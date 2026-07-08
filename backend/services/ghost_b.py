@@ -44,6 +44,7 @@ from services.llm_lane_pool import (
 SchemaResolver = Callable[[str, list[float], int], Awaitable[list[str]]]
 GhostBAuditSink = Callable[[dict[str, Any]], Awaitable[None]]
 ExtractionRoutingPolicy = Literal["work_stealing", "balanced", "primary_fallback"]
+_BALANCED_ROUTE_OFFSETS: dict[tuple[str, ...], int] = {}
 
 logger = logging.getLogger(__name__)
 _TOKENIZER = tiktoken.get_encoding("cl100k_base")
@@ -1214,10 +1215,34 @@ def _resolve_extraction_routing_policy(pool: list[dict]) -> ExtractionRoutingPol
     return "work_stealing"
 
 
+def _pool_route_key(pool: list[dict]) -> tuple[str, ...]:
+    return tuple(
+        ":".join(
+            str(entry.get(field) or "")
+            for field in ("provider_preset", "base_url", "model")
+        )
+        for entry in pool
+    )
+
+
+def _next_balanced_route_offset(
+    pool: list[dict],
+    routing_policy: ExtractionRoutingPolicy,
+) -> int:
+    if routing_policy != "balanced" or len(pool) < 2:
+        return 0
+    key = _pool_route_key(pool)
+    current = _BALANCED_ROUTE_OFFSETS.get(key, 0)
+    _BALANCED_ROUTE_OFFSETS[key] = current + 1
+    return current
+
+
 def _worker_lane_spawn_order(
     lane_limits: list[int],
     disabled_lanes: set[int],
     routing_policy: ExtractionRoutingPolicy,
+    *,
+    start_offset: int = 0,
 ) -> list[int]:
     enabled = [
         idx
@@ -1232,6 +1257,10 @@ def _worker_lane_spawn_order(
             for idx in enabled
             for _ in range(int(lane_limits[idx]))
         ]
+
+    if enabled and start_offset:
+        offset = int(start_offset) % len(enabled)
+        enabled = enabled[offset:] + enabled[:offset]
 
     order: list[int] = []
     max_slots = max((int(lane_limits[idx]) for idx in enabled), default=0)
@@ -3737,10 +3766,12 @@ async def extract_entities(
         for idx, entry in enumerate(pool)
     ]
     routing_policy = _resolve_extraction_routing_policy(pool)
+    balanced_start_offset = _next_balanced_route_offset(pool, routing_policy)
     logger.info(
-        "GHOST B routing selected: policy=%s lane_limits=%s models=%s",
+        "GHOST B routing selected: policy=%s lane_limits=%s start_offset=%d models=%s",
         routing_policy,
         lane_limits,
+        balanced_start_offset,
         [str(entry.get("model") or "") for entry in pool],
     )
 
@@ -4684,6 +4715,7 @@ async def extract_entities(
             lane_limits,
             disabled_lanes,
             routing_policy,
+            start_offset=balanced_start_offset,
         ):
             workers.append(asyncio.create_task(_lane_worker(pool_idx)))
         if workers:

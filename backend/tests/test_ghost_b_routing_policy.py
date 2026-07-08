@@ -67,6 +67,41 @@ def test_balanced_spawn_order_gives_cloud_lanes_early_work():
     assert order.count(2) == 45
 
 
+def test_balanced_spawn_order_can_rotate_first_lane():
+    order = ghost_b._worker_lane_spawn_order(
+        [60, 8, 45],
+        disabled_lanes=set(),
+        routing_policy="balanced",
+        start_offset=1,
+    )
+
+    assert order[:9] == [1, 2, 0, 1, 2, 0, 1, 2, 0]
+    assert order.count(0) == 60
+    assert order.count(1) == 8
+    assert order.count(2) == 45
+
+
+def test_balanced_route_offset_rotates_across_documents():
+    pool = [
+        {"provider_preset": "vllm-rtx", "base_url": "http://rtx/v1", "model": "a"},
+        {"provider_preset": "siliconflow", "base_url": "https://sf/v1", "model": "b"},
+        {"provider_preset": "longcat", "base_url": "https://lc/v1", "model": "c"},
+    ]
+
+    ghost_b._BALANCED_ROUTE_OFFSETS.clear()
+    first_lanes = [
+        ghost_b._worker_lane_spawn_order(
+            [60, 8, 45],
+            disabled_lanes=set(),
+            routing_policy="balanced",
+            start_offset=ghost_b._next_balanced_route_offset(pool, "balanced"),
+        )[0]
+        for _ in range(4)
+    ]
+
+    assert first_lanes == [0, 1, 2, 0]
+
+
 def test_primary_fallback_spawn_order_uses_only_first_healthy_lane():
     order = ghost_b._worker_lane_spawn_order(
         [60, 8, 45],
@@ -255,7 +290,7 @@ async def test_lifecycle_shutdown_runs_when_worker_drain_raises(monkeypatch):
     monkeypatch.setattr(
         ghost_b,
         "_worker_lane_spawn_order",
-        lambda lane_limits, disabled_lanes, routing_policy: [99],
+        lambda lane_limits, disabled_lanes, routing_policy, **_: [99],
     )
 
     with pytest.raises(IndexError):
