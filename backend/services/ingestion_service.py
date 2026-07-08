@@ -151,6 +151,7 @@ def _summary_backfill_index_scope(
     limit: int | None,
     generated_parent_ids: list[str],
     summary_text_clause: dict,
+    bounded_by_doc_ids: bool = False,
 ) -> tuple[str, list[dict]]:
     """Return the summary-index query scope for a backfill call.
 
@@ -158,11 +159,17 @@ def _summary_backfill_index_scope(
     mode, indexing must stay bounded to the summaries generated in the same
     call. Full-corpus reindexing is still available through explicit index-only
     maintenance runs.
+
+    A doc-scoped post-batch backfill is already bounded by the batch's doc_ids,
+    so it may safely index every existing summary for those docs even when the
+    generation leg is capped.
     """
 
     clauses: list[dict] = [summary_text_clause]
-    if generate and limit is not None:
+    if generate and limit is not None and not bounded_by_doc_ids:
         return "generated_in_call", [*clauses, {"parent_id": {"$in": generated_parent_ids}}]
+    if bounded_by_doc_ids:
+        return "doc_scope_existing_summaries", clauses
     return "all_existing_summaries", clauses
 
 
@@ -1601,6 +1608,7 @@ class IngestionService:
         index: bool = True,
         limit: int | None = None,
         batch: int = 32,
+        doc_ids: list[str] | None = None,
     ) -> dict[str, Any]:
         """Repair parent-summary retrieval for an existing corpus.
 
@@ -1609,9 +1617,10 @@ class IngestionService:
         indexes parent-summary text into Qdrant, and updates each document's
         ``write_state.summaries_indexed`` when its body parents are covered.
         Capped generate+index calls index only the summaries generated in that
-        call; explicit index-only calls still rebuild all existing summary
-        points. That lets older balanced corpora gain the summary retrieval
-        lane without delete/reingest churn or surprise full-corpus work.
+        call unless ``doc_ids`` scopes the run to a known batch. Explicit
+        index-only calls still rebuild all existing summary points. That lets
+        older balanced corpora gain the summary retrieval lane without
+        delete/reingest churn or surprise full-corpus work.
         """
 
         from pymongo import UpdateOne
@@ -1631,6 +1640,11 @@ class IngestionService:
         batch = max(1, min(int(batch or 32), 128))
         if limit is not None:
             limit = max(0, int(limit))
+        doc_id_filter = (
+            sorted({str(doc_id) for doc_id in doc_ids if str(doc_id).strip()})
+            if doc_ids is not None
+            else None
+        )
 
         body_clause = {
             "$or": [
@@ -1645,7 +1659,13 @@ class IngestionService:
         }
 
         def _parent_query(*clauses: dict) -> dict:
-            return {"corpus_id": corpus_id, "$and": [body_clause, *clauses]}
+            query: dict[str, Any] = {
+                "corpus_id": corpus_id,
+                "$and": [body_clause, *clauses],
+            }
+            if doc_id_filter is not None:
+                query["doc_id"] = {"$in": doc_id_filter}
+            return query
 
         async def _summary_health() -> dict[str, Any]:
             body_parent_count = await self._db["parent_chunks"].count_documents(_parent_query())
@@ -1833,6 +1853,7 @@ class IngestionService:
                 limit=limit,
                 generated_parent_ids=generated_parent_ids,
                 summary_text_clause=summary_text_clause,
+                bounded_by_doc_ids=doc_id_filter is not None,
             )
             cursor = self._db["parent_chunks"].find(
                 _parent_query(*index_clauses),
@@ -1945,6 +1966,7 @@ class IngestionService:
         return {
             "corpus_id": corpus_id,
             "status": after["status"],
+            "doc_scope_count": len(doc_id_filter) if doc_id_filter is not None else None,
             "generated": generated,
             "attempted": attempted,
             "indexed": indexed,

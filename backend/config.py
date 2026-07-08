@@ -857,6 +857,30 @@ class Settings(BaseSettings):
             "of failing before extraction can run."
         ),
     )
+    INGEST_DEFERRED_SUMMARY_BACKFILL_ENABLED: bool = Field(
+        default=True,
+        description=(
+            "When a durable batch intentionally defers parent summaries "
+            "(for example rtx_assisted queryable/graph-first ingestion), run a "
+            "bounded doc-scoped summary backfill after the batch drains."
+        ),
+    )
+    INGEST_DEFERRED_SUMMARY_BACKFILL_LIMIT: int = Field(
+        default=2000,
+        ge=0,
+        le=50000,
+        description=(
+            "Maximum missing body-parent summaries to generate in one automatic "
+            "post-batch deferred-summary backfill. Existing summaries for the "
+            "batch documents are still indexed; 0 means index-only."
+        ),
+    )
+    INGEST_DEFERRED_SUMMARY_BACKFILL_BATCH: int = Field(
+        default=32,
+        ge=1,
+        le=128,
+        description="Parent batch size for automatic deferred-summary backfill.",
+    )
     # §13-H E1 — local_then_enrich quality gate. Thresholds calibrated against
     # the 2026-07-05 measured baselines: local GLiNER/GLiREL 62% coverage /
     # 0.4 facts-per-chunk / 57% typed; RTX vLLM 91% / 2.35 / 75-100% typed.

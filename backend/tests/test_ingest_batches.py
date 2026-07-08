@@ -504,6 +504,58 @@ async def test_local_batch_item_exception_is_terminal_failed(monkeypatch, tmp_pa
 
 
 @pytest.mark.asyncio
+async def test_local_batch_item_transient_store_exception_is_recoverable(monkeypatch, tmp_path):
+    source = tmp_path / "store-reset.md"
+    source.write_text("# store reset", encoding="utf-8")
+    db = _ItemUpdatesDb()
+    item = {
+        "item_id": "item-store-reset",
+        "source_path": str(source),
+        "filename": source.name,
+    }
+    batch = {
+        "corpus_id": "corpus-1",
+        "user_id": "user-1",
+        "options": {},
+    }
+
+    class FakeIngestionService:
+        async def _get_corpus_raw(self, _corpus_id):
+            return {"default_ingestion_config": {}}
+
+        async def ingest(self, **kwargs):
+            await kwargs["on_doc_id"]("doc-store-reset")
+            await kwargs["on_phase"]("neo4j", {"doc_id": "doc-store-reset"})
+            raise RuntimeError(
+                "Failed to read from defunct connection IPv4Address(('neo4j', 7687))"
+            )
+
+    async def fake_wait_for_slot(_limit=None):
+        return None
+
+    async def fake_release_slot():
+        return None
+
+    monkeypatch.setattr(batches, "_wait_for_ingest_slot", fake_wait_for_slot)
+    monkeypatch.setattr(batches.admission, "release_ingest_slot", fake_release_slot)
+
+    await batches._process_local_item(
+        db=db,
+        ingestion_service=FakeIngestionService(),
+        batch=batch,
+        item=item,
+    )
+
+    final = db.items.updates[-1][1]["$set"]
+    assert final["status"] == batches.ITEM_FAILED_RECOVERABLE
+    assert final["phase"] == "failed"
+    assert final["failure_stage"] == "transient_store_exception"
+    assert final["lease_owner"] is None
+    assert final["lease_until"] is None
+    assert "completed_at" not in final
+
+
+@pytest.mark.asyncio
 async def test_local_batch_item_failed_result_does_not_requeue(monkeypatch, tmp_path):
     source = tmp_path / "incomplete.md"
     source.write_text("# incomplete", encoding="utf-8")

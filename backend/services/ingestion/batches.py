@@ -1292,6 +1292,40 @@ async def _wait_for_ingest_slot(limit: int | None = None) -> None:
         await asyncio.sleep(1.0)
 
 
+def _is_transient_store_exception(exc: BaseException) -> bool:
+    """Return True for retryable infrastructure/store transport failures."""
+
+    message = str(exc).lower()
+    deterministic_markers = (
+        "chunker timeout",
+        "tier_chunker",
+        "chunk_failed",
+        "pathological content",
+    )
+    if any(marker in message for marker in deterministic_markers):
+        return False
+    needles = (
+        "defunct connection",
+        "connection reset",
+        "connection refused",
+        "connection aborted",
+        "server disconnected",
+        "temporarily unavailable",
+        "timed out",
+        "timeout",
+        "readtimeout",
+        "writetimeout",
+        "service unavailable",
+        "503",
+        "504",
+        "neo4j",
+        "qdrant",
+        "mongodb",
+        "mongo",
+    )
+    return any(needle in message for needle in needles)
+
+
 async def _reap_over_attempt_items(db: AsyncIOMotorDatabase, batch_id: str) -> int:
     """Terminal-fail items that exceeded the attempt cap (audit 2026-07-06,
     critical): attempts was incremented but never read, so deterministic
@@ -1419,6 +1453,7 @@ async def _set_item_phase(
     error: str | None = None,
     failure_stage: str | None = None,
     completed: bool = False,
+    release_lease: bool = False,
 ) -> None:
     now = _now()
     set_doc: dict[str, Any] = {
@@ -1437,6 +1472,7 @@ async def _set_item_phase(
         set_doc["failure_stage"] = failure_stage
     if completed:
         set_doc["completed_at"] = now
+    if completed or release_lease:
         set_doc["lease_owner"] = None
         set_doc["lease_until"] = None
     await db[ITEMS].update_one({"item_id": item_id}, {"$set": set_doc})
@@ -1546,14 +1582,18 @@ async def _process_local_item(
         )
     except Exception as exc:
         logger.exception("Batch item ingest failed item=%s path=%s", item_id, path)
+        recoverable = _is_transient_store_exception(exc)
         await _set_item_phase(
             db,
             item_id,
             "failed",
-            status=ITEM_FAILED,
+            status=ITEM_FAILED_RECOVERABLE if recoverable else ITEM_FAILED,
             error=str(exc),
-            failure_stage="worker_exception",
-            completed=True,
+            failure_stage=(
+                "transient_store_exception" if recoverable else "worker_exception"
+            ),
+            completed=not recoverable,
+            release_lease=recoverable,
         )
     finally:
         if slot_acquired:
@@ -1822,6 +1862,189 @@ async def _batch_quality_report(db, batch: dict) -> dict[str, Any]:
     return report
 
 
+async def _run_deferred_summary_backfill(
+    *,
+    db: AsyncIOMotorDatabase,
+    ingestion_service: Any,
+    batch: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Drain the summary lane for a deferred-summary batch.
+
+    RTX/cloud-assisted ingestion intentionally makes documents queryable and
+    graph-promoted before spending time on parent-summary vectors. This hook
+    keeps that speed contract while preventing "done but summary-dead" batches:
+    after the file work drains, run one bounded, doc-scoped summary backfill for
+    this batch's completed documents. It is best-effort and fully recorded.
+    """
+
+    settings = get_settings()
+    if not bool(getattr(settings, "INGEST_DEFERRED_SUMMARY_BACKFILL_ENABLED", True)):
+        return None
+    if not _batch_defer_summaries(batch):
+        return None
+
+    options = batch.get("options") or {}
+    if options.get("chunk_summarization") is False:
+        return None
+
+    try:
+        config = await _build_item_config(
+            ingestion_service=ingestion_service,
+            corpus_id=str(batch["corpus_id"]),
+            options=options,
+        )
+    except Exception as exc:  # noqa: BLE001 - summary backfill must not fail ingest
+        logger.warning("deferred summary backfill config resolution failed: %s", exc)
+        return None
+    if not bool(getattr(config, "chunk_summarization", False)):
+        return None
+
+    doc_ids = [
+        str(row["doc_id"])
+        async for row in db[ITEMS].find(
+            {
+                "batch_id": batch["batch_id"],
+                "status": ITEM_DONE,
+                "doc_id": {"$exists": True, "$nin": [None, ""]},
+            },
+            {"_id": 0, "doc_id": 1},
+        )
+    ]
+    doc_ids = sorted(set(doc_ids))
+    if not doc_ids:
+        return None
+
+    limit = max(
+        0,
+        int(getattr(settings, "INGEST_DEFERRED_SUMMARY_BACKFILL_LIMIT", 2000)),
+    )
+    parent_batch = max(
+        1,
+        min(
+            128,
+            int(getattr(settings, "INGEST_DEFERRED_SUMMARY_BACKFILL_BATCH", 32)),
+        ),
+    )
+    run_id = f"summary_backfill_after_batch_{batch['batch_id'][:8]}_{uuid.uuid4().hex[:8]}"
+    now = _now()
+    run_doc = {
+        "run_id": run_id,
+        "kind": "summary_backfill_after_batch",
+        "status": "running",
+        "corpus_id": batch["corpus_id"],
+        "batch_id": batch["batch_id"],
+        "doc_scope_count": len(doc_ids),
+        "limit": limit,
+        "batch": parent_batch,
+        "created_at": now,
+        "updated_at": now,
+    }
+    await db["ingest_repair_runs"].update_one(
+        {"run_id": run_id},
+        {"$setOnInsert": {"created_at": now}, "$set": run_doc},
+        upsert=True,
+    )
+    await db[BATCHES].update_one(
+        {"batch_id": batch["batch_id"]},
+        {
+            "$set": {
+                "summary_backfill_status": "running",
+                "summary_backfill_run_id": run_id,
+                "summary_backfill_started_at": now,
+                "updated_at": now,
+            }
+        },
+    )
+    logger.info(
+        "batch %s deferred summary backfill start docs=%d limit=%d batch=%d",
+        batch["batch_id"][:8],
+        len(doc_ids),
+        limit,
+        parent_batch,
+    )
+    try:
+        result = await ingestion_service.backfill_parent_summaries(
+            str(batch["corpus_id"]),
+            user_id=str(batch.get("user_id") or ""),
+            generate=limit != 0,
+            index=True,
+            limit=limit if limit != 0 else None,
+            batch=parent_batch,
+            doc_ids=doc_ids,
+        )
+        status = "complete"
+        if result.get("generation_errors") or result.get("status") not in {
+            "healthy",
+            "empty",
+        }:
+            status = "partial"
+        finished_at = _now()
+        await db["ingest_repair_runs"].update_one(
+            {"run_id": run_id},
+            {
+                "$set": {
+                    "status": status,
+                    "result": result,
+                    "updated_at": finished_at,
+                    "completed_at": finished_at,
+                }
+            },
+        )
+        await db[BATCHES].update_one(
+            {"batch_id": batch["batch_id"]},
+            {
+                "$set": {
+                    "summary_backfill_status": status,
+                    "summary_backfill_result": result,
+                    "summary_backfill_completed_at": finished_at,
+                    "updated_at": finished_at,
+                }
+            },
+        )
+        logger.info(
+            "batch %s deferred summary backfill %s: generated=%s indexed=%s status=%s",
+            batch["batch_id"][:8],
+            status,
+            result.get("generated"),
+            result.get("indexed"),
+            result.get("status"),
+        )
+        return result
+    except Exception as exc:  # noqa: BLE001 - queryable ingest remains valid
+        finished_at = _now()
+        message = str(exc)[:1000]
+        await db["ingest_repair_runs"].update_one(
+            {"run_id": run_id},
+            {
+                "$set": {
+                    "status": "failed",
+                    "error": message,
+                    "updated_at": finished_at,
+                    "completed_at": finished_at,
+                }
+            },
+        )
+        await db[BATCHES].update_one(
+            {"batch_id": batch["batch_id"]},
+            {
+                "$set": {
+                    "summary_backfill_status": "failed",
+                    "summary_backfill_error": message,
+                    "updated_at": finished_at,
+                },
+                "$addToSet": {
+                    "warnings": f"Deferred summary backfill failed: {message}"
+                },
+            },
+        )
+        logger.warning(
+            "batch %s deferred summary backfill failed: %s",
+            batch["batch_id"][:8],
+            message,
+        )
+        return {"status": "failed", "error": message}
+
+
 async def run_local_batch(
     *,
     db: AsyncIOMotorDatabase,
@@ -1989,7 +2212,15 @@ async def run_local_batch(
             logger.info("Batch %s quality report: %s", batch_id[:8], report)
         except Exception as exc:  # noqa: BLE001 — reporting never fails the batch
             logger.warning("Batch quality report failed: %s", exc)
-        return await refresh_batch_counts(db, batch_id, user_id=user_id)
+        refreshed = await refresh_batch_counts(db, batch_id, user_id=user_id)
+        if refreshed.get("status") in {BATCH_DONE, BATCH_PARTIAL}:
+            await _run_deferred_summary_backfill(
+                db=db,
+                ingestion_service=ingestion_service,
+                batch=refreshed,
+            )
+            refreshed = await refresh_batch_counts(db, batch_id, user_id=user_id)
+        return refreshed
     finally:
         if lifecycle_hold_acquired:
             from services.ingestion.model_lifecycle import release_model_lifecycle_hold

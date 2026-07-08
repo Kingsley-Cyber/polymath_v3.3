@@ -45,6 +45,21 @@ def test_summary_backfill_index_only_rebuilds_all_existing_summaries() -> None:
     assert clauses == [clause]
 
 
+def test_summary_backfill_doc_scope_indexes_existing_summaries_inside_scope() -> None:
+    clause = {"summary": {"$exists": True, "$nin": [None, ""]}}
+
+    scope, clauses = _summary_backfill_index_scope(
+        generate=True,
+        limit=200,
+        generated_parent_ids=["parent-a"],
+        summary_text_clause=clause,
+        bounded_by_doc_ids=True,
+    )
+
+    assert scope == "doc_scope_existing_summaries"
+    assert clauses == [clause]
+
+
 def test_global_summary_settings_encrypt_mask_and_decrypt() -> None:
     raw = {
         "summary": {
