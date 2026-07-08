@@ -4052,10 +4052,11 @@ async def run_ingest_job(
             if summary_write_required:
                 write_updates["summaries_indexed"] = True
                 write_updates["summary_points"] = expected_summary_points
-            elif not summary_gate_required:
+            elif summary_deferred_by_run or not summary_gate_required:
                 write_updates["summaries_indexed"] = False
                 # writer intent = zero summary vectors; the verifier must not
-                # re-derive an expectation from heal-added Mongo summaries
+                # re-derive an expectation from heal-added Mongo summaries or
+                # from intentionally deferred summary lanes.
                 write_updates["summary_points"] = 0
             # gate-required-but-none-produced stays UNSTAMPED on purpose:
             # verifier falls back to the strict Mongo derivation and the
@@ -4126,7 +4127,7 @@ async def run_ingest_job(
             if summary_write_required:
                 ws.summaries_indexed = True
                 ws.summary_points = expected_summary_points
-            elif not summary_gate_required:
+            elif summary_deferred_by_run or not summary_gate_required:
                 ws.summary_points = 0
             logger.info(
                 "phase=qdrant duration=%.2fs doc=%s corpus=%s targets=%s summaries_indexed=%s",

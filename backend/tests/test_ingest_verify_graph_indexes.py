@@ -61,6 +61,69 @@ class _FakeNeo4jDriver:
 
 
 @pytest.mark.asyncio
+async def test_expected_child_count_includes_noisy_chunks_for_qdrant():
+    class FakeChunks:
+        def __init__(self):
+            self.query = None
+
+        async def count_documents(self, query):
+            self.query = query
+            return 2
+
+    class FakeDb:
+        def __init__(self):
+            self.chunks = FakeChunks()
+
+        def __getitem__(self, name):
+            assert name == "chunks"
+            return self.chunks
+
+    db = FakeDb()
+
+    count = await verify._expected_child_count(
+        db,
+        doc_id="doc-1",
+        corpus_id="corpus-1",
+        collection_kind="naive",
+    )
+
+    assert count == 2
+    assert "$or" not in db.chunks.query
+
+
+@pytest.mark.asyncio
+async def test_expected_child_count_excludes_noisy_chunks_for_neo4j():
+    class FakeChunks:
+        def __init__(self):
+            self.query = None
+
+        async def count_documents(self, query):
+            self.query = query
+            return 1
+
+    class FakeDb:
+        def __init__(self):
+            self.chunks = FakeChunks()
+
+        def __getitem__(self, name):
+            assert name == "chunks"
+            return self.chunks
+
+    db = FakeDb()
+
+    count = await verify._expected_child_count(
+        db,
+        doc_id="doc-1",
+        corpus_id="corpus-1",
+        collection_kind="naive",
+        exclude_noisy=True,
+    )
+
+    assert count == 1
+    assert "$or" in db.chunks.query
+
+
+@pytest.mark.asyncio
 async def test_verify_ingest_checks_graph_retrieval_indexes(monkeypatch):
     wait_mock = AsyncMock(
         return_value={"entity_name_ft": "ONLINE", "fact_text_ft": "ONLINE"}

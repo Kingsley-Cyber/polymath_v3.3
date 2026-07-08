@@ -34,19 +34,20 @@ async def _expected_child_count(
     doc_id: str,
     corpus_id: str,
     collection_kind: str,
+    exclude_noisy: bool = False,
 ) -> int:
     """Return the expected child-vector count for a Qdrant collection.
 
-    HRAG intentionally stores only high-confidence child chunks (Tier A/B/B+)
-    plus summaries. Naive and graph collections store every child chunk. The
-    verifier must mirror that write contract or it reports false failures for
-    Tier C documents.
+    Qdrant stores every vectorized child for naive/graph and Tier A/B/B+
+    children for HRAG. Neo4j intentionally excludes noisy chunks before graph
+    writing, so callers can pass ``exclude_noisy=True`` for graph checks.
     """
     query: dict[str, Any] = {"doc_id": doc_id, "corpus_id": corpus_id}
-    query["$or"] = [
-        {"chunk_kind": {"$exists": False}},
-        {"chunk_kind": {"$nin": sorted(NOISY_KINDS)}},
-    ]
+    if exclude_noisy:
+        query["$or"] = [
+            {"chunk_kind": {"$exists": False}},
+            {"chunk_kind": {"$nin": sorted(NOISY_KINDS)}},
+        ]
     if collection_kind == "hrag":
         query["source_tier"] = {"$in": list(_HRAG_CHILD_TIERS)}
     return int(await db["chunks"].count_documents(query))
@@ -487,6 +488,7 @@ async def verify_ingest(
                 doc_id=doc_id,
                 corpus_id=corpus_id,
                 collection_kind="naive",
+                exclude_noisy=True,
             )
             # Scope the Chunk side by corpus too: Document nodes MERGE on
             # doc_id, so re-ingesting the same file into a different corpus
