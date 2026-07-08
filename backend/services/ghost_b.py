@@ -1144,12 +1144,11 @@ def _select_extraction_output_mode(
     post-hoc in Pt8b validation. json_object (legacy) is retained for explicit
     fallback behavior.
 
-    Rescue profiles stay on JSONL — the rescue prompt is JSONL-shaped and
-    its merge logic with accepted_jsonl_items depends on the line format.
-    Only the "normal" profile path opts into json_schema.
+    Structured-capable lanes stay structured for rescue as well. The previous
+    rescue-only JSONL downgrade turned provider-native json_schema lanes back
+    into prompt-only parsing exactly when reliability mattered most. JSONL
+    remains the compatibility fallback for lanes without a structured contract.
     """
-    if profile_name != "normal":
-        return "jsonl"
     card = resolve_extraction_provider_card(entry)
     if card.schema_mode == "json_schema":
         return "json_schema"
@@ -4081,8 +4080,10 @@ async def extract_entities(
                 "max_facts": profile.max_facts,
                 "max_total_lines": profile.max_total_lines,
             }
-            profile_output_mode = (
-                normal_output_mode if profile.name == "normal" else "jsonl"
+            profile_output_mode = _select_extraction_output_mode(
+                output_mode_setting,
+                entry,
+                profile_name=profile.name,
             )
             # Pt9c/provider-card — json_schema, json_object, and compiler-
             # gated json_object_prompt all use the single-object prompt. Only

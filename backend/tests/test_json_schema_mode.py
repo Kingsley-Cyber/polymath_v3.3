@@ -8,8 +8,8 @@ pattern that drove Pt8b's drop-rate problem. These tests pin:
   • The response_format payload matches the json_schema spec contract
   • _lane_supports_json_schema defaults on for known structured-output lanes,
     while preserving explicit opt-out
-  • _select_extraction_output_mode returns "json_schema" for known lanes
-    when the profile is "normal"
+  • _select_extraction_output_mode returns "json_schema" for known lanes,
+    including rescue attempts
   • Source-pin: the 5 sites in _process_one all recognize the new mode
 
 The actual end-to-end LLM call is exercised by integration tests; these
@@ -425,14 +425,19 @@ def test_select_mode_returns_json_schema_when_flag_set_for_unknown_lane():
     assert mode == "json_schema"
 
 
-def test_select_mode_rescue_profile_stays_jsonl():
-    """Rescue profiles use JSONL even when json_schema is enabled — the
-    rescue prompt is JSONL-shaped and its accepted_jsonl_items merge
-    depends on that format."""
+def test_select_mode_rescue_profile_keeps_json_schema_for_capable_lane():
+    """Provider-native structured output must not downgrade during rescue."""
     entry = {
         "model": "deepseek/deepseek-chat",
         "extra_params": {"supports_json_schema": True},
     }
+    mode = _select_extraction_output_mode(None, entry, profile_name="rescue")
+    assert mode == "json_schema"
+
+
+def test_select_mode_rescue_profile_stays_jsonl_for_compat_lane():
+    """Compatibility lanes without structured-output support still use JSONL."""
+    entry = {"model": "custom/freeform-extractor", "provider_preset": "custom"}
     mode = _select_extraction_output_mode(None, entry, profile_name="rescue")
     assert mode == "jsonl"
 

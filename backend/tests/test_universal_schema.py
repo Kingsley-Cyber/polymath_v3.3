@@ -251,7 +251,7 @@ def test_output_mode_prefers_structured_provider_modes_for_frontier_lanes():
             {"model": "deepseek/deepseek-v4-flash", "base_url": None},
             profile_name="rescue",
         )
-        == "jsonl"
+        == "json_schema"
     )
 
 
