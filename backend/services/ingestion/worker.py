@@ -1193,6 +1193,26 @@ async def _run_ghosts_parallel(
     expected_summary_count = len(summarizable_parents)
 
     if need_ghost_a and ws.summaries_indexed:
+        existing_by_parent_id = {p.get("parent_id"): p for p in existing_parent_chunks}
+        mongo_summaries_complete = all(
+            (
+                existing_by_parent_id.get(p.parent_id, {}).get("summary")
+                or ""
+            ).strip()
+            for p in summarizable_parents
+        )
+        if not mongo_summaries_complete:
+            ws.summaries_indexed = False
+            logger.warning(
+                "phase=ghost_a_resume reason=mongo_summary_text_missing "
+                "doc=%s corpus=%s expected=%d",
+                doc_id[:12],
+                corpus_id[:8],
+                expected_summary_count,
+            )
+        # This is the only safe fast-skip: the canonical Mongo parent summary
+        # text and the Qdrant summary points must both exist.
+    if need_ghost_a and ws.summaries_indexed:
         # This is the only safe fast-skip: children may already be in Qdrant
         # while summaries are absent, so qdrant_written is not enough.
         try:

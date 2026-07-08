@@ -864,6 +864,69 @@ async def test_ghost_a_qdrant_written_without_summaries_reconstructs_for_reindex
 
 
 @pytest.mark.asyncio
+async def test_ghost_a_summaries_indexed_without_mongo_text_reruns_llm():
+    """Qdrant summary points alone are not a safe resume skip.
+
+    If Mongo parent_chunks[].summary is missing, rerun Ghost A so the canonical
+    summary text can be stored and the Qdrant text contract can verify.
+    """
+    doc_id, corpus_id = "doc-summary-split-brain", "c" * 36
+    parents = [_parent(doc_id, corpus_id)[0]]
+    children = [parents[0].children[0]]
+
+    existing = {
+        "doc_id": doc_id,
+        "corpus_id": corpus_id,
+        "write_state": {
+            "mongo_written": True,
+            "qdrant_written": True,
+            "summaries_indexed": True,
+            "summary_points": 1,
+            "neo4j_written": False,
+        },
+        "parent_chunks": [{
+            "parent_id": parents[0].parent_id,
+            "summary": "",
+        }],
+    }
+    ws = WriteState(**existing["write_state"])
+    cfg = IngestionConfig(
+        use_neo4j=False,
+        chunk_summarization=True,
+        target_qdrant_collections=["naive", "hrag"],
+    )
+
+    async def _fake_summarize(tasks, **kwargs):
+        return [_fake_summary_result(t.parent_id, doc_id, corpus_id) for t in tasks]
+
+    summarize_mock = AsyncMock(side_effect=_fake_summarize)
+    summary_check = AsyncMock(return_value=True)
+    with patch.object(worker, "summarize_parents", summarize_mock), \
+         patch.object(worker, "_qdrant_has_summary_points", summary_check), \
+         patch.object(worker.settings, "NEO4J_ENABLED", True):
+        summaries, ghost_b_out = await worker._run_ghosts_parallel(
+            config=cfg,
+            parents=parents,
+            children=children,
+            doc_id=doc_id,
+            corpus_id=corpus_id,
+            model="m",
+            db=MagicMock(),
+            qdrant_client=MagicMock(),
+            neo4j_driver=MagicMock(),
+            existing_doc=existing,
+            ws=ws,
+        )
+
+    assert summarize_mock.await_count == 1
+    assert summary_check.await_count == 0
+    assert summaries is not None
+    assert len(summaries) == 1
+    assert ws.summaries_indexed is False
+    assert ghost_b_out is None
+
+
+@pytest.mark.asyncio
 async def test_ghost_a_partial_reconstruct_falls_back_to_llm():
     """Missing summary on even one parent = partial reconstruct, must re-run
     ghost_a so the LLM fills the gap coherently."""
