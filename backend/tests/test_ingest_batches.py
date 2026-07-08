@@ -188,6 +188,29 @@ class _ItemUpdatesDb:
         return self.items
 
 
+def _set_nested(row: dict, key: str, value):
+    target = row
+    parts = key.split(".")
+    for part in parts[:-1]:
+        child = target.get(part)
+        if not isinstance(child, dict):
+            child = {}
+            target[part] = child
+        target = child
+    target[parts[-1]] = value
+
+
+def _unset_nested(row: dict, key: str):
+    target = row
+    parts = key.split(".")
+    for part in parts[:-1]:
+        child = target.get(part)
+        if not isinstance(child, dict):
+            return
+        target = child
+    target.pop(parts[-1], None)
+
+
 def _get_nested(row: dict, key: str):
     value = row
     for part in key.split("."):
@@ -247,6 +270,40 @@ class _QualityDb(dict):
         super().__init__(
             {name: _QualityCollection(rows) for name, rows in collections.items()}
         )
+
+
+class _PreflightBatchCollection:
+    def __init__(self, row):
+        self.row = row
+        self.updates = []
+
+    async def find_one(self, query):
+        if _matches_query(self.row, query):
+            return self.row
+        return None
+
+    async def update_one(self, query, update):
+        self.updates.append((query, update))
+        if not _matches_query(self.row, query):
+            return type("Result", (), {"modified_count": 0})()
+        for key, value in (update.get("$set") or {}).items():
+            _set_nested(self.row, key, value)
+        for key in (update.get("$unset") or {}):
+            _unset_nested(self.row, key)
+        for key, value in (update.get("$addToSet") or {}).items():
+            existing = self.row.setdefault(key, [])
+            if value not in existing:
+                existing.append(value)
+        return type("Result", (), {"modified_count": 1})()
+
+
+class _PreflightDb:
+    def __init__(self, batch):
+        self.batch_collection = _PreflightBatchCollection(batch)
+
+    def __getitem__(self, name):
+        assert name == batches.BATCHES
+        return self.batch_collection
 
 
 @pytest.mark.asyncio
@@ -539,6 +596,144 @@ async def test_local_batch_item_preserves_combined_pending_phase(monkeypatch, tm
     assert final["status"] == batches.ITEM_DONE
     assert final["phase"] == "queryable_with_pending_summary_and_graph"
     assert final.get("failure_stage") is None
+
+
+@pytest.mark.asyncio
+async def test_local_batch_item_passes_batch_summary_defer_flag(monkeypatch, tmp_path):
+    source = tmp_path / "summary-deferred.md"
+    source.write_text("# deferred", encoding="utf-8")
+    db = _ItemUpdatesDb()
+    item = {
+        "item_id": "item-summary-defer",
+        "source_path": str(source),
+        "filename": source.name,
+    }
+    batch = {
+        "corpus_id": "corpus-1",
+        "user_id": "user-1",
+        "options": {"defer_summaries": True},
+    }
+    seen = {}
+
+    class FakeIngestionService:
+        async def _get_corpus_raw(self, _corpus_id):
+            return {"default_ingestion_config": {"chunk_summarization": True}}
+
+        async def ingest(self, **kwargs):
+            seen["defer_summaries"] = kwargs.get("defer_summaries")
+            await kwargs["on_doc_id"]("doc-summary-defer")
+            return SimpleNamespace(
+                status="queryable_with_pending_summary",
+                doc_id="doc-summary-defer",
+                error=None,
+            )
+
+    async def fake_wait_for_slot():
+        return None
+
+    async def fake_release_slot():
+        return None
+
+    monkeypatch.setattr(batches, "_wait_for_ingest_slot", fake_wait_for_slot)
+    monkeypatch.setattr(batches.admission, "release_ingest_slot", fake_release_slot)
+
+    await batches._process_local_item(
+        db=db,
+        ingestion_service=FakeIngestionService(),
+        batch=batch,
+        item=item,
+    )
+
+    assert seen["defer_summaries"] is True
+    final = db.items.updates[-1][1]["$set"]
+    assert final["status"] == batches.ITEM_DONE
+    assert final["phase"] == "queryable_with_pending_summary"
+
+
+def _preflight_settings(*, safe_summary_failures: bool) -> SimpleNamespace:
+    return SimpleNamespace(
+        INGEST_PREFLIGHT_CANARY=True,
+        INGEST_SAFE_SUMMARY_FAILURES=safe_summary_failures,
+        INGEST_STALE_JOB_MINUTES=10,
+        INGEST_BATCH_WORKERS=1,
+        INGEST_GLOBAL_MAX_DOCS=1,
+        INGEST_MAX_ACTIVE_JOBS=1,
+    )
+
+
+async def _run_batch_with_preflight_failure(monkeypatch, *, safe_summary_failures: bool):
+    batch = {
+        "batch_id": "batch-safe-summary",
+        "user_id": "user-1",
+        "corpus_id": "corpus-1",
+        "source": batches.SOURCE_LOCAL_FOLDER,
+        "options": {},
+    }
+    db = _PreflightDb(batch)
+
+    async def fake_canary(_db, _batch):
+        return "summary quota exhausted"
+
+    async def fake_noop(*_args, **_kwargs):
+        return None
+
+    async def fake_lease_next_item(*_args, **_kwargs):
+        return None
+
+    async def fake_refresh(_db, _batch_id, user_id=None):
+        return dict(db.batch_collection.row)
+
+    async def fake_quality_report(_db, _batch):
+        return {}
+
+    monkeypatch.setattr(batches, "get_settings", lambda: _preflight_settings(
+        safe_summary_failures=safe_summary_failures
+    ))
+    monkeypatch.setattr(batches, "_preflight_summary_canary", fake_canary)
+    monkeypatch.setattr(batches, "reconcile_stale_items", fake_noop)
+    monkeypatch.setattr(batches, "_reap_over_attempt_items", fake_noop)
+    monkeypatch.setattr(batches, "_lease_next_item", fake_lease_next_item)
+    monkeypatch.setattr(batches, "refresh_batch_counts", fake_refresh)
+    monkeypatch.setattr(batches, "_batch_quality_report", fake_quality_report)
+
+    result = await batches.run_local_batch(
+        db=db,
+        ingestion_service=object(),
+        batch_id=batch["batch_id"],
+        user_id=batch["user_id"],
+    )
+    return db.batch_collection.row, result
+
+
+@pytest.mark.asyncio
+async def test_local_batch_safe_summary_preflight_defers_instead_of_failing(monkeypatch):
+    row, result = await _run_batch_with_preflight_failure(
+        monkeypatch,
+        safe_summary_failures=True,
+    )
+
+    assert row["options"]["defer_summaries"] is True
+    assert row["options"]["summary_preflight_failed"] is True
+    assert row["options"]["summary_preflight_error"] == "summary quota exhausted"
+    assert row["status"] == batches.BATCH_RUNNING
+    assert result["status"] == batches.BATCH_RUNNING
+    assert row.get("error") is None
+    assert any(
+        "summaries deferred" in warning for warning in row.get("warnings", [])
+    )
+
+
+@pytest.mark.asyncio
+async def test_local_batch_strict_summary_preflight_still_fails(monkeypatch):
+    row, result = await _run_batch_with_preflight_failure(
+        monkeypatch,
+        safe_summary_failures=False,
+    )
+
+    assert row["status"] == batches.BATCH_FAILED
+    assert "Preflight canary failed: summary quota exhausted" in row["error"]
+    assert row["options"].get("defer_summaries") is None
+    assert result["status"] == batches.BATCH_FAILED
 
 
 class _BatchCursor:

@@ -645,6 +645,7 @@ class IngestionService:
         on_phase: "Any | None" = None,
         target_stage: str | None = None,
         extraction_endpoint_urls: list[str] | None = None,
+        defer_summaries: bool = False,
     ) -> IngestJobResponse:
         """Run the full ingestion pipeline for one document.
 
@@ -701,6 +702,7 @@ class IngestionService:
             on_phase=on_phase,
             target_stage=target_stage,
             extraction_endpoint_urls=extraction_endpoint_urls,
+            defer_summaries=defer_summaries,
         )
 
     async def _embed_and_upsert_schema_terms(

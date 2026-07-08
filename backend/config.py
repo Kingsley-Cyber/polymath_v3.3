@@ -935,9 +935,10 @@ class Settings(BaseSettings):
         default=True,
         description=(
             "Run ONE real summary-shaped call through the batch's model path "
-            "before processing any file; empty/unreachable output fails the "
-            "batch with an actionable error instead of silently burning books "
-            "(two full runs lost to a thinking-mode chip before this existed)."
+            "before processing any file. With INGEST_SAFE_SUMMARY_FAILURES on, "
+            "empty/unreachable output defers summaries and lets extraction keep "
+            "running; with safe mode off it fails the batch with an actionable "
+            "error instead of silently burning books."
         ),
     )
     INGEST_GLOBAL_MAX_DOCS: int = Field(

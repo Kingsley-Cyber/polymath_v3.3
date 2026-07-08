@@ -1428,6 +1428,7 @@ async def _process_local_item(
             on_phase=_on_phase,
             target_stage=(batch.get("options") or {}).get("target_stage") or None,
             extraction_endpoint_urls=_profile_endpoint_urls(batch),
+            defer_summaries=bool((batch.get("options") or {}).get("defer_summaries")),
         )
         if result.status == "staged":
             # §13-S: durable through the pass target; next pass re-leases it.
@@ -1488,6 +1489,8 @@ async def _preflight_summary_canary(db, batch: dict) -> str | None:
     corpus = await db["corpora"].find_one({"corpus_id": batch.get("corpus_id")}) or {}
     cfg = corpus.get("default_ingestion_config") or {}
     opts = batch.get("options") or {}
+    if bool(opts.get("defer_summaries")):
+        return None
     summary_enabled = opts.get("chunk_summarization")
     if summary_enabled is None:
         summary_enabled = cfg.get("chunk_summarization")
@@ -1746,19 +1749,45 @@ async def run_local_batch(
     # Preflight canary (owner-agreed 2026-07-04): ONE real summary-shaped
     # call through the batch's actual model path BEFORE any book is spent.
     # 5 seconds to save 30 minutes — a misconfigured chip (deprecated model,
-    # thinking-mode empties, bad key) burned two full runs before this
-    # existed. Failure marks the batch failed with an actionable error.
+    # thinking-mode empties, bad key) burned two full runs before this existed.
+    # In safe-summary mode, failure defers summaries for this batch instead of
+    # stopping extraction; strict mode preserves the old fail-fast behavior.
     if bool(getattr(get_settings(), "INGEST_PREFLIGHT_CANARY", True)):
         canary_err = await _preflight_summary_canary(db, batch)
         if canary_err:
-            await db[BATCHES].update_one(
-                {"batch_id": batch_id},
-                {"$set": {"status": "failed",
-                          "error": f"Preflight canary failed: {canary_err}",
-                          "updated_at": _now()}},
-            )
-            logger.error("Batch %s preflight canary FAILED: %s", batch_id[:8], canary_err)
-            return await refresh_batch_counts(db, batch_id, user_id=user_id)
+            if bool(getattr(get_settings(), "INGEST_SAFE_SUMMARY_FAILURES", True)):
+                reason = f"Preflight summary canary failed; summaries deferred: {canary_err}"
+                await db[BATCHES].update_one(
+                    {"batch_id": batch_id},
+                    {
+                        "$set": {
+                            "options.defer_summaries": True,
+                            "options.summary_preflight_failed": True,
+                            "options.summary_preflight_error": canary_err,
+                            "summary_pending_reason": reason,
+                            "updated_at": _now(),
+                        },
+                        "$addToSet": {"warnings": reason},
+                        "$unset": {"error": ""},
+                    },
+                )
+                logger.warning(
+                    "Batch %s preflight canary deferred summaries: %s",
+                    batch_id[:8],
+                    canary_err,
+                )
+                batch = await db[BATCHES].find_one(
+                    {"batch_id": batch_id, "user_id": user_id}
+                ) or batch
+            else:
+                await db[BATCHES].update_one(
+                    {"batch_id": batch_id},
+                    {"$set": {"status": "failed",
+                              "error": f"Preflight canary failed: {canary_err}",
+                              "updated_at": _now()}},
+                )
+                logger.error("Batch %s preflight canary FAILED: %s", batch_id[:8], canary_err)
+                return await refresh_batch_counts(db, batch_id, user_id=user_id)
 
     await reconcile_stale_items(db, batch_id=batch_id, user_id=user_id)
     await db[BATCHES].update_one(

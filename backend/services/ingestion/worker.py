@@ -3069,6 +3069,9 @@ async def run_ingest_job(
     # §13-S per-call extraction endpoint scoping (profile override) — kills
     # the RUNTIME_ENDPOINT_URLS last-writer-wins race across corpora.
     extraction_endpoint_urls: list[str] | None = None,
+    # Run-level summary safe mode: preserve chunk/extraction/graph progress when
+    # the summary pool is known dead/exhausted for this batch.
+    defer_summaries: bool = False,
 ) -> IngestJobResponse:
     """Run the locked ingestion pipeline for a single document.
 
@@ -3495,6 +3498,7 @@ async def run_ingest_job(
         )
 
     queryable_first_pass = str(target_stage or "").lower() in {"indexed", "queryable"}
+    summary_deferred_by_run = bool(defer_summaries) or queryable_first_pass
 
     # ── Phase 3: Ghost model phases ──────────────────────────────────────
     await _set_ingest_stage(
@@ -3521,7 +3525,7 @@ async def run_ingest_job(
             existing_doc=existing_doc,
             ws=ws,
             extraction_endpoint_urls=extraction_endpoint_urls,
-            defer_summaries=queryable_first_pass,
+            defer_summaries=summary_deferred_by_run,
             defer_ghost_b=queryable_first_pass,
         )
     if isinstance(ghost_result, GhostRunResult):
