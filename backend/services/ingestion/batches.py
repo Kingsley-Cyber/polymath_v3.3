@@ -117,6 +117,10 @@ INGEST_PROFILES: dict[str, dict] = {
         "concurrency": None,  # honor batch/env
         "pass_plan": [None],
         "extraction_endpoint_urls": None,  # settings/global fleet
+        # RTX/cloud extraction is the expensive/offloaded lane. Do not let a
+        # slow or exhausted summary provider keep the RTX idle; summaries are
+        # filled by the summary backfill lane after graph extraction lands.
+        "defer_summaries": True,
     },
 }
 
@@ -131,6 +135,19 @@ def _normalize_profile(profile: str | None) -> str | None:
             f"{profile!r}; expected one of {', '.join(sorted(INGEST_PROFILES))}"
         )
     return value
+
+
+def _profile_defaults(profile: str | None) -> dict[str, Any]:
+    value = _normalize_profile(profile)
+    return dict(INGEST_PROFILES.get(value or "", {}))
+
+
+def _batch_defer_summaries(batch: dict[str, Any]) -> bool:
+    options = batch.get("options") or {}
+    if "defer_summaries" in options:
+        return bool(options.get("defer_summaries"))
+    profile_defaults = _profile_defaults(options.get("profile"))
+    return bool(profile_defaults.get("defer_summaries"))
 
 
 def _profile_endpoint_urls(batch: dict[str, Any]) -> list[str] | None:
@@ -489,6 +506,9 @@ async def create_local_batch(
         "options": {
             "use_neo4j": use_neo4j,
             "chunk_summarization": chunk_summarization,
+            "defer_summaries": bool(
+                _profile_defaults(normalized_profile).get("defer_summaries")
+            ),
             "model": model or "",
             "concurrency": worker_count,
             "profile": normalized_profile,
@@ -616,6 +636,9 @@ async def create_upload_batch(
         "options": {
             "use_neo4j": use_neo4j,
             "chunk_summarization": chunk_summarization,
+            "defer_summaries": bool(
+                _profile_defaults(normalized_profile).get("defer_summaries")
+            ),
             "model": model or "",
             "concurrency": worker_count,
             "profile": normalized_profile,
@@ -1494,7 +1517,7 @@ async def _process_local_item(
             on_phase=_on_phase,
             target_stage=(batch.get("options") or {}).get("target_stage") or None,
             extraction_endpoint_urls=_profile_endpoint_urls(batch),
-            defer_summaries=bool((batch.get("options") or {}).get("defer_summaries")),
+            defer_summaries=_batch_defer_summaries(batch),
         )
         if result.status == "staged":
             # §13-S: durable through the pass target; next pass re-leases it.
@@ -1555,7 +1578,7 @@ async def _preflight_summary_canary(db, batch: dict) -> str | None:
     corpus = await db["corpora"].find_one({"corpus_id": batch.get("corpus_id")}) or {}
     cfg = corpus.get("default_ingestion_config") or {}
     opts = batch.get("options") or {}
-    if bool(opts.get("defer_summaries")):
+    if _batch_defer_summaries(batch):
         return None
     summary_enabled = opts.get("chunk_summarization")
     if summary_enabled is None:

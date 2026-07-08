@@ -53,6 +53,50 @@ from services.ingestion.worker import (
 # ── Test data builders ──────────────────────────────────────────────────────
 
 
+def test_ghost_branches_overlap_for_rtx_extraction_and_cloud_summary():
+    cfg = IngestionConfig(
+        use_neo4j=True,
+        chunk_summarization=True,
+        extraction_engine="cloud",
+        models_linked=False,
+        summary_models=[
+            ModelProfileRef(
+                model="deepseek/deepseek-v4-flash",
+                base_url="https://api.deepseek.com/v1",
+                max_concurrent=45,
+            )
+        ],
+        extraction_models=[
+            ModelProfileRef(
+                model="openai/polymath-extract",
+                base_url="http://192.168.1.83:8000/v1",
+                max_concurrent=60,
+            )
+        ],
+    )
+
+    assert worker._ghost_branches_can_overlap(cfg) is True
+
+
+def test_ghost_branches_do_not_overlap_when_models_are_linked():
+    cfg = IngestionConfig(
+        use_neo4j=True,
+        chunk_summarization=True,
+        extraction_engine="cloud",
+        models_linked=True,
+        summary_models=[
+            ModelProfileRef(
+                model="tencent/Hy3",
+                base_url="https://api.siliconflow.com/v1",
+                max_concurrent=8,
+            )
+        ],
+        extraction_models=[],
+    )
+
+    assert worker._ghost_branches_can_overlap(cfg) is False
+
+
 def _parse_result(tier: SourceTier = SourceTier.tier_a) -> Any:
     return SimpleNamespace(
         text="Apple Inc. hired Steve Jobs in 1976.",

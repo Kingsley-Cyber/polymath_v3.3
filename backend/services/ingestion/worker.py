@@ -292,6 +292,46 @@ def _cloud_pool_refs_for_config(config: IngestionConfig) -> list[Any]:
     return list(getattr(config, "extraction_models", []) or [])
 
 
+def _pool_lane_signature(ref: Any) -> tuple[str, str, str, str]:
+    data = _plain_model_ref(ref)
+    return (
+        str(data.get("provider_preset") or "").strip().lower(),
+        str(data.get("base_url") or "").strip().rstrip("/").lower(),
+        str(data.get("lifecycle_base_url") or "").strip().rstrip("/").lower(),
+        str(data.get("model") or "").strip().lower(),
+    )
+
+
+def _ghost_branches_can_overlap(config: IngestionConfig) -> bool:
+    """Return true when Ghost A and Ghost B use disjoint heavy resources.
+
+    This keeps the conservative old behavior for linked cloud pools, while
+    allowing RTX/private-vLLM extraction to stay busy when summaries are routed
+    to a separate provider.
+    """
+    engine = str(getattr(config, "extraction_engine", "") or "").strip().lower()
+    if engine in {"legacy_local", "local_then_enrich", "off"}:
+        return True
+    if getattr(config, "models_linked", True):
+        return False
+
+    extraction_refs = list(getattr(config, "extraction_models", []) or [])
+    if any(_pool_entry_uses_managed_vllm(_plain_model_ref(ref)) for ref in extraction_refs):
+        return True
+
+    summary_sigs = {
+        _pool_lane_signature(ref)
+        for ref in (getattr(config, "summary_models", []) or [])
+        if _pool_lane_signature(ref) != ("", "", "", "")
+    }
+    extraction_sigs = {
+        _pool_lane_signature(ref)
+        for ref in extraction_refs
+        if _pool_lane_signature(ref) != ("", "", "", "")
+    }
+    return bool(summary_sigs and extraction_sigs and summary_sigs.isdisjoint(extraction_sigs))
+
+
 def _resource_profile_for_config(
     config: IngestionConfig,
     *,
@@ -1933,10 +1973,7 @@ async def _run_ghosts_parallel(
     # provider-pressure rationale only holds when BOTH branches hit the same
     # cloud provider — with a local/sidecar extraction engine they use
     # disjoint resources, so B (the long pole) starts first and A overlaps.
-    _engine_hint = str(
-        getattr(config, "extraction_engine", "") or ""
-    ).strip().lower()
-    _parallel_ghosts = _engine_hint in ("legacy_local", "local_then_enrich", "off")
+    _parallel_ghosts = _ghost_branches_can_overlap(config)
     _b_task: asyncio.Task | None = None
     if _parallel_ghosts:
         _b_task = asyncio.create_task(_b_branch())

@@ -16,6 +16,18 @@ from services.ingestion import batches, graph_backfill
 from models.schemas import IngestionConfig
 
 
+def test_rtx_assisted_defaults_to_summary_deferral():
+    batch = {"options": {"profile": "rtx_assisted"}}
+
+    assert batches._batch_defer_summaries(batch) is True
+
+
+def test_explicit_summary_deferral_option_overrides_profile_default():
+    batch = {"options": {"profile": "rtx_assisted", "defer_summaries": False}}
+
+    assert batches._batch_defer_summaries(batch) is False
+
+
 def test_discover_local_files_filters_and_sorts(tmp_path):
     (tmp_path / "b.pdf").write_bytes(b"b")
     (tmp_path / "a.txt").write_text("a", encoding="utf-8")
