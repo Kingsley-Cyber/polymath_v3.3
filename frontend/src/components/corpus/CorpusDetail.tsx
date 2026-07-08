@@ -187,6 +187,10 @@ function hasUsefulBatchProgress(batch: IngestBatchResponse): boolean {
   );
 }
 
+function isArchivedBatch(batch: IngestBatchResponse): boolean {
+  return batch.status === "cancelled" || batch.status === "failed";
+}
+
 function selectDisplayBatch(
   batches: IngestBatchResponse[],
 ): IngestBatchResponse | null {
@@ -306,9 +310,12 @@ export function CorpusDetail({
         // item view doesn't blank out between polls.
         .getIngestBatch(localBatch.batch_id, { includeItems: false })
         .then((next) =>
-          setLocalBatch((prev) =>
-            prev ? { ...next, items: next.items ?? prev.items } : next,
-          ),
+          setLocalBatch((prev) => {
+            if (isArchivedBatch(next) && !hasUsefulBatchProgress(next)) {
+              return null;
+            }
+            return prev ? { ...next, items: next.items ?? prev.items } : next;
+          }),
         )
         .catch(() => undefined);
     }, 3000);

@@ -138,6 +138,24 @@ def _graph_gap_reason(row: dict[str, Any]) -> str | None:
     return None
 
 
+def _row_matches_repair_filters(
+    row: dict[str, Any],
+    *,
+    reasons: set[str] | None = None,
+    flush_only: bool = False,
+) -> bool:
+    reason = str(row.get("graph_gap_reason") or "")
+    if reasons and reason not in reasons:
+        return False
+    if not flush_only:
+        return True
+    return (
+        int(row.get("staged_extractions") or 0) > 0
+        and int(row.get("failure_rows") or 0) == 0
+        and int(row.get("ghost_b_failure_count") or 0) == 0
+    )
+
+
 async def _candidate_rows(
     db: Any,
     *,
@@ -145,6 +163,8 @@ async def _candidate_rows(
     limit: int,
     max_chunks: int | None,
     largest_first: bool,
+    reasons: set[str] | None = None,
+    flush_only: bool = False,
 ) -> list[dict[str, Any]]:
     cursor = db["documents"].find(
         {
@@ -196,6 +216,12 @@ async def _candidate_rows(
         row["failure_rows"] = await _row_count(
             db, "ghost_b_failures", corpus_id=corpus_id, doc_id=doc_id
         )
+        if not _row_matches_repair_filters(
+            row,
+            reasons=reasons,
+            flush_only=flush_only,
+        ):
+            continue
         enriched.append(row)
 
     enriched.sort(
@@ -311,11 +337,15 @@ async def _run(args: argparse.Namespace) -> int:
             limit=args.limit,
             max_chunks=args.max_chunks,
             largest_first=args.largest_first,
+            reasons=set(args.reason or []) or None,
+            flush_only=args.flush_only,
         )
         summary = {
             "run_id": run_id,
             "apply": args.apply,
             "corpus_id": args.corpus_id,
+            "flush_only": args.flush_only,
+            "reasons": args.reason or [],
             "planned_docs": len(plan),
             "planned_child_chunks": sum(int(row.get("child_chunks") or 0) for row in plan),
             "planned_parents": sum(int(row.get("parents") or 0) for row in plan),
@@ -332,7 +362,11 @@ async def _run(args: argparse.Namespace) -> int:
                 corpus_id=args.corpus_id,
                 plan=plan,
                 apply=False,
-                extra={"active_batches_at_plan": active},
+                extra={
+                    "active_batches_at_plan": active,
+                    "flush_only": args.flush_only,
+                    "reasons": args.reason or [],
+                },
             )
             return 0
 
@@ -344,6 +378,11 @@ async def _run(args: argparse.Namespace) -> int:
                 corpus_id=args.corpus_id,
                 plan=[],
                 apply=True,
+                extra={
+                    "active_batches_at_start": active,
+                    "flush_only": args.flush_only,
+                    "reasons": args.reason or [],
+                },
             )
             return 0
 
@@ -354,7 +393,11 @@ async def _run(args: argparse.Namespace) -> int:
             corpus_id=args.corpus_id,
             plan=plan,
             apply=True,
-            extra={"active_batches_at_start": active},
+            extra={
+                "active_batches_at_start": active,
+                "flush_only": args.flush_only,
+                "reasons": args.reason or [],
+            },
         )
         qdrant = _qdrant_client()
         neo4j = _neo4j_driver()
@@ -459,6 +502,20 @@ def main() -> None:
         "--largest-first",
         action="store_true",
         help="Process largest eligible docs first instead of smallest first.",
+    )
+    parser.add_argument(
+        "--reason",
+        action="append",
+        choices=["neo4j_missing", "neo4j_verify_mismatch"],
+        help="Only plan docs with this graph gap reason. May be passed more than once.",
+    )
+    parser.add_argument(
+        "--flush-only",
+        action="store_true",
+        help=(
+            "Only plan docs that already have staged Ghost B rows and zero failure rows. "
+            "This uses the Neo4j flush fast path and avoids fresh LLM extraction."
+        ),
     )
     parser.add_argument("--run-id", default=None)
     parser.add_argument("--apply", action="store_true", help="Actually run the repair.")
