@@ -724,16 +724,27 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
     null,
   );
 
-  const loadCorpora = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
+  const loadCorpora = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = Boolean(opts?.silent);
+    if (!silent) {
+      setIsLoading(true);
+      setError(null);
+    }
     try {
       const data = await api.listCorpora();
       setCorpora(data);
+      setSelectedCorpus((prev) => {
+        if (!prev) return prev;
+        return data.find((c) => c.corpus_id === prev.corpus_id) ?? prev;
+      });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load corpora");
+      if (!silent) {
+        setError(err instanceof Error ? err.message : "Failed to load corpora");
+      }
     } finally {
-      setIsLoading(false);
+      if (!silent) {
+        setIsLoading(false);
+      }
     }
   }, [setCorpora]);
 
@@ -759,6 +770,14 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
         .catch(() => setGlobalIngestionDefaults(null));
     }
   }, [isOpen, loadCorpora, showCreateForm]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const timer = window.setInterval(() => {
+      void loadCorpora({ silent: true });
+    }, 10000);
+    return () => window.clearInterval(timer);
+  }, [isOpen, loadCorpora]);
 
   const handleCreate = async () => {
     if (!newName.trim()) return;
@@ -882,6 +901,9 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
                 corpora.map((c) =>
                   c.corpus_id === updated.corpus_id ? updated : c,
                 ),
+              );
+              setSelectedCorpus((prev) =>
+                prev?.corpus_id === updated.corpus_id ? updated : prev,
               );
             }}
             onEditConfig={(c) => {
@@ -1559,7 +1581,7 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
             {corpora.length} CORPUS // {selectedCorpusIds.length} SELECTED
           </div>
           <button
-            onClick={loadCorpora}
+            onClick={() => void loadCorpora()}
             disabled={isLoading}
             className="text-[9px] text-content-tertiary hover:text-accent-main tracking-widest uppercase transition-none disabled:opacity-50"
           >
