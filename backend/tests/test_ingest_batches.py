@@ -88,6 +88,32 @@ def test_runtime_batch_concurrency_uses_worker_default_when_unset():
     assert batches._runtime_batch_concurrency(batch, settings) == 2
 
 
+def test_rtx_assisted_runtime_concurrency_uses_managed_vllm_doc_cap():
+    settings = SimpleNamespace(
+        INGEST_BATCH_WORKERS=1,
+        INGEST_GLOBAL_MAX_DOCS=1,
+        INGEST_MAX_ACTIVE_JOBS=1,
+        EXTRACTION_MANAGED_VLLM_MAX_ACTIVE_DOCS=2,
+    )
+    batch = {"options": {"profile": "rtx_assisted"}}
+
+    assert batches._runtime_batch_concurrency(batch, settings) == 2
+    assert batches._global_doc_limit_for_batch(batch, settings) == 2
+
+
+def test_mac_safe_global_doc_limit_stays_static_env_cap():
+    settings = SimpleNamespace(
+        INGEST_BATCH_WORKERS=1,
+        INGEST_GLOBAL_MAX_DOCS=1,
+        INGEST_MAX_ACTIVE_JOBS=1,
+        EXTRACTION_MANAGED_VLLM_MAX_ACTIVE_DOCS=2,
+    )
+    batch = {"options": {"profile": "mac_safe"}}
+
+    assert batches._runtime_batch_concurrency(batch, settings) == 1
+    assert batches._global_doc_limit_for_batch(batch, settings) == 1
+
+
 def test_normalize_profile_rejects_unknown_value():
     assert batches._normalize_profile("RTX_ASSISTED") == "rtx_assisted"
     assert batches._normalize_profile("MAC_QUERYABLE_FIRST") == "mac_queryable_first"

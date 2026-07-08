@@ -1861,9 +1861,10 @@ async def run_local_batch(
     # inside the API process — event loop saturated, healthcheck failed,
     # autoheal SIGTERMed the backend (RestartCount=37, Cloudflare 502s).
     # Batches now QUEUE behind this semaphore instead of stacking.
-    sem = _global_doc_semaphore()
+    settings = get_settings()
+    sem = await _global_doc_semaphore(_global_doc_limit_for_batch(batch, settings))
     lease_seconds = max(60, int(get_settings().INGEST_STALE_JOB_MINUTES * 60))
-    concurrency = _runtime_batch_concurrency(batch, get_settings())
+    concurrency = _runtime_batch_concurrency(batch, settings)
     await _reap_over_attempt_items(db, batch_id)
 
     # ── §13-S pass driver ────────────────────────────────────────────────────
@@ -1971,24 +1972,80 @@ def _runtime_batch_concurrency(batch: dict[str, Any], settings: Any) -> int:
     API container can hold, which turns startup recovery into an OOM loop.
     """
 
-    configured = int((batch.get("options") or {}).get("concurrency") or 0)
+    options = batch.get("options") or {}
+    configured = int(options.get("concurrency") or 0)
     requested = configured or int(getattr(settings, "INGEST_BATCH_WORKERS", 1))
+    if str(options.get("profile") or "").strip().lower() == "rtx_assisted":
+        remote_cap = _rtx_assisted_doc_cap(settings)
+        return max(1, min(configured or max(requested, remote_cap), remote_cap))
     global_cap = max(1, int(getattr(settings, "INGEST_GLOBAL_MAX_DOCS", 1)))
     active_cap = max(1, int(getattr(settings, "INGEST_MAX_ACTIVE_JOBS", 1)))
     return max(1, min(requested, global_cap, active_cap))
 
 
-_GLOBAL_DOC_SEM: "asyncio.Semaphore | None" = None
+def _rtx_assisted_doc_cap(settings: Any) -> int:
+    return max(
+        1,
+        int(getattr(settings, "EXTRACTION_MANAGED_VLLM_MAX_ACTIVE_DOCS", 2)),
+    )
+
+
+def _global_doc_limit_for_batch(batch: dict[str, Any], settings: Any) -> int:
+    options = batch.get("options") or {}
+    if str(options.get("profile") or "").strip().lower() == "rtx_assisted":
+        return _rtx_assisted_doc_cap(settings)
+    return max(1, int(getattr(settings, "INGEST_GLOBAL_MAX_DOCS", 1)))
+
+
+class _AdjustableDocSemaphore:
+    def __init__(self, limit: int) -> None:
+        self._limit = max(1, int(limit))
+        self._active = 0
+        self._cond = asyncio.Condition()
+
+    async def set_limit(self, limit: int) -> None:
+        new_limit = max(1, int(limit))
+        async with self._cond:
+            widened = new_limit > self._limit
+            self._limit = new_limit
+            if widened:
+                self._cond.notify_all()
+
+    async def __aenter__(self):
+        async with self._cond:
+            while self._active >= self._limit:
+                await self._cond.wait()
+            self._active += 1
+        return self
+
+    async def __aexit__(self, *exc):
+        async with self._cond:
+            self._active = max(0, self._active - 1)
+            self._cond.notify_all()
+        return False
+
+
+_GLOBAL_DOC_SEM: "_AdjustableDocSemaphore | None" = None
 _GLOBAL_DOC_SEM_SIZE: int = 0
 
 
-def _global_doc_semaphore() -> "asyncio.Semaphore":
+async def _global_doc_semaphore(limit: int | None = None) -> "_AdjustableDocSemaphore":
     """Process-wide document-ingest semaphore, sized by
     INGEST_GLOBAL_MAX_DOCS (re-created if the knob changes)."""
     global _GLOBAL_DOC_SEM, _GLOBAL_DOC_SEM_SIZE
-    size = max(1, int(getattr(get_settings(), "INGEST_GLOBAL_MAX_DOCS", 2)))
-    if _GLOBAL_DOC_SEM is None or size != _GLOBAL_DOC_SEM_SIZE:
-        _GLOBAL_DOC_SEM = asyncio.Semaphore(size)
+    size = max(
+        1,
+        int(
+            limit
+            if limit is not None
+            else getattr(get_settings(), "INGEST_GLOBAL_MAX_DOCS", 2)
+        ),
+    )
+    if _GLOBAL_DOC_SEM is None:
+        _GLOBAL_DOC_SEM = _AdjustableDocSemaphore(size)
+        _GLOBAL_DOC_SEM_SIZE = size
+    elif size != _GLOBAL_DOC_SEM_SIZE:
+        await _GLOBAL_DOC_SEM.set_limit(size)
         _GLOBAL_DOC_SEM_SIZE = size
     return _GLOBAL_DOC_SEM
 
