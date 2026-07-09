@@ -1936,7 +1936,6 @@ async def _run_deferred_summary_backfill(
         "doc_scope_count": len(doc_ids),
         "limit": limit,
         "batch": parent_batch,
-        "created_at": now,
         "updated_at": now,
     }
     await db["ingest_repair_runs"].update_one(
