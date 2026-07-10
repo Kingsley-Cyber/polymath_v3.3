@@ -8,6 +8,11 @@ import logging
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from pymongo.errors import OperationFailure
 
+from db.queue_integrity import (
+    DURABLE_JOB_COLLECTIONS,
+    ensure_durable_job_queue_integrity,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -204,6 +209,11 @@ async def create_all_indexes(db: AsyncIOMotorDatabase) -> None:
         [("event", 1), ("created_at", -1)],
         name="ghost_b_error_event_time",
     )
+    await _ensure_index(
+        db["ghost_b_error_events"],
+        [("corpus_id", 1), ("created_at", -1), ("event", 1)],
+        name="ghost_b_error_corpus_time_event",
+    )
     logger.info("Indexes ensured: ghost_b_error_events")
 
     # --- ingest batches ---
@@ -228,6 +238,62 @@ async def create_all_indexes(db: AsyncIOMotorDatabase) -> None:
     )
     await _ensure_index(db["ingest_batch_items"], "doc_id")
     logger.info("Indexes ensured: ingest_batches / ingest_batch_items")
+
+    # --- durable ingestion repair queues ---
+    # These collections are the production read models behind corpus readiness:
+    # every repair cycle counts by corpus/status, claims queued jobs by
+    # updated_at/lease_until, and reconciles stale rows by deterministic
+    # job_id/stage_identity. Without these indexes the control plane works on
+    # toy corpora but degrades into collection scans on large libraries.
+    # Planners, claimers, and reconcilers all use deterministic job_id as the
+    # queue identity. Repair historical duplicates before any runner starts,
+    # then make that invariant enforceable by Mongo rather than convention.
+    await ensure_durable_job_queue_integrity(db)
+    for name in DURABLE_JOB_COLLECTIONS:
+        await _ensure_index(
+            db[name],
+            [("corpus_id", 1), ("status", 1), ("updated_at", 1)],
+            name=f"{name}_corpus_status_updated",
+        )
+        await _ensure_index(
+            db[name],
+            [("status", 1), ("lease_until", 1), ("updated_at", 1)],
+            name=f"{name}_status_lease_updated",
+        )
+        await _ensure_index(
+            db[name],
+            [("corpus_id", 1), ("doc_id", 1), ("status", 1)],
+            name=f"{name}_corpus_doc_status",
+        )
+        await _ensure_index(
+            db[name],
+            [("corpus_id", 1), ("stage_identity.stage_key", 1)],
+            name=f"{name}_stage_key",
+            sparse=True,
+        )
+        await _ensure_index(
+            db[name],
+            [("corpus_id", 1), ("stage_identity.source_file_hash", 1)],
+            name=f"{name}_source_file_hash",
+            sparse=True,
+        )
+    await _ensure_index(
+        db["extraction_jobs"],
+        [("corpus_id", 1), ("chunk_id", 1), ("status", 1)],
+        name="extraction_jobs_corpus_chunk_status",
+    )
+    await _ensure_index(
+        db["summary_jobs"],
+        [("corpus_id", 1), ("kind", 1), ("parent_id", 1), ("status", 1)],
+        name="summary_jobs_parent_status",
+        sparse=True,
+    )
+    await _ensure_index(
+        db["summary_jobs"],
+        [("corpus_id", 1), ("kind", 1), ("doc_id", 1), ("status", 1)],
+        name="summary_jobs_doc_status",
+    )
+    logger.info("Indexes ensured: durable ingestion repair queues")
 
     # --- settings ---
     await _ensure_index(db["settings"], "user_id", unique=True)

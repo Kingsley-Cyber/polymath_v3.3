@@ -88,8 +88,11 @@ def _check_reranker(endpoint: Endpoint, wait_seconds: int) -> None:
     info = _get_json(f"{endpoint.base_url}/info")
     if not info.get("ready", True):
         raise CheckError(f"{endpoint.name} info says not ready: {info}")
-    if info.get("score_scale") != "cosine":
-        raise CheckError(f"{endpoint.name} score_scale must be cosine: {info}")
+    score_scale = info.get("score_scale")
+    if score_scale not in {"cosine", "probability"}:
+        raise CheckError(
+            f"{endpoint.name} score_scale must be cosine or probability: {info}"
+        )
 
     response = _post_json(
         f"{endpoint.base_url}/rerank",

@@ -14,7 +14,6 @@ import re
 from typing import Any
 
 from models.schemas import SourceChunk
-from pymongo.errors import OperationFailure
 from services.cache_util import TTLCache
 from services.conversation import conversation_service
 from services.facets import metadata_with_facets
@@ -618,35 +617,12 @@ class DocumentAnchorRetriever:
             "content_facet_confidence": 1,
             "score": {"$meta": "textScore"},
         }
-        search_text = " ".join(terms[:12])
         rows: list[dict[str, Any]] = []
-        if search_text:
-            try:
-                cursor = (
-                    db["chunks"]
-                    .find(
-                        {
-                            "corpus_id": corpus_id,
-                            "doc_id": doc_id,
-                            "$text": {"$search": search_text},
-                            "chunk_kind": {"$nin": list(NOISY_KINDS)},
-                        },
-                        projection,
-                    )
-                    .sort([("score", {"$meta": "textScore"})])
-                    .limit(per_doc)
-                )
-                rows = await cursor.to_list(length=per_doc)
-            except OperationFailure:
-                rows = []
-
-        if rows:
-            max_score = max(float(row.get("score") or 0.0) for row in rows) or 1.0
-            return [
-                (row, min(1.0, float(row.get("score") or 0.0) / max_score))
-                for row in rows
-            ]
-
+        # Mongo permits one text index per collection. The shared chunks text
+        # index is not prefixed by doc_id, so a `$text` query scans the corpus
+        # text index before applying the document filter (230k+ chunks in the
+        # large corpus). Anchor recall already knows the document: use the
+        # indexed doc_id equality first, then a bounded local regex match.
         conditions = []
         for term in terms[:8]:
             conditions.append({"text": {"$regex": re.escape(term), "$options": "i"}})

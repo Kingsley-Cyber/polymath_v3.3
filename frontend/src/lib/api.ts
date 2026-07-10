@@ -443,6 +443,254 @@ export async function updateCorpus(
   });
 }
 
+export async function reconcileCorpusFailureMetadata(
+  corpusId: string,
+  payload: { apply?: boolean; limit?: number } = {},
+): Promise<Record<string, unknown>> {
+  return fetchJSON(`/corpora/${corpusId}/ingestion/reconcile-failures`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function listCorpusGraphPromotionJobs(
+  corpusId: string,
+  params: { limit?: number; status?: string[] } = {},
+): Promise<Record<string, unknown>> {
+  const search = new URLSearchParams();
+  if (params.limit) search.set("limit", String(params.limit));
+  for (const status of params.status ?? []) {
+    search.append("status", status);
+  }
+  const suffix = search.toString() ? `?${search.toString()}` : "";
+  return fetchJSON(`/corpora/${corpusId}/ingestion/graph-promotion-jobs${suffix}`);
+}
+
+export async function planCorpusGraphPromotionJobs(
+  corpusId: string,
+  payload: { apply?: boolean; limit?: number; max_chunks?: number | null } = {},
+): Promise<Record<string, unknown>> {
+  return fetchJSON(`/corpora/${corpusId}/ingestion/graph-promotion-jobs/plan`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function runCorpusGraphPromotionJobs(
+  corpusId: string,
+  payload: { limit?: number } = {},
+): Promise<Record<string, unknown>> {
+  return fetchJSON(`/corpora/${corpusId}/ingestion/graph-promotion-jobs/run`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function listCorpusExtractionJobs(
+  corpusId: string,
+  params: { limit?: number; status?: string[] } = {},
+): Promise<Record<string, unknown>> {
+  const search = new URLSearchParams();
+  if (params.limit) search.set("limit", String(params.limit));
+  for (const status of params.status ?? []) {
+    search.append("status", status);
+  }
+  const suffix = search.toString() ? `?${search.toString()}` : "";
+  return fetchJSON(`/corpora/${corpusId}/ingestion/extraction-jobs${suffix}`);
+}
+
+export async function planCorpusExtractionJobs(
+  corpusId: string,
+  payload: { apply?: boolean; limit?: number; include_succeeded?: boolean } = {},
+): Promise<Record<string, unknown>> {
+  return fetchJSON(`/corpora/${corpusId}/ingestion/extraction-jobs/plan`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function runCorpusExtractionJobs(
+  corpusId: string,
+  payload: { limit?: number; statuses?: string[] } = {},
+): Promise<Record<string, unknown>> {
+  return fetchJSON(`/corpora/${corpusId}/ingestion/extraction-jobs/run`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function planCorpusSourceParseJobs(
+  corpusId: string,
+  payload: { apply?: boolean; limit?: number } = {},
+): Promise<Record<string, unknown>> {
+  return fetchJSON(`/corpora/${corpusId}/ingestion/source-parse-jobs/plan`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function listCorpusSourceParseJobs(
+  corpusId: string,
+  params: { limit?: number; status?: string[] } = {},
+): Promise<Record<string, unknown>> {
+  const search = new URLSearchParams();
+  if (params.limit) search.set("limit", String(params.limit));
+  for (const status of params.status ?? []) search.append("status", status);
+  const suffix = search.toString() ? `?${search.toString()}` : "";
+  return fetchJSON(`/corpora/${corpusId}/ingestion/source-parse-jobs${suffix}`);
+}
+
+export async function runCorpusSourceParseJobs(
+  corpusId: string,
+  payload: { limit?: number; statuses?: string[] } = {},
+): Promise<Record<string, unknown>> {
+  return fetchJSON(`/corpora/${corpusId}/ingestion/source-parse-jobs/run`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function planCorpusSummaryJobs(
+  corpusId: string,
+  payload: { apply?: boolean; limit?: number; kinds?: string[] | null } = {},
+): Promise<Record<string, unknown>> {
+  return fetchJSON(`/corpora/${corpusId}/ingestion/summary-jobs/plan`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function listCorpusSummaryJobs(
+  corpusId: string,
+  params: { limit?: number; status?: string[]; kind?: string[] } = {},
+): Promise<Record<string, unknown>> {
+  const search = new URLSearchParams();
+  if (params.limit) search.set("limit", String(params.limit));
+  for (const status of params.status ?? []) search.append("status", status);
+  for (const kind of params.kind ?? []) search.append("kind", kind);
+  const suffix = search.toString() ? `?${search.toString()}` : "";
+  return fetchJSON(`/corpora/${corpusId}/ingestion/summary-jobs${suffix}`);
+}
+
+export async function runCorpusSummaryJobs(
+  corpusId: string,
+  payload: { limit?: number; statuses?: string[] | null; kinds?: string[] | null } = {},
+): Promise<Record<string, unknown>> {
+  return fetchJSON(`/corpora/${corpusId}/ingestion/summary-jobs/run`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function planCorpusDocumentPipelineJobs(
+  corpusId: string,
+  payload: { apply?: boolean; limit?: number; kinds?: string[] | null } = {},
+): Promise<Record<string, unknown>> {
+  return fetchJSON(`/corpora/${corpusId}/ingestion/document-pipeline-jobs/plan`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function listCorpusDocumentPipelineJobs(
+  corpusId: string,
+  params: { limit?: number; status?: string[]; kind?: string[] } = {},
+): Promise<Record<string, unknown>> {
+  const search = new URLSearchParams();
+  if (params.limit) search.set("limit", String(params.limit));
+  for (const status of params.status ?? []) search.append("status", status);
+  for (const kind of params.kind ?? []) search.append("kind", kind);
+  const suffix = search.toString() ? `?${search.toString()}` : "";
+  return fetchJSON(`/corpora/${corpusId}/ingestion/document-pipeline-jobs${suffix}`);
+}
+
+export async function runCorpusDocumentPipelineJobs(
+  corpusId: string,
+  payload: { limit?: number; statuses?: string[] | null; kinds?: string[] | null } = {},
+): Promise<Record<string, unknown>> {
+  return fetchJSON(`/corpora/${corpusId}/ingestion/document-pipeline-jobs/run`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function runCorpusRepairCycle(
+  corpusId: string,
+  payload: {
+    apply?: boolean;
+    background?: boolean;
+    reconcile_failures?: boolean;
+    failure_reconcile_limit?: number;
+    backfill_promoted_extraction_marks_rows?: boolean;
+    promoted_extraction_marks_backfill_limit?: number;
+    plan_source_parse_jobs?: boolean;
+    source_parse_job_plan_limit?: number;
+    run_source_parse_jobs?: boolean;
+    source_parse_job_run_limit?: number;
+    plan_document_pipeline_jobs?: boolean;
+    document_pipeline_job_plan_limit?: number;
+    run_document_pipeline_jobs?: boolean;
+    document_pipeline_job_run_limit?: number;
+    plan_graph_jobs?: boolean;
+    graph_plan_limit?: number;
+    graph_max_chunks?: number | null;
+    plan_extraction_jobs?: boolean;
+    extraction_job_plan_limit?: number;
+    run_extraction_jobs?: boolean;
+    extraction_job_run_limit?: number;
+    plan_summary_jobs?: boolean;
+    summary_job_plan_limit?: number;
+    run_summary_jobs?: boolean;
+    summary_job_run_limit?: number;
+    run_document_summaries?: boolean;
+    document_summary_limit?: number;
+    run_graph_jobs?: boolean;
+    graph_run_limit?: number;
+  } = {},
+): Promise<Record<string, unknown>> {
+  return fetchJSON(`/corpora/${corpusId}/ingestion/repair-cycle`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function auditCorpusIdempotency(
+  corpusId: string,
+  params: { group_limit?: number; missing_limit?: number } = {},
+): Promise<Record<string, unknown>> {
+  const search = new URLSearchParams();
+  if (params.group_limit) search.set("group_limit", String(params.group_limit));
+  if (params.missing_limit) search.set("missing_limit", String(params.missing_limit));
+  const suffix = search.toString() ? `?${search.toString()}` : "";
+  return fetchJSON(`/corpora/${corpusId}/ingestion/idempotency-audit${suffix}`);
+}
+
+export async function backfillCorpusDocumentSummaries(
+  corpusId: string,
+  payload: { limit?: number; doc_ids?: string[] | null } = {},
+): Promise<Record<string, unknown>> {
+  return fetchJSON(`/corpora/${corpusId}/summaries/document-backfill`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function backfillCorpusSummaries(
+  corpusId: string,
+  payload: {
+    generate?: boolean;
+    index?: boolean;
+    limit?: number | null;
+    batch?: number;
+    background?: boolean;
+  } = {},
+): Promise<Record<string, unknown>> {
+  return fetchJSON(`/corpora/${corpusId}/summaries/backfill`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 /**
  * DELETE /api/corpora/{corpus_id}
  * Delete a corpus and cascade all associated data.

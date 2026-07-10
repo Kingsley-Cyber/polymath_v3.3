@@ -199,6 +199,30 @@ async def test_db_none_falls_back_to_degree_only():
 
 
 @pytest.mark.asyncio
+async def test_metrics_aware_cypher_carries_entity_flags_across_with():
+    """Regression: Neo4j drops variables not carried through WITH clauses."""
+    chunks = [_StubChunk("c1", 1.0)]
+    captured: dict[str, str] = {}
+
+    def on_run(cypher, **kwargs):
+        captured["cypher"] = cypher
+        return _FakeResult([
+            {"chunk_id": "c1", "entities": [{"entity_id": "e1", "degree": 1}]}
+        ])
+
+    driver = _FakeDriver(on_run)
+    await graph_rerank.apply_graph_degree_boost_metrics_aware(
+        chunks=chunks, corpus_ids=["corp-1"], neo4j_driver=driver, db=None,
+    )
+
+    cypher = captured["cypher"]
+    assert "AS generic_entity" in cypher
+    assert "AS graph_expansion_allowed" in cypher
+    assert "WHEN generic_entity" in cypher
+    assert "WHEN coalesce(e.generic_entity" not in cypher
+
+
+@pytest.mark.asyncio
 async def test_cold_cache_no_metrics_row_falls_back_to_degree():
     """db present but get_cached_metrics returns None → degree-only
     multiplier (cache contribution is 0)."""

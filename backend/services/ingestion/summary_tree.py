@@ -15,9 +15,12 @@ a failed node yields a deterministic extractive fallback, never an exception.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Sequence
+
+from services.ingestion.section_classifier import should_summarize_parent
 
 ROLLUP_WINDOW_MIN = 12
 ROLLUP_WINDOW_MAX = 20
@@ -162,6 +165,7 @@ async def build_tree(
     source_type: str,
     parents: Sequence[ParentSummaryIn],
     llm_fn: LlmFn | None,
+    max_concurrent: int = 16,
 ) -> list[TreeNode]:
     """Full L2→L4 tree for one document. Returns upsert-ready nodes with
     STABLE ids (resumable: same doc ⇒ same node ids)."""
@@ -175,7 +179,15 @@ async def build_tree(
         for c in p.concepts:
             concepts[c] = concepts.get(c, 0) + 1
 
+    generation_semaphore = asyncio.Semaphore(max(1, min(int(max_concurrent or 1), 64)))
+
+    async def _bounded_gen(prompt: str, fallback_texts: Sequence[str]) -> str:
+        async with generation_semaphore:
+            return await _gen(llm_fn, prompt, fallback_texts)
+
     sections: list[TreeNode] = []
+    section_rollups: list[list[TreeNode]] = []
+    rollup_generators: list[Awaitable[str]] = []
     r_idx = 0
     for s_idx, (heading, members) in enumerate(group_by_section(usable)):
         rollups: list[TreeNode] = []
@@ -188,8 +200,12 @@ async def build_tree(
             )
             r_idx += 1
             body = "\n".join(f"- {p.summary}" for p in win)
-            node.summary = await _gen(
-                llm_fn, _ROLLUP_PROMPT.format(body=body), [p.summary for p in win])
+            rollup_generators.append(
+                _bounded_gen(
+                    _ROLLUP_PROMPT.format(body=body),
+                    [p.summary for p in win],
+                )
+            )
             rollups.append(node)
         sec = TreeNode(
             node_id=f"section_{doc_id[:12]}_{s_idx:04d}",
@@ -197,14 +213,41 @@ async def build_tree(
             child_node_ids=[r.node_id for r in rollups],
             section_range=heading,
         )
-        if len(rollups) == 1:
-            sec.summary = rollups[0].summary        # no extra LLM call needed
-        else:
-            body = "\n".join(f"- {r.summary}" for r in rollups)
-            sec.summary = await _gen(
-                llm_fn, _SECTION_PROMPT.format(body=body), [r.summary for r in rollups])
         nodes.extend(rollups)
         sections.append(sec)
+        section_rollups.append(rollups)
+
+    rollup_summaries = await asyncio.gather(*rollup_generators)
+    for node, summary in zip(
+        (node for rollups in section_rollups for node in rollups),
+        rollup_summaries,
+        strict=True,
+    ):
+        node.summary = summary
+
+    section_generators: list[Awaitable[str]] = []
+    generated_section_indexes: list[int] = []
+    for section_index, (section, rollups) in enumerate(
+        zip(sections, section_rollups, strict=True)
+    ):
+        if len(rollups) == 1:
+            section.summary = rollups[0].summary
+            continue
+        body = "\n".join(f"- {rollup.summary}" for rollup in rollups)
+        generated_section_indexes.append(section_index)
+        section_generators.append(
+            _bounded_gen(
+                _SECTION_PROMPT.format(body=body),
+                [rollup.summary for rollup in rollups],
+            )
+        )
+    section_summaries = await asyncio.gather(*section_generators)
+    for section_index, summary in zip(
+        generated_section_indexes,
+        section_summaries,
+        strict=True,
+    ):
+        sections[section_index].summary = summary
     nodes.extend(sections)
 
     profile = TreeNode(
@@ -241,6 +284,7 @@ async def build_and_store_tree(
     use_llm: bool = True,
     heal_missing: bool = True,
     heal_limit: int = 2000,
+    max_concurrent: int = 16,
 ) -> dict[str, Any]:
     """Read PARENT-level summaries (parent_chunks.summary — Ghost A output;
     never child chunks), build the L2→L4 tree, upsert nodes into the
@@ -268,17 +312,19 @@ async def build_and_store_tree(
         {"parent_id": 1, "summary": 1, "heading_path": 1, "domain": 1,
          "chunk_kind": 1, "text": 1, "child_ids": 1, "source_child_ids": 1},
     ).sort("parent_id", 1).to_list(length=None)  # {doc}_parent_NNNN → lexical = doc order
-    body_rows = [r for r in rows if (r.get("chunk_kind") or "body") == "body"]
+    summary_rows = [
+        r for r in rows if should_summarize_parent(str(r.get("chunk_kind") or "body"))
+    ]
     fn = llm_fn if llm_fn is not None else (_default_llm if use_llm else None)
 
     # GUARD RAIL — the summarized-parent invariant. Ghost A is conditional
-    # (global enabled flag + model pool); this backstop ensures every BODY
-    # parent carries a summary before the tree builds. Deterministic
-    # identification (chunk_kind == body via section_classifier), bounded,
+    # (global enabled flag + model pool); this backstop ensures each
+    # retrieval-summary parent carries a summary before the tree builds.
+    # Deterministic identification comes from section_classifier, bounded and
     # best-effort per parent, persisted so re-runs skip healed rows.
     healed = 0
     if fn is not None and heal_missing:
-        for r in body_rows:
+        for r in summary_rows:
             if healed >= heal_limit:
                 break
             if (r.get("summary") or "").strip():
@@ -367,7 +413,7 @@ async def build_and_store_tree(
             heading_path=tuple(r.get("heading_path") or ()),
             domain=str(r.get("domain") or ""),
         )
-        for r in body_rows
+        for r in summary_rows
     ]
     if not any(p.summary for p in parents):
         return {"skipped": "no_parent_summaries", "parents": len(parents), "healed": healed}
@@ -378,6 +424,7 @@ async def build_and_store_tree(
         source_type=str(doc.get("source_type") or ""),
         parents=parents,
         llm_fn=fn,
+        max_concurrent=max_concurrent,
     )
     now = datetime.utcnow()
     for n in nodes:

@@ -31,6 +31,25 @@ class Settings(BaseSettings):
     QDRANT_URL: str = Field(
         default="http://qdrant:6333", description="Qdrant vector database URL"
     )
+    QDRANT_MEM_LIMIT: str = Field(
+        default="",
+        description=(
+            "Configured Qdrant container memory cap, e.g. 5g. Used by corpus "
+            "readiness to turn Qdrant memory metrics into ingest backpressure."
+        ),
+    )
+    QDRANT_MEMORY_WARN_RATIO: float = Field(
+        default=0.85,
+        ge=0.50,
+        le=0.99,
+        description="Qdrant memory pressure ratio that marks vector writes elevated.",
+    )
+    QDRANT_MEMORY_STOP_RATIO: float = Field(
+        default=0.90,
+        ge=0.50,
+        le=1.20,
+        description="Qdrant memory pressure ratio that pauses vector-writing lanes.",
+    )
     QDRANT_TIMEOUT_SECONDS: float = Field(
         default=120.0,
         description="HTTP timeout for Qdrant operations such as per-corpus collection provisioning",
@@ -778,6 +797,106 @@ class Settings(BaseSettings):
             "durable ingest batches created by a separate query API process."
         ),
     )
+    INGEST_AUTO_REPAIR_ENABLED: bool = Field(
+        default=True,
+        description=(
+            "When durable ingest runners are enabled, periodically materialize "
+            "corpus readiness and plan bounded repair queues from durable "
+            "artifacts. This does not run provider-backed extraction/summary "
+            "work unless the explicit auto-run flags below are enabled."
+        ),
+    )
+    INGEST_AUTO_REPAIR_POLL_SECONDS: float = Field(
+        default=300.0,
+        ge=30.0,
+        le=86_400.0,
+        description="Minimum interval between automatic corpus repair planning ticks.",
+    )
+    INGEST_AUTO_REPAIR_CORPUS_LIMIT: int = Field(
+        default=5,
+        ge=1,
+        le=100,
+        description="Maximum corpora inspected in one automatic repair planning tick.",
+    )
+    INGEST_AUTO_REPAIR_RUN_DOCUMENT_PIPELINE: bool = Field(
+        default=False,
+        description=(
+            "Allow the automatic repair tick to execute safe document-pipeline "
+            "jobs such as Mongo artifact persistence and Qdrant embedding."
+        ),
+    )
+    INGEST_AUTO_REPAIR_RUN_EXTRACTION: bool = Field(
+        default=False,
+        description="Allow the automatic repair tick to execute queued chunk extraction jobs.",
+    )
+    INGEST_AUTO_REPAIR_RUN_SUMMARIES: bool = Field(
+        default=False,
+        description="Allow the automatic repair tick to execute queued summary jobs.",
+    )
+    INGEST_AUTO_REPAIR_RUN_GRAPH: bool = Field(
+        default=True,
+        description=(
+            "Allow the automatic repair tick to execute queued Neo4j graph "
+            "promotion jobs. Graph promotion is local durable write work, not "
+            "provider-backed extraction/summary spend, and still respects "
+            "graph_promotion_allowed backpressure."
+        ),
+    )
+    INGEST_AUTO_REPAIR_DOCUMENT_RUN_LIMIT: int = Field(
+        default=25,
+        ge=1,
+        le=500,
+        description="Maximum document-pipeline jobs executed per corpus repair tick.",
+    )
+    INGEST_AUTO_REPAIR_EXTRACTION_RUN_LIMIT: int = Field(
+        default=100,
+        ge=1,
+        le=500,
+        description="Maximum chunk extraction jobs executed per corpus repair tick.",
+    )
+    INGEST_AUTO_REPAIR_SUMMARY_RUN_LIMIT: int = Field(
+        default=100,
+        ge=1,
+        le=500,
+        description="Maximum summary jobs executed per corpus repair tick.",
+    )
+    INGEST_AUTO_REPAIR_STAGE_IDENTITY_LIMIT: int = Field(
+        default=1000,
+        ge=0,
+        le=50000,
+        description=(
+            "Maximum legacy Ghost B extraction artifact rows whose missing "
+            "stage_identity metadata may be backfilled per corpus per automatic "
+            "repair pass. Set to 0 to skip this metadata-only repair."
+        ),
+    )
+    INGEST_AUTO_REPAIR_GRAPH_RUN_LIMIT: int = Field(
+        default=5,
+        ge=1,
+        le=100,
+        description=(
+            "Maximum queued graph-promotion jobs the automatic repair tick may "
+            "execute per corpus per pass."
+        ),
+    )
+    INGEST_MONGO_STORAGE_WARN_RATIO: float = Field(
+        default=0.85,
+        ge=0.1,
+        le=1.0,
+        description=(
+            "Mongo filesystem usage ratio where automatic ingestion repair "
+            "surfaces storage pressure and recommends bounded repair only."
+        ),
+    )
+    INGEST_MONGO_STORAGE_STOP_RATIO: float = Field(
+        default=0.90,
+        ge=0.1,
+        le=1.0,
+        description=(
+            "Mongo filesystem usage ratio where provider-backed and write-heavy "
+            "automatic ingestion repair is paused until storage pressure drops."
+        ),
+    )
     INGEST_BLOCK_NEAR_DUPLICATES: bool = Field(
         default=True,
         description=(
@@ -870,7 +989,7 @@ class Settings(BaseSettings):
         ge=0,
         le=50000,
         description=(
-            "Maximum missing body-parent summaries to generate in one automatic "
+            "Maximum missing retrieval parent summaries to generate in one automatic "
             "post-batch deferred-summary backfill. Existing summaries for the "
             "batch documents are still indexed; 0 means index-only."
         ),
@@ -1047,6 +1166,16 @@ class Settings(BaseSettings):
             "HTTP timeout for the reranker sidecar. Retrieval may call the "
             "reranker more than once during coverage repair, so this must stay "
             "short enough that a sick sidecar cannot stall a chat turn."
+        ),
+    )
+    RERANKER_QUEUE_TIMEOUT_SECONDS: float = Field(
+        default=5.0,
+        ge=0.0,
+        le=60.0,
+        description=(
+            "Maximum time a retrieval call waits for the local reranker slot "
+            "before falling back to score-sort. This protects chat latency "
+            "when the Mac MLX sidecar is busy or recovering."
         ),
     )
     RERANKER_CIRCUIT_BREAKER_SECONDS: float = Field(
@@ -1501,6 +1630,32 @@ class Settings(BaseSettings):
             "of stalling indefinitely."
         ),
     )
+    TIER_CHUNKER_PATHOLOGICAL_CHAR_THRESHOLD: int = Field(
+        default=350000,
+        ge=100000,
+        le=50000000,
+        description=(
+            "Parsed-text size that routes a document directly to the bounded "
+            "regex/sentence-merge chunker. This avoids spending the full normal "
+            "chunk timeout on large markdown/table-heavy documents already known "
+            "to make semantic splitting superlinear."
+        ),
+    )
+    TIER_CHUNKER_PATHOLOGICAL_SECTION_THRESHOLD: int = Field(
+        default=5000,
+        ge=500,
+        le=1000000,
+        description=(
+            "Parsed-section count that routes directly to the bounded pathological "
+            "chunk fallback even when character count is below the size threshold."
+        ),
+    )
+    TIER_CHUNKER_PATHOLOGICAL_FALLBACK_TIMEOUT_SECONDS: int = Field(
+        default=180,
+        ge=30,
+        le=1800,
+        description="Wall-clock cap for the isolated regex/sentence-merge fallback.",
+    )
     EMBEDDER_SAFE_MAX_TOKENS: int = Field(
         default=960,
         ge=128,
@@ -1916,6 +2071,16 @@ class Settings(BaseSettings):
             "their independent max_concurrent budgets and are summed under "
             "EXTRACTION_GLOBAL_MAX_CONCURRENT, so two docs do not multiply each "
             "lane's configured concurrency."
+        ),
+    )
+    EXTRACTION_REPAIR_MAX_ACTIVE_DOCS: int = Field(
+        default=32,
+        ge=1,
+        le=128,
+        description=(
+            "Maximum document groups processed concurrently by the bounded "
+            "chunk-level extraction repair executor. Provider and process-wide "
+            "Ghost B semaphores remain the authoritative request ceilings."
         ),
     )
     EXTRACTION_FAILURE_PAUSE_PERCENT: float = Field(

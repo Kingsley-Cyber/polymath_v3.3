@@ -23,12 +23,20 @@ from dataclasses import dataclass
 import httpx
 
 from config import get_settings
+from services.extraction_provider_cards import (
+    provider_payload_defaults,
+    resolve_extraction_provider_card,
+)
 from services.llm_lane_pool import (
     FatalLaneError,
+    RateLimitedLaneError,
     SOFT_FATAL_DISABLE_STRIKES,
     is_fatal_provider_error,
+    is_rate_limit_provider_error,
     provider_error_tier,
     provider_error_summary,
+    rate_limit_retry_after_seconds,
+    shared_provider_semaphore,
 )
 
 logger = logging.getLogger(__name__)
@@ -319,6 +327,14 @@ async def summarize_parents(
     disabled_lanes: set[int] = set()
     lane_fatal_strikes: dict[int, int] = {}
     _disabled_lock = asyncio.Lock()
+    provider_sems = [
+        shared_provider_semaphore(
+            entry,
+            lane=pool_idx,
+            limit=max(1, int(entry.get("max_concurrent") or 1)),
+        )
+        for pool_idx, entry in enumerate(pool)
+    ]
 
     async def _lane_disable_ready(pool_idx: int, exc: Exception) -> bool:
         tier = provider_error_tier(exc)
@@ -386,22 +402,20 @@ async def summarize_parents(
         from services.ingestion.extraction_contract import provider_payload_extras
 
         payload.update(provider_payload_extras(entry.get("extra_params")))
-        # DeepSeek v4 models default to THINKING mode, which returns EMPTY
-        # content at bounded max_tokens — 156/156 and 128/148 parent
-        # summaries came back blank on real ingests (2026-07-04). Disabling
-        # thinking measured 1.6-2.0s with valid §10.1 JSON via the same
-        # litellm hop. Injected only for deepseek-v4* and only when the
-        # chip's extra_params didn't already set it.
-        _mdl = str(entry.get("model") or "").lower()
-        if "v4-flash" in _mdl or "v4-pro" in _mdl or "deepseek-v4" in _mdl:
-            payload.setdefault("thinking", {"type": "disabled"})
+        # Apply the same provider-card defaults as Ghost B. Summary lanes must
+        # honor explicit disable_thinking flags too; otherwise reasoning models
+        # can return HTTP 200 with empty content at the bounded output limit.
+        card = resolve_extraction_provider_card(entry)
+        for key, value in provider_payload_defaults(card).items():
+            payload.setdefault(key, value)
         try:
-            async with httpx.AsyncClient(timeout=120.0) as client:
-                resp = await client.post(
-                    f"{settings.LITELLM_URL}/chat/completions",
-                    json=payload,
-                    headers=headers,
-                )
+            async with provider_sems[pool_idx]:
+                async with httpx.AsyncClient(timeout=120.0) as client:
+                    resp = await client.post(
+                        f"{settings.LITELLM_URL}/chat/completions",
+                        json=payload,
+                        headers=headers,
+                    )
                 resp.raise_for_status()
                 raw = resp.json()["choices"][0]["message"]["content"].strip()
                 _sem = parse_semantic_summary(
@@ -457,6 +471,11 @@ async def summarize_parents(
                     retrieval_text=_artifact["retrieval_text"],
                 )
         except Exception as exc:
+            if is_rate_limit_provider_error(exc):
+                raise RateLimitedLaneError(
+                    exc,
+                    retry_after_seconds=rate_limit_retry_after_seconds(exc),
+                ) from exc
             if is_fatal_provider_error(exc):
                 raise FatalLaneError(exc) from exc
             logger.error(
@@ -479,6 +498,15 @@ async def summarize_parents(
                     return
                 try:
                     result = await _process_one(task, pool_idx)
+                except RateLimitedLaneError as exc:
+                    task_queue.put_nowait(task)
+                    logger.warning(
+                        "GHOST A cooling summary lane=%d for %.1fs after rate limit",
+                        pool_idx,
+                        exc.retry_after_seconds,
+                    )
+                    await asyncio.sleep(exc.retry_after_seconds)
+                    return
                 except FatalLaneError as exc:
                     task_queue.put_nowait(task)
                     if await _lane_disable_ready(pool_idx, exc.original):
@@ -593,59 +621,16 @@ async def summarize_parents(
 
     missing_after_retries = _missing_tasks()
     if missing_after_retries:
-        logger.warning(
-            "GHOST A using extractive fallback for %d missing parent summaries",
-            len(missing_after_retries),
+        provider_capacity_exhausted = (
+            bool(disabled_lanes) and _enabled_lane_count() <= 0
         )
-        for task in missing_after_retries:
-            summary, domain, topics = _extractive_fallback_summary(task.text, cap)
-            if not summary:
-                continue
-            _sem = parse_semantic_summary(
-                summary,
-                source_child_ids=task.source_child_ids or [],
-                source_text=task.text,
-            )
-            _artifact = canonical_parent_summary_fields(
-                _sem,
-                parent_id=task.parent_id,
-                doc_id=task.doc_id,
-                corpus_id=task.corpus_id,
-                source_text=task.text,
-                source_child_ids=task.source_child_ids or [],
-                summary_model="extractive_fallback",
-                repair_status="regenerated",
-            )
-            if not _artifact["summary"] or _artifact["validation_status"] != "valid":
-                continue
-            results_by_parent_id[task.parent_id] = SummaryResult(
-                parent_id=task.parent_id,
-                doc_id=task.doc_id,
-                corpus_id=task.corpus_id,
-                source_tier=task.source_tier,
-                summary=_artifact["summary"],
-                domain=domain,
-                topics=topics,
-                schema_version=_artifact["schema_version"],
-                summary_type=_artifact["summary_type"],
-                central_claim=_artifact["central_claim"],
-                key_points=_artifact["key_points"] or None,
-                main_mechanism=_artifact["main_mechanism"],
-                concept_tags=(_artifact["concept_tags"] or topics or None),
-                entity_hints=_artifact["entity_hints"] or None,
-                retrieval_uses=_artifact["retrieval_uses"] or None,
-                abstraction_level=_artifact["abstraction_level"],
-                source_child_ids=_artifact["source_child_ids"] or None,
-                summary_id=_artifact["summary_id"],
-                source_hash=_artifact["source_hash"],
-                summary_model=_artifact["summary_model"],
-                summary_created_at=_artifact["summary_created_at"],
-                validation_status=_artifact["validation_status"],
-                repair_status=_artifact["repair_status"],
-                quality_score=_artifact["quality_score"],
-                quality_flags=_artifact["quality_flags"],
-                retrieval_text=_artifact["retrieval_text"],
-            )
+        logger.error(
+            "GHOST A deferred %d parent summaries after provider generation did "
+            "not produce valid artifacts (capacity_exhausted=%s); extractive "
+            "fallback is disabled so failed provider work remains retryable",
+            len(missing_after_retries),
+            provider_capacity_exhausted,
+        )
 
     results = [
         results_by_parent_id[t.parent_id]

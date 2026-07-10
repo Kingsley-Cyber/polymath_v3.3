@@ -229,13 +229,17 @@ async def apply_graph_degree_boost_metrics_aware(
     WHERE c.corpus_id IN $corpus_ids
     WITH c.chunk_id AS chunk_id, e
     OPTIONAL MATCH (e)-[r:RELATES_TO]-()
-    WITH chunk_id, e.entity_id AS entity_id, count(r) AS degree
+    WITH chunk_id,
+         e.entity_id AS entity_id,
+         coalesce(e.generic_entity, false) AS generic_entity,
+         coalesce(e.graph_expansion_allowed, true) AS graph_expansion_allowed,
+         count(r) AS degree
     RETURN chunk_id,
            collect({
                entity_id: entity_id,
                degree: CASE
-                   WHEN coalesce(e.generic_entity, false)
-                     OR coalesce(e.graph_expansion_allowed, true) = false
+                   WHEN generic_entity
+                     OR graph_expansion_allowed = false
                    THEN 0
                    ELSE degree
                END

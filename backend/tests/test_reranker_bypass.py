@@ -15,11 +15,13 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+import httpx
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from services.reranker import (
+    RerankPassAborted,
     RerankerService,
     _is_code_chunk,
     _minmax_inplace,
@@ -131,6 +133,82 @@ def test_ranked_chunks_from_scores_response_sorts_for_mlx_shape():
 
     assert [c.chunk_id for c in out] == ["b", "a", "c"]
     assert [c.score for c in out] == [0.9, 0.2, 0.1]
+
+
+def _resilient_settings(**overrides):
+    values = {
+        "RERANKER_URL": "http://reranker:8080",
+        "RERANKER_BYPASS_CODE": False,
+        "RERANKER_SCORE_SCALE": "probability",
+        "RERANKER_TIMEOUT_SECONDS": 0.5,
+        "RERANKER_QUEUE_TIMEOUT_SECONDS": 0.01,
+        "RERANKER_CIRCUIT_BREAKER_SECONDS": 120.0,
+    }
+    values.update(overrides)
+    return SimpleNamespace(**values)
+
+
+@pytest.mark.asyncio
+async def test_reranker_timeout_falls_back_without_opening_circuit(monkeypatch):
+    svc = RerankerService()
+    svc._settings = _resilient_settings()
+
+    async def fake_rerank_batch_or_split(**kwargs):
+        raise RerankPassAborted("timed out")
+
+    monkeypatch.setattr(svc, "_rerank_batch_or_split", fake_rerank_batch_or_split)
+    pool = [_chunk(score=0.2, chunk_id="low"), _chunk(score=0.8, chunk_id="high")]
+
+    out = await svc._rerank_pool("query", pool)
+
+    assert [c.chunk_id for c in out] == ["high", "low"]
+    assert svc._disabled_until == 0.0
+    assert svc.diagnostics()["status"] == "timeout_fallback_score_sort"
+
+
+@pytest.mark.asyncio
+async def test_reranker_429_falls_back_without_opening_circuit(monkeypatch):
+    svc = RerankerService()
+    svc._settings = _resilient_settings()
+
+    async def fake_rerank_batch_or_split(**kwargs):
+        request = httpx.Request("POST", "http://reranker:8080/rerank")
+        response = httpx.Response(429, request=request, text="busy")
+        raise httpx.HTTPStatusError("busy", request=request, response=response)
+
+    monkeypatch.setattr(svc, "_rerank_batch_or_split", fake_rerank_batch_or_split)
+    pool = [_chunk(score=0.1, chunk_id="a"), _chunk(score=0.9, chunk_id="b")]
+
+    out = await svc._rerank_pool("query", pool)
+
+    assert [c.chunk_id for c in out] == ["b", "a"]
+    assert svc._disabled_until == 0.0
+    assert svc.diagnostics()["status"] == "busy_fallback_score_sort"
+
+
+@pytest.mark.asyncio
+async def test_reranker_queue_timeout_falls_back_without_http_call(monkeypatch):
+    svc = RerankerService()
+    svc._settings = _resilient_settings(RERANKER_QUEUE_TIMEOUT_SECONDS=0.001)
+    await svc._sidecar_semaphore.acquire()
+    try:
+        called = False
+
+        async def fake_rerank_batch_or_split(**kwargs):
+            nonlocal called
+            called = True
+            return [], 0, 0
+
+        monkeypatch.setattr(svc, "_rerank_batch_or_split", fake_rerank_batch_or_split)
+        pool = [_chunk(score=0.1, chunk_id="a"), _chunk(score=0.9, chunk_id="b")]
+        out = await svc._rerank_pool("query", pool)
+    finally:
+        svc._sidecar_semaphore.release()
+
+    assert not called
+    assert [c.chunk_id for c in out] == ["b", "a"]
+    assert svc._disabled_until == 0.0
+    assert svc.diagnostics()["status"] == "busy_fallback_score_sort"
 
 
 # ─── RerankerService.rerank ─────────────────────────────────────────────────

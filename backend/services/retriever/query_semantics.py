@@ -156,6 +156,24 @@ BASE_STOP_WORDS: frozenset[str] = frozenset(
         "argue",
         "argues",
         "argued",
+        # request-shape verbs and corpus/media labels. These words describe
+        # how the user wants the corpus queried, not evidence the corpus must
+        # prove. If they survive as required atoms, cross-corpus turns can
+        # overfit to filenames or source formats instead of the substantive
+        # business concepts being asked about.
+        "recommend",
+        "recommends",
+        "recommended",
+        "recommendation",
+        "recommendations",
+        "appear",
+        "appears",
+        "appeared",
+        "appearing",
+        "pdf",
+        "pdfs",
+        "transcript",
+        "transcripts",
     }
 )
 
@@ -165,6 +183,8 @@ RELATIONSHIP_TERMS: frozenset[str] = frozenset(
         "associated",
         "association",
         "between",
+        "cause",
+        "causes",
         "connect",
         "connected",
         "connection",
@@ -173,12 +193,20 @@ RELATIONSHIP_TERMS: frozenset[str] = frozenset(
         "correlates",
         "correlation",
         "interplay",
+        "improve",
+        "improves",
+        "increase",
+        "increases",
+        "lead",
+        "leads",
         "link",
         "linked",
         "relationship",
         "relation",
         "relate",
         "related",
+        "result",
+        "results",
     }
 )
 
@@ -259,6 +287,18 @@ GENERIC_CONCEPT_TOKENS: frozenset[str] = frozenset(
         "many",
         "much",
         "several",
+        "one",
+        "two",
+        "three",
+        "four",
+        "five",
+        "six",
+        "seven",
+        "eight",
+        "nine",
+        "ten",
+        "eleven",
+        "twelve",
         "ever",
         "been",
         "happen",
@@ -365,6 +405,19 @@ GENERIC_CONCEPT_TOKENS: frozenset[str] = frozenset(
         "vulnerable",
         "way",
         "ways",
+        # generic prompt scaffolding from corpus-wide business questions.
+        # "repeated advice about creating offers" should decompose to offers /
+        # positioning / conversion, not lanes for repeated/advice/creating.
+        "repeat",
+        "repeated",
+        "advice",
+        "advices",
+        "advise",
+        "advises",
+        "create",
+        "creates",
+        "creating",
+        "created",
     }
 )
 
@@ -372,6 +425,7 @@ CONCEPT_ONLY_STOP_WORDS: frozenset[str] = frozenset(
     {
         "use",
         "uses",
+        "used",
         "using",
     }
 )
@@ -390,6 +444,15 @@ LEXICAL_STOP_WORDS: frozenset[str] = (
     BASE_STOP_WORDS | OPERATOR_TERMS | GENERIC_CONTEXT_TERMS
 )
 TOKEN_DISPLAY_STOP_WORDS: frozenset[str] = BASE_STOP_WORDS
+
+SINGLE_TOKEN_ALIAS_DETECTION_KEYS: frozenset[str] = frozenset(
+    {
+        # In commerce/marketing corpora, "positioning" is a meaningful concept
+        # by itself. Keep this scoped instead of enabling all one-token aliases
+        # globally, which would make broad aliases like "type" too noisy.
+        "product_positioning",
+    }
+)
 
 RELATIONSHIP_MARKERS: tuple[str, ...] = tuple(sorted(RELATIONSHIP_TERMS | COMPARISON_TERMS))
 DEFINITION_MARKERS: tuple[str, ...] = (
@@ -419,10 +482,41 @@ METHOD_MARKERS: tuple[str, ...] = (
 
 CONCEPT_ALIASES: dict[str, tuple[str, ...]] = {
     "ai": ("ai", "artificial intelligence"),
+    "abandoned_cart": (
+        "abandoned cart",
+        "abandoned carts",
+        "cart abandonment",
+        "abandon cart",
+        "abandon carts",
+    ),
+    "conversion": (
+        "conversion",
+        "conversions",
+        "conversion rate",
+        "conversion rates",
+        "cro",
+        "conversion optimization",
+    ),
+    "customer_acquisition": (
+        "customer acquisition",
+        "customer acquisition cost",
+        "cac",
+        "acquisition",
+        "acquire customers",
+        "acquiring customers",
+    ),
     "db": ("db", "database"),
     "llm": ("llm", "large language model", "large language models"),
     "ml": ("ml", "machine learning"),
     "nlp": ("nlp", "natural language processing"),
+    "offers": (
+        "offers",
+        "offer",
+        "value proposition",
+        "value propositions",
+        "irresistible offer",
+        "irresistible offers",
+    ),
     "personality": (
         "personality",
         "character",
@@ -470,8 +564,39 @@ CONCEPT_ALIASES: dict[str, tuple[str, ...]] = {
         "retrieval augmented generation",
         "retrieval-augmented generation",
     ),
+    "product_page": (
+        "product page",
+        "product pages",
+        "product detail page",
+        "product detail pages",
+        "pdp",
+        "pdps",
+    ),
+    "product_positioning": (
+        "product positioning",
+        "brand positioning",
+        "market positioning",
+        "positioning",
+    ),
     "seduction": ("seduction", "seductive", "seduce", "seducer", "seducers"),
     "sql": ("sql", "structured query language"),
+    "sticky_message": (
+        "sticky message",
+        "sticky idea",
+        "made to stick",
+        "successs principles",
+        "successs framework",
+        "message stickiness",
+        "idea stickiness",
+        "make ideas stick",
+        "ideas become sticky",
+        "sticky messages",
+        "sticky ideas",
+        "memorable message",
+        "memorable messages",
+        "memorable idea",
+        "memorable ideas",
+    ),
 }
 
 
@@ -504,6 +629,39 @@ def query_tokens(query: str, *, stop_words: frozenset[str]) -> list[str]:
         seen.add(token)
         out.append(token)
     return out
+
+
+def _scope_descriptor_token(token: str, normalized_query: str) -> bool:
+    """True when a token names the selected source scope, not the topic.
+
+    In a prompt such as "compare the marketing transcripts and ecommerce PDFs",
+    "marketing" and "ecommerce" describe which corpora/files the user selected.
+    They should not displace the real evidence lanes: offers, positioning,
+    conversion, acquisition, etc.
+    """
+
+    if token not in {"ecommerce", "marketing"}:
+        return False
+    scope_nouns = (
+        "book",
+        "books",
+        "corpus",
+        "document",
+        "documents",
+        "library",
+        "libraries",
+        "pdf",
+        "pdfs",
+        "source",
+        "sources",
+        "transcript",
+        "transcripts",
+    )
+    return any(
+        f"{token} {scope}" in normalized_query
+        or f"{scope} {token}" in normalized_query
+        for scope in scope_nouns
+    )
 
 
 def token_variants(token: str) -> tuple[str, ...]:
@@ -559,7 +717,7 @@ def _phrase_concept_groups(query: str) -> list[ConceptGroup]:
                 "character traits",
             }:
                 continue
-            if len(alias_tokens) >= 2:
+            if len(alias_tokens) >= 2 or key in SINGLE_TOKEN_ALIAS_DETECTION_KEYS:
                 detection_aliases.append(alias)
         if any(alias_matches(alias, haystack) for alias in detection_aliases):
             groups.append(ConceptGroup(key=key, aliases=aliases))
@@ -582,6 +740,8 @@ def concept_groups(query: str, *, max_groups: int = 8) -> list[ConceptGroup]:
     normalized = normalize_query(query)
     for token in query_tokens(query, stop_words=CONCEPT_STOP_WORDS):
         if token in covered_tokens:
+            continue
+        if _scope_descriptor_token(token, normalized):
             continue
         # In phrases like "the art of seduction", "art" is part of a title /
         # expression, not an evidence concept that should compete with the
@@ -649,6 +809,36 @@ def is_curated_concept(key: str | None) -> bool:
     evidence plan is strong enough or should be re-decomposed (LLM path)."""
 
     return str(key or "") in CONCEPT_ALIASES
+
+
+def concept_support_phrases(
+    key: str | None,
+    *,
+    max_phrases: int = 4,
+) -> tuple[str, ...]:
+    """Return a small deterministic recall query for one concept.
+
+    Curated concepts need more than their canonical surface form during a
+    repair pass. For example, a source can explain the SUCCESs framework or
+    *Made to Stick* without containing the exact phrase "sticky message".
+    """
+
+    normalized_key = str(key or "").strip().lower()
+    if not normalized_key or max_phrases <= 0:
+        return ()
+    canonical = normalized_key.replace("_", " ")
+    candidates = (canonical, *(CONCEPT_ALIASES.get(normalized_key) or ()))
+    selected: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        phrase = " ".join(str(candidate or "").lower().split())
+        if not phrase or phrase in seen:
+            continue
+        selected.append(phrase)
+        seen.add(phrase)
+        if len(selected) >= max_phrases:
+            break
+    return tuple(selected)
 
 
 def required_atoms_for_query(query: str | None, *, max_concepts: int = 4) -> set[str]:

@@ -14,6 +14,7 @@ from typing import Any, Literal
 
 
 SchemaMode = Literal["json_schema", "json_object", "json_object_prompt", "jsonl"]
+ExtractionRoutingPolicy = Literal["work_stealing", "balanced", "primary_fallback"]
 JsonRepairMode = Literal[
     "provider_native",
     "balanced_object_repair",
@@ -74,6 +75,7 @@ class ExtractionProviderCard:
     local_private: bool = False
     managed_vllm: bool = False
     lifecycle_base_url: str = ""
+    context_window_tokens: int | None = None
     promotion_gate: tuple[str, ...] = PROMOTION_GATE
     notes: tuple[str, ...] = ()
 
@@ -94,6 +96,17 @@ def _entry_dict(entry: Any) -> dict[str, Any]:
 def _extra(entry: dict[str, Any]) -> dict[str, Any]:
     value = entry.get("extra_params") or {}
     return value if isinstance(value, dict) else {}
+
+
+def normalize_extraction_routing_policy(value: Any) -> ExtractionRoutingPolicy | None:
+    text = str(value or "").strip().lower().replace("-", "_")
+    if text in {"balanced", "balanced_fanout", "fanout", "parallel"}:
+        return "balanced"
+    if text in {"work_stealing", "workstealing", "spillover", "fastest", "auto"}:
+        return "work_stealing"
+    if text in {"primary_fallback", "primary_failover", "fallback", "failover"}:
+        return "primary_fallback"
+    return None
 
 
 def _flag(value: Any) -> bool | None:
@@ -169,6 +182,15 @@ def resolve_extraction_provider_card(entry: Any) -> ExtractionProviderCard:
     explicit_json_schema = _flag(extra.get("supports_json_schema"))
     explicit_json_object = _flag(extra.get("supports_json_object"))
     explicit_disable_thinking = _flag(extra.get("disable_thinking"))
+    context_window_raw = (
+        extra.get("context_window_tokens")
+        or extra.get("max_context_tokens")
+        or data.get("context_window_tokens")
+    )
+    try:
+        context_window_tokens = int(context_window_raw or 0) or None
+    except (TypeError, ValueError):
+        context_window_tokens = None
 
     notes: list[str] = []
     supports_json_schema = False
@@ -243,6 +265,14 @@ def resolve_extraction_provider_card(entry: Any) -> ExtractionProviderCard:
     if explicit_disable_thinking is not None:
         disable_thinking = explicit_disable_thinking
 
+    if context_window_tokens is None:
+        if provider == "local_private_vllm":
+            # Current managed RTX service advertises an 8K serving context.
+            # Operators can override this per card when the server changes.
+            context_window_tokens = 8192
+        elif provider == "longcat":
+            context_window_tokens = 1_000_000
+
     return ExtractionProviderCard(
         provider=provider,
         model=model,
@@ -259,8 +289,88 @@ def resolve_extraction_provider_card(entry: Any) -> ExtractionProviderCard:
         local_private=local_private,
         managed_vllm=managed_vllm,
         lifecycle_base_url=lifecycle,
+        context_window_tokens=context_window_tokens,
         notes=tuple(notes),
     )
+
+
+def resolve_extraction_routing_policy(pool: list[Any]) -> ExtractionRoutingPolicy:
+    """Resolve how a provider pool should consume chunk extraction work.
+
+    Mixed local/private and cloud provider pools default to balanced fanout so
+    the configured independent provider lanes all receive work. Operators can
+    still force primary-fallback or work-stealing per lane via routing_policy or
+    extra_params.routing_policy.
+    """
+
+    entries = [_entry_dict(entry) for entry in pool]
+    for entry in entries:
+        explicit = normalize_extraction_routing_policy(entry.get("routing_policy"))
+        if explicit:
+            return explicit
+        extra = _extra(entry)
+        explicit = normalize_extraction_routing_policy(
+            extra.get("routing_policy") or extra.get("route_policy")
+        )
+        if explicit:
+            return explicit
+
+    if len(entries) < 2:
+        return "work_stealing"
+    cards = [resolve_extraction_provider_card(entry) for entry in entries]
+    has_private = any(card.local_private for card in cards)
+    has_cloud = any(not card.local_private for card in cards)
+    if has_private and has_cloud:
+        return "balanced"
+    return "work_stealing"
+
+
+def safe_extraction_lane_descriptor(entry: Any, *, lane: int) -> dict[str, Any]:
+    data = _entry_dict(entry)
+    card = resolve_extraction_provider_card(data)
+    return {
+        "lane": lane,
+        "provider_preset": data.get("provider_preset") or data.get("provider"),
+        "provider": card.provider,
+        "model": data.get("model") or data.get("model_name"),
+        "base_url": data.get("base_url") or data.get("api_base"),
+        "max_concurrent": data.get("max_concurrent"),
+        "schema_mode": card.schema_mode,
+        "output_mode": card.schema_mode,
+        "json_repair_mode": card.json_repair_mode,
+        "semantic_verifier_mode": card.semantic_verifier_mode,
+        "concurrency_policy": card.concurrency_policy,
+        "local_private": card.local_private,
+        "managed_vllm": card.managed_vllm,
+        "provider_card": card.to_safe_dict(),
+    }
+
+
+def safe_extraction_pool_contract(*, pool_source: str, pool: list[Any]) -> dict[str, Any]:
+    """Safe, API-key-free provider contract used by jobs, APIs, and UI."""
+
+    entries = [_entry_dict(entry) for entry in pool]
+    lanes = [
+        safe_extraction_lane_descriptor(entry, lane=idx)
+        for idx, entry in enumerate(entries)
+    ]
+    return {
+        "pool_source": pool_source,
+        "pool_size": len(lanes),
+        "routing_policy": resolve_extraction_routing_policy(entries),
+        "lanes": lanes,
+        "lane_capacities": [
+            {
+                "lane": lane["lane"],
+                "provider": lane["provider"],
+                "model": lane["model"],
+                "max_concurrent": lane["max_concurrent"],
+                "concurrency_policy": lane["concurrency_policy"],
+                "local_private": lane["local_private"],
+            }
+            for lane in lanes
+        ],
+    }
 
 
 def provider_payload_defaults(card: ExtractionProviderCard) -> dict[str, Any]:

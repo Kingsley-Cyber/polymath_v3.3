@@ -2,6 +2,7 @@ from models.schemas import RetrievalTier, SourceChunk
 from services.retriever.intent_policy import infer_retrieval_intent
 from services.retriever import _trim_bounded_rerank_tail
 from services.retriever.ranking_policy import (
+    _candidate_atoms,
     _required_atoms_for_query,
     apply_candidate_weights,
     apply_query_grounding,
@@ -45,6 +46,29 @@ def test_candidate_kind_detects_summary_lexical_and_child():
     assert candidate_kind(
         _chunk("c2", score=0.9, source_tier="tier_a+lexical")
     ) == "lexical"
+
+
+def test_relationship_atoms_cover_common_causal_language():
+    chunk = _chunk(
+        "causal",
+        score=0.9,
+        text="Emotional contrast improves message recall and increases response.",
+    )
+
+    assert "relationship" in _candidate_atoms(chunk)
+
+
+def test_framework_listing_counts_as_definitional_evidence():
+    chunk = _chunk(
+        "framework",
+        score=0.9,
+        text=(
+            "The SUCCESs framework lists Simple, Unexpected, Concrete, "
+            "Credible, Emotional, and Stories."
+        ),
+    )
+
+    assert "definition" in _candidate_atoms(chunk)
 
 
 def test_broad_weighting_lifts_summary_over_near_child():
@@ -125,7 +149,9 @@ def test_multi_corpus_final_selection_does_not_force_weak_corpus_candidate():
     )
 
     assert [c.corpus_id for c in result.candidates] == ["alpha", "alpha"]
-    assert result.diagnostics["corpus_floor"]["target_corpora"] == ["alpha"]
+    assert result.diagnostics["corpus_floor"]["target_corpora"] == ["alpha", "beta"]
+    assert result.diagnostics["corpus_floor"]["covered_corpora"] == ["alpha"]
+    assert result.diagnostics["corpus_floor"]["skipped"] == ["beta"]
 
 
 def test_diversity_skips_weak_or_duplicate_candidates():
@@ -241,10 +267,17 @@ def test_diversity_includes_high_confidence_document_anchor_candidate():
         _chunk("c2", score=-1.00, parent_id="p2", doc_id="d2"),
         _chunk(
             "anchor",
-            score=-6.00,
+            score=0.40,
             parent_id="p3",
             doc_id="d3",
             source_tier="document_anchor+lexical",
+            metadata={
+                "query_grounding": {
+                    "concept_count": 4,
+                    "matched_count": 3,
+                    "matched": ["evidence", "named", "books"],
+                }
+            },
             provenance=[
                 {
                     "retriever": "document_anchor",
@@ -262,7 +295,44 @@ def test_diversity_includes_high_confidence_document_anchor_candidate():
     )
 
     assert result.added == 1
-    assert [c.chunk_id for c in result.candidates] == ["c1", "anchor"]
+    assert {c.chunk_id for c in result.candidates} == {"c1", "anchor"}
+
+
+def test_document_anchor_does_not_reserve_weakly_grounded_passage():
+    intent = infer_retrieval_intent("define purple ocean branded dropshipping")
+    ranked = [
+        _chunk(
+            "relevant",
+            score=0.90,
+            text="Purple Ocean is a branded dropshipping market strategy.",
+        ),
+        _chunk(
+            "weak-anchor",
+            score=0.30,
+            source_tier="document_anchor+lexical",
+            text="Apply this generic strategy to your business.",
+            metadata={
+                "query_grounding": {
+                    "concept_count": 4,
+                    "matched_count": 1,
+                    "matched": ["branded"],
+                }
+            },
+            provenance=[
+                {"retriever": "document_anchor", "document_score": 0.98}
+            ],
+        ),
+    ]
+
+    result = select_with_diversity(
+        ranked,
+        final_top_k=2,
+        intent=intent,
+        tier=RetrievalTier.qdrant_mongo,
+        query="define purple ocean branded dropshipping",
+    )
+
+    assert [chunk.chunk_id for chunk in result.candidates] == ["relevant"]
 
 
 def test_fast_search_uses_mmr_without_expanding_final_sources():
@@ -572,16 +642,32 @@ def test_personality_framework_relationship_requires_second_source():
     assert result.diagnostics["sufficiency"]["relationship_distinct_docs"] == 2
 
 
-def test_graph_tier_reserves_slot_for_demoted_graph_expansion():
-    """A graph-expanded neighbor demoted by the cross-encoder still reaches the
-    LLM via the graph-provenance reservation in select_with_diversity."""
+def test_graph_tier_reserves_slot_for_grounded_graph_expansion():
+    """Grounded relational evidence may survive moderate reranker demotion."""
     intent = infer_retrieval_intent("what is layering")
     ranked = [
         _chunk(f"core-{i}", score=0.90 - i * 0.01, doc_id=f"d{i}") for i in range(6)
     ]
-    # Relational neighbor scored low by text-similarity rerank, distinct doc/parent.
+    # Relational neighbor scored below the normal graph floor, but it is tied
+    # to a query concept and carries concrete relation evidence.
     ranked.append(
-        _chunk("graph-neighbor", score=0.40, source_tier="graph_mode_a", doc_id="gdoc")
+        _chunk(
+            "graph-neighbor",
+            score=0.40,
+            source_tier="graph_mode_a",
+            doc_id="gdoc",
+            text="Layering uses boundaries to separate application concerns.",
+            metadata={"query_grounding": {"matched": ["layering"]}},
+            provenance=[
+                {
+                    "entity": "Layering",
+                    "predicate": "uses",
+                    "evidence_phrase": (
+                        "Layering uses boundaries to separate application concerns."
+                    ),
+                }
+            ],
+        )
     )
     result = select_with_diversity(
         ranked,
@@ -590,7 +676,7 @@ def test_graph_tier_reserves_slot_for_demoted_graph_expansion():
         tier=RetrievalTier.qdrant_mongo_graph,
     )
     ids = [c.chunk_id for c in result.candidates]
-    assert "graph-neighbor" in ids  # reserved despite low rerank score
+    assert "graph-neighbor" in ids
 
 
 def test_hybrid_tier_does_not_reserve_graph_slot():

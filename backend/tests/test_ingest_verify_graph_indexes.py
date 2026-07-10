@@ -132,10 +132,11 @@ async def test_verify_ingest_checks_graph_retrieval_indexes(monkeypatch):
         "services.graph.schema.wait_for_retrieval_indexes",
         wait_mock,
     )
+    expected_count_mock = AsyncMock(return_value=1)
     monkeypatch.setattr(
         verify,
         "_expected_child_count",
-        AsyncMock(return_value=1),
+        expected_count_mock,
     )
     monkeypatch.setattr(
         verify,
@@ -161,6 +162,11 @@ async def test_verify_ingest_checks_graph_retrieval_indexes(monkeypatch):
     assert ok is True
     assert errors == []
     wait_mock.assert_awaited_once()
+    assert expected_count_mock.await_count == 2
+    assert all(
+        call.kwargs.get("exclude_noisy") is True
+        for call in expected_count_mock.await_args_list
+    )
 
 
 @pytest.mark.asyncio
@@ -245,3 +251,41 @@ async def test_expected_qdrant_texts_use_summary_retrieval_text():
         "Central claim: summaries improve recall."
     )
     assert expected["parent-1_summary"] != "Short generated summary."
+
+
+@pytest.mark.asyncio
+async def test_expected_qdrant_texts_compile_missing_legacy_retrieval_text():
+    class FakeCollection:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def find(self, _query, _projection=None):
+            return _Cursor(self.rows)
+
+    class FakeDb:
+        def __getitem__(self, name):
+            if name == "chunks":
+                return FakeCollection([])
+            if name == "parent_chunks":
+                return FakeCollection(
+                    [
+                        {
+                            "corpus_id": "corpus-1",
+                            "doc_id": "doc-1",
+                            "parent_id": "parent-1",
+                            "text": "Source evidence for a legacy parent summary.",
+                            "summary": "A legacy summary remains useful after its retrieval contract is compiled.",
+                            "source_child_ids": ["child-1"],
+                        }
+                    ]
+                )
+            raise KeyError(name)
+
+    expected = await verify._expected_qdrant_texts(
+        FakeDb(),
+        doc_id="doc-1",
+        corpus_id="corpus-1",
+    )
+
+    assert expected["parent-1_summary"]
+    assert "legacy summary" in expected["parent-1_summary"].lower()

@@ -16,11 +16,14 @@ from services.ingestion.section_classifier import (
     ALL_KINDS,
     GHOST_B_SKIP_KINDS,
     NOISY_KINDS,
+    PARENT_SUMMARY_KINDS,
     ChunkKind,
     classify_chunk,
     classify_content,
     classify_heading,
     is_noisy,
+    parent_summary_required_clause,
+    should_summarize_parent,
     should_skip_ghost_b,
 )
 
@@ -140,6 +143,24 @@ def test_ghost_b_skip_kinds_includes_code():
     assert GHOST_B_SKIP_KINDS == frozenset(list(NOISY_KINDS) + [ChunkKind.CODE])
     assert ChunkKind.CODE in GHOST_B_SKIP_KINDS
     assert ChunkKind.TABLE not in GHOST_B_SKIP_KINDS
+
+
+def test_parent_summary_contract_includes_body_table_and_legacy_only():
+    assert PARENT_SUMMARY_KINDS == (ChunkKind.BODY, ChunkKind.TABLE)
+    assert should_summarize_parent(ChunkKind.BODY) is True
+    assert should_summarize_parent(ChunkKind.TABLE) is True
+    assert should_summarize_parent(None) is True
+    assert should_summarize_parent("") is True
+    assert should_summarize_parent(ChunkKind.CODE) is False
+    assert should_summarize_parent(ChunkKind.TOC) is False
+
+    assert parent_summary_required_clause() == {
+        "$or": [
+            {"chunk_kind": {"$exists": False}},
+            {"chunk_kind": None},
+            {"chunk_kind": {"$in": [ChunkKind.BODY, ChunkKind.TABLE]}},
+        ]
+    }
 
 
 @pytest.mark.parametrize(

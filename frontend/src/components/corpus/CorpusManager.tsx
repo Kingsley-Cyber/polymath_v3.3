@@ -1,5 +1,5 @@
 // CorpusManager.tsx - Corpus CRUD management interface
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Plus,
   Trash2,
@@ -44,6 +44,50 @@ import { Button } from "../ui/Button";
 interface CorpusManagerProps {
   isOpen: boolean;
   onClose: () => void;
+}
+
+type SummaryScopeValue =
+  | string
+  | {
+      label?: string;
+      description?: string;
+      readiness_gate?: boolean;
+      includes_chunk_kinds?: string[];
+      includes_missing_chunk_kind?: boolean;
+    };
+
+function summaryScope(
+  scopes: Record<string, SummaryScopeValue> | undefined,
+  key: string,
+): { label?: string; description?: string } {
+  const value = scopes?.[key];
+  if (!value || typeof value === "string") return {};
+  return {
+    label: value.label,
+    description: value.description,
+  };
+}
+
+function readinessLabel(status?: string | null): string {
+  return (status || "unknown").replace(/_/g, " ");
+}
+
+function readinessTone(status?: string | null): string {
+  if (status === "fully_enriched") return "text-accent-main border-accent-main/50";
+  if (
+    status === "summaries_pending" ||
+    status === "graph_pending" ||
+    status === "ingestion_pending" ||
+    status === "extraction_pending" ||
+    status === "queryable_partial" ||
+    status === "needs_review"
+  ) {
+    return "text-amber-300 border-amber-400/40";
+  }
+  if (status === "needs_repair" || status === "needs_reconciliation" || status === "not_ready") {
+    return "text-error border-error/40";
+  }
+  return "text-content-tertiary border-border-minimal";
 }
 
 // DEFAULT_INGESTION_CONFIG imported from ../../types (complete version with all IngestionConfig fields)
@@ -677,6 +721,7 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
 
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const corpusLoadInFlight = useRef(false);
 
   // Sprint 2B — Modal global status. Fetched once on open; gates the
   // embed_mode='modal' option in the per-corpus form.
@@ -725,6 +770,8 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
   );
 
   const loadCorpora = useCallback(async (opts?: { silent?: boolean }) => {
+    if (corpusLoadInFlight.current) return;
+    corpusLoadInFlight.current = true;
     const silent = Boolean(opts?.silent);
     if (!silent) {
       setIsLoading(true);
@@ -742,6 +789,7 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
         setError(err instanceof Error ? err.message : "Failed to load corpora");
       }
     } finally {
+      corpusLoadInFlight.current = false;
       if (!silent) {
         setIsLoading(false);
       }
@@ -775,7 +823,7 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
     if (!isOpen) return;
     const timer = window.setInterval(() => {
       void loadCorpora({ silent: true });
-    }, 10000);
+    }, 30000);
     return () => window.clearInterval(timer);
   }, [isOpen, loadCorpora]);
 
@@ -1179,6 +1227,32 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
                 const isEditing = editingId === corpus.corpus_id;
                 const isPendingDelete = deleteConfirmId === corpus.corpus_id;
                 const isDeleting = deletingId === corpus.corpus_id;
+                const readinessDocs = corpus.readiness?.documents;
+                const queryableDocs = readinessDocs?.queryable ?? corpus.ready_doc_count ?? 0;
+                const totalDocs = readinessDocs?.total ?? corpus.doc_count;
+                const excludedDocs = readinessDocs?.excluded_total ?? 0;
+                const readinessStatus = corpus.readiness?.status;
+                const readinessGraph = corpus.readiness?.graph;
+                const graphRequired = readinessGraph?.required !== false;
+                const graphPromotionPending = graphRequired
+                  ? readinessGraph?.pending ?? 0
+                  : 0;
+                const graphMetadataMarkDocs = graphRequired
+                  ? readinessGraph?.unmarked_promoted_extraction_docs ??
+                    readinessGraph?.unpromoted_extraction_docs ??
+                    0
+                  : 0;
+                const graphMetadataMarkRows = graphRequired
+                  ? readinessGraph?.unmarked_promoted_extraction_rows ??
+                    readinessGraph?.unpromoted_extraction_rows ??
+                    0
+                  : 0;
+                const graphFailedChunks = graphRequired
+                  ? readinessGraph?.failed_chunks ?? 0
+                  : 0;
+                const graphStaleFailureRows = graphRequired
+                  ? readinessGraph?.stale_failure_rows ?? 0
+                  : 0;
 
                 return (
                   <div
@@ -1263,16 +1337,127 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
                       {/* Stats */}
                       {!isEditing && (
                         <div className="flex items-center gap-3 text-[9px] text-content-tertiary tracking-wider shrink-0">
+                          {readinessStatus && (
+                            <span
+                              className={`px-1.5 py-0.5 border font-bold uppercase ${readinessTone(readinessStatus)}`}
+                              title={
+                                [
+                                  corpus.readiness?.computed_at
+                                    ? `Computed ${formatDate(corpus.readiness.computed_at)}`
+                                    : null,
+                                  corpus.readiness?.source
+                                    ? `source=${corpus.readiness.source}`
+                                    : null,
+                                  corpus.readiness?.stale ? "stale snapshot" : null,
+                                  corpus.readiness?.refresh_error
+                                    ? `refresh error: ${corpus.readiness.refresh_error}`
+                                    : null,
+                                  (corpus.readiness?.blocking ?? []).join(" · ") ||
+                                    "Corpus readiness from durable artifacts",
+                                ]
+                                  .filter(Boolean)
+                                  .join(" · ")
+                              }
+                            >
+                              {readinessLabel(readinessStatus)}
+                            </span>
+                          )}
+                          {corpus.readiness?.computed_at && (
+                            <span
+                              className={
+                                corpus.readiness.stale
+                                  ? "text-amber-300"
+                                  : "text-content-tertiary"
+                              }
+                              title={`Corpus truth snapshot computed at ${formatDate(
+                                corpus.readiness.computed_at,
+                              )}`}
+                            >
+                              truth {formatDate(corpus.readiness.computed_at)}
+                            </span>
+                          )}
                           <span
                             className="flex items-center gap-1"
-                            title={`${corpus.ready_doc_count ?? 0} fully verified of ${corpus.doc_count} document rows (in-flight and failed rows included in the total)`}
+                            title={
+                              corpus.readiness
+                                ? `${queryableDocs} queryable of ${totalDocs} eligible document rows${excludedDocs ? `; ${excludedDocs} duplicate row(s) excluded` : ""}`
+                                : `${corpus.ready_doc_count ?? 0} fully verified of ${corpus.doc_count} document rows (legacy ready count)`
+                            }
                           >
                             <FileText className="w-3 h-3" />
-                            {corpus.ready_doc_count != null
-                              ? `${corpus.ready_doc_count}/${corpus.doc_count} ready`
-                              : corpus.doc_count}
+                            {corpus.readiness
+                              ? `${queryableDocs}/${totalDocs} queryable${excludedDocs ? ` · ${excludedDocs} duplicates` : ""}`
+                              : corpus.ready_doc_count != null
+                                ? `${corpus.ready_doc_count}/${corpus.doc_count} ready`
+                                : corpus.doc_count}
                           </span>
                           <span>{corpus.chunk_count} chunks</span>
+                          {corpus.readiness?.summaries && (
+                            <span
+                              title={
+                                summaryScope(
+                                  corpus.readiness.summaries.scopes as
+                                    | Record<string, SummaryScopeValue>
+                                    | undefined,
+                                  "retrieval_parent",
+                                ).description ??
+                                "Retrieval summaries required for readiness. This includes eligible body/table and legacy parent rows, not body-only diagnostics or structural rows."
+                              }
+                            >
+                              {corpus.readiness.summaries.retrieval_parent_done ??
+                                corpus.readiness.summaries.body_parent_done}/
+                              {corpus.readiness.summaries.retrieval_parent_total ??
+                                corpus.readiness.summaries.body_parent_total}{" "}
+                              {summaryScope(
+                                corpus.readiness.summaries.scopes as
+                                  | Record<string, SummaryScopeValue>
+                                  | undefined,
+                                "retrieval_parent",
+                              ).label?.toLowerCase() ?? "retrieval summaries"}
+                            </span>
+                          )}
+                          {corpus.readiness?.summaries && (
+                            <span
+                              title={`Document-level summaries synced in doc_profile and summary_tree. Usable in either store: ${corpus.readiness.summaries.document_done}/${corpus.readiness.summaries.document_total}; drift: ${corpus.readiness.summaries.document_mismatch ?? 0}.`}
+                            >
+                              {corpus.readiness.summaries.document_synced_done ??
+                                corpus.readiness.summaries.document_done}
+                              /
+                              {corpus.readiness.summaries.document_total} document summaries
+                            </span>
+                          )}
+                          {graphPromotionPending > 0 && (
+                            <span
+                              className="text-amber-300"
+                              title={`${graphPromotionPending} queryable document(s) still need Neo4j graph promotion.`}
+                            >
+                              {graphPromotionPending} graph pending
+                            </span>
+                          )}
+                          {graphFailedChunks > 0 && (
+                            <span
+                              className="text-error"
+                              title={`${graphFailedChunks} extraction chunk(s) failed validation or provider repair. This is extraction-quality work, not necessarily Neo4j promotion work.`}
+                            >
+                              {graphFailedChunks} extraction repair
+                            </span>
+                          )}
+                          {graphMetadataMarkRows > 0 && (
+                            <span
+                              className="text-amber-300"
+                              title={`${graphMetadataMarkDocs} document(s) are graph-written but have ${graphMetadataMarkRows} legacy extraction artifact(s) missing promoted metadata.`}
+                            >
+                              graph metadata audit
+                            </span>
+                          )}
+                          {graphStaleFailureRows > 0 && (
+                            <span
+                              className="text-content-tertiary"
+                              title={`${graphStaleFailureRows} stale failure row(s) reference chunks that are gone or already repaired. These are audit/reconciliation records, not active graph-promotion jobs.`}
+                            >
+                              {graphStaleFailureRows} stale refs
+                            </span>
+                          )}
                         </div>
                       )}
 
@@ -2004,6 +2189,9 @@ function IngestionModelsSection({
                     : contract.pool
                         .map(formatExtractionPoolEntry)
                         .join(", ")}
+                  {contract.routing_policy
+                    ? ` · routing ${contract.routing_policy.replace(/_/g, " ")}`
+                    : ""}
                 </span>
               )}
               {contract.errors.map((e, i) => (

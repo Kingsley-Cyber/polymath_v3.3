@@ -54,6 +54,41 @@ from services.graph.neo4j_writer import (
 )
 
 
+def _fake_extraction_settings(*, output_mode: str = "auto") -> SimpleNamespace:
+    return SimpleNamespace(
+        ENTITY_CONFIDENCE_THRESHOLD=0.0,
+        SCHEMA_INLINE_LIMIT=30,
+        SCHEMA_RETRIEVAL_TOP_K=10,
+        EXTRACTION_MAX_TOKENS=1200,
+        EXTRACTION_OUTPUT_MODE=output_mode,
+        EXTRACTION_JSON_OBJECT_MAX_ENTITIES_PER_CHUNK=8,
+        EXTRACTION_JSON_OBJECT_MAX_RELATIONS_PER_CHUNK=12,
+        EXTRACTION_JSON_OBJECT_MAX_FACTS_PER_CHUNK=4,
+        EXTRACTION_EVIDENCE_MAX_CHARS=120,
+        EXTRACTION_FACT_VALUE_MAX_CHARS=160,
+        EXTRACTION_RESCUE_MAX_TOKENS=900,
+        EXTRACTION_ENABLE_FACTS=False,
+        EXTRACTION_MAX_FACTS_PER_CHUNK=5,
+        EXTRACTION_JSONL_MAX_CALLS=2,
+        EXTRACTION_FOREGROUND_MAX_CALLS=2,
+        EXTRACTION_JSONL_DEBUG_RAW=False,
+        EXTRACTION_MAX_INPUT_TOKENS=700,
+        EXTRACTION_MAX_TOTAL_LINES=20,
+        EXTRACTION_RESCUE_MAX_TOTAL_LINES=16,
+        EXTRACTION_MAX_ENTITIES_PER_CHUNK=14,
+        EXTRACTION_MAX_RELATIONS_PER_CHUNK=20,
+        EXTRACTION_RESCUE_MAX_ENTITIES_PER_CHUNK=8,
+        EXTRACTION_RESCUE_MAX_RELATIONS_PER_CHUNK=8,
+        LITELLM_MASTER_KEY="test-key",
+        LITELLM_URL="http://litellm",
+        DEFAULT_COMPLETION_MODEL="test-model",
+        EXTRACTION_MAX_CONCURRENT=1,
+        EXTRACTION_GLOBAL_MAX_CONCURRENT=180,
+        EXTRACTION_FAILURE_PAUSE_PERCENT=100.0,
+        EXTRACTION_FAILURE_PAUSE_MIN_CHUNKS=20,
+    )
+
+
 def test_entity_schema_shape():
     # Pt9a: schema widened from 12 → 14 with `Software` + `Standard`.
     # Software pulls libraries/frameworks/apps out of the overloaded
@@ -668,6 +703,236 @@ async def test_deepseek_auto_uses_json_schema_payload_on_primary(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_json_schema_rejection_degrades_retry_to_prompt_object(monkeypatch):
+    calls: list[dict] = []
+    content = json.dumps(
+        {
+            "entities": [
+                {
+                    "canonical_name": "alpha",
+                    "surface_form": "Alpha",
+                    "entity_type": "Concept",
+                    "confidence": 0.95,
+                }
+            ],
+            "relations": [],
+            "facts": [],
+        }
+    )
+
+    class FakeResponse:
+        def __init__(self, *, reject: bool = False):
+            self.reject = reject
+            self.status_code = 400 if reject else 200
+            self.request = ghost_b.httpx.Request("POST", "http://litellm/chat/completions")
+
+        def raise_for_status(self) -> None:
+            if self.reject:
+                response = ghost_b.httpx.Response(
+                    400,
+                    request=self.request,
+                    text='{"error":"response_format json_schema unsupported"}',
+                )
+                raise ghost_b.httpx.HTTPStatusError(
+                    "response_format json_schema unsupported",
+                    request=self.request,
+                    response=response,
+                )
+
+        def json(self) -> dict:
+            return {
+                "usage": {"total_tokens": 120, "prompt_tokens": 90, "completion_tokens": 30},
+                "choices": [
+                    {"finish_reason": "stop", "message": {"content": content}}
+                ],
+            }
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, json, headers):
+            calls.append(copy.deepcopy(json))
+            return FakeResponse(reject=len(calls) == 1)
+
+    fake_settings = SimpleNamespace(
+        ENTITY_CONFIDENCE_THRESHOLD=0.0,
+        SCHEMA_INLINE_LIMIT=30,
+        SCHEMA_RETRIEVAL_TOP_K=10,
+        EXTRACTION_MAX_TOKENS=1200,
+        EXTRACTION_OUTPUT_MODE="auto",
+        EXTRACTION_JSON_OBJECT_MAX_ENTITIES_PER_CHUNK=8,
+        EXTRACTION_JSON_OBJECT_MAX_RELATIONS_PER_CHUNK=12,
+        EXTRACTION_JSON_OBJECT_MAX_FACTS_PER_CHUNK=4,
+        EXTRACTION_EVIDENCE_MAX_CHARS=120,
+        EXTRACTION_FACT_VALUE_MAX_CHARS=160,
+        EXTRACTION_RESCUE_MAX_TOKENS=900,
+        EXTRACTION_ENABLE_FACTS=False,
+        EXTRACTION_MAX_FACTS_PER_CHUNK=5,
+        EXTRACTION_JSONL_MAX_CALLS=2,
+        EXTRACTION_FOREGROUND_MAX_CALLS=2,
+        EXTRACTION_JSONL_DEBUG_RAW=False,
+        EXTRACTION_MAX_INPUT_TOKENS=700,
+        EXTRACTION_MAX_TOTAL_LINES=20,
+        EXTRACTION_RESCUE_MAX_TOTAL_LINES=16,
+        EXTRACTION_MAX_ENTITIES_PER_CHUNK=14,
+        EXTRACTION_MAX_RELATIONS_PER_CHUNK=20,
+        EXTRACTION_RESCUE_MAX_ENTITIES_PER_CHUNK=8,
+        EXTRACTION_RESCUE_MAX_RELATIONS_PER_CHUNK=8,
+        LITELLM_MASTER_KEY="test-key",
+        LITELLM_URL="http://litellm",
+        DEFAULT_COMPLETION_MODEL="test-model",
+        EXTRACTION_MAX_CONCURRENT=1,
+        EXTRACTION_GLOBAL_MAX_CONCURRENT=180,
+        EXTRACTION_FAILURE_PAUSE_PERCENT=100.0,
+        EXTRACTION_FAILURE_PAUSE_MIN_CHUNKS=20,
+    )
+    monkeypatch.setattr(ghost_b, "get_settings", lambda: fake_settings)
+    monkeypatch.setattr(ghost_b.httpx, "AsyncClient", FakeClient)
+
+    report = await ghost_b.extract_entities(
+        [
+            ExtractionTask(
+                chunk_id="c1",
+                doc_id="d1",
+                corpus_id="corp1",
+                text="Alpha is a compact test concept.",
+            )
+        ],
+        pool=[{
+            "model": "deepseek/deepseek-v4-flash",
+            "base_url": "https://api.deepseek.com/v1",
+            "api_key": None,
+            "max_concurrent": 1,
+            "extra_params": {},
+        }],
+        return_report=True,
+        enable_facts=False,
+    )
+
+    assert len(calls) == 2
+    assert calls[0]["response_format"]["type"] == "json_schema"
+    assert "response_format" not in calls[1]
+    assert "Return exactly one valid JSON object" in calls[1]["messages"][1]["content"]
+    assert "Output JSONL only" not in calls[1]["messages"][1]["content"]
+    assert report.results and report.results[0].entities[0].canonical_name == "alpha"
+    assert report.metrics["attempt_count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_json_schema_rejection_downgrades_lane_for_following_chunks(monkeypatch):
+    calls: list[dict] = []
+
+    def _content(name: str) -> str:
+        return json.dumps(
+            {
+                "entities": [
+                    {
+                        "canonical_name": name,
+                        "surface_form": name.title(),
+                        "entity_type": "Concept",
+                        "confidence": 0.95,
+                    }
+                ],
+                "relations": [],
+                "facts": [],
+            }
+        )
+
+    class FakeResponse:
+        def __init__(self, *, reject: bool = False, content: str = ""):
+            self.reject = reject
+            self.content = content
+            self.status_code = 400 if reject else 200
+            self.request = ghost_b.httpx.Request("POST", "http://litellm/chat/completions")
+
+        def raise_for_status(self) -> None:
+            if self.reject:
+                response = ghost_b.httpx.Response(
+                    400,
+                    request=self.request,
+                    text='{"error":"response_format json_schema unsupported"}',
+                )
+                raise ghost_b.httpx.HTTPStatusError(
+                    "response_format json_schema unsupported",
+                    request=self.request,
+                    response=response,
+                )
+
+        def json(self) -> dict:
+            return {
+                "usage": {"total_tokens": 120, "prompt_tokens": 90, "completion_tokens": 30},
+                "choices": [
+                    {"finish_reason": "stop", "message": {"content": self.content}}
+                ],
+            }
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, json, headers):
+            calls.append(copy.deepcopy(json))
+            if len(calls) == 1:
+                return FakeResponse(reject=True)
+            prompt = str(json["messages"][1]["content"])
+            name = "beta" if "Beta is another compact test concept." in prompt else "alpha"
+            return FakeResponse(content=_content(name))
+
+    monkeypatch.setattr(
+        ghost_b,
+        "get_settings",
+        lambda: _fake_extraction_settings(output_mode="auto"),
+    )
+    monkeypatch.setattr(ghost_b.httpx, "AsyncClient", FakeClient)
+
+    report = await ghost_b.extract_entities(
+        [
+            ExtractionTask(
+                chunk_id="c1",
+                doc_id="d1",
+                corpus_id="corp1",
+                text="Alpha is a compact test concept.",
+            ),
+            ExtractionTask(
+                chunk_id="c2",
+                doc_id="d1",
+                corpus_id="corp1",
+                text="Beta is another compact test concept.",
+            ),
+        ],
+        pool=[{
+            "model": "deepseek/deepseek-v4-flash",
+            "base_url": "https://api.deepseek.com/v1",
+            "api_key": None,
+            "max_concurrent": 1,
+            "extra_params": {},
+        }],
+        return_report=True,
+        enable_facts=False,
+    )
+
+    assert len(calls) == 3
+    assert calls[0]["response_format"]["type"] == "json_schema"
+    assert "response_format" not in calls[1]
+    assert "response_format" not in calls[2]
+    assert "Return exactly one valid JSON object" in calls[2]["messages"][1]["content"]
+    assert len(report.results) == 2
+
+
+@pytest.mark.asyncio
 async def test_mimo_auto_disables_thinking_for_extraction(monkeypatch):
     calls: list[dict] = []
     content = '{"entities":[{"canonical_name":"mimo","surface_form":"MiMo","entity_type":"Concept","confidence":0.95}],"relations":[],"facts":[]}'
@@ -759,6 +1024,198 @@ async def test_mimo_auto_disables_thinking_for_extraction(monkeypatch):
     assert "Return exactly one valid JSON object" in calls[0]["messages"][1]["content"]
     assert report.results and report.results[0].entities[0].canonical_name == "mimo"
     assert report.metrics["attempt_count"] == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("pool_entry", "expected_provider", "expects_thinking_disabled"),
+    [
+        (
+            {
+                "provider_preset": "siliconflow",
+                "model": "openai/tencent/Hy3-preview",
+                "base_url": "https://api.siliconflow.com/v1",
+                "api_key": "test-key",
+                "max_concurrent": 1,
+                "extra_params": {},
+            },
+            "siliconflow",
+            False,
+        ),
+        (
+            {
+                "provider_preset": "longcat",
+                "model": "openai/LongCat-2.0",
+                "base_url": "https://api.longcat.chat/openai/v1",
+                "api_key": "test-key",
+                "max_concurrent": 1,
+                "extra_params": {},
+            },
+            "longcat",
+            True,
+        ),
+    ],
+)
+async def test_compiler_gated_providers_do_not_send_native_response_format(
+    monkeypatch,
+    pool_entry,
+    expected_provider,
+    expects_thinking_disabled,
+):
+    calls: list[dict] = []
+    content = json.dumps(
+        {
+            "entities": [
+                {
+                    "canonical_name": "alpha",
+                    "surface_form": "Alpha",
+                    "entity_type": "Concept",
+                    "confidence": 0.95,
+                }
+            ],
+            "relations": [],
+            "facts": [],
+        }
+    )
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {
+                "usage": {"total_tokens": 120, "prompt_tokens": 90, "completion_tokens": 30},
+                "choices": [
+                    {"finish_reason": "stop", "message": {"content": content}}
+                ],
+            }
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, json, headers):
+            calls.append(copy.deepcopy(json))
+            return FakeResponse()
+
+    monkeypatch.setattr(
+        ghost_b,
+        "get_settings",
+        lambda: _fake_extraction_settings(output_mode="json_schema"),
+    )
+    monkeypatch.setattr(ghost_b.httpx, "AsyncClient", FakeClient)
+
+    report = await ghost_b.extract_entities(
+        [
+            ExtractionTask(
+                chunk_id="c1",
+                doc_id="d1",
+                corpus_id="corp1",
+                text="Alpha is a compact test concept.",
+            )
+        ],
+        pool=[pool_entry],
+        return_report=True,
+        enable_facts=False,
+    )
+
+    assert len(calls) == 1
+    assert "response_format" not in calls[0]
+    assert "Return exactly one valid JSON object" in calls[0]["messages"][1]["content"]
+    assert "Output JSONL only" not in calls[0]["messages"][1]["content"]
+    if expects_thinking_disabled:
+        assert calls[0]["thinking"] == {"type": "disabled"}
+    else:
+        assert "thinking" not in calls[0]
+    assert report.results and report.results[0].provider == expected_provider
+    assert report.results[0].schema_mode == "json_object_prompt"
+    assert report.results[0].output_mode == "json_object_prompt"
+
+
+@pytest.mark.asyncio
+async def test_private_vllm_provider_uses_native_json_schema_payload(monkeypatch):
+    calls: list[dict] = []
+    content = json.dumps(
+        {
+            "entities": [
+                {
+                    "canonical_name": "alpha",
+                    "surface_form": "Alpha",
+                    "entity_type": "Concept",
+                    "confidence": 0.95,
+                }
+            ],
+            "relations": [],
+            "facts": [],
+        }
+    )
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {
+                "usage": {"total_tokens": 120, "prompt_tokens": 90, "completion_tokens": 30},
+                "choices": [
+                    {"finish_reason": "stop", "message": {"content": content}}
+                ],
+            }
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, json, headers):
+            calls.append(copy.deepcopy(json))
+            return FakeResponse()
+
+    monkeypatch.setattr(ghost_b, "get_settings", lambda: _fake_extraction_settings())
+    monkeypatch.setattr(ghost_b.httpx, "AsyncClient", FakeClient)
+
+    report = await ghost_b.extract_entities(
+        [
+            ExtractionTask(
+                chunk_id="c1",
+                doc_id="d1",
+                corpus_id="corp1",
+                text="Alpha is a compact test concept.",
+            )
+        ],
+        pool=[
+            {
+                "provider_preset": "vllm-rtx",
+                "model": "openai/polymath-extract",
+                "base_url": "http://192.168.1.83:8000/v1",
+                "api_key": "test-key",
+                "max_concurrent": 1,
+                "extra_params": {"managed_vllm": True, "resource_class": "rtx"},
+            }
+        ],
+        return_report=True,
+        enable_facts=False,
+    )
+
+    assert len(calls) == 1
+    assert calls[0]["response_format"]["type"] == "json_schema"
+    assert calls[0]["response_format"]["json_schema"]["strict"] is True
+    assert "thinking" not in calls[0]
+    assert "Return exactly one valid JSON object" in calls[0]["messages"][1]["content"]
+    assert report.results and report.results[0].provider == "local_private_vllm"
+    assert report.results[0].schema_mode == "json_schema"
+    assert report.results[0].output_mode == "json_schema"
 
 
 @pytest.mark.asyncio
@@ -1046,6 +1503,10 @@ async def test_jsonl_repair_is_hard_clamped_to_one_retry(monkeypatch):
     assert len(report.results) == 0
     assert len(report.failures) == 1
     assert report.failures[0].attempts == 2
+    assert report.failures[0].provider == "custom"
+    assert report.failures[0].schema_mode == "jsonl"
+    assert report.failures[0].output_mode == "jsonl"
+    assert report.failures[0].provider_card["provider"] == "custom"
 
 
 @pytest.mark.asyncio

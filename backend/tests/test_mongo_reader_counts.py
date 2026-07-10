@@ -49,27 +49,36 @@ class _Collection:
     def __init__(self, rows):
         self.rows = rows
 
+    def _matches(self, row, query):
+        if "$and" in query:
+            return all(self._matches(row, clause) for clause in query["$and"])
+        if "$or" in query:
+            return any(self._matches(row, clause) for clause in query["$or"])
+        for key, expected in query.items():
+            if key == "$and" or key == "$or":
+                continue
+            actual = row.get(key)
+            if isinstance(expected, dict):
+                if "$in" in expected and actual not in set(expected["$in"]):
+                    return False
+                if "$exists" in expected and (key in row) is not bool(expected["$exists"]):
+                    return False
+                continue
+            if actual != expected:
+                return False
+        return True
+
     def find(self, query, projection=None):
         del projection
-        rows = [
-            row
-            for row in self.rows
-            if row.get("corpus_id") == query.get("corpus_id")
-            and (
-                "user_id" not in query
-                or row.get("user_id") == query.get("user_id")
-            )
-        ]
+        rows = [row for row in self.rows if self._matches(row, query)]
         return _Cursor(rows)
 
     def aggregate(self, pipeline):
         match = pipeline[0]["$match"]
-        doc_ids = set(match["doc_id"]["$in"])
         counts = Counter(
             row["doc_id"]
             for row in self.rows
-            if row.get("corpus_id") == match["corpus_id"]
-            and row.get("doc_id") in doc_ids
+            if self._matches(row, match)
         )
         return _Cursor([{"_id": doc_id, "count": count} for doc_id, count in counts.items()])
 

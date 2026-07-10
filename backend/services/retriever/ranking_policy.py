@@ -32,11 +32,13 @@ _DISTINCT_DOC_BREADTH: dict[QueryNeed, int] = {
 # Relative (pool-derived) noise floor on the MAIN selection for hydrated tiers:
 # a non-graph chunk scoring below this fraction of the top score is the kind of
 # lexical-rescued junk (a ~0.02 cross-encoder chunk lifted to ~0.18 by the
-# query-grounding per-word bonus) the LLM should not see. Graph-provenance
-# chunks are exempt (their value is relational); MIN_KEEP never strands a pool.
+# query-grounding per-word bonus) the LLM should not see. Graph provenance is
+# not a relevance substitute: only query-grounded graph evidence receives a
+# modestly relaxed floor. MIN_KEEP never strands a pool.
 _MAIN_FLOOR_RATIO: float = 0.25
 _MAIN_ABS_FLOOR: float = 0.10
 _MAIN_MIN_KEEP: int = 3
+_GRAPH_GROUNDED_FLOOR_RATIO: float = 0.40
 # SPECIFIC-intent post-MMR trim floor (ratio of top score). Deliberately
 # stricter than _MAIN_FLOOR_RATIO: tangential cross-encoder scores cluster in
 # the 0.25-0.5 band, genuinely relevant secondary passages score above it.
@@ -84,6 +86,20 @@ def _document_anchor_confidence(chunk: SourceChunk) -> float:
 
 def _is_confident_document_anchor(chunk: SourceChunk) -> bool:
     return _document_anchor_confidence(chunk) >= 0.75
+
+
+def _is_query_grounded_document_anchor(chunk: SourceChunk) -> bool:
+    if not _is_confident_document_anchor(chunk):
+        return False
+    grounding = (chunk.metadata or {}).get("query_grounding")
+    if not isinstance(grounding, dict):
+        return False
+    try:
+        matched = int(grounding.get("matched_count") or 0)
+        total = int(grounding.get("concept_count") or 0)
+    except (TypeError, ValueError):
+        return False
+    return bool(total > 0 and matched > 0 and (matched / total) >= 0.60)
 
 
 def _is_graph_expansion(chunk: SourceChunk) -> bool:
@@ -639,6 +655,9 @@ def _candidate_atoms(chunk: SourceChunk) -> set[str]:
         or " refers to " in text
         or " defined as " in text
         or " definition " in text
+        or " consists of " in text
+        or " framework " in text
+        or " principles " in text
         or re.search(r"\bis\s+(?:a|an|the)\b", text)
         or re.search(
             r"\b[a-z0-9][a-z0-9_+\-]*(?:\s+[a-z0-9][a-z0-9_+\-]*){0,4}"
@@ -684,6 +703,12 @@ def _candidate_atoms(chunk: SourceChunk) -> set[str]:
             " uses ",
             " used for ",
             " enables ",
+            " improves ",
+            " improve ",
+            " increases ",
+            " increase ",
+            " leads to ",
+            " results in ",
             " supports ",
             " requires ",
             " causes ",
@@ -795,6 +820,64 @@ def _score_normalizer(ranked: list[SourceChunk]) -> dict[int, float]:
     return normalized
 
 
+def _query_grounding_matches(candidate: SourceChunk) -> set[str]:
+    grounding = (candidate.metadata or {}).get("query_grounding")
+    if not isinstance(grounding, dict):
+        return set()
+    return {
+        str(value).strip().lower()
+        for value in grounding.get("matched") or []
+        if str(value).strip()
+    }
+
+
+def _has_relational_graph_evidence(
+    candidate: SourceChunk,
+    fp: dict[str, Any],
+) -> bool:
+    if fp["facts"] or fp["predicates"]:
+        return True
+    for item in candidate.provenance or []:
+        if not isinstance(item, dict):
+            continue
+        if any(
+            str(item.get(key) or "").strip()
+            for key in (
+                "evidence_phrase",
+                "predicate",
+                "relation_family",
+                "fact_id",
+            )
+        ):
+            return True
+    return False
+
+
+def _is_query_grounded_graph_evidence(
+    candidate: SourceChunk,
+    fp: dict[str, Any],
+) -> bool:
+    """Graph provenance may relax, but never replace, semantic relevance."""
+
+    return bool(
+        fp["graph_supported"]
+        and _query_grounding_matches(candidate)
+        and _has_relational_graph_evidence(candidate, fp)
+    )
+
+
+def _is_query_grounded_external_support(candidate: SourceChunk) -> bool:
+    support = (candidate.metadata or {}).get("external_sufficiency_support")
+    if not isinstance(support, dict) or not support.get("admitted"):
+        return False
+    required = {
+        str(value).strip().lower()
+        for value in support.get("missing_concepts") or []
+        if str(value).strip()
+    }
+    return bool(required and required <= _query_grounding_matches(candidate))
+
+
 def _passes_relevance_floor(
     *,
     idx: int,
@@ -807,21 +890,25 @@ def _passes_relevance_floor(
     """Reject fake diversity while preserving trusted non-text evidence lanes."""
     if idx == 0:
         return True
-    if _is_confident_document_anchor(candidate):
-        return True
-    # Graph expansion can be reranker-demoted because its value is relational.
-    # Keep it eligible only when it carries graph provenance/atoms, not merely
-    # because it is from a different document.
-    if fp["graph_supported"] and (
-        fp["facts"]
-        or fp["predicates"]
-        or "graph_evidence" in fp["atoms"]
-    ):
-        return True
     raw_score = float(candidate.score or 0.0)
     if 0.0 <= raw_score <= top_score <= 1.0 and top_score > 0.0:
-        return (raw_score / top_score) >= policy.relevance_floor
-    return relevance_by_idx.get(idx, 0.0) >= policy.relevance_floor
+        floor = policy.relevance_floor
+        if _is_query_grounded_graph_evidence(candidate, fp):
+            floor = min(floor, _GRAPH_GROUNDED_FLOOR_RATIO)
+        if _is_query_grounded_document_anchor(candidate):
+            floor = min(floor, _GRAPH_GROUNDED_FLOOR_RATIO)
+        if _is_query_grounded_external_support(candidate):
+            floor = min(floor, _GRAPH_GROUNDED_FLOOR_RATIO)
+        return (raw_score / top_score) >= floor
+    normalized_score = relevance_by_idx.get(idx, 0.0)
+    floor = policy.relevance_floor
+    if _is_query_grounded_graph_evidence(candidate, fp):
+        floor = min(floor, _GRAPH_GROUNDED_FLOOR_RATIO)
+    if _is_query_grounded_document_anchor(candidate):
+        floor = min(floor, _GRAPH_GROUNDED_FLOOR_RATIO)
+    if _is_query_grounded_external_support(candidate):
+        floor = min(floor, _GRAPH_GROUNDED_FLOOR_RATIO)
+    return normalized_score >= floor
 
 
 def _similarity(
@@ -1223,11 +1310,25 @@ def select_with_diversity(
                 relaxed_floor_ok = (raw_score / top_score) >= 0.25
             else:
                 relaxed_floor_ok = relevance_by_idx.get(idx, 0.0) >= 0.25
+            special_lane_grounded = True
+            if _is_confident_document_anchor(candidate):
+                special_lane_grounded = _is_query_grounded_document_anchor(candidate)
+            if fp["graph_supported"]:
+                special_lane_grounded = (
+                    special_lane_grounded
+                    and _is_query_grounded_graph_evidence(candidate, fp)
+                )
+            if (candidate.metadata or {}).get("external_sufficiency_support"):
+                special_lane_grounded = (
+                    special_lane_grounded
+                    and _is_query_grounded_external_support(candidate)
+                )
             can_relax_relevance_floor = (
                 relaxed
                 and tier != RetrievalTier.qdrant_only
                 and len(selected_indices) < min(final_top_k, _MAIN_MIN_KEEP)
                 and relaxed_floor_ok
+                and special_lane_grounded
             )
             if not can_relax_relevance_floor:
                 return None
@@ -1362,9 +1463,8 @@ def select_with_diversity(
     # cross-encoder scores live (live probe 2026-07-01: "Flutter for
     # Jobseekers" seated at ~0.3-0.5 in an Eric Berne query). For a focused
     # query, hold seated chunks to a stricter floor — better to return fewer,
-    # on-topic chunks. The reserve passes below still re-fill deliberately
-    # when their own guards fire, and graph-supported chunks keep their
-    # existing floor exemption.
+    # on-topic chunks. The reserve passes below still re-fill deliberately,
+    # but graph provenance alone does not exempt a candidate.
     specific_floor_trimmed = 0
     if (
         intent.need == QueryNeed.SPECIFIC
@@ -1377,7 +1477,14 @@ def select_with_diversity(
         for idx in selected_indices:
             if (
                 float(ranked[idx].score or 0.0) >= specific_floor
-                or fingerprints[idx]["graph_supported"]
+                or _passes_relevance_floor(
+                    idx=idx,
+                    candidate=ranked[idx],
+                    fp=fingerprints[idx],
+                    relevance_by_idx=relevance_by_idx,
+                    policy=policy,
+                    top_score=top_score,
+                )
             ):
                 kept.append(idx)
                 continue
@@ -1392,10 +1499,19 @@ def select_with_diversity(
                 covered_atoms.update(fingerprints[idx]["atoms"])
 
     if tier != RetrievalTier.qdrant_only and not any(
-        _is_confident_document_anchor(ranked[idx]) for idx in selected_indices
+        _is_query_grounded_document_anchor(ranked[idx]) for idx in selected_indices
     ):
         for idx, candidate in enumerate(ranked):
-            if idx in chosen_idx or not _is_confident_document_anchor(candidate):
+            if idx in chosen_idx or not _is_query_grounded_document_anchor(candidate):
+                continue
+            if not _passes_relevance_floor(
+                idx=idx,
+                candidate=candidate,
+                fp=fingerprints[idx],
+                relevance_by_idx=relevance_by_idx,
+                policy=policy,
+                top_score=top_score,
+            ):
                 continue
             anchor_score = relevance_by_idx.get(idx, 0.0) + 0.18
             if len(selected_indices) < final_top_k:
@@ -1404,7 +1520,7 @@ def select_with_diversity(
                 replace_pos: int | None = None
                 replace_score = float("inf")
                 for pos, selected_idx in enumerate(selected_indices):
-                    if _is_confident_document_anchor(ranked[selected_idx]):
+                    if _is_query_grounded_document_anchor(ranked[selected_idx]):
                         continue
                     score = selected_scores.get(
                         selected_idx,
@@ -1484,6 +1600,15 @@ def select_with_diversity(
             if graph_need <= 0:
                 break
             if idx in chosen_idx or not fp["graph_supported"]:
+                continue
+            if not _passes_relevance_floor(
+                idx=idx,
+                candidate=ranked[idx],
+                fp=fp,
+                relevance_by_idx=relevance_by_idx,
+                policy=policy,
+                top_score=top_score,
+            ):
                 continue
             selected_fps = [fingerprints[i] for i in selected_indices]
             if any(
@@ -1576,11 +1701,10 @@ def select_with_diversity(
             eligible_by_corpus[corpus_id] = idx
 
         # Prefer the user's corpus order when possible, but never reserve more
-        # corpora than there are final slots. Corpora with no strong candidate
-        # are intentionally absent: coverage is a floor, not forced noise.
-        target_corpora = [
-            corpus_id for corpus_id in requested_corpora if corpus_id in eligible_by_corpus
-        ][:final_top_k]
+        # corpora than there are final slots. Diagnostics should still expose
+        # the requested corpus set, even when a corpus has no strong candidate:
+        # coverage is a floor, not forced noise.
+        target_corpora = requested_corpora[:final_top_k]
         corpus_floor_meta["enabled"] = bool(target_corpora)
         corpus_floor_meta["target_corpora"] = target_corpora
 
@@ -1635,7 +1759,10 @@ def select_with_diversity(
             if corpus_counts.get(corpus_id, 0) > 0:
                 continue
             idx = eligible_by_corpus.get(corpus_id)
-            if idx is None or idx in chosen_idx:
+            if idx is None:
+                corpus_floor_meta["skipped"].append(corpus_id)
+                continue
+            if idx in chosen_idx:
                 continue
             reserve_score = relevance_by_idx.get(idx, 0.0) + 0.10
             if len(selected_indices) < final_top_k:

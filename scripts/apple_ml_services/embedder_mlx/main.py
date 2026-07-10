@@ -21,8 +21,10 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from typing import Any
 
+import asyncio
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
@@ -37,6 +39,8 @@ MODEL_NAME = os.environ.get("EMBEDDER_MODEL_NAME", "Qwen3-Embedding-0.6B")
 EMBED_DIM = 1024
 MAX_LENGTH = int(os.environ.get("EMBED_MAX_LENGTH", "512"))
 BATCH_SIZE = int(os.environ.get("EMBED_BATCH_SIZE", "32"))
+REQUEST_TIMEOUT_SECONDS = float(os.environ.get("EMBEDDER_REQUEST_TIMEOUT_SECONDS", "60"))
+QUEUE_TIMEOUT_SECONDS = float(os.environ.get("EMBEDDER_QUEUE_TIMEOUT_SECONDS", "30"))
 
 
 class EmbeddingsRequest(BaseModel):
@@ -58,6 +62,10 @@ class EmbeddingsResponse(BaseModel):
 
 
 app = FastAPI(title="Polymath Apple MLX Embedder", version="0.1.0")
+_request_gate = asyncio.Semaphore(1)
+_active_request_started_at: float | None = None
+_last_request_seconds: float | None = None
+_last_error: str | None = None
 
 
 def _apply_mlx_memory_guardrails() -> None:
@@ -235,11 +243,38 @@ async def info() -> dict:
 async def health() -> dict:
     if _model is None:
         raise HTTPException(status_code=503, detail="model is not loaded")
-    return {"status": "ok", "model": MODEL_ID, "device": "mps"}
+    now = time.monotonic()
+    stalled_for = (
+        now - _active_request_started_at
+        if _active_request_started_at is not None
+        else 0.0
+    )
+    if stalled_for > REQUEST_TIMEOUT_SECONDS:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                f"embedding request stalled for {stalled_for:.1f}s "
+                f"(timeout={REQUEST_TIMEOUT_SECONDS:.1f}s)"
+            ),
+        )
+    return {
+        "status": "ok",
+        "model": MODEL_ID,
+        "device": "mps",
+        "in_flight": _active_request_started_at is not None,
+        "active_seconds": round(stalled_for, 3),
+        "last_request_seconds": (
+            round(_last_request_seconds, 3)
+            if _last_request_seconds is not None
+            else None
+        ),
+        "last_error": _last_error,
+    }
 
 
 @app.post("/embeddings", response_model=EmbeddingsResponse)
 async def embeddings(req: EmbeddingsRequest) -> EmbeddingsResponse:
+    global _active_request_started_at, _last_error, _last_request_seconds
     if _model is None:
         try:
             _load_model()
@@ -250,10 +285,40 @@ async def embeddings(req: EmbeddingsRequest) -> EmbeddingsResponse:
     if not inputs:
         raise HTTPException(status_code=400, detail="input is empty")
 
+    acquired = False
+    started = time.monotonic()
     try:
-        embeddings_np = _encode_texts(inputs)
+        try:
+            await asyncio.wait_for(_request_gate.acquire(), timeout=QUEUE_TIMEOUT_SECONDS)
+            acquired = True
+        except TimeoutError:
+            raise HTTPException(
+                status_code=429,
+                detail=(
+                    "embedder is busy; previous request did not release within "
+                    f"{QUEUE_TIMEOUT_SECONDS:.1f}s"
+                ),
+            )
+        _active_request_started_at = time.monotonic()
+        embeddings_np = await asyncio.wait_for(
+            asyncio.to_thread(_encode_texts, inputs),
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
+        _last_error = None
+    except TimeoutError:
+        _last_error = f"embedding request timed out after {REQUEST_TIMEOUT_SECONDS:.1f}s"
+        logger.error("%s; exiting so launchd restarts the MLX sidecar", _last_error)
+        os._exit(124)
+    except HTTPException:
+        raise
     except Exception as exc:
+        _last_error = f"{type(exc).__name__}: {exc}"
         raise HTTPException(status_code=500, detail=f"embedding failed: {exc}")
+    finally:
+        _last_request_seconds = time.monotonic() - started
+        _active_request_started_at = None
+        if acquired:
+            _request_gate.release()
 
     return EmbeddingsResponse(
         data=[

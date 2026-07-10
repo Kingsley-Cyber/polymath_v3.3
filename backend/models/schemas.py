@@ -349,6 +349,7 @@ class CorpusCreate(_legacy.CorpusCreate):
 
 class CorpusResponse(_legacy.CorpusResponse):
     default_ingestion_config: IngestionConfig
+    readiness: dict[str, Any] | None = None
 
 
 class ToolBase(BaseModel):

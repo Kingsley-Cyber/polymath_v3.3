@@ -7,6 +7,7 @@ from services.llm_lane_pool import (
     is_fatal_provider_error,
     is_rate_limit_provider_error,
     rate_limit_retry_after_seconds,
+    shared_provider_semaphore,
 )
 
 
@@ -45,3 +46,40 @@ def test_missing_retry_after_uses_default() -> None:
     exc = _http_error(429)
 
     assert rate_limit_retry_after_seconds(exc, default_seconds=7) == 7
+
+
+def test_same_provider_credential_shares_one_budget(event_loop) -> None:
+    async def resolve():
+        first = shared_provider_semaphore(
+            {
+                "model": "openai/tencent/Hy3",
+                "base_url": "https://api.siliconflow.example/v1",
+                "api_key": "shared-secret",
+            },
+            lane=1,
+            limit=8,
+        )
+        second = shared_provider_semaphore(
+            {
+                "model": "openai/tencent/Hy3",
+                "base_url": "https://api.siliconflow.example/v1",
+                "api_key": "shared-secret",
+            },
+            lane=1,
+            limit=8,
+        )
+        other_key = shared_provider_semaphore(
+            {
+                "model": "openai/tencent/Hy3",
+                "base_url": "https://api.siliconflow.example/v1",
+                "api_key": "other-secret",
+            },
+            lane=2,
+            limit=8,
+        )
+        return first, second, other_key
+
+    first, second, other_key = event_loop.run_until_complete(resolve())
+
+    assert first is second
+    assert first is not other_key

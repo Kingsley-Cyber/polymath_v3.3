@@ -32,14 +32,7 @@ class _FakeCollection:
     def find(self, query, projection):
         self.query = query
         self.projection = projection
-        wanted = set(query["chunk_id"]["$in"])
-        corpora = set(query.get("corpus_id", {}).get("$in", []))
-        records = [
-            record
-            for record in self._records
-            if record.get("chunk_id") in wanted
-            and (not corpora or record.get("corpus_id") in corpora)
-        ]
+        records = [record for record in self._records if _matches(record, query)]
         return _FakeCursor(records)
 
 
@@ -65,15 +58,28 @@ class _FakeDocumentsCollection:
     def find(self, query, projection):
         self.query = query
         self.projection = projection
-        doc_ids = set(query.get("doc_id", {}).get("$in", []))
-        corpora = set(query.get("corpus_id", {}).get("$in", []))
-        records = [
-            record
-            for record in self._records
-            if (not doc_ids or record.get("doc_id") in doc_ids)
-            and (not corpora or record.get("corpus_id") in corpora)
-        ]
+        records = [record for record in self._records if _matches(record, query)]
         return _FakeCursor(records)
+
+
+def _matches(record: dict, query: dict) -> bool:
+    if "$and" in query:
+        return all(_matches(record, clause) for clause in query["$and"])
+    if "$or" in query:
+        return any(_matches(record, clause) for clause in query["$or"])
+    for key, expected in query.items():
+        if key in {"$and", "$or"}:
+            continue
+        actual = record.get(key)
+        if isinstance(expected, dict):
+            if "$in" in expected and actual not in set(expected["$in"]):
+                return False
+            if "$exists" in expected and (key in record) is not bool(expected["$exists"]):
+                return False
+            continue
+        if actual != expected:
+            return False
+    return True
 
 
 def _chunk(chunk_id: str, text: str) -> SourceChunk:

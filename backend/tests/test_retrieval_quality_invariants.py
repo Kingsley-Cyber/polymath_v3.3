@@ -27,15 +27,27 @@ from services.retriever.graph_decoration import _edge_query_relevance, _query_ra
 from services.retriever.query_grounding import concept_groups
 
 
-def _chunk(chunk_id, *, score, doc_id=None, parent_id=None, source_tier="tier_a"):
+def _chunk(
+    chunk_id,
+    *,
+    score,
+    doc_id=None,
+    parent_id=None,
+    source_tier="tier_a",
+    text=None,
+    metadata=None,
+    provenance=None,
+):
     return SourceChunk(
         chunk_id=chunk_id,
         parent_id=parent_id or chunk_id,
         doc_id=doc_id or f"doc-{chunk_id}",
         corpus_id="c1",
-        text=f"text {chunk_id}",
+        text=text or f"text {chunk_id}",
         score=score,
         source_tier=source_tier,
+        metadata=metadata or {},
+        provenance=provenance,
     )
 
 
@@ -73,12 +85,44 @@ def test_relative_floor_drops_subfloor_nongraph_chunk():
     assert "junk" not in [c.chunk_id for c in res.candidates]
 
 
-def test_graph_chunk_exempt_from_floor():
+def test_ungrounded_graph_chunk_does_not_bypass_relevance_floor():
     intent = infer_retrieval_intent("how does X work")
     ranked = [_chunk(f"c{i}", score=0.9 - i * 0.05, doc_id=f"d{i}") for i in range(5)]
     ranked.append(_chunk("g", score=0.05, source_tier="graph_mode_a", doc_id="gd"))  # below floor
     res = select_with_diversity(ranked, final_top_k=5, intent=intent, tier=RetrievalTier.qdrant_mongo_graph)
-    assert "g" in [c.chunk_id for c in res.candidates]   # reserved despite below floor
+    assert "g" not in [c.chunk_id for c in res.candidates]
+
+
+def test_query_grounded_graph_evidence_gets_only_a_bounded_floor_relaxation():
+    intent = infer_retrieval_intent("how does X work")
+    ranked = [_chunk("top", score=0.90, doc_id="d1", text="X is a system.")]
+    ranked.append(
+        _chunk(
+            "grounded-graph",
+            score=0.40,
+            source_tier="graph_mode_a",
+            doc_id="d2",
+            text="X uses Y to perform the work.",
+            metadata={"query_grounding": {"matched": ["x"]}},
+            provenance=[
+                {
+                    "entity": "X",
+                    "predicate": "uses",
+                    "evidence_phrase": "X uses Y to perform the work.",
+                }
+            ],
+        )
+    )
+
+    res = select_with_diversity(
+        ranked,
+        final_top_k=2,
+        intent=intent,
+        tier=RetrievalTier.qdrant_mongo_graph,
+        query="how does X work",
+    )
+
+    assert [c.chunk_id for c in res.candidates] == ["top", "grounded-graph"]
 
 
 def test_relevance_floor_can_return_fewer_than_final_k():

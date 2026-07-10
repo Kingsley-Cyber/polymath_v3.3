@@ -133,22 +133,25 @@ async def _expected_qdrant_texts(
 
     parents = await db["parent_chunks"].find(
         {"doc_id": doc_id, "corpus_id": corpus_id},
-        {"_id": 0, "parent_id": 1, "summary": 1, "retrieval_text": 1},
+        {"_id": 0},
     ).to_list(length=None)
     if not parents:
         doc = await db["documents"].find_one(
             {"doc_id": doc_id, "corpus_id": corpus_id},
-            {
-                "_id": 0,
-                "parent_chunks.parent_id": 1,
-                "parent_chunks.summary": 1,
-                "parent_chunks.retrieval_text": 1,
-            },
+            {"_id": 0, "parent_chunks": 1},
         )
         parents = (doc or {}).get("parent_chunks", []) or []
     for parent in parents:
         parent_id = str(parent.get("parent_id") or "")
-        retrieval_text = str(parent.get("retrieval_text") or parent.get("summary") or "")
+        retrieval_text = str(parent.get("retrieval_text") or "")
+        if not retrieval_text and parent.get("summary"):
+            from services.ingestion.summary_semantics import repair_parent_summary_row
+
+            retrieval_text = str(
+                repair_parent_summary_row(parent).get("retrieval_text")
+                or parent.get("summary")
+                or ""
+            )
         if parent_id and retrieval_text:
             expected[f"{parent_id}_summary"] = retrieval_text
     return expected
@@ -312,6 +315,7 @@ async def verify_ingest(
             doc_id=doc_id,
             corpus_id=corpus_id,
             collection_kind=kind,
+            exclude_noisy=True,
         )
         try:
             res = await _with_retries(lambda col=col: qdrant.count(

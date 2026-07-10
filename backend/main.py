@@ -337,6 +337,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.warning("graph_sessions multi-corpus migration failed (non-fatal): %s", exc)
 
     ingest_poll_task: asyncio.Task | None = None
+    startup_repair_task: asyncio.Task | None = None
+    auto_repair_lock = asyncio.Lock()
 
     async def _stores_ready() -> bool:
         import httpx as _hx
@@ -369,12 +371,39 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             )
         return result
 
+    async def _run_auto_corpus_repair_tick(reason: str) -> None:
+        if auto_repair_lock.locked():
+            logger.info("Auto corpus repair %s tick skipped: repair already running", reason)
+            return
+        try:
+            async with auto_repair_lock:
+                result = await ingestion_service.run_auto_corpus_repair_tick()
+            logger.info(
+                "Auto corpus repair %s tick: scanned=%d changed=%d",
+                reason,
+                int(result.get("scanned") or 0),
+                int(result.get("changed") or 0),
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Auto corpus repair %s tick failed: %s", reason, exc)
+
     async def _ingest_worker_poll_loop() -> None:
         interval = float(getattr(settings, "INGEST_RUNNER_POLL_SECONDS", 10.0) or 10.0)
+        repair_interval = float(
+            getattr(settings, "INGEST_AUTO_REPAIR_POLL_SECONDS", 300.0) or 300.0
+        )
+        last_repair_tick = 0.0
         while True:
             await asyncio.sleep(interval)
             try:
                 await _recover_ingest_batches("poll")
+                if bool(getattr(settings, "INGEST_AUTO_REPAIR_ENABLED", True)):
+                    now = asyncio.get_running_loop().time()
+                    if now - last_repair_tick >= repair_interval:
+                        last_repair_tick = now
+                        await _run_auto_corpus_repair_tick("poll")
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001
@@ -404,6 +433,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 )
 
             await _recover_ingest_batches("startup")
+            if bool(getattr(settings, "INGEST_AUTO_REPAIR_ENABLED", True)):
+                startup_repair_task = asyncio.create_task(
+                    _run_auto_corpus_repair_tick("startup")
+                )
             ingest_poll_task = asyncio.create_task(_ingest_worker_poll_loop())
             logger.info(
                 "Durable ingest runners enabled; polling every %.1fs",
@@ -447,6 +480,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Shutdown
     logger.info("Shutting down Polymath RAG API")
+    if startup_repair_task is not None:
+        startup_repair_task.cancel()
+        try:
+            await startup_repair_task
+        except asyncio.CancelledError:
+            pass
     if ingest_poll_task is not None:
         ingest_poll_task.cancel()
         try:

@@ -22,7 +22,9 @@ Selection:
 """
 
 import asyncio
+import inspect
 import logging
+import os
 import time
 from typing import Any
 
@@ -35,7 +37,10 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_BATCH_SIZE = 32
 _MAX_BATCH_SIZE = 512
-_LOCAL_TIMEOUT = 600.0
+_LOCAL_TIMEOUT = float(os.environ.get("EMBEDDER_LOCAL_TIMEOUT_SECONDS", "120") or 120)
+_QUERY_LOCAL_TIMEOUT = float(
+    os.environ.get("EMBEDDER_QUERY_TIMEOUT_SECONDS", "30") or 30
+)
 _DEFAULT_DIM = 1024  # fallback when caller doesn't specify (e.g. query path on Qwen3-0.6B)
 # Query-embedding cache: a chat turn embeds the main query plus every facet/lane
 # support-query (each retrieve() re-embeds independently), and the same text
@@ -91,12 +96,13 @@ async def _local_fallback_or_raise(
     reason: Exception | str,
     texts: list[str],
     dim: int,
+    local_timeout_s: float | None = None,
 ):
     settings = get_settings()
     message = f"{provider} embedding failed or is unavailable: {reason}"
     if settings.EMBED_ALLOW_LOCAL_FALLBACK:
         logger.warning("%s — falling back to local embedder", message)
-        return await _embed_batch_local(texts, dim)
+        return await _call_embed_batch_local(texts, dim, timeout_s=local_timeout_s)
     raise RuntimeError(
         f"{message}. Local embedding fallback is disabled by EMBED_ALLOW_LOCAL_FALLBACK=false."
     )
@@ -113,6 +119,7 @@ async def embed_batch(
     max_concurrent: int | None = None,
     modal_containers: int | None = None,
     api_pool: list[dict[str, Any]] | None = None,
+    local_timeout_s: float | None = None,
 ) -> list[list[float]]:
     """Dispatch to the selected embedding provider.
 
@@ -162,12 +169,14 @@ async def embed_batch(
                     reason=exc,
                     texts=texts,
                     dim=dim,
+                    local_timeout_s=local_timeout_s,
                 )
         return await _local_fallback_or_raise(
             provider="Modal",
             reason="embed_mode='modal' but Modal is not deployed/enabled",
             texts=texts,
             dim=dim,
+            local_timeout_s=local_timeout_s,
         )
 
     # ── API (OpenAI-compatible /embeddings, any provider) ────────────────
@@ -185,6 +194,7 @@ async def embed_batch(
                     reason=exc,
                     texts=texts,
                     dim=dim,
+                    local_timeout_s=local_timeout_s,
                 )
 
         # Per-corpus creds take precedence. Fall through to SiliconFlow
@@ -198,6 +208,7 @@ async def embed_batch(
                 reason="base_url or api_key missing (per-corpus and global)",
                 texts=texts,
                 dim=dim,
+                local_timeout_s=local_timeout_s,
             )
         try:
             return await _embed_batch_api(
@@ -213,10 +224,11 @@ async def embed_batch(
                 reason=exc,
                 texts=texts,
                 dim=dim,
+                local_timeout_s=local_timeout_s,
             )
 
     # ── Local (default) ─────────────────────────────────────────────────
-    return await _embed_batch_local(texts, dim)
+    return await _call_embed_batch_local(texts, dim, timeout_s=local_timeout_s)
 
 
 async def _embed_batch_api(
@@ -530,8 +542,13 @@ class _QueryEmbedBatcher:
                 max_concurrent=config.get("embed_max_concurrent"),
                 modal_containers=config.get("modal_containers"),
                 api_pool=api_pool,
+                local_timeout_s=_QUERY_LOCAL_TIMEOUT,
             )
-        return await _embed_batch_local(texts, _DEFAULT_DIM)
+        return await _call_embed_batch_local(
+            texts,
+            _DEFAULT_DIM,
+            timeout_s=_QUERY_LOCAL_TIMEOUT,
+        )
 
 
 _QUERY_BATCHER = _QueryEmbedBatcher()
@@ -575,26 +592,62 @@ async def embed_query(text: str, config: dict[str, Any] | None = None) -> list[f
 # AsyncClient paid TCP setup every time. One reused, keep-alive client removes
 # that overhead. Lazily created inside the running event loop (httpx binds its
 # transport on first request, so module-level construction is safe).
-_LOCAL_HTTP_CLIENT: httpx.AsyncClient | None = None
+_LOCAL_HTTP_CLIENTS: dict[float, httpx.AsyncClient] = {}
 
 
-def _get_local_http_client() -> httpx.AsyncClient:
-    global _LOCAL_HTTP_CLIENT
-    if _LOCAL_HTTP_CLIENT is None or _LOCAL_HTTP_CLIENT.is_closed:
-        _LOCAL_HTTP_CLIENT = httpx.AsyncClient(
-            timeout=_LOCAL_TIMEOUT,
+def _get_local_http_client(timeout_s: float | None = None) -> httpx.AsyncClient:
+    timeout_s = float(timeout_s or _LOCAL_TIMEOUT)
+    client = _LOCAL_HTTP_CLIENTS.get(timeout_s)
+    if client is None or client.is_closed:
+        client = httpx.AsyncClient(
+            timeout=timeout_s,
             limits=httpx.Limits(
                 max_keepalive_connections=20,
                 max_connections=40,
                 keepalive_expiry=30.0,
             ),
         )
-    return _LOCAL_HTTP_CLIENT
+        _LOCAL_HTTP_CLIENTS[timeout_s] = client
+    return client
+
+
+def _accepts_timeout_kw(func: Any) -> bool:
+    """Return whether a patched/local embed function accepts timeout_s.
+
+    A few unit tests monkeypatch ``_embed_batch_local`` with the old two-arg
+    callable shape. Production needs the timeout knob for query-vs-ingest
+    pressure, but the dispatcher should remain compatible with those callables
+    instead of turning a test double into a false sidecar failure.
+    """
+
+    try:
+        signature = inspect.signature(func)
+    except (TypeError, ValueError):
+        return True
+    for parameter in signature.parameters.values():
+        if parameter.kind is inspect.Parameter.VAR_KEYWORD:
+            return True
+        if parameter.name == "timeout_s":
+            return True
+    return False
+
+
+async def _call_embed_batch_local(
+    texts: list[str],
+    expected_dim: int,
+    *,
+    timeout_s: float | None = None,
+) -> list[list[float]]:
+    if _accepts_timeout_kw(_embed_batch_local):
+        return await _embed_batch_local(texts, expected_dim, timeout_s=timeout_s)
+    return await _embed_batch_local(texts, expected_dim)
 
 
 async def _embed_batch_local(
     texts: list[str],
     expected_dim: int,
+    *,
+    timeout_s: float | None = None,
 ) -> list[list[float]]:
     """Local embedder sidecar — Docker sentence-transformers service."""
     settings = get_settings()
@@ -602,7 +655,7 @@ async def _embed_batch_local(
     vectors: list[list[float]] = []
     batch_size = _embedding_batch_size()
 
-    client = _get_local_http_client()
+    client = _get_local_http_client(float(timeout_s or _LOCAL_TIMEOUT))
     for i in range(0, len(texts), batch_size):
         batch = texts[i : i + batch_size]
         batch_vectors = await _embed_local_batch_with_split(

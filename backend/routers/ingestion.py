@@ -18,6 +18,7 @@ import re
 import time
 from datetime import datetime, timedelta
 from typing import Literal
+from uuid import uuid4
 
 import httpx
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
@@ -97,6 +98,36 @@ def _safe_ingest_error(exc: Exception) -> str:
     return message[:1000] or exc.__class__.__name__
 
 
+async def _attach_corpus_readiness(
+    result: dict,
+    *,
+    corpus_id: str,
+    context: str,
+) -> dict:
+    """Attach a fresh corpus-readiness snapshot after state-changing ops.
+
+    Batch/job rows are run history. The UI's truth bar reads the materialized
+    corpus readiness view, so every endpoint that mutates durable ingestion
+    state should rematerialize it before returning.
+    """
+
+    try:
+        from services.ingestion.readiness import materialize_corpus_readiness
+
+        result["readiness"] = await materialize_corpus_readiness(
+            ingestion_service.db,
+            corpus_id,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "readiness refresh after %s failed corpus=%s: %s",
+            context,
+            corpus_id[:8],
+            exc,
+        )
+    return result
+
+
 async def _mark_ingest_failed(
     *,
     doc_id: str,
@@ -152,6 +183,104 @@ class StaleIngestReconcileRequest(BaseModel):
     auto_backfill_graph: bool = True
 
 
+class FailureMetadataReconcileRequest(BaseModel):
+    apply: bool = False
+    limit: int = Field(default=5000, ge=1, le=50000)
+
+
+class SourceParseJobPlanRequest(BaseModel):
+    apply: bool = False
+    limit: int = Field(default=500, ge=1, le=10000)
+
+
+class SourceParseJobRunRequest(BaseModel):
+    limit: int = Field(default=25, ge=1, le=500)
+    statuses: list[str] | None = None
+
+
+class GraphPromotionPlanRequest(BaseModel):
+    apply: bool = False
+    limit: int = Field(default=100, ge=1, le=5000)
+    max_chunks: int | None = Field(default=None, ge=1, le=50000)
+
+
+class GraphPromotionRunRequest(BaseModel):
+    limit: int = Field(default=5, ge=1, le=100)
+
+
+class ExtractionJobPlanRequest(BaseModel):
+    apply: bool = False
+    limit: int = Field(default=500, ge=1, le=10000)
+    include_succeeded: bool = False
+
+
+class ExtractionJobRunRequest(BaseModel):
+    limit: int = Field(default=25, ge=1, le=500)
+    statuses: list[str] | None = None
+
+
+class SummaryJobPlanRequest(BaseModel):
+    apply: bool = False
+    limit: int = Field(default=500, ge=1, le=10000)
+    kinds: list[str] | None = None
+
+
+class SummaryJobRunRequest(BaseModel):
+    limit: int = Field(default=25, ge=1, le=500)
+    statuses: list[str] | None = None
+    kinds: list[str] | None = None
+
+
+class DocumentPipelineJobPlanRequest(BaseModel):
+    apply: bool = False
+    limit: int = Field(default=500, ge=1, le=10000)
+    kinds: list[str] | None = None
+
+
+class DocumentPipelineJobRunRequest(BaseModel):
+    limit: int = Field(default=25, ge=1, le=500)
+    statuses: list[str] | None = None
+    kinds: list[str] | None = None
+
+
+class CorpusRepairCycleRequest(BaseModel):
+    apply: bool = False
+    background: bool = False
+    reconcile_failures: bool = True
+    failure_reconcile_limit: int = Field(default=5000, ge=1, le=50000)
+    backfill_promoted_extraction_marks_rows: bool = True
+    promoted_extraction_marks_backfill_limit: int = Field(default=100, ge=0, le=50000)
+    backfill_source_parse_stage_identity_rows: bool = True
+    source_parse_stage_identity_backfill_limit: int = Field(default=1000, ge=0, le=50000)
+    backfill_ghost_b_stage_identity_rows: bool = True
+    ghost_b_stage_identity_backfill_limit: int = Field(default=1000, ge=0, le=50000)
+    plan_source_parse_jobs: bool = True
+    source_parse_job_plan_limit: int = Field(default=500, ge=1, le=10000)
+    run_source_parse_jobs: bool = False
+    source_parse_job_run_limit: int = Field(default=25, ge=1, le=500)
+    plan_document_pipeline_jobs: bool = True
+    document_pipeline_job_plan_limit: int = Field(default=500, ge=1, le=10000)
+    run_document_pipeline_jobs: bool = False
+    document_pipeline_job_run_limit: int = Field(default=25, ge=1, le=500)
+    plan_graph_jobs: bool = True
+    graph_plan_limit: int = Field(default=100, ge=1, le=5000)
+    graph_max_chunks: int | None = Field(default=None, ge=1, le=50000)
+    plan_extraction_jobs: bool = True
+    extraction_job_plan_limit: int = Field(default=500, ge=1, le=10000)
+    run_extraction_jobs: bool = False
+    extraction_job_run_limit: int = Field(default=25, ge=1, le=500)
+    plan_summary_jobs: bool = True
+    summary_job_plan_limit: int = Field(default=500, ge=1, le=10000)
+    backfill_summary_stage_identity_rows: bool = True
+    summary_stage_identity_backfill_limit: int = Field(default=1000, ge=0, le=50000)
+    run_summary_jobs: bool = False
+    summary_job_run_limit: int = Field(default=25, ge=1, le=500)
+    run_document_summaries: bool = False
+    document_summary_limit: int = Field(default=10, ge=1, le=500)
+    run_graph_jobs: bool = False
+    graph_run_limit: int = Field(default=3, ge=1, le=100)
+
+
 class SummaryBackfillRequest(BaseModel):
     """Repair parent summaries for an already-ingested corpus."""
 
@@ -164,6 +293,17 @@ class SummaryBackfillRequest(BaseModel):
         description="Max missing parent summaries to generate in this call.",
     )
     batch: int = Field(default=32, ge=1, le=128)
+    background: bool = Field(
+        default=False,
+        description="Queue the bounded summary repair as a background repair run.",
+    )
+
+
+class DocumentSummaryBackfillRequest(BaseModel):
+    """Repair document-level summary profiles for an already-ingested corpus."""
+
+    limit: int = Field(default=25, ge=1, le=500)
+    doc_ids: list[str] | None = None
 
 
 class RescanIngestBatchRequest(BaseModel):
@@ -680,6 +820,7 @@ async def create_corpus(
         chunk_count=doc.get("chunk_count", 0),
         embedding_model_id=doc.get("embedding_model_id"),
         default_ingestion_config=IngestionConfig(**doc["default_ingestion_config"]),
+        readiness=doc.get("readiness"),
     )
 
 
@@ -701,6 +842,7 @@ async def list_corpora(
             chunk_count=d.get("chunk_count", 0),
             embedding_model_id=d.get("embedding_model_id"),
             default_ingestion_config=IngestionConfig(**d["default_ingestion_config"]),
+            readiness=d.get("readiness"),
         )
         for d in docs
     ]
@@ -757,7 +899,10 @@ async def get_extraction_contract(
 
     import httpx as _httpx
 
-    from services.extraction_provider_cards import resolve_extraction_provider_card
+    from services.extraction_provider_cards import (
+        resolve_extraction_provider_card,
+        safe_extraction_pool_contract,
+    )
     from services.ingestion.extraction_contract import resolve_extraction_contract
     from services.private_vllm_capacity import fetch_private_vllm_capacity
     from services.settings import settings_service as _ss
@@ -839,7 +984,12 @@ async def get_extraction_contract(
             }
 
     pool_items = []
+    safe_pool_contract = None
     if contract.uses_provider_llm and contract.pool_source != "none":
+        safe_pool_contract = safe_extraction_pool_contract(
+            pool_source=contract.pool_source,
+            pool=list(pool_refs or []),
+        )
         for m in pool_refs or []:
             card = resolve_extraction_provider_card(m)
             pool_items.append(
@@ -868,6 +1018,16 @@ async def get_extraction_contract(
         "source": contract.source,
         "models_linked": cfg.models_linked,
         "pool_source": contract.pool_source if contract.uses_provider_llm else "none",
+        "routing_policy": (
+            safe_pool_contract.get("routing_policy")
+            if safe_pool_contract
+            else None
+        ),
+        "lane_capacities": (
+            safe_pool_contract.get("lane_capacities")
+            if safe_pool_contract
+            else []
+        ),
         "pool": pool,
         "endpoints": [
             {
@@ -903,6 +1063,7 @@ async def get_corpus(
         chunk_count=doc.get("chunk_count", 0),
         embedding_model_id=doc.get("embedding_model_id"),
         default_ingestion_config=IngestionConfig(**doc["default_ingestion_config"]),
+        readiness=doc.get("readiness"),
     )
 
 
@@ -969,6 +1130,7 @@ async def update_corpus(
         chunk_count=doc.get("chunk_count", 0),
         embedding_model_id=doc.get("embedding_model_id"),
         default_ingestion_config=IngestionConfig(**doc["default_ingestion_config"]),
+        readiness=doc.get("readiness"),
     )
 
 
@@ -1227,6 +1389,110 @@ async def backfill_corpus_summaries(
     corpus = await ingestion_service.get_corpus(corpus_id)
     if not corpus:
         raise HTTPException(status_code=404, detail="Corpus not found")
+    if body.background:
+        run_id = f"summary_backfill_manual_{corpus_id[:8]}_{uuid4().hex[:8]}"
+        now = datetime.utcnow()
+        await ingestion_service.db["ingest_repair_runs"].update_one(
+            {"run_id": run_id},
+            {
+                "$setOnInsert": {"created_at": now},
+                "$set": {
+                    "run_id": run_id,
+                    "kind": "summary_backfill_manual",
+                    "status": "queued",
+                    "corpus_id": corpus_id,
+                    "user_id": current_user["user_id"],
+                    "limit": body.limit,
+                    "batch": body.batch,
+                    "generate": body.generate,
+                    "index": body.index,
+                    "updated_at": now,
+                },
+            },
+            upsert=True,
+        )
+
+        async def _run() -> None:
+            started = datetime.utcnow()
+            try:
+                await ingestion_service.db["ingest_repair_runs"].update_one(
+                    {"run_id": run_id},
+                    {"$set": {"status": "running", "started_at": started, "updated_at": started}},
+                )
+                result = await ingestion_service.backfill_parent_summaries(
+                    corpus_id,
+                    user_id=current_user["user_id"],
+                    generate=body.generate,
+                    index=body.index,
+                    limit=body.limit,
+                    batch=body.batch,
+                )
+                finished = datetime.utcnow()
+                status = "complete" if result.get("status") in {"healthy", "empty"} else "partial"
+                await ingestion_service.db["ingest_repair_runs"].update_one(
+                    {"run_id": run_id},
+                    {
+                        "$set": {
+                            "status": status,
+                            "result": result,
+                            "counts": {
+                                "generated": result.get("generated", 0),
+                                "attempted": result.get("attempted", 0),
+                                "indexed": result.get("indexed", 0),
+                                "missing_summary_text": (
+                                    (result.get("after") or {}).get("missing_summary_text")
+                                ),
+                            },
+                            "completed_at": finished,
+                            "updated_at": finished,
+                        }
+                    },
+                )
+                try:
+                    from services.ingestion.readiness import materialize_corpus_readiness
+
+                    await materialize_corpus_readiness(ingestion_service.db, corpus_id)
+                except Exception as refresh_exc:  # noqa: BLE001
+                    logger.warning(
+                        "readiness refresh after summary backfill failed corpus=%s: %s",
+                        corpus_id[:8],
+                        refresh_exc,
+                    )
+            except Exception as exc:  # noqa: BLE001 - background repair records failure
+                logger.exception("Summary backfill run %s failed: %s", run_id, exc)
+                finished = datetime.utcnow()
+                await ingestion_service.db["ingest_repair_runs"].update_one(
+                    {"run_id": run_id},
+                    {
+                        "$set": {
+                            "status": "failed",
+                            "error": _safe_ingest_error(exc),
+                            "completed_at": finished,
+                            "updated_at": finished,
+                        }
+                    },
+                )
+                try:
+                    from services.ingestion.readiness import materialize_corpus_readiness
+
+                    await materialize_corpus_readiness(ingestion_service.db, corpus_id)
+                except Exception as refresh_exc:  # noqa: BLE001
+                    logger.warning(
+                        "readiness refresh after failed summary backfill failed corpus=%s: %s",
+                        corpus_id[:8],
+                        refresh_exc,
+                    )
+
+        task = asyncio.create_task(_run())
+        _BACKFILL_BG_TASKS.add(task)
+        task.add_done_callback(_BACKFILL_BG_TASKS.discard)
+        return {
+            "status": "queued",
+            "run_id": run_id,
+            "corpus_id": corpus_id,
+            "limit": body.limit,
+            "batch": body.batch,
+        }
     return await ingestion_service.backfill_parent_summaries(
         corpus_id,
         user_id=current_user["user_id"],
@@ -1234,6 +1500,24 @@ async def backfill_corpus_summaries(
         index=body.index,
         limit=body.limit,
         batch=body.batch,
+    )
+
+
+@router.post("/corpora/{corpus_id}/summaries/document-backfill")
+async def backfill_corpus_document_summaries(
+    corpus_id: str,
+    body: DocumentSummaryBackfillRequest = DocumentSummaryBackfillRequest(),
+    current_user: dict = Depends(get_current_user),
+):
+    """Generate missing document-level summary profiles for an existing corpus."""
+    corpus = await ingestion_service.get_corpus(corpus_id)
+    if not corpus:
+        raise HTTPException(status_code=404, detail="Corpus not found")
+    return await ingestion_service.backfill_document_summaries(
+        corpus_id=corpus_id,
+        user_id=current_user["user_id"],
+        limit=body.limit,
+        doc_ids=body.doc_ids,
     )
 
 
@@ -1279,6 +1563,664 @@ async def ingestion_audit(
         )
         audit["duplicates"] = {"error": str(exc)}
     return audit
+
+
+@router.post("/corpora/{corpus_id}/ingestion/reconcile-failures")
+async def reconcile_failure_metadata(
+    corpus_id: str,
+    body: FailureMetadataReconcileRequest | None = None,
+    current_user: dict = Depends(get_current_user),
+):
+    """Classify stale Ghost B failures and realign document failure counters."""
+    existing = await ingestion_service.get_corpus(corpus_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Corpus not found")
+    body = body or FailureMetadataReconcileRequest()
+    from services.ingestion.failure_reconciliation import (
+        reconcile_ghost_b_failure_metadata,
+    )
+
+    result = await reconcile_ghost_b_failure_metadata(
+        ingestion_service.db,
+        corpus_id=corpus_id,
+        apply=body.apply,
+        limit=body.limit,
+    )
+    if body.apply:
+        try:
+            from services.ingestion.readiness import materialize_corpus_readiness
+
+            result["readiness"] = await materialize_corpus_readiness(
+                ingestion_service.db,
+                corpus_id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "readiness refresh after failure reconciliation failed corpus=%s: %s",
+                corpus_id[:8],
+                exc,
+            )
+    result["user_id"] = current_user["user_id"]
+    return result
+
+
+@router.get("/corpora/{corpus_id}/ingestion/idempotency-audit")
+async def audit_corpus_idempotency(
+    corpus_id: str,
+    group_limit: int = Query(default=25, ge=1, le=200),
+    missing_limit: int = Query(default=25, ge=1, le=200),
+    current_user: dict = Depends(get_current_user),
+):
+    """Return exact source/content duplicate groups and source-identity gaps."""
+    existing = await ingestion_service.get_corpus(corpus_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Corpus not found")
+    result = await ingestion_service.audit_corpus_idempotency(
+        corpus_id=corpus_id,
+        group_limit=group_limit,
+        missing_limit=missing_limit,
+    )
+    result["user_id"] = current_user["user_id"]
+    return result
+
+
+@router.get("/corpora/{corpus_id}/ingestion/source-parse-jobs")
+async def list_source_parse_jobs(
+    corpus_id: str,
+    limit: int = Query(default=100, ge=1, le=1000),
+    status: list[str] | None = Query(default=None),
+    current_user: dict = Depends(get_current_user),
+):
+    """List materialized source/parse jobs for this corpus."""
+    existing = await ingestion_service.get_corpus(corpus_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Corpus not found")
+    return await ingestion_service.list_source_parse_jobs(
+        corpus_id=corpus_id,
+        limit=limit,
+        statuses=status,
+    )
+
+
+@router.post("/corpora/{corpus_id}/ingestion/source-parse-jobs/plan")
+async def plan_source_parse_jobs(
+    corpus_id: str,
+    body: SourceParseJobPlanRequest | None = None,
+    current_user: dict = Depends(get_current_user),
+):
+    """Materialize durable source/parse jobs from ingest batch manifests."""
+    existing = await ingestion_service.get_corpus(corpus_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Corpus not found")
+    body = body or SourceParseJobPlanRequest()
+    result = await ingestion_service.plan_source_parse_jobs(
+        corpus_id=corpus_id,
+        user_id=current_user["user_id"],
+        apply=body.apply,
+        limit=body.limit,
+    )
+    if body.apply:
+        return await _attach_corpus_readiness(
+            result,
+            corpus_id=corpus_id,
+            context="source parse job planning",
+        )
+    return result
+
+
+@router.post("/corpora/{corpus_id}/ingestion/source-parse-jobs/run")
+async def run_source_parse_jobs(
+    corpus_id: str,
+    body: SourceParseJobRunRequest | None = None,
+    current_user: dict = Depends(get_current_user),
+):
+    """Resume eligible source/parse jobs via durable ingest batch runners."""
+    existing = await ingestion_service.get_corpus(corpus_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Corpus not found")
+    body = body or SourceParseJobRunRequest()
+    result = await ingestion_service.run_source_parse_jobs(
+        corpus_id=corpus_id,
+        user_id=current_user["user_id"],
+        limit=body.limit,
+        statuses=body.statuses,
+    )
+    return await _attach_corpus_readiness(
+        result,
+        corpus_id=corpus_id,
+        context="source parse job run",
+    )
+
+
+@router.get("/corpora/{corpus_id}/ingestion/graph-promotion-jobs")
+async def list_graph_promotion_jobs(
+    corpus_id: str,
+    limit: int = Query(default=100, ge=1, le=500),
+    status: list[str] | None = Query(default=None),
+    current_user: dict = Depends(get_current_user),
+):
+    """List durable graph-promotion jobs for this corpus."""
+    existing = await ingestion_service.get_corpus(corpus_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Corpus not found")
+    return await ingestion_service.list_graph_promotion_jobs(
+        corpus_id=corpus_id,
+        limit=limit,
+        statuses=status,
+    )
+
+
+@router.post("/corpora/{corpus_id}/ingestion/graph-promotion-jobs/plan")
+async def plan_graph_promotion_jobs(
+    corpus_id: str,
+    body: GraphPromotionPlanRequest | None = None,
+    current_user: dict = Depends(get_current_user),
+):
+    """Materialize graph gaps as durable promotion jobs."""
+    existing = await ingestion_service.get_corpus(corpus_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Corpus not found")
+    body = body or GraphPromotionPlanRequest()
+    result = await ingestion_service.plan_graph_promotion_jobs(
+        corpus_id=corpus_id,
+        user_id=current_user["user_id"],
+        apply=body.apply,
+        limit=body.limit,
+        max_chunks=body.max_chunks,
+    )
+    if body.apply:
+        return await _attach_corpus_readiness(
+            result,
+            corpus_id=corpus_id,
+            context="graph promotion job planning",
+        )
+    return result
+
+
+@router.post("/corpora/{corpus_id}/ingestion/graph-promotion-jobs/run")
+async def run_graph_promotion_jobs(
+    corpus_id: str,
+    body: GraphPromotionRunRequest | None = None,
+    current_user: dict = Depends(get_current_user),
+):
+    """Run queued graph-promotion jobs through the existing graph backfill path."""
+    existing = await ingestion_service.get_corpus(corpus_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Corpus not found")
+    body = body or GraphPromotionRunRequest()
+    result = await ingestion_service.run_graph_promotion_jobs(
+        corpus_id=corpus_id,
+        user_id=current_user["user_id"],
+        limit=body.limit,
+    )
+    return await _attach_corpus_readiness(
+        result,
+        corpus_id=corpus_id,
+        context="graph promotion job run",
+    )
+
+
+@router.get("/corpora/{corpus_id}/ingestion/extraction-jobs")
+async def list_extraction_jobs(
+    corpus_id: str,
+    limit: int = Query(default=100, ge=1, le=1000),
+    status: list[str] | None = Query(default=None),
+    current_user: dict = Depends(get_current_user),
+):
+    """List materialized chunk-level extraction jobs for a corpus."""
+    existing = await ingestion_service.get_corpus(corpus_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Corpus not found")
+    return await ingestion_service.list_extraction_jobs(
+        corpus_id=corpus_id,
+        limit=limit,
+        statuses=status,
+    )
+
+
+@router.post("/corpora/{corpus_id}/ingestion/extraction-jobs/plan")
+async def plan_extraction_jobs(
+    corpus_id: str,
+    body: ExtractionJobPlanRequest | None = None,
+    current_user: dict = Depends(get_current_user),
+):
+    """Plan/materialize durable chunk-level extraction jobs from live chunks.
+
+    Dry-run by default. Applied plans create/update rows in ``extraction_jobs``
+    but do not call providers yet.
+    """
+    existing = await ingestion_service.get_corpus(corpus_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Corpus not found")
+    body = body or ExtractionJobPlanRequest()
+    result = await ingestion_service.plan_extraction_jobs(
+        corpus_id=corpus_id,
+        user_id=current_user["user_id"],
+        apply=body.apply,
+        limit=body.limit,
+        include_succeeded=body.include_succeeded,
+    )
+    if body.apply:
+        return await _attach_corpus_readiness(
+            result,
+            corpus_id=corpus_id,
+            context="extraction job planning",
+        )
+    return result
+
+
+@router.post("/corpora/{corpus_id}/ingestion/extraction-jobs/run")
+async def run_extraction_jobs(
+    corpus_id: str,
+    body: ExtractionJobRunRequest | None = None,
+    current_user: dict = Depends(get_current_user),
+):
+    """Run a bounded set of materialized chunk-level extraction jobs."""
+    existing = await ingestion_service.get_corpus(corpus_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Corpus not found")
+    body = body or ExtractionJobRunRequest()
+    result = await ingestion_service.run_extraction_jobs(
+        corpus_id=corpus_id,
+        user_id=current_user["user_id"],
+        limit=body.limit,
+        statuses=body.statuses,
+    )
+    return await _attach_corpus_readiness(
+        result,
+        corpus_id=corpus_id,
+        context="extraction job run",
+    )
+
+
+@router.get("/corpora/{corpus_id}/ingestion/summary-jobs")
+async def list_summary_jobs(
+    corpus_id: str,
+    limit: int = Query(default=100, ge=1, le=1000),
+    status: list[str] | None = Query(default=None),
+    kind: list[str] | None = Query(default=None),
+    current_user: dict = Depends(get_current_user),
+):
+    """List materialized parent/document summary jobs for a corpus."""
+    existing = await ingestion_service.get_corpus(corpus_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Corpus not found")
+    return await ingestion_service.list_summary_jobs(
+        corpus_id=corpus_id,
+        limit=limit,
+        statuses=status,
+        kinds=kind,
+    )
+
+
+@router.post("/corpora/{corpus_id}/ingestion/summary-jobs/plan")
+async def plan_summary_jobs(
+    corpus_id: str,
+    body: SummaryJobPlanRequest | None = None,
+    current_user: dict = Depends(get_current_user),
+):
+    """Plan/materialize durable parent/document summary jobs from live gaps."""
+    existing = await ingestion_service.get_corpus(corpus_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Corpus not found")
+    body = body or SummaryJobPlanRequest()
+    result = await ingestion_service.plan_summary_jobs(
+        corpus_id=corpus_id,
+        user_id=current_user["user_id"],
+        apply=body.apply,
+        limit=body.limit,
+        kinds=body.kinds,
+    )
+    if body.apply:
+        return await _attach_corpus_readiness(
+            result,
+            corpus_id=corpus_id,
+            context="summary job planning",
+        )
+    return result
+
+
+@router.post("/corpora/{corpus_id}/ingestion/summary-jobs/run")
+async def run_summary_jobs(
+    corpus_id: str,
+    body: SummaryJobRunRequest | None = None,
+    current_user: dict = Depends(get_current_user),
+):
+    """Run a bounded slice of durable parent/document summary jobs."""
+    existing = await ingestion_service.get_corpus(corpus_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Corpus not found")
+    body = body or SummaryJobRunRequest()
+    result = await ingestion_service.run_summary_jobs(
+        corpus_id=corpus_id,
+        user_id=current_user["user_id"],
+        limit=body.limit,
+        statuses=body.statuses,
+        kinds=body.kinds,
+    )
+    return await _attach_corpus_readiness(
+        result,
+        corpus_id=corpus_id,
+        context="summary job run",
+    )
+
+
+@router.get("/corpora/{corpus_id}/ingestion/document-pipeline-jobs")
+async def list_document_pipeline_jobs(
+    corpus_id: str,
+    limit: int = Query(default=100, ge=1, le=1000),
+    status: list[str] | None = Query(default=None),
+    kind: list[str] | None = Query(default=None),
+    current_user: dict = Depends(get_current_user),
+):
+    """List materialized document-stage chunk/persist/embed jobs for a corpus."""
+    existing = await ingestion_service.get_corpus(corpus_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Corpus not found")
+    return await ingestion_service.list_document_pipeline_jobs(
+        corpus_id=corpus_id,
+        limit=limit,
+        statuses=status,
+        kinds=kind,
+    )
+
+
+@router.post("/corpora/{corpus_id}/ingestion/document-pipeline-jobs/plan")
+async def plan_document_pipeline_jobs(
+    corpus_id: str,
+    body: DocumentPipelineJobPlanRequest | None = None,
+    current_user: dict = Depends(get_current_user),
+):
+    """Plan/materialize document-stage chunk/persist/embed jobs from live gaps."""
+    existing = await ingestion_service.get_corpus(corpus_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Corpus not found")
+    body = body or DocumentPipelineJobPlanRequest()
+    result = await ingestion_service.plan_document_pipeline_jobs(
+        corpus_id=corpus_id,
+        user_id=current_user["user_id"],
+        apply=body.apply,
+        limit=body.limit,
+        kinds=body.kinds,
+    )
+    if body.apply:
+        return await _attach_corpus_readiness(
+            result,
+            corpus_id=corpus_id,
+            context="document pipeline job planning",
+        )
+    return result
+
+
+@router.post("/corpora/{corpus_id}/ingestion/document-pipeline-jobs/run")
+async def run_document_pipeline_jobs(
+    corpus_id: str,
+    body: DocumentPipelineJobRunRequest | None = None,
+    current_user: dict = Depends(get_current_user),
+):
+    """Run/reconcile a bounded slice of document-stage chunk/persist/embed jobs."""
+    existing = await ingestion_service.get_corpus(corpus_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Corpus not found")
+    body = body or DocumentPipelineJobRunRequest()
+    result = await ingestion_service.run_document_pipeline_jobs(
+        corpus_id=corpus_id,
+        user_id=current_user["user_id"],
+        limit=body.limit,
+        statuses=body.statuses,
+        kinds=body.kinds,
+    )
+    return await _attach_corpus_readiness(
+        result,
+        corpus_id=corpus_id,
+        context="document pipeline job run",
+    )
+
+
+@router.post("/corpora/{corpus_id}/ingestion/repair-cycle")
+async def run_corpus_repair_cycle(
+    corpus_id: str,
+    body: CorpusRepairCycleRequest | None = None,
+    current_user: dict = Depends(get_current_user),
+):
+    """Run one bounded corpus repair cycle.
+
+    Dry-run by default. Applied cycles reconcile failure metadata, materialize
+    graph-promotion jobs, and optionally run a small number of queued graph jobs.
+    """
+    existing = await ingestion_service.get_corpus(corpus_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Corpus not found")
+    body = body or CorpusRepairCycleRequest()
+    if body.background:
+        if not body.apply:
+            raise HTTPException(
+                status_code=400,
+                detail="background repair requires apply=true",
+            )
+        active = await ingestion_service.db["ingest_repair_runs"].find_one(
+            {
+                "corpus_id": corpus_id,
+                "kind": "corpus_repair_cycle_background",
+                "status": {"$in": ["queued", "running"]},
+            },
+            {"_id": 0, "run_id": 1, "status": 1, "started_at": 1, "updated_at": 1},
+        )
+        if active:
+            return {
+                "status": "already_running",
+                "run_id": active.get("run_id"),
+                "corpus_id": corpus_id,
+                "active": active,
+            }
+
+        run_id = f"corpus_repair_bg_{corpus_id[:8]}_{uuid4().hex[:8]}"
+        now = datetime.utcnow()
+        request_payload = body.model_dump()
+        await ingestion_service.db["ingest_repair_runs"].update_one(
+            {"run_id": run_id},
+            {
+                "$setOnInsert": {"created_at": now},
+                "$set": {
+                    "run_id": run_id,
+                    "kind": "corpus_repair_cycle_background",
+                    "status": "queued",
+                    "corpus_id": corpus_id,
+                    "user_id": current_user["user_id"],
+                    "request": request_payload,
+                    "updated_at": now,
+                },
+            },
+            upsert=True,
+        )
+        try:
+            from services.ingestion.readiness import materialize_corpus_readiness
+
+            readiness = await materialize_corpus_readiness(ingestion_service.db, corpus_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "readiness refresh after queueing background repair failed corpus=%s: %s",
+                corpus_id[:8],
+                exc,
+            )
+            readiness = None
+
+        async def _run() -> None:
+            started = datetime.utcnow()
+            try:
+                await ingestion_service.db["ingest_repair_runs"].update_one(
+                    {"run_id": run_id},
+                    {
+                        "$set": {
+                            "status": "running",
+                            "started_at": started,
+                            "updated_at": started,
+                        }
+                    },
+                )
+                try:
+                    from services.ingestion.readiness import materialize_corpus_readiness
+
+                    await materialize_corpus_readiness(ingestion_service.db, corpus_id)
+                except Exception as refresh_exc:  # noqa: BLE001
+                    logger.warning(
+                        "readiness refresh after starting background repair failed corpus=%s: %s",
+                        corpus_id[:8],
+                        refresh_exc,
+                    )
+                result = await ingestion_service.run_bounded_corpus_repair_cycle(
+                    corpus_id=corpus_id,
+                    user_id=current_user["user_id"],
+                    apply=True,
+                    reconcile_failures=body.reconcile_failures,
+                    failure_reconcile_limit=body.failure_reconcile_limit,
+                    backfill_promoted_extraction_marks_rows=(
+                        body.backfill_promoted_extraction_marks_rows
+                    ),
+                    promoted_extraction_marks_backfill_limit=(
+                        body.promoted_extraction_marks_backfill_limit
+                    ),
+                    backfill_source_parse_stage_identity_rows=(
+                        body.backfill_source_parse_stage_identity_rows
+                    ),
+                    source_parse_stage_identity_backfill_limit=(
+                        body.source_parse_stage_identity_backfill_limit
+                    ),
+                    backfill_ghost_b_stage_identity_rows=body.backfill_ghost_b_stage_identity_rows,
+                    ghost_b_stage_identity_backfill_limit=(
+                        body.ghost_b_stage_identity_backfill_limit
+                    ),
+                    plan_source_parse_jobs=body.plan_source_parse_jobs,
+                    source_parse_job_plan_limit=body.source_parse_job_plan_limit,
+                    run_source_parse_jobs=body.run_source_parse_jobs,
+                    source_parse_job_run_limit=body.source_parse_job_run_limit,
+                    plan_document_pipeline_jobs=body.plan_document_pipeline_jobs,
+                    document_pipeline_job_plan_limit=body.document_pipeline_job_plan_limit,
+                    run_document_pipeline_jobs=body.run_document_pipeline_jobs,
+                    document_pipeline_job_run_limit=body.document_pipeline_job_run_limit,
+                    plan_graph_jobs=body.plan_graph_jobs,
+                    graph_plan_limit=body.graph_plan_limit,
+                    graph_max_chunks=body.graph_max_chunks,
+                    plan_extraction_jobs=body.plan_extraction_jobs,
+                    extraction_job_plan_limit=body.extraction_job_plan_limit,
+                    run_extraction_jobs=body.run_extraction_jobs,
+                    extraction_job_run_limit=body.extraction_job_run_limit,
+                    plan_summary_jobs=body.plan_summary_jobs,
+                    summary_job_plan_limit=body.summary_job_plan_limit,
+                    backfill_summary_stage_identity_rows=(
+                        body.backfill_summary_stage_identity_rows
+                    ),
+                    summary_stage_identity_backfill_limit=(
+                        body.summary_stage_identity_backfill_limit
+                    ),
+                    run_summary_jobs=body.run_summary_jobs,
+                    summary_job_run_limit=body.summary_job_run_limit,
+                    run_document_summaries=body.run_document_summaries,
+                    document_summary_limit=body.document_summary_limit,
+                    run_graph_jobs=body.run_graph_jobs,
+                    graph_run_limit=body.graph_run_limit,
+                    record_run=False,
+                )
+                finished = datetime.utcnow()
+                await ingestion_service.db["ingest_repair_runs"].update_one(
+                    {"run_id": run_id},
+                    {
+                        "$set": {
+                            "status": result.get("status") or "complete",
+                            "result": result,
+                            "counts": result.get("summary") or {},
+                            "completed_at": finished,
+                            "updated_at": finished,
+                        }
+                    },
+                )
+                try:
+                    from services.ingestion.readiness import materialize_corpus_readiness
+
+                    await materialize_corpus_readiness(ingestion_service.db, corpus_id)
+                except Exception as refresh_exc:  # noqa: BLE001
+                    logger.warning(
+                        "readiness refresh after background repair failed corpus=%s: %s",
+                        corpus_id[:8],
+                        refresh_exc,
+                    )
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("Background corpus repair %s failed: %s", run_id, exc)
+                finished = datetime.utcnow()
+                await ingestion_service.db["ingest_repair_runs"].update_one(
+                    {"run_id": run_id},
+                    {
+                        "$set": {
+                            "status": "failed",
+                            "error": _safe_ingest_error(exc),
+                            "completed_at": finished,
+                            "updated_at": finished,
+                        }
+                    },
+                )
+                try:
+                    from services.ingestion.readiness import materialize_corpus_readiness
+
+                    await materialize_corpus_readiness(ingestion_service.db, corpus_id)
+                except Exception as refresh_exc:  # noqa: BLE001
+                    logger.warning(
+                        "readiness refresh after failed background repair failed corpus=%s: %s",
+                        corpus_id[:8],
+                        refresh_exc,
+                    )
+
+        task = asyncio.create_task(_run())
+        _BACKFILL_BG_TASKS.add(task)
+        task.add_done_callback(_BACKFILL_BG_TASKS.discard)
+        response = {
+            "status": "queued",
+            "run_id": run_id,
+            "corpus_id": corpus_id,
+            "background": True,
+            "request": request_payload,
+        }
+        if readiness is not None:
+            response["readiness"] = readiness
+        return response
+
+    return await ingestion_service.run_bounded_corpus_repair_cycle(
+        corpus_id=corpus_id,
+        user_id=current_user["user_id"],
+        apply=body.apply,
+        reconcile_failures=body.reconcile_failures,
+        failure_reconcile_limit=body.failure_reconcile_limit,
+        backfill_promoted_extraction_marks_rows=body.backfill_promoted_extraction_marks_rows,
+        promoted_extraction_marks_backfill_limit=body.promoted_extraction_marks_backfill_limit,
+        backfill_source_parse_stage_identity_rows=body.backfill_source_parse_stage_identity_rows,
+        source_parse_stage_identity_backfill_limit=body.source_parse_stage_identity_backfill_limit,
+        backfill_ghost_b_stage_identity_rows=body.backfill_ghost_b_stage_identity_rows,
+        ghost_b_stage_identity_backfill_limit=body.ghost_b_stage_identity_backfill_limit,
+        plan_source_parse_jobs=body.plan_source_parse_jobs,
+        source_parse_job_plan_limit=body.source_parse_job_plan_limit,
+        run_source_parse_jobs=body.run_source_parse_jobs,
+        source_parse_job_run_limit=body.source_parse_job_run_limit,
+        plan_document_pipeline_jobs=body.plan_document_pipeline_jobs,
+        document_pipeline_job_plan_limit=body.document_pipeline_job_plan_limit,
+        run_document_pipeline_jobs=body.run_document_pipeline_jobs,
+        document_pipeline_job_run_limit=body.document_pipeline_job_run_limit,
+        plan_graph_jobs=body.plan_graph_jobs,
+        graph_plan_limit=body.graph_plan_limit,
+        graph_max_chunks=body.graph_max_chunks,
+        plan_extraction_jobs=body.plan_extraction_jobs,
+        extraction_job_plan_limit=body.extraction_job_plan_limit,
+        run_extraction_jobs=body.run_extraction_jobs,
+        extraction_job_run_limit=body.extraction_job_run_limit,
+        plan_summary_jobs=body.plan_summary_jobs,
+        summary_job_plan_limit=body.summary_job_plan_limit,
+        backfill_summary_stage_identity_rows=body.backfill_summary_stage_identity_rows,
+        summary_stage_identity_backfill_limit=body.summary_stage_identity_backfill_limit,
+        run_summary_jobs=body.run_summary_jobs,
+        summary_job_run_limit=body.summary_job_run_limit,
+        run_document_summaries=body.run_document_summaries,
+        document_summary_limit=body.document_summary_limit,
+        run_graph_jobs=body.run_graph_jobs,
+        graph_run_limit=body.graph_run_limit,
+    )
 
 
 @router.post("/corpora/{corpus_id}/ingest-batches/local")
@@ -1651,12 +2593,17 @@ async def reconcile_stale_ingestion(
             )
             marked_recoverable += 1
             inspected.append({"doc_id": doc_id, "action": "marked_failed_recoverable"})
-    return {
+    result = {
         **batch_result,
         "graph_repairs_queued": graph_repairs_queued,
         "marked_failed_recoverable": marked_recoverable,
         "inspected": inspected,
     }
+    return await _attach_corpus_readiness(
+        result,
+        corpus_id=corpus_id,
+        context="stale ingestion reconciliation",
+    )
 
 
 @router.get("/ingestion/health")

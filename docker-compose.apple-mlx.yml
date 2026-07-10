@@ -19,9 +19,9 @@
 #   * Disables the in-cluster embedder, reranker, and docling services
 #     (they're replaced by host-native MLX equivalents).
 #   * Points the backend at host.docker.internal:{8082,8081,8500}.
-#   * Sets RERANKER_SCORE_SCALE=cosine because Jina v3 returns cosine
-#     scores, not logits — without this the negative-logit "low confidence"
-#     guard misclassifies every result.
+#   * Sets RERANKER_SCORE_SCALE=probability because the default Apple path is
+#     the Torch/Jina cross-encoder with calibrated [0,1] probabilities. The
+#     rollback MLX bi-encoder path returns cosine; both are bounded scales.
 
 services:
   # ── disable in-cluster GPU services ─────────────────────────────────
@@ -40,10 +40,14 @@ services:
       EMBEDDER_URL: http://host.docker.internal:8082
       RERANKER_URL: http://host.docker.internal:8081
       DOCLING_URL: http://host.docker.internal:8500
-      RERANKER_SCORE_SCALE: cosine
+      RERANKER_SCORE_SCALE: probability
       RERANKER_MODEL: mlx-community/jina-reranker-v3-4bit-mxfp4
+      RERANKER_HTTP_BATCH_SIZE: ${RERANKER_HTTP_BATCH_SIZE:-16}
+      RERANKER_QUEUE_TIMEOUT_SECONDS: ${RERANKER_QUEUE_TIMEOUT_SECONDS:-5}
       EMBEDDER_MODEL_NAME: Qwen3-Embedding-0.6B
       EMBED_BATCH_SIZE: ${EMBED_BATCH_SIZE:-32}
+      EMBEDDER_LOCAL_TIMEOUT_SECONDS: ${EMBEDDER_LOCAL_TIMEOUT_SECONDS:-120}
+      EMBEDDER_QUERY_TIMEOUT_SECONDS: ${EMBEDDER_QUERY_TIMEOUT_SECONDS:-30}
       LOCAL_EMBEDDER_ENABLED: ${LOCAL_EMBEDDER_ENABLED:-true}
       LOCAL_RERANKER_ENABLED: ${LOCAL_RERANKER_ENABLED:-true}
       # Pass-1 deterministic + Pass-2 SLM-residual enrichment (both default off).
@@ -63,7 +67,11 @@ services:
       EMBEDDER_URL: http://host.docker.internal:8082
       RERANKER_URL: http://host.docker.internal:8081
       DOCLING_URL: http://host.docker.internal:8500
-      RERANKER_SCORE_SCALE: cosine
+      RERANKER_SCORE_SCALE: probability
       RERANKER_MODEL: mlx-community/jina-reranker-v3-4bit-mxfp4
+      RERANKER_HTTP_BATCH_SIZE: ${RERANKER_HTTP_BATCH_SIZE:-16}
+      RERANKER_QUEUE_TIMEOUT_SECONDS: ${RERANKER_QUEUE_TIMEOUT_SECONDS:-5}
       EMBEDDER_MODEL_NAME: Qwen3-Embedding-0.6B
       EMBED_BATCH_SIZE: ${EMBED_BATCH_SIZE:-32}
+      EMBEDDER_LOCAL_TIMEOUT_SECONDS: ${EMBEDDER_LOCAL_TIMEOUT_SECONDS:-120}
+      EMBEDDER_QUERY_TIMEOUT_SECONDS: ${EMBEDDER_QUERY_TIMEOUT_SECONDS:-30}

@@ -286,7 +286,8 @@ REQUIREMENTS: tuple[Requirement, ...] = (
         description="Successful Mongo + Qdrant + Neo4j ingest schedules the debounced graph analytics/cache warm worker.",
         path="backend/services/ingestion/worker.py",
         needles=(
-            "if ws.qdrant_written and ws.neo4j_written:",
+            "summary_complete_for_cleanup = (not summary_gate_required) or ws.summaries_indexed",
+            "if ws.qdrant_written and ws.neo4j_written and summary_complete_for_cleanup:",
             "from services.graph.orchestrator import schedule_graph_discovery_cache_warm",
             "schedule_graph_discovery_cache_warm(",
         ),
@@ -529,7 +530,8 @@ REQUIREMENTS: tuple[Requirement, ...] = (
         needles=(
             "RERANKER_MAX_DOC_CHARS",
             '"1000"',
-            "physical batch",
+            "when a pair overflows it",
+            "query_guided_excerpt",
         ),
     ),
     Requirement(

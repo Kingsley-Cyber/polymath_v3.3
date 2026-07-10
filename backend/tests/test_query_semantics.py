@@ -1,4 +1,5 @@
 from services.retriever.query_semantics import (
+    concept_support_phrases,
     concept_groups,
     lexical_terms,
     required_atoms_for_query,
@@ -46,6 +47,42 @@ def test_phrase_aliases_collapse_to_semantic_concepts():
         "concept:nlp",
         "definition",
     }
+
+
+def test_sticky_message_and_sticky_idea_share_one_evidence_concept():
+    query = "how can a sticky message improve advertising"
+    query_groups = concept_groups(query)
+    sticky = next(group for group in query_groups if group.key == "sticky_message")
+
+    assert "sticky ideas" in sticky.aliases
+    assert "concept:sticky" not in required_atoms_for_query(query)
+    assert "concept:message" not in required_atoms_for_query(query)
+    assert "concept:sticky_message" in required_atoms_for_query(query)
+
+
+def test_sticky_message_support_expands_to_framework_vocabulary():
+    assert concept_support_phrases("sticky_message") == (
+        "sticky message",
+        "sticky idea",
+        "made to stick",
+        "successs principles",
+    )
+
+
+def test_used_is_query_scaffolding_not_an_evidence_concept():
+    atoms = required_atoms_for_query(
+        "How is emotional contrast used in a sticky message?"
+    )
+
+    assert "concept:used" not in atoms
+
+
+def test_cardinal_count_words_do_not_become_evidence_concepts():
+    atoms = required_atoms_for_query(
+        "What are the six SUCCESs principles in Made to Stick?"
+    )
+
+    assert "concept:six" not in atoms
 
 
 def test_art_of_seduction_does_not_make_art_a_required_concept():
@@ -99,3 +136,30 @@ def test_generic_descriptors_do_not_anchor_lanes():
         assert junk not in keys, f"{junk} must not anchor a lane"
     assert "seducers" in keys
     assert "trait" in keys
+
+
+def test_business_query_scaffolding_does_not_displace_substantive_concepts():
+    keys = [g.key for g in concept_groups(
+        "What repeated advice appears in this corpus about creating offers, "
+        "product positioning, and conversion?"
+    )]
+
+    for junk in ("repeated", "advice", "appears", "creating"):
+        assert junk not in keys
+    assert keys[:3] == ["conversion", "offers", "product_positioning"]
+
+
+def test_cross_corpus_media_scope_words_do_not_become_evidence_lanes():
+    keys = [g.key for g in concept_groups(
+        "Compare what the marketing transcripts and ecommerce PDFs say about "
+        "offers, positioning, conversion, and customer acquisition."
+    )]
+
+    for junk in ("marketing", "transcripts", "ecommerce", "pdfs"):
+        assert junk not in keys
+    assert keys[:4] == [
+        "conversion",
+        "customer_acquisition",
+        "offers",
+        "product_positioning",
+    ]

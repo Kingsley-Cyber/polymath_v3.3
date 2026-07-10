@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
-from typing import Literal
+from typing import Any, Literal
 
 import httpx
 
@@ -14,6 +16,43 @@ FatalErrorTier = Literal["hard", "soft"]
 HARD_FATAL_STATUS_CODES = {401, 402}
 SOFT_FATAL_STATUS_CODES = {403}
 SOFT_FATAL_DISABLE_STRIKES = 2
+
+_SHARED_PROVIDER_SEMAPHORES: dict[tuple[int, str, str], asyncio.Semaphore] = {}
+
+
+def shared_provider_semaphore(
+    entry: dict[str, Any],
+    *,
+    lane: int,
+    limit: int,
+) -> asyncio.Semaphore:
+    """Return one event-loop-local budget for a provider credential.
+
+    Ghost A and Ghost B can use the same provider card concurrently. Their
+    lane-local worker counts must not be added together or one key configured
+    for eight calls can receive sixteen. A hashed credential identity lets the
+    two pipelines share capacity without retaining or logging the secret.
+    """
+
+    normalized_limit = max(1, int(limit or 1))
+    raw_key = str(entry.get("api_key") or "").strip()
+    if raw_key:
+        credential_id = hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
+    else:
+        credential_id = f"lane:{lane}:{entry.get('model') or ''}"
+    endpoint = str(
+        entry.get("base_url")
+        or entry.get("api_base")
+        or entry.get("provider_preset")
+        or entry.get("provider")
+        or "litellm"
+    ).rstrip("/")
+    key = (id(asyncio.get_running_loop()), endpoint, credential_id)
+    semaphore = _SHARED_PROVIDER_SEMAPHORES.get(key)
+    if semaphore is None:
+        semaphore = asyncio.Semaphore(normalized_limit)
+        _SHARED_PROVIDER_SEMAPHORES[key] = semaphore
+    return semaphore
 
 HARD_FATAL_ERROR_MARKERS = (
     "insufficient balance",

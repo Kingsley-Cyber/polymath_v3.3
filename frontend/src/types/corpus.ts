@@ -285,6 +285,244 @@ export interface CorpusUpdate {
   default_ingestion_config?: IngestionConfig;
 }
 
+export interface CorpusReadiness {
+  corpus_id: string;
+  status: string;
+  schema_version?: string;
+  source?: string;
+  computed_at?: string;
+  stale?: boolean;
+  refresh_error?: string;
+  blocking?: string[];
+  error?: string;
+  next_actions?: Array<{
+    id: string;
+    label: string;
+    lane: string;
+    severity: "critical" | "warning" | "review" | string;
+    reason: string;
+    count: number;
+    blocked_by_pressure?: boolean;
+  }>;
+  documents?: {
+    total: number;
+    registered_total?: number;
+    excluded_total?: number;
+    queryable: number;
+    fully_enriched: number;
+    verified: number;
+    failed: number;
+    coverage: number;
+    fully_enriched_coverage: number;
+    stage_counts: Record<string, number>;
+  };
+  chunks?: {
+    total: number;
+    docs_with_chunks: number;
+  };
+  summaries?: {
+    scopes?: Record<
+      string,
+      | string
+      | {
+          label?: string;
+          description?: string;
+          readiness_gate?: boolean;
+          includes_chunk_kinds?: string[];
+          includes_missing_chunk_kind?: boolean;
+        }
+    >;
+    primary_parent_scope?: "retrieval_parent" | string;
+    primary_parent_label?: string;
+    /** Legacy parent_* fields alias this scope. */
+    parent_alias_scope?: "retrieval_parent" | string;
+    /** Canonical retrieval-summary gate. Same values as retrieval_parent_*; excludes structural parent rows. */
+    parent_total: number;
+    parent_done: number;
+    parent_missing: number;
+    parent_coverage: number;
+    /** Diagnostic count across all parent rows, including code/navigation/bibliography rows. */
+    all_parent_total?: number;
+    all_parent_done?: number;
+    all_parent_missing?: number;
+    all_parent_coverage?: number;
+    summary_excluded_parent_total?: number;
+    summary_excluded_parent_done?: number;
+    retrieval_parent_total: number;
+    retrieval_parent_done: number;
+    retrieval_parent_missing: number;
+    retrieval_parent_coverage: number;
+    /** Pure body-prose diagnostic only. Retrieval readiness also includes eligible table/legacy parent rows. */
+    body_parent_total: number;
+    body_parent_done: number;
+    body_parent_missing: number;
+    body_parent_coverage: number;
+    document_total: number;
+    document_done: number;
+    document_missing: number;
+    document_coverage: number;
+    document_synced_done?: number;
+    document_sync_missing?: number;
+    document_sync_coverage?: number;
+    document_profile_done: number;
+    document_tree_done: number;
+    document_both_done?: number;
+    document_profile_only?: number;
+    document_tree_only?: number;
+    document_mismatch?: number;
+  };
+  graph?: {
+    required: boolean;
+    promoted: number;
+    pending: number;
+    unpromoted_extraction_docs?: number;
+    unpromoted_extraction_rows?: number;
+    /** Legacy metadata drift: docs are graph-written, but old extraction artifacts lack promoted_at. */
+    unmarked_promoted_extraction_docs?: number;
+    unmarked_promoted_extraction_rows?: number;
+    failed_docs: number;
+    failed_chunks: number;
+    failure_docs: number;
+    failure_rows: number;
+    stale_failure_docs: number;
+    stale_failure_rows: number;
+    reconciled_stale_failure_docs: number;
+    reconciled_stale_failure_rows: number;
+    orphaned_failure_docs: number;
+  };
+  idempotency?: {
+    source_keyed_documents: number;
+    content_hash_documents: number;
+    missing_source_identity: number;
+    stage_identity_missing_total?: number;
+    stage_identity_blocking_total?: number;
+    source_parse_jobs_missing_stage_identity?: number;
+    document_pipeline_jobs_missing_stage_identity?: number;
+    extraction_jobs_missing_stage_identity?: number;
+    summary_jobs_missing_stage_identity?: number;
+    graph_promotion_jobs_missing_stage_identity?: number;
+    ghost_b_extractions_missing_stage_identity?: number;
+    ghost_b_extractions_missing_stage_identity_blocking?: number;
+    ghost_b_extractions_missing_stage_identity_legacy_ok?: number;
+    duplicate_source_key_groups: number;
+    duplicate_source_key_docs: number;
+    source_key_collision_groups?: number;
+    source_key_collision_docs?: number;
+    duplicate_content_hash_groups: number;
+    duplicate_content_hash_docs: number;
+  };
+  repair?: {
+    active_runs: number;
+    source_parse_jobs?: Record<string, number>;
+    source_parse_jobs_pending?: number;
+    source_parse_jobs_failed?: number;
+    document_pipeline_jobs?: Record<string, number>;
+    document_pipeline_jobs_pending?: number;
+    document_pipeline_jobs_failed?: number;
+    graph_promotion_jobs?: Record<string, number>;
+    extraction_jobs?: Record<string, number>;
+    extraction_jobs_pending?: number;
+    extraction_jobs_failed?: number;
+    extraction_jobs_blocked?: number;
+    provider_lane_health?: {
+      status?: string;
+      window_minutes?: number;
+      sample_size?: number;
+      cooldown_keys?: string[];
+      lanes?: Array<{
+        key?: string;
+        provider?: string;
+        model?: string;
+        lane?: number;
+        attempts?: number;
+        succeeded?: number;
+        failed?: number;
+        rate_limited?: number;
+        rate_limit_ratio?: number;
+        status?: string;
+        reasons?: string[];
+      }>;
+    };
+    summary_jobs?: Record<string, number>;
+    summary_jobs_pending?: number;
+    summary_jobs_waiting_dependencies?: number;
+    summary_jobs_failed?: number;
+    latest_runs?: Array<Record<string, unknown>>;
+  };
+  pressure?: {
+    status: "normal" | "elevated" | "high" | string;
+    reasons?: string[];
+    recommendations?: string[];
+    resources?: {
+      backend_rss_mb?: number | null;
+      ram_cap_mb?: number | null;
+      rss_soft_limit_mb?: number | null;
+      rss_pressure?: number | null;
+    };
+    queues?: {
+      active_repairs?: number;
+      graph_pending?: number;
+      extraction_pending?: number;
+      summary_missing?: number;
+    };
+    storage?: {
+      mongo_storage_bytes?: number;
+      mongo_data_bytes?: number;
+      mongo_index_bytes?: number;
+      mongo_objects?: number;
+      mongo_fs_used_bytes?: number;
+      mongo_fs_total_bytes?: number;
+      mongo_fs_pressure?: number | null;
+      mongo_storage_warn_ratio?: number;
+      mongo_storage_stop_ratio?: number;
+    };
+    limits?: {
+      qdrant_write_concurrency?: number | null;
+      neo4j_write_concurrency?: number | null;
+    };
+    writers?: {
+      qdrant?: {
+        status?: string;
+        reasons?: string[];
+        write_latency_ms?: number | null;
+        queue_depth?: number;
+        queue_warn?: number;
+        queue_stop?: number;
+        source?: string;
+        max_queue_depth?: number;
+        deferred_points?: number;
+        collections_total?: number;
+        vectors_total?: number;
+        memory_resident_bytes?: number;
+        memory_allocated_bytes?: number;
+        memory_active_bytes?: number;
+        memory_retained_bytes?: number;
+        memory_limit_bytes?: number;
+        memory_pressure?: number;
+        memory_warn_ratio?: number;
+        memory_stop_ratio?: number;
+      };
+      neo4j?: {
+        status?: string;
+        reasons?: string[];
+        write_latency_ms?: number | null;
+        queue_depth?: number;
+        queue_warn?: number;
+        queue_stop?: number;
+      };
+    };
+    backpressure?: {
+      source_parse_allowed?: boolean;
+      document_pipeline_allowed?: boolean;
+      summary_generation_allowed?: boolean;
+      summary_indexing_allowed?: boolean;
+      summary_backfill_allowed?: boolean;
+      extraction_backfill_allowed?: boolean;
+      graph_promotion_allowed?: boolean;
+    };
+  };
+}
+
 export interface CorpusResponse {
   corpus_id: string;
   name: string;
@@ -297,6 +535,7 @@ export interface CorpusResponse {
   chunk_count: number;
   embedding_model_id: string | null;
   default_ingestion_config: IngestionConfig;
+  readiness?: CorpusReadiness | null;
 }
 
 export interface ParentChunk {
@@ -531,6 +770,15 @@ export interface ExtractionContractResponse {
   source: "corpus" | "global" | "default";
   models_linked: boolean;
   pool_source: "extraction_models" | "summary_models" | "none";
+  routing_policy?: "work_stealing" | "balanced" | "primary_fallback" | null;
+  lane_capacities?: Array<{
+    lane: number;
+    provider?: string | null;
+    model?: string | null;
+    max_concurrent?: number | null;
+    concurrency_policy?: "static_lane_cap" | "adaptive_vram_85" | string;
+    local_private?: boolean;
+  }>;
   pool: Array<{
     provider_preset?: string | null;
     model: string;

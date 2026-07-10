@@ -148,3 +148,33 @@ async def test_existing_collection_dimension_mismatch_fails_loudly():
             "abcdef123456",
             dim=1024,
         )
+
+
+class _DeleteClient:
+    def __init__(self) -> None:
+        self.selectors = []
+
+    async def collection_exists(self, _collection_name: str) -> bool:
+        return True
+
+    async def delete(self, *, points_selector, **_kwargs):
+        self.selectors.append(points_selector)
+        return SimpleNamespace(operation_id=1)
+
+
+@pytest.mark.asyncio
+async def test_doc_replace_can_preserve_existing_summary_points():
+    client = _DeleteClient()
+
+    await qdrant_writer.delete_points_by_doc(
+        client,
+        "abcdef123456",
+        "doc-1",
+        preserve_summary_points=True,
+    )
+
+    assert len(client.selectors) == 3
+    for selector in client.selectors:
+        assert selector.must_not
+        assert selector.must_not[0].key == "chunk_type"
+        assert selector.must_not[0].match.value == "summary"

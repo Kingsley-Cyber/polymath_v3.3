@@ -214,6 +214,145 @@ async def test_stash_accepts_pre_serialized_dicts():
 
 
 @pytest.mark.asyncio
+async def test_stash_ghost_b_rows_carry_current_stage_identity():
+    db = _FakeDb()
+    doc_id = "unit-test-doc-identity"
+    corpus_id = "unit-test-corpus-identity"
+    await db["documents"].insert_one(
+        {
+            "doc_id": doc_id,
+            "corpus_id": corpus_id,
+            "source_identity": {"content_sha256": "source-hash"},
+            "source_key": "sha256:source-hash",
+            "updated_at": "doc-v1",
+            "ingestion_config": {
+                "extraction_engine": "cloud",
+                "models_linked": False,
+                "extraction_models": [{"model": "openai/test"}],
+                "use_neo4j": True,
+            },
+            "schema_lens": {"relations": ["created_by"]},
+        }
+    )
+    await db["chunks"].insert_one(
+        {
+            "doc_id": doc_id,
+            "corpus_id": corpus_id,
+            "chunk_id": "c-id",
+            "text": "Apple Inc. was co-founded by Steve Jobs.",
+            "chunk_hash": "chunk-hash-v1",
+            "chunk_version": "chunk-v1",
+            "updated_at": "chunk-updated",
+        }
+    )
+
+    result = _sample_result("c-id")
+    result.model = "openai/polymath-extract"
+    result.provider = "local_private_vllm"
+    result.lane = 0
+    result.schema_mode = "json_schema"
+    result.output_mode = "json_schema"
+    result.json_repair_mode = "provider_native"
+    result.semantic_verifier_mode = "strict_with_direction_repair"
+    result.prompt_hash = "prompt-hash"
+    result.prompt_chars = 123
+    result.provider_card = {
+        "provider": "local_private_vllm",
+        "schema_mode": "json_schema",
+        "promotion_gate": ["required_evidence_phrase", "allowed_predicate"],
+    }
+
+    await mongo_writer.stash_ghost_b(
+        db,
+        doc_id,
+        corpus_id,
+        [result],
+    )
+    row = await db["ghost_b_extractions"].find_one(
+        {"doc_id": doc_id, "corpus_id": corpus_id, "chunk_id": "c-id"}
+    )
+
+    assert row["chunk_hash"] == "chunk-hash-v1"
+    assert row["chunk_version"] == "chunk-v1"
+    assert row["doc_version"] == "doc-v1"
+    assert row["extraction_contract_hash"]
+    assert row["model"] == "openai/polymath-extract"
+    assert row["provider"] == "local_private_vllm"
+    assert row["lane"] == 0
+    assert row["schema_mode"] == "json_schema"
+    assert row["output_mode"] == "json_schema"
+    assert row["json_repair_mode"] == "provider_native"
+    assert row["semantic_verifier_mode"] == "strict_with_direction_repair"
+    assert row["prompt_hash"] == "prompt-hash"
+    assert row["prompt_chars"] == 123
+    assert row["provider_card"]["promotion_gate"] == [
+        "required_evidence_phrase",
+        "allowed_predicate",
+    ]
+    assert str(row["raw_output_artifact_id"]).startswith("derived:")
+    assert row["stage_identity"]["identity_version"] == "stage_identity.v1"
+    assert row["stage_identity"]["source_file_hash"] == "source-hash"
+    assert row["stage_identity"]["chunk_hash"] == "chunk-hash-v1"
+    assert (
+        row["stage_identity"]["extraction_contract_hash"]
+        == row["extraction_contract_hash"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_stash_ghost_b_failure_rows_carry_current_stage_identity():
+    db = _FakeDb()
+    doc_id = "unit-test-doc-failure-identity"
+    corpus_id = "unit-test-corpus-failure-identity"
+    await db["documents"].insert_one(
+        {
+            "doc_id": doc_id,
+            "corpus_id": corpus_id,
+            "updated_at": "doc-v2",
+            "ingestion_config": {"extraction_engine": "cloud"},
+        }
+    )
+    await db["chunks"].insert_one(
+        {
+            "doc_id": doc_id,
+            "corpus_id": corpus_id,
+            "chunk_id": "c-fail",
+            "text": "This failed chunk still has a live identity.",
+            "text_hash": "text-hash-v2",
+            "updated_at": "chunk-v2",
+        }
+    )
+    failure = ExtractionFailureItem(
+        chunk_id="c-fail",
+        doc_id=doc_id,
+        corpus_id=corpus_id,
+        model="openai/test",
+        lane=1,
+        attempts=2,
+        error_type="validation_error",
+        error_message="bad predicate",
+        prompt_hash="prompt-sha",
+        prompt_chars=321,
+        raw_output_fingerprint={"sha256": "raw-sha", "chars": 42},
+    )
+
+    await mongo_writer.stash_ghost_b_failures(db, doc_id, corpus_id, [failure])
+    row = await db["ghost_b_extractions"].find_one(
+        {"doc_id": doc_id, "corpus_id": corpus_id, "chunk_id": "c-fail"}
+    )
+
+    assert row["status"] == "error"
+    assert row["chunk_hash"] == "text-hash-v2"
+    assert row["doc_version"] == "doc-v2"
+    assert row["extraction_contract_hash"]
+    assert row["prompt_hash"] == "prompt-sha"
+    assert row["prompt_chars"] == 321
+    assert row["raw_output_artifact_id"] == "sha256:raw-sha"
+    assert row["raw_output_fingerprint"] == {"sha256": "raw-sha", "chars": 42}
+    assert row["stage_identity"]["chunk_hash"] == "text-hash-v2"
+
+
+@pytest.mark.asyncio
 async def test_split_staging_keeps_document_compact_for_thousands_of_rows():
     """Thousands of Ghost B rows must not inflate the documents record."""
     db = _FakeDb()

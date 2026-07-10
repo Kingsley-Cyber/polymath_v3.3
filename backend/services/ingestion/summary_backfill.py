@@ -40,6 +40,7 @@ from services.ingestion.summary_semantics import (
     looks_like_raw_json_text,
     repair_parent_summary_row,
 )
+from services.ingestion.section_classifier import parent_summary_required_clause
 
 _POOL_FILE = os.environ.get("POLYMATH_SUMMARY_POOL_FILE", "/tmp/summary_pool.json")
 _EMBED_DIM = 1024  # MLX Qwen3-Embedding — same space as children + query path
@@ -95,7 +96,7 @@ def _row_child_ids(row: dict) -> list[str]:
     return [str(v) for v in values if str(v)]
 
 
-async def _child_context_for_rows(db, corpus_id: str, rows: list[dict]) -> dict[str, dict]:
+async def child_context_for_rows(db, corpus_id: str, rows: list[dict]) -> dict[str, dict]:
     """Hydrate child anchors for parent-summary generation.
 
     The summary artifact contract needs stable child IDs even during backfill.
@@ -151,6 +152,39 @@ async def _child_context_for_rows(db, corpus_id: str, rows: list[dict]) -> dict[
     return out
 
 
+def summary_result_fields(result, *, updated_at: datetime) -> dict:
+    """Return the complete canonical parent-summary persistence payload."""
+
+    return {
+        "summary": result.summary,
+        "domain": getattr(result, "domain", None),
+        "topics": getattr(result, "topics", None),
+        "semantic_chunk_type": getattr(result, "semantic_chunk_type", None),
+        "key_terms": getattr(result, "key_terms", None),
+        "mechanisms": getattr(result, "mechanisms", None),
+        "schema_version": getattr(result, "schema_version", None),
+        "summary_type": getattr(result, "summary_type", None),
+        "central_claim": getattr(result, "central_claim", None),
+        "key_points": getattr(result, "key_points", None),
+        "main_mechanism": getattr(result, "main_mechanism", None),
+        "concept_tags": getattr(result, "concept_tags", None),
+        "entity_hints": getattr(result, "entity_hints", None),
+        "retrieval_uses": getattr(result, "retrieval_uses", None),
+        "abstraction_level": getattr(result, "abstraction_level", None),
+        "source_child_ids": getattr(result, "source_child_ids", None),
+        "summary_id": getattr(result, "summary_id", None),
+        "source_hash": getattr(result, "source_hash", None),
+        "summary_model": getattr(result, "summary_model", None),
+        "summary_created_at": getattr(result, "summary_created_at", None),
+        "validation_status": getattr(result, "validation_status", None),
+        "repair_status": getattr(result, "repair_status", None),
+        "quality_score": getattr(result, "quality_score", None),
+        "quality_flags": getattr(result, "quality_flags", None),
+        "retrieval_text": getattr(result, "retrieval_text", None),
+        "summary_updated_at": updated_at,
+    }
+
+
 # ── index (free) ─────────────────────────────────────────────────────────────
 async def index_existing(corpus_id: str, *, batch: int = 256) -> dict:
     """Embed + upsert summary points for every parent that has summary text."""
@@ -204,11 +238,13 @@ async def generate(corpus_id: str, *, batch: int = 400, limit: int | None = None
                                   # run always advances (thinking-model empties /
                                   # transient errors don't stall the front)
     try:
-        # Body parents only — Ghost A intentionally skips non-body kinds
-        # (code/table/index/bibliography/toc), so those are NOT a summary gap.
-        q = {"corpus_id": corpus_id, "chunk_kind": "body",
-             "$or": [{"summary": None}, {"summary": ""},
-                     {"summary": {"$exists": False}}]}
+        # Generate only parent rows that participate in retrieval-summary
+        # readiness. Structural rows are not a summary gap.
+        q = {"corpus_id": corpus_id, "$and": [
+            parent_summary_required_clause(),
+            {"$or": [{"summary": None}, {"summary": ""},
+                     {"summary": {"$exists": False}}]},
+        ]}
         start_missing = await db["parent_chunks"].count_documents(q)
         print(f"generate: {start_missing} parents need summaries"
               + (f" (capped to {limit} this run)" if limit else ""))
@@ -225,7 +261,7 @@ async def generate(corpus_id: str, *, batch: int = 400, limit: int | None = None
             if not rows:
                 break
             batches += 1
-            child_context = await _child_context_for_rows(db, corpus_id, rows)
+            child_context = await child_context_for_rows(db, corpus_id, rows)
             tasks = [
                 SummaryTask(
                     parent_id=r["parent_id"],
@@ -266,33 +302,9 @@ async def generate(corpus_id: str, *, batch: int = 400, limit: int | None = None
             consecutive_empty = 0
             # persist
             from pymongo import UpdateOne
+            now = datetime.now(timezone.utc)
             ops = [UpdateOne({"parent_id": r.parent_id, "corpus_id": corpus_id},
-                             {"$set": {"summary": r.summary,
-                                       "domain": getattr(r, "domain", None),
-                                       "topics": getattr(r, "topics", None),
-                                       "semantic_chunk_type": getattr(r, "semantic_chunk_type", None),
-                                       "key_terms": getattr(r, "key_terms", None),
-                                       "mechanisms": getattr(r, "mechanisms", None),
-                                       "schema_version": getattr(r, "schema_version", None),
-                                       "summary_type": getattr(r, "summary_type", None),
-                                       "central_claim": getattr(r, "central_claim", None),
-                                       "key_points": getattr(r, "key_points", None),
-                                       "main_mechanism": getattr(r, "main_mechanism", None),
-                                       "concept_tags": getattr(r, "concept_tags", None),
-                                       "entity_hints": getattr(r, "entity_hints", None),
-                                       "retrieval_uses": getattr(r, "retrieval_uses", None),
-                                       "abstraction_level": getattr(r, "abstraction_level", None),
-                                       "source_child_ids": getattr(r, "source_child_ids", None),
-                                       "summary_id": getattr(r, "summary_id", None),
-                                       "source_hash": getattr(r, "source_hash", None),
-                                       "summary_model": getattr(r, "summary_model", None),
-                                       "summary_created_at": getattr(r, "summary_created_at", None),
-                                       "validation_status": getattr(r, "validation_status", None),
-                                       "repair_status": getattr(r, "repair_status", None),
-                                       "quality_score": getattr(r, "quality_score", None),
-                                       "quality_flags": getattr(r, "quality_flags", None),
-                                       "retrieval_text": getattr(r, "retrieval_text", None),
-                                       "summary_updated_at": datetime.now(timezone.utc)}})
+                             {"$set": summary_result_fields(r, updated_at=now)})
                    for r in results]
             if ops:
                 await db["parent_chunks"].bulk_write(ops, ordered=False)

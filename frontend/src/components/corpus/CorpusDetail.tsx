@@ -22,6 +22,7 @@ import {
   Copy,
   BookOpen,
   Search,
+  Zap,
 } from "lucide-react";
 import * as api from "../../lib/api";
 import { parseBookMeta } from "../../lib/label-utils";
@@ -65,6 +66,34 @@ function formatRate(value?: number | null): string {
   return `${Math.round(value * 100)}%`;
 }
 
+function formatCoverage(done?: number | null, total?: number | null): string {
+  const safeDone = done ?? 0;
+  const safeTotal = total ?? 0;
+  if (safeTotal <= 0) return `${safeDone}/0`;
+  return `${safeDone}/${safeTotal} · ${Math.round((safeDone / safeTotal) * 100)}%`;
+}
+
+function readinessLabel(status?: string | null): string {
+  return (status || "unknown").replace(/_/g, " ");
+}
+
+function readinessTone(status?: string | null): string {
+  if (status === "fully_enriched") return "text-accent-main border-accent-main/50";
+  if (
+    status === "summaries_pending" ||
+    status === "graph_pending" ||
+    status === "ingestion_pending" ||
+    status === "queryable_partial" ||
+    status === "needs_review"
+  ) {
+    return "text-amber-300 border-amber-400/40";
+  }
+  if (status === "needs_repair" || status === "needs_reconciliation" || status === "not_ready") {
+    return "text-error border-error/40";
+  }
+  return "text-content-tertiary border-border-minimal";
+}
+
 function providerLabel(provider: string): string {
   const key = provider.toLowerCase();
   if (key.includes("vllm") || key.includes("rtx")) return "RTX";
@@ -81,6 +110,204 @@ function topCountEntries(counts?: Record<string, number>, limit = 4) {
     .slice(0, limit);
 }
 
+type SummaryScopeValue =
+  | string
+  | {
+      label?: string;
+      description?: string;
+      readiness_gate?: boolean;
+      includes_chunk_kinds?: string[];
+      includes_missing_chunk_kind?: boolean;
+    };
+
+function summaryScope(
+  scopes: Record<string, SummaryScopeValue> | undefined,
+  key: string,
+): { label?: string; description?: string } {
+  const value = scopes?.[key];
+  if (!value || typeof value === "string") return {};
+  return {
+    label: value.label,
+    description: value.description,
+  };
+}
+
+type RepairCycleSummary = {
+  readiness_status?: string;
+  pressure_status?: string;
+  pressure_recommendations?: string[];
+  queryable_docs?: number;
+  total_docs?: number;
+  main_summary_missing?: number;
+  document_summary_missing?: number;
+  document_summaries_built?: number;
+  graph_pending?: number;
+  failed_chunks?: number;
+  stale_failure_rows?: number;
+  promoted_extraction_marks_planned?: number;
+  promoted_extraction_marks_backfilled?: number;
+  graph_jobs_queued?: number;
+  graph_jobs_running?: number;
+  graph_jobs_blocked?: number;
+  source_parse_jobs_queued?: number;
+  source_parse_jobs_running?: number;
+  source_parse_jobs_blocked?: number;
+  source_parse_jobs_started?: number;
+  document_pipeline_jobs_queued?: number;
+  document_pipeline_jobs_running?: number;
+  document_pipeline_jobs_blocked?: number;
+  document_pipeline_jobs_ran?: number;
+  document_pipeline_jobs_succeeded?: number;
+  extraction_jobs_queued?: number;
+  extraction_jobs_failed?: number;
+  extraction_jobs_blocked?: number;
+  summary_jobs_queued?: number;
+  summary_jobs_running?: number;
+  summary_jobs_pending?: number;
+  summary_jobs_waiting_dependencies?: number;
+  summary_jobs_blocked?: number;
+  summary_jobs_ran?: number;
+  summary_jobs_succeeded?: number;
+};
+
+type RepairCycleResult = {
+  status?: string;
+  apply?: boolean;
+  background?: boolean;
+  run_id?: string;
+  summary?: RepairCycleSummary;
+};
+
+type SummaryBackfillResult = {
+  status?: string;
+  run_id?: string;
+  generated?: number;
+  attempted?: number;
+  indexed?: number;
+  limit?: number | null;
+  index_scope?: string;
+  index_requested?: boolean;
+  index_deferred_by_pressure?: boolean;
+};
+
+type ExtractionJobPlanResult = {
+  status?: string;
+  apply?: boolean;
+  planned?: number;
+  counts?: Record<string, number>;
+  kind_counts?: Record<string, number>;
+};
+
+type SummaryJobPlanResult = {
+  status?: string;
+  apply?: boolean;
+  planned?: number;
+  counts?: Record<string, number>;
+  kind_counts?: Record<string, number>;
+};
+
+type SummaryJobRunResult = {
+  status?: string;
+  claimed?: number;
+  reclaimed?: number;
+  parent_claimed?: number;
+  document_claimed?: number;
+  counts?: Record<string, number>;
+  runner_results?: Record<
+    string,
+    {
+      index_scope?: string;
+      index_requested?: boolean;
+      index_deferred_by_pressure?: boolean;
+      generated?: number;
+      indexed?: number;
+    }
+  >;
+};
+
+type SourceParseJobPlanResult = {
+  status?: string;
+  apply?: boolean;
+  planned?: number;
+  counts?: Record<string, number>;
+  kind_counts?: Record<string, number>;
+};
+
+type SourceParseJobRunResult = {
+  status?: string;
+  requested?: number;
+  eligible_items?: number;
+  batch_count?: number;
+  runners_started?: number;
+  runner_deferred?: boolean;
+  counts?: Record<string, number>;
+};
+
+type DocumentPipelineJobPlanResult = {
+  status?: string;
+  apply?: boolean;
+  planned?: number;
+  counts?: Record<string, number>;
+  kind_counts?: Record<string, number>;
+};
+
+type DocumentPipelineJobRunResult = {
+  status?: string;
+  claimed?: number;
+  reclaimed?: number;
+  source_claimed?: number;
+  source_requested?: boolean;
+  executor_missing_kinds?: string[];
+  runner_results?: Record<string, unknown>;
+  counts?: Record<string, number>;
+};
+
+type ExtractionJobRunResult = {
+  status?: string;
+  claimed?: number;
+  reclaimed?: number;
+  counts?: Record<string, number>;
+};
+
+type IdentityAuditDocCard = {
+  doc_id?: string;
+  filename?: string;
+  title?: string;
+  ingest_stage?: string;
+  source_key?: string;
+  source_kind?: string;
+  content_sha256?: string;
+  identity_version?: string;
+  write_state?: Partial<WriteState>;
+};
+
+type IdentityAuditDuplicateGroup = {
+  source_key?: string;
+  content_sha256?: string;
+  doc_count?: number;
+  canonical_doc_id?: string | null;
+  canonical_doc?: IdentityAuditDocCard | null;
+  duplicate_doc_ids?: string[];
+  recommended_action?: string;
+  docs?: IdentityAuditDocCard[];
+};
+
+type IdentityAuditResult = {
+  status?: string;
+  doc_total?: number;
+  source_keyed_documents?: number;
+  content_hash_documents?: number;
+  missing_source_identity_count?: number;
+  duplicate_source_key_group_count?: number;
+  duplicate_source_key_doc_count?: number;
+  source_key_collision_group_count?: number;
+  source_key_collision_doc_count?: number;
+  duplicate_content_hash_group_count?: number;
+  duplicate_content_hash_doc_count?: number;
+  duplicate_source_key_groups?: IdentityAuditDuplicateGroup[];
+  duplicate_content_hash_groups?: IdentityAuditDuplicateGroup[];
+};
+
 function getWriteStateMessages(
   state: Pick<WriteState, "warnings" | "verify_errors">,
 ) {
@@ -89,6 +316,22 @@ function getWriteStateMessages(
 
 function getParentCount(doc: DocumentResponse): number {
   return doc.parent_count ?? doc.parent_chunks?.length ?? 0;
+}
+
+function getIdentityAuditAction(result: IdentityAuditResult | null): string | null {
+  if (!result) return null;
+  const group =
+    result.duplicate_source_key_groups?.[0] ??
+    result.duplicate_content_hash_groups?.[0];
+  if (group?.recommended_action === "repair_source_identity_collision") {
+    return "Repair source identity collision before reusing artifacts; matching source_key rows have different content hashes";
+  }
+  if (!group?.canonical_doc_id) return null;
+  const duplicateCount = group.duplicate_doc_ids?.length ?? 0;
+  if (duplicateCount <= 0) return null;
+  const canonicalLabel =
+    group.canonical_doc?.filename || group.canonical_doc_id || "canonical doc";
+  return `Keep ${canonicalLabel}; reuse artifacts for ${duplicateCount} exact duplicate${duplicateCount === 1 ? "" : "s"}`;
 }
 
 function getBatchItemStatusLabel(item: IngestBatchItemResponse): string {
@@ -121,7 +364,7 @@ function defaultBatchProfile(corpus: CorpusResponse): IngestProfileName {
         extras.resource_class === "remote_vllm" ||
         extras.managed_vllm === true
       );
-    }) || ["local", "cloud", "dual", "local_then_cloud", "local_then_enrich"].includes(engine);
+    }) || ["cloud", "dual", "local_then_cloud", "local_then_enrich"].includes(engine);
   return hasRemotePool ? "rtx_assisted" : "mac_queryable_first";
 }
 
@@ -284,6 +527,33 @@ export function CorpusDetail({
   const [localBatch, setLocalBatch] = useState<IngestBatchResponse | null>(null);
   const [isStartingLocalBatch, setIsStartingLocalBatch] = useState(false);
   const [isQuickUploading, setIsQuickUploading] = useState(false);
+  const [isRunningRepairCycle, setIsRunningRepairCycle] = useState(false);
+  const [repairCycleResult, setRepairCycleResult] = useState<RepairCycleResult | null>(null);
+  const [isQueueingSummaryBackfill, setIsQueueingSummaryBackfill] = useState(false);
+  const [summaryBackfillResult, setSummaryBackfillResult] = useState<SummaryBackfillResult | null>(null);
+  const [isPlanningExtractionJobs, setIsPlanningExtractionJobs] = useState(false);
+  const [extractionJobPlanResult, setExtractionJobPlanResult] = useState<ExtractionJobPlanResult | null>(null);
+  const [isPlanningSummaryJobs, setIsPlanningSummaryJobs] = useState(false);
+  const [summaryJobPlanResult, setSummaryJobPlanResult] = useState<SummaryJobPlanResult | null>(null);
+  const [isRunningSummaryJobs, setIsRunningSummaryJobs] = useState(false);
+  const [summaryJobRunResult, setSummaryJobRunResult] = useState<SummaryJobRunResult | null>(null);
+  const [isPlanningSourceParseJobs, setIsPlanningSourceParseJobs] = useState(false);
+  const [sourceParseJobPlanResult, setSourceParseJobPlanResult] =
+    useState<SourceParseJobPlanResult | null>(null);
+  const [isRunningSourceParseJobs, setIsRunningSourceParseJobs] = useState(false);
+  const [sourceParseJobRunResult, setSourceParseJobRunResult] =
+    useState<SourceParseJobRunResult | null>(null);
+  const [isPlanningDocumentPipelineJobs, setIsPlanningDocumentPipelineJobs] = useState(false);
+  const [documentPipelineJobPlanResult, setDocumentPipelineJobPlanResult] =
+    useState<DocumentPipelineJobPlanResult | null>(null);
+  const [isRunningDocumentPipelineJobs, setIsRunningDocumentPipelineJobs] = useState(false);
+  const [documentPipelineJobRunResult, setDocumentPipelineJobRunResult] =
+    useState<DocumentPipelineJobRunResult | null>(null);
+  const [isRunningExtractionJobs, setIsRunningExtractionJobs] = useState(false);
+  const [extractionJobRunResult, setExtractionJobRunResult] = useState<ExtractionJobRunResult | null>(null);
+  const [isAuditingIdentity, setIsAuditingIdentity] = useState(false);
+  const [identityAuditResult, setIdentityAuditResult] = useState<IdentityAuditResult | null>(null);
+  const identityAuditAction = getIdentityAuditAction(identityAuditResult);
   const quickUploadInputRef = useRef<HTMLInputElement | null>(null);
 
   // Modal global status — used to warn when corpus default is embed_mode='modal'
@@ -580,6 +850,229 @@ export function CorpusDetail({
     }
   };
 
+  const handleRepairCycle = async (
+    apply: boolean,
+    options: {
+      background?: boolean;
+      runGraphJobs?: boolean;
+      runExtractionJobs?: boolean;
+      runDocumentPipelineJobs?: boolean;
+      runSummaryJobs?: boolean;
+      runDocumentSummaries?: boolean;
+    } = {},
+  ) => {
+    setIsRunningRepairCycle(true);
+    setError(null);
+    try {
+      const result = (await api.runCorpusRepairCycle(corpus.corpus_id, {
+        apply,
+        background: options.background ?? false,
+        reconcile_failures: true,
+        failure_reconcile_limit: 5000,
+        backfill_promoted_extraction_marks_rows: true,
+        promoted_extraction_marks_backfill_limit: 100,
+        plan_source_parse_jobs: true,
+        source_parse_job_plan_limit: 1000,
+        plan_document_pipeline_jobs: true,
+        document_pipeline_job_plan_limit: 1000,
+        run_document_pipeline_jobs: options.runDocumentPipelineJobs ?? false,
+        document_pipeline_job_run_limit: 25,
+        plan_graph_jobs: true,
+        graph_plan_limit: 100,
+        plan_extraction_jobs: true,
+        extraction_job_plan_limit: 500,
+        run_extraction_jobs: options.runExtractionJobs ?? false,
+        extraction_job_run_limit: 25,
+        run_summary_jobs: options.runSummaryJobs ?? false,
+        summary_job_run_limit: 25,
+        run_document_summaries: options.runDocumentSummaries ?? false,
+        document_summary_limit: 10,
+        run_graph_jobs: options.runGraphJobs ?? false,
+        graph_run_limit: 3,
+      })) as RepairCycleResult;
+      setRepairCycleResult(result);
+      const refreshed = await api.getCorpus(corpus.corpus_id);
+      onCorpusUpdated(refreshed);
+      if (apply) {
+        await loadDocuments();
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to run corpus repair cycle");
+    } finally {
+      setIsRunningRepairCycle(false);
+    }
+  };
+
+  const handleSummaryBackfill = async () => {
+    setIsQueueingSummaryBackfill(true);
+    setError(null);
+    try {
+      const result = (await api.backfillCorpusSummaries(corpus.corpus_id, {
+        generate: true,
+        index: true,
+        limit: 500,
+        batch: 32,
+        background: true,
+      })) as SummaryBackfillResult;
+      setSummaryBackfillResult(result);
+      onCorpusUpdated(await api.getCorpus(corpus.corpus_id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to queue summary backfill");
+    } finally {
+      setIsQueueingSummaryBackfill(false);
+    }
+  };
+
+  const handlePlanExtractionJobs = async () => {
+    setIsPlanningExtractionJobs(true);
+    setError(null);
+    try {
+      const result = (await api.planCorpusExtractionJobs(corpus.corpus_id, {
+        apply: true,
+        limit: 1000,
+        include_succeeded: false,
+      })) as ExtractionJobPlanResult;
+      setExtractionJobPlanResult(result);
+      onCorpusUpdated(await api.getCorpus(corpus.corpus_id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to plan extraction jobs");
+    } finally {
+      setIsPlanningExtractionJobs(false);
+    }
+  };
+
+  const handlePlanSummaryJobs = async () => {
+    setIsPlanningSummaryJobs(true);
+    setError(null);
+    try {
+      const result = (await api.planCorpusSummaryJobs(corpus.corpus_id, {
+        apply: true,
+        limit: 1000,
+      })) as SummaryJobPlanResult;
+      setSummaryJobPlanResult(result);
+      onCorpusUpdated(await api.getCorpus(corpus.corpus_id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to plan summary jobs");
+    } finally {
+      setIsPlanningSummaryJobs(false);
+    }
+  };
+
+  const handleRunSummaryJobs = async () => {
+    setIsRunningSummaryJobs(true);
+    setError(null);
+    try {
+      const result = (await api.runCorpusSummaryJobs(corpus.corpus_id, {
+        limit: 25,
+      })) as SummaryJobRunResult;
+      setSummaryJobRunResult(result);
+      onCorpusUpdated(await api.getCorpus(corpus.corpus_id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to run summary jobs");
+    } finally {
+      setIsRunningSummaryJobs(false);
+    }
+  };
+
+  const handlePlanDocumentPipelineJobs = async () => {
+    setIsPlanningDocumentPipelineJobs(true);
+    setError(null);
+    try {
+      const result = (await api.planCorpusDocumentPipelineJobs(corpus.corpus_id, {
+        apply: true,
+        limit: 1000,
+      })) as DocumentPipelineJobPlanResult;
+      setDocumentPipelineJobPlanResult(result);
+      onCorpusUpdated(await api.getCorpus(corpus.corpus_id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to plan document pipeline jobs");
+    } finally {
+      setIsPlanningDocumentPipelineJobs(false);
+    }
+  };
+
+  const handleRunDocumentPipelineJobs = async () => {
+    setIsRunningDocumentPipelineJobs(true);
+    setError(null);
+    try {
+      const result = (await api.runCorpusDocumentPipelineJobs(corpus.corpus_id, {
+        limit: 25,
+      })) as DocumentPipelineJobRunResult;
+      setDocumentPipelineJobRunResult(result);
+      onCorpusUpdated(await api.getCorpus(corpus.corpus_id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to run document pipeline jobs");
+    } finally {
+      setIsRunningDocumentPipelineJobs(false);
+    }
+  };
+
+  const handlePlanSourceParseJobs = async () => {
+    setIsPlanningSourceParseJobs(true);
+    setError(null);
+    try {
+      const result = (await api.planCorpusSourceParseJobs(corpus.corpus_id, {
+        apply: true,
+        limit: 1000,
+      })) as SourceParseJobPlanResult;
+      setSourceParseJobPlanResult(result);
+      onCorpusUpdated(await api.getCorpus(corpus.corpus_id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to plan source parse jobs");
+    } finally {
+      setIsPlanningSourceParseJobs(false);
+    }
+  };
+
+  const handleRunSourceParseJobs = async () => {
+    setIsRunningSourceParseJobs(true);
+    setError(null);
+    try {
+      const result = (await api.runCorpusSourceParseJobs(corpus.corpus_id, {
+        limit: 25,
+      })) as SourceParseJobRunResult;
+      setSourceParseJobRunResult(result);
+      onCorpusUpdated(await api.getCorpus(corpus.corpus_id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to run source parse jobs");
+    } finally {
+      setIsRunningSourceParseJobs(false);
+    }
+  };
+
+  const handleRunExtractionJobs = async () => {
+    setIsRunningExtractionJobs(true);
+    setError(null);
+    try {
+      const result = (await api.runCorpusExtractionJobs(corpus.corpus_id, {
+        limit: 25,
+      })) as ExtractionJobRunResult;
+      setExtractionJobRunResult(result);
+      onCorpusUpdated(await api.getCorpus(corpus.corpus_id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to run extraction jobs");
+    } finally {
+      setIsRunningExtractionJobs(false);
+    }
+  };
+
+  const handleIdentityAudit = async () => {
+    setIsAuditingIdentity(true);
+    setError(null);
+    try {
+      const result = (await api.auditCorpusIdempotency(corpus.corpus_id, {
+        group_limit: 10,
+        missing_limit: 10,
+      })) as IdentityAuditResult;
+      setIdentityAuditResult(result);
+      onCorpusUpdated(await api.getCorpus(corpus.corpus_id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to audit source identity");
+    } finally {
+      setIsAuditingIdentity(false);
+    }
+  };
+
   const formatDate = (iso: string) => {
     const d = new Date(iso);
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
@@ -614,6 +1107,67 @@ export function CorpusDetail({
     batchReport?.ghost_b_model_call_counts ??
     {};
   const batchRouteEntries = topCountEntries(batchRouteCounts);
+  const readiness = corpus.readiness;
+  const readinessDocs = readiness?.documents;
+  const readinessGraph = readiness?.graph;
+  const readinessSummaries = readiness?.summaries;
+  const retrievalSummaryScope = summaryScope(
+    readinessSummaries?.scopes as Record<string, SummaryScopeValue> | undefined,
+    "retrieval_parent",
+  );
+  const allParentSummaryScope = summaryScope(
+    readinessSummaries?.scopes as Record<string, SummaryScopeValue> | undefined,
+    "all_parent",
+  );
+  const documentSummaryScope = summaryScope(
+    readinessSummaries?.scopes as Record<string, SummaryScopeValue> | undefined,
+    "document",
+  );
+  const documentSummaryDrift = readinessSummaries?.document_mismatch ?? 0;
+  const documentSummarySyncedDone =
+    readinessSummaries?.document_synced_done ?? readinessSummaries?.document_done;
+  const summaryExcludedParentTotal = readinessSummaries?.summary_excluded_parent_total ?? 0;
+  const graphMetadataMarkDocs =
+    readinessGraph?.unmarked_promoted_extraction_docs ??
+    readinessGraph?.unpromoted_extraction_docs ??
+    0;
+  const graphMetadataMarkRows =
+    readinessGraph?.unmarked_promoted_extraction_rows ??
+    readinessGraph?.unpromoted_extraction_rows ??
+    0;
+  const readinessIdempotency = readiness?.idempotency;
+  const readinessRepair = readiness?.repair;
+  const graphRunnableJobCount =
+    (readinessRepair?.graph_promotion_jobs?.queued ?? 0) +
+    (readinessRepair?.graph_promotion_jobs?.running ?? 0);
+  const graphStaleJobCount =
+    (readinessRepair?.graph_promotion_jobs?.queued_stale ?? 0) +
+    (readinessRepair?.graph_promotion_jobs?.running_stale ?? 0);
+  const graphPromotionWorkAvailable =
+    readinessGraph?.required !== false &&
+    (graphRunnableJobCount > 0 || (readinessGraph?.pending ?? 0) > 0);
+  const providerCooldownLanes =
+    readinessRepair?.provider_lane_health?.lanes?.filter(
+      (lane) => lane.status === "cooldown",
+    ) ?? [];
+  const readinessPressure = readiness?.pressure;
+  const summaryGenerationPaused =
+    readinessPressure?.backpressure?.summary_generation_allowed === false ||
+    readinessPressure?.backpressure?.summary_backfill_allowed === false;
+  const summaryIndexingPaused =
+    readinessPressure?.backpressure?.summary_indexing_allowed === false;
+  const summaryIndexDeferredNotice =
+    summaryIndexingPaused
+      ? " Qdrant indexing is paused by pressure; generated summaries will be stored and vector indexing will be deferred."
+      : "";
+  const summaryBackfillTitle = summaryGenerationPaused
+    ? "Summary generation is paused by ingestion pressure; wait for active repairs/write queues to drain."
+    : `Queue a bounded background run for up to 500 missing retrieval parent summaries.${summaryIndexDeferredNotice}`;
+  const summaryJobRunTitle = summaryGenerationPaused
+    ? "Summary generation is paused by storage/provider pressure."
+    : `Run up to 25 queued retrieval-parent/document summary jobs and reconcile against stored artifacts.${summaryIndexDeferredNotice}`;
+  const readinessComputedAt = readiness?.computed_at;
+  const readinessNextActions = (readiness?.next_actions ?? []).slice(0, 4);
 
   return (
     <div className="flex flex-col h-full relative">
@@ -724,6 +1278,879 @@ export function CorpusDetail({
         <IngestionProgressBar documents={documents} />
       </div>
 
+      {readiness && (
+        <div className="border-b border-border-minimal bg-bg-base/80 px-4 py-2 shrink-0">
+          <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
+            <div className="flex items-center gap-2 min-w-0">
+              <BookOpen className="w-3.5 h-3.5 text-accent-secondary shrink-0" />
+              <div className="text-[9px] font-bold tracking-widest text-content-tertiary uppercase">
+                Corpus truth
+              </div>
+              <span
+                className={`px-2 py-0.5 border text-[9px] font-bold tracking-widest uppercase ${readinessTone(readiness.status)}`}
+                title={[
+                  readinessComputedAt ? `Computed ${formatDate(readinessComputedAt)}` : null,
+                  readiness.source ? `source=${readiness.source}` : null,
+                  readiness.stale ? "stale snapshot" : null,
+                  readiness.refresh_error ? `refresh error: ${readiness.refresh_error}` : null,
+                  (readiness.blocking ?? []).join(" · ") || "No blocking readiness reason reported",
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+              >
+                {readinessLabel(readiness.status)}
+              </span>
+              {readinessComputedAt && (
+                <span
+                  className={`text-[9px] ${readiness.stale ? "text-amber-300" : "text-content-tertiary"}`}
+                  title={`Corpus truth snapshot computed at ${formatDate(readinessComputedAt)}`}
+                >
+                  truth {formatDate(readinessComputedAt)}
+                </span>
+              )}
+              {(readinessRepair?.active_runs ?? 0) > 0 && (
+                <span className="text-[9px] text-accent-secondary">
+                  {readinessRepair?.active_runs} repair active
+                </span>
+              )}
+              {readinessPressure && readinessPressure.status !== "normal" && (
+                <span
+                  className={`px-1.5 py-0.5 border text-[9px] font-bold tracking-widest uppercase ${
+                    readinessPressure.status === "high"
+                      ? "border-error/60 text-error"
+                      : "border-amber-400/50 text-amber-300"
+                  }`}
+                  title={[
+                    `RSS pressure: ${
+                      typeof readinessPressure.resources?.rss_pressure === "number"
+                        ? Math.round(readinessPressure.resources.rss_pressure * 100)
+                        : "unknown"
+                    }%`,
+                    `Active repairs: ${readinessPressure.queues?.active_repairs ?? 0}`,
+                    `Graph queue: ${readinessPressure.queues?.graph_pending ?? 0}`,
+                    `Extraction queue: ${readinessPressure.queues?.extraction_pending ?? 0}`,
+                    `Qdrant writer: ${readinessPressure.writers?.qdrant?.status ?? "unknown"}`,
+                    `Qdrant queue: ${readinessPressure.writers?.qdrant?.queue_depth ?? 0}`,
+                    `Qdrant write latency: ${
+                      typeof readinessPressure.writers?.qdrant?.write_latency_ms === "number"
+                        ? `${Math.round(readinessPressure.writers.qdrant.write_latency_ms)}ms`
+                        : "unknown"
+                    }`,
+                    `Qdrant memory: ${
+                      typeof readinessPressure.writers?.qdrant?.memory_pressure === "number"
+                        ? `${Math.round(readinessPressure.writers.qdrant.memory_pressure * 100)}%`
+                        : "unknown"
+                    }`,
+                    `Summary generation: ${
+                      readinessPressure.backpressure?.summary_generation_allowed === false
+                        ? "paused"
+                        : "allowed"
+                    }`,
+                    `Summary indexing: ${
+                      readinessPressure.backpressure?.summary_indexing_allowed === false
+                        ? "paused"
+                        : "allowed"
+                    }`,
+                    ...(readinessPressure.recommendations ?? []),
+                  ].join(" · ")}
+                >
+                  pressure {readinessPressure.status}
+                </span>
+              )}
+              {graphRunnableJobCount > 0 && (
+                <span className="text-[9px] text-accent-secondary">
+                  {graphRunnableJobCount} graph jobs
+                </span>
+              )}
+              {graphStaleJobCount > 0 && graphRunnableJobCount <= 0 && (
+                <span
+                  className="text-[9px] text-content-tertiary"
+                  title="Stale graph-promotion job rows are retained for audit but no longer count as runnable work because corpus artifacts already show those docs are promoted."
+                >
+                  {graphStaleJobCount} stale graph jobs
+                </span>
+              )}
+              {(((readinessRepair?.document_pipeline_jobs?.queued ?? 0) +
+                (readinessRepair?.document_pipeline_jobs?.blocked_no_source ?? 0) +
+                (readinessRepair?.document_pipeline_jobs?.blocked_missing_chunks ?? 0) +
+                (readinessRepair?.document_pipeline_jobs?.blocked_mongo_state ?? 0)) > 0) && (
+                <span className="text-[9px] text-amber-300">
+                  {(readinessRepair?.document_pipeline_jobs?.queued ?? 0) +
+                    (readinessRepair?.document_pipeline_jobs?.blocked_no_source ?? 0) +
+                    (readinessRepair?.document_pipeline_jobs?.blocked_missing_chunks ?? 0) +
+                    (readinessRepair?.document_pipeline_jobs?.blocked_mongo_state ?? 0)} pipeline jobs
+                </span>
+              )}
+              {(((readinessRepair?.extraction_jobs?.queued ?? 0) +
+                (readinessRepair?.extraction_jobs?.provider_failed ?? 0) +
+                (readinessRepair?.extraction_jobs?.validation_failed ?? 0)) > 0) && (
+                <span className="text-[9px] text-amber-300">
+                  {(readinessRepair?.extraction_jobs?.queued ?? 0) +
+                    (readinessRepair?.extraction_jobs?.provider_failed ?? 0) +
+                  (readinessRepair?.extraction_jobs?.validation_failed ?? 0)} extraction jobs
+                </span>
+              )}
+              {providerCooldownLanes.length > 0 && (
+                <span
+                  className="text-[9px] text-amber-300"
+                  title={providerCooldownLanes
+                    .slice(0, 6)
+                    .map((lane) =>
+                      [
+                        providerLabel(lane.provider ?? "provider"),
+                        lane.model ?? "model",
+                        lane.lane != null ? `lane ${lane.lane}` : null,
+                        `${lane.rate_limited ?? 0} rate limited`,
+                        `${lane.succeeded ?? 0} ok`,
+                      ]
+                        .filter(Boolean)
+                        .join(" · "),
+                    )
+                    .join(" / ")}
+                >
+                  {providerCooldownLanes.length} provider cooldown
+                </span>
+              )}
+              {(((readinessRepair?.summary_jobs?.queued ?? 0) +
+                (readinessRepair?.summary_jobs?.blocked_no_parent_summaries ?? 0) +
+                (readinessRepair?.summary_jobs?.blocked_parent_summaries_incomplete ?? 0)) > 0) && (
+                <span className="text-[9px] text-accent-secondary">
+                  {(readinessRepair?.summary_jobs?.queued ?? 0) +
+                    (readinessRepair?.summary_jobs?.blocked_no_parent_summaries ?? 0) +
+                    (readinessRepair?.summary_jobs?.blocked_parent_summaries_incomplete ?? 0)} summary jobs
+                </span>
+              )}
+              {readiness.error && (
+                <span className="text-[9px] text-error truncate">
+                  readiness unavailable
+                </span>
+              )}
+              {readinessNextActions.length > 0 && (
+                <div
+                  className="flex items-center gap-1 min-w-0"
+                  title="Recommended next actions from durable corpus readiness"
+                >
+                  <span className="text-[9px] text-content-tertiary uppercase">
+                    next
+                  </span>
+                  {readinessNextActions.map((action) => (
+                    <span
+                      key={action.id}
+                      className={`px-1.5 py-0.5 border text-[9px] font-bold tracking-widest uppercase ${
+                        action.blocked_by_pressure
+                          ? "border-border-minimal text-content-tertiary"
+                          : action.severity === "critical"
+                            ? "border-error/60 text-error"
+                            : action.severity === "review"
+                              ? "border-amber-400/50 text-amber-300"
+                              : "border-accent-secondary/50 text-accent-secondary"
+                      }`}
+                      title={`${action.reason}${action.count ? ` · ${action.count}` : ""}${
+                        action.blocked_by_pressure ? " · paused by pressure" : ""
+                      }`}
+                    >
+                      {action.label}
+                      {action.count > 0 ? ` ${action.count}` : ""}
+                    </span>
+                  ))}
+                </div>
+              )}
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  onClick={() => handleRepairCycle(false)}
+                  disabled={isRunningRepairCycle}
+                  className="flex items-center gap-1 px-2 py-0.5 text-[9px] font-bold tracking-widest text-content-tertiary border border-border-minimal hover:border-content-secondary hover:text-content-secondary disabled:opacity-50 transition-none uppercase"
+                  title="Dry-run bounded reconciliation and graph repair planning without writing changes"
+                >
+                  {isRunningRepairCycle ? (
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                  ) : (
+                    <Search className="w-3 h-3" />
+                  )}
+                  <span>Analyze repair</span>
+                </button>
+                <button
+                  onClick={() =>
+                    handleRepairCycle(true, {
+                      background: true,
+                      runExtractionJobs: true,
+                      runDocumentPipelineJobs:
+                        (readinessRepair?.document_pipeline_jobs_pending ?? 0) > 0 &&
+                        readinessPressure?.backpressure?.document_pipeline_allowed !== false,
+                      runSummaryJobs:
+                        ((readinessRepair?.summary_jobs_pending ?? 0) > 0 ||
+                          ((readinessSummaries?.retrieval_parent_missing ??
+                            readinessSummaries?.body_parent_missing ??
+                            0) +
+                            (readinessSummaries?.document_missing ?? 0)) > 0) &&
+                        !summaryGenerationPaused,
+                      runDocumentSummaries:
+                        (readinessSummaries?.document_missing ?? 0) > 0 &&
+                        !summaryGenerationPaused,
+                      runGraphJobs:
+                        graphPromotionWorkAvailable &&
+                        readinessPressure?.backpressure?.graph_promotion_allowed !== false,
+                    })
+                  }
+                  disabled={isRunningRepairCycle}
+                  className="flex items-center gap-1 px-2 py-0.5 text-[9px] font-bold tracking-widest text-accent-main border border-accent-main hover:bg-accent-main hover:text-bg-base disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-accent-main transition-none uppercase"
+                  title="Queue a bounded background repair: reconcile stale failures, materialize document pipeline/extraction/graph/summary jobs, retry up to 25 extraction chunks, run up to 25 summary jobs, backfill up to 10 document summaries, and run graph jobs only when pressure allows."
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  <span>Auto repair</span>
+                </button>
+                <button
+                  onClick={() => handleRepairCycle(true, { runGraphJobs: true })}
+                  disabled={
+                    isRunningRepairCycle ||
+                    !graphPromotionWorkAvailable ||
+                    readinessPressure?.backpressure?.graph_promotion_allowed === false
+                  }
+                  className="flex items-center gap-1 px-2 py-0.5 text-[9px] font-bold tracking-widest text-amber-300 border border-amber-400/50 hover:bg-amber-400/10 disabled:opacity-50 transition-none uppercase"
+                  title={
+                    readinessPressure?.backpressure?.graph_promotion_allowed === false
+                      ? "Graph promotion is paused by ingestion pressure; queue repair metadata first and let writes drain."
+                      : !graphPromotionWorkAvailable
+                        ? "No actionable graph-promotion work is pending. Stale graph job rows are audit history, not runnable work."
+                        : graphRunnableJobCount > 0
+                          ? "Run up to 3 queued graph-promotion jobs."
+                          : "Plan missing graph-promotion jobs for pending docs, then run up to 3."
+                  }
+                >
+                  <CheckCircle2 className="w-3 h-3" />
+                  <span>Run graph jobs</span>
+                </button>
+                <button
+                  onClick={handleSummaryBackfill}
+                  disabled={
+                    isQueueingSummaryBackfill ||
+                    (readinessSummaries?.retrieval_parent_missing ??
+                      readinessSummaries?.body_parent_missing ??
+                      0) <= 0 ||
+                    summaryGenerationPaused
+                  }
+                  className="flex items-center gap-1 px-2 py-0.5 text-[9px] font-bold tracking-widest text-accent-secondary border border-accent-secondary/50 hover:bg-accent-secondary/10 disabled:opacity-50 transition-none uppercase"
+                  title={
+                    summaryBackfillTitle
+                  }
+                >
+                  {isQueueingSummaryBackfill ? (
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                  ) : (
+                    <BookOpen className="w-3 h-3" />
+                  )}
+                  <span>Backfill summaries</span>
+                </button>
+                <button
+                  onClick={handlePlanSourceParseJobs}
+                  disabled={isPlanningSourceParseJobs}
+                  className="flex items-center gap-1 px-2 py-0.5 text-[9px] font-bold tracking-widest text-amber-300 border border-amber-400/50 hover:bg-amber-400/10 disabled:opacity-50 transition-none uppercase"
+                  title="Materialize source-file and parse progress from durable ingest batch manifests"
+                >
+                  {isPlanningSourceParseJobs ? (
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                  ) : (
+                    <FileText className="w-3 h-3" />
+                  )}
+                  <span>Plan source jobs</span>
+                </button>
+                <button
+                  onClick={handleRunSourceParseJobs}
+                  disabled={
+                    isRunningSourceParseJobs ||
+                    readinessPressure?.backpressure?.source_parse_allowed === false ||
+                    ((readinessRepair?.source_parse_jobs_pending ?? 0) +
+                      (readinessRepair?.source_parse_jobs?.failed_recoverable ?? 0)) <= 0
+                  }
+                  className="flex items-center gap-1 px-2 py-0.5 text-[9px] font-bold tracking-widest text-amber-300 border border-amber-400/50 hover:bg-amber-400/10 disabled:opacity-50 transition-none uppercase"
+                  title={
+                    readinessPressure?.backpressure?.source_parse_allowed === false
+                      ? "Source parse jobs are paused by ingestion pressure; wait for Mongo/RSS pressure to drop."
+                      : "Resume eligible source/parse jobs through the durable ingest batch runner"
+                  }
+                >
+                  {isRunningSourceParseJobs ? (
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                  ) : (
+                    <RotateCcw className="w-3 h-3" />
+                  )}
+                  <span>Run source jobs</span>
+                </button>
+                <button
+                  onClick={handlePlanDocumentPipelineJobs}
+                  disabled={isPlanningDocumentPipelineJobs}
+                  className="flex items-center gap-1 px-2 py-0.5 text-[9px] font-bold tracking-widest text-amber-300 border border-amber-400/50 hover:bg-amber-400/10 disabled:opacity-50 transition-none uppercase"
+                  title="Materialize missing chunk/persist/embed document-stage work as durable jobs without running heavy ingestion"
+                >
+                  {isPlanningDocumentPipelineJobs ? (
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                  ) : (
+                    <Layers className="w-3 h-3" />
+                  )}
+                  <span>Plan pipeline jobs</span>
+                </button>
+                <button
+                  onClick={handleRunDocumentPipelineJobs}
+                  disabled={
+                    isRunningDocumentPipelineJobs ||
+                    (readinessRepair?.document_pipeline_jobs_pending ?? 0) <= 0 ||
+                    readinessPressure?.backpressure?.document_pipeline_allowed === false
+                  }
+                  className="flex items-center gap-1 px-2 py-0.5 text-[9px] font-bold tracking-widest text-amber-300 border border-amber-400/50 hover:bg-amber-400/10 disabled:opacity-50 transition-none uppercase"
+                  title={
+                    readinessPressure?.backpressure?.document_pipeline_allowed === false
+                      ? "Document pipeline repair is paused by ingestion pressure"
+                      : "Run/reconcile up to 25 queued chunk/persist/embed document-stage jobs"
+                  }
+                >
+                  {isRunningDocumentPipelineJobs ? (
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                  ) : (
+                    <RotateCcw className="w-3 h-3" />
+                  )}
+                  <span>Run pipeline jobs</span>
+                </button>
+                <button
+                  onClick={handlePlanSummaryJobs}
+                  disabled={
+                    isPlanningSummaryJobs ||
+                    ((readinessSummaries?.retrieval_parent_missing ??
+                      readinessSummaries?.body_parent_missing ??
+                      0) +
+                      (readinessSummaries?.document_missing ?? 0)) <= 0
+                  }
+                  className="flex items-center gap-1 px-2 py-0.5 text-[9px] font-bold tracking-widest text-accent-secondary border border-accent-secondary/50 hover:bg-accent-secondary/10 disabled:opacity-50 transition-none uppercase"
+                  title="Materialize missing retrieval-parent and document-summary work as durable jobs without calling summary providers"
+                >
+                  {isPlanningSummaryJobs ? (
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                  ) : (
+                    <Layers className="w-3 h-3" />
+                  )}
+                  <span>Plan summary jobs</span>
+                </button>
+                <button
+                  onClick={handleRunSummaryJobs}
+                  disabled={
+                    isRunningSummaryJobs ||
+                    (readinessRepair?.summary_jobs_pending ?? 0) <= 0 ||
+                    summaryGenerationPaused
+                  }
+                  className="flex items-center gap-1 px-2 py-0.5 text-[9px] font-bold tracking-widest text-accent-secondary border border-accent-secondary/50 hover:bg-accent-secondary/10 disabled:opacity-50 transition-none uppercase"
+                  title={
+                    summaryJobRunTitle
+                  }
+                >
+                  {isRunningSummaryJobs ? (
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                  ) : (
+                    <Zap className="w-3 h-3" />
+                  )}
+                  <span>Run summary jobs</span>
+                </button>
+                <button
+                  onClick={handlePlanExtractionJobs}
+                  disabled={isPlanningExtractionJobs || readinessGraph?.required === false}
+                  className="flex items-center gap-1 px-2 py-0.5 text-[9px] font-bold tracking-widest text-amber-300 border border-amber-400/50 hover:bg-amber-400/10 disabled:opacity-50 transition-none uppercase"
+                  title="Materialize up to 1000 missing or failed chunk extraction jobs without calling providers"
+                >
+                  {isPlanningExtractionJobs ? (
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                  ) : (
+                    <Hash className="w-3 h-3" />
+                  )}
+                  <span>Plan extraction jobs</span>
+                </button>
+                <button
+                  onClick={handleRunExtractionJobs}
+                  disabled={
+                    isRunningExtractionJobs ||
+                    readinessGraph?.required === false ||
+                    readinessPressure?.backpressure?.extraction_backfill_allowed === false ||
+                    (((readinessRepair?.extraction_jobs?.queued ?? 0) +
+                      (readinessRepair?.extraction_jobs?.provider_failed ?? 0) +
+                      (readinessRepair?.extraction_jobs?.validation_failed ?? 0) +
+                      (readinessRepair?.extraction_jobs?.failed ?? 0)) <= 0)
+                  }
+                  className="flex items-center gap-1 px-2 py-0.5 text-[9px] font-bold tracking-widest text-amber-300 border border-amber-400/50 hover:bg-amber-400/10 disabled:opacity-50 transition-none uppercase"
+                  title={
+                    readinessPressure?.backpressure?.extraction_backfill_allowed === false
+                      ? "Extraction job execution is paused by ingestion pressure."
+                      : "Run up to 25 queued or failed chunk-level extraction jobs through the active Ghost B contract"
+                  }
+                >
+                  {isRunningExtractionJobs ? (
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                  ) : (
+                    <Zap className="w-3 h-3" />
+                  )}
+                  <span>Run extraction jobs</span>
+                </button>
+                <button
+                  onClick={handleIdentityAudit}
+                  disabled={isAuditingIdentity}
+                  className="flex items-center gap-1 px-2 py-0.5 text-[9px] font-bold tracking-widest text-content-tertiary border border-border-minimal hover:border-content-secondary hover:text-content-secondary disabled:opacity-50 transition-none uppercase"
+                  title="Fetch exact duplicate source-key/content-hash groups and documents missing source identity metadata"
+                >
+                  {isAuditingIdentity ? (
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                  ) : (
+                    <Hash className="w-3 h-3" />
+                  )}
+                  <span>Audit identity</span>
+                </button>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-11 gap-2 text-[9px] font-mono">
+              <div className="border border-border-minimal px-2 py-1">
+                <div className="text-content-tertiary uppercase">Queryable docs</div>
+                <div className="text-content-primary">
+                  {formatCoverage(readinessDocs?.queryable, readinessDocs?.total)}
+                </div>
+                {(readinessDocs?.excluded_total ?? 0) > 0 && (
+                  <div className="text-content-tertiary">
+                    {readinessDocs?.excluded_total} duplicates excluded
+                  </div>
+                )}
+              </div>
+              <div className="border border-border-minimal px-2 py-1">
+                <div className="text-content-tertiary uppercase">Fully enriched</div>
+                <div className="text-content-primary">
+                  {formatCoverage(readinessDocs?.fully_enriched, readinessDocs?.total)}
+                </div>
+              </div>
+              <div
+                className="border border-accent-secondary/40 px-2 py-1"
+                title={
+                  retrievalSummaryScope.description ??
+                  "Retrieval summaries required for readiness. This includes eligible body/table and legacy parent rows, not body-only diagnostics or structural rows."
+                }
+              >
+                <div className="text-content-tertiary uppercase">
+                  {retrievalSummaryScope.label ?? "Retrieval summaries"}
+                </div>
+                <div className="text-accent-secondary">
+                  {formatCoverage(
+                    readinessSummaries?.retrieval_parent_done ??
+                      readinessSummaries?.body_parent_done,
+                    readinessSummaries?.retrieval_parent_total ??
+                      readinessSummaries?.body_parent_total,
+                  )}
+                </div>
+              </div>
+              <div
+                className="border border-border-minimal px-2 py-1"
+                title={
+                  allParentSummaryScope.description ??
+                  "Diagnostic count across every parent row, including structural rows that are not required for retrieval-summary readiness."
+                }
+              >
+                <div className="text-content-tertiary uppercase">
+                  {allParentSummaryScope.label ?? "All parent rows"}
+                </div>
+                <div className="text-content-primary">
+                  {formatCoverage(
+                    readinessSummaries?.all_parent_done ?? readinessSummaries?.parent_done,
+                    readinessSummaries?.all_parent_total ?? readinessSummaries?.parent_total,
+                  )}
+                </div>
+                {summaryExcludedParentTotal > 0 && (
+                  <div
+                    className="mt-0.5 text-[8px] text-content-tertiary"
+                    title="Structural parent rows excluded from the retrieval-summary gate."
+                  >
+                    {summaryExcludedParentTotal} excluded
+                  </div>
+                )}
+              </div>
+              <div
+                className="border border-border-minimal px-2 py-1"
+                title={
+                  documentSummaryScope.description ??
+                  "Document-level summaries from summary_tree/doc_profile. These summarize whole documents after parent summaries are available."
+                }
+              >
+                <div className="text-content-tertiary uppercase">
+                  {documentSummaryScope.label ?? "Document summaries"}
+                </div>
+                <div className="text-content-primary">
+                  {formatCoverage(
+                    documentSummarySyncedDone,
+                    readinessSummaries?.document_total,
+                  )}
+                </div>
+                {documentSummarySyncedDone !== readinessSummaries?.document_done && (
+                  <div
+                    className="mt-0.5 text-[8px] text-content-tertiary"
+                    title="Usable document summaries present in either doc_profile or summary_tree."
+                  >
+                    {readinessSummaries?.document_done ?? 0} usable
+                  </div>
+                )}
+                {documentSummaryDrift > 0 && (
+                  <div
+                    className="mt-0.5 text-[8px] text-warning"
+                    title={`doc_profile only: ${readinessSummaries?.document_profile_only ?? 0}; summary_tree only: ${readinessSummaries?.document_tree_only ?? 0}`}
+                  >
+                    {documentSummaryDrift} artifact drift
+                  </div>
+                )}
+              </div>
+              <div
+                className={`border px-2 py-1 ${
+                  (readinessGraph?.failed_chunks ?? 0) > 0 ||
+                  (readinessGraph?.stale_failure_rows ?? 0) > 0 ||
+                  graphMetadataMarkRows > 0
+                    ? "border-error/40"
+                    : "border-border-minimal"
+                }`}
+              >
+                <div className="text-content-tertiary uppercase">Graph state</div>
+                <div className="text-content-primary">
+                  {readinessGraph?.required === false ? (
+                    <span className="text-content-tertiary">not required</span>
+                  ) : (
+                    <>
+                      {readinessGraph?.promoted ?? 0} promoted
+                      <span className="text-content-tertiary">
+                        {" "}· {readinessGraph?.pending ?? 0} pending
+                      </span>
+                    </>
+                  )}
+                </div>
+                {graphMetadataMarkRows > 0 && (
+                  <div className="text-amber-300">
+                    {graphMetadataMarkDocs} docs with
+                    <span className="text-content-tertiary">
+                      {" "}{graphMetadataMarkRows} graph metadata marks missing
+                    </span>
+                  </div>
+                )}
+                {((readinessGraph?.failed_chunks ?? 0) > 0 ||
+                  (readinessGraph?.stale_failure_rows ?? 0) > 0) && (
+                  <div className="text-error">
+                    {readinessGraph?.failed_chunks ?? 0} failed chunks
+                    <span className="text-content-tertiary">
+                      {" "}· {readinessGraph?.stale_failure_rows ?? 0} stale refs
+                    </span>
+                  </div>
+                )}
+                {(readinessGraph?.reconciled_stale_failure_rows ?? 0) > 0 && (
+                  <div className="text-content-tertiary">
+                    {readinessGraph?.reconciled_stale_failure_rows} reconciled stale
+                  </div>
+                )}
+              </div>
+              <div
+                className={`border px-2 py-1 ${
+                  ((readinessRepair?.extraction_jobs_failed ?? 0) > 0 ||
+                    (readinessRepair?.extraction_jobs_blocked ?? 0) > 0)
+                    ? "border-error/40"
+                    : (readinessRepair?.extraction_jobs_pending ?? 0) > 0
+                      ? "border-accent-primary/40"
+                      : "border-border-minimal"
+                }`}
+                title="Durable chunk-level extraction jobs still waiting, running, needing retry, or blocked by provider contract configuration."
+              >
+                <div className="text-content-tertiary uppercase">Extraction queue</div>
+                <div className="text-content-primary">
+                  {readinessRepair?.extraction_jobs_pending ?? 0} pending
+                </div>
+                {(readinessRepair?.extraction_jobs_failed ?? 0) > 0 && (
+                  <div className="text-error">
+                    {readinessRepair?.extraction_jobs_failed} retry
+                  </div>
+                )}
+                {(readinessRepair?.extraction_jobs_blocked ?? 0) > 0 && (
+                  <div className="text-error">
+                    {readinessRepair?.extraction_jobs_blocked} contract blocked
+                  </div>
+                )}
+              </div>
+              <div
+                className={`border px-2 py-1 ${
+                  (readinessRepair?.source_parse_jobs_failed ?? 0) > 0
+                    ? "border-error/40"
+                    : (readinessRepair?.source_parse_jobs_pending ?? 0) > 0
+                      ? "border-amber-400/40"
+                      : "border-border-minimal"
+                }`}
+                title="Durable source-file and parse jobs derived from ingest batch manifests."
+              >
+                <div className="text-content-tertiary uppercase">Source queue</div>
+                <div className="text-content-primary">
+                  {readinessRepair?.source_parse_jobs_pending ?? 0} pending
+                </div>
+                {(readinessRepair?.source_parse_jobs_failed ?? 0) > 0 && (
+                  <div className="text-error">
+                    {readinessRepair?.source_parse_jobs_failed} blocked
+                  </div>
+                )}
+              </div>
+              <div
+                className={`border px-2 py-1 ${
+                  (readinessRepair?.document_pipeline_jobs_failed ?? 0) > 0
+                    ? "border-error/40"
+                    : (readinessRepair?.document_pipeline_jobs_pending ?? 0) > 0
+                      ? "border-amber-400/40"
+                      : "border-border-minimal"
+                }`}
+                title="Durable document-stage jobs for missing chunk, persist, or embedding/index work."
+              >
+                <div className="text-content-tertiary uppercase">Pipeline queue</div>
+                <div className="text-content-primary">
+                  {readinessRepair?.document_pipeline_jobs_pending ?? 0} pending
+                </div>
+                {(readinessRepair?.document_pipeline_jobs_failed ?? 0) > 0 && (
+                  <div className="text-error">
+                    {readinessRepair?.document_pipeline_jobs_failed} blocked
+                  </div>
+                )}
+              </div>
+              <div
+                className={`border px-2 py-1 ${
+                  (readinessRepair?.summary_jobs_failed ?? 0) > 0
+                    ? "border-error/40"
+                    : (readinessRepair?.summary_jobs_pending ?? 0) > 0
+                      ? "border-accent-secondary/40"
+                      : "border-border-minimal"
+                }`}
+                title="Durable parent/document summary jobs still waiting or blocked."
+              >
+                <div className="text-content-tertiary uppercase">Summary queue</div>
+                <div className="text-content-primary">
+                  {readinessRepair?.summary_jobs_pending ?? 0} pending
+                </div>
+                {(readinessRepair?.summary_jobs_failed ?? 0) > 0 && (
+                  <div className="text-error">
+                    {readinessRepair?.summary_jobs_failed} blocked
+                  </div>
+                )}
+                {(readinessRepair?.summary_jobs_waiting_dependencies ?? 0) > 0 && (
+                  <div className="text-content-tertiary">
+                    {readinessRepair?.summary_jobs_waiting_dependencies} waiting
+                  </div>
+                )}
+              </div>
+              <div
+                className={`border px-2 py-1 ${
+                  ((readinessIdempotency?.duplicate_source_key_groups ?? 0) -
+                    (readinessIdempotency?.source_key_collision_groups ?? 0)) > 0 ||
+                  (readinessIdempotency?.source_key_collision_groups ?? 0) > 0 ||
+                  (readinessIdempotency?.duplicate_content_hash_groups ?? 0) > 0 ||
+                  (readinessIdempotency?.missing_source_identity ?? 0) > 0 ||
+                  (readinessIdempotency?.stage_identity_blocking_total ??
+                    readinessIdempotency?.stage_identity_missing_total ??
+                    0) > 0
+                    ? "border-amber-400/50"
+                    : "border-border-minimal"
+                }`}
+                title={[
+                  "Exact source identity, content-hash, and stage-identity audit for duplicate/idempotent ingestion.",
+                  `Missing source identity: ${readinessIdempotency?.missing_source_identity ?? 0}`,
+                  `Active stage identity gaps: ${readinessIdempotency?.stage_identity_blocking_total ?? readinessIdempotency?.stage_identity_missing_total ?? 0}`,
+                  `Legacy successful extraction artifacts missing identity: ${readinessIdempotency?.ghost_b_extractions_missing_stage_identity_legacy_ok ?? 0}`,
+                  `Source/parse stage gaps: ${readinessIdempotency?.source_parse_jobs_missing_stage_identity ?? 0}`,
+                  `Source-key collision groups: ${readinessIdempotency?.source_key_collision_groups ?? 0}`,
+                  `Exact source duplicate groups: ${Math.max(
+                    (readinessIdempotency?.duplicate_source_key_groups ?? 0) -
+                      (readinessIdempotency?.source_key_collision_groups ?? 0),
+                    0,
+                  )}`,
+                  `Duplicate content groups: ${readinessIdempotency?.duplicate_content_hash_groups ?? 0}`,
+                ].join(" · ")}
+              >
+                <div className="text-content-tertiary uppercase">Identity audit</div>
+                <div className="text-content-primary">
+                  {readinessIdempotency?.source_keyed_documents ?? 0} keyed
+                </div>
+                {((readinessIdempotency?.missing_source_identity ?? 0) > 0 ||
+                  (readinessIdempotency?.stage_identity_blocking_total ??
+                    readinessIdempotency?.stage_identity_missing_total ??
+                    0) > 0) && (
+                  <div className="text-amber-300">
+                    {readinessIdempotency?.missing_source_identity ?? 0} source gap ·{" "}
+                    {readinessIdempotency?.stage_identity_blocking_total ??
+                      readinessIdempotency?.stage_identity_missing_total ??
+                      0} active stage gap
+                  </div>
+                )}
+                {((readinessIdempotency?.ghost_b_extractions_missing_stage_identity_legacy_ok ?? 0) > 0) && (
+                  <div className="text-content-tertiary">
+                    {readinessIdempotency?.ghost_b_extractions_missing_stage_identity_legacy_ok ?? 0} legacy artifact gaps
+                  </div>
+                )}
+                {(((readinessIdempotency?.duplicate_source_key_groups ?? 0) -
+                  (readinessIdempotency?.source_key_collision_groups ?? 0) > 0) ||
+                  ((readinessIdempotency?.duplicate_content_hash_groups ?? 0) > 0)) && (
+                  <div className="text-amber-300">
+                    {Math.max(
+                      (readinessIdempotency?.duplicate_source_key_groups ?? 0) -
+                        (readinessIdempotency?.source_key_collision_groups ?? 0),
+                      0,
+                    ) +
+                      (readinessIdempotency?.duplicate_content_hash_groups ?? 0)} dup groups
+                  </div>
+                )}
+                {(readinessIdempotency?.source_key_collision_groups ?? 0) > 0 && (
+                  <div className="text-amber-300">
+                    {readinessIdempotency?.source_key_collision_groups ?? 0} source-key collisions
+                  </div>
+                )}
+              </div>
+            </div>
+            {repairCycleResult && (
+              <div className="xl:col-span-2 text-[9px] font-mono text-content-tertiary">
+                Repair {repairCycleResult.background ? "queued" : repairCycleResult.apply ? "applied" : "planned"} ·
+                {repairCycleResult.run_id ? ` ${repairCycleResult.run_id.slice(0, 18)} ·` : ""}
+                {" "}{repairCycleResult.summary?.graph_jobs_queued ?? 0} graph queued ·
+                {" "}{repairCycleResult.summary?.graph_jobs_blocked ?? 0} blocked ·
+                {" "}{repairCycleResult.summary?.promoted_extraction_marks_backfilled ?? 0} graph metadata marks fixed ·
+                {" "}{repairCycleResult.summary?.source_parse_jobs_queued ?? 0} source queued ·
+                {" "}{repairCycleResult.summary?.source_parse_jobs_blocked ?? 0} source blocked ·
+                {" "}{repairCycleResult.summary?.source_parse_jobs_started ?? 0} source runners ·
+                {" "}{repairCycleResult.summary?.document_pipeline_jobs_queued ?? 0} pipeline queued ·
+                {" "}{repairCycleResult.summary?.document_pipeline_jobs_blocked ?? 0} pipeline blocked ·
+                {" "}{repairCycleResult.summary?.document_pipeline_jobs_ran ?? 0} pipeline ran ·
+                {" "}{repairCycleResult.summary?.document_pipeline_jobs_succeeded ?? 0} pipeline succeeded ·
+                {" "}{repairCycleResult.summary?.failed_chunks ?? 0} failed chunks ·
+                {" "}{repairCycleResult.summary?.extraction_jobs_queued ?? 0} extraction queued ·
+                {" "}{repairCycleResult.summary?.extraction_jobs_failed ?? 0} extraction failed ·
+                {" "}{repairCycleResult.summary?.extraction_jobs_blocked ?? 0} extraction blocked ·
+                {" "}{repairCycleResult.summary?.summary_jobs_queued ?? 0} summary queued ·
+                {" "}{repairCycleResult.summary?.summary_jobs_waiting_dependencies ?? 0} summary waiting ·
+                {" "}{repairCycleResult.summary?.summary_jobs_blocked ?? 0} summary blocked ·
+                {" "}{repairCycleResult.summary?.summary_jobs_ran ?? 0} summary ran ·
+                {" "}{repairCycleResult.summary?.summary_jobs_succeeded ?? 0} summary succeeded ·
+                {" "}{repairCycleResult.summary?.main_summary_missing ?? 0} retrieval parent summaries missing ·
+                {" "}{repairCycleResult.summary?.document_summaries_built ?? 0} doc summaries built
+              </div>
+            )}
+            {summaryBackfillResult && (
+              <div className="xl:col-span-2 text-[9px] font-mono text-content-tertiary">
+                Summary repair {summaryBackfillResult.status ?? "queued"} ·
+                {" "}limit {summaryBackfillResult.limit ?? 500}
+                {typeof summaryBackfillResult.generated === "number" && (
+                  <> · generated {summaryBackfillResult.generated}</>
+                )}
+                {typeof summaryBackfillResult.indexed === "number" && (
+                  <> · indexed {summaryBackfillResult.indexed}</>
+                )}
+                {summaryBackfillResult.index_deferred_by_pressure && (
+                  <> · indexing deferred by Qdrant pressure</>
+                )}
+                {summaryBackfillResult.run_id && (
+                  <> · run {summaryBackfillResult.run_id.slice(0, 18)}</>
+                )}
+              </div>
+            )}
+            {identityAuditResult && (
+              <div className="xl:col-span-2 text-[9px] font-mono text-content-tertiary">
+                Identity audit {identityAuditResult.status ?? "unknown"} ·
+                {" "}{identityAuditResult.source_keyed_documents ?? 0}/{identityAuditResult.doc_total ?? 0} keyed ·
+                {" "}{identityAuditResult.missing_source_identity_count ?? 0} missing ·
+                {" "}{(identityAuditResult.duplicate_source_key_group_count ?? 0) +
+                  (identityAuditResult.duplicate_content_hash_group_count ?? 0)} dup groups
+                {identityAuditAction && (
+                  <div className="mt-1 text-amber-300">{identityAuditAction}</div>
+                )}
+              </div>
+            )}
+            {extractionJobPlanResult && (
+              <div className="xl:col-span-2 text-[9px] font-mono text-content-tertiary">
+                Extraction jobs {extractionJobPlanResult.status ?? "planned"} ·
+                {" "}{extractionJobPlanResult.planned ?? 0} planned ·
+                {" "}{extractionJobPlanResult.counts?.queued ?? 0} queued ·
+                {" "}{extractionJobPlanResult.counts?.provider_failed ?? 0} provider failed ·
+                {" "}{extractionJobPlanResult.counts?.validation_failed ?? 0} validation failed ·
+                {" "}{extractionJobPlanResult.counts?.blocked_provider_contract ?? 0} contract blocked
+              </div>
+            )}
+            {documentPipelineJobPlanResult && (
+              <div className="xl:col-span-2 text-[9px] font-mono text-content-tertiary">
+                Pipeline jobs {documentPipelineJobPlanResult.status ?? "planned"} ·
+                {" "}{documentPipelineJobPlanResult.planned ?? 0} planned ·
+                {" "}{documentPipelineJobPlanResult.counts?.queued ?? 0} queued ·
+                {" "}{(documentPipelineJobPlanResult.counts?.blocked_no_source ?? 0) +
+                  (documentPipelineJobPlanResult.counts?.blocked_missing_chunks ?? 0) +
+                  (documentPipelineJobPlanResult.counts?.blocked_mongo_state ?? 0) +
+                  (documentPipelineJobPlanResult.counts?.failed ?? 0)} blocked
+              </div>
+            )}
+            {documentPipelineJobRunResult && (
+              <div className="xl:col-span-2 text-[9px] font-mono text-content-tertiary">
+                Pipeline run {documentPipelineJobRunResult.status ?? "complete"} ·
+                {" "}{documentPipelineJobRunResult.claimed ?? 0} claimed ·
+                {" "}{documentPipelineJobRunResult.reclaimed ?? 0} reclaimed ·
+                {" "}{documentPipelineJobRunResult.source_claimed ?? 0} source-backed ·
+                {" "}{documentPipelineJobRunResult.source_requested ? "source requested" : "source unchanged"} ·
+                {" "}{documentPipelineJobRunResult.executor_missing_kinds?.length
+                  ? `missing executor: ${documentPipelineJobRunResult.executor_missing_kinds.join(", ")} ·`
+                  : ""}{" "}
+                {" "}{documentPipelineJobRunResult.counts?.succeeded ?? 0} succeeded ·
+                {" "}{documentPipelineJobRunResult.counts?.failed ?? 0} failed
+              </div>
+            )}
+            {sourceParseJobPlanResult && (
+              <div className="xl:col-span-2 text-[9px] font-mono text-content-tertiary">
+                Source jobs {sourceParseJobPlanResult.status ?? "planned"} ·
+                {" "}{sourceParseJobPlanResult.planned ?? 0} planned ·
+                {" "}{sourceParseJobPlanResult.counts?.queued ?? 0} queued ·
+                {" "}{sourceParseJobPlanResult.counts?.running ?? 0} running ·
+                {" "}{(sourceParseJobPlanResult.counts?.blocked_source_missing ?? 0) +
+                  (sourceParseJobPlanResult.counts?.failed_recoverable ?? 0) +
+                  (sourceParseJobPlanResult.counts?.failed ?? 0)} blocked
+              </div>
+            )}
+            {sourceParseJobRunResult && (
+              <div className="xl:col-span-2 text-[9px] font-mono text-content-tertiary">
+                Source run {sourceParseJobRunResult.status ?? "requested"} ·
+                {" "}{sourceParseJobRunResult.eligible_items ?? 0}/{sourceParseJobRunResult.requested ?? 0} eligible ·
+                {" "}{sourceParseJobRunResult.batch_count ?? 0} batches ·
+                {" "}{sourceParseJobRunResult.runners_started ?? 0} runners
+                {sourceParseJobRunResult.runner_deferred ? " · deferred to ingest worker" : ""}
+              </div>
+            )}
+            {summaryJobPlanResult && (
+              <div className="xl:col-span-2 text-[9px] font-mono text-content-tertiary">
+                Summary jobs {summaryJobPlanResult.status ?? "planned"} ·
+                {" "}{summaryJobPlanResult.planned ?? 0} planned ·
+                {" "}{summaryJobPlanResult.counts?.queued ?? 0} queued ·
+                {" "}{(summaryJobPlanResult.counts?.blocked_no_parent_summaries ?? 0) +
+                  (summaryJobPlanResult.counts?.blocked_parent_summaries_incomplete ?? 0)} waiting ·
+                {" "}{(summaryJobPlanResult.counts?.blocked_empty_source ?? 0) +
+                  (summaryJobPlanResult.counts?.failed ?? 0)} blocked
+              </div>
+            )}
+            {summaryJobRunResult && (
+              <div className="xl:col-span-2 text-[9px] font-mono text-content-tertiary">
+                Summary run {summaryJobRunResult.status ?? "complete"} ·
+                {" "}{summaryJobRunResult.claimed ?? 0} claimed ·
+                {" "}{summaryJobRunResult.reclaimed ?? 0} reclaimed ·
+                {" "}{summaryJobRunResult.parent_claimed ?? 0} parent ·
+                {" "}{summaryJobRunResult.document_claimed ?? 0} document ·
+                {" "}{summaryJobRunResult.counts?.succeeded ?? 0} succeeded ·
+                {" "}{summaryJobRunResult.counts?.failed ?? 0} failed
+                {summaryJobRunResult.runner_results?.retrieval_parent_summary?.index_deferred_by_pressure
+                  ? " · parent indexing deferred by Qdrant pressure"
+                  : ""}
+              </div>
+            )}
+            {extractionJobRunResult && (
+              <div className="xl:col-span-2 text-[9px] font-mono text-content-tertiary">
+                Extraction run {extractionJobRunResult.status ?? "complete"} ·
+                {" "}{extractionJobRunResult.claimed ?? 0} claimed ·
+                {" "}{extractionJobRunResult.reclaimed ?? 0} reclaimed ·
+                {" "}{extractionJobRunResult.counts?.succeeded ?? 0} succeeded ·
+                {" "}{extractionJobRunResult.counts?.provider_failed ?? 0} provider failed ·
+                {" "}{extractionJobRunResult.counts?.validation_failed ?? 0} validation failed ·
+                {" "}{extractionJobRunResult.counts?.blocked_provider_contract ?? 0} contract blocked
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {showDuplicates && (
         <DuplicatesPanel
           corpusId={corpus.corpus_id}
@@ -797,9 +2224,21 @@ export function CorpusDetail({
             </button>
           </div>
           {localBatch && (
+            <>
+            <div
+              className="mt-2 flex flex-wrap items-center gap-2 text-[9px]"
+              title="Batch state is run history. Corpus truth above is authoritative for queryability, graph, and summaries."
+            >
+              <span className="font-bold tracking-widest uppercase text-content-tertiary">
+                Latest run log
+              </span>
+              <span className="text-content-tertiary">
+                Run history only. Use Corpus truth above for current query, graph, and summary readiness.
+              </span>
+            </div>
             <div className="mt-2 grid grid-cols-1 sm:grid-cols-4 xl:grid-cols-11 gap-2 text-[9px] font-mono">
               <div className="border border-border-minimal px-2 py-1">
-                <div className="text-content-tertiary uppercase">Status</div>
+                <div className="text-content-tertiary uppercase">Batch status</div>
                 <div className="text-content-primary">{localBatch.status}</div>
               </div>
               <div className="border border-border-minimal px-2 py-1">
@@ -812,19 +2251,19 @@ export function CorpusDetail({
                 </div>
               </div>
               <div className="border border-border-minimal px-2 py-1">
-                <div className="text-content-tertiary uppercase">Files</div>
+                <div className="text-content-tertiary uppercase">Run files</div>
                 <div className="text-content-primary">{localBatch.total}</div>
               </div>
               <div className="border border-border-minimal px-2 py-1">
-                <div className="text-content-tertiary uppercase">Queued</div>
+                <div className="text-content-tertiary uppercase">Run queued</div>
                 <div className="text-content-primary">{localBatch.counts?.queued ?? 0}</div>
               </div>
               <div className="border border-border-minimal px-2 py-1">
-                <div className="text-content-tertiary uppercase">Running</div>
+                <div className="text-content-tertiary uppercase">Run active</div>
                 <div className="text-accent-secondary">{localBatch.counts?.running ?? 0}</div>
               </div>
               <div className="border border-border-minimal px-2 py-1">
-                <div className="text-content-tertiary uppercase">Done</div>
+                <div className="text-content-tertiary uppercase">Run done</div>
                 <div className="text-green-500">
                   {localBatch.counts?.done ?? 0}
                   {localBatch.progress && (
@@ -837,9 +2276,9 @@ export function CorpusDetail({
               {localBatch.progress && (
                 <div
                   className="border border-accent-secondary/40 px-2 py-1"
-                  title="Graph extraction finished. Retrieval readiness is the Queryable count."
+                  title="Graph extraction finished inside this batch run. Corpus truth above is authoritative for current graph readiness."
                 >
-                  <div className="text-content-tertiary uppercase">Graph extracted</div>
+                  <div className="text-content-tertiary uppercase">Run graph extract</div>
                   <div className="text-accent-secondary">
                     {localBatch.progress.ladder?.graph_extracted ??
                       localBatch.progress.files_graph_extracted ??
@@ -855,9 +2294,9 @@ export function CorpusDetail({
               {localBatch.progress?.ladder && (
                 <div
                   className="border border-border-minimal px-2 py-1"
-                  title="Fully queryable files, inferred from the staged ingestion ladder"
+                  title="Files made queryable inside this batch run. Corpus truth above is authoritative for current query readiness."
                 >
-                  <div className="text-content-tertiary uppercase">Queryable</div>
+                  <div className="text-content-tertiary uppercase">Run queryable</div>
                   <div className="text-content-primary">
                     {localBatch.progress.ladder.queryable ??
                       localBatch.progress.files_queryable ??
@@ -870,26 +2309,27 @@ export function CorpusDetail({
                 </div>
               )}
               <div className="border border-border-minimal px-2 py-1">
-                <div className="text-content-tertiary uppercase">Failed</div>
+                <div className="text-content-tertiary uppercase">Run failed</div>
                 <div className="text-error">{localBatch.counts?.failed ?? 0}</div>
               </div>
               <div className="border border-border-minimal px-2 py-1">
-                <div className="text-content-tertiary uppercase">Recoverable</div>
+                <div className="text-content-tertiary uppercase">Run recoverable</div>
                 <div className="text-amber-400">
                   {localBatch.counts?.failed_recoverable ?? 0}
                 </div>
               </div>
               <div className="border border-border-minimal px-2 py-1">
-                <div className="text-content-tertiary uppercase">Stale</div>
+                <div className="text-content-tertiary uppercase">Run stale</div>
                 <div className="text-amber-400">{localBatchStaleCount}</div>
               </div>
               <div className="border border-border-minimal px-2 py-1">
-                <div className="text-content-tertiary uppercase">Stored</div>
+                <div className="text-content-tertiary uppercase">Run stored</div>
                 <div className="text-content-primary">
                   {formatBytes(localBatch.stored_bytes)}
                 </div>
               </div>
             </div>
+            </>
           )}
 	          {localBatch?.progress?.ladder && (
 	            <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 gap-2 text-[9px] font-mono">
@@ -929,7 +2369,7 @@ export function CorpusDetail({
 	              <div className="border border-border-minimal px-2 py-2">
 	                <div className="flex items-center justify-between gap-2">
 	                  <div className="text-content-tertiary uppercase">
-	                    Batch quality
+	                    Run quality
 	                  </div>
 	                  <div className="text-content-tertiary">
 	                    verified {batchReport.docs_verified ?? 0}/{batchReport.docs ?? 0}

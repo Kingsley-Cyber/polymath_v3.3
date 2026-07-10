@@ -125,6 +125,36 @@ def test_single_rollup_section_reuses_summary():
     assert s.summary == r.summary                     # no wasted LLM call
 
 
+def test_rollup_generation_is_bounded_and_concurrent():
+    active = 0
+    peak = 0
+
+    async def fake(prompt):
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        await asyncio.sleep(0.01)
+        active -= 1
+        return "merged"
+
+    async def run():
+        return await build_tree(
+            doc_id="g" * 24,
+            corpus_id="k",
+            title="T",
+            source_type="book",
+            parents=_parents(80),
+            llm_fn=fake,
+            max_concurrent=3,
+        )
+
+    nodes = asyncio.run(run())
+    assert peak == 3
+    assert [node.node_id for node in nodes if node.node_type == "rollup"] == [
+        f"rollup_{'g' * 12}_{index:04d}" for index in range(4)
+    ]
+
+
 class _FakeFind:
     def __init__(self, rows):
         self.rows = rows

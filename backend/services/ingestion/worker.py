@@ -114,15 +114,22 @@ from services.ingestion.summary_semantics import (
     topic_key_for as _topic_key_for,
 )
 from services.ingestion.schema_lens import get_or_create_schema_lens
+from services.ingestion.summary_tree_llm import summary_tree_llm_from_pool as _summary_tree_llm_from_pool
 from services.ingestion.section_classifier import (
     ChunkKind,
     is_noisy,
+    should_summarize_parent,
     should_skip_ghost_b,
 )
 from services.ingestion.resource_planner import (
     ResourceProfile,
     log_resource_profile,
     plan_ingestion_resources,
+)
+from services.ingestion.provider_lane_health import (
+    adapt_extraction_pool_concurrency,
+    filter_extraction_pool_by_provider_health,
+    load_recent_provider_lane_health,
 )
 from services.ingestion.source_identity import source_identity_doc_fields
 from services.secrets import decrypt as _decrypt_api_key
@@ -265,6 +272,81 @@ async def _chunk_with_pool(parse_result, doc_id, corpus_id, config, timeout: int
         doc_id[:12],
     )
     return await asyncio.wait_for(asyncio.to_thread(call), timeout=timeout)
+
+
+async def _chunk_with_pathological_fallback(
+    parse_result,
+    doc_id,
+    corpus_id,
+    config,
+    *,
+    timeout: int = 180,
+):
+    """Run the regex/greedy fallback in an isolated, one-shot process."""
+    import multiprocessing
+    from concurrent.futures import ProcessPoolExecutor
+
+    from services.ingestion.chunk_subprocess import chunk_entry_pathological
+
+    call = functools.partial(
+        chunk_entry_pathological,
+        parse_result,
+        doc_id,
+        corpus_id,
+        config,
+    )
+    executor = ProcessPoolExecutor(
+        max_workers=1,
+        mp_context=multiprocessing.get_context("spawn"),
+        max_tasks_per_child=1,
+    )
+    loop = asyncio.get_running_loop()
+    try:
+        return await asyncio.wait_for(
+            loop.run_in_executor(executor, call),
+            timeout=max(30, int(timeout or 180)),
+        )
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
+
+
+def _pathological_chunk_reason(parse_result, settings_obj) -> str | None:
+    """Return the deterministic preflight reason for bypassing semantic chunking."""
+    if getattr(parse_result, "language", None):
+        return None
+    text = str(
+        getattr(parse_result, "text", None)
+        or getattr(parse_result, "markdown", None)
+        or ""
+    )
+    char_threshold = max(
+        100000,
+        int(
+            getattr(
+                settings_obj,
+                "TIER_CHUNKER_PATHOLOGICAL_CHAR_THRESHOLD",
+                350000,
+            )
+            or 350000
+        ),
+    )
+    if len(text) >= char_threshold:
+        return f"chars:{len(text)}>={char_threshold}"
+    section_count = len(getattr(parse_result, "sections", None) or [])
+    section_threshold = max(
+        500,
+        int(
+            getattr(
+                settings_obj,
+                "TIER_CHUNKER_PATHOLOGICAL_SECTION_THRESHOLD",
+                5000,
+            )
+            or 5000
+        ),
+    )
+    if section_count >= section_threshold:
+        return f"sections:{section_count}>={section_threshold}"
+    return None
 
 _MODEL_PHASE_SEMAPHORES: dict[str, asyncio.Semaphore] = {}
 _MODEL_PHASE_SEMAPHORE_STATE: dict[str, tuple[int, asyncio.AbstractEventLoop]] = {}
@@ -456,6 +538,8 @@ def _ghost_b_active_doc_limit(
     extraction_engine: str,
     config: IngestionConfig | None = None,
 ) -> int:
+    if str(extraction_engine or "").lower() == "legacy_local":
+        return 1
     if config is not None:
         profile = _resource_profile_for_config(
             config,
@@ -482,6 +566,8 @@ def _ghost_b_file_gate_key(
     extraction_engine: str,
     config: IngestionConfig | None = None,
 ) -> str:
+    if str(extraction_engine or "").lower() == "legacy_local":
+        return "legacy_local"
     if config is not None:
         profile = _resource_profile_for_config(
             config,
@@ -589,9 +675,7 @@ def _summarizable_parents(parents) -> list:
     return [
         p
         for p in parents
-        if not should_skip_ghost_b(
-            getattr(p, "chunk_kind", None) or ChunkKind.BODY
-        )
+        if should_summarize_parent(getattr(p, "chunk_kind", None) or ChunkKind.BODY)
     ]
 
 
@@ -699,6 +783,7 @@ def _build_ghost_b_error_event_sink(
     )
     counts = {
         "ghost_b_attempt_failed": 0,
+        "ghost_b_attempt_rate_limited": 0,
         "ghost_b_attempt_succeeded": 0,
         "ghost_b_attempt_succeeded_with_validation_rejections": 0,
         "ghost_b_failure_budget_tripped": 0,
@@ -709,6 +794,11 @@ def _build_ghost_b_error_event_sink(
         name = str(event.get("event") or "")
         async with lock:
             if name == "ghost_b_attempt_failed":
+                if counts[name] >= max_failed:
+                    return
+                counts[name] += 1
+                sample_index = counts[name]
+            elif name == "ghost_b_attempt_rate_limited":
                 if counts[name] >= max_failed:
                     return
                 counts[name] += 1
@@ -919,55 +1009,6 @@ def _build_ghost_pool(refs) -> list[dict]:
     return out
 
 
-def _summary_tree_llm_from_pool(pool: list[dict], max_tokens: int) -> Callable[[str], Any] | None:
-    """Build the owner-summary-tree LLM hook from the same corpus Summary pool.
-
-    Without this, summary_tree falls back to services.llm's global default,
-    which can be a totally different provider/model than the corpus contract.
-    """
-    if not pool:
-        return None
-
-    lane_idx = 0
-
-    async def _call(prompt: str) -> str:
-        nonlocal lane_idx
-        import httpx
-
-        from services.ingestion.extraction_contract import provider_payload_extras
-
-        entry = pool[lane_idx % len(pool)]
-        lane_idx += 1
-        payload: dict[str, Any] = {
-            "model": entry["model"],
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0,
-            "max_tokens": max(128, min(1024, int(max_tokens or 300))),
-        }
-        if entry.get("base_url"):
-            payload["api_base"] = entry["base_url"]
-        if entry.get("api_key"):
-            payload["api_key"] = entry["api_key"]
-        payload.update(provider_payload_extras(entry.get("extra_params")))
-        model_name = str(entry.get("model") or "").lower()
-        if "v4-flash" in model_name or "v4-pro" in model_name or "deepseek-v4" in model_name:
-            payload.setdefault("thinking", {"type": "disabled"})
-        headers = {
-            "Authorization": f"Bearer {settings.LITELLM_MASTER_KEY}",
-            "Content-Type": "application/json",
-        }
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            resp = await client.post(
-                f"{settings.LITELLM_URL}/chat/completions",
-                json=payload,
-                headers=headers,
-            )
-            resp.raise_for_status()
-            return str(resp.json()["choices"][0]["message"]["content"] or "").strip()
-
-    return _call
-
-
 def _rehydrate_ghost_b_staging(staged: list[dict]) -> list[ExtractionResult]:
     """Reconstruct ExtractionResult dataclasses from a Mongo-stored staging list.
 
@@ -1020,7 +1061,7 @@ def _reconstruct_summaries_from_mongo(
     """Rebuild SummaryResult list from Mongo-stored parent_chunks[].summary.
 
     Only called on the D.2 resume path when every summarizable parent has a
-    non-empty summary. Non-body parents are intentionally skipped by Ghost A,
+    non-empty summary. Structural parents are intentionally skipped by Ghost A,
     so they are not required for resume. The parent_id set is stable across
     runs (deterministic from content-hashed doc_id), so we zip by parent_id map.
     """
@@ -1028,7 +1069,7 @@ def _reconstruct_summaries_from_mongo(
     out: list[SummaryResult] = []
     for p in parents:
         kind = getattr(p, "chunk_kind", None) or ChunkKind.BODY
-        if should_skip_ghost_b(kind):
+        if not should_summarize_parent(kind):
             continue
         ep = by_id.get(p.parent_id)
         if not ep:
@@ -1072,7 +1113,10 @@ def _reconstruct_summaries_from_mongo(
                 repair_status=repaired.get("repair_status"),
                 quality_score=repaired.get("quality_score"),
                 quality_flags=repaired.get("quality_flags"),
-                retrieval_text=repaired.get("retrieval_text"),
+                # A stored retrieval_text is part of the durable summary
+                # contract. Recompute only for legacy rows that never had it;
+                # otherwise a repair re-embed can drift from Mongo truth.
+                retrieval_text=ep.get("retrieval_text") or repaired.get("retrieval_text"),
             )
         )
     return out
@@ -1092,6 +1136,16 @@ def _rehydrate_ghost_b_failures(rows: list[dict]) -> list[ExtractionFailureItem]
                     attempts=int(row.get("attempts") or 0),
                     error_type=str(row.get("error_type") or "unknown"),
                     error_message=str(row.get("error_message") or ""),
+                    provider=str(row.get("provider") or ""),
+                    schema_mode=str(row.get("schema_mode") or ""),
+                    output_mode=str(row.get("output_mode") or ""),
+                    json_repair_mode=str(row.get("json_repair_mode") or ""),
+                    semantic_verifier_mode=str(row.get("semantic_verifier_mode") or ""),
+                    provider_card=(
+                        row.get("provider_card")
+                        if isinstance(row.get("provider_card"), dict)
+                        else {}
+                    ),
                 )
             )
         except Exception:
@@ -1231,6 +1285,24 @@ async def _run_ghosts_parallel(
     summary_targets = _summary_target_kinds(config)
     summarizable_parents = _summarizable_parents(parents)
     expected_summary_count = len(summarizable_parents)
+
+    # Queryable-first and repair passes may intentionally defer provider
+    # summarization, but they still replace Mongo/Qdrant document surfaces.
+    # Carry forward any validated durable summaries so that a retry cannot
+    # erase them and force a paid regeneration pass.
+    if defer_summaries and config.chunk_summarization and existing_parent_chunks:
+        summaries_from_mongo = _reconstruct_summaries_from_mongo(
+            parents,
+            existing_parent_chunks,
+        )
+        if summaries_from_mongo:
+            logger.info(
+                "phase=ghost_a_deferred_reuse doc=%s corpus=%s summaries=%d expected=%d",
+                doc_id[:12],
+                corpus_id[:8],
+                len(summaries_from_mongo),
+                expected_summary_count,
+            )
 
     if need_ghost_a and ws.summaries_indexed:
         existing_by_parent_id = {p.get("parent_id"): p for p in existing_parent_chunks}
@@ -1409,27 +1481,24 @@ async def _run_ghosts_parallel(
     async def _a_branch() -> list[SummaryResult] | None:
         if not need_ghost_a:
             return summaries_from_mongo  # None unless resume-reconstructed
-        # Skip non-body parents (TOC, bibliography, index, appendix, …).
-        # Each summary call is an LLM round-trip and the resulting summary
-        # also gets embedded → skipping noisy parents both saves LLM spend
-        # and reduces GPU pressure on the embed phase. Backwards-compat:
-        # parents without `chunk_kind` (legacy data, or rehydrated from
-        # earlier ingest) are treated as body and flow through unchanged.
+        # Skip parent rows outside the retrieval-summary contract. Each
+        # summary call is an LLM round-trip and the resulting summary also gets
+        # embedded, so structural rows are not a summary gap.
         skipped_kinds_a: dict[str, int] = {}
-        body_parents = []
+        summary_parents = []
         for p in parents:
             kind = getattr(p, "chunk_kind", None) or ChunkKind.BODY
-            if should_skip_ghost_b(kind):  # same skip set for both ghosts
-                skipped_kinds_a[kind] = skipped_kinds_a.get(kind, 0) + 1
+            if should_summarize_parent(kind):
+                summary_parents.append(p)
             else:
-                body_parents.append(p)
+                skipped_kinds_a[kind] = skipped_kinds_a.get(kind, 0) + 1
         if skipped_kinds_a:
             logger.info(
-                "phase=ghost_a_skip_kinds doc=%s corpus=%s skipped=%s body=%d/%d",
+                "phase=ghost_a_skip_kinds doc=%s corpus=%s skipped=%s summarized=%d/%d",
                 doc_id[:12],
                 corpus_id[:8],
                 skipped_kinds_a,
-                len(body_parents),
+                len(summary_parents),
                 len(parents),
             )
         tasks = [
@@ -1444,7 +1513,7 @@ async def _run_ghosts_parallel(
                     f"[{c.chunk_id}]\n{c.text}" for c in getattr(p, "children", [])
                 ),
             )
-            for p in body_parents
+            for p in summary_parents
         ]
         pool = _build_ghost_pool(config.summary_models)
         summary_max_concurrent: int | None = None
@@ -1609,6 +1678,37 @@ async def _run_ghosts_parallel(
         )
         extraction_engine = contract.engine
         pool = _build_ghost_pool(cloud_pool_refs)
+        if pool and contract.uses_provider_llm:
+            try:
+                provider_health = await load_recent_provider_lane_health(
+                    db,
+                    corpus_id=corpus_id,
+                )
+                filtered_pool, skipped_lanes = filter_extraction_pool_by_provider_health(
+                    pool,
+                    provider_health,
+                )
+                if skipped_lanes:
+                    logger.warning(
+                        "phase=ghost_b_provider_health doc=%s corpus=%s skipped_lanes=%s",
+                        doc_id[:12],
+                        corpus_id[:8],
+                        skipped_lanes,
+                    )
+                    pool = filtered_pool
+                pool, concurrency_adjustments = adapt_extraction_pool_concurrency(
+                    pool,
+                    provider_health,
+                )
+                if concurrency_adjustments:
+                    logger.info(
+                        "phase=ghost_b_provider_concurrency doc=%s corpus=%s adjustments=%s",
+                        doc_id[:12],
+                        corpus_id[:8],
+                        concurrency_adjustments,
+                    )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("ghost_b provider health check failed: %s", exc)
         resource_profile = _resource_profile_for_config(
             config,
             extraction_engine=extraction_engine,
@@ -2735,7 +2835,12 @@ async def _write_qdrant_for_doc(
 
     # Replace the document's vector surface, don't only upsert. Retries and
     # chunker/schema changes can remove chunk ids; stale points break verify.
-    await qdrant_writer.delete_points_by_doc(qdrant_client, corpus_id, doc_id)
+    await qdrant_writer.delete_points_by_doc(
+        qdrant_client,
+        corpus_id,
+        doc_id,
+        preserve_summary_points=not bool(summaries),
+    )
 
     if "naive" in target_cols:
         dicts = [_as_payload(c) for c in vector_children]
@@ -3443,42 +3548,92 @@ async def run_ingest_job(
     _chunk_timeout = max(
         60, int(getattr(settings, "TIER_CHUNKER_DOC_TIMEOUT_SECONDS", 600))
     )
+    _fallback_timeout = max(
+        30,
+        int(
+            getattr(
+                settings,
+                "TIER_CHUNKER_PATHOLOGICAL_FALLBACK_TIMEOUT_SECONDS",
+                180,
+            )
+            or 180
+        ),
+    )
+    _pathological_chunk_fallback_used = False
+    _pathological_chunk_trigger = _pathological_chunk_reason(parse_result, settings)
     try:
-        parents, children, injected_headers = await _chunk_with_pool(
-            parse_result,
-            doc_id,
-            corpus_id,
-            ingestion_config,
-            timeout=_chunk_timeout,
-        )
+        if _pathological_chunk_trigger:
+            logger.warning(
+                "phase=tier_chunker_pathological_preflight doc=%s corpus=%s "
+                "trigger=%s",
+                doc_id[:12],
+                corpus_id[:8],
+                _pathological_chunk_trigger,
+            )
+            parents, children, injected_headers = (
+                await _chunk_with_pathological_fallback(
+                    parse_result,
+                    doc_id,
+                    corpus_id,
+                    ingestion_config,
+                    timeout=_fallback_timeout,
+                )
+            )
+            _pathological_chunk_fallback_used = True
+        else:
+            parents, children, injected_headers = await _chunk_with_pool(
+                parse_result,
+                doc_id,
+                corpus_id,
+                ingestion_config,
+                timeout=_chunk_timeout,
+            )
     except asyncio.TimeoutError as exc:
         logger.error(
             "phase=tier_chunker_timeout doc=%s corpus=%s timeout=%ds — "
-            "doc has pathological content (long unbroken token sequences). "
-            "Pre-process with Pandoc / strip code-math blocks and retry, "
-            "or raise TIER_CHUNKER_DOC_TIMEOUT_SECONDS.",
+            "retrying once with isolated regex/greedy fallback",
             doc_id[:12], corpus_id[:8], _chunk_timeout,
         )
-        message = (
-            f"tier_chunker exceeded {_chunk_timeout}s wall-clock for this "
-            "document — likely pathological content (long code/math/table "
-            "blocks with no sentence boundaries). Pre-process and retry."
-        )
-        await _mark_ingest_failed(
-            db=db,
-            doc_id=doc_id,
-            corpus_id=corpus_id,
-            message=message,
-            stage="chunk_failed",
-        )
-        await _emit_ingest_phase(
-            on_phase,
-            "chunk_failed",
-            doc_id=doc_id,
-            corpus_id=corpus_id,
-            error=message,
-        )
-        raise RuntimeError(message) from exc
+        _pathological_chunk_trigger = f"timeout:{_chunk_timeout}s"
+        try:
+            parents, children, injected_headers = (
+                await _chunk_with_pathological_fallback(
+                    parse_result,
+                    doc_id,
+                    corpus_id,
+                    ingestion_config,
+                    timeout=_fallback_timeout,
+                )
+            )
+            _pathological_chunk_fallback_used = True
+            logger.warning(
+                "phase=tier_chunker_pathological_fallback doc=%s corpus=%s "
+                "parents=%d children=%d",
+                doc_id[:12],
+                corpus_id[:8],
+                len(parents),
+                len(children),
+            )
+        except Exception as fallback_exc:
+            message = (
+                f"tier_chunker exceeded {_chunk_timeout}s and deterministic "
+                f"pathological fallback failed: {fallback_exc}"
+            )
+            await _mark_ingest_failed(
+                db=db,
+                doc_id=doc_id,
+                corpus_id=corpus_id,
+                message=message,
+                stage="chunk_failed",
+            )
+            await _emit_ingest_phase(
+                on_phase,
+                "chunk_failed",
+                doc_id=doc_id,
+                corpus_id=corpus_id,
+                error=message,
+            )
+            raise RuntimeError(message) from fallback_exc
     except Exception as exc:
         message = f"tier_chunker failed: {exc}"
         await _mark_ingest_failed(
@@ -3497,6 +3652,22 @@ async def run_ingest_job(
         )
         raise RuntimeError(message) from exc
     chunking_config = tier_chunker.describe_chunking(parse_result, ingestion_config)
+    if _pathological_chunk_fallback_used:
+        chunking_config.update(
+            {
+                "child_strategy": "sentence_merge",
+                "semantic_split_enabled": False,
+                "semantic_split_reason": None,
+                "pathological_fallback": {
+                    "used": True,
+                    "sentence_engine": "regex",
+                    "semantic_escalation": False,
+                    "semantic_parents": False,
+                    "timeout_seconds": _fallback_timeout,
+                    "trigger": _pathological_chunk_trigger,
+                },
+            }
+        )
     if injected_headers:
         chunking_config["injected_headers"] = [
             {
@@ -3844,6 +4015,10 @@ async def run_ingest_job(
     )
     summary_write_required = bool(summary_targets and summaries)
     expected_summary_points = len(summaries or [])
+    summary_write_complete = bool(
+        not summary_gate_required
+        or expected_summary_points >= len(_summarizable_parents(parents))
+    )
     if ws.qdrant_written:
         try:
             from qdrant_client import models as qmodels
@@ -4050,7 +4225,7 @@ async def run_ingest_job(
                 )
             write_updates: dict[str, Any] = {"qdrant_written": True}
             if summary_write_required:
-                write_updates["summaries_indexed"] = True
+                write_updates["summaries_indexed"] = summary_write_complete
                 write_updates["summary_points"] = expected_summary_points
             elif summary_deferred_by_run or not summary_gate_required:
                 write_updates["summaries_indexed"] = False

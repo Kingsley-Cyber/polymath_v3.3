@@ -15,6 +15,12 @@ from typing import Any
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from pymongo import ReplaceOne, UpdateOne
 
+from services.ingestion.extraction_jobs import extraction_contract_hash
+from services.ingestion.stage_identity import (
+    chunk_hash as stage_chunk_hash,
+    extraction_stage_identity,
+    stable_stage_hash,
+)
 from services.storage.record_status import (
     ACTIVE_STATUS,
     DELETED_STATUS,
@@ -237,6 +243,116 @@ async def delete_ghost_b_extractions(
     return result.deleted_count
 
 
+async def _ghost_b_identity_context(
+    db: AsyncIOMotorDatabase,
+    *,
+    doc_id: str,
+    corpus_id: str,
+    chunk_ids: list[str],
+) -> tuple[dict[str, Any] | None, dict[str, dict[str, Any]], str]:
+    """Load current document/chunk identity used to stamp Ghost B rows."""
+
+    clean_chunk_ids = sorted({str(chunk_id) for chunk_id in chunk_ids if chunk_id})
+    doc = await db["documents"].find_one(
+        {"doc_id": doc_id, "corpus_id": corpus_id},
+        {
+            "_id": 0,
+            "doc_id": 1,
+            "corpus_id": 1,
+            "user_id": 1,
+            "filename": 1,
+            "updated_at": 1,
+            "source_identity": 1,
+            "source_key": 1,
+            "content_sha256": 1,
+            "source_file_hash": 1,
+            "ingestion_config": 1,
+            "schema_lens": 1,
+        },
+    )
+    chunks: dict[str, dict[str, Any]] = {}
+    if clean_chunk_ids:
+        rows = await db["chunks"].find(
+            {
+                "doc_id": doc_id,
+                "corpus_id": corpus_id,
+                "chunk_id": {"$in": clean_chunk_ids},
+            },
+            {
+                "_id": 0,
+                "chunk_id": 1,
+                "parent_id": 1,
+                "text": 1,
+                "text_hash": 1,
+                "chunk_hash": 1,
+                "chunk_version": 1,
+                "updated_at": 1,
+            },
+        ).to_list(length=len(clean_chunk_ids))
+        chunks = {str(row.get("chunk_id") or ""): row for row in rows if row.get("chunk_id")}
+    return doc, chunks, extraction_contract_hash(doc)
+
+
+def _stamp_ghost_b_identity(
+    row: dict[str, Any],
+    *,
+    chunk: dict[str, Any] | None,
+    doc: dict[str, Any] | None,
+    contract_hash: str,
+) -> None:
+    if not chunk:
+        return
+    identity = extraction_stage_identity(
+        chunk=chunk,
+        doc=doc,
+        extraction_contract_hash=contract_hash,
+    )
+    row["chunk_hash"] = stage_chunk_hash(chunk)
+    row["chunk_version"] = identity.get("chunk_version")
+    row["doc_version"] = identity.get("doc_version")
+    row["extraction_contract_hash"] = contract_hash
+    row["stage_identity"] = identity
+
+
+def _ensure_ghost_b_artifact_id(row: dict[str, Any]) -> None:
+    """Attach a compact durable handle for this staged extraction artifact.
+
+    Successful LLM rows normally carry ``sha256:<raw-response-hash>`` from
+    Ghost B. Legacy rows, deterministic extractors, and provider failures may
+    not have a raw output body, so derive a stable id from the row identity and
+    compact audit fields instead of storing raw prompt/response text.
+    """
+
+    if str(row.get("raw_output_artifact_id") or "").strip():
+        return
+    fingerprint = row.get("raw_output_fingerprint")
+    if isinstance(fingerprint, dict):
+        raw_sha = str(fingerprint.get("sha256") or "").strip()
+        if raw_sha:
+            row["raw_output_artifact_id"] = f"sha256:{raw_sha}"
+            return
+    identity = row.get("stage_identity") if isinstance(row.get("stage_identity"), dict) else {}
+    row["raw_output_artifact_id"] = "derived:" + stable_stage_hash(
+        {
+            "doc_id": row.get("doc_id"),
+            "corpus_id": row.get("corpus_id"),
+            "chunk_id": row.get("chunk_id"),
+            "chunk_hash": row.get("chunk_hash") or identity.get("chunk_hash"),
+            "extraction_contract_hash": (
+                row.get("extraction_contract_hash")
+                or identity.get("extraction_contract_hash")
+            ),
+            "status": row.get("status"),
+            "model": row.get("model"),
+            "provider": row.get("provider"),
+            "lane": row.get("lane"),
+            "attempts": row.get("attempts"),
+            "prompt_hash": row.get("prompt_hash"),
+            "error_type": row.get("error_type"),
+        }
+    )
+
+
 async def stash_ghost_b(
     db: AsyncIOMotorDatabase,
     doc_id: str,
@@ -274,6 +390,20 @@ async def stash_ghost_b(
         serialized.append(row)
 
     if serialized:
+        doc, chunks_by_id, contract_hash = await _ghost_b_identity_context(
+            db,
+            doc_id=doc_id,
+            corpus_id=corpus_id,
+            chunk_ids=[str(row.get("chunk_id") or "") for row in serialized],
+        )
+        for row in serialized:
+            _stamp_ghost_b_identity(
+                row,
+                chunk=chunks_by_id.get(str(row.get("chunk_id") or "")),
+                doc=doc,
+                contract_hash=contract_hash,
+            )
+            _ensure_ghost_b_artifact_id(row)
         ops = [
             ReplaceOne(
                 {
@@ -376,6 +506,20 @@ async def stash_ghost_b_failures(
         serialized.append(row)
 
     if serialized:
+        doc, chunks_by_id, contract_hash = await _ghost_b_identity_context(
+            db,
+            doc_id=doc_id,
+            corpus_id=corpus_id,
+            chunk_ids=[str(row.get("chunk_id") or "") for row in serialized],
+        )
+        for row in serialized:
+            _stamp_ghost_b_identity(
+                row,
+                chunk=chunks_by_id.get(str(row.get("chunk_id") or "")),
+                doc=doc,
+                contract_hash=contract_hash,
+            )
+            _ensure_ghost_b_artifact_id(row)
         ops = [
             ReplaceOne(
                 {

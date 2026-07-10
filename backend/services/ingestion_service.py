@@ -14,6 +14,7 @@ Usage in main.py lifespan:
 """
 
 import asyncio
+import inspect
 import logging
 import hashlib
 import mimetypes
@@ -25,8 +26,23 @@ from config import get_settings
 from models.schemas import IngestionConfig, IngestJobResponse
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from qdrant_client import AsyncQdrantClient
+from services.ingestion.section_classifier import parent_summary_required_clause
+from services.storage.record_status import with_active_records
 
 logger = logging.getLogger(__name__)
+
+STRONG_SOURCE_KINDS: frozenset[str] = frozenset(
+    {"youtube_video", "url", "content_hash"}
+)
+QUERYABLE_INGEST_STAGES: frozenset[str] = frozenset(
+    {
+        "complete",
+        "fully_enriched",
+        "queryable_with_pending_graph",
+        "queryable_with_pending_summary",
+        "queryable_with_pending_summary_and_graph",
+    }
+)
 
 
 # ── Frozen / mutable field partition ───────────────────────────────────────
@@ -143,6 +159,64 @@ def build_effective_config(
                 continue
             merged[k] = v
     return IngestionConfig(**merged)
+
+
+async def _call_ingest_callback(callback: Any, *args: Any) -> None:
+    if callback is None:
+        return
+    result = callback(*args)
+    if inspect.isawaitable(result):
+        await result
+
+
+def exact_source_duplicate_query(
+    *,
+    corpus_id: str,
+    source_identity: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Return the exact-source duplicate query for strong source identities.
+
+    Filename-only identity is intentionally excluded: it is useful for audit,
+    but too weak to skip ingestion. URL/video ids and byte-content hashes are
+    deterministic enough to prevent redundant parse/chunk/embed/extract work.
+    """
+
+    identity = source_identity or {}
+    source_key = str(identity.get("source_key") or "").strip()
+    source_kind = str(identity.get("source_kind") or "").strip()
+    content_sha = str(identity.get("content_sha256") or "").strip()
+    clauses: list[dict[str, Any]] = []
+    # Byte/content identity is stricter than URL identity. Some crawled/exported
+    # sources collapse many distinct files to the same channel/page URL; when a
+    # content hash is available, never skip by source_key alone.
+    if not content_sha and source_key and source_kind in STRONG_SOURCE_KINDS:
+        clauses.extend([
+            {"source_key": source_key},
+            {"source_identity.source_key": source_key},
+        ])
+    if content_sha:
+        clauses.extend([
+            {"source_identity.content_sha256": content_sha},
+            {"content_sha256": content_sha},
+            {"source_file_hash": content_sha},
+        ])
+    if not clauses:
+        return None
+    return with_active_records(
+        {
+            "corpus_id": corpus_id,
+            "ingest_stage": {"$ne": "skipped_duplicate"},
+            "$and": [
+                {
+                    "$or": [
+                        {"write_state.qdrant_written": True},
+                        {"ingest_stage": {"$in": sorted(QUERYABLE_INGEST_STAGES)}},
+                    ]
+                }
+            ],
+            "$or": clauses,
+        }
+    )
 
 
 def _summary_backfill_index_scope(
@@ -305,8 +379,20 @@ class IngestionService:
             return
         try:
             await self._db["documents"].create_index(
+                [("source_key", 1), ("corpus_id", 1)],
+                name="documents_source_key_corpus_idx",
+                sparse=True,
+                background=True,
+            )
+            await self._db["documents"].create_index(
                 [("source_identity.source_key", 1), ("corpus_id", 1)],
                 name="documents_source_identity_key_corpus_idx",
+                sparse=True,
+                background=True,
+            )
+            await self._db["documents"].create_index(
+                [("source_identity.content_sha256", 1), ("corpus_id", 1)],
+                name="documents_source_identity_content_sha_corpus_idx",
                 sparse=True,
                 background=True,
             )
@@ -674,6 +760,7 @@ class IngestionService:
         target_stage: str | None = None,
         extraction_endpoint_urls: list[str] | None = None,
         defer_summaries: bool = False,
+        duplicate_policy: str = "skip",
     ) -> IngestJobResponse:
         """Run the full ingestion pipeline for one document.
 
@@ -711,6 +798,57 @@ class IngestionService:
         source_identity.setdefault("original_filename", filename)
         source_identity["deterministic_filename"] = deterministic_filename
         filename = deterministic_filename
+        if duplicate_policy not in {"skip", "allow"}:
+            raise ValueError("duplicate_policy must be 'skip' or 'allow'")
+        if duplicate_policy == "skip":
+            duplicate_query = exact_source_duplicate_query(
+                corpus_id=corpus_id,
+                source_identity=source_identity,
+            )
+            if duplicate_query is not None and self._db is not None:
+                existing = await self._db["documents"].find_one(
+                    duplicate_query,
+                    {
+                        "_id": 0,
+                        "doc_id": 1,
+                        "filename": 1,
+                        "source_tier": 1,
+                        "source_key": 1,
+                        "source_identity.content_sha256": 1,
+                        "ingest_stage": 1,
+                    },
+                )
+                if existing:
+                    existing_doc_id = str(existing.get("doc_id") or "")
+                    reason = (
+                        "Exact source duplicate skipped: "
+                        f"{filename!r} matches existing document "
+                        f"{existing.get('filename') or existing_doc_id} "
+                        f"({existing_doc_id}). Pass duplicate_policy='allow' "
+                        "to intentionally ingest another copy."
+                    )
+                    await _call_ingest_callback(on_doc_id, existing_doc_id)
+                    await _call_ingest_callback(
+                        on_phase,
+                        "skipped_duplicate",
+                        {
+                            "doc_id": existing_doc_id,
+                            "corpus_id": corpus_id,
+                            "duplicate_of": existing_doc_id,
+                            "source_key": source_identity.get("source_key"),
+                        },
+                    )
+                    return IngestJobResponse(
+                        job_id=str(uuid.uuid4()),
+                        doc_id=existing_doc_id,
+                        corpus_id=corpus_id,
+                        filename=filename,
+                        source_tier=existing.get("source_tier"),
+                        status="skipped_duplicate",
+                        chunk_count=0,
+                        parent_count=0,
+                        error=reason,
+                    )
 
         return await run_ingest_job(
             job_id=str(uuid.uuid4()),
@@ -985,13 +1123,14 @@ class IngestionService:
                     exc,
                 )
 
+        await self._refresh_corpus_counts([corpus_doc])
         return corpus_doc
 
     async def list_corpora(self, user_id: Optional[str] = None) -> list[dict]:
         from services.storage.mongo_reader import list_corpora
 
         docs = await list_corpora(self._db, user_id=user_id)
-        await self._refresh_corpus_counts(docs)
+        await self._refresh_corpus_counts(docs, refresh_readiness=False)
         for doc in docs:
             self._mask_ingestion_keys_in_place(doc.get("default_ingestion_config"))
         return docs
@@ -1001,11 +1140,64 @@ class IngestionService:
 
         doc = await get_corpus(self._db, corpus_id)
         if doc:
-            await self._refresh_corpus_counts([doc])
+            await self._refresh_corpus_counts([doc], refresh_readiness=False)
             self._mask_ingestion_keys_in_place(doc.get("default_ingestion_config"))
         return doc
 
-    async def _refresh_corpus_counts(self, docs: list[dict]) -> None:
+    async def _materialize_corpus_readiness_safely(self, corpus_id: str) -> dict | None:
+        try:
+            from services.ingestion.readiness import materialize_corpus_readiness
+
+            return await materialize_corpus_readiness(self._db, corpus_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Corpus readiness materialization failed corpus=%s: %s",
+                str(corpus_id)[:8],
+                exc,
+            )
+            return None
+
+    async def _compute_corpus_readiness_safely(self, corpus_id: str) -> dict | None:
+        try:
+            from services.ingestion.readiness import compute_corpus_readiness
+
+            return await compute_corpus_readiness(self._db, corpus_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Corpus readiness pressure check failed corpus=%s: %s",
+                str(corpus_id)[:8],
+                exc,
+            )
+            return None
+
+    async def _backpressure_pause_result(
+        self,
+        *,
+        corpus_id: str,
+        lane_key: str,
+        operation: str,
+        readiness: dict | None = None,
+    ) -> dict | None:
+        readiness = readiness or await self._compute_corpus_readiness_safely(corpus_id)
+        pressure = (readiness or {}).get("pressure") or {}
+        backpressure = pressure.get("backpressure") or {}
+        if backpressure.get(lane_key) is not False:
+            return None
+        return {
+            "corpus_id": corpus_id,
+            "status": "paused_pressure",
+            "operation": operation,
+            "reason": f"{lane_key}=false",
+            "pressure": pressure,
+            "readiness": readiness,
+        }
+
+    async def _refresh_corpus_counts(
+        self,
+        docs: list[dict],
+        *,
+        refresh_readiness: bool = True,
+    ) -> None:
         """Repair corpus doc/chunk aggregate counters from Mongo truth.
 
         Document deletion cascades remove rows from `documents` and `chunks`.
@@ -1039,6 +1231,24 @@ class IngestionService:
             {"$group": {"_id": "$corpus_id", "count": {"$sum": 1}}},
         ]).to_list(length=None)
         ready_counts = {str(r["_id"]): int(r["count"]) for r in ready_rows}
+        cached_readiness: dict[str, dict] = {}
+        if not refresh_readiness:
+            rows = await self._db["corpus_readiness"].find(
+                {"_id": {"$in": corpus_ids}},
+                {"_id": 1, "corpus_id": 1, "status": 1, "blocking": 1,
+                 "next_actions": 1, "documents": 1, "chunks": 1,
+                 "summaries": 1, "graph": 1, "idempotency": 1,
+                 "repair": 1, "pressure": 1, "schema_version": 1,
+                 "computed_at": 1, "source": 1, "stale": 1,
+                 "refresh_error": 1},
+            ).to_list(length=len(corpus_ids))
+            cached_readiness = {
+                str(row.get("corpus_id") or row.get("_id")): {
+                    key: value for key, value in row.items() if key != "_id"
+                }
+                for row in rows
+            }
+
         for doc in docs:
             cid = doc.get("corpus_id")
             if not cid:
@@ -1059,6 +1269,56 @@ class IngestionService:
                 )
             doc["doc_count"] = actual_docs
             doc["chunk_count"] = actual_chunks
+            if not refresh_readiness:
+                readiness = cached_readiness.get(str(cid))
+                if readiness is not None:
+                    doc["readiness"] = readiness
+                else:
+                    doc["readiness"] = {
+                        "corpus_id": str(cid),
+                        "status": "unknown",
+                        "stale": True,
+                        "blocking": ["readiness_snapshot_missing"],
+                    }
+                continue
+
+            try:
+                readiness = await self._materialize_corpus_readiness_safely(str(cid))
+                if readiness is None:
+                    raise RuntimeError("materialize_corpus_readiness returned no snapshot")
+                doc["readiness"] = readiness
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "Corpus readiness snapshot failed corpus=%s: %s",
+                    str(cid)[:8],
+                    exc,
+                )
+                cached = None
+                try:
+                    from services.ingestion.readiness import (
+                        build_corpus_readiness_record,
+                        get_materialized_corpus_readiness,
+                    )
+
+                    cached = await get_materialized_corpus_readiness(self._db, str(cid))
+                    doc["readiness"] = build_corpus_readiness_record(
+                        cached
+                        or {
+                            "corpus_id": str(cid),
+                            "status": "unknown",
+                            "blocking": ["readiness_refresh_failed"],
+                        },
+                        stale=True,
+                        refresh_error=str(exc),
+                    )
+                except Exception:
+                    doc["readiness"] = {
+                        "corpus_id": str(cid),
+                        "status": "unknown",
+                        "stale": True,
+                        "error": str(exc)[:300],
+                        "blocking": ["readiness_refresh_failed"],
+                    }
 
     async def _get_corpus_raw(self, corpus_id: str) -> Optional[dict]:
         """Unmasked read — used by update_corpus so `_encrypt_ingestion_keys_in_place`
@@ -1068,7 +1328,7 @@ class IngestionService:
 
         doc = await get_corpus(self._db, corpus_id)
         if doc:
-            await self._refresh_corpus_counts([doc])
+            await self._refresh_corpus_counts([doc], refresh_readiness=False)
         return doc
 
     @staticmethod
@@ -1326,6 +1586,7 @@ class IngestionService:
         # Mask api_keys in the returned doc so the PUT response matches GET.
         if updated:
             self._mask_ingestion_keys_in_place(updated.get("default_ingestion_config"))
+            await self._refresh_corpus_counts([updated])
 
             # Phase 7.5 — if the corpus name changed, re-point Qdrant aliases.
             # Best-effort; failures are logged inside rename_corpus_aliases.
@@ -1532,13 +1793,871 @@ class IngestionService:
         """Retry only failed Ghost B chunks and patch Neo4j incrementally."""
         from services.ingestion.graph_backfill import backfill_failed_graph_chunks
 
-        return await backfill_failed_graph_chunks(
+        result = await backfill_failed_graph_chunks(
             db=self._db,
             qdrant_client=self._qdrant,
             neo4j_driver=self._neo4j,
             corpus_id=corpus_id,
             doc_id=doc_id,
             user_id=user_id,
+        )
+        readiness = await self._materialize_corpus_readiness_safely(corpus_id)
+        if readiness is not None:
+            result["readiness"] = readiness
+        return result
+
+    async def plan_graph_promotion_jobs(
+        self,
+        *,
+        corpus_id: str,
+        user_id: str | None = None,
+        apply: bool = False,
+        limit: int = 100,
+        max_chunks: int | None = None,
+    ) -> dict:
+        from services.ingestion.graph_promotion_jobs import plan_graph_promotion_jobs
+
+        result = await plan_graph_promotion_jobs(
+            self._db,
+            corpus_id=corpus_id,
+            user_id=user_id,
+            apply=apply,
+            limit=limit,
+            max_chunks=max_chunks,
+        )
+        if apply:
+            readiness = await self._materialize_corpus_readiness_safely(corpus_id)
+            if readiness is not None:
+                result["readiness"] = readiness
+        return result
+
+    async def list_graph_promotion_jobs(
+        self,
+        *,
+        corpus_id: str,
+        limit: int = 100,
+        statuses: list[str] | None = None,
+    ) -> dict:
+        from services.ingestion.graph_promotion_jobs import list_graph_promotion_jobs
+
+        return await list_graph_promotion_jobs(
+            self._db,
+            corpus_id=corpus_id,
+            limit=limit,
+            statuses=statuses,
+        )
+
+    async def run_graph_promotion_jobs(
+        self,
+        *,
+        corpus_id: str,
+        user_id: str,
+        limit: int = 5,
+    ) -> dict:
+        from services.ingestion.graph_promotion_jobs import run_graph_promotion_jobs
+
+        paused = await self._backpressure_pause_result(
+            corpus_id=corpus_id,
+            lane_key="graph_promotion_allowed",
+            operation="graph_promotion_jobs.run",
+        )
+        if paused is not None:
+            paused["counts"] = {}
+            return paused
+
+        result = await run_graph_promotion_jobs(
+            self._db,
+            qdrant_client=self._qdrant,
+            neo4j_driver=self._neo4j,
+            corpus_id=corpus_id,
+            user_id=user_id,
+            limit=limit,
+        )
+        readiness = await self._materialize_corpus_readiness_safely(corpus_id)
+        if readiness is not None:
+            result["readiness"] = readiness
+        return result
+
+    async def plan_extraction_jobs(
+        self,
+        *,
+        corpus_id: str,
+        user_id: str,
+        apply: bool = False,
+        limit: int = 500,
+        include_succeeded: bool = False,
+    ) -> dict:
+        from services.ingestion.extraction_jobs import plan_extraction_jobs
+
+        result = await plan_extraction_jobs(
+            self._db,
+            corpus_id=corpus_id,
+            user_id=user_id,
+            apply=apply,
+            limit=limit,
+            include_succeeded=include_succeeded,
+        )
+        if apply:
+            readiness = await self._materialize_corpus_readiness_safely(corpus_id)
+            if readiness is not None:
+                result["readiness"] = readiness
+        return result
+
+    async def list_extraction_jobs(
+        self,
+        *,
+        corpus_id: str,
+        limit: int = 100,
+        statuses: list[str] | None = None,
+    ) -> dict:
+        from services.ingestion.extraction_jobs import list_extraction_jobs
+
+        return await list_extraction_jobs(
+            self._db,
+            corpus_id=corpus_id,
+            limit=limit,
+            statuses=statuses,
+        )
+
+    async def plan_source_parse_jobs(
+        self,
+        *,
+        corpus_id: str,
+        user_id: str | None = None,
+        apply: bool = False,
+        limit: int = 500,
+    ) -> dict:
+        from services.ingestion.source_parse_jobs import plan_source_parse_jobs
+
+        result = await plan_source_parse_jobs(
+            self._db,
+            corpus_id=corpus_id,
+            user_id=user_id,
+            apply=apply,
+            limit=limit,
+        )
+        if apply:
+            readiness = await self._materialize_corpus_readiness_safely(corpus_id)
+            if readiness is not None:
+                result["readiness"] = readiness
+        return result
+
+    async def list_source_parse_jobs(
+        self,
+        *,
+        corpus_id: str,
+        limit: int = 100,
+        statuses: list[str] | None = None,
+    ) -> dict:
+        from services.ingestion.source_parse_jobs import list_source_parse_jobs
+
+        return await list_source_parse_jobs(
+            self._db,
+            corpus_id=corpus_id,
+            limit=limit,
+            statuses=statuses,
+        )
+
+    async def run_source_parse_jobs(
+        self,
+        *,
+        corpus_id: str,
+        user_id: str,
+        limit: int = 25,
+        statuses: list[str] | None = None,
+    ) -> dict:
+        from services.ingestion.source_parse_jobs import run_source_parse_jobs
+
+        start_runners = bool(get_settings().INGEST_RUNNERS_ENABLED)
+        result = await run_source_parse_jobs(
+            self._db,
+            corpus_id=corpus_id,
+            user_id=user_id,
+            ingestion_service=self if start_runners else None,
+            limit=limit,
+            statuses=statuses,
+            start_runners=start_runners,
+        )
+        readiness = await self._materialize_corpus_readiness_safely(corpus_id)
+        if readiness is not None:
+            result["readiness"] = readiness
+        return result
+
+    async def run_extraction_jobs(
+        self,
+        *,
+        corpus_id: str,
+        user_id: str,
+        limit: int = 25,
+        statuses: list[str] | None = None,
+    ) -> dict:
+        from services.ingestion.extraction_jobs import run_extraction_jobs
+
+        paused = await self._backpressure_pause_result(
+            corpus_id=corpus_id,
+            lane_key="extraction_backfill_allowed",
+            operation="extraction_jobs.run",
+        )
+        if paused is not None:
+            paused.update({"claimed": 0, "counts": {}})
+            return paused
+
+        result = await run_extraction_jobs(
+            self._db,
+            qdrant_client=self._qdrant,
+            corpus_id=corpus_id,
+            user_id=user_id,
+            limit=limit,
+            statuses=statuses,
+        )
+        readiness = await self._materialize_corpus_readiness_safely(corpus_id)
+        if readiness is not None:
+            result["readiness"] = readiness
+        return result
+
+    async def plan_document_pipeline_jobs(
+        self,
+        *,
+        corpus_id: str,
+        user_id: str | None = None,
+        apply: bool = False,
+        limit: int = 500,
+        kinds: list[str] | None = None,
+    ) -> dict:
+        from services.ingestion.document_pipeline_jobs import plan_document_pipeline_jobs
+
+        result = await plan_document_pipeline_jobs(
+            self._db,
+            corpus_id=corpus_id,
+            user_id=user_id,
+            apply=apply,
+            limit=limit,
+            kinds=kinds,
+        )
+        if apply:
+            readiness = await self._materialize_corpus_readiness_safely(corpus_id)
+            if readiness is not None:
+                result["readiness"] = readiness
+        return result
+
+    async def list_document_pipeline_jobs(
+        self,
+        *,
+        corpus_id: str,
+        limit: int = 100,
+        statuses: list[str] | None = None,
+        kinds: list[str] | None = None,
+    ) -> dict:
+        from services.ingestion.document_pipeline_jobs import list_document_pipeline_jobs
+
+        return await list_document_pipeline_jobs(
+            self._db,
+            corpus_id=corpus_id,
+            limit=limit,
+            statuses=statuses,
+            kinds=kinds,
+        )
+
+    async def run_document_pipeline_jobs(
+        self,
+        *,
+        corpus_id: str,
+        user_id: str | None = None,
+        limit: int = 25,
+        statuses: list[str] | None = None,
+        kinds: list[str] | None = None,
+    ) -> dict:
+        from services.ingestion.document_pipeline_jobs import run_document_pipeline_jobs
+
+        paused = await self._backpressure_pause_result(
+            corpus_id=corpus_id,
+            lane_key="document_pipeline_allowed",
+            operation="document_pipeline_jobs.run",
+        )
+        if paused is not None:
+            paused.update(
+                {
+                    "claimed": 0,
+                    "source_claimed": 0,
+                    "source_requested": False,
+                    "source_result": None,
+                    "executor_missing_kinds": [],
+                    "counts": {},
+                    "jobs": [],
+                }
+            )
+            return paused
+
+        async def _source_runner(*, limit: int) -> dict:
+            return await self.run_source_parse_jobs(
+                corpus_id=corpus_id,
+                user_id=user_id,
+                limit=limit,
+            )
+
+        async def _persist_runner(*, doc_ids: list[str], limit: int) -> dict:
+            from services.ingestion.document_pipeline_executors import (
+                mark_documents_persisted_from_artifacts,
+            )
+
+            return await mark_documents_persisted_from_artifacts(
+                self._db,
+                corpus_id=corpus_id,
+                doc_ids=doc_ids,
+                limit=limit,
+            )
+
+        async def _embed_runner(*, doc_ids: list[str], limit: int) -> dict:
+            from services.ingestion.document_pipeline_executors import (
+                embed_documents_to_qdrant_from_artifacts,
+            )
+
+            return await embed_documents_to_qdrant_from_artifacts(
+                self._db,
+                qdrant_client=self._qdrant,
+                corpus_id=corpus_id,
+                doc_ids=doc_ids,
+                limit=limit,
+            )
+
+        result = await run_document_pipeline_jobs(
+            self._db,
+            corpus_id=corpus_id,
+            user_id=user_id,
+            limit=limit,
+            statuses=statuses,
+            kinds=kinds,
+            source_runner=_source_runner,
+            persist_runner=_persist_runner,
+            embed_runner=_embed_runner,
+        )
+        readiness = await self._materialize_corpus_readiness_safely(corpus_id)
+        if readiness is not None:
+            result["readiness"] = readiness
+        return result
+
+    async def plan_summary_jobs(
+        self,
+        *,
+        corpus_id: str,
+        user_id: str | None = None,
+        apply: bool = False,
+        limit: int = 500,
+        kinds: list[str] | None = None,
+    ) -> dict:
+        from services.ingestion.summary_jobs import plan_summary_jobs
+
+        result = await plan_summary_jobs(
+            self._db,
+            corpus_id=corpus_id,
+            user_id=user_id,
+            apply=apply,
+            limit=limit,
+            kinds=kinds,
+        )
+        if apply:
+            readiness = await self._materialize_corpus_readiness_safely(corpus_id)
+            if readiness is not None:
+                result["readiness"] = readiness
+        return result
+
+    async def list_summary_jobs(
+        self,
+        *,
+        corpus_id: str,
+        limit: int = 100,
+        statuses: list[str] | None = None,
+        kinds: list[str] | None = None,
+    ) -> dict:
+        from services.ingestion.summary_jobs import list_summary_jobs
+
+        return await list_summary_jobs(
+            self._db,
+            corpus_id=corpus_id,
+            limit=limit,
+            statuses=statuses,
+            kinds=kinds,
+        )
+
+    async def run_summary_jobs(
+        self,
+        *,
+        corpus_id: str,
+        user_id: str | None = None,
+        limit: int = 25,
+        statuses: list[str] | None = None,
+        kinds: list[str] | None = None,
+    ) -> dict:
+        from services.ingestion.summary_jobs import run_summary_jobs
+
+        pressure_readiness = await self._compute_corpus_readiness_safely(corpus_id)
+        paused = await self._backpressure_pause_result(
+            corpus_id=corpus_id,
+            lane_key="summary_generation_allowed",
+            operation="summary_jobs.run",
+            readiness=pressure_readiness,
+        )
+        if paused is not None:
+            paused.update(
+                {
+                    "claimed": 0,
+                    "parent_claimed": 0,
+                    "document_claimed": 0,
+                    "counts": {},
+                    "runner_results": {},
+                    "jobs": [],
+                }
+            )
+            return paused
+
+        summary_backpressure = ((pressure_readiness or {}).get("pressure") or {}).get(
+            "backpressure"
+        ) or {}
+        summary_indexing_allowed = (
+            summary_backpressure.get("summary_indexing_allowed") is not False
+        )
+
+        async def _parent_runner(*, limit: int, doc_ids: list[str] | None = None) -> dict:
+            result = await self.backfill_parent_summaries(
+                corpus_id,
+                user_id=user_id,
+                generate=True,
+                index=summary_indexing_allowed,
+                limit=limit,
+                batch=min(max(int(limit or 1), 1), 32),
+                doc_ids=doc_ids,
+            )
+            if not summary_indexing_allowed:
+                result["index_scope"] = "paused_qdrant_pressure"
+                result["index_deferred_by_pressure"] = True
+            return result
+
+        async def _document_runner(*, limit: int, doc_ids: list[str] | None = None) -> dict:
+            return await self.backfill_document_summaries(
+                corpus_id=corpus_id,
+                user_id=user_id,
+                limit=limit,
+                doc_ids=doc_ids,
+            )
+
+        result = await run_summary_jobs(
+            self._db,
+            corpus_id=corpus_id,
+            user_id=user_id,
+            limit=limit,
+            statuses=statuses,
+            kinds=kinds,
+            parent_runner=_parent_runner,
+            document_runner=_document_runner,
+        )
+        readiness = await self._materialize_corpus_readiness_safely(corpus_id)
+        if readiness is not None:
+            result["readiness"] = readiness
+        return result
+
+    async def run_bounded_corpus_repair_cycle(
+        self,
+        *,
+        corpus_id: str,
+        user_id: str,
+        apply: bool = False,
+        reconcile_failures: bool = True,
+        failure_reconcile_limit: int = 5000,
+        backfill_promoted_extraction_marks_rows: bool = True,
+        promoted_extraction_marks_backfill_limit: int = 100,
+        backfill_source_parse_stage_identity_rows: bool = True,
+        source_parse_stage_identity_backfill_limit: int = 1000,
+        backfill_ghost_b_stage_identity_rows: bool = True,
+        ghost_b_stage_identity_backfill_limit: int = 1000,
+        plan_source_parse_jobs: bool = True,
+        source_parse_job_plan_limit: int = 500,
+        run_source_parse_jobs: bool = False,
+        source_parse_job_run_limit: int = 25,
+        plan_document_pipeline_jobs: bool = True,
+        document_pipeline_job_plan_limit: int = 500,
+        run_document_pipeline_jobs: bool = False,
+        document_pipeline_job_run_limit: int = 25,
+        plan_graph_jobs: bool = True,
+        graph_plan_limit: int = 100,
+        graph_max_chunks: int | None = None,
+        plan_extraction_jobs: bool = True,
+        extraction_job_plan_limit: int = 500,
+        run_extraction_jobs: bool = False,
+        extraction_job_run_limit: int = 25,
+        plan_summary_jobs: bool = True,
+        summary_job_plan_limit: int = 500,
+        backfill_summary_stage_identity_rows: bool = True,
+        summary_stage_identity_backfill_limit: int = 1000,
+        run_summary_jobs: bool = False,
+        summary_job_run_limit: int = 25,
+        run_document_summaries: bool = False,
+        document_summary_limit: int = 10,
+        run_graph_jobs: bool = False,
+        graph_run_limit: int = 3,
+        record_run: bool = True,
+    ) -> dict:
+        from services.ingestion.corpus_repair import run_bounded_corpus_repair_cycle
+
+        return await run_bounded_corpus_repair_cycle(
+            self._db,
+            corpus_id=corpus_id,
+            user_id=user_id,
+            ingestion_service=self,
+            qdrant_client=self._qdrant,
+            neo4j_driver=self._neo4j,
+            apply=apply,
+            reconcile_failures=reconcile_failures,
+            failure_reconcile_limit=failure_reconcile_limit,
+            backfill_promoted_extraction_marks_rows=backfill_promoted_extraction_marks_rows,
+            promoted_extraction_marks_backfill_limit=promoted_extraction_marks_backfill_limit,
+            backfill_source_parse_stage_identity_rows=backfill_source_parse_stage_identity_rows,
+            source_parse_stage_identity_backfill_limit=source_parse_stage_identity_backfill_limit,
+            backfill_ghost_b_stage_identity_rows=backfill_ghost_b_stage_identity_rows,
+            ghost_b_stage_identity_backfill_limit=ghost_b_stage_identity_backfill_limit,
+            plan_source_parse_job_rows=plan_source_parse_jobs,
+            source_parse_job_plan_limit=source_parse_job_plan_limit,
+            run_source_parse_job_rows=run_source_parse_jobs,
+            source_parse_job_run_limit=source_parse_job_run_limit,
+            source_parse_start_runners=bool(get_settings().INGEST_RUNNERS_ENABLED),
+            plan_document_pipeline_job_rows=plan_document_pipeline_jobs,
+            document_pipeline_job_plan_limit=document_pipeline_job_plan_limit,
+            run_document_pipeline_job_rows=run_document_pipeline_jobs,
+            document_pipeline_job_run_limit=document_pipeline_job_run_limit,
+            plan_graph_jobs=plan_graph_jobs,
+            graph_plan_limit=graph_plan_limit,
+            graph_max_chunks=graph_max_chunks,
+            plan_extraction_job_rows=plan_extraction_jobs,
+            extraction_job_plan_limit=extraction_job_plan_limit,
+            run_extraction_job_rows=run_extraction_jobs,
+            extraction_job_run_limit=extraction_job_run_limit,
+            plan_summary_job_rows=plan_summary_jobs,
+            summary_job_plan_limit=summary_job_plan_limit,
+            backfill_summary_stage_identity_rows=backfill_summary_stage_identity_rows,
+            summary_stage_identity_backfill_limit=summary_stage_identity_backfill_limit,
+            run_summary_job_rows=run_summary_jobs,
+            summary_job_run_limit=summary_job_run_limit,
+            run_document_summaries=run_document_summaries,
+            document_summary_limit=document_summary_limit,
+            run_graph_jobs=run_graph_jobs,
+            graph_run_limit=graph_run_limit,
+            record_run=record_run,
+        )
+
+    async def run_auto_corpus_repair_tick(
+        self,
+        *,
+        limit: int | None = None,
+    ) -> dict[str, Any]:
+        """Plan safe repair queues for recently active corpora.
+
+        This is the worker-owned maintenance loop that keeps corpus readiness
+        and durable repair queues current without waiting for an operator to
+        click a button. By default it plans/reconciles only. Provider-backed or
+        write-heavy execution is gated by explicit settings flags.
+        """
+
+        settings = get_settings()
+        if not bool(getattr(settings, "INGEST_AUTO_REPAIR_ENABLED", True)):
+            return {"status": "disabled", "scanned": 0, "corpora": []}
+
+        limit = max(
+            1,
+            min(
+                int(limit or getattr(settings, "INGEST_AUTO_REPAIR_CORPUS_LIMIT", 5) or 5),
+                100,
+            ),
+        )
+        rows = await self._db["corpora"].find(
+            with_active_records({}),
+            {"_id": 0, "corpus_id": 1, "user_id": 1, "name": 1, "updated_at": 1},
+        ).sort("updated_at", -1).limit(limit).to_list(length=limit)
+        results: list[dict[str, Any]] = []
+        for row in rows:
+            corpus_id = str(row.get("corpus_id") or "")
+            if not corpus_id:
+                continue
+            user_id = str(row.get("user_id") or "")
+            run_extraction_lane = bool(
+                getattr(settings, "INGEST_AUTO_REPAIR_RUN_EXTRACTION", False)
+            )
+            run_summary_lane = bool(
+                getattr(settings, "INGEST_AUTO_REPAIR_RUN_SUMMARIES", False)
+            )
+            run_document_lane = bool(
+                getattr(settings, "INGEST_AUTO_REPAIR_RUN_DOCUMENT_PIPELINE", False)
+            )
+            run_graph_lane = bool(
+                getattr(settings, "INGEST_AUTO_REPAIR_RUN_GRAPH", True)
+            )
+            document_run_limit = int(
+                getattr(settings, "INGEST_AUTO_REPAIR_DOCUMENT_RUN_LIMIT", 25)
+                or 25
+            )
+            extraction_run_limit = int(
+                getattr(settings, "INGEST_AUTO_REPAIR_EXTRACTION_RUN_LIMIT", 100)
+                or 100
+            )
+            summary_run_limit = int(
+                getattr(settings, "INGEST_AUTO_REPAIR_SUMMARY_RUN_LIMIT", 100)
+                or 100
+            )
+            graph_run_limit = int(
+                getattr(settings, "INGEST_AUTO_REPAIR_GRAPH_RUN_LIMIT", 5)
+                or 5
+            )
+            try:
+                result = await self.run_bounded_corpus_repair_cycle(
+                    corpus_id=corpus_id,
+                    user_id=user_id,
+                    apply=True,
+                    reconcile_failures=True,
+                    failure_reconcile_limit=5000,
+                    backfill_ghost_b_stage_identity_rows=(
+                        int(getattr(settings, "INGEST_AUTO_REPAIR_STAGE_IDENTITY_LIMIT", 1000) or 0)
+                        > 0
+                    ),
+                    backfill_source_parse_stage_identity_rows=(
+                        int(getattr(settings, "INGEST_AUTO_REPAIR_STAGE_IDENTITY_LIMIT", 1000) or 0)
+                        > 0
+                    ),
+                    source_parse_stage_identity_backfill_limit=int(
+                        getattr(settings, "INGEST_AUTO_REPAIR_STAGE_IDENTITY_LIMIT", 1000)
+                        or 0
+                    ),
+                    ghost_b_stage_identity_backfill_limit=int(
+                        getattr(settings, "INGEST_AUTO_REPAIR_STAGE_IDENTITY_LIMIT", 1000)
+                        or 0
+                    ),
+                    plan_source_parse_jobs=True,
+                    source_parse_job_plan_limit=500,
+                    run_source_parse_jobs=False,
+                    plan_document_pipeline_jobs=True,
+                    document_pipeline_job_plan_limit=500,
+                    run_document_pipeline_jobs=False,
+                    document_pipeline_job_run_limit=document_run_limit,
+                    plan_graph_jobs=True,
+                    graph_plan_limit=100,
+                    plan_extraction_jobs=True,
+                    extraction_job_plan_limit=500,
+                    # Provider-backed lanes run independently below. Keeping
+                    # them out of the sequential repair cycle lets extraction
+                    # and summarization overlap without weakening their
+                    # separate durable queues or pressure gates.
+                    run_extraction_jobs=False,
+                    extraction_job_run_limit=extraction_run_limit,
+                    plan_summary_jobs=True,
+                    summary_job_plan_limit=500,
+                    backfill_summary_stage_identity_rows=(
+                        int(getattr(settings, "INGEST_AUTO_REPAIR_STAGE_IDENTITY_LIMIT", 1000) or 0)
+                        > 0
+                    ),
+                    summary_stage_identity_backfill_limit=int(
+                        getattr(settings, "INGEST_AUTO_REPAIR_STAGE_IDENTITY_LIMIT", 1000)
+                        or 0
+                    ),
+                    run_summary_jobs=False,
+                    summary_job_run_limit=summary_run_limit,
+                    run_document_summaries=False,
+                    run_graph_jobs=False,
+                    graph_run_limit=graph_run_limit,
+                    record_run=False,
+                )
+
+                lane_names: list[str] = []
+                lane_coroutines: list[Any] = []
+                if run_document_lane:
+                    lane_names.append("document_pipeline")
+                    lane_coroutines.append(
+                        self.run_document_pipeline_jobs(
+                            corpus_id=corpus_id,
+                            user_id=user_id,
+                            limit=document_run_limit,
+                        )
+                    )
+                if run_summary_lane:
+                    lane_names.append("summary")
+                    lane_coroutines.append(
+                        self.run_summary_jobs(
+                            corpus_id=corpus_id,
+                            user_id=user_id,
+                            limit=summary_run_limit,
+                        )
+                    )
+                if run_extraction_lane:
+                    lane_names.append("extraction")
+                    lane_coroutines.append(
+                        self.run_extraction_jobs(
+                            corpus_id=corpus_id,
+                            user_id=user_id,
+                            limit=extraction_run_limit,
+                        )
+                    )
+                if run_graph_lane:
+                    lane_names.append("graph_promotion")
+                    lane_coroutines.append(
+                        self.run_graph_promotion_jobs(
+                            corpus_id=corpus_id,
+                            user_id=user_id,
+                            limit=graph_run_limit,
+                        )
+                    )
+
+                provider_lanes: dict[str, dict[str, Any]] = {}
+                if lane_coroutines:
+                    lane_results = await asyncio.gather(
+                        *lane_coroutines,
+                        return_exceptions=True,
+                    )
+                    for lane_name, lane_result in zip(
+                        lane_names,
+                        lane_results,
+                        strict=True,
+                    ):
+                        if isinstance(lane_result, Exception):
+                            provider_lanes[lane_name] = {
+                                "status": "failed",
+                                "claimed": 0,
+                                "error": str(lane_result)[:500],
+                            }
+                        else:
+                            provider_lanes[lane_name] = lane_result
+                    logger.info(
+                        "Auto repair lanes corpus=%s document=%s summary=%s extraction=%s graph=%s",
+                        corpus_id[:8],
+                        {
+                            key: provider_lanes.get("document_pipeline", {}).get(key)
+                            for key in ("status", "claimed")
+                        },
+                        {
+                            key: provider_lanes.get("summary", {}).get(key)
+                            for key in ("status", "claimed")
+                        },
+                        {
+                            key: provider_lanes.get("extraction", {}).get(key)
+                            for key in ("status", "claimed")
+                        },
+                        {
+                            key: provider_lanes.get("graph_promotion", {}).get(key)
+                            for key in ("status", "claimed")
+                        },
+                    )
+                result["provider_lanes"] = provider_lanes
+                summary = result.get("summary") or {}
+                results.append(
+                    {
+                        "corpus_id": corpus_id,
+                        "status": result.get("status"),
+                        "readiness_status": summary.get("readiness_status"),
+                        "queryable_docs": summary.get("queryable_docs"),
+                        "total_docs": summary.get("total_docs"),
+                        "failed_chunks": summary.get("failed_chunks"),
+                        "graph_jobs_queued": summary.get("graph_jobs_queued"),
+                        "extraction_jobs_queued": summary.get("extraction_jobs_queued"),
+                        "summary_jobs_queued": summary.get("summary_jobs_queued"),
+                        "document_pipeline_jobs_queued": summary.get(
+                            "document_pipeline_jobs_queued"
+                        ),
+                        "ghost_b_stage_identity_backfilled": summary.get(
+                            "ghost_b_stage_identity_backfilled"
+                        ),
+                        "source_parse_stage_identity_backfilled": summary.get(
+                            "source_parse_stage_identity_backfilled"
+                        ),
+                        "summary_stage_identity_backfilled": summary.get(
+                            "summary_stage_identity_backfilled"
+                        ),
+                        "provider_lanes": {
+                            lane_name: {
+                                "status": lane_result.get("status"),
+                                "claimed": int(lane_result.get("claimed") or 0),
+                                "counts": lane_result.get("counts") or {},
+                            }
+                            for lane_name, lane_result in provider_lanes.items()
+                        },
+                    }
+                )
+            except Exception as exc:  # noqa: BLE001 - maintenance must not kill worker
+                logger.warning(
+                    "Auto corpus repair tick failed corpus=%s: %s",
+                    corpus_id[:8],
+                    exc,
+                )
+                results.append(
+                    {
+                        "corpus_id": corpus_id,
+                        "status": "failed",
+                        "error": str(exc)[:500],
+                    }
+                )
+        changed = [
+            row
+            for row in results
+            if int(row.get("graph_jobs_queued") or 0)
+            or int(row.get("extraction_jobs_queued") or 0)
+            or int(row.get("summary_jobs_queued") or 0)
+            or int(row.get("document_pipeline_jobs_queued") or 0)
+            or int(row.get("source_parse_stage_identity_backfilled") or 0)
+            or int(row.get("summary_stage_identity_backfilled") or 0)
+            or int(row.get("failed_chunks") or 0)
+            or any(
+                int(lane.get("claimed") or 0)
+                for lane in (row.get("provider_lanes") or {}).values()
+            )
+            or row.get("status") == "failed"
+        ]
+        return {
+            "status": "complete",
+            "scanned": len(results),
+            "changed": len(changed),
+            "corpora": results,
+        }
+
+    async def backfill_document_summaries(
+        self,
+        *,
+        corpus_id: str,
+        user_id: str | None = None,
+        limit: int = 25,
+        doc_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        from services.ingestion.document_summaries import backfill_document_summaries
+
+        paused = await self._backpressure_pause_result(
+            corpus_id=corpus_id,
+            lane_key="summary_generation_allowed",
+            operation="document_summaries.backfill",
+        )
+        if paused is not None:
+            paused.update({"attempted": 0, "built": 0, "skipped": 0, "failed": 0})
+            return paused
+
+        result = await backfill_document_summaries(
+            self._db,
+            corpus_id=corpus_id,
+            user_id=user_id,
+            limit=limit,
+            doc_ids=doc_ids,
+        )
+        readiness = await self._materialize_corpus_readiness_safely(corpus_id)
+        if readiness is not None:
+            result["readiness"] = readiness
+        return result
+
+    async def audit_corpus_idempotency(
+        self,
+        *,
+        corpus_id: str,
+        group_limit: int = 25,
+        missing_limit: int = 25,
+    ) -> dict[str, Any]:
+        """Return exact duplicate/source identity gaps for a corpus."""
+        from services.ingestion.idempotency_audit import audit_corpus_idempotency
+
+        return await audit_corpus_idempotency(
+            self._db,
+            corpus_id=corpus_id,
+            group_limit=group_limit,
+            missing_limit=missing_limit,
         )
 
     async def get_ingestion_audit(self, corpus_id: str) -> dict:
@@ -1626,11 +2745,26 @@ class IngestionService:
             readiness = "needs_backfill"
         if totals["related_to_ratio"] > 0.35 or totals["domain_range_remaps"] > totals["relations"] * 0.2:
             readiness = "schema_review"
+        try:
+            idempotency = await self.audit_corpus_idempotency(
+                corpus_id=corpus_id,
+                group_limit=10,
+                missing_limit=10,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "idempotency audit failed for corpus=%s: %s",
+                str(corpus_id)[:8],
+                exc,
+            )
+            idempotency = {"status": "audit_failed", "error": str(exc)[:500]}
+
         return {
             "corpus_id": corpus_id,
             "readiness": readiness,
             "totals": totals,
             "partial_docs": partial_docs[:50],
+            "idempotency": idempotency,
             "recommendations": [
                 "Run graph backfill for partial docs before large-batch graph analysis."
                 if totals["ghost_b_failed_chunks"]
@@ -1655,9 +2789,9 @@ class IngestionService:
         """Repair parent-summary retrieval for an existing corpus.
 
         This intentionally does not mutate the frozen ``chunk_summarization``
-        ingest flag. It fills missing body-parent summaries, idempotently
+        ingest flag. It fills missing retrieval parent summaries, idempotently
         indexes parent-summary text into Qdrant, and updates each document's
-        ``write_state.summaries_indexed`` when its body parents are covered.
+        ``write_state.summaries_indexed`` when required parent summaries are covered.
         Capped generate+index calls index only the summaries generated in that
         call unless ``doc_ids`` scopes the run to a known batch. Explicit
         index-only calls still rebuild all existing summary points. That lets
@@ -1688,13 +2822,7 @@ class IngestionService:
             else None
         )
 
-        body_clause = {
-            "$or": [
-                {"chunk_kind": {"$exists": False}},
-                {"chunk_kind": None},
-                {"chunk_kind": "body"},
-            ]
-        }
+        summary_parent_clause = parent_summary_required_clause()
         summary_text_clause = {"summary": {"$exists": True, "$nin": [None, ""]}}
         missing_summary_clause = {
             "$or": [{"summary": {"$exists": False}}, {"summary": None}, {"summary": ""}]
@@ -1703,16 +2831,35 @@ class IngestionService:
         def _parent_query(*clauses: dict) -> dict:
             query: dict[str, Any] = {
                 "corpus_id": corpus_id,
-                "$and": [body_clause, *clauses],
+                "$and": [summary_parent_clause, *clauses],
             }
             if doc_id_filter is not None:
                 query["doc_id"] = {"$in": doc_id_filter}
             return query
 
+        def _body_parent_query(*clauses: dict) -> dict:
+            query: dict[str, Any] = {
+                "corpus_id": corpus_id,
+                "chunk_kind": "body",
+            }
+            if clauses:
+                query["$and"] = list(clauses)
+            if doc_id_filter is not None:
+                query["doc_id"] = {"$in": doc_id_filter}
+            return query
+
         async def _summary_health() -> dict[str, Any]:
-            body_parent_count = await self._db["parent_chunks"].count_documents(_parent_query())
+            retrieval_parent_count = await self._db["parent_chunks"].count_documents(
+                _parent_query()
+            )
+            body_parent_count = await self._db["parent_chunks"].count_documents(
+                _body_parent_query()
+            )
             with_summary_text = await self._db["parent_chunks"].count_documents(
                 _parent_query(summary_text_clause)
+            )
+            body_with_summary_text = await self._db["parent_chunks"].count_documents(
+                _body_parent_query(summary_text_clause)
             )
             indexed_summary_points = 0
             qdrant_error = None
@@ -1735,22 +2882,28 @@ class IngestionService:
                 qdrant_error = str(exc)[:300]
 
             coverage = (
-                min(indexed_summary_points, body_parent_count) / body_parent_count
-                if body_parent_count
+                min(indexed_summary_points, retrieval_parent_count) / retrieval_parent_count
+                if retrieval_parent_count
                 else 1.0
             )
-            if body_parent_count == 0:
+            if retrieval_parent_count == 0:
                 status = "empty"
-            elif with_summary_text >= body_parent_count and indexed_summary_points >= body_parent_count:
+            elif (
+                with_summary_text >= retrieval_parent_count
+                and indexed_summary_points >= retrieval_parent_count
+            ):
                 status = "healthy"
             elif with_summary_text or indexed_summary_points:
                 status = "partial"
             else:
                 status = "degraded"
             health: dict[str, Any] = {
+                "retrieval_parent_count": retrieval_parent_count,
                 "body_parent_count": body_parent_count,
                 "with_summary_text": with_summary_text,
-                "missing_summary_text": max(body_parent_count - with_summary_text, 0),
+                "missing_summary_text": max(retrieval_parent_count - with_summary_text, 0),
+                "body_with_summary_text": body_with_summary_text,
+                "body_missing_summary_text": max(body_parent_count - body_with_summary_text, 0),
                 "indexed_summary_points": indexed_summary_points,
                 "coverage": round(coverage, 4),
                 "status": status,
@@ -1760,6 +2913,66 @@ class IngestionService:
             return health
 
         before = await _summary_health()
+        pressure_readiness = await self._compute_corpus_readiness_safely(corpus_id)
+        if generate:
+            paused = await self._backpressure_pause_result(
+                corpus_id=corpus_id,
+                lane_key="summary_generation_allowed",
+                operation="summaries.backfill",
+                readiness=pressure_readiness,
+            )
+            if paused is not None:
+                paused.update(
+                    {
+                        "doc_scope_count": len(doc_id_filter) if doc_id_filter is not None else None,
+                        "generated": 0,
+                        "attempted": 0,
+                        "indexed": 0,
+                        "index_scope": "paused_pressure",
+                        "generation_batches": 0,
+                        "generation_errors": [paused["reason"]],
+                        "before": before,
+                        "after": before,
+                    }
+                )
+                return paused
+
+        summary_backpressure = ((pressure_readiness or {}).get("pressure") or {}).get(
+            "backpressure"
+        ) or {}
+        summary_indexing_allowed = (
+            summary_backpressure.get("summary_indexing_allowed") is not False
+        )
+        index_requested = bool(index)
+        index_deferred_by_pressure = False
+        if index_requested and not summary_indexing_allowed:
+            if generate:
+                index = False
+                index_deferred_by_pressure = True
+            else:
+                paused = await self._backpressure_pause_result(
+                    corpus_id=corpus_id,
+                    lane_key="summary_indexing_allowed",
+                    operation="summaries.backfill",
+                    readiness=pressure_readiness,
+                )
+                if paused is not None:
+                    paused.update(
+                        {
+                            "doc_scope_count": len(doc_id_filter) if doc_id_filter is not None else None,
+                            "generated": 0,
+                            "attempted": 0,
+                            "indexed": 0,
+                            "index_scope": "paused_qdrant_pressure",
+                            "index_deferred_by_pressure": True,
+                            "generation_batches": 0,
+                            "generation_errors": [],
+                            "before": before,
+                            "after": before,
+                        }
+                    )
+                    return paused
+
         generated = 0
         attempted = 0
         generation_batches = 0
@@ -1852,6 +3065,16 @@ class IngestionService:
                     rows = [r for r in rows if (r.get("text") or "").strip()]
                     if not rows:
                         break
+                    from services.ingestion.summary_backfill import (
+                        child_context_for_rows,
+                        summary_result_fields,
+                    )
+
+                    child_context = await child_context_for_rows(
+                        self._db,
+                        corpus_id,
+                        rows,
+                    )
                     generation_batches += 1
                     attempted += len(rows)
                     tasks = [
@@ -1861,6 +3084,12 @@ class IngestionService:
                             corpus_id=corpus_id,
                             source_tier=r.get("source_tier") or "parent",
                             text=r["text"],
+                            source_child_ids=child_context.get(
+                                r["parent_id"], {}
+                            ).get("source_child_ids", []),
+                            child_boundaries=child_context.get(
+                                r["parent_id"], {}
+                            ).get("child_boundaries", ""),
                         )
                         for r in rows
                     ]
@@ -1883,12 +3112,10 @@ class IngestionService:
                             UpdateOne(
                                 {"parent_id": r.parent_id, "corpus_id": corpus_id},
                                 {
-                                    "$set": {
-                                        "summary": r.summary,
-                                        "domain": r.domain,
-                                        "topics": r.topics,
-                                        "summary_updated_at": now,
-                                    }
+                                    "$set": summary_result_fields(
+                                        r,
+                                        updated_at=now,
+                                    )
                                 },
                             )
                             for r in results
@@ -1982,12 +3209,12 @@ class IngestionService:
             pipeline = [
                 {"$match": _parent_query()},
                 {
-                    "$group": {
-                        "_id": "$doc_id",
-                        "body_parent_count": {"$sum": 1},
-                        "with_summary": {
-                            "$sum": {
-                                "$cond": [
+                        "$group": {
+                            "_id": "$doc_id",
+                            "retrieval_parent_count": {"$sum": 1},
+                            "with_summary": {
+                                "$sum": {
+                                    "$cond": [
                                     {
                                         "$and": [
                                             {"$ne": ["$summary", None]},
@@ -2003,9 +3230,9 @@ class IngestionService:
                 },
             ]
             async for row in self._db["parent_chunks"].aggregate(pipeline):
-                ready_by_doc[str(row["_id"])] = int(row.get("body_parent_count") or 0) <= int(
-                    row.get("with_summary") or 0
-                )
+                ready_by_doc[str(row["_id"])] = int(
+                    row.get("retrieval_parent_count") or 0
+                ) <= int(row.get("with_summary") or 0)
             if ready_by_doc:
                 now = datetime.utcnow()
                 await self._db["documents"].bulk_write(
@@ -2025,7 +3252,7 @@ class IngestionService:
                 )
 
         after = await _summary_health()
-        return {
+        result = {
             "corpus_id": corpus_id,
             "status": after["status"],
             "doc_scope_count": len(doc_id_filter) if doc_id_filter is not None else None,
@@ -2033,11 +3260,17 @@ class IngestionService:
             "attempted": attempted,
             "indexed": indexed,
             "index_scope": index_scope,
+            "index_requested": index_requested,
+            "index_deferred_by_pressure": index_deferred_by_pressure,
             "generation_batches": generation_batches,
             "generation_errors": generation_errors,
             "before": before,
             "after": after,
         }
+        readiness = await self._materialize_corpus_readiness_safely(corpus_id)
+        if readiness is not None:
+            result["readiness"] = readiness
+        return result
 
     async def preflight_document(
         self,

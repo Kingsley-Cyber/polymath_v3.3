@@ -2177,6 +2177,7 @@ async def _ingest_bytes(
             model="",
             source_url=source_url,
             source_identity=source_identity,
+            duplicate_policy=duplicate_policy,
         )
         return {
             "status": "queued",

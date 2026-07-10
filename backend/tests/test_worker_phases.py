@@ -48,9 +48,47 @@ from services.ingestion.worker import (
     GhostBFailure,
     _build_ghost_pool,
 )
+from services.ingestion.summary_semantics import (
+    canonical_parent_summary_fields,
+    parse_semantic_summary,
+)
 
 
 # ── Test data builders ──────────────────────────────────────────────────────
+
+
+def test_reconstructed_summary_preserves_stored_retrieval_contract():
+    parsed = parse_semantic_summary(
+        '{"summary":"A durable summary preserves its stored retrieval contract across repair embedding runs.","central_claim":"Stored retrieval text remains stable."}',
+        source_child_ids=["child-1"],
+        source_text="Stable source text for the parent summary.",
+    )
+    row = {
+        **canonical_parent_summary_fields(
+            parsed,
+            parent_id="parent-1",
+            doc_id="doc-1",
+            corpus_id="corpus-1",
+            source_text="Stable source text for the parent summary.",
+            source_child_ids=["child-1"],
+            summary_model="unit-model",
+        ),
+        "parent_id": "parent-1",
+        "text": "Stable source text for the parent summary.",
+        "retrieval_text": "Stored retrieval contract text.",
+    }
+    parent = SimpleNamespace(
+        parent_id="parent-1",
+        doc_id="doc-1",
+        corpus_id="corpus-1",
+        source_tier="tier_a",
+        chunk_kind="body",
+    )
+
+    summaries = worker._reconstruct_summaries_from_mongo([parent], [row])
+
+    assert len(summaries) == 1
+    assert summaries[0].retrieval_text == "Stored retrieval contract text."
 
 
 def test_ghost_branches_overlap_for_rtx_extraction_and_cloud_summary():
@@ -478,6 +516,79 @@ async def test_parse_progress_and_doc_id_callback_happen_before_chunk_failure():
     assert update["$set"]["error"] == "tier_chunker failed: chunk exploded"
 
 
+@pytest.mark.asyncio
+async def test_chunk_timeout_uses_deterministic_pathological_fallback():
+    rec = PhaseRecorder()
+    parent, child = _parent("stub-doc", "c" * 36)
+    mocks = _install_mocks(
+        rec,
+        parents=[parent],
+        children=[child],
+        summaries=[],
+        ghost_b_out=[],
+    )
+    mocks["chunk"].side_effect = asyncio.TimeoutError()
+    fallback = AsyncMock(return_value=([parent], [child], []))
+    try:
+        with patch.object(worker, "_chunk_with_pathological_fallback", fallback):
+            response = await _run_job(
+                mocks,
+                IngestionConfig(use_neo4j=False, chunk_summarization=False),
+            )
+        assert response.status == "done"
+        fallback.assert_awaited_once()
+    finally:
+        mocks["stop_all"]()
+
+
+@pytest.mark.asyncio
+async def test_chunk_preflight_bypasses_normal_chunker_for_pathological_docs():
+    rec = PhaseRecorder()
+    parent, child = _parent("stub-doc", "c" * 36)
+    mocks = _install_mocks(
+        rec,
+        parents=[parent],
+        children=[child],
+        summaries=[],
+        ghost_b_out=[],
+    )
+    fallback = AsyncMock(return_value=([parent], [child], []))
+    try:
+        with patch.object(worker, "_pathological_chunk_reason", return_value="chars:test"), \
+             patch.object(worker, "_chunk_with_pathological_fallback", fallback):
+            response = await _run_job(
+                mocks,
+                IngestionConfig(use_neo4j=False, chunk_summarization=False),
+            )
+        assert response.status == "done"
+        mocks["chunk"].assert_not_awaited()
+        fallback.assert_awaited_once()
+    finally:
+        mocks["stop_all"]()
+
+
+def test_pathological_chunk_config_forces_sentence_merge_without_mutation():
+    from services.ingestion.chunk_subprocess import _pathological_config
+
+    original = IngestionConfig(child_chunk_algorithm="semantic_split")
+    fallback = _pathological_config(original)
+
+    assert original.child_chunk_algorithm == "semantic_split"
+    assert fallback.child_chunk_algorithm == "sentence_merge"
+
+
+def test_pathological_chunk_preflight_routes_large_prose_but_not_code():
+    prose = SimpleNamespace(text="x" * 100001, sections=[], language=None)
+    code = SimpleNamespace(text="x" * 100001, sections=[], language="python")
+    settings_obj = SimpleNamespace(
+        TIER_CHUNKER_PATHOLOGICAL_CHAR_THRESHOLD=100000,
+        TIER_CHUNKER_PATHOLOGICAL_SECTION_THRESHOLD=5000,
+    )
+
+    assert worker._pathological_chunk_reason(prose, settings_obj) == "chars:100001>=100000"
+    assert worker._pathological_chunk_reason(code, settings_obj) is None
+
+
 # ── Phase order tests ───────────────────────────────────────────────────────
 
 
@@ -720,8 +831,14 @@ async def test_qdrant_write_replaces_doc_points_before_upsert(monkeypatch):
         chunk_kind="body",
     )
 
-    async def fake_delete(_client, corpus_id, doc_id):
-        calls.append(("delete", corpus_id, doc_id))
+    async def fake_delete(
+        _client,
+        corpus_id,
+        doc_id,
+        *,
+        preserve_summary_points=False,
+    ):
+        calls.append(("delete", corpus_id, doc_id, preserve_summary_points))
 
     async def fake_upsert_children(
         _client,
@@ -756,7 +873,7 @@ async def test_qdrant_write_replaces_doc_points_before_upsert(monkeypatch):
         config=IngestionConfig(target_qdrant_collections=["naive", "graph"]),
     )
 
-    assert calls[0] == ("delete", "corpus-1", "doc-1")
+    assert calls[0] == ("delete", "corpus-1", "doc-1", True)
     assert ("upsert_children", "corpus-1", ("naive",), 1, 1) in calls
     assert ("upsert_children", "corpus-1", ("graph",), 1, 1) in calls
 
@@ -1153,6 +1270,49 @@ async def test_defer_flags_skip_summary_and_ghost_b_calls():
     assert extract_mock.await_count == 0
     assert result.summaries is None
     assert result.ghost_b_out is None
+
+
+@pytest.mark.asyncio
+async def test_deferred_summary_pass_reuses_durable_parent_summary():
+    doc_id, corpus_id = "doc-deferred-reuse", "c" * 36
+    parent, child = _parent(doc_id, corpus_id, pid="p0", child_id="c0")
+    cfg = IngestionConfig(
+        use_neo4j=False,
+        chunk_summarization=True,
+        target_qdrant_collections=["naive", "hrag"],
+    )
+    existing_parent = {
+        "parent_id": "p0",
+        "doc_id": doc_id,
+        "corpus_id": corpus_id,
+        "source_tier": SourceTier.tier_a.value,
+        "summary": "A durable parent summary.",
+    }
+    summarize_mock = AsyncMock()
+
+    with patch.object(worker.mongo_reader, "get_parent_chunks", new_callable=AsyncMock) as parent_mock, \
+         patch.object(worker, "summarize_parents", summarize_mock):
+        parent_mock.return_value = [existing_parent]
+        result = await worker._run_ghosts_parallel(
+            config=cfg,
+            parents=[parent],
+            children=[child],
+            doc_id=doc_id,
+            corpus_id=corpus_id,
+            model="m",
+            db=MagicMock(),
+            qdrant_client=MagicMock(),
+            neo4j_driver=None,
+            existing_doc=None,
+            ws=WriteState(),
+            defer_summaries=True,
+            defer_ghost_b=True,
+        )
+
+    assert summarize_mock.await_count == 0
+    assert result.summaries is not None
+    assert [summary.parent_id for summary in result.summaries] == ["p0"]
+    assert result.summaries[0].summary == "A durable parent summary."
 
 
 @pytest.mark.asyncio

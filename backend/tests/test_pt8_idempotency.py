@@ -159,7 +159,14 @@ def test_pydantic_literal_validation_is_deterministic():
         except Exception:
             pass  # expected
 
-    valid_r = {"subject": "a", "predicate": "uses", "object": "b", "object_kind": "entity", "confidence": 0.9}
+    valid_r = {
+        "subject": "a",
+        "predicate": "uses",
+        "object": "b",
+        "object_kind": "entity",
+        "confidence": 0.9,
+        "evidence_phrase": "a uses b.",
+    }
     invalid_r = {**valid_r, "predicate": "measures"}  # off-schema
     for _ in range(10):
         LLMRelation.model_validate(valid_r)
@@ -210,6 +217,7 @@ def test_current_graph_predicates_survive_pydantic_literal():
             LLMRelation.model_validate({
                 "subject": "x", "predicate": pred, "object": "y",
                 "object_kind": "entity", "confidence": 0.9,
+                "evidence_phrase": f"x {pred} y.",
             })
         except Exception as exc:
             raise AssertionError(
@@ -222,6 +230,7 @@ def test_current_graph_predicates_survive_pydantic_literal():
             LLMRelation.model_validate({
                 "subject": "x", "predicate": pred, "object": "y",
                 "object_kind": "entity", "confidence": 0.9,
+                "evidence_phrase": f"x {pred} y.",
             })
             raise AssertionError(
                 f"Pt 8b Pydantic Literal accepted dropped predicate {pred!r}. "

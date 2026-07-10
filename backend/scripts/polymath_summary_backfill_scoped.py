@@ -7,7 +7,7 @@ corpora where "complete" can hide a mostly empty parent-summary retrieval tier.
 
 Defaults are conservative:
   - dry-run unless --apply is passed
-  - body parents only, matching the production Ghost A contract
+  - retrieval-required parent rows only, matching the production Ghost A contract
   - bounded parent count
   - refuses to run while durable ingest batches are active unless forced
 
@@ -36,6 +36,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from qdrant_client import AsyncQdrantClient
 
 from config import get_settings
+from services.ingestion.section_classifier import parent_summary_required_clause
 from services.ingestion_service import IngestionService
 from services.settings import settings_service
 
@@ -77,14 +78,8 @@ async def _active_batches(db: Any) -> list[dict[str, Any]]:
     ).sort("updated_at", -1).to_list(length=20)
 
 
-def _body_clause() -> dict[str, Any]:
-    return {
-        "$or": [
-            {"chunk_kind": {"$exists": False}},
-            {"chunk_kind": None},
-            {"chunk_kind": "body"},
-        ]
-    }
+def _retrieval_parent_clause() -> dict[str, Any]:
+    return parent_summary_required_clause()
 
 
 def _missing_summary_clause() -> dict[str, Any]:
@@ -102,29 +97,38 @@ def _summary_text_clause() -> dict[str, Any]:
 
 
 def _parent_query(corpus_id: str, *clauses: dict[str, Any]) -> dict[str, Any]:
-    return {"corpus_id": corpus_id, "$and": [_body_clause(), *clauses]}
+    return {"corpus_id": corpus_id, "$and": [_retrieval_parent_clause(), *clauses]}
+
+
+def _body_parent_query(corpus_id: str, *clauses: dict[str, Any]) -> dict[str, Any]:
+    query: dict[str, Any] = {"corpus_id": corpus_id, "chunk_kind": "body"}
+    if clauses:
+        query["$and"] = list(clauses)
+    return query
 
 
 async def _summary_plan(db: Any, *, corpus_id: str, limit: int) -> dict[str, Any]:
-    body_parent_count = await db["parent_chunks"].count_documents(
+    retrieval_parent_count = await db["parent_chunks"].count_documents(
         _parent_query(corpus_id)
+    )
+    body_parent_count = await db["parent_chunks"].count_documents(
+        _body_parent_query(corpus_id)
     )
     with_summary_text = await db["parent_chunks"].count_documents(
         _parent_query(corpus_id, _summary_text_clause())
     )
+    body_with_summary_text = await db["parent_chunks"].count_documents(
+        _body_parent_query(corpus_id, _summary_text_clause())
+    )
     missing_summary_text = await db["parent_chunks"].count_documents(
         _parent_query(corpus_id, _missing_summary_clause())
     )
-    non_body_missing = await db["parent_chunks"].count_documents(
+    non_retrieval_missing = await db["parent_chunks"].count_documents(
         {
             "corpus_id": corpus_id,
             "$and": [
                 _missing_summary_clause(),
-                {
-                    "chunk_kind": {
-                        "$nin": ["body", None],
-                    }
-                },
+                {"$nor": [_retrieval_parent_clause()]},
             ],
         }
     )
@@ -163,12 +167,18 @@ async def _summary_plan(db: Any, *, corpus_id: str, limit: int) -> dict[str, Any
         ]
     ).to_list(length=10)
     return {
+        "retrieval_parent_count": retrieval_parent_count,
         "body_parent_count": body_parent_count,
         "with_summary_text": with_summary_text,
         "missing_summary_text": missing_summary_text,
-        "non_body_missing_summary_text": non_body_missing,
+        "body_with_summary_text": body_with_summary_text,
+        "body_missing_summary_text": max(body_parent_count - body_with_summary_text, 0),
+        "non_retrieval_missing_summary_text": non_retrieval_missing,
+        # Deprecated compatibility alias for older operator notes/scripts. This
+        # means non-retrieval, not literally non-body.
+        "non_body_missing_summary_text": non_retrieval_missing,
         "coverage": round(
-            with_summary_text / body_parent_count if body_parent_count else 1.0,
+            with_summary_text / retrieval_parent_count if retrieval_parent_count else 1.0,
             4,
         ),
         "planned_limit": limit,

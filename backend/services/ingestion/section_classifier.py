@@ -71,6 +71,28 @@ NOISY_KINDS: tuple[str, ...] = tuple(k for k in ALL_KINDS if k not in _RETRIEVAB
 # later phase.
 GHOST_B_SKIP_KINDS: frozenset[str] = frozenset(list(NOISY_KINDS) + [ChunkKind.CODE])
 
+# Parent-summary generation is narrower than "retrievable": body prose and
+# tables benefit from parent summaries, while code remains child-level evidence
+# until a deterministic code summarizer/AST lane exists. Missing legacy
+# chunk_kind is treated as body by the query helper below.
+PARENT_SUMMARY_KINDS: tuple[str, ...] = (ChunkKind.BODY, ChunkKind.TABLE)
+
+
+def should_summarize_parent(kind: str | None) -> bool:
+    """True when Ghost A/backfill should generate a parent summary."""
+    return not kind or kind in PARENT_SUMMARY_KINDS
+
+
+def parent_summary_required_clause(field: str = "chunk_kind") -> dict[str, object]:
+    """Mongo predicate for parent rows that are part of summary readiness."""
+    return {
+        "$or": [
+            {field: {"$exists": False}},
+            {field: None},
+            {field: {"$in": list(PARENT_SUMMARY_KINDS)}},
+        ]
+    }
+
 
 # ─── Heading-text classification rules ──────────────────────────────────────
 # Each rule = (compiled_regex, kind). Order matters: first match wins, so

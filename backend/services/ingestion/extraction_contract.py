@@ -61,6 +61,10 @@ INTERNAL_MODEL_FLAGS = frozenset(
         "route_policy",
         "lane_role",
         "route_weight",
+        "context_window_tokens",
+        "max_context_tokens",
+        "canary_max_concurrent",
+        "provider_canary_passed",
     }
 )
 

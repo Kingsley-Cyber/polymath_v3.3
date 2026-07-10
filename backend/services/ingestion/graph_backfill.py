@@ -7,6 +7,7 @@ holes later by retrying only the failed chunks and patching Neo4j incrementally.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from dataclasses import asdict
@@ -18,32 +19,221 @@ from qdrant_client import AsyncQdrantClient
 
 from models.schemas import IngestionConfig
 from services.ghost_b import (
+    EntityItem,
     ExtractionBatchReport,
     ExtractionFailureItem,
     ExtractionResult,
     ExtractionTask,
+    FactItem,
+    RelationItem,
     SchemaContext,
     extract_entities as cloud_extract_entities,
     summarize_extraction_batch,
 )
 from services.ghost_b_local import extract_entities as local_extract_entities
 from services.ingestion.extraction_contract import resolve_extraction_contract
-from services.graph.neo4j_writer import write_document_graph
-from services.ingestion.worker import (
-    _build_ghost_pool,
-    _build_ghost_b_error_event_sink,
-    _ghost_b_partial_warning,
-    _rehydrate_ghost_b_staging,
+from services.ingestion.provider_lane_health import (
+    adapt_extraction_pool_concurrency,
+    filter_extraction_pool_by_provider_health,
+    load_recent_provider_lane_health,
 )
+from services.graph.neo4j_writer import write_document_graph
 from services.ingestion.section_classifier import ChunkKind, should_skip_ghost_b
+from services.secrets import decrypt as _decrypt_api_key
 from services.storage import mongo_reader, mongo_writer
-from services.storage.qdrant_writer import retrieve_schema_for_chunk
 
 logger = logging.getLogger(__name__)
 
 
 _PARTIAL_PREFIX = "Ghost B graph extraction partial:"
 _BACKFILL_PREFIX = "Ghost B backfill"
+
+
+def _safe_settings() -> Any | None:
+    """Load settings lazily so repair modules remain importable in isolation."""
+
+    try:
+        from config import get_settings
+
+        return get_settings()
+    except Exception as exc:  # noqa: BLE001 - missing secrets should not break repair imports/tests
+        logger.debug("graph_backfill: settings unavailable, using local defaults: %s", exc)
+        return None
+
+
+def _pool_entry_uses_managed_vllm(entry: dict[str, Any] | Any) -> bool:
+    from services.extraction_provider_cards import extraction_lane_uses_private_vllm
+
+    return extraction_lane_uses_private_vllm(entry)
+
+
+def _build_ghost_pool(refs: list[Any] | None) -> list[dict[str, Any]]:
+    """Normalize/decrypt model profile refs for Ghost B without importing worker."""
+
+    if not refs:
+        return []
+    out: list[dict[str, Any]] = []
+    for ref in refs:
+        data = ref.model_dump() if hasattr(ref, "model_dump") else dict(ref or {})
+        for secret_field in ("api_key", "lifecycle_api_key"):
+            ct = data.get(secret_field)
+            if ct:
+                pt = _decrypt_api_key(ct)
+                data[secret_field] = pt if pt is not None else ct
+        extra_params = data.get("extra_params") or {}
+        if not isinstance(extra_params, dict):
+            extra_params = {}
+        managed_vllm = _pool_entry_uses_managed_vllm(data)
+        if managed_vllm and not bool(extra_params.get("disable_lifecycle_auto_stop")):
+            extra_params.setdefault("lifecycle_idle_shutdown_seconds", 600)
+            lifecycle_auto_stop = True
+        else:
+            lifecycle_auto_stop = bool(data.get("lifecycle_auto_stop"))
+        out.append(
+            {
+                "provider_preset": data.get("provider_preset") or "",
+                "model": data.get("model"),
+                "base_url": data.get("base_url") or None,
+                "api_key": data.get("api_key") or None,
+                "max_concurrent": int(data.get("max_concurrent") or 1) or 1,
+                "lifecycle_base_url": data.get("lifecycle_base_url") or None,
+                "lifecycle_api_key": data.get("lifecycle_api_key") or None,
+                "lifecycle_auto_start": bool(data.get("lifecycle_auto_start")),
+                "lifecycle_auto_stop": lifecycle_auto_stop,
+                "lifecycle_up_path": data.get("lifecycle_up_path") or "/up",
+                "lifecycle_status_path": data.get("lifecycle_status_path") or "/status",
+                "lifecycle_down_path": data.get("lifecycle_down_path") or "/down",
+                "lifecycle_ready_timeout_seconds": int(
+                    data.get("lifecycle_ready_timeout_seconds") or 360
+                ),
+                "extra_params": extra_params,
+            }
+        )
+    return out
+
+
+def _build_ghost_b_error_event_sink(
+    db: AsyncIOMotorDatabase,
+    *,
+    run_id: str,
+) -> Any | None:
+    settings = _safe_settings()
+    if settings is not None and not getattr(settings, "EXTRACTION_ERROR_AUDIT_ENABLED", True):
+        return None
+
+    max_failed = max(
+        0,
+        int(
+            getattr(settings, "EXTRACTION_ERROR_AUDIT_MAX_FAILED_ATTEMPTS_PER_DOC", 25)
+            if settings is not None
+            else 25
+        ),
+    )
+    max_success = max(
+        0,
+        int(
+            getattr(settings, "EXTRACTION_ERROR_AUDIT_MAX_SUCCESS_ATTEMPTS_PER_DOC", 2)
+            if settings is not None
+            else 2
+        ),
+    )
+    counts = {
+        "ghost_b_attempt_failed": 0,
+        "ghost_b_attempt_rate_limited": 0,
+        "ghost_b_attempt_succeeded": 0,
+        "ghost_b_attempt_succeeded_with_validation_rejections": 0,
+        "ghost_b_failure_budget_tripped": 0,
+    }
+    lock = asyncio.Lock()
+
+    async def _sink(event: dict[str, Any]) -> None:
+        name = str(event.get("event") or "")
+        async with lock:
+            if name == "ghost_b_attempt_failed":
+                if counts[name] >= max_failed:
+                    return
+                counts[name] += 1
+                sample_index = counts[name]
+            elif name == "ghost_b_attempt_rate_limited":
+                if counts[name] >= max_failed:
+                    return
+                counts[name] += 1
+                sample_index = counts[name]
+            elif name == "ghost_b_attempt_succeeded":
+                if counts[name] >= max_success:
+                    return
+                counts[name] += 1
+                sample_index = counts[name]
+            elif name == "ghost_b_attempt_succeeded_with_validation_rejections":
+                if counts[name] >= max_success:
+                    return
+                counts[name] += 1
+                sample_index = counts[name]
+            elif name == "ghost_b_failure_budget_tripped":
+                counts[name] += 1
+                sample_index = counts[name]
+            else:
+                return
+        doc = dict(event)
+        doc["run_id"] = doc.get("run_id") or run_id
+        doc["sample_index"] = sample_index
+        doc["created_at"] = datetime.utcnow()
+        try:
+            await db["ghost_b_error_events"].insert_one(doc)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("phase=ghost_b_error_audit_write_failed error=%s", exc)
+
+    return _sink
+
+
+def _ghost_b_partial_warning(
+    *,
+    extracted: int,
+    total: int,
+) -> str:
+    skipped = max(total - extracted, 0)
+    return (
+        f"Ghost B graph extraction partial: {extracted}/{total} chunks produced "
+        f"entities/relations; {skipped} chunks remain available for vector RAG "
+        "but have no extracted graph entities."
+    )
+
+
+def _rehydrate_ghost_b_staging(staged: list[dict[str, Any]]) -> list[ExtractionResult]:
+    """Reconstruct ExtractionResult dataclasses from Mongo-stored staging rows."""
+
+    out: list[ExtractionResult] = []
+    for row in staged:
+        out.append(
+            ExtractionResult(
+                schema_version=row.get("schema_version", "polymath.extract.v1"),
+                chunk_id=row["chunk_id"],
+                doc_id=row["doc_id"],
+                corpus_id=row["corpus_id"],
+                text=row.get("text", ""),
+                entities=[EntityItem(**item) for item in row.get("entities", [])],
+                relations=[RelationItem(**item) for item in row.get("relations", [])],
+                facts=[FactItem(**item) for item in row.get("facts", [])],
+                entity_remap_count=row.get("entity_remap_count", 0),
+                entity_drop_count=row.get("entity_drop_count", 0),
+                relation_remap_count=row.get("relation_remap_count", 0),
+                relation_drop_count=row.get("relation_drop_count", 0),
+                domain_range_remap_count=row.get("domain_range_remap_count", 0),
+                domain_range_warn_count=row.get("domain_range_warn_count", 0),
+                endpoint_completion_count=row.get("endpoint_completion_count", 0),
+                evidence_cue_repair_count=row.get("evidence_cue_repair_count", 0),
+                semantic_direction_repair_count=row.get("semantic_direction_repair_count", 0),
+                semantic_direction_drop_count=row.get("semantic_direction_drop_count", 0),
+                entity_evidence_drop_count=row.get("entity_evidence_drop_count", 0),
+                citation_drop_count=row.get("citation_drop_count", 0),
+                strict_entity_drop_count=row.get("strict_entity_drop_count", 0),
+                strict_relation_drop_count=row.get("strict_relation_drop_count", 0),
+                evidence_drop_count=row.get("evidence_drop_count", 0),
+                fact_drop_count=row.get("fact_drop_count", 0),
+                schema_lens_id=row.get("schema_lens_id"),
+            )
+        )
+    return out
 
 
 def _failure_from_dict(row: dict[str, Any]) -> ExtractionFailureItem:
@@ -56,6 +246,16 @@ def _failure_from_dict(row: dict[str, Any]) -> ExtractionFailureItem:
         attempts=int(row.get("attempts") or 0),
         error_type=str(row.get("error_type") or "unknown"),
         error_message=str(row.get("error_message") or "")[:1000],
+        provider=str(row.get("provider") or ""),
+        schema_mode=str(row.get("schema_mode") or ""),
+        output_mode=str(row.get("output_mode") or ""),
+        json_repair_mode=str(row.get("json_repair_mode") or ""),
+        semantic_verifier_mode=str(row.get("semantic_verifier_mode") or ""),
+        provider_card=(
+            row.get("provider_card")
+            if isinstance(row.get("provider_card"), dict)
+            else {}
+        ),
     )
 
 
@@ -309,8 +509,39 @@ async def _run_ghost_b_backfill(
         )
 
     pool = _build_ghost_pool(cloud_pool_refs)
+    if pool:
+        try:
+            provider_health = await load_recent_provider_lane_health(
+                db,
+                corpus_id=corpus_id,
+            )
+            filtered_pool, skipped_lanes = filter_extraction_pool_by_provider_health(
+                pool,
+                provider_health,
+            )
+            if skipped_lanes:
+                logger.warning(
+                    "graph_backfill provider health skipped extraction lanes corpus=%s lanes=%s",
+                    corpus_id[:8],
+                    skipped_lanes,
+                )
+                pool = filtered_pool
+            pool, concurrency_adjustments = adapt_extraction_pool_concurrency(
+                pool,
+                provider_health,
+            )
+            if concurrency_adjustments:
+                logger.info(
+                    "graph_backfill provider concurrency adapted corpus=%s adjustments=%s",
+                    corpus_id[:8],
+                    concurrency_adjustments,
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("graph_backfill provider health check failed: %s", exc)
 
     async def _schema_resolver(kind: str, query_vec: list[float], top_k: int) -> list[str]:
+        from services.storage.qdrant_writer import retrieve_schema_for_chunk
+
         return await retrieve_schema_for_chunk(qdrant_client, corpus_id, kind, query_vec, top_k)
 
     ghost_b_run_id = f"backfill-{uuid.uuid4()}"
@@ -390,14 +621,16 @@ async def backfill_failed_graph_chunks(
     corpus_id: str,
     doc_id: str,
     user_id: str,
+    allow_extraction: bool = True,
 ) -> dict:
     """Retry failed Ghost B chunks AND/OR flush staged extraction to Neo4j.
 
     Pt 9 — this function now serves two complementary purposes that share
     the same Mongo state and the same writer call:
 
-    1. **Failure retry** — if `ghost_b_failures` is non-empty, re-extract
-       those chunks via Ghost B and merge the results into staging.
+    1. **Failure retry** — if `ghost_b_failures` is non-empty and
+       ``allow_extraction`` is true, re-extract those chunks via Ghost B and
+       merge the results into staging.
     2. **Neo4j flush** — if `write_state.neo4j_written` is not True, or
        verification proves Neo4j chunk links are broken, and `ghost_b_staging`
        is non-empty, fire `write_document_graph` against the staged results so
@@ -451,12 +684,12 @@ async def backfill_failed_graph_chunks(
             "neo4j_flushed": False,
         }
 
-    # Pt 9 — when there are no failures but Neo4j needs flushing, take a
-    # fast path that skips Ghost B entirely and just runs the writer on
-    # the existing staged results. This is the common case after an
-    # embedder / Qdrant outage left the doc in `neo4j_written=False`
-    # despite extraction being complete.
-    if not failures and needs_neo4j_flush:
+    # Pt 9 — when Neo4j needs flushing and staged rows already exist, take a
+    # fast path that skips Ghost B entirely and just runs the writer on those
+    # existing results. Graph-promotion jobs call this helper with
+    # ``allow_extraction=False`` so promotion can flush known-good artifacts
+    # without waking RTX/cloud extraction for failed chunks.
+    if needs_neo4j_flush and (not failures or not allow_extraction):
         staged_results = _rehydrate_ghost_b_staging(staged_raw)
         if not staged_results:
             return {
@@ -465,8 +698,9 @@ async def backfill_failed_graph_chunks(
                 "corpus_id": corpus_id,
                 "retried_chunks": 0,
                 "recovered_chunks": 0,
-                "remaining_failed_chunks": 0,
+                "remaining_failed_chunks": len(failures) if not allow_extraction else 0,
                 "neo4j_flushed": False,
+                "extraction_retry_skipped": not allow_extraction,
             }
         all_chunk_ids = [
             row["chunk_id"]
@@ -509,9 +743,10 @@ async def backfill_failed_graph_chunks(
             "corpus_id": corpus_id,
             "retried_chunks": 0,
             "recovered_chunks": 0,
-            "remaining_failed_chunks": 0,
+            "remaining_failed_chunks": len(failures) if not allow_extraction else 0,
             "neo4j_flushed": True,
             "staged_results_written": len(staged_results),
+            "extraction_retry_skipped": not allow_extraction,
         }
 
     # Pt 10 — full replay fallback. Some partial docs made it through
@@ -519,6 +754,18 @@ async def backfill_failed_graph_chunks(
     # left to flush. The raw file bytes are gone, but Mongo still has the child
     # chunks. Re-run Ghost B from those chunks and write a normal full graph.
     if needs_full_replay:
+        if not allow_extraction:
+            return {
+                "status": "blocked_extraction_replay_required",
+                "doc_id": doc_id,
+                "corpus_id": corpus_id,
+                "retried_chunks": 0,
+                "recovered_chunks": 0,
+                "remaining_failed_chunks": 0,
+                "neo4j_flushed": False,
+                "full_replay_required": True,
+                "extraction_retry_skipped": True,
+            }
         tasks, all_chunk_ids = await _extract_tasks(
             db=db,
             corpus_id=corpus_id,
@@ -668,6 +915,17 @@ async def backfill_failed_graph_chunks(
         }
 
     failed_ids = list(dict.fromkeys(f.chunk_id for f in failures if f.chunk_id))
+    if not allow_extraction:
+        return {
+            "status": "blocked_extraction_required",
+            "doc_id": doc_id,
+            "corpus_id": corpus_id,
+            "retried_chunks": 0,
+            "recovered_chunks": 0,
+            "remaining_failed_chunks": len(failures),
+            "neo4j_flushed": False,
+            "extraction_retry_skipped": True,
+        }
     tasks, _ = await _extract_tasks(
         db=db,
         corpus_id=corpus_id,
@@ -707,7 +965,8 @@ async def backfill_failed_graph_chunks(
             {"chunk_id": 1, "_id": 0},
         )
     ]
-    if report.results:
+    graph_results_to_write = staged_results if needs_neo4j_flush else list(report.results)
+    if graph_results_to_write:
         # Anchor metadata from Mongo so the Neo4j Document mirrors filename +
         # ghost_b health without a follow-up backfill pass.
         doc_metrics = doc.get("ghost_b_metrics") or {}
@@ -724,7 +983,7 @@ async def backfill_failed_graph_chunks(
             driver=neo4j_driver,
             doc_id=doc_id,
             corpus_id=corpus_id,
-            extraction_results=report.results,
+            extraction_results=graph_results_to_write,
             user_id=user_id,
             file_id=doc.get("file_id"),
             all_chunk_ids=all_chunk_ids,
@@ -788,7 +1047,7 @@ async def backfill_failed_graph_chunks(
         "write_state.warnings": warnings,
         "updated_at": datetime.utcnow(),
     }
-    if report.results:
+    if graph_results_to_write:
         update_set.update(_write_state_after_graph_flush(write_state))
 
     await db["documents"].update_one(
@@ -811,4 +1070,6 @@ async def backfill_failed_graph_chunks(
         "retried_chunks": len(tasks),
         "recovered_chunks": len(recovered_ids),
         "remaining_failed_chunks": len(remaining_failures),
+        "neo4j_flushed": bool(graph_results_to_write),
+        "staged_results_written": len(graph_results_to_write),
     }

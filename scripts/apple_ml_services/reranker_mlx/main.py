@@ -22,9 +22,12 @@ Required env:
 from __future__ import annotations
 
 import logging
+import math
 import os
+import time
 from typing import Any
 
+import asyncio
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
@@ -58,6 +61,14 @@ CAL_VERSION = os.environ.get("RERANKER_CAL_VERSION", "cal.v1-provisional")
 BATCH_SIZE = int(os.environ.get("RERANKER_BATCH_SIZE", "16"))
 MAX_DOC_CHARS = int(os.environ.get("RERANKER_MAX_DOC_CHARS", "6000"))
 MAX_QUERY_CHARS = int(os.environ.get("RERANKER_MAX_QUERY_CHARS", "2000"))
+REQUEST_TIMEOUT_SECONDS = float(os.environ.get("RERANKER_REQUEST_TIMEOUT_SECONDS", "60"))
+QUEUE_TIMEOUT_SECONDS = float(os.environ.get("RERANKER_QUEUE_TIMEOUT_SECONDS", "5"))
+WARM_ON_STARTUP = os.environ.get("RERANKER_WARM_ON_STARTUP", "true").strip().lower() not in {
+    "0",
+    "false",
+    "no",
+    "off",
+}
 
 
 class RerankRequest(BaseModel):
@@ -75,6 +86,12 @@ app = FastAPI(title="Polymath Apple MLX Reranker (Jina v3)", version="0.1.0")
 _model: Any = None
 _tokenizer: Any = None
 _generate: Any = None
+_request_gate = asyncio.Semaphore(1)
+_active_request_started_at: float | None = None
+_last_request_seconds: float | None = None
+_last_error: str | None = None
+_warmup_complete = False
+_warmup_seconds: float | None = None
 
 
 def _import_mlx_embeddings() -> tuple[Any, Any]:
@@ -250,19 +267,66 @@ def _encode_texts(texts: list[str]) -> Any:
     return np.vstack(batches)
 
 
+def _warm_model() -> None:
+    """Load weights and execute a real inference before reporting ready."""
+    global _last_error, _warmup_complete, _warmup_seconds
+    started = time.monotonic()
+    if BACKEND == "torch_fp16":
+        _load_model_torch()
+        scores = _score_pairs_torch(
+            "retrieval readiness probe",
+            ["This document verifies that the reranker inference path is ready."],
+        )
+    else:
+        _load_model()
+        scores = _score_pairs(
+            "retrieval readiness probe",
+            ["This document verifies that the reranker inference path is ready."],
+        )
+    if len(scores) != 1 or not math.isfinite(float(scores[0])):
+        raise RuntimeError("reranker warmup returned an invalid score")
+    _warmup_seconds = time.monotonic() - started
+    _warmup_complete = True
+    _last_error = None
+    logger.info("reranker inference warmup complete in %.2fs", _warmup_seconds)
+
+
 @app.on_event("startup")
 async def _startup() -> None:
+    global _last_error
     try:
-        if BACKEND == "torch_fp16":
-            _load_model_torch()
+        if WARM_ON_STARTUP:
+            await asyncio.to_thread(_warm_model)
+        elif BACKEND == "torch_fp16":
+            await asyncio.to_thread(_load_model_torch)
         else:
-            _load_model()
+            await asyncio.to_thread(_load_model)
     except Exception as exc:
+        _last_error = f"startup warmup failed: {type(exc).__name__}: {exc}"
         logger.exception("startup model load failed: %s", exc)
 
 
 @app.get("/health")
 async def health() -> dict:
+    now = time.monotonic()
+    stalled_for = (
+        now - _active_request_started_at
+        if _active_request_started_at is not None
+        else 0.0
+    )
+    if stalled_for > REQUEST_TIMEOUT_SECONDS:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                f"rerank request stalled for {stalled_for:.1f}s "
+                f"(timeout={REQUEST_TIMEOUT_SECONDS:.1f}s)"
+            ),
+        )
+    if WARM_ON_STARTUP and not _warmup_complete:
+        raise HTTPException(
+            status_code=503,
+            detail=_last_error or "model inference warmup is incomplete",
+        )
     if BACKEND == "torch_fp16":
         if _torch_model is None:
             raise HTTPException(status_code=503, detail="model is not loaded")
@@ -273,10 +337,38 @@ async def health() -> dict:
             "cross_encoder": True,
             "calibration": CAL_VERSION,
             "device": "mps",
+            "in_flight": _active_request_started_at is not None,
+            "active_seconds": round(stalled_for, 3),
+            "last_request_seconds": (
+                round(_last_request_seconds, 3)
+                if _last_request_seconds is not None
+                else None
+            ),
+            "last_error": _last_error,
+            "warmup_complete": _warmup_complete,
+            "warmup_seconds": (
+                round(_warmup_seconds, 3) if _warmup_seconds is not None else None
+            ),
         }
     if _model is None:
         raise HTTPException(status_code=503, detail="model is not loaded")
-    return {"status": "ok", "model": MODEL_ID, "device": "mps"}
+    return {
+        "status": "ok",
+        "model": MODEL_ID,
+        "device": "mps",
+        "in_flight": _active_request_started_at is not None,
+        "active_seconds": round(stalled_for, 3),
+        "last_request_seconds": (
+            round(_last_request_seconds, 3)
+            if _last_request_seconds is not None
+            else None
+        ),
+        "last_error": _last_error,
+        "warmup_complete": _warmup_complete,
+        "warmup_seconds": (
+            round(_warmup_seconds, 3) if _warmup_seconds is not None else None
+        ),
+    }
 
 
 @app.get("/info")
@@ -290,6 +382,8 @@ async def info() -> dict:
             "max_doc_chars": MAX_DOC_CHARS,
             "max_query_chars": MAX_QUERY_CHARS,
             "ready": _torch_model is not None,
+            "warmup_complete": _warmup_complete,
+            "warmup_seconds": _warmup_seconds,
         }
     return {
         "model": MODEL_ID,
@@ -298,6 +392,8 @@ async def info() -> dict:
         "max_doc_chars": MAX_DOC_CHARS,
         "max_query_chars": MAX_QUERY_CHARS,
         "ready": _model is not None,
+        "warmup_complete": _warmup_complete,
+        "warmup_seconds": _warmup_seconds,
     }
 
 
@@ -317,11 +413,10 @@ def _score_pairs(query: str, documents: list[str]) -> list[float]:
 
 @app.post("/rerank", response_model=RerankResponse)
 async def rerank(req: RerankRequest) -> RerankResponse:
+    global _active_request_started_at, _last_error, _last_request_seconds
     if not req.documents:
         return RerankResponse(scores=[])
     if BACKEND == "torch_fp16":
-        import asyncio
-
         if _torch_model is None:
             try:
                 _load_model_torch()
@@ -329,18 +424,47 @@ async def rerank(req: RerankRequest) -> RerankResponse:
                 raise HTTPException(
                     status_code=503, detail=f"model load failed: {exc}"
                 )
+        scorer = _score_pairs_torch
+    else:
+        if _model is None:
+            try:
+                _load_model()
+            except Exception as exc:
+                raise HTTPException(status_code=503, detail=f"model load failed: {exc}")
+        scorer = _score_pairs
+
+    acquired = False
+    started = time.monotonic()
+    try:
         try:
-            # Blocking MPS forward pass — keep the event loop free.
-            scores = await asyncio.to_thread(
-                _score_pairs_torch, req.query, req.documents
+            await asyncio.wait_for(_request_gate.acquire(), timeout=QUEUE_TIMEOUT_SECONDS)
+            acquired = True
+        except TimeoutError:
+            raise HTTPException(
+                status_code=429,
+                detail=(
+                    "reranker is busy; previous request did not release within "
+                    f"{QUEUE_TIMEOUT_SECONDS:.1f}s"
+                ),
             )
-        except Exception as exc:
-            raise HTTPException(status_code=500, detail=f"rerank failed: {exc}")
-        return RerankResponse(scores=scores)
-    if _model is None:
-        try:
-            _load_model()
-        except Exception as exc:
-            raise HTTPException(status_code=503, detail=f"model load failed: {exc}")
-    scores = _score_pairs(req.query, req.documents)
+        _active_request_started_at = time.monotonic()
+        scores = await asyncio.wait_for(
+            asyncio.to_thread(scorer, req.query, req.documents),
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
+        _last_error = None
+    except TimeoutError:
+        _last_error = f"rerank request timed out after {REQUEST_TIMEOUT_SECONDS:.1f}s"
+        logger.error("%s; exiting so launchd restarts the MLX sidecar", _last_error)
+        os._exit(124)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _last_error = f"{type(exc).__name__}: {exc}"
+        raise HTTPException(status_code=500, detail=f"rerank failed: {exc}")
+    finally:
+        _last_request_seconds = time.monotonic() - started
+        _active_request_started_at = None
+        if acquired:
+            _request_gate.release()
     return RerankResponse(scores=scores)

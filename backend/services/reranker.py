@@ -12,6 +12,7 @@ through the cross-encoder, code chunks keep their pre-rerank scores
 independently before merge so the cross-encoder's wider score range does not
 crowd code out.
 """
+import asyncio
 import logging
 import os
 import time
@@ -20,7 +21,6 @@ from typing import List
 import httpx
 from config import get_settings
 from models.schemas import SourceChunk
-from services.retriever.excerpt import query_guided_excerpt
 
 logger = logging.getLogger(__name__)
 
@@ -180,6 +180,8 @@ class RerankerService:
             "fallback": False,
             "score_scale": getattr(self._settings, "RERANKER_SCORE_SCALE", "logit"),
         }
+        self._sidecar_semaphore = asyncio.Semaphore(1)
+        self._http_client_timeout: float | None = None
 
     def _record_status(self, status: str, **extra: object) -> None:
         self._last_status = {
@@ -324,8 +326,21 @@ class RerankerService:
         # dumped raw lexical scores (197.x) into the packet. 30s covers a
         # 50-doc fp16 pass with generous headroom on contended Metal.
         timeout = float(getattr(self._settings, "RERANKER_TIMEOUT_SECONDS", 30.0) or 30.0)
+        queue_timeout = float(
+            getattr(self._settings, "RERANKER_QUEUE_TIMEOUT_SECONDS", 5.0) or 0.0
+        )
 
+        acquired = False
         try:
+            if queue_timeout > 0:
+                await asyncio.wait_for(
+                    self._sidecar_semaphore.acquire(),
+                    timeout=queue_timeout,
+                )
+            else:
+                await self._sidecar_semaphore.acquire()
+            acquired = True
+
             client = self._get_http_client(timeout)
             ranked, successes, failures = await self._rerank_batch_or_split(
                 client=client,
@@ -381,6 +396,83 @@ class RerankerService:
             )
             return sorted(ranked, key=lambda c: c.score, reverse=True)
 
+        except asyncio.TimeoutError as exc:
+            self._last_failure = (
+                f"reranker busy: waited {queue_timeout:.1f}s for local sidecar slot"
+            )
+            logger.info(
+                "Reranker local sidecar busy after %.1fs — falling back to score sort",
+                queue_timeout,
+            )
+            self._record_status(
+                "busy_fallback_score_sort",
+                fallback=True,
+                candidate_count=len(pool),
+                timeout_seconds=timeout,
+                queue_timeout_seconds=queue_timeout,
+                url=url,
+                error=str(exc),
+            )
+            return sorted(pool, key=lambda x: x.score, reverse=True)
+        except RerankPassAborted as exc:
+            self._last_failure = str(exc)
+            logger.warning(
+                "Reranker pass timed out after %.1fs — falling back to score sort without opening circuit",
+                timeout,
+            )
+            self._record_status(
+                "timeout_fallback_score_sort",
+                fallback=True,
+                candidate_count=len(pool),
+                timeout_seconds=timeout,
+                queue_timeout_seconds=queue_timeout,
+                url=url,
+                error=str(exc),
+            )
+            return sorted(pool, key=lambda x: x.score, reverse=True)
+        except httpx.HTTPStatusError as exc:
+            status_code = exc.response.status_code
+            if status_code == 429:
+                self._last_failure = f"reranker busy: HTTP 429"
+                logger.info(
+                    "Reranker returned HTTP 429 — falling back to score sort without opening circuit"
+                )
+                self._record_status(
+                    "busy_fallback_score_sort",
+                    fallback=True,
+                    candidate_count=len(pool),
+                    timeout_seconds=timeout,
+                    queue_timeout_seconds=queue_timeout,
+                    url=url,
+                    error=self._last_failure,
+                )
+                return sorted(pool, key=lambda x: x.score, reverse=True)
+            breaker_seconds = float(
+                getattr(self._settings, "RERANKER_CIRCUIT_BREAKER_SECONDS", 120.0)
+                or 0.0
+            )
+            self._last_failure = str(exc)
+            if breaker_seconds > 0:
+                self._disabled_until = time.monotonic() + breaker_seconds
+            logger.warning(
+                "Reranker HTTP %d after %.1fs — falling back to score sort%s",
+                status_code,
+                timeout,
+                f" and opening circuit for {breaker_seconds:.0f}s"
+                if breaker_seconds > 0
+                else "",
+            )
+            self._record_status(
+                "fallback_score_sort",
+                fallback=True,
+                candidate_count=len(pool),
+                timeout_seconds=timeout,
+                queue_timeout_seconds=queue_timeout,
+                url=url,
+                error=str(exc),
+                circuit_breaker_seconds=breaker_seconds,
+            )
+            return sorted(pool, key=lambda x: x.score, reverse=True)
         except Exception as exc:
             breaker_seconds = float(
                 getattr(self._settings, "RERANKER_CIRCUIT_BREAKER_SECONDS", 120.0)
@@ -407,6 +499,9 @@ class RerankerService:
                 circuit_breaker_seconds=breaker_seconds,
             )
             return sorted(pool, key=lambda x: x.score, reverse=True)
+        finally:
+            if acquired:
+                self._sidecar_semaphore.release()
 
     def _get_http_client(self, timeout: float) -> httpx.AsyncClient:
         """Pooled HTTP client to the reranker sidecar, reused across rerank
@@ -414,7 +509,11 @@ class RerankerService:
         connections instead of opening a fresh socket each time. Instance-scoped
         so the singleton service pools in production while tests stay isolated."""
         client = getattr(self, "_http_client", None)
-        if client is None or client.is_closed:
+        if (
+            client is None
+            or client.is_closed
+            or self._http_client_timeout != timeout
+        ):
             client = httpx.AsyncClient(
                 timeout=timeout,
                 limits=httpx.Limits(
@@ -424,6 +523,7 @@ class RerankerService:
                 ),
             )
             self._http_client = client
+            self._http_client_timeout = timeout
         return client
 
     async def _rerank_batch_or_split(
@@ -525,6 +625,8 @@ class RerankerService:
         # best sentence window, not the chunk's leading chars — the passage
         # that matched retrieval is what the cross-encoder must score.
         if _RERANK_QUERY_GUIDED_EXCERPT:
+            from services.retriever.excerpt import query_guided_excerpt
+
             documents = [
                 query_guided_excerpt(
                     c.text or "", query, max_chars=_RERANK_MAX_DOC_CHARS

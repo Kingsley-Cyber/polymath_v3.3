@@ -50,12 +50,12 @@ export APPLE_MLX_EMBED_MODEL_ID="${APPLE_MLX_EMBED_MODEL_ID:-mlx-community/Qwen3
 export APPLE_MLX_RERANKER_MODEL_ID="${APPLE_MLX_RERANKER_MODEL_ID:-mlx-community/jina-reranker-v3-4bit-mxfp4}"
 # Retrieval Layer v4 (2026-07-02): the mlx backend was a bi-encoder cosine
 # pass, never a cross-encoder. torch_fp16 runs jina-reranker-v3's TRUE
-# listwise cross-encoder head (fp16 on MPS) with calibrated [0,1] scores.
+# listwise cross-encoder head (fp16 on MPS) with calibrated probability scores.
 # Rollback: APPLE_RERANKER_BACKEND=mlx
 export APPLE_RERANKER_BACKEND="${APPLE_RERANKER_BACKEND:-torch_fp16}"
 export APPLE_TORCH_RERANKER_MODEL_ID="${APPLE_TORCH_RERANKER_MODEL_ID:-jinaai/jina-reranker-v3}"
 export EMBEDDER_MODEL_NAME="${EMBEDDER_MODEL_NAME:-Qwen3-Embedding-0.6B}"
-export RERANKER_SCORE_SCALE="${RERANKER_SCORE_SCALE:-cosine}"
+export RERANKER_SCORE_SCALE="${RERANKER_SCORE_SCALE:-probability}"
 
 export EMBED_BATCH_SIZE="${EMBED_BATCH_SIZE:-${LOCAL_EMBED_BATCH_SIZE:-32}}"
 export EMBED_MAX_LENGTH="${EMBED_MAX_LENGTH:-512}"
@@ -72,9 +72,84 @@ should_start() {
   esac
 }
 
+kill_pid_if_live() {
+  local pid="$1" reason="$2"
+  [[ -n "${pid}" ]] || return 0
+  if kill -0 "${pid}" 2>/dev/null; then
+    echo "[apple-ml] stopping stale ${reason} pid=${pid}"
+    kill "${pid}" 2>/dev/null || true
+  fi
+}
+
+wait_for_pid_exit() {
+  local pid="$1"
+  [[ -n "${pid}" ]] || return 0
+  local tries=0
+  while [[ "${tries}" -lt 20 ]]; do
+    if ! kill -0 "${pid}" 2>/dev/null; then
+      return 0
+    fi
+    sleep 0.25
+    tries=$((tries + 1))
+  done
+  kill -9 "${pid}" 2>/dev/null || true
+}
+
+kill_port_listeners() {
+  local port="$1" reason="$2"
+  command -v lsof >/dev/null 2>&1 || return 0
+  local pids
+  pids="$(lsof -tiTCP:"${port}" -sTCP:LISTEN 2>/dev/null || true)"
+  for pid in ${pids}; do
+    kill_pid_if_live "${pid}" "${reason} port ${port}"
+    wait_for_pid_exit "${pid}"
+  done
+}
+
+kill_stale_service() {
+  local name="$1" module="$2" port="$3"
+  local pid_file="${LOG_DIR}/${name}.pid"
+  if [[ -f "${pid_file}" ]]; then
+    local pid
+    pid="$(cat "${pid_file}" 2>/dev/null || echo)"
+    kill_pid_if_live "${pid}" "${name} pid-file"
+    wait_for_pid_exit "${pid}"
+    rm -f "${pid_file}"
+  fi
+  local pids
+  pids="$(pgrep -f "uvicorn.*${module}:app.*--port ${port}" 2>/dev/null || true)"
+  for pid in ${pids}; do
+    [[ "${pid}" = "$$" ]] && continue
+    kill_pid_if_live "${pid}" "${name} module"
+    wait_for_pid_exit "${pid}"
+  done
+  kill_port_listeners "${port}" "${name}"
+}
+
+wait_for_health() {
+  local name="$1" port="$2" pid="$3"
+  local deadline="${SIDECAR_HEALTH_WAIT_SECONDS:-180}"
+  local waited=0
+  while [[ "${waited}" -lt "${deadline}" ]]; do
+    if ! kill -0 "${pid}" 2>/dev/null; then
+      echo "[apple-ml] ${name} exited before health became ready"
+      return 1
+    fi
+    if curl -fsS "http://127.0.0.1:${port}/health" >/dev/null 2>&1; then
+      echo "[apple-ml] ${name} healthy on 127.0.0.1:${port}"
+      return 0
+    fi
+    sleep 2
+    waited=$((waited + 2))
+  done
+  echo "[apple-ml] ${name} did not become healthy within ${deadline}s"
+  return 1
+}
+
 start_service() {
   local name="$1" module="$2" host_var="$3" port_var="$4"
   local host="${!host_var}" port="${!port_var}"
+  kill_stale_service "${name}" "${module}" "${port}"
   echo "[apple-ml] starting ${name} on ${host}:${port}"
   ${PY} -m uvicorn "${module}:app" \
     --host "${host}" --port "${port}" \
@@ -83,6 +158,7 @@ start_service() {
   local pid=$!
   echo "${pid}" > "${LOG_DIR}/${name}.pid"
   PID_FILES+=("${LOG_DIR}/${name}.pid")
+  wait_for_health "${name}" "${port}" "${pid}"
 }
 
 skip_service() {

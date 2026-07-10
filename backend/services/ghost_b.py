@@ -3,7 +3,8 @@ GHOST B — Entity Extraction (Phase 4)
 
 Runs when ingestion_config.use_neo4j is True.
 Extracts entities and relations from child chunks via LiteLLM. temperature=0.
-Bounded by EXTRACTION_MAX_CONCURRENT semaphore.
+Provider-backed extraction is bounded by per-lane concurrency budgets plus
+the process-wide EXTRACTION_GLOBAL_MAX_CONCURRENT safety ceiling.
 
 Called by the ingestion worker AFTER tier chunking and stable ID assignment.
 Returns ExtractionResult list — worker passes to neo4j_writer.write_document_graph().
@@ -27,8 +28,10 @@ import tiktoken
 
 from config import get_settings
 from services.extraction_provider_cards import (
+    normalize_extraction_routing_policy,
     provider_payload_defaults,
     resolve_extraction_provider_card,
+    resolve_extraction_routing_policy,
 )
 from services.llm_lane_pool import (
     FatalLaneError,
@@ -38,6 +41,7 @@ from services.llm_lane_pool import (
     provider_error_tier,
     provider_error_summary,
     rate_limit_retry_after_seconds,
+    shared_provider_semaphore,
 )
 
 # Phase 14.2 — pluggable schema retriever. Worker injects a closure over qdrant_client +
@@ -57,6 +61,58 @@ _GLOBAL_EXTRACTION_SEMAPHORE_LOOP: asyncio.AbstractEventLoop | None = None
 _MODEL_LANE_SEMAPHORES: dict[tuple[int, str, str], asyncio.Semaphore] = {}
 _MODEL_LANE_SEMAPHORE_LIMITS: dict[tuple[int, str, str], int] = {}
 _MODEL_LANE_SEMAPHORE_LOOPS: dict[tuple[int, str, str], asyncio.AbstractEventLoop] = {}
+
+
+class _LaneCooldowns:
+    """Shared per-provider-lane cooldown state for 429s within one batch."""
+
+    def __init__(self, size: int):
+        self._until = [0.0 for _ in range(max(0, int(size)))]
+        self._lock = asyncio.Lock()
+
+    async def set(
+        self,
+        lane: int,
+        retry_after_seconds: float,
+        *,
+        now_fn: Callable[[], float] | None = None,
+    ) -> float:
+        now_fn = now_fn or time.monotonic
+        cooldown_seconds = max(0.5, float(retry_after_seconds or 0.5))
+        proposed_until = now_fn() + cooldown_seconds
+        async with self._lock:
+            if proposed_until > self._until[lane]:
+                self._until[lane] = proposed_until
+            return max(0.0, self._until[lane] - now_fn())
+
+    async def remaining(
+        self,
+        lane: int,
+        *,
+        now_fn: Callable[[], float] | None = None,
+    ) -> float:
+        now_fn = now_fn or time.monotonic
+        async with self._lock:
+            return max(0.0, self._until[lane] - now_fn())
+
+    async def wait(
+        self,
+        lane: int,
+        *,
+        sleep: Callable[[float], Awaitable[None]] | None = None,
+        now_fn: Callable[[], float] | None = None,
+        should_stop: Callable[[], bool] | None = None,
+    ) -> None:
+        sleep = sleep or asyncio.sleep
+        now_fn = now_fn or time.monotonic
+        while True:
+            if should_stop is not None and should_stop():
+                return
+            delay = await self.remaining(lane, now_fn=now_fn)
+            if delay <= 0:
+                return
+            await sleep(min(delay, 1.0))
+
 
 _SYSTEM = (
     "You are a precise entity, relation, and fact extractor. "
@@ -939,6 +995,33 @@ def _model_lane_semaphore(
     return _MODEL_LANE_SEMAPHORES[key]
 
 
+def _resolve_extraction_global_limit(
+    *,
+    lane_limits: list[int],
+    settings: Any,
+) -> tuple[int, dict[str, Any]]:
+    """Resolve the process-wide Ghost B cap from explicit lane budgets.
+
+    Provider lanes are intentionally independent: RTX/vLLM, SiliconFlow, and
+    LongCat each get their configured lane semaphore. The global semaphore is a
+    safety ceiling over the sum of those lanes, not a replacement for them.
+    """
+
+    normalized_lane_limits = [max(1, int(limit or 1)) for limit in lane_limits]
+    configured_lane_concurrency = sum(normalized_lane_limits) or max(
+        1,
+        int(getattr(settings, "EXTRACTION_MAX_CONCURRENT", 1) or 1),
+    )
+    hard_cap = max(1, int(getattr(settings, "EXTRACTION_GLOBAL_MAX_CONCURRENT", 1) or 1))
+    effective = min(hard_cap, configured_lane_concurrency)
+    return effective, {
+        "lane_limits": normalized_lane_limits,
+        "configured_lane_concurrency": configured_lane_concurrency,
+        "global_hard_cap": hard_cap,
+        "global_cap_applied": hard_cap < configured_lane_concurrency,
+    }
+
+
 @dataclass
 class SchemaContext:
     """Phase 14: Ontology-Lite schema for entity-type and relation-predicate vocabularies.
@@ -1165,6 +1248,20 @@ def _select_extraction_output_mode(
     return "jsonl"
 
 
+def _degraded_output_mode_after_native_rejection(
+    rejected_mode: str,
+) -> Literal["json_object_prompt", "jsonl"] | None:
+    """Fallback mode after provider-native response_format is rejected.
+
+    json_object_prompt keeps the strict object prompt and parser/validator path
+    while removing provider-native response_format from the wire payload.
+    """
+
+    if rejected_mode in {"json_schema", "json_object"}:
+        return "json_object_prompt"
+    return None
+
+
 def _entry_extra_params(entry: dict | object) -> dict[str, Any]:
     if hasattr(entry, "model_dump"):
         data = entry.model_dump()  # type: ignore[attr-defined]
@@ -1177,14 +1274,7 @@ def _entry_extra_params(entry: dict | object) -> dict[str, Any]:
 
 
 def _normalize_extraction_routing_policy(value: Any) -> ExtractionRoutingPolicy | None:
-    text = str(value or "").strip().lower().replace("-", "_")
-    if text in {"balanced", "balanced_fanout", "fanout", "parallel"}:
-        return "balanced"
-    if text in {"work_stealing", "workstealing", "spillover", "fastest", "auto"}:
-        return "work_stealing"
-    if text in {"primary_fallback", "primary_failover", "fallback", "failover"}:
-        return "primary_fallback"
-    return None
+    return normalize_extraction_routing_policy(value)
 
 
 def _resolve_extraction_routing_policy(pool: list[dict]) -> ExtractionRoutingPolicy:
@@ -1196,25 +1286,7 @@ def _resolve_extraction_routing_policy(pool: list[dict]) -> ExtractionRoutingPol
     explicit primary/fallback behavior.
     """
 
-    for entry in pool:
-        explicit = _normalize_extraction_routing_policy(entry.get("routing_policy"))
-        if explicit:
-            return explicit
-        extra = _entry_extra_params(entry)
-        explicit = _normalize_extraction_routing_policy(
-            extra.get("routing_policy") or extra.get("route_policy")
-        )
-        if explicit:
-            return explicit
-
-    if len(pool) < 2:
-        return "work_stealing"
-    cards = [resolve_extraction_provider_card(entry) for entry in pool]
-    has_private = any(card.local_private for card in cards)
-    has_cloud = any(not card.local_private for card in cards)
-    if has_private and has_cloud:
-        return "balanced"
-    return "work_stealing"
+    return resolve_extraction_routing_policy(pool)
 
 
 def _pool_route_key(pool: list[dict]) -> tuple[str, ...]:
@@ -1356,6 +1428,121 @@ def _json_schema_response_format() -> dict:
             "strict": True,
         },
     }
+
+
+def _context_bounded_completion_tokens(
+    entry: dict[str, Any],
+    *,
+    system_prompt: str,
+    user_prompt: str,
+    requested_tokens: int,
+    safety_margin_tokens: int = 256,
+) -> tuple[int, dict[str, Any]]:
+    """Fit output tokens inside the provider card's serving context.
+
+    Provider APIs commonly reject ``input + max_tokens > context`` before
+    generation. That is a capacity error, not evidence that structured output
+    is unsupported. Bound proactively so native schema decoding stays enabled.
+    """
+
+    requested = max(1, int(requested_tokens or 1))
+    card = resolve_extraction_provider_card(entry)
+    context_window = int(card.context_window_tokens or 0)
+    tokenizer_prompt_tokens = len(
+        _TOKENIZER.encode(
+            f"{system_prompt}\n{user_prompt}",
+            disallowed_special=(),
+        )
+    ) + 16
+    # LiteLLM's tiktoken estimate can undercount Qwen-family serving tokens,
+    # especially for schema-heavy prompts.  A conservative character bound
+    # prevents avoidable 400 context errors without requiring the remote
+    # server's tokenizer on the Mac.
+    character_prompt_tokens = (
+        len(system_prompt) + len(user_prompt) + 2
+    ) // 3 + 16
+    prompt_tokens = max(tokenizer_prompt_tokens, character_prompt_tokens)
+    meta = {
+        "requested_tokens": requested,
+        "prompt_token_estimate": prompt_tokens,
+        "tokenizer_prompt_token_estimate": tokenizer_prompt_tokens,
+        "character_prompt_token_estimate": character_prompt_tokens,
+        "context_window_tokens": context_window or None,
+        "safety_margin_tokens": max(0, int(safety_margin_tokens or 0)),
+        "capped": False,
+    }
+    if context_window <= 0:
+        return requested, meta
+    available = max(
+        1,
+        context_window
+        - prompt_tokens
+        - max(0, int(safety_margin_tokens or 0)),
+    )
+    effective = min(requested, available)
+    meta["capped"] = effective < requested
+    meta["effective_tokens"] = effective
+    return effective, meta
+
+
+def _http_error_message(exc: Exception) -> str:
+    if not isinstance(exc, httpx.HTTPStatusError) or exc.response is None:
+        return str(exc)
+    try:
+        body = exc.response.json()
+    except Exception:
+        return str(exc.response.text or exc)
+    if isinstance(body, dict):
+        error = body.get("error")
+        if isinstance(error, dict):
+            return str(error.get("message") or error)
+        return str(body.get("message") or body)
+    return str(body)
+
+
+def _native_mode_http_error_type(
+    exc: Exception,
+    *,
+    output_mode: str,
+) -> str | None:
+    """Classify 400/422 errors without conflating context and schema support."""
+
+    if not isinstance(exc, httpx.HTTPStatusError) or exc.response is None:
+        return None
+    if exc.response.status_code not in {400, 422}:
+        return None
+    message = _http_error_message(exc).lower()
+    if any(
+        marker in message
+        for marker in (
+            "maximum context length",
+            "context length",
+            "input_tokens",
+            "input tokens",
+            "max_tokens is too large",
+        )
+    ):
+        return "context_window_exceeded"
+    if output_mode not in {"json_schema", "json_object"}:
+        return None
+    if any(
+        marker in message
+        for marker in (
+            "response_format",
+            "json_schema",
+            "json schema",
+            "json_object",
+            "json object",
+            "structured output",
+            "guided decoding",
+        )
+    ):
+        return (
+            "json_schema_unsupported"
+            if output_mode == "json_schema"
+            else "json_object_unsupported"
+        )
+    return None
 
 
 def _render_table_extraction_rules(
@@ -1878,6 +2065,19 @@ class ExtractionResult:
     evidence_drop_count: int = 0
     fact_drop_count: int = 0
     schema_lens_id: str | None = None
+    model: str = ""
+    provider: str = ""
+    lane: int = -1
+    attempts: int = 0
+    schema_mode: str = ""
+    output_mode: str = ""
+    json_repair_mode: str = ""
+    semantic_verifier_mode: str = ""
+    prompt_hash: str | None = None
+    prompt_chars: int | None = None
+    raw_output_artifact_id: str | None = None
+    raw_output_fingerprint: dict[str, Any] = field(default_factory=dict)
+    provider_card: dict[str, Any] = field(default_factory=dict)
 
     @property
     def validation_rejection_count(self) -> int:
@@ -1910,6 +2110,16 @@ class ExtractionFailureItem:
     attempts: int
     error_type: str
     error_message: str
+    provider: str = ""
+    schema_mode: str = ""
+    output_mode: str = ""
+    json_repair_mode: str = ""
+    semantic_verifier_mode: str = ""
+    prompt_hash: str | None = None
+    prompt_chars: int | None = None
+    raw_output_artifact_id: str | None = None
+    raw_output_fingerprint: dict[str, Any] = field(default_factory=dict)
+    provider_card: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -2219,6 +2429,41 @@ def _normalize_object_kind(raw: str, canon: list[str] | None) -> str:
             return term
     # Pass-through bounded.
     return cleaned[:100]
+
+
+def _normalize_relation_object_kind(
+    raw: Any,
+    *,
+    object_name: str = "",
+    entity_names: set[str] | None = None,
+) -> str:
+    """Normalize relation object_kind to the frozen entity|literal contract.
+
+    Some OpenAI-compatible providers confuse the two object_kind fields:
+    entity.object_kind is an open taxonomy such as "method" or "software",
+    while relation.object_kind is only the endpoint shape, "entity" or
+    "literal". Treat emitted entity-type names as an entity endpoint so one
+    malformed provider field cannot reject an otherwise valid extraction.
+    """
+
+    cleaned = str(raw or "").strip().lower()
+    if cleaned in {"entity", "literal"}:
+        return cleaned
+    if entity_names and _entity_key(object_name) in entity_names:
+        return "entity"
+    entity_type_aliases = {str(value).lower() for value in UNIVERSAL_ENTITY_SCHEMA}
+    entity_type_aliases.update(
+        {
+            "named_entity",
+            "named entity",
+            "entity_reference",
+            "entity reference",
+            "node",
+        }
+    )
+    if cleaned in entity_type_aliases:
+        return "entity"
+    return "literal"
 
 
 def _append_validation_status(existing: str | None, status: str) -> str:
@@ -2884,6 +3129,7 @@ def _parse(
             continue
 
     relations: list[RelationItem] = []
+    parsed_entity_names = {_entity_key(e.canonical_name) for e in entities}
     for r in data.get("relations", []):
         if r.get("confidence", 0.0) < threshold:
             continue
@@ -2893,7 +3139,11 @@ def _parse(
                     subject=r["subject"],
                     predicate=r["predicate"],
                     object=r["object"],
-                    object_kind=r.get("object_kind", "literal"),
+                    object_kind=_normalize_relation_object_kind(
+                        r.get("object_kind", "literal"),
+                        object_name=r.get("object", ""),
+                        entity_names=parsed_entity_names,
+                    ),
                     confidence=float(r["confidence"]),
                     evidence_phrase=str(r.get("evidence_phrase") or r.get("evidence") or "")[:500],
                     relation_cue=str(r.get("relation_cue") or "")[:120],
@@ -3268,7 +3518,9 @@ def _jsonl_item_identity(item: dict) -> tuple:
             _entity_key(item.get("sub") or item.get("subject") or ""),
             str(item.get("pred") or item.get("predicate") or "").strip(),
             _entity_key(item.get("obj") or item.get("object") or ""),
-            str(item.get("ok") or item.get("object_kind") or "literal").strip(),
+            _normalize_relation_object_kind(
+                item.get("ok") or item.get("object_kind") or "literal"
+            ),
         )
     if item_type == "f":
         return (
@@ -3363,9 +3615,10 @@ def _jsonl_items_to_object(items: list[dict], task: ExtractionTask) -> dict:
                     "subject": subject,
                     "predicate": predicate,
                     "object": obj,
-                    "object_kind": str(
-                        item.get("ok") or item.get("object_kind") or "literal"
-                    ).strip(),
+                    "object_kind": _normalize_relation_object_kind(
+                        item.get("ok") or item.get("object_kind") or "literal",
+                        object_name=obj,
+                    ),
                     "confidence": _jsonl_confidence(item),
                     "evidence_phrase": str(
                         item.get("ev") or item.get("evidence_phrase") or ""
@@ -3427,6 +3680,65 @@ def _parse_jsonl_items(
     )
 
 
+def _extract_balanced_json_object(raw: str) -> str | None:
+    """Extract one complete top-level JSON object from provider wrappers.
+
+    LongCat and other prompt-only providers sometimes wrap an otherwise valid
+    object in Markdown/XML or append a prose explanation. This compiler step
+    removes syntax wrappers only; the resulting object still passes every
+    schema, evidence, endpoint, and semantic promotion gate.
+    """
+
+    text = str(raw or "").lstrip("\ufeff").strip()
+    payload_match = re.search(
+        r"<json_payload\b[^>]*>(.*?)</json_payload>",
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if payload_match:
+        text = payload_match.group(1).strip()
+    start = text.find("{")
+    if start < 0:
+        return None
+    depth = 0
+    in_string = False
+    escape = False
+    end: int | None = None
+    for index, char in enumerate(text[start:], start=start):
+        if in_string:
+            if escape:
+                escape = False
+            elif char == "\\":
+                escape = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                end = index + 1
+                break
+            if depth < 0:
+                return None
+    if end is None:
+        return None
+    candidate = text[start:end]
+    remainder = text[end:].strip()
+    remainder = re.sub(r"^(?:```|</json_payload>)\s*", "", remainder, flags=re.I)
+    # A second object is ambiguous and must not be silently discarded.
+    if "{" in remainder:
+        return None
+    try:
+        parsed = json.loads(candidate)
+    except json.JSONDecodeError:
+        return None
+    return candidate if isinstance(parsed, dict) else None
+
+
 def _repair_truncated_json_object(raw: str) -> str | None:
     """Best-effort close for legacy one-shot JSON object responses."""
 
@@ -3484,7 +3796,24 @@ def _parse_object_with_repair(
     )
     if result is not None:
         return result
-    repaired = _repair_truncated_json_object(raw)
+    balanced = _extract_balanced_json_object(raw)
+    if balanced:
+        result = _parse(
+            balanced,
+            task,
+            threshold,
+            schema=schema,
+            schema_lens=schema_lens,
+            enable_facts=enable_facts,
+            max_facts=max_facts,
+        )
+        if result is not None:
+            return result
+    truncated_source = str(raw or "")
+    object_start = truncated_source.find("{")
+    if object_start > 0:
+        truncated_source = truncated_source[object_start:]
+    repaired = _repair_truncated_json_object(truncated_source)
     if not repaired:
         return None
     return _parse(
@@ -3738,11 +4067,19 @@ async def extract_entities(
                 )
     except Exception as exc:  # noqa: BLE001
         logger.warning("GHOST B private vLLM capacity check unavailable: %s", exc)
-    configured_lane_concurrency = sum(lane_limits) or max(1, settings.EXTRACTION_MAX_CONCURRENT)
-    global_max_concurrent = min(
-        settings.EXTRACTION_GLOBAL_MAX_CONCURRENT,
-        configured_lane_concurrency,
+    global_max_concurrent, concurrency_plan = _resolve_extraction_global_limit(
+        lane_limits=lane_limits,
+        settings=settings,
     )
+    configured_lane_concurrency = int(concurrency_plan["configured_lane_concurrency"])
+    if concurrency_plan["global_cap_applied"]:
+        logger.warning(
+            "GHOST B provider lane budget capped by global semaphore: lanes=%d hard_cap=%d lane_limits=%s",
+            configured_lane_concurrency,
+            concurrency_plan["global_hard_cap"],
+            lane_limits,
+        )
+    memory_throttle_applied = False
     try:
         from services.ingestion.resource_planner import throttle_concurrency_for_rss
 
@@ -3760,11 +4097,22 @@ async def extract_entities(
                 throttle_meta.get("ram_cap_mb"),
             )
             global_max_concurrent = throttled
+            memory_throttle_applied = True
     except Exception as exc:  # noqa: BLE001
         logger.debug("GHOST B memory throttle unavailable: %s", exc)
+    concurrency_plan["global_max_concurrent"] = global_max_concurrent
+    concurrency_plan["memory_throttle_applied"] = memory_throttle_applied
     global_sem = _global_extraction_semaphore(global_max_concurrent)
     lane_sems = [
         _model_lane_semaphore(entry, idx, lane_limits[idx])
+        for idx, entry in enumerate(pool)
+    ]
+    provider_sems = [
+        shared_provider_semaphore(
+            entry,
+            lane=idx,
+            limit=lane_limits[idx],
+        )
         for idx, entry in enumerate(pool)
     ]
     routing_policy = _resolve_extraction_routing_policy(pool)
@@ -3796,7 +4144,15 @@ async def extract_entities(
     _list_lock = asyncio.Lock()
     disabled_lanes: set[int] = set()
     lane_fatal_strikes: dict[int, int] = {}
+    lane_cooldowns = _LaneCooldowns(len(pool))
     _disabled_lock = asyncio.Lock()
+    lane_output_mode_overrides: dict[int, Literal["json_object_prompt", "jsonl"]] = {}
+    _lane_output_mode_lock = asyncio.Lock()
+    failed_provider_families: dict[str, set[str]] = {}
+    cross_provider_rescue = bool(
+        getattr(settings, "EXTRACTION_CROSS_PROVIDER_RESCUE", True)
+    )
+    cross_provider_reroutes = 0
     failure_budget_open = False
     failure_budget_reason = "failure_budget_exceeded"
 
@@ -3837,6 +4193,36 @@ async def extract_entities(
         async with _disabled_lock:
             lane_fatal_strikes.pop(pool_idx, None)
 
+    async def _lane_output_mode_override(
+        pool_idx: int,
+    ) -> Literal["json_object_prompt", "jsonl"] | None:
+        async with _lane_output_mode_lock:
+            return lane_output_mode_overrides.get(pool_idx)
+
+    async def _set_lane_output_mode_override(
+        pool_idx: int,
+        mode: Literal["json_object_prompt", "jsonl"] | None,
+        *,
+        rejected_mode: str,
+        error_type: str,
+    ) -> None:
+        if mode is None:
+            return
+        async with _lane_output_mode_lock:
+            if lane_output_mode_overrides.get(pool_idx) == mode:
+                return
+            lane_output_mode_overrides[pool_idx] = mode
+        entry = pool[pool_idx]
+        logger.warning(
+            "GHOST B downgraded extraction lane=%d model=%s from %s to %s "
+            "for this run after native structured-output rejection: %s",
+            pool_idx,
+            entry.get("model"),
+            rejected_mode,
+            mode,
+            error_type,
+        )
+
     async def _disable_lane(pool_idx: int, exc: Exception) -> None:
         async with _disabled_lock:
             if pool_idx in disabled_lanes:
@@ -3849,6 +4235,27 @@ async def extract_entities(
             entry["model"],
             provider_error_summary(exc),
         )
+
+    def _provider_family(pool_idx: int) -> str:
+        card = resolve_extraction_provider_card(pool[pool_idx])
+        return str(card.provider or pool[pool_idx].get("model") or pool_idx).lower()
+
+    def _has_untried_provider_family(chunk_id: str) -> bool:
+        if not cross_provider_rescue:
+            return False
+        attempted = failed_provider_families.get(chunk_id, set())
+        return any(
+            pool_idx not in disabled_lanes
+            and _provider_family(pool_idx) not in attempted
+            for pool_idx in range(len(pool))
+        )
+
+    def _remove_intermediate_failure(chunk_id: str, pool_idx: int) -> None:
+        for index in range(len(failures_list) - 1, -1, -1):
+            failure = failures_list[index]
+            if failure.chunk_id == chunk_id and failure.lane == pool_idx:
+                failures_list.pop(index)
+                return
 
     async def _process_one(task: ExtractionTask, pool_idx: int) -> ExtractionResult | None:
         entry = pool[pool_idx]
@@ -3901,6 +4308,9 @@ async def extract_entities(
             entry,
             profile_name="normal",
         )
+        lane_forced_output_mode = await _lane_output_mode_override(pool_idx)
+        if lane_forced_output_mode is not None:
+            normal_output_mode = lane_forced_output_mode
         normal_max_entities = (
             min(max_entities, json_object_max_entities)
             if normal_output_mode in ("json_object", "json_schema", "json_object_prompt")
@@ -3975,9 +4385,14 @@ async def extract_entities(
         # Never repeat the exact same broad prompt after a capped/malformed reply.
         last_exc: Exception | None = None
         last_error_type = "unknown"
+        last_output_mode = normal_output_mode
+        forced_retry_output_mode: Literal["json_object_prompt", "jsonl"] | None = None
         parse_failures = 0
         exception_failures = 0
         call_attempts = 0
+        last_prompt_hash: str | None = None
+        last_prompt_chars: int | None = None
+        last_raw_output_fingerprint: dict[str, Any] = {}
         accepted_jsonl_items: list[dict[str, Any]] = []
         max_attempts = max(1, max_jsonl_calls)
 
@@ -4089,6 +4504,11 @@ async def extract_entities(
                 entry,
                 profile_name=profile.name,
             )
+            if forced_retry_output_mode is not None:
+                profile_output_mode = forced_retry_output_mode
+            elif lane_forced_output_mode is not None:
+                profile_output_mode = lane_forced_output_mode
+            last_output_mode = profile_output_mode
             # Pt9c/provider-card — json_schema, json_object, and compiler-
             # gated json_object_prompt all use the single-object prompt. Only
             # the first two send provider-native response_format payloads.
@@ -4112,15 +4532,18 @@ async def extract_entities(
             prompt_hash = hashlib.sha256(
                 prompt.encode("utf-8", errors="replace")
             ).hexdigest()
+            last_prompt_hash = prompt_hash
+            last_prompt_chars = prompt_chars
             attempt_payload = dict(payload_base)
+            system_prompt = (
+                _JSON_OBJECT_SYSTEM
+                if profile_output_mode in ("json_object", "json_schema", "json_object_prompt")
+                else _SYSTEM
+            )
             attempt_payload["messages"] = [
                 {
                     "role": "system",
-                    "content": (
-                        _JSON_OBJECT_SYSTEM
-                        if profile_output_mode in ("json_object", "json_schema", "json_object_prompt")
-                        else _SYSTEM
-                    ),
+                    "content": system_prompt,
                 },
                 {"role": "user", "content": prompt},
             ]
@@ -4131,21 +4554,38 @@ async def extract_entities(
                 attempt_payload["response_format"] = _json_schema_response_format()
             elif profile_output_mode == "json_object":
                 attempt_payload["response_format"] = _json_object_response_format()
-            attempt_max_tokens = profile.max_tokens
+            attempt_max_tokens, token_budget_meta = _context_bounded_completion_tokens(
+                entry,
+                system_prompt=system_prompt,
+                user_prompt=prompt,
+                requested_tokens=profile.max_tokens,
+            )
+            if token_budget_meta["capped"]:
+                logger.info(
+                    "GHOST B output budget capped chunk_id=%s lane=%d "
+                    "requested=%d effective=%d prompt_estimate=%d context=%s",
+                    task.chunk_id,
+                    pool_idx,
+                    profile.max_tokens,
+                    attempt_max_tokens,
+                    token_budget_meta["prompt_token_estimate"],
+                    token_budget_meta["context_window_tokens"],
+                )
             attempt_payload["max_tokens"] = attempt_max_tokens
             try:
                 async with lane_sems[pool_idx]:
                     async with global_sem:
-                        async with httpx.AsyncClient(timeout=120.0) as client:
-                            try:
-                                resp = await client.post(
-                                    f"{settings.LITELLM_URL}/chat/completions",
-                                    json=attempt_payload,
-                                    headers=headers,
-                                )
-                            finally:
-                                attempt_payload["messages"] = []
-                                prompt = ""
+                        async with provider_sems[pool_idx]:
+                            async with httpx.AsyncClient(timeout=120.0) as client:
+                                try:
+                                    resp = await client.post(
+                                        f"{settings.LITELLM_URL}/chat/completions",
+                                        json=attempt_payload,
+                                        headers=headers,
+                                    )
+                                finally:
+                                    attempt_payload["messages"] = []
+                                    prompt = ""
                     duration = time.perf_counter() - started
                     resp.raise_for_status()
                     call_attempts += 1
@@ -4172,6 +4612,12 @@ async def extract_entities(
                         profile_output_mode,
                     )
                     raw = str(choice.get("message", {}).get("content") or "")
+                    raw_fingerprint = _raw_output_fingerprint(
+                        raw,
+                        first_chars=audit_raw_first_chars,
+                        last_chars=audit_raw_last_chars,
+                    )
+                    last_raw_output_fingerprint = raw_fingerprint
                     body = {}
                     choices = []
                     choice = {}
@@ -4348,6 +4794,23 @@ async def extract_entities(
                     )
                     if complete and result:
                         validation_rejections = _validation_rejection_count(result)
+                        result.model = str(entry["model"])
+                        result.provider = provider_card.provider
+                        result.lane = pool_idx
+                        result.attempts = attempt + 1
+                        result.schema_mode = provider_card.schema_mode
+                        result.output_mode = profile_output_mode
+                        result.json_repair_mode = provider_card.json_repair_mode
+                        result.semantic_verifier_mode = provider_card.semantic_verifier_mode
+                        result.prompt_hash = prompt_hash
+                        result.prompt_chars = prompt_chars
+                        result.raw_output_artifact_id = (
+                            f"sha256:{raw_fingerprint.get('sha256')}"
+                            if raw_fingerprint.get("sha256")
+                            else None
+                        )
+                        result.raw_output_fingerprint = raw_fingerprint
+                        result.provider_card = provider_card.to_safe_dict()
                         await _audit_attempt(
                             event=(
                                 "ghost_b_attempt_succeeded_with_validation_rejections"
@@ -4359,15 +4822,7 @@ async def extract_entities(
                             output_mode=profile_output_mode,
                             prompt_hash=prompt_hash,
                             prompt_chars=prompt_chars,
-                            raw_fingerprint=(
-                                _raw_output_fingerprint(
-                                    raw,
-                                    first_chars=audit_raw_first_chars,
-                                    last_chars=audit_raw_last_chars,
-                                )
-                                if validation_rejections
-                                else None
-                            ),
+                            raw_fingerprint=raw_fingerprint if validation_rejections else None,
                             result=result,
                             jsonl_chunk=jsonl_chunk,
                             jsonl_items=jsonl_items,
@@ -4410,11 +4865,7 @@ async def extract_entities(
                         output_mode=profile_output_mode,
                         prompt_hash=prompt_hash,
                         prompt_chars=prompt_chars,
-                        raw_fingerprint=_raw_output_fingerprint(
-                            raw,
-                            first_chars=audit_raw_first_chars,
-                            last_chars=audit_raw_last_chars,
-                        ),
+                        raw_fingerprint=raw_fingerprint,
                         result=result,
                         jsonl_chunk=jsonl_chunk,
                         jsonl_items=jsonl_items,
@@ -4540,23 +4991,76 @@ async def extract_entities(
                         exc,
                         retry_after_seconds=retry_after_seconds,
                     ) from exc
-                # Pt9c — json_schema mode shares the 400/422 retry path
-                # with json_object. Some providers reject malformed
-                # response_format payloads (or unsupported schema features)
-                # with these status codes; we fall through to the rescue
-                # path the same way, accepting one degraded attempt rather
-                # than failing the whole chunk.
+                native_error_type = _native_mode_http_error_type(
+                    exc,
+                    output_mode=profile_output_mode,
+                )
                 if (
-                    profile_output_mode in ("json_object", "json_schema", "json_object_prompt")
-                    and isinstance(exc, httpx.HTTPStatusError)
-                    and exc.response is not None
-                    and exc.response.status_code in {400, 422}
+                    native_error_type == "context_window_exceeded"
                     and attempt + 1 < max_attempts
                 ):
-                    last_error_type = (
-                        "json_schema_unsupported"
-                        if profile_output_mode == "json_schema"
-                        else "json_object_unsupported"
+                    last_error_type = native_error_type
+                    call_metrics.append(
+                        {
+                            "chunk_id": task.chunk_id,
+                            "model": entry["model"],
+                            "provider": provider_card.provider,
+                            "schema_mode": provider_card.schema_mode,
+                            "json_repair_mode": provider_card.json_repair_mode,
+                            "semantic_verifier_mode": provider_card.semantic_verifier_mode,
+                            "lane": pool_idx,
+                            "profile": profile.name,
+                            "output_mode": profile_output_mode,
+                            "attempt": attempt + 1,
+                            "duration_seconds": round(time.perf_counter() - started, 3),
+                            "max_tokens": attempt_payload.get("max_tokens"),
+                            "prompt_hash": prompt_hash,
+                            "prompt_chars": prompt_chars,
+                            "success": False,
+                            "error_type": last_error_type,
+                            "routing_policy": routing_policy,
+                        }
+                    )
+                    await _audit_attempt(
+                        event="ghost_b_attempt_failed",
+                        attempt=attempt + 1,
+                        profile=profile,
+                        output_mode=profile_output_mode,
+                        prompt_hash=prompt_hash,
+                        prompt_chars=prompt_chars,
+                        hit_output_cap=False,
+                        finish_reason=None,
+                        usage={},
+                        max_tokens=attempt_payload.get("max_tokens"),
+                        error_type=last_error_type,
+                        error_message=_http_error_message(exc),
+                    )
+                    logger.warning(
+                        "GHOST B context budget rejected chunk_id=%s lane=%d; "
+                        "keeping output_mode=%s and switching to rescue budget",
+                        task.chunk_id,
+                        pool_idx,
+                        profile_output_mode,
+                    )
+                    continue
+                # Pt9c/provider-card — native response_format rejection must
+                # degrade the next attempt. Recomputing the card each attempt
+                # would otherwise send the same unsupported json_schema/json_object
+                # payload again and burn the retry on an identical 400/422.
+                if (
+                    native_error_type
+                    in {"json_schema_unsupported", "json_object_unsupported"}
+                    and attempt + 1 < max_attempts
+                ):
+                    forced_retry_output_mode = _degraded_output_mode_after_native_rejection(
+                        profile_output_mode
+                    )
+                    last_error_type = native_error_type
+                    await _set_lane_output_mode_override(
+                        pool_idx,
+                        forced_retry_output_mode,
+                        rejected_mode=profile_output_mode,
+                        error_type=last_error_type,
                     )
                     call_metrics.append(
                         {
@@ -4583,6 +5087,8 @@ async def extract_entities(
                             "prompt_chars": prompt_chars,
                             "success": False,
                             "error_type": last_error_type,
+                            "degraded_next_output_mode": forced_retry_output_mode,
+                            "lane_output_mode_override": forced_retry_output_mode,
                             "routing_policy": routing_policy,
                         }
                     )
@@ -4598,15 +5104,16 @@ async def extract_entities(
                         usage={},
                         max_tokens=attempt_payload.get("max_tokens"),
                         error_type=last_error_type,
-                        error_message=str(exc),
+                        error_message=_http_error_message(exc),
                     )
                     logger.warning(
                         "GHOST B %s mode was rejected by provider "
-                        "chunk_id=%s lane=%d status=%s; switching_to_rescue=True",
+                        "chunk_id=%s lane=%d status=%s; degraded_next_output_mode=%s",
                         profile_output_mode,
                         task.chunk_id,
                         pool_idx,
                         exc.response.status_code,
+                        forced_retry_output_mode,
                     )
                     continue
                 fatal_tier = provider_error_tier(exc)
@@ -4685,14 +5192,38 @@ async def extract_entities(
                 attempts=call_attempts or (parse_failures + exception_failures),
                 error_type=last_error_type,
                 error_message=str(last_exc)[:1000],
+                provider=provider_card.provider,
+                schema_mode=provider_card.schema_mode,
+                output_mode=last_output_mode,
+                json_repair_mode=provider_card.json_repair_mode,
+                semantic_verifier_mode=provider_card.semantic_verifier_mode,
+                prompt_hash=last_prompt_hash,
+                prompt_chars=last_prompt_chars,
+                raw_output_artifact_id=(
+                    f"sha256:{last_raw_output_fingerprint.get('sha256')}"
+                    if last_raw_output_fingerprint.get("sha256")
+                    else None
+                ),
+                raw_output_fingerprint=last_raw_output_fingerprint,
+                provider_card=provider_card.to_safe_dict(),
             )
         )
         return None
 
     async def _lane_worker(pool_idx: int) -> None:
         """One coroutine per lane slot. Drains the shared queue until empty."""
-        nonlocal failed_count, failure_budget_open
+        nonlocal failed_count, failure_budget_open, cross_provider_reroutes
         while True:
+            if pool_idx in disabled_lanes or failure_budget_open:
+                return
+            await lane_cooldowns.wait(
+                pool_idx,
+                should_stop=lambda: (
+                    task_queue.empty()
+                    or pool_idx in disabled_lanes
+                    or failure_budget_open
+                ),
+            )
             if pool_idx in disabled_lanes or failure_budget_open:
                 return
             try:
@@ -4703,17 +5234,26 @@ async def extract_entities(
                 if pool_idx in disabled_lanes or failure_budget_open:
                     task_queue.put_nowait(task)
                     return
+                attempted_families = failed_provider_families.get(task.chunk_id, set())
+                lane_family = _provider_family(pool_idx)
+                if lane_family in attempted_families:
+                    task_queue.put_nowait(task)
+                    await asyncio.sleep(0.01)
+                    continue
                 try:
                     result = await _process_one(task, pool_idx)
                 except RateLimitedLaneError as exc:
                     task_queue.put_nowait(task)
+                    cooldown_seconds = await lane_cooldowns.set(
+                        pool_idx,
+                        exc.retry_after_seconds,
+                    )
                     logger.warning(
                         "GHOST B requeued chunk_id=%s after rate limit on lane=%d; cooldown=%.1fs",
                         task.chunk_id,
                         pool_idx,
-                        exc.retry_after_seconds,
+                        cooldown_seconds,
                     )
-                    await asyncio.sleep(exc.retry_after_seconds)
                     continue
                 except FatalLaneError as exc:
                     task_queue.put_nowait(task)
@@ -4736,6 +5276,22 @@ async def extract_entities(
                         await _clear_lane_strikes(pool_idx)
                         results_list.append(result)
                     else:
+                        failed_provider_families.setdefault(task.chunk_id, set()).add(
+                            lane_family
+                        )
+                        if _has_untried_provider_family(task.chunk_id):
+                            _remove_intermediate_failure(task.chunk_id, pool_idx)
+                            task_queue.put_nowait(task)
+                            cross_provider_reroutes += 1
+                            logger.warning(
+                                "GHOST B rerouted chunk_id=%s after provider-family failure "
+                                "provider=%s lane=%d attempted_families=%s",
+                                task.chunk_id,
+                                lane_family,
+                                pool_idx,
+                                sorted(failed_provider_families[task.chunk_id]),
+                            )
+                            continue
                         failed_count += 1
                     if not failure_budget_open and _failure_budget_should_open():
                         failure_budget_open = True
@@ -4891,15 +5447,40 @@ async def extract_entities(
         total_relation_drops,
     )
     if return_report:
+        metrics = summarize_extraction_batch(
+            total_chunks=len(tasks),
+            results=results,
+            failures=failures_list,
+            call_metrics=call_metrics,
+            models=[str(e["model"]) for e in pool],
+        )
+        metrics.update(
+            {
+                "lane_limits": list(concurrency_plan["lane_limits"]),
+                "configured_lane_concurrency": concurrency_plan[
+                    "configured_lane_concurrency"
+                ],
+                "global_hard_cap": concurrency_plan["global_hard_cap"],
+                "global_max_concurrent": concurrency_plan["global_max_concurrent"],
+                "global_cap_applied": concurrency_plan["global_cap_applied"],
+                "memory_throttle_applied": concurrency_plan[
+                    "memory_throttle_applied"
+                ],
+                "cross_provider_rescue_enabled": cross_provider_rescue,
+                "cross_provider_reroutes": cross_provider_reroutes,
+                "worker_slot_count": len(
+                    _worker_lane_spawn_order(
+                        lane_limits,
+                        disabled_lanes=set(),
+                        routing_policy=routing_policy,
+                        start_offset=balanced_start_offset,
+                    )
+                ),
+            }
+        )
         return ExtractionBatchReport(
             results=results,
             failures=failures_list,
-            metrics=summarize_extraction_batch(
-                total_chunks=len(tasks),
-                results=results,
-                failures=failures_list,
-                call_metrics=call_metrics,
-                models=[str(e["model"]) for e in pool],
-            ),
+            metrics=metrics,
         )
     return results

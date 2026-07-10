@@ -97,3 +97,67 @@ requests, currently private RTX/vLLM in this setup.
   compiler-gated JSON.
 - Record validation rejections per provider in the library graph chip.
 - Keep paused production batch paused until the active extraction mix is chosen.
+
+## Production Repair Validation - 2026-07-09
+
+The active `polymath_v2` contract is no longer RTX-only. The live corpus uses
+the cloud/provider execution path with seven independent extraction lanes:
+
+- Managed RTX vLLM: `openai/polymath-extract`, configured `59`, observed
+  adaptive limit `58`, native `json_schema`.
+- SiliconFlow: three `openai/tencent/Hy3` lanes at `8` each.
+- LongCat: three `openai/LongCat-2.0` lanes with configured operator ceilings
+  of `45`. Runtime canary control starts each lane at `2` and increases only
+  from recent accepted-attempt and rate-limit telemetry.
+
+The bounded repair recovered all 57 genuinely extractable failed chunks and
+reclassified 7 bibliography chunks as terminal structural skips. The corpus
+ended with `0` Ghost B error rows. No API keys were written to artifacts or
+logs.
+
+### Executor And Contract Corrections
+
+- RTX output is bounded against its 8,192-token serving context without
+  treating context overflow as evidence that JSON Schema is unsupported.
+- Provider prose, Markdown fences, and XML JSON envelopes are compiled by a
+  deterministic balanced-object parser before Pydantic and semantic gates.
+- Successful and skipped artifacts are stamped with the live corpus contract,
+  not a document's retired provider snapshot.
+- Retry rows are reconciled against successful artifacts before claims; this
+  closed 35 false retries without provider calls.
+- Non-extractable structural chunks persist a terminal skipped artifact so a
+  later planner cannot recreate them as failures.
+- Bounded repair document groups now execute concurrently while existing
+  global and per-provider request semaphores remain authoritative.
+
+### Live Throughput
+
+| Repair slice | Result | Elapsed |
+|---|---:|---:|
+| Serial document executor | 25/25 recovered | 265.33s |
+| Bounded concurrent executor | 23/25 recovered first pass | 32.82s |
+| Final routed retry | 2/2 recovered | 10.99s |
+
+The like-for-like 25-chunk slice improved by 8.1x after removing document-level
+serialization. The final concurrent slice used 18 document slots; provider and
+global semaphores still controlled actual network concurrency.
+
+### Latest 50 Accepted Artifacts
+
+| Provider | Chunks | Entities | Relations | Facts | `related_to` | Missing relation evidence |
+|---|---:|---:|---:|---:|---:|---:|
+| RTX vLLM | 9 | 30 | 23 | 12 | 1 | 0 |
+| SiliconFlow Hy3 | 24 | 99 | 28 | 24 | 5 | 0 |
+| LongCat 2.0 | 17 | 84 | 57 | 36 | 15 | 0 |
+
+LongCat completed 17/17 sampled chunks without a 429. Its output was the
+richest, but its `related_to` ratio remains higher than RTX and should continue
+to be measured before lifting the canary cap. Compiler acceptance does not
+replace semantic evaluation; the evidence, ontology, endpoint, and promotion
+gates remain mandatory for every provider.
+
+At repair completion, the 30-minute health window contained 20 accepted
+LongCat attempts and zero rate limits, so the adaptive policy advanced all
+three LongCat lanes from effective concurrency `2` to `4`. The configured `45`
+per-key ceiling remains available but intentionally ungranted until the larger
+canary thresholds are met.

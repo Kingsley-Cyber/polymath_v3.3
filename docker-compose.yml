@@ -41,9 +41,13 @@ services:
     healthcheck:
       test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')", "--quiet"]
       interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
+      # Large readiness/materialization and summary-backfill scans can make
+      # mongosh startup/auth exceed 5s even while Mongo is serving API traffic.
+      # Keep the check strict enough to catch a dead DB, but avoid false
+      # dependency failures during storage-heavy ingestion repair.
+      timeout: 15s
+      retries: 6
+      start_period: 20s
     restart: unless-stopped
 
   mongo-express:
@@ -479,6 +483,9 @@ services:
     environment:
       MONGODB_URI: mongodb://${MONGO_USER:-polymath}:${MONGO_PASSWORD}@mongodb:27017/polymath?authSource=admin
       QDRANT_URL: http://qdrant:6333
+      QDRANT_MEM_LIMIT: ${QDRANT_MEM_LIMIT:-4g}
+      QDRANT_MEMORY_WARN_RATIO: ${QDRANT_MEMORY_WARN_RATIO:-0.85}
+      QDRANT_MEMORY_STOP_RATIO: ${QDRANT_MEMORY_STOP_RATIO:-0.90}
       NEO4J_URI: bolt://neo4j:7687
       NEO4J_USER: neo4j
       NEO4J_PASSWORD: ${NEO4J_PASSWORD}
@@ -495,6 +502,7 @@ services:
       RERANKER_SCORE_SCALE: ${RERANKER_SCORE_SCALE:-probability}
       RERANKER_LOW_CONFIDENCE_THRESHOLD: ${RERANKER_LOW_CONFIDENCE_THRESHOLD:--2.5}
       RERANKER_TIMEOUT_SECONDS: ${RERANKER_TIMEOUT_SECONDS:-30}
+      RERANKER_QUEUE_TIMEOUT_SECONDS: ${RERANKER_QUEUE_TIMEOUT_SECONDS:-5}
       ANSWERABILITY_CHUNK_GATE: ${ANSWERABILITY_CHUNK_GATE:-soft}
       # Per-doc char cap for cross-encoder rerank. 768 fits a child chunk
       # (128-256 tok) with headroom while trimming the leading-window cost vs
@@ -505,6 +513,8 @@ services:
       GRAPH_FACT_SEED_TIMEOUT_SECONDS: ${GRAPH_FACT_SEED_TIMEOUT_SECONDS:-5}
       GRAPH_SYNTHESIS_TIMEOUT_SECONDS: ${GRAPH_SYNTHESIS_TIMEOUT_SECONDS:-30}
       EMBEDDER_URL: http://embedder:80
+      EMBEDDER_LOCAL_TIMEOUT_SECONDS: ${EMBEDDER_LOCAL_TIMEOUT_SECONDS:-120}
+      EMBEDDER_QUERY_TIMEOUT_SECONDS: ${EMBEDDER_QUERY_TIMEOUT_SECONDS:-30}
       LIVE_WEB_SEARCH_ENABLED: ${LIVE_WEB_SEARCH_ENABLED:-true}
       SEARXNG_URL: ${SEARXNG_URL:-http://searxng:8080}
       SEARXNG_ENGINES: ${SEARXNG_ENGINES:-duckduckgo,bing,mojeek,wikipedia}
@@ -693,6 +703,7 @@ services:
       RERANKER_SCORE_SCALE: ${RERANKER_SCORE_SCALE:-probability}
       RERANKER_LOW_CONFIDENCE_THRESHOLD: ${RERANKER_LOW_CONFIDENCE_THRESHOLD:--2.5}
       RERANKER_TIMEOUT_SECONDS: ${RERANKER_TIMEOUT_SECONDS:-30}
+      RERANKER_QUEUE_TIMEOUT_SECONDS: ${RERANKER_QUEUE_TIMEOUT_SECONDS:-5}
       # Per-doc char cap for cross-encoder rerank. 768 fits a child chunk
       # (128-256 tok) with headroom while trimming the leading-window cost vs
       # the 1000-char code default. Cuts rerank time without truncating the
@@ -703,6 +714,8 @@ services:
       GRAPH_SYNTHESIS_TIMEOUT_SECONDS: ${GRAPH_SYNTHESIS_TIMEOUT_SECONDS:-30}
       EMBEDDER_URL: http://embedder:80
       EMBED_BATCH_SIZE: ${EMBED_BATCH_SIZE:-32}
+      EMBEDDER_LOCAL_TIMEOUT_SECONDS: ${EMBEDDER_LOCAL_TIMEOUT_SECONDS:-120}
+      EMBEDDER_QUERY_TIMEOUT_SECONDS: ${EMBEDDER_QUERY_TIMEOUT_SECONDS:-30}
       # Auth — reuse the backend's JWT secret so tokens issued by /api/auth
       # validate identically here. DEFAULT_ADMIN_PASSWORD is unused by MCP at
       # runtime (only auth_service.bootstrap consumes it), but Pydantic Settings

@@ -800,14 +800,17 @@ async def delete_points_by_doc(
     client: AsyncQdrantClient,
     corpus_id: str,
     doc_id: str,
+    *,
+    preserve_summary_points: bool = False,
 ) -> dict[str, bool]:
     """Delete all points for a single document across naive / hrag / graph.
 
     Per-doc delete (Phase 22). Corpus-level drops go through
     `drop_collections_for_corpus`; this helper is for single-document cascade.
-    Filters on `doc_id` within each per-corpus collection so summary points
-    (which also carry `doc_id` in their payload — see `upsert_summary_points`)
-    are removed alongside child chunks.
+    Filters on `doc_id` within each per-corpus collection. By default summary
+    points are removed alongside child chunks. Retry paths that intentionally
+    defer Ghost A can set ``preserve_summary_points`` so replacing child
+    vectors does not erase already-indexed durable summaries.
 
     Schemas collection is NOT touched — schema terms are corpus-scoped, not
     doc-scoped.
@@ -819,14 +822,25 @@ async def delete_points_by_doc(
             if not await client.collection_exists(name):
                 results[kind] = False
                 continue
+            selector = Filter(
+                must=[
+                    FieldCondition(key="corpus_id", match=MatchValue(value=corpus_id)),
+                    FieldCondition(key="doc_id", match=MatchValue(value=doc_id)),
+                ],
+                must_not=(
+                    [
+                        FieldCondition(
+                            key="chunk_type",
+                            match=MatchValue(value="summary"),
+                        )
+                    ]
+                    if preserve_summary_points
+                    else None
+                ),
+            )
             op = await client.delete(
                 collection_name=name,
-                points_selector=Filter(
-                    must=[
-                        FieldCondition(key="corpus_id", match=MatchValue(value=corpus_id)),
-                        FieldCondition(key="doc_id", match=MatchValue(value=doc_id)),
-                    ]
-                ),
+                points_selector=selector,
             )
             results[kind] = getattr(op, "operation_id", None) is not None
         except Exception as exc:
@@ -835,9 +849,10 @@ async def delete_points_by_doc(
             )
             results[kind] = False
     logger.info(
-        "Qdrant: deleted points for doc %s in corpus %s → %s",
+        "Qdrant: deleted points for doc %s in corpus %s preserve_summaries=%s → %s",
         doc_id[:12],
         corpus_id[:8],
+        preserve_summary_points,
         results,
     )
     return results

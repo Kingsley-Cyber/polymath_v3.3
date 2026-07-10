@@ -169,6 +169,42 @@ async def test_document_anchor_retriever_returns_chunks_from_named_books(monkeyp
 
 
 @pytest.mark.asyncio
+async def test_anchor_chunk_lookup_is_document_scoped_without_global_text_search():
+    seen_queries = []
+
+    class _TrackingCollection(_Collection):
+        def find(self, query, projection=None):
+            seen_queries.append(query)
+            return super().find(query, projection)
+
+    db = _Db(
+        chunks=_TrackingCollection(
+            [
+                {
+                    "corpus_id": "c1",
+                    "doc_id": "named-doc",
+                    "chunk_id": "c1",
+                    "parent_id": "p1",
+                    "text": "Sticky messages use concrete emotional stories.",
+                }
+            ]
+        )
+    )
+
+    rows = await document_anchor_retriever._chunks_for_doc(
+        db,
+        {"corpus_id": "c1", "doc_id": "named-doc"},
+        terms=["sticky", "emotional"],
+        per_doc=2,
+    )
+
+    assert rows
+    assert seen_queries
+    assert all(query.get("doc_id") == "named-doc" for query in seen_queries)
+    assert all("$text" not in query for query in seen_queries)
+
+
+@pytest.mark.asyncio
 async def test_doc_label_table_is_cached_across_retrievals(monkeypatch):
     # Speed campaign (2026-07-02): _matching_docs used to fetch EVERY document
     # record from Mongo on EVERY retrieval (main + each support pass), which

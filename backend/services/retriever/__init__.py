@@ -62,6 +62,10 @@ from services.retriever.ranking_policy import (
     apply_query_grounding,
     select_with_diversity,
 )
+from services.retriever.query_semantics import (
+    concept_support_phrases,
+    is_curated_concept,
+)
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -88,6 +92,41 @@ _RETRIEVAL_CACHE = TTLCache(maxsize=512, ttl_seconds=120.0)
 # the graph tier. Recall help is never worth stalling the funnels gather;
 # past the budget the lane degrades to no candidates.
 _DOC_ANCHOR_BUDGET_SECONDS = 2.5
+_EXTERNAL_SUFFICIENCY_MAX_CONCEPTS = 3
+
+
+def _missing_concept_support_query(result: RetrievalResult) -> str | None:
+    """Build one bounded support query from a failed final-context gate."""
+
+    selection = (result.diagnostics or {}).get("selection") or {}
+    sufficiency = selection.get("sufficiency") or {}
+    if sufficiency.get("answerable") is not False:
+        return None
+    missing: list[str] = []
+    for atom in sufficiency.get("missing_atoms") or []:
+        value = str(atom or "")
+        if not value.startswith("concept:"):
+            continue
+        term = value.removeprefix("concept:").replace("_", " ").strip()
+        if term and term not in missing:
+            missing.append(term)
+        if len(missing) >= _EXTERNAL_SUFFICIENCY_MAX_CONCEPTS:
+            break
+    if not missing:
+        return None
+
+    # A blended repair query can accidentally satisfy a generic token while
+    # missing the named concept that triggered repair. Prefer one curated
+    # concept and fan it out through the shared alias vocabulary. Fall back to
+    # the original compact multi-concept query for unknown vocabulary.
+    curated = next(
+        (term for term in missing if is_curated_concept(term.replace(" ", "_"))),
+        None,
+    )
+    if curated:
+        phrases = concept_support_phrases(curated.replace(" ", "_"))
+        return " ".join(phrases) or curated
+    return " ".join(missing)
 
 
 def _unwrap_funnel_result(
@@ -150,6 +189,15 @@ def _document_anchor_limit_for(effective_tier: RetrievalTier, *, retrieval_k: in
     if effective_tier == RetrievalTier.qdrant_only:
         return 0
     return 8 if retrieval_k >= 40 else 4
+
+
+def _rerank_enabled_for_tier(
+    requested: bool,
+    tier: RetrievalTier,
+) -> bool:
+    """Fast Search is a storage contract, not a slower profile alias."""
+
+    return bool(requested and tier != RetrievalTier.qdrant_only)
 
 
 def _retrieval_store_contract(tier: RetrievalTier) -> dict[str, Any]:
@@ -760,6 +808,231 @@ class RetrieverOrchestrator:
 
         return requested_tier, None
 
+    async def _repair_cross_corpus_missing_concepts(
+        self,
+        result: RetrievalResult,
+        request_kwargs: dict[str, Any],
+    ) -> RetrievalResult:
+        """Run one bounded Hybrid support pass when final context is incomplete.
+
+        The in-pool selector can only repair with candidates it already has.
+        This pass is deliberately narrow: multi-corpus, local search, reranking
+        enabled, and missing concept atoms present. The repaired context is
+        adopted only when the deterministic sufficiency score improves.
+        """
+
+        corpus_ids = list(request_kwargs.get("corpus_ids") or [])
+        support_query = _missing_concept_support_query(result)
+        if (
+            len(corpus_ids) < 2
+            or not support_query
+            or bool(request_kwargs.get("support_profile", False))
+            or str(request_kwargs.get("search_mode") or "local").lower() != "local"
+            or not bool(request_kwargs.get("rerank_enabled", True))
+            or result.effective_tier == RetrievalTier.qdrant_only
+            or not result.chunks
+        ):
+            return result
+
+        started = perf_counter()
+        diagnostics = dict(result.diagnostics or {})
+        before_selection = diagnostics.get("selection") or {}
+        before_sufficiency = before_selection.get("sufficiency") or {}
+        repair_meta: dict[str, Any] = {
+            "attempted": True,
+            "adopted": False,
+            "support_query": support_query,
+            "missing_atoms_before": list(before_sufficiency.get("missing_atoms") or []),
+            "coverage_before": float(before_sufficiency.get("required_coverage") or 0.0),
+        }
+
+        try:
+            support_kwargs = dict(request_kwargs)
+            support_kwargs.update(
+                {
+                    "query": support_query,
+                    "ranking_query": support_query,
+                    "retrieval_tier": RetrievalTier.qdrant_mongo,
+                    "collections": None,
+                    "retrieval_k": max(
+                        24,
+                        min(int(request_kwargs.get("retrieval_k") or 40), 40),
+                    ),
+                    "rerank_enabled": False,
+                    "top_k_summary": 0,
+                    "rerank_top_n": 16,
+                    "neo4j_expansion_cap": 0,
+                    "final_top_k": 6,
+                    "fact_seed_limit": 0,
+                    "search_mode": "local",
+                    "support_profile": True,
+                }
+            )
+            support = await self._retrieve_uncached(**support_kwargs)
+            repair_meta["support_candidates"] = len(support.chunks)
+            missing_concepts = [
+                str(atom).removeprefix("concept:").strip().lower()
+                for atom in before_sufficiency.get("missing_atoms") or []
+                if str(atom).startswith("concept:")
+            ]
+            marked_support: list[SourceChunk] = []
+            for support_rank, chunk in enumerate(support.chunks, start=1):
+                copied = chunk.model_copy(deep=True)
+                copied.metadata = dict(copied.metadata or {})
+                copied.metadata["external_sufficiency_support"] = {
+                    "query": support_query,
+                    "rank": support_rank,
+                    "missing_concepts": missing_concepts,
+                    "admitted": False,
+                }
+                marked_support.append(copied)
+            combined = merge_pools(result.chunks, marked_support)
+            repair_meta["combined_candidates"] = len(combined)
+            if len(combined) <= len(result.chunks):
+                repair_meta["reason"] = "support_search_added_no_candidates"
+                diagnostics["external_sufficiency_repair"] = repair_meta
+                return result.model_copy(update={"diagnostics": diagnostics})
+
+            ranking_query = str(
+                request_kwargs.get("ranking_query")
+                or request_kwargs.get("query")
+                or ""
+            )
+            ranked = await reranker_service.rerank(ranking_query, combined)
+            ranked = apply_query_grounding(
+                ranked,
+                query=ranking_query,
+                tier=result.effective_tier,
+                score_scale=settings.RERANKER_SCORE_SCALE,
+            )
+            # The final cross-encoder may demote a passage that is an exact
+            # hit for the missing atom because it only explains one side of a
+            # multi-part query. Reserve at most one such passage, and only when
+            # it covers every missing concept from the support pass.
+            support_candidates: list[SourceChunk] = []
+            for chunk in ranked:
+                metadata = dict(chunk.metadata or {})
+                support_info = metadata.get("external_sufficiency_support")
+                grounding = metadata.get("query_grounding")
+                if not isinstance(support_info, dict) or not isinstance(grounding, dict):
+                    continue
+                matched = {
+                    str(value).strip().lower()
+                    for value in grounding.get("matched") or []
+                    if str(value).strip()
+                }
+                if missing_concepts and set(missing_concepts) <= matched:
+                    support_candidates.append(chunk)
+            if support_candidates:
+                support_candidates.sort(
+                    key=lambda chunk: int(
+                        ((chunk.metadata or {}).get("external_sufficiency_support") or {}).get(
+                            "rank", 999
+                        )
+                    )
+                )
+                reserved_id = support_candidates[0].chunk_id
+                top_score = max(float(chunk.score or 0.0) for chunk in ranked)
+                adjusted: list[SourceChunk] = []
+                for chunk in ranked:
+                    copied = chunk.model_copy(deep=True)
+                    if copied.chunk_id == reserved_id:
+                        copied.score = max(float(copied.score or 0.0), top_score * 0.45)
+                        copied.metadata = dict(copied.metadata or {})
+                        support_info = dict(
+                            copied.metadata.get("external_sufficiency_support") or {}
+                        )
+                        support_info["admitted"] = True
+                        copied.metadata["external_sufficiency_support"] = support_info
+                        repair_meta["reserved_support_chunk_id"] = reserved_id
+                    adjusted.append(copied)
+                ranked = sorted(adjusted, key=lambda chunk: chunk.score, reverse=True)
+            final_top_k = int(
+                request_kwargs.get("final_top_k")
+                or settings.DEFAULT_RETRIEVAL_K
+            )
+            diversity = select_with_diversity(
+                ranked,
+                final_top_k=final_top_k,
+                intent=infer_retrieval_intent(ranking_query),
+                tier=result.effective_tier,
+                multi_corpus=True,
+                selected_corpus_ids=corpus_ids,
+                query=ranking_query,
+            )
+            after_selection = dict(diversity.diagnostics or {})
+            after_sufficiency = after_selection.get("sufficiency") or {}
+            coverage_after = float(
+                after_sufficiency.get("required_coverage") or 0.0
+            )
+            coverage_before = float(
+                before_sufficiency.get("required_coverage") or 0.0
+            )
+            missing_before = {
+                str(atom)
+                for atom in before_sufficiency.get("missing_atoms") or []
+            }
+            missing_after = {
+                str(atom)
+                for atom in after_sufficiency.get("missing_atoms") or []
+            }
+            resolved_concepts = sorted(
+                atom
+                for atom in missing_before - missing_after
+                if atom.startswith("concept:")
+            )
+            improved = bool(
+                coverage_after > coverage_before and resolved_concepts
+            )
+            repair_meta.update(
+                {
+                    "coverage_after": coverage_after,
+                    "resolved_concepts": resolved_concepts,
+                    "missing_atoms_after": list(
+                        after_sufficiency.get("missing_atoms") or []
+                    ),
+                    "answerable_after": bool(
+                        after_sufficiency.get("answerable", False)
+                    ),
+                    "duration_s": round(perf_counter() - started, 3),
+                }
+            )
+            if not improved:
+                repair_meta["reason"] = "support_search_did_not_improve_coverage"
+                diagnostics["external_sufficiency_repair"] = repair_meta
+                return result.model_copy(update={"diagnostics": diagnostics})
+
+            repair_meta["adopted"] = True
+            diagnostics["external_sufficiency_repair"] = repair_meta
+            diagnostics["selection"] = after_selection
+            counts = dict(diagnostics.get("counts") or {})
+            counts["external_sufficiency_support"] = len(support.chunks)
+            counts["candidates"] = len(diversity.candidates)
+            diagnostics["counts"] = counts
+            diagnostics["final_count"] = len(diversity.candidates)
+            diagnostics["total_s"] = round(
+                float(diagnostics.get("total_s") or 0.0)
+                + float(repair_meta["duration_s"]),
+                3,
+            )
+            return result.model_copy(
+                update={
+                    "chunks": diversity.candidates,
+                    "diagnostics": diagnostics,
+                }
+            )
+        except Exception as exc:
+            logger.warning("External sufficiency repair skipped: %s", exc)
+            repair_meta.update(
+                {
+                    "reason": "support_search_error",
+                    "error": f"{type(exc).__name__}: {exc}"[:300],
+                    "duration_s": round(perf_counter() - started, 3),
+                }
+            )
+            diagnostics["external_sufficiency_repair"] = repair_meta
+            return result.model_copy(update={"diagnostics": diagnostics})
+
     # ── main entry ─────────────────────────────────────────────────────────────
 
     async def retrieve(self, *args, **kwargs) -> RetrievalResult:
@@ -807,6 +1080,8 @@ class RetrieverOrchestrator:
                 except Exception:
                     return hit
         result = await self._retrieve_uncached(*args, **kwargs)
+        if not args:
+            result = await self._repair_cross_corpus_missing_concepts(result, kwargs)
         if key is not None and getattr(result, "chunks", None):
             try:
                 _RETRIEVAL_CACHE.set(key, result.model_copy(deep=True))
@@ -861,8 +1136,14 @@ class RetrieverOrchestrator:
 
         Phase 18 — `retrieval_k` overrides `_SINGLE_CORPUS_LIMIT` for the
         pre-rerank pool (single-corpus path); `rerank_enabled=False` skips the
-        cross-encoder call entirely (fixes the previously-dead UI toggle).
+        cross-encoder call entirely. Fast Search always skips the cross-encoder
+        because its qdrant_only contract is the latency-oriented route.
         """
+        requested_rerank_enabled = bool(rerank_enabled)
+        rerank_enabled = _rerank_enabled_for_tier(
+            requested_rerank_enabled,
+            retrieval_tier,
+        )
         single_limit = (
             retrieval_k
             if retrieval_k is not None
@@ -1003,6 +1284,7 @@ class RetrieverOrchestrator:
                     "final_top_k": final_top_k
                     if final_top_k is not None
                     else settings.DEFAULT_RETRIEVAL_K,
+                    "rerank_requested": requested_rerank_enabled,
                     "rerank_enabled": rerank_enabled,
                 },
                 "counts": {key: int(value) for key, value in counts.items()},
@@ -1899,7 +2181,12 @@ class RetrieverOrchestrator:
             phase_started = perf_counter()
             ranked = _rank_fused_order(merged)
             reranker_diagnostics = {
-                "status": "skipped_by_request",
+                "status": (
+                    "skipped_fast_tier"
+                    if requested_rerank_enabled
+                    and effective_tier == RetrievalTier.qdrant_only
+                    else "skipped_by_request"
+                ),
                 "fallback": True,
                 "ordering": "rrf_rank_fusion",
                 "candidate_count": len(merged),

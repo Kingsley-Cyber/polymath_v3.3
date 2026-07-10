@@ -19,6 +19,7 @@ tests cover the LLM → EntityItem boundary which is the part new to Pt9b.
 """
 from __future__ import annotations
 
+import json
 import sys
 from types import ModuleType
 
@@ -104,6 +105,7 @@ from services.ghost_b import (  # noqa: E402
     _apply_schema,
     _jsonl_items_to_object,
     _normalize_object_kind,
+    _normalize_relation_object_kind,
     _parse,
 )
 from services.ghost_b_schemas import LLMEntity  # noqa: E402
@@ -334,6 +336,84 @@ def test_jsonl_relation_ok_is_entity_or_literal_unchanged():
     out = _jsonl_items_to_object(items, task)
     assert len(out["relations"]) == 1
     assert out["relations"][0]["object_kind"] == "entity"
+
+
+def test_jsonl_relation_entity_type_object_kind_is_normalized_to_entity():
+    """Hy3/LongCat-style providers sometimes put an entity type in relation
+    object_kind. The relation endpoint contract must still be entity|literal.
+    """
+    task = ExtractionTask(
+        chunk_id="c1", doc_id="d1", corpus_id="cor1", text="",
+    )
+    items = [
+        {
+            "t": "r",
+            "sub": "react",
+            "pred": "implements",
+            "obj": "virtual_dom",
+            "cf": 0.9,
+            "ok": "Method",
+        }
+    ]
+    out = _jsonl_items_to_object(items, task)
+    assert len(out["relations"]) == 1
+    assert out["relations"][0]["object_kind"] == "entity"
+
+
+def test_normalize_relation_object_kind_uses_endpoint_entity_names():
+    assert (
+        _normalize_relation_object_kind(
+            "",
+            object_name="virtual dom",
+            entity_names={"virtual dom"},
+        )
+        == "entity"
+    )
+    assert _normalize_relation_object_kind("method") == "entity"
+    assert _normalize_relation_object_kind("numeric value") == "literal"
+
+
+def test_parse_normalizes_provider_relation_object_kind_before_strict_gate():
+    task = ExtractionTask(
+        chunk_id="c1",
+        doc_id="d1",
+        corpus_id="cor1",
+        text="React implements the Virtual DOM.",
+    )
+    raw = json.dumps({
+        "schema_version": "polymath.extract.v1",
+        "entities": [
+            {
+                "canonical_name": "react",
+                "surface_form": "React",
+                "entity_type": "Software",
+                "confidence": 0.95,
+            },
+            {
+                "canonical_name": "virtual dom",
+                "surface_form": "Virtual DOM",
+                "entity_type": "Concept",
+                "confidence": 0.92,
+            },
+        ],
+        "relations": [
+            {
+                "subject": "react",
+                "predicate": "implements",
+                "object": "virtual dom",
+                "object_kind": "Method",
+                "confidence": 0.91,
+                "evidence_phrase": "React implements the Virtual DOM",
+            }
+        ],
+        "facts": [],
+    })
+
+    result = _parse(raw, task, threshold=0.1, schema=None, schema_lens=None)
+
+    assert result is not None
+    assert len(result.relations) == 1
+    assert result.relations[0].object_kind == "entity"
 
 
 # ── soft-remap preserves object_kind ────────────────────────────────
