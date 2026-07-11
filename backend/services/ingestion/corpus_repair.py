@@ -12,6 +12,7 @@ from typing import Any
 from uuid import uuid4
 
 from services.ingestion.document_summaries import backfill_document_summaries
+from services.ingestion.batches import reconcile_batch_enrichment_truth
 from services.ingestion.document_pipeline_jobs import plan_document_pipeline_jobs
 from services.ingestion.failure_reconciliation import reconcile_ghost_b_failure_metadata
 from services.ingestion.extraction_jobs import plan_extraction_jobs, run_extraction_jobs
@@ -865,6 +866,40 @@ async def run_bounded_corpus_repair_cycle(
                         "result": result,
                     }
                 )
+
+    if apply:
+        reconciled = 0
+        examined = 0
+        reconciliation_status = "complete"
+        try:
+            batch_rows = await db["ingest_batches"].find(
+                {
+                    "corpus_id": corpus_id,
+                    "status": {"$in": ["done", "partial"]},
+                },
+                {"_id": 0, "batch_id": 1, "user_id": 1},
+            ).sort("created_at", -1).limit(20).to_list(length=20)
+            for batch_row in batch_rows:
+                batch_result = await reconcile_batch_enrichment_truth(
+                    db,
+                    batch_id=str(batch_row.get("batch_id") or ""),
+                    user_id=str(batch_row.get("user_id") or "") or None,
+                )
+                reconciled += int(batch_result.get("promoted") or 0)
+                examined += int(batch_result.get("examined") or 0)
+        except (AttributeError, TypeError):
+            # Lightweight test/maintenance database adapters may not expose
+            # batch history; enrichment repair remains optional in that case.
+            reconciliation_status = "skipped_unavailable"
+        if reconciliation_status == "complete":
+            steps.append(
+                {
+                    "name": "batch_enrichment_reconciliation",
+                    "status": reconciliation_status,
+                    "changed": reconciled > 0,
+                    "result": {"examined": examined, "promoted": reconciled},
+                }
+            )
 
     readiness_after = await compute_corpus_readiness(db, corpus_id)
     summary = build_repair_cycle_summary(steps=steps, readiness=readiness_after)

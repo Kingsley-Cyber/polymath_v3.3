@@ -188,6 +188,60 @@ def test_infer_item_stage_from_legacy_phase_rows():
     )
 
 
+def test_enrichment_completion_requires_all_parallel_lanes():
+    doc = {
+        "write_state": {
+            "mongo_written": True,
+            "qdrant_written": True,
+            "neo4j_written": True,
+            "verified": True,
+        },
+        "doc_profile": {"summary": "Document summary"},
+    }
+
+    complete = batches._enrichment_completion_state(
+        doc=doc,
+        summary_required=True,
+        graph_required=True,
+        required_parent_count=4,
+        summarized_parent_count=4,
+        document_tree_done=True,
+    )
+    assert complete == {
+        "queryable": True,
+        "summary": "complete",
+        "graph": "complete",
+        "verified": True,
+        "fully_enriched": True,
+    }
+
+    missing_parent = batches._enrichment_completion_state(
+        doc=doc,
+        summary_required=True,
+        graph_required=True,
+        required_parent_count=4,
+        summarized_parent_count=3,
+        document_tree_done=True,
+    )
+    assert missing_parent["summary"] == "pending"
+    assert missing_parent["fully_enriched"] is False
+
+    missing_graph_doc = {
+        **doc,
+        "write_state": {**doc["write_state"], "neo4j_written": False},
+    }
+    missing_graph = batches._enrichment_completion_state(
+        doc=missing_graph_doc,
+        summary_required=True,
+        graph_required=True,
+        required_parent_count=4,
+        summarized_parent_count=4,
+        document_tree_done=True,
+    )
+    assert missing_graph["graph"] == "pending"
+    assert missing_graph["fully_enriched"] is False
+
+
 def test_storage_quota_counts_existing_bytes(tmp_path):
     storage = tmp_path / "spool"
     storage.mkdir()
@@ -1248,6 +1302,103 @@ async def test_recover_local_batch_runners_does_not_start_manifest_only_batch(mo
 
     assert result["candidate_batches"] == 1
     assert result["started_batches"] == 0
+
+
+@pytest.mark.asyncio
+async def test_recover_local_batch_runners_starts_durably_requested_queued_batch(
+    monkeypatch,
+):
+    batch_rows = [
+        {
+            "batch_id": "batch-1",
+            "source": "browser_upload",
+            "user_id": "user-1",
+            "status": batches.BATCH_QUEUED,
+            "run_requested_at": datetime(2024, 1, 1),
+        }
+    ]
+    item_rows = [
+        {
+            "item_id": "queued",
+            "batch_id": "batch-1",
+            "source": "browser_upload",
+            "user_id": "user-1",
+            "status": batches.ITEM_QUEUED,
+        }
+    ]
+    db = _RecoveryDb(batch_rows, item_rows)
+    started = []
+
+    def fake_start_local_batch_runner(**kwargs):
+        started.append((kwargs["batch_id"], kwargs["user_id"]))
+        return True
+
+    monkeypatch.setattr(
+        batches,
+        "start_local_batch_runner",
+        fake_start_local_batch_runner,
+    )
+
+    result = await batches.recover_local_batch_runners(
+        db=db,
+        ingestion_service=object(),
+    )
+
+    assert result["candidate_batches"] == 1
+    assert result["started_batches"] == 1
+    assert started == [("batch-1", "user-1")]
+
+
+@pytest.mark.asyncio
+async def test_explicit_resume_requeues_bounded_worker_failure(monkeypatch):
+    monkeypatch.setattr(
+        batches,
+        "get_settings",
+        lambda: SimpleNamespace(INGEST_MAX_ITEM_ATTEMPTS=5),
+    )
+    item_rows = [
+        {
+            "item_id": "retryable",
+            "batch_id": "batch-1",
+            "user_id": "user-1",
+            "source": "browser_upload",
+            "status": batches.ITEM_FAILED,
+            "failure_stage": "worker_exception",
+            "attempts": 1,
+            "error": "parser unavailable",
+        },
+        {
+            "item_id": "missing",
+            "batch_id": "batch-1",
+            "user_id": "user-1",
+            "source": "browser_upload",
+            "status": batches.ITEM_FAILED,
+            "failure_stage": "source_missing",
+            "attempts": 1,
+        },
+    ]
+    db = _RecoveryDb(
+        [
+            {
+                "batch_id": "batch-1",
+                "source": "browser_upload",
+                "user_id": "user-1",
+                "status": batches.BATCH_FAILED,
+            }
+        ],
+        item_rows,
+    )
+
+    result = await batches.requeue_failed_items_for_resume(
+        db,
+        batch_id="batch-1",
+        user_id="user-1",
+    )
+
+    assert result["requeued_items"] == 1
+    assert item_rows[0]["status"] == batches.ITEM_FAILED_RECOVERABLE
+    assert item_rows[0]["phase"] == "retry_requested"
+    assert item_rows[1]["status"] == batches.ITEM_FAILED
 
 
 @pytest.mark.asyncio

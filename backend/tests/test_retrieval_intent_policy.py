@@ -27,6 +27,15 @@ def test_specific_query_favors_child_chunks():
     assert limits.summary_top_k == 12
 
 
+def test_assessment_generation_is_broad_retrieval():
+    intent = infer_retrieval_intent(
+        "create an HTML test to test out my understanding ecommerce AI"
+    )
+
+    assert intent.need == QueryNeed.BROAD
+    assert intent.broad_score >= 3
+
+
 def test_ambiguous_query_uses_balanced_mix():
     intent = infer_retrieval_intent("the spider rig")
     limits = adaptive_funnel_limits(intent, child_base=40, summary_base=20)

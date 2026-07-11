@@ -38,11 +38,55 @@ def test_parser_strategy_keeps_md_txt_and_query_runtime_off_docling(adapter):
     assert adapter.parser_strategy("inventory.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") == "local_spreadsheet"
     assert adapter.parser_strategy("book.pdf", "application/pdf") == "local_pdf_fast_text"
     assert adapter.parser_strategy("plan.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document") == "local_docx"
+    assert adapter.parser_strategy("book.epub", "application/octet-stream") == "local_epub"
     assert adapter.docling_sidecar_needed("notes.md", "text/markdown") is False
     assert adapter.docling_sidecar_needed("notes.txt", "text/plain") is False
     assert adapter.docling_sidecar_needed("products.csv", "text/csv") is False
     assert adapter.docling_sidecar_needed("inventory.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") is False
     assert adapter.docling_sidecar_needed("plan.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document") is False
+    assert adapter.docling_sidecar_needed("book.epub", "application/octet-stream") is False
+
+
+@pytest.mark.asyncio
+async def test_epub_upload_parses_locally_in_spine_order(adapter, monkeypatch):
+    pytest.importorskip("ebooklib")
+    from ebooklib import epub
+
+    async def fail_post(*_args, **_kwargs):
+        raise AssertionError("Docling sidecar should not be called for EPUB")
+
+    monkeypatch.setattr(adapter.httpx.AsyncClient, "post", fail_post, raising=False)
+    book = epub.EpubBook()
+    book.set_identifier("test-book")
+    book.set_title("Consumer Behavior")
+    book.set_language("en")
+    book.add_author("Test Author")
+    first = epub.EpubHtml(title="First", file_name="first.xhtml", lang="en")
+    first.content = "<h1>Culture</h1><p>Culture shapes consumer behavior and product meaning across markets.</p>" * 4
+    second = epub.EpubHtml(title="Second", file_name="second.xhtml", lang="en")
+    second.content = "<h1>Commerce</h1><p>Commerce decisions depend on values, symbols, and social context.</p>" * 4
+    book.add_item(first)
+    book.add_item(second)
+    book.add_item(epub.EpubNcx())
+    book.add_item(epub.EpubNav())
+    book.toc = (first, second)
+    book.spine = ["nav", first, second]
+    buffer = io.BytesIO()
+    epub.write_epub(buffer, book)
+
+    result = await adapter.parse_document(
+        raw_bytes=buffer.getvalue(),
+        filename="consumer.epub",
+        mime="application/octet-stream",
+        do_ocr=False,
+    )
+
+    assert result.source_format == "local_epub"
+    assert result.title == "Consumer Behavior"
+    assert result.author == "Test Author"
+    assert result.source_type == "book"
+    assert result.text.index("Culture shapes") < result.text.index("Commerce decisions")
+    assert len(result.sections) >= 4
 
 
 @pytest.mark.asyncio

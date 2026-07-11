@@ -81,9 +81,27 @@ async def reconcile_satisfied_summary_jobs(
 
     now = datetime.utcnow()
     ops: list[UpdateOne] = []
+    doc_ids = {
+        str(row.get("doc_id") or "")
+        for row in rows
+        if row.get("doc_id")
+    }
+    excluded_rows = await db["documents"].find(
+        {
+            "corpus_id": corpus_id,
+            "doc_id": {"$in": sorted(doc_ids)},
+            "ingest_stage": {"$in": sorted(TERMINAL_SKIP_INGEST_STAGES)},
+        },
+        {"_id": 0, "doc_id": 1},
+    ).to_list(length=len(doc_ids))
+    excluded_doc_ids = {
+        str(row.get("doc_id") or "")
+        for row in excluded_rows
+    }
     for row in rows:
         kind = str(row.get("kind") or "")
         satisfied = False
+        excluded = str(row.get("doc_id") or "") in excluded_doc_ids
         if kind == "retrieval_parent_summary":
             parent_id = str(row.get("parent_id") or "")
             if parent_id:
@@ -106,7 +124,7 @@ async def reconcile_satisfied_summary_jobs(
                     doc_id=doc_id,
                 )
             )
-        if not satisfied:
+        if not satisfied and not excluded:
             continue
         ops.append(
             UpdateOne(
@@ -114,7 +132,11 @@ async def reconcile_satisfied_summary_jobs(
                 {
                     "$set": {
                         "status": "superseded",
-                        "reason": "artifact_already_satisfied",
+                        "reason": (
+                            "document_excluded_from_readiness"
+                            if excluded
+                            else "artifact_already_satisfied"
+                        ),
                         "artifact_reconciled_at": now,
                         "updated_at": now,
                         "lease_until": None,

@@ -5961,6 +5961,12 @@ def _format_retrieval_diagnostics_trace(
     if not stores:
         stores.append("training-data only or no corpus stores")
     total_s = float(diag.get("total_s") or 0.0)
+    funnel_s = float(
+        timings.get("funnels") or timings.get("candidate_generation") or 0.0
+    )
+    hydrate_s = float(
+        timings.get("hydrate") or timings.get("hydrate_finalists") or 0.0
+    )
     final_mix = (
         ", ".join(
             f"{tier}={count}" for tier, count in sorted(final_source_tiers.items())
@@ -6022,10 +6028,10 @@ def _format_retrieval_diagnostics_trace(
             "timing: "
             f"total={total_s:.2f}s "
             f"embed={float(timings.get('embed') or 0):.2f}s "
-            f"funnels={float(timings.get('funnels') or 0):.2f}s "
+            f"funnels={funnel_s:.2f}s "
             f"graph={float(timings.get('graph') or 0):.2f}s "
             f"rerank={float(timings.get('rerank') or 0):.2f}s "
-            f"hydrate={float(timings.get('hydrate') or 0):.2f}s"
+            f"hydrate={hydrate_s:.2f}s"
         ),
     ]
     if str(effective) == RetrievalTier.qdrant_mongo_graph.value:

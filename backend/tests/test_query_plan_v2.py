@@ -1,5 +1,6 @@
 from services.retriever.query_plan import (
     build_query_plan_v2,
+    query_plan_curation_query,
     query_plan_evidence_sides,
     query_plan_to_dict,
 )
@@ -20,6 +21,37 @@ def test_named_strategy_stays_one_phrase_lane():
     assert "ocean" not in [lane.lane_id for lane in plan.lanes]
 
 
+def test_uppercase_test_command_keeps_subject_and_drops_command_scaffolding():
+    query = "CREATE ME A HTML TEST TO TEST OUT MY UNDERSTANDING ECOMMERCE AI"
+
+    plan = build_query_plan_v2(query)
+
+    assert plan.concepts == ("ECOMMERCE", "AI")
+    assert _core_phrases(query) == ["ECOMMERCE", "AI"]
+    assert not any("CREATE ME" in concept for concept in plan.concepts)
+    assert not {"HTML", "TEST", "OUT", "UNDERSTANDING"} & set(plan.concepts)
+    assert query_plan_curation_query(plan) == "ECOMMERCE AI"
+
+
+def test_lowercase_assessment_command_keeps_only_subject_concept():
+    plan = build_query_plan_v2(
+        "Create a test to assess my understanding of cinematography and film editing"
+    )
+
+    assert plan.concepts == ("cinematography and film editing",)
+    assert "assess" not in plan.concepts
+    assert query_plan_curation_query(plan) == "cinematography and film editing"
+
+
+def test_uppercase_branded_subject_is_not_fragmented_by_command_handling():
+    query = "TEST MY UNDERSTANDING PURPLE OCEAN STRATEGY"
+
+    plan = build_query_plan_v2(query)
+
+    assert "PURPLE OCEAN STRATEGY" in plan.concepts
+    assert not {"PURPLE", "OCEAN"} & set(plan.concepts)
+
+
 def test_cross_domain_combine_preserves_both_semantic_sides():
     query = (
         "Combine Purple Ocean strategy with sticky messaging for an " "ecommerce offer."
@@ -38,6 +70,7 @@ def test_cross_domain_combine_preserves_both_semantic_sides():
     assert set(bridge[0].depends_on) == {
         lane.lane_id for lane in plan.lanes if lane.role == "core"
     }
+    assert query_plan_curation_query(plan) == plan.original_query
 
 
 def test_compare_named_book_and_strategy_does_not_split_titles():

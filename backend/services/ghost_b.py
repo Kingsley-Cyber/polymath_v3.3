@@ -5599,8 +5599,12 @@ async def extract_entities(
                 lane_family = _provider_family(pool_idx)
                 if lane_family in failed_provider_families.get(first_task.chunk_id, set()):
                     task_queue.put_nowait(first_task)
-                    await asyncio.sleep(0.01)
-                    continue
+                    # This worker cannot make progress on the task. Returning
+                    # lets the current drain finish so the outer retry pass can
+                    # respawn workers for every provider family. Continuing
+                    # here can spin forever when the workers for the untried
+                    # family already observed an empty queue and exited.
+                    return
                 entry = pool[pool_idx]
                 extra = entry.get("extra_params") or {}
                 configured_batch = int(

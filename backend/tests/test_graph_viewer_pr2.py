@@ -87,6 +87,24 @@ class _SequentialDriver:
         return self.session_obj
 
 
+def test_stale_brain_view_payload_remains_renderable_without_mutating_cache():
+    from routers.graph import _stale_brain_view_payload
+
+    cached = {
+        "documents": [{"doc_id": "doc-1"}],
+        "bridges": [{"source": "doc-1", "target": "doc-2"}],
+        "meta": {"total_documents": 1, "warming": False},
+    }
+
+    result = _stale_brain_view_payload(cached)
+
+    assert result["documents"] == [{"doc_id": "doc-1"}]
+    assert result["bridges"] == [{"source": "doc-1", "target": "doc-2"}]
+    assert result["meta"]["warming"] is True
+    assert result["meta"]["stale_while_revalidate"] is True
+    assert cached["meta"] == {"total_documents": 1, "warming": False}
+
+
 # ─── services.graph.queries.get_brain_view ──────────────────────────────────
 
 

@@ -44,6 +44,34 @@ async def test_artifact_reconciliation_retires_blocked_parent_summary_job():
     assert update["reason"] == "artifact_already_satisfied"
 
 
+@pytest.mark.asyncio
+async def test_artifact_reconciliation_retires_jobs_for_excluded_duplicates():
+    db = _Db(
+        doc_rows=[
+            {
+                "corpus_id": "corpus-1",
+                "doc_id": "duplicate-doc",
+                "ingest_stage": "skipped_duplicate",
+            }
+        ]
+    )
+    db["summary_jobs"].rows = [
+        {
+            "job_id": "duplicate-summary-job",
+            "corpus_id": "corpus-1",
+            "doc_id": "duplicate-doc",
+            "kind": "document_summary",
+            "status": "blocked_no_parent_summaries",
+        }
+    ]
+
+    await reconcile_satisfied_summary_jobs(db, corpus_id="corpus-1")
+
+    update = db["summary_jobs"].bulk_ops[0]._doc["$set"]
+    assert update["status"] == "superseded"
+    assert update["reason"] == "document_excluded_from_readiness"
+
+
 def test_summary_job_id_is_deterministic_and_kind_scoped():
     parent_id = summary_job_id(
         corpus_id="c",

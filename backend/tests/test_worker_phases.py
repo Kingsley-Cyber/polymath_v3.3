@@ -386,6 +386,7 @@ def _install_mocks(
     checkpoint_mock = AsyncMock(side_effect=_checkpoint_side_effect)
     update_state_mock = AsyncMock()
     verify_mock = AsyncMock(return_value=(True, []))
+    summary_tree_mock = AsyncMock(return_value={})
     readiness_mock = AsyncMock(return_value=_ready_report())
     mongo_db = MagicMock()
     # For the corpora counter update path in run_ingest_job
@@ -406,6 +407,7 @@ def _install_mocks(
         patch.object(worker, "_checkpoint_child_chunks", checkpoint_mock),
         patch.object(worker.mongo_writer, "update_write_state", update_state_mock),
         patch("services.ingestion.verify.verify_ingest", verify_mock),
+        patch("services.ingestion.summary_tree.build_and_store_tree", summary_tree_mock),
         patch(
             "services.retrieval_readiness.ensure_corpus_retrieval_ready",
             readiness_mock,
@@ -434,6 +436,7 @@ def _install_mocks(
         "checkpoint_chunks": checkpoint_mock,
         "update_state": update_state_mock,
         "verify": verify_mock,
+        "summary_tree": summary_tree_mock,
         "readiness": readiness_mock,
         "db": mongo_db,
         "stop_all": _stop_all,
@@ -446,6 +449,7 @@ async def _run_job(
     *,
     corpus_id: str = "c" * 36,
     target_stage: str | None = None,
+    defer_summaries: bool = False,
 ):
     return await worker.run_ingest_job(
         job_id="job-1",
@@ -459,6 +463,7 @@ async def _run_job(
         neo4j_driver=MagicMock(),
         model="ollama/qwen3:1.7b",
         target_stage=target_stage,
+        defer_summaries=defer_summaries,
     )
 
 
@@ -786,6 +791,31 @@ async def test_queryable_target_defers_enrichment_before_qdrant():
         assert "neo4j_write" not in rec.events
         assert m["ghosts"].await_args.kwargs["defer_summaries"] is True
         assert m["ghosts"].await_args.kwargs["defer_ghost_b"] is True
+    finally:
+        m["stop_all"]()
+
+
+@pytest.mark.asyncio
+async def test_deferred_summaries_do_not_run_inline_summary_tree():
+    rec = PhaseRecorder()
+    p, c = _parent("stub-doc", "c" * 36)
+    m = _install_mocks(
+        rec,
+        parents=[p],
+        children=[c],
+        summaries=None,
+        ghost_b_out=None,
+    )
+    try:
+        cfg = IngestionConfig(
+            use_neo4j=False,
+            chunk_summarization=True,
+            target_qdrant_collections=["naive", "hrag"],
+        )
+        await _run_job(m, cfg, defer_summaries=True)
+
+        assert m["ghosts"].await_args.kwargs["defer_summaries"] is True
+        assert m["summary_tree"].await_count == 0
     finally:
         m["stop_all"]()
 

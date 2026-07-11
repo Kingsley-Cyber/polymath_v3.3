@@ -65,7 +65,7 @@ def _get_active_count() -> int:
     return _admission.active_count()
 
 
-def _start_batch_runner_if_enabled(*, batch_id: str, user_id: str) -> bool:
+async def _start_batch_runner_if_enabled(*, batch_id: str, user_id: str) -> bool:
     """Start a durable batch only from processes allowed to own ingest memory.
 
     Offline-ingest deployments run the public/query API with
@@ -73,6 +73,20 @@ def _start_batch_runner_if_enabled(*, batch_id: str, user_id: str) -> bool:
     The query API still creates/resumes durable batches; the worker discovers
     them through startup/poll recovery.
     """
+    # The public API and ingest worker are separate processes in offline-ingest
+    # deployments. Persist the user's Run/Resume intent before checking process
+    # ownership so the worker poller can distinguish it from a manifest-only
+    # batch that was deliberately staged without execution.
+    await ingestion_service.db["ingest_batches"].update_one(
+        {"batch_id": batch_id, "user_id": user_id},
+        {
+            "$set": {
+                "run_requested_at": datetime.utcnow(),
+                "updated_at": datetime.utcnow(),
+            },
+            "$unset": {"run_deferred_reason": ""},
+        },
+    )
     if not bool(get_settings().INGEST_RUNNERS_ENABLED):
         logger.info(
             "Ingest runner start deferred: batch=%s "
@@ -2379,7 +2393,7 @@ async def create_local_ingest_batch(
         raise HTTPException(status_code=400, detail=str(exc))
     started = False
     if body.start:
-        started = _start_batch_runner_if_enabled(
+        started = await _start_batch_runner_if_enabled(
             batch_id=batch["batch_id"],
             user_id=current_user["user_id"],
         )
@@ -2447,7 +2461,7 @@ async def create_upload_ingest_batch(
 
     started = False
     if start:
-        started = _start_batch_runner_if_enabled(
+        started = await _start_batch_runner_if_enabled(
             batch_id=batch["batch_id"],
             user_id=current_user["user_id"],
         )
@@ -2559,7 +2573,12 @@ async def resume_ingest_batch(
         batch_id=batch_id,
         user_id=current_user["user_id"],
     )
-    started = _start_batch_runner_if_enabled(
+    await ingest_batches.requeue_failed_items_for_resume(
+        ingestion_service.db,
+        batch_id=batch_id,
+        user_id=current_user["user_id"],
+    )
+    started = await _start_batch_runner_if_enabled(
         batch_id=batch_id,
         user_id=current_user["user_id"],
     )
@@ -2603,7 +2622,7 @@ async def rescan_ingest_batch(
             batch_id=batch_id,
             user_id=current_user["user_id"],
         )
-        started = _start_batch_runner_if_enabled(
+        started = await _start_batch_runner_if_enabled(
             batch_id=batch_id,
             user_id=current_user["user_id"],
         )

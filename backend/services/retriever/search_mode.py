@@ -138,6 +138,10 @@ def _has_code_entity(query: str) -> bool:
         token = match.group(0)
         if token in _CODE_ENTITY_STOPLIST:
             continue
+        if token.isupper():
+            # Shouted natural-language commands ("CREATE ME A TEST") are not
+            # code symbols. Real all-caps acronyms are handled by the stoplist.
+            continue
         # Single-letter "I" / "A" — common pronouns, skip
         if len(token) <= 1:
             continue

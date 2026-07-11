@@ -58,9 +58,10 @@ from services.retriever.planned_fusion import (
     filter_grounded_planned_candidates,
     fuse_planned_pools,
     grounded_planned_lane_ids,
+    limit_candidates_per_document,
     reserve_planned_finalists,
 )
-from services.retriever.query_plan import QueryPlanV2
+from services.retriever.query_plan import QueryPlanV2, query_plan_curation_query
 from services.retriever.intent_policy import (
     FunnelLimits,
     QueryNeed,
@@ -84,6 +85,33 @@ from services.retriever.query_semantics import (
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
+
+
+def _planned_rerank_candidate_limit(
+    *,
+    plan: QueryPlanV2,
+    intent: Any,
+    tier: RetrievalTier,
+    configured_limit: int,
+    final_top_k: int,
+) -> int:
+    """Bound cross-encoder work by query complexity without starving recall."""
+
+    configured = max(1, int(configured_limit))
+    final_k = max(1, int(final_top_k))
+    if tier == RetrievalTier.qdrant_mongo_graph:
+        desired = 20 if plan.complexity in {"comparative", "dependent_multi_hop"} else 16
+        if intent.need == QueryNeed.SPECIFIC and plan.complexity == "simple":
+            desired = 12
+        ceiling = 24
+    else:
+        desired = 12 if intent.need == QueryNeed.BROAD else 8
+        if plan.complexity in {"comparative", "dependent_multi_hop"}:
+            desired = 16
+        elif plan.complexity == "compositional":
+            desired = max(desired, 12)
+        ceiling = 16
+    return max(final_k, min(configured, desired, ceiling))
 
 
 def _filter_fast_grounded_candidates(
@@ -1211,6 +1239,9 @@ class RetrieverOrchestrator:
     ) -> RetrievalResult:
         """Execute QueryPlanV2 as one candidate-generation and rerank pass."""
 
+        curation_query = query_plan_curation_query(plan)
+        intent = infer_retrieval_intent(plan.original_query)
+
         if (
             retrieval_tier == RetrievalTier.qdrant_only
             and requires_explicit_graph_evidence(plan.original_query)
@@ -1238,7 +1269,7 @@ class RetrieverOrchestrator:
                 rerank_enabled=False
                 if retrieval_tier == RetrievalTier.qdrant_only
                 else rerank_enabled,
-                ranking_query=plan.original_query,
+                ranking_query=curation_query,
                 top_k_summary=top_k_summary,
                 rerank_top_n=rerank_top_n,
                 final_top_k=final_top_k,
@@ -1352,8 +1383,15 @@ class RetrieverOrchestrator:
             lane.lane_id: vector for lane, vector in zip(lanes, vectors)
         }
 
-        child_top_k = max(8, min(int(retrieval_k or 40), 40))
-        summary_top_k = max(0, min(int(top_k_summary or 12), 20))
+        requested_child_top_k = max(8, min(int(retrieval_k or 40), 40))
+        requested_summary_top_k = max(1, min(int(top_k_summary or 12), 20))
+        funnel_limits = adaptive_funnel_limits(
+            intent,
+            child_base=requested_child_top_k,
+            summary_base=requested_summary_top_k,
+        )
+        child_top_k = max(8, min(funnel_limits.child_top_k, 40))
+        summary_top_k = max(0, min(funnel_limits.summary_top_k, 20))
         lexical_top_k = max(4, min(child_top_k // 2, 12))
 
         async def _lane_pools(lane, vector) -> list[PlannedPool]:
@@ -1465,12 +1503,12 @@ class RetrieverOrchestrator:
             if effective_tier == RetrievalTier.qdrant_mongo_graph
             else int(getattr(settings, "QUERY_PLAN_HYBRID_RERANK_CANDIDATES", 16))
         )
-        rerank_cap = max(
-            1,
-            min(
-                rerank_cap,
-                24 if effective_tier == RetrievalTier.qdrant_mongo_graph else 16,
-            ),
+        rerank_cap = _planned_rerank_candidate_limit(
+            plan=plan,
+            intent=intent,
+            tier=effective_tier,
+            configured_limit=rerank_cap,
+            final_top_k=int(final_top_k or settings.DEFAULT_RETRIEVAL_K),
         )
         if rerank_top_n is not None:
             rerank_cap = min(rerank_cap, max(1, int(rerank_top_n)))
@@ -1730,7 +1768,20 @@ class RetrieverOrchestrator:
                 }
             )
         fused, duplicate_count = dedupe_cross_corpus_evidence(fused)
+        pre_rerank_document_drops = 0
+        if intent.need == QueryNeed.BROAD:
+            fused, pre_rerank_document_drops = limit_candidates_per_document(
+                fused,
+                max_candidates=rerank_cap,
+                max_per_document=2,
+            )
         fused = fused[:rerank_cap]
+        fusion_diagnostics["pre_rerank_document_cap"] = {
+            "enabled": intent.need == QueryNeed.BROAD,
+            "max_per_document": 2 if intent.need == QueryNeed.BROAD else None,
+            "dropped": pre_rerank_document_drops,
+            "selected_candidates": len(fused),
+        }
         timings["identity_dedupe"] = perf_counter() - identity_started
 
         rerank_started = perf_counter()
@@ -1757,7 +1808,7 @@ class RetrieverOrchestrator:
         if rerank_enabled and fused:
             try:
                 ranked = await asyncio.wait_for(
-                    reranker_service.rerank(plan.original_query, fused),
+                    reranker_service.rerank(curation_query, fused),
                     timeout=_stage_timeout(
                         float(
                             getattr(settings, "QUERY_PLAN_RERANK_DEADLINE_SECONDS", 6.0)
@@ -1791,7 +1842,7 @@ class RetrieverOrchestrator:
 
         ranked = apply_query_grounding(
             ranked,
-            query=plan.original_query,
+            query=curation_query,
             tier=effective_tier,
             score_scale=settings.RERANKER_SCORE_SCALE,
         )
@@ -1799,7 +1850,6 @@ class RetrieverOrchestrator:
             ranked,
             required_lane_ids,
         )
-        intent = infer_retrieval_intent(plan.original_query)
         diversity = select_with_diversity(
             ranked,
             final_top_k=int(final_top_k or settings.DEFAULT_RETRIEVAL_K),
@@ -1807,7 +1857,7 @@ class RetrieverOrchestrator:
             tier=effective_tier,
             multi_corpus=bool(corpus_ids and len(corpus_ids) > 1),
             selected_corpus_ids=corpus_ids or [],
-            query=plan.original_query,
+            query=curation_query,
         )
         finalist_candidates, reservation_diagnostics = reserve_planned_finalists(
             ranked,
@@ -1815,6 +1865,7 @@ class RetrieverOrchestrator:
             required_lane_ids=required_lane_ids,
             corpus_ids=corpus_ids,
             max_candidates=int(final_top_k or settings.DEFAULT_RETRIEVAL_K),
+            max_per_document=1 if intent.need == QueryNeed.BROAD else None,
         )
         hydrate_started = perf_counter()
         try:
@@ -1867,16 +1918,78 @@ class RetrieverOrchestrator:
         reranker_diagnostics = dict(reranker_diagnostics)
         reranker_diagnostics["execution_s"] = round(timings.get("rerank", 0.0), 3)
         total_s = perf_counter() - started
+        final_source_tiers: dict[str, int] = {}
+        for chunk in finalists:
+            source_tier = str(chunk.source_tier or "unknown")
+            final_source_tiers[source_tier] = final_source_tiers.get(source_tier, 0) + 1
+
+        def _distinct_docs(chunks: list[SourceChunk]) -> int:
+            return len({str(chunk.doc_id) for chunk in chunks if chunk.doc_id})
+
+        max_doc_share_final = (
+            round(max(document_distribution.values()) / len(finalists), 4)
+            if finalists and document_distribution
+            else 0.0
+        )
+        planned_counts = {
+            "funnel_a": sum(
+                len(pool.chunks) for pool in pools if pool.retriever == "summary"
+            ),
+            "funnel_b": sum(
+                len(pool.chunks) for pool in pools if pool.retriever == "dense"
+            ),
+            "lexical": sum(
+                len(pool.chunks) for pool in pools if pool.retriever == "lexical"
+            ),
+            "document_anchor": sum(
+                len(pool.chunks)
+                for pool in pools
+                if pool.retriever == "document_anchor"
+            ),
+            "facts": len(facts),
+            "fact_seed_chunks": sum(
+                1 for chunk in fused if str(chunk.source_tier or "") == "fact_seed"
+            ),
+            "graph_expanded": sum(
+                1
+                for chunk in fused
+                if str(chunk.source_tier or "") in {"graph", "graph_expanded"}
+            ),
+            "merged_initial": int(
+                fusion_diagnostics.get("unique_candidates") or len(fused)
+            ),
+            "ranked": len(ranked),
+            "ranked_query_grounded": len(ranked),
+            "distinct_docs_merged": _distinct_docs(fused),
+            "distinct_docs_in_pool": _distinct_docs(ranked),
+        }
         diagnostics = {
             "status": "query_plan_v2_degraded" if failures else "query_plan_v2",
             "query_plan_version": plan.version,
             "complexity": plan.complexity,
             "original_query": plan.original_query,
             "standalone_query": plan.standalone_query,
+            "curation_query": curation_query,
             "detected_phrases": list(plan.concepts),
             "detected_entities": list(plan.concepts),
             "requested_tier": getattr(retrieval_tier, "value", retrieval_tier),
             "effective_tier": getattr(effective_tier, "value", effective_tier),
+            "store_contract": _retrieval_store_contract(effective_tier),
+            "search_mode": search_mode,
+            "intent": {
+                "need": getattr(intent.need, "value", intent.need),
+                "broad_score": intent.broad_score,
+                "specific_score": intent.specific_score,
+                "child_ratio": intent.child_ratio,
+                "summary_ratio": intent.summary_ratio,
+            },
+            "limits": {
+                "child_top_k": child_top_k,
+                "summary_top_k": summary_top_k,
+                "final_top_k": int(final_top_k or settings.DEFAULT_RETRIEVAL_K),
+                "rerank_enabled": bool(rerank_enabled),
+            },
+            "counts": planned_counts,
             "dropped_corpus_ids": dropped,
             "lanes": lane_diagnostics,
             "lane_failures": failures,
@@ -1911,6 +2024,9 @@ class RetrieverOrchestrator:
                 "corpora": corpus_distribution,
                 "documents": document_distribution,
             },
+            "final_source_tiers": final_source_tiers,
+            "unique_docs_final": len(document_distribution),
+            "max_doc_share_final": max_doc_share_final,
             "graph_evidence": {
                 "facts_used": len(facts),
                 "fact_types": sorted(

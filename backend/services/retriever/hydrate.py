@@ -166,7 +166,48 @@ async def attach_document_identities(
     db = conversation_service._db
     if db is None:
         return chunks
-    doc_ids = sorted({str(chunk.doc_id) for chunk in chunks if chunk.doc_id})
+    chunk_ids = sorted(
+        {str(chunk.chunk_id) for chunk in chunks if chunk.chunk_id and not chunk.doc_id}
+    )
+    parent_ids = sorted(
+        {str(chunk.parent_id) for chunk in chunks if chunk.parent_id and not chunk.doc_id}
+    )
+    doc_id_by_chunk: dict[str, str] = {}
+    doc_id_by_parent: dict[str, str] = {}
+    if chunk_ids or parent_ids:
+        identity_terms: list[dict] = []
+        if chunk_ids:
+            identity_terms.append({"chunk_id": {"$in": chunk_ids}})
+        if parent_ids:
+            identity_terms.append({"parent_id": {"$in": parent_ids}})
+        identity_query: dict = {"$or": identity_terms}
+        if corpus_ids:
+            identity_query["corpus_id"] = {"$in": corpus_ids}
+        try:
+            chunk_rows = await db["chunks"].find(
+                with_active_records(identity_query),
+                {"_id": 0, "chunk_id": 1, "parent_id": 1, "doc_id": 1},
+            ).to_list(length=None)
+            doc_id_by_chunk = {
+                str(row.get("chunk_id")): str(row.get("doc_id"))
+                for row in chunk_rows
+                if row.get("chunk_id") and row.get("doc_id")
+            }
+            doc_id_by_parent = {
+                str(row.get("parent_id")): str(row.get("doc_id"))
+                for row in chunk_rows
+                if row.get("parent_id") and row.get("doc_id")
+            }
+        except Exception as exc:
+            logger.warning("Chunk document identity hydration failed: %s", exc)
+
+    resolved_doc_ids = {
+        str(chunk.doc_id or "")
+        or doc_id_by_chunk.get(str(chunk.chunk_id), "")
+        or doc_id_by_parent.get(str(chunk.parent_id), "")
+        for chunk in chunks
+    }
+    doc_ids = sorted(doc_id for doc_id in resolved_doc_ids if doc_id)
     if not doc_ids:
         return chunks
     query: dict = {"doc_id": {"$in": doc_ids}}
@@ -199,7 +240,14 @@ async def attach_document_identities(
     output: List[SourceChunk] = []
     for chunk in chunks:
         copied = chunk.model_copy(deep=True)
-        identity = identity_by_doc.get(str(copied.doc_id)) or {}
+        resolved_doc_id = (
+            str(copied.doc_id or "")
+            or doc_id_by_chunk.get(str(copied.chunk_id), "")
+            or doc_id_by_parent.get(str(copied.parent_id), "")
+        )
+        if resolved_doc_id and not copied.doc_id:
+            copied.doc_id = resolved_doc_id
+        identity = identity_by_doc.get(resolved_doc_id) or {}
         source_hash = str(identity.get("source_file_hash") or "")
         if source_hash:
             metadata = dict(copied.metadata or {})

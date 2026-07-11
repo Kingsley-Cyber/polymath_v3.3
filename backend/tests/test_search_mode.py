@@ -90,6 +90,12 @@ def test_short_pronouns_dont_count_as_entity():
     assert not _has_code_entity("I want a summary")
 
 
+def test_uppercase_natural_language_is_not_a_code_entity():
+    assert not _has_code_entity(
+        "CREATE ME A HTML TEST TO TEST OUT MY UNDERSTANDING ECOMMERCE AI"
+    )
+
+
 # ─── Default bias toward local ─────────────────────────────────────────────
 
 

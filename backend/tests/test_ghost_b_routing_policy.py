@@ -521,18 +521,21 @@ async def test_failed_chunk_reroutes_to_untried_provider_family(monkeypatch):
     monkeypatch.setattr(ghost_b, "get_settings", lambda: fake_settings)
     monkeypatch.setattr(ghost_b.httpx, "AsyncClient", FakeClient)
 
-    report = await ghost_b.extract_entities(
-        [
-            ExtractionTask(
-                chunk_id="c1",
-                doc_id="d1",
-                corpus_id="corp1",
-                text="Alpha works.",
-            )
-        ],
-        pool=pool,
-        return_report=True,
-        enable_facts=False,
+    report = await asyncio.wait_for(
+        ghost_b.extract_entities(
+            [
+                ExtractionTask(
+                    chunk_id="c1",
+                    doc_id="d1",
+                    corpus_id="corp1",
+                    text="Alpha works.",
+                )
+            ],
+            pool=pool,
+            return_report=True,
+            enable_facts=False,
+        ),
+        timeout=1.0,
     )
 
     assert len(report.results) == 1

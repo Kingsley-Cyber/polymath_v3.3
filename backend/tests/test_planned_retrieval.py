@@ -21,6 +21,38 @@ def _chunk(chunk_id: str, corpus_id: str = "c1") -> SourceChunk:
     )
 
 
+def test_planned_rerank_limit_is_adaptive_to_query_complexity():
+    simple = build_query_plan_v2("What is Purple Ocean strategy?")
+    assessment = build_query_plan_v2(
+        "create a test to test my understanding ecommerce AI"
+    )
+    comparative = build_query_plan_v2(
+        "Compare Purple Ocean strategy with sticky messaging."
+    )
+
+    assert retriever_module._planned_rerank_candidate_limit(
+        plan=simple,
+        intent=SimpleNamespace(need=retriever_module.QueryNeed.SPECIFIC),
+        tier=RetrievalTier.qdrant_mongo,
+        configured_limit=16,
+        final_top_k=5,
+    ) == 8
+    assert retriever_module._planned_rerank_candidate_limit(
+        plan=assessment,
+        intent=SimpleNamespace(need=retriever_module.QueryNeed.BROAD),
+        tier=RetrievalTier.qdrant_mongo,
+        configured_limit=16,
+        final_top_k=5,
+    ) == 12
+    assert retriever_module._planned_rerank_candidate_limit(
+        plan=comparative,
+        intent=SimpleNamespace(need=retriever_module.QueryNeed.BALANCED),
+        tier=RetrievalTier.qdrant_mongo,
+        configured_limit=16,
+        final_top_k=5,
+    ) == 16
+
+
 @pytest.mark.asyncio
 async def test_planned_hybrid_batches_embeddings_and_reranks_once(monkeypatch):
     orchestrator = retriever_module.RetrieverOrchestrator()

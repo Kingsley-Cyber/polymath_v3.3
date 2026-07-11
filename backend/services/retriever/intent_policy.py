@@ -37,6 +37,14 @@ _MULTI_DOC_MARKERS: tuple[str, ...] = (
     "corpora",
     "library",
 )
+_ASSESSMENT_MARKERS: tuple[str, ...] = (
+    "test my understanding",
+    "test out my understanding",
+    "quiz me",
+    "assess my knowledge",
+    "assess my understanding",
+    "test my knowledge",
+)
 class QueryNeed(str, Enum):
     BROAD = "broad"
     BALANCED = "balanced"
@@ -87,6 +95,10 @@ def infer_retrieval_intent(query: str) -> RetrievalIntent:
 
     if any(marker in normalized for marker in _MULTI_DOC_MARKERS):
         broad_score += 1
+    if any(marker in normalized for marker in _ASSESSMENT_MARKERS):
+        # Assessment generation should sample the subject broadly enough to
+        # create representative questions, not collapse onto one passage.
+        broad_score += 5
     if has_marker(normalized, RELATIONSHIP_MARKERS):
         # Relationship questions usually need evidence from both sides of
         # the relation. Balance them against "how does" local markers unless

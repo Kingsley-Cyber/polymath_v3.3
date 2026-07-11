@@ -20,6 +20,11 @@ class PlannedPool:
 
 
 LANE_GROUNDING_THRESHOLD = 0.75
+LANE_RESERVATION_MIN_SCORE_RATIO = 0.25
+_OPERATIONAL_ARTIFACT_RE = re.compile(
+    r"^(?:ocr-(?:completion|marker-append)|epub-backfill-status)-report(?:\.[a-z0-9]+)?$",
+    re.IGNORECASE,
+)
 _TRAILING_DESCRIPTORS = frozenset(
     {
         "framework",
@@ -35,6 +40,13 @@ _TRAILING_DESCRIPTORS = frozenset(
 
 def _normalized_tokens(value: str) -> list[str]:
     return re.findall(r"[a-z0-9]+", str(value or "").lower())
+
+
+def is_operational_artifact_source(chunk: SourceChunk) -> bool:
+    """Exclude deterministic pipeline reports that are not corpus evidence."""
+
+    name = str(chunk.doc_name or "").strip().rsplit("/", 1)[-1]
+    return bool(_OPERATIONAL_ARTIFACT_RE.fullmatch(name))
 
 
 def _lane_grounding_score(chunk: SourceChunk, pool: PlannedPool) -> float:
@@ -178,6 +190,9 @@ def filter_grounded_planned_candidates(
     if not required:
         diagnostics["reason"] = "no_required_lanes"
         return chunks, diagnostics
+    if any(len(_normalized_tokens(lane_id)) == 1 and len(lane_id) <= 3 for lane_id in required):
+        diagnostics["reason"] = "short_acronym_lane_fail_open"
+        return chunks, diagnostics
     grounded_lane_ids = list(diagnostics["grounded_lane_ids"])
     if not grounded_lane_ids:
         diagnostics["reason"] = "no_grounded_coverage"
@@ -214,6 +229,47 @@ def _candidate_key(chunk: SourceChunk) -> str:
     return str(chunk.chunk_id or chunk.parent_id or "")
 
 
+def _candidate_document_key(chunk: SourceChunk) -> str:
+    metadata = chunk.metadata or {}
+    return str(
+        chunk.doc_id
+        or metadata.get("source_file_hash")
+        or chunk.doc_name
+        or ""
+    ).strip().lower()
+
+
+def limit_candidates_per_document(
+    chunks: list[SourceChunk],
+    *,
+    max_candidates: int,
+    max_per_document: int,
+) -> tuple[list[SourceChunk], int]:
+    """Bound same-document neighbors before the cross-encoder call.
+
+    Input order is preserved. Candidates without a durable document identity
+    are retained because dropping unknown identities would trade recall for an
+    ingestion metadata gap.
+    """
+
+    limit = max(1, int(max_candidates))
+    document_limit = max(1, int(max_per_document))
+    output: list[SourceChunk] = []
+    document_counts: dict[str, int] = {}
+    dropped = 0
+    for chunk in chunks:
+        if len(output) >= limit:
+            break
+        document_key = _candidate_document_key(chunk)
+        if document_key and document_counts.get(document_key, 0) >= document_limit:
+            dropped += 1
+            continue
+        output.append(chunk)
+        if document_key:
+            document_counts[document_key] = document_counts.get(document_key, 0) + 1
+    return output, dropped
+
+
 def _has_lane_retriever(chunk: SourceChunk, lane_id: str, retriever: str) -> bool:
     expected = f"planned_{retriever}"
     return any(
@@ -240,6 +296,7 @@ def fuse_planned_pools(
     retriever_counts: dict[str, int] = {}
 
     retriever_weights = {"dense": 1.0, "summary": 0.75, "lexical": 0.85, "graph": 0.9}
+    excluded_operational_artifacts = 0
     for pool in pools:
         weight = retriever_weights.get(pool.retriever, 0.8)
         retriever_counts[pool.retriever] = retriever_counts.get(
@@ -247,6 +304,9 @@ def fuse_planned_pools(
         ) + len(pool.chunks)
         lane_bucket = lane_keys.setdefault(pool.lane_id, [])
         for rank, chunk in enumerate(pool.chunks):
+            if is_operational_artifact_source(chunk):
+                excluded_operational_artifacts += 1
+                continue
             key = _candidate_key(chunk)
             if not key:
                 continue
@@ -349,6 +409,7 @@ def fuse_planned_pools(
         "selected_candidates": len(output),
         "required_lanes": required_lanes,
         "retriever_counts": retriever_counts,
+        "excluded_operational_artifacts": excluded_operational_artifacts,
     }
 
 
@@ -359,6 +420,7 @@ def reserve_planned_finalists(
     required_lane_ids: list[str],
     corpus_ids: list[str] | None,
     max_candidates: int,
+    max_per_document: int | None = None,
 ) -> tuple[list[SourceChunk], dict[str, object]]:
     """Keep required semantic sides and corpora through the final rank cut.
 
@@ -372,19 +434,38 @@ def reserve_planned_finalists(
     limit = max(1, int(max_candidates))
     by_key = {_candidate_key(chunk): chunk for chunk in ranked if _candidate_key(chunk)}
     ranked_keys = list(by_key)
+    top_score = max((float(chunk.score or 0.0) for chunk in ranked), default=0.0)
+
+    def reservation_relevant(chunk: SourceChunk, lane_id: str) -> bool:
+        if planned_lane_grounding(chunk, lane_id) < LANE_GROUNDING_THRESHOLD:
+            return False
+        score = float(chunk.score or 0.0)
+        if 0.0 <= score <= top_score <= 1.0 and top_score > 0.0:
+            return score >= max(0.05, top_score * LANE_RESERVATION_MIN_SCORE_RATIO)
+        return True
     selected: list[str] = []
     selected_set: set[str] = set()
     protected_keys: set[str] = set()
     lane_reservations: dict[str, str] = {}
     corpus_reservations: dict[str, str] = {}
+    document_counts: dict[str, int] = {}
 
     def reserve(key: str | None, *, allow_overflow: bool = False) -> bool:
         if not key or key in selected_set:
             return False
         if len(selected) >= limit and not allow_overflow:
             return False
+        document_key = _candidate_document_key(by_key[key])
+        if (
+            max_per_document is not None
+            and document_key
+            and document_counts.get(document_key, 0) >= max(1, max_per_document)
+        ):
+            return False
         selected.append(key)
         selected_set.add(key)
+        if document_key:
+            document_counts[document_key] = document_counts.get(document_key, 0) + 1
         return True
 
     # Diversity selection is the primary packet. Reservations add only a
@@ -408,6 +489,7 @@ def reserve_planned_finalists(
             for candidate_key in ranked_keys
             if lane_id
             in set((by_key[candidate_key].metadata or {}).get("planned_lanes") or [])
+            and reservation_relevant(by_key[candidate_key], lane_id)
         ]
         key = existing_key or max(
             candidates,
@@ -457,6 +539,11 @@ def reserve_planned_finalists(
             break
         ordered_selected.remove(removable)
         selected_set.discard(removable)
+        document_key = _candidate_document_key(by_key[removable])
+        if document_key:
+            document_counts[document_key] = max(
+                0, document_counts.get(document_key, 0) - 1
+            )
 
     # Preserve the cross-encoder's order among the selected candidates.
     output = [by_key[key] for key in ranked_keys if key in selected_set][:limit]
@@ -465,6 +552,7 @@ def reserve_planned_finalists(
         "lane_reservations": lane_reservations,
         "corpus_reservations": corpus_reservations,
         "selected_candidates": len(output),
+        "max_per_document": max_per_document,
     }
 
 
@@ -553,7 +641,7 @@ def dedupe_document_lane_finalists(
                 if float(value or 0.0) >= LANE_GROUNDING_THRESHOLD
             )
         )
-        doc_id = str(chunk.doc_id or "").strip()
+        doc_id = _candidate_document_key(chunk)
         if not doc_id or not lane_signature:
             output.append(chunk)
             continue

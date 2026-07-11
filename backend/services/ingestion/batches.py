@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
-from pymongo import ReturnDocument
+from pymongo import ReturnDocument, UpdateOne
 
 from config import get_settings
 from models.schemas import IngestionConfig
@@ -315,6 +315,264 @@ def _infer_item_stage(item: dict[str, Any]) -> str | None:
     if status in {ITEM_QUEUED, ITEM_RUNNING, ITEM_FAILED_RECOVERABLE, ITEM_FAILED}:
         return "registered"
     return None
+
+
+def _enrichment_completion_state(
+    *,
+    doc: dict[str, Any],
+    summary_required: bool,
+    graph_required: bool,
+    required_parent_count: int,
+    summarized_parent_count: int,
+    document_tree_done: bool,
+) -> dict[str, Any]:
+    """Derive parallel enrichment-lane truth from durable artifacts."""
+
+    write_state = doc.get("write_state") or {}
+    profile = doc.get("doc_profile") or {}
+    queryable = bool(
+        write_state.get("mongo_written") is True
+        and write_state.get("qdrant_written") is True
+    )
+    document_profile_done = bool(str(profile.get("summary") or "").strip())
+    summary_complete = bool(
+        not summary_required
+        or (
+            summarized_parent_count >= required_parent_count
+            and document_profile_done
+            and document_tree_done
+        )
+    )
+    graph_complete = bool(
+        not graph_required or write_state.get("neo4j_written") is True
+    )
+    verified = write_state.get("verified") is True
+    return {
+        "queryable": queryable,
+        "summary": "complete" if summary_complete else "pending",
+        "graph": "complete" if graph_complete else "pending",
+        "verified": verified,
+        "fully_enriched": bool(
+            queryable and summary_complete and graph_complete and verified
+        ),
+    }
+
+
+async def reconcile_batch_enrichment_truth(
+    db: AsyncIOMotorDatabase,
+    *,
+    batch_id: str,
+    user_id: str | None = None,
+) -> dict[str, Any]:
+    """Promote stale batch/document phases from completed durable artifacts.
+
+    Summary and graph lanes can finish after the source batch has become
+    queryable. Their workers write the authoritative artifacts, but older code
+    never projected that truth back onto the originating batch rows. This
+    reconciliation is deterministic and idempotent; it never invokes a model.
+    """
+
+    batch_filter: dict[str, Any] = {"batch_id": batch_id}
+    if user_id is not None:
+        batch_filter["user_id"] = user_id
+    batch = await db[BATCHES].find_one(batch_filter)
+    if not batch:
+        return {"status": "not_found", "promoted": 0}
+
+    pending_phases = [
+        "awaiting_summary",
+        "queryable",
+        "queryable_with_pending_summary",
+        "queryable_with_pending_graph",
+        "queryable_with_pending_summary_and_graph",
+    ]
+    item_query: dict[str, Any] = {
+        "batch_id": batch_id,
+        "status": ITEM_DONE,
+        "doc_id": {"$exists": True, "$nin": [None, ""]},
+        "$or": [
+            {"phase": {"$in": pending_phases}},
+            {"stage": {"$in": ["summary_pending", "graph_pending", "graph_promoted"]}},
+        ],
+    }
+    if user_id is not None:
+        item_query["user_id"] = user_id
+    items = await db[ITEMS].find(
+        item_query,
+        {"_id": 0, "item_id": 1, "doc_id": 1},
+    ).to_list(length=None)
+    if not items:
+        return {"status": "noop", "promoted": 0, "examined": 0}
+
+    corpus_id = str(batch.get("corpus_id") or "")
+    doc_ids = sorted(
+        {str(item.get("doc_id") or "") for item in items if item.get("doc_id")}
+    )
+    docs = await db["documents"].find(
+        {"corpus_id": corpus_id, "doc_id": {"$in": doc_ids}},
+        {
+            "_id": 0,
+            "doc_id": 1,
+            "ingest_stage": 1,
+            "write_state": 1,
+            "doc_profile.summary": 1,
+        },
+    ).to_list(length=None)
+    docs_by_id = {str(doc.get("doc_id") or ""): doc for doc in docs}
+
+    options = batch.get("options") or {}
+    corpus = await db["corpora"].find_one(
+        {"corpus_id": corpus_id},
+        {"_id": 0, "default_ingestion_config": 1},
+    )
+    defaults = (corpus or {}).get("default_ingestion_config") or {}
+    summary_required = bool(
+        options.get("chunk_summarization", defaults.get("chunk_summarization", False))
+    )
+    graph_required = bool(options.get("use_neo4j", defaults.get("use_neo4j", True)))
+
+    required_counts = {doc_id: 0 for doc_id in doc_ids}
+    summarized_counts = {doc_id: 0 for doc_id in doc_ids}
+    if summary_required:
+        from services.ingestion.section_classifier import parent_summary_required_clause
+        from services.storage.record_status import with_active_records
+
+        parent_query = with_active_records(
+            {
+                "corpus_id": corpus_id,
+                "doc_id": {"$in": doc_ids},
+                "$and": [parent_summary_required_clause()],
+            }
+        )
+        parent_rows = await db["parent_chunks"].find(
+            parent_query,
+            {"_id": 0, "doc_id": 1, "summary": 1},
+        ).to_list(length=None)
+        for parent in parent_rows:
+            doc_id = str(parent.get("doc_id") or "")
+            required_counts[doc_id] = required_counts.get(doc_id, 0) + 1
+            if str(parent.get("summary") or "").strip():
+                summarized_counts[doc_id] = summarized_counts.get(doc_id, 0) + 1
+
+    tree_rows = await db["summary_tree"].find(
+        {
+            "corpus_id": corpus_id,
+            "doc_id": {"$in": doc_ids},
+            "node_type": "document",
+            "summary": {"$exists": True, "$nin": [None, ""]},
+        },
+        {"_id": 0, "doc_id": 1},
+    ).to_list(length=None)
+    tree_doc_ids = {
+        str(row.get("doc_id") or "")
+        for row in tree_rows
+    }
+
+    item_ops: list[UpdateOne] = []
+    doc_ops: list[UpdateOne] = []
+    promoted_doc_ids: set[str] = set()
+    for item in items:
+        doc_id = str(item.get("doc_id") or "")
+        doc = docs_by_id.get(doc_id)
+        if not doc:
+            continue
+        state = _enrichment_completion_state(
+            doc=doc,
+            summary_required=summary_required,
+            graph_required=graph_required,
+            required_parent_count=required_counts.get(doc_id, 0),
+            summarized_parent_count=summarized_counts.get(doc_id, 0),
+            document_tree_done=doc_id in tree_doc_ids,
+        )
+        item_set: dict[str, Any] = {
+            "enrichment_lanes": {
+                "summary": state["summary"],
+                "graph": state["graph"],
+            },
+            "enrichment_reconciled_at": _now(),
+            "updated_at": _now(),
+        }
+        item_update: dict[str, Any] = {"$set": item_set}
+        if state["fully_enriched"]:
+            item_set.update(
+                {
+                    "phase": "fully_enriched",
+                    "stage": "fully_enriched",
+                    "stage_rank": STAGE_RANK["fully_enriched"],
+                }
+            )
+            item_update["$unset"] = {"error": "", "failure_stage": ""}
+            promoted_doc_ids.add(doc_id)
+        item_ops.append(
+            UpdateOne({"item_id": item.get("item_id")}, item_update, upsert=False)
+        )
+        if state["fully_enriched"]:
+            doc_ops.append(
+                UpdateOne(
+                    {"corpus_id": corpus_id, "doc_id": doc_id},
+                    {
+                        "$set": {
+                            "ingest_stage": "fully_enriched",
+                            "enrichment_lanes": {
+                                "summary": "complete",
+                                "graph": "complete",
+                            },
+                            "enrichment_reconciled_at": _now(),
+                            "updated_at": _now(),
+                        },
+                        "$unset": {
+                            "enrichment_pending_reason": "",
+                            "summary_pending_reason": "",
+                        },
+                    },
+                    upsert=False,
+                )
+            )
+
+    if item_ops:
+        await db[ITEMS].bulk_write(item_ops, ordered=False)
+    if doc_ops:
+        await db["documents"].bulk_write(doc_ops, ordered=False)
+
+    remaining = await db[ITEMS].count_documents(
+        {
+            "batch_id": batch_id,
+            "status": ITEM_DONE,
+            "phase": {"$in": pending_phases},
+        }
+    )
+    if remaining == 0 and batch.get("summary_backfill_run_id"):
+        now = _now()
+        run_id = str(batch.get("summary_backfill_run_id"))
+        await db["ingest_repair_runs"].update_one(
+            {"run_id": run_id, "status": {"$in": ["queued", "running"]}},
+            {
+                "$set": {
+                    "status": "complete",
+                    "completion_reason": "durable_artifacts_reconciled",
+                    "completed_at": now,
+                    "updated_at": now,
+                }
+            },
+        )
+        await db[BATCHES].update_one(
+            {"batch_id": batch_id},
+            {
+                "$set": {
+                    "summary_backfill_status": "complete",
+                    "summary_backfill_completed_at": now,
+                    "updated_at": now,
+                },
+                "$unset": {"summary_pending_reason": ""},
+            },
+        )
+
+    return {
+        "status": "complete",
+        "examined": len(items),
+        "promoted": len(promoted_doc_ids),
+        "remaining": remaining,
+    }
 
 
 def discover_local_files(
@@ -681,6 +939,13 @@ async def get_batch(
     include_items: bool = True,
     item_limit: int = 500,
 ) -> dict[str, Any] | None:
+    reconciliation = await reconcile_batch_enrichment_truth(
+        db,
+        batch_id=batch_id,
+        user_id=user_id,
+    )
+    if int(reconciliation.get("promoted") or 0) > 0:
+        await refresh_batch_counts(db, batch_id, user_id=user_id)
     batch = await db[BATCHES].find_one(
         {"batch_id": batch_id, "user_id": user_id},
         {"_id": 0},
@@ -1120,6 +1385,46 @@ async def reconcile_stale_items(
     return {"reconciled_items": int(res.modified_count)}
 
 
+async def requeue_failed_items_for_resume(
+    db: AsyncIOMotorDatabase,
+    *,
+    batch_id: str,
+    user_id: str,
+) -> dict[str, int]:
+    """Requeue bounded worker failures after an explicit operator Resume.
+
+    Missing sources and exhausted-attempt items stay terminal. Automatic
+    recovery never calls this path, so deterministic failures cannot loop
+    unless an operator explicitly retries after changing parser/provider
+    configuration.
+    """
+
+    now = _now()
+    max_attempts = max(1, int(get_settings().INGEST_MAX_ITEM_ATTEMPTS))
+    result = await db[ITEMS].update_many(
+        {
+            "batch_id": batch_id,
+            "user_id": user_id,
+            "status": ITEM_FAILED,
+            "failure_stage": {"$in": ["worker_exception", "worker_result_failed"]},
+            "attempts": {"$lt": max_attempts},
+        },
+        {
+            "$set": {
+                "status": ITEM_FAILED_RECOVERABLE,
+                "phase": "retry_requested",
+                "lease_owner": None,
+                "lease_until": None,
+                "completed_at": None,
+                "updated_at": now,
+            },
+            "$unset": {"error": ""},
+        },
+    )
+    await refresh_batch_counts(db, batch_id, user_id=user_id)
+    return {"requeued_items": int(result.modified_count)}
+
+
 async def recover_local_batch_runners(
     *,
     db: AsyncIOMotorDatabase,
@@ -1206,12 +1511,23 @@ async def recover_local_batch_runners(
         batch_filter["user_id"] = user_id
     rows = await db[BATCHES].find(
         batch_filter,
-        {"_id": 0, "batch_id": 1, "user_id": 1, "status": 1, "started_at": 1},
+        {
+            "_id": 0,
+            "batch_id": 1,
+            "user_id": 1,
+            "status": 1,
+            "started_at": 1,
+            "run_requested_at": 1,
+        },
     ).limit(max(1, int(max_batches))).to_list(length=max(1, int(max_batches)))
 
     started = 0
     for batch in rows:
-        if batch.get("status") == BATCH_QUEUED and not batch.get("started_at"):
+        if (
+            batch.get("status") == BATCH_QUEUED
+            and not batch.get("started_at")
+            and not batch.get("run_requested_at")
+        ):
             continue
         batch_user_id = str(batch.get("user_id") or user_id or "")
         batch_id = str(batch.get("batch_id") or "")
@@ -2009,6 +2325,11 @@ async def _run_deferred_summary_backfill(
             result.get("generated"),
             result.get("indexed"),
             result.get("status"),
+        )
+        await reconcile_batch_enrichment_truth(
+            db,
+            batch_id=str(batch["batch_id"]),
+            user_id=str(batch.get("user_id") or "") or None,
         )
         return result
     except Exception as exc:  # noqa: BLE001 - queryable ingest remains valid

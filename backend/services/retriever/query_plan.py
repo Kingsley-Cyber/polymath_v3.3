@@ -50,6 +50,12 @@ _TARGET_RE = re.compile(
     r"[A-Za-z][A-Za-z0-9'\-]*)$",
     re.IGNORECASE,
 )
+_COMMAND_SUBJECT_RE = re.compile(
+    r"\b(?:understanding|knowledge|comprehension)\s+"
+    r"(?:(?:of|about|in|on)\s+)?"
+    r"((?:[A-Za-z][A-Za-z0-9'\-]*\s+){0,4}[A-Za-z][A-Za-z0-9'\-]*)$",
+    re.IGNORECASE,
+)
 _DEPENDENCY_RE = re.compile(
     r"\b(?:then|before|after|depends?\s+on|using\s+the\s+result|based\s+on)\b",
     re.IGNORECASE,
@@ -59,6 +65,8 @@ _EXPLICIT_MULTI_RE = re.compile(
     re.IGNORECASE,
 )
 _GENERIC_LANE_TERMS = {
+    "assess",
+    "assessment",
     "brand",
     "combine",
     "comparison",
@@ -68,12 +76,17 @@ _GENERIC_LANE_TERMS = {
     "exact",
     "find",
     "graph",
+    "html",
     "offer",
     "offers",
+    "out",
     "product",
     "require",
     "requires",
     "strategy",
+    "test",
+    "quiz",
+    "understanding",
     "framework",
     "model",
     "method",
@@ -101,12 +114,14 @@ _PHRASE_LEADERS = {
     "how",
     "is",
     "it",
+    "my",
     "relate",
     "require",
     "requires",
     "then",
     "the",
     "to",
+    "understanding",
     "use",
     "using",
     "what",
@@ -168,12 +183,20 @@ def _strip_phrase_leaders(value: str) -> str:
     return " ".join(words)
 
 
+def _looks_like_uppercase_command(value: str) -> bool:
+    """Reject shouted imperative clauses that the title regex can misread."""
+
+    words = [word for word in _normalize_phrase(value).split() if word.isalpha()]
+    return len(words) >= 4 and all(word.isupper() for word in words)
+
+
 def _phrase_candidates(query: str, groups: list[ConceptGroup]) -> list[str]:
     candidates: list[str] = []
     candidates.extend(match.group(1) for match in _QUOTE_RE.finditer(query))
     candidates.extend(
         phrase
         for match in _TITLE_RE.finditer(query)
+        if not _looks_like_uppercase_command(match.group(1))
         if (phrase := _strip_phrase_leaders(match.group(1)))
     )
     candidates.extend(
@@ -186,6 +209,11 @@ def _phrase_candidates(query: str, groups: list[ConceptGroup]) -> list[str]:
         target_terms = set(lexical_terms(target))
         if target_terms and not target_terms <= _GENERIC_LANE_TERMS:
             candidates.append(target)
+    for match in _COMMAND_SUBJECT_RE.finditer(query):
+        subject = _strip_phrase_leaders(match.group(1))
+        subject_terms = set(lexical_terms(subject))
+        if subject_terms and not subject_terms <= _GENERIC_LANE_TERMS:
+            candidates.append(subject)
     for match in _DESCRIPTOR_RE.finditer(query):
         prefix = _strip_phrase_leaders(match.group(1))
         # A descriptor phrase may begin after an operator/preposition. Keep the
@@ -341,6 +369,33 @@ def _collapse_attribution_concepts(
     return [max(attributed, key=lambda item: (len(item.split()), len(item)))]
 
 
+def _decompose_command_subject(query: str, concepts: list[str]) -> list[str]:
+    """Split a cross-domain ``domain + acronym`` command subject into lanes.
+
+    This is deliberately narrow: branded phrases and normal title-cased
+    concepts remain intact, while subjects such as ``ECOMMERCE AI`` or
+    ``healthcare NLP`` get one evidence lane per domain side.
+    """
+
+    match = _COMMAND_SUBJECT_RE.search(query)
+    if not match:
+        return concepts
+    subject = _normalize_phrase(match.group(1))
+    words = subject.split()
+    if len(words) != 2 or len(words[0]) < 5 or len(words[1]) > 4:
+        return concepts
+    subject_key = clean_text(subject).strip()
+    if not any(clean_text(concept).strip() == subject_key for concept in concepts):
+        return concepts
+    decomposed: list[str] = []
+    for concept in concepts:
+        if clean_text(concept).strip() == subject_key:
+            decomposed.extend(words)
+        else:
+            decomposed.append(concept)
+    return list(dict.fromkeys(decomposed))
+
+
 def build_query_plan_v2(
     query: str,
     *,
@@ -377,6 +432,7 @@ def build_query_plan_v2(
         concepts[:max_core_lanes],
         groups,
     )
+    concepts = _decompose_command_subject(original, concepts)[:max_core_lanes]
 
     operators = tuple(sorted(required_operator_atoms(original)))
     lanes: list[QueryLane] = [
@@ -431,6 +487,24 @@ def build_query_plan_v2(
         lanes=tuple(lanes),
         corpus_ids=tuple(str(item) for item in (corpus_ids or ())),
     )
+
+
+def query_plan_curation_query(plan: QueryPlanV2) -> str:
+    """Return the semantic subject used for reranking and answerability.
+
+    Simple imperative requests often contain output-format and interaction
+    words (for example, "create an HTML test about X"). The original lane is
+    still searched for recall, but those command words must not become required
+    evidence atoms. Comparative/relational plans retain their full wording.
+    """
+
+    if (
+        plan.complexity in {"simple", "compositional"}
+        and plan.concepts
+        and not plan.operators
+    ):
+        return " ".join(plan.concepts)
+    return plan.original_query
 
 
 def query_plan_to_dict(plan: QueryPlanV2) -> dict[str, object]:

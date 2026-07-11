@@ -478,7 +478,8 @@ def _mmr_policy_for(
         intent_lambda_boost = 0.08
     elif intent.need == QueryNeed.BROAD:
         min_docs, target_docs = 3, 4
-        soft_doc_cap, hard_doc_cap = 3, 4
+        broad_doc_cap = _per_doc_cap_for(intent, final_top_k)
+        soft_doc_cap, hard_doc_cap = broad_doc_cap, broad_doc_cap
         intent_lambda_boost = 0.0
     else:
         min_docs, target_docs = 2, 3
@@ -496,12 +497,12 @@ def _mmr_policy_for(
         max_same_predicate = 999
     elif tier == RetrievalTier.qdrant_mongo:
         base_lambda = 0.65
-        relevance_floor = 0.85
+        relevance_floor = 0.35 if intent.need == QueryNeed.BROAD else 0.85
         graph_reserve = 0
         max_same_predicate = 999
     else:
         base_lambda = 0.55
-        relevance_floor = 0.80
+        relevance_floor = 0.35 if intent.need == QueryNeed.BROAD else 0.80
         graph_reserve = 2 if intent.need == QueryNeed.BROAD else 1
         max_same_predicate = 3
 
@@ -779,8 +780,15 @@ def _candidate_atoms(chunk: SourceChunk) -> set[str]:
 
 def _fingerprint(chunk: SourceChunk) -> dict[str, Any]:
     parent_key = chunk.parent_id or chunk.chunk_id or ""
+    metadata = chunk.metadata or {}
+    document_key = str(
+        chunk.doc_id
+        or metadata.get("source_file_hash")
+        or chunk.doc_name
+        or ""
+    ).strip().lower()
     return {
-        "doc": str(chunk.doc_id or ""),
+        "doc": document_key,
         "parent": str(parent_key),
         "identity": _candidate_identity(chunk),
         "tokens": _token_set(_chunk_text(chunk)),

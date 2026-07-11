@@ -23,6 +23,7 @@ import logging
 import os
 import re
 import csv
+import tempfile
 from io import BytesIO, StringIO
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -50,6 +51,8 @@ _MARKDOWN_MIMES = {"text/markdown", "text/x-markdown"}
 _MARKDOWN_EXTS = {".md", ".markdown", ".mdown", ".mkd"}
 _HTML_MIMES = {"text/html", "application/xhtml+xml"}
 _HTML_EXTS = {".html", ".htm", ".xhtml"}
+_EPUB_MIMES = {"application/epub+zip", "application/epub"}
+_EPUB_EXTS = {".epub"}
 _DOCX_MIMES = {
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 }
@@ -377,6 +380,10 @@ def _looks_like_html(filename: str, mime: str) -> bool:
     return (mime or "").lower() in _HTML_MIMES or _extension(filename) in _HTML_EXTS
 
 
+def _looks_like_epub(filename: str, mime: str) -> bool:
+    return (mime or "").lower() in _EPUB_MIMES or _extension(filename) in _EPUB_EXTS
+
+
 def _looks_like_docx(filename: str, mime: str) -> bool:
     return (mime or "").lower() in _DOCX_MIMES or _extension(filename) == ".docx"
 
@@ -404,6 +411,8 @@ def docling_sidecar_needed(filename: str, mime: str) -> bool:
         return False
     if _looks_like_html(filename, mime):
         return False
+    if _looks_like_epub(filename, mime):
+        return False
     if _looks_like_docx(filename, mime):
         return False
     if _looks_like_csv(filename, mime) or _looks_like_spreadsheet(filename, mime):
@@ -423,6 +432,8 @@ def parser_strategy(filename: str, mime: str) -> str:
         return "local_markdown"
     if _looks_like_html(filename, mime):
         return "local_html"
+    if _looks_like_epub(filename, mime):
+        return "local_epub"
     if _looks_like_docx(filename, mime):
         return "local_docx"
     if _looks_like_csv(filename, mime):
@@ -1314,6 +1325,11 @@ def _parse_local_text_document(raw_bytes: bytes, filename: str, mime: str) -> Do
     if legacy_sheet_result is not None:
         return legacy_sheet_result
 
+    if _looks_like_epub(filename, mime):
+        epub_result = _parse_local_epub_document(raw_bytes, filename)
+        if epub_result is not None:
+            return epub_result
+
     if _looks_like_html(filename, mime):
         from services.ingestion.format_router import route
 
@@ -1399,6 +1415,156 @@ def _parse_local_text_document(raw_bytes: bytes, filename: str, mime: str) -> Do
         augmented_with_synthetic_headers=augmented,
         injected_headers_audit=audit,
         filename=filename,
+    )
+
+
+def _epub_metadata_value(book, namespace: str, key: str) -> str | None:
+    values = book.get_metadata(namespace, key) or []
+    if not values:
+        return None
+    value = values[0][0] if isinstance(values[0], (tuple, list)) else values[0]
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    return text or None
+
+
+def _parse_local_epub_document(
+    raw_bytes: bytes,
+    filename: str,
+) -> DoclingParseResult | None:
+    """Parse ordinary EPUB books locally in deterministic spine order."""
+
+    try:
+        from bs4 import BeautifulSoup
+        from ebooklib import epub
+    except Exception:
+        return None
+
+    temp_path = ""
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".epub", delete=False) as handle:
+            handle.write(raw_bytes)
+            temp_path = handle.name
+        book = epub.read_epub(temp_path, options={"ignore_ncx": True})
+    except Exception as exc:
+        logger.warning("Local EPUB open failed for %s: %s", filename, exc)
+        return None
+    finally:
+        if temp_path:
+            try:
+                os.unlink(temp_path)
+            except OSError:
+                pass
+
+    title = _epub_metadata_value(book, "DC", "title") or Path(filename).stem
+    author = _epub_metadata_value(book, "DC", "creator")
+    sections: list[Section] = []
+    markdown_lines: list[str] = []
+    text_blocks: list[str] = []
+    h1_count = 0
+    h2_count = 0
+    spine_documents = 0
+
+    for spine_entry in book.spine:
+        item_id = str(spine_entry[0] if isinstance(spine_entry, (tuple, list)) else spine_entry)
+        item = book.get_item_with_id(item_id)
+        if item is None:
+            continue
+        try:
+            soup = BeautifulSoup(item.get_content(), "html.parser")
+        except Exception:
+            continue
+        for tag in soup(["script", "style", "nav", "footer", "header", "iframe"]):
+            tag.decompose()
+
+        chapter_title_tag = soup.find(["h1", "h2", "title"])
+        chapter_title = re.sub(
+            r"\s+", " ", chapter_title_tag.get_text(" ", strip=True)
+        ).strip() if chapter_title_tag else ""
+        if not chapter_title:
+            chapter_title = Path(str(getattr(item, "file_name", "") or item_id)).stem
+        heading_stack: list[str] = [chapter_title] if chapter_title else [title]
+        chapter_has_text = False
+        previous_text = ""
+
+        for element in soup.find_all(["h1", "h2", "h3", "h4", "h5", "h6", "p", "li", "blockquote", "pre"]):
+            text = re.sub(r"\s+", " ", element.get_text(" ", strip=True)).strip()
+            if not text or text == previous_text:
+                continue
+            previous_text = text
+            if element.name and element.name.startswith("h"):
+                level = max(1, min(6, int(element.name[1])))
+                if level == 1:
+                    h1_count += 1
+                elif level == 2:
+                    h2_count += 1
+                heading_stack = heading_stack[: level - 1]
+                while len(heading_stack) < level - 1:
+                    heading_stack.append("")
+                heading_stack.append(text)
+                path = [part for part in heading_stack if part]
+                sections.append(
+                    Section(
+                        heading_path=path,
+                        text=text,
+                        element_type="section_heading",
+                        level=level,
+                    )
+                )
+                markdown_lines.append(f"{'#' * level} {text}")
+                chapter_has_text = True
+                continue
+
+            if len(text) < 2:
+                continue
+            path = [part for part in heading_stack if part]
+            element_type = "code_block" if element.name == "pre" else "paragraph"
+            sections.append(
+                Section(
+                    heading_path=path,
+                    text=text,
+                    element_type=element_type,
+                )
+            )
+            markdown_lines.append(text)
+            text_blocks.append(text)
+            chapter_has_text = True
+
+        if chapter_has_text:
+            spine_documents += 1
+
+    text = "\n\n".join(text_blocks).strip()
+    if len(text) < 200 or not sections:
+        logger.warning(
+            "Local EPUB produced insufficient text for %s chars=%d sections=%d",
+            filename,
+            len(text),
+            len(sections),
+        )
+        return None
+
+    has_structure = (h1_count + h2_count) > 0 or spine_documents > 1
+    logger.info(
+        "Local EPUB parsed %s spine_docs=%d sections=%d chars=%d",
+        filename,
+        spine_documents,
+        len(sections),
+        len(text),
+    )
+    return DoclingParseResult(
+        text=text,
+        markdown="\n\n".join(markdown_lines),
+        sections=sections,
+        pages=None,
+        has_structure=has_structure,
+        source_tier=SourceTier.tier_a if has_structure else SourceTier.tier_c,
+        h1_count=h1_count,
+        h2_count=h2_count,
+        num_pages=max(1, spine_documents),
+        source_format="local_epub",
+        filename=filename,
+        title=title,
+        author=author,
+        source_type="book",
     )
 
 

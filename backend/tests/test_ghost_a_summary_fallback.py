@@ -7,6 +7,8 @@ from services.ghost_a import (
     SummaryTask,
     parse_summary_microbatch_response,
     parse_tagged_summary_response,
+    provider_summary_microbatch_size,
+    provider_summary_token_budget,
     summary_compiler_token_budget,
     summarize_parents,
 )
@@ -52,6 +54,25 @@ def test_summary_compiler_budget_is_separate_from_semantic_length() -> None:
     assert summary_compiler_token_budget(175) == 1024
     assert summary_compiler_token_budget(175, 4) == 4096
     assert summary_compiler_token_budget(1024, 8) == 8192
+
+
+def test_hy3_summary_budget_reserves_reasoning_overhead() -> None:
+    hy3 = {
+        "provider_preset": "siliconflow",
+        "model": "openai/tencent/Hy3",
+        "base_url": "https://api.siliconflow.com/v1",
+    }
+    longcat = {
+        "provider_preset": "longcat",
+        "model": "openai/LongCat-2.0",
+        "base_url": "https://api.longcat.chat/openai/v1",
+    }
+
+    assert provider_summary_token_budget(hy3, 175) == 4096
+    assert provider_summary_token_budget(longcat, 175) == 1024
+    assert provider_summary_token_budget(hy3, 175, 8) == 8192
+    assert provider_summary_microbatch_size(hy3, 4) == 1
+    assert provider_summary_microbatch_size(longcat, 4) == 4
 
 
 class _EnvelopeIgnoringResponse:
@@ -316,7 +337,14 @@ async def test_validation_rejection_routes_to_untried_provider_signature(monkeyp
         for payload in _CrossProviderComplianceClient.payloads
         if "longcat" in str(payload.get("model") or "").lower()
     ]
-    assert len(hy3_calls) == 1
+    # Hy3 is intentionally unbatched: each target receives one normal request
+    # and one bounded tagged rescue before routing to another provider family.
+    assert len(hy3_calls) == 6
+    assert sum(
+        "Produce this exact line-oriented contract"
+        in payload["messages"][1]["content"]
+        for payload in hy3_calls
+    ) == 3
     assert len(longcat_calls) == 1
 
 

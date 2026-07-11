@@ -131,6 +131,41 @@ def summary_compiler_token_budget(summary_tokens: int, item_count: int = 1) -> i
     return min(8192, max(1024 * items, semantic_cap * items + 512))
 
 
+def provider_summary_token_budget(
+    entry: dict[str, Any],
+    summary_tokens: int,
+    item_count: int = 1,
+) -> int:
+    """Apply provider-specific reasoning overhead to the compiler budget."""
+
+    budget = summary_compiler_token_budget(summary_tokens, item_count)
+    card = resolve_extraction_provider_card(entry)
+    model = str(entry.get("model") or "").lower()
+    if card.provider == "siliconflow" and "hy3" in model:
+        # Hy3 can ignore enable_thinking=false and spend a 1K completion in
+        # reasoning_content, leaving empty content. Reserve enough output for
+        # both its reasoning and the validated parent_summary.v1 artifact.
+        budget = max(4096, budget)
+    return min(8192, budget)
+
+
+def provider_summary_microbatch_size(
+    entry: dict[str, Any],
+    configured_size: int,
+) -> int:
+    """Return a provider-safe summary envelope size."""
+
+    size = max(1, min(8, int(configured_size or 1)))
+    card = resolve_extraction_provider_card(entry)
+    model = str(entry.get("model") or "").lower()
+    if card.provider == "siliconflow" and "hy3" in model:
+        # Hy3 follows the single parent_summary.v1 contract but has not
+        # reliably followed the multi-target envelope. Preserve concurrency
+        # through lane workers while keeping each provider call single-target.
+        return 1
+    return size
+
+
 @dataclass
 class SummaryTask:
     parent_id: str
@@ -651,7 +686,7 @@ async def summarize_parents(
                 },
             ],
             "temperature": 0,
-            "max_tokens": summary_compiler_token_budget(cap),
+            "max_tokens": provider_summary_token_budget(entry, cap),
             # Mongo/Qdrant hold the validated durable artifact. Caching the
             # unvalidated provider response can permanently replay malformed
             # JSON after an operator retry or provider-contract fix.
@@ -783,7 +818,11 @@ async def summarize_parents(
                 },
             ],
             "temperature": 0,
-            "max_tokens": summary_compiler_token_budget(cap, len(batch_tasks)),
+            "max_tokens": provider_summary_token_budget(
+                entry,
+                cap,
+                len(batch_tasks),
+            ),
             "cache": {"no-cache": True, "no-store": True},
         }
         if entry.get("base_url"):
@@ -958,7 +997,10 @@ async def summarize_parents(
                 or getattr(settings, "INGEST_PROVIDER_MICROBATCH_SIZE", 4)
                 or 4
             )
-            microbatch_size = max(1, min(8, configured_batch))
+            microbatch_size = provider_summary_microbatch_size(
+                entry,
+                configured_batch,
+            )
             max_chars = max(
                 2000,
                 int(

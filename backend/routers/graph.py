@@ -10,6 +10,7 @@ because it's not scoped to a single corpus in the URL path (corpus_id is in
 the request body).
 """
 import asyncio
+import copy
 import logging
 from typing import Optional
 
@@ -50,6 +51,16 @@ router = APIRouter(prefix="/api/corpora", tags=["graph"])
 # different prefix than the per-corpus extraction reads. Both routers get
 # registered in main.py.
 discovery_router = APIRouter(prefix="/api/graph", tags=["graph-discovery"])
+
+
+def _stale_brain_view_payload(payload: dict) -> dict:
+    """Return a renderable last-known-good graph while cache refresh runs."""
+
+    stale = copy.deepcopy(payload)
+    meta = stale.setdefault("meta", {})
+    meta["warming"] = True
+    meta["stale_while_revalidate"] = True
+    return stale
 
 
 def _discover_result_corpus_ids(result: object, fallback: list[str]) -> list[str]:
@@ -1043,6 +1054,9 @@ async def graph_brain_view(body: dict = Body(...)) -> dict:
     )
     if cached and cached.get("payload") is not None:
         return cached["payload"]
+    stale_cached = await db["graph_brain_view_cache"].find_one(
+        {"key": key}, {"_id": 0, "payload": 1}
+    )
 
     existing = _BRAIN_VIEW_BUILD_TASKS.get(key)
     if existing is None or existing.done():
@@ -1105,6 +1119,12 @@ async def graph_brain_view(body: dict = Body(...)) -> dict:
                 _BRAIN_VIEW_BUILD_TASKS.pop(bkey, None)
 
         _BRAIN_VIEW_BUILD_TASKS[key] = asyncio.create_task(_build())
+
+    # A metadata-only document update can invalidate the signature even when
+    # the graph topology is unchanged. Keep the canvas useful during the
+    # expensive Neo4j bridge refresh instead of replacing it with zero nodes.
+    if stale_cached and stale_cached.get("payload") is not None:
+        return _stale_brain_view_payload(stale_cached["payload"])
 
     return {
         "documents": [],

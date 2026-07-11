@@ -108,6 +108,31 @@ def test_mmr_keeps_final_k_and_prefers_distinct_sources_for_broad_hybrid():
     assert [c.chunk_id for c in result.candidates] == ["c1", "c3", "c4"]
 
 
+def test_broad_mmr_uses_document_name_when_doc_id_is_missing():
+    intent = infer_retrieval_intent("summarize themes across documents")
+    first = _chunk("first", score=1.0, parent_id="p1", doc_id="")
+    first.doc_id = ""
+    first.doc_name = "same-book.md"
+    duplicate_doc = _chunk("second", score=0.99, parent_id="p2", doc_id="")
+    duplicate_doc.doc_id = ""
+    duplicate_doc.doc_name = "same-book.md"
+    other = _chunk("other", score=0.9, parent_id="p3", doc_id="")
+    other.doc_id = ""
+    other.doc_name = "other-book.md"
+
+    result = select_with_diversity(
+        [first, duplicate_doc, other],
+        final_top_k=2,
+        intent=intent,
+        tier=RetrievalTier.qdrant_mongo,
+    )
+
+    assert [chunk.doc_name for chunk in result.candidates] == [
+        "same-book.md",
+        "other-book.md",
+    ]
+
+
 def test_multi_corpus_final_selection_reserves_strong_selected_corpus():
     intent = infer_retrieval_intent("compare architecture patterns across selected corpora")
     ranked = [

@@ -1730,10 +1730,26 @@ async def _run_ghosts_parallel(
         if provider_lane_active:
             from services.ingestion.model_lifecycle import ensure_model_lifecycle_ready
 
-            ready_pool = await ensure_model_lifecycle_ready(
-                pool,
-                purpose="schema_lens",
-            )
+            try:
+                ready_pool = await ensure_model_lifecycle_ready(
+                    pool,
+                    purpose="schema_lens",
+                )
+            except RuntimeError as exc:
+                warning = (
+                    "Ghost B extraction deferred: no configured provider lane is "
+                    f"currently available ({exc}). Local chunks remain eligible "
+                    "for Mongo/Qdrant persistence and durable graph retry."
+                )
+                warnings.append(warning)
+                logger.warning(
+                    "phase=ghost_b_deferred reason=provider_unavailable "
+                    "doc=%s corpus=%s error=%s",
+                    doc_id[:12],
+                    corpus_id[:8],
+                    exc,
+                )
+                return ghost_b_from_staging
             if ready_pool is not None:
                 pool = ready_pool
             provider_lane_active = bool(pool)
@@ -3868,11 +3884,11 @@ async def run_ingest_job(
             warnings=ws.warnings,
         )
         ws.mongo_written = True
-        if queryable_first_pass:
+        if summary_deferred_by_run:
             logger.info(
-                "phase=summary_tree_deferred reason=queryable_first doc=%s corpus=%s",
-                doc_id[:12],
-                corpus_id[:8],
+                "phase=summary_tree_deferred reason=%s doc=%s corpus=%s",
+                "queryable_first" if queryable_first_pass else "deferred_by_run",
+                doc_id[:12], corpus_id[:8],
             )
         else:
             # B3 — owner summary tree (parent summaries → rollups → sections →
