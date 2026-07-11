@@ -381,6 +381,8 @@ def provider_payload_defaults(card: ExtractionProviderCard) -> dict[str, Any]:
     """
 
     if card.disable_thinking:
+        if card.provider == "siliconflow":
+            return {"enable_thinking": False}
         return {"thinking": {"type": "disabled"}}
     return {}
 

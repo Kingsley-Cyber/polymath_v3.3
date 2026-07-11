@@ -123,12 +123,16 @@ class LLMService:
         # An explicit provider-native control always wins. Otherwise translate
         # the saved operator flag after sanitization instead of forwarding the
         # invalid ``disable_thinking`` key itself.
-        if (
-            disable_thinking
-            and "thinking" not in safe_params
-            and "reasoning_effort" not in safe_params
-        ):
-            body["thinking"] = {"type": "disabled"}
+        if disable_thinking and not {
+            "thinking",
+            "enable_thinking",
+            "reasoning_effort",
+        }.intersection(safe_params):
+            model = str(body.get("model") or "").lower()
+            if "tencent/hy3" in model or "hy3" in model:
+                body["enable_thinking"] = False
+            else:
+                body["thinking"] = {"type": "disabled"}
 
     def _build_request_body(
         self,

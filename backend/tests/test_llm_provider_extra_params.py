@@ -22,7 +22,8 @@ def test_provider_extra_params_strip_internal_flags_and_disable_thinking() -> No
         },
     )
 
-    assert body["thinking"] == {"type": "disabled"}
+    assert body["enable_thinking"] is False
+    assert "thinking" not in body
     assert body["temperature"] == 0
     assert "disable_thinking" not in body
     assert "routing_policy" not in body
@@ -139,7 +140,8 @@ async def test_stream_chat_uses_sanitized_hy3_payload(monkeypatch) -> None:
 
     assert chunks == [{"content": "ok"}]
     assert client.body is not None
-    assert client.body["thinking"] == {"type": "disabled"}
+    assert client.body["enable_thinking"] is False
+    assert "thinking" not in client.body
     assert client.body["temperature"] == 0
     assert "disable_thinking" not in client.body
     assert "routing_policy" not in client.body
@@ -176,6 +178,7 @@ async def test_sync_and_tool_calls_use_sanitized_hy3_payload(monkeypatch) -> Non
     assert tools["content"] == "ok"
     assert len(client.bodies) == 2
     for body in client.bodies:
-        assert body["thinking"] == {"type": "disabled"}
+        assert body["enable_thinking"] is False
+        assert "thinking" not in body
         assert "disable_thinking" not in body
         assert "routing_policy" not in body

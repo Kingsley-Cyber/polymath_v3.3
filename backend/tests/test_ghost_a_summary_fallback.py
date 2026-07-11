@@ -460,7 +460,8 @@ async def test_summary_lane_honors_provider_disable_thinking(monkeypatch) -> Non
     )
 
     assert _CapturingBlankSummaryClient.payloads
-    assert _CapturingBlankSummaryClient.payloads[0]["thinking"] == {"type": "disabled"}
+    assert _CapturingBlankSummaryClient.payloads[0]["enable_thinking"] is False
+    assert "thinking" not in _CapturingBlankSummaryClient.payloads[0]
     assert _CapturingBlankSummaryClient.payloads[0]["cache"] == {
         "no-cache": True,
         "no-store": True,

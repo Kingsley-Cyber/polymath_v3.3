@@ -69,6 +69,23 @@ def test_payload_extras_strip_provider_card_flags():
     assert out == {"seed": 7}
 
 
+def test_siliconflow_disable_thinking_uses_native_wire_parameter():
+    from services.extraction_provider_cards import (
+        provider_payload_defaults,
+        resolve_extraction_provider_card,
+    )
+
+    card = resolve_extraction_provider_card(
+        {
+            "model": "openai/tencent/Hy3",
+            "base_url": "https://api.siliconflow.com/v1",
+            "extra_params": {"disable_thinking": True},
+        }
+    )
+
+    assert provider_payload_defaults(card) == {"enable_thinking": False}
+
+
 def test_payload_extras_reserved_keys_never_overridden():
     out = provider_payload_extras(
         {"model": "evil", "messages": [], "response_format": {"type": "json"}}
