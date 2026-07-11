@@ -572,6 +572,8 @@ async def summarize_parents(
         card = resolve_extraction_provider_card(entry)
         for key, value in provider_payload_defaults(card).items():
             payload.setdefault(key, value)
+        if card.provider == "siliconflow":
+            payload.setdefault("response_format", {"type": "json_object"})
         started = time.perf_counter()
         try:
             async with provider_sems[pool_idx]:
@@ -684,6 +686,8 @@ async def summarize_parents(
         card = resolve_extraction_provider_card(entry)
         for key, value in provider_payload_defaults(card).items():
             payload.setdefault(key, value)
+        if card.provider == "siliconflow":
+            payload.setdefault("response_format", {"type": "json_object"})
         started = time.perf_counter()
         try:
             async with provider_sems[pool_idx]:
