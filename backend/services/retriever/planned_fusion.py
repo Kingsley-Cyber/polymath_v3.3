@@ -435,6 +435,7 @@ def reserve_planned_finalists(
     max_candidates: int,
     max_per_document: int | None = None,
     routed_document_budget: int = 0,
+    preferred_route_lane_ids: list[str] | None = None,
 ) -> tuple[list[SourceChunk], dict[str, object]]:
     """Keep required semantic sides and corpora through the final rank cut.
 
@@ -526,9 +527,16 @@ def reserve_planned_finalists(
     # independently relevant candidate from a bounded number of routed
     # documents before wildcard/global candidates consume the final packet.
     route_candidates: dict[str, tuple[float, int, str]] = {}
+    preferred_route_lanes = set(preferred_route_lane_ids or [])
     for rank, candidate_key in enumerate(ranked_keys):
         chunk = by_key[candidate_key]
         route_scores = dict((chunk.metadata or {}).get("document_route_lanes") or {})
+        if preferred_route_lanes:
+            route_scores = {
+                lane_id: value
+                for lane_id, value in route_scores.items()
+                if lane_id in preferred_route_lanes
+            }
         if not route_scores:
             continue
         document_key = _candidate_document_key(chunk)
@@ -625,9 +633,171 @@ def reserve_planned_finalists(
         "routed_document_reservations": routed_document_reservations,
         "routed_documents_selected": routed_documents_selected,
         "routed_document_budget": route_limit,
+        "preferred_route_lane_ids": sorted(preferred_route_lanes),
         "selected_candidates": len(output),
         "max_per_document": max_per_document,
     }
+
+
+def prioritize_enumeration_candidates(
+    ranked: list[SourceChunk],
+    preferred: list[SourceChunk],
+    *,
+    answer_lane_ids: list[str],
+    required_lane_ids: list[str],
+    max_candidates: int,
+) -> tuple[list[SourceChunk], dict[str, object]]:
+    """Allocate enumeration context to answer objects before support prose."""
+
+    answer_lanes = list(dict.fromkeys(answer_lane_ids))
+    if not answer_lanes:
+        return preferred[: max(1, int(max_candidates))], {"applied": False}
+
+    limit = max(1, int(max_candidates))
+    support_lanes = [
+        lane_id
+        for lane_id in dict.fromkeys(required_lane_ids)
+        if lane_id not in answer_lanes
+    ]
+    answer_budget = max(2, limit - min(2, len(support_lanes)))
+    top_score = max((float(chunk.score or 0.0) for chunk in ranked), default=0.0)
+    selected: list[SourceChunk] = []
+    selected_keys: set[str] = set()
+    parent_counts: dict[str, int] = {}
+    support_document_counts: dict[str, int] = {}
+
+    def add(chunk: SourceChunk, *, answer: bool = False) -> bool:
+        key = _candidate_key(chunk)
+        if not key or key in selected_keys or len(selected) >= limit:
+            return False
+        parent_key = str(chunk.parent_id or "").strip()
+        document_key = _candidate_document_key(chunk)
+        if answer and parent_key and parent_counts.get(parent_key, 0) >= 2:
+            return False
+        if (
+            not answer
+            and document_key
+            and support_document_counts.get(document_key, 0) >= 1
+        ):
+            return False
+        selected.append(chunk)
+        selected_keys.add(key)
+        if answer and parent_key:
+            parent_counts[parent_key] = parent_counts.get(parent_key, 0) + 1
+        elif document_key:
+            support_document_counts[document_key] = (
+                support_document_counts.get(document_key, 0) + 1
+            )
+        return True
+
+    answer_count = 0
+    for chunk in ranked:
+        if answer_count >= answer_budget:
+            break
+        if not any(
+            planned_lane_grounding(chunk, lane_id) >= LANE_GROUNDING_THRESHOLD
+            for lane_id in answer_lanes
+        ):
+            continue
+        score = float(chunk.score or 0.0)
+        if 0.0 < top_score <= 1.0 and score < top_score * 0.20:
+            continue
+        if add(chunk, answer=True):
+            answer_count += 1
+
+    support_count = 0
+    for lane_id in support_lanes:
+        support = next(
+            (
+                chunk
+                for chunk in [*preferred, *ranked]
+                if planned_lane_grounding(chunk, lane_id) >= LANE_GROUNDING_THRESHOLD
+                and _candidate_key(chunk) not in selected_keys
+            ),
+            None,
+        )
+        if support is not None and add(support):
+            support_count += 1
+
+    for chunk in preferred:
+        add(chunk)
+
+    return selected, {
+        "applied": True,
+        "answer_lane_ids": answer_lanes,
+        "support_lane_ids": support_lanes,
+        "answer_budget": answer_budget,
+        "answer_candidates": answer_count,
+        "support_candidates": support_count,
+        "selected_candidates": len(selected),
+    }
+
+
+def dedupe_enumeration_finalists(
+    chunks: list[SourceChunk],
+    *,
+    answer_lane_ids: list[str],
+    max_answer_per_parent: int = 2,
+) -> tuple[list[SourceChunk], int]:
+    """Preserve answer siblings while capping repeated support-document prose."""
+
+    answer_lanes = set(answer_lane_ids)
+    output: list[SourceChunk] = []
+    seen_keys: set[str] = set()
+    answer_parent_counts: dict[str, int] = {}
+    support_document_counts: dict[str, int] = {}
+    dropped = 0
+    for chunk in chunks:
+        key = _candidate_key(chunk)
+        if key and key in seen_keys:
+            dropped += 1
+            continue
+        is_answer = any(
+            planned_lane_grounding(chunk, lane_id) >= LANE_GROUNDING_THRESHOLD
+            for lane_id in answer_lanes
+        )
+        parent_key = str(chunk.parent_id or "").strip()
+        document_key = _candidate_document_key(chunk)
+        if is_answer:
+            if parent_key and answer_parent_counts.get(parent_key, 0) >= max(
+                1, int(max_answer_per_parent)
+            ):
+                dropped += 1
+                continue
+            if parent_key:
+                answer_parent_counts[parent_key] = (
+                    answer_parent_counts.get(parent_key, 0) + 1
+                )
+        elif document_key:
+            if support_document_counts.get(document_key, 0) >= 1:
+                dropped += 1
+                continue
+            support_document_counts[document_key] = 1
+        if key:
+            seen_keys.add(key)
+        output.append(chunk)
+    return output, dropped
+
+
+def order_enumeration_finalists(
+    chunks: list[SourceChunk], *, answer_lane_ids: list[str]
+) -> list[SourceChunk]:
+    """Present requested answer objects before bounded supporting context."""
+
+    answer_lanes = set(answer_lane_ids)
+    return [
+        chunk
+        for _index, chunk in sorted(
+            enumerate(chunks),
+            key=lambda item: (
+                not any(
+                    planned_lane_grounding(item[1], lane_id) >= LANE_GROUNDING_THRESHOLD
+                    for lane_id in answer_lanes
+                ),
+                item[0],
+            ),
+        )
+    ]
 
 
 def dedupe_parent_finalists(

@@ -29,6 +29,7 @@ def test_planned_rerank_limit_is_adaptive_to_query_complexity():
     comparative = build_query_plan_v2(
         "Compare Purple Ocean strategy with sticky messaging."
     )
+    enumeration = build_query_plan_v2("what books help with dropshipping and why?")
 
     assert (
         retriever_module._planned_rerank_candidate_limit(
@@ -59,6 +60,16 @@ def test_planned_rerank_limit_is_adaptive_to_query_complexity():
             final_top_k=5,
         )
         == 16
+    )
+    assert (
+        retriever_module._planned_rerank_candidate_limit(
+            plan=enumeration,
+            intent=SimpleNamespace(need=retriever_module.QueryNeed.BALANCED),
+            tier=RetrievalTier.qdrant_mongo_graph,
+            configured_limit=24,
+            final_top_k=8,
+        )
+        == 12
     )
 
 

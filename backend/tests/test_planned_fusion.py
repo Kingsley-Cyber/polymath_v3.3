@@ -3,12 +3,15 @@ from services.retriever.planned_fusion import (
     PlannedPool,
     annotate_planned_lane_grounding,
     dedupe_document_lane_finalists,
+    dedupe_enumeration_finalists,
     dedupe_parent_finalists,
     filter_grounded_planned_candidates,
     fuse_planned_pools,
     grounded_planned_lane_ids,
     limit_candidates_per_document,
+    order_enumeration_finalists,
     planned_lane_grounding,
+    prioritize_enumeration_candidates,
     reserve_planned_finalists,
 )
 
@@ -465,6 +468,111 @@ def test_finalist_reservations_keep_bounded_routed_document_evidence():
         "doc-routed-b",
     ]
     assert set(diagnostics["routed_document_reservations"]) == {"doc-routed-b"}
+
+
+def test_finalist_route_reservations_can_be_scoped_to_answer_lane():
+    answer = _chunk("book", "a", 0.8)
+    answer.doc_id = "book-doc"
+    answer.metadata = {
+        "planned_lanes": ["books"],
+        "planned_lane_grounding": {"books": 2.0},
+        "document_route_lanes": {"books": 0.9},
+    }
+    support = _chunk("support", "a", 0.9)
+    support.doc_id = "support-doc"
+    support.metadata = {
+        "planned_lanes": ["dropshipping"],
+        "planned_lane_grounding": {"dropshipping": 2.0},
+        "document_route_lanes": {"dropshipping": 0.95},
+    }
+
+    result, diagnostics = reserve_planned_finalists(
+        [support, answer],
+        preferred=[],
+        required_lane_ids=["books", "dropshipping"],
+        corpus_ids=["a"],
+        max_candidates=2,
+        routed_document_budget=1,
+        preferred_route_lane_ids=["books"],
+    )
+
+    assert {chunk.chunk_id for chunk in result} == {"book", "support"}
+    assert diagnostics["preferred_route_lane_ids"] == ["books"]
+    assert diagnostics["routed_documents_selected"] == ["book-doc", "support-doc"]
+
+
+def test_enumeration_priority_allocates_answer_items_before_support_prose():
+    books = []
+    for index in range(4):
+        chunk = _chunk(f"book-{index}", "a", 1.0 - index * 0.05)
+        chunk.doc_id = "book-doc"
+        chunk.parent_id = f"book-parent-{index // 2}"
+        chunk.metadata = {
+            "planned_lanes": ["books"],
+            "planned_lane_grounding": {"books": 2.0},
+        }
+        books.append(chunk)
+    support = []
+    for index in range(4):
+        chunk = _chunk(f"support-{index}", "a", 0.95 - index * 0.05)
+        chunk.doc_id = "support-doc"
+        chunk.metadata = {
+            "planned_lanes": ["dropshipping"],
+            "planned_lane_grounding": {"dropshipping": 2.0},
+        }
+        support.append(chunk)
+
+    selected, diagnostics = prioritize_enumeration_candidates(
+        [books[0], *support, *books[1:]],
+        preferred=support,
+        answer_lane_ids=["books"],
+        required_lane_ids=["books", "dropshipping"],
+        max_candidates=6,
+    )
+
+    assert sum(chunk.chunk_id.startswith("book-") for chunk in selected) == 4
+    assert sum(chunk.chunk_id.startswith("support-") for chunk in selected) == 1
+    assert diagnostics["answer_candidates"] == 4
+
+
+def test_enumeration_dedupe_preserves_answer_siblings_and_caps_support_doc():
+    answer_a = _chunk("book-a", "a")
+    answer_a.doc_id = "book-doc"
+    answer_a.parent_id = "book-parent"
+    answer_a.metadata = {"planned_lane_grounding": {"books": 2.0}}
+    answer_b = answer_a.model_copy(deep=True)
+    answer_b.chunk_id = "book-b"
+    support_a = _chunk("support-a", "a")
+    support_a.doc_id = "support-doc"
+    support_a.metadata = {"planned_lane_grounding": {"dropshipping": 2.0}}
+    support_b = support_a.model_copy(deep=True)
+    support_b.chunk_id = "support-b"
+
+    selected, dropped = dedupe_enumeration_finalists(
+        [answer_a, answer_b, support_a, support_b],
+        answer_lane_ids=["books"],
+    )
+
+    assert [chunk.chunk_id for chunk in selected] == [
+        "book-a",
+        "book-b",
+        "support-a",
+    ]
+    assert dropped == 1
+
+
+def test_enumeration_output_places_answer_objects_before_support_context():
+    support = _chunk("support", "a", 1.0)
+    support.metadata = {"planned_lane_grounding": {"dropshipping": 2.0}}
+    answer = _chunk("answer", "a", 0.8)
+    answer.metadata = {"planned_lane_grounding": {"books": 2.0}}
+
+    ordered = order_enumeration_finalists(
+        [support, answer],
+        answer_lane_ids=["books"],
+    )
+
+    assert [chunk.chunk_id for chunk in ordered] == ["answer", "support"]
 
 
 def test_parent_finalist_dedupe_merges_lane_provenance():

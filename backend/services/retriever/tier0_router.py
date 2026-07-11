@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from dataclasses import dataclass
 
 from qdrant_client import AsyncQdrantClient, models
@@ -72,6 +73,48 @@ def select_adaptive_routes(
     return eligible
 
 
+def select_title_aligned_routes(
+    routes: list[DocumentRoute],
+    title_terms: tuple[str, ...],
+    *,
+    confidence_margin: float = 0.10,
+) -> list[DocumentRoute]:
+    """Gate explicit answer-object routes when document titles confirm scope.
+
+    A title gate is applied only when its best match is close to the strongest
+    semantic route. This preserves semantic fallback for corpora whose useful
+    documents have opaque titles while preventing a generic support document
+    from outranking an explicitly named list/book/tool document.
+    """
+
+    ordered = sorted(
+        routes, key=lambda item: (-item.score, item.corpus_id, item.doc_id)
+    )
+    if not ordered or not title_terms:
+        return ordered
+
+    wanted = {
+        token[:-1] if token.endswith("s") and len(token) > 3 else token
+        for term in title_terms
+        for token in re.findall(r"[a-z0-9]+", str(term).lower())
+        if len(token) >= 3
+    }
+
+    def aligned(route: DocumentRoute) -> bool:
+        title_tokens = {
+            token[:-1] if token.endswith("s") and len(token) > 3 else token
+            for token in re.findall(r"[a-z0-9]+", route.title.lower())
+        }
+        return bool(wanted & title_tokens)
+
+    matches = [route for route in ordered if aligned(route)]
+    if not matches:
+        return ordered
+    if float(matches[0].score) < float(ordered[0].score) - float(confidence_margin):
+        return ordered
+    return matches
+
+
 class Tier0DocumentRouter:
     def __init__(self) -> None:
         settings = get_settings()
@@ -92,6 +135,7 @@ class Tier0DocumentRouter:
         relative_margin: float = 0.20,
         max_per_lane: int = 6,
         cliff_min_gap: float = 0.08,
+        title_terms_by_lane: dict[str, tuple[str, ...]] | None = None,
     ) -> tuple[dict[str, list[DocumentRoute]], dict[str, object]]:
         """Route each semantic lane fairly across every selected corpus."""
 
@@ -164,18 +208,29 @@ class Tier0DocumentRouter:
 
         routes: dict[str, list[DocumentRoute]] = {}
         candidate_counts: dict[str, int] = {}
+        title_gates: dict[str, dict[str, object]] = {}
         for lane_id, values in candidates.items():
             deduped: dict[tuple[str, str], DocumentRoute] = {}
             for value in sorted(values, key=lambda item: -item.score):
                 deduped.setdefault((value.corpus_id, value.doc_id), value)
             candidate_counts[lane_id] = len(deduped)
-            routes[lane_id] = select_adaptive_routes(
+            selected = select_adaptive_routes(
                 list(deduped.values()),
                 min_score=min_score,
                 relative_margin=relative_margin,
                 max_keep=max_per_lane,
                 cliff_min_gap=cliff_min_gap,
             )
+            title_terms = tuple((title_terms_by_lane or {}).get(lane_id) or ())
+            gated = select_title_aligned_routes(selected, title_terms)
+            routes[lane_id] = gated
+            if title_terms:
+                title_gates[lane_id] = {
+                    "terms": list(title_terms),
+                    "before": len(selected),
+                    "after": len(gated),
+                    "applied": len(gated) < len(selected),
+                }
         diagnostics["routes"] = {
             lane_id: [
                 {
@@ -196,6 +251,7 @@ class Tier0DocumentRouter:
             }
         )
         diagnostics["candidate_counts"] = candidate_counts
+        diagnostics["title_gates"] = title_gates
         diagnostics["selection"] = {
             "per_lane_per_corpus_fetch": int(per_lane_per_corpus),
             "max_per_lane": int(max_per_lane),

@@ -374,6 +374,38 @@ def _lexical_recall_phrases(
     return tuple(dict.fromkeys(phrase for phrase in phrases if phrase))
 
 
+def answer_object_lane_ids(plan: QueryPlanV2) -> tuple[str, ...]:
+    """Return core lanes that describe the objects the answer must enumerate."""
+
+    if plan.answer_shape != "enumeration":
+        return ()
+    return tuple(
+        lane.lane_id
+        for lane in plan.lanes
+        if lane.role == "core"
+        and clean_text(lane.phrase or "").strip() in _ANSWER_OBJECT_SUPPORT
+    )
+
+
+def answer_object_title_terms(plan: QueryPlanV2) -> dict[str, tuple[str, ...]]:
+    """Expose conservative title terms for top-down answer-object routing."""
+
+    answer_lanes = set(answer_object_lane_ids(plan))
+    return {
+        lane.lane_id: tuple(
+            dict.fromkeys(
+                term
+                for term in re.findall(
+                    r"[a-z0-9]+", (lane.phrase or lane.lane_id).lower()
+                )
+                if len(term) >= 3
+            )
+        )
+        for lane in plan.lanes
+        if lane.lane_id in answer_lanes
+    }
+
+
 def _complexity(
     query: str, lane_count: int, operators: tuple[str, ...]
 ) -> QueryComplexity:
@@ -565,12 +597,16 @@ def build_query_plan_v2(
         lane_id = _slug(concept) or f"concept_{index + 1}"
         support_phrases = _lexical_recall_phrases(concept, groups)
         recall_query = " ".join(support_phrases)
+        is_answer_object = clean_text(concept).strip() in _ANSWER_OBJECT_SUPPORT
         lanes.append(
             QueryLane(
                 lane_id=lane_id,
                 role="core",
                 query=recall_query,
-                dense_text=concept,
+                # Bare answer nouns are weak document-routing vectors. Add
+                # the requested object shape so titles/authors/list documents
+                # separate from generic prose that merely mentions the noun.
+                dense_text=recall_query if is_answer_object else concept,
                 lexical_terms=tuple(lexical_terms(concept)[:12]),
                 phrase=concept,
                 support_phrases=support_phrases,

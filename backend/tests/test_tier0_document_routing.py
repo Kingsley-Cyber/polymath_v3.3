@@ -9,7 +9,31 @@ from services.retriever.tier0_router import (
     DocumentRoute,
     Tier0DocumentRouter,
     select_adaptive_routes,
+    select_title_aligned_routes,
 )
+
+
+def test_title_aligned_answer_object_routes_gate_generic_semantic_neighbors():
+    routes = [
+        DocumentRoute("books", "c", "book-a", 0.61, "Books that made me rich"),
+        DocumentRoute("books", "c", "book-b", 0.55, "Unpopular book tier list"),
+        DocumentRoute("books", "c", "generic", 0.54, "AI tools tier list"),
+    ]
+
+    selected = select_title_aligned_routes(routes, ("books",))
+
+    assert [route.doc_id for route in selected] == ["book-a", "book-b"]
+
+
+def test_title_aligned_routes_fail_open_when_title_match_is_not_competitive():
+    routes = [
+        DocumentRoute("books", "c", "semantic", 0.80, "Founder interview"),
+        DocumentRoute("books", "c", "book", 0.55, "Book notes"),
+    ]
+
+    selected = select_title_aligned_routes(routes, ("books",))
+
+    assert [route.doc_id for route in selected] == ["semantic", "book"]
 
 
 class _RouteClient:
@@ -123,7 +147,7 @@ async def test_all_three_layers_descend_from_document_routes(monkeypatch, tier):
     async def fake_embed(texts, config):
         return [[float(index + 1)] for index, _ in enumerate(texts)]
 
-    async def fake_route(vectors, corpus_ids):
+    async def fake_route(vectors, corpus_ids, **kwargs):
         return (
             {
                 "books": [DocumentRoute("books", "c1", "doc-books", 0.8)],

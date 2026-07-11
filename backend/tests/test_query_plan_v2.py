@@ -1,4 +1,5 @@
 from services.retriever.query_plan import (
+    answer_object_title_terms,
     build_query_plan_v2,
     contextualize_followup_query,
     query_plan_curation_query,
@@ -176,6 +177,11 @@ def test_answer_object_books_survives_as_required_concept():
     )
     assert "help" not in plan.concepts
     assert plan.answer_shape == "enumeration"
+    books_lane = next(lane for lane in plan.lanes if lane.lane_id == "books")
+    assert books_lane.dense_text == (
+        "books book titles authors book recommendations lessons principles"
+    )
+    assert answer_object_title_terms(plan) == {"books": ("books",)}
 
 
 def test_terse_followup_uses_previous_user_subject_without_model_call():
