@@ -45,6 +45,8 @@ _ASSESSMENT_MARKERS: tuple[str, ...] = (
     "assess my understanding",
     "test my knowledge",
 )
+
+
 class QueryNeed(str, Enum):
     BROAD = "broad"
     BALANCED = "balanced"
@@ -121,6 +123,36 @@ def infer_retrieval_intent(query: str) -> RetrievalIntent:
         need=need,
         broad_score=broad_score,
         specific_score=specific_score,
+        child_ratio=child_ratio,
+        summary_ratio=summary_ratio,
+    )
+
+
+def promote_compositional_intent(
+    intent: RetrievalIntent,
+    *,
+    complexity: str,
+    required_lane_count: int,
+) -> RetrievalIntent:
+    """Make independent retrieval obligations broad even when wording is local.
+
+    A question containing several ``how`` clauses is lexically classified as
+    specific, but each clause needs its own evidence neighborhood. QueryPlanV2
+    has already established that structure, so it is the stronger signal for
+    final breadth and hierarchy budgets.
+    """
+
+    if (
+        required_lane_count <= 1
+        or complexity not in {"compositional", "comparative", "dependent_multi_hop"}
+        or intent.need == QueryNeed.BROAD
+    ):
+        return intent
+    child_ratio, summary_ratio = _RATIOS[QueryNeed.BROAD]
+    return RetrievalIntent(
+        need=QueryNeed.BROAD,
+        broad_score=max(intent.broad_score, intent.specific_score + 2),
+        specific_score=intent.specific_score,
         child_ratio=child_ratio,
         summary_ratio=summary_ratio,
     )

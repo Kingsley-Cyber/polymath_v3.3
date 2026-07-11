@@ -72,11 +72,13 @@ from services.retriever.query_plan import (
     query_plan_execution_lanes,
 )
 from services.retriever.tier0_router import tier0_document_router
+from services.retriever.summary_tree_navigator import summary_tree_navigator
 from services.retriever.intent_policy import (
     FunnelLimits,
     QueryNeed,
     adaptive_funnel_limits,
     infer_retrieval_intent,
+    promote_compositional_intent,
 )
 from services.retriever.lexical import _terms, lexical_retriever
 from services.retriever.merge import merge_pools
@@ -109,23 +111,48 @@ def _planned_rerank_candidate_limit(
 
     configured = max(1, int(configured_limit))
     final_k = max(1, int(final_top_k))
+    obligation_count = max(1, len([probe for probe in plan.probes if probe.required]))
     if tier == RetrievalTier.qdrant_mongo_graph:
-        desired = (
-            20 if plan.complexity in {"comparative", "dependent_multi_hop"} else 16
-        )
-        if plan.answer_shape == "enumeration":
-            desired = 12
-        if intent.need == QueryNeed.SPECIFIC and plan.complexity == "simple":
-            desired = 12
-        ceiling = 24
+        desired = 72 + min(16, obligation_count * 4)
+        ceiling = 96
+    elif tier == RetrievalTier.qdrant_mongo:
+        desired = 52 + min(16, obligation_count * 4)
+        ceiling = 72
     else:
-        desired = 12 if intent.need == QueryNeed.BROAD else 8
-        if plan.complexity in {"comparative", "dependent_multi_hop"}:
-            desired = 16
-        elif plan.complexity == "compositional":
-            desired = max(desired, 12)
-        ceiling = 16
+        desired = 36 + min(12, obligation_count * 4)
+        ceiling = 56
+    if intent.need == QueryNeed.SPECIFIC and plan.complexity == "simple":
+        desired = max(final_k * 3, desired - 16)
     return max(final_k, min(configured, desired, ceiling))
+
+
+def _planned_final_result_limit(
+    *,
+    plan: QueryPlanV2,
+    intent: Any,
+    tier: RetrievalTier,
+    requested_limit: int,
+    routed_document_count: int,
+) -> int:
+    """Size final context from answer obligations and routed breadth."""
+
+    requested = max(1, int(requested_limit))
+    required_probes = max(1, len([probe for probe in plan.probes if probe.required]))
+    if plan.complexity == "simple" and intent.need == QueryNeed.SPECIFIC:
+        floor = 8
+    else:
+        floor = 8 + min(8, (required_probes - 1) * 3)
+    if intent.need == QueryNeed.BROAD:
+        floor = max(floor, 12)
+    floor = max(floor, min(6, max(0, int(routed_document_count))))
+    ceiling = (
+        24
+        if tier == RetrievalTier.qdrant_mongo_graph
+        else 20
+        if tier == RetrievalTier.qdrant_mongo
+        else 16
+    )
+    return min(ceiling, max(requested, floor))
 
 
 def _filter_fast_grounded_candidates(
@@ -343,9 +370,9 @@ def _rerank_enabled_for_tier(
     requested: bool,
     tier: RetrievalTier,
 ) -> bool:
-    """Fast Search is a storage contract, not a slower profile alias."""
+    """Reranking is a relevance policy independent of the storage tier."""
 
-    return bool(requested and tier != RetrievalTier.qdrant_only)
+    return bool(requested)
 
 
 def _retrieval_store_contract(tier: RetrievalTier) -> dict[str, Any]:
@@ -362,6 +389,7 @@ def _retrieval_store_contract(tier: RetrievalTier) -> dict[str, Any]:
             "mongo_hydration": False,
             "neo4j_facts": False,
             "neo4j_expansion": False,
+            "cross_encoder_rerank": True,
             "description": (
                 "Qdrant dense vector search plus in-collection sparse BM25/RRF "
                 "when available, over child chunks and parent summaries. Mongo "
@@ -379,6 +407,7 @@ def _retrieval_store_contract(tier: RetrievalTier) -> dict[str, Any]:
             "mongo_hydration": True,
             "neo4j_facts": False,
             "neo4j_expansion": False,
+            "cross_encoder_rerank": True,
             "description": (
                 "Qdrant vector recall plus Mongo lexical/document-anchor recall "
                 "and parent hydration. Neo4j is disabled."
@@ -394,6 +423,7 @@ def _retrieval_store_contract(tier: RetrievalTier) -> dict[str, Any]:
         "mongo_hydration": True,
         "neo4j_facts": True,
         "neo4j_expansion": True,
+        "cross_encoder_rerank": True,
         "description": (
             "Highest quality: Hybrid Search plus Neo4j fact seeds, mention/call "
             "walks, bridge expansion, and graph-aware ranking signals."
@@ -1258,6 +1288,13 @@ class RetrieverOrchestrator:
 
         curation_query = query_plan_curation_query(plan)
         intent = infer_retrieval_intent(plan.standalone_query)
+        intent = promote_compositional_intent(
+            intent,
+            complexity=plan.complexity,
+            required_lane_count=sum(
+                1 for probe in plan.probes if bool(getattr(probe, "required", False))
+            ),
+        )
 
         if (
             retrieval_tier == RetrievalTier.qdrant_only
@@ -1283,9 +1320,7 @@ class RetrieverOrchestrator:
                 retrieval_tier=retrieval_tier,
                 collections=collections,
                 retrieval_k=retrieval_k,
-                rerank_enabled=False
-                if retrieval_tier == RetrievalTier.qdrant_only
-                else rerank_enabled,
+                rerank_enabled=rerank_enabled,
                 ranking_query=curation_query,
                 top_k_summary=top_k_summary,
                 rerank_top_n=rerank_top_n,
@@ -1309,8 +1344,11 @@ class RetrieverOrchestrator:
                 9.5 if retrieval_tier == RetrievalTier.qdrant_mongo_graph else 7.5,
             )
         )
+        quality_first = bool(getattr(settings, "QUERY_PLAN_QUALITY_FIRST", True))
 
         def _stage_timeout(cap: float, *, reserve: float = 0.0) -> float:
+            if quality_first:
+                return max(0.05, float(cap))
             remaining = total_deadline - (perf_counter() - started) - reserve
             return max(0.05, min(float(cap), remaining))
 
@@ -1359,9 +1397,7 @@ class RetrieverOrchestrator:
         if not lanes:
             lanes = [plan.lanes[0]]
         required_lane_ids = [
-            lane.lane_id
-            for lane in lanes
-            if lane.role == "core" and lane.required
+            lane.lane_id for lane in lanes if lane.role == "core" and lane.required
         ]
         answer_lane_ids = list(answer_object_lane_ids(plan))
         repair_diagnostics: dict[str, Any] = {
@@ -1436,19 +1472,6 @@ class RetrieverOrchestrator:
                     ),
                     timeout=_stage_timeout(1.25, reserve=1.0),
                 )
-                if effective_tier == RetrievalTier.qdrant_only and answer_lane_ids:
-                    for lane_id in answer_lane_ids:
-                        routes = list(document_routes.get(lane_id) or [])
-                        if len(routes) > 1:
-                            document_routes[lane_id] = routes[:1]
-                    document_routing_diagnostics["fast_answer_route_cap"] = 1
-                    document_routing_diagnostics["routed_doc_count"] = len(
-                        {
-                            (route.corpus_id, route.doc_id)
-                            for routes in document_routes.values()
-                            for route in routes
-                        }
-                    )
             except Exception as exc:
                 failures.append(
                     {
@@ -1463,6 +1486,54 @@ class RetrieverOrchestrator:
                     "reason": f"{type(exc).__name__}: {exc}"[:240],
                 }
         timings["document_routing"] = perf_counter() - routing_started
+
+        tree_routing_started = perf_counter()
+        summary_tree_routes: dict[str, list[Any]] = {}
+        summary_tree_diagnostics: dict[str, Any] = {
+            "enabled": False,
+            "reason": (
+                "not_available_in_qdrant_only_store_contract"
+                if effective_tier == RetrievalTier.qdrant_only
+                else "no_document_routes"
+            ),
+        }
+        if document_routes and effective_tier != RetrievalTier.qdrant_only:
+            try:
+                summary_tree_routes, summary_tree_diagnostics = await asyncio.wait_for(
+                    summary_tree_navigator.navigate(
+                        lane_vectors={
+                            lane.lane_id: vectors_by_lane_id.get(lane.lane_id)
+                            for lane in lanes
+                            if lane.role == "core"
+                        },
+                        document_routes=document_routes,
+                        embedding_config=embedding_config,
+                    ),
+                    timeout=_stage_timeout(
+                        float(
+                            getattr(
+                                settings,
+                                "QUERY_PLAN_TREE_ROUTING_DEADLINE_SECONDS",
+                                6.0,
+                            )
+                        ),
+                        reserve=1.0,
+                    ),
+                )
+            except Exception as exc:
+                failures.append(
+                    {
+                        "lane_id": "summary_tree_routing",
+                        "retriever": "summary_tree",
+                        "error": f"{type(exc).__name__}: {exc}"[:240],
+                    }
+                )
+                summary_tree_diagnostics = {
+                    "enabled": True,
+                    "status": "degraded",
+                    "reason": f"{type(exc).__name__}: {exc}"[:240],
+                }
+        timings["summary_tree_routing"] = perf_counter() - tree_routing_started
 
         def _annotate_document_routes(
             chunks: list[SourceChunk], lane_id: str
@@ -1497,20 +1568,19 @@ class RetrieverOrchestrator:
                 chunk.provenance = provenance
             return chunks
 
-        requested_child_top_k = max(8, min(int(retrieval_k or 40), 40))
-        requested_summary_top_k = max(1, min(int(top_k_summary or 12), 20))
+        requested_child_top_k = max(85, min(int(retrieval_k or 85), 128))
+        requested_summary_top_k = max(20, min(int(top_k_summary or 24), 48))
         funnel_limits = adaptive_funnel_limits(
             intent,
             child_base=requested_child_top_k,
             summary_base=requested_summary_top_k,
         )
-        child_top_k = max(8, min(funnel_limits.child_top_k, 40))
-        summary_top_k = max(0, min(funnel_limits.summary_top_k, 20))
-        lexical_top_k = max(4, min(child_top_k // 2, 12))
+        child_top_k = max(32, min(funnel_limits.child_top_k, 120))
+        summary_top_k = max(12, min(funnel_limits.summary_top_k, 48))
+        lexical_top_k = max(12, min(child_top_k // 2, 32))
         if effective_tier == RetrievalTier.qdrant_only:
-            # Fast remains Qdrant-only, but still descends through a small
-            # parent-summary set before selecting children.
-            summary_top_k = min(4, max(2, summary_top_k))
+            # Focused retrieval remains Qdrant-only. It still uses the full
+            # document/summary hierarchy and Qdrant dense+sparse fusion.
             lexical_top_k = 0
 
         async def _lane_pools(lane, vector) -> list[PlannedPool]:
@@ -1521,6 +1591,18 @@ class RetrieverOrchestrator:
                 else None
             )
             is_routed_core = bool(routed_doc_ids)
+            tree_routes_for_lane = list(summary_tree_routes.get(lane.lane_id) or [])
+            tree_parent_ids_by_doc = {
+                str(route.doc_id): list(route.parent_ids)
+                for route in tree_routes_for_lane
+            }
+            tree_parent_ids = list(
+                dict.fromkeys(
+                    parent_id
+                    for route in tree_routes_for_lane
+                    for parent_id in route.parent_ids
+                )
+            )
             lane_summary_top_k = summary_top_k if lane.role == "core" else 0
             lane_lexical_top_k = (
                 lexical_top_k if lane.role == "core" else min(2, lexical_top_k)
@@ -1528,16 +1610,14 @@ class RetrieverOrchestrator:
             lane_child_top_k = (
                 child_top_k if lane.role == "core" else min(6, child_top_k)
             )
-            fair_answer_documents = bool(
-                lane.lane_id in answer_lane_ids
-                and routed_doc_ids
-                and len(routed_doc_ids) > 1
+            fair_routed_documents = bool(
+                lane.role == "core" and routed_doc_ids and len(routed_doc_ids) > 1
             )
 
             async def _summary_candidates() -> list[SourceChunk]:
                 if lane_summary_top_k <= 0 or vector is None:
                     return []
-                if not fair_answer_documents:
+                if not fair_routed_documents:
                     return await funnel_a.search(
                         vector,
                         corpus_ids,
@@ -1546,6 +1626,7 @@ class RetrieverOrchestrator:
                         fair_mode=True,
                         query_text=lane.query,
                         doc_ids=routed_doc_ids,
+                        parent_ids=tree_parent_ids or None,
                     )
                 per_document = max(
                     2,
@@ -1562,6 +1643,7 @@ class RetrieverOrchestrator:
                             fair_mode=True,
                             query_text=lane.query,
                             doc_ids=[doc_id],
+                            parent_ids=tree_parent_ids_by_doc.get(str(doc_id)) or None,
                         )
                         for doc_id in routed_doc_ids
                     ),
@@ -1584,7 +1666,7 @@ class RetrieverOrchestrator:
             async def _lexical_candidates() -> list[SourceChunk]:
                 if lane_lexical_top_k <= 0:
                     return []
-                if not fair_answer_documents:
+                if not fair_routed_documents:
                     return await lexical_retriever.search(
                         lane.query,
                         corpus_ids,
@@ -1687,7 +1769,7 @@ class RetrieverOrchestrator:
             child_raw: list[SourceChunk] | BaseException = []
             if vector is not None:
                 try:
-                    if fair_answer_documents:
+                    if fair_routed_documents:
                         per_document = max(
                             4,
                             (lane_child_top_k + len(routed_doc_ids) - 1)
@@ -1709,6 +1791,7 @@ class RetrieverOrchestrator:
                                             if str(chunk.doc_id or "") == str(doc_id)
                                             and str(chunk.parent_id or "").strip()
                                         ]
+                                        or tree_parent_ids_by_doc.get(str(doc_id))
                                         or None,
                                     )
                                     for doc_id in routed_doc_ids
@@ -1753,7 +1836,9 @@ class RetrieverOrchestrator:
                                 query_text=lane.query,
                                 doc_ids=routed_doc_ids,
                                 parent_ids=(
-                                    routed_parent_ids if is_routed_core else None
+                                    (routed_parent_ids or tree_parent_ids)
+                                    if is_routed_core
+                                    else None
                                 ),
                             ),
                             timeout=_stage_timeout(
@@ -1815,9 +1900,14 @@ class RetrieverOrchestrator:
                     "query": lane.query,
                     "routed_doc_ids": routed_doc_ids or [],
                     "routed_parent_ids": routed_parent_ids,
+                    "tree_parent_ids": tree_parent_ids,
                     "descent": (
-                        "document_parent_child_fair"
-                        if fair_answer_documents and routed_parent_ids
+                        "document_tree_parent_child_fair"
+                        if fair_routed_documents and tree_parent_ids
+                        else "document_parent_child_fair"
+                        if fair_routed_documents and routed_parent_ids
+                        else "document_tree_parent_child"
+                        if is_routed_core and tree_parent_ids
                         else "document_parent_child"
                         if is_routed_core and routed_parent_ids
                         else "document_child_fallback"
@@ -1837,20 +1927,38 @@ class RetrieverOrchestrator:
         pools = [pool for group in lane_pool_groups for pool in group]
         timings["candidate_generation"] = perf_counter() - candidate_started
 
+        routed_document_count = int(
+            document_routing_diagnostics.get("routed_doc_count") or 0
+        )
+        planned_final_top_k = _planned_final_result_limit(
+            plan=plan,
+            intent=intent,
+            tier=effective_tier,
+            requested_limit=int(final_top_k or settings.DEFAULT_RETRIEVAL_K),
+            routed_document_count=routed_document_count,
+        )
         rerank_cap = (
-            int(getattr(settings, "QUERY_PLAN_GRAPH_RERANK_CANDIDATES", 20))
+            int(getattr(settings, "QUERY_PLAN_GRAPH_RERANK_CANDIDATES", 80))
             if effective_tier == RetrievalTier.qdrant_mongo_graph
-            else int(getattr(settings, "QUERY_PLAN_HYBRID_RERANK_CANDIDATES", 16))
+            else int(getattr(settings, "QUERY_PLAN_HYBRID_RERANK_CANDIDATES", 64))
+            if effective_tier == RetrievalTier.qdrant_mongo
+            else int(getattr(settings, "QUERY_PLAN_FAST_RERANK_CANDIDATES", 48))
         )
         rerank_cap = _planned_rerank_candidate_limit(
             plan=plan,
             intent=intent,
             tier=effective_tier,
             configured_limit=rerank_cap,
-            final_top_k=int(final_top_k or settings.DEFAULT_RETRIEVAL_K),
+            final_top_k=planned_final_top_k,
         )
         if rerank_top_n is not None:
-            rerank_cap = min(rerank_cap, max(1, int(rerank_top_n)))
+            if quality_first:
+                rerank_cap = max(
+                    rerank_cap,
+                    min(128, max(1, int(rerank_top_n))),
+                )
+            else:
+                rerank_cap = min(rerank_cap, max(1, int(rerank_top_n)))
         fused, fusion_diagnostics = fuse_planned_pools(
             pools,
             max_candidates=rerank_cap,
@@ -2002,7 +2110,7 @@ class RetrieverOrchestrator:
         if (
             missing_before_repair
             and int(plan.max_repair_rounds) > 0
-            and _budget_remaining() > 0.4
+            and (quality_first or _budget_remaining() > 0.4)
         ):
             repair_started = perf_counter()
             repair_diagnostics["attempted_rounds"] = 1
@@ -2137,16 +2245,21 @@ class RetrieverOrchestrator:
                 )
         fused, duplicate_count = dedupe_cross_corpus_evidence(fused)
         pre_rerank_document_drops = 0
+        pre_rerank_max_per_document = (
+            6 if plan.complexity in {"compositional", "dependent_multi_hop"} else 4
+        )
         if intent.need == QueryNeed.BROAD:
             fused, pre_rerank_document_drops = limit_candidates_per_document(
                 fused,
                 max_candidates=rerank_cap,
-                max_per_document=2,
+                max_per_document=pre_rerank_max_per_document,
             )
         fused = fused[:rerank_cap]
         fusion_diagnostics["pre_rerank_document_cap"] = {
             "enabled": intent.need == QueryNeed.BROAD,
-            "max_per_document": 2 if intent.need == QueryNeed.BROAD else None,
+            "max_per_document": (
+                pre_rerank_max_per_document if intent.need == QueryNeed.BROAD else None
+            ),
             "dropped": pre_rerank_document_drops,
             "selected_candidates": len(fused),
         }
@@ -2176,7 +2289,7 @@ class RetrieverOrchestrator:
                 )
         fused, hydrated_duplicate_count = dedupe_cross_corpus_evidence(fused)
         reranker_diagnostics: dict[str, Any]
-        if rerank_enabled and effective_tier != RetrievalTier.qdrant_only and fused:
+        if rerank_enabled and fused:
             try:
                 ranked = await asyncio.wait_for(
                     reranker_service.rerank(curation_query, fused),
@@ -2223,14 +2336,14 @@ class RetrieverOrchestrator:
         )
         diversity = select_with_diversity(
             ranked,
-            final_top_k=int(final_top_k or settings.DEFAULT_RETRIEVAL_K),
+            final_top_k=planned_final_top_k,
             intent=intent,
             tier=effective_tier,
             multi_corpus=bool(corpus_ids and len(corpus_ids) > 1),
             selected_corpus_ids=corpus_ids or [],
             query=plan.standalone_query,
         )
-        final_limit = int(final_top_k or settings.DEFAULT_RETRIEVAL_K)
+        final_limit = planned_final_top_k
         preferred_candidates = diversity.candidates
         enumeration_diagnostics: dict[str, object] = {"applied": False}
         if answer_lane_ids:
@@ -2244,7 +2357,7 @@ class RetrieverOrchestrator:
                 required_lane_ids=required_lane_ids,
                 max_candidates=final_limit,
             )
-        route_count = int(document_routing_diagnostics.get("routed_doc_count") or 0)
+        route_count = routed_document_count
         if answer_lane_ids or intent.need == QueryNeed.BROAD:
             routed_document_budget = min(route_count, max(2, final_limit // 2))
         elif intent.need == QueryNeed.SPECIFIC:
@@ -2258,9 +2371,7 @@ class RetrieverOrchestrator:
             corpus_ids=corpus_ids,
             max_candidates=final_limit,
             max_per_document=(
-                1
-                if intent.need == QueryNeed.BROAD and not answer_lane_ids
-                else None
+                1 if intent.need == QueryNeed.BROAD and not answer_lane_ids else None
             ),
             routed_document_budget=routed_document_budget,
             preferred_route_lane_ids=answer_lane_ids,
@@ -2323,6 +2434,31 @@ class RetrieverOrchestrator:
             if required_lane_ids
             else 1.0
         )
+        selection_diagnostics = dict(diversity.diagnostics or {})
+        scoring_sufficiency = selection_diagnostics.get("sufficiency")
+        required_lane_atoms = [f"concept:{lane_id}" for lane_id in required_lane_ids]
+        supported_lane_set = set(supported_lane_ids)
+        covered_lane_atoms = [
+            f"concept:{lane_id}"
+            for lane_id in required_lane_ids
+            if lane_id in supported_lane_set
+        ]
+        missing_lane_atoms = [
+            f"concept:{lane_id}"
+            for lane_id in required_lane_ids
+            if lane_id not in supported_lane_set
+        ]
+        if isinstance(scoring_sufficiency, dict):
+            selection_diagnostics["scoring_sufficiency"] = scoring_sufficiency
+        selection_diagnostics["sufficiency"] = {
+            "required_atoms": required_lane_atoms,
+            "covered_required_atoms": covered_lane_atoms,
+            "missing_atoms": missing_lane_atoms,
+            "missing_critical_atoms": missing_lane_atoms,
+            "required_coverage": round(required_lane_coverage, 4),
+            "answerable": bool(finalists) and required_lane_coverage >= 1.0,
+            "source": "query_plan_required_lanes",
+        }
         corpus_distribution: dict[str, int] = {}
         document_distribution: dict[str, int] = {}
         predicates_used: set[str] = set()
@@ -2424,7 +2560,11 @@ class RetrieverOrchestrator:
             "limits": {
                 "child_top_k": child_top_k,
                 "summary_top_k": summary_top_k,
-                "final_top_k": int(final_top_k or settings.DEFAULT_RETRIEVAL_K),
+                "requested_final_top_k": int(
+                    final_top_k or settings.DEFAULT_RETRIEVAL_K
+                ),
+                "final_top_k": planned_final_top_k,
+                "rerank_candidates": rerank_cap,
                 "rerank_enabled": bool(rerank_enabled),
                 "similarity_threshold": similarity_threshold,
                 "neo4j_expansion_cap": neo4j_expansion_cap,
@@ -2442,7 +2582,7 @@ class RetrieverOrchestrator:
                 "document_lanes": document_lane_duplicate_count,
             },
             "reranker": reranker_diagnostics,
-            "selection": diversity.diagnostics or {},
+            "selection": selection_diagnostics,
             "enumeration_selection": enumeration_diagnostics,
             "grounding_filter": grounding_filter_diagnostics,
             "reservations": reservation_diagnostics,
@@ -2468,6 +2608,7 @@ class RetrieverOrchestrator:
             },
             "final_source_tiers": final_source_tiers,
             "document_routing": document_routing_diagnostics,
+            "summary_tree_routing": summary_tree_diagnostics,
             "unique_docs_final": len(document_distribution),
             "max_doc_share_final": max_doc_share_final,
             "graph_evidence": {
@@ -2482,6 +2623,7 @@ class RetrieverOrchestrator:
                 "predicates_used": sorted(predicates_used),
             },
             "timings_s": {key: round(value, 3) for key, value in timings.items()},
+            "quality_first": quality_first,
             "total_deadline_s": round(total_deadline, 3),
             "budget_remaining_s": round(_budget_remaining(), 3),
             "total_s": round(total_s, 3),

@@ -20,7 +20,9 @@ class PlannedPool:
 
 
 LANE_GROUNDING_THRESHOLD = 0.75
+DOCUMENT_ROUTE_GROUNDING_THRESHOLD = 0.30
 LANE_RESERVATION_MIN_SCORE_RATIO = 0.25
+ROUTED_LANE_RESERVATION_MIN_SCORE_RATIO = 0.08
 _OPERATIONAL_ARTIFACT_RE = re.compile(
     r"^(?:ocr-(?:completion|marker-append)|epub-backfill-status)-report(?:\.[a-z0-9]+)?$",
     re.IGNORECASE,
@@ -130,6 +132,25 @@ def planned_document_route_score(chunk: SourceChunk, lane_id: str) -> float:
         return 0.0
 
 
+def planned_lane_supported(chunk: SourceChunk, lane_id: str) -> bool:
+    """Accept literal grounding or evidence descended from a semantic route.
+
+    Route support is deliberately conjunctive: a chunk must have been
+    retrieved for the lane and must belong to a document whose source profile
+    cleared the semantic routing floor. A routed profile alone is never final
+    evidence; the candidate still has to be a descended parent/child passage.
+    """
+
+    if planned_lane_grounding(chunk, lane_id) >= LANE_GROUNDING_THRESHOLD:
+        return True
+    planned_lanes = set((chunk.metadata or {}).get("planned_lanes") or [])
+    return bool(
+        lane_id in planned_lanes
+        and planned_document_route_score(chunk, lane_id)
+        >= DOCUMENT_ROUTE_GROUNDING_THRESHOLD
+    )
+
+
 def annotate_planned_lane_grounding(
     chunks: list[SourceChunk],
     *,
@@ -169,10 +190,7 @@ def grounded_planned_lane_ids(
     return sorted(
         lane_id
         for lane_id in dict.fromkeys(required_lane_ids)
-        if any(
-            planned_lane_grounding(chunk, lane_id) >= LANE_GROUNDING_THRESHOLD
-            for chunk in chunks
-        )
+        if any(planned_lane_supported(chunk, lane_id) for chunk in chunks)
     )
 
 
@@ -214,10 +232,7 @@ def filter_grounded_planned_candidates(
     filtered = [
         chunk
         for chunk in chunks
-        if any(
-            planned_lane_grounding(chunk, lane_id) >= LANE_GROUNDING_THRESHOLD
-            for lane_id in grounded_lane_ids
-        )
+        if any(planned_lane_supported(chunk, lane_id) for lane_id in grounded_lane_ids)
     ]
     if not filtered:
         diagnostics["reason"] = "empty_filter_guard"
@@ -452,17 +467,24 @@ def reserve_planned_finalists(
     top_score = max((float(chunk.score or 0.0) for chunk in ranked), default=0.0)
 
     def reservation_relevant(chunk: SourceChunk, lane_id: str) -> bool:
-        if planned_lane_grounding(chunk, lane_id) < LANE_GROUNDING_THRESHOLD:
+        if not planned_lane_supported(chunk, lane_id):
             return False
         score = float(chunk.score or 0.0)
         if 0.0 <= score <= top_score <= 1.0 and top_score > 0.0:
-            return score >= max(0.05, top_score * LANE_RESERVATION_MIN_SCORE_RATIO)
+            ratio = (
+                ROUTED_LANE_RESERVATION_MIN_SCORE_RATIO
+                if planned_document_route_score(chunk, lane_id)
+                >= DOCUMENT_ROUTE_GROUNDING_THRESHOLD
+                else LANE_RESERVATION_MIN_SCORE_RATIO
+            )
+            return score >= max(0.05, top_score * ratio)
         return True
 
     selected: list[str] = []
     selected_set: set[str] = set()
     protected_keys: set[str] = set()
     lane_reservations: dict[str, str] = {}
+    lane_candidate_diagnostics: dict[str, dict[str, object]] = {}
     corpus_reservations: dict[str, str] = {}
     routed_document_reservations: dict[str, str] = {}
     document_counts: dict[str, int] = {}
@@ -496,21 +518,66 @@ def reserve_planned_finalists(
             (
                 candidate_key
                 for candidate_key in selected
-                if planned_lane_grounding(by_key[candidate_key], lane_id)
-                >= LANE_GROUNDING_THRESHOLD
+                if planned_lane_supported(by_key[candidate_key], lane_id)
             ),
             None,
         )
-        candidates = [
+        supported_candidates = [
             candidate_key
             for candidate_key in ranked_keys
             if lane_id
             in set((by_key[candidate_key].metadata or {}).get("planned_lanes") or [])
-            and reservation_relevant(by_key[candidate_key], lane_id)
+            and planned_lane_supported(by_key[candidate_key], lane_id)
         ]
+        candidates = [
+            candidate_key
+            for candidate_key in supported_candidates
+            if reservation_relevant(by_key[candidate_key], lane_id)
+        ]
+        best_supported = max(
+            supported_candidates,
+            key=lambda candidate_key: (
+                planned_document_route_score(by_key[candidate_key], lane_id),
+                planned_lane_grounding(by_key[candidate_key], lane_id),
+                float(by_key[candidate_key].score or 0.0),
+                -ranked_keys.index(candidate_key),
+            ),
+            default=None,
+        )
+        best_chunk = by_key.get(best_supported) if best_supported else None
+        best_score = float(best_chunk.score or 0.0) if best_chunk else 0.0
+        max_supported_score = max(
+            (float(by_key[key].score or 0.0) for key in supported_candidates),
+            default=0.0,
+        )
+        lane_candidate_diagnostics[lane_id] = {
+            "supported_candidates": len(supported_candidates),
+            "score_eligible_candidates": len(candidates),
+            "best_supported_score": round(best_score, 4),
+            "best_supported_score_ratio": round(best_score / top_score, 4)
+            if top_score > 0.0
+            else 0.0,
+            "max_supported_score": round(max_supported_score, 4),
+            "max_supported_score_ratio": round(max_supported_score / top_score, 4)
+            if top_score > 0.0
+            else 0.0,
+            "best_document_route_score": round(
+                planned_document_route_score(best_chunk, lane_id), 4
+            )
+            if best_chunk
+            else 0.0,
+            "best_literal_grounding": round(
+                planned_lane_grounding(best_chunk, lane_id), 4
+            )
+            if best_chunk
+            else 0.0,
+        }
         key = existing_key or max(
             candidates,
             key=lambda candidate_key: (
+                planned_lane_grounding(by_key[candidate_key], lane_id)
+                >= LANE_GROUNDING_THRESHOLD,
+                float(by_key[candidate_key].score or 0.0),
                 planned_document_route_score(by_key[candidate_key], lane_id),
                 planned_lane_grounding(by_key[candidate_key], lane_id),
                 _has_lane_retriever(by_key[candidate_key], lane_id, "lexical"),
@@ -629,6 +696,7 @@ def reserve_planned_finalists(
     return output, {
         "required_lane_ids": list(dict.fromkeys(required_lane_ids)),
         "lane_reservations": lane_reservations,
+        "lane_candidates": lane_candidate_diagnostics,
         "corpus_reservations": corpus_reservations,
         "routed_document_reservations": routed_document_reservations,
         "routed_documents_selected": routed_documents_selected,
@@ -694,10 +762,7 @@ def prioritize_enumeration_candidates(
     for chunk in ranked:
         if answer_count >= answer_budget:
             break
-        if not any(
-            planned_lane_grounding(chunk, lane_id) >= LANE_GROUNDING_THRESHOLD
-            for lane_id in answer_lanes
-        ):
+        if not any(planned_lane_supported(chunk, lane_id) for lane_id in answer_lanes):
             continue
         score = float(chunk.score or 0.0)
         if 0.0 < top_score <= 1.0 and score < top_score * 0.20:
@@ -711,7 +776,7 @@ def prioritize_enumeration_candidates(
             (
                 chunk
                 for chunk in [*preferred, *ranked]
-                if planned_lane_grounding(chunk, lane_id) >= LANE_GROUNDING_THRESHOLD
+                if planned_lane_supported(chunk, lane_id)
                 and _candidate_key(chunk) not in selected_keys
             ),
             None,
@@ -753,8 +818,7 @@ def dedupe_enumeration_finalists(
             dropped += 1
             continue
         is_answer = any(
-            planned_lane_grounding(chunk, lane_id) >= LANE_GROUNDING_THRESHOLD
-            for lane_id in answer_lanes
+            planned_lane_supported(chunk, lane_id) for lane_id in answer_lanes
         )
         parent_key = str(chunk.parent_id or "").strip()
         document_key = _candidate_document_key(chunk)
@@ -791,8 +855,7 @@ def order_enumeration_finalists(
             enumerate(chunks),
             key=lambda item: (
                 not any(
-                    planned_lane_grounding(item[1], lane_id) >= LANE_GROUNDING_THRESHOLD
-                    for lane_id in answer_lanes
+                    planned_lane_supported(item[1], lane_id) for lane_id in answer_lanes
                 ),
                 item[0],
             ),

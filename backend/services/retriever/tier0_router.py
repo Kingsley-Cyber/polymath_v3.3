@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import re
 from dataclasses import dataclass
 
@@ -18,6 +19,12 @@ from services.ingestion.tier0 import SHARED_DOCSUM
 
 logger = logging.getLogger(__name__)
 
+_TECHNICAL_REPORT_RE = re.compile(
+    r"\b(?:backfill|repair|migration|append|ingest(?:ion)?|pipeline)\b.*\breport\b|"
+    r"\bstatus\s+report\b",
+    re.IGNORECASE,
+)
+
 
 @dataclass(frozen=True)
 class DocumentRoute:
@@ -26,6 +33,64 @@ class DocumentRoute:
     doc_id: str
     score: float
     title: str = ""
+    summary: str = ""
+    concepts: tuple[str, ...] = ()
+    section_ids: tuple[str, ...] = ()
+
+
+def diversify_document_routes(
+    routes: list[DocumentRoute],
+    *,
+    relevance_weight: float = 0.82,
+) -> list[DocumentRoute]:
+    """Order a relevant neighborhood by relevance plus profile novelty.
+
+    Adaptive selection decides which documents are relevant. This second pass
+    does not drop any of them; it only prevents near-duplicate profiles from
+    occupying every early descent/reservation slot.
+    """
+
+    remaining = sorted(
+        routes, key=lambda item: (-item.score, item.corpus_id, item.doc_id)
+    )
+    if len(remaining) <= 2:
+        return remaining
+
+    def terms(route: DocumentRoute) -> set[str]:
+        return {
+            value
+            for value in re.findall(
+                r"[a-z0-9]+",
+                " ".join((route.title, route.summary, *route.concepts)).lower(),
+            )
+            if len(value) >= 3
+        }
+
+    token_sets = {(route.corpus_id, route.doc_id): terms(route) for route in remaining}
+    selected = [remaining.pop(0)]
+    while remaining:
+
+        def objective(route: DocumentRoute) -> tuple[float, float, str, str]:
+            current = token_sets[(route.corpus_id, route.doc_id)]
+            max_overlap = 0.0
+            for prior in selected:
+                previous = token_sets[(prior.corpus_id, prior.doc_id)]
+                union = current | previous
+                overlap = len(current & previous) / len(union) if union else 0.0
+                max_overlap = max(max_overlap, overlap)
+            value = (
+                relevance_weight * route.score - (1.0 - relevance_weight) * max_overlap
+            )
+            return value, route.score, route.corpus_id, route.doc_id
+
+        next_route = max(remaining, key=objective)
+        selected.append(next_route)
+        remaining.remove(next_route)
+    return selected
+
+
+def _is_technical_report_route(route: DocumentRoute) -> bool:
+    return bool(_TECHNICAL_REPORT_RE.search(route.title or ""))
 
 
 def select_adaptive_routes(
@@ -203,6 +268,17 @@ class Tier0DocumentRouter:
                         doc_id=doc_id,
                         score=score,
                         title=str(payload.get("title") or ""),
+                        summary=str(payload.get("summary") or ""),
+                        concepts=tuple(
+                            str(value)
+                            for value in (payload.get("concepts") or [])
+                            if str(value)
+                        ),
+                        section_ids=tuple(
+                            str(value)
+                            for value in (payload.get("section_ids") or [])
+                            if str(value)
+                        ),
                     )
                 )
 
@@ -213,23 +289,73 @@ class Tier0DocumentRouter:
             deduped: dict[tuple[str, str], DocumentRoute] = {}
             for value in sorted(values, key=lambda item: -item.score):
                 deduped.setdefault((value.corpus_id, value.doc_id), value)
+            if not any(
+                marker in lane_id.lower()
+                for marker in ("backfill", "repair", "migration", "status_report")
+            ):
+                content_routes = {
+                    key: route
+                    for key, route in deduped.items()
+                    if not _is_technical_report_route(route)
+                }
+                if content_routes:
+                    deduped = content_routes
             candidate_counts[lane_id] = len(deduped)
-            selected = select_adaptive_routes(
-                list(deduped.values()),
-                min_score=min_score,
-                relative_margin=relative_margin,
-                max_keep=max_per_lane,
-                cliff_min_gap=cliff_min_gap,
-            )
             title_terms = tuple((title_terms_by_lane or {}).get(lane_id) or ())
-            gated = select_title_aligned_routes(selected, title_terms)
-            routes[lane_id] = gated
+            grouped: dict[str, list[DocumentRoute]] = {}
+            for route in deduped.values():
+                grouped.setdefault(route.corpus_id, []).append(route)
+            per_corpus_max = max(
+                2,
+                math.ceil(max(1, int(max_per_lane)) / max(1, len(grouped))),
+            )
+            selected: list[DocumentRoute] = []
+            title_before = 0
+            title_after = 0
+            for corpus_id in sorted(grouped):
+                corpus_selected = select_adaptive_routes(
+                    grouped[corpus_id],
+                    min_score=min_score,
+                    relative_margin=relative_margin,
+                    max_keep=per_corpus_max,
+                    cliff_min_gap=cliff_min_gap,
+                )
+                title_before += len(corpus_selected)
+                corpus_selected = select_title_aligned_routes(
+                    corpus_selected,
+                    title_terms,
+                )
+                title_after += len(corpus_selected)
+                selected.extend(corpus_selected)
+
+            global_budget = max(max(1, int(max_per_lane)), len(grouped))
+            if len(selected) > global_budget:
+                anchors: list[DocumentRoute] = []
+                for corpus_id in sorted(grouped):
+                    corpus_routes = [
+                        route for route in selected if route.corpus_id == corpus_id
+                    ]
+                    if corpus_routes:
+                        anchors.append(
+                            max(corpus_routes, key=lambda route: route.score)
+                        )
+                anchor_keys = {(route.corpus_id, route.doc_id) for route in anchors}
+                remainder = diversify_document_routes(
+                    [
+                        route
+                        for route in selected
+                        if (route.corpus_id, route.doc_id) not in anchor_keys
+                    ]
+                )
+                selected = anchors + remainder[: max(0, global_budget - len(anchors))]
+            selected = diversify_document_routes(selected)
+            routes[lane_id] = selected
             if title_terms:
                 title_gates[lane_id] = {
                     "terms": list(title_terms),
-                    "before": len(selected),
-                    "after": len(gated),
-                    "applied": len(gated) < len(selected),
+                    "before": title_before,
+                    "after": title_after,
+                    "applied": title_after < title_before,
                 }
         diagnostics["routes"] = {
             lane_id: [
@@ -238,6 +364,8 @@ class Tier0DocumentRouter:
                     "doc_id": route.doc_id,
                     "score": round(route.score, 4),
                     "title": route.title,
+                    "concepts": list(route.concepts),
+                    "section_ids": list(route.section_ids),
                 }
                 for route in values
             ]

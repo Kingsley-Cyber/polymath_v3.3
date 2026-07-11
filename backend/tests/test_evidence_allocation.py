@@ -164,7 +164,12 @@ def test_coverage_ignores_weak_term_only_match_from_foreign_doc():
 def test_select_lane_support_rejects_weak_foreign_docs():
     candidates = [
         Chunk("s1", "strategy_book", "generic tactics and types", score=0.95),
-        Chunk("p1", "personality_book", "personality assessment and big five traits", score=0.5),
+        Chunk(
+            "p1",
+            "personality_book",
+            "personality assessment and big five traits",
+            score=0.5,
+        ),
     ]
     picks = select_lane_support(
         candidates,
@@ -241,8 +246,18 @@ def test_cap_chunks_per_doc_limits_dominant_doc_but_protects_support():
         Chunk("s2", "art_of_seduction", "seduction 2"),
         Chunk("s3", "art_of_seduction", "seduction 3"),
         Chunk("s4", "art_of_seduction", "seduction 4"),
-        Chunk("p1", "four_tendencies", "personality 1", metadata={"support_role": "evidence_plan_lane"}),
-        Chunk("p2", "handbook_personality", "personality 2", metadata={"support_role": "evidence_plan_lane"}),
+        Chunk(
+            "p1",
+            "four_tendencies",
+            "personality 1",
+            metadata={"support_role": "evidence_plan_lane"},
+        ),
+        Chunk(
+            "p2",
+            "handbook_personality",
+            "personality 2",
+            metadata={"support_role": "evidence_plan_lane"},
+        ),
     ]
 
     def _protected(c):
@@ -279,7 +294,12 @@ def test_end_to_end_distribution_for_seduction_plus_personality():
     assert PERSONALITY.name in cov["missing_lanes"]
 
     pool = [
-        Chunk("p2", "handbook_personality", "the handbook of personality traits", score=0.5),
+        Chunk(
+            "p2",
+            "handbook_personality",
+            "the handbook of personality traits",
+            score=0.5,
+        ),
         Chunk("p3", "gifts_differing", "myers briggs personality type", score=0.48),
     ]
     existing_docs = {_did(c) for c in base}
@@ -304,14 +324,19 @@ def test_end_to_end_distribution_for_seduction_plus_personality():
         merged,
         cap=cap,
         doc_id_fn=_did,
-        protect_fn=lambda c: (c.metadata or {}).get("support_role") == "evidence_plan_lane",
+        protect_fn=lambda c: (c.metadata or {}).get("support_role")
+        == "evidence_plan_lane",
     )
 
     by_doc = {}
     for c in final:
         by_doc.setdefault(_did(c), 0)
         by_doc[_did(c)] += 1
-    personality_docs = [d for d in by_doc if d in {"four_tendencies", "handbook_personality", "gifts_differing"}]
+    personality_docs = [
+        d
+        for d in by_doc
+        if d in {"four_tendencies", "handbook_personality", "gifts_differing"}
+    ]
 
     # The exact fix: the title book drops from 4 chunks to the per-side cap (2),
     # the personality side is backed by >=2 distinct books, and no single
@@ -373,7 +398,9 @@ def test_split_query_sides_generalizes_to_unseen_book_pair():
         "versus the negotiation tactics in Never Split the Difference"
     )
     assert len(sides) == 2, sides
-    blob = " ".join(s["name"] + " " + " ".join(s["search_terms"]) for s in sides).lower()
+    blob = " ".join(
+        s["name"] + " " + " ".join(s["search_terms"]) for s in sides
+    ).lower()
     assert "laws" in blob or "power" in blob
     assert "split" in blob or "negotiation" in blob or "difference" in blob
 
@@ -400,14 +427,35 @@ def test_build_evidence_plan_from_sides_makes_a_two_side_plan():
 def test_build_evidence_plan_from_sides_falls_back_when_underspecified():
     # Only one usable side -> fall back to the deterministic plan, never crash.
     plan = build_evidence_plan_from_sides(
-        "what is natural language processing", [{"name": "nlp", "search_terms": ["nlp"]}]
+        "what is natural language processing",
+        [{"name": "nlp", "search_terms": ["nlp"]}],
     )
     assert plan.mode in {"single_concept", "unstructured"}
 
 
+def test_query_plan_adapter_can_preserve_one_complete_objective():
+    plan = build_evidence_plan_from_sides(
+        "How should I prompt the opening scene?",
+        [
+            {
+                "name": "opening_scene",
+                "label": "How should I prompt the opening scene?",
+                "query": "How should I prompt the opening scene?",
+                "search_terms": ["opening scene", "video prompt"],
+            }
+        ],
+        allow_single=True,
+    )
+
+    assert plan.mode == "single_objective_sourced"
+    assert [lane.name for lane in plan.required_lanes] == ["opening_scene"]
+
+
 def test_parse_llm_sides_is_tolerant():
-    good = '```json\n{"sides": [{"name": "A", "search_terms": ["a1", "a2"]}, ' \
-           '{"name": "B", "terms": "b1"}]}\n```'
+    good = (
+        '```json\n{"sides": [{"name": "A", "search_terms": ["a1", "a2"]}, '
+        '{"name": "B", "terms": "b1"}]}\n```'
+    )
     sides = parse_llm_sides(good)
     assert [s["name"] for s in sides] == ["A", "B"]
     assert sides[1]["search_terms"] == ["b1"]
@@ -436,7 +484,9 @@ def test_is_curated_concept():
 
 
 def _run_all():
-    tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
+    tests = [
+        v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)
+    ]
     failed = 0
     for t in tests:
         try:

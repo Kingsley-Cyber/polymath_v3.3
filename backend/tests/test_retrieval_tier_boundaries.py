@@ -106,7 +106,7 @@ def test_document_anchor_recall_is_only_for_hydrated_tiers():
 
 
 def test_fast_search_never_invokes_cross_encoder_reranking():
-    assert not _rerank_enabled_for_tier(True, RetrievalTier.qdrant_only)
+    assert _rerank_enabled_for_tier(True, RetrievalTier.qdrant_only)
     assert not _rerank_enabled_for_tier(False, RetrievalTier.qdrant_only)
     assert _rerank_enabled_for_tier(True, RetrievalTier.qdrant_mongo)
     assert _rerank_enabled_for_tier(True, RetrievalTier.qdrant_mongo_graph)

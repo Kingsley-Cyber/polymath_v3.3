@@ -35,6 +35,7 @@ class FunnelA:
         fair_mode: bool = True,
         query_text: str | None = None,
         doc_ids: Optional[List[str]] = None,
+        parent_ids: Optional[List[str]] = None,
     ) -> List[SourceChunk]:
         """
         Execute breadth search for summaries across target collections in parallel.
@@ -73,6 +74,7 @@ class FunnelA:
                         top_k=per_corpus_k,
                         query_text=query_text,
                         doc_ids=doc_ids,
+                        parent_ids=parent_ids,
                     )
                     for corpus_id in corpus_ids
                 ]
@@ -90,6 +92,7 @@ class FunnelA:
             top_k=top_k,
             query_text=query_text,
             doc_ids=doc_ids,
+            parent_ids=parent_ids,
         )
 
     async def _search_scoped(
@@ -101,6 +104,7 @@ class FunnelA:
         top_k: int,
         query_text: str | None = None,
         doc_ids: Optional[List[str]] = None,
+        parent_ids: Optional[List[str]] = None,
     ) -> List[SourceChunk]:
         """One summary search over ``collections`` scoped to ``corpus_scope``."""
 
@@ -129,10 +133,19 @@ class FunnelA:
                 )
             )
 
+        if parent_ids:
+            must_conditions.append(
+                models.FieldCondition(
+                    key="parent_id",
+                    match=models.MatchAny(any=list(dict.fromkeys(parent_ids))),
+                )
+            )
+
         # Mirror funnel_b: drop summary points that summarize TOC / biblio /
         # index / appendix / front_matter / back_matter parents. Legacy
         # summaries (no `chunk_kind` payload) pass through as before.
         from services.ingestion.section_classifier import NOISY_KINDS
+
         must_not_conditions = [
             models.FieldCondition(
                 key="chunk_kind",
@@ -188,7 +201,9 @@ class FunnelA:
             from services.storage.qdrant_writer import _collection_layout
             from services.storage.sparse_encoder import encode_query
 
-            has_named, has_sparse = await _collection_layout(self.client, collection_name)
+            has_named, has_sparse = await _collection_layout(
+                self.client, collection_name
+            )
             sparse_query = encode_query(query_text)
             kwargs = {
                 "collection_name": collection_name,

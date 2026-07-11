@@ -8,9 +8,55 @@ from services.retriever.query_plan import build_query_plan_v2
 from services.retriever.tier0_router import (
     DocumentRoute,
     Tier0DocumentRouter,
+    _is_technical_report_route,
+    diversify_document_routes,
     select_adaptive_routes,
     select_title_aligned_routes,
 )
+
+
+def test_route_diversity_reorders_but_preserves_relevant_neighborhood():
+    routes = [
+        DocumentRoute(
+            "creative",
+            "c",
+            "a",
+            0.90,
+            "Audience advertising",
+            "Target audience response to advertising psychology",
+        ),
+        DocumentRoute(
+            "creative",
+            "c",
+            "b",
+            0.89,
+            "Audience advertising copy",
+            "Target audience response to advertising psychology",
+        ),
+        DocumentRoute(
+            "creative",
+            "c",
+            "c",
+            0.87,
+            "Directing cinematic motion",
+            "Opening shots camera movement and visual storytelling",
+        ),
+    ]
+
+    selected = diversify_document_routes(routes)
+
+    assert [route.doc_id for route in selected] == ["a", "c", "b"]
+    assert {route.doc_id for route in selected} == {"a", "b", "c"}
+
+
+def test_technical_repair_reports_do_not_displace_content_documents():
+    routes = [
+        DocumentRoute("audience", "c", "content", 0.65, "Breakthrough Advertising"),
+        DocumentRoute("audience", "c", "report", 0.64, "EPUB backfill status report"),
+    ]
+
+    assert not _is_technical_report_route(routes[0])
+    assert _is_technical_report_route(routes[1])
 
 
 def test_title_aligned_answer_object_routes_gate_generic_semantic_neighbors():
@@ -47,7 +93,7 @@ class _RouteClient:
         return SimpleNamespace(
             points=[
                 SimpleNamespace(
-                    score=0.72,
+                    score=0.72 if corpus_id == "c1" else 0.41,
                     payload={
                         "corpus_id": corpus_id,
                         "doc_id": f"doc-{corpus_id}",
@@ -151,8 +197,13 @@ async def test_all_three_layers_descend_from_document_routes(monkeypatch, tier):
         return (
             {
                 "books": [DocumentRoute("books", "c1", "doc-books", 0.8)],
-                "dropshipping": [
-                    DocumentRoute("dropshipping", "c1", "doc-dropshipping", 0.8)
+                "books_justification": [
+                    DocumentRoute(
+                        "books_justification",
+                        "c1",
+                        "doc-dropshipping",
+                        0.8,
+                    )
                 ],
             },
             {"enabled": True, "routed_doc_count": 2, "routes": {}},
@@ -228,7 +279,7 @@ async def test_all_three_layers_descend_from_document_routes(monkeypatch, tier):
     lane_rows = {row["lane_id"]: row for row in result.diagnostics["lanes"]}
     assert routed["enabled"] is True
     assert lane_rows["books"]["routed_doc_ids"] == ["doc-books"]
-    assert lane_rows["dropshipping"]["routed_doc_ids"] == ["doc-dropshipping"]
+    assert lane_rows["books_justification"]["routed_doc_ids"] == ["doc-dropshipping"]
     assert result.diagnostics["required_concept_coverage"]["coverage"] == 1.0
     assert {chunk.doc_id for chunk in result.chunks} >= {
         "doc-books",
@@ -241,7 +292,7 @@ async def test_all_three_layers_descend_from_document_routes(monkeypatch, tier):
     if tier == RetrievalTier.qdrant_only:
         assert calls["summary"] > 0
         assert calls["lexical"] == 0
-        assert calls["rerank"] == 0
+        assert calls["rerank"] == 1
         assert calls["graph"] == 0
     else:
         assert calls["summary"] > 0

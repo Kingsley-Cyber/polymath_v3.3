@@ -99,6 +99,63 @@ _FOLLOWUP_PREFIX_RE = re.compile(
     r"and\s+|also\s+|what\s+about\s+)",
     re.IGNORECASE,
 )
+_REFERENTIAL_FOLLOWUP_RE = re.compile(
+    r"\b(?:this|that|these|those|it|its|they|their|them|the\s+(?:product|"
+    r"audience|answer|idea|concept|example|scene|video|prompt|strategy|"
+    r"framework|document|book|ad|advertisement)|above|earlier|previous)\b",
+    re.IGNORECASE,
+)
+_QUESTION_OBLIGATION_SPLIT_RE = re.compile(
+    r"\s+(?:and|then)\s+(?=(?:how|what|why|which|who|where|when|can|"
+    r"should|would|could|is|are|do|does)\b)",
+    re.IGNORECASE,
+)
+_QUESTION_OBLIGATION_START_RE = re.compile(
+    r"^(?:how|what|why|which|who|where|when|can|should|would|could|is|are|"
+    r"do|does|identify|find|create|write|design|explain|compare|recommend|"
+    r"list|assess|evaluate)\b",
+    re.IGNORECASE,
+)
+_COORDINATED_OBJECTIVE_VERBS = (
+    "apply",
+    "attract",
+    "build",
+    "choose",
+    "communicate",
+    "create",
+    "demonstrate",
+    "design",
+    "explain",
+    "find",
+    "hook",
+    "identify",
+    "make",
+    "measure",
+    "open",
+    "persuade",
+    "position",
+    "predict",
+    "prompt",
+    "show",
+    "stage",
+    "start",
+    "structure",
+    "target",
+    "test",
+    "use",
+    "write",
+)
+_COORDINATED_OBJECTIVE_HEAD_RE = re.compile(
+    r"^(?P<operator>how\s+(?:should|can|would|could|do|does)\s+)"
+    r"(?P<subject>.+?)\s+"
+    r"(?P<objectives>(?:" + "|".join(_COORDINATED_OBJECTIVE_VERBS) + r")\b.+)$",
+    re.IGNORECASE,
+)
+_COORDINATED_OBJECTIVE_SPLIT_RE = re.compile(
+    r"(?:,\s*(?:and\s+)?|\s+and\s+)"
+    r"(?=(?:" + "|".join(_COORDINATED_OBJECTIVE_VERBS) + r")\b)",
+    re.IGNORECASE,
+)
 _ANSWER_OBJECT_SUPPORT: dict[str, tuple[str, ...]] = {
     "book": ("book titles", "authors", "book recommendations", "lessons", "principles"),
     "books": (
@@ -567,7 +624,11 @@ def contextualize_followup_query(
     if not current:
         return current
     tokens = re.findall(r"[A-Za-z0-9']+", current)
-    contextual = len(tokens) <= 6 or bool(_FOLLOWUP_PREFIX_RE.match(current))
+    contextual = (
+        len(tokens) <= 6
+        or bool(_FOLLOWUP_PREFIX_RE.match(current))
+        or bool(_REFERENTIAL_FOLLOWUP_RE.search(current))
+    )
     if not contextual:
         return current
 
@@ -584,6 +645,66 @@ def contextualize_followup_query(
 
     focus = _FOLLOWUP_PREFIX_RE.sub("", current).strip() or current
     return _normalize_phrase(f"{previous_user}; {focus}")
+
+
+def _question_obligation_clauses(query: str) -> tuple[str, ...]:
+    """Split compound requests into complete retrieval questions.
+
+    This is intentionally narrower than generic sentence splitting. It only
+    creates another obligation at a sentence boundary or before a new
+    question operator (``and how``, ``and why``, and similar forms), so named
+    concepts and ordinary noun conjunctions remain intact.
+    """
+
+    clauses: list[str] = []
+    for sentence in re.split(r"[.!?;]+", str(query or "")):
+        normalized = _normalize_phrase(sentence)
+        if not normalized:
+            continue
+        coordinated = _COORDINATED_OBJECTIVE_HEAD_RE.match(normalized)
+        if coordinated:
+            objectives = [
+                _normalize_phrase(value)
+                for value in _COORDINATED_OBJECTIVE_SPLIT_RE.split(
+                    coordinated.group("objectives")
+                )
+                if _normalize_phrase(value)
+            ]
+            if len(objectives) >= 2:
+                prefix = coordinated.group("operator") + coordinated.group("subject")
+                clauses.extend(
+                    _normalize_phrase(f"{prefix} {objective}")
+                    for objective in objectives
+                )
+                continue
+        clauses.extend(
+            part
+            for part in (
+                _normalize_phrase(value)
+                for value in _QUESTION_OBLIGATION_SPLIT_RE.split(normalized)
+            )
+            if part and _QUESTION_OBLIGATION_START_RE.match(part)
+        )
+    if len(clauses) < 2:
+        return ()
+    return tuple(dict.fromkeys(clauses[:4]))
+
+
+def _clause_concepts(clause: str, fallback: tuple[str, ...]) -> tuple[str, ...]:
+    """Return coverage atoms for one obligation without changing its wording."""
+
+    clause_terms = tuple(lexical_terms(clause))
+    clause_term_set = set(clause_terms)
+    matched = [
+        concept for concept in fallback if set(lexical_terms(concept)) & clause_term_set
+    ]
+    if matched:
+        return tuple(dict.fromkeys(matched))
+    return tuple(
+        term
+        for term in clause_terms
+        if term not in _GENERIC_LANE_TERMS and len(term) >= 3
+    )[:6]
 
 
 def _probe_constraints(query: str) -> tuple[str, ...]:
@@ -622,13 +743,41 @@ def _build_retrieval_probes(
     is_enumeration = bool(answer_object)
     probes: list[RetrievalProbe] = []
 
-    if is_procedure:
-        audience = "a beginner" if "beginner" in constraints or "Day 0" in constraints else "someone"
+    obligation_clauses = _question_obligation_clauses(query)
+    if obligation_clauses and not is_enumeration:
+        for index, clause in enumerate(obligation_clauses):
+            clause_concepts = _clause_concepts(clause, topic_concepts)
+            clause_shape = _answer_shape(clause, "simple")
+            probes.append(
+                RetrievalProbe(
+                    probe_id=(
+                        _slug(" ".join(lexical_terms(clause)))
+                        or f"objective_{index + 1}"
+                    ),
+                    question=clause,
+                    answer_type=(
+                        "synthesis" if clause_shape == "single_fact" else clause_shape
+                    ),
+                    role="primary" if index == 0 else "support",
+                    required=True,
+                    concepts=clause_concepts,
+                    constraints=constraints,
+                )
+            )
+
+    if is_procedure and not probes:
+        audience = (
+            "a beginner"
+            if "beginner" in constraints or "Day 0" in constraints
+            else "someone"
+        )
         timing = " on Day 0" if "Day 0" in constraints else ""
         subject = topic or "this task"
         probes.append(
             RetrievalProbe(
-                probe_id="day_zero_steps" if "Day 0" in constraints else "starting_steps",
+                probe_id="day_zero_steps"
+                if "Day 0" in constraints
+                else "starting_steps",
                 question=f"What steps should {audience} take{timing} to start {subject}?",
                 answer_type="procedure",
                 concepts=topic_concepts,
@@ -721,7 +870,10 @@ def _build_retrieval_probes(
     seen_ids: set[str] = set()
     seen_questions: set[str] = set()
     for probe in probes[:4]:
-        question = _normalize_phrase(probe.question) + "?"
+        question = _normalize_phrase(probe.question)
+        if question and question[0].islower():
+            question = question[0].upper() + question[1:]
+        question += "?"
         question_key = clean_text(question).strip()
         probe_id = probe.probe_id or f"probe_{len(output) + 1}"
         if not question_key or question_key in seen_questions or probe_id in seen_ids:
@@ -754,9 +906,7 @@ def query_plan_execution_lanes(plan: QueryPlanV2) -> tuple[QueryLane, ...]:
         (lane for lane in plan.lanes if lane.role == "original"), plan.lanes[0]
     )
     if not plan.probes:
-        return tuple(
-            lane for lane in plan.lanes if lane.role in {"original", "core"}
-        )
+        return tuple(lane for lane in plan.lanes if lane.role in {"original", "core"})
 
     lanes: list[QueryLane] = [original_lane]
     groups = concept_groups(plan.standalone_query, max_groups=8)
@@ -781,6 +931,8 @@ def query_plan_execution_lanes(plan: QueryPlanV2) -> tuple[QueryLane, ...]:
             if answer_object
             else probe.question
         )
+        if plan.standalone_query != plan.original_query and not answer_object:
+            dense_text = f"{probe.question} Context: {plan.standalone_query}"
         lanes.append(
             QueryLane(
                 lane_id=probe.probe_id,
@@ -910,7 +1062,7 @@ def build_query_plan_v2(
     complexity = _complexity(standalone, len(concepts), operators)
     answer_shape = _answer_shape(standalone, complexity)
     probes = _build_retrieval_probes(
-        standalone,
+        original,
         concepts,
         complexity=complexity,
         answer_shape=answer_shape,
@@ -938,6 +1090,8 @@ def query_plan_curation_query(plan: QueryPlanV2) -> str:
     evidence atoms. Comparative/relational plans retain their full wording.
     """
 
+    if plan.standalone_query != plan.original_query:
+        return plan.standalone_query
     if len(plan.probes) > 1:
         # A single concept concatenation previously converted compositional
         # questions into fragments. Preserve the user's complete formulation

@@ -380,19 +380,32 @@ class Settings(BaseSettings):
             "This adds no provider call and supports production comparison."
         ),
     )
+    QUERY_PLAN_QUALITY_FIRST: bool = Field(
+        default=True,
+        description=(
+            "Treat total retrieval deadlines as observability targets rather "
+            "than hard truncation limits. Individual stages retain bounded "
+            "safety timeouts, but candidate generation, hierarchy descent, "
+            "coverage repair, and reranking may complete normally."
+        ),
+    )
     QUERY_PLAN_HYBRID_TOTAL_DEADLINE_SECONDS: float = Field(
         default=7.5, ge=2.0, le=30.0
     )
     QUERY_PLAN_GRAPH_TOTAL_DEADLINE_SECONDS: float = Field(default=9.5, ge=3.0, le=45.0)
     QUERY_PLAN_EMBED_DEADLINE_SECONDS: float = Field(default=5.0, ge=0.5, le=30.0)
-    QUERY_PLAN_RETRIEVAL_DEADLINE_SECONDS: float = Field(default=4.0, ge=0.5, le=30.0)
-    QUERY_PLAN_GRAPH_DEADLINE_SECONDS: float = Field(default=4.0, ge=0.5, le=30.0)
-    QUERY_PLAN_REPAIR_DEADLINE_SECONDS: float = Field(default=1.25, ge=0.1, le=5.0)
+    QUERY_PLAN_RETRIEVAL_DEADLINE_SECONDS: float = Field(default=12.0, ge=0.5, le=30.0)
+    QUERY_PLAN_TREE_ROUTING_DEADLINE_SECONDS: float = Field(
+        default=10.0, ge=0.5, le=30.0
+    )
+    QUERY_PLAN_GRAPH_DEADLINE_SECONDS: float = Field(default=12.0, ge=0.5, le=30.0)
+    QUERY_PLAN_REPAIR_DEADLINE_SECONDS: float = Field(default=6.0, ge=0.1, le=15.0)
     QUERY_PLAN_IDENTITY_DEADLINE_SECONDS: float = Field(default=2.0, ge=0.5, le=15.0)
-    QUERY_PLAN_RERANK_DEADLINE_SECONDS: float = Field(default=6.0, ge=0.5, le=30.0)
-    QUERY_PLAN_HYBRID_RERANK_CANDIDATES: int = Field(default=16, ge=1, le=16)
-    QUERY_PLAN_GRAPH_RERANK_CANDIDATES: int = Field(default=20, ge=1, le=24)
-    QUERY_PLAN_HYDRATE_DEADLINE_SECONDS: float = Field(default=2.0, ge=0.5, le=15.0)
+    QUERY_PLAN_RERANK_DEADLINE_SECONDS: float = Field(default=20.0, ge=0.5, le=45.0)
+    QUERY_PLAN_FAST_RERANK_CANDIDATES: int = Field(default=48, ge=8, le=64)
+    QUERY_PLAN_HYBRID_RERANK_CANDIDATES: int = Field(default=64, ge=8, le=96)
+    QUERY_PLAN_GRAPH_RERANK_CANDIDATES: int = Field(default=80, ge=8, le=128)
+    QUERY_PLAN_HYDRATE_DEADLINE_SECONDS: float = Field(default=8.0, ge=0.5, le=30.0)
     FAST_SUMMARY_DEADLINE_SECONDS: float = Field(
         default=1.25,
         ge=0.1,

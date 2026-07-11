@@ -219,9 +219,7 @@ def test_compositional_beginner_query_decomposes_into_complete_probes():
         "beginner_books",
     ]
     assert all(
-        len(lane.query.split()) >= 4
-        for lane in execution_lanes
-        if lane.role == "core"
+        len(lane.query.split()) >= 4 for lane in execution_lanes if lane.role == "core"
     )
     assert execution_lanes[2].dense_text.startswith("books book titles authors")
 
@@ -255,3 +253,73 @@ def test_terse_followup_uses_previous_user_subject_without_model_call():
     assert plan.standalone_query == standalone
     assert plan.concepts == ("books", "dropshipping", "authors")
     assert query_plan_curation_query(plan) == standalone
+
+
+def test_long_referential_followup_keeps_previous_subject_for_retrieval():
+    recent = [
+        {
+            "role": "user",
+            "content": "Design an ad for a skincare product aimed at busy parents",
+        },
+        {"role": "assistant", "content": "Here is an initial creative direction."},
+    ]
+    query = "What should the text-to-video prompt be for its first five-second scene?"
+
+    standalone = contextualize_followup_query(query, recent)
+    plan = build_query_plan_v2(query, standalone_query=standalone)
+    execution_lanes = query_plan_execution_lanes(plan)
+
+    assert standalone.startswith("Design an ad for a skincare product")
+    assert plan.original_query == query.rstrip("?")
+    assert plan.standalone_query == standalone
+    assert "skincare product" in execution_lanes[1].dense_text
+
+
+def test_compound_creative_request_becomes_complete_answer_obligations():
+    query = (
+        "How can this product be used to find a target audience and how would "
+        "this audience respond to the ad. How would I prompt the initial five "
+        "second video?"
+    )
+
+    plan = build_query_plan_v2(query)
+    questions = [probe.question for probe in plan.probes]
+
+    assert len(questions) == 3
+    assert questions[0] == ("How can this product be used to find a target audience?")
+    assert questions[1] == "How would this audience respond to the ad?"
+    assert questions[2] == "How would I prompt the initial five second video?"
+    assert all(probe.required for probe in plan.probes)
+    assert all(len(probe.question.split()) >= 5 for probe in plan.probes)
+    # Planning remains corpus-agnostic. Domain documents are discovered by
+    # routing; their names must not be injected into the user's obligations.
+    assert not any(
+        term in " ".join(questions).lower()
+        for term in ("facs", "cinematography", "laban")
+    )
+
+
+def test_declarative_context_is_not_misclassified_as_answer_obligation():
+    plan = build_query_plan_v2(
+        "The product is a portable espresso maker. How do I identify its "
+        "audience? How should I prompt the opening ad?"
+    )
+
+    assert [probe.question for probe in plan.probes] == [
+        "How do I identify its audience?",
+        "How should I prompt the opening ad?",
+    ]
+
+
+def test_coordinated_objectives_in_one_question_become_complete_probes():
+    plan = build_query_plan_v2(
+        "How should a dropshipping ad identify a target audience, make the "
+        "message memorable, and stage the first five seconds of video?"
+    )
+
+    assert [probe.question for probe in plan.probes] == [
+        "How should a dropshipping ad identify a target audience?",
+        "How should a dropshipping ad make the message memorable?",
+        "How should a dropshipping ad stage the first five seconds of video?",
+    ]
+    assert all(probe.required for probe in plan.probes)

@@ -2,6 +2,7 @@ from services.retriever.intent_policy import (
     QueryNeed,
     adaptive_funnel_limits,
     infer_retrieval_intent,
+    promote_compositional_intent,
 )
 
 
@@ -67,3 +68,31 @@ def test_intent_is_deterministic_and_idempotent():
     second = infer_retrieval_intent(query)
 
     assert first == second
+
+
+def test_compositional_plan_promotes_local_wording_to_broad_retrieval():
+    initial = infer_retrieval_intent(
+        "how do I find an audience and how do they respond and how do I open"
+    )
+
+    promoted = promote_compositional_intent(
+        initial,
+        complexity="compositional",
+        required_lane_count=3,
+    )
+
+    assert promoted.need == QueryNeed.BROAD
+    assert promoted.summary_ratio == 0.5
+
+
+def test_single_obligation_keeps_original_retrieval_intent():
+    initial = infer_retrieval_intent("how does this exact mechanism work")
+
+    assert (
+        promote_compositional_intent(
+            initial,
+            complexity="simple",
+            required_lane_count=1,
+        )
+        == initial
+    )

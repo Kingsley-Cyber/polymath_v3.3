@@ -766,7 +766,6 @@ def _build_chat_query_plan(
         {"key": group.key, "aliases": list(group.aliases[:8])}
         for group in concept_groups(semantic_query, max_groups=8)
     ]
-    evidence_plan = build_evidence_plan(semantic_query)
     tier_value = str(getattr(requested_tier, "value", requested_tier) or "")
     corpus_count = len(corpus_ids or [])
     query_plan_v2 = build_query_plan_v2(
@@ -774,6 +773,15 @@ def _build_chat_query_plan(
         corpus_ids=corpus_ids,
         standalone_query=semantic_query,
     )
+    evidence_plan = build_evidence_plan(semantic_query)
+    if settings.QUERY_PLAN_V2:
+        v2_sides = query_plan_evidence_sides(query_plan_v2)
+        if v2_sides:
+            evidence_plan = build_evidence_plan_from_sides(
+                semantic_query,
+                v2_sides,
+                allow_single=True,
+            )
     plan = {
         "query": query,
         "retrieval_query": retrieval_query,
@@ -5970,9 +5978,7 @@ def _format_retrieval_diagnostics_trace(
     funnel_s = float(
         timings.get("funnels") or timings.get("candidate_generation") or 0.0
     )
-    hydrate_s = float(
-        timings.get("hydrate") or timings.get("hydrate_finalists") or 0.0
-    )
+    hydrate_s = float(timings.get("hydrate") or timings.get("hydrate_finalists") or 0.0)
     final_mix = (
         ", ".join(
             f"{tier}={count}" for tier, count in sorted(final_source_tiers.items())
@@ -6766,7 +6772,48 @@ class ChatOrchestrator:
                 and str(resolved_mode or "").lower() != "global"
             )
         )
-        if _retrieval_fast_path:
+        if settings.QUERY_PLAN_V2:
+            if evidence_plan_llm_task is not None:
+                evidence_plan_llm_task.cancel()
+            if coverage_facets_task is not None:
+                try:
+                    await coverage_facets_task
+                except Exception:
+                    pass
+            coverage_sources = retrieval_sources
+            required_coverage = dict(
+                _plan_diagnostics.get("required_concept_coverage") or {}
+            )
+            required_lane_ids = list(required_coverage.get("required_lane_ids") or [])
+            covered_lane_ids = list(required_coverage.get("supported_lane_ids") or [])
+            covered_lane_set = set(covered_lane_ids)
+            missing_lane_ids = [
+                lane_id
+                for lane_id in required_lane_ids
+                if lane_id not in covered_lane_set
+            ]
+            coverage_meta = {
+                "query_plan_v2": True,
+                "integrated": True,
+                "added": 0,
+                "duration_s": perf_counter() - coverage_start,
+                "coverage_uncovered_lanes": missing_lane_ids,
+                "skipped": "legacy_facet_support_pass",
+            }
+            evidence_sources = coverage_sources
+            evidence_plan_meta = {
+                "active": True,
+                "mode": "query_plan_v2_integrated",
+                "plan": evidence_plan_to_dict(evidence_plan),
+                "required_lanes": required_lane_ids,
+                "covered_lanes": covered_lane_ids,
+                "missing_lanes": missing_lane_ids,
+                "lane_reports": _plan_diagnostics.get("lanes") or [],
+                "added": 0,
+                "duration_s": 0.0,
+                "skipped": "legacy_evidence_support_pass",
+            }
+        elif _retrieval_fast_path:
             if evidence_plan_llm_task is not None:
                 evidence_plan_llm_task.cancel()
             # Don't leak the concurrently-started coverage-facet prefetch.
@@ -9458,8 +9505,15 @@ class ChatOrchestrator:
         )
         if settings.QUERY_PLAN_V2:
             v2_sides = query_plan_evidence_sides(query_plan_v2)
-            if len(v2_sides) >= 2:
-                return build_evidence_plan_from_sides(query, v2_sides), None
+            if v2_sides:
+                return (
+                    build_evidence_plan_from_sides(
+                        query,
+                        v2_sides,
+                        allow_single=True,
+                    ),
+                    None,
+                )
         plan = build_evidence_plan(query)
         # A deterministic plan is good as-is only when it already has >=2 sides
         # AND none of them is a bare token lane. A token lane ("metacognition",

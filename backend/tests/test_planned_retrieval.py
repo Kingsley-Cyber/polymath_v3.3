@@ -39,40 +39,69 @@ def test_planned_rerank_limit_is_adaptive_to_query_complexity():
             plan=simple,
             intent=SimpleNamespace(need=retriever_module.QueryNeed.SPECIFIC),
             tier=RetrievalTier.qdrant_mongo,
-            configured_limit=16,
-            final_top_k=5,
+            configured_limit=64,
+            final_top_k=8,
         )
-        == 8
+        == 40
     )
     assert (
         retriever_module._planned_rerank_candidate_limit(
             plan=assessment,
             intent=SimpleNamespace(need=retriever_module.QueryNeed.BROAD),
             tier=RetrievalTier.qdrant_mongo,
-            configured_limit=16,
-            final_top_k=5,
+            configured_limit=64,
+            final_top_k=8,
         )
-        == 12
+        == 56
     )
     assert (
         retriever_module._planned_rerank_candidate_limit(
             plan=comparative,
             intent=SimpleNamespace(need=retriever_module.QueryNeed.BALANCED),
             tier=RetrievalTier.qdrant_mongo,
-            configured_limit=16,
-            final_top_k=5,
+            configured_limit=64,
+            final_top_k=8,
         )
-        == 16
+        == 64
     )
     assert (
         retriever_module._planned_rerank_candidate_limit(
             plan=enumeration,
             intent=SimpleNamespace(need=retriever_module.QueryNeed.BALANCED),
             tier=RetrievalTier.qdrant_mongo_graph,
-            configured_limit=24,
+            configured_limit=96,
             final_top_k=8,
         )
-        == 12
+        == 80
+    )
+
+
+def test_final_context_budget_expands_for_multiple_answer_obligations():
+    simple = build_query_plan_v2("What is Purple Ocean strategy?")
+    compound = build_query_plan_v2(
+        "How can this product find a target audience and how would that "
+        "audience respond to the ad. How should I prompt the opening video?"
+    )
+
+    assert (
+        retriever_module._planned_final_result_limit(
+            plan=simple,
+            intent=SimpleNamespace(need=retriever_module.QueryNeed.SPECIFIC),
+            tier=RetrievalTier.qdrant_mongo,
+            requested_limit=5,
+            routed_document_count=1,
+        )
+        == 8
+    )
+    assert (
+        retriever_module._planned_final_result_limit(
+            plan=compound,
+            intent=SimpleNamespace(need=retriever_module.QueryNeed.BALANCED),
+            tier=RetrievalTier.qdrant_mongo,
+            requested_limit=8,
+            routed_document_count=6,
+        )
+        == 14
     )
 
 
@@ -149,15 +178,19 @@ async def test_planned_hybrid_batches_embeddings_and_reranks_once(monkeypatch):
     )
 
     assert len(embedded) == 1
-    assert embedded[0] == [
-        lane.dense_text for lane in query_plan_execution_lanes(plan)
-    ]
-    assert reranks == [(plan.original_query, min(16, sequence))]
+    assert embedded[0] == [lane.dense_text for lane in query_plan_execution_lanes(plan)]
+    assert len(reranks) == 1
+    assert reranks[0][0] == plan.original_query
+    assert 1 <= reranks[0][1] <= 64
     assert result.diagnostics["query_plan_version"] == "query_plan.v2"
     assert result.diagnostics["lane_failures"] == []
     # Synthetic candidates carry no phrase/title grounding. Lane provenance
     # alone must not be reported as semantic concept coverage.
     assert result.diagnostics["required_concept_coverage"]["coverage"] == 0.0
+    assert result.diagnostics["selection"]["sufficiency"]["answerable"] is False
+    assert result.diagnostics["selection"]["sufficiency"]["source"] == (
+        "query_plan_required_lanes"
+    )
     assert result.diagnostics["repair"]["attempted_rounds"] == 1
     assert result.diagnostics["repair"]["missing_lane_ids_before"]
     assert set(result.diagnostics["fusion"]["repair"]["retriever_counts"]) == {
@@ -206,8 +239,9 @@ async def test_planned_fast_uses_top_down_qdrant_only_contract(monkeypatch):
     async def forbidden_lexical(*args, **kwargs):
         raise AssertionError("Fast must not use the lexical evidence lane")
 
-    async def forbidden_rerank(*args, **kwargs):
-        raise AssertionError("Fast must not call the cross-encoder")
+    async def focused_rerank(query, chunks):
+        calls.append("rerank")
+        return chunks
 
     monkeypatch.setattr(orchestrator, "_retrieve_uncached", forbidden_uncached)
     monkeypatch.setattr(orchestrator, "_filter_existing_corpora", fake_filter)
@@ -219,7 +253,7 @@ async def test_planned_fast_uses_top_down_qdrant_only_contract(monkeypatch):
     monkeypatch.setattr(retriever_module.funnel_b, "search", fake_child_search)
     monkeypatch.setattr(retriever_module.funnel_a, "search", fake_summary_search)
     monkeypatch.setattr(retriever_module.lexical_retriever, "search", forbidden_lexical)
-    monkeypatch.setattr(retriever_module.reranker_service, "rerank", forbidden_rerank)
+    monkeypatch.setattr(retriever_module.reranker_service, "rerank", focused_rerank)
 
     result = await orchestrator.retrieve_planned(
         plan=plan,
@@ -231,9 +265,10 @@ async def test_planned_fast_uses_top_down_qdrant_only_contract(monkeypatch):
     assert calls
     assert result.effective_tier == RetrievalTier.qdrant_only
     assert "summary" in calls
-    assert result.diagnostics["limits"]["summary_top_k"] == 4
+    assert result.diagnostics["limits"]["summary_top_k"] >= 12
     assert result.diagnostics["counts"]["lexical"] == 0
-    assert result.diagnostics["reranker"]["status"] == "skipped_by_request"
+    assert "rerank" in calls
+    assert result.diagnostics["reranker"]["status"] != "skipped_by_request"
 
 
 @pytest.mark.asyncio
@@ -363,6 +398,7 @@ async def test_planned_route_deadline_degrades_to_lexical_evidence(monkeypatch):
         "QUERY_PLAN_HYBRID_TOTAL_DEADLINE_SECONDS",
         0.2,
     )
+    monkeypatch.setattr(retriever_module.settings, "QUERY_PLAN_QUALITY_FIRST", False)
 
     started = perf_counter()
     result = await orchestrator.retrieve_planned(

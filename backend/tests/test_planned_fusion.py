@@ -11,6 +11,7 @@ from services.retriever.planned_fusion import (
     limit_candidates_per_document,
     order_enumeration_finalists,
     planned_lane_grounding,
+    planned_lane_supported,
     prioritize_enumeration_candidates,
     reserve_planned_finalists,
 )
@@ -179,6 +180,24 @@ def test_provenance_only_lane_does_not_count_as_grounded_coverage():
         )
         == []
     )
+
+
+def test_semantic_document_route_plus_lane_descent_counts_as_support():
+    routed = _chunk("consumer-desire", "a")
+    routed.text = "Existing desire and awareness determine persuasive response."
+    routed.metadata = {
+        "planned_lanes": ["audience_response"],
+        "planned_lane_grounding": {"audience_response": 0.25},
+        "document_route_lanes": {"audience_response": 0.47},
+    }
+    weak_route = routed.model_copy(deep=True)
+    weak_route.metadata["document_route_lanes"] = {"audience_response": 0.29}
+
+    assert planned_lane_supported(routed, "audience_response")
+    assert not planned_lane_supported(weak_route, "audience_response")
+    assert grounded_planned_lane_ids([routed], ["audience_response"]) == [
+        "audience_response"
+    ]
 
 
 def test_multi_side_filter_removes_generic_fillers_after_full_coverage():
@@ -373,6 +392,31 @@ def test_finalist_reservations_reject_weak_or_ungrounded_lane_fillers():
 
     assert [chunk.chunk_id for chunk in result] == ["strong"]
     assert diagnostics["lane_reservations"] == {"ecommerce": "strong"}
+
+
+def test_finalist_reservations_keep_low_global_score_from_strong_semantic_route():
+    dominant = _chunk("dominant", "a", 1.0)
+    dominant.metadata = {
+        "planned_lanes": ["audience"],
+        "planned_lane_grounding": {"audience": 2.0},
+    }
+    prompt = _chunk("prompt", "a", 0.09)
+    prompt.metadata = {
+        "planned_lanes": ["opening_prompt"],
+        "planned_lane_grounding": {"opening_prompt": 0.75},
+        "document_route_lanes": {"opening_prompt": 0.49},
+    }
+
+    result, diagnostics = reserve_planned_finalists(
+        [dominant, prompt],
+        preferred=[dominant],
+        required_lane_ids=["audience", "opening_prompt"],
+        corpus_ids=["a"],
+        max_candidates=2,
+    )
+
+    assert [chunk.chunk_id for chunk in result] == ["dominant", "prompt"]
+    assert diagnostics["lane_reservations"]["opening_prompt"] == "prompt"
 
 
 def test_finalist_reservations_do_not_refill_a_complete_diversity_pack():

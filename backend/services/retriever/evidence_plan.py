@@ -122,7 +122,9 @@ def _lane_search_terms(group: ConceptGroup) -> tuple[str, ...]:
 
 def _lane_from_group(group: ConceptGroup, *, min_sources: int = 1) -> EvidenceLane:
     search_terms = _lane_search_terms(group)
-    aliases = _dedupe_terms([group.key.replace("_", " "), *group.aliases, *search_terms])
+    aliases = _dedupe_terms(
+        [group.key.replace("_", " "), *group.aliases, *search_terms]
+    )
     query_terms = search_terms[:12] or aliases[:12]
     return EvidenceLane(
         name=group.key,
@@ -236,6 +238,7 @@ def build_evidence_plan_from_sides(
     sides: list[dict] | tuple[dict, ...],
     *,
     max_lanes: int = 4,
+    allow_single: bool = False,
 ) -> EvidencePlan:
     """Build a multi-side plan from externally-provided sides (E: generalization).
 
@@ -244,8 +247,9 @@ def build_evidence_plan_from_sides(
     ``search_terms`` (and optionally a ``query``). This lets an *arbitrary*
     multi-document question get the same per-side, distinct-document allocation
     as the curated concepts — the lanes are still grounded to real documents
-    downstream via the ingestion-metadata hints. Falls back to the deterministic
-    plan when fewer than two usable sides are provided.
+    downstream via the ingestion-metadata hints. Normal callers fall back to
+    the deterministic plan when fewer than two usable sides are provided;
+    QueryPlanV2 may opt into preserving one complete objective.
     """
 
     lanes: list[EvidenceLane] = []
@@ -281,12 +285,12 @@ def build_evidence_plan_from_sides(
         )
         seen.add(name)
 
-    if len(lanes) < 2:
+    if len(lanes) < (1 if allow_single else 2):
         return build_evidence_plan(query, max_lanes=max_lanes)
 
     operators = tuple(sorted(required_operator_atoms(query or "")))
     return EvidencePlan(
-        mode="multi_concept_sourced",
+        mode="multi_concept_sourced" if len(lanes) > 1 else "single_objective_sourced",
         reason="query_decomposed_into_source_sides",
         operators=operators,
         lanes=tuple(lanes),
