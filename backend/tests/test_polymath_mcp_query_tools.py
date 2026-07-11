@@ -114,9 +114,11 @@ async def test_mcp_search_forwards_current_retrieval_knobs(monkeypatch, system_u
             requested_tier=kwargs["retrieval_tier"],
             effective_tier=kwargs["retrieval_tier"],
             downgrade_reason=None,
+            diagnostics={},
         )
 
     monkeypatch.setattr(mcp_tools, "_scope_corpus_ids", AsyncMock(return_value=["c1", "c2"]))
+    monkeypatch.setattr(mcp_tools.get_settings(), "QUERY_PLAN_V2", False)
     monkeypatch.setattr(mcp_tools.retriever_orchestrator, "retrieve", fake_retrieve)
 
     result = await mcp_tools.polymath_search(
@@ -147,6 +149,49 @@ async def test_mcp_search_forwards_current_retrieval_knobs(monkeypatch, system_u
     assert captured["final_top_k"] == 6
     assert captured["fact_seed_limit"] == 7
     assert captured["search_mode"] == "local"
+
+
+@pytest.mark.asyncio
+async def test_mcp_search_uses_top_down_plan_when_enabled(monkeypatch, system_user):
+    captured: dict = {}
+
+    async def fake_retrieve_planned(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(
+            chunks=[],
+            requested_tier=kwargs["retrieval_tier"],
+            effective_tier=kwargs["retrieval_tier"],
+            downgrade_reason=None,
+            diagnostics={
+                "query_plan_version": "query_plan.v2",
+                "document_routing": {"routed_doc_count": 2},
+            },
+        )
+
+    monkeypatch.setattr(mcp_tools, "_scope_corpus_ids", AsyncMock(return_value=["c1"]))
+    monkeypatch.setattr(mcp_tools.get_settings(), "QUERY_PLAN_V2", True)
+    monkeypatch.setattr(
+        mcp_tools.retriever_orchestrator,
+        "retrieve_planned",
+        fake_retrieve_planned,
+    )
+
+    result = await mcp_tools.polymath_search(
+        query="what books help with dropshipping and why?",
+        corpus_ids=["c1"],
+        retrieval_tier="qdrant_mongo",
+        similarity_threshold=0.2,
+        neo4j_expansion_cap=7,
+        max_corpora_per_query=1,
+    )
+
+    assert captured["plan"].concepts == ("books", "dropshipping")
+    assert captured["similarity_threshold"] == 0.2
+    assert captured["neo4j_expansion_cap"] == 7
+    assert captured["max_corpora_per_query"] == 1
+    assert result["retrieval"]["diagnostics"]["document_routing"] == {
+        "routed_doc_count": 2
+    }
 
 
 @pytest.mark.asyncio

@@ -1236,6 +1236,9 @@ class RetrieverOrchestrator:
         rerank_top_n: int | None = None,
         final_top_k: int | None = None,
         fact_seed_limit: int | None = None,
+        similarity_threshold: float | None = None,
+        neo4j_expansion_cap: int | None = None,
+        max_corpora_per_query: int | None = None,
         search_mode: str = "local",
     ) -> RetrievalResult:
         """Execute QueryPlanV2 as one candidate-generation and rerank pass."""
@@ -1316,6 +1319,12 @@ class RetrieverOrchestrator:
                     "error": f"{type(exc).__name__}: {exc}"[:240],
                 }
             )
+        if (
+            max_corpora_per_query is not None
+            and max_corpora_per_query > 0
+            and len(corpus_ids) > max_corpora_per_query
+        ):
+            corpus_ids = corpus_ids[:max_corpora_per_query]
         try:
             effective_tier, downgrade_reason = await asyncio.wait_for(
                 self._enforce_strategy_intersection(retrieval_tier, corpus_ids),
@@ -1601,6 +1610,16 @@ class RetrieverOrchestrator:
             max_candidates=rerank_cap,
             corpus_ids=corpus_ids,
         )
+        if similarity_threshold is not None and similarity_threshold > 0.0:
+            before_threshold = len(fused)
+            fused = [
+                chunk for chunk in fused if float(chunk.score or 0.0) >= similarity_threshold
+            ]
+            fusion_diagnostics["similarity_threshold"] = {
+                "value": float(similarity_threshold),
+                "before": before_threshold,
+                "after": len(fused),
+            }
 
         facts: list[SourceFact] = []
         if effective_tier == RetrievalTier.qdrant_mongo_graph and fused:
@@ -1616,7 +1635,12 @@ class RetrieverOrchestrator:
                 expansion_task = mode_a_expansion.expand(
                     fused,
                     corpus_ids,
-                    limit=min(12, rerank_cap),
+                    limit=min(
+                        max(0, int(neo4j_expansion_cap))
+                        if neo4j_expansion_cap is not None
+                        else 12,
+                        rerank_cap,
+                    ),
                     db=conversation_service._db,
                     query=plan.standalone_query,
                 )
@@ -2104,6 +2128,9 @@ class RetrieverOrchestrator:
                 "summary_top_k": summary_top_k,
                 "final_top_k": int(final_top_k or settings.DEFAULT_RETRIEVAL_K),
                 "rerank_enabled": bool(rerank_enabled),
+                "similarity_threshold": similarity_threshold,
+                "neo4j_expansion_cap": neo4j_expansion_cap,
+                "max_corpora_per_query": max_corpora_per_query,
             },
             "counts": planned_counts,
             "dropped_corpus_ids": dropped,

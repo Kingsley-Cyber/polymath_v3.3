@@ -33,6 +33,7 @@ from services.ingestion.source_identity import (
 )
 from services.ingestion_service import ingestion_service
 from services.retriever import retriever_orchestrator
+from services.retriever.query_plan import build_query_plan_v2
 
 from .auth import (
     AuthError,
@@ -372,22 +373,31 @@ async def _run_search(
             logger.debug("MCP search_mode auto fallback to local: %s", exc)
             effective_search_mode = "local"
 
-    result = await retriever_orchestrator.retrieve(
-        query=query,
-        corpus_ids=scoped,
-        retrieval_tier=tier,
-        collections=None,
-        retrieval_k=retrieval_k,
-        rerank_enabled=rerank_enabled,
-        top_k_summary=top_k_summary,
-        rerank_top_n=rerank_top_n,
-        similarity_threshold=similarity_threshold,
-        neo4j_expansion_cap=neo4j_expansion_cap,
-        max_corpora_per_query=max_corpora_per_query,
-        final_top_k=result_cap,
-        fact_seed_limit=fact_seed_limit,
-        search_mode=effective_search_mode,
-    )
+    retrieval_kwargs = {
+        "corpus_ids": scoped,
+        "retrieval_tier": tier,
+        "collections": None,
+        "retrieval_k": retrieval_k,
+        "rerank_enabled": rerank_enabled,
+        "top_k_summary": top_k_summary,
+        "rerank_top_n": rerank_top_n,
+        "similarity_threshold": similarity_threshold,
+        "neo4j_expansion_cap": neo4j_expansion_cap,
+        "max_corpora_per_query": max_corpora_per_query,
+        "final_top_k": result_cap,
+        "fact_seed_limit": fact_seed_limit,
+        "search_mode": effective_search_mode,
+    }
+    if settings.QUERY_PLAN_V2:
+        result = await retriever_orchestrator.retrieve_planned(
+            plan=build_query_plan_v2(query, corpus_ids=scoped),
+            **retrieval_kwargs,
+        )
+    else:
+        result = await retriever_orchestrator.retrieve(
+            query=query,
+            **retrieval_kwargs,
+        )
     return {
         "chunks": [_json_ready(c) for c in result.chunks],
         "corpus_ids": scoped,
@@ -406,6 +416,7 @@ async def _run_search(
             "neo4j_expansion_cap": neo4j_expansion_cap,
             "max_corpora_per_query": max_corpora_per_query,
             "fact_seed_limit": fact_seed_limit,
+            "diagnostics": _json_ready(result.diagnostics or {}),
         },
     }
 
