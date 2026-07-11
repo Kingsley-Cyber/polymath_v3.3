@@ -134,6 +134,16 @@ def test_summary_microbatch_parser_salvages_valid_siblings_only() -> None:
     assert "valid" in parsed["parent-1"]
 
 
+def test_summary_microbatch_parser_skips_reasoning_object_prefix() -> None:
+    parsed = parse_summary_microbatch_response(
+        '<think>{"plan":"compile each item"}</think>\n'
+        '{"items":[{"target_id":"parent-1","artifact":{"summary":"valid"}}]}',
+        allowed_target_ids={"parent-1"},
+    )
+
+    assert set(parsed) == {"parent-1"}
+
+
 @pytest.mark.asyncio
 async def test_summary_microbatch_falls_back_only_missing_targets(monkeypatch) -> None:
     _EnvelopeIgnoringClient.payloads.clear()

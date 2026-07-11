@@ -282,6 +282,32 @@ def _salvage_json_fragment(text: str) -> dict:
     }
 
 
+def extract_json_object(
+    text: str,
+    *,
+    required_keys: set[str] | None = None,
+) -> dict | None:
+    """Find a balanced JSON object inside mixed provider output.
+
+    Reasoning-capable providers may put prose, tags, or even another JSON
+    object before the requested artifact. A first-``{``/last-``}`` slice joins
+    those objects and makes otherwise valid output unparseable.
+    """
+
+    required = set(required_keys or ())
+    decoder = json.JSONDecoder()
+    for index, char in enumerate(str(text or "")):
+        if char != "{":
+            continue
+        try:
+            value, _end = decoder.raw_decode(text[index:])
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        if isinstance(value, dict) and required.issubset(value):
+            return value
+    return None
+
+
 def parent_summary_artifact_fields(
     obj: dict,
     *,
@@ -619,18 +645,10 @@ def parse_semantic_summary(
     if not text:
         return out
 
-    obj: dict | None = None
-    parsed_json = False
+    obj = extract_json_object(text, required_keys={"summary"})
+    parsed_json = obj is not None
     repaired_fragment = False
-    start, end = text.find("{"), text.rfind("}")
-    if start != -1 and end > start:
-        try:
-            obj = json.loads(text[start : end + 1])
-            parsed_json = True
-        except Exception:
-            obj = _salvage_json_fragment(text) if looks_like_raw_json_text(text) else None
-            repaired_fragment = bool(obj and obj.get("summary"))
-    elif looks_like_raw_json_text(text):
+    if obj is None and looks_like_raw_json_text(text):
         obj = _salvage_json_fragment(text)
         repaired_fragment = bool(obj and obj.get("summary"))
 

@@ -76,6 +76,7 @@ _SYSTEM = (
 from services.ingestion.summary_semantics import (  # noqa: E402
     SEMANTIC_SUMMARY_INSTRUCTION as _SEM_INSTR,
     canonical_parent_summary_fields,
+    extract_json_object,
     parse_semantic_summary,
 )
 _SYSTEM = _SYSTEM.replace("__SEMANTIC_INSTRUCTION__", _SEM_INSTR)
@@ -166,21 +167,29 @@ def parse_summary_microbatch_response(
     text = str(raw or "").strip()
     if not text:
         return {}
-    start_candidates = [idx for idx in (text.find("{"), text.find("[")) if idx >= 0]
-    if not start_candidates:
-        return {}
-    start = min(start_candidates)
-    try:
-        payload = json.loads(text[start:])
-    except Exception:
-        end = max(text.rfind("}"), text.rfind("]"))
-        if end <= start:
+    payload = extract_json_object(text, required_keys={"items"})
+    if payload is not None:
+        rows = payload.get("items")
+    else:
+        rows = None
+    if isinstance(rows, list):
+        pass
+    else:
+        start_candidates = [idx for idx in (text.find("{"), text.find("[")) if idx >= 0]
+        if not start_candidates:
             return {}
+        start = min(start_candidates)
         try:
-            payload = json.loads(text[start : end + 1])
+            payload = json.loads(text[start:])
         except Exception:
-            return {}
-    rows = payload.get("items") if isinstance(payload, dict) else payload
+            end = max(text.rfind("}"), text.rfind("]"))
+            if end <= start:
+                return {}
+            try:
+                payload = json.loads(text[start : end + 1])
+            except Exception:
+                return {}
+        rows = payload.get("items") if isinstance(payload, dict) else payload
     if not isinstance(rows, list):
         return {}
     artifacts: dict[str, str] = {}

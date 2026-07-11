@@ -36,6 +36,17 @@ def test_truncated_json_salvages_clean_summary():
     assert o["repair_status"] == "repaired"
     assert o["validation_status"] == "valid"
 
+def test_reasoning_preamble_does_not_swallow_summary_artifact():
+    raw = (
+        '<think>Evaluate {"format":"parent_summary"} before answering.</think>\n'
+        '```json\n{"summary":"The passage explains how durable queues prevent duplicate provider work while preserving validated artifacts for retrieval.",'
+        '"central_claim":"Durable queues prevent duplicate provider work.",'
+        '"key_points":[{"point":"Validated artifacts remain reusable.","supporting_child_ids":["child_1"]}]}\n```'
+    )
+    parsed = parse_semantic_summary(raw, source_child_ids=["child_1"])
+    assert parsed["summary"].startswith("The passage explains")
+    assert parsed["validation_status"] == "valid"
+
 def test_unrepairable_raw_json_is_quarantined():
     o = parse_semantic_summary('{"central_claim": {"bad": true}', source_child_ids=["child_1"])
     assert o["summary"] == ""
