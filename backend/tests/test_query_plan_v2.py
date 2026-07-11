@@ -4,6 +4,7 @@ from services.retriever.query_plan import (
     contextualize_followup_query,
     query_plan_curation_query,
     query_plan_evidence_sides,
+    query_plan_execution_lanes,
     query_plan_to_dict,
 )
 
@@ -172,9 +173,7 @@ def test_answer_object_books_survives_as_required_concept():
     plan = build_query_plan_v2("what books help with dropshipping and why?")
 
     assert plan.concepts == ("books", "dropshipping")
-    assert query_plan_curation_query(plan) == (
-        "books book titles authors book recommendations lessons dropshipping"
-    )
+    assert query_plan_curation_query(plan) == plan.standalone_query
     assert "help" not in plan.concepts
     assert plan.answer_shape == "enumeration"
     books_lane = next(lane for lane in plan.lanes if lane.lane_id == "books")
@@ -182,6 +181,64 @@ def test_answer_object_books_survives_as_required_concept():
         "books book titles authors book recommendations lessons principles"
     )
     assert answer_object_title_terms(plan) == {"books": ("books",)}
+    assert [probe.probe_id for probe in plan.probes] == [
+        "books",
+        "books_justification",
+    ]
+    assert all(len(probe.question.split()) >= 4 for probe in plan.probes)
+
+
+def test_compositional_beginner_query_decomposes_into_complete_probes():
+    query = (
+        "SO IF I WANTED TO START DAY 0 DROPSHIPPING WHERE DO I EVEN BEGIN "
+        "AND WHAT DO I DO? what books should i reads for this"
+    )
+
+    plan = build_query_plan_v2(query)
+    execution_lanes = query_plan_execution_lanes(plan)
+
+    assert plan.concepts == ("books", "dropshipping")
+    assert plan.answer_shape == "synthesis"
+    assert [probe.probe_id for probe in plan.probes] == [
+        "day_zero_steps",
+        "beginner_books",
+    ]
+    assert plan.probes[0].question == (
+        "What steps should a beginner take on Day 0 to start dropshipping?"
+    )
+    assert plan.probes[1].question == (
+        "Which books does the corpus recommend to a beginner starting dropshipping?"
+    )
+    assert all(probe.required for probe in plan.probes)
+    assert not {"so", "if", "wanted", "start", "day", "begin"} & {
+        concept.lower() for concept in plan.concepts
+    }
+    assert [lane.lane_id for lane in execution_lanes] == [
+        "original",
+        "day_zero_steps",
+        "beginner_books",
+    ]
+    assert all(
+        len(lane.query.split()) >= 4
+        for lane in execution_lanes
+        if lane.role == "core"
+    )
+    assert execution_lanes[2].dense_text.startswith("books book titles authors")
+
+
+def test_probe_contract_is_serialized_and_drives_evidence_sides():
+    plan = build_query_plan_v2(
+        "How should I start dropshipping and what books should I read?"
+    )
+
+    payload = query_plan_to_dict(plan)
+    sides = query_plan_evidence_sides(plan)
+
+    assert payload["probes"]
+    assert [side["name"] for side in sides] == [
+        probe.probe_id for probe in plan.probes if probe.required
+    ]
+    assert all(str(side["query"]).endswith("?") for side in sides)
 
 
 def test_terse_followup_uses_previous_user_subject_without_model_call():
@@ -197,7 +254,4 @@ def test_terse_followup_uses_previous_user_subject_without_model_call():
     assert plan.original_query == "no authors"
     assert plan.standalone_query == standalone
     assert plan.concepts == ("books", "dropshipping", "authors")
-    assert query_plan_curation_query(plan) == (
-        "books book titles authors book recommendations lessons dropshipping "
-        "book authors written by"
-    )
+    assert query_plan_curation_query(plan) == standalone

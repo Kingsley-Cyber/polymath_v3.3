@@ -69,6 +69,7 @@ from services.retriever.query_plan import (
     answer_object_lane_ids,
     answer_object_title_terms,
     query_plan_curation_query,
+    query_plan_execution_lanes,
 )
 from services.retriever.tier0_router import tier0_document_router
 from services.retriever.intent_policy import (
@@ -1354,10 +1355,14 @@ class RetrieverOrchestrator:
         a_cols, b_cols = self._resolve_collections(
             effective_tier, corpus_ids, collections
         )
-        lanes = [lane for lane in plan.lanes if lane.role in {"original", "core"}]
+        lanes = list(query_plan_execution_lanes(plan))
         if not lanes:
             lanes = [plan.lanes[0]]
-        required_lane_ids = [lane.lane_id for lane in lanes if lane.role == "core"]
+        required_lane_ids = [
+            lane.lane_id
+            for lane in lanes
+            if lane.role == "core" and lane.required
+        ]
         answer_lane_ids = list(answer_object_lane_ids(plan))
         repair_diagnostics: dict[str, Any] = {
             "max_rounds": int(plan.max_repair_rounds),
@@ -2228,7 +2233,7 @@ class RetrieverOrchestrator:
         final_limit = int(final_top_k or settings.DEFAULT_RETRIEVAL_K)
         preferred_candidates = diversity.candidates
         enumeration_diagnostics: dict[str, object] = {"applied": False}
-        if plan.answer_shape == "enumeration":
+        if answer_lane_ids:
             (
                 preferred_candidates,
                 enumeration_diagnostics,
@@ -2240,7 +2245,7 @@ class RetrieverOrchestrator:
                 max_candidates=final_limit,
             )
         route_count = int(document_routing_diagnostics.get("routed_doc_count") or 0)
-        if plan.answer_shape == "enumeration" or intent.need == QueryNeed.BROAD:
+        if answer_lane_ids or intent.need == QueryNeed.BROAD:
             routed_document_budget = min(route_count, max(2, final_limit // 2))
         elif intent.need == QueryNeed.SPECIFIC:
             routed_document_budget = min(route_count, 2)
@@ -2254,7 +2259,7 @@ class RetrieverOrchestrator:
             max_candidates=final_limit,
             max_per_document=(
                 1
-                if intent.need == QueryNeed.BROAD and plan.answer_shape != "enumeration"
+                if intent.need == QueryNeed.BROAD and not answer_lane_ids
                 else None
             ),
             routed_document_budget=routed_document_budget,
@@ -2390,6 +2395,19 @@ class RetrieverOrchestrator:
             "original_query": plan.original_query,
             "standalone_query": plan.standalone_query,
             "curation_query": curation_query,
+            "probes": [
+                {
+                    "probe_id": probe.probe_id,
+                    "question": probe.question,
+                    "answer_type": probe.answer_type,
+                    "role": probe.role,
+                    "required": probe.required,
+                    "concepts": list(probe.concepts),
+                    "constraints": list(probe.constraints),
+                    "depends_on": list(probe.depends_on),
+                }
+                for probe in plan.probes
+            ],
             "detected_phrases": list(plan.concepts),
             "detected_entities": list(plan.concepts),
             "requested_tier": getattr(retrieval_tier, "value", retrieval_tier),

@@ -6,7 +6,10 @@ import pytest
 
 import services.retriever as retriever_module
 from models.schemas import RetrievalTier, SourceChunk
-from services.retriever.query_plan import build_query_plan_v2
+from services.retriever.query_plan import (
+    build_query_plan_v2,
+    query_plan_execution_lanes,
+)
 
 
 def _chunk(chunk_id: str, corpus_id: str = "c1") -> SourceChunk:
@@ -147,7 +150,7 @@ async def test_planned_hybrid_batches_embeddings_and_reranks_once(monkeypatch):
 
     assert len(embedded) == 1
     assert embedded[0] == [
-        lane.dense_text for lane in plan.lanes if lane.role in {"original", "core"}
+        lane.dense_text for lane in query_plan_execution_lanes(plan)
     ]
     assert reranks == [(plan.original_query, min(16, sequence))]
     assert result.diagnostics["query_plan_version"] == "query_plan.v2"

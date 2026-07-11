@@ -30,6 +30,7 @@ QueryComplexity = Literal[
     "dependent_multi_hop",
 ]
 QueryLaneRole = Literal["original", "core", "bridge", "background"]
+ProbeRole = Literal["primary", "support", "bridge"]
 AnswerShape = Literal[
     "single_fact",
     "enumeration",
@@ -78,6 +79,21 @@ _ANSWER_OBJECT_RE = re.compile(
     r"strategies|examples?|products?|companies|organizations?|documents?|sources?)\b",
     re.IGNORECASE,
 )
+_PROCEDURE_INTENT_RE = re.compile(
+    r"\b(?:how\s+(?:do|should|can)\s+i|where\s+do\s+i\s+(?:begin|start)|"
+    r"what\s+do\s+i\s+do|day\s*(?:0|zero)|first\s+steps?|getting\s+started|"
+    r"start(?:ing)?\s+from\s+scratch)\b",
+    re.IGNORECASE,
+)
+_JUSTIFICATION_RE = re.compile(
+    r"\b(?:and\s+)?why\b|\breasons?\b|\bwhy\s+(?:it|they|these)\b",
+    re.IGNORECASE,
+)
+_BEGINNER_RE = re.compile(
+    r"\b(?:complete\s+beginner|beginner|newcomer|starting\s+from\s+scratch|day\s*(?:0|zero))\b",
+    re.IGNORECASE,
+)
+_DAY_ZERO_RE = re.compile(r"\bday\s*(?:0|zero)\b", re.IGNORECASE)
 _FOLLOWUP_PREFIX_RE = re.compile(
     r"^(?:no[,:]?\s+|actually[,:]?\s+|instead[,:]?\s+|"
     r"and\s+|also\s+|what\s+about\s+)",
@@ -129,6 +145,8 @@ _GENERIC_LANE_TERMS = {
     "model",
     "method",
     "no",
+    "if",
+    "so",
     "principles",
 }
 
@@ -152,6 +170,7 @@ _PHRASE_LEADERS = {
     "from",
     "how",
     "is",
+    "if",
     "it",
     "my",
     "relate",
@@ -159,6 +178,7 @@ _PHRASE_LEADERS = {
     "requires",
     "then",
     "the",
+    "so",
     "to",
     "understanding",
     "use",
@@ -182,6 +202,25 @@ class QueryLane:
 
 
 @dataclass(frozen=True)
+class RetrievalProbe:
+    """One independently meaningful retrieval obligation.
+
+    A probe is deliberately a complete question rather than a keyword lane.
+    ``concepts`` and ``constraints`` remain structured so fusion can measure
+    coverage without parsing the generated question back into fragments.
+    """
+
+    probe_id: str
+    question: str
+    answer_type: AnswerShape
+    role: ProbeRole = "primary"
+    required: bool = True
+    concepts: tuple[str, ...] = ()
+    constraints: tuple[str, ...] = ()
+    depends_on: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class QueryPlanV2:
     version: str
     original_query: str
@@ -190,6 +229,7 @@ class QueryPlanV2:
     concepts: tuple[str, ...]
     operators: tuple[str, ...]
     lanes: tuple[QueryLane, ...]
+    probes: tuple[RetrievalProbe, ...] = ()
     answer_shape: AnswerShape = "single_fact"
     corpus_ids: tuple[str, ...] = ()
     max_repair_rounds: int = 1
@@ -227,7 +267,10 @@ def _looks_like_uppercase_command(value: str) -> bool:
     """Reject shouted imperative clauses that the title regex can misread."""
 
     words = [word for word in _normalize_phrase(value).split() if word.isalpha()]
-    return len(words) >= 4 and all(word.isupper() for word in words)
+    if not words or not all(word.isupper() for word in words):
+        return False
+    normalized = {word.lower() for word in words}
+    return len(words) >= 4 or normalized <= _PHRASE_LEADERS
 
 
 def _phrase_candidates(query: str, groups: list[ConceptGroup]) -> list[str]:
@@ -377,6 +420,12 @@ def _lexical_recall_phrases(
 def answer_object_lane_ids(plan: QueryPlanV2) -> tuple[str, ...]:
     """Return core lanes that describe the objects the answer must enumerate."""
 
+    if plan.probes:
+        return tuple(
+            probe.probe_id
+            for probe in plan.probes
+            if probe.answer_type == "enumeration"
+        )
     if plan.answer_shape != "enumeration":
         return ()
     return tuple(
@@ -391,6 +440,7 @@ def answer_object_title_terms(plan: QueryPlanV2) -> dict[str, tuple[str, ...]]:
     """Expose conservative title terms for top-down answer-object routing."""
 
     answer_lanes = set(answer_object_lane_ids(plan))
+    execution_lanes = query_plan_execution_lanes(plan)
     return {
         lane.lane_id: tuple(
             dict.fromkeys(
@@ -401,7 +451,7 @@ def answer_object_title_terms(plan: QueryPlanV2) -> dict[str, tuple[str, ...]]:
                 if len(term) >= 3
             )
         )
-        for lane in plan.lanes
+        for lane in execution_lanes
         if lane.lane_id in answer_lanes
     }
 
@@ -420,6 +470,10 @@ def _complexity(
 
 def _answer_shape(query: str, complexity: QueryComplexity) -> AnswerShape:
     normalized = clean_text(query).strip()
+    if _ANSWER_OBJECT_RE.search(query or "") and _PROCEDURE_INTENT_RE.search(
+        query or ""
+    ):
+        return "synthesis"
     if _ANSWER_OBJECT_RE.search(query or ""):
         return "enumeration"
     if complexity == "comparative" or re.search(
@@ -532,6 +586,231 @@ def contextualize_followup_query(
     return _normalize_phrase(f"{previous_user}; {focus}")
 
 
+def _probe_constraints(query: str) -> tuple[str, ...]:
+    constraints: list[str] = []
+    if _BEGINNER_RE.search(query):
+        constraints.append("beginner")
+    if _DAY_ZERO_RE.search(query):
+        constraints.append("Day 0")
+    return tuple(constraints)
+
+
+def _probe_topic_concepts(concepts: list[str]) -> tuple[str, ...]:
+    return tuple(
+        concept
+        for concept in concepts
+        if clean_text(concept).strip() not in _ANSWER_OBJECT_SUPPORT
+        and clean_text(concept).strip() not in _GENERIC_LANE_TERMS
+    )
+
+
+def _build_retrieval_probes(
+    query: str,
+    concepts: list[str],
+    *,
+    complexity: QueryComplexity,
+    answer_shape: AnswerShape,
+) -> tuple[RetrievalProbe, ...]:
+    """Turn user obligations into bounded, independently useful questions."""
+
+    constraints = _probe_constraints(query)
+    topic_concepts = _probe_topic_concepts(concepts)
+    topic = " and ".join(topic_concepts[:2]).strip()
+    object_match = _ANSWER_OBJECT_RE.search(query)
+    answer_object = _normalize_phrase(object_match.group(1)) if object_match else ""
+    is_procedure = bool(_PROCEDURE_INTENT_RE.search(query))
+    is_enumeration = bool(answer_object)
+    probes: list[RetrievalProbe] = []
+
+    if is_procedure:
+        audience = "a beginner" if "beginner" in constraints or "Day 0" in constraints else "someone"
+        timing = " on Day 0" if "Day 0" in constraints else ""
+        subject = topic or "this task"
+        probes.append(
+            RetrievalProbe(
+                probe_id="day_zero_steps" if "Day 0" in constraints else "starting_steps",
+                question=f"What steps should {audience} take{timing} to start {subject}?",
+                answer_type="procedure",
+                concepts=topic_concepts,
+                constraints=constraints,
+            )
+        )
+
+    if is_enumeration:
+        subject = f" for {topic}" if topic else ""
+        is_beginner = "beginner" in constraints or "Day 0" in constraints
+        normalized_object = clean_text(answer_object).strip() or "items"
+        enumeration_question = (
+            f"Which {answer_object} does the corpus recommend to a beginner"
+            f" starting {topic}?"
+            if is_beginner and topic
+            else f"Which {answer_object} does the corpus recommend{subject}?"
+        )
+        probes.append(
+            RetrievalProbe(
+                probe_id=(
+                    f"beginner_{_slug(normalized_object)}"
+                    if is_beginner
+                    else _slug(normalized_object)
+                ),
+                question=enumeration_question,
+                answer_type="enumeration",
+                concepts=tuple(dict.fromkeys((answer_object, *topic_concepts))),
+                constraints=constraints,
+            )
+        )
+        if _JUSTIFICATION_RE.search(query):
+            justification_question = (
+                f"Why are the recommended {answer_object} useful to a beginner"
+                f" starting {topic}?"
+                if is_beginner and topic
+                else f"Why are the recommended {answer_object} useful{subject}?"
+            )
+            probes.append(
+                RetrievalProbe(
+                    probe_id=f"{_slug(normalized_object)}_justification",
+                    question=justification_question,
+                    answer_type="synthesis",
+                    role="support",
+                    required=True,
+                    concepts=tuple(dict.fromkeys((answer_object, *topic_concepts))),
+                    constraints=constraints,
+                    depends_on=(probes[-1].probe_id,),
+                )
+            )
+
+    if not probes and complexity in {"comparative", "dependent_multi_hop"}:
+        for concept in concepts[:3]:
+            probes.append(
+                RetrievalProbe(
+                    probe_id=_slug(concept),
+                    question=f"What does the corpus establish about {concept}?",
+                    answer_type="single_fact",
+                    concepts=(concept,),
+                )
+            )
+        if len(probes) > 1:
+            probes.append(
+                RetrievalProbe(
+                    probe_id="relationship",
+                    question=_normalize_phrase(query) + "?",
+                    answer_type=(
+                        "relationship"
+                        if answer_shape == "relationship"
+                        else "comparison"
+                    ),
+                    role="bridge",
+                    required=True,
+                    concepts=tuple(concepts[:3]),
+                    depends_on=tuple(probe.probe_id for probe in probes),
+                )
+            )
+
+    if not probes:
+        probes.append(
+            RetrievalProbe(
+                probe_id="primary",
+                question=_normalize_phrase(query) + "?",
+                answer_type=answer_shape,
+                concepts=tuple(concepts),
+                constraints=constraints,
+            )
+        )
+
+    output: list[RetrievalProbe] = []
+    seen_ids: set[str] = set()
+    seen_questions: set[str] = set()
+    for probe in probes[:4]:
+        question = _normalize_phrase(probe.question) + "?"
+        question_key = clean_text(question).strip()
+        probe_id = probe.probe_id or f"probe_{len(output) + 1}"
+        if not question_key or question_key in seen_questions or probe_id in seen_ids:
+            continue
+        # No keyword fragments: every executable probe must be a sentence-like
+        # question with a subject beyond request scaffolding.
+        if len(re.findall(r"[A-Za-z0-9]+", question)) < 4:
+            continue
+        output.append(
+            RetrievalProbe(
+                probe_id=probe_id,
+                question=question,
+                answer_type=probe.answer_type,
+                role=probe.role,
+                required=probe.required,
+                concepts=probe.concepts,
+                constraints=probe.constraints,
+                depends_on=probe.depends_on,
+            )
+        )
+        seen_ids.add(probe_id)
+        seen_questions.add(question_key)
+    return tuple(output)
+
+
+def query_plan_execution_lanes(plan: QueryPlanV2) -> tuple[QueryLane, ...]:
+    """Compile complete probes into the legacy lane executor contract."""
+
+    original_lane = next(
+        (lane for lane in plan.lanes if lane.role == "original"), plan.lanes[0]
+    )
+    if not plan.probes:
+        return tuple(
+            lane for lane in plan.lanes if lane.role in {"original", "core"}
+        )
+
+    lanes: list[QueryLane] = [original_lane]
+    groups = concept_groups(plan.standalone_query, max_groups=8)
+    for probe in plan.probes:
+        concepts = tuple(concept for concept in probe.concepts if concept)
+        answer_object = next(
+            (
+                concept
+                for concept in concepts
+                if clean_text(concept).strip() in _ANSWER_OBJECT_SUPPORT
+            ),
+            None,
+        )
+        anchor = answer_object or next(iter(concepts), probe.question)
+        grounding_concepts = (answer_object,) if answer_object else concepts
+        support_phrases: list[str] = []
+        for concept in concepts:
+            support_phrases.extend(_lexical_recall_phrases(concept, groups))
+        support_phrases.extend(probe.constraints)
+        dense_text = (
+            " ".join(_lexical_recall_phrases(answer_object, groups))
+            if answer_object
+            else probe.question
+        )
+        lanes.append(
+            QueryLane(
+                lane_id=probe.probe_id,
+                # The executor treats every required probe as a core evidence
+                # lane. Probe.role still records whether it is a primary,
+                # support, or bridge obligation for diagnostics/synthesis.
+                role="core",
+                query=probe.question,
+                # Keep the executable probe as a complete question while
+                # giving document routing an answer-object representation.
+                # Otherwise topic words (for example, dropshipping) dominate
+                # and route a books probe to generic topic documents.
+                dense_text=dense_text,
+                lexical_terms=tuple(
+                    dict.fromkeys(
+                        re.findall(
+                            r"[a-z0-9]+",
+                            " ".join(grounding_concepts).lower(),
+                        )
+                    )
+                )[:16],
+                required=probe.required,
+                depends_on=probe.depends_on,
+                phrase=anchor,
+                support_phrases=tuple(dict.fromkeys(support_phrases or [anchor])),
+            )
+        )
+    return tuple(lanes)
+
+
 def build_query_plan_v2(
     query: str,
     *,
@@ -629,6 +908,13 @@ def build_query_plan_v2(
         )
 
     complexity = _complexity(standalone, len(concepts), operators)
+    answer_shape = _answer_shape(standalone, complexity)
+    probes = _build_retrieval_probes(
+        standalone,
+        concepts,
+        complexity=complexity,
+        answer_shape=answer_shape,
+    )
     return QueryPlanV2(
         version="query_plan.v2",
         original_query=original,
@@ -637,7 +923,8 @@ def build_query_plan_v2(
         concepts=tuple(concepts),
         operators=operators,
         lanes=tuple(lanes),
-        answer_shape=_answer_shape(standalone, complexity),
+        probes=probes,
+        answer_shape=answer_shape,
         corpus_ids=tuple(str(item) for item in (corpus_ids or ())),
     )
 
@@ -651,6 +938,12 @@ def query_plan_curation_query(plan: QueryPlanV2) -> str:
     evidence atoms. Comparative/relational plans retain their full wording.
     """
 
+    if len(plan.probes) > 1:
+        # A single concept concatenation previously converted compositional
+        # questions into fragments. Preserve the user's complete formulation
+        # for the one cross-encoder pass; individual probes already drive
+        # candidate generation and required-coverage reservations.
+        return plan.standalone_query
     if (
         plan.complexity in {"simple", "compositional"}
         and plan.concepts
@@ -677,6 +970,19 @@ def query_plan_to_dict(plan: QueryPlanV2) -> dict[str, object]:
         "operators": list(plan.operators),
         "corpus_ids": list(plan.corpus_ids),
         "max_repair_rounds": plan.max_repair_rounds,
+        "probes": [
+            {
+                "probe_id": probe.probe_id,
+                "question": probe.question,
+                "answer_type": probe.answer_type,
+                "role": probe.role,
+                "required": probe.required,
+                "concepts": list(probe.concepts),
+                "constraints": list(probe.constraints),
+                "depends_on": list(probe.depends_on),
+            }
+            for probe in plan.probes
+        ],
         "lanes": [
             {
                 "lane_id": lane.lane_id,
@@ -697,6 +1003,21 @@ def query_plan_to_dict(plan: QueryPlanV2) -> dict[str, object]:
 def query_plan_evidence_sides(plan: QueryPlanV2) -> list[dict[str, object]]:
     """Convert core lanes to the existing evidence-plan input contract."""
 
+    if plan.probes:
+        return [
+            {
+                "name": probe.probe_id,
+                "label": probe.question,
+                "query": probe.question,
+                "search_terms": [
+                    probe.question,
+                    *probe.concepts,
+                    *probe.constraints,
+                ],
+            }
+            for probe in plan.probes
+            if probe.required
+        ]
     return [
         {
             "name": lane.lane_id,
