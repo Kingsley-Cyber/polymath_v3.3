@@ -17,6 +17,7 @@ from pymongo import UpdateOne
 
 from db.queue_integrity import bulk_upsert_durable_jobs
 from services.ingestion.job_leases import (
+    DEAD_LETTER_JOB_STATUS,
     claim_runnable_jobs,
     reclaim_expired_running_jobs,
     retire_superseded_jobs,
@@ -61,6 +62,73 @@ def _has_qdrant_vector_gap(write_state: dict[str, Any]) -> bool:
         or "qdrant" in str(error).lower()
         for error in (write_state.get("verify_errors") or [])
     )
+
+
+async def reconcile_satisfied_document_pipeline_jobs(
+    db: Any,
+    *,
+    corpus_id: str,
+    limit: int = 5000,
+) -> int:
+    """Retire stale queue rows when document artifacts already satisfy them."""
+
+    statuses = sorted({*SUPERSEDABLE_STATUSES, DEAD_LETTER_JOB_STATUS})
+    safe_limit = max(1, min(int(limit or 5000), 50000))
+    rows = await db["document_pipeline_jobs"].find(
+        {"corpus_id": corpus_id, "status": {"$in": statuses}},
+        {"_id": 0, "job_id": 1, "doc_id": 1, "kind": 1},
+    ).limit(safe_limit).to_list(length=safe_limit)
+    if not rows:
+        return 0
+    doc_ids = sorted({str(row.get("doc_id") or "") for row in rows if row.get("doc_id")})
+    docs = await db["documents"].find(
+        {"corpus_id": corpus_id, "doc_id": {"$in": doc_ids}},
+        {"_id": 0, "doc_id": 1, "write_state": 1},
+    ).to_list(length=len(doc_ids))
+    doc_map = {str(row.get("doc_id") or ""): row for row in docs}
+
+    now = datetime.utcnow()
+    ops: list[UpdateOne] = []
+    for row in rows:
+        doc_id = str(row.get("doc_id") or "")
+        doc = doc_map.get(doc_id) or {}
+        write_state = doc.get("write_state") or {}
+        kind = str(row.get("kind") or "")
+        if kind == "chunk_document":
+            satisfied = await _count(
+                db,
+                "chunks",
+                with_active_records({"corpus_id": corpus_id, "doc_id": doc_id}),
+            ) > 0
+        elif kind == "persist_document":
+            satisfied = bool(write_state.get("mongo_written"))
+        elif kind == "embed_document":
+            satisfied = bool(write_state.get("qdrant_written")) and not _has_qdrant_vector_gap(
+                write_state
+            )
+        else:
+            satisfied = False
+        if not satisfied:
+            continue
+        ops.append(
+            UpdateOne(
+                {"job_id": row.get("job_id"), "status": {"$in": statuses}},
+                {
+                    "$set": {
+                        "status": "superseded",
+                        "reason": "artifact_already_satisfied",
+                        "artifact_reconciled_at": now,
+                        "updated_at": now,
+                        "lease_until": None,
+                    },
+                    "$unset": {"runner": "", "started_at": ""},
+                },
+            )
+        )
+    if not ops:
+        return 0
+    result = await db["document_pipeline_jobs"].bulk_write(ops, ordered=False)
+    return int(getattr(result, "modified_count", 0) or 0)
 
 
 def document_pipeline_contract(doc: dict[str, Any] | None) -> dict[str, Any]:
@@ -415,6 +483,15 @@ async def plan_document_pipeline_jobs(
 ) -> dict[str, Any]:
     limit = max(1, min(int(limit or 500), 10000))
     kinds_set = set(kinds or ["chunk_document", "persist_document", "embed_document"])
+    artifact_reconciled = (
+        await reconcile_satisfied_document_pipeline_jobs(
+            db,
+            corpus_id=corpus_id,
+            limit=max(limit, 5000),
+        )
+        if apply
+        else 0
+    )
     query = with_active_records({"corpus_id": corpus_id})
     if user_id:
         query["user_id"] = user_id
@@ -482,6 +559,7 @@ async def plan_document_pipeline_jobs(
         "counts": counts,
         "kind_counts": kind_counts,
         "jobs": jobs[:50],
+        "artifact_reconciled": artifact_reconciled,
     }
     if not apply or not jobs:
         return result

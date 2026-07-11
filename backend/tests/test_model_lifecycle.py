@@ -7,6 +7,98 @@ import pytest
 from services.ingestion import model_lifecycle
 
 
+@pytest.fixture(autouse=True)
+def _clear_lifecycle_failure_cooldowns():
+    model_lifecycle._failure_cooldowns.clear()
+    yield
+    model_lifecycle._failure_cooldowns.clear()
+
+
+@pytest.mark.asyncio
+async def test_ready_quarantines_failed_managed_lane_and_keeps_cloud_lane(
+    monkeypatch,
+):
+    attempts: list[str] = []
+
+    async def fake_ready(entry, *, purpose):
+        attempts.append(str(entry["model"]))
+        raise OSError("controller offline")
+
+    monkeypatch.setattr(model_lifecycle, "_ensure_one_ready", fake_ready)
+    pool = [
+        {
+            "model": "openai/polymath-extract",
+            "lifecycle_base_url": "http://controller.test",
+            "lifecycle_auto_start": True,
+        },
+        {
+            "model": "openai/tencent/Hy3",
+            "base_url": "https://cloud.test/v1",
+        },
+    ]
+
+    ready = await model_lifecycle.ensure_model_lifecycle_ready(
+        pool,
+        purpose="ghost_b",
+    )
+
+    assert attempts == ["openai/polymath-extract"]
+    assert [entry["model"] for entry in ready] == ["openai/tencent/Hy3"]
+
+
+@pytest.mark.asyncio
+async def test_ready_raises_when_failed_lifecycle_lane_is_only_capacity(monkeypatch):
+    async def fake_ready(entry, *, purpose):
+        raise OSError("controller offline")
+
+    monkeypatch.setattr(model_lifecycle, "_ensure_one_ready", fake_ready)
+
+    with pytest.raises(RuntimeError, match="all model lanes unavailable"):
+        await model_lifecycle.ensure_model_lifecycle_ready(
+            [
+                {
+                    "model": "openai/polymath-extract",
+                    "lifecycle_base_url": "http://controller.test",
+                    "lifecycle_auto_start": True,
+                }
+            ],
+            purpose="ghost_b",
+        )
+
+
+@pytest.mark.asyncio
+async def test_ready_cooldown_avoids_repeated_controller_attempts(monkeypatch):
+    attempts = 0
+
+    async def fake_ready(entry, *, purpose):
+        nonlocal attempts
+        attempts += 1
+        raise OSError("controller offline")
+
+    monkeypatch.setattr(model_lifecycle, "_ensure_one_ready", fake_ready)
+    pool = [
+        {
+            "model": "openai/polymath-extract",
+            "lifecycle_base_url": "http://controller.test",
+            "lifecycle_auto_start": True,
+            "lifecycle_failure_cooldown_seconds": 300,
+        },
+        {"model": "openai/tencent/Hy3"},
+    ]
+
+    first = await model_lifecycle.ensure_model_lifecycle_ready(
+        pool,
+        purpose="ghost_b",
+    )
+    second = await model_lifecycle.ensure_model_lifecycle_ready(
+        pool,
+        purpose="ghost_b",
+    )
+
+    assert attempts == 1
+    assert first == second == [{"model": "openai/tencent/Hy3"}]
+
+
 @pytest.mark.asyncio
 async def test_shutdown_model_lifecycle_posts_down_once_per_control_plane(monkeypatch):
     posts: list[tuple[str, dict[str, str]]] = []

@@ -3,7 +3,11 @@ from __future__ import annotations
 import pytest
 
 from services import ghost_a
-from services.ghost_a import SummaryTask, summarize_parents
+from services.ghost_a import (
+    SummaryTask,
+    parse_summary_microbatch_response,
+    summarize_parents,
+)
 from services.ingestion import model_lifecycle
 
 
@@ -40,6 +44,54 @@ class _CapturingBlankSummaryClient(_BlankSummaryClient):
     async def post(self, *args, **kwargs) -> _BlankSummaryResponse:
         self.payloads.append(dict(kwargs.get("json") or {}))
         return _BlankSummaryResponse()
+
+
+@pytest.mark.asyncio
+async def test_summary_microbatch_uses_one_provider_call_for_four_targets(monkeypatch) -> None:
+    _CapturingBlankSummaryClient.payloads.clear()
+    monkeypatch.setattr(ghost_a.httpx, "AsyncClient", _CapturingBlankSummaryClient)
+    monkeypatch.setattr(ghost_a, "_SUMMARY_RETRY_ATTEMPTS", 0)
+
+    results = await summarize_parents(
+        [
+            SummaryTask(
+                parent_id=f"parent-{index}",
+                doc_id="doc-1",
+                corpus_id="corpus-1",
+                source_tier="parent",
+                text=f"Independent source passage {index} with enough semantic content.",
+            )
+            for index in range(4)
+        ],
+        pool=[
+            {
+                "model": "unit/batch-model",
+                "base_url": None,
+                "api_key": None,
+                "max_concurrent": 1,
+                "extra_params": {"microbatch_size": 4},
+            }
+        ],
+        global_max_concurrent=1,
+    )
+
+    assert results == []
+    assert len(_CapturingBlankSummaryClient.payloads) == 1
+    assert "parent-0" in _CapturingBlankSummaryClient.payloads[0]["messages"][1]["content"]
+
+
+def test_summary_microbatch_parser_salvages_valid_siblings_only() -> None:
+    parsed = parse_summary_microbatch_response(
+        '{"items":['
+        '{"target_id":"parent-1","artifact":{"summary":"valid"}},'
+        '{"target_id":"unknown","artifact":{"summary":"ignore"}},'
+        '{"target_id":"parent-2","artifact":"malformed"}'
+        ']}',
+        allowed_target_ids={"parent-1", "parent-2"},
+    )
+
+    assert set(parsed) == {"parent-1"}
+    assert "valid" in parsed["parent-1"]
 
 
 @pytest.mark.asyncio

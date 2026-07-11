@@ -849,6 +849,45 @@ async def test_local_batch_strict_summary_preflight_still_fails(monkeypatch):
     assert result["status"] == batches.BATCH_FAILED
 
 
+@pytest.mark.asyncio
+async def test_local_batch_continues_when_managed_lifecycle_warmup_fails(
+    monkeypatch,
+):
+    from services.ingestion import model_lifecycle
+
+    attempts = 0
+
+    async def fake_lifecycle_pool(**_kwargs):
+        return [
+            {
+                "model": "openai/polymath-extract",
+                "lifecycle_base_url": "http://controller.test",
+                "lifecycle_auto_start": True,
+            }
+        ]
+
+    async def fake_acquire(*_args, **_kwargs):
+        nonlocal attempts
+        attempts += 1
+        raise OSError("controller offline")
+
+    monkeypatch.setattr(batches, "_batch_lifecycle_pool", fake_lifecycle_pool)
+    monkeypatch.setattr(
+        model_lifecycle,
+        "acquire_model_lifecycle_hold",
+        fake_acquire,
+    )
+
+    row, result = await _run_batch_with_preflight_failure(
+        monkeypatch,
+        safe_summary_failures=True,
+    )
+
+    assert attempts == 1
+    assert row["status"] == batches.BATCH_RUNNING
+    assert result["status"] == batches.BATCH_RUNNING
+
+
 class _BatchCursor:
     def __init__(self, rows):
         self.rows = rows

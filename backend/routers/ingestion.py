@@ -17,7 +17,7 @@ import logging
 import re
 import time
 from datetime import datetime, timedelta
-from typing import Literal
+from typing import Any, Literal
 from uuid import uuid4
 
 import httpx
@@ -243,6 +243,11 @@ class DocumentPipelineJobRunRequest(BaseModel):
     kinds: list[str] | None = None
 
 
+class IngestionJobControlRequest(BaseModel):
+    action: Literal["retry", "supersede", "dead_letter"]
+    reason: str = Field(min_length=3, max_length=500)
+
+
 class CorpusRepairCycleRequest(BaseModel):
     apply: bool = False
     background: bool = False
@@ -333,6 +338,7 @@ class ModelRefTestResult(BaseModel):
     base_url: str | None = None
     dimension: int | None = None
     error: str | None = None
+    cached: bool = False
 
 
 class ModelRefModelsResult(BaseModel):
@@ -432,11 +438,27 @@ async def _model_ref_for_test(
     return data, None
 
 
-async def _test_chat_model_ref(entry: dict) -> ModelRefTestResult:
+async def _test_chat_model_ref(entry: dict, *, db: Any = None) -> ModelRefTestResult:
     settings = get_settings()
     model = str(entry.get("model") or "").strip()
     if not model:
         return ModelRefTestResult(ok=False, kind="chat", error="Model is required")
+
+    if db is not None:
+        from services.ingestion.provider_canary_cache import load_cached_canary
+
+        cached = await load_cached_canary(db, entry=entry)
+        if cached is not None:
+            return ModelRefTestResult(
+                ok=bool(cached.get("ok")),
+                kind="chat",
+                status=cached.get("status"),
+                latency_ms=cached.get("latency_ms"),
+                model=model,
+                base_url=(entry.get("base_url") or "").strip() or None,
+                error=cached.get("error_class") if not cached.get("ok") else None,
+                cached=True,
+            )
 
     payload: dict = {
         "model": model,
@@ -474,7 +496,7 @@ async def _test_chat_model_ref(entry: dict) -> ModelRefTestResult:
             )
         latency_ms = int((time.monotonic() - started) * 1000)
         if resp.status_code >= 400:
-            return ModelRefTestResult(
+            result = ModelRefTestResult(
                 ok=False,
                 kind="chat",
                 status=resp.status_code,
@@ -483,31 +505,72 @@ async def _test_chat_model_ref(entry: dict) -> ModelRefTestResult:
                 base_url=base_url,
                 error=_safe_provider_text(resp.text),
             )
-        return ModelRefTestResult(
-            ok=True,
-            kind="chat",
-            status=resp.status_code,
-            latency_ms=latency_ms,
-            model=model,
-            base_url=base_url,
-        )
+        else:
+            result = ModelRefTestResult(
+                ok=True,
+                kind="chat",
+                status=resp.status_code,
+                latency_ms=latency_ms,
+                model=model,
+                base_url=base_url,
+            )
+        if db is not None:
+            from services.ingestion.provider_canary_cache import record_canary
+
+            await record_canary(
+                db,
+                entry=entry,
+                ok=result.ok,
+                status=result.status,
+                latency_ms=result.latency_ms,
+                error_class=(
+                    "rate_limited"
+                    if result.status == 429
+                    else (f"http_{result.status}" if not result.ok else None)
+                ),
+            )
+        return result
     except httpx.TimeoutException:
-        return ModelRefTestResult(
+        result = ModelRefTestResult(
             ok=False,
             kind="chat",
             model=model,
             base_url=base_url,
             error="Request timed out after 20s",
         )
+        if db is not None:
+            from services.ingestion.provider_canary_cache import record_canary
+
+            await record_canary(
+                db,
+                entry=entry,
+                ok=False,
+                status=None,
+                latency_ms=None,
+                error_class="timeout",
+            )
+        return result
     except Exception as exc:
         logger.warning("ingestion model chat probe failed: %s", exc)
-        return ModelRefTestResult(
+        result = ModelRefTestResult(
             ok=False,
             kind="chat",
             model=model,
             base_url=base_url,
             error=_safe_provider_text(str(exc)),
         )
+        if db is not None:
+            from services.ingestion.provider_canary_cache import record_canary
+
+            await record_canary(
+                db,
+                entry=entry,
+                ok=False,
+                status=None,
+                latency_ms=None,
+                error_class=type(exc).__name__,
+            )
+        return result
     finally:
         await shutdown_model_lifecycle([entry], purpose="model_ref_test")
 
@@ -865,7 +928,7 @@ async def test_ingestion_model_ref(
         )
     if body.kind == "embedding":
         return await _test_embedding_model_ref(entry)
-    return await _test_chat_model_ref(entry)
+    return await _test_chat_model_ref(entry, db=ingestion_service.db)
 
 
 @router.post("/ingestion/model-ref/models", response_model=ModelRefModelsResult)
@@ -1974,6 +2037,62 @@ async def run_document_pipeline_jobs(
         result,
         corpus_id=corpus_id,
         context="document pipeline job run",
+    )
+
+
+@router.get("/corpora/{corpus_id}/ingestion/durable-jobs")
+async def list_corpus_durable_jobs(
+    corpus_id: str,
+    lane: Literal["source", "document", "extraction", "summary", "graph"] | None = None,
+    status: list[str] | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
+    current_user: dict = Depends(get_current_user),
+):
+    """Inspect durable queue/audit history independently from artifact truth."""
+    existing = await ingestion_service.get_corpus(corpus_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Corpus not found")
+    from services.ingestion.job_control import list_jobs
+
+    return await list_jobs(
+        ingestion_service.db,
+        corpus_id=corpus_id,
+        lane=lane,
+        statuses=status,
+        limit=limit,
+    )
+
+
+@router.post("/corpora/{corpus_id}/ingestion/durable-jobs/{lane}/{job_id}/control")
+async def control_corpus_durable_job(
+    corpus_id: str,
+    lane: Literal["source", "document", "extraction", "summary", "graph"],
+    job_id: str,
+    body: IngestionJobControlRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Explicitly retry, supersede, or dead-letter one durable job."""
+    existing = await ingestion_service.get_corpus(corpus_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Corpus not found")
+    from services.ingestion.job_control import control_job
+
+    try:
+        result = await control_job(
+            ingestion_service.db,
+            corpus_id=corpus_id,
+            lane=lane,
+            job_id=job_id,
+            action=body.action,
+            reason=body.reason,
+            operator_user_id=str(current_user.get("user_id") or "unknown"),
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return await _attach_corpus_readiness(
+        result,
+        corpus_id=corpus_id,
+        context=f"durable job {body.action}",
     )
 
 

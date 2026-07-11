@@ -18,6 +18,7 @@ from pymongo import UpdateOne
 from db.queue_integrity import bulk_upsert_durable_jobs
 from services.ingestion.document_summaries import MISSING_DOCUMENT_SUMMARY_CLAUSE
 from services.ingestion.job_leases import (
+    DEAD_LETTER_JOB_STATUS,
     claim_runnable_jobs,
     reclaim_expired_running_jobs,
     retire_superseded_jobs,
@@ -54,6 +55,78 @@ STAGE_IDENTITY_MISSING_CLAUSE: dict[str, Any] = {
 }
 SummaryParentRunner = Callable[..., Awaitable[dict[str, Any]]]
 SummaryDocumentRunner = Callable[..., Awaitable[dict[str, Any]]]
+
+
+async def reconcile_satisfied_summary_jobs(
+    db: Any,
+    *,
+    corpus_id: str,
+    limit: int = 5000,
+) -> int:
+    """Retire actionable queue history whose durable artifact is complete."""
+
+    statuses = sorted({*SUPERSEDABLE_STATUSES, DEAD_LETTER_JOB_STATUS})
+    rows = await db["summary_jobs"].find(
+        {"corpus_id": corpus_id, "status": {"$in": statuses}},
+        {
+            "_id": 0,
+            "job_id": 1,
+            "kind": 1,
+            "doc_id": 1,
+            "parent_id": 1,
+        },
+    ).limit(max(1, min(int(limit or 5000), 50000))).to_list(length=limit)
+    if not rows:
+        return 0
+
+    now = datetime.utcnow()
+    ops: list[UpdateOne] = []
+    for row in rows:
+        kind = str(row.get("kind") or "")
+        satisfied = False
+        if kind == "retrieval_parent_summary":
+            parent_id = str(row.get("parent_id") or "")
+            if parent_id:
+                parent = await db["parent_chunks"].find_one(
+                    {
+                        "corpus_id": corpus_id,
+                        "parent_id": parent_id,
+                        **SUMMARY_TEXT_CLAUSE,
+                    },
+                    {"_id": 1},
+                )
+                satisfied = bool(parent)
+        elif kind == "document_summary":
+            doc_id = str(row.get("doc_id") or "")
+            satisfied = bool(
+                doc_id
+                and await _document_summary_exists(
+                    db,
+                    corpus_id=corpus_id,
+                    doc_id=doc_id,
+                )
+            )
+        if not satisfied:
+            continue
+        ops.append(
+            UpdateOne(
+                {"job_id": row.get("job_id"), "status": {"$in": statuses}},
+                {
+                    "$set": {
+                        "status": "superseded",
+                        "reason": "artifact_already_satisfied",
+                        "artifact_reconciled_at": now,
+                        "updated_at": now,
+                        "lease_until": None,
+                    },
+                    "$unset": {"runner": "", "started_at": ""},
+                },
+            )
+        )
+    if not ops:
+        return 0
+    result = await db["summary_jobs"].bulk_write(ops, ordered=False)
+    return int(getattr(result, "modified_count", 0) or 0)
 
 
 def _stable_hash(value: Any) -> str:
@@ -566,6 +639,15 @@ async def plan_summary_jobs(
             "jobs": [],
         }
 
+    artifact_reconciled = (
+        await reconcile_satisfied_summary_jobs(
+            db,
+            corpus_id=corpus_id,
+            limit=max(limit, 5000),
+        )
+        if apply
+        else 0
+    )
     jobs: list[dict[str, Any]] = []
     remaining = limit
 
@@ -662,6 +744,7 @@ async def plan_summary_jobs(
         "counts": counts,
         "kind_counts": kind_counts,
         "jobs": jobs[:50],
+        "artifact_reconciled": artifact_reconciled,
     }
     if not apply or not jobs:
         return result

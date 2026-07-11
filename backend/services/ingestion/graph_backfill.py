@@ -147,6 +147,12 @@ def _build_ghost_b_error_event_sink(
     lock = asyncio.Lock()
 
     async def _sink(event: dict[str, Any]) -> None:
+        from services.ingestion.provider_call_telemetry import record_ghost_b_event
+
+        try:
+            await record_ghost_b_event(db, event)
+        except Exception as exc:
+            logger.warning("ghost_b provider metric write failed: %s", exc)
         name = str(event.get("event") or "")
         async with lock:
             if name == "ghost_b_attempt_failed":

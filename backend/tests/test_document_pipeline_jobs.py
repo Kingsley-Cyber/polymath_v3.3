@@ -6,8 +6,39 @@ from services.ingestion.document_pipeline_jobs import (
     document_pipeline_contract_hash,
     document_pipeline_job_id,
     plan_document_pipeline_jobs,
+    reconcile_satisfied_document_pipeline_jobs,
     run_document_pipeline_jobs,
 )
+
+
+@pytest.mark.asyncio
+async def test_artifact_reconciliation_retires_failed_chunk_job_when_chunks_exist():
+    db = _Db(
+        docs=[
+            {
+                "corpus_id": "corpus-1",
+                "doc_id": "doc-1",
+                "write_state": {"mongo_written": True},
+            }
+        ],
+        child_count=3,
+    )
+    db["document_pipeline_jobs"].rows = [
+        {
+            "job_id": "poison-job",
+            "corpus_id": "corpus-1",
+            "doc_id": "doc-1",
+            "kind": "chunk_document",
+            "status": "failed",
+            "attempt_count": 170,
+        }
+    ]
+
+    await reconcile_satisfied_document_pipeline_jobs(db, corpus_id="corpus-1")
+
+    update = db["document_pipeline_jobs"].bulk_ops[0]._doc["$set"]
+    assert update["status"] == "superseded"
+    assert update["reason"] == "artifact_already_satisfied"
 from services.ingestion.document_pipeline_executors import (
     _stage_after_qdrant,
     mark_documents_persisted_from_artifacts,

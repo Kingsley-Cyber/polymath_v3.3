@@ -499,6 +499,14 @@ async def reconcile_ghost_b_failure_metadata(
         await db["documents"].bulk_write(doc_ops, ordered=False)
 
     result["stale_extraction_jobs_skipped"] = stale_extraction_jobs_skipped
+    changed = bool(row_ops or doc_ops or stale_extraction_jobs_skipped)
+    result["changed"] = changed
+    result["run_recorded"] = changed
+    if not changed:
+        # A healthy corpus should not accumulate an ingest_repair_runs row on
+        # every scheduler tick. The returned result remains observable in the
+        # tick telemetry, but durable repair history is reserved for work.
+        return result
     run_id = f"ghost_b_failure_reconcile_{now.strftime('%Y%m%d_%H%M%S')}_{uuid4().hex[:8]}"
     await db["ingest_repair_runs"].insert_one(
         {

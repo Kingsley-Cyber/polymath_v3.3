@@ -3,7 +3,9 @@ from datetime import datetime, timedelta
 import pytest
 
 from services.ingestion.job_leases import (
+    DEAD_LETTER_JOB_STATUS,
     SUPERSEDED_JOB_STATUS,
+    acquire_lane_lease,
     claim_runnable_jobs,
     lease_deadline,
     reclaim_expired_running_jobs,
@@ -182,3 +184,87 @@ async def test_claim_runnable_jobs_only_returns_atomically_claimed_rows():
     assert db.collection.rows[1]["attempt_count"] == 0
     assert db.collection.rows[2]["status"] == "running"
     assert db.collection.rows[2]["attempt_count"] == 3
+
+
+@pytest.mark.asyncio
+async def test_claim_dead_letters_exhausted_job_without_running_it():
+    db = _Db(
+        rows=[
+            {
+                "job_id": "job-poison",
+                "status": "queued",
+                "attempt_count": 5,
+                "last_error": "TimeoutError: provider stalled",
+            }
+        ]
+    )
+
+    claimed = await claim_runnable_jobs(
+        db,
+        collection_name="summary_jobs",
+        jobs=[dict(db.collection.rows[0])],
+        runnable_statuses={"queued"},
+        runner="summary_jobs.run",
+        increment_attempt=True,
+        max_attempts=5,
+    )
+
+    assert claimed == []
+    assert db.collection.rows[0]["status"] == DEAD_LETTER_JOB_STATUS
+    assert db.collection.rows[0]["failure_class"] == "timeouterror"
+
+
+class _LaneResult:
+    deleted_count = 1
+
+
+class _LaneCollection:
+    def __init__(self):
+        self.row = None
+
+    async def find_one_and_update(self, query, update, **_kwargs):
+        now = update["$set"]["updated_at"]
+        if self.row and self.row["lease_until"] > now and self.row["owner"] != update["$set"]["owner"]:
+            return None
+        self.row = {"_id": query["_id"], **update["$set"]}
+        return self.row
+
+    async def delete_one(self, query):
+        if self.row and self.row.get("lease_id") == query.get("lease_id"):
+            self.row = None
+            return _LaneResult()
+        return type("Result", (), {"deleted_count": 0})()
+
+
+@pytest.mark.asyncio
+async def test_lane_lease_allows_only_one_owner_until_expiry():
+    collection = _LaneCollection()
+    db = {"ingest_lane_leases": collection}
+    now = datetime(2026, 1, 1, 12, 0, 0)
+
+    first = await acquire_lane_lease(
+        db,
+        corpus_id="corpus-1",
+        lane="summary",
+        owner="worker-a",
+        now=now,
+    )
+    second = await acquire_lane_lease(
+        db,
+        corpus_id="corpus-1",
+        lane="summary",
+        owner="worker-b",
+        now=now + timedelta(seconds=1),
+    )
+    reclaimed = await acquire_lane_lease(
+        db,
+        corpus_id="corpus-1",
+        lane="summary",
+        owner="worker-b",
+        now=now + timedelta(hours=1),
+    )
+
+    assert first is not None
+    assert second is None
+    assert reclaimed is not None
+    assert reclaimed["owner"] == "worker-b"

@@ -433,7 +433,9 @@ async def run_bounded_corpus_repair_cycle(
             {
                 "name": "document_pipeline_job_plan",
                 "status": result.get("status"),
-                "changed": bool(result.get("planned")),
+                "changed": bool(
+                    result.get("planned") or result.get("artifact_reconciled")
+                ),
                 "result": result,
             }
         )
@@ -551,7 +553,9 @@ async def run_bounded_corpus_repair_cycle(
             {
                 "name": "summary_job_plan",
                 "status": result.get("status"),
-                "changed": bool(result.get("planned")),
+                "changed": bool(
+                    result.get("planned") or result.get("artifact_reconciled")
+                ),
                 "result": result,
             }
         )
@@ -710,13 +714,20 @@ async def run_bounded_corpus_repair_cycle(
                     )
                 )
             else:
-                result = await run_extraction_jobs(
-                    db,
-                    qdrant_client=qdrant_client,
-                    corpus_id=corpus_id,
-                    user_id=user_id,
-                    limit=extraction_job_run_limit,
-                )
+                if ingestion_service is not None:
+                    result = await ingestion_service.run_extraction_jobs(
+                        corpus_id=corpus_id,
+                        user_id=user_id,
+                        limit=extraction_job_run_limit,
+                    )
+                else:
+                    result = await run_extraction_jobs(
+                        db,
+                        qdrant_client=qdrant_client,
+                        corpus_id=corpus_id,
+                        user_id=user_id,
+                        limit=extraction_job_run_limit,
+                    )
                 steps.append(
                     {
                         "name": "extraction_job_run",
@@ -828,14 +839,21 @@ async def run_bounded_corpus_repair_cycle(
                     )
                 )
             else:
-                result = await run_graph_promotion_jobs(
-                    db,
-                    qdrant_client=qdrant_client,
-                    neo4j_driver=neo4j_driver,
-                    corpus_id=corpus_id,
-                    user_id=user_id,
-                    limit=graph_run_limit,
-                )
+                if ingestion_service is not None:
+                    result = await ingestion_service.run_graph_promotion_jobs(
+                        corpus_id=corpus_id,
+                        user_id=user_id,
+                        limit=graph_run_limit,
+                    )
+                else:
+                    result = await run_graph_promotion_jobs(
+                        db,
+                        qdrant_client=qdrant_client,
+                        neo4j_driver=neo4j_driver,
+                        corpus_id=corpus_id,
+                        user_id=user_id,
+                        limit=graph_run_limit,
+                    )
                 steps.append(
                     {
                         "name": "graph_promotion_run",

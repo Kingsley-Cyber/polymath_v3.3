@@ -15,6 +15,7 @@ import mimetypes
 import os
 import shutil
 import uuid
+from contextlib import AsyncExitStack
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -2182,12 +2183,20 @@ async def run_local_batch(
         if lifecycle_pool:
             from services.ingestion.model_lifecycle import acquire_model_lifecycle_hold
 
-            await acquire_model_lifecycle_hold(
-                lifecycle_pool,
-                purpose=lifecycle_purpose,
-                hold_id=lifecycle_hold_id,
-            )
-            lifecycle_hold_acquired = True
+            try:
+                await acquire_model_lifecycle_hold(
+                    lifecycle_pool,
+                    purpose=lifecycle_purpose,
+                    hold_id=lifecycle_hold_id,
+                )
+                lifecycle_hold_acquired = True
+            except Exception as exc:  # noqa: BLE001 - cloud lanes are independent
+                logger.warning(
+                    "batch lifecycle warmup unavailable; continuing with "
+                    "provider-level failover batch=%s failure_class=%s",
+                    batch_id[:8],
+                    type(exc).__name__,
+                )
 
         for _pass_target in pass_plan:
             _rank = STAGE_RANK.get(_pass_target) if _pass_target else None
@@ -2330,12 +2339,45 @@ def start_local_batch_runner(
 
     async def _run() -> None:
         try:
-            await run_local_batch(
-                db=db,
-                ingestion_service=ingestion_service,
-                batch_id=batch_id,
-                user_id=user_id,
+            batch = await db[BATCHES].find_one(
+                {"batch_id": batch_id, "user_id": user_id},
+                {"_id": 0, "corpus_id": 1},
             )
+            corpus_id = str((batch or {}).get("corpus_id") or "")
+            if not corpus_id:
+                return
+            from services.ingestion.job_leases import corpus_lane_lease
+
+            owner = f"batch:{batch_id}"
+            async with AsyncExitStack() as stack:
+                for lane in (
+                    "source_parse",
+                    "document_pipeline",
+                    "extraction",
+                    "summary",
+                    "graph_promotion",
+                ):
+                    lease = await stack.enter_async_context(
+                        corpus_lane_lease(
+                            db,
+                            corpus_id=corpus_id,
+                            lane=lane,
+                            owner=owner,
+                        )
+                    )
+                    if not lease:
+                        logger.info(
+                            "batch %s deferred because corpus lane %s is owned",
+                            batch_id[:8],
+                            lane,
+                        )
+                        return
+                await run_local_batch(
+                    db=db,
+                    ingestion_service=ingestion_service,
+                    batch_id=batch_id,
+                    user_id=user_id,
+                )
         except Exception:
             logger.exception("Local ingest batch failed batch=%s", batch_id)
             await db[BATCHES].update_one(

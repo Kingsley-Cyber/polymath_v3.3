@@ -617,6 +617,44 @@ export async function runCorpusDocumentPipelineJobs(
   });
 }
 
+export interface DurableIngestionJob {
+  job_id: string;
+  lane: "source" | "document" | "extraction" | "summary" | "graph";
+  status: string;
+  kind?: string;
+  doc_id?: string;
+  chunk_id?: string;
+  parent_id?: string;
+  attempt_count?: number;
+  failure_class?: string | null;
+  last_actionable_error?: string | null;
+  updated_at?: string;
+}
+
+export async function listCorpusDurableJobs(
+  corpusId: string,
+  params: { lane?: DurableIngestionJob["lane"]; status?: string[]; limit?: number } = {},
+): Promise<{ items: DurableIngestionJob[]; count: number }> {
+  const search = new URLSearchParams();
+  if (params.lane) search.set("lane", params.lane);
+  if (params.limit) search.set("limit", String(params.limit));
+  for (const status of params.status ?? []) search.append("status", status);
+  const suffix = search.toString() ? `?${search.toString()}` : "";
+  return fetchJSON(`/corpora/${corpusId}/ingestion/durable-jobs${suffix}`);
+}
+
+export async function controlCorpusDurableJob(
+  corpusId: string,
+  lane: DurableIngestionJob["lane"],
+  jobId: string,
+  payload: { action: "retry" | "supersede" | "dead_letter"; reason: string },
+): Promise<Record<string, unknown>> {
+  return fetchJSON(
+    `/corpora/${corpusId}/ingestion/durable-jobs/${lane}/${encodeURIComponent(jobId)}/control`,
+    { method: "POST", body: JSON.stringify(payload) },
+  );
+}
+
 export async function runCorpusRepairCycle(
   corpusId: string,
   payload: {

@@ -553,6 +553,9 @@ export function CorpusDetail({
   const [extractionJobRunResult, setExtractionJobRunResult] = useState<ExtractionJobRunResult | null>(null);
   const [isAuditingIdentity, setIsAuditingIdentity] = useState(false);
   const [identityAuditResult, setIdentityAuditResult] = useState<IdentityAuditResult | null>(null);
+  const [durableJobs, setDurableJobs] = useState<api.DurableIngestionJob[]>([]);
+  const [isLoadingDurableJobs, setIsLoadingDurableJobs] = useState(false);
+  const [controllingJobId, setControllingJobId] = useState<string | null>(null);
   const identityAuditAction = getIdentityAuditAction(identityAuditResult);
   const quickUploadInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -1040,6 +1043,49 @@ export function CorpusDetail({
     }
   };
 
+  const handleInspectDurableJobs = async () => {
+    setIsLoadingDurableJobs(true);
+    setError(null);
+    try {
+      const result = await api.listCorpusDurableJobs(corpus.corpus_id, {
+        status: [
+          "dead_letter",
+          "failed",
+          "provider_failed",
+          "validation_failed",
+          "blocked_empty_source",
+          "blocked_provider_contract",
+        ],
+        limit: 100,
+      });
+      setDurableJobs(result.items);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to inspect durable jobs");
+    } finally {
+      setIsLoadingDurableJobs(false);
+    }
+  };
+
+  const handleControlDurableJob = async (
+    job: api.DurableIngestionJob,
+    action: "retry" | "supersede" | "dead_letter",
+  ) => {
+    setControllingJobId(job.job_id);
+    setError(null);
+    try {
+      await api.controlCorpusDurableJob(corpus.corpus_id, job.lane, job.job_id, {
+        action,
+        reason: `Operator ${action} from corpus artifact/queue audit`,
+      });
+      await handleInspectDurableJobs();
+      onCorpusUpdated(await api.getCorpus(corpus.corpus_id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : `Failed to ${action} durable job`);
+    } finally {
+      setControllingJobId(null);
+    }
+  };
+
   const handleRunExtractionJobs = async () => {
     setIsRunningExtractionJobs(true);
     setError(null);
@@ -1500,6 +1546,19 @@ export function CorpusDetail({
                   <span>Auto repair</span>
                 </button>
                 <button
+                  onClick={handleInspectDurableJobs}
+                  disabled={isLoadingDurableJobs}
+                  className="flex items-center gap-1 px-2 py-0.5 text-[9px] font-bold tracking-widest text-content-tertiary border border-border-minimal hover:border-content-secondary hover:text-content-secondary disabled:opacity-50 transition-none uppercase"
+                  title="Inspect dead-letter and failed durable jobs without changing artifact truth"
+                >
+                  {isLoadingDurableJobs ? (
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                  ) : (
+                    <FileText className="w-3 h-3" />
+                  )}
+                  <span>Inspect jobs</span>
+                </button>
+                <button
                   onClick={() => handleRepairCycle(true, { runGraphJobs: true })}
                   disabled={
                     isRunningRepairCycle ||
@@ -1842,6 +1901,22 @@ export function CorpusDetail({
                 )}
               </div>
               <div
+                className="border border-border-minimal px-2 py-1"
+                title="Secret-free provider accounting over the last 24 hours. Artifact truth is not derived from these audit counters."
+              >
+                <div className="text-content-tertiary uppercase">Provider efficiency</div>
+                <div className="text-content-primary">
+                  {readinessRepair?.provider_efficiency?.calls ?? 0} calls
+                  <span className="text-content-tertiary">
+                    {" "}· {readinessRepair?.provider_efficiency?.accepted_artifacts ?? 0} accepted
+                  </span>
+                </div>
+                <div className="text-content-tertiary">
+                  {readinessRepair?.provider_efficiency?.calls_per_artifact ?? "n/a"} calls/artifact ·{" "}
+                  {readinessRepair?.queue_telemetry?.dead_letter_total ?? 0} dead-letter
+                </div>
+              </div>
+              <div
                 className={`border px-2 py-1 ${
                   ((readinessRepair?.extraction_jobs_failed ?? 0) > 0 ||
                     (readinessRepair?.extraction_jobs_blocked ?? 0) > 0)
@@ -1999,6 +2074,53 @@ export function CorpusDetail({
                 )}
               </div>
             </div>
+            {durableJobs.length > 0 && (
+              <div className="xl:col-span-2 border-t border-border-minimal pt-2 space-y-1">
+                <div className="flex items-center justify-between text-[9px] uppercase tracking-widest">
+                  <span className="text-content-secondary">Queue audit history</span>
+                  <span className="text-content-tertiary">{durableJobs.length} inspectable blockers</span>
+                </div>
+                {durableJobs.slice(0, 20).map((job) => (
+                  <div
+                    key={`${job.lane}:${job.job_id}`}
+                    className="grid grid-cols-[90px_minmax(0,1fr)_auto] items-center gap-2 border border-border-minimal px-2 py-1 text-[9px]"
+                  >
+                    <span className="text-content-tertiary uppercase">{job.lane}</span>
+                    <span className="min-w-0 truncate text-content-secondary" title={job.last_actionable_error ?? job.job_id}>
+                      {job.failure_class ?? job.status} · attempts {job.attempt_count ?? 0} · {job.job_id}
+                    </span>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => handleControlDurableJob(job, "retry")}
+                        disabled={controllingJobId === job.job_id}
+                        className="p-1 text-accent-main hover:bg-accent-main hover:text-bg-base disabled:opacity-50"
+                        title="Explicitly reset the attempt ceiling and retry this job"
+                      >
+                        <RotateCcw className="w-3 h-3" />
+                      </button>
+                      <button
+                        onClick={() => handleControlDurableJob(job, "supersede")}
+                        disabled={controllingJobId === job.job_id}
+                        className="p-1 text-content-tertiary hover:text-content-primary disabled:opacity-50"
+                        title="Keep this job as audit history but remove it from readiness"
+                      >
+                        <Check className="w-3 h-3" />
+                      </button>
+                      {job.status !== "dead_letter" && (
+                        <button
+                          onClick={() => handleControlDurableJob(job, "dead_letter")}
+                          disabled={controllingJobId === job.job_id}
+                          className="p-1 text-error hover:bg-error hover:text-bg-base disabled:opacity-50"
+                          title="Stop automatic retries and move this job to dead-letter"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
             {repairCycleResult && (
               <div className="xl:col-span-2 text-[9px] font-mono text-content-tertiary">
                 Repair {repairCycleResult.background ? "queued" : repairCycleResult.apply ? "applied" : "planned"} ·

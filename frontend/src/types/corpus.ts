@@ -443,6 +443,38 @@ export interface CorpusReadiness {
         reasons?: string[];
       }>;
     };
+    provider_efficiency?: {
+      window_hours?: number;
+      calls?: number;
+      billable_calls?: number;
+      local_calls?: number;
+      attempted_items?: number;
+      accepted_artifacts?: number;
+      calls_per_artifact?: number | null;
+      tokens_per_artifact?: number | null;
+      input_tokens?: number;
+      output_tokens?: number;
+      retries?: number;
+      rate_limits?: number;
+      providers?: Record<
+        string,
+        { calls?: number; accepted?: number; input_tokens?: number; output_tokens?: number }
+      >;
+    };
+    scheduler?: {
+      idle_ticks?: number;
+      no_op_cycles?: number;
+      next_eligible_at?: string;
+      updated_at?: string;
+      last_changed?: boolean;
+    };
+    queue_telemetry?: {
+      dead_letter_total?: number;
+      lanes?: Record<
+        string,
+        { dead_letter?: number; oldest_actionable_age_seconds?: number }
+      >;
+    };
     summary_jobs?: Record<string, number>;
     summary_jobs_pending?: number;
     summary_jobs_waiting_dependencies?: number;

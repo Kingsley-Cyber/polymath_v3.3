@@ -108,7 +108,12 @@ QUERYABLE_STAGES = {
 FULLY_ENRICHED_STAGES = {"complete", "fully_enriched"}
 EXCLUDED_DOCUMENT_STAGES = {"skipped_duplicate"}
 EXTRACTION_PENDING_JOB_STATUSES = ("queued", "running")
-EXTRACTION_FAILED_JOB_STATUSES = ("provider_failed", "validation_failed", "failed")
+EXTRACTION_FAILED_JOB_STATUSES = (
+    "provider_failed",
+    "validation_failed",
+    "failed",
+    "dead_letter",
+)
 EXTRACTION_BLOCKED_JOB_STATUSES = ("blocked_provider_contract",)
 EXTRACTION_IDENTITY_BLOCKING_STATUSES = (
     *EXTRACTION_PENDING_JOB_STATUSES,
@@ -120,19 +125,21 @@ SUMMARY_WAITING_JOB_STATUSES = (
     "blocked_no_parent_summaries",
     "blocked_parent_summaries_incomplete",
 )
-SUMMARY_FAILED_JOB_STATUSES = ("failed", "blocked_empty_source")
+SUMMARY_FAILED_JOB_STATUSES = ("failed", "blocked_empty_source", "dead_letter")
 DOCUMENT_PIPELINE_PENDING_JOB_STATUSES = ("queued", "running")
 DOCUMENT_PIPELINE_FAILED_JOB_STATUSES = (
     "failed",
     "blocked_no_source",
     "blocked_missing_chunks",
     "blocked_mongo_state",
+    "dead_letter",
 )
 SOURCE_PARSE_PENDING_JOB_STATUSES = ("queued", "running")
 SOURCE_PARSE_FAILED_JOB_STATUSES = (
     "failed",
     "failed_recoverable",
     "blocked_source_missing",
+    "dead_letter",
 )
 
 
@@ -429,6 +436,9 @@ def build_corpus_readiness_snapshot(
     summary_jobs = repair_counts.get("summary_jobs") or {}
     document_pipeline_jobs = repair_counts.get("document_pipeline_jobs") or {}
     source_parse_jobs = repair_counts.get("source_parse_jobs") or {}
+    provider_efficiency = repair_counts.get("provider_efficiency") or {}
+    scheduler_state = repair_counts.get("scheduler_state") or {}
+    queue_telemetry = repair_counts.get("queue_telemetry") or {}
     source_parse_pending_jobs = sum(
         _int(source_parse_jobs.get(status)) for status in SOURCE_PARSE_PENDING_JOB_STATUSES
     )
@@ -930,6 +940,9 @@ def build_corpus_readiness_snapshot(
             "document_pipeline_jobs": document_pipeline_jobs,
             "document_pipeline_jobs_pending": document_pipeline_pending_jobs,
             "document_pipeline_jobs_failed": document_pipeline_failed_jobs,
+            "provider_efficiency": provider_efficiency,
+            "scheduler": scheduler_state,
+            "queue_telemetry": queue_telemetry,
             "latest_runs": repair_counts.get("latest_runs") or [],
         },
         "pressure": pressure
@@ -1685,6 +1698,62 @@ async def compute_corpus_readiness(db: Any, corpus_id: str) -> dict[str, Any]:
         neo4j_write_concurrency=neo4j_write_concurrency,
     )
 
+    try:
+        from services.ingestion.provider_call_telemetry import provider_efficiency_snapshot
+
+        provider_efficiency = await provider_efficiency_snapshot(
+            db,
+            corpus_id=corpus_id,
+        )
+    except Exception:
+        provider_efficiency = {}
+    try:
+        scheduler_state = await db["ingest_scheduler_state"].find_one(
+            {"_id": corpus_id},
+            {
+                "_id": 0,
+                "idle_ticks": 1,
+                "no_op_cycles": 1,
+                "next_eligible_at": 1,
+                "updated_at": 1,
+                "last_changed": 1,
+            },
+        ) or {}
+    except Exception:
+        scheduler_state = {}
+    queue_telemetry: dict[str, Any] = {"dead_letter_total": 0, "lanes": {}}
+    now = datetime.now(timezone.utc)
+    for lane, collection, counts in (
+        ("source", "source_parse_jobs", source_parse_jobs),
+        ("document", "document_pipeline_jobs", document_pipeline_jobs),
+        ("extraction", "extraction_jobs", extraction_jobs),
+        ("summary", "summary_jobs", summary_jobs),
+        ("graph", "graph_promotion_jobs", graph_jobs),
+    ):
+        dead_letters = _int(counts.get("dead_letter"))
+        oldest_age_seconds = 0
+        try:
+            oldest = await db[collection].find_one(
+                {
+                    "corpus_id": corpus_id,
+                    "status": {"$in": ["queued", "running"]},
+                },
+                {"_id": 0, "created_at": 1, "updated_at": 1},
+                sort=[("created_at", 1)],
+            )
+            stamp = (oldest or {}).get("created_at") or (oldest or {}).get("updated_at")
+            if isinstance(stamp, datetime):
+                if stamp.tzinfo is None:
+                    stamp = stamp.replace(tzinfo=timezone.utc)
+                oldest_age_seconds = max(0, int((now - stamp).total_seconds()))
+        except Exception:
+            pass
+        queue_telemetry["lanes"][lane] = {
+            "dead_letter": dead_letters,
+            "oldest_actionable_age_seconds": oldest_age_seconds,
+        }
+        queue_telemetry["dead_letter_total"] += dead_letters
+
     return build_corpus_readiness_snapshot(
         corpus_id=corpus_id,
         document_counts=doc_counts,
@@ -1702,6 +1771,9 @@ async def compute_corpus_readiness(db: Any, corpus_id: str) -> dict[str, Any]:
             "provider_lane_health": provider_lane_health,
             "summary_jobs": summary_jobs,
             "document_pipeline_jobs": document_pipeline_jobs,
+            "provider_efficiency": provider_efficiency,
+            "scheduler_state": scheduler_state,
+            "queue_telemetry": queue_telemetry,
         },
         pressure=pressure,
     )

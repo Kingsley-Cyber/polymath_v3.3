@@ -849,11 +849,44 @@ class Settings(BaseSettings):
         le=86_400.0,
         description="Minimum interval between automatic corpus repair planning ticks.",
     )
+    INGEST_AUTO_REPAIR_MAX_BACKOFF_SECONDS: float = Field(
+        default=3600.0,
+        ge=60.0,
+        le=86_400.0,
+        description="Maximum per-corpus idle backoff for unchanged repair truth.",
+    )
+    INGEST_JOB_MAX_ATTEMPTS: int = Field(
+        default=5,
+        ge=1,
+        le=100,
+        description="Attempts allowed for one unchanged durable job identity before dead-lettering.",
+    )
+    INGEST_PROVIDER_MICROBATCH_SIZE: int = Field(
+        default=4,
+        ge=1,
+        le=8,
+        description="Maximum independent summary/extraction targets compiled in one provider request.",
+    )
+    INGEST_PROVIDER_MICROBATCH_MAX_CHARS: int = Field(
+        default=60_000,
+        ge=2_000,
+        le=500_000,
+        description="Input character ceiling for one provider microbatch.",
+    )
     INGEST_AUTO_REPAIR_CORPUS_LIMIT: int = Field(
         default=5,
         ge=1,
         le=100,
         description="Maximum corpora inspected in one automatic repair planning tick.",
+    )
+    INGEST_AUTO_REPAIR_CORPUS_CONCURRENCY: int = Field(
+        default=3,
+        ge=1,
+        le=16,
+        description=(
+            "Maximum corpora repaired concurrently. Per-corpus lane leases, "
+            "provider semaphores, and pressure gates remain authoritative."
+        ),
     )
     INGEST_AUTO_REPAIR_RUN_DOCUMENT_PIPELINE: bool = Field(
         default=False,

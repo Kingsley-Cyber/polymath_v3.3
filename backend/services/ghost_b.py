@@ -3739,6 +3739,32 @@ def _extract_balanced_json_object(raw: str) -> str | None:
     return candidate if isinstance(parsed, dict) else None
 
 
+def parse_extraction_microbatch_response(
+    raw: str,
+    *,
+    allowed_target_ids: set[str],
+) -> dict[str, dict[str, Any]]:
+    """Salvage independently valid extraction siblings from a batch envelope."""
+    candidate = _extract_balanced_json_object(raw) or raw
+    try:
+        payload = json.loads(candidate)
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    items = payload.get("items") if isinstance(payload, dict) else None
+    if not isinstance(items, list):
+        return {}
+    artifacts: dict[str, dict[str, Any]] = {}
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        target_id = str(item.get("target_id") or "")
+        artifact = item.get("artifact")
+        if target_id not in allowed_target_ids or not isinstance(artifact, dict):
+            continue
+        artifacts[target_id] = artifact
+    return artifacts
+
+
 def _repair_truncated_json_object(raw: str) -> str | None:
     """Best-effort close for legacy one-shot JSON object responses."""
 
@@ -4008,7 +4034,9 @@ async def extract_entities(
         shutdown_model_lifecycle,
     )
 
-    await ensure_model_lifecycle_ready(pool, purpose="ghost_b")
+    ready_pool = await ensure_model_lifecycle_ready(pool, purpose="ghost_b")
+    if ready_pool is not None:  # Compatibility with injected legacy test doubles.
+        pool = ready_pool
 
     lane_limits = [max(1, int(entry.get("max_concurrent") or 1) or 1) for entry in pool]
     try:
@@ -5210,6 +5238,339 @@ async def extract_entities(
         )
         return None
 
+    async def _process_batch(
+        batch_tasks: list[ExtractionTask],
+        pool_idx: int,
+    ) -> dict[str, ExtractionResult]:
+        """Run one provider call, then validate each target independently."""
+        batch_request_count = len(batch_tasks)
+        if len(batch_tasks) == 1:
+            result = await _process_one(batch_tasks[0], pool_idx)
+            return {result.chunk_id: result} if result else {}
+
+        entry = pool[pool_idx]
+        provider_card = resolve_extraction_provider_card(entry)
+        prepared: list[tuple[ExtractionTask, ExtractionTask, ExtractionAttemptProfile, str]] = []
+        for task in batch_tasks:
+            bounded_text, _input_tokens, input_truncated = _bounded_extraction_text(
+                task.text,
+                max_input_tokens,
+            )
+            prompt_task = ExtractionTask(
+                chunk_id=task.chunk_id,
+                doc_id=task.doc_id,
+                corpus_id=task.corpus_id,
+                text=bounded_text,
+                chunk_kind=task.chunk_kind,
+                metadata=dict(task.metadata or {}),
+            )
+            chunk_vec = chunk_vectors.get(task.chunk_id) if chunk_vectors else None
+            eff_entity, eff_relation = await resolve_chunk_vocab(
+                schema=schema,
+                chunk_vec=chunk_vec,
+                resolver=schema_resolver,
+                inline_limit=inline_limit,
+                top_k=top_k,
+            )
+            profile = ExtractionAttemptProfile(
+                name="microbatch",
+                max_tokens=max_completion_tokens,
+                max_entities=min(max_entities, json_object_max_entities),
+                max_relations=min(max_relations, json_object_max_relations),
+                max_total_lines=max_total_lines,
+                enable_facts=facts_enabled,
+                max_facts=(
+                    min(max_facts, json_object_max_facts) if facts_enabled else 0
+                ),
+            )
+            prompt = build_json_object_prompt(
+                chunk_id=task.chunk_id,
+                doc_id=task.doc_id,
+                corpus_id=task.corpus_id,
+                text=bounded_text,
+                max_entities=profile.max_entities,
+                max_relations=profile.max_relations,
+                schema=schema,
+                effective_entity_vocab=eff_entity,
+                effective_relation_vocab=eff_relation,
+                schema_lens=schema_lens,
+                enable_facts=profile.enable_facts,
+                max_facts=profile.max_facts,
+                chunk_kind=prompt_task.chunk_kind,
+                metadata=prompt_task.metadata,
+                evidence_max_chars=evidence_max_chars,
+                fact_value_max_chars=fact_value_max_chars,
+            )
+            if input_truncated:
+                logger.warning(
+                    "GHOST B microbatch input truncated chunk_id=%s",
+                    task.chunk_id,
+                )
+            prepared.append((task, prompt_task, profile, prompt))
+
+        batch_items = [
+            {"target_id": task.chunk_id, "instructions": prompt}
+            for task, _prompt_task, _profile, prompt in prepared
+        ]
+        user_prompt = (
+            "Execute every independent extraction request below. Preserve target_id "
+            "exactly and never mix evidence across targets. Return only "
+            '{"items":[{"target_id":"...","artifact":{"entities":[],"relations":[],"facts":[]}}]}. '
+            "Each artifact must obey its own instructions. A malformed item must not "
+            "prevent valid siblings.\n\nITEMS:\n"
+            + json.dumps(batch_items, ensure_ascii=True)
+        )
+        payload: dict[str, Any] = {
+            "model": entry["model"],
+            "temperature": 0,
+            "messages": [
+                {"role": "system", "content": _JSON_OBJECT_SYSTEM},
+                {"role": "user", "content": user_prompt},
+            ],
+        }
+        if entry.get("base_url"):
+            payload["api_base"] = entry["base_url"]
+        if entry.get("api_key"):
+            payload["api_key"] = entry["api_key"]
+        from services.ingestion.extraction_contract import provider_payload_extras
+
+        payload.update(provider_payload_extras(entry.get("extra_params")))
+        for key, value in provider_payload_defaults(provider_card).items():
+            payload.setdefault(key, value)
+        requested_tokens = min(32768, max_completion_tokens * len(batch_tasks))
+        batch_max_tokens, budget_meta = _context_bounded_completion_tokens(
+            entry,
+            system_prompt=_JSON_OBJECT_SYSTEM,
+            user_prompt=user_prompt,
+            requested_tokens=requested_tokens,
+        )
+        payload["max_tokens"] = batch_max_tokens
+        prompt_hash = hashlib.sha256(
+            user_prompt.encode("utf-8", errors="replace")
+        ).hexdigest()
+        started = time.perf_counter()
+        try:
+            async with lane_sems[pool_idx]:
+                async with global_sem:
+                    async with provider_sems[pool_idx]:
+                        async with httpx.AsyncClient(timeout=120.0) as client:
+                            try:
+                                resp = await client.post(
+                                    f"{settings.LITELLM_URL}/chat/completions",
+                                    json=payload,
+                                    headers=headers,
+                                )
+                            finally:
+                                payload["messages"] = []
+            duration = time.perf_counter() - started
+            resp.raise_for_status()
+            body = resp.json()
+            usage = body.get("usage") or {}
+            raw = str(
+                ((body.get("choices") or [{}])[0].get("message") or {}).get(
+                    "content"
+                )
+                or ""
+            )
+            artifacts = parse_extraction_microbatch_response(
+                raw,
+                allowed_target_ids={task.chunk_id for task in batch_tasks},
+            )
+            compiled: dict[str, ExtractionResult] = {}
+            for task, prompt_task, profile, _prompt in prepared:
+                artifact = artifacts.get(task.chunk_id)
+                if artifact is None:
+                    continue
+                artifact_raw = json.dumps(artifact, ensure_ascii=True)
+                result = _parse_object_with_repair(
+                    artifact_raw,
+                    prompt_task,
+                    threshold,
+                    schema=schema,
+                    schema_lens=schema_lens,
+                    enable_facts=profile.enable_facts,
+                    max_facts=profile.max_facts,
+                )
+                result = _cap_result(result, profile)
+                if (
+                    result is None
+                    or (_json_object_claims_items(artifact_raw) and not _result_has_items(result))
+                ):
+                    continue
+                artifact_fingerprint = _raw_output_fingerprint(
+                    artifact_raw,
+                    first_chars=audit_raw_first_chars,
+                    last_chars=audit_raw_last_chars,
+                )
+                result.model = str(entry["model"])
+                result.provider = provider_card.provider
+                result.lane = pool_idx
+                result.attempts = 1
+                result.schema_mode = provider_card.schema_mode
+                result.output_mode = "json_object_microbatch"
+                result.json_repair_mode = provider_card.json_repair_mode
+                result.semantic_verifier_mode = provider_card.semantic_verifier_mode
+                result.prompt_hash = prompt_hash
+                result.prompt_chars = len(user_prompt)
+                result.raw_output_artifact_id = f"sha256:{artifact_fingerprint['sha256']}"
+                result.raw_output_fingerprint = artifact_fingerprint
+                result.provider_card = provider_card.to_safe_dict()
+                compiled[task.chunk_id] = result
+                await _emit_ghost_b_audit_event(
+                    audit_event_sink,
+                    {
+                        "event": (
+                            "ghost_b_attempt_succeeded_with_validation_rejections"
+                            if _validation_rejection_count(result)
+                            else "ghost_b_attempt_succeeded"
+                        ),
+                        "provider_call_accounted": True,
+                        "run_id": audit_run_id,
+                        "corpus_id": task.corpus_id,
+                        "doc_id": task.doc_id,
+                        "chunk_id": task.chunk_id,
+                        "attempt": 1,
+                        "profile": "microbatch",
+                        "model": str(entry["model"]),
+                        "lane": pool_idx,
+                        "provider_card": provider_card.to_safe_dict(),
+                        "validation": {
+                            "validation_rejections": _validation_rejection_count(result)
+                        },
+                    },
+                )
+            microbatch_accepted = len(compiled)
+            if microbatch_accepted == 0:
+                await _emit_ghost_b_audit_event(
+                    audit_event_sink,
+                    {
+                        "event": "ghost_b_attempt_failed",
+                        "provider_call_accounted": True,
+                        "run_id": audit_run_id,
+                        "corpus_id": batch_tasks[0].corpus_id,
+                        "doc_id": batch_tasks[0].doc_id,
+                        "chunk_id": batch_tasks[0].chunk_id,
+                        "attempt": 1,
+                        "profile": "microbatch",
+                        "model": str(entry["model"]),
+                        "lane": pool_idx,
+                        "provider_card": provider_card.to_safe_dict(),
+                        "error_type": "parse_error",
+                        "error_message": "No independently valid artifact in microbatch envelope",
+                        "jsonl": {"valid_lines": 0, "finished": False},
+                        "raw": _raw_output_fingerprint(
+                            raw,
+                            first_chars=audit_raw_first_chars,
+                            last_chars=audit_raw_last_chars,
+                        ),
+                    },
+                )
+            # Provider compatibility fallback: some OpenAI-compatible routes
+            # ignore the outer envelope and emit one plain extraction object.
+            # Keep accepted siblings and retry only missing targets through the
+            # existing single-item state machine and all of its validation
+            # gates before considering cross-provider rescue.
+            fallback_failures = 0
+            for fallback_index, task in enumerate(batch_tasks):
+                if task.chunk_id in compiled:
+                    continue
+                fallback = await _process_one(task, pool_idx)
+                if fallback is not None:
+                    compiled[task.chunk_id] = fallback
+                    continue
+                fallback_failures += 1
+                projected_failed = failed_count + fallback_failures + (
+                    1 if microbatch_accepted == 0 else 0
+                )
+                projected_processed = (
+                    len(results_list) + len(compiled) + projected_failed
+                )
+                if (
+                    projected_processed >= failure_pause_min_chunks
+                    and projected_failed / max(1, projected_processed) * 100
+                    >= failure_pause_percent
+                ):
+                    # Count one envelope-level target plus this failed
+                    # single-item fallback toward the chunk failure budget;
+                    # return all remaining siblings to the durable queue.
+                    deferred = batch_tasks[fallback_index + 2 :]
+                    for deferred_task in deferred:
+                        task_queue.task_done()
+                        task_queue.put_nowait(deferred_task)
+                    del batch_tasks[fallback_index + 2 :]
+                    break
+            metric = {
+                "chunk_id": batch_tasks[0].chunk_id,
+                "model": entry["model"],
+                "provider": provider_card.provider,
+                "lane": pool_idx,
+                "profile": "microbatch",
+                "output_mode": "json_object_microbatch",
+                "attempt": 1,
+                "duration_seconds": round(duration, 3),
+                "total_tokens": usage.get("total_tokens"),
+                "prompt_tokens": usage.get("prompt_tokens"),
+                "completion_tokens": usage.get("completion_tokens"),
+                "prompt_hash": prompt_hash,
+                "prompt_chars": len(user_prompt),
+                "success": bool(microbatch_accepted),
+                "item_count": batch_request_count,
+                "accepted_count": microbatch_accepted,
+                "rejected_count": batch_request_count - microbatch_accepted,
+                "routing_policy": routing_policy,
+                "context_budget_capped": budget_meta.get("capped"),
+            }
+            call_metrics.append(metric)
+            await _emit_ghost_b_audit_event(
+                audit_event_sink,
+                {
+                    "event": "ghost_b_microbatch_call",
+                    "run_id": audit_run_id,
+                    "corpus_id": batch_tasks[0].corpus_id,
+                    "model": str(entry["model"]),
+                    "provider_card": provider_card.to_safe_dict(),
+                    **metric,
+                },
+            )
+            return compiled
+        except Exception as exc:
+            await _emit_ghost_b_audit_event(
+                audit_event_sink,
+                {
+                    "event": "ghost_b_microbatch_call",
+                    "run_id": audit_run_id,
+                    "corpus_id": batch_tasks[0].corpus_id,
+                    "model": str(entry["model"]),
+                    "provider_card": provider_card.to_safe_dict(),
+                    "item_count": batch_request_count,
+                    "accepted_count": 0,
+                    "rejected_count": batch_request_count,
+                    "duration_seconds": round(time.perf_counter() - started, 3),
+                    "rate_limited": is_rate_limit_provider_error(exc),
+                    "error_type": type(exc).__name__,
+                },
+            )
+            if is_rate_limit_provider_error(exc):
+                raise RateLimitedLaneError(
+                    exc,
+                    retry_after_seconds=rate_limit_retry_after_seconds(exc),
+                ) from exc
+            if provider_error_tier(exc) == "hard":
+                raise FatalLaneError(exc) from exc
+            logger.warning(
+                "GHOST B microbatch failed size=%d lane=%d; retrying only missing "
+                "targets through the single-item contract: %s",
+                len(batch_tasks),
+                pool_idx,
+                exc,
+            )
+            fallback_results: dict[str, ExtractionResult] = {}
+            for task in batch_tasks:
+                result = await _process_one(task, pool_idx)
+                if result is not None:
+                    fallback_results[task.chunk_id] = result
+            return fallback_results
+
     async def _lane_worker(pool_idx: int) -> None:
         """One coroutine per lane slot. Drains the shared queue until empty."""
         nonlocal failed_count, failure_budget_open, cross_provider_reroutes
@@ -5227,71 +5588,161 @@ async def extract_entities(
             if pool_idx in disabled_lanes or failure_budget_open:
                 return
             try:
-                task = task_queue.get_nowait()
+                first_task = task_queue.get_nowait()
             except asyncio.QueueEmpty:
                 return
+            batch_tasks = [first_task]
             try:
                 if pool_idx in disabled_lanes or failure_budget_open:
-                    task_queue.put_nowait(task)
+                    task_queue.put_nowait(first_task)
                     return
-                attempted_families = failed_provider_families.get(task.chunk_id, set())
                 lane_family = _provider_family(pool_idx)
-                if lane_family in attempted_families:
-                    task_queue.put_nowait(task)
+                if lane_family in failed_provider_families.get(first_task.chunk_id, set()):
+                    task_queue.put_nowait(first_task)
                     await asyncio.sleep(0.01)
                     continue
+                entry = pool[pool_idx]
+                extra = entry.get("extra_params") or {}
+                configured_batch = int(
+                    extra.get("microbatch_size")
+                    or getattr(settings, "INGEST_PROVIDER_MICROBATCH_SIZE", 4)
+                    or 4
+                )
+                enabled_worker_slots = max(
+                    1,
+                    sum(
+                        lane_limits[index]
+                        for index in range(len(pool))
+                        if index not in disabled_lanes
+                    ),
+                )
+                remaining_items = task_queue.qsize() + 1
+                fair_share = max(
+                    1,
+                    (remaining_items + enabled_worker_slots - 1)
+                    // enabled_worker_slots,
+                )
+                microbatch_size = max(
+                    1,
+                    min(8, configured_batch, fair_share),
+                )
+                if _select_extraction_output_mode(
+                    output_mode_setting,
+                    entry,
+                    profile_name="normal",
+                ) == "json_schema":
+                    # Native schema mode describes one extraction artifact.
+                    # Do not send a conflicting outer batch envelope unless a
+                    # provider-specific batch schema is configured.
+                    microbatch_size = 1
+                max_chars = max(
+                    2000,
+                    int(
+                        extra.get("microbatch_max_chars")
+                        or getattr(
+                            settings,
+                            "INGEST_PROVIDER_MICROBATCH_MAX_CHARS",
+                            60_000,
+                        )
+                        or 60_000
+                    ),
+                )
+                batch_chars = len(first_task.text or "")
+                while len(batch_tasks) < microbatch_size and batch_chars < max_chars:
+                    try:
+                        candidate = task_queue.get_nowait()
+                    except asyncio.QueueEmpty:
+                        break
+                    candidate_chars = len(candidate.text or "")
+                    candidate_attempted = failed_provider_families.get(
+                        candidate.chunk_id, set()
+                    )
+                    if (
+                        lane_family in candidate_attempted
+                        or batch_chars + candidate_chars > max_chars
+                    ):
+                        task_queue.task_done()
+                        task_queue.put_nowait(candidate)
+                        break
+                    batch_tasks.append(candidate)
+                    batch_chars += candidate_chars
                 try:
-                    result = await _process_one(task, pool_idx)
+                    batch_results = await _process_batch(batch_tasks, pool_idx)
                 except RateLimitedLaneError as exc:
-                    task_queue.put_nowait(task)
+                    for task in batch_tasks:
+                        task_queue.put_nowait(task)
                     cooldown_seconds = await lane_cooldowns.set(
                         pool_idx,
                         exc.retry_after_seconds,
                     )
                     logger.warning(
-                        "GHOST B requeued chunk_id=%s after rate limit on lane=%d; cooldown=%.1fs",
-                        task.chunk_id,
+                        "GHOST B requeued microbatch size=%d after rate limit on lane=%d; cooldown=%.1fs",
+                        len(batch_tasks),
                         pool_idx,
                         cooldown_seconds,
                     )
                     continue
                 except FatalLaneError as exc:
-                    task_queue.put_nowait(task)
+                    for task in batch_tasks:
+                        task_queue.put_nowait(task)
                     if await _lane_disable_ready(pool_idx, exc.original):
                         await _disable_lane(pool_idx, exc.original)
                         logger.warning(
-                            "GHOST B requeued chunk_id=%s after disabling lane=%d",
-                            task.chunk_id,
+                            "GHOST B requeued microbatch size=%d after disabling lane=%d",
+                            len(batch_tasks),
                             pool_idx,
                         )
                     else:
                         logger.warning(
-                            "GHOST B requeued chunk_id=%s after soft fatal strike on lane=%d",
-                            task.chunk_id,
+                            "GHOST B requeued microbatch size=%d after soft fatal strike on lane=%d",
+                            len(batch_tasks),
                             pool_idx,
                         )
                     return
                 async with _list_lock:
-                    if result is not None:
+                    if batch_results:
                         await _clear_lane_strikes(pool_idx)
-                        results_list.append(result)
-                    else:
-                        failed_provider_families.setdefault(task.chunk_id, set()).add(
-                            lane_family
-                        )
+                        results_list.extend(batch_results.values())
+                    batch_parse_failure_recorded = False
+                    for task in batch_tasks:
+                        if task.chunk_id in batch_results:
+                            continue
+                        failed_provider_families.setdefault(task.chunk_id, set()).add(lane_family)
                         if _has_untried_provider_family(task.chunk_id):
                             _remove_intermediate_failure(task.chunk_id, pool_idx)
                             task_queue.put_nowait(task)
                             cross_provider_reroutes += 1
-                            logger.warning(
-                                "GHOST B rerouted chunk_id=%s after provider-family failure "
-                                "provider=%s lane=%d attempted_families=%s",
-                                task.chunk_id,
-                                lane_family,
-                                pool_idx,
-                                sorted(failed_provider_families[task.chunk_id]),
-                            )
                             continue
+                        failure_exists = any(
+                            failure.chunk_id == task.chunk_id
+                            and failure.lane == pool_idx
+                            for failure in failures_list
+                        )
+                        if len(batch_tasks) > 1 and not failure_exists:
+                            failure_type = (
+                                "parse_error"
+                                if not batch_parse_failure_recorded
+                                else "failure_budget_exceeded"
+                            )
+                            batch_parse_failure_recorded = True
+                            failures_list.append(
+                                ExtractionFailureItem(
+                                    chunk_id=task.chunk_id,
+                                    doc_id=task.doc_id,
+                                    corpus_id=task.corpus_id,
+                                    model=str(entry["model"]),
+                                    lane=pool_idx,
+                                    attempts=1,
+                                    error_type=failure_type,
+                                    error_message=(
+                                        "Provider microbatch omitted the target or its artifact "
+                                        "failed existing extraction validation gates"
+                                    ),
+                                    provider=resolve_extraction_provider_card(entry).provider,
+                                    output_mode="json_object_microbatch",
+                                    provider_card=resolve_extraction_provider_card(entry).to_safe_dict(),
+                                )
+                            )
                         failed_count += 1
                     if not failure_budget_open and _failure_budget_should_open():
                         failure_budget_open = True
@@ -5310,9 +5761,9 @@ async def extract_entities(
                             {
                                 "event": "ghost_b_failure_budget_tripped",
                                 "run_id": audit_run_id,
-                                "corpus_id": task.corpus_id,
-                                "doc_id": task.doc_id,
-                                "chunk_id": task.chunk_id,
+                                "corpus_id": first_task.corpus_id,
+                                "doc_id": first_task.doc_id,
+                                "chunk_id": first_task.chunk_id,
                                 "failed": failed_count,
                                 "processed": processed,
                                 "successes": len(results_list),
@@ -5324,7 +5775,8 @@ async def extract_entities(
                             },
                         )
             finally:
-                task_queue.task_done()
+                for _task in batch_tasks:
+                    task_queue.task_done()
 
     async def _run_enabled_workers() -> None:
         # Spawn total_concurrency workers = sum of enabled per-lane max_concurrent.

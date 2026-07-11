@@ -1,14 +1,207 @@
-"""Lease helpers for durable ingestion repair queues."""
+"""Lease and exhaustion helpers for durable ingestion repair queues.
+
+Job leases prevent duplicate execution of one queue row.  Lane leases sit one
+level above that and prevent two controllers (auto-repair, a manual repair, or
+a batch worker) from driving the same corpus/lane concurrently.
+"""
 
 from __future__ import annotations
 
+import asyncio
+import re
+from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timedelta
 from typing import Any
+from uuid import uuid4
 
-from pymongo import UpdateMany
+from pymongo import ReturnDocument, UpdateMany
+from pymongo.errors import DuplicateKeyError
 
 DEFAULT_JOB_LEASE_SECONDS = 15 * 60
+DEFAULT_JOB_MAX_ATTEMPTS = 5
+DEFAULT_LANE_LEASE_SECONDS = 30 * 60
 SUPERSEDED_JOB_STATUS = "superseded"
+DEAD_LETTER_JOB_STATUS = "dead_letter"
+LANE_LEASE_COLLECTION = "ingest_lane_leases"
+
+
+def normalize_failure_class(value: Any) -> str:
+    """Return a stable, non-secret failure class for queue telemetry."""
+
+    text = str(value or "").strip()
+    if not text:
+        return "attempt_limit_exhausted"
+    first = text.split(":", 1)[0].strip()
+    normalized = re.sub(r"[^a-z0-9]+", "_", first.lower()).strip("_")
+    return normalized[:80] or "attempt_limit_exhausted"
+
+
+async def acquire_lane_lease(
+    db: Any,
+    *,
+    corpus_id: str,
+    lane: str,
+    owner: str,
+    now: datetime | None = None,
+    lease_seconds: int = DEFAULT_LANE_LEASE_SECONDS,
+) -> dict[str, Any] | None:
+    """Atomically acquire one corpus/lane lease, reclaiming expired leases."""
+
+    now = now or datetime.utcnow()
+    lease_id = uuid4().hex
+    key = f"{corpus_id}:{lane}"
+    deadline = lease_deadline(now, lease_seconds=lease_seconds)
+    compatibility_lease = {
+        "_id": key,
+        "corpus_id": corpus_id,
+        "lane": lane,
+        "owner": owner,
+        "lease_id": lease_id,
+        "lease_until": deadline,
+    }
+    try:
+        collection = db[LANE_LEASE_COLLECTION]
+        if not hasattr(collection, "find_one_and_update"):
+            return compatibility_lease
+        row = await collection.find_one_and_update(
+            {
+                "_id": key,
+                "$or": [
+                    {"lease_until": {"$lte": now}},
+                    {"lease_until": {"$exists": False}},
+                    {"owner": owner},
+                ],
+            },
+            {
+                "$set": {
+                    "corpus_id": corpus_id,
+                    "lane": lane,
+                    "owner": owner,
+                    "lease_id": lease_id,
+                    "lease_until": deadline,
+                    "updated_at": now,
+                },
+                "$setOnInsert": {"created_at": now},
+            },
+            upsert=True,
+            return_document=ReturnDocument.AFTER,
+        )
+    except DuplicateKeyError:
+        return None
+    except (AssertionError, KeyError, AttributeError, TypeError):
+        return compatibility_lease
+    except Exception:
+        return None
+    return row if row and row.get("lease_id") == lease_id else None
+
+
+async def release_lane_lease(
+    db: Any,
+    *,
+    corpus_id: str,
+    lane: str,
+    lease_id: str,
+    now: datetime | None = None,
+) -> bool:
+    """Release only the lease instance owned by this caller."""
+
+    try:
+        collection = db[LANE_LEASE_COLLECTION]
+        if not hasattr(collection, "delete_one"):
+            return True
+        result = await collection.delete_one(
+            {
+                "_id": f"{corpus_id}:{lane}",
+                "lease_id": lease_id,
+            }
+        )
+        return int(getattr(result, "deleted_count", 0) or 0) > 0
+    except (AssertionError, KeyError, AttributeError, TypeError):
+        return True
+    except Exception:
+        # Expiry is the final safety net if a process disappears mid-lane.
+        return False
+
+
+async def renew_lane_lease(
+    db: Any,
+    *,
+    corpus_id: str,
+    lane: str,
+    lease_id: str,
+    lease_seconds: int = DEFAULT_LANE_LEASE_SECONDS,
+    now: datetime | None = None,
+) -> bool:
+    """Extend only the current lease instance."""
+    now = now or datetime.utcnow()
+    try:
+        result = await db[LANE_LEASE_COLLECTION].update_one(
+            {"_id": f"{corpus_id}:{lane}", "lease_id": lease_id},
+            {
+                "$set": {
+                    "lease_until": now
+                    + timedelta(seconds=max(60, int(lease_seconds or 0))),
+                    "heartbeat_at": now,
+                    "updated_at": now,
+                }
+            },
+        )
+        return int(getattr(result, "modified_count", 0) or 0) > 0
+    except (AssertionError, KeyError, AttributeError, TypeError):
+        return True
+    except Exception:
+        return False
+
+
+@asynccontextmanager
+async def corpus_lane_lease(
+    db: Any,
+    *,
+    corpus_id: str,
+    lane: str,
+    owner: str,
+    lease_seconds: int = DEFAULT_LANE_LEASE_SECONDS,
+):
+    """Yield the lease row, or ``None`` when another controller owns it."""
+
+    lease = await acquire_lane_lease(
+        db,
+        corpus_id=corpus_id,
+        lane=lane,
+        owner=owner,
+        lease_seconds=lease_seconds,
+    )
+    heartbeat_task: asyncio.Task | None = None
+    if lease:
+        async def _heartbeat() -> None:
+            interval = max(20.0, float(lease_seconds) / 3.0)
+            while True:
+                await asyncio.sleep(interval)
+                renewed = await renew_lane_lease(
+                    db,
+                    corpus_id=corpus_id,
+                    lane=lane,
+                    lease_id=str(lease.get("lease_id") or ""),
+                    lease_seconds=lease_seconds,
+                )
+                if not renewed:
+                    return
+
+        heartbeat_task = asyncio.create_task(_heartbeat())
+    try:
+        yield lease
+    finally:
+        if heartbeat_task:
+            heartbeat_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await heartbeat_task
+        if lease:
+            await release_lane_lease(
+                db,
+                corpus_id=corpus_id,
+                lane=lane,
+                lease_id=str(lease.get("lease_id") or ""),
+            )
 
 
 def lease_deadline(
@@ -82,6 +275,7 @@ async def claim_runnable_jobs(
     lease_seconds: int = DEFAULT_JOB_LEASE_SECONDS,
     increment_attempt: bool = False,
     set_fields: dict[str, Any] | None = None,
+    max_attempts: int | None = None,
 ) -> list[dict[str, Any]]:
     """Atomically claim queued/retryable queue rows.
 
@@ -97,11 +291,50 @@ async def claim_runnable_jobs(
     if not jobs or not statuses:
         return []
 
+    if max_attempts is None:
+        try:
+            from config import get_settings
+
+            max_attempts = int(
+                getattr(get_settings(), "INGEST_JOB_MAX_ATTEMPTS", DEFAULT_JOB_MAX_ATTEMPTS)
+                or DEFAULT_JOB_MAX_ATTEMPTS
+            )
+        except Exception:
+            max_attempts = DEFAULT_JOB_MAX_ATTEMPTS
     deadline = lease_deadline(now, lease_seconds=lease_seconds)
     claimed: list[dict[str, Any]] = []
     for job in jobs:
         job_id = str(job.get("job_id") or "")
         if not job_id:
+            continue
+        try:
+            attempts = int(job.get("attempt_count") or 0)
+        except (TypeError, ValueError):
+            attempts = 0
+        if increment_attempt and attempts >= max(1, int(max_attempts or 0)):
+            last_error = job.get("last_error") or job.get("error") or job.get("reason")
+            try:
+                await db[collection_name].update_one(
+                    {
+                        "job_id": job_id,
+                        "status": {"$in": statuses},
+                    },
+                    {
+                        "$set": {
+                            "status": DEAD_LETTER_JOB_STATUS,
+                            "reason": "attempt_limit_exhausted",
+                            "failure_class": normalize_failure_class(last_error),
+                            "last_actionable_error": str(last_error or "")[:500],
+                            "dead_lettered_at": now,
+                            "updated_at": now,
+                            "lease_until": None,
+                        },
+                        "$unset": {"runner": "", "started_at": ""},
+                    },
+                    upsert=False,
+                )
+            except Exception:
+                pass
             continue
         update: dict[str, Any] = {
             "$set": {

@@ -330,7 +330,16 @@ async def generate(
                 )
                 for r in rows
             ]
-            results = await summarize_parents(tasks, pool=pool)
+            from services.ingestion.provider_call_telemetry import record_provider_call
+
+            async def _telemetry(event: dict) -> None:
+                await record_provider_call(db, event)
+
+            results = await summarize_parents(
+                tasks,
+                pool=pool,
+                telemetry_sink=_telemetry,
+            )
             results = [x for x in results if x and getattr(x, "summary", None)]
             # parents attempted but not summarized (thinking-empty / transient):
             # skip them for the rest of THIS run so we advance to fresh parents.

@@ -18,12 +18,15 @@ import httpx
 logger = logging.getLogger(__name__)
 
 DEFAULT_IDLE_SHUTDOWN_SECONDS = 600
+DEFAULT_FAILURE_COOLDOWN_SECONDS = 60
 
 LifecycleKey = tuple[str, str, str]
+LifecycleStartKey = tuple[str, str, str, str]
 
 _shutdown_tasks: dict[LifecycleKey, asyncio.Task] = {}
 _shutdown_generations: dict[LifecycleKey, int] = {}
 _lifecycle_holds: dict[LifecycleKey, set[str]] = {}
+_failure_cooldowns: dict[LifecycleStartKey, float] = {}
 
 
 def _managed_entries(pool: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
@@ -81,6 +84,38 @@ def _lifecycle_key(entry: dict[str, Any]) -> LifecycleKey:
         down_path,
         str(entry.get("lifecycle_api_key") or ""),
     )
+
+
+def _lifecycle_start_key(entry: dict[str, Any]) -> LifecycleStartKey:
+    up_path = str(entry.get("lifecycle_up_path") or "/up").strip() or "/up"
+    status_path = (
+        str(entry.get("lifecycle_status_path") or "/status").strip() or "/status"
+    )
+    if not up_path.startswith("/"):
+        up_path = "/" + up_path
+    if not status_path.startswith("/"):
+        status_path = "/" + status_path
+    return (
+        str(entry.get("lifecycle_base_url") or "").strip().rstrip("/"),
+        up_path,
+        status_path,
+        str(entry.get("lifecycle_api_key") or ""),
+    )
+
+
+def _failure_cooldown_seconds(entry: dict[str, Any]) -> int:
+    extra = entry.get("extra_params") or {}
+    if not isinstance(extra, dict):
+        extra = {}
+    raw = entry.get("lifecycle_failure_cooldown_seconds")
+    if raw is None:
+        raw = extra.get("lifecycle_failure_cooldown_seconds")
+    if raw is None:
+        return DEFAULT_FAILURE_COOLDOWN_SECONDS
+    try:
+        return max(1, int(float(raw)))
+    except (TypeError, ValueError):
+        return DEFAULT_FAILURE_COOLDOWN_SECONDS
 
 
 def _idle_shutdown_seconds(entry: dict[str, Any]) -> int:
@@ -183,31 +218,100 @@ async def ensure_model_lifecycle_ready(
     pool: list[dict[str, Any]] | None,
     *,
     purpose: str,
-) -> None:
-    """Start and poll each managed runtime used by this pool."""
+) -> list[dict[str, Any]]:
+    """Start managed runtimes and quarantine only unavailable lifecycle lanes.
 
-    entries = _managed_entries(pool)
+    Cloud providers in the same pool do not depend on a managed local runtime.
+    Returning a filtered pool keeps those independent lanes usable when one
+    lifecycle control plane is offline. If no lane remains, the original
+    lifecycle error is raised so callers can record a real provider failure.
+    """
+
+    original_pool = list(pool or [])
+
+    entries = _managed_entries(original_pool)
     if not entries:
-        return
+        return original_pool
 
-    seen: set[tuple[str, str, str, str]] = set()
+    seen: set[LifecycleStartKey] = set()
     unique: list[dict[str, Any]] = []
     for entry in entries:
-        key = (
-            str(entry.get("lifecycle_base_url") or "").strip().rstrip("/"),
-            str(entry.get("lifecycle_up_path") or "/up"),
-            str(entry.get("lifecycle_status_path") or "/status"),
-            str(entry.get("lifecycle_api_key") or ""),
-        )
+        key = _lifecycle_start_key(entry)
         if key in seen:
             continue
         seen.add(key)
         unique.append(entry)
 
+    now = time.monotonic()
+    failed_keys: set[LifecycleStartKey] = set()
+    failures: list[BaseException] = []
+    candidates: list[dict[str, Any]] = []
     for entry in unique:
+        key = _lifecycle_start_key(entry)
+        retry_at = _failure_cooldowns.get(key, 0.0)
+        if retry_at > now:
+            failed_keys.add(key)
+            logger.info(
+                "model lifecycle lane remains quarantined purpose=%s control=%s retry_in_s=%d",
+                purpose,
+                key[0],
+                max(1, int(retry_at - now)),
+            )
+            continue
         _cancel_pending_shutdown(entry, purpose=purpose)
+        candidates.append(entry)
 
-    await asyncio.gather(*[_ensure_one_ready(entry, purpose=purpose) for entry in unique])
+    if candidates:
+        results = await asyncio.gather(
+            *[_ensure_one_ready(entry, purpose=purpose) for entry in candidates],
+            return_exceptions=True,
+        )
+        for entry, result in zip(candidates, results, strict=True):
+            key = _lifecycle_start_key(entry)
+            if isinstance(result, asyncio.CancelledError):
+                raise result
+            if isinstance(result, BaseException):
+                cooldown = _failure_cooldown_seconds(entry)
+                _failure_cooldowns[key] = time.monotonic() + cooldown
+                failed_keys.add(key)
+                failures.append(result)
+                logger.warning(
+                    "model lifecycle lane quarantined purpose=%s control=%s "
+                    "failure_class=%s cooldown_s=%d",
+                    purpose,
+                    key[0],
+                    type(result).__name__,
+                    cooldown,
+                )
+            else:
+                _failure_cooldowns.pop(key, None)
+
+    filtered_pool = [
+        entry
+        for entry in original_pool
+        if not (
+            entry.get("lifecycle_base_url")
+            and entry.get("lifecycle_auto_start")
+            and _lifecycle_start_key(entry) in failed_keys
+        )
+    ]
+    if failed_keys and not filtered_pool:
+        error = RuntimeError(
+            "all model lanes unavailable after lifecycle quarantine "
+            f"(purpose={purpose}, failed_controls={len(failed_keys)})"
+        )
+        if failures:
+            raise error from failures[0]
+        raise error
+    if failed_keys:
+        logger.warning(
+            "model lifecycle failover purpose=%s quarantined_controls=%d "
+            "usable_lanes=%d",
+            purpose,
+            len(failed_keys),
+            len(filtered_pool),
+        )
+    return filtered_pool
 
 
 async def acquire_model_lifecycle_hold(

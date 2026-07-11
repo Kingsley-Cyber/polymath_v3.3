@@ -18,7 +18,9 @@ import asyncio
 import json
 import logging
 import re
+import time
 from dataclasses import dataclass
+from typing import Any, Awaitable, Callable
 
 import httpx
 
@@ -93,6 +95,14 @@ _USER = (
     "PARENT PASSAGE:\n{text}\n\nCHILD BOUNDARIES:\n{child_boundaries}"
 )
 
+_BATCH_USER = (
+    "Create one independent parent_summary.v1 compiler artifact for every "
+    "item in the JSON array below. Preserve target_id exactly. Use only that "
+    "item's parent passage and child evidence; never mix evidence between "
+    "items. Return only {{\"items\":[{{\"target_id\":...,\"artifact\":{{...}}}}]}}. "
+    "A failure on one item must not omit valid sibling items.\n\nITEMS:\n{items}"
+)
+
 
 @dataclass
 class SummaryTask:
@@ -136,6 +146,45 @@ class SummaryResult:
     quality_score: float | None = None
     quality_flags: list[str] | None = None
     retrieval_text: str | None = None
+
+
+def parse_summary_microbatch_response(
+    raw: str,
+    *,
+    allowed_target_ids: set[str],
+) -> dict[str, str]:
+    """Return independently parseable artifacts, salvaging valid siblings."""
+
+    text = str(raw or "").strip()
+    if not text:
+        return {}
+    start_candidates = [idx for idx in (text.find("{"), text.find("[")) if idx >= 0]
+    if not start_candidates:
+        return {}
+    start = min(start_candidates)
+    try:
+        payload = json.loads(text[start:])
+    except Exception:
+        end = max(text.rfind("}"), text.rfind("]"))
+        if end <= start:
+            return {}
+        try:
+            payload = json.loads(text[start : end + 1])
+        except Exception:
+            return {}
+    rows = payload.get("items") if isinstance(payload, dict) else payload
+    if not isinstance(rows, list):
+        return {}
+    artifacts: dict[str, str] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        target_id = str(row.get("target_id") or "").strip()
+        artifact = row.get("artifact")
+        if target_id not in allowed_target_ids or not isinstance(artifact, dict):
+            continue
+        artifacts.setdefault(target_id, json.dumps(artifact, ensure_ascii=True))
+    return artifacts
 
 
 def _parse_summary_json(raw: str) -> tuple[str, str | None, list[str] | None]:
@@ -228,6 +277,7 @@ async def summarize_parents(
     pool: list[dict] | None = None,
     model: str | None = None,
     global_max_concurrent: int | None = None,
+    telemetry_sink: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
 ) -> list[SummaryResult]:
     """
     Summarize parent chunks in parallel, round-robining tasks across the
@@ -260,6 +310,14 @@ async def summarize_parents(
         "Content-Type": "application/json",
     }
 
+    async def _emit_telemetry(event: dict[str, Any]) -> None:
+        if telemetry_sink is None:
+            return
+        try:
+            await telemetry_sink(event)
+        except Exception as exc:  # telemetry must never fail provider work
+            logger.warning("GHOST A telemetry sink failed: %s", exc)
+
     if not pool:
         pool = [
             {
@@ -278,7 +336,9 @@ async def summarize_parents(
         shutdown_model_lifecycle,
     )
 
-    await ensure_model_lifecycle_ready(pool, purpose="ghost_a")
+    ready_pool = await ensure_model_lifecycle_ready(pool, purpose="ghost_a")
+    if ready_pool is not None:  # Compatibility with injected legacy test doubles.
+        pool = ready_pool
 
     cap_logged = False
 
@@ -376,6 +436,68 @@ async def summarize_parents(
             provider_error_summary(exc),
         )
 
+    def _compile_result(
+        task: SummaryTask,
+        *,
+        raw: str,
+        entry: dict,
+    ) -> SummaryResult | None:
+        semantic = parse_semantic_summary(
+            raw,
+            source_child_ids=task.source_child_ids or [],
+            source_text=task.text,
+        )
+        artifact = canonical_parent_summary_fields(
+            semantic,
+            parent_id=task.parent_id,
+            doc_id=task.doc_id,
+            corpus_id=task.corpus_id,
+            source_text=task.text,
+            source_child_ids=task.source_child_ids or [],
+            summary_model=entry["model"],
+            repair_status=semantic.get("repair_status"),
+        )
+        summary = artifact["summary"]
+        raw_domain = semantic["domain"]
+        domain = (
+            raw_domain
+            if raw_domain in _DOMAIN_TAXONOMY
+            else ("other" if raw_domain else None)
+        )
+        if not summary or artifact.get("validation_status") != "valid":
+            return None
+        return SummaryResult(
+            parent_id=task.parent_id,
+            doc_id=task.doc_id,
+            corpus_id=task.corpus_id,
+            source_tier=task.source_tier,
+            summary=summary,
+            domain=domain,
+            topics=None,
+            semantic_chunk_type=semantic["semantic_chunk_type"],
+            key_terms=semantic["key_terms"] or None,
+            mechanisms=semantic["mechanisms"] or None,
+            schema_version=artifact["schema_version"],
+            summary_type=artifact["summary_type"],
+            central_claim=artifact["central_claim"],
+            key_points=artifact["key_points"] or None,
+            main_mechanism=artifact["main_mechanism"],
+            concept_tags=artifact["concept_tags"] or None,
+            entity_hints=artifact["entity_hints"] or None,
+            retrieval_uses=artifact["retrieval_uses"] or None,
+            abstraction_level=artifact["abstraction_level"],
+            source_child_ids=artifact["source_child_ids"] or None,
+            summary_id=artifact["summary_id"],
+            source_hash=artifact["source_hash"],
+            summary_model=artifact["summary_model"],
+            summary_created_at=artifact["summary_created_at"],
+            validation_status=artifact["validation_status"],
+            repair_status=artifact["repair_status"],
+            quality_score=artifact["quality_score"],
+            quality_flags=artifact["quality_flags"],
+            retrieval_text=artifact["retrieval_text"],
+        )
+
     async def _process_one(task: SummaryTask, pool_idx: int) -> SummaryResult | None:
         entry = pool[pool_idx]
         payload: dict = {
@@ -408,6 +530,7 @@ async def summarize_parents(
         card = resolve_extraction_provider_card(entry)
         for key, value in provider_payload_defaults(card).items():
             payload.setdefault(key, value)
+        started = time.perf_counter()
         try:
             async with provider_sems[pool_idx]:
                 async with httpx.AsyncClient(timeout=120.0) as client:
@@ -417,60 +540,40 @@ async def summarize_parents(
                         headers=headers,
                     )
                 resp.raise_for_status()
-                raw = resp.json()["choices"][0]["message"]["content"].strip()
-                _sem = parse_semantic_summary(
-                    raw,
-                    source_child_ids=task.source_child_ids or [],
-                    source_text=task.text,
-                )
-                _artifact = canonical_parent_summary_fields(
-                    _sem,
-                    parent_id=task.parent_id,
-                    doc_id=task.doc_id,
-                    corpus_id=task.corpus_id,
-                    source_text=task.text,
-                    source_child_ids=task.source_child_ids or [],
-                    summary_model=entry["model"],
-                    repair_status=_sem.get("repair_status"),
-                )
-                summary = _artifact["summary"]
-                _dom = _sem["domain"]
-                domain = _dom if _dom in _DOMAIN_TAXONOMY else ("other" if _dom else None)
-                topics = None  # retired
-                if not summary or _artifact.get("validation_status") != "valid":
-                    return None
-                return SummaryResult(
-                    parent_id=task.parent_id,
-                    doc_id=task.doc_id,
-                    corpus_id=task.corpus_id,
-                    source_tier=task.source_tier,
-                    summary=summary,
-                    domain=domain,
-                    topics=topics,
-                    semantic_chunk_type=_sem["semantic_chunk_type"],
-                    key_terms=_sem["key_terms"] or None,
-                    mechanisms=_sem["mechanisms"] or None,
-                    schema_version=_artifact["schema_version"],
-                    summary_type=_artifact["summary_type"],
-                    central_claim=_artifact["central_claim"],
-                    key_points=_artifact["key_points"] or None,
-                    main_mechanism=_artifact["main_mechanism"],
-                    concept_tags=_artifact["concept_tags"] or None,
-                    entity_hints=_artifact["entity_hints"] or None,
-                    retrieval_uses=_artifact["retrieval_uses"] or None,
-                    abstraction_level=_artifact["abstraction_level"],
-                    source_child_ids=_artifact["source_child_ids"] or None,
-                    summary_id=_artifact["summary_id"],
-                    source_hash=_artifact["source_hash"],
-                    summary_model=_artifact["summary_model"],
-                    summary_created_at=_artifact["summary_created_at"],
-                    validation_status=_artifact["validation_status"],
-                    repair_status=_artifact["repair_status"],
-                    quality_score=_artifact["quality_score"],
-                    quality_flags=_artifact["quality_flags"],
-                    retrieval_text=_artifact["retrieval_text"],
-                )
+                body = resp.json()
+                raw = body["choices"][0]["message"]["content"].strip()
+                result = _compile_result(task, raw=raw, entry=entry)
+                usage = body.get("usage") or {}
+                await _emit_telemetry({
+                    "corpus_id": task.corpus_id,
+                    "phase": "summary",
+                    "provider": card.provider,
+                    "model": entry["model"],
+                    "item_count": 1,
+                    "accepted_count": 1 if result else 0,
+                    "rejected_count": 0 if result else 1,
+                    "latency_ms": (time.perf_counter() - started) * 1000,
+                    "input_tokens": usage.get("prompt_tokens") or max(1, len(task.text) // 4),
+                    "output_tokens": usage.get("completion_tokens") or max(0, len(raw) // 4),
+                    "attempts": 1,
+                })
+                return result
         except Exception as exc:
+            await _emit_telemetry({
+                "corpus_id": task.corpus_id,
+                "phase": "summary",
+                "provider": card.provider,
+                "model": entry["model"],
+                "item_count": 1,
+                "accepted_count": 0,
+                "rejected_count": 1,
+                "latency_ms": (time.perf_counter() - started) * 1000,
+                "input_tokens": max(1, len(task.text) // 4),
+                "output_tokens": 0,
+                "attempts": 1,
+                "rate_limited": is_rate_limit_provider_error(exc),
+                "failure_class": type(exc).__name__,
+            })
             if is_rate_limit_provider_error(exc):
                 raise RateLimitedLaneError(
                     exc,
@@ -484,51 +587,202 @@ async def summarize_parents(
             )
             return None
 
+    async def _process_batch(
+        batch_tasks: list[SummaryTask],
+        pool_idx: int,
+    ) -> dict[str, SummaryResult]:
+        if len(batch_tasks) == 1:
+            result = await _process_one(batch_tasks[0], pool_idx)
+            return {result.parent_id: result} if result else {}
+        entry = pool[pool_idx]
+        items = [
+            {
+                "target_id": task.parent_id,
+                "max_tokens": cap,
+                "source_child_ids": task.source_child_ids or [],
+                "parent_passage": task.text,
+                "child_boundaries": task.child_boundaries or "",
+            }
+            for task in batch_tasks
+        ]
+        payload: dict = {
+            "model": entry["model"],
+            "messages": [
+                {"role": "system", "content": _SYSTEM},
+                {
+                    "role": "user",
+                    "content": _BATCH_USER.format(
+                        items=json.dumps(items, ensure_ascii=True)
+                    ),
+                },
+            ],
+            "temperature": 0,
+            "max_tokens": min(8192, max(cap, cap * len(batch_tasks) + 128)),
+        }
+        if entry.get("base_url"):
+            payload["api_base"] = entry["base_url"]
+        if entry.get("api_key"):
+            payload["api_key"] = entry["api_key"]
+        from services.ingestion.extraction_contract import provider_payload_extras
+
+        payload.update(provider_payload_extras(entry.get("extra_params")))
+        card = resolve_extraction_provider_card(entry)
+        for key, value in provider_payload_defaults(card).items():
+            payload.setdefault(key, value)
+        started = time.perf_counter()
+        try:
+            async with provider_sems[pool_idx]:
+                async with httpx.AsyncClient(timeout=120.0) as client:
+                    resp = await client.post(
+                        f"{settings.LITELLM_URL}/chat/completions",
+                        json=payload,
+                        headers=headers,
+                    )
+                resp.raise_for_status()
+                body = resp.json()
+                raw = body["choices"][0]["message"]["content"].strip()
+            raw_artifacts = parse_summary_microbatch_response(
+                raw,
+                allowed_target_ids={task.parent_id for task in batch_tasks},
+            )
+            compiled: dict[str, SummaryResult] = {}
+            for task in batch_tasks:
+                artifact_raw = raw_artifacts.get(task.parent_id)
+                if not artifact_raw:
+                    continue
+                result = _compile_result(task, raw=artifact_raw, entry=entry)
+                if result:
+                    compiled[task.parent_id] = result
+            usage = body.get("usage") or {}
+            await _emit_telemetry({
+                "corpus_id": batch_tasks[0].corpus_id,
+                "phase": "summary",
+                "provider": card.provider,
+                "model": entry["model"],
+                "item_count": len(batch_tasks),
+                "accepted_count": len(compiled),
+                "rejected_count": len(batch_tasks) - len(compiled),
+                "latency_ms": (time.perf_counter() - started) * 1000,
+                "input_tokens": usage.get("prompt_tokens") or max(
+                    1, sum(len(task.text) for task in batch_tasks) // 4
+                ),
+                "output_tokens": usage.get("completion_tokens") or max(0, len(raw) // 4),
+                "attempts": 1,
+            })
+            return compiled
+        except Exception as exc:
+            await _emit_telemetry({
+                "corpus_id": batch_tasks[0].corpus_id,
+                "phase": "summary",
+                "provider": card.provider,
+                "model": entry["model"],
+                "item_count": len(batch_tasks),
+                "accepted_count": 0,
+                "rejected_count": len(batch_tasks),
+                "latency_ms": (time.perf_counter() - started) * 1000,
+                "input_tokens": max(
+                    1, sum(len(task.text) for task in batch_tasks) // 4
+                ),
+                "output_tokens": 0,
+                "attempts": 1,
+                "rate_limited": is_rate_limit_provider_error(exc),
+                "failure_class": type(exc).__name__,
+            })
+            if is_rate_limit_provider_error(exc):
+                raise RateLimitedLaneError(
+                    exc,
+                    retry_after_seconds=rate_limit_retry_after_seconds(exc),
+                ) from exc
+            if is_fatal_provider_error(exc):
+                raise FatalLaneError(exc) from exc
+            logger.error(
+                "GHOST A microbatch failed size=%d via %s: %s",
+                len(batch_tasks),
+                entry["model"],
+                exc,
+            )
+            return {}
+
     async def _lane_worker(pool_idx: int) -> None:
         while True:
             if pool_idx in disabled_lanes:
                 return
             try:
-                task = task_queue.get_nowait()
+                first_task = task_queue.get_nowait()
             except asyncio.QueueEmpty:
                 return
+            entry = pool[pool_idx]
+            extra = entry.get("extra_params") or {}
+            configured_batch = int(
+                extra.get("microbatch_size")
+                or getattr(settings, "INGEST_PROVIDER_MICROBATCH_SIZE", 4)
+                or 4
+            )
+            microbatch_size = max(1, min(8, configured_batch))
+            max_chars = max(
+                2000,
+                int(
+                    extra.get("microbatch_max_chars")
+                    or getattr(settings, "INGEST_PROVIDER_MICROBATCH_MAX_CHARS", 60_000)
+                    or 60_000
+                ),
+            )
+            batch_tasks = [first_task]
+            chars = len(first_task.text or "")
+            while len(batch_tasks) < microbatch_size and chars < max_chars:
+                try:
+                    candidate = task_queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+                candidate_chars = len(candidate.text or "")
+                if batch_tasks and chars + candidate_chars > max_chars:
+                    task_queue.task_done()
+                    task_queue.put_nowait(candidate)
+                    break
+                batch_tasks.append(candidate)
+                chars += candidate_chars
             try:
                 if pool_idx in disabled_lanes:
-                    task_queue.put_nowait(task)
+                    for task in batch_tasks:
+                        task_queue.put_nowait(task)
                     return
                 try:
-                    result = await _process_one(task, pool_idx)
+                    batch_results = await _process_batch(batch_tasks, pool_idx)
                 except RateLimitedLaneError as exc:
-                    task_queue.put_nowait(task)
+                    for task in batch_tasks:
+                        task_queue.put_nowait(task)
                     logger.warning(
-                        "GHOST A cooling summary lane=%d for %.1fs after rate limit",
+                        "GHOST A cooling summary lane=%d for %.1fs after rate limit (batch=%d)",
                         pool_idx,
                         exc.retry_after_seconds,
+                        len(batch_tasks),
                     )
                     await asyncio.sleep(exc.retry_after_seconds)
                     return
                 except FatalLaneError as exc:
-                    task_queue.put_nowait(task)
+                    for task in batch_tasks:
+                        task_queue.put_nowait(task)
                     if await _lane_disable_ready(pool_idx, exc.original):
                         await _disable_lane(pool_idx, exc.original)
                         logger.warning(
-                            "GHOST A requeued parent_id=%s after disabling lane=%d",
-                            task.parent_id,
+                            "GHOST A requeued batch size=%d after disabling lane=%d",
+                            len(batch_tasks),
                             pool_idx,
                         )
                     else:
                         logger.warning(
-                            "GHOST A requeued parent_id=%s after soft fatal strike on lane=%d",
-                            task.parent_id,
+                            "GHOST A requeued batch size=%d after soft fatal strike on lane=%d",
+                            len(batch_tasks),
                             pool_idx,
                         )
                     return
-                if result is not None:
+                if batch_results:
                     await _clear_lane_strikes(pool_idx)
                     async with _results_lock:
-                        results_by_parent_id[result.parent_id] = result
+                        results_by_parent_id.update(batch_results)
             finally:
-                task_queue.task_done()
+                for _task in batch_tasks:
+                    task_queue.task_done()
 
     async def _run_enabled_workers() -> None:
         workers: list[asyncio.Task] = []

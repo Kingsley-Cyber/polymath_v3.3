@@ -6,11 +6,42 @@ from services.ingestion.summary_jobs import (
     build_parent_summary_job,
     classify_document_summary_status,
     plan_summary_jobs,
+    reconcile_satisfied_summary_jobs,
     run_summary_jobs,
     summary_contract_hash,
     summary_job_id,
     summary_provider_contract,
 )
+
+
+@pytest.mark.asyncio
+async def test_artifact_reconciliation_retires_blocked_parent_summary_job():
+    db = _Db(
+        parent_rows=[
+            {
+                "corpus_id": "corpus-1",
+                "doc_id": "doc-1",
+                "parent_id": "parent-1",
+                "summary": "Already complete.",
+            }
+        ]
+    )
+    db["summary_jobs"].rows = [
+        {
+            "job_id": "stale-job",
+            "corpus_id": "corpus-1",
+            "doc_id": "doc-1",
+            "parent_id": "parent-1",
+            "kind": "retrieval_parent_summary",
+            "status": "failed",
+        }
+    ]
+
+    await reconcile_satisfied_summary_jobs(db, corpus_id="corpus-1")
+
+    update = db["summary_jobs"].bulk_ops[0]._doc["$set"]
+    assert update["status"] == "superseded"
+    assert update["reason"] == "artifact_already_satisfied"
 
 
 def test_summary_job_id_is_deterministic_and_kind_scoped():

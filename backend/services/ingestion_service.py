@@ -1192,6 +1192,39 @@ class IngestionService:
             "readiness": readiness,
         }
 
+    async def _run_owned_repair_lane(
+        self,
+        *,
+        corpus_id: str,
+        lane: str,
+        operation: str,
+        runner: Any,
+    ) -> dict[str, Any]:
+        """Run one lane only when this controller owns its distributed lease."""
+
+        from services.ingestion.job_leases import corpus_lane_lease
+
+        owner = f"{operation}:{uuid.uuid4().hex}"
+        async with corpus_lane_lease(
+            self._db,
+            corpus_id=corpus_id,
+            lane=lane,
+            owner=owner,
+        ) as lease:
+            if not lease:
+                return {
+                    "status": "lease_busy",
+                    "corpus_id": corpus_id,
+                    "lane": lane,
+                    "operation": operation,
+                    "claimed": 0,
+                    "counts": {},
+                }
+            result = runner()
+            if inspect.isawaitable(result):
+                result = await result
+            return result
+
     async def _refresh_corpus_counts(
         self,
         docs: list[dict],
@@ -1865,13 +1898,21 @@ class IngestionService:
             paused["counts"] = {}
             return paused
 
-        result = await run_graph_promotion_jobs(
-            self._db,
-            qdrant_client=self._qdrant,
-            neo4j_driver=self._neo4j,
+        async def _execute_graph_lane() -> dict:
+            return await run_graph_promotion_jobs(
+                self._db,
+                qdrant_client=self._qdrant,
+                neo4j_driver=self._neo4j,
+                corpus_id=corpus_id,
+                user_id=user_id,
+                limit=limit,
+            )
+
+        result = await self._run_owned_repair_lane(
             corpus_id=corpus_id,
-            user_id=user_id,
-            limit=limit,
+            lane="graph_promotion",
+            operation="graph_promotion_jobs.run",
+            runner=_execute_graph_lane,
         )
         readiness = await self._materialize_corpus_readiness_safely(corpus_id)
         if readiness is not None:
@@ -1969,14 +2010,22 @@ class IngestionService:
         from services.ingestion.source_parse_jobs import run_source_parse_jobs
 
         start_runners = bool(get_settings().INGEST_RUNNERS_ENABLED)
-        result = await run_source_parse_jobs(
-            self._db,
+        async def _execute_source_lane() -> dict:
+            return await run_source_parse_jobs(
+                self._db,
+                corpus_id=corpus_id,
+                user_id=user_id,
+                ingestion_service=self if start_runners else None,
+                limit=limit,
+                statuses=statuses,
+                start_runners=start_runners,
+            )
+
+        result = await self._run_owned_repair_lane(
             corpus_id=corpus_id,
-            user_id=user_id,
-            ingestion_service=self if start_runners else None,
-            limit=limit,
-            statuses=statuses,
-            start_runners=start_runners,
+            lane="source_parse",
+            operation="source_parse_jobs.run",
+            runner=_execute_source_lane,
         )
         readiness = await self._materialize_corpus_readiness_safely(corpus_id)
         if readiness is not None:
@@ -2002,13 +2051,21 @@ class IngestionService:
             paused.update({"claimed": 0, "counts": {}})
             return paused
 
-        result = await run_extraction_jobs(
-            self._db,
-            qdrant_client=self._qdrant,
+        async def _execute_extraction_lane() -> dict:
+            return await run_extraction_jobs(
+                self._db,
+                qdrant_client=self._qdrant,
+                corpus_id=corpus_id,
+                user_id=user_id,
+                limit=limit,
+                statuses=statuses,
+            )
+
+        result = await self._run_owned_repair_lane(
             corpus_id=corpus_id,
-            user_id=user_id,
-            limit=limit,
-            statuses=statuses,
+            lane="extraction",
+            operation="extraction_jobs.run",
+            runner=_execute_extraction_lane,
         )
         readiness = await self._materialize_corpus_readiness_safely(corpus_id)
         if readiness is not None:
@@ -2120,16 +2177,24 @@ class IngestionService:
                 limit=limit,
             )
 
-        result = await run_document_pipeline_jobs(
-            self._db,
+        async def _execute_document_lane() -> dict:
+            return await run_document_pipeline_jobs(
+                self._db,
+                corpus_id=corpus_id,
+                user_id=user_id,
+                limit=limit,
+                statuses=statuses,
+                kinds=kinds,
+                source_runner=_source_runner,
+                persist_runner=_persist_runner,
+                embed_runner=_embed_runner,
+            )
+
+        result = await self._run_owned_repair_lane(
             corpus_id=corpus_id,
-            user_id=user_id,
-            limit=limit,
-            statuses=statuses,
-            kinds=kinds,
-            source_runner=_source_runner,
-            persist_runner=_persist_runner,
-            embed_runner=_embed_runner,
+            lane="document_pipeline",
+            operation="document_pipeline_jobs.run",
+            runner=_execute_document_lane,
         )
         readiness = await self._materialize_corpus_readiness_safely(corpus_id)
         if readiness is not None:
@@ -2240,15 +2305,23 @@ class IngestionService:
                 doc_ids=doc_ids,
             )
 
-        result = await run_summary_jobs(
-            self._db,
+        async def _execute_summary_lane() -> dict:
+            return await run_summary_jobs(
+                self._db,
+                corpus_id=corpus_id,
+                user_id=user_id,
+                limit=limit,
+                statuses=statuses,
+                kinds=kinds,
+                parent_runner=_parent_runner,
+                document_runner=_document_runner,
+            )
+
+        result = await self._run_owned_repair_lane(
             corpus_id=corpus_id,
-            user_id=user_id,
-            limit=limit,
-            statuses=statuses,
-            kinds=kinds,
-            parent_runner=_parent_runner,
-            document_runner=_document_runner,
+            lane="summary",
+            operation="summary_jobs.run",
+            runner=_execute_summary_lane,
         )
         readiness = await self._materialize_corpus_readiness_safely(corpus_id)
         if readiness is not None:
@@ -2347,6 +2420,8 @@ class IngestionService:
         self,
         *,
         limit: int | None = None,
+        _corpus_id: str | None = None,
+        _fanout: bool = True,
     ) -> dict[str, Any]:
         """Plan safe repair queues for recently active corpora.
 
@@ -2367,10 +2442,71 @@ class IngestionService:
                 100,
             ),
         )
+        corpus_filter: dict[str, Any] = {}
+        if _corpus_id:
+            corpus_filter["corpus_id"] = _corpus_id
         rows = await self._db["corpora"].find(
-            with_active_records({}),
+            with_active_records(corpus_filter),
             {"_id": 0, "corpus_id": 1, "user_id": 1, "name": 1, "updated_at": 1},
         ).sort("updated_at", -1).limit(limit).to_list(length=limit)
+
+        # A long local pipeline repair in one corpus must not serialize cloud
+        # extraction or summary work for another corpus. Fan out one-corpus
+        # ticks under a small bounded semaphore; the normal durable lane
+        # leases and provider credential semaphores still prevent duplicate or
+        # over-budget execution inside each child tick.
+        if _fanout and not _corpus_id and len(rows) > 1:
+            corpus_concurrency = max(
+                1,
+                min(
+                    int(
+                        getattr(
+                            settings,
+                            "INGEST_AUTO_REPAIR_CORPUS_CONCURRENCY",
+                            3,
+                        )
+                        or 3
+                    ),
+                    len(rows),
+                ),
+            )
+            semaphore = asyncio.Semaphore(corpus_concurrency)
+
+            async def _run_one(row: dict[str, Any]) -> dict[str, Any]:
+                async with semaphore:
+                    return await self.run_auto_corpus_repair_tick(
+                        limit=1,
+                        _corpus_id=str(row.get("corpus_id") or ""),
+                        _fanout=False,
+                    )
+
+            child_results = await asyncio.gather(
+                *(_run_one(row) for row in rows),
+                return_exceptions=True,
+            )
+            corpora: list[dict[str, Any]] = []
+            changed = 0
+            for row, child in zip(rows, child_results, strict=True):
+                if isinstance(child, Exception):
+                    corpora.append(
+                        {
+                            "corpus_id": str(row.get("corpus_id") or ""),
+                            "status": "failed",
+                            "error": str(child)[:500],
+                        }
+                    )
+                    changed += 1
+                    continue
+                corpora.extend(child.get("corpora") or [])
+                changed += int(child.get("changed") or 0)
+            return {
+                "status": "complete",
+                "scanned": len(corpora),
+                "changed": changed,
+                "corpora": corpora,
+                "corpus_concurrency": corpus_concurrency,
+            }
+
         results: list[dict[str, Any]] = []
         for row in rows:
             corpus_id = str(row.get("corpus_id") or "")
@@ -2405,7 +2541,56 @@ class IngestionService:
                 getattr(settings, "INGEST_AUTO_REPAIR_GRAPH_RUN_LIMIT", 5)
                 or 5
             )
+            scheduler_snapshot: dict[str, Any] | None = None
             try:
+                from services.ingestion.repair_scheduler import (
+                    backoff_decision,
+                    load_scheduler_state,
+                    quick_repair_gap_snapshot,
+                    record_scheduler_outcome,
+                )
+
+                scheduler_snapshot = await quick_repair_gap_snapshot(
+                    self._db,
+                    corpus_id,
+                )
+                scheduler_state = await load_scheduler_state(self._db, corpus_id)
+                scheduler_now = datetime.utcnow()
+                decision = backoff_decision(
+                    snapshot=scheduler_snapshot,
+                    state=scheduler_state,
+                    now=scheduler_now,
+                )
+                if not decision["should_run"]:
+                    await record_scheduler_outcome(
+                        self._db,
+                        corpus_id=corpus_id,
+                        snapshot=scheduler_snapshot,
+                        changed=False,
+                        now=scheduler_now,
+                        base_seconds=int(
+                            getattr(settings, "INGEST_AUTO_REPAIR_POLL_SECONDS", 120)
+                            or 120
+                        ),
+                        max_seconds=int(
+                            getattr(
+                                settings,
+                                "INGEST_AUTO_REPAIR_MAX_BACKOFF_SECONDS",
+                                3600,
+                            )
+                            or 3600
+                        ),
+                    )
+                    results.append(
+                        {
+                            "corpus_id": corpus_id,
+                            "status": "idle",
+                            "scheduler_reason": decision["reason"],
+                            "gap_snapshot": scheduler_snapshot,
+                            "provider_lanes": {},
+                        }
+                    )
+                    continue
                 result = await self.run_bounded_corpus_repair_cycle(
                     corpus_id=corpus_id,
                     user_id=user_id,
@@ -2543,8 +2728,7 @@ class IngestionService:
                     )
                 result["provider_lanes"] = provider_lanes
                 summary = result.get("summary") or {}
-                results.append(
-                    {
+                result_row = {
                         "corpus_id": corpus_id,
                         "status": result.get("status"),
                         "readiness_status": summary.get("readiness_status"),
@@ -2574,8 +2758,35 @@ class IngestionService:
                             }
                             for lane_name, lane_result in provider_lanes.items()
                         },
+                        "repair_changed": any(
+                            bool(step.get("changed"))
+                            for step in (result.get("steps") or [])
+                        ),
                     }
-                )
+                results.append(result_row)
+                if scheduler_snapshot is not None:
+                    useful_change = bool(result_row["repair_changed"]) or any(
+                        int(lane.get("claimed") or 0)
+                        for lane in result_row["provider_lanes"].values()
+                    )
+                    await record_scheduler_outcome(
+                        self._db,
+                        corpus_id=corpus_id,
+                        snapshot=scheduler_snapshot,
+                        changed=useful_change,
+                        base_seconds=int(
+                            getattr(settings, "INGEST_AUTO_REPAIR_POLL_SECONDS", 120)
+                            or 120
+                        ),
+                        max_seconds=int(
+                            getattr(
+                                settings,
+                                "INGEST_AUTO_REPAIR_MAX_BACKOFF_SECONDS",
+                                3600,
+                            )
+                            or 3600
+                        ),
+                    )
             except Exception as exc:  # noqa: BLE001 - maintenance must not kill worker
                 logger.warning(
                     "Auto corpus repair tick failed corpus=%s: %s",
@@ -2599,6 +2810,7 @@ class IngestionService:
             or int(row.get("source_parse_stage_identity_backfilled") or 0)
             or int(row.get("summary_stage_identity_backfilled") or 0)
             or int(row.get("failed_chunks") or 0)
+            or bool(row.get("repair_changed"))
             or any(
                 int(lane.get("claimed") or 0)
                 for lane in (row.get("provider_lanes") or {}).values()
@@ -3093,11 +3305,17 @@ class IngestionService:
                         )
                         for r in rows
                     ]
+                    from services.ingestion.provider_call_telemetry import record_provider_call
+
+                    async def _summary_telemetry(event: dict) -> None:
+                        await record_provider_call(self._db, event)
+
                     results = await summarize_parents(
                         tasks,
                         max_summary_tokens=max_summary_tokens,
                         pool=pool,
                         global_max_concurrent=global_max_concurrent,
+                        telemetry_sink=_summary_telemetry,
                     )
                     results = [r for r in results if r and r.summary]
                     if not results:

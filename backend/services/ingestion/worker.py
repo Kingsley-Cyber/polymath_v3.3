@@ -791,6 +791,12 @@ def _build_ghost_b_error_event_sink(
     lock = asyncio.Lock()
 
     async def _sink(event: dict[str, Any]) -> None:
+        from services.ingestion.provider_call_telemetry import record_ghost_b_event
+
+        try:
+            await record_ghost_b_event(db, event)
+        except Exception as exc:
+            logger.warning("phase=ghost_b_provider_metric_write_failed error=%s", exc)
         name = str(event.get("event") or "")
         async with lock:
             if name == "ghost_b_attempt_failed":
@@ -1548,12 +1554,18 @@ async def _run_ghosts_parallel(
             len(pool) or 1,
             summary_max_concurrent or "-",
         )
+        from services.ingestion.provider_call_telemetry import record_provider_call
+
+        async def _summary_telemetry(event: dict[str, Any]) -> None:
+            await record_provider_call(db, event)
+
         results = await summarize_parents(
             tasks,
             max_summary_tokens=max_summary_tokens,
             pool=pool,
             model=model,
             global_max_concurrent=summary_max_concurrent,
+            telemetry_sink=_summary_telemetry,
         )
         if len(results) < len(tasks):
             if not results and tasks:
@@ -1718,7 +1730,13 @@ async def _run_ghosts_parallel(
         if provider_lane_active:
             from services.ingestion.model_lifecycle import ensure_model_lifecycle_ready
 
-            await ensure_model_lifecycle_ready(pool, purpose="schema_lens")
+            ready_pool = await ensure_model_lifecycle_ready(
+                pool,
+                purpose="schema_lens",
+            )
+            if ready_pool is not None:
+                pool = ready_pool
+            provider_lane_active = bool(pool)
         # Exclude noisy parents/children from the schema lens — letting
         # bibliography page entries (publishers, ISBNs, citation bric-a-brac)
         # influence which schema terms get retrieved would erode entity

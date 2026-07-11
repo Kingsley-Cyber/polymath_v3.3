@@ -171,14 +171,30 @@ class _FakeCorpora:
     def __init__(self, rows):
         self.rows = rows
 
-    def find(self, *_args, **_kwargs):
-        return _Cursor(self.rows)
+    def find(self, query=None, *_args, **_kwargs):
+        rows = self.rows
+        def _corpus_id_filter(value):
+            if not isinstance(value, dict):
+                return None
+            if value.get("corpus_id"):
+                return value["corpus_id"]
+            for clause in value.get("$and") or []:
+                found = _corpus_id_filter(clause)
+                if found:
+                    return found
+            return None
+
+        corpus_id = _corpus_id_filter(query or {})
+        if corpus_id:
+            rows = [row for row in rows if row.get("corpus_id") == corpus_id]
+        return _Cursor(rows)
 
 
 class _AutoRepairDb:
-    def __init__(self):
+    def __init__(self, rows=None):
         self.corpora = _FakeCorpora(
-            [
+            rows
+            or [
                 {
                     "corpus_id": "corpus-1",
                     "user_id": "user-1",
@@ -549,3 +565,79 @@ async def test_auto_corpus_repair_tick_runs_provider_lanes_concurrently(monkeypa
         "summary": {"status": "complete", "claimed": 3, "counts": {"succeeded": 3}},
         "extraction": {"status": "complete", "claimed": 5, "counts": {"succeeded": 5}},
     }
+
+
+@pytest.mark.asyncio
+async def test_auto_corpus_repair_tick_does_not_serialize_corpora(monkeypatch):
+    service = IngestionService()
+    service._db = _AutoRepairDb(
+        [
+            {"corpus_id": "local-corpus", "user_id": "user-1", "name": "Local"},
+            {"corpus_id": "cloud-corpus", "user_id": "user-1", "name": "Cloud"},
+        ]
+    )
+    cloud_summary_started = asyncio.Event()
+
+    class _Settings:
+        INGEST_AUTO_REPAIR_ENABLED = True
+        INGEST_AUTO_REPAIR_CORPUS_LIMIT = 2
+        INGEST_AUTO_REPAIR_CORPUS_CONCURRENCY = 2
+        INGEST_AUTO_REPAIR_RUN_DOCUMENT_PIPELINE = True
+        INGEST_AUTO_REPAIR_DOCUMENT_RUN_LIMIT = 1
+        INGEST_AUTO_REPAIR_RUN_EXTRACTION = False
+        INGEST_AUTO_REPAIR_RUN_SUMMARIES = True
+        INGEST_AUTO_REPAIR_SUMMARY_RUN_LIMIT = 1
+        INGEST_AUTO_REPAIR_RUN_GRAPH = False
+
+    async def fake_cycle(**_kwargs):
+        return {
+            "status": "complete",
+            "summary": {
+                "readiness_status": "needs_repair",
+                "queryable_docs": 1,
+                "total_docs": 1,
+                "failed_chunks": 0,
+                "graph_jobs_queued": 0,
+                "extraction_jobs_queued": 0,
+                "summary_jobs_queued": 1,
+                "document_pipeline_jobs_queued": 1,
+            },
+        }
+
+    async def fake_run_document_jobs(**kwargs):
+        if kwargs["corpus_id"] == "local-corpus":
+            await asyncio.wait_for(cloud_summary_started.wait(), timeout=0.5)
+        return {"status": "complete", "claimed": 1, "counts": {"succeeded": 1}}
+
+    async def fake_run_summary_jobs(**kwargs):
+        if kwargs["corpus_id"] == "cloud-corpus":
+            cloud_summary_started.set()
+        return {"status": "complete", "claimed": 1, "counts": {"succeeded": 1}}
+
+    async def fake_snapshot(_db, corpus_id):
+        return {"corpus_id": corpus_id, "total_gap_count": 2}
+
+    async def fake_state(_db, _corpus_id):
+        return {}
+
+    async def fake_record(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr("services.ingestion_service.get_settings", lambda: _Settings())
+    monkeypatch.setattr(service, "run_bounded_corpus_repair_cycle", fake_cycle)
+    monkeypatch.setattr(service, "run_document_pipeline_jobs", fake_run_document_jobs)
+    monkeypatch.setattr(service, "run_summary_jobs", fake_run_summary_jobs)
+    monkeypatch.setattr("services.ingestion.repair_scheduler.quick_repair_gap_snapshot", fake_snapshot)
+    monkeypatch.setattr("services.ingestion.repair_scheduler.load_scheduler_state", fake_state)
+    monkeypatch.setattr(
+        "services.ingestion.repair_scheduler.backoff_decision",
+        lambda **_kwargs: {"should_run": True, "reason": "gaps_present"},
+    )
+    monkeypatch.setattr("services.ingestion.repair_scheduler.record_scheduler_outcome", fake_record)
+
+    result = await service.run_auto_corpus_repair_tick()
+
+    assert result["status"] == "complete"
+    assert result["scanned"] == 2
+    assert result["corpus_concurrency"] == 2
+    assert cloud_summary_started.is_set()
