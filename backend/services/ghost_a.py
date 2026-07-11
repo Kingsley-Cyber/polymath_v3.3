@@ -104,6 +104,24 @@ _BATCH_USER = (
     "A failure on one item must not omit valid sibling items.\n\nITEMS:\n{items}"
 )
 
+_TAGGED_RESCUE_SYSTEM = (
+    "Summarize the supplied passage using the exact labeled prose format. "
+    "Do not output JSON, braces, markdown fences, hidden reasoning, or source "
+    "data verbatim. Use only facts present in the passage."
+)
+_TAGGED_RESCUE_USER = (
+    "Produce this exact line-oriented contract:\n"
+    "SUMMARY: 40-180 words of dense factual retrieval prose\n"
+    "CLAIM: one sentence\n"
+    "POINT: one supported point\n"
+    "POINT: one supported point\n"
+    "POINT: one supported point\n"
+    "TAGS: three to eight terms separated by |\n"
+    "MECHANISM: optional short mechanism\n"
+    "ABSTRACTION: low, medium, or high\n\n"
+    "PARENT PASSAGE:\n{text}"
+)
+
 
 def summary_compiler_token_budget(summary_tokens: int, item_count: int = 1) -> int:
     """Budget complete JSON artifacts independently from stored prose length."""
@@ -122,6 +140,65 @@ class SummaryTask:
     source_tier: str  # tier_a | tier_b | tier_c | ocr_ast
     source_child_ids: list[str] | None = None
     child_boundaries: str = ""
+
+
+def parse_tagged_summary_response(
+    raw: str,
+    *,
+    source_child_ids: list[str] | None = None,
+    source_text: str | None = None,
+) -> dict[str, Any]:
+    """Compile a non-JSON provider rescue response into semantic fields."""
+
+    text = re.sub(r"<think>.*?</think>", "", str(raw or ""), flags=re.DOTALL | re.IGNORECASE)
+    sections: dict[str, list[str]] = {}
+    current: str | None = None
+    allowed = {"SUMMARY", "CLAIM", "POINT", "TAGS", "MECHANISM", "ABSTRACTION"}
+    for raw_line in text.splitlines():
+        line = raw_line.strip().strip("`")
+        if not line:
+            continue
+        label, separator, value = line.partition(":")
+        normalized = label.strip().upper()
+        if separator and normalized in allowed:
+            current = normalized
+            sections.setdefault(current, []).append(value.strip())
+        elif current:
+            sections[current][-1] = f"{sections[current][-1]} {line}".strip()
+
+    summary = " ".join(sections.get("SUMMARY") or []).strip()
+    if not summary:
+        return parse_semantic_summary(
+            raw,
+            source_child_ids=source_child_ids or [],
+            source_text=source_text,
+        )
+    child_ids = [str(value) for value in (source_child_ids or []) if str(value)]
+    points = [
+        {"point": point, "supporting_child_ids": child_ids}
+        for point in sections.get("POINT") or []
+        if point
+    ]
+    tags = [
+        item.strip()
+        for value in sections.get("TAGS") or []
+        for item in re.split(r"[|,]", value)
+        if item.strip()
+    ]
+    payload = {
+        "summary": summary,
+        "central_claim": " ".join(sections.get("CLAIM") or []).strip(),
+        "key_points": points,
+        "concept_tags": tags,
+        "main_mechanism": " ".join(sections.get("MECHANISM") or []).strip(),
+        "abstraction_level": " ".join(sections.get("ABSTRACTION") or []).strip().lower(),
+        "retrieval_uses": ["evidence"],
+    }
+    return parse_semantic_summary(
+        json.dumps(payload, ensure_ascii=True),
+        source_child_ids=child_ids,
+        source_text=source_text,
+    )
 
 
 @dataclass
@@ -468,11 +545,20 @@ async def summarize_parents(
         *,
         raw: str,
         entry: dict,
+        tagged_rescue: bool = False,
     ) -> SummaryResult | None:
-        semantic = parse_semantic_summary(
-            raw,
-            source_child_ids=task.source_child_ids or [],
-            source_text=task.text,
+        semantic = (
+            parse_tagged_summary_response(
+                raw,
+                source_child_ids=task.source_child_ids or [],
+                source_text=task.text,
+            )
+            if tagged_rescue
+            else parse_semantic_summary(
+                raw,
+                source_child_ids=task.source_child_ids or [],
+                source_text=task.text,
+            )
         )
         artifact = canonical_parent_summary_fields(
             semantic,
@@ -536,18 +622,33 @@ async def summarize_parents(
             retrieval_text=artifact["retrieval_text"],
         )
 
-    async def _process_one(task: SummaryTask, pool_idx: int) -> SummaryResult | None:
+    async def _process_one(
+        task: SummaryTask,
+        pool_idx: int,
+        *,
+        tagged_rescue: bool = False,
+    ) -> SummaryResult | None:
         entry = pool[pool_idx]
         payload: dict = {
             "model": entry["model"],
             "messages": [
-                {"role": "system", "content": _SYSTEM},
-                {"role": "user", "content": _USER.format(
-                    max_tokens=cap,
-                    text=task.text,
-                    source_child_ids=json.dumps(task.source_child_ids or []),
-                    child_boundaries=task.child_boundaries or "",
-                )},
+                {
+                    "role": "system",
+                    "content": _TAGGED_RESCUE_SYSTEM if tagged_rescue else _SYSTEM,
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        _TAGGED_RESCUE_USER.format(text=task.text)
+                        if tagged_rescue
+                        else _USER.format(
+                            max_tokens=cap,
+                            text=task.text,
+                            source_child_ids=json.dumps(task.source_child_ids or []),
+                            child_boundaries=task.child_boundaries or "",
+                        )
+                    ),
+                },
             ],
             "temperature": 0,
             "max_tokens": summary_compiler_token_budget(cap),
@@ -584,7 +685,12 @@ async def summarize_parents(
                 resp.raise_for_status()
                 body = resp.json()
                 raw = body["choices"][0]["message"]["content"].strip()
-                result = _compile_result(task, raw=raw, entry=entry)
+                result = _compile_result(
+                    task,
+                    raw=raw,
+                    entry=entry,
+                    tagged_rescue=tagged_rescue,
+                )
                 usage = body.get("usage") or {}
                 finish_reason = str(
                     body.get("choices", [{}])[0].get("finish_reason") or ""
@@ -647,6 +753,12 @@ async def summarize_parents(
     ) -> dict[str, SummaryResult]:
         if len(batch_tasks) == 1:
             result = await _process_one(batch_tasks[0], pool_idx)
+            if result is None:
+                result = await _process_one(
+                    batch_tasks[0],
+                    pool_idx,
+                    tagged_rescue=True,
+                )
             return {result.parent_id: result} if result else {}
         entry = pool[pool_idx]
         items = [
@@ -747,7 +859,10 @@ async def summarize_parents(
             ]
             if raw and missing_tasks:
                 fallback_results = await asyncio.gather(
-                    *(_process_one(task, pool_idx) for task in missing_tasks),
+                    *(
+                        _process_one(task, pool_idx, tagged_rescue=True)
+                        for task in missing_tasks
+                    ),
                     return_exceptions=True,
                 )
                 for task, fallback_result in zip(

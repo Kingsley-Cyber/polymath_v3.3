@@ -6,6 +6,7 @@ from services import ghost_a
 from services.ghost_a import (
     SummaryTask,
     parse_summary_microbatch_response,
+    parse_tagged_summary_response,
     summary_compiler_token_budget,
     summarize_parents,
 )
@@ -86,6 +87,34 @@ class _EnvelopeIgnoringClient(_BlankSummaryClient):
         )
 
 
+class _TaggedRescueClient(_BlankSummaryClient):
+    payloads: list[dict] = []
+
+    async def post(self, *args, **kwargs) -> _EnvelopeIgnoringResponse:
+        payload = dict(kwargs.get("json") or {})
+        self.payloads.append(payload)
+        user = payload["messages"][1]["content"]
+        if "ITEMS:" in user:
+            return _EnvelopeIgnoringResponse(
+                '{"items":['
+                '{"target_id":"parent-0","artifact":{"source":"copied-json"}},'
+                '{"target_id":"parent-1","artifact":{"source":"copied-json"}},'
+                '{"target_id":"parent-2","artifact":{"source":"copied-json"}}'
+                "]}"
+            )
+        return _EnvelopeIgnoringResponse(
+            "SUMMARY: Durable queues preserve validated retrieval artifacts while preventing repeated provider work. "
+            "The process separates generation from promotion and records failures for explicit operator review.\n"
+            "CLAIM: Durable queues prevent duplicate provider work.\n"
+            "POINT: Validated artifacts remain reusable across retries.\n"
+            "POINT: Invalid generations are not promoted into retrieval storage.\n"
+            "POINT: Operators explicitly control retries after a terminal failure.\n"
+            "TAGS: durable queues | retrieval artifacts | validation | retries\n"
+            "MECHANISM: validation before durable promotion\n"
+            "ABSTRACTION: medium"
+        )
+
+
 @pytest.mark.asyncio
 async def test_summary_microbatch_uses_one_provider_call_for_four_targets(monkeypatch) -> None:
     _CapturingBlankSummaryClient.payloads.clear()
@@ -142,6 +171,63 @@ def test_summary_microbatch_parser_skips_reasoning_object_prefix() -> None:
     )
 
     assert set(parsed) == {"parent-1"}
+
+
+def test_tagged_summary_compiler_attaches_known_child_evidence() -> None:
+    parsed = parse_tagged_summary_response(
+        "SUMMARY: A bounded provider rescue produces factual retrieval prose without requiring native JSON support. "
+        "The deterministic compiler attaches known evidence identifiers and validates the resulting artifact.\n"
+        "CLAIM: The compiler converts tagged prose into a validated artifact.\n"
+        "POINT: Tagged prose avoids malformed JSON responses.\n"
+        "TAGS: tagged prose | validation | retrieval\n"
+        "ABSTRACTION: medium",
+        source_child_ids=["child-1"],
+    )
+
+    assert parsed["summary"].startswith("A bounded provider rescue")
+    assert parsed["validation_status"] == "valid"
+    assert parsed["key_points"][0]["supporting_child_ids"] == ["child-1"]
+
+
+@pytest.mark.asyncio
+async def test_invalid_json_microbatch_uses_bounded_tagged_rescue(monkeypatch) -> None:
+    _TaggedRescueClient.payloads.clear()
+    monkeypatch.setattr(ghost_a.httpx, "AsyncClient", _TaggedRescueClient)
+
+    results = await summarize_parents(
+        [
+            SummaryTask(
+                parent_id=f"parent-{index}",
+                doc_id="doc-1",
+                corpus_id="corpus-1",
+                source_tier="parent",
+                text="Durable queues preserve validated artifacts and prevent duplicate work.",
+                source_child_ids=["child-1"],
+            )
+            for index in range(3)
+        ],
+        pool=[
+            {
+                "model": "unit/tagged-rescue-model",
+                "base_url": None,
+                "api_key": None,
+                "max_concurrent": 4,
+                "extra_params": {"microbatch_size": 4},
+            }
+        ],
+        global_max_concurrent=4,
+    )
+
+    assert {result.parent_id for result in results} == {
+        "parent-0",
+        "parent-1",
+        "parent-2",
+    }
+    assert len(_TaggedRescueClient.payloads) == 4
+    assert sum(
+        "Produce this exact line-oriented contract" in payload["messages"][1]["content"]
+        for payload in _TaggedRescueClient.payloads
+    ) == 3
 
 
 @pytest.mark.asyncio
@@ -218,7 +304,10 @@ async def test_blank_model_content_defers_instead_of_using_fallback(monkeypatch)
     )
 
     assert results == []
-    assert len(_CapturingBlankSummaryClient.payloads) == 1
+    assert len(_CapturingBlankSummaryClient.payloads) == 2
+    assert "Produce this exact line-oriented contract" in (
+        _CapturingBlankSummaryClient.payloads[1]["messages"][1]["content"]
+    )
 
 
 @pytest.mark.asyncio
