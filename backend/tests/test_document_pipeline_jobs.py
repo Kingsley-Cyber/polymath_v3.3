@@ -1,5 +1,13 @@
+from unittest.mock import AsyncMock
+
 import pytest
 
+from services.ingestion.document_pipeline_executors import (
+    _qdrant_child_vectors_complete,
+    _stage_after_qdrant,
+    _will_write_summary_points,
+    mark_documents_persisted_from_artifacts,
+)
 from services.ingestion.document_pipeline_jobs import (
     build_document_pipeline_job,
     classify_document_pipeline_jobs,
@@ -39,11 +47,6 @@ async def test_artifact_reconciliation_retires_failed_chunk_job_when_chunks_exis
     update = db["document_pipeline_jobs"].bulk_ops[0]._doc["$set"]
     assert update["status"] == "superseded"
     assert update["reason"] == "artifact_already_satisfied"
-from services.ingestion.document_pipeline_executors import (
-    _stage_after_qdrant,
-    _will_write_summary_points,
-    mark_documents_persisted_from_artifacts,
-)
 
 
 def test_document_pipeline_job_id_is_deterministic():
@@ -251,6 +254,52 @@ def test_summary_write_intent_tracks_actual_qdrant_targets():
     assert not _will_write_summary_points(
         type("Config", (), {"target_qdrant_collections": ["naive"]})(),
         [],
+    )
+
+
+@pytest.mark.asyncio
+async def test_qdrant_preflight_accepts_complete_child_vectors(monkeypatch):
+    class Qdrant:
+        async def count(self, **_kwargs):
+            return type("Count", (), {"count": 7})()
+
+    expected = AsyncMock(return_value=7)
+    monkeypatch.setattr(
+        "services.ingestion.verify._expected_child_count",
+        expected,
+    )
+
+    assert await _qdrant_child_vectors_complete(
+        object(),
+        qdrant_client=Qdrant(),
+        corpus_id="corpus-1",
+        doc_id="doc-1",
+        target_qdrant_collections=["naive", "hrag", "graph"],
+    )
+    assert expected.await_count == 3
+
+
+@pytest.mark.asyncio
+async def test_qdrant_preflight_rejects_any_missing_collection(monkeypatch):
+    class Qdrant:
+        def __init__(self):
+            self.calls = 0
+
+        async def count(self, **_kwargs):
+            self.calls += 1
+            return type("Count", (), {"count": 7 if self.calls == 1 else 6})()
+
+    monkeypatch.setattr(
+        "services.ingestion.verify._expected_child_count",
+        AsyncMock(return_value=7),
+    )
+
+    assert not await _qdrant_child_vectors_complete(
+        object(),
+        qdrant_client=Qdrant(),
+        corpus_id="corpus-1",
+        doc_id="doc-1",
+        target_qdrant_collections=["naive", "hrag"],
     )
 
 

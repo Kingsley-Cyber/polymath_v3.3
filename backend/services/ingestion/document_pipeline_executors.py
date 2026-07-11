@@ -45,6 +45,55 @@ def _will_write_summary_points(config: Any, summaries: list[Any]) -> bool:
     return bool(summaries and targets.intersection({"naive", "hrag"}))
 
 
+async def _qdrant_child_vectors_complete(
+    db: Any,
+    *,
+    qdrant_client: Any,
+    corpus_id: str,
+    doc_id: str,
+    target_qdrant_collections: list[str],
+) -> bool:
+    """Check current child-vector counts before an expensive rewrite."""
+    from qdrant_client import models as qmodels
+
+    from services.ingestion.verify import _expected_child_count
+    from services.storage.qdrant_writer import _col_for_corpus
+
+    if not target_qdrant_collections:
+        return False
+    for kind in target_qdrant_collections:
+        expected = await _expected_child_count(
+            db,
+            doc_id=doc_id,
+            corpus_id=corpus_id,
+            collection_kind=kind,
+            exclude_noisy=True,
+        )
+        collection_name = _col_for_corpus(corpus_id, kind)
+        try:
+            result = await qdrant_client.count(
+                collection_name=collection_name,
+                count_filter=qmodels.Filter(
+                    must=[
+                        qmodels.FieldCondition(
+                            key="doc_id",
+                            match=qmodels.MatchValue(value=doc_id),
+                        ),
+                        qmodels.FieldCondition(
+                            key="chunk_type",
+                            match=qmodels.MatchValue(value="child"),
+                        ),
+                    ]
+                ),
+                exact=True,
+            )
+        except Exception:
+            return False
+        if int(getattr(result, "count", -1)) != expected:
+            return False
+    return True
+
+
 def _facet_from_row(row: dict[str, Any]) -> dict[str, Any]:
     return {
         "facet_ids": _list(row.get("facet_ids")),
@@ -284,6 +333,39 @@ async def embed_documents_to_qdrant_from_artifacts(
                     live_corpus=live_cfg,
                     ingest_overrides=None,
                 )
+                target_collections = list(config.target_qdrant_collections or [])
+                write_state = _dict(doc.get("write_state"))
+                if write_state.get("qdrant_written") is True and await _qdrant_child_vectors_complete(
+                    db,
+                    qdrant_client=qdrant_client,
+                    corpus_id=corpus_id,
+                    doc_id=doc_id,
+                    target_qdrant_collections=target_collections,
+                ):
+                    remaining_errors = [
+                        error
+                        for error in (write_state.get("verify_errors") or [])
+                        if "child vectors" not in str(error).lower()
+                    ]
+                    await mongo_writer.update_write_state(
+                        db,
+                        doc_id,
+                        corpus_id=corpus_id,
+                        qdrant_written=True,
+                        verified=not remaining_errors,
+                        verify_errors=remaining_errors,
+                    )
+                    status, reason = "succeeded", "qdrant_child_vectors_already_complete"
+                    counts[status] = counts.get(status, 0) + 1
+                    docs.append(
+                        {
+                            "doc_id": doc_id,
+                            "status": status,
+                            "reason": reason,
+                            "elapsed_seconds": round(time.monotonic() - started, 3),
+                        }
+                    )
+                    continue
                 parents, children, facet_profile = _rehydrate_chunks(
                     doc=doc,
                     parent_rows=parent_rows,
@@ -362,7 +444,7 @@ async def embed_documents_to_qdrant_from_artifacts(
                     doc_id=doc_id,
                     corpus_id=corpus_id,
                     target_qdrant_collections=list(
-                        config.target_qdrant_collections or []
+                        target_collections
                     ),
                     use_neo4j=bool(config.use_neo4j and neo4j_driver is not None),
                 )
