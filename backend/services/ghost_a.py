@@ -542,6 +542,10 @@ async def summarize_parents(
             ],
             "temperature": 0,
             "max_tokens": summary_compiler_token_budget(cap),
+            # Mongo/Qdrant hold the validated durable artifact. Caching the
+            # unvalidated provider response can permanently replay malformed
+            # JSON after an operator retry or provider-contract fix.
+            "cache": {"no-cache": True, "no-store": True},
         }
         if entry.get("base_url"):
             payload["api_base"] = entry["base_url"]
@@ -659,6 +663,7 @@ async def summarize_parents(
             ],
             "temperature": 0,
             "max_tokens": summary_compiler_token_budget(cap, len(batch_tasks)),
+            "cache": {"no-cache": True, "no-store": True},
         }
         if entry.get("base_url"):
             payload["api_base"] = entry["base_url"]
