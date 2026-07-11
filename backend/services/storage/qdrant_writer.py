@@ -172,7 +172,9 @@ def _col_for_corpus(corpus_id: str, kind: str) -> str:
         f"{prefix}{corpus_id[:8]}_{kind}" — e.g. "corpus_a1b2c3d4_naive".
     """
     if kind not in _VALID_KINDS:
-        raise ValueError(f"Invalid Qdrant kind {kind!r} (expected one of {_VALID_KINDS})")
+        raise ValueError(
+            f"Invalid Qdrant kind {kind!r} (expected one of {_VALID_KINDS})"
+        )
     if not corpus_id:
         raise ValueError("corpus_id is required for per-corpus collection naming")
     return f"{settings.QDRANT_COLLECTION_PREFIX}{corpus_id[:8]}_{kind}"
@@ -360,12 +362,21 @@ def _dense_vector_size(vectors_config) -> int | None:
         return None
 
 
+def _layout_from_collection_info(collection_info: object) -> tuple[bool, bool]:
+    params = getattr(getattr(collection_info, "config", None), "params", None)
+    vec_cfg = getattr(params, "vectors", None)
+    has_named_dense = isinstance(vec_cfg, dict) and "dense" in vec_cfg
+    sparse_cfg = getattr(params, "sparse_vectors", None) or {}
+    has_sparse = bool(sparse_cfg) and "sparse" in sparse_cfg
+    return has_named_dense, has_sparse
+
+
 async def _assert_collection_dimension(
     client: AsyncQdrantClient,
     *,
     collection_name: str,
     expected_dim: int,
-) -> None:
+) -> object | None:
     """Fail fast when an existing collection cannot serve this corpus.
 
     Re-indexing is required after an embedding-dimension change. Silently
@@ -376,18 +387,35 @@ async def _assert_collection_dimension(
         info = await client.get_collection(collection_name)
         vectors_config = getattr(getattr(info.config, "params", None), "vectors", None)
         actual_dim = _dense_vector_size(vectors_config)
+        # Readiness already paid for this metadata request. Prime the shared
+        # read-path cache so the first interactive query does not launch one
+        # get_collection request per concurrent lane/corpus.
+        _COLLECTION_LAYOUT_CACHE[collection_name] = _layout_from_collection_info(info)
     except Exception as exc:
-        logger.warning("Could not inspect Qdrant collection %s: %s", collection_name, exc)
-        return
+        logger.warning(
+            "Could not inspect Qdrant collection %s: %s", collection_name, exc
+        )
+        return None
     if actual_dim is None:
-        logger.warning("Could not determine Qdrant vector dimension for %s", collection_name)
-        return
+        logger.warning(
+            "Could not determine Qdrant vector dimension for %s", collection_name
+        )
+        return info
     if actual_dim != int(expected_dim):
         raise RuntimeError(
             f"Qdrant collection {collection_name!r} has vector dimension "
             f"{actual_dim}, expected {expected_dim}. Re-index this corpus before "
             "retrieval can be deterministic."
         )
+    return info
+
+
+def _payload_index_fields(collection_info: object | None) -> set[str]:
+    """Return fields already indexed according to one collection snapshot."""
+    payload_schema = getattr(collection_info, "payload_schema", None) or {}
+    if isinstance(payload_schema, dict):
+        return {str(field) for field in payload_schema}
+    return set()
 
 
 async def _list_aliases_for_collection(
@@ -418,9 +446,14 @@ async def rename_corpus_aliases(
             if a != new_alias:
                 ops.append(DeleteAliasOperation(delete_alias=DeleteAlias(alias_name=a)))
         if new_alias not in existing_aliases:
-            ops.append(CreateAliasOperation(create_alias=CreateAlias(
-                collection_name=physical, alias_name=new_alias,
-            )))
+            ops.append(
+                CreateAliasOperation(
+                    create_alias=CreateAlias(
+                        collection_name=physical,
+                        alias_name=new_alias,
+                    )
+                )
+            )
     if not ops:
         return
     try:
@@ -447,12 +480,14 @@ async def ensure_collections_for_corpus(
     chunk_kinds = ("naive", "hrag", "graph")
     for kind in chunk_kinds:
         name = _col_for_corpus(corpus_id, kind)
+        existing_payload_indexes: set[str] = set()
         if await client.collection_exists(name):
-            await _assert_collection_dimension(
+            info = await _assert_collection_dimension(
                 client,
                 collection_name=name,
                 expected_dim=dim,
             )
+            existing_payload_indexes = _payload_index_fields(info)
             logger.debug("Qdrant collection exists: %s", name)
         else:
             # Hybrid layout: named "dense" for the Qwen3 embedding + named
@@ -463,32 +498,46 @@ async def ensure_collections_for_corpus(
             await _create_collection_with_retry(
                 client,
                 collection_name=name,
-                vectors_config={"dense": VectorParams(size=dim, distance=Distance.COSINE)},
-                sparse_vectors_config={"sparse": SparseVectorParams(modifier=Modifier.IDF)},
+                vectors_config={
+                    "dense": VectorParams(size=dim, distance=Distance.COSINE)
+                },
+                sparse_vectors_config={
+                    "sparse": SparseVectorParams(modifier=Modifier.IDF)
+                },
             )
         for field_name in _CHUNK_PAYLOAD_INDEXES:
+            if field_name in existing_payload_indexes:
+                continue
             await _create_payload_index_with_retry(
                 client,
                 collection_name=name,
                 field_name=field_name,
             )
-        logger.info("Ensured Qdrant collection: %s (corpus %s) [hybrid]", name, corpus_id)
+        logger.info(
+            "Ensured Qdrant collection: %s (corpus %s) [hybrid]", name, corpus_id
+        )
 
     schemas_name = _col_for_corpus(corpus_id, "schemas")
+    existing_schema_indexes: set[str] = set()
     if await client.collection_exists(schemas_name):
-        await _assert_collection_dimension(
+        info = await _assert_collection_dimension(
             client,
             collection_name=schemas_name,
             expected_dim=dim,
         )
+        existing_schema_indexes = _payload_index_fields(info)
     else:
         await _create_collection_with_retry(
             client,
             collection_name=schemas_name,
             vectors_config=VectorParams(size=dim, distance=Distance.COSINE),
         )
-        logger.info("Created Qdrant collection: %s (corpus %s)", schemas_name, corpus_id)
+        logger.info(
+            "Created Qdrant collection: %s (corpus %s)", schemas_name, corpus_id
+        )
     for field_name in _SCHEMA_PAYLOAD_INDEXES:
+        if field_name in existing_schema_indexes:
+            continue
         await _create_payload_index_with_retry(
             client,
             collection_name=schemas_name,
@@ -500,9 +549,7 @@ async def ensure_collections_for_corpus(
         await rename_corpus_aliases(client, corpus_id, corpus_name)
 
 
-async def drop_collections_for_corpus(
-    client: AsyncQdrantClient, corpus_id: str
-) -> int:
+async def drop_collections_for_corpus(client: AsyncQdrantClient, corpus_id: str) -> int:
     """Drop the 4 per-corpus collections. O(1) per-collection — replaces the
     old filter-delete cascade. Idempotent: missing collections are silently
     skipped. Returns the count of collections actually dropped. Qdrant aliases
@@ -514,7 +561,9 @@ async def drop_collections_for_corpus(
         try:
             if await client.collection_exists(name):
                 await client.delete_collection(collection_name=name)
-                logger.info("Dropped Qdrant collection: %s (corpus %s)", name, corpus_id)
+                logger.info(
+                    "Dropped Qdrant collection: %s (corpus %s)", name, corpus_id
+                )
                 dropped += 1
         except Exception as exc:
             logger.warning(
@@ -531,6 +580,7 @@ async def drop_collections_for_corpus(
 # and new (named dense+sparse) collections in the same upsert path
 # without per-call introspection.
 _COLLECTION_LAYOUT_CACHE: dict[str, tuple[bool, bool]] = {}
+_COLLECTION_LAYOUT_LOCKS: dict[str, asyncio.Lock] = {}
 
 
 async def _collection_layout(
@@ -540,15 +590,15 @@ async def _collection_layout(
     cached = _COLLECTION_LAYOUT_CACHE.get(collection_name)
     if cached is not None:
         return cached
-    info = await client.get_collection(collection_name)
-    params = info.config.params
-    vec_cfg = getattr(params, "vectors", None)
-    has_named_dense = isinstance(vec_cfg, dict) and "dense" in vec_cfg
-    sparse_cfg = getattr(params, "sparse_vectors", None) or {}
-    has_sparse = bool(sparse_cfg) and "sparse" in sparse_cfg
-    layout = (has_named_dense, has_sparse)
-    _COLLECTION_LAYOUT_CACHE[collection_name] = layout
-    return layout
+    lock = _COLLECTION_LAYOUT_LOCKS.setdefault(collection_name, asyncio.Lock())
+    async with lock:
+        cached = _COLLECTION_LAYOUT_CACHE.get(collection_name)
+        if cached is not None:
+            return cached
+        info = await client.get_collection(collection_name)
+        layout = _layout_from_collection_info(info)
+        _COLLECTION_LAYOUT_CACHE[collection_name] = layout
+        return layout
 
 
 def _build_vector(
@@ -664,8 +714,10 @@ async def upsert_children(
             PointStruct(
                 id=_child_point_id(c["chunk_id"]),
                 vector=_build_vector(
-                    dense=v, sparse=sv,
-                    has_named_dense=has_named, has_sparse=has_sparse,
+                    dense=v,
+                    sparse=sv,
+                    has_named_dense=has_named,
+                    has_sparse=has_sparse,
                 ),
                 payload=payload,
             )
@@ -679,7 +731,10 @@ async def upsert_children(
         )
         logger.debug(
             "Upserted %d child points → %s (named=%s sparse=%s)",
-            len(points), name, has_named, has_sparse,
+            len(points),
+            name,
+            has_named,
+            has_sparse,
         )
 
 
@@ -715,51 +770,55 @@ async def upsert_summaries(
     for p in summary_payloads:
         summary_text = p.get("summary") or p.get("summary_text") or ""
         retrieval_text = p.get("retrieval_text") or summary_text
-        payloads.append({
-            "corpus_id": p["corpus_id"],
-            "doc_id": p["doc_id"],
-            "filename": p.get("filename") or p.get("doc_name") or "",
-            "doc_name": p.get("doc_name") or p.get("filename") or "",
-            "chunk_id": f"{p['parent_id']}_summary",
-            "parent_id": p["parent_id"],
-            "chunk_type": "summary",
-            "summary_id": p.get("summary_id") or f"{p['parent_id']}_summary",
-            "schema_version": p.get("schema_version") or "parent_summary.v1",
-            "summary_type": p.get("summary_type") or "parent_retrieval_replacement",
-            "summary_text": summary_text,
-            "retrieval_text": retrieval_text,
-            "central_claim": p.get("central_claim") or "",
-            "key_points": p.get("key_points") or [],
-            "main_mechanism": p.get("main_mechanism") or "",
-            "concept_tags": p.get("concept_tags") or [],
-            "entity_hints": p.get("entity_hints") or [],
-            "retrieval_uses": p.get("retrieval_uses") or [],
-            "abstraction_level": p.get("abstraction_level") or "medium",
-            "source_child_ids": p.get("source_child_ids") or p.get("child_ids") or [],
-            "source_hash": p.get("source_hash") or "",
-            "summary_model": p.get("summary_model") or "",
-            "summary_created_at": p.get("summary_created_at") or "",
-            "validation_status": p.get("validation_status") or "",
-            "repair_status": p.get("repair_status") or "",
-            "quality_score": p.get("quality_score"),
-            "quality_flags": p.get("quality_flags") or [],
-            "source_tier": p["source_tier"],
-            "heading_path": p.get("heading_path"),
-            "chunk_text": retrieval_text,
-            **payload_text_contract(retrieval_text),
-            "user_id": p.get("user_id", ""),
-            "chunk_kind": p.get("chunk_kind", "body"),
-            "language": p.get("language"),
-            "metadata": p.get("metadata") or {},
-            "facet_ids": p.get("facet_ids") or [],
-            "facet_text": p.get("facet_text") or "",
-            "content_facet_ids": p.get("content_facet_ids") or [],
-            "content_facet_text": p.get("content_facet_text") or "",
-            "content_facet_source": p.get("content_facet_source") or "",
-            "content_facet_confidence": p.get("content_facet_confidence"),
-            "doc_facet_ids": p.get("doc_facet_ids") or [],
-            "facet_schema_version": p.get("facet_schema_version") or "",
-        })
+        payloads.append(
+            {
+                "corpus_id": p["corpus_id"],
+                "doc_id": p["doc_id"],
+                "filename": p.get("filename") or p.get("doc_name") or "",
+                "doc_name": p.get("doc_name") or p.get("filename") or "",
+                "chunk_id": f"{p['parent_id']}_summary",
+                "parent_id": p["parent_id"],
+                "chunk_type": "summary",
+                "summary_id": p.get("summary_id") or f"{p['parent_id']}_summary",
+                "schema_version": p.get("schema_version") or "parent_summary.v1",
+                "summary_type": p.get("summary_type") or "parent_retrieval_replacement",
+                "summary_text": summary_text,
+                "retrieval_text": retrieval_text,
+                "central_claim": p.get("central_claim") or "",
+                "key_points": p.get("key_points") or [],
+                "main_mechanism": p.get("main_mechanism") or "",
+                "concept_tags": p.get("concept_tags") or [],
+                "entity_hints": p.get("entity_hints") or [],
+                "retrieval_uses": p.get("retrieval_uses") or [],
+                "abstraction_level": p.get("abstraction_level") or "medium",
+                "source_child_ids": p.get("source_child_ids")
+                or p.get("child_ids")
+                or [],
+                "source_hash": p.get("source_hash") or "",
+                "summary_model": p.get("summary_model") or "",
+                "summary_created_at": p.get("summary_created_at") or "",
+                "validation_status": p.get("validation_status") or "",
+                "repair_status": p.get("repair_status") or "",
+                "quality_score": p.get("quality_score"),
+                "quality_flags": p.get("quality_flags") or [],
+                "source_tier": p["source_tier"],
+                "heading_path": p.get("heading_path"),
+                "chunk_text": retrieval_text,
+                **payload_text_contract(retrieval_text),
+                "user_id": p.get("user_id", ""),
+                "chunk_kind": p.get("chunk_kind", "body"),
+                "language": p.get("language"),
+                "metadata": p.get("metadata") or {},
+                "facet_ids": p.get("facet_ids") or [],
+                "facet_text": p.get("facet_text") or "",
+                "content_facet_ids": p.get("content_facet_ids") or [],
+                "content_facet_text": p.get("content_facet_text") or "",
+                "content_facet_source": p.get("content_facet_source") or "",
+                "content_facet_confidence": p.get("content_facet_confidence"),
+                "doc_facet_ids": p.get("doc_facet_ids") or [],
+                "facet_schema_version": p.get("facet_schema_version") or "",
+            }
+        )
 
     for kind in target_kinds:
         if kind == "graph":
@@ -771,8 +830,10 @@ async def upsert_summaries(
             PointStruct(
                 id=_summary_point_id(p["corpus_id"], p["parent_id"]),
                 vector=_build_vector(
-                    dense=v, sparse=sv,
-                    has_named_dense=has_named, has_sparse=has_sparse,
+                    dense=v,
+                    sparse=sv,
+                    has_named_dense=has_named,
+                    has_sparse=has_sparse,
                 ),
                 payload=payload,
             )
@@ -786,7 +847,10 @@ async def upsert_summaries(
         )
         logger.debug(
             "Upserted %d summary points → %s (named=%s sparse=%s)",
-            len(points), name, has_named, has_sparse,
+            len(points),
+            name,
+            has_named,
+            has_sparse,
         )
 
 
@@ -845,7 +909,10 @@ async def delete_points_by_doc(
             results[kind] = getattr(op, "operation_id", None) is not None
         except Exception as exc:
             logger.warning(
-                "Qdrant per-doc delete failed for %s (doc=%s): %s", name, doc_id[:12], exc
+                "Qdrant per-doc delete failed for %s (doc=%s): %s",
+                name,
+                doc_id[:12],
+                exc,
             )
             results[kind] = False
     logger.info(

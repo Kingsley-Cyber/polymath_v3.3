@@ -1,0 +1,84 @@
+{
+  "version": 1,
+  "description": "Human-reviewed document-level relevance judgments for the ecommerce, mark transcript, and polymath_v2 QueryPlanV2 live evaluation.",
+  "judgment_contract": {
+    "citation_precision": "A returned source is relevant when its document directly supports at least one required answer side. Unanswerable cases may cite only the supported named-concept side.",
+    "coverage": "Required-anchor coverage is scored only on routes whose contract can answer the query. Unanswerable guards are exempt because missing coverage is the expected result.",
+    "duplicates": "Repeated document IDs in one evidence packet count as duplicate evidence. Cross-corpus content-hash behavior is additionally covered by a synthetic fixture because the live corpora contain zero cross-corpus content-hash duplicate groups."
+  },
+  "queries": {
+    "purple_ocean_definition": {
+      "evaluated_routes": ["Fast Search", "Hybrid Search", "Graph Augmentation"],
+      "relevant_doc_ids": [
+        "17b558b809bba8899e6a2951513223f8c2e382e5bddbccf31fd05d70cf2fd50e",
+        "f6f827504f3343a0f7517e540868097c604c9caf64dd2a48603dac61a65589eb",
+        "02d1d93080f1ca97d29a0107f25f0976d7fc46606216569be5ab0f9f2fa94066",
+        "55e404ad59a6b63ae3ddf9c7a3298e9345a6414b36b6b93deb9bc10557157a4e",
+        "b9d8b70224d4c2d224cd0d9fd102d240ee25a7d5c92fbb8b4da2c3825b72a6c0",
+        "077f954daf38252f03aa2ce200be33f9828ea28b61b6d8bce480ecd325f1eeb5"
+      ]
+    },
+    "sticky_message_definition": {
+      "evaluated_routes": ["Fast Search", "Hybrid Search", "Graph Augmentation"],
+      "relevant_doc_ids": [
+        "caaae4bcd6e01a95844c4f7871ec52904e399875d9bec5873ca4b77ba0a5527d"
+      ]
+    },
+    "purple_sticky_comparison": {
+      "evaluated_routes": ["Hybrid Search", "Graph Augmentation"],
+      "relevant_doc_ids": [
+        "17b558b809bba8899e6a2951513223f8c2e382e5bddbccf31fd05d70cf2fd50e",
+        "f6f827504f3343a0f7517e540868097c604c9caf64dd2a48603dac61a65589eb",
+        "02d1d93080f1ca97d29a0107f25f0976d7fc46606216569be5ab0f9f2fa94066",
+        "55e404ad59a6b63ae3ddf9c7a3298e9345a6414b36b6b93deb9bc10557157a4e",
+        "b9d8b70224d4c2d224cd0d9fd102d240ee25a7d5c92fbb8b4da2c3825b72a6c0",
+        "077f954daf38252f03aa2ce200be33f9828ea28b61b6d8bce480ecd325f1eeb5",
+        "caaae4bcd6e01a95844c4f7871ec52904e399875d9bec5873ca4b77ba0a5527d"
+      ]
+    },
+    "cross_corpus_offer": {
+      "evaluated_routes": ["Hybrid Search", "Graph Augmentation"],
+      "relevant_doc_ids": [
+        "17b558b809bba8899e6a2951513223f8c2e382e5bddbccf31fd05d70cf2fd50e",
+        "f6f827504f3343a0f7517e540868097c604c9caf64dd2a48603dac61a65589eb",
+        "02d1d93080f1ca97d29a0107f25f0976d7fc46606216569be5ab0f9f2fa94066",
+        "55e404ad59a6b63ae3ddf9c7a3298e9345a6414b36b6b93deb9bc10557157a4e",
+        "b9d8b70224d4c2d224cd0d9fd102d240ee25a7d5c92fbb8b4da2c3825b72a6c0",
+        "077f954daf38252f03aa2ce200be33f9828ea28b61b6d8bce480ecd325f1eeb5",
+        "caaae4bcd6e01a95844c4f7871ec52904e399875d9bec5873ca4b77ba0a5527d"
+      ]
+    },
+    "graph_relation_positioning_message": {
+      "evaluated_routes": ["Hybrid Search", "Graph Augmentation"],
+      "expected_empty_routes": ["Fast Search"],
+      "relevant_doc_ids": [
+        "00161d83e9c9a715435c719f07808b99e99c63cbc07ac0b5d246799e1df8d01e",
+        "bfe723a8f1f4e1c3ac3157bbdce7e6ee6d13280c833a9efc0f3d73731cdd4578",
+        "31f849173ba72d341e50b63c717a03298c40b5c65968229a35c5c78223467257",
+        "25d572e591c5e8e27c24cc379ca101e5c7388fd085a368edb6365b158f2fbe12",
+        "caaae4bcd6e01a95844c4f7871ec52904e399875d9bec5873ca4b77ba0a5527d"
+      ]
+    },
+    "dependent_multi_hop_offer": {
+      "evaluated_routes": ["Hybrid Search", "Graph Augmentation"],
+      "relevant_doc_ids": [
+        "f6f827504f3343a0f7517e540868097c604c9caf64dd2a48603dac61a65589eb",
+        "caaae4bcd6e01a95844c4f7871ec52904e399875d9bec5873ca4b77ba0a5527d",
+        "28871deeb46ff95b40d153c907f882f56f0f0f25ef2040d8f2b56df16a45336e",
+        "a7a558085cda121d6411a37c6b511549c22257d8cd1f12661d4ded6dcfc1f758"
+      ]
+    },
+    "unanswerable_guard": {
+      "evaluated_routes": ["Fast Search", "Hybrid Search", "Graph Augmentation"],
+      "coverage_exempt": true,
+      "relevant_doc_ids": [
+        "17b558b809bba8899e6a2951513223f8c2e382e5bddbccf31fd05d70cf2fd50e",
+        "f6f827504f3343a0f7517e540868097c604c9caf64dd2a48603dac61a65589eb",
+        "02d1d93080f1ca97d29a0107f25f0976d7fc46606216569be5ab0f9f2fa94066",
+        "55e404ad59a6b63ae3ddf9c7a3298e9345a6414b36b6b93deb9bc10557157a4e",
+        "b9d8b70224d4c2d224cd0d9fd102d240ee25a7d5c92fbb8b4da2c3825b72a6c0",
+        "077f954daf38252f03aa2ce200be33f9828ea28b61b6d8bce480ecd325f1eeb5"
+      ]
+    }
+  }
+}

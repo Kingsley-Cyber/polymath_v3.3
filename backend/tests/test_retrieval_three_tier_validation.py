@@ -65,7 +65,11 @@ def test_anchor_coverage_supports_required_groups():
     case = {
         "anchor_groups": [
             {"name": "python", "terms": ["Python"], "required": True},
-            {"name": "ai", "terms": ["AI", "artificial intelligence"], "required": True},
+            {
+                "name": "ai",
+                "terms": ["AI", "artificial intelligence"],
+                "required": True,
+            },
             {"name": "ml", "terms": ["ML", "machine learning"], "required": False},
         ]
     }
@@ -98,6 +102,7 @@ def test_extract_trace_summary_reads_local_and_graph_advantage():
 
     assert summary["has_local_rag_trace"] is True
     assert summary["has_graph_advantage"] is True
+    assert summary["has_graph_trace"] is True
     assert summary["effective_tier"] == "qdrant_mongo_graph"
     assert summary["graph_advantage"]["facts_used"] == 3
 
@@ -149,7 +154,45 @@ def test_graph_route_requires_graph_advantage_trace():
     )
 
     assert validation["status"] == "fail"
-    assert any(issue["code"] == "missing_graph_advantage" for issue in validation["issues"])
+    assert any(issue["code"] == "missing_graph_trace" for issue in validation["issues"])
+
+
+def test_graph_route_reports_zero_signal_augmentation_without_fake_advantage():
+    case = {"anchor_groups": [{"name": "topic", "terms": ["topic"]}]}
+    result = {
+        "answer": "The sources discuss the topic, but no graph edge was established.",
+        "sources": [{"chunk_id": "a", "doc_id": "a", "text": "topic evidence"}],
+        "trace_events": [
+            {
+                "title": "Local RAG retrieval",
+                "metadata": {
+                    "duration_s": 1.0,
+                    "effective_tier": "qdrant_mongo_graph",
+                },
+            },
+            {
+                "title": "Graph Augmentation",
+                "metadata": {
+                    "advantage_established": False,
+                    "facts_used": 0,
+                    "relations_used": 0,
+                    "graph_expanded_chunks": 0,
+                },
+            },
+        ],
+        "timings_s": {"total": 2.0, "retrieval_done_sources": 1.0},
+    }
+
+    validation = evaluate_route_result(
+        query_case=case,
+        route_name="Graph Augmentation",
+        result=result,
+    )
+
+    assert validation["status"] == "pass"
+    assert validation["trace_summary"]["has_graph_trace"] is True
+    assert validation["trace_summary"]["has_graph_advantage"] is False
+    assert any(issue["code"] == "weak_graph_signal" for issue in validation["issues"])
 
 
 def test_fast_route_fails_if_graph_trace_leaks_in():
@@ -176,6 +219,126 @@ def test_fast_route_fails_if_graph_trace_leaks_in():
     assert validation["status"] == "fail"
     assert any(
         issue["code"] == "unexpected_graph_advantage" for issue in validation["issues"]
+    )
+
+
+def test_expected_fast_abstention_does_not_fail_empty_source_check():
+    case = {
+        "expected_empty_routes": ["Fast Search"],
+        "anchor_groups": [{"name": "relation", "terms": ["relationship"]}],
+    }
+    result = {
+        "answer": "",
+        "sources": [],
+        "trace_events": [
+            {
+                "title": "Local RAG retrieval",
+                "metadata": {"duration_s": 0.2, "effective_tier": "qdrant_only"},
+            }
+        ],
+        "timings_s": {"total": 0.3, "retrieval_done_sources": 0.2},
+        "stop_after_sources": True,
+    }
+
+    validation = evaluate_route_result(
+        query_case=case,
+        route_name="Fast Search",
+        result=result,
+    )
+
+    assert validation["status"] == "pass"
+    assert validation["expected_empty"] is True
+    assert validation["issues"] == []
+
+
+def test_supported_answer_fails_when_it_omits_a_required_source_concept():
+    case = {
+        "anchor_groups": [
+            {"name": "purple", "terms": ["purple ocean"], "required": True},
+            {"name": "sticky", "terms": ["sticky messaging"], "required": True},
+        ]
+    }
+    result = {
+        "answer": (
+            "Purple Ocean is a market-positioning strategy with a focused "
+            "niche and a validated market."
+        ),
+        "sources": [
+            {
+                "chunk_id": "purple",
+                "doc_id": "purple-doc",
+                "text": "Purple Ocean market-positioning strategy.",
+            },
+            {
+                "chunk_id": "sticky",
+                "doc_id": "sticky-doc",
+                "text": "Sticky messaging makes an offer memorable.",
+            },
+        ],
+        "trace_events": [
+            {
+                "title": "Local RAG retrieval",
+                "metadata": {"duration_s": 1.0, "effective_tier": "qdrant_mongo"},
+            }
+        ],
+        "timings_s": {"total": 2.0, "retrieval_done_sources": 1.0},
+    }
+
+    validation = evaluate_route_result(
+        query_case=case,
+        route_name="Hybrid Search",
+        result=result,
+    )
+
+    assert validation["status"] == "fail"
+    assert any(
+        issue["code"] == "required_answer_anchor_missing"
+        for issue in validation["issues"]
+    )
+
+
+def test_grounded_answerability_refusal_is_not_synthesis_drift():
+    case = {
+        "anchor_groups": [
+            {"name": "positioning", "terms": ["product positioning"]},
+            {"name": "messaging", "terms": ["memorable messaging"]},
+        ]
+    }
+    result = {
+        "answer": (
+            "I cannot answer that as a source-backed result from the selected "
+            "corpus. The retrieval did not establish a relationship."
+        ),
+        "sources": [
+            {"chunk_id": "a", "doc_id": "a", "text": "product positioning"},
+            {"chunk_id": "b", "doc_id": "b", "text": "memorable messaging"},
+        ],
+        "trace_events": [
+            {
+                "title": "Local RAG retrieval",
+                "metadata": {
+                    "duration_s": 1.0,
+                    "effective_tier": "qdrant_mongo",
+                    "retrieval_diagnostics": {
+                        "selection": {"sufficiency": {"answerable": False}}
+                    },
+                },
+            }
+        ],
+        "timings_s": {"total": 2.0, "retrieval_done_sources": 1.0},
+    }
+
+    validation = evaluate_route_result(
+        query_case=case,
+        route_name="Hybrid Search",
+        result=result,
+    )
+
+    assert validation["status"] == "pass"
+    assert validation["grounded_abstention"] is True
+    assert not any(
+        issue["code"] == "required_answer_anchor_missing"
+        for issue in validation["issues"]
     )
 
 
@@ -234,7 +397,9 @@ def test_retrieval_budget_is_hard_fail_by_default():
     )
 
     assert validation["status"] == "fail"
-    assert any(issue["code"] == "retrieval_over_budget" for issue in validation["issues"])
+    assert any(
+        issue["code"] == "retrieval_over_budget" for issue in validation["issues"]
+    )
 
 
 def test_total_budget_is_warning_unless_promoted():

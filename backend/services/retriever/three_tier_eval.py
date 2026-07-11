@@ -58,11 +58,15 @@ ROUTE_LATENCY_BUDGETS: dict[str, dict[str, float]] = {
 def normalize_route(value: str | None) -> dict[str, str]:
     """Resolve either a UI route name or backend tier value."""
     raw = str(value or "").strip()
-    return ROUTE_BY_NAME.get(raw) or ROUTE_BY_TIER.get(raw) or {
-        "ui_name": raw or "Unknown",
-        "tier": raw or "unknown",
-        "purpose": "unknown",
-    }
+    return (
+        ROUTE_BY_NAME.get(raw)
+        or ROUTE_BY_TIER.get(raw)
+        or {
+            "ui_name": raw or "Unknown",
+            "tier": raw or "unknown",
+            "purpose": "unknown",
+        }
+    )
 
 
 def route_latency_budget(route_name: str | None) -> dict[str, float]:
@@ -118,7 +122,9 @@ def summarize_sources(sources: list[dict[str, Any]] | None) -> dict[str, Any]:
 
     for source in sources:
         doc = _text(source.get("doc_id") or source.get("doc_name") or "unknown")
-        parent = _text(source.get("parent_id") or source.get("parent_chunk_id") or "none")
+        parent = _text(
+            source.get("parent_id") or source.get("parent_chunk_id") or "none"
+        )
         tier = _text(source.get("source_tier") or source.get("chunk_kind") or "unknown")
         text = _source_text(source)
         provenance = source.get("provenance") or []
@@ -160,7 +166,9 @@ def _anchor_groups(case: dict[str, Any]) -> list[dict[str, Any]]:
     normalized: list[dict[str, Any]] = []
     for index, group in enumerate(groups):
         if isinstance(group, dict):
-            terms = [str(term) for term in group.get("terms") or [] if str(term).strip()]
+            terms = [
+                str(term) for term in group.get("terms") or [] if str(term).strip()
+            ]
             if not terms and group.get("name"):
                 terms = [str(group["name"])]
             normalized.append(
@@ -228,9 +236,7 @@ def extract_trace_summary(trace_events: list[dict[str, Any]] | None) -> dict[str
     trace_events = trace_events or []
     titles = [_text(event.get("title")) for event in trace_events]
     local_rag_events = [
-        event
-        for event in trace_events
-        if event.get("title") == "Local RAG retrieval"
+        event for event in trace_events if event.get("title") == "Local RAG retrieval"
     ]
     local_rag = next(
         (
@@ -240,17 +246,26 @@ def extract_trace_summary(trace_events: list[dict[str, Any]] | None) -> dict[str
         ),
         local_rag_events[-1] if local_rag_events else {},
     )
-    graph_advantage = next(
-        (event for event in trace_events if event.get("title") == "Graph Advantage"),
+    graph_event = next(
+        (
+            event
+            for event in trace_events
+            if event.get("title") in {"Graph Advantage", "Graph Augmentation"}
+        ),
         {},
     )
     local_meta = local_rag.get("metadata") or {}
-    graph_meta = graph_advantage.get("metadata") or {}
+    graph_meta = graph_event.get("metadata") or {}
+    graph_signal = bool(
+        graph_event.get("title") == "Graph Advantage"
+        and graph_meta.get("advantage_established", True)
+    )
     diagnostics = local_meta.get("retrieval_diagnostics") or {}
     return {
         "trace_titles": titles,
         "has_local_rag_trace": bool(local_rag),
-        "has_graph_advantage": bool(graph_advantage),
+        "has_graph_trace": bool(graph_event),
+        "has_graph_advantage": graph_signal,
         "effective_tier": _text(local_meta.get("effective_tier")),
         "local_rag_duration_s": local_meta.get("duration_s"),
         "retrieval_diagnostics": diagnostics,
@@ -306,14 +321,34 @@ def evaluate_route_result(
     generation_s = timings.get("generation_after_sources")
     generation_s = float(generation_s) if generation_s is not None else None
     graph_advantage = trace_summary.get("graph_advantage") or {}
+    retrieval_diagnostics = trace_summary.get("retrieval_diagnostics") or {}
+    sufficiency = (retrieval_diagnostics.get("selection") or {}).get(
+        "sufficiency"
+    ) or {}
+    grounded_abstention = bool(
+        answer
+        and "cannot answer that as a source-backed result" in answer.casefold()
+        and sufficiency.get("answerable") is False
+    )
+    expected_empty = route["ui_name"] in set(
+        query_case.get("expected_empty_routes") or []
+    )
 
     issues: list[dict[str, str]] = []
     if result.get("error_events"):
         issues.append(
             _issue("fail", "error_events", f"error events: {result['error_events']}")
         )
-    if source_summary["source_count"] <= 0:
+    if source_summary["source_count"] <= 0 and not expected_empty:
         issues.append(_issue("fail", "no_sources", "route returned zero sources"))
+    elif source_summary["source_count"] > 0 and expected_empty:
+        issues.append(
+            _issue(
+                "fail",
+                "unexpected_sources",
+                "route returned evidence where its contract requires abstention",
+            )
+        )
     if answer and len(answer) < 80:
         issues.append(
             _issue("warn", "short_answer", f"answer has only {len(answer)} chars")
@@ -344,7 +379,11 @@ def evaluate_route_result(
                 f"generation after sources {generation_s:.2f}s > {generation_budget_s:.2f}s",
             )
         )
-    if source_cov["required_anchor_count"] and source_cov["required_coverage"] < 0.5:
+    if (
+        not expected_empty
+        and source_cov["required_anchor_count"]
+        and source_cov["required_coverage"] < 0.5
+    ):
         issues.append(
             _issue(
                 "warn",
@@ -352,12 +391,34 @@ def evaluate_route_result(
                 "retrieved sources cover less than half of required anchors",
             )
         )
-    if answer and answer_cov["required_anchor_count"] and answer_cov["required_coverage"] < 0.5:
+    if (
+        answer
+        and not grounded_abstention
+        and answer_cov["required_anchor_count"]
+        and answer_cov["required_coverage"] < 0.5
+    ):
         issues.append(
             _issue(
                 "warn",
                 "weak_answer_anchor_coverage",
                 "answer covers less than half of required anchors",
+            )
+        )
+    # A supported answer must carry the concepts that retrieval established.
+    # This catches fluent synthesis drift that source-only metrics cannot see
+    # while preserving deliberate abstention for unsupported questions.
+    if (
+        answer
+        and not grounded_abstention
+        and answer_cov["required_anchor_count"]
+        and source_cov["required_coverage"] >= 0.9
+        and answer_cov["required_coverage"] < 0.9
+    ):
+        issues.append(
+            _issue(
+                "fail",
+                "required_answer_anchor_missing",
+                "answer omitted a required concept established by its sources",
             )
         )
 
@@ -371,12 +432,12 @@ def evaluate_route_result(
                 )
             )
     if route["ui_name"] == "Graph Augmentation":
-        if not trace_summary["has_graph_advantage"]:
+        if not trace_summary["has_graph_trace"]:
             issues.append(
                 _issue(
                     "fail",
-                    "missing_graph_advantage",
-                    "Graph Augmentation did not emit a Graph Advantage trace",
+                    "missing_graph_trace",
+                    "Graph Augmentation did not emit a graph trace",
                 )
             )
         facts = int(graph_advantage.get("facts_used") or 0)
@@ -398,6 +459,8 @@ def evaluate_route_result(
         "route": route["ui_name"],
         "tier": route["tier"],
         "purpose": route["purpose"],
+        "expected_empty": expected_empty,
+        "grounded_abstention": grounded_abstention,
         "issues": issues,
         "fail_count": fail_count,
         "warn_count": warn_count,
@@ -432,7 +495,9 @@ def summarize_report(results: list[dict[str, Any]]) -> dict[str, Any]:
     summaries: dict[str, Any] = {}
     for route, route_results in sorted(by_route.items()):
         timings = [
-            float((res.get("validation") or {}).get("timings_s", {}).get("total") or 0.0)
+            float(
+                (res.get("validation") or {}).get("timings_s", {}).get("total") or 0.0
+            )
             for res in route_results
         ]
         retrievals = [

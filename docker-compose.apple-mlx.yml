@@ -42,7 +42,9 @@ services:
       DOCLING_URL: http://host.docker.internal:8500
       RERANKER_SCORE_SCALE: probability
       RERANKER_MODEL: mlx-community/jina-reranker-v3-4bit-mxfp4
-      RERANKER_HTTP_BATCH_SIZE: ${RERANKER_HTTP_BATCH_SIZE:-16}
+      # QueryPlanV2 sends at most 16 Hybrid or 24 Graph candidates. Keep the
+      # Graph pool in one listwise cross-encoder request.
+      RERANKER_HTTP_BATCH_SIZE: ${RERANKER_HTTP_BATCH_SIZE:-24}
       RERANKER_QUEUE_TIMEOUT_SECONDS: ${RERANKER_QUEUE_TIMEOUT_SECONDS:-5}
       EMBEDDER_MODEL_NAME: Qwen3-Embedding-0.6B
       EMBED_BATCH_SIZE: ${EMBED_BATCH_SIZE:-32}
@@ -69,7 +71,7 @@ services:
       DOCLING_URL: http://host.docker.internal:8500
       RERANKER_SCORE_SCALE: probability
       RERANKER_MODEL: mlx-community/jina-reranker-v3-4bit-mxfp4
-      RERANKER_HTTP_BATCH_SIZE: ${RERANKER_HTTP_BATCH_SIZE:-16}
+      RERANKER_HTTP_BATCH_SIZE: ${RERANKER_HTTP_BATCH_SIZE:-24}
       RERANKER_QUEUE_TIMEOUT_SECONDS: ${RERANKER_QUEUE_TIMEOUT_SECONDS:-5}
       EMBEDDER_MODEL_NAME: Qwen3-Embedding-0.6B
       EMBED_BATCH_SIZE: ${EMBED_BATCH_SIZE:-32}

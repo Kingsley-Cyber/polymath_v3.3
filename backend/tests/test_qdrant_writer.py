@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -102,8 +103,14 @@ def test_payload_text_contract_marks_full_text_not_preview():
 
 
 class _ExistingCollectionClient:
-    def __init__(self, *, dim: int = 1024) -> None:
+    def __init__(
+        self,
+        *,
+        dim: int = 1024,
+        payload_indexes: set[str] | None = None,
+    ) -> None:
         self.dim = dim
+        self.payload_indexes = payload_indexes or set()
         self.created_indexes: list[tuple[str, str]] = []
         self.created_collections: list[str] = []
 
@@ -114,9 +121,11 @@ class _ExistingCollectionClient:
         return SimpleNamespace(
             config=SimpleNamespace(
                 params=SimpleNamespace(
-                    vectors={"dense": SimpleNamespace(size=self.dim)}
+                    vectors={"dense": SimpleNamespace(size=self.dim)},
+                    sparse_vectors={"sparse": object()},
                 )
-            )
+            ),
+            payload_schema={field: object() for field in self.payload_indexes},
         )
 
     async def create_payload_index(self, **kwargs) -> None:
@@ -136,6 +145,56 @@ async def test_existing_collections_still_get_payload_indexes_repaired():
     indexed_fields = {field for _collection, field in client.created_indexes}
     assert {"corpus_id", "doc_id", "chunk_id", "parent_id"} <= indexed_fields
     assert {"kind", "term"} <= indexed_fields
+
+
+@pytest.mark.asyncio
+async def test_existing_payload_indexes_are_not_recreated_on_startup():
+    client = _ExistingCollectionClient(
+        payload_indexes=(
+            set(qdrant_writer._CHUNK_PAYLOAD_INDEXES)
+            | set(qdrant_writer._SCHEMA_PAYLOAD_INDEXES)
+        )
+    )
+
+    await qdrant_writer.ensure_collections_for_corpus(client, "abcdef123456", dim=1024)
+
+    assert client.created_collections == []
+    assert client.created_indexes == []
+    assert qdrant_writer._COLLECTION_LAYOUT_CACHE["corpus_abcdef12_naive"] == (
+        True,
+        True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_collection_layout_introspection_is_single_flight():
+    class _LayoutClient:
+        def __init__(self):
+            self.calls = 0
+
+        async def get_collection(self, _collection_name):
+            self.calls += 1
+            await asyncio.sleep(0)
+            return SimpleNamespace(
+                config=SimpleNamespace(
+                    params=SimpleNamespace(
+                        vectors={"dense": SimpleNamespace(size=1024)},
+                        sparse_vectors={"sparse": object()},
+                    )
+                )
+            )
+
+    name = "corpus_singleflight_naive"
+    qdrant_writer._COLLECTION_LAYOUT_CACHE.pop(name, None)
+    qdrant_writer._COLLECTION_LAYOUT_LOCKS.pop(name, None)
+    client = _LayoutClient()
+
+    layouts = await asyncio.gather(
+        *(qdrant_writer._collection_layout(client, name) for _ in range(12))
+    )
+
+    assert layouts == [(True, True)] * 12
+    assert client.calls == 1
 
 
 @pytest.mark.asyncio

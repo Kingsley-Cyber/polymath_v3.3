@@ -11,6 +11,7 @@ from typing import Any, AsyncGenerator
 import httpx
 from config import get_settings
 from models.schemas import ModelOverrides
+from services.provider_payload import provider_payload_extras
 from services.streaming_normalizer import StreamingNormalizer, extract_stream_delta
 
 logger = logging.getLogger(__name__)
@@ -21,7 +22,7 @@ settings = get_settings()
 # connect). Matched case-insensitively against str(exc). Deliberately narrow —
 # HTTP status errors, auth failures, and model errors must NOT retry.
 _TRANSIENT_STREAM_ERROR_MARKERS = (
-    "name or service not known",        # getaddrinfo errno -2 (the burst DNS blip)
+    "name or service not known",  # getaddrinfo errno -2 (the burst DNS blip)
     "temporary failure in name resolution",  # errno -3
     "getaddrinfo",
     "errno -2",
@@ -90,6 +91,44 @@ class LLMService:
         if self._master_key:
             headers["Authorization"] = f"Bearer {self._master_key}"
         return headers
+
+    @staticmethod
+    def _merge_provider_extra_params(
+        body: dict[str, Any],
+        extra_params: dict[str, Any] | None,
+        *,
+        reserved: set[str] | frozenset[str] = frozenset(),
+    ) -> None:
+        """Merge saved model-pool params without leaking scheduler metadata.
+
+        Provider cards share ``extra_params`` with Polymath routing and
+        lifecycle configuration. Those internal fields are not valid LLM API
+        arguments. ``disable_thinking`` is the one internal field with a wire
+        effect: normalize it to the OpenAI-compatible provider contract used
+        by SiliconFlow, DeepSeek, and LongCat.
+        """
+        if not extra_params:
+            return
+
+        raw_disable = extra_params.get("disable_thinking")
+        disable_thinking = raw_disable is True or (
+            isinstance(raw_disable, str)
+            and raw_disable.strip().lower() in {"1", "true", "yes", "on"}
+        )
+        safe_params = provider_payload_extras(extra_params)
+        for key, value in safe_params.items():
+            if key not in reserved:
+                body[key] = value
+
+        # An explicit provider-native control always wins. Otherwise translate
+        # the saved operator flag after sanitization instead of forwarding the
+        # invalid ``disable_thinking`` key itself.
+        if (
+            disable_thinking
+            and "thinking" not in safe_params
+            and "reasoning_effort" not in safe_params
+        ):
+            body["thinking"] = {"type": "disabled"}
 
     def _build_request_body(
         self,
@@ -166,7 +205,9 @@ class LLMService:
             # with the unmapped body.
             logger.warning(
                 "thinking_mapper failed (effort=%r model=%r): %s",
-                thinking_effort, model, exc,
+                thinking_effort,
+                model,
+                exc,
             )
 
     def _reapply_explicit_thinking_effort(
@@ -549,11 +590,21 @@ class LLMService:
             resolved_key = await self._resolve_api_key(model)
             if resolved_key:
                 body["api_key"] = resolved_key
-        if extra_params:
-            for k, v in extra_params.items():
-                if k in {"model", "messages", "temperature", "max_tokens", "stream"}:
-                    continue
-                body[k] = v
+        self._merge_provider_extra_params(
+            body,
+            extra_params,
+            reserved=frozenset(
+                {
+                    "model",
+                    "messages",
+                    "temperature",
+                    "max_tokens",
+                    "stream",
+                    "api_base",
+                    "api_key",
+                }
+            ),
+        )
 
         # Non-streaming helper calls (HyDE, graph synthesis, query refinement,
         # JSON repair) need concise content, not provider reasoning traces.
@@ -568,7 +619,8 @@ class LLMService:
             except Exception as exc:  # pragma: no cover - defensive
                 logger.warning(
                     "thinking_mapper helper default failed (model=%r): %s",
-                    model, exc,
+                    model,
+                    exc,
                 )
 
         headers = self._get_headers()
@@ -599,7 +651,9 @@ class LLMService:
                 "complete_sync: model=%s returned empty content; "
                 "extracting tail of reasoning_content (finish_reason=%s, "
                 "reasoning_chars=%d). Pick a non-reasoning model to fix.",
-                model, finish, len(reasoning_content),
+                model,
+                finish,
+                len(reasoning_content),
             )
             # Take the last ~600 chars of reasoning as a fallback answer
             tail = reasoning_content[-600:]
@@ -641,28 +695,44 @@ class LLMService:
             body["api_key"] = resolved_key
         if api_base:
             body["api_base"] = api_base
-        if extra_params:
-            for key, value in extra_params.items():
-                if key in {
+        self._merge_provider_extra_params(
+            body,
+            extra_params,
+            reserved=frozenset(
+                {
                     "model",
                     "messages",
                     "stream",
                     "tools",
                     "tool_choice",
-                }:
-                    continue
-                body[key] = value
+                    "api_base",
+                    "api_key",
+                }
+            ),
+        )
         self._reapply_explicit_thinking_effort(body, model, overrides)
         # Default thinking posture (2026-07-04): when the per-turn selector is
         # untouched, thinking-default-ON models (deepseek-v4*) burned 91s of a
         # 99s RAG answer on reasoning tokens. RAG chat pre-retrieves the
         # evidence — apply the server default (settings, "none") unless the
         # user explicitly set the dial this turn (the reapply above wins).
-        _explicit = overrides is not None and getattr(overrides, "thinking_effort", None) is not None
+        _explicit = (
+            overrides is not None
+            and getattr(overrides, "thinking_effort", None) is not None
+        )
         if not _explicit:
-            _dflt = str(getattr(
-                settings, "CHAT_DEFAULT_THINKING_EFFORT", "none",
-            ) or "").strip().lower()
+            _dflt = (
+                str(
+                    getattr(
+                        settings,
+                        "CHAT_DEFAULT_THINKING_EFFORT",
+                        "none",
+                    )
+                    or ""
+                )
+                .strip()
+                .lower()
+            )
             if _dflt in ("none", "low", "medium", "high"):
                 self._apply_thinking_effort(body, body.get("model") or model, _dflt)
 
@@ -808,21 +878,44 @@ class LLMService:
             body["api_key"] = resolved_key
         if api_base:
             body["api_base"] = api_base
-        if extra_params:
-            for _k, _v in extra_params.items():
-                if _k not in ("model", "messages", "stream", "tools", "tool_choice"):
-                    body[_k] = _v
+        self._merge_provider_extra_params(
+            body,
+            extra_params,
+            reserved=frozenset(
+                {
+                    "model",
+                    "messages",
+                    "stream",
+                    "tools",
+                    "tool_choice",
+                    "api_base",
+                    "api_key",
+                }
+            ),
+        )
         self._reapply_explicit_thinking_effort(body, model, overrides)
         # Default thinking posture (2026-07-04): when the per-turn selector is
         # untouched, thinking-default-ON models (deepseek-v4*) burned 91s of a
         # 99s RAG answer on reasoning tokens. RAG chat pre-retrieves the
         # evidence — apply the server default (settings, "none") unless the
         # user explicitly set the dial this turn (the reapply above wins).
-        _explicit = overrides is not None and getattr(overrides, "thinking_effort", None) is not None
+        _explicit = (
+            overrides is not None
+            and getattr(overrides, "thinking_effort", None) is not None
+        )
         if not _explicit:
-            _dflt = str(getattr(
-                settings, "CHAT_DEFAULT_THINKING_EFFORT", "none",
-            ) or "").strip().lower()
+            _dflt = (
+                str(
+                    getattr(
+                        settings,
+                        "CHAT_DEFAULT_THINKING_EFFORT",
+                        "none",
+                    )
+                    or ""
+                )
+                .strip()
+                .lower()
+            )
             if _dflt in ("none", "low", "medium", "high"):
                 self._apply_thinking_effort(body, body.get("model") or model, _dflt)
 

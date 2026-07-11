@@ -38,17 +38,15 @@ _RERANK_MAX_DOC_CHARS = max(
 # matched the query (live probe: Le Guin doc-hit/passage-miss).
 # query_guided_excerpt picks the best sentence window instead — CPU-only.
 # Env kill-switch restores the leading window without a redeploy.
-_RERANK_QUERY_GUIDED_EXCERPT = (
-    os.environ.get("RERANKER_QUERY_GUIDED_EXCERPT", "true").strip().lower()
-    not in {"0", "false", "no", "off"}
-)
+_RERANK_QUERY_GUIDED_EXCERPT = os.environ.get(
+    "RERANKER_QUERY_GUIDED_EXCERPT", "true"
+).strip().lower() not in {"0", "false", "no", "off"}
 # H3 (Q3, 2026-07-04): prepend "Book > Section" to each reranker document so
 # the cross-encoder scores passages WITH their source frame. Env-gated like
 # its siblings; default set by the Q3 A/B.
-_RERANKER_INPUT_CONTEXT = (
-    os.environ.get("RERANKER_INPUT_CONTEXT", "true").strip().lower()
-    not in {"0", "false", "no", "off"}
-)
+_RERANKER_INPUT_CONTEXT = os.environ.get(
+    "RERANKER_INPUT_CONTEXT", "true"
+).strip().lower() not in {"0", "false", "no", "off"}
 # Speed campaign (2026-07-02): jina-reranker-v3 is LISTWISE — it scores up
 # to 64 documents in one forward pass (independently benchmarked ~188ms/query;
 # our own sidecar probe measured 40 docs / 1.3s in ONE call). The old batch=8
@@ -103,7 +101,9 @@ def _clamp_bounded_scores_inplace(pool: List[SourceChunk]) -> None:
 
 
 def _score_scale_is_bounded(settings: object) -> bool:
-    return str(getattr(settings, "RERANKER_SCORE_SCALE", "logit") or "logit").lower() in {
+    return str(
+        getattr(settings, "RERANKER_SCORE_SCALE", "logit") or "logit"
+    ).lower() in {
         "probability",
         "cosine",
     }
@@ -124,6 +124,7 @@ def _ranked_chunks_from_response(
     Apple MLX scaffold:
       {"scores": [0.91, 0.12, ...]}  # aligned to input documents
     """
+
     def _item_index(item: dict) -> int:
         if "index" in item:
             return int(item["index"])
@@ -198,7 +199,9 @@ class RerankerService:
     def diagnostics(self) -> dict[str, object]:
         return dict(self._last_status)
 
-    async def rerank(self, query: str, candidate_pool: List[SourceChunk]) -> List[SourceChunk]:
+    async def rerank(
+        self, query: str, candidate_pool: List[SourceChunk]
+    ) -> List[SourceChunk]:
         """
         Rerank candidates against the query using the configured sidecar.
         Falls back to vector-score sort if the sidecar is unreachable or returns an error.
@@ -281,7 +284,9 @@ class RerankerService:
             )
         logger.info(
             "Reranker bypass: cross-encoded %d prose, kept original scores on %d code (merged %d)",
-            len(reranked_prose), len(code_pool), len(merged),
+            len(reranked_prose),
+            len(code_pool),
+            len(merged),
         )
         previous = self.diagnostics()
         self._record_status(
@@ -295,7 +300,9 @@ class RerankerService:
         )
         return merged
 
-    async def _rerank_pool(self, query: str, pool: List[SourceChunk]) -> List[SourceChunk]:
+    async def _rerank_pool(
+        self, query: str, pool: List[SourceChunk]
+    ) -> List[SourceChunk]:
         """Send a single pool through the reranker sidecar. Falls
         back to vector-score sort on HTTP failure."""
         if not pool:
@@ -325,7 +332,9 @@ class RerankerService:
         # through the split-recovery path, tripped the circuit breaker, and
         # dumped raw lexical scores (197.x) into the packet. 30s covers a
         # 50-doc fp16 pass with generous headroom on contended Metal.
-        timeout = float(getattr(self._settings, "RERANKER_TIMEOUT_SECONDS", 30.0) or 30.0)
+        timeout = float(
+            getattr(self._settings, "RERANKER_TIMEOUT_SECONDS", 30.0) or 30.0
+        )
         queue_timeout = float(
             getattr(self._settings, "RERANKER_QUEUE_TIMEOUT_SECONDS", 5.0) or 0.0
         )
@@ -350,9 +359,7 @@ class RerankerService:
             )
 
             if successes <= 0:
-                raise RuntimeError(
-                    f"all reranker batches failed (failures={failures})"
-                )
+                raise RuntimeError(f"all reranker batches failed (failures={failures})")
             self._last_failure = ""
             self._disabled_until = 0.0
             status = "used"
@@ -509,11 +516,7 @@ class RerankerService:
         connections instead of opening a fresh socket each time. Instance-scoped
         so the singleton service pools in production while tests stay isolated."""
         client = getattr(self, "_http_client", None)
-        if (
-            client is None
-            or client.is_closed
-            or self._http_client_timeout != timeout
-        ):
+        if client is None or client.is_closed or self._http_client_timeout != timeout:
             client = httpx.AsyncClient(
                 timeout=timeout,
                 limits=httpx.Limits(
@@ -561,12 +564,16 @@ class RerankerService:
             return ranked, successes, failures
 
         try:
-            return await self._post_rerank_batch(
-                client=client,
-                url=url,
-                query=query,
-                pool=pool,
-            ), 1, 0
+            return (
+                await self._post_rerank_batch(
+                    client=client,
+                    url=url,
+                    query=query,
+                    pool=pool,
+                ),
+                1,
+                0,
+            )
         except httpx.TimeoutException as exc:
             # Death-spiral guard (2026-07-04): the split logic below assumes
             # FAST failures (llama.cpp 500s on batch shape). A TIMEOUT means
@@ -577,7 +584,9 @@ class RerankerService:
             # the caller falls back to rank-fusion ordering in milliseconds.
             logger.warning(
                 "Reranker TIMEOUT on batch of %d — aborting rerank pass "
-                "(rank-fusion fallback), not splitting: %s", len(pool), exc,
+                "(rank-fusion fallback), not splitting: %s",
+                len(pool),
+                exc,
             )
             raise RerankPassAborted(str(exc)) from exc
         except httpx.HTTPStatusError as exc:
@@ -609,6 +618,19 @@ class RerankerService:
                 client=client, url=url, query=query, pool=pool[mid:]
             )
             return left + right, left_ok + right_ok, left_bad + right_bad
+        except httpx.TransportError as exc:
+            # A restarted/unreachable sidecar is a service-wide transport
+            # failure, not evidence that one candidate poisoned the batch.
+            # Recursive splitting amplified one stale keepalive into 24
+            # doomed calls and opened the circuit. Abort the single pass;
+            # the next request gets a fresh connection and can recover.
+            logger.warning(
+                "Reranker transport failure on batch of %d — aborting pass "
+                "without recursive splitting: %s",
+                len(pool),
+                exc,
+            )
+            raise RerankPassAborted(str(exc)) from exc
         except Exception as exc:
             if len(pool) <= 1:
                 logger.warning(
@@ -681,11 +703,13 @@ class RerankerService:
                     for h in (getattr(c, "heading_path", None) or [])
                     if str(h).strip()
                 ]
-                prefixed.append(RerankerInput(
-                    source_book=name,
-                    section=" › ".join(heads[:2])[:80],
-                    excerpt=doc,
-                ).render())
+                prefixed.append(
+                    RerankerInput(
+                        source_book=name,
+                        section=" › ".join(heads[:2])[:80],
+                        excerpt=doc,
+                    ).render()
+                )
             documents = prefixed
         resp = await client.post(
             url,

@@ -383,15 +383,25 @@ class Settings(BaseSettings):
     QUERY_PLAN_HYBRID_TOTAL_DEADLINE_SECONDS: float = Field(
         default=7.5, ge=2.0, le=30.0
     )
-    QUERY_PLAN_GRAPH_TOTAL_DEADLINE_SECONDS: float = Field(
-        default=9.5, ge=3.0, le=45.0
-    )
+    QUERY_PLAN_GRAPH_TOTAL_DEADLINE_SECONDS: float = Field(default=9.5, ge=3.0, le=45.0)
     QUERY_PLAN_EMBED_DEADLINE_SECONDS: float = Field(default=5.0, ge=0.5, le=30.0)
     QUERY_PLAN_RETRIEVAL_DEADLINE_SECONDS: float = Field(default=4.0, ge=0.5, le=30.0)
     QUERY_PLAN_GRAPH_DEADLINE_SECONDS: float = Field(default=4.0, ge=0.5, le=30.0)
+    QUERY_PLAN_REPAIR_DEADLINE_SECONDS: float = Field(default=1.25, ge=0.1, le=5.0)
     QUERY_PLAN_IDENTITY_DEADLINE_SECONDS: float = Field(default=2.0, ge=0.5, le=15.0)
     QUERY_PLAN_RERANK_DEADLINE_SECONDS: float = Field(default=6.0, ge=0.5, le=30.0)
+    QUERY_PLAN_HYBRID_RERANK_CANDIDATES: int = Field(default=16, ge=1, le=16)
+    QUERY_PLAN_GRAPH_RERANK_CANDIDATES: int = Field(default=20, ge=1, le=24)
     QUERY_PLAN_HYDRATE_DEADLINE_SECONDS: float = Field(default=2.0, ge=0.5, le=15.0)
+    FAST_SUMMARY_DEADLINE_SECONDS: float = Field(
+        default=1.25,
+        ge=0.1,
+        le=5.0,
+        description=(
+            "Fast-route deadline for optional parent-summary recall. Child "
+            "evidence remains eligible when summary search is cold or busy."
+        ),
+    )
     # ── Resilience: retry the streaming LLM connection on transient blips ──
     LLM_STREAM_MAX_RETRIES: int = Field(
         default=2,
@@ -1322,7 +1332,8 @@ class Settings(BaseSettings):
         default=5, description="Default number of chunks to retrieve"
     )
     SIMILARITY_THRESHOLD: float = Field(
-        default=0.0, description="Minimum similarity score for retrieval; 0 disables the hard score gate"
+        default=0.0,
+        description="Minimum similarity score for retrieval; 0 disables the hard score gate",
     )
 
     # === QDRANT COLLECTION NAMES ===

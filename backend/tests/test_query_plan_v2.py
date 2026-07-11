@@ -22,8 +22,7 @@ def test_named_strategy_stays_one_phrase_lane():
 
 def test_cross_domain_combine_preserves_both_semantic_sides():
     query = (
-        "Combine Purple Ocean strategy with sticky messaging for an "
-        "ecommerce offer."
+        "Combine Purple Ocean strategy with sticky messaging for an " "ecommerce offer."
     )
     plan = build_query_plan_v2(query, corpus_ids=["marketing", "commerce"])
     phrases = [phrase.lower() for phrase in _core_phrases(query)]
@@ -51,6 +50,28 @@ def test_compare_named_book_and_strategy_does_not_split_titles():
     assert "ocean" not in phrases
 
 
+def test_attribution_question_uses_named_source_as_one_lane():
+    plan = build_query_plan_v2(
+        "What makes a message sticky according to Made to Stick?"
+    )
+
+    assert plan.complexity == "simple"
+    assert _core_phrases(plan.original_query) == ["Made to Stick"]
+    assert plan.lanes[1].support_phrases[0] == "Made to Stick"
+
+
+def test_regulatory_phrase_does_not_fragment_into_bare_tokens():
+    plan = build_query_plan_v2(
+        "What exact 2029 tax law does Purple Ocean require for lunar ecommerce stores?"
+    )
+    phrases = [phrase.lower() for phrase in _core_phrases(plan.original_query)]
+
+    assert "purple ocean" in phrases
+    assert "2029 tax law" in phrases
+    assert "lunar ecommerce stores" in phrases
+    assert not {"exact", "tax", "law", "lunar", "stores"} & set(phrases)
+
+
 def test_plan_is_serializable_and_evidence_compatible():
     plan = build_query_plan_v2(
         "What is the relationship between product positioning and sticky messaging?"
@@ -62,6 +83,20 @@ def test_plan_is_serializable_and_evidence_compatible():
     assert payload["lanes"][0]["role"] == "original"
     assert len(sides) >= 2
     assert all(side["query"] for side in sides)
+    phrases = {lane.phrase for lane in plan.lanes if lane.role == "core"}
+    assert phrases == {"product positioning", "sticky messaging"}
+    assert all("graph establish" not in str(phrase).lower() for phrase in phrases)
+
+
+def test_graph_wording_does_not_pollute_product_positioning_lane():
+    plan = build_query_plan_v2(
+        "What relationship does the graph establish between product "
+        "positioning and memorable messaging?"
+    )
+    phrases = {lane.phrase for lane in plan.lanes if lane.role == "core"}
+
+    assert phrases == {"product positioning", "memorable messaging"}
+    assert all("graph establish" not in str(phrase).lower() for phrase in phrases)
 
 
 def test_dependency_language_marks_multi_hop_plan():
@@ -78,18 +113,21 @@ def test_multi_hop_plan_removes_imperative_scaffolding():
         "evaluate sticky messaging for a product page."
     )
     phrases = [
-        (lane.phrase or "").lower()
-        for lane in plan.lanes
-        if lane.role == "core"
+        (lane.phrase or "").lower() for lane in plan.lanes if lane.role == "core"
     ]
 
     assert "purple ocean differentiation mechanism" in phrases
     assert "sticky messaging" in phrases
     assert "product page" in phrases
-    assert not any(phrase.startswith(("find ", "it to ", "evaluate ")) for phrase in phrases)
+    assert "find" not in phrases
+    assert "then" not in phrases
+    assert not any(
+        phrase.startswith(("find ", "it to ", "evaluate ")) for phrase in phrases
+    )
     sticky_lane = next(lane for lane in plan.lanes if lane.phrase == "sticky messaging")
     product_lane = next(lane for lane in plan.lanes if lane.phrase == "product page")
     assert sticky_lane.dense_text == "sticky messaging"
     assert "made to stick" in sticky_lane.query
+    assert "made to stick" in sticky_lane.support_phrases
     assert product_lane.dense_text == "product page"
     assert "product detail page" in product_lane.query

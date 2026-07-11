@@ -26,6 +26,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from services.provider_payload import INTERNAL_MODEL_FLAGS, provider_payload_extras
+
 ENGINES = (
     "off",
     "local",
@@ -35,52 +37,6 @@ ENGINES = (
     "local_then_cloud",
     "local_then_enrich",
 )
-
-# Internal model-chip flags: routing/validation hints read by Polymath itself
-# (output-mode selection, resource planning, save-time validation). They are
-# NEVER valid provider request-body params — Groq 400s on unknown keys
-# (observed 2026-07-05 with supports_json_schema leaking into the body).
-INTERNAL_MODEL_FLAGS = frozenset(
-    {
-        "supports_json_object",
-        "supports_json_schema",
-        "skip_model_validation",
-        "managed_vllm",
-        "resource_class",
-        "schema_mode",
-        "json_repair_mode",
-        "semantic_verifier_mode",
-        "concurrency_policy",
-        "failure_backfill_policy",
-        "disable_thinking",
-        "local_private",
-        "adaptive_vram",
-        "vram_safety_ratio",
-        "lifecycle_base_url",
-        "routing_policy",
-        "route_policy",
-        "lane_role",
-        "route_weight",
-        "context_window_tokens",
-        "max_context_tokens",
-        "canary_max_concurrent",
-        "provider_canary_passed",
-    }
-)
-
-# Keys the caller always owns — chip extras must never override them.
-_RESERVED_PAYLOAD_KEYS = frozenset({"model", "messages", "response_format"})
-
-
-def provider_payload_extras(extra_params: dict | None) -> dict:
-    """The ONLY dict safe to merge into a provider request body: chip
-    extra_params minus internal flags and reserved keys. Every payload merge
-    site (ghost_a summaries, ghost_b extraction) must go through this."""
-    return {
-        k: v
-        for k, v in (extra_params or {}).items()
-        if k not in INTERNAL_MODEL_FLAGS and k not in _RESERVED_PAYLOAD_KEYS
-    }
 
 # Engines that REQUIRE a non-empty provider-card LLM pool to honor the
 # contract. "local" is a private/local provider-card LLM, not the legacy
@@ -167,9 +123,9 @@ def _extra(entry: dict) -> dict:
 def _entry_uses_private_provider(entry: object) -> bool:
     data = _entry_dict(entry)
     extra = _extra(data)
-    provider = str(
-        data.get("provider_preset") or data.get("provider") or ""
-    ).strip().lower()
+    provider = (
+        str(data.get("provider_preset") or data.get("provider") or "").strip().lower()
+    )
     model = str(data.get("model") or data.get("model_name") or "").lower()
     base_url = str(data.get("base_url") or data.get("api_base") or "").lower()
     lifecycle = str(
@@ -191,7 +147,11 @@ def _entry_uses_private_provider(entry: object) -> bool:
         "local_private_vllm",
     }:
         return True
-    if any(token in value for token in ("vllm", "polymath-extract") for value in (provider, model, base_url, lifecycle)):
+    if any(
+        token in value
+        for token in ("vllm", "polymath-extract")
+        for value in (provider, model, base_url, lifecycle)
+    ):
         return True
     return any(marker in base_url for marker in _PRIVATE_NET_MARKERS)
 
@@ -244,7 +204,9 @@ def resolve_extraction_contract(
         pool_size = max(0, int(extraction_model_count))
         pool_source = "extraction_models" if pool_size else "none"
 
-    urls = tuple(u.strip().rstrip("/") for u in (enabled_endpoint_urls or []) if u and u.strip())
+    urls = tuple(
+        u.strip().rstrip("/") for u in (enabled_endpoint_urls or []) if u and u.strip()
+    )
 
     if engine in _PROVIDER_REQUIRED and pool_size == 0:
         if engine == "local":
@@ -265,7 +227,9 @@ def resolve_extraction_contract(
         engine == "local"
         and pool_size > 0
         and provider_pool_entries is not None
-        and not any(_entry_uses_private_provider(entry) for entry in provider_pool_entries)
+        and not any(
+            _entry_uses_private_provider(entry) for entry in provider_pool_entries
+        )
     ):
         errors.append(
             "engine='local' requires at least one local_private_vllm / vLLM / "
@@ -293,7 +257,12 @@ def resolve_extraction_contract(
     return ExtractionContract(
         engine=engine,
         source=source,
-        pool_source=pool_source if (engine != "off" and (engine in _PROVIDER_REQUIRED or engine in _PROVIDER_OPTIONAL)) else "none",
+        pool_source=pool_source
+        if (
+            engine != "off"
+            and (engine in _PROVIDER_REQUIRED or engine in _PROVIDER_OPTIONAL)
+        )
+        else "none",
         pool_size=pool_size,
         endpoint_urls=urls,
         errors=tuple(errors),

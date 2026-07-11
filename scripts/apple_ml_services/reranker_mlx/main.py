@@ -69,6 +69,31 @@ WARM_ON_STARTUP = os.environ.get("RERANKER_WARM_ON_STARTUP", "true").strip().low
     "no",
     "off",
 }
+def _warmup_candidate_shapes() -> tuple[int, ...]:
+    raw = os.environ.get("RERANKER_WARMUP_CANDIDATE_SHAPES", "16,24")
+    shapes: list[int] = []
+    for value in str(raw or "").split(","):
+        try:
+            candidate_count = max(1, int(value.strip()))
+        except (TypeError, ValueError):
+            continue
+        if candidate_count not in shapes:
+            shapes.append(candidate_count)
+    if shapes:
+        return tuple(shapes)
+    return (
+        max(1, int(os.environ.get("RERANKER_WARMUP_CANDIDATES", "16") or 16)),
+    )
+
+
+WARMUP_CANDIDATE_SHAPES = _warmup_candidate_shapes()
+WARMUP_DOC_CHARS = max(
+    128,
+    min(
+        MAX_DOC_CHARS,
+        int(os.environ.get("RERANKER_WARMUP_DOC_CHARS", "768") or 768),
+    ),
+)
 
 
 class RerankRequest(BaseModel):
@@ -271,24 +296,38 @@ def _warm_model() -> None:
     """Load weights and execute a real inference before reporting ready."""
     global _last_error, _warmup_complete, _warmup_seconds
     started = time.monotonic()
+    warmup_query = "Compare retrieval concepts and rank the strongest evidence."
+    warmup_seed = (
+        "This document provides grounded retrieval evidence, definitions, "
+        "relationships, examples, and source context for semantic ranking. "
+    )
     if BACKEND == "torch_fp16":
         _load_model_torch()
-        scores = _score_pairs_torch(
-            "retrieval readiness probe",
-            ["This document verifies that the reranker inference path is ready."],
-        )
     else:
         _load_model()
-        scores = _score_pairs(
-            "retrieval readiness probe",
-            ["This document verifies that the reranker inference path is ready."],
-        )
-    if len(scores) != 1 or not math.isfinite(float(scores[0])):
-        raise RuntimeError("reranker warmup returned an invalid score")
+    for candidate_count in WARMUP_CANDIDATE_SHAPES:
+        warmup_docs = [
+            ((f"Candidate {index}. " + warmup_seed * 12)[:WARMUP_DOC_CHARS])
+            for index in range(candidate_count)
+        ]
+        if BACKEND == "torch_fp16":
+            scores = _score_pairs_torch(warmup_query, warmup_docs)
+        else:
+            scores = _score_pairs(warmup_query, warmup_docs)
+        if len(scores) != candidate_count or not all(
+            math.isfinite(float(score)) for score in scores
+        ):
+            raise RuntimeError(
+                f"reranker warmup returned an invalid score for shape {candidate_count}"
+            )
     _warmup_seconds = time.monotonic() - started
     _warmup_complete = True
     _last_error = None
-    logger.info("reranker inference warmup complete in %.2fs", _warmup_seconds)
+    logger.info(
+        "reranker inference warmup shapes=%s complete in %.2fs",
+        WARMUP_CANDIDATE_SHAPES,
+        _warmup_seconds,
+    )
 
 
 @app.on_event("startup")
@@ -349,6 +388,7 @@ async def health() -> dict:
             "warmup_seconds": (
                 round(_warmup_seconds, 3) if _warmup_seconds is not None else None
             ),
+            "warmup_candidate_shapes": list(WARMUP_CANDIDATE_SHAPES),
         }
     if _model is None:
         raise HTTPException(status_code=503, detail="model is not loaded")
@@ -368,6 +408,7 @@ async def health() -> dict:
         "warmup_seconds": (
             round(_warmup_seconds, 3) if _warmup_seconds is not None else None
         ),
+        "warmup_candidate_shapes": list(WARMUP_CANDIDATE_SHAPES),
     }
 
 
@@ -384,6 +425,7 @@ async def info() -> dict:
             "ready": _torch_model is not None,
             "warmup_complete": _warmup_complete,
             "warmup_seconds": _warmup_seconds,
+            "warmup_candidate_shapes": list(WARMUP_CANDIDATE_SHAPES),
         }
     return {
         "model": MODEL_ID,
@@ -394,6 +436,7 @@ async def info() -> dict:
         "ready": _model is not None,
         "warmup_complete": _warmup_complete,
         "warmup_seconds": _warmup_seconds,
+        "warmup_candidate_shapes": list(WARMUP_CANDIDATE_SHAPES),
     }
 
 

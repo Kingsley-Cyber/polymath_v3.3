@@ -40,6 +40,16 @@ _TITLE_RE = re.compile(
     r"\b([A-Z][A-Za-z0-9'\-]*(?:\s+(?:to|of|the|and|for|in|on|[A-Z][A-Za-z0-9'\-]*)){1,5})\b"
 )
 _QUOTE_RE = re.compile(r"[\"']([^\"']{3,100})[\"']")
+_REGULATORY_RE = re.compile(
+    r"\b((?:exact\s+)?(?:\d{4}\s+)?(?:[A-Za-z][A-Za-z0-9'\-]*\s+){0,2}"
+    r"(?:law|regulation|policy))\b",
+    re.IGNORECASE,
+)
+_TARGET_RE = re.compile(
+    r"\bfor\s+((?:an?\s+|the\s+)?(?:[A-Za-z][A-Za-z0-9'\-]*\s+){1,3}"
+    r"[A-Za-z][A-Za-z0-9'\-]*)$",
+    re.IGNORECASE,
+)
 _DEPENDENCY_RE = re.compile(
     r"\b(?:then|before|after|depends?\s+on|using\s+the\s+result|based\s+on)\b",
     re.IGNORECASE,
@@ -52,16 +62,25 @@ _GENERIC_LANE_TERMS = {
     "brand",
     "combine",
     "comparison",
+    "establish",
     "ecommerce",
+    "evaluate",
+    "exact",
+    "find",
+    "graph",
     "offer",
     "offers",
     "product",
+    "require",
+    "requires",
     "strategy",
     "framework",
     "model",
     "method",
     "principles",
 }
+
+_PHRASE_BOUNDARIES = {"between", "versus", "vs", "with"}
 
 _PHRASE_LEADERS = {
     "a",
@@ -75,6 +94,7 @@ _PHRASE_LEADERS = {
     "do",
     "does",
     "evaluate",
+    "exact",
     "find",
     "for",
     "from",
@@ -82,6 +102,8 @@ _PHRASE_LEADERS = {
     "is",
     "it",
     "relate",
+    "require",
+    "requires",
     "then",
     "the",
     "to",
@@ -102,6 +124,7 @@ class QueryLane:
     required: bool = True
     depends_on: tuple[str, ...] = ()
     phrase: str | None = None
+    support_phrases: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -153,6 +176,16 @@ def _phrase_candidates(query: str, groups: list[ConceptGroup]) -> list[str]:
         for match in _TITLE_RE.finditer(query)
         if (phrase := _strip_phrase_leaders(match.group(1)))
     )
+    candidates.extend(
+        phrase
+        for match in _REGULATORY_RE.finditer(query)
+        if (phrase := _strip_phrase_leaders(match.group(1)))
+    )
+    for match in _TARGET_RE.finditer(query):
+        target = _strip_phrase_leaders(match.group(1))
+        target_terms = set(lexical_terms(target))
+        if target_terms and not target_terms <= _GENERIC_LANE_TERMS:
+            candidates.append(target)
     for match in _DESCRIPTOR_RE.finditer(query):
         prefix = _strip_phrase_leaders(match.group(1))
         # A descriptor phrase may begin after an operator/preposition. Keep the
@@ -161,15 +194,20 @@ def _phrase_candidates(query: str, groups: list[ConceptGroup]) -> list[str]:
         words = prefix.split()
         while words and words[0].lower() in _PHRASE_LEADERS:
             words.pop(0)
+        boundary_indexes = [
+            index
+            for index, word in enumerate(words)
+            if word.lower().rstrip(".") in _PHRASE_BOUNDARIES
+        ]
+        if boundary_indexes and boundary_indexes[-1] < len(words) - 1:
+            words = words[boundary_indexes[-1] + 1 :]
         if words:
             candidates.append(" ".join([*words[-4:], match.group(2)]))
 
     # Curated aliases are stable semantic phrases. Prefer the longest surface
     # form present in the user query (e.g. "Made to Stick").
     candidates.extend(
-        _best_surface(group, query)
-        for group in groups
-        if group.key in CONCEPT_ALIASES
+        _best_surface(group, query) for group in groups if group.key in CONCEPT_ALIASES
     )
 
     # Common morphology that the curated alias table deliberately keeps small.
@@ -253,15 +291,20 @@ def _curated_group_for_concept(
     return max(matches, key=lambda item: item[0], default=(0, None))[1]
 
 
-def _lexical_recall_query(concept: str, groups: list[ConceptGroup]) -> str:
+def _lexical_recall_phrases(
+    concept: str,
+    groups: list[ConceptGroup],
+) -> tuple[str, ...]:
     group = _curated_group_for_concept(concept, groups)
     if group is None:
-        return concept
+        return (concept,)
     phrases = [concept, *concept_support_phrases(group.key, max_phrases=4)]
-    return " ".join(dict.fromkeys(phrase for phrase in phrases if phrase))
+    return tuple(dict.fromkeys(phrase for phrase in phrases if phrase))
 
 
-def _complexity(query: str, lane_count: int, operators: tuple[str, ...]) -> QueryComplexity:
+def _complexity(
+    query: str, lane_count: int, operators: tuple[str, ...]
+) -> QueryComplexity:
     if _DEPENDENCY_RE.search(query) and lane_count > 1:
         return "dependent_multi_hop"
     if "relationship" in operators or _EXPLICIT_MULTI_RE.search(query):
@@ -269,6 +312,33 @@ def _complexity(query: str, lane_count: int, operators: tuple[str, ...]) -> Quer
     if lane_count > 1:
         return "compositional"
     return "simple"
+
+
+def _collapse_attribution_concepts(
+    query: str,
+    concepts: list[str],
+    groups: list[ConceptGroup],
+) -> list[str]:
+    """Treat a named ``according to`` source as the retrieval authority.
+
+    In questions such as "what makes a message sticky according to Made to
+    Stick", the surrounding property words describe what to extract from the
+    named source. They are not independent evidence lanes. Keeping them as
+    lanes turns ordinary words such as ``sticky`` into false domain concepts.
+    Comparative and dependent queries retain every semantic side.
+    """
+    if not re.search(r"\baccording\s+to\b", query, re.IGNORECASE):
+        return concepts
+    if _EXPLICIT_MULTI_RE.search(query) or _DEPENDENCY_RE.search(query):
+        return concepts
+    attributed = [
+        concept
+        for concept in concepts
+        if _curated_group_for_concept(concept, groups) is not None
+    ]
+    if not attributed:
+        return concepts
+    return [max(attributed, key=lambda item: (len(item.split()), len(item)))]
 
 
 def build_query_plan_v2(
@@ -293,12 +363,20 @@ def build_query_plan_v2(
     for group in groups:
         surface = _best_surface(group, original)
         key = clean_text(surface).strip()
-        if key in _GENERIC_LANE_TERMS or _overlaps_phrase(surface, concepts):
+        if (
+            key in _GENERIC_LANE_TERMS
+            or key in _PHRASE_LEADERS
+            or _overlaps_phrase(surface, concepts)
+        ):
             continue
         concepts.append(surface)
         if len(concepts) >= max_core_lanes:
             break
-    concepts = concepts[:max_core_lanes]
+    concepts = _collapse_attribution_concepts(
+        original,
+        concepts[:max_core_lanes],
+        groups,
+    )
 
     operators = tuple(sorted(required_operator_atoms(original)))
     lanes: list[QueryLane] = [
@@ -309,11 +387,13 @@ def build_query_plan_v2(
             dense_text=original,
             lexical_terms=tuple(lexical_terms(original)[:16]),
             phrase=original,
+            support_phrases=(original,),
         )
     ]
     for index, concept in enumerate(concepts):
         lane_id = _slug(concept) or f"concept_{index + 1}"
-        recall_query = _lexical_recall_query(concept, groups)
+        support_phrases = _lexical_recall_phrases(concept, groups)
+        recall_query = " ".join(support_phrases)
         lanes.append(
             QueryLane(
                 lane_id=lane_id,
@@ -322,10 +402,13 @@ def build_query_plan_v2(
                 dense_text=concept,
                 lexical_terms=tuple(lexical_terms(concept)[:12]),
                 phrase=concept,
+                support_phrases=support_phrases,
             )
         )
 
-    if len(concepts) > 1 and ("relationship" in operators or _EXPLICIT_MULTI_RE.search(original)):
+    if len(concepts) > 1 and (
+        "relationship" in operators or _EXPLICIT_MULTI_RE.search(original)
+    ):
         lanes.append(
             QueryLane(
                 lane_id="bridge",
@@ -370,6 +453,7 @@ def query_plan_to_dict(plan: QueryPlanV2) -> dict[str, object]:
                 "required": lane.required,
                 "depends_on": list(lane.depends_on),
                 "phrase": lane.phrase,
+                "support_phrases": list(lane.support_phrases),
             }
             for lane in plan.lanes
         ],

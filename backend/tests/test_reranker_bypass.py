@@ -45,6 +45,7 @@ def _chunk(text="t", score=0.5, language=None, chunk_id=None):
 
 # ─── _is_code_chunk ─────────────────────────────────────────────────────────
 
+
 def test_is_code_chunk_true_when_language_set():
     assert _is_code_chunk(_chunk(language="python"))
     assert _is_code_chunk(_chunk(language="luau"))
@@ -56,6 +57,7 @@ def test_is_code_chunk_false_for_prose():
 
 
 # ─── _minmax_inplace ────────────────────────────────────────────────────────
+
 
 def test_minmax_inplace_normalizes_range():
     pool = [_chunk(score=1.0), _chunk(score=5.0), _chunk(score=9.0)]
@@ -83,6 +85,7 @@ def test_minmax_inplace_single_element():
 
 
 # ─── Sidecar response shape adapters ───────────────────────────────────────
+
 
 def test_ranked_chunks_from_results_response():
     pool = [_chunk(chunk_id="a"), _chunk(chunk_id="b")]
@@ -206,8 +209,36 @@ async def test_reranker_post_429_is_not_recursively_split(monkeypatch):
     out = await svc._rerank_pool("query", pool)
 
     assert calls == 1
-    assert [chunk.chunk_id for chunk in out] == [str(index) for index in reversed(range(8))]
+    assert [chunk.chunk_id for chunk in out] == [
+        str(index) for index in reversed(range(8))
+    ]
     assert svc.diagnostics()["status"] == "busy_fallback_score_sort"
+
+
+@pytest.mark.asyncio
+async def test_reranker_transport_failure_is_not_recursively_split(monkeypatch):
+    """A stale keepalive after sidecar restart must result in one attempt."""
+    svc = RerankerService()
+    svc._settings = _resilient_settings()
+    calls = 0
+
+    async def fail_post(**kwargs):
+        nonlocal calls
+        calls += 1
+        request = httpx.Request("POST", "http://reranker:8080/rerank")
+        raise httpx.ConnectError("connection replaced", request=request)
+
+    monkeypatch.setattr(svc, "_post_rerank_batch", fail_post)
+    pool = [_chunk(score=float(index), chunk_id=str(index)) for index in range(8)]
+
+    out = await svc._rerank_pool("query", pool)
+
+    assert calls == 1
+    assert [chunk.chunk_id for chunk in out] == [
+        str(index) for index in reversed(range(8))
+    ]
+    assert svc._disabled_until == 0.0
+    assert svc.diagnostics()["status"] == "timeout_fallback_score_sort"
 
 
 @pytest.mark.asyncio
@@ -236,6 +267,7 @@ async def test_reranker_queue_timeout_falls_back_without_http_call(monkeypatch):
 
 
 # ─── RerankerService.rerank ─────────────────────────────────────────────────
+
 
 @pytest.fixture
 def svc(monkeypatch):
@@ -275,6 +307,7 @@ async def test_rerank_all_code_skips_cross_encoder(svc, monkeypatch):
 @pytest.mark.asyncio
 async def test_rerank_all_prose_uses_cross_encoder(svc, monkeypatch):
     """All-prose pool: behaves like the legacy path."""
+
     async def fake_rerank_pool(query, pool):
         # Reverse scores: pretend the cross-encoder swapped the ordering
         for i, c in enumerate(pool):
@@ -327,7 +360,9 @@ async def test_rerank_mixed_pool_partitions(svc, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_rerank_mixed_tiny_pool_clamps_code_score_on_bounded_scale(svc, monkeypatch):
+async def test_rerank_mixed_tiny_pool_clamps_code_score_on_bounded_scale(
+    svc, monkeypatch
+):
     """A single bypassed code chunk must not keep a raw lexical score like
     103 inside a probability/cosine rerank pool. That score later drives
     bounded tail trimming and can delete every useful prose chunk."""
@@ -507,5 +542,6 @@ async def test_rerank_partial_failure_budget_opens_circuit(svc, monkeypatch):
 async def test_rerank_default_bypass_is_on():
     """Verify the setting default is True so the bypass is opt-OUT, not opt-in."""
     from config import get_settings
+
     s = get_settings()
     assert s.RERANKER_BYPASS_CODE is True

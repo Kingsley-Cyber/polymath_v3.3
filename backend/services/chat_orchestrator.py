@@ -38,6 +38,7 @@ from services.llm import llm_service
 from services.retriever import retriever_orchestrator
 from services.ingestion.section_classifier import is_noisy
 from services.tool_registry import tool_registry
+
 # Phase 24 perf — hoist hot-path imports to module level so each chat turn
 # doesn't pay the import-resolution cost (was previously inside `try:` blocks
 # in process_chat_request).
@@ -46,6 +47,7 @@ from services.reasoning_cascade import analyze as reasoning_cascade_analyze
 from services.query_model_resolver import (
     resolve as resolve_query_model_kind,
     resolve_by_entry_id,
+    resolve_fallback_candidates,
 )
 from services.retriever.intent_policy import infer_retrieval_intent
 from services.retriever.evidence_plan import (
@@ -155,12 +157,42 @@ _CHAT_COVERAGE_DOMAIN_CAP = 3
 # global mode so an overview answer spans more documents/domains. Local unaffected.
 # (Eval: overview pools held ~35 docs but answers used only 6-7 at the default cap.)
 _GLOBAL_OVERVIEW_BUDGET = 12
-# Cross-model fallback for the in-process stream retry: when the primary synthesis
-# model fails BEFORE producing any content (e.g. a lapsed Ollama Cloud model 500s),
-# retry once on this known-good backup so the answer is never blank. litellm v1.60
-# does not auto-fallback on a streamed error (Issue #6532). Routes via litellm's
-# deepseek/* group (DEEPSEEK_API_KEY in .env); no per-request credentials.
+# Last-resort fallback when a user has no other enabled query-pool entry. Normal
+# chat fallback is resolved dynamically from the user's encrypted model pool so
+# an exhausted provider/account cannot strand a correct retrieval packet.
 _CHAT_FALLBACK_MODEL = "deepseek/deepseek-chat"
+
+
+async def _resolve_chat_fallback(
+    user_id: str | None,
+    *,
+    primary_model: str,
+    primary_entry_id: str | None,
+) -> dict[str, Any] | None:
+    """Return one safe configured fallback without exposing credentials."""
+    try:
+        candidates = await resolve_fallback_candidates(
+            user_id,
+            primary_model=primary_model,
+            primary_entry_id=primary_entry_id,
+            limit=1,
+        )
+    except Exception as exc:  # fallback resolution must not mask primary error
+        logger.warning("Configured chat fallback resolution failed: %s", exc)
+        candidates = []
+    if candidates:
+        return candidates[0]
+    if primary_model != _CHAT_FALLBACK_MODEL:
+        return {
+            "entry_id": None,
+            "provider": None,
+            "model": _CHAT_FALLBACK_MODEL,
+            "api_base": None,
+            "api_key": None,
+            "extra_params": None,
+        }
+    return None
+
 
 # (Removed) The Phase-4 LLM "overview intent" second-chance classifier that
 # silently upgraded local→global. Routing is now tier-authoritative: GLOBAL is
@@ -173,7 +205,7 @@ _RAW_TOOL_REQUEST_MARKERS = (
     "<tool_calls",
     "tool_calls>",
     "invoke name=",
-    "\"tool_calls\"",
+    '"tool_calls"',
     "'tool_calls'",
 )
 
@@ -544,9 +576,8 @@ def _should_skip_hyde_for_query(query: str) -> bool:
         return False
     if any(marker in text for marker in _HYDE_SOURCE_CONSTRAINT_MARKERS):
         return True
-    if (
-        ("what is" in text or "define " in text or "explain " in text)
-        and any(marker in text for marker in _HYDE_SPECIFIC_RELATION_MARKERS)
+    if ("what is" in text or "define " in text or "explain " in text) and any(
+        marker in text for marker in _HYDE_SPECIFIC_RELATION_MARKERS
     ):
         return True
     return ("based on" in text or "according to" in text) and (
@@ -656,11 +687,7 @@ def _append_deduped_web_sources(existing: list[Any], pending: list[Any]) -> list
     if not pending:
         return existing
 
-    seen = {
-        key
-        for source in existing
-        if (key := _web_source_key(source))
-    }
+    seen = {key for source in existing if (key := _web_source_key(source))}
     merged = list(existing)
     for source in pending:
         key = _web_source_key(source)
@@ -822,10 +849,7 @@ def _format_chat_query_plan_trace(plan: dict[str, Any]) -> str:
             "evidence_lanes: "
             f"{', '.join(evidence_lanes) if evidence_lanes else 'none'}"
         ),
-        (
-            "operators: "
-            f"{', '.join(plan.get('operators') or []) or 'none'}"
-        ),
+        ("operators: " f"{', '.join(plan.get('operators') or []) or 'none'}"),
         (
             "required_evidence: "
             f"{', '.join(plan.get('required_atoms') or []) or 'none'}"
@@ -974,14 +998,10 @@ def _build_retrieval_answerability_gate(
             if str(name).strip()
         }
         final_plan = (
-            plan_meta.get("final")
-            if isinstance(plan_meta.get("final"), dict)
-            else {}
+            plan_meta.get("final") if isinstance(plan_meta.get("final"), dict) else {}
         )
         plan_payload = (
-            plan_meta.get("plan")
-            if isinstance(plan_meta.get("plan"), dict)
-            else {}
+            plan_meta.get("plan") if isinstance(plan_meta.get("plan"), dict) else {}
         )
         plan_operators = {
             str(operator)
@@ -1040,9 +1060,7 @@ def _build_retrieval_answerability_gate(
         missing_atoms = sorted(missing_set)
         missing_critical = sorted(critical_set)
         required_coverage = (
-            len(covered_set & required_set) / len(required_set)
-            if required_set
-            else 1.0
+            len(covered_set & required_set) / len(required_set) if required_set else 1.0
         )
 
     # Text-answerability fallback: count a required concept as covered when its
@@ -1083,7 +1101,10 @@ def _build_retrieval_answerability_gate(
         status = "unanswerable"
     elif effective_answerable:
         status = "answerable"
-    elif _missing_is_relationship_only(missing_critical) and required_coverage >= _partial_floor:
+    elif (
+        _missing_is_relationship_only(missing_critical)
+        and required_coverage >= _partial_floor
+    ):
         # The ONLY thing missing is the cross-document relationship bridge — the
         # grounded sides are present and the LLM can synthesize the link. Answer
         # with a "synthesized across sources" caveat instead of refusing. This
@@ -1141,10 +1162,7 @@ def _format_retrieval_answerability_trace(gate: dict[str, Any]) -> str:
             "[Answerability gate]",
             f"status: {status}",
             f"coverage: {gate.get('required_coverage')}",
-            (
-                "required: "
-                f"{', '.join(gate.get('required_atoms') or []) or 'none'}"
-            ),
+            ("required: " f"{', '.join(gate.get('required_atoms') or []) or 'none'}"),
             f"covered: {', '.join(covered) if covered else 'none'}",
             f"missing: {', '.join(missing) if missing else 'none'}",
             f"rule: {rule}",
@@ -1584,7 +1602,9 @@ def _score_web_evidence_chunk(
     }
 
 
-def _annotate_web_evidence_scores(query: str, chunks: list[Any]) -> list[dict[str, Any]]:
+def _annotate_web_evidence_scores(
+    query: str, chunks: list[Any]
+) -> list[dict[str, Any]]:
     seen_domains: set[str] = set()
     seen_types: set[str] = set()
     scores: list[dict[str, Any]] = []
@@ -1618,7 +1638,9 @@ def _classify_web_evidence_sufficiency(
 ) -> dict[str, Any]:
     """Hard web-evidence grade for the final model and UI telemetry."""
     result_count = len(chunks)
-    best_score = max((float(score.get("final") or 0.0) for score in scores), default=0.0)
+    best_score = max(
+        (float(score.get("final") or 0.0) for score in scores), default=0.0
+    )
     avg_score = (
         sum(float(score.get("final") or 0.0) for score in scores) / len(scores)
         if scores
@@ -1631,7 +1653,9 @@ def _classify_web_evidence_sufficiency(
     if result_count == 0:
         grade = "insufficient"
         reason = "no_final_web_sources"
-    elif best_score >= 0.72 and avg_score >= 0.55 and result_count >= 3 and not degraded:
+    elif (
+        best_score >= 0.72 and avg_score >= 0.55 and result_count >= 3 and not degraded
+    ):
         grade = "confident"
         reason = "multiple_relevant_sources"
     elif (
@@ -1671,7 +1695,10 @@ def _build_backend_retry_query(
         for token in base.split()
         if len(token) >= 3 and token.lower() not in _EVIDENCE_SCORE_STOPWORDS
     ]
-    anchors = re.findall(r"\b[A-Z][A-Za-z0-9_]*(?:Service|API|SDK|DB|RAG|LLM)?\b", original_query or search_query)
+    anchors = re.findall(
+        r"\b[A-Z][A-Za-z0-9_]*(?:Service|API|SDK|DB|RAG|LLM)?\b",
+        original_query or search_query,
+    )
     ordered: list[str] = []
     for token in [*anchors, *tokens]:
         cleaned = token.strip(".,;:()[]{}")
@@ -1684,7 +1711,10 @@ def _build_backend_retry_query(
         return None
     retry = " ".join(ordered)
     lower_original = (original_query or search_query).lower()
-    if any(marker in lower_original for marker in ("official", "docs", "documentation", "api", "reference")):
+    if any(
+        marker in lower_original
+        for marker in ("official", "docs", "documentation", "api", "reference")
+    ):
         if "official" not in retry.lower():
             retry = f"{retry} official documentation"
     if retry.lower() == search_query.lower():
@@ -1840,9 +1870,7 @@ def _format_evidence_packet_block(
             )
             prefix_bits.append(f"kind={kind}")
             prefix_bits.append(f"score={score}")
-            lines.append(
-                " | ".join(prefix_bits) + f"\n   {excerpt or '(no excerpt)'}"
-            )
+            lines.append(" | ".join(prefix_bits) + f"\n   {excerpt or '(no excerpt)'}")
 
     if web_selected:
         lines.append("\n[Web Evidence]")
@@ -1856,11 +1884,7 @@ def _format_evidence_packet_block(
             transcript = metadata.get("transcript_status")
             provider = metadata.get("search_provider") or metadata.get("source")
             score = metadata.get("evidence_score") or {}
-            final_score = (
-                score.get("final")
-                if isinstance(score, dict)
-                else None
-            )
+            final_score = score.get("final") if isinstance(score, dict) else None
             excerpt = _source_excerpt(
                 data, max_chars=1100, query=getattr(request, "message", None)
             )
@@ -2002,7 +2026,9 @@ def _chat_source_is_low_value(source: SourceChunk, query: str) -> bool:
         return True
     if re.search(r"\brelated work\b", heading_text, re.IGNORECASE):
         haystack = f"{heading_text}\n{summary_head}\n{text_head}"
-        citation_hits = len(re.findall(r"\b[A-Z][A-Za-z-]+ et al\.\s*\(\d{4}", haystack))
+        citation_hits = len(
+            re.findall(r"\b[A-Z][A-Za-z-]+ et al\.\s*\(\d{4}", haystack)
+        )
         year_hits = len(re.findall(r"\(\d{4}[a-z]?\)", haystack))
         if citation_hits >= 3 or year_hits >= 5:
             return True
@@ -2245,8 +2271,7 @@ def _apply_final_context_answerability_gate(
     active_mode = str(
         mode
         if mode is not None
-        else getattr(settings, "ANSWERABILITY_CHUNK_GATE", "off")
-        or "off"
+        else getattr(settings, "ANSWERABILITY_CHUNK_GATE", "off") or "off"
     ).lower()
     if active_mode not in {"soft", "strict"}:
         return list(sources or []), {
@@ -2284,12 +2309,20 @@ def _apply_final_context_answerability_gate(
         int(
             min_keep
             if min_keep is not None
-            else getattr(settings, "ANSWERABILITY_CHUNK_GATE_MIN_KEEP", _CHAT_EVIDENCE_MIN_KEEP_AFTER_FILTER)
+            else getattr(
+                settings,
+                "ANSWERABILITY_CHUNK_GATE_MIN_KEEP",
+                _CHAT_EVIDENCE_MIN_KEEP_AFTER_FILTER,
+            )
         ),
     )
 
     plan_for_gate = evidence_plan if isinstance(evidence_plan, EvidencePlan) else None
-    gate_lanes = list(plan_for_gate.required_lanes) if plan_for_gate and plan_for_gate.active else []
+    gate_lanes = (
+        list(plan_for_gate.required_lanes)
+        if plan_for_gate and plan_for_gate.active
+        else []
+    )
     multi_side_plan = len(gate_lanes) >= 2
     broad_spectrum = _query_requests_broad_spectrum(query)
 
@@ -2303,7 +2336,9 @@ def _apply_final_context_answerability_gate(
             evidence_plan=evidence_plan,
         )
         protected = bool(detail.get("protected"))
-        passes = protected or (score > floor if active_mode == "soft" else score >= floor)
+        passes = protected or (
+            score > floor if active_mode == "soft" else score >= floor
+        )
         status = "kept" if passes else "drop_candidate"
         annotated = _annotate_answerability_chunk_gate(
             source,
@@ -2438,13 +2473,18 @@ def _clip_source_text_for_prompt(text: str, query: str, max_chars: int) -> str:
         start = max(0, center - (max_chars // 3))
         end = min(len(text), start + max_chars)
         start = max(0, end - max_chars)
-        prefix = "[...source excerpt clipped before this point...]\n" if start > 0 else ""
-        suffix = "\n[...source excerpt clipped after this point...]" if end < len(text) else ""
+        prefix = (
+            "[...source excerpt clipped before this point...]\n" if start > 0 else ""
+        )
+        suffix = (
+            "\n[...source excerpt clipped after this point...]"
+            if end < len(text)
+            else ""
+        )
         return f"{prefix}{text[start:end].strip()}{suffix}"
 
     return (
-        text[:max_chars].rstrip()
-        + "\n[...source excerpt clipped after this point...]"
+        text[:max_chars].rstrip() + "\n[...source excerpt clipped after this point...]"
     )
 
 
@@ -2467,7 +2507,9 @@ def _compact_sources_for_prompt(
     return [
         _copy_source_for_prompt(
             source,
-            text=_clip_source_text_for_prompt(source.text or "", query, source_max_chars),
+            text=_clip_source_text_for_prompt(
+                source.text or "", query, source_max_chars
+            ),
         )
         for source in (sources or [])
     ]
@@ -2529,12 +2571,16 @@ def _build_budgeted_augmented_prompt(
             decoration=prompt_decoration,
             packet=packet,
         )
-        return prompt, count_tokens(prompt, model), {
-            "source_chars": source_chars,
-            "facts": len(prompt_facts),
-            "decorations": len(prompt_decoration),
-            "analysis": bool(analysis and use_analysis),
-        }
+        return (
+            prompt,
+            count_tokens(prompt, model),
+            {
+                "source_chars": source_chars,
+                "facts": len(prompt_facts),
+                "decorations": len(prompt_decoration),
+                "analysis": bool(analysis and use_analysis),
+            },
+        )
 
     full_prompt, full_tokens, full_shape = _build(
         source_chars=None,
@@ -2620,9 +2666,11 @@ async def _drop_noisy_retrieval_chunks(chunks: list[Any]) -> list[Any]:
     if db is None or not ids:
         return survivors
     try:
-        rows = await db["chunks"].find(
-            {"chunk_id": {"$in": ids}}, {"chunk_id": 1, "chunk_kind": 1}
-        ).to_list(length=None)
+        rows = (
+            await db["chunks"]
+            .find({"chunk_id": {"$in": ids}}, {"chunk_id": 1, "chunk_kind": 1})
+            .to_list(length=None)
+        )
     except Exception as exc:  # noqa: BLE001
         logger.debug("noisy-chunk Mongo confirm failed: %s", exc)
         return survivors
@@ -2630,8 +2678,7 @@ async def _drop_noisy_retrieval_chunks(chunks: list[Any]) -> list[Any]:
     if not noisy_ids:
         return survivors
     return [
-        c for c in survivors
-        if str(getattr(c, "chunk_id", "") or "") not in noisy_ids
+        c for c in survivors if str(getattr(c, "chunk_id", "") or "") not in noisy_ids
     ]
 
 
@@ -2717,7 +2764,11 @@ def _chat_coverage_facets_for_query(query: str) -> list[dict[str, Any]]:
                 matched=matched,
                 source="query_deconstruction",
                 first_match_pos=min(
-                    [haystack.find(term) for term in matched if haystack.find(term) >= 0]
+                    [
+                        haystack.find(term)
+                        for term in matched
+                        if haystack.find(term) >= 0
+                    ]
                     or [999999]
                 ),
             )
@@ -2733,9 +2784,7 @@ def _is_weak_ingest_profile_lane(facet: dict[str, Any]) -> bool:
 
     if str(facet.get("source") or "") != "ingest_facet_profile":
         return False
-    name_tokens = [
-        token for token in str(facet.get("name") or "").split("_") if token
-    ]
+    name_tokens = [token for token in str(facet.get("name") or "").split("_") if token]
     matched = [str(item) for item in (facet.get("matched") or []) if str(item)]
     try:
         match_score = float(facet.get("match_score") or 0.0)
@@ -2758,15 +2807,22 @@ def _merge_chat_coverage_facets(
             merged[name] = dict(row)
             continue
         existing["matched"] = list(
-            dict.fromkeys([*(existing.get("matched") or []), *(row.get("matched") or [])])
+            dict.fromkeys(
+                [*(existing.get("matched") or []), *(row.get("matched") or [])]
+            )
         )[:8]
         existing["support_terms"] = list(
             dict.fromkeys(
-                [*(existing.get("support_terms") or []), *(row.get("support_terms") or [])]
+                [
+                    *(existing.get("support_terms") or []),
+                    *(row.get("support_terms") or []),
+                ]
             )
         )[:12]
         existing["triggers"] = list(
-            dict.fromkeys([*(existing.get("triggers") or []), *(row.get("triggers") or [])])
+            dict.fromkeys(
+                [*(existing.get("triggers") or []), *(row.get("triggers") or [])]
+            )
         )[:12]
         existing["source"] = existing.get("source") or row.get("source")
         existing["query_matched"] = bool(
@@ -2790,7 +2846,10 @@ def _merge_chat_coverage_facets(
         if row.get("facet_doc_ids"):
             existing["facet_doc_ids"] = list(
                 dict.fromkeys(
-                    [*(existing.get("facet_doc_ids") or []), *(row.get("facet_doc_ids") or [])]
+                    [
+                        *(existing.get("facet_doc_ids") or []),
+                        *(row.get("facet_doc_ids") or []),
+                    ]
                 )
             )[:8]
         if row.get("facet_docs"):
@@ -2896,7 +2955,11 @@ def _chat_facet_coverage_score(source: SourceChunk, facet: dict[str, Any]) -> in
         return 0
     score = 0
     metadata = source.metadata if isinstance(source.metadata, dict) else {}
-    support_facet = metadata.get("support_facet") if isinstance(metadata.get("support_facet"), dict) else {}
+    support_facet = (
+        metadata.get("support_facet")
+        if isinstance(metadata.get("support_facet"), dict)
+        else {}
+    )
     if str(support_facet.get("name") or "") == str(facet.get("name") or ""):
         score += 8
     high_text = _chat_coverage_norm(
@@ -2930,7 +2993,9 @@ def _chat_facet_coverage_score(source: SourceChunk, facet: dict[str, Any]) -> in
     return score
 
 
-def _chat_query_fit_score(source: SourceChunk, query: str, facet: dict[str, Any]) -> int:
+def _chat_query_fit_score(
+    source: SourceChunk, query: str, facet: dict[str, Any]
+) -> int:
     query_terms = [
         term
         for term in re.findall(r"[a-z0-9][a-z0-9\-]{3,}", str(query or "").lower())
@@ -2976,7 +3041,9 @@ def _chat_support_query_variants(
     label = str(facet.get("label") or facet.get("name") or "").strip()
     query_terms = [
         term
-        for term in re.findall(r"[a-z0-9][a-z0-9\-]{4,}", str(original_query or "").lower())
+        for term in re.findall(
+            r"[a-z0-9][a-z0-9\-]{4,}", str(original_query or "").lower()
+        )
         if term
         not in {
             "could",
@@ -3138,7 +3205,9 @@ def _choose_chat_coverage_candidate_with_report(
         # are not 0-1 normalized — observed values 0.7 .. 1400+) cannot drown out
         # facet_score (*10) and query_fit (*2), which are the grounding signals.
         bounded_score = min(max(float(chunk.score or 0.0), 0.0), 0.8) * 2.0
-        final_score = (facet_score * 10.0) + (query_fit * 2.0) + bounded_score + new_doc_bonus
+        final_score = (
+            (facet_score * 10.0) + (query_fit * 2.0) + bounded_score + new_doc_bonus
+        )
         if facet_score < _CHAT_COVERAGE_WEAK_THRESHOLD:
             # Layer-2 retention fix: the lexical facet_score scores 0 for body-only
             # semantic matches and for vector-probe lanes whose terms are the document
@@ -3443,15 +3512,21 @@ def _format_chat_coverage_prompt_note(meta: dict[str, Any]) -> str | None:
         else []
     )
     explicit = [
-        row
-        for row in breakdown
-        if isinstance(row, dict) and row.get("query_explicit")
+        row for row in breakdown if isinstance(row, dict) and row.get("query_explicit")
     ]
     if not selected and not explicit:
         return None
-    lane_counts = meta.get("coverage_lane_counts") if isinstance(meta.get("coverage_lane_counts"), dict) else {}
-    uncovered = [str(name) for name in (meta.get("coverage_uncovered_lanes") or []) if name]
-    reports = meta.get("lane_reports") if isinstance(meta.get("lane_reports"), list) else []
+    lane_counts = (
+        meta.get("coverage_lane_counts")
+        if isinstance(meta.get("coverage_lane_counts"), dict)
+        else {}
+    )
+    uncovered = [
+        str(name) for name in (meta.get("coverage_uncovered_lanes") or []) if name
+    ]
+    reports = (
+        meta.get("lane_reports") if isinstance(meta.get("lane_reports"), list) else []
+    )
     weak = [
         str(report.get("lane") or "")
         for report in reports
@@ -3639,7 +3714,9 @@ async def _enforce_chat_query_coverage(
     meta["support_search_mode"] = "local"
 
     existing_chunk_ids = {str(source.chunk_id or "") for source in base_sources}
-    existing_doc_ids = {str(source.doc_id or "") for source in base_sources if source.doc_id}
+    existing_doc_ids = {
+        str(source.doc_id or "") for source in base_sources if source.doc_id
+    }
     support_sources: list[SourceChunk] = []
 
     # Each missing facet needs an independent support retrieval, so run them
@@ -3668,7 +3745,9 @@ async def _enforce_chat_query_coverage(
 
     async def _cover_one_facet(
         facet: dict[str, Any],
-    ) -> tuple[dict[str, Any], "SourceChunk | None", dict[str, Any], dict[str, Any], str]:
+    ) -> tuple[
+        dict[str, Any], "SourceChunk | None", dict[str, Any], dict[str, Any], str
+    ]:
         facet_name = str(facet.get("name") or "")
         lane_report: dict[str, Any] = {
             "lane": facet_name,
@@ -3722,7 +3801,11 @@ async def _enforce_chat_query_coverage(
                     attempt["status"] = "retrieval_error"
                     attempt["error"] = _clip_trace_value(exc, 180)
                     lane_report["attempts"].append(attempt)
-                    logger.debug("chat coverage support retrieval skipped for %s: %s", facet_name, exc)
+                    logger.debug(
+                        "chat coverage support retrieval skipped for %s: %s",
+                        facet_name,
+                        exc,
+                    )
                     continue
                 candidates = list(getattr(result, "chunks", []) or [])
                 attempt["returned"] = len(candidates)
@@ -3748,7 +3831,9 @@ async def _enforce_chat_query_coverage(
                     break
         return facet, chosen, chosen_report, lane_report, support_query
 
-    facet_results = await asyncio.gather(*[_cover_one_facet(facet) for facet in missing])
+    facet_results = await asyncio.gather(
+        *[_cover_one_facet(facet) for facet in missing]
+    )
 
     # Apply marking + cross-facet de-dup in facet order. The serial loop never
     # picked a duplicate because it grew the seen-sets between facets; the
@@ -3820,7 +3905,9 @@ async def _enforce_chat_query_coverage(
         and source.metadata.get("support_role") == "chat_semantic_facet_coverage"
     ]
     meta["added"] = len(actual_support)
-    meta["support_doc_ids"] = [str(source.doc_id or "") for source in actual_support if source.doc_id]
+    meta["support_doc_ids"] = [
+        str(source.doc_id or "") for source in actual_support if source.doc_id
+    ]
     meta["support_lanes"] = [
         str(source.metadata.get("support_lane") or "")
         for source in actual_support
@@ -3831,16 +3918,23 @@ async def _enforce_chat_query_coverage(
     meta["coverage_lane_counts"] = selector_meta.get("lane_counts", {})
     meta["coverage_uncovered_lanes"] = selector_meta.get("uncovered_lanes", [])
     meta["coverage_priority_lanes"] = selector_meta.get("priority_lanes", [])
-    meta["coverage_uncovered_priority_lanes"] = selector_meta.get("uncovered_priority_lanes", [])
+    meta["coverage_uncovered_priority_lanes"] = selector_meta.get(
+        "uncovered_priority_lanes", []
+    )
     for report in meta.get("lane_reports", []):
         lane = str(report.get("lane") or "")
-        if lane in meta["coverage_uncovered_lanes"] and report.get("status") == "selected":
+        if (
+            lane in meta["coverage_uncovered_lanes"]
+            and report.get("status") == "selected"
+        ):
             report["status"] = "selected_but_not_in_final_packet"
     return merged, meta
 
 
 def _evidence_source_doc_key(source: SourceChunk) -> str:
-    return str(source.doc_id or source.doc_name or source.parent_id or source.chunk_id or "")
+    return str(
+        source.doc_id or source.doc_name or source.parent_id or source.chunk_id or ""
+    )
 
 
 def _evidence_lane_match_score(source: SourceChunk, lane: EvidenceLane) -> int:
@@ -3894,7 +3988,8 @@ def _evidence_lane_match_score(source: SourceChunk, lane: EvidenceLane) -> int:
         strong_personality_terms = [
             term
             for term in lane.search_terms
-            if term not in {"personality", "character", "trait", "traits", "type", "types"}
+            if term
+            not in {"personality", "character", "trait", "traits", "type", "types"}
         ]
         if any(
             f" {_chat_coverage_norm(term)} " in f" {high_text} "
@@ -3973,17 +4068,10 @@ def _evidence_lane_coverage(
         if len(lane_doc_ids.get(lane.name) or []) >= max(1, int(lane.min_sources or 1))
     ]
     missing = [
-        lane.name
-        for lane in plan.required_lanes
-        if lane.name not in set(covered)
+        lane.name for lane in plan.required_lanes if lane.name not in set(covered)
     ]
     distinct_docs = sorted(
-        {
-            doc_id
-            for doc_ids in lane_doc_ids.values()
-            for doc_id in doc_ids
-            if doc_id
-        }
+        {doc_id for doc_ids in lane_doc_ids.values() for doc_id in doc_ids if doc_id}
     )
     return {
         "covered_lanes": covered,
@@ -4044,7 +4132,9 @@ def _evidence_facet_hint_doc_ids(facets: list[dict[str, Any]] | None) -> set[str
     for facet in facets or []:
         if not isinstance(facet, dict):
             continue
-        doc_ids.update(str(doc_id) for doc_id in (facet.get("facet_doc_ids") or []) if doc_id)
+        doc_ids.update(
+            str(doc_id) for doc_id in (facet.get("facet_doc_ids") or []) if doc_id
+        )
         for doc in facet.get("facet_docs") or []:
             if isinstance(doc, dict) and doc.get("doc_id"):
                 doc_ids.add(str(doc.get("doc_id")))
@@ -4063,7 +4153,9 @@ async def _semantic_ingest_hints_for_evidence_lane(
             corpus_ids,
         )
     except Exception as exc:
-        logger.debug("evidence-plan semantic ingest hints skipped for %s: %s", lane.name, exc)
+        logger.debug(
+            "evidence-plan semantic ingest hints skipped for %s: %s", lane.name, exc
+        )
         facets = []
     terms = _evidence_facet_hint_terms(facets)
     doc_ids = sorted(_evidence_facet_hint_doc_ids(facets))
@@ -4239,7 +4331,9 @@ def _select_evidence_plan_sources(
     *,
     max_sources: int,
 ) -> list[SourceChunk]:
-    max_sources = max(1, int(max_sources or len(base_sources) or len(support_sources) or 1))
+    max_sources = max(
+        1, int(max_sources or len(base_sources) or len(support_sources) or 1)
+    )
     if not support_sources:
         return base_sources[:max_sources]
     support_keys = {str(source.chunk_id or "") for source in support_sources}
@@ -4431,7 +4525,11 @@ async def _enforce_evidence_plan_lanes(
                     attempt["status"] = "retrieval_error"
                     attempt["error"] = _clip_trace_value(exc, 180)
                     lane_report["attempts"].append(attempt)
-                    logger.debug("evidence-plan support retrieval skipped for %s: %s", lane.name, exc)
+                    logger.debug(
+                        "evidence-plan support retrieval skipped for %s: %s",
+                        lane.name,
+                        exc,
+                    )
                     continue
                 candidates = list(getattr(result, "chunks", []) or [])
                 attempt["returned"] = len(candidates)
@@ -4454,7 +4552,11 @@ async def _enforce_evidence_plan_lanes(
                     pick_doc_id = _evidence_source_doc_key(pick)
                     if pick_chunk_id and pick_chunk_id in lane_chunk_ids:
                         continue
-                    if pick_doc_id and pick_doc_id in lane_doc_ids and not allow_same_doc_deepening:
+                    if (
+                        pick_doc_id
+                        and pick_doc_id in lane_doc_ids
+                        and not allow_same_doc_deepening
+                    ):
                         continue
                     chosen_list.append(pick)
                     if pick_chunk_id:
@@ -4465,7 +4567,9 @@ async def _enforce_evidence_plan_lanes(
                         break
                 attempt.update(
                     {
-                        "status": "selected" if chosen_list else chosen_report.get("status", "uncovered"),
+                        "status": "selected"
+                        if chosen_list
+                        else chosen_report.get("status", "uncovered"),
                         "selected_count": len(chosen_list),
                         "selected": chosen_report.get("selected"),
                         "reason": chosen_report.get("reason"),
@@ -4498,10 +4602,7 @@ async def _enforce_evidence_plan_lanes(
             )
             lane_hints.append(dict(_EMPTY_HINTS))
     lane_results = await asyncio.gather(
-        *[
-            _cover_one_lane(lane, hints)
-            for lane, hints in zip(missing, lane_hints)
-        ]
+        *[_cover_one_lane(lane, hints) for lane, hints in zip(missing, lane_hints)]
     )
     for lane, chosen_list, chosen_report, lane_report, support_query in lane_results:
         if not chosen_list:
@@ -4517,7 +4618,8 @@ async def _enforce_evidence_plan_lanes(
                 continue
             strength = (
                 "strong"
-                if _evidence_lane_match_score(chosen, lane) >= _EVIDENCE_LANE_STRONG_SCORE
+                if _evidence_lane_match_score(chosen, lane)
+                >= _EVIDENCE_LANE_STRONG_SCORE
                 else "weak"
             )
             marked = _mark_evidence_plan_chunk(
@@ -4563,8 +4665,12 @@ async def _enforce_evidence_plan_lanes(
         and source.metadata.get("support_role") == "evidence_plan_lane"
     ]
     final = _evidence_lane_coverage(merged, evidence_plan)
-    final_undercovered = [str(name) for name in (final.get("missing_lanes") or []) if name]
-    final_lane_doc_ids = final.get("lane_doc_ids") if isinstance(final.get("lane_doc_ids"), dict) else {}
+    final_undercovered = [
+        str(name) for name in (final.get("missing_lanes") or []) if name
+    ]
+    final_lane_doc_ids = (
+        final.get("lane_doc_ids") if isinstance(final.get("lane_doc_ids"), dict) else {}
+    )
     final_thin_lanes = [
         lane_name
         for lane_name in final_undercovered
@@ -4695,7 +4801,9 @@ def _format_web_retrieval_decision_trace(
         if isinstance(pipeline.get("snippet_sufficiency"), dict)
         else {}
     )
-    fetches = pipeline.get("fetches") if isinstance(pipeline.get("fetches"), list) else []
+    fetches = (
+        pipeline.get("fetches") if isinstance(pipeline.get("fetches"), list) else []
+    )
     results = payload.get("results") if isinstance(payload.get("results"), list) else []
     selected_urls = (
         pipeline.get("selected_full_page_urls")
@@ -4746,9 +4854,7 @@ def _format_web_retrieval_decision_trace(
     fetch_attempts = pipeline.get("full_page_fetch_attempts") or 0
     fetch_successes = pipeline.get("full_page_fetch_successes") or 0
     final_results = (
-        pipeline.get("final_reranked_results")
-        or payload.get("reranked_results")
-        or 0
+        pipeline.get("final_reranked_results") or payload.get("reranked_results") or 0
     )
     final_limit = pipeline.get("final_result_limit") or _MAX_WEB_SEARCH_RESULTS_PER_CALL
 
@@ -4983,10 +5089,7 @@ def _looks_like_raw_tool_request_content(content: str) -> bool:
     if any(marker in text for marker in _RAW_TOOL_REQUEST_MARKERS):
         return True
     return "web_search" in text and (
-        "<" in text
-        or "{" in text
-        or "invoke" in text
-        or "parameter" in text
+        "<" in text or "{" in text or "invoke" in text or "parameter" in text
     )
 
 
@@ -5016,9 +5119,7 @@ def _available_tool_schemas(
     )
     if force_initial_web_search:
         web_only = [
-            schema
-            for schema in available
-            if _tool_schema_name(schema) == "web_search"
+            schema for schema in available if _tool_schema_name(schema) == "web_search"
         ]
         return web_only or available
     return available
@@ -5037,11 +5138,7 @@ def _tool_schemas_contain(
 
 
 def _tool_schema_names(tool_schemas: list[dict[str, Any]]) -> list[str]:
-    return [
-        name
-        for schema in tool_schemas
-        if (name := _tool_schema_name(schema))
-    ]
+    return [name for schema in tool_schemas if (name := _tool_schema_name(schema))]
 
 
 def _partition_known_tool_calls(
@@ -5127,9 +5224,9 @@ def _compact_source_previews(sources: list[Any] | None) -> list[dict[str, Any]] 
         if data is None:
             continue
 
-        data["text"] = _clip_source_text(
-            data.get("text"), _MAX_PERSISTED_SOURCE_TEXT_CHARS
-        ) or ""
+        data["text"] = (
+            _clip_source_text(data.get("text"), _MAX_PERSISTED_SOURCE_TEXT_CHARS) or ""
+        )
         if data.get("summary"):
             data["summary"] = _clip_source_text(
                 data.get("summary"), _MAX_PERSISTED_SOURCE_SUMMARY_CHARS
@@ -5360,8 +5457,7 @@ _RETRIEVAL_NUANCE_STOPWORDS = frozenset(
     section chapter page pages figure table appendix article xmlns kobospan class
     header title kobo span xhtml html href http https www com org pdf markdown
     text note notes example examples following previous including include includes
-    """
-    .split()
+    """.split()
 )
 
 _BROAD_CONCEPT_FRAME_RULES: dict[str, tuple[dict[str, Any], ...]] = {
@@ -5514,7 +5610,9 @@ def _detect_broad_concept_frames(
     frames: list[dict[str, Any]] = []
     for concept in concepts:
         for rule in _BROAD_CONCEPT_FRAME_RULES.get(concept, ()):
-            patterns = [re.compile(pattern, re.IGNORECASE) for pattern in rule["patterns"]]
+            patterns = [
+                re.compile(pattern, re.IGNORECASE) for pattern in rule["patterns"]
+            ]
             matches: list[dict[str, Any]] = []
             terms: set[str] = set()
             for title, text in source_texts:
@@ -5640,7 +5738,9 @@ def _build_retrieval_nuance_digest(
     phrase_words = {word for phrase in phrases for word in phrase.split()}
     singles = [
         term
-        for term in _retrieval_nuance_rank_terms(token_tf, token_df, phrase=False, limit=12)
+        for term in _retrieval_nuance_rank_terms(
+            token_tf, token_df, phrase=False, limit=12
+        )
         if term not in phrase_words
     ][:8]
     high_frequency_context = [*phrases[:6], *singles[:6]][:10]
@@ -5863,8 +5963,7 @@ def _format_retrieval_diagnostics_trace(
     total_s = float(diag.get("total_s") or 0.0)
     final_mix = (
         ", ".join(
-            f"{tier}={count}"
-            for tier, count in sorted(final_source_tiers.items())
+            f"{tier}={count}" for tier, count in sorted(final_source_tiers.items())
         )
         if isinstance(final_source_tiers, dict) and final_source_tiers
         else "none"
@@ -6132,7 +6231,7 @@ POLYMATH_SYSTEM_PROMPT = (
     "numbered lists, or JSON examples, satisfy that requested display form "
     "instead of reverting to prose.\n"
     "- For entity extraction, schema, span, offset, or typed-result examples, "
-    "show a fenced `json` block such as `{ \"entities\": [...] }` when useful.\n"
+    'show a fenced `json` block such as `{ "entities": [...] }` when useful.\n'
     "\n"
     "Sound like a smart friend explaining, not a research assistant producing "
     "a report."
@@ -6232,6 +6331,7 @@ class ChatOrchestrator:
 
         # Step 2: Get model to use
         model_used = self._get_model_to_use(request, model_config)
+        primary_entry_id: str | None = None
 
         # Step 3: Create user message
         user_message = self._create_user_message(request.message, model_used)
@@ -6248,13 +6348,9 @@ class ChatOrchestrator:
         )
         web_search_enabled = _is_web_search_enabled_for_request(request)
         web_only_tool_route = bool(
-            web_search_enabled
-            and not request.selected_tools
-            and not agentic_on_request
+            web_search_enabled and not request.selected_tools and not agentic_on_request
         )
-        tool_route_active = bool(
-            request.selected_tools or agentic_on_request
-        )
+        tool_route_active = bool(request.selected_tools or agentic_on_request)
         if user_id and (
             model_used.startswith("profile:") or model_used.startswith("pool:")
         ):
@@ -6269,6 +6365,7 @@ class ChatOrchestrator:
             _resolved = await resolve_by_entry_id(user_id, _id)
 
             if _resolved:
+                primary_entry_id = str(_resolved.get("entry_id") or _id or "") or None
                 profile_creds = {
                     "api_base": _resolved.get("api_base"),
                     "api_key": _resolved.get("api_key"),
@@ -6277,13 +6374,18 @@ class ChatOrchestrator:
                 model_used = _resolved["model"]
                 logger.info(
                     "%s resolved: user=%s id=%s → %s",
-                    prefix, user_id, _id, model_used,
+                    prefix,
+                    user_id,
+                    _id,
+                    model_used,
                 )
             else:
                 logger.warning(
                     "%s not found: user=%s id=%s; "
                     "falling back to DEFAULT_COMPLETION_MODEL.",
-                    prefix, user_id, _id,
+                    prefix,
+                    user_id,
+                    _id,
                 )
                 model_used = settings.DEFAULT_COMPLETION_MODEL
 
@@ -6299,11 +6401,10 @@ class ChatOrchestrator:
         # web tools directly so the chat model owns query/refine/sufficiency.
         if tool_route_active:
             qres = (
-                await resolve_query_model_kind(user_id, "agentic")
-                if user_id
-                else None
+                await resolve_query_model_kind(user_id, "agentic") if user_id else None
             )
             if qres:
+                primary_entry_id = str(qres.get("entry_id") or "") or None
                 model_used = qres["model"]
                 profile_creds = {
                     "api_base": qres["api_base"],
@@ -6312,25 +6413,32 @@ class ChatOrchestrator:
                 }
                 logger.info(
                     "Phase F query prefs resolution: user=%s kind=%s → %s",
-                    user_id, "agentic", model_used,
+                    user_id,
+                    "agentic",
+                    model_used,
                 )
             else:
                 model_used = settings.AGENTIC_MODEL
                 profile_creds = {}
                 logger.info(
                     "Agentic env fallback resolution: user=%s kind=agentic → %s",
-                    user_id or "-", model_used,
+                    user_id or "-",
+                    model_used,
                 )
 
         elif (
             user_id
             and not profile_creds
-            and not (model_used.startswith("pool:") or model_used.startswith("profile:"))
+            and not (
+                model_used.startswith("pool:") or model_used.startswith("profile:")
+            )
             and not (request.overrides and request.overrides.model)
-            and model_used in (settings.DEFAULT_COMPLETION_MODEL, settings.AGENTIC_MODEL)
+            and model_used
+            in (settings.DEFAULT_COMPLETION_MODEL, settings.AGENTIC_MODEL)
         ):
             qres = await resolve_query_model_kind(user_id, "query")
             if qres:
+                primary_entry_id = str(qres.get("entry_id") or "") or None
                 model_used = qres["model"]
                 profile_creds = {
                     "api_base": qres["api_base"],
@@ -6339,7 +6447,9 @@ class ChatOrchestrator:
                 }
                 logger.info(
                     "Phase F query prefs resolution: user=%s kind=%s → %s",
-                    user_id, "query", model_used,
+                    user_id,
+                    "query",
+                    model_used,
                 )
 
         if request.overrides is not None:
@@ -6350,8 +6460,7 @@ class ChatOrchestrator:
             title="Chat model route",
             status="done",
             content=(
-                "Resolved the final chat model before retrieval and tool "
-                "execution."
+                "Resolved the final chat model before retrieval and tool " "execution."
             ),
             metadata={"model": model_used, "web_planner_split": web_only_tool_route},
         )
@@ -6370,7 +6479,9 @@ class ChatOrchestrator:
                 vision_capable_models_hint,
             )
 
-            if attachments_include_image(request.attachments) and not supports_vision(model_used):
+            if attachments_include_image(request.attachments) and not supports_vision(
+                model_used
+            ):
                 logger.warning(
                     "vision mismatch: model=%r has no vision support but "
                     "request has image attachments — emitting SSE error",
@@ -6416,9 +6527,7 @@ class ChatOrchestrator:
             )
         if hyde_trace_enabled:
             hyde_model_trace = (
-                (hyde_route or {}).get("model")
-                or settings.HYDE_MODEL
-                or model_used
+                (hyde_route or {}).get("model") or settings.HYDE_MODEL or model_used
             )
             yield _record_trace_event(
                 lane="model_call",
@@ -6650,7 +6759,9 @@ class ChatOrchestrator:
             evidence_plan_meta = {"active": False, "fast_path": True, "duration_s": 0.0}
             logger.info(
                 "chat_fast_path: tier=%s intent=%s — skipped coverage+evidence (%d sources)",
-                str(getattr(effective_retrieval_tier, "value", effective_retrieval_tier)),
+                str(
+                    getattr(effective_retrieval_tier, "value", effective_retrieval_tier)
+                ),
                 _fast_intent,
                 len(coverage_sources),
             )
@@ -6660,7 +6771,9 @@ class ChatOrchestrator:
                 try:
                     precomputed_coverage_facets = await coverage_facets_task
                 except Exception as exc:
-                    logger.debug("coverage facet prefetch failed; detecting inline: %s", exc)
+                    logger.debug(
+                        "coverage facet prefetch failed; detecting inline: %s", exc
+                    )
             # Speed campaign (2026-07-02): coverage and evidence-plan used to
             # run SEQUENTIALLY (~8s + ~7.5s measured) even though they fill
             # ORTHOGONAL gaps — coverage adds facet evidence, evidence-plan
@@ -6682,9 +6795,7 @@ class ChatOrchestrator:
                     refined_plan = None
                 if refined_plan is not None:
                     evidence_plan = refined_plan
-            shared_support_semaphore = asyncio.Semaphore(
-                _CHAT_COVERAGE_MAX_CONCURRENCY
-            )
+            shared_support_semaphore = asyncio.Semaphore(_CHAT_COVERAGE_MAX_CONCURRENCY)
             evidence_plan_start = perf_counter()
             (
                 (coverage_sources, coverage_meta),
@@ -6695,7 +6806,9 @@ class ChatOrchestrator:
                     retrieval_query=retrieval_query,
                     sources=retrieval_sources,
                     corpus_ids=request.corpus_ids,
-                    retrieval_tier=getattr(retrieval, "effective_tier", request.retrieval_tier),
+                    retrieval_tier=getattr(
+                        retrieval, "effective_tier", request.retrieval_tier
+                    ),
                     collections=request.collections,
                     retrieval_k=profile_k,
                     rerank_enabled=profile_rerank,
@@ -6716,7 +6829,9 @@ class ChatOrchestrator:
                     sources=retrieval_sources,
                     evidence_plan=evidence_plan,
                     corpus_ids=request.corpus_ids,
-                    retrieval_tier=getattr(retrieval, "effective_tier", request.retrieval_tier),
+                    retrieval_tier=getattr(
+                        retrieval, "effective_tier", request.retrieval_tier
+                    ),
                     collections=request.collections,
                     retrieval_k=profile_k,
                     top_k_summary=profile_cfg["top_k_summary"],
@@ -6752,9 +6867,7 @@ class ChatOrchestrator:
             # Union of the two parallel passes: evidence-plan output first
             # (its lane-marked support chunks must survive), then any
             # coverage-added chunks not already present.
-            _merged_ids = {
-                str(chunk.chunk_id or "") for chunk in evidence_only_sources
-            }
+            _merged_ids = {str(chunk.chunk_id or "") for chunk in evidence_only_sources}
             evidence_sources = list(evidence_only_sources)
             for chunk in coverage_sources:
                 _cid = str(chunk.chunk_id or "")
@@ -6795,7 +6908,9 @@ class ChatOrchestrator:
             evidence_plan_meta["duration_s"] = perf_counter() - evidence_plan_start
             evidence_plan_meta["parallel_with_coverage"] = True
         if evidence_plan_meta.get("active"):
-            if evidence_plan_meta.get("added") or evidence_plan_meta.get("missing_lanes"):
+            if evidence_plan_meta.get("added") or evidence_plan_meta.get(
+                "missing_lanes"
+            ):
                 logger.info(
                     "chat_evidence_plan: mode=%s added=%s covered=%s missing=%s docs=%s",
                     evidence_plan_meta.get("mode"),
@@ -6808,9 +6923,7 @@ class ChatOrchestrator:
                 lane="planning",
                 title="Evidence plan",
                 status=(
-                    "done"
-                    if not evidence_plan_meta.get("missing_lanes")
-                    else "warning"
+                    "done" if not evidence_plan_meta.get("missing_lanes") else "warning"
                 ),
                 content=_format_evidence_plan_trace(evidence_plan_meta),
                 metadata=evidence_plan_meta,
@@ -6837,7 +6950,10 @@ class ChatOrchestrator:
         else:
             sources = _cap_chunks_per_doc(sources)
         retrieval_diagnostics = getattr(retrieval, "diagnostics", {}) or {}
-        sources, answerability_chunk_gate_meta = _apply_final_context_answerability_gate(
+        (
+            sources,
+            answerability_chunk_gate_meta,
+        ) = _apply_final_context_answerability_gate(
             sources,
             query=request.message,
             evidence_plan=evidence_plan,
@@ -6845,7 +6961,9 @@ class ChatOrchestrator:
         )
         sources = _filter_sources_to_selected_corpora(sources, request.corpus_ids)
         if answerability_chunk_gate_meta.get("enabled"):
-            retrieval_diagnostics["answerability_chunk_gate"] = answerability_chunk_gate_meta
+            retrieval_diagnostics[
+                "answerability_chunk_gate"
+            ] = answerability_chunk_gate_meta
         effective_tier_for_trace = getattr(
             retrieval.effective_tier,
             "value",
@@ -6868,7 +6986,9 @@ class ChatOrchestrator:
                 "retrieval_diagnostics": retrieval_diagnostics,
                 "answerability_chunk_gate": answerability_chunk_gate_meta,
                 "coverage_detected_facets": coverage_meta.get("detected_facets", []),
-                "coverage_query_facet_breakdown": coverage_meta.get("query_facet_breakdown", []),
+                "coverage_query_facet_breakdown": coverage_meta.get(
+                    "query_facet_breakdown", []
+                ),
                 "coverage_selected_facets": coverage_meta.get("selected_facets", []),
                 "coverage_explicit_missing_facets": coverage_meta.get(
                     "explicit_missing_facets", []
@@ -6881,17 +7001,27 @@ class ChatOrchestrator:
                 ),
                 "coverage_added": coverage_meta.get("added", 0),
                 "coverage_support_lanes": coverage_meta.get("support_lanes", []),
-                "coverage_support_search_mode": coverage_meta.get("support_search_mode"),
+                "coverage_support_search_mode": coverage_meta.get(
+                    "support_search_mode"
+                ),
                 "coverage_support_doc_ids": coverage_meta.get("support_doc_ids", []),
                 "coverage_duration_s": coverage_meta.get("duration_s", 0.0),
-                "evidence_filtered_low_value": coverage_meta.get("filtered_low_value", 0),
-                "evidence_cleaned_frontmatter": coverage_meta.get("cleaned_frontmatter", 0),
-                "coverage_priority_lanes": coverage_meta.get("coverage_priority_lanes", []),
+                "evidence_filtered_low_value": coverage_meta.get(
+                    "filtered_low_value", 0
+                ),
+                "evidence_cleaned_frontmatter": coverage_meta.get(
+                    "cleaned_frontmatter", 0
+                ),
+                "coverage_priority_lanes": coverage_meta.get(
+                    "coverage_priority_lanes", []
+                ),
                 "coverage_uncovered_priority_lanes": coverage_meta.get(
                     "coverage_uncovered_priority_lanes", []
                 ),
                 "coverage_lane_counts": coverage_meta.get("coverage_lane_counts", {}),
-                "coverage_uncovered_lanes": coverage_meta.get("coverage_uncovered_lanes", []),
+                "coverage_uncovered_lanes": coverage_meta.get(
+                    "coverage_uncovered_lanes", []
+                ),
                 "coverage_lane_reports": coverage_meta.get("lane_reports", []),
                 "evidence_plan": evidence_plan_meta.get("plan", {}),
                 "evidence_plan_added": evidence_plan_meta.get("added", 0),
@@ -6904,7 +7034,9 @@ class ChatOrchestrator:
                 "evidence_plan_missing_lanes": evidence_plan_meta.get(
                     "missing_lanes", []
                 ),
-                "evidence_plan_lane_reports": evidence_plan_meta.get("lane_reports", []),
+                "evidence_plan_lane_reports": evidence_plan_meta.get(
+                    "lane_reports", []
+                ),
                 "evidence_plan_duration_s": evidence_plan_meta.get("duration_s", 0.0),
             },
         )
@@ -7019,7 +7151,7 @@ class ChatOrchestrator:
                 ] = len(decoration)
                 retrieval_diagnostics.setdefault("timings_s", {})[
                     "graph_decoration"
-                ] = decoration_ms / 1000.0
+                ] = (decoration_ms / 1000.0)
                 logger.info(
                     "Graph decoration final-only: ms=%.1f chunks=%d arrows=%d",
                     decoration_ms,
@@ -7047,14 +7179,8 @@ class ChatOrchestrator:
             graph_entity_names = {
                 str(value).strip()
                 for value in [
-                    *[
-                        getattr(fact, "subject", "")
-                        for fact in facts or []
-                    ],
-                    *[
-                        getattr(edge, "seed_entity", "")
-                        for edge in decoration or []
-                    ],
+                    *[getattr(fact, "subject", "") for fact in facts or []],
+                    *[getattr(edge, "seed_entity", "") for edge in decoration or []],
                     *[
                         getattr(edge, "neighbor_entity", "")
                         for edge in decoration or []
@@ -7081,19 +7207,36 @@ class ChatOrchestrator:
                     "rerank": graph_timings.get("rerank", 0.0),
                     "graph_decoration": graph_timings.get("graph_decoration", 0.0),
                 },
-                "why_better_than_hybrid": [
+            }
+            graph_signal_count = (
+                int(graph_advantage["facts_used"] or 0)
+                + int(graph_advantage["relations_used"] or 0)
+                + int(graph_advantage["graph_expanded_chunks"] or 0)
+            )
+            advantage_established = graph_signal_count > 0
+            graph_advantage["advantage_established"] = advantage_established
+            graph_advantage["why_better_than_hybrid"] = (
+                [
                     "Added Neo4j fact/entity evidence to the hybrid seed pool",
                     "Expanded only from bounded top hybrid chunks",
                     "Decorated only final selected chunks with graph relations",
                     "Verified final answer context through Mongo-hydrated chunks",
-                ],
-            }
+                ]
+                if advantage_established
+                else [
+                    "No graph-specific fact, relation, or expansion was established",
+                    "Returned only source-backed hybrid evidence without inventing an edge",
+                ]
+            )
+            trace_title = (
+                "Graph Advantage" if advantage_established else "Graph Augmentation"
+            )
             yield _record_trace_event(
                 lane="retrieval",
-                title="Graph Advantage",
-                status="done",
+                title=trace_title,
+                status="done" if advantage_established else "degraded",
                 content=(
-                    "Graph Advantage\n"
+                    f"{trace_title}\n"
                     f"facts={graph_advantage['facts_used']} · "
                     f"relations={graph_advantage['relations_used']} · "
                     f"expanded_chunks={graph_advantage['graph_expanded_chunks']} · "
@@ -7407,9 +7550,15 @@ class ChatOrchestrator:
                     sources,
                     user_id=user_id,
                     chat_model=model_used,
-                    chat_api_base=profile_creds.get("api_base") if profile_creds else None,
-                    chat_api_key=profile_creds.get("api_key") if profile_creds else None,
-                    chat_extra_params=profile_creds.get("extra_params") if profile_creds else None,
+                    chat_api_base=profile_creds.get("api_base")
+                    if profile_creds
+                    else None,
+                    chat_api_key=profile_creds.get("api_key")
+                    if profile_creds
+                    else None,
+                    chat_extra_params=profile_creds.get("extra_params")
+                    if profile_creds
+                    else None,
                 )
                 # Captured BEFORE analysis_text is merged with the always-on
                 # synthesis-lens / nuance blocks, so the signal reflects the
@@ -7421,7 +7570,9 @@ class ChatOrchestrator:
         answerability_prompt_note = _format_retrieval_answerability_prompt_note(
             answerability_gate
         )
-        evidence_plan_prompt_note = _format_evidence_plan_prompt_note(evidence_plan_meta)
+        evidence_plan_prompt_note = _format_evidence_plan_prompt_note(
+            evidence_plan_meta
+        )
         coverage_prompt_note = _format_chat_coverage_prompt_note(coverage_meta)
         analysis_blocks = [
             block
@@ -7453,7 +7604,9 @@ class ChatOrchestrator:
                     should_skip_inline_decoration as _should_skip_inline_decoration_fn,
                 )
 
-                if not _should_skip_inline_decoration_fn(reasoning_mode, reasoning_blend):
+                if not _should_skip_inline_decoration_fn(
+                    reasoning_mode, reasoning_blend
+                ):
                     inline_decoration = decoration
             except Exception:
                 # If the helper somehow fails, prefer "render" over "drop"
@@ -7467,9 +7620,13 @@ class ChatOrchestrator:
         # a /code-* skill manually. The skill flows through the standard
         # active_skills_dicts envelope — no special rendering path.
         from services.code_lane_skills import maybe_inject_code_skill
+
         skill_count_before_code_lane = len(active_skills_dicts)
         active_skills_dicts = maybe_inject_code_skill(sources, active_skills_dicts)
-        if active_skills_dicts and len(active_skills_dicts) > skill_count_before_code_lane:
+        if (
+            active_skills_dicts
+            and len(active_skills_dicts) > skill_count_before_code_lane
+        ):
             auto = active_skills_dicts[-1]
             if auto.get("auto_selected"):
                 logger.info("Code lane: auto-injected skill %s", auto["name"])
@@ -7496,12 +7653,13 @@ class ChatOrchestrator:
             from utils.tokens import estimate_attachment_tokens
 
             attachment_tokens = estimate_attachment_tokens(
-                attachments, model_used,
+                attachments,
+                model_used,
             )
             if attachment_tokens > 0:
                 user_message.token_count = (
-                    (user_message.token_count or 0) + attachment_tokens
-                )
+                    user_message.token_count or 0
+                ) + attachment_tokens
                 logger.info(
                     "attachment token budget: +%d (images=%d, text=%d) → "
                     "user_message.token_count=%d",
@@ -7527,8 +7685,8 @@ class ChatOrchestrator:
                     else ""
                 )
                 inlined_parts.append(
-                    f"<attached_file name=\"{att.filename}\" "
-                    f"mime=\"{att.mime_type}\">\n{body_text}{marker}\n</attached_file>"
+                    f'<attached_file name="{att.filename}" '
+                    f'mime="{att.mime_type}">\n{body_text}{marker}\n</attached_file>'
                 )
             attachments_block = "\n\n".join(inlined_parts)
             # Prepend the attachments block so the user's question reads
@@ -7553,7 +7711,8 @@ class ChatOrchestrator:
             except NameError:  # no corpus retrieval this turn (web/pure chat)
                 _wf_packet = None
             if _wf_packet and any(
-                str(getattr(s, "source_tier", "") or "") == "web_search" for s in sources
+                str(getattr(s, "source_tier", "") or "") == "web_search"
+                for s in sources
             ):
                 _wf_packet = None
             user_message.content, prompt_budget_meta = _build_budgeted_augmented_prompt(
@@ -7719,13 +7878,13 @@ class ChatOrchestrator:
                             # universally accepted by OpenAI/Anthropic/
                             # Gemini multimodal endpoints, and LiteLLM
                             # forwards the URL field unchanged.
-                            data_url = (
-                                f"data:{att.mime_type};base64,{att.content}"
+                            data_url = f"data:{att.mime_type};base64,{att.content}"
+                            content_blocks.append(
+                                {
+                                    "type": "image_url",
+                                    "image_url": {"url": data_url},
+                                }
                             )
-                            content_blocks.append({
-                                "type": "image_url",
-                                "image_url": {"url": data_url},
-                            })
                         message_dicts[i] = {
                             "role": "user",
                             "content": content_blocks,
@@ -7804,7 +7963,9 @@ class ChatOrchestrator:
                     **profile_creds,
                 ):
                     if first_token_at is None and (
-                        chunk.get("content") or chunk.get("thinking") or chunk.get("tool_calls")
+                        chunk.get("content")
+                        or chunk.get("thinking")
+                        or chunk.get("tool_calls")
                     ):
                         first_token_at = perf_counter()
                     if chunk.get("tool_calls"):
@@ -7835,29 +7996,41 @@ class ChatOrchestrator:
                 # tool call (e.g. lapsed-model 500 at stream start) — retry once on
                 # the known-good backup so the answer is not blank. Falls through to
                 # the normal no-tool answer path on success; on still-empty, errors.
-                if (
-                    not assistant_content.strip()
-                    and not tool_calls
-                    and model_used != _CHAT_FALLBACK_MODEL
-                ):
+                if not assistant_content.strip() and not tool_calls:
+                    fallback = await _resolve_chat_fallback(
+                        user_id,
+                        primary_model=model_used,
+                        primary_entry_id=primary_entry_id,
+                    )
                     try:
-                        logger.warning("stream fallback %s -> %s", model_used, _CHAT_FALLBACK_MODEL)
-                        async for fb in llm_service.stream_chat(
-                            messages=message_dicts,
-                            model=_CHAT_FALLBACK_MODEL,
-                            overrides=None,
-                            tools=None,
-                        ):
-                            if fb.get("content"):
-                                assistant_content += fb["content"]
-                                if not suppress_content_until_web:
-                                    yield build_sse_chunk(
-                                        ChatChunk(
-                                            type="token",
-                                            content=fb["content"],
-                                            conversation_id=str(conversation_id),
+                        if fallback:
+                            logger.warning(
+                                "stream fallback %s -> %s source=%s",
+                                model_used,
+                                fallback["model"],
+                                "configured_pool"
+                                if fallback.get("entry_id")
+                                else "static",
+                            )
+                            async for fb in llm_service.stream_chat(
+                                messages=message_dicts,
+                                model=fallback["model"],
+                                overrides=None,
+                                tools=None,
+                                api_base=fallback.get("api_base"),
+                                api_key=fallback.get("api_key"),
+                                extra_params=fallback.get("extra_params"),
+                            ):
+                                if fb.get("content"):
+                                    assistant_content += fb["content"]
+                                    if not suppress_content_until_web:
+                                        yield build_sse_chunk(
+                                            ChatChunk(
+                                                type="token",
+                                                content=fb["content"],
+                                                conversation_id=str(conversation_id),
+                                            )
                                         )
-                                    )
                     except Exception as e2:
                         logger.error(f"Fallback model also failed: {e2}")
                 if not assistant_content.strip() and not tool_calls:
@@ -8021,9 +8194,11 @@ class ChatOrchestrator:
             if not tool_calls:
                 break
 
-            response_text, response_call, non_response_tool_calls = (
-                _extract_response_tool_text(tool_calls)
-            )
+            (
+                response_text,
+                response_call,
+                non_response_tool_calls,
+            ) = _extract_response_tool_text(tool_calls)
             if response_call is not None and not non_response_tool_calls:
                 if web_search_enabled and web_search_call_count == 0:
                     web_required_retry_count += 1
@@ -8056,7 +8231,8 @@ class ChatOrchestrator:
                             "content": assistant_content or None,
                             "tool_calls": [
                                 {
-                                    "id": response_call.get("id") or "response_before_web",
+                                    "id": response_call.get("id")
+                                    or "response_before_web",
                                     "type": response_call.get("type") or "function",
                                     "function": response_call.get("function") or {},
                                 }
@@ -8066,7 +8242,8 @@ class ChatOrchestrator:
                     react_messages.append(
                         {
                             "role": "tool",
-                            "tool_call_id": response_call.get("id") or "response_before_web",
+                            "tool_call_id": response_call.get("id")
+                            or "response_before_web",
                             "name": "response",
                             "content": (
                                 "Rejected: Web is enabled, so call web_search "
@@ -8234,9 +8411,9 @@ class ChatOrchestrator:
                         "role": "tool",
                         "tool_call_id": (
                             call.get("id")
-                            or assistant_tool_calls[min(i, len(assistant_tool_calls) - 1)][
-                                "id"
-                            ]
+                            or assistant_tool_calls[
+                                min(i, len(assistant_tool_calls) - 1)
+                            ]["id"]
                         ),
                         "name": fn.get("name") or "",
                         "content": result,
@@ -8446,24 +8623,40 @@ class ChatOrchestrator:
                 # In-process model fallback (see _CHAT_FALLBACK_MODEL): retry once on
                 # the backup when the primary produced nothing, so the forced answer
                 # is not blank. On still-empty, fall through to the error emit.
-                if not assistant_content.strip() and model_used != _CHAT_FALLBACK_MODEL:
+                if not assistant_content.strip():
+                    fallback = await _resolve_chat_fallback(
+                        user_id,
+                        primary_model=model_used,
+                        primary_entry_id=primary_entry_id,
+                    )
                     try:
-                        logger.warning("final-stream fallback %s -> %s", model_used, _CHAT_FALLBACK_MODEL)
-                        async for fb in llm_service.stream_chat(
-                            messages=final_messages,
-                            model=_CHAT_FALLBACK_MODEL,
-                            overrides=None,
-                            tools=None,
-                        ):
-                            if fb.get("content"):
-                                assistant_content += fb["content"]
-                                yield build_sse_chunk(
-                                    ChatChunk(
-                                        type="token",
-                                        content=fb["content"],
-                                        conversation_id=str(conversation_id),
+                        if fallback:
+                            logger.warning(
+                                "final-stream fallback %s -> %s source=%s",
+                                model_used,
+                                fallback["model"],
+                                "configured_pool"
+                                if fallback.get("entry_id")
+                                else "static",
+                            )
+                            async for fb in llm_service.stream_chat(
+                                messages=final_messages,
+                                model=fallback["model"],
+                                overrides=None,
+                                tools=None,
+                                api_base=fallback.get("api_base"),
+                                api_key=fallback.get("api_key"),
+                                extra_params=fallback.get("extra_params"),
+                            ):
+                                if fb.get("content"):
+                                    assistant_content += fb["content"]
+                                    yield build_sse_chunk(
+                                        ChatChunk(
+                                            type="token",
+                                            content=fb["content"],
+                                            conversation_id=str(conversation_id),
+                                        )
                                     )
-                                )
                     except Exception as e2:
                         logger.error(f"Fallback model also failed: {e2}")
                 if not assistant_content.strip():
@@ -8480,7 +8673,16 @@ class ChatOrchestrator:
                     return
 
         if not assistant_content.strip():
-            if model_used != _CHAT_FALLBACK_MODEL and last_generation_messages:
+            fallback = (
+                await _resolve_chat_fallback(
+                    user_id,
+                    primary_model=model_used,
+                    primary_entry_id=primary_entry_id,
+                )
+                if last_generation_messages
+                else None
+            )
+            if fallback and last_generation_messages:
                 yield _record_trace_event(
                     lane="model_call",
                     title="Chat model fallback",
@@ -8489,15 +8691,24 @@ class ChatOrchestrator:
                         "The selected model completed without user-facing "
                         "tokens; retrying once on the fallback chat model."
                     ),
-                    metadata={"from_model": model_used, "to_model": _CHAT_FALLBACK_MODEL},
+                    metadata={
+                        "from_model": model_used,
+                        "to_model": fallback["model"],
+                        "source": "configured_pool"
+                        if fallback.get("entry_id")
+                        else "static",
+                    },
                 )
                 fallback_start = perf_counter()
                 try:
                     async for fb in llm_service.stream_chat(
                         messages=last_generation_messages,
-                        model=_CHAT_FALLBACK_MODEL,
+                        model=fallback["model"],
                         overrides=None,
                         tools=None,
+                        api_base=fallback.get("api_base"),
+                        api_key=fallback.get("api_key"),
+                        extra_params=fallback.get("extra_params"),
                     ):
                         if fb.get("content"):
                             assistant_content += fb["content"]
@@ -8519,7 +8730,7 @@ class ChatOrchestrator:
                         ),
                         metadata={
                             "from_model": model_used,
-                            "to_model": _CHAT_FALLBACK_MODEL,
+                            "to_model": fallback["model"],
                             "duration_s": perf_counter() - fallback_start,
                             "content_chars": len(assistant_content),
                         },
@@ -8531,11 +8742,16 @@ class ChatOrchestrator:
                         title="Chat model fallback",
                         status="error",
                         content=f"Fallback model failed: {fallback_exc}",
-                        metadata={"from_model": model_used, "to_model": _CHAT_FALLBACK_MODEL},
+                        metadata={
+                            "from_model": model_used,
+                            "to_model": fallback["model"],
+                        },
                     )
 
         if not assistant_content.strip():
-            logger.error("LLM returned an empty assistant response for %s", conversation_id)
+            logger.error(
+                "LLM returned an empty assistant response for %s", conversation_id
+            )
             yield _record_trace_event(
                 lane="final",
                 title="Assistant final answer",
@@ -8570,7 +8786,9 @@ class ChatOrchestrator:
                     model=model_used,
                 )
                 if was_revised:
-                    critique = "; ".join(issues[:3])  # cap at first 3 issues for display
+                    critique = "; ".join(
+                        issues[:3]
+                    )  # cap at first 3 issues for display
                     yield build_sse_chunk(
                         ChatChunk(
                             type="thinking",
@@ -8588,9 +8806,13 @@ class ChatOrchestrator:
                             conversation_id=str(conversation_id),
                         )
                     )
-                    assistant_content = f"{assistant_content}\n\n---\n**Revised answer:**\n\n{revised}"
+                    assistant_content = (
+                        f"{assistant_content}\n\n---\n**Revised answer:**\n\n{revised}"
+                    )
             except Exception as exc:
-                logger.warning("self_correct post-pass failed (%s) — keeping draft", exc)
+                logger.warning(
+                    "self_correct post-pass failed (%s) — keeping draft", exc
+                )
 
         # Phase 24 — collect skill/tool/reasoning trust signals for this turn
         skills_used_names = [s["name"] for s in active_skills_dicts]
@@ -8635,7 +8857,9 @@ class ChatOrchestrator:
                 trace_events=trace_events,
             )
         except Exception as exc:
-            logger.error("Failed to persist assistant message for %s: %s", conversation_id, exc)
+            logger.error(
+                "Failed to persist assistant message for %s: %s", conversation_id, exc
+            )
             yield build_sse_chunk(
                 ChatChunk(
                     type="error",
@@ -8675,7 +8899,9 @@ class ChatOrchestrator:
         done_emitted = perf_counter()
         elapsed = (datetime.utcnow() - start_time).total_seconds()
         ttft_s = (first_token_at - stream_start) if first_token_at else None
-        stream_s = (stream_end - first_token_at) if (first_token_at and stream_end) else None
+        stream_s = (
+            (stream_end - first_token_at) if (first_token_at and stream_end) else None
+        )
         tail_s = (done_emitted - stream_end) if stream_end else None
         ttft_str = f"{ttft_s:.2f}s" if ttft_s is not None else "n/a"
         stream_str = f"{stream_s:.2f}s" if stream_s is not None else "n/a"
@@ -8742,7 +8968,9 @@ class ChatOrchestrator:
         overrides = request.overrides
         hyde_explicit = bool(overrides and overrides.hyde_enabled is not None)
         profile_key = (
-            overrides.query_profile if overrides and overrides.query_profile else "balanced"
+            overrides.query_profile
+            if overrides and overrides.query_profile
+            else "balanced"
         )
 
         # Defaults for the extra knobs — None means "let retriever decide"
@@ -9113,6 +9341,7 @@ class ChatOrchestrator:
             "splitting the question into its 2-4 distinct evidence topics, each "
             "with 3-6 search terms.\n\nQuestion: " + str(query or "")
         )
+
         # Thinking-capable HyDE models (e.g. minimax) are high-variance: the
         # same prompt occasionally returns empty content even with an ample
         # budget. RACE the attempts concurrently (ElevenLabs pattern) — first
@@ -9355,7 +9584,9 @@ class ChatOrchestrator:
             content=message,
             token_count=count_tokens(message, model),
             created_at=datetime.utcnow(),
-            metadata={"attachments": attachment_receipts} if attachment_receipts else {},
+            metadata={"attachments": attachment_receipts}
+            if attachment_receipts
+            else {},
         )
 
     async def _trim_history(
@@ -9532,9 +9763,7 @@ class ChatOrchestrator:
             return json.dumps({"error": "query is required"})
         web_options = _resolve_web_evidence_options(request)
         try:
-            max_results = int(
-                args.get("max_results") or web_options["max_sources"]
-            )
+            max_results = int(args.get("max_results") or web_options["max_sources"])
         except (TypeError, ValueError):
             max_results = int(web_options["max_sources"])
         max_results = max(1, min(max_results, int(web_options["max_sources"])))
@@ -9610,18 +9839,21 @@ class ChatOrchestrator:
                     max_results=candidate_limit,
                     time_range=pass_time_range,
                 )
-                pass_fetched, pass_fetch_stats, pass_hits_to_fetch, pass_web_pipeline = (
-                    await live_web_search._fetch_pages_for_search(
-                        search_query=pass_query,
-                        hits=pass_hits,
-                        max_results=max_results,
-                        prior_web_urls=prior_web_urls,
-                        fetch_depth=str(web_options["fetch_depth"]),
-                        youtube_transcripts_enabled=bool(
-                            web_options["youtube_transcripts"]
-                        ),
-                        max_fetch_pages=int(web_options["max_fetch_pages"]),
-                    )
+                (
+                    pass_fetched,
+                    pass_fetch_stats,
+                    pass_hits_to_fetch,
+                    pass_web_pipeline,
+                ) = await live_web_search._fetch_pages_for_search(
+                    search_query=pass_query,
+                    hits=pass_hits,
+                    max_results=max_results,
+                    prior_web_urls=prior_web_urls,
+                    fetch_depth=str(web_options["fetch_depth"]),
+                    youtube_transcripts_enabled=bool(
+                        web_options["youtube_transcripts"]
+                    ),
+                    max_fetch_pages=int(web_options["max_fetch_pages"]),
                 )
                 pass_fetch_stats_by_url = {
                     str(item.get("url")): item for item in pass_fetch_stats
@@ -9734,13 +9966,13 @@ class ChatOrchestrator:
                         "content": _web_chunk_content_preview(chunk),
                         "snippet": (hit.snippet[:700] if hit else ""),
                         "published_date": (
-                            hit.published_date if hit else (chunk.metadata or {}).get("published_date")
+                            hit.published_date
+                            if hit
+                            else (chunk.metadata or {}).get("published_date")
                         ),
                         "search_query": metadata.get("search_query"),
                         "time_range": metadata.get("time_range"),
-                        "full_page_fetched": bool(
-                            metadata.get("full_page_fetched")
-                        ),
+                        "full_page_fetched": bool(metadata.get("full_page_fetched")),
                         "evidence_mode": metadata.get("evidence_mode"),
                         "fetch_status": metadata.get("fetch_status"),
                         "fetch_method": metadata.get("fetch_method"),
@@ -9755,9 +9987,7 @@ class ChatOrchestrator:
                         "content_chars": metadata.get("content_chars"),
                         "source_text_chars": metadata.get("source_text_chars"),
                         "source_text_max_chars": metadata.get("source_text_max_chars"),
-                        "content_truncated": bool(
-                            metadata.get("content_truncated")
-                        ),
+                        "content_truncated": bool(metadata.get("content_truncated")),
                         "rerank_text_max_chars": metadata.get("rerank_text_max_chars"),
                         "web_content_untrusted": True,
                     }
@@ -9791,9 +10021,7 @@ class ChatOrchestrator:
                 "freshness_time_range": time_range,
                 "fetch_depth": web_options["fetch_depth"],
                 "research_mode": bool(web_options["research_mode"]),
-                "youtube_transcripts_enabled": bool(
-                    web_options["youtube_transcripts"]
-                ),
+                "youtube_transcripts_enabled": bool(web_options["youtube_transcripts"]),
                 "requested_max_sources": web_options["requested_max_sources"],
                 "snippet_rerank_applied": bool(
                     settings.LIVE_WEB_SEARCH_FETCH_FULL_PAGES
@@ -9989,9 +10217,7 @@ class ChatOrchestrator:
             result = await live_web_search._fetch_one_page_with_stats(
                 raw_url,
                 allow_obscura=str(web_options["fetch_depth"]) == "deep",
-                youtube_transcripts_enabled=bool(
-                    web_options["youtube_transcripts"]
-                ),
+                youtube_transcripts_enabled=bool(web_options["youtube_transcripts"]),
             )
             content = (result.text or "").strip()
             payload = {
@@ -10002,7 +10228,8 @@ class ChatOrchestrator:
                 "fetch_depth": web_options["fetch_depth"],
                 "chars": result.chars,
                 "content_truncated": bool(
-                    result.text and result.chars >= int(settings.OBSCURA_MAX_CHARS or 4000)
+                    result.text
+                    and result.chars >= int(settings.OBSCURA_MAX_CHARS or 4000)
                 ),
                 "source_text_max_chars": int(settings.OBSCURA_MAX_CHARS or 4000),
                 "cache_hit": bool(result.from_cache),
@@ -10042,10 +10269,13 @@ class ChatOrchestrator:
                                 "transcript_status": result.transcript_status,
                                 "content_chars": result.chars,
                                 "source_text_chars": result.chars,
-                                "source_text_max_chars": int(settings.OBSCURA_MAX_CHARS or 4000),
+                                "source_text_max_chars": int(
+                                    settings.OBSCURA_MAX_CHARS or 4000
+                                ),
                                 "content_truncated": bool(
                                     result.text
-                                    and result.chars >= int(settings.OBSCURA_MAX_CHARS or 4000)
+                                    and result.chars
+                                    >= int(settings.OBSCURA_MAX_CHARS or 4000)
                                 ),
                                 "obscura_attempted": bool(result.obscura_attempted),
                                 "obscura_skipped_reason": result.obscura_skipped_reason,

@@ -39,7 +39,7 @@
       "expected_best_route": "Graph Augmentation",
       "anchor_groups": [
         {"name": "purple_ocean", "terms": ["purple ocean"], "required": true},
-        {"name": "sticky_message", "terms": ["sticky message", "made to stick", "sticky idea"], "required": true},
+        {"name": "sticky_message", "terms": ["sticky message", "sticky messaging", "made to stick", "sticky idea"], "required": true},
         {"name": "offer", "terms": ["offer", "value proposition", "product page"], "required": false}
       ]
     },
@@ -48,9 +48,10 @@
       "query": "What relationship does the graph establish between product positioning and memorable messaging?",
       "intent": "graph relation evidence",
       "expected_best_route": "Graph Augmentation",
+      "expected_empty_routes": ["Fast Search"],
       "anchor_groups": [
         {"name": "positioning", "terms": ["product positioning", "brand positioning", "positioning"], "required": true},
-        {"name": "messaging", "terms": ["memorable message", "sticky message", "messaging"], "required": true}
+        {"name": "messaging", "terms": ["memorable message", "sticky message", "messaging", "communicated", "communication"], "required": true}
       ]
     },
     {

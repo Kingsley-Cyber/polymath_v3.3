@@ -61,12 +61,16 @@ def _load_pool() -> list[dict]:
         with open(_POOL_FILE, encoding="utf-8") as fh:
             pool = json.load(fh)
     except FileNotFoundError:
-        raise SystemExit(f"pool file not found: {_POOL_FILE} (write it first; never commit keys)")
+        raise SystemExit(
+            f"pool file not found: {_POOL_FILE} (write it first; never commit keys)"
+        )
     if not isinstance(pool, list) or not pool:
         raise SystemExit("pool file must be a non-empty JSON list of lane dicts")
     masked = [
-        {**{k: v for k, v in e.items() if k != "api_key"},
-         "api_key": ("…" + e["api_key"][-4:]) if e.get("api_key") else None}
+        {
+            **{k: v for k, v in e.items() if k != "api_key"},
+            "api_key": ("…" + e["api_key"][-4:]) if e.get("api_key") else None,
+        }
         for e in pool
     ]
     print(f"pool lanes ({len(pool)}): {json.dumps(masked)}")
@@ -75,6 +79,7 @@ def _load_pool() -> list[dict]:
 
 def _mongo():
     from motor.motor_asyncio import AsyncIOMotorClient
+
     s = get_settings()
     mc = AsyncIOMotorClient(_A(s, "MONGODB_URI", "MONGODB_URL"))
     return mc, mc[_A(s, "MONGODB_DB", default="polymath")]
@@ -82,12 +87,16 @@ def _mongo():
 
 def _qdrant():
     from qdrant_client import AsyncQdrantClient
+
     s = get_settings()
-    return AsyncQdrantClient(url=s.QDRANT_URL, timeout=_A(s, "QDRANT_TIMEOUT_SECONDS", default=60))
+    return AsyncQdrantClient(
+        url=s.QDRANT_URL, timeout=_A(s, "QDRANT_TIMEOUT_SECONDS", default=60)
+    )
 
 
 async def _embed(texts: list[str]) -> list[list[float]]:
     from services.embedder import embed_batch
+
     return await embed_batch(
         texts,
         mode="local",
@@ -101,7 +110,9 @@ def _row_child_ids(row: dict) -> list[str]:
     return [str(v) for v in values if str(v)]
 
 
-async def child_context_for_rows(db, corpus_id: str, rows: list[dict]) -> dict[str, dict]:
+async def child_context_for_rows(
+    db, corpus_id: str, rows: list[dict]
+) -> dict[str, dict]:
     """Hydrate child anchors for parent-summary generation.
 
     The summary artifact contract needs stable child IDs even during backfill.
@@ -157,6 +168,11 @@ async def child_context_for_rows(db, corpus_id: str, rows: list[dict]) -> dict[s
     return out
 
 
+# Compatibility for repair scripts/tests created before the helper became a
+# public scheduler primitive. Keep both names until those callers migrate.
+_child_context_for_rows = child_context_for_rows
+
+
 def summary_result_fields(result, *, updated_at: datetime) -> dict:
     """Return the complete canonical parent-summary persistence payload."""
 
@@ -194,6 +210,7 @@ def summary_result_fields(result, *, updated_at: datetime) -> dict:
 async def index_existing(corpus_id: str, *, batch: int = 256) -> dict:
     """Embed + upsert summary points for every parent that has summary text."""
     from services.storage.qdrant_writer import upsert_summaries
+
     mc, db = _mongo()
     qc = _qdrant()
     indexed = 0
@@ -203,18 +220,19 @@ async def index_existing(corpus_id: str, *, batch: int = 256) -> dict:
         print(f"index: {total} parents have summary text")
         cursor = db["parent_chunks"].find(q)
         buf: list[dict] = []
+
         async def flush():
             nonlocal indexed
             if not buf:
                 return
-            vecs = await _embed([
-                p.get("retrieval_text") or p["summary"]
-                for p in buf
-            ])
-            await upsert_summaries(qc, corpus_id, buf, vecs, target_kinds=["naive", "hrag"])
+            vecs = await _embed([p.get("retrieval_text") or p["summary"] for p in buf])
+            await upsert_summaries(
+                qc, corpus_id, buf, vecs, target_kinds=["naive", "hrag"]
+            )
             indexed += len(buf)
             print(f"  indexed {indexed}/{total}")
             buf.clear()
+
         async for p in cursor:
             buf.append(p)
             if len(buf) >= batch:
@@ -228,11 +246,14 @@ async def index_existing(corpus_id: str, *, batch: int = 256) -> dict:
 
 
 # ── generate (cloud, guardrailed) ────────────────────────────────────────────
-async def generate(corpus_id: str, *, batch: int = 400, limit: int | None = None) -> dict:
+async def generate(
+    corpus_id: str, *, batch: int = 400, limit: int | None = None
+) -> dict:
     """Summarize parents with summary=None via the pool. Batched + resumable.
     ABORTS if a batch yields 0 (all lanes exhausted) instead of finishing partial.
     `limit` caps total parents processed this run (for a probe)."""
     from services.ghost_a import SummaryTask, summarize_parents
+
     pool = _load_pool()
     mc, db = _mongo()
     made = 0
@@ -240,28 +261,54 @@ async def generate(corpus_id: str, *, batch: int = 400, limit: int | None = None
     aborted = False
     consecutive_empty = 0
     failed_ids: set[str] = set()  # attempted-but-failed this run → skip so the
-                                  # run always advances (thinking-model empties /
-                                  # transient errors don't stall the front)
+    # run always advances (thinking-model empties /
+    # transient errors don't stall the front)
     try:
         # Generate only parent rows that participate in retrieval-summary
         # readiness. Structural rows are not a summary gap.
-        q = {"corpus_id": corpus_id, "$and": [
-            parent_summary_required_clause(),
-            {"$or": [{"summary": None}, {"summary": ""},
-                     {"summary": {"$exists": False}}]},
-        ]}
+        q = {
+            "corpus_id": corpus_id,
+            "$and": [
+                parent_summary_required_clause(),
+                {
+                    "$or": [
+                        {"summary": None},
+                        {"summary": ""},
+                        {"summary": {"$exists": False}},
+                    ]
+                },
+            ],
+        }
         start_missing = await db["parent_chunks"].count_documents(q)
-        print(f"generate: {start_missing} parents need summaries"
-              + (f" (capped to {limit} this run)" if limit else ""))
+        print(
+            f"generate: {start_missing} parents need summaries"
+            + (f" (capped to {limit} this run)" if limit else "")
+        )
         while True:
             if limit is not None and made >= limit:
                 break
             fetch = batch if limit is None else max(1, min(batch, limit - made))
-            fetch_q = {**q, "parent_id": {"$nin": list(failed_ids)}} if failed_ids else q
-            rows = await db["parent_chunks"].find(
-                fetch_q, {"parent_id": 1, "doc_id": 1, "corpus_id": 1, "source_tier": 1,
-                    "text": 1, "child_ids": 1, "source_child_ids": 1, "_id": 0}
-            ).limit(fetch).to_list(length=fetch)
+            fetch_q = (
+                {**q, "parent_id": {"$nin": list(failed_ids)}} if failed_ids else q
+            )
+            rows = (
+                await db["parent_chunks"]
+                .find(
+                    fetch_q,
+                    {
+                        "parent_id": 1,
+                        "doc_id": 1,
+                        "corpus_id": 1,
+                        "source_tier": 1,
+                        "text": 1,
+                        "child_ids": 1,
+                        "source_child_ids": 1,
+                        "_id": 0,
+                    },
+                )
+                .limit(fetch)
+                .to_list(length=fetch)
+            )
             rows = [r for r in rows if (r.get("text") or "").strip()]
             if not rows:
                 break
@@ -296,34 +343,52 @@ async def generate(corpus_id: str, *, batch: int = 400, limit: int | None = None
             # the keys are actually dead/exhausted, not a hiccup.
             if not results:
                 consecutive_empty += 1
-                print(f"  batch {batches}: 0/{len(tasks)} (consecutive empty "
-                      f"{consecutive_empty}/2) — parents stay queued (None), retrying")
+                print(
+                    f"  batch {batches}: 0/{len(tasks)} (consecutive empty "
+                    f"{consecutive_empty}/2) — parents stay queued (None), retrying"
+                )
                 if consecutive_empty >= 2:
                     aborted = True
-                    print(f"!! ABORT after 2 consecutive empty batches — lanes "
-                          f"dead/exhausted. Made {made}; resumable (re-run continues).")
+                    print(
+                        f"!! ABORT after 2 consecutive empty batches — lanes "
+                        f"dead/exhausted. Made {made}; resumable (re-run continues)."
+                    )
                     break
                 continue
             consecutive_empty = 0
             # persist
             from pymongo import UpdateOne
+
             now = datetime.now(timezone.utc)
-            ops = [UpdateOne({"parent_id": r.parent_id, "corpus_id": corpus_id},
-                             {"$set": summary_result_fields(r, updated_at=now)})
-                   for r in results]
+            ops = [
+                UpdateOne(
+                    {"parent_id": r.parent_id, "corpus_id": corpus_id},
+                    {"$set": summary_result_fields(r, updated_at=now)},
+                )
+                for r in results
+            ]
             if ops:
                 await db["parent_chunks"].bulk_write(ops, ordered=False)
             made += len(results)
             cov = len(results) / len(tasks)
-            print(f"  batch {batches}: {len(results)}/{len(tasks)} summarized "
-                  f"(cov={cov:.0%}) | total made={made}")
+            print(
+                f"  batch {batches}: {len(results)}/{len(tasks)} summarized "
+                f"(cov={cov:.0%}) | total made={made}"
+            )
             if cov < 0.5:
                 print(f"  ⚠ low coverage on batch {batches} — some lanes failing")
         remaining = await db["parent_chunks"].count_documents(q)
-        print(f"GENERATE done: made={made} batches={batches} "
-              f"skipped_this_run={len(failed_ids)} remaining={remaining} aborted={aborted}")
-        return {"made": made, "batches": batches, "skipped": len(failed_ids),
-                "remaining": remaining, "aborted": aborted}
+        print(
+            f"GENERATE done: made={made} batches={batches} "
+            f"skipped_this_run={len(failed_ids)} remaining={remaining} aborted={aborted}"
+        )
+        return {
+            "made": made,
+            "batches": batches,
+            "skipped": len(failed_ids),
+            "remaining": remaining,
+            "aborted": aborted,
+        }
     finally:
         mc.close()
 
@@ -351,12 +416,26 @@ async def repair_existing(
     ops: list[UpdateOne] = []
     reindex_buf: list[dict] = []
     tracked = [
-        "summary_id", "summary", "schema_version", "summary_type",
-        "central_claim", "key_points", "main_mechanism", "concept_tags",
-        "entity_hints", "retrieval_uses", "abstraction_level",
-        "source_child_ids", "source_hash", "summary_model",
-        "summary_created_at", "validation_status", "repair_status",
-        "quality_score", "quality_flags", "retrieval_text",
+        "summary_id",
+        "summary",
+        "schema_version",
+        "summary_type",
+        "central_claim",
+        "key_points",
+        "main_mechanism",
+        "concept_tags",
+        "entity_hints",
+        "retrieval_uses",
+        "abstraction_level",
+        "source_child_ids",
+        "source_hash",
+        "summary_model",
+        "summary_created_at",
+        "validation_status",
+        "repair_status",
+        "quality_score",
+        "quality_flags",
+        "retrieval_text",
     ]
 
     async def flush_updates() -> None:
@@ -403,9 +482,7 @@ async def repair_existing(
             quarantined += 1 if status == "quarantined" else 0
             repaired += 1 if fixed.get("repair_status") == "repaired" else 0
             diff = {
-                key: fixed.get(key)
-                for key in tracked
-                if row.get(key) != fixed.get(key)
+                key: fixed.get(key) for key in tracked if row.get(key) != fixed.get(key)
             }
             if diff:
                 changed += 1
@@ -414,14 +491,16 @@ async def repair_existing(
                     diff["summary_quarantine_reason"] = fixed.get("quality_flags") or []
                     if before_raw:
                         diff["summary_quarantine_raw"] = row.get("summary")
-                ops.append(UpdateOne(
-                    {
-                        "corpus_id": row.get("corpus_id"),
-                        "doc_id": row.get("doc_id"),
-                        "parent_id": row.get("parent_id"),
-                    },
-                    {"$set": diff},
-                ))
+                ops.append(
+                    UpdateOne(
+                        {
+                            "corpus_id": row.get("corpus_id"),
+                            "doc_id": row.get("doc_id"),
+                            "parent_id": row.get("parent_id"),
+                        },
+                        {"$set": diff},
+                    )
+                )
             if reindex and apply and fixed.get("validation_status") == "valid":
                 reindex_buf.append({**row, **fixed})
             if len(ops) >= batch:
@@ -454,23 +533,40 @@ async def repair_existing(
 async def verify(corpus_id: str) -> dict:
     from services.storage.qdrant_writer import _col_for_corpus
     from qdrant_client import models
+
     mc, db = _mongo()
     qc = _qdrant()
     try:
         parents = await db["parent_chunks"].count_documents({"corpus_id": corpus_id})
         with_sum = await db["parent_chunks"].count_documents(
-            {"corpus_id": corpus_id, "summary": {"$exists": True, "$nin": [None, ""]}})
+            {"corpus_id": corpus_id, "summary": {"$exists": True, "$nin": [None, ""]}}
+        )
         col = _col_for_corpus(corpus_id, "hrag")
-        f = models.Filter(must=[models.FieldCondition(
-            key="chunk_type", match=models.MatchValue(value="summary"))])
+        f = models.Filter(
+            must=[
+                models.FieldCondition(
+                    key="chunk_type", match=models.MatchValue(value="summary")
+                )
+            ]
+        )
         sum_points = (await qc.count(col, count_filter=f)).count
         coverage = sum_points / parents if parents else 0.0
-        status = "HEALTHY" if coverage >= 0.9 else ("PARTIAL" if coverage > 0 else "DEGRADED")
-        print(f"VERIFY {corpus_id}: parents={parents} with_summary_text={with_sum} "
-              f"indexed_summary_points={sum_points} coverage={coverage:.1%} -> {status}")
-        return {"parents": parents, "with_summary_text": with_sum,
-                "indexed_summary_points": sum_points, "coverage": round(coverage, 4),
-                "status": status}
+        status = (
+            "HEALTHY"
+            if coverage >= 0.9
+            else ("PARTIAL" if coverage > 0 else "DEGRADED")
+        )
+        print(
+            f"VERIFY {corpus_id}: parents={parents} with_summary_text={with_sum} "
+            f"indexed_summary_points={sum_points} coverage={coverage:.1%} -> {status}"
+        )
+        return {
+            "parents": parents,
+            "with_summary_text": with_sum,
+            "indexed_summary_points": sum_points,
+            "coverage": round(coverage, 4),
+            "status": status,
+        }
     finally:
         await qc.close()
         mc.close()
@@ -495,7 +591,11 @@ async def heal_all(*, apply: bool = False) -> dict:
         statuses[cid] = r
         # auto-index is safe + free (no model calls): pushes any Mongo summaries
         # that exist but were never indexed into Funnel A.
-        if apply and r["status"] != "HEALTHY" and r["with_summary_text"] > r["indexed_summary_points"]:
+        if (
+            apply
+            and r["status"] != "HEALTHY"
+            and r["with_summary_text"] > r["indexed_summary_points"]
+        ):
             print(f"  -> auto-indexing {cid} (mongo summaries not in Funnel A)")
             await index_existing(cid)
             statuses[cid] = await verify(cid)
@@ -509,16 +609,42 @@ async def heal_all(*, apply: bool = False) -> dict:
 def main() -> None:
     ap = argparse.ArgumentParser(description="Summary-tier backfill + readiness")
     ap.add_argument("--corpus", help="corpus_id (required for index/generate/verify)")
-    ap.add_argument("--heal-all", action="store_true", help="scan all corpora for summary-tier health")
-    ap.add_argument("--apply-heal", action="store_true", help="with --heal-all: auto-index orphaned summaries")
-    ap.add_argument("--index", action="store_true", help="index parents that have summary text")
-    ap.add_argument("--generate", action="store_true", help="summarize missing parents via pool")
-    ap.add_argument("--repair", action="store_true", help="repair/quarantine malformed parent_summary.v1 rows")
-    ap.add_argument("--apply", action="store_true", help="with --repair: persist deterministic repair fields")
-    ap.add_argument("--reindex", action="store_true", help="with --repair --apply: re-embed clean retrieval_text")
+    ap.add_argument(
+        "--heal-all",
+        action="store_true",
+        help="scan all corpora for summary-tier health",
+    )
+    ap.add_argument(
+        "--apply-heal",
+        action="store_true",
+        help="with --heal-all: auto-index orphaned summaries",
+    )
+    ap.add_argument(
+        "--index", action="store_true", help="index parents that have summary text"
+    )
+    ap.add_argument(
+        "--generate", action="store_true", help="summarize missing parents via pool"
+    )
+    ap.add_argument(
+        "--repair",
+        action="store_true",
+        help="repair/quarantine malformed parent_summary.v1 rows",
+    )
+    ap.add_argument(
+        "--apply",
+        action="store_true",
+        help="with --repair: persist deterministic repair fields",
+    )
+    ap.add_argument(
+        "--reindex",
+        action="store_true",
+        help="with --repair --apply: re-embed clean retrieval_text",
+    )
     ap.add_argument("--verify", action="store_true", help="readiness assertion")
     ap.add_argument("--batch", type=int, default=400)
-    ap.add_argument("--limit", type=int, default=None, help="cap parents processed this run (probe)")
+    ap.add_argument(
+        "--limit", type=int, default=None, help="cap parents processed this run (probe)"
+    )
     args = ap.parse_args()
     if args.heal_all:
         asyncio.run(heal_all(apply=args.apply_heal))
@@ -528,19 +654,23 @@ def main() -> None:
     if args.verify:
         asyncio.run(verify(args.corpus))
     if args.repair:
-        asyncio.run(repair_existing(
-            args.corpus,
-            batch=args.batch,
-            limit=args.limit,
-            apply=args.apply,
-            reindex=args.reindex,
-        ))
+        asyncio.run(
+            repair_existing(
+                args.corpus,
+                batch=args.batch,
+                limit=args.limit,
+                apply=args.apply,
+                reindex=args.reindex,
+            )
+        )
     if args.index:
         asyncio.run(index_existing(args.corpus, batch=min(256, args.batch)))
     if args.generate:
         asyncio.run(generate(args.corpus, batch=args.batch, limit=args.limit))
     if not (args.verify or args.repair or args.index or args.generate):
-        ap.error("pass at least one of --verify / --repair / --index / --generate / --heal-all")
+        ap.error(
+            "pass at least one of --verify / --repair / --index / --generate / --heal-all"
+        )
 
 
 if __name__ == "__main__":

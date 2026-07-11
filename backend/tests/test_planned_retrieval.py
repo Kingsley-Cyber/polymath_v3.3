@@ -59,7 +59,9 @@ async def test_planned_hybrid_batches_embeddings_and_reranks_once(monkeypatch):
         return chunks
 
     monkeypatch.setattr(orchestrator, "_filter_existing_corpora", fake_filter)
-    monkeypatch.setattr(orchestrator, "_enforce_strategy_intersection", fake_intersection)
+    monkeypatch.setattr(
+        orchestrator, "_enforce_strategy_intersection", fake_intersection
+    )
     monkeypatch.setattr(orchestrator, "_embedding_config_for_query", fake_config)
     monkeypatch.setattr(retriever_module, "embed_queries", fake_embed)
     monkeypatch.setattr(retriever_module.funnel_a, "search", fake_search)
@@ -67,7 +69,11 @@ async def test_planned_hybrid_batches_embeddings_and_reranks_once(monkeypatch):
     monkeypatch.setattr(retriever_module.lexical_retriever, "search", fake_search)
     monkeypatch.setattr(retriever_module, "attach_document_identities", identity)
     monkeypatch.setattr(retriever_module, "hydrate_rerank_texts", identity)
-    monkeypatch.setattr(retriever_module, "hydrate_chunks", lambda chunks, corpus_ids, query=None: identity(chunks, corpus_ids))
+    monkeypatch.setattr(
+        retriever_module,
+        "hydrate_chunks",
+        lambda chunks, corpus_ids, query=None: identity(chunks, corpus_ids),
+    )
     monkeypatch.setattr(retriever_module.reranker_service, "rerank", rerank)
     monkeypatch.setattr(
         retriever_module,
@@ -88,12 +94,22 @@ async def test_planned_hybrid_batches_embeddings_and_reranks_once(monkeypatch):
     )
 
     assert len(embedded) == 1
-    assert embedded[0] == [lane.dense_text for lane in plan.lanes if lane.role in {"original", "core"}]
+    assert embedded[0] == [
+        lane.dense_text for lane in plan.lanes if lane.role in {"original", "core"}
+    ]
     assert reranks == [(plan.original_query, min(16, sequence))]
     assert result.diagnostics["query_plan_version"] == "query_plan.v2"
     assert result.diagnostics["lane_failures"] == []
-    assert result.diagnostics["required_concept_coverage"]["coverage"] == 1.0
-    assert result.diagnostics["repair"]["attempted_rounds"] == 0
+    # Synthetic candidates carry no phrase/title grounding. Lane provenance
+    # alone must not be reported as semantic concept coverage.
+    assert result.diagnostics["required_concept_coverage"]["coverage"] == 0.0
+    assert result.diagnostics["repair"]["attempted_rounds"] == 1
+    assert result.diagnostics["repair"]["missing_lane_ids_before"]
+    assert set(result.diagnostics["fusion"]["repair"]["retriever_counts"]) == {
+        "dense",
+        "summary",
+        "lexical",
+    }
     assert result.diagnostics["cache"]["key_version"] == "retrieval_v2"
     assert result.effective_tier == RetrievalTier.qdrant_mongo
 
@@ -127,6 +143,31 @@ async def test_planned_fast_delegates_to_strict_fast_contract(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_planned_fast_abstains_from_explicit_graph_evidence(monkeypatch):
+    orchestrator = retriever_module.RetrieverOrchestrator()
+    plan = build_query_plan_v2(
+        "What relationship does the graph establish between positioning and messaging?"
+    )
+
+    async def must_not_retrieve(**kwargs):
+        raise AssertionError("Fast must not silently run a non-graph evidence route")
+
+    monkeypatch.setattr(orchestrator, "_retrieve_uncached", must_not_retrieve)
+
+    result = await orchestrator.retrieve_planned(
+        plan=plan,
+        corpus_ids=["c1"],
+        retrieval_tier=RetrievalTier.qdrant_only,
+    )
+
+    assert result.chunks == []
+    assert result.diagnostics["status"] == "route_capability_mismatch"
+    assert (
+        result.diagnostics["reason"] == "explicit_graph_evidence_requires_graph_route"
+    )
+
+
+@pytest.mark.asyncio
 async def test_planned_rerank_timeout_degrades_to_fused_results(monkeypatch):
     orchestrator = retriever_module.RetrieverOrchestrator()
     plan = build_query_plan_v2("Compare Purple Ocean strategy with sticky messaging.")
@@ -150,7 +191,9 @@ async def test_planned_rerank_timeout_degrades_to_fused_results(monkeypatch):
         raise TimeoutError("bounded reranker deadline")
 
     monkeypatch.setattr(orchestrator, "_filter_existing_corpora", fake_filter)
-    monkeypatch.setattr(orchestrator, "_enforce_strategy_intersection", fake_intersection)
+    monkeypatch.setattr(
+        orchestrator, "_enforce_strategy_intersection", fake_intersection
+    )
     monkeypatch.setattr(orchestrator, "_embedding_config_for_query", fake_config)
 
     async def fake_embed(texts, config):
@@ -211,7 +254,9 @@ async def test_planned_route_deadline_degrades_to_lexical_evidence(monkeypatch):
         return chunks
 
     monkeypatch.setattr(orchestrator, "_filter_existing_corpora", fake_filter)
-    monkeypatch.setattr(orchestrator, "_enforce_strategy_intersection", fake_intersection)
+    monkeypatch.setattr(
+        orchestrator, "_enforce_strategy_intersection", fake_intersection
+    )
     monkeypatch.setattr(orchestrator, "_embedding_config_for_query", fake_config)
     monkeypatch.setattr(retriever_module, "embed_queries", slow_embed)
     monkeypatch.setattr(retriever_module.lexical_retriever, "search", lexical_search)

@@ -66,9 +66,7 @@ async def _shared_api_key_for_entry(
     return None
 
 
-async def resolve_by_entry_id(
-    user_id: str | None, entry_id: str
-) -> dict | None:
+async def resolve_by_entry_id(user_id: str | None, entry_id: str) -> dict | None:
     """Resolve a specific pool entry id → {model, api_base, api_key,
     extra_params}. Tries the unified pool first, then the legacy stores.
     Returns None if the entry can't be found anywhere.
@@ -87,7 +85,7 @@ async def resolve_by_entry_id(
         return normalize_model_for_litellm(provider, mname)
 
     raw = await settings_service.get_models_raw(user_id)
-    for entry in (raw.get("query_model_pool") or []):
+    for entry in raw.get("query_model_pool") or []:
         if not isinstance(entry, dict) or entry.get("entry_id") != entry_id:
             continue
         model_name = str(entry.get("model_name") or "").strip()
@@ -98,6 +96,8 @@ async def resolve_by_entry_id(
         base_url = entry.get("base_url")
         # Ollama entries have no base_url; worker falls through to env default.
         return {
+            "entry_id": entry_id,
+            "provider": str(entry.get("provider") or "").strip().lower(),
             "model": _route_model(entry.get("provider"), model_name),
             "api_base": base_url,
             "api_key": plaintext,
@@ -111,6 +111,8 @@ async def resolve_by_entry_id(
         resolved = await model_pool_service.get_resolved(user_id, entry_id)
         if resolved:
             return {
+                "entry_id": entry_id,
+                "provider": str(resolved.get("provider") or "").strip().lower(),
                 "model": _route_model(resolved.get("provider"), resolved["model_name"]),
                 "api_base": resolved.get("base_url"),
                 "api_key": resolved.get("api_key"),
@@ -126,6 +128,8 @@ async def resolve_by_entry_id(
         profile = await model_profiles_service.get_resolved(user_id, entry_id)
         if profile:
             return {
+                "entry_id": entry_id,
+                "provider": "custom",
                 "model": _route_model("custom", profile["model_name"]),
                 "api_base": profile.get("base_url"),
                 "api_key": profile.get("api_key"),
@@ -135,6 +139,83 @@ async def resolve_by_entry_id(
         logger.debug("legacy model_profiles lookup failed: %s", exc)
 
     return None
+
+
+async def resolve_fallback_candidates(
+    user_id: str | None,
+    *,
+    primary_model: str | None = None,
+    primary_entry_id: str | None = None,
+    limit: int = 2,
+) -> list[dict]:
+    """Resolve credential-complete chat fallbacks from the configured pool.
+
+    Fallbacks are operator-owned pool entries, not hardcoded provider routes.
+    The selected entry is excluded, while another account for the same model
+    remains eligible because it has an independent credential/rate limit.
+    Extraction-only RTX entries are never promoted into answer synthesis.
+    """
+    if not user_id or limit <= 0:
+        return []
+
+    from services.settings import settings_service
+
+    raw = await settings_service.get_models_raw(user_id)
+    entries = [
+        entry
+        for entry in (raw.get("query_model_pool") or [])
+        if isinstance(entry, dict)
+        and entry.get("entry_id")
+        and entry.get("enabled", True)
+    ]
+
+    # An explicitly configured utility model is the safest first fallback for
+    # answer synthesis. Preserve pool order for every remaining candidate so
+    # the Models UI remains the operator's priority control.
+    utility_id = str((raw.get("utility") or {}).get("pool_entry_id") or "")
+    if utility_id:
+        entries.sort(
+            key=lambda entry: 0 if str(entry.get("entry_id") or "") == utility_id else 1
+        )
+
+    results: list[dict] = []
+    seen_entries: set[str] = set()
+    skipped_primary_model_match = False
+    normalized_primary = str(primary_model or "").strip().lower()
+    for entry in entries:
+        entry_id = str(entry.get("entry_id") or "")
+        if not entry_id or entry_id in seen_entries or entry_id == primary_entry_id:
+            continue
+        seen_entries.add(entry_id)
+
+        provider = str(entry.get("provider") or "").strip().lower()
+        model_name = str(entry.get("model_name") or "").strip().lower()
+        if provider in {"vllm-rtx", "rtx", "gliner", "glirel"}:
+            continue
+        if "polymath-extract" in model_name:
+            continue
+
+        resolved = await resolve_by_entry_id(user_id, entry_id)
+        if not resolved or not resolved.get("model"):
+            continue
+
+        # Direct model selections do not carry an entry id. Exclude only the
+        # first exact pool match; later same-model entries may represent other
+        # accounts and therefore remain valid independent fallback lanes.
+        if (
+            primary_entry_id is None
+            and normalized_primary
+            and str(resolved["model"]).strip().lower() == normalized_primary
+            and not skipped_primary_model_match
+        ):
+            skipped_primary_model_match = True
+            continue
+
+        results.append(resolved)
+        if len(results) >= limit:
+            break
+
+    return results
 
 
 async def resolve(user_id: str | None, kind: Kind) -> dict | None:
@@ -165,15 +246,20 @@ async def resolve(user_id: str | None, kind: Kind) -> dict | None:
                 return result
             logger.warning(
                 "query_model_resolver: dangling %s pool_entry_id=%s user=%s",
-                kind, pid, user_id,
+                kind,
+                pid,
+                user_id,
             )
 
     # Legacy Phase F fallback — honors pre-migration prefs until the next
     # get_settings() call runs the migration.
     from services.query_prefs import query_prefs_service
 
-    legacy_field = {"hyde": "hyde_pool_id", "agentic": "agentic_pool_id",
-                    "query": "query_pool_id"}.get(kind)
+    legacy_field = {
+        "hyde": "hyde_pool_id",
+        "agentic": "agentic_pool_id",
+        "query": "query_pool_id",
+    }.get(kind)
     if legacy_field:
         prefs = await query_prefs_service.get(user_id)
         legacy_pid = prefs.get(legacy_field)

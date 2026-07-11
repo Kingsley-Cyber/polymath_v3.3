@@ -12,6 +12,21 @@ import re
 from dataclasses import dataclass
 
 TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9_'\-]{1,}")
+_GRAPH_ROUTE_TERM_RE = re.compile(r"\b(?:knowledge\s+graph|graph|ontology)\b")
+_GRAPH_RELATION_TERM_RE = re.compile(
+    r"\b(?:relationship|relation|predicate|edge|path|connect(?:s|ed|ion)?|link(?:s|ed)?)\b"
+)
+
+
+def requires_explicit_graph_evidence(query: str) -> bool:
+    """Whether a query explicitly asks what the stored graph establishes."""
+
+    normalized = " ".join(str(query or "").casefold().split())
+    return bool(
+        _GRAPH_ROUTE_TERM_RE.search(normalized)
+        and _GRAPH_RELATION_TERM_RE.search(normalized)
+    )
+
 
 BASE_STOP_WORDS: frozenset[str] = frozenset(
     {
@@ -423,6 +438,17 @@ GENERIC_CONCEPT_TOKENS: frozenset[str] = frozenset(
 
 CONCEPT_ONLY_STOP_WORDS: frozenset[str] = frozenset(
     {
+        "evaluate",
+        "evaluates",
+        "evaluated",
+        "evaluating",
+        "find",
+        "finds",
+        "found",
+        "establish",
+        "establishes",
+        "established",
+        "establishing",
         "use",
         "uses",
         "used",
@@ -454,7 +480,9 @@ SINGLE_TOKEN_ALIAS_DETECTION_KEYS: frozenset[str] = frozenset(
     }
 )
 
-RELATIONSHIP_MARKERS: tuple[str, ...] = tuple(sorted(RELATIONSHIP_TERMS | COMPARISON_TERMS))
+RELATIONSHIP_MARKERS: tuple[str, ...] = tuple(
+    sorted(RELATIONSHIP_TERMS | COMPARISON_TERMS)
+)
 DEFINITION_MARKERS: tuple[str, ...] = (
     "what is",
     "what are",
@@ -658,8 +686,7 @@ def _scope_descriptor_token(token: str, normalized_query: str) -> bool:
         "transcripts",
     )
     return any(
-        f"{token} {scope}" in normalized_query
-        or f"{scope} {token}" in normalized_query
+        f"{token} {scope}" in normalized_query or f"{scope} {token}" in normalized_query
         for scope in scope_nouns
     )
 
@@ -733,12 +760,12 @@ def concept_groups(query: str, *, max_groups: int = 8) -> list[ConceptGroup]:
     for group in groups:
         for alias in group.aliases:
             if alias_matches(alias, haystack):
-                covered_tokens.update(
-                    query_tokens(alias, stop_words=frozenset())
-                )
+                covered_tokens.update(query_tokens(alias, stop_words=frozenset()))
                 break
     normalized = normalize_query(query)
     for token in query_tokens(query, stop_words=CONCEPT_STOP_WORDS):
+        if token == "graph" and requires_explicit_graph_evidence(query):
+            continue
         if token in covered_tokens:
             continue
         if _scope_descriptor_token(token, normalized):
