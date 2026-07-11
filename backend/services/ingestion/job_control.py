@@ -128,6 +128,20 @@ async def control_job(
         {"corpus_id": corpus_id, "job_id": job_id},
         {"$set": update, "$unset": unset, "$push": {"operator_audit": audit}},
     )
+    if action == "retry":
+        # An operator retry represents new information (for example, a changed
+        # provider contract), so stale idle-backoff state must not delay it.
+        await db["ingest_scheduler_state"].update_one(
+            {"_id": corpus_id},
+            {
+                "$set": {
+                    "gap_fingerprint": None,
+                    "next_eligible_at": now,
+                    "idle_ticks": 0,
+                    "updated_at": now,
+                }
+            },
+        )
     return {
         "job_id": job_id,
         "lane": lane,

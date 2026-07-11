@@ -32,10 +32,14 @@ class _Collection:
 class _Db:
     def __init__(self, row):
         self.collection = _Collection(row)
+        self.scheduler = _Collection({"_id": row["corpus_id"]})
 
     def __getitem__(self, name):
-        assert name == "summary_jobs"
-        return self.collection
+        if name == "summary_jobs":
+            return self.collection
+        if name == "ingest_scheduler_state":
+            return self.scheduler
+        raise AssertionError(f"Unexpected collection: {name}")
 
 
 @pytest.mark.asyncio
@@ -64,3 +68,6 @@ async def test_operator_retry_is_only_path_that_resets_dead_letter_attempts() ->
     assert result["operator_override_generation"] == 3
     assert db.collection.row["attempt_count"] == 0
     assert db.collection.row["status"] == "queued"
+    assert db.scheduler.update["$set"]["gap_fingerprint"] is None
+    assert db.scheduler.update["$set"]["next_eligible_at"] is not None
+    assert db.scheduler.update["$set"]["idle_ticks"] == 0
