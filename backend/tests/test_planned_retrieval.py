@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 import services.retriever as retriever_module
-from models.schemas import RetrievalResult, RetrievalTier, SourceChunk
+from models.schemas import RetrievalTier, SourceChunk
 from services.retriever.query_plan import build_query_plan_v2
 
 
@@ -147,31 +147,62 @@ async def test_planned_hybrid_batches_embeddings_and_reranks_once(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_planned_fast_delegates_to_strict_fast_contract(monkeypatch):
+async def test_planned_fast_uses_top_down_qdrant_only_contract(monkeypatch):
     orchestrator = retriever_module.RetrieverOrchestrator()
     plan = build_query_plan_v2("What is Purple Ocean strategy?")
-    captured = {}
+    calls: list[str] = []
 
-    async def fake_retrieve_uncached(**kwargs):
-        captured.update(kwargs)
-        return RetrievalResult(
-            chunks=[],
-            requested_tier=RetrievalTier.qdrant_only,
-            effective_tier=RetrievalTier.qdrant_only,
-        )
+    async def forbidden_uncached(**kwargs):
+        raise AssertionError("Fast QueryPlanV2 must use the top-down planned route")
 
-    monkeypatch.setattr(orchestrator, "_retrieve_uncached", fake_retrieve_uncached)
+    async def fake_filter(corpus_ids):
+        return corpus_ids, []
 
-    await orchestrator.retrieve_planned(
+    async def fake_intersection(tier, corpus_ids):
+        return tier, None
+
+    async def fake_config(corpus_ids):
+        return None
+
+    async def fake_embed(texts, config):
+        return [[0.1] for _ in texts]
+
+    async def fake_child_search(*args, **kwargs):
+        calls.append("child")
+        chunk = _chunk("fast-evidence")
+        chunk.text = "Purple Ocean strategy differentiates a brand from competitors."
+        return [chunk]
+
+    async def forbidden_lane(*args, **kwargs):
+        raise AssertionError("Fast must not use summary or lexical evidence lanes")
+
+    async def forbidden_rerank(*args, **kwargs):
+        raise AssertionError("Fast must not call the cross-encoder")
+
+    monkeypatch.setattr(orchestrator, "_retrieve_uncached", forbidden_uncached)
+    monkeypatch.setattr(orchestrator, "_filter_existing_corpora", fake_filter)
+    monkeypatch.setattr(
+        orchestrator, "_enforce_strategy_intersection", fake_intersection
+    )
+    monkeypatch.setattr(orchestrator, "_embedding_config_for_query", fake_config)
+    monkeypatch.setattr(retriever_module, "embed_queries", fake_embed)
+    monkeypatch.setattr(retriever_module.funnel_b, "search", fake_child_search)
+    monkeypatch.setattr(retriever_module.funnel_a, "search", forbidden_lane)
+    monkeypatch.setattr(retriever_module.lexical_retriever, "search", forbidden_lane)
+    monkeypatch.setattr(retriever_module.reranker_service, "rerank", forbidden_rerank)
+
+    result = await orchestrator.retrieve_planned(
         plan=plan,
         corpus_ids=["c1"],
         retrieval_tier=RetrievalTier.qdrant_only,
         rerank_enabled=True,
     )
 
-    assert captured["query"] == plan.original_query
-    assert captured["rerank_enabled"] is False
-    assert captured["retrieval_tier"] == RetrievalTier.qdrant_only
+    assert calls
+    assert result.effective_tier == RetrievalTier.qdrant_only
+    assert result.diagnostics["limits"]["summary_top_k"] == 0
+    assert result.diagnostics["counts"]["lexical"] == 0
+    assert result.diagnostics["reranker"]["status"] == "skipped_by_request"
 
 
 @pytest.mark.asyncio

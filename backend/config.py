@@ -546,11 +546,10 @@ class Settings(BaseSettings):
         ),
     )
     TIER0_ROUTING: bool = Field(
-        default=False,
+        default=True,
         description=(
-            "GATED groundwork — query-time Tier-0 routing over "
-            "polymath_doc_summaries. No query-path call sites yet; probe via "
-            "scripts_probe_tier0.py. Flipping this alone does nothing."
+            "Enable top-down query-time document routing over "
+            "polymath_doc_summaries before parent/child evidence retrieval."
         ),
     )
     # §12.6 waterfall graph serving — P2 Mode A knobs (each a kill-switch)

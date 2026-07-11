@@ -62,6 +62,7 @@ from services.retriever.planned_fusion import (
     reserve_planned_finalists,
 )
 from services.retriever.query_plan import QueryPlanV2, query_plan_curation_query
+from services.retriever.tier0_router import tier0_document_router
 from services.retriever.intent_policy import (
     FunnelLimits,
     QueryNeed,
@@ -1240,11 +1241,11 @@ class RetrieverOrchestrator:
         """Execute QueryPlanV2 as one candidate-generation and rerank pass."""
 
         curation_query = query_plan_curation_query(plan)
-        intent = infer_retrieval_intent(plan.original_query)
+        intent = infer_retrieval_intent(plan.standalone_query)
 
         if (
             retrieval_tier == RetrievalTier.qdrant_only
-            and requires_explicit_graph_evidence(plan.original_query)
+            and requires_explicit_graph_evidence(plan.standalone_query)
         ):
             return RetrievalResult(
                 chunks=[],
@@ -1259,9 +1260,9 @@ class RetrieverOrchestrator:
                 },
             )
 
-        if retrieval_tier == RetrievalTier.qdrant_only or search_mode == "global":
+        if search_mode == "global":
             return await self._retrieve_uncached(
-                query=plan.original_query,
+                query=plan.standalone_query,
                 corpus_ids=corpus_ids,
                 retrieval_tier=retrieval_tier,
                 collections=collections,
@@ -1383,6 +1384,42 @@ class RetrieverOrchestrator:
             lane.lane_id: vector for lane, vector in zip(lanes, vectors)
         }
 
+        routing_started = perf_counter()
+        document_routes: dict[str, list[Any]] = {}
+        document_routing_diagnostics: dict[str, Any] = {
+            "enabled": False,
+            "reason": "tier0_routing_disabled",
+        }
+        if bool(getattr(settings, "TIER0_ROUTING", False)):
+            try:
+                route_vectors = {
+                    lane.lane_id: vectors_by_lane_id.get(lane.lane_id)
+                    for lane in lanes
+                    if lane.role == "core"
+                }
+                if not route_vectors and lanes:
+                    route_vectors[lanes[0].lane_id] = vectors_by_lane_id.get(
+                        lanes[0].lane_id
+                    )
+                document_routes, document_routing_diagnostics = await asyncio.wait_for(
+                    tier0_document_router.route_lanes(route_vectors, corpus_ids),
+                    timeout=_stage_timeout(1.25, reserve=1.0),
+                )
+            except Exception as exc:
+                failures.append(
+                    {
+                        "lane_id": "document_routing",
+                        "retriever": "tier0_document_summary",
+                        "error": f"{type(exc).__name__}: {exc}"[:240],
+                    }
+                )
+                document_routing_diagnostics = {
+                    "enabled": True,
+                    "status": "degraded",
+                    "reason": f"{type(exc).__name__}: {exc}"[:240],
+                }
+        timings["document_routing"] = perf_counter() - routing_started
+
         requested_child_top_k = max(8, min(int(retrieval_k or 40), 40))
         requested_summary_top_k = max(1, min(int(top_k_summary or 12), 20))
         funnel_limits = adaptive_funnel_limits(
@@ -1393,9 +1430,17 @@ class RetrieverOrchestrator:
         child_top_k = max(8, min(funnel_limits.child_top_k, 40))
         summary_top_k = max(0, min(funnel_limits.summary_top_k, 20))
         lexical_top_k = max(4, min(child_top_k // 2, 12))
+        if effective_tier == RetrievalTier.qdrant_only:
+            summary_top_k = 0
+            lexical_top_k = 0
 
         async def _lane_pools(lane, vector) -> list[PlannedPool]:
             lane_started = perf_counter()
+            routed_doc_ids = (
+                [route.doc_id for route in document_routes.get(lane.lane_id, [])]
+                if lane.role == "core"
+                else None
+            )
             raw_results = await asyncio.gather(
                 asyncio.wait_for(
                     funnel_b.search(
@@ -1404,6 +1449,7 @@ class RetrieverOrchestrator:
                         b_cols,
                         top_k=child_top_k,
                         query_text=lane.query,
+                        doc_ids=routed_doc_ids,
                     ),
                     timeout=_stage_timeout(
                         float(
@@ -1424,6 +1470,7 @@ class RetrieverOrchestrator:
                         top_k=summary_top_k,
                         fair_mode=True,
                         query_text=lane.query,
+                        doc_ids=routed_doc_ids,
                     ),
                     timeout=_stage_timeout(
                         float(
@@ -1450,7 +1497,9 @@ class RetrieverOrchestrator:
                         ),
                         reserve=1.0,
                     ),
-                ),
+                )
+                if lexical_top_k > 0
+                else asyncio.sleep(0, result=[]),
                 return_exceptions=True,
             )
             retrievers = ("dense", "summary", "lexical")
@@ -1485,6 +1534,7 @@ class RetrieverOrchestrator:
                     "lane_id": lane.lane_id,
                     "role": lane.role,
                     "query": lane.query,
+                    "routed_doc_ids": routed_doc_ids or [],
                     "counts": counts,
                     "duration_s": round(perf_counter() - lane_started, 3),
                 }
@@ -1525,7 +1575,7 @@ class RetrieverOrchestrator:
                 from services.conversation import conversation_service
 
                 facts_task = self._retrieve_graph_seed_facts(
-                    plan.original_query,
+                    plan.standalone_query,
                     corpus_ids,
                     fact_seed_limit=fact_seed_limit,
                 )
@@ -1534,7 +1584,7 @@ class RetrieverOrchestrator:
                     corpus_ids,
                     limit=min(12, rerank_cap),
                     db=conversation_service._db,
-                    query=plan.original_query,
+                    query=plan.standalone_query,
                 )
                 facts_raw, expansion_raw = await asyncio.wait_for(
                     asyncio.gather(facts_task, expansion_task, return_exceptions=True),
@@ -1655,6 +1705,9 @@ class RetrieverOrchestrator:
             async def _repair_lane(lane_id: str) -> list[PlannedPool]:
                 lane = lanes_by_id[lane_id]
                 vector = vectors_by_lane_id.get(lane_id)
+                routed_doc_ids = [
+                    route.doc_id for route in document_routes.get(lane_id, [])
+                ] or None
                 retrievers = ("dense", "summary", "lexical")
                 try:
                     raw_results = await asyncio.wait_for(
@@ -1665,6 +1718,7 @@ class RetrieverOrchestrator:
                                 b_cols,
                                 top_k=min(child_top_k, 12),
                                 query_text=lane.query,
+                                doc_ids=routed_doc_ids,
                             )
                             if vector is not None
                             else asyncio.sleep(0, result=[]),
@@ -1675,6 +1729,7 @@ class RetrieverOrchestrator:
                                 top_k=min(summary_top_k, 8),
                                 fair_mode=True,
                                 query_text=lane.query,
+                                doc_ids=routed_doc_ids,
                             )
                             if summary_top_k > 0 and vector is not None
                             else asyncio.sleep(0, result=[]),
@@ -1682,7 +1737,9 @@ class RetrieverOrchestrator:
                                 lane.query,
                                 corpus_ids,
                                 top_k=min(16, max(8, lexical_top_k * 2)),
-                            ),
+                            )
+                            if lexical_top_k > 0
+                            else asyncio.sleep(0, result=[]),
                             return_exceptions=True,
                         ),
                         timeout=_stage_timeout(
@@ -1749,24 +1806,27 @@ class RetrieverOrchestrator:
             timings["repair"] = perf_counter() - repair_started
 
         identity_started = perf_counter()
-        try:
-            fused = await asyncio.wait_for(
-                attach_document_identities(fused, corpus_ids),
-                timeout=_stage_timeout(
-                    float(
-                        getattr(settings, "QUERY_PLAN_IDENTITY_DEADLINE_SECONDS", 2.0)
+        if effective_tier != RetrievalTier.qdrant_only:
+            try:
+                fused = await asyncio.wait_for(
+                    attach_document_identities(fused, corpus_ids),
+                    timeout=_stage_timeout(
+                        float(
+                            getattr(
+                                settings, "QUERY_PLAN_IDENTITY_DEADLINE_SECONDS", 2.0
+                            )
+                        ),
+                        reserve=0.8,
                     ),
-                    reserve=0.8,
-                ),
-            )
-        except Exception as exc:
-            failures.append(
-                {
-                    "lane_id": "final",
-                    "retriever": "document_identity",
-                    "error": f"{type(exc).__name__}: {exc}"[:240],
-                }
-            )
+                )
+            except Exception as exc:
+                failures.append(
+                    {
+                        "lane_id": "final",
+                        "retriever": "document_identity",
+                        "error": f"{type(exc).__name__}: {exc}"[:240],
+                    }
+                )
         fused, duplicate_count = dedupe_cross_corpus_evidence(fused)
         pre_rerank_document_drops = 0
         if intent.need == QueryNeed.BROAD:
@@ -1785,27 +1845,34 @@ class RetrieverOrchestrator:
         timings["identity_dedupe"] = perf_counter() - identity_started
 
         rerank_started = perf_counter()
-        try:
-            fused = await asyncio.wait_for(
-                hydrate_rerank_texts(fused, corpus_ids),
-                timeout=_stage_timeout(
-                    float(
-                        getattr(settings, "QUERY_PLAN_HYDRATE_DEADLINE_SECONDS", 2.0)
+        if effective_tier != RetrievalTier.qdrant_only:
+            try:
+                fused = await asyncio.wait_for(
+                    hydrate_rerank_texts(fused, corpus_ids),
+                    timeout=_stage_timeout(
+                        float(
+                            getattr(
+                                settings, "QUERY_PLAN_HYDRATE_DEADLINE_SECONDS", 2.0
+                            )
+                        ),
+                        reserve=0.6,
                     ),
-                    reserve=0.6,
-                ),
-            )
-        except Exception as exc:
-            failures.append(
-                {
-                    "lane_id": "final",
-                    "retriever": "rerank_text_hydration",
-                    "error": f"{type(exc).__name__}: {exc}"[:240],
-                }
-            )
+                )
+            except Exception as exc:
+                failures.append(
+                    {
+                        "lane_id": "final",
+                        "retriever": "rerank_text_hydration",
+                        "error": f"{type(exc).__name__}: {exc}"[:240],
+                    }
+                )
         fused, hydrated_duplicate_count = dedupe_cross_corpus_evidence(fused)
         reranker_diagnostics: dict[str, Any]
-        if rerank_enabled and fused:
+        if (
+            rerank_enabled
+            and effective_tier != RetrievalTier.qdrant_only
+            and fused
+        ):
             try:
                 ranked = await asyncio.wait_for(
                     reranker_service.rerank(curation_query, fused),
@@ -1868,26 +1935,37 @@ class RetrieverOrchestrator:
             max_per_document=1 if intent.need == QueryNeed.BROAD else None,
         )
         hydrate_started = perf_counter()
-        try:
-            finalists = await asyncio.wait_for(
-                hydrate_chunks(
-                    finalist_candidates, corpus_ids, query=plan.original_query
-                ),
-                timeout=_stage_timeout(
-                    float(getattr(settings, "QUERY_PLAN_HYDRATE_DEADLINE_SECONDS", 2.0))
-                ),
-            )
-        except Exception as exc:
-            failures.append(
-                {
-                    "lane_id": "final",
-                    "retriever": "finalist_hydration",
-                    "error": f"{type(exc).__name__}: {exc}"[:240],
-                }
-            )
+        if effective_tier == RetrievalTier.qdrant_only:
             finalists = [
                 chunk for chunk in finalist_candidates if str(chunk.text or "").strip()
             ]
+        else:
+            try:
+                finalists = await asyncio.wait_for(
+                    hydrate_chunks(
+                        finalist_candidates, corpus_ids, query=plan.standalone_query
+                    ),
+                    timeout=_stage_timeout(
+                        float(
+                            getattr(
+                                settings, "QUERY_PLAN_HYDRATE_DEADLINE_SECONDS", 2.0
+                            )
+                        )
+                    ),
+                )
+            except Exception as exc:
+                failures.append(
+                    {
+                        "lane_id": "final",
+                        "retriever": "finalist_hydration",
+                        "error": f"{type(exc).__name__}: {exc}"[:240],
+                    }
+                )
+                finalists = [
+                    chunk
+                    for chunk in finalist_candidates
+                    if str(chunk.text or "").strip()
+                ]
         finalists, parent_duplicate_count = dedupe_parent_finalists(finalists)
         finalists, document_lane_duplicate_count = dedupe_document_lane_finalists(
             finalists
@@ -1945,6 +2023,9 @@ class RetrieverOrchestrator:
                 len(pool.chunks)
                 for pool in pools
                 if pool.retriever == "document_anchor"
+            ),
+            "document_routes": int(
+                document_routing_diagnostics.get("routed_doc_count") or 0
             ),
             "facts": len(facts),
             "fact_seed_chunks": sum(
@@ -2025,6 +2106,7 @@ class RetrieverOrchestrator:
                 "documents": document_distribution,
             },
             "final_source_tiers": final_source_tiers,
+            "document_routing": document_routing_diagnostics,
             "unique_docs_final": len(document_distribution),
             "max_doc_share_final": max_doc_share_final,
             "graph_evidence": {

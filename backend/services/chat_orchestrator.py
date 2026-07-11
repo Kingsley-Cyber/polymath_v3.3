@@ -92,6 +92,7 @@ from services.retriever.query_semantics import (
 )
 from services.retriever.query_plan import (
     build_query_plan_v2,
+    contextualize_followup_query,
     query_plan_evidence_sides,
     query_plan_to_dict,
 )
@@ -760,14 +761,19 @@ def _build_chat_query_plan(
     """Deterministic query plan used for trace and downstream guardrails."""
 
     intent = infer_retrieval_intent(query)
+    semantic_query = retrieval_query or query
     concepts = [
         {"key": group.key, "aliases": list(group.aliases[:8])}
-        for group in concept_groups(query, max_groups=8)
+        for group in concept_groups(semantic_query, max_groups=8)
     ]
-    evidence_plan = build_evidence_plan(query)
+    evidence_plan = build_evidence_plan(semantic_query)
     tier_value = str(getattr(requested_tier, "value", requested_tier) or "")
     corpus_count = len(corpus_ids or [])
-    query_plan_v2 = build_query_plan_v2(query, corpus_ids=corpus_ids)
+    query_plan_v2 = build_query_plan_v2(
+        query,
+        corpus_ids=corpus_ids,
+        standalone_query=semantic_query,
+    )
     plan = {
         "query": query,
         "retrieval_query": retrieval_query,
@@ -6561,6 +6567,11 @@ class ChatOrchestrator:
             fallback_extra=profile_creds.get("extra_params"),
             resolved_route=hyde_route,
         )
+        if not hyde_applied:
+            retrieval_query = contextualize_followup_query(
+                retrieval_query,
+                existing_messages,
+            )
         if hyde_trace_enabled:
             yield _record_trace_event(
                 lane="model_call",
@@ -6597,6 +6608,7 @@ class ChatOrchestrator:
         evidence_plan, evidence_plan_llm_task = await self._resolve_evidence_plan(
             request,
             user_id=user_id,
+            retrieval_query=retrieval_query,
             llm_decompose=bool(profile_cfg.get("evidence_plan_llm_decompose")),
             fallback_model=model_used,
             fallback_api_base=profile_creds.get("api_base"),
@@ -6670,6 +6682,7 @@ class ChatOrchestrator:
                 plan=build_query_plan_v2(
                     request.message,
                     corpus_ids=request.corpus_ids,
+                    standalone_query=retrieval_query,
                 ),
                 corpus_ids=request.corpus_ids,
                 retrieval_tier=request.retrieval_tier,
@@ -6735,8 +6748,16 @@ class ChatOrchestrator:
         effective_retrieval_tier = getattr(
             retrieval, "effective_tier", request.retrieval_tier
         )
-        _retrieval_fast_path = (
+        _plan_diagnostics = getattr(retrieval, "diagnostics", {}) or {}
+        _plan_selection = _plan_diagnostics.get("selection") or {}
+        _plan_sufficiency = _plan_selection.get("sufficiency") or {}
+        _query_plan_fast_path = bool(
             settings.QUERY_PLAN_V2
+            and str(_plan_diagnostics.get("complexity") or "") == "simple"
+            and bool(_plan_sufficiency.get("answerable"))
+        )
+        _retrieval_fast_path = (
+            _query_plan_fast_path
             or str(getattr(effective_retrieval_tier, "value", effective_retrieval_tier))
             == RetrievalTier.qdrant_only.value
             or (
@@ -9409,6 +9430,7 @@ class ChatOrchestrator:
         *,
         user_id: str | None,
         llm_decompose: bool,
+        retrieval_query: str | None = None,
         fallback_model: str | None = None,
         fallback_api_base: str | None = None,
         fallback_api_key: str | None = None,
@@ -9428,8 +9450,12 @@ class ChatOrchestrator:
            to name the sides. Always falls back to the deterministic plan.
         """
 
-        query = request.message
-        query_plan_v2 = build_query_plan_v2(query, corpus_ids=request.corpus_ids)
+        query = retrieval_query or request.message
+        query_plan_v2 = build_query_plan_v2(
+            request.message,
+            corpus_ids=request.corpus_ids,
+            standalone_query=query,
+        )
         if settings.QUERY_PLAN_V2:
             v2_sides = query_plan_evidence_sides(query_plan_v2)
             if len(v2_sides) >= 2:

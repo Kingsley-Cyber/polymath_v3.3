@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Iterable, Literal
 
 from services.retriever.query_semantics import (
     CONCEPT_ALIASES,
@@ -64,6 +64,17 @@ _EXPLICIT_MULTI_RE = re.compile(
     r"\b(?:compare|contrast|versus|vs\.?|combine|relationship|relate|between)\b",
     re.IGNORECASE,
 )
+_ANSWER_OBJECT_RE = re.compile(
+    r"\b(?:what|which|name|list|identify|recommend)\s+"
+    r"(books?|authors?|people|experts?|tools?|models?|frameworks?|methods?|"
+    r"strategies|examples?|products?|companies|organizations?|documents?|sources?)\b",
+    re.IGNORECASE,
+)
+_FOLLOWUP_PREFIX_RE = re.compile(
+    r"^(?:no[,:]?\s+|actually[,:]?\s+|instead[,:]?\s+|"
+    r"and\s+|also\s+|what\s+about\s+)",
+    re.IGNORECASE,
+)
 _GENERIC_LANE_TERMS = {
     "assess",
     "assessment",
@@ -76,6 +87,9 @@ _GENERIC_LANE_TERMS = {
     "exact",
     "find",
     "graph",
+    "help",
+    "helped",
+    "helps",
     "html",
     "offer",
     "offers",
@@ -90,6 +104,7 @@ _GENERIC_LANE_TERMS = {
     "framework",
     "model",
     "method",
+    "no",
     "principles",
 }
 
@@ -192,6 +207,7 @@ def _looks_like_uppercase_command(value: str) -> bool:
 
 def _phrase_candidates(query: str, groups: list[ConceptGroup]) -> list[str]:
     candidates: list[str] = []
+    candidates.extend(match.group(1) for match in _ANSWER_OBJECT_RE.finditer(query))
     candidates.extend(match.group(1) for match in _QUOTE_RE.finditer(query))
     candidates.extend(
         phrase
@@ -396,17 +412,60 @@ def _decompose_command_subject(query: str, concepts: list[str]) -> list[str]:
     return list(dict.fromkeys(decomposed))
 
 
+def _message_value(message: Any, field: str) -> str:
+    if isinstance(message, dict):
+        return str(message.get(field) or "")
+    return str(getattr(message, field, "") or "")
+
+
+def contextualize_followup_query(
+    query: str,
+    recent_messages: Iterable[Any] | None,
+) -> str:
+    """Build a deterministic standalone retrieval query for terse follow-ups.
+
+    The answer model still receives the user's exact message. This rewrite is
+    retrieval-only and activates only for short/elliptical turns, avoiding an
+    extra model call while preventing fragments such as ``no authors`` from
+    being embedded without the subject established by the previous user turn.
+    """
+
+    current = _normalize_phrase(query)
+    if not current:
+        return current
+    tokens = re.findall(r"[A-Za-z0-9']+", current)
+    contextual = len(tokens) <= 6 or bool(_FOLLOWUP_PREFIX_RE.match(current))
+    if not contextual:
+        return current
+
+    previous_user = ""
+    for message in reversed(list(recent_messages or [])):
+        if _message_value(message, "role").lower() != "user":
+            continue
+        candidate = _normalize_phrase(_message_value(message, "content"))
+        if candidate and candidate.casefold() != current.casefold():
+            previous_user = candidate
+            break
+    if not previous_user:
+        return current
+
+    focus = _FOLLOWUP_PREFIX_RE.sub("", current).strip() or current
+    return _normalize_phrase(f"{previous_user}; {focus}")
+
+
 def build_query_plan_v2(
     query: str,
     *,
     corpus_ids: list[str] | tuple[str, ...] | None = None,
     max_core_lanes: int = 4,
+    standalone_query: str | None = None,
 ) -> QueryPlanV2:
     """Build a bounded phrase-aware plan without an LLM call."""
 
     original = _normalize_phrase(query)
-    groups = concept_groups(original, max_groups=max_core_lanes + 4)
-    phrases = _phrase_candidates(original, groups)
+    standalone = _normalize_phrase(standalone_query or original)
+    groups = concept_groups(standalone, max_groups=max_core_lanes + 4)
+    phrases = _phrase_candidates(standalone, groups)
 
     concepts: list[str] = []
     for phrase in phrases:
@@ -416,7 +475,7 @@ def build_query_plan_v2(
     # Preserve useful bare concepts only when they are not already represented
     # by a phrase. This is the guard against Purple/Ocean fragmentation.
     for group in groups:
-        surface = _best_surface(group, original)
+        surface = _best_surface(group, standalone)
         key = clean_text(surface).strip()
         if (
             key in _GENERIC_LANE_TERMS
@@ -428,22 +487,22 @@ def build_query_plan_v2(
         if len(concepts) >= max_core_lanes:
             break
     concepts = _collapse_attribution_concepts(
-        original,
+        standalone,
         concepts[:max_core_lanes],
         groups,
     )
-    concepts = _decompose_command_subject(original, concepts)[:max_core_lanes]
+    concepts = _decompose_command_subject(standalone, concepts)[:max_core_lanes]
 
-    operators = tuple(sorted(required_operator_atoms(original)))
+    operators = tuple(sorted(required_operator_atoms(standalone)))
     lanes: list[QueryLane] = [
         QueryLane(
             lane_id="original",
             role="original",
-            query=original,
-            dense_text=original,
-            lexical_terms=tuple(lexical_terms(original)[:16]),
-            phrase=original,
-            support_phrases=(original,),
+            query=standalone,
+            dense_text=standalone,
+            lexical_terms=tuple(lexical_terms(standalone)[:16]),
+            phrase=standalone,
+            support_phrases=(standalone,),
         )
     ]
     for index, concept in enumerate(concepts):
@@ -463,15 +522,15 @@ def build_query_plan_v2(
         )
 
     if len(concepts) > 1 and (
-        "relationship" in operators or _EXPLICIT_MULTI_RE.search(original)
+        "relationship" in operators or _EXPLICIT_MULTI_RE.search(standalone)
     ):
         lanes.append(
             QueryLane(
                 lane_id="bridge",
                 role="bridge",
-                query=original,
-                dense_text=original,
-                lexical_terms=tuple(lexical_terms(original)[:16]),
+                query=standalone,
+                dense_text=standalone,
+                lexical_terms=tuple(lexical_terms(standalone)[:16]),
                 required=False,
                 depends_on=tuple(lane.lane_id for lane in lanes if lane.role == "core"),
             )
@@ -480,8 +539,8 @@ def build_query_plan_v2(
     return QueryPlanV2(
         version="query_plan.v2",
         original_query=original,
-        standalone_query=original,
-        complexity=_complexity(original, len(concepts), operators),
+        standalone_query=standalone,
+        complexity=_complexity(standalone, len(concepts), operators),
         concepts=tuple(concepts),
         operators=operators,
         lanes=tuple(lanes),

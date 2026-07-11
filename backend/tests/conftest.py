@@ -50,6 +50,20 @@ def _clear_rag_caches():
         except Exception:
             pass
 
+    old_tier0 = None
+    try:
+        import services.retriever as _ret
+
+        old_tier0 = _ret.settings.TIER0_ROUTING
+        _ret.settings.TIER0_ROUTING = False
+    except Exception:
+        pass
+
     _clear()
     yield
+    if old_tier0 is not None:
+        try:
+            _ret.settings.TIER0_ROUTING = old_tier0
+        except Exception:
+            pass
     _clear()

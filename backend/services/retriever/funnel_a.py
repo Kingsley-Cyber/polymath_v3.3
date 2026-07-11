@@ -34,6 +34,7 @@ class FunnelA:
         top_k: int = 20,
         fair_mode: bool = True,
         query_text: str | None = None,
+        doc_ids: Optional[List[str]] = None,
     ) -> List[SourceChunk]:
         """
         Execute breadth search for summaries across target collections in parallel.
@@ -71,6 +72,7 @@ class FunnelA:
                         collections=collections,
                         top_k=per_corpus_k,
                         query_text=query_text,
+                        doc_ids=doc_ids,
                     )
                     for corpus_id in corpus_ids
                 ]
@@ -87,6 +89,7 @@ class FunnelA:
             collections=collections,
             top_k=top_k,
             query_text=query_text,
+            doc_ids=doc_ids,
         )
 
     async def _search_scoped(
@@ -97,6 +100,7 @@ class FunnelA:
         collections: List[str],
         top_k: int,
         query_text: str | None = None,
+        doc_ids: Optional[List[str]] = None,
     ) -> List[SourceChunk]:
         """One summary search over ``collections`` scoped to ``corpus_scope``."""
 
@@ -114,6 +118,14 @@ class FunnelA:
                 models.FieldCondition(
                     key="corpus_id",
                     match=models.MatchAny(any=corpus_scope),
+                )
+            )
+
+        if doc_ids:
+            must_conditions.append(
+                models.FieldCondition(
+                    key="doc_id",
+                    match=models.MatchAny(any=list(dict.fromkeys(doc_ids))),
                 )
             )
 

@@ -36,6 +36,7 @@ class FunnelB:
         concept_terms: Optional[List[str]] = None,
         entity_ids: Optional[List[str]] = None,
         min_filtered: int = 0,
+        doc_ids: Optional[List[str]] = None,
     ) -> List[SourceChunk]:
         """
         Execute precision search across target collections in parallel.
@@ -66,6 +67,14 @@ class FunnelB:
                 models.FieldCondition(
                     key="corpus_id",
                     match=models.MatchAny(any=corpus_ids),
+                )
+            )
+
+        if doc_ids:
+            must_conditions.append(
+                models.FieldCondition(
+                    key="doc_id",
+                    match=models.MatchAny(any=list(dict.fromkeys(doc_ids))),
                 )
             )
 

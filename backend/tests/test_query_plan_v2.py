@@ -1,5 +1,6 @@
 from services.retriever.query_plan import (
     build_query_plan_v2,
+    contextualize_followup_query,
     query_plan_curation_query,
     query_plan_evidence_sides,
     query_plan_to_dict,
@@ -164,3 +165,27 @@ def test_multi_hop_plan_removes_imperative_scaffolding():
     assert "made to stick" in sticky_lane.support_phrases
     assert product_lane.dense_text == "product page"
     assert "product detail page" in product_lane.query
+
+
+def test_answer_object_books_survives_as_required_concept():
+    plan = build_query_plan_v2("what books help with dropshipping and why?")
+
+    assert plan.concepts == ("books", "dropshipping")
+    assert query_plan_curation_query(plan) == "books dropshipping"
+    assert "help" not in plan.concepts
+
+
+def test_terse_followup_uses_previous_user_subject_without_model_call():
+    recent = [
+        {"role": "user", "content": "what books help with dropshipping and why?"},
+        {"role": "assistant", "content": "The evidence was incomplete."},
+    ]
+
+    standalone = contextualize_followup_query("no authors", recent)
+    plan = build_query_plan_v2("no authors", standalone_query=standalone)
+
+    assert standalone == "what books help with dropshipping and why; authors"
+    assert plan.original_query == "no authors"
+    assert plan.standalone_query == standalone
+    assert plan.concepts == ("books", "dropshipping", "authors")
+    assert query_plan_curation_query(plan) == "books dropshipping authors"
