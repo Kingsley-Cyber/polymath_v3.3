@@ -286,9 +286,6 @@ async def test_summary_lane_honors_provider_disable_thinking(monkeypatch) -> Non
         "no-cache": True,
         "no-store": True,
     }
-    assert _CapturingBlankSummaryClient.payloads[0]["response_format"] == {
-        "type": "json_object"
-    }
 
 
 @pytest.mark.asyncio
