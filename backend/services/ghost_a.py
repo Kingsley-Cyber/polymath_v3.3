@@ -915,12 +915,31 @@ async def summarize_parents(
             return {}
 
     async def _lane_worker(pool_idx: int) -> None:
+        def _next_eligible_task() -> SummaryTask | None:
+            """Claim one task this provider signature has not rejected."""
+
+            signature = _model_signature(pool[pool_idx])
+            scan_limit = task_queue.qsize()
+            for _ in range(scan_limit):
+                try:
+                    candidate = task_queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    return None
+                if signature not in rejected_models_by_parent.get(
+                    candidate.parent_id,
+                    set(),
+                ):
+                    return candidate
+                # Rotate ineligible work without changing Queue.join accounting.
+                task_queue.task_done()
+                task_queue.put_nowait(candidate)
+            return None
+
         while True:
             if pool_idx in disabled_lanes:
                 return
-            try:
-                first_task = task_queue.get_nowait()
-            except asyncio.QueueEmpty:
+            first_task = _next_eligible_task()
+            if first_task is None:
                 return
             entry = pool[pool_idx]
             extra = entry.get("extra_params") or {}
@@ -941,9 +960,8 @@ async def summarize_parents(
             batch_tasks = [first_task]
             chars = len(first_task.text or "")
             while len(batch_tasks) < microbatch_size and chars < max_chars:
-                try:
-                    candidate = task_queue.get_nowait()
-                except asyncio.QueueEmpty:
+                candidate = _next_eligible_task()
+                if candidate is None:
                     break
                 candidate_chars = len(candidate.text or "")
                 if batch_tasks and chars + candidate_chars > max_chars:

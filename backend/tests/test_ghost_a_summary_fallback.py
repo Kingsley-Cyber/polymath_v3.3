@@ -115,6 +115,39 @@ class _TaggedRescueClient(_BlankSummaryClient):
         )
 
 
+class _CrossProviderComplianceClient(_BlankSummaryClient):
+    payloads: list[dict] = []
+
+    async def post(self, *args, **kwargs) -> _EnvelopeIgnoringResponse:
+        payload = dict(kwargs.get("json") or {})
+        self.payloads.append(payload)
+        if "longcat" not in str(payload.get("model") or "").lower():
+            return _EnvelopeIgnoringResponse('{"source":"ignored-contract"}')
+        user = payload["messages"][1]["content"]
+        target_ids = [f"parent-{index}" for index in range(3) if f"parent-{index}" in user]
+        items = [
+            {
+                "target_id": target_id,
+                "artifact": {
+                    "summary": (
+                        "A second provider compiles the source into a durable semantic "
+                        "summary after the first provider rejects the output contract."
+                    ),
+                    "central_claim": "Cross-provider routing recovers contract compliance.",
+                    "key_points": [
+                        {
+                            "point": "The validated artifact remains grounded in the source child.",
+                            "supporting_child_ids": ["child-1"],
+                        }
+                    ],
+                    "concept_tags": ["provider routing", "validation"],
+                },
+            }
+            for target_id in target_ids
+        ]
+        return _EnvelopeIgnoringResponse(__import__("json").dumps({"items": items}))
+
+
 @pytest.mark.asyncio
 async def test_summary_microbatch_uses_one_provider_call_for_four_targets(monkeypatch) -> None:
     _CapturingBlankSummaryClient.payloads.clear()
@@ -228,6 +261,63 @@ async def test_invalid_json_microbatch_uses_bounded_tagged_rescue(monkeypatch) -
         "Produce this exact line-oriented contract" in payload["messages"][1]["content"]
         for payload in _TaggedRescueClient.payloads
     ) == 3
+
+
+@pytest.mark.asyncio
+async def test_validation_rejection_routes_to_untried_provider_signature(monkeypatch) -> None:
+    _CrossProviderComplianceClient.payloads.clear()
+    monkeypatch.setattr(ghost_a.httpx, "AsyncClient", _CrossProviderComplianceClient)
+    monkeypatch.setattr(ghost_a, "_SUMMARY_RETRY_ATTEMPTS", 2)
+    monkeypatch.setattr(ghost_a, "_SUMMARY_RETRY_BACKOFF_SECONDS", 0)
+
+    results = await summarize_parents(
+        [
+            SummaryTask(
+                parent_id=f"parent-{index}",
+                doc_id="doc-1",
+                corpus_id="corpus-1",
+                source_tier="parent",
+                text="Cross-provider routing must preserve evidence and validation.",
+                source_child_ids=["child-1"],
+            )
+            for index in range(3)
+        ],
+        pool=[
+            {
+                "model": "openai/tencent/Hy3",
+                "base_url": "https://siliconflow.invalid/v1",
+                "api_key": "hy3-test-key",
+                "max_concurrent": 3,
+                "extra_params": {"microbatch_size": 3},
+            },
+            {
+                "model": "openai/LongCat-2.0",
+                "base_url": "https://longcat.invalid/v1",
+                "api_key": "longcat-test-key",
+                "max_concurrent": 1,
+                "extra_params": {"microbatch_size": 3},
+            },
+        ],
+        global_max_concurrent=4,
+    )
+
+    assert {result.parent_id for result in results} == {
+        "parent-0",
+        "parent-1",
+        "parent-2",
+    }
+    hy3_calls = [
+        payload
+        for payload in _CrossProviderComplianceClient.payloads
+        if "hy3" in str(payload.get("model") or "").lower()
+    ]
+    longcat_calls = [
+        payload
+        for payload in _CrossProviderComplianceClient.payloads
+        if "longcat" in str(payload.get("model") or "").lower()
+    ]
+    assert len(hy3_calls) == 4
+    assert len(longcat_calls) == 1
 
 
 @pytest.mark.asyncio
