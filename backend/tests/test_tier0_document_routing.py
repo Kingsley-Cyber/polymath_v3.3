@@ -5,7 +5,11 @@ import pytest
 import services.retriever as retriever_module
 from models.schemas import RetrievalTier, SourceChunk
 from services.retriever.query_plan import build_query_plan_v2
-from services.retriever.tier0_router import DocumentRoute, Tier0DocumentRouter
+from services.retriever.tier0_router import (
+    DocumentRoute,
+    Tier0DocumentRouter,
+    select_adaptive_routes,
+)
 
 
 class _RouteClient:
@@ -52,7 +56,23 @@ async def test_tier0_router_is_fair_per_lane_and_corpus():
     assert {route.corpus_id for route in routes["books"]} == {"c1", "c2"}
     assert {route.corpus_id for route in routes["dropshipping"]} == {"c1", "c2"}
     assert diagnostics["routed_doc_count"] == 2
-    assert all("noise" not in route.doc_id for values in routes.values() for route in values)
+    assert all(
+        "noise" not in route.doc_id for values in routes.values() for route in values
+    )
+
+
+def test_adaptive_routes_cut_background_tail_at_score_cliff():
+    routes = [
+        DocumentRoute("books", "c1", "d1", 0.91),
+        DocumentRoute("books", "c1", "d2", 0.88),
+        DocumentRoute("books", "c1", "d3", 0.86),
+        DocumentRoute("books", "c1", "d4", 0.62),
+        DocumentRoute("books", "c1", "d5", 0.60),
+    ]
+
+    selected = select_adaptive_routes(routes, relative_margin=0.40)
+
+    assert [route.doc_id for route in selected] == ["d1", "d2", "d3"]
 
 
 def _evidence(lane: str, doc_id: str) -> SourceChunk:
@@ -89,6 +109,7 @@ async def test_all_three_layers_descend_from_document_routes(monkeypatch, tier):
         corpus_ids=["c1"],
     )
     calls = {"summary": 0, "lexical": 0, "rerank": 0, "graph": 0}
+    child_scopes: list[dict] = []
 
     async def fake_filter(corpus_ids):
         return corpus_ids, []
@@ -114,6 +135,7 @@ async def test_all_three_layers_descend_from_document_routes(monkeypatch, tier):
         )
 
     async def fake_child(*args, **kwargs):
+        child_scopes.append(dict(kwargs))
         doc_ids = kwargs.get("doc_ids") or []
         query_text = str(kwargs.get("query_text") or "")
         if doc_ids:
@@ -124,7 +146,11 @@ async def test_all_three_layers_descend_from_document_routes(monkeypatch, tier):
     async def fake_summary(*args, **kwargs):
         calls["summary"] += 1
         doc_ids = kwargs.get("doc_ids") or ["doc-direct"]
-        lane = "books" if "books" in str(kwargs.get("query_text") or "") else "dropshipping"
+        lane = (
+            "books"
+            if "books" in str(kwargs.get("query_text") or "")
+            else "dropshipping"
+        )
         return [_evidence(lane, doc_ids[0])]
 
     async def fake_lexical(*args, **kwargs):
@@ -184,9 +210,15 @@ async def test_all_three_layers_descend_from_document_routes(monkeypatch, tier):
         "doc-books",
         "doc-dropshipping",
     }
+    core_scopes = [scope for scope in child_scopes if scope.get("doc_ids")]
+    assert core_scopes
+    assert all(scope.get("parent_ids") for scope in core_scopes)
 
     if tier == RetrievalTier.qdrant_only:
-        assert calls == {"summary": 0, "lexical": 0, "rerank": 0, "graph": 0}
+        assert calls["summary"] > 0
+        assert calls["lexical"] == 0
+        assert calls["rerank"] == 0
+        assert calls["graph"] == 0
     else:
         assert calls["summary"] > 0
         assert calls["lexical"] > 0

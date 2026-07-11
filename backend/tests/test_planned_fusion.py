@@ -433,6 +433,40 @@ def test_finalist_reservations_respect_broad_document_cap():
     assert diagnostics["max_per_document"] == 1
 
 
+def test_finalist_reservations_keep_bounded_routed_document_evidence():
+    global_top = _chunk("global", "a", 1.0)
+    routed_a = _chunk("routed-a", "a", 0.7)
+    routed_a.doc_id = "doc-routed-a"
+    routed_a.metadata = {
+        "planned_lanes": ["books"],
+        "planned_lane_grounding": {"books": 2.0},
+        "document_route_lanes": {"books": 0.91},
+    }
+    routed_b = _chunk("routed-b", "a", 0.6)
+    routed_b.doc_id = "doc-routed-b"
+    routed_b.metadata = {
+        "planned_lanes": ["books"],
+        "planned_lane_grounding": {"books": 2.0},
+        "document_route_lanes": {"books": 0.87},
+    }
+
+    result, diagnostics = reserve_planned_finalists(
+        [global_top, routed_a, routed_b],
+        preferred=[global_top],
+        required_lane_ids=["books"],
+        corpus_ids=["a"],
+        max_candidates=3,
+        routed_document_budget=2,
+    )
+
+    assert {chunk.chunk_id for chunk in result} == {"global", "routed-a", "routed-b"}
+    assert diagnostics["routed_documents_selected"] == [
+        "doc-routed-a",
+        "doc-routed-b",
+    ]
+    assert set(diagnostics["routed_document_reservations"]) == {"doc-routed-b"}
+
+
 def test_parent_finalist_dedupe_merges_lane_provenance():
     first = _chunk("first", "a")
     first.parent_id = "shared-parent"

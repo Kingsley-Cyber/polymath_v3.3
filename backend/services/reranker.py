@@ -675,17 +675,21 @@ class RerankerService:
         # context and 500s the whole batch. B2: fill the cap with the QUERY'S
         # best sentence window, not the chunk's leading chars — the passage
         # that matched retrieval is what the cross-encoder must score.
+        parent_contexts = [
+            str((c.metadata or {}).get("reranker_parent_context") or "").strip()
+            for c in pool
+        ]
+        context_cap = min(360, max(0, _RERANK_MAX_DOC_CHARS // 3))
+        excerpt_cap = max(256, _RERANK_MAX_DOC_CHARS - context_cap)
         if _RERANK_QUERY_GUIDED_EXCERPT:
             from services.retriever.excerpt import query_guided_excerpt
 
             documents = [
-                query_guided_excerpt(
-                    c.text or "", query, max_chars=_RERANK_MAX_DOC_CHARS
-                )
+                query_guided_excerpt(c.text or "", query, max_chars=excerpt_cap)
                 for c in pool
             ]
         else:
-            documents = [(c.text or "")[:_RERANK_MAX_DOC_CHARS] for c in pool]
+            documents = [(c.text or "")[:excerpt_cap] for c in pool]
         # H3 (Q3) — RerankerInput context prefix: "Book > Section" ahead of
         # the excerpt so the CE scores the passage WITH its source frame
         # (title-anchored / section-scoped queries stop losing to look-alike
@@ -696,7 +700,7 @@ class RerankerService:
             from models.contracts import RerankerInput
 
             prefixed = []
-            for c, doc in zip(pool, documents):
+            for c, doc, parent_context in zip(pool, documents, parent_contexts):
                 name = str(getattr(c, "doc_name", "") or "").strip()[:80]
                 heads = [
                     str(h).strip()
@@ -707,6 +711,7 @@ class RerankerService:
                     RerankerInput(
                         source_book=name,
                         section=" › ".join(heads[:2])[:80],
+                        parent_context=parent_context[:context_cap],
                         excerpt=doc,
                     ).render()
                 )

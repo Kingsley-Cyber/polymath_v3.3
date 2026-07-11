@@ -200,7 +200,10 @@ def filter_grounded_planned_candidates(
     if not required:
         diagnostics["reason"] = "no_required_lanes"
         return chunks, diagnostics
-    if any(len(_normalized_tokens(lane_id)) == 1 and len(lane_id) <= 3 for lane_id in required):
+    if any(
+        len(_normalized_tokens(lane_id)) == 1 and len(lane_id) <= 3
+        for lane_id in required
+    ):
         diagnostics["reason"] = "short_acronym_lane_fail_open"
         return chunks, diagnostics
     grounded_lane_ids = list(diagnostics["grounded_lane_ids"])
@@ -241,12 +244,11 @@ def _candidate_key(chunk: SourceChunk) -> str:
 
 def _candidate_document_key(chunk: SourceChunk) -> str:
     metadata = chunk.metadata or {}
-    return str(
-        chunk.doc_id
-        or metadata.get("source_file_hash")
-        or chunk.doc_name
-        or ""
-    ).strip().lower()
+    return (
+        str(chunk.doc_id or metadata.get("source_file_hash") or chunk.doc_name or "")
+        .strip()
+        .lower()
+    )
 
 
 def limit_candidates_per_document(
@@ -432,6 +434,7 @@ def reserve_planned_finalists(
     corpus_ids: list[str] | None,
     max_candidates: int,
     max_per_document: int | None = None,
+    routed_document_budget: int = 0,
 ) -> tuple[list[SourceChunk], dict[str, object]]:
     """Keep required semantic sides and corpora through the final rank cut.
 
@@ -454,11 +457,13 @@ def reserve_planned_finalists(
         if 0.0 <= score <= top_score <= 1.0 and top_score > 0.0:
             return score >= max(0.05, top_score * LANE_RESERVATION_MIN_SCORE_RATIO)
         return True
+
     selected: list[str] = []
     selected_set: set[str] = set()
     protected_keys: set[str] = set()
     lane_reservations: dict[str, str] = {}
     corpus_reservations: dict[str, str] = {}
+    routed_document_reservations: dict[str, str] = {}
     document_counts: dict[str, int] = {}
 
     def reserve(key: str | None, *, allow_overflow: bool = False) -> bool:
@@ -517,6 +522,52 @@ def reserve_planned_finalists(
             protected_keys.add(key)
             lane_reservations[lane_id] = key
 
+    # Routing is a scope prior, not a score bonus. Preserve the strongest
+    # independently relevant candidate from a bounded number of routed
+    # documents before wildcard/global candidates consume the final packet.
+    route_candidates: dict[str, tuple[float, int, str]] = {}
+    for rank, candidate_key in enumerate(ranked_keys):
+        chunk = by_key[candidate_key]
+        route_scores = dict((chunk.metadata or {}).get("document_route_lanes") or {})
+        if not route_scores:
+            continue
+        document_key = _candidate_document_key(chunk)
+        if not document_key:
+            continue
+        route_score = max(
+            (float(value or 0.0) for value in route_scores.values()), default=0.0
+        )
+        if route_score <= 0.0 or not any(
+            reservation_relevant(chunk, lane_id) for lane_id in route_scores
+        ):
+            continue
+        candidate = (route_score, -rank, candidate_key)
+        if candidate > route_candidates.get(document_key, (-1.0, -(10**9), "")):
+            route_candidates[document_key] = candidate
+
+    route_limit = min(
+        max(0, int(routed_document_budget)),
+        max(0, limit - 1),
+        len(route_candidates),
+    )
+    routed_docs_already_selected = {
+        _candidate_document_key(by_key[key])
+        for key in selected
+        if dict((by_key[key].metadata or {}).get("document_route_lanes") or {})
+    }
+    for document_key, (_route_score, _rank, key) in sorted(
+        route_candidates.items(),
+        key=lambda item: (-item[1][0], -item[1][1], item[0]),
+    ):
+        if len(routed_docs_already_selected) >= route_limit:
+            break
+        if document_key in routed_docs_already_selected:
+            continue
+        if reserve(key, allow_overflow=True):
+            protected_keys.add(key)
+            routed_docs_already_selected.add(document_key)
+            routed_document_reservations[document_key] = key
+
     for corpus_id in corpus_ids or []:
         existing_key = next(
             (
@@ -559,10 +610,21 @@ def reserve_planned_finalists(
 
     # Preserve the cross-encoder's order among the selected candidates.
     output = [by_key[key] for key in ranked_keys if key in selected_set][:limit]
+    routed_documents_selected = sorted(
+        {
+            _candidate_document_key(chunk)
+            for chunk in output
+            if dict((chunk.metadata or {}).get("document_route_lanes") or {})
+            and _candidate_document_key(chunk)
+        }
+    )
     return output, {
         "required_lane_ids": list(dict.fromkeys(required_lane_ids)),
         "lane_reservations": lane_reservations,
         "corpus_reservations": corpus_reservations,
+        "routed_document_reservations": routed_document_reservations,
+        "routed_documents_selected": routed_documents_selected,
+        "routed_document_budget": route_limit,
         "selected_candidates": len(output),
         "max_per_document": max_per_document,
     }

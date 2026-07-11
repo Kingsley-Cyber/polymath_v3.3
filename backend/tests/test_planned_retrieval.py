@@ -30,27 +30,36 @@ def test_planned_rerank_limit_is_adaptive_to_query_complexity():
         "Compare Purple Ocean strategy with sticky messaging."
     )
 
-    assert retriever_module._planned_rerank_candidate_limit(
-        plan=simple,
-        intent=SimpleNamespace(need=retriever_module.QueryNeed.SPECIFIC),
-        tier=RetrievalTier.qdrant_mongo,
-        configured_limit=16,
-        final_top_k=5,
-    ) == 8
-    assert retriever_module._planned_rerank_candidate_limit(
-        plan=assessment,
-        intent=SimpleNamespace(need=retriever_module.QueryNeed.BROAD),
-        tier=RetrievalTier.qdrant_mongo,
-        configured_limit=16,
-        final_top_k=5,
-    ) == 12
-    assert retriever_module._planned_rerank_candidate_limit(
-        plan=comparative,
-        intent=SimpleNamespace(need=retriever_module.QueryNeed.BALANCED),
-        tier=RetrievalTier.qdrant_mongo,
-        configured_limit=16,
-        final_top_k=5,
-    ) == 16
+    assert (
+        retriever_module._planned_rerank_candidate_limit(
+            plan=simple,
+            intent=SimpleNamespace(need=retriever_module.QueryNeed.SPECIFIC),
+            tier=RetrievalTier.qdrant_mongo,
+            configured_limit=16,
+            final_top_k=5,
+        )
+        == 8
+    )
+    assert (
+        retriever_module._planned_rerank_candidate_limit(
+            plan=assessment,
+            intent=SimpleNamespace(need=retriever_module.QueryNeed.BROAD),
+            tier=RetrievalTier.qdrant_mongo,
+            configured_limit=16,
+            final_top_k=5,
+        )
+        == 12
+    )
+    assert (
+        retriever_module._planned_rerank_candidate_limit(
+            plan=comparative,
+            intent=SimpleNamespace(need=retriever_module.QueryNeed.BALANCED),
+            tier=RetrievalTier.qdrant_mongo,
+            configured_limit=16,
+            final_top_k=5,
+        )
+        == 16
+    )
 
 
 @pytest.mark.asyncio
@@ -173,8 +182,15 @@ async def test_planned_fast_uses_top_down_qdrant_only_contract(monkeypatch):
         chunk.text = "Purple Ocean strategy differentiates a brand from competitors."
         return [chunk]
 
-    async def forbidden_lane(*args, **kwargs):
-        raise AssertionError("Fast must not use summary or lexical evidence lanes")
+    async def fake_summary_search(*args, **kwargs):
+        calls.append("summary")
+        chunk = _chunk("fast-parent-summary")
+        chunk.parent_id = "p-fast-evidence"
+        chunk.text = "Purple Ocean strategy parent context."
+        return [chunk]
+
+    async def forbidden_lexical(*args, **kwargs):
+        raise AssertionError("Fast must not use the lexical evidence lane")
 
     async def forbidden_rerank(*args, **kwargs):
         raise AssertionError("Fast must not call the cross-encoder")
@@ -187,8 +203,8 @@ async def test_planned_fast_uses_top_down_qdrant_only_contract(monkeypatch):
     monkeypatch.setattr(orchestrator, "_embedding_config_for_query", fake_config)
     monkeypatch.setattr(retriever_module, "embed_queries", fake_embed)
     monkeypatch.setattr(retriever_module.funnel_b, "search", fake_child_search)
-    monkeypatch.setattr(retriever_module.funnel_a, "search", forbidden_lane)
-    monkeypatch.setattr(retriever_module.lexical_retriever, "search", forbidden_lane)
+    monkeypatch.setattr(retriever_module.funnel_a, "search", fake_summary_search)
+    monkeypatch.setattr(retriever_module.lexical_retriever, "search", forbidden_lexical)
     monkeypatch.setattr(retriever_module.reranker_service, "rerank", forbidden_rerank)
 
     result = await orchestrator.retrieve_planned(
@@ -200,7 +216,8 @@ async def test_planned_fast_uses_top_down_qdrant_only_contract(monkeypatch):
 
     assert calls
     assert result.effective_tier == RetrievalTier.qdrant_only
-    assert result.diagnostics["limits"]["summary_top_k"] == 0
+    assert "summary" in calls
+    assert result.diagnostics["limits"]["summary_top_k"] == 4
     assert result.diagnostics["counts"]["lexical"] == 0
     assert result.diagnostics["reranker"]["status"] == "skipped_by_request"
 

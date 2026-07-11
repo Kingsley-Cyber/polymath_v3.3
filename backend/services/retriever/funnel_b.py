@@ -37,6 +37,7 @@ class FunnelB:
         entity_ids: Optional[List[str]] = None,
         min_filtered: int = 0,
         doc_ids: Optional[List[str]] = None,
+        parent_ids: Optional[List[str]] = None,
     ) -> List[SourceChunk]:
         """
         Execute precision search across target collections in parallel.
@@ -78,6 +79,14 @@ class FunnelB:
                 )
             )
 
+        if parent_ids:
+            must_conditions.append(
+                models.FieldCondition(
+                    key="parent_id",
+                    match=models.MatchAny(any=list(dict.fromkeys(parent_ids))),
+                )
+            )
+
         # Default-exclude noisy chunk_kind values (toc, bibliography, index,
         # appendix, front_matter, back_matter). Legacy points written before
         # the field existed have no `chunk_kind` payload and so don't match
@@ -85,6 +94,7 @@ class FunnelB:
         # intended backwards-compat path. To opt-in noisy kinds, callers
         # should override `query_filter` upstream.
         from services.ingestion.section_classifier import NOISY_KINDS
+
         must_not_conditions = [
             models.FieldCondition(
                 key="chunk_kind",
@@ -95,13 +105,19 @@ class FunnelB:
         base_filter = models.Filter(must=must_conditions, must_not=must_not_conditions)
         soft_should = []
         if concept_terms:
-            soft_should.append(models.FieldCondition(
-                key="concepts", match=models.MatchAny(any=list(concept_terms)),
-            ))
+            soft_should.append(
+                models.FieldCondition(
+                    key="concepts",
+                    match=models.MatchAny(any=list(concept_terms)),
+                )
+            )
         if entity_ids:
-            soft_should.append(models.FieldCondition(
-                key="entity_ids", match=models.MatchAny(any=list(entity_ids)),
-            ))
+            soft_should.append(
+                models.FieldCondition(
+                    key="entity_ids",
+                    match=models.MatchAny(any=list(entity_ids)),
+                )
+            )
         query_filter = (
             models.Filter(
                 must=must_conditions,
@@ -140,7 +156,10 @@ class FunnelB:
             merged_chunks = await _fan_out(base_filter)
             logger.info(
                 "Funnel B soft-prefilter fallback: filtered=%d < min=%d -> "
-                "unfiltered=%d", filtered_n, int(min_filtered), len(merged_chunks),
+                "unfiltered=%d",
+                filtered_n,
+                int(min_filtered),
+                len(merged_chunks),
             )
 
         # Global sort across all collection results by retrieval score
@@ -174,7 +193,9 @@ class FunnelB:
             from services.storage.qdrant_writer import _collection_layout
             from services.storage.sparse_encoder import encode_query
 
-            has_named, has_sparse = await _collection_layout(self.client, collection_name)
+            has_named, has_sparse = await _collection_layout(
+                self.client, collection_name
+            )
             sparse_query = encode_query(query_text)
             kwargs = {
                 "collection_name": collection_name,
@@ -257,10 +278,16 @@ class FunnelB:
                         domain=payload.get("domain") or None,
                         metadata={
                             **metadata_with_facets(payload.get("metadata"), payload),
-                            **({"semantic_chunk_type": payload["semantic_chunk_type"]}
-                               if payload.get("semantic_chunk_type") else {}),
-                            **({"mechanisms": payload["mechanisms"]}
-                               if payload.get("mechanisms") else {}),
+                            **(
+                                {"semantic_chunk_type": payload["semantic_chunk_type"]}
+                                if payload.get("semantic_chunk_type")
+                                else {}
+                            ),
+                            **(
+                                {"mechanisms": payload["mechanisms"]}
+                                if payload.get("mechanisms")
+                                else {}
+                            ),
                         },
                         provenance=list(retriever_provenance),
                     )

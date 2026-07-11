@@ -37,15 +37,23 @@ class _FakeCollection:
 
 
 class _FakeDb:
-    def __init__(self, records: list[dict], documents: list[dict] | None = None):
+    def __init__(
+        self,
+        records: list[dict],
+        documents: list[dict] | None = None,
+        parents: list[dict] | None = None,
+    ):
         self.chunks = _FakeCollection(records)
         self.documents = _FakeDocumentsCollection(documents or [])
+        self.parents = _FakeCollection(parents or [])
 
     def __getitem__(self, name):
         if name == "chunks":
             return self.chunks
         if name == "documents":
             return self.documents
+        if name == "parent_chunks":
+            return self.parents
         raise AssertionError(name)
 
 
@@ -74,7 +82,9 @@ def _matches(record: dict, query: dict) -> bool:
         if isinstance(expected, dict):
             if "$in" in expected and actual not in set(expected["$in"]):
                 return False
-            if "$exists" in expected and (key in record) is not bool(expected["$exists"]):
+            if "$exists" in expected and (key in record) is not bool(
+                expected["$exists"]
+            ):
                 return False
             continue
         if actual != expected:
@@ -114,7 +124,15 @@ async def test_hydrate_rerank_texts_replaces_qdrant_snippet(monkeypatch):
                 "chunk_kind": "table",
                 "metadata": {"row_start": 1, "row_end": 7},
             }
-        ]
+        ],
+        parents=[
+            {
+                "parent_id": "parent-1",
+                "doc_id": "doc-1",
+                "corpus_id": "corpus-1",
+                "retrieval_text": "The section maps event-driven needs to AWS services.",
+            }
+        ],
     )
     monkeypatch.setattr(conversation_service, "_db", fake_db)
 
@@ -124,7 +142,11 @@ async def test_hydrate_rerank_texts_replaces_qdrant_snippet(monkeypatch):
     assert hydrated[0].text == full_text
     assert "Event-driven processing" in hydrated[0].text
     assert "Amazon SQS + AWS Lambda" in hydrated[0].text
-    assert hydrated[0].metadata == {"row_start": 1, "row_end": 7}
+    assert hydrated[0].metadata["row_start"] == 1
+    assert hydrated[0].metadata["row_end"] == 7
+    assert hydrated[0].metadata["reranker_parent_context"] == (
+        "The section maps event-driven needs to AWS services."
+    )
     assert original[0].text == "Table: Table 1\nRow 1: Static website hosting"
 
 

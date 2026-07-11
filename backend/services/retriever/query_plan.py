@@ -30,6 +30,14 @@ QueryComplexity = Literal[
     "dependent_multi_hop",
 ]
 QueryLaneRole = Literal["original", "core", "bridge", "background"]
+AnswerShape = Literal[
+    "single_fact",
+    "enumeration",
+    "comparison",
+    "relationship",
+    "procedure",
+    "synthesis",
+]
 
 _DESCRIPTOR_RE = re.compile(
     r"\b((?:[A-Za-z][A-Za-z0-9'\-]*\s+){1,4})"
@@ -77,7 +85,13 @@ _FOLLOWUP_PREFIX_RE = re.compile(
 )
 _ANSWER_OBJECT_SUPPORT: dict[str, tuple[str, ...]] = {
     "book": ("book titles", "authors", "book recommendations", "lessons", "principles"),
-    "books": ("book titles", "authors", "book recommendations", "lessons", "principles"),
+    "books": (
+        "book titles",
+        "authors",
+        "book recommendations",
+        "lessons",
+        "principles",
+    ),
     "author": ("book authors", "written by", "books"),
     "authors": ("book authors", "written by", "books"),
     "tool": ("tools", "use cases", "applications"),
@@ -176,6 +190,7 @@ class QueryPlanV2:
     concepts: tuple[str, ...]
     operators: tuple[str, ...]
     lanes: tuple[QueryLane, ...]
+    answer_shape: AnswerShape = "single_fact"
     corpus_ids: tuple[str, ...] = ()
     max_repair_rounds: int = 1
 
@@ -371,6 +386,25 @@ def _complexity(
     return "simple"
 
 
+def _answer_shape(query: str, complexity: QueryComplexity) -> AnswerShape:
+    normalized = clean_text(query).strip()
+    if _ANSWER_OBJECT_RE.search(query or ""):
+        return "enumeration"
+    if complexity == "comparative" or re.search(
+        r"\b(?:compare|contrast|versus|vs)\b", normalized
+    ):
+        return "comparison"
+    if re.search(r"\b(?:relationship|relate|between|connect|link)\b", normalized):
+        return "relationship"
+    if normalized.startswith("how ") or re.search(
+        r"\b(?:steps|procedure|process)\b", normalized
+    ):
+        return "procedure"
+    if complexity in {"compositional", "dependent_multi_hop"}:
+        return "synthesis"
+    return "single_fact"
+
+
 def _collapse_attribution_concepts(
     query: str,
     concepts: list[str],
@@ -558,14 +592,16 @@ def build_query_plan_v2(
             )
         )
 
+    complexity = _complexity(standalone, len(concepts), operators)
     return QueryPlanV2(
         version="query_plan.v2",
         original_query=original,
         standalone_query=standalone,
-        complexity=_complexity(standalone, len(concepts), operators),
+        complexity=complexity,
         concepts=tuple(concepts),
         operators=operators,
         lanes=tuple(lanes),
+        answer_shape=_answer_shape(standalone, complexity),
         corpus_ids=tuple(str(item) for item in (corpus_ids or ())),
     )
 
@@ -587,7 +623,9 @@ def query_plan_curation_query(plan: QueryPlanV2) -> str:
         phrases: list[str] = []
         for concept in plan.concepts:
             phrases.append(concept)
-            phrases.extend(_ANSWER_OBJECT_SUPPORT.get(clean_text(concept).strip(), ())[:4])
+            phrases.extend(
+                _ANSWER_OBJECT_SUPPORT.get(clean_text(concept).strip(), ())[:4]
+            )
         return " ".join(dict.fromkeys(phrases))
     return plan.original_query
 
@@ -598,6 +636,7 @@ def query_plan_to_dict(plan: QueryPlanV2) -> dict[str, object]:
         "original_query": plan.original_query,
         "standalone_query": plan.standalone_query,
         "complexity": plan.complexity,
+        "answer_shape": plan.answer_shape,
         "concepts": list(plan.concepts),
         "operators": list(plan.operators),
         "corpus_ids": list(plan.corpus_ids),

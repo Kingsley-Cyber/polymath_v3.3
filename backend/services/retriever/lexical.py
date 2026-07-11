@@ -66,9 +66,7 @@ def _regex_score(query: str, terms: list[str], row: dict[str, Any]) -> float:
     # because 'life' substring-matched "LIFEcycle", 'mid' matched "MIDdle" —
     # cross-domain polysemy amplified by partial-word hits).
     def _whole_word(term: str, hay: str) -> bool:
-        return bool(
-            re.search(rf"(?<![a-z0-9]){re.escape(term)}(?![a-z0-9])", hay)
-        )
+        return bool(re.search(rf"(?<![a-z0-9]){re.escape(term)}(?![a-z0-9])", hay))
 
     hits = sum(1 for term in terms if _whole_word(term, haystack))
     if hits <= 0:
@@ -123,6 +121,7 @@ class LexicalRetriever:
         corpus_ids: list[str] | None,
         *,
         top_k: int = 10,
+        doc_ids: list[str] | None = None,
     ) -> list[SourceChunk]:
         """Return lexical child-chunk candidates scoped to selected corpora.
 
@@ -142,13 +141,14 @@ class LexicalRetriever:
             try:
                 results.extend(
                     await self._qdrant_sparse_search(
-                        query, sparse_corpora, top_k=top_k
+                        query, sparse_corpora, top_k=top_k, doc_ids=doc_ids
                     )
                 )
             except Exception as exc:
                 logger.warning(
                     "Qdrant sparse lexical search failed (%s) — falling back to Mongo for %d corpora",
-                    exc, len(sparse_corpora),
+                    exc,
+                    len(sparse_corpora),
                 )
                 # On Qdrant failure, fall through to Mongo for these too.
                 legacy_corpora = list(set(legacy_corpora) | set(sparse_corpora))
@@ -162,7 +162,9 @@ class LexicalRetriever:
             else:
                 try:
                     results.extend(
-                        await self._text_search(db, query, legacy_corpora, top_k=top_k)
+                        await self._text_search(
+                            db, query, legacy_corpora, top_k=top_k, doc_ids=doc_ids
+                        )
                     )
                 except OperationFailure as exc:
                     logger.warning(
@@ -170,7 +172,9 @@ class LexicalRetriever:
                         exc,
                     )
                     results.extend(
-                        await self._regex_search(db, query, legacy_corpora, top_k=top_k)
+                        await self._regex_search(
+                            db, query, legacy_corpora, top_k=top_k, doc_ids=doc_ids
+                        )
                     )
                 except Exception as exc:
                     logger.warning("Mongo lexical search failed (%s)", exc)
@@ -182,6 +186,7 @@ class LexicalRetriever:
             existing=results,
             db=db,
             per_concept_k=2,
+            doc_ids=doc_ids,
         )
         results.extend(coverage_results)
 
@@ -206,6 +211,7 @@ class LexicalRetriever:
         existing: list[SourceChunk],
         db,
         per_concept_k: int = 2,
+        doc_ids: list[str] | None = None,
     ) -> list[SourceChunk]:
         """Add tiny, per-concept lexical recall for missing query concepts.
 
@@ -226,6 +232,7 @@ class LexicalRetriever:
                         bridge_query,
                         sparse_corpora,
                         top_k=per_concept_k,
+                        doc_ids=doc_ids,
                     )
                 )
             if legacy_corpora and db is not None:
@@ -236,6 +243,7 @@ class LexicalRetriever:
                             bridge_query,
                             legacy_corpora,
                             top_k=per_concept_k,
+                            doc_ids=doc_ids,
                         )
                     )
                 except Exception as exc:
@@ -262,6 +270,7 @@ class LexicalRetriever:
                             variant,
                             sparse_corpora,
                             top_k=per_concept_k,
+                            doc_ids=doc_ids,
                         )
                     )
                 if legacy_corpora and db is not None:
@@ -272,6 +281,7 @@ class LexicalRetriever:
                                 variant,
                                 legacy_corpora,
                                 top_k=per_concept_k,
+                                doc_ids=doc_ids,
                             )
                         )
                     except OperationFailure as exc:
@@ -287,6 +297,7 @@ class LexicalRetriever:
                                 variant,
                                 legacy_corpora,
                                 top_k=per_concept_k,
+                                doc_ids=doc_ids,
                             )
                         )
                     except Exception as exc:
@@ -340,6 +351,7 @@ class LexicalRetriever:
         vectors. Sparse corpora go through Qdrant; legacy go through Mongo.
         Errors / missing collections fall through as legacy (safest)."""
         from services.storage.qdrant_writer import _col_for_corpus, _collection_layout
+
         sparse_corpora: list[str] = []
         legacy_corpora: list[str] = []
         client = self._client()
@@ -361,6 +373,7 @@ class LexicalRetriever:
         corpus_ids: list[str],
         *,
         top_k: int,
+        doc_ids: list[str] | None = None,
     ) -> list[SourceChunk]:
         """BM25 search inside Qdrant via the named "sparse" vector. One
         query per per-corpus collection; results merged by score."""
@@ -375,13 +388,21 @@ class LexicalRetriever:
 
         # Same default-noise filter as funnel_a / funnel_b, so all three
         # halves of hybrid see the same candidate universe.
-        query_filter = qmodels.Filter(
-            must=[
+        must_conditions = [
+            qmodels.FieldCondition(
+                key="chunk_type",
+                match=qmodels.MatchValue(value="child"),
+            )
+        ]
+        if doc_ids:
+            must_conditions.append(
                 qmodels.FieldCondition(
-                    key="chunk_type",
-                    match=qmodels.MatchValue(value="child"),
+                    key="doc_id",
+                    match=qmodels.MatchAny(any=list(dict.fromkeys(doc_ids))),
                 )
-            ],
+            )
+        query_filter = qmodels.Filter(
+            must=must_conditions,
             must_not=[
                 qmodels.FieldCondition(
                     key="chunk_kind",
@@ -405,7 +426,9 @@ class LexicalRetriever:
                 )
             except Exception as exc:
                 logger.warning(
-                    "Qdrant sparse query failed for collection=%s: %s", name, exc,
+                    "Qdrant sparse query failed for collection=%s: %s",
+                    name,
+                    exc,
                 )
                 continue
             for hit in resp.points or []:
@@ -416,7 +439,9 @@ class LexicalRetriever:
                         parent_id=str(payload.get("parent_id") or ""),
                         doc_id=str(payload.get("doc_id") or ""),
                         corpus_id=str(payload.get("corpus_id") or ""),
-                        text=str(payload.get("chunk_text") or payload.get("text") or ""),
+                        text=str(
+                            payload.get("chunk_text") or payload.get("text") or ""
+                        ),
                         summary=None,
                         score=float(hit.score or 0.0),
                         source_tier=f"{payload.get('source_tier') or 'chunk'}+lexical",
@@ -435,7 +460,9 @@ class LexicalRetriever:
         # hits are returned in raw BM25 rank order; pool selection is now
         # rank-fused per lane and the cross-encoder is the only score that
         # orders the packet, so cross-lane score parity is a non-goal.
-        all_hits.sort(key=lambda c: (-float(c.score or 0.0), c.doc_id or "", c.chunk_id or ""))
+        all_hits.sort(
+            key=lambda c: (-float(c.score or 0.0), c.doc_id or "", c.chunk_id or "")
+        )
         return all_hits
 
     async def _text_search(
@@ -445,6 +472,7 @@ class LexicalRetriever:
         corpus_ids: list[str],
         *,
         top_k: int,
+        doc_ids: list[str] | None = None,
     ) -> list[SourceChunk]:
         projection = {
             "_id": 0,
@@ -472,16 +500,17 @@ class LexicalRetriever:
         # True, so legacy chunks without `chunk_kind` pass through unchanged
         # — same backwards-compat behavior as the vector path.
         from services.ingestion.section_classifier import NOISY_KINDS
+
+        mongo_filter = {
+            "corpus_id": {"$in": corpus_ids},
+            "$text": {"$search": query},
+            "chunk_kind": {"$nin": list(NOISY_KINDS)},
+        }
+        if doc_ids:
+            mongo_filter["doc_id"] = {"$in": list(dict.fromkeys(doc_ids))}
         cursor = (
             db["chunks"]
-            .find(
-                {
-                    "corpus_id": {"$in": corpus_ids},
-                    "$text": {"$search": query},
-                    "chunk_kind": {"$nin": list(NOISY_KINDS)},
-                },
-                projection,
-            )
+            .find(mongo_filter, projection)
             .sort([("score", {"$meta": "textScore"})])
             .limit(top_k)
         )
@@ -507,14 +536,14 @@ class LexicalRetriever:
         corpus_ids: list[str],
         *,
         top_k: int,
+        doc_ids: list[str] | None = None,
     ) -> list[SourceChunk]:
         terms = _terms(query)
         if not terms:
             return []
         # Bounded fallback for dev/old DBs before the text index exists.
         conditions = [
-            {"text": {"$regex": re.escape(term), "$options": "i"}}
-            for term in terms[:6]
+            {"text": {"$regex": re.escape(term), "$options": "i"}} for term in terms[:6]
         ]
         conditions.extend(
             {"heading_path": {"$regex": re.escape(term), "$options": "i"}}
@@ -538,14 +567,18 @@ class LexicalRetriever:
         )
         # Mirror the text-search default-noise filter on the regex fallback.
         from services.ingestion.section_classifier import NOISY_KINDS
+
+        mongo_filter = {
+            "corpus_id": {"$in": corpus_ids},
+            "$or": conditions,
+            "chunk_kind": {"$nin": list(NOISY_KINDS)},
+        }
+        if doc_ids:
+            mongo_filter["doc_id"] = {"$in": list(dict.fromkeys(doc_ids))}
         cursor = (
             db["chunks"]
             .find(
-                {
-                    "corpus_id": {"$in": corpus_ids},
-                    "$or": conditions,
-                    "chunk_kind": {"$nin": list(NOISY_KINDS)},
-                },
+                mongo_filter,
                 {
                     "_id": 0,
                     "chunk_id": 1,
@@ -569,16 +602,10 @@ class LexicalRetriever:
             .limit(max(top_k * 4, 20))
         )
         rows = await cursor.to_list(length=max(top_k * 4, 20))
-        scored = [
-            (row, _regex_score(query, terms, row))
-            for row in rows
-        ]
+        scored = [(row, _regex_score(query, terms, row)) for row in rows]
         scored = [(row, score) for row, score in scored if score > 0.0]
         scored.sort(key=lambda item: item[1], reverse=True)
-        chunks = [
-            self._row_to_chunk(row, score=score)
-            for row, score in scored[:top_k]
-        ]
+        chunks = [self._row_to_chunk(row, score=score) for row, score in scored[:top_k]]
         logger.info("Lexical regex fallback returned %d candidates", len(chunks))
         return chunks
 

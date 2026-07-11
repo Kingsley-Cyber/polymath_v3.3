@@ -11,7 +11,7 @@ from services.retriever import (
 )
 from services.retriever.funnel_a import FunnelA
 from services.retriever.funnel_b import FunnelB
-from services.retriever.lexical import _regex_score, _terms
+from services.retriever.lexical import LexicalRetriever, _regex_score, _terms
 from services.storage import qdrant_writer
 
 
@@ -42,26 +42,38 @@ class _FakeQdrantClient:
 
 
 def test_speed_profiles_map_to_lexical_budget():
-    assert _lexical_limit_for(
-        RetrievalTier.qdrant_only,
-        retrieval_k=60,
-        rerank_enabled=True,
-    ) == 0
-    assert _lexical_limit_for(
-        RetrievalTier.qdrant_mongo,
-        retrieval_k=10,
-        rerank_enabled=False,
-    ) == 6
-    assert _lexical_limit_for(
-        RetrievalTier.qdrant_mongo,
-        retrieval_k=40,
-        rerank_enabled=True,
-    ) == 12
-    assert _lexical_limit_for(
-        RetrievalTier.qdrant_mongo_graph,
-        retrieval_k=60,
-        rerank_enabled=True,
-    ) == 18
+    assert (
+        _lexical_limit_for(
+            RetrievalTier.qdrant_only,
+            retrieval_k=60,
+            rerank_enabled=True,
+        )
+        == 0
+    )
+    assert (
+        _lexical_limit_for(
+            RetrievalTier.qdrant_mongo,
+            retrieval_k=10,
+            rerank_enabled=False,
+        )
+        == 6
+    )
+    assert (
+        _lexical_limit_for(
+            RetrievalTier.qdrant_mongo,
+            retrieval_k=40,
+            rerank_enabled=True,
+        )
+        == 12
+    )
+    assert (
+        _lexical_limit_for(
+            RetrievalTier.qdrant_mongo_graph,
+            retrieval_k=60,
+            rerank_enabled=True,
+        )
+        == 18
+    )
 
 
 def test_retrieval_store_contracts_make_tiers_observable():
@@ -146,7 +158,9 @@ async def test_fast_funnel_b_uses_qdrant_dense_sparse_rrf_when_available(monkeyp
 
 
 @pytest.mark.asyncio
-async def test_fast_funnel_a_summaries_use_qdrant_dense_sparse_rrf_when_available(monkeypatch):
+async def test_fast_funnel_a_summaries_use_qdrant_dense_sparse_rrf_when_available(
+    monkeypatch,
+):
     monkeypatch.setattr(qdrant_writer, "_collection_layout", _fake_collection_layout)
     client = _FakeQdrantClient()
     funnel = FunnelA()
@@ -171,7 +185,9 @@ async def test_fast_funnel_a_summaries_use_qdrant_dense_sparse_rrf_when_availabl
 
 @pytest.mark.asyncio
 async def test_fast_funnel_b_falls_back_to_dense_for_legacy_collection(monkeypatch):
-    monkeypatch.setattr(qdrant_writer, "_collection_layout", _fake_legacy_collection_layout)
+    monkeypatch.setattr(
+        qdrant_writer, "_collection_layout", _fake_legacy_collection_layout
+    )
     client = _FakeQdrantClient()
     funnel = FunnelB()
     funnel.client = client
@@ -212,6 +228,46 @@ async def test_fast_funnel_b_rrf_failure_falls_back_to_dense(monkeypatch):
     assert client.calls[1]["query"] == [0.1, 0.2]
     assert client.calls[1]["using"] == "dense"
     assert chunks[0].provenance == [{"retriever": "qdrant_dense"}]
+
+
+@pytest.mark.asyncio
+async def test_funnel_b_filters_children_by_document_and_parent(monkeypatch):
+    monkeypatch.setattr(qdrant_writer, "_collection_layout", _fake_collection_layout)
+    client = _FakeQdrantClient()
+    funnel = FunnelB()
+    funnel.client = client
+
+    await funnel.search(
+        [0.1, 0.2],
+        ["corpus-1"],
+        ["corpus_abcd_naive"],
+        query_text="book recommendations",
+        doc_ids=["doc-1"],
+        parent_ids=["parent-1"],
+    )
+
+    conditions = client.calls[0]["prefetch"][0].filter.must
+    fields = {condition.key: condition.match for condition in conditions}
+    assert fields["doc_id"].any == ["doc-1"]
+    assert fields["parent_id"].any == ["parent-1"]
+
+
+@pytest.mark.asyncio
+async def test_lexical_sparse_search_honors_routed_document_scope(monkeypatch):
+    client = _FakeQdrantClient()
+    retriever = LexicalRetriever()
+    retriever._qdrant = client
+
+    await retriever._qdrant_sparse_search(
+        "book recommendations",
+        ["corpus-1"],
+        top_k=5,
+        doc_ids=["doc-1"],
+    )
+
+    conditions = client.calls[0]["query_filter"].must
+    fields = {condition.key: condition.match for condition in conditions}
+    assert fields["doc_id"].any == ["doc-1"]
 
 
 def test_low_confidence_guard_drops_unrelated_rerank_results():

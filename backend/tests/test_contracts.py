@@ -30,16 +30,32 @@ from models.contracts import (  # noqa: E402
 
 def _full_payload() -> RetrievalPayload:
     return RetrievalPayload(
-        chunk_id="c1", parent_id="p1", doc_id="d1", corpus_id="k1", user_id="u1",
-        chunk_type="child", chunk_kind="body", language="python", domain="programming",
+        chunk_id="c1",
+        parent_id="p1",
+        doc_id="d1",
+        corpus_id="k1",
+        user_id="u1",
+        chunk_type="child",
+        chunk_kind="body",
+        language="python",
+        domain="programming",
         topic_key="cpp.language.standard",
-        concepts=["tensorflow", "tf"], entity_ids=["entity:tensorflow"],
-        entity_families=["machine_learning"], entity_domains=["AIModel"],
-        relation_predicates=["uses"], relation_families=["Operational"],
-        fact_types=["quantity"], has_relations=True,
-        semantic_chunk_type="principle", mechanisms=["compounding"], key_terms=["XPath"],
-        document_status="active", is_latest=True, document_date="2026-06-15",
-        valid_from="2026-06-15", valid_to=None,
+        concepts=["tensorflow", "tf"],
+        entity_ids=["entity:tensorflow"],
+        entity_families=["machine_learning"],
+        entity_domains=["AIModel"],
+        relation_predicates=["uses"],
+        relation_families=["Operational"],
+        fact_types=["quantity"],
+        has_relations=True,
+        semantic_chunk_type="principle",
+        mechanisms=["compounding"],
+        key_terms=["XPath"],
+        document_status="active",
+        is_latest=True,
+        document_date="2026-06-15",
+        valid_from="2026-06-15",
+        valid_to=None,
     )
 
 
@@ -47,7 +63,7 @@ def test_stage_contract_every_field_populated():
     p = _full_payload()
     empty = []
     for name, val in p.model_dump().items():
-        if name == "valid_to":            # None is the OPEN-ended validity — allowed
+        if name == "valid_to":  # None is the OPEN-ended validity — allowed
             continue
         if val in (None, "", [], {}):
             empty.append(name)
@@ -61,12 +77,22 @@ def test_version_stamps_default():
 
 
 def test_envelope_extractor_provenance_is_required():
-    ok = ChunkExtraction(extractor="gliner_glirel_local", corpus_id="k", doc_id="d",
-                         chunk_id="c", parent_id="p")
+    ok = ChunkExtraction(
+        extractor="gliner_glirel_local",
+        corpus_id="k",
+        doc_id="d",
+        chunk_id="c",
+        parent_id="p",
+    )
     assert ok.schema_version == "polymath.extract.v2"
     try:
-        ChunkExtraction(extractor="something_else", corpus_id="k", doc_id="d",
-                        chunk_id="c", parent_id="p")
+        ChunkExtraction(
+            extractor="something_else",
+            corpus_id="k",
+            doc_id="d",
+            chunk_id="c",
+            parent_id="p",
+        )
         raise AssertionError("invalid extractor accepted")
     except Exception:
         pass  # pydantic rejected — provenance is a closed enum
@@ -87,16 +113,28 @@ def test_fact_type_closed_enum():
 
 
 def test_graph_entity_id_never_corpus_prefixed_convention():
-    g = GraphEntity(entity_id="entity:tensorflow", canonical_name="tensorflow",
-                    corpus_ids=["k1", "k2"])
+    g = GraphEntity(
+        entity_id="entity:tensorflow",
+        canonical_name="tensorflow",
+        corpus_ids=["k1", "k2"],
+    )
     assert g.entity_id.startswith("entity:") and "::" not in g.entity_id
-    assert g.corpus_ids == ["k1", "k2"]        # isolation via property, not identity
+    assert g.corpus_ids == ["k1", "k2"]  # isolation via property, not identity
 
 
 def test_reranker_input_render_no_ids():
-    r = RerankerInput(source_book="Atomic Habits", section="Chapter 1", excerpt="Habits compound.")
+    r = RerankerInput(
+        source_book="Atomic Habits",
+        section="Chapter 1",
+        parent_context="The chapter explains compound behavior change.",
+        excerpt="Habits compound.",
+    )
     out = r.render()
-    assert out == "Atomic Habits › Chapter 1\nHabits compound."
+    assert out == (
+        "Atomic Habits › Chapter 1\n"
+        "Parent context: The chapter explains compound behavior change.\n"
+        "Habits compound."
+    )
     r2 = RerankerInput(excerpt="bare text")
     assert r2.render() == "bare text"
 
@@ -110,13 +148,17 @@ def test_chunk_metadata_versioning_defaults():
 def test_graph_write_model_composes():
     gw = GraphWriteModel(
         entities=[GraphEntity(entity_id="entity:x", canonical_name="x")],
-        relations=[GraphRelation(subject_id="entity:x", predicate="uses", object_id="entity:y")],
+        relations=[
+            GraphRelation(subject_id="entity:x", predicate="uses", object_id="entity:y")
+        ],
     )
     assert gw.relations[0].predicate == "uses"
 
 
 def _run_all():
-    tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
+    tests = [
+        v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)
+    ]
     failed = 0
     for t in tests:
         try:

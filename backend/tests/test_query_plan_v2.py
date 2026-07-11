@@ -175,6 +175,7 @@ def test_answer_object_books_survives_as_required_concept():
         "books book titles authors book recommendations lessons dropshipping"
     )
     assert "help" not in plan.concepts
+    assert plan.answer_shape == "enumeration"
 
 
 def test_terse_followup_uses_previous_user_subject_without_model_call():

@@ -10,6 +10,7 @@ Mode A expansion note:
   chunks collection as a first pass before attempting parent text hydration, so
   Mode A results are hydrated correctly rather than passing through with empty text.
 """
+import asyncio
 import hashlib
 import logging
 import re
@@ -142,6 +143,7 @@ def _assemble_hydrated_text(
         )
     return body
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -170,7 +172,11 @@ async def attach_document_identities(
         {str(chunk.chunk_id) for chunk in chunks if chunk.chunk_id and not chunk.doc_id}
     )
     parent_ids = sorted(
-        {str(chunk.parent_id) for chunk in chunks if chunk.parent_id and not chunk.doc_id}
+        {
+            str(chunk.parent_id)
+            for chunk in chunks
+            if chunk.parent_id and not chunk.doc_id
+        }
     )
     doc_id_by_chunk: dict[str, str] = {}
     doc_id_by_parent: dict[str, str] = {}
@@ -184,10 +190,14 @@ async def attach_document_identities(
         if corpus_ids:
             identity_query["corpus_id"] = {"$in": corpus_ids}
         try:
-            chunk_rows = await db["chunks"].find(
-                with_active_records(identity_query),
-                {"_id": 0, "chunk_id": 1, "parent_id": 1, "doc_id": 1},
-            ).to_list(length=None)
+            chunk_rows = (
+                await db["chunks"]
+                .find(
+                    with_active_records(identity_query),
+                    {"_id": 0, "chunk_id": 1, "parent_id": 1, "doc_id": 1},
+                )
+                .to_list(length=None)
+            )
             doc_id_by_chunk = {
                 str(row.get("chunk_id")): str(row.get("doc_id"))
                 for row in chunk_rows
@@ -214,17 +224,21 @@ async def attach_document_identities(
     if corpus_ids:
         query["corpus_id"] = {"$in": corpus_ids}
     try:
-        rows = await db["documents"].find(
-            with_active_records(query),
-            {
-                "_id": 0,
-                "doc_id": 1,
-                "corpus_id": 1,
-                "source_file_hash": 1,
-                "content_sha256": 1,
-                "source_identity": 1,
-            },
-        ).to_list(length=None)
+        rows = (
+            await db["documents"]
+            .find(
+                with_active_records(query),
+                {
+                    "_id": 0,
+                    "doc_id": 1,
+                    "corpus_id": 1,
+                    "source_file_hash": 1,
+                    "content_sha256": 1,
+                    "source_identity": 1,
+                },
+            )
+            .to_list(length=None)
+        )
     except Exception as exc:
         logger.warning("Document identity hydration failed: %s", exc)
         return chunks
@@ -298,9 +312,7 @@ def dedupe_cross_corpus_evidence(
             if value
         }
         memberships.update(
-            str(value)
-            for value in metadata.get("corpus_memberships") or []
-            if value
+            str(value) for value in metadata.get("corpus_memberships") or [] if value
         )
         if chunk.corpus_id:
             memberships.add(str(chunk.corpus_id))
@@ -378,9 +390,11 @@ async def hydrate_chunks(
             orphan_query: dict = {"chunk_id": {"$in": orphan_ids}}
             if corpus_ids:
                 orphan_query["corpus_id"] = {"$in": corpus_ids}
-            chunk_records = await db["chunks"].find(
-                with_active_records(orphan_query)
-            ).to_list(length=None)
+            chunk_records = (
+                await db["chunks"]
+                .find(with_active_records(orphan_query))
+                .to_list(length=None)
+            )
             pid_map = {r["chunk_id"]: r.get("parent_id", "") for r in chunk_records}
             did_map = {r["chunk_id"]: r.get("doc_id", "") for r in chunk_records}
             kind_map = {r["chunk_id"]: r.get("chunk_kind", "") for r in chunk_records}
@@ -390,7 +404,9 @@ async def hydrate_chunks(
                 if not chunk.doc_id:
                     chunk.doc_id = did_map.get(chunk.chunk_id, "") or ""
                 if not getattr(chunk, "chunk_kind", "") or chunk.chunk_kind == "body":
-                    chunk.chunk_kind = kind_map.get(chunk.chunk_id, "") or chunk.chunk_kind
+                    chunk.chunk_kind = (
+                        kind_map.get(chunk.chunk_id, "") or chunk.chunk_kind
+                    )
                 chunk.metadata = metadata_with_facets(
                     chunk.metadata,
                     meta_map.get(chunk.chunk_id),
@@ -410,7 +426,11 @@ async def hydrate_chunks(
         mongo_query["corpus_id"] = {"$in": corpus_ids}
 
     try:
-        docs = await db["documents"].find(with_active_records(mongo_query)).to_list(length=None)
+        docs = (
+            await db["documents"]
+            .find(with_active_records(mongo_query))
+            .to_list(length=None)
+        )
     except Exception as exc:
         logger.error("Hydration documents query failed: %s", exc)
         return chunks
@@ -426,10 +446,14 @@ async def hydrate_chunks(
         if corpus_ids:
             parent_query["corpus_id"] = {"$in": corpus_ids}
         try:
-            parent_rows = await db["parent_chunks"].find(
-                with_active_records(parent_query),
-                {"_id": 0},
-            ).to_list(length=None)
+            parent_rows = (
+                await db["parent_chunks"]
+                .find(
+                    with_active_records(parent_query),
+                    {"_id": 0},
+                )
+                .to_list(length=None)
+            )
             for pc in parent_rows:
                 did = pc.get("doc_id", "")
                 pid = pc.get("parent_id", "")
@@ -456,12 +480,12 @@ async def hydrate_chunks(
     corpus_name_map: dict[str, str] = {}
     if corpus_id_set:
         try:
-            corpus_docs = await db["corpora"].find(
-                {"corpus_id": {"$in": list(corpus_id_set)}}
-            ).to_list(length=None)
-            corpus_name_map = {
-                c["corpus_id"]: c.get("name", "") for c in corpus_docs
-            }
+            corpus_docs = (
+                await db["corpora"]
+                .find({"corpus_id": {"$in": list(corpus_id_set)}})
+                .to_list(length=None)
+            )
+            corpus_name_map = {c["corpus_id"]: c.get("name", "") for c in corpus_docs}
         except Exception as exc:
             logger.warning("Corpus name lookup failed: %s", exc)
 
@@ -494,7 +518,9 @@ async def hydrate_chunks(
                 # (e.g. Mode A graph expansion produced empty-text chunks).
                 if not chunk.heading_path and pc.get("heading_path"):
                     chunk.heading_path = pc["heading_path"]
-                if (not getattr(chunk, "chunk_kind", "") or chunk.chunk_kind == "body") and pc.get("chunk_kind"):
+                if (
+                    not getattr(chunk, "chunk_kind", "") or chunk.chunk_kind == "body"
+                ) and pc.get("chunk_kind"):
                     chunk.chunk_kind = pc["chunk_kind"]
                 # Code lane (Phase 1) — propagate language + AST metadata
                 # from the parent Mongo record. Mode A / Mode B chunks
@@ -519,9 +545,7 @@ async def hydrate_chunks(
                 metadata["doc_artifact"] = doc_artifact
                 chunk.metadata = metadata
 
-        chunk.corpus_name = (
-            corpus_name_map.get(chunk.corpus_id, "") or chunk.corpus_id
-        )
+        chunk.corpus_name = corpus_name_map.get(chunk.corpus_id, "") or chunk.corpus_id
         hydrated.append(chunk)
 
     # ── Pass 3: drop empty-text chunks (unresolvable Mode A results) ─────────
@@ -562,9 +586,7 @@ async def hydrate_rerank_texts(
         return chunks
 
     chunk_ids = [
-        c.chunk_id
-        for c in chunks
-        if c.chunk_id and not c.chunk_id.endswith("_summary")
+        c.chunk_id for c in chunks if c.chunk_id and not c.chunk_id.endswith("_summary")
     ]
     if not chunk_ids:
         return chunks
@@ -573,33 +595,86 @@ async def hydrate_rerank_texts(
     if corpus_ids:
         query["corpus_id"] = {"$in": corpus_ids}
 
+    parent_ids = sorted(
+        {str(c.parent_id) for c in chunks if str(c.parent_id or "").strip()}
+    )
+
+    async def _chunk_records():
+        return (
+            await db["chunks"]
+            .find(
+                with_active_records(query),
+                {
+                    "_id": 0,
+                    "chunk_id": 1,
+                    "text": 1,
+                    "parent_id": 1,
+                    "doc_id": 1,
+                    "corpus_id": 1,
+                    "chunk_kind": 1,
+                    "heading_path": 1,
+                    "language": 1,
+                    "metadata": 1,
+                    "facet_ids": 1,
+                    "facet_text": 1,
+                    "content_facet_ids": 1,
+                    "content_facet_text": 1,
+                    "content_facet_source": 1,
+                    "content_facet_confidence": 1,
+                },
+            )
+            .to_list(length=None)
+        )
+
+    async def _parent_records():
+        if not parent_ids:
+            return []
+        parent_query: dict = {"parent_id": {"$in": parent_ids}}
+        if corpus_ids:
+            parent_query["corpus_id"] = {"$in": corpus_ids}
+        return (
+            await db["parent_chunks"]
+            .find(
+                with_active_records(parent_query),
+                {
+                    "_id": 0,
+                    "parent_id": 1,
+                    "doc_id": 1,
+                    "corpus_id": 1,
+                    "summary": 1,
+                    "retrieval_text": 1,
+                },
+            )
+            .to_list(length=None)
+        )
+
     try:
-        records = await db["chunks"].find(
-            with_active_records(query),
-            {
-                "_id": 0,
-                "chunk_id": 1,
-                "text": 1,
-                "parent_id": 1,
-                "doc_id": 1,
-                "corpus_id": 1,
-                "chunk_kind": 1,
-                "heading_path": 1,
-                "language": 1,
-                "metadata": 1,
-                "facet_ids": 1,
-                "facet_text": 1,
-                "content_facet_ids": 1,
-                "content_facet_text": 1,
-                "content_facet_source": 1,
-                "content_facet_confidence": 1,
-            },
-        ).to_list(length=None)
+        records, parent_records = await asyncio.gather(
+            _chunk_records(),
+            _parent_records(),
+        )
     except Exception as exc:
         logger.warning("Reranker text hydration failed: %s", exc)
         return chunks
 
     by_id = {str(r.get("chunk_id")): r for r in records if r.get("chunk_id")}
+    parent_context_by_key: dict[tuple[str, str, str], str] = {}
+    parent_context_by_id: dict[str, str] = {}
+    for parent in parent_records:
+        parent_id = str(parent.get("parent_id") or "")
+        context = str(
+            parent.get("retrieval_text") or parent.get("summary") or ""
+        ).strip()
+        if not parent_id or not context:
+            continue
+        parent_context_by_key[
+            (
+                str(parent.get("corpus_id") or ""),
+                str(parent.get("doc_id") or ""),
+                parent_id,
+            )
+        ] = context
+        parent_context_by_id.setdefault(parent_id, context)
     if not by_id:
         return chunks
 
@@ -625,6 +700,17 @@ async def hydrate_rerank_texts(
                 copied.metadata or record.get("metadata") or {},
                 record,
             )
+        parent_context = parent_context_by_key.get(
+            (
+                str(copied.corpus_id or ""),
+                str(copied.doc_id or ""),
+                str(copied.parent_id or ""),
+            )
+        ) or parent_context_by_id.get(str(copied.parent_id or ""))
+        if parent_context:
+            metadata = dict(copied.metadata or {})
+            metadata["reranker_parent_context"] = parent_context[:1200]
+            copied.metadata = metadata
         hydrated.append(copied)
 
     if replaced:
@@ -680,30 +766,34 @@ async def hydrate_summary_rerank_texts(
         return chunks
 
     try:
-        docs = await db["documents"].find(
-            with_active_records(query),
-            {
-                "_id": 0,
-                "doc_id": 1,
-                "corpus_id": 1,
-                "filename": 1,
-                "title": 1,
-                "doc_title": 1,
-                "source_path": 1,
-                "parent_chunks.parent_id": 1,
-                "parent_chunks.summary": 1,
-                "parent_chunks.domain": 1,
-                "parent_chunks.heading_path": 1,
-                "parent_chunks.chunk_kind": 1,
-                "parent_chunks.metadata": 1,
-                "parent_chunks.facet_ids": 1,
-                "parent_chunks.facet_text": 1,
-                "parent_chunks.content_facet_ids": 1,
-                "parent_chunks.content_facet_text": 1,
-                "parent_chunks.content_facet_source": 1,
-                "parent_chunks.content_facet_confidence": 1,
-            },
-        ).to_list(length=None)
+        docs = (
+            await db["documents"]
+            .find(
+                with_active_records(query),
+                {
+                    "_id": 0,
+                    "doc_id": 1,
+                    "corpus_id": 1,
+                    "filename": 1,
+                    "title": 1,
+                    "doc_title": 1,
+                    "source_path": 1,
+                    "parent_chunks.parent_id": 1,
+                    "parent_chunks.summary": 1,
+                    "parent_chunks.domain": 1,
+                    "parent_chunks.heading_path": 1,
+                    "parent_chunks.chunk_kind": 1,
+                    "parent_chunks.metadata": 1,
+                    "parent_chunks.facet_ids": 1,
+                    "parent_chunks.facet_text": 1,
+                    "parent_chunks.content_facet_ids": 1,
+                    "parent_chunks.content_facet_text": 1,
+                    "parent_chunks.content_facet_source": 1,
+                    "parent_chunks.content_facet_confidence": 1,
+                },
+            )
+            .to_list(length=None)
+        )
     except Exception as exc:
         logger.warning("Summary reranker text hydration failed: %s", exc)
         return chunks
@@ -718,10 +808,14 @@ async def hydrate_summary_rerank_texts(
         if corpus_ids:
             parent_query["corpus_id"] = {"$in": corpus_ids}
         try:
-            parent_rows = await db["parent_chunks"].find(
-                with_active_records(parent_query),
-                {"_id": 0},
-            ).to_list(length=None)
+            parent_rows = (
+                await db["parent_chunks"]
+                .find(
+                    with_active_records(parent_query),
+                    {"_id": 0},
+                )
+                .to_list(length=None)
+            )
             for parent in parent_rows:
                 parent_id = str(parent.get("parent_id") or "")
                 summary = str(parent.get("summary") or "")
@@ -765,7 +859,9 @@ async def hydrate_summary_rerank_texts(
         parent_id = copied.parent_id or (
             chunk_id.removesuffix("_summary") if chunk_id.endswith("_summary") else ""
         )
-        record = by_doc_parent.get((copied.doc_id or "", parent_id)) or by_parent.get(parent_id)
+        record = by_doc_parent.get((copied.doc_id or "", parent_id)) or by_parent.get(
+            parent_id
+        )
         if record and record.get("summary"):
             original_len = len(copied.text or "")
             summary = str(record["summary"])
@@ -777,7 +873,9 @@ async def hydrate_summary_rerank_texts(
                 copied.parent_id = parent_id
             if not copied.heading_path and record.get("heading_path"):
                 copied.heading_path = record["heading_path"]
-            if (not copied.chunk_kind or copied.chunk_kind == "body") and record.get("chunk_kind"):
+            if (not copied.chunk_kind or copied.chunk_kind == "body") and record.get(
+                "chunk_kind"
+            ):
                 copied.chunk_kind = record["chunk_kind"]
             # Global/summary-mode hydration must carry domain too, otherwise the
             # per-domain coverage cap (gated on search_mode=="global") sees

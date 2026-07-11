@@ -35,7 +35,7 @@ class ExtractedEntity(BaseModel):
     char_start: Optional[int] = None  # local emits; cloud may null
     char_end: Optional[int] = None
     # promote-time (ontology resolution at write; null at extract)
-    entity_id: Optional[str] = None          # "entity:{slug}" — the graph join key
+    entity_id: Optional[str] = None  # "entity:{slug}" — the graph join key
     domain_type: Optional[str] = None
     canonical_family: Optional[str] = None
 
@@ -57,8 +57,15 @@ class ExtractedRelation(BaseModel):
 class ExtractedFact(BaseModel):
     subject: str
     fact_type: Literal[
-        "property", "status", "timestamp", "quantity", "threshold",
-        "category", "tag", "rule_condition", "rule_action",
+        "property",
+        "status",
+        "timestamp",
+        "quantity",
+        "threshold",
+        "category",
+        "tag",
+        "rule_condition",
+        "rule_action",
     ]
     property_name: str = Field(max_length=80)
     value: str = Field(max_length=500)
@@ -66,7 +73,7 @@ class ExtractedFact(BaseModel):
     condition: Optional[str] = None
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     evidence_phrase: str = Field(default="", max_length=500)
-    fact_id: Optional[str] = None            # deterministic hash (Neo4j key)
+    fact_id: Optional[str] = None  # deterministic hash (Neo4j key)
 
 
 class ChunkExtraction(BaseModel):
@@ -93,10 +100,10 @@ class ChunkMetadata(BaseModel):
     parent_id: str
     corpus_id: str
     user_id: str = ""
-    source_title: str = ""                   # M2 (title)
-    author_or_org: str = ""                  # M2
-    source_type: str = ""                    # M2 format-family / Ghost-A refined
-    document_date: Optional[str] = None      # M2, ISO
+    source_title: str = ""  # M2 (title)
+    author_or_org: str = ""  # M2
+    source_type: str = ""  # M2 format-family / Ghost-A refined
+    document_date: Optional[str] = None  # M2, ISO
     section_path: list[str] = Field(default_factory=list)  # heading_path
     chunk_kind: str = "body"
     token_count: int = 0
@@ -121,11 +128,11 @@ class RetrievalPayload(BaseModel):
     chunk_type: Literal["child", "summary", "doc_summary"] = "child"
     chunk_kind: str = "body"
     language: Optional[str] = None
-    domain: Optional[str] = None             # SOFT boost, never a gate
-    topic_key: Optional[str] = None          # owner compact schema
+    domain: Optional[str] = None  # SOFT boost, never a gate
+    topic_key: Optional[str] = None  # owner compact schema
     # promoted from Ghost B (B2)
-    concepts: list[str] = Field(default_factory=list)       # names+aliases (recall)
-    entity_ids: list[str] = Field(default_factory=list)     # entity:{slug} (graph join)
+    concepts: list[str] = Field(default_factory=list)  # names+aliases (recall)
+    entity_ids: list[str] = Field(default_factory=list)  # entity:{slug} (graph join)
     entity_families: list[str] = Field(default_factory=list)
     entity_domains: list[str] = Field(default_factory=list)
     relation_predicates: list[str] = Field(default_factory=list)
@@ -133,7 +140,9 @@ class RetrievalPayload(BaseModel):
     fact_types: list[str] = Field(default_factory=list)
     has_relations: bool = False
     # promoted from Ghost A (B3)
-    semantic_chunk_type: Optional[str] = None  # definition|claim|procedure|principle|...
+    semantic_chunk_type: Optional[
+        str
+    ] = None  # definition|claim|procedure|principle|...
     mechanisms: list[str] = Field(default_factory=list)
     key_terms: list[str] = Field(default_factory=list)
     # temporal / versioning (M2)
@@ -149,13 +158,15 @@ class RetrievalPayload(BaseModel):
 
 # ── 4. GraphWriteModel — Neo4j write shape ──────────────────────────────────
 class GraphEntity(BaseModel):
-    entity_id: str                            # entity:{slug} — GLOBAL, never corpus-prefixed
+    entity_id: str  # entity:{slug} — GLOBAL, never corpus-prefixed
     canonical_name: str
     entity_type: str = ""
     object_kind: str = ""
     canonical_family: Optional[str] = None
     domain_type: Optional[str] = None
-    corpus_ids: list[str] = Field(default_factory=list)  # accumulated union (isolation w/o identity split)
+    corpus_ids: list[str] = Field(
+        default_factory=list
+    )  # accumulated union (isolation w/o identity split)
 
 
 class GraphRelation(BaseModel):
@@ -165,7 +176,7 @@ class GraphRelation(BaseModel):
     relation_family: Optional[str] = None
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     evidence_phrase: str = ""
-    chunk_id: str = ""                        # provenance
+    chunk_id: str = ""  # provenance
 
 
 class GraphWriteModel(BaseModel):
@@ -180,6 +191,7 @@ class RerankerInput(BaseModel):
 
     source_book: str = ""
     section: str = ""
+    parent_context: str = ""
     excerpt: str
 
     def render(self) -> str:
@@ -188,4 +200,7 @@ class RerankerInput(BaseModel):
             prefix = f"{self.source_book} › {self.section}\n"
         elif self.source_book:
             prefix = f"{self.source_book}\n"
-        return prefix + self.excerpt
+        context = (
+            f"Parent context: {self.parent_context}\n" if self.parent_context else ""
+        )
+        return prefix + context + self.excerpt

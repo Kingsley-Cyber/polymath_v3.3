@@ -27,6 +27,51 @@ class DocumentRoute:
     title: str = ""
 
 
+def select_adaptive_routes(
+    routes: list[DocumentRoute],
+    *,
+    min_score: float = 0.30,
+    relative_margin: float = 0.20,
+    min_keep: int = 1,
+    max_keep: int = 6,
+    cliff_min_gap: float = 0.08,
+) -> list[DocumentRoute]:
+    """Keep the coherent high-relevance document neighborhood for one lane.
+
+    The router over-fetches first, applies a global lane-relative floor, then
+    cuts at a meaningful score cliff. This avoids both a fixed top-3 truncation
+    and the opposite failure of admitting a flat background-similarity tail.
+    """
+
+    ordered = sorted(
+        routes, key=lambda item: (-item.score, item.corpus_id, item.doc_id)
+    )
+    if not ordered:
+        return []
+    top_score = float(ordered[0].score)
+    floor = max(float(min_score), top_score - float(relative_margin))
+    eligible = [route for route in ordered if float(route.score) >= floor]
+    if not eligible:
+        return []
+
+    limit = min(max(1, int(max_keep)), len(eligible))
+    eligible = eligible[:limit]
+    minimum = min(max(1, int(min_keep)), len(eligible))
+    gaps = [
+        float(eligible[index].score) - float(eligible[index + 1].score)
+        for index in range(len(eligible) - 1)
+    ]
+    meaningful = [
+        (gap, index + 1)
+        for index, gap in enumerate(gaps)
+        if index + 1 >= minimum and gap >= float(cliff_min_gap)
+    ]
+    if meaningful:
+        _gap, cut = max(meaningful, key=lambda item: (item[0], -item[1]))
+        eligible = eligible[:cut]
+    return eligible
+
+
 class Tier0DocumentRouter:
     def __init__(self) -> None:
         settings = get_settings()
@@ -42,9 +87,11 @@ class Tier0DocumentRouter:
         lane_vectors: dict[str, list[float] | None],
         corpus_ids: list[str] | None,
         *,
-        per_lane_per_corpus: int = 3,
+        per_lane_per_corpus: int = 12,
         min_score: float = 0.30,
         relative_margin: float = 0.20,
+        max_per_lane: int = 6,
+        cliff_min_gap: float = 0.08,
     ) -> tuple[dict[str, list[DocumentRoute]], dict[str, object]]:
         """Route each semantic lane fairly across every selected corpus."""
 
@@ -91,7 +138,7 @@ class Tier0DocumentRouter:
             for corpus_id in scoped_corpora
         ]
         raw_results = await asyncio.gather(*tasks, return_exceptions=True)
-        routes: dict[str, list[DocumentRoute]] = {lane_id: [] for lane_id in usable}
+        candidates: dict[str, list[DocumentRoute]] = {lane_id: [] for lane_id in usable}
         for raw in raw_results:
             if isinstance(raw, BaseException):
                 cast_failures = diagnostics["failures"]
@@ -99,15 +146,13 @@ class Tier0DocumentRouter:
                     cast_failures.append(f"{type(raw).__name__}: {raw}"[:240])
                 continue
             lane_id, corpus_id, hits = raw
-            top_score = max((float(hit.score or 0.0) for hit in hits), default=0.0)
-            floor = max(float(min_score), top_score - float(relative_margin))
             for hit in hits:
                 score = float(hit.score or 0.0)
                 payload = hit.payload or {}
                 doc_id = str(payload.get("doc_id") or "")
-                if not doc_id or score < floor:
+                if not doc_id:
                     continue
-                routes[lane_id].append(
+                candidates[lane_id].append(
                     DocumentRoute(
                         lane_id=lane_id,
                         corpus_id=str(payload.get("corpus_id") or corpus_id),
@@ -117,11 +162,20 @@ class Tier0DocumentRouter:
                     )
                 )
 
-        for lane_id, values in routes.items():
+        routes: dict[str, list[DocumentRoute]] = {}
+        candidate_counts: dict[str, int] = {}
+        for lane_id, values in candidates.items():
             deduped: dict[tuple[str, str], DocumentRoute] = {}
             for value in sorted(values, key=lambda item: -item.score):
                 deduped.setdefault((value.corpus_id, value.doc_id), value)
-            routes[lane_id] = list(deduped.values())
+            candidate_counts[lane_id] = len(deduped)
+            routes[lane_id] = select_adaptive_routes(
+                list(deduped.values()),
+                min_score=min_score,
+                relative_margin=relative_margin,
+                max_keep=max_per_lane,
+                cliff_min_gap=cliff_min_gap,
+            )
         diagnostics["routes"] = {
             lane_id: [
                 {
@@ -141,6 +195,14 @@ class Tier0DocumentRouter:
                 for route in values
             }
         )
+        diagnostics["candidate_counts"] = candidate_counts
+        diagnostics["selection"] = {
+            "per_lane_per_corpus_fetch": int(per_lane_per_corpus),
+            "max_per_lane": int(max_per_lane),
+            "min_score": float(min_score),
+            "relative_margin": float(relative_margin),
+            "cliff_min_gap": float(cliff_min_gap),
+        }
         return routes, diagnostics
 
 

@@ -101,7 +101,9 @@ def _planned_rerank_candidate_limit(
     configured = max(1, int(configured_limit))
     final_k = max(1, int(final_top_k))
     if tier == RetrievalTier.qdrant_mongo_graph:
-        desired = 20 if plan.complexity in {"comparative", "dependent_multi_hop"} else 16
+        desired = (
+            20 if plan.complexity in {"comparative", "dependent_multi_hop"} else 16
+        )
         if intent.need == QueryNeed.SPECIFIC and plan.complexity == "simple":
             desired = 12
         ceiling = 24
@@ -1473,7 +1475,9 @@ class RetrieverOrchestrator:
         summary_top_k = max(0, min(funnel_limits.summary_top_k, 20))
         lexical_top_k = max(4, min(child_top_k // 2, 12))
         if effective_tier == RetrievalTier.qdrant_only:
-            summary_top_k = 0
+            # Fast remains Qdrant-only, but still descends through a small
+            # parent-summary set before selecting children.
+            summary_top_k = min(4, max(2, summary_top_k))
             lexical_top_k = 0
 
         async def _lane_pools(lane, vector) -> list[PlannedPool]:
@@ -1483,33 +1487,22 @@ class RetrieverOrchestrator:
                 if lane.role == "core"
                 else None
             )
-            raw_results = await asyncio.gather(
-                asyncio.wait_for(
-                    funnel_b.search(
-                        vector,
-                        corpus_ids,
-                        b_cols,
-                        top_k=child_top_k,
-                        query_text=lane.query,
-                        doc_ids=routed_doc_ids,
-                    ),
-                    timeout=_stage_timeout(
-                        float(
-                            getattr(
-                                settings, "QUERY_PLAN_RETRIEVAL_DEADLINE_SECONDS", 4.0
-                            )
-                        ),
-                        reserve=1.0,
-                    ),
-                )
-                if vector is not None
-                else asyncio.sleep(0, result=[]),
+            is_routed_core = bool(routed_doc_ids)
+            lane_summary_top_k = summary_top_k if lane.role == "core" else 0
+            lane_lexical_top_k = (
+                lexical_top_k if lane.role == "core" else min(2, lexical_top_k)
+            )
+            lane_child_top_k = (
+                child_top_k if lane.role == "core" else min(6, child_top_k)
+            )
+
+            summary_raw, lexical_raw = await asyncio.gather(
                 asyncio.wait_for(
                     funnel_a.search(
                         vector,
                         corpus_ids,
                         a_cols,
-                        top_k=summary_top_k,
+                        top_k=lane_summary_top_k,
                         fair_mode=True,
                         query_text=lane.query,
                         doc_ids=routed_doc_ids,
@@ -1523,13 +1516,14 @@ class RetrieverOrchestrator:
                         reserve=1.0,
                     ),
                 )
-                if summary_top_k > 0 and vector is not None
+                if lane_summary_top_k > 0 and vector is not None
                 else asyncio.sleep(0, result=[]),
                 asyncio.wait_for(
                     lexical_retriever.search(
                         lane.query,
                         corpus_ids,
-                        top_k=lexical_top_k,
+                        top_k=lane_lexical_top_k,
+                        doc_ids=routed_doc_ids,
                     ),
                     timeout=_stage_timeout(
                         float(
@@ -1540,11 +1534,81 @@ class RetrieverOrchestrator:
                         reserve=1.0,
                     ),
                 )
-                if lexical_top_k > 0
+                if lane_lexical_top_k > 0
                 else asyncio.sleep(0, result=[]),
                 return_exceptions=True,
             )
+            summary_chunks = (
+                []
+                if isinstance(summary_raw, BaseException)
+                else list(summary_raw or [])
+            )
+            lexical_chunks = (
+                []
+                if isinstance(lexical_raw, BaseException)
+                else list(lexical_raw or [])
+            )
+            if isinstance(summary_raw, BaseException):
+                failures.append(
+                    {
+                        "lane_id": lane.lane_id,
+                        "retriever": "summary",
+                        "error": f"{type(summary_raw).__name__}: {summary_raw}"[:240],
+                    }
+                )
+            if isinstance(lexical_raw, BaseException):
+                failures.append(
+                    {
+                        "lane_id": lane.lane_id,
+                        "retriever": "lexical",
+                        "error": f"{type(lexical_raw).__name__}: {lexical_raw}"[:240],
+                    }
+                )
+            routed_parent_ids = list(
+                dict.fromkeys(
+                    str(chunk.parent_id)
+                    for chunk in summary_chunks
+                    if str(chunk.parent_id or "").strip()
+                )
+            )
+            child_raw: list[SourceChunk] | BaseException = []
+            if vector is not None:
+                try:
+                    child_raw = await asyncio.wait_for(
+                        funnel_b.search(
+                            vector,
+                            corpus_ids,
+                            b_cols,
+                            top_k=lane_child_top_k,
+                            query_text=lane.query,
+                            doc_ids=routed_doc_ids,
+                            parent_ids=routed_parent_ids if is_routed_core else None,
+                        ),
+                        timeout=_stage_timeout(
+                            float(
+                                getattr(
+                                    settings,
+                                    "QUERY_PLAN_RETRIEVAL_DEADLINE_SECONDS",
+                                    4.0,
+                                )
+                            ),
+                            reserve=0.75,
+                        ),
+                    )
+                    if is_routed_core and routed_parent_ids and not child_raw:
+                        child_raw = await funnel_b.search(
+                            vector,
+                            corpus_ids,
+                            b_cols,
+                            top_k=min(8, lane_child_top_k),
+                            query_text=lane.query,
+                            doc_ids=routed_doc_ids,
+                        )
+                except Exception as exc:
+                    child_raw = exc
+
             retrievers = ("dense", "summary", "lexical")
+            raw_results = (child_raw, summary_chunks, lexical_chunks)
             pools: list[PlannedPool] = []
             counts: dict[str, int] = {}
             for retriever_name, raw in zip(retrievers, raw_results):
@@ -1578,6 +1642,14 @@ class RetrieverOrchestrator:
                     "role": lane.role,
                     "query": lane.query,
                     "routed_doc_ids": routed_doc_ids or [],
+                    "routed_parent_ids": routed_parent_ids,
+                    "descent": (
+                        "document_parent_child"
+                        if is_routed_core and routed_parent_ids
+                        else "document_child_fallback"
+                        if is_routed_core
+                        else "global_wildcard"
+                    ),
                     "counts": counts,
                     "duration_s": round(perf_counter() - lane_started, 3),
                 }
@@ -1613,7 +1685,9 @@ class RetrieverOrchestrator:
         if similarity_threshold is not None and similarity_threshold > 0.0:
             before_threshold = len(fused)
             fused = [
-                chunk for chunk in fused if float(chunk.score or 0.0) >= similarity_threshold
+                chunk
+                for chunk in fused
+                if float(chunk.score or 0.0) >= similarity_threshold
             ]
             fusion_diagnostics["similarity_threshold"] = {
                 "value": float(similarity_threshold),
@@ -1795,6 +1869,7 @@ class RetrieverOrchestrator:
                                 lane.query,
                                 corpus_ids,
                                 top_k=min(16, max(8, lexical_top_k * 2)),
+                                doc_ids=routed_doc_ids,
                             )
                             if lexical_top_k > 0
                             else asyncio.sleep(0, result=[]),
@@ -1927,11 +2002,7 @@ class RetrieverOrchestrator:
                 )
         fused, hydrated_duplicate_count = dedupe_cross_corpus_evidence(fused)
         reranker_diagnostics: dict[str, Any]
-        if (
-            rerank_enabled
-            and effective_tier != RetrievalTier.qdrant_only
-            and fused
-        ):
+        if rerank_enabled and effective_tier != RetrievalTier.qdrant_only and fused:
             try:
                 ranked = await asyncio.wait_for(
                     reranker_service.rerank(curation_query, fused),
@@ -1985,13 +2056,22 @@ class RetrieverOrchestrator:
             selected_corpus_ids=corpus_ids or [],
             query=plan.standalone_query,
         )
+        final_limit = int(final_top_k or settings.DEFAULT_RETRIEVAL_K)
+        route_count = int(document_routing_diagnostics.get("routed_doc_count") or 0)
+        if plan.answer_shape == "enumeration" or intent.need == QueryNeed.BROAD:
+            routed_document_budget = min(route_count, max(2, final_limit // 2))
+        elif intent.need == QueryNeed.SPECIFIC:
+            routed_document_budget = min(route_count, 2)
+        else:
+            routed_document_budget = min(route_count, max(2, final_limit // 3))
         finalist_candidates, reservation_diagnostics = reserve_planned_finalists(
             ranked,
             diversity.candidates,
             required_lane_ids=required_lane_ids,
             corpus_ids=corpus_ids,
-            max_candidates=int(final_top_k or settings.DEFAULT_RETRIEVAL_K),
+            max_candidates=final_limit,
             max_per_document=1 if intent.need == QueryNeed.BROAD else None,
+            routed_document_budget=routed_document_budget,
         )
         hydrate_started = perf_counter()
         if effective_tier == RetrievalTier.qdrant_only:
@@ -2025,10 +2105,14 @@ class RetrieverOrchestrator:
                     for chunk in finalist_candidates
                     if str(chunk.text or "").strip()
                 ]
-        finalists, parent_duplicate_count = dedupe_parent_finalists(finalists)
-        finalists, document_lane_duplicate_count = dedupe_document_lane_finalists(
-            finalists
-        )
+        if plan.answer_shape == "enumeration":
+            parent_duplicate_count = 0
+            document_lane_duplicate_count = 0
+        else:
+            finalists, parent_duplicate_count = dedupe_parent_finalists(finalists)
+            finalists, document_lane_duplicate_count = dedupe_document_lane_finalists(
+                finalists
+            )
         timings["hydrate_finalists"] = perf_counter() - hydrate_started
         supported_lane_ids = grounded_planned_lane_ids(
             finalists,
@@ -2107,6 +2191,7 @@ class RetrieverOrchestrator:
             "status": "query_plan_v2_degraded" if failures else "query_plan_v2",
             "query_plan_version": plan.version,
             "complexity": plan.complexity,
+            "answer_shape": plan.answer_shape,
             "original_query": plan.original_query,
             "standalone_query": plan.standalone_query,
             "curation_query": curation_query,
