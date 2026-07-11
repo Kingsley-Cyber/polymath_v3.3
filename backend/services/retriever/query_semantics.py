@@ -16,6 +16,12 @@ _GRAPH_ROUTE_TERM_RE = re.compile(r"\b(?:knowledge\s+graph|graph|ontology)\b")
 _GRAPH_RELATION_TERM_RE = re.compile(
     r"\b(?:relationship|relation|predicate|edge|path|connect(?:s|ed|ion)?|link(?:s|ed)?)\b"
 )
+_ANSWER_OBJECT_RE = re.compile(
+    r"\b(?:what|which|name|list|identify|recommend)\s+"
+    r"(books?|authors?|people|experts?|tools?|models?|frameworks?|methods?|"
+    r"strategies|examples?|products?|companies|organizations?|documents?|sources?)\b",
+    re.IGNORECASE,
+)
 
 
 def requires_explicit_graph_evidence(query: str) -> bool:
@@ -755,6 +761,14 @@ def _phrase_concept_groups(query: str) -> list[ConceptGroup]:
 def concept_groups(query: str, *, max_groups: int = 8) -> list[ConceptGroup]:
     groups: list[ConceptGroup] = _phrase_concept_groups(query)
     seen = {group.key for group in groups}
+    for match in _ANSWER_OBJECT_RE.finditer(query or ""):
+        key = match.group(1).lower()
+        if key in seen:
+            continue
+        groups.append(ConceptGroup(key=key, aliases=token_variants(key)))
+        seen.add(key)
+        if len(groups) >= max_groups:
+            return groups[:max_groups]
     haystack = clean_text(query)
     covered_tokens: set[str] = set()
     for group in groups:

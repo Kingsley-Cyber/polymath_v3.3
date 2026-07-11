@@ -171,7 +171,9 @@ def test_answer_object_books_survives_as_required_concept():
     plan = build_query_plan_v2("what books help with dropshipping and why?")
 
     assert plan.concepts == ("books", "dropshipping")
-    assert query_plan_curation_query(plan) == "books dropshipping"
+    assert query_plan_curation_query(plan) == (
+        "books book titles authors book recommendations lessons dropshipping"
+    )
     assert "help" not in plan.concepts
 
 
@@ -188,4 +190,7 @@ def test_terse_followup_uses_previous_user_subject_without_model_call():
     assert plan.original_query == "no authors"
     assert plan.standalone_query == standalone
     assert plan.concepts == ("books", "dropshipping", "authors")
-    assert query_plan_curation_query(plan) == "books dropshipping authors"
+    assert query_plan_curation_query(plan) == (
+        "books book titles authors book recommendations lessons dropshipping "
+        "book authors written by"
+    )

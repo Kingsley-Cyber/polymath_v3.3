@@ -1420,6 +1420,39 @@ class RetrieverOrchestrator:
                 }
         timings["document_routing"] = perf_counter() - routing_started
 
+        def _annotate_document_routes(
+            chunks: list[SourceChunk], lane_id: str
+        ) -> list[SourceChunk]:
+            route_scores = {
+                str(route.doc_id): float(route.score)
+                for route in document_routes.get(lane_id, [])
+            }
+            if not route_scores:
+                return chunks
+            for chunk in chunks:
+                route_score = route_scores.get(str(chunk.doc_id or ""))
+                if route_score is None:
+                    continue
+                metadata = dict(chunk.metadata or {})
+                routed_lanes = dict(metadata.get("document_route_lanes") or {})
+                routed_lanes[lane_id] = max(
+                    route_score,
+                    float(routed_lanes.get(lane_id) or 0.0),
+                )
+                metadata["document_route_lanes"] = routed_lanes
+                metadata["document_routed"] = True
+                chunk.metadata = metadata
+                marker = {
+                    "retriever": "tier0_document_summary",
+                    "lane_id": lane_id,
+                    "route_score": round(route_score, 4),
+                }
+                provenance = list(chunk.provenance or [])
+                if marker not in provenance:
+                    provenance.append(marker)
+                chunk.provenance = provenance
+            return chunks
+
         requested_child_top_k = max(8, min(int(retrieval_k or 40), 40))
         requested_summary_top_k = max(1, min(int(top_k_summary or 12), 20))
         funnel_limits = adaptive_funnel_limits(
@@ -1517,6 +1550,7 @@ class RetrieverOrchestrator:
                     chunks: list[SourceChunk] = []
                 else:
                     chunks = list(raw or [])
+                chunks = _annotate_document_routes(chunks, lane.lane_id)
                 counts[retriever_name] = len(chunks)
                 pools.append(
                     PlannedPool(
@@ -1776,6 +1810,7 @@ class RetrieverOrchestrator:
                         chunks: list[SourceChunk] = []
                     else:
                         chunks = list(raw or [])
+                    chunks = _annotate_document_routes(chunks, lane_id)
                     repair_pools.append(
                         PlannedPool(
                             lane_id=lane_id,
@@ -1924,7 +1959,7 @@ class RetrieverOrchestrator:
             tier=effective_tier,
             multi_corpus=bool(corpus_ids and len(corpus_ids) > 1),
             selected_corpus_ids=corpus_ids or [],
-            query=curation_query,
+            query=plan.standalone_query,
         )
         finalist_candidates, reservation_diagnostics = reserve_planned_finalists(
             ranked,

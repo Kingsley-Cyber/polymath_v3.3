@@ -120,6 +120,16 @@ def planned_lane_grounding(chunk: SourceChunk, lane_id: str) -> float:
         return 0.0
 
 
+def planned_document_route_score(chunk: SourceChunk, lane_id: str) -> float:
+    values = (chunk.metadata or {}).get("document_route_lanes") or {}
+    if not isinstance(values, dict):
+        return 0.0
+    try:
+        return float(values.get(lane_id) or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def annotate_planned_lane_grounding(
     chunks: list[SourceChunk],
     *,
@@ -368,6 +378,7 @@ def fuse_planned_pools(
             max(
                 candidates,
                 key=lambda key: (
+                    planned_document_route_score(representatives[key], lane_id),
                     planned_lane_grounding(representatives[key], lane_id),
                     _has_lane_retriever(representatives[key], lane_id, "lexical"),
                     scores.get(key, 0.0),
@@ -494,6 +505,7 @@ def reserve_planned_finalists(
         key = existing_key or max(
             candidates,
             key=lambda candidate_key: (
+                planned_document_route_score(by_key[candidate_key], lane_id),
                 planned_lane_grounding(by_key[candidate_key], lane_id),
                 _has_lane_retriever(by_key[candidate_key], lane_id, "lexical"),
                 -ranked_keys.index(candidate_key),

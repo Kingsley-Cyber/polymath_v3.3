@@ -75,6 +75,16 @@ _FOLLOWUP_PREFIX_RE = re.compile(
     r"and\s+|also\s+|what\s+about\s+)",
     re.IGNORECASE,
 )
+_ANSWER_OBJECT_SUPPORT: dict[str, tuple[str, ...]] = {
+    "book": ("book titles", "authors", "book recommendations", "lessons", "principles"),
+    "books": ("book titles", "authors", "book recommendations", "lessons", "principles"),
+    "author": ("book authors", "written by", "books"),
+    "authors": ("book authors", "written by", "books"),
+    "tool": ("tools", "use cases", "applications"),
+    "tools": ("tools", "use cases", "applications"),
+    "example": ("examples", "case studies", "applications"),
+    "examples": ("examples", "case studies", "applications"),
+}
 _GENERIC_LANE_TERMS = {
     "assess",
     "assessment",
@@ -339,6 +349,9 @@ def _lexical_recall_phrases(
     concept: str,
     groups: list[ConceptGroup],
 ) -> tuple[str, ...]:
+    answer_object_phrases = _ANSWER_OBJECT_SUPPORT.get(clean_text(concept).strip())
+    if answer_object_phrases:
+        return tuple(dict.fromkeys((concept, *answer_object_phrases)))
     group = _curated_group_for_concept(concept, groups)
     if group is None:
         return (concept,)
@@ -492,6 +505,15 @@ def build_query_plan_v2(
         groups,
     )
     concepts = _decompose_command_subject(standalone, concepts)[:max_core_lanes]
+    deduplicated_concepts: list[str] = []
+    seen_concepts: set[str] = set()
+    for concept in concepts:
+        key = clean_text(concept).strip()
+        if not key or key in seen_concepts:
+            continue
+        deduplicated_concepts.append(concept)
+        seen_concepts.add(key)
+    concepts = deduplicated_concepts[:max_core_lanes]
 
     operators = tuple(sorted(required_operator_atoms(standalone)))
     lanes: list[QueryLane] = [
@@ -562,7 +584,11 @@ def query_plan_curation_query(plan: QueryPlanV2) -> str:
         and plan.concepts
         and not plan.operators
     ):
-        return " ".join(plan.concepts)
+        phrases: list[str] = []
+        for concept in plan.concepts:
+            phrases.append(concept)
+            phrases.extend(_ANSWER_OBJECT_SUPPORT.get(clean_text(concept).strip(), ())[:4])
+        return " ".join(dict.fromkeys(phrases))
     return plan.original_query
 
 

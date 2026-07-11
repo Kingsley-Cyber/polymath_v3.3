@@ -180,6 +180,10 @@ async def test_all_three_layers_descend_from_document_routes(monkeypatch, tier):
     assert lane_rows["books"]["routed_doc_ids"] == ["doc-books"]
     assert lane_rows["dropshipping"]["routed_doc_ids"] == ["doc-dropshipping"]
     assert result.diagnostics["required_concept_coverage"]["coverage"] == 1.0
+    assert {chunk.doc_id for chunk in result.chunks} >= {
+        "doc-books",
+        "doc-dropshipping",
+    }
 
     if tier == RetrievalTier.qdrant_only:
         assert calls == {"summary": 0, "lexical": 0, "rerank": 0, "graph": 0}
