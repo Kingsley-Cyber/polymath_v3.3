@@ -441,9 +441,10 @@ async def polymath_search(
 ) -> dict[str, Any]:
     """Search Polymath corpora and return ranked chunks.
 
-    Delegates to services.retriever.retriever_orchestrator.retrieve — the same
-    code path used by POST /api/chat. Same query + same corpus + same tier
-    yields identical results across MCP and HTTP.
+    Delegates to the same QueryPlanV2 document-first path used by POST /api/chat
+    when enabled, with the legacy retriever retained only behind its rollout
+    flag. Same query + same corpus + same tier yields equivalent hierarchy and
+    ranking behavior across MCP and HTTP.
 
     Args:
         query: Natural-language search query.
