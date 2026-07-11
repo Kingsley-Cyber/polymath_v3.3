@@ -104,6 +104,14 @@ _BATCH_USER = (
 )
 
 
+def summary_compiler_token_budget(summary_tokens: int, item_count: int = 1) -> int:
+    """Budget complete JSON artifacts independently from stored prose length."""
+
+    items = max(1, min(8, int(item_count or 1)))
+    semantic_cap = max(32, int(summary_tokens or 175))
+    return min(8192, max(1024 * items, semantic_cap * items + 512))
+
+
 @dataclass
 class SummaryTask:
     parent_id: str
@@ -512,7 +520,7 @@ async def summarize_parents(
                 )},
             ],
             "temperature": 0,
-            "max_tokens": cap,
+            "max_tokens": summary_compiler_token_budget(cap),
         }
         if entry.get("base_url"):
             payload["api_base"] = entry["base_url"]
@@ -544,6 +552,9 @@ async def summarize_parents(
                 raw = body["choices"][0]["message"]["content"].strip()
                 result = _compile_result(task, raw=raw, entry=entry)
                 usage = body.get("usage") or {}
+                finish_reason = str(
+                    body.get("choices", [{}])[0].get("finish_reason") or ""
+                ).lower()
                 await _emit_telemetry({
                     "corpus_id": task.corpus_id,
                     "phase": "summary",
@@ -556,6 +567,15 @@ async def summarize_parents(
                     "input_tokens": usage.get("prompt_tokens") or max(1, len(task.text) // 4),
                     "output_tokens": usage.get("completion_tokens") or max(0, len(raw) // 4),
                     "attempts": 1,
+                    "failure_class": (
+                        None
+                        if result
+                        else (
+                            "length_truncated"
+                            if finish_reason == "length"
+                            else "validation_rejected"
+                        )
+                    ),
                 })
                 return result
         except Exception as exc:
@@ -617,7 +637,7 @@ async def summarize_parents(
                 },
             ],
             "temperature": 0,
-            "max_tokens": min(8192, max(cap, cap * len(batch_tasks) + 128)),
+            "max_tokens": summary_compiler_token_budget(cap, len(batch_tasks)),
         }
         if entry.get("base_url"):
             payload["api_base"] = entry["base_url"]
@@ -654,6 +674,9 @@ async def summarize_parents(
                 if result:
                     compiled[task.parent_id] = result
             usage = body.get("usage") or {}
+            finish_reason = str(
+                body.get("choices", [{}])[0].get("finish_reason") or ""
+            ).lower()
             await _emit_telemetry({
                 "corpus_id": batch_tasks[0].corpus_id,
                 "phase": "summary",
@@ -668,7 +691,45 @@ async def summarize_parents(
                 ),
                 "output_tokens": usage.get("completion_tokens") or max(0, len(raw) // 4),
                 "attempts": 1,
+                "failure_class": (
+                    None
+                    if len(compiled) == len(batch_tasks)
+                    else (
+                        "length_truncated"
+                        if finish_reason == "length"
+                        else "validation_rejected"
+                    )
+                ),
             })
+
+            # Some OpenAI-compatible providers accept the batch prompt but
+            # ignore its target envelope, returning one ordinary summary
+            # artifact. Never guess which target that artifact belongs to.
+            # Preserve valid siblings, then degrade only missing targets to
+            # the already-validated single-target contract.
+            missing_tasks = [
+                task for task in batch_tasks if task.parent_id not in compiled
+            ]
+            if raw and missing_tasks:
+                fallback_results = await asyncio.gather(
+                    *(_process_one(task, pool_idx) for task in missing_tasks),
+                    return_exceptions=True,
+                )
+                for task, fallback_result in zip(
+                    missing_tasks,
+                    fallback_results,
+                    strict=True,
+                ):
+                    if isinstance(fallback_result, Exception):
+                        if isinstance(fallback_result, (RateLimitedLaneError, FatalLaneError)):
+                            raise fallback_result
+                        logger.warning(
+                            "GHOST A single-target fallback failed parent_id=%s: %s",
+                            task.parent_id,
+                            fallback_result,
+                        )
+                    elif fallback_result is not None:
+                        compiled[task.parent_id] = fallback_result
             return compiled
         except Exception as exc:
             await _emit_telemetry({

@@ -235,6 +235,7 @@ async def embed_documents_to_qdrant_from_artifacts(
     db: Any,
     *,
     qdrant_client: Any,
+    neo4j_driver: Any | None = None,
     corpus_id: str,
     doc_ids: list[str],
     limit: int = 10,
@@ -338,6 +339,26 @@ async def embed_documents_to_qdrant_from_artifacts(
                 elif not summary_gate_required:
                     write_updates["summaries_indexed"] = False
                     write_updates["summary_points"] = 0
+
+                # Re-run the normal cross-store verifier before declaring the
+                # repair complete. Otherwise qdrant_written=True can coexist
+                # with a stale verified=False mismatch, causing every planner
+                # tick to re-embed the same document forever.
+                from services.ingestion.verify import verify_ingest
+
+                verified, verify_errors = await verify_ingest(
+                    db=db,
+                    qdrant=qdrant_client,
+                    neo4j_driver=neo4j_driver,
+                    doc_id=doc_id,
+                    corpus_id=corpus_id,
+                    target_qdrant_collections=list(
+                        config.target_qdrant_collections or []
+                    ),
+                    use_neo4j=bool(config.use_neo4j and neo4j_driver is not None),
+                )
+                write_updates["verified"] = verified
+                write_updates["verify_errors"] = verify_errors
                 await mongo_writer.update_write_state(
                     db,
                     doc_id,

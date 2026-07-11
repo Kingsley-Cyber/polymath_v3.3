@@ -6,6 +6,7 @@ from services import ghost_a
 from services.ghost_a import (
     SummaryTask,
     parse_summary_microbatch_response,
+    summary_compiler_token_budget,
     summarize_parents,
 )
 from services.ingestion import model_lifecycle
@@ -44,6 +45,45 @@ class _CapturingBlankSummaryClient(_BlankSummaryClient):
     async def post(self, *args, **kwargs) -> _BlankSummaryResponse:
         self.payloads.append(dict(kwargs.get("json") or {}))
         return _BlankSummaryResponse()
+
+
+def test_summary_compiler_budget_is_separate_from_semantic_length() -> None:
+    assert summary_compiler_token_budget(175) == 1024
+    assert summary_compiler_token_budget(175, 4) == 4096
+    assert summary_compiler_token_budget(1024, 8) == 8192
+
+
+class _EnvelopeIgnoringResponse:
+    def __init__(self, content: str) -> None:
+        self.content = content
+
+    def raise_for_status(self) -> None:
+        return None
+
+    def json(self) -> dict:
+        return {
+            "choices": [{"message": {"content": self.content}}],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 10},
+        }
+
+
+class _EnvelopeIgnoringClient(_BlankSummaryClient):
+    payloads: list[dict] = []
+
+    async def post(self, *args, **kwargs) -> _EnvelopeIgnoringResponse:
+        payload = dict(kwargs.get("json") or {})
+        self.payloads.append(payload)
+        user = payload["messages"][1]["content"]
+        if "ITEMS:" in user:
+            return _EnvelopeIgnoringResponse(
+                '{"summary":"A provider ignored the batch envelope but returned prose."}'
+            )
+        return _EnvelopeIgnoringResponse(
+            '{"summary":"The passage explains a durable semantic claim with supporting evidence.",'
+            '"central_claim":"The passage explains a durable semantic claim.",'
+            '"key_points":[{"point":"The claim is supported by the source child.",'
+            '"supporting_child_ids":["child-1"]}]}'
+        )
 
 
 @pytest.mark.asyncio
@@ -92,6 +132,45 @@ def test_summary_microbatch_parser_salvages_valid_siblings_only() -> None:
 
     assert set(parsed) == {"parent-1"}
     assert "valid" in parsed["parent-1"]
+
+
+@pytest.mark.asyncio
+async def test_summary_microbatch_falls_back_only_missing_targets(monkeypatch) -> None:
+    _EnvelopeIgnoringClient.payloads.clear()
+    monkeypatch.setattr(ghost_a.httpx, "AsyncClient", _EnvelopeIgnoringClient)
+    monkeypatch.setattr(ghost_a, "_SUMMARY_RETRY_ATTEMPTS", 0)
+
+    results = await summarize_parents(
+        [
+            SummaryTask(
+                parent_id=f"parent-{index}",
+                doc_id="doc-1",
+                corpus_id="corpus-1",
+                source_tier="parent",
+                text="The source child supports a durable semantic claim.",
+                source_child_ids=["child-1"],
+            )
+            for index in range(3)
+        ],
+        pool=[
+            {
+                "model": "unit/envelope-ignoring-model",
+                "base_url": None,
+                "api_key": None,
+                "max_concurrent": 4,
+                "extra_params": {"microbatch_size": 4},
+            }
+        ],
+        global_max_concurrent=4,
+    )
+
+    assert {result.parent_id for result in results} == {
+        "parent-0",
+        "parent-1",
+        "parent-2",
+    }
+    assert len(_EnvelopeIgnoringClient.payloads) == 4
+    assert sum("ITEMS:" in payload["messages"][1]["content"] for payload in _EnvelopeIgnoringClient.payloads) == 1
 
 
 @pytest.mark.asyncio

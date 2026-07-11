@@ -2172,6 +2172,7 @@ class IngestionService:
             return await embed_documents_to_qdrant_from_artifacts(
                 self._db,
                 qdrant_client=self._qdrant,
+                neo4j_driver=self._neo4j,
                 corpus_id=corpus_id,
                 doc_ids=doc_ids,
                 limit=limit,
@@ -2997,6 +2998,7 @@ class IngestionService:
         limit: int | None = None,
         batch: int = 32,
         doc_ids: list[str] | None = None,
+        index_existing_doc_summaries: bool = False,
     ) -> dict[str, Any]:
         """Repair parent-summary retrieval for an existing corpus.
 
@@ -3004,11 +3006,11 @@ class IngestionService:
         ingest flag. It fills missing retrieval parent summaries, idempotently
         indexes parent-summary text into Qdrant, and updates each document's
         ``write_state.summaries_indexed`` when required parent summaries are covered.
-        Capped generate+index calls index only the summaries generated in that
-        call unless ``doc_ids`` scopes the run to a known batch. Explicit
-        index-only calls still rebuild all existing summary points. That lets
-        older balanced corpora gain the summary retrieval lane without
-        delete/reingest churn or surprise full-corpus work.
+        Capped generate+index calls index only summaries generated in that
+        call. A known post-batch document scope may explicitly request all
+        existing summaries through ``index_existing_doc_summaries``. Explicit
+        index-only calls still rebuild all existing summary points. This keeps
+        a handful of failed durable jobs from re-embedding whole documents.
         """
 
         from pymongo import UpdateOne
@@ -3360,7 +3362,9 @@ class IngestionService:
                 limit=limit,
                 generated_parent_ids=generated_parent_ids,
                 summary_text_clause=summary_text_clause,
-                bounded_by_doc_ids=doc_id_filter is not None,
+                bounded_by_doc_ids=(
+                    doc_id_filter is not None and index_existing_doc_summaries
+                ),
             )
             cursor = self._db["parent_chunks"].find(
                 _parent_query(*index_clauses),

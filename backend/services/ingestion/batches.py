@@ -1971,6 +1971,7 @@ async def _run_deferred_summary_backfill(
             limit=limit if limit != 0 else None,
             batch=parent_batch,
             doc_ids=doc_ids,
+            index_existing_doc_summaries=True,
         )
         status = "complete"
         if result.get("generation_errors") or result.get("status") not in {
