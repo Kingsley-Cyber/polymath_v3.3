@@ -36,6 +36,15 @@ def _dict(value: Any) -> dict:
     return value if isinstance(value, dict) else {}
 
 
+def _will_write_summary_points(config: Any, summaries: list[Any]) -> bool:
+    """Return whether the Qdrant writer will persist summary vectors."""
+    targets = {
+        str(kind)
+        for kind in (getattr(config, "target_qdrant_collections", None) or [])
+    }
+    return bool(summaries and targets.intersection({"naive", "hrag"}))
+
+
 def _facet_from_row(row: dict[str, Any]) -> dict[str, Any]:
     return {
         "facet_ids": _list(row.get("facet_ids")),
@@ -287,7 +296,7 @@ async def embed_documents_to_qdrant_from_artifacts(
                     and summary_targets
                     and worker._summarizable_parents(parents)
                 )
-                summary_write_required = bool(summary_targets and summaries)
+                summary_write_required = _will_write_summary_points(config, summaries)
 
                 async with worker._embed_phase_semaphore():
                     vec_map, summary_vec_map = await worker._embed_batch_for_doc(

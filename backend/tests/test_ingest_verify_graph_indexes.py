@@ -60,6 +60,30 @@ class _FakeNeo4jDriver:
         return _FakeNeo4jSession()
 
 
+class _CountNeo4jResult:
+    def __init__(self, count):
+        self.count = count
+
+    async def single(self):
+        return {"cnt": self.count}
+
+
+class _CountNeo4jSession(_FakeNeo4jSession):
+    def __init__(self, count):
+        self.count = count
+
+    async def run(self, *_args, **_kwargs):
+        return _CountNeo4jResult(self.count)
+
+
+class _CountNeo4jDriver:
+    def __init__(self, count):
+        self.count = count
+
+    def session(self):
+        return _CountNeo4jSession(self.count)
+
+
 @pytest.mark.asyncio
 async def test_expected_child_count_includes_noisy_chunks_for_qdrant():
     class FakeChunks:
@@ -167,6 +191,58 @@ async def test_verify_ingest_checks_graph_retrieval_indexes(monkeypatch):
         call.kwargs.get("exclude_noisy") is True
         for call in expected_count_mock.await_args_list
     )
+
+
+@pytest.mark.asyncio
+async def test_verify_ingest_allows_legacy_neo4j_overcoverage(monkeypatch):
+    monkeypatch.setattr(
+        "services.graph.schema.wait_for_retrieval_indexes",
+        AsyncMock(return_value={"entity_name_ft": "ONLINE", "fact_text_ft": "ONLINE"}),
+    )
+    monkeypatch.setattr(verify, "_expected_child_count", AsyncMock(return_value=1))
+    monkeypatch.setattr(verify, "_expected_summary_count", AsyncMock(return_value=0))
+    monkeypatch.setattr(
+        verify, "_verify_qdrant_text_contract", AsyncMock(return_value=[])
+    )
+
+    ok, errors = await verify.verify_ingest(
+        db=_FakeDb(),
+        qdrant=_FakeQdrant(),
+        neo4j_driver=_CountNeo4jDriver(2),
+        doc_id="doc-1",
+        corpus_id="corpus-12345678",
+        target_qdrant_collections=["graph"],
+        use_neo4j=True,
+    )
+
+    assert ok is True
+    assert errors == []
+
+
+@pytest.mark.asyncio
+async def test_verify_ingest_rejects_neo4j_undercount(monkeypatch):
+    monkeypatch.setattr(
+        "services.graph.schema.wait_for_retrieval_indexes",
+        AsyncMock(return_value={"entity_name_ft": "ONLINE", "fact_text_ft": "ONLINE"}),
+    )
+    monkeypatch.setattr(verify, "_expected_child_count", AsyncMock(return_value=2))
+    monkeypatch.setattr(verify, "_expected_summary_count", AsyncMock(return_value=0))
+    monkeypatch.setattr(
+        verify, "_verify_qdrant_text_contract", AsyncMock(return_value=[])
+    )
+
+    ok, errors = await verify.verify_ingest(
+        db=_FakeDb(),
+        qdrant=_FakeQdrant(),
+        neo4j_driver=_CountNeo4jDriver(1),
+        doc_id="doc-1",
+        corpus_id="corpus-12345678",
+        target_qdrant_collections=["graph"],
+        use_neo4j=True,
+    )
+
+    assert ok is False
+    assert any("HAS_CHUNK count=1 but expected=2" in error for error in errors)
 
 
 @pytest.mark.asyncio

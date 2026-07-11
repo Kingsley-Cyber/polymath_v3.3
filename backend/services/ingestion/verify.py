@@ -510,7 +510,9 @@ async def verify_ingest(
                 )
                 row = await result.single()
                 neo_cnt = int(row["cnt"]) if row else 0
-            if neo_cnt != expected_neo4j:
+            # Missing graph chunks are a retrieval defect. Legacy extra links
+            # are cleanup work and must not cycle a Qdrant embed repair.
+            if neo_cnt < expected_neo4j:
                 errors.append(
                     f"neo4j: HAS_CHUNK count={neo_cnt} but expected={expected_neo4j} "
                     f"(body chunks; mongo total={mongo_chunk_count})"

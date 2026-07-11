@@ -57,9 +57,11 @@ def _int(value: Any) -> int:
 def _has_qdrant_vector_gap(write_state: dict[str, Any]) -> bool:
     if write_state.get("verified") is not False:
         return False
+    # Only child-vector count errors are repairable by embed_document.
+    # Summary, payload-contract, probe, and checker errors have separate
+    # repair paths and must not make valid child vectors cycle forever.
     return any(
         "child vectors" in str(error).lower()
-        or "qdrant" in str(error).lower()
         for error in (write_state.get("verify_errors") or [])
     )
 

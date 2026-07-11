@@ -41,6 +41,7 @@ async def test_artifact_reconciliation_retires_failed_chunk_job_when_chunks_exis
     assert update["reason"] == "artifact_already_satisfied"
 from services.ingestion.document_pipeline_executors import (
     _stage_after_qdrant,
+    _will_write_summary_points,
     mark_documents_persisted_from_artifacts,
 )
 
@@ -211,6 +212,46 @@ def test_classify_verified_qdrant_count_mismatch_as_embed_job():
     assert [job["kind"] for job in jobs] == ["embed_document"]
     assert jobs[0]["status"] == "queued"
     assert jobs[0]["reason"] == "qdrant_vector_mismatch"
+
+
+def test_summary_qdrant_error_does_not_reembed_valid_children():
+    jobs = classify_document_pipeline_jobs(
+        doc={
+            "corpus_id": "corpus-1",
+            "doc_id": "doc-1",
+            "filename": "book.pdf",
+            "write_state": {
+                "mongo_written": True,
+                "qdrant_written": True,
+                "verified": False,
+                "verify_errors": [
+                    "mismatch: expected=20 summary vectors but corpus_x_naive has 18 summary vectors",
+                    "corpus_x_hrag: 2 payload text mismatch(es)",
+                ],
+            },
+        },
+        child_chunks=240,
+        parent_chunks=20,
+    )
+
+    assert jobs == []
+
+
+def test_summary_write_intent_tracks_actual_qdrant_targets():
+    summaries = [object()]
+
+    assert _will_write_summary_points(
+        type("Config", (), {"target_qdrant_collections": ["naive", "graph"]})(),
+        summaries,
+    )
+    assert not _will_write_summary_points(
+        type("Config", (), {"target_qdrant_collections": ["graph"]})(),
+        summaries,
+    )
+    assert not _will_write_summary_points(
+        type("Config", (), {"target_qdrant_collections": ["naive"]})(),
+        [],
+    )
 
 
 def test_qdrant_executor_stage_does_not_overstate_full_enrichment():
