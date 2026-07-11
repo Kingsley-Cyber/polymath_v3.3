@@ -249,8 +249,22 @@ class _Collection:
                 return row
         return None
 
-    def find(self, *_args, **_kwargs):
-        return _Cursor(self.rows)
+    def find(self, query=None, *_args, **_kwargs):
+        query = query or {}
+
+        def matches(row):
+            for key, value in query.items():
+                if key.startswith("$"):
+                    continue
+                current = row.get(key)
+                if isinstance(value, dict) and "$in" in value:
+                    if current not in value["$in"]:
+                        return False
+                elif current != value:
+                    return False
+            return True
+
+        return _Cursor([row for row in self.rows if matches(row)])
 
     async def count_documents(self, query):
         return self.summarized if "summary" in str(query) else self.required
@@ -340,6 +354,39 @@ async def test_plan_summary_jobs_materializes_missing_parent_jobs():
     assert [type(op).__name__ for op in db["summary_jobs"].bulk_ops].count("UpdateOne") == 1
     assert [type(op).__name__ for op in db["summary_jobs"].bulk_ops].count("UpdateMany") == 1
     assert result["superseded"] == 0
+
+
+@pytest.mark.asyncio
+async def test_plan_summary_jobs_does_not_resurrect_dead_letter_without_operator_retry():
+    parent = {
+        "corpus_id": "corpus-1",
+        "doc_id": "doc-1",
+        "parent_id": "parent-1",
+        "text": "Useful parent text.",
+    }
+    db = _Db(
+        parent_rows=[parent],
+        doc_rows=[{"corpus_id": "corpus-1", "doc_id": "doc-1", "user_id": "user-1"}],
+    )
+    job = build_parent_summary_job(
+        parent=parent,
+        doc={"user_id": "user-1"},
+        corpus=db["corpora"].find_one_row,
+    )
+    db["summary_jobs"].rows = [{**job, "status": "dead_letter", "attempt_count": 5}]
+
+    result = await plan_summary_jobs(
+        db,
+        corpus_id="corpus-1",
+        apply=True,
+        limit=10,
+        kinds=["retrieval_parent_summary"],
+    )
+
+    assert result["planned"] == 0
+    assert result["protected_dead_letters"] == 1
+    assert db["summary_jobs"].rows[0]["status"] == "dead_letter"
+    assert db["summary_jobs"].bulk_ops == []
 
 
 @pytest.mark.asyncio

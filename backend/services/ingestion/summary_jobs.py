@@ -730,6 +730,22 @@ async def plan_summary_jobs(
                 )
             )
 
+    protected_dead_letters = 0
+    if apply and jobs:
+        planned_ids = [str(job.get("job_id") or "") for job in jobs if job.get("job_id")]
+        protected_rows = await db["summary_jobs"].find(
+            {
+                "job_id": {"$in": planned_ids},
+                "status": DEAD_LETTER_JOB_STATUS,
+            },
+            {"_id": 0, "job_id": 1},
+        ).to_list(length=len(planned_ids))
+        protected_ids = {
+            str(row.get("job_id") or "") for row in protected_rows if row.get("job_id")
+        }
+        protected_dead_letters = len(protected_ids)
+        jobs = [job for job in jobs if str(job.get("job_id") or "") not in protected_ids]
+
     counts: dict[str, int] = {}
     kind_counts: dict[str, int] = {}
     for job in jobs:
@@ -745,6 +761,7 @@ async def plan_summary_jobs(
         "kind_counts": kind_counts,
         "jobs": jobs[:50],
         "artifact_reconciled": artifact_reconciled,
+        "protected_dead_letters": protected_dead_letters,
     }
     if not apply or not jobs:
         return result
