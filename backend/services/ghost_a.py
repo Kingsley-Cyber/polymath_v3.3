@@ -394,6 +394,8 @@ async def summarize_parents(
     _results_lock = asyncio.Lock()
     disabled_lanes: set[int] = set()
     lane_fatal_strikes: dict[int, int] = {}
+    rejected_models_by_parent: dict[str, set[str]] = {}
+    validation_flags_by_parent: dict[str, list[str]] = {}
     _disabled_lock = asyncio.Lock()
     provider_sems = [
         shared_provider_semaphore(
@@ -444,6 +446,14 @@ async def summarize_parents(
             provider_error_summary(exc),
         )
 
+    def _model_signature(entry: dict[str, Any]) -> str:
+        card = resolve_extraction_provider_card(entry)
+        return f"{card.provider}:{entry.get('model') or 'unknown'}"
+
+    def _validation_failure_class(task: SummaryTask) -> str:
+        flags = validation_flags_by_parent.get(task.parent_id) or []
+        return f"validation_rejected:{flags[0]}" if flags else "validation_rejected"
+
     def _compile_result(
         task: SummaryTask,
         *,
@@ -473,6 +483,17 @@ async def summarize_parents(
             else ("other" if raw_domain else None)
         )
         if not summary or artifact.get("validation_status") != "valid":
+            flags = [str(flag) for flag in (artifact.get("quality_flags") or []) if str(flag)]
+            validation_flags_by_parent[task.parent_id] = flags[:8]
+            rejected_models_by_parent.setdefault(task.parent_id, set()).add(
+                _model_signature(entry)
+            )
+            logger.warning(
+                "GHOST A rejected parent_id=%s model=%s flags=%s",
+                task.parent_id,
+                entry.get("model"),
+                ",".join(flags[:8]) or "unknown",
+            )
             return None
         return SummaryResult(
             parent_id=task.parent_id,
@@ -573,7 +594,7 @@ async def summarize_parents(
                         else (
                             "length_truncated"
                             if finish_reason == "length"
-                            else "validation_rejected"
+                            else _validation_failure_class(task)
                         )
                     ),
                 })
@@ -915,6 +936,24 @@ async def summarize_parents(
                     len(missing),
                 )
                 break
+            enabled_signatures = {
+                _model_signature(entry)
+                for pool_idx, entry in enumerate(pool)
+                if pool_idx not in disabled_lanes
+            }
+            retryable_missing = [
+                task
+                for task in missing
+                if enabled_signatures
+                - rejected_models_by_parent.get(task.parent_id, set())
+            ]
+            if not retryable_missing:
+                logger.warning(
+                    "GHOST A stopped retries for %d parents after every enabled "
+                    "model signature deterministically rejected the artifact",
+                    len(missing),
+                )
+                break
             _clear_pending_queue()
             if _SUMMARY_RETRY_BACKOFF_SECONDS > 0:
                 await asyncio.sleep(_SUMMARY_RETRY_BACKOFF_SECONDS * attempt)
@@ -922,9 +961,9 @@ async def summarize_parents(
                 "GHOST A retry %d/%d for %d missing parent summaries",
                 attempt,
                 _SUMMARY_RETRY_ATTEMPTS,
-                len(missing),
+                len(retryable_missing),
             )
-            for task in missing:
+            for task in retryable_missing:
                 task_queue.put_nowait(task)
             await _run_enabled_workers()
             await _drain_pending_queue()

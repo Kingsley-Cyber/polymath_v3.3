@@ -175,8 +175,9 @@ async def test_summary_microbatch_falls_back_only_missing_targets(monkeypatch) -
 
 @pytest.mark.asyncio
 async def test_blank_model_content_defers_instead_of_using_fallback(monkeypatch) -> None:
-    monkeypatch.setattr(ghost_a.httpx, "AsyncClient", _BlankSummaryClient)
-    monkeypatch.setattr(ghost_a, "_SUMMARY_RETRY_ATTEMPTS", 1)
+    _CapturingBlankSummaryClient.payloads.clear()
+    monkeypatch.setattr(ghost_a.httpx, "AsyncClient", _CapturingBlankSummaryClient)
+    monkeypatch.setattr(ghost_a, "_SUMMARY_RETRY_ATTEMPTS", 2)
     monkeypatch.setattr(ghost_a, "_SUMMARY_RETRY_BACKOFF_SECONDS", 0)
 
     results = await summarize_parents(
@@ -207,6 +208,7 @@ async def test_blank_model_content_defers_instead_of_using_fallback(monkeypatch)
     )
 
     assert results == []
+    assert len(_CapturingBlankSummaryClient.payloads) == 1
 
 
 @pytest.mark.asyncio
