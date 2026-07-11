@@ -122,7 +122,7 @@ class _CrossProviderComplianceClient(_BlankSummaryClient):
         payload = dict(kwargs.get("json") or {})
         self.payloads.append(payload)
         if "longcat" not in str(payload.get("model") or "").lower():
-            return _EnvelopeIgnoringResponse('{"source":"ignored-contract"}')
+            return _EnvelopeIgnoringResponse("")
         user = payload["messages"][1]["content"]
         target_ids = [f"parent-{index}" for index in range(3) if f"parent-{index}" in user]
         items = [
@@ -316,7 +316,7 @@ async def test_validation_rejection_routes_to_untried_provider_signature(monkeyp
         for payload in _CrossProviderComplianceClient.payloads
         if "longcat" in str(payload.get("model") or "").lower()
     ]
-    assert len(hy3_calls) == 4
+    assert len(hy3_calls) == 1
     assert len(longcat_calls) == 1
 
 

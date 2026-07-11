@@ -857,6 +857,16 @@ async def summarize_parents(
             missing_tasks = [
                 task for task in batch_tasks if task.parent_id not in compiled
             ]
+            if not raw and missing_tasks:
+                signature = _model_signature(entry)
+                for task in missing_tasks:
+                    validation_flags_by_parent[task.parent_id] = [
+                        "missing_summary",
+                        "empty_provider_content",
+                    ]
+                    rejected_models_by_parent.setdefault(task.parent_id, set()).add(
+                        signature
+                    )
             if raw and missing_tasks:
                 fallback_results = await asyncio.gather(
                     *(
