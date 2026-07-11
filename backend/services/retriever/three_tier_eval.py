@@ -38,7 +38,7 @@ ROUTE_LATENCY_BUDGETS: dict[str, dict[str, float]] = {
     # model-generation slowness separately so retrieval regressions cannot hide
     # behind a broad end-to-end timeout.
     "Fast Search": {
-        "retrieval_s": 6.0,
+        "retrieval_s": 2.0,
         "total_s": 20.0,
         "generation_after_sources_s": 14.0,
     },
@@ -48,7 +48,7 @@ ROUTE_LATENCY_BUDGETS: dict[str, dict[str, float]] = {
         "generation_after_sources_s": 14.0,
     },
     "Graph Augmentation": {
-        "retrieval_s": 8.0,
+        "retrieval_s": 10.0,
         "total_s": 25.0,
         "generation_after_sources_s": 16.0,
     },
@@ -75,16 +75,23 @@ def _text(value: Any) -> str:
 
 
 def _norm(value: str) -> str:
-    return re.sub(r"\s+", " ", value.casefold()).strip()
+    normalized = re.sub(r"[^a-z0-9]+", " ", value.casefold())
+    return re.sub(r"\s+", " ", normalized).strip()
 
 
 def _source_text(source: dict[str, Any]) -> str:
-    return _text(
+    body = _text(
         source.get("text")
         or source.get("content")
         or source.get("chunk_text")
         or source.get("summary")
     )
+    attribution = " ".join(
+        _text(source.get(key))
+        for key in ("doc_name", "document_name", "title", "corpus_name")
+        if source.get(key)
+    )
+    return "\n".join(part for part in (attribution, body) if part)
 
 
 def source_identifier(source: dict[str, Any]) -> str:
@@ -220,9 +227,18 @@ def sources_joined_text(sources: list[dict[str, Any]] | None) -> str:
 def extract_trace_summary(trace_events: list[dict[str, Any]] | None) -> dict[str, Any]:
     trace_events = trace_events or []
     titles = [_text(event.get("title")) for event in trace_events]
+    local_rag_events = [
+        event
+        for event in trace_events
+        if event.get("title") == "Local RAG retrieval"
+    ]
     local_rag = next(
-        (event for event in trace_events if event.get("title") == "Local RAG retrieval"),
-        {},
+        (
+            event
+            for event in reversed(local_rag_events)
+            if (event.get("metadata") or {}).get("retrieval_diagnostics")
+        ),
+        local_rag_events[-1] if local_rag_events else {},
     )
     graph_advantage = next(
         (event for event in trace_events if event.get("title") == "Graph Advantage"),

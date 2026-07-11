@@ -580,6 +580,35 @@ class RerankerService:
                 "(rank-fusion fallback), not splitting: %s", len(pool), exc,
             )
             raise RerankPassAborted(str(exc)) from exc
+        except httpx.HTTPStatusError as exc:
+            # 429/auth/contract failures apply to the request or service, not
+            # one candidate. Recursive splitting would multiply identical
+            # calls and amplify overload. Only 5xx batch-shape failures are
+            # eligible for isolation below.
+            status_code = int(exc.response.status_code)
+            if status_code < 500:
+                raise
+            if len(pool) <= 1:
+                logger.warning(
+                    "Reranker single-candidate HTTP %d; preserving original score",
+                    status_code,
+                )
+                return sorted(pool, key=lambda c: c.score, reverse=True), 0, 1
+            mid = len(pool) // 2
+            logger.info(
+                "Reranker HTTP %d on batch of %d; splitting into %d + %d",
+                status_code,
+                len(pool),
+                mid,
+                len(pool) - mid,
+            )
+            left, left_ok, left_bad = await self._rerank_batch_or_split(
+                client=client, url=url, query=query, pool=pool[:mid]
+            )
+            right, right_ok, right_bad = await self._rerank_batch_or_split(
+                client=client, url=url, query=query, pool=pool[mid:]
+            )
+            return left + right, left_ok + right_ok, left_bad + right_bad
         except Exception as exc:
             if len(pool) <= 1:
                 logger.warning(

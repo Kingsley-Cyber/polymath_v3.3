@@ -22,6 +22,7 @@ from __future__ import annotations
 import logging
 import os
 import time
+import heapq
 from typing import Any
 
 import asyncio
@@ -46,6 +47,7 @@ QUEUE_TIMEOUT_SECONDS = float(os.environ.get("EMBEDDER_QUEUE_TIMEOUT_SECONDS", "
 class EmbeddingsRequest(BaseModel):
     input: list[str] | str
     model: str | None = None  # ignored — we always serve MODEL_ID
+    workload_class: str = "document_ingestion"
 
 
 class EmbeddingItem(BaseModel):
@@ -61,8 +63,63 @@ class EmbeddingsResponse(BaseModel):
     usage: dict[str, int] = Field(default_factory=lambda: {"prompt_tokens": 0, "total_tokens": 0})
 
 
-app = FastAPI(title="Polymath Apple MLX Embedder", version="0.1.0")
-_request_gate = asyncio.Semaphore(1)
+app = FastAPI(title="Polymath Apple MLX Embedder", version="0.2.0")
+
+
+class PriorityRequestGate:
+    """Single-device admission with stable priority and FIFO within a class."""
+
+    PRIORITIES = {
+        "interactive_query": 0,
+        "document_ingestion": 1,
+        "backfill_repair": 2,
+    }
+
+    def __init__(self) -> None:
+        self._condition = asyncio.Condition()
+        self._waiting: list[tuple[int, int, asyncio.Future[None]]] = []
+        self._sequence = 0
+        self._active = False
+
+    async def acquire(self, workload_class: str, timeout: float) -> None:
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[None] = loop.create_future()
+        priority = self.PRIORITIES.get(workload_class, 1)
+        async with self._condition:
+            self._sequence += 1
+            heapq.heappush(self._waiting, (priority, self._sequence, future))
+            self._dispatch_locked()
+        try:
+            await asyncio.wait_for(future, timeout=timeout)
+        except BaseException:
+            async with self._condition:
+                self._waiting = [item for item in self._waiting if item[2] is not future]
+                heapq.heapify(self._waiting)
+                self._dispatch_locked()
+            raise
+
+    async def release(self) -> None:
+        async with self._condition:
+            self._active = False
+            self._dispatch_locked()
+
+    def _dispatch_locked(self) -> None:
+        if self._active:
+            return
+        while self._waiting:
+            _, _, future = heapq.heappop(self._waiting)
+            if future.done():
+                continue
+            self._active = True
+            future.set_result(None)
+            return
+
+    @property
+    def queue_depth(self) -> int:
+        return sum(1 for _, _, future in self._waiting if not future.done())
+
+
+_request_gate = PriorityRequestGate()
 _active_request_started_at: float | None = None
 _last_request_seconds: float | None = None
 _last_error: str | None = None
@@ -269,6 +326,7 @@ async def health() -> dict:
             else None
         ),
         "last_error": _last_error,
+        "queue_depth": _request_gate.queue_depth,
     }
 
 
@@ -285,25 +343,38 @@ async def embeddings(req: EmbeddingsRequest) -> EmbeddingsResponse:
     if not inputs:
         raise HTTPException(status_code=400, detail="input is empty")
 
-    acquired = False
     started = time.monotonic()
     try:
-        try:
-            await asyncio.wait_for(_request_gate.acquire(), timeout=QUEUE_TIMEOUT_SECONDS)
-            acquired = True
-        except TimeoutError:
-            raise HTTPException(
-                status_code=429,
-                detail=(
-                    "embedder is busy; previous request did not release within "
-                    f"{QUEUE_TIMEOUT_SECONDS:.1f}s"
-                ),
+        import numpy as np
+
+        microbatches = []
+        for batch_start in range(0, len(inputs), max(1, BATCH_SIZE)):
+            acquired = False
+            try:
+                await _request_gate.acquire(req.workload_class, QUEUE_TIMEOUT_SECONDS)
+                acquired = True
+                _active_request_started_at = time.monotonic()
+                microbatches.append(
+                    await asyncio.wait_for(
+                        asyncio.to_thread(
+                            _encode_batch,
+                            inputs[batch_start : batch_start + BATCH_SIZE],
+                        ),
+                        timeout=REQUEST_TIMEOUT_SECONDS,
+                    )
+                )
+            finally:
+                _active_request_started_at = None
+                if acquired:
+                    await _request_gate.release()
+            # Give newly arrived interactive requests a chance to enqueue
+            # before this bulk request asks for the next device slice.
+            await asyncio.sleep(0)
+        embeddings_np = np.vstack(microbatches)
+        if embeddings_np.shape[1] != EMBED_DIM:
+            raise RuntimeError(
+                f"embedding dimension mismatch: expected {EMBED_DIM}, got {embeddings_np.shape[1]}"
             )
-        _active_request_started_at = time.monotonic()
-        embeddings_np = await asyncio.wait_for(
-            asyncio.to_thread(_encode_texts, inputs),
-            timeout=REQUEST_TIMEOUT_SECONDS,
-        )
         _last_error = None
     except TimeoutError:
         _last_error = f"embedding request timed out after {REQUEST_TIMEOUT_SECONDS:.1f}s"
@@ -317,8 +388,6 @@ async def embeddings(req: EmbeddingsRequest) -> EmbeddingsResponse:
     finally:
         _last_request_seconds = time.monotonic() - started
         _active_request_started_at = None
-        if acquired:
-            _request_gate.release()
 
     return EmbeddingsResponse(
         data=[

@@ -192,6 +192,7 @@ export async function streamChat(
   request: ChatRequest,
   onEvent: (event: SSEEvent) => void,
   onError: (error: Error) => void,
+  signal?: AbortSignal,
 ): Promise<void> {
   try {
     // Build headers with auth token — SSE uses raw fetch, not fetchJSON (UT-002)
@@ -207,6 +208,7 @@ export async function streamChat(
       method: "POST",
       headers,
       body: JSON.stringify(request),
+      signal,
     });
 
     if (!response.ok) {
@@ -251,6 +253,7 @@ export async function streamChat(
       reader.releaseLock();
     }
   } catch (error) {
+    if (signal?.aborted) return;
     onError(error as Error);
   }
 }
@@ -404,8 +407,8 @@ export async function updateCredentials(
  * GET /api/corpora
  * List all corpora owned by the current user.
  */
-export async function listCorpora(): Promise<CorpusResponse[]> {
-  return fetchJSON("/corpora");
+export async function listCorpora(signal?: AbortSignal): Promise<CorpusResponse[]> {
+  return fetchJSON("/corpora", { signal });
 }
 
 /**

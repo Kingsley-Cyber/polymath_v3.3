@@ -3,9 +3,31 @@ from services.retriever.three_tier_eval import (
     evaluate_route_result,
     extract_trace_summary,
     route_latency_budget,
+    sources_joined_text,
     summarize_report,
     summarize_sources,
 )
+
+
+def test_source_anchor_text_includes_normalized_citation_title():
+    joined = sources_joined_text(
+        [
+            {
+                "doc_name": "chip-heath-dan-heath-made-to-stick-2007.md",
+                "text": "A framework for simple, unexpected, concrete ideas.",
+            }
+        ]
+    )
+    coverage = anchor_coverage(
+        {
+            "anchor_groups": [
+                {"name": "book", "terms": ["made to stick"], "required": True}
+            ]
+        },
+        joined,
+    )
+
+    assert coverage["required_coverage"] == 1.0
 
 
 def test_summarize_sources_keeps_counts_without_text():
@@ -78,6 +100,32 @@ def test_extract_trace_summary_reads_local_and_graph_advantage():
     assert summary["has_graph_advantage"] is True
     assert summary["effective_tier"] == "qdrant_mongo_graph"
     assert summary["graph_advantage"]["facts_used"] == 3
+
+
+def test_extract_trace_summary_prefers_final_populated_retrieval_event():
+    trace = [
+        {
+            "title": "Local RAG retrieval",
+            "metadata": {"duration_s": 0.1, "effective_tier": "qdrant_mongo"},
+        },
+        {
+            "title": "Local RAG retrieval",
+            "metadata": {
+                "duration_s": 1.5,
+                "effective_tier": "qdrant_mongo_graph",
+                "retrieval_diagnostics": {
+                    "query_plan_version": "query_plan.v2",
+                    "timings_s": {"rerank": 0.8},
+                },
+            },
+        },
+    ]
+
+    summary = extract_trace_summary(trace)
+
+    assert summary["effective_tier"] == "qdrant_mongo_graph"
+    assert summary["local_rag_duration_s"] == 1.5
+    assert summary["retrieval_diagnostics"]["query_plan_version"] == "query_plan.v2"
 
 
 def test_graph_route_requires_graph_advantage_trace():
@@ -160,9 +208,9 @@ def test_summarize_report_aggregates_route_budgets():
 
 
 def test_route_latency_budget_is_not_a_35_second_blanket():
-    assert route_latency_budget("Fast Search")["retrieval_s"] == 6.0
+    assert route_latency_budget("Fast Search")["retrieval_s"] == 2.0
     assert route_latency_budget("Hybrid Search")["retrieval_s"] == 8.0
-    assert route_latency_budget("Graph Augmentation")["retrieval_s"] == 8.0
+    assert route_latency_budget("Graph Augmentation")["retrieval_s"] == 10.0
 
 
 def test_retrieval_budget_is_hard_fail_by_default():

@@ -20,8 +20,10 @@ import {
   Loader2,
   AlertTriangle,
   ExternalLink,
+  RefreshCw,
 } from "lucide-react";
 import { useChatStore } from "../../stores/chatStore";
+import { useSettingsStore } from "../../stores/settingsStore";
 import * as api from "../../lib/api";
 import type {
   CorpusResponse,
@@ -722,6 +724,8 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const corpusLoadInFlight = useRef(false);
+  const corpusLoadController = useRef<AbortController | null>(null);
+  const corpusLoadRequestId = useRef(0);
 
   // Sprint 2B — Modal global status. Fetched once on open; gates the
   // embed_mode='modal' option in the per-corpus form.
@@ -770,31 +774,74 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
   );
 
   const loadCorpora = useCallback(async (opts?: { silent?: boolean }) => {
-    if (corpusLoadInFlight.current) return;
+    if (corpusLoadInFlight.current && opts?.silent) return;
+    corpusLoadController.current?.abort();
+    const controller = new AbortController();
+    corpusLoadController.current = controller;
+    const requestId = ++corpusLoadRequestId.current;
     corpusLoadInFlight.current = true;
     const silent = Boolean(opts?.silent);
+    let timedOut = false;
+    const timeout = window.setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, 10000);
     if (!silent) {
       setIsLoading(true);
       setError(null);
     }
     try {
-      const data = await api.listCorpora();
+      const data = await api.listCorpora(controller.signal);
+      if (requestId !== corpusLoadRequestId.current) return;
       setCorpora(data);
+      const validIds = data.map((corpus) => corpus.corpus_id);
+      const validSet = new Set(validIds);
+      const currentSelectedIds = useChatStore.getState().selectedCorpusIds;
+      const reconciledSelectedIds = currentSelectedIds.filter((id) => validSet.has(id));
+      if (
+        reconciledSelectedIds.length !== currentSelectedIds.length ||
+        reconciledSelectedIds.some((id, index) => id !== currentSelectedIds[index])
+      ) {
+        setSelectedCorpusIds(reconciledSelectedIds);
+      }
+      useSettingsStore.getState().purgeStaleCorpusIds(validIds);
       setSelectedCorpus((prev) => {
         if (!prev) return prev;
-        return data.find((c) => c.corpus_id === prev.corpus_id) ?? prev;
+        return data.find((c) => c.corpus_id === prev.corpus_id) ?? null;
       });
+      setExpandedId((prev) => (prev && validSet.has(prev) ? prev : null));
+      setEditingId((prev) => (prev && validSet.has(prev) ? prev : null));
     } catch (err) {
-      if (!silent) {
-        setError(err instanceof Error ? err.message : "Failed to load corpora");
+      if (!silent && requestId === corpusLoadRequestId.current) {
+        setError(
+          timedOut
+            ? "Corpus readiness timed out after 10 seconds. Retry when storage pressure settles."
+            : err instanceof Error && err.name !== "AbortError"
+              ? err.message
+              : "Corpus load was cancelled.",
+        );
       }
     } finally {
-      corpusLoadInFlight.current = false;
-      if (!silent) {
-        setIsLoading(false);
+      window.clearTimeout(timeout);
+      if (requestId === corpusLoadRequestId.current) {
+        corpusLoadInFlight.current = false;
+        corpusLoadController.current = null;
+        if (!silent) {
+          setIsLoading(false);
+        }
       }
     }
-  }, [setCorpora]);
+  }, [setCorpora, setSelectedCorpusIds]);
+
+  useEffect(() => {
+    if (isOpen) return;
+    corpusLoadController.current?.abort();
+    corpusLoadController.current = null;
+    corpusLoadInFlight.current = false;
+    setIsLoading(false);
+  }, [isOpen]);
+
+  useEffect(() => () => corpusLoadController.current?.abort(), []);
 
   useEffect(() => {
     if (isOpen) {
@@ -1013,6 +1060,15 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
           <div className="flex items-center gap-2 px-4 py-2 bg-error/10 border-b border-error/30 text-[11px] text-error">
             <AlertTriangle className="w-3 h-3 shrink-0" />
             <span className="flex-1">{error}</span>
+            <button
+              type="button"
+              onClick={() => void loadCorpora()}
+              className="inline-flex items-center gap-1 hover:text-content-primary"
+              title="Retry corpus readiness"
+            >
+              <RefreshCw className="w-3 h-3" />
+              Retry
+            </button>
             <button
               onClick={() => setError(null)}
               className="hover:text-content-primary"

@@ -88,7 +88,12 @@ def _qdrant():
 
 async def _embed(texts: list[str]) -> list[list[float]]:
     from services.embedder import embed_batch
-    return await embed_batch(texts, mode="local", expected_dim=_EMBED_DIM)
+    return await embed_batch(
+        texts,
+        mode="local",
+        expected_dim=_EMBED_DIM,
+        workload_class="backfill_repair",
+    )
 
 
 def _row_child_ids(row: dict) -> list[str]:

@@ -1,5 +1,6 @@
 // FileAttachment.tsx - File attachment display and upload component
-import { X, Upload } from "lucide-react";
+import { useEffect, useState } from "react";
+import { ImageOff, X, Upload } from "lucide-react";
 
 interface FileAttachmentProps {
   file: File;
@@ -14,6 +15,19 @@ export function FileAttachment({
   uploadProgress,
   isUploading = false,
 }: FileAttachmentProps) {
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewFailed, setPreviewFailed] = useState(false);
+
+  useEffect(() => {
+    setPreviewFailed(false);
+    if (!(file.type || "").toLowerCase().startsWith("image/")) {
+      setPreviewUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(file);
+    setPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
 
   const formatFileSize = (bytes: number): string => {
     if (bytes === 0) return "0 B";
@@ -34,8 +48,27 @@ export function FileAttachment({
 
   return (
     <div
-      className="relative flex items-center gap-2 px-3 py-2 bg-bg-tertiary border border-border rounded-lg group"
+      className="relative flex min-w-0 items-center gap-2 border border-border-minimal bg-bg-surface px-2 py-1.5 group"
+      data-testid="attachment-preview"
     >
+      {previewUrl && !previewFailed ? (
+        <img
+          src={previewUrl}
+          alt={`Preview of ${file.name}`}
+          className="h-10 w-10 shrink-0 object-cover"
+          width={40}
+          height={40}
+          onError={() => setPreviewFailed(true)}
+          data-testid="attachment-preview-image"
+        />
+      ) : previewFailed ? (
+        <span
+          className="flex h-10 w-10 shrink-0 items-center justify-center border border-error/30 text-error"
+          title="Image preview failed"
+        >
+          <ImageOff className="h-4 w-4" />
+        </span>
+      ) : null}
       {/* File type tag */}
       <span className="status-badge status-badge-inf">{`<${getFileTag()}>`}</span>
 
@@ -69,7 +102,8 @@ export function FileAttachment({
         onRemove && (
           <button
             onClick={onRemove}
-            className="opacity-0 group-hover:opacity-100 p-1 text-text-tertiary hover:text-error hover:bg-error/10 rounded transition-all"
+            className="p-1 text-text-tertiary hover:text-error hover:bg-error/10 transition-colors"
+            title={`Remove ${file.name}`}
           >
             <X className="w-4 h-4" />
           </button>
@@ -103,7 +137,7 @@ export function FileDropZone({ onFilesSelected: _onFilesSelected, isDragging = f
         Drop files here or click to browse
       </p>
       <p className="text-xs text-text-tertiary mt-1">
-        Supports PDF, TXT, MD, JSON, and images
+        Supports TXT, MD, JSON, code, and images
       </p>
     </div>
   );

@@ -120,6 +120,7 @@ async def embed_batch(
     modal_containers: int | None = None,
     api_pool: list[dict[str, Any]] | None = None,
     local_timeout_s: float | None = None,
+    workload_class: str = "document_ingestion",
 ) -> list[list[float]]:
     """Dispatch to the selected embedding provider.
 
@@ -228,7 +229,12 @@ async def embed_batch(
             )
 
     # ── Local (default) ─────────────────────────────────────────────────
-    return await _call_embed_batch_local(texts, dim, timeout_s=local_timeout_s)
+    return await _call_embed_batch_local(
+        texts,
+        dim,
+        timeout_s=local_timeout_s,
+        workload_class=workload_class,
+    )
 
 
 async def _embed_batch_api(
@@ -543,11 +549,13 @@ class _QueryEmbedBatcher:
                 modal_containers=config.get("modal_containers"),
                 api_pool=api_pool,
                 local_timeout_s=_QUERY_LOCAL_TIMEOUT,
+                workload_class="interactive_query",
             )
         return await _call_embed_batch_local(
             texts,
             _DEFAULT_DIM,
             timeout_s=_QUERY_LOCAL_TIMEOUT,
+            workload_class="interactive_query",
         )
 
 
@@ -587,6 +595,56 @@ async def embed_query(text: str, config: dict[str, Any] | None = None) -> list[f
     return vector
 
 
+def _query_cache_key(text: str, config: dict[str, Any] | None) -> str:
+    if config:
+        return hash_key(
+            "api",
+            config.get("embed_mode") or "local",
+            config.get("embedding_model_id"),
+            config.get("embedding_dimension") or _DEFAULT_DIM,
+            config.get("embed_base_url"),
+            text,
+        )
+    return hash_key("local", _DEFAULT_DIM, text)
+
+
+async def embed_queries(
+    texts: list[str],
+    config: dict[str, Any] | None = None,
+) -> list[list[float]]:
+    """Embed a planned query set in one provider request.
+
+    Unlike independent ``embed_query`` calls, this function does not depend on
+    the coalescing window. It deterministically deduplicates texts, resolves
+    cached rows, sends all misses through one batch call, then restores the
+    caller's original order.
+    """
+
+    if not texts:
+        return []
+    unique_texts = list(dict.fromkeys(str(text or "") for text in texts))
+    vectors_by_text: dict[str, list[float]] = {}
+    misses: list[str] = []
+    for text in unique_texts:
+        cached = _QUERY_EMBED_CACHE.get(_query_cache_key(text, config))
+        if cached is None:
+            misses.append(text)
+        else:
+            vectors_by_text[text] = cached
+
+    if misses:
+        vectors = await _QUERY_BATCHER._embed_texts(misses, config)
+        if len(vectors) != len(misses):
+            raise ValueError(
+                f"embed batch returned {len(vectors)} vectors for {len(misses)} texts"
+            )
+        for text, vector in zip(misses, vectors):
+            vectors_by_text[text] = vector
+            _QUERY_EMBED_CACHE.set(_query_cache_key(text, config), vector)
+
+    return [vectors_by_text[str(text or "")] for text in texts]
+
+
 # Pooled HTTP client for the local embedder sidecar. A chat turn issues ~6-9
 # embed calls (main query + each facet/lane support query); a per-call
 # AsyncClient paid TCP setup every time. One reused, keep-alive client removes
@@ -611,8 +669,8 @@ def _get_local_http_client(timeout_s: float | None = None) -> httpx.AsyncClient:
     return client
 
 
-def _accepts_timeout_kw(func: Any) -> bool:
-    """Return whether a patched/local embed function accepts timeout_s.
+def _accepts_kw(func: Any, name: str) -> bool:
+    """Return whether a patched/local embed function accepts a keyword.
 
     A few unit tests monkeypatch ``_embed_batch_local`` with the old two-arg
     callable shape. Production needs the timeout knob for query-vs-ingest
@@ -627,7 +685,7 @@ def _accepts_timeout_kw(func: Any) -> bool:
     for parameter in signature.parameters.values():
         if parameter.kind is inspect.Parameter.VAR_KEYWORD:
             return True
-        if parameter.name == "timeout_s":
+        if parameter.name == name:
             return True
     return False
 
@@ -637,10 +695,14 @@ async def _call_embed_batch_local(
     expected_dim: int,
     *,
     timeout_s: float | None = None,
+    workload_class: str = "document_ingestion",
 ) -> list[list[float]]:
-    if _accepts_timeout_kw(_embed_batch_local):
-        return await _embed_batch_local(texts, expected_dim, timeout_s=timeout_s)
-    return await _embed_batch_local(texts, expected_dim)
+    kwargs: dict[str, Any] = {}
+    if _accepts_kw(_embed_batch_local, "timeout_s"):
+        kwargs["timeout_s"] = timeout_s
+    if _accepts_kw(_embed_batch_local, "workload_class"):
+        kwargs["workload_class"] = workload_class
+    return await _embed_batch_local(texts, expected_dim, **kwargs)
 
 
 async def _embed_batch_local(
@@ -648,6 +710,7 @@ async def _embed_batch_local(
     expected_dim: int,
     *,
     timeout_s: float | None = None,
+    workload_class: str = "document_ingestion",
 ) -> list[list[float]]:
     """Local embedder sidecar — Docker sentence-transformers service."""
     settings = get_settings()
@@ -663,6 +726,7 @@ async def _embed_batch_local(
             url=url,
             batch=batch,
             expected_dim=expected_dim,
+            workload_class=workload_class,
         )
         vectors.extend(batch_vectors)
 
@@ -675,6 +739,7 @@ async def _post_local_with_retries(
     url: str,
     batch: list[str],
     expected_dim: int,
+    workload_class: str,
 ) -> list[list[float]]:
     """Retry transient sidecar failures (intermittent 400/5xx/short responses
     observed under GPU contention — PILOT_REPORT resilience #2) before
@@ -683,12 +748,15 @@ async def _post_local_with_retries(
     last_exc: Exception | None = None
     for attempt in range(3):
         try:
-            return await _post_local_embedding_batch(
-                client=client,
-                url=url,
-                batch=batch,
-                expected_dim=expected_dim,
-            )
+            kwargs = {
+                "client": client,
+                "url": url,
+                "batch": batch,
+                "expected_dim": expected_dim,
+            }
+            if _accepts_kw(_post_local_embedding_batch, "workload_class"):
+                kwargs["workload_class"] = workload_class
+            return await _post_local_embedding_batch(**kwargs)
         except httpx.TimeoutException:
             raise
         except (
@@ -718,6 +786,7 @@ async def _embed_local_batch_with_split(
     url: str,
     batch: list[str],
     expected_dim: int,
+    workload_class: str = "document_ingestion",
 ) -> list[list[float]]:
     """Embed a local batch, splitting it when a large PDF batch times out."""
     try:
@@ -726,6 +795,7 @@ async def _embed_local_batch_with_split(
             url=url,
             batch=batch,
             expected_dim=expected_dim,
+            workload_class=workload_class,
         )
     except httpx.TimeoutException:
         if len(batch) <= 1:
@@ -746,12 +816,14 @@ async def _embed_local_batch_with_split(
             url=url,
             batch=batch[:midpoint],
             expected_dim=expected_dim,
+            workload_class=workload_class,
         )
         right = await _embed_local_batch_with_split(
             client=client,
             url=url,
             batch=batch[midpoint:],
             expected_dim=expected_dim,
+            workload_class=workload_class,
         )
         return left + right
 
@@ -762,8 +834,16 @@ async def _post_local_embedding_batch(
     url: str,
     batch: list[str],
     expected_dim: int,
+    workload_class: str = "document_ingestion",
 ) -> list[list[float]]:
-    resp = await client.post(url, json={"input": batch, "model": "embed"})
+    resp = await client.post(
+        url,
+        json={
+            "input": batch,
+            "model": "embed",
+            "workload_class": workload_class,
+        },
+    )
     resp.raise_for_status()
     data = resp.json()
     items = data.get("data") or []

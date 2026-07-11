@@ -1,0 +1,250 @@
+import asyncio
+from time import perf_counter
+from types import SimpleNamespace
+
+import pytest
+
+import services.retriever as retriever_module
+from models.schemas import RetrievalResult, RetrievalTier, SourceChunk
+from services.retriever.query_plan import build_query_plan_v2
+
+
+def _chunk(chunk_id: str, corpus_id: str = "c1") -> SourceChunk:
+    return SourceChunk(
+        chunk_id=chunk_id,
+        parent_id=f"p-{chunk_id}",
+        doc_id=f"d-{chunk_id}",
+        corpus_id=corpus_id,
+        text=f"evidence {chunk_id}",
+        score=0.8,
+        source_tier="vector",
+    )
+
+
+@pytest.mark.asyncio
+async def test_planned_hybrid_batches_embeddings_and_reranks_once(monkeypatch):
+    orchestrator = retriever_module.RetrieverOrchestrator()
+    plan = build_query_plan_v2(
+        "Compare Purple Ocean strategy with sticky messaging.",
+        corpus_ids=["c1", "c2"],
+    )
+    embedded: list[list[str]] = []
+    reranks: list[tuple[str, int]] = []
+    sequence = 0
+
+    async def fake_filter(corpus_ids):
+        return corpus_ids, []
+
+    async def fake_intersection(tier, corpus_ids):
+        return tier, None
+
+    async def fake_config(corpus_ids):
+        return None
+
+    async def fake_embed(texts, config):
+        embedded.append(list(texts))
+        return [[float(index)] for index, _ in enumerate(texts)]
+
+    async def fake_search(*args, **kwargs):
+        nonlocal sequence
+        sequence += 1
+        corpus_id = "c2" if sequence % 2 == 0 else "c1"
+        return [_chunk(f"chunk-{sequence}", corpus_id)]
+
+    async def identity(chunks, corpus_ids):
+        return chunks
+
+    async def rerank(query, chunks):
+        reranks.append((query, len(chunks)))
+        return chunks
+
+    monkeypatch.setattr(orchestrator, "_filter_existing_corpora", fake_filter)
+    monkeypatch.setattr(orchestrator, "_enforce_strategy_intersection", fake_intersection)
+    monkeypatch.setattr(orchestrator, "_embedding_config_for_query", fake_config)
+    monkeypatch.setattr(retriever_module, "embed_queries", fake_embed)
+    monkeypatch.setattr(retriever_module.funnel_a, "search", fake_search)
+    monkeypatch.setattr(retriever_module.funnel_b, "search", fake_search)
+    monkeypatch.setattr(retriever_module.lexical_retriever, "search", fake_search)
+    monkeypatch.setattr(retriever_module, "attach_document_identities", identity)
+    monkeypatch.setattr(retriever_module, "hydrate_rerank_texts", identity)
+    monkeypatch.setattr(retriever_module, "hydrate_chunks", lambda chunks, corpus_ids, query=None: identity(chunks, corpus_ids))
+    monkeypatch.setattr(retriever_module.reranker_service, "rerank", rerank)
+    monkeypatch.setattr(
+        retriever_module,
+        "select_with_diversity",
+        lambda ranked, **kwargs: SimpleNamespace(
+            candidates=ranked[: kwargs["final_top_k"]],
+            diagnostics={"required_coverage": 1.0},
+        ),
+    )
+
+    result = await orchestrator.retrieve_planned(
+        plan=plan,
+        corpus_ids=["c1", "c2"],
+        retrieval_tier=RetrievalTier.qdrant_mongo,
+        rerank_enabled=True,
+        rerank_top_n=32,
+        final_top_k=6,
+    )
+
+    assert len(embedded) == 1
+    assert embedded[0] == [lane.dense_text for lane in plan.lanes if lane.role in {"original", "core"}]
+    assert reranks == [(plan.original_query, min(16, sequence))]
+    assert result.diagnostics["query_plan_version"] == "query_plan.v2"
+    assert result.diagnostics["lane_failures"] == []
+    assert result.diagnostics["required_concept_coverage"]["coverage"] == 1.0
+    assert result.diagnostics["repair"]["attempted_rounds"] == 0
+    assert result.diagnostics["cache"]["key_version"] == "retrieval_v2"
+    assert result.effective_tier == RetrievalTier.qdrant_mongo
+
+
+@pytest.mark.asyncio
+async def test_planned_fast_delegates_to_strict_fast_contract(monkeypatch):
+    orchestrator = retriever_module.RetrieverOrchestrator()
+    plan = build_query_plan_v2("What is Purple Ocean strategy?")
+    captured = {}
+
+    async def fake_retrieve_uncached(**kwargs):
+        captured.update(kwargs)
+        return RetrievalResult(
+            chunks=[],
+            requested_tier=RetrievalTier.qdrant_only,
+            effective_tier=RetrievalTier.qdrant_only,
+        )
+
+    monkeypatch.setattr(orchestrator, "_retrieve_uncached", fake_retrieve_uncached)
+
+    await orchestrator.retrieve_planned(
+        plan=plan,
+        corpus_ids=["c1"],
+        retrieval_tier=RetrievalTier.qdrant_only,
+        rerank_enabled=True,
+    )
+
+    assert captured["query"] == plan.original_query
+    assert captured["rerank_enabled"] is False
+    assert captured["retrieval_tier"] == RetrievalTier.qdrant_only
+
+
+@pytest.mark.asyncio
+async def test_planned_rerank_timeout_degrades_to_fused_results(monkeypatch):
+    orchestrator = retriever_module.RetrieverOrchestrator()
+    plan = build_query_plan_v2("Compare Purple Ocean strategy with sticky messaging.")
+
+    async def fake_filter(corpus_ids):
+        return corpus_ids, []
+
+    async def fake_intersection(tier, corpus_ids):
+        return tier, None
+
+    async def fake_config(corpus_ids):
+        return None
+
+    async def fake_search(*args, **kwargs):
+        return [_chunk("evidence")]
+
+    async def identity(chunks, corpus_ids, **kwargs):
+        return chunks
+
+    async def timeout_rerank(query, chunks):
+        raise TimeoutError("bounded reranker deadline")
+
+    monkeypatch.setattr(orchestrator, "_filter_existing_corpora", fake_filter)
+    monkeypatch.setattr(orchestrator, "_enforce_strategy_intersection", fake_intersection)
+    monkeypatch.setattr(orchestrator, "_embedding_config_for_query", fake_config)
+
+    async def fake_embed(texts, config):
+        return [[0.1] for _ in texts]
+
+    monkeypatch.setattr(retriever_module, "embed_queries", fake_embed)
+    monkeypatch.setattr(retriever_module.funnel_a, "search", fake_search)
+    monkeypatch.setattr(retriever_module.funnel_b, "search", fake_search)
+    monkeypatch.setattr(retriever_module.lexical_retriever, "search", fake_search)
+    monkeypatch.setattr(retriever_module, "attach_document_identities", identity)
+    monkeypatch.setattr(retriever_module, "hydrate_rerank_texts", identity)
+    monkeypatch.setattr(retriever_module, "hydrate_chunks", identity)
+    monkeypatch.setattr(retriever_module.reranker_service, "rerank", timeout_rerank)
+
+    result = await orchestrator.retrieve_planned(
+        plan=plan,
+        corpus_ids=["c1"],
+        retrieval_tier=RetrievalTier.qdrant_mongo,
+        rerank_enabled=True,
+        final_top_k=4,
+    )
+
+    assert result.chunks
+    assert result.diagnostics["status"] == "query_plan_v2_degraded"
+    assert result.diagnostics["reranker"]["status"] == "deadline_fallback_rank_fusion"
+    assert any(
+        failure["retriever"] == "reranker"
+        for failure in result.diagnostics["lane_failures"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_planned_route_deadline_degrades_to_lexical_evidence(monkeypatch):
+    orchestrator = retriever_module.RetrieverOrchestrator()
+    plan = build_query_plan_v2("Compare Purple Ocean strategy with sticky messaging.")
+
+    async def fake_filter(corpus_ids):
+        return corpus_ids, []
+
+    async def fake_intersection(tier, corpus_ids):
+        return tier, None
+
+    async def fake_config(corpus_ids):
+        return None
+
+    async def slow_embed(texts, config):
+        await asyncio.sleep(1)
+        return [[0.1] for _ in texts]
+
+    async def lexical_search(*args, **kwargs):
+        return [_chunk("lexical-evidence")]
+
+    async def identity(chunks, corpus_ids, **kwargs):
+        return chunks
+
+    async def slow_rerank(query, chunks):
+        await asyncio.sleep(1)
+        return chunks
+
+    monkeypatch.setattr(orchestrator, "_filter_existing_corpora", fake_filter)
+    monkeypatch.setattr(orchestrator, "_enforce_strategy_intersection", fake_intersection)
+    monkeypatch.setattr(orchestrator, "_embedding_config_for_query", fake_config)
+    monkeypatch.setattr(retriever_module, "embed_queries", slow_embed)
+    monkeypatch.setattr(retriever_module.lexical_retriever, "search", lexical_search)
+    monkeypatch.setattr(retriever_module, "attach_document_identities", identity)
+    monkeypatch.setattr(retriever_module, "hydrate_rerank_texts", identity)
+    monkeypatch.setattr(retriever_module, "hydrate_chunks", identity)
+    monkeypatch.setattr(retriever_module.reranker_service, "rerank", slow_rerank)
+    monkeypatch.setattr(
+        retriever_module.settings,
+        "QUERY_PLAN_HYBRID_TOTAL_DEADLINE_SECONDS",
+        0.2,
+    )
+
+    started = perf_counter()
+    result = await orchestrator.retrieve_planned(
+        plan=plan,
+        corpus_ids=["c1"],
+        retrieval_tier=RetrievalTier.qdrant_mongo,
+        rerank_enabled=True,
+        final_top_k=4,
+    )
+    elapsed = perf_counter() - started
+
+    assert elapsed < 0.4
+    assert result.chunks
+    assert result.diagnostics["status"] == "query_plan_v2_degraded"
+    assert result.diagnostics["total_deadline_s"] == 0.2
+    assert result.diagnostics["total_s"] < 0.4
+    assert any(
+        failure["retriever"] == "embedding"
+        for failure in result.diagnostics["lane_failures"]
+    )
+    assert any(
+        failure["retriever"] == "reranker"
+        for failure in result.diagnostics["lane_failures"]
+    )

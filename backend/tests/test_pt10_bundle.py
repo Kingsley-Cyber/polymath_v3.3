@@ -11,13 +11,10 @@ production failure observed on the Phase5_Luau_v4 corpus:
     Fix: heuristic gate before evidence validation — drops anything
     matching (year + punctuation + (publisher OR length>=8 words)).
 
-  Pt10c — HyDE on balanced query profile
-    Failure: cross-domain queries like "how does generative AI apply
-    to urban planning" produced wrong-domain retrieval because raw
-    query embeddings matched on surface tokens ("design").
-    Fix: balanced profile now has hyde_enabled=True (was False).
-    Hypothetical-answer generation routes retrieval to actually-
-    relevant docs.
+  Pt10c — explicit-only HyDE
+    Cross-domain decomposition is handled by deterministic phrase-aware
+    planning. HyDE remains available as an explicit request override, but is
+    not a profile default because it adds latency and can drift from the query.
 
   Pt10d — model_name save-time validation
     Failure: production saw two pool entries with bad model_names
@@ -243,12 +240,10 @@ def test_partition_known_tool_calls_empty_only_yields_no_kept():
     assert dropped == ["<empty>"]
 
 
-def test_balanced_profile_has_hyde_enabled():
-    """The fix for cross-domain query retrieval. Pre-Pt10c this was
-    False; that produced wrong-domain results when queries had
-    overloaded surface tokens like 'design'."""
+def test_balanced_profile_keeps_hyde_explicit_only():
+    """Phrase-aware planning handles decomposition without HyDE latency/drift."""
     presets = ChatOrchestrator._QUERY_PROFILE_PRESETS
-    assert presets["balanced"]["hyde_enabled"] is True
+    assert presets["balanced"]["hyde_enabled"] is False
     # v4 P1: pool widened toward the 64-doc listwise capacity.
     assert presets["balanced"]["rerank_top_n"] == 32
 
@@ -260,9 +255,9 @@ def test_fast_profile_still_has_hyde_disabled():
     assert presets["fast"]["hyde_enabled"] is False
 
 
-def test_thorough_profile_unchanged():
+def test_thorough_profile_keeps_hyde_explicit_only():
     presets = ChatOrchestrator._QUERY_PROFILE_PRESETS
-    assert presets["thorough"]["hyde_enabled"] is True
+    assert presets["thorough"]["hyde_enabled"] is False
     assert presets["thorough"]["retrieval_k"] == 120
     assert presets["thorough"]["rerank_top_n"] == 40
 
@@ -890,7 +885,7 @@ async def test_source_constrained_profile_default_hyde_is_skipped(monkeypatch):
     orchestrator = ChatOrchestrator()
 
     profile = await orchestrator._resolve_query_profile(request)
-    assert profile["hyde_enabled"] is True
+    assert profile["hyde_enabled"] is False
     assert profile["hyde_explicit"] is False
 
     async def fail_complete_sync(**_kwargs):

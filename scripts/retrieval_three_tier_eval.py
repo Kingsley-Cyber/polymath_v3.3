@@ -249,6 +249,9 @@ def run_chat_case(
             "has_graph_advantage": validation["trace_summary"]["has_graph_advantage"],
             "local_rag_duration_s": validation["trace_summary"]["local_rag_duration_s"],
             "graph_advantage": validation["trace_summary"]["graph_advantage"],
+            "retrieval_diagnostics": validation["trace_summary"][
+                "retrieval_diagnostics"
+            ],
         },
         "issues": validation["issues"],
         "validation": validation,
@@ -437,7 +440,7 @@ def main() -> int:
         default=None,
         help=(
             "Override route-specific hard retrieval/source budget. Defaults: "
-            "Fast 6s, Hybrid 8s, Graph 8s."
+            "Fast 2s, Hybrid 8s, Graph 10s."
         ),
     )
     parser.add_argument(

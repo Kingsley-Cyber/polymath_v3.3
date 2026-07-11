@@ -10,6 +10,7 @@ Mode A expansion note:
   chunks collection as a first pass before attempting parent text hydration, so
   Mode A results are hydrated correctly rather than passing through with empty text.
 """
+import hashlib
 import logging
 import re
 from pathlib import Path
@@ -142,6 +143,135 @@ def _assemble_hydrated_text(
     return body
 
 logger = logging.getLogger(__name__)
+
+
+def _document_source_hash(doc: dict) -> str:
+    identity = doc.get("source_identity") or {}
+    return str(
+        doc.get("source_file_hash")
+        or doc.get("content_sha256")
+        or identity.get("content_sha256")
+        or ""
+    ).strip()
+
+
+async def attach_document_identities(
+    chunks: List[SourceChunk],
+    corpus_ids: Optional[List[str]] = None,
+) -> List[SourceChunk]:
+    """Attach source hashes before cross-corpus fusion/reranking."""
+
+    if not chunks:
+        return []
+    db = conversation_service._db
+    if db is None:
+        return chunks
+    doc_ids = sorted({str(chunk.doc_id) for chunk in chunks if chunk.doc_id})
+    if not doc_ids:
+        return chunks
+    query: dict = {"doc_id": {"$in": doc_ids}}
+    if corpus_ids:
+        query["corpus_id"] = {"$in": corpus_ids}
+    try:
+        rows = await db["documents"].find(
+            with_active_records(query),
+            {
+                "_id": 0,
+                "doc_id": 1,
+                "corpus_id": 1,
+                "source_file_hash": 1,
+                "content_sha256": 1,
+                "source_identity": 1,
+            },
+        ).to_list(length=None)
+    except Exception as exc:
+        logger.warning("Document identity hydration failed: %s", exc)
+        return chunks
+
+    identity_by_doc = {
+        str(row.get("doc_id")): {
+            "source_file_hash": _document_source_hash(row),
+            "corpus_id": str(row.get("corpus_id") or ""),
+        }
+        for row in rows
+        if row.get("doc_id")
+    }
+    output: List[SourceChunk] = []
+    for chunk in chunks:
+        copied = chunk.model_copy(deep=True)
+        identity = identity_by_doc.get(str(copied.doc_id)) or {}
+        source_hash = str(identity.get("source_file_hash") or "")
+        if source_hash:
+            metadata = dict(copied.metadata or {})
+            metadata["source_file_hash"] = source_hash
+            membership = str(identity.get("corpus_id") or copied.corpus_id or "")
+            metadata["corpus_memberships"] = [membership] if membership else []
+            copied.metadata = metadata
+        output.append(copied)
+    return output
+
+
+def dedupe_cross_corpus_evidence(
+    chunks: List[SourceChunk],
+) -> tuple[List[SourceChunk], int]:
+    """Collapse identical passages from duplicate documents across corpora.
+
+    The document hash alone is not enough because a useful answer may need
+    several passages from one book. The key combines the document source hash
+    with normalized evidence text; equivalent copies collapse while distinct
+    passages remain. Every corpus membership is retained in metadata and
+    provenance.
+    """
+
+    output: List[SourceChunk] = []
+    index_by_key: dict[tuple[str, str], int] = {}
+    dropped = 0
+    for chunk in chunks:
+        metadata = dict(chunk.metadata or {})
+        source_hash = str(metadata.get("source_file_hash") or "").strip()
+        normalized_text = " ".join(str(chunk.text or "").lower().split())
+        if not source_hash or not normalized_text:
+            output.append(chunk)
+            continue
+        text_hash = hashlib.sha256(normalized_text.encode("utf-8")).hexdigest()
+        key = (source_hash, text_hash)
+        existing_index = index_by_key.get(key)
+        if existing_index is None:
+            index_by_key[key] = len(output)
+            output.append(chunk.model_copy(deep=True))
+            continue
+
+        dropped += 1
+        existing = output[existing_index]
+        existing_meta = dict(existing.metadata or {})
+        memberships = {
+            str(value)
+            for value in existing_meta.get("corpus_memberships") or []
+            if value
+        }
+        memberships.update(
+            str(value)
+            for value in metadata.get("corpus_memberships") or []
+            if value
+        )
+        if chunk.corpus_id:
+            memberships.add(str(chunk.corpus_id))
+        existing_meta["corpus_memberships"] = sorted(memberships)
+        existing.metadata = existing_meta
+        existing.score = max(float(existing.score or 0.0), float(chunk.score or 0.0))
+        provenance = list(existing.provenance or [])
+        provenance.extend(
+            item for item in (chunk.provenance or []) if item not in provenance
+        )
+        provenance.append(
+            {
+                "retriever": "cross_corpus_hash_dedupe",
+                "corpus_id": chunk.corpus_id,
+                "doc_id": chunk.doc_id,
+            }
+        )
+        existing.provenance = provenance
+    return output, dropped
 
 
 def _basename(value: object) -> str:

@@ -19,6 +19,7 @@ import {
 import { ToggleBar } from "./ToggleBar";
 import { ModelSelector } from "./ModelSelector";
 import { ThinkingEffortSelector } from "./ThinkingEffortSelector";
+import { FileAttachment } from "./FileAttachment";
 import { useChatStore } from "../../stores/chatStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useQueryModelPoolStore } from "../../stores/queryModelPoolStore";
@@ -421,14 +422,6 @@ export function ChatInput({
     setAttachments((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const formatFileSize = (bytes: number): string => {
-    if (bytes === 0) return "0 B";
-    const k = 1024;
-    const sizes = ["B", "KB", "MB", "GB"];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
-  };
-
   const hasContent = input.trim().length > 0 || attachments.length > 0;
 
   return (
@@ -540,25 +533,11 @@ export function ChatInput({
         {attachments.length > 0 && (
           <div className="flex flex-wrap gap-2 px-3 pt-3 pb-1">
             {attachments.map((file, index) => (
-              <div
+              <FileAttachment
                 key={`${file.name}-${index}`}
-                className="flex items-center gap-2 px-2 py-1 bg-bg-surface border border-border-minimal group transition-none hover:border-accent-main"
-              >
-                <StatusTag tag="FIL" tone="inf" />
-                <span className="text-[10px] text-content-primary truncate max-w-[150px] font-bold">
-                  {file.name}
-                </span>
-                <span className="text-[9px] text-content-tertiary tracking-wider">
-                  [{formatFileSize(file.size)}]
-                </span>
-                <button
-                  onClick={() => removeAttachment(index)}
-                  className="p-0.5 hover:bg-error/20 hover:text-error text-content-tertiary transition-none rounded-none"
-                  disabled={isLoading}
-                >
-                  <X className="w-3 h-3" />
-                </button>
-              </div>
+                file={file}
+                onRemove={isLoading ? undefined : () => removeAttachment(index)}
+              />
             ))}
           </div>
         )}
@@ -588,9 +567,10 @@ export function ChatInput({
             ref={fileInputRef}
             type="file"
             multiple
-            onChange={(e: ChangeEvent<HTMLInputElement>) =>
-              handleFileSelect(e.target.files)
-            }
+            onChange={(e: ChangeEvent<HTMLInputElement>) => {
+              handleFileSelect(e.target.files);
+              e.currentTarget.value = "";
+            }}
             className="hidden"
           />
 

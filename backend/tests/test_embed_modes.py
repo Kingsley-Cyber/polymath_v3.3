@@ -202,6 +202,34 @@ async def test_local_embedder_uses_configured_client_batch_size(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_local_embedder_sends_interactive_workload_class(monkeypatch):
+    captured = {}
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"data": [{"index": 0, "embedding": [0.1, 0.2]}]}
+
+    class Client:
+        async def post(self, url, json):
+            captured.update(json)
+            return Response()
+
+    result = await embedder._post_local_embedding_batch(
+        client=Client(),
+        url="http://embedder/embeddings",
+        batch=["query"],
+        expected_dim=2,
+        workload_class="interactive_query",
+    )
+
+    assert result == [[0.1, 0.2]]
+    assert captured["workload_class"] == "interactive_query"
+
+
+@pytest.mark.asyncio
 async def test_api_mode_pool_fails_over_to_healthy_lane(monkeypatch):
     calls: list[str] = []
 

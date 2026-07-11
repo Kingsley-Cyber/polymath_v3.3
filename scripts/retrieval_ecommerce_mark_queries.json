@@ -1,0 +1,78 @@
+{
+  "version": 1,
+  "description": "Fixed ecommerce PDF and markbuildsbrands transcript retrieval evaluation set for QueryPlanV2 rollout.",
+  "queries": [
+    {
+      "id": "purple_ocean_definition",
+      "query": "What is Purple Ocean strategy?",
+      "intent": "simple named-concept definition",
+      "expected_best_route": "Hybrid Search",
+      "anchor_groups": [
+        {"name": "purple_ocean", "terms": ["purple ocean"], "required": true},
+        {"name": "positioning", "terms": ["positioning", "differentiate", "differentiation"], "required": false}
+      ]
+    },
+    {
+      "id": "sticky_message_definition",
+      "query": "What makes a message sticky according to Made to Stick?",
+      "intent": "named-book concept retrieval",
+      "expected_best_route": "Hybrid Search",
+      "anchor_groups": [
+        {"name": "made_to_stick", "terms": ["made to stick", "succes", "sticky"], "required": true},
+        {"name": "message", "terms": ["message", "idea"], "required": true}
+      ]
+    },
+    {
+      "id": "purple_sticky_comparison",
+      "query": "Compare Purple Ocean strategy with Made to Stick principles.",
+      "intent": "comparative cross-domain synthesis",
+      "expected_best_route": "Hybrid Search",
+      "anchor_groups": [
+        {"name": "purple_ocean", "terms": ["purple ocean"], "required": true},
+        {"name": "made_to_stick", "terms": ["made to stick", "sticky", "succes"], "required": true}
+      ]
+    },
+    {
+      "id": "cross_corpus_offer",
+      "query": "Combine Purple Ocean strategy with sticky messaging for an ecommerce offer.",
+      "intent": "cross-corpus compositional application",
+      "expected_best_route": "Graph Augmentation",
+      "anchor_groups": [
+        {"name": "purple_ocean", "terms": ["purple ocean"], "required": true},
+        {"name": "sticky_message", "terms": ["sticky message", "made to stick", "sticky idea"], "required": true},
+        {"name": "offer", "terms": ["offer", "value proposition", "product page"], "required": false}
+      ]
+    },
+    {
+      "id": "graph_relation_positioning_message",
+      "query": "What relationship does the graph establish between product positioning and memorable messaging?",
+      "intent": "graph relation evidence",
+      "expected_best_route": "Graph Augmentation",
+      "anchor_groups": [
+        {"name": "positioning", "terms": ["product positioning", "brand positioning", "positioning"], "required": true},
+        {"name": "messaging", "terms": ["memorable message", "sticky message", "messaging"], "required": true}
+      ]
+    },
+    {
+      "id": "dependent_multi_hop_offer",
+      "query": "Find the Purple Ocean differentiation mechanism, then use it to evaluate sticky messaging for a product page.",
+      "intent": "dependent multi-hop application",
+      "expected_best_route": "Graph Augmentation",
+      "anchor_groups": [
+        {"name": "purple_ocean", "terms": ["purple ocean", "differentiation"], "required": true},
+        {"name": "sticky_message", "terms": ["sticky message", "made to stick", "memorable"], "required": true},
+        {"name": "product_page", "terms": ["product page", "product detail page"], "required": false}
+      ]
+    },
+    {
+      "id": "unanswerable_guard",
+      "query": "What exact 2029 tax law does Purple Ocean require for lunar ecommerce stores?",
+      "intent": "unanswerable guard",
+      "expected_best_route": "Hybrid Search",
+      "anchor_groups": [
+        {"name": "purple_ocean", "terms": ["purple ocean"], "required": true},
+        {"name": "tax_law", "terms": ["2029 tax law", "lunar ecommerce"], "required": true}
+      ]
+    }
+  ]
+}

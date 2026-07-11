@@ -33,7 +33,7 @@ from typing import Any
 from config import get_settings
 from models.schemas import RetrievalResult, RetrievalTier, SourceChunk, SourceFact
 from services.cache_util import TTLCache, hash_key
-from services.embedder import embed_query
+from services.embedder import embed_queries, embed_query
 from services.reranker import reranker_service
 from services.retriever.document_anchor import document_anchor_retriever
 from services.retriever.funnel_a import funnel_a
@@ -43,10 +43,19 @@ from services.retriever.graph_rerank import (
     apply_graph_degree_boost_metrics_aware,
 )
 from services.retriever.hydrate import (
+    attach_document_identities,
+    dedupe_cross_corpus_evidence,
     hydrate_chunks,
     hydrate_rerank_texts,
     hydrate_summary_rerank_texts,
 )
+from services.retriever.planned_fusion import (
+    PlannedPool,
+    dedupe_parent_finalists,
+    fuse_planned_pools,
+    reserve_planned_finalists,
+)
+from services.retriever.query_plan import QueryPlanV2
 from services.retriever.intent_policy import (
     FunnelLimits,
     QueryNeed,
@@ -93,6 +102,12 @@ _RETRIEVAL_CACHE = TTLCache(maxsize=512, ttl_seconds=120.0)
 # past the budget the lane degrades to no candidates.
 _DOC_ANCHOR_BUDGET_SECONDS = 2.5
 _EXTERNAL_SUFFICIENCY_MAX_CONCEPTS = 3
+
+
+def invalidate_retrieval_cache() -> None:
+    """Invalidate assembled retrieval results after artifact mutations."""
+
+    _RETRIEVAL_CACHE.clear()
 
 
 def _missing_concept_support_query(result: RetrievalResult) -> str | None:
@@ -537,6 +552,33 @@ class RetrieverOrchestrator:
         except Exception as exc:
             logger.warning("Corpus existence check failed (%s) — keeping all ids", exc)
             return corpus_ids, []
+
+    async def _corpus_artifact_epoch(self, corpus_ids: list[str] | None) -> tuple:
+        """Return the durable readiness version used by retrieval cache keys."""
+
+        if not corpus_ids:
+            return ()
+        try:
+            from services.conversation import conversation_service
+
+            db = conversation_service._db
+            if db is None:
+                return tuple((str(cid), "unknown") for cid in sorted(corpus_ids))
+            rows = await db["corpus_readiness"].find(
+                {"_id": {"$in": list(corpus_ids)}},
+                {"_id": 1, "computed_at": 1, "schema_version": 1},
+            ).to_list(length=None)
+            versions = {
+                str(row.get("_id")): str(row.get("computed_at") or "unknown")
+                for row in rows
+            }
+            return tuple(
+                (str(cid), versions.get(str(cid), "unknown"))
+                for cid in sorted(corpus_ids)
+            )
+        except Exception as exc:
+            logger.warning("Corpus artifact epoch lookup failed: %s", exc)
+            return tuple((str(cid), "unknown") for cid in sorted(corpus_ids))
 
     async def _retrieve_graph_seed_facts(
         self,
@@ -1035,6 +1077,537 @@ class RetrieverOrchestrator:
 
     # ── main entry ─────────────────────────────────────────────────────────────
 
+    async def retrieve_planned(
+        self,
+        *,
+        plan: QueryPlanV2,
+        corpus_ids: list[str] | None,
+        retrieval_tier: RetrievalTier,
+        collections: list[str] | None = None,
+        retrieval_k: int | None = None,
+        rerank_enabled: bool = True,
+        top_k_summary: int | None = None,
+        rerank_top_n: int | None = None,
+        final_top_k: int | None = None,
+        fact_seed_limit: int | None = None,
+        search_mode: str = "local",
+    ) -> RetrievalResult:
+        """Execute QueryPlanV2 as one candidate-generation and rerank pass."""
+
+        if retrieval_tier == RetrievalTier.qdrant_only or search_mode == "global":
+            return await self._retrieve_uncached(
+                query=plan.original_query,
+                corpus_ids=corpus_ids,
+                retrieval_tier=retrieval_tier,
+                collections=collections,
+                retrieval_k=retrieval_k,
+                rerank_enabled=False if retrieval_tier == RetrievalTier.qdrant_only else rerank_enabled,
+                ranking_query=plan.original_query,
+                top_k_summary=top_k_summary,
+                rerank_top_n=rerank_top_n,
+                final_top_k=final_top_k,
+                fact_seed_limit=fact_seed_limit,
+                search_mode=search_mode,
+            )
+
+        started = perf_counter()
+        timings: dict[str, float] = {}
+        lane_diagnostics: list[dict[str, Any]] = []
+        failures: list[dict[str, str]] = []
+        total_deadline = float(
+            getattr(
+                settings,
+                (
+                    "QUERY_PLAN_GRAPH_TOTAL_DEADLINE_SECONDS"
+                    if retrieval_tier == RetrievalTier.qdrant_mongo_graph
+                    else "QUERY_PLAN_HYBRID_TOTAL_DEADLINE_SECONDS"
+                ),
+                9.5 if retrieval_tier == RetrievalTier.qdrant_mongo_graph else 7.5,
+            )
+        )
+
+        def _stage_timeout(cap: float, *, reserve: float = 0.0) -> float:
+            remaining = total_deadline - (perf_counter() - started) - reserve
+            return max(0.05, min(float(cap), remaining))
+
+        def _budget_remaining() -> float:
+            return max(0.0, total_deadline - (perf_counter() - started))
+
+        requested_corpus_ids = list(corpus_ids or [])
+        try:
+            corpus_ids, dropped = await asyncio.wait_for(
+                self._filter_existing_corpora(corpus_ids),
+                timeout=_stage_timeout(1.0, reserve=1.0),
+            )
+        except Exception as exc:
+            corpus_ids, dropped = requested_corpus_ids, []
+            failures.append(
+                {
+                    "lane_id": "setup",
+                    "retriever": "corpus_filter",
+                    "error": f"{type(exc).__name__}: {exc}"[:240],
+                }
+            )
+        try:
+            effective_tier, downgrade_reason = await asyncio.wait_for(
+                self._enforce_strategy_intersection(retrieval_tier, corpus_ids),
+                timeout=_stage_timeout(1.0, reserve=1.0),
+            )
+        except Exception as exc:
+            effective_tier, downgrade_reason = retrieval_tier, None
+            failures.append(
+                {
+                    "lane_id": "setup",
+                    "retriever": "strategy_intersection",
+                    "error": f"{type(exc).__name__}: {exc}"[:240],
+                }
+            )
+        a_cols, b_cols = self._resolve_collections(effective_tier, corpus_ids, collections)
+        lanes = [lane for lane in plan.lanes if lane.role in {"original", "core"}]
+        if not lanes:
+            lanes = [plan.lanes[0]]
+
+        embed_started = perf_counter()
+        try:
+            embedding_config = await asyncio.wait_for(
+                self._embedding_config_for_query(corpus_ids),
+                timeout=_stage_timeout(1.0, reserve=1.0),
+            )
+        except Exception as exc:
+            embedding_config = None
+            failures.append(
+                {
+                    "lane_id": "setup",
+                    "retriever": "embedding_config",
+                    "error": f"{type(exc).__name__}: {exc}"[:240],
+                }
+            )
+        try:
+            vectors = await asyncio.wait_for(
+                embed_queries([lane.dense_text for lane in lanes], embedding_config),
+                timeout=_stage_timeout(
+                    float(getattr(settings, "QUERY_PLAN_EMBED_DEADLINE_SECONDS", 5.0)),
+                    reserve=2.0,
+                ),
+            )
+        except Exception as exc:
+            logger.warning("QueryPlanV2 embedding degraded to lexical-only lanes: %s", exc)
+            vectors = [None] * len(lanes)
+            failures.append(
+                {
+                    "lane_id": "all",
+                    "retriever": "embedding",
+                    "error": f"{type(exc).__name__}: {exc}"[:240],
+                }
+            )
+        timings["embed"] = perf_counter() - embed_started
+
+        child_top_k = max(8, min(int(retrieval_k or 40), 40))
+        summary_top_k = max(0, min(int(top_k_summary or 12), 20))
+        lexical_top_k = max(4, min(child_top_k // 2, 12))
+
+        async def _lane_pools(lane, vector) -> list[PlannedPool]:
+            lane_started = perf_counter()
+            raw_results = await asyncio.gather(
+                asyncio.wait_for(
+                    funnel_b.search(
+                        vector,
+                        corpus_ids,
+                        b_cols,
+                        top_k=child_top_k,
+                        query_text=lane.query,
+                    ),
+                    timeout=_stage_timeout(
+                        float(getattr(settings, "QUERY_PLAN_RETRIEVAL_DEADLINE_SECONDS", 4.0)),
+                        reserve=1.0,
+                    ),
+                ) if vector is not None else asyncio.sleep(0, result=[]),
+                asyncio.wait_for(
+                    funnel_a.search(
+                        vector,
+                        corpus_ids,
+                        a_cols,
+                        top_k=summary_top_k,
+                        fair_mode=True,
+                        query_text=lane.query,
+                    ),
+                    timeout=_stage_timeout(
+                        float(getattr(settings, "QUERY_PLAN_RETRIEVAL_DEADLINE_SECONDS", 4.0)),
+                        reserve=1.0,
+                    ),
+                ) if summary_top_k > 0 and vector is not None else asyncio.sleep(0, result=[]),
+                asyncio.wait_for(
+                    lexical_retriever.search(
+                        lane.query,
+                        corpus_ids,
+                        top_k=lexical_top_k,
+                    ),
+                    timeout=_stage_timeout(
+                        float(getattr(settings, "QUERY_PLAN_RETRIEVAL_DEADLINE_SECONDS", 4.0)),
+                        reserve=1.0,
+                    ),
+                ),
+                return_exceptions=True,
+            )
+            retrievers = ("dense", "summary", "lexical")
+            pools: list[PlannedPool] = []
+            counts: dict[str, int] = {}
+            for retriever_name, raw in zip(retrievers, raw_results):
+                if isinstance(raw, BaseException):
+                    failures.append(
+                        {
+                            "lane_id": lane.lane_id,
+                            "retriever": retriever_name,
+                            "error": f"{type(raw).__name__}: {raw}"[:240],
+                        }
+                    )
+                    chunks: list[SourceChunk] = []
+                else:
+                    chunks = list(raw or [])
+                counts[retriever_name] = len(chunks)
+                pools.append(
+                    PlannedPool(
+                        lane_id=lane.lane_id,
+                        retriever=retriever_name,
+                        chunks=tuple(chunks),
+                        required=lane.role == "core",
+                    )
+                )
+            lane_diagnostics.append(
+                {
+                    "lane_id": lane.lane_id,
+                    "role": lane.role,
+                    "query": lane.query,
+                    "counts": counts,
+                    "duration_s": round(perf_counter() - lane_started, 3),
+                }
+            )
+            return pools
+
+        candidate_started = perf_counter()
+        lane_pool_groups = await asyncio.gather(
+            *[_lane_pools(lane, vector) for lane, vector in zip(lanes, vectors)]
+        )
+        pools = [pool for group in lane_pool_groups for pool in group]
+        timings["candidate_generation"] = perf_counter() - candidate_started
+
+        rerank_cap = 24 if effective_tier == RetrievalTier.qdrant_mongo_graph else 16
+        if rerank_top_n is not None:
+            rerank_cap = min(rerank_cap, max(1, int(rerank_top_n)))
+        fused, fusion_diagnostics = fuse_planned_pools(
+            pools,
+            max_candidates=rerank_cap,
+            corpus_ids=corpus_ids,
+        )
+
+        facts: list[SourceFact] = []
+        if effective_tier == RetrievalTier.qdrant_mongo_graph and fused:
+            graph_started = perf_counter()
+            try:
+                from services.conversation import conversation_service
+
+                facts_task = self._retrieve_graph_seed_facts(
+                    plan.original_query,
+                    corpus_ids,
+                    fact_seed_limit=fact_seed_limit,
+                )
+                expansion_task = mode_a_expansion.expand(
+                    fused,
+                    corpus_ids,
+                    limit=min(12, rerank_cap),
+                    db=conversation_service._db,
+                    query=plan.original_query,
+                )
+                facts_raw, expansion_raw = await asyncio.wait_for(
+                    asyncio.gather(facts_task, expansion_task, return_exceptions=True),
+                    timeout=_stage_timeout(
+                        float(getattr(settings, "QUERY_PLAN_GRAPH_DEADLINE_SECONDS", 4.0)),
+                        reserve=1.0,
+                    ),
+                )
+                if not isinstance(facts_raw, BaseException):
+                    facts = list(facts_raw or [])
+                if isinstance(expansion_raw, BaseException):
+                    failures.append(
+                        {
+                            "lane_id": "graph",
+                            "retriever": "graph",
+                            "error": f"{type(expansion_raw).__name__}: {expansion_raw}"[:240],
+                        }
+                    )
+                    graph_chunks = []
+                else:
+                    graph_chunks = [
+                        chunk
+                        for chunk in list(expansion_raw or [])
+                        if any(
+                            str(item.get(key) or "").strip()
+                            for item in (chunk.provenance or [])
+                            if isinstance(item, dict)
+                            for key in (
+                                "entity",
+                                "entity_id",
+                                "predicate",
+                                "relation_family",
+                                "bridge_type",
+                                "evidence_phrase",
+                            )
+                        )
+                    ]
+                fact_chunks = _fact_seed_chunks(facts)
+                required_base_pools = [
+                    PlannedPool(
+                        lane.lane_id,
+                        "dense",
+                        tuple(
+                            chunk
+                            for chunk in fused
+                            if lane.lane_id
+                            in set((chunk.metadata or {}).get("planned_lanes") or [])
+                        ),
+                        required=True,
+                    )
+                    for lane in lanes
+                    if lane.role == "core"
+                ]
+                graph_pools = [
+                    PlannedPool("graph", "graph", tuple(graph_chunks)),
+                    PlannedPool("graph_facts", "graph", tuple(fact_chunks)),
+                ]
+                fused, graph_fusion = fuse_planned_pools(
+                    [
+                        PlannedPool("base", "dense", tuple(fused)),
+                        *required_base_pools,
+                        *graph_pools,
+                    ],
+                    max_candidates=rerank_cap,
+                    corpus_ids=corpus_ids,
+                )
+                fusion_diagnostics["graph"] = graph_fusion
+            except asyncio.TimeoutError:
+                failures.append(
+                    {
+                        "lane_id": "graph",
+                        "retriever": "graph",
+                        "error": "deadline_exceeded",
+                    }
+                )
+            timings["graph"] = perf_counter() - graph_started
+
+        identity_started = perf_counter()
+        try:
+            fused = await asyncio.wait_for(
+                attach_document_identities(fused, corpus_ids),
+                timeout=_stage_timeout(
+                    float(getattr(settings, "QUERY_PLAN_IDENTITY_DEADLINE_SECONDS", 2.0)),
+                    reserve=0.8,
+                ),
+            )
+        except Exception as exc:
+            failures.append(
+                {
+                    "lane_id": "final",
+                    "retriever": "document_identity",
+                    "error": f"{type(exc).__name__}: {exc}"[:240],
+                }
+            )
+        fused, duplicate_count = dedupe_cross_corpus_evidence(fused)
+        fused = fused[:rerank_cap]
+        timings["identity_dedupe"] = perf_counter() - identity_started
+
+        rerank_started = perf_counter()
+        try:
+            fused = await asyncio.wait_for(
+                hydrate_rerank_texts(fused, corpus_ids),
+                timeout=_stage_timeout(
+                    float(getattr(settings, "QUERY_PLAN_HYDRATE_DEADLINE_SECONDS", 2.0)),
+                    reserve=0.6,
+                ),
+            )
+        except Exception as exc:
+            failures.append(
+                {
+                    "lane_id": "final",
+                    "retriever": "rerank_text_hydration",
+                    "error": f"{type(exc).__name__}: {exc}"[:240],
+                }
+            )
+        fused, hydrated_duplicate_count = dedupe_cross_corpus_evidence(fused)
+        reranker_diagnostics: dict[str, Any]
+        if rerank_enabled and fused:
+            try:
+                ranked = await asyncio.wait_for(
+                    reranker_service.rerank(plan.original_query, fused),
+                    timeout=_stage_timeout(
+                        float(getattr(settings, "QUERY_PLAN_RERANK_DEADLINE_SECONDS", 6.0)),
+                        reserve=0.35,
+                    ),
+                )
+                reranker_diagnostics = reranker_service.diagnostics()
+            except Exception as exc:
+                failures.append(
+                    {
+                        "lane_id": "final",
+                        "retriever": "reranker",
+                        "error": f"{type(exc).__name__}: {exc}"[:240],
+                    }
+                )
+                ranked = fused
+                reranker_diagnostics = {
+                    "status": "deadline_fallback_rank_fusion",
+                    "fallback": True,
+                    "candidate_count": len(fused),
+                    "error": f"{type(exc).__name__}: {exc}"[:240],
+                }
+        else:
+            ranked = fused
+            reranker_diagnostics = {
+                "status": "skipped_by_request",
+                "candidate_count": len(fused),
+            }
+        timings["rerank"] = perf_counter() - rerank_started
+
+        ranked = apply_query_grounding(
+            ranked,
+            query=plan.original_query,
+            tier=effective_tier,
+            score_scale=settings.RERANKER_SCORE_SCALE,
+        )
+        intent = infer_retrieval_intent(plan.original_query)
+        diversity = select_with_diversity(
+            ranked,
+            final_top_k=int(final_top_k or settings.DEFAULT_RETRIEVAL_K),
+            intent=intent,
+            tier=effective_tier,
+            multi_corpus=bool(corpus_ids and len(corpus_ids) > 1),
+            selected_corpus_ids=corpus_ids or [],
+            query=plan.original_query,
+        )
+        finalist_candidates, reservation_diagnostics = reserve_planned_finalists(
+            ranked,
+            diversity.candidates,
+            required_lane_ids=[lane.lane_id for lane in lanes if lane.role == "core"],
+            corpus_ids=corpus_ids,
+            max_candidates=int(final_top_k or settings.DEFAULT_RETRIEVAL_K),
+        )
+        hydrate_started = perf_counter()
+        try:
+            finalists = await asyncio.wait_for(
+                hydrate_chunks(finalist_candidates, corpus_ids, query=plan.original_query),
+                timeout=_stage_timeout(
+                    float(getattr(settings, "QUERY_PLAN_HYDRATE_DEADLINE_SECONDS", 2.0))
+                ),
+            )
+        except Exception as exc:
+            failures.append(
+                {
+                    "lane_id": "final",
+                    "retriever": "finalist_hydration",
+                    "error": f"{type(exc).__name__}: {exc}"[:240],
+                }
+            )
+            finalists = [chunk for chunk in finalist_candidates if str(chunk.text or "").strip()]
+        finalists, parent_duplicate_count = dedupe_parent_finalists(finalists)
+        timings["hydrate_finalists"] = perf_counter() - hydrate_started
+        required_lane_ids = [lane.lane_id for lane in lanes if lane.role == "core"]
+        supported_lane_ids = sorted(
+            {
+                lane_id
+                for chunk in finalists
+                for lane_id in (chunk.metadata or {}).get("planned_lanes") or []
+                if lane_id in required_lane_ids
+            }
+        )
+        required_lane_coverage = (
+            len(supported_lane_ids) / len(required_lane_ids)
+            if required_lane_ids
+            else 1.0
+        )
+        corpus_distribution: dict[str, int] = {}
+        document_distribution: dict[str, int] = {}
+        predicates_used: set[str] = set()
+        for chunk in finalists:
+            corpus_key = str(chunk.corpus_id or "unknown")
+            document_key = str(chunk.doc_id or "unknown")
+            corpus_distribution[corpus_key] = corpus_distribution.get(corpus_key, 0) + 1
+            document_distribution[document_key] = document_distribution.get(document_key, 0) + 1
+            for item in chunk.provenance or []:
+                if isinstance(item, dict) and str(item.get("predicate") or "").strip():
+                    predicates_used.add(str(item["predicate"]).strip())
+        reranker_diagnostics = dict(reranker_diagnostics)
+        reranker_diagnostics["execution_s"] = round(timings.get("rerank", 0.0), 3)
+        total_s = perf_counter() - started
+        diagnostics = {
+            "status": "query_plan_v2_degraded" if failures else "query_plan_v2",
+            "query_plan_version": plan.version,
+            "complexity": plan.complexity,
+            "original_query": plan.original_query,
+            "standalone_query": plan.standalone_query,
+            "detected_phrases": list(plan.concepts),
+            "detected_entities": list(plan.concepts),
+            "requested_tier": getattr(retrieval_tier, "value", retrieval_tier),
+            "effective_tier": getattr(effective_tier, "value", effective_tier),
+            "dropped_corpus_ids": dropped,
+            "lanes": lane_diagnostics,
+            "lane_failures": failures,
+            "fusion": fusion_diagnostics,
+            "dedupe": {
+                "pre_hydration": duplicate_count,
+                "post_hydration": hydrated_duplicate_count,
+                "parent_finalists": parent_duplicate_count,
+            },
+            "reranker": reranker_diagnostics,
+            "selection": diversity.diagnostics or {},
+            "reservations": reservation_diagnostics,
+            "cache": {"hit": False, "key_version": "retrieval_v2"},
+            "required_concept_coverage": {
+                "required_lane_ids": required_lane_ids,
+                "supported_lane_ids": supported_lane_ids,
+                "coverage": round(required_lane_coverage, 3),
+            },
+            "repair": {
+                "max_rounds": int(plan.max_repair_rounds),
+                "attempted_rounds": 0,
+                "decision": (
+                    "not_needed_required_lanes_reserved"
+                    if required_lane_coverage >= 1.0
+                    else "degraded_no_safe_additional_pass"
+                ),
+            },
+            "final_distribution": {
+                "corpora": corpus_distribution,
+                "documents": document_distribution,
+            },
+            "graph_evidence": {
+                "facts_used": len(facts),
+                "fact_types": sorted(
+                    {str(fact.fact_type) for fact in facts if str(fact.fact_type or "").strip()}
+                ),
+                "predicates_used": sorted(predicates_used),
+            },
+            "timings_s": {key: round(value, 3) for key, value in timings.items()},
+            "total_deadline_s": round(total_deadline, 3),
+            "budget_remaining_s": round(_budget_remaining(), 3),
+            "total_s": round(total_s, 3),
+            "final_count": len(finalists),
+        }
+        logger.info(
+            "QueryPlanV2 timings total=%.3fs budget=%.3fs remaining=%.3fs stages=%s failures=%s",
+            total_s,
+            total_deadline,
+            _budget_remaining(),
+            diagnostics["timings_s"],
+            [f"{item['retriever']}:{item['error']}" for item in failures],
+        )
+        return RetrievalResult(
+            chunks=finalists,
+            facts=facts,
+            requested_tier=retrieval_tier,
+            effective_tier=effective_tier,
+            downgrade_reason=downgrade_reason,
+            diagnostics=diagnostics,
+        )
+
     async def retrieve(self, *args, **kwargs) -> RetrievalResult:
         """Cache wrapper around the retrieval pipeline.
 
@@ -1051,8 +1624,10 @@ class RetrieverOrchestrator:
         if not args:
             try:
                 corpus_ids = kwargs.get("corpus_ids") or []
+                artifact_epoch = await self._corpus_artifact_epoch(corpus_ids)
                 key = hash_key(
-                    "retrieval_v1",
+                    "retrieval_v2",
+                    artifact_epoch,
                     kwargs.get("query"),
                     tuple(sorted(str(c) for c in corpus_ids)),
                     str(kwargs.get("retrieval_tier")),

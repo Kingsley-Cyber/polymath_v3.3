@@ -110,6 +110,10 @@ function App() {
   const [collections, setCollections] = useState<Collection[]>([]);
   const [corpora, setCorpora] = useState<CorpusResponse[]>([]);
   const corporaRef = useRef<CorpusResponse[]>([]);
+  const activeChatRequestRef = useRef<{
+    id: string;
+    controller: AbortController;
+  } | null>(null);
   const [modelsLoaded, setModelsLoaded] = useState(false);
 
   // Pt 7: prefill bridge from GraphViewer's Graph Query tab to ChatInput.
@@ -211,6 +215,15 @@ function App() {
       // fires, even before the (async) conversation-create round-trip. Without
       // this the first message of a new chat showed a blank screen until the
       // POST /conversations returned.
+      activeChatRequestRef.current?.controller.abort();
+      const streamRequestId = crypto.randomUUID();
+      const streamController = new AbortController();
+      activeChatRequestRef.current = {
+        id: streamRequestId,
+        controller: streamController,
+      };
+      const isCurrentStream = () =>
+        activeChatRequestRef.current?.id === streamRequestId;
       chat.startStreaming();
 
       let cid = chat.activeConversationId;
@@ -239,6 +252,16 @@ function App() {
         role: "user",
         content: message,
         created_at: new Date().toISOString(),
+        metadata: attachments
+          ? {
+              attachments: attachments.map((attachment) => ({
+                filename: attachment.filename,
+                mime_type: attachment.mime_type,
+                size_bytes: attachment.size_bytes,
+                kind: attachment.kind,
+              })),
+            }
+          : undefined,
       };
       chat.addMessage(cid, userMessage);
 
@@ -358,6 +381,7 @@ function App() {
       let thinkingBuffer = "";
       let flushTimer: number | undefined;
       const flushStreamingBuffers = () => {
+        if (!isCurrentStream()) return;
         if (flushTimer !== undefined) {
           window.clearTimeout(flushTimer);
           flushTimer = undefined;
@@ -375,6 +399,7 @@ function App() {
       };
 
       const preserveStreamingFailure = (errorMessage: string) => {
+        if (!isCurrentStream()) return;
         flushStreamingBuffers();
         chat.setError(errorMessage);
         const state = useChatStore.getState();
@@ -411,6 +436,7 @@ function App() {
         await api.streamChat(
           request,
           (event) => {
+            if (!isCurrentStream()) return;
             switch (event.type) {
               case "token":
                 if (event.content) {
@@ -562,15 +588,27 @@ function App() {
             }
           },
           (err) => {
+            if (!isCurrentStream()) return;
             preserveStreamingFailure(err.message);
           },
+          streamController.signal,
         );
       } catch (err) {
+        if (!isCurrentStream()) return;
         preserveStreamingFailure(
           err instanceof Error ? err.message : "Unknown error",
         );
+      } finally {
+        if (isCurrentStream()) {
+          activeChatRequestRef.current = null;
+        }
       }
     },
+    [],
+  );
+
+  useEffect(
+    () => () => activeChatRequestRef.current?.controller.abort(),
     [],
   );
 

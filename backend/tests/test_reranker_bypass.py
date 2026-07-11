@@ -187,6 +187,30 @@ async def test_reranker_429_falls_back_without_opening_circuit(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_reranker_post_429_is_not_recursively_split(monkeypatch):
+    """A provider-wide busy response must result in one HTTP attempt."""
+    svc = RerankerService()
+    svc._settings = _resilient_settings()
+    calls = 0
+
+    async def fail_post(**kwargs):
+        nonlocal calls
+        calls += 1
+        request = httpx.Request("POST", "http://reranker:8080/rerank")
+        response = httpx.Response(429, request=request, text="busy")
+        raise httpx.HTTPStatusError("busy", request=request, response=response)
+
+    monkeypatch.setattr(svc, "_post_rerank_batch", fail_post)
+    pool = [_chunk(score=float(index), chunk_id=str(index)) for index in range(8)]
+
+    out = await svc._rerank_pool("query", pool)
+
+    assert calls == 1
+    assert [chunk.chunk_id for chunk in out] == [str(index) for index in reversed(range(8))]
+    assert svc.diagnostics()["status"] == "busy_fallback_score_sort"
+
+
+@pytest.mark.asyncio
 async def test_reranker_queue_timeout_falls_back_without_http_call(monkeypatch):
     svc = RerankerService()
     svc._settings = _resilient_settings(RERANKER_QUEUE_TIMEOUT_SECONDS=0.001)

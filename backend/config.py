@@ -365,6 +365,33 @@ class Settings(BaseSettings):
             "decide (and source-constrained queries are still auto-skipped)."
         ),
     )
+    QUERY_PLAN_V2: bool = Field(
+        default=False,
+        description=(
+            "Use the deterministic phrase-aware QueryPlanV2 for evidence lanes. "
+            "Disabled by default until shadow traces and live evaluation pass; "
+            "the legacy planner remains the instant rollback path."
+        ),
+    )
+    QUERY_PLAN_V2_SHADOW: bool = Field(
+        default=True,
+        description=(
+            "Build and trace QueryPlanV2 without changing retrieval behavior. "
+            "This adds no provider call and supports production comparison."
+        ),
+    )
+    QUERY_PLAN_HYBRID_TOTAL_DEADLINE_SECONDS: float = Field(
+        default=7.5, ge=2.0, le=30.0
+    )
+    QUERY_PLAN_GRAPH_TOTAL_DEADLINE_SECONDS: float = Field(
+        default=9.5, ge=3.0, le=45.0
+    )
+    QUERY_PLAN_EMBED_DEADLINE_SECONDS: float = Field(default=5.0, ge=0.5, le=30.0)
+    QUERY_PLAN_RETRIEVAL_DEADLINE_SECONDS: float = Field(default=4.0, ge=0.5, le=30.0)
+    QUERY_PLAN_GRAPH_DEADLINE_SECONDS: float = Field(default=4.0, ge=0.5, le=30.0)
+    QUERY_PLAN_IDENTITY_DEADLINE_SECONDS: float = Field(default=2.0, ge=0.5, le=15.0)
+    QUERY_PLAN_RERANK_DEADLINE_SECONDS: float = Field(default=6.0, ge=0.5, le=30.0)
+    QUERY_PLAN_HYDRATE_DEADLINE_SECONDS: float = Field(default=2.0, ge=0.5, le=15.0)
     # ── Resilience: retry the streaming LLM connection on transient blips ──
     LLM_STREAM_MAX_RETRIES: int = Field(
         default=2,

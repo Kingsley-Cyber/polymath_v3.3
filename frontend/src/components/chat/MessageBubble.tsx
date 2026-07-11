@@ -182,6 +182,23 @@ export function MessageBubble({
             }
           `}
         >
+          {isUser && Array.isArray(message.metadata?.attachments) && (
+            <div className="mb-2 flex flex-wrap gap-1.5">
+              {(message.metadata.attachments as Array<{
+                filename?: string;
+                kind?: string;
+                size_bytes?: number;
+              }>).map((attachment, index) => (
+                <span
+                  key={`${attachment.filename || "attachment"}-${index}`}
+                  className="max-w-full truncate border border-white/15 bg-black/15 px-2 py-1 text-[9px] uppercase text-content-secondary"
+                  title={attachment.filename || "Attachment"}
+                >
+                  {attachment.kind || "file"}: {attachment.filename || "attachment"}
+                </span>
+              ))}
+            </div>
+          )}
           {/* Content with Markdown and brutalist formatting */}
           <div
             className={

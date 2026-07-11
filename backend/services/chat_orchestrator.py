@@ -88,6 +88,11 @@ from services.retriever.query_semantics import (
     required_operator_atoms,
     split_query_sides,
 )
+from services.retriever.query_plan import (
+    build_query_plan_v2,
+    query_plan_evidence_sides,
+    query_plan_to_dict,
+)
 from services.retriever.search_mode import resolve_search_mode
 from services.settings import settings_service
 from utils.streaming import build_sse_chunk
@@ -735,6 +740,7 @@ def _build_chat_query_plan(
     evidence_plan = build_evidence_plan(query)
     tier_value = str(getattr(requested_tier, "value", requested_tier) or "")
     corpus_count = len(corpus_ids or [])
+    query_plan_v2 = build_query_plan_v2(query, corpus_ids=corpus_ids)
     plan = {
         "query": query,
         "retrieval_query": retrieval_query,
@@ -751,6 +757,14 @@ def _build_chat_query_plan(
         "operators": _operator_labels_for_query(query),
         "required_atoms": sorted(required_atoms_for_query(query, max_concepts=4)),
         "evidence_plan": evidence_plan_to_dict(evidence_plan),
+        "query_plan_v2": query_plan_to_dict(query_plan_v2),
+        "query_plan_v2_mode": (
+            "active"
+            if settings.QUERY_PLAN_V2
+            else "shadow"
+            if settings.QUERY_PLAN_V2_SHADOW
+            else "disabled"
+        ),
         "intent": {
             "need": intent.need.value,
             "broad_score": intent.broad_score,
@@ -6525,7 +6539,7 @@ class ChatOrchestrator:
                     request.message, request.corpus_ids
                 )
             )
-            if request.corpus_ids
+            if request.corpus_ids and not settings.QUERY_PLAN_V2
             else None
         )
 
@@ -6536,7 +6550,24 @@ class ChatOrchestrator:
         # ever the user's explicit choice. The old LLM "overview intent" second
         # chance silently upgraded local→global, overrode the user's tier, and
         # added an LLM call — removed so the selected tier + mode drive the work.
-        if reasoning_mode == "atomic":
+        if settings.QUERY_PLAN_V2:
+            retrieval = await retriever_orchestrator.retrieve_planned(
+                plan=build_query_plan_v2(
+                    request.message,
+                    corpus_ids=request.corpus_ids,
+                ),
+                corpus_ids=request.corpus_ids,
+                retrieval_tier=request.retrieval_tier,
+                collections=request.collections,
+                retrieval_k=profile_k,
+                rerank_enabled=profile_rerank,
+                top_k_summary=profile_cfg["top_k_summary"],
+                rerank_top_n=profile_cfg["rerank_top_n"],
+                final_top_k=profile_cfg["final_top_k"],
+                fact_seed_limit=profile_cfg["fact_seed_limit"],
+                search_mode=resolved_mode,
+            )
+        elif reasoning_mode == "atomic":
             from services.reasoning import atomic_retrieve
 
             retrieval = await atomic_retrieve(
@@ -6586,10 +6617,18 @@ class ChatOrchestrator:
             _fast_intent = infer_retrieval_intent(request.message).need.value
         except Exception:
             _fast_intent = ""
+        effective_retrieval_tier = getattr(
+            retrieval, "effective_tier", request.retrieval_tier
+        )
         _retrieval_fast_path = (
-            str(_fast_intent or "").lower() == "specific"
-            and len(evidence_plan.required_lanes) < 2
-            and str(resolved_mode or "").lower() != "global"
+            settings.QUERY_PLAN_V2
+            or str(getattr(effective_retrieval_tier, "value", effective_retrieval_tier))
+            == RetrievalTier.qdrant_only.value
+            or (
+                str(_fast_intent or "").lower() == "specific"
+                and len(evidence_plan.required_lanes) < 2
+                and str(resolved_mode or "").lower() != "global"
+            )
         )
         if _retrieval_fast_path:
             if evidence_plan_llm_task is not None:
@@ -6610,7 +6649,9 @@ class ChatOrchestrator:
             evidence_sources = coverage_sources
             evidence_plan_meta = {"active": False, "fast_path": True, "duration_s": 0.0}
             logger.info(
-                "chat_fast_path: specific single-concept query — skipped coverage+evidence (%d sources)",
+                "chat_fast_path: tier=%s intent=%s — skipped coverage+evidence (%d sources)",
+                str(getattr(effective_retrieval_tier, "value", effective_retrieval_tier)),
+                _fast_intent,
                 len(coverage_sources),
             )
         else:
@@ -7147,7 +7188,11 @@ class ChatOrchestrator:
             )
             user_saved = await conversation_service.append_message(
                 str(conversation_id),
-                self._create_user_message(request.message, model_used),
+                self._create_user_message(
+                    request.message,
+                    model_used,
+                    request.attachments,
+                ),
             )
             if not user_saved:
                 logger.error("Failed to persist user message for %s", conversation_id)
@@ -7621,7 +7666,11 @@ class ChatOrchestrator:
         # the user typed.
         user_saved = await conversation_service.append_message(
             str(conversation_id),
-            self._create_user_message(request.message, model_used),
+            self._create_user_message(
+                request.message,
+                model_used,
+                request.attachments,
+            ),
         )
         if not user_saved:
             logger.error("Failed to persist user message for %s", conversation_id)
@@ -8645,15 +8694,9 @@ class ChatOrchestrator:
         # (Qdrant ms-level); recall INTO the rank-fused pool is what feeds
         # the cross-encoder. fast 10->70, balanced 40->100, thorough 60->160.
         "fast": {"retrieval_k": 50, "rerank_enabled": False, "hyde_enabled": False},
-        # Pt10c — balanced now enables HyDE by default. Cross-domain
-        # queries on heterogeneous libraries (e.g. "how does generative
-        # AI apply to urban planning?") were producing wrong-domain
-        # retrieval because the raw query embedding cosine-matched on
-        # surface tokens like "design" instead of conceptual content.
-        # HyDE generates a hypothetical answer first, embeds THAT, then
-        # retrieves — which routes the search to the actually-relevant
-        # documents. The ~1-2s latency cost is acceptable for a
-        # knowledge-graph application where quality > speed.
+        # HyDE is explicit-only. Deterministic phrase-aware planning provides
+        # cross-domain decomposition without a pre-retrieval model call or a
+        # hypothetical answer that can drift away from the user's wording.
         # v4 P1: pools widened toward the listwise reranker's 64-doc
         # capacity (one forward pass). balanced 24->32, thorough 32->40.
         # Owner budget shape: retrieve 70-200 (cheap Qdrant fetch) -> rerank
@@ -8665,13 +8708,13 @@ class ChatOrchestrator:
         "balanced": {
             "retrieval_k": 70,
             "rerank_enabled": True,
-            "hyde_enabled": True,
+            "hyde_enabled": False,
             "rerank_top_n": 32,
         },
         "thorough": {
             "retrieval_k": 120,
             "rerank_enabled": True,
-            "hyde_enabled": True,
+            "hyde_enabled": False,
             "rerank_top_n": 40,
         },
     }
@@ -9151,6 +9194,11 @@ class ChatOrchestrator:
         """
 
         query = request.message
+        query_plan_v2 = build_query_plan_v2(query, corpus_ids=request.corpus_ids)
+        if settings.QUERY_PLAN_V2:
+            v2_sides = query_plan_evidence_sides(query_plan_v2)
+            if len(v2_sides) >= 2:
+                return build_evidence_plan_from_sides(query, v2_sides), None
         plan = build_evidence_plan(query)
         # A deterministic plan is good as-is only when it already has >=2 sides
         # AND none of them is a bare token lane. A token lane ("metacognition",
@@ -9286,13 +9334,28 @@ class ChatOrchestrator:
             "selector, or set DEFAULT_COMPLETION_MODEL in your .env."
         )
 
-    def _create_user_message(self, message: str, model: str) -> ChatMessage:
+    def _create_user_message(
+        self,
+        message: str,
+        model: str,
+        attachments: list[Any] | None = None,
+    ) -> ChatMessage:
         """Create a user message object without saving it."""
+        attachment_receipts = [
+            {
+                "filename": attachment.filename,
+                "mime_type": attachment.mime_type,
+                "size_bytes": attachment.size_bytes,
+                "kind": attachment.kind,
+            }
+            for attachment in (attachments or [])
+        ]
         return ChatMessage(
             role="user",
             content=message,
             token_count=count_tokens(message, model),
             created_at=datetime.utcnow(),
+            metadata={"attachments": attachment_receipts} if attachment_receipts else {},
         )
 
     async def _trim_history(

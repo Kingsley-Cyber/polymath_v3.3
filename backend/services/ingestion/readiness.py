@@ -1732,4 +1732,10 @@ async def materialize_corpus_readiness(
         {"_id": corpus_id, **record},
         upsert=True,
     )
+    try:
+        from services.retriever import invalidate_retrieval_cache
+
+        invalidate_retrieval_cache()
+    except Exception:
+        pass
     return record
