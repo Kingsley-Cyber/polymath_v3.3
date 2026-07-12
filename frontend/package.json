@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "lint": "eslint src scripts tests --max-warnings 0",
     "smoke:responsive": "node scripts/responsive-smoke.mjs",
+    "smoke:corpus-dashboard": "node scripts/corpus-dashboard-smoke.mjs",
     "smoke:chat-sidebar": "node scripts/chat-sidebar-smoke.mjs"
   },
   "dependencies": {

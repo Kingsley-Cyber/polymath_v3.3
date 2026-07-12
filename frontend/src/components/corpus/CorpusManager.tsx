@@ -6,7 +6,6 @@ import {
   Edit3,
   FolderOpen,
   FolderClosed,
-  FileText,
   ChevronRight,
   ChevronDown,
   X,
@@ -48,28 +47,6 @@ interface CorpusManagerProps {
   onClose: () => void;
 }
 
-type SummaryScopeValue =
-  | string
-  | {
-      label?: string;
-      description?: string;
-      readiness_gate?: boolean;
-      includes_chunk_kinds?: string[];
-      includes_missing_chunk_kind?: boolean;
-    };
-
-function summaryScope(
-  scopes: Record<string, SummaryScopeValue> | undefined,
-  key: string,
-): { label?: string; description?: string } {
-  const value = scopes?.[key];
-  if (!value || typeof value === "string") return {};
-  return {
-    label: value.label,
-    description: value.description,
-  };
-}
-
 function readinessLabel(status?: string | null): string {
   return (status || "unknown").replace(/_/g, " ");
 }
@@ -91,6 +68,14 @@ function readinessTone(status?: string | null): string {
     return "text-error border-error/40";
   }
   return "text-content-tertiary border-border-minimal";
+}
+
+function compactCount(value?: number | null): string {
+  const count = value ?? 0;
+  return new Intl.NumberFormat("en", {
+    notation: count >= 10_000 ? "compact" : "standard",
+    maximumFractionDigits: 1,
+  }).format(count);
 }
 
 // DEFAULT_INGESTION_CONFIG imported from ../../types (complete version with all IngestionConfig fields)
@@ -1001,11 +986,12 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
     return (
       <div className="fixed inset-0 z-[100] flex items-stretch sm:items-center justify-center sm:p-4">
         <div
+          data-testid="corpus-manager-dialog"
           className="absolute inset-0 bg-bg-base animate-overlay-in opacity-100"
           onClick={() => setSelectedCorpus(null)}
         />
         <div
-          className="relative w-full h-dvh sm:h-[85vh] sm:max-h-[800px] sm:min-h-[500px] sm:max-w-[1200px] bg-[#242424] rounded-none sm:rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-white/5"
+          className="relative w-full h-dvh sm:h-[85vh] sm:max-h-[800px] sm:min-h-[500px] sm:max-w-[1200px] bg-[#242424] rounded-none sm:rounded-lg shadow-2xl flex flex-col overflow-hidden border border-white/5"
           style={{ fontFamily: "Inter, -apple-system, sans-serif" }}
         >
           <CorpusDetail
@@ -1036,20 +1022,24 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
   return (
     <div className="fixed inset-0 z-[100] flex items-stretch sm:items-center justify-center sm:p-4">
       <div
+        data-testid="corpus-manager-dialog"
         className="absolute inset-0 bg-bg-base animate-overlay-in opacity-100"
         onClick={onClose}
       />
       <div
-        className="relative w-full h-dvh sm:h-[85vh] sm:max-h-[800px] sm:min-h-[500px] sm:max-w-[1200px] bg-[#242424] rounded-none sm:rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-white/5"
+        className="relative w-full h-dvh sm:h-[85vh] sm:max-h-[800px] sm:min-h-[500px] sm:max-w-[1200px] bg-[#242424] rounded-none sm:rounded-lg shadow-2xl flex flex-col overflow-hidden border border-white/5"
         style={{ fontFamily: "Inter, -apple-system, sans-serif" }}
       >
         {/* Header */}
         <div className="flex items-center justify-between gap-3 px-4 sm:px-6 py-3 sm:py-4 border-b border-white/5 shrink-0">
-          <div className="flex items-center gap-2">
+          <div className="flex min-w-0 items-center gap-3">
             <Database className="w-5 h-5 text-accent-main" />
-            <span className="text-[13px] font-semibold text-white">
-              Corpus Manager
-            </span>
+            <div className="min-w-0">
+              <div className="text-[13px] font-semibold text-white">Corpus Manager</div>
+              <div className="mt-0.5 truncate text-[10px] text-content-tertiary">
+                {corpora.length} corpora · {corpora.filter((item) => item.readiness?.status !== "fully_enriched").length} need attention
+              </div>
+            </div>
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -1067,6 +1057,7 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
               <span>New Corpus</span>
             </button>
             <button
+              data-testid="corpus-manager-close"
               onClick={onClose}
               className="p-1.5 text-gray-400 hover:text-white transition-colors"
             >
@@ -1296,7 +1287,7 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
               </span>
             </div>
           ) : (
-            <div className="divide-y divide-border-minimal">
+            <div className="space-y-2 p-3 sm:p-4">
               {corpora.map((corpus) => {
                 const isSelected = selectedCorpusIds.includes(corpus.corpus_id);
                 const isExpanded = expandedId === corpus.corpus_id;
@@ -1314,11 +1305,6 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
                 const graphPromotionPending = graphRequired
                   ? readinessGraph?.pending ?? 0
                   : 0;
-                const graphMetadataMarkDocs = graphRequired
-                  ? readinessGraph?.unmarked_promoted_extraction_docs ??
-                    readinessGraph?.unpromoted_extraction_docs ??
-                    0
-                  : 0;
                 const graphMetadataMarkRows = graphRequired
                   ? readinessGraph?.unmarked_promoted_extraction_rows ??
                     readinessGraph?.unpromoted_extraction_rows ??
@@ -1330,231 +1316,101 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
                 const graphStaleFailureRows = graphRequired
                   ? readinessGraph?.stale_failure_rows ?? 0
                   : 0;
+                const summaries = corpus.readiness?.summaries;
+                const retrievalSummaryDone =
+                  summaries?.retrieval_parent_done ?? summaries?.body_parent_done ?? 0;
+                const retrievalSummaryTotal =
+                  summaries?.retrieval_parent_total ?? summaries?.body_parent_total ?? 0;
+                const documentSummaryDone =
+                  summaries?.document_synced_done ?? summaries?.document_done ?? 0;
+                const documentSummaryTotal = summaries?.document_total ?? totalDocs;
+                const primaryAction = corpus.readiness?.next_actions?.[0];
 
                 return (
                   <div
                     key={corpus.corpus_id}
-                    className={`group transition-none ${
+                    className={`group border border-border-minimal bg-bg-base/40 transition-none ${
                       isSelected
                         ? "bg-accent-main/5 border-l-2 border-l-accent-main"
                         : "border-l-2 border-l-transparent hover:bg-bg-surface/50"
                     }`}
                   >
-                    {/* Corpus Row */}
-                    <div className="flex items-center gap-2 px-4 py-3">
-                      {/* Expand Toggle */}
-                      <button
-                        onClick={() =>
-                          setExpandedId(isExpanded ? null : corpus.corpus_id)
-                        }
-                        className="p-0.5 text-content-tertiary hover:text-content-primary transition-none"
-                      >
-                        {isExpanded ? (
-                          <ChevronDown className="w-3 h-3" />
-                        ) : (
-                          <ChevronRight className="w-3 h-3" />
-                        )}
-                      </button>
-
-                      {/* Selection Checkbox */}
-                      <button
-                        onClick={() => toggleCorpusId(corpus.corpus_id)}
-                        className={`w-4 h-4 border flex items-center justify-center transition-none ${
-                          isSelected
-                            ? "bg-accent-main border-accent-main text-bg-base"
-                            : "border-border-minimal text-transparent hover:border-content-secondary"
-                        }`}
-                      >
-                        <Check className="w-3 h-3" />
-                      </button>
-
-                      {/* Folder Icon */}
-                      {isSelected ? (
-                        <FolderOpen className="w-3.5 h-3.5 text-accent-secondary shrink-0" />
-                      ) : (
-                        <FolderClosed className="w-3.5 h-3.5 text-content-tertiary shrink-0" />
-                      )}
-
-                      {/* Name / Edit */}
-                      {isEditing ? (
-                        <div className="flex-1 flex items-center gap-2">
-                          <input
-                            type="text"
-                            value={editName}
-                            onChange={(e) => setEditName(e.target.value)}
-                            className="flex-1 px-1 py-0.5 bg-bg-base border border-accent-main text-[12px] text-content-primary focus:outline-none"
-                            autoFocus
-                          />
+                    <div className="px-4 py-3">
+                      <div className="flex items-start gap-3">
+                        <div className="flex items-center gap-2 pt-0.5 shrink-0">
                           <button
-                            onClick={() => handleUpdate(corpus.corpus_id)}
-                            className="p-0.5 text-accent-main hover:text-accent-hover"
+                            onClick={() => setExpandedId(isExpanded ? null : corpus.corpus_id)}
+                            className="p-1 text-content-tertiary hover:text-content-primary"
+                            title={isExpanded ? "Hide corpus configuration" : "Show corpus configuration"}
+                            aria-label={isExpanded ? "Collapse corpus" : "Expand corpus"}
                           >
-                            <Check className="w-3 h-3" />
+                            {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
                           </button>
                           <button
-                            onClick={cancelEdit}
-                            className="p-0.5 text-content-tertiary hover:text-content-primary"
+                            onClick={() => toggleCorpusId(corpus.corpus_id)}
+                            className={`w-5 h-5 border flex items-center justify-center ${
+                              isSelected
+                                ? "bg-accent-main border-accent-main text-bg-base"
+                                : "border-border-minimal text-transparent hover:border-content-secondary"
+                            }`}
+                            title="Include this corpus in retrieval"
+                            aria-label={`Include ${corpus.name} in retrieval`}
                           >
-                            <X className="w-3 h-3" />
+                            <Check className="w-3.5 h-3.5" />
                           </button>
+                          {isSelected ? (
+                            <FolderOpen className="w-4 h-4 text-accent-secondary" />
+                          ) : (
+                            <FolderClosed className="w-4 h-4 text-content-tertiary" />
+                          )}
                         </div>
-                      ) : (
-                        <div className="flex-1 min-w-0">
-                          <div className="text-[12px] font-bold text-content-primary truncate">
-                            {corpus.name}
-                          </div>
-                          {corpus.description && (
-                            <div className="text-[9px] text-content-tertiary truncate mt-0.5">
-                              {corpus.description}
+
+                        <div className="min-w-0 flex-1">
+                          {isEditing ? (
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="text"
+                                value={editName}
+                                onChange={(e) => setEditName(e.target.value)}
+                                className="min-w-0 flex-1 px-2 py-1 bg-bg-base border border-accent-main text-[13px] text-content-primary focus:outline-none"
+                                autoFocus
+                              />
+                              <Button variant="primary" size="icon" onClick={() => handleUpdate(corpus.corpus_id)} title="Save corpus name">
+                                <Check className="w-3.5 h-3.5" />
+                              </Button>
+                              <Button variant="ghost" size="icon" onClick={cancelEdit} title="Cancel editing">
+                                <X className="w-3.5 h-3.5" />
+                              </Button>
                             </div>
+                          ) : (
+                            <>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <h3 className="min-w-0 truncate text-[13px] font-bold text-content-primary">
+                                  {corpus.name}
+                                </h3>
+                                {readinessStatus && (
+                                  <span
+                                    className={`px-2 py-0.5 border text-[9px] font-bold uppercase ${readinessTone(readinessStatus)}`}
+                                    title={(corpus.readiness?.blocking ?? []).join(" · ") || "Durable corpus readiness"}
+                                  >
+                                    {readinessLabel(readinessStatus)}
+                                  </span>
+                                )}
+                              </div>
+                              {corpus.description && (
+                                <p className="mt-1 max-w-3xl truncate text-[10px] text-content-tertiary">
+                                  {corpus.description}
+                                </p>
+                              )}
+                            </>
                           )}
                         </div>
-                      )}
 
-                      {/* Stats */}
-                      {!isEditing && (
-                        <div className="flex items-center gap-3 text-[9px] text-content-tertiary tracking-wider shrink-0">
-                          {readinessStatus && (
-                            <span
-                              className={`px-1.5 py-0.5 border font-bold uppercase ${readinessTone(readinessStatus)}`}
-                              title={
-                                [
-                                  corpus.readiness?.computed_at
-                                    ? `Computed ${formatDate(corpus.readiness.computed_at)}`
-                                    : null,
-                                  corpus.readiness?.source
-                                    ? `source=${corpus.readiness.source}`
-                                    : null,
-                                  corpus.readiness?.stale ? "stale snapshot" : null,
-                                  corpus.readiness?.refresh_error
-                                    ? `refresh error: ${corpus.readiness.refresh_error}`
-                                    : null,
-                                  (corpus.readiness?.blocking ?? []).join(" · ") ||
-                                    "Corpus readiness from durable artifacts",
-                                ]
-                                  .filter(Boolean)
-                                  .join(" · ")
-                              }
-                            >
-                              {readinessLabel(readinessStatus)}
-                            </span>
-                          )}
-                          {corpus.readiness?.computed_at && (
-                            <span
-                              className={
-                                corpus.readiness.stale
-                                  ? "text-amber-300"
-                                  : "text-content-tertiary"
-                              }
-                              title={`Corpus truth snapshot computed at ${formatDate(
-                                corpus.readiness.computed_at,
-                              )}`}
-                            >
-                              truth {formatDate(corpus.readiness.computed_at)}
-                            </span>
-                          )}
-                          <span
-                            className="flex items-center gap-1"
-                            title={
-                              corpus.readiness
-                                ? `${queryableDocs} queryable of ${totalDocs} eligible document rows${excludedDocs ? `; ${excludedDocs} duplicate row(s) excluded` : ""}`
-                                : `${corpus.ready_doc_count ?? 0} fully verified of ${corpus.doc_count} document rows (legacy ready count)`
-                            }
-                          >
-                            <FileText className="w-3 h-3" />
-                            {corpus.readiness
-                              ? `${queryableDocs}/${totalDocs} queryable${excludedDocs ? ` · ${excludedDocs} duplicates` : ""}`
-                              : corpus.ready_doc_count != null
-                                ? `${corpus.ready_doc_count}/${corpus.doc_count} ready`
-                                : corpus.doc_count}
-                          </span>
-                          <span>{corpus.chunk_count} chunks</span>
-                          {corpus.readiness?.summaries && (
-                            <span
-                              title={
-                                summaryScope(
-                                  corpus.readiness.summaries.scopes as
-                                    | Record<string, SummaryScopeValue>
-                                    | undefined,
-                                  "retrieval_parent",
-                                ).description ??
-                                "Retrieval summaries required for readiness. This includes eligible body/table and legacy parent rows, not body-only diagnostics or structural rows."
-                              }
-                            >
-                              {corpus.readiness.summaries.retrieval_parent_done ??
-                                corpus.readiness.summaries.body_parent_done}/
-                              {corpus.readiness.summaries.retrieval_parent_total ??
-                                corpus.readiness.summaries.body_parent_total}{" "}
-                              {summaryScope(
-                                corpus.readiness.summaries.scopes as
-                                  | Record<string, SummaryScopeValue>
-                                  | undefined,
-                                "retrieval_parent",
-                              ).label?.toLowerCase() ?? "retrieval summaries"}
-                            </span>
-                          )}
-                          {lexiconReady !== undefined && (
-                            <span
-                              className={
-                                (readinessDocs?.lexicon_pending ?? 0) > 0
-                                  ? "text-amber-300"
-                                  : "text-content-tertiary"
-                              }
-                              title="Documents with a complete corpus-grounded vocabulary projection"
-                            >
-                              {lexiconReady}/{totalDocs} vocabulary ready
-                            </span>
-                          )}
-                          {corpus.readiness?.summaries && (
-                            <span
-                              title={`Document-level summaries synced in doc_profile and summary_tree. Usable in either store: ${corpus.readiness.summaries.document_done}/${corpus.readiness.summaries.document_total}; drift: ${corpus.readiness.summaries.document_mismatch ?? 0}.`}
-                            >
-                              {corpus.readiness.summaries.document_synced_done ??
-                                corpus.readiness.summaries.document_done}
-                              /
-                              {corpus.readiness.summaries.document_total} document summaries
-                            </span>
-                          )}
-                          {graphPromotionPending > 0 && (
-                            <span
-                              className="text-amber-300"
-                              title={`${graphPromotionPending} queryable document(s) still need Neo4j graph promotion.`}
-                            >
-                              {graphPromotionPending} graph pending
-                            </span>
-                          )}
-                          {graphFailedChunks > 0 && (
-                            <span
-                              className="text-error"
-                              title={`${graphFailedChunks} extraction chunk(s) failed validation or provider repair. This is extraction-quality work, not necessarily Neo4j promotion work.`}
-                            >
-                              {graphFailedChunks} extraction repair
-                            </span>
-                          )}
-                          {graphMetadataMarkRows > 0 && (
-                            <span
-                              className="text-amber-300"
-                              title={`${graphMetadataMarkDocs} document(s) are graph-written but have ${graphMetadataMarkRows} legacy extraction artifact(s) missing promoted metadata.`}
-                            >
-                              graph metadata audit
-                            </span>
-                          )}
-                          {graphStaleFailureRows > 0 && (
-                            <span
-                              className="text-content-tertiary"
-                              title={`${graphStaleFailureRows} stale failure row(s) reference chunks that are gone or already repaired. These are audit/reconciliation records, not active graph-promotion jobs.`}
-                            >
-                              {graphStaleFailureRows} stale refs
-                            </span>
-                          )}
-                        </div>
-                      )}
-
-                      {/* Actions */}
-                      {!isEditing && (
-                        <div className="flex items-center gap-1 shrink-0">
+                        {!isEditing && (
+                          <div className="flex items-center gap-1 shrink-0">
                           <Button
                             data-testid="corpus-browse-btn"
+                            aria-label={`Open ${corpus.name}`}
                             variant="secondary"
                             size="sm"
                             onClick={() => setSelectedCorpus(corpus)}
@@ -1562,7 +1418,7 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
                             title="View corpus documents and ingestion controls"
                           >
                             <ExternalLink className="w-3 h-3" />
-                            <span>View</span>
+                            <span className="hidden sm:inline">Open</span>
                           </Button>
                           <Button
                             variant="ghost"
@@ -1608,6 +1464,49 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
                             </Button>
                           )}
                         </div>
+                      )}
+                      </div>
+
+                      {!isEditing && (
+                        <>
+                          <div className="mt-3 grid grid-cols-2 gap-px bg-border-minimal sm:grid-cols-3 lg:grid-cols-6">
+                            {[
+                              ["Queryable", `${queryableDocs}/${totalDocs}`, excludedDocs ? `${excludedDocs} excluded` : "documents"],
+                              ["Chunks", compactCount(corpus.chunk_count), "indexed units"],
+                              ["Retrieval summaries", `${retrievalSummaryDone}/${retrievalSummaryTotal}`, retrievalSummaryTotal > 0 ? `${Math.round((retrievalSummaryDone / retrievalSummaryTotal) * 100)}% complete` : "not required"],
+                              ["Document summaries", `${documentSummaryDone}/${documentSummaryTotal}`, `${summaries?.document_mismatch ?? 0} drift`],
+                              ["Vocabulary", lexiconReady === undefined ? "—" : `${lexiconReady}/${totalDocs}`, (readinessDocs?.lexicon_pending ?? 0) > 0 ? `${readinessDocs?.lexicon_pending} pending` : "ready"],
+                              ["Graph", graphRequired ? `${readinessGraph?.promoted ?? 0}/${totalDocs}` : "Off", graphRequired ? `${graphPromotionPending} pending` : "not required"],
+                            ].map(([label, value, detail]) => (
+                              <div key={label} className="min-w-0 bg-bg-base px-3 py-2">
+                                <div className="truncate text-[9px] font-bold uppercase text-content-tertiary">{label}</div>
+                                <div className="mt-0.5 truncate text-[12px] font-semibold text-content-primary">{value}</div>
+                                <div className="truncate text-[9px] text-content-tertiary">{detail}</div>
+                              </div>
+                            ))}
+                          </div>
+
+                          <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[9px]">
+                            <div className="min-w-0 flex-1">
+                              {primaryAction ? (
+                                <div className={primaryAction.blocked_by_pressure ? "text-content-tertiary" : "text-amber-300"} title={primaryAction.reason}>
+                                  <span className="font-bold uppercase">Next: </span>
+                                  {primaryAction.label}{primaryAction.count > 0 ? ` (${primaryAction.count})` : ""}
+                                  <span className="ml-1 text-content-tertiary">{primaryAction.reason}</span>
+                                </div>
+                              ) : graphFailedChunks > 0 || graphMetadataMarkRows > 0 || graphStaleFailureRows > 0 ? (
+                                <div className="text-amber-300">Graph audit has unresolved extraction metadata.</div>
+                              ) : (
+                                <div className="text-content-tertiary">No blocking action reported.</div>
+                              )}
+                            </div>
+                            {corpus.readiness?.computed_at && (
+                              <span className={corpus.readiness.stale ? "text-amber-300" : "text-content-tertiary"}>
+                                Updated {formatDate(corpus.readiness.computed_at)}
+                              </span>
+                            )}
+                          </div>
+                        </>
                       )}
                     </div>
 
@@ -1851,15 +1750,16 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
 
         {/* Footer */}
         <div className="flex items-center justify-between px-4 py-2 border-t border-border-minimal bg-bg-surface shrink-0">
-          <div className="text-[9px] text-content-tertiary tracking-widest">
-            {corpora.length} CORPUS // {selectedCorpusIds.length} SELECTED
+          <div className="text-[9px] text-content-tertiary">
+            {corpora.length} corpora · {selectedCorpusIds.length} selected
           </div>
           <button
             onClick={() => void loadCorpora()}
             disabled={isLoading}
-            className="text-[9px] text-content-tertiary hover:text-accent-main tracking-widest uppercase transition-none disabled:opacity-50"
+            className="flex items-center gap-1 text-[9px] font-bold text-content-tertiary hover:text-accent-main uppercase disabled:opacity-50"
           >
-            [REFRESH]
+            <RefreshCw className="h-3 w-3" />
+            Refresh
           </button>
         </div>
       </div>

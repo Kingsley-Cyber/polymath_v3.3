@@ -513,6 +513,8 @@ export function CorpusDetail({
 
   // Expanded document for details
   const [expandedDocId, setExpandedDocId] = useState<string | null>(null);
+  const [documentQuery, setDocumentQuery] = useState("");
+  const [documentFilter, setDocumentFilter] = useState<"all" | "ready" | "attention">("all");
 
   // Delete confirmation
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
@@ -520,8 +522,9 @@ export function CorpusDetail({
   // Per-batch overrides (Sprint 2B). Empty object = use corpus defaults.
   const [overrides, setOverrides] = useState<IngestOverrides>({});
   const [showOverrides, setShowOverrides] = useState(false);
-  const [showLocalBatch, setShowLocalBatch] = useState(true);
+  const [showLocalBatch, setShowLocalBatch] = useState(false);
   const [showDuplicates, setShowDuplicates] = useState(false);
+  const [showAdvancedJobs, setShowAdvancedJobs] = useState(false);
   const [localBatchPath, setLocalBatchPath] = useState(LOCAL_BATCH_DEFAULT_PATH);
   const [localBatchProfile, setLocalBatchProfile] = useState<IngestProfileName>(
     () => defaultBatchProfile(corpus),
@@ -628,7 +631,7 @@ export function CorpusDetail({
 
   useEffect(() => {
     setLocalBatch(null);
-    setShowLocalBatch(true);
+    setShowLocalBatch(false);
 
     let cancelled = false;
     // The library's PROCESSING / FAILED sections need the item list; hydrate
@@ -1217,11 +1220,27 @@ export function CorpusDetail({
     : `Run up to 25 queued retrieval-parent/document summary jobs and reconcile against stored artifacts.${summaryIndexDeferredNotice}`;
   const readinessComputedAt = readiness?.computed_at;
   const readinessNextActions = (readiness?.next_actions ?? []).slice(0, 4);
+  const visibleDocuments = useMemo(() => {
+    const normalizedQuery = documentQuery.trim().toLowerCase();
+    return documents.filter((doc) => {
+      const isReady = doc.write_state.verified === true;
+      if (documentFilter === "ready" && !isReady) return false;
+      if (documentFilter === "attention" && isReady) return false;
+      if (!normalizedQuery) return true;
+      return [doc.filename, doc.source_path, doc.source_mime, doc.doc_id]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(normalizedQuery));
+    });
+  }, [documentFilter, documentQuery, documents]);
+  const attentionDocumentCount = useMemo(
+    () => documents.filter((doc) => doc.write_state.verified !== true).length,
+    [documents],
+  );
 
   return (
-    <div className="flex flex-col h-full relative">
+    <div data-testid="corpus-detail" className="flex flex-col h-full relative">
       {/* Header */}
-      <div className="flex items-center gap-2 px-4 py-3 border-b border-border-minimal bg-bg-surface shrink-0">
+      <div className="flex flex-wrap items-center gap-2 px-4 py-3 border-b border-border-minimal bg-bg-surface shrink-0">
         <button
           onClick={onBack}
           className="p-1 text-content-tertiary hover:text-accent-main transition-none"
@@ -1238,13 +1257,13 @@ export function CorpusDetail({
             </div>
           )}
         </div>
-        <div className="flex items-center gap-2 text-[9px] text-content-tertiary tracking-wider shrink-0">
-          <span>{corpus.doc_count} docs</span>
-          <span>{corpus.chunk_count} chunks</span>
+        <div className="flex flex-wrap items-center justify-end gap-2 text-[10px] text-content-tertiary shrink-0">
+          <span>{corpus.doc_count.toLocaleString()} docs</span>
+          <span>{corpus.chunk_count.toLocaleString()} chunks</span>
           {onEditConfig && (
             <button
               onClick={() => onEditConfig(corpus)}
-              className="flex items-center gap-1 px-2 py-1 ml-1 text-[9px] font-bold tracking-widest text-accent-main border border-accent-main hover:bg-accent-main hover:text-bg-base transition-none uppercase"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 ml-1 text-[10px] font-bold text-accent-main border border-accent-main hover:bg-accent-main hover:text-bg-base uppercase"
               title="Edit ingestion models, API keys, and schema"
             >
               <Settings2 className="w-3 h-3" />
@@ -1256,11 +1275,11 @@ export function CorpusDetail({
 
       {/* Ingest Bar */}
       <div className="flex flex-col border-b border-border-minimal bg-bg-surface/50 shrink-0">
-      <div className="flex items-center justify-between px-4 py-2">
+      <div className="flex flex-col gap-2 px-4 py-2 sm:flex-row sm:items-center sm:justify-between">
         <div data-testid="upload-status" className="text-[9px] font-bold tracking-widest text-content-tertiary uppercase">
           {`DOCUMENTS · ${documents.length}`}
         </div>
-        <div className="flex items-center gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5">
           <button
             onClick={() => setShowOverrides(!showOverrides)}
             className={`flex items-center gap-1.5 px-2 py-1 text-[9px] font-bold tracking-widest border transition-none uppercase ${
@@ -1328,9 +1347,9 @@ export function CorpusDetail({
       </div>
 
       {readiness && (
-        <div className="border-b border-border-minimal bg-bg-base/80 px-4 py-2 shrink-0">
-          <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
-            <div className="flex items-center gap-2 min-w-0">
+        <div className="max-h-[52vh] overflow-y-auto custom-scrollbar border-b border-border-minimal bg-bg-base/80 px-4 py-3 shrink-0">
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center gap-2 min-w-0">
               <BookOpen className="w-3.5 h-3.5 text-accent-secondary shrink-0" />
               <div className="text-[9px] font-bold tracking-widest text-content-tertiary uppercase">
                 Corpus truth
@@ -1504,8 +1523,9 @@ export function CorpusDetail({
                   ))}
                 </div>
               )}
-              <div className="flex items-center gap-1 shrink-0">
+              <div className="flex w-full flex-wrap items-center gap-1.5 border-t border-border-minimal pt-2">
                 <button
+                  data-testid="advanced-jobs-toggle"
                   onClick={() => handleRepairCycle(false)}
                   disabled={isRunningRepairCycle}
                   className="flex items-center gap-1 px-2 py-0.5 text-[9px] font-bold tracking-widest text-content-tertiary border border-border-minimal hover:border-content-secondary hover:text-content-secondary disabled:opacity-50 transition-none uppercase"
@@ -1561,6 +1581,18 @@ export function CorpusDetail({
                   )}
                   <span>Inspect jobs</span>
                 </button>
+                <button
+                  onClick={() => setShowAdvancedJobs((open) => !open)}
+                  className="ml-auto flex items-center gap-1 px-2 py-1 text-[9px] font-bold text-content-tertiary border border-border-minimal hover:border-content-secondary hover:text-content-primary uppercase"
+                  title="Show manual controls for individual ingestion lanes"
+                  aria-expanded={showAdvancedJobs}
+                >
+                  <Settings2 className="w-3 h-3" />
+                  <span>Advanced jobs</span>
+                  {showAdvancedJobs ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                </button>
+                {showAdvancedJobs && (
+                  <div className="mt-1 grid w-full grid-cols-1 gap-1.5 border-t border-border-minimal pt-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
                 <button
                   onClick={() => handleRepairCycle(true, { runGraphJobs: true })}
                   disabled={
@@ -1761,9 +1793,11 @@ export function CorpusDetail({
                   )}
                   <span>Audit identity</span>
                 </button>
+                  </div>
+                )}
               </div>
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-12 gap-2 text-[9px] font-mono">
+            <div className="grid grid-cols-2 gap-2 text-[10px] lg:grid-cols-3 xl:grid-cols-4">
               <div className="border border-border-minimal px-2 py-1">
                 <div className="text-content-tertiary uppercase">Queryable docs</div>
                 <div className="text-content-primary">
@@ -1840,7 +1874,7 @@ export function CorpusDetail({
                 </div>
               </div>
               <div
-                className="border border-border-minimal px-2 py-1"
+                className={`${showAdvancedJobs ? "" : "hidden"} border border-border-minimal px-2 py-1`}
                 title={
                   allParentSummaryScope.description ??
                   "Diagnostic count across every parent row, including structural rows that are not required for retrieval-summary readiness."
@@ -1943,7 +1977,7 @@ export function CorpusDetail({
                 )}
               </div>
               <div
-                className="border border-border-minimal px-2 py-1"
+                className={`${showAdvancedJobs ? "" : "hidden"} border border-border-minimal px-2 py-1`}
                 title="Secret-free provider accounting over the last 24 hours. Artifact truth is not derived from these audit counters."
               >
                 <div className="text-content-tertiary uppercase">Provider efficiency</div>
@@ -1959,7 +1993,7 @@ export function CorpusDetail({
                 </div>
               </div>
               <div
-                className={`border px-2 py-1 ${
+                className={`${showAdvancedJobs ? "" : "hidden"} border px-2 py-1 ${
                   ((readinessRepair?.extraction_jobs_failed ?? 0) > 0 ||
                     (readinessRepair?.extraction_jobs_blocked ?? 0) > 0)
                     ? "border-error/40"
@@ -1985,7 +2019,7 @@ export function CorpusDetail({
                 )}
               </div>
               <div
-                className={`border px-2 py-1 ${
+                className={`${showAdvancedJobs ? "" : "hidden"} border px-2 py-1 ${
                   (readinessRepair?.source_parse_jobs_failed ?? 0) > 0
                     ? "border-error/40"
                     : (readinessRepair?.source_parse_jobs_pending ?? 0) > 0
@@ -2005,7 +2039,7 @@ export function CorpusDetail({
                 )}
               </div>
               <div
-                className={`border px-2 py-1 ${
+                className={`${showAdvancedJobs ? "" : "hidden"} border px-2 py-1 ${
                   (readinessRepair?.document_pipeline_jobs_failed ?? 0) > 0
                     ? "border-error/40"
                     : (readinessRepair?.document_pipeline_jobs_pending ?? 0) > 0
@@ -2025,7 +2059,7 @@ export function CorpusDetail({
                 )}
               </div>
               <div
-                className={`border px-2 py-1 ${
+                className={`${showAdvancedJobs ? "" : "hidden"} border px-2 py-1 ${
                   (readinessRepair?.summary_jobs_failed ?? 0) > 0
                     ? "border-error/40"
                     : (readinessRepair?.summary_jobs_pending ?? 0) > 0
@@ -2050,7 +2084,7 @@ export function CorpusDetail({
                 )}
               </div>
               <div
-                className={`border px-2 py-1 ${
+                className={`${showAdvancedJobs ? "" : "hidden"} border px-2 py-1 ${
                   ((readinessIdempotency?.duplicate_source_key_groups ?? 0) -
                     (readinessIdempotency?.source_key_collision_groups ?? 0)) > 0 ||
                   (readinessIdempotency?.source_key_collision_groups ?? 0) > 0 ||
@@ -2330,7 +2364,7 @@ export function CorpusDetail({
       )}
 
       {showLocalBatch && (
-        <div className="border-b border-border-minimal bg-bg-base/70 px-4 py-3 shrink-0">
+        <div className="max-h-[40vh] overflow-y-auto custom-scrollbar border-b border-border-minimal bg-bg-base/70 px-4 py-3 shrink-0">
           <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(210px,0.45fr)_auto_auto_auto] gap-2 items-end">
             <label className="min-w-0">
               <span className="block text-[9px] font-bold tracking-widest text-content-tertiary uppercase mb-1">
@@ -2706,9 +2740,40 @@ export function CorpusDetail({
       {/* Main area — resizable split: left = document list, right = library */}
       <div ref={splitRowRef} className="flex-1 flex flex-col md:flex-row overflow-hidden">
       <div
+        data-testid="corpus-file-dashboard"
         style={{ "--left-panel-width": `${leftPct}%` } as CSSProperties}
         className="h-1/2 w-full overflow-y-auto custom-scrollbar shrink-0 md:h-auto md:w-[var(--left-panel-width)]"
       >
+        <div className="sticky top-0 z-10 flex flex-col gap-2 border-b border-border-minimal bg-bg-base/95 px-3 py-2 backdrop-blur-sm sm:flex-row sm:items-center">
+          <label className="relative min-w-0 flex-1">
+            <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-content-tertiary" />
+            <input
+              value={documentQuery}
+              onChange={(event) => setDocumentQuery(event.target.value)}
+              placeholder="Search files"
+              className="h-8 w-full border border-border-minimal bg-bg-surface pl-8 pr-2 text-[11px] text-content-primary outline-none placeholder:text-content-tertiary focus:border-accent-main"
+            />
+          </label>
+          <div className="flex items-center border border-border-minimal" aria-label="Filter documents">
+            {([
+              ["all", `All ${documents.length}`],
+              ["ready", `Ready ${documents.length - attentionDocumentCount}`],
+              ["attention", `Attention ${attentionDocumentCount}`],
+            ] as const).map(([value, label]) => (
+              <button
+                key={value}
+                onClick={() => setDocumentFilter(value)}
+                className={`h-8 px-2 text-[9px] font-bold uppercase ${
+                  documentFilter === value
+                    ? "bg-accent-main text-bg-base"
+                    : "text-content-tertiary hover:bg-bg-surface hover:text-content-primary"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
         {isLoading ? (
           <div className="flex items-center justify-center py-12 text-[10px] text-content-tertiary tracking-widest">
             <Loader2 className="w-4 h-4 animate-spin mr-2" />
@@ -2722,9 +2787,15 @@ export function CorpusDetail({
               &gt; Start a backend folder batch to begin ingestion
             </span>
           </div>
+        ) : visibleDocuments.length === 0 ? (
+          <div className="flex flex-col items-center justify-center px-4 py-12 text-center text-[10px] text-content-tertiary">
+            <Search className="mb-3 h-6 w-6 opacity-50" />
+            <span className="font-bold uppercase">No matching files</span>
+            <span className="mt-1">Change the search or status filter.</span>
+          </div>
         ) : (
           <div className="divide-y divide-border-minimal">
-            {documents.map((doc) => {
+            {visibleDocuments.map((doc) => {
               const isExpanded = expandedDocId === doc.doc_id;
               const isPendingDelete = deleteConfirmId === doc.doc_id;
               const stateMessages = getWriteStateMessages(doc.write_state);
@@ -2735,7 +2806,7 @@ export function CorpusDetail({
                   className="group hover:bg-bg-surface/50 transition-none"
                 >
                   {/* Document Row */}
-                  <div className="flex items-center gap-2 px-4 py-2.5">
+                  <div className="flex flex-wrap items-center gap-2 px-4 py-3">
                     {/* Expand Toggle */}
                     <button
                       onClick={() =>
@@ -2787,7 +2858,7 @@ export function CorpusDetail({
 
                     {/* Stats — child chunk count matches corpus header;
                          parent count in parens for context. */}
-                    <div className="flex items-center gap-3 text-[9px] text-content-tertiary tracking-wider shrink-0">
+                    <div className="order-last ml-10 flex w-full flex-wrap items-center gap-3 text-[9px] text-content-tertiary">
                       <span
                         className="flex items-center gap-1"
                         title={`${doc.chunk_count ?? 0} child chunks (retrieval unit) · ${getParentCount(doc)} parent chunks (context unit)`}
@@ -2812,7 +2883,7 @@ export function CorpusDetail({
                     </div>
 
                     {/* Delete */}
-                    <div className="opacity-0 group-hover:opacity-100 transition-none shrink-0">
+                    <div className="shrink-0 opacity-60 group-hover:opacity-100">
                       {isPendingDelete ? (
                         <div className="flex items-center gap-1">
                           <button
@@ -3066,15 +3137,16 @@ export function CorpusDetail({
 
       {/* Footer */}
       <div className="flex items-center justify-between px-4 py-2 border-t border-border-minimal bg-bg-surface shrink-0">
-        <div className="text-[9px] text-content-tertiary tracking-widest">
-          {documents.length} DOCUMENTS
+        <div className="text-[9px] text-content-tertiary">
+          Showing {visibleDocuments.length} of {documents.length} files
         </div>
         <button
           onClick={loadDocuments}
           disabled={isLoading}
-          className="text-[9px] text-content-tertiary hover:text-accent-main tracking-widest uppercase transition-none disabled:opacity-50"
+          className="flex items-center gap-1 text-[9px] font-bold text-content-tertiary hover:text-accent-main uppercase disabled:opacity-50"
         >
-          [REFRESH]
+          <RotateCcw className={`h-3 w-3 ${isLoading ? "animate-spin" : ""}`} />
+          Refresh
         </button>
       </div>
     </div>
@@ -3171,9 +3243,9 @@ function IngestionProgressBar({
         : "text-content-tertiary";
 
   return (
-    <div className="flex flex-col gap-1 px-4 py-1.5 border-t border-border-minimal">
-      <div className="flex items-center justify-between text-[9px] font-bold tracking-widest uppercase">
-        <div className="flex items-center gap-2">
+    <div className="flex flex-col gap-1.5 px-4 py-2 border-t border-border-minimal">
+      <div className="flex flex-wrap items-center justify-between gap-2 text-[9px] font-bold uppercase">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <span className={stageColor(mongoDone)}>
             MONGO {mongoDone}/{total}
           </span>
@@ -3190,14 +3262,14 @@ function IngestionProgressBar({
             VERIFIED {verifiedDone}/{total}
           </span>
         </div>
-        <div className="flex items-center gap-3 text-content-tertiary">
+        <div className="flex flex-wrap items-center gap-3 text-content-tertiary">
           <span>
             CHUNKS{" "}
-            <span className="text-content-secondary">{totalChunks}</span>
+            <span className="text-content-secondary">{totalChunks.toLocaleString()}</span>
           </span>
           <span>
             PARENTS{" "}
-            <span className="text-content-secondary">{totalParents}</span>
+            <span className="text-content-secondary">{totalParents.toLocaleString()}</span>
           </span>
           <span
             className={
