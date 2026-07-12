@@ -16,6 +16,11 @@
 - Routing is a scope prior, not a weak score boost. Preserve selected corpus
   identities, reserve relevant routed documents, and keep a bounded global
   wildcard fallback for routing mistakes.
+- Vocabulary resolution over multiple selected corpora must fan out within
+  each corpus boundary, merge into one globally ranked result set, retain
+  `corpus_id` plus global and corpus-local ranks, and reserve representation
+  per selected corpus. Never satisfy a unified query with an unscoped global
+  vocabulary search.
 - Ranking must consider relevance, obligation coverage, document/corpus
   representation, metadata, schema, parent/child identity, and diversity.
   Never optimize MMR or final top-k independently of the initial candidate

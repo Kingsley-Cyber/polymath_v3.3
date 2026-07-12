@@ -96,6 +96,7 @@ from services.retriever.query_plan import (
     query_plan_evidence_sides,
     query_plan_to_dict,
 )
+from services.retriever.planned_fusion import reserved_required_lane_ids
 from services.retriever.search_mode import resolve_search_mode
 from services.settings import settings_service
 from utils.streaming import build_sse_chunk
@@ -2154,6 +2155,7 @@ def _score_answerability_chunk(
     *,
     query: str,
     evidence_plan: EvidencePlan | None = None,
+    required_planned_lane_ids: list[str] | None = None,
 ) -> tuple[float, dict[str, Any]]:
     if _is_reserved_support_chunk(source):
         return 1.0, {
@@ -2161,6 +2163,35 @@ def _score_answerability_chunk(
             "protected": True,
             "matched_concepts": [],
             "matched_lanes": [],
+            "matched_terms": [],
+        }
+
+    metadata = source.metadata if isinstance(source.metadata, dict) else {}
+    corpus_reservations = [
+        str(value)
+        for value in (metadata.get("planned_corpus_reservations") or [])
+        if str(value)
+    ]
+    if corpus_reservations:
+        return 1.0, {
+            "reason": "selected_corpus_reservation",
+            "protected": True,
+            "matched_concepts": [],
+            "matched_lanes": [],
+            "matched_terms": [],
+            "matched_corpora": corpus_reservations,
+        }
+
+    supported_required_lanes = reserved_required_lane_ids(
+        source,
+        required_planned_lane_ids,
+    )
+    if supported_required_lanes:
+        return 1.0, {
+            "reason": "query_plan_required_lane",
+            "protected": True,
+            "matched_concepts": [],
+            "matched_lanes": supported_required_lanes,
             "matched_terms": [],
         }
 
@@ -2182,7 +2213,6 @@ def _score_answerability_chunk(
             "matched_terms": [],
         }
 
-    metadata = source.metadata if isinstance(source.metadata, dict) else {}
     grounding = (
         metadata.get("query_grounding")
         if isinstance(metadata.get("query_grounding"), dict)
@@ -2270,6 +2300,7 @@ def _apply_final_context_answerability_gate(
     *,
     query: str,
     evidence_plan: EvidencePlan | None = None,
+    required_planned_lane_ids: list[str] | None = None,
     search_mode: str | None = None,
     mode: str | None = None,
     min_keep: int | None = None,
@@ -2348,6 +2379,7 @@ def _apply_final_context_answerability_gate(
             source,
             query=query,
             evidence_plan=evidence_plan,
+            required_planned_lane_ids=required_planned_lane_ids,
         )
         protected = bool(detail.get("protected"))
         passes = protected or (
@@ -2394,6 +2426,7 @@ def _apply_final_context_answerability_gate(
             source,
             query=query,
             evidence_plan=evidence_plan,
+            required_planned_lane_ids=required_planned_lane_ids,
         )
         recovered.append(
             _annotate_answerability_chunk_gate(
@@ -4765,6 +4798,39 @@ def _format_evidence_plan_prompt_note(meta: dict[str, Any] | None) -> str | None
         f"- Required source-backed evidence lanes: {required}.",
         f"- Retrieved lane coverage: covered={covered}; thin={thin}; missing={missing}.",
     ]
+    plan = meta.get("plan") if isinstance(meta.get("plan"), dict) else {}
+    lane_rows = {
+        str(lane.get("name") or ""): lane
+        for lane in (plan.get("lanes") or [])
+        if isinstance(lane, dict) and str(lane.get("name") or "")
+    }
+    covered_requirements: list[str] = []
+    for lane_name in meta.get("covered_lanes") or []:
+        lane = lane_rows.get(str(lane_name or "")) or {}
+        label = " ".join(
+            str(lane.get("label") or lane_name or "").replace("_", " ").split()
+        )
+        evidence_need = " ".join(str(lane.get("query") or "").split())
+        if len(evidence_need) > 220:
+            evidence_need = evidence_need[:217].rstrip() + "..."
+        if label:
+            covered_requirements.append(
+                f"  {len(covered_requirements) + 1}. {label}"
+                + (f" - {evidence_need}" if evidence_need else "")
+            )
+    if covered_requirements:
+        lines.extend(
+            [
+                "- Final-answer coverage checklist (internal):",
+                *covered_requirements,
+                (
+                    "- Before finalizing, silently verify that every checklist item "
+                    "appears as at least one explicit, source-grounded claim, "
+                    "recommendation, step, or caveat. Do not leave a covered lane "
+                    "merely implied, and do not name the lane/checklist machinery."
+                ),
+            ]
+        )
     if meta.get("missing_lanes"):
         lines.append(
             "- HARD LIMIT: do not synthesize a full relationship answer across "
@@ -4779,7 +4845,8 @@ def _format_evidence_plan_prompt_note(meta: dict[str, Any] | None) -> str | None
     else:
         lines.append(
             "- The retrieved packet contains evidence for every required lane. "
-            "Synthesize across lanes, but keep claims tied to what the sources show."
+            "Synthesize across lanes, keep claims tied to what the sources show, "
+            "and satisfy the explicit final-answer checklist above."
         )
     return "\n".join(lines)
 
@@ -5995,6 +6062,31 @@ def _format_retrieval_diagnostics_trace(
         for atom in (sufficiency.get("missing_atoms") or [])
         if str(atom).strip()
     ]
+    vocabulary = (
+        diag.get("vocabulary_resolution")
+        if isinstance(diag.get("vocabulary_resolution"), dict)
+        else {}
+    )
+    vocabulary_matches = [
+        row
+        for row in (vocabulary.get("matches") or [])
+        if isinstance(row, dict)
+    ]
+    vocabulary_labels = [
+        str(row.get("term") or row.get("canonical_name") or "").strip()
+        for row in vocabulary_matches
+        if str(row.get("term") or row.get("canonical_name") or "").strip()
+    ]
+    vocabulary_expansion = (
+        vocabulary.get("expansion")
+        if isinstance(vocabulary.get("expansion"), dict)
+        else {}
+    )
+    grounded_planner = (
+        vocabulary.get("grounded_planner")
+        if isinstance(vocabulary.get("grounded_planner"), dict)
+        else {}
+    )
 
     lines = [
         "[Retrieval tier trace]",
@@ -6044,6 +6136,21 @@ def _format_retrieval_diagnostics_trace(
             f"graph={float(timings.get('graph') or 0):.2f}s "
             f"rerank={float(timings.get('rerank') or 0):.2f}s "
             f"hydrate={hydrate_s:.2f}s"
+        ),
+        (
+            "vocabulary: "
+            f"status={vocabulary.get('status') or 'unavailable'} "
+            f"matched={', '.join(vocabulary_labels[:6]) if vocabulary_labels else 'none'} "
+            f"translated={len(vocabulary_expansion.get('translation_lane_ids') or [])} "
+            f"step_back={len(vocabulary_expansion.get('step_back_lane_ids') or [])} "
+            f"rejected={len(vocabulary.get('rejected_expansions') or [])} "
+            f"stores={','.join(key for key, used in (vocabulary.get('store_usage') or {}).items() if used) or 'none'}"
+        ),
+        (
+            "grounded_planner: "
+            f"status={grounded_planner.get('status') or 'skipped'} "
+            f"provider_calls={int(grounded_planner.get('provider_calls') or 0)} "
+            f"cache_hit={'yes' if grounded_planner.get('cache_hit') else 'no'}"
         ),
     ]
     if str(effective) == RetrievalTier.qdrant_mongo_graph.value:
@@ -6684,6 +6791,23 @@ class ChatOrchestrator:
         # chance silently upgraded local→global, overrode the user's tier, and
         # added an LLM call — removed so the selected tier + mode drive the work.
         if settings.QUERY_PLAN_V2:
+            grounded_planner_route = None
+            if request.corpus_ids and bool(
+                getattr(settings, "GROUNDED_QUERY_PLANNER_ENABLED", False)
+            ):
+                grounded_planner_route = (
+                    await resolve_query_model_kind(user_id, "utility")
+                    if user_id
+                    else None
+                )
+                if not grounded_planner_route:
+                    grounded_planner_route = {
+                        "model": model_used,
+                        "api_base": profile_creds.get("api_base"),
+                        "api_key": profile_creds.get("api_key"),
+                        "extra_params": profile_creds.get("extra_params"),
+                        "source": "active_chat_model",
+                    }
             retrieval = await retriever_orchestrator.retrieve_planned(
                 plan=build_query_plan_v2(
                     request.message,
@@ -6700,6 +6824,12 @@ class ChatOrchestrator:
                 final_top_k=profile_cfg["final_top_k"],
                 fact_seed_limit=profile_cfg["fact_seed_limit"],
                 search_mode=resolved_mode,
+                disabled_lexicon_ids=(
+                    request.overrides.disabled_lexicon_ids
+                    if request.overrides
+                    else None
+                ),
+                grounded_planner_route=grounded_planner_route,
             )
         elif reasoning_mode == "atomic":
             from services.reasoning import atomic_retrieve
@@ -7024,6 +7154,12 @@ class ChatOrchestrator:
         else:
             sources = _cap_chunks_per_doc(sources)
         retrieval_diagnostics = getattr(retrieval, "diagnostics", {}) or {}
+        required_planned_lane_ids = list(
+            (
+                retrieval_diagnostics.get("required_concept_coverage") or {}
+            ).get("required_lane_ids")
+            or []
+        )
         (
             sources,
             answerability_chunk_gate_meta,
@@ -7031,6 +7167,7 @@ class ChatOrchestrator:
             sources,
             query=request.message,
             evidence_plan=evidence_plan,
+            required_planned_lane_ids=required_planned_lane_ids,
             search_mode=resolved_mode,
         )
         sources = _filter_sources_to_selected_corpora(sources, request.corpus_ids)

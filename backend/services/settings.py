@@ -32,6 +32,7 @@ from models.schemas import (
     GlobalSettings,
     GlobalIngestionSettings,
     GlobalIngestionSummarySettings,
+    RunpodFlashExtractionSettings,
     InfrastructureSettings,
     ModalDeploySettings,
     ModelsConfig,
@@ -191,7 +192,8 @@ class SettingsService:
                     max_summary_tokens=c.SUMMARY_MAX_TOKENS,
                     max_concurrent=c.SUMMARY_MAX_CONCURRENT,
                     summary_models=[],
-                )
+                ),
+                runpod_flash=RunpodFlashExtractionSettings(),
             ),
         )
 
@@ -337,6 +339,40 @@ class SettingsService:
         except Exception as exc:  # noqa: BLE001
             logger.warning("get_runtime_ingestion_settings fell back to defaults: %s", exc)
             return defaults
+
+    async def get_system_runpod_flash(
+        self,
+        user_id: str | None = None,
+    ) -> tuple[RunpodFlashExtractionSettings, str | None]:
+        """Return safe Flash config plus the decrypted backend-only API key."""
+
+        config = RunpodFlashExtractionSettings()
+        api_key: str | None = None
+        if self._db is None:
+            return config, api_key
+        try:
+            query: dict[str, Any] = (
+                {"user_id": user_id}
+                if user_id
+                else {
+                    "$or": [
+                        {"ingestion.runpod_flash": {"$exists": True}},
+                        {"api_keys.runpod": {"$exists": True}},
+                    ]
+                }
+            )
+            doc = await self._db["settings"].find_one(query)
+            raw = ((doc or {}).get("ingestion") or {}).get("runpod_flash") or {}
+            if raw:
+                config = RunpodFlashExtractionSettings(**raw)
+            ciphertext = ((doc or {}).get("api_keys") or {}).get("runpod")
+            if ciphertext:
+                from services.secrets import decrypt
+
+                api_key = decrypt(ciphertext)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("get_system_runpod_flash fell back to defaults: %s", exc)
+        return config, api_key
 
     async def update_ingestion_settings(
         self,

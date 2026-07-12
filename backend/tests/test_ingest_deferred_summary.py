@@ -31,6 +31,9 @@ class _Collection:
     def find(self, *_args: Any, **_kwargs: Any) -> _AsyncCursor:
         return _AsyncCursor(self.rows)
 
+    async def find_one(self, *_args: Any, **_kwargs: Any) -> dict[str, Any] | None:
+        return self.rows[0] if self.rows else None
+
     async def update_one(
         self,
         _filter: dict[str, Any],
@@ -58,12 +61,33 @@ class _Db:
 
 
 class _IngestionService:
+    def __init__(self) -> None:
+        self.plan_calls: list[dict[str, Any]] = []
+        self.run_calls: list[dict[str, Any]] = []
+
     async def backfill_parent_summaries(self, *_args: Any, **_kwargs: Any) -> dict:
         return {
             "status": "healthy",
             "generated": 1,
             "indexed": 1,
             "generation_errors": [],
+        }
+
+    async def plan_summary_jobs(self, **kwargs: Any) -> dict:
+        self.plan_calls.append(kwargs)
+        return {
+            "status": "complete",
+            "planned": 1,
+            "counts": {"queued": 1},
+        }
+
+    async def run_summary_jobs(self, **kwargs: Any) -> dict:
+        self.run_calls.append(kwargs)
+        return {
+            "status": "complete",
+            "claimed": 1,
+            "counts": {"succeeded": 1},
+            "batch_reconciliation": {"status": "complete", "promoted": 1},
         }
 
 
@@ -86,6 +110,7 @@ async def test_deferred_summary_run_record_has_no_created_at_update_conflict(
     monkeypatch.setattr(batches, "_build_item_config", fake_build_item_config)
 
     db = _Db()
+    ingestion_service = _IngestionService()
     result = await batches._run_deferred_summary_backfill(
         db=db,
         batch={
@@ -94,11 +119,14 @@ async def test_deferred_summary_run_record_has_no_created_at_update_conflict(
             "user_id": "user-1",
             "options": {"profile": "rtx_assisted", "chunk_summarization": True},
         },
-        ingestion_service=_IngestionService(),
+        ingestion_service=ingestion_service,
     )
 
     assert result["status"] == "healthy"
+    assert result["document_summary_jobs"]["plan"]["planned"] == 1
+    assert result["document_summary_jobs"]["run"]["counts"] == {"succeeded": 1}
+    assert ingestion_service.plan_calls[0]["kinds"] == ["document_summary"]
+    assert ingestion_service.run_calls[0]["statuses"] == ["queued"]
     run_update = db["ingest_repair_runs"].updates[0]["update"]
     assert "created_at" in run_update["$setOnInsert"]
     assert "created_at" not in run_update["$set"]
-

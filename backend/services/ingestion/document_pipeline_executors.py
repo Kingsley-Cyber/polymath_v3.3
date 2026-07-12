@@ -493,3 +493,151 @@ async def embed_documents_to_qdrant_from_artifacts(
         "counts": counts,
         "docs": docs,
     }
+
+
+async def index_document_summaries_from_artifacts(
+    db: Any,
+    *,
+    qdrant_client: Any,
+    neo4j_driver: Any | None = None,
+    corpus_id: str,
+    doc_ids: list[str],
+    limit: int = 10,
+) -> dict[str, Any]:
+    """Replace only Qdrant parent summaries from canonical Mongo artifacts."""
+
+    from services.ingestion import worker
+    from services.storage import mongo_writer
+    from services.storage.sparse_encoder import encode_text as _bm25_encode
+
+    selected = [
+        str(doc_id)
+        for doc_id in doc_ids
+        if str(doc_id).strip()
+    ][: max(1, int(limit or 10))]
+    corpus = await db["corpora"].find_one(
+        with_active_records({"corpus_id": corpus_id}),
+        {"_id": 0, "default_ingestion_config": 1},
+    )
+    live_cfg = (corpus or {}).get("default_ingestion_config") or {}
+    counts: dict[str, int] = {}
+    docs: list[dict[str, Any]] = []
+    for doc_id in selected:
+        started = time.monotonic()
+        try:
+            doc, parent_rows, child_rows = await _load_rows_for_doc(
+                db,
+                corpus_id=corpus_id,
+                doc_id=doc_id,
+            )
+            if not doc:
+                status, reason = "failed", "document_missing"
+            elif not parent_rows:
+                status, reason = "blocked_missing_summaries", "missing_parent_artifacts"
+            else:
+                from services.ingestion_service import build_effective_config
+
+                config = build_effective_config(
+                    frozen_base=doc.get("ingestion_config") or live_cfg,
+                    live_corpus=live_cfg,
+                    ingest_overrides=None,
+                )
+                parents, _children, facet_profile = _rehydrate_chunks(
+                    doc=doc,
+                    parent_rows=parent_rows,
+                    child_rows=child_rows,
+                )
+                summaries = worker._reconstruct_summaries_from_mongo(
+                    parents,
+                    parent_rows,
+                )
+                if not summaries:
+                    status, reason = (
+                        "blocked_missing_summaries",
+                        "no_canonical_parent_summaries",
+                    )
+                else:
+                    async with worker._embed_phase_semaphore():
+                        _unused, summary_vec_map = await worker._embed_batch_for_doc(
+                            children=[],
+                            summaries=summaries,
+                            config=config,
+                        )
+                    summary_sparse_map = await asyncio.to_thread(
+                        lambda: {
+                            summary.parent_id: _bm25_encode(
+                                worker._summary_vector_text(summary)
+                            )
+                            for summary in summaries
+                            if summary.parent_id in summary_vec_map
+                        }
+                    )
+                    async with worker._qdrant_write_semaphore():
+                        written = await worker._write_qdrant_summaries_for_doc(
+                            qdrant_client=qdrant_client,
+                            corpus_id=corpus_id,
+                            doc_id=doc_id,
+                            user_id=str(doc.get("user_id") or ""),
+                            filename=str(doc.get("filename") or doc_id),
+                            parents=parents,
+                            summaries=summaries,
+                            summary_vec_map=summary_vec_map,
+                            config=config,
+                            summary_sparse_map=summary_sparse_map,
+                            facet_profile=facet_profile,
+                            replace_existing=True,
+                        )
+
+                    from services.ingestion.verify import verify_ingest
+
+                    verified, verify_errors = await verify_ingest(
+                        db=db,
+                        qdrant=qdrant_client,
+                        neo4j_driver=neo4j_driver,
+                        doc_id=doc_id,
+                        corpus_id=corpus_id,
+                        target_qdrant_collections=list(
+                            config.target_qdrant_collections or []
+                        ),
+                        use_neo4j=bool(
+                            config.use_neo4j and neo4j_driver is not None
+                        ),
+                    )
+                    await mongo_writer.update_write_state(
+                        db,
+                        doc_id,
+                        corpus_id=corpus_id,
+                        summaries_indexed=True,
+                        summary_points=int(written),
+                        verified=verified,
+                        verify_errors=verify_errors,
+                    )
+                    summary_errors = [
+                        error
+                        for error in verify_errors
+                        if "summary vectors" in str(error).lower()
+                    ]
+                    status = "succeeded" if not summary_errors else "failed"
+                    reason = (
+                        "summary_projection_complete"
+                        if not summary_errors
+                        else str(summary_errors[0])[:500]
+                    )
+        except Exception as exc:  # noqa: BLE001 - bounded per-doc executor
+            status, reason = "failed", str(exc)[:500]
+        counts[status] = counts.get(status, 0) + 1
+        docs.append(
+            {
+                "doc_id": doc_id,
+                "status": status,
+                "reason": reason,
+                "duration_seconds": round(time.monotonic() - started, 3),
+            }
+        )
+    return {
+        "status": "complete" if not counts.get("failed") else "partial",
+        "corpus_id": corpus_id,
+        "attempted": len(selected),
+        "counts": counts,
+        "docs": docs,
+    }

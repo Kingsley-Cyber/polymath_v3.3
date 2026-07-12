@@ -11,6 +11,13 @@ import re
 from collections import Counter
 from typing import Any
 
+from services.retriever.eval_metrics import (
+    average_precision_at_k,
+    ndcg_at_k,
+    recall_at_k,
+    reciprocal_rank_at_k,
+)
+
 
 ROUTES: tuple[dict[str, str], ...] = (
     {
@@ -277,6 +284,191 @@ def _issue(level: str, code: str, message: str) -> dict[str, str]:
     return {"level": level, "code": code, "message": message}
 
 
+def _expectation_groups(values: Any) -> list[list[str]]:
+    groups: list[list[str]] = []
+    for value in values or []:
+        if isinstance(value, (list, tuple, set)):
+            group = [_norm(str(item)) for item in value if _norm(str(item))]
+        else:
+            group = [_norm(str(value))] if _norm(str(value)) else []
+        if group:
+            groups.append(group)
+    return groups
+
+
+def grounding_quality(
+    query_case: dict[str, Any],
+    sources: list[dict[str, Any]],
+    diagnostics: dict[str, Any],
+) -> dict[str, Any]:
+    """Evaluate vocabulary, routing, coverage, and context precision contracts."""
+
+    vocabulary = diagnostics.get("vocabulary_resolution") or {}
+    matches = [
+        row for row in (vocabulary.get("matches") or []) if isinstance(row, dict)
+    ]
+    matched_surface = _norm(
+        " ".join(
+            str(value)
+            for row in matches
+            for value in [
+                row.get("term") or row.get("canonical_name"),
+                *(row.get("aliases") or []),
+                *(row.get("abbreviations") or []),
+            ]
+            if value
+        )
+    )
+    expected_lexicon = _expectation_groups(
+        query_case.get("expected_lexicon_terms")
+    )
+    optional_lexicon = _expectation_groups(
+        query_case.get("optional_lexicon_terms")
+    )
+    forbidden_lexicon = _expectation_groups(
+        query_case.get("forbidden_lexicon_terms")
+    )
+
+    def group_hits(groups: list[list[str]], haystack: str) -> list[bool]:
+        return [any(term and term in haystack for term in group) for group in groups]
+
+    expected_hits = group_hits(expected_lexicon, matched_surface)
+    optional_hits = group_hits(optional_lexicon, matched_surface)
+    forbidden_hits = group_hits(forbidden_lexicon, matched_surface)
+
+    routed = (diagnostics.get("document_routing") or {}).get("routes") or {}
+    routed_rows = [
+        row
+        for rows in routed.values()
+        for row in (rows or [])
+        if isinstance(row, dict)
+    ]
+    routed_text = _norm(
+        " ".join(
+            " ".join(
+                [
+                    str(row.get("doc_id") or ""),
+                    str(row.get("title") or ""),
+                    " ".join(str(value) for value in (row.get("concepts") or [])),
+                ]
+            )
+            for row in routed_rows
+        )
+    )
+    document_expectations = _expectation_groups(
+        query_case.get("document_route_patterns")
+    )
+    document_hits = group_hits(document_expectations, routed_text)
+
+    expected_corpora = {
+        str(value)
+        for value in (query_case.get("expected_corpus_ids") or [])
+        if str(value)
+    }
+    represented_corpora = {
+        str(source.get("corpus_id") or "")
+        for source in sources
+        if str(source.get("corpus_id") or "")
+    }
+    ranked_doc_ids = list(
+        dict.fromkeys(
+            str(source.get("doc_id") or "")
+            for source in sources
+            if str(source.get("doc_id") or "")
+        )
+    )
+    document_relevance = {
+        str(doc_id): float(grade)
+        for doc_id, grade in (query_case.get("document_relevance") or {}).items()
+        if str(doc_id)
+    }
+
+    required_groups = [
+        group
+        for group in _anchor_groups(query_case)
+        if group.get("required", True)
+    ]
+    relevant_source_count = 0
+    for source in sources:
+        if document_relevance:
+            relevant = document_relevance.get(str(source.get("doc_id") or ""), 0) > 0
+        else:
+            source_text = _norm(_source_text(source))
+            relevant = not required_groups or any(
+                any(_norm(term) in source_text for term in group.get("terms") or [])
+                for group in required_groups
+            )
+        if relevant:
+            relevant_source_count += 1
+
+    required_lane_coverage = float(
+        (diagnostics.get("required_concept_coverage") or {}).get("coverage") or 0.0
+    )
+    expansion = vocabulary.get("expansion") or {}
+    grounded_planner = vocabulary.get("grounded_planner") or {}
+    return {
+        "lexicon_recall": round(
+            sum(expected_hits) / max(1, len(expected_hits)), 3
+        ) if expected_lexicon else None,
+        "expected_lexicon_hits": expected_hits,
+        "optional_lexicon_hits": optional_hits,
+        "forbidden_lexicon_hits": forbidden_hits,
+        "matched_lexicon_ids": [
+            str(row.get("lexicon_id") or "") for row in matches if row.get("lexicon_id")
+        ],
+        "matched_lexicon_terms": [
+            str(row.get("term") or row.get("canonical_name") or "")
+            for row in matches
+            if row.get("term") or row.get("canonical_name")
+        ],
+        "rejected_expansion_count": len(vocabulary.get("rejected_expansions") or []),
+        "translation_lane_count": len(expansion.get("translation_lane_ids") or []),
+        "step_back_lane_count": len(expansion.get("step_back_lane_ids") or []),
+        "exploratory_expansions_required": bool(expansion.get("required", False)),
+        "document_route_recall": round(
+            sum(document_hits) / max(1, len(document_hits)), 3
+        ) if document_expectations else None,
+        "document_route_hits": document_hits,
+        "routed_document_count": len(
+            {
+                (str(row.get("corpus_id") or ""), str(row.get("doc_id") or ""))
+                for row in routed_rows
+            }
+        ),
+        "required_lane_coverage": round(required_lane_coverage, 3),
+        "context_precision": round(
+            relevant_source_count / max(1, len(sources)), 3
+        ),
+        "document_MRR@5": (
+            round(reciprocal_rank_at_k(ranked_doc_ids, document_relevance, k=5), 4)
+            if document_relevance
+            else None
+        ),
+        "document_Recall@20": (
+            round(recall_at_k(ranked_doc_ids, document_relevance, k=20), 4)
+            if document_relevance
+            else None
+        ),
+        "document_MAP@20": (
+            round(average_precision_at_k(ranked_doc_ids, document_relevance, k=20), 4)
+            if document_relevance
+            else None
+        ),
+        "document_NDCG@8": (
+            round(ndcg_at_k(ranked_doc_ids, document_relevance, k=8), 4)
+            if document_relevance
+            else None
+        ),
+        "expected_corpus_coverage": round(
+            len(expected_corpora & represented_corpora) / max(1, len(expected_corpora)),
+            3,
+        ) if expected_corpora else None,
+        "represented_corpus_ids": sorted(represented_corpora),
+        "provider_calls": int(grounded_planner.get("provider_calls") or 0),
+        "planner_cache_hit": bool(grounded_planner.get("cache_hit")),
+    }
+
+
 def evaluate_route_result(
     *,
     query_case: dict[str, Any],
@@ -322,6 +514,7 @@ def evaluate_route_result(
     generation_s = float(generation_s) if generation_s is not None else None
     graph_advantage = trace_summary.get("graph_advantage") or {}
     retrieval_diagnostics = trace_summary.get("retrieval_diagnostics") or {}
+    grounding = grounding_quality(query_case, sources, retrieval_diagnostics)
     sufficiency = (retrieval_diagnostics.get("selection") or {}).get(
         "sufficiency"
     ) or {}
@@ -389,6 +582,99 @@ def evaluate_route_result(
                 "warn",
                 "weak_source_anchor_coverage",
                 "retrieved sources cover less than half of required anchors",
+            )
+        )
+
+    minimum_lexicon_recall = float(query_case.get("min_lexicon_recall") or 0.0)
+    if (
+        grounding["lexicon_recall"] is not None
+        and grounding["lexicon_recall"] < minimum_lexicon_recall
+    ):
+        issues.append(
+            _issue(
+                "fail",
+                "lexicon_recall_below_threshold",
+                f"lexicon recall {grounding['lexicon_recall']:.3f} < {minimum_lexicon_recall:.3f}",
+            )
+        )
+    if any(grounding["forbidden_lexicon_hits"]):
+        issues.append(
+            _issue(
+                "fail",
+                "forbidden_vocabulary_expansion",
+                "a negative-control vocabulary concept was introduced",
+            )
+        )
+    if grounding["exploratory_expansions_required"]:
+        issues.append(
+            _issue(
+                "fail",
+                "exploratory_expansion_became_required",
+                "an exploratory vocabulary expansion became a required claim",
+            )
+        )
+    minimum_route_recall = float(query_case.get("min_document_route_recall") or 0.0)
+    if (
+        grounding["document_route_recall"] is not None
+        and grounding["document_route_recall"] < minimum_route_recall
+    ):
+        issues.append(
+            _issue(
+                "fail",
+                "document_route_recall_below_threshold",
+                f"document route recall {grounding['document_route_recall']:.3f} < {minimum_route_recall:.3f}",
+            )
+        )
+    minimum_lane_coverage = float(
+        query_case.get("min_required_lane_coverage") or 0.0
+    )
+    if grounding["required_lane_coverage"] < minimum_lane_coverage:
+        issues.append(
+            _issue(
+                "fail",
+                "required_lane_coverage_below_threshold",
+                f"required lane coverage {grounding['required_lane_coverage']:.3f} < {minimum_lane_coverage:.3f}",
+            )
+        )
+    minimum_context_precision = float(query_case.get("min_context_precision") or 0.0)
+    if sources and grounding["context_precision"] < minimum_context_precision:
+        issues.append(
+            _issue(
+                "fail",
+                "context_precision_below_threshold",
+                f"context precision {grounding['context_precision']:.3f} < {minimum_context_precision:.3f}",
+            )
+        )
+    for field, case_key, code in (
+        ("document_MRR@5", "min_document_mrr", "document_mrr_below_threshold"),
+        (
+            "document_Recall@20",
+            "min_document_recall",
+            "document_recall_below_threshold",
+        ),
+        ("document_NDCG@8", "min_document_ndcg", "document_ndcg_below_threshold"),
+    ):
+        observed = grounding.get(field)
+        minimum = query_case.get(case_key)
+        if observed is None or minimum is None:
+            continue
+        if float(observed) < float(minimum):
+            issues.append(
+                _issue(
+                    "fail",
+                    code,
+                    f"{field} {float(observed):.3f} < {float(minimum):.3f}",
+                )
+            )
+    if (
+        grounding["expected_corpus_coverage"] is not None
+        and grounding["expected_corpus_coverage"] < 1.0
+    ):
+        issues.append(
+            _issue(
+                "fail",
+                "selected_corpus_representation_missing",
+                "one or more required corpora were absent from final evidence",
             )
         )
     if (
@@ -482,12 +768,24 @@ def evaluate_route_result(
         "source_summary": source_summary,
         "source_anchor_coverage": source_cov,
         "answer_anchor_coverage": answer_cov,
+        "grounding_quality": grounding,
         "trace_summary": trace_summary,
     }
 
 
 def summarize_report(results: list[dict[str, Any]]) -> dict[str, Any]:
     """Aggregate live route results into UI-route summaries."""
+
+    def percentile(values: list[float], fraction: float) -> float:
+        if not values:
+            return 0.0
+        ordered = sorted(values)
+        position = max(0.0, min(1.0, fraction)) * (len(ordered) - 1)
+        lower = int(position)
+        upper = min(lower + 1, len(ordered) - 1)
+        weight = position - lower
+        return ordered[lower] * (1.0 - weight) + ordered[upper] * weight
+
     by_route: dict[str, list[dict[str, Any]]] = {}
     for result in results:
         by_route.setdefault(result.get("route") or "Unknown", []).append(result)
@@ -531,13 +829,27 @@ def summarize_report(results: list[dict[str, Any]]) -> dict[str, Any]:
             "failures": failures,
             "warnings": warnings,
             "avg_total_s": round(sum(timings) / max(1, len(timings)), 3),
+            "p50_total_s": round(percentile(timings, 0.50), 3),
+            "p95_total_s": round(percentile(timings, 0.95), 3),
             "max_total_s": round(max(timings or [0.0]), 3),
             "avg_retrieval_or_sources_s": round(
                 sum(retrievals) / max(1, len(retrievals)), 3
             ),
+            "p50_retrieval_or_sources_s": round(
+                percentile(retrievals, 0.50), 3
+            ),
+            "p95_retrieval_or_sources_s": round(
+                percentile(retrievals, 0.95), 3
+            ),
             "max_retrieval_or_sources_s": round(max(retrievals or [0.0]), 3),
             "avg_generation_after_sources_s": round(
                 sum(generations) / max(1, len(generations)), 3
+            ),
+            "p50_generation_after_sources_s": round(
+                percentile(generations, 0.50), 3
+            ),
+            "p95_generation_after_sources_s": round(
+                percentile(generations, 0.95), 3
             ),
             "max_generation_after_sources_s": round(max(generations or [0.0]), 3),
         }

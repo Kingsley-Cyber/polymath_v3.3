@@ -177,6 +177,27 @@ def test_openai_cloud_pool_is_not_classified_as_remote_vllm():
     assert profile.extraction_max_concurrent == 8
 
 
+def test_runpod_flash_is_remote_compute_without_provider_pool_or_metal_claims():
+    cfg = IngestionConfig(extraction_engine="runpod_flash", embed_mode="local")
+    profile = plan_ingestion_resources(
+        config=cfg,
+        extraction_engine="runpod_flash",
+        extraction_pool=[],
+        settings=_settings(),
+        resources=SystemResources(
+            cpu_cores=12,
+            ram_total_mb=32_768,
+            process_rss_mb=1_024,
+            metal_available=True,
+        ),
+    )
+
+    assert profile.extraction_backend == "cloud_api"
+    assert profile.extraction_lanes == ("cloud_api",)
+    assert profile.embedding_backend == "local_metal"
+    assert profile.recommended_ingest_profile == "runpod_burst"
+
+
 def test_local_private_provider_profile_uses_remote_vllm():
     cfg = IngestionConfig(
         extraction_engine="local",

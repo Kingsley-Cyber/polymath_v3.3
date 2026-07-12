@@ -49,6 +49,9 @@ KNOWN_PROVIDERS = frozenset(
         "minimax",
         "mimo",
         "longcat",
+        # Runpod Flash burst extraction. This key is consumed only by the
+        # serverless extraction client/deployment tooling, never LiteLLM.
+        "runpod",
         "mimo-coding",
         "glm-coding",
         # Sprint 3 — QueryModelPoolEntry.provider coverage. Added so

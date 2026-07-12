@@ -40,7 +40,6 @@ import uuid
 from datetime import datetime
 from typing import Any, Callable
 
-
 # Pt 10e — filename sanitizer.
 # Anna's Archive / libgen / z-library export filenames carry aggregator
 # markers that pollute (a) the chat citation display, (b) the Ghost B
@@ -82,6 +81,7 @@ def _sanitize_filename(name: str) -> str:
     except Exception:
         return name
 
+
 from config import get_settings
 from models.schemas import IngestionConfig, IngestJobResponse, SourceTier, WriteState
 from motor.motor_asyncio import AsyncIOMotorDatabase
@@ -114,7 +114,9 @@ from services.ingestion.summary_semantics import (
     topic_key_for as _topic_key_for,
 )
 from services.ingestion.schema_lens import get_or_create_schema_lens
-from services.ingestion.summary_tree_llm import summary_tree_llm_from_pool as _summary_tree_llm_from_pool
+from services.ingestion.summary_tree_llm import (
+    summary_tree_llm_from_pool as _summary_tree_llm_from_pool,
+)
 from services.ingestion.section_classifier import (
     ChunkKind,
     is_noisy,
@@ -221,18 +223,20 @@ async def _chunk_via_remote(parse_result, doc_id, corpus_id, config, timeout: in
                 if r.status_code != 200:
                     logger.warning(
                         "remote chunk %s -> %d (doc=%s) — trying next/local",
-                        url, r.status_code, doc_id[:12],
+                        url,
+                        r.status_code,
+                        doc_id[:12],
                     )
                     continue
                 out = pickle.loads(base64.b64decode(r.json()["result_b64"]))
-                logger.info(
-                    "phase=chunk_remote url=%s doc=%s", url, doc_id[:12]
-                )
+                logger.info("phase=chunk_remote url=%s doc=%s", url, doc_id[:12])
                 return out
             except Exception as exc:  # noqa: BLE001 — elastic fallback
                 logger.warning(
                     "remote chunk %s unreachable (%s) doc=%s — trying next/local",
-                    url, type(exc).__name__, doc_id[:12],
+                    url,
+                    type(exc).__name__,
+                    doc_id[:12],
                 )
     return None
 
@@ -348,6 +352,7 @@ def _pathological_chunk_reason(parse_result, settings_obj) -> str | None:
         return f"sections:{section_count}>={section_threshold}"
     return None
 
+
 _MODEL_PHASE_SEMAPHORES: dict[str, asyncio.Semaphore] = {}
 _MODEL_PHASE_SEMAPHORE_STATE: dict[str, tuple[int, asyncio.AbstractEventLoop]] = {}
 _GHOST_B_FILE_SEMAPHORES: dict[str, asyncio.Semaphore] = {}
@@ -392,13 +397,15 @@ def _ghost_branches_can_overlap(config: IngestionConfig) -> bool:
     to a separate provider.
     """
     engine = str(getattr(config, "extraction_engine", "") or "").strip().lower()
-    if engine in {"legacy_local", "local_then_enrich", "off"}:
+    if engine in {"legacy_local", "local_then_enrich", "runpod_flash", "off"}:
         return True
     if getattr(config, "models_linked", True):
         return False
 
     extraction_refs = list(getattr(config, "extraction_models", []) or [])
-    if any(_pool_entry_uses_managed_vllm(_plain_model_ref(ref)) for ref in extraction_refs):
+    if any(
+        _pool_entry_uses_managed_vllm(_plain_model_ref(ref)) for ref in extraction_refs
+    ):
         return True
 
     summary_sigs = {
@@ -411,7 +418,9 @@ def _ghost_branches_can_overlap(config: IngestionConfig) -> bool:
         for ref in extraction_refs
         if _pool_lane_signature(ref) != ("", "", "", "")
     }
-    return bool(summary_sigs and extraction_sigs and summary_sigs.isdisjoint(extraction_sigs))
+    return bool(
+        summary_sigs and extraction_sigs and summary_sigs.isdisjoint(extraction_sigs)
+    )
 
 
 def _resource_profile_for_config(
@@ -423,10 +432,14 @@ def _resource_profile_for_config(
 ) -> ResourceProfile:
     return plan_ingestion_resources(
         config=config,
-        extraction_engine=extraction_engine
-        if extraction_engine is not None
-        else getattr(config, "extraction_engine", None),
-        extraction_pool=pool if pool is not None else _cloud_pool_refs_for_config(config),
+        extraction_engine=(
+            extraction_engine
+            if extraction_engine is not None
+            else getattr(config, "extraction_engine", None)
+        ),
+        extraction_pool=(
+            pool if pool is not None else _cloud_pool_refs_for_config(config)
+        ),
         source_location=source_location,
         settings=get_settings(),
     )
@@ -540,6 +553,8 @@ def _ghost_b_active_doc_limit(
 ) -> int:
     if str(extraction_engine or "").lower() == "legacy_local":
         return 1
+    if str(extraction_engine or "").lower() == "runpod_flash":
+        return 1
     if config is not None:
         profile = _resource_profile_for_config(
             config,
@@ -555,8 +570,12 @@ def _ghost_b_active_doc_limit(
         "local_then_cloud",
         "local_then_enrich",
     }
-    if provider_lane_active and any(_pool_entry_uses_managed_vllm(entry) for entry in pool):
-        return max(1, int(getattr(current, "EXTRACTION_MANAGED_VLLM_MAX_ACTIVE_DOCS", 2)))
+    if provider_lane_active and any(
+        _pool_entry_uses_managed_vllm(entry) for entry in pool
+    ):
+        return max(
+            1, int(getattr(current, "EXTRACTION_MANAGED_VLLM_MAX_ACTIVE_DOCS", 2))
+        )
     return max(1, int(getattr(current, "EXTRACTION_MAX_ACTIVE_DOCS", 1)))
 
 
@@ -568,6 +587,8 @@ def _ghost_b_file_gate_key(
 ) -> str:
     if str(extraction_engine or "").lower() == "legacy_local":
         return "legacy_local"
+    if str(extraction_engine or "").lower() == "runpod_flash":
+        return "runpod_flash"
     if config is not None:
         profile = _resource_profile_for_config(
             config,
@@ -583,7 +604,9 @@ def _ghost_b_file_gate_key(
         "local_then_cloud",
         "local_then_enrich",
     }
-    if provider_lane_active and any(_pool_entry_uses_managed_vllm(entry) for entry in pool):
+    if provider_lane_active and any(
+        _pool_entry_uses_managed_vllm(entry) for entry in pool
+    ):
         return "remote_vllm"
     return "default"
 
@@ -615,7 +638,9 @@ def _qdrant_write_semaphore() -> asyncio.Semaphore:
         _QDRANT_WRITE_SEMAPHORES,
         _QDRANT_WRITE_SEMAPHORE_STATE,
         key="qdrant",
-        limit=max(1, int(getattr(get_settings(), "QDRANT_INGEST_WRITE_CONCURRENCY", 2))),
+        limit=max(
+            1, int(getattr(get_settings(), "QDRANT_INGEST_WRITE_CONCURRENCY", 2))
+        ),
     )
 
 
@@ -775,11 +800,17 @@ def _build_ghost_b_error_event_sink(
 
     max_failed = max(
         0,
-        int(getattr(settings, "EXTRACTION_ERROR_AUDIT_MAX_FAILED_ATTEMPTS_PER_DOC", 25) or 0),
+        int(
+            getattr(settings, "EXTRACTION_ERROR_AUDIT_MAX_FAILED_ATTEMPTS_PER_DOC", 25)
+            or 0
+        ),
     )
     max_success = max(
         0,
-        int(getattr(settings, "EXTRACTION_ERROR_AUDIT_MAX_SUCCESS_ATTEMPTS_PER_DOC", 2) or 0),
+        int(
+            getattr(settings, "EXTRACTION_ERROR_AUDIT_MAX_SUCCESS_ATTEMPTS_PER_DOC", 2)
+            or 0
+        ),
     )
     counts = {
         "ghost_b_attempt_failed": 0,
@@ -875,10 +906,7 @@ def _ghost_b_metrics_for_skipped(results: list[ExtractionResult] | None) -> dict
         return None
     relation_count = sum(len(r.relations) for r in results)
     related_to_count = sum(
-        1
-        for r in results
-        for rel in r.relations
-        if rel.predicate == "related_to"
+        1 for r in results for rel in r.relations if rel.predicate == "related_to"
     )
     lens_ids = sorted({r.schema_lens_id for r in results if r.schema_lens_id})
     return {
@@ -896,7 +924,9 @@ def _ghost_b_metrics_for_skipped(results: list[ExtractionResult] | None) -> dict
         "relation_count": relation_count,
         "fact_count": sum(len(getattr(r, "facts", []) or []) for r in results),
         "related_to_count": related_to_count,
-        "related_to_ratio": round(related_to_count / relation_count, 4) if relation_count else 0.0,
+        "related_to_ratio": (
+            round(related_to_count / relation_count, 4) if relation_count else 0.0
+        ),
         "entity_remap_count": sum(r.entity_remap_count for r in results),
         "relation_remap_count": sum(r.relation_remap_count for r in results),
         "domain_range_remap_count": sum(r.domain_range_remap_count for r in results),
@@ -909,7 +939,9 @@ def _ghost_b_metrics_for_skipped(results: list[ExtractionResult] | None) -> dict
         "entity_evidence_drop_count": sum(
             getattr(r, "entity_evidence_drop_count", 0) for r in results
         ),
-        "citation_drop_count": sum(getattr(r, "citation_drop_count", 0) for r in results),
+        "citation_drop_count": sum(
+            getattr(r, "citation_drop_count", 0) for r in results
+        ),
         "strict_entity_drop_count": sum(
             getattr(r, "strict_entity_drop_count", 0) for r in results
         ),
@@ -917,8 +949,7 @@ def _ghost_b_metrics_for_skipped(results: list[ExtractionResult] | None) -> dict
             getattr(r, "strict_relation_drop_count", 0) for r in results
         ),
         "validation_rejection_count": sum(
-            int(getattr(r, "validation_rejection_count", 0) or 0)
-            for r in results
+            int(getattr(r, "validation_rejection_count", 0) or 0) for r in results
         ),
         "schema_lens_ids": lens_ids,
         "error_counts": {},
@@ -959,9 +990,10 @@ def _ghost_b_metrics_with_failures(
     if failed_from_rows:
         error_counts = metrics.get("error_counts")
         counted = Counter(f.error_type or "unknown" for f in failures or [])
-        if not isinstance(error_counts, dict) or sum(
-            _as_int(v) for v in error_counts.values()
-        ) < failed_from_rows:
+        if (
+            not isinstance(error_counts, dict)
+            or sum(_as_int(v) for v in error_counts.values()) < failed_from_rows
+        ):
             metrics["error_counts"] = dict(counted)
 
     return metrics
@@ -1047,7 +1079,9 @@ def _rehydrate_ghost_b_staging(staged: list[dict]) -> list[ExtractionResult]:
                 domain_range_warn_count=r.get("domain_range_warn_count", 0),
                 endpoint_completion_count=r.get("endpoint_completion_count", 0),
                 evidence_cue_repair_count=r.get("evidence_cue_repair_count", 0),
-                semantic_direction_repair_count=r.get("semantic_direction_repair_count", 0),
+                semantic_direction_repair_count=r.get(
+                    "semantic_direction_repair_count", 0
+                ),
                 semantic_direction_drop_count=r.get("semantic_direction_drop_count", 0),
                 entity_evidence_drop_count=r.get("entity_evidence_drop_count", 0),
                 citation_drop_count=r.get("citation_drop_count", 0),
@@ -1122,7 +1156,8 @@ def _reconstruct_summaries_from_mongo(
                 # A stored retrieval_text is part of the durable summary
                 # contract. Recompute only for legacy rows that never had it;
                 # otherwise a repair re-embed can drift from Mongo truth.
-                retrieval_text=ep.get("retrieval_text") or repaired.get("retrieval_text"),
+                retrieval_text=ep.get("retrieval_text")
+                or repaired.get("retrieval_text"),
             )
         )
     return out
@@ -1212,9 +1247,7 @@ async def _find_near_duplicate_documents(
             str(doc.get("corpus_id") or corpus_id),
         )
         existing_texts = [
-            str(p.get("text") or "")
-            for p in parent_rows
-            if isinstance(p, dict)
+            str(p.get("text") or "") for p in parent_rows if isinstance(p, dict)
         ]
         existing = await asyncio.to_thread(_doc_shingle_set, existing_texts)
         if not existing:
@@ -1313,10 +1346,7 @@ async def _run_ghosts_parallel(
     if need_ghost_a and ws.summaries_indexed:
         existing_by_parent_id = {p.get("parent_id"): p for p in existing_parent_chunks}
         mongo_summaries_complete = all(
-            (
-                existing_by_parent_id.get(p.parent_id, {}).get("summary")
-                or ""
-            ).strip()
+            (existing_by_parent_id.get(p.parent_id, {}).get("summary") or "").strip()
             for p in summarizable_parents
         )
         if not mongo_summaries_complete:
@@ -1368,10 +1398,7 @@ async def _run_ghosts_parallel(
     if need_ghost_a and existing_parent_chunks:
         existing_by_parent_id = {p.get("parent_id"): p for p in existing_parent_chunks}
         all_filled = all(
-            (
-                existing_by_parent_id.get(p.parent_id, {}).get("summary")
-                or ""
-            ).strip()
+            (existing_by_parent_id.get(p.parent_id, {}).get("summary") or "").strip()
             for p in summarizable_parents
         )
         if all_filled:
@@ -1408,7 +1435,9 @@ async def _run_ghosts_parallel(
 
     # ── GHOST B path decisions ────────────────────────────────────────────
     need_ghost_b = (
-        config.use_neo4j and settings.NEO4J_ENABLED and not ws.neo4j_written
+        config.use_neo4j
+        and settings.NEO4J_ENABLED
+        and not ws.neo4j_written
         and not defer_ghost_b
     )
     ghost_b_from_staging: list[ExtractionResult] | None = None
@@ -1419,7 +1448,12 @@ async def _run_ghosts_parallel(
             doc_id[:12],
             corpus_id[:8],
         )
-    if defer_ghost_b and config.use_neo4j and settings.NEO4J_ENABLED and not ws.neo4j_written:
+    if (
+        defer_ghost_b
+        and config.use_neo4j
+        and settings.NEO4J_ENABLED
+        and not ws.neo4j_written
+    ):
         logger.info(
             "phase=ghost_b_deferred reason=queryable_first doc=%s corpus=%s",
             doc_id[:12],
@@ -1528,10 +1562,14 @@ async def _run_ghosts_parallel(
             try:
                 from services.settings import settings_service
 
-                runtime_ingestion = await settings_service.get_runtime_ingestion_settings(user_id)
+                runtime_ingestion = (
+                    await settings_service.get_runtime_ingestion_settings(user_id)
+                )
                 runtime_summary = runtime_ingestion.summary
                 summary_max_concurrent = runtime_summary.max_concurrent
-                default_tokens = IngestionConfig.model_fields["max_summary_tokens"].default
+                default_tokens = IngestionConfig.model_fields[
+                    "max_summary_tokens"
+                ].default
                 if (
                     max_summary_tokens == default_tokens
                     and runtime_summary.max_summary_tokens != default_tokens
@@ -1599,7 +1637,8 @@ async def _run_ghosts_parallel(
         if bool(getattr(_gs_tp(), "TWO_PHASE_INGEST", False)):
             logger.info(
                 "phase=ghost_b DEFERRED (two-phase) doc=%s — enrichment "
-                "runs post-qdrant in background", doc_id[:12],
+                "runs post-qdrant in background",
+                doc_id[:12],
             )
             return ghost_b_from_staging
         if not need_ghost_b:
@@ -1617,7 +1656,10 @@ async def _run_ghosts_parallel(
             kind = getattr(c, "chunk_kind", None) or ChunkKind.BODY
             if should_skip_ghost_b(kind):
                 skipped_kinds[kind] = skipped_kinds.get(kind, 0) + 1
-            elif ghost_b_missing_ids is not None and c.chunk_id not in ghost_b_missing_ids:
+            elif (
+                ghost_b_missing_ids is not None
+                and c.chunk_id not in ghost_b_missing_ids
+            ):
                 continue
             else:
                 body_children.append(c)
@@ -1696,9 +1738,11 @@ async def _run_ghosts_parallel(
                     db,
                     corpus_id=corpus_id,
                 )
-                filtered_pool, skipped_lanes = filter_extraction_pool_by_provider_health(
-                    pool,
-                    provider_health,
+                filtered_pool, skipped_lanes = (
+                    filter_extraction_pool_by_provider_health(
+                        pool,
+                        provider_health,
+                    )
                 )
                 if skipped_lanes:
                     logger.warning(
@@ -1758,11 +1802,13 @@ async def _run_ghosts_parallel(
         # influence which schema terms get retrieved would erode entity
         # extraction quality on body content.
         body_parents_for_lens = [
-            p for p in parents
+            p
+            for p in parents
             if not should_skip_ghost_b(getattr(p, "chunk_kind", None) or ChunkKind.BODY)
         ]
         body_children_for_lens = [
-            c for c in children
+            c
+            for c in children
             if not should_skip_ghost_b(getattr(c, "chunk_kind", None) or ChunkKind.BODY)
         ]
         schema_lens = await get_or_create_schema_lens(
@@ -1793,7 +1839,9 @@ async def _run_ghosts_parallel(
         reason = (
             "staging_partial_resume"
             if ghost_b_missing_ids is not None
-            else ("fresh_ingest" if not ws.mongo_written else "staging_missing_legacy_doc")
+            else (
+                "fresh_ingest" if not ws.mongo_written else "staging_missing_legacy_doc"
+            )
         )
         logger.info(
             "phase=ghost_b_run reason=%s doc=%s corpus=%s children=%d pool=%d strict=%s",
@@ -1869,7 +1917,8 @@ async def _run_ghosts_parallel(
             # Owner-selectable engine (per-corpus contract):
             # off = vectors-only; local = private/provider LLM pool
             # (for example LAN RTX/vLLM); cloud = provider LLM pool;
-            # legacy_local = deprecated GLiNER/GLiREL sidecars; dual and
+            # runpod_flash = burst joint GLiNER-Relex workers; legacy_local =
+            # deprecated GLiNER/GLiREL sidecars; dual and
             # local_then_* are transitional legacy-local mixed modes.
             if extraction_engine == "off":
                 report = ExtractionBatchReport(
@@ -1887,6 +1936,12 @@ async def _run_ghosts_parallel(
                 from services.ghost_b import extract_entities as _cloud_extract
 
                 report = await _cloud_extract(tasks, **_extract_kwargs)
+            elif extraction_engine == "runpod_flash":
+                from services.runpod_flash_extraction import (
+                    extract_entities as _runpod_extract,
+                )
+
+                report = await _runpod_extract(tasks, **_extract_kwargs)
             elif extraction_engine == "legacy_local":
                 report = await extract_entities(
                     tasks,
@@ -1905,7 +1960,11 @@ async def _run_ghosts_parallel(
                 _local_part = tasks[0::2]
                 _cloud_part = tasks[1::2]
                 _rep_local, _rep_cloud = await asyncio.gather(
-                    extract_entities(_local_part, **_extract_kwargs, endpoint_urls=_endpoint_urls or None),
+                    extract_entities(
+                        _local_part,
+                        **_extract_kwargs,
+                        endpoint_urls=_endpoint_urls or None,
+                    ),
                     _cloud_extract(_cloud_part, **_extract_kwargs),
                 )
                 if isinstance(_rep_local, ExtractionBatchReport) and isinstance(
@@ -1924,7 +1983,9 @@ async def _run_ghosts_parallel(
                     report = list(_rep_local) + list(_rep_cloud)
             elif extraction_engine == "local_then_cloud":
                 try:
-                    report = await extract_entities(tasks, **_extract_kwargs, endpoint_urls=_endpoint_urls or None)
+                    report = await extract_entities(
+                        tasks, **_extract_kwargs, endpoint_urls=_endpoint_urls or None
+                    )
                 except Exception as _local_exc:  # noqa: BLE001
                     if contract.pool_size == 0:
                         raise
@@ -1949,7 +2010,9 @@ async def _run_ghosts_parallel(
                     select_enrichment_tasks,
                 )
 
-                report = await extract_entities(tasks, **_extract_kwargs, endpoint_urls=_endpoint_urls or None)
+                report = await extract_entities(
+                    tasks, **_extract_kwargs, endpoint_urls=_endpoint_urls or None
+                )
                 if isinstance(report, ExtractionBatchReport):
                     _verdict = enrichment_verdict(
                         report.metrics,
@@ -1992,12 +2055,8 @@ async def _run_ghosts_parallel(
                                 extract_entities as _cloud_extract,
                             )
 
-                            _rep_cloud = await _cloud_extract(
-                                _picks, **_extract_kwargs
-                            )
-                            _enriched_ids = {
-                                r.chunk_id for r in _rep_cloud.results
-                            }
+                            _rep_cloud = await _cloud_extract(_picks, **_extract_kwargs)
+                            _enriched_ids = {r.chunk_id for r in _rep_cloud.results}
                             _kept = [
                                 r
                                 for r in report.results
@@ -2006,13 +2065,10 @@ async def _run_ghosts_parallel(
                             _kept_failures = [
                                 f
                                 for f in report.failures
-                                if str(getattr(f, "chunk_id", ""))
-                                not in _enriched_ids
+                                if str(getattr(f, "chunk_id", "")) not in _enriched_ids
                             ]
                             _base_metrics["enriched_chunks"] = len(_picks)
-                            _base_metrics["enrich_succeeded"] = len(
-                                _rep_cloud.results
-                            )
+                            _base_metrics["enrich_succeeded"] = len(_rep_cloud.results)
                             _base_metrics["enrich_cloud"] = {
                                 k: v
                                 for k, v in dict(_rep_cloud.metrics or {}).items()
@@ -2020,8 +2076,7 @@ async def _run_ghosts_parallel(
                             }
                             report = ExtractionBatchReport(
                                 results=_kept + list(_rep_cloud.results),
-                                failures=_kept_failures
-                                + list(_rep_cloud.failures),
+                                failures=_kept_failures + list(_rep_cloud.failures),
                                 metrics=_base_metrics,
                             )
                         else:
@@ -2092,7 +2147,9 @@ async def _run_ghosts_parallel(
             )
         results = list(fresh_results)
         if ghost_b_from_staging:
-            merged_by_chunk = {result.chunk_id: result for result in ghost_b_from_staging}
+            merged_by_chunk = {
+                result.chunk_id: result for result in ghost_b_from_staging
+            }
             for result in fresh_results:
                 merged_by_chunk[result.chunk_id] = result
             results = list(merged_by_chunk.values())
@@ -2222,12 +2279,18 @@ def _build_parent_dicts(
                 "concept_tags": getattr(sr, "concept_tags", None) if sr else None,
                 "entity_hints": getattr(sr, "entity_hints", None) if sr else None,
                 "retrieval_uses": getattr(sr, "retrieval_uses", None) if sr else None,
-                "abstraction_level": getattr(sr, "abstraction_level", None) if sr else None,
+                "abstraction_level": (
+                    getattr(sr, "abstraction_level", None) if sr else None
+                ),
                 "summary_id": getattr(sr, "summary_id", None) if sr else None,
                 "source_hash": getattr(sr, "source_hash", None) if sr else None,
                 "summary_model": getattr(sr, "summary_model", None) if sr else None,
-                "summary_created_at": getattr(sr, "summary_created_at", None) if sr else None,
-                "validation_status": getattr(sr, "validation_status", None) if sr else None,
+                "summary_created_at": (
+                    getattr(sr, "summary_created_at", None) if sr else None
+                ),
+                "validation_status": (
+                    getattr(sr, "validation_status", None) if sr else None
+                ),
                 "repair_status": getattr(sr, "repair_status", None) if sr else None,
                 "quality_score": getattr(sr, "quality_score", None) if sr else None,
                 "quality_flags": getattr(sr, "quality_flags", None) if sr else None,
@@ -2238,7 +2301,9 @@ def _build_parent_dicts(
                     else [c.chunk_id for c in p.children]
                 ),
                 "domain": getattr(sr, "domain", None) if sr else None,
-                "semantic_chunk_type": getattr(sr, "semantic_chunk_type", None) if sr else None,
+                "semantic_chunk_type": (
+                    getattr(sr, "semantic_chunk_type", None) if sr else None
+                ),
                 "key_terms": getattr(sr, "key_terms", None) if sr else None,
                 "mechanisms": getattr(sr, "mechanisms", None) if sr else None,
                 "topic_key": _topic_key_for(
@@ -2381,8 +2446,11 @@ async def _write_mongo_all(
         "source_mime": source_mime,
         "source_tier": source_tier.value,
         # M2 parse-time metadata + per-document routing report
-        **{k: v for k, v in (source_meta or {}).items()
-           if k in ("title", "author", "document_date", "source_type", "routing_trace")},
+        **{
+            k: v
+            for k, v in (source_meta or {}).items()
+            if k in ("title", "author", "document_date", "source_type", "routing_trace")
+        },
         "ingestion_config": freeze_snapshot(ingestion_config),
         "chunking_config": chunking_config,
         "write_state": ws.model_dump(),
@@ -2415,7 +2483,9 @@ async def _write_mongo_all(
             duplicate_candidates,
         )
     if replace_existing_artifacts:
-        await db["parent_chunks"].delete_many({"doc_id": doc_id, "corpus_id": corpus_id})
+        await db["parent_chunks"].delete_many(
+            {"doc_id": doc_id, "corpus_id": corpus_id}
+        )
         await db["chunks"].delete_many({"doc_id": doc_id, "corpus_id": corpus_id})
         await db["ghost_b_extractions"].delete_many(
             {"doc_id": doc_id, "corpus_id": corpus_id}
@@ -2638,6 +2708,37 @@ async def _mark_ingest_skipped_duplicate(
     return reason
 
 
+async def _mark_ingest_skipped_nonsemantic(
+    *,
+    db: AsyncIOMotorDatabase,
+    doc_id: str,
+    corpus_id: str,
+) -> str:
+    """Exclude a parsed navigation/cover shell with no visible source text."""
+
+    reason = (
+        "Source contains no retrievable text after deterministic markup "
+        "normalization (for example, only cover images or empty EPUB anchors)."
+    )
+    await db["documents"].update_one(
+        {"doc_id": doc_id, "corpus_id": corpus_id},
+        {
+            "$set": {
+                "ingest_stage": "skipped_nonsemantic",
+                "queryable": False,
+                "skipped_reason": reason,
+                "excluded_from_readiness": True,
+                "enrichment_pending_reason": None,
+                "enrichment_status": {"summary": "excluded", "graph": "excluded"},
+                "updated_at": datetime.utcnow(),
+            },
+            "$unset": {"error": ""},
+            "$addToSet": {"write_state.warnings": reason},
+        },
+    )
+    return reason
+
+
 async def _flag_document_near_duplicate(
     *,
     db: AsyncIOMotorDatabase,
@@ -2794,6 +2895,107 @@ async def _embed_batch_for_doc(
     return vec_map, summary_vec_map
 
 
+async def _write_qdrant_summaries_for_doc(
+    *,
+    qdrant_client: AsyncQdrantClient,
+    corpus_id: str,
+    doc_id: str,
+    user_id: str,
+    filename: str,
+    parents,
+    summaries: list[SummaryResult],
+    summary_vec_map: dict[str, list[float]],
+    config: IngestionConfig,
+    summary_sparse_map: dict[str, Any] | None = None,
+    facet_profile: dict | None = None,
+    replace_existing: bool = False,
+) -> int:
+    """Write the canonical summary projection without touching child vectors."""
+
+    if not summaries:
+        return 0
+    summary_sparse_map = summary_sparse_map or {}
+    schema_version = (facet_profile or {}).get("schema_version")
+    doc_facet_ids = (facet_profile or {}).get("facet_ids") or []
+    parent_facet_map = (facet_profile or {}).get("parent_facets") or {}
+    hp_map = {parent.parent_id: parent.heading_path for parent in parents}
+    kind_map = {
+        parent.parent_id: getattr(parent, "chunk_kind", ChunkKind.BODY)
+        for parent in parents
+    }
+    summary_payloads = []
+    for summary in summaries:
+        facet_meta = parent_facet_map.get(summary.parent_id, {})
+        summary_payloads.append(
+            {
+                "parent_id": summary.parent_id,
+                "doc_id": summary.doc_id,
+                "corpus_id": summary.corpus_id,
+                "source_tier": summary.source_tier,
+                "filename": filename,
+                "doc_name": filename,
+                "summary": summary.summary,
+                "retrieval_text": getattr(summary, "retrieval_text", None),
+                "schema_version": getattr(summary, "schema_version", None),
+                "summary_type": getattr(summary, "summary_type", None),
+                "central_claim": getattr(summary, "central_claim", None),
+                "key_points": getattr(summary, "key_points", None),
+                "main_mechanism": getattr(summary, "main_mechanism", None),
+                "concept_tags": getattr(summary, "concept_tags", None),
+                "entity_hints": getattr(summary, "entity_hints", None),
+                "retrieval_uses": getattr(summary, "retrieval_uses", None),
+                "abstraction_level": getattr(summary, "abstraction_level", None),
+                "source_child_ids": getattr(summary, "source_child_ids", None),
+                "summary_id": getattr(summary, "summary_id", None),
+                "source_hash": getattr(summary, "source_hash", None),
+                "summary_model": getattr(summary, "summary_model", None),
+                "summary_created_at": getattr(summary, "summary_created_at", None),
+                "validation_status": getattr(summary, "validation_status", None),
+                "repair_status": getattr(summary, "repair_status", None),
+                "quality_score": getattr(summary, "quality_score", None),
+                "quality_flags": getattr(summary, "quality_flags", None),
+                "heading_path": hp_map.get(summary.parent_id),
+                "user_id": user_id,
+                "chunk_kind": kind_map.get(summary.parent_id, ChunkKind.BODY),
+                "metadata": _metadata_with_facets({}, facet_meta),
+                "facet_ids": facet_meta.get("facet_ids") or doc_facet_ids[:6],
+                "facet_text": facet_meta.get("facet_text") or "",
+                "content_facet_ids": facet_meta.get("content_facet_ids") or [],
+                "content_facet_text": facet_meta.get("content_facet_text") or "",
+                "content_facet_source": facet_meta.get("content_facet_source") or "",
+                "content_facet_confidence": facet_meta.get(
+                    "content_facet_confidence"
+                ),
+                "doc_facet_ids": doc_facet_ids,
+                "facet_schema_version": schema_version,
+            }
+        )
+    if replace_existing:
+        await qdrant_writer.delete_summary_points_by_doc(
+            qdrant_client,
+            corpus_id,
+            doc_id,
+        )
+    summary_vecs = [summary_vec_map[summary.parent_id] for summary in summaries]
+    summary_sparse = [
+        summary_sparse_map.get(summary.parent_id) for summary in summaries
+    ]
+    summary_kinds = [
+        kind
+        for kind in config.target_qdrant_collections
+        if kind in ("naive", "hrag")
+    ]
+    await qdrant_writer.upsert_summaries(
+        qdrant_client,
+        corpus_id,
+        summary_payloads,
+        summary_vecs,
+        summary_kinds,
+        sparse_vectors=summary_sparse,
+    )
+    return len(summaries)
+
+
 async def _write_qdrant_for_doc(
     *,
     qdrant_client: AsyncQdrantClient,
@@ -2830,7 +3032,6 @@ async def _write_qdrant_for_doc(
     schema_version = (facet_profile or {}).get("schema_version")
     doc_facet_ids = (facet_profile or {}).get("facet_ids") or []
     child_facet_map = (facet_profile or {}).get("child_facets") or {}
-    parent_facet_map = (facet_profile or {}).get("parent_facets") or {}
 
     def _as_payload(c) -> dict:
         facet_meta = child_facet_map.get(c.chunk_id, {})
@@ -2881,7 +3082,11 @@ async def _write_qdrant_for_doc(
         vecs = [vec_map[c.chunk_id] for c in vector_children]
         sparse = [child_sparse_map.get(c.chunk_id) for c in vector_children]
         await qdrant_writer.upsert_children(
-            qdrant_client, corpus_id, dicts, vecs, ["naive"],
+            qdrant_client,
+            corpus_id,
+            dicts,
+            vecs,
+            ["naive"],
             sparse_vectors=sparse,
         )
 
@@ -2891,7 +3096,11 @@ async def _write_qdrant_for_doc(
         vecs = [vec_map[c.chunk_id] for c in hrag_eligible]
         sparse = [child_sparse_map.get(c.chunk_id) for c in hrag_eligible]
         await qdrant_writer.upsert_children(
-            qdrant_client, corpus_id, dicts, vecs, ["hrag"],
+            qdrant_client,
+            corpus_id,
+            dicts,
+            vecs,
+            ["hrag"],
             sparse_vectors=sparse,
         )
 
@@ -2900,68 +3109,27 @@ async def _write_qdrant_for_doc(
         vecs = [vec_map[c.chunk_id] for c in vector_children]
         sparse = [child_sparse_map.get(c.chunk_id) for c in vector_children]
         await qdrant_writer.upsert_children(
-            qdrant_client, corpus_id, dicts, vecs, ["graph"],
+            qdrant_client,
+            corpus_id,
+            dicts,
+            vecs,
+            ["graph"],
             sparse_vectors=sparse,
         )
 
     if summaries:
-        hp_map = {p.parent_id: p.heading_path for p in parents}
-        kind_map = {p.parent_id: getattr(p, "chunk_kind", ChunkKind.BODY) for p in parents}
-        summary_payloads = []
-        for s in summaries:
-            facet_meta = parent_facet_map.get(s.parent_id, {})
-            summary_payloads.append(
-                {
-                    "parent_id": s.parent_id,
-                    "doc_id": s.doc_id,
-                    "corpus_id": s.corpus_id,
-                    "source_tier": s.source_tier,
-                    "filename": filename,
-                    "doc_name": filename,
-                    "summary": s.summary,
-                    "retrieval_text": getattr(s, "retrieval_text", None),
-                    "schema_version": getattr(s, "schema_version", None),
-                    "summary_type": getattr(s, "summary_type", None),
-                    "central_claim": getattr(s, "central_claim", None),
-                    "key_points": getattr(s, "key_points", None),
-                    "main_mechanism": getattr(s, "main_mechanism", None),
-                    "concept_tags": getattr(s, "concept_tags", None),
-                    "entity_hints": getattr(s, "entity_hints", None),
-                    "retrieval_uses": getattr(s, "retrieval_uses", None),
-                    "abstraction_level": getattr(s, "abstraction_level", None),
-                    "source_child_ids": getattr(s, "source_child_ids", None),
-                    "summary_id": getattr(s, "summary_id", None),
-                    "source_hash": getattr(s, "source_hash", None),
-                    "summary_model": getattr(s, "summary_model", None),
-                    "summary_created_at": getattr(s, "summary_created_at", None),
-                    "validation_status": getattr(s, "validation_status", None),
-                    "repair_status": getattr(s, "repair_status", None),
-                    "quality_score": getattr(s, "quality_score", None),
-                    "quality_flags": getattr(s, "quality_flags", None),
-                    "heading_path": hp_map.get(s.parent_id),
-                    "user_id": user_id,
-                    "chunk_kind": kind_map.get(s.parent_id, ChunkKind.BODY),
-                    "metadata": _metadata_with_facets({}, facet_meta),
-                    "facet_ids": facet_meta.get("facet_ids") or doc_facet_ids[:6],
-                    "facet_text": facet_meta.get("facet_text") or "",
-                    "content_facet_ids": facet_meta.get("content_facet_ids") or [],
-                    "content_facet_text": facet_meta.get("content_facet_text") or "",
-                    "content_facet_source": facet_meta.get("content_facet_source") or "",
-                    "content_facet_confidence": facet_meta.get("content_facet_confidence"),
-                    "doc_facet_ids": doc_facet_ids,
-                    "facet_schema_version": schema_version,
-                }
-            )
-        summary_vecs = [summary_vec_map[s.parent_id] for s in summaries]
-        summary_sparse = [summary_sparse_map.get(s.parent_id) for s in summaries]
-        summary_kinds = [k for k in target_cols if k in ("naive", "hrag")]
-        await qdrant_writer.upsert_summaries(
-            qdrant_client,
-            corpus_id,
-            summary_payloads,
-            summary_vecs,
-            summary_kinds,
-            sparse_vectors=summary_sparse,
+        await _write_qdrant_summaries_for_doc(
+            qdrant_client=qdrant_client,
+            corpus_id=corpus_id,
+            doc_id=doc_id,
+            user_id=user_id,
+            filename=filename,
+            parents=parents,
+            summaries=summaries,
+            summary_vec_map=summary_vec_map,
+            config=config,
+            summary_sparse_map=summary_sparse_map,
+            facet_profile=facet_profile,
         )
 
 
@@ -3010,7 +3178,9 @@ def _searchable_text(chunk) -> str:
         # Tokenize the path so each segment becomes a BM25 term:
         # "ReplicatedStorage/Combat/CombatModule.luau"
         # → ReplicatedStorage Combat CombatModule luau
-        for part in file_path.replace("/", " ").replace("\\", " ").replace(".", " ").split():
+        for part in (
+            file_path.replace("/", " ").replace("\\", " ").replace(".", " ").split()
+        ):
             if part and part not in tokens:
                 tokens.append(part)
     if not tokens:
@@ -3065,10 +3235,14 @@ def _synthesize_code_extraction_results(graph_children) -> list:
                 continue
             seen.add(key)
             entity_type = resolve_code_entity_type(sym, c) or "Method"
-            entities.append(EntityItem(
-                canonical_name=sym, surface_form=sym,
-                entity_type=entity_type, confidence=1.0,
-            ))
+            entities.append(
+                EntityItem(
+                    canonical_name=sym,
+                    surface_form=sym,
+                    entity_type=entity_type,
+                    confidence=1.0,
+                )
+            )
         # symbols_called now includes Roblox APIs from Step 1's regex
         # extractor + graphify backfill (Pt 11.1). The resolver turns
         # `TweenService` into `RobloxService`, etc.; unknown names default
@@ -3082,10 +3256,14 @@ def _synthesize_code_extraction_results(graph_children) -> list:
                 continue
             seen.add(key)
             entity_type = resolve_code_entity_type(sym, c) or "Method"
-            entities.append(EntityItem(
-                canonical_name=sym, surface_form=sym,
-                entity_type=entity_type, confidence=1.0,
-            ))
+            entities.append(
+                EntityItem(
+                    canonical_name=sym,
+                    surface_form=sym,
+                    entity_type=entity_type,
+                    confidence=1.0,
+                )
+            )
         for imp in meta.get("imports", []) or []:
             src = str(imp).strip()
             if not src:
@@ -3095,22 +3273,28 @@ def _synthesize_code_extraction_results(graph_children) -> list:
                 continue
             seen.add(key)
             entity_type = resolve_code_entity_type(src, c) or "Artifact"
-            entities.append(EntityItem(
-                canonical_name=src, surface_form=src,
-                entity_type=entity_type, confidence=1.0,
-            ))
+            entities.append(
+                EntityItem(
+                    canonical_name=src,
+                    surface_form=src,
+                    entity_type=entity_type,
+                    confidence=1.0,
+                )
+            )
         if not entities:
             continue
-        out.append(ExtractionResult(
-            schema_version="polymath.code.v1",
-            chunk_id=c.chunk_id,
-            doc_id=c.doc_id,
-            corpus_id=c.corpus_id,
-            text=getattr(c, "text", "") or "",
-            entities=entities,
-            relations=[],
-            facts=[],
-        ))
+        out.append(
+            ExtractionResult(
+                schema_version="polymath.code.v1",
+                chunk_id=c.chunk_id,
+                doc_id=c.doc_id,
+                corpus_id=c.corpus_id,
+                text=getattr(c, "text", "") or "",
+                entities=entities,
+                relations=[],
+                facts=[],
+            )
+        )
     return out
 
 
@@ -3164,7 +3348,9 @@ async def _write_neo4j_for_doc(
         logger.info(
             "Pt8c neo4j writer skipping %d noisy chunks (toc/index/biblio/...) "
             "of %d total for doc_id=%s",
-            skipped_count, len(children), doc_id,
+            skipped_count,
+            len(children),
+            doc_id,
         )
 
     code_extraction_results = _synthesize_code_extraction_results(graph_children)
@@ -3173,7 +3359,9 @@ async def _write_neo4j_for_doc(
         logger.info(
             "Phase 4 code graph: synthesized %d ExtractionResult objects "
             "(deterministic, from metadata.symbols_defined / imports) "
-            "for doc_id=%s", len(code_extraction_results), doc_id[:12],
+            "for doc_id=%s",
+            len(code_extraction_results),
+            doc_id[:12],
         )
 
     all_extraction_results = list(ghost_b_out or []) + code_extraction_results
@@ -3214,6 +3402,7 @@ async def _write_neo4j_for_doc(
     # backfill_document_graph), compute it locally as before for back-compat.
     try:
         from config import get_settings
+
         if get_settings().GRAPHIFY_AUGMENT_CODE_LANE:
             from services import code_graph_augmenter
             from services.graph.neo4j_writer import write_graphify_enrichment
@@ -3221,7 +3410,9 @@ async def _write_neo4j_for_doc(
 
             enrichment = graphify_enrichment
             if enrichment is None:
-                code_only = [c for c in graph_children if c.chunk_kind == ChunkKind.CODE]
+                code_only = [
+                    c for c in graph_children if c.chunk_kind == ChunkKind.CODE
+                ]
                 if code_only:
                     enrichment = code_graph_augmenter.augment_code_chunks(code_only)
             if enrichment is not None:
@@ -3234,7 +3425,8 @@ async def _write_neo4j_for_doc(
         # Pure augmentation — never block the ingest if it fails.
         logger.warning(
             "Phase 4.5 graphify augmentation skipped for doc=%s: %s",
-            doc_id[:12] if doc_id else "?", exc,
+            doc_id[:12] if doc_id else "?",
+            exc,
         )
 
 
@@ -3402,6 +3594,42 @@ async def run_ingest_job(
             source_identity=source_identity,
         )
 
+    # Cover/navigation-only exports are valid source artifacts but have no
+    # retrieval payload. Terminate them before setup, chunking, embedding,
+    # summaries, or graph work so they cannot create permanent repair loops.
+    if not docling_adapter.has_retrievable_content(parse_result):
+        reason = await _mark_ingest_skipped_nonsemantic(
+            db=db,
+            doc_id=doc_id,
+            corpus_id=corpus_id,
+        )
+        ws.warnings.append(reason)
+        logger.info(
+            "phase=skipped_nonsemantic doc=%s corpus=%s",
+            doc_id[:12],
+            cid8,
+        )
+        await _call_optional_callback(on_doc_id, doc_id)
+        await _emit_ingest_phase(
+            on_phase,
+            "skipped_nonsemantic",
+            doc_id=doc_id,
+            corpus_id=corpus_id,
+            reason=reason,
+        )
+        return IngestJobResponse(
+            job_id=job_id,
+            doc_id=doc_id,
+            corpus_id=corpus_id,
+            filename=filename,
+            source_tier=source_tier.value,
+            status="skipped_nonsemantic",
+            write_state=ws,
+            chunk_count=0,
+            parent_count=0,
+            error=reason,
+        )
+
     # Preventive retrieval setup gate. Startup tries to repair all corpora, but
     # an ingest can start immediately after corpus creation or after a partial
     # restore on a new machine. Enforce the same Qdrant/Neo4j readiness contract
@@ -3435,10 +3663,13 @@ async def run_ingest_job(
                 )
                 if not _transient or _attempt == 3:
                     raise
-                _wait = 5 * (2 ** _attempt)
+                _wait = 5 * (2**_attempt)
                 logger.warning(
                     "phase=retrieval_setup transient (%s) doc=%s — retry %d/3 in %ds",
-                    _msg[:80], doc_id[:12], _attempt + 1, _wait,
+                    _msg[:80],
+                    doc_id[:12],
+                    _attempt + 1,
+                    _wait,
                 )
                 await asyncio.sleep(_wait)
         if readiness is None:
@@ -3626,7 +3857,9 @@ async def run_ingest_job(
         logger.error(
             "phase=tier_chunker_timeout doc=%s corpus=%s timeout=%ds — "
             "retrying once with isolated regex/greedy fallback",
-            doc_id[:12], corpus_id[:8], _chunk_timeout,
+            doc_id[:12],
+            corpus_id[:8],
+            _chunk_timeout,
         )
         _pathological_chunk_trigger = f"timeout:{_chunk_timeout}s"
         try:
@@ -3826,8 +4059,14 @@ async def run_ingest_job(
     ws.warnings = _merge_warnings(ws.warnings, ingest_warnings)
     ghost_a_partial = any(w.startswith("Ghost A ") for w in ingest_warnings)
     ghost_b_partial = any(w.startswith("Ghost B ") for w in ingest_warnings)
-    ghost_a_status = "partial" if ghost_a_partial else ("ok" if summaries is not None else "skipped")
-    ghost_b_status = "partial" if ghost_b_partial else ("ok" if ghost_b_out is not None else "skipped")
+    ghost_a_status = (
+        "partial" if ghost_a_partial else ("ok" if summaries is not None else "skipped")
+    )
+    ghost_b_status = (
+        "partial"
+        if ghost_b_partial
+        else ("ok" if ghost_b_out is not None else "skipped")
+    )
     logger.info(
         "phase=ghosts duration=%.2fs doc=%s corpus=%s ghost_a=%s ghost_b=%s warnings=%d failed_chunks=%d",
         time.monotonic() - t0,
@@ -3873,7 +4112,13 @@ async def run_ingest_job(
             source_identity=source_identity,
             source_meta={
                 k: getattr(parse_result, k, None)
-                for k in ("title", "author", "document_date", "source_type", "routing_trace")
+                for k in (
+                    "title",
+                    "author",
+                    "document_date",
+                    "source_type",
+                    "routing_trace",
+                )
             },
         )
         await mongo_writer.update_write_state(
@@ -3888,15 +4133,18 @@ async def run_ingest_job(
             logger.info(
                 "phase=summary_tree_deferred reason=%s doc=%s corpus=%s",
                 "queryable_first" if queryable_first_pass else "deferred_by_run",
-                doc_id[:12], corpus_id[:8],
+                doc_id[:12],
+                corpus_id[:8],
             )
         else:
             # B3 — owner summary tree (parent summaries → rollups → sections →
             # document profile). Best-effort: never fails the ingest.
             try:
                 from config import get_settings as _gs
+
                 if bool(getattr(_gs(), "SUMMARY_TREE_ENABLED", True)):
                     from services.ingestion.summary_tree import build_and_store_tree
+
                     _summary_tree_pool = _build_ghost_pool(
                         getattr(ingestion_config, "summary_models", None) or []
                     )
@@ -3915,15 +4163,20 @@ async def run_ingest_job(
                         llm_fn=_summary_tree_llm,
                         use_llm=_summary_tree_llm is not None,
                         heal_missing=_summary_tree_llm is not None,
+                        qdrant_client=qdrant_client,
+                        embedding_config=ingestion_config,
                     )
                     logger.info(
                         "phase=summary_tree doc=%s corpus=%s %s",
-                        doc_id[:12], corpus_id[:8], _tree_counts,
+                        doc_id[:12],
+                        corpus_id[:8],
+                        _tree_counts,
                     )
             except Exception as _tree_exc:  # noqa: BLE001
                 logger.warning(
                     "phase=summary_tree doc=%s FAILED (non-fatal): %s",
-                    doc_id[:12], _tree_exc,
+                    doc_id[:12],
+                    _tree_exc,
                 )
         logger.info(
             "phase=mongo duration=%.2fs doc=%s corpus=%s parents=%d children=%d summaries=%d",
@@ -3987,13 +4240,15 @@ async def run_ingest_job(
     if settings.GRAPHIFY_AUGMENT_CODE_LANE:
         try:
             from services import code_graph_augmenter
+
             code_only = [
-                c for c in children
-                if getattr(c, "chunk_kind", None) == ChunkKind.CODE
+                c for c in children if getattr(c, "chunk_kind", None) == ChunkKind.CODE
             ]
             if code_only:
                 t0 = time.monotonic()
-                graphify_enrichment = code_graph_augmenter.augment_code_chunks(code_only)
+                graphify_enrichment = code_graph_augmenter.augment_code_chunks(
+                    code_only
+                )
                 # Backfill: write graphify-derived call sites into each
                 # chunk's metadata.symbols_called so _searchable_text
                 # appends them to the BM25 input. Dedupe case-insensitively;
@@ -4015,15 +4270,19 @@ async def run_ingest_job(
                 logger.info(
                     "phase=graphify_backfill duration=%.2fs doc=%s corpus=%s "
                     "code_chunks=%d chunks_backfilled=%d call_edges=%d",
-                    time.monotonic() - t0, doc_id[:12], cid8,
-                    len(code_only), backfilled,
+                    time.monotonic() - t0,
+                    doc_id[:12],
+                    cid8,
+                    len(code_only),
+                    backfilled,
                     len(graphify_enrichment.call_edges),
                 )
         except Exception as exc:
             # Pure augmentation — never block the ingest if it fails.
             logger.warning(
                 "phase=graphify_backfill doc=%s status=failed_continue err=%s",
-                doc_id[:12], exc,
+                doc_id[:12],
+                exc,
             )
 
     # ── Phase 5: Embed + Phase 6: Qdrant ─────────────────────────────────
@@ -4060,7 +4319,8 @@ async def run_ingest_job(
             from services.storage.qdrant_writer import _col_for_corpus
 
             targets = list(
-                getattr(ingestion_config, "target_qdrant_collections", None) or ["naive"]
+                getattr(ingestion_config, "target_qdrant_collections", None)
+                or ["naive"]
             )
             # naive's membership == all vector-eligible children; hrag is
             # tier-filtered, so only naive gives an exact expected count.
@@ -4134,9 +4394,8 @@ async def run_ingest_job(
                 exc,
             )
 
-    qdrant_phase_needed = (
-        not ws.qdrant_written
-        or (summary_write_required and not ws.summaries_indexed)
+    qdrant_phase_needed = not ws.qdrant_written or (
+        summary_write_required and not ws.summaries_indexed
     )
     if target_stage == "extracted":
         # §13-S pass driver: durable through 'extracted' — exit, release
@@ -4145,10 +4404,15 @@ async def run_ingest_job(
             on_phase, "staged_extracted", doc_id=doc_id, corpus_id=corpus_id
         )
         return IngestJobResponse(
-            job_id=job_id, doc_id=doc_id, corpus_id=corpus_id,
-            filename=filename, source_tier=source_tier.value,
-            status="staged", write_state=ws,
-            chunk_count=len(children), parent_count=len(parents),
+            job_id=job_id,
+            doc_id=doc_id,
+            corpus_id=corpus_id,
+            filename=filename,
+            source_tier=source_tier.value,
+            status="staged",
+            write_state=ws,
+            chunk_count=len(children),
+            parent_count=len(parents),
         )
 
     if qdrant_phase_needed:
@@ -4193,7 +4457,9 @@ async def run_ingest_job(
             # (e.g. a function that uses TweenService via a local alias).
             # Prose chunks pass through unchanged.
             from services.storage.sparse_encoder import encode_text as _bm25_encode
+
             t0 = time.monotonic()
+
             # Audit 2026-07-06 (major): these comprehensions ran ON the event
             # loop — a 5,000-child book froze every other in-flight doc for
             # seconds right after embed. Thread offload keeps the loop live.
@@ -4239,7 +4505,9 @@ async def run_ingest_job(
                     doc_id[:12],
                     cid8,
                     qdrant_wait,
-                    max(1, int(getattr(settings, "QDRANT_INGEST_WRITE_CONCURRENCY", 2))),
+                    max(
+                        1, int(getattr(settings, "QDRANT_INGEST_WRITE_CONCURRENCY", 2))
+                    ),
                 )
                 await _write_qdrant_for_doc(
                     qdrant_client=qdrant_client,
@@ -4278,39 +4546,48 @@ async def run_ingest_job(
             # points now exist; at the Mongo barrier they don't yet). Best
             # effort: never fails the ingest.
             try:
-                from config import get_settings as _gs2
-                if bool(getattr(_gs2(), "SUMMARY_TREE_ENABLED", True)):
-                    from services.ingestion.promote import promote_doc
-                    _promo = await promote_doc(db, corpus_id=corpus_id, doc_id=doc_id)
-                    logger.info(
-                        "phase=promote doc=%s corpus=%s %s",
-                        doc_id[:12], corpus_id[:8], _promo,
-                    )
+                from services.ingestion.promote import promote_doc
+
+                _promo = await promote_doc(db, corpus_id=corpus_id, doc_id=doc_id)
+                logger.info(
+                    "phase=promote doc=%s corpus=%s %s",
+                    doc_id[:12],
+                    corpus_id[:8],
+                    _promo,
+                )
             except Exception as _promo_exc:  # noqa: BLE001
                 logger.warning(
                     "phase=promote doc=%s FAILED (non-fatal): %s",
-                    doc_id[:12], _promo_exc,
+                    doc_id[:12],
+                    _promo_exc,
                 )
             # W1 Tier-0 — embed the doc routing card into the universal
             # polymath_doc_summaries collection. Additive + best-effort;
             # consumption stays gated behind TIER0_ROUTING.
             try:
                 from config import get_settings as _gs3
+
                 if bool(getattr(_gs3(), "TIER0_AUTO_EMBED", True)):
                     from services.ingestion.tier0 import embed_doc_profile
+
                     _t0 = await embed_doc_profile(
-                        db, qdrant_client,
-                        corpus_id=corpus_id, doc_id=doc_id,
+                        db,
+                        qdrant_client,
+                        corpus_id=corpus_id,
+                        doc_id=doc_id,
                         dim=int(getattr(ingestion_config, "embedding_dimension", 1024)),
                     )
                     logger.info(
                         "phase=tier0 doc=%s corpus=%s %s",
-                        doc_id[:12], corpus_id[:8], _t0,
+                        doc_id[:12],
+                        corpus_id[:8],
+                        _t0,
                     )
             except Exception as _t0_exc:  # noqa: BLE001
                 logger.warning(
                     "phase=tier0 doc=%s FAILED (non-fatal): %s",
-                    doc_id[:12], _t0_exc,
+                    doc_id[:12],
+                    _t0_exc,
                 )
             # TWO-PHASE: doc is queryable NOW — fire enrichment (extraction
             # retry via the receipted graph-backfill path, then promote) as a
@@ -4318,17 +4595,25 @@ async def run_ingest_job(
             # exactly like a normal failed lane and remain retryable.
             try:
                 from config import get_settings as _gs_tp2
+
                 if bool(getattr(_gs_tp2(), "TWO_PHASE_INGEST", False)):
+
                     async def _enrich(cid=corpus_id, did=doc_id):
                         try:
-                            from services.ingestion_service import ingestion_service as _svc
+                            from services.ingestion_service import (
+                                ingestion_service as _svc,
+                            )
+
                             await _svc.backfill_graph_failures(cid, did)
                             from services.ingestion.promote import promote_doc
+
                             await promote_doc(db, corpus_id=cid, doc_id=did)
                             logger.info("phase=enrich done doc=%s", did[:12])
                         except Exception as _en_exc:  # noqa: BLE001
-                            logger.warning("phase=enrich FAILED doc=%s: %s",
-                                           did[:12], _en_exc)
+                            logger.warning(
+                                "phase=enrich FAILED doc=%s: %s", did[:12], _en_exc
+                            )
+
                     asyncio.create_task(_enrich())
                     logger.info("phase=enrich scheduled doc=%s", doc_id[:12])
             except Exception:  # noqa: BLE001
@@ -4361,20 +4646,25 @@ async def run_ingest_job(
             )
             logger.warning(
                 "phase=embed_qdrant doc=%s corpus=%s status=failed_continue err=%s",
-                doc_id[:12], cid8, embed_qdrant_exc,
+                doc_id[:12],
+                cid8,
+                embed_qdrant_exc,
             )
             try:
                 await db["documents"].update_one(
                     {"doc_id": doc_id, "corpus_id": corpus_id},
-                    {"$set": {
-                        "write_state.warnings": ws.warnings,
-                        "updated_at": datetime.utcnow(),
-                    }},
+                    {
+                        "$set": {
+                            "write_state.warnings": ws.warnings,
+                            "updated_at": datetime.utcnow(),
+                        }
+                    },
                 )
             except Exception as warn_persist_exc:
                 logger.warning(
                     "phase=embed_qdrant warn-persist failed doc=%s err=%s",
-                    doc_id[:12], warn_persist_exc,
+                    doc_id[:12],
+                    warn_persist_exc,
                 )
 
     if str(target_stage or "").lower() in {"indexed", "queryable"}:
@@ -4383,7 +4673,11 @@ async def run_ingest_job(
         pending: list[str] = []
         if summary_gate_required and not ws.summaries_indexed:
             pending.append("summary")
-        if ingestion_config.use_neo4j and settings.NEO4J_ENABLED and not ws.neo4j_written:
+        if (
+            ingestion_config.use_neo4j
+            and settings.NEO4J_ENABLED
+            and not ws.neo4j_written
+        ):
             pending.append("graph")
         queryable_stage = (
             "queryable_with_pending_" + "_and_".join(pending)
@@ -4405,7 +4699,9 @@ async def run_ingest_job(
                             else None
                         ),
                         "enrichment_status": {
-                            "summary": "pending" if "summary" in pending else "complete",
+                            "summary": (
+                                "pending" if "summary" in pending else "complete"
+                            ),
                             "graph": "pending" if "graph" in pending else "complete",
                         },
                         "updated_at": datetime.utcnow(),
@@ -4424,18 +4720,19 @@ async def run_ingest_job(
             on_phase, "staged_queryable", doc_id=doc_id, corpus_id=corpus_id
         )
         return IngestJobResponse(
-            job_id=job_id, doc_id=doc_id, corpus_id=corpus_id,
-            filename=filename, source_tier=source_tier.value,
-            status="staged", write_state=ws,
-            chunk_count=len(children), parent_count=len(parents),
+            job_id=job_id,
+            doc_id=doc_id,
+            corpus_id=corpus_id,
+            filename=filename,
+            source_tier=source_tier.value,
+            status="staged",
+            write_state=ws,
+            chunk_count=len(children),
+            parent_count=len(parents),
         )
 
     # ── Phase 7: Neo4j (optional) ────────────────────────────────────────
-    if (
-        ingestion_config.use_neo4j
-        and settings.NEO4J_ENABLED
-        and not ws.neo4j_written
-    ):
+    if ingestion_config.use_neo4j and settings.NEO4J_ENABLED and not ws.neo4j_written:
         if neo4j_driver is None:
             logger.warning(
                 "Neo4j enabled in config but driver not initialized; skipping phase=neo4j doc=%s",
@@ -4489,6 +4786,31 @@ async def run_ingest_job(
                 db, doc_id, corpus_id=corpus_id, neo4j_written=True
             )
             ws.neo4j_written = True
+            try:
+                from services.ingestion.graph_promotion_jobs import (
+                    mark_doc_extractions_promoted,
+                )
+
+                promotion_marks = await mark_doc_extractions_promoted(
+                    db,
+                    corpus_id=corpus_id,
+                    doc_id=doc_id,
+                    result={"status": "done", "neo4j_flushed": True},
+                )
+                logger.info(
+                    "phase=neo4j_promotion_marks doc=%s corpus=%s ghost_b=%d jobs=%d",
+                    doc_id[:12],
+                    cid8,
+                    int(promotion_marks.get("ghost_b_rows_promoted") or 0),
+                    int(promotion_marks.get("extraction_jobs_promoted") or 0),
+                )
+            except Exception as exc:  # noqa: BLE001 - graph is already durable
+                logger.warning(
+                    "phase=neo4j_promotion_marks doc=%s corpus=%s failed: %s",
+                    doc_id[:12],
+                    cid8,
+                    exc,
+                )
             logger.info(
                 "phase=neo4j duration=%.2fs doc=%s corpus=%s extractions=%d",
                 time.monotonic() - t0,

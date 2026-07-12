@@ -3,10 +3,20 @@ from datetime import datetime, timedelta, timezone
 from services.ingestion.readiness import (
     READINESS_SCHEMA_VERSION,
     _demote_stale_graph_job_counts,
+    _nonempty_text_expr,
     build_corpus_readiness_record,
     build_corpus_readiness_snapshot,
     neo4j_pressure_from_graph_promotion_jobs,
 )
+
+
+def test_nonempty_text_expression_treats_missing_profile_as_empty():
+    assert _nonempty_text_expr("$doc_profile.summary") == {
+        "$gt": [
+            {"$strLenCP": {"$ifNull": ["$doc_profile.summary", ""]}},
+            0,
+        ]
+    }
 from services.ingestion.pressure import build_ingestion_pressure_snapshot
 from services.ingestion.storage_pressure import (
     parse_memory_limit_bytes,
@@ -39,6 +49,64 @@ def test_readiness_reports_registered_and_excluded_document_counts():
     assert snapshot["documents"]["total"] == 72
     assert snapshot["documents"]["registered_total"] == 75
     assert snapshot["documents"]["excluded_total"] == 3
+
+
+def test_lexicon_pending_blocks_strict_enrichment_not_queryability():
+    snapshot = build_corpus_readiness_snapshot(
+        corpus_id="corpus-lexicon",
+        document_counts={
+            "total": 4,
+            "queryable": 4,
+            "fully_enriched": 4,
+            "verified": 4,
+            "lexicon_tracked": 4,
+            "lexicon_ready": 3,
+        },
+        stage_counts={"fully_enriched": 4},
+        summary_counts={
+            "retrieval_parent_total": 4,
+            "retrieval_parent_done": 4,
+            "document_done": 4,
+            "document_synced_done": 4,
+        },
+        graph_counts={"required": True, "promoted": 4},
+    )
+
+    assert snapshot["status"] == "lexicon_pending"
+    assert snapshot["documents"]["queryable"] == 4
+    assert snapshot["documents"]["fully_enriched"] == 3
+    assert snapshot["documents"]["lexicon_ready"] == 3
+    assert snapshot["documents"]["lexicon_pending"] == 1
+    assert "corpus_lexicon_pending" in snapshot["blocking"]
+    assert snapshot["next_actions"][-1]["id"] == "backfill_corpus_lexicon"
+
+
+def test_tier0_document_profile_projection_blocks_strict_enrichment():
+    snapshot = build_corpus_readiness_snapshot(
+        corpus_id="corpus-tier0",
+        document_counts={
+            "total": 3,
+            "queryable": 3,
+            "fully_enriched": 3,
+            "verified": 3,
+        },
+        stage_counts={"fully_enriched": 3},
+        summary_counts={
+            "retrieval_parent_total": 3,
+            "retrieval_parent_done": 3,
+            "document_profile_done": 3,
+            "document_tree_done": 3,
+            "document_synced_done": 3,
+            "document_profile_index_tracked": 3,
+            "document_profile_index_ready": 2,
+        },
+        graph_counts={"required": True, "promoted": 3},
+    )
+
+    assert snapshot["status"] == "summaries_pending"
+    assert snapshot["documents"]["fully_enriched"] == 2
+    assert snapshot["summaries"]["document_profile_index_pending"] == 1
+    assert "document_profile_index_pending" in snapshot["blocking"]
 
 
 def test_readiness_uses_retrieval_parent_summaries_as_primary_summary_gate():

@@ -172,6 +172,7 @@ export function ChatInput({
     hydeEnabled,
     webSearchEnabled,
     reasoningCascadeEnabled,
+    disabledLexiconIds,
     toggleTool,
     toggleSkill,
   } = useSettingsStore();
@@ -264,9 +265,16 @@ export function ChatInput({
     hydeEnabled ? "HyDE" : null,
     reasoningCascadeEnabled ? "Reason" : null,
     webSearchEnabled ? "Web" : null,
+    disabledLexiconIds.length > 0
+      ? `${disabledLexiconIds.length} vocabulary exclusion${
+          disabledLexiconIds.length === 1 ? "" : "s"
+        }`
+      : null,
   ].filter((chip): chip is string => Boolean(chip));
   const activeFeatureCount =
-    activeModeChips.length + selectedToolIds.length + selectedSkillIds.length;
+    activeModeChips.length +
+    selectedToolIds.length +
+    selectedSkillIds.length;
 
   // Auto-resize textarea
   useEffect(() => {

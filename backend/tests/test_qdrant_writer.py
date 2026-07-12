@@ -36,6 +36,15 @@ class _PayloadIndexClient:
             raise self.failures.pop(0)
 
 
+class _QueryPointsOnlyClient:
+    def __init__(self) -> None:
+        self.kwargs = None
+
+    async def query_points(self, **kwargs):
+        self.kwargs = kwargs
+        return SimpleNamespace(points=[SimpleNamespace(score=0.9)])
+
+
 @pytest.mark.asyncio
 async def test_create_collection_accepts_server_side_success_after_timeout():
     client = _CollectionClient(exists_after_failure=True)
@@ -88,6 +97,232 @@ async def test_payload_index_retries_transient_failure(monkeypatch):
     )
 
     assert client.create_calls == 2
+
+
+@pytest.mark.asyncio
+async def test_search_compat_uses_query_points_on_qdrant_client_118():
+    client = _QueryPointsOnlyClient()
+    query_filter = qdrant_writer.Filter(must=[])
+
+    hits = await qdrant_writer._search_points_compat(
+        client,
+        collection_name="corpus_abcd_schemas",
+        query_vector=[0.1, 0.2],
+        query_filter=query_filter,
+        limit=3,
+        with_payload=True,
+    )
+
+    assert len(hits) == 1
+    assert client.kwargs["query"] == [0.1, 0.2]
+    assert client.kwargs["query_filter"] is query_filter
+
+
+@pytest.mark.asyncio
+async def test_collection_availability_positive_result_is_cached():
+    class ExistsClient:
+        def __init__(self):
+            self.calls = 0
+
+        async def collection_exists(self, _collection_name):
+            self.calls += 1
+            return True
+
+    name = "corpus_existence_cache_schemas"
+    qdrant_writer._COLLECTION_EXISTENCE_CACHE.discard(name)
+    client = ExistsClient()
+
+    assert await qdrant_writer._collection_available(client, name) is True
+    assert await qdrant_writer._collection_available(client, name) is True
+    assert client.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_summary_tree_batch_search_preserves_query_order_and_filters():
+    class BatchClient:
+        def __init__(self):
+            self.exists_calls = 0
+            self.requests = []
+
+        async def collection_exists(self, _collection_name):
+            self.exists_calls += 1
+            return True
+
+        async def query_batch_points(self, *, requests, **_kwargs):
+            self.requests = list(requests)
+            return [
+                SimpleNamespace(
+                    points=[
+                        SimpleNamespace(
+                            score=0.9 - index * 0.1,
+                            payload={"node_id": f"node-{index}"},
+                        )
+                    ]
+                )
+                for index, _request in enumerate(requests)
+            ]
+
+    corpus_id = "batch987654"
+    name = qdrant_writer._col_for_corpus(corpus_id, "schemas")
+    qdrant_writer._COLLECTION_EXISTENCE_CACHE.discard(name)
+    client = BatchClient()
+
+    rows = await qdrant_writer.search_summary_tree_entries_batch(
+        client,
+        corpus_id,
+        queries=[
+            {
+                "query_vec": [0.1, 0.2],
+                "doc_id": "doc-1",
+                "node_type": "section",
+                "top_k": 5,
+            },
+            {
+                "query_vec": [0.3, 0.4],
+                "doc_id": "doc-2",
+                "node_type": "rollup",
+                "node_ids": ["rollup-2"],
+                "top_k": 3,
+            },
+        ],
+    )
+
+    assert [[row["node_id"] for row in result] for result in rows] == [
+        ["node-0"],
+        ["node-1"],
+    ]
+    assert client.exists_calls == 1
+    assert len(client.requests) == 2
+    assert client.requests[0].limit == 5
+    assert client.requests[1].limit == 3
+
+
+@pytest.mark.asyncio
+async def test_lexicon_exact_lookup_uses_bounded_match_any_conditions():
+    class ExactClient:
+        def __init__(self):
+            self.scroll_filter = None
+
+        async def collection_exists(self, _collection_name):
+            return True
+
+        async def scroll(self, *, scroll_filter, **_kwargs):
+            self.scroll_filter = scroll_filter
+            return [], None
+
+    client = ExactClient()
+    await qdrant_writer.search_lexicon_entries(
+        client,
+        "abcdef123456",
+        query_vec=None,
+        exact_terms=["facs", "facial action coding system"],
+    )
+
+    assert len(client.scroll_filter.should) == 4
+    assert all(
+        condition.match.any == ["facs", "facial action coding system"]
+        for condition in client.scroll_filter.should
+    )
+
+
+@pytest.mark.asyncio
+async def test_lexicon_lookup_can_be_scoped_to_hierarchy_concept_ids():
+    class ExactClient:
+        def __init__(self):
+            self.scroll_filter = None
+
+        async def collection_exists(self, _collection_name):
+            return True
+
+        async def scroll(self, *, scroll_filter, **_kwargs):
+            self.scroll_filter = scroll_filter
+            return [], None
+
+    client = ExactClient()
+    await qdrant_writer.search_lexicon_entries(
+        client,
+        "abcdef123456",
+        query_vec=None,
+        exact_terms=["facs"],
+        allowed_lexicon_ids=["lex-facs", "lex-laban"],
+    )
+
+    scoped = next(
+        condition
+        for condition in client.scroll_filter.must
+        if condition.key == "lexicon_id"
+    )
+    assert scoped.match.any == ["lex-facs", "lex-laban"]
+
+
+@pytest.mark.asyncio
+async def test_retrieve_lexicon_entries_returns_payload_and_reusable_vector():
+    class RetrieveClient:
+        def __init__(self):
+            self.ids = []
+
+        async def collection_exists(self, _collection_name):
+            return True
+
+        async def retrieve(self, *, ids, **_kwargs):
+            self.ids.extend(ids)
+            return [
+                SimpleNamespace(
+                    payload={"lexicon_id": "lex-facs", "embedding_gloss": "FACS"},
+                    vector=[0.1, 0.2],
+                )
+            ]
+
+    client = RetrieveClient()
+    rows = await qdrant_writer.retrieve_lexicon_entries(
+        client,
+        "abcdef123456",
+        ["lex-facs", "lex-missing"],
+    )
+
+    assert len(client.ids) == 2
+    assert rows == {
+        "lex-facs": {
+            "payload": {"lexicon_id": "lex-facs", "embedding_gloss": "FACS"},
+            "vector": [0.1, 0.2],
+        }
+    }
+
+
+@pytest.mark.asyncio
+async def test_lexicon_dense_lookup_exposes_prefusion_rank(monkeypatch):
+    class DenseClient:
+        async def collection_exists(self, _collection_name):
+            return True
+
+    monkeypatch.setattr(
+        qdrant_writer,
+        "_search_points_compat",
+        AsyncMock(
+            return_value=[
+                SimpleNamespace(
+                    score=0.81,
+                    payload={"lexicon_id": "lex-facs", "canonical_key": "facs"},
+                ),
+                SimpleNamespace(
+                    score=0.76,
+                    payload={"lexicon_id": "lex-laban", "canonical_key": "laban"},
+                ),
+            ]
+        ),
+    )
+
+    rows = await qdrant_writer.search_lexicon_entries(
+        DenseClient(),
+        "abcdef123456",
+        query_vec=[0.1, 0.2],
+        top_k=4,
+    )
+
+    assert [(row["lexicon_id"], row["dense_rank"]) for row in rows] == [
+        ("lex-facs", 1),
+        ("lex-laban", 2),
+    ]
 
 
 def test_payload_text_contract_marks_full_text_not_preview():

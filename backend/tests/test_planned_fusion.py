@@ -13,6 +13,8 @@ from services.retriever.planned_fusion import (
     planned_lane_grounding,
     planned_lane_supported,
     prioritize_enumeration_candidates,
+    propagate_grounded_lane_aliases,
+    reserved_required_lane_ids,
     reserve_planned_finalists,
 )
 
@@ -48,6 +50,27 @@ def test_fusion_reserves_required_lanes_and_corpora():
     assert {"purple", "sticky"} <= ids
     assert {chunk.corpus_id for chunk in result} == {"a", "b"}
     assert diagnostics["selected_candidates"] == 4
+
+
+def test_corpus_reservation_is_annotated_for_late_context_gates():
+    corpus_a = _chunk("corpus-a", "a", score=0.9)
+    corpus_b = _chunk("corpus-b", "b", score=0.4)
+
+    selected, diagnostics = reserve_planned_finalists(
+        [corpus_a, corpus_b],
+        [corpus_a],
+        required_lane_ids=[],
+        corpus_ids=["a", "b"],
+        max_candidates=2,
+    )
+
+    by_id = {chunk.chunk_id: chunk for chunk in selected}
+    assert diagnostics["corpus_reservations"] == {
+        "a": "corpus-a",
+        "b": "corpus-b",
+    }
+    assert by_id["corpus-a"].metadata["planned_corpus_reservations"] == ["a"]
+    assert by_id["corpus-b"].metadata["planned_corpus_reservations"] == ["b"]
 
 
 def test_fusion_excludes_pipeline_status_reports_from_evidence():
@@ -99,6 +122,77 @@ def test_pre_rerank_document_cap_preserves_order_and_unknown_identity():
 
     assert [chunk.chunk_id for chunk in result] == ["a-1", "a-2", "b-1", "unknown"]
     assert dropped == 1
+
+
+def test_pre_rerank_document_cap_preserves_exact_query_lane():
+    generic = [_chunk(f"generic-{index}", "a", score=1.0 - index / 10) for index in range(4)]
+    exact = _chunk("exact-query-hit", "a", score=0.1)
+    exact.metadata = {"planned_lanes": ["original"]}
+
+    result, _ = limit_candidates_per_document(
+        [*generic, exact],
+        max_candidates=3,
+        max_per_document=1,
+        protected_lane_ids=["original"],
+    )
+
+    assert "exact-query-hit" in {chunk.chunk_id for chunk in result}
+
+
+def test_pre_rerank_document_cap_preserves_required_lane_beyond_doc_cap():
+    first = _chunk("a-1", "a", score=0.9)
+    first.doc_id = "doc-a"
+    second = _chunk("a-2", "a", score=0.8)
+    second.doc_id = "doc-a"
+    third = _chunk("a-3", "a", score=0.7)
+    third.doc_id = "doc-a"
+    required = _chunk("sticky", "a", score=0.2)
+    required.doc_id = "doc-a"
+    required.metadata = {
+        "planned_lanes": ["sticky_message"],
+        "document_route_lanes": {"sticky_message": 0.8},
+    }
+    other = _chunk("b-1", "a", score=0.6)
+    other.doc_id = "doc-b"
+
+    result, dropped = limit_candidates_per_document(
+        [first, second, third, required, other],
+        max_candidates=4,
+        max_per_document=2,
+        required_lane_ids=["sticky_message"],
+    )
+
+    assert [chunk.chunk_id for chunk in result] == ["a-1", "sticky", "b-1"]
+    assert dropped == 2
+
+
+def test_pre_rerank_cap_preserves_strongest_answer_object_document_route():
+    exact_doc = _chunk("exact-list", "a", score=0.2)
+    exact_doc.doc_id = "exact-doc"
+    exact_doc.metadata = {
+        "planned_lanes": ["books"],
+        "document_route_lanes": {"books": 0.82},
+    }
+    generic_doc = _chunk("generic-list", "a", score=0.9)
+    generic_doc.doc_id = "generic-doc"
+    generic_doc.metadata = {
+        "planned_lanes": ["books", "books_justification"],
+        "document_route_lanes": {
+            "books": 0.55,
+            "books_justification": 0.75,
+        },
+    }
+    fillers = [_chunk(f"filler-{index}", "a", score=0.8) for index in range(4)]
+
+    result, _dropped = limit_candidates_per_document(
+        [generic_doc, *fillers, exact_doc],
+        max_candidates=3,
+        max_per_document=2,
+        required_lane_ids=["books", "books_justification"],
+        preferred_route_lane_ids=["books"],
+    )
+
+    assert "exact-list" in {chunk.chunk_id for chunk in result}
 
 
 def test_fusion_dedupes_same_chunk_across_retrievers():
@@ -225,6 +319,40 @@ def test_multi_side_filter_removes_generic_fillers_after_full_coverage():
     assert diagnostics["dropped"] == 1
 
 
+def test_grounded_translation_propagates_to_originating_required_lane_only():
+    grounded = _chunk("made-to-stick", "a")
+    grounded.metadata = {
+        "planned_lanes": ["translation_lexicon"],
+        "planned_lane_grounding": {"translation_lexicon": 2.5},
+    }
+    ungrounded = _chunk("generic", "a")
+    ungrounded.metadata = {
+        "planned_lanes": ["translation_lexicon"],
+        "planned_lane_grounding": {"translation_lexicon": 0.3},
+        "document_route_lanes": {"translation_lexicon": 0.9},
+    }
+
+    diagnostics = propagate_grounded_lane_aliases(
+        [grounded, ungrounded],
+        {"translation_lexicon": ["sticky_message"]},
+    )
+
+    assert planned_lane_supported(grounded, "sticky_message") is True
+    assert planned_lane_grounding(grounded, "sticky_message") == 2.5
+    assert grounded.metadata["planned_lane_grounding_sources"] == {
+        "sticky_message": ["translation_lexicon"]
+    }
+    assert planned_lane_supported(ungrounded, "sticky_message") is False
+    assert "sticky_message" not in ungrounded.metadata["planned_lanes"]
+    assert diagnostics["propagated_candidate_count"] == 1
+    assert diagnostics["propagated_pairs"] == [
+        {
+            "source_lane_id": "translation_lexicon",
+            "target_lane_id": "sticky_message",
+        }
+    ]
+
+
 def test_multi_side_filter_preserves_validated_graph_bridge():
     purple = _chunk("purple", "a")
     purple.metadata = {"planned_lane_grounding": {"purple_ocean": 3.0}}
@@ -270,6 +398,22 @@ def test_multi_side_filter_degrades_open_when_one_side_is_missing():
     assert diagnostics["reason"] == "partial_grounded_coverage"
 
 
+def test_multi_corpus_filter_preserves_best_candidate_for_downstream_floor():
+    corpus_b_best = _chunk("b-best", "b", score=0.7)
+    corpus_b_other = _chunk("b-other", "b", score=0.6)
+    corpus_a_grounded = _chunk("a-grounded", "a", score=0.8)
+    corpus_a_grounded.metadata = {"planned_lane_grounding": {"audience": 3.0}}
+
+    result, diagnostics = filter_grounded_planned_candidates(
+        [corpus_a_grounded, corpus_b_best, corpus_b_other],
+        ["audience"],
+        selected_corpus_ids=["a", "b"],
+    )
+
+    assert [chunk.chunk_id for chunk in result] == ["a-grounded", "b-best"]
+    assert diagnostics["corpus_floor_candidates_preserved"] == ["b"]
+
+
 def test_single_named_side_filter_removes_token_overlap_fillers():
     exact = _chunk("exact", "a")
     exact.metadata = {"planned_lane_grounding": {"made_to_stick": 3.0}}
@@ -284,6 +428,50 @@ def test_single_named_side_filter_removes_token_overlap_fillers():
     assert result == [exact]
     assert diagnostics["applied"] is True
     assert diagnostics["dropped"] == 1
+
+
+def test_grounding_filter_preserves_exact_query_recall_lane():
+    exact = _chunk("exact-query-hit", "a")
+    exact.metadata = {"planned_lanes": ["original"]}
+    required = _chunk("required", "a")
+    required.metadata = {
+        "planned_lanes": ["purple_ocean"],
+        "planned_lane_grounding": {"purple_ocean": 3.0},
+    }
+    unrelated = _chunk("unrelated", "a")
+
+    result, diagnostics = filter_grounded_planned_candidates(
+        [unrelated, required, exact],
+        ["purple_ocean"],
+        protected_lane_ids=["original"],
+    )
+
+    assert [chunk.chunk_id for chunk in result] == ["required", "exact-query-hit"]
+    assert diagnostics["protected_lane_candidates_preserved"] == 1
+
+
+def test_single_side_filter_preserves_literal_vocabulary_translation():
+    required = _chunk("required", "a")
+    required.metadata = {"planned_lane_grounding": {"primary": 2.0}}
+    translated = _chunk("translated", "a")
+    translated.metadata = {
+        "planned_lanes": ["translation_facs"],
+        "planned_lane_grounding": {"translation_facs": 2.5},
+    }
+    route_only = _chunk("route-only", "a")
+    route_only.metadata = {
+        "planned_lanes": ["translation_facs"],
+        "planned_lane_grounding": {"translation_facs": 0.0},
+        "document_route_lanes": {"translation_facs": 0.9},
+    }
+
+    result, diagnostics = filter_grounded_planned_candidates(
+        [route_only, required, translated],
+        ["primary"],
+    )
+
+    assert [chunk.chunk_id for chunk in result] == ["required", "translated"]
+    assert diagnostics["grounded_translation_candidates_preserved"] == 1
 
 
 def test_two_word_lane_requires_an_exact_span_or_multiword_alias():
@@ -366,6 +554,14 @@ def test_finalist_reservations_survive_reranker_order():
         "purple_ocean": "purple",
         "sticky_message": "sticky",
     }
+    assert reserved_required_lane_ids(
+        next(chunk for chunk in result if chunk.chunk_id == "purple"),
+        ["purple_ocean", "sticky_message"],
+    ) == ["purple_ocean"]
+    assert reserved_required_lane_ids(
+        next(chunk for chunk in result if chunk.chunk_id == "sticky"),
+        ["purple_ocean", "sticky_message"],
+    ) == ["sticky_message"]
 
 
 def test_finalist_reservations_reject_weak_or_ungrounded_lane_fillers():
@@ -400,7 +596,7 @@ def test_finalist_reservations_keep_low_global_score_from_strong_semantic_route(
         "planned_lanes": ["audience"],
         "planned_lane_grounding": {"audience": 2.0},
     }
-    prompt = _chunk("prompt", "a", 0.09)
+    prompt = _chunk("prompt", "a", 0.001)
     prompt.metadata = {
         "planned_lanes": ["opening_prompt"],
         "planned_lane_grounding": {"opening_prompt": 0.75},
@@ -417,6 +613,36 @@ def test_finalist_reservations_keep_low_global_score_from_strong_semantic_route(
 
     assert [chunk.chunk_id for chunk in result] == ["dominant", "prompt"]
     assert diagnostics["lane_reservations"]["opening_prompt"] == "prompt"
+
+
+def test_required_lane_replaces_selected_route_only_tail_with_reranked_candidate():
+    strong = _chunk("strong-sticky", "a", 0.95)
+    strong.doc_id = "strong-doc"
+    strong.metadata = {
+        "planned_lanes": ["sticky_message"],
+        "planned_lane_grounding": {"sticky_message": 0.4},
+        "document_route_lanes": {"sticky_message": 0.5},
+    }
+    weak_selected = _chunk("weak-sticky", "a", 0.001)
+    weak_selected.doc_id = "weak-doc"
+    weak_selected.metadata = {
+        "planned_lanes": ["sticky_message"],
+        "planned_lane_grounding": {"sticky_message": 0.4},
+        "document_route_lanes": {"sticky_message": 0.6},
+    }
+
+    result, diagnostics = reserve_planned_finalists(
+        [strong, weak_selected],
+        preferred=[weak_selected],
+        required_lane_ids=["sticky_message"],
+        corpus_ids=["a"],
+        max_candidates=1,
+    )
+
+    assert [chunk.chunk_id for chunk in result] == ["strong-sticky"]
+    assert diagnostics["lane_reservations"] == {
+        "sticky_message": "strong-sticky"
+    }
 
 
 def test_finalist_reservations_do_not_refill_a_complete_diversity_pack():
@@ -480,6 +706,71 @@ def test_finalist_reservations_respect_broad_document_cap():
     assert diagnostics["max_per_document"] == 1
 
 
+def test_required_lane_replaces_unprotected_same_document_winner():
+    generic = _chunk("generic", "a", 1.0)
+    generic.doc_id = "doc-a"
+    performance = _chunk("performance", "a", 0.9)
+    performance.doc_id = "doc-b"
+    performance.metadata = {
+        "planned_lanes": ["performance"],
+        "planned_lane_grounding": {"performance": 2.0},
+    }
+    visual = _chunk("visual", "a", 0.4)
+    visual.doc_id = "doc-a"
+    visual.metadata = {
+        "planned_lanes": ["visual"],
+        "planned_lane_grounding": {"visual": 2.0},
+        "document_route_lanes": {"visual": 0.8},
+    }
+
+    result, diagnostics = reserve_planned_finalists(
+        [generic, performance, visual],
+        preferred=[generic, performance],
+        required_lane_ids=["visual", "performance"],
+        corpus_ids=["a"],
+        max_candidates=2,
+        max_per_document=1,
+    )
+
+    assert [chunk.chunk_id for chunk in result] == ["performance", "visual"]
+    assert diagnostics["lane_reservations"] == {
+        "visual": "visual",
+        "performance": "performance",
+    }
+
+
+def test_required_lane_can_share_document_when_no_other_grounded_source_exists():
+    purple = _chunk("purple", "a", 0.99)
+    purple.doc_id = "shared-doc"
+    purple.metadata = {
+        "planned_lanes": ["purple"],
+        "planned_lane_grounding": {"purple": 2.0},
+        "document_route_lanes": {"purple": 0.8},
+    }
+    sticky = _chunk("sticky", "a", 0.98)
+    sticky.doc_id = "shared-doc"
+    sticky.metadata = {
+        "planned_lanes": ["sticky"],
+        "planned_lane_grounding": {"sticky": 2.0},
+        "document_route_lanes": {"sticky": 0.8},
+    }
+
+    result, diagnostics = reserve_planned_finalists(
+        [purple, sticky],
+        preferred=[purple],
+        required_lane_ids=["purple", "sticky"],
+        corpus_ids=["a"],
+        max_candidates=2,
+        max_per_document=1,
+    )
+
+    assert [chunk.chunk_id for chunk in result] == ["purple", "sticky"]
+    assert diagnostics["lane_reservations"] == {
+        "purple": "purple",
+        "sticky": "sticky",
+    }
+
+
 def test_finalist_reservations_keep_bounded_routed_document_evidence():
     global_top = _chunk("global", "a", 1.0)
     routed_a = _chunk("routed-a", "a", 0.7)
@@ -512,6 +803,31 @@ def test_finalist_reservations_keep_bounded_routed_document_evidence():
         "doc-routed-b",
     ]
     assert set(diagnostics["routed_document_reservations"]) == {"doc-routed-b"}
+
+
+def test_finalist_reservations_keep_exact_query_lane_without_counting_it_required():
+    required = _chunk("required", "a", 0.9)
+    required.metadata = {
+        "planned_lanes": ["purple_ocean"],
+        "planned_lane_grounding": {"purple_ocean": 3.0},
+    }
+    exact = _chunk("exact-query-hit", "a", 0.2)
+    exact.metadata = {"planned_lanes": ["original"]}
+
+    result, diagnostics = reserve_planned_finalists(
+        [required, exact],
+        preferred=[required],
+        required_lane_ids=["purple_ocean"],
+        protected_lane_ids=["original"],
+        corpus_ids=["a"],
+        max_candidates=2,
+    )
+
+    assert [chunk.chunk_id for chunk in result] == ["required", "exact-query-hit"]
+    assert diagnostics["required_lane_ids"] == ["purple_ocean"]
+    assert diagnostics["protected_lane_reservations"] == {
+        "original": "exact-query-hit"
+    }
 
 
 def test_finalist_route_reservations_can_be_scoped_to_answer_lane():
@@ -648,3 +964,27 @@ def test_parent_finalist_dedupe_merges_lane_provenance():
         item.get("retriever") == "parent_finalist_dedupe"
         for item in result[0].provenance
     )
+
+
+def test_parent_dedupe_preserves_route_backed_required_reservation():
+    original = _chunk("original", "a")
+    original.parent_id = "shared-parent"
+    original.metadata = {"planned_lanes": ["original"]}
+    required = _chunk("audience", "a")
+    required.parent_id = "shared-parent"
+    required.metadata = {
+        "planned_lanes": ["target_audience"],
+        "planned_lane_grounding": {"target_audience": 0.6667},
+        "document_route_lanes": {"target_audience": 0.5971},
+        "planned_required_lane_reservations": ["target_audience"],
+    }
+
+    result, dropped = dedupe_parent_finalists([original, required])
+
+    assert dropped == 1
+    assert result[0].metadata["document_route_lanes"] == {
+        "target_audience": 0.5971
+    }
+    assert reserved_required_lane_ids(result[0], ["target_audience"]) == [
+        "target_audience"
+    ]

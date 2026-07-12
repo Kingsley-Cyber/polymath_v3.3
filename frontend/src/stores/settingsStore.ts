@@ -57,6 +57,7 @@ const DEFAULT_SETTINGS: Omit<SettingsState, "selectedModel"> = {
   selectedCollectionIds: [],
   retrievalTier: "qdrant_mongo",
   selectedCorpusIds: [],
+  disabledLexiconIds: [],
 
   // UI Settings
   theme: "ayu-mirage",
@@ -146,6 +147,9 @@ interface SettingsStore extends SettingsState {
   selectAllCollections: (collectionIds: string[]) => void;
   clearCollections: () => void;
   setRetrievalTier: (tier: SettingsState["retrievalTier"]) => void;
+  disableLexiconExpansion: (lexiconId: string) => void;
+  enableLexiconExpansion: (lexiconId: string) => void;
+  clearDisabledLexiconExpansions: () => void;
   toggleCorpus: (corpusId: string) => void;
   /** Drop any selected corpus ids not in the given valid set. Called after
    *  corpora list loads so deleted corpora don't keep poisoning retrieval. */
@@ -461,6 +465,24 @@ export const useSettingsStore = create<SettingsStore>()(
 
       setRetrievalTier: (tier) => set({ retrievalTier: tier }),
 
+      disableLexiconExpansion: (lexiconId) =>
+        set((state) => {
+          const value = lexiconId.trim();
+          if (!value || state.disabledLexiconIds.includes(value)) return {};
+          return {
+            disabledLexiconIds: [...state.disabledLexiconIds, value].slice(-64),
+          };
+        }),
+
+      enableLexiconExpansion: (lexiconId) =>
+        set((state) => ({
+          disabledLexiconIds: state.disabledLexiconIds.filter(
+            (value) => value !== lexiconId,
+          ),
+        })),
+
+      clearDisabledLexiconExpansions: () => set({ disabledLexiconIds: [] }),
+
       toggleCorpus: (corpusId) =>
         set((state) => {
           const current = state.selectedCorpusIds;
@@ -554,6 +576,7 @@ export const useSettingsStore = create<SettingsStore>()(
         graphFinalSources: state.graphFinalSources,
         graphReranker: state.graphReranker,
         selectedCorpusIds: state.selectedCorpusIds,
+        disabledLexiconIds: state.disabledLexiconIds,
         agenticModeEnabled: state.agenticModeEnabled,
         agenticModel: state.agenticModel,
         // reasoningMode already included above; also persist the blend

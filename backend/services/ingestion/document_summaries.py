@@ -13,13 +13,14 @@ from typing import Any
 
 from models.schemas import IngestionConfig
 from services.ingestion.section_classifier import parent_summary_required_clause
-from services.ingestion.summary_tree import build_and_store_tree
+from services.ingestion.summary_tree import (
+    build_and_store_tree,
+    sync_document_profile_from_existing_tree,
+)
 from services.ingestion.summary_tree_llm import summary_tree_llm_from_pool
 from services.storage.record_status import with_active_records
 
-SUMMARY_TEXT_CLAUSE: dict[str, Any] = {
-    "summary": {"$exists": True, "$nin": [None, ""]}
-}
+SUMMARY_TEXT_CLAUSE: dict[str, Any] = {"summary": {"$exists": True, "$nin": [None, ""]}}
 MISSING_DOCUMENT_SUMMARY_CLAUSE: dict[str, Any] = {
     "$or": [
         {"doc_profile.summary": {"$exists": False}},
@@ -98,11 +99,15 @@ async def _summary_tree_pool_for_corpus(
     provider_capacity = sum(
         max(1, int(entry.get("max_concurrent") or 1)) for entry in pool
     )
-    effective_max_concurrent = min(
-        64,
-        provider_capacity,
-        max(1, int(global_cap or provider_capacity)),
-    ) if pool else 0
+    effective_max_concurrent = (
+        min(
+            64,
+            provider_capacity,
+            max(1, int(global_cap or provider_capacity)),
+        )
+        if pool
+        else 0
+    )
 
     contract = {
         "source": source,
@@ -126,6 +131,7 @@ async def backfill_document_summaries(
     db: Any,
     *,
     corpus_id: str,
+    qdrant_client: Any | None = None,
     user_id: str | None = None,
     limit: int = 25,
     doc_ids: list[str] | None = None,
@@ -176,10 +182,15 @@ async def backfill_document_summaries(
             "$in": sorted({str(doc_id) for doc_id in doc_ids if str(doc_id).strip()})
         }
 
-    rows = await db["documents"].find(
-        doc_filter,
-        {"_id": 0, "doc_id": 1, "filename": 1, "title": 1},
-    ).limit(limit).to_list(length=limit)
+    rows = (
+        await db["documents"]
+        .find(
+            doc_filter,
+            {"_id": 0, "doc_id": 1, "filename": 1, "title": 1},
+        )
+        .limit(limit)
+        .to_list(length=limit)
+    )
 
     parent_clause = parent_summary_required_clause()
     max_concurrent = min(
@@ -193,7 +204,32 @@ async def backfill_document_summaries(
         if not doc_id:
             return None
         async with semaphore:
-            parent_query = {"corpus_id": corpus_id, "doc_id": doc_id, "$and": [parent_clause]}
+            try:
+                synced = await sync_document_profile_from_existing_tree(
+                    db=db,
+                    doc_id=doc_id,
+                    corpus_id=corpus_id,
+                )
+            except Exception as exc:  # noqa: BLE001 - generation remains fallback
+                synced = {
+                    "status": "sync_failed",
+                    "error": f"{type(exc).__name__}: {exc}"[:500],
+                }
+            if synced.get("status") in {"synced", "already_synced"}:
+                return {
+                    "doc_id": doc_id,
+                    "status": "built",
+                    "result": {
+                        "document": 1,
+                        "profile_source": "existing_summary_tree",
+                        **synced,
+                    },
+                }
+            parent_query = {
+                "corpus_id": corpus_id,
+                "doc_id": doc_id,
+                "$and": [parent_clause],
+            }
             required_parent_count, summarized_parent_count = await asyncio.gather(
                 db["parent_chunks"].count_documents(parent_query),
                 db["parent_chunks"].count_documents(
@@ -204,7 +240,9 @@ async def backfill_document_summaries(
                     }
                 ),
             )
-            missing_parent_count = max(required_parent_count - summarized_parent_count, 0)
+            missing_parent_count = max(
+                required_parent_count - summarized_parent_count, 0
+            )
             if required_parent_count == 0 or summarized_parent_count == 0:
                 return {
                     "doc_id": doc_id,
@@ -212,7 +250,9 @@ async def backfill_document_summaries(
                     "required_parent_count": required_parent_count,
                     "summarized_parent_count": summarized_parent_count,
                 }
-            if missing_parent_count and (llm_fn is None or missing_parent_count > parent_heal_limit):
+            if missing_parent_count and (
+                llm_fn is None or missing_parent_count > parent_heal_limit
+            ):
                 return {
                     "doc_id": doc_id,
                     "status": "skipped_parent_summaries_incomplete",
@@ -231,7 +271,28 @@ async def backfill_document_summaries(
                     heal_missing=llm_fn is not None,
                     heal_limit=parent_heal_limit,
                     max_concurrent=max_concurrent,
+                    qdrant_client=qdrant_client,
+                    embedding_config=cfg,
                 )
+                if qdrant_client is not None and not tree_result.get("skipped"):
+                    try:
+                        from services.ingestion.corpus_lexicon import (
+                            refresh_and_index_document_lexicon,
+                        )
+
+                        tree_result["lexicon_context_refresh"] = (
+                            await refresh_and_index_document_lexicon(
+                                db,
+                                qdrant_client,
+                                corpus_id=corpus_id,
+                                doc_id=doc_id,
+                            )
+                        )
+                    except Exception as exc:  # noqa: BLE001 - tree remains durable
+                        tree_result["lexicon_context_refresh"] = {
+                            "status": "degraded",
+                            "error": f"{type(exc).__name__}: {exc}"[:500],
+                        }
             except Exception as exc:  # noqa: BLE001 - bounded repair reports per doc
                 return {
                     "doc_id": doc_id,
@@ -251,7 +312,49 @@ async def backfill_document_summaries(
     failed = sum(1 for result in results if result.get("status") == "failed")
     skipped = attempted - built - failed
 
-    status = "complete" if failed == 0 else "partial"
+    tier0_projection: dict[str, Any] = {
+        "status": "not_needed",
+        "requested": 0,
+        "embedded": 0,
+    }
+    built_doc_ids = [
+        str(result.get("doc_id") or "")
+        for result in results
+        if result.get("status") == "built" and result.get("doc_id")
+    ]
+    if built_doc_ids and qdrant_client is not None:
+        try:
+            from services.ingestion.tier0 import embed_doc_profiles
+
+            tier0_projection = {
+                "status": "complete",
+                **await embed_doc_profiles(
+                    db,
+                    qdrant_client,
+                    corpus_id=corpus_id,
+                    doc_ids=built_doc_ids,
+                    dim=int(getattr(cfg, "embedding_dimension", 1024)),
+                ),
+            }
+        except Exception as exc:  # noqa: BLE001 - durable state records retry need
+            tier0_projection = {
+                "status": "failed",
+                "requested": len(built_doc_ids),
+                "embedded": 0,
+                "error": f"{type(exc).__name__}: {exc}"[:500],
+            }
+    elif built_doc_ids:
+        tier0_projection = {
+            "status": "deferred_no_qdrant_client",
+            "requested": len(built_doc_ids),
+            "embedded": 0,
+        }
+
+    status = (
+        "complete"
+        if failed == 0 and tier0_projection.get("status") != "failed"
+        else "partial"
+    )
     return {
         "status": status,
         "corpus_id": corpus_id,
@@ -262,6 +365,7 @@ async def backfill_document_summaries(
         "failed": failed,
         "max_concurrent": max_concurrent,
         "summary_contract": contract,
+        "tier0_projection": tier0_projection,
         "results": results,
         "started_at": started,
         "completed_at": datetime.utcnow(),

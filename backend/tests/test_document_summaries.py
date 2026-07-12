@@ -4,6 +4,7 @@ import pytest
 
 from models.schemas import IngestionConfig
 from services.ingestion import document_summaries
+from services.ingestion import tier0
 
 
 class _FindCursor:
@@ -80,6 +81,44 @@ async def test_document_summary_backfill_builds_missing_profiles(monkeypatch):
     assert result["skipped"] == 0
     assert calls == ["doc-1"]
     assert result["results"][0]["status"] == "built"
+
+
+@pytest.mark.asyncio
+async def test_document_summary_backfill_projects_completed_profiles_to_tier0(
+    monkeypatch,
+):
+    async def fake_pool(*_args, **_kwargs):
+        return None, {"source": "none", "models": [], "lanes": 0}, IngestionConfig()
+
+    async def fake_build_tree(**_kwargs):
+        return {"document": 1, "section": 1, "parents_in": 2}
+
+    projected = []
+
+    async def fake_embed_profiles(_db, client, *, corpus_id, doc_ids, dim, api_key=None):
+        projected.append((client, corpus_id, doc_ids, dim, api_key))
+        return {"requested": len(doc_ids), "embedded": len(doc_ids)}
+
+    monkeypatch.setattr(document_summaries, "_summary_tree_pool_for_corpus", fake_pool)
+    monkeypatch.setattr(document_summaries, "build_and_store_tree", fake_build_tree)
+    monkeypatch.setattr(tier0, "embed_doc_profiles", fake_embed_profiles)
+    qdrant = object()
+
+    result = await document_summaries.backfill_document_summaries(
+        _Db(docs=[{"doc_id": "doc-1"}]),
+        corpus_id="corpus-1",
+        qdrant_client=qdrant,
+        user_id="user-1",
+        limit=5,
+    )
+
+    assert result["status"] == "complete"
+    assert result["tier0_projection"] == {
+        "status": "complete",
+        "requested": 1,
+        "embedded": 1,
+    }
+    assert projected == [(qdrant, "corpus-1", ["doc-1"], 1024, None)]
 
 
 @pytest.mark.asyncio
@@ -192,3 +231,47 @@ async def test_document_summary_backfill_uses_bounded_provider_concurrency(monke
     assert [row["doc_id"] for row in result["results"]] == [
         f"doc-{index}" for index in range(8)
     ]
+
+
+@pytest.mark.asyncio
+async def test_document_summary_backfill_reuses_existing_tree_without_llm(monkeypatch):
+    async def fake_pool(*_args, **_kwargs):
+        async def fail_llm(_prompt):
+            raise AssertionError("existing tree repair must not call the LLM")
+
+        return (
+            fail_llm,
+            {"source": "corpus", "models": ["summary-model"], "lanes": 1},
+            IngestionConfig(),
+        )
+
+    async def fake_sync(**kwargs):
+        return {
+            "status": "synced",
+            "doc_id": kwargs["doc_id"],
+            "node_id": "doc-1:document",
+        }
+
+    async def fail_build_tree(**_kwargs):
+        raise AssertionError("existing tree repair must not rebuild the hierarchy")
+
+    monkeypatch.setattr(document_summaries, "_summary_tree_pool_for_corpus", fake_pool)
+    monkeypatch.setattr(
+        document_summaries,
+        "sync_document_profile_from_existing_tree",
+        fake_sync,
+    )
+    monkeypatch.setattr(document_summaries, "build_and_store_tree", fail_build_tree)
+
+    result = await document_summaries.backfill_document_summaries(
+        _Db(docs=[{"doc_id": "doc-1"}]),
+        corpus_id="corpus-1",
+        user_id="user-1",
+        limit=5,
+    )
+
+    assert result["built"] == 1
+    assert (
+        result["results"][0]["result"]["profile_source"]
+        == "existing_summary_tree"
+    )

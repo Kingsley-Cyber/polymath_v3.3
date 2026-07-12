@@ -57,39 +57,43 @@ QUERYABLE_INGEST_STAGES: frozenset[str] = frozenset(
 #   - FROZEN.isdisjoint(MUTABLE)
 #   - FROZEN | MUTABLE == set(IngestionConfig.model_fields)
 
-FROZEN_CONFIG_FIELDS: frozenset[str] = frozenset({
-    "embedding_model",
-    "embedding_dimension",
-    "embedding_model_id",
-    "parent_chunk_tokens",
-    "child_chunk_tokens",
-    "chunk_overlap",
-    "child_chunk_algorithm",
-    "semantic_split_threshold",
-    "max_summary_tokens",
-    "use_neo4j",
-    "chunk_summarization",
-    "target_qdrant_collections",
-    "entity_schema",
-    "relation_schema",
-    "schema_strict",
-    "docling_ocr_enabled",
-    "preset",
-})
+FROZEN_CONFIG_FIELDS: frozenset[str] = frozenset(
+    {
+        "embedding_model",
+        "embedding_dimension",
+        "embedding_model_id",
+        "parent_chunk_tokens",
+        "child_chunk_tokens",
+        "chunk_overlap",
+        "child_chunk_algorithm",
+        "semantic_split_threshold",
+        "max_summary_tokens",
+        "use_neo4j",
+        "chunk_summarization",
+        "target_qdrant_collections",
+        "entity_schema",
+        "relation_schema",
+        "schema_strict",
+        "docling_ocr_enabled",
+        "preset",
+    }
+)
 
-MUTABLE_CONFIG_FIELDS: frozenset[str] = frozenset({
-    "embed_mode",
-    "embed_base_url",
-    "embed_api_key",
-    "embed_max_concurrent",
-    "embedding_models",
-    "modal_containers",
-    "summary_models",
-    "extraction_models",
-    "extraction_engine",
-    "entity_confidence_threshold",
-    "models_linked",
-})
+MUTABLE_CONFIG_FIELDS: frozenset[str] = frozenset(
+    {
+        "embed_mode",
+        "embed_base_url",
+        "embed_api_key",
+        "embed_max_concurrent",
+        "embedding_models",
+        "modal_containers",
+        "summary_models",
+        "extraction_models",
+        "extraction_engine",
+        "entity_confidence_threshold",
+        "models_linked",
+    }
+)
 
 
 class FrozenFieldError(ValueError):
@@ -190,22 +194,28 @@ def exact_source_duplicate_query(
     # sources collapse many distinct files to the same channel/page URL; when a
     # content hash is available, never skip by source_key alone.
     if not content_sha and source_key and source_kind in STRONG_SOURCE_KINDS:
-        clauses.extend([
-            {"source_key": source_key},
-            {"source_identity.source_key": source_key},
-        ])
+        clauses.extend(
+            [
+                {"source_key": source_key},
+                {"source_identity.source_key": source_key},
+            ]
+        )
     if content_sha:
-        clauses.extend([
-            {"source_identity.content_sha256": content_sha},
-            {"content_sha256": content_sha},
-            {"source_file_hash": content_sha},
-        ])
+        clauses.extend(
+            [
+                {"source_identity.content_sha256": content_sha},
+                {"content_sha256": content_sha},
+                {"source_file_hash": content_sha},
+            ]
+        )
     if not clauses:
         return None
     return with_active_records(
         {
             "corpus_id": corpus_id,
-            "ingest_stage": {"$ne": "skipped_duplicate"},
+            "ingest_stage": {
+                "$nin": ["skipped_duplicate", "skipped_nonsemantic"]
+            },
             "$and": [
                 {
                     "$or": [
@@ -241,7 +251,10 @@ def _summary_backfill_index_scope(
 
     clauses: list[dict] = [summary_text_clause]
     if generate and limit is not None and not bounded_by_doc_ids:
-        return "generated_in_call", [*clauses, {"parent_id": {"$in": generated_parent_ids}}]
+        return "generated_in_call", [
+            *clauses,
+            {"parent_id": {"$in": generated_parent_ids}},
+        ]
     if bounded_by_doc_ids:
         return "doc_scope_existing_summaries", clauses
     return "all_existing_summaries", clauses
@@ -402,6 +415,9 @@ class IngestionService:
                 sparse=True,
                 background=True,
             )
+            from services.ingestion.corpus_lexicon import ensure_lexicon_indexes
+
+            await ensure_lexicon_indexes(self._db)
         except Exception as exc:
             logger.warning("Source identity index setup skipped: %s", exc)
 
@@ -433,6 +449,7 @@ class IngestionService:
             "off",
             "local",
             "cloud",
+            "runpod_flash",
             "legacy_local",
             "dual",
             "local_then_cloud",
@@ -456,10 +473,18 @@ class IngestionService:
         )
         async for doc in cursor:
             scanned += 1
-            current = str(
-                ((doc.get("default_ingestion_config") or {}).get("extraction_engine"))
-                or ""
-            ).strip().lower()
+            current = (
+                str(
+                    (
+                        (doc.get("default_ingestion_config") or {}).get(
+                            "extraction_engine"
+                        )
+                    )
+                    or ""
+                )
+                .strip()
+                .lower()
+            )
             if current in valid:
                 continue  # already explicit
             await self._db["corpora"].update_one(
@@ -555,19 +580,29 @@ class IngestionService:
                     ]
                     if missing_entities:
                         new_entities = [*existing_entities, *missing_entities]
-                        reasons.append(f"missing_universal_entities={len(missing_entities)}")
+                        reasons.append(
+                            f"missing_universal_entities={len(missing_entities)}"
+                        )
                 if not existing_relations:
                     new_relations = universal_relations
                     reasons.append("null_relation_schema")
                 elif all(rel in universal_relations for rel in existing_relations):
                     missing_relations = [
-                        rel for rel in universal_relations if rel not in existing_relations
+                        rel
+                        for rel in universal_relations
+                        if rel not in existing_relations
                     ]
                     if missing_relations:
-                        body = [rel for rel in existing_relations if rel != "related_to"]
-                        additions = [rel for rel in missing_relations if rel != "related_to"]
+                        body = [
+                            rel for rel in existing_relations if rel != "related_to"
+                        ]
+                        additions = [
+                            rel for rel in missing_relations if rel != "related_to"
+                        ]
                         new_relations = [*body, *additions, "related_to"]
-                        reasons.append(f"missing_universal_relations={len(missing_relations)}")
+                        reasons.append(
+                            f"missing_universal_relations={len(missing_relations)}"
+                        )
                 if existing_strict in ("off", "hard"):
                     reasons.append(f"legacy_strict={existing_strict}")
 
@@ -637,9 +672,7 @@ class IngestionService:
         from services.provider_presets import litellm_provider_for
 
         if self._db is None:
-            logger.warning(
-                "migrate_bare_model_names: DB not connected — skipping"
-            )
+            logger.warning("migrate_bare_model_names: DB not connected — skipping")
             return {
                 "corpora_patched": 0,
                 "pool_entries_patched": 0,
@@ -680,7 +713,9 @@ class IngestionService:
             for idx, entry in enumerate(new_summary):
                 if not isinstance(entry, dict):
                     continue
-                rewritten = _needs_rewrite(entry.get("provider_preset"), entry.get("model"))
+                rewritten = _needs_rewrite(
+                    entry.get("provider_preset"), entry.get("model")
+                )
                 if rewritten is None:
                     continue
                 rewrites_for_doc.append(
@@ -691,7 +726,9 @@ class IngestionService:
             for idx, entry in enumerate(new_extraction):
                 if not isinstance(entry, dict):
                     continue
-                rewritten = _needs_rewrite(entry.get("provider_preset"), entry.get("model"))
+                rewritten = _needs_rewrite(
+                    entry.get("provider_preset"), entry.get("model")
+                )
                 if rewritten is None:
                     continue
                 rewrites_for_doc.append(
@@ -718,7 +755,11 @@ class IngestionService:
                 logger.info(
                     "migrate_bare_model_names: corpus=%s field=%s idx=%d "
                     "old=%r new=%r",
-                    doc["corpus_id"], field, idx, old_model, new_model,
+                    doc["corpus_id"],
+                    field,
+                    idx,
+                    old_model,
+                    new_model,
                 )
 
         # Chat/query model pools are resolved at use time so setup can keep
@@ -895,9 +936,7 @@ class IngestionService:
                 getattr(ingestion_config, "embedding_models", None)
             ),
         )
-        return await upsert_schema_terms(
-            self._qdrant, corpus_id, terms, kind, vectors
-        )
+        return await upsert_schema_terms(self._qdrant, corpus_id, terms, kind, vectors)
 
     @staticmethod
     def _plaintext_model_pool(refs) -> list[dict]:
@@ -932,9 +971,13 @@ class IngestionService:
         try:
             from services.settings import settings_service
 
-            global_ingestion = await settings_service.get_runtime_ingestion_settings(user_id)
+            global_ingestion = await settings_service.get_runtime_ingestion_settings(
+                user_id
+            )
         except Exception as exc:  # noqa: BLE001 - settings defaults are best-effort
-            logger.warning("global summary defaults unavailable for user=%s: %s", user_id, exc)
+            logger.warning(
+                "global summary defaults unavailable for user=%s: %s", user_id, exc
+            )
             return ingestion_config
 
         summary = global_ingestion.summary
@@ -955,7 +998,8 @@ class IngestionService:
                 return (
                     (a.get("model") or "") == (b.get("model") or "")
                     and (a.get("base_url") or None) == (b.get("base_url") or None)
-                    and (a.get("provider_preset") or "") == (b.get("provider_preset") or "")
+                    and (a.get("provider_preset") or "")
+                    == (b.get("provider_preset") or "")
                 )
 
             changed = False
@@ -970,11 +1014,17 @@ class IngestionService:
                 if not masked_fields:
                     continue
                 replacement = None
-                if idx < len(runtime_summary_models) and _matches(entry, runtime_summary_models[idx]):
+                if idx < len(runtime_summary_models) and _matches(
+                    entry, runtime_summary_models[idx]
+                ):
                     replacement = runtime_summary_models[idx]
                 else:
                     replacement = next(
-                        (candidate for candidate in runtime_summary_models if _matches(entry, candidate)),
+                        (
+                            candidate
+                            for candidate in runtime_summary_models
+                            if _matches(entry, candidate)
+                        ),
                         None,
                     )
                 if replacement:
@@ -1259,22 +1309,52 @@ class IngestionService:
         # Owner 2026-07-06: doc_count alone misled — every file that STARTS
         # parsing gets a document row, so a churned batch showed "498" while
         # ~80 were actually complete. ready_doc_count = fully verified docs.
-        ready_rows = await self._db["documents"].aggregate([
-            {"$match": with_active_records({"corpus_id": {"$in": corpus_ids}, "write_state.verified": True})},
-            {"$group": {"_id": "$corpus_id", "count": {"$sum": 1}}},
-        ]).to_list(length=None)
+        ready_rows = (
+            await self._db["documents"]
+            .aggregate(
+                [
+                    {
+                        "$match": with_active_records(
+                            {
+                                "corpus_id": {"$in": corpus_ids},
+                                "write_state.verified": True,
+                            }
+                        )
+                    },
+                    {"$group": {"_id": "$corpus_id", "count": {"$sum": 1}}},
+                ]
+            )
+            .to_list(length=None)
+        )
         ready_counts = {str(r["_id"]): int(r["count"]) for r in ready_rows}
         cached_readiness: dict[str, dict] = {}
         if not refresh_readiness:
-            rows = await self._db["corpus_readiness"].find(
-                {"_id": {"$in": corpus_ids}},
-                {"_id": 1, "corpus_id": 1, "status": 1, "blocking": 1,
-                 "next_actions": 1, "documents": 1, "chunks": 1,
-                 "summaries": 1, "graph": 1, "idempotency": 1,
-                 "repair": 1, "pressure": 1, "schema_version": 1,
-                 "computed_at": 1, "source": 1, "stale": 1,
-                 "refresh_error": 1},
-            ).to_list(length=len(corpus_ids))
+            rows = (
+                await self._db["corpus_readiness"]
+                .find(
+                    {"_id": {"$in": corpus_ids}},
+                    {
+                        "_id": 1,
+                        "corpus_id": 1,
+                        "status": 1,
+                        "blocking": 1,
+                        "next_actions": 1,
+                        "documents": 1,
+                        "chunks": 1,
+                        "summaries": 1,
+                        "graph": 1,
+                        "idempotency": 1,
+                        "repair": 1,
+                        "pressure": 1,
+                        "schema_version": 1,
+                        "computed_at": 1,
+                        "source": 1,
+                        "stale": 1,
+                        "refresh_error": 1,
+                    },
+                )
+                .to_list(length=len(corpus_ids))
+            )
             cached_readiness = {
                 str(row.get("corpus_id") or row.get("_id")): {
                     key: value for key, value in row.items() if key != "_id"
@@ -1289,7 +1369,10 @@ class IngestionService:
             actual_docs = doc_counts.get(cid, 0)
             actual_chunks = chunk_counts.get(cid, 0)
             doc["ready_doc_count"] = ready_counts.get(cid, 0)
-            if doc.get("doc_count", 0) != actual_docs or doc.get("chunk_count", 0) != actual_chunks:
+            if (
+                doc.get("doc_count", 0) != actual_docs
+                or doc.get("chunk_count", 0) != actual_chunks
+            ):
                 await self._db["corpora"].update_one(
                     {"corpus_id": cid},
                     {"$set": {"doc_count": actual_docs, "chunk_count": actual_chunks}},
@@ -1318,7 +1401,9 @@ class IngestionService:
             try:
                 readiness = await self._materialize_corpus_readiness_safely(str(cid))
                 if readiness is None:
-                    raise RuntimeError("materialize_corpus_readiness returned no snapshot")
+                    raise RuntimeError(
+                        "materialize_corpus_readiness returned no snapshot"
+                    )
                 doc["readiness"] = readiness
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
@@ -1463,7 +1548,9 @@ class IngestionService:
 
         for pool_field in ("summary_models", "extraction_models", "embedding_models"):
             new_pool = config_dict.get(pool_field) or []
-            existing_pool = (existing_config or {}).get(pool_field) or [] if existing_config else []
+            existing_pool = (
+                (existing_config or {}).get(pool_field) or [] if existing_config else []
+            )
             for idx, entry in enumerate(new_pool):
                 if not isinstance(entry, dict):
                     continue
@@ -1491,7 +1578,9 @@ class IngestionService:
         for field in IngestionService._LEGACY_KEY_FIELDS:
             if field not in config_dict:
                 continue
-            existing_val = (existing_config or {}).get(field) if existing_config else None
+            existing_val = (
+                (existing_config or {}).get(field) if existing_config else None
+            )
             config_dict[field] = _enc(config_dict.get(field), existing_val)
 
     async def update_corpus(self, corpus_id: str, updates: dict) -> Optional[dict]:
@@ -1625,8 +1714,11 @@ class IngestionService:
             # Best-effort; failures are logged inside rename_corpus_aliases.
             if "name" in updates and updates["name"]:
                 from services.storage.qdrant_writer import rename_corpus_aliases
+
                 try:
-                    await rename_corpus_aliases(self._qdrant, corpus_id, updates["name"])
+                    await rename_corpus_aliases(
+                        self._qdrant, corpus_id, updates["name"]
+                    )
                 except Exception as exc:
                     logger.warning(
                         "rename_corpus_aliases failed for %s: %s", corpus_id, exc
@@ -1689,6 +1781,23 @@ class IngestionService:
 
         cleanup_warnings: list[dict[str, str]] = []
         try:
+            from services.ingestion.corpus_lexicon import delete_corpus_lexicon
+
+            await delete_corpus_lexicon(self._db, corpus_id)
+        except Exception as exc:
+            logger.warning(
+                "Background lexicon purge failed for corpus %s",
+                corpus_id,
+                exc_info=True,
+            )
+            cleanup_warnings.append(
+                {
+                    "stage": "mongo_lexicon",
+                    "error": str(exc),
+                    "at": datetime.utcnow().isoformat(),
+                }
+            )
+        try:
             await delete_chunks_by_corpus(self._db, corpus_id)
         except Exception as exc:
             logger.warning(
@@ -1740,7 +1849,11 @@ class IngestionService:
                 },
             )
         except Exception:
-            logger.warning("Final corpus tombstone mark failed for corpus %s", corpus_id, exc_info=True)
+            logger.warning(
+                "Final corpus tombstone mark failed for corpus %s",
+                corpus_id,
+                exc_info=True,
+            )
             return
         logger.info(
             "Background purge %s for corpus %s",
@@ -1772,6 +1885,7 @@ class IngestionService:
         from services.storage.mongo_writer import (
             delete_chunks_by_doc,
             delete_document,
+            retire_document_derived_state,
         )
         from services.storage.qdrant_writer import delete_points_by_doc
 
@@ -1781,6 +1895,24 @@ class IngestionService:
         except Exception:
             logger.warning(
                 "Qdrant per-doc delete failed for doc %s in corpus %s",
+                doc_id[:12],
+                corpus_id[:8],
+            )
+
+        # The universal Tier-0 collection is not part of the per-corpus
+        # naive/hrag/graph collection family, so delete its deterministic
+        # document routing card explicitly.
+        try:
+            from services.ingestion.tier0 import delete_doc_profile
+
+            await delete_doc_profile(
+                self._qdrant,
+                corpus_id=corpus_id,
+                doc_id=doc_id,
+            )
+        except Exception:
+            logger.warning(
+                "Tier-0 per-doc delete failed for doc %s in corpus %s",
                 doc_id[:12],
                 corpus_id[:8],
             )
@@ -1796,15 +1928,52 @@ class IngestionService:
                     doc_id=doc_id,
                 )
             except Exception:
-                logger.warning(
-                    "Neo4j per-doc delete failed for doc %s", doc_id[:12]
-                )
+                logger.warning("Neo4j per-doc delete failed for doc %s", doc_id[:12])
 
-        # 3. Mongo chunks.
+        # 3. Reconcile the materialized vocabulary while source provenance is
+        # still available. This is enrichment cleanup and must not prevent the
+        # document tombstone when a vector provider is temporarily unavailable.
+        try:
+            from services.ingestion.corpus_lexicon import (
+                index_affected_lexicon,
+                remove_document_lexicon_sources,
+            )
+
+            lexicon_reconciliation = await remove_document_lexicon_sources(
+                self._db,
+                corpus_id=corpus_id,
+                doc_id=doc_id,
+            )
+            await index_affected_lexicon(
+                self._db,
+                self._qdrant,
+                corpus_id=corpus_id,
+                entries=lexicon_reconciliation["entries"],
+                stale_lexicon_ids=lexicon_reconciliation["stale_lexicon_ids"],
+            )
+        except Exception:
+            logger.warning(
+                "Lexicon per-doc delete reconciliation failed for doc %s",
+                doc_id[:12],
+                exc_info=True,
+            )
+
+        # 4. Remove derived hierarchy rows and retire every durable job for
+        # this source identity before a same-content re-ingest can replan it.
+        await retire_document_derived_state(
+            self._db,
+            corpus_id=corpus_id,
+            doc_id=doc_id,
+        )
+
+        # 5. Mongo chunks.
         await delete_chunks_by_doc(self._db, corpus_id, doc_id)
 
-        # 4. Mongo document record.
-        return await delete_document(self._db, corpus_id, doc_id)
+        # 6. Mongo document record and materialized corpus truth.
+        deleted = await delete_document(self._db, corpus_id, doc_id)
+        if deleted:
+            await self._refresh_corpus_counts([{"corpus_id": corpus_id}])
+        return deleted
 
     async def list_all_user_documents(
         self,
@@ -2010,6 +2179,7 @@ class IngestionService:
         from services.ingestion.source_parse_jobs import run_source_parse_jobs
 
         start_runners = bool(get_settings().INGEST_RUNNERS_ENABLED)
+
         async def _execute_source_lane() -> dict:
             return await run_source_parse_jobs(
                 self._db,
@@ -2081,7 +2251,9 @@ class IngestionService:
         limit: int = 500,
         kinds: list[str] | None = None,
     ) -> dict:
-        from services.ingestion.document_pipeline_jobs import plan_document_pipeline_jobs
+        from services.ingestion.document_pipeline_jobs import (
+            plan_document_pipeline_jobs,
+        )
 
         result = await plan_document_pipeline_jobs(
             self._db,
@@ -2105,7 +2277,9 @@ class IngestionService:
         statuses: list[str] | None = None,
         kinds: list[str] | None = None,
     ) -> dict:
-        from services.ingestion.document_pipeline_jobs import list_document_pipeline_jobs
+        from services.ingestion.document_pipeline_jobs import (
+            list_document_pipeline_jobs,
+        )
 
         return await list_document_pipeline_jobs(
             self._db,
@@ -2178,6 +2352,48 @@ class IngestionService:
                 limit=limit,
             )
 
+        async def _profile_runner(*, doc_ids: list[str], limit: int) -> dict:
+            from services.ingestion.tier0 import embed_doc_profiles
+
+            corpus = await self._db["corpora"].find_one(
+                {"corpus_id": corpus_id},
+                {"_id": 0, "default_ingestion_config.embedding_dimension": 1},
+            )
+            dimension = int(
+                ((corpus or {}).get("default_ingestion_config") or {}).get(
+                    "embedding_dimension", 1024
+                )
+            )
+            result = await embed_doc_profiles(
+                self._db,
+                self._qdrant,
+                corpus_id=corpus_id,
+                doc_ids=doc_ids[: max(1, int(limit))],
+                dim=dimension,
+            )
+            return {
+                "status": "complete",
+                "counts": {
+                    "succeeded": int(result.get("embedded") or 0),
+                    "failed": 0,
+                },
+                **result,
+            }
+
+        async def _summary_runner(*, doc_ids: list[str], limit: int) -> dict:
+            from services.ingestion.document_pipeline_executors import (
+                index_document_summaries_from_artifacts,
+            )
+
+            return await index_document_summaries_from_artifacts(
+                self._db,
+                qdrant_client=self._qdrant,
+                neo4j_driver=self._neo4j,
+                corpus_id=corpus_id,
+                doc_ids=doc_ids,
+                limit=limit,
+            )
+
         async def _execute_document_lane() -> dict:
             return await run_document_pipeline_jobs(
                 self._db,
@@ -2189,6 +2405,8 @@ class IngestionService:
                 source_runner=_source_runner,
                 persist_runner=_persist_runner,
                 embed_runner=_embed_runner,
+                summary_runner=_summary_runner,
+                profile_runner=_profile_runner,
             )
 
         result = await self._run_owned_repair_lane(
@@ -2283,7 +2501,9 @@ class IngestionService:
             summary_backpressure.get("summary_indexing_allowed") is not False
         )
 
-        async def _parent_runner(*, limit: int, doc_ids: list[str] | None = None) -> dict:
+        async def _parent_runner(
+            *, limit: int, doc_ids: list[str] | None = None
+        ) -> dict:
             result = await self.backfill_parent_summaries(
                 corpus_id,
                 user_id=user_id,
@@ -2298,7 +2518,9 @@ class IngestionService:
                 result["index_deferred_by_pressure"] = True
             return result
 
-        async def _document_runner(*, limit: int, doc_ids: list[str] | None = None) -> dict:
+        async def _document_runner(
+            *, limit: int, doc_ids: list[str] | None = None
+        ) -> dict:
             return await self.backfill_document_summaries(
                 corpus_id=corpus_id,
                 user_id=user_id,
@@ -2439,17 +2661,27 @@ class IngestionService:
         limit = max(
             1,
             min(
-                int(limit or getattr(settings, "INGEST_AUTO_REPAIR_CORPUS_LIMIT", 5) or 5),
+                int(
+                    limit
+                    or getattr(settings, "INGEST_AUTO_REPAIR_CORPUS_LIMIT", 5)
+                    or 5
+                ),
                 100,
             ),
         )
         corpus_filter: dict[str, Any] = {}
         if _corpus_id:
             corpus_filter["corpus_id"] = _corpus_id
-        rows = await self._db["corpora"].find(
-            with_active_records(corpus_filter),
-            {"_id": 0, "corpus_id": 1, "user_id": 1, "name": 1, "updated_at": 1},
-        ).sort("updated_at", -1).limit(limit).to_list(length=limit)
+        rows = (
+            await self._db["corpora"]
+            .find(
+                with_active_records(corpus_filter),
+                {"_id": 0, "corpus_id": 1, "user_id": 1, "name": 1, "updated_at": 1},
+            )
+            .sort("updated_at", -1)
+            .limit(limit)
+            .to_list(length=limit)
+        )
 
         # A long local pipeline repair in one corpus must not serialize cloud
         # extraction or summary work for another corpus. Fan out one-corpus
@@ -2527,20 +2759,16 @@ class IngestionService:
                 getattr(settings, "INGEST_AUTO_REPAIR_RUN_GRAPH", True)
             )
             document_run_limit = int(
-                getattr(settings, "INGEST_AUTO_REPAIR_DOCUMENT_RUN_LIMIT", 25)
-                or 25
+                getattr(settings, "INGEST_AUTO_REPAIR_DOCUMENT_RUN_LIMIT", 25) or 25
             )
             extraction_run_limit = int(
-                getattr(settings, "INGEST_AUTO_REPAIR_EXTRACTION_RUN_LIMIT", 100)
-                or 100
+                getattr(settings, "INGEST_AUTO_REPAIR_EXTRACTION_RUN_LIMIT", 100) or 100
             )
             summary_run_limit = int(
-                getattr(settings, "INGEST_AUTO_REPAIR_SUMMARY_RUN_LIMIT", 100)
-                or 100
+                getattr(settings, "INGEST_AUTO_REPAIR_SUMMARY_RUN_LIMIT", 100) or 100
             )
             graph_run_limit = int(
-                getattr(settings, "INGEST_AUTO_REPAIR_GRAPH_RUN_LIMIT", 5)
-                or 5
+                getattr(settings, "INGEST_AUTO_REPAIR_GRAPH_RUN_LIMIT", 5) or 5
             )
             scheduler_snapshot: dict[str, Any] | None = None
             try:
@@ -2599,19 +2827,37 @@ class IngestionService:
                     reconcile_failures=True,
                     failure_reconcile_limit=5000,
                     backfill_ghost_b_stage_identity_rows=(
-                        int(getattr(settings, "INGEST_AUTO_REPAIR_STAGE_IDENTITY_LIMIT", 1000) or 0)
+                        int(
+                            getattr(
+                                settings,
+                                "INGEST_AUTO_REPAIR_STAGE_IDENTITY_LIMIT",
+                                1000,
+                            )
+                            or 0
+                        )
                         > 0
                     ),
                     backfill_source_parse_stage_identity_rows=(
-                        int(getattr(settings, "INGEST_AUTO_REPAIR_STAGE_IDENTITY_LIMIT", 1000) or 0)
+                        int(
+                            getattr(
+                                settings,
+                                "INGEST_AUTO_REPAIR_STAGE_IDENTITY_LIMIT",
+                                1000,
+                            )
+                            or 0
+                        )
                         > 0
                     ),
                     source_parse_stage_identity_backfill_limit=int(
-                        getattr(settings, "INGEST_AUTO_REPAIR_STAGE_IDENTITY_LIMIT", 1000)
+                        getattr(
+                            settings, "INGEST_AUTO_REPAIR_STAGE_IDENTITY_LIMIT", 1000
+                        )
                         or 0
                     ),
                     ghost_b_stage_identity_backfill_limit=int(
-                        getattr(settings, "INGEST_AUTO_REPAIR_STAGE_IDENTITY_LIMIT", 1000)
+                        getattr(
+                            settings, "INGEST_AUTO_REPAIR_STAGE_IDENTITY_LIMIT", 1000
+                        )
                         or 0
                     ),
                     plan_source_parse_jobs=True,
@@ -2634,11 +2880,20 @@ class IngestionService:
                     plan_summary_jobs=True,
                     summary_job_plan_limit=500,
                     backfill_summary_stage_identity_rows=(
-                        int(getattr(settings, "INGEST_AUTO_REPAIR_STAGE_IDENTITY_LIMIT", 1000) or 0)
+                        int(
+                            getattr(
+                                settings,
+                                "INGEST_AUTO_REPAIR_STAGE_IDENTITY_LIMIT",
+                                1000,
+                            )
+                            or 0
+                        )
                         > 0
                     ),
                     summary_stage_identity_backfill_limit=int(
-                        getattr(settings, "INGEST_AUTO_REPAIR_STAGE_IDENTITY_LIMIT", 1000)
+                        getattr(
+                            settings, "INGEST_AUTO_REPAIR_STAGE_IDENTITY_LIMIT", 1000
+                        )
                         or 0
                     ),
                     run_summary_jobs=False,
@@ -2730,40 +2985,40 @@ class IngestionService:
                 result["provider_lanes"] = provider_lanes
                 summary = result.get("summary") or {}
                 result_row = {
-                        "corpus_id": corpus_id,
-                        "status": result.get("status"),
-                        "readiness_status": summary.get("readiness_status"),
-                        "queryable_docs": summary.get("queryable_docs"),
-                        "total_docs": summary.get("total_docs"),
-                        "failed_chunks": summary.get("failed_chunks"),
-                        "graph_jobs_queued": summary.get("graph_jobs_queued"),
-                        "extraction_jobs_queued": summary.get("extraction_jobs_queued"),
-                        "summary_jobs_queued": summary.get("summary_jobs_queued"),
-                        "document_pipeline_jobs_queued": summary.get(
-                            "document_pipeline_jobs_queued"
-                        ),
-                        "ghost_b_stage_identity_backfilled": summary.get(
-                            "ghost_b_stage_identity_backfilled"
-                        ),
-                        "source_parse_stage_identity_backfilled": summary.get(
-                            "source_parse_stage_identity_backfilled"
-                        ),
-                        "summary_stage_identity_backfilled": summary.get(
-                            "summary_stage_identity_backfilled"
-                        ),
-                        "provider_lanes": {
-                            lane_name: {
-                                "status": lane_result.get("status"),
-                                "claimed": int(lane_result.get("claimed") or 0),
-                                "counts": lane_result.get("counts") or {},
-                            }
-                            for lane_name, lane_result in provider_lanes.items()
-                        },
-                        "repair_changed": any(
-                            bool(step.get("changed"))
-                            for step in (result.get("steps") or [])
-                        ),
-                    }
+                    "corpus_id": corpus_id,
+                    "status": result.get("status"),
+                    "readiness_status": summary.get("readiness_status"),
+                    "queryable_docs": summary.get("queryable_docs"),
+                    "total_docs": summary.get("total_docs"),
+                    "failed_chunks": summary.get("failed_chunks"),
+                    "graph_jobs_queued": summary.get("graph_jobs_queued"),
+                    "extraction_jobs_queued": summary.get("extraction_jobs_queued"),
+                    "summary_jobs_queued": summary.get("summary_jobs_queued"),
+                    "document_pipeline_jobs_queued": summary.get(
+                        "document_pipeline_jobs_queued"
+                    ),
+                    "ghost_b_stage_identity_backfilled": summary.get(
+                        "ghost_b_stage_identity_backfilled"
+                    ),
+                    "source_parse_stage_identity_backfilled": summary.get(
+                        "source_parse_stage_identity_backfilled"
+                    ),
+                    "summary_stage_identity_backfilled": summary.get(
+                        "summary_stage_identity_backfilled"
+                    ),
+                    "provider_lanes": {
+                        lane_name: {
+                            "status": lane_result.get("status"),
+                            "claimed": int(lane_result.get("claimed") or 0),
+                            "counts": lane_result.get("counts") or {},
+                        }
+                        for lane_name, lane_result in provider_lanes.items()
+                    },
+                    "repair_changed": any(
+                        bool(step.get("changed"))
+                        for step in (result.get("steps") or [])
+                    ),
+                }
                 results.append(result_row)
                 if scheduler_snapshot is not None:
                     useful_change = bool(result_row["repair_changed"]) or any(
@@ -2847,6 +3102,7 @@ class IngestionService:
         result = await backfill_document_summaries(
             self._db,
             corpus_id=corpus_id,
+            qdrant_client=self._qdrant,
             user_id=user_id,
             limit=limit,
             doc_ids=doc_ids,
@@ -2875,22 +3131,28 @@ class IngestionService:
 
     async def get_ingestion_audit(self, corpus_id: str) -> dict:
         """Aggregate corpus ingestion health for large-batch readiness."""
-        docs = await self._db["documents"].find(
-            {"corpus_id": corpus_id},
-            {
-                "doc_id": 1,
-                "filename": 1,
-                "chunk_count": 1,
-                "ghost_b_failures": 1,
-                "ghost_b_staging": 1,
-                "ghost_b_failure_count": 1,
-                "ghost_b_staging_count": 1,
-                "ghost_b_metrics": 1,
-                "write_state": 1,
-                "_id": 0,
-            },
-        ).to_list(length=None)
-        total_chunks = await self._db["chunks"].count_documents({"corpus_id": corpus_id})
+        docs = (
+            await self._db["documents"]
+            .find(
+                {"corpus_id": corpus_id},
+                {
+                    "doc_id": 1,
+                    "filename": 1,
+                    "chunk_count": 1,
+                    "ghost_b_failures": 1,
+                    "ghost_b_staging": 1,
+                    "ghost_b_failure_count": 1,
+                    "ghost_b_staging_count": 1,
+                    "ghost_b_metrics": 1,
+                    "write_state": 1,
+                    "_id": 0,
+                },
+            )
+            .to_list(length=None)
+        )
+        total_chunks = await self._db["chunks"].count_documents(
+            {"corpus_id": corpus_id}
+        )
         totals = {
             "docs": len(docs),
             "chunks": total_chunks,
@@ -2938,10 +3200,18 @@ class IngestionService:
             totals["ghost_b_attempts"] += int(metrics.get("attempt_count") or 0)
             totals["relations"] += int(metrics.get("relation_count") or 0)
             totals["related_to"] += int(metrics.get("related_to_count") or 0)
-            totals["domain_range_remaps"] += int(metrics.get("domain_range_remap_count") or 0)
-            totals["domain_range_warns"] += int(metrics.get("domain_range_warn_count") or 0)
-            totals["endpoint_completions"] += int(metrics.get("endpoint_completion_count") or 0)
-            totals["evidence_cue_repairs"] += int(metrics.get("evidence_cue_repair_count") or 0)
+            totals["domain_range_remaps"] += int(
+                metrics.get("domain_range_remap_count") or 0
+            )
+            totals["domain_range_warns"] += int(
+                metrics.get("domain_range_warn_count") or 0
+            )
+            totals["endpoint_completions"] += int(
+                metrics.get("endpoint_completion_count") or 0
+            )
+            totals["evidence_cue_repairs"] += int(
+                metrics.get("evidence_cue_repair_count") or 0
+            )
 
         totals["ghost_b_success_rate"] = (
             round(totals["ghost_b_extracted_chunks"] / total_chunks, 4)
@@ -2956,7 +3226,10 @@ class IngestionService:
         readiness = "ready"
         if totals["verify_failed_docs"] or totals["ghost_b_failed_chunks"]:
             readiness = "needs_backfill"
-        if totals["related_to_ratio"] > 0.35 or totals["domain_range_remaps"] > totals["relations"] * 0.2:
+        if (
+            totals["related_to_ratio"] > 0.35
+            or totals["domain_range_remaps"] > totals["relations"] * 0.2
+        ):
             readiness = "schema_review"
         try:
             idempotency = await self.audit_corpus_idempotency(
@@ -2979,12 +3252,16 @@ class IngestionService:
             "partial_docs": partial_docs[:50],
             "idempotency": idempotency,
             "recommendations": [
-                "Run graph backfill for partial docs before large-batch graph analysis."
-                if totals["ghost_b_failed_chunks"]
-                else "No graph backfill needed.",
-                "Review relation schema if related_to ratio stays above 35%."
-                if totals["related_to_ratio"] > 0.35
-                else "Relation specificity is within the current target band.",
+                (
+                    "Run graph backfill for partial docs before large-batch graph analysis."
+                    if totals["ghost_b_failed_chunks"]
+                    else "No graph backfill needed."
+                ),
+                (
+                    "Review relation schema if related_to ratio stays above 35%."
+                    if totals["related_to_ratio"] > 0.35
+                    else "Relation specificity is within the current target band."
+                ),
             ],
         }
 
@@ -3018,12 +3295,17 @@ class IngestionService:
 
         from services.embedder import embed_batch
         from services.ghost_a import SummaryTask, summarize_parents
+        from services.ingestion.summary_backfill import summary_index_text
         from services.settings import settings_service
         from services.storage.qdrant_writer import _col_for_corpus, upsert_summaries
 
         corpus = await self._get_corpus_raw(corpus_id)
         if not corpus:
-            return {"corpus_id": corpus_id, "status": "not_found", "error": "corpus not found"}
+            return {
+                "corpus_id": corpus_id,
+                "status": "not_found",
+                "error": "corpus not found",
+            }
 
         cfg = IngestionConfig(**(corpus.get("default_ingestion_config") or {}))
         effective_user_id = user_id or str(corpus.get("user_id") or "")
@@ -3096,7 +3378,8 @@ class IngestionService:
                 qdrant_error = str(exc)[:300]
 
             coverage = (
-                min(indexed_summary_points, retrieval_parent_count) / retrieval_parent_count
+                min(indexed_summary_points, retrieval_parent_count)
+                / retrieval_parent_count
                 if retrieval_parent_count
                 else 1.0
             )
@@ -3115,9 +3398,13 @@ class IngestionService:
                 "retrieval_parent_count": retrieval_parent_count,
                 "body_parent_count": body_parent_count,
                 "with_summary_text": with_summary_text,
-                "missing_summary_text": max(retrieval_parent_count - with_summary_text, 0),
+                "missing_summary_text": max(
+                    retrieval_parent_count - with_summary_text, 0
+                ),
                 "body_with_summary_text": body_with_summary_text,
-                "body_missing_summary_text": max(body_parent_count - body_with_summary_text, 0),
+                "body_missing_summary_text": max(
+                    body_parent_count - body_with_summary_text, 0
+                ),
                 "indexed_summary_points": indexed_summary_points,
                 "coverage": round(coverage, 4),
                 "status": status,
@@ -3138,7 +3425,9 @@ class IngestionService:
             if paused is not None:
                 paused.update(
                     {
-                        "doc_scope_count": len(doc_id_filter) if doc_id_filter is not None else None,
+                        "doc_scope_count": (
+                            len(doc_id_filter) if doc_id_filter is not None else None
+                        ),
                         "generated": 0,
                         "attempted": 0,
                         "indexed": 0,
@@ -3173,7 +3462,11 @@ class IngestionService:
                 if paused is not None:
                     paused.update(
                         {
-                            "doc_scope_count": len(doc_id_filter) if doc_id_filter is not None else None,
+                            "doc_scope_count": (
+                                len(doc_id_filter)
+                                if doc_id_filter is not None
+                                else None
+                            ),
                             "generated": 0,
                             "attempted": 0,
                             "indexed": 0,
@@ -3221,17 +3514,28 @@ class IngestionService:
             pool = [
                 {
                     "model": (ref.model if hasattr(ref, "model") else ref.get("model")),
-                    "base_url": (ref.base_url if hasattr(ref, "base_url") else ref.get("base_url")) or None,
+                    "base_url": (
+                        ref.base_url
+                        if hasattr(ref, "base_url")
+                        else ref.get("base_url")
+                    )
+                    or None,
                     "api_key": _plaintext_key(
                         (ref.api_key if hasattr(ref, "api_key") else ref.get("api_key"))
                         or None
                     ),
                     "max_concurrent": int(
-                        (ref.max_concurrent if hasattr(ref, "max_concurrent") else ref.get("max_concurrent"))
+                        (
+                            ref.max_concurrent
+                            if hasattr(ref, "max_concurrent")
+                            else ref.get("max_concurrent")
+                        )
                         or 1
                     ),
                     "extra_params": (
-                        ref.extra_params if hasattr(ref, "extra_params") else ref.get("extra_params")
+                        ref.extra_params
+                        if hasattr(ref, "extra_params")
+                        else ref.get("extra_params")
                     )
                     or {},
                 }
@@ -3262,20 +3566,29 @@ class IngestionService:
                     global_max_concurrent or "-",
                 )
                 while limit is None or attempted < limit:
-                    fetch = batch if limit is None else max(0, min(batch, limit - attempted))
+                    fetch = (
+                        batch
+                        if limit is None
+                        else max(0, min(batch, limit - attempted))
+                    )
                     if fetch <= 0:
                         break
-                    rows = await self._db["parent_chunks"].find(
-                        _parent_query(missing_summary_clause),
-                        {
-                            "_id": 0,
-                            "parent_id": 1,
-                            "doc_id": 1,
-                            "corpus_id": 1,
-                            "source_tier": 1,
-                            "text": 1,
-                        },
-                    ).limit(fetch).to_list(length=fetch)
+                    rows = (
+                        await self._db["parent_chunks"]
+                        .find(
+                            _parent_query(missing_summary_clause),
+                            {
+                                "_id": 0,
+                                "parent_id": 1,
+                                "doc_id": 1,
+                                "corpus_id": 1,
+                                "source_tier": 1,
+                                "text": 1,
+                            },
+                        )
+                        .limit(fetch)
+                        .to_list(length=fetch)
+                    )
                     rows = [r for r in rows if (r.get("text") or "").strip()]
                     if not rows:
                         break
@@ -3298,16 +3611,18 @@ class IngestionService:
                             corpus_id=corpus_id,
                             source_tier=r.get("source_tier") or "parent",
                             text=r["text"],
-                            source_child_ids=child_context.get(
-                                r["parent_id"], {}
-                            ).get("source_child_ids", []),
-                            child_boundaries=child_context.get(
-                                r["parent_id"], {}
-                            ).get("child_boundaries", ""),
+                            source_child_ids=child_context.get(r["parent_id"], {}).get(
+                                "source_child_ids", []
+                            ),
+                            child_boundaries=child_context.get(r["parent_id"], {}).get(
+                                "child_boundaries", ""
+                            ),
                         )
                         for r in rows
                     ]
-                    from services.ingestion.provider_call_telemetry import record_provider_call
+                    from services.ingestion.provider_call_telemetry import (
+                        record_provider_call,
+                    )
 
                     async def _summary_telemetry(event: dict) -> None:
                         await record_provider_call(self._db, event)
@@ -3375,6 +3690,32 @@ class IngestionService:
                     "corpus_id": 1,
                     "source_tier": 1,
                     "summary": 1,
+                    "retrieval_text": 1,
+                    "text": 1,
+                    "parent_text": 1,
+                    "child_ids": 1,
+                    "domain": 1,
+                    "topics": 1,
+                    "semantic_chunk_type": 1,
+                    "key_terms": 1,
+                    "mechanisms": 1,
+                    "schema_version": 1,
+                    "summary_type": 1,
+                    "central_claim": 1,
+                    "key_points": 1,
+                    "main_mechanism": 1,
+                    "concept_tags": 1,
+                    "entity_hints": 1,
+                    "retrieval_uses": 1,
+                    "abstraction_level": 1,
+                    "source_child_ids": 1,
+                    "source_hash": 1,
+                    "summary_model": 1,
+                    "summary_created_at": 1,
+                    "validation_status": 1,
+                    "repair_status": 1,
+                    "quality_score": 1,
+                    "quality_flags": 1,
                     "heading_path": 1,
                     "filename": 1,
                     "doc_name": 1,
@@ -3398,7 +3739,7 @@ class IngestionService:
                 if not buf:
                     return
                 vectors = await embed_batch(
-                    [str(p.get("summary") or "") for p in buf],
+                    [summary_index_text(p) for p in buf],
                     mode="local",
                     expected_dim=cfg.embedding_dimension,
                     expected_model_id=cfg.embedding_model_id,
@@ -3406,6 +3747,7 @@ class IngestionService:
                 payloads = [
                     {
                         **p,
+                        "retrieval_text": summary_index_text(p),
                         "user_id": effective_user_id,
                         "source_tier": p.get("source_tier") or "parent",
                     }
@@ -3427,16 +3769,16 @@ class IngestionService:
                     await _flush()
             await _flush()
 
-            ready_by_doc: dict[str, bool] = {}
+            ready_by_doc: dict[str, tuple[bool, int]] = {}
             pipeline = [
                 {"$match": _parent_query()},
                 {
-                        "$group": {
-                            "_id": "$doc_id",
-                            "retrieval_parent_count": {"$sum": 1},
-                            "with_summary": {
-                                "$sum": {
-                                    "$cond": [
+                    "$group": {
+                        "_id": "$doc_id",
+                        "retrieval_parent_count": {"$sum": 1},
+                        "with_summary": {
+                            "$sum": {
+                                "$cond": [
                                     {
                                         "$and": [
                                             {"$ne": ["$summary", None]},
@@ -3452,9 +3794,11 @@ class IngestionService:
                 },
             ]
             async for row in self._db["parent_chunks"].aggregate(pipeline):
-                ready_by_doc[str(row["_id"])] = int(
-                    row.get("retrieval_parent_count") or 0
-                ) <= int(row.get("with_summary") or 0)
+                with_summary = int(row.get("with_summary") or 0)
+                ready_by_doc[str(row["_id"])] = (
+                    int(row.get("retrieval_parent_count") or 0) <= with_summary,
+                    with_summary,
+                )
             if ready_by_doc:
                 now = datetime.utcnow()
                 await self._db["documents"].bulk_write(
@@ -3464,11 +3808,12 @@ class IngestionService:
                             {
                                 "$set": {
                                     "write_state.summaries_indexed": ready,
+                                    "write_state.summary_points": summary_points,
                                     "write_state.summary_backfilled_at": now,
                                 }
                             },
                         )
-                        for doc_id, ready in ready_by_doc.items()
+                        for doc_id, (ready, summary_points) in ready_by_doc.items()
                     ],
                     ordered=False,
                 )
@@ -3477,7 +3822,9 @@ class IngestionService:
         result = {
             "corpus_id": corpus_id,
             "status": after["status"],
-            "doc_scope_count": len(doc_id_filter) if doc_id_filter is not None else None,
+            "doc_scope_count": (
+                len(doc_id_filter) if doc_id_filter is not None else None
+            ),
             "generated": generated,
             "attempted": attempted,
             "indexed": indexed,
@@ -3531,7 +3878,9 @@ class IngestionService:
         )
 
         def _uses_managed_vllm(ref) -> bool:
-            from services.extraction_provider_cards import extraction_lane_uses_private_vllm
+            from services.extraction_provider_cards import (
+                extraction_lane_uses_private_vllm,
+            )
 
             return extraction_lane_uses_private_vllm(ref)
 
@@ -3546,10 +3895,13 @@ class IngestionService:
             if managed_vllm
             else settings.INGEST_MAX_MODEL_PHASE_DOCS
         )
-        extraction_concurrency = sum(
-            max(1, int(getattr(m, "max_concurrent", 1) or 1))
-            for m in extraction_pool
-        ) or settings.EXTRACTION_MAX_CONCURRENT
+        extraction_concurrency = (
+            sum(
+                max(1, int(getattr(m, "max_concurrent", 1) or 1))
+                for m in extraction_pool
+            )
+            or settings.EXTRACTION_MAX_CONCURRENT
+        )
         foreground_calls_per_child = min(
             settings.EXTRACTION_JSONL_MAX_CALLS,
             settings.EXTRACTION_FOREGROUND_MAX_CALLS,
@@ -3567,7 +3919,9 @@ class IngestionService:
         )
         warnings: list[str] = []
         if len(children) > 500:
-            warnings.append("High child-chunk count; ingest this file in a controlled batch.")
+            warnings.append(
+                "High child-chunk count; ingest this file in a controlled batch."
+            )
         if child_tokens and max(child_tokens) > settings.EXTRACTION_MAX_INPUT_TOKENS:
             warnings.append(
                 "At least one child chunk exceeds the Ghost B extraction input cap."
@@ -3580,7 +3934,9 @@ class IngestionService:
             "parent_count": len(parents),
             "child_count": len(children),
             "total_child_tokens": total_tokens,
-            "avg_child_tokens": round(total_tokens / len(children), 1) if children else 0,
+            "avg_child_tokens": (
+                round(total_tokens / len(children), 1) if children else 0
+            ),
             "max_child_tokens": max(child_tokens) if child_tokens else 0,
             "ghost_b_calls": graph_calls,
             "summary_calls": summary_calls,
@@ -3610,7 +3966,9 @@ class IngestionService:
                 "worst_case_completion_tokens": worst_case_completion_tokens,
             },
             "injected_headers": len(injected_headers),
-            "chunking_config": tier_chunker.describe_chunking(parse_result, ingestion_config),
+            "chunking_config": tier_chunker.describe_chunking(
+                parse_result, ingestion_config
+            ),
             "recommended_batch_size": 25 if len(children) < 500 else 10,
             "warnings": warnings,
         }

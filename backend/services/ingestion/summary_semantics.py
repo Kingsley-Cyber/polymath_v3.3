@@ -112,7 +112,21 @@ def _clean_generated_text(value, *, max_words: int | None = None) -> str:
         return ""
     if looks_like_raw_json_text(text):
         return ""
-    if text.startswith("```") or text.lower().startswith(("json ", "here is", "here's")):
+    # Reject provider wrappers, not legitimate subject matter.  The previous
+    # ``startswith("json ")`` guard erased valid summaries such as "JSON is
+    # nearly valid Python code", leaving fully formed provider artifacts
+    # quarantined as if every required field were missing.
+    if text.startswith("```") or re.match(
+        r"^json\s*(?::|\r?\n)\s*[\{\[]",
+        text,
+        flags=re.IGNORECASE,
+    ):
+        return ""
+    if re.match(
+        r"^here(?:\s+is|'s)\s+(?:the\s+)?(?:json|response|summary)\s*(?::|\r?\n)",
+        text,
+        flags=re.IGNORECASE,
+    ):
         return ""
     return _clip_words(text, max_words) if max_words else text
 

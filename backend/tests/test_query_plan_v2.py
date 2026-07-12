@@ -4,8 +4,10 @@ from services.retriever.query_plan import (
     contextualize_followup_query,
     query_plan_curation_query,
     query_plan_evidence_sides,
+    query_plan_execution_batches,
     query_plan_execution_lanes,
     query_plan_to_dict,
+    query_plan_vocabulary_lanes,
 )
 
 
@@ -22,6 +24,20 @@ def test_named_strategy_stays_one_phrase_lane():
     assert _core_phrases(plan.original_query) == ["Purple Ocean strategy"]
     assert "purple" not in [lane.lane_id for lane in plan.lanes]
     assert "ocean" not in [lane.lane_id for lane in plan.lanes]
+
+
+def test_compact_noun_phrase_is_one_complete_retrieval_obligation():
+    plan = build_query_plan_v2("UGC ad prompt")
+    execution_lanes = query_plan_execution_lanes(plan)
+
+    assert plan.concepts == ("UGC ad prompt",)
+    assert plan.complexity == "simple"
+    assert [probe.question for probe in plan.probes] == [
+        "What does the corpus establish about UGC ad prompt?"
+    ]
+    assert [lane.lane_id for lane in execution_lanes] == ["original", "primary"]
+    assert execution_lanes[1].phrase == "UGC ad prompt"
+    assert execution_lanes[1].required is True
 
 
 def test_uppercase_test_command_keeps_subject_and_drops_command_scaffolding():
@@ -66,6 +82,7 @@ def test_cross_domain_combine_preserves_both_semantic_sides():
     assert any("purple ocean strategy" == phrase for phrase in phrases)
     assert any("sticky messag" in phrase for phrase in phrases)
     assert not any(phrase in {"combine", "brand", "ecommerce"} for phrase in phrases)
+    assert "ecommerce offer" not in phrases
     assert "combine purple ocean" not in phrases
     assert plan.corpus_ids == ("marketing", "commerce")
     bridge = [lane for lane in plan.lanes if lane.role == "bridge"]
@@ -74,6 +91,26 @@ def test_cross_domain_combine_preserves_both_semantic_sides():
         lane.lane_id for lane in plan.lanes if lane.role == "core"
     }
     assert query_plan_curation_query(plan) == plan.original_query
+
+
+def test_comparative_application_target_is_context_not_required_side():
+    query = (
+        "Combine Purple Ocean strategy with sticky-message principles for an "
+        "ecommerce ad."
+    )
+    plan = build_query_plan_v2(query)
+    execution_lanes = query_plan_execution_lanes(plan)
+
+    assert plan.concepts == (
+        "Purple Ocean strategy",
+        "sticky-message principles",
+    )
+    assert [probe.probe_id for probe in plan.probes] == [
+        "purple_ocean_strategy",
+        "sticky_message_principles",
+        "relationship",
+    ]
+    assert "ecommerce ad" in execution_lanes[-1].query.lower()
 
 
 def test_compare_named_book_and_strategy_does_not_split_titles():
@@ -163,8 +200,8 @@ def test_multi_hop_plan_removes_imperative_scaffolding():
     sticky_lane = next(lane for lane in plan.lanes if lane.phrase == "sticky messaging")
     product_lane = next(lane for lane in plan.lanes if lane.phrase == "product page")
     assert sticky_lane.dense_text == "sticky messaging"
-    assert "made to stick" in sticky_lane.query
-    assert "made to stick" in sticky_lane.support_phrases
+    assert "made to stick" not in sticky_lane.query
+    assert "made to stick" not in sticky_lane.support_phrases
     assert product_lane.dense_text == "product page"
     assert "product detail page" in product_lane.query
 
@@ -173,7 +210,7 @@ def test_answer_object_books_survives_as_required_concept():
     plan = build_query_plan_v2("what books help with dropshipping and why?")
 
     assert plan.concepts == ("books", "dropshipping")
-    assert query_plan_curation_query(plan) == plan.standalone_query
+    assert query_plan_curation_query(plan) == plan.original_query
     assert "help" not in plan.concepts
     assert plan.answer_shape == "enumeration"
     books_lane = next(lane for lane in plan.lanes if lane.lane_id == "books")
@@ -270,12 +307,12 @@ def test_long_referential_followup_keeps_previous_subject_for_retrieval():
     execution_lanes = query_plan_execution_lanes(plan)
 
     assert standalone.startswith("Design an ad for a skincare product")
-    assert plan.original_query == query.rstrip("?")
+    assert plan.original_query == query
     assert plan.standalone_query == standalone
     assert "skincare product" in execution_lanes[1].dense_text
 
 
-def test_compound_creative_request_becomes_complete_answer_obligations():
+def test_compound_request_preserves_wording_across_answer_obligations():
     query = (
         "How can this product be used to find a target audience and how would "
         "this audience respond to the ad. How would I prompt the initial five "
@@ -289,6 +326,11 @@ def test_compound_creative_request_becomes_complete_answer_obligations():
     assert questions[0] == ("How can this product be used to find a target audience?")
     assert questions[1] == "How would this audience respond to the ad?"
     assert questions[2] == "How would I prompt the initial five second video?"
+    assert plan.probes[1].depends_on == (plan.probes[0].probe_id,)
+    assert query_plan_execution_batches(plan) == (
+        (plan.probes[0].probe_id, plan.probes[2].probe_id),
+        (plan.probes[1].probe_id,),
+    )
     assert all(probe.required for probe in plan.probes)
     assert all(len(probe.question.split()) >= 5 for probe in plan.probes)
     # Planning remains corpus-agnostic. Domain documents are discovered by
@@ -299,7 +341,46 @@ def test_compound_creative_request_becomes_complete_answer_obligations():
     )
 
 
-def test_declarative_context_is_not_misclassified_as_answer_obligation():
+def test_vocabulary_lanes_preserve_narrow_concepts_without_new_obligations():
+    plan = build_query_plan_v2("How should an actor's face move in the opening ad?")
+
+    vocabulary_lanes = query_plan_vocabulary_lanes(plan)
+
+    assert [lane.dense_text for lane in vocabulary_lanes] == [
+        "actor's",
+        "face",
+        "move",
+        "opening",
+    ]
+    assert all(lane.role == "background" for lane in vocabulary_lanes)
+    assert all(lane.required is False for lane in vocabulary_lanes)
+    assert not any(lane.dense_text == plan.original_query for lane in vocabulary_lanes)
+
+
+def test_multi_obligation_vocabulary_lanes_prioritize_complete_probes():
+    plan = build_query_plan_v2(
+        "How should a dropshipping ad identify a target audience, make the "
+        "message memorable, and stage the first five seconds of video?"
+    )
+
+    vocabulary_lanes = query_plan_vocabulary_lanes(plan)
+
+    assert vocabulary_lanes[0].lane_id.startswith("probe_")
+    assert "target audience" in vocabulary_lanes[0].dense_text
+    assert all(lane.required is False for lane in vocabulary_lanes)
+
+
+def test_modified_list_command_still_creates_enumeration_probe():
+    plan = build_query_plan_v2(
+        "List the unpopular books that made Mark rich and explain why."
+    )
+
+    assert plan.answer_shape == "enumeration"
+    assert plan.probes[0].answer_type == "enumeration"
+    assert "books" in plan.probes[0].concepts
+
+
+def test_declarative_context_does_not_trigger_topic_specific_rewriting():
     plan = build_query_plan_v2(
         "The product is a portable espresso maker. How do I identify its "
         "audience? How should I prompt the opening ad?"
@@ -309,6 +390,45 @@ def test_declarative_context_is_not_misclassified_as_answer_obligation():
         "How do I identify its audience?",
         "How should I prompt the opening ad?",
     ]
+
+
+def test_negative_constraints_do_not_become_positive_retrieval_concepts():
+    query = "Show only the product on white with no person or face."
+    plan = build_query_plan_v2(query)
+    execution_lanes = query_plan_execution_lanes(plan)
+
+    assert "face" not in {concept.casefold() for concept in plan.concepts}
+    assert "person" not in {concept.casefold() for concept in plan.concepts}
+    assert all(
+        "face" not in lane.lexical_terms and "person" not in lane.lexical_terms
+        for lane in execution_lanes
+        if lane.role == "core"
+    )
+    assert execution_lanes[0].query == query
+    exclusions = [
+        constraint
+        for constraint in plan.constraints
+        if constraint.operator == "exclude"
+    ]
+    assert [(constraint.text, constraint.terms) for constraint in exclusions] == [
+        ("person face", ("person", "face"))
+    ]
+    payload = query_plan_to_dict(plan)
+    assert payload["constraints"][0]["operator"] == "exclude"
+
+
+def test_answer_object_support_probe_keeps_its_own_semantic_intent():
+    plan = build_query_plan_v2("What books help with dropshipping and why?")
+    lanes = query_plan_execution_lanes(plan)
+
+    enumeration = next(lane for lane in lanes if lane.lane_id == "books")
+    justification = next(
+        lane for lane in lanes if lane.lane_id == "books_justification"
+    )
+
+    assert enumeration.dense_text.startswith("books book titles authors")
+    assert justification.dense_text.startswith("Why are the recommended books useful")
+    assert "Prerequisite questions:" in justification.dense_text
 
 
 def test_coordinated_objectives_in_one_question_become_complete_probes():
@@ -321,5 +441,21 @@ def test_coordinated_objectives_in_one_question_become_complete_probes():
         "How should a dropshipping ad identify a target audience?",
         "How should a dropshipping ad make the message memorable?",
         "How should a dropshipping ad stage the first five seconds of video?",
+    ]
+    assert all(probe.required for probe in plan.probes)
+
+
+def test_for_context_coordinated_objectives_become_independent_probes():
+    plan = build_query_plan_v2(
+        "For a dropshipping product, identify the target audience, make the "
+        "message memorable, and design the opening five seconds."
+    )
+
+    assert plan.complexity == "compositional"
+    assert plan.answer_shape == "synthesis"
+    assert [probe.question for probe in plan.probes] == [
+        "Identify the target audience for a dropshipping product?",
+        "Make the message memorable for a dropshipping product?",
+        "Design the opening five seconds for a dropshipping product?",
     ]
     assert all(probe.required for probe in plan.probes)

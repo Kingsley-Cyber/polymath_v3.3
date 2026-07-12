@@ -224,6 +224,7 @@ export interface ExtractionSettings {
   engine?:
     | "local"
     | "cloud"
+    | "runpod_flash"
     | "legacy_local"
     | "local_then_cloud"
     | "dual"
@@ -275,8 +276,49 @@ export interface GlobalIngestionSummarySettings {
   summary_models: ModelProfileRef[];
 }
 
+export interface RunpodFlashExtractionSettings {
+  enabled: boolean;
+  endpoint_id: string;
+  endpoint_name: string;
+  model_id: string;
+  model_revision: string;
+  spacy_pipeline: string;
+  min_workers: number;
+  max_workers: number;
+  worker_max_concurrency: number;
+  idle_timeout_seconds: number;
+  scaler_value: number;
+  request_batch_size: number;
+  request_concurrency: number;
+  timeout_seconds: number;
+  poll_interval_seconds: number;
+  entity_threshold: number;
+  adjacency_threshold: number;
+  relation_threshold: number;
+  entity_lens_enabled: boolean;
+  entity_lens_max_labels: number;
+  model_batch_size: number;
+  max_window_words: number;
+  benchmark_chunks: number;
+  target_speedup: number;
+  budget_cap_usd: number;
+  estimated_gpu_rate_per_second_usd: number;
+  cost_overhead_multiplier: number;
+}
+
+export interface RunpodFlashTestResult {
+  ok: boolean;
+  result_count: number;
+  failure_count: number;
+  entity_count: number;
+  relation_count: number;
+  metrics: Record<string, unknown>;
+  errors: string[];
+}
+
 export interface GlobalIngestionSettings {
   summary: GlobalIngestionSummarySettings;
+  runpod_flash: RunpodFlashExtractionSettings;
 }
 
 export interface GlobalSettings {
@@ -364,6 +406,9 @@ export interface RAGSettings {
   selectedCollectionIds: string[];
   retrievalTier: RetrievalTier;
   selectedCorpusIds: string[];
+  /** Per-turn planner exclusions. These suppress vocabulary expansions without
+   * mutating the corpus lexicon or any stored extraction artifact. */
+  disabledLexiconIds: string[];
 }
 
 /**

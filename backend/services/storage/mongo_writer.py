@@ -231,6 +231,64 @@ async def delete_document(
     return result.matched_count > 0
 
 
+async def retire_document_derived_state(
+    db: AsyncIOMotorDatabase,
+    *,
+    corpus_id: str,
+    doc_id: str,
+) -> dict[str, int]:
+    """Remove derived trees and retire durable jobs for a deleted document.
+
+    Queue history remains inspectable, but no old lease or terminal artifact
+    may masquerade as current truth when the same source is ingested again.
+    Summary-tree rows are derived and are deleted outright so legacy readers
+    that predate active-record filtering cannot reuse a stale document root.
+    """
+
+    now = datetime.utcnow()
+    tree_result = await db["summary_tree"].delete_many(
+        {"corpus_id": corpus_id, "doc_id": doc_id}
+    )
+    queue_counts: dict[str, int] = {}
+    for collection_name in (
+        "source_parse_jobs",
+        "document_pipeline_jobs",
+        "extraction_jobs",
+        "summary_jobs",
+        "graph_promotion_jobs",
+    ):
+        result = await db[collection_name].update_many(
+            {"corpus_id": corpus_id, "doc_id": doc_id},
+            {
+                "$set": {
+                    "status": "superseded",
+                    "reason": "document_deleted",
+                    "document_deleted_at": now,
+                    "updated_at": now,
+                    "lease_until": None,
+                },
+                "$unset": {"runner": "", "started_at": ""},
+            },
+        )
+        queue_counts[collection_name] = int(
+            getattr(result, "modified_count", 0) or 0
+        )
+    await db["ingest_batch_items"].update_many(
+        {"corpus_id": corpus_id, "doc_id": doc_id},
+        {
+            "$set": {
+                "document_deleted": True,
+                "document_deleted_at": now,
+                "updated_at": now,
+            }
+        },
+    )
+    return {
+        "summary_tree": int(getattr(tree_result, "deleted_count", 0) or 0),
+        **queue_counts,
+    }
+
+
 async def delete_ghost_b_extractions(
     db: AsyncIOMotorDatabase,
     doc_id: str,

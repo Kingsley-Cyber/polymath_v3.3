@@ -85,7 +85,12 @@ def extract_declared_source_url(data: bytes | str | None) -> str | None:
         return _clean_url_token(match.group(1))
     match = _ANY_YOUTUBE_URL_RE.search(text)
     if match:
-        return _clean_url_token(match.group(0))
+        candidate = _clean_url_token(match.group(0))
+        # An unlabeled channel/profile link in an ebook footer is provenance,
+        # not the identity of the uploaded document. Only a concrete video URL
+        # is strong enough to override the content hash without a declaration.
+        if extract_youtube_video_id(candidate):
+            return candidate
     return None
 
 

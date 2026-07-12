@@ -15,6 +15,14 @@ python-multipart>=0.0.20
 tokenizers>=0.20.0
 sentencepiece>=0.2.0
 
+# Default reranker path: Jina v3 listwise cross-encoder on Apple MPS.
+# Keep these in the reproducible runtime instead of relying on packages that
+# happen to exist in a developer's host Python environment.
+torch>=2.2.0
+transformers>=4.57.0,<6.0.0
+einops>=0.8.0
+safetensors>=0.4.0
+
 # HuggingFace cache + hub (model pull, not inference)
 huggingface_hub>=0.36.0
 hf_xet>=1.1.0

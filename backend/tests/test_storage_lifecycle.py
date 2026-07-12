@@ -2,7 +2,10 @@ import pytest
 
 from services.ingestion_service import IngestionService
 from services.storage.mongo_writer import delete_corpus
-from services.storage.mongo_writer import replace_relation_support_for_document
+from services.storage.mongo_writer import (
+    replace_relation_support_for_document,
+    retire_document_derived_state,
+)
 from services.storage.record_status import (
     ACTIVE_STATUS,
     DELETED_STATUS,
@@ -44,6 +47,7 @@ class _FakeCollection:
         self.update_many_calls = []
         self.update_one_calls = []
         self.bulk_ops = []
+        self.delete_many_calls = []
         self.fail_update_many = fail_update_many
 
     async def update_many(self, query, update):
@@ -60,6 +64,10 @@ class _FakeCollection:
         self.bulk_ops.extend(ops)
         self.ordered = ordered
         return None
+
+    async def delete_many(self, query):
+        self.delete_many_calls.append(query)
+        return _UpdateResult()
 
 
 class _FakeDb:
@@ -123,11 +131,52 @@ async def test_delete_corpus_unsets_deleting_marker():
 
 
 @pytest.mark.asyncio
+async def test_retire_document_derived_state_clears_tree_and_retires_jobs():
+    names = [
+        "summary_tree",
+        "source_parse_jobs",
+        "document_pipeline_jobs",
+        "extraction_jobs",
+        "summary_jobs",
+        "graph_promotion_jobs",
+        "ingest_batch_items",
+    ]
+    db = _FakeDb({name: _FakeCollection() for name in names})
+
+    result = await retire_document_derived_state(
+        db,
+        corpus_id="corpus-1",
+        doc_id="doc-1",
+    )
+
+    assert db["summary_tree"].delete_many_calls == [
+        {"corpus_id": "corpus-1", "doc_id": "doc-1"}
+    ]
+    for name in names[1:-1]:
+        query, update = db[name].update_many_calls[0]
+        assert query == {"corpus_id": "corpus-1", "doc_id": "doc-1"}
+        assert update["$set"]["status"] == "superseded"
+        assert update["$set"]["reason"] == "document_deleted"
+        assert update["$unset"] == {"runner": "", "started_at": ""}
+    batch_query, batch_update = db["ingest_batch_items"].update_many_calls[0]
+    assert batch_query == {"corpus_id": "corpus-1", "doc_id": "doc-1"}
+    assert batch_update["$set"]["document_deleted"] is True
+    assert result["summary_tree"] == 0
+
+
+@pytest.mark.asyncio
 async def test_background_purge_finalizes_corpus_when_chunk_cleanup_fails():
     service = IngestionService()
     corpora = _FakeCollection()
     chunks = _FakeCollection(fail_update_many=True)
-    service._db = _FakeDb({"corpora": corpora, "chunks": chunks})
+    service._db = _FakeDb(
+        {
+            "corpora": corpora,
+            "chunks": chunks,
+            "corpus_lexicon": _FakeCollection(),
+            "corpus_lexicon_sources": _FakeCollection(),
+        }
+    )
     service._settings.NEO4J_ENABLED = False
 
     await service._purge_corpus_bulk("corpus-1")

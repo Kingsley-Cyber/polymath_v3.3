@@ -342,6 +342,137 @@ def test_grounded_answerability_refusal_is_not_synthesis_drift():
     )
 
 
+def test_grounding_quality_scores_lexicon_routing_and_corpus_representation():
+    corpus_id = "ecommerce"
+    case = {
+        "expected_lexicon_terms": [["FACS", "Facial Action Coding System"]],
+        "document_route_patterns": [["facial action coding system"]],
+        "expected_corpus_ids": [corpus_id],
+        "min_lexicon_recall": 1.0,
+        "min_document_route_recall": 1.0,
+        "min_required_lane_coverage": 1.0,
+        "min_context_precision": 1.0,
+        "anchor_groups": [
+            {
+                "name": "face",
+                "terms": ["facial action coding system"],
+                "required": True,
+            }
+        ],
+    }
+    result = {
+        "answer": (
+            "The Facial Action Coding System gives the actor a concrete way "
+            "to control visible movement in the opening performance."
+        ),
+        "sources": [
+            {
+                "chunk_id": "c1",
+                "doc_id": "d1",
+                "corpus_id": corpus_id,
+                "text": "Facial Action Coding System evidence.",
+            }
+        ],
+        "trace_events": [
+            {
+                "title": "Local RAG retrieval",
+                "metadata": {
+                    "duration_s": 1.0,
+                    "effective_tier": "qdrant_mongo",
+                    "retrieval_diagnostics": {
+                        "vocabulary_resolution": {
+                            "matches": [
+                                {
+                                    "lexicon_id": "lex-facs",
+                                    "term": "Facial Action Coding System",
+                                    "aliases": ["FACS"],
+                                }
+                            ],
+                            "expansion": {
+                                "translation_lane_ids": ["translation_facs"],
+                                "required": False,
+                            },
+                        },
+                        "document_routing": {
+                            "routes": {
+                                "translation_facs": [
+                                    {
+                                        "corpus_id": corpus_id,
+                                        "doc_id": "d1",
+                                        "title": "Facial Action Coding System",
+                                    }
+                                ]
+                            }
+                        },
+                        "required_concept_coverage": {"coverage": 1.0},
+                    },
+                },
+            }
+        ],
+        "timings_s": {"total": 2.0, "retrieval_done_sources": 1.0},
+    }
+
+    validation = evaluate_route_result(
+        query_case=case,
+        route_name="Hybrid Search",
+        result=result,
+    )
+
+    assert validation["status"] == "pass"
+    quality = validation["grounding_quality"]
+    assert quality["lexicon_recall"] == 1.0
+    assert quality["document_route_recall"] == 1.0
+    assert quality["expected_corpus_coverage"] == 1.0
+    assert quality["context_precision"] == 1.0
+
+
+def test_negative_control_fails_when_forbidden_lexicon_is_introduced():
+    case = {
+        "forbidden_lexicon_terms": [["FACS", "Facial Action Coding System"]],
+        "anchor_groups": [
+            {"name": "product", "terms": ["product"], "required": True}
+        ],
+    }
+    result = {
+        "answer": "Show the product alone on a white background with no person present.",
+        "sources": [{"chunk_id": "c1", "doc_id": "d1", "text": "product"}],
+        "trace_events": [
+            {
+                "title": "Local RAG retrieval",
+                "metadata": {
+                    "duration_s": 1.0,
+                    "effective_tier": "qdrant_only",
+                    "retrieval_diagnostics": {
+                        "vocabulary_resolution": {
+                            "matches": [
+                                {
+                                    "lexicon_id": "lex-facs",
+                                    "term": "Facial Action Coding System",
+                                    "aliases": ["FACS"],
+                                }
+                            ],
+                            "expansion": {"required": False},
+                        }
+                    },
+                },
+            }
+        ],
+        "timings_s": {"total": 2.0, "retrieval_done_sources": 1.0},
+    }
+
+    validation = evaluate_route_result(
+        query_case=case,
+        route_name="Fast Search",
+        result=result,
+    )
+
+    assert validation["status"] == "fail"
+    assert any(
+        issue["code"] == "forbidden_vocabulary_expansion"
+        for issue in validation["issues"]
+    )
+
+
 def test_summarize_report_aggregates_route_budgets():
     results = [
         {
@@ -367,6 +498,8 @@ def test_summarize_report_aggregates_route_budgets():
     assert summary["Fast Search"]["cases"] == 2
     assert summary["Fast Search"]["failures"] == 1
     assert summary["Fast Search"]["warnings"] == 1
+    assert summary["Fast Search"]["p50_total_s"] == 1.6
+    assert summary["Fast Search"]["p95_total_s"] == 1.96
     assert summary["Fast Search"]["max_total_s"] == 2.0
 
 

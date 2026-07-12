@@ -3,14 +3,17 @@ import { useEffect, useRef, useState, type DependencyList } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
+  Ban,
   Clock,
   Copy,
   Check,
+  RotateCcw,
 } from "lucide-react";
 import type { ChatMessage } from "../../types";
 import type { ProcessTimelineItem } from "../../types";
 import type { TraceEvent } from "../../types";
 import type { StreamingToolActivity } from "../../stores/chatStore";
+import { useSettingsStore } from "../../stores/settingsStore";
 import { RetrievalBadge } from "./RetrievalBadge";
 
 interface MessageBubbleProps {
@@ -18,6 +21,7 @@ interface MessageBubbleProps {
   isStreaming?: boolean;
   toolActivity?: StreamingToolActivity[];
   processTimeline?: ProcessTimelineItem[];
+  onRerun?: () => void;
 }
 
 export function MessageBubble({
@@ -25,6 +29,7 @@ export function MessageBubble({
   isStreaming = false,
   toolActivity = [],
   processTimeline,
+  onRerun,
 }: MessageBubbleProps) {
   const [copied, setCopied] = useState(false);
   const [thinkingOpen, setThinkingOpen] = useState(isStreaming);
@@ -138,6 +143,7 @@ export function MessageBubble({
             items={visibleProcessTimeline}
             isStreaming={isStreaming}
             defaultOpen={!hasAssistantContent}
+            onRerun={onRerun}
           />
         )}
 
@@ -150,6 +156,7 @@ export function MessageBubble({
             open={traceOpen}
             isStreaming={isStreaming}
             onToggle={setTraceOpen}
+            onRerun={onRerun}
           />
         )}
 
@@ -486,10 +493,12 @@ function ProcessTimeline({
   items,
   isStreaming,
   defaultOpen = false,
+  onRerun,
 }: {
   items: ProcessTimelineItem[];
   isStreaming: boolean;
   defaultOpen?: boolean;
+  onRerun?: () => void;
 }) {
   const [manualOpenIds, setManualOpenIds] = useState<Set<string>>(
     () => new Set(),
@@ -544,6 +553,7 @@ function ProcessTimeline({
             open={open}
             active={active}
             onToggle={(nextOpen) => handleToggle(group.id, nextOpen)}
+            onRerun={onRerun}
           />
         );
       })}
@@ -557,12 +567,14 @@ function ProcessTimelineCard({
   open,
   active,
   onToggle,
+  onRerun,
 }: {
   group: ProcessGroup;
   index: number;
   open: boolean;
   active: boolean;
   onToggle: (open: boolean) => void;
+  onRerun?: () => void;
 }) {
   const bodyRef = useAutoScroll<HTMLDivElement>([
     group.items.length,
@@ -628,6 +640,7 @@ function ProcessTimelineCard({
                   key={item.id}
                   item={item}
                   index={itemIndex}
+                  onRerun={onRerun}
                 />
               ))
             )}
@@ -649,9 +662,11 @@ interface ProcessGroup {
 function ProcessTimelineRow({
   item,
   index,
+  onRerun,
 }: {
   item: ProcessTimelineItem;
   index: number;
+  onRerun?: () => void;
 }) {
   const content = [item.content, item.detail].filter(Boolean).join("\n\n");
   const modelCall = parseModelCallBlock(content);
@@ -671,6 +686,277 @@ function ProcessTimelineRow({
             {content}
           </div>
         )}
+        <VocabularyExpansionControls
+          metadata={item.metadata}
+          onRerun={onRerun}
+        />
+      </div>
+    </div>
+  );
+}
+
+interface VocabularyExpansionMatch {
+  lexicon_id: string;
+  canonical_name: string;
+  corpus_id?: string;
+  score?: number;
+  applicability?: string;
+  globalRank?: number;
+  corpusRank?: number;
+}
+
+function vocabularyMatchesFromMetadata(
+  metadata?: Record<string, unknown>,
+): {
+  matches: VocabularyExpansionMatch[];
+  rejectedCount: number;
+  translatedCount: number;
+  obligationCount: number;
+  executionBatchCount: number;
+  representedCorpusCount: number;
+  exclusions: string[];
+} {
+  const retrievalDiagnostics = metadata?.retrieval_diagnostics;
+  if (!retrievalDiagnostics || typeof retrievalDiagnostics !== "object") {
+    return {
+      matches: [],
+      rejectedCount: 0,
+      translatedCount: 0,
+      obligationCount: 0,
+      executionBatchCount: 0,
+      representedCorpusCount: 0,
+      exclusions: [],
+    };
+  }
+  const diagnostics = retrievalDiagnostics as Record<string, unknown>;
+  const vocabulary = diagnostics.vocabulary_resolution;
+  if (!vocabulary || typeof vocabulary !== "object") {
+    const probes = Array.isArray(diagnostics.probes) ? diagnostics.probes : [];
+    const executionBatches = Array.isArray(diagnostics.execution_batches)
+      ? diagnostics.execution_batches
+      : [];
+    const exclusions = (Array.isArray(diagnostics.constraints)
+      ? diagnostics.constraints
+      : []
+    )
+      .filter(
+        (value): value is Record<string, unknown> =>
+          Boolean(value) &&
+          typeof value === "object" &&
+          value.operator === "exclude",
+      )
+      .map((value) => String(value.text || "").trim())
+      .filter(Boolean);
+    return {
+      matches: [],
+      rejectedCount: 0,
+      translatedCount: 0,
+      obligationCount: probes.filter(
+        (value) =>
+          Boolean(value) &&
+          typeof value === "object" &&
+          (value as Record<string, unknown>).required !== false,
+      ).length,
+      executionBatchCount: executionBatches.length,
+      representedCorpusCount: 0,
+      exclusions,
+    };
+  }
+  const record = vocabulary as Record<string, unknown>;
+  const matches = (Array.isArray(record.matches) ? record.matches : [])
+    .filter(
+      (value): value is Record<string, unknown> =>
+        Boolean(value) && typeof value === "object",
+    )
+    .map((value) => ({
+      lexicon_id: String(value.lexicon_id || ""),
+      canonical_name: String(value.term || value.canonical_name || "").trim(),
+      corpus_id: value.corpus_id ? String(value.corpus_id) : undefined,
+      score:
+        typeof value.score === "number" && Number.isFinite(value.score)
+          ? value.score
+          : undefined,
+      applicability: value.applicability
+        ? String(value.applicability)
+        : undefined,
+      globalRank:
+        typeof value.global_rank === "number" ? value.global_rank : undefined,
+      corpusRank:
+        typeof value.corpus_rank === "number" ? value.corpus_rank : undefined,
+    }))
+    .filter((value) => value.lexicon_id && value.canonical_name)
+    .slice(0, 8);
+  const rejectedCount = Array.isArray(record.rejected_expansions)
+    ? record.rejected_expansions.length
+    : 0;
+  const expansion =
+    record.expansion && typeof record.expansion === "object"
+      ? (record.expansion as Record<string, unknown>)
+      : {};
+  const translatedCount = Array.isArray(expansion.translation_lane_ids)
+    ? expansion.translation_lane_ids.length
+    : 0;
+  const globalSearch =
+    record.global_search && typeof record.global_search === "object"
+      ? (record.global_search as Record<string, unknown>)
+      : {};
+  const representedCorpusCount = Array.isArray(
+    globalSearch.represented_corpus_ids,
+  )
+    ? globalSearch.represented_corpus_ids.length
+    : 0;
+  const probes = Array.isArray(diagnostics.probes) ? diagnostics.probes : [];
+  const executionBatches = Array.isArray(diagnostics.execution_batches)
+    ? diagnostics.execution_batches
+    : [];
+  const exclusions = (Array.isArray(diagnostics.constraints)
+    ? diagnostics.constraints
+    : []
+  )
+    .filter(
+      (value): value is Record<string, unknown> =>
+        Boolean(value) &&
+        typeof value === "object" &&
+        value.operator === "exclude",
+    )
+    .map((value) => String(value.text || "").trim())
+    .filter(Boolean);
+  return {
+    matches,
+    rejectedCount,
+    translatedCount,
+    obligationCount: probes.filter(
+      (value) =>
+        Boolean(value) &&
+        typeof value === "object" &&
+        (value as Record<string, unknown>).required !== false,
+    ).length,
+    executionBatchCount: executionBatches.length,
+    representedCorpusCount,
+    exclusions,
+  };
+}
+
+function VocabularyExpansionControls({
+  metadata,
+  onRerun,
+}: {
+  metadata?: Record<string, unknown>;
+  onRerun?: () => void;
+}) {
+  const {
+    matches,
+    rejectedCount,
+    translatedCount,
+    obligationCount,
+    executionBatchCount,
+    representedCorpusCount,
+    exclusions,
+  } =
+    vocabularyMatchesFromMetadata(metadata);
+  const disabledLexiconIds = useSettingsStore(
+    (state) => state.disabledLexiconIds,
+  );
+  const disableLexiconExpansion = useSettingsStore(
+    (state) => state.disableLexiconExpansion,
+  );
+  const enableLexiconExpansion = useSettingsStore(
+    (state) => state.enableLexiconExpansion,
+  );
+
+  if (matches.length === 0 && obligationCount === 0 && exclusions.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="mt-2 border-t border-white/10 pt-2">
+      <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
+        <span className="text-[9px] font-bold uppercase tracking-widest text-content-tertiary">
+          Retrieval plan · {obligationCount} obligations · {executionBatchCount} stages
+          {matches.length > 0 ? ` · ${matches.length} terms` : ""}
+          {representedCorpusCount > 0
+            ? ` · ${representedCorpusCount} corpora`
+            : ""}
+          {translatedCount > 0 ? ` · ${translatedCount} expansions` : ""}
+          {rejectedCount > 0 ? ` · ${rejectedCount} rejected` : ""}
+        </span>
+        {onRerun && (
+          <button
+            type="button"
+            onClick={onRerun}
+            className="inline-flex h-7 items-center gap-1 rounded border border-border-minimal px-2 text-[9px] font-bold uppercase tracking-widest text-content-secondary hover:border-accent-main hover:text-accent-main"
+            title="Rerun the previous query using the current expansion exclusions"
+          >
+            <RotateCcw className="h-3 w-3" />
+            Rerun
+          </button>
+        )}
+      </div>
+      {exclusions.length > 0 && (
+        <div className="mb-1.5 flex flex-wrap gap-1.5">
+          {exclusions.map((exclusion) => (
+            <span
+              key={exclusion}
+              className="inline-flex max-w-64 truncate rounded border border-amber-500/35 bg-amber-950/20 px-1.5 py-1 text-[9px] text-amber-100"
+              title={`Excluded constraint: ${exclusion}`}
+            >
+              Exclude: {exclusion}
+            </span>
+          ))}
+        </div>
+      )}
+      <div className="flex flex-wrap gap-1.5">
+        {matches.map((match) => {
+          const disabled = disabledLexiconIds.includes(match.lexicon_id);
+          return (
+            <div
+              key={`${match.corpus_id || "corpus"}:${match.lexicon_id}`}
+              className={`inline-flex min-w-0 items-center gap-1 rounded border px-1.5 py-1 text-[9px] ${
+                disabled
+                  ? "border-amber-500/40 bg-amber-950/25 text-amber-200"
+                  : "border-emerald-500/25 bg-emerald-950/15 text-emerald-100"
+              }`}
+              title={`${match.applicability || "grounded"}${
+                match.score === undefined ? "" : ` · score ${match.score.toFixed(3)}`
+              }${
+                match.globalRank === undefined
+                  ? ""
+                  : ` · global #${match.globalRank}`
+              }${
+                match.corpusRank === undefined
+                  ? ""
+                  : ` · corpus #${match.corpusRank}`
+              } · ${match.lexicon_id}`}
+            >
+              <span className="max-w-48 truncate">{match.canonical_name}</span>
+              <button
+                type="button"
+                onClick={() =>
+                  disabled
+                    ? enableLexiconExpansion(match.lexicon_id)
+                    : disableLexiconExpansion(match.lexicon_id)
+                }
+                className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded hover:bg-white/10"
+                aria-label={
+                  disabled
+                    ? `Restore ${match.canonical_name} expansion`
+                    : `Exclude ${match.canonical_name} expansion`
+                }
+                title={
+                  disabled
+                    ? "Restore this expansion for the next query"
+                    : "Exclude this expansion from the next query"
+                }
+              >
+                {disabled ? (
+                  <RotateCcw className="h-3 w-3" />
+                ) : (
+                  <Ban className="h-3 w-3" />
+                )}
+              </button>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -1142,11 +1428,13 @@ function TracePanel({
   open,
   isStreaming,
   onToggle,
+  onRerun,
 }: {
   events: TraceEvent[];
   open: boolean;
   isStreaming: boolean;
   onToggle: (open: boolean) => void;
+  onRerun?: () => void;
 }) {
   const active = isStreaming;
   const bodyRef = useAutoScroll<HTMLDivElement>([
@@ -1192,7 +1480,11 @@ function TracePanel({
                 </div>
               )}
               {events.map((event) => (
-                <TraceEventRow key={event.id} event={event} />
+                <TraceEventRow
+                  key={event.id}
+                  event={event}
+                  onRerun={onRerun}
+                />
               ))}
             </div>
           </div>
@@ -1328,7 +1620,13 @@ function GeneratingIndicator({ label = "GENERATING" }: { label?: string }) {
   );
 }
 
-function TraceEventRow({ event }: { event: TraceEvent }) {
+function TraceEventRow({
+  event,
+  onRerun,
+}: {
+  event: TraceEvent;
+  onRerun?: () => void;
+}) {
   const statusBadge = badgeForStatus(event.status);
 
   return (
@@ -1346,6 +1644,10 @@ function TraceEventRow({ event }: { event: TraceEvent }) {
           {event.content}
         </div>
       )}
+      <VocabularyExpansionControls
+        metadata={event.metadata}
+        onRerun={onRerun}
+      />
     </div>
   );
 }

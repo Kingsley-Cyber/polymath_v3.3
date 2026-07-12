@@ -4,7 +4,8 @@ import pytest
 
 from scripts.polymath_summary_backfill_scoped import _summary_plan
 from services.ghost_a import SummaryResult
-from services.ingestion.summary_backfill import summary_result_fields
+from services.ingestion.summary_backfill import summary_index_text, summary_result_fields
+from services.ingestion.summary_semantics import repair_parent_summary_row
 
 
 class _Cursor:
@@ -159,3 +160,30 @@ def test_summary_result_fields_preserves_canonical_artifact_metadata():
     assert fields["validation_status"] == "valid"
     assert fields["source_child_ids"] == ["chunk-1"]
     assert fields["summary_updated_at"] == updated_at
+
+
+def test_summary_index_text_prefers_canonical_retrieval_artifact():
+    row = {
+        "summary": "Short prose.",
+        "retrieval_text": "Central claim plus grounded key points.",
+    }
+
+    assert summary_index_text(row) == "Central claim plus grounded key points."
+
+
+def test_summary_index_text_repairs_legacy_structured_artifact():
+    row = {
+        "parent_id": "parent-1",
+        "doc_id": "doc-1",
+        "corpus_id": "corpus-1",
+        "summary": "Short prose.",
+        "central_claim": "The canonical claim carries more retrieval detail.",
+        "key_points": ["First grounded point.", "Second grounded point."],
+        "source_child_ids": ["chunk-1"],
+    }
+
+    text = summary_index_text(row)
+
+    assert text != row["summary"]
+    assert text == repair_parent_summary_row(row)["retrieval_text"]
+    assert "The canonical claim carries more retrieval detail." in text

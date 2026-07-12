@@ -64,6 +64,13 @@ def expected_summary_points_from_state(write_state: Any) -> int | None:
     strict Mongo derivation and real missing-vector cases still fail."""
     if not isinstance(write_state, dict):
         return None
+    # A later summary backfill supersedes the count stamped by the original
+    # child-vector write. Legacy documents commonly carry summary_points=0
+    # even though a subsequent backfill indexed hundreds of parent summaries.
+    # Derive from current Mongo parents in that case instead of preserving a
+    # stale writer snapshot forever.
+    if write_state.get("summary_backfilled_at"):
+        return None
     pts = write_state.get("summary_points")
     if isinstance(pts, bool):  # bool is an int subclass — reject explicitly
         return None
@@ -81,7 +88,11 @@ async def _expected_summary_count(
     """Return Mongo parent summaries that should have Qdrant summary points."""
     doc_state = await db["documents"].find_one(
         {"doc_id": doc_id, "corpus_id": corpus_id},
-        {"_id": 0, "write_state.summary_points": 1},
+        {
+            "_id": 0,
+            "write_state.summary_points": 1,
+            "write_state.summary_backfilled_at": 1,
+        },
     )
     stamped = expected_summary_points_from_state(
         (doc_state or {}).get("write_state")
@@ -233,23 +244,27 @@ async def _verify_qdrant_text_contract(
         doc_id=doc_id,
         corpus_id=corpus_id,
     )
-    missing = 0
-    text_mismatch = 0
-    contract_mismatch = 0
-    examples: list[str] = []
+    mismatch_counts = {
+        "child": {"missing": 0, "text": 0, "contract": 0, "examples": []},
+        "summary": {"missing": 0, "text": 0, "contract": 0, "examples": []},
+    }
     for payload in payloads:
+        payload_kind = (
+            "summary" if payload.get("chunk_type") == "summary" else "child"
+        )
+        counts = mismatch_counts[payload_kind]
         chunk_id = str(payload.get("chunk_id") or "")
         if not chunk_id:
             continue
         expected = expected_by_id.get(chunk_id)
         if expected is None:
-            missing += 1
+            counts["missing"] += 1
             continue
         actual = str(payload.get("chunk_text") or payload.get("text") or "")
         if actual != expected:
-            text_mismatch += 1
-            if len(examples) < 2:
-                examples.append(
+            counts["text"] += 1
+            if len(counts["examples"]) < 2:
+                counts["examples"].append(
                     f"{chunk_id[:16]} qdrant_len={len(actual)} mongo_len={len(expected)}"
                 )
         contract = payload_text_contract(expected)
@@ -262,19 +277,27 @@ async def _verify_qdrant_text_contract(
             or payload.get("text_hash") != contract["text_hash"]
             or payload.get("is_truncated") is not False
         ):
-            contract_mismatch += 1
+            counts["contract"] += 1
 
-    if missing:
-        errors.append(f"{collection_name}: {missing} payload(s) missing Mongo text")
-    if text_mismatch:
-        suffix = f" examples={examples}" if examples else ""
-        errors.append(
-            f"{collection_name}: {text_mismatch} payload text mismatch(es){suffix}"
-        )
-    if contract_mismatch:
-        errors.append(
-            f"{collection_name}: {contract_mismatch} payload text contract mismatch(es)"
-        )
+    for payload_kind, counts in mismatch_counts.items():
+        if counts["missing"]:
+            errors.append(
+                f"{collection_name}: {counts['missing']} {payload_kind} payload(s) "
+                "missing Mongo text"
+            )
+        if counts["text"]:
+            suffix = (
+                f" examples={counts['examples']}" if counts["examples"] else ""
+            )
+            errors.append(
+                f"{collection_name}: {counts['text']} {payload_kind} payload text "
+                f"mismatch(es){suffix}"
+            )
+        if counts["contract"]:
+            errors.append(
+                f"{collection_name}: {counts['contract']} {payload_kind} payload "
+                "text contract mismatch(es)"
+            )
     return errors
 
 

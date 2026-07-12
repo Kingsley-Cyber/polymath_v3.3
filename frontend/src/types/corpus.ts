@@ -139,8 +139,13 @@ export interface IngestionConfig {
 
 export type IngestionPreset = "fast" | "balanced" | "deep" | "custom";
 // mac_queryable_first/mac_safe are displayed as "Mac optimized": one active
-// local document, retrieval-first sweeps, and bounded phase-level parallelism.
-export type IngestProfileName = "mac_safe" | "mac_queryable_first" | "rtx_assisted";
+// local document and retrieval-first sweeps. runpod_burst keeps the full
+// summary/extraction pipeline active while remote extraction scales out.
+export type IngestProfileName =
+  | "mac_safe"
+  | "mac_queryable_first"
+  | "rtx_assisted"
+  | "runpod_burst";
 
 /** Open-time preset inference — used by the corpus create/edit forms to
  * decide which radio option to pre-select. If the stored preset disagrees
@@ -314,6 +319,10 @@ export interface CorpusReadiness {
     failed: number;
     coverage: number;
     fully_enriched_coverage: number;
+    lexicon_tracked?: number;
+    lexicon_ready?: number;
+    lexicon_pending?: number;
+    lexicon_coverage?: number;
     stage_counts: Record<string, number>;
   };
   chunks?: {
@@ -370,6 +379,10 @@ export interface CorpusReadiness {
     document_profile_only?: number;
     document_tree_only?: number;
     document_mismatch?: number;
+    summary_tree_index_tracked?: number;
+    summary_tree_index_ready?: number;
+    summary_tree_index_pending?: number;
+    summary_tree_index_coverage?: number;
   };
   graph?: {
     required: boolean;
@@ -791,6 +804,7 @@ export type ExtractionEngine =
   | "off"
   | "local"
   | "cloud"
+  | "runpod_flash"
   | "legacy_local"
   | "dual"
   | "local_then_cloud"
@@ -855,6 +869,16 @@ export interface ExtractionContractResponse {
       error?: string | null;
     } | null;
   }>;
+  runpod_flash?: {
+    enabled: boolean;
+    configured: boolean;
+    endpoint_id: string | null;
+    endpoint_name: string;
+    model_id: string;
+    request_batch_size: number;
+    request_concurrency: number;
+    max_workers: number;
+  } | null;
   endpoints: Array<{
     label?: string | null;
     url: string;

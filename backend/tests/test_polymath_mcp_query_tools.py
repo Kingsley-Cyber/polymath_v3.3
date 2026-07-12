@@ -180,6 +180,7 @@ async def test_mcp_search_uses_top_down_plan_when_enabled(monkeypatch, system_us
         query="what books help with dropshipping and why?",
         corpus_ids=["c1"],
         retrieval_tier="qdrant_mongo",
+        disabled_lexicon_ids=["lexicon:c1:noise"],
         similarity_threshold=0.2,
         neo4j_expansion_cap=7,
         max_corpora_per_query=1,
@@ -189,6 +190,7 @@ async def test_mcp_search_uses_top_down_plan_when_enabled(monkeypatch, system_us
     assert captured["similarity_threshold"] == 0.2
     assert captured["neo4j_expansion_cap"] == 7
     assert captured["max_corpora_per_query"] == 1
+    assert captured["disabled_lexicon_ids"] == ["lexicon:c1:noise"]
     assert result["retrieval"]["diagnostics"]["document_routing"] == {
         "routed_doc_count": 2
     }
@@ -249,6 +251,7 @@ async def test_mcp_chat_query_allows_multi_corpus_and_passes_new_options(
         web_research_mode=True,
         web_youtube_transcripts=True,
         web_max_sources=9,
+        disabled_lexicon_ids=["lexicon:a:noise"],
         selected_tools=["web_search"],
         active_skill_ids=["skill1"],
     )
@@ -274,6 +277,7 @@ async def test_mcp_chat_query_allows_multi_corpus_and_passes_new_options(
     assert request.overrides.web_research_mode is True
     assert request.overrides.web_youtube_transcripts is True
     assert request.overrides.web_max_sources == 9
+    assert request.overrides.disabled_lexicon_ids == ["lexicon:a:noise"]
 
 
 @pytest.mark.asyncio

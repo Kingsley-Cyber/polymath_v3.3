@@ -56,6 +56,18 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
             "tokenizer_config.json",
         ),
     ),
+    ModelSpec(
+        role="reranker_cross_encoder",
+        env_var="APPLE_TORCH_RERANKER_MODEL_ID",
+        default_repo_id="jinaai/jina-reranker-v3",
+        required_files=(
+            "config.json",
+            "model.safetensors",
+            "modeling.py",
+            "tokenizer.json",
+            "tokenizer_config.json",
+        ),
+    ),
 )
 
 ALLOW_PATTERNS: list[str] = [

@@ -10,6 +10,7 @@ returned as final citation evidence.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import math
 from dataclasses import dataclass
@@ -22,6 +23,8 @@ from services.retriever.tier0_router import DocumentRoute
 logger = logging.getLogger(__name__)
 
 EmbedFn = Callable[[list[str], dict[str, Any] | None], Awaitable[list[list[float]]]]
+TreeSearchFn = Callable[..., Awaitable[list[dict[str, Any]]]]
+BatchTreeSearchFn = Callable[..., Awaitable[list[list[dict[str, Any]]]]]
 
 
 @dataclass(frozen=True)
@@ -41,6 +44,8 @@ class SummaryTreeRoute:
     section_ids: tuple[str, ...]
     rollup_ids: tuple[str, ...]
     parent_ids: tuple[str, ...]
+    lexicon_ids: tuple[str, ...] = ()
+    document_title: str = ""
 
 
 def _cosine(left: list[float], right: list[float]) -> float:
@@ -91,6 +96,309 @@ def select_collapsed_tree_nodes(
     return selected
 
 
+async def _navigate_indexed_tree(
+    *,
+    qdrant_client: Any,
+    search_fn: TreeSearchFn,
+    usable_lanes: dict[str, list[float]],
+    document_routes: dict[str, list[DocumentRoute]],
+    diagnostics: dict[str, Any],
+    max_parent_ids_per_document: int,
+    batch_search_fn: BatchTreeSearchFn | None = None,
+) -> dict[str, list[SummaryTreeRoute]] | None:
+    """Search persisted tree vectors and descend through Mongo tree pointers."""
+
+    section_specs = [
+        (lane_id, str(route.corpus_id), str(route.doc_id), query_vector)
+        for lane_id, query_vector in usable_lanes.items()
+        for route in document_routes.get(lane_id, [])
+    ]
+    document_titles = {
+        (lane_id, str(route.corpus_id), str(route.doc_id)): str(route.title or "")
+        for lane_id, routes in document_routes.items()
+        for route in routes
+    }
+
+    async def search_sections(spec):
+        lane_id, corpus_id, doc_id, query_vector = spec
+        try:
+            rows = await search_fn(
+                qdrant_client,
+                corpus_id,
+                query_vec=query_vector,
+                doc_id=doc_id,
+                node_type="section",
+                top_k=10,
+            )
+            return lane_id, corpus_id, doc_id, rows, None
+        except Exception as exc:  # noqa: BLE001 - legacy fallback remains available
+            return lane_id, corpus_id, doc_id, [], exc
+
+    if batch_search_fn is None:
+        section_results = await asyncio.gather(
+            *(search_sections(spec) for spec in section_specs)
+        )
+    else:
+        section_specs_by_corpus: dict[str, list[tuple]] = {}
+        for spec in section_specs:
+            section_specs_by_corpus.setdefault(spec[1], []).append(spec)
+
+        async def search_section_batch(corpus_id: str, specs: list[tuple]):
+            try:
+                rows = await batch_search_fn(
+                    qdrant_client,
+                    corpus_id,
+                    queries=[
+                        {
+                            "query_vec": query_vector,
+                            "doc_id": doc_id,
+                            "node_type": "section",
+                            "top_k": 10,
+                        }
+                        for _lane_id, _corpus_id, doc_id, query_vector in specs
+                    ],
+                )
+                return [
+                    (lane_id, corpus_id, doc_id, hits, None)
+                    for (lane_id, _corpus_id, doc_id, _query_vector), hits in zip(
+                        specs,
+                        rows,
+                        strict=True,
+                    )
+                ]
+            except Exception as exc:  # noqa: BLE001 - legacy fallback remains available
+                return [
+                    (lane_id, corpus_id, doc_id, [], exc)
+                    for lane_id, _corpus_id, doc_id, _query_vector in specs
+                ]
+
+        section_groups = await asyncio.gather(
+            *(
+                search_section_batch(corpus_id, specs)
+                for corpus_id, specs in section_specs_by_corpus.items()
+            )
+        )
+        section_results = [row for group in section_groups for row in group]
+    selected_sections: dict[tuple[str, str, str], list[TreeNodeCandidate]] = {}
+    lexicon_ids_by_node: dict[str, list[str]] = {}
+    payload_by_node: dict[str, dict[str, Any]] = {}
+    indexed_hit_count = 0
+    for lane_id, corpus_id, doc_id, hits, error in section_results:
+        if error is not None:
+            diagnostics["failures"].append(
+                f"indexed section search: {type(error).__name__}: {error}"[:240]
+            )
+        indexed_hit_count += len(hits)
+        for row in hits:
+            node_id = str(row.get("node_id") or "")
+            if node_id:
+                payload_by_node[node_id] = row
+                lexicon_ids_by_node[node_id] = [
+                    str(value) for value in (row.get("lexicon_ids") or []) if str(value)
+                ]
+        candidates = [
+            TreeNodeCandidate(
+                node_id=str(row.get("node_id") or ""),
+                node_type="section",
+                score=float(row.get("score") or 0.0),
+                token_estimate=max(1, int(row.get("token_estimate") or 1)),
+            )
+            for row in hits
+            if str(row.get("node_id") or "")
+        ]
+        selected_sections[(lane_id, corpus_id, doc_id)] = select_collapsed_tree_nodes(
+            candidates,
+            max_keep=5,
+            max_tokens=1200,
+        )
+
+    rollup_specs: list[
+        tuple[str, str, str, list[TreeNodeCandidate], list[str], list[float]]
+    ] = []
+    for lane_id, query_vector in usable_lanes.items():
+        for route in document_routes.get(lane_id, []):
+            corpus_id, doc_id = str(route.corpus_id), str(route.doc_id)
+            pair = (corpus_id, doc_id)
+            selected = selected_sections.get((lane_id, corpus_id, doc_id), [])
+            allowed_ids = list(
+                dict.fromkeys(
+                    str(value)
+                    for section in selected
+                    for value in (payload_by_node.get(section.node_id) or {}).get(
+                        "child_node_ids", []
+                    )
+                    if str(value)
+                )
+            )
+            rollup_specs.append(
+                (lane_id, corpus_id, doc_id, selected, allowed_ids, query_vector)
+            )
+
+    async def search_rollups(spec):
+        lane_id, corpus_id, doc_id, selected, allowed_ids, query_vector = spec
+        try:
+            rows = await search_fn(
+                qdrant_client,
+                corpus_id,
+                query_vec=query_vector,
+                doc_id=doc_id,
+                node_type="rollup",
+                node_ids=allowed_ids,
+                top_k=8,
+            )
+            return lane_id, corpus_id, doc_id, selected, rows, None
+        except Exception as exc:  # noqa: BLE001 - legacy fallback remains available
+            return lane_id, corpus_id, doc_id, selected, [], exc
+
+    if batch_search_fn is None:
+        rollup_results = await asyncio.gather(
+            *(search_rollups(spec) for spec in rollup_specs)
+        )
+    else:
+        rollup_specs_by_corpus: dict[str, list[tuple]] = {}
+        for spec in rollup_specs:
+            rollup_specs_by_corpus.setdefault(spec[1], []).append(spec)
+
+        async def search_rollup_batch(corpus_id: str, specs: list[tuple]):
+            try:
+                rows = await batch_search_fn(
+                    qdrant_client,
+                    corpus_id,
+                    queries=[
+                        {
+                            "query_vec": query_vector,
+                            "doc_id": doc_id,
+                            "node_type": "rollup",
+                            "node_ids": allowed_ids,
+                            "top_k": 8,
+                        }
+                        for (
+                            _lane_id,
+                            _corpus_id,
+                            doc_id,
+                            _selected,
+                            allowed_ids,
+                            query_vector,
+                        ) in specs
+                    ],
+                )
+                return [
+                    (lane_id, corpus_id, doc_id, selected, hits, None)
+                    for (
+                        lane_id,
+                        _corpus_id,
+                        doc_id,
+                        selected,
+                        _allowed_ids,
+                        _query_vector,
+                    ), hits in zip(specs, rows, strict=True)
+                ]
+            except Exception as exc:  # noqa: BLE001 - legacy fallback remains available
+                return [
+                    (lane_id, corpus_id, doc_id, selected, [], exc)
+                    for (
+                        lane_id,
+                        _corpus_id,
+                        doc_id,
+                        selected,
+                        _allowed_ids,
+                        _query_vector,
+                    ) in specs
+                ]
+
+        rollup_groups = await asyncio.gather(
+            *(
+                search_rollup_batch(corpus_id, specs)
+                for corpus_id, specs in rollup_specs_by_corpus.items()
+            )
+        )
+        rollup_results = [row for group in rollup_groups for row in group]
+    output: dict[str, list[SummaryTreeRoute]] = {
+        lane_id: [] for lane_id in usable_lanes
+    }
+    for (
+        lane_id,
+        corpus_id,
+        doc_id,
+        selected_sections_for_route,
+        hits,
+        error,
+    ) in rollup_results:
+        if error is not None:
+            diagnostics["failures"].append(
+                f"indexed rollup search: {type(error).__name__}: {error}"[:240]
+            )
+        indexed_hit_count += len(hits)
+        for row in hits:
+            node_id = str(row.get("node_id") or "")
+            if node_id:
+                payload_by_node[node_id] = row
+                lexicon_ids_by_node[node_id] = [
+                    str(value) for value in (row.get("lexicon_ids") or []) if str(value)
+                ]
+        rollup_candidates = [
+            TreeNodeCandidate(
+                node_id=str(row.get("node_id") or ""),
+                node_type="rollup",
+                score=float(row.get("score") or 0.0),
+                token_estimate=max(1, int(row.get("token_estimate") or 1)),
+            )
+            for row in hits
+            if str(row.get("node_id") or "")
+        ]
+        selected_rollups = select_collapsed_tree_nodes(
+            rollup_candidates,
+            min_keep=1,
+            max_keep=4,
+            max_tokens=900,
+        )
+        if not selected_rollups:
+            continue
+        section_ids = [item.node_id for item in selected_sections_for_route]
+        rollup_ids = [item.node_id for item in selected_rollups]
+        parent_ids = list(
+            dict.fromkeys(
+                str(value)
+                for rollup_id in rollup_ids
+                for value in (payload_by_node.get(rollup_id) or {}).get(
+                    "parent_ids", []
+                )
+                if str(value)
+            )
+        )[: max(1, int(max_parent_ids_per_document))]
+        if not parent_ids:
+            continue
+        output[lane_id].append(
+            SummaryTreeRoute(
+                lane_id=lane_id,
+                corpus_id=corpus_id,
+                doc_id=doc_id,
+                selected_node_ids=tuple([*section_ids, *rollup_ids]),
+                section_ids=tuple(section_ids),
+                rollup_ids=tuple(rollup_ids),
+                parent_ids=tuple(parent_ids),
+                lexicon_ids=tuple(
+                    list(
+                        dict.fromkeys(
+                            lexicon_id
+                            for node_id in [*section_ids, *rollup_ids]
+                            for lexicon_id in lexicon_ids_by_node.get(node_id, [])
+                        )
+                    )[:96]
+                ),
+                document_title=document_titles.get((lane_id, corpus_id, doc_id), ""),
+            )
+        )
+
+    if indexed_hit_count == 0:
+        return None
+    diagnostics["vector_source"] = "qdrant_preembedded"
+    diagnostics["indexed_hit_count"] = indexed_hit_count
+    diagnostics["embedded_section_count"] = 0
+    diagnostics["embedded_rollup_count"] = 0
+    return output
+
+
 class SummaryTreeNavigator:
     async def navigate(
         self,
@@ -99,7 +407,10 @@ class SummaryTreeNavigator:
         document_routes: dict[str, list[DocumentRoute]],
         embedding_config: dict[str, Any] | None = None,
         db: Any | None = None,
+        qdrant_client: Any | None = None,
         embed_fn: EmbedFn = embed_queries,
+        tree_search_fn: TreeSearchFn | None = None,
+        tree_batch_search_fn: BatchTreeSearchFn | None = None,
         max_nodes_per_document: int = 180,
         max_parent_ids_per_document: int = 48,
     ) -> tuple[dict[str, list[SummaryTreeRoute]], dict[str, Any]]:
@@ -124,8 +435,58 @@ class SummaryTreeNavigator:
             for route in document_routes.get(lane_id, [])
             if route.corpus_id and route.doc_id
         }
-        if database is None or not usable_lanes or not route_pairs:
-            diagnostics["reason"] = "missing_database_vectors_or_document_routes"
+        if not usable_lanes or not route_pairs:
+            diagnostics["reason"] = "missing_vectors_or_document_routes"
+            return {}, diagnostics
+
+        if qdrant_client is not None:
+            if tree_search_fn is None:
+                from services.storage.qdrant_writer import (
+                    search_summary_tree_entries,
+                    search_summary_tree_entries_batch,
+                )
+
+                tree_search_fn = search_summary_tree_entries
+                tree_batch_search_fn = search_summary_tree_entries_batch
+            indexed_output = await _navigate_indexed_tree(
+                qdrant_client=qdrant_client,
+                search_fn=tree_search_fn,
+                usable_lanes=usable_lanes,
+                document_routes=document_routes,
+                diagnostics=diagnostics,
+                max_parent_ids_per_document=max_parent_ids_per_document,
+                batch_search_fn=tree_batch_search_fn,
+            )
+            if indexed_output is not None:
+                output = indexed_output
+                diagnostics["routes"] = {
+                    lane_id: [
+                        {
+                            "corpus_id": route.corpus_id,
+                            "doc_id": route.doc_id,
+                            "selected_node_ids": list(route.selected_node_ids),
+                            "section_ids": list(route.section_ids),
+                            "rollup_ids": list(route.rollup_ids),
+                            "parent_count": len(route.parent_ids),
+                            "lexicon_count": len(route.lexicon_ids),
+                        }
+                        for route in routes
+                    ]
+                    for lane_id, routes in output.items()
+                }
+                diagnostics["routed_document_count"] = sum(
+                    len(routes) for routes in output.values()
+                )
+                diagnostics["parent_id_count"] = sum(
+                    len(route.parent_ids)
+                    for routes in output.values()
+                    for route in routes
+                )
+                return output, diagnostics
+            diagnostics["index_fallback"] = "no_indexed_tree_points"
+
+        if database is None:
+            diagnostics["reason"] = "summary_tree_index_unavailable"
             return {}, diagnostics
 
         pair_filters = [
@@ -277,6 +638,7 @@ class SummaryTreeNavigator:
                 return {}, diagnostics
         diagnostics["embedded_section_count"] = len(section_ids)
         diagnostics["embedded_rollup_count"] = len(rollup_ids)
+        diagnostics["vector_source"] = "query_time_embedding_fallback"
 
         output: dict[str, list[SummaryTreeRoute]] = {}
         for lane_id, query_vector in usable_lanes.items():
@@ -354,6 +716,7 @@ class SummaryTreeNavigator:
                         section_ids=tuple(selected_section_ids),
                         rollup_ids=tuple(selected_rollup_ids),
                         parent_ids=tuple(parent_ids),
+                        document_title=str(document_route.title or ""),
                     )
                 )
             output[lane_id] = lane_routes
@@ -367,6 +730,7 @@ class SummaryTreeNavigator:
                     "section_ids": list(route.section_ids),
                     "rollup_ids": list(route.rollup_ids),
                     "parent_count": len(route.parent_ids),
+                    "lexicon_count": len(route.lexicon_ids),
                 }
                 for route in routes
             ]

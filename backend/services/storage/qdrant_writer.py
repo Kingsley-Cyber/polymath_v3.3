@@ -34,10 +34,13 @@ from qdrant_client.models import (
     Distance,
     FieldCondition,
     Filter,
+    MatchAny,
     MatchValue,
     Modifier,
     PayloadSchemaType,
+    PointIdsList,
     PointStruct,
+    QueryRequest,
     SparseVector,
     SparseVectorParams,
     VectorParams,
@@ -246,7 +249,25 @@ _CHUNK_PAYLOAD_INDEXES: tuple[str, ...] = (
     "concepts",
     "entity_ids",
 )
-_SCHEMA_PAYLOAD_INDEXES: tuple[str, ...] = ("corpus_id", "kind", "term")
+_SCHEMA_PAYLOAD_INDEXES: tuple[str, ...] = (
+    "corpus_id",
+    "kind",
+    "term",
+    "doc_id",
+    "node_id",
+    "node_type",
+    "lexicon_id",
+    "lexicon_ids",
+    "canonical_key",
+    "member_keys",
+    "aliases_normalized",
+    "abbreviations_normalized",
+)
+
+# Startup readiness verifies every corpus collection before serving traffic.
+# Remember that result so high-fanout query stages do not issue one
+# ``collection_exists`` HTTP request per lane, document, and hierarchy level.
+_COLLECTION_EXISTENCE_CACHE: set[str] = set()
 
 
 async def _collection_exists_safe(
@@ -258,6 +279,58 @@ async def _collection_exists_safe(
     except Exception as exc:
         logger.debug("Qdrant collection_exists failed for %s: %s", collection_name, exc)
         return False
+
+
+async def _collection_available(
+    client: AsyncQdrantClient,
+    collection_name: str,
+) -> bool:
+    """Return collection availability with positive-result caching."""
+
+    if collection_name in _COLLECTION_EXISTENCE_CACHE:
+        return True
+    exists = await _collection_exists_safe(client, collection_name)
+    if exists:
+        _COLLECTION_EXISTENCE_CACHE.add(collection_name)
+    return exists
+
+
+async def _search_points_compat(
+    client: AsyncQdrantClient,
+    *,
+    collection_name: str,
+    query_vector: list[float],
+    query_filter: Filter,
+    limit: int,
+    with_payload=True,
+    with_vectors: bool = False,
+    score_threshold: float | None = None,
+):
+    """Support qdrant-client before and after ``search`` was removed in 1.18."""
+
+    search = getattr(client, "search", None)
+    if callable(search):
+        kwargs = {
+            "collection_name": collection_name,
+            "query_vector": query_vector,
+            "query_filter": query_filter,
+            "limit": limit,
+            "with_payload": with_payload,
+            "with_vectors": with_vectors,
+        }
+        if score_threshold is not None:
+            kwargs["score_threshold"] = score_threshold
+        return await search(**kwargs)
+    response = await client.query_points(
+        collection_name=collection_name,
+        query=query_vector,
+        query_filter=query_filter,
+        limit=limit,
+        with_payload=with_payload,
+        with_vectors=with_vectors,
+        score_threshold=score_threshold,
+    )
+    return list(getattr(response, "points", None) or [])
 
 
 async def _create_collection_with_retry(
@@ -391,6 +464,7 @@ async def _assert_collection_dimension(
         # read-path cache so the first interactive query does not launch one
         # get_collection request per concurrent lane/corpus.
         _COLLECTION_LAYOUT_CACHE[collection_name] = _layout_from_collection_info(info)
+        _COLLECTION_EXISTENCE_CACHE.add(collection_name)
     except Exception as exc:
         logger.warning(
             "Could not inspect Qdrant collection %s: %s", collection_name, exc
@@ -513,6 +587,7 @@ async def ensure_collections_for_corpus(
                 collection_name=name,
                 field_name=field_name,
             )
+        _COLLECTION_EXISTENCE_CACHE.add(name)
         logger.info(
             "Ensured Qdrant collection: %s (corpus %s) [hybrid]", name, corpus_id
         )
@@ -543,6 +618,7 @@ async def ensure_collections_for_corpus(
             collection_name=schemas_name,
             field_name=field_name,
         )
+    _COLLECTION_EXISTENCE_CACHE.add(schemas_name)
     logger.info("Ensured Qdrant collection: %s (corpus %s)", schemas_name, corpus_id)
 
     if corpus_name:
@@ -561,6 +637,8 @@ async def drop_collections_for_corpus(client: AsyncQdrantClient, corpus_id: str)
         try:
             if await client.collection_exists(name):
                 await client.delete_collection(collection_name=name)
+                _COLLECTION_EXISTENCE_CACHE.discard(name)
+                _COLLECTION_LAYOUT_CACHE.pop(name, None)
                 logger.info(
                     "Dropped Qdrant collection: %s (corpus %s)", name, corpus_id
                 )
@@ -925,6 +1003,48 @@ async def delete_points_by_doc(
     return results
 
 
+async def delete_summary_points_by_doc(
+    client: AsyncQdrantClient,
+    corpus_id: str,
+    doc_id: str,
+) -> dict[str, bool]:
+    """Delete only parent-summary points while preserving child vectors."""
+
+    results: dict[str, bool] = {}
+    for kind in ("naive", "hrag"):
+        name = _col_for_corpus(corpus_id, kind)
+        try:
+            if not await client.collection_exists(name):
+                results[kind] = False
+                continue
+            selector = Filter(
+                must=[
+                    FieldCondition(
+                        key="corpus_id", match=MatchValue(value=corpus_id)
+                    ),
+                    FieldCondition(key="doc_id", match=MatchValue(value=doc_id)),
+                    FieldCondition(
+                        key="chunk_type", match=MatchValue(value="summary")
+                    ),
+                ]
+            )
+            op = await client.delete(
+                collection_name=name,
+                points_selector=selector,
+                wait=True,
+            )
+            results[kind] = getattr(op, "operation_id", None) is not None
+        except Exception as exc:
+            logger.warning(
+                "Qdrant summary-only delete failed for %s (doc=%s): %s",
+                name,
+                doc_id[:12],
+                exc,
+            )
+            results[kind] = False
+    return results
+
+
 # ── Phase 14.2 — Schema-Term Embedding (Ontology-Lite) ────────────────────
 
 
@@ -1027,6 +1147,594 @@ async def delete_schema_terms(
     return deleted
 
 
+# ── Corpus vocabulary bridge ──────────────────────────────────────────────
+
+LEXICON_SCHEMA_KIND = "entity_lexicon"
+SUMMARY_TREE_SCHEMA_KIND = "summary_tree"
+
+
+def _summary_tree_payload(entry: dict) -> dict:
+    """Bounded payload for a pre-embedded RAPTOR section or rollup node."""
+
+    summary = str(entry.get("summary") or "").strip()
+    return {
+        "corpus_id": str(entry.get("corpus_id") or ""),
+        "kind": SUMMARY_TREE_SCHEMA_KIND,
+        "term": str(entry.get("section_range") or entry.get("node_id") or ""),
+        "node_id": str(entry.get("node_id") or ""),
+        "node_type": str(entry.get("node_type") or ""),
+        "doc_id": str(entry.get("doc_id") or ""),
+        "section_range": str(entry.get("section_range") or "")[:500],
+        "summary": summary[:2400],
+        "parent_ids": [str(value) for value in (entry.get("parent_ids") or [])[:64]],
+        "child_node_ids": [
+            str(value) for value in (entry.get("child_node_ids") or [])[:64]
+        ],
+        "lexicon_ids": [str(value) for value in (entry.get("lexicon_ids") or [])[:96]],
+        "token_estimate": max(1, len(summary.split())),
+        "schema_version": str(entry.get("schema_version") or ""),
+    }
+
+
+async def upsert_summary_tree_entries(
+    client: AsyncQdrantClient,
+    corpus_id: str,
+    entries: list[dict],
+    vectors: list[list[float]],
+    *,
+    verify_owner: bool = True,
+) -> int:
+    """Index section/rollup routing nodes once so queries only embed the query."""
+
+    if not entries or not vectors:
+        return 0
+    if len(entries) != len(vectors):
+        raise ValueError("summary-tree entries and vectors length mismatch")
+    name = _col_for_corpus(corpus_id, "schemas")
+    if verify_owner:
+        await _assert_collection_owner(client, name, corpus_id)
+    points: list[PointStruct] = []
+    for entry, vector in zip(entries, vectors):
+        node_id = str(entry.get("node_id") or "")
+        node_type = str(entry.get("node_type") or "")
+        if not node_id or node_type not in {"section", "rollup"}:
+            continue
+        payload = _summary_tree_payload({**entry, "corpus_id": corpus_id})
+        points.append(
+            PointStruct(
+                id=_schema_point_id(
+                    corpus_id,
+                    SUMMARY_TREE_SCHEMA_KIND,
+                    node_id,
+                ),
+                vector=vector,
+                payload=payload,
+            )
+        )
+    await _upsert_points_batched(
+        client,
+        collection_name=name,
+        points=points,
+        point_label="schema:summary_tree",
+    )
+    return len(points)
+
+
+async def search_summary_tree_entries(
+    client: AsyncQdrantClient,
+    corpus_id: str,
+    *,
+    query_vec: list[float],
+    doc_id: str,
+    node_type: str,
+    node_ids: list[str] | None = None,
+    top_k: int = 8,
+    score_threshold: float | None = 0.2,
+) -> list[dict]:
+    """Search one routed document's pre-embedded hierarchy nodes."""
+
+    if not query_vec or node_type not in {"section", "rollup"}:
+        return []
+    name = _col_for_corpus(corpus_id, "schemas")
+    if not await _collection_available(client, name):
+        return []
+    must = [
+        FieldCondition(key="corpus_id", match=MatchValue(value=corpus_id)),
+        FieldCondition(
+            key="kind",
+            match=MatchValue(value=SUMMARY_TREE_SCHEMA_KIND),
+        ),
+        FieldCondition(key="doc_id", match=MatchValue(value=doc_id)),
+        FieldCondition(key="node_type", match=MatchValue(value=node_type)),
+    ]
+    scoped_ids = [str(value) for value in (node_ids or []) if str(value)]
+    if scoped_ids:
+        must.append(FieldCondition(key="node_id", match=MatchAny(any=scoped_ids[:256])))
+    hits = await _search_points_compat(
+        client,
+        collection_name=name,
+        query_vector=query_vec,
+        query_filter=Filter(must=must),
+        limit=max(1, min(int(top_k), 32)),
+        with_payload=True,
+        with_vectors=False,
+        score_threshold=score_threshold,
+    )
+    output: list[dict] = []
+    for hit in hits:
+        payload = dict(getattr(hit, "payload", None) or {})
+        if not payload.get("node_id"):
+            continue
+        payload["score"] = float(getattr(hit, "score", 0.0) or 0.0)
+        output.append(payload)
+    return output
+
+
+async def search_summary_tree_entries_batch(
+    client: AsyncQdrantClient,
+    corpus_id: str,
+    *,
+    queries: list[dict],
+) -> list[list[dict]]:
+    """Batch hierarchy searches for one corpus while preserving input order."""
+
+    if not queries:
+        return []
+    name = _col_for_corpus(corpus_id, "schemas")
+    if not await _collection_available(client, name):
+        return [[] for _query in queries]
+
+    requests: list[QueryRequest] = []
+    request_indexes: list[int] = []
+    output: list[list[dict]] = [[] for _query in queries]
+    for index, spec in enumerate(queries):
+        query_vec = list(spec.get("query_vec") or [])
+        node_type = str(spec.get("node_type") or "")
+        doc_id = str(spec.get("doc_id") or "")
+        if not query_vec or node_type not in {"section", "rollup"} or not doc_id:
+            continue
+        must = [
+            FieldCondition(key="corpus_id", match=MatchValue(value=corpus_id)),
+            FieldCondition(
+                key="kind",
+                match=MatchValue(value=SUMMARY_TREE_SCHEMA_KIND),
+            ),
+            FieldCondition(key="doc_id", match=MatchValue(value=doc_id)),
+            FieldCondition(key="node_type", match=MatchValue(value=node_type)),
+        ]
+        scoped_ids = [
+            str(value) for value in (spec.get("node_ids") or []) if str(value)
+        ]
+        if scoped_ids:
+            must.append(
+                FieldCondition(
+                    key="node_id",
+                    match=MatchAny(any=scoped_ids[:256]),
+                )
+            )
+        requests.append(
+            QueryRequest(
+                query=query_vec,
+                filter=Filter(must=must),
+                limit=max(1, min(int(spec.get("top_k") or 8), 32)),
+                with_payload=True,
+                with_vector=False,
+                score_threshold=spec.get("score_threshold", 0.2),
+            )
+        )
+        request_indexes.append(index)
+
+    if not requests:
+        return output
+    responses = []
+    for start in range(0, len(requests), 64):
+        responses.extend(
+            await client.query_batch_points(
+                collection_name=name,
+                requests=requests[start : start + 64],
+            )
+        )
+    for output_index, response in zip(request_indexes, responses, strict=True):
+        rows: list[dict] = []
+        for hit in list(getattr(response, "points", None) or []):
+            payload = dict(getattr(hit, "payload", None) or {})
+            if not payload.get("node_id"):
+                continue
+            payload["score"] = float(getattr(hit, "score", 0.0) or 0.0)
+            rows.append(payload)
+        output[output_index] = rows
+    return output
+
+
+async def delete_summary_tree_entries(
+    client: AsyncQdrantClient,
+    corpus_id: str,
+    node_ids: list[str] | None = None,
+    *,
+    doc_id: str | None = None,
+) -> bool:
+    """Delete selected or all hierarchy vectors for one corpus."""
+
+    name = _col_for_corpus(corpus_id, "schemas")
+    if not await client.collection_exists(name):
+        return False
+    if node_ids:
+        point_ids = [
+            _schema_point_id(corpus_id, SUMMARY_TREE_SCHEMA_KIND, str(node_id))
+            for node_id in dict.fromkeys(node_ids)
+            if str(node_id)
+        ]
+        for start in range(0, len(point_ids), 2048):
+            await client.delete(
+                collection_name=name,
+                points_selector=PointIdsList(points=point_ids[start : start + 2048]),
+                wait=True,
+            )
+        return True
+    must = [
+        FieldCondition(key="corpus_id", match=MatchValue(value=corpus_id)),
+        FieldCondition(
+            key="kind",
+            match=MatchValue(value=SUMMARY_TREE_SCHEMA_KIND),
+        ),
+    ]
+    if doc_id:
+        must.append(FieldCondition(key="doc_id", match=MatchValue(value=doc_id)))
+    await client.delete(
+        collection_name=name,
+        points_selector=Filter(must=must),
+        wait=True,
+    )
+    return True
+
+
+def _lexicon_payload(entry: dict) -> dict:
+    """Bounded retrieval payload for a materialized Mongo lexicon entry."""
+
+    return {
+        "corpus_id": str(entry.get("corpus_id") or ""),
+        "kind": LEXICON_SCHEMA_KIND,
+        "term": str(entry.get("canonical_name") or ""),
+        "lexicon_id": str(entry.get("lexicon_id") or ""),
+        "canonical_key": str(entry.get("canonical_key") or ""),
+        "member_keys": list(entry.get("member_keys") or [])[:32],
+        "aliases": list(entry.get("aliases") or [])[:32],
+        "aliases_normalized": list(entry.get("aliases_normalized") or [])[:32],
+        "abbreviations": list(entry.get("abbreviations") or [])[:16],
+        "abbreviations_normalized": list(entry.get("abbreviations_normalized") or [])[
+            :16
+        ],
+        # Mongo retains the complete bounded provenance projection. Qdrant
+        # carries only what query-time diagnostics and hierarchy descent use;
+        # oversized payloads otherwise dominate vector-backfill write cost.
+        "alias_evidence": list(entry.get("alias_evidence") or [])[:12],
+        "retrieval_gloss": str(entry.get("retrieval_gloss") or "")[:1800],
+        "embedding_gloss": str(entry.get("embedding_gloss") or "")[:900],
+        "utility_gloss": str(entry.get("utility_gloss") or "")[:900],
+        "definitions": list(entry.get("definitions") or [])[:6],
+        "structural_contexts": list(entry.get("structural_contexts") or [])[:12],
+        "contextual_usages": list(entry.get("contextual_usages") or [])[:12],
+        "entity_ids": list(entry.get("entity_ids") or [])[:32],
+        "entity_types": list(entry.get("entity_types") or [])[:12],
+        "object_kinds": list(entry.get("object_kinds") or [])[:12],
+        "source_document_ids": list(entry.get("source_document_ids") or [])[:32],
+        "source_document_support": list(entry.get("source_document_support") or [])[
+            :32
+        ],
+        "source_parent_ids": list(entry.get("source_parent_ids") or [])[:48],
+        "source_chunk_ids": list(entry.get("source_chunk_ids") or [])[:48],
+        "components": list(entry.get("components") or [])[:16],
+        "component_of": list(entry.get("component_of") or [])[:16],
+        "application_contexts": list(entry.get("application_contexts") or [])[:16],
+        "factual_relations": list(entry.get("factual_relations") or [])[:24],
+        "cooccurrence_neighbors": list(entry.get("cooccurrence_neighbors") or [])[:16],
+        "semantic_neighbors": list(entry.get("semantic_neighbors") or [])[:16],
+        "support_count": int(entry.get("support_count") or 0),
+        "mean_confidence": float(entry.get("mean_confidence") or 0.0),
+        "quality_flags": list(entry.get("quality_flags") or [])[:24],
+        "retrieval_eligible": bool(entry.get("retrieval_eligible", True)),
+        "schema_version": str(entry.get("schema_version") or ""),
+        "lexicon_state": str(entry.get("lexicon_state") or "lexicon_ready"),
+    }
+
+
+async def upsert_lexicon_entries(
+    client: AsyncQdrantClient,
+    corpus_id: str,
+    entries: list[dict],
+    vectors: list[list[float]],
+    *,
+    verify_owner: bool = True,
+) -> int:
+    """Mirror Mongo lexicon entries into the isolated ``schemas`` collection."""
+
+    if not entries or not vectors:
+        return 0
+    if len(entries) != len(vectors):
+        raise ValueError("lexicon entries and vectors length mismatch")
+    name = _col_for_corpus(corpus_id, "schemas")
+    if verify_owner:
+        await _assert_collection_owner(client, name, corpus_id)
+    points: list[PointStruct] = []
+    for entry, vector in zip(entries, vectors):
+        lexicon_id = str(entry.get("lexicon_id") or "")
+        if not lexicon_id:
+            continue
+        payload = _lexicon_payload({**entry, "corpus_id": corpus_id})
+        points.append(
+            PointStruct(
+                id=_schema_point_id(corpus_id, LEXICON_SCHEMA_KIND, lexicon_id),
+                vector=vector,
+                payload=payload,
+            )
+        )
+    await _upsert_points_batched(
+        client,
+        collection_name=name,
+        points=points,
+        point_label="schema:entity_lexicon",
+    )
+    return len(points)
+
+
+async def retrieve_lexicon_entries(
+    client: AsyncQdrantClient,
+    corpus_id: str,
+    lexicon_ids: list[str],
+    *,
+    with_vectors: bool = True,
+    check_exists: bool = True,
+) -> dict[str, dict]:
+    """Fetch deterministic lexicon points for delta-aware projection repair."""
+
+    ids = [str(value) for value in dict.fromkeys(lexicon_ids) if str(value)]
+    if not ids:
+        return {}
+    name = _col_for_corpus(corpus_id, "schemas")
+    if check_exists and not await _collection_available(client, name):
+        return {}
+    rows: dict[str, dict] = {}
+    for start in range(0, len(ids), 512):
+        point_ids = [
+            _schema_point_id(corpus_id, LEXICON_SCHEMA_KIND, lexicon_id)
+            for lexicon_id in ids[start : start + 512]
+        ]
+        points = await client.retrieve(
+            collection_name=name,
+            ids=point_ids,
+            with_payload=True,
+            with_vectors=with_vectors,
+        )
+        for point in points:
+            payload = dict(getattr(point, "payload", None) or {})
+            lexicon_id = str(payload.get("lexicon_id") or "")
+            if not lexicon_id:
+                continue
+            rows[lexicon_id] = {
+                "payload": payload,
+                "vector": getattr(point, "vector", None) if with_vectors else None,
+            }
+    return rows
+
+
+async def delete_lexicon_entries(
+    client: AsyncQdrantClient,
+    corpus_id: str,
+    lexicon_ids: list[str] | None = None,
+) -> bool:
+    """Delete selected lexicon points, or the complete lexicon projection."""
+
+    name = _col_for_corpus(corpus_id, "schemas")
+    if not await client.collection_exists(name):
+        return False
+    if lexicon_ids:
+        point_ids = [
+            _schema_point_id(corpus_id, LEXICON_SCHEMA_KIND, lexicon_id)
+            for lexicon_id in dict.fromkeys(lexicon_ids)
+            if lexicon_id
+        ]
+        if not point_ids:
+            return True
+        deleted = True
+        for start in range(0, len(point_ids), 2048):
+            result = await client.delete(
+                collection_name=name,
+                points_selector=PointIdsList(points=point_ids[start : start + 2048]),
+                wait=True,
+            )
+            deleted = deleted and getattr(result, "operation_id", None) is not None
+        return deleted
+    else:
+        result = await client.delete(
+            collection_name=name,
+            points_selector=Filter(
+                must=[
+                    FieldCondition(key="corpus_id", match=MatchValue(value=corpus_id)),
+                    FieldCondition(
+                        key="kind", match=MatchValue(value=LEXICON_SCHEMA_KIND)
+                    ),
+                ]
+            ),
+        )
+    return getattr(result, "operation_id", None) is not None
+
+
+async def search_lexicon_entries(
+    client: AsyncQdrantClient,
+    corpus_id: str,
+    *,
+    query_vec: list[float] | None,
+    exact_terms: list[str] | None = None,
+    allowed_lexicon_ids: list[str] | None = None,
+    top_k: int = 8,
+    score_threshold: float | None = None,
+    with_vectors: bool = False,
+) -> list[dict]:
+    """Return exact alias hits followed by dense plain-language gloss hits.
+
+    Exact lookup is payload-indexed and therefore available even when the
+    embedder is degraded. The caller decides which short terms are safe to use;
+    this function performs no fuzzy matching.
+    """
+
+    name = _col_for_corpus(corpus_id, "schemas")
+    if not await _collection_available(client, name):
+        return []
+    limit = max(1, int(top_k))
+    base_must = [
+        FieldCondition(key="corpus_id", match=MatchValue(value=corpus_id)),
+        FieldCondition(key="kind", match=MatchValue(value=LEXICON_SCHEMA_KIND)),
+    ]
+    allowed_ids = [str(value) for value in (allowed_lexicon_ids or []) if str(value)]
+    if allowed_ids:
+        base_must.append(
+            FieldCondition(key="lexicon_id", match=MatchAny(any=allowed_ids[:512]))
+        )
+    results: list[dict] = []
+    normalized_terms = list(
+        dict.fromkeys(
+            str(term or "").strip().lower()
+            for term in (exact_terms or [])
+            if str(term or "").strip()
+        )
+    )
+    if normalized_terms:
+        should = [
+            FieldCondition(key=field, match=MatchAny(any=normalized_terms))
+            for field in (
+                "canonical_key",
+                "member_keys",
+                "aliases_normalized",
+                "abbreviations_normalized",
+            )
+        ]
+        points, _ = await client.scroll(
+            collection_name=name,
+            scroll_filter=Filter(must=base_must, should=should),
+            limit=max(limit * 2, 16),
+            with_payload=True,
+            with_vectors=with_vectors,
+        )
+        for point in points:
+            payload = dict(getattr(point, "payload", None) or {})
+            payload["score"] = 1.0
+            payload["match_type"] = "exact_alias"
+            if with_vectors:
+                payload["_vector"] = getattr(point, "vector", None)
+            results.append(payload)
+
+    if query_vec is not None:
+        kwargs = {
+            "collection_name": name,
+            "query_vector": query_vec,
+            "query_filter": Filter(must=base_must),
+            "limit": max(limit * 2, 12),
+            "with_payload": True,
+            "with_vectors": with_vectors,
+        }
+        if score_threshold is not None:
+            kwargs["score_threshold"] = float(score_threshold)
+        hits = await _search_points_compat(
+            client,
+            collection_name=kwargs["collection_name"],
+            query_vector=kwargs["query_vector"],
+            query_filter=kwargs["query_filter"],
+            limit=kwargs["limit"],
+            with_payload=kwargs["with_payload"],
+            with_vectors=kwargs["with_vectors"],
+            score_threshold=kwargs.get("score_threshold"),
+        )
+        for dense_rank, hit in enumerate(hits, start=1):
+            payload = dict(getattr(hit, "payload", None) or {})
+            payload["score"] = float(getattr(hit, "score", 0.0) or 0.0)
+            payload["match_type"] = "gloss_vector"
+            payload["dense_rank"] = dense_rank
+            if with_vectors:
+                payload["_vector"] = getattr(hit, "vector", None)
+            results.append(payload)
+
+    deduped: dict[str, dict] = {}
+    for item in results:
+        lexicon_id = str(item.get("lexicon_id") or "")
+        if not lexicon_id:
+            continue
+        current = deduped.get(lexicon_id)
+        if current is not None:
+            if item.get("match_type") == "gloss_vector":
+                current["gloss_score"] = max(
+                    float(current.get("gloss_score") or 0.0),
+                    float(item.get("score") or 0.0),
+                )
+                current["dense_rank"] = min(
+                    int(current.get("dense_rank") or 1_000_000),
+                    int(item.get("dense_rank") or 1_000_000),
+                )
+                if str(current.get("match_type") or "").startswith("exact"):
+                    current["match_type"] = "exact_alias+gloss_vector"
+            elif current.get("match_type") == "gloss_vector":
+                item["gloss_score"] = max(
+                    float(item.get("gloss_score") or 0.0),
+                    float(current.get("score") or 0.0),
+                )
+                item["dense_rank"] = int(current.get("dense_rank") or 1_000_000)
+        if current is None or float(item.get("score") or 0.0) > float(
+            current.get("score") or 0.0
+        ):
+            deduped[lexicon_id] = item
+            if current is not None and item.get("match_type") == "exact_alias":
+                item["match_type"] = "exact_alias+gloss_vector"
+        elif current is not None and item.get("match_type") == "exact_alias":
+            current["match_type"] = "exact_alias+gloss_vector"
+    return sorted(
+        deduped.values(),
+        key=lambda item: (
+            0 if str(item.get("match_type") or "").startswith("exact") else 1,
+            -float(item.get("score") or 0.0),
+            str(item.get("canonical_key") or ""),
+        ),
+    )[:limit]
+
+
+async def list_lexicon_ids(
+    client: AsyncQdrantClient,
+    corpus_id: str,
+    *,
+    page_size: int = 2048,
+) -> list[str]:
+    """List the currently mirrored lexicon IDs for stale-point reconciliation."""
+
+    name = _col_for_corpus(corpus_id, "schemas")
+    if not await _collection_available(client, name):
+        return []
+    offset = None
+    output: list[str] = []
+    while True:
+        points, next_offset = await client.scroll(
+            collection_name=name,
+            scroll_filter=Filter(
+                must=[
+                    FieldCondition(key="corpus_id", match=MatchValue(value=corpus_id)),
+                    FieldCondition(
+                        key="kind", match=MatchValue(value=LEXICON_SCHEMA_KIND)
+                    ),
+                ]
+            ),
+            limit=max(1, int(page_size)),
+            offset=offset,
+            with_payload=["lexicon_id"],
+            with_vectors=False,
+        )
+        output.extend(
+            str((getattr(point, "payload", None) or {}).get("lexicon_id") or "")
+            for point in points
+            if (getattr(point, "payload", None) or {}).get("lexicon_id")
+        )
+        if next_offset is None:
+            break
+        offset = next_offset
+    return list(dict.fromkeys(output))
+
+
 async def retrieve_schema_for_chunk(
     client: AsyncQdrantClient,
     corpus_id: str,
@@ -1053,12 +1761,13 @@ async def retrieve_schema_for_chunk(
         when the schemas collection is missing or has no terms for this corpus.
     """
     name = _col_for_corpus(corpus_id, "schemas")
-    if not await client.collection_exists(name):
+    if not await _collection_available(client, name):
         return []
 
     # Per-corpus collection already filters by corpus; payload filter on
     # corpus_id is kept as defense-in-depth, kind filter is the real selector.
-    hits = await client.search(
+    hits = await _search_points_compat(
+        client,
         collection_name=name,
         query_vector=query_vec,
         query_filter=Filter(

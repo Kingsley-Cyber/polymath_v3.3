@@ -1,4 +1,4 @@
-"""Tiny-doc verifier fix — writer-intent stamp beats Mongo re-derivation.
+"""Summary verifier writer-stamp/backfill decision table.
 
 Pure: loads expected_summary_points_from_state by file path (verify.py's
 other imports need the app tree, so we exec only the function's module after
@@ -36,6 +36,14 @@ fn = _load_fn()
 def test_stamp_preferred():
     assert fn({"summary_points": 0}) == 0          # tiny doc: writer wrote none
     assert fn({"summary_points": 7}) == 7
+
+
+def test_later_backfill_invalidates_original_writer_stamp():
+    assert fn({
+        "summary_points": 0,
+        "summaries_indexed": True,
+        "summary_backfilled_at": "2026-07-10T00:00:00Z",
+    }) is None
 
 
 def test_unstamped_falls_back():

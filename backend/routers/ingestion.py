@@ -44,6 +44,10 @@ from utils.streaming import build_sse_done, build_sse_error
 # add_done_callback.
 _INGEST_BG_TASKS: set[asyncio.Task] = set()
 _BACKFILL_BG_TASKS: set[asyncio.Task] = set()
+_BACKGROUND_REPAIR_HEARTBEAT_SECONDS = 30
+_BACKGROUND_REPAIR_LEASE_SECONDS = 120
+_BACKGROUND_REPAIR_QUEUE_LEASE_SECONDS = 300
+_BACKGROUND_REPAIR_LEGACY_STALE_SECONDS = 600
 _SECRET_RE = re.compile(r"\bsk-[A-Za-z0-9_-]{12,}\b")
 # Slot primitives extracted to services/ingestion/admission.py so the
 # MCP write surface (polymath_mcp/tools.py:_ingest_bytes) can share
@@ -110,6 +114,31 @@ PARSE_DOC_ID_WAIT_SECONDS = 240.0
 def _safe_ingest_error(exc: Exception) -> str:
     message = _SECRET_RE.sub("sk-...[redacted]", str(exc))
     return message[:1000] or exc.__class__.__name__
+
+
+async def _heartbeat_background_repair(run_id: str) -> None:
+    """Renew a durable repair lease while this process owns the task."""
+
+    while True:
+        await asyncio.sleep(_BACKGROUND_REPAIR_HEARTBEAT_SECONDS)
+        now = datetime.utcnow()
+        try:
+            result = await ingestion_service.db["ingest_repair_runs"].update_one(
+                {"run_id": run_id, "status": "running"},
+                {
+                    "$set": {
+                        "heartbeat_at": now,
+                        "updated_at": now,
+                        "lease_expires_at": now
+                        + timedelta(seconds=_BACKGROUND_REPAIR_LEASE_SECONDS),
+                    }
+                },
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Background repair heartbeat failed run=%s: %s", run_id, exc)
+            continue
+        if result.matched_count == 0:
+            return
 
 
 async def _attach_corpus_readiness(
@@ -179,7 +208,9 @@ class LocalIngestBatchRequest(BaseModel):
     """Create a durable backend-owned ingest batch from a local folder path."""
 
     root_path: str = Field(..., min_length=1)
-    profile: Literal["mac_safe", "mac_queryable_first", "rtx_assisted"] | None = None
+    profile: Literal[
+        "mac_safe", "mac_queryable_first", "rtx_assisted", "runpod_burst"
+    ] | None = None
     recursive: bool = True
     extensions: list[str] | None = None
     max_files: int | None = Field(default=None, ge=1, le=20000)
@@ -312,6 +343,17 @@ class SummaryBackfillRequest(BaseModel):
         description="Max missing parent summaries to generate in this call.",
     )
     batch: int = Field(default=32, ge=1, le=128)
+    doc_ids: list[str] | None = Field(
+        default=None,
+        description="Optional exact document scope for deterministic repair.",
+    )
+    index_existing_doc_summaries: bool = Field(
+        default=False,
+        description=(
+            "Reindex every existing canonical parent summary in doc_ids; "
+            "requires an explicit document scope."
+        ),
+    )
     background: bool = Field(
         default=False,
         description="Queue the bounded summary repair as a background repair run.",
@@ -991,10 +1033,14 @@ async def get_extraction_contract(
 
     engine_global = "local"
     endpoints = []
+    runpod_config = None
     try:
         ext = await _ss.get_system_extraction()
         engine_global = str(getattr(ext, "engine", "local") or "local")
         endpoints = list(ext.endpoints or [])
+        runpod_config, _runpod_key = await _ss.get_system_runpod_flash(
+            current_user["user_id"]
+        )
     except Exception:  # noqa: BLE001 — resolver defaults are the floor
         pass
 
@@ -1090,6 +1136,13 @@ async def get_extraction_contract(
         else []
     )
 
+    contract_errors = list(contract.errors)
+    if contract.engine == "runpod_flash":
+        if runpod_config is None or not runpod_config.enabled:
+            contract_errors.append("Runpod Flash is disabled in Settings")
+        elif not runpod_config.endpoint_id.strip():
+            contract_errors.append("Runpod Flash endpoint ID is missing in Settings")
+
     return {
         "engine": contract.engine,
         "source": contract.source,
@@ -1106,6 +1159,20 @@ async def get_extraction_contract(
             else []
         ),
         "pool": pool,
+        "runpod_flash": (
+            {
+                "enabled": bool(runpod_config.enabled),
+                "configured": bool(runpod_config.endpoint_id.strip()),
+                "endpoint_id": runpod_config.endpoint_id.strip() or None,
+                "endpoint_name": runpod_config.endpoint_name,
+                "model_id": runpod_config.model_id,
+                "request_batch_size": runpod_config.request_batch_size,
+                "request_concurrency": runpod_config.request_concurrency,
+                "max_workers": runpod_config.max_workers,
+            }
+            if runpod_config is not None
+            else None
+        ),
         "endpoints": [
             {
                 "label": e.label,
@@ -1115,7 +1182,7 @@ async def get_extraction_contract(
             }
             for e in endpoints
         ],
-        "errors": list(contract.errors),
+        "errors": contract_errors,
         "warnings": list(contract.warnings),
     }
 
@@ -1466,6 +1533,11 @@ async def backfill_corpus_summaries(
     corpus = await ingestion_service.get_corpus(corpus_id)
     if not corpus:
         raise HTTPException(status_code=404, detail="Corpus not found")
+    if body.index_existing_doc_summaries and not body.doc_ids:
+        raise HTTPException(
+            status_code=400,
+            detail="index_existing_doc_summaries requires explicit doc_ids",
+        )
     if body.background:
         run_id = f"summary_backfill_manual_{corpus_id[:8]}_{uuid4().hex[:8]}"
         now = datetime.utcnow()
@@ -1483,6 +1555,8 @@ async def backfill_corpus_summaries(
                     "batch": body.batch,
                     "generate": body.generate,
                     "index": body.index,
+                    "doc_ids": body.doc_ids,
+                    "index_existing_doc_summaries": body.index_existing_doc_summaries,
                     "updated_at": now,
                 },
             },
@@ -1503,6 +1577,10 @@ async def backfill_corpus_summaries(
                     index=body.index,
                     limit=body.limit,
                     batch=body.batch,
+                    doc_ids=body.doc_ids,
+                    index_existing_doc_summaries=(
+                        body.index_existing_doc_summaries
+                    ),
                 )
                 finished = datetime.utcnow()
                 status = "complete" if result.get("status") in {"healthy", "empty"} else "partial"
@@ -1577,6 +1655,8 @@ async def backfill_corpus_summaries(
         index=body.index,
         limit=body.limit,
         batch=body.batch,
+        doc_ids=body.doc_ids,
+        index_existing_doc_summaries=body.index_existing_doc_summaries,
     )
 
 
@@ -2131,6 +2211,42 @@ async def run_corpus_repair_cycle(
                 status_code=400,
                 detail="background repair requires apply=true",
             )
+        reconciled_at = datetime.utcnow()
+        legacy_stale_before = reconciled_at - timedelta(
+            seconds=_BACKGROUND_REPAIR_LEGACY_STALE_SECONDS
+        )
+        await ingestion_service.db["ingest_repair_runs"].update_many(
+            {
+                "corpus_id": corpus_id,
+                "kind": "corpus_repair_cycle_background",
+                "status": {"$in": ["queued", "running"]},
+                "$or": [
+                    {"lease_expires_at": {"$lt": reconciled_at}},
+                    {
+                        "lease_expires_at": {"$exists": False},
+                        "updated_at": {"$lt": legacy_stale_before},
+                    },
+                    {
+                        "lease_expires_at": {"$exists": False},
+                        "updated_at": {"$exists": False},
+                    },
+                ],
+            },
+            {
+                "$set": {
+                    "status": "failed",
+                    "completion_reason": "orphaned_background_task_lease_expired",
+                    "error": (
+                        "The background repair lease expired; durable artifacts "
+                        "were preserved for deterministic replanning."
+                    ),
+                    "completed_at": reconciled_at,
+                    "updated_at": reconciled_at,
+                    "reconciled_at": reconciled_at,
+                },
+                "$unset": {"lease_expires_at": ""},
+            },
+        )
         active = await ingestion_service.db["ingest_repair_runs"].find_one(
             {
                 "corpus_id": corpus_id,
@@ -2162,6 +2278,8 @@ async def run_corpus_repair_cycle(
                     "user_id": current_user["user_id"],
                     "request": request_payload,
                     "updated_at": now,
+                    "lease_expires_at": now
+                    + timedelta(seconds=_BACKGROUND_REPAIR_QUEUE_LEASE_SECONDS),
                 },
             },
             upsert=True,
@@ -2180,6 +2298,7 @@ async def run_corpus_repair_cycle(
 
         async def _run() -> None:
             started = datetime.utcnow()
+            heartbeat_task: asyncio.Task | None = None
             try:
                 await ingestion_service.db["ingest_repair_runs"].update_one(
                     {"run_id": run_id},
@@ -2187,10 +2306,14 @@ async def run_corpus_repair_cycle(
                         "$set": {
                             "status": "running",
                             "started_at": started,
+                            "heartbeat_at": started,
                             "updated_at": started,
+                            "lease_expires_at": started
+                            + timedelta(seconds=_BACKGROUND_REPAIR_LEASE_SECONDS),
                         }
                     },
                 )
+                heartbeat_task = asyncio.create_task(_heartbeat_background_repair(run_id))
                 try:
                     from services.ingestion.readiness import materialize_corpus_readiness
 
@@ -2264,7 +2387,8 @@ async def run_corpus_repair_cycle(
                             "counts": result.get("summary") or {},
                             "completed_at": finished,
                             "updated_at": finished,
-                        }
+                        },
+                        "$unset": {"lease_expires_at": ""},
                     },
                 )
                 try:
@@ -2288,7 +2412,8 @@ async def run_corpus_repair_cycle(
                             "error": _safe_ingest_error(exc),
                             "completed_at": finished,
                             "updated_at": finished,
-                        }
+                        },
+                        "$unset": {"lease_expires_at": ""},
                     },
                 )
                 try:
@@ -2301,6 +2426,13 @@ async def run_corpus_repair_cycle(
                         corpus_id[:8],
                         refresh_exc,
                     )
+            finally:
+                if heartbeat_task is not None:
+                    heartbeat_task.cancel()
+                    try:
+                        await heartbeat_task
+                    except asyncio.CancelledError:
+                        pass
 
         task = asyncio.create_task(_run())
         _BACKFILL_BG_TASKS.add(task)
@@ -2408,7 +2540,9 @@ async def create_upload_ingest_batch(
     chunk_summarization: bool | None = Form(default=None),
     model: str = Form(default=""),
     concurrency: int | None = Form(default=1),
-    profile: Literal["mac_safe", "mac_queryable_first", "rtx_assisted"] | None = Form(default=None),
+    profile: Literal[
+        "mac_safe", "mac_queryable_first", "rtx_assisted", "runpod_burst"
+    ] | None = Form(default=None),
     start: bool = Form(default=True),
     current_user: dict = Depends(get_current_user),
 ):

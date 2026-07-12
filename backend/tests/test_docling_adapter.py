@@ -47,6 +47,34 @@ def test_parser_strategy_keeps_md_txt_and_query_runtime_off_docling(adapter):
     assert adapter.docling_sidecar_needed("book.epub", "application/octet-stream") is False
 
 
+def test_navigation_only_markdown_has_no_retrievable_content(adapter):
+    result = adapter._parse_local_text_document(
+        (
+            "![](cover.jpg)\n\n"
+            "[]{#nav.xhtml}\n\n"
+            "[]{#chapter-1.html}\n"
+        ).encode("utf-8"),
+        "empty-book.md",
+        "text/markdown",
+    )
+
+    assert result is not None
+    assert result.sections == []
+    assert adapter.retrievable_content_text(result) == ""
+    assert adapter.has_retrievable_content(result) is False
+
+
+def test_short_visible_markdown_remains_retrievable(adapter):
+    result = adapter._parse_local_text_document(
+        b"# FACS\n\nControls visible facial action units.",
+        "facs.md",
+        "text/markdown",
+    )
+
+    assert result is not None
+    assert adapter.has_retrievable_content(result) is True
+
+
 @pytest.mark.asyncio
 async def test_epub_upload_parses_locally_in_spine_order(adapter, monkeypatch):
     pytest.importorskip("ebooklib")

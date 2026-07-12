@@ -22,6 +22,8 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 BACKEND = ROOT / "backend"
+if str(BACKEND) not in sys.path:
+    sys.path.insert(0, str(BACKEND))
 VALIDATION_PATH = BACKEND / "services" / "retriever" / "three_tier_eval.py"
 _spec = importlib.util.spec_from_file_location(
     "three_tier_eval_core",
@@ -111,6 +113,8 @@ def run_chat_case(
         "max_tokens": args.max_answer_tokens,
         "final_top_k": args.final_top_k,
     }
+    if args.disable_rerank:
+        overrides["rerank_enabled"] = False
     if args.model:
         overrides["model"] = args.model
     if args.query_profile:
@@ -243,6 +247,8 @@ def run_chat_case(
         "source_summary": validation["source_summary"],
         "source_anchor_coverage": validation["source_anchor_coverage"],
         "answer_anchor_coverage": validation["answer_anchor_coverage"],
+        "grounding_quality": validation["grounding_quality"],
+        "corpus_ids": corpus_ids,
         "trace_summary": {
             "trace_titles": validation["trace_summary"]["trace_titles"],
             "effective_tier": validation["trace_summary"]["effective_tier"],
@@ -334,23 +340,29 @@ def build_report(
                     "generation_after_sources": args.max_generation_s,
                     "fail_total_budget": args.fail_total_budget,
                     "fail_generation_budget": args.fail_generation_budget,
+                    "rerank_enabled": not args.disable_rerank,
                 },
             },
             "metrics_positioning": {
                 "live_e2e": [
                     "route latency",
+                    "p50/p95 route latency",
                     "source hydration",
                     "anchor coverage",
                     "trace diagnostics",
                     "Graph Advantage",
-                ],
-                "offline_golden_set": [
                     "MRR@5",
                     "MAP@20",
+                    "Recall@20",
                     "NDCG@8",
+                    "context precision",
+                    "corpus representation",
                     "answer sufficiency",
                 ],
-                "note": "MRR/MAP/NDCG need labeled relevance data and are not computed live.",
+                "note": (
+                    "Ranking metrics are computed from the checked-in labeled "
+                    "document relevance judgments against real live retrieval."
+                ),
             },
             "github_reference_stack": query_set.get("github_reference_stack", []),
         },
@@ -373,7 +385,8 @@ def print_table(report: dict[str, Any]) -> None:
         print(
             f"{route:19} cases={summary['cases']} fail={summary['failures']} "
             f"warn={summary['warnings']} avg_total={summary['avg_total_s']:.2f}s "
-            f"max_total={summary['max_total_s']:.2f}s "
+            f"p50={summary['p50_total_s']:.2f}s "
+            f"p95={summary['p95_total_s']:.2f}s "
             f"avg_sources={summary['avg_retrieval_or_sources_s']:.2f}s "
             f"avg_gen={summary['avg_generation_after_sources_s']:.2f}s"
         )
@@ -389,6 +402,8 @@ def print_table(report: dict[str, Any]) -> None:
             f"sources={src['source_count']} docs={src['unique_doc_count']} "
             f"src_cov={validation['source_anchor_coverage']['required_coverage']:.2f} "
             f"ans_cov={validation['answer_anchor_coverage']['required_coverage']:.2f} "
+            f"lane_cov={validation['grounding_quality']['required_lane_coverage']:.2f} "
+            f"ctx_precision={validation['grounding_quality']['context_precision']:.2f} "
             f"facts={int(graph.get('facts_used') or 0)} "
             f"rels={int(graph.get('relations_used') or 0)}"
         )
@@ -423,6 +438,11 @@ def main() -> int:
     parser.add_argument("--route", action="append", default=None)
     parser.add_argument("--model", default="")
     parser.add_argument("--query-profile", default="balanced")
+    parser.add_argument(
+        "--disable-rerank",
+        action="store_true",
+        help="Run a controlled E2E ablation with cross-encoder reranking disabled.",
+    )
     parser.add_argument("--max-answer-tokens", type=int, default=512)
     parser.add_argument("--final-top-k", type=int, default=8)
     parser.add_argument(
@@ -487,12 +507,17 @@ def main() -> int:
     )
     results: list[dict[str, Any]] = []
     for query_case in queries:
+        case_corpus_ids = [
+            str(value)
+            for value in (query_case.get("corpus_ids") or corpus_ids)
+            if str(value)
+        ]
         for route in routes:
             print(f"→ {route['ui_name']}: {query_case['id']} :: {query_case['query']}")
             result = run_chat_case(
                 base_url=args.base_url,
                 token=token,
-                corpus_ids=corpus_ids,
+                corpus_ids=case_corpus_ids,
                 route=route,
                 query_case=query_case,
                 args=args,

@@ -22,6 +22,13 @@ def test_rtx_assisted_defaults_to_summary_deferral():
     assert batches._batch_defer_summaries(batch) is True
 
 
+def test_runpod_burst_keeps_summary_lane_in_the_full_pass():
+    batch = {"options": {"profile": "runpod_burst"}}
+
+    assert batches._batch_defer_summaries(batch) is False
+    assert batches.INGEST_PROFILES["runpod_burst"]["pass_plan"] == [None]
+
+
 def test_explicit_summary_deferral_option_overrides_profile_default():
     batch = {"options": {"profile": "rtx_assisted", "defer_summaries": False}}
 

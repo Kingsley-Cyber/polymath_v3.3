@@ -25,6 +25,7 @@ Cross-corpus constraints (spec §CROSS-CORPUS QUERY CONSTRAINTS):
   - Fair mode: FUNNEL A (summaries) skipped for multi-corpus
   - Strategy intersection: graph requires use_neo4j=True on ALL selected corpora
 """
+
 import asyncio
 import logging
 import re
@@ -62,6 +63,7 @@ from services.retriever.planned_fusion import (
     limit_candidates_per_document,
     order_enumeration_finalists,
     prioritize_enumeration_candidates,
+    propagate_grounded_lane_aliases,
     reserve_planned_finalists,
 )
 from services.retriever.query_plan import (
@@ -69,10 +71,29 @@ from services.retriever.query_plan import (
     answer_object_lane_ids,
     answer_object_title_terms,
     query_plan_curation_query,
+    query_plan_execution_batches,
     query_plan_execution_lanes,
+    query_plan_vocabulary_lanes,
 )
-from services.retriever.tier0_router import tier0_document_router
+from services.retriever.tier0_router import (
+    merge_grounded_document_route_hints,
+    tier0_document_router,
+)
 from services.retriever.summary_tree_navigator import summary_tree_navigator
+from services.retriever.vocabulary import (
+    VOCABULARY_RESOLVER_VERSION,
+    corpus_vocabulary_resolver,
+    definition_reference_vocabulary_matches,
+    grounded_document_route_hints,
+    grounded_translation_lane_targets,
+    grounded_vocabulary_lanes,
+    hierarchy_bound_vocabulary_matches,
+)
+from services.retriever.grounded_planner import (
+    filter_aligned_planner_lanes,
+    grounded_planner_lanes,
+    run_grounded_planner,
+)
 from services.retriever.intent_policy import (
     FunnelLimits,
     QueryNeed,
@@ -113,17 +134,34 @@ def _planned_rerank_candidate_limit(
     final_k = max(1, int(final_top_k))
     obligation_count = max(1, len([probe for probe in plan.probes if probe.required]))
     if tier == RetrievalTier.qdrant_mongo_graph:
-        desired = 72 + min(16, obligation_count * 4)
-        ceiling = 96
+        desired = 34 + min(16, obligation_count * 4)
+        ceiling = 52
     elif tier == RetrievalTier.qdrant_mongo:
-        desired = 52 + min(16, obligation_count * 4)
-        ceiling = 72
+        desired = 26 + min(12, obligation_count * 3)
+        ceiling = 40
     else:
-        desired = 36 + min(12, obligation_count * 4)
-        ceiling = 56
+        desired = 18 + min(10, obligation_count * 2)
+        ceiling = 28
     if intent.need == QueryNeed.SPECIFIC and plan.complexity == "simple":
-        desired = max(final_k * 3, desired - 16)
+        desired = max(final_k * 2, desired - 8)
     return max(final_k, min(configured, desired, ceiling))
+
+
+def _tree_routing_lane_ids(lanes: list[Any]) -> list[str]:
+    """Use full RAPTOR descent for required obligations, not advisory probes."""
+
+    required = [
+        lane.lane_id
+        for lane in lanes
+        if lane.role == "core" and bool(lane.required)
+    ]
+    if required:
+        return required
+    return [
+        lane.lane_id
+        for lane in lanes
+        if lane.role in {"core", "original"}
+    ][:1]
 
 
 def _planned_final_result_limit(
@@ -1283,6 +1321,8 @@ class RetrieverOrchestrator:
         neo4j_expansion_cap: int | None = None,
         max_corpora_per_query: int | None = None,
         search_mode: str = "local",
+        disabled_lexicon_ids: list[str] | None = None,
+        grounded_planner_route: dict[str, Any] | None = None,
     ) -> RetrievalResult:
         """Execute QueryPlanV2 as one candidate-generation and rerank pass."""
 
@@ -1396,9 +1436,22 @@ class RetrieverOrchestrator:
         lanes = list(query_plan_execution_lanes(plan))
         if not lanes:
             lanes = [plan.lanes[0]]
+        vocabulary_lanes = list(query_plan_vocabulary_lanes(plan))
         required_lane_ids = [
             lane.lane_id for lane in lanes if lane.role == "core" and lane.required
         ]
+        protected_lane_ids = [
+            lane.lane_id for lane in lanes if lane.role == "original"
+        ]
+        broad_document_routing = bool(
+            len(required_lane_ids) >= 3
+            or plan.complexity
+            in {"comparative", "compositional", "dependent_multi_hop"}
+            or plan.answer_shape
+            in {"comparison", "enumeration", "relationship", "synthesis"}
+        )
+        document_route_limit = 12 if broad_document_routing else 6
+        document_route_fetch = 24 if broad_document_routing else 12
         answer_lane_ids = list(answer_object_lane_ids(plan))
         repair_diagnostics: dict[str, Any] = {
             "max_rounds": int(plan.max_repair_rounds),
@@ -1423,8 +1476,12 @@ class RetrieverOrchestrator:
                 }
             )
         try:
-            vectors = await asyncio.wait_for(
-                embed_queries([lane.dense_text for lane in lanes], embedding_config),
+            embedding_texts = [
+                *[lane.dense_text for lane in lanes],
+                *[lane.dense_text for lane in vocabulary_lanes],
+            ]
+            embedded_vectors = await asyncio.wait_for(
+                embed_queries(embedding_texts, embedding_config),
                 timeout=_stage_timeout(
                     float(getattr(settings, "QUERY_PLAN_EMBED_DEADLINE_SECONDS", 5.0)),
                     reserve=2.0,
@@ -1434,7 +1491,7 @@ class RetrieverOrchestrator:
             logger.warning(
                 "QueryPlanV2 embedding degraded to lexical-only lanes: %s", exc
             )
-            vectors = [None] * len(lanes)
+            embedded_vectors = [None] * (len(lanes) + len(vocabulary_lanes))
             failures.append(
                 {
                     "lane_id": "all",
@@ -1442,7 +1499,201 @@ class RetrieverOrchestrator:
                     "error": f"{type(exc).__name__}: {exc}"[:240],
                 }
             )
+        vectors = embedded_vectors[: len(lanes)]
+        vocabulary_vectors = embedded_vectors[len(lanes) :]
         timings["embed"] = perf_counter() - embed_started
+
+        vocabulary_started = perf_counter()
+        qdrant_client = None
+        vocabulary_diagnostics: dict[str, Any] = {
+            "version": VOCABULARY_RESOLVER_VERSION,
+            "status": "skipped",
+            "reason": "lexicon_projection_unavailable",
+            "matches": [],
+            "per_corpus": {},
+            "rejected_expansions": [],
+        }
+        vocabulary_deadline_s = float(
+            getattr(
+                settings,
+                "QUERY_PLAN_VOCABULARY_DEADLINE_SECONDS",
+                15.0,
+            )
+        )
+        try:
+            from services.conversation import conversation_service
+            from services.ingestion_service import ingestion_service
+
+            qdrant_client = getattr(ingestion_service, "qdrant_client", None)
+            if (
+                bool(getattr(settings, "CORPUS_VOCABULARY_RESOLVER_ENABLED", True))
+                and qdrant_client is not None
+                and corpus_ids
+            ):
+                original_vector = next(
+                    (
+                        vector
+                        for lane, vector in zip(lanes, vectors)
+                        if lane.role == "original" and vector is not None
+                    ),
+                    next((vector for vector in vectors if vector is not None), None),
+                )
+                vocabulary_diagnostics = await asyncio.wait_for(
+                    corpus_vocabulary_resolver.resolve(
+                        query=plan.standalone_query,
+                        corpus_ids=corpus_ids,
+                        tier=effective_tier,
+                        query_vector=original_vector,
+                        qdrant_client=qdrant_client,
+                        db=conversation_service._db,
+                        neo4j_driver=getattr(ingestion_service, "neo4j_driver", None),
+                        disabled_lexicon_ids=disabled_lexicon_ids,
+                        excluded_terms=[
+                            term
+                            for constraint in plan.constraints
+                            if constraint.operator == "exclude"
+                            for term in constraint.terms
+                        ],
+                        query_lanes=[
+                            {
+                                "lane_id": lane.lane_id,
+                                "query": lane.query or lane.dense_text,
+                                "query_vector": vector,
+                            }
+                            for lane, vector in zip(
+                                vocabulary_lanes,
+                                vocabulary_vectors,
+                            )
+                            if vector is not None
+                        ],
+                    ),
+                    timeout=_stage_timeout(
+                        vocabulary_deadline_s,
+                        reserve=1.0,
+                    ),
+                )
+                extra_lanes, expansion_diagnostics = grounded_vocabulary_lanes(
+                    plan,
+                    vocabulary_diagnostics,
+                )
+                vocabulary_diagnostics["expansion"] = expansion_diagnostics
+                if extra_lanes:
+                    extra_vectors = await asyncio.wait_for(
+                        embed_queries(
+                            [lane.dense_text for lane in extra_lanes],
+                            embedding_config,
+                        ),
+                        timeout=_stage_timeout(
+                            float(
+                                getattr(
+                                    settings,
+                                    "QUERY_PLAN_EMBED_DEADLINE_SECONDS",
+                                    5.0,
+                                )
+                            ),
+                            reserve=1.0,
+                        ),
+                    )
+                    lanes.extend(extra_lanes)
+                    vectors.extend(extra_vectors)
+                planner_diagnostics = await run_grounded_planner(
+                    conversation_service._db,
+                    plan=plan,
+                    resolution=vocabulary_diagnostics,
+                    corpus_ids=list(corpus_ids),
+                    route=grounded_planner_route,
+                )
+                planner_extra_lanes, planner_lane_lexicon_ids = grounded_planner_lanes(
+                    planner_diagnostics,
+                    vocabulary_diagnostics,
+                )
+                if planner_extra_lanes:
+                    planner_vectors = await asyncio.wait_for(
+                        embed_queries(
+                            [lane.dense_text for lane in planner_extra_lanes],
+                            embedding_config,
+                        ),
+                        timeout=_stage_timeout(
+                            float(
+                                getattr(
+                                    settings,
+                                    "QUERY_PLAN_EMBED_DEADLINE_SECONDS",
+                                    5.0,
+                                )
+                            ),
+                            reserve=1.0,
+                        ),
+                    )
+                    original_vector = next(
+                        (
+                            vector
+                            for lane, vector in zip(lanes, vectors)
+                            if lane.role == "original" and vector is not None
+                        ),
+                        next((vector for vector in vectors if vector is not None), None),
+                    )
+                    (
+                        planner_extra_lanes,
+                        planner_vectors,
+                        planner_lane_lexicon_ids,
+                        planner_alignment,
+                    ) = filter_aligned_planner_lanes(
+                        planner_extra_lanes,
+                        planner_vectors,
+                        planner_lane_lexicon_ids,
+                        original_vector=original_vector,
+                        minimum_alignment=float(
+                            getattr(
+                                settings,
+                                "GROUNDED_QUERY_PLANNER_MIN_ALIGNMENT",
+                                0.45,
+                            )
+                        ),
+                        step_back_minimum_alignment=float(
+                            getattr(
+                                settings,
+                                "GROUNDED_QUERY_PLANNER_STEP_BACK_MIN_ALIGNMENT",
+                                0.35,
+                            )
+                        ),
+                    )
+                    planner_diagnostics["semantic_alignment"] = planner_alignment
+                    lanes.extend(planner_extra_lanes)
+                    vectors.extend(planner_vectors)
+                planner_diagnostics["lane_ids"] = [
+                    lane.lane_id for lane in planner_extra_lanes
+                ]
+                planner_diagnostics["lane_lexicon_ids"] = planner_lane_lexicon_ids
+                if planner_lane_lexicon_ids:
+                    expansion = vocabulary_diagnostics.setdefault("expansion", {})
+                    expansion.setdefault("lane_lexicon_ids", {}).update(
+                        planner_lane_lexicon_ids
+                    )
+                vocabulary_diagnostics["grounded_planner"] = planner_diagnostics
+                vocabulary_diagnostics["status"] = (
+                    "expanded"
+                    if extra_lanes or planner_extra_lanes
+                    else "resolved_no_expansion"
+                )
+            elif not bool(
+                getattr(settings, "CORPUS_VOCABULARY_RESOLVER_ENABLED", True)
+            ):
+                vocabulary_diagnostics["reason"] = "disabled_by_operator"
+        except Exception as exc:
+            vocabulary_diagnostics.update(
+                {
+                    "status": "degraded",
+                    "reason": f"{type(exc).__name__}: {exc}"[:240],
+                }
+            )
+            failures.append(
+                {
+                    "lane_id": "vocabulary",
+                    "retriever": "corpus_vocabulary",
+                    "error": f"{type(exc).__name__}: {exc}"[:240],
+                }
+            )
+        timings["vocabulary_resolution"] = perf_counter() - vocabulary_started
         vectors_by_lane_id = {
             lane.lane_id: vector for lane, vector in zip(lanes, vectors)
         }
@@ -1468,6 +1719,8 @@ class RetrieverOrchestrator:
                     tier0_document_router.route_lanes(
                         route_vectors,
                         corpus_ids,
+                        per_lane_per_corpus=document_route_fetch,
+                        max_per_lane=document_route_limit,
                         title_terms_by_lane=answer_object_title_terms(plan),
                     ),
                     timeout=_stage_timeout(1.25, reserve=1.0),
@@ -1485,29 +1738,75 @@ class RetrieverOrchestrator:
                     "status": "degraded",
                     "reason": f"{type(exc).__name__}: {exc}"[:240],
                 }
+            route_hints = grounded_document_route_hints(
+                vocabulary_diagnostics,
+                vocabulary_diagnostics.get("expansion") or {},
+            )
+            document_routes, grounded_route_rows = merge_grounded_document_route_hints(
+                document_routes,
+                route_hints,
+                max_per_lane=document_route_limit,
+            )
+            if grounded_route_rows:
+                document_routing_diagnostics[
+                    "grounded_route_hints"
+                ] = grounded_route_rows
+                document_routing_diagnostics["grounded_route_hint_count"] = sum(
+                    len(values) for values in grounded_route_rows.values()
+                )
+                document_routing_diagnostics["routed_doc_count"] = len(
+                    {
+                        (route.corpus_id, route.doc_id)
+                        for values in document_routes.values()
+                        for route in values
+                    }
+                )
+                document_routing_diagnostics["routes"] = {
+                    lane_id: [
+                        {
+                            "corpus_id": route.corpus_id,
+                            "doc_id": route.doc_id,
+                            "score": round(route.score, 4),
+                            "title": route.title,
+                            "concepts": list(route.concepts),
+                            "section_ids": list(route.section_ids),
+                            "grounded_hint": (
+                                route.corpus_id,
+                                route.doc_id,
+                            )
+                            in {
+                                (
+                                    str(hint.get("corpus_id") or ""),
+                                    str(hint.get("doc_id") or ""),
+                                )
+                                for hint in grounded_route_rows.get(lane_id, [])
+                            },
+                        }
+                        for route in values
+                    ]
+                    for lane_id, values in document_routes.items()
+                }
         timings["document_routing"] = perf_counter() - routing_started
 
         tree_routing_started = perf_counter()
         summary_tree_routes: dict[str, list[Any]] = {}
         summary_tree_diagnostics: dict[str, Any] = {
             "enabled": False,
-            "reason": (
-                "not_available_in_qdrant_only_store_contract"
-                if effective_tier == RetrievalTier.qdrant_only
-                else "no_document_routes"
-            ),
+            "reason": "no_document_routes",
         }
-        if document_routes and effective_tier != RetrievalTier.qdrant_only:
+        if document_routes:
             try:
+                initial_tree_lane_ids = _tree_routing_lane_ids(lanes)
                 summary_tree_routes, summary_tree_diagnostics = await asyncio.wait_for(
                     summary_tree_navigator.navigate(
                         lane_vectors={
                             lane.lane_id: vectors_by_lane_id.get(lane.lane_id)
                             for lane in lanes
-                            if lane.role == "core"
+                            if lane.lane_id in set(initial_tree_lane_ids)
                         },
                         document_routes=document_routes,
                         embedding_config=embedding_config,
+                        qdrant_client=qdrant_client,
                     ),
                     timeout=_stage_timeout(
                         float(
@@ -1520,6 +1819,8 @@ class RetrieverOrchestrator:
                         reserve=1.0,
                     ),
                 )
+                summary_tree_diagnostics["initial_lane_ids"] = initial_tree_lane_ids
+                summary_tree_diagnostics["advisory_lanes_use_document_routes"] = True
             except Exception as exc:
                 failures.append(
                     {
@@ -1533,6 +1834,319 @@ class RetrieverOrchestrator:
                     "status": "degraded",
                     "reason": f"{type(exc).__name__}: {exc}"[:240],
                 }
+
+        # The hierarchy points already carry source-proven lexicon IDs. Resolve
+        # only those bound cards, then execute novel corpus-native terms as
+        # optional lanes. This is a deterministic second descent, not an LLM
+        # rewrite and not another corpus-wide concept search.
+        hierarchy_binding_diagnostics: dict[str, Any] = {
+            "status": "skipped",
+            "reason": "no_summary_tree_routes",
+        }
+        hierarchy_tree_routes = {
+            lane_id: list(summary_tree_routes.get(lane_id) or [])
+            for lane_id in required_lane_ids
+            if summary_tree_routes.get(lane_id)
+        }
+        hierarchy_match_limit = min(
+            4,
+            max(2, len(hierarchy_tree_routes)) * max(1, len(corpus_ids)),
+        )
+        hierarchy_vocabulary_deadline_s = min(
+            12.0,
+            max(4.0, vocabulary_deadline_s * 0.8),
+        )
+        if hierarchy_tree_routes and qdrant_client is not None:
+            try:
+                (
+                    hierarchy_matches,
+                    hierarchy_binding_diagnostics,
+                ) = await asyncio.wait_for(
+                    hierarchy_bound_vocabulary_matches(
+                        qdrant_client=qdrant_client,
+                        summary_tree_routes=hierarchy_tree_routes,
+                        lane_vectors=vectors_by_lane_id,
+                        lane_queries={lane.lane_id: lane.query for lane in lanes},
+                        existing_matches=list(
+                            vocabulary_diagnostics.get("matches") or []
+                        ),
+                        disabled_lexicon_ids=disabled_lexicon_ids,
+                        max_matches=hierarchy_match_limit,
+                        max_per_lane_corpus=(
+                            2 if len(hierarchy_tree_routes) == 1 else 1
+                        ),
+                    ),
+                    timeout=_stage_timeout(
+                        hierarchy_vocabulary_deadline_s,
+                        reserve=1.0,
+                    ),
+                )
+                hierarchy_binding_diagnostics["deadline_s"] = (
+                    hierarchy_vocabulary_deadline_s
+                )
+                if hierarchy_matches:
+                    existing_match_ids = {
+                        str(row.get("lexicon_id") or "")
+                        for row in (vocabulary_diagnostics.get("matches") or [])
+                    }
+                    novel_matches = [
+                        row
+                        for row in hierarchy_matches
+                        if str(row.get("lexicon_id") or "") not in existing_match_ids
+                    ]
+
+                    matches_by_corpus: dict[str, list[dict[str, Any]]] = {}
+                    for match in novel_matches:
+                        match_corpus_id = str(match.get("corpus_id") or "")
+                        if match_corpus_id:
+                            matches_by_corpus.setdefault(match_corpus_id, []).append(
+                                match
+                            )
+                    reference_results = await asyncio.gather(
+                        *(
+                            definition_reference_vocabulary_matches(
+                                qdrant_client,
+                                corpus_id=match_corpus_id,
+                                seeds=corpus_matches,
+                                disabled_lexicon_ids=disabled_lexicon_ids,
+                                query_lanes=[
+                                    {
+                                        "lane_id": lane.lane_id,
+                                        "query": lane.query or lane.dense_text,
+                                    }
+                                    for lane in lanes
+                                ],
+                                limit=2,
+                            )
+                            for match_corpus_id, corpus_matches in matches_by_corpus.items()
+                        ),
+                        return_exceptions=True,
+                    )
+                    hierarchy_reference_rejections: list[dict[str, Any]] = []
+                    for result in reference_results:
+                        if isinstance(result, BaseException):
+                            continue
+                        reference_matches, reference_rejections = result
+                        for match in reference_matches:
+                            lexicon_id = str(match.get("lexicon_id") or "")
+                            if lexicon_id and lexicon_id not in existing_match_ids:
+                                novel_matches.append(match)
+                                existing_match_ids.add(lexicon_id)
+                        hierarchy_reference_rejections.extend(reference_rejections)
+                    hierarchy_binding_diagnostics[
+                        "definition_reference_matches"
+                    ] = sum(
+                        1
+                        for match in novel_matches
+                        if str(match.get("applicability") or "")
+                        == "corpus_definition_reference"
+                    )
+                    if hierarchy_reference_rejections:
+                        vocabulary_diagnostics.setdefault(
+                            "rejected_expansions", []
+                        ).extend(hierarchy_reference_rejections[:8])
+                    vocabulary_diagnostics[
+                        "definition_reference_expansion_count"
+                    ] = int(
+                        vocabulary_diagnostics.get(
+                            "definition_reference_expansion_count"
+                        )
+                        or 0
+                    ) + int(
+                        hierarchy_binding_diagnostics[
+                            "definition_reference_matches"
+                        ]
+                    )
+                    vocabulary_diagnostics.setdefault("matches", []).extend(
+                        novel_matches
+                    )
+                    for match in novel_matches:
+                        corpus_id = str(match.get("corpus_id") or "")
+                        if not corpus_id:
+                            continue
+                        corpus_diagnostics = vocabulary_diagnostics.setdefault(
+                            "per_corpus", {}
+                        ).setdefault(corpus_id, {})
+                        corpus_diagnostics.setdefault("matches", []).append(match)
+                        corpus_diagnostics["match_count"] = len(
+                            corpus_diagnostics.get("matches") or []
+                        )
+                        if (
+                            str(match.get("applicability") or "")
+                            == "corpus_definition_reference"
+                        ):
+                            corpus_diagnostics[
+                                "definition_reference_match_count"
+                            ] = int(
+                                corpus_diagnostics.get(
+                                    "definition_reference_match_count"
+                                )
+                                or 0
+                            ) + 1
+
+                    # Route hints require document profiles. Reuse the already
+                    # selected Tier-0 cards instead of issuing another store read.
+                    profiles = vocabulary_diagnostics.setdefault(
+                        "document_profiles", []
+                    )
+                    profile_keys = {
+                        (
+                            str(profile.get("corpus_id") or ""),
+                            str(profile.get("doc_id") or ""),
+                        )
+                        for profile in profiles
+                    }
+                    for route_values in document_routes.values():
+                        for route in route_values:
+                            key = (str(route.corpus_id), str(route.doc_id))
+                            if key in profile_keys:
+                                continue
+                            profiles.append(
+                                {
+                                    "corpus_id": str(route.corpus_id),
+                                    "doc_id": str(route.doc_id),
+                                    "title": str(route.title or ""),
+                                    "summary": str(route.summary or ""),
+                                    "concepts": list(route.concepts),
+                                    "section_ids": list(route.section_ids),
+                                    "node_type": "document",
+                                    "store": "tier0_document_profile",
+                                }
+                            )
+                            profile_keys.add(key)
+
+                    all_grounded_lanes, hierarchy_expansion = grounded_vocabulary_lanes(
+                        plan,
+                        {"matches": novel_matches},
+                        max_translation_lanes=hierarchy_match_limit,
+                        max_translation_lanes_per_corpus=max(
+                            1,
+                            min(hierarchy_match_limit, len(hierarchy_tree_routes)),
+                        ),
+                    )
+                    existing_lane_ids = {lane.lane_id for lane in lanes}
+                    new_hierarchy_lanes = [
+                        lane
+                        for lane in all_grounded_lanes
+                        if lane.lane_id not in existing_lane_ids
+                    ]
+                    if new_hierarchy_lanes:
+                        new_vectors = await asyncio.wait_for(
+                            embed_queries(
+                                [lane.dense_text for lane in new_hierarchy_lanes],
+                                embedding_config,
+                            ),
+                            timeout=_stage_timeout(
+                                float(
+                                    getattr(
+                                        settings,
+                                        "QUERY_PLAN_EMBED_DEADLINE_SECONDS",
+                                        5.0,
+                                    )
+                                ),
+                                reserve=1.0,
+                            ),
+                        )
+                        lanes.extend(new_hierarchy_lanes)
+                        vectors.extend(new_vectors)
+                        vectors_by_lane_id.update(
+                            {
+                                lane.lane_id: vector
+                                for lane, vector in zip(
+                                    new_hierarchy_lanes,
+                                    new_vectors,
+                                    strict=True,
+                                )
+                            }
+                        )
+
+                        expansion = vocabulary_diagnostics.setdefault("expansion", {})
+                        for field in (
+                            "translation_lane_ids",
+                            "step_back_lane_ids",
+                            "introduced_lexicon_ids",
+                        ):
+                            expansion[field] = list(
+                                dict.fromkeys(
+                                    [
+                                        *(expansion.get(field) or []),
+                                        *(hierarchy_expansion.get(field) or []),
+                                    ]
+                                )
+                            )
+                        expansion.setdefault("lane_lexicon_ids", {}).update(
+                            hierarchy_expansion.get("lane_lexicon_ids") or {}
+                        )
+                        expansion["required"] = False
+
+                        route_hints = grounded_document_route_hints(
+                            vocabulary_diagnostics,
+                            expansion,
+                        )
+                        (
+                            document_routes,
+                            hierarchy_route_rows,
+                        ) = merge_grounded_document_route_hints(
+                            document_routes,
+                            {
+                                lane.lane_id: route_hints.get(lane.lane_id, [])
+                                for lane in new_hierarchy_lanes
+                            },
+                            max_per_lane=document_route_limit,
+                        )
+                        hierarchy_binding_diagnostics["route_hints"] = sum(
+                            len(values) for values in hierarchy_route_rows.values()
+                        )
+                        hierarchy_binding_diagnostics["new_lane_ids"] = [
+                            lane.lane_id for lane in new_hierarchy_lanes
+                        ]
+
+                        (
+                            second_tree_routes,
+                            second_tree_diagnostics,
+                        ) = await asyncio.wait_for(
+                            summary_tree_navigator.navigate(
+                                lane_vectors={
+                                    lane.lane_id: vectors_by_lane_id.get(lane.lane_id)
+                                    for lane in new_hierarchy_lanes
+                                },
+                                document_routes={
+                                    lane.lane_id: document_routes.get(lane.lane_id, [])
+                                    for lane in new_hierarchy_lanes
+                                },
+                                embedding_config=embedding_config,
+                                qdrant_client=qdrant_client,
+                            ),
+                            timeout=_stage_timeout(
+                                float(
+                                    getattr(
+                                        settings,
+                                        "QUERY_PLAN_TREE_ROUTING_DEADLINE_SECONDS",
+                                        6.0,
+                                    )
+                                ),
+                                reserve=1.0,
+                            ),
+                        )
+                        summary_tree_routes.update(second_tree_routes)
+                        hierarchy_binding_diagnostics[
+                            "second_tree"
+                        ] = second_tree_diagnostics
+                    vocabulary_diagnostics["status"] = "expanded"
+            except Exception as exc:
+                hierarchy_binding_diagnostics = {
+                    "status": "degraded",
+                    "reason": f"{type(exc).__name__}: {exc}"[:240],
+                    "deadline_s": hierarchy_vocabulary_deadline_s,
+                }
+                failures.append(
+                    {
+                        "lane_id": "hierarchy_vocabulary",
+                        "retriever": "hierarchy_bound_vocabulary",
+                        "error": f"{type(exc).__name__}: {exc}"[:240],
+                    }
+                )
+        vocabulary_diagnostics["hierarchy_binding"] = hierarchy_binding_diagnostics
         timings["summary_tree_routing"] = perf_counter() - tree_routing_started
 
         def _annotate_document_routes(
@@ -1603,13 +2217,21 @@ class RetrieverOrchestrator:
                     for parent_id in route.parent_ids
                 )
             )
-            lane_summary_top_k = summary_top_k if lane.role == "core" else 0
-            lane_lexical_top_k = (
-                lexical_top_k if lane.role == "core" else min(2, lexical_top_k)
-            )
-            lane_child_top_k = (
-                child_top_k if lane.role == "core" else min(6, child_top_k)
-            )
+            if lane.role == "original":
+                # The exact user wording is the recall safety lane. It remains
+                # global and receives the configured broad first-stage budget;
+                # derived probes may narrow through Tier-0 and the RAPTOR tree.
+                lane_summary_top_k = requested_summary_top_k
+                lane_lexical_top_k = lexical_top_k
+                lane_child_top_k = requested_child_top_k
+            else:
+                lane_summary_top_k = summary_top_k if lane.role == "core" else 0
+                lane_lexical_top_k = (
+                    lexical_top_k if lane.role == "core" else min(2, lexical_top_k)
+                )
+                lane_child_top_k = (
+                    child_top_k if lane.role == "core" else min(6, child_top_k)
+                )
             fair_routed_documents = bool(
                 lane.role == "core" and routed_doc_ids and len(routed_doc_ids) > 1
             )
@@ -1705,32 +2327,40 @@ class RetrieverOrchestrator:
                 return chunks
 
             summary_raw, lexical_raw = await asyncio.gather(
-                asyncio.wait_for(
-                    _summary_candidates(),
-                    timeout=_stage_timeout(
-                        float(
-                            getattr(
-                                settings, "QUERY_PLAN_RETRIEVAL_DEADLINE_SECONDS", 4.0
-                            )
+                (
+                    asyncio.wait_for(
+                        _summary_candidates(),
+                        timeout=_stage_timeout(
+                            float(
+                                getattr(
+                                    settings,
+                                    "QUERY_PLAN_RETRIEVAL_DEADLINE_SECONDS",
+                                    4.0,
+                                )
+                            ),
+                            reserve=1.0,
                         ),
-                        reserve=1.0,
-                    ),
-                )
-                if lane_summary_top_k > 0 and vector is not None
-                else asyncio.sleep(0, result=[]),
-                asyncio.wait_for(
-                    _lexical_candidates(),
-                    timeout=_stage_timeout(
-                        float(
-                            getattr(
-                                settings, "QUERY_PLAN_RETRIEVAL_DEADLINE_SECONDS", 4.0
-                            )
+                    )
+                    if lane_summary_top_k > 0 and vector is not None
+                    else asyncio.sleep(0, result=[])
+                ),
+                (
+                    asyncio.wait_for(
+                        _lexical_candidates(),
+                        timeout=_stage_timeout(
+                            float(
+                                getattr(
+                                    settings,
+                                    "QUERY_PLAN_RETRIEVAL_DEADLINE_SECONDS",
+                                    4.0,
+                                )
+                            ),
+                            reserve=1.0,
                         ),
-                        reserve=1.0,
-                    ),
-                )
-                if lane_lexical_top_k > 0
-                else asyncio.sleep(0, result=[]),
+                    )
+                    if lane_lexical_top_k > 0
+                    else asyncio.sleep(0, result=[])
+                ),
                 return_exceptions=True,
             )
             summary_chunks = (
@@ -1887,7 +2517,13 @@ class RetrieverOrchestrator:
                         lane_id=lane.lane_id,
                         retriever=retriever_name,
                         chunks=tuple(chunks),
-                        required=lane.role == "core",
+                        # Fusion protects one exact-query candidate before the
+                        # rerank cap. Semantic answerability still counts only
+                        # required core lanes via required_lane_ids above.
+                        required=(
+                            lane.role == "original"
+                            or (lane.role == "core" and lane.required)
+                        ),
                         anchor_phrase=lane.phrase,
                         anchor_phrases=tuple(lane.support_phrases),
                         anchor_terms=tuple(lane.lexical_terms),
@@ -1904,15 +2540,23 @@ class RetrieverOrchestrator:
                     "descent": (
                         "document_tree_parent_child_fair"
                         if fair_routed_documents and tree_parent_ids
-                        else "document_parent_child_fair"
-                        if fair_routed_documents and routed_parent_ids
-                        else "document_tree_parent_child"
-                        if is_routed_core and tree_parent_ids
-                        else "document_parent_child"
-                        if is_routed_core and routed_parent_ids
-                        else "document_child_fallback"
-                        if is_routed_core
-                        else "global_wildcard"
+                        else (
+                            "document_parent_child_fair"
+                            if fair_routed_documents and routed_parent_ids
+                            else (
+                                "document_tree_parent_child"
+                                if is_routed_core and tree_parent_ids
+                                else (
+                                    "document_parent_child"
+                                    if is_routed_core and routed_parent_ids
+                                    else (
+                                        "document_child_fallback"
+                                        if is_routed_core
+                                        else "global_wildcard"
+                                    )
+                                )
+                            )
+                        )
                     ),
                     "counts": counts,
                     "duration_s": round(perf_counter() - lane_started, 3),
@@ -1940,9 +2584,11 @@ class RetrieverOrchestrator:
         rerank_cap = (
             int(getattr(settings, "QUERY_PLAN_GRAPH_RERANK_CANDIDATES", 80))
             if effective_tier == RetrievalTier.qdrant_mongo_graph
-            else int(getattr(settings, "QUERY_PLAN_HYBRID_RERANK_CANDIDATES", 64))
-            if effective_tier == RetrievalTier.qdrant_mongo
-            else int(getattr(settings, "QUERY_PLAN_FAST_RERANK_CANDIDATES", 48))
+            else (
+                int(getattr(settings, "QUERY_PLAN_HYBRID_RERANK_CANDIDATES", 64))
+                if effective_tier == RetrievalTier.qdrant_mongo
+                else int(getattr(settings, "QUERY_PLAN_FAST_RERANK_CANDIDATES", 48))
+            )
         )
         rerank_cap = _planned_rerank_candidate_limit(
             plan=plan,
@@ -1992,9 +2638,11 @@ class RetrieverOrchestrator:
                     fused,
                     corpus_ids,
                     limit=min(
-                        max(0, int(neo4j_expansion_cap))
-                        if neo4j_expansion_cap is not None
-                        else 12,
+                        (
+                            max(0, int(neo4j_expansion_cap))
+                            if neo4j_expansion_cap is not None
+                            else 12
+                        ),
                         rerank_cap,
                     ),
                     db=conversation_service._db,
@@ -2126,35 +2774,41 @@ class RetrieverOrchestrator:
                 try:
                     raw_results = await asyncio.wait_for(
                         asyncio.gather(
-                            funnel_b.search(
-                                vector,
-                                corpus_ids,
-                                b_cols,
-                                top_k=min(child_top_k, 12),
-                                query_text=lane.query,
-                                doc_ids=routed_doc_ids,
-                            )
-                            if vector is not None
-                            else asyncio.sleep(0, result=[]),
-                            funnel_a.search(
-                                vector,
-                                corpus_ids,
-                                a_cols,
-                                top_k=min(summary_top_k, 8),
-                                fair_mode=True,
-                                query_text=lane.query,
-                                doc_ids=routed_doc_ids,
-                            )
-                            if summary_top_k > 0 and vector is not None
-                            else asyncio.sleep(0, result=[]),
-                            lexical_retriever.search(
-                                lane.query,
-                                corpus_ids,
-                                top_k=min(16, max(8, lexical_top_k * 2)),
-                                doc_ids=routed_doc_ids,
-                            )
-                            if lexical_top_k > 0
-                            else asyncio.sleep(0, result=[]),
+                            (
+                                funnel_b.search(
+                                    vector,
+                                    corpus_ids,
+                                    b_cols,
+                                    top_k=min(child_top_k, 12),
+                                    query_text=lane.query,
+                                    doc_ids=routed_doc_ids,
+                                )
+                                if vector is not None
+                                else asyncio.sleep(0, result=[])
+                            ),
+                            (
+                                funnel_a.search(
+                                    vector,
+                                    corpus_ids,
+                                    a_cols,
+                                    top_k=min(summary_top_k, 8),
+                                    fair_mode=True,
+                                    query_text=lane.query,
+                                    doc_ids=routed_doc_ids,
+                                )
+                                if summary_top_k > 0 and vector is not None
+                                else asyncio.sleep(0, result=[])
+                            ),
+                            (
+                                lexical_retriever.search(
+                                    lane.query,
+                                    corpus_ids,
+                                    top_k=min(16, max(8, lexical_top_k * 2)),
+                                    doc_ids=routed_doc_ids,
+                                )
+                                if lexical_top_k > 0
+                                else asyncio.sleep(0, result=[])
+                            ),
                             return_exceptions=True,
                         ),
                         timeout=_stage_timeout(
@@ -2253,6 +2907,9 @@ class RetrieverOrchestrator:
                 fused,
                 max_candidates=rerank_cap,
                 max_per_document=pre_rerank_max_per_document,
+                required_lane_ids=required_lane_ids,
+                preferred_route_lane_ids=answer_lane_ids,
+                protected_lane_ids=protected_lane_ids,
             )
         fused = fused[:rerank_cap]
         fusion_diagnostics["pre_rerank_document_cap"] = {
@@ -2330,9 +2987,19 @@ class RetrieverOrchestrator:
             tier=effective_tier,
             score_scale=settings.RERANKER_SCORE_SCALE,
         )
+        translation_lane_targets = grounded_translation_lane_targets(
+            vocabulary_diagnostics,
+            vocabulary_diagnostics.get("expansion") or {},
+            required_lane_ids=required_lane_ids,
+        )
+        vocabulary_diagnostics["required_lane_propagation"] = (
+            propagate_grounded_lane_aliases(ranked, translation_lane_targets)
+        )
         ranked, grounding_filter_diagnostics = filter_grounded_planned_candidates(
             ranked,
             required_lane_ids,
+            selected_corpus_ids=corpus_ids,
+            protected_lane_ids=protected_lane_ids,
         )
         diversity = select_with_diversity(
             ranked,
@@ -2375,6 +3042,7 @@ class RetrieverOrchestrator:
             ),
             routed_document_budget=routed_document_budget,
             preferred_route_lane_ids=answer_lane_ids,
+            protected_lane_ids=protected_lane_ids,
         )
         hydrate_started = perf_counter()
         if effective_tier == RetrievalTier.qdrant_only:
@@ -2528,6 +3196,19 @@ class RetrieverOrchestrator:
             "query_plan_version": plan.version,
             "complexity": plan.complexity,
             "answer_shape": plan.answer_shape,
+            "constraints": [
+                {
+                    "constraint_id": constraint.constraint_id,
+                    "operator": constraint.operator,
+                    "kind": constraint.kind,
+                    "text": constraint.text,
+                    "terms": list(constraint.terms),
+                }
+                for constraint in plan.constraints
+            ],
+            "execution_batches": [
+                list(batch) for batch in query_plan_execution_batches(plan)
+            ],
             "original_query": plan.original_query,
             "standalone_query": plan.standalone_query,
             "curation_query": curation_query,
@@ -2592,14 +3273,17 @@ class RetrieverOrchestrator:
                 "supported_lane_ids": supported_lane_ids,
                 "coverage": round(required_lane_coverage, 3),
             },
+            "protected_recall_lanes": protected_lane_ids,
             "repair": {
                 **repair_diagnostics,
                 "decision": (
                     "not_needed_required_lanes_reserved"
                     if not missing_before_repair
-                    else "repair_recovered_required_lanes"
-                    if required_lane_coverage >= 1.0
-                    else "repair_exhausted_required_lanes_unsupported"
+                    else (
+                        "repair_recovered_required_lanes"
+                        if required_lane_coverage >= 1.0
+                        else "repair_exhausted_required_lanes_unsupported"
+                    )
                 ),
             },
             "final_distribution": {
@@ -2609,6 +3293,7 @@ class RetrieverOrchestrator:
             "final_source_tiers": final_source_tiers,
             "document_routing": document_routing_diagnostics,
             "summary_tree_routing": summary_tree_diagnostics,
+            "vocabulary_resolution": vocabulary_diagnostics,
             "unique_docs_final": len(document_distribution),
             "max_doc_share_final": max_doc_share_final,
             "graph_evidence": {
@@ -2890,9 +3575,11 @@ class RetrieverOrchestrator:
                     "child_top_k": funnel_limits.child_top_k,
                     "summary_top_k": funnel_limits.summary_top_k,
                     "requested_retrieval_k": single_limit,
-                    "final_top_k": final_top_k
-                    if final_top_k is not None
-                    else settings.DEFAULT_RETRIEVAL_K,
+                    "final_top_k": (
+                        final_top_k
+                        if final_top_k is not None
+                        else settings.DEFAULT_RETRIEVAL_K
+                    ),
                     "rerank_requested": requested_rerank_enabled,
                     "rerank_enabled": rerank_enabled,
                 },

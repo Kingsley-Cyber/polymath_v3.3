@@ -38,6 +38,14 @@ class ModelOverrides(_legacy.ModelOverrides):
     """Current per-request override shape."""
 
     max_tokens: int | None = Field(default=None, ge=1, le=384000)
+    disabled_lexicon_ids: list[str] | None = Field(
+        default=None,
+        max_length=64,
+        description=(
+            "Scoped corpus-vocabulary expansions to suppress for this turn. "
+            "This changes query planning only and never edits corpus data."
+        ),
+    )
     web_search_enabled: bool | None = Field(
         default=None,
         description=(
@@ -231,6 +239,7 @@ class IngestionConfig(BaseModel):
         "off",
         "local",
         "cloud",
+        "runpod_flash",
         "legacy_local",
         "dual",
         "local_then_cloud",
@@ -547,6 +556,7 @@ class ExtractionSettings(BaseModel):
         "off",
         "local",
         "cloud",
+        "runpod_flash",
         "legacy_local",
         "local_then_cloud",
         "dual",
@@ -563,6 +573,80 @@ class ExtractionSettings(BaseModel):
         ),
     )
     endpoints: list[ExtractionEndpoint] = Field(default_factory=list)
+
+
+class RunpodFlashExtractionSettings(BaseModel):
+    """Runpod Flash burst lane for joint GLiNER-Relex extraction.
+
+    The API key is deliberately absent. It lives in the encrypted shared-key
+    store under ``api_keys.runpod`` and is resolved only at dispatch time.
+    Flash workers are stateless inference workers: they never receive database
+    credentials and never write MongoDB, Qdrant, or Neo4j directly.
+    """
+
+    enabled: bool = False
+    endpoint_id: str = Field(default="", max_length=120)
+    endpoint_name: str = Field(default="polymath-gliner-relex", max_length=120)
+    model_id: str = Field(
+        default="knowledgator/gliner-relex-large-v0.5",
+        max_length=240,
+    )
+    model_revision: str = Field(
+        default="9c4171ae1e690fc29b87f33579e50bcd65faf2cc",
+        max_length=80,
+        description="Pinned Hugging Face revision; empty opts into the repository default.",
+    )
+    spacy_pipeline: str = Field(default="blank:en", max_length=80)
+    min_workers: int = Field(default=0, ge=0, le=64)
+    max_workers: int = Field(default=8, ge=1, le=64)
+    worker_max_concurrency: int = Field(default=1, ge=1, le=8)
+    # Auto-repair polls every 120 seconds by default. Keep burst workers warm
+    # across adjacent durable slices while still scaling to zero promptly.
+    idle_timeout_seconds: int = Field(default=180, ge=5, le=3600)
+    scaler_value: int = Field(
+        default=1,
+        ge=1,
+        le=100,
+        description=(
+            "REQUEST_COUNT jobs-per-worker target used when the Flash endpoint "
+            "is deployed. Lower values scale out more aggressively."
+        ),
+    )
+    request_batch_size: int = Field(default=32, ge=1, le=128)
+    request_concurrency: int = Field(default=8, ge=1, le=64)
+    timeout_seconds: int = Field(default=1800, ge=30, le=7200)
+    poll_interval_seconds: float = Field(default=1.0, ge=0.25, le=10.0)
+    entity_threshold: float = Field(default=0.4, ge=0.0, le=1.0)
+    adjacency_threshold: float = Field(default=0.6, ge=0.0, le=1.0)
+    relation_threshold: float = Field(default=0.75, ge=0.0, le=1.0)
+    entity_lens_enabled: bool = True
+    entity_lens_max_labels: int = Field(default=6, ge=2, le=14)
+    model_batch_size: int = Field(default=32, ge=1, le=256)
+    max_window_words: int = Field(default=260, ge=80, le=800)
+    benchmark_chunks: int = Field(default=5000, ge=100, le=50000)
+    target_speedup: float = Field(default=100.0, ge=1.0, le=1000.0)
+    budget_cap_usd: float = Field(default=40.0, ge=0.0, le=10000.0)
+    estimated_gpu_rate_per_second_usd: float = Field(
+        default=0.00031,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Operator-supplied conservative Flex rate used only for estimates. "
+            "Actual billing remains authoritative in Runpod."
+        ),
+    )
+    cost_overhead_multiplier: float = Field(
+        default=1.5,
+        ge=1.0,
+        le=10.0,
+        description="Estimate allowance for worker startup and idle time.",
+    )
+
+    @model_validator(mode="after")
+    def validate_worker_bounds(self):
+        if self.min_workers > self.max_workers:
+            raise ValueError("runpod_flash.min_workers cannot exceed max_workers")
+        return self
 
 
 class GlobalIngestionSummarySettings(BaseModel):
@@ -604,6 +688,9 @@ class GlobalIngestionSettings(BaseModel):
 
     summary: GlobalIngestionSummarySettings = Field(
         default_factory=GlobalIngestionSummarySettings
+    )
+    runpod_flash: RunpodFlashExtractionSettings = Field(
+        default_factory=RunpodFlashExtractionSettings
     )
 
 

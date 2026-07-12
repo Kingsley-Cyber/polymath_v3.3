@@ -233,6 +233,21 @@ def test_off_is_a_valid_explicit_state():
     assert c.engine == "off" and not c.errors and c.pool_source == "none"
 
 
+def test_runpod_flash_is_a_distinct_pool_free_engine():
+    c = _c(
+        corpus_engine="runpod_flash",
+        summary_model_count=0,
+        extraction_model_count=0,
+        provider_pool_entries=[],
+    )
+    assert c.engine == "runpod_flash"
+    assert c.uses_runpod_flash
+    assert not c.uses_provider_llm
+    assert not c.uses_legacy_local
+    assert c.pool_source == "none"
+    assert not c.errors
+
+
 def test_legacy_local_without_endpoints_warns_env_floor():
     c = _c(corpus_engine="legacy_local", enabled_endpoint_urls=[])
     assert not c.errors

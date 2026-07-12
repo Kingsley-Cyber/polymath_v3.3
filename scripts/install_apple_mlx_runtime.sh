@@ -35,6 +35,13 @@ LAUNCH_AGENT_NAME="com.polymath.apple-ml"
 LAUNCH_AGENT_PATH="${HOME}/Library/LaunchAgents/${LAUNCH_AGENT_NAME}.plist"
 APPLE_MLX_EMBED_MODEL_ID="${APPLE_MLX_EMBED_MODEL_ID:-mlx-community/Qwen3-Embedding-0.6B-mxfp8}"
 APPLE_MLX_RERANKER_MODEL_ID="${APPLE_MLX_RERANKER_MODEL_ID:-mlx-community/jina-reranker-v3-4bit-mxfp4}"
+APPLE_RERANKER_BACKEND="${APPLE_RERANKER_BACKEND:-torch_fp16}"
+APPLE_TORCH_RERANKER_MODEL_ID="${APPLE_TORCH_RERANKER_MODEL_ID:-jinaai/jina-reranker-v3}"
+if [[ "${APPLE_RERANKER_BACKEND}" == "torch_fp16" ]]; then
+  RERANKER_SCORE_SCALE="probability"
+else
+  RERANKER_SCORE_SCALE="cosine"
+fi
 EMBED_BATCH_SIZE="${EMBED_BATCH_SIZE:-32}"
 START_EMBEDDER="${START_EMBEDDER:-true}"
 START_RERANKER="${START_RERANKER:-true}"
@@ -52,6 +59,7 @@ echo "[apple-mlx] services     : ${SERVICES_DIR}"
 echo "[apple-mlx] launch agent : ${LAUNCH_AGENT_PATH}"
 echo "[apple-mlx] embed batch  : ${EMBED_BATCH_SIZE}"
 echo "[apple-mlx] sidecars     : embedder=${START_EMBEDDER} reranker=${START_RERANKER} docling=${START_DOCLING}"
+echo "[apple-mlx] reranker     : backend=${APPLE_RERANKER_BACKEND} model=${APPLE_TORCH_RERANKER_MODEL_ID}"
 
 mkdir -p "${SERVICES_DIR}" "${LOG_DIR}" "${RUNTIME_ROOT}/models" "${RUNTIME_ROOT}/volumes/hf-cache"
 
@@ -102,7 +110,11 @@ fi
 
 cd "${SERVICES_DIR}"
 echo "[apple-mlx] creating venv + installing requirements"
-uv venv .venv --python 3.11
+if [[ ! -x "${SERVICES_DIR}/.venv/bin/python" ]]; then
+  uv venv .venv --python 3.11
+else
+  echo "[apple-mlx] reusing existing uv environment"
+fi
 # shellcheck disable=SC1091
 source .venv/bin/activate
 uv pip install --upgrade pip
@@ -113,12 +125,14 @@ deactivate
 echo "[apple-mlx] pre-pulling MLX model weights (this can take a while on first run)"
 APPLE_MLX_EMBED_MODEL_ID="${APPLE_MLX_EMBED_MODEL_ID}" \
 APPLE_MLX_RERANKER_MODEL_ID="${APPLE_MLX_RERANKER_MODEL_ID}" \
+APPLE_TORCH_RERANKER_MODEL_ID="${APPLE_TORCH_RERANKER_MODEL_ID}" \
 HF_HOME="${RUNTIME_ROOT}/volumes/hf-cache" \
 HF_HUB_CACHE="${RUNTIME_ROOT}/volumes/hf-cache/hub" \
 "${SERVICES_DIR}/.venv/bin/python" "${REPO_ROOT}/scripts/pull_apple_mlx_models.py"
 
 APPLE_MLX_EMBED_MODEL_ID="${APPLE_MLX_EMBED_MODEL_ID}" \
 APPLE_MLX_RERANKER_MODEL_ID="${APPLE_MLX_RERANKER_MODEL_ID}" \
+APPLE_TORCH_RERANKER_MODEL_ID="${APPLE_TORCH_RERANKER_MODEL_ID}" \
 HF_HOME="${RUNTIME_ROOT}/volumes/hf-cache" \
 HF_HUB_CACHE="${RUNTIME_ROOT}/volumes/hf-cache/hub" \
 "${SERVICES_DIR}/.venv/bin/python" "${REPO_ROOT}/scripts/pull_apple_mlx_models.py" --check-only
@@ -155,6 +169,10 @@ cat > "${LAUNCH_AGENT_PATH}" <<PLIST
         <string>${APPLE_MLX_EMBED_MODEL_ID}</string>
         <key>APPLE_MLX_RERANKER_MODEL_ID</key>
         <string>${APPLE_MLX_RERANKER_MODEL_ID}</string>
+        <key>APPLE_RERANKER_BACKEND</key>
+        <string>${APPLE_RERANKER_BACKEND}</string>
+        <key>APPLE_TORCH_RERANKER_MODEL_ID</key>
+        <string>${APPLE_TORCH_RERANKER_MODEL_ID}</string>
         <key>EMBED_BATCH_SIZE</key>
         <string>${EMBED_BATCH_SIZE}</string>
         <key>START_EMBEDDER</key>
@@ -164,7 +182,11 @@ cat > "${LAUNCH_AGENT_PATH}" <<PLIST
         <key>START_DOCLING</key>
         <string>${START_DOCLING}</string>
         <key>RERANKER_SCORE_SCALE</key>
-        <string>cosine</string>
+        <string>${RERANKER_SCORE_SCALE}</string>
+        <key>RERANKER_WARM_ON_STARTUP</key>
+        <string>true</string>
+        <key>RERANKER_WARMUP_CANDIDATE_SHAPES</key>
+        <string>16,24</string>
     </dict>
     <key>RunAtLoad</key>
     <true/>
@@ -178,7 +200,19 @@ cat > "${LAUNCH_AGENT_PATH}" <<PLIST
 </plist>
 PLIST
 
-launchctl bootstrap "gui/$(id -u)" "${LAUNCH_AGENT_PATH}"
+bootstrap_ok=false
+for attempt in 1 2 3 4 5; do
+  if launchctl bootstrap "gui/$(id -u)" "${LAUNCH_AGENT_PATH}"; then
+    bootstrap_ok=true
+    break
+  fi
+  echo "[apple-mlx] launchd bootstrap raced prior shutdown; retrying (${attempt}/5)"
+  sleep 1
+done
+if [[ "${bootstrap_ok}" != "true" ]]; then
+  echo "ERROR: unable to bootstrap ${LAUNCH_AGENT_NAME}" >&2
+  exit 1
+fi
 launchctl kickstart -k "gui/$(id -u)/${LAUNCH_AGENT_NAME}"
 
 # ── 6. Smoke ─────────────────────────────────────────────────────────

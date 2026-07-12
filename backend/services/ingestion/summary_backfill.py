@@ -206,6 +206,20 @@ def summary_result_fields(result, *, updated_at: datetime) -> dict:
     }
 
 
+def summary_index_text(row: dict) -> str:
+    """Canonical text used for both summary payloads and embeddings."""
+
+    retrieval_text = str(row.get("retrieval_text") or "").strip()
+    if retrieval_text:
+        return retrieval_text
+    if row.get("summary"):
+        repaired = repair_parent_summary_row(row)
+        retrieval_text = str(repaired.get("retrieval_text") or "").strip()
+        if retrieval_text:
+            return retrieval_text
+    return str(row.get("summary") or "")
+
+
 # ── index (free) ─────────────────────────────────────────────────────────────
 async def index_existing(corpus_id: str, *, batch: int = 256) -> dict:
     """Embed + upsert summary points for every parent that has summary text."""
@@ -225,9 +239,12 @@ async def index_existing(corpus_id: str, *, batch: int = 256) -> dict:
             nonlocal indexed
             if not buf:
                 return
-            vecs = await _embed([p.get("retrieval_text") or p["summary"] for p in buf])
+            payloads = [
+                {**p, "retrieval_text": summary_index_text(p)} for p in buf
+            ]
+            vecs = await _embed([p["retrieval_text"] for p in payloads])
             await upsert_summaries(
-                qc, corpus_id, buf, vecs, target_kinds=["naive", "hrag"]
+                qc, corpus_id, payloads, vecs, target_kinds=["naive", "hrag"]
             )
             indexed += len(buf)
             print(f"  indexed {indexed}/{total}")

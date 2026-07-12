@@ -159,6 +159,24 @@ def test_skipped_duplicate_is_terminal_document_pipeline_work():
     assert jobs[0]["reason"] == "duplicate_document"
 
 
+def test_nonsemantic_source_is_terminal_document_pipeline_work():
+    jobs = classify_document_pipeline_jobs(
+        doc={
+            "corpus_id": "corpus-1",
+            "doc_id": "doc-1",
+            "filename": "navigation-shell.md",
+            "ingest_stage": "skipped_nonsemantic",
+            "write_state": {},
+        },
+        child_chunks=0,
+        parent_chunks=0,
+    )
+
+    assert len(jobs) == 1
+    assert jobs[0]["status"] == "skipped"
+    assert jobs[0]["reason"] == "nonsemantic_source"
+
+
 def test_classify_existing_chunks_missing_mongo_and_qdrant():
     jobs = classify_document_pipeline_jobs(
         doc={
@@ -217,7 +235,7 @@ def test_classify_verified_qdrant_count_mismatch_as_embed_job():
     assert jobs[0]["reason"] == "qdrant_vector_mismatch"
 
 
-def test_summary_qdrant_error_does_not_reembed_valid_children():
+def test_summary_qdrant_error_plans_summary_only_projection():
     jobs = classify_document_pipeline_jobs(
         doc={
             "corpus_id": "corpus-1",
@@ -237,7 +255,31 @@ def test_summary_qdrant_error_does_not_reembed_valid_children():
         parent_chunks=20,
     )
 
-    assert jobs == []
+    assert [job["kind"] for job in jobs] == ["index_summaries"]
+    assert jobs[0]["status"] == "queued"
+    assert jobs[0]["reason"] == "qdrant_summary_vector_mismatch"
+
+
+def test_missing_tier0_profile_projection_is_durable_document_job():
+    jobs = classify_document_pipeline_jobs(
+        doc={
+            "corpus_id": "corpus-1",
+            "doc_id": "doc-1",
+            "filename": "book.pdf",
+            "doc_profile": {"summary": "Document routing summary."},
+            "write_state": {
+                "mongo_written": True,
+                "qdrant_written": True,
+                "document_profile_indexed": False,
+            },
+        },
+        child_chunks=20,
+        parent_chunks=4,
+    )
+
+    assert [job["kind"] for job in jobs] == ["index_document_profile"]
+    assert jobs[0]["status"] == "queued"
+    assert jobs[0]["reason"] == "missing_tier0_document_profile"
 
 
 def test_summary_write_intent_tracks_actual_qdrant_targets():
@@ -552,6 +594,97 @@ async def test_run_document_pipeline_jobs_executes_embed_runner_and_reconciles_s
     assert result["executor_missing_kinds"] == []
     assert result["counts"] == {"succeeded": 1}
     assert result["jobs"][0]["reason"] == "qdrant_write_complete"
+
+
+@pytest.mark.asyncio
+async def test_run_document_pipeline_jobs_executes_summary_only_runner():
+    doc = {
+        "corpus_id": "corpus-1",
+        "doc_id": "doc-1",
+        "user_id": "user-1",
+        "filename": "book.pdf",
+        "write_state": {
+            "mongo_written": True,
+            "qdrant_written": True,
+            "verified": False,
+            "verify_errors": [
+                "mismatch: expected=20 summary vectors but corpus_x_naive has 18 summary vectors"
+            ],
+        },
+    }
+    db = _Db(docs=[doc], child_count=4, parent_count=20)
+    job = build_document_pipeline_job(
+        doc=doc,
+        kind="index_summaries",
+        child_chunks=4,
+        parent_chunks=20,
+    )
+    db["document_pipeline_jobs"].rows = [
+        {**job, "status": "queued", "updated_at": 1}
+    ]
+
+    async def summary_runner(*, doc_ids, limit):
+        assert doc_ids == ["doc-1"]
+        assert limit == 1
+        doc["write_state"]["verified"] = True
+        doc["write_state"]["verify_errors"] = []
+        return {"status": "complete", "counts": {"succeeded": 1}}
+
+    result = await run_document_pipeline_jobs(
+        db,
+        corpus_id="corpus-1",
+        user_id="user-1",
+        summary_runner=summary_runner,
+    )
+
+    assert result["status"] == "complete"
+    assert result["runner_results"]["index_summaries"]["status"] == "complete"
+    assert result["counts"] == {"succeeded": 1}
+    assert result["jobs"][0]["reason"] == "summary_projection_complete"
+
+
+@pytest.mark.asyncio
+async def test_run_document_pipeline_jobs_executes_tier0_profile_runner():
+    doc = {
+        "corpus_id": "corpus-1",
+        "doc_id": "doc-1",
+        "user_id": "user-1",
+        "filename": "book.pdf",
+        "doc_profile": {"summary": "Document routing summary."},
+        "write_state": {
+            "mongo_written": True,
+            "qdrant_written": True,
+            "document_profile_indexed": False,
+        },
+    }
+    db = _Db(docs=[doc], child_count=4, parent_count=1)
+    job = build_document_pipeline_job(
+        doc=doc,
+        kind="index_document_profile",
+        child_chunks=4,
+        parent_chunks=1,
+    )
+    db["document_pipeline_jobs"].rows = [
+        {**job, "status": "queued", "updated_at": 1}
+    ]
+
+    async def profile_runner(*, doc_ids, limit):
+        assert doc_ids == ["doc-1"]
+        assert limit == 1
+        doc["write_state"]["document_profile_indexed"] = True
+        return {"status": "complete", "counts": {"succeeded": 1}}
+
+    result = await run_document_pipeline_jobs(
+        db,
+        corpus_id="corpus-1",
+        user_id="user-1",
+        profile_runner=profile_runner,
+    )
+
+    assert result["status"] == "complete"
+    assert result["runner_results"]["index_document_profile"]["status"] == "complete"
+    assert result["counts"] == {"succeeded": 1}
+    assert result["jobs"][0]["reason"] == "tier0_document_profile_indexed"
 
 
 @pytest.mark.asyncio

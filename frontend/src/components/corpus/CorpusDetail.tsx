@@ -81,6 +81,7 @@ function readinessTone(status?: string | null): string {
   if (status === "fully_enriched") return "text-accent-main border-accent-main/50";
   if (
     status === "summaries_pending" ||
+    status === "lexicon_pending" ||
     status === "graph_pending" ||
     status === "ingestion_pending" ||
     status === "queryable_partial" ||
@@ -347,6 +348,7 @@ function getBatchItemStatusLabel(item: IngestBatchItemResponse): string {
 function defaultBatchProfile(corpus: CorpusResponse): IngestProfileName {
   const cfg = corpus.default_ingestion_config;
   const engine = cfg.extraction_engine ?? "local";
+  if (engine === "runpod_flash") return "runpod_burst";
   const hasRemotePool =
     (cfg.extraction_models ?? []).some((m) => {
       const url = (m.base_url ?? "").toLowerCase();
@@ -370,6 +372,7 @@ function defaultBatchProfile(corpus: CorpusResponse): IngestProfileName {
 
 const PROFILE_LABELS: Record<IngestProfileName, string> = {
   rtx_assisted: "RTX assisted",
+  runpod_burst: "Runpod burst",
   mac_queryable_first: "Mac queryable-first",
   mac_safe: "Mac optimized",
 };
@@ -1760,7 +1763,7 @@ export function CorpusDetail({
                 </button>
               </div>
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-11 gap-2 text-[9px] font-mono">
+            <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-12 gap-2 text-[9px] font-mono">
               <div className="border border-border-minimal px-2 py-1">
                 <div className="text-content-tertiary uppercase">Queryable docs</div>
                 <div className="text-content-primary">
@@ -1776,6 +1779,45 @@ export function CorpusDetail({
                 <div className="text-content-tertiary uppercase">Fully enriched</div>
                 <div className="text-content-primary">
                   {formatCoverage(readinessDocs?.fully_enriched, readinessDocs?.total)}
+                </div>
+              </div>
+              <div
+                className={`border px-2 py-1 ${
+                  (readinessSummaries?.summary_tree_index_pending ?? 0) > 0
+                    ? "border-warning/40"
+                    : "border-border-minimal"
+                }`}
+                title="Pre-embedded section and rollup vectors used for top-down hierarchy descent."
+              >
+                <div className="text-content-tertiary uppercase">Hierarchy index</div>
+                <div className="text-content-primary">
+                  {formatCoverage(
+                    readinessSummaries?.summary_tree_index_ready,
+                    readinessSummaries?.document_tree_done,
+                  )}
+                </div>
+                {(readinessSummaries?.summary_tree_index_pending ?? 0) > 0 && (
+                  <div className="mt-0.5 text-[8px] text-warning">
+                    {readinessSummaries?.summary_tree_index_pending} pending
+                  </div>
+                )}
+              </div>
+              <div
+                className="border border-border-minimal px-2 py-1"
+                title="Versioned corpus-grounded vocabulary available for query translation and document routing"
+              >
+                <div className="text-content-tertiary uppercase">Vocabulary bridge</div>
+                <div
+                  className={
+                    (readinessDocs?.lexicon_pending ?? 0) > 0
+                      ? "text-amber-300"
+                      : "text-content-primary"
+                  }
+                >
+                  {formatCoverage(
+                    readinessDocs?.lexicon_ready,
+                    readinessDocs?.total,
+                  )}
                 </div>
               </div>
               <div

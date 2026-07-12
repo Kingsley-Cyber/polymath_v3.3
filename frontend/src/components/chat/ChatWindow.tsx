@@ -13,7 +13,11 @@ type PromptSuggestion = {
   entities?: string[];
 };
 
-export function ChatWindow() {
+interface ChatWindowProps {
+  onRerun?: (message: string) => void;
+}
+
+export function ChatWindow({ onRerun }: ChatWindowProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const streamingMessageRef = useRef<HTMLDivElement>(null);
@@ -296,6 +300,13 @@ export function ChatWindow() {
           const isLatestAssistant =
             index === conversationMessages.length - 1 &&
             message.role === "assistant";
+          const rerunPrompt =
+            message.role === "assistant"
+              ? [...conversationMessages]
+                  .slice(0, index)
+                  .reverse()
+                  .find((candidate) => candidate.role === "user")?.content
+              : undefined;
           return (
             <div
               key={message.id || index}
@@ -304,6 +315,11 @@ export function ChatWindow() {
               <MessageBubble
                 message={message}
                 isStreaming={false}
+                onRerun={
+                  rerunPrompt && onRerun
+                    ? () => onRerun(rerunPrompt)
+                    : undefined
+                }
               />
             </div>
           );

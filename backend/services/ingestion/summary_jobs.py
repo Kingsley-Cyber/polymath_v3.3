@@ -43,7 +43,7 @@ MISSING_PARENT_SUMMARY_CLAUSE: dict[str, Any] = {
     "$or": [{"summary": {"$exists": False}}, {"summary": None}, {"summary": ""}]
 }
 SUMMARY_RUNNABLE_STATUSES = ("queued",)
-TERMINAL_SKIP_INGEST_STAGES = {"skipped_duplicate"}
+TERMINAL_SKIP_INGEST_STAGES = {"skipped_duplicate", "skipped_nonsemantic"}
 STAGE_IDENTITY_MISSING_CLAUSE: dict[str, Any] = {
     "$or": [
         {"stage_identity": {"$exists": False}},
@@ -1143,6 +1143,45 @@ async def run_summary_jobs(
         paused_kinds=paused_kinds,
         errors_by_kind=errors_by_kind,
     )
+    batch_reconciliation: dict[str, Any] = {
+        "status": "not_needed",
+        "batches": 0,
+        "examined": 0,
+        "promoted": 0,
+        "remaining": 0,
+    }
+    completed_document_ids = sorted(
+        {
+            str(job.get("doc_id") or "")
+            for job in reconciled["jobs"]
+            if job.get("kind") == "document_summary"
+            and job.get("status") == "succeeded"
+            and job.get("doc_id")
+        }
+    )
+    if completed_document_ids:
+        try:
+            from services.ingestion.batches import (
+                reconcile_pending_batch_enrichment_truth,
+            )
+
+            batch_reconciliation = await reconcile_pending_batch_enrichment_truth(
+                db,
+                corpus_id=corpus_id,
+                doc_ids=completed_document_ids,
+                limit=max(len(completed_document_ids), 1),
+            )
+        except (AttributeError, KeyError, TypeError):
+            # Lightweight maintenance/test adapters may not expose batch
+            # history. Summary artifacts remain authoritative and a later
+            # corpus repair pass can project their stage labels.
+            batch_reconciliation = {
+                "status": "skipped_unavailable",
+                "batches": 0,
+                "examined": 0,
+                "promoted": 0,
+                "remaining": 0,
+            }
     counts = reconciled["counts"]
     status = "complete"
     if paused_kinds and not counts.get("succeeded"):
@@ -1162,6 +1201,7 @@ async def run_summary_jobs(
         "document_claimed": len(document_jobs),
         "counts": counts,
         "runner_results": runner_results,
+        "batch_reconciliation": batch_reconciliation,
         "jobs": reconciled["jobs"],
     }
 

@@ -11,6 +11,7 @@ import logging
 import math
 import re
 from dataclasses import dataclass
+from typing import Any
 
 from qdrant_client import AsyncQdrantClient, models
 
@@ -36,6 +37,73 @@ class DocumentRoute:
     summary: str = ""
     concepts: tuple[str, ...] = ()
     section_ids: tuple[str, ...] = ()
+
+
+def merge_grounded_document_route_hints(
+    routes: dict[str, list[DocumentRoute]],
+    route_hints: dict[str, list[dict[str, Any]]],
+    *,
+    max_per_lane: int = 6,
+) -> tuple[dict[str, list[DocumentRoute]], dict[str, list[dict[str, Any]]]]:
+    """Reserve provenance-backed documents before filling semantic slots."""
+
+    merged = {lane_id: list(values) for lane_id, values in routes.items()}
+    applied: dict[str, list[dict[str, Any]]] = {}
+    for lane_id, hints in route_hints.items():
+        grounded_routes = [
+            DocumentRoute(
+                lane_id=lane_id,
+                corpus_id=str(hint.get("corpus_id") or ""),
+                doc_id=str(hint.get("doc_id") or ""),
+                score=float(hint.get("score") or 0.0),
+                title=str(hint.get("title") or ""),
+                summary=str(hint.get("summary") or ""),
+                concepts=tuple(
+                    str(value)
+                    for value in (hint.get("concepts") or [])
+                    if str(value)
+                ),
+                section_ids=tuple(
+                    str(value)
+                    for value in (hint.get("section_ids") or [])
+                    if str(value)
+                ),
+            )
+            for hint in hints
+            if hint.get("corpus_id") and hint.get("doc_id")
+        ]
+        if not grounded_routes:
+            continue
+        existing = list(merged.get(lane_id) or [])
+        grounded_keys = {
+            (route.corpus_id, route.doc_id) for route in grounded_routes
+        }
+        by_document = {
+            (route.corpus_id, route.doc_id): route for route in grounded_routes
+        }
+        for route in existing:
+            key = (route.corpus_id, route.doc_id)
+            current = by_document.get(key)
+            if current is None or route.score > current.score:
+                by_document[key] = route
+        anchors = sorted(
+            (
+                route
+                for key, route in by_document.items()
+                if key in grounded_keys
+            ),
+            key=lambda route: (-route.score, route.corpus_id, route.doc_id),
+        )
+        remainder = diversify_document_routes(
+            [
+                route
+                for key, route in by_document.items()
+                if key not in grounded_keys
+            ]
+        )
+        merged[lane_id] = (anchors + remainder)[: max(1, int(max_per_lane))]
+        applied[lane_id] = list(hints)
+    return merged, applied
 
 
 def diversify_document_routes(

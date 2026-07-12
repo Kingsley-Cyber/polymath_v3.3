@@ -8,10 +8,45 @@ from models.schemas import (
     GlobalIngestionSettings,
     GlobalIngestionSummarySettings,
     IngestionConfig,
+    RunpodFlashExtractionSettings,
 )
 from services.ingestion_service import IngestionService, _summary_backfill_index_scope
 from services.secrets import decrypt, encrypt
 from services.settings import SettingsService, settings_service
+
+
+@pytest.mark.asyncio
+async def test_runpod_runtime_settings_are_user_scoped_and_decrypted() -> None:
+    queries: list[dict[str, str]] = []
+    runpod = RunpodFlashExtractionSettings(
+        enabled=True,
+        endpoint_id="unit-endpoint",
+        endpoint_name="unit-runpod-flash",
+    )
+
+    class SettingsCollection:
+        async def find_one(self, query):
+            queries.append(query)
+            return {
+                "user_id": "user-1",
+                "ingestion": {"runpod_flash": runpod.model_dump()},
+                "api_keys": {"runpod": encrypt("unit-runpod-secret")},
+            }
+
+    class FakeDatabase:
+        def __getitem__(self, name):
+            assert name == "settings"
+            return SettingsCollection()
+
+    service = SettingsService()
+    service._db = FakeDatabase()
+
+    config, api_key = await service.get_system_runpod_flash("user-1")
+
+    assert queries == [{"user_id": "user-1"}]
+    assert config.enabled is True
+    assert config.endpoint_id == "unit-endpoint"
+    assert api_key == "unit-runpod-secret"
 
 
 def test_summary_backfill_limited_generate_indexes_only_generated_parents() -> None:

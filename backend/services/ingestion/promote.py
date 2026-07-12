@@ -344,7 +344,43 @@ async def promote_doc(db, corpus_id: str, doc_id: str) -> dict[str, Any]:
                 {"corpus_id": corpus_id, "chunk_id": chunk_id}, {"$set": delta}
             )
             done += 1
-        return {"promoted": done, "rows": len(rows), "payload_warns": warn}
+        lexicon_result: dict[str, Any] = {}
+        try:
+            from services.ingestion.corpus_lexicon import (
+                refresh_and_index_document_lexicon,
+            )
+
+            lexicon_result = await refresh_and_index_document_lexicon(
+                db,
+                client,
+                corpus_id=corpus_id,
+                doc_id=doc_id,
+            )
+        except Exception as exc:  # lexicon is enrichment, never queryability
+            logger.warning(
+                "promote_doc lexicon refresh failed doc=%s corpus=%s: %s",
+                doc_id[:12],
+                corpus_id[:8],
+                exc,
+            )
+            try:
+                await db["documents"].update_one(
+                    {"corpus_id": corpus_id, "doc_id": doc_id},
+                    {
+                        "$set": {
+                            "lexicon_state": "lexicon_pending",
+                            "lexicon_last_error": f"{type(exc).__name__}: {exc}"[:500],
+                        }
+                    },
+                )
+            except Exception:
+                pass
+        return {
+            "promoted": done,
+            "rows": len(rows),
+            "payload_warns": warn,
+            "lexicon": lexicon_result,
+        }
     finally:
         try:
             await client.close()

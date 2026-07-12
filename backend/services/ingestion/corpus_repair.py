@@ -12,7 +12,6 @@ from typing import Any
 from uuid import uuid4
 
 from services.ingestion.document_summaries import backfill_document_summaries
-from services.ingestion.batches import reconcile_batch_enrichment_truth
 from services.ingestion.document_pipeline_jobs import plan_document_pipeline_jobs
 from services.ingestion.failure_reconciliation import reconcile_ghost_b_failure_metadata
 from services.ingestion.extraction_jobs import plan_extraction_jobs, run_extraction_jobs
@@ -21,23 +20,39 @@ from services.ingestion.graph_promotion_jobs import (
     plan_graph_promotion_jobs,
     run_graph_promotion_jobs,
 )
-from services.ingestion.readiness import compute_corpus_readiness, materialize_corpus_readiness
+from services.ingestion.readiness import (
+    compute_corpus_readiness,
+    materialize_corpus_readiness,
+)
 from services.ingestion.source_parse_jobs import (
     backfill_source_parse_stage_identity,
     plan_source_parse_jobs,
     run_source_parse_jobs,
 )
 from services.ingestion.stage_identity_repair import backfill_ghost_b_stage_identity
-from services.ingestion.summary_jobs import backfill_summary_stage_identity, plan_summary_jobs
+from services.ingestion.summary_jobs import (
+    backfill_summary_stage_identity,
+    plan_summary_jobs,
+)
 
 
-def build_repair_cycle_summary(*, steps: list[dict[str, Any]], readiness: dict[str, Any] | None) -> dict[str, Any]:
+def build_repair_cycle_summary(
+    *, steps: list[dict[str, Any]], readiness: dict[str, Any] | None
+) -> dict[str, Any]:
     """Small pure summarizer for tests and API stability."""
 
-    graph_jobs = ((readiness or {}).get("repair") or {}).get("graph_promotion_jobs") or {}
-    source_parse_jobs = ((readiness or {}).get("repair") or {}).get("source_parse_jobs") or {}
-    document_pipeline_jobs = ((readiness or {}).get("repair") or {}).get("document_pipeline_jobs") or {}
-    extraction_jobs = ((readiness or {}).get("repair") or {}).get("extraction_jobs") or {}
+    graph_jobs = ((readiness or {}).get("repair") or {}).get(
+        "graph_promotion_jobs"
+    ) or {}
+    source_parse_jobs = ((readiness or {}).get("repair") or {}).get(
+        "source_parse_jobs"
+    ) or {}
+    document_pipeline_jobs = ((readiness or {}).get("repair") or {}).get(
+        "document_pipeline_jobs"
+    ) or {}
+    extraction_jobs = ((readiness or {}).get("repair") or {}).get(
+        "extraction_jobs"
+    ) or {}
     summary_jobs = ((readiness or {}).get("repair") or {}).get("summary_jobs") or {}
     planned_graph_jobs = {}
     planned_source_parse_jobs = {}
@@ -45,12 +60,17 @@ def build_repair_cycle_summary(*, steps: list[dict[str, Any]], readiness: dict[s
     planned_extraction_jobs = {}
     planned_summary_jobs = {}
     for step in steps:
-        if step.get("name") in {"graph_promotion_plan", "graph_promotion_replan_after_extraction"}:
+        if step.get("name") in {
+            "graph_promotion_plan",
+            "graph_promotion_replan_after_extraction",
+        }:
             planned_graph_jobs = (step.get("result") or {}).get("counts") or {}
         elif step.get("name") == "source_parse_job_plan":
             planned_source_parse_jobs = (step.get("result") or {}).get("counts") or {}
         elif step.get("name") == "document_pipeline_job_plan":
-            planned_document_pipeline_jobs = (step.get("result") or {}).get("counts") or {}
+            planned_document_pipeline_jobs = (step.get("result") or {}).get(
+                "counts"
+            ) or {}
         elif step.get("name") == "extraction_job_plan":
             planned_extraction_jobs = (step.get("result") or {}).get("counts") or {}
         elif step.get("name") in {
@@ -60,7 +80,9 @@ def build_repair_cycle_summary(*, steps: list[dict[str, Any]], readiness: dict[s
             planned_summary_jobs = (step.get("result") or {}).get("counts") or {}
     graph_job_counts = graph_jobs or planned_graph_jobs
     source_parse_job_counts = source_parse_jobs or planned_source_parse_jobs
-    document_pipeline_job_counts = document_pipeline_jobs or planned_document_pipeline_jobs
+    document_pipeline_job_counts = (
+        document_pipeline_jobs or planned_document_pipeline_jobs
+    )
     extraction_job_counts = extraction_jobs or planned_extraction_jobs
     summary_job_counts = summary_jobs or planned_summary_jobs
     graph = (readiness or {}).get("graph") or {}
@@ -142,9 +164,15 @@ def build_repair_cycle_summary(*, steps: list[dict[str, Any]], readiness: dict[s
             for step in steps
             if step.get("name") == "source_parse_job_run"
         ),
-        "document_pipeline_jobs_queued": int(document_pipeline_job_counts.get("queued") or 0),
-        "document_pipeline_jobs_running": int(document_pipeline_job_counts.get("running") or 0),
-        "document_pipeline_jobs_blocked": int(document_pipeline_job_counts.get("failed") or 0)
+        "document_pipeline_jobs_queued": int(
+            document_pipeline_job_counts.get("queued") or 0
+        ),
+        "document_pipeline_jobs_running": int(
+            document_pipeline_job_counts.get("running") or 0
+        ),
+        "document_pipeline_jobs_blocked": int(
+            document_pipeline_job_counts.get("failed") or 0
+        )
         + int(document_pipeline_job_counts.get("blocked_no_source") or 0)
         + int(document_pipeline_job_counts.get("blocked_missing_chunks") or 0)
         + int(document_pipeline_job_counts.get("blocked_mongo_state") or 0),
@@ -154,7 +182,9 @@ def build_repair_cycle_summary(*, steps: list[dict[str, Any]], readiness: dict[s
             if step.get("name") == "document_pipeline_job_run"
         ),
         "document_pipeline_jobs_succeeded": sum(
-            int((((step.get("result") or {}).get("counts") or {}).get("succeeded") or 0))
+            int(
+                (((step.get("result") or {}).get("counts") or {}).get("succeeded") or 0)
+            )
             for step in steps
             if step.get("name") == "document_pipeline_job_run"
         ),
@@ -162,7 +192,9 @@ def build_repair_cycle_summary(*, steps: list[dict[str, Any]], readiness: dict[s
         "extraction_jobs_failed": int(extraction_job_counts.get("provider_failed") or 0)
         + int(extraction_job_counts.get("validation_failed") or 0)
         + int(extraction_job_counts.get("failed") or 0),
-        "extraction_jobs_blocked": int(extraction_job_counts.get("blocked_provider_contract") or 0),
+        "extraction_jobs_blocked": int(
+            extraction_job_counts.get("blocked_provider_contract") or 0
+        ),
         "summary_jobs_queued": int(summary_job_counts.get("queued") or 0),
         "summary_jobs_running": int(summary_job_counts.get("running") or 0),
         "summary_jobs_waiting_dependencies": int(
@@ -181,7 +213,9 @@ def build_repair_cycle_summary(*, steps: list[dict[str, Any]], readiness: dict[s
             if step.get("name") == "summary_job_run"
         ),
         "summary_jobs_succeeded": sum(
-            int((((step.get("result") or {}).get("counts") or {}).get("succeeded") or 0))
+            int(
+                (((step.get("result") or {}).get("counts") or {}).get("succeeded") or 0)
+            )
             for step in steps
             if step.get("name") == "summary_job_run"
         ),
@@ -207,7 +241,9 @@ def _backpressure_allowed(readiness: dict[str, Any], key: str) -> bool:
     return backpressure.get(key) is not False
 
 
-def _pressure_skip_step(name: str, readiness: dict[str, Any], key: str) -> dict[str, Any]:
+def _pressure_skip_step(
+    name: str, readiness: dict[str, Any], key: str
+) -> dict[str, Any]:
     pressure = readiness.get("pressure") or {}
     return {
         "name": name,
@@ -238,7 +274,9 @@ async def _refresh_backpressure_readiness(
 
     try:
         return await compute_corpus_readiness(db, corpus_id)
-    except Exception:  # noqa: BLE001 - pressure refresh failure should not crash repair planning
+    except (
+        Exception
+    ):  # noqa: BLE001 - pressure refresh failure should not crash repair planning
         return fallback
 
 
@@ -309,7 +347,9 @@ async def run_bounded_corpus_repair_cycle(
             {
                 "name": "failure_reconciliation",
                 "status": result.get("status"),
-                "changed": bool(result.get("affected_docs") or result.get("stale_split_rows")),
+                "changed": bool(
+                    result.get("affected_docs") or result.get("stale_split_rows")
+                ),
                 "result": result,
             }
         )
@@ -325,7 +365,9 @@ async def run_bounded_corpus_repair_cycle(
             {
                 "name": "ghost_b_stage_identity_backfill",
                 "status": result.get("status"),
-                "changed": bool(result.get("modified") if apply else result.get("planned")),
+                "changed": bool(
+                    result.get("modified") if apply else result.get("planned")
+                ),
                 "result": result,
             }
         )
@@ -341,7 +383,9 @@ async def run_bounded_corpus_repair_cycle(
             {
                 "name": "promoted_extraction_mark_backfill",
                 "status": result.get("status"),
-                "changed": bool(result.get("modified_rows") if apply else result.get("planned_rows")),
+                "changed": bool(
+                    result.get("modified_rows") if apply else result.get("planned_rows")
+                ),
                 "result": result,
             }
         )
@@ -358,7 +402,9 @@ async def run_bounded_corpus_repair_cycle(
             {
                 "name": "source_parse_stage_identity_backfill",
                 "status": result.get("status"),
-                "changed": bool(result.get("modified") if apply else result.get("planned")),
+                "changed": bool(
+                    result.get("modified") if apply else result.get("planned")
+                ),
                 "result": result,
             }
         )
@@ -409,7 +455,9 @@ async def run_bounded_corpus_repair_cycle(
                     db,
                     corpus_id=corpus_id,
                     user_id=user_id,
-                    ingestion_service=ingestion_service if source_parse_start_runners else None,
+                    ingestion_service=(
+                        ingestion_service if source_parse_start_runners else None
+                    ),
                     limit=source_parse_job_run_limit,
                     start_runners=source_parse_start_runners,
                 )
@@ -466,7 +514,9 @@ async def run_bounded_corpus_repair_cycle(
                 corpus_id=corpus_id,
                 fallback=readiness_before,
             )
-            if not _backpressure_allowed(pressure_readiness, "document_pipeline_allowed"):
+            if not _backpressure_allowed(
+                pressure_readiness, "document_pipeline_allowed"
+            ):
                 steps.append(
                     _pressure_skip_step(
                         "document_pipeline_job_run",
@@ -537,7 +587,9 @@ async def run_bounded_corpus_repair_cycle(
             {
                 "name": "summary_stage_identity_backfill",
                 "status": result.get("status"),
-                "changed": bool(result.get("modified") if apply else result.get("planned")),
+                "changed": bool(
+                    result.get("modified") if apply else result.get("planned")
+                ),
                 "result": result,
             }
         )
@@ -586,7 +638,9 @@ async def run_bounded_corpus_repair_cycle(
                 corpus_id=corpus_id,
                 fallback=readiness_before,
             )
-            if not _backpressure_allowed(pressure_readiness, "summary_backfill_allowed"):
+            if not _backpressure_allowed(
+                pressure_readiness, "summary_backfill_allowed"
+            ):
                 steps.append(
                     _pressure_skip_step(
                         "summary_job_run",
@@ -657,7 +711,9 @@ async def run_bounded_corpus_repair_cycle(
                 corpus_id=corpus_id,
                 fallback=readiness_before,
             )
-            if not _backpressure_allowed(pressure_readiness, "summary_backfill_allowed"):
+            if not _backpressure_allowed(
+                pressure_readiness, "summary_backfill_allowed"
+            ):
                 steps.append(
                     _pressure_skip_step(
                         "document_summary_run_after_parent_summary",
@@ -706,7 +762,9 @@ async def run_bounded_corpus_repair_cycle(
                 corpus_id=corpus_id,
                 fallback=readiness_before,
             )
-            if not _backpressure_allowed(pressure_readiness, "extraction_backfill_allowed"):
+            if not _backpressure_allowed(
+                pressure_readiness, "extraction_backfill_allowed"
+            ):
                 steps.append(
                     _pressure_skip_step(
                         "extraction_job_run",
@@ -742,11 +800,11 @@ async def run_bounded_corpus_repair_cycle(
         (step for step in reversed(steps) if step.get("name") == "extraction_job_run"),
         None,
     )
-    extraction_claimed = bool(((extraction_run_step or {}).get("result") or {}).get("claimed"))
+    extraction_claimed = bool(
+        ((extraction_run_step or {}).get("result") or {}).get("claimed")
+    )
     should_replan_graph_after_extraction = bool(
-        apply
-        and extraction_claimed
-        and (plan_graph_jobs or run_graph_jobs)
+        apply and extraction_claimed and (plan_graph_jobs or run_graph_jobs)
     )
     if should_replan_graph_after_extraction:
         result = await plan_graph_promotion_jobs(
@@ -782,7 +840,9 @@ async def run_bounded_corpus_repair_cycle(
                 corpus_id=corpus_id,
                 fallback=readiness_before,
             )
-            if not _backpressure_allowed(pressure_readiness, "summary_backfill_allowed"):
+            if not _backpressure_allowed(
+                pressure_readiness, "summary_backfill_allowed"
+            ):
                 steps.append(
                     _pressure_skip_step(
                         "document_summary_backfill",
@@ -794,6 +854,7 @@ async def run_bounded_corpus_repair_cycle(
                 result = await backfill_document_summaries(
                     db,
                     corpus_id=corpus_id,
+                    qdrant_client=qdrant_client,
                     user_id=user_id,
                     limit=document_summary_limit,
                 )
@@ -872,21 +933,17 @@ async def run_bounded_corpus_repair_cycle(
         examined = 0
         reconciliation_status = "complete"
         try:
-            batch_rows = await db["ingest_batches"].find(
-                {
-                    "corpus_id": corpus_id,
-                    "status": {"$in": ["done", "partial"]},
-                },
-                {"_id": 0, "batch_id": 1, "user_id": 1},
-            ).sort("created_at", -1).limit(20).to_list(length=20)
-            for batch_row in batch_rows:
-                batch_result = await reconcile_batch_enrichment_truth(
-                    db,
-                    batch_id=str(batch_row.get("batch_id") or ""),
-                    user_id=str(batch_row.get("user_id") or "") or None,
-                )
-                reconciled += int(batch_result.get("promoted") or 0)
-                examined += int(batch_result.get("examined") or 0)
+            from services.ingestion.batches import (
+                reconcile_pending_batch_enrichment_truth,
+            )
+
+            batch_result = await reconcile_pending_batch_enrichment_truth(
+                db,
+                corpus_id=corpus_id,
+                limit=500,
+            )
+            reconciled = int(batch_result.get("promoted") or 0)
+            examined = int(batch_result.get("examined") or 0)
         except (AttributeError, TypeError):
             # Lightweight test/maintenance database adapters may not expose
             # batch history; enrichment repair remains optional in that case.
@@ -934,6 +991,8 @@ async def run_bounded_corpus_repair_cycle(
             result["run_id"] = run_id
         readiness_after = await materialize_corpus_readiness(db, corpus_id)
         result["readiness_after"] = readiness_after
-        result["summary"] = build_repair_cycle_summary(steps=steps, readiness=readiness_after)
+        result["summary"] = build_repair_cycle_summary(
+            steps=steps, readiness=readiness_after
+        )
 
     return result

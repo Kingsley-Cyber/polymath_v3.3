@@ -303,6 +303,10 @@ function App() {
           model: settings.selectedModel,
           temperature: settings.temperature,
           max_tokens: settings.maxTokens,
+          disabled_lexicon_ids:
+            settings.disabledLexiconIds.length > 0
+              ? settings.disabledLexiconIds
+              : undefined,
           // The visible HyDE toggle is authoritative. Send false explicitly so
           // backend query-profile defaults cannot silently turn HyDE on.
           hyde_enabled: settings.hydeEnabled,
@@ -798,7 +802,7 @@ function App() {
 
         {/* Content Area (Force-directed Graph / Chat View) */}
         <div className="flex-1 relative flex flex-col overflow-hidden bg-[radial-gradient(ellipse_at_center,_var(--bg-raised)_0%,_var(--bg-surface)_100%)]">
-          <ChatWindow />
+          <ChatWindow onRerun={(message) => void handleSend(message)} />
         </div>
 
         {/* Input Area - Command Line Interface */}

@@ -9,6 +9,7 @@ from models.schemas import RetrievalTier, SourceChunk
 from services.retriever.query_plan import (
     build_query_plan_v2,
     query_plan_execution_lanes,
+    query_plan_vocabulary_lanes,
 )
 
 
@@ -42,7 +43,7 @@ def test_planned_rerank_limit_is_adaptive_to_query_complexity():
             configured_limit=64,
             final_top_k=8,
         )
-        == 40
+        == 21
     )
     assert (
         retriever_module._planned_rerank_candidate_limit(
@@ -52,7 +53,7 @@ def test_planned_rerank_limit_is_adaptive_to_query_complexity():
             configured_limit=64,
             final_top_k=8,
         )
-        == 56
+        == 29
     )
     assert (
         retriever_module._planned_rerank_candidate_limit(
@@ -62,7 +63,7 @@ def test_planned_rerank_limit_is_adaptive_to_query_complexity():
             configured_limit=64,
             final_top_k=8,
         )
-        == 64
+        == 35
     )
     assert (
         retriever_module._planned_rerank_candidate_limit(
@@ -72,8 +73,23 @@ def test_planned_rerank_limit_is_adaptive_to_query_complexity():
             configured_limit=96,
             final_top_k=8,
         )
-        == 80
+        == 42
     )
+
+
+def test_tree_routing_scopes_full_descent_to_required_obligations():
+    lanes = [
+        SimpleNamespace(lane_id="original", role="original", required=True),
+        SimpleNamespace(lane_id="required_a", role="core", required=True),
+        SimpleNamespace(lane_id="required_b", role="core", required=True),
+        SimpleNamespace(lane_id="planner_optional", role="core", required=False),
+        SimpleNamespace(lane_id="translation_optional", role="core", required=False),
+    ]
+
+    assert retriever_module._tree_routing_lane_ids(lanes) == [
+        "required_a",
+        "required_b",
+    ]
 
 
 def test_final_context_budget_expands_for_multiple_answer_obligations():
@@ -178,7 +194,10 @@ async def test_planned_hybrid_batches_embeddings_and_reranks_once(monkeypatch):
     )
 
     assert len(embedded) == 1
-    assert embedded[0] == [lane.dense_text for lane in query_plan_execution_lanes(plan)]
+    assert embedded[0] == [
+        *[lane.dense_text for lane in query_plan_execution_lanes(plan)],
+        *[lane.dense_text for lane in query_plan_vocabulary_lanes(plan)],
+    ]
     assert len(reranks) == 1
     assert reranks[0][0] == plan.original_query
     assert 1 <= reranks[0][1] <= 64

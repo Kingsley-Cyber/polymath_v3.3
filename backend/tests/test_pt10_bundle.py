@@ -335,6 +335,7 @@ def test_chat_query_plan_exposes_relationship_search_contract():
     assert [lane["name"] for lane in plan["evidence_plan"]["lanes"]] == [
         "personality_framework",
         "seduction",
+        "relationship",
     ]
     assert plan["stores"] == ["qdrant_vectors", "mongo_lexical_hydration"]
     trace = _format_chat_query_plan_trace(plan)
@@ -602,6 +603,40 @@ def test_answerability_gate_blocks_when_evidence_plan_lane_is_missing():
     assert "cross_document_relationship_evidence" in gate["missing_atoms"]
     note = _format_evidence_plan_prompt_note(evidence_plan_meta)
     assert "HARD LIMIT" in note
+
+
+def test_evidence_plan_prompt_requires_explicit_supported_lane_coverage():
+    meta = {
+        "active": True,
+        "required_lanes": ["performance_and_motion", "timing_and_pacing"],
+        "covered_lanes": ["performance_and_motion", "timing_and_pacing"],
+        "missing_lanes": [],
+        "thin_lanes": [],
+        "plan": {
+            "lanes": [
+                {
+                    "name": "performance_and_motion",
+                    "label": "performance and motion",
+                    "query": "How should the actor move and perform?",
+                    "required": True,
+                },
+                {
+                    "name": "timing_and_pacing",
+                    "label": "timing and pacing",
+                    "query": "What timing and opening beat should govern the result?",
+                    "required": True,
+                },
+            ]
+        },
+    }
+
+    note = _format_evidence_plan_prompt_note(meta)
+
+    assert "Final-answer coverage checklist" in note
+    assert "performance and motion - How should the actor move and perform?" in note
+    assert "timing and pacing - What timing and opening beat" in note
+    assert "every checklist item" in note
+    assert "merely implied" in note
 
 
 def test_answerability_gate_does_not_require_cross_doc_for_plain_multi_concept():

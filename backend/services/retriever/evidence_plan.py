@@ -289,9 +289,20 @@ def build_evidence_plan_from_sides(
         return build_evidence_plan(query, max_lanes=max_lanes)
 
     operators = tuple(sorted(required_operator_atoms(query or "")))
+    relationship = "relationship" in operators and len(lanes) > 1
     return EvidencePlan(
-        mode="multi_concept_sourced" if len(lanes) > 1 else "single_objective_sourced",
-        reason="query_decomposed_into_source_sides",
+        mode=(
+            "multi_concept_relationship"
+            if relationship
+            else "multi_concept_sourced"
+            if len(lanes) > 1
+            else "single_objective_sourced"
+        ),
+        reason=(
+            "relationship_query_decomposed_into_source_sides"
+            if relationship
+            else "query_decomposed_into_source_sides"
+        ),
         operators=operators,
         lanes=tuple(lanes),
         bridge_query=query or "",

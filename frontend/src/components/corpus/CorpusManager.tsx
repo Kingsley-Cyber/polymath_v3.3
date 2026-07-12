@@ -78,6 +78,7 @@ function readinessTone(status?: string | null): string {
   if (status === "fully_enriched") return "text-accent-main border-accent-main/50";
   if (
     status === "summaries_pending" ||
+    status === "lexicon_pending" ||
     status === "graph_pending" ||
     status === "ingestion_pending" ||
     status === "extraction_pending" ||
@@ -98,6 +99,7 @@ type IngestionWorkflowId =
   | "local_only"
   | "rtx_only"
   | "cloud_only"
+  | "runpod_flash"
   | "local_cloud"
   | "local_rtx"
   | "cloud_rtx"
@@ -146,6 +148,20 @@ const WORKFLOW_META: {
     needsCloudPool: true,
     needsRtx: false,
     needsCloudApi: true,
+  },
+  {
+    key: "runpod_flash",
+    label: "Runpod Flash burst",
+    detail:
+      "Joint GLiNER-Relex extraction runs on an autoscaling Runpod GPU fleet; spaCy preserves sentence windows and offsets.",
+    execution: "Dispatches bounded batches to the configured Flash queue endpoint",
+    outcome: "Fast ontology-bound entities and relations, validated locally before graph promotion",
+    badge: "GPU burst",
+    kind: "cloud",
+    engine: "runpod_flash",
+    needsCloudPool: false,
+    needsRtx: false,
+    needsCloudApi: false,
   },
   {
     key: "cloud_rtx",
@@ -396,6 +412,7 @@ function inferWorkflow(config: IngestionConfig): IngestionWorkflowId {
   const hasRtx = pool.some(isRtxModel);
   const hasCloud = hasNonRtxCloudModel(pool);
   if (engine === "off") return "vectors_only";
+  if (engine === "runpod_flash") return "runpod_flash";
   if (engine === "legacy_local") return "local_only";
   if (engine === "local") return hasRtx ? "rtx_only" : "custom";
   if (engine === "cloud") {
@@ -456,6 +473,7 @@ function applyWorkflowToConfig(
   if (
     (workflow.engine === "cloud" ||
       workflow.engine === "local" ||
+      workflow.engine === "runpod_flash" ||
       workflow.engine === "dual" ||
       // §13-H: storage chunks at LLM shape; the local GLiREL lane derives
       // its own sentence windows from parent text at extraction time.
@@ -527,6 +545,7 @@ function humanEngineLabel(engine: ExtractionEngine | string | undefined): string
   if (!engine || engine === "inherit") return "Inherited";
   if (engine === "local") return "Private provider LLM";
   if (engine === "cloud") return "Cloud/API provider LLM";
+  if (engine === "runpod_flash") return "Runpod Flash GLiNER-Relex";
   if (engine === "dual") return "Legacy sidecar + provider LLM";
   if (engine === "local_then_cloud") return "Legacy local, cloud rescue";
   if (engine === "local_then_enrich") return "Legacy local, RTX enrichment";
@@ -552,6 +571,7 @@ function IngestionWorkflowSelector({
   const primaryWorkflowIds: IngestionWorkflowId[] = [
     "rtx_only",
     "cloud_only",
+    "runpod_flash",
     "cloud_rtx",
     "vectors_only",
   ];
@@ -1287,6 +1307,7 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
                 const queryableDocs = readinessDocs?.queryable ?? corpus.ready_doc_count ?? 0;
                 const totalDocs = readinessDocs?.total ?? corpus.doc_count;
                 const excludedDocs = readinessDocs?.excluded_total ?? 0;
+                const lexiconReady = readinessDocs?.lexicon_ready;
                 const readinessStatus = corpus.readiness?.status;
                 const readinessGraph = corpus.readiness?.graph;
                 const graphRequired = readinessGraph?.required !== false;
@@ -1470,6 +1491,18 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
                                   | undefined,
                                 "retrieval_parent",
                               ).label?.toLowerCase() ?? "retrieval summaries"}
+                            </span>
+                          )}
+                          {lexiconReady !== undefined && (
+                            <span
+                              className={
+                                (readinessDocs?.lexicon_pending ?? 0) > 0
+                                  ? "text-amber-300"
+                                  : "text-content-tertiary"
+                              }
+                              title="Documents with a complete corpus-grounded vocabulary projection"
+                            >
+                              {lexiconReady}/{totalDocs} vocabulary ready
                             </span>
                           )}
                           {corpus.readiness?.summaries && (
@@ -2097,7 +2130,9 @@ function IngestionModelsSection({
             Extraction contract
           </span>
           <span className="text-[10px] font-bold tracking-widest text-accent-secondary uppercase">
-            {engine === "local_then_enrich"
+            {engine === "runpod_flash"
+              ? "RUNPOD FLASH BURST"
+              : engine === "local_then_enrich"
               ? "LEGACY LOCAL FIRST - RTX fills gaps"
               : draftUsesLegacyLocal && draftUsesProvider
                 ? "TRANSITION - legacy sidecar + provider LLM"
@@ -2208,6 +2243,14 @@ function IngestionModelsSection({
                 {humanEngineLabel(contract.engine)}
               </span>
               <span className="text-content-tertiary"> ({contract.source})</span>
+              {contract.engine === "runpod_flash" && (
+                <span className="text-content-secondary">
+                  {" · "}
+                  {contract.runpod_flash?.configured
+                    ? `${contract.runpod_flash.endpoint_name} · ${contract.runpod_flash.request_batch_size} chunks/request · ${contract.runpod_flash.request_concurrency} in flight · max ${contract.runpod_flash.max_workers} workers`
+                    : "endpoint not configured"}
+                </span>
+              )}
               {(contract.engine === "legacy_local" ||
                 contract.engine === "dual" ||
                 contract.engine === "local_then_cloud" ||

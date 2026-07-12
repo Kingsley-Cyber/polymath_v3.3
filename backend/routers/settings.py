@@ -410,3 +410,59 @@ async def update_api_keys(
         raise HTTPException(status_code=400, detail=str(exc))
 
     return ApiKeysPublic(keys=masked, providers=sorted(KNOWN_PROVIDERS))
+
+
+@router.post("/ingestion/runpod-flash/test")
+async def test_runpod_flash_extraction(
+    current_user: dict = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Run one bounded, ontology-bound extraction through the saved endpoint."""
+
+    from services.ghost_b import (
+        UNIVERSAL_ENTITY_SCHEMA,
+        UNIVERSAL_RELATION_SCHEMA,
+        ExtractionTask,
+        SchemaContext,
+    )
+    from services.runpod_flash_extraction import extract_entities
+
+    runpod_config, runpod_api_key = await settings_service.get_system_runpod_flash(
+        current_user["user_id"]
+    )
+    report = await extract_entities(
+        [
+            ExtractionTask(
+                chunk_id="runpod-flash-canary",
+                doc_id="runpod-flash-canary",
+                corpus_id="runpod-flash-canary",
+                text=(
+                    "The Eiffel Tower is located in Paris and was created by "
+                    "engineer Gustave Eiffel."
+                ),
+            )
+        ],
+        schema=SchemaContext(
+            entity_schema=list(UNIVERSAL_ENTITY_SCHEMA),
+            relation_schema=list(UNIVERSAL_RELATION_SCHEMA),
+            strict="soft",
+        ),
+        return_report=True,
+        runpod_config=runpod_config,
+        runpod_api_key=runpod_api_key,
+    )
+    entity_count = sum(len(item.entities) for item in report.results)
+    relation_count = sum(len(item.relations) for item in report.results)
+    return {
+        "ok": (
+            not report.failures
+            and len(report.results) == 1
+            and entity_count >= 2
+            and relation_count >= 1
+        ),
+        "result_count": len(report.results),
+        "failure_count": len(report.failures),
+        "entity_count": entity_count,
+        "relation_count": relation_count,
+        "metrics": report.metrics,
+        "errors": [failure.error_type for failure in report.failures],
+    }

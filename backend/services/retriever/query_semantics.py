@@ -624,23 +624,6 @@ CONCEPT_ALIASES: dict[str, tuple[str, ...]] = {
     ),
     "seduction": ("seduction", "seductive", "seduce", "seducer", "seducers"),
     "sql": ("sql", "structured query language"),
-    "sticky_message": (
-        "sticky message",
-        "sticky idea",
-        "made to stick",
-        "successs principles",
-        "successs framework",
-        "message stickiness",
-        "idea stickiness",
-        "make ideas stick",
-        "ideas become sticky",
-        "sticky messages",
-        "sticky ideas",
-        "memorable message",
-        "memorable messages",
-        "memorable idea",
-        "memorable ideas",
-    ),
 }
 
 
@@ -678,13 +661,13 @@ def query_tokens(query: str, *, stop_words: frozenset[str]) -> list[str]:
 def _scope_descriptor_token(token: str, normalized_query: str) -> bool:
     """True when a token names the selected source scope, not the topic.
 
-    In a prompt such as "compare the marketing transcripts and ecommerce PDFs",
-    "marketing" and "ecommerce" describe which corpora/files the user selected.
-    They should not displace the real evidence lanes: offers, positioning,
-    conversion, acquisition, etc.
+    A modifier adjacent to a source noun can name a corpus or file family rather
+    than an evidence concept. Detect that grammar without maintaining a list of
+    domain names.
     """
 
-    if token not in {"ecommerce", "marketing"}:
+    normalized_token = clean_text(token).strip()
+    if not normalized_token:
         return False
     scope_nouns = (
         "book",
@@ -701,8 +684,16 @@ def _scope_descriptor_token(token: str, normalized_query: str) -> bool:
         "transcript",
         "transcripts",
     )
+    query = clean_text(normalized_query).strip()
     return any(
-        f"{token} {scope}" in normalized_query or f"{scope} {token}" in normalized_query
+        re.search(
+            rf"(?:^|\s){re.escape(normalized_token)}\s+{re.escape(scope)}(?:\s|$)",
+            query,
+        )
+        or re.search(
+            rf"(?:^|\s){re.escape(scope)}\s+{re.escape(normalized_token)}(?:\s|$)",
+            query,
+        )
         for scope in scope_nouns
     )
 
@@ -870,8 +861,8 @@ def concept_support_phrases(
     """Return a small deterministic recall query for one concept.
 
     Curated concepts need more than their canonical surface form during a
-    repair pass. For example, a source can explain the SUCCESs framework or
-    *Made to Stick* without containing the exact phrase "sticky message".
+    repair pass. Corpus-specific expansion is supplied separately by the
+    evidence-backed vocabulary resolver.
     """
 
     normalized_key = str(key or "").strip().lower()

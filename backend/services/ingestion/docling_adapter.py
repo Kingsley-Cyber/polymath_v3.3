@@ -536,6 +536,7 @@ def _split_markdown_table_row(line: str) -> list[str]:
 # must stay verbatim).
 _IMG_MD_RE = re.compile(r"!\[[^\]\n]*\]\([^)\n]*\)")  # drop images entirely (alt incl.)
 _INLINE_MD_LINK_RE = re.compile(r"\[([^\]\n]*)\]\((?:[^)\s]+(?:\s+\"[^\"]*\")?)\)")
+_EMPTY_MD_ANCHOR_RE = re.compile(r"\[\]\{#[^}\n]+\}")
 _BARE_URL_RE = re.compile(r"https?://\S+")
 _TRANSCRIPT_HEADER_RE = re.compile(
     r"^\s*(Video|URL|Duration|Segments|Source|Date)\s*:\s*(.*?)\s*$",
@@ -552,10 +553,38 @@ def _scrub_inline_links(text: str) -> str:
     if not text or ("[" not in text and "http" not in text and "¶" not in text):
         return text
     t = _IMG_MD_RE.sub("", text)  # before link rewrite, or `![x](u)` leaves a stray `!`
+    t = _EMPTY_MD_ANCHOR_RE.sub("", t)
     t = _INLINE_MD_LINK_RE.sub(r"\1", t)
     t = _BARE_URL_RE.sub("", t)
     t = t.replace("¶", "")
     return re.sub(r"[ \t]{2,}", " ", t)
+
+
+def retrievable_content_text(result: "DoclingParseResult") -> str:
+    """Return visible source content after deterministic markup removal.
+
+    This is a content-presence gate, not a relevance heuristic: any visible
+    letter or number keeps the source ingestible. It only rejects artifacts
+    made entirely of images, empty anchors, URLs, and markup.
+    """
+
+    section_text = "\n".join(
+        str(section.text or "")
+        for section in (result.sections or [])
+        if str(section.text or "").strip()
+    )
+    candidate = section_text or str(result.text or result.markdown or "")
+    if str(result.source_format or "") == "local_markdown":
+        candidate = _scrub_inline_links(candidate)
+        candidate = re.sub(r"<[^>]+>", " ", candidate)
+        candidate = re.sub(r"(?m)^\s*[#>*_`~-]+\s*$", " ", candidate)
+    return " ".join(candidate.split()).strip()
+
+
+def has_retrievable_content(result: "DoclingParseResult") -> bool:
+    """Whether a parsed source contains any visible semantic token."""
+
+    return bool(re.search(r"[^\W_]{2,}", retrievable_content_text(result), re.UNICODE))
 
 
 _SUB_TIME_RE = re.compile(

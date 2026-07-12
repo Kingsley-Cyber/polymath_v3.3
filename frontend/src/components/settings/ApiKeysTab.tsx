@@ -19,7 +19,7 @@ import * as api from "../../lib/api";
 type ProviderMeta = {
   label: string;
   placeholder: string;
-  group: "chat" | "embedder";
+  group: "chat" | "embedder" | "extraction";
   routing: string;
 };
 
@@ -59,6 +59,12 @@ const PROVIDER_LABELS: Record<string, ProviderMeta> = {
     placeholder: "sk-...",
     group: "embedder",
     routing: "direct to SiliconFlow embedder API (bypasses LiteLLM)",
+  },
+  runpod: {
+    label: "Runpod Flash",
+    placeholder: "rpa_...",
+    group: "extraction",
+    routing: "direct to the Runpod serverless queue for burst extraction",
   },
   // Modal credentials (token_id, token_secret, proxy bearer) live under
   // Settings → Infrastructure → Modal as of Sprint 2B — co-located with
@@ -219,13 +225,19 @@ export function ApiKeysTab() {
         </div>
       )}
 
-      {(["chat", "embedder"] as const).map((groupKey) => {
+      {(["chat", "embedder", "extraction"] as const).map((groupKey) => {
         const groupLabel =
           groupKey === "chat"
             ? "Chat (via LiteLLM proxy)"
-            : "Embedder (direct, bypasses LiteLLM)";
+            : groupKey === "embedder"
+              ? "Embedder (direct, bypasses LiteLLM)"
+              : "Extraction compute";
         const groupColor =
-          groupKey === "chat" ? "text-blue-300" : "text-emerald-300";
+          groupKey === "chat"
+            ? "text-blue-300"
+            : groupKey === "embedder"
+              ? "text-emerald-300"
+              : "text-amber-300";
         const inGroup = providers.filter(
           (p) => (PROVIDER_LABELS[p]?.group ?? "chat") === groupKey,
         );

@@ -49,24 +49,8 @@ def test_phrase_aliases_collapse_to_semantic_concepts():
     }
 
 
-def test_sticky_message_and_sticky_idea_share_one_evidence_concept():
-    query = "how can a sticky message improve advertising"
-    query_groups = concept_groups(query)
-    sticky = next(group for group in query_groups if group.key == "sticky_message")
-
-    assert "sticky ideas" in sticky.aliases
-    assert "concept:sticky" not in required_atoms_for_query(query)
-    assert "concept:message" not in required_atoms_for_query(query)
-    assert "concept:sticky_message" in required_atoms_for_query(query)
-
-
-def test_sticky_message_support_expands_to_framework_vocabulary():
-    assert concept_support_phrases("sticky_message") == (
-        "sticky message",
-        "sticky idea",
-        "made to stick",
-        "successs principles",
-    )
+def test_uncurated_concept_does_not_gain_static_domain_aliases():
+    assert concept_support_phrases("sticky_message") == ("sticky message",)
 
 
 def test_used_is_query_scaffolding_not_an_evidence_concept():

@@ -1,3 +1,5 @@
+from unittest.mock import AsyncMock
+
 import pytest
 
 from routers import ingestion as ingestion_router
@@ -61,3 +63,27 @@ async def test_list_model_ref_models_calls_base_models_endpoint(monkeypatch):
             {"Authorization": "Bearer secret"},
         )
     ]
+
+
+@pytest.mark.asyncio
+async def test_background_repair_heartbeat_renews_expiring_lease(monkeypatch):
+    update_one = AsyncMock()
+    update_one.return_value.matched_count = 0
+
+    class FakeDatabase:
+        def __getitem__(self, name):
+            assert name == "ingest_repair_runs"
+            return type("Collection", (), {"update_one": update_one})()
+
+    monkeypatch.setattr(ingestion_router.ingestion_service, "_db", FakeDatabase())
+    monkeypatch.setattr(ingestion_router.asyncio, "sleep", AsyncMock())
+
+    await ingestion_router._heartbeat_background_repair("repair-1")
+
+    query, update = update_one.await_args.args
+    assert query == {"run_id": "repair-1", "status": "running"}
+    assert update["$set"]["heartbeat_at"] == update["$set"]["updated_at"]
+    assert (
+        update["$set"]["lease_expires_at"]
+        > update["$set"]["heartbeat_at"]
+    )

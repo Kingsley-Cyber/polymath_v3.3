@@ -32,6 +32,7 @@ ENGINES = (
     "off",
     "local",
     "cloud",
+    "runpod_flash",
     "legacy_local",
     "dual",
     "local_then_cloud",
@@ -100,6 +101,10 @@ class ExtractionContract:
     @property
     def uses_legacy_local(self) -> bool:
         return self.engine in _LEGACY_LOCAL_ENGINES
+
+    @property
+    def uses_runpod_flash(self) -> bool:
+        return self.engine == "runpod_flash"
 
     @property
     def uses_local(self) -> bool:
@@ -259,7 +264,7 @@ def resolve_extraction_contract(
         source=source,
         pool_source=pool_source
         if (
-            engine != "off"
+            engine not in {"off", "runpod_flash"}
             and (engine in _PROVIDER_REQUIRED or engine in _PROVIDER_OPTIONAL)
         )
         else "none",

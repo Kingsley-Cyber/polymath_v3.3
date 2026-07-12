@@ -273,6 +273,8 @@ def classify_extraction_backend(
     lanes: list[str] = []
     if engine in {"legacy_local", "dual", "local_then_cloud", "local_then_enrich"}:
         lanes.append("local_mac_llm")
+    if engine == "runpod_flash":
+        lanes.append("cloud_api")
     uses_provider_llm = engine in {
         "local",
         "cloud",
@@ -405,7 +407,11 @@ def plan_ingestion_resources(
         notes.append(f"remote_vllm concurrency capped by configured chips at {max_concurrent}")
 
     recommended_profile = (
-        "rtx_assisted" if has_remote_vllm else "mac_queryable_first"
+        "runpod_burst"
+        if str(extraction_engine or "").strip().lower() == "runpod_flash"
+        else "rtx_assisted"
+        if has_remote_vllm
+        else "mac_queryable_first"
     )
     name_parts = [extraction_backend, embedding_backend, storage_mode]
     return ResourceProfile(

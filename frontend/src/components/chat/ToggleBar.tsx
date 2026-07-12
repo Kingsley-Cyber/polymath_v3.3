@@ -2,7 +2,7 @@
 // Phase 24: agentic toggle KILLED. Tool selection itself activates the
 // ReAct loop; auto-fallback to the agentic pool entry happens silently
 // when the chat model can't tool-call. Reasoning Cascade added.
-import { Brain, Globe2, Telescope } from "lucide-react";
+import { Brain, Globe2, RotateCcw, Telescope } from "lucide-react";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useQueryModelPoolStore } from "../../stores/queryModelPoolStore";
 import { ActivatorSelector } from "./ActivatorSelector";
@@ -20,6 +20,8 @@ export function ToggleBar({ className = "" }: ToggleBarProps) {
     reasoningCascadeEnabled,
     toggleReasoningCascade,
     selectedToolIds,
+    disabledLexiconIds,
+    clearDisabledLexiconExpansions,
   } = useSettingsStore();
 
   // Phase 24 — auto-fallback badge. Shows the model that WILL handle the
@@ -81,6 +83,19 @@ export function ToggleBar({ className = "" }: ToggleBarProps) {
 
       <div className="hidden sm:block h-4 w-px bg-border-minimal" />
       <ActivatorSelector />
+
+      {disabledLexiconIds.length > 0 && (
+        <button
+          type="button"
+          onClick={clearDisabledLexiconExpansions}
+          className="group flex items-center gap-1.5 rounded border border-amber-500/35 bg-amber-950/20 px-2 py-1 text-[9px] font-bold uppercase tracking-widest text-amber-200 hover:border-amber-400"
+          title="Restore all vocabulary expansions for the next query"
+        >
+          <RotateCcw className="h-3 w-3" />
+          Restore {disabledLexiconIds.length} expansion
+          {disabledLexiconIds.length === 1 ? "" : "s"}
+        </button>
+      )}
     </div>
   );
 }

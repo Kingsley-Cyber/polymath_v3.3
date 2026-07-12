@@ -10,6 +10,7 @@ from services.retriever.tier0_router import (
     Tier0DocumentRouter,
     _is_technical_report_route,
     diversify_document_routes,
+    merge_grounded_document_route_hints,
     select_adaptive_routes,
     select_title_aligned_routes,
 )
@@ -47,6 +48,39 @@ def test_route_diversity_reorders_but_preserves_relevant_neighborhood():
 
     assert [route.doc_id for route in selected] == ["a", "c", "b"]
     assert {route.doc_id for route in selected} == {"a", "b", "c"}
+
+
+def test_grounded_route_hint_is_reserved_before_semantic_fillers():
+    routes = {
+        "translation": [
+            DocumentRoute("translation", "c", "semantic-a", 0.92),
+            DocumentRoute("translation", "c", "grounded", 0.60),
+            DocumentRoute("translation", "c", "semantic-b", 0.80),
+        ]
+    }
+    hints = {
+        "translation": [
+            {
+                "corpus_id": "c",
+                "doc_id": "grounded",
+                "score": 0.88,
+                "title": "Source-backed concept",
+            }
+        ]
+    }
+
+    merged, applied = merge_grounded_document_route_hints(
+        routes,
+        hints,
+        max_per_lane=2,
+    )
+
+    assert [route.doc_id for route in merged["translation"]] == [
+        "grounded",
+        "semantic-a",
+    ]
+    assert merged["translation"][0].score == 0.88
+    assert applied == hints
 
 
 def test_technical_repair_reports_do_not_displace_content_documents():
@@ -180,6 +214,7 @@ async def test_all_three_layers_descend_from_document_routes(monkeypatch, tier):
     )
     calls = {"summary": 0, "lexical": 0, "rerank": 0, "graph": 0}
     child_scopes: list[dict] = []
+    route_kwargs: list[dict] = []
 
     async def fake_filter(corpus_ids):
         return corpus_ids, []
@@ -194,6 +229,7 @@ async def test_all_three_layers_descend_from_document_routes(monkeypatch, tier):
         return [[float(index + 1)] for index, _ in enumerate(texts)]
 
     async def fake_route(vectors, corpus_ids, **kwargs):
+        route_kwargs.append(dict(kwargs))
         return (
             {
                 "books": [DocumentRoute("books", "c1", "doc-books", 0.8)],
@@ -281,6 +317,9 @@ async def test_all_three_layers_descend_from_document_routes(monkeypatch, tier):
     assert lane_rows["books"]["routed_doc_ids"] == ["doc-books"]
     assert lane_rows["books_justification"]["routed_doc_ids"] == ["doc-dropshipping"]
     assert result.diagnostics["required_concept_coverage"]["coverage"] == 1.0
+    assert len(route_kwargs) == 1
+    assert route_kwargs[0]["per_lane_per_corpus"] == 24
+    assert route_kwargs[0]["max_per_lane"] == 12
     assert {chunk.doc_id for chunk in result.chunks} >= {
         "doc-books",
         "doc-dropshipping",

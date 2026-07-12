@@ -1,0 +1,222 @@
+{
+  "version": 1,
+  "description": "Corpus-grounded vocabulary, top-down routing, cross-corpus, enumeration, relation, and negative-control retrieval battery.",
+  "queries": [
+    {
+      "id": "naive_actor_face_to_facs",
+      "query": "How should an actor's face move in the opening ad?",
+      "corpus_ids": ["fd460347-61cc-4358-87fc-4b2a80533f0a"],
+      "expected_corpus_ids": ["fd460347-61cc-4358-87fc-4b2a80533f0a"],
+      "expected_lexicon_terms": [["FACS", "Facial Action Coding System"]],
+      "document_route_patterns": [
+        ["facial action coding system", "classifying facial action"],
+        ["laban for actors", "film directing cinematic motion"]
+      ],
+      "document_relevance": {
+        "1f55f7f5c4e375c55184280574b62cf537289e36c3f82e338569df7e252575a5": 3,
+        "644fa066c79d084f3a3a7d6a4c6b7b6962ce20ac5a5da25e45045cf8cb7100eb": 3,
+        "4ec63b401d0e6788627daae927e9656700a737d5e026373038487760447fbc10": 3,
+        "cf766913f175583cf4fae5d32c1e89d4c7238d9208d1a2fd8e1851419d5f1542": 2,
+        "ba520febaf47f6712b212c794315c276cbbeb66ad250e77d85485c7a3aa6f739": 2
+      },
+      "anchor_groups": [
+        {"name": "facial_system", "terms": ["FACS", "facial action coding system", "facial action"], "required": true},
+        {"name": "movement", "terms": ["action unit", "facial movement", "expression", "movement"], "required": true},
+        {"name": "opening", "terms": ["opening", "first five seconds", "hook", "attention"], "required": true}
+      ],
+      "min_lexicon_recall": 1.0,
+      "min_document_route_recall": 0.5,
+      "min_required_lane_coverage": 1.0,
+      "min_context_precision": 0.25,
+      "min_document_mrr": 0.2,
+      "min_document_recall": 0.2,
+      "min_document_ndcg": 0.15
+    },
+    {
+      "id": "ugc_exploratory_not_mandatory",
+      "query": "UGC ad prompt",
+      "corpus_ids": ["fd460347-61cc-4358-87fc-4b2a80533f0a"],
+      "optional_lexicon_terms": [["FACS", "Facial Action Coding System"]],
+      "anchor_groups": [
+        {"name": "ugc", "terms": ["UGC", "user generated content", "creator"], "required": true},
+        {"name": "ad_prompt", "terms": ["ad", "prompt", "hook", "opening"], "required": true}
+      ],
+      "min_required_lane_coverage": 1.0,
+      "min_context_precision": 0.2
+    },
+    {
+      "id": "text_to_video_ugc_earring_constraint_compiler",
+      "query": "I need a text-to-video prompt for a UGC video about an earring, TikTok style.",
+      "corpus_ids": ["fd460347-61cc-4358-87fc-4b2a80533f0a"],
+      "expected_corpus_ids": ["fd460347-61cc-4358-87fc-4b2a80533f0a"],
+      "expected_lexicon_terms": [["FACS", "Facial Action Coding System"]],
+      "optional_lexicon_terms": [
+        ["Laban", "Effort Actions"],
+        ["shot grammar", "shot composition", "framing"]
+      ],
+      "document_route_patterns": [
+        ["film school reading map", "ontology driven multimodal direction prompting"],
+        ["facial action coding system", "classifying facial action"],
+        ["laban", "grammar of the shot", "timing for animation"]
+      ],
+      "anchor_groups": [
+        {"name": "performance", "terms": ["facial expression", "action unit", "gaze", "actor movement", "performance", "body mechanics", "gesture", "head movement", "head tilt", "smile", "blink"], "required": true},
+        {"name": "cinematography", "terms": ["shot", "framing", "composition", "camera", "lighting"], "required": true},
+        {"name": "timing", "terms": ["timing", "pacing", "rhythm", "opening beat", "start, move, end"], "required": true}
+      ],
+      "min_lexicon_recall": 1.0,
+      "min_document_route_recall": 0.34,
+      "min_required_lane_coverage": 1.0,
+      "min_context_precision": 0.25
+    },
+    {
+      "id": "product_only_negative_facs",
+      "query": "Show only the product on a white background with no person or face.",
+      "corpus_ids": ["fd460347-61cc-4358-87fc-4b2a80533f0a"],
+      "forbidden_lexicon_terms": [["FACS", "Facial Action Coding System"]],
+      "anchor_groups": [
+        {"name": "product_only", "terms": ["product", "packshot", "white background", "still life"], "required": true}
+      ],
+      "min_required_lane_coverage": 1.0
+    },
+    {
+      "id": "audience_response_first_five_seconds",
+      "query": "How can this product be used to find the target audience, how would that audience respond to the ad, and how should I prompt the initial five-second video?",
+      "corpus_ids": ["fd460347-61cc-4358-87fc-4b2a80533f0a"],
+      "document_route_patterns": [
+        ["storybrand", "adweek copywriting", "hey whipple"],
+        ["visual story", "directing the story", "film directing"]
+      ],
+      "document_relevance": {
+        "ed3ed9666e1862b51e311bd9d5d00640f45b83389b77714d50fe3f8084c7a9b2": 3,
+        "caaae4bcd6e01a95844c4f7871ec52904e399875d9bec5873ca4b77ba0a5527d": 3,
+        "31f849173ba72d341e50b63c717a03298c40b5c65968229a35c5c78223467257": 3,
+        "5b382271ed161e79fa54331886a6f5815f4c5532df5ded4e67d3d7d5c2fc5d5d": 2,
+        "c114a92af86e673222c04dc87f1be21541c75a4a4e70cab50ec39b6f588cf7c1": 2,
+        "b3b4e760a5c44444c22a437b5d5fe05388bca94d6a2a92593766774304b5df9f": 3,
+        "720804e738c64de2e83d385caadf83e2b2844256dbd56ce9b37dc802513d27ad": 3,
+        "ac671b3124231958e303e4b8f2f07b161a880acd598112694fae4511035a89d3": 2,
+        "6c41ca2c928575b5f866b300fc282374ed5986ddf6db7c982e131a9d0ff44425": 1,
+        "bad6051d95ac37d7976182171800398d539dedd91ca56be62ef526c0ba65555e": 2,
+        "f10c82826d5148ce8047137b63111905dd22dacd3ce29c20fdd5acb35f879b2c": 2,
+        "96b7076a7916a839e9c0b51cf04c15329baaf4dd51f88836b2548228e6f0b39e": 2
+      },
+      "relevance_judgment_method": "pooled_manual_judgment_2026-07-12",
+      "relevance_judgment_note": "Added source-backed advertising, audience-response, timing, and video-prompt documents observed in pooled Fast, Hybrid, and Graph runs; original judgments and thresholds are retained.",
+      "anchor_groups": [
+        {"name": "target_audience", "terms": ["target audience", "audience", "customer", "market"], "required": true},
+        {"name": "response", "terms": ["response", "emotion", "motivation", "attention", "persuasion"], "required": true},
+        {"name": "opening_video", "terms": ["first five seconds", "opening", "hook", "shot"], "required": true}
+      ],
+      "min_document_route_recall": 0.5,
+      "min_required_lane_coverage": 1.0,
+      "min_context_precision": 0.25,
+      "min_document_mrr": 0.2,
+      "min_document_recall": 0.2,
+      "min_document_ndcg": 0.15
+    },
+    {
+      "id": "cross_corpus_dropshipping_objectives",
+      "query": "For a dropshipping product, identify the target audience, make the message memorable, and design the opening five seconds.",
+      "corpus_ids": [
+        "fd460347-61cc-4358-87fc-4b2a80533f0a",
+        "5a20bc21-95df-42c2-80c8-f927b4e83904"
+      ],
+      "expected_corpus_ids": [
+        "fd460347-61cc-4358-87fc-4b2a80533f0a",
+        "5a20bc21-95df-42c2-80c8-f927b4e83904"
+      ],
+      "document_route_patterns": [
+        ["facebook ads", "branded dropshipping", "video sales letters"],
+        ["made to stick", "storybrand", "hey whipple"]
+      ],
+      "document_relevance": {
+        "4ea6af8332a8d59ab6d0559b1becfee99efc74e1b04ad2968d8d9a09d840f086": 3,
+        "5789db09d2271aac2b7820fcacffc2c4275b8b2e4ca17386ff965d2646c4982f": 2,
+        "f472f9e60004ddcf0cc894194577b267db549802c047073862533250d21eaad3": 2,
+        "ed3ed9666e1862b51e311bd9d5d00640f45b83389b77714d50fe3f8084c7a9b2": 3,
+        "caaae4bcd6e01a95844c4f7871ec52904e399875d9bec5873ca4b77ba0a5527d": 3,
+        "31f849173ba72d341e50b63c717a03298c40b5c65968229a35c5c78223467257": 3,
+        "30cf49736903ba78570e21813b5034d095469bfef9ac9a60b30a5df4b0834448": 3,
+        "333dd5a665b6e48e564cb3a8401e96d98311695cd5949bddbdad7547b73e40e1": 2,
+        "b3b4e760a5c44444c22a437b5d5fe05388bca94d6a2a92593766774304b5df9f": 3
+      },
+      "relevance_judgment_method": "pooled_manual_judgment_2026-07-12",
+      "relevance_judgment_note": "Added source-backed target-audience, ad-response, and audience-format passages observed in the Graph pool; original judgments and thresholds are retained.",
+      "anchor_groups": [
+        {"name": "dropshipping_audience", "terms": ["dropshipping", "target audience", "audience", "customer"], "required": true},
+        {"name": "memorable_message", "terms": ["memorable", "sticky", "message", "story"], "required": true},
+        {"name": "opening", "terms": ["first five seconds", "opening", "hook", "attention"], "required": true}
+      ],
+      "min_document_route_recall": 0.5,
+      "min_required_lane_coverage": 1.0,
+      "min_context_precision": 0.2,
+      "min_document_mrr": 0.2,
+      "min_document_recall": 0.15,
+      "min_document_ndcg": 0.1
+    },
+    {
+      "id": "purple_ocean_and_sticky_message",
+      "query": "Combine Purple Ocean strategy with sticky-message principles for an ecommerce ad.",
+      "corpus_ids": [
+        "fd460347-61cc-4358-87fc-4b2a80533f0a",
+        "5a20bc21-95df-42c2-80c8-f927b4e83904"
+      ],
+      "expected_corpus_ids": [
+        "fd460347-61cc-4358-87fc-4b2a80533f0a",
+        "5a20bc21-95df-42c2-80c8-f927b4e83904"
+      ],
+      "expected_lexicon_terms": [
+        ["Purple Ocean"],
+        ["sticky message", "Made to Stick"]
+      ],
+      "document_route_patterns": [
+        ["1 product 3 ai tools", "purple ocean"],
+        ["made to stick", "sticky message"]
+      ],
+      "document_relevance": {
+        "02d1d93080f1ca97d29a0107f25f0976d7fc46606216569be5ab0f9f2fa94066": 3,
+        "caaae4bcd6e01a95844c4f7871ec52904e399875d9bec5873ca4b77ba0a5527d": 3,
+        "8ad2922f51d1cdb4f1b58c05feb3447ec7caebfd7a2c661537f6e8fbc23a41ec": 2,
+        "55e404ad59a6b63ae3ddf9c7a3298e9345a6414b36b6b93deb9bc10557157a4e": 3,
+        "b9d8b70224d4c2d224cd0d9fd102d240ee25a7d5c92fbb8b4da2c3825b72a6c0": 2,
+        "f6f827504f3343a0f7517e540868097c604c9caf64dd2a48603dac61a65589eb": 3
+      },
+      "relevance_judgment_method": "pooled_manual_judgment_2026-07-12",
+      "relevance_judgment_note": "Added four returned documents whose durable document profiles explicitly identify Purple Ocean strategy as a primary use; generic ecommerce/ad documents remain unjudged.",
+      "anchor_groups": [
+        {"name": "purple_ocean", "terms": ["Purple Ocean"], "required": true},
+        {"name": "sticky_message", "terms": ["sticky", "Made to Stick", "memorable message"], "required": true},
+        {"name": "ecommerce_ad", "terms": ["ecommerce", "ad", "product"], "required": true}
+      ],
+      "min_lexicon_recall": 0.5,
+      "min_document_route_recall": 1.0,
+      "min_required_lane_coverage": 1.0,
+      "min_context_precision": 0.25,
+      "min_document_mrr": 0.2,
+      "min_document_recall": 0.34,
+      "min_document_ndcg": 0.2
+    },
+    {
+      "id": "enumeration_unpopular_books",
+      "query": "List the unpopular books that made Mark rich, including each book's tier and why it was placed there.",
+      "corpus_ids": ["5a20bc21-95df-42c2-80c8-f927b4e83904"],
+      "document_route_patterns": [["unpopular books that made me rich"]],
+      "document_relevance": {
+        "e68e3163d1797a24ca3c05acdd0df684dfc27b623115a42b6821c399222743ec": 3,
+        "e9672e07715868b1fb103f3eb0f79ab3472467357e70f07aa398d1ad65e1541f": 1
+      },
+      "anchor_groups": [
+        {"name": "book_entries", "terms": ["book", "books", "title"], "required": true},
+        {"name": "tier", "terms": ["tier", "A tier", "B tier", "C tier"], "required": true},
+        {"name": "reason", "terms": ["reason", "because", "applicable", "made me rich"], "required": true}
+      ],
+      "min_document_route_recall": 1.0,
+      "min_required_lane_coverage": 1.0,
+      "min_context_precision": 0.3,
+      "min_document_mrr": 0.2,
+      "min_document_recall": 0.5,
+      "min_document_ndcg": 0.2
+    }
+  ]
+}

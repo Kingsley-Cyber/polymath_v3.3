@@ -30,16 +30,31 @@ FAILED_STATUSES = {
     "failed",
     "blocked_no_source",
     "blocked_missing_chunks",
+    "blocked_missing_summaries",
     "blocked_mongo_state",
+    "blocked_missing_document_summary",
 }
 TERMINAL_STATUSES = {"succeeded", "skipped"}
 SUPERSEDABLE_STATUSES = ACTIVE_STATUSES | FAILED_STATUSES
 FAILED_INGEST_STAGES = {"failed", "setup_failed", "chunk_failed"}
-TERMINAL_SKIP_INGEST_STAGES = {"skipped_duplicate"}
+TERMINAL_SKIP_INGEST_STAGES = {"skipped_duplicate", "skipped_nonsemantic"}
 RUNNABLE_STATUSES = ("queued",)
-EXECUTOR_BACKED_KINDS = {"persist_document", "embed_document"}
+EXECUTOR_BACKED_KINDS = {
+    "persist_document",
+    "embed_document",
+    "index_summaries",
+    "index_document_profile",
+}
 SourceRunner = Callable[..., Awaitable[dict[str, Any]]]
 DocumentStageRunner = Callable[..., Awaitable[dict[str, Any]]]
+
+
+def _terminal_skip_reason(ingest_stage: str) -> str:
+    return (
+        "duplicate_document"
+        if ingest_stage == "skipped_duplicate"
+        else "nonsemantic_source"
+    )
 
 
 def _stable_hash(value: Any) -> str:
@@ -57,11 +72,34 @@ def _int(value: Any) -> int:
 def _has_qdrant_vector_gap(write_state: dict[str, Any]) -> bool:
     if write_state.get("verified") is not False:
         return False
-    # Only child-vector count errors are repairable by embed_document.
-    # Summary, payload-contract, probe, and checker errors have separate
-    # repair paths and must not make valid child vectors cycle forever.
+    # Child count and child payload drift require a full child projection.
+    # Summary drift has a separate summary-only lane and must not make valid
+    # child vectors cycle forever.
     return any(
-        "child vectors" in str(error).lower()
+        any(
+            marker in str(error).lower()
+            for marker in (
+                "child vectors",
+                "child payload text mismatch",
+                "child payload text contract mismatch",
+            )
+        )
+        for error in (write_state.get("verify_errors") or [])
+    )
+
+
+def _has_qdrant_summary_gap(write_state: dict[str, Any]) -> bool:
+    if write_state.get("verified") is not False:
+        return False
+    return any(
+        any(
+            marker in str(error).lower()
+            for marker in (
+                "summary vectors",
+                "summary payload text mismatch",
+                "summary payload text contract mismatch",
+            )
+        )
         for error in (write_state.get("verify_errors") or [])
     )
 
@@ -108,6 +146,10 @@ async def reconcile_satisfied_document_pipeline_jobs(
             satisfied = bool(write_state.get("qdrant_written")) and not _has_qdrant_vector_gap(
                 write_state
             )
+        elif kind == "index_summaries":
+            satisfied = not _has_qdrant_summary_gap(write_state)
+        elif kind == "index_document_profile":
+            satisfied = write_state.get("document_profile_indexed") is True
         else:
             satisfied = False
         if not satisfied:
@@ -223,7 +265,7 @@ def build_document_pipeline_job(
     if kind == "chunk_document":
         if ingest_stage in TERMINAL_SKIP_INGEST_STAGES:
             status = "skipped"
-            reason = "duplicate_document"
+            reason = _terminal_skip_reason(ingest_stage)
         elif ingest_stage in FAILED_INGEST_STAGES:
             status = "failed"
             reason = ingest_stage
@@ -249,6 +291,22 @@ def build_document_pipeline_job(
             reason = "qdrant_vector_mismatch"
         else:
             reason = "missing_qdrant_vectors"
+    elif kind == "index_summaries":
+        if parent_chunks <= 0:
+            status = "blocked_missing_summaries"
+            reason = "missing_parent_artifacts"
+        elif write_state.get("mongo_written") is not True:
+            status = "blocked_mongo_state"
+            reason = "mongo_write_not_complete"
+        else:
+            reason = "qdrant_summary_vector_mismatch"
+    elif kind == "index_document_profile":
+        profile_summary = str(((doc.get("doc_profile") or {}).get("summary") or "")).strip()
+        if not profile_summary:
+            status = "blocked_missing_document_summary"
+            reason = "missing_document_summary"
+        else:
+            reason = "missing_tier0_document_profile"
 
     return {
         "job_id": document_pipeline_job_id(
@@ -271,6 +329,9 @@ def build_document_pipeline_job(
             "qdrant_written": bool(write_state.get("qdrant_written")),
             "neo4j_written": bool(write_state.get("neo4j_written")),
             "verified": write_state.get("verified"),
+            "document_profile_indexed": write_state.get(
+                "document_profile_indexed"
+            ),
         },
         "child_chunks": int(child_chunks or 0),
         "parent_chunks": int(parent_chunks or 0),
@@ -317,6 +378,27 @@ def classify_document_pipeline_jobs(
                 parent_chunks=parent_chunks,
             )
         )
+    if _has_qdrant_summary_gap(write_state):
+        jobs.append(
+            build_document_pipeline_job(
+                doc=doc,
+                kind="index_summaries",
+                child_chunks=child_chunks,
+                parent_chunks=parent_chunks,
+            )
+        )
+    if (
+        str(((doc.get("doc_profile") or {}).get("summary") or "")).strip()
+        and write_state.get("document_profile_indexed") is False
+    ):
+        jobs.append(
+            build_document_pipeline_job(
+                doc=doc,
+                kind="index_document_profile",
+                child_chunks=child_chunks,
+                parent_chunks=parent_chunks,
+            )
+        )
     return jobs
 
 
@@ -339,6 +421,7 @@ async def _doc_for_job(db: Any, *, corpus_id: str, doc_id: str) -> dict[str, Any
                 "filename": 1,
                 "ingest_stage": 1,
                 "write_state": 1,
+                "doc_profile": 1,
                 "source_identity": 1,
                 "source_key": 1,
                 "content_sha256": 1,
@@ -385,10 +468,13 @@ async def _job_status_from_artifacts(
             "qdrant_written": bool(write_state.get("qdrant_written")),
             "neo4j_written": bool(write_state.get("neo4j_written")),
             "verified": write_state.get("verified"),
+            "document_profile_indexed": write_state.get(
+                "document_profile_indexed"
+            ),
         },
     }
     if str(doc.get("ingest_stage") or "") in TERMINAL_SKIP_INGEST_STAGES:
-        return "skipped", "duplicate_document", metadata
+        return "skipped", _terminal_skip_reason(str(doc.get("ingest_stage") or "")), metadata
     executor_error = (executor_errors_by_kind or {}).get(kind)
     if kind == "chunk_document":
         if child_chunks > 0:
@@ -421,6 +507,30 @@ async def _job_status_from_artifacts(
             metadata["last_error"] = executor_error
             return "failed", "executor_error", metadata
         return "queued", "missing_qdrant_vectors", metadata
+    if kind == "index_summaries":
+        if parent_chunks <= 0:
+            return "blocked_missing_summaries", "missing_parent_artifacts", metadata
+        if write_state.get("mongo_written") is not True:
+            return "blocked_mongo_state", "mongo_write_not_complete", metadata
+        if not _has_qdrant_summary_gap(write_state):
+            return "succeeded", "summary_projection_complete", metadata
+        if executor_error:
+            metadata["last_error"] = executor_error
+            return "failed", "executor_error", metadata
+        return "queued", "qdrant_summary_vector_mismatch", metadata
+    if kind == "index_document_profile":
+        if not str(((doc.get("doc_profile") or {}).get("summary") or "")).strip():
+            return (
+                "blocked_missing_document_summary",
+                "missing_document_summary",
+                metadata,
+            )
+        if write_state.get("document_profile_indexed") is True:
+            return "succeeded", "tier0_document_profile_indexed", metadata
+        if executor_error:
+            metadata["last_error"] = executor_error
+            return "failed", "executor_error", metadata
+        return "queued", "missing_tier0_document_profile", metadata
     return "failed", "unknown_document_pipeline_job_kind", metadata
 
 
@@ -484,7 +594,16 @@ async def plan_document_pipeline_jobs(
     kinds: list[str] | None = None,
 ) -> dict[str, Any]:
     limit = max(1, min(int(limit or 500), 10000))
-    kinds_set = set(kinds or ["chunk_document", "persist_document", "embed_document"])
+    kinds_set = set(
+        kinds
+        or [
+            "chunk_document",
+            "persist_document",
+            "embed_document",
+            "index_summaries",
+            "index_document_profile",
+        ]
+    )
     artifact_reconciled = (
         await reconcile_satisfied_document_pipeline_jobs(
             db,
@@ -507,6 +626,7 @@ async def plan_document_pipeline_jobs(
             "filename": 1,
             "ingest_stage": 1,
             "write_state": 1,
+            "doc_profile": 1,
             "ingestion_config": 1,
             "embedding_model_id": 1,
             "source_identity": 1,
@@ -608,6 +728,8 @@ async def run_document_pipeline_jobs(
     source_runner: SourceRunner | None = None,
     persist_runner: DocumentStageRunner | None = None,
     embed_runner: DocumentStageRunner | None = None,
+    summary_runner: DocumentStageRunner | None = None,
+    profile_runner: DocumentStageRunner | None = None,
 ) -> dict[str, Any]:
     """Run/reconcile a bounded slice of document-stage jobs.
 
@@ -680,6 +802,10 @@ async def run_document_pipeline_jobs(
     source_jobs = [job for job in jobs if job.get("kind") == "chunk_document"]
     persist_jobs = [job for job in jobs if job.get("kind") == "persist_document"]
     embed_jobs = [job for job in jobs if job.get("kind") == "embed_document"]
+    summary_jobs = [job for job in jobs if job.get("kind") == "index_summaries"]
+    profile_jobs = [
+        job for job in jobs if job.get("kind") == "index_document_profile"
+    ]
     source_result: dict[str, Any] | None = None
     source_requested = False
     source_error: str | None = None
@@ -734,6 +860,16 @@ async def run_document_pipeline_jobs(
 
     await _run_stage(kind="persist_document", stage_jobs=persist_jobs, runner=persist_runner)
     await _run_stage(kind="embed_document", stage_jobs=embed_jobs, runner=embed_runner)
+    await _run_stage(
+        kind="index_summaries",
+        stage_jobs=summary_jobs,
+        runner=summary_runner,
+    )
+    await _run_stage(
+        kind="index_document_profile",
+        stage_jobs=profile_jobs,
+        runner=profile_runner,
+    )
 
     reconciled = await _reconcile_document_pipeline_jobs(
         db,
@@ -746,7 +882,13 @@ async def run_document_pipeline_jobs(
     counts = reconciled["counts"]
     blocked_count = sum(
         int(counts.get(status) or 0)
-        for status in ("blocked_no_source", "blocked_missing_chunks", "blocked_mongo_state")
+        for status in (
+            "blocked_no_source",
+            "blocked_missing_chunks",
+            "blocked_missing_summaries",
+            "blocked_mongo_state",
+            "blocked_missing_document_summary",
+        )
     )
     executor_missing_kinds = sorted(missing_executor_kinds)
     executor_missing = bool(counts.get("queued") and executor_missing_kinds)

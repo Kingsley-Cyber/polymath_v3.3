@@ -578,6 +578,10 @@ async def _run_ghost_b_backfill(
         )
     elif contract.engine in {"local", "cloud"}:
         report = await cloud_extract_entities(tasks, **extract_kwargs)
+    elif contract.engine == "runpod_flash":
+        from services.runpod_flash_extraction import extract_entities as runpod_extract_entities
+
+        report = await runpod_extract_entities(tasks, **extract_kwargs)
     elif contract.engine == "legacy_local":
         report = await local_extract_entities(tasks, **extract_kwargs)
     elif contract.engine == "dual":

@@ -344,6 +344,7 @@ async def _run_search(
     final_top_k: int | None = None,
     fact_seed_limit: int | None = None,
     search_mode: Literal["local", "global", "auto"] = "local",
+    disabled_lexicon_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     settings = get_settings()
     scoped = await _scope_corpus_ids(corpus_ids, default_to_all=default_to_all)
@@ -391,6 +392,7 @@ async def _run_search(
     if settings.QUERY_PLAN_V2:
         result = await retriever_orchestrator.retrieve_planned(
             plan=build_query_plan_v2(query, corpus_ids=scoped),
+            disabled_lexicon_ids=disabled_lexicon_ids,
             **retrieval_kwargs,
         )
     else:
@@ -416,6 +418,7 @@ async def _run_search(
             "neo4j_expansion_cap": neo4j_expansion_cap,
             "max_corpora_per_query": max_corpora_per_query,
             "fact_seed_limit": fact_seed_limit,
+            "disabled_lexicon_ids": disabled_lexicon_ids or [],
             "diagnostics": _json_ready(result.diagnostics or {}),
         },
     }
@@ -438,6 +441,7 @@ async def polymath_search(
     final_top_k: int | None = None,
     fact_seed_limit: int | None = None,
     search_mode: Literal["local", "global", "auto"] = "local",
+    disabled_lexicon_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     """Search Polymath corpora and return ranked chunks.
 
@@ -491,6 +495,7 @@ async def polymath_search(
         final_top_k=final_top_k,
         fact_seed_limit=fact_seed_limit,
         search_mode=search_mode,
+        disabled_lexicon_ids=disabled_lexicon_ids,
     )
 
 
@@ -511,6 +516,7 @@ async def polymath_cross_corpus_search(
     final_top_k: int | None = None,
     fact_seed_limit: int | None = None,
     search_mode: Literal["local", "global", "auto"] = "local",
+    disabled_lexicon_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     """Explicit cross-corpus retrieval tool for agents.
 
@@ -535,6 +541,7 @@ async def polymath_cross_corpus_search(
         final_top_k=final_top_k,
         fact_seed_limit=fact_seed_limit,
         search_mode=search_mode,
+        disabled_lexicon_ids=disabled_lexicon_ids,
     )
 
 
@@ -570,6 +577,7 @@ async def polymath_chat_query(
     web_research_mode: bool | None = None,
     web_youtube_transcripts: bool | None = None,
     web_max_sources: int | None = None,
+    disabled_lexicon_ids: list[str] | None = None,
     selected_tools: list[str] | None = None,
     active_skill_ids: list[str] | None = None,
     max_sources: int = 8,
@@ -652,6 +660,7 @@ async def polymath_chat_query(
         "web_research_mode": web_research_mode,
         "web_youtube_transcripts": web_youtube_transcripts,
         "web_max_sources": web_max_sources,
+        "disabled_lexicon_ids": disabled_lexicon_ids,
     }
     overrides = (
         ModelOverrides(**{k: v for k, v in override_data.items() if v is not None})

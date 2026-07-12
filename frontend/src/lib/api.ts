@@ -831,7 +831,12 @@ export async function createUploadIngestBatch(
     chunk_summarization?: boolean;
     model?: string;
     concurrency?: number;
-    profile?: "mac_safe" | "mac_queryable_first" | "rtx_assisted" | null;
+    profile?:
+      | "mac_safe"
+      | "mac_queryable_first"
+      | "rtx_assisted"
+      | "runpod_burst"
+      | null;
     start?: boolean;
   } = {},
 ): Promise<IngestBatchResponse> {
@@ -1487,6 +1492,14 @@ export async function validateExtraction(): Promise<ExtractionValidationReport> 
   return fetchJSON("/settings/extraction/validate");
 }
 
+export async function testRunpodFlashExtraction(): Promise<
+  import("../types/settings").RunpodFlashTestResult
+> {
+  return fetchJSON("/settings/ingestion/runpod-flash/test", {
+    method: "POST",
+  });
+}
+
 /**
  * POST /api/settings/infrastructure/test
  * Test connectivity to all infrastructure services.
@@ -1704,6 +1717,7 @@ export const api = {
   getGlobalSettings,
   updateGlobalSettings,
   validateExtraction,
+  testRunpodFlashExtraction,
   testInfrastructure,
   testService,
   testModalEndpoint,

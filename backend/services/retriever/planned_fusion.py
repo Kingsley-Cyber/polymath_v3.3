@@ -22,7 +22,6 @@ class PlannedPool:
 LANE_GROUNDING_THRESHOLD = 0.75
 DOCUMENT_ROUTE_GROUNDING_THRESHOLD = 0.30
 LANE_RESERVATION_MIN_SCORE_RATIO = 0.25
-ROUTED_LANE_RESERVATION_MIN_SCORE_RATIO = 0.08
 _OPERATIONAL_ARTIFACT_RE = re.compile(
     r"^(?:ocr-(?:completion|marker-append)|epub-backfill-status)-report(?:\.[a-z0-9]+)?$",
     re.IGNORECASE,
@@ -151,6 +150,28 @@ def planned_lane_supported(chunk: SourceChunk, lane_id: str) -> bool:
     )
 
 
+def reserved_required_lane_ids(
+    chunk: SourceChunk,
+    required_lane_ids: list[str] | None = None,
+) -> list[str]:
+    """Return required lanes explicitly reserved for this final source.
+
+    Semantic routing can annotate many neighboring candidates. Only the one
+    selected as the final reservation for a required lane should bypass a
+    later context filter.
+    """
+
+    required = set(required_lane_ids or [])
+    reserved = list(
+        (chunk.metadata or {}).get("planned_required_lane_reservations") or []
+    )
+    return [
+        lane_id
+        for lane_id in dict.fromkeys(str(value) for value in reserved if value)
+        if lane_id in required and planned_lane_supported(chunk, lane_id)
+    ]
+
+
 def annotate_planned_lane_grounding(
     chunks: list[SourceChunk],
     *,
@@ -182,6 +203,80 @@ def annotate_planned_lane_grounding(
         chunk.metadata = metadata
 
 
+def propagate_grounded_lane_aliases(
+    chunks: list[SourceChunk],
+    lane_targets: dict[str, list[str]],
+) -> dict[str, object]:
+    """Credit required lanes only from literally grounded translation lanes.
+
+    The vocabulary resolver supplies the source-to-target mapping. This helper
+    performs no semantic guessing: the source lane must already be present on
+    the candidate and its literal concept grounding must clear the normal lane
+    threshold. Route-only and step-back evidence therefore cannot inherit a
+    required obligation.
+    """
+
+    diagnostics: dict[str, object] = {
+        "source_lane_count": len(lane_targets),
+        "candidate_count": len(chunks),
+        "propagated_candidate_count": 0,
+        "propagated_pairs": [],
+    }
+    propagated_candidates = 0
+    propagated_pairs: set[tuple[str, str]] = set()
+    for chunk in chunks:
+        metadata = dict(chunk.metadata or {})
+        planned_lanes = set(metadata.get("planned_lanes") or [])
+        grounding = dict(metadata.get("planned_lane_grounding") or {})
+        grounding_sources = {
+            str(lane_id): list(values or [])
+            for lane_id, values in (
+                metadata.get("planned_lane_grounding_sources") or {}
+            ).items()
+        }
+        changed = False
+        for source_lane_id, target_lane_ids in lane_targets.items():
+            if source_lane_id not in planned_lanes:
+                continue
+            try:
+                source_score = float(grounding.get(source_lane_id) or 0.0)
+            except (TypeError, ValueError):
+                source_score = 0.0
+            if source_score < LANE_GROUNDING_THRESHOLD:
+                continue
+            for target_lane_id in target_lane_ids:
+                target = str(target_lane_id or "").strip()
+                if not target or target == source_lane_id:
+                    continue
+                planned_lanes.add(target)
+                try:
+                    previous_score = float(grounding.get(target) or 0.0)
+                except (TypeError, ValueError):
+                    previous_score = 0.0
+                grounding[target] = max(previous_score, source_score)
+                sources = grounding_sources.setdefault(target, [])
+                if source_lane_id not in sources:
+                    sources.append(source_lane_id)
+                propagated_pairs.add((source_lane_id, target))
+                changed = True
+        if not changed:
+            continue
+        metadata["planned_lanes"] = sorted(planned_lanes)
+        metadata["planned_lane_grounding"] = grounding
+        metadata["planned_lane_grounding_sources"] = {
+            lane_id: sorted(dict.fromkeys(values))
+            for lane_id, values in grounding_sources.items()
+        }
+        chunk.metadata = metadata
+        propagated_candidates += 1
+    diagnostics["propagated_candidate_count"] = propagated_candidates
+    diagnostics["propagated_pairs"] = [
+        {"source_lane_id": source, "target_lane_id": target}
+        for source, target in sorted(propagated_pairs)
+    ]
+    return diagnostics
+
+
 def grounded_planned_lane_ids(
     chunks: list[SourceChunk],
     required_lane_ids: list[str],
@@ -197,6 +292,9 @@ def grounded_planned_lane_ids(
 def filter_grounded_planned_candidates(
     chunks: list[SourceChunk],
     required_lane_ids: list[str],
+    *,
+    selected_corpus_ids: list[str] | None = None,
+    protected_lane_ids: list[str] | None = None,
 ) -> tuple[list[SourceChunk], dict[str, object]]:
     """Remove generic quota fillers from a fully grounded multi-side pack.
 
@@ -206,12 +304,14 @@ def filter_grounded_planned_candidates(
     their text or structured provenance grounds at least one required side.
     """
     required = list(dict.fromkeys(required_lane_ids))
+    protected = list(dict.fromkeys(protected_lane_ids or []))
     diagnostics: dict[str, object] = {
         "enabled": bool(required),
         "input": len(chunks),
         "kept": len(chunks),
         "dropped": 0,
         "required_lane_ids": required,
+        "protected_lane_ids": protected,
         "grounded_lane_ids": grounded_planned_lane_ids(chunks, required),
         "applied": False,
     }
@@ -229,14 +329,66 @@ def filter_grounded_planned_candidates(
         diagnostics["reason"] = "no_grounded_coverage"
         return chunks, diagnostics
 
+    def grounded_translation_lanes(chunk: SourceChunk) -> list[str]:
+        grounding = (chunk.metadata or {}).get("planned_lane_grounding") or {}
+        if not isinstance(grounding, dict):
+            return []
+        output: list[str] = []
+        for lane_id, value in grounding.items():
+            source_lane_id = str(lane_id or "")
+            if not (
+                source_lane_id.startswith("translation_")
+                or source_lane_id.startswith("planner_translation_")
+            ) or source_lane_id in required:
+                continue
+            try:
+                score = float(value or 0.0)
+            except (TypeError, ValueError):
+                score = 0.0
+            if score >= LANE_GROUNDING_THRESHOLD:
+                output.append(source_lane_id)
+        return sorted(output)
+
+    grounded_translation_candidates = {
+        id(chunk): grounded_translation_lanes(chunk) for chunk in chunks
+    }
+    protected_lane_candidates = {
+        id(chunk): sorted(
+            set((chunk.metadata or {}).get("planned_lanes") or []) & set(protected)
+        )
+        for chunk in chunks
+    }
     filtered = [
         chunk
         for chunk in chunks
         if any(planned_lane_supported(chunk, lane_id) for lane_id in grounded_lane_ids)
+        or bool(grounded_translation_candidates[id(chunk)])
+        or bool(protected_lane_candidates[id(chunk)])
     ]
     if not filtered:
         diagnostics["reason"] = "empty_filter_guard"
         return chunks, diagnostics
+
+    preserved_corpora: list[str] = []
+    requested_corpora = list(
+        dict.fromkeys(str(value) for value in (selected_corpus_ids or []) if str(value))
+    )
+    if len(requested_corpora) > 1:
+        kept_ids = {id(chunk) for chunk in filtered}
+        represented = {str(chunk.corpus_id or "") for chunk in filtered}
+        for corpus_id in requested_corpora:
+            if corpus_id in represented:
+                continue
+            candidate = next(
+                (chunk for chunk in chunks if str(chunk.corpus_id or "") == corpus_id),
+                None,
+            )
+            if candidate is None:
+                continue
+            kept_ids.add(id(candidate))
+            represented.add(corpus_id)
+            preserved_corpora.append(corpus_id)
+        filtered = [chunk for chunk in chunks if id(chunk) in kept_ids]
 
     diagnostics.update(
         {
@@ -248,6 +400,14 @@ def filter_grounded_planned_candidates(
             ),
             "kept": len(filtered),
             "dropped": len(chunks) - len(filtered),
+            "corpus_floor_candidates_preserved": preserved_corpora,
+            "grounded_translation_candidates_preserved": sum(
+                bool(grounded_translation_candidates.get(id(chunk)))
+                for chunk in filtered
+            ),
+            "protected_lane_candidates_preserved": sum(
+                bool(protected_lane_candidates.get(id(chunk))) for chunk in filtered
+            ),
         }
     )
     return filtered, diagnostics
@@ -271,6 +431,9 @@ def limit_candidates_per_document(
     *,
     max_candidates: int,
     max_per_document: int,
+    required_lane_ids: list[str] | None = None,
+    preferred_route_lane_ids: list[str] | None = None,
+    protected_lane_ids: list[str] | None = None,
 ) -> tuple[list[SourceChunk], int]:
     """Bound same-document neighbors before the cross-encoder call.
 
@@ -281,12 +444,111 @@ def limit_candidates_per_document(
 
     limit = max(1, int(max_candidates))
     document_limit = max(1, int(max_per_document))
+    required = list(dict.fromkeys(required_lane_ids or []))
+    remaining_required = set(required)
+    protected_object_ids: set[int] = set()
+    for lane_id in dict.fromkeys(protected_lane_ids or []):
+        selected_chunk = next(
+            (
+                chunk
+                for chunk in chunks
+                if lane_id
+                in set((chunk.metadata or {}).get("planned_lanes") or [])
+            ),
+            None,
+        )
+        if selected_chunk is not None and len(protected_object_ids) < limit:
+            protected_object_ids.add(id(selected_chunk))
+    for lane_id in dict.fromkeys(preferred_route_lane_ids or []):
+        routed = [
+            (rank, chunk)
+            for rank, chunk in enumerate(chunks)
+            if planned_lane_supported(chunk, lane_id)
+            and planned_document_route_score(chunk, lane_id) > 0.0
+        ]
+        if not routed or len(protected_object_ids) >= limit:
+            continue
+        _rank, selected_chunk = max(
+            routed,
+            key=lambda row: (
+                planned_document_route_score(row[1], lane_id),
+                planned_lane_grounding(row[1], lane_id),
+                float(row[1].score or 0.0),
+                -row[0],
+            ),
+        )
+        protected_object_ids.add(id(selected_chunk))
+        supported_required = {
+            lane
+            for lane in list(remaining_required)
+            if planned_lane_supported(selected_chunk, lane)
+        }
+        remaining_required.difference_update(supported_required)
+    while remaining_required and len(protected_object_ids) < limit:
+        choices: list[tuple[tuple[float, ...], SourceChunk, set[str]]] = []
+        for rank, chunk in enumerate(chunks):
+            supported = {
+                lane_id
+                for lane_id in remaining_required
+                if planned_lane_supported(chunk, lane_id)
+            }
+            if not supported:
+                continue
+            choices.append(
+                (
+                    (
+                        float(len(supported)),
+                        max(
+                            (
+                                planned_lane_grounding(chunk, lane_id)
+                                for lane_id in supported
+                            ),
+                            default=0.0,
+                        ),
+                        max(
+                            (
+                                planned_document_route_score(chunk, lane_id)
+                                for lane_id in supported
+                            ),
+                            default=0.0,
+                        ),
+                        float(chunk.score or 0.0),
+                        float(-rank),
+                    ),
+                    chunk,
+                    supported,
+                )
+            )
+        if not choices:
+            break
+        _priority, selected_chunk, supported = max(
+            choices,
+            key=lambda row: row[0],
+        )
+        protected_object_ids.add(id(selected_chunk))
+        remaining_required.difference_update(supported)
+
     output: list[SourceChunk] = []
     document_counts: dict[str, int] = {}
+    for chunk in chunks:
+        if id(chunk) not in protected_object_ids:
+            continue
+        document_key = _candidate_document_key(chunk)
+        if document_key:
+            document_counts[document_key] = document_counts.get(document_key, 0) + 1
+    protected_remaining = len(protected_object_ids)
     dropped = 0
     for chunk in chunks:
         if len(output) >= limit:
             break
+        protected = id(chunk) in protected_object_ids
+        if protected:
+            output.append(chunk)
+            protected_remaining -= 1
+            continue
+        if len(output) + protected_remaining >= limit:
+            dropped += 1
+            continue
         document_key = _candidate_document_key(chunk)
         if document_key and document_counts.get(document_key, 0) >= document_limit:
             dropped += 1
@@ -451,6 +713,7 @@ def reserve_planned_finalists(
     max_per_document: int | None = None,
     routed_document_budget: int = 0,
     preferred_route_lane_ids: list[str] | None = None,
+    protected_lane_ids: list[str] | None = None,
 ) -> tuple[list[SourceChunk], dict[str, object]]:
     """Keep required semantic sides and corpora through the final rank cut.
 
@@ -469,34 +732,46 @@ def reserve_planned_finalists(
     def reservation_relevant(chunk: SourceChunk, lane_id: str) -> bool:
         if not planned_lane_supported(chunk, lane_id):
             return False
+        planned_lanes = set((chunk.metadata or {}).get("planned_lanes") or [])
+        if (
+            lane_id in planned_lanes
+            and planned_document_route_score(chunk, lane_id)
+            >= DOCUMENT_ROUTE_GROUNDING_THRESHOLD
+        ):
+            # Document routing is a scope gate, not a score bonus. Once the
+            # lane retrieved a descendant from a semantically accepted route,
+            # a sharply calibrated reranker may order candidates within that
+            # lane but cannot erase the lane from the final packet.
+            return True
         score = float(chunk.score or 0.0)
         if 0.0 <= score <= top_score <= 1.0 and top_score > 0.0:
-            ratio = (
-                ROUTED_LANE_RESERVATION_MIN_SCORE_RATIO
-                if planned_document_route_score(chunk, lane_id)
-                >= DOCUMENT_ROUTE_GROUNDING_THRESHOLD
-                else LANE_RESERVATION_MIN_SCORE_RATIO
-            )
-            return score >= max(0.05, top_score * ratio)
+            return score >= max(0.05, top_score * LANE_RESERVATION_MIN_SCORE_RATIO)
         return True
 
     selected: list[str] = []
     selected_set: set[str] = set()
     protected_keys: set[str] = set()
     lane_reservations: dict[str, str] = {}
+    protected_lane_reservations: dict[str, str] = {}
     lane_candidate_diagnostics: dict[str, dict[str, object]] = {}
     corpus_reservations: dict[str, str] = {}
     routed_document_reservations: dict[str, str] = {}
     document_counts: dict[str, int] = {}
 
-    def reserve(key: str | None, *, allow_overflow: bool = False) -> bool:
+    def reserve(
+        key: str | None,
+        *,
+        allow_overflow: bool = False,
+        ignore_document_cap: bool = False,
+    ) -> bool:
         if not key or key in selected_set:
             return False
         if len(selected) >= limit and not allow_overflow:
             return False
         document_key = _candidate_document_key(by_key[key])
         if (
-            max_per_document is not None
+            not ignore_document_cap
+            and max_per_document is not None
             and document_key
             and document_counts.get(document_key, 0) >= max(1, max_per_document)
         ):
@@ -507,11 +782,80 @@ def reserve_planned_finalists(
             document_counts[document_key] = document_counts.get(document_key, 0) + 1
         return True
 
+    def replace_unprotected_document_candidate(key: str | None) -> bool:
+        """Swap a same-document diversity winner for required lane evidence."""
+
+        if not key or key in selected_set:
+            return bool(key and key in selected_set)
+        document_key = _candidate_document_key(by_key[key])
+        if not document_key:
+            return False
+        replace_key = next(
+            (
+                current
+                for current in selected
+                if current not in protected_keys
+                and _candidate_document_key(by_key[current]) == document_key
+            ),
+            None,
+        )
+        if not replace_key:
+            return False
+        index = selected.index(replace_key)
+        selected[index] = key
+        selected_set.discard(replace_key)
+        selected_set.add(key)
+        return True
+
     # Diversity selection is the primary packet. Reservations add only a
     # missing semantic side/corpus; they must not repopulate every empty slot
     # with lower-quality ranked candidates.
     for chunk in preferred:
         reserve(_candidate_key(chunk))
+
+    # The exact user query is a recall safety lane, not another semantic
+    # obligation. Preserve its strongest cross-encoder result without counting
+    # it toward required-concept coverage or granting it route authority.
+    for lane_id in dict.fromkeys(protected_lane_ids or []):
+        existing_key = next(
+            (
+                candidate_key
+                for candidate_key in selected
+                if lane_id
+                in set(
+                    (by_key[candidate_key].metadata or {}).get("planned_lanes") or []
+                )
+            ),
+            None,
+        )
+        key = existing_key or next(
+            (
+                candidate_key
+                for candidate_key in ranked_keys
+                if lane_id
+                in set(
+                    (by_key[candidate_key].metadata or {}).get("planned_lanes") or []
+                )
+            ),
+            None,
+        )
+        if key and (
+            key in selected_set
+            or reserve(
+                key,
+                allow_overflow=True,
+                ignore_document_cap=True,
+            )
+        ):
+            protected_keys.add(key)
+            protected_lane_reservations[lane_id] = key
+
+    for lane_id, key in protected_lane_reservations.items():
+        metadata = dict(by_key[key].metadata or {})
+        reservations = set(metadata.get("planned_protected_lane_reservations") or [])
+        reservations.add(lane_id)
+        metadata["planned_protected_lane_reservations"] = sorted(reservations)
+        by_key[key].metadata = metadata
 
     for lane_id in dict.fromkeys(required_lane_ids):
         existing_key = next(
@@ -572,7 +916,7 @@ def reserve_planned_finalists(
             if best_chunk
             else 0.0,
         }
-        key = existing_key or max(
+        ordered_candidates = sorted(
             candidates,
             key=lambda candidate_key: (
                 planned_lane_grounding(by_key[candidate_key], lane_id)
@@ -583,12 +927,47 @@ def reserve_planned_finalists(
                 _has_lane_retriever(by_key[candidate_key], lane_id, "lexical"),
                 -ranked_keys.index(candidate_key),
             ),
-            default=None,
+            reverse=True,
         )
-        if key:
-            reserve(key, allow_overflow=True)
+        # A previously selected route-only candidate may technically support
+        # the lane while the reranker has scored it near zero. Do not let that
+        # first-selected candidate short-circuit a much stronger grounded
+        # passage for the same obligation.
+        key = ordered_candidates[0] if ordered_candidates else existing_key
+        if key not in selected_set:
+            for candidate_key in ordered_candidates:
+                if candidate_key != key:
+                    continue
+                if reserve(candidate_key, allow_overflow=True) or (
+                    max_per_document is not None
+                    and replace_unprotected_document_candidate(candidate_key)
+                ):
+                    key = candidate_key
+                    break
+        if key is None or key not in selected_set:
+            # A hard document-diversity cap must not make a required semantic
+            # side disappear when its only grounded passage is a different
+            # chunk in a document already reserved for another side.
+            for candidate_key in ordered_candidates:
+                if reserve(
+                    candidate_key,
+                    allow_overflow=True,
+                    ignore_document_cap=True,
+                ):
+                    key = candidate_key
+                    break
+        if key is not None:
             protected_keys.add(key)
             lane_reservations[lane_id] = key
+
+    for lane_id, key in lane_reservations.items():
+        metadata = dict(by_key[key].metadata or {})
+        reservations = set(
+            metadata.get("planned_required_lane_reservations") or []
+        )
+        reservations.add(lane_id)
+        metadata["planned_required_lane_reservations"] = sorted(reservations)
+        by_key[key].metadata = metadata
 
     # Routing is a scope prior, not a score bonus. Preserve the strongest
     # independently relevant candidate from a bounded number of routed
@@ -665,6 +1044,13 @@ def reserve_planned_finalists(
             protected_keys.add(key)
             corpus_reservations[str(corpus_id)] = key
 
+    for corpus_id, key in corpus_reservations.items():
+        metadata = dict(by_key[key].metadata or {})
+        reservations = set(metadata.get("planned_corpus_reservations") or [])
+        reservations.add(corpus_id)
+        metadata["planned_corpus_reservations"] = sorted(reservations)
+        by_key[key].metadata = metadata
+
     # If adding required evidence exceeded the limit, remove the weakest
     # unprotected diversity winner. Required semantic/corpus evidence survives.
     ordered_selected = [key for key in ranked_keys if key in selected_set]
@@ -695,6 +1081,8 @@ def reserve_planned_finalists(
     )
     return output, {
         "required_lane_ids": list(dict.fromkeys(required_lane_ids)),
+        "protected_lane_ids": list(dict.fromkeys(protected_lane_ids or [])),
+        "protected_lane_reservations": protected_lane_reservations,
         "lane_reservations": lane_reservations,
         "lane_candidates": lane_candidate_diagnostics,
         "corpus_reservations": corpus_reservations,
@@ -885,7 +1273,11 @@ def dedupe_parent_finalists(
         existing = output[existing_index]
         existing_meta = dict(existing.metadata or {})
         duplicate_meta = dict(chunk.metadata or {})
-        for list_key in ("planned_lanes", "corpus_memberships"):
+        for list_key in (
+            "planned_lanes",
+            "planned_required_lane_reservations",
+            "corpus_memberships",
+        ):
             merged = {
                 str(value)
                 for value in (
@@ -902,19 +1294,23 @@ def dedupe_parent_finalists(
                 )
             if merged:
                 existing_meta[list_key] = sorted(merged)
-        merged_grounding = dict(existing_meta.get("planned_lane_grounding") or {})
-        for lane_id, value in dict(
-            duplicate_meta.get("planned_lane_grounding") or {}
-        ).items():
-            try:
-                merged_grounding[str(lane_id)] = max(
-                    float(merged_grounding.get(str(lane_id)) or 0.0),
-                    float(value or 0.0),
-                )
-            except (TypeError, ValueError):
-                continue
-        if merged_grounding:
-            existing_meta["planned_lane_grounding"] = merged_grounding
+        for score_map_key in (
+            "planned_lane_grounding",
+            "document_route_lanes",
+        ):
+            merged_scores = dict(existing_meta.get(score_map_key) or {})
+            for lane_id, value in dict(
+                duplicate_meta.get(score_map_key) or {}
+            ).items():
+                try:
+                    merged_scores[str(lane_id)] = max(
+                        float(merged_scores.get(str(lane_id)) or 0.0),
+                        float(value or 0.0),
+                    )
+                except (TypeError, ValueError):
+                    continue
+            if merged_scores:
+                existing_meta[score_map_key] = merged_scores
         existing.metadata = existing_meta
         provenance = list(existing.provenance or [])
         provenance.extend(
@@ -962,7 +1358,12 @@ def dedupe_document_lane_finalists(
         dropped += 1
         existing_meta = dict(existing.metadata or {})
         duplicate_meta = dict(chunk.metadata or {})
-        for list_key in ("corpus_memberships", "planned_retrievers", "planned_lanes"):
+        for list_key in (
+            "corpus_memberships",
+            "planned_retrievers",
+            "planned_lanes",
+            "planned_required_lane_reservations",
+        ):
             merged = set(existing_meta.get(list_key) or [])
             merged.update(duplicate_meta.get(list_key) or [])
             if list_key == "corpus_memberships":
@@ -973,6 +1374,23 @@ def dedupe_document_lane_finalists(
                 )
             if merged:
                 existing_meta[list_key] = sorted(str(value) for value in merged)
+        for score_map_key in (
+            "planned_lane_grounding",
+            "document_route_lanes",
+        ):
+            merged_scores = dict(existing_meta.get(score_map_key) or {})
+            for lane_id, value in dict(
+                duplicate_meta.get(score_map_key) or {}
+            ).items():
+                try:
+                    merged_scores[str(lane_id)] = max(
+                        float(merged_scores.get(str(lane_id)) or 0.0),
+                        float(value or 0.0),
+                    )
+                except (TypeError, ValueError):
+                    continue
+            if merged_scores:
+                existing_meta[score_map_key] = merged_scores
         existing.metadata = existing_meta
         provenance = list(existing.provenance or [])
         provenance.extend(

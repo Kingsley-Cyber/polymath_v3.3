@@ -22,7 +22,6 @@ from services.retriever.query_semantics import (
     required_operator_atoms,
 )
 
-
 QueryComplexity = Literal[
     "simple",
     "compositional",
@@ -31,6 +30,8 @@ QueryComplexity = Literal[
 ]
 QueryLaneRole = Literal["original", "core", "bridge", "background"]
 ProbeRole = Literal["primary", "support", "bridge"]
+ConstraintOperator = Literal["include", "exclude"]
+ConstraintKind = Literal["audience", "temporal", "content"]
 AnswerShape = Literal[
     "single_fact",
     "enumeration",
@@ -74,7 +75,8 @@ _EXPLICIT_MULTI_RE = re.compile(
     re.IGNORECASE,
 )
 _ANSWER_OBJECT_RE = re.compile(
-    r"\b(?:what|which|name|list|identify|recommend)\s+"
+    r"\b(?:(?:what|which)\s+|(?:name|list|identify|recommend)\s+"
+    r"(?:the\s+)?(?:[a-z0-9][a-z0-9'-]*\s+){0,4}?)"
     r"(books?|authors?|people|experts?|tools?|models?|frameworks?|methods?|"
     r"strategies|examples?|products?|companies|organizations?|documents?|sources?)\b",
     re.IGNORECASE,
@@ -151,6 +153,11 @@ _COORDINATED_OBJECTIVE_HEAD_RE = re.compile(
     r"(?P<objectives>(?:" + "|".join(_COORDINATED_OBJECTIVE_VERBS) + r")\b.+)$",
     re.IGNORECASE,
 )
+_COORDINATED_FOR_OBJECTIVE_HEAD_RE = re.compile(
+    r"^for\s+(?P<subject>[^,;]{2,120}),\s*"
+    r"(?P<objectives>(?:" + "|".join(_COORDINATED_OBJECTIVE_VERBS) + r")\b.+)$",
+    re.IGNORECASE,
+)
 _COORDINATED_OBJECTIVE_SPLIT_RE = re.compile(
     r"(?:,\s*(?:and\s+)?|\s+and\s+)"
     r"(?=(?:" + "|".join(_COORDINATED_OBJECTIVE_VERBS) + r")\b)",
@@ -179,7 +186,6 @@ _GENERIC_LANE_TERMS = {
     "combine",
     "comparison",
     "establish",
-    "ecommerce",
     "evaluate",
     "exact",
     "find",
@@ -278,6 +284,17 @@ class RetrievalProbe:
 
 
 @dataclass(frozen=True)
+class QueryConstraint:
+    """One typed user constraint kept separate from positive concepts."""
+
+    constraint_id: str
+    operator: ConstraintOperator
+    kind: ConstraintKind
+    text: str
+    terms: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class QueryPlanV2:
     version: str
     original_query: str
@@ -287,6 +304,7 @@ class QueryPlanV2:
     operators: tuple[str, ...]
     lanes: tuple[QueryLane, ...]
     probes: tuple[RetrievalProbe, ...] = ()
+    constraints: tuple[QueryConstraint, ...] = ()
     answer_shape: AnswerShape = "single_fact"
     corpus_ids: tuple[str, ...] = ()
     max_repair_rounds: int = 1
@@ -294,6 +312,82 @@ class QueryPlanV2:
 
 def _normalize_phrase(value: str) -> str:
     return " ".join(str(value or "").strip(" ,.:;!?()[]{}").split())
+
+
+def _negative_constraint_phrases(value: str) -> tuple[str, ...]:
+    """Return bounded phrases explicitly excluded by the user."""
+
+    tokens = re.findall(r"[a-z0-9]+", _normalize_phrase(value).casefold())
+    starts = {"no", "without", "exclude", "excluding", "avoid", "avoiding"}
+    stops = {"but", "except", "for", "from", "to", "using", "while", "with"}
+    comparative_no = {"earlier", "fewer", "later", "less", "more"}
+    output: list[str] = []
+    for index, token in enumerate(tokens):
+        if token not in starts:
+            continue
+        following = tokens[index + 1 : index + 7]
+        if token == "no" and following and following[0] in comparative_no:
+            continue
+        captured: list[str] = []
+        for candidate in following:
+            if candidate in stops:
+                break
+            if candidate in {"a", "an", "any", "and", "nor", "or", "the"}:
+                continue
+            captured.append(candidate)
+        phrase = " ".join(captured)
+        if phrase and phrase not in output:
+            output.append(phrase)
+    return tuple(output)
+
+
+def _query_constraints(value: str) -> tuple[QueryConstraint, ...]:
+    constraints: list[QueryConstraint] = []
+    if _BEGINNER_RE.search(value):
+        constraints.append(
+            QueryConstraint(
+                constraint_id="audience_beginner",
+                operator="include",
+                kind="audience",
+                text="beginner",
+                terms=("beginner",),
+            )
+        )
+    if _DAY_ZERO_RE.search(value):
+        constraints.append(
+            QueryConstraint(
+                constraint_id="temporal_day_0",
+                operator="include",
+                kind="temporal",
+                text="Day 0",
+                terms=("day", "0"),
+            )
+        )
+    for phrase in _negative_constraint_phrases(value):
+        terms = tuple(dict.fromkeys(re.findall(r"[a-z0-9]+", phrase.casefold())))
+        if not terms:
+            continue
+        constraints.append(
+            QueryConstraint(
+                constraint_id=f"exclude_{_slug('_'.join(terms))}",
+                operator="exclude",
+                kind="content",
+                text=phrase,
+                terms=terms,
+            )
+        )
+    return tuple(dict.fromkeys(constraints))
+
+
+def _negated_concept_terms(value: str) -> set[str]:
+    """Return terms explicitly excluded by a bounded negative constraint."""
+
+    return {
+        term
+        for constraint in _query_constraints(value)
+        if constraint.operator == "exclude"
+        for term in constraint.terms
+    }
 
 
 def _slug(value: str) -> str:
@@ -330,8 +424,35 @@ def _looks_like_uppercase_command(value: str) -> bool:
     return len(words) >= 4 or normalized <= _PHRASE_LEADERS
 
 
+def _compact_query_phrase(value: str) -> str:
+    """Preserve a terse noun phrase as one semantic retrieval concept.
+
+    Treating every token in a short intent as an independent required
+    obligation destroys phrase meaning. This bounded structural rule does not
+    infer vocabulary; it only keeps the user's contiguous wording intact.
+    """
+
+    phrase = _normalize_phrase(value)
+    words = re.findall(r"[A-Za-z0-9][A-Za-z0-9'\-]*", phrase)
+    if not 2 <= len(words) <= 6:
+        return ""
+    if _looks_like_uppercase_command(phrase):
+        return ""
+    if _QUESTION_OBLIGATION_START_RE.match(phrase):
+        return ""
+    if _EXPLICIT_MULTI_RE.search(phrase) or _DEPENDENCY_RE.search(phrase):
+        return ""
+    if any(word.casefold() in {"and", "then"} for word in words):
+        return ""
+    if words[0].casefold() in _PHRASE_LEADERS:
+        return ""
+    return phrase
+
+
 def _phrase_candidates(query: str, groups: list[ConceptGroup]) -> list[str]:
     candidates: list[str] = []
+    if compact_phrase := _compact_query_phrase(query):
+        candidates.append(compact_phrase)
     candidates.extend(match.group(1) for match in _ANSWER_OBJECT_RE.finditer(query))
     candidates.extend(match.group(1) for match in _QUOTE_RE.finditer(query))
     candidates.extend(
@@ -358,8 +479,8 @@ def _phrase_candidates(query: str, groups: list[ConceptGroup]) -> list[str]:
     for match in _DESCRIPTOR_RE.finditer(query):
         prefix = _strip_phrase_leaders(match.group(1))
         # A descriptor phrase may begin after an operator/preposition. Keep the
-        # final meaningful words so "combine Purple Ocean strategy" becomes
-        # "Purple Ocean strategy", not an operator-shaped lane.
+        # final meaningful words so the subject remains intact instead of
+        # becoming an operator-shaped lane.
         words = prefix.split()
         while words and words[0].lower() in _PHRASE_LEADERS:
             words.pop(0)
@@ -374,14 +495,10 @@ def _phrase_candidates(query: str, groups: list[ConceptGroup]) -> list[str]:
             candidates.append(" ".join([*words[-4:], match.group(2)]))
 
     # Curated aliases are stable semantic phrases. Prefer the longest surface
-    # form present in the user query (e.g. "Made to Stick").
+    # form that is actually present in the user query.
     candidates.extend(
         _best_surface(group, query) for group in groups if group.key in CONCEPT_ALIASES
     )
-
-    # Common morphology that the curated alias table deliberately keeps small.
-    for match in re.finditer(r"\bsticky\s+messag(?:e|es|ing)\b", query, re.I):
-        candidates.append(match.group(0))
 
     seen: set[str] = set()
     output: list[str] = []
@@ -448,8 +565,8 @@ def _curated_group_for_concept(
         best_overlap = 0
         for alias in group.aliases:
             alias_tokens = {_stem_token(token) for token in lexical_terms(alias)}
-            # Single-token aliases such as "ocean" are too ambiguous to map a
-            # phrase like Purple Ocean onto an unrelated curated framework.
+            # Single-token aliases are too ambiguous to map a longer named
+            # phrase onto an unrelated curated framework.
             if len(alias_tokens) < 2:
                 continue
             overlap = len(alias_tokens & concept_tokens)
@@ -551,36 +668,47 @@ def _answer_shape(query: str, complexity: QueryComplexity) -> AnswerShape:
 def _collapse_attribution_concepts(
     query: str,
     concepts: list[str],
-    groups: list[ConceptGroup],
+    _groups: list[ConceptGroup],
 ) -> list[str]:
     """Treat a named ``according to`` source as the retrieval authority.
 
-    In questions such as "what makes a message sticky according to Made to
-    Stick", the surrounding property words describe what to extract from the
-    named source. They are not independent evidence lanes. Keeping them as
-    lanes turns ordinary words such as ``sticky`` into false domain concepts.
-    Comparative and dependent queries retain every semantic side.
+    The surrounding property words describe what to extract from the named
+    source; they are not independent evidence lanes. Comparative and dependent
+    queries retain every semantic side.
     """
-    if not re.search(r"\baccording\s+to\b", query, re.IGNORECASE):
+    attribution = re.search(
+        r"\baccording\s+to\s+(.+?)(?:[?.!]|$)",
+        query,
+        re.IGNORECASE,
+    )
+    if attribution is None:
         return concepts
     if _EXPLICIT_MULTI_RE.search(query) or _DEPENDENCY_RE.search(query):
         return concepts
+    source = _normalize_phrase(attribution.group(1))
+    source_key = clean_text(source).strip()
     attributed = [
         concept
         for concept in concepts
-        if _curated_group_for_concept(concept, groups) is not None
+        if (
+            (concept_key := clean_text(concept).strip())
+            and (
+                f" {concept_key} " in f" {source_key} "
+                or f" {source_key} " in f" {concept_key} "
+            )
+        )
     ]
-    if not attributed:
-        return concepts
-    return [max(attributed, key=lambda item: (len(item.split()), len(item)))]
+    if attributed:
+        return [max(attributed, key=lambda item: (len(item.split()), len(item)))]
+    return [source] if source_key else concepts
 
 
 def _decompose_command_subject(query: str, concepts: list[str]) -> list[str]:
     """Split a cross-domain ``domain + acronym`` command subject into lanes.
 
     This is deliberately narrow: branded phrases and normal title-cased
-    concepts remain intact, while subjects such as ``ECOMMERCE AI`` or
-    ``healthcare NLP`` get one evidence lane per domain side.
+    concepts remain intact, while a domain plus acronym subject gets one
+    evidence lane per side.
     """
 
     match = _COMMAND_SUBJECT_RE.search(query)
@@ -647,14 +775,8 @@ def contextualize_followup_query(
     return _normalize_phrase(f"{previous_user}; {focus}")
 
 
-def _question_obligation_clauses(query: str) -> tuple[str, ...]:
-    """Split compound requests into complete retrieval questions.
-
-    This is intentionally narrower than generic sentence splitting. It only
-    creates another obligation at a sentence boundary or before a new
-    question operator (``and how``, ``and why``, and similar forms), so named
-    concepts and ordinary noun conjunctions remain intact.
-    """
+def _raw_question_obligation_clauses(query: str) -> list[str]:
+    """Split a request without resolving references between its clauses."""
 
     clauses: list[str] = []
     for sentence in re.split(r"[.!?;]+", str(query or "")):
@@ -677,6 +799,22 @@ def _question_obligation_clauses(query: str) -> tuple[str, ...]:
                     for objective in objectives
                 )
                 continue
+        coordinated_for = _COORDINATED_FOR_OBJECTIVE_HEAD_RE.match(normalized)
+        if coordinated_for:
+            objectives = [
+                _normalize_phrase(value)
+                for value in _COORDINATED_OBJECTIVE_SPLIT_RE.split(
+                    coordinated_for.group("objectives")
+                )
+                if _normalize_phrase(value)
+            ]
+            if len(objectives) >= 2:
+                subject = _normalize_phrase(coordinated_for.group("subject"))
+                clauses.extend(
+                    _normalize_phrase(f"{objective} for {subject}")
+                    for objective in objectives
+                )
+                continue
         clauses.extend(
             part
             for part in (
@@ -685,6 +823,40 @@ def _question_obligation_clauses(query: str) -> tuple[str, ...]:
             )
             if part and _QUESTION_OBLIGATION_START_RE.match(part)
         )
+    return clauses
+
+
+def _standalone_obligation_specs(query: str) -> tuple[tuple[str, bool], ...]:
+    """Return standalone clauses and whether each needs prior evidence.
+
+    Deterministic planning preserves user wording. Corpus-native translation
+    and reference resolution belong to the grounded planner, not topic rules.
+    """
+
+    raw_clauses = _raw_question_obligation_clauses(query)
+    if len(raw_clauses) < 2:
+        return ()
+
+    return tuple(
+        (
+            clause,
+            bool(index > 0 and _REFERENTIAL_FOLLOWUP_RE.search(clause)),
+        )
+        for index, clause in enumerate(raw_clauses[:4])
+    )
+
+
+def _question_obligation_clauses(query: str) -> tuple[str, ...]:
+    """Split compound requests into standalone retrieval questions.
+
+    This is intentionally narrower than generic sentence splitting. It only
+    creates another obligation at a sentence boundary or before a new
+    question operator, then resolves references established by the same
+    request so every independently executed lane retains its subject.
+    """
+
+    specs = _standalone_obligation_specs(query)
+    clauses = [clause for clause, _depends_on_previous in specs]
     if len(clauses) < 2:
         return ()
     return tuple(dict.fromkeys(clauses[:4]))
@@ -743,17 +915,17 @@ def _build_retrieval_probes(
     is_enumeration = bool(answer_object)
     probes: list[RetrievalProbe] = []
 
-    obligation_clauses = _question_obligation_clauses(query)
-    if obligation_clauses and not is_enumeration:
-        for index, clause in enumerate(obligation_clauses):
+    obligation_specs = _standalone_obligation_specs(query)
+    if obligation_specs and not is_enumeration:
+        for index, (clause, depends_on_previous) in enumerate(obligation_specs):
             clause_concepts = _clause_concepts(clause, topic_concepts)
             clause_shape = _answer_shape(clause, "simple")
+            probe_id = (
+                _slug(" ".join(lexical_terms(clause))) or f"objective_{index + 1}"
+            )
             probes.append(
                 RetrievalProbe(
-                    probe_id=(
-                        _slug(" ".join(lexical_terms(clause)))
-                        or f"objective_{index + 1}"
-                    ),
+                    probe_id=probe_id,
                     question=clause,
                     answer_type=(
                         "synthesis" if clause_shape == "single_fact" else clause_shape
@@ -762,6 +934,9 @@ def _build_retrieval_probes(
                     required=True,
                     concepts=clause_concepts,
                     constraints=constraints,
+                    depends_on=(
+                        (probes[-1].probe_id,) if depends_on_previous and probes else ()
+                    ),
                 )
             )
 
@@ -775,9 +950,9 @@ def _build_retrieval_probes(
         subject = topic or "this task"
         probes.append(
             RetrievalProbe(
-                probe_id="day_zero_steps"
-                if "Day 0" in constraints
-                else "starting_steps",
+                probe_id=(
+                    "day_zero_steps" if "Day 0" in constraints else "starting_steps"
+                ),
                 question=f"What steps should {audience} take{timing} to start {subject}?",
                 answer_type="procedure",
                 concepts=topic_concepts,
@@ -856,10 +1031,18 @@ def _build_retrieval_probes(
             )
 
     if not probes:
+        primary_question = _normalize_phrase(query)
+        if (
+            len(re.findall(r"[A-Za-z0-9]+", primary_question)) < 4
+            or not _QUESTION_OBLIGATION_START_RE.match(primary_question)
+        ):
+            primary_question = (
+                f"What does the corpus establish about {primary_question}"
+            )
         probes.append(
             RetrievalProbe(
                 probe_id="primary",
-                question=_normalize_phrase(query) + "?",
+                question=primary_question,
                 answer_type=answer_shape,
                 concepts=tuple(concepts),
                 constraints=constraints,
@@ -909,6 +1092,7 @@ def query_plan_execution_lanes(plan: QueryPlanV2) -> tuple[QueryLane, ...]:
         return tuple(lane for lane in plan.lanes if lane.role in {"original", "core"})
 
     lanes: list[QueryLane] = [original_lane]
+    probes_by_id = {probe.probe_id: probe for probe in plan.probes}
     groups = concept_groups(plan.standalone_query, max_groups=8)
     for probe in plan.probes:
         concepts = tuple(concept for concept in probe.concepts if concept)
@@ -926,13 +1110,28 @@ def query_plan_execution_lanes(plan: QueryPlanV2) -> tuple[QueryLane, ...]:
         for concept in concepts:
             support_phrases.extend(_lexical_recall_phrases(concept, groups))
         support_phrases.extend(probe.constraints)
-        dense_text = (
+        answer_object_text = (
             " ".join(_lexical_recall_phrases(answer_object, groups))
             if answer_object
-            else probe.question
+            else ""
         )
+        if answer_object and probe.answer_type == "enumeration":
+            dense_text = answer_object_text
+        elif answer_object:
+            dense_text = f"{probe.question} Answer objects: {answer_object_text}"
+        else:
+            dense_text = probe.question
+        prerequisite_questions = [
+            probes_by_id[probe_id].question
+            for probe_id in probe.depends_on
+            if probe_id in probes_by_id
+        ]
+        if prerequisite_questions:
+            dense_text = f"{dense_text} Prerequisite questions: " + " ".join(
+                prerequisite_questions
+            )
         if plan.standalone_query != plan.original_query and not answer_object:
-            dense_text = f"{probe.question} Context: {plan.standalone_query}"
+            dense_text = f"{dense_text} Context: {plan.standalone_query}"
         lanes.append(
             QueryLane(
                 lane_id=probe.probe_id,
@@ -963,6 +1162,92 @@ def query_plan_execution_lanes(plan: QueryPlanV2) -> tuple[QueryLane, ...]:
     return tuple(lanes)
 
 
+def query_plan_vocabulary_lanes(
+    plan: QueryPlanV2,
+    *,
+    max_lanes: int = 7,
+) -> tuple[QueryLane, ...]:
+    """Return bounded concept/probe lanes used only for vocabulary resolution.
+
+    Retrieval obligations must remain complete questions, but a gloss index also
+    needs narrow concept vectors to bridge ordinary language to corpus-native
+    terminology. These lanes are embedded in the same batch as executable lanes
+    and never become required evidence obligations by themselves.
+    """
+
+    output: list[QueryLane] = []
+    seen_texts = {clean_text(plan.original_query)}
+
+    def add(lane: QueryLane, *, prefix: str) -> None:
+        text = _normalize_phrase(lane.dense_text or lane.query)
+        key = clean_text(text)
+        if not text or not key or key in seen_texts or len(output) >= max_lanes:
+            return
+        seen_texts.add(key)
+        output.append(
+            QueryLane(
+                lane_id=f"{prefix}_{lane.lane_id}",
+                role="background",
+                query=lane.query or text,
+                dense_text=text,
+                lexical_terms=lane.lexical_terms,
+                required=False,
+                depends_on=lane.depends_on,
+                phrase=lane.phrase,
+                support_phrases=lane.support_phrases,
+            )
+        )
+
+    probe_lanes = [
+        lane
+        for lane in query_plan_execution_lanes(plan)
+        if lane.role == "core"
+        and clean_text(lane.query) != clean_text(plan.original_query)
+    ]
+    concept_lanes = [lane for lane in plan.lanes if lane.role == "core"]
+
+    # Multi-obligation and enumeration plans need complete sub-questions to
+    # reach the gloss index before parser fragments consume the bounded lane
+    # budget. A simple query keeps narrow concept vectors first because its
+    # only complete probe commonly duplicates the original query.
+    probe_first = len(plan.probes) > 1 or plan.complexity != "simple"
+    ordered_groups = (
+        ((probe_lanes, "probe"), (concept_lanes, "concept"))
+        if probe_first
+        else ((concept_lanes, "concept"), (probe_lanes, "probe"))
+    )
+    for group, prefix in ordered_groups:
+        for lane in group:
+            add(lane, prefix=prefix)
+    return tuple(output)
+
+
+def query_plan_execution_batches(plan: QueryPlanV2) -> tuple[tuple[str, ...], ...]:
+    """Return deterministic topological batches for the obligation graph."""
+
+    pending = {probe.probe_id: probe for probe in plan.probes}
+    completed: set[str] = set()
+    batches: list[tuple[str, ...]] = []
+    while pending:
+        ready = tuple(
+            probe_id
+            for probe_id, probe in pending.items()
+            if all(
+                dependency in completed or dependency not in pending
+                for dependency in probe.depends_on
+            )
+        )
+        if not ready:
+            # A malformed optional planner must not deadlock retrieval. Keep
+            # the deterministic source order and expose the unresolved group.
+            ready = tuple(pending)
+        batches.append(ready)
+        completed.update(ready)
+        for probe_id in ready:
+            pending.pop(probe_id, None)
+    return tuple(batches)
+
+
 def build_query_plan_v2(
     query: str,
     *,
@@ -972,8 +1257,10 @@ def build_query_plan_v2(
 ) -> QueryPlanV2:
     """Build a bounded phrase-aware plan without an LLM call."""
 
-    original = _normalize_phrase(query)
-    standalone = _normalize_phrase(standalone_query or original)
+    original = str(query or "")
+    standalone = _normalize_phrase(
+        standalone_query if standalone_query is not None else original
+    )
     groups = concept_groups(standalone, max_groups=max_core_lanes + 4)
     phrases = _phrase_candidates(standalone, groups)
 
@@ -983,7 +1270,7 @@ def build_query_plan_v2(
             concepts.append(phrase)
 
     # Preserve useful bare concepts only when they are not already represented
-    # by a phrase. This is the guard against Purple/Ocean fragmentation.
+    # by a phrase. This prevents named multiword concepts from fragmenting.
     for group in groups:
         surface = _best_surface(group, standalone)
         key = clean_text(surface).strip()
@@ -1002,6 +1289,21 @@ def build_query_plan_v2(
         groups,
     )
     concepts = _decompose_command_subject(standalone, concepts)[:max_core_lanes]
+    # In a comparison/combination, a trailing ``for ...`` phrase states the
+    # application context rather than a third semantic side. The original and
+    # relationship probes retain that wording; only the compared concepts get
+    # independent evidence obligations.
+    if _EXPLICIT_MULTI_RE.search(standalone) and (
+        target_match := _TARGET_RE.search(standalone)
+    ):
+        target_key = clean_text(_strip_phrase_leaders(target_match.group(1))).strip()
+        without_target = [
+            concept
+            for concept in concepts
+            if clean_text(concept).strip() != target_key
+        ]
+        if target_key and len(without_target) >= 2:
+            concepts = without_target
     deduplicated_concepts: list[str] = []
     seen_concepts: set[str] = set()
     for concept in concepts:
@@ -1011,17 +1313,30 @@ def build_query_plan_v2(
         deduplicated_concepts.append(concept)
         seen_concepts.add(key)
     concepts = deduplicated_concepts[:max_core_lanes]
+    constraints = _query_constraints(standalone)
+    negated_terms = {
+        term
+        for constraint in constraints
+        if constraint.operator == "exclude"
+        for term in constraint.terms
+    }
+    if negated_terms:
+        concepts = [
+            concept
+            for concept in concepts
+            if not (set(lexical_terms(concept)) & negated_terms)
+        ]
 
     operators = tuple(sorted(required_operator_atoms(standalone)))
     lanes: list[QueryLane] = [
         QueryLane(
             lane_id="original",
             role="original",
-            query=standalone,
-            dense_text=standalone,
-            lexical_terms=tuple(lexical_terms(standalone)[:16]),
-            phrase=standalone,
-            support_phrases=(standalone,),
+            query=original,
+            dense_text=original,
+            lexical_terms=tuple(lexical_terms(original)[:16]),
+            phrase=original,
+            support_phrases=(original,),
         )
     ]
     for index, concept in enumerate(concepts):
@@ -1059,10 +1374,15 @@ def build_query_plan_v2(
             )
         )
 
-    complexity = _complexity(standalone, len(concepts), operators)
+    obligation_count = len(_standalone_obligation_specs(standalone))
+    complexity = _complexity(
+        standalone,
+        max(len(concepts), obligation_count),
+        operators,
+    )
     answer_shape = _answer_shape(standalone, complexity)
     probes = _build_retrieval_probes(
-        original,
+        standalone,
         concepts,
         complexity=complexity,
         answer_shape=answer_shape,
@@ -1076,6 +1396,7 @@ def build_query_plan_v2(
         operators=operators,
         lanes=tuple(lanes),
         probes=probes,
+        constraints=constraints,
         answer_shape=answer_shape,
         corpus_ids=tuple(str(item) for item in (corpus_ids or ())),
     )
@@ -1090,14 +1411,14 @@ def query_plan_curation_query(plan: QueryPlanV2) -> str:
     evidence atoms. Comparative/relational plans retain their full wording.
     """
 
-    if plan.standalone_query != plan.original_query:
+    if plan.standalone_query != _normalize_phrase(plan.original_query):
         return plan.standalone_query
     if len(plan.probes) > 1:
         # A single concept concatenation previously converted compositional
         # questions into fragments. Preserve the user's complete formulation
         # for the one cross-encoder pass; individual probes already drive
         # candidate generation and required-coverage reservations.
-        return plan.standalone_query
+        return plan.original_query
     if (
         plan.complexity in {"simple", "compositional"}
         and plan.concepts
@@ -1122,8 +1443,21 @@ def query_plan_to_dict(plan: QueryPlanV2) -> dict[str, object]:
         "answer_shape": plan.answer_shape,
         "concepts": list(plan.concepts),
         "operators": list(plan.operators),
+        "constraints": [
+            {
+                "constraint_id": constraint.constraint_id,
+                "operator": constraint.operator,
+                "kind": constraint.kind,
+                "text": constraint.text,
+                "terms": list(constraint.terms),
+            }
+            for constraint in plan.constraints
+        ],
         "corpus_ids": list(plan.corpus_ids),
         "max_repair_rounds": plan.max_repair_rounds,
+        "execution_batches": [
+            list(batch) for batch in query_plan_execution_batches(plan)
+        ],
         "probes": [
             {
                 "probe_id": probe.probe_id,

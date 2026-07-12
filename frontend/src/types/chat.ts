@@ -337,6 +337,8 @@ export interface ModelConfig {
 
 export interface ChatOverrides extends Partial<ModelConfig> {
   hyde_enabled?: boolean;
+  /** Corpus-vocabulary expansion ids suppressed for this turn only. */
+  disabled_lexicon_ids?: string[];
   /** Opt-in live web context for this turn. Omit/false keeps chat corpus-only. */
   web_search_enabled?: boolean;
   /** Live-web fetch depth. snippets = search only, normal = static fetch,

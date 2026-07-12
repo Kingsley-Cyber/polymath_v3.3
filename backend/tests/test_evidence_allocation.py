@@ -418,7 +418,7 @@ def test_build_evidence_plan_from_sides_makes_a_two_side_plan():
         {"name": "buddhism", "search_terms": ["buddhism", "the dhammapada"]},
     ]
     plan = build_evidence_plan_from_sides("stoicism versus buddhism", sides)
-    assert plan.mode == "multi_concept_sourced"
+    assert plan.mode == "multi_concept_relationship"
     assert [l.name for l in plan.lanes] == ["stoicism", "buddhism"]
     for lane in plan.required_lanes:
         assert lane.min_sources >= 2  # inherits the per-side floor

@@ -123,6 +123,12 @@ async def test_web_toggle_on_runs_agentic_rag_web_loop_to_rerank_pipeline(
     monkeypatch.setattr(co.settings, "AGENTIC_MODE_ENABLED", False, raising=False)
     monkeypatch.setattr(
         co.settings,
+        "GROUNDED_QUERY_PLANNER_ENABLED",
+        False,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        co.settings,
         "DEFAULT_COMPLETION_MODEL",
         "openai/base-query",
         raising=False,
@@ -190,6 +196,13 @@ async def test_web_toggle_on_runs_agentic_rag_web_loop_to_rerank_pipeline(
             facts=[],
             requested_tier=RetrievalTier.qdrant_mongo,
             effective_tier=RetrievalTier.qdrant_mongo,
+        )
+
+    async def fake_retrieve_planned(**kwargs):
+        plan = kwargs.get("plan")
+        return await fake_retrieve(
+            **kwargs,
+            ranking_query=getattr(plan, "original_query", request.message),
         )
 
     async def fake_search_live_web_pool(query, *, max_results=None, time_range=None):
@@ -380,6 +393,11 @@ async def test_web_toggle_on_runs_agentic_rag_web_loop_to_rerank_pipeline(
     monkeypatch.setattr(wf.live_web_search, "_fetch_pages_for_search", fake_fetch_pages_for_search)
     monkeypatch.setattr(wf, "rerank_web_source_chunks", fake_rerank_web_source_chunks)
     monkeypatch.setattr(co.retriever_orchestrator, "retrieve", fake_retrieve)
+    monkeypatch.setattr(
+        co.retriever_orchestrator,
+        "retrieve_planned",
+        fake_retrieve_planned,
+    )
     monkeypatch.setattr(co.conversation_service, "append_message", fake_append_message)
     monkeypatch.setattr(
         co.conversation_service,
@@ -607,6 +625,12 @@ async def test_web_toggle_off_is_pure_rag_and_does_not_call_web_or_utility(
 ):
     monkeypatch.setattr(co.settings, "LIVE_WEB_SEARCH_ENABLED", True, raising=False)
     monkeypatch.setattr(co.settings, "AGENTIC_MODE_ENABLED", False, raising=False)
+    monkeypatch.setattr(
+        co.settings,
+        "GROUNDED_QUERY_PLANNER_ENABLED",
+        False,
+        raising=False,
+    )
     monkeypatch.setattr(co.settings, "NEO4J_ENABLED", False, raising=False)
 
     orchestrator = ChatOrchestrator()
@@ -648,6 +672,13 @@ async def test_web_toggle_off_is_pure_rag_and_does_not_call_web_or_utility(
             facts=[],
             requested_tier=RetrievalTier.qdrant_mongo,
             effective_tier=RetrievalTier.qdrant_mongo,
+        )
+
+    async def fake_retrieve_planned(**kwargs):
+        plan = kwargs.get("plan")
+        return await fake_retrieve(
+            **kwargs,
+            ranking_query=getattr(plan, "original_query", request.message),
         )
 
     async def fail_web_search(*_args, **_kwargs):
@@ -701,6 +732,11 @@ async def test_web_toggle_off_is_pure_rag_and_does_not_call_web_or_utility(
     monkeypatch.setattr(co, "resolve_query_model_kind", fake_resolve_query_model_kind)
     monkeypatch.setattr(wqe, "resolve_query_model_kind", fake_resolve_query_model_kind)
     monkeypatch.setattr(co.retriever_orchestrator, "retrieve", fake_retrieve)
+    monkeypatch.setattr(
+        co.retriever_orchestrator,
+        "retrieve_planned",
+        fake_retrieve_planned,
+    )
     monkeypatch.setattr(co.conversation_service, "append_message", fake_append_message)
     monkeypatch.setattr(co.tool_registry, "get_tools_by_ids", fake_get_tools_by_ids)
     monkeypatch.setattr(co.context_manager, "build_augmented_prompt", fake_build_augmented_prompt)

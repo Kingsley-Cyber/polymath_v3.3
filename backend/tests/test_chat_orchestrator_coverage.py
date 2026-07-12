@@ -444,6 +444,113 @@ def test_final_context_answerability_gate_soft_drops_non_answering_chunks():
     )
 
 
+def test_final_context_gate_preserves_source_backed_required_query_plan_lane():
+    required_lane = "sticky_message"
+    sources = [
+        _chunk(
+            "sticky-required",
+            doc_id="made-to-stick.md",
+            text=(
+                "Unexpected ideas create curiosity gaps and concrete images "
+                "that make an explanation memorable."
+            ),
+            metadata={
+                "planned_lanes": [required_lane],
+                "planned_lane_grounding": {required_lane: 2.0},
+                "planned_required_lane_reservations": [required_lane],
+            },
+        ),
+        _chunk(
+            "purple-answer",
+            doc_id="purple-ocean.md",
+            text="Purple Ocean positioning combines familiar demand with novelty.",
+        ),
+    ]
+
+    gated, meta = chat_module._apply_final_context_answerability_gate(
+        sources,
+        query="How can Purple Ocean positioning create a sticky audience message?",
+        required_planned_lane_ids=[required_lane],
+        mode="soft",
+        min_keep=1,
+    )
+
+    assert [chunk.chunk_id for chunk in gated] == [
+        "sticky-required",
+        "purple-answer",
+    ]
+    sticky_gate = gated[0].metadata["answerability_chunk_gate"]
+    assert sticky_gate["reason"] == "query_plan_required_lane"
+    assert sticky_gate["protected"] is True
+    assert sticky_gate["matched_lanes"] == [required_lane]
+    assert meta["dropped"] == 0
+
+
+def test_final_context_gate_preserves_selected_corpus_reservation():
+    sources = [
+        _chunk(
+            "purple-answer",
+            doc_id="purple-ocean.md",
+            text="Purple Ocean positioning combines familiar demand with novelty.",
+        ),
+        _chunk(
+            "sticky-corpus-reservation",
+            doc_id="made-to-stick.md",
+            text="A concrete unexpected example creates a memorable explanation.",
+            metadata={"planned_corpus_reservations": ["ecommerce"]},
+        ),
+    ]
+
+    gated, meta = chat_module._apply_final_context_answerability_gate(
+        sources,
+        query="Combine Purple Ocean strategy with sticky-message principles.",
+        mode="soft",
+        min_keep=1,
+    )
+
+    assert [chunk.chunk_id for chunk in gated] == [
+        "purple-answer",
+        "sticky-corpus-reservation",
+    ]
+    reservation_gate = gated[1].metadata["answerability_chunk_gate"]
+    assert reservation_gate["reason"] == "selected_corpus_reservation"
+    assert reservation_gate["protected"] is True
+    assert meta["dropped"] == 0
+
+
+def test_final_context_gate_does_not_protect_unrequired_planned_lane():
+    sources = [
+        _chunk(
+            "optional-planned",
+            doc_id="unrelated.md",
+            text="Appendix permissions and publication history.",
+            metadata={
+                "planned_lanes": ["optional_translation_probe"],
+                "planned_lane_grounding": {"optional_translation_probe": 2.0},
+                "planned_required_lane_reservations": [
+                    "optional_translation_probe"
+                ],
+            },
+        ),
+        _chunk(
+            "purple-answer",
+            doc_id="purple-ocean.md",
+            text="Purple Ocean positioning combines familiar demand with novelty.",
+        ),
+    ]
+
+    gated, meta = chat_module._apply_final_context_answerability_gate(
+        sources,
+        query="What is Purple Ocean positioning?",
+        required_planned_lane_ids=["purple_ocean"],
+        mode="soft",
+        min_keep=1,
+    )
+
+    assert [chunk.chunk_id for chunk in gated] == ["purple-answer"]
+    assert meta["dropped_chunk_ids"] == ["optional-planned"]
+
+
 def test_final_context_answerability_gate_ignores_generic_modifier_terms():
     query = "Which personality types are vulnerable to seduction tactics?"
     plan = chat_module.build_evidence_plan(query)

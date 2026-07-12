@@ -48,6 +48,23 @@ Duration: 17:33
     assert identity["content_sha256"]
 
 
+def test_incidental_youtube_channel_link_does_not_replace_content_identity():
+    data = b"""# Expert Systems
+
+Publisher resources: https://www.youtube.com/oreillymedia
+The book discusses rule engines and knowledge representation.
+"""
+
+    assert extract_declared_source_url(data) is None
+    identity = build_source_identity(
+        filename="expert-systems.md",
+        data=data,
+    )
+
+    assert identity["source_kind"] == "content_hash"
+    assert identity["source_key"].startswith("sha256:")
+
+
 def test_deterministic_youtube_filename_uses_video_title_and_id():
     data = b"""Video:    How to build a Modern EDITABLE Grid using Gallery in Power Apps (2025)
 URL:      https://youtu.be/6h4tsfwfyzo

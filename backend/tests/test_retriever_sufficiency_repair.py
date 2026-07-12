@@ -142,9 +142,7 @@ async def test_cross_corpus_missing_concept_repair_fetches_and_adopts_better_con
     )
 
     meta = repaired.diagnostics["external_sufficiency_repair"]
-    assert support_calls[0]["query"] == (
-        "sticky message sticky idea made to stick successs principles"
-    )
+    assert support_calls[0]["query"] == "sticky message"
     assert support_calls[0]["retrieval_tier"] == RetrievalTier.qdrant_mongo
     assert support_calls[0]["rerank_enabled"] is False
     assert meta["adopted"] is True

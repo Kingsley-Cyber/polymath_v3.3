@@ -366,11 +366,11 @@ class Settings(BaseSettings):
         ),
     )
     QUERY_PLAN_V2: bool = Field(
-        default=False,
+        default=True,
         description=(
             "Use the deterministic phrase-aware QueryPlanV2 for evidence lanes. "
-            "Disabled by default until shadow traces and live evaluation pass; "
-            "the legacy planner remains the instant rollback path."
+            "Enabled by default after three-tier validation; setting this false "
+            "keeps the legacy planner as the instant rollback path."
         ),
     )
     QUERY_PLAN_V2_SHADOW: bool = Field(
@@ -394,6 +394,60 @@ class Settings(BaseSettings):
     )
     QUERY_PLAN_GRAPH_TOTAL_DEADLINE_SECONDS: float = Field(default=9.5, ge=3.0, le=45.0)
     QUERY_PLAN_EMBED_DEADLINE_SECONDS: float = Field(default=5.0, ge=0.5, le=30.0)
+    QUERY_PLAN_VOCABULARY_DEADLINE_SECONDS: float = Field(
+        default=15.0,
+        ge=0.25,
+        le=20.0,
+        description=(
+            "Bounded Qdrant/Mongo/Neo4j corpus-vocabulary resolution before "
+            "document routing. This stage never calls a generation model."
+        ),
+    )
+    CORPUS_VOCABULARY_RESOLVER_ENABLED: bool = Field(
+        default=True,
+        description=(
+            "Use the versioned corpus lexicon to add provenance-backed, "
+            "non-required translation and step-back lanes to QueryPlanV2."
+        ),
+    )
+    GROUNDED_QUERY_PLANNER_ENABLED: bool = Field(
+        default=False,
+        description=(
+            "Allow one cached structured planner call only when deterministic "
+            "coverage is ambiguous or compositional. Disabled unless a model "
+            "and durable call budget are also configured."
+        ),
+    )
+    GROUNDED_QUERY_PLANNER_MODEL: str = Field(default="")
+    GROUNDED_QUERY_PLANNER_MAX_CALLS_TOTAL: int = Field(
+        default=0,
+        ge=0,
+        le=100000,
+        description="Durable lifetime call ceiling; zero disables provider calls.",
+    )
+    GROUNDED_QUERY_PLANNER_TIMEOUT_SECONDS: float = Field(
+        default=8.0, ge=1.0, le=30.0
+    )
+    GROUNDED_QUERY_PLANNER_CACHE_TTL_HOURS: int = Field(
+        default=24, ge=1, le=720
+    )
+    GROUNDED_QUERY_PLANNER_MIN_ALIGNMENT: float = Field(
+        default=0.45,
+        ge=-1.0,
+        le=1.0,
+        description=(
+            "Minimum cosine alignment between the protected original query and "
+            "LLM decomposition/translation probes."
+        ),
+    )
+    GROUNDED_QUERY_PLANNER_STEP_BACK_MIN_ALIGNMENT: float = Field(
+        default=0.35,
+        ge=-1.0,
+        le=1.0,
+        description=(
+            "Lower bounded cosine floor for intentionally broader step-back probes."
+        ),
+    )
     QUERY_PLAN_RETRIEVAL_DEADLINE_SECONDS: float = Field(default=12.0, ge=0.5, le=30.0)
     QUERY_PLAN_TREE_ROUTING_DEADLINE_SECONDS: float = Field(
         default=10.0, ge=0.5, le=30.0

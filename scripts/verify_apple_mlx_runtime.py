@@ -85,6 +85,15 @@ def _check_embedder(endpoint: Endpoint, wait_seconds: int, expected_dim: int) ->
 
 def _check_reranker(endpoint: Endpoint, wait_seconds: int) -> None:
     _wait_for(f"{endpoint.base_url}/health", wait_seconds)
+    health = _get_json(f"{endpoint.base_url}/health")
+    if health.get("warmup_complete") is not True:
+        raise CheckError(
+            f"{endpoint.name} has not completed inference warmup: {health}"
+        )
+    if health.get("backend") == "torch_fp16" and health.get("cross_encoder") is not True:
+        raise CheckError(
+            f"{endpoint.name} torch backend is not reporting a cross-encoder: {health}"
+        )
     info = _get_json(f"{endpoint.base_url}/info")
     if not info.get("ready", True):
         raise CheckError(f"{endpoint.name} info says not ready: {info}")

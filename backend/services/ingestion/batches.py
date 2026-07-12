@@ -87,6 +87,14 @@ _PHASE_TO_STAGE = {
     "queryable_with_pending_summary_and_graph": "graph_pending",
 }
 
+PENDING_ENRICHMENT_PHASES = [
+    "awaiting_summary",
+    "queryable",
+    "queryable_with_pending_summary",
+    "queryable_with_pending_graph",
+    "queryable_with_pending_summary_and_graph",
+]
+
 # ── §13-S named profiles (deterministic one-knob presets) ────────────────────
 # mac_safe is the global local/Mac rule:
 #   - one active document owns the heavy phase budget;
@@ -95,6 +103,9 @@ _PHASE_TO_STAGE = {
 # First pass is queryable-first: Mongo chunks + dense/sparse vectors land before
 # Ghost B/Neo4j, so local extraction can never gate initial retrieval.
 # rtx_assisted: the elastic-car topology; single full pass.
+# runpod_burst: autoscaling extraction with summaries allowed to overlap; unlike
+# rtx_assisted it does not intentionally defer Ghost A, so a new cloud ingest
+# can reach strict enrichment in one durable pass when both providers are live.
 INGEST_PROFILES: dict[str, dict] = {
     "mac_queryable_first": {
         "concurrency": 1,
@@ -122,6 +133,12 @@ INGEST_PROFILES: dict[str, dict] = {
         # slow or exhausted summary provider keep the RTX idle; summaries are
         # filled by the summary backfill lane after graph extraction lands.
         "defer_summaries": True,
+    },
+    "runpod_burst": {
+        "concurrency": None,
+        "pass_plan": [None],
+        "extraction_endpoint_urls": None,
+        "defer_summaries": False,
     },
 }
 
@@ -379,19 +396,12 @@ async def reconcile_batch_enrichment_truth(
     if not batch:
         return {"status": "not_found", "promoted": 0}
 
-    pending_phases = [
-        "awaiting_summary",
-        "queryable",
-        "queryable_with_pending_summary",
-        "queryable_with_pending_graph",
-        "queryable_with_pending_summary_and_graph",
-    ]
     item_query: dict[str, Any] = {
         "batch_id": batch_id,
         "status": ITEM_DONE,
         "doc_id": {"$exists": True, "$nin": [None, ""]},
         "$or": [
-            {"phase": {"$in": pending_phases}},
+            {"phase": {"$in": PENDING_ENRICHMENT_PHASES}},
             {"stage": {"$in": ["summary_pending", "graph_pending", "graph_promoted"]}},
         ],
     }
@@ -489,6 +499,10 @@ async def reconcile_batch_enrichment_truth(
                 "summary": state["summary"],
                 "graph": state["graph"],
             },
+            "enrichment_status": {
+                "summary": state["summary"],
+                "graph": state["graph"],
+            },
             "enrichment_reconciled_at": _now(),
             "updated_at": _now(),
         }
@@ -517,6 +531,10 @@ async def reconcile_batch_enrichment_truth(
                                 "summary": "complete",
                                 "graph": "complete",
                             },
+                            "enrichment_status": {
+                                "summary": "complete",
+                                "graph": "complete",
+                            },
                             "enrichment_reconciled_at": _now(),
                             "updated_at": _now(),
                         },
@@ -538,7 +556,7 @@ async def reconcile_batch_enrichment_truth(
         {
             "batch_id": batch_id,
             "status": ITEM_DONE,
-            "phase": {"$in": pending_phases},
+            "phase": {"$in": PENDING_ENRICHMENT_PHASES},
         }
     )
     if remaining == 0 and batch.get("summary_backfill_run_id"):
@@ -571,6 +589,89 @@ async def reconcile_batch_enrichment_truth(
         "status": "complete",
         "examined": len(items),
         "promoted": len(promoted_doc_ids),
+        "remaining": remaining,
+    }
+
+
+async def reconcile_pending_batch_enrichment_truth(
+    db: AsyncIOMotorDatabase,
+    *,
+    corpus_id: str,
+    doc_ids: list[str] | None = None,
+    limit: int = 500,
+) -> dict[str, Any]:
+    """Reconcile batches selected from pending durable items, not recency.
+
+    Summary and graph lanes can finish long after their source batch. Selecting
+    the newest batches starves older completed artifacts and leaves UI stages
+    permanently stale. Pending batch items are the authoritative work index.
+    """
+
+    limit = max(1, min(int(limit or 500), 5000))
+    item_query: dict[str, Any] = {
+        "corpus_id": corpus_id,
+        "status": ITEM_DONE,
+        "doc_id": {"$exists": True, "$nin": [None, ""]},
+        "$or": [
+            {"phase": {"$in": PENDING_ENRICHMENT_PHASES}},
+            {"stage": {"$in": ["summary_pending", "graph_pending", "graph_promoted"]}},
+        ],
+    }
+    normalized_doc_ids = sorted(
+        {str(doc_id).strip() for doc_id in (doc_ids or []) if str(doc_id).strip()}
+    )
+    if normalized_doc_ids:
+        item_query["doc_id"] = {"$in": normalized_doc_ids}
+
+    item_rows = await db[ITEMS].find(
+        item_query,
+        {"_id": 0, "batch_id": 1},
+    ).limit(limit).to_list(length=limit)
+    batch_ids = sorted(
+        {
+            str(row.get("batch_id") or "")
+            for row in item_rows
+            if row.get("batch_id")
+        }
+    )
+    if not batch_ids:
+        return {
+            "status": "noop",
+            "batches": 0,
+            "examined": 0,
+            "promoted": 0,
+            "remaining": 0,
+        }
+
+    batch_rows = await db[BATCHES].find(
+        {"corpus_id": corpus_id, "batch_id": {"$in": batch_ids}},
+        {"_id": 0, "batch_id": 1, "user_id": 1},
+    ).to_list(length=len(batch_ids))
+    examined = 0
+    promoted = 0
+    remaining = 0
+    reconciled_batches = 0
+    for batch in batch_rows:
+        batch_id = str(batch.get("batch_id") or "")
+        if not batch_id:
+            continue
+        result = await reconcile_batch_enrichment_truth(
+            db,
+            batch_id=batch_id,
+            user_id=str(batch.get("user_id") or "") or None,
+        )
+        if result.get("status") == "not_found":
+            continue
+        reconciled_batches += 1
+        examined += int(result.get("examined") or 0)
+        promoted += int(result.get("promoted") or 0)
+        remaining += int(result.get("remaining") or 0)
+
+    return {
+        "status": "complete",
+        "batches": reconciled_batches,
+        "examined": examined,
+        "promoted": promoted,
         "remaining": remaining,
     }
 
@@ -1882,8 +1983,9 @@ async def _process_local_item(
         elif str(result.status).startswith("queryable_with_pending_"):
             item_phase = str(result.status)
             status, failure_stage = ITEM_DONE, None
-        elif result.status == "skipped_duplicate":
-            # Deliberate skip (near-duplicate) — NOT a failure; don't retry.
+        elif result.status in {"skipped_duplicate", "skipped_nonsemantic"}:
+            # Deliberate terminal exclusions are not failures and must never
+            # enter the retry queue.
             status, item_phase, failure_stage = ITEM_SKIPPED, "skipped", None
         else:
             status, item_phase, failure_stage = ITEM_FAILED, "failed", "worker_result_failed"
@@ -2289,11 +2391,51 @@ async def _run_deferred_summary_backfill(
             doc_ids=doc_ids,
             index_existing_doc_summaries=True,
         )
+        document_job_limit = min(max(len(doc_ids), 1), 500)
+        document_plan = await ingestion_service.plan_summary_jobs(
+            corpus_id=str(batch["corpus_id"]),
+            user_id=str(batch.get("user_id") or "") or None,
+            apply=True,
+            limit=document_job_limit,
+            kinds=["document_summary"],
+        )
+        document_run: dict[str, Any] = {
+            "status": "empty",
+            "claimed": 0,
+            "counts": {},
+        }
+        if int(document_plan.get("planned") or 0) > 0:
+            document_run = await ingestion_service.run_summary_jobs(
+                corpus_id=str(batch["corpus_id"]),
+                user_id=str(batch.get("user_id") or "") or None,
+                limit=document_job_limit,
+                statuses=["queued"],
+                kinds=["document_summary"],
+            )
+        result["document_summary_jobs"] = {
+            "plan": {
+                "status": document_plan.get("status"),
+                "planned": int(document_plan.get("planned") or 0),
+                "counts": document_plan.get("counts") or {},
+            },
+            "run": {
+                "status": document_run.get("status"),
+                "claimed": int(document_run.get("claimed") or 0),
+                "counts": document_run.get("counts") or {},
+                "batch_reconciliation": document_run.get("batch_reconciliation")
+                or {},
+            },
+        }
         status = "complete"
         if result.get("generation_errors") or result.get("status") not in {
             "healthy",
             "empty",
         }:
+            status = "partial"
+        if document_run.get("status") not in {"complete", "empty"} or any(
+            int((document_run.get("counts") or {}).get(key) or 0) > 0
+            for key in ("failed", "blocked_no_parent_summaries", "blocked_parent_summaries_incomplete")
+        ):
             status = "partial"
         finished_at = _now()
         await db["ingest_repair_runs"].update_one(

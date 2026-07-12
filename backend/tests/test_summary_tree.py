@@ -15,6 +15,7 @@ if _BACKEND not in sys.path:
 
 from services.ingestion.summary_tree import (  # noqa: E402
     ParentSummaryIn,
+    _attach_doc_artifact,
     build_and_store_tree,
     build_profile_input,
     build_tree,
@@ -270,6 +271,29 @@ def test_heal_missing_summary_persists_parent_artifact_fields():
     assert doc_profile["doc_artifact"]["artifact_version"] == "polymath.doc_artifact.v1"
     assert doc_profile["doc_artifact"]["field_provenance"]["owner_intent"] == "corpus_description"
     assert doc_profile["doc_artifact"]["synthesis_hint"]
+
+
+def test_attach_doc_artifact_runs_directly_without_recursion():
+    db = _FakeDb()
+    profile = {
+        "summary": "A stable existing document summary.",
+        "concepts": ["Polymath"],
+        "domains": {"machine_learning": 1},
+    }
+
+    result = asyncio.run(
+        _attach_doc_artifact(
+            db,
+            corpus_id="corpus_1",
+            doc_id="doc_1",
+            doc=db["documents"].rows[0],
+            rows=db["parent_chunks"].rows,
+            doc_profile=profile,
+        )
+    )
+
+    assert result["summary"] == profile["summary"]
+    assert result["doc_artifact"]["artifact_version"] == "polymath.doc_artifact.v1"
 
 
 def _run_all():

@@ -533,7 +533,10 @@ async def test_plan_summary_jobs_queues_profile_only_document_summary_drift():
     assert result["counts"] == {"queued": 1}
     assert result["jobs"][0]["kind"] == "document_summary"
     first_match = db["documents"].last_aggregate_pipeline[0]["$match"]
-    assert first_match["$and"][0]["ingest_stage"]["$nin"] == ["skipped_duplicate"]
+    assert first_match["$and"][0]["ingest_stage"]["$nin"] == [
+        "skipped_duplicate",
+        "skipped_nonsemantic",
+    ]
 
 
 @pytest.mark.asyncio

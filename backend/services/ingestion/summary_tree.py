@@ -29,6 +29,7 @@ PROFILE_MAX_CONCEPTS = 12
 TREE_SCHEMA_VERSION = "polymath.summary_tree.v1"
 
 LlmFn = Callable[[str], Awaitable[str]]
+TreeEmbedFn = Callable[[list[str], dict[str, Any] | None], Awaitable[list[list[float]]]]
 
 
 @dataclass(frozen=True)
@@ -39,16 +40,16 @@ class ParentSummaryIn:
     summary: str
     heading_path: tuple[str, ...] = ()
     domain: str = ""
-    concepts: tuple[str, ...] = ()   # optional (promoted metadata when present)
+    concepts: tuple[str, ...] = ()  # optional (promoted metadata when present)
 
 
 @dataclass
 class TreeNode:
     node_id: str
-    node_type: str                    # rollup | section | document
+    node_type: str  # rollup | section | document
     doc_id: str
     corpus_id: str
-    parent_ids: list[str] = field(default_factory=list)   # L1 members (rollups)
+    parent_ids: list[str] = field(default_factory=list)  # L1 members (rollups)
     child_node_ids: list[str] = field(default_factory=list)  # tree children
     section_range: str = ""
     summary: str = ""
@@ -57,12 +58,185 @@ class TreeNode:
     schema_version: str = TREE_SCHEMA_VERSION
 
 
+def _config_dict(config: Any | None) -> dict[str, Any] | None:
+    if config is None:
+        return None
+    if isinstance(config, dict):
+        return dict(config)
+    dump = getattr(config, "model_dump", None)
+    if callable(dump):
+        return dict(dump(mode="python"))
+    legacy_dump = getattr(config, "dict", None)
+    if callable(legacy_dump):
+        return dict(legacy_dump())
+    return None
+
+
+def _node_record(node: TreeNode | dict[str, Any]) -> dict[str, Any]:
+    if isinstance(node, dict):
+        return dict(node)
+    from dataclasses import asdict
+
+    return asdict(node)
+
+
+async def index_summary_tree_nodes(
+    *,
+    qdrant_client: Any,
+    db: Any | None = None,
+    corpus_id: str,
+    nodes: Sequence[TreeNode | dict[str, Any]],
+    embedding_config: Any | None,
+    embed_fn: TreeEmbedFn | None = None,
+    batch_size: int = 128,
+) -> dict[str, Any]:
+    """Persist L2/L3 hierarchy vectors from existing summary artifacts.
+
+    This is an embedding/indexing operation, not an extraction or summary-model
+    call. Stable node IDs make it safe to rerun after a summary tree changes.
+    """
+
+    from services.embedder import embed_queries
+    from services.storage.qdrant_writer import (
+        delete_summary_tree_entries,
+        upsert_summary_tree_entries,
+    )
+
+    entries = [
+        record
+        for node in nodes
+        for record in [_node_record(node)]
+        if str(record.get("node_type") or "") in {"section", "rollup"}
+        and str(record.get("node_id") or "")
+        and str(record.get("summary") or "").strip()
+    ]
+    if not entries:
+        return {"indexed": 0, "eligible": 0}
+    if db is not None:
+        rollups = {
+            str(row.get("node_id") or ""): row
+            for row in entries
+            if str(row.get("node_type") or "") == "rollup"
+        }
+        all_parent_ids = sorted(
+            {
+                str(parent_id)
+                for row in rollups.values()
+                for parent_id in (row.get("parent_ids") or [])
+                if str(parent_id)
+            }
+        )
+        all_parent_id_set = set(all_parent_ids)
+        lexicon_rows = (
+            await db["corpus_lexicon"]
+            .find(
+                {
+                    "corpus_id": corpus_id,
+                    "retrieval_eligible": {"$ne": False},
+                    "source_parent_ids": {"$in": all_parent_ids},
+                },
+                {
+                    "_id": 0,
+                    "lexicon_id": 1,
+                    "source_parent_ids": 1,
+                    "support_count": 1,
+                },
+            )
+            .limit(20_000)
+            .to_list(length=20_000)
+            if all_parent_ids
+            else []
+        )
+        lexicon_by_parent: dict[str, list[tuple[int, str]]] = {}
+        for lexicon_row in lexicon_rows:
+            lexicon_id = str(lexicon_row.get("lexicon_id") or "")
+            support = int(lexicon_row.get("support_count") or 0)
+            if not lexicon_id:
+                continue
+            for parent_id in lexicon_row.get("source_parent_ids") or []:
+                normalized_parent_id = str(parent_id or "")
+                if normalized_parent_id in all_parent_id_set:
+                    lexicon_by_parent.setdefault(normalized_parent_id, []).append(
+                        (support, lexicon_id)
+                    )
+        lexicon_by_rollup: dict[str, list[str]] = {}
+        for node_id, row in rollups.items():
+            ranked = [
+                value
+                for parent_id in (row.get("parent_ids") or [])
+                for value in lexicon_by_parent.get(str(parent_id), [])
+            ]
+            lexicon_by_rollup[node_id] = list(
+                dict.fromkeys(
+                    lexicon_id
+                    for _support, lexicon_id in sorted(
+                        ranked,
+                        key=lambda item: (-item[0], item[1]),
+                    )
+                )
+            )[:96]
+            row["lexicon_ids"] = lexicon_by_rollup[node_id]
+        for row in entries:
+            if str(row.get("node_type") or "") != "section":
+                continue
+            row["lexicon_ids"] = list(
+                dict.fromkeys(
+                    lexicon_id
+                    for child_id in (row.get("child_node_ids") or [])
+                    for lexicon_id in lexicon_by_rollup.get(str(child_id), [])
+                )
+            )[:96]
+    config = _config_dict(embedding_config)
+    embedding_call = embed_fn or embed_queries
+    batch_size = max(1, min(int(batch_size or 128), 256))
+    embedded_vectors: list[list[float]] = []
+    for start in range(0, len(entries), batch_size):
+        batch = entries[start : start + batch_size]
+        texts = [
+            " ".join(
+                part
+                for part in (
+                    str(row.get("section_range") or "").strip(),
+                    str(row.get("summary") or "").strip(),
+                )
+                if part
+            )[:3000]
+            for row in batch
+        ]
+        vectors = await embedding_call(texts, config)
+        if len(vectors) != len(batch):
+            raise RuntimeError(
+                "summary-tree embedding returned "
+                f"{len(vectors)} vectors for {len(batch)} nodes"
+            )
+        embedded_vectors.extend(vectors)
+    for doc_id in sorted(
+        {str(row.get("doc_id") or "") for row in entries if row.get("doc_id")}
+    ):
+        await delete_summary_tree_entries(
+            qdrant_client,
+            corpus_id,
+            doc_id=doc_id,
+        )
+    indexed = 0
+    for start in range(0, len(entries), batch_size):
+        indexed += await upsert_summary_tree_entries(
+            qdrant_client,
+            corpus_id,
+            entries[start : start + batch_size],
+            embedded_vectors[start : start + batch_size],
+        )
+    return {"indexed": indexed, "eligible": len(entries)}
+
+
 # ── pure structure ──────────────────────────────────────────────────────────
 def _top_heading(p: ParentSummaryIn) -> str:
     return p.heading_path[0] if p.heading_path else "(untitled)"
 
 
-def group_by_section(parents: Sequence[ParentSummaryIn]) -> list[tuple[str, list[ParentSummaryIn]]]:
+def group_by_section(
+    parents: Sequence[ParentSummaryIn],
+) -> list[tuple[str, list[ParentSummaryIn]]]:
     """Group CONSECUTIVE parents by top-level heading (document order kept —
     a heading that reappears later starts a new group, preserving structure)."""
     groups: list[tuple[str, list[ParentSummaryIn]]] = []
@@ -75,8 +249,11 @@ def group_by_section(parents: Sequence[ParentSummaryIn]) -> list[tuple[str, list
     return groups
 
 
-def windows(items: Sequence[ParentSummaryIn],
-            lo: int = ROLLUP_WINDOW_MIN, hi: int = ROLLUP_WINDOW_MAX) -> list[list[ParentSummaryIn]]:
+def windows(
+    items: Sequence[ParentSummaryIn],
+    lo: int = ROLLUP_WINDOW_MIN,
+    hi: int = ROLLUP_WINDOW_MAX,
+) -> list[list[ParentSummaryIn]]:
     """Split a section's parents into rollup windows of lo..hi, deterministic:
     equal-ish sizes, never below lo unless the whole section is smaller."""
     n = len(items)
@@ -84,12 +261,12 @@ def windows(items: Sequence[ParentSummaryIn],
         return []
     if n <= hi:
         return [list(items)]
-    count = (n + hi - 1) // hi                     # fewest windows within hi
+    count = (n + hi - 1) // hi  # fewest windows within hi
     base, extra = divmod(n, count)
     out, i = [], 0
     for w in range(count):
         size = base + (1 if w < extra else 0)
-        out.append(list(items[i:i + size]))
+        out.append(list(items[i : i + size]))
         i += size
     return out
 
@@ -110,10 +287,17 @@ def build_profile_input(
     section summaries. NEVER all parent summaries."""
     lines = [f"Title: {title}", f"Source type: {source_type or 'document'}"]
     if domains:
-        lines.append("Detected domains: " + ", ".join(
-            f"{d}({c})" for d, c in sorted(domains.items(), key=lambda kv: -kv[1])[:6]))
+        lines.append(
+            "Detected domains: "
+            + ", ".join(
+                f"{d}({c})"
+                for d, c in sorted(domains.items(), key=lambda kv: -kv[1])[:6]
+            )
+        )
     if concepts:
-        lines.append("Top concepts: " + ", ".join(top_terms(concepts, PROFILE_MAX_CONCEPTS)))
+        lines.append(
+            "Top concepts: " + ", ".join(top_terms(concepts, PROFILE_MAX_CONCEPTS))
+        )
     lines.append("Top sections:")
     for s in list(sections)[:PROFILE_MAX_SECTIONS]:
         lines.append(f"- {s.section_range}: {s.summary[:300]}")
@@ -194,7 +378,9 @@ async def build_tree(
         for win in windows(members):
             node = TreeNode(
                 node_id=f"rollup_{doc_id[:12]}_{r_idx:04d}",
-                node_type="rollup", doc_id=doc_id, corpus_id=corpus_id,
+                node_type="rollup",
+                doc_id=doc_id,
+                corpus_id=corpus_id,
                 parent_ids=[p.parent_id for p in win],
                 section_range=heading,
             )
@@ -209,7 +395,9 @@ async def build_tree(
             rollups.append(node)
         sec = TreeNode(
             node_id=f"section_{doc_id[:12]}_{s_idx:04d}",
-            node_type="section", doc_id=doc_id, corpus_id=corpus_id,
+            node_type="section",
+            doc_id=doc_id,
+            corpus_id=corpus_id,
             child_node_ids=[r.node_id for r in rollups],
             section_range=heading,
         )
@@ -252,7 +440,9 @@ async def build_tree(
 
     profile = TreeNode(
         node_id=f"docsum_{doc_id[:12]}",
-        node_type="document", doc_id=doc_id, corpus_id=corpus_id,
+        node_type="document",
+        doc_id=doc_id,
+        corpus_id=corpus_id,
         child_node_ids=[s.node_id for s in sections],
         section_range=title,
         domains=domains,
@@ -260,8 +450,9 @@ async def build_tree(
     )
     profile.summary = await _gen(
         llm_fn,
-        _PROFILE_PROMPT.format(body=build_profile_input(
-            title, source_type, sections, domains, concepts)),
+        _PROFILE_PROMPT.format(
+            body=build_profile_input(title, source_type, sections, domains, concepts)
+        ),
         [s.summary for s in sections],
     )
     nodes.append(profile)
@@ -275,6 +466,138 @@ async def _default_llm(prompt: str) -> str:
     return await llm_service.complete_chat([{"role": "user", "content": prompt}])
 
 
+async def _attach_doc_artifact(
+    db: Any,
+    *,
+    corpus_id: str,
+    doc_id: str,
+    doc: dict[str, Any],
+    rows: Sequence[dict[str, Any]],
+    doc_profile: dict[str, Any],
+) -> dict[str, Any]:
+    """Add deterministic routing metadata to an existing document profile."""
+
+    try:
+        from services.ingestion.doc_artifact import build_doc_artifact
+
+        corpus_doc = await db["corpora"].find_one(
+            {"corpus_id": corpus_id},
+            {"_id": 0, "description": 1},
+        )
+        ghost_rows = (
+            await db["ghost_b_extractions"]
+            .find(
+                {"doc_id": doc_id, "corpus_id": corpus_id, "status": "ok"},
+                {"_id": 0, "entities": 1},
+            )
+            .limit(300)
+            .to_list(length=300)
+        )
+        ghost_entities = [
+            entity for row in ghost_rows for entity in (row.get("entities") or [])
+        ]
+        chunk_kind_stats: dict[str, int] = {}
+        for row in rows:
+            kind = str(row.get("chunk_kind") or "body")
+            chunk_kind_stats[kind] = chunk_kind_stats.get(kind, 0) + 1
+        existing_artifact = (doc.get("doc_profile") or {}).get("doc_artifact") or {}
+        artifact = build_doc_artifact(
+            doc_profile=doc_profile,
+            facet_profile=doc.get("facet_profile") or {},
+            source_meta={
+                "title": doc.get("title"),
+                "filename": doc.get("filename"),
+                "source_type": doc.get("source_type"),
+                "source_path": doc.get("source_path"),
+            },
+            ghost_b_entities=ghost_entities,
+            chunk_kind_stats=chunk_kind_stats,
+            owner_fields=existing_artifact,
+            corpus_description=(corpus_doc or {}).get("description"),
+        )
+        if artifact:
+            doc_profile["doc_artifact"] = artifact
+    except Exception:
+        pass
+    return doc_profile
+
+
+async def sync_document_profile_from_existing_tree(
+    *,
+    db: Any,
+    doc_id: str,
+    corpus_id: str,
+    force: bool = False,
+) -> dict[str, Any]:
+    """Restore a missing profile from its durable L4 node without inference."""
+
+    from datetime import datetime
+
+    doc = await db["documents"].find_one(
+        {"doc_id": doc_id, "corpus_id": corpus_id},
+        {
+            "title": 1,
+            "filename": 1,
+            "source_type": 1,
+            "source_path": 1,
+            "facet_profile": 1,
+            "doc_profile": 1,
+        },
+    )
+    if not doc:
+        return {"status": "no_document", "doc_id": doc_id}
+    root = await db["summary_tree"].find_one(
+        {
+            "doc_id": doc_id,
+            "corpus_id": corpus_id,
+            "node_type": "document",
+            "summary": {"$exists": True, "$nin": [None, ""]},
+        },
+        {"_id": 0},
+        sort=[("updated_at", -1)],
+    )
+    if not root:
+        return {"status": "no_tree", "doc_id": doc_id}
+    if str((doc.get("doc_profile") or {}).get("summary") or "").strip() and not force:
+        return {
+            "status": "already_synced",
+            "doc_id": doc_id,
+            "node_id": root.get("node_id"),
+        }
+
+    rows = await db["parent_chunks"].find(
+        {"doc_id": doc_id, "corpus_id": corpus_id},
+        {"_id": 0, "chunk_kind": 1},
+    ).to_list(length=None)
+    now = datetime.utcnow()
+    doc_profile = {
+        "summary_id": root.get("node_id"),
+        "summary": str(root.get("summary") or ""),
+        "concepts": root.get("concepts") or [],
+        "domains": root.get("domains") or {},
+        "section_ids": root.get("child_node_ids") or [],
+        "schema_version": root.get("schema_version") or TREE_SCHEMA_VERSION,
+        "updated_at": now,
+    }
+    doc_profile = await _attach_doc_artifact(
+        db,
+        corpus_id=corpus_id,
+        doc_id=doc_id,
+        doc=doc,
+        rows=rows,
+        doc_profile=doc_profile,
+    )
+    await db["documents"].update_one(
+        {"doc_id": doc_id, "corpus_id": corpus_id},
+        {"$set": {"doc_profile": doc_profile}},
+    )
+    return {
+        "status": "synced",
+        "doc_id": doc_id,
+        "node_id": root.get("node_id"),
+    }
+
+
 async def build_and_store_tree(
     *,
     db,
@@ -285,6 +608,8 @@ async def build_and_store_tree(
     heal_missing: bool = True,
     heal_limit: int = 2000,
     max_concurrent: int = 16,
+    qdrant_client: Any | None = None,
+    embedding_config: Any | None = None,
 ) -> dict[str, Any]:
     """Read PARENT-level summaries (parent_chunks.summary — Ghost A output;
     never child chunks), build the L2→L4 tree, upsert nodes into the
@@ -307,11 +632,24 @@ async def build_and_store_tree(
     )
     if not doc:
         return {"skipped": "no_document"}
-    rows = await db["parent_chunks"].find(
-        {"doc_id": doc_id, "corpus_id": corpus_id},
-        {"parent_id": 1, "summary": 1, "heading_path": 1, "domain": 1,
-         "chunk_kind": 1, "text": 1, "child_ids": 1, "source_child_ids": 1},
-    ).sort("parent_id", 1).to_list(length=None)  # {doc}_parent_NNNN → lexical = doc order
+    rows = (
+        await db["parent_chunks"]
+        .find(
+            {"doc_id": doc_id, "corpus_id": corpus_id},
+            {
+                "parent_id": 1,
+                "summary": 1,
+                "heading_path": 1,
+                "domain": 1,
+                "chunk_kind": 1,
+                "text": 1,
+                "child_ids": 1,
+                "source_child_ids": 1,
+            },
+        )
+        .sort("parent_id", 1)
+        .to_list(length=None)
+    )  # {doc}_parent_NNNN → lexical = doc order
     summary_rows = [
         r for r in rows if should_summarize_parent(str(r.get("chunk_kind") or "body"))
     ]
@@ -338,20 +676,24 @@ async def build_and_store_tree(
                 parse_semantic_summary,
                 topic_key_for,
             )
+
             source_child_ids = [
                 str(v)
                 for v in (r.get("source_child_ids") or r.get("child_ids") or [])
                 if str(v)
             ]
             try:
-                raw = (await fn(
-                    "Summarize and classify this passage. "
-                    + SEMANTIC_SUMMARY_INSTRUCTION
-                    + "\n\nsource_child_ids: "
-                    + json.dumps(source_child_ids)
-                    + "\n\nPASSAGE:\n"
-                    + text
-                ) or "").strip()
+                raw = (
+                    await fn(
+                        "Summarize and classify this passage. "
+                        + SEMANTIC_SUMMARY_INSTRUCTION
+                        + "\n\nsource_child_ids: "
+                        + json.dumps(source_child_ids)
+                        + "\n\nPASSAGE:\n"
+                        + text
+                    )
+                    or ""
+                ).strip()
             except Exception:  # noqa: BLE001 — guard rail never fails the tree
                 raw = ""
             sem = parse_semantic_summary(
@@ -386,7 +728,8 @@ async def build_and_store_tree(
                     "entity_hints": artifact["entity_hints"] or None,
                     "retrieval_uses": artifact["retrieval_uses"] or None,
                     "abstraction_level": artifact["abstraction_level"],
-                    "source_child_ids": artifact["source_child_ids"] or source_child_ids,
+                    "source_child_ids": artifact["source_child_ids"]
+                    or source_child_ids,
                     "summary_id": artifact["summary_id"],
                     "source_hash": artifact["source_hash"],
                     "summary_model": artifact["summary_model"],
@@ -416,7 +759,11 @@ async def build_and_store_tree(
         for r in summary_rows
     ]
     if not any(p.summary for p in parents):
-        return {"skipped": "no_parent_summaries", "parents": len(parents), "healed": healed}
+        return {
+            "skipped": "no_parent_summaries",
+            "parents": len(parents),
+            "healed": healed,
+        }
     nodes = await build_tree(
         doc_id=doc_id,
         corpus_id=corpus_id,
@@ -431,6 +778,24 @@ async def build_and_store_tree(
         rec = asdict(n)
         rec["updated_at"] = now
         await db["summary_tree"].replace_one({"node_id": n.node_id}, rec, upsert=True)
+    tree_index: dict[str, Any] = {"indexed": 0, "eligible": 0}
+    if qdrant_client is not None:
+        try:
+            tree_index = await index_summary_tree_nodes(
+                qdrant_client=qdrant_client,
+                db=db,
+                corpus_id=corpus_id,
+                nodes=nodes,
+                embedding_config=embedding_config,
+            )
+        except Exception as exc:  # noqa: BLE001 - summary artifacts remain durable
+            tree_index = {
+                "indexed": 0,
+                "eligible": sum(
+                    1 for node in nodes if node.node_type in {"section", "rollup"}
+                ),
+                "error": f"{type(exc).__name__}: {exc}"[:500],
+            }
     profile = nodes[-1]
     doc_profile = {
         "summary_id": profile.node_id,
@@ -441,53 +806,52 @@ async def build_and_store_tree(
         "schema_version": profile.schema_version,
         "updated_at": now,
     }
-    try:
-        from services.ingestion.doc_artifact import build_doc_artifact
+    doc_profile = await _attach_doc_artifact(
+        db,
+        corpus_id=corpus_id,
+        doc_id=doc_id,
+        doc=doc,
+        rows=rows,
+        doc_profile=doc_profile,
+    )
 
-        corpus_doc = await db["corpora"].find_one(
-            {"corpus_id": corpus_id},
-            {"_id": 0, "description": 1},
+    document_updates: dict[str, Any] = {"doc_profile": doc_profile}
+    if qdrant_client is not None:
+        index_ready = bool(
+            int(tree_index.get("eligible") or 0) > 0
+            and int(tree_index.get("indexed") or 0)
+            == int(tree_index.get("eligible") or 0)
+            and not tree_index.get("error")
         )
-        ghost_rows = await db["ghost_b_extractions"].find(
-            {"doc_id": doc_id, "corpus_id": corpus_id, "status": "ok"},
-            {"_id": 0, "entities": 1},
-        ).limit(300).to_list(length=300)
-        ghost_entities = [
-            entity
-            for row in ghost_rows
-            for entity in (row.get("entities") or [])
-        ]
-        chunk_kind_stats: dict[str, int] = {}
-        for row in rows:
-            kind = str(row.get("chunk_kind") or "body")
-            chunk_kind_stats[kind] = chunk_kind_stats.get(kind, 0) + 1
-        existing_artifact = ((doc.get("doc_profile") or {}).get("doc_artifact") or {})
-        artifact = build_doc_artifact(
-            doc_profile=doc_profile,
-            facet_profile=doc.get("facet_profile") or {},
-            source_meta={
-                "title": doc.get("title"),
-                "filename": doc.get("filename"),
-                "source_type": doc.get("source_type"),
-                "source_path": doc.get("source_path"),
-            },
-            ghost_b_entities=ghost_entities,
-            chunk_kind_stats=chunk_kind_stats,
-            owner_fields=existing_artifact,
-            corpus_description=(corpus_doc or {}).get("description"),
+        document_updates.update(
+            {
+                "summary_tree_index_state": (
+                    "summary_tree_index_ready"
+                    if index_ready
+                    else "summary_tree_index_pending"
+                ),
+                "summary_tree_indexed_nodes": int(tree_index.get("indexed") or 0),
+                "summary_tree_index_eligible_nodes": int(
+                    tree_index.get("eligible") or 0
+                ),
+                "summary_tree_index_updated_at": now,
+            }
         )
-        if artifact:
-            doc_profile["doc_artifact"] = artifact
-    except Exception:
-        pass
-
+        if tree_index.get("error"):
+            document_updates["summary_tree_index_error"] = str(tree_index["error"])[
+                :500
+            ]
+    update: dict[str, Any] = {"$set": document_updates}
+    if qdrant_client is not None and not tree_index.get("error"):
+        update["$unset"] = {"summary_tree_index_error": ""}
     await db["documents"].update_one(
         {"doc_id": doc_id, "corpus_id": corpus_id},
-        {"$set": {"doc_profile": doc_profile}},
+        update,
     )
     counts: dict[str, Any] = {}
     for n in nodes:
         counts[n.node_type] = counts.get(n.node_type, 0) + 1
     counts["parents_in"] = len(parents)
     counts["summaries_healed"] = healed
+    counts["tree_index"] = tree_index
     return counts

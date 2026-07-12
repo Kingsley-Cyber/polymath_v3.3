@@ -47,6 +47,26 @@ def test_reasoning_preamble_does_not_swallow_summary_artifact():
     assert parsed["summary"].startswith("The passage explains")
     assert parsed["validation_status"] == "valid"
 
+def test_json_subject_is_not_mistaken_for_provider_wrapper():
+    raw = (
+        '{"summary":"JSON is nearly valid Python code, but null values and '
+        'trailing-comma rules differ. Python applications use the standard json '
+        'module to decode objects, arrays, strings, numbers, Booleans, and null '
+        'values into native structures for deterministic processing.",'
+        '"central_claim":"JSON maps a constrained data grammar into Python structures.",'
+        '"key_points":[{"point":"The json module decodes JSON into Python values.",'
+        '"supporting_child_ids":["child_1"]}],'
+        '"concept_tags":["json","python","serialization"],'
+        '"retrieval_uses":["definition"],"abstraction_level":"low"}'
+    )
+    parsed = parse_semantic_summary(
+        raw,
+        source_child_ids=["child_1"],
+        source_text="JSON is nearly valid Python code and can be decoded with json.load.",
+    )
+    assert parsed["summary"].startswith("JSON is nearly valid Python code")
+    assert parsed["validation_status"] == "valid"
+
 def test_unrepairable_raw_json_is_quarantined():
     o = parse_semantic_summary('{"central_claim": {"bad": true}', source_child_ids=["child_1"])
     assert o["summary"] == ""
