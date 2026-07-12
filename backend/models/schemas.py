@@ -686,6 +686,13 @@ class GlobalIngestionSummarySettings(BaseModel):
 class GlobalIngestionSettings(BaseModel):
     """Mutable global ingestion defaults."""
 
+    provider_models: list[_legacy.ModelProfileRef] = Field(
+        default_factory=list,
+        description=(
+            "Dedicated ingestion provider registry. Corpus configs reference these "
+            "rows by profile_id; chat model routing remains separate."
+        ),
+    )
     summary: GlobalIngestionSummarySettings = Field(
         default_factory=GlobalIngestionSummarySettings
     )

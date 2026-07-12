@@ -705,6 +705,24 @@ class ModelProfileRef(BaseModel):
     seeing ciphertext or plaintext.
     """
 
+    profile_id: str | None = Field(
+        default=None,
+        description="Stable Settings ingestion-provider registry identifier.",
+    )
+    profile_label: str | None = Field(
+        default=None,
+        max_length=120,
+        description="Operator-facing ingestion route label.",
+    )
+    runtime: Literal["cloud", "rtx", "modal", "runpod", "custom"] | None = Field(
+        default=None,
+        description="Runtime placement used by corpus workflow selectors.",
+    )
+    capabilities: list[Literal["summary", "extraction", "embedding"]] = Field(
+        default_factory=list,
+        description="Approved ingestion roles. Empty means all roles for compatibility.",
+    )
+    enabled: bool = True
     provider_preset: str = Field(
         default="",
         description="UI label (openai / deepseek / ollama / …). Not runtime-authoritative.",

@@ -21,6 +21,7 @@ import {
   testRunpodFlashExtraction,
 } from "../../lib/api";
 import { IngestionModelPool } from "./IngestionModelPool";
+import { IngestionProviderSelector } from "./IngestionProviderSelector";
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -376,6 +377,7 @@ function ExtractionEnginesCard() {
 }
 
 const DEFAULT_GLOBAL_INGESTION: GlobalIngestionSettings = {
+  provider_models: [],
   summary: {
     enabled: false,
     max_summary_tokens: DEFAULT_INGESTION_CONFIG.max_summary_tokens,
@@ -417,6 +419,7 @@ function cloneGlobalIngestion(
   source?: GlobalIngestionSettings | null,
 ): GlobalIngestionSettings {
   return {
+    provider_models: [...(source?.provider_models ?? [])],
     summary: {
       ...DEFAULT_GLOBAL_INGESTION.summary,
       ...(source?.summary ?? {}),
@@ -459,6 +462,15 @@ function SummaryDefaultsCard() {
     setSaved(false);
   };
 
+  const mutateProviders = (provider_models: ModelProfileRef[]) => {
+    setIngestion((previous) => ({
+      ...cloneGlobalIngestion(previous),
+      provider_models,
+    }));
+    setDirty(true);
+    setSaved(false);
+  };
+
   const save = async () => {
     if (!ingestion) return;
     setSaving(true);
@@ -469,6 +481,7 @@ function SummaryDefaultsCard() {
         (await getGlobalSettings()).settings.ingestion,
       );
       latest.summary = ingestion.summary;
+      latest.provider_models = ingestion.provider_models;
       const { settings } = await updateGlobalSettings({ ingestion: latest });
       setIngestion(cloneGlobalIngestion(settings.ingestion));
       setDirty(false);
@@ -491,6 +504,7 @@ function SummaryDefaultsCard() {
 
   const summary = ingestion.summary;
   const pool: ModelProfileRef[] = summary.summary_models ?? [];
+  const providers = ingestion.provider_models ?? [];
   const requestedConcurrency = pool.reduce(
     (sum, m) => sum + (m.max_concurrent || 1),
     0,
@@ -501,12 +515,12 @@ function SummaryDefaultsCard() {
       <div className="flex items-start justify-between gap-3">
         <div>
           <h3 className="text-[15px] font-semibold text-white flex items-center gap-2">
-            <Cloud size={16} className="text-amber-400" /> Summary Defaults
+            <Cloud size={16} className="text-amber-400" /> Ingestion Provider Registry
           </h3>
           <p className="text-[11px] text-content-tertiary mt-1 leading-relaxed">
-            Global Ghost A defaults for new corpora and agent-created corpora.
-            Configure one or more local/cloud summary models here; corpus-level
-            pools still override this when set.
+            Configure extraction, summary, RTX, and cloud model credentials once.
+            Corpus Manager selects saved routes by reference and never asks for a key.
+            Chat model APIs remain separate under Settings → Models.
           </p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
@@ -533,6 +547,25 @@ function SummaryDefaultsCard() {
           {error}
         </div>
       )}
+
+      <IngestionModelPool
+        title="Saved ingestion routes"
+        subtitle="Credential-bearing registry for cloud APIs and private OpenAI-compatible runtimes"
+        value={providers}
+        onChange={mutateProviders}
+        editing={true}
+        testKind="chat"
+        registryMode={true}
+      />
+
+      <div className="border-t border-white/5 pt-3">
+        <div className="text-[10px] font-bold tracking-widest uppercase text-content-secondary">
+          Summary defaults
+        </div>
+        <div className="mt-0.5 text-[9px] text-content-tertiary">
+          New corpora inherit these selected registry routes. Each corpus may choose a different set.
+        </div>
+      </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
         <label className="flex items-center justify-between gap-3 border border-white/5 bg-[#121418] rounded px-3 py-2">
@@ -598,13 +631,14 @@ function SummaryDefaultsCard() {
         </label>
       </div>
 
-      <IngestionModelPool
-        title="Default Summary Models"
-        subtitle="Local and cloud Ghost A lanes · copied into new empty corpus configs"
+      <IngestionProviderSelector
+        title="Default summary routes"
+        subtitle="Choose saved routes for Ghost A; credentials continue to live in the registry above."
+        role="summary"
+        profiles={providers}
         value={pool}
         onChange={(next) => mutateSummary({ summary_models: next })}
         editing={true}
-        testKind="chat"
       />
     </div>
   );

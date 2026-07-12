@@ -317,6 +317,8 @@ export interface RunpodFlashTestResult {
 }
 
 export interface GlobalIngestionSettings {
+  /** Credential-bearing registry used only by ingestion, never by chat routing. */
+  provider_models: ModelProfileRef[];
   summary: GlobalIngestionSummarySettings;
   runpod_flash: RunpodFlashExtractionSettings;
 }

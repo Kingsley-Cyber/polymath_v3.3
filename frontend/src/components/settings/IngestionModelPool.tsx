@@ -65,6 +65,8 @@ interface Props {
     corpusId?: string | null;
     poolField?: IngestionModelPoolField;
   };
+  /** Assign stable Settings registry IDs; never enable in a corpus inline pool. */
+  registryMode?: boolean;
 }
 
 const EMPTY_DRAFT = {
@@ -149,6 +151,7 @@ export function IngestionModelPool({
   modelPlaceholder = "model (required)",
   testKind = "chat",
   testContext,
+  registryMode = false,
 }: Props) {
   const [draft, setDraft] = useState(EMPTY_DRAFT);
   const [flashId, setFlashId] = useState<string | null>(null);
@@ -204,7 +207,28 @@ export function IngestionModelPool({
       extraParams.lifecycle_idle_shutdown_seconds =
         preset.lifecycle.idle_shutdown_seconds;
     }
+    const routeKind = inferRouteKind({
+      provider_preset: draft.provider_preset,
+      model: composeModel(draft.provider_preset, bare),
+      base_url: draft.base_url.trim() || null,
+      api_key: null,
+      max_concurrent: 1,
+      extra_params: extraParams,
+    });
     return {
+      profile_id: registryMode ? crypto.randomUUID() : null,
+      profile_label: registryMode
+        ? `${selectedPreset?.name || draft.provider_preset || "Custom"} · ${bare}`
+        : null,
+      runtime: registryMode
+        ? routeKind === "private_rtx"
+          ? "rtx"
+          : routeKind === "cloud_api"
+            ? "cloud"
+            : "custom"
+        : null,
+      capabilities: registryMode ? ["summary", "extraction"] : [],
+      enabled: true,
       provider_preset: draft.provider_preset,
       // Safety net: prefix with the preset's LiteLLM provider unless already
       // prefixed. SiliconFlow model IDs contain slashes but still need openai/*.

@@ -39,6 +39,15 @@ export interface TokenBudget {
  * or plaintext. Round-tripping "[set]" preserves the stored key.
  */
 export interface ModelProfileRef {
+  /** Stable Settings -> Ingestion registry identifier. Legacy inline rows omit it. */
+  profile_id?: string | null;
+  /** Optional operator-facing name from the ingestion registry. */
+  profile_label?: string | null;
+  /** Runtime placement used by workflow filtering; credentials remain in Settings. */
+  runtime?: "cloud" | "rtx" | "modal" | "runpod" | "custom" | null;
+  /** Roles this saved route is approved for. Empty/omitted means all ingestion roles. */
+  capabilities?: Array<"summary" | "extraction" | "embedding">;
+  enabled?: boolean;
   /** UI label hint (openai / deepseek / ollama / …). Not runtime-authoritative. */
   provider_preset: string;
   model: string;

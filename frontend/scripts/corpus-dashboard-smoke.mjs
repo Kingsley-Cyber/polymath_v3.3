@@ -115,6 +115,20 @@ const corpus = {
   readiness,
 };
 
+const providerProfile = {
+  profile_id: "longcat-ingestion",
+  profile_label: "LongCat ingestion",
+  runtime: "cloud",
+  capabilities: ["summary", "extraction"],
+  enabled: true,
+  provider_preset: "longcat",
+  model: "openai/LongCat-Flash-Chat",
+  base_url: "https://api.example.test/v1",
+  api_key: "[set]",
+  max_concurrent: 45,
+  extra_params: { disable_thinking: true },
+};
+
 const documents = Array.from({ length: 8 }, (_, index) => ({
   doc_id: `doc-${index}`,
   corpus_id: "test-corpus",
@@ -159,7 +173,28 @@ async function setupRoutes(page) {
       return route.fulfill(json({ chat_models: [], embedding_models: [], default_model: "", default_embedding_model: "" }));
     }
     if (path === "/api/settings/models") return route.fulfill(json({ query_model_pool: [] }));
-    if (path === "/api/settings") return route.fulfill(json({ settings: { chat: {}, retrieval: {}, infrastructure: {}, extraction: { endpoints: [] } } }));
+    if (path === "/api/settings") {
+      return route.fulfill(
+        json({
+          settings: {
+            chat: {},
+            retrieval: {},
+            infrastructure: {},
+            extraction: { endpoints: [] },
+            ingestion: {
+              provider_models: [providerProfile],
+              summary: {
+                enabled: false,
+                max_summary_tokens: 175,
+                max_concurrent: 8,
+                summary_models: [],
+              },
+              runpod_flash: { enabled: false },
+            },
+          },
+        }),
+      );
+    }
     return route.fulfill(json({}));
   });
 }
@@ -201,6 +236,29 @@ async function run() {
     await page.waitForSelector('[data-testid="corpus-manager-dialog"]');
     const manager = await box(page, "corpus-manager-dialog");
     await page.screenshot({ path: `/tmp/polymath-corpus-manager-${name}.png`, fullPage: true });
+
+    await page.click('[data-testid="create-corpus-btn"]');
+    await page.click('[data-testid="create-ingestion-workflow-cloud_only"]');
+    const providerButton = page.locator(
+      '[data-testid="ingestion-provider-extraction-longcat-ingestion"]',
+    );
+    if ((await providerButton.count()) !== 1) {
+      throw new Error(`${name}: saved ingestion provider was not rendered`);
+    }
+    if ((await providerButton.getAttribute("aria-pressed")) !== "true") {
+      throw new Error(`${name}: cloud workflow did not select the saved provider`);
+    }
+    const inlineSecretInputs = await page.locator(
+      '[data-testid="corpus-manager-dialog"] input[type="password"]',
+    ).count();
+    if (inlineSecretInputs !== 0) {
+      throw new Error(`${name}: corpus editor still renders ${inlineSecretInputs} secret input(s)`);
+    }
+    await page.screenshot({
+      path: `/tmp/polymath-corpus-provider-selector-${name}.png`,
+      fullPage: true,
+    });
+    await page.click('[data-testid="create-corpus-btn"]');
 
     await page.getByRole("button", { name: `Open ${corpus.name}` }).click();
     await page.waitForSelector('[data-testid="corpus-detail"]');

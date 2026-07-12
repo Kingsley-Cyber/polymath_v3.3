@@ -37,9 +37,9 @@ import type {
   ModelProfileRef,
 } from "../../types";
 import { DEFAULT_INGESTION_CONFIG, inferPreset } from "../../types";
-import { composeModelString, findPreset } from "../../types";
 import { CorpusDetail } from "./CorpusDetail";
 import { IngestionModelPool } from "../settings/IngestionModelPool";
+import { IngestionProviderSelector } from "../settings/IngestionProviderSelector";
 import { Button } from "../ui/Button";
 
 interface CorpusManagerProps {
@@ -316,9 +316,6 @@ function createDefaultIngestionConfig(
     extraction_models: [...DEFAULT_INGESTION_CONFIG.extraction_models],
     embedding_models: [...DEFAULT_INGESTION_CONFIG.embedding_models],
   };
-  if ((next.extraction_engine ?? "local") === "local") {
-    next.extraction_models = ensureRtxExtractionModel(next.extraction_models ?? []);
-  }
   if (usesProviderEngine(draftEngine(next.extraction_engine, "cloud")) && hasFactoryChunkShape(next)) {
     next = {
       ...next,
@@ -336,6 +333,7 @@ function isRtxModel(entry: ModelProfileRef): boolean {
   const lifecycle = (entry.lifecycle_base_url || "").toLowerCase();
   const extra = entry.extra_params || {};
   return (
+    entry.runtime === "rtx" ||
     provider === "vllm-rtx" ||
     provider === "vllm" ||
     Boolean(extra.managed_vllm) ||
@@ -349,46 +347,6 @@ function isRtxModel(entry: ModelProfileRef): boolean {
 
 function hasNonRtxCloudModel(entries: ModelProfileRef[]): boolean {
   return entries.some((entry) => !isRtxModel(entry));
-}
-
-function makeRtxExtractionModel(): ModelProfileRef {
-  const preset = findPreset("vllm-rtx");
-  return {
-    provider_preset: "vllm-rtx",
-    model: composeModelString("vllm-rtx", preset?.example_model ?? "polymath-extract"),
-    base_url: preset?.base_url ?? "http://192.168.1.83:8000/v1",
-    api_key: null,
-    max_concurrent: preset?.default_max_concurrent ?? 60,
-    lifecycle_base_url: preset?.lifecycle?.base_url ?? "http://192.168.1.83:8085",
-    lifecycle_api_key: null,
-    lifecycle_auto_start: preset?.lifecycle?.auto_start ?? true,
-    lifecycle_auto_stop: preset?.lifecycle?.auto_stop ?? false,
-    lifecycle_up_path: "/up",
-    lifecycle_status_path: "/status",
-    lifecycle_down_path: "/down",
-    lifecycle_ready_timeout_seconds:
-      preset?.lifecycle?.ready_timeout_seconds ?? 360,
-    extra_params: {
-      ...(preset?.kwargs ?? {}),
-      managed_vllm: true,
-      resource_class: "rtx",
-      supports_json_schema: true,
-      schema_mode: "json_schema",
-      json_repair_mode: "provider_native",
-      semantic_verifier_mode: "strict_with_direction_repair",
-      concurrency_policy: "adaptive_vram_85",
-      failure_backfill_policy: "retry_then_stage",
-      adaptive_vram: true,
-      vram_safety_ratio: 0.85,
-      lifecycle_idle_shutdown_seconds:
-        preset?.lifecycle?.idle_shutdown_seconds ?? 600,
-    },
-  };
-}
-
-function ensureRtxExtractionModel(entries: ModelProfileRef[]): ModelProfileRef[] {
-  if (entries.some(isRtxModel)) return entries;
-  return [makeRtxExtractionModel(), ...entries];
 }
 
 function inferWorkflow(config: IngestionConfig): IngestionWorkflowId {
@@ -430,6 +388,7 @@ function hasFactoryChunkShape(cfg: IngestionConfig): boolean {
 function applyWorkflowToConfig(
   cfg: IngestionConfig,
   workflowId: IngestionWorkflowId,
+  providerProfiles: ModelProfileRef[] = [],
 ): IngestionConfig {
   const workflow = WORKFLOW_META.find((item) => item.key === workflowId);
   if (!workflow || workflowId === "custom") return cfg;
@@ -446,8 +405,25 @@ function applyWorkflowToConfig(
   } else if (next.preset === "fast" || inferPreset(next) === "fast") {
     next = applyPresetToConfig(next, "balanced");
   }
-  if (workflow.needsRtx) {
-    next.extraction_models = ensureRtxExtractionModel(next.extraction_models ?? []);
+  if (workflow.needsCloudPool && providerProfiles.length) {
+    const eligible = providerProfiles.filter((profile) => {
+      if (profile.enabled === false || !profile.profile_id) return false;
+      if (profile.capabilities?.length && !profile.capabilities.includes("extraction")) {
+        return false;
+      }
+      if (workflow.needsRtx && workflow.needsCloudApi) return true;
+      if (workflow.needsRtx) return isRtxModel(profile);
+      if (workflow.needsCloudApi) return !isRtxModel(profile);
+      return true;
+    });
+    if (eligible.length) {
+      next.extraction_models = eligible.map((profile) => ({
+        ...profile,
+        api_key: null,
+        lifecycle_api_key: null,
+        extra_params: { ...(profile.extra_params || {}) },
+      }));
+    }
   }
   // Cloud-LLM extraction (RTX vLLM / API) reads context, not GLiNER spans:
   // 512-token children ≈ 4× fewer extraction calls per file at equal
@@ -543,10 +519,12 @@ function IngestionWorkflowSelector({
   config,
   onChange,
   idPrefix,
+  providerProfiles,
 }: {
   config: IngestionConfig;
   onChange: (next: IngestionConfig) => void;
   idPrefix: string;
+  providerProfiles: ModelProfileRef[];
 }) {
   const current = inferWorkflow(config);
   const currentMeta = WORKFLOW_META.find((item) => item.key === current) ?? WORKFLOW_META[0];
@@ -576,8 +554,8 @@ function IngestionWorkflowSelector({
               Extraction Profile
             </div>
             <div className="mt-0.5 text-[10px] text-content-tertiary leading-snug">
-              Pick the execution route. The model cards below provide URL, key,
-              model name, concurrency, live test, and live model listing.
+              Pick the execution route, then assign saved provider profiles below.
+              Credentials are managed once under Settings → Ingestion.
             </div>
           </div>
           <div
@@ -598,7 +576,9 @@ function IngestionWorkflowSelector({
                 id={`${idPrefix}-ingestion-workflow-${item.key}`}
                 data-testid={`${idPrefix}-ingestion-workflow-${item.key}`}
                 type="button"
-                onClick={() => onChange(applyWorkflowToConfig(config, item.key))}
+                onClick={() =>
+                  onChange(applyWorkflowToConfig(config, item.key, providerProfiles))
+                }
                 className={`min-h-[138px] text-left border px-3 py-2.5 transition-colors ${workflowKindClass(
                   item.kind,
                   selected,
@@ -651,7 +631,9 @@ function IngestionWorkflowSelector({
               <button
                 key={item.key}
                 type="button"
-                onClick={() => onChange(applyWorkflowToConfig(config, item.key))}
+                onClick={() =>
+                  onChange(applyWorkflowToConfig(config, item.key, providerProfiles))
+                }
                 className={`text-left border px-2.5 py-2 transition-colors ${workflowKindClass(
                   item.kind,
                   false,
@@ -1137,6 +1119,7 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
                 config={newConfig}
                 onChange={setNewConfig}
                 idPrefix="create"
+                providerProfiles={globalIngestionDefaults?.provider_models ?? []}
               />
             </section>
 
@@ -1173,6 +1156,7 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
                   setNewConfig((prev) => ({ ...prev, ...patch }))
                 }
                 editing={true}
+                providerProfiles={globalIngestionDefaults?.provider_models ?? []}
               />
             </section>
 
@@ -1544,6 +1528,7 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
                           config={editConfig}
                           onChange={(next) => setEditConfig(next)}
                           idPrefix={`edit-${corpus.corpus_id}`}
+                          providerProfiles={globalIngestionDefaults?.provider_models ?? []}
                         />
 
                         <div>
@@ -1571,7 +1556,7 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
                         <div className="border-t border-accent-main/20 pt-3 space-y-3">
                           <div className="flex items-center gap-2 text-[10px] font-bold tracking-widest uppercase text-accent-main">
                             <span className="w-1 h-3 bg-accent-main" />
-                            Mutable — provider / credentials
+                            Mutable — provider mappings
                           </div>
 
                           <EmbedSection
@@ -1594,6 +1579,7 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
                             }
                             editing={true}
                             corpusId={corpus.corpus_id}
+                            providerProfiles={globalIngestionDefaults?.provider_models ?? []}
                           />
 
                           <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
@@ -1929,11 +1915,13 @@ function IngestionModelsSection({
   onPatch,
   editing,
   corpusId,
+  providerProfiles,
 }: {
   config: IngestionConfig;
   onPatch: (patch: Partial<IngestionConfig>) => void;
   editing: boolean;
   corpusId?: string;
+  providerProfiles: ModelProfileRef[];
 }) {
   const linked = config.models_linked !== false;
   const summaryPool = config.summary_models ?? [];
@@ -2226,34 +2214,29 @@ function IngestionModelsSection({
         </div>
       </div>
 
-      <IngestionModelPool
-        title="Summary Route"
-        subtitle="Parent-chunk summarization · tasks round-robined across chips"
+      <IngestionProviderSelector
+        title="Summary routes"
+        subtitle="Select saved Settings routes for parent-chunk summarization. Keys never enter this form."
+        role="summary"
+        profiles={providerProfiles}
         value={summaryPool}
         onChange={(next) => onPatch({ summary_models: next })}
         editing={editing}
-        testKind="chat"
-        testContext={{ corpusId, poolField: "summary_models" }}
       />
 
       {draftUsesProvider ? (
-        <IngestionModelPool
-          title="Extraction Route"
+        <IngestionProviderSelector
+          title="Extraction routes"
           subtitle={
             linked
-              ? "Legacy mode: Summary pool is currently reused for provider extraction"
-              : "Provider-card extraction lane · private RTX and API chips share this pool"
+              ? "Legacy summary reuse is active. Detach it above to select dedicated extraction routes."
+              : "Select cloud API and private RTX routes from the saved ingestion registry."
           }
+          role="extraction"
+          profiles={providerProfiles}
           value={extractionPool}
           onChange={(next) => onPatch({ extraction_models: next })}
-          editing={editing}
-          readOnly={linked}
-          readOnlyHint="Detach legacy summary reuse to configure a dedicated extraction pool."
-          testKind="chat"
-          testContext={{
-            corpusId,
-            poolField: linked ? "summary_models" : "extraction_models",
-          }}
+          editing={editing && !linked}
         />
       ) : (
         <div className="border border-border-minimal bg-bg-base/40 px-3 py-2 text-[10px] text-content-tertiary leading-snug">

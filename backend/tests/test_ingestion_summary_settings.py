@@ -133,6 +133,96 @@ def test_global_summary_settings_encrypt_mask_and_decrypt() -> None:
     assert update["summary"]["summary_models"][0]["api_key"] == stored_key
 
 
+def test_ingestion_provider_registry_preserves_keys_by_profile_id() -> None:
+    existing = {
+        "provider_models": [
+            {
+                "profile_id": "profile-a",
+                "profile_label": "Cloud A",
+                "provider_preset": "openai",
+                "model": "openai/model-a",
+                "base_url": "https://a.example/v1",
+                "api_key": encrypt("secret-a"),
+                "max_concurrent": 8,
+                "extra_params": {},
+            },
+            {
+                "profile_id": "profile-b",
+                "profile_label": "Cloud B",
+                "provider_preset": "openai",
+                "model": "openai/model-b",
+                "base_url": "https://b.example/v1",
+                "api_key": encrypt("secret-b"),
+                "max_concurrent": 4,
+                "extra_params": {},
+            },
+        ],
+        "summary": {"summary_models": []},
+    }
+    update = copy.deepcopy(existing)
+    update["provider_models"].reverse()
+    for entry in update["provider_models"]:
+        entry["api_key"] = "[set]"
+
+    SettingsService._encrypt_ingestion_keys_in_place(update, existing)
+
+    by_id = {entry["profile_id"]: entry for entry in update["provider_models"]}
+    assert decrypt(by_id["profile-a"]["api_key"]) == "secret-a"
+    assert decrypt(by_id["profile-b"]["api_key"]) == "secret-b"
+
+
+@pytest.mark.asyncio
+async def test_corpus_profile_ref_materializes_registry_secret(monkeypatch) -> None:
+    async def fake_registry(user_id: str):
+        assert user_id == "user-1"
+        return [
+            {
+                "profile_id": "profile-a",
+                "profile_label": "LongCat extraction",
+                "runtime": "cloud",
+                "capabilities": ["summary", "extraction"],
+                "enabled": True,
+                "provider_preset": "longcat",
+                "model": "openai/LongCat-Flash-Chat",
+                "base_url": "https://api.example/v1",
+                "api_key": encrypt("registry-secret"),
+                "max_concurrent": 45,
+                "extra_params": {"disable_thinking": True},
+            }
+        ]
+
+    monkeypatch.setattr(
+        settings_service,
+        "get_ingestion_provider_registry_raw",
+        fake_registry,
+    )
+    cfg = IngestionConfig(
+        extraction_engine="cloud",
+        extraction_models=[
+            {
+                "profile_id": "profile-a",
+                "provider_preset": "longcat",
+                "model": "openai/LongCat-Flash-Chat",
+                "base_url": None,
+                "api_key": None,
+                "max_concurrent": 32,
+                "extra_params": {},
+            }
+        ],
+    )
+
+    materialized = await IngestionService._materialize_ingestion_provider_refs(
+        user_id="user-1",
+        ingestion_config=cfg,
+    )
+
+    lane = materialized.extraction_models[0]
+    assert lane.profile_id == "profile-a"
+    assert lane.max_concurrent == 32
+    assert decrypt(lane.api_key) == "registry-secret"
+    assert lane.extra_params["disable_thinking"] is True
+
+
 def test_keyless_ollama_summary_update_clears_stale_cloud_key() -> None:
     existing = {
         "summary": {

@@ -1047,6 +1047,56 @@ class IngestionService:
             return ingestion_config
         return IngestionConfig(**{**ingestion_config.model_dump(), **patch})
 
+    @staticmethod
+    async def _materialize_ingestion_provider_refs(
+        *,
+        user_id: str,
+        ingestion_config: IngestionConfig,
+    ) -> IngestionConfig:
+        """Resolve secret-free corpus profile refs from Settings.
+
+        Corpus Manager stores a stable ``profile_id`` plus a per-corpus
+        concurrency override. The worker-facing snapshot remains the existing
+        ModelProfileRef shape, so every summary/extraction/indexing executor
+        keeps one proven dispatch contract while credentials stay editable in
+        Settings only.
+        """
+        if not user_id:
+            return ingestion_config
+        from services.settings import settings_service
+
+        registry = await settings_service.get_ingestion_provider_registry_raw(user_id)
+        by_id = {
+            str(entry.get("profile_id")): entry
+            for entry in registry
+            if isinstance(entry, dict)
+            and entry.get("profile_id")
+            and entry.get("enabled", True)
+        }
+        if not by_id:
+            return ingestion_config
+
+        config = ingestion_config.model_dump()
+        changed = False
+        for field in ("summary_models", "extraction_models", "embedding_models"):
+            resolved_pool: list[dict] = []
+            for current in config.get(field) or []:
+                if not isinstance(current, dict):
+                    resolved_pool.append(current)
+                    continue
+                saved = by_id.get(str(current.get("profile_id") or ""))
+                if not saved:
+                    resolved_pool.append(current)
+                    continue
+                replacement = dict(saved)
+                replacement["max_concurrent"] = current.get(
+                    "max_concurrent", replacement.get("max_concurrent", 1)
+                )
+                resolved_pool.append(replacement)
+                changed = True
+            config[field] = resolved_pool
+        return IngestionConfig(**config) if changed else ingestion_config
+
     async def create_corpus(
         self,
         name: str,
@@ -1061,6 +1111,10 @@ class IngestionService:
         from services.storage.mongo_writer import upsert_corpus
 
         ingestion_config = await self._apply_global_summary_defaults(
+            user_id=user_id,
+            ingestion_config=ingestion_config,
+        )
+        ingestion_config = await self._materialize_ingestion_provider_refs(
             user_id=user_id,
             ingestion_config=ingestion_config,
         )
@@ -1583,7 +1637,9 @@ class IngestionService:
             )
             config_dict[field] = _enc(config_dict.get(field), existing_val)
 
-    async def update_corpus(self, corpus_id: str, updates: dict) -> Optional[dict]:
+    async def update_corpus(
+        self, corpus_id: str, updates: dict, *, user_id: str | None = None
+    ) -> Optional[dict]:
         """
         Partial update of corpus metadata (name, description, config).
 
@@ -1631,8 +1687,13 @@ class IngestionService:
             # stored config before the write so frozen fields survive a
             # mutable-only patch, and vice-versa.
             merged_config = {**existing_config, **new_config}
-            new_config = merged_config
-            updates["default_ingestion_config"] = merged_config
+            effective_user_id = user_id or str((existing or {}).get("user_id") or "")
+            materialized = await self._materialize_ingestion_provider_refs(
+                user_id=effective_user_id,
+                ingestion_config=IngestionConfig(**merged_config),
+            )
+            new_config = materialized.model_dump()
+            updates["default_ingestion_config"] = new_config
 
         # Preset normalization: rewrite toggles to match the chosen preset
         # before the schema-diff / Qdrant-sync block runs, so we diff against

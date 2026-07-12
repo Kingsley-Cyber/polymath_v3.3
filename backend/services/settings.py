@@ -187,6 +187,7 @@ class SettingsService:
             modal=ModalDeploySettings(),
             extraction=self._extraction_defaults_from_env(),
             ingestion=GlobalIngestionSettings(
+                provider_models=[],
                 summary=GlobalIngestionSummarySettings(
                     enabled=False,
                     max_summary_tokens=c.SUMMARY_MAX_TOKENS,
@@ -237,14 +238,19 @@ class SettingsService:
 
     @staticmethod
     def _mask_ingestion_keys_in_place(ingestion_raw: dict | None) -> None:
-        """Mask settings-level Ghost A API keys before returning to the UI."""
+        """Mask ingestion-registry and legacy Ghost A keys before UI return."""
         if not ingestion_raw:
             return
-        summary = ingestion_raw.get("summary") or {}
-        pool = summary.get("summary_models") or []
-        for entry in pool:
-            if isinstance(entry, dict):
-                entry["api_key"] = _MASK_SENTINEL if entry.get("api_key") else None
+        pools = [
+            ingestion_raw.get("provider_models") or [],
+            (ingestion_raw.get("summary") or {}).get("summary_models") or [],
+        ]
+        for pool in pools:
+            for entry in pool:
+                if not isinstance(entry, dict):
+                    continue
+                for field in ("api_key", "lifecycle_api_key"):
+                    entry[field] = _MASK_SENTINEL if entry.get(field) else None
 
     @staticmethod
     def _decrypt_ingestion_keys_in_place(ingestion_raw: dict | None) -> None:
@@ -253,15 +259,19 @@ class SettingsService:
             return
         from services.secrets import decrypt
 
-        summary = ingestion_raw.get("summary") or {}
-        pool = summary.get("summary_models") or []
-        for entry in pool:
-            if not isinstance(entry, dict):
-                continue
-            raw_key = entry.get("api_key")
-            if raw_key:
-                plaintext = decrypt(raw_key)
-                entry["api_key"] = plaintext if plaintext is not None else raw_key
+        pools = [
+            ingestion_raw.get("provider_models") or [],
+            (ingestion_raw.get("summary") or {}).get("summary_models") or [],
+        ]
+        for pool in pools:
+            for entry in pool:
+                if not isinstance(entry, dict):
+                    continue
+                for field in ("api_key", "lifecycle_api_key"):
+                    raw_key = entry.get(field)
+                    if raw_key:
+                        plaintext = decrypt(raw_key)
+                        entry[field] = plaintext if plaintext is not None else raw_key
 
     @staticmethod
     def _encrypt_ingestion_keys_in_place(
@@ -274,17 +284,6 @@ class SettingsService:
         matching corpus-level ``summary_models`` update semantics.
         """
         from services.secrets import decrypt, encrypt
-
-        summary = ingestion_raw.get("summary") or {}
-        pool = summary.get("summary_models") or []
-        existing_summary = (existing_ingestion_raw or {}).get("summary") or {}
-        existing_pool = existing_summary.get("summary_models") or []
-
-        def _same_summary_target(entry: dict, existing_entry: dict) -> bool:
-            return all(
-                (entry.get(key) or None) == (existing_entry.get(key) or None)
-                for key in ("provider_preset", "model", "base_url")
-            )
 
         def _enc(new_val, existing_val, *, same_target: bool, provider: str):
             if provider in {"ollama", "ollama_chat", "local"} and not new_val:
@@ -299,8 +298,62 @@ class SettingsService:
                 return new_val
             return encrypt(new_val)
 
+        registry = ingestion_raw.get("provider_models") or []
+        existing_registry = (existing_ingestion_raw or {}).get("provider_models") or []
+        existing_by_id = {
+            str(entry.get("profile_id")): entry
+            for entry in existing_registry
+            if isinstance(entry, dict) and entry.get("profile_id")
+        }
+        for entry in registry:
+            if not isinstance(entry, dict):
+                continue
+            entry["profile_id"] = str(entry.get("profile_id") or uuid4())
+            entry.setdefault(
+                "profile_label",
+                str(entry.get("model") or entry.get("provider_preset") or "Ingestion route"),
+            )
+            existing_entry = existing_by_id.get(entry["profile_id"], {})
+            same_target = all(
+                (entry.get(key) or None) == (existing_entry.get(key) or None)
+                for key in ("provider_preset", "model", "base_url")
+            )
+            provider = str(entry.get("provider_preset") or "").lower()
+            for field in ("api_key", "lifecycle_api_key"):
+                entry[field] = _enc(
+                    entry.get(field),
+                    existing_entry.get(field),
+                    same_target=same_target,
+                    provider=provider,
+                )
+
+        registry_by_id = {
+            str(entry.get("profile_id")): entry
+            for entry in registry
+            if isinstance(entry, dict) and entry.get("profile_id")
+        }
+        summary = ingestion_raw.get("summary") or {}
+        pool = summary.get("summary_models") or []
+        existing_summary = (existing_ingestion_raw or {}).get("summary") or {}
+        existing_pool = existing_summary.get("summary_models") or []
+
+        def _same_summary_target(entry: dict, existing_entry: dict) -> bool:
+            return all(
+                (entry.get(key) or None) == (existing_entry.get(key) or None)
+                for key in ("provider_preset", "model", "base_url")
+            )
+
         for idx, entry in enumerate(pool):
             if not isinstance(entry, dict):
+                continue
+            profile_id = str(entry.get("profile_id") or "")
+            registry_entry = registry_by_id.get(profile_id)
+            if registry_entry:
+                concurrency = entry.get("max_concurrent")
+                entry.clear()
+                entry.update(copy.deepcopy(registry_entry))
+                if concurrency is not None:
+                    entry["max_concurrent"] = concurrency
                 continue
             existing_entry = (
                 existing_pool[idx]
@@ -313,6 +366,62 @@ class SettingsService:
                 same_target=_same_summary_target(entry, existing_entry),
                 provider=str(entry.get("provider_preset") or "").lower(),
             )
+
+    async def get_ingestion_provider_registry_raw(
+        self, user_id: str
+    ) -> list[dict[str, Any]]:
+        """Return encrypted registry rows for server-side corpus materialization."""
+        if self._db is None:
+            return []
+        doc = await self._db["settings"].find_one(
+            {"user_id": user_id}, {"_id": 0, "ingestion.provider_models": 1}
+        )
+        return copy.deepcopy(((doc or {}).get("ingestion") or {}).get("provider_models") or [])
+
+    async def _sync_ingestion_provider_snapshots(
+        self, user_id: str, registry: list[dict[str, Any]]
+    ) -> None:
+        """Refresh secret-bearing corpus snapshots after a registry edit.
+
+        Workers keep consuming the proven ModelProfileRef contract. Stable IDs
+        make credential rotation and endpoint changes propagate without asking
+        users to edit every corpus or exposing keys in Corpus Manager.
+        """
+        if self._db is None:
+            return
+        by_id = {
+            str(entry.get("profile_id")): entry
+            for entry in registry
+            if isinstance(entry, dict) and entry.get("profile_id")
+        }
+        if not by_id:
+            return
+        cursor = self._db["corpora"].find(
+            {"user_id": user_id},
+            {"_id": 1, "default_ingestion_config": 1},
+        )
+        async for corpus in cursor:
+            config = copy.deepcopy(corpus.get("default_ingestion_config") or {})
+            changed = False
+            for field in ("summary_models", "extraction_models", "embedding_models"):
+                pool = config.get(field) or []
+                for index, current in enumerate(pool):
+                    if not isinstance(current, dict):
+                        continue
+                    saved = by_id.get(str(current.get("profile_id") or ""))
+                    if not saved:
+                        continue
+                    replacement = copy.deepcopy(saved)
+                    replacement["max_concurrent"] = current.get(
+                        "max_concurrent", replacement.get("max_concurrent", 1)
+                    )
+                    pool[index] = replacement
+                    changed = True
+            if changed:
+                await self._db["corpora"].update_one(
+                    {"_id": corpus["_id"]},
+                    {"$set": {"default_ingestion_config": config, "updated_at": datetime.utcnow()}},
+                )
 
     async def get_runtime_ingestion_settings(
         self,
@@ -393,6 +502,9 @@ class SettingsService:
             {"user_id": user_id},
             {"$set": {"ingestion": to_write}},
             upsert=True,
+        )
+        await self._sync_ingestion_provider_snapshots(
+            user_id, to_write.get("provider_models") or []
         )
         masked = copy.deepcopy(to_write)
         self._mask_ingestion_keys_in_place(masked)

@@ -421,6 +421,27 @@ async def _model_ref_for_test(
 ) -> tuple[dict, str | None]:
     data = body.entry.model_dump()
 
+    profile_id = str(data.get("profile_id") or "").strip()
+    if profile_id:
+        from services.settings import settings_service
+
+        registry = await settings_service.get_ingestion_provider_registry_raw(user_id)
+        saved = next(
+            (
+                entry
+                for entry in registry
+                if isinstance(entry, dict)
+                and str(entry.get("profile_id") or "") == profile_id
+            ),
+            None,
+        )
+        if saved is None:
+            return data, "Saved ingestion provider no longer exists in Settings."
+        concurrency = data.get("max_concurrent")
+        data = dict(saved)
+        if concurrency is not None:
+            data["max_concurrent"] = concurrency
+
     # Non-ASCII guard (2026-07-04): keys/urls pasted from formatted sources
     # arrive with smart dashes/quotes (em-dash \u2014 etc.). They end up in
     # HTTP headers, which must be ASCII — litellm then 500s with a cryptic
@@ -1239,7 +1260,9 @@ async def update_corpus(
         raise HTTPException(status_code=400, detail="No fields to update")
 
     try:
-        doc = await ingestion_service.update_corpus(corpus_id, updates)
+        doc = await ingestion_service.update_corpus(
+            corpus_id, updates, user_id=current_user["user_id"]
+        )
     except FrozenFieldError as exc:
         # Phase 21 — full FROZEN field lock tripped. Return structured 409
         # so the frontend can display a helpful dialog.
