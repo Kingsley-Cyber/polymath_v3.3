@@ -754,6 +754,7 @@ Acceptance:
 - [ ] Add or verify reranker-side priority admission.
 - [ ] Measure whether keepalive provides value after startup warmup.
 - [ ] Evaluate separate ingestion embedder capacity only if contention persists.
+  **[IN CODE — wave2/rpembed, pending merge + endpoint deploy]**
 
 Acceptance:
 
