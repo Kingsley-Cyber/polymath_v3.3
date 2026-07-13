@@ -1056,6 +1056,55 @@ A corpus is strict-ready only when:
   regeneration running as bounded resumable jobs; boxes flip after all
   corpora verify and three-tier recall probes show no regression.
 
+### 2026-07-13 - P0.4 honest answerability (code complete; live verify pending restart)
+
+- Commit: (this commit)
+- Owner: goal-mode agent
+- Root cause (live baseline evidence): the synthetic fallback probe
+  (`query_plan.FALLBACK_PROBE_ID == "primary"`, created for undecomposed
+  queries) became a refusal-critical `concept:primary` atom, and
+  `filter_grounded_planned_candidates` gated single-lane packs at the 0.75
+  grounding threshold despite its documented multi-side contract — together
+  producing the recorded cross-corpus false refusal ("did not establish
+  primary strongly enough").
+- Code changes: fallback probe id is now a documented reserved constant;
+  the grounded-lane filter excludes synthetic lanes (named single-side
+  filtering unchanged); retriever sufficiency separates lane COVERAGE
+  (`selection.lane_coverage`, telemetry incl. synthetic lanes) from
+  ANSWERABILITY (undecomposed queries judged by the strict evidence-atom
+  gate, so negative controls still fail closed);
+  `required_concept_coverage` excludes the synthetic lane so the chat gate
+  can no longer promote it to a critical atom; chat gate emits
+  `lane_coverage`/`answer_shape`/`coverage_threshold` separately; coverage
+  thresholds calibrate by answer shape (broad -0.20, enumeration/comparison
+  -0.10, floor 0.40 — shape-keyed, never content-keyed); refusals name the
+  nearest retrieved documents and never leak internal lane ids.
+- Tests: `tests/test_answerability_honesty.py` (6) + updated
+  `test_planned_fusion.py` fixture that had used the now-reserved lane id.
+  Full backend suite green: 2,563 passed.
+- Deployment/live verification: pending backend restart (deferred so running
+  P0.1 backfills are not killed); acceptance re-probe (cross-corpus answer +
+  tungsten fail-closed on all tiers) follows the restart.
+
+### 2026-07-13 - P1.1 held-out suite + contamination firewall (baseline run pending)
+
+- Commit: (this commit)
+- Owner: goal-mode agent
+- Artifacts: `backend/evals/heldout_questions.jsonl` — 56 questions across
+  direct/naive/single-fact/broad/list/procedural/comparison/followup/
+  negative-control/cross-domain/cross-corpus/irrelevant-corpus shapes and all
+  four active corpora, each with expected docs (validated against Mongo),
+  expected concepts, and acceptable-alternate notes;
+  `backend/scripts/freeze_heldout_eval.py` (structural + ground-truth
+  validation, hash freeze); `backend/evals/heldout_hashes.json` (56 frozen
+  hashes); `backend/services/eval_firewall.py` (`is_heldout_query` — any
+  future attested/generated representation harvesting MUST consult it);
+  `backend/scripts/run_heldout_eval.py` (three-tier runner: doc recall,
+  concept recall, answerability match, corpus diversity, latency).
+- Baseline metric capture: deliberately deferred until P0.1 completes on
+  polymath_v2 so the baseline reflects the repaired catalog; runs follow the
+  backend restart.
+
 ## Implementation Log Template
 
 Copy this section for every completed item:

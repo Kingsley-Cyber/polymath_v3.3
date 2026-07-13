@@ -6,6 +6,7 @@ import re
 from dataclasses import dataclass
 
 from models.schemas import SourceChunk
+from services.retriever.query_plan import FALLBACK_PROBE_ID
 from services.retriever.reservation_policy import (
     CORPUS_RESERVATION_MIN_SCORE,
     CORPUS_RESERVATION_MIN_SCORE_RATIO,
@@ -321,8 +322,24 @@ def filter_grounded_planned_candidates(
         "grounded_lane_ids": grounded_planned_lane_ids(chunks, required),
         "applied": False,
     }
+    # The synthetic fallback probe is retrieval plumbing, not a semantic side.
+    # Gating a whole packet on its 0.75 grounding threshold starves broad
+    # undecomposed queries and produced false refusals (P0.4). Named
+    # single-side filtering (a real user concept) remains supported.
+    synthetic_dropped = [lane for lane in required if lane == FALLBACK_PROBE_ID]
+    if synthetic_dropped:
+        required = [lane for lane in required if lane != FALLBACK_PROBE_ID]
+        diagnostics["required_lane_ids"] = required
+        diagnostics["synthetic_lanes_excluded"] = synthetic_dropped
+        diagnostics["grounded_lane_ids"] = grounded_planned_lane_ids(
+            chunks, required
+        )
     if not required:
-        diagnostics["reason"] = "no_required_lanes"
+        diagnostics["reason"] = (
+            "synthetic_fallback_lane_fail_open"
+            if synthetic_dropped
+            else "no_required_lanes"
+        )
         return chunks, diagnostics
     if any(
         len(_normalized_tokens(lane_id)) == 1 and len(lane_id) <= 3

@@ -30,6 +30,11 @@ QueryComplexity = Literal[
 ]
 QueryLaneRole = Literal["original", "core", "bridge", "background"]
 ProbeRole = Literal["primary", "support", "bridge"]
+# The synthetic catch-all probe created when a query does not decompose into
+# concept probes. It is internal retrieval plumbing: it may drive lanes and
+# repair, but it must never be treated as a refusal-critical user concept and
+# must never leak into user-facing refusal text (P0.4).
+FALLBACK_PROBE_ID = "primary"
 ConstraintOperator = Literal["include", "exclude"]
 ConstraintKind = Literal["audience", "temporal", "content"]
 AnswerShape = Literal[
@@ -1041,7 +1046,7 @@ def _build_retrieval_probes(
             )
         probes.append(
             RetrievalProbe(
-                probe_id="primary",
+                probe_id=FALLBACK_PROBE_ID,
                 question=primary_question,
                 answer_type=answer_shape,
                 concepts=tuple(concepts),

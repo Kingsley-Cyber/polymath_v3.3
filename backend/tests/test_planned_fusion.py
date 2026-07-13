@@ -451,8 +451,11 @@ def test_grounding_filter_preserves_exact_query_recall_lane():
 
 
 def test_single_side_filter_preserves_literal_vocabulary_translation():
+    # NOTE: the single named side deliberately avoids the reserved synthetic
+    # fallback id (query_plan.FALLBACK_PROBE_ID == "primary"), which now fails
+    # open by contract (P0.4). Named single-side filtering stays supported.
     required = _chunk("required", "a")
-    required.metadata = {"planned_lane_grounding": {"primary": 2.0}}
+    required.metadata = {"planned_lane_grounding": {"movement_notation": 2.0}}
     translated = _chunk("translated", "a")
     translated.metadata = {
         "planned_lanes": ["translation_facs"],
@@ -467,7 +470,7 @@ def test_single_side_filter_preserves_literal_vocabulary_translation():
 
     result, diagnostics = filter_grounded_planned_candidates(
         [route_only, required, translated],
-        ["primary"],
+        ["movement_notation"],
     )
 
     assert [chunk.chunk_id for chunk in result] == ["required", "translated"]

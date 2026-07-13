@@ -82,10 +82,29 @@ def lane_strong_score() -> int:
     return max(1, int(getattr(get_settings(), "LANE_STRONG_SCORE", 8) or 8))
 
 
-def coverage_threshold() -> float:
+def coverage_threshold(answer_shape: str | None = None) -> float:
     """Required-atom coverage to answer without the text-help branch. Default
-    0.80; clamped to a sane band so a bad .env can't disable the gate."""
-    return _clamp(getattr(get_settings(), "ANSWERABILITY_COVERAGE_THRESHOLD", 0.80), 0.40, 0.95, 0.80)
+    0.80; clamped to a sane band so a bad .env can't disable the gate.
+
+    P0.4 — sufficiency is calibrated by answer SHAPE, not one universal
+    threshold: broad synthesis legitimately draws on partial coverage of many
+    concepts and enumerations/comparisons tolerate a missing minor facet,
+    while single-fact/definition questions keep the strict default. Shape
+    modifiers key on the query's shape, never its content, and the base stays
+    env-tunable."""
+
+    base = _clamp(
+        getattr(get_settings(), "ANSWERABILITY_COVERAGE_THRESHOLD", 0.80),
+        0.40,
+        0.95,
+        0.80,
+    )
+    shape = str(answer_shape or "").strip().lower()
+    if shape in {"broad_synthesis", "synthesis", "broad"}:
+        return max(0.40, round(base - 0.20, 4))
+    if shape in {"enumeration", "comparison"}:
+        return max(0.40, round(base - 0.10, 4))
+    return base
 
 
 def text_help_threshold() -> float:

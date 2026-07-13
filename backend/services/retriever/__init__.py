@@ -68,6 +68,7 @@ from services.retriever.planned_fusion import (
     reserve_planned_finalists,
 )
 from services.retriever.query_plan import (
+    FALLBACK_PROBE_ID,
     QueryPlanV2,
     answer_object_lane_ids,
     answer_object_title_terms,
@@ -3118,29 +3119,83 @@ class RetrieverOrchestrator:
         )
         selection_diagnostics = dict(diversity.diagnostics or {})
         scoring_sufficiency = selection_diagnostics.get("sufficiency")
-        required_lane_atoms = [f"concept:{lane_id}" for lane_id in required_lane_ids]
         supported_lane_set = set(supported_lane_ids)
-        covered_lane_atoms = [
-            f"concept:{lane_id}"
-            for lane_id in required_lane_ids
-            if lane_id in supported_lane_set
+        # P0.4 — separate lane COVERAGE (telemetry; includes the synthetic
+        # fallback probe) from ANSWERABILITY (the refusal signal; never keyed
+        # to internal plumbing). The synthetic fallback lane may drive
+        # retrieval and repair, but an undecomposed query must be judged by
+        # evidence-atom sufficiency, not by whether one catch-all lane cleared
+        # a grounding threshold.
+        refusal_lane_ids = [
+            lane_id for lane_id in required_lane_ids if lane_id != FALLBACK_PROBE_ID
         ]
-        missing_lane_atoms = [
-            f"concept:{lane_id}"
-            for lane_id in required_lane_ids
-            if lane_id not in supported_lane_set
+        synthetic_lane_ids = [
+            lane_id for lane_id in required_lane_ids if lane_id == FALLBACK_PROBE_ID
         ]
+        selection_diagnostics["lane_coverage"] = {
+            "required_lane_ids": required_lane_ids,
+            "supported_lane_ids": supported_lane_ids,
+            "coverage": round(required_lane_coverage, 4),
+            "synthetic_lane_ids": synthetic_lane_ids,
+        }
         if isinstance(scoring_sufficiency, dict):
             selection_diagnostics["scoring_sufficiency"] = scoring_sufficiency
-        selection_diagnostics["sufficiency"] = {
-            "required_atoms": required_lane_atoms,
-            "covered_required_atoms": covered_lane_atoms,
-            "missing_atoms": missing_lane_atoms,
-            "missing_critical_atoms": missing_lane_atoms,
-            "required_coverage": round(required_lane_coverage, 4),
-            "answerable": bool(finalists) and required_lane_coverage >= 1.0,
-            "source": "query_plan_required_lanes",
-        }
+        if refusal_lane_ids:
+            required_lane_atoms = [
+                f"concept:{lane_id}" for lane_id in refusal_lane_ids
+            ]
+            covered_lane_atoms = [
+                f"concept:{lane_id}"
+                for lane_id in refusal_lane_ids
+                if lane_id in supported_lane_set
+            ]
+            missing_lane_atoms = [
+                f"concept:{lane_id}"
+                for lane_id in refusal_lane_ids
+                if lane_id not in supported_lane_set
+            ]
+            refusal_coverage = len(covered_lane_atoms) / len(required_lane_atoms)
+            selection_diagnostics["sufficiency"] = {
+                "required_atoms": required_lane_atoms,
+                "covered_required_atoms": covered_lane_atoms,
+                "missing_atoms": missing_lane_atoms,
+                "missing_critical_atoms": missing_lane_atoms,
+                "required_coverage": round(refusal_coverage, 4),
+                "answerable": bool(finalists) and refusal_coverage >= 1.0,
+                "source": "query_plan_required_lanes",
+            }
+        elif isinstance(scoring_sufficiency, dict):
+            # Undecomposed query: judge by the strict evidence-atom gate that
+            # already drove sufficiency repair, so negative controls still
+            # fail closed while grounded broad questions answer.
+            selection_diagnostics["sufficiency"] = {
+                "required_atoms": list(
+                    scoring_sufficiency.get("required_atoms") or []
+                ),
+                "covered_required_atoms": list(
+                    scoring_sufficiency.get("covered_required_atoms") or []
+                ),
+                "missing_atoms": list(scoring_sufficiency.get("missing_atoms") or []),
+                "missing_critical_atoms": list(
+                    scoring_sufficiency.get("missing_critical_atoms") or []
+                ),
+                "required_coverage": float(
+                    scoring_sufficiency.get("required_coverage") or 0.0
+                ),
+                "answerable": bool(finalists)
+                and bool(scoring_sufficiency.get("answerable")),
+                "source": "evidence_atom_sufficiency",
+            }
+        else:
+            selection_diagnostics["sufficiency"] = {
+                "required_atoms": [],
+                "covered_required_atoms": [],
+                "missing_atoms": [],
+                "missing_critical_atoms": [],
+                "required_coverage": 1.0 if finalists else 0.0,
+                "answerable": bool(finalists),
+                "source": "evidence_presence",
+            }
         corpus_distribution: dict[str, int] = {}
         document_distribution: dict[str, int] = {}
         predicates_used: set[str] = set()
@@ -3283,9 +3338,30 @@ class RetrieverOrchestrator:
             "reservations": reservation_diagnostics,
             "cache": {"hit": False, "key_version": "retrieval_v2"},
             "required_concept_coverage": {
-                "required_lane_ids": required_lane_ids,
-                "supported_lane_ids": supported_lane_ids,
-                "coverage": round(required_lane_coverage, 3),
+                # Refusal-relevant lanes only: the synthetic fallback probe is
+                # retrieval plumbing and must not become a chat-gate critical
+                # atom (P0.4). Full lane telemetry incl. the synthetic lane
+                # lives in selection.lane_coverage.
+                "required_lane_ids": refusal_lane_ids,
+                "supported_lane_ids": [
+                    lane_id
+                    for lane_id in supported_lane_ids
+                    if lane_id != FALLBACK_PROBE_ID
+                ],
+                "coverage": round(
+                    (
+                        sum(
+                            1
+                            for lane_id in refusal_lane_ids
+                            if lane_id in supported_lane_set
+                        )
+                        / len(refusal_lane_ids)
+                    )
+                    if refusal_lane_ids
+                    else 1.0,
+                    3,
+                ),
+                "synthetic_lane_ids": synthetic_lane_ids,
             },
             "protected_recall_lanes": protected_lane_ids,
             "repair": {

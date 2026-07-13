@@ -66,6 +66,7 @@ from services.retriever.evidence_allocation import (
     per_doc_cap_for_plan as _evidence_per_doc_cap_for_plan,
     select_lane_support as _ea_select_lane_support,
 )
+from services.retriever.query_plan import FALLBACK_PROBE_ID as _FALLBACK_PROBE_ID
 from services.answerability_tuning import (
     CROSS_DOCUMENT_RELATIONSHIP_ATOM as _CROSS_DOC_ATOM,
     coverage_threshold as _answerability_coverage_threshold,
@@ -1097,7 +1098,12 @@ def _build_retrieval_answerability_gate(
                 len(covered_set) / len(required_set) if required_set else 1.0
             )
 
-    _cov_floor = _answerability_coverage_threshold()
+    answer_shape = (
+        str((diagnostics or {}).get("answer_shape") or "")
+        if isinstance(diagnostics, dict)
+        else ""
+    )
+    _cov_floor = _answerability_coverage_threshold(answer_shape or None)
     _text_floor = _answerability_text_help_threshold()
     _partial_floor = _answerability_partial_floor()
     effective_answerable = (
@@ -1146,6 +1152,16 @@ def _build_retrieval_answerability_gate(
         "missing_atoms": missing_atoms,
         "missing_critical_atoms": missing_critical,
         "required_coverage": round(required_coverage, 4),
+        # P0.4 — lane coverage is telemetry, answerability is the decision;
+        # surface them separately so UI/MCP can render both without conflation.
+        "lane_coverage": (
+            (diagnostics or {}).get("selection", {}).get("lane_coverage")
+            if isinstance(diagnostics, dict)
+            and isinstance((diagnostics or {}).get("selection"), dict)
+            else None
+        ),
+        "answer_shape": answer_shape or None,
+        "coverage_threshold": round(_cov_floor, 4),
         "diagnostic_source": (
             "retriever_sufficiency+evidence_plan"
             if sufficiency and plan_meta.get("active")
@@ -1247,6 +1263,10 @@ def _should_short_circuit_answerability(
 
 def _friendly_missing_atom(atom: str) -> str:
     text = str(atom or "").strip()
+    if text == f"concept:{_FALLBACK_PROBE_ID}":
+        # Internal synthetic catch-all lane; never leak plumbing ids into
+        # user-facing refusal text (P0.4).
+        return "the main subject of the question"
     if text.startswith("concept:"):
         return text.split(":", 1)[1].replace("_", " ")
     if text == "methods_tasks":
@@ -1260,6 +1280,7 @@ def _format_answerability_short_circuit_response(
     gate: dict[str, Any],
     *,
     query: str,
+    sources: list[SourceChunk] | None = None,
 ) -> str:
     missing = [
         _friendly_missing_atom(atom)
@@ -1267,11 +1288,28 @@ def _format_answerability_short_circuit_response(
         if str(atom).strip()
     ]
     missing_text = ", ".join(dict.fromkeys(missing)) or "the required evidence"
+    # P0.4 — a precise refusal names what the retrieved material DOES cover,
+    # so a nearby-but-different-concept miss is visible to the user.
+    nearby_names: list[str] = []
+    for chunk in sources or []:
+        name = str(
+            getattr(chunk, "doc_name", "") or getattr(chunk, "filename", "") or ""
+        ).strip()
+        if name and name not in nearby_names:
+            nearby_names.append(name)
+        if len(nearby_names) >= 3:
+            break
+    nearby_text = (
+        f" The nearest retrieved material comes from: {'; '.join(nearby_names)}."
+        if nearby_names
+        else ""
+    )
     if int(gate.get("source_count") or 0) > 0:
         return (
             "I cannot answer that as a source-backed result from the selected "
             f"corpus. The retrieval found some related material, but it did not "
-            f"establish {missing_text} strongly enough to support the question. "
+            f"establish {missing_text} strongly enough to support the question."
+            f"{nearby_text} "
             "Try a broader corpus/search scope or ask for the narrower part the "
             "retrieved sources do cover."
         )
@@ -7539,6 +7577,7 @@ class ChatOrchestrator:
             assistant_content = _format_answerability_short_circuit_response(
                 answerability_gate,
                 query=request.message,
+                sources=sources,
             )
             user_saved = await conversation_service.append_message(
                 str(conversation_id),
