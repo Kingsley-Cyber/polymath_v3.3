@@ -261,6 +261,8 @@ def test_extract_entities_report_carries_sidecar_failures(monkeypatch):
         evidence_drop_count: int = 0
         fact_drop_count: int = 0
         schema_lens_id: str | None = None
+        temporal_captures: list = field(default_factory=list)
+        temporal_capture_version: str | None = None
 
     @dataclass
     class _ExtractionFailureItem:
