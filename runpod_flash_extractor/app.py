@@ -20,8 +20,94 @@ from runpod_flash import Endpoint, GpuType, ServerlessScalerType
 _MODEL_CACHE: dict[tuple[str, str], Any] = {}
 _MODEL_SOURCE_CACHE: dict[tuple[str, str], str] = {}
 _SPACY_CACHE: dict[str, Any] = {}
-_CONTRACT_VERSION = "polymath.runpod_gliner_relex.v2"
+_CONTRACT_VERSION = "polymath.runpod_gliner_relex.v3"
+# T-HOOK-1: v3 only ADDS the per-chunk ``time_expressions`` capture field to
+# the response; the request envelope is unchanged. Backends still stamping v2
+# requests therefore remain valid and simply receive the additive field.
+_ACCEPTED_CONTRACT_VERSIONS = frozenset(
+    {"polymath.runpod_gliner_relex.v2", _CONTRACT_VERSION}
+)
 _HF_CACHE_ROOT = Path("/runpod-volume/huggingface-cache/hub")
+
+# ---------------------------------------------------------------------------
+# T-HOOK-1 temporal CAPTURE (capture-only; resolution is a later Polymath-side
+# stage). Deterministic surface-form detection: spaCy DATE/TIME/EVENT entity
+# spans where the loaded pipeline provides them, plus a conservative regex
+# family. No calendar normalization, no validity claims — surface + exact
+# chunk offsets + keyword-cue role guesses only.
+_TIME_EXPRESSIONS_MAX_PER_CHUNK = 64
+_TIME_CUE_WINDOW_CHARS = 40
+_SPACY_TIME_ENT_LABELS = frozenset({"DATE", "TIME", "EVENT"})
+
+_MONTH_TOKEN = (
+    "January|February|March|April|May|June|July|August|September|October|"
+    "November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sept|Sep|Oct|Nov|Dec"
+)
+_YEAR_TOKEN = r"(?:19|20)\d{2}"
+# Ordered by specificity; earlier families suppress overlapping later matches
+# (e.g. the bare year inside an ISO date or a quarter is not double-captured).
+_TIME_REGEX_FAMILY: tuple[tuple[str, "re.Pattern[str]"], ...] = (
+    ("iso_date", re.compile(r"\b\d{4}-\d{2}-\d{2}\b")),
+    ("quarter", re.compile(rf"\bQ[1-4]\s+{_YEAR_TOKEN}\b")),
+    ("month_year", re.compile(rf"\b(?:{_MONTH_TOKEN})\.?\s+{_YEAR_TOKEN}\b")),
+    ("version", re.compile(r"\bv?\d+\.\d+(?:\.\d+)*\b")),
+    ("year", re.compile(rf"\b{_YEAR_TOKEN}\b")),
+)
+# Version-string guard: a bare dotted number only counts as a temporal-ish
+# version marker when a release/version token sits within the cue window.
+_VERSION_CUE_RE = re.compile(
+    r"\b(?:release|releases|released|version|versions)\b", re.IGNORECASE
+)
+# Deterministic role-candidate cues (guess list, never a resolution claim).
+# Fixed order matches the wire contract enumeration.
+_TIME_ROLE_CUES: tuple[tuple[str, "re.Pattern[str]"], ...] = (
+    (
+        "publication",
+        re.compile(
+            r"\b(?:published|publishes|publish|publication|issued|released)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "revision",
+        re.compile(
+            r"\b(?:updated|revised|revision|amended|modified)\b", re.IGNORECASE
+        ),
+    ),
+    (
+        "reference",
+        re.compile(r"\b(?:as of|according to|data from)\b", re.IGNORECASE),
+    ),
+    (
+        "event",
+        re.compile(
+            r"\b(?:occurred|happened|took place|launched|founded|began)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "effective",
+        re.compile(
+            r"\b(?:effective|takes effect|in effect|comes into force)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "forecast",
+        re.compile(
+            r"\b(?:will launch|will release|will ship|expected|forecasts?"
+            r"|projected|predicted|anticipated)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "deadline",
+        re.compile(
+            r"\b(?:deadline|due by|due on|due date|no later than)\b",
+            re.IGNORECASE,
+        ),
+    ),
+)
 
 
 def _label_key(value: str) -> str:
@@ -111,6 +197,65 @@ def _canonical_name(value: str) -> str:
     return " ".join(normalized.split())[:200]
 
 
+def _time_role_candidates(text: str, start: int, end: int) -> list[str]:
+    """Keyword-cue role guesses within the +/- cue window around a span."""
+
+    left = max(0, start - _TIME_CUE_WINDOW_CHARS)
+    context = text[left : end + _TIME_CUE_WINDOW_CHARS]
+    return [role for role, cue in _TIME_ROLE_CUES if cue.search(context)]
+
+
+def _version_cue_adjacent(text: str, start: int, end: int) -> bool:
+    left = max(0, start - _TIME_CUE_WINDOW_CHARS)
+    return bool(_VERSION_CUE_RE.search(text[left : end + _TIME_CUE_WINDOW_CHARS]))
+
+
+def _time_expressions(text: str, doc: Any) -> tuple[list[dict[str, Any]], bool]:
+    """Capture temporal surface forms with exact offsets into ``text``.
+
+    Detectors: spaCy DATE/TIME/EVENT entity spans (when the pipeline exposes
+    ``doc.ents``) first, then the conservative regex family. Overlapping later
+    matches are suppressed so each surface region is captured once. Returns
+    ``(expressions, truncated)`` where the list is offset-ordered and capped
+    at ``_TIME_EXPRESSIONS_MAX_PER_CHUNK``.
+    """
+
+    if not text:
+        return [], False
+    captured: list[dict[str, Any]] = []
+    taken: list[tuple[int, int]] = []
+
+    def _add(start: int, end: int, detector: str) -> None:
+        if start >= end or any(s < end and start < e for s, e in taken):
+            return
+        taken.append((start, end))
+        captured.append(
+            {
+                "text": text[start:end],
+                "char_start": start,
+                "char_end": end,
+                "detector": detector,
+                "role_candidates": _time_role_candidates(text, start, end),
+            }
+        )
+
+    ents = getattr(doc, "ents", ()) if doc is not None else ()
+    for ent in ents:
+        if getattr(ent, "label_", "") in _SPACY_TIME_ENT_LABELS:
+            _add(int(ent.start_char), int(ent.end_char), "spacy")
+    for family, pattern in _TIME_REGEX_FAMILY:
+        for match in pattern.finditer(text):
+            if family == "version" and not _version_cue_adjacent(
+                text, match.start(), match.end()
+            ):
+                continue
+            _add(match.start(), match.end(), "regex")
+
+    captured.sort(key=lambda item: (item["char_start"], item["char_end"]))
+    truncated = len(captured) > _TIME_EXPRESSIONS_MAX_PER_CHUNK
+    return captured[:_TIME_EXPRESSIONS_MAX_PER_CHUNK], truncated
+
+
 def _cached_model_path(
     model_id: str,
     model_revision: str,
@@ -183,8 +328,7 @@ def _model(model_id: str, model_revision: str):
     return model
 
 
-def _sentence_spans(text: str, nlp: Any) -> list[tuple[int, int]]:
-    doc = nlp(text)
+def _sentence_spans(text: str, doc: Any) -> list[tuple[int, int]]:
     spans = [(sent.start_char, sent.end_char) for sent in doc.sents if sent.text.strip()]
     return spans or [(0, len(text))]
 
@@ -194,10 +338,15 @@ def _windows(
     *,
     nlp: Any,
     max_words: int,
+    doc: Any = None,
 ) -> tuple[list[tuple[str, int]], list[tuple[int, int]]]:
     if not text.strip():
         return [], []
-    sentence_spans = _sentence_spans(text, nlp)
+    # T-HOOK-1: the caller passes the already-parsed doc so the temporal
+    # capture pass and sentence windowing share ONE spaCy parse per chunk.
+    if doc is None:
+        doc = nlp(text)
+    sentence_spans = _sentence_spans(text, doc)
     if len(text.split()) <= max_words:
         return [(text, 0)], sentence_spans
     windows: list[tuple[str, int]] = []
@@ -262,6 +411,8 @@ def _extract_task(
     sentence_spans: list[tuple[int, int]],
     entity_label_map: dict[str, str] | None = None,
     relation_label_map: dict[str, str] | None = None,
+    time_expressions: list[dict[str, Any]] | None = None,
+    time_expressions_truncated: bool = False,
 ) -> dict[str, Any]:
     text = str(task.get("text") or "")
     entity_label_map = entity_label_map or {}
@@ -348,6 +499,10 @@ def _extract_task(
         "entities": list(entity_best.values()),
         "relations": list(relation_best.values()),
         "facts": [],
+        # T-HOOK-1 capture-only payload: temporal surface forms with exact
+        # offsets into this chunk's text. Never normalized here.
+        "time_expressions": list(time_expressions or []),
+        "time_expressions_truncated": bool(time_expressions_truncated),
         "text": text,
         "entity_drop_count": 0,
         "relation_drop_count": 0,
@@ -388,7 +543,7 @@ def _extract_task(
 )
 def extract_batch(payload: dict[str, Any]) -> dict[str, Any]:
     started = time.perf_counter()
-    if payload.get("contract_version") != _CONTRACT_VERSION:
+    if payload.get("contract_version") not in _ACCEPTED_CONTRACT_VERSIONS:
         raise ValueError("unsupported extraction contract")
     tasks = list(payload.get("tasks") or [])
     entity_labels = list(payload.get("entity_labels") or [])
@@ -422,12 +577,18 @@ def extract_batch(payload: dict[str, Any]) -> dict[str, Any]:
     flattened: list[str] = []
     task_windows: list[list[tuple[str, int]]] = []
     task_sentences: list[list[tuple[int, int]]] = []
+    task_time_expressions: list[tuple[list[dict[str, Any]], bool]] = []
     for task in tasks:
+        task_text = str(task.get("text") or "")
+        # One spaCy parse per chunk, shared by sentence windowing and the
+        # T-HOOK-1 temporal capture pass.
+        doc = nlp(task_text) if task_text.strip() else None
         windows, sentences = _windows(
-            str(task.get("text") or ""), nlp=nlp, max_words=max_window_words
+            task_text, nlp=nlp, max_words=max_window_words, doc=doc
         )
         task_windows.append(windows)
         task_sentences.append(sentences)
+        task_time_expressions.append(_time_expressions(task_text, doc))
         flattened.extend(text for text, _offset in windows)
 
     entity_threshold = float(payload.get("entity_threshold") or 0.4)
@@ -503,6 +664,7 @@ def extract_batch(payload: dict[str, Any]) -> dict[str, Any]:
     cursor = 0
     for task_index, task in enumerate(tasks):
         count = len(task_windows[task_index])
+        expressions, expressions_truncated = task_time_expressions[task_index]
         results.append(
             _extract_task(
                 task,
@@ -512,6 +674,8 @@ def extract_batch(payload: dict[str, Any]) -> dict[str, Any]:
                 sentence_spans=task_sentences[task_index],
                 entity_label_map=entity_label_map,
                 relation_label_map=relation_label_map,
+                time_expressions=expressions,
+                time_expressions_truncated=expressions_truncated,
             )
         )
         cursor += count
@@ -529,6 +693,9 @@ def extract_batch(payload: dict[str, Any]) -> dict[str, Any]:
             "windows": len(flattened),
             "entities_emitted": sum(len(rows or []) for rows in entities),
             "relations_emitted": sum(len(rows or []) for rows in relations),
+            "time_expressions_emitted": sum(
+                len(items) for items, _truncated in task_time_expressions
+            ),
             "entity_lens_enabled": entity_lens_enabled,
             "entity_lens_groups": len(lens_groups),
             "entity_lens_second_pass_windows": sum(

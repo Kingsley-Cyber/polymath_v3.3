@@ -5,6 +5,26 @@ from pathlib import Path
 import app
 
 
+class _FakeEnt:
+    def __init__(self, label: str, start_char: int, end_char: int) -> None:
+        self.label_ = label
+        self.start_char = start_char
+        self.end_char = end_char
+
+
+class _FakeSent:
+    def __init__(self, text: str, start_char: int, end_char: int) -> None:
+        self.text = text[start_char:end_char]
+        self.start_char = start_char
+        self.end_char = end_char
+
+
+class _FakeDoc:
+    def __init__(self, text: str, ents=(), sents=None) -> None:
+        self.ents = list(ents)
+        self.sents = list(sents or [_FakeSent(text, 0, len(text))])
+
+
 def test_flash_endpoint_contract_is_burst_safe() -> None:
     remote = app.extract_batch.__remote_config__
     config = remote["resource_config"].model_dump(mode="json")
@@ -26,6 +46,121 @@ def test_empty_text_creates_no_inference_window() -> None:
     windows, sentences = app._windows("   ", nlp=object(), max_words=260)
     assert windows == []
     assert sentences == []
+
+
+def test_windows_reuses_the_caller_provided_doc_without_a_second_parse() -> None:
+    text = "One short sentence."
+    # nlp=object() is not callable: passing it proves _windows never re-parses
+    # when the shared per-chunk doc is supplied (T-HOOK-1 single-parse rule).
+    windows, sentences = app._windows(
+        text, nlp=object(), max_words=260, doc=_FakeDoc(text)
+    )
+    assert windows == [(text, 0)]
+    assert sentences == [(0, len(text))]
+
+
+def test_contract_version_is_v3_and_accepts_the_known_compatible_set() -> None:
+    assert app._CONTRACT_VERSION == "polymath.runpod_gliner_relex.v3"
+    assert app._ACCEPTED_CONTRACT_VERSIONS == frozenset(
+        {
+            "polymath.runpod_gliner_relex.v2",
+            "polymath.runpod_gliner_relex.v3",
+        }
+    )
+
+
+def test_regex_family_captures_each_temporal_form_with_exact_offsets() -> None:
+    text = (
+        "Published on 2024-03-05, revised March 2024. Guidance from 1999 "
+        "applies until Q1 2025, when version 2.0 ships."
+    )
+    expressions, truncated = app._time_expressions(text, None)
+
+    assert truncated is False
+    by_surface = {item["text"]: item for item in expressions}
+    assert sorted(by_surface) == ["1999", "2.0", "2024-03-05", "March 2024", "Q1 2025"]
+    for item in expressions:
+        assert item["detector"] == "regex"
+        assert text[item["char_start"] : item["char_end"]] == item["text"]
+    assert by_surface["2024-03-05"]["char_start"] == text.index("2024-03-05")
+    assert by_surface["March 2024"]["char_start"] == text.index("March 2024")
+    assert by_surface["1999"]["char_start"] == text.index("1999")
+    assert by_surface["Q1 2025"]["char_start"] == text.index("Q1 2025")
+    assert by_surface["2.0"]["char_start"] == text.index("2.0")
+    # Offset order is deterministic.
+    starts = [item["char_start"] for item in expressions]
+    assert starts == sorted(starts)
+
+
+def test_bare_year_inside_a_larger_expression_is_not_double_captured() -> None:
+    text = "The audit window opened on 2024-03-05 and closed in Q4 2024."
+    expressions, _ = app._time_expressions(text, None)
+    assert [item["text"] for item in expressions] == ["2024-03-05", "Q4 2024"]
+
+
+def test_version_strings_require_an_adjacent_release_or_version_token() -> None:
+    guarded, _ = app._time_expressions("The team released v1.2 in June.", None)
+    assert [item["text"] for item in guarded] == ["v1.2"]
+
+    unguarded, _ = app._time_expressions("The signal ratio stays at 2.5 here.", None)
+    assert unguarded == []
+
+
+def test_role_candidates_come_from_cue_words_inside_the_window() -> None:
+    # Each cue sits inside its expression's +/-40 char window; generous
+    # neutral padding keeps neighbouring cues outside the other windows.
+    text = (
+        "Published in March 2021 with broad agreement from reviewers everywhere. "
+        "The policy stays fully unchanged and is effective 2022-01-01 for every "
+        "region and profile there. They said the group will launch in Q3 2026 "
+        "under the very same plan and same name. No cue precedes 1987 "
+        "whatsoever in this final plain sentence."
+    )
+    expressions, _ = app._time_expressions(text, None)
+    by_surface = {item["text"]: item for item in expressions}
+
+    assert by_surface["March 2021"]["role_candidates"] == ["publication"]
+    assert by_surface["2022-01-01"]["role_candidates"] == ["effective"]
+    assert by_surface["Q3 2026"]["role_candidates"] == ["forecast"]
+    assert by_surface["1987"]["role_candidates"] == []
+
+
+def test_spacy_date_ents_are_captured_and_suppress_overlapping_regex() -> None:
+    text = "Updated in March 2024 by the maintainers."
+    start = text.index("March 2024")
+    doc = _FakeDoc(
+        text,
+        ents=[
+            _FakeEnt("DATE", start, start + len("March 2024")),
+            _FakeEnt("ORG", text.index("maintainers"), len(text) - 1),
+        ],
+    )
+    expressions, _ = app._time_expressions(text, doc)
+
+    assert len(expressions) == 1
+    item = expressions[0]
+    assert item["text"] == "March 2024"
+    assert item["detector"] == "spacy"
+    assert item["char_start"] == start
+    assert item["role_candidates"] == ["revision"]
+
+
+def test_time_expressions_cap_at_64_and_record_truncation() -> None:
+    text = " ".join(f"in {1900 + i}" for i in range(80))
+    expressions, truncated = app._time_expressions(text, None)
+
+    assert truncated is True
+    assert len(expressions) == 64
+    assert expressions[0]["text"] == "1900"
+    assert expressions[-1]["text"] == "1963"
+
+
+def test_text_without_temporal_surface_forms_yields_an_empty_list() -> None:
+    expressions, truncated = app._time_expressions(
+        "Plain prose with no dates at all.", None
+    )
+    assert expressions == []
+    assert truncated is False
 
 
 def test_ontology_labels_are_humanized_and_round_trip_to_canonical_ids() -> None:
@@ -141,3 +276,36 @@ def test_joint_relation_offsets_become_source_backed_wire_artifacts() -> None:
             "relation_cue": "",
         }
     ]
+    # v3 additive capture fields default to empty/false when absent.
+    assert result["time_expressions"] == []
+    assert result["time_expressions_truncated"] is False
+
+
+def test_extract_task_carries_time_expressions_into_the_wire_result() -> None:
+    text = "The framework was published in March 2024."
+    expressions, truncated = app._time_expressions(text, None)
+    result = app._extract_task(
+        {
+            "chunk_id": "chunk-t",
+            "doc_id": "doc-t",
+            "corpus_id": "corpus-t",
+            "text": text,
+        },
+        entities=[[]],
+        relations=[[]],
+        window_offsets=[0],
+        sentence_spans=[(0, len(text))],
+        time_expressions=expressions,
+        time_expressions_truncated=truncated,
+    )
+
+    assert result["time_expressions"] == [
+        {
+            "text": "March 2024",
+            "char_start": text.index("March 2024"),
+            "char_end": text.index("March 2024") + len("March 2024"),
+            "detector": "regex",
+            "role_candidates": ["publication"],
+        }
+    ]
+    assert result["time_expressions_truncated"] is False

@@ -33,6 +33,15 @@ logger = logging.getLogger(__name__)
 
 RUNPOD_API_BASE = "https://api.runpod.ai/v2"
 RUNPOD_CONTRACT_VERSION = "polymath.runpod_gliner_relex.v2"
+# T-HOOK-1: v3 additively appends per-chunk ``time_expressions`` (temporal
+# CAPTURE surface forms; resolution stays Polymath-side) to the worker
+# response. Requests keep the v2 stamp — the request shape is unchanged and a
+# not-yet-redeployed v2 worker must keep accepting them — while responses from
+# either worker generation are accepted.
+RUNPOD_CONTRACT_VERSION_V3 = "polymath.runpod_gliner_relex.v3"
+ACCEPTED_CONTRACT_VERSIONS = frozenset(
+    {RUNPOD_CONTRACT_VERSION, RUNPOD_CONTRACT_VERSION_V3}
+)
 TERMINAL_FAILURES = {"FAILED", "CANCELLED", "TIMED_OUT"}
 
 
@@ -274,6 +283,7 @@ def _validate_wire_result(
     *,
     task: dict[str, Any],
     schema: SchemaContext,
+    contract_version: str | None = None,
 ) -> dict[str, Any]:
     text = task["text"]
     allowed_entities = set(schema.entity_vocab)
@@ -383,7 +393,7 @@ def _validate_wire_result(
             continue
         relations.append(valid.model_dump())
 
-    return {
+    validated = {
         "schema_version": SCHEMA_VERSION,
         "chunk_id": task["chunk_id"],
         "doc_id": task["doc_id"],
@@ -398,6 +408,17 @@ def _validate_wire_result(
         "fact_drop_count": 0,
         "schema_lens_id": row.get("schema_lens_id"),
     }
+    # T-HOOK-1: contract v3 workers append capture-only temporal surface
+    # forms. Map them through verbatim when present (v2 rows simply lack the
+    # field — never required) so extraction rows persist them as
+    # ``temporal_captures`` + ``temporal_capture_version``.
+    time_expressions = row.get("time_expressions")
+    if isinstance(time_expressions, list):
+        validated["temporal_captures"] = time_expressions
+        validated["temporal_capture_version"] = (
+            str(contract_version or "") or RUNPOD_CONTRACT_VERSION_V3
+        )
+    return validated
 
 
 async def extract_entities(
@@ -514,7 +535,7 @@ async def extract_entities(
                 timeout_seconds=runpod_config.timeout_seconds,
                 poll_interval_seconds=runpod_config.poll_interval_seconds,
             )
-        if output.get("contract_version") != RUNPOD_CONTRACT_VERSION:
+        if output.get("contract_version") not in ACCEPTED_CONTRACT_VERSIONS:
             raise RuntimeError("Runpod worker contract revision mismatch")
         return output
 
@@ -623,7 +644,14 @@ async def extract_entities(
             if task is None or chunk_id in seen:
                 continue
             seen.add(chunk_id)
-            raw_results.append(_validate_wire_result(row, task=task, schema=schema))
+            raw_results.append(
+                _validate_wire_result(
+                    row,
+                    task=task,
+                    schema=schema,
+                    contract_version=str(outcome.get("contract_version") or ""),
+                )
+            )
         for task in batch:
             if task["chunk_id"] in seen:
                 continue
