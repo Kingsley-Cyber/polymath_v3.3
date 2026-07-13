@@ -176,7 +176,12 @@ def test_multi_corpus_final_selection_does_not_force_weak_corpus_candidate():
     assert [c.corpus_id for c in result.candidates] == ["alpha", "alpha"]
     assert result.diagnostics["corpus_floor"]["target_corpora"] == ["alpha", "beta"]
     assert result.diagnostics["corpus_floor"]["covered_corpora"] == ["alpha"]
-    assert result.diagnostics["corpus_floor"]["skipped"] == ["beta"]
+    skipped = result.diagnostics["corpus_floor"]["skipped"]
+    assert [entry["corpus_id"] for entry in skipped] == ["beta"]
+    assert skipped[0]["reason"] in {
+        "below_reservation_bound",
+        "below_relevance_floor",
+    }
 
 
 def test_diversity_skips_weak_or_duplicate_candidates():

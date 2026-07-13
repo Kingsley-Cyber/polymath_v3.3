@@ -6,6 +6,12 @@ import re
 from dataclasses import dataclass
 
 from models.schemas import SourceChunk
+from services.retriever.reservation_policy import (
+    CORPUS_RESERVATION_MIN_SCORE,
+    CORPUS_RESERVATION_MIN_SCORE_RATIO,
+    corpus_reservation_bound,
+    passes_corpus_reservation,
+)
 
 
 @dataclass(frozen=True)
@@ -22,8 +28,6 @@ class PlannedPool:
 LANE_GROUNDING_THRESHOLD = 0.75
 DOCUMENT_ROUTE_GROUNDING_THRESHOLD = 0.30
 LANE_RESERVATION_MIN_SCORE_RATIO = 0.25
-CORPUS_RESERVATION_MIN_SCORE = 0.25
-CORPUS_RESERVATION_MIN_SCORE_RATIO = 0.30
 _OPERATIONAL_ARTIFACT_RE = re.compile(
     r"^(?:ocr-(?:completion|marker-append)|epub-backfill-status)-report(?:\.[a-z0-9]+)?$",
     re.IGNORECASE,
@@ -372,20 +376,41 @@ def filter_grounded_planned_candidates(
         return chunks, diagnostics
 
     preserved_corpora: list[str] = []
+    skipped_preservations: list[dict[str, object]] = []
     requested_corpora = list(
         dict.fromkeys(str(value) for value in (selected_corpus_ids or []) if str(value))
     )
     if len(requested_corpora) > 1:
         kept_ids = {id(chunk) for chunk in filtered}
         represented = {str(chunk.corpus_id or "") for chunk in filtered}
+        # Preservation is a corpus seat, so it must pass the same calibrated
+        # reservation bound as every other corpus seat (P0.3). Pick the
+        # corpus's best-scoring candidate, not its first in input order.
+        top_score = max((float(chunk.score or 0.0) for chunk in chunks), default=0.0)
         for corpus_id in requested_corpora:
             if corpus_id in represented:
                 continue
-            candidate = next(
-                (chunk for chunk in chunks if str(chunk.corpus_id or "") == corpus_id),
-                None,
-            )
-            if candidate is None:
+            corpus_chunks = [
+                chunk
+                for chunk in chunks
+                if str(chunk.corpus_id or "") == corpus_id
+            ]
+            if not corpus_chunks:
+                skipped_preservations.append(
+                    {"corpus_id": corpus_id, "reason": "no_candidate"}
+                )
+                continue
+            candidate = max(corpus_chunks, key=lambda c: float(c.score or 0.0))
+            candidate_score = float(candidate.score or 0.0)
+            if not passes_corpus_reservation(candidate_score, top_score):
+                skipped_preservations.append(
+                    {
+                        "corpus_id": corpus_id,
+                        "reason": "below_reservation_bound",
+                        "best_score": round(candidate_score, 4),
+                        "bound": corpus_reservation_bound(top_score),
+                    }
+                )
                 continue
             kept_ids.add(id(candidate))
             represented.add(corpus_id)
@@ -403,6 +428,7 @@ def filter_grounded_planned_candidates(
             "kept": len(filtered),
             "dropped": len(chunks) - len(filtered),
             "corpus_floor_candidates_preserved": preserved_corpora,
+            "corpus_floor_candidates_skipped": skipped_preservations,
             "grounded_translation_candidates_preserved": sum(
                 bool(grounded_translation_candidates.get(id(chunk)))
                 for chunk in filtered
@@ -1026,42 +1052,67 @@ def reserve_planned_finalists(
             routed_document_reservations[document_key] = key
 
     def corpus_reservation_relevant(chunk: SourceChunk) -> bool:
-        """A selected corpus gets a seat only when it has relevant evidence."""
+        """A selected corpus gets a seat only when it has relevant evidence.
 
-        score = float(chunk.score or 0.0)
-        if 0.0 <= score <= top_score <= 1.0 and top_score > 0.0:
-            return score >= max(
-                CORPUS_RESERVATION_MIN_SCORE,
-                top_score * CORPUS_RESERVATION_MIN_SCORE_RATIO,
-            )
-        # Unbounded/logit scores are not ratio-comparable. Preserve the prior
-        # behavior until that score family has an explicit calibration.
-        return True
+        Unbounded/logit score families are not ratio-comparable; the shared
+        gate preserves the prior behavior for them until that score family
+        has an explicit calibration.
+        """
 
+        return passes_corpus_reservation(float(chunk.score or 0.0), top_score)
+
+    corpus_reservation_details: dict[str, dict[str, object]] = {}
     for corpus_id in corpus_ids or []:
+        cid = str(corpus_id)
         existing_key = next(
             (
                 candidate_key
                 for candidate_key in selected
-                if str(by_key[candidate_key].corpus_id or "") == str(corpus_id)
+                if str(by_key[candidate_key].corpus_id or "") == cid
             ),
             None,
         )
-        key = existing_key or next(
-            (
-                candidate_key
-                for candidate_key in ranked_keys
-                if str(by_key[candidate_key].corpus_id or "") == str(corpus_id)
-                and corpus_reservation_relevant(by_key[candidate_key])
-            ),
-            None,
-        )
+        # An already-selected candidate earns corpus PROTECTION only through
+        # the same calibrated gate as a fresh reservation (P0.3): protection
+        # shields it from the overflow trim, so a sub-bound candidate must
+        # not hold the corpus seat. It keeps its diversity seat either way.
+        key = None
+        if existing_key is not None and corpus_reservation_relevant(
+            by_key[existing_key]
+        ):
+            key = existing_key
+        if key is None:
+            key = next(
+                (
+                    candidate_key
+                    for candidate_key in ranked_keys
+                    if str(by_key[candidate_key].corpus_id or "") == cid
+                    and corpus_reservation_relevant(by_key[candidate_key])
+                ),
+                None,
+            )
+        corpus_scores = [
+            float(by_key[candidate_key].score or 0.0)
+            for candidate_key in ranked_keys
+            if str(by_key[candidate_key].corpus_id or "") == cid
+        ]
+        detail: dict[str, object] = {
+            "best_score": round(max(corpus_scores), 4) if corpus_scores else None,
+            "bound": corpus_reservation_bound(top_score),
+        }
         if key:
             reserve(key, allow_overflow=True)
             protected_keys.add(key)
-            corpus_reservations[str(corpus_id)] = key
+            corpus_reservations[cid] = key
+            detail["outcome"] = (
+                "existing_selected" if key == existing_key else "reserved_ranked"
+            )
         else:
-            skipped_corpus_reservations.append(str(corpus_id))
+            skipped_corpus_reservations.append(cid)
+            detail["outcome"] = (
+                "below_reservation_bound" if corpus_scores else "no_candidate"
+            )
+        corpus_reservation_details[cid] = detail
 
     for corpus_id, key in corpus_reservations.items():
         metadata = dict(by_key[key].metadata or {})
@@ -1106,6 +1157,7 @@ def reserve_planned_finalists(
         "lane_candidates": lane_candidate_diagnostics,
         "corpus_reservations": corpus_reservations,
         "skipped_corpus_reservations": skipped_corpus_reservations,
+        "corpus_reservation_details": corpus_reservation_details,
         "routed_document_reservations": routed_document_reservations,
         "routed_documents_selected": routed_documents_selected,
         "routed_document_budget": route_limit,

@@ -8,6 +8,10 @@ from typing import Any
 
 from models.schemas import RetrievalTier, SourceChunk
 from services.retriever.intent_policy import QueryNeed, RetrievalIntent
+from services.retriever.reservation_policy import (
+    corpus_reservation_bound,
+    passes_corpus_reservation,
+)
 from services.retriever.query_grounding import (
     chunk_concept_hits,
     concept_groups,
@@ -1682,6 +1686,8 @@ def select_with_diversity(
         "added": 0,
         "replaced": 0,
         "skipped": [],
+        "eligibility": {},
+        "reservation_bound": None,
     }
     if multi_corpus and final_top_k > 1:
         requested_corpora = _ordered_unique(selected_corpus_ids)
@@ -1690,23 +1696,52 @@ def select_with_diversity(
                 [str(getattr(chunk, "corpus_id", "") or "") for chunk in ranked]
             )
         requested_set = set(requested_corpora)
+        corpus_floor_meta["reservation_bound"] = corpus_reservation_bound(top_score)
         eligible_by_corpus: dict[str, int] = {}
+        eligibility_trace: dict[str, dict[str, Any]] = {}
         for idx, candidate in enumerate(ranked):
             corpus_id = str(getattr(candidate, "corpus_id", "") or "")
             if not corpus_id or (requested_set and corpus_id not in requested_set):
                 continue
             if corpus_id in eligible_by_corpus:
                 continue
-            if not _passes_relevance_floor(
+            raw_score = float(candidate.score or 0.0)
+            passes_floor = _passes_relevance_floor(
                 idx=idx,
                 candidate=candidate,
                 fp=fingerprints[idx],
                 relevance_by_idx=relevance_by_idx,
                 policy=policy,
                 top_score=top_score,
-            ):
+            )
+            # A corpus-floor seat is a reservation, so the calibrated packet
+            # score must also clear the shared reservation bound that
+            # planned_fusion applies (P0.3 consolidation) — the MMR-normalized
+            # relevance floor alone cannot re-seat a corpus that the finalist
+            # reservation path would reject.
+            passes_bound = passes_corpus_reservation(raw_score, top_score)
+            trace = eligibility_trace.setdefault(corpus_id, {})
+            if "best_chunk_id" not in trace:
+                trace.update(
+                    {
+                        "best_chunk_id": str(candidate.chunk_id or ""),
+                        "best_score": round(raw_score, 4),
+                        "mmr_relevance": round(relevance_by_idx.get(idx, 0.0), 4),
+                        "passed_relevance_floor": passes_floor,
+                        "passed_reservation_bound": passes_bound,
+                    }
+                )
+            if not (passes_floor and passes_bound):
                 continue
             eligible_by_corpus[corpus_id] = idx
+            eligibility_trace[corpus_id] = {
+                "best_chunk_id": str(candidate.chunk_id or ""),
+                "best_score": round(raw_score, 4),
+                "mmr_relevance": round(relevance_by_idx.get(idx, 0.0), 4),
+                "passed_relevance_floor": True,
+                "passed_reservation_bound": True,
+            }
+        corpus_floor_meta["eligibility"] = eligibility_trace
 
         # Prefer the user's corpus order when possible, but never reserve more
         # corpora than there are final slots. Diagnostics should still expose
@@ -1762,17 +1797,32 @@ def select_with_diversity(
                 return False
             return True
 
+        def _skip(corpus_id: str, reason: str) -> None:
+            corpus_floor_meta["skipped"].append(
+                {"corpus_id": corpus_id, "reason": reason}
+            )
+
         for corpus_id in target_corpora:
             corpus_counts = _selected_corpus_counts(selected_indices, ranked)
             if corpus_counts.get(corpus_id, 0) > 0:
                 continue
             idx = eligible_by_corpus.get(corpus_id)
             if idx is None:
-                corpus_floor_meta["skipped"].append(corpus_id)
+                trace = eligibility_trace.get(corpus_id) or {}
+                if not trace:
+                    _skip(corpus_id, "no_candidate")
+                elif not trace.get("passed_reservation_bound", True):
+                    _skip(corpus_id, "below_reservation_bound")
+                else:
+                    _skip(corpus_id, "below_relevance_floor")
                 continue
             if idx in chosen_idx:
                 continue
-            reserve_score = relevance_by_idx.get(idx, 0.0) + 0.10
+            # Seat protection comes from selected_by="corpus_floor", never from
+            # score inflation: the reserve keeps the candidate's true relevance
+            # so downstream ordering and diagnostics stay honest (P0.3 removed
+            # the former unconditional +0.10 reserve bonus).
+            reserve_score = relevance_by_idx.get(idx, 0.0)
             if len(selected_indices) < final_top_k:
                 _take(idx, reserve_score, "corpus_floor")
                 corpus_floor_meta["added"] += 1
@@ -1802,12 +1852,12 @@ def select_with_diversity(
                     replace_score = score
                     replace_pos = pos
             if replace_pos is None:
-                corpus_floor_meta["skipped"].append(corpus_id)
+                _skip(corpus_id, "no_replaceable_seat")
                 continue
             if _try_replace(replace_pos, idx, reserve_score):
                 corpus_floor_meta["replaced"] += 1
             else:
-                corpus_floor_meta["skipped"].append(corpus_id)
+                _skip(corpus_id, "replace_would_break_answerability")
 
         corpus_floor_meta["covered_corpora"] = [
             corpus_id

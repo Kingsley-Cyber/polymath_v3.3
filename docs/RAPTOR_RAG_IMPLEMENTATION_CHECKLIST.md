@@ -974,6 +974,79 @@ A corpus is strict-ready only when:
   structural skips.
 - [ ] All three retrieval tiers pass smoke and negative-control probes.
 
+## Implementation Log
+
+### 2026-07-13 - Baseline capture (pre-edit requirement)
+
+- Commit: 4327713
+- Owner: goal-mode agent
+- Corpus/data scope: all active corpora (read-only)
+- Code changes: `backend/scripts/capture_raptor_baseline.py`,
+  `backend/scripts/probe_tier_latency.py`
+- Before metrics: census reproduces the recorded durable baseline exactly
+  (polymath_v2 84,987/67,953; jobs 50,522/500/775; tree 21,432/20,942/23,394).
+  Live probes: Fast 42.7s / Hybrid 47.8s / Graph 54.7s / cross-corpus 21.2s.
+  Tungsten negative control fails closed. Cross-corpus Hybrid FALSELY refused
+  an answerable query that single-corpus answers (P0.3/P0.4 evidence).
+- Artifacts: `docs/baselines/BASELINE_2026-07-13.json`,
+  `docs/baselines/LATENCY_2026-07-13.json`
+
+### 2026-07-13 - P0.3 corpus-floor calibration (code complete; deploy pending)
+
+- Commit: (this commit)
+- Owner: goal-mode agent
+- Corpus/data scope: none (retrieval policy code only)
+- Code changes: new `services/retriever/reservation_policy.py` (single shared
+  calibrated reservation bound + ordering contract); `planned_fusion.py`
+  (already-selected corpus candidates must pass the same gate before being
+  protected; grounded-filter preservation now picks the corpus's best
+  candidate and gates it; structured `corpus_reservation_details` +
+  `corpus_floor_candidates_skipped` diagnostics); `ranking_policy.py`
+  (corpus-floor eligibility now also enforces the shared calibrated bound on
+  raw packet scores with a per-corpus eligibility trace; removed the
+  unconditional +0.10 reserve bonus — seat protection is the selection
+  reason, never a score; `corpus_floor.skipped` entries now carry reasons).
+- Durable migration/backfill: none required.
+- Tests by tier: `tests/test_corpus_floor_calibration.py` (7 new: shared-gate
+  semantics, skip-reason + eligibility trace, no-bonus seat score,
+  strong-corpus coverage, finalist existing-candidate gate, finalist strong
+  reserve, grounded-filter gated preservation) + updated
+  `test_retrieval_ranking_policy.py` skip contract. Full backend suite:
+  2,557 passed (embedder priority-gate test needs the repo `scripts/` tree
+  present; environmental, passes with it).
+- Deployment image/health: pending final rebuild from main (completion rule:
+  boxes flip only after deploy + acceptance re-verification).
+- Remaining risks: `facets/final_selector.reserve_corpora` (chat-side floor)
+  still uses its own discipline; it is superseded by shelf_reserve in P1.5
+  and will adopt the shared gate there.
+
+### 2026-07-13 - P0.1 partial: queue reconcile + legacy provenance (durable)
+
+- Commit: (this commit)
+- Owner: goal-mode agent
+- Corpus/data scope: summary_jobs (500 rows superseded, all belonging to the
+  deleted `authentic_library`); parent_chunks provenance stamping —
+  polymath_v2 34,681 / markbuildsbrands 20 / ecommerce 791 legacy abstractive
+  summaries stamped `summary_model="legacy_unknown"` after a deterministic
+  validation gate (min length, not identical/prefix-copy of parent text,
+  length ratio, evidence-token overlap); 2,635 validation failures
+  quarantined (`summary=None` + reason) for regeneration via the production
+  Ghost A path. Backups: `docs/baselines/p0_1_backups/` (prior field values
+  and full prior summary text; untracked).
+- Code changes: `backend/scripts/p0_1_summary_integrity.py` (retire-orphan-jobs /
+  stamp-legacy / quarantine-regen / residual-report / verify subcommands; all
+  dry-run by default; verify exits non-zero on failure).
+- Evidence for the stamp decision: sampled placeholder-point parents show the
+  Mongo summaries are real abstractive text (0/1000 byte-identical to parent
+  text); the Qdrant `summary_model=""` points are overwhelmingly stale
+  projections. The Qdrant writer's storage-boundary contract explicitly
+  documents `legacy_unknown` as the marker for intentionally imported legacy
+  summaries.
+- Status: canary corpus (markbuildsbrands) VERIFIED end-to-end (1,009/1,009
+  attributed, 0 empty-model points). ecommerce reindex + polymath_v2
+  regeneration running as bounded resumable jobs; boxes flip after all
+  corpora verify and three-tier recall probes show no regression.
+
 ## Implementation Log Template
 
 Copy this section for every completed item:
