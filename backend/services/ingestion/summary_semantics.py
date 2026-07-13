@@ -35,6 +35,29 @@ MAX_MECHANISMS = 5
 MAX_LATENT_CONCEPTS = 12
 MAX_LATENT_ALIASES = 3
 LATENT_EVIDENCE_BASES = ("direct", "inferred")
+# T-HOOK-2 capture-at-generation (Temporal RAG program, adopted 2026-07-13):
+# the summary call also emits a temporal class + raw time expressions.
+# Capture-only — resolution/normalization stays deterministic Polymath-side
+# (T-MAIN); taxonomy per TEMPORAL_RAG_E2E_IMPLEMENTATION_REPORT_2026-07-12
+# §3.1 (classes) and §3.2 (time-expression roles).
+TEMPORAL_CLASSES = (
+    "evergreen", "slowly_evolving", "versioned", "event", "ephemeral", "unknown",
+)
+TIME_EXPRESSION_ROLES = (
+    "publication_time", "revision_time", "reference_time", "event_time",
+    "effective_time", "forecast_time", "deadline_time", "media_offset",
+    "unknown",
+)
+MAX_TIME_EXPRESSIONS = 12
+MAX_TIME_EXPRESSION_CHARS = 60
+#: Silent-drop accounting for temporal parsing (never raises, never repairs a
+#: malformed value into a fact — mirrors parse_latent_concepts, plus counters
+#: so drops are countable instead of invisible).
+TEMPORAL_PARSE_COUNTERS: dict[str, int] = {
+    "invalid_temporal_class": 0,
+    "malformed_time_expression": 0,
+    "unverifiable_time_expression": 0,
+}
 PARENT_SUMMARY_SCHEMA_VERSION = "parent_summary.v1"
 PARENT_SUMMARY_TYPE = "parent_retrieval_replacement"
 MAX_CONCEPT_TAGS = 8
@@ -73,9 +96,18 @@ SEMANTIC_SUMMARY_INSTRUCTION = (
     "search for; may be strongly implied rather than named, but must be "
     'supported by this passage — never an invented fact>", '
     '"evidence_basis": "<direct|inferred>", '
-    '"aliases": ["<up to 3 phrasings a non-expert user might type>"]}]}'
+    '"aliases": ["<up to 3 phrasings a non-expert user might type>"]}], '
+    '"temporal_class": "<one of: ' + "|".join(TEMPORAL_CLASSES) + " — how the "
+    'passage\'s claims age; use unknown when unsure>", '
+    '"time_expressions": [{"text": "<time expression copied VERBATIM from the '
+    'passage, e.g. March 2024, Q4 2025, the 1990s>", '
+    '"role": "<' + "|".join(TIME_EXPRESSION_ROLES) + '>"}]}'
     " Include at most 12 latent_concepts; prefer useful retrieval concepts "
     "over impressive academic terms; omit weak or speculative ideas entirely."
+    " Include at most 12 time_expressions; each text must appear verbatim in"
+    " the passage. List them in passage order, including repeated identical"
+    " literals as separate rows when their roles differ; omit"
+    " time_expressions entirely when the passage has none."
 )
 
 
@@ -111,6 +143,73 @@ def parse_latent_concepts(obj: dict) -> list[dict]:
         if len(out) >= MAX_LATENT_CONCEPTS:
             break
     return out
+
+
+def parse_temporal_semantics(obj: dict, *, source_text: str | None = None) -> dict:
+    """Deterministically clamp LLM temporal candidates (T-HOOK-2 capture).
+
+    Mirrors parse_latent_concepts: Python owns normalization, no LLM value is
+    trusted. ``temporal_class`` must be exactly one of TEMPORAL_CLASSES (else
+    ``None`` + counter). ``time_expressions`` rows must be dicts whose ``text``
+    appears verbatim in ``source_text`` when it is provided (char offsets are
+    computed IN CODE from that match — never taken from the model); roles are
+    whitelisted to TIME_EXPRESSION_ROLES (else ``"unknown"``). Malformed rows
+    are dropped silently and counted in TEMPORAL_PARSE_COUNTERS.
+    """
+
+    temporal_class: str | None = None
+    raw_class = obj.get("temporal_class")
+    if raw_class not in (None, ""):
+        candidate = str(raw_class).strip().lower()
+        if candidate in TEMPORAL_CLASSES:
+            temporal_class = candidate
+        else:
+            TEMPORAL_PARSE_COUNTERS["invalid_temporal_class"] += 1
+
+    expressions: list[dict] = []
+    seen_without_source: set[tuple[str, str]] = set()
+    # A model identifies a literal + role, never a trusted offset. Repeated
+    # identical literals are therefore assigned to source occurrences in row
+    # order. This keeps publication/revision roles distinct and makes a second
+    # parse of an already-clamped artifact produce the same spans.
+    next_search_start: dict[str, int] = {}
+    source = str(source_text or "")
+    for row in obj.get("time_expressions") or []:
+        if len(expressions) >= MAX_TIME_EXPRESSIONS:
+            break
+        if not isinstance(row, dict):
+            TEMPORAL_PARSE_COUNTERS["malformed_time_expression"] += 1
+            continue
+        text = " ".join(str(row.get("text") or "").split()).strip()
+        if not text or len(text) > MAX_TIME_EXPRESSION_CHARS:
+            TEMPORAL_PARSE_COUNTERS["malformed_time_expression"] += 1
+            continue
+        role = str(row.get("role") or "").strip().lower()
+        if role not in TIME_EXPRESSION_ROLES:
+            role = "unknown"
+        char_start: int | None = None
+        char_end: int | None = None
+        if source:
+            index = source.find(text, next_search_start.get(text, 0))
+            if index < 0:
+                TEMPORAL_PARSE_COUNTERS["unverifiable_time_expression"] += 1
+                continue
+            char_start, char_end = index, index + len(text)
+            next_search_start[text] = char_end
+        else:
+            key = (text.lower(), role)
+            if key in seen_without_source:
+                continue
+            seen_without_source.add(key)
+        expressions.append(
+            {
+                "text": text,
+                "role": role,
+                "char_start": char_start,
+                "char_end": char_end,
+            }
+        )
+    return {"temporal_class": temporal_class, "time_expressions": expressions}
 
 
 def _snake(value: str) -> str:
@@ -340,6 +439,10 @@ def _salvage_json_fragment(text: str) -> dict:
         "entity_hints": _json_string_array_field(text, "entity_hints"),
         "retrieval_uses": _json_string_array_field(text, "retrieval_uses"),
         "abstraction_level": _json_string_field(text, "abstraction_level"),
+        # T-HOOK-2: temporal_class is a bounded scalar and safe to salvage;
+        # time_expressions (array of objects) is NOT salvaged from fragments —
+        # structure is never fabricated from truncated output.
+        "temporal_class": _json_string_field(text, "temporal_class"),
     }
 
 
@@ -575,13 +678,17 @@ def canonical_parent_summary_fields(
         source_child_ids=source_child_ids,
         source_text=source_text,
     )
+    # T-HOOK-2: re-clamping already-clamped temporal fields is idempotent
+    # (validated class stays, verbatim expressions re-verify against the same
+    # source text), so the canonical artifact always passes the parser.
+    temporal = parse_temporal_semantics(parsed, source_text=source_text)
     fields = {
         **normalized,
-        "latent_concepts": (
-            parsed.get("latent_concepts")
-            if isinstance(parsed.get("latent_concepts"), list)
-            else parse_latent_concepts(parsed)
-        ),
+        # Treat even parser output as untrusted at the canonical boundary.
+        # This also prevents repair paths from persisting over-limit aliases.
+        "latent_concepts": parse_latent_concepts(parsed),
+        "temporal_class": temporal["temporal_class"] or "unknown",
+        "time_expressions": temporal["time_expressions"],
         "summary_id": summary_id_for_parent(parent_id),
         "corpus_id": corpus_id,
         "doc_id": doc_id,
@@ -651,6 +758,9 @@ def repair_parent_summary_row(
             "entity_hints": row.get("entity_hints") or [],
             "retrieval_uses": row.get("retrieval_uses") or [],
             "abstraction_level": row.get("abstraction_level") or "medium",
+            "latent_concepts": row.get("latent_concepts") or [],
+            "temporal_class": row.get("temporal_class"),
+            "time_expressions": row.get("time_expressions") or [],
         }
         parsed = parse_semantic_summary(
             json.dumps(obj),
@@ -660,6 +770,14 @@ def repair_parent_summary_row(
         parsed["repair_status"] = "repaired" if needs_repair else (
             row.get("repair_status") or "none"
         )
+    # Stored semantic capture fields are independent columns and must survive
+    # deterministic repair even when ``summary`` itself is a raw JSON fragment.
+    if row.get("latent_concepts"):
+        parsed["latent_concepts"] = parse_latent_concepts(row)
+    if row.get("temporal_class") or row.get("time_expressions"):
+        stored_temporal = parse_temporal_semantics(row, source_text=source_text)
+        parsed["temporal_class"] = stored_temporal["temporal_class"] or "unknown"
+        parsed["time_expressions"] = stored_temporal["time_expressions"]
     return canonical_parent_summary_fields(
         parsed,
         parent_id=str(row.get("parent_id") or ""),
@@ -701,6 +819,8 @@ def parse_semantic_summary(
         "retrieval_uses": [],
         "abstraction_level": "medium",
         "latent_concepts": [],
+        "temporal_class": "unknown",
+        "time_expressions": [],
         "source_child_ids": source_child_ids or [],
         "validation_status": "quarantined",
         "repair_status": "quarantined",
@@ -747,6 +867,9 @@ def parse_semantic_summary(
                     if len(out["mechanisms"]) >= MAX_MECHANISMS:
                         break
             out["latent_concepts"] = parse_latent_concepts(obj)
+            temporal = parse_temporal_semantics(obj, source_text=source_text)
+            out["temporal_class"] = temporal["temporal_class"] or "unknown"
+            out["time_expressions"] = temporal["time_expressions"]
             out.update(parent_summary_artifact_fields(
                 obj,
                 summary=out["summary"],

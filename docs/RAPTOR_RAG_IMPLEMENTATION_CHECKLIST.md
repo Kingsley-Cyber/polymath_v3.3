@@ -192,14 +192,22 @@ cross-impact so no artifact is rebuilt twice:
   temporal capture aboard. The 1/100/500-chunk gates passed on the v2
   contract; the 5,000-chunk gate runs after this hook lands.
   *(merged + redeployed both accounts (t0nuyi6shc2t9a/t5wjsqmvpjm0lm) + live-proven 2026-07-13: v3 captures with exact offsets and cue role-candidates flow to ExtractionResult)*
-- [ ] T-HOOK-2 (immediate, future-only): add `temporal_class`
+- [x] T-HOOK-2 (immediate, future-only): add `temporal_class`
   (evergreen|slowly_evolving|versioned|event|ephemeral|unknown) and
   `time_expressions` to the Ghost A summary contract — the same seam that
   carries `latent_concepts`; existing rows get the deterministic classifier
   backfill in T-MAIN Phase 3, never a paid regeneration.
-- [ ] T-HOOK-3 (merged with the P2.1 bibliographic item — one implementation):
+  *(merged + deployed + live-proven 2026-07-13: strict typed Mongo boundary,
+  tagged-rescue capture, deterministic verbatim spans, and Mongo/Qdrant
+  projection; UGO 203/203 explicit class + array fields, 0 span/schema errors,
+  both Qdrant projections 203/203 exact, no additional model calls)*
+- [x] T-HOOK-3 (merged with the P2.1 bibliographic item — one implementation):
   docling date de-conflation (publication vs file-creation vs revision),
   `source_published_at` capture, deterministic doc-date backfill.
+  *(merged + deployed + live-proven 2026-07-13: all four corpora / 681 documents
+  stamped through durable presence-aware backups; 86 publication-date families,
+  0 mixed families, 0 file-time publication dates, 0 unexplained nulls;
+  parent collections byte-identical before/after)*
 - [ ] T-MAIN (after the P1.1 baseline and current retrieval work): report
   Phases 2-7 — source versions/episodes/assertions + outbox, Qdrant payload
   indexes + projection without re-embedding, versioned Neo4j `RELATES_TO`
@@ -1397,6 +1405,72 @@ A corpus is strict-ready only when:
 - Baseline metric capture: deliberately deferred until P0.1 completes on
   polymath_v2 so the baseline reflects the repaired catalog; runs follow the
   backend restart.
+
+### 2026-07-13 - T-HOOK-2 temporal capture + T-HOOK-3 bibliographic identity
+
+- Commit: (this commit; recovered Claude handoff continued on
+  `claude-continuation-20260713`)
+- Owner: Codex continuation agent
+- Corpus/data scope: T-HOOK-2 UGO canary, 203 parent summaries and both Qdrant
+  summary projections; T-HOOK-3 all four active corpora, 681 document rows
+  (polymath_v2 498, markbuildsbrands 103, ecommerce 79, UGO 1). Documents-only
+  bibliographic writes; no parent/chunk rewrite.
+- Code changes: strict `ParentSummaryRecord` temporal/latent rows and Mongo
+  writer validation; Ghost A JSON + tagged-rescue capture; deterministic
+  repeated-literal span binding; repair/reuse preservation; Qdrant summary
+  projection; warn-first nested Mongo schema; deterministic Docling/frontmatter/
+  HTML/PDF/DOCX/EPUB bibliographic candidates; atomic persisted date-family
+  merge; dry-run-first CAS backfill with collision-proof durable preimages and
+  presence-aware restore.
+- Durable migration/backfill: UGO summary repair was deterministic only (no
+  model calls), then reindexed 203/203 summary points. Full-row UGO backup:
+  `/data/ingest-files/backups/summary-capture-20260713/`
+  (`203` rows, SHA-256 `edb9b9d6a006700a19f6cc32af6c7138fee437577a80b136de26c7673d0c9def`).
+  Bibliographic backups: `/data/ingest-files/backups/bibliographic-20260713/`
+  (`498/103/79/1` rows; SHA-256
+  `470d17d9f58345f8e07d1c314053085a6e1de9bb35d0e0539d9ce3323310b829`,
+  `e766ae1e1360c5fa96c8deb5746bc84eb84b970c7576fd5a81896a940a68ddea`,
+  `bca49567364face570695c7951e800082f13937e6e23980898ed731c3670ab27`,
+  `02748551c2416922c0a40ecd6d6bd91ff096bcabb419663591710fb52c1515cd`).
+  Immediate apply rerun planned 0 rows and created no new backup; all four
+  hashes remained unchanged.
+- Before metrics: UGO 203 valid summaries but only 47 explicit temporal classes,
+  20 nonempty time-expression arrays, and 47 latent rows. Bibliographic coverage:
+  polymath_v2 0 dates/0 provenance; mark 0/0; ecommerce 27/79 (unsafe v1 stamp);
+  UGO 0/0.
+- After metrics: UGO 203/203 explicit bounded classes, 203/203 array-valued
+  temporal + latent fields, 0 strict/span/schema violations, 0 changes to the 47
+  pre-existing latent rows, and Mongo equals both Qdrant projections 203/203.
+  Bibliographic: 681/681 v2 stamps, 86 complete publication-date families,
+  0 mixed families, 0 file-time publication dates, 0 unexplained nulls, and
+  681/681 rows equal their planned backup postimages.
+- Tests by tier: focused S1 integration 121 passed / 1 skipped; focused S2
+  capture + migration safety 97 passed / 1 skipped; backend non-integration
+  suite 2,782 passed / 4 skipped / 3 deselected plus all five path-relocated
+  Mac-sidecar cases rerun green (2,787 product tests total). Execution-plan
+  recovery verifier independently proves 533/533 claim parity and 409/409
+  checkbox coverage.
+- Cross-corpus test: full sorted parent fingerprints stayed byte-identical for
+  polymath_v2 130,503, mark 1,015, ecommerce 10,222, and UGO 203 rows (141,943
+  total). All four document scopes pass the same date-family/null-reason gates.
+- Failure/rollback test: fake-Mongo tests cover CAS collision/abort, backup
+  collision/no-op non-truncation, and field-presence restoration. A real
+  disposable Mongo drill restored 498/498 rows with 0 preimage mismatches and
+  then dropped the drill database.
+- Deployment image/health: query backend + offline ingest worker rebuilt with
+  base + local override + Apple MLX + offline-ingest overlays; both healthy.
+  `verify_backend_runtime.sh` passed with live 1,024-d embedder; Mongo, Qdrant,
+  LiteLLM, Redis, reranker, and Neo4j health all green. Updated validators are
+  installed `moderate`/`warn` and exact-readback matches source.
+- Remaining risks: deterministic language coverage remains 0 because no source
+  asserted a language; honest null is retained. Claude's earlier unsafe
+  ecommerce v1 pass truncated its original 79-row preimage backup before this
+  continuation, so the exact pre-v1 state is not recoverable; the durable v2
+  backup starts from post-v1/pre-v2 state, and v2 changed ecommerce provenance
+  only (author/title/date coverage did not change). Legacy temporal
+  classification beyond the UGO canary remains correctly deferred to T-MAIN
+  Phase 3 rather than paid regeneration.
+- Checklist boxes closed: T-HOOK-2, T-HOOK-3.
 
 ## Implementation Log Template
 

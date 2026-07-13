@@ -14,7 +14,14 @@ from typing import Any
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from pymongo import ReplaceOne, UpdateOne
+from pymongo.errors import DuplicateKeyError
 
+from models.contracts import ParentSummaryRecord
+from services.ingestion.bibliographic import (
+    BIBLIO_DOC_FIELDS,
+    merge_persisted_bibliographic,
+    promote_bibliographic,
+)
 from services.ingestion.extraction_jobs import extraction_contract_hash
 from services.ingestion.stage_identity import (
     chunk_hash as stage_chunk_hash,
@@ -29,6 +36,89 @@ from services.storage.record_status import (
 )
 
 logger = logging.getLogger(__name__)
+
+_BIBLIOGRAPHIC_CAS_ATTEMPTS = 3
+
+
+def _validate_parent_summary_row(parent: dict) -> dict:
+    """Validate and normalize the summary portion of a parent row.
+
+    Parent rows contain structural ingestion fields that deliberately do not
+    belong to :class:`ParentSummaryRecord`, so the writer validates the
+    contract-owned projection rather than rejecting unrelated parent fields.
+    Rows with no generated summary remain valid structural/checkpoint rows.
+    """
+    row = dict(parent)
+    if "summary" not in row or row.get("summary") is None:
+        return row
+
+    contract_fields = ParentSummaryRecord.model_fields
+    payload = {name: row[name] for name in contract_fields if name in row}
+    # Legacy/resume paths materialize every SummaryResult attribute and may
+    # therefore pass explicit nulls instead of omitting newly-added capture
+    # fields. Normalize only null/missing values; malformed non-null values
+    # (including empty strings or wrong container types) must still fail.
+    if payload.get("latent_concepts") is None:
+        payload["latent_concepts"] = []
+    if payload.get("temporal_class") is None:
+        payload["temporal_class"] = "unknown"
+    if payload.get("time_expressions") is None:
+        payload["time_expressions"] = []
+    normalized = ParentSummaryRecord.model_validate(payload).model_dump(
+        mode="python",
+        exclude_none=True,
+    )
+
+    source_text = row.get("text")
+    if source_text is None:
+        source_text = row.get("parent_text")
+    if isinstance(source_text, str):
+        for expression in normalized.get("time_expressions") or []:
+            start = expression.get("char_start")
+            end = expression.get("char_end")
+            literal = expression["text"]
+            if start is None or end is None:
+                raise ValueError(
+                    "time expression offsets are required when parent text "
+                    f"is available: {literal!r}"
+                )
+            if not (0 <= start < end <= len(source_text)):
+                raise ValueError(
+                    "time expression offsets are outside parent text bounds: "
+                    f"{literal!r} [{start}:{end}] len={len(source_text)}"
+                )
+            if source_text[start:end] != literal:
+                raise ValueError(
+                    "time expression offsets do not select the verbatim "
+                    f"parent text: {literal!r} != {source_text[start:end]!r}"
+                )
+
+    # Replace every contract-owned field with its validated representation.
+    # This prevents a legacy/null value from surviving next to normalized
+    # defaults such as ``temporal_class=unknown`` and empty capture arrays.
+    for name in contract_fields:
+        row.pop(name, None)
+    row.update(normalized)
+    return row
+
+
+def _bibliographic_cas_filter(identity: dict, existing: dict | None) -> dict:
+    """Build a compare-and-swap filter for durable bibliographic fields."""
+    durable = existing if isinstance(existing, dict) else {}
+    clauses: list[dict] = [dict(identity)]
+    for field_name in BIBLIO_DOC_FIELDS:
+        if field_name in durable:
+            clauses.append(
+                {
+                    field_name: {
+                        "$exists": True,
+                        "$eq": durable[field_name],
+                    }
+                }
+            )
+        else:
+            clauses.append({field_name: {"$exists": False}})
+    return {"$and": clauses}
 
 
 async def upsert_corpus(db: AsyncIOMotorDatabase, corpus_doc: dict) -> None:
@@ -50,12 +140,46 @@ async def upsert_document(db: AsyncIOMotorDatabase, doc: dict) -> None:
     doc must include: doc_id, corpus_id, user_id, source_tier,
     ingestion_config, write_state. Bulk artifacts such as parent chunks and
     Ghost B staging must be written to their own collections.
+
+    T-HOOK-3: parse-time bibliographic identity rides
+    ``routing_trace["bibliographic"]`` from ``finalize_source_meta``;
+    ``promote_bibliographic`` lifts it into the top-level document fields
+    (author/title/language/document_date/source_published_at/
+    date_confidence/bibliographic_provenance) at this storage boundary,
+    non-clobbering.
     """
-    doc = mark_active(dict(doc))
-    await db["documents"].replace_one(
-        {"doc_id": doc["doc_id"], "corpus_id": doc["corpus_id"]},
-        doc,
-        upsert=True,
+    collection = db["documents"]
+    doc = promote_bibliographic(mark_active(dict(doc)))
+    identity = {"doc_id": doc["doc_id"], "corpus_id": doc["corpus_id"]}
+    projection = {field_name: 1 for field_name in BIBLIO_DOC_FIELDS}
+    for attempt in range(_BIBLIOGRAPHIC_CAS_ATTEMPTS):
+        existing = await collection.find_one(identity, projection)
+        replacement = merge_persisted_bibliographic(doc, existing)
+        cas_filter = _bibliographic_cas_filter(identity, existing)
+        try:
+            result = await collection.replace_one(
+                cas_filter,
+                replacement,
+                upsert=existing is None,
+            )
+        except DuplicateKeyError:
+            # A first insert raced a concurrent enrichment. Re-read and merge
+            # instead of replacing that newly durable bibliographic identity.
+            continue
+        if existing is None or getattr(result, "matched_count", 1) == 1:
+            return
+        logger.info(
+            "Retrying document bibliographic CAS for corpus=%s doc=%s "
+            "(attempt %d/%d)",
+            doc["corpus_id"],
+            doc["doc_id"],
+            attempt + 1,
+            _BIBLIOGRAPHIC_CAS_ATTEMPTS,
+        )
+    raise RuntimeError(
+        "document bibliographic metadata changed concurrently after "
+        f"{_BIBLIOGRAPHIC_CAS_ATTEMPTS} attempts: "
+        f"corpus={doc['corpus_id']} doc={doc['doc_id']}"
     )
 
 
@@ -69,7 +193,7 @@ async def upsert_parent_chunks(
     now = datetime.utcnow()
     ops = []
     for parent in parent_chunks:
-        row = mark_active(dict(parent))
+        row = mark_active(_validate_parent_summary_row(parent))
         row["updated_at"] = now
         ops.append(
             ReplaceOne(

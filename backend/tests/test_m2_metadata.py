@@ -79,7 +79,9 @@ def test_pdf_info_metadata():
     meta = da._meta_from_pdf(buf.getvalue())
     assert meta["title"] == "Spec Sheet"
     assert meta["author"] == "Bob Builder"
-    assert meta["document_date"] == "2026-02-10"
+    resolution = da.resolve_document_dates(meta["date_candidates"])
+    assert resolution["document_date"] is None
+    assert resolution["reason"] == "file_date_only"
 
 
 def test_subtitle_gets_stem_title():

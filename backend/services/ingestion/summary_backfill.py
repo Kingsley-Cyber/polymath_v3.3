@@ -174,37 +174,49 @@ _child_context_for_rows = child_context_for_rows
 
 
 def summary_result_fields(result, *, updated_at: datetime) -> dict:
-    """Return the complete canonical parent-summary persistence payload."""
+    """Return the complete canonical parent-summary persistence payload.
 
-    return {
-        "summary": result.summary,
-        "domain": getattr(result, "domain", None),
-        "topics": getattr(result, "topics", None),
-        "semantic_chunk_type": getattr(result, "semantic_chunk_type", None),
-        "key_terms": getattr(result, "key_terms", None),
-        "mechanisms": getattr(result, "mechanisms", None),
-        "schema_version": getattr(result, "schema_version", None),
-        "summary_type": getattr(result, "summary_type", None),
-        "central_claim": getattr(result, "central_claim", None),
-        "key_points": getattr(result, "key_points", None),
-        "main_mechanism": getattr(result, "main_mechanism", None),
-        "concept_tags": getattr(result, "concept_tags", None),
-        "entity_hints": getattr(result, "entity_hints", None),
-        "retrieval_uses": getattr(result, "retrieval_uses", None),
-        "abstraction_level": getattr(result, "abstraction_level", None),
-        "latent_concepts": getattr(result, "latent_concepts", None),
-        "source_child_ids": getattr(result, "source_child_ids", None),
-        "summary_id": getattr(result, "summary_id", None),
-        "source_hash": getattr(result, "source_hash", None),
-        "summary_model": getattr(result, "summary_model", None),
-        "summary_created_at": getattr(result, "summary_created_at", None),
-        "validation_status": getattr(result, "validation_status", None),
-        "repair_status": getattr(result, "repair_status", None),
-        "quality_score": getattr(result, "quality_score", None),
-        "quality_flags": getattr(result, "quality_flags", None),
-        "retrieval_text": getattr(result, "retrieval_text", None),
-        "summary_updated_at": updated_at,
-    }
+    P0.8 typed-model acceptance at the Mongo summary-writer boundary: the
+    payload is built THROUGH models.contracts.ParentSummaryRecord, so every
+    summary generate/backfill writer (this module's --generate loop and
+    IngestionService.backfill_parent_summaries) persists only a validated
+    typed shape — a malformed artifact raises pydantic.ValidationError loudly
+    instead of landing in ``parent_chunks`` as durable junk. Existing callers
+    keep passing SummaryResult; no call-site change required.
+    """
+    from models.contracts import ParentSummaryRecord
+
+    record = ParentSummaryRecord(
+        summary=result.summary,
+        domain=getattr(result, "domain", None),
+        topics=getattr(result, "topics", None),
+        semantic_chunk_type=getattr(result, "semantic_chunk_type", None),
+        key_terms=getattr(result, "key_terms", None),
+        mechanisms=getattr(result, "mechanisms", None),
+        schema_version=getattr(result, "schema_version", None),
+        summary_type=getattr(result, "summary_type", None),
+        central_claim=getattr(result, "central_claim", None),
+        key_points=getattr(result, "key_points", None),
+        main_mechanism=getattr(result, "main_mechanism", None),
+        concept_tags=getattr(result, "concept_tags", None),
+        entity_hints=getattr(result, "entity_hints", None),
+        retrieval_uses=getattr(result, "retrieval_uses", None),
+        abstraction_level=getattr(result, "abstraction_level", None),
+        latent_concepts=getattr(result, "latent_concepts", None) or [],
+        temporal_class=getattr(result, "temporal_class", None) or "unknown",
+        time_expressions=getattr(result, "time_expressions", None) or [],
+        source_child_ids=getattr(result, "source_child_ids", None),
+        summary_id=getattr(result, "summary_id", None),
+        source_hash=getattr(result, "source_hash", None),
+        summary_model=getattr(result, "summary_model", None),
+        summary_created_at=getattr(result, "summary_created_at", None),
+        validation_status=getattr(result, "validation_status", None),
+        repair_status=getattr(result, "repair_status", None),
+        quality_score=getattr(result, "quality_score", None),
+        quality_flags=getattr(result, "quality_flags", None),
+        retrieval_text=getattr(result, "retrieval_text", None),
+    )
+    return {**record.model_dump(), "summary_updated_at": updated_at}
 
 
 def summary_index_text(row: dict) -> str:
@@ -454,6 +466,9 @@ async def repair_existing(
         "entity_hints",
         "retrieval_uses",
         "abstraction_level",
+        "latent_concepts",
+        "temporal_class",
+        "time_expressions",
         "source_child_ids",
         "source_hash",
         "summary_model",

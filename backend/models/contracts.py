@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 EXTRACT_SCHEMA_VERSION = "polymath.extract.v2"
 PROMOTE_VERSION = "polymath.promote.v1"
@@ -204,3 +204,120 @@ class RerankerInput(BaseModel):
             f"Parent context: {self.parent_context}\n" if self.parent_context else ""
         )
         return prefix + context + self.excerpt
+
+
+# ── 6. ParentSummaryRecord — Mongo summary-writer boundary (P0.8) ──────────
+TEMPORAL_CLASS_VALUES = (
+    "evergreen",
+    "slowly_evolving",
+    "versioned",
+    "event",
+    "ephemeral",
+    "unknown",
+)
+
+TemporalClass = Literal[
+    "evergreen", "slowly_evolving", "versioned", "event", "ephemeral", "unknown"
+]
+TemporalRole = Literal[
+    "publication_time",
+    "revision_time",
+    "reference_time",
+    "event_time",
+    "effective_time",
+    "forecast_time",
+    "deadline_time",
+    "media_offset",
+    "unknown",
+]
+
+
+class LatentConceptRecord(BaseModel):
+    """P2.2 capture row — shape produced by parse_latent_concepts, only."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    concept: str = Field(min_length=1, max_length=60)
+    evidence_basis: Literal["direct", "inferred"]
+    aliases: list[str] = Field(default_factory=list, max_length=3)
+
+
+class TimeExpressionRecord(BaseModel):
+    """T-HOOK-2 capture row — shape produced by parse_temporal_semantics,
+    only. ``char_start``/``char_end`` are computed in code from a verbatim
+    source-text match, never taken from a model."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    text: str = Field(min_length=1, max_length=60)
+    role: TemporalRole = "unknown"
+    char_start: Optional[int] = Field(default=None, ge=0)
+    char_end: Optional[int] = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def validate_offset_pair(self) -> "TimeExpressionRecord":
+        """Offsets are either absent together or form a non-empty span."""
+
+        if (self.char_start is None) != (self.char_end is None):
+            raise ValueError("char_start and char_end must be provided together")
+        if (
+            self.char_start is not None
+            and self.char_end is not None
+            and self.char_end <= self.char_start
+        ):
+            raise ValueError("char_end must be greater than char_start")
+        return self
+
+
+class ParentSummaryRecord(BaseModel):
+    """The canonical parent-summary persistence payload (parent_summary.v1).
+
+    P0.8 typed-model acceptance at the Mongo summary-writer boundary: every
+    summary generate/backfill writer builds its ``$set`` through this model
+    (services/ingestion/summary_backfill.summary_result_fields), so a
+    malformed artifact raises loudly instead of persisting as durable junk.
+    New summary artifacts are intentionally strict. Extra fields are rejected,
+    temporal values are bounded enums, and missing temporal classification is
+    represented explicitly as ``unknown`` rather than ``None``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    summary: str = Field(min_length=1)
+    domain: Optional[str] = None
+    topics: Optional[list[str]] = None  # DEPRECATED passthrough
+    semantic_chunk_type: Optional[str] = None
+    key_terms: Optional[list[str]] = None
+    mechanisms: Optional[list[str]] = None
+    schema_version: Optional[str] = None
+    summary_type: Optional[str] = None
+    central_claim: Optional[str] = None
+    key_points: Optional[list[dict]] = None
+    main_mechanism: Optional[str] = None
+    concept_tags: Optional[list[str]] = None
+    entity_hints: Optional[list[str]] = None
+    retrieval_uses: Optional[list[str]] = None
+    abstraction_level: Optional[str] = None
+    latent_concepts: list[LatentConceptRecord] = Field(
+        default_factory=list, max_length=12
+    )
+    temporal_class: TemporalClass = "unknown"
+    time_expressions: list[TimeExpressionRecord] = Field(
+        default_factory=list, max_length=12
+    )
+    source_child_ids: Optional[list[str]] = None
+    summary_id: Optional[str] = None
+    source_hash: Optional[str] = None
+    summary_model: Optional[str] = None
+    summary_created_at: Optional[str] = None
+    validation_status: Optional[str] = None
+    repair_status: Optional[str] = None
+    quality_score: Optional[float] = None
+    quality_flags: Optional[list[str]] = None
+    retrieval_text: Optional[str] = None
+
+    @field_validator("summary")
+    @classmethod
+    def validate_nonempty_summary(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("summary must contain non-whitespace text")
+        return value

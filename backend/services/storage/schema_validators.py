@@ -5,8 +5,9 @@ Additive and permissive by design:
   - Only identity-spine fields are ``required`` per collection.
   - Known optional fields are type-checked with ``bsonType`` unions that
     include ``"null"`` so legacy rows and existing writers never fail.
-  - ``additionalProperties`` is never set to ``False`` — unknown fields
-    stay allowed.
+  - Top-level ``additionalProperties`` is never set to ``False`` — unrelated
+    parent/document fields stay allowed. Nested typed capture rows mirror the
+    writer contract and reject unknown row fields.
   - Defaults are ``validationAction: "warn"`` + ``validationLevel:
     "moderate"``: violations are logged by mongod, writes always proceed.
 
@@ -38,7 +39,82 @@ PARENT_CHUNKS_SCHEMA: dict = {
             "corpus_id": {"bsonType": "string"},
             "summary": {"bsonType": ["string", "null"]},
             "summary_model": {"bsonType": ["string", "null"]},
-            "latent_concepts": {"bsonType": ["array", "null"]},
+            "latent_concepts": {
+                "bsonType": ["array", "null"],
+                "maxItems": 12,
+                "items": {
+                    "bsonType": "object",
+                    "required": ["concept", "evidence_basis"],
+                    "additionalProperties": False,
+                    "properties": {
+                        "concept": {
+                            "bsonType": "string",
+                            "minLength": 1,
+                            "maxLength": 60,
+                        },
+                        "evidence_basis": {"enum": ["direct", "inferred"]},
+                        "aliases": {
+                            "bsonType": "array",
+                            "maxItems": 3,
+                            "items": {"bsonType": "string"},
+                        },
+                    },
+                },
+            },
+            # T-HOOK-2: temporal capture on the Ghost A summary contract.
+            "temporal_class": {
+                "bsonType": ["string", "null"],
+                "enum": [
+                    "evergreen",
+                    "slowly_evolving",
+                    "versioned",
+                    "event",
+                    "ephemeral",
+                    "unknown",
+                    None,
+                ]
+            },
+            "time_expressions": {
+                "bsonType": ["array", "null"],
+                "maxItems": 12,
+                "items": {
+                    "bsonType": "object",
+                    "required": ["text", "role"],
+                    "additionalProperties": False,
+                    "dependencies": {
+                        "char_start": ["char_end"],
+                        "char_end": ["char_start"],
+                    },
+                    "properties": {
+                        "text": {
+                            "bsonType": "string",
+                            "minLength": 1,
+                            "maxLength": 60,
+                        },
+                        "role": {
+                            "enum": [
+                                "publication_time",
+                                "revision_time",
+                                "reference_time",
+                                "event_time",
+                                "effective_time",
+                                "forecast_time",
+                                "deadline_time",
+                                "media_offset",
+                                "unknown",
+                            ]
+                        },
+                        "char_start": {
+                            "bsonType": ["int", "long", "null"],
+                            "minimum": 0,
+                        },
+                        "char_end": {
+                            "bsonType": ["int", "long", "null"],
+                            "minimum": 0,
+                        },
+                    },
+                },
+            },
         },
     }
 }

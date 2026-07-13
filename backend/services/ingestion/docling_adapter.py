@@ -26,12 +26,24 @@ import csv
 import tempfile
 from io import BytesIO, StringIO
 from dataclasses import dataclass, field
+from html.parser import HTMLParser
 from pathlib import Path
 
 import httpx
 
 from models.schemas import SourceTier
 from services.ingestion.b_plus_normalizer import inject_synthetic_headers
+from services.ingestion.bibliographic import (
+    FRONTMATTER_DATE_KEYS,
+    FRONTMATTER_LANGUAGE_KEYS,
+    KIND_FILE_CREATION,
+    KIND_PUBLICATION,
+    KIND_REVISION,
+    DateCandidate,
+    build_provenance,
+    normalize_language,
+    resolve_document_dates,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -182,9 +194,41 @@ _FRONTMATTER_RE = re.compile(
 
 
 _HTML_TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.I | re.S)
-_HTML_AUTHOR_RE = re.compile(
-    r'<meta[^>]+name=["\']author["\'][^>]*content=["\']([^"\']+)', re.I
-)
+
+_HTML_PUBLISHED_KEYS = {
+    "article:published_time",
+    "citation_publication_date",
+    "citation_date",
+    "datepublished",
+    "publish_date",
+    "publish-date",
+    "publishdate",
+}
+
+
+class _HTMLMetadataParser(HTMLParser):
+    """Order-independent extraction of explicit HTML metadata attributes."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.author: str | None = None
+        self.language: str | None = None
+        self.published: tuple[str, str] | None = None
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        values = {str(k).lower(): v for k, v in attrs if k}
+        tag = tag.lower()
+        if tag == "html" and self.language is None:
+            self.language = values.get("lang")
+            return
+        if tag != "meta":
+            return
+        key = str(values.get("property") or values.get("name") or "").lower()
+        content = str(values.get("content") or "").strip()
+        if key == "author" and content and self.author is None:
+            self.author = content
+        if key in _HTML_PUBLISHED_KEYS and content and self.published is None:
+            self.published = (key, content)
 
 
 def _meta_from_frontmatter(text: str) -> dict:
@@ -198,6 +242,8 @@ def _meta_from_frontmatter(text: str) -> dict:
     if not m:
         return {}
     out: dict = {}
+    candidates: list[DateCandidate] = []
+    seen_date_keys: set[str] = set()
     for line in m.group(0).splitlines()[1:-1]:
         k, _, v = line.partition(":")
         k, v = k.strip().lower(), v.strip().strip("'\"")
@@ -207,8 +253,22 @@ def _meta_from_frontmatter(text: str) -> dict:
             out["title"] = v[:300]
         elif k in ("author", "authors", "creator", "by") and "author" not in out:
             out["author"] = v[:200]
-        elif k in ("date", "created", "published", "publish_date", "pubdate") and "document_date" not in out:
-            out["document_date"] = v[:40]
+        elif k in FRONTMATTER_LANGUAGE_KEYS and "language_meta" not in out:
+            lang = normalize_language(v)
+            if lang:
+                out["language_meta"] = lang
+        elif k in FRONTMATTER_DATE_KEYS and k not in seen_date_keys:
+            # T-HOOK-3: no more conflation into document_date — each dated key
+            # becomes a typed candidate (published→publication, date→ambiguous,
+            # created/modified→file time); finalize_source_meta resolves.
+            seen_date_keys.add(k)
+            kind, method = FRONTMATTER_DATE_KEYS[k]
+            candidates.append(
+                DateCandidate(raw=v[:80], kind=kind, method=method,
+                              source=f"frontmatter:{k}")
+            )
+    if candidates:
+        out["date_candidates"] = candidates
     return out
 
 
@@ -223,9 +283,28 @@ def _meta_from_html(raw_bytes: bytes) -> dict:
         t = re.sub(r"\s+", " ", m.group(1)).strip()
         if t:
             out["title"] = t[:300]
-    m = _HTML_AUTHOR_RE.search(head)
-    if m:
-        out["author"] = m.group(1).strip()[:200]
+    parser = _HTMLMetadataParser()
+    try:
+        parser.feed(head)
+    except Exception:
+        # Malformed scraped HTML must not fail ingestion; title regex above and
+        # all downstream fallbacks remain available.
+        pass
+    if parser.author:
+        out["author"] = parser.author[:200]
+    lang = normalize_language(parser.language)
+    if lang:
+        out["language_meta"] = lang
+    if parser.published:
+        key, raw_date = parser.published
+        out["date_candidates"] = [
+            DateCandidate(
+                raw=raw_date[:80],
+                kind=KIND_PUBLICATION,
+                method="html_meta_published",
+                source=f"html_meta:{key}",
+            )
+        ]
     return out
 
 
@@ -235,12 +314,39 @@ def _meta_from_docx(raw_bytes: bytes) -> dict:
 
         cp = Document(BytesIO(raw_bytes)).core_properties
         out: dict = {}
-        if cp.title:
-            out["title"] = str(cp.title).strip()[:300]
-        if cp.author:
-            out["author"] = str(cp.author).strip()[:200]
-        if cp.created:
-            out["document_date"] = cp.created.date().isoformat()
+        title = getattr(cp, "title", None)
+        author = getattr(cp, "author", None)
+        if title:
+            out["title"] = str(title).strip()[:300]
+        if author:
+            out["author"] = str(author).strip()[:200]
+        lang = normalize_language(getattr(cp, "language", None))
+        if lang:
+            out["language_meta"] = lang
+        # T-HOOK-3 de-conflation: core-props created/modified are FILE times,
+        # never publication — they may only ever explain a null date.
+        candidates: list[DateCandidate] = []
+        created = getattr(cp, "created", None)
+        if created:
+            candidates.append(
+                DateCandidate(
+                    raw=created.date().isoformat(),
+                    kind=KIND_FILE_CREATION,
+                    method="docx_core_created",
+                    source="docx:core_properties.created",
+                )
+            )
+        if getattr(cp, "modified", None):
+            candidates.append(
+                DateCandidate(
+                    raw=cp.modified.date().isoformat(),
+                    kind=KIND_REVISION,
+                    method="docx_core_modified",
+                    source="docx:core_properties.modified",
+                )
+            )
+        if candidates:
+            out["date_candidates"] = candidates
         return out
     except Exception:
         return {}
@@ -254,22 +360,50 @@ def _meta_from_pdf(raw_bytes: bytes) -> dict:
         out: dict = {}
         t = str(md.get("/Title") or "").strip()
         a = str(md.get("/Author") or "").strip()
-        d = str(md.get("/CreationDate") or "").strip()
         if t:
             out["title"] = t[:300]
         if a:
             out["author"] = a[:200]
-        if d.startswith("D:") and len(d) >= 10 and d[2:10].isdigit():
-            out["document_date"] = f"{d[2:6]}-{d[6:8]}-{d[8:10]}"
+        # T-HOOK-3 de-conflation: /CreationDate and /ModDate are FILE times,
+        # never publication — they may only ever explain a null date.
+        candidates: list[DateCandidate] = []
+        for key, kind, method in (
+            ("/CreationDate", KIND_FILE_CREATION, "pdf_creation_date"),
+            ("/ModDate", KIND_REVISION, "pdf_mod_date"),
+        ):
+            d = str(md.get(key) or "").strip()
+            if d.startswith("D:") and len(d) >= 10 and d[2:10].isdigit():
+                candidates.append(
+                    DateCandidate(
+                        raw=f"{d[2:6]}-{d[6:8]}-{d[8:10]}",
+                        kind=kind,
+                        method=method,
+                        source=f"pdf:{key}",
+                    )
+                )
+        if candidates:
+            out["date_candidates"] = candidates
         return out
     except Exception:
         return {}
 
 
 def _apply_meta(result: "DoclingParseResult", meta: dict) -> None:
-    for k in ("title", "author", "document_date"):
+    for k in ("title", "author", "language_meta"):
         if meta.get(k) and not getattr(result, k, None):
             setattr(result, k, meta[k])
+    if meta.get("date_candidates"):
+        current = getattr(result, "date_candidates", None)
+        if current is None:
+            setattr(result, "date_candidates", list(meta["date_candidates"]))
+        else:
+            current.extend(meta["date_candidates"])
+        # Preserve the parse-result convenience contract, but resolve through
+        # the de-conflated candidate model: publication metadata is visible
+        # immediately while file-creation/revision times remain null.
+        result.document_date = resolve_document_dates(
+            getattr(result, "date_candidates", None) or []
+        )["document_date"]
 
 
 _SOURCE_TYPE_BY_FORMAT = {
@@ -294,6 +428,13 @@ def finalize_source_meta(result: "DoclingParseResult", filename: str | None) -> 
     Fills fallbacks (title ← cleaned filename stem), a deterministic
     format-family source_type (semantic refinement is Ghost A's job later),
     and the per-document routing_trace (every cascade decision). Idempotent.
+
+    T-HOOK-3: also runs the date de-conflation resolver over the parser's
+    typed ``date_candidates`` — ``document_date``/``source_published_at`` are
+    set ONLY from publication-grade candidates (file-creation/revision times
+    never leak in; unknown stays null with a reason code) — and stamps the
+    full bibliographic block onto ``routing_trace["bibliographic"]``, which
+    ``mongo_writer.upsert_document`` promotes to top-level document fields.
     """
     fname = filename or result.filename or ""
     stem = Path(fname).stem
@@ -315,6 +456,14 @@ def finalize_source_meta(result: "DoclingParseResult", filename: str | None) -> 
         "tier_code": "ast_bound_code",
         "tier_c": "semantic_parents_or_token_window",
     }.get(tier, "heading_bound")
+    # T-HOOK-3 — resolve typed date candidates; publication vs file-time
+    # de-conflation lives in services.ingestion.bibliographic.
+    resolution = resolve_document_dates(getattr(result, "date_candidates", None) or [])
+    result.document_date = resolution["document_date"]
+    prior_block = (
+        (getattr(result, "routing_trace", None) or {}).get("bibliographic") or {}
+    )
+    prior_provenance = prior_block.get("bibliographic_provenance") or {}
     result.routing_trace = {
         "parser": result.source_format or "docling_sidecar",
         "tier": tier,
@@ -325,6 +474,23 @@ def finalize_source_meta(result: "DoclingParseResult", filename: str | None) -> 
         "parent_strategy": parent_strategy,
         "child_strategy": "semantic_split+routers",
         "title_source": "metadata" if title_from_metadata else "filename",
+        # promoted to top-level document fields at the Mongo writer boundary
+        "bibliographic": {
+            "title": result.title,
+            "author": result.author,
+            "language": getattr(result, "language_meta", None),
+            "document_date": resolution["document_date"],
+            "source_published_at": resolution["source_published_at"],
+            "date_confidence": resolution["date_confidence"],
+            "bibliographic_provenance": build_provenance(
+                method=resolution["method"],
+                source=resolution["source"],
+                precision=resolution["precision"],
+                reason=resolution["reason"],
+                origin="ingest",
+                captured_at=prior_provenance.get("captured_at"),
+            ),
+        },
     }
 
 
@@ -484,8 +650,16 @@ class DoclingParseResult:
     # Prerequisite for two-lane anchoring + the summary-tree compact schema.
     title: str | None = None
     author: str | None = None
-    document_date: str | None = None  # ISO date string when the format has one
+    document_date: str | None = None  # PUBLICATION date only (resolved in finalize)
     source_type: str | None = None    # book|paper|standard|manual|blog|... (heuristic)
+    # T-HOOK-3 — bibliographic/date identity. `language_meta` is the natural
+    # language from EXPLICIT format metadata (frontmatter lang, <html lang>,
+    # EPUB dc:language, DOCX core-props) — distinct from the code-lane
+    # `language` (programming language). `date_candidates` collects every raw
+    # dated observation (typed publication vs file-creation vs revision);
+    # `finalize_source_meta` runs the de-conflation resolver over them.
+    language_meta: str | None = None
+    date_candidates: list = field(default_factory=list)
     # Per-document routing report — cascade decisions (intercept → sniff →
     # tier → parent strategy) recorded for /documents/{id} visibility.
     routing_trace: dict = field(default_factory=dict)
@@ -1364,7 +1538,7 @@ def _parse_local_text_document(raw_bytes: bytes, filename: str, mime: str) -> Do
 
         decoded = route(raw_bytes, filename=filename, mime_hint=mime)
         text = decoded.text or ""
-        return DoclingParseResult(
+        html_result = DoclingParseResult(
             text=text,
             markdown=text,
             sections=[],
@@ -1373,13 +1547,14 @@ def _parse_local_text_document(raw_bytes: bytes, filename: str, mime: str) -> Do
             source_tier=SourceTier.tier_b,
             source_format="local_html",
             filename=filename,
-            **{k: v for k, v in _meta_from_html(raw_bytes).items()
-               if k in ("title", "author", "document_date")},
         )
+        _apply_meta(html_result, _meta_from_html(raw_bytes))  # M2 + T-HOOK-3
+        return html_result
 
     if _looks_like_markdown(filename, mime):
         raw_text = raw_bytes.decode("utf-8", errors="replace")
         fm_meta = _meta_from_frontmatter(raw_text)  # M2: read before stripping
+        fm_candidates = list(fm_meta.get("date_candidates") or [])
         markdown = _strip_leading_metadata_block(_strip_yaml_frontmatter(raw_text))
         sections, h1, h2 = _markdown_sections(markdown)
         has_tables = any(s.element_type == "table" for s in sections)
@@ -1402,7 +1577,9 @@ def _parse_local_text_document(raw_bytes: bytes, filename: str, mime: str) -> Do
             filename=filename,
             title=fm_meta.get("title"),
             author=fm_meta.get("author"),
-            document_date=fm_meta.get("document_date"),
+            document_date=resolve_document_dates(fm_candidates)["document_date"],
+            language_meta=fm_meta.get("language_meta"),
+            date_candidates=fm_candidates,
         )
 
     if _looks_like_docx(filename, mime):
@@ -1486,6 +1663,16 @@ def _parse_local_epub_document(
 
     title = _epub_metadata_value(book, "DC", "title") or Path(filename).stem
     author = _epub_metadata_value(book, "DC", "creator")
+    # T-HOOK-3 — dc:language is explicit natural-language metadata; dc:date is
+    # a publication-grade (but unlabelled) candidate, resolved in finalize.
+    epub_language = normalize_language(_epub_metadata_value(book, "DC", "language"))
+    epub_date_candidates: list[DateCandidate] = []
+    dc_date = _epub_metadata_value(book, "DC", "date")
+    if dc_date:
+        epub_date_candidates.append(
+            DateCandidate(raw=str(dc_date)[:80], kind=KIND_PUBLICATION,
+                          method="epub_dc_date", source="epub:dc:date")
+        )
     sections: list[Section] = []
     markdown_lines: list[str] = []
     text_blocks: list[str] = []
@@ -1593,6 +1780,9 @@ def _parse_local_epub_document(
         filename=filename,
         title=title,
         author=author,
+        document_date=resolve_document_dates(epub_date_candidates)["document_date"],
+        language_meta=epub_language,
+        date_candidates=epub_date_candidates,
         source_type="book",
     )
 

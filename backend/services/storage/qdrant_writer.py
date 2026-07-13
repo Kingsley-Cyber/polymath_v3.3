@@ -898,6 +898,9 @@ async def upsert_summaries(
                 "entity_hints": p.get("entity_hints") or [],
                 "retrieval_uses": p.get("retrieval_uses") or [],
                 "abstraction_level": p.get("abstraction_level") or "medium",
+                "latent_concepts": p.get("latent_concepts") or [],
+                "temporal_class": p.get("temporal_class") or "unknown",
+                "time_expressions": p.get("time_expressions") or [],
                 "source_child_ids": p.get("source_child_ids")
                 or p.get("child_ids")
                 or [],

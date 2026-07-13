@@ -106,8 +106,9 @@ _BATCH_USER = (
 
 _TAGGED_RESCUE_SYSTEM = (
     "Summarize the supplied passage using the exact labeled prose format. "
-    "Do not output JSON, braces, markdown fences, hidden reasoning, or source "
-    "data verbatim. Use only facts present in the passage."
+    "Do not output JSON, braces, markdown fences, hidden reasoning, or long "
+    "source passages. Use only facts present in the passage. TIME values are "
+    "the one exception: copy each short time expression verbatim."
 )
 _TAGGED_RESCUE_USER = (
     "Produce this exact line-oriented contract:\n"
@@ -119,6 +120,12 @@ _TAGGED_RESCUE_USER = (
     "TAGS: three to eight terms separated by |\n"
     "MECHANISM: optional short mechanism\n"
     "ABSTRACTION: low, medium, or high\n\n"
+    "LATENT: direct or inferred | retrieval concept | up to three aliases "
+    "separated by ; (optional; repeat)\n"
+    "TEMPORAL_CLASS: evergreen, slowly_evolving, versioned, event, ephemeral, or unknown\n"
+    "TIME: publication_time, revision_time, reference_time, event_time, "
+    "effective_time, forecast_time, deadline_time, media_offset, or unknown | "
+    "short verbatim time expression (optional; repeat in passage order)\n\n"
     "PARENT PASSAGE:\n{text}"
 )
 
@@ -188,7 +195,17 @@ def parse_tagged_summary_response(
     text = re.sub(r"<think>.*?</think>", "", str(raw or ""), flags=re.DOTALL | re.IGNORECASE)
     sections: dict[str, list[str]] = {}
     current: str | None = None
-    allowed = {"SUMMARY", "CLAIM", "POINT", "TAGS", "MECHANISM", "ABSTRACTION"}
+    allowed = {
+        "SUMMARY",
+        "CLAIM",
+        "POINT",
+        "TAGS",
+        "MECHANISM",
+        "ABSTRACTION",
+        "LATENT",
+        "TEMPORAL_CLASS",
+        "TIME",
+    }
     for raw_line in text.splitlines():
         line = raw_line.strip().strip("`")
         if not line:
@@ -220,6 +237,35 @@ def parse_tagged_summary_response(
         for item in re.split(r"[|,]", value)
         if item.strip()
     ]
+    latent_concepts: list[dict[str, Any]] = []
+    for value in sections.get("LATENT") or []:
+        parts = [part.strip() for part in value.split("|", 2)]
+        if len(parts) < 2:
+            continue
+        aliases = (
+            [item.strip() for item in re.split(r"[;,]", parts[2]) if item.strip()]
+            if len(parts) == 3
+            else []
+        )
+        latent_concepts.append(
+            {
+                "evidence_basis": parts[0].lower(),
+                "concept": parts[1],
+                "aliases": aliases,
+            }
+        )
+    time_expressions: list[dict[str, str]] = []
+    for value in sections.get("TIME") or []:
+        role, separator, expression = value.partition("|")
+        if not separator:
+            continue
+        time_expressions.append(
+            {"role": role.strip().lower(), "text": expression.strip()}
+        )
+    temporal_class = (
+        (sections.get("TEMPORAL_CLASS") or ["unknown"])[0].strip().lower()
+        or "unknown"
+    )
     payload = {
         "summary": summary,
         "central_claim": " ".join(sections.get("CLAIM") or []).strip(),
@@ -228,6 +274,9 @@ def parse_tagged_summary_response(
         "main_mechanism": " ".join(sections.get("MECHANISM") or []).strip(),
         "abstraction_level": " ".join(sections.get("ABSTRACTION") or []).strip().lower(),
         "retrieval_uses": ["evidence"],
+        "latent_concepts": latent_concepts,
+        "temporal_class": temporal_class,
+        "time_expressions": time_expressions,
     }
     return parse_semantic_summary(
         json.dumps(payload, ensure_ascii=True),
@@ -258,6 +307,8 @@ class SummaryResult:
     retrieval_uses: list[str] | None = None
     abstraction_level: str | None = None
     latent_concepts: list[dict] | None = None
+    temporal_class: str | None = None
+    time_expressions: list[dict] | None = None
     source_child_ids: list[str] | None = None
     summary_id: str | None = None
     source_hash: str | None = None
@@ -646,7 +697,9 @@ async def summarize_parents(
             entity_hints=artifact["entity_hints"] or None,
             retrieval_uses=artifact["retrieval_uses"] or None,
             abstraction_level=artifact["abstraction_level"],
-            latent_concepts=artifact.get("latent_concepts") or None,
+            latent_concepts=artifact.get("latent_concepts") or [],
+            temporal_class=artifact.get("temporal_class") or "unknown",
+            time_expressions=artifact.get("time_expressions") or [],
             source_child_ids=artifact["source_child_ids"] or None,
             summary_id=artifact["summary_id"],
             source_hash=artifact["source_hash"],
