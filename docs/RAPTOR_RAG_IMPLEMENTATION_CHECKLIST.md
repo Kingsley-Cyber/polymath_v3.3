@@ -210,9 +210,19 @@ Milestone acceptance:
 - [x] Exclude explicit empty-model summary points from Funnel A.
 - [x] Refuse new summary writes without explicit model provenance.
 - [x] Count only summaries actually accepted by the Qdrant writer.
-- [ ] Reconcile the 500 queued summary jobs against current artifacts.
+- [x] Reconcile the 500 queued summary jobs against current artifacts.
+  *(2026-07-13: all 500 belonged to the deleted `authentic_library`;
+  superseded with reason `corpus_not_active_orphan_job`, backed up, 0 queued
+  remain — commit 1171e9d.)*
 - [ ] Backfill valid summaries for every summary-required parent.
+  **[IN PROGRESS — markbuildsbrands 1,009/1,009 VERIFIED, ecommerce
+  9,453/9,453 VERIFIED, UGO 203/203 VERIFIED (incl. generated missing parent
+  + doc profile + Tier-0 card); polymath_v2 regeneration of 2,633
+  quarantined defective legacy rows running]**
 - [ ] Remove or supersede legacy empty-model summary points after backfill.
+  **[IN PROGRESS — in-place reprojection is overwriting placeholder points
+  (67,953 → ~53k and falling on polymath_v2); residual snapshot+delete runs
+  after the index pass completes]**
 - [ ] Verify every valid summary has child IDs, boundaries, model, schema,
   validation status, and evidence-backed semantics.
 - [ ] Verify document-summary trees roll up only validated children.
@@ -251,43 +261,61 @@ Acceptance:
 
 - [x] Add bounded relevance to late planned-fusion corpus reservations.
 - [ ] Apply the same relevance gate before an already-selected corpus candidate
-  is protected as a reservation.
+  is protected as a reservation. **[IN CODE @1171e9d — awaiting live verify]**
 - [ ] Trace `ranking_policy` corpus-floor eligibility on calibrated packet
   scores rather than only normalized MMR relevance.
+  **[IN CODE @1171e9d — awaiting live verify]**
 - [ ] Consolidate or explicitly order the `planned_fusion` and `ranking_policy`
   corpus-floor decisions so one path cannot undo the other's rejection.
+  **[IN CODE @1171e9d — shared `reservation_policy.py` bound + ordering
+  contract; awaiting live verify]**
 - [ ] Remove or justify the unconditional `+0.10` reserve bonus.
+  **[IN CODE @1171e9d — removed; seat protection is the selection reason]**
 - [ ] Require diagnostics to distinguish naturally selected corpus evidence
-  from quota-reserved evidence.
-- [ ] Add a test where one selected corpus has no relevant evidence.
-- [ ] Add a test where all selected corpora genuinely contribute.
+  from quota-reserved evidence. **[IN CODE @1171e9d — reasoned skips +
+  eligibility trace + reservation outcome details]**
+- [x] Add a test where one selected corpus has no relevant evidence.
+  *(tests/test_corpus_floor_calibration.py, green in container)*
+- [x] Add a test where all selected corpora genuinely contribute.
+  *(tests/test_corpus_floor_calibration.py, green in container)*
 
 Acceptance:
 
 - [ ] No sub-threshold corpus receives a forced final seat.
+  **[unit-proven on all three paths @1171e9d; live probe after restart]**
 - [ ] Relevant cross-corpus questions retain evidence from each necessary
   corpus.
 - [ ] `corpus_floor.skipped` reports why a selected shelf was omitted.
+  **[IN CODE @1171e9d — structured reasons; live probe after restart]**
 
 ### P0.4 Make Answerability Honest
 
 - [x] Chat-facing negative control currently fails closed for the tungsten
   query.
 - [ ] Rename or clearly separate lane coverage from answerability in every
-  diagnostic contract.
+  diagnostic contract. **[IN CODE @f2fb6e2 — `selection.lane_coverage`
+  telemetry object + gate `lane_coverage`/`answer_shape`/`coverage_threshold`
+  keys; awaiting live verify]**
 - [ ] Calibrate evidence sufficiency by query/answer shape, not one universal
-  threshold.
+  threshold. **[IN CODE @f2fb6e2 — shape-keyed coverage thresholds (broad
+  −0.20, enumeration/comparison −0.10, floor 0.40); awaiting live verify]**
 - [ ] Require answer presence, evidence strength, obligation coverage, and
-  contradiction checks before `answerable=true`.
+  contradiction checks before `answerable=true`. **[PARTIAL @f2fb6e2 —
+  undecomposed queries now judged by the strict evidence-atom gate instead of
+  synthetic-lane coverage; contradiction checks not yet implemented]**
 - [ ] Surface a precise refusal reason when sources cover a nearby but different
-  concept.
+  concept. **[IN CODE @f2fb6e2 — refusals name the nearest retrieved
+  documents and never leak internal lane ids; awaiting live verify]**
 
 Acceptance:
 
 - [ ] Negative controls across all three tiers return `answerable=false`.
+  **[live probe after restart]**
 - [ ] Strong answers are not rejected solely because calibrated score ranges
-  differ by query type.
+  differ by query type. **[root cause of the recorded cross-corpus false
+  refusal fixed @f2fb6e2; live probe after restart]**
 - [ ] Lane coverage and answerability are separately visible in UI/MCP output.
+  **[IN CODE @f2fb6e2; awaiting live verify]**
 
 ### P0.5 Complete Chunk And Metadata Hygiene
 
@@ -317,16 +345,26 @@ Acceptance:
 - [x] Persist corpus-cleanup ownership/lease fields and hold strong references
   to active bulk-deletion tasks.
 - [ ] Add periodic reclaim of expired and partial cleanup leases during normal
-  uptime; do not rely only on service startup.
+  uptime; do not rely only on service startup. **[IN CODE @0dc5a7e — 60s
+  cadence in the ingest poll loop; awaiting live verify]**
 - [ ] Heartbeat/extend the lease while a large chunk or Neo4j purge is active.
+  **[IN CODE @0dc5a7e — owner-guarded renewal every lease/3]**
 - [ ] Release or shorten the lease when graceful shutdown cancels a cleanup
   task, allowing the replacement process to reclaim it immediately.
+  **[IN CODE @0dc5a7e — disconnect() releases owned leases]**
 - [ ] Retry partial cleanup automatically after `cleanup_retry_at` without
-  requiring another process restart.
+  requiring another process restart. **[IN CODE @0dc5a7e — periodic reclaim
+  query honors cleanup_retry_at]**
 - [ ] Test immediate restart before lease expiry, purge duration beyond lease,
   two competing service processes, partial-stage retry, and idempotent replay.
-- [ ] Produce a dry-run ownership manifest for historical Qdrant collections,
+  **[PARTIAL @0dc5a7e — owner-guarded finalize, shutdown release, heartbeat,
+  reclaim, partial-retry covered (17 green); restart-before-expiry and
+  purge-beyond-lease scenarios still to add]**
+- [x] Produce a dry-run ownership manifest for historical Qdrant collections,
   Tier-0 cards, tree rows, and Mongo records.
+  *(2026-07-13 `orphan_ownership_manifest.py` → docs/baselines/
+  ORPHAN_MANIFEST_2026-07-13.json: 17 dead corpus ids; authentic_library
+  residue 1,701,144 Mongo rows + 638,743 Neo4j nodes — commit 0dc5a7e.)*
 - [ ] Review and approve the exact deletion allow-list.
 - [ ] Execute the one-time orphan cleanup.
 - [ ] Verify deleted `authentic_library` projections are removed or explicitly
@@ -374,21 +412,34 @@ Acceptance:
 
 ### P1.1 Establish The Evaluation Set First
 
-- [ ] Create at least 50 held-out lay-language questions across film,
+- [x] Create at least 50 held-out lay-language questions across film,
   psychology, ecommerce, marketing, philosophy, and technical material.
-- [ ] Include direct, naive-vocabulary, broad, list, comparison, procedural,
+  *(56 questions in `backend/evals/heldout_questions.jsonl`, all four active
+  corpora, Mongo-validated expected docs — commit f2fb6e2.)*
+- [x] Include direct, naive-vocabulary, broad, list, comparison, procedural,
   follow-up, negative-control, cross-domain, and cross-corpus cases.
-- [ ] Record expected documents, concepts, evidence, and acceptable alternate
-  routes.
+  *(shape census: direct 8, naive 6, single-fact 5, broad 4, list 6,
+  procedural 6, comparison 3, follow-up 3, negative-control 5, cross-domain
+  2, cross-corpus 6, cross-corpus-irrelevant 2.)*
+- [x] Record expected documents, concepts, evidence, and acceptable alternate
+  routes. *(expected_doc_ids validated against Mongo per question, expected
+  concepts, expected_all_docs semantics, alternate-route notes.)*
 - [ ] Capture baseline Recall@K, document recall, concept recall, nDCG/MRR,
   answerability, evidence coverage, diversity, and latency by tier.
+  **[runner ready (`run_heldout_eval.py`); baseline capture deliberately
+  deferred until P0.1 completes on polymath_v2 + backend restart]**
 - [ ] Add a librarian rubric: direct relevance, useful adjacency, bridge
   validity, counterbalance, provenance, and harmful analogy penalty.
-- [ ] Store stable hashes for every held-out query and exclude those hashes,
+- [x] Store stable hashes for every held-out query and exclude those hashes,
   expected answers, and evaluator-authored paraphrases from attested-query
   harvesting and any training/backfill source.
+  *(56 frozen sha256 hashes in `backend/evals/heldout_hashes.json`;
+  `services/eval_firewall.is_heldout_query()` is the mandatory gate for any
+  future harvesting — commit f2fb6e2.)*
 - [ ] Add an automated contamination check that fails an evaluation run when a
   held-out query appears in attested/generated concept representations.
+  **[firewall primitive exists; the eval-run check lands with the first
+  attested/generated representation store (P2.2)]**
 
 Acceptance:
 
