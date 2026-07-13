@@ -263,12 +263,13 @@ Milestone acceptance:
   lexicon/vocabulary first.
 - [ ] Generate candidate documents through current Tier-0 dense/sparse recall.
 - [ ] Assign query-relative shelf roles through indexed field overlap.
+  **[IN CODE — wave2/shelves, pending merge]**
 - [ ] Implement `shelf_reserve` through the calibrated eligibility discipline
   required by P0.3; never mirror the old unconditional corpus-floor behavior.
 - [ ] Descend reserved documents through tree -> parent -> child evidence.
 - [ ] Require shared mechanisms/principles plus evidence for every Bridge seat.
 - [ ] Use versioned misuse/counterbalance policy data, not per-corpus Python
-  conditionals.
+  conditionals. **[IN CODE — wave2/shelves, pending merge]**
 
 Milestone acceptance:
 
@@ -606,12 +607,13 @@ Acceptance:
 ### P1.5 Implement Librarian Selection Roles
 
 - [ ] Add retrieval roles: direct, foundational, adjacent, bridge, and
-  counterbalance.
+  counterbalance. **[IN CODE — wave2/shelves, pending merge]**
 - [ ] Assign roles per query; never stamp a document with one permanent shelf
-  role.
+  role. **[IN CODE — wave2/shelves, pending merge]**
 - [ ] Derive roles from universal capabilities, mechanisms, problems, risks,
   and source evidence rather than topic-specific rules.
 - [ ] Define deterministic v0 eligibility:
+  **[IN CODE — wave2/shelves, pending merge]**
   - Direct: central-subject/problem overlap with the query.
   - Foundational: capability overlap supported by mechanisms/evidence.
   - Adjacent: shared capabilities/mechanisms with meaningfully different
@@ -622,14 +624,15 @@ Acceptance:
     counterbalancing concept/document.
 - [ ] Require every bridge recommendation to expose:
   `document -> concept -> transferable principle -> user goal`.
+  **[IN CODE — wave2/shelves, pending merge]**
 - [ ] Treat embedding scores as candidate recall only; they cannot independently
-  satisfy any shelf-role gate.
+  satisfy any shelf-role gate. **[IN CODE — wave2/shelves, pending merge]**
 - [ ] Deduplicate by document while retaining multiple validated roles, themes,
-  and reasons.
+  and reasons. **[IN CODE — wave2/shelves, pending merge]**
 - [ ] Reserve role diversity only when candidates clear relevance/evidence
   gates.
 - [ ] Skip a role seat when no candidate qualifies; never fill a quota with
-  weak evidence.
+  weak evidence. **[IN CODE — wave2/shelves, pending merge]**
 - [ ] Return a reading path, not merely a flat chunk list, for librarian-mode
   questions.
 
