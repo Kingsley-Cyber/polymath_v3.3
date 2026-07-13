@@ -114,12 +114,13 @@ Tracked work added by this audit:
 
 - [ ] Add additive Mongo JSON-schema validators (warn-first, then enforce)
   for documents, parent_chunks, ghost_b_extractions, corpus_lexicon, and
-  summary_tree.
+  summary_tree. **[IN CODE — wave1/p08, pending merge]**
 - [ ] Enforce typed-model acceptance at the Mongo writer boundary (close the
   B0 "writers accept ONLY typed models" gap) without breaking existing
   callers.
 - [ ] Normalize extraction `schema_version` (v1/v2/missing) and backfill
   `extractor` engine identity where derivable from provenance.
+  **[IN CODE — wave1/p08, pending merge]**
 - [ ] Audit graph key alignment (formal `corpus_ids` vs live node keys) and
   reconcile with a migration or a documented contract correction.
 
