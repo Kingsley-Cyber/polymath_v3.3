@@ -38,6 +38,7 @@ from models.schemas import (
     ModelsConfig,
     QueryModelPoolEntry,
     RetrievalSettings,
+    RunpodFlashAccount,
 )
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
@@ -482,6 +483,77 @@ class SettingsService:
         except Exception as exc:  # noqa: BLE001
             logger.warning("get_system_runpod_flash fell back to defaults: %s", exc)
         return config, api_key
+
+    async def get_system_runpod_flash_accounts(
+        self,
+        user_id: str | None = None,
+    ) -> list[tuple[RunpodFlashAccount, str]]:
+        """Resolve enabled Runpod accounts with decrypted backend-only keys.
+
+        Multi-account routing (P2.7c): ``ingestion.runpod_flash.accounts``
+        holds additive account rows; the matching ciphertexts live in the
+        shared key store under ``api_keys.runpod_accounts.<name>``. Disabled
+        or keyless accounts are skipped with a logged warning. When no usable
+        account rows exist, the legacy pair (``endpoint_id`` +
+        ``api_keys.runpod``) is returned as one implicit account named
+        ``default`` so callers keep ONE code path; a missing legacy key
+        yields an empty-string key that fails closed at dispatch time.
+        """
+
+        config, legacy_key = await self.get_system_runpod_flash(user_id)
+        resolved: list[tuple[RunpodFlashAccount, str]] = []
+        if config.accounts:
+            ciphertexts: dict[str, Any] = {}
+            if self._db is not None:
+                try:
+                    query: dict[str, Any] = (
+                        {"user_id": user_id}
+                        if user_id
+                        else {
+                            "$or": [
+                                {"ingestion.runpod_flash": {"$exists": True}},
+                                {"api_keys.runpod": {"$exists": True}},
+                            ]
+                        }
+                    )
+                    doc = await self._db["settings"].find_one(query)
+                    stored = ((doc or {}).get("api_keys") or {}).get(
+                        "runpod_accounts"
+                    )
+                    if isinstance(stored, dict):
+                        ciphertexts = stored
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "get_system_runpod_flash_accounts key lookup failed: %s", exc
+                    )
+            from services.secrets import decrypt
+
+            for account in config.accounts:
+                if not account.enabled:
+                    logger.warning(
+                        "Runpod account %r is disabled; skipping", account.name
+                    )
+                    continue
+                ciphertext = ciphertexts.get(account.name)
+                account_key = decrypt(ciphertext) if ciphertext else None
+                if not account_key:
+                    logger.warning(
+                        "Runpod account %r has no stored API key under "
+                        "api_keys.runpod_accounts; skipping",
+                        account.name,
+                    )
+                    continue
+                resolved.append((account, account_key))
+        if resolved:
+            return resolved
+        default_account = RunpodFlashAccount(
+            name="default",
+            endpoint_id=config.endpoint_id,
+            enabled=config.enabled,
+            max_workers=config.max_workers,
+            request_concurrency=config.request_concurrency,
+        )
+        return [(default_account, legacy_key or "")]
 
     async def update_ingestion_settings(
         self,

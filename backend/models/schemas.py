@@ -575,6 +575,31 @@ class ExtractionSettings(BaseModel):
     endpoints: list[ExtractionEndpoint] = Field(default_factory=list)
 
 
+class RunpodFlashAccount(BaseModel):
+    """One Runpod account for multi-account burst routing (P2.7c).
+
+    Each API key is a distinct Runpod account with its own serverless
+    endpoint, quota, and billing; batch-level routing across accounts makes
+    combined burst throughput the sum of the accounts. The API key is
+    deliberately absent here (same house rule as
+    ``RunpodFlashExtractionSettings``): each account's key lives in the
+    encrypted shared-key store under ``api_keys.runpod_accounts.<name>`` and
+    is resolved only at dispatch time.
+    """
+
+    name: str = Field(max_length=60)
+    endpoint_id: str = Field(max_length=120)
+    enabled: bool = True
+    max_workers: int = Field(default=8, ge=1, le=64)
+    request_concurrency: int = Field(default=8, ge=1, le=64)
+    weight: float = Field(
+        default=1.0,
+        ge=0.1,
+        le=10.0,
+        description="Least-in-flight tiebreaker: higher weight wins ties.",
+    )
+
+
 class RunpodFlashExtractionSettings(BaseModel):
     """Runpod Flash burst lane for joint GLiNER-Relex extraction.
 
@@ -586,6 +611,14 @@ class RunpodFlashExtractionSettings(BaseModel):
 
     enabled: bool = False
     endpoint_id: str = Field(default="", max_length=120)
+    accounts: list[RunpodFlashAccount] = Field(
+        default_factory=list,
+        description=(
+            "Additive multi-account routing rows (P2.7c). Empty keeps the "
+            "legacy single endpoint_id + api_keys.runpod pair as the implicit "
+            "'default' account."
+        ),
+    )
     endpoint_name: str = Field(default="polymath-gliner-relex", max_length=120)
     model_id: str = Field(
         default="knowledgator/gliner-relex-large-v0.5",

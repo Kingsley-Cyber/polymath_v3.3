@@ -17,7 +17,7 @@ from typing import Any
 
 import httpx
 
-from models.schemas import RunpodFlashExtractionSettings
+from models.schemas import RunpodFlashAccount, RunpodFlashExtractionSettings
 from services.ghost_b import (
     UNIVERSAL_ENTITY_SCHEMA,
     UNIVERSAL_RELATION_SCHEMA,
@@ -192,6 +192,83 @@ async def _submit_and_wait(
         raise
 
 
+class _AccountState:
+    """Mutable dispatch state for one Runpod account (P2.7c)."""
+
+    __slots__ = (
+        "account",
+        "api_key",
+        "semaphore",
+        "in_flight",
+        "batches",
+        "failures",
+        "failovers",
+    )
+
+    def __init__(self, account: RunpodFlashAccount, api_key: str) -> None:
+        self.account = account
+        self.api_key = api_key
+        self.semaphore = asyncio.Semaphore(account.request_concurrency)
+        # Batches assigned and not yet finished (queued-on-semaphore included).
+        self.in_flight = 0
+        # batches = dispatch attempts routed here (failover retries included);
+        # failures = attempts that failed here; failovers = batches this
+        # account accepted after they failed on a different account.
+        self.batches = 0
+        self.failures = 0
+        self.failovers = 0
+
+
+class _AccountDispatcher:
+    """Least-in-flight batch router across Runpod accounts (P2.7c).
+
+    Selection is synchronous: the winner is the enabled account with the
+    fewest assigned-and-unfinished batches; ties go to the higher weight,
+    then to the alphabetically first name. Per-account concurrency is
+    enforced by each account's own semaphore, sized from its
+    ``request_concurrency``.
+    """
+
+    def __init__(self, accounts: list[tuple[RunpodFlashAccount, str]]) -> None:
+        self._states = [_AccountState(account, key) for account, key in accounts]
+
+    @property
+    def size(self) -> int:
+        return len(self._states)
+
+    def select(self, exclude: frozenset[str] = frozenset()) -> _AccountState | None:
+        candidates = [
+            state for state in self._states if state.account.name not in exclude
+        ]
+        if not candidates:
+            return None
+        chosen = min(
+            candidates,
+            key=lambda state: (
+                state.in_flight,
+                -state.account.weight,
+                state.account.name,
+            ),
+        )
+        chosen.in_flight += 1
+        chosen.batches += 1
+        return chosen
+
+    @staticmethod
+    def release(state: _AccountState) -> None:
+        state.in_flight -= 1
+
+    def summary(self) -> dict[str, dict[str, int]]:
+        return {
+            state.account.name: {
+                "batches": state.batches,
+                "failures": state.failures,
+                "failovers": state.failovers,
+            }
+            for state in sorted(self._states, key=lambda item: item.account.name)
+        }
+
+
 def _validate_wire_result(
     row: dict[str, Any],
     *,
@@ -338,27 +415,68 @@ async def extract_entities(
     audit_run_id: str | None = None,
     runpod_config: RunpodFlashExtractionSettings | None = None,
     runpod_api_key: str | None = None,
+    accounts: list[tuple[RunpodFlashAccount, str]] | None = None,
     http_client: httpx.AsyncClient | None = None,
 ) -> list[Any] | ExtractionBatchReport:
-    """Extract one task set through a bounded Runpod Flash queue endpoint."""
+    """Extract one task set through bounded Runpod Flash queue endpoints.
+
+    Multi-account routing (P2.7c): ``accounts`` carries
+    ``(RunpodFlashAccount, api_key)`` pairs (what
+    ``settings_service.get_system_runpod_flash_accounts`` returns). Each
+    request batch is routed to the enabled account with the least in-flight
+    requests (tie: higher weight, then name alpha) under a per-account
+    concurrency semaphore, with one bounded failover to a different account
+    on batch failure. The legacy single ``runpod_config``/``runpod_api_key``
+    pair keeps working unchanged by being wrapped as one implicit ``default``
+    account; that legacy path emits no ``account_dispatch`` metric so its
+    diagnostics shape stays byte-identical.
+    """
 
     del model, schema_lens, chunk_vectors, schema_resolver, pool, enable_facts
     del audit_event_sink, audit_run_id
     if not tasks:
         return []
-    if runpod_config is None or runpod_api_key is None:
+    if runpod_config is None or (runpod_api_key is None and accounts is None):
         from services.settings import settings_service
 
+        if runpod_config is None and runpod_api_key is None and accounts is None:
+            # No-args caller (ingest worker / graph backfill): resolve the full
+            # multi-account state so configured accounts route automatically.
+            accounts = await settings_service.get_system_runpod_flash_accounts()
         stored_config, stored_key = await settings_service.get_system_runpod_flash()
         runpod_config = runpod_config or stored_config
-        runpod_api_key = runpod_api_key or stored_key
+        if accounts is None:
+            runpod_api_key = runpod_api_key or stored_key
     if not runpod_config.enabled:
         raise RuntimeError("Runpod Flash extraction is disabled in Settings")
-    endpoint_id = runpod_config.endpoint_id.strip()
-    if not endpoint_id:
+    emit_account_dispatch = accounts is not None
+    if accounts is None:
+        accounts = [
+            (
+                RunpodFlashAccount(
+                    name="default",
+                    endpoint_id=runpod_config.endpoint_id,
+                    max_workers=runpod_config.max_workers,
+                    request_concurrency=runpod_config.request_concurrency,
+                ),
+                runpod_api_key or "",
+            )
+        ]
+    enabled_accounts = [(acct, key) for acct, key in accounts if acct.enabled]
+    if not enabled_accounts:
+        raise RuntimeError("No enabled Runpod account is configured in Settings")
+    with_endpoint = [
+        (acct, key) for acct, key in enabled_accounts if acct.endpoint_id.strip()
+    ]
+    if not with_endpoint:
         raise RuntimeError("Runpod Flash endpoint_id is not configured in Settings")
-    if not runpod_api_key:
+    usable_accounts = [(acct, key) for acct, key in with_endpoint if key]
+    if not usable_accounts:
         raise RuntimeError("Runpod API key is not configured in Settings")
+    endpoint_by_account = {
+        acct.name: acct.endpoint_id.strip() for acct, _ in usable_accounts
+    }
+    default_endpoint = usable_accounts[0][0].endpoint_id.strip()
 
     schema = schema or SchemaContext(
         entity_schema=UNIVERSAL_ENTITY_SCHEMA,
@@ -377,14 +495,32 @@ async def extract_entities(
         task_dicts[start : start + runpod_config.request_batch_size]
         for start in range(0, len(task_dicts), runpod_config.request_batch_size)
     ]
-    semaphore = asyncio.Semaphore(runpod_config.request_concurrency)
+    dispatcher = _AccountDispatcher(usable_accounts)
     owns_client = http_client is None
     client = http_client or httpx.AsyncClient(
         timeout=httpx.Timeout(runpod_config.timeout_seconds + 30, connect=20)
     )
     started = time.perf_counter()
 
-    async def run_slice(index: int, batch: list[dict[str, Any]]) -> tuple[int, Any]:
+    async def attempt_on_account(
+        state: _AccountState, request: dict[str, Any]
+    ) -> dict[str, Any]:
+        async with state.semaphore:
+            output = await _submit_and_wait(
+                client,
+                endpoint_id=state.account.endpoint_id.strip(),
+                api_key=state.api_key,
+                request=request,
+                timeout_seconds=runpod_config.timeout_seconds,
+                poll_interval_seconds=runpod_config.poll_interval_seconds,
+            )
+        if output.get("contract_version") != RUNPOD_CONTRACT_VERSION:
+            raise RuntimeError("Runpod worker contract revision mismatch")
+        return output
+
+    async def run_slice(
+        index: int, batch: list[dict[str, Any]]
+    ) -> tuple[int, Any, str]:
         request = {
             "contract_version": RUNPOD_CONTRACT_VERSION,
             "batch_id": _batch_id(batch, runpod_config),
@@ -405,21 +541,35 @@ async def extract_entities(
             "model_batch_size": runpod_config.model_batch_size,
             "max_window_words": runpod_config.max_window_words,
         }
-        async with semaphore:
-            try:
-                output = await _submit_and_wait(
-                    client,
-                    endpoint_id=endpoint_id,
-                    api_key=runpod_api_key or "",
-                    request=request,
-                    timeout_seconds=runpod_config.timeout_seconds,
-                    poll_interval_seconds=runpod_config.poll_interval_seconds,
-                )
-                if output.get("contract_version") != RUNPOD_CONTRACT_VERSION:
-                    raise RuntimeError("Runpod worker contract revision mismatch")
-                return index, output
-            except Exception as exc:  # noqa: BLE001 - durable failures below
-                return index, exc
+        primary = dispatcher.select()
+        assert primary is not None  # usable_accounts is non-empty
+        try:
+            output = await attempt_on_account(primary, request)
+            return index, output, primary.account.name
+        except Exception as exc:  # noqa: BLE001 - bounded failover below
+            primary.failures += 1
+            first_error: Exception = exc
+        finally:
+            dispatcher.release(primary)
+        fallback = dispatcher.select(exclude=frozenset({primary.account.name}))
+        if fallback is None:
+            return index, first_error, primary.account.name
+        fallback.failovers += 1
+        logger.warning(
+            "Runpod batch %d failed on account %s; requeuing once on %s: %s",
+            index,
+            primary.account.name,
+            fallback.account.name,
+            _safe_error(first_error),
+        )
+        try:
+            output = await attempt_on_account(fallback, request)
+            return index, output, fallback.account.name
+        except Exception as exc:  # noqa: BLE001 - durable failures below
+            fallback.failures += 1
+            return index, exc, fallback.account.name
+        finally:
+            dispatcher.release(fallback)
 
     try:
         completed = await asyncio.gather(
@@ -432,7 +582,8 @@ async def extract_entities(
     raw_results: list[dict[str, Any]] = []
     failures: list[ExtractionFailureItem] = []
     remote_metrics: list[dict[str, Any]] = []
-    for index, outcome in sorted(completed, key=lambda item: item[0]):
+    account_by_chunk: dict[str, str] = {}
+    for index, outcome, account_name in sorted(completed, key=lambda item: item[0]):
         batch = slices[index]
         if isinstance(outcome, Exception):
             for task in batch:
@@ -455,6 +606,8 @@ async def extract_entities(
                 )
             continue
         rows = outcome.get("results") or []
+        for task in batch:
+            account_by_chunk[task["chunk_id"]] = account_name
         remote_metrics.append(
             {
                 **(outcome.get("metrics") or {}),
@@ -504,7 +657,9 @@ async def extract_entities(
             "provider": "runpod_flash",
             "model": runpod_config.model_id,
             "model_revision": runpod_config.model_revision,
-            "endpoint": endpoint_id,
+            "endpoint": endpoint_by_account.get(
+                account_by_chunk.get(result.chunk_id, ""), default_endpoint
+            ),
             "schema_mode": "ontology_labels",
             "concurrency_policy": "serverless_burst",
         }
@@ -599,5 +754,7 @@ async def extract_entities(
         "schema_evidence_pass_rate": round(schema_pass_rate, 6),
         "remote": remote_summary,
     }
+    if emit_account_dispatch:
+        metrics["account_dispatch"] = dispatcher.summary()
     report = ExtractionBatchReport(results=results, failures=failures, metrics=metrics)
     return report if return_report else results
