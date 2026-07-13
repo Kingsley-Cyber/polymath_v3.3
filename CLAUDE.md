@@ -1,7 +1,43 @@
 # Polymath v3.3 — agent & contributor guide
 
-Read this before deploying or running the stack. It exists to stop a specific,
-costly mistake from recurring on any device or by any AI agent.
+Read this before deploying or running the stack. It exists to stop specific,
+costly mistakes from recurring on any device or by any AI agent.
+
+## 🧭 North star: the implementation checklist — never execute from memory
+
+`docs/RAPTOR_RAG_IMPLEMENTATION_CHECKLIST.md` is the **single execution ledger
+and north star** for all RAG/ingestion work. It is a live file edited by
+multiple agents in parallel — any in-head copy of it is stale by construction.
+
+**The habit this section kills — "cached-plan" execution.** On 2026-07-13 the
+agent worked from its session memory of the plan instead of the file: it
+rebuilt lexicons + librarian cards for the PoC corpora while adopted capture
+hooks for those SAME rows (temporal_class in the summary contract, bibliographic
+author/date capture) were still unbuilt — forcing a full second rebuild — and
+assumed latent-concept coverage was corpus-wide when only one small regen
+window actually had it. Sequencing lives in the file, not in memory.
+
+Binding rules:
+
+1. **Read-before-act.** Re-read the relevant checklist section FROM DISK at the
+   start of every work phase, before dispatching any subagent, and after any
+   merge. Quote the item you are executing; if you can't point to it, you are
+   not executing the plan.
+2. **Adopt-then-execute.** New ideas and new owner directives are written INTO
+   the checklist first — slotted into the dependency order with what they block
+   and what blocks them — and only then implemented. Work with no checklist
+   anchor is drift: stop and add the anchor.
+3. **Rebuild freeze (dependency gate).** Never rebuild a derived artifact
+   (lexicons, cards, summaries, embeddings, indexes) while an adopted-but-unbuilt
+   capture hook targets the same rows. One contract change, one pass: batch all
+   adopted capture fields into a single contract seam, then run ONE data pass
+   that carries them all.
+4. **Scratch-off with receipts.** `[x]` only after live verification per the
+   item's completion rule; `[IN CODE @commit]` for merged-but-not-deployed;
+   never mark from intent. Before starting an item, verify its upstream
+   dependencies are actually `[x]` in the file — not just remembered as done.
+5. Pair this with the Goal Drift rules in `AGENTS.md` — that section governs
+   how to fix a bug; this one governs what order to do work in.
 
 ## 🚨 Deploying / recreating the backend — DO NOT get this wrong
 
