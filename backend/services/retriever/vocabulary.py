@@ -19,6 +19,7 @@ from models.schemas import RetrievalTier
 from qdrant_client import models
 from services.ingestion.corpus_lexicon import normalize_identity
 from services.ingestion.tier0 import SHARED_DOCSUM
+from services.retriever import vocabulary_cache
 from services.retriever.query_plan import QueryLane, QueryPlanV2
 from services.retriever.query_semantics import lexical_terms
 
@@ -1102,6 +1103,28 @@ class CorpusVocabularyResolver:
             for value in (excluded_terms or [])[:32]
             if str(value).strip()
         ]
+        # P1.7 — resolution cache: key on query/lanes/corpus-set/knobs plus
+        # per-corpus epochs; query vectors are deliberately excluded (they are
+        # deterministic per query text under the deployed embedder).
+        _resolution_cache_key = None
+        if vocabulary_cache.enabled():
+            _resolution_cache_key = vocabulary_cache.resolution_cache_key(
+                query=query,
+                corpus_ids=corpus_ids,
+                tier=tier,
+                top_k_per_corpus=top_k_per_corpus,
+                lane_queries=[
+                    (str(lane["lane_id"]), str(lane["query"]))
+                    for lane in search_lanes
+                ],
+                disabled_lexicon_ids=sorted(disabled),
+                excluded_terms=exclusions,
+            )
+            cached = vocabulary_cache.get(_resolution_cache_key)
+            if cached is not None:
+                cached["cache"] = {"hit": True}
+                cached["duration_s"] = round(perf_counter() - started, 4)
+                return cached
         per_corpus: dict[str, Any] = {}
         accepted_global: list[dict[str, Any]] = []
         document_profiles_global: list[dict[str, Any]] = []
@@ -1627,7 +1650,7 @@ class CorpusVocabularyResolver:
         for global_rank, match in enumerate(accepted_global, start=1):
             match["global_rank"] = global_rank
 
-        return {
+        resolution = {
             "version": VOCABULARY_RESOLVER_VERSION,
             "query": query,
             "query_lanes": [
@@ -1671,6 +1694,12 @@ class CorpusVocabularyResolver:
             "degraded_stores": degraded_stores,
             "duration_s": round(perf_counter() - started, 4),
         }
+        # P1.7 — cache by query/lanes/corpus-set/knobs + per-corpus epoch so
+        # repeated conversational queries skip the slowest pre-retrieval stage.
+        resolution["cache"] = {"hit": False}
+        if _resolution_cache_key is not None:
+            vocabulary_cache.put(_resolution_cache_key, resolution)
+        return resolution
 
 
 def grounded_vocabulary_lanes(

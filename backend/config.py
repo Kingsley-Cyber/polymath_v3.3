@@ -410,6 +410,28 @@ class Settings(BaseSettings):
             "non-required translation and step-back lanes to QueryPlanV2."
         ),
     )
+    # P1.7 — vocabulary-resolution cache (repeated conversational queries skip
+    # the slowest pre-retrieval stage; TTL bounds cross-process staleness).
+    VOCAB_RESOLUTION_CACHE: bool = Field(
+        default=True,
+        description="Cache CorpusVocabularyResolver.resolve() results in memory.",
+    )
+    VOCAB_RESOLUTION_CACHE_TTL_SECONDS: float = Field(
+        default=300.0,
+        ge=0.0,
+        le=3600.0,
+        description=(
+            "Vocabulary-resolution cache entry lifetime. Bounds staleness from "
+            "ingest-worker writes that cannot bump this process's epochs; 0 "
+            "disables the cache."
+        ),
+    )
+    VOCAB_RESOLUTION_CACHE_MAX_ENTRIES: int = Field(
+        default=512,
+        ge=16,
+        le=8192,
+        description="LRU capacity of the vocabulary-resolution cache.",
+    )
     GROUNDED_QUERY_PLANNER_ENABLED: bool = Field(
         default=False,
         description=(

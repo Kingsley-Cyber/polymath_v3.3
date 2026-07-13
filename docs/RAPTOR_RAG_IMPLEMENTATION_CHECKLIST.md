@@ -562,8 +562,15 @@ Acceptance:
   support it.
 - [ ] Keep exact alias payload lookup logically separate from dense requests.
 - [ ] Cache vocabulary resolution by query hash, selected corpus set, planner
-  version, and artifact epoch.
+  version, and artifact epoch. **[IN CODE — `services/retriever/
+  vocabulary_cache.py` + resolve() wiring: key = normalized query + ordered
+  lane queries + sorted corpus set + tier/top-k/disabled/exclusions +
+  per-corpus epoch; keyed on resolver VERSION via cached payload's version
+  field; TTL default 300s, LRU 512, env-tunable; awaiting live verify]**
 - [ ] Invalidate cache on lexicon/tree/document artifact changes.
+  **[IN CODE — epoch bumps from lexicon materialization (full + affected) and
+  corpus-lexicon deletion; cross-process worker writes are bounded by the
+  TTL, stated explicitly in the module contract]**
 - [ ] Capture a lexical/exact-only resolver baseline before adding deterministic
   multi-point representations so each representation method must prove lift.
 - [ ] Treat this section and the P1.1 baseline as release prerequisites for the

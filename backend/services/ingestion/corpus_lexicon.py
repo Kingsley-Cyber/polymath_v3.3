@@ -2296,6 +2296,7 @@ async def materialize_affected_lexicon(
         await collection.delete_many(
             {"corpus_id": corpus_id, "lexicon_id": {"$in": stale_ids}}
         )
+    _bump_vocabulary_cache_epoch(corpus_id)
     return {
         "entries": entries,
         "closure_keys": sorted(closure),
@@ -2516,6 +2517,7 @@ async def materialize_corpus_lexicon(
             }
         },
     )
+    _bump_vocabulary_cache_epoch(corpus_id)
     return {
         "corpus_id": corpus_id,
         "source_entries": source_entry_count,
@@ -3368,9 +3370,25 @@ async def remove_document_lexicon_sources(
     }
 
 
+def _bump_vocabulary_cache_epoch(corpus_id: str) -> None:
+    """Invalidate in-process vocabulary-resolution cache entries (P1.7).
+
+    Best-effort: the resolver usually runs in the backend process while
+    materialization runs in the ingest worker, where this bump is a no-op for
+    the backend's cache — its TTL bounds that staleness window."""
+
+    try:
+        from services.retriever.vocabulary_cache import bump_corpus_epoch
+
+        bump_corpus_epoch(corpus_id)
+    except Exception:  # noqa: BLE001 — cache invalidation must never break writes
+        logger.debug("vocabulary cache epoch bump failed", exc_info=True)
+
+
 async def delete_corpus_lexicon(db: Any, corpus_id: str) -> dict[str, int]:
     sources = await db[LEXICON_SOURCE_COLLECTION].delete_many({"corpus_id": corpus_id})
     entries = await db[LEXICON_COLLECTION].delete_many({"corpus_id": corpus_id})
+    _bump_vocabulary_cache_epoch(corpus_id)
     return {
         "source_entries": int(getattr(sources, "deleted_count", 0)),
         "lexicon_entries": int(getattr(entries, "deleted_count", 0)),
