@@ -201,12 +201,17 @@ Milestone acceptance:
 
 - [ ] Build cards from existing lexicon, Ghost B, summary semantics, document
   profiles, tree bindings, and promotion artifacts only.
+  **[IN CODE — wave1/card, pending merge]**
 - [ ] Write the authoritative card to Mongo and a slim routing projection to
-  Tier-0/Qdrant.
+  Tier-0/Qdrant. (Mongo `librarian_cards` upsert + returned slim payload
+  **[IN CODE — wave1/card, pending merge]**; the Qdrant/Tier-0 write is
+  deliberately NOT in wave 1.)
 - [ ] Leave unsupported fields empty; do not infer prose to make cards look
-  complete.
+  complete. **[IN CODE — wave1/card, pending merge]**
 - [ ] Normalize every value through corpus lexicon `canonical_key` identity.
+  **[IN CODE — wave1/card, pending merge]**
 - [ ] Reject every card value without source IDs/spans and derivation method.
+  **[IN CODE — wave1/card, pending merge]**
 
 Milestone acceptance:
 
