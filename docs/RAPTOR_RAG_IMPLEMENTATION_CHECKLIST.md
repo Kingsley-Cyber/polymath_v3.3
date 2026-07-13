@@ -531,10 +531,12 @@ Acceptance:
 - [x] Record expected documents, concepts, evidence, and acceptable alternate
   routes. *(expected_doc_ids validated against Mongo per question, expected
   concepts, expected_all_docs semantics, alternate-route notes.)*
-- [ ] Capture baseline Recall@K, document recall, concept recall, nDCG/MRR,
+- [x] Capture baseline Recall@K, document recall, concept recall, nDCG/MRR,
   answerability, evidence coverage, diversity, and latency by tier.
-  **[runner ready (`run_heldout_eval.py`); baseline capture deliberately
-  deferred until P0.1 completes on polymath_v2 + backend restart]**
+  *(captured 2026-07-13 post-P0.1/restart, scorer v3, 0 errors:
+  Fast 84.3% doc-hit / 39.7s; Hybrid 90.2% / 55.5s; Graph 94.3% / 62.3s
+  with 5/5 negative controls fail-closed on the corrected set;
+  docs/baselines/EVAL_2026-07-13_*.json)*
 - [ ] Add a librarian rubric: direct relevance, useful adjacency, bridge
   validity, counterbalance, provenance, and harmful analogy penalty.
 - [x] Store stable hashes for every held-out query and exclude those hashes,
