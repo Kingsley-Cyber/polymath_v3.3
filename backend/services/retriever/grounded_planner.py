@@ -21,6 +21,7 @@ from config import get_settings
 from services.llm import llm_service
 from services.retriever.query_plan import QueryLane, QueryPlanV2
 from services.retriever.query_semantics import lexical_terms
+from services.retriever.vocabulary import select_strong_vocabulary_matches
 
 PLANNER_VERSION = "grounded_query_planner.v5"
 CACHE_COLLECTION = "grounded_query_plans"
@@ -371,7 +372,11 @@ async def run_grounded_planner(
                 ],
                 "source_document_ids": list(row.get("source_document_ids") or [])[:4],
             }
-            for row in (resolution.get("matches") or [])[:6]
+            # Strength-first dossier (P1.2/P1.5): strong matches are admitted
+            # regardless of list position, remaining capacity fills by rank.
+            for row in select_strong_vocabulary_matches(
+                resolution.get("matches") or [], cap=8, fill_by_rank=True
+            )
         ],
         "document_profiles": [
             {

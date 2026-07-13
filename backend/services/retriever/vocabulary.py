@@ -1702,6 +1702,63 @@ class CorpusVocabularyResolver:
         return resolution
 
 
+# Audit Delta 2 (P1.2/P1.5) — strong vocabulary matches must reach planning
+# regardless of their applicability-tier position: the tier-first ranking let
+# six weak direct-tier matches exhaust the lane cap while a 0.909-scored
+# expert concept at position 14 was silently dropped. Strength is a universal
+# score bound relative to the top match — never term- or corpus-specific.
+VOCAB_STRONG_MATCH_ABS_FLOOR = 0.55
+VOCAB_STRONG_MATCH_TOP_RATIO = 0.75
+VOCAB_STRONG_LANE_BONUS = 4
+
+
+def _vocab_match_score(row: dict[str, Any]) -> float:
+    try:
+        return float(row.get("evidence_adjusted_score") or row.get("score") or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def select_strong_vocabulary_matches(
+    matches: list[dict[str, Any]],
+    *,
+    cap: int | None = None,
+    abs_floor: float = VOCAB_STRONG_MATCH_ABS_FLOOR,
+    top_ratio: float = VOCAB_STRONG_MATCH_TOP_RATIO,
+    fill_by_rank: bool = False,
+) -> list[dict[str, Any]]:
+    """Deterministic strength-first selection of vocabulary matches.
+
+    Admits every match whose score clears max(abs_floor, top*top_ratio),
+    strongest first (name-tiebroken); with ``fill_by_rank`` the remaining
+    capacity is filled in original rank order. Used by the grounded-planner
+    dossier and the translation-lane strength override so no consumer can
+    lose a strong match to positional truncation."""
+
+    rows = [row for row in (matches or []) if isinstance(row, dict)]
+    if not rows:
+        return []
+    top = max(_vocab_match_score(row) for row in rows)
+    bound = max(abs_floor, top * top_ratio) if top > 0.0 else abs_floor
+    strong = sorted(
+        (row for row in rows if _vocab_match_score(row) >= bound),
+        key=lambda row: (
+            -_vocab_match_score(row),
+            str(row.get("canonical_name") or row.get("term") or ""),
+        ),
+    )
+    selected = strong[: cap if cap is not None else len(strong)]
+    if fill_by_rank and cap is not None and len(selected) < cap:
+        chosen = {id(row) for row in selected}
+        for row in rows:
+            if id(row) in chosen:
+                continue
+            selected.append(row)
+            if len(selected) >= cap:
+                break
+    return selected
+
+
 def grounded_vocabulary_lanes(
     plan: QueryPlanV2,
     resolution: dict[str, Any],
@@ -1802,6 +1859,38 @@ def grounded_vocabulary_lanes(
                 break
         if len(matches) >= max(1, int(max_translation_lanes)):
             break
+    # Strength override (P1.2/P1.5): matches clearing the universal strength
+    # bound gain bonus lanes beyond the tier round-robin cap so a strong
+    # expert concept can always create its translation lane.
+    strong_admitted: list[str] = []
+    strength_bound: float | None = None
+    if ranked_matches:
+        top_score = max(_vocab_match_score(row) for row in ranked_matches)
+        if top_score > 0.0:
+            strength_bound = max(
+                VOCAB_STRONG_MATCH_ABS_FLOOR,
+                top_score * VOCAB_STRONG_MATCH_TOP_RATIO,
+            )
+            already = {str(row.get("lexicon_id") or "") for row in matches}
+            # Rescue-only: a bonus seat requires strictly outscoring a seated
+            # match, so equal-strength fields keep their fair per-corpus
+            # distribution and the override cannot double-serve one corpus.
+            min_selected = min(
+                (_vocab_match_score(row) for row in matches), default=0.0
+            )
+            for row in select_strong_vocabulary_matches(ranked_matches):
+                if len(strong_admitted) >= VOCAB_STRONG_LANE_BONUS:
+                    break
+                score = _vocab_match_score(row)
+                if score <= min_selected:
+                    break
+                lexicon_id = str(row.get("lexicon_id") or "")
+                if not lexicon_id or lexicon_id in already:
+                    continue
+                matches.append(row)
+                already.add(lexicon_id)
+                strong_admitted.append(lexicon_id)
+    lane_capacity = max(1, int(max_translation_lanes)) + len(strong_admitted)
     lane_lexicon_ids: dict[str, list[str]] = {}
     for row in matches:
         canonical = str(row.get("term") or row.get("canonical_name") or "").strip()
@@ -1839,7 +1928,7 @@ def grounded_vocabulary_lanes(
         )
         lane_lexicon_ids[lane_id] = [lexicon_id]
         used_ids.append(lexicon_id)
-        if len(used_ids) >= max_translation_lanes:
+        if len(used_ids) >= lane_capacity:
             break
 
     step_back_lanes: list[str] = []
@@ -1906,6 +1995,12 @@ def grounded_vocabulary_lanes(
         "lane_lexicon_ids": lane_lexicon_ids,
         "introduced_lexicon_ids": used_ids,
         "skipped_non_executable_lexicon_ids": skipped_non_executable_ids,
+        "strong_admission": {
+            "bound": round(strength_bound, 4) if strength_bound else None,
+            "admitted_lexicon_ids": strong_admitted,
+            "tier_cap": max(1, int(max_translation_lanes)),
+            "lane_capacity": lane_capacity,
+        },
         "required": False,
     }
 

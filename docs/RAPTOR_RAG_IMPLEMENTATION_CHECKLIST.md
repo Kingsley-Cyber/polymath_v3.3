@@ -149,6 +149,41 @@ Tracked work added by this audit:
   unchanged); every harvested representation must pass the eval firewall
   and span validation.
 
+## Temporal RAG Program — adopted 2026-07-13 with sequencing hooks
+
+Specification of record: `TEMPORAL_RAG_E2E_IMPLEMENTATION_REPORT_2026-07-12.md`
+(bitemporal, assertion-based, projection-safe; explicitly no full reingest).
+Verdict: FEASIBLE and compatible with every standing invariant. Sequenced by
+cross-impact so no artifact is rebuilt twice:
+
+- [ ] T-HOOK-1 (blocks the authorized corpus-scale re-extraction): extend the
+  extraction wire contract with temporal CAPTURE fields (raw time expressions,
+  role candidates, exact spans — capture-only, resolution stays Polymath-side)
+  and redeploy the RunPod worker, so mass re-extraction runs ONCE with
+  temporal capture aboard. The 1/100/500-chunk gates passed on the v2
+  contract; the 5,000-chunk gate runs after this hook lands.
+- [ ] T-HOOK-2 (immediate, future-only): add `temporal_class`
+  (evergreen|slowly_evolving|versioned|event|ephemeral|unknown) and
+  `time_expressions` to the Ghost A summary contract — the same seam that
+  carries `latent_concepts`; existing rows get the deterministic classifier
+  backfill in T-MAIN Phase 3, never a paid regeneration.
+- [ ] T-HOOK-3 (merged with the P2.1 bibliographic item — one implementation):
+  docling date de-conflation (publication vs file-creation vs revision),
+  `source_published_at` capture, deterministic doc-date backfill.
+- [ ] T-MAIN (after the P1.1 baseline and current retrieval work): report
+  Phases 2-7 — source versions/episodes/assertions + outbox, Qdrant payload
+  indexes + projection without re-embedding, versioned Neo4j `RELATES_TO`
+  edges (executed together with P2.5 typed-signature work — same edge-schema
+  migration), query temporal modes (CURRENT/AS_OF/BETWEEN/AS_KNOWN/EVOLUTION),
+  ONE eligibility service across Tier-0/Fast/Hybrid/Graph, shadow-then-enforce,
+  synthesis temporal receipts, and capability-specific readiness
+  (`temporal_unavailable|partial|strict_ready` — same seam as the
+  operational-vs-metadata-quality readiness split adopted in Audit Delta 2).
+- Ordering rationale: field capture rides in-flight generation/backfills for
+  free; retrieval-behavior changes are gated by the held-out suite; temporal
+  eligibility needs the fields to exist first; re-extracting before the
+  contract hook would force a second paid extraction pass.
+
 ## Governing Librarian Planning Constraint
 
 The librarian must ship from trustworthy existing projections before any
