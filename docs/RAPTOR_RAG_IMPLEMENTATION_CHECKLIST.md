@@ -262,14 +262,14 @@ Milestone acceptance:
 - [ ] Resolve story/query language to existing capability/concept IDs through
   lexicon/vocabulary first.
 - [ ] Generate candidate documents through current Tier-0 dense/sparse recall.
-- [ ] Assign query-relative shelf roles through indexed field overlap.
-  **[IN CODE — wave2/shelves, pending merge]**
+- [x] Assign query-relative shelf roles through indexed field overlap.
+  *(merged + live-probed 2026-07-13 on the PoC pair: 3 direct / 2 adjacent / 2 bridges with evidence chains / policy-triggered counterbalance; foundational honestly skipped)*
 - [ ] Implement `shelf_reserve` through the calibrated eligibility discipline
   required by P0.3; never mirror the old unconditional corpus-floor behavior.
 - [ ] Descend reserved documents through tree -> parent -> child evidence.
 - [ ] Require shared mechanisms/principles plus evidence for every Bridge seat.
-- [ ] Use versioned misuse/counterbalance policy data, not per-corpus Python
-  conditionals. **[IN CODE — wave2/shelves, pending merge]**
+- [x] Use versioned misuse/counterbalance policy data, not per-corpus Python
+  conditionals. *(merged + live-probed 2026-07-13 on the PoC pair: 3 direct / 2 adjacent / 2 bridges with evidence chains / policy-triggered counterbalance; foundational honestly skipped)*
 
 Milestone acceptance:
 
@@ -606,14 +606,14 @@ Acceptance:
 
 ### P1.5 Implement Librarian Selection Roles
 
-- [ ] Add retrieval roles: direct, foundational, adjacent, bridge, and
-  counterbalance. **[IN CODE — wave2/shelves, pending merge]**
-- [ ] Assign roles per query; never stamp a document with one permanent shelf
-  role. **[IN CODE — wave2/shelves, pending merge]**
+- [x] Add retrieval roles: direct, foundational, adjacent, bridge, and
+  counterbalance. *(merged + live-probed 2026-07-13 on the PoC pair: 3 direct / 2 adjacent / 2 bridges with evidence chains / policy-triggered counterbalance; foundational honestly skipped)*
+- [x] Assign roles per query; never stamp a document with one permanent shelf
+  role. *(merged + live-probed 2026-07-13 on the PoC pair: 3 direct / 2 adjacent / 2 bridges with evidence chains / policy-triggered counterbalance; foundational honestly skipped)*
 - [ ] Derive roles from universal capabilities, mechanisms, problems, risks,
   and source evidence rather than topic-specific rules.
-- [ ] Define deterministic v0 eligibility:
-  **[IN CODE — wave2/shelves, pending merge]**
+- [x] Define deterministic v0 eligibility:
+  *(merged + live-probed 2026-07-13 on the PoC pair: 3 direct / 2 adjacent / 2 bridges with evidence chains / policy-triggered counterbalance; foundational honestly skipped)*
   - Direct: central-subject/problem overlap with the query.
   - Foundational: capability overlap supported by mechanisms/evidence.
   - Adjacent: shared capabilities/mechanisms with meaningfully different
@@ -622,17 +622,17 @@ Acceptance:
     and source evidence on both sides.
   - Counterbalance: a versioned policy trigger plus an evidence-backed
     counterbalancing concept/document.
-- [ ] Require every bridge recommendation to expose:
+- [x] Require every bridge recommendation to expose:
   `document -> concept -> transferable principle -> user goal`.
-  **[IN CODE — wave2/shelves, pending merge]**
-- [ ] Treat embedding scores as candidate recall only; they cannot independently
-  satisfy any shelf-role gate. **[IN CODE — wave2/shelves, pending merge]**
-- [ ] Deduplicate by document while retaining multiple validated roles, themes,
-  and reasons. **[IN CODE — wave2/shelves, pending merge]**
+  *(merged + live-probed 2026-07-13 on the PoC pair: 3 direct / 2 adjacent / 2 bridges with evidence chains / policy-triggered counterbalance; foundational honestly skipped)*
+- [x] Treat embedding scores as candidate recall only; they cannot independently
+  satisfy any shelf-role gate. *(merged + live-probed 2026-07-13 on the PoC pair: 3 direct / 2 adjacent / 2 bridges with evidence chains / policy-triggered counterbalance; foundational honestly skipped)*
+- [x] Deduplicate by document while retaining multiple validated roles, themes,
+  and reasons. *(merged + live-probed 2026-07-13 on the PoC pair: 3 direct / 2 adjacent / 2 bridges with evidence chains / policy-triggered counterbalance; foundational honestly skipped)*
 - [ ] Reserve role diversity only when candidates clear relevance/evidence
   gates.
-- [ ] Skip a role seat when no candidate qualifies; never fill a quota with
-  weak evidence. **[IN CODE — wave2/shelves, pending merge]**
+- [x] Skip a role seat when no candidate qualifies; never fill a quota with
+  weak evidence. *(merged + live-probed 2026-07-13 on the PoC pair: 3 direct / 2 adjacent / 2 bridges with evidence chains / policy-triggered counterbalance; foundational honestly skipped)*
 - [ ] Return a reading path, not merely a flat chunk list, for librarian-mode
   questions.
 
