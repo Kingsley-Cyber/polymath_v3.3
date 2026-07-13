@@ -44,11 +44,11 @@ REFUSAL_RE = re.compile(
     # Refusals AND honest absence acknowledgments both count as fail-closed
     # behavior for negative controls (scorer v2, 2026-07-13: the v1 pattern
     # under-credited honest "sources don't cover X" answers).
-    r"i cannot answer|does not contain|did not find source evidence|"
+    r"i cannot answer|did not find source evidence|"
     r"cannot answer that as a source-backed|"
-    r"do(?:es)?(?: not|n't) (?:specifically|explicitly|directly) "
-    r"(?:address|name|cover|mention|state)|"
-    r"does not contain a direct answer",
+    r"(?:do(?:es)?(?: not|n't)|is not|are not)\s+(?:\w+\s+){0,2}?"
+    r"(?:address|cover|contain|mention|name|state|establish|detail|describe|"
+    r"include|provide|specify|recommend)",
     re.IGNORECASE,
 )
 
