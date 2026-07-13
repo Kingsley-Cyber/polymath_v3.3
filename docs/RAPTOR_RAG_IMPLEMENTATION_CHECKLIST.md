@@ -81,6 +81,74 @@ maintainer response. They are integrated below as tracked work:
   links require validation.
 - P1.8: embedder model loading is not the same as inference warmup/readiness.
 
+## Audit Delta 2 - 2026-07-13 Metadata Audit (owner-submitted, independently verified)
+
+An external metadata audit was verified live on 2026-07-13 before adoption.
+Confirmed: no Mongo JSON-schema validators on documents/parent_chunks/
+ghost_b_extractions/corpus_lexicon/summary_tree; `extractor` absent on
+0/3,000 sampled extraction rows; summary-tree `concepts` populated on
+0/42,990 (polymath_v2) and 0/1,867 (ecommerce) nodes; bibliographic fields
+effectively empty (author 0-1 docs, language 0, doc_profile.concepts 0);
+corpus-lens facet contamination is real (68% of sampled ecommerce parents
+carry `emotional_patterns`; `agentic_ai` stamped on a movement/film corpus);
+parent `page_start`/entity char offsets are 0; the vocabulary-to-planner
+handoff truncates positionally at 6 matches (`query_plan.py:884`) — the
+mechanism that dropped a 0.909-scored expert concept from planning.
+NOT confirmed (excluded until evidence): malformed schema-version strings
+("polygraph/polath/polymad") — a 3,000-row sample shows only clean
+v1/v2/missing; contract tests catching their own AssertionError — no such
+pattern found in tests/test_contracts.py.
+Discarded by design: a weighted multi-signal `final_score` formula
+(conflicts with the standing "cross-encoder is the sole scoring authority /
+retire multi-score fusion" decision — those signals are admissible only for
+candidate generation and routing, never final-packet scoring); adopting the
+full "universal evidence packet" architecture now (overlapping pieces are
+already tracked as shelves/cards/bridges/sufficiency/receipts; the novel
+layers — epistemic ledger, artifact blueprint, domain compilers,
+post-synthesis usage ledger — are recorded as the post-checklist synthesis
+packet v2 design, not scope for this pass).
+
+Tracked work added by this audit:
+
+### P0.8 Schema Enforcement At Storage Boundaries
+
+- [ ] Add additive Mongo JSON-schema validators (warn-first, then enforce)
+  for documents, parent_chunks, ghost_b_extractions, corpus_lexicon, and
+  summary_tree.
+- [ ] Enforce typed-model acceptance at the Mongo writer boundary (close the
+  B0 "writers accept ONLY typed models" gap) without breaking existing
+  callers.
+- [ ] Normalize extraction `schema_version` (v1/v2/missing) and backfill
+  `extractor` engine identity where derivable from provenance.
+- [ ] Audit graph key alignment (formal `corpus_ids` vs live node keys) and
+  reconcile with a migration or a documented contract correction.
+
+### Adopted into existing sections
+
+- P0.5 gains: strip corpus-lens-inherited facets that lack per-document
+  content evidence (measure facet DF per corpus; a lens category is not
+  evidence every document teaches it), then backfill cleaned facet payloads.
+- P0.2/P2.1 gain: populate `summary_tree.concepts` at construction (the
+  field exists but is never passed) and backfill from parent
+  mechanisms/key_terms; persist the lexicon joins on Mongo tree rows so the
+  durable hierarchy is not thinner than its Qdrant projection.
+- P2.1 gains: deterministic bibliographic capture/backfill (author, title,
+  date, language from front matter where parseable), temporal validity
+  fields (published_at / temporal_scope) on documents and cards, and a
+  readiness split: operational readiness (artifacts exist, projections
+  reconcile) vs metadata-quality readiness (bibliographic, facet-precision,
+  card availability) as separate gates — `fully_enriched` must stop
+  implying librarian-grade metadata.
+- P1.2/P1.5 gain: replace the positional vocabulary-match cap in the
+  planner handoff with obligation-aware selection (strong matches must be
+  able to create evidence obligations regardless of list position) —
+  universal cap-policy fix, never term-specific routing.
+- P2.2 gains the owner-supplied "polymath librarian" latent-concept
+  prompt as its generation asset (docs/LATENT_CONCEPT_PROMPT.md), still
+  gated behind the P1.1 baseline + P1.7 (deterministic-first ordering
+  unchanged); every harvested representation must pass the eval firewall
+  and span validation.
+
 ## Governing Librarian Planning Constraint
 
 The librarian must ship from trustworthy existing projections before any
