@@ -980,6 +980,29 @@ Acceptance:
 
 - [ ] RunPod is called production-ready only after corpus-scale measured parity.
 
+### P2.7b RunPod Burst Orchestration (owner design, adopted 2026-07-13)
+
+- [ ] Per-corpus disposition matrix BEFORE any mass job: each active corpus is
+  classified `reingest` (re-parse/re-chunk — bad heading_path/OCR; rebuilds
+  chunk IDs so summaries/vectors/extractions follow) vs `re-extract-only`
+  (chunking sound; summaries/vectors preserved) vs `projection-only`. No
+  reindex or extraction spend on a corpus marked `reingest`.
+- [ ] Chunk-complete barrier: for a corpus ingest (e.g. 300 files), ALL valid
+  children are parsed, metadata-extracted, and fully chunked BEFORE the first
+  RunPod dispatch; extraction never interleaves with chunking.
+- [ ] Saturating burst dispatch: build the full eligible-chunk manifest at the
+  barrier, size request_batch_size x request_concurrency so queue depth keeps
+  max_workers saturated end-to-end (pods bill by time — throughput IS cost),
+  autoscale workers to awaiting-job volume, drain, then idle_timeout scales
+  to zero. Record chunks/sec, worker-seconds billed, and cost per 1k chunks
+  per burst.
+- [ ] Burst runs the full local stack remotely: GLiNER-ReLEX + spaCy windows +
+  deterministic python normalization in the worker; results return through
+  the existing ontology/evidence/promotion gates only.
+- [ ] Sequencing: T-HOOK-1 (temporal capture in the wire contract) lands
+  before the first corpus-scale burst; 5,000-chunk gate validates the burst
+  profile itself (not just extraction quality).
+
 ### P2.8 Direct Concept-To-Document Grounding
 
 - [x] Concept provenance and expansion-lane document hints exist.
