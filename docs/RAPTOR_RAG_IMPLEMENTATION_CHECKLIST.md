@@ -293,8 +293,10 @@ Milestone acceptance:
   *(merged + live-probed 2026-07-13 on the PoC pair: 3 direct / 2 adjacent / 2 bridges with evidence chains / policy-triggered counterbalance; foundational honestly skipped)*
 - [ ] Implement `shelf_reserve` through the calibrated eligibility discipline
   required by P0.3; never mirror the old unconditional corpus-floor behavior.
-  **[IN CODE — wave3/reserve, dark behind SHELF_RESERVE_ENABLED, pending
-  before/after evals]**
+  **[IN CODE — merged DARK on main @f049041 (2026-07-13),
+  SHELF_RESERVE_ENABLED=False; tests/test_shelf_reserve_wiring.py 16 passed
+  (exit 0) in the deployed backend container post-merge; flip via S8
+  before/after evals only]**
 - [ ] Descend reserved documents through tree -> parent -> child evidence.
 - [ ] Require shared mechanisms/principles plus evidence for every Bridge seat.
 - [x] Use versioned misuse/counterbalance policy data, not per-corpus Python
@@ -441,7 +443,13 @@ Acceptance:
 - [ ] Require answer presence, evidence strength, obligation coverage, and
   contradiction checks before `answerable=true`. **[PARTIAL @f2fb6e2 —
   undecomposed queries now judged by the strict evidence-atom gate instead of
-  synthetic-lane coverage; contradiction checks not yet implemented]**
+  synthetic-lane coverage. REMAINING (verified absent 2026-07-13, S0): no
+  contradiction check exists anywhere in the gate/sufficiency path (zero
+  code hits in the chat gate, retriever sufficiency, answerability_tuning)
+  and no asserting test covers one (zero contradiction assertions across
+  test_answerability_honesty/_gate_loosening/_text_fallback); deliberately
+  NOT built in S0 — needs its own design + asserting test before this box
+  can flip]**
 - [x] Surface a precise refusal reason when sources cover a nearby but different
   concept. *(live 2026-07-13: refusal names real concepts + nearest documents)*
 
@@ -703,16 +711,22 @@ Acceptance:
 - [ ] Batch Qdrant dense lane requests per corpus where client/server contracts
   support it.
 - [ ] Keep exact alias payload lookup logically separate from dense requests.
-- [ ] Cache vocabulary resolution by query hash, selected corpus set, planner
-  version, and artifact epoch. **[IN CODE — `services/retriever/
+- [x] Cache vocabulary resolution by query hash, selected corpus set, planner
+  version, and artifact epoch. **[`services/retriever/
   vocabulary_cache.py` + resolve() wiring: key = normalized query + ordered
   lane queries + sorted corpus set + tier/top-k/disabled/exclusions +
   per-corpus epoch; keyed on resolver VERSION via cached payload's version
-  field; TTL default 300s, LRU 512, env-tunable; awaiting live verify]**
-- [ ] Invalidate cache on lexicon/tree/document artifact changes.
-  **[IN CODE — epoch bumps from lexicon materialization (full + affected) and
+  field; TTL default 300s, LRU 512, env-tunable. LIVE-VERIFIED 2026-07-13
+  in the deployed backend container against live artifacts: identical
+  resolve() pair = cold miss 2.494s -> hit 0.002s, cache.hit=true, stats
+  hits 0->1, probe exit 0]**
+- [x] Invalidate cache on lexicon/tree/document artifact changes.
+  **[epoch bumps from lexicon materialization (full + affected) and
   corpus-lexicon deletion; cross-process worker writes are bounded by the
-  TTL, stated explicitly in the module contract]**
+  TTL, stated explicitly in the module contract. LIVE-VERIFIED 2026-07-13:
+  bump_corpus_epoch rotated the cache key (070c7428… -> 3c35e72b…),
+  invalidations=1, and the next identical resolve() recomputed (miss,
+  0.21s) instead of serving the stale entry]**
 - [ ] Capture a lexical/exact-only resolver baseline before adding deterministic
   multi-point representations so each representation method must prove lift.
 - [ ] Treat this section and the P1.1 baseline as release prerequisites for the
@@ -729,15 +743,22 @@ Acceptance:
 - [x] Reranker performs real inference warmup at startup.
 - [x] Embedder provides priority/FIFO admission classes.
 - [x] Query calls use the interactive embedding workload class.
-- [ ] Add a bounded real-inference embedder startup warmup using the deployed
+- [x] Add a bounded real-inference embedder startup warmup using the deployed
   query contract; model loading alone is not sufficient.
-  **[IN CODE — wave1/warm, pending merge]**
-- [ ] Separate embedder liveness, model-loaded health, and inference-ready
+  *(merged @7f8e7b2; runtime sidecar copy redeployed + live-probed
+  2026-07-13: fixed neutral batch ran through the serving-path admission
+  gate at backfill class, warmup complete in 0.045s, dim=1024; in-container
+  warmup+priority-gate suites 10 passed, exit 0)*
+- [x] Separate embedder liveness, model-loaded health, and inference-ready
   status so deployment gates cannot confuse them.
-  **[IN CODE — wave1/warm, pending merge]**
-- [ ] Expose `warmup_complete`, duration, vector dimension, and model/version in
+  *(merged @7f8e7b2; live :8082/health 2026-07-13 carries distinct
+  liveness=true / model_loaded=true / inference_ready=true keys; backend
+  health checker prefers inference_ready when present)*
+- [x] Expose `warmup_complete`, duration, vector dimension, and model/version in
   readiness diagnostics without exposing request content.
-  **[IN CODE — wave1/warm, pending merge]**
+  *(merged @7f8e7b2; live :8082/health 2026-07-13: warmup{complete:true,
+  duration_s:0.045, vector_dim:1024, model:Qwen3-Embedding-0.6B-mxfp8,
+  error:null} — warmup batch is a fixed constant, never request content)*
 
 ### P1.9 Qdrant Hot-Path And Contention Audit
 
