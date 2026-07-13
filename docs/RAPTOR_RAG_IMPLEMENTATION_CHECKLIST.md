@@ -159,13 +159,13 @@ Specification of record: `TEMPORAL_RAG_E2E_IMPLEMENTATION_REPORT_2026-07-12.md`
 Verdict: FEASIBLE and compatible with every standing invariant. Sequenced by
 cross-impact so no artifact is rebuilt twice:
 
-- [ ] T-HOOK-1 (blocks the authorized corpus-scale re-extraction): extend the
+- [x] T-HOOK-1 (blocks the authorized corpus-scale re-extraction): extend the
   extraction wire contract with temporal CAPTURE fields (raw time expressions,
   role candidates, exact spans — capture-only, resolution stays Polymath-side)
   and redeploy the RunPod worker, so mass re-extraction runs ONCE with
   temporal capture aboard. The 1/100/500-chunk gates passed on the v2
   contract; the 5,000-chunk gate runs after this hook lands.
-  **[IN CODE — wave2/thook, pending merge + endpoint redeploy]**
+  *(merged + redeployed both accounts (t0nuyi6shc2t9a/t5wjsqmvpjm0lm) + live-proven 2026-07-13: v3 captures with exact offsets and cue role-candidates flow to ExtractionResult)*
 - [ ] T-HOOK-2 (immediate, future-only): add `temporal_class`
   (evergreen|slowly_evolving|versioned|event|ephemeral|unknown) and
   `time_expressions` to the Ghost A summary contract — the same seam that
