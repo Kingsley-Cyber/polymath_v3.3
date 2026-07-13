@@ -90,15 +90,6 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
             "field api_keys.runpod_accounts.<name>"
         )
 
-    account = RunpodFlashAccount(
-        name=args.name,
-        endpoint_id=args.endpoint_id,
-        enabled=not args.disable,
-        max_workers=args.max_workers,
-        request_concurrency=args.request_concurrency,
-        weight=args.weight,
-    )
-
     from services.secrets import encrypt
 
     client, db = _mongo_db()
@@ -112,6 +103,26 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         raw_accounts = list(
             (((doc.get("ingestion") or {}).get("runpod_flash") or {}).get("accounts"))
             or []
+        )
+        # --embed-endpoint-id omitted (None) preserves the stored value on a
+        # replace-by-name upsert; pass an explicit empty string to clear it.
+        existing_embed_endpoint_id = ""
+        for row in raw_accounts:
+            if isinstance(row, dict) and str(row.get("name") or "") == args.name:
+                existing_embed_endpoint_id = str(row.get("embed_endpoint_id") or "")
+                break
+        account = RunpodFlashAccount(
+            name=args.name,
+            endpoint_id=args.endpoint_id,
+            embed_endpoint_id=(
+                args.embed_endpoint_id
+                if args.embed_endpoint_id is not None
+                else existing_embed_endpoint_id
+            ),
+            enabled=not args.disable,
+            max_workers=args.max_workers,
+            request_concurrency=args.request_concurrency,
+            weight=args.weight,
         )
         replaced = False
         for index, row in enumerate(raw_accounts):
@@ -166,6 +177,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--name", required=True, help="Account name (unique key).")
     parser.add_argument(
         "--endpoint-id", required=True, help="Runpod serverless endpoint id."
+    )
+    parser.add_argument(
+        "--embed-endpoint-id",
+        default=None,
+        help=(
+            "Optional Runpod endpoint id for the burst EMBEDDING worker "
+            "(runpod_flash_embedder; embed mode 'runpod'). Omitted: any "
+            "stored value is preserved on replace. Pass '' to clear."
+        ),
     )
     parser.add_argument("--max-workers", type=int, default=8)
     parser.add_argument("--request-concurrency", type=int, default=8)

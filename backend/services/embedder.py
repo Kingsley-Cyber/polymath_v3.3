@@ -5,6 +5,9 @@ Providers (Phase 14.3 + 10.15 refinements):
   local_st     — local Docker sentence-transformers sidecar (fallback + query path)
   modal_tei    — Modal cloud GPU webhook (TEI container)
   siliconflow  — SiliconFlow OpenAI-compatible embeddings API
+  runpod       — Runpod Flash burst worker fleet (bulk/backfill lane, P1.8);
+                 routes across the multi-account Runpod registry shared with
+                 extraction (runpod_flash_embedder/ worker)
 
 Architecture invariants:
   - ALL providers must serve the corpus's frozen `embedding_model_id` at
@@ -55,6 +58,15 @@ _LEGACY_MODE_ALIASES = {
     "modal_tei": "modal",
     "siliconflow": "api",
 }
+
+# ── Runpod Flash burst embedding (P1.8 bulk/backfill lane) ──────────────────
+# Wire contract shared with runpod_flash_embedder/app.py (module constant on
+# both sides). The worker hosts the SAME model/pooling/normalization as the
+# local sidecar; the dimension check below is the invariant that protects the
+# Qdrant collections.
+RUNPOD_EMBED_CONTRACT_VERSION = "polymath.runpod_embed.v1"
+# Worker-side hard cap — requests are sliced to this size before submission.
+RUNPOD_EMBED_MAX_TEXTS_PER_REQUEST = 256
 
 
 def _decrypt_api_key(value: str | None) -> str | None:
@@ -126,9 +138,12 @@ async def embed_batch(
 
     Args:
         texts: strings to embed
-        mode: "local" | "api" | "modal" (IngestionConfig.embed_mode). Legacy
-            values "local_st" / "modal_tei" / "siliconflow" are accepted and
-            coerced for backward compatibility during the rename window.
+        mode: "local" | "api" | "modal" | "runpod" (IngestionConfig
+            embed_mode). Legacy values "local_st" / "modal_tei" /
+            "siliconflow" are accepted and coerced for backward
+            compatibility during the rename window. "runpod" is the burst
+            bulk/backfill lane routed across the multi-account Runpod
+            registry shared with extraction.
         expected_dim: dim the corpus is frozen to. Every response row must
             match — raised as ValueError on mismatch.
         expected_model_id: optional model-drift guard. Cloud providers echo
@@ -222,6 +237,24 @@ async def embed_batch(
         except Exception as exc:
             return await _local_fallback_or_raise(
                 provider="API embedding",
+                reason=exc,
+                texts=texts,
+                dim=dim,
+                local_timeout_s=local_timeout_s,
+            )
+
+    # ── Runpod Flash burst (bulk/backfill embedding, P1.8) ───────────────
+    if mode == "runpod":
+        try:
+            return await _embed_batch_runpod(
+                texts=texts,
+                expected_dim=dim,
+                expected_model_id=expected_model_id,
+                max_concurrent=max_concurrent,
+            )
+        except Exception as exc:
+            return await _local_fallback_or_raise(
+                provider="Runpod",
                 reason=exc,
                 texts=texts,
                 dim=dim,
@@ -450,6 +483,211 @@ async def _embed_batch_api_pool(
     if any(v is None for v in ordered):
         raise ValueError("embedding API pool returned incomplete vector set")
     return [v for v in ordered if v is not None]
+
+
+async def _runpod_flash_submit(
+    client: httpx.AsyncClient,
+    *,
+    endpoint_id: str,
+    api_key: str,
+    request: dict[str, Any],
+    timeout_seconds: int,
+    poll_interval_seconds: float,
+) -> dict[str, Any]:
+    """Submit one Runpod Flash job and poll it to completion.
+
+    Thin seam over ``services.runpod_flash_extraction._submit_and_wait`` —
+    the proven submit/retry/poll/cancel implementation of the extraction
+    lane is reused, not copied. Imported lazily so this module never drags
+    the Ghost B stack in at import time; the seam is also the monkeypatch
+    point for the offline test suite.
+    """
+    from services.runpod_flash_extraction import _submit_and_wait
+
+    return await _submit_and_wait(
+        client,
+        endpoint_id=endpoint_id,
+        api_key=api_key,
+        request=request,
+        timeout_seconds=timeout_seconds,
+        poll_interval_seconds=poll_interval_seconds,
+    )
+
+
+def _validate_runpod_embed_output(
+    output: dict[str, Any],
+    *,
+    batch_len: int,
+    expected_dim: int,
+    expected_model_id: str | None,
+) -> list[list[float]]:
+    """Enforce the runpod embed wire contract on one worker response."""
+    if output.get("contract_version") != RUNPOD_EMBED_CONTRACT_VERSION:
+        raise RuntimeError("Runpod embed worker contract revision mismatch")
+    vectors = output.get("vectors")
+    if not isinstance(vectors, list) or len(vectors) != batch_len:
+        count = len(vectors) if isinstance(vectors, list) else "no"
+        raise ValueError(
+            f"Runpod embedding returned {count} vectors for {batch_len} texts"
+        )
+    # Model drift is warn-only, matching the api_pool lane's stance: hosts
+    # legitimately report provider-specific ids (the worker echoes the HF id
+    # 'Qwen/Qwen3-Embedding-0.6B' while local corpora freeze
+    # 'qwen3-embedding-0.6b-v1'). The dimension lock below is the invariant
+    # that protects the Qdrant collection.
+    returned_model = str(output.get("model") or "")
+    if (
+        expected_model_id
+        and returned_model
+        and returned_model != expected_model_id
+    ):
+        logger.warning(
+            "Runpod embedding model id differs from the corpus's frozen id: "
+            "worker=%r corpus=%r — verify the worker hosts the same model",
+            returned_model,
+            expected_model_id,
+        )
+    for vector in vectors:
+        if len(vector) != expected_dim:
+            raise ValueError(
+                f"Runpod embedding dimension mismatch: expected "
+                f"{expected_dim}, got {len(vector)}"
+            )
+    return [[float(value) for value in vector] for vector in vectors]
+
+
+async def _embed_batch_runpod(
+    *,
+    texts: list[str],
+    expected_dim: int,
+    expected_model_id: str | None,
+    max_concurrent: int | None = None,
+) -> list[list[float]]:
+    """Runpod Flash burst embedding across the multi-account registry (P1.8).
+
+    Routing mirrors the extraction lane and REUSES its dispatcher
+    (``services.runpod_flash_extraction._AccountDispatcher``): the enabled
+    account with the least in-flight batches wins (tie: weight, then name),
+    per-account concurrency is gated by each account's own semaphore, and a
+    failed batch fails over ONCE to a different account before raising.
+    Accounts are the same rows extraction uses
+    (``settings_service.get_system_runpod_flash_accounts``); only accounts
+    with a non-empty ``embed_endpoint_id`` participate here. ``max_concurrent``
+    additionally caps total in-flight requests across all accounts.
+
+    Any incomplete result raises — a short vector set must never reach the
+    caller (COUNT IS A CONTRACT, same rule as the local path).
+    """
+    from services.runpod_flash_extraction import _AccountDispatcher, _safe_error
+    from services.settings import settings_service
+
+    accounts = await settings_service.get_system_runpod_flash_accounts()
+    runpod_config, _legacy_key = await settings_service.get_system_runpod_flash()
+    embed_accounts = [
+        (account, key)
+        for account, key in accounts
+        if account.enabled and account.embed_endpoint_id.strip() and key
+    ]
+    if not embed_accounts:
+        raise RuntimeError(
+            "embed_mode='runpod' but no enabled Runpod account has an "
+            "embed_endpoint_id configured (register one via "
+            "scripts/register_runpod_account.py --embed-endpoint-id)"
+        )
+
+    dispatcher = _AccountDispatcher(embed_accounts)
+    global_gate = (
+        asyncio.Semaphore(max(1, int(max_concurrent))) if max_concurrent else None
+    )
+    batch_size = RUNPOD_EMBED_MAX_TEXTS_PER_REQUEST
+    slices = [
+        (index, start, texts[start : start + batch_size])
+        for index, start in enumerate(range(0, len(texts), batch_size))
+    ]
+    client = httpx.AsyncClient(
+        timeout=httpx.Timeout(runpod_config.timeout_seconds + 30, connect=20)
+    )
+
+    async def attempt_on_account(state, request, batch_len):
+        if global_gate is not None:
+            await global_gate.acquire()
+        try:
+            async with state.semaphore:
+                output = await _runpod_flash_submit(
+                    client,
+                    endpoint_id=state.account.embed_endpoint_id.strip(),
+                    api_key=state.api_key,
+                    request=request,
+                    timeout_seconds=runpod_config.timeout_seconds,
+                    poll_interval_seconds=runpod_config.poll_interval_seconds,
+                )
+        finally:
+            if global_gate is not None:
+                global_gate.release()
+        return _validate_runpod_embed_output(
+            output,
+            batch_len=batch_len,
+            expected_dim=expected_dim,
+            expected_model_id=expected_model_id,
+        )
+
+    async def run_slice(index, start, batch):
+        request = {
+            "contract_version": RUNPOD_EMBED_CONTRACT_VERSION,
+            "texts": batch,
+        }
+        primary = dispatcher.select()
+        assert primary is not None  # embed_accounts is non-empty
+        try:
+            vectors = await attempt_on_account(primary, request, len(batch))
+            return start, vectors
+        except Exception as exc:  # noqa: BLE001 - bounded failover below
+            primary.failures += 1
+            first_error: Exception = exc
+        finally:
+            dispatcher.release(primary)
+        fallback = dispatcher.select(exclude=frozenset({primary.account.name}))
+        if fallback is None:
+            raise first_error
+        fallback.failovers += 1
+        logger.warning(
+            "Runpod embed batch %d failed on account %s; requeuing once on %s: %s",
+            index,
+            primary.account.name,
+            fallback.account.name,
+            _safe_error(first_error),
+        )
+        try:
+            vectors = await attempt_on_account(fallback, request, len(batch))
+            return start, vectors
+        except Exception:
+            fallback.failures += 1
+            raise
+        finally:
+            dispatcher.release(fallback)
+
+    try:
+        completed = await asyncio.gather(
+            *(run_slice(index, start, batch) for index, start, batch in slices),
+            return_exceptions=True,
+        )
+    finally:
+        await client.aclose()
+
+    # Silent-fallback accounting: surface failover/failure rates, always.
+    summary = dispatcher.summary()
+    if any(row["failures"] or row["failovers"] for row in summary.values()):
+        logger.warning("Runpod embed dispatch summary: %s", summary)
+
+    errors = [item for item in completed if isinstance(item, BaseException)]
+    if errors:
+        raise errors[0]
+    ordered: list[list[float] | None] = [None] * len(texts)
+    for start, vectors in completed:  # type: ignore[misc]
+        ordered[start : start + len(vectors)] = vectors
+    if any(vector is None for vector in ordered):
+        raise ValueError("Runpod embedding returned an incomplete vector set")
+    return [vector for vector in ordered if vector is not None]
 
 
 class _QueryEmbedBatcher:

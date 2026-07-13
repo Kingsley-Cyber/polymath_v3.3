@@ -589,6 +589,15 @@ class RunpodFlashAccount(BaseModel):
 
     name: str = Field(max_length=60)
     endpoint_id: str = Field(max_length=120)
+    embed_endpoint_id: str = Field(
+        default="",
+        max_length=120,
+        description=(
+            "Optional Runpod serverless endpoint id for the burst EMBEDDING "
+            "worker (runpod_flash_embedder, P1.8). Accounts without it are "
+            "skipped by embed mode 'runpod'; extraction routing ignores it."
+        ),
+    )
     enabled: bool = True
     max_workers: int = Field(default=8, ge=1, le=64)
     request_concurrency: int = Field(default=8, ge=1, le=64)
