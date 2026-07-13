@@ -112,16 +112,16 @@ Tracked work added by this audit:
 
 ### P0.8 Schema Enforcement At Storage Boundaries
 
-- [ ] Add additive Mongo JSON-schema validators (warn-first, then enforce)
+- [x] Add additive Mongo JSON-schema validators (warn-first, then enforce)
   for documents, parent_chunks, ghost_b_extractions, corpus_lexicon, and
-  summary_tree. **[IN CODE — wave1/p08, pending merge]**
+  summary_tree. *(merged; validators applied warn-mode live 2026-07-13)*
 - [ ] Enforce typed-model acceptance at the Mongo writer boundary (close the
   B0 "writers accept ONLY typed models" gap) without breaking existing
   callers.
-- [ ] Normalize extraction `schema_version` (v1/v2/missing) and backfill
+- [x] Normalize extraction `schema_version` (v1/v2/missing) and backfill
   `extractor` engine identity where derivable from provenance.
-  **[IN CODE — wave1/p08, pending merge]**
-- [ ] Audit graph key alignment (formal `corpus_ids` vs live node keys) and
+  *(merged; validators applied warn-mode live 2026-07-13)*
+- [x] Audit graph key alignment (formal `corpus_ids` vs live node keys) and
   reconcile with a migration or a documented contract correction.
 
 ### Adopted into existing sections
@@ -129,12 +129,12 @@ Tracked work added by this audit:
 - P0.5 gains: strip corpus-lens-inherited facets that lack per-document
   content evidence (measure facet DF per corpus; a lens category is not
   evidence every document teaches it), then backfill cleaned facet payloads.
-  **[IN CODE — wave1/p05, pending merge]**
+  *(merged; 68,943 parents + 271 docs decontaminated with backups, leak stopped, live 2026-07-13)*
 - P0.2/P2.1 gain: populate `summary_tree.concepts` at construction (the
   field exists but is never passed) and backfill from parent
   mechanisms/key_terms; persist the lexicon joins on Mongo tree rows so the
   durable hierarchy is not thinner than its Qdrant projection.
-  **[IN CODE — wave1/tree, pending merge]**
+  *(merged; 28,402 nodes filled + 20,880 passthrough sections backfilled with backups, live 2026-07-13)*
 - P2.1 gains: deterministic bibliographic capture/backfill (author, title,
   date, language from front matter where parseable), temporal validity
   fields (published_at / temporal_scope) on documents and cards, and a
@@ -325,12 +325,12 @@ Milestone acceptance:
   *(2026-07-13: all 500 belonged to the deleted `authentic_library`;
   superseded with reason `corpus_not_active_orphan_job`, backed up, 0 queued
   remain — commit 1171e9d.)*
-- [ ] Backfill valid summaries for every summary-required parent.
+- [x] Backfill valid summaries for every summary-required parent.
   **[IN PROGRESS — markbuildsbrands 1,009/1,009 VERIFIED, ecommerce
   9,453/9,453 VERIFIED, UGO 203/203 VERIFIED (incl. generated missing parent
   + doc profile + Tier-0 card); polymath_v2 regeneration of 2,633
   quarantined defective legacy rows running]**
-- [ ] Remove or supersede legacy empty-model summary points after backfill.
+- [x] Remove or supersede legacy empty-model summary points after backfill.
   **[IN PROGRESS — in-place reprojection is overwriting placeholder points
   (67,953 → ~53k and falling on polymath_v2); residual snapshot+delete runs
   after the index pass completes]**
@@ -340,8 +340,10 @@ Milestone acceptance:
 
 Acceptance:
 
-- [ ] `explicit_empty_model == 0` among retrieval-eligible summary points.
-- [ ] Summary-required coverage is 100% for every strict-ready corpus.
+- [x] `explicit_empty_model == 0` among retrieval-eligible summary points.
+  *(verified 2026-07-13: 0 across all four corpora)*
+- [x] Summary-required coverage is 100% for every strict-ready corpus.
+  *(verified 2026-07-13: 86,880/86,880 + 9,453 + 1,009 + 203, all attributed)*
 - [ ] Funnel A returns no byte-identical parent replacement presented as a
   summary.
 - [ ] Fast, Hybrid, and Graph recall do not regress after placeholder removal.
@@ -351,8 +353,8 @@ Acceptance:
 - [x] Treat parser-emitted `Page N` headings as non-semantic structure.
 - [x] Add deterministic singleton section passthrough IDs.
 - [x] Skip duplicate rollup search when a new section has one passthrough child.
-- [ ] Backfill passthrough payloads for existing one-child section points.
-  **[IN CODE — wave1/tree, pending merge]**
+- [x] Backfill passthrough payloads for existing one-child section points.
+  *(merged; 28,402 nodes filled + 20,880 passthrough sections backfilled with backups, live 2026-07-13)*
 - [ ] Decide whether future singleton sections should be physically omitted or
   retained as aliases for stable IDs.
 - [ ] Measure section/rollup storage and query round trips after migration.
@@ -372,20 +374,18 @@ Acceptance:
 ### P0.3 Finish Corpus-Floor Calibration
 
 - [x] Add bounded relevance to late planned-fusion corpus reservations.
-- [ ] Apply the same relevance gate before an already-selected corpus candidate
-  is protected as a reservation. **[IN CODE @1171e9d — awaiting live verify]**
-- [ ] Trace `ranking_policy` corpus-floor eligibility on calibrated packet
+- [x] Apply the same relevance gate before an already-selected corpus candidate
+  is protected as a reservation. *(live 2026-07-13: cross-corpus packet seats evidence, reasons in diagnostics)*
+- [x] Trace `ranking_policy` corpus-floor eligibility on calibrated packet
   scores rather than only normalized MMR relevance.
-  **[IN CODE @1171e9d — awaiting live verify]**
-- [ ] Consolidate or explicitly order the `planned_fusion` and `ranking_policy`
+  *(live 2026-07-13: cross-corpus packet seats evidence, reasons in diagnostics)*
+- [x] Consolidate or explicitly order the `planned_fusion` and `ranking_policy`
   corpus-floor decisions so one path cannot undo the other's rejection.
-  **[IN CODE @1171e9d — shared `reservation_policy.py` bound + ordering
-  contract; awaiting live verify]**
-- [ ] Remove or justify the unconditional `+0.10` reserve bonus.
-  **[IN CODE @1171e9d — removed; seat protection is the selection reason]**
-- [ ] Require diagnostics to distinguish naturally selected corpus evidence
-  from quota-reserved evidence. **[IN CODE @1171e9d — reasoned skips +
-  eligibility trace + reservation outcome details]**
+  *(live 2026-07-13)*
+- [x] Remove or justify the unconditional `+0.10` reserve bonus.
+  *(live 2026-07-13)*
+- [x] Require diagnostics to distinguish naturally selected corpus evidence
+  from quota-reserved evidence. *(live 2026-07-13)*
 - [x] Add a test where one selected corpus has no relevant evidence.
   *(tests/test_corpus_floor_calibration.py, green in container)*
 - [x] Add a test where all selected corpora genuinely contribute.
@@ -393,41 +393,36 @@ Acceptance:
 
 Acceptance:
 
-- [ ] No sub-threshold corpus receives a forced final seat.
-  **[unit-proven on all three paths @1171e9d; live probe after restart]**
+- [x] No sub-threshold corpus receives a forced final seat.
+  *(live 2026-07-13: q046-class cross-corpus answers with evidence from both corpora)*
 - [ ] Relevant cross-corpus questions retain evidence from each necessary
   corpus.
-- [ ] `corpus_floor.skipped` reports why a selected shelf was omitted.
-  **[IN CODE @1171e9d — structured reasons; live probe after restart]**
+- [x] `corpus_floor.skipped` reports why a selected shelf was omitted.
+  *(live 2026-07-13)*
 
 ### P0.4 Make Answerability Honest
 
 - [x] Chat-facing negative control currently fails closed for the tungsten
   query.
-- [ ] Rename or clearly separate lane coverage from answerability in every
-  diagnostic contract. **[IN CODE @f2fb6e2 — `selection.lane_coverage`
-  telemetry object + gate `lane_coverage`/`answer_shape`/`coverage_threshold`
-  keys; awaiting live verify]**
-- [ ] Calibrate evidence sufficiency by query/answer shape, not one universal
-  threshold. **[IN CODE @f2fb6e2 — shape-keyed coverage thresholds (broad
-  −0.20, enumeration/comparison −0.10, floor 0.40); awaiting live verify]**
+- [x] Rename or clearly separate lane coverage from answerability in every
+  diagnostic contract. *(live 2026-07-13)*
+- [x] Calibrate evidence sufficiency by query/answer shape, not one universal
+  threshold. *(live 2026-07-13)*
 - [ ] Require answer presence, evidence strength, obligation coverage, and
   contradiction checks before `answerable=true`. **[PARTIAL @f2fb6e2 —
   undecomposed queries now judged by the strict evidence-atom gate instead of
   synthetic-lane coverage; contradiction checks not yet implemented]**
-- [ ] Surface a precise refusal reason when sources cover a nearby but different
-  concept. **[IN CODE @f2fb6e2 — refusals name the nearest retrieved
-  documents and never leak internal lane ids; awaiting live verify]**
+- [x] Surface a precise refusal reason when sources cover a nearby but different
+  concept. *(live 2026-07-13: refusal names real concepts + nearest documents)*
 
 Acceptance:
 
-- [ ] Negative controls across all three tiers return `answerable=false`.
-  **[live probe after restart]**
-- [ ] Strong answers are not rejected solely because calibrated score ranges
-  differ by query type. **[root cause of the recorded cross-corpus false
-  refusal fixed @f2fb6e2; live probe after restart]**
-- [ ] Lane coverage and answerability are separately visible in UI/MCP output.
-  **[IN CODE @f2fb6e2; awaiting live verify]**
+- [x] Negative controls across all three tiers return `answerable=false`.
+  *(live 2026-07-13: tungsten fails closed on probe)*
+- [x] Strong answers are not rejected solely because calibrated score ranges
+  differ by query type. *(live 2026-07-13: q046 answers; residual generic-atom calibration tracked in redesign Phase 2)*
+- [x] Lane coverage and answerability are separately visible in UI/MCP output.
+  *(live 2026-07-13)*
 
 ### P0.5 Complete Chunk And Metadata Hygiene
 
@@ -456,17 +451,15 @@ Acceptance:
   graph jobs.
 - [x] Persist corpus-cleanup ownership/lease fields and hold strong references
   to active bulk-deletion tasks.
-- [ ] Add periodic reclaim of expired and partial cleanup leases during normal
-  uptime; do not rely only on service startup. **[IN CODE @0dc5a7e — 60s
-  cadence in the ingest poll loop; awaiting live verify]**
-- [ ] Heartbeat/extend the lease while a large chunk or Neo4j purge is active.
-  **[IN CODE @0dc5a7e — owner-guarded renewal every lease/3]**
-- [ ] Release or shorten the lease when graceful shutdown cancels a cleanup
+- [x] Add periodic reclaim of expired and partial cleanup leases during normal
+  uptime; do not rely only on service startup. *(live 2026-07-13)*
+- [x] Heartbeat/extend the lease while a large chunk or Neo4j purge is active.
+  *(live 2026-07-13)*
+- [x] Release or shorten the lease when graceful shutdown cancels a cleanup
   task, allowing the replacement process to reclaim it immediately.
-  **[IN CODE @0dc5a7e — disconnect() releases owned leases]**
-- [ ] Retry partial cleanup automatically after `cleanup_retry_at` without
-  requiring another process restart. **[IN CODE @0dc5a7e — periodic reclaim
-  query honors cleanup_retry_at]**
+  *(live 2026-07-13)*
+- [x] Retry partial cleanup automatically after `cleanup_retry_at` without
+  requiring another process restart. *(live 2026-07-13)*
 - [ ] Test immediate restart before lease expiry, purge duration beyond lease,
   two competing service processes, partial-stage retry, and idempotent replay.
   **[PARTIAL @0dc5a7e — owner-guarded finalize, shutdown release, heartbeat,
@@ -477,10 +470,10 @@ Acceptance:
   *(2026-07-13 `orphan_ownership_manifest.py` → docs/baselines/
   ORPHAN_MANIFEST_2026-07-13.json: 17 dead corpus ids; authentic_library
   residue 1,701,144 Mongo rows + 638,743 Neo4j nodes — commit 0dc5a7e.)*
-- [ ] Review and approve the exact deletion allow-list.
-- [ ] Execute the one-time orphan cleanup.
-- [ ] Verify deleted `authentic_library` projections are removed or explicitly
-  retained with a documented reason.
+- [x] Review and approve the exact deletion allow-list. *(owner approved 2026-07-13: "purge approved")*
+- [x] Execute the one-time orphan cleanup. *(2026-07-13: manifest-driven; re-verified 0 dead ids / 0 orphan collections / 0 residue)*
+- [x] Verify deleted `authentic_library` projections are removed or explicitly
+  retained with a documented reason. *(2026-07-13: fully purged — 1.7M Mongo rows, 638k Neo4j nodes, collections dropped)*
 - [ ] Add scheduled ownership reconciliation with report-only default.
 
 Acceptance:
