@@ -985,6 +985,24 @@ Acceptance:
 
 - [ ] RunPod is called production-ready only after corpus-scale measured parity.
 
+### Active PoC Scope (owner directive 2026-07-13 — grounding for all testing)
+
+- **Designated proof-of-concept corpora: `markbuildsbrands_transcripts` and
+  `ecommerce_AI_FILM_SCHOOL`** — all cross-corpus retrieval testing,
+  ingestion experiments, extraction bursts, and librarian/shelf iteration
+  target these two until the owner widens scope. They are the cross-corpus
+  pair for eval interpretation (film craft x marketing = real bridge
+  material).
+- **`polymath_v2` is LEFT ALONE for heavy operations** (its P0.1 repair is
+  complete and verified; sheer size makes it wrong for PoC iteration):
+  no re-extraction, no reingest, no mass backfills without a new owner
+  directive. Read-only participation in the held-out eval suite continues.
+- **`UGO_CORPUS` stays the 1-document canary** (first target for any new
+  pipeline before the PoC pair).
+- Disposition matrix consequence: v2 = `projection-only (frozen)`;
+  mark + ecommerce = active `re-extract-only` PoC targets (pending T-HOOK-1);
+  the 5,000-chunk burst gate runs against the PoC pair, not v2.
+
 ### P2.7b RunPod Burst Orchestration (owner design, adopted 2026-07-13)
 
 - [ ] Per-corpus disposition matrix BEFORE any mass job: each active corpus is
