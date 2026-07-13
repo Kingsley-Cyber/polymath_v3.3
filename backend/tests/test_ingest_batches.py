@@ -1412,6 +1412,7 @@ async def test_explicit_resume_requeues_bounded_worker_failure(monkeypatch):
 async def test_create_upload_batch_stores_browser_files_as_runnable_batch(monkeypatch, tmp_path):
     settings = SimpleNamespace(
         INGEST_FILE_STORAGE_DIR=str(tmp_path / "spool"),
+        INGEST_DROP_OFF_DIR=str(tmp_path / "drop-off"),
         INGEST_FILE_STORAGE_MAX_BYTES=1024,
         INGEST_BATCH_WORKERS=2,
         INGEST_MAX_ACTIVE_JOBS=16,
@@ -1437,6 +1438,8 @@ async def test_create_upload_batch_stores_browser_files_as_runnable_batch(monkey
     assert result["source"] == batches.SOURCE_BROWSER_UPLOAD
     assert result["counts"][batches.ITEM_QUEUED] == 1
     assert result["stored_bytes"] == len(b"# Quick")
+    assert result["drop_off_relative_dir"].startswith("corpus-1/uploads/")
+    assert Path(result["drop_off_dir"]).is_dir()
     assert result["options"]["concurrency"] == 4
     assert result["options"]["profile"] == "rtx_assisted"
     item = db.collections[batches.ITEMS].rows[0]
@@ -1444,7 +1447,38 @@ async def test_create_upload_batch_stores_browser_files_as_runnable_batch(monkey
     assert item["relative_path"] == "quick.md"
     assert item["source_path"] == "quick.md"
     assert item["stored_path"]
+    assert item["drop_off_path"] == item["stored_path"]
+    assert Path(item["stored_path"]).name == "quick.md"
     assert Path(item["stored_path"]).read_bytes() == b"# Quick"
+
+
+@pytest.mark.asyncio
+async def test_create_upload_batch_sanitizes_and_preserves_duplicate_names(monkeypatch, tmp_path):
+    settings = SimpleNamespace(
+        INGEST_FILE_STORAGE_DIR=str(tmp_path / "spool"),
+        INGEST_DROP_OFF_DIR=str(tmp_path / "drop-off"),
+        INGEST_FILE_STORAGE_MAX_BYTES=1024,
+        INGEST_BATCH_WORKERS=2,
+        INGEST_MAX_ACTIVE_JOBS=16,
+    )
+    monkeypatch.setattr(batches, "get_settings", lambda: settings)
+    db = _RecoveryDb([], [])
+
+    await batches.create_upload_batch(
+        db=db,
+        corpus_id="corpus-1",
+        user_id="user-1",
+        files=[
+            {"filename": "../notes.md", "data": b"first"},
+            {"filename": "notes.md", "data": b"second"},
+        ],
+    )
+
+    items = db.collections[batches.ITEMS].rows
+    stored = [Path(item["stored_path"]) for item in items]
+    assert [path.name for path in stored] == ["notes.md", "notes (2).md"]
+    assert [path.read_bytes() for path in stored] == [b"first", b"second"]
+    assert all(path.parent.name == items[0]["batch_id"] for path in stored)
 
 
 @pytest.mark.asyncio

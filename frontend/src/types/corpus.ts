@@ -693,6 +693,7 @@ export interface IngestBatchItemResponse {
   relative_path?: string;
   source_path?: string;
   stored_path?: string | null;
+  drop_off_path?: string | null;
   status:
     | "queued"
     | "running"
@@ -720,6 +721,8 @@ export interface IngestBatchResponse {
   corpus_id: string;
   source: "local_folder" | string;
   root_path?: string;
+  drop_off_dir?: string;
+  drop_off_relative_dir?: string;
   store_files?: boolean;
   total_source_bytes?: number;
   stored_bytes?: number;

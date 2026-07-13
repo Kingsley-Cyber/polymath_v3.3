@@ -823,7 +823,7 @@ async def upsert_summaries(
     vectors: list[list[float]],
     target_kinds: list[str],
     sparse_vectors: list[SparseVector] | None = None,
-) -> None:
+) -> int:
     """
     Upsert summary vectors into per-corpus collections. Never written to graph.
 
@@ -838,11 +838,40 @@ async def upsert_summaries(
             Same backwards-compat handling as `upsert_children`.
     """
     if not summary_payloads or not vectors:
-        return
+        return 0
     assert len(summary_payloads) == len(vectors)
     if sparse_vectors is not None:
         assert len(sparse_vectors) == len(summary_payloads), "sparse length mismatch"
     sv_iter = sparse_vectors or [None] * len(summary_payloads)
+
+    # A summary without a producing model is not an abstraction artifact. The
+    # historical path copied raw parent text into the summary lane and stamped
+    # ``summary_model=""``, doubling retrieval candidates while adding no new
+    # information. Refuse new placeholders at the storage boundary; callers
+    # that intentionally import a legacy summary must provide an explicit
+    # provenance value such as ``legacy_unknown``.
+    prepared = [
+        (payload, vector, sparse)
+        for payload, vector, sparse in zip(
+            summary_payloads,
+            vectors,
+            sv_iter,
+            strict=True,
+        )
+        if str(payload.get("summary_model") or "").strip()
+    ]
+    skipped = len(summary_payloads) - len(prepared)
+    if skipped:
+        logger.warning(
+            "Skipped %d unmodeled summary placeholder(s) for corpus %s",
+            skipped,
+            corpus_id,
+        )
+    if not prepared:
+        return 0
+    summary_payloads = [row[0] for row in prepared]
+    vectors = [row[1] for row in prepared]
+    sv_iter = [row[2] for row in prepared]
 
     payloads = []
     for p in summary_payloads:
@@ -898,6 +927,7 @@ async def upsert_summaries(
             }
         )
 
+    wrote_to_collection = False
     for kind in target_kinds:
         if kind == "graph":
             continue  # summaries never seed the graph collection
@@ -923,6 +953,7 @@ async def upsert_summaries(
             points=points,
             point_label="summary",
         )
+        wrote_to_collection = True
         logger.debug(
             "Upserted %d summary points → %s (named=%s sparse=%s)",
             len(points),
@@ -930,6 +961,7 @@ async def upsert_summaries(
             has_named,
             has_sparse,
         )
+    return len(payloads) if wrote_to_collection else 0
 
 
 # `delete_points_by_corpus` was removed in Phase 7.5 — per-corpus collections
@@ -1169,6 +1201,15 @@ def _summary_tree_payload(entry: dict) -> dict:
         "parent_ids": [str(value) for value in (entry.get("parent_ids") or [])[:64]],
         "child_node_ids": [
             str(value) for value in (entry.get("child_node_ids") or [])[:64]
+        ],
+        "passthrough_rollup_id": str(entry.get("passthrough_rollup_id") or ""),
+        "passthrough_parent_ids": [
+            str(value)
+            for value in (entry.get("passthrough_parent_ids") or [])[:64]
+        ],
+        "passthrough_lexicon_ids": [
+            str(value)
+            for value in (entry.get("passthrough_lexicon_ids") or [])[:96]
         ],
         "lexicon_ids": [str(value) for value in (entry.get("lexicon_ids") or [])[:96]],
         "token_estimate": max(1, len(summary.split())),

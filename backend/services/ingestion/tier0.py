@@ -204,6 +204,30 @@ async def delete_doc_profile(client, *, corpus_id: str, doc_id: str) -> None:
     )
 
 
+async def delete_corpus_doc_profiles(client, *, corpus_id: str) -> int:
+    """Delete every shared Tier-0 routing card owned by one corpus."""
+
+    from qdrant_client import models as qm
+
+    if not await client.collection_exists(SHARED_DOCSUM):
+        return 0
+    result = await client.delete(
+        collection_name=SHARED_DOCSUM,
+        points_selector=qm.FilterSelector(
+            filter=qm.Filter(
+                must=[
+                    qm.FieldCondition(
+                        key="corpus_id",
+                        match=qm.MatchValue(value=corpus_id),
+                    )
+                ]
+            )
+        ),
+        wait=True,
+    )
+    return 1 if getattr(result, "operation_id", None) is not None else 0
+
+
 async def reconcile_doc_profile_projection_state(
     db,
     client,

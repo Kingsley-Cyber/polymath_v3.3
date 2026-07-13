@@ -238,6 +238,25 @@ def test_content_facets_are_created_for_parent_summary_and_child_text():
     assert "user_modeling" in child_rows[0]["content_facet_ids"]
 
 
+def test_broad_single_words_do_not_stamp_handwritten_content_facets():
+    parents = [_parent(heading_path=["General discussion"])]
+    parents[0].text = (
+        "A choice can create stress, affect control, and change a person's mood."
+    )
+    profile = build_ingest_facet_profile(
+        filename="general_notes.md",
+        doc_id="doc-generic",
+        corpus_id="corpus-1",
+        parents=parents,
+        children=[],
+        summaries=[],
+    )
+
+    content_ids = profile["parent_facets"]["p1"].get("content_facet_ids", [])
+    assert "agency_preservation" not in content_ids
+    assert "emotional_patterns" not in content_ids
+
+
 @pytest.mark.asyncio
 async def test_matching_ingest_facets_finds_query_named_doc_facets():
     profile = build_ingest_facet_profile(

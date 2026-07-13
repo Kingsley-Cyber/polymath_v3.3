@@ -157,15 +157,30 @@ async def delete_corpus(db: AsyncIOMotorDatabase, corpus_id: str) -> bool:
     return result.matched_count > 0
 
 
-async def mark_corpus_deleting(db: AsyncIOMotorDatabase, corpus_id: str) -> bool:
+async def mark_corpus_deleting(
+    db: AsyncIOMotorDatabase,
+    corpus_id: str,
+    *,
+    cleanup_owner: str | None = None,
+    cleanup_lease_until: datetime | None = None,
+) -> bool:
     """Mark a corpus as deleting before projection cleanup starts."""
+    now = datetime.utcnow()
+    cleanup_fields = {}
+    if cleanup_owner and cleanup_lease_until:
+        cleanup_fields = {
+            "cleanup_owner": cleanup_owner,
+            "cleanup_lease_until": cleanup_lease_until,
+            "cleanup_status": "running",
+        }
     result = await db["corpora"].update_one(
         {"corpus_id": corpus_id},
         {
             "$set": {
                 "status": DELETING_STATUS,
-                "deleting_at": datetime.utcnow(),
-                "updated_at": datetime.utcnow(),
+                "deleting_at": now,
+                "updated_at": now,
+                **cleanup_fields,
             }
         },
     )
@@ -279,6 +294,55 @@ async def retire_document_derived_state(
             "$set": {
                 "document_deleted": True,
                 "document_deleted_at": now,
+                "updated_at": now,
+            }
+        },
+    )
+    return {
+        "summary_tree": int(getattr(tree_result, "deleted_count", 0) or 0),
+        **queue_counts,
+    }
+
+
+async def retire_corpus_derived_state(
+    db: AsyncIOMotorDatabase,
+    *,
+    corpus_id: str,
+) -> dict[str, int]:
+    """Remove hierarchy rows and retire durable work for a deleted corpus."""
+
+    now = datetime.utcnow()
+    tree_result = await db["summary_tree"].delete_many({"corpus_id": corpus_id})
+    queue_counts: dict[str, int] = {}
+    for collection_name in (
+        "source_parse_jobs",
+        "document_pipeline_jobs",
+        "extraction_jobs",
+        "summary_jobs",
+        "graph_promotion_jobs",
+    ):
+        result = await db[collection_name].update_many(
+            {"corpus_id": corpus_id, "status": {"$ne": "superseded"}},
+            {
+                "$set": {
+                    "status": "superseded",
+                    "reason": "corpus_deleted",
+                    "corpus_deleted_at": now,
+                    "updated_at": now,
+                    "lease_until": None,
+                },
+                "$unset": {"runner": "", "started_at": ""},
+            },
+        )
+        queue_counts[collection_name] = int(
+            getattr(result, "modified_count", 0) or 0
+        )
+    await db["ingest_batch_items"].update_many(
+        {"corpus_id": corpus_id},
+        {
+            "$set": {
+                "corpus_deleted": True,
+                "corpus_deleted_at": now,
                 "updated_at": now,
             }
         },

@@ -19,13 +19,14 @@ import logging
 import hashlib
 import mimetypes
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Optional
 
 from config import get_settings
 from models.schemas import IngestionConfig, IngestJobResponse
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from qdrant_client import AsyncQdrantClient
+from pymongo import ReturnDocument
 from services.ingestion.section_classifier import parent_summary_required_clause
 from services.storage.record_status import with_active_records
 
@@ -43,6 +44,7 @@ QUERYABLE_INGEST_STAGES: frozenset[str] = frozenset(
         "queryable_with_pending_summary_and_graph",
     }
 )
+CORPUS_CLEANUP_LEASE_MINUTES = 30
 
 
 # ── Frozen / mutable field partition ───────────────────────────────────────
@@ -313,6 +315,8 @@ class IngestionService:
         self._qdrant: Optional[AsyncQdrantClient] = None
         self._neo4j = None  # neo4j.AsyncDriver when NEO4J_ENABLED
         self._settings = get_settings()
+        self._cleanup_owner = f"corpus-cleanup:{uuid.uuid4()}"
+        self._cleanup_tasks: set[asyncio.Task] = set()
 
     async def connect(self, db: AsyncIOMotorDatabase) -> None:
         """Called from lifespan startup. Receives the shared MongoDB db instance.
@@ -337,6 +341,13 @@ class IngestionService:
                 auth=(self._settings.NEO4J_USER, self._settings.NEO4J_PASSWORD),
             )
             logger.info("IngestionService: Neo4j connected")
+
+        try:
+            recovered = await self.recover_pending_corpus_purges(limit=4)
+            if recovered:
+                logger.info("Recovered %d durable corpus purge(s)", recovered)
+        except Exception as exc:
+            logger.warning("Durable corpus purge recovery skipped: %s", exc)
 
         # Retrieval readiness repair — ensure every existing corpus has the
         # Qdrant collection/index layout for its frozen embedding dimension and
@@ -422,6 +433,10 @@ class IngestionService:
             logger.warning("Source identity index setup skipped: %s", exc)
 
     async def disconnect(self) -> None:
+        for task in tuple(self._cleanup_tasks):
+            task.cancel()
+        if self._cleanup_tasks:
+            await asyncio.gather(*tuple(self._cleanup_tasks), return_exceptions=True)
         if self._qdrant:
             await self._qdrant.close()
         if self._neo4j:
@@ -1807,7 +1822,15 @@ class IngestionService:
         )
         from services.storage.qdrant_writer import drop_collections_for_corpus
 
-        existed = await mark_corpus_deleting(self._db, corpus_id)
+        lease_until = datetime.utcnow() + timedelta(
+            minutes=CORPUS_CLEANUP_LEASE_MINUTES
+        )
+        existed = await mark_corpus_deleting(
+            self._db,
+            corpus_id,
+            cleanup_owner=self._cleanup_owner,
+            cleanup_lease_until=lease_until,
+        )
 
         # Phase 7.5 — atomically drop all 4 per-corpus collections (naive,
         # hrag, graph, schemas). A whole-collection drop is fast regardless of
@@ -1819,20 +1842,95 @@ class IngestionService:
                 "Failed to drop per-corpus Qdrant collections for %s", corpus_id
             )
 
+        try:
+            from services.ingestion.tier0 import delete_corpus_doc_profiles
+
+            await delete_corpus_doc_profiles(self._qdrant, corpus_id=corpus_id)
+        except Exception:
+            logger.warning(
+                "Failed to delete shared Tier-0 profiles for corpus %s",
+                corpus_id,
+                exc_info=True,
+            )
+
         # Mark document/support rows synchronously so evidence cannot be read
         # while the heavier chunk + graph projection cleanup runs.
         await delete_documents_by_corpus(self._db, corpus_id)
 
-        # Background the bulk deletes (chunks + Neo4j) — they no longer gate
-        # the HTTP response.
         try:
-            asyncio.create_task(self._purge_corpus_bulk(corpus_id))
-        except RuntimeError:
-            # No running loop (sync context) — fall back to inline so data is
-            # still cleaned, just slower.
-            await self._purge_corpus_bulk(corpus_id)
+            from services.storage.mongo_writer import retire_corpus_derived_state
+
+            await retire_corpus_derived_state(self._db, corpus_id=corpus_id)
+        except Exception:
+            logger.warning(
+                "Failed to retire derived state for corpus %s",
+                corpus_id,
+                exc_info=True,
+            )
+
+        # The large chunk/graph deletion remains asynchronous for HTTP latency,
+        # but it is now a leased durable task. A process restart can reclaim
+        # the deleting corpus instead of abandoning an unreferenced coroutine.
+        self._start_corpus_purge_task(corpus_id)
 
         return existed
+
+    def _start_corpus_purge_task(self, corpus_id: str) -> None:
+        task = asyncio.create_task(self._purge_corpus_bulk(corpus_id))
+        self._cleanup_tasks.add(task)
+        task.add_done_callback(self._cleanup_tasks.discard)
+
+    async def recover_pending_corpus_purges(self, *, limit: int = 4) -> int:
+        """Claim stale/partial corpus purges from durable corpus state."""
+        if self._db is None:
+            return 0
+        recovered = 0
+        for _ in range(max(0, int(limit))):
+            now = datetime.utcnow()
+            row = await self._db["corpora"].find_one_and_update(
+                {
+                    "$and": [
+                        {
+                            "$or": [
+                                {"status": "deleting"},
+                                {"cleanup_status": "partial"},
+                            ]
+                        },
+                        {
+                            "$or": [
+                                {"cleanup_lease_until": {"$exists": False}},
+                                {"cleanup_lease_until": {"$lte": now}},
+                            ]
+                        },
+                        {
+                            "$or": [
+                                {"cleanup_retry_at": {"$exists": False}},
+                                {"cleanup_retry_at": {"$lte": now}},
+                            ]
+                        },
+                    ]
+                },
+                {
+                    "$set": {
+                        "cleanup_owner": self._cleanup_owner,
+                        "cleanup_lease_until": now
+                        + timedelta(minutes=CORPUS_CLEANUP_LEASE_MINUTES),
+                        "cleanup_status": "running",
+                        "updated_at": now,
+                    },
+                    "$unset": {"cleanup_retry_at": ""},
+                },
+                projection={"corpus_id": 1, "_id": 0},
+                return_document=ReturnDocument.AFTER,
+            )
+            if not row:
+                break
+            corpus_id = str(row.get("corpus_id") or "").strip()
+            if not corpus_id:
+                break
+            self._start_corpus_purge_task(corpus_id)
+            recovered += 1
+        return recovered
 
     async def _purge_corpus_bulk(self, corpus_id: str) -> None:
         """Background bulk cleanup for a deleted corpus: Mongo chunks +
@@ -1902,11 +2000,24 @@ class IngestionService:
                         "cleanup_completed_at": datetime.utcnow(),
                         "updated_at": datetime.utcnow(),
                         **(
+                            {
+                                "cleanup_retry_at": datetime.utcnow()
+                                + timedelta(minutes=5)
+                            }
+                            if cleanup_warnings
+                            else {}
+                        ),
+                        **(
                             {"cleanup_warnings": cleanup_warnings}
                             if cleanup_warnings
                             else {}
                         ),
-                    }
+                    },
+                    "$unset": {
+                        "cleanup_owner": "",
+                        "cleanup_lease_until": "",
+                        **({} if cleanup_warnings else {"cleanup_retry_at": ""}),
+                    },
                 },
             )
         except Exception:
@@ -3814,14 +3925,14 @@ class IngestionService:
                     }
                     for p in buf
                 ]
-                await upsert_summaries(
+                written = await upsert_summaries(
                     self._qdrant,
                     corpus_id,
                     payloads,
                     vectors,
                     target_kinds=target_kinds,
                 )
-                indexed += len(buf)
+                indexed += written
                 buf.clear()
 
             async for parent in cursor:

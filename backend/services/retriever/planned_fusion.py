@@ -22,6 +22,8 @@ class PlannedPool:
 LANE_GROUNDING_THRESHOLD = 0.75
 DOCUMENT_ROUTE_GROUNDING_THRESHOLD = 0.30
 LANE_RESERVATION_MIN_SCORE_RATIO = 0.25
+CORPUS_RESERVATION_MIN_SCORE = 0.25
+CORPUS_RESERVATION_MIN_SCORE_RATIO = 0.30
 _OPERATIONAL_ARTIFACT_RE = re.compile(
     r"^(?:ocr-(?:completion|marker-append)|epub-backfill-status)-report(?:\.[a-z0-9]+)?$",
     re.IGNORECASE,
@@ -755,6 +757,7 @@ def reserve_planned_finalists(
     protected_lane_reservations: dict[str, str] = {}
     lane_candidate_diagnostics: dict[str, dict[str, object]] = {}
     corpus_reservations: dict[str, str] = {}
+    skipped_corpus_reservations: list[str] = []
     routed_document_reservations: dict[str, str] = {}
     document_counts: dict[str, int] = {}
 
@@ -1022,6 +1025,19 @@ def reserve_planned_finalists(
             routed_docs_already_selected.add(document_key)
             routed_document_reservations[document_key] = key
 
+    def corpus_reservation_relevant(chunk: SourceChunk) -> bool:
+        """A selected corpus gets a seat only when it has relevant evidence."""
+
+        score = float(chunk.score or 0.0)
+        if 0.0 <= score <= top_score <= 1.0 and top_score > 0.0:
+            return score >= max(
+                CORPUS_RESERVATION_MIN_SCORE,
+                top_score * CORPUS_RESERVATION_MIN_SCORE_RATIO,
+            )
+        # Unbounded/logit scores are not ratio-comparable. Preserve the prior
+        # behavior until that score family has an explicit calibration.
+        return True
+
     for corpus_id in corpus_ids or []:
         existing_key = next(
             (
@@ -1036,6 +1052,7 @@ def reserve_planned_finalists(
                 candidate_key
                 for candidate_key in ranked_keys
                 if str(by_key[candidate_key].corpus_id or "") == str(corpus_id)
+                and corpus_reservation_relevant(by_key[candidate_key])
             ),
             None,
         )
@@ -1043,6 +1060,8 @@ def reserve_planned_finalists(
             reserve(key, allow_overflow=True)
             protected_keys.add(key)
             corpus_reservations[str(corpus_id)] = key
+        else:
+            skipped_corpus_reservations.append(str(corpus_id))
 
     for corpus_id, key in corpus_reservations.items():
         metadata = dict(by_key[key].metadata or {})
@@ -1086,6 +1105,7 @@ def reserve_planned_finalists(
         "lane_reservations": lane_reservations,
         "lane_candidates": lane_candidate_diagnostics,
         "corpus_reservations": corpus_reservations,
+        "skipped_corpus_reservations": skipped_corpus_reservations,
         "routed_document_reservations": routed_document_reservations,
         "routed_documents_selected": routed_documents_selected,
         "routed_document_budget": route_limit,

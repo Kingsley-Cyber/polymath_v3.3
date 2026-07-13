@@ -255,6 +255,7 @@ async def test_qdrant_child_and_summary_payloads_include_readable_doc_label(monk
                 "corpus_id": "corpus-12345678",
                 "filename": "aws.txt",
                 "summary": "AWS service recommendations.",
+                "summary_model": "unit-model",
                 "source_tier": "tier_a",
                 "facet_ids": ["aws_service_recommendations"],
                 "facet_text": "aws service recommendations",

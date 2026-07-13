@@ -213,29 +213,81 @@ async def _navigate_indexed_tree(
         )
 
     rollup_specs: list[
-        tuple[str, str, str, list[TreeNodeCandidate], list[str], list[float]]
+        tuple[
+            str,
+            str,
+            str,
+            list[TreeNodeCandidate],
+            list[str],
+            list[float],
+            list[dict[str, Any]],
+        ]
     ] = []
     for lane_id, query_vector in usable_lanes.items():
         for route in document_routes.get(lane_id, []):
             corpus_id, doc_id = str(route.corpus_id), str(route.doc_id)
             pair = (corpus_id, doc_id)
             selected = selected_sections.get((lane_id, corpus_id, doc_id), [])
-            allowed_ids = list(
-                dict.fromkeys(
+            allowed_ids: list[str] = []
+            passthrough_hits: list[dict[str, Any]] = []
+            for section in selected:
+                payload = payload_by_node.get(section.node_id) or {}
+                child_ids = [
                     str(value)
-                    for section in selected
-                    for value in (payload_by_node.get(section.node_id) or {}).get(
-                        "child_node_ids", []
-                    )
+                    for value in (payload.get("child_node_ids") or [])
                     if str(value)
+                ]
+                passthrough_parent_ids = [
+                    str(value)
+                    for value in (payload.get("passthrough_parent_ids") or [])
+                    if str(value)
+                ]
+                passthrough_rollup_id = str(
+                    payload.get("passthrough_rollup_id") or ""
                 )
-            )
+                if (
+                    len(child_ids) == 1
+                    and passthrough_parent_ids
+                    and passthrough_rollup_id == child_ids[0]
+                ):
+                    passthrough_hits.append(
+                        {
+                            "node_id": passthrough_rollup_id,
+                            "score": section.score,
+                            "token_estimate": section.token_estimate,
+                            "parent_ids": passthrough_parent_ids,
+                            "lexicon_ids": list(
+                                payload.get("passthrough_lexicon_ids") or []
+                            ),
+                        }
+                    )
+                else:
+                    allowed_ids.extend(child_ids)
+            allowed_ids = list(dict.fromkeys(allowed_ids))
             rollup_specs.append(
-                (lane_id, corpus_id, doc_id, selected, allowed_ids, query_vector)
+                (
+                    lane_id,
+                    corpus_id,
+                    doc_id,
+                    selected,
+                    allowed_ids,
+                    query_vector,
+                    passthrough_hits,
+                )
             )
 
     async def search_rollups(spec):
-        lane_id, corpus_id, doc_id, selected, allowed_ids, query_vector = spec
+        (
+            lane_id,
+            corpus_id,
+            doc_id,
+            selected,
+            allowed_ids,
+            query_vector,
+            passthrough_hits,
+        ) = spec
+        if not allowed_ids:
+            return lane_id, corpus_id, doc_id, selected, passthrough_hits, None
         try:
             rows = await search_fn(
                 qdrant_client,
@@ -246,9 +298,16 @@ async def _navigate_indexed_tree(
                 node_ids=allowed_ids,
                 top_k=8,
             )
-            return lane_id, corpus_id, doc_id, selected, rows, None
+            return (
+                lane_id,
+                corpus_id,
+                doc_id,
+                selected,
+                [*passthrough_hits, *rows],
+                None,
+            )
         except Exception as exc:  # noqa: BLE001 - legacy fallback remains available
-            return lane_id, corpus_id, doc_id, selected, [], exc
+            return lane_id, corpus_id, doc_id, selected, passthrough_hits, exc
 
     if batch_search_fn is None:
         rollup_results = await asyncio.gather(
@@ -260,30 +319,51 @@ async def _navigate_indexed_tree(
             rollup_specs_by_corpus.setdefault(spec[1], []).append(spec)
 
         async def search_rollup_batch(corpus_id: str, specs: list[tuple]):
+            active_specs = [spec for spec in specs if spec[4]]
             try:
-                rows = await batch_search_fn(
-                    qdrant_client,
-                    corpus_id,
-                    queries=[
-                        {
-                            "query_vec": query_vector,
-                            "doc_id": doc_id,
-                            "node_type": "rollup",
-                            "node_ids": allowed_ids,
-                            "top_k": 8,
-                        }
-                        for (
-                            _lane_id,
-                            _corpus_id,
-                            doc_id,
-                            _selected,
-                            allowed_ids,
-                            query_vector,
-                        ) in specs
-                    ],
+                rows = (
+                    await batch_search_fn(
+                        qdrant_client,
+                        corpus_id,
+                        queries=[
+                            {
+                                "query_vec": query_vector,
+                                "doc_id": doc_id,
+                                "node_type": "rollup",
+                                "node_ids": allowed_ids,
+                                "top_k": 8,
+                            }
+                            for (
+                                _lane_id,
+                                _corpus_id,
+                                doc_id,
+                                _selected,
+                                allowed_ids,
+                                query_vector,
+                                _passthrough_hits,
+                            ) in active_specs
+                        ],
+                    )
+                    if active_specs
+                    else []
                 )
+                hits_by_spec_id = {
+                    id(spec): hits
+                    for spec, hits in zip(active_specs, rows, strict=True)
+                }
                 return [
-                    (lane_id, corpus_id, doc_id, selected, hits, None)
+                    (
+                        lane_id,
+                        corpus_id,
+                        doc_id,
+                        selected,
+                        [
+                            *passthrough_hits,
+                            *hits_by_spec_id.get(id(spec), []),
+                        ],
+                        None,
+                    )
+                    for spec in specs
                     for (
                         lane_id,
                         _corpus_id,
@@ -291,7 +371,8 @@ async def _navigate_indexed_tree(
                         selected,
                         _allowed_ids,
                         _query_vector,
-                    ), hits in zip(specs, rows, strict=True)
+                        passthrough_hits,
+                    ) in [spec]
                 ]
             except Exception as exc:  # noqa: BLE001 - legacy fallback remains available
                 return [
@@ -303,6 +384,7 @@ async def _navigate_indexed_tree(
                         selected,
                         _allowed_ids,
                         _query_vector,
+                        _passthrough_hits,
                     ) in specs
                 ]
 

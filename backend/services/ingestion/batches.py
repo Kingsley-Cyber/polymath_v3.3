@@ -273,9 +273,61 @@ def _ensure_storage_quota(
         )
 
 
+async def _ensure_storage_quota_durable(
+    *,
+    db: AsyncIOMotorDatabase,
+    storage_root: Path,
+    incoming_bytes: int,
+    max_total_bytes: int,
+) -> None:
+    """Check the durable byte ledger without walking every stored file.
+
+    Every successful stored batch already records ``stored_bytes``. Use that
+    indexed Mongo projection on the request path and retain the filesystem walk
+    only as a compatibility fallback for older/fake databases.
+    """
+
+    try:
+        rows = await db[BATCHES].aggregate(
+            [
+                {"$match": {"stored_bytes": {"$gt": 0}}},
+                {"$group": {"_id": None, "used": {"$sum": "$stored_bytes"}}},
+            ]
+        ).to_list(length=1)
+        used = int(rows[0].get("used") or 0) if rows else 0
+    except Exception:
+        used = _directory_size_bytes(storage_root)
+    if used + incoming_bytes > max_total_bytes:
+        raise ValueError(
+            "Durable ingest file storage quota exceeded: "
+            f"{used + incoming_bytes} bytes requested, "
+            f"{max_total_bytes} bytes available. "
+            "Delete old stored batches or raise INGEST_FILE_STORAGE_MAX_BYTES."
+        )
+
+
 def _storage_path_for_item(storage_root: Path, batch_id: str, item_id: str, filename: str) -> Path:
     suffix = Path(filename).suffix
     return storage_root / batch_id / f"{item_id}{suffix}"
+
+
+def _safe_upload_filename(filename: str, *, fallback: str) -> str:
+    """Return a human-readable leaf name without permitting path traversal."""
+    leaf = Path(str(filename or "").replace("\\", "/")).name.strip()
+    return leaf or fallback
+
+
+def _unique_drop_off_path(directory: Path, filename: str, *, reserved: set[str]) -> Path:
+    """Preserve the upload name, adding a deterministic suffix for duplicates."""
+    candidate = filename
+    stem = Path(filename).stem
+    suffix = Path(filename).suffix
+    sequence = 2
+    while candidate.casefold() in reserved or (directory / candidate).exists():
+        candidate = f"{stem} ({sequence}){suffix}"
+        sequence += 1
+    reserved.add(candidate.casefold())
+    return directory / candidate
 
 
 def _mtime_ms(value: Any) -> int:
@@ -732,6 +784,7 @@ def _file_item_doc(
     relative_path: str | None = None,
     filename: str | None = None,
     source_path: str | None = None,
+    drop_off_path: Path | None = None,
 ) -> dict[str, Any]:
     stat = path.stat()
     if relative_path is None:
@@ -750,6 +803,7 @@ def _file_item_doc(
         "source": source,
         "source_path": source_path,
         "stored_path": str(stored_path) if stored_path is not None else None,
+        "drop_off_path": str(drop_off_path) if drop_off_path is not None else None,
         "relative_path": relative_path,
         "filename": filename,
         "ordinal": ordinal,
@@ -810,7 +864,8 @@ async def create_local_batch(
     stored_paths: dict[Path, Path] = {}
     item_ids: dict[Path, str] = {}
     if store_files:
-        _ensure_storage_quota(
+        await _ensure_storage_quota_durable(
+            db=db,
             storage_root=storage_root,
             incoming_bytes=total_source_bytes,
             max_total_bytes=storage_limit,
@@ -918,7 +973,10 @@ async def create_upload_batch(
     cleaned: list[dict[str, Any]] = []
     total_source_bytes = 0
     for idx, file in enumerate(files):
-        filename = str(file.get("filename") or f"upload-{idx + 1}").strip()
+        filename = _safe_upload_filename(
+            str(file.get("filename") or ""),
+            fallback=f"upload-{idx + 1}",
+        )
         data = bytes(file.get("data") or b"")
         ext = Path(filename).suffix.lower()
         if ext not in allowed_exts:
@@ -938,9 +996,10 @@ async def create_upload_batch(
     batch_id = str(uuid.uuid4())
     settings = get_settings()
     normalized_profile = _normalize_profile(profile)
-    storage_root = Path(settings.INGEST_FILE_STORAGE_DIR).expanduser().resolve()
+    storage_root = Path(settings.INGEST_DROP_OFF_DIR).expanduser().resolve()
     storage_limit = int(max_total_bytes or settings.INGEST_FILE_STORAGE_MAX_BYTES)
-    _ensure_storage_quota(
+    await _ensure_storage_quota_durable(
+        db=db,
         storage_root=storage_root,
         incoming_bytes=total_source_bytes,
         max_total_bytes=storage_limit,
@@ -952,16 +1011,16 @@ async def create_upload_batch(
             int(settings.INGEST_MAX_ACTIVE_JOBS),
         ),
     )
-    batch_storage_dir = storage_root / batch_id
+    batch_storage_dir = storage_root / corpus_id / "uploads" / batch_id
     batch_storage_dir.mkdir(parents=True, exist_ok=False)
     try:
+        reserved_names: set[str] = set()
         for file in cleaned:
             item_id = str(uuid.uuid4())
-            stored_path = _storage_path_for_item(
-                storage_root,
-                batch_id,
-                item_id,
+            stored_path = _unique_drop_off_path(
+                batch_storage_dir,
                 file["filename"],
+                reserved=reserved_names,
             )
             stored_path.write_bytes(file["data"])
             file["item_id"] = item_id
@@ -975,7 +1034,9 @@ async def create_upload_batch(
         "corpus_id": corpus_id,
         "user_id": user_id,
         "source": SOURCE_BROWSER_UPLOAD,
-        "root_path": None,
+        "root_path": str(batch_storage_dir),
+        "drop_off_dir": str(batch_storage_dir),
+        "drop_off_relative_dir": str(Path(corpus_id) / "uploads" / batch_id),
         "recursive": False,
         "extensions": sorted({Path(file["filename"]).suffix.lower() for file in cleaned}),
         "max_files": len(cleaned),
@@ -1024,6 +1085,7 @@ async def create_upload_batch(
                 relative_path=file["filename"],
                 filename=file["filename"],
                 source_path=file["filename"],
+                drop_off_path=file["stored_path"],
             )
             for idx, file in enumerate(cleaned)
         ],
@@ -1156,7 +1218,8 @@ async def append_new_files_to_batch(
     item_ids: dict[Path, str] = {}
     copied_paths: list[Path] = []
     if store_files:
-        _ensure_storage_quota(
+        await _ensure_storage_quota_durable(
+            db=db,
             storage_root=storage_root,
             incoming_bytes=incoming_bytes,
             max_total_bytes=storage_limit,

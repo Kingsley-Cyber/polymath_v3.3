@@ -1259,6 +1259,13 @@ class Settings(BaseSettings):
             "store_files=true."
         ),
     )
+    INGEST_DROP_OFF_DIR: str = Field(
+        default="/data/ingest-drop-off",
+        description=(
+            "Host-visible durable drop-off used by browser Quick Upload batches. "
+            "Original filenames are preserved under a per-corpus, per-batch path."
+        ),
+    )
     INGEST_FILE_STORAGE_MAX_BYTES: int = Field(
         default=2 * 1024 * 1024 * 1024,
         ge=1,

@@ -150,7 +150,15 @@ class FunnelA:
             models.FieldCondition(
                 key="chunk_kind",
                 match=models.MatchAny(any=list(NOISY_KINDS)),
-            )
+            ),
+            # Legacy placeholder points copied the parent text into the summary
+            # lane without a model/provenance stamp. Missing fields still pass
+            # for old imported corpora; an explicit empty value is the durable
+            # placeholder marker written by this repository.
+            models.FieldCondition(
+                key="summary_model",
+                match=models.MatchValue(value=""),
+            ),
         ]
 
         query_filter = models.Filter(must=must_conditions, must_not=must_not_conditions)

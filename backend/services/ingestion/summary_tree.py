@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Sequence
 
@@ -112,12 +113,23 @@ async def index_summary_tree_nodes(
     ]
     if not entries:
         return {"indexed": 0, "eligible": 0}
+    rollups = {
+        str(row.get("node_id") or ""): row
+        for row in entries
+        if str(row.get("node_type") or "") == "rollup"
+    }
+    for row in entries:
+        if str(row.get("node_type") or "") != "section":
+            continue
+        child_ids = [
+            str(value) for value in (row.get("child_node_ids") or []) if str(value)
+        ]
+        if len(child_ids) != 1 or child_ids[0] not in rollups:
+            continue
+        child = rollups[child_ids[0]]
+        row["passthrough_rollup_id"] = child_ids[0]
+        row["passthrough_parent_ids"] = list(child.get("parent_ids") or [])
     if db is not None:
-        rollups = {
-            str(row.get("node_id") or ""): row
-            for row in entries
-            if str(row.get("node_type") or "") == "rollup"
-        }
         all_parent_ids = sorted(
             {
                 str(parent_id)
@@ -186,6 +198,8 @@ async def index_summary_tree_nodes(
                     for lexicon_id in lexicon_by_rollup.get(str(child_id), [])
                 )
             )[:96]
+            if row.get("passthrough_rollup_id"):
+                row["passthrough_lexicon_ids"] = list(row.get("lexicon_ids") or [])
     config = _config_dict(embedding_config)
     embedding_call = embed_fn or embed_queries
     batch_size = max(1, min(int(batch_size or 128), 256))
@@ -230,8 +244,18 @@ async def index_summary_tree_nodes(
 
 
 # ── pure structure ──────────────────────────────────────────────────────────
+_PAGE_HEADING_RE = re.compile(
+    r"^(?:page|p\.?)[\s_-]*(?:\d+|[ivxlcdm]+)(?:\s*(?:of|/)\s*\d+)?$",
+    re.IGNORECASE,
+)
+
+
 def _top_heading(p: ParentSummaryIn) -> str:
     return p.heading_path[0] if p.heading_path else "(untitled)"
+
+
+def _is_page_heading(value: str) -> bool:
+    return bool(_PAGE_HEADING_RE.fullmatch(" ".join(str(value or "").split())))
 
 
 def group_by_section(
@@ -240,8 +264,16 @@ def group_by_section(
     """Group CONSECUTIVE parents by top-level heading (document order kept —
     a heading that reappears later starts a new group, preserving structure)."""
     groups: list[tuple[str, list[ParentSummaryIn]]] = []
+    active_heading = "(untitled)"
     for p in parents:
         h = _top_heading(p)
+        # Parser-emitted page labels are pagination, not semantic structure.
+        # Inherit the last real heading so one PDF does not become thousands of
+        # one-rollup sections.
+        if _is_page_heading(h):
+            h = active_heading
+        else:
+            active_heading = h
         if groups and groups[-1][0] == h:
             groups[-1][1].append(p)
         else:

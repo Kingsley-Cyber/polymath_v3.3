@@ -848,7 +848,8 @@ export function CorpusDetail({
       setLocalBatch(batch);
       setShowLocalBatch(true);
       setRetryHint(
-        `Quick upload batch ${batch.batch_id.slice(0, 8)} started for ${batch.total} file(s).`,
+        `Quick upload batch ${batch.batch_id.slice(0, 8)} started for ${batch.total} file(s). ` +
+          `Drop-off: ${batch.drop_off_relative_dir ?? batch.drop_off_dir ?? "durable upload storage"}.`,
       );
       await loadDocuments();
     } catch (err) {

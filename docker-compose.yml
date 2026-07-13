@@ -473,6 +473,8 @@ services:
       - "${POLYMATH_MODELS_ROOT:-C:/PolymathRuntime/models}:/models:ro"
       - "${POLYMATH_DOCKER_DATA_ROOT:-C:/PolymathRuntime}/volumes/hf-cache:/home/appuser/.cache/huggingface"
       - "${POLYMATH_DOCKER_DATA_ROOT:-C:/PolymathRuntime}/volumes/ingest-files:/data/ingest-files"
+      # Browser Quick Uploads remain visible and auditable on the host.
+      - "${POLYMATH_DOCKER_DATA_ROOT:-C:/PolymathRuntime}/volumes/ingest-drop-off:/data/ingest-drop-off"
       # Durable backend-owned folder ingest reads from this host directory.
       # In the UI, paths under the mounted host root appear as /ingest-source/...
       - "${POLYMATH_INGEST_SOURCE_ROOT:-C:/PolymathRuntime/ingest-source}:/ingest-source:ro"
@@ -665,6 +667,7 @@ services:
       GRAPH_CACHE_WARMUP_SKIP_DURING_ACTIVE_INGEST: ${GRAPH_CACHE_WARMUP_SKIP_DURING_ACTIVE_INGEST:-true}
       GRAPH_CACHE_WARMUP_ACTIVE_INGEST_DEFER_SECONDS: ${GRAPH_CACHE_WARMUP_ACTIVE_INGEST_DEFER_SECONDS:-120}
       INGEST_FILE_STORAGE_DIR: ${INGEST_FILE_STORAGE_DIR:-/data/ingest-files}
+      INGEST_DROP_OFF_DIR: ${INGEST_DROP_OFF_DIR:-/data/ingest-drop-off}
       INGEST_FILE_STORAGE_MAX_BYTES: ${INGEST_FILE_STORAGE_MAX_BYTES:-2147483648}
     depends_on:
       mongodb:

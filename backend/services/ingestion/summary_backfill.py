@@ -243,10 +243,10 @@ async def index_existing(corpus_id: str, *, batch: int = 256) -> dict:
                 {**p, "retrieval_text": summary_index_text(p)} for p in buf
             ]
             vecs = await _embed([p["retrieval_text"] for p in payloads])
-            await upsert_summaries(
+            written = await upsert_summaries(
                 qc, corpus_id, payloads, vecs, target_kinds=["naive", "hrag"]
             )
-            indexed += len(buf)
+            indexed += written
             print(f"  indexed {indexed}/{total}")
             buf.clear()
 
@@ -478,14 +478,14 @@ async def repair_existing(
             return
         if qc is not None:
             vecs = await _embed([p["retrieval_text"] for p in reindex_buf])
-            await upsert_summaries(
+            written = await upsert_summaries(
                 qc,
                 corpus_id,
                 reindex_buf,
                 vecs,
                 target_kinds=["naive", "hrag"],
             )
-            indexed += len(reindex_buf)
+            indexed += written
         reindex_buf = []
 
     try:

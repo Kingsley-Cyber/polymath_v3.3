@@ -618,6 +618,23 @@ def _content_phrase_facets(text: str, *, limit: int) -> list[tuple[str, float]]:
     return out
 
 
+def _specific_content_alias(facet_id: str, alias: str) -> bool:
+    """Reject broad one-word aliases that stamp unrelated document metadata.
+
+    Multiword phrases carry enough context for deterministic matching. A
+    single word is accepted only when it is the canonical facet name or a
+    protected technical acronym. Corpus-derived phrase mining remains the
+    general fallback, so this gate removes query-shaped trigger pollution
+    without introducing another hand-maintained denylist.
+    """
+
+    words = _split_words(alias)
+    if len(words) != 1:
+        return bool(words)
+    token = words[0]
+    return token in _PROTECTED_ACRONYMS or normalize_facet_id(token) == facet_id
+
+
 def _content_facets(
     *,
     text: Any,
@@ -643,6 +660,8 @@ def _content_facets(
     for facet_id, aliases in _CONTENT_FACET_ALIASES.items():
         matched = False
         for alias in aliases:
+            if not _specific_content_alias(facet_id, alias):
+                continue
             alias_norm = _match_haystack(alias)
             if not alias_norm:
                 continue

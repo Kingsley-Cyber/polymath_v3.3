@@ -37,6 +37,7 @@ from models.schemas import RetrievalResult, RetrievalTier, SourceChunk, SourceFa
 from services.cache_util import TTLCache, hash_key
 from services.embedder import embed_queries, embed_query
 from services.reranker import reranker_service
+from services.text_quality import is_separator_only_text
 from services.retriever.document_anchor import document_anchor_retriever
 from services.retriever.funnel_a import funnel_a
 from services.retriever.funnel_b import funnel_b
@@ -2945,6 +2946,19 @@ class RetrieverOrchestrator:
                     }
                 )
         fused, hydrated_duplicate_count = dedupe_cross_corpus_evidence(fused)
+        separator_only_count = sum(
+            1 for chunk in fused if is_separator_only_text(chunk.text)
+        )
+        if separator_only_count:
+            fused = [
+                chunk
+                for chunk in fused
+                if not is_separator_only_text(chunk.text)
+            ]
+        fusion_diagnostics["structural_noise_filter"] = {
+            "separator_only_dropped": separator_only_count,
+            "remaining_candidates": len(fused),
+        }
         reranker_diagnostics: dict[str, Any]
         if rerank_enabled and fused:
             try:

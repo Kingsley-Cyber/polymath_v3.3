@@ -4,6 +4,7 @@ from services.ingestion_service import IngestionService
 from services.storage.mongo_writer import delete_corpus
 from services.storage.mongo_writer import (
     replace_relation_support_for_document,
+    retire_corpus_derived_state,
     retire_document_derived_state,
 )
 from services.storage.record_status import (
@@ -68,6 +69,19 @@ class _FakeCollection:
     async def delete_many(self, query):
         self.delete_many_calls.append(query)
         return _UpdateResult()
+
+
+class _RecoverableCorpusCollection(_FakeCollection):
+    def __init__(self, rows):
+        super().__init__()
+        self.rows = list(rows)
+        self.find_one_and_update_calls = []
+
+    async def find_one_and_update(self, query, update, **kwargs):
+        self.find_one_and_update_calls.append((query, update, kwargs))
+        if not self.rows:
+            return None
+        return self.rows.pop(0)
 
 
 class _FakeDb:
@@ -165,6 +179,32 @@ async def test_retire_document_derived_state_clears_tree_and_retires_jobs():
 
 
 @pytest.mark.asyncio
+async def test_retire_corpus_derived_state_clears_tree_and_retires_all_jobs():
+    names = [
+        "summary_tree",
+        "source_parse_jobs",
+        "document_pipeline_jobs",
+        "extraction_jobs",
+        "summary_jobs",
+        "graph_promotion_jobs",
+        "ingest_batch_items",
+    ]
+    db = _FakeDb({name: _FakeCollection() for name in names})
+
+    await retire_corpus_derived_state(db, corpus_id="corpus-1")
+
+    assert db["summary_tree"].delete_many_calls == [{"corpus_id": "corpus-1"}]
+    for name in names[1:-1]:
+        query, update = db[name].update_many_calls[0]
+        assert query == {"corpus_id": "corpus-1", "status": {"$ne": "superseded"}}
+        assert update["$set"]["status"] == "superseded"
+        assert update["$set"]["reason"] == "corpus_deleted"
+    assert db["ingest_batch_items"].update_many_calls[0][0] == {
+        "corpus_id": "corpus-1"
+    }
+
+
+@pytest.mark.asyncio
 async def test_background_purge_finalizes_corpus_when_chunk_cleanup_fails():
     service = IngestionService()
     corpora = _FakeCollection()
@@ -187,3 +227,23 @@ async def test_background_purge_finalizes_corpus_when_chunk_cleanup_fails():
     assert tombstone_update["$unset"] == {"deleting_at": ""}
     assert cleanup_update["$set"]["cleanup_status"] == "partial"
     assert cleanup_update["$set"]["cleanup_warnings"][0]["stage"] == "mongo_chunks"
+    assert cleanup_update["$unset"]["cleanup_owner"] == ""
+    assert "cleanup_retry_at" in cleanup_update["$set"]
+
+
+@pytest.mark.asyncio
+async def test_pending_corpus_purge_is_claimed_from_durable_state(monkeypatch):
+    service = IngestionService()
+    corpora = _RecoverableCorpusCollection([{"corpus_id": "corpus-1"}, None])
+    service._db = _FakeDb({"corpora": corpora})
+    scheduled = []
+    monkeypatch.setattr(service, "_start_corpus_purge_task", scheduled.append)
+
+    recovered = await service.recover_pending_corpus_purges(limit=4)
+
+    assert recovered == 1
+    assert scheduled == ["corpus-1"]
+    _query, update, kwargs = corpora.find_one_and_update_calls[0]
+    assert update["$set"]["cleanup_owner"] == service._cleanup_owner
+    assert update["$set"]["cleanup_status"] == "running"
+    assert kwargs["projection"] == {"corpus_id": 1, "_id": 0}

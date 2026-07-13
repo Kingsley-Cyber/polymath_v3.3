@@ -2985,7 +2985,7 @@ async def _write_qdrant_summaries_for_doc(
         for kind in config.target_qdrant_collections
         if kind in ("naive", "hrag")
     ]
-    await qdrant_writer.upsert_summaries(
+    written = await qdrant_writer.upsert_summaries(
         qdrant_client,
         corpus_id,
         summary_payloads,
@@ -2993,7 +2993,7 @@ async def _write_qdrant_summaries_for_doc(
         summary_kinds,
         sparse_vectors=summary_sparse,
     )
-    return len(summaries)
+    return written
 
 
 async def _write_qdrant_for_doc(

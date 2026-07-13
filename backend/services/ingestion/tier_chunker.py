@@ -27,6 +27,7 @@ from models.schemas import SourceTier
 from services.ingestion.b_plus_normalizer import InjectedHeader  # re-exported for worker
 from services.ingestion.section_classifier import ChunkKind, classify_chunk
 from services.ingestion import code_splitter
+from services.text_quality import is_separator_only_text
 
 
 def _embedder_safe_max_tokens() -> int:
@@ -1154,7 +1155,7 @@ def _make_children(
     )
     children: list[ChildChunk] = []
     for ct in texts:
-        if not ct.strip():
+        if not ct.strip() or is_separator_only_text(ct):
             continue
         children.append(
             ChildChunk(
