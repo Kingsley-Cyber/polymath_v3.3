@@ -128,6 +128,7 @@ Tracked work added by this audit:
 - P0.5 gains: strip corpus-lens-inherited facets that lack per-document
   content evidence (measure facet DF per corpus; a lens category is not
   evidence every document teaches it), then backfill cleaned facet payloads.
+  **[IN CODE — wave1/p05, pending merge]**
 - P0.2/P2.1 gain: populate `summary_tree.concepts` at construction (the
   field exists but is never passed) and backfill from parent
   mechanisms/key_terms; persist the lexicon joins on Mongo tree rows so the
