@@ -125,7 +125,11 @@ def test_ingest_facet_profile_places_doc_parent_and_child_facets():
 
     assert profile["schema_version"] == FACET_SCHEMA_VERSION
     assert profile["primary_facet_id"] == "on_device_llm_architecture"
-    assert "local_ai_architecture" in profile["facet_ids"]
+    # P0.5: lens-derived facets attach only with per-document content
+    # evidence. "retrieval_augmented_generation" is evidenced (child heading
+    # and text); "local_ai_architecture" appears nowhere in the content, so
+    # the corpus-lens category no longer stamps the document.
+    assert "local_ai_architecture" not in profile["facet_ids"]
     assert "retrieval_augmented_generation" in profile["facet_ids"]
 
     parent_rows = _build_parent_dicts(
@@ -259,12 +263,14 @@ def test_broad_single_words_do_not_stamp_handwritten_content_facets():
 
 @pytest.mark.asyncio
 async def test_matching_ingest_facets_finds_query_named_doc_facets():
+    # P0.5: a lens family needs per-document content evidence to attach, so
+    # this document carries a heading that actually teaches the category.
     profile = build_ingest_facet_profile(
         filename="Evidence-Centered_Assessment_Design_Layers.pdf.md",
         doc_id="doc-eca",
         corpus_id="corpus-1",
         schema_lens={"canonical_families": ["psychometric_assessment"]},
-        parents=[],
+        parents=[_parent(heading_path=["Psychometric Assessment"])],
         children=[],
     )
     db = _Db(

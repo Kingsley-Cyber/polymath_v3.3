@@ -496,6 +496,17 @@ def _schema_lens_facets(schema_lens: dict[str, Any] | None, doc_ref: dict[str, A
     return rows
 
 
+def schema_lens_facet_ids(schema_lens: dict[str, Any] | None) -> list[str]:
+    """Return the facet ids a corpus schema lens would stamp on a document.
+
+    Exposed so audit/backfill tooling (e.g. scripts/p0_5_facet_decontamination)
+    can classify stored rows with the exact production lens-to-facet mapping
+    instead of re-deriving it.
+    """
+
+    return [row["facet_id"] for row in _schema_lens_facets(schema_lens, {})]
+
+
 def _heading_facets(chunks: list[Any], doc_ref: dict[str, Any]) -> list[dict[str, Any]]:
     counts: Counter[str] = Counter()
     raw_by_key: dict[str, Any] = {}
@@ -724,24 +735,55 @@ def _merge_chunk_semantic_facets(
     return semantic
 
 
+def heading_local_facet_ids(heading_path: list[Any] | None) -> list[str]:
+    """Return the facet ids a row earns from its own first two headings.
+
+    Headings are the row's own content, so these ids count as per-content
+    evidence when deciding whether a corpus-lens-derived facet may attach.
+    Shared with scripts/p0_5_facet_decontamination so stored rows are
+    classified with the exact ingestion mapping.
+    """
+
+    labels = [_compact_label(h, max_words=8) for h in (heading_path or [])[:2]]
+    return [normalize_facet_id(label) for label in labels if label]
+
+
 def _chunk_facets(
     chunk: Any,
     doc_facet_ids: list[str],
     *,
     content_text: Any = None,
     content_source: str = "chunk_text",
+    lens_facet_ids: set[str] | None = None,
 ) -> dict[str, Any]:
-    heading_labels = [_compact_label(h, max_words=8) for h in (getattr(chunk, "heading_path", None) or [])[:2]]
-    local_ids = [normalize_facet_id(label) for label in heading_labels if label]
-    facet_ids = list(dict.fromkeys([*local_ids, *doc_facet_ids[:6]]))[:8]
-    facet_text = " ".join(fid.replace("_", " ") for fid in facet_ids)
+    local_ids = heading_local_facet_ids(getattr(chunk, "heading_path", None))
+    lens_ids = set(lens_facet_ids or ())
+    inheritable = [fid for fid in doc_facet_ids[:6] if fid not in lens_ids]
+    provisional_ids = list(dict.fromkeys([*local_ids, *inheritable]))[:8]
     text_for_facets = content_text if content_text not in (None, "") else getattr(chunk, "text", "")
     content_meta = _content_facets(
         text=text_for_facets,
         heading_path=getattr(chunk, "heading_path", None) or [],
         source=content_source,
-        existing_ids=facet_ids,
+        existing_ids=provisional_ids,
     )
+    # Corpus-lens-derived doc facets do not blanket-inherit: they attach to
+    # this row only when the row shows its own per-content evidence for them
+    # (its own headings or its own mined content facets).
+    row_evidence = {*local_ids, *(content_meta.get("content_facet_ids") or [])}
+    facet_ids = list(
+        dict.fromkeys(
+            [
+                *local_ids,
+                *(
+                    fid
+                    for fid in doc_facet_ids[:6]
+                    if fid not in lens_ids or fid in row_evidence
+                ),
+            ]
+        )
+    )[:8]
+    facet_text = " ".join(fid.replace("_", " ") for fid in facet_ids)
     return {
         "facet_ids": facet_ids,
         "facet_text": facet_text,
@@ -823,16 +865,23 @@ def build_ingest_facet_profile(
     rows: list[dict[str, Any]] = []
     if primary:
         rows.append(primary)
-    rows.extend(_schema_lens_facets(schema_lens, doc_ref))
-    rows.extend(_heading_facets([*(parents or []), *(children or [])], doc_ref))
-    rows.extend(
-        _document_content_facet_rows(
-            doc_ref=doc_ref,
-            parents=parents or [],
-            children=children or [],
-            summaries=summaries or [],
-        )
+    heading_rows = _heading_facets([*(parents or []), *(children or [])], doc_ref)
+    content_rows = _document_content_facet_rows(
+        doc_ref=doc_ref,
+        parents=parents or [],
+        children=children or [],
+        summaries=summaries or [],
     )
+    lens_rows = _schema_lens_facets(schema_lens, doc_ref)
+    lens_facet_ids = {row["facet_id"] for row in lens_rows}
+    # A lens category is not evidence that this document teaches it. The
+    # corpus-level lens record itself stays untouched; a lens-derived facet id
+    # attaches to this document only when the document's own content (its
+    # headings or mined content facets) shows evidence for it.
+    doc_content_evidence = {row["facet_id"] for row in [*heading_rows, *content_rows]}
+    rows.extend(row for row in lens_rows if row["facet_id"] in doc_content_evidence)
+    rows.extend(heading_rows)
+    rows.extend(content_rows)
     doc_facets = _dedupe_facets(rows)
     doc_facet_ids = [row["facet_id"] for row in doc_facets]
     doc_facet_text = " ".join(
@@ -856,6 +905,7 @@ def build_ingest_facet_profile(
                 if summary_by_parent.get(str(p.parent_id))
                 else "parent_text"
             ),
+            lens_facet_ids=lens_facet_ids,
         )
         for p in (parents or [])
         if getattr(p, "parent_id", None)
@@ -866,6 +916,7 @@ def build_ingest_facet_profile(
             doc_facet_ids,
             content_text=getattr(c, "text", ""),
             content_source="child_text",
+            lens_facet_ids=lens_facet_ids,
         )
         for c in (children or [])
         if getattr(c, "chunk_id", None)
