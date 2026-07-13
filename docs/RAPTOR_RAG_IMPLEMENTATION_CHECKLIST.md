@@ -132,6 +132,7 @@ Tracked work added by this audit:
   field exists but is never passed) and backfill from parent
   mechanisms/key_terms; persist the lexicon joins on Mongo tree rows so the
   durable hierarchy is not thinner than its Qdrant projection.
+  **[IN CODE — wave1/tree, pending merge]**
 - P2.1 gains: deterministic bibliographic capture/backfill (author, title,
   date, language from front matter where parseable), temporal validity
   fields (published_at / temporal_scope) on documents and cards, and a
@@ -309,6 +310,7 @@ Acceptance:
 - [x] Add deterministic singleton section passthrough IDs.
 - [x] Skip duplicate rollup search when a new section has one passthrough child.
 - [ ] Backfill passthrough payloads for existing one-child section points.
+  **[IN CODE — wave1/tree, pending merge]**
 - [ ] Decide whether future singleton sections should be physically omitted or
   retained as aliases for stable IDs.
 - [ ] Measure section/rollup storage and query round trips after migration.

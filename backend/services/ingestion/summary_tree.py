@@ -22,12 +22,53 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Sequence
 
 from services.ingestion.section_classifier import should_summarize_parent
+from services.ingestion.summary_semantics import _snake
 
 ROLLUP_WINDOW_MIN = 12
 ROLLUP_WINDOW_MAX = 20
 PROFILE_MAX_SECTIONS = 8
 PROFILE_MAX_CONCEPTS = 12
+NODE_CONCEPTS_CAP = 16
 TREE_SCHEMA_VERSION = "polymath.summary_tree.v1"
+
+# Parent-row fields whose union defines a node's deterministic concepts
+# (checklist P0.2/P2.1 — populate `summary_tree.concepts` at construction).
+CONCEPT_SOURCE_FIELDS = ("key_terms", "mechanisms", "concept_tags")
+
+
+def derive_node_concepts(parent_rows: list[dict], cap: int = NODE_CONCEPTS_CAP) -> list[str]:
+    """Deterministic node concepts — pure Python, zero LLM (owner directive).
+
+    Union of each row's ``key_terms`` + ``mechanisms`` + ``concept_tags``,
+    snake_case-normalized (shared ``summary_semantics._snake``), deduped
+    per row (so frequency = number of rows carrying the concept), capped at
+    ``cap``, ordered frequency-desc then alphabetically (``top_terms`` order).
+
+    Rollup nodes derive from their member parent rows; section/document
+    nodes union their children's already-derived concepts by passing them
+    back through this helper as ``{"concept_tags": child.concepts}`` rows.
+    """
+    counts: dict[str, int] = {}
+    for row in parent_rows or []:
+        if not isinstance(row, dict):
+            continue
+        seen: set[str] = set()
+        for field_name in CONCEPT_SOURCE_FIELDS:
+            for value in row.get(field_name) or []:
+                if value is None or isinstance(value, (bool, dict, list, tuple)):
+                    continue
+                concept = _snake(str(value))
+                if concept and concept not in seen:
+                    seen.add(concept)
+                    counts[concept] = counts.get(concept, 0) + 1
+    if cap <= 0:
+        return []
+    return top_terms(counts, int(cap))
+
+
+def _child_concept_rows(children: Sequence[Any]) -> list[dict]:
+    """Adapt derived child concepts into ``derive_node_concepts`` rows."""
+    return [{"concept_tags": list(child.concepts or ())} for child in children]
 
 LlmFn = Callable[[str], Awaitable[str]]
 TreeEmbedFn = Callable[[list[str], dict[str, Any] | None], Awaitable[list[list[float]]]]
@@ -415,6 +456,7 @@ async def build_tree(
                 corpus_id=corpus_id,
                 parent_ids=[p.parent_id for p in win],
                 section_range=heading,
+                concepts=derive_node_concepts(_child_concept_rows(win)),
             )
             r_idx += 1
             body = "\n".join(f"- {p.summary}" for p in win)
@@ -432,6 +474,7 @@ async def build_tree(
             corpus_id=corpus_id,
             child_node_ids=[r.node_id for r in rollups],
             section_range=heading,
+            concepts=derive_node_concepts(_child_concept_rows(rollups)),
         )
         nodes.extend(rollups)
         sections.append(sec)
@@ -478,7 +521,7 @@ async def build_tree(
         child_node_ids=[s.node_id for s in sections],
         section_range=title,
         domains=domains,
-        concepts=top_terms(concepts, PROFILE_MAX_CONCEPTS),
+        concepts=derive_node_concepts(_child_concept_rows(sections)),
     )
     profile.summary = await _gen(
         llm_fn,
@@ -677,6 +720,9 @@ async def build_and_store_tree(
                 "text": 1,
                 "child_ids": 1,
                 "source_child_ids": 1,
+                "key_terms": 1,
+                "mechanisms": 1,
+                "concept_tags": 1,
             },
         )
         .sort("parent_id", 1)
@@ -775,6 +821,11 @@ async def build_and_store_tree(
                 }
                 r["summary"] = artifact["summary"]
                 r["domain"] = domain
+                # Mirror the persisted concept-source fields in-memory so a
+                # just-healed parent contributes node concepts this same run.
+                r["key_terms"] = update_fields["key_terms"]
+                r["mechanisms"] = update_fields["mechanisms"]
+                r["concept_tags"] = update_fields["concept_tags"]
                 await db["parent_chunks"].update_one(
                     {"corpus_id": corpus_id, "parent_id": r["parent_id"]},
                     {"$set": update_fields},
@@ -787,6 +838,7 @@ async def build_and_store_tree(
             summary=str(r.get("summary") or ""),
             heading_path=tuple(r.get("heading_path") or ()),
             domain=str(r.get("domain") or ""),
+            concepts=tuple(derive_node_concepts([r])),
         )
         for r in summary_rows
     ]
