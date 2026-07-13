@@ -1,0 +1,280 @@
+{
+  "captured_at": "2026-07-13T02:52:08Z",
+  "git_commit": "d3159b816460f1e0b0830f6682cbcb30aa0675de",
+  "corpora": [
+    {
+      "corpus_id": "f8a0aa85-6cb4-4f64-a973-f9183f1546bb",
+      "name": "authentic_library",
+      "status": "deleted",
+      "cleanup_status": "running"
+    },
+    {
+      "corpus_id": "29313790-1212-450a-8a9d-3c54c51888c7",
+      "name": "vllm_quality_control_20260705_091326",
+      "status": "deleted"
+    },
+    {
+      "corpus_id": "999b5934-272e-4f20-a538-b5d422249a05",
+      "name": "polymath_v2"
+    },
+    {
+      "corpus_id": "5903e8bc-6a9b-414a-a772-da4249fd5e3c",
+      "name": "e1_probe_20",
+      "status": "deleted"
+    },
+    {
+      "corpus_id": "2011e31b-7e2e-44bc-a10f-4b8c484c68cb",
+      "name": "cloud_rtx_canary_2files",
+      "status": "deleted"
+    },
+    {
+      "corpus_id": "1d43101e-a352-48cf-a49b-697bb6fb8594",
+      "name": "cloud_rtx_canary_2files_patch_verify",
+      "status": "deleted"
+    },
+    {
+      "corpus_id": "f11b9af7-fe6c-4d7b-855e-0717c434890f",
+      "name": "cloud_rtx_canary_balanced_route_b5638331",
+      "status": "deleted"
+    },
+    {
+      "corpus_id": "9a07ca49-c28a-4e14-961e-ee3a95cb4361",
+      "name": "cloud_rtx_canary_post_lifecycle_20260708_020232",
+      "status": "deleted"
+    },
+    {
+      "corpus_id": "e9fc1a1f-7ef7-4950-9454-e0eb2c2feca1",
+      "name": "cloud_rtx_lifecycle_hold_canary_20260708_022058",
+      "status": "deleted"
+    },
+    {
+      "corpus_id": "5a20bc21-95df-42c2-80c8-f927b4e83904",
+      "name": "markbuildsbrands_transcripts",
+      "status": "active"
+    },
+    {
+      "corpus_id": "fd460347-61cc-4358-87fc-4b2a80533f0a",
+      "name": "ecommerce_AI_FILM_SCHOOL",
+      "status": "active"
+    },
+    {
+      "corpus_id": "bcf80054-7611-47d0-ae16-fa7fed259b13",
+      "name": "UGO_CORPUS",
+      "status": "active"
+    }
+  ],
+  "qdrant_collections": {
+    "corpus_16a5694b_graph": 0,
+    "corpus_16a5694b_hrag": 0,
+    "corpus_16a5694b_naive": 0,
+    "corpus_16a5694b_schemas": 0,
+    "corpus_1d43101e_graph": 0,
+    "corpus_1d43101e_hrag": 0,
+    "corpus_1d43101e_naive": 0,
+    "corpus_1d43101e_schemas": 0,
+    "corpus_2011e31b_graph": 0,
+    "corpus_2011e31b_hrag": 0,
+    "corpus_2011e31b_naive": 0,
+    "corpus_2011e31b_schemas": 0,
+    "corpus_29313790_graph": 0,
+    "corpus_29313790_hrag": 0,
+    "corpus_29313790_naive": 0,
+    "corpus_29313790_schemas": 0,
+    "corpus_5903e8bc_graph": 0,
+    "corpus_5903e8bc_hrag": 0,
+    "corpus_5903e8bc_naive": 0,
+    "corpus_5903e8bc_schemas": 0,
+    "corpus_5a20bc21_graph": 3687,
+    "corpus_5a20bc21_hrag": 4344,
+    "corpus_5a20bc21_naive": 4344,
+    "corpus_5a20bc21_schemas": 2490,
+    "corpus_7c8ec461_hrag": 4763,
+    "corpus_999b5934_graph": 222783,
+    "corpus_999b5934_hrag": 278284,
+    "corpus_999b5934_naive": 307770,
+    "corpus_999b5934_schemas": 291092,
+    "corpus_9a07ca49_graph": 0,
+    "corpus_9a07ca49_hrag": 0,
+    "corpus_9a07ca49_naive": 0,
+    "corpus_9a07ca49_schemas": 0,
+    "corpus_a42992d0_hrag": 152961,
+    "corpus_a42992d0_schemas": 44,
+    "corpus_bcf80054_graph": 659,
+    "corpus_bcf80054_hrag": 861,
+    "corpus_bcf80054_naive": 861,
+    "corpus_bcf80054_schemas": 44,
+    "corpus_e9fc1a1f_graph": 0,
+    "corpus_e9fc1a1f_hrag": 0,
+    "corpus_e9fc1a1f_naive": 0,
+    "corpus_e9fc1a1f_schemas": 0,
+    "corpus_f11b9af7_graph": 0,
+    "corpus_f11b9af7_hrag": 0,
+    "corpus_f11b9af7_naive": 0,
+    "corpus_f11b9af7_schemas": 0,
+    "corpus_f8a0aa85_graph": 0,
+    "corpus_f8a0aa85_hrag": 0,
+    "corpus_f8a0aa85_naive": 0,
+    "corpus_f8a0aa85_schemas": 0,
+    "corpus_fd460347_graph": 55774,
+    "corpus_fd460347_hrag": 65149,
+    "corpus_fd460347_naive": 65149,
+    "corpus_fd460347_schemas": 45949,
+    "hermes_memories": 608,
+    "mem0migrations": 0,
+    "polymath_children": 3,
+    "polymath_doc_summaries": 858
+  },
+  "summary_integrity": {
+    "polymath_v2": {
+      "corpus_id": "999b5934-272e-4f20-a538-b5d422249a05",
+      "summary_points": 84987,
+      "summary_points_empty_model": 67953,
+      "summary_points_noisy_kind": 0,
+      "lexicon_points": 248554,
+      "tier0_doc_cards": 496
+    },
+    "markbuildsbrands_transcripts": {
+      "corpus_id": "5a20bc21-95df-42c2-80c8-f927b4e83904",
+      "summary_points": 657,
+      "summary_points_empty_model": 12,
+      "summary_points_noisy_kind": 0,
+      "lexicon_points": 2042,
+      "tier0_doc_cards": 102
+    },
+    "ecommerce_AI_FILM_SCHOOL": {
+      "corpus_id": "fd460347-61cc-4358-87fc-4b2a80533f0a",
+      "summary_points": 9375,
+      "summary_points_empty_model": 5796,
+      "summary_points_noisy_kind": 0,
+      "lexicon_points": 44114,
+      "tier0_doc_cards": 76
+    },
+    "UGO_CORPUS": {
+      "corpus_id": "bcf80054-7611-47d0-ae16-fa7fed259b13",
+      "summary_points": 202,
+      "summary_points_empty_model": 202,
+      "summary_points_noisy_kind": 0,
+      "lexicon_points": 0,
+      "tier0_doc_cards": 0
+    }
+  },
+  "summary_jobs_by_status": {
+    "superseded": 775,
+    "succeeded": 50522,
+    "queued": 500
+  },
+  "summary_tree": {
+    "by_type": {
+      "section": 21432,
+      "document": 692,
+      "rollup": 23394
+    },
+    "one_child_sections": 20942
+  },
+  "mongo_per_corpus": {
+    "polymath_v2": {
+      "documents": 498,
+      "parent_chunks": 130503,
+      "chunks": 240876,
+      "ghost_b_extractions": 202375,
+      "lexicon_entries": 310024,
+      "lexicon_retrieval_eligible": 248551
+    },
+    "markbuildsbrands_transcripts": {
+      "documents": 103,
+      "parent_chunks": 1015,
+      "chunks": 3791,
+      "ghost_b_extractions": 3836,
+      "lexicon_entries": 2405,
+      "lexicon_retrieval_eligible": 2042
+    },
+    "ecommerce_AI_FILM_SCHOOL": {
+      "documents": 79,
+      "parent_chunks": 10222,
+      "chunks": 56996,
+      "ghost_b_extractions": 56920,
+      "lexicon_entries": 48367,
+      "lexicon_retrieval_eligible": 44114
+    },
+    "UGO_CORPUS": {
+      "documents": 1,
+      "parent_chunks": 203,
+      "chunks": 659,
+      "ghost_b_extractions": 0,
+      "lexicon_entries": 0,
+      "lexicon_retrieval_eligible": 0
+    }
+  },
+  "corpus_readiness": [
+    {
+      "corpus_id": "f8a0aa85-6cb4-4f64-a973-f9183f1546bb",
+      "status": "needs_repair",
+      "schema_version": "corpus_readiness.v1",
+      "computed_at": "2026-07-10T02:39:11.777952Z",
+      "source": "durable_artifacts",
+      "stale": false
+    },
+    {
+      "corpus_id": "fd460347-61cc-4358-87fc-4b2a80533f0a",
+      "status": "fully_enriched",
+      "schema_version": "corpus_readiness.v2",
+      "computed_at": "2026-07-12T16:59:51.580991Z",
+      "source": "durable_artifacts",
+      "stale": false
+    },
+    {
+      "corpus_id": "5a20bc21-95df-42c2-80c8-f927b4e83904",
+      "status": "fully_enriched",
+      "schema_version": "corpus_readiness.v2",
+      "computed_at": "2026-07-12T16:59:44.775356Z",
+      "source": "durable_artifacts",
+      "stale": false
+    },
+    {
+      "corpus_id": "999b5934-272e-4f20-a538-b5d422249a05",
+      "status": "fully_enriched",
+      "schema_version": "corpus_readiness.v2",
+      "computed_at": "2026-07-12T16:59:42.147079Z",
+      "source": "durable_artifacts",
+      "stale": false
+    },
+    {
+      "corpus_id": "bcf80054-7611-47d0-ae16-fa7fed259b13",
+      "status": "graph_pending",
+      "schema_version": "corpus_readiness.v1",
+      "computed_at": "2026-07-11T14:16:02.045486Z",
+      "source": "durable_artifacts",
+      "stale": false
+    }
+  ],
+  "neo4j": {
+    "labels": {
+      "Document": 694,
+      "Chunk": 624698,
+      "Entity": 792832,
+      "Fact": 951607
+    },
+    "per_corpus": {
+      "polymath_v2": {
+        "Chunk": 234234,
+        "Document": 490,
+        "Fact": 284772
+      },
+      "markbuildsbrands_transcripts": {
+        "Chunk": 3687,
+        "Document": 102,
+        "Fact": 2047
+      },
+      "ecommerce_AI_FILM_SCHOOL": {
+        "Chunk": 56323,
+        "Document": 76,
+        "Fact": 16743
+      },
+      "UGO_CORPUS": {
+        "Chunk": 0,
+        "Document": 0,
+        "Fact": 0
+      }
+    }
+  }
+}
