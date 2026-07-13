@@ -236,6 +236,30 @@ class HealthService:
                 )
                 latency = (datetime.utcnow() - start).total_seconds() * 1000
                 if response.status_code == 200:
+                    # P1.8: prefer the sidecar's explicit tri-state readiness
+                    # when present so deployment gates cannot confuse
+                    # model_loaded with inference_ready. Legacy sidecars
+                    # (no `inference_ready` key) keep HTTP-200-means-ok.
+                    try:
+                        payload = response.json()
+                    except ValueError:
+                        payload = None
+                    if isinstance(payload, dict) and "inference_ready" in payload:
+                        if not payload.get("inference_ready"):
+                            warmup = payload.get("warmup")
+                            warmup_error = (
+                                warmup.get("error")
+                                if isinstance(warmup, dict)
+                                else None
+                            )
+                            detail = "embedder not inference-ready (warmup incomplete)"
+                            if warmup_error:
+                                detail = f"{detail}: {warmup_error}"
+                            return ServiceStatus(
+                                status="error",
+                                latency_ms=round(latency, 2),
+                                error=detail,
+                            )
                     return ServiceStatus(status="ok", latency_ms=round(latency, 2))
                 return ServiceStatus(
                     status="error",

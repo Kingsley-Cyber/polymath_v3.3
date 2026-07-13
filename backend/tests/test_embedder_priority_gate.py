@@ -1,18 +1,19 @@
 import asyncio
 import importlib.util
+import os
 from pathlib import Path
 
 import pytest
 
 
 def _load_sidecar_module():
-    path = (
-        Path(__file__).parents[2]
-        / "scripts"
-        / "apple_ml_services"
-        / "embedder_mlx"
-        / "main.py"
+    root = Path(
+        os.environ.get(
+            "SIDECAR_PATH",
+            str(Path(__file__).parents[2] / "scripts" / "apple_ml_services"),
+        )
     )
+    path = root / "embedder_mlx" / "main.py"
     spec = importlib.util.spec_from_file_location("embedder_mlx_priority_test", path)
     module = importlib.util.module_from_spec(spec)
     assert spec and spec.loader
