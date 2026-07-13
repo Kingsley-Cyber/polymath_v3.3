@@ -10,7 +10,7 @@ from .normalizer import (
     canonical_display_name,
     normalize_facet_id,
 )
-from .final_selector import FacetCandidate, select_facet_final
+from .final_selector import FacetCandidate, ShelfReserveContext, select_facet_final
 from .runtime import (
     matching_ingest_facets,
     matching_vector_facets,
@@ -29,4 +29,5 @@ __all__ = [
     "metadata_with_facets",
     "normalize_facet_id",
     "select_facet_final",
+    "ShelfReserveContext",
 ]

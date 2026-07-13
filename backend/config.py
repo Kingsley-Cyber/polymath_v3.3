@@ -389,6 +389,19 @@ class Settings(BaseSettings):
             "coverage repair, and reranking may complete normally."
         ),
     )
+    SHELF_RESERVE_ENABLED: bool = Field(
+        default=False,
+        description=(
+            "P1.5 shelf_reserve: inside the chat-side final selection "
+            "(select_facet_final), reserve at most one role-diverse seat each "
+            "for the best bridge and best counterbalance candidate assigned "
+            "by the librarian shelf-role engine — only for documents already "
+            "in the candidate pool that pass the calibrated P0.3 "
+            "corpus-reservation bound (reservation_policy). Skip beats weak "
+            "fill; scores are never modified. Ships dark (False) pending "
+            "before/after evals."
+        ),
+    )
     QUERY_PLAN_HYBRID_TOTAL_DEADLINE_SECONDS: float = Field(
         default=7.5, ge=2.0, le=30.0
     )

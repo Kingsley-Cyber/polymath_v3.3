@@ -293,6 +293,8 @@ Milestone acceptance:
   *(merged + live-probed 2026-07-13 on the PoC pair: 3 direct / 2 adjacent / 2 bridges with evidence chains / policy-triggered counterbalance; foundational honestly skipped)*
 - [ ] Implement `shelf_reserve` through the calibrated eligibility discipline
   required by P0.3; never mirror the old unconditional corpus-floor behavior.
+  **[IN CODE — wave3/reserve, dark behind SHELF_RESERVE_ENABLED, pending
+  before/after evals]**
 - [ ] Descend reserved documents through tree -> parent -> child evidence.
 - [ ] Require shared mechanisms/principles plus evidence for every Bridge seat.
 - [x] Use versioned misuse/counterbalance policy data, not per-corpus Python
@@ -659,11 +661,14 @@ Acceptance:
 - [x] Deduplicate by document while retaining multiple validated roles, themes,
   and reasons. *(merged + live-probed 2026-07-13 on the PoC pair: 3 direct / 2 adjacent / 2 bridges with evidence chains / policy-triggered counterbalance; foundational honestly skipped)*
 - [ ] Reserve role diversity only when candidates clear relevance/evidence
-  gates.
+  gates. **[IN CODE — wave3/reserve, dark behind SHELF_RESERVE_ENABLED,
+  pending before/after evals]**
 - [x] Skip a role seat when no candidate qualifies; never fill a quota with
   weak evidence. *(merged + live-probed 2026-07-13 on the PoC pair: 3 direct / 2 adjacent / 2 bridges with evidence chains / policy-triggered counterbalance; foundational honestly skipped)*
 - [ ] Return a reading path, not merely a flat chunk list, for librarian-mode
-  questions.
+  questions. **[IN CODE — wave3/reserve (diagnostics seed:
+  meta.shelf_reserve.reading_path), dark behind SHELF_RESERVE_ENABLED,
+  pending before/after evals]**
 
 Acceptance:
 

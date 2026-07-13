@@ -28,6 +28,7 @@ from services.context_manager import context_manager
 from services.conversation import conversation_service
 from services.facets import (
     FacetCandidate,
+    ShelfReserveContext,
     matching_ingest_facets,
     matching_vector_facets,
     metadata_facet_terms,
@@ -3538,6 +3539,128 @@ def _merge_chat_coverage_sources(
     )[:2]
 
 
+# P1.5 shelf_reserve — bounded librarian-card projection for the seat pass:
+# exactly the fields shelf_engine.assign_shelf_roles reads (role fields with
+# their entry-level source_ids) plus the aggregated evidence_spans.
+_SHELF_RESERVE_CARD_PROJECTION = {
+    "_id": 0,
+    "corpus_id": 1,
+    "doc_id": 1,
+    "schema_version": 1,
+    "central_subjects": 1,
+    "candidate_latent_subjects": 1,
+    "capabilities_developed": 1,
+    "mechanisms_taught": 1,
+    "transferable_principles": 1,
+    "evidence_spans": 1,
+}
+_SHELF_RESERVE_MAX_CONCEPTS = 12
+
+
+def _shelf_reserve_query_concepts(
+    query: str,
+    retrieval_diagnostics: dict[str, Any] | None,
+) -> list[str]:
+    """Resolved query concept ids for the P1.5 shelf_reserve seat pass.
+
+    Deterministic source choice (documented per the P1.5 spec):
+
+    1. PRIMARY: ``vocabulary_resolution.matches[].canonical_key`` from the
+       main retrieval's diagnostics — corpus-resolved lexicon ids that share
+       the ``normalize_identity`` keyspace with librarian-card ``value_key``s
+       (librarian cards are seeded from the same corpus lexicon), so this is
+       the exact-join source. Already computed by the retrieval that just
+       ran; no new calls of any kind.
+    2. FALLBACK (no vocabulary matches): ``concept_groups(query)`` keys —
+       the same pure deterministic resolver that seeds the evidence plan.
+
+    No LLM in either path. Bounded at _SHELF_RESERVE_MAX_CONCEPTS.
+    """
+
+    concepts: list[str] = []
+    seen: set[str] = set()
+
+    def _push(value: Any) -> None:
+        text = str(value or "").strip()
+        key = text.lower()
+        if not text or key in seen:
+            return
+        seen.add(key)
+        concepts.append(text)
+
+    diagnostics = retrieval_diagnostics if isinstance(retrieval_diagnostics, dict) else {}
+    vocabulary = (
+        diagnostics.get("vocabulary_resolution")
+        if isinstance(diagnostics.get("vocabulary_resolution"), dict)
+        else {}
+    )
+    for row in vocabulary.get("matches") or []:
+        if isinstance(row, dict):
+            _push(row.get("canonical_key") or row.get("canonical_name"))
+        if len(concepts) >= _SHELF_RESERVE_MAX_CONCEPTS:
+            return concepts
+    if concepts:
+        return concepts
+    for group in concept_groups(query or "", max_groups=8):
+        _push(group.key)
+        if len(concepts) >= _SHELF_RESERVE_MAX_CONCEPTS:
+            break
+    return concepts
+
+
+async def _shelf_reserve_context_for_pool(
+    sources: list[SourceChunk],
+    *,
+    query_concepts: list[str],
+    db: Any = None,
+) -> ShelfReserveContext:
+    """Build the shelf_reserve context for the pooled candidate documents.
+
+    ONE Mongo find on ``librarian_cards`` over the pool's distinct
+    ``(corpus_id, doc_id)`` pairs, slim projection. Failure-tolerant: any
+    Mongo problem degrades to an empty card map, which the selector records
+    as a per-role skip reason — never an exception on the chat path.
+    """
+
+    pairs: dict[str, set[str]] = {}
+    for source in sources or []:
+        doc_id = str(getattr(source, "doc_id", "") or "")
+        corpus_id = str(getattr(source, "corpus_id", "") or "")
+        if doc_id and corpus_id:
+            pairs.setdefault(corpus_id, set()).add(doc_id)
+    context = ShelfReserveContext(
+        query_concepts=list(query_concepts or []),
+        cards_by_doc={},
+        enabled=True,
+    )
+    if db is None:
+        db = getattr(conversation_service, "_db", None)
+    if db is None or not pairs:
+        return context
+    query = {
+        "$or": [
+            {"corpus_id": corpus_id, "doc_id": {"$in": sorted(doc_ids)}}
+            for corpus_id, doc_ids in sorted(pairs.items())
+        ]
+    }
+    try:
+        rows = (
+            await db["librarian_cards"]
+            .find(query, _SHELF_RESERVE_CARD_PROJECTION)
+            .to_list(length=None)
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("shelf_reserve card fetch failed; seat pass degrades: %s", exc)
+        return context
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        key = (str(row.get("corpus_id") or ""), str(row.get("doc_id") or ""))
+        if key[1]:
+            context.cards_by_doc.setdefault(key, row)
+    return context
+
+
 def _select_chat_coverage_sources(
     base_sources: list[SourceChunk],
     support_sources: list[SourceChunk],
@@ -3551,6 +3674,7 @@ def _select_chat_coverage_sources(
     max_per_domain: int | None = None,
     per_doc_cap: int | None = None,
     selected_corpus_ids: list[str] | None = None,
+    shelf_reserve_context: ShelfReserveContext | None = None,
 ) -> tuple[list[SourceChunk], int, dict[str, Any]]:
     max_sources = max(1, int(max_sources or len(base_sources) or 1))
     all_sources = [*base_sources, *support_sources]
@@ -3572,6 +3696,7 @@ def _select_chat_coverage_sources(
         # doc_counts.get(doc_id, 0) >= 0 is always true).
         per_doc_cap=per_doc_cap or (_CHAT_PER_DOC_CAP or None),
         selected_corpus_ids=selected_corpus_ids or [],
+        shelf_reserve_context=shelf_reserve_context,
     )
     actual_support = [
         source
@@ -3701,6 +3826,7 @@ async def _enforce_chat_query_coverage(
     search_mode: str,
     precomputed_facets: list[dict[str, Any]] | None = None,
     support_semaphore: "asyncio.Semaphore | None" = None,
+    shelf_reserve_concepts: list[str] | None = None,
 ) -> tuple[list[SourceChunk], dict[str, Any]]:
     """Add missing query-facet evidence using the same chat retrieval tier.
 
@@ -3967,6 +4093,16 @@ async def _enforce_chat_query_coverage(
     if str(search_mode or "").lower() == "global":
         max_sources = max(max_sources, _GLOBAL_OVERVIEW_BUDGET)
         source_cap = max(int(source_cap or 0), _GLOBAL_OVERVIEW_BUDGET)
+    # P1.5 shelf_reserve (dark behind SHELF_RESERVE_ENABLED): the caller hands
+    # in resolved query concepts only when the flag is on and the request is
+    # corpus-scoped; fetch librarian cards for the pooled documents (one Mongo
+    # find) and pass the context into the final selector's seat pass.
+    shelf_reserve_context: ShelfReserveContext | None = None
+    if shelf_reserve_concepts is not None and settings.SHELF_RESERVE_ENABLED:
+        shelf_reserve_context = await _shelf_reserve_context_for_pool(
+            [*base_sources, *support_sources],
+            query_concepts=shelf_reserve_concepts,
+        )
     merged, added, selector_meta = _select_chat_coverage_sources(
         base_sources,
         support_sources,
@@ -3982,6 +4118,7 @@ async def _enforce_chat_query_coverage(
             else None
         ),
         selected_corpus_ids=corpus_ids or [],
+        shelf_reserve_context=shelf_reserve_context,
     )
     actual_support = [
         source
@@ -7038,6 +7175,16 @@ class ChatOrchestrator:
                 if refined_plan is not None:
                     evidence_plan = refined_plan
             shared_support_semaphore = asyncio.Semaphore(_CHAT_COVERAGE_MAX_CONCURRENCY)
+            # P1.5 shelf_reserve (dark behind SHELF_RESERVE_ENABLED): resolve
+            # deterministic query concept ids ONLY for corpus-scoped requests.
+            # Source choice documented in _shelf_reserve_query_concepts
+            # (vocabulary_resolution canonical keys, concept_groups fallback).
+            shelf_reserve_concepts: list[str] | None = None
+            if settings.SHELF_RESERVE_ENABLED and (request.corpus_ids or []):
+                shelf_reserve_concepts = _shelf_reserve_query_concepts(
+                    request.message,
+                    _plan_diagnostics,
+                )
             evidence_plan_start = perf_counter()
             (
                 (coverage_sources, coverage_meta),
@@ -7065,6 +7212,7 @@ class ChatOrchestrator:
                     search_mode=resolved_mode,
                     precomputed_facets=precomputed_coverage_facets,
                     support_semaphore=shared_support_semaphore,
+                    shelf_reserve_concepts=shelf_reserve_concepts,
                 ),
                 _enforce_evidence_plan_lanes(
                     original_query=request.message,
@@ -7213,6 +7361,14 @@ class ChatOrchestrator:
             retrieval_diagnostics[
                 "answerability_chunk_gate"
             ] = answerability_chunk_gate_meta
+        # P1.5 shelf_reserve: surface the final selector's seat-pass
+        # diagnostics (the reading-path seed) into the retrieval trace
+        # metadata alongside the corpus floor (selection.corpus_floor).
+        _shelf_reserve_meta = (
+            coverage_meta.get("final_selector") or {}
+        ).get("shelf_reserve")
+        if _shelf_reserve_meta:
+            retrieval_diagnostics["shelf_reserve"] = _shelf_reserve_meta
         effective_tier_for_trace = getattr(
             retrieval.effective_tier,
             "value",
