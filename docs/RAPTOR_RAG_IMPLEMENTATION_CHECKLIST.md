@@ -754,7 +754,7 @@ Acceptance:
 - [ ] Add or verify reranker-side priority admission.
 - [ ] Measure whether keepalive provides value after startup warmup.
 - [ ] Evaluate separate ingestion embedder capacity only if contention persists.
-  **[IN CODE — wave2/rpembed, pending merge + endpoint deploy]**
+  *(merged + deployed both accounts (k695blmk52oscm/hlp9h3o4zd0v4d) + live-verified 2026-07-13: dim 1024, dual-account routing works; PROMOTION GATE: local-mxfp8 vs remote-fp cosine = 0.98, so runpod embed mode is approved for whole-corpus/bulk experiments only until a held-out recall A/B clears mixed-source use — never mix embedding sources within one collection)*
 
 Acceptance:
 
