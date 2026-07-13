@@ -134,6 +134,10 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
             db = client[settings.MONGODB_DATABASE]
         settings_service.attach(db)
         config, api_key = await settings_service.get_system_runpod_flash()
+        # P2.7c — multi-account routing. One resolved account is the legacy
+        # pair wrapped as "default"; more than one exercises the dispatcher.
+        accounts = await settings_service.get_system_runpod_flash_accounts()
+        multi_account = len(accounts) > 1
         requested = 1 if args.canary else max(1, int(args.limit or config.benchmark_chunks))
         if args.canary:
             canary_text = (
@@ -164,9 +168,11 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
             "sampled_chunks": len(tasks),
             "eligible_chunks": eligible,
             "eligible_source_bytes": source_bytes,
-            "endpoint_configured": bool(config.endpoint_id.strip()),
+            "endpoint_configured": bool(config.endpoint_id.strip())
+            or any(acct.endpoint_id.strip() for acct, _ in accounts),
             "engine_enabled": bool(config.enabled),
-            "credential_configured": bool(api_key),
+            "credential_configured": bool(api_key)
+            or any(bool(key) for _, key in accounts),
             "model": config.model_id,
             "dispatch": {
                 "chunks_per_request": config.request_batch_size,
@@ -182,18 +188,23 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                 f"requested {requested} benchmark chunks but only sampled {len(tasks)}"
             )
 
-        started = time.perf_counter()
-        report = await extract_entities(
-            tasks,
-            schema=SchemaContext(
+        extract_kwargs: dict[str, Any] = {
+            "schema": SchemaContext(
                 entity_schema=list(UNIVERSAL_ENTITY_SCHEMA),
                 relation_schema=list(UNIVERSAL_RELATION_SCHEMA),
                 strict="soft",
             ),
-            runpod_config=config,
-            runpod_api_key=api_key,
-            return_report=True,
-        )
+            "runpod_config": config,
+            "return_report": True,
+        }
+        if multi_account:
+            # Route across every enabled account (least-in-flight dispatch).
+            extract_kwargs["accounts"] = accounts
+        else:
+            # Legacy single-account call path, byte-identical to before.
+            extract_kwargs["runpod_api_key"] = api_key
+        started = time.perf_counter()
+        report = await extract_entities(tasks, **extract_kwargs)
         wall_seconds = time.perf_counter() - started
         processed = len(report.results)
         entity_count = sum(len(result.entities) for result in report.results)
@@ -230,8 +241,15 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                 speedup >= config.target_speedup if speedup is not None else None
             ),
         }
+        account_dispatch = report.metrics.get("account_dispatch")
+        routing = (
+            {"account_dispatch": account_dispatch}
+            if account_dispatch is not None
+            else {}
+        )
         return {
             **base,
+            **routing,
             "processed_chunks": processed,
             "failed_chunks": len(report.failures),
             "entity_count": entity_count,

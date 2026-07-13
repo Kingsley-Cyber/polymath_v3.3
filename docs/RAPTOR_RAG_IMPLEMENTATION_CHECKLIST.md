@@ -1023,12 +1023,15 @@ Acceptance:
   max_workers, request_concurrency, weight} with per-account encrypted keys
   in the shared key store; legacy single endpoint_id + `api_keys.runpod`
   keeps working as the "default" account.
+  **[IN CODE — wave2/rpacct, pending merge]**
 - [ ] Dispatch routes request batches across enabled accounts
   (least-in-flight, weight-tiebroken), per-account concurrency semaphores,
   bounded failover of a failed batch to another account, per-account batch
   counts in diagnostics — combined burst throughput = sum of accounts.
+  **[IN CODE — wave2/rpacct, pending merge]**
 - [ ] Registration helper reads the key from env only (never argv/logs) and
   encrypts at rest; benchmark exercises routing across all enabled accounts.
+  **[IN CODE — wave2/rpacct, pending merge]**
 
 ### P2.8 Direct Concept-To-Document Grounding
 
