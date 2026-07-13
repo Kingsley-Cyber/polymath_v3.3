@@ -41,8 +41,14 @@ REPO = Path(__file__).resolve().parents[2]
 API = os.environ.get("POLYMATH_API", "http://127.0.0.1:8000")
 QUESTIONS = REPO / "backend" / "evals" / "heldout_questions.jsonl"
 REFUSAL_RE = re.compile(
+    # Refusals AND honest absence acknowledgments both count as fail-closed
+    # behavior for negative controls (scorer v2, 2026-07-13: the v1 pattern
+    # under-credited honest "sources don't cover X" answers).
     r"i cannot answer|does not contain|did not find source evidence|"
-    r"cannot answer that as a source-backed",
+    r"cannot answer that as a source-backed|"
+    r"do(?:es)?(?: not|n't) (?:specifically|explicitly|directly) "
+    r"(?:address|name|cover|mention|state)|"
+    r"does not contain a direct answer",
     re.IGNORECASE,
 )
 
