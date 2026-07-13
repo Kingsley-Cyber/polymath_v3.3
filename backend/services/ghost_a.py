@@ -257,6 +257,7 @@ class SummaryResult:
     entity_hints: list[str] | None = None
     retrieval_uses: list[str] | None = None
     abstraction_level: str | None = None
+    latent_concepts: list[dict] | None = None
     source_child_ids: list[str] | None = None
     summary_id: str | None = None
     source_hash: str | None = None
@@ -645,6 +646,7 @@ async def summarize_parents(
             entity_hints=artifact["entity_hints"] or None,
             retrieval_uses=artifact["retrieval_uses"] or None,
             abstraction_level=artifact["abstraction_level"],
+            latent_concepts=artifact.get("latent_concepts") or None,
             source_child_ids=artifact["source_child_ids"] or None,
             summary_id=artifact["summary_id"],
             source_hash=artifact["source_hash"],

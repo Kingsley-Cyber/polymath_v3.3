@@ -1144,6 +1144,7 @@ def _reconstruct_summaries_from_mongo(
                 entity_hints=repaired.get("entity_hints"),
                 retrieval_uses=repaired.get("retrieval_uses"),
                 abstraction_level=repaired.get("abstraction_level"),
+                latent_concepts=repaired.get("latent_concepts"),
                 source_child_ids=repaired.get("source_child_ids"),
                 summary_id=repaired.get("summary_id"),
                 source_hash=repaired.get("source_hash"),
@@ -2279,6 +2280,7 @@ def _build_parent_dicts(
                 "concept_tags": getattr(sr, "concept_tags", None) if sr else None,
                 "entity_hints": getattr(sr, "entity_hints", None) if sr else None,
                 "retrieval_uses": getattr(sr, "retrieval_uses", None) if sr else None,
+                "latent_concepts": getattr(sr, "latent_concepts", None) if sr else None,
                 "abstraction_level": (
                     getattr(sr, "abstraction_level", None) if sr else None
                 ),
@@ -2945,6 +2947,7 @@ async def _write_qdrant_summaries_for_doc(
                 "entity_hints": getattr(summary, "entity_hints", None),
                 "retrieval_uses": getattr(summary, "retrieval_uses", None),
                 "abstraction_level": getattr(summary, "abstraction_level", None),
+                "latent_concepts": getattr(summary, "latent_concepts", None),
                 "source_child_ids": getattr(summary, "source_child_ids", None),
                 "summary_id": getattr(summary, "summary_id", None),
                 "source_hash": getattr(summary, "source_hash", None),

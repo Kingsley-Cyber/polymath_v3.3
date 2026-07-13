@@ -192,6 +192,7 @@ def summary_result_fields(result, *, updated_at: datetime) -> dict:
         "entity_hints": getattr(result, "entity_hints", None),
         "retrieval_uses": getattr(result, "retrieval_uses", None),
         "abstraction_level": getattr(result, "abstraction_level", None),
+        "latent_concepts": getattr(result, "latent_concepts", None),
         "source_child_ids": getattr(result, "source_child_ids", None),
         "summary_id": getattr(result, "summary_id", None),
         "source_hash": getattr(result, "source_hash", None),

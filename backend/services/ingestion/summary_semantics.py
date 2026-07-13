@@ -29,6 +29,12 @@ SEMANTIC_CHUNK_TYPES = (
 )
 MAX_KEY_TERMS = 8
 MAX_MECHANISMS = 5
+# P2.2 capture-at-generation (owner directive 2026-07-13): the summary call
+# also emits latent retrieval concepts. Stored as unvalidated candidates on
+# the parent row; consumption stays gated behind the P2.2 discipline.
+MAX_LATENT_CONCEPTS = 12
+MAX_LATENT_ALIASES = 3
+LATENT_EVIDENCE_BASES = ("direct", "inferred")
 PARENT_SUMMARY_SCHEMA_VERSION = "parent_summary.v1"
 PARENT_SUMMARY_TYPE = "parent_retrieval_replacement"
 MAX_CONCEPT_TAGS = 8
@@ -62,8 +68,49 @@ SEMANTIC_SUMMARY_INSTRUCTION = (
     '"entity_hints": ["<explicit source entities only>"], '
     '"retrieval_uses": ["<definition|mechanism|comparison|example|claim|method|'
     'cause_effect|critique|framework|evidence|synthesis>"], '
-    '"abstraction_level": "<low|medium|high>"}'
+    '"abstraction_level": "<low|medium|high>", '
+    '"latent_concepts": [{"concept": "<snake_case concept a reader would '
+    "search for; may be strongly implied rather than named, but must be "
+    'supported by this passage — never an invented fact>", '
+    '"evidence_basis": "<direct|inferred>", '
+    '"aliases": ["<up to 3 phrasings a non-expert user might type>"]}]}'
+    " Include at most 12 latent_concepts; prefer useful retrieval concepts "
+    "over impressive academic terms; omit weak or speculative ideas entirely."
 )
+
+
+def parse_latent_concepts(obj: dict) -> list[dict]:
+    """Deterministically clamp LLM latent-concept candidates (P2.2 capture).
+
+    Python owns normalization: snake_case concepts, whitelisted evidence
+    basis, deduped, alias-clamped. Anything malformed is dropped, never
+    repaired into a fact."""
+
+    out: list[dict] = []
+    seen: set[str] = set()
+    for row in obj.get("latent_concepts") or []:
+        if not isinstance(row, dict):
+            continue
+        concept = _snake(str(row.get("concept") or ""))
+        basis = str(row.get("evidence_basis") or "").strip().lower()
+        if not concept or len(concept) > 60 or concept in seen:
+            continue
+        if basis not in LATENT_EVIDENCE_BASES:
+            continue
+        aliases: list[str] = []
+        for alias in row.get("aliases") or []:
+            cleaned = " ".join(str(alias).split()).strip().lower()
+            if cleaned and len(cleaned) <= 60 and cleaned not in aliases:
+                aliases.append(cleaned)
+            if len(aliases) >= MAX_LATENT_ALIASES:
+                break
+        seen.add(concept)
+        out.append(
+            {"concept": concept, "evidence_basis": basis, "aliases": aliases}
+        )
+        if len(out) >= MAX_LATENT_CONCEPTS:
+            break
+    return out
 
 
 def _snake(value: str) -> str:
@@ -530,6 +577,11 @@ def canonical_parent_summary_fields(
     )
     fields = {
         **normalized,
+        "latent_concepts": (
+            parsed.get("latent_concepts")
+            if isinstance(parsed.get("latent_concepts"), list)
+            else parse_latent_concepts(parsed)
+        ),
         "summary_id": summary_id_for_parent(parent_id),
         "corpus_id": corpus_id,
         "doc_id": doc_id,
@@ -648,6 +700,7 @@ def parse_semantic_summary(
         "entity_hints": [],
         "retrieval_uses": [],
         "abstraction_level": "medium",
+        "latent_concepts": [],
         "source_child_ids": source_child_ids or [],
         "validation_status": "quarantined",
         "repair_status": "quarantined",
@@ -693,6 +746,7 @@ def parse_semantic_summary(
                     out["mechanisms"].append(s)
                     if len(out["mechanisms"]) >= MAX_MECHANISMS:
                         break
+            out["latent_concepts"] = parse_latent_concepts(obj)
             out.update(parent_summary_artifact_fields(
                 obj,
                 summary=out["summary"],
