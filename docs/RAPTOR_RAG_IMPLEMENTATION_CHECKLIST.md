@@ -693,10 +693,13 @@ Acceptance:
 - [x] Query calls use the interactive embedding workload class.
 - [ ] Add a bounded real-inference embedder startup warmup using the deployed
   query contract; model loading alone is not sufficient.
+  **[IN CODE — wave1/warm, pending merge]**
 - [ ] Separate embedder liveness, model-loaded health, and inference-ready
   status so deployment gates cannot confuse them.
+  **[IN CODE — wave1/warm, pending merge]**
 - [ ] Expose `warmup_complete`, duration, vector dimension, and model/version in
   readiness diagnostics without exposing request content.
+  **[IN CODE — wave1/warm, pending merge]**
 
 ### P1.9 Qdrant Hot-Path And Contention Audit
 

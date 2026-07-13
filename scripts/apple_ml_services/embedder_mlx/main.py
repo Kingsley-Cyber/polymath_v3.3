@@ -6,7 +6,10 @@ Polymath doesn't notice the swap.
 
 Wire spec (matches backend expectations):
   GET  /info       → {"model": "...", "dimension": 1024, "device": "mps"}
-  GET  /health     → {"status": "ok"}
+  GET  /health     → {"status": "ok", ...} plus additive P1.8 tri-state keys:
+                     liveness / model_loaded / inference_ready and a
+                     warmup{complete, duration_s, vector_dim, model, error}
+                     diagnostics block (never request content)
   POST /embeddings → OpenAI shape {data: [{embedding: [...], index: i}, ...]}
 
 Required env:
@@ -42,6 +45,10 @@ MAX_LENGTH = int(os.environ.get("EMBED_MAX_LENGTH", "512"))
 BATCH_SIZE = int(os.environ.get("EMBED_BATCH_SIZE", "32"))
 REQUEST_TIMEOUT_SECONDS = float(os.environ.get("EMBEDDER_REQUEST_TIMEOUT_SECONDS", "60"))
 QUEUE_TIMEOUT_SECONDS = float(os.environ.get("EMBEDDER_QUEUE_TIMEOUT_SECONDS", "30"))
+WARMUP_TIMEOUT_SECONDS = float(os.environ.get("EMBEDDER_WARMUP_TIMEOUT_SECONDS", "30"))
+# P1.8: fixed neutral warmup batch — never derived from (or logged as) request
+# content. Two texts exercise real multi-row batching through the serving path.
+WARMUP_TEXTS = ("warmup", "warmup")
 
 
 class EmbeddingsRequest(BaseModel):
@@ -123,6 +130,15 @@ _request_gate = PriorityRequestGate()
 _active_request_started_at: float | None = None
 _last_request_seconds: float | None = None
 _last_error: str | None = None
+
+# P1.8 warmup / tri-state readiness state. `inference_ready` (== warmup
+# complete) is deliberately distinct from `model_loaded`: weights being
+# resident does not prove the Metal inference path works or is compiled.
+_warmup_complete = False
+_warmup_seconds: float | None = None
+_warmup_vector_dim: int | None = None
+_warmup_error: str | None = None
+_warmup_task: "asyncio.Task[None] | None" = None
 
 
 def _apply_mlx_memory_guardrails() -> None:
@@ -275,12 +291,62 @@ def _encode_texts(inputs: list[str]) -> Any:
     return embeddings_np
 
 
+async def _run_startup_warmup() -> None:
+    """P1.8: bounded real-inference warmup through the exact serving path.
+
+    Runs the fixed neutral batch through the same admission gate and encode
+    function that /embeddings serves, submitted at the lowest-priority
+    (backfill) workload class so warmup can never delay the first interactive
+    request. Success flips ``inference_ready``; any failure records the error
+    and leaves ``inference_ready`` false — it never crashes or restarts the
+    sidecar.
+    """
+    global _warmup_complete, _warmup_error, _warmup_seconds, _warmup_vector_dim
+    started = time.monotonic()
+    acquired = False
+    try:
+        await _request_gate.acquire("backfill_repair", WARMUP_TIMEOUT_SECONDS)
+        acquired = True
+        remaining = max(0.1, WARMUP_TIMEOUT_SECONDS - (time.monotonic() - started))
+        vectors = await asyncio.wait_for(
+            asyncio.to_thread(_encode_batch, list(WARMUP_TEXTS)),
+            timeout=remaining,
+        )
+        dim = int(vectors.shape[1])
+        if dim != EMBED_DIM:
+            raise RuntimeError(
+                f"warmup vector dimension mismatch: expected {EMBED_DIM}, got {dim}"
+            )
+        _warmup_vector_dim = dim
+        _warmup_seconds = time.monotonic() - started
+        _warmup_complete = True
+        _warmup_error = None
+        logger.info(
+            "embedder inference warmup complete in %.2fs (dim=%d, model=%s)",
+            _warmup_seconds,
+            dim,
+            MODEL_ID,
+        )
+    except Exception as exc:
+        _warmup_seconds = time.monotonic() - started
+        _warmup_error = f"{type(exc).__name__}: {exc}"
+        logger.error("embedder startup warmup failed: %s", _warmup_error)
+    finally:
+        if acquired:
+            await _request_gate.release()
+
+
 @app.on_event("startup")
 async def _startup() -> None:
+    global _warmup_task
     try:
         _load_model()
     except Exception as exc:  # pragma: no cover — surface to logs, allow /health to still answer
         logger.exception("startup model load failed: %s", exc)
+    # P1.8: schedule (never block startup on) the real-inference warmup. If the
+    # model failed to load, the warmup records that failure and
+    # inference_ready stays false.
+    _warmup_task = asyncio.create_task(_run_startup_warmup())
 
 
 @app.get("/info")
@@ -327,6 +393,21 @@ async def health() -> dict:
         ),
         "last_error": _last_error,
         "queue_depth": _request_gate.queue_depth,
+        # P1.8 tri-state readiness (additive keys): liveness = the process is
+        # answering, model_loaded = weights are resident, inference_ready =
+        # the bounded real-inference warmup succeeded through the serving path.
+        "liveness": True,
+        "model_loaded": _model is not None,
+        "inference_ready": _warmup_complete,
+        "warmup": {
+            "complete": _warmup_complete,
+            "duration_s": (
+                round(_warmup_seconds, 3) if _warmup_seconds is not None else None
+            ),
+            "vector_dim": _warmup_vector_dim,
+            "model": MODEL_ID,
+            "error": _warmup_error,
+        },
     }
 
 
