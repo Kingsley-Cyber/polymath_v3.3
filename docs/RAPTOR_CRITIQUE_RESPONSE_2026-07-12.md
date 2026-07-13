@@ -103,3 +103,9 @@ Every retrieval change remains subject to all three product tiers: Qdrant-only,
 Hybrid, and Graph Augmentation. It must preserve selected corpus boundaries,
 top-down document/tree routing, parent/child identity, source hydration,
 required answer obligations, and final evidence relevance.
+
+## Follow-up acknowledgement
+
+Independent review of this response and commit `d3159b8`:
+[`RAPTOR_CRITIQUE_ACKNOWLEDGEMENT_2026-07-12.md`](RAPTOR_CRITIQUE_ACKNOWLEDGEMENT_2026-07-12.md)
+(includes running WIP/discrepancy log).

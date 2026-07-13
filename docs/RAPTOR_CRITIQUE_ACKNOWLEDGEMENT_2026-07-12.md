@@ -33,6 +33,28 @@ understated, and where each is tracked.
    compile/warmup cost, and deployment gates could not tell liveness,
    model-loaded, and inference-ready apart. Tracked as checklist P1.8.
 
+## Running WIP / discrepancy log
+
+The live work-in-progress and discrepancy record is maintained in two places,
+both tracked in Git so history survives:
+
+- [`RAPTOR_RAG_IMPLEMENTATION_CHECKLIST.md`](RAPTOR_RAG_IMPLEMENTATION_CHECKLIST.md)
+  — every checkbox carries live status: `[x]` only when the checklist's own
+  completion rule is met, `[IN CODE @commit]` for merged-and-tested work
+  awaiting live verification on the running service, `[IN PROGRESS]` with
+  counts for long-running data repairs, and `[PARTIAL]` where sub-scope
+  remains. The Implementation Log at the bottom of that file records each
+  completed tranche with commits, before/after evidence, and explicit
+  deploy-pending status.
+- `docs/baselines/` — timestamped census, latency, orphan-manifest, and
+  (forthcoming) held-out evaluation artifacts that back every quantitative
+  claim in the log.
+
+Discrepancies found between recorded claims and observed state are logged as
+Implementation Log entries at discovery time (e.g. the stale
+architecture-ledger claim that Tier-0 routing was gated off, corrected against
+`config.py` on 2026-07-13).
+
 ## Standing correction on claim language
 
 Completion reports in this repository must distinguish deployed code,
