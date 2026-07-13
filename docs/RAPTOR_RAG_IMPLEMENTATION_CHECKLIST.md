@@ -1028,21 +1028,21 @@ Acceptance:
 
 ### P2.7c Multi-Account RunPod Routing (owner directive 2026-07-13)
 
-- [ ] Settings support N RunPod accounts (each API key = a distinct account
+- [x] Settings support N RunPod accounts (each API key = a distinct account
   with its own endpoint, quota, and billing): additive
   `ingestion.runpod_flash.accounts[]` {name, endpoint_id, enabled,
   max_workers, request_concurrency, weight} with per-account encrypted keys
   in the shared key store; legacy single endpoint_id + `api_keys.runpod`
   keeps working as the "default" account.
-  **[IN CODE — wave2/rpacct, pending merge]**
-- [ ] Dispatch routes request batches across enabled accounts
+  *(merged + live-verified 2026-07-13: 2 accounts, 100-chunk run split 2/2 batches, 0 failures/failovers)*
+- [x] Dispatch routes request batches across enabled accounts
   (least-in-flight, weight-tiebroken), per-account concurrency semaphores,
   bounded failover of a failed batch to another account, per-account batch
   counts in diagnostics — combined burst throughput = sum of accounts.
-  **[IN CODE — wave2/rpacct, pending merge]**
-- [ ] Registration helper reads the key from env only (never argv/logs) and
+  *(merged + live-verified 2026-07-13: 2 accounts, 100-chunk run split 2/2 batches, 0 failures/failovers)*
+- [x] Registration helper reads the key from env only (never argv/logs) and
   encrypts at rest; benchmark exercises routing across all enabled accounts.
-  **[IN CODE — wave2/rpacct, pending merge]**
+  *(merged + live-verified 2026-07-13: 2 accounts, 100-chunk run split 2/2 batches, 0 failures/failovers)*
 
 ### P2.8 Direct Concept-To-Document Grounding
 
