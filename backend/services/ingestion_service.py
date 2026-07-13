@@ -19,6 +19,7 @@ import logging
 import hashlib
 import mimetypes
 import uuid
+from contextlib import suppress
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
@@ -437,6 +438,24 @@ class IngestionService:
             task.cancel()
         if self._cleanup_tasks:
             await asyncio.gather(*tuple(self._cleanup_tasks), return_exceptions=True)
+        # P0.6 — graceful shutdown cancelled any running purge; release the
+        # cleanup lease immediately so the replacement process can reclaim the
+        # corpus without waiting out the full lease window.
+        if self._db is not None:
+            try:
+                await self._db["corpora"].update_many(
+                    {"cleanup_owner": self._cleanup_owner},
+                    {
+                        "$set": {
+                            "cleanup_lease_until": datetime.utcnow(),
+                            "cleanup_released_at": datetime.utcnow(),
+                        }
+                    },
+                )
+            except Exception:  # noqa: BLE001 — shutdown must not fail on this
+                logger.warning(
+                    "Cleanup lease release on shutdown failed", exc_info=True
+                )
         if self._qdrant:
             await self._qdrant.close()
         if self._neo4j:
@@ -1932,6 +1951,37 @@ class IngestionService:
             recovered += 1
         return recovered
 
+    async def _heartbeat_cleanup_lease(self, corpus_id: str) -> None:
+        """Extend cleanup_lease_until while a long purge runs (P0.6).
+
+        Owner-guarded: only the row this process claimed is renewed, so an
+        expired-and-reclaimed corpus is never re-extended by the loser."""
+
+        interval = max(20.0, CORPUS_CLEANUP_LEASE_MINUTES * 60 / 3)
+        try:
+            while True:
+                await asyncio.sleep(interval)
+                await self._db["corpora"].update_one(
+                    {
+                        "corpus_id": corpus_id,
+                        "cleanup_owner": self._cleanup_owner,
+                    },
+                    {
+                        "$set": {
+                            "cleanup_lease_until": datetime.utcnow()
+                            + timedelta(minutes=CORPUS_CLEANUP_LEASE_MINUTES),
+                            "cleanup_heartbeat_at": datetime.utcnow(),
+                        }
+                    },
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 — heartbeat is best-effort
+            logger.warning(
+                "Cleanup lease heartbeat failed for corpus %s", corpus_id,
+                exc_info=True,
+            )
+
     async def _purge_corpus_bulk(self, corpus_id: str) -> None:
         """Background bulk cleanup for a deleted corpus: Mongo chunks +
         batched Neo4j graph. Best-effort — orphaned rows keyed by a dead
@@ -1939,6 +1989,21 @@ class IngestionService:
         from services.storage.mongo_writer import delete_chunks_by_corpus, delete_corpus
 
         cleanup_warnings: list[dict[str, str]] = []
+        heartbeat = asyncio.create_task(self._heartbeat_cleanup_lease(corpus_id))
+        try:
+            return await self._purge_corpus_bulk_stages(
+                corpus_id, cleanup_warnings
+            )
+        finally:
+            heartbeat.cancel()
+            with suppress(asyncio.CancelledError):
+                await heartbeat
+
+    async def _purge_corpus_bulk_stages(
+        self, corpus_id: str, cleanup_warnings: list[dict[str, str]]
+    ) -> None:
+        from services.storage.mongo_writer import delete_chunks_by_corpus, delete_corpus
+
         try:
             from services.ingestion.corpus_lexicon import delete_corpus_lexicon
 
@@ -1992,8 +2057,13 @@ class IngestionService:
         try:
             await delete_corpus(self._db, corpus_id)
             cleanup_status = "partial" if cleanup_warnings else "complete"
+            # Owner-guarded finalize (P0.6): if the lease expired mid-purge and
+            # a replacement process reclaimed this corpus, the stale loser's
+            # finalize becomes a no-op instead of clobbering the new owner's
+            # state — the pair that makes competing-process and idempotent
+            # replay behavior safe.
             await self._db["corpora"].update_one(
-                {"corpus_id": corpus_id},
+                {"corpus_id": corpus_id, "cleanup_owner": self._cleanup_owner},
                 {
                     "$set": {
                         "cleanup_status": cleanup_status,

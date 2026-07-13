@@ -394,13 +394,24 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         repair_interval = float(
             getattr(settings, "INGEST_AUTO_REPAIR_POLL_SECONDS", 300.0) or 300.0
         )
+        purge_reclaim_interval = float(
+            getattr(settings, "CORPUS_PURGE_RECLAIM_POLL_SECONDS", 60.0) or 60.0
+        )
         last_repair_tick = 0.0
+        last_purge_reclaim_tick = 0.0
         while True:
             await asyncio.sleep(interval)
             try:
                 await _recover_ingest_batches("poll")
+                # P0.6 — reclaim expired/partial corpus-cleanup leases during
+                # normal uptime, not only at startup. The reclaim query already
+                # honors cleanup_retry_at, so this same tick also auto-retries
+                # partial cleanups without an operator-triggered restart.
+                now = asyncio.get_running_loop().time()
+                if now - last_purge_reclaim_tick >= purge_reclaim_interval:
+                    last_purge_reclaim_tick = now
+                    await ingestion_service.recover_pending_corpus_purges()
                 if bool(getattr(settings, "INGEST_AUTO_REPAIR_ENABLED", True)):
-                    now = asyncio.get_running_loop().time()
                     if now - last_repair_tick >= repair_interval:
                         last_repair_tick = now
                         await _run_auto_corpus_repair_tick("poll")
