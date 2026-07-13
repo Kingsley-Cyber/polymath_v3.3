@@ -1,7 +1,33 @@
 # RAPTOR RAG Implementation Checklist
 
-Last updated: 2026-07-12  
+Last updated: 2026-07-13  
 Baseline commit: `d3159b8`  
+
+## Execution Order — SEQUENCED PLAN OF RECORD
+
+The dependency-ordered execution plan derived from this ledger is
+`docs/PLAN_CRITIQUE_2026-07-13.md` (S0–S14, with verified data-state receipts
+and the critique of prior sequencing). Execute in S-order; a step's checklist
+anchors are listed per row. This ledger stays the item-level source of truth;
+the plan file is its ordering.
+
+## Standing Rules (adopted 2026-07-13 from plan critique)
+
+1. **Capture-before-rebuild:** no summary/lexicon/card rebuild may run while an
+   ADOPTED capture hook targeting the same rows is unbuilt. A rebuild must list
+   the open capture hooks for its seam and obtain an explicit owner waiver,
+   else the hook lands first. (Violated once — critique C1/C2; never again.)
+2. **No dark fields:** every captured field ships with its first consumer, or a
+   named consumer + checklist anchor in the same phase; otherwise the ledger
+   must mark it dark data.
+3. **Receipts refresh tags:** any status tag (IN PROGRESS/PARTIAL) contradicted
+   by a later verification is stale by definition; ledger edits re-run the
+   relevant verify and restamp the date.
+4. **One migration per seam:** migrations touching the same artifact are
+   co-scheduled (P2.5 + T-MAIN edges; S5 rollup + S7 facet cleanup payloads).
+5. **Read-before-act:** agents re-read the relevant section of THIS FILE from
+   disk at every phase start and before dispatching work — never from session
+   memory (see repo CLAUDE.md north-star section).
 Scope: ingestion, hierarchy, retrieval, librarian behavior, concept vocabulary,
 GLiNER/RunPod parity, lifecycle hygiene, and all three retrieval tiers.
 
@@ -328,14 +354,14 @@ Milestone acceptance:
   superseded with reason `corpus_not_active_orphan_job`, backed up, 0 queued
   remain — commit 1171e9d.)*
 - [x] Backfill valid summaries for every summary-required parent.
-  **[IN PROGRESS — markbuildsbrands 1,009/1,009 VERIFIED, ecommerce
-  9,453/9,453 VERIFIED, UGO 203/203 VERIFIED (incl. generated missing parent
-  + doc profile + Tier-0 card); polymath_v2 regeneration of 2,633
-  quarantined defective legacy rows running]**
+  *(2026-07-13 restamp: `p0_1_summary_integrity.py verify` PASSES all four
+  corpora — polymath_v2 86,880 + ecommerce 9,453 + markbuilds 1,009 + UGO 203
+  all attributed, 0 empty-model. NOTE (plan critique C1): this pass ran BEFORE
+  T-HOOK-2/latent capture existed, so pair rows are back-level on capture
+  fields — the S4 consolidated pass carries them.)*
 - [x] Remove or supersede legacy empty-model summary points after backfill.
-  **[IN PROGRESS — in-place reprojection is overwriting placeholder points
-  (67,953 → ~53k and falling on polymath_v2); residual snapshot+delete runs
-  after the index pass completes]**
+  *(2026-07-13 restamp: verify green, 0 empty-model summaries remain on any
+  corpus; prior in-progress reprojection completed.)*
 - [ ] Verify every valid summary has child IDs, boundaries, model, schema,
   validation status, and evidence-backed semantics.
 - [ ] Verify document-summary trees roll up only validated children.
