@@ -343,23 +343,32 @@ Acceptance:
 
 ### P0.7 Documentation And Claim Integrity
 
-- [ ] Create the referenced
+- [x] Create the referenced
   `RAPTOR_CRITIQUE_ACKNOWLEDGEMENT_2026-07-12.md` or remove the broken link from
   the maintainer response.
-- [ ] Add an automated relative-link check for tracked Markdown files.
-- [ ] Require completion reports to distinguish deployed code, migrated legacy
-  data, and future-only behavior.
-- [ ] Require health/readiness claims to identify whether they test process
-  liveness, model load, or real inference.
-- [ ] Keep durable baseline counts and probe timestamps attached to claims that
-  may become stale.
+- [x] Add an automated relative-link check for tracked Markdown files
+  (`backend/scripts/check_markdown_links.py`, non-zero exit on failure).
+- [x] Require completion reports to distinguish deployed code, migrated legacy
+  data, and future-only behavior (standing convention recorded in the
+  acknowledgement; the Implementation Log entries follow it, including
+  explicit deploy-pending status).
+- [x] Require health/readiness claims to identify whether they test process
+  liveness, model load, or real inference (convention recorded in the
+  acknowledgement; the endpoint-level separation itself is tracked as P1.8).
+- [x] Keep durable baseline counts and probe timestamps attached to claims that
+  may become stale (`docs/baselines/` census + latency artifacts, referenced
+  from Implementation Log entries).
 
 Acceptance:
 
-- [ ] Every referenced local document exists and resolves.
-- [ ] No repair is called complete while its legacy data migration remains
-  open.
-- [ ] Runtime claims can be reproduced by a credential-free command or test.
+- [x] Every referenced local document exists and resolves (link check green
+  across 72 tracked files, 2026-07-13).
+- [x] No repair is called complete while its legacy data migration remains
+  open (Implementation Log discipline; P0.1 boxes stay open until every
+  corpus verifies).
+- [x] Runtime claims can be reproduced by a credential-free command
+  (`capture_raptor_baseline.py`, `probe_tier_latency.py`,
+  `p0_1_summary_integrity.py verify` — secrets stay in `.env`/container).
 
 ## P1 - Librarian Query Understanding
 

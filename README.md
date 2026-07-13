@@ -65,7 +65,7 @@ the corpus.
 
 ## Current build highlights
 
-The latest repo history is summarized in [`commit_history.md`](commit_history.md).
+The latest repo history is summarized by `git log --oneline`.
 Recent work focused on making the app feel less like a generic RAG demo and
 more like a research workbench:
 

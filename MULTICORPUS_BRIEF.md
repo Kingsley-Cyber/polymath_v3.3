@@ -26,12 +26,12 @@
 
 **Latent risk to address in parallel:** `_orchestrator_legacy.cpython-311.pyc` is a sourceless compiled module. If it ever breaks or is lost, all of Mission Control breaks. **Recommend a parallel track to reconstruct it as tracked Python source** — independent of multi-corpus, just for survivability.
 
-**Cross-doc reconciliation status (2026-05-10):** This brief, [Phased Rollout Plan — Single corpus.txt](../../Phased Rollout Plan — Single corpus.txt), and [GRAPH_VIEWER_BRIDGE.md](../../GRAPH_VIEWER_BRIDGE.md) are now consistent on:
+**Cross-doc reconciliation status (2026-05-10):** This brief, `Phased Rollout Plan — Single corpus.txt`, and `GRAPH_VIEWER_BRIDGE.md` (both historical documents that are no longer in this repository) are now consistent on:
 - Schema Lens deferred (active phases skip it; technical content preserved as "Phase A — [DEFERRED]" in the rollout plan)
 - Library = `react-force-graph-2d` (sigma.js / graphology retired in Bridge §10 Phase F)
 - Endpoints added in PR 2: `POST /api/graph/cluster/{concept_id}`, `GET /api/corpora/{cid}/cache-status`, plus the `top_entities` cap bump
 - `POST /api/graph/query` multi-corpus fan-out lands in PR 3 alongside `/discover`
-- Zero-corpora behavior: empty-state prompt, no auto-fallback (legacy [App.tsx:67-88](../../frontend/src/App.tsx) auto-fallback retired in Phase F)
+- Zero-corpora behavior: empty-state prompt, no auto-fallback (legacy [App.tsx:67-88](frontend/src/App.tsx) auto-fallback retired in Phase F)
 - Phase F cleanup retires GraphView, DiscoveryPanel, BooksClusterView, RelationGraph, the `mission-control-context-graph` CustomEvent, and sigma.js/graphology dependencies
 
 ---
@@ -531,7 +531,7 @@ One component, two modes, ~600 LOC including styles.
    - Bumps `top_entities` cap in overview response from 6 to 50 so the interim drill workaround has enough data
    Legacy GETs untouched. Backend testable independently of frontend.
 3. **PR 3 — Item #4 (Mission Control + Agent Query multi-corpus).** Wrapper-fan-out + merger for BOTH `POST /api/graph/discover` AND `POST /api/graph/query` via the same pattern. Includes Mongo `graph_sessions` migration. Largest PR. LLM synthesis path stays untouched per locked decision; multi-corpus only extends the wrapper input/output boundary.
-4. **PR 4 — Frontend rewrite (per [GRAPH_VIEWER_BRIDGE.md](../../GRAPH_VIEWER_BRIDGE.md), all phases A-F).** New `<GraphViewer>` component using react-force-graph-2d. Brain + Query modes. Phase F retires the legacy GraphView / DiscoveryPanel / BooksClusterView / RelationGraph and removes sigma.js/graphology dependencies.
+4. **PR 4 — Frontend rewrite (per `GRAPH_VIEWER_BRIDGE.md`, a historical document no longer in this repository, all phases A-F).** New `<GraphViewer>` component using react-force-graph-2d. Brain + Query modes. Phase F retires the legacy GraphView / DiscoveryPanel / BooksClusterView / RelationGraph and removes sigma.js/graphology dependencies.
 5. **(Parallel track — independent of all above) — `_orchestrator_legacy.cpython-311.pyc` recovery.** Reconstruct the sourceless legacy module as tracked Python source. Survivability fix; not gated on multi-corpus work.
 6. **(Deferred) Item #6 — Schema Lens refresh.** Revisit only if extraction quality drift becomes a real observed problem on existing corpora. Technical content preserved in [Phased Rollout Plan — Single corpus.txt](../../Phased Rollout Plan — Single corpus.txt) under "Phase A — [DEFERRED]" for future execution.
 
