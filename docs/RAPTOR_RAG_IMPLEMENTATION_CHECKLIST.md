@@ -468,6 +468,10 @@ Acceptance:
 - [x] Filter separator-only candidates before reranking.
 - [x] Gate broad one-word hand-authored facet aliases by specificity.
 - [ ] Audit OCR-corrupt heading paths and define a source-safe repair rule.
+  **[IN CODE — evidence gathered 2026-07-13, awaiting owner sign-off:
+  docs/DISPOSITION_MATRIX_2026-07-13.md — full census ecom/mark/UGO + v2
+  sample; ecom 7.6% corrupt-flagged parents across 9 docs, 45.2% page-slug
+  headings; proposed deterministic repair rule in §7 of the matrix]**
 - [ ] Backfill missing `doc_name`, filename, and source identity on legacy
   payloads.
 - [ ] Move remaining curated content aliases from Python into a versioned
@@ -1069,6 +1073,11 @@ Acceptance:
   chunk IDs so summaries/vectors/extractions follow) vs `re-extract-only`
   (chunking sound; summaries/vectors preserved) vs `projection-only`. No
   reindex or extraction spend on a corpus marked `reingest`.
+  **[IN CODE — evidence gathered 2026-07-13, awaiting owner sign-off:
+  docs/DISPOSITION_MATRIX_2026-07-13.md — recommended: ecom = reingest subset
+  (Group A + optional B) + projection repair, mark = re-extract-only, UGO =
+  projection-only, v2 = projection-only (frozen); page_start needs a
+  prov-capture code change, reingest alone will NOT add it]**
 - [ ] Chunk-complete barrier: for a corpus ingest (e.g. 300 files), ALL valid
   children are parsed, metadata-extracted, and fully chunked BEFORE the first
   RunPod dispatch; extraction never interleaves with chunking.
