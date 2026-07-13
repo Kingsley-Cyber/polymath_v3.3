@@ -237,6 +237,11 @@ def _rehydrate_ghost_b_staging(staged: list[dict[str, Any]]) -> list[ExtractionR
                 evidence_drop_count=row.get("evidence_drop_count", 0),
                 fact_drop_count=row.get("fact_drop_count", 0),
                 schema_lens_id=row.get("schema_lens_id"),
+                # T-HOOK-1 — rehydrated rows are re-stashed via ReplaceOne, so
+                # the additive capture fields must round-trip or a backfill
+                # pass would silently erase persisted temporal captures.
+                temporal_captures=list(row.get("temporal_captures") or []),
+                temporal_capture_version=row.get("temporal_capture_version"),
             )
         )
     return out

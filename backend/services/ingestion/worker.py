@@ -1090,6 +1090,11 @@ def _rehydrate_ghost_b_staging(staged: list[dict]) -> list[ExtractionResult]:
                 evidence_drop_count=r.get("evidence_drop_count", 0),
                 fact_drop_count=r.get("fact_drop_count", 0),
                 schema_lens_id=r.get("schema_lens_id"),
+                # T-HOOK-1 — resume paths may re-stash rehydrated staging via
+                # ReplaceOne; the additive capture fields must round-trip so
+                # persisted temporal captures are never silently erased.
+                temporal_captures=list(r.get("temporal_captures") or []),
+                temporal_capture_version=r.get("temporal_capture_version"),
             )
         )
     return out

@@ -165,6 +165,7 @@ cross-impact so no artifact is rebuilt twice:
   and redeploy the RunPod worker, so mass re-extraction runs ONCE with
   temporal capture aboard. The 1/100/500-chunk gates passed on the v2
   contract; the 5,000-chunk gate runs after this hook lands.
+  **[IN CODE — wave2/thook, pending merge + endpoint redeploy]**
 - [ ] T-HOOK-2 (immediate, future-only): add `temporal_class`
   (evergreen|slowly_evolving|versioned|event|ephemeral|unknown) and
   `time_expressions` to the Ghost A summary contract — the same seam that

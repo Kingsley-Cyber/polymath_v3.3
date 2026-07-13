@@ -879,6 +879,10 @@ def _to_results(raw: list[dict]) -> list:
             evidence_drop_count=int(r.get("evidence_drop_count") or 0),
             fact_drop_count=int(r.get("fact_drop_count") or 0),
             schema_lens_id=r.get("schema_lens_id"),
+            # T-HOOK-1 additive capture fields (wire contract v3); rows that
+            # pre-date the field fall back to the dataclass defaults.
+            temporal_captures=list(r.get("temporal_captures") or []),
+            temporal_capture_version=r.get("temporal_capture_version"),
         ))
     return out
 

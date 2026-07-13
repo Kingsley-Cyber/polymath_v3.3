@@ -2078,6 +2078,15 @@ class ExtractionResult:
     raw_output_artifact_id: str | None = None
     raw_output_fingerprint: dict[str, Any] = field(default_factory=dict)
     provider_card: dict[str, Any] = field(default_factory=dict)
+    # T-HOOK-1 — temporal CAPTURE payload from the extraction wire contract
+    # v3 (surface forms + exact chunk offsets + keyword-cue role candidates;
+    # capture-only — resolution happens in a later Polymath-side stage).
+    # Providers that pre-date the v3 contract leave these at their defaults.
+    # Both ghost_b_extractions write sites (_persist_extraction_rows and
+    # mongo_writer.stash_ghost_b) serialize this dataclass via asdict, so the
+    # two fields persist additively on every extraction row.
+    temporal_captures: list[dict[str, Any]] = field(default_factory=list)
+    temporal_capture_version: str | None = None
 
     @property
     def validation_rejection_count(self) -> int:
