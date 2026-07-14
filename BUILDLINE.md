@@ -43,10 +43,12 @@ receipts. Authority: senior AUTO. Failure = STOP + diagnose, no gate weakening.
 
 ## CP2 — Corpus enrichment (Phase B, MARK-ONLY per g1 finding) — next
 Consumes: runbook §Phase B; latent_concept_policy.v1 (interim-v1 capture).
-mark full regen → ecom clean-docs → lexicons → cards LAST → readiness →
-after-eval vs today's baselines. Exit gate: coverage censuses + reconciliation
-+ no-regression eval. Authority: 2h GLIDE after CP1 verification.
-OWNER-ONLY carve-outs: ecom junk deletion, v2 unfreeze.
+mark full regen → mark lexicon → mark cards LAST → readiness → after-eval vs
+today's baselines. ECOM REMOVED (g1 finding): its path is now
+CP1-D1 fix → owner §8/reingest decision on corrected evidence → reingest →
+ONE enrichment pass (never twice). Exit gate: coverage censuses +
+reconciliation + no-regression eval. Authority: 2h GLIDE after CP1
+verification. OWNER-ONLY carve-outs: ecom junk deletion, v2 unfreeze.
 
 ## CP3 — P2.5b envelope completion
 Consumes: FINAL_SCHEMA §Shared envelope/§hash taxonomy/§Identifier recipes;
