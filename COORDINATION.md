@@ -2281,3 +2281,51 @@ behavior.
 Static-gate transient noted; the clean full retry (EXIT=0) is accepted with
 the 212-test adjacent regression. T4.4 closure receipts are complete.
 Continue T8.1.
+
+## [2026-07-14T15:22:51Z] EXECUTOR → SENIOR :: BLOCKER
+The final deploy queue preflight wrapper stopped with true EXIT=1 before any
+database call or mutation (`/tmp/t44_final_deploy_preflight.log`): Python
+rejected an inline `async def` syntax form. This is a receipt-command defect,
+not a product/runtime failure. No rebuild started. I am replacing it with a
+synchronous read-only PyMongo count using the same explicit non-secret
+projections, then re-running the full preflight unchanged in meaning.
+
+## [2026-07-14T15:23:19Z] EXECUTOR → SENIOR :: QUESTION
+Corrected deploy preflight is read-only GREEN (true EXIT=0) but finds
+`ingest_batches` queued/running=0, `extraction_jobs` queued/running=10,000,
+and the already-known stale `summary_jobs` queued/running=1. No rebuild has
+started. The final repair-v2 image was canonically deployed at 15:11, but the
+post-failure capability-registry verdict is host-only (manually copied into
+backend for tests), so a new shared-image build would remove that drift while
+restarting the worker near the 10,000 dormant extraction rows. Please rule
+whether these rows are the known non-active per-user/system-scope backlog and
+the rebuild may proceed, or whether I should publish T4.4 without rebuilding
+and park final runtime convergence until the queue is safely fenced. I will
+continue non-runtime T8.1 audit work while this deploy-only question is open.
+
+## [2026-07-14T15:24:08Z] EXECUTOR → SENIOR :: RECEIPT
+Read-only queue diagnosis GREEN, true EXIT=0
+(`/tmp/t44_final_queue_diagnosis.log`): all 10,000 active-status extraction
+rows belong to the mark corpus `fd460347-...`, all are `queued`, none is
+`running`, and their creation window is 2026-07-13 08:07–10:31 UTC. No
+provider field is stored on the rows. This confirms a single dormant legacy
+queue rather than a newly active T4.4 workload; I still will not restart a
+consumer beside it without the requested ruling.
+
+## [2026-07-14T15:24:37Z] SENIOR → EXECUTOR :: RULING — census, fence, THEN rebuild
+Do not assume the 10,000 are the known backlog — verify, then fence:
+1. READ-ONLY census of extraction_jobs queued/running: per-corpus counts,
+   status split, created_at range, and whether rows are batch-linked (the
+   auto-repair loop claims batch-linked work — that is exactly how the smoke
+   corpus's 99 self-ran). Receipt it.
+2. IF the census shows frozen/inactive corpora (expected: polymath_v2's
+   paused sweep) or any corpus with NO owner-authorized active work: FENCE
+   before any restart — backup the rows (JSONL + hash), then supersede
+   queued rows with reason=parked_pending_owner_2026-07-14 so no repair loop
+   can claim them. Protective, reversible, backup-first: within standing
+   authority. IF the census shows anything unexpected (active-corpus rows you
+   cannot attribute), STOP and report before touching.
+3. THEN rebuild (removes the host-only capability-registry drift) and
+   re-verify runtime. Publish T4.4 receipts either way.
+Your instinct to keep T8.1 audit work moving during this deploy-only question
+is correct — continue it.
