@@ -52,24 +52,16 @@ scratch checklist boxes only per completion rule with receipts.
 
 ## THE TASK LIST (execute in order; □ = your work; each with receipts)
 
-### CP2 — Mark enrichment [P0.1] — PRE-AUTHORIZED (owner GO already posted)
-□ T2.1 Preflight: capture-stale census (~1,004), pool resolution (flash
-  primary, Hy3 demoted), no active ingest owners.
-□ T2.2 3-row canary: backend/scripts/s4_quarantine_stale.py (markbuilds 3
-  --apply) + scripts/polymath_summary_backfill_scoped.py --limit 3 --apply.
-  Verify latent/temporal/model=deepseek-v4-flash. RECEIPT before scaling.
-□ T2.3 Full batch: quarantine all → scoped backfill (durable jobs). Abort
-  >5% failures. Monitor drop counters.
-□ T2.4 Censuses: latent/temporal coverage; p0_1_summary_integrity verify;
-  Mongo==Qdrant summary parity (per-collection contract).
-□ T2.5 Lexicon rebuild (backfill_corpus_lexicon --apply, mark) → cards LAST
-  (build_librarian_cards --apply) → authenticated readiness = fully_enriched.
-□ T2.6 After-eval: build a --out-suffix variant of run_heldout_eval if not
-  present, run 3 tiers, compare vs docs/baselines/EVAL_2026-07-14_* with
-  scorer-v4 logic; thresholds: negatives 5/5, no shape >5pts, latency +20%;
-  track the 4 watch-list ids (see EVAL_POSTS2_COMPARISON_RECEIPT).
-□ T2.7 Consolidated CP2 RECEIPT; scratch P0.1's 4 verify boxes if literally
-  met; update PROGRESS.md; commit/push.
+### CP2 — SUPERSEDED BY OWNER SEQUENCING RULING (2026-07-14)
+Owner ruling: NO paid enrichment before the semantic schema era — parent-level
+semantics for mark (and ecom) are generated ONCE, claim-grounded, via the
+gateway SemanticDigest at CP9. The interim-v1 mark regen (old T2.1–T2.5) is
+CANCELLED — do not quarantine, do not regen, do not spend. Absorbed items:
+□ T2a P0.1's four verify boxes → run READ-ONLY during CP6 (they verify
+  existing summary integrity; no regeneration involved).
+□ T2b The after-eval machinery (old T2.6) → build it during CP3 downtime
+  (script + tests only; first real run happens after the CP5 instruction A/B).
+Mark's 3 already-regenerated canary parents stay as-is (harmless, receipted).
 
 ### CP3 — Envelope + identity [P2.5b · P0.8]
 □ T3.1 Legacy adapters (models/legacy_adapters.py + tests): adapt legacy
@@ -105,7 +97,8 @@ scratch checklist boxes only per completion rule with receipts.
   Tier4 schema-identical). Scratch P2.5c boxes. RECEIPT.
 
 ### CP5 — Vocabulary/alias/instruction layer [P1.7 · P2.1 · P2.3 · Lib Ph.3]
-□ T5.1 ONE versioned alias registry absorbing the 3 existing stores (lexicon
+□ T5.1 (latent ROLLUP portion of S5 moves to CP9/CP10 — rolls digest-era
+  latent, not interim-v1) ONE versioned alias registry absorbing the 3 existing stores (lexicon
   identity aliases, curated CONCEPT_ALIASES python, latent_concepts[].aliases)
   per REBUTTAL restatement; migration script backup-first; consumers repointed.
 □ T5.2 Fix qdrant_writer summary payload whitelist to carry latent_concepts;
@@ -187,8 +180,11 @@ scratch checklist boxes only per completion rule with receipts.
 □ T9.2 Frame instances w/ role_bindings from compiled claims; motif matcher
   (sequence-tolerance + role-threading as versioned recipes; MotifCandidate
   dual scores; approved stage→superframe bindings registry).
-□ T9.3 Gateway-driven SemanticDigest on mark parents (claim-grounded latent
-  v2 corroborating interim-v1 candidates; permission ladder enforced).
+□ T9.3 THE ONE PAID PARENT-SEMANTICS PASS: gateway-driven SemanticDigest over
+  ALL mark parents (claim-grounded; summary + latent + domains + frames +
+  motifs in ONE call per packet; permission ladder enforced; flash primary;
+  durable jobs; canary-first). This replaces the cancelled CP2 regen — mark's
+  parent semantics are bought exactly once, here, on the final schema.
 □ T9.4 P2.6 engine parity contract + P2.7 remainder (5,000-chunk gate,
   parity compare harness, retry safety, readiness wiring) + P2.7b burst
   (chunk-complete barrier, manifest, per-burst metrics).

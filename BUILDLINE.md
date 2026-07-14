@@ -24,7 +24,7 @@ gated, at CP6. Any 4B-model move is owner-initiated only and has no slot.
 
 ---
 
-**NOW → CP2** (mark-only enrichment LAUNCHED — GO posted, canary-first)
+**NOW → CP3** (envelope + identity; CP2 superseded — schema before spend)
 **UNSLOTTED:** none as of 2026-07-14 (verified by coverage script)
 
 ---
@@ -45,7 +45,9 @@ CP1-D1: text-layer PDFs → docling layout (no OCR) → markdown/sections →
 structural lane; OCR only for image-only scans; fallback counter; general
 logic only. Exit: g1–g10 green on re-run. Consumes: REBATCH_RUNBOOK §Phase A.
 
-## CP2 — Mark-only enrichment (Phase B) — [P0.1]
+## CP2 — SUPERSEDED (owner sequencing ruling 2026-07-14) — [P0.1→CP6]
+No paid enrichment before the semantic schema era; mark parent semantics are
+generated ONCE at CP9 via the gateway digest. P0.1 verify boxes → CP6.
 Mark full regen → lexicon → cards LAST → readiness → after-eval. Ecom REMOVED
 (fix→owner reingest decision→ONE pass). P0.1's 4 verify boxes ride these
 receipts. Exit: coverage censuses + reconcile + no-regression eval.
