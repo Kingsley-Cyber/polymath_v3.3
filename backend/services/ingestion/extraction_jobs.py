@@ -79,7 +79,6 @@ async def active_ingest_doc_ids(
         if str(row.get("doc_id") or "")
     }
 
-
 def _stable_hash(value: Any) -> str:
     payload = json.dumps(value, sort_keys=True, default=str, separators=(",", ":"))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
@@ -617,6 +616,30 @@ async def _count(db: Any, collection: str, query: dict[str, Any]) -> int:
         return 0
 
 
+def terminal_extraction_artifact_matches_job(
+    job: dict[str, Any],
+    extraction_row: dict[str, Any],
+) -> bool:
+    """Whether durable artifact truth makes a provider retry unnecessary.
+
+    This is the pure decision already enforced by
+    ``reconcile_terminal_extraction_jobs``: only an ``ok``/``skipped`` row
+    for the same chunk and the exact same non-empty extraction contract can
+    retire a runnable job. It is exported so burst/readiness receipts reuse
+    this one truth instead of inventing a parallel retry policy.
+    """
+
+    if str(extraction_row.get("status") or "") not in {"ok", "skipped"}:
+        return False
+    job_chunk = str(job.get("chunk_id") or "")
+    row_chunk = str(extraction_row.get("chunk_id") or "")
+    if not job_chunk or job_chunk != row_chunk:
+        return False
+    job_contract = str(job.get("extraction_contract_hash") or "")
+    row_contract = str(extraction_row.get("extraction_contract_hash") or "")
+    return bool(job_contract and row_contract and job_contract == row_contract)
+
+
 async def reconcile_terminal_extraction_jobs(
     db: Any,
     *,
@@ -691,9 +714,7 @@ async def reconcile_terminal_extraction_jobs(
         row = extraction_by_chunk.get(str(job.get("chunk_id") or ""))
         if not row:
             continue
-        job_contract = str(job.get("extraction_contract_hash") or "")
-        row_contract = str(row.get("extraction_contract_hash") or "")
-        if not job_contract or not row_contract or job_contract != row_contract:
+        if not terminal_extraction_artifact_matches_job(job, row):
             continue
         promoted_at = row.get("promoted_at")
         row_status = str(row.get("status") or "")

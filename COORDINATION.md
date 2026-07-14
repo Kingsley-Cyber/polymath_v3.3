@@ -5689,6 +5689,94 @@ despite `EXIT=0`. Neither is accepted as a green receipt. The v2 receipt reran
 every check fail-fast and contains the non-empty final hash. No provider call,
 live write, or Phase-2 row occurred; Phase 2 remains owner-sealed.
 
+## [2026-07-14T23:04:25Z] EXECUTOR → SENIOR :: RECEIPT
+
+First T9.4 deterministic-slice focused invocation RED at test collection:
+true `EXIT=2` in `/tmp/t94_focused_v1.log`. Both new test modules failed to
+import `services.ingestion.extraction_artifacts` because the temporary overlay
+contained leaf files without the existing package tree; Python selected the
+regular `/app/services` package and could not extend it into the overlay. No
+contract assertion ran, and no provider call, live-state read/write, deploy,
+5,000 run, or spend occurred. Rebuilding the isolated overlay from the existing
+`/app/services`, `/app/models`, and `/app/tests` trees, then overlaying only the
+seven changed files and rerunning the identical focused boundary.
+
+## [2026-07-14T23:05:00Z] EXECUTOR → SENIOR :: RECEIPT
+
+Second T9.4 focused invocation reached the contract assertions and returned
+true `EXIT=1` in `/tmp/t94_focused_v2.log`: 17 passed / 1 failed. The sole
+failure over-specified the existing deterministic alias rule, expecting
+`National Aeronautics and Space Administration` while
+`services.ingestion.enrich.extract_aliases` correctly and deterministically
+returns the source-visible `The National Aeronautics and Space Administration`.
+The adapter is required to reuse that shared rule, so production code remains
+unchanged; correcting only the test to assert the shared result without
+inventing new article stripping. No live state, call, deploy, 5,000 run, or
+spend occurred.
+
+## [2026-07-14T23:05:58Z] EXECUTOR → SENIOR :: RECEIPT
+
+T9.4 deterministic-slice focused contracts GREEN after the assertion
+correction and schema golden pin: 18/18 passed, true `EXIT=0` in
+`/tmp/t94_focused_final.log`. Shared candidate artifact v1 schema hash is
+`sha256:370661b1059bb5c3e7027033d0dba91f399686eda5895bbe780dc39bb620d229`.
+Coverage proves all four engine names adapt into one strict candidate shape;
+field methods/runtime/model/source-wire versions are recorded; ungrounded
+`object_kind` and relation cues are omitted; aliases/definitions reuse shared
+backend rules; deterministic fact support is explicit and facts never gate
+queryability; parity is measurement-only; lane failure/fallback accounting is
+first-class; the burst barrier derives from CP1-D2a durable jobs/artifacts; and
+same-contract terminal rows skip provider retries while protected downstream
+surfaces remain preserve-only. No live gate, dispatch, mutation, deploy, 5,000
+run, production stamp, call, or spend occurred. Expanding to adjacent existing
+durable-job/readiness/RunPod contracts.
+
+## [2026-07-14T23:06:36Z] EXECUTOR → SENIOR :: RECEIPT
+
+First T9.4 adjacent invocation returned true `EXIT=1` in
+`/tmp/t94_adjacent_v1.log`: 251 passed / 4 failed. All four failures are the
+existing LocalExtraction registry-loader tests correctly failing closed because
+the isolated overlay omitted `backend/registries`; the missing path was
+`/tmp/t94_overlay/registries/domain_registry.v1.json`. No product assertion
+outside that absent-fixture dependency failed. Copying the current unchanged
+registry tree into the isolated overlay and rerunning the identical 15-file
+boundary. Calls/writes/deploys/5,000-run/spend remain zero.
+
+## [2026-07-14T23:07:08Z] EXECUTOR → SENIOR :: RECEIPT
+
+T9.4 deterministic-slice adjacent boundary GREEN after restoring the unchanged
+registry fixtures to the overlay: 255/255 passed, 8 existing warnings, true
+`EXIT=0` in `/tmp/t94_adjacent_v2.log`. Boundary spans the new candidate/
+parity/burst contracts plus extraction jobs and contracts, RunPod Flash,
+corpus/readiness materialization, document durable jobs, leases, ingest batch
+done-means-done, validation, graph promotion, LocalExtraction, router/service
+readiness, and retrieval readiness. This is contract/test evidence only: the
+5,000 PoC-pair run, live readiness wiring, pinned deployment, corpus-scale
+parity measurement, and production-ready stamp remain blocked/unclaimed as
+ruled. Calls/writes/deploys/5,000-run/spend remain zero.
+
+## [2026-07-14T23:08:54Z] EXECUTOR → SENIOR :: RECEIPT
+
+Post-scope-cleanup adjacent gate remains GREEN: 255/255 passed, 8 existing
+warnings, true `EXIT=0` in `/tmp/t94_adjacent_post_scope.log`. Diff review had
+caught that mechanical Black formatting touched the whole pre-existing
+`extraction_jobs.py`; I restored its committed layout and retained only the
+26-line pure same-contract terminal-artifact predicate plus the 3-line call-
+site replacement. This removes 300+ lines of unrelated formatting churn with
+no behavior change; the identical regression boundary re-proves the focused
+retry decision and all adjacent paths. No live state, call, deploy, 5,000 run,
+or spend occurred.
+
+## [2026-07-14T23:09:37Z] EXECUTOR → SENIOR :: RECEIPT
+
+T9.4 deterministic-slice static gate GREEN: six new model/service/test files
+are Black-clean, host compile is clean for all seven changed Python files, and
+`git diff --check` is clean; true `EXIT=0` in `/tmp/t94_static.log`. Existing
+`extraction_jobs.py` was intentionally excluded from whole-file Black because
+its committed layout predates current formatting; the added 26-line predicate
+itself is Black-shaped and the scope-clean diff is 26 insertions / 3 replaced
+lines. No calls, live reads/writes, deploy, 5,000 run, or spend.
+
 ## [OWNER-RELAY 2026-07-14T22:5xZ] OWNER :: DECISIONS (relayed verbatim-intent by senior; owner live in senior channel)
 1. "lane b." — Lane B APPROVED: fix-then-buy for the mark digest pass.
 2. Full program directive (owner words, lightly condensed): "i want a full
@@ -5741,3 +5829,24 @@ E3. FULL E2E: ingest ~15 owner-named-folder docs into a FRESH TEST CORPUS
     negatives, with preregistered targets before the run.
 Post a B1/B2 design note before code; the E2E details get their own design
 review at E1 completion.
+
+## [2026-07-14T23:11:30Z] EXECUTOR → SENIOR :: ACK
+
+ACK owner Lane B and the scoped future E2E authorization. I will publish the
+already-green T9.4 deterministic contract slice first, then post the required
+B1/B2 design note before changing eligibility or claim-packet code. Execution
+order is frozen as B1 eligibility recipe/census → B2 certified local atomic
+claims + packet version bump → B3 recorded deterministic-domain policy → B4
+fresh 10-packet mark preflight; no Phase-2 provider call occurs before those
+gates. The later ~15-document run will use a fresh test corpus from the named
+folder after E1/E2 review and will not mutate/reingest the existing ecommerce
+corpus. Existing 66 accepted digests remain valid purchases as ruled.
+
+## [2026-07-14T23:12:26Z] EXECUTOR → SENIOR :: RECEIPT
+
+T9.4 exact staged-tree guard GREEN: true `EXIT=0` in
+`/tmp/t94_staged_guard.log`; exactly 10 intended files staged, `tmp/` staged
+count zero, credential-shaped staged-diff scan clean, and
+`git diff --cached --check` clean. Focused 18/18, adjacent 255/255, and static
+gates remain the publication evidence. Committing/pushing the deterministic
+slice now; no live state, call, deploy, 5,000 run, or spend.

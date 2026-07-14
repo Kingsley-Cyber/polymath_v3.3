@@ -1473,16 +1473,27 @@ Acceptance:
 
 ### P2.6 Engine Parity And Provenance
 
-- [ ] Version a shared extraction artifact contract across cloud, local, and
-  RunPod engines.
-- [ ] Record extraction engine, model ID, contract hash, field-level methods,
-  offsets, confidence, and evidence.
-- [ ] Decide whether deterministic facts are supported per engine; do not make
-  noisy facts mandatory for queryability.
-- [ ] Leave `object_kind` blank when it cannot be grounded; do not fabricate it
-  from coarse entity type.
-- [ ] Add relation-cue derivation only when source-evidenced.
-- [ ] Keep deterministic alias/definition rules in shared backend validation.
+- [x] Version a shared extraction artifact contract across cloud, local, and
+  RunPod engines. *(T9.4 deterministic slice: strict
+  `candidate_extraction_artifact.v1` adapters cover cloud, private local,
+  legacy local, and RunPod; authority is explicitly executor-proposed and
+  owner-ratifiable.)*
+- [x] Record extraction engine, model ID, contract hash, field-level methods,
+  offsets, confidence, and evidence. *(T9.4: native/runtime/wire identities and
+  exact-or-unavailable offset provenance are mandatory in the shared shape.)*
+- [x] Decide whether deterministic facts are supported per engine; do not make
+  noisy facts mandatory for queryability. *(T9.4 v1 records current truth:
+  legacy-local deterministic facts supported; cloud/private-local and RunPod
+  not deterministic; facts required for queryability is false for every
+  engine.)*
+- [x] Leave `object_kind` blank when it cannot be grounded; do not fabricate it
+  from coarse entity type. *(T9.4 adapter preserves it only with an exact
+  caller-supplied source quote containing the proposed kind.)*
+- [x] Add relation-cue derivation only when source-evidenced. *(T9.4 adapter
+  carries a cue only when it maps to one unique exact source span.)*
+- [x] Keep deterministic alias/definition rules in shared backend validation.
+  *(T9.4 adapters ignore provider aliases/definitions and recompute through
+  `services.ingestion.enrich`.)*
 - [ ] Run the same post-extraction lexicon projector (co-occurrence, usage
   frames, semantic profile, DF/specificity, and representation admission) for
   cloud, local, RTX, and RunPod artifacts so provider choice cannot change the
@@ -3034,6 +3045,60 @@ A corpus is strict-ready only when:
 - Checklist boxes closed: Phase-1C release and the pre-Phase-2 legacy fence.
   T9.3 remains open: Phase 2, corpus-wide completion, and bounded tail are
   owner/sequencing gated; no projection or retrieval activation is claimed.
+
+### 2026-07-14 - T9.4 provider-neutral parity and burst-safety contracts
+
+- Commit: this commit on `claude-continuation-20260713`.
+- Owner: Codex sole executor under `CODEX_MISSION.md`; Claude approved the
+  deterministic T9.4 slice with four boundaries: measurement never
+  adjudication, executor-proposed/owner-ratifiable authority, CP1-D2a as the
+  one completeness truth, and first-class per-lane failure/fallback accounting.
+- Corpus/data scope: synthetic contract fixtures only. No UGO, mark, ecommerce,
+  or v2 corpus row was read; the PoC-pair 5,000-chunk gate did not run.
+- Code changes: added strict `candidate_extraction_artifact.v1`, additive pure
+  adapters for cloud/private-local/legacy-local/RunPod `ExtractionResult`
+  shapes, a same-chunk measurement-only parity report, and pure disposition/
+  durable-job barrier/burst-metrics contracts. Exported the exact existing
+  same-contract terminal-artifact predicate used by extraction-job
+  reconciliation so retry receipts reuse one decision.
+- Durable migration/backfill: none. No queue row, extraction, summary, vector,
+  graph artifact, manifest, readiness row, or projection was persisted.
+- Before metrics: engines shared downstream dataclasses but had no one strict
+  candidate/provenance schema, no symmetric like-for-like delta report, and no
+  receipt contract joining the disposition matrix to CP1-D2a durable-job
+  truth and per-lane burst accounting.
+- After metrics: shared schema hash is
+  `sha256:370661b1059bb5c3e7027033d0dba91f399686eda5895bbe780dc39bb620d229`.
+  Parity reports engine/runtime/model/source-wire identities plus entity,
+  relation, exact-evidence, ontology, graph-eligibility, failure, and fallback
+  measures without a verdict/winner field. Burst manifests dispatch only when
+  all valid chunks are accounted terminal-or-runnable by exact durable job
+  identity; metrics expose chunks/sec, worker/billed seconds, cost per 1k, and
+  per-lane failures/fallbacks.
+- Tests by tier: focused 18/18 passed
+  (`/tmp/t94_focused_final.log`); adjacent extraction/RunPod/durable-job/
+  readiness/graph/local-extraction boundary passed 255/255 with 8 existing
+  warnings (`/tmp/t94_adjacent_post_scope.log`); six new files are Black-clean,
+  all seven changed Python files compile, and diff check is clean
+  (`/tmp/t94_static.log`).
+- Cross-corpus test: intentionally not run. The contract supports corpus-bound
+  manifests but the owner-designated mark/ecommerce 5,000 gate and actual
+  engine comparison remain blocked by the senior's production boundary.
+- Failure/rollback test: duplicate engine/chunk rows, source-text mismatch,
+  incomplete metadata/chunking, active ingest, owner-pending/projection-only
+  dispositions, unfinished pipeline jobs, chunk/contract identity drift,
+  ungrounded object kinds/cues, and incomplete burst accounting all fail
+  closed. Rollback removes code/tests only; no durable state exists.
+- Deployment image/health: no rebuild, restart, endpoint deploy, or production
+  readiness stamp. Tests ran from an isolated overlay of the healthy backend
+  image with current registry fixtures.
+- Remaining risks: the full provider-independent lexicon projector remains
+  open; current RunPod responses still need a pinned image/pipeline version
+  surface; live readiness wiring and the 100/500/5,000 measured gates remain
+  open; no engine has been adjudicated and RunPod remains non-production.
+- Checklist boxes closed: the first six P2.6 shared-contract/provenance/
+  grounding-rule bullets only. P2.6 projector parity, all corpus-scale P2.7
+  acceptance, and live P2.7b orchestration remain open.
 
 ## Implementation Log Template
 
