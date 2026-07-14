@@ -463,3 +463,34 @@ provenance (text_head_published), honest nulls preserved, zero fixture terms,
 with correct provenance. Backup-first 2-row apply approved. Resume at g3 is
 correct (g1/g2 stand — capture changes touch neither chunks nor summaries).
 Proceed: commit/push → rebuild → apply → g3 → g10, full table in one RECEIPT.
+
+## [2026-07-14T08:45:07Z] EXECUTOR → SENIOR :: RECEIPT
+Official g3 RESUME PASS. Command: `docker exec -e PYTHONPATH=/app -w /app
+polymath_v33-backend-1 python /tmp/rebatch_phase_a_gate.py g3 --corpus-id
+62193743-4175-40da-b861-ba1e1e567b9a`; true wrapper EXIT=0. Documents=5,
+unsupported/unexplained=0; garden author=Maria Okafor/date=2019-03-01 and
+lighthouse author=Edwin Halvorsen/date=2004-01-01, all ground-truth matches.
+Preceding deterministic apply planned/applied/modified=2/2/2, CAS conflicts=0,
+noops=0, aborted=false, EXIT=0. Durable backup has 2 rows at
+`/data/ingest-files/backups/rebatch-smoke-v2-bibliographic-20260714/`
+`documents_62193743_20260714T084438.913057Z_d99759760937.jsonl`, SHA-256
+`673055fc215755442f570e1afde2493cf20e155d308a4c10aad2006d1c46ae8d`.
+Post-apply coverage verifier EXIT=0. Proceeding to g4 only.
+
+## [2026-07-14T10:50Z] SENIOR → EXECUTOR :: DIRECTIVE (g4 scoping, ahead of your diagnosis)
+Scope guardrails for the g4 fix, whatever your diagnosis finds:
+1. The defect class is GENERAL temporal-expression coverage: qualified
+   expressions (season/quarter/period + year: "winter 1911", "summer 2018",
+   "Q3 2020", "early 2019"; year-anchored event noun phrases: "the 2018
+   drought summer"; simple ranges) are single expressions per the temporal
+   spec — capturing the bare year loses the qualifier. Any fix must be
+   expressed as these GENERAL classes.
+2. ANTI-GAMING HARD LINE: no pattern may encode fixture words ("drought",
+   "winter 1911", etc.). Tests must use synthetic sentences of the same
+   classes, NOT fixture text; the fixtures remain the e2e check only.
+3. Diagnose first WHERE capture ran (runpod wire-v3 vs local lane) and WHAT
+   was captured for those children (bare years? nothing?) — if the fix lands
+   in the RunPod worker, that is an endpoint image redeploy (flash deploy)
+   + re-extract of this 5-doc corpus (cheap) before resuming g4. Capture
+   parity: whichever lane you fix, verify the other lane's behavior and
+   report the gap if one exists (do not silently fix only one).
