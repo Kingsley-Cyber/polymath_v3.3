@@ -1,0 +1,39 @@
+qdrant collections: 20
+
+polymath_v2 (cid8=999b5934) mongo children=240876 parents=130503
+  qdrant corpus_999b5934_graph: 222783
+  qdrant corpus_999b5934_hrag: 280175
+  qdrant corpus_999b5934_naive: 309661
+  qdrant corpus_999b5934_schemas: 291535
+
+markbuildsbrands_transcripts (cid8=5a20bc21) mongo children=3791 parents=1015
+  qdrant corpus_5a20bc21_graph: 3687
+  qdrant corpus_5a20bc21_hrag: 4696
+  qdrant corpus_5a20bc21_naive: 4696
+  qdrant corpus_5a20bc21_schemas: 2490
+
+ecommerce_AI_FILM_SCHOOL (cid8=fd460347) mongo children=56996 parents=10222
+  qdrant corpus_fd460347_graph: 55774
+  qdrant corpus_fd460347_hrag: 65227
+  qdrant corpus_fd460347_naive: 65227
+  qdrant corpus_fd460347_schemas: 45949
+
+UGO_CORPUS (cid8=bcf80054) mongo children=659 parents=203
+  qdrant corpus_bcf80054_graph: 659
+  qdrant corpus_bcf80054_hrag: 862
+  qdrant corpus_bcf80054_naive: 862
+  qdrant corpus_bcf80054_schemas: 7494
+
+MISMATCHES: 0
+
+INTERPRETATION (2026-07-13, orchestrator):
+- UGO: EXACT reconcile (hrag 862 = 659 children + 203 parents; naive same; graph = 659 children).
+- mark: hrag/naive 4,696 = 3,791 children + 905 summary-eligible parents (parent_summary_required_clause
+  excludes 110 non-body parents); graph 3,687 = children minus 104 extraction-ineligible chunks. CONSISTENT.
+- ecom: hrag/naive 65,227 = 56,996 + 8,231 summary-eligible parents; graph 55,774 = children minus 1,222
+  junk/empty (matches junk-chunk census). CONSISTENT under the same rule.
+- polymath_v2: DOES NOT reconcile under any simple rule: naive 309,661 vs 240,876 Mongo children
+  (+68,785 unexplained), hrag 280,175. Suspected stale legacy projection points / legacy denominator drift.
+  OPEN ITEM -> P2.5b ProjectionManifest + strict-ready reconciliation gate must make this provable;
+  candidate remediation: manifest-driven rebuild of v2 naive/hrag collections (additive, versioned).
+- schemas collections are lexicon/schema mirrors (kind-partitioned), not chunk-count comparable.
