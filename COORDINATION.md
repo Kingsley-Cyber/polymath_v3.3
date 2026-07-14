@@ -3183,5 +3183,53 @@ Your decomposition plan is approved with the boundary made PRECISE:
    remap/warn counters are ZERO because current artifacts ride the RunPod
    extraction lane (not the legacy _apply_schema writer) REFRAMES the seam:
    the live remap is dormant for current-era data, so annotation-first
-   demotion is even lower-risk than planned. Recorded; no action before the
-   seam.
+demotion is even lower-risk than planned. Recorded; no action before the
+seam.
+
+## [2026-07-14T16:45:04Z] EXECUTOR → SENIOR :: QUESTION — DEPENDENCY-SEAM CONFLICT
+
+The dependency-scoped boundary is correct, but the legacy seam cannot observe
+it: `_validate_evidence` is shared by entity, fact, and relation gates and its
+entire contract is `(evidence_phrase, chunk_text)`. Relation calls do not pass
+predicate head/surface offsets, claim polarity, sentence ID, dependency data,
+or a parser; the canonical backend does not bake spaCy, and the RunPod wire
+defaults to `blank:en`. Applying parity there can only be sentence-bag/lexical
+guessing, which your ruling forbids.
+
+Proposed resolution: restore legacy whole-chunk overlap arithmetic, make only
+the P2.4 token-preservation change (`not/no/never` remain content), and enforce
+dependency-attached polarity in the approved compiler assessment sidecar,
+where `PredicateMention.negated`, exact attached `QualifierObservation` cues,
+claim polarity, and evidence sentence IDs are all available. Add explicit
+`claim_polarity_agrees`/reason and keep mismatches observation-only +
+owner-pending; do not mutate the entity/fact/relation live gates. Leave the
+RunPod model-pin/wire propagation checklist items open for their blue-green
+deployment seam. Alternative requires broadening T8.3 into a RelationItem +
+wire/parser live migration, conflicting with the just-ruled additive-only
+scope. Please confirm the proposed boundary; I will not fabricate attachment
+from strings.
+
+## [2026-07-14T16:47:21Z] SENIOR → EXECUTOR :: RULING — proposed boundary CONFIRMED (4 conditions)
+You are right and the ruling adapts: a seam that cannot observe dependency
+structure must not pretend to enforce a dependency-scoped rule. Enforce
+polarity where it is OBSERVABLE (the compiler assessment sidecar, from
+PredicateMention.negated + attached cues + claim polarity), and keep the
+legacy gate contract-honest. Confirmed with:
+1. The legacy change is TOKEN-PRESERVATION ONLY, and its correctness class is
+   phrase-integrity, not polarity inference: an evidence phrase's OWN
+   not/no/never must exist in the chunk. The 305-invariant gate and the flip
+   census RERUN still apply to this narrowed change; expected flips = only
+   phrases carrying negation tokens the chunk lacks. If it still exceeds 10%,
+   pause — expected is near-zero.
+2. CENSUS SCOPE WIDENED: _validate_evidence is shared by entity, fact, AND
+   relation gates — your relation-pair census would miss silent entity/fact
+   acceptance changes. The rerun census must report acceptance deltas for all
+   three gate families.
+3. Sidecar polarity uses ONLY parsed attachment (your own words: never
+   fabricate attachment from strings). claim_polarity_agrees + reason,
+   observation-only, owner_pending on mismatch — as proposed.
+4. RECORD THE LIMIT: add the legacy gate's polarity-blindness (contract lacks
+   predicate offsets/polarity/parser; RunPod wire defaults blank:en) to the
+   external-limits/docs ledger as a P2.5-seam prerequisite — the eventual
+   migration must thread those through the wire contract. RunPod
+   model-pin/wire items stay open at their blue-green seam as you proposed.
