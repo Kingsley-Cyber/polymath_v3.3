@@ -1,0 +1,20 @@
+{
+  "registry": "motif_registry",
+  "version": "v1",
+  "source": "owner-delivered in-chat 2026-07-14 (verbatim; no reinterpretation)",
+  "policy_note": "Motifs are ordered multi-frame patterns. Stage labels are stored EXACTLY as delivered. Stage-to-superframe bindings are NOT owner-delivered and must not be invented: any resolver mapping stages onto MF ids is recipe/policy that requires explicit owner confirmation before use. Motif matching is normalization against these canonical patterns (Stage 9 of the pipeline); LLM-proposed novel motifs resolve to this registry or remain candidates.",
+  "motifs": [
+    {"motif_id": "M01", "pattern_verbatim": "SIGNAL → INTERPRETATION → VALUATION → CHOICE", "stages": ["SIGNAL", "INTERPRETATION", "VALUATION", "CHOICE"]},
+    {"motif_id": "M02", "pattern_verbatim": "REPRESENTATION → ATTENTION → BELIEF → ACTION", "stages": ["REPRESENTATION", "ATTENTION", "BELIEF", "ACTION"]},
+    {"motif_id": "M03", "pattern_verbatim": "GOAL → CONSTRAINT → DECISION → OUTCOME", "stages": ["GOAL", "CONSTRAINT", "DECISION", "OUTCOME"]},
+    {"motif_id": "M04", "pattern_verbatim": "ACTION → FEEDBACK → UPDATE → NEW ACTION", "stages": ["ACTION", "FEEDBACK", "UPDATE", "NEW ACTION"]},
+    {"motif_id": "M05", "pattern_verbatim": "SCARCITY → ALLOCATION → TRADE-OFF", "stages": ["SCARCITY", "ALLOCATION", "TRADE-OFF"]},
+    {"motif_id": "M06", "pattern_verbatim": "IDENTITY/ROLE → NORM → BEHAVIOR → SOCIAL FEEDBACK", "stages": ["IDENTITY/ROLE", "NORM", "BEHAVIOR", "SOCIAL FEEDBACK"]},
+    {"motif_id": "M07", "pattern_verbatim": "VARIATION → SELECTION CRITERION → RETENTION", "stages": ["VARIATION", "SELECTION CRITERION", "RETENTION"]},
+    {"motif_id": "M08", "pattern_verbatim": "STOCK/FLOW → THRESHOLD → STATE TRANSITION", "stages": ["STOCK/FLOW", "THRESHOLD", "STATE TRANSITION"]},
+    {"motif_id": "M09", "pattern_verbatim": "COMPONENT INTERACTIONS → AGGREGATE PATTERN → EMERGENCE", "stages": ["COMPONENT INTERACTIONS", "AGGREGATE PATTERN", "EMERGENCE"]},
+    {"motif_id": "M10", "pattern_verbatim": "UNCERTAINTY → PROXY/HEURISTIC → DECISION", "stages": ["UNCERTAINTY", "PROXY/HEURISTIC", "DECISION"]},
+    {"motif_id": "M11", "pattern_verbatim": "INTERDEPENDENCE → TRUST/POWER MECHANISM → COORDINATION OUTCOME", "stages": ["INTERDEPENDENCE", "TRUST/POWER MECHANISM", "COORDINATION OUTCOME"]},
+    {"motif_id": "M12", "pattern_verbatim": "INTERVENTION → MEDIATOR → OUTCOME, UNDER CONDITION", "stages": ["INTERVENTION", "MEDIATOR", "OUTCOME"], "qualifier": "UNDER CONDITION"}
+  ]
+}

@@ -64,9 +64,9 @@ this file with zero chat-history dependence. Updated 2026-07-14.
 `backend/registries/domain_registry.v1.json` (D01–D16 + members),
 `superframe_registry.v1.json` (MF01–MF16),
 `domain_superframe_affinity.v1.json` (priors; may never force/forbid an
-assignment). MOTIF registry: NOT YET DELIVERED — motifs are ordered frame
-patterns; canonical motif normalization + any seed motif schema still come from
-the owner. Do not invent registry entries.
+assignment). `motif_registry.v1.json` (M01–M12) — ALL FOUR delivered. Stage→superframe
+bindings are not owner-delivered: resolvers must not use any such mapping
+until the owner confirms one. Do not invent registry entries.
 
 ## State snapshot (2026-07-14)
 
@@ -90,8 +90,7 @@ regressing >5pts, negatives 5/5, latency within +20%.
 BLOCKED ON OWNER: (1) key rotation → then S4 mark batch (1,004 parents;
 driver `/tmp/s4_quarantine_stale.py` in backend container + 
 `scripts/polymath_summary_backfill_scoped.py --corpus-id 5a20bc21-… --apply`;
-pin pool to deepseek-v4-flash); (2) motif registry schema; (3) S3 matrix §8
-sign-off; (4) S7 facet DF rule ("facet DF rule approved").
+pin pool to deepseek-v4-flash); (2) S3 matrix §8 sign-off; (3) S7 facet DF rule ("facet DF rule approved").
 
 NEXT UNBLOCKED WORK, in order: P2.5b registry-independent slices (canonical
 JSON serializer + hash-namespace golden vectors + identity recipes + legacy
