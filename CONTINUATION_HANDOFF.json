@@ -1,5 +1,5 @@
 {
-  "version": "2026-07-14.6",
+  "version": "2026-07-14.7",
   "purpose": "Machine-readable job queue for any continuing agent. Read CONTINUATION_HANDOFF.md first.",
   "authoritative_docs": [
     "CLAUDE.md",
@@ -11,7 +11,8 @@
     "docs/SEMANTIC_EXTRACTION_PRODUCTION_READINESS_2026-07-13.md",
     "docs/EXECUTION_PLAN_2026-07-13.md",
     "docs/LOCAL_EXTRACTION_THREE_SCHEMA_DESIGN_2026-07-14.md",
-    "docs/REBATCH_RUNBOOK_2026-07-14.md"
+    "docs/REBATCH_RUNBOOK_2026-07-14.md",
+    "docs/STRUCTURED_OUTPUT_GATEWAY_SPEC_2026-07-14.md"
   ],
   "registries": {
     "domain": "backend/registries/domain_registry.v1.json",
@@ -39,6 +40,13 @@
       "executor": "codex",
       "what": "per-corpus enrichment per runbook Phase B: mark full, ecom clean-docs (junk-deletion/subset OWNER-GATED), UGO skip, v2 frozen/deterministic-only; lexicons+cards LAST; preflight canary per paid stage; per-provider empty-latent counter",
       "gate": "B6 smoke + reconciliation + checklist receipts"
+    },
+    {
+      "id": "p2.5c-gateway",
+      "status": "ready",
+      "executor": "codex",
+      "what": "structured-output gateway per docs/STRUCTURED_OUTPUT_GATEWAY_SPEC_2026-07-14.md + checklist P2.5c boxes; SemanticDigestV1 + ladder + semantic validator + targeted repair + dead-letter + provenance/cache; UGO packet canary",
+      "gate": "P2.5c acceptance boxes green; Ghost A path untouched"
     },
     {
       "id": "eval-post-s2",

@@ -1293,6 +1293,43 @@ Acceptance:
 - [ ] P2.5b passes on UGO before the PoC pair's paid mass re-extraction or any
   production graph/vector cutover.
 
+### P2.5c Structured-Output Gateway (semantic digest calls)
+
+Design of record: `docs/STRUCTURED_OUTPUT_GATEWAY_SPEC_2026-07-14.md`
+(owner-delivered 2026-07-14). RunPod = extraction; API via THIS gateway =
+digests. Registry-independent; first S11 build unit alongside P2.5b envelope.
+
+- [ ] `SemanticDigestV1` pydantic contract (portable subset: shallow, closed,
+  fully-required, enum-driven, versioned) + `model_json_schema()` as the single
+  source of truth; golden schema-hash test.
+- [ ] Capability ladder: Tier1 native strict json_schema via LiteLLM
+  `supports_response_schema()`; Tier2 grammar-constrained local fallback
+  (llama.cpp Metal path; MLX not trusted until proven); Tier3 forced tool-call;
+  Tier4 JSON-mode+validate+one-retry (last resort, flagged in provenance).
+- [ ] Python semantic validator (claim refs exist+belong to parent; registry
+  ids exist or explicitly candidate; frames MF01-16 with support; latent needs
+  claims in claim-grounded mode; motifs >=2 frames over proposed/validated
+  frames; no self-links; LLM proposals never source-observed/validated).
+- [ ] Targeted repair loop: attempt-2 sends exact validation errors under the
+  SAME constrained schema; failures -> dead-letter queue, never canonical
+  writes; deterministic-safe fixes in Python only.
+- [ ] Determinism/provenance record on every generation (model/runtime/
+  tokenizer/template/schema/prompt hashes, temp 0, input/output hashes) +
+  cache keyed on input+model+schema+prompt+runtime.
+- [ ] Prompt/schema separation: compact rule prompt; schema only via
+  response_format; scope discipline (digest never emits entities/triples/
+  claims/Cypher/records/payloads/embeddings).
+
+Acceptance:
+
+- [ ] UGO parent-packet canary: 10 packets through Tier1 with 0 structural
+  failures, semantic-validator receipts, >=1 exercised targeted repair, >=1
+  dead-letter demonstration (synthetic), provenance rows complete.
+- [ ] Ladder downgrade test: same packet through Tier1 and Tier4 produces
+  schema-identical shapes; Tier4 flagged in provenance.
+- [ ] Cutover stays gated: Ghost A `RetrievalSummary` path untouched until the
+  measured cutover ruled in P2.5b.
+
 ### P2.6 Engine Parity And Provenance
 
 - [ ] Version a shared extraction artifact contract across cloud, local, and
