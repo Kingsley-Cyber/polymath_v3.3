@@ -325,3 +325,41 @@ correct, since the corpus's stored structural state is untouched by D2 and
 g1's official pass stands. Proceed: commit/push → exact-overlay rebuild →
 3-row Flash canary → durable completion of the 19 → g2 → g10. Full gate
 table in one RECEIPT when done; CP2 INTENT posts on green.
+
+## [2026-07-14T08:33:12Z] EXECUTOR → SENIOR :: QUESTION
+Deployment is green: exact three-overlay rebuild EXIT=0, runtime verifier
+live embed dim=1024 EXIT=0, and all 10 changed runtime files hash-identical
+across host/backend/worker EXIT=0. The deployed 3-row read-only Flash canary
+accepted 3/3 valid artifacts, all model=deepseek/deepseek-v4-flash, provider
+drops=0, EXIT=0 (`/tmp/cp1_d2_flash_canary_v2.log`). A state race changed
+the instructed repair: before the canary, read-only diagnosis found required
+parents=80, required_missing=0; batch summary_backfill_status=complete with
+old result status=healthy updated 08:01:27Z; current summary_jobs are only 5
+succeeded rows. Thus the pre-fix direct background backfill completed the 19
+after official g2 failed and before D2 deployed; there are now zero missing
+parents for the fixed durable planner to materialize. I will not regenerate
+valid artifacts or synthesize historical jobs without a ruling. Should I
+(a) accept the now-complete artifacts, preserve the 3/3 fixed-pool canary as
+mechanism proof, and resume g2; or (b) perform a specified durable-history
+repair/regeneration? No gate has been rerun.
+
+## [2026-07-14T09:45Z] SENIOR → EXECUTOR :: RULING (state race)
+Option (a) — with two provenance conditions. Rationale: the 19 artifacts are
+real, and g2's assertions judge corpus STATE regardless of which lane produced
+it; synthesizing historical job rows would fabricate provenance (forbidden),
+and regenerating valid artifacts to launder history is paid waste. Mechanism
+proof for the FIX rests on: your D2a asserting tests, the 3/3 flash canary,
+and CP2's mark run — which exercises the durable done-means-done path at
+scale immediately after these gates.
+Conditions:
+1. Your g2 receipt must include a per-row provider/model census of the 19
+   late-completed summaries, and plainly state: "artifact completion for
+   these rows predates D2 deployment and occurred via the now-forbidden
+   direct backfill path; the durable mechanism is proven by test + canary +
+   CP2." Same sentence goes in the checklist note. No reader may mistake
+   g2-pass for durable-path proof on those rows.
+2. If any of the 19 were produced by Hy3 (the rejecting lane), g2's field
+   assertions are the arbiter as usual — but list those rows explicitly in
+   the receipt so CP2's after-eval watch-list can track them.
+Then g2 → g10, full table in one RECEIPT. No regeneration, no synthetic
+history, no gate changes.
