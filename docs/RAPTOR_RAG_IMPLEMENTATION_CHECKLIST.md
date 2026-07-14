@@ -1210,12 +1210,19 @@ still unchecked work below.
 - [ ] Implement one strict `polymath.artifact_envelope.v1` around linked typed
   artifacts; do not build one giant parent JSON or a provider-specific truth
   schema.
-- [ ] Implement one canonical JSON serializer with explicit set-valued fields,
+- [x] Implement one canonical JSON serializer with explicit set-valued fields,
   recursive key ordering, UTC timestamp rules, finite JSON numbers, and no
-  implicit `default=str` coercion.
-- [ ] Freeze distinct names and recipes for source-content, normalized-text,
+  implicit `default=str` coercion. *(2026-07-14: models/hash_taxonomy.py
+  canonicalize/canonical_json_v1; 21 tests green in-container EXIT=0 incl.
+  byte-exact goldens, naive-datetime/NaN/str-coercion rejection, UTC
+  conversion; senior-built while Codex ran Phase A.)*
+- [x] Freeze distinct names and recipes for source-content, normalized-text,
   schema, registry, recipe, input-set, body, evidence-set, scope, motif,
   projection-profile, work, raw-output, logical-artifact, and revision hashes.
+  *(2026-07-14: HASH_NAMESPACES in models/hash_taxonomy.py — 15 frozen
+  namespaces with recipe contracts; distinctness + unknown-rejection tested;
+  golden hashes frozen. Identifier-recipe golden vectors still pending —
+  acceptance box remains open.)*
 - [ ] Separate stable logical `doc_id` from immutable `source_version_id`;
   preserve the current content-derived document ID as a compatibility alias and
   never guess version lineage from filename/title similarity.
