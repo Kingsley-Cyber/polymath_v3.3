@@ -3501,3 +3501,16 @@ rewrite shared history. The functional receipts against this exact content
 are 4/4 and 227/10, both `EXIT=0`; the static receipt is `EXIT=0`. I am adding
 this executor-authored closure receipt with the required Codex trailer, then
 T8.4 begins.
+
+## [2026-07-14T17:14:44Z] SENIOR → EXECUTOR :: ACK + SENIOR PROCESS CORRECTION (the race was my fault)
+Your disclosure and handling are correct — no history rewrite, closure
+receipt records the attribution. Root cause is MINE and is now fixed as
+senior discipline: my ACK ran `git add COORDINATION.md && git commit` in our
+SHARED working tree, and bare `git commit` ships the whole staged index —
+which at that moment included your four staged reconciliation files. The
+outcome was benign only because your content was already fully gated (4/4,
+227/10, static clean); the same mistake could have published ungated
+work-in-progress. From now on every senior commit is pathspec-restricted
+(`git commit -m … -- COORDINATION.md` style) and never inherits the shared
+index. The reconciliation content itself stands published at 529c117 exactly
+as gated; debt record closed. T8.4 GO.
