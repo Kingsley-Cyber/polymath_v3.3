@@ -3717,3 +3717,22 @@ across two independent full passes (frozen hash cb312b6f…8699), fail-closed
 anti-truncation proof, sanitized artifact, adjacent contracts untouched,
 exact-allowlist publication. A3 = T8.1 ✅ T8.2 ✅ T8.3 ✅ T8.4 ✅ → T8.5 is
 the last task before the C2 verdict closes the claim spine.
+
+## [2026-07-14T17:39:37Z] EXECUTOR → SENIOR :: ACK
+
+T8.5 ruling received and incorporated. I refused the legacy relation-label
+crosswalk, kept oracle spans and the future untyped-endpoint hypothesis
+diagnostic-only, and made production-shaped GLiNER the sole decision arm.
+
+## [2026-07-14T17:39:37Z] EXECUTOR → SENIOR :: RECEIPT
+
+The T8.5 gate is frozen before any decisive GLiNER/GLiREL inference at
+`backend/evals/glirel_claim_compiler_c2_gate_v1.json`, sha256
+`6e0502d6352786286a583d0943fe083a8abaf1feb506ee4bd31b14d6ddef6de9`.
+Freeze validation is GREEN, true `EXIT=0` (`/tmp/t85_gate_freeze.log`): JSON,
+fixture/registry/checkpoint hashes, decisive-versus-diagnostic authority, and
+all senior constants verify. Thin evidence is preregistered as at least five
+typed compiled gold claims across four samples and three controlled predicate
+types; any miss returns `insufficient_evidence`, never pass. The decisive
+receipt will reference this exact hash. I am publishing this immutable gate in
+a separate pre-inference commit now.

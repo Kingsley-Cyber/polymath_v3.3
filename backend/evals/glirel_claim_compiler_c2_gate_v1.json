@@ -1,0 +1,136 @@
+{
+  "schema_version": "polymath.glirel_claim_compiler_c2_gate.v1",
+  "preregistered_at_utc": "2026-07-14T17:38:23Z",
+  "authority": {
+    "owner_decision": "C2 approved 2026-07-14",
+    "senior_ruling": "COORDINATION.md 2026-07-14T17:35:17Z",
+    "change_policy": "immutable_after_first_decisive_inference; changes require a new version and a new pre-run hash"
+  },
+  "purpose": "Decide whether controlled-label GLiREL candidates improve evidence-grounded ClaimRecordV1 compilation enough to own Stage 4. Relations remain observation-only unless the decisive arm passes every gate.",
+  "inputs": {
+    "gold_fixture": {
+      "path": "backend/evals/semantic_extraction_gold_v1.json",
+      "sha256": "866d1b2104c7bc7d3a5696462058053a6bb041c8bd6784eae59a1f390d5e7816"
+    },
+    "extraction_vocabulary": {
+      "path": "backend/registries/extraction_vocabularies.v1.json",
+      "sha256": "47ea44fee2341c3cc65ef2bb4f99795947aa0c1cc9e1d55314efc7647af89612",
+      "entity_labels_sha256": "a213a7ab6bfb9d258e361da09b4d251d3a32250e007ff75c28c07ff3f8c32c11",
+      "predicate_labels_sha256": "977b96634f09799faa22f13b531f2251f8a946336de241bd66187bdd83956be8"
+    },
+    "predicate_normalization": {
+      "path": "backend/registries/predicate_normalization.v1.json",
+      "sha256": "0ba7cdc3d8dd6f643e7ccce74b46f4711940947fa73020adaf130f5efd727ce8"
+    }
+  },
+  "model_contract": {
+    "spacy": {
+      "model": "en_core_web_sm",
+      "required_model_version": "3.8.0",
+      "required_spacy_version": "3.8.14"
+    },
+    "gliner": {
+      "model_id": "urchade/gliner_medium-v2.1",
+      "revision": "40ec419335d09393f298636f471328b722c6da9e",
+      "config_sha256": "a8f3c2ecc57deb70077be6940962aa60e82d861a153a5cd2839b91795968ae7d",
+      "weights_sha256": "922214c0c60f7835bb5c00f52ad1769d38518d5183f85de7bc03893a8403c023",
+      "threshold": 0.4,
+      "labels": "exact entity_types array from extraction_vocabularies.v1.json"
+    },
+    "glirel": {
+      "checkpoint": "models/glirel_ghost_b_v1/best",
+      "weights_sha256": "05849c34aa6910b6cdcc37ceaab023272c5c9dcccb5a9eb9e94e3ad447200c31",
+      "config_sha256": "92f9814daf40c6157306886f5dc4711ca6ad29d63dd1fff90d7078c1d07042a1",
+      "trained_labels_file_sha256": "f8fd558faf3f51d819a29e2fc95b4cdfc8e1d7d450ef79e086b851647066f548",
+      "threshold": 0.4,
+      "labels": "exact predicate_types array from extraction_vocabularies.v1.json",
+      "fixed_relation_types": true,
+      "legacy_type_gate": false,
+      "reason_legacy_type_gate_disabled": "the legacy gate can rewrite an owner-controlled label to related_to, which is outside the C2 vocabulary"
+    }
+  },
+  "arms": {
+    "decisive": {
+      "name": "production_shaped_gliner",
+      "entities": "GLiNER predictions under the exact owner entity-label registry",
+      "without": "certified spaCy observation and ClaimRecordV1 compilers with the decisive entities and zero relation candidates",
+      "with": "the identical bundle, predicates, and decisive entities plus exact-controlled-label GLiREL candidates",
+      "decision_weight": true
+    },
+    "diagnostic": {
+      "name": "oracle_gold_spans",
+      "entities": "gold entity spans translated into owner EntityType solely for an entity-recall diagnostic",
+      "entity_type_crosswalk": {
+        "Concept": "CONCEPT",
+        "Method": "METHOD",
+        "Person": "PERSON",
+        "Rule": "CONSTRAINT",
+        "TimeReference": "TIME_PATTERN"
+      },
+      "nonlexical_crosswalks": [
+        "Rule->CONSTRAINT",
+        "TimeReference->TIME_PATTERN"
+      ],
+      "decision_weight": false
+    }
+  },
+  "candidate_binding": {
+    "relation_labels": "exact owner PredicateType values only; no legacy relation-label crosswalk",
+    "entity_resolution": "a GLiREL endpoint must resolve to exactly one same-sample EntityMention",
+    "predicate_resolution": "a proposal binds only when exactly one typed predicate in the evidence sentence has normalized_predicate equal to the GLiREL label",
+    "compiler_acceptance": "ClaimRecordV1 compiler independently requires dependency subject direction, dependency object direction, and evidence-sentence agreement",
+    "unbound_policy": "retain as counted observation-only proposals; never coerce a label or predicate_id"
+  },
+  "decision_base": {
+    "unit": "one gold claim matched by sample and predicate-lemma occurrence to a typed compiled ClaimRecordV1 with dependency subject and object arguments",
+    "expected_support_key": "sample_id + normalized_predicate + predicate_lemma occurrence + normalized dependency subject surfaces + normalized dependency object surfaces",
+    "predicted_support_key": "the owning compiled claim key for each compiler-accepted source_relation_id; duplicate accepted relations are duplicate predictions, not free true positives",
+    "thin_evidence_minimums": {
+      "typed_compiled_gold_claims": 5,
+      "distinct_samples": 4,
+      "distinct_predicate_types": 3
+    },
+    "thin_evidence_rationale": "The assigned fixture is a small adversarial canary, so a legitimate strict-improvement reading requires more than isolated examples and must span multiple samples and controlled predicate families. Falling below any minimum yields insufficient_evidence, never pass."
+  },
+  "core_quality_projection": [
+    "claim_match_rate",
+    "claim_field_accuracy_overall",
+    "claim_field_accuracy.polarity",
+    "claim_field_accuracy.modal_force",
+    "claim_field_accuracy.assertion_mode",
+    "claim_field_accuracy.claim_type",
+    "condition_recall",
+    "exception_recall",
+    "qualifiers.f1"
+  ],
+  "pass_gate": {
+    "all_required": true,
+    "thin_evidence_minimums_met": true,
+    "core_claim_projection_with_equals_without": true,
+    "accepted_support_f1_with_strictly_greater_than_without": true,
+    "accepted_support_precision_minimum": 0.5,
+    "accepted_label_predicate_conflicts_maximum": 0,
+    "evidence_round_trip_errors_maximum": 0,
+    "claim_conservation_errors_maximum": 0,
+    "relation_reference_errors_maximum": 0,
+    "controlled_label_violations_maximum": 0
+  },
+  "verdict_precedence": [
+    "If any thin-evidence minimum is missed: insufficient_evidence and relations remain observation-only.",
+    "Else if every pass gate is true: with_wins and Stage-4 GLiREL may proceed to owner ratification.",
+    "Else: without_wins and relations remain observation-only."
+  ],
+  "diagnostics_without_verdict_weight": [
+    "oracle-span arm",
+    "legacy exact relation-span F1 with no label crosswalk",
+    "historical open-label baseline reference",
+    "GLiREL proposals whose endpoints agree with an UNTYPED compiled claim",
+    "latency and throughput"
+  ],
+  "anti_gaming": [
+    "No sample-ID, text, or gold-answer branching in inference or binding.",
+    "No post-run threshold, label, denominator, crosswalk, or gate edits.",
+    "The same entities and deterministic compiler inputs are used in WITH and WITHOUT within each arm.",
+    "All claims and relations remain candidate or observation-only; the benchmark performs no provider call, persistence, promotion, graph write, or vector write."
+  ]
+}
