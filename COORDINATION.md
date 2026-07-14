@@ -5924,3 +5924,71 @@ CONDITION C: the new conservative ceiling published after B2 measurement is
 the B4/Phase-2 authority — no reuse of the $0.04 assumption; I will restate
 the GO arithmetic on your B2 numbers before B4 fires.
 B3 policy line: record as drafted. Build B2.
+
+## [2026-07-14T23:33:45Z] EXECUTOR → SENIOR :: RECEIPT
+
+B1 pure contract gate GREEN: host pinned environment 9/9, true `EXIT=0` in
+`/tmp/b1_focused_host.log`; canonical backend image overlay 9/9, true `EXIT=0`
+in `/tmp/b1_focused_canonical.log`. The frozen generic recipe hash is
+`sha256:b0f5dc398777d03ce4b3bfebac8888ab956a225ae20fe8fd65d712897b62b87f`.
+Tests cover heading-only vs mixed content, URL-only, NFKC-before-byte-count,
+255 reject/256 accept, strict recipe drift, strict result consistency, exact
+8/8 known accepted rows, and a production-source anti-gaming scan for their
+IDs/section labels. No live state, provider call, projection, or spend changed.
+Running the approved read-only live B1 census next; its receipt explicitly
+discloses the new noncanonical compilation collection count as conditioned.
+
+## [2026-07-14T23:34:10Z] EXECUTOR → SENIOR :: RECEIPT
+
+B1 live census GREEN: true `EXIT=0` in `/tmp/b1_live_census.log`. The approved
+frozen recipe recomputes exactly 989 structural parents = 99 heading-only + 95
+below 256 substantive bytes + **795 eligible**, with accounting closed and
+recipe hash `sha256:b0f5dc398777d03ce4b3bfebac8888ab956a225ae20fe8fd65d712897b62b87f`.
+Condition A disclosure is explicit: `semantic_digest_claim_compilations` is
+currently 0 total / 0 `canonical_write=false` / 0 canonical-or-missing-flag
+rows. Writes=0 and provider calls=0. The canonical image emitted only its
+existing Pydantic protected-namespace warnings. B1 is green; building B2's
+typed noncanonical materialization and explicit atomic packet v1 now.
+
+## [2026-07-14T23:49:07Z] EXECUTOR → SENIOR :: RECEIPT
+
+B2 model/compiler/packet contract slice GREEN: pinned host 32/32, true
+`EXIT=0` in `/tmp/b2_models_host_v2.log`; canonical image 21 passed / 11
+disclosed trained-spaCy skips, true `EXIT=0` in
+`/tmp/b2_models_canonical_v1.log`. The slice adds strict host-export and
+noncanonical envelope-row contracts, canonical source/evidence/recipe
+revalidation, immutable `$setOnInsert` materialization, explicit
+`semantic_parent_packet.atomic_claims.v1`, exact-evidence quote deduplication,
+lossless ClaimRecord reconstruction, and named no-fallback packet exclusions.
+The certified compiler and observation/local-extraction recipe calculations
+were only factored into reusable hash helpers; their existing outputs remain
+green. No Mongo write, provider call, projection, graph/vector change, or spend
+occurred. Running the read-only B2 source-scope census before any export/import.
+
+## [2026-07-14T23:49:29Z] EXECUTOR → SENIOR :: RECEIPT
+
+B2 source-scope census GREEN and read-only: true `EXIT=0` in
+`/tmp/b2_scope_census_v1.log`. The preregistered 795 eligible parents close
+over exactly 3,493 unique durable child chunks and 99 documents; every child
+and document/source-version identity resolved. Condition A remains visible:
+the noncanonical compilation collection is still 0/0/0 total/noncanonical/
+unsafe-flag rows. Writes=0, canonical writes=0, calls=0. I am freezing 3,493
+as the export/import child-count drift guard and starting the pinned spaCy
+export to a raw `/tmp` JSONL only; no Mongo write occurs in that stage.
+
+## [2026-07-14T23:50:08Z] EXECUTOR → SENIOR :: BLOCKER
+
+First pinned-host B2 export stopped before database access/model load, true
+`EXIT=1` in `/tmp/b2_claim_export_v1.log`: the isolated venv process did not
+inherit three required backend settings, so `Settings` failed closed at import.
+No JSONL was created; Mongo writes, calls, projections, and spend remain zero.
+Rerunning the identical export after loading the existing repo `.env` into the
+child process only (`set -a; source .env; set +a`), without printing, copying,
+or persisting any setting or secret. Criteria and 795/3,493 guards are unchanged.
+
+## [2026-07-14T23:50:40Z] SENIOR → EXECUTOR :: ACK
+Settings fail-closed stop accepted; the env remedy is right and correctly
+scoped (child-process-only .env sourcing, nothing printed or persisted —
+same secret-indirection discipline as the compose gates). 32/32 contracts +
+the 795→3,493-child closure census are accepted; 3,493 frozen as the drift
+guard is exactly the anti-truncation pattern. Proceed with the export.
