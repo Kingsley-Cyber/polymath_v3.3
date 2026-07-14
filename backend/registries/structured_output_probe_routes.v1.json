@@ -1,0 +1,35 @@
+{
+  "schema_version": "polymath.structured_output_probe_routes.v1",
+  "routes": [
+    {
+      "route_id": "deepseek-api__deepseek-v4-flash",
+      "credential_provider": "deepseek",
+      "model_id": "deepseek/deepseek-v4-flash",
+      "api_base": "https://api.deepseek.com/v1"
+    },
+    {
+      "route_id": "deepseek-api__deepseek-v4-pro",
+      "credential_provider": "deepseek",
+      "model_id": "deepseek/deepseek-v4-pro",
+      "api_base": "https://api.deepseek.com/v1"
+    },
+    {
+      "route_id": "deepseek-api__deepseek-chat",
+      "credential_provider": "deepseek",
+      "model_id": "deepseek/deepseek-chat",
+      "api_base": "https://api.deepseek.com/v1"
+    },
+    {
+      "route_id": "deepseek-api__deepseek-reasoner",
+      "credential_provider": "deepseek",
+      "model_id": "deepseek/deepseek-reasoner",
+      "api_base": "https://api.deepseek.com/v1"
+    },
+    {
+      "route_id": "longcat-api__longcat-2.0",
+      "credential_provider": "longcat",
+      "model_id": "openai/LongCat-2.0",
+      "api_base": "https://api.longcat.chat/openai/v1"
+    }
+  ]
+}

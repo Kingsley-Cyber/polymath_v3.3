@@ -1,0 +1,60 @@
+{
+  "schema_version": "polymath.structured_output_capability_probe.v1",
+  "generated_at": "2026-07-14T15:17:10Z",
+  "recipe_version": "structured-output-capability.runtime-probe.v1",
+  "response_format_type": "json_schema",
+  "accepted": 0,
+  "rejected": 5,
+  "routes": [
+    {
+      "route_id": "deepseek-api__deepseek-v4-flash",
+      "model_id": "deepseek/deepseek-v4-flash",
+      "verified_at": "2026-07-14T14:26:39.928137Z",
+      "outcome": "provider_rejected",
+      "http_status": 400,
+      "error_code": "400",
+      "message": "litellm.BadRequestError: DeepseekException - Error code: 400 - {'error': {'message': 'This response_format type is unavailable now', 'type': 'invalid_request_error', 'param': None, 'code': 'invalid_request_error'}}"
+    },
+    {
+      "route_id": "deepseek-api__deepseek-v4-pro",
+      "model_id": "deepseek/deepseek-v4-pro",
+      "verified_at": "2026-07-14T14:26:40.291405Z",
+      "outcome": "provider_rejected",
+      "http_status": 400,
+      "error_code": "400",
+      "message": "litellm.BadRequestError: DeepseekException - Error code: 400 - {'error': {'message': 'This response_format type is unavailable now', 'type': 'invalid_request_error', 'param': None, 'code': 'invalid_request_error'}}"
+    },
+    {
+      "route_id": "deepseek-api__deepseek-chat",
+      "model_id": "deepseek/deepseek-chat",
+      "verified_at": "2026-07-14T14:26:40.755164Z",
+      "outcome": "provider_rejected",
+      "http_status": 400,
+      "error_code": "400",
+      "message": "litellm.BadRequestError: DeepseekException - Error code: 400 - {'error': {'message': 'This response_format type is unavailable now', 'type': 'invalid_request_error', 'param': None, 'code': 'invalid_request_error'}}"
+    },
+    {
+      "route_id": "deepseek-api__deepseek-reasoner",
+      "model_id": "deepseek/deepseek-reasoner",
+      "verified_at": "2026-07-14T14:26:41.220133Z",
+      "outcome": "provider_rejected",
+      "http_status": 400,
+      "error_code": "400",
+      "message": "litellm.BadRequestError: DeepseekException - Error code: 400 - {'error': {'message': 'This response_format type is unavailable now', 'type': 'invalid_request_error', 'param': None, 'code': 'invalid_request_error'}}"
+    },
+    {
+      "route_id": "longcat-api__longcat-2.0",
+      "model_id": "openai/LongCat-2.0",
+      "verified_at": "2026-07-14T14:26:43.104359Z",
+      "outcome": "provider_rejected",
+      "http_status": 200,
+      "error_code": "invalid_structured_output",
+      "message": "2xx response did not contain valid JSON content"
+    }
+  ],
+  "security": {
+    "credentials_from_encrypted_settings": true,
+    "plaintext_credentials_in_receipt": false,
+    "raw_provider_body_in_receipt": false
+  }
+}

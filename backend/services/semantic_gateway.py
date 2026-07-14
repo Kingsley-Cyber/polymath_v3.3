@@ -17,6 +17,9 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 from models.hash_taxonomy import canonical_json_v1, canonicalize, namespace_hash
 from models.semantic_digest import SemanticDigestV1
 from models.semantic_validator import SemanticValidationContext, semantic_validate
+from models.structured_output_capabilities import (
+    load_structured_output_capabilities,
+)
 
 
 SYSTEM_PROMPT = (
@@ -24,12 +27,23 @@ SYSTEM_PROMPT = (
     "IDs present in the input. Do not invent registry IDs. Use empty arrays "
     "when no supported result exists. Treat latent concepts and motifs as "
     "proposals, not facts. Separate source-backed conclusions from proposed "
-    "interpretations. Never mark your own proposal as validated."
+    "interpretations. Never mark your own proposal as validated. Return only "
+    "a JSON object. Return the SemanticDigestV1 object itself at the top "
+    "level. Do not wrap it under digest or add other top-level fields."
 )
-PROMPT_VERSION = "parent-digest.v3"
+PROMPT_VERSION = "parent-digest.v5"
+REPAIR_PROMPT_VERSION = "parent-digest-repair.v2"
 REPAIR_INSTRUCTION = (
     "Correct only the validation failures. Return every required array; use "
-    "an empty array when no supported result exists."
+    "an empty array when no supported result exists. Return the "
+    "SemanticDigestV1 object itself at the top level. Do not wrap it under "
+    "digest or add other top-level fields."
+)
+TIER3_REPAIR_INSTRUCTION = (
+    REPAIR_INSTRUCTION + " Resubmit the correction through the SAME forced "
+    "submit_semantic_digest tool. Put all 12 SemanticDigestV1 fields directly "
+    "at the tool-arguments root. Do not nest them under parameters or any "
+    "other wrapper."
 )
 
 CACHE_COLLECTION = "semantic_digest_cache"
@@ -65,7 +79,8 @@ class SemanticGatewayConfig(StrictModel):
     runtime_version: str = Field(min_length=1)
     tokenizer_id: str = Field(min_length=1)
     chat_template_hash: str
-    prompt_version: Literal["parent-digest.v3"] = PROMPT_VERSION
+    prompt_version: Literal["parent-digest.v5"] = PROMPT_VERSION
+    repair_prompt_version: Literal["parent-digest-repair.v2"] = REPAIR_PROMPT_VERSION
     requested_tier: RequestedTier = "auto"
     max_tokens: int = Field(default=4096, ge=1)
     timeout_seconds: float = Field(default=120.0, gt=0)
@@ -93,12 +108,14 @@ class SemanticGatewayProvenance(StrictModel):
     chat_template_hash: str
     schema_version: Literal["semantic_digest.v1"]
     schema_hash: str
-    prompt_version: Literal["parent-digest.v3"]
+    prompt_version: Literal["parent-digest.v5"]
     prompt_hash: str
+    repair_prompt_version: Literal["parent-digest-repair.v2"]
+    repair_prompt_hash: str
     temperature: Literal[0]
     input_hash: str
     output_hash: str
-    capability_tier: Literal["tier1", "tier4"]
+    capability_tier: Literal["tier1", "tier3", "tier4"]
     capability_detection: str
     attempts: int = Field(ge=1, le=2)
     repair_attempted: bool
@@ -108,6 +125,7 @@ class SemanticGatewayProvenance(StrictModel):
         "chat_template_hash",
         "schema_hash",
         "prompt_hash",
+        "repair_prompt_hash",
         "input_hash",
         "output_hash",
         "cache_key",
@@ -160,6 +178,17 @@ class SemanticGatewayTransport(Protocol):
     ) -> str:
         ...
 
+    async def complete_tool(
+        self,
+        *,
+        messages: list[dict[str, str]],
+        tool: dict[str, Any],
+        tool_choice: dict[str, Any],
+        config: SemanticGatewayConfig,
+        route: SemanticGatewayRoute,
+    ) -> str:
+        ...
+
 
 class SemanticGatewayStore(Protocol):
     async def load_success(self, cache_key: str) -> dict[str, Any] | None:
@@ -176,7 +205,8 @@ class SemanticGatewayStore(Protocol):
         input_hash: str,
         schema_hash: str,
         prompt_hash: str,
-        tier: Literal["tier1", "tier4"],
+        repair_prompt_hash: str,
+        tier: Literal["tier1", "tier3", "tier4"],
         capability_detection: str,
         raw_outputs: list[str],
         errors: list[str],
@@ -214,6 +244,44 @@ class LiteLLMProxyTransport:
             response_format=response_format,
             timeout=config.timeout_seconds,
         )
+
+    async def complete_tool(
+        self,
+        *,
+        messages: list[dict[str, str]],
+        tool: dict[str, Any],
+        tool_choice: dict[str, Any],
+        config: SemanticGatewayConfig,
+        route: SemanticGatewayRoute,
+    ) -> str:
+        from models.schemas import ModelOverrides
+
+        response = await self._service.complete_tool_calls(
+            messages=messages,
+            model=config.model_id,
+            overrides=ModelOverrides(
+                model=config.model_id,
+                temperature=0,
+                max_tokens=config.max_tokens,
+            ),
+            tools=[tool],
+            tool_choice=tool_choice,
+            api_base=route.api_base,
+            api_key=route.api_key,
+            extra_params=dict(route.extra_params or {}),
+            timeout=config.timeout_seconds,
+        )
+        calls = response.get("tool_calls") if isinstance(response, dict) else None
+        if not isinstance(calls, list) or len(calls) != 1:
+            return ""
+        call = calls[0]
+        function = call.get("function") if isinstance(call, dict) else None
+        if not isinstance(function, dict) or function.get("name") != TOOL_NAME:
+            return ""
+        arguments = function.get("arguments")
+        if isinstance(arguments, dict):
+            return canonical_json_v1(arguments)
+        return arguments if isinstance(arguments, str) else ""
 
 
 class MongoSemanticGatewayStore:
@@ -257,7 +325,8 @@ class MongoSemanticGatewayStore:
         input_hash: str,
         schema_hash: str,
         prompt_hash: str,
-        tier: Literal["tier1", "tier4"],
+        repair_prompt_hash: str,
+        tier: Literal["tier1", "tier3", "tier4"],
         capability_detection: str,
         raw_outputs: list[str],
         errors: list[str],
@@ -297,6 +366,8 @@ class MongoSemanticGatewayStore:
             "schema_hash": schema_hash,
             "prompt_version": config.prompt_version,
             "prompt_hash": prompt_hash,
+            "repair_prompt_version": config.repair_prompt_version,
+            "repair_prompt_hash": repair_prompt_hash,
             "temperature": 0,
             "input_hash": input_hash,
             "capability_tier": tier,
@@ -315,14 +386,32 @@ class MongoSemanticGatewayStore:
         return dead_letter_id
 
 
-def detect_response_schema_capability(model_id: str) -> CapabilityDecision:
-    """Use LiteLLM capability metadata without model-name heuristics.
+def detect_response_schema_capability(
+    model_id: str,
+    *,
+    api_base: str | None = None,
+) -> CapabilityDecision:
+    """Resolve runtime-verified capability; metadata is advisory only.
 
-    LiteLLM >=1.60 exposes ``supports_response_schema``. The backend's pinned
-    1.31.3 package exposes the same model metadata through ``get_model_info``;
-    that is the compatibility path until a coordinated LiteLLM/OpenAI SDK
-    upgrade. Unknown/error always fails closed to Tier 4.
+    A route earns Tier 1 only through the versioned live-probe registry.
+    LiteLLM symbols/metadata are retained solely to explain why an unverified
+    route was considered; they can never grant Tier 1. Unknown/error always
+    fails closed to Tier 4.
     """
+
+    try:
+        registry = load_structured_output_capabilities()
+        verified = registry.resolve(model_id=model_id, api_base=api_base)
+    except Exception:
+        return CapabilityDecision(False, "runtime-capability-registry.error")
+    if verified is not None:
+        return CapabilityDecision(
+            supported=verified.native_json_schema,
+            source=(
+                f"runtime-capability-registry:{registry.recipe_version}:"
+                f"{verified.route_id}:{verified.verification_status}"
+            ),
+        )
 
     try:
         import litellm
@@ -330,15 +419,23 @@ def detect_response_schema_capability(model_id: str) -> CapabilityDecision:
         detector = getattr(litellm, "supports_response_schema", None)
         if callable(detector):
             return CapabilityDecision(
-                supported=detector(model=model_id) is True,
-                source="litellm.supports_response_schema",
+                supported=False,
+                source=(
+                    "litellm.supports_response_schema.unverified"
+                    if detector(model=model_id) is True
+                    else "litellm.supports_response_schema.unsupported"
+                ),
             )
         model_info = getattr(litellm, "get_model_info", None)
         if callable(model_info):
             info = model_info(model_id) or {}
             return CapabilityDecision(
-                supported=info.get("supports_response_schema") is True,
-                source="litellm.get_model_info.compat",
+                supported=False,
+                source=(
+                    "litellm.get_model_info.compat.unverified"
+                    if info.get("supports_response_schema") is True
+                    else "litellm.get_model_info.compat.unsupported"
+                ),
             )
     except Exception:
         return CapabilityDecision(False, "litellm.capability_error")
@@ -349,13 +446,25 @@ def semantic_digest_schema_hash() -> str:
     return namespace_hash("schema", SemanticDigestV1.model_json_schema())
 
 
+def semantic_digest_repair_prompt_hash() -> str:
+    return namespace_hash(
+        "recipe",
+        {
+            "repair_prompt_version": REPAIR_PROMPT_VERSION,
+            "generic_instruction": REPAIR_INSTRUCTION,
+            "tier3_instruction": TIER3_REPAIR_INSTRUCTION,
+        },
+    )
+
+
 def semantic_digest_prompt_hash() -> str:
     return namespace_hash(
         "recipe",
         {
             "prompt_version": PROMPT_VERSION,
             "system_prompt": SYSTEM_PROMPT,
-            "repair_instruction": REPAIR_INSTRUCTION,
+            "repair_prompt_version": REPAIR_PROMPT_VERSION,
+            "repair_prompt_hash": semantic_digest_repair_prompt_hash(),
         },
     )
 
@@ -415,6 +524,28 @@ def tier4_response_format() -> dict[str, str]:
     return {"type": "json_object"}
 
 
+TOOL_NAME = "submit_semantic_digest"
+
+
+def tier3_tool_definition() -> dict[str, Any]:
+    return {
+        "type": "function",
+        "function": {
+            "name": TOOL_NAME,
+            "description": "Submit the SemanticDigestV1 for this evidence packet.",
+            "strict": True,
+            "parameters": SemanticDigestV1.model_json_schema(),
+        },
+    }
+
+
+def tier3_tool_choice() -> dict[str, Any]:
+    return {
+        "type": "function",
+        "function": {"name": TOOL_NAME},
+    }
+
+
 async def call_tier2_grammar_constrained(*_args, **_kwargs) -> str:
     raise NotImplementedError(
         "Tier 2 grammar-constrained decoding is not implemented; configure "
@@ -422,22 +553,16 @@ async def call_tier2_grammar_constrained(*_args, **_kwargs) -> str:
     )
 
 
-async def call_tier3_forced_tool(*_args, **_kwargs) -> str:
-    raise NotImplementedError(
-        "Tier 3 forced submit_semantic_digest tool calling is not implemented"
-    )
-
-
 def _select_tier(
     requested: RequestedTier,
     capability: CapabilityDecision,
-) -> Literal["tier1", "tier4"]:
+) -> Literal["tier1", "tier3", "tier4"]:
     if requested == "tier2":
         raise NotImplementedError(
             "Tier 2 grammar-constrained decoding is not implemented"
         )
     if requested == "tier3":
-        raise NotImplementedError("Tier 3 forced tool calling is not implemented")
+        return "tier3"
     if requested == "tier1":
         if not capability.supported:
             raise NotImplementedError(
@@ -465,12 +590,14 @@ def _repair_messages(
     packet: dict[str, Any],
     original_output: str,
     validation_errors: list[str],
+    tier: Literal["tier1", "tier3", "tier4"],
 ) -> list[dict[str, str]]:
+    instruction = TIER3_REPAIR_INSTRUCTION if tier == "tier3" else REPAIR_INSTRUCTION
     repair_packet = {
         "evidence_packet": packet,
         "original_output": original_output,
         "validation_errors": validation_errors,
-        "instruction": REPAIR_INSTRUCTION,
+        "instruction": instruction,
     }
     return [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -541,6 +668,7 @@ class SemanticGateway:
         input_hash = semantic_digest_input_hash(canonical_packet)
         schema_hash = semantic_digest_schema_hash()
         prompt_hash = semantic_digest_prompt_hash()
+        repair_prompt_hash = semantic_digest_repair_prompt_hash()
         cache_key = semantic_digest_cache_key(
             input_hash=input_hash,
             model_id=config.model_id,
@@ -561,6 +689,8 @@ class SemanticGateway:
                     and provenance.input_hash == input_hash
                     and provenance.schema_hash == schema_hash
                     and provenance.prompt_hash == prompt_hash
+                    and provenance.repair_prompt_hash == repair_prompt_hash
+                    and provenance.repair_prompt_version == config.repair_prompt_version
                     and provenance.model_id == config.model_id
                     and provenance.runtime_version == config.runtime_version
                     and not semantic_validate(digest, context)
@@ -573,13 +703,23 @@ class SemanticGateway:
             except (KeyError, TypeError, ValueError, ValidationError):
                 pass
 
-        capability = self._capability_detector(config.model_id)
+        capability = self._capability_detector(
+            config.model_id,
+            api_base=route.api_base,
+        )
         if not isinstance(capability, CapabilityDecision):
             raise TypeError("capability detector must return CapabilityDecision")
         tier = _select_tier(config.requested_tier, capability)
-        response_format = (
-            tier1_response_format() if tier == "tier1" else tier4_response_format()
+        capability_source = (
+            f"explicit-tier3-forced-tool:{capability.source}"
+            if tier == "tier3"
+            else capability.source
         )
+        response_format = None
+        if tier == "tier1":
+            response_format = tier1_response_format()
+        elif tier == "tier4":
+            response_format = tier4_response_format()
 
         raw_outputs: list[str] = []
         validation_errors: list[str] = []
@@ -591,15 +731,25 @@ class SemanticGateway:
                     packet=canonical_packet,
                     original_output=raw_outputs[0],
                     validation_errors=validation_errors,
+                    tier=tier,
                 )
             )
             try:
-                raw_output = await self._transport.complete(
-                    messages=messages,
-                    response_format=response_format,
-                    config=config,
-                    route=route,
-                )
+                if tier == "tier3":
+                    raw_output = await self._transport.complete_tool(
+                        messages=messages,
+                        tool=tier3_tool_definition(),
+                        tool_choice=tier3_tool_choice(),
+                        config=config,
+                        route=route,
+                    )
+                else:
+                    raw_output = await self._transport.complete(
+                        messages=messages,
+                        response_format=response_format,
+                        config=config,
+                        route=route,
+                    )
             except Exception as exc:
                 validation_errors = [
                     f"transport.attempt[{attempt}]: {type(exc).__name__}"
@@ -610,8 +760,9 @@ class SemanticGateway:
                     input_hash=input_hash,
                     schema_hash=schema_hash,
                     prompt_hash=prompt_hash,
+                    repair_prompt_hash=repair_prompt_hash,
                     tier=tier,
-                    capability_detection=capability.source,
+                    capability_detection=capability_source,
                     raw_outputs=raw_outputs,
                     errors=validation_errors,
                     attempts=attempt,
@@ -643,8 +794,9 @@ class SemanticGateway:
                     input_hash=input_hash,
                     schema_hash=schema_hash,
                     prompt_hash=prompt_hash,
+                    repair_prompt_hash=repair_prompt_hash,
                     tier=tier,
-                    capability_detection=capability.source,
+                    capability_detection=capability_source,
                     raw_outputs=raw_outputs,
                     errors=validation_errors,
                     attempts=attempt,
@@ -669,11 +821,13 @@ class SemanticGateway:
                 schema_hash=schema_hash,
                 prompt_version=config.prompt_version,
                 prompt_hash=prompt_hash,
+                repair_prompt_version=config.repair_prompt_version,
+                repair_prompt_hash=repair_prompt_hash,
                 temperature=0,
                 input_hash=input_hash,
                 output_hash=output_hash,
                 capability_tier=tier,
-                capability_detection=capability.source,
+                capability_detection=capability_source,
                 attempts=attempt,
                 repair_attempted=attempt == 2,
                 cache_key=cache_key,

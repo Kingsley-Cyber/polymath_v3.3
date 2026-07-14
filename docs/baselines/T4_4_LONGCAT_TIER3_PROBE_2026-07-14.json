@@ -1,0 +1,18 @@
+{
+  "api_base": "https://api.longcat.chat/openai/v1",
+  "elapsed_ms": 3493.55,
+  "error_code": "",
+  "generated_at": "2026-07-14T15:11:44.136938Z",
+  "http_status": 200,
+  "message": "forced tool accepted and tiny arguments enforced",
+  "model_id": "openai/LongCat-2.0",
+  "route_id": "longcat-api__longcat-2.0",
+  "schema_version": "polymath.tier3_tool_capability_probe.v1",
+  "security": {
+    "credential_from_encrypted_settings": true,
+    "plaintext_credentials_in_receipt": false,
+    "raw_provider_body_in_receipt": false
+  },
+  "tier3_forced_tool": true,
+  "verification_status": "accepted"
+}

@@ -1408,9 +1408,12 @@ digests. Registry-independent; first S11 build unit alongside P2.5b envelope.
   `supports_response_schema()`; Tier2 grammar-constrained local fallback
   (llama.cpp Metal path; MLX not trusted until proven); Tier3 forced tool-call;
   Tier4 JSON-mode+validate+one-retry (last resort, flagged in provenance).
-  *(T4.3 implements and tests Tier1 plus fail-closed Tier4; Tier2/3 are public
-  clear-failure stubs exactly as the mission requires. This combined box stays
-  open until those local/tool paths are separately implemented and proven.)*
+  *(T4.3 implements Tier1 and fail-closed Tier4. T4.4 adds a versioned Tier3
+  forced-tool path and a runtime-probed route registry. Flash rejected Tier1,
+  Tier4 was structurally unreliable, and Tier3 accepted only a partial set
+  before exhausting semantic repair; LongCat passed only a tiny Tier3 tool
+  probe. `verified_digest_path` therefore remains null. Tier2 remains a public
+  clear-failure stub, so this combined box stays open.)*
 - [x] Python semantic validator (claim refs exist+belong to parent; registry
   ids exist or explicitly candidate; frames MF01-16 with support; latent needs
   claims in claim-grounded mode; motifs >=2 frames over proposed/validated
@@ -1421,27 +1424,38 @@ digests. Registry-independent; first S11 build unit alongside P2.5b envelope.
   SAME constrained schema; failures -> dead-letter queue, never canonical
   writes; deterministic-safe fixes in Python only. *(T4.3: structural and
   location-indexed semantic failures exercise exactly one repair; second
-  failure and transport failure write only the noncanonical DLQ.)*
+  failure and transport failure write only the noncanonical DLQ. T4.4 pins
+  independent `parent-digest.v5` and `parent-digest-repair.v2` identities;
+  Tier3 repair reuses the same forced tool and requires all 12 fields at the
+  argument root.)*
 - [x] Determinism/provenance record on every generation (model/runtime/
   tokenizer/template/schema/prompt hashes, temp 0, input/output hashes) +
   cache keyed on input+model+schema+prompt+runtime. *(T4.3: all five cache-key
   inputs have identity-flip tests; accepted cache entries are structurally and
-  semantically revalidated before reuse.)*
-- [x] Prompt/schema separation: compact rule prompt; schema only via
-  response_format; scope discipline (digest never emits entities/triples/
-  claims/Cypher/records/payloads/embeddings). *(T4.3: the owner prompt is
-  compact and the generated Pydantic schema appears only in Tier1
-  `response_format`, never in initial or repair prompt text.)*
+  semantically revalidated before reuse. T4.4 adds the repair-prompt hash to
+  provenance and the combined prompt identity without changing the five cache
+  key dimensions.)*
+- [x] Prompt/schema separation: compact rule prompt; schema only via the
+  constrained API surface (`response_format` or a Tier3 forced-tool
+  definition); scope discipline (digest never emits entities/triples/claims/
+  Cypher/records/payloads/embeddings). *(T4.3/T4.4: the generated Pydantic
+  schema never appears in initial or repair prompt text.)*
 
 Acceptance:
 
 - [ ] UGO parent-packet canary: 10 packets through Tier1 with 0 structural
   failures, semantic-validator receipts, >=1 exercised targeted repair, >=1
-  dead-letter demonstration (synthetic), provenance rows complete.
+  dead-letter demonstration (synthetic), provenance rows complete. *(T4.4
+  closed at an external provider limit: 0/5 configured routes accepted native
+  `json_schema`; flash Tier4 was structurally unreliable and Tier3 stopped
+  after 3/10 accepted noncanonical rows plus one two-attempt semantic DLQ.
+  The synthetic DLQ step was not reached. See the T4.4 baselines.)*
 - [ ] Ladder downgrade test: same packet through Tier1 and Tier4 produces
-  schema-identical shapes; Tier4 flagged in provenance.
-- [ ] Cutover stays gated: Ghost A `RetrievalSummary` path untouched until the
-  measured cutover ruled in P2.5b.
+  schema-identical shapes; Tier4 flagged in provenance. *(Not reachable
+  without a provider-verified Tier1 digest path; retest at CP9 preflight.)*
+- [x] Cutover stays gated: Ghost A `RetrievalSummary` path untouched until the
+  measured cutover ruled in P2.5b. *(T4.4: Ghost A changes=0; four exact
+  Mongo/Qdrant/Neo4j snapshots stayed number-for-number unchanged.)*
 
 ### P2.6 Engine Parity And Provenance
 
@@ -2325,6 +2339,79 @@ A corpus is strict-ready only when:
 - Checklist boxes closed: P2.5c targeted repair/dead-letter,
   determinism/provenance/cache, and prompt/schema separation only. The
   combined capability-ladder item and all UGO/downgrade acceptance stay open.
+
+### 2026-07-14 - T4.4 UGO gateway canary and external-provider limit
+
+- Commit: this commit on `claude-continuation-20260713`.
+- Owner: Codex sole executor under `CODEX_MISSION.md`; Claude approved the
+  probe ladder, three versioned repair iterations, Tier3 forced-tool lever,
+  final close-either-way run, and CP9 provider preflight through
+  `COORDINATION.md`.
+- Corpus/data scope: read-only discovery of `Unspoken Global Outcomes`, corpus
+  `bcf80054-7611-47d0-ae16-fa7fed259b13` (1 document, 203 eligible parents),
+  with 10 evenly spaced accepted-evidence parent packets. Provider results
+  were written only to the noncanonical semantic cache/DLQ. No paid batch,
+  canonical semantic artifact, vector/graph write, or Ghost A cutover ran.
+- Code changes: added a strict versioned structured-output route registry and
+  sanitized capability probe; extended the gateway with an exact forced
+  `submit_semantic_digest(SemanticDigestV1)` Tier3 path; versioned the compact
+  initial prompt as `parent-digest.v5` and root-only Tier3 repair as
+  `parent-digest-repair.v2`; added repair identity/hash provenance and cache
+  identity; and added the UGO canary plus a tiny closed-tool LongCat probe.
+- Durable migration/backfill: no semantic migration/backfill. Live test rows
+  are explicitly noncanonical: four accepted cache rows across the two Tier3
+  investigations and four evidenced DLQs; all have `canonical_write=false`.
+  Before the final worker restart, a senior-authorized backup-first fence
+  superseded 10,000 dormant ecom extraction rows from the killed 2026-07-13
+  chain with reason `parked_pending_owner_ecom_cp9_2026-07-14`. The sorted
+  10,000-row JSONL backup is local/ignored, SHA-256 receipted, and reversible;
+  no extraction, deletion, reingest, or canonical projection occurred.
+- Before metrics: LiteLLM metadata claimed flash response-schema support, but
+  no configured route had a runtime receipt and the UGO digest contract had
+  never been exercised against a real provider.
+- After metrics: native strict-schema probe accepted 0/5 routes. All four
+  DeepSeek routes returned HTTP 400 `response_format` unavailable; LongCat
+  returned HTTP 200 but no valid closed JSON. Flash Tier4 remained
+  structurally unreliable. Flash Tier3 produced 3 accepted noncanonical rows
+  before one packet exhausted two attempts on three unknown-domain assignment
+  errors; the other six calls were cancelled before persistence. The final
+  repair arguments had exactly the 12 root fields, proving the wrapper fix,
+  but not semantic correction reliability. LongCat's tiny forced-tool probe
+  returned exact closed `{ok:boolean}` arguments in 3493.55 ms; a full digest
+  remains unverified. Both routes therefore have `verified_digest_path=null`.
+- Tests by tier: final exact focused suite 53 passed (`EXIT=0`); adjacent
+  contract/regression superset 212 passed / 3 pre-existing Docker-only skips
+  (`EXIT=0`); Black 9/9, compileall, `git diff --check`, sanitized JSON parse,
+  and filename-only credential-prefix scan all passed. The earlier 57-focused
+  and 168-adjacent repair-v2 gates also passed before the final provider run.
+- Cross-corpus test: not applicable to this one-corpus acceptance canary. The
+  pre/post canonical census covered every live Qdrant collection plus global
+  Neo4j and Mongo semantic-artifact counts; all four snapshots were exact.
+- Failure/rollback test: real provider failures exhausted at most two attempts
+  and wrote only hashed/raw-body-free DLQ state. Final census stayed Mongo
+  semantic artifacts=0, Qdrant points=1,364,767, Neo4j nodes=1,361,818, and
+  Neo4j relationships=3,712,432. No synthetic acceptance was substituted.
+  Rollback is removal of the unconsumed gateway additions and noncanonical
+  cache/DLQ rows; canonical retrieval state requires no rollback.
+- Deployment image/health: after the authorized ecom queue fence, the exact
+  three-overlay command rebuilt/recreated backend and ingest-worker from the
+  final tree. Runtime verification returned a live 1024-dimensional embedding.
+  Seven gateway/registry/probe files hash identically across both containers;
+  both load the final flash/LongCat null-path verdict and prompt v5/repair-v2.
+  Post-restart ingest batches active=0, extraction jobs running=0, ecom active
+  extraction=0, and exact fenced reason count=10,000.
+- Remaining risks: no full provider-verified digest path exists. CP9 preflight
+  must retest flash native strict schema and run the same 10-packet Tier3
+  acceptance on candidate LongCat; whichever passes becomes the digest route.
+  If both fail, the paid digest pass parks for an owner line. Tier2 local
+  grammar fallback and the Tier1/Tier4 parity acceptance remain open.
+- Artifacts: `docs/baselines/T4_4_STRUCTURED_CAPABILITY_PROBE_2026-07-14.json`,
+  `docs/baselines/T4_4_LONGCAT_TIER3_PROBE_2026-07-14.json`, and
+  `docs/baselines/T4_4_UGO_GATEWAY_EXTERNAL_LIMIT_2026-07-14.json`, plus
+  `docs/baselines/T4_4_ECOM_QUEUE_FENCE_2026-07-14.json`.
+- Checklist boxes closed: P2.5c cutover-stays-gated only. Capability-ladder,
+  10-packet Tier1, synthetic DLQ demonstration, and Tier1/Tier4 parity remain
+  open without redefining passing.
 
 ## Implementation Log Template
 

@@ -2385,3 +2385,42 @@ Fence GREEN accepted (backup verified pre-mutation; the earlier unauth
 mongoexport stop was correct fail-closed behavior and needs no further
 action). The dormant ecom queue is parked and owner-referenced. Proceed:
 rebuild, runtime verify, publish T4.4, continue T8.1.
+
+## [2026-07-14T15:30:18Z] EXECUTOR → SENIOR :: RECEIPT
+Final backend runtime verifier GREEN, true EXIT=0
+(`/tmp/t44_final_runtime_verify.log`): canonical backend resolves the local
+embedder at the expected endpoint, receives a live 1024-dimensional vector,
+and reports healthy runtime wiring. Proceeding to the final two-container
+hash/capability assertions and post-restart queue fence check.
+
+## [2026-07-14T15:31:22Z] EXECUTOR → SENIOR :: RECEIPT
+T4.4 final two-container/runtime-drift gate GREEN, true EXIT=0
+(`/tmp/t44_final_two_container.log`). Seven gateway/registry/probe files hash
+identically in backend and ingest-worker. Both load flash as
+`verified_digest_path=null`, Tier3 partial/repair-exhausted, Tier4
+structurally unreliable with four evidence IDs; both load LongCat as tiny
+Tier3 accepted/full digest unverified and prompt v5/repair-v2. Post-restart
+state remains ingest batches active=0, all extraction running=0, ecom
+queued/running=0, exact ecom fenced rows=10,000. T4.4 is ready to publish.
+
+## [2026-07-14T15:32:46Z] EXECUTOR → SENIOR :: RECEIPT
+T4.4 final documentation/backup-integrity gate GREEN, true EXIT=0
+(`/tmp/t44_final_docs_gate.log`): checklist records the external limit without
+closing failed acceptance boxes, PROGRESS points to T8.1, the ecom fence
+receipt parses, and the ignored 10,000-line backup still matches its recorded
+SHA-256. I am performing the mandatory pull-rebase-autostash, then will stage
+only the T4.4 files (force-adding required docs, never `tmp/`), run cached-diff
+checks, commit, and push branch plus HEAD:main.
+
+## [2026-07-14T15:33:09Z] EXECUTOR → SENIOR :: RECEIPT
+Mandatory pre-commit `git pull --rebase --autostash origin
+claude-continuation-20260713` GREEN: branch already up to date, true EXIT=0.
+Working tree contains only the intended T4.4 tracked/untracked files plus the
+pre-existing ignored `tmp/`; staging it now by exact path.
+
+## [2026-07-14T15:33:57Z] EXECUTOR → SENIOR :: RECEIPT
+T4.4 cached publication gate GREEN, true EXIT=0
+(`/tmp/t44_cached_gate.log`): exactly 19 intended files staged, cached diff
+check clean, no `tmp/` path staged, and staged filename-only credential-prefix
+scan clean. I will re-stage this receipt, repeat the mandatory shared-branch
+pull immediately before commit, then publish both refs.

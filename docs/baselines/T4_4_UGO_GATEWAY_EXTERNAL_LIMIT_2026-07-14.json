@@ -1,0 +1,132 @@
+{
+  "schema_version": "polymath.semantic_gateway_ugo_external_limit.v1",
+  "generated_at": "2026-07-14T15:17:10Z",
+  "status": "closed_external_provider_limit",
+  "corpus": {
+    "name": "Unspoken Global Outcomes",
+    "corpus_id": "bcf80054-7611-47d0-ae16-fa7fed259b13",
+    "document_count": 1,
+    "eligible_parent_count": 203,
+    "target_packet_count": 10,
+    "sample_strategy": "ten_evenly_spaced_by_parent_id"
+  },
+  "native_json_schema_probe": {
+    "configured_routes_tested": 5,
+    "accepted": 0,
+    "rejected": 5,
+    "flash_outcome": "provider_rejected"
+  },
+  "flash_digest_paths": {
+    "tier1": {
+      "status": "provider_rejected",
+      "verified_digest_path": false
+    },
+    "tier4": {
+      "status": "structurally_unreliable",
+      "dead_letter_ids": [
+        "semantic-dlq:c17065513de69beb42fcbe80547408ecf1ded594948db048894c39c68931195a",
+        "semantic-dlq:06bfaf8e065e67047029756674830e717883849d96e6bca0dc1c31d417d4588a"
+      ],
+      "verified_digest_path": false
+    },
+    "tier3": {
+      "status": "partial_acceptance_repair_budget_exhausted",
+      "initial_prompt_version": "parent-digest.v5",
+      "repair_prompt_version": "parent-digest-repair.v2",
+      "final_run": {
+        "target_packets": 10,
+        "accepted_noncanonical_cache_rows": 3,
+        "failed_packets": 1,
+        "cancelled_before_persistence": 6,
+        "all_completed_packet_attempts": 2,
+        "full_ten_packet_completion": false,
+        "synthetic_dead_letter_step_reached": false,
+        "dead_letter_id": "semantic-dlq:c941b145d966d041bb2c83ff29a2de4b2f0f4b06cd6da7880e23712252192b4d",
+        "dead_letter_validation_errors": [
+          "domain_proposals[0].registry_id: unknown domain registry id 'culture-and-persuasion' requires assignment_state='candidate'",
+          "domain_proposals[1].registry_id: unknown domain registry id 'individualism-collectivism' requires assignment_state='candidate'",
+          "domain_proposals[2].registry_id: unknown domain registry id 'cultural-psychology' requires assignment_state='candidate'"
+        ],
+        "raw_output_hash_count": 2,
+        "canonical_write": false
+      },
+      "verified_digest_path": false
+    },
+    "verified_digest_path": null
+  },
+  "longcat_digest_path": {
+    "status": "tiny_tool_accepted_digest_unverified",
+    "tiny_tier3_forced_tool_http_status": 200,
+    "full_semantic_digest_tested": false,
+    "verified_digest_path": null,
+    "retest_at": "CP9_preflight"
+  },
+  "canonical_store_census": {
+    "snapshots_compared": 4,
+    "exactly_unchanged": true,
+    "mongo_semantic_artifacts": 0,
+    "neo4j_nodes": 1361818,
+    "neo4j_relationships": 3712432,
+    "qdrant_total_points": 1364767,
+    "qdrant_collection_points": {
+      "corpus_0d296882_graph": 76,
+      "corpus_0d296882_hrag": 95,
+      "corpus_0d296882_naive": 99,
+      "corpus_0d296882_schemas": 437,
+      "corpus_5a20bc21_graph": 3687,
+      "corpus_5a20bc21_hrag": 4696,
+      "corpus_5a20bc21_naive": 4696,
+      "corpus_5a20bc21_schemas": 2490,
+      "corpus_62193743_graph": 106,
+      "corpus_62193743_hrag": 186,
+      "corpus_62193743_naive": 186,
+      "corpus_62193743_schemas": 510,
+      "corpus_999b5934_graph": 222783,
+      "corpus_999b5934_hrag": 280175,
+      "corpus_999b5934_naive": 309661,
+      "corpus_999b5934_schemas": 291535,
+      "corpus_bcf80054_graph": 659,
+      "corpus_bcf80054_hrag": 862,
+      "corpus_bcf80054_naive": 862,
+      "corpus_bcf80054_schemas": 7494,
+      "corpus_e89431b5_graph": 0,
+      "corpus_e89431b5_hrag": 0,
+      "corpus_e89431b5_naive": 0,
+      "corpus_e89431b5_schemas": 0,
+      "corpus_fd460347_graph": 55774,
+      "corpus_fd460347_hrag": 65227,
+      "corpus_fd460347_naive": 65227,
+      "corpus_fd460347_schemas": 45949,
+      "hermes_memories": 608,
+      "mem0migrations": 0,
+      "polymath_children": 3,
+      "polymath_doc_summaries": 684
+    }
+  },
+  "acceptance": {
+    "ten_tier1_packets": false,
+    "ten_tier3_packets": false,
+    "ten_tier4_packets": false,
+    "repair_exercised": true,
+    "synthetic_dead_letter_persisted": false,
+    "tier1_tier4_schema_identical": null,
+    "all_green": false
+  },
+  "verdict": {
+    "t4_4": "closed_external_provider_limit",
+    "further_provider_calls_in_t4_4": false,
+    "cp9_digest_provider_preflight": [
+      "retest flash native strict json_schema",
+      "run LongCat full 10-packet Tier3 acceptance"
+    ],
+    "paid_digest_pass_authorized": false
+  },
+  "security": {
+    "credentials_from_encrypted_settings": true,
+    "plaintext_credentials_in_receipt": false,
+    "packet_text_in_receipt": false,
+    "raw_provider_output_in_receipt": false,
+    "canonical_writes": 0,
+    "ghost_a_changes": 0
+  }
+}

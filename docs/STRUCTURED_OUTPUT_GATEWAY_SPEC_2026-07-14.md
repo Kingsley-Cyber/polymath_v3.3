@@ -138,6 +138,15 @@ truth for every backend.
 - **Tier 4 — JSON mode + validate + ONE retry** (last resort only; never treat
   JSON mode as schema enforcement).
 
+Runtime-verification note (2026-07-14): provider/library metadata is advisory
+and cannot grant Tier 1. The versioned route registry is authoritative. All
+five configured routes rejected the tiny native-schema probe. Flash Tier 4 is
+`structurally_unreliable` for SemanticDigestV1; flash Tier 3 produced partial
+acceptance but exhausted its repair budget and therefore has no verified
+digest path. LongCat accepted a tiny forced-tool probe, but full-digest
+capability remains unverified. These are external runtime limits, not reasons
+to weaken validation or relabel a lower tier.
+
 ## 5. Gateway flow (reference implementation shape)
 
 ```python
@@ -159,7 +168,22 @@ the prompt): "Generate a SemanticDigestV1 from the supplied evidence. Use only
 claim IDs present in the input. Do not invent registry IDs. Use empty arrays
 when no supported result exists. Treat latent concepts and motifs as proposals,
 not facts. Separate source-backed conclusions from proposed interpretations.
-Never mark your own proposal as validated." Temperature 0.
+Never mark your own proposal as validated. Return only a JSON object. Return
+the SemanticDigestV1 object itself at the top level. Do not wrap it under
+digest or add other top-level fields." Temperature 0. This universal
+`parent-digest.v5` prompt is identical across tiers; its final instructions
+satisfy DeepSeek's runtime requirement that a `json_object` prompt contain the
+literal word `json` and forbid the observed `{digest: ...}` wrapper without
+pasting a schema. The targeted repair instruction repeats the same top-level
+shape constraint. The route-level requirement is recorded in
+`structured_output_capabilities.v1.json`.
+
+Tier 3 targeted repairs use the separately versioned
+`parent-digest-repair.v2` instruction: corrections must be resubmitted through
+the same forced `submit_semantic_digest` tool, with all 12 fields directly at
+the tool-arguments root and no `parameters` or other wrapper. Its independent
+hash is recorded in provenance and participates in the combined prompt hash,
+so repair-contract changes always change the cache identity.
 
 ## 6. Semantic validation (structure ≠ meaning; Python enforces after Pydantic)
 
@@ -200,7 +224,9 @@ surface, and grammar-compilation cost.
 {"model_id": "exact-model-version", "runtime": "llama.cpp|vllm|mlx|provider",
  "runtime_version": "...", "tokenizer_id": "...", "chat_template_hash": "...",
  "schema_version": "semantic_digest.v1", "schema_hash": "...",
- "prompt_version": "parent-digest.v3", "prompt_hash": "...",
+ "prompt_version": "parent-digest.v5", "prompt_hash": "...",
+ "repair_prompt_version": "parent-digest-repair.v2",
+ "repair_prompt_hash": "...",
  "temperature": 0, "input_hash": "...", "output_hash": "..."}
 ```
 

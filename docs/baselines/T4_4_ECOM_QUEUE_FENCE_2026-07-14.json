@@ -1,0 +1,53 @@
+{
+  "schema_version": "polymath.extraction_queue_fence_receipt.v1",
+  "generated_at": "2026-07-14T15:31:22Z",
+  "corpus": {
+    "name": "ecommerce_AI_FILM_SCHOOL",
+    "corpus_id": "fd460347-61cc-4358-87fc-4b2a80533f0a",
+    "status": "active",
+    "owner_authorized_active_work": false,
+    "cp9_owner_gate_required": true
+  },
+  "census_before": {
+    "queued": 10000,
+    "running": 0,
+    "created_at_min": "2026-07-13T08:07:05.397000Z",
+    "created_at_max": "2026-07-13T10:31:10.253000Z",
+    "direct_batch_field_count": 0,
+    "jobs_with_doc_in_ingest_batch_items": 10000,
+    "linked_ingest_batch_count": 1,
+    "linked_ingest_batch_status": "done"
+  },
+  "backup": {
+    "format": "mongoexport_canonical_jsonl",
+    "sorted_by": "job_id",
+    "local_path": "docs/baselines/t44_backups/T4_4_ECOM_EXTRACTION_JOBS_QUEUED_2026-07-14.jsonl",
+    "git_scope": "ignored_local_backup",
+    "row_count": 10000,
+    "bytes": 125954543,
+    "sha256": "91ff40da53d3d37b6e93dac09119ccffb5c573a2c2ccb288613251965c95f267",
+    "sha256_sidecar": true,
+    "credential_prefix_scan_clean": true
+  },
+  "fence": {
+    "filter_status": "queued",
+    "status_after": "superseded",
+    "reason": "parked_pending_owner_ecom_cp9_2026-07-14",
+    "matched": 10000,
+    "modified": 10000,
+    "lease_until_cleared": true,
+    "reversible_from_backup": true
+  },
+  "verification_after_restart": {
+    "ecom_queued_or_running": 0,
+    "all_extraction_running": 0,
+    "exact_fenced_reason_count": 10000,
+    "ingest_batches_queued_or_running": 0
+  },
+  "scope_guards": {
+    "extraction_calls": 0,
+    "document_deletions": 0,
+    "reingest_calls": 0,
+    "canonical_artifact_changes": 0
+  }
+}

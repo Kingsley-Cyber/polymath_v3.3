@@ -1,0 +1,118 @@
+{
+  "schema_version": "polymath.structured_output_capabilities.v1",
+  "recipe_version": "structured-output-capability.runtime-probe.v1",
+  "generated_at": "2026-07-14T15:13:13.240000Z",
+  "policy": {
+    "metadata_can_grant_tier1": false,
+    "unverified_default": "tier4"
+  },
+  "routes": [
+    {
+      "route_id": "deepseek-api__deepseek-v4-flash",
+      "model_id": "deepseek/deepseek-v4-flash",
+      "api_base": "https://api.deepseek.com/v1",
+      "native_json_schema": false,
+      "verification_status": "provider_rejected",
+      "verified_at": "2026-07-14T14:26:39.928137Z",
+      "verified_digest_path": null,
+      "tier3_digest_status": "partial_acceptance_repair_budget_exhausted",
+      "tier4_digest_status": "structurally_unreliable",
+      "digest_evidence_receipts": [
+        "semantic-dlq:c17065513de69beb42fcbe80547408ecf1ded594948db048894c39c68931195a",
+        "semantic-dlq:06bfaf8e065e67047029756674830e717883849d96e6bca0dc1c31d417d4588a",
+        "semantic-dlq:b8cb39acdcdc912e6809cb5bcccb0f1fab4f27ca6b04bdce1c6574224fab4914",
+        "semantic-dlq:c941b145d966d041bb2c83ff29a2de4b2f0f4b06cd6da7880e23712252192b4d"
+      ],
+      "tier4_prompt_requirement": "json_object_prompt_must_contain_literal_json",
+      "probe_receipt": {
+        "http_status": 400,
+        "outcome": "provider_rejected",
+        "error_code": "400",
+        "message": "litellm.BadRequestError: DeepseekException - Error code: 400 - {'error': {'message': 'This response_format type is unavailable now', 'type': 'invalid_request_error', 'param': None, 'code': 'invalid_request_error'}}",
+        "response_format_type": "json_schema"
+      }
+    },
+    {
+      "route_id": "deepseek-api__deepseek-v4-pro",
+      "model_id": "deepseek/deepseek-v4-pro",
+      "api_base": "https://api.deepseek.com/v1",
+      "native_json_schema": false,
+      "verification_status": "provider_rejected",
+      "verified_at": "2026-07-14T14:26:40.291405Z",
+      "verified_digest_path": null,
+      "tier3_digest_status": "not_tested",
+      "tier4_digest_status": "not_tested",
+      "digest_evidence_receipts": [],
+      "tier4_prompt_requirement": "json_object_prompt_must_contain_literal_json",
+      "probe_receipt": {
+        "http_status": 400,
+        "outcome": "provider_rejected",
+        "error_code": "400",
+        "message": "litellm.BadRequestError: DeepseekException - Error code: 400 - {'error': {'message': 'This response_format type is unavailable now', 'type': 'invalid_request_error', 'param': None, 'code': 'invalid_request_error'}}",
+        "response_format_type": "json_schema"
+      }
+    },
+    {
+      "route_id": "deepseek-api__deepseek-chat",
+      "model_id": "deepseek/deepseek-chat",
+      "api_base": "https://api.deepseek.com/v1",
+      "native_json_schema": false,
+      "verification_status": "provider_rejected",
+      "verified_at": "2026-07-14T14:26:40.755164Z",
+      "verified_digest_path": null,
+      "tier3_digest_status": "not_tested",
+      "tier4_digest_status": "not_tested",
+      "digest_evidence_receipts": [],
+      "tier4_prompt_requirement": "json_object_prompt_must_contain_literal_json",
+      "probe_receipt": {
+        "http_status": 400,
+        "outcome": "provider_rejected",
+        "error_code": "400",
+        "message": "litellm.BadRequestError: DeepseekException - Error code: 400 - {'error': {'message': 'This response_format type is unavailable now', 'type': 'invalid_request_error', 'param': None, 'code': 'invalid_request_error'}}",
+        "response_format_type": "json_schema"
+      }
+    },
+    {
+      "route_id": "deepseek-api__deepseek-reasoner",
+      "model_id": "deepseek/deepseek-reasoner",
+      "api_base": "https://api.deepseek.com/v1",
+      "native_json_schema": false,
+      "verification_status": "provider_rejected",
+      "verified_at": "2026-07-14T14:26:41.220133Z",
+      "verified_digest_path": null,
+      "tier3_digest_status": "not_tested",
+      "tier4_digest_status": "not_tested",
+      "digest_evidence_receipts": [],
+      "tier4_prompt_requirement": "json_object_prompt_must_contain_literal_json",
+      "probe_receipt": {
+        "http_status": 400,
+        "outcome": "provider_rejected",
+        "error_code": "400",
+        "message": "litellm.BadRequestError: DeepseekException - Error code: 400 - {'error': {'message': 'This response_format type is unavailable now', 'type': 'invalid_request_error', 'param': None, 'code': 'invalid_request_error'}}",
+        "response_format_type": "json_schema"
+      }
+    },
+    {
+      "route_id": "longcat-api__longcat-2.0",
+      "model_id": "openai/LongCat-2.0",
+      "api_base": "https://api.longcat.chat/openai/v1",
+      "native_json_schema": false,
+      "verification_status": "provider_rejected",
+      "verified_at": "2026-07-14T14:26:43.104359Z",
+      "verified_digest_path": null,
+      "tier3_digest_status": "tiny_tool_accepted_digest_unverified",
+      "tier4_digest_status": "not_tested",
+      "digest_evidence_receipts": [
+        "polymath.tier3_tool_capability_probe.v1:longcat-api__longcat-2.0:2026-07-14T15:11:44.136938Z"
+      ],
+      "tier4_prompt_requirement": "not_runtime_verified",
+      "probe_receipt": {
+        "http_status": 200,
+        "outcome": "provider_rejected",
+        "error_code": "invalid_structured_output",
+        "message": "2xx response did not contain valid JSON content",
+        "response_format_type": "json_schema"
+      }
+    }
+  ]
+}
