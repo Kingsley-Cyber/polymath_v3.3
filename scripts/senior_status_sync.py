@@ -120,16 +120,28 @@ def main() -> int:
     entries = coordination_entries()
     exec_entries = [e for e in entries if e["who"] == "EXECUTOR"]
     n_exec = len(exec_entries)
-    if n_exec > state.get("exec_entries", 0):
-        for e in exec_entries[state.get("exec_entries", 0):]:
-            alerts.append(f"ALERT NEW_EXECUTOR_ENTRY :: {e['typ']} {e['head']}")
+    # Content-keyed dedup: a pull --rebase --autostash window can transiently
+    # shrink COORDINATION.md on disk, so counts regress and count-based state
+    # replays the tail. Keys never regress.
+    entry_key = lambda e: f"{e['ts']}|{e['typ']}|{e['head']}"  # noqa: E731
+    seen = set(state.get("seen_exec_keys", []))
+    new_exec = [e for e in exec_entries if entry_key(e) not in seen]
+    for e in new_exec:
+        alerts.append(f"ALERT NEW_EXECUTOR_ENTRY :: {e['typ']} {e['head']}")
+    seen |= {entry_key(e) for e in exec_entries}
 
-    # unanswered QUESTION/BLOCKER: an executor Q/B with no later senior entry
+    # unanswered QUESTION/BLOCKER: an executor Q/B with no later senior entry;
+    # alert once per pending entry (keyed), not once per sweep
+    pending_alerted = set(state.get("pending_alerted_keys", []))
+    pending_now: list[str] = []
     if entries:
         last_senior_idx = max((i for i, e in enumerate(entries) if e["who"] in ("SENIOR", "OWNER")), default=-1)
         for i, e in enumerate(entries):
             if e["who"] == "EXECUTOR" and e["typ"] in ("QUESTION", "BLOCKER") and i > last_senior_idx:
-                alerts.append(f"ALERT PENDING_FOR_SENIOR :: {e['typ']} {e['head']}")
+                pending_now.append(entry_key(e))
+                if entry_key(e) not in pending_alerted:
+                    alerts.append(f"ALERT PENDING_FOR_SENIOR :: {e['typ']} {e['head']}")
+    pending_alerted |= set(pending_now)
 
     cov = subprocess.run(
         ["python3", str(REPO / "scripts" / "check_buildline_coverage.py")],
@@ -159,7 +171,7 @@ def main() -> int:
         alerts.append("ALERT BATCH_TERMINAL :: previously-running batch reached a terminal state")
 
     last_exec_ts = state.get("last_activity_ts", time.time())
-    if n_exec > state.get("exec_entries", 0) or head != state.get("git_head"):
+    if new_exec or head != state.get("git_head"):
         last_exec_ts = time.time()
     silent_min = int((time.time() - last_exec_ts) / 60)
     if silent_min > 45 and "ACTIVE" in ptr.upper():
@@ -196,7 +208,8 @@ BUILDLINE coverage: {'OK' if cov.returncode == 0 else 'FAILING'}
 """)
 
     STATE.write_text(json.dumps({
-        "exec_entries": n_exec,
+        "seen_exec_keys": sorted(seen)[-800:],
+        "pending_alerted_keys": sorted(pending_alerted)[-200:],
         "now_pointer": ptr,
         "gate_logs": logs,
         "git_head": head,

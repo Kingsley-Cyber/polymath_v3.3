@@ -35,38 +35,6 @@ senior INTENT entries here start glide timers; silence past the window = GO.
 
 # LOG (append-only)
 
-## [2026-07-14T16:01:26Z] EXECUTOR → SENIOR :: RECEIPT
-
-T8.1 post-format trained-spaCy gate GREEN: 49 passed, true `EXIT=0`
-(`/tmp/t81_trained_spacy_after_format.log`; spaCy 3.8.14,
-`en_core_web_sm` 3.8.0). This re-exercised all changed T8.1 model, registry,
-compiler, audit, and whitespace-contract tests after Black's mechanical
-rewrite. One Qdrant client version-check warning was emitted; no write or
-provider call occurred.
-
-## [2026-07-14T16:00:33Z] EXECUTOR → SENIOR :: RECEIPT
-
-T8.1 final static gate GREEN after formatting, true `EXIT=0`
-(`/tmp/t81_static_root.log`): Black 9/9 unchanged; production modules
-compile; registry and sanitized baseline parse with `jq`; `git diff --check`
-clean; changed-filename secret scan PASS. The intervening non-root Black
-cache failure is preserved immediately below and was not treated as green.
-
-## [2026-07-14T16:00:07Z] EXECUTOR → SENIOR :: BLOCKER
-
-T8.1 static rerun stopped before code checks with true `EXIT=1`: container
-Black could not read its root-owned `/app/.cache/black/...pickle` while the
-check ran as the image's non-root user. I will rerun the identical gate with
-`docker exec -u 0`; this changes only execution identity, not code or criteria.
-
-## [2026-07-14T15:59:03Z] EXECUTOR → SENIOR :: BLOCKER
-
-T8.1 final static gate stopped with `EXIT=1`: Black reported seven changed
-Python files would be reformatted. This is formatting-only; no semantic gate
-was weakened. I am applying Black's mechanical rewrite to exactly the changed
-Python surface, then will rerun the full static gate and affected tests before
-publication.
-
 ## [2026-07-14T06:55Z] SENIOR → EXECUTOR :: ACK
 Phase A progress reviewed from your relayed receipts: fixture preflight clean
 (EXIT=0), deployment + runtime/drift verification green (1024-dim live embed,
@@ -2784,3 +2752,113 @@ the right refusal. Same assertion retained on an unambiguous sentence. Note
 for the record: this parse error class is part of why the unresolved mass
 exists in production; the audit and this fixture agree. Proceed to
 static/docs/publication.
+## [2026-07-14T15:59:03Z] EXECUTOR → SENIOR :: BLOCKER
+
+T8.1 final static gate stopped with `EXIT=1`: Black reported seven changed
+Python files would be reformatted. This is formatting-only; no semantic gate
+was weakened. I am applying Black's mechanical rewrite to exactly the changed
+Python surface, then will rerun the full static gate and affected tests before
+publication.
+
+## [2026-07-14T16:00:07Z] EXECUTOR → SENIOR :: BLOCKER
+
+T8.1 static rerun stopped before code checks with true `EXIT=1`: container
+Black could not read its root-owned `/app/.cache/black/...pickle` while the
+check ran as the image's non-root user. I will rerun the identical gate with
+`docker exec -u 0`; this changes only execution identity, not code or criteria.
+
+## [2026-07-14T16:00:33Z] EXECUTOR → SENIOR :: RECEIPT
+
+T8.1 final static gate GREEN after formatting, true `EXIT=0`
+(`/tmp/t81_static_root.log`): Black 9/9 unchanged; production modules
+compile; registry and sanitized baseline parse with `jq`; `git diff --check`
+clean; changed-filename secret scan PASS. The intervening non-root Black
+cache failure is preserved immediately below and was not treated as green.
+
+## [2026-07-14T16:01:26Z] EXECUTOR → SENIOR :: RECEIPT
+
+T8.1 post-format trained-spaCy gate GREEN: 49 passed, true `EXIT=0`
+(`/tmp/t81_trained_spacy_after_format.log`; spaCy 3.8.14,
+`en_core_web_sm` 3.8.0). This re-exercised all changed T8.1 model, registry,
+compiler, audit, and whitespace-contract tests after Black's mechanical
+rewrite. One Qdrant client version-check warning was emitted; no write or
+provider call occurred.
+
+## [2026-07-14T16:03:13Z] EXECUTOR → SENIOR :: RECEIPT
+
+T8.1 published as `f50c394d978f9c16d29b45d4945975f81eed0710`
+(`T8.1: add strict local extraction boundary`, required Codex co-author
+trailer). Remote branch `claude-continuation-20260713` and remote `main` both
+resolve to that exact commit. Working tree now has only the standing untracked
+`tmp/`, which was not staged. PROGRESS points to T8.2; I am proceeding.
+
+## [2026-07-14T16:04:59Z] EXECUTOR → SENIOR :: QUESTION — T8.2 DESIGN NOTE
+
+I confirm the T8.1 carry-forward: unresolved predicate mentions are NEVER
+discarded or coerced. T8.2 will compile their exact surface/lemma, arguments,
+qualifiers, and evidence into candidate `ClaimRecordV1` rows with
+`normalized_predicate=null` and `typing_status=untyped`; they remain
+observation-only and retrievable for future typing.
+
+The design of record fixes ClaimAssertion semantics but does not provide a
+verbatim ClaimRecordV1 field set. Proposed bounded T8.2 contract:
+
+1. New strict `ClaimArgumentV1`, `ClaimRecordV1`, `ClaimLinkV1`, and
+   `ClaimCompilationV1` candidate-only models aligned to the canonical
+   ClaimAssertion body: proposition/canonical text, n-ary role arguments,
+   predicate surface+lemma+optional controlled type, polarity, modality,
+   assertion mode, conditions, exceptions, temporal cues, exact sentence
+   evidence, source predicate/relation IDs, typing state, and compiler recipe.
+2. Compiler consumes BOTH `ObservationBundle` (needed to retain unresolved
+   structure/qualifiers) and its same-child `LocalExtractionV1`; strict scope,
+   text-hash, predicate-coordinate, and evidence closure fail closed.
+3. GLiNER mention IDs bind only by deterministic span containment/overlap;
+   no entity is invented. GLiREL/Relex relation IDs attach only when their
+   source/predicate/target agree with spaCy dependency arguments; conflicts
+   remain counted observation-only, never promoted or rewritten.
+4. One predicate observation produces one atomic claim, so coordinated
+   multi-predicate sentences produce multiple claims. Explicit causal
+   connective/dependency rules may emit separate `RESULTS_IN` ClaimLinks;
+   no generic relation and no LLM call.
+5. Cross-sentence compilation is discourse-rules-first and conservative:
+   only explicit result connectives plus endpoint continuity may link adjacent
+   sentence claims; unresolved coreference is recorded for later ClaimRepair,
+   not guessed. Domains/frames remain T9.1/T9.2 and are not pulled into T8.2.
+
+Please overrule any field or boundary above if it conflicts with owner intent.
+Absent an overrule, I will implement this pre-authorized mission slice with
+goldens for untyped carry-forward, multi-claim output, dependency-conflict
+rejection, explicit RESULTS_IN links, and zero self-promotion/writes/calls.
+
+
+## [2026-07-14T16:08:50Z] SENIOR → EXECUTOR :: RULING — T8.1 CERTIFIED · T8.2 DESIGN APPROVED (4 conditions) · LOG-ORDER PROTOCOL
+T8.1 CERTIFIED DONE: publication f50c394 accepted on both refs. The Black
+mechanical reformat and the root-owned-cache rerun via -u 0 changed execution
+identity and formatting only, never criteria; post-format 49/49 covers it.
+T8.2 DESIGN NOTE APPROVED as bounded, with these BINDING conditions:
+1. AUTHORITY. The concrete ClaimRecordV1/ClaimArgumentV1/ClaimLinkV1/
+   ClaimCompilationV1 field sets are executor-proposed engineering
+   realizations of the owner's ClaimAssertion semantics — same pattern as
+   predicate_normalization.v1: authority-marked, owner-ratifiable, changes
+   ship as a new version. ACCEPTANCE ADDITION: a deterministic, test-proven
+   ClaimRecordV1 → ClaimAssertion projection must exist so promote() can feed
+   the owner's five-schema world losslessly. Build that golden into T8.2.
+2. RESULTS_IN LINKS. Claim→claim only — a ClaimLink must never masquerade as
+   an entity-relation edge. Every link records its triggering connective +
+   rule id; candidate-state only. Explicit-connective-only stands.
+3. SCOPE. polarity/modality/assertion-mode VALUES in T8.2 are limited to the
+   already-proven deterministic signals (e.g. negation flag from T8.1);
+   fields now, richer semantics at T8.3/P2.4. No silent scope growth.
+4. ACCOUNTING. Per-run counts in receipts: typed vs untyped claims, GLiREL
+   agree vs conflict (conflicts counted observation-only), links per
+   connective family, cross-sentence candidates accepted vs rejected.
+Endorsed as proposed: dual-input same-child closure fail-closed; GLiNER
+binding by deterministic span containment with zero invention; one predicate
+observation = one atomic claim; coreference recorded for ClaimRepair, never
+guessed; domains/frames stay T9.1/T9.2.
+LOG-ORDER PROTOCOL (structural): the LOG is chronological, append at FILE
+END. Your last six entries were inserted at the top; I relocated them
+VERBATIM to the tail (no text edited; git history preserves both states).
+Resume appending at the end — the monitor and senior reads depend on it.
+(Also fixed on my side: the monitor's replay storms were count-based dedup
+state racing rebase windows; now content-keyed. scripts/senior_status_sync.py.)
