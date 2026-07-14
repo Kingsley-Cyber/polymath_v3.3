@@ -132,6 +132,16 @@ Deploy-train rule: every step below that changes backend code ships in the next 
 
 Parallelizable: S2+S3 (independent of S1); S6 alongside S5; P0.2/P0.6 test-matrix remainders can fill any gap — they touch nothing above.
 
+### S11 restated (owner rebuttal approved 2026-07-14)
+
+S11 = the staged claim-first pipeline (FINAL_SCHEMA addendum: spaCy structure →
+GLiNER spans → controlled-label GLiREL candidates → Python claim compiler →
+deterministic domain/superframe mapping → packet assembler (no re-chunk, C1) →
+one LLM digest → normalization + permission ladder → motifs → bottom-up
+profiles → cross-document mining). Front gate = P2.5b (envelope + registries +
+GLiREL re-benchmark C2). Relations observation-only until C2 passes. The old
+"mass GLiNER-ReLEX relation burst" reading is superseded.
+
 ## 4. Critique — where sequencing broke, what it cost, what rule prevents it
 
 **C1. Rebuild-before-capture on the very rows the plan cares about (the core violation).**

@@ -916,3 +916,67 @@ Decision change from the empirical result:
 The remaining next HOW work is still the full envelope, hash goldens,
 registries, adapters, Mongo indexes/validators, outbox/manifests, stronger
 pinned parser comparison, expanded labels, and an UGO-only annotate pipeline.
+
+## Owner rebuttal integration (2026-07-14, APPROVED)
+
+The owner's grounded rebuttal (docs/REBUTTAL_INTEGRATION_RESTATEMENT_2026-07-13.md,
+approved in full) amends this architecture as follows. Where earlier sections
+conflict, this section wins.
+
+### Permission model replaces staged lockout
+
+- Parent/document aggregate profiles are **stable routing signals** — not the
+  only retrieval-consumable artifacts.
+- Validated claim assignments, provisional latent concepts, and motif candidates
+  are **weighted soft-recall signals** from day one.
+- Only validated source-backed claims may independently ground FACTUAL answers.
+- Lifecycle: `LLM proposals → Python normalization → retained semantic
+  candidates → differentiated permissions → corroboration → promotion`.
+  Candidates are RETAINED with states; assignment_state confers permissions
+  (ground / recall / expand / explain); nothing useful is discarded.
+
+### Store families (each gets a ProjectionManifest)
+
+- Qdrant dense: source-child; context-enriched child (implemented as a P2.2
+  representation-point kind — owner ruling C3); parent-summary; latent-concept;
+  motif/analogy.
+- Mongo hybrid: exact source text; explicit aliases; generated aliases; domain
+  labels; superframe labels; latent concepts; assignment states.
+- Neo4j: asserted claim graph; validated semantic graph; provisional expansion
+  graph; analogy graph.
+
+### Query modes (permission mixes per lane)
+
+FACTUAL · EXPLANATORY · CROSS_DOMAIN · EXPLORATORY · CREATIVE_TRANSFER ·
+CONTRAST — a policy axis alongside answer-shape routing, selecting which
+assignment states and index families may contribute recall vs grounding.
+
+### Owner rulings recorded
+
+1. **C1 (chunking):** current 128-token children + structural parents stand;
+   the "parent evidence packet" (5–10 children) is a packet **assembler** over
+   existing structure. No re-chunking.
+2. **C2 (GLiREL):** Stage-4 GLiREL retained as controlled-label candidate
+   producer; production go/no-go = compiled-claim quality WITH vs WITHOUT
+   GLiREL candidates under the controlled registry on the gold fixture.
+   Relations remain observation-only until that gate passes.
+3. **C3:** context-enriched child embeddings ride P2.2 (prereqs met), not a new
+   mechanism.
+4. **C4:** full motif/superframe/domain registry schemas arrive from the owner
+   verbatim as versioned snapshot data (P2.5b registry boxes consume them).
+
+### Staged pipeline of record (S11)
+
+Stage 1 structure (Python+spaCy) → Stage 2 linguistic signals → Stage 3 spans
+(GLiNER: real-world + semantic entities; Python alias resolution) → Stage 4
+relations (GLiREL, controlled labels, candidates) → Stage 5 atomic-claim
+compilation (Python; dependency-parse conflict check; RESULTS_IN links;
+discourse-rules-first multi-sentence) → deterministic domain + superframe
+mapping (registries + rule registry) → Stage 6 parent evidence packet
+(accepted outputs only) → Stage 7 ONE LLM semantic-digest call (summary,
+central thesis, cross-claim meaning, latent concepts, implicit mechanisms,
+novel motifs, secondary domains) → Stage 8 Python normalization/validation/
+permission assignment → Stage 9 motif compilation (frame sequences) →
+Stage 10 bottom-up aggregation (claims → parent → chapter → document) →
+Stage 11 cross-document connection mining (structural compatibility, never
+topicality; LLM explains only).

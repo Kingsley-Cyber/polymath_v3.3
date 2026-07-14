@@ -1250,6 +1250,34 @@ still unchecked work below.
   revisions/assertions with explicit supersession, while validation/lifecycle
   state remains outside semantic body identity.
 
+Owner rebuttal integration (2026-07-14, rulings C1–C4 APPROVED — see
+docs/REBUTTAL_INTEGRATION_RESTATEMENT_2026-07-13.md and the FINAL_SCHEMA
+"Owner rebuttal integration" addendum):
+
+- [ ] Implement the permission-state ladder: candidates are RETAINED after
+  Python normalization with differentiated permissions (ground / recall /
+  expand / explain) and corroboration→promotion paths; provisional latent
+  concepts and motif candidates are weighted soft-recall signals; only
+  validated source-backed claims independently ground FACTUAL answers.
+- [ ] Consume the owner's motif/superframe/domain registry schemas VERBATIM as
+  versioned snapshot data (delivery pending — C4); no invented registry ids.
+- [ ] Build the parent evidence-packet ASSEMBLER over existing structure
+  (128-token children + structural parents stand; no re-chunking — C1).
+- [ ] GLiREL Stage-4 re-benchmark gate (C2): compiled-claim quality WITH vs
+  WITHOUT controlled-label GLiREL candidates on the gold fixture; relations
+  stay observation-only until this passes.
+- [ ] Context-enriched child embeddings ship as a P2.2 representation-point
+  kind (C3), inheriting P2.2 prereqs/caps — not a new mechanism.
+- [ ] Enumerate ProjectionManifests for all owner-ruled families: Qdrant
+  (source-child, context-enriched child, parent-summary, latent-concept,
+  motif/analogy), Mongo hybrid signals (source text, explicit aliases,
+  generated aliases, domain labels, superframe labels, latent concepts,
+  assignment states), Neo4j (asserted claims, validated semantic, provisional
+  expansion, analogy).
+- [ ] Implement query modes (FACTUAL / EXPLANATORY / CROSS_DOMAIN /
+  EXPLORATORY / CREATIVE_TRANSFER / CONTRAST) as permission mixes over
+  assignment states and index families — policy data, not hardcoded branches.
+
 Acceptance:
 
 - [ ] Canonical JSON, every hash namespace, and every identifier recipe have

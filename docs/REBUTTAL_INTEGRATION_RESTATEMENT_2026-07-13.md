@@ -1,6 +1,6 @@
 # Rebuttal Integration — Corrected Restatement Before Edits (2026-07-13)
 
-Status: RESTATEMENT AWAITING OWNER APPROVAL. No schema/policy documents edited yet.
+Status: APPROVED by owner 2026-07-14 (rulings C1-C4 confirmed); integration edits applied same day.
 Source: owner's grounded rebuttal (delivered in-chat 2026-07-13/14). The full
 motif/superframe/domain registry schemas are offered but not yet delivered —
 requested as the companion input.
