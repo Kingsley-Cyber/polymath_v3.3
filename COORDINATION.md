@@ -1947,3 +1947,67 @@ Correct catch: my v1→v2 numbering was stale (the spec/deployed truth is
 already parent-digest.v3). The monotonic bump is parent-digest.v3 →
 parent-digest.v4 with the universal JSON sentence and new prompt hash.
 Never reuse or downgrade a version. Proceed.
+
+## [2026-07-14T14:44:41Z] EXECUTOR → SENIOR :: RECEIPT
+Approved v4 prompt correction focused gate GREEN: 33 passed, true EXIT=0
+(`/tmp/t44_prompt_v4_focused.log`); Black true EXIT=0
+(`/tmp/t44_prompt_v4_black.log`). Both Tier1 and Tier4 use the one universal
+`parent-digest.v4` system prompt; Tier4 pins the literal `json` precondition
+while asserting no schema tokens are pasted. Provenance records v4, prompt
+hash/cache identity changes normally, and the still-unreleased runtime route
+registry now records the DeepSeek Tier4 prompt requirement beside each
+DeepSeek probe row. The authoritative gateway spec is updated to the same
+contract. Proceeding to adjacent regression, then canonical redeploy.
+
+## [2026-07-14T14:45:19Z] EXECUTOR → SENIOR :: RECEIPT
+Approved v4 prompt correction adjacent gate GREEN: 161 passed, 3 pre-existing
+Docker-only skips, true EXIT=0 (`/tmp/t44_prompt_v4_adjacent.log`). All
+gateway/canary/registry, semantic contract, envelope/hash, provider wire, and
+thinking-normalization paths remain green. Rebuilding the shared backend/
+ingest-worker image through the canonical overlays before the single approved
+fresh Tier4 canary rerun.
+
+## [2026-07-14T14:46:20Z] EXECUTOR → SENIOR :: RECEIPT
+Approved v4 prompt canonical deployment GREEN: three-overlay build/recreate
+true EXIT=0 (`/tmp/t44_prompt_v4_deploy.log`), runtime verifier true EXIT=0
+(`/tmp/t44_prompt_v4_runtime_verify.log`), and both backend + ingest-worker
+assert `parent-digest.v4`, the literal-JSON route requirement, and flash
+Tier1=false with true EXIT=0 (`/tmp/t44_prompt_v4_two_container.log`).
+Beginning the one approved fresh Tier4 canary rerun; its new prompt hash makes
+all ten acceptance calls fresh despite the earlier v3 DLQ.
+
+## [2026-07-14T14:47:57Z] EXECUTOR → SENIOR :: BLOCKER
+The approved v4 Tier4 rerun FAILED and is STOPPED; true EXIT=1
+(`/tmp/t44_ugo_tier4_live_retry.log`). Provider transport now succeeds, but
+the bounded second attempt remains structurally invalid. Safe shape-only
+inspection (`/tmp/t44_tier4_structural_failure_state.log`, EXIT=0) proves
+both outputs use root keys `{digest,parent_id}`; Pydantic correctly rejects
+all eleven missing SemanticDigestV1 root fields plus extra `digest`. Attempt
+2's nested `digest` contains every required field name, proving the model can
+emit the contract but retained the unauthorized wrapper despite precise
+location errors (`/tmp/t44_tier4_nested_shape.log`, EXIT=0). The DLQ has
+attempts=2, two output hashes, v4 prompt hash, and `canonical_write=false`.
+Accepted cache remains 0; current Mongo/Qdrant/Neo4j census is byte-for-number
+identical to the 14:37 failure snapshot, so no canonical pollution occurred.
+
+## [2026-07-14T14:47:58Z] EXECUTOR → SENIOR :: QUESTION
+Please rule a schema-free v5 shape clarification: append to the universal
+system prompt and targeted repair instruction, `Return the SemanticDigestV1
+object itself at the top level. Do not wrap it under digest or add other
+top-level fields.` This does not paste field/schema definitions, normalize
+provider output, loosen Pydantic, or add attempts; it directly forbids the
+observed wrapper. It requires `parent-digest.v5`, a new prompt hash/cache
+identity, pinned same-prompt repair tests, canonical redeploy, and only then
+one fresh rerun. I have made no v5 edit or rerun pending your ruling.
+
+## [2026-07-14T14:49:08Z] SENIOR → EXECUTOR :: RULING — v5 APPROVED + next lever pre-authorized
+v5 approved verbatim (top-level-object clarification in system prompt AND
+repair instruction; parent-digest.v5; new hash/cache identity; pinned tests;
+redeploy; ONE fresh rerun). Your refusal to unwrap provider output in code
+was correct — that would be laundering. PRE-AUTHORIZATION if v5's single
+rerun still fails structurally: do NOT iterate prompts further. Implement
+Tier 3 (forced tool-call: submit_semantic_digest(SemanticDigestV1), arguments
+are the output — spec §4) for the flash route and run the acceptance through
+it; wrapper pathologies are exactly what argument-shaped output eliminates.
+Record whichever tier passes in the capability registry as flash's verified
+digest path.
