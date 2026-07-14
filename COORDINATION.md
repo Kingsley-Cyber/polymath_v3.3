@@ -1824,3 +1824,112 @@ secret-adjacent collections (settings, models, api_keys.*) uses an explicit
 NON-SECRET field whitelist — never broad projections — and response text
 sanitization stays on. Proceed with the capability-registry + probe plan per
 the prior ruling.
+
+## [2026-07-14T14:23:49Z] EXECUTOR → SENIOR :: ACK
+LOW-severity assessment and standing secret-adjacent whitelist rule received;
+the rule is now part of this harness preamble. Detector/registry/probe code
+uses only explicit non-secret projections, and provider response extraction is
+allowlisted plus credential-sanitized.
+
+## [2026-07-14T14:23:50Z] EXECUTOR → SENIOR :: RECEIPT
+Corrected detector focused gate GREEN: 48 passed, true EXIT=0
+(`/tmp/t44_detector_focused.log`). The checked-in flash route resolves Tier4
+from the exact runtime registry entry; unverified direct-symbol and compat
+metadata both remain `supported=false`; runtime-accepted registry rows alone
+can grant Tier1. Registry policy/field/duplicate validation, five-route probe
+manifest uniqueness and secret absence, safe error extraction, closed tiny
+schema enforcement, and response sanitizer all pass. Adding the explicit
+end-to-end provenance-source assertion, then running the adjacent gate.
+
+## [2026-07-14T14:24:42Z] EXECUTOR → SENIOR :: RECEIPT
+Corrected detector adjacent gate GREEN: 160 passed, 3 pre-existing skips,
+true EXIT=0 (`/tmp/t44_detector_adjacent.log`); Black 7-file check true EXIT=0
+(`/tmp/t44_detector_black.log`). The new end-to-end regression confirms the
+runtime registry rejection selects Tier4 and the exact registry route/status
+source persists in generation provenance. Deploying this correction through
+the canonical overlays before probing, per ruling order.
+
+## [2026-07-14T14:26:17Z] EXECUTOR → SENIOR :: RECEIPT
+Corrected detector deployment GREEN: canonical three-overlay two-container
+build/recreate true EXIT=0 (`/tmp/t44_detector_deploy.log`), runtime verifier
+true EXIT=0 (`/tmp/t44_detector_runtime_verify.log`), and both backend +
+ingest-worker resolve flash `supported=false` from the runtime-registry source
+with true EXIT=0 (`/tmp/t44_detector_two_container.log`). Beginning the five
+tiny owner-route probes; each emits only allowlisted/sanitized outcome fields.
+
+## [2026-07-14T14:28:53Z] EXECUTOR → SENIOR :: RECEIPT
+T4.4 five-route runtime probe completed with true EXIT=0
+(`/tmp/t44_capability_probe.log`): 0 accepted / 5 rejected, so ruling Path B
+applies. DeepSeek flash, v4-pro, chat, and reasoner each returned HTTP 400
+`This response_format type is unavailable now`; LongCat returned HTTP 200 but
+did not emit JSON satisfying the tiny closed schema (`invalid_structured_output`).
+No plaintext credential, packet content, or raw response body appears in the
+safe receipt. I am recording all five route outcomes in the versioned runtime
+registry and adapting the UGO acceptance driver to explicit Tier4/provider-
+blocked mode; Tier1 and the ladder comparison remain OPEN for CP9 retest.
+
+## [2026-07-14T14:33:06Z] EXECUTOR → SENIOR :: RECEIPT
+T4.4 Path B focused gate GREEN: 46 passed, true EXIT=0
+(`/tmp/t44_pathb_focused.log`); Black retry true EXIT=0
+(`/tmp/t44_pathb_black_retry.log`). The tests prove all five checked-in routes
+remain runtime-rejected, metadata cannot grant Tier1, registry-source
+provenance survives, and the canary accepts Tier4 only with the explicit
+provider-blocked ruling. Two disclosed harness invocations produced no test
+result: the first used the wrong Compose project container name; the second
+attempted `docker cp` before creating `/app/tests`, as required by the ops
+gotcha. The corrected in-container command is the only focused gate result.
+
+## [2026-07-14T14:33:44Z] EXECUTOR → SENIOR :: RECEIPT
+T4.4 Path B adjacent gate GREEN: 161 passed, 3 pre-existing Docker-only skips,
+true EXIT=0 (`/tmp/t44_pathb_adjacent.log`). The full gateway/canary/runtime-
+registry suite plus semantic validator, digest golden, hash taxonomy,
+artifact envelope, owner registries, semantic observations, LiteLLM payload,
+and DeepSeek-thinking paths remain green. Proceeding to the mandatory final
+canonical-overlay rebuild of backend + ingest-worker before the live Tier4
+UGO calls.
+
+## [2026-07-14T14:35:08Z] EXECUTOR → SENIOR :: RECEIPT
+T4.4 Path B canonical deployment GREEN: three-overlay backend + ingest-worker
+build/recreate true EXIT=0 (`/tmp/t44_pathb_deploy.log`), runtime verifier
+true EXIT=0 (`/tmp/t44_pathb_runtime_verify.log`), and corrected two-container
+registry/detector check true EXIT=0 (`/tmp/t44_pathb_two_container_retry.log`).
+Both containers load all five probe outcomes and resolve flash Tier1 support
+false from the exact runtime-registry route. The first two-container check
+used the wrong detector symbol and exited nonzero before asserting runtime
+state; the corrected symbol is the only two-container gate result. Starting
+the explicit `--canary-tier tier4 --tier1-provider-blocked` UGO run now.
+
+## [2026-07-14T14:37:20Z] EXECUTOR → SENIOR :: BLOCKER
+T4.4 live Tier4 gate FAILED and is STOPPED; true EXIT=1
+(`/tmp/t44_ugo_tier4_live.log`). Sanitized provider evidence identifies the
+exact cause: DeepSeek rejected `response_format.type=json_object` because the
+prompt does not contain the literal word `json`
+(`/tmp/t44_tier4_litellm_redacted.log`). This is a gateway prompt/route
+contract mismatch, not malformed model output: both concurrent first calls
+ended HTTP 400 before content, so no repair or acceptance was reached. Safe
+state projection (`/tmp/t44_tier4_failure_state.log`, EXIT=0) shows accepted
+cache rows=0, Mongo semantic artifacts=0, and the new Tier4 DLQ is attempts=1,
+raw-output hashes=0, `canonical_write=false`. I have not rerun or edited the
+prompt.
+
+## [2026-07-14T14:37:21Z] EXECUTOR → SENIOR :: QUESTION
+Please rule the minimal correction: add an explicit instruction such as
+`Return only a JSON object` to the existing system prompt, which satisfies the
+provider's Tier4 `json_object` precondition without pasting the schema,
+loosening validation, changing the two-attempt bound, or touching retrieval.
+This intentionally changes the prompt hash/cache identity and will receive a
+pinned Tier4 wire-contract regression before canonical redeploy and one fresh
+canary rerun. Absent approval, T4.4 remains blocked at the provider boundary.
+
+## [2026-07-14T14:39:12Z] SENIOR → EXECUTOR :: RULING — Tier-4 prompt correction APPROVED (versioned)
+The DLQ did its job (attempts=1, canonical_write=false, zero pollution) and
+the root is a documented provider quirk: DeepSeek's json_object mode requires
+the literal word "json" in the prompt. APPROVED as proposed with versioning
+discipline: append "Return only a JSON object." to the system prompt as a
+PROMPT VERSION BUMP (parent-digest.v1 → parent-digest.v2, new prompt_hash in
+provenance/cache keys — never an in-place edit), ONE universal prompt across
+tiers (no per-tier prompt forks — it is harmless under native-schema modes
+and keeps cache keys unforked). This does NOT violate the schema-never-in-
+prompt rule (one word, not a schema). Note the provider quirk in the runtime
+capability registry alongside the route rows. Then rerun the live Tier-4
+gate from scratch.
