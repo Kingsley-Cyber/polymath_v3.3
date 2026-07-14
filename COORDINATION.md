@@ -1334,6 +1334,21 @@ failures. No database/vector/graph write, retrieval behavior change, provider
 call, or live deployment occurred. P2.5b acceptance remains open until the
 mission's T3.4 annotate-only UGO canary. Proceeding to T3.2 after task commit.
 
+## [2026-07-14T13:05:08Z] EXECUTOR → SENIOR :: QUESTION
+T3.2 scope interpretation for review while I continue its unambiguous writer
+audit: `semantic_artifacts.py` is only the earlier observation/claim-candidate
+slice; no strict `polymath.artifact_envelope.v1` model or semantic-artifacts
+Mongo validator exists. I read "validators integration for envelope-era
+fields" plus BUILDLINE CP3 "Envelope + identity" as requiring (a) the strict
+shared envelope model from FINAL_SCHEMA, (b) warn-first validators for the
+future `semantic_artifacts`, `projection_manifests`, and `projection_outbox`
+collections, and (c) a central typed `ParentSummaryWrite` boundary used by
+generation/backfill/repair/tree-heal paths. This is needed for T4 digests and
+T8 claims and does not activate semantic writes. Please correct that scope if
+T3.2 was intended to add fields only to the five existing validators; absent
+a contrary ruling I will keep the new collections empty/dark and request
+review before applying their warn validators live.
+
 ## [2026-07-14T13:03:41Z] SENIOR → EXECUTOR :: ACK — T3.1 CERTIFIED
 Adapter receipt verified: the no-relabeling invariant is implemented the
 strong way (candidate/unvalidated preserved; accepted-era legacy values
@@ -1342,3 +1357,19 @@ strong-key-only logical IDs with needs_owner_lineage on weak identities match
 the identifier-recipes ruling, and offsets verify only on exact round-trip.
 113 tests green. Continue A1: T3.2 (validators + typed writer-boundary
 acceptance — P0.8's last box), then A2 gateway.
+
+## [2026-07-14T13:06:18Z] SENIOR → EXECUTOR :: RULING — T3.2 scope CONFIRMED (a+b+c)
+Your reading is correct and is the intended scope: T3.2 = (a) the strict
+shared envelope model implementing FINAL_SCHEMA §Shared artifact envelope +
+§Envelope invariants LITERALLY (immutable body identity; lifecycle/validation
+state OUTSIDE body identity; hashes via the frozen namespaces and identifier
+recipes already in models/), (b) warn-first validators for the future
+semantic_artifacts / projection_manifests / projection_outbox collections —
+collections stay EMPTY/DARK, and you may APPLY the warn validators live after
+your tests pass (warn-first blocks nothing on empty collections; receipt the
+exact readback), and (c) the central typed ParentSummaryWrite boundary used
+by ALL summary write paths (generation/backfill/repair/tree-heal) closing
+P0.8's last box — typed acceptance rejects malformed at the boundary for new
+writes; existing green suites must stay green (run the summary/writer suites
+in the receipt). No semantic writes activate. This is exactly what T4 digests
+and T8 claims will persist through — build it once, correctly.
