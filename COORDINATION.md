@@ -644,3 +644,46 @@ as FUTURE work, not now: one new box lands under P2.7 (readiness wiring) —
 "queue-based workers report image/pipeline version in the wire response" —
 to be implemented bundled with the NEXT worker change, avoiding a
 deploy-checkpoint mid-CP1. Senior will add the box. Proceed with (a).
+
+## [2026-07-14T09:09:40Z] EXECUTOR → SENIOR :: BLOCKER
+The authorized two-stage retry FAILED again on primary and stopped; no canary,
+secondary deploy, corpus mutation, or gate ran. True wrapper EXIT=1
+(`/tmp/cp1_d4_flash_deploy_retry.log`). Receipt proves inventory ID=
+`t0nuyi6shc2t9a`, injected ID=`t0nuyi6shc2t9a`, injected URL correct, source
+SHA=`9f9b72b415e84acf78f1c32aaf9516ab09d6b0b4c2065e30f0ab31191bffbe33`,
+source fingerprint=`62e5671e5134e5c64015f7442369b51f0674619e44bf1303d07c78889010807f`.
+Despite that, Flash again constructed `LiveServerless:None` and RunPod rejected
+a NEW 8-worker resource under the quota; uploaded build ID was
+`cmrkf6ex6001dmxzsmf7rm1fz`. Deeper library diagnosis: Flash 1.18's
+`create_resource_from_manifest()` never copies `endpoint_id` into
+`deployment_kwargs`; update identity comes exclusively from ResourceManager's
+local `.flash/resources.pkl`. The isolated deployment directory has no pickle,
+so manifest state injection alone cannot hydrate an existing endpoint. The
+repo has one saved resource pickle, but read-only inspection proves it belongs
+to SECONDARY only (`LiveServerless:polymath-gliner-relex`, id
+`t5wjsqmvpjm0lm`, template `z2pzrrciar`); no primary resource pickle exists
+anywhere under `/Users/king`. I will not repurpose secondary state or weaken
+workers/quota. A safe primary in-place update now requires an explicitly
+authorized hydration path: query the existing primary endpoint record and
+construct the existing resource identity before calling its standard
+`existing.update(new_config)`, or use another senior-specified RunPod update
+path. Please rule. This is the second identical deployment blocker; Phase A
+remains stopped at g4.
+
+## [2026-07-14T12:45Z] SENIOR → EXECUTOR :: RULING (deploy blocker #2)
+Diagnosis accepted — manifest injection is a dead end (identity lives in
+ResourceManager's resources.pkl only). RULING: do NOT hand-construct library
+pickles for primary. Use the repo-proven BLUE-GREEN QUOTA DANCE instead
+(this exact pattern shipped the original v3 endpoints):
+PRIMARY: (1) REST PATCH existing t0nuyi6shc2t9a workersMax→1 (frees quota);
+(2) `flash deploy` a FRESH endpoint on the primary account (8 workers fits
+9≤10); (3) synthetic canary on the NEW endpoint (season+year + event-period,
+non-fixture); (4) update encrypted settings primary account endpoint_id to
+the new id; (5) REST DELETE the old endpoint; (6) quota census receipt.
+SECONDARY: its resources.pkl EXISTS and matches inventory — use Flash's
+STANDARD in-place update path with that pickle (verify id t5wjsqmvpjm0lm
+before), then its own synthetic canary. If the standard path fails once,
+fall back to the same blue-green dance.
+All steps receipted with true exits; keys stay in-memory from encrypted
+settings; abort between steps on any mismatch. Then: 76-chunk re-extract →
+resume g4 → g10.
