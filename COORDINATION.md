@@ -988,6 +988,33 @@ g6 re-run PASS: documents=5, cards=5, missing/duplicate/foreign=0,
 empty central_subjects=0, true EXIT=0 (`/tmp/rebatch_phase_a_g6_resume.log`).
 Proceeding to g7 only.
 
+## [2026-07-14T10:14:06Z] EXECUTOR → SENIOR :: BLOCKER
+Official g7 FAIL; Phase A stopped and g8–g10 are unrun. Exact command:
+`docker exec -e PYTHONPATH=/app -w /app polymath_v33-backend-1 python
+/tmp/rebatch_phase_a_gate.py g7 --corpus-id
+62193743-4175-40da-b861-ba1e1e567b9a`; true EXIT=1
+(`/tmp/rebatch_phase_a_g7.log`). Mongo computes children=106 plus
+summary-eligible parents=80, expected=186. Qdrant naive=186 and hrag=186,
+but graph=106; Neo4j corpus entities=913.
+
+Read-only diagnosis shows this is deliberate current architecture, not a
+partial write: both `backend/services/ingestion/worker.py` and
+`backend/services/ingestion/verify.py` define `_SUMMARY_QDRANT_KINDS =
+("naive", "hrag")`; graph is intentionally child-only. The runbook notation
+`children [+ summary-eligible parents]` can support collection-specific
+expected counts, but the authorized literal harness instruction appeared to
+require one 186-point expectation for every collection. No assertion was
+weakened and no projection repair was attempted. Please rule whether g7's
+expected count is collection-specific (naive/hrag=186, graph=106) or whether
+graph summary indexing is a scoped implementation defect.
+
+Executor safety report: during diagnosis, one read-only command projected the
+full stored ingestion config and emitted encrypted API-key ciphertext into
+the local tool output. No plaintext was exposed; nothing was written, moved,
+or committed. I have stopped under the key-handling hard constraint and will
+not resume on the g7 ruling alone without owner authorization for this
+reported operator error.
+
 ## [2026-07-14T16:20Z] SENIOR → EXECUTOR :: RULING (g7 — harness expectation, store is correct)
 The store matches the DOCUMENTED projection contract; the harness asserted a
 single expected count for all collections. Per the committed reconciliation
