@@ -3563,3 +3563,47 @@ mutating the canonical image — precisely the right call; the census's
 environment provenance (python/spaCy/model versions) must appear in the
 receipt as always. Zero rows/writes/calls before each stop, disclosed.
 Proceed.
+
+## [2026-07-14T17:23:40Z] EXECUTOR → SENIOR :: RECEIPT
+
+T8.4 full-population census GREEN, true `EXIT=0`
+(`/tmp/t84_ugo_full_census_final.log`): all 659 sanitized UGO children,
+10,014 sentences, and 14,117 observed predicates produced 14,090 conserved
+candidate claims (495 typed + 13,595 untyped) plus 27 explicit typed skips for
+missing subjects. Claim yield 99.8087%; 82 explicit-result links; 173/173
+cross-sentence candidates correctly rejected; 3,026 unresolved-coreference
+observations remain candidate backlog. Negation: 526 claims (3.7331%); 16
+predicate+qualifier agreement and 510 qualifier-only (96.9582% of negated).
+All evidence, conservation, polarity, candidate-status, and accounting errors
+are zero. The deterministic local lane emitted zero relation candidates, so
+dependency/polarity/signature relation rates are honestly empty; T8.5 must
+supply controlled-label GLiREL observations before a real typed-signature rate
+exists. Writes/calls/promotion/graph/vector = zero; raw text and child IDs are
+absent from the receipt. I am running a second full pass for byte determinism
+and static/receipt sanitization. Unless you rule otherwise, I interpret the
+accepted census-first T8.4 boundary as complete without durable annotation
+rows; persistence would be the separate gated step you described.
+
+## [2026-07-14T17:24:46Z] SENIOR → EXECUTOR :: RULING — boundary confirmed; census accepted pending determinism pass
+BOUNDARY CONFIRMED: T8.4 closes at census + byte-determinism + publication,
+with ZERO durable annotation rows. Persistence rides CP9 activation (or its
+own pre-CP9 gated step if a consumer needs it sooner) — nothing in T8.5
+requires persisted claims. Census review, accepted subject to the determinism
+rerun matching:
+1. CONSERVATION CLOSES: 14,090 + 27 explicit subject-missing typed skips
+   = 14,117 observed predicates; the only non-conserved rows are individually
+   accounted. Yield 99.81%, typed 3.5% at population scale (sample said
+   2.4% — consistent).
+2. POPULATION FINDING (record): negation is overwhelmingly QUALIFIER-SCOPED —
+   510/526 (96.96%) qualifier-only vs 16 predicate-attached. This
+   retroactively validates the dependency-scoped boundary: sentence-bag
+   parity would have mislabeled ~97% of negation contexts.
+3. CLAIMREPAIR WORKLOAD: 3,026 unresolved-coreference observations (~30% of
+   10,014 sentences) is now the population-scale backlog number behind the
+   repair stage.
+4. 173/173 cross-sentence rejections at scale = the conservatism holding;
+   82 explicit-result links stand.
+5. Relation lanes honestly empty; the FIRST real typed-signature rate arrives
+   only with T8.5's controlled-label GLiREL observations — as you said.
+Publish after the determinism pass; then T8.5, the C2 verdict task that
+closes A3.
