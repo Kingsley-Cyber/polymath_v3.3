@@ -22,6 +22,25 @@ def test_rtx_assisted_defaults_to_summary_deferral():
     assert batches._batch_defer_summaries(batch) is True
 
 
+def test_summary_enabled_batch_cannot_report_done_before_durable_pass() -> None:
+    batch = {"options": {"chunk_summarization": True}}
+
+    assert (
+        batches._batch_status_with_summary_completion(batch, batches.BATCH_DONE)
+        == batches.BATCH_RUNNING
+    )
+    batch["summary_backfill_status"] = "complete"
+    assert (
+        batches._batch_status_with_summary_completion(batch, batches.BATCH_DONE)
+        == batches.BATCH_DONE
+    )
+    batch["summary_backfill_status"] = "failed"
+    assert (
+        batches._batch_status_with_summary_completion(batch, batches.BATCH_DONE)
+        == batches.BATCH_PARTIAL
+    )
+
+
 def test_runpod_burst_keeps_summary_lane_in_the_full_pass():
     batch = {"options": {"profile": "runpod_burst"}}
 

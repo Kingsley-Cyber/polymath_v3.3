@@ -2670,6 +2670,7 @@ class IngestionService:
         apply: bool = False,
         limit: int = 500,
         kinds: list[str] | None = None,
+        doc_ids: list[str] | None = None,
     ) -> dict:
         from services.ingestion.summary_jobs import plan_summary_jobs
 
@@ -2680,6 +2681,7 @@ class IngestionService:
             apply=apply,
             limit=limit,
             kinds=kinds,
+            doc_ids=doc_ids,
         )
         if apply:
             readiness = await self._materialize_corpus_readiness_safely(corpus_id)
@@ -2713,6 +2715,7 @@ class IngestionService:
         limit: int = 25,
         statuses: list[str] | None = None,
         kinds: list[str] | None = None,
+        doc_ids: list[str] | None = None,
     ) -> dict:
         from services.ingestion.summary_jobs import run_summary_jobs
 
@@ -2778,6 +2781,7 @@ class IngestionService:
                 limit=limit,
                 statuses=statuses,
                 kinds=kinds,
+                doc_ids=doc_ids,
                 parent_runner=_parent_runner,
                 document_runner=_document_runner,
             )
@@ -3733,56 +3737,23 @@ class IngestionService:
                 await settings_service.get_runtime_ingestion_settings(effective_user_id)
             ).summary
             corpus_summary_models = list(cfg.summary_models or [])
-            use_corpus_summary_pool = bool(corpus_summary_models)
-            pool_refs = (
-                corpus_summary_models
-                if use_corpus_summary_pool
-                else (
-                    runtime_summary.summary_models
-                    if runtime_summary.enabled and runtime_summary.summary_models
-                    else []
-                )
+            from services.ingestion.summary_provider_pool import (
+                resolve_summary_provider_pool,
             )
-            from services.secrets import decrypt
 
-            def _plaintext_key(value: str | None) -> str | None:
-                if not value:
-                    return None
-                if isinstance(value, str) and value.startswith("gAAAAA"):
-                    plaintext = decrypt(value)
-                    return plaintext if plaintext is not None else value
-                return value
-
-            pool = [
-                {
-                    "model": (ref.model if hasattr(ref, "model") else ref.get("model")),
-                    "base_url": (
-                        ref.base_url
-                        if hasattr(ref, "base_url")
-                        else ref.get("base_url")
-                    )
-                    or None,
-                    "api_key": _plaintext_key(
-                        (ref.api_key if hasattr(ref, "api_key") else ref.get("api_key"))
-                        or None
-                    ),
-                    "max_concurrent": int(
-                        (
-                            ref.max_concurrent
-                            if hasattr(ref, "max_concurrent")
-                            else ref.get("max_concurrent")
-                        )
-                        or 1
-                    ),
-                    "extra_params": (
-                        ref.extra_params
-                        if hasattr(ref, "extra_params")
-                        else ref.get("extra_params")
-                    )
-                    or {},
-                }
-                for ref in (pool_refs or [])
-            ]
+            pool, pool_resolution = await resolve_summary_provider_pool(
+                configured_refs=corpus_summary_models,
+                runtime_refs=(
+                    runtime_summary.summary_models
+                    if runtime_summary.enabled
+                    else []
+                ),
+                user_id=effective_user_id,
+                db=self._db,
+            )
+            provider_pool_status: dict[str, Any] = {
+                "resolution": pool_resolution,
+            }
             max_summary_tokens = cfg.max_summary_tokens
             default_tokens = IngestionConfig.model_fields["max_summary_tokens"].default
             if (
@@ -3792,9 +3763,7 @@ class IngestionService:
             ):
                 max_summary_tokens = runtime_summary.max_summary_tokens
             global_max_concurrent = (
-                None
-                if use_corpus_summary_pool
-                else runtime_summary.max_concurrent if runtime_summary.enabled else None
+                runtime_summary.max_concurrent if runtime_summary.enabled else None
             )
 
             if not pool:
@@ -3803,7 +3772,7 @@ class IngestionService:
                 logger.info(
                     "summary_backfill pool corpus=%s source=%s models=%s global_cap=%s",
                     corpus_id[:8],
-                    "corpus" if use_corpus_summary_pool else "settings",
+                    "resolved_flash_primary",
                     [str(entry.get("model") or "") for entry in pool],
                     global_max_concurrent or "-",
                 )
@@ -3875,6 +3844,7 @@ class IngestionService:
                         pool=pool,
                         global_max_concurrent=global_max_concurrent,
                         telemetry_sink=_summary_telemetry,
+                        pool_status=provider_pool_status,
                     )
                     results = [r for r in results if r and r.summary]
                     if not results:
@@ -4075,6 +4045,9 @@ class IngestionService:
             "index_deferred_by_pressure": index_deferred_by_pressure,
             "generation_batches": generation_batches,
             "generation_errors": generation_errors,
+            "provider_pool_status": (
+                provider_pool_status if generate and (limit is None or limit > 0) else {}
+            ),
             "before": before,
             "after": after,
         }

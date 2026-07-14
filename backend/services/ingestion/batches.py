@@ -198,6 +198,48 @@ BATCH_DONE = "done"
 BATCH_PARTIAL = "partial"
 BATCH_FAILED = "failed"
 
+
+def _batch_requires_summary_completion(batch: dict[str, Any]) -> bool:
+    return bool((batch.get("options") or {}).get("chunk_summarization"))
+
+
+def _batch_status_with_summary_completion(
+    batch: dict[str, Any],
+    item_status: str,
+) -> str:
+    """Prevent file completion from masquerading as batch completion."""
+
+    if item_status not in {BATCH_DONE, BATCH_PARTIAL}:
+        return item_status
+    if not _batch_requires_summary_completion(batch):
+        return item_status
+    summary_status = str(batch.get("summary_backfill_status") or "pending")
+    if summary_status == "complete":
+        return item_status
+    if summary_status in {"partial", "failed"}:
+        return BATCH_PARTIAL
+    return BATCH_RUNNING
+
+
+def _batch_items_terminal(batch: dict[str, Any]) -> bool:
+    counts = batch.get("counts") or {}
+    total = sum(int(counts.get(status) or 0) for status in (
+        ITEM_QUEUED,
+        ITEM_RUNNING,
+        ITEM_DONE,
+        ITEM_FAILED,
+        ITEM_FAILED_RECOVERABLE,
+        ITEM_SKIPPED,
+        ITEM_STAGED,
+    ))
+    unfinished = sum(int(counts.get(status) or 0) for status in (
+        ITEM_QUEUED,
+        ITEM_RUNNING,
+        ITEM_FAILED_RECOVERABLE,
+        ITEM_STAGED,
+    ))
+    return total > 0 and unfinished == 0
+
 DEFAULT_EXTENSIONS = {
     ".pdf",
     ".epub",
@@ -1312,13 +1354,18 @@ async def refresh_batch_counts(
         + counts[ITEM_STAGED]
     )
     if total == 0:
-        status = BATCH_FAILED
+        item_status = BATCH_FAILED
     elif unfinished > 0:
-        status = BATCH_RUNNING if counts[ITEM_RUNNING] else BATCH_QUEUED
+        item_status = BATCH_RUNNING if counts[ITEM_RUNNING] else BATCH_QUEUED
     elif counts[ITEM_FAILED] > 0:
-        status = BATCH_PARTIAL if counts[ITEM_DONE] or counts[ITEM_SKIPPED] else BATCH_FAILED
+        item_status = (
+            BATCH_PARTIAL
+            if counts[ITEM_DONE] or counts[ITEM_SKIPPED]
+            else BATCH_FAILED
+        )
     else:
-        status = BATCH_DONE
+        item_status = BATCH_DONE
+    status = _batch_status_with_summary_completion(batch, item_status)
 
     # Owner metric (2026-07-05): progress in FILES and MB, with an explicit
     # "extracted" milestone — the extraction lane's own deliverable — distinct
@@ -2094,7 +2141,9 @@ async def _preflight_summary_canary(db, batch: dict) -> str | None:
         SEMANTIC_SUMMARY_INSTRUCTION,
         parse_semantic_summary,
     )
-    from services.secrets import decrypt as _decrypt_secret
+    from services.ingestion.summary_provider_pool import (
+        resolve_summary_provider_pool,
+    )
 
     settings = get_settings()
     corpus = await db["corpora"].find_one({"corpus_id": batch.get("corpus_id")}) or {}
@@ -2107,14 +2156,30 @@ async def _preflight_summary_canary(db, batch: dict) -> str | None:
         summary_enabled = cfg.get("chunk_summarization")
     if not bool(summary_enabled):
         return None
-    pool = (cfg.get("summary_models") or cfg.get("summary_model_pool") or [])
-    entry = dict(pool[0]) if pool else {"model": getattr(
-        settings, "GHOST_A_DEFAULT_MODEL", "") or settings.DEFAULT_COMPLETION_MODEL}
-    for field in ("api_key", "lifecycle_api_key"):
-        secret = entry.get(field)
-        if secret:
-            plaintext = _decrypt_secret(secret)
-            entry[field] = plaintext if plaintext is not None else secret
+    runtime_refs: list[Any] = []
+    try:
+        from services.settings import settings_service
+
+        runtime_summary = (
+            await settings_service.get_runtime_ingestion_settings(
+                str(batch.get("user_id") or corpus.get("user_id") or "")
+            )
+        ).summary
+        if runtime_summary.enabled:
+            runtime_refs = list(runtime_summary.summary_models or [])
+    except Exception as exc:  # noqa: BLE001 - shared/default Flash may still work
+        logger.warning("Preflight runtime summary pool unavailable: %s", exc)
+    pool, pool_resolution = await resolve_summary_provider_pool(
+        configured_refs=(
+            cfg.get("summary_models") or cfg.get("summary_model_pool") or []
+        ),
+        runtime_refs=runtime_refs,
+        user_id=str(batch.get("user_id") or corpus.get("user_id") or ""),
+        db=db,
+    )
+    if not pool:
+        return "no summary model configured after provider admission"
+    entry = dict(pool[0])
     model = str(entry.get("model") or "")
     if not model:
         return "no summary model configured (chip empty and no default)"
@@ -2159,6 +2224,12 @@ async def _preflight_summary_canary(db, batch: dict) -> str | None:
         )
     logger.info("Preflight canary PASSED for %s (structure=%s)",
                 model, bool(parsed.get("semantic_chunk_type")))
+    logger.info(
+        "Preflight summary pool primary=%s admitted=%d demoted=%d",
+        pool_resolution.get("primary_model"),
+        int(pool_resolution.get("admitted_provider_count") or 0),
+        int(pool_resolution.get("demoted_provider_count") or 0),
+    )
     return None
 
 
@@ -2350,21 +2421,18 @@ async def _run_deferred_summary_backfill(
     ingestion_service: Any,
     batch: dict[str, Any],
 ) -> dict[str, Any] | None:
-    """Drain the summary lane for a deferred-summary batch.
+    """Drain the durable summary lane before a summary-enabled batch is done.
 
     RTX/cloud-assisted ingestion intentionally makes documents queryable and
     graph-promoted before spending time on parent-summary vectors. This hook
-    keeps that speed contract while preventing "done but summary-dead" batches:
-    after the file work drains, run one bounded, doc-scoped summary backfill for
-    this batch's completed documents. It is best-effort and fully recorded.
+    keeps that speed contract while preventing "done but summary-dead" batches.
+    Every missing parent/document artifact is first materialized as a durable
+    summary job, then executed through the normal bounded job runner.
     """
 
     settings = get_settings()
     if not bool(getattr(settings, "INGEST_DEFERRED_SUMMARY_BACKFILL_ENABLED", True)):
         return None
-    if not _batch_defer_summaries(batch):
-        return None
-
     options = batch.get("options") or {}
     if options.get("chunk_summarization") is False:
         return None
@@ -2394,7 +2462,26 @@ async def _run_deferred_summary_backfill(
     ]
     doc_ids = sorted(set(doc_ids))
     if not doc_ids:
-        return None
+        result = {
+            "status": "complete",
+            "doc_scope_count": 0,
+            "reason": "no_completed_documents_require_summary_work",
+            "parent_summary_jobs": {"plan": {"planned": 0}, "runs": []},
+            "document_summary_jobs": {"plan": {"planned": 0}, "run": {}},
+        }
+        finished_at = _now()
+        await db[BATCHES].update_one(
+            {"batch_id": batch["batch_id"]},
+            {
+                "$set": {
+                    "summary_backfill_status": "complete",
+                    "summary_backfill_result": result,
+                    "summary_backfill_completed_at": finished_at,
+                    "updated_at": finished_at,
+                }
+            },
+        )
+        return result
 
     limit = max(
         0,
@@ -2437,69 +2524,160 @@ async def _run_deferred_summary_backfill(
         },
     )
     logger.info(
-        "batch %s deferred summary backfill start docs=%d limit=%d batch=%d",
+        "batch %s durable summary completion start docs=%d limit=%d batch=%d",
         batch["batch_id"][:8],
         len(doc_ids),
         limit,
         parent_batch,
     )
     try:
-        result = await ingestion_service.backfill_parent_summaries(
-            str(batch["corpus_id"]),
-            user_id=str(batch.get("user_id") or ""),
-            generate=limit != 0,
-            index=True,
-            limit=limit if limit != 0 else None,
-            batch=parent_batch,
+        corpus_id = str(batch["corpus_id"])
+        effective_user_id = str(batch.get("user_id") or "") or None
+        parent_plan = await ingestion_service.plan_summary_jobs(
+            corpus_id=corpus_id,
+            user_id=effective_user_id,
+            apply=True,
+            limit=max(limit, 1),
+            kinds=["retrieval_parent_summary"],
             doc_ids=doc_ids,
-            index_existing_doc_summaries=True,
         )
+        parent_runs: list[dict[str, Any]] = []
+        max_slices = max(
+            1,
+            (int(parent_plan.get("planned") or 0) + parent_batch - 1)
+            // parent_batch
+            + 1,
+        )
+        for _ in range(max_slices):
+            parent_run = await ingestion_service.run_summary_jobs(
+                corpus_id=corpus_id,
+                user_id=effective_user_id,
+                limit=parent_batch,
+                statuses=["queued"],
+                kinds=["retrieval_parent_summary"],
+                doc_ids=doc_ids,
+            )
+            parent_runs.append(parent_run)
+            if int(parent_run.get("claimed") or 0) <= 0:
+                break
+            if parent_run.get("status") == "paused_pressure":
+                break
+
+        from services.ingestion.section_classifier import (
+            parent_summary_required_clause,
+        )
+
+        parent_scope = {
+            "corpus_id": corpus_id,
+            "doc_id": {"$in": doc_ids},
+            "$and": [parent_summary_required_clause()],
+        }
+        required_parent_count = await db["parent_chunks"].count_documents(
+            parent_scope
+        )
+        summarized_parent_count = await db["parent_chunks"].count_documents(
+            {
+                **parent_scope,
+                "summary": {"$exists": True, "$nin": [None, ""]},
+            }
+        )
+        missing_parent_count = max(
+            int(required_parent_count or 0) - int(summarized_parent_count or 0),
+            0,
+        )
+        parent_run_counts: dict[str, int] = {}
+        for parent_run in parent_runs:
+            for key, value in (parent_run.get("counts") or {}).items():
+                parent_run_counts[str(key)] = parent_run_counts.get(
+                    str(key), 0
+                ) + int(value or 0)
+        parent_complete = missing_parent_count == 0 and not any(
+            int(parent_run_counts.get(key) or 0) > 0
+            for key in ("queued", "running", "failed", "blocked_empty_source")
+        )
+
         document_job_limit = min(max(len(doc_ids), 1), 500)
         document_plan = await ingestion_service.plan_summary_jobs(
-            corpus_id=str(batch["corpus_id"]),
-            user_id=str(batch.get("user_id") or "") or None,
+            corpus_id=corpus_id,
+            user_id=effective_user_id,
             apply=True,
             limit=document_job_limit,
             kinds=["document_summary"],
+            doc_ids=doc_ids,
         )
         document_run: dict[str, Any] = {
             "status": "empty",
             "claimed": 0,
             "counts": {},
         }
-        if int(document_plan.get("planned") or 0) > 0:
+        if parent_complete and int(document_plan.get("planned") or 0) > 0:
             document_run = await ingestion_service.run_summary_jobs(
-                corpus_id=str(batch["corpus_id"]),
-                user_id=str(batch.get("user_id") or "") or None,
+                corpus_id=corpus_id,
+                user_id=effective_user_id,
                 limit=document_job_limit,
                 statuses=["queued"],
                 kinds=["document_summary"],
+                doc_ids=doc_ids,
             )
-        result["document_summary_jobs"] = {
-            "plan": {
-                "status": document_plan.get("status"),
-                "planned": int(document_plan.get("planned") or 0),
-                "counts": document_plan.get("counts") or {},
+        result: dict[str, Any] = {
+            "status": "complete" if parent_complete else "partial",
+            "parent_summary_jobs": {
+                "plan": {
+                    "status": parent_plan.get("status"),
+                    "planned": int(parent_plan.get("planned") or 0),
+                    "counts": parent_plan.get("counts") or {},
+                },
+                "runs": [
+                    {
+                        "status": row.get("status"),
+                        "claimed": int(row.get("claimed") or 0),
+                        "counts": row.get("counts") or {},
+                        "runner_results": row.get("runner_results") or {},
+                    }
+                    for row in parent_runs
+                ],
+                "required_parent_count": int(required_parent_count or 0),
+                "summarized_parent_count": int(summarized_parent_count or 0),
+                "missing_parent_count": missing_parent_count,
+                "counts": parent_run_counts,
             },
-            "run": {
-                "status": document_run.get("status"),
-                "claimed": int(document_run.get("claimed") or 0),
-                "counts": document_run.get("counts") or {},
-                "batch_reconciliation": document_run.get("batch_reconciliation")
-                or {},
+            "document_summary_jobs": {
+                "plan": {
+                    "status": document_plan.get("status"),
+                    "planned": int(document_plan.get("planned") or 0),
+                    "counts": document_plan.get("counts") or {},
+                },
+                "run": {
+                    "status": document_run.get("status"),
+                    "claimed": int(document_run.get("claimed") or 0),
+                    "counts": document_run.get("counts") or {},
+                    "batch_reconciliation": document_run.get(
+                        "batch_reconciliation"
+                    )
+                    or {},
+                },
             },
         }
         status = "complete"
-        if result.get("generation_errors") or result.get("status") not in {
-            "healthy",
-            "empty",
-        }:
+        if not parent_complete:
             status = "partial"
-        if document_run.get("status") not in {"complete", "empty"} or any(
+        if any(
+            int((document_plan.get("counts") or {}).get(key) or 0) > 0
+            for key in (
+                "blocked_no_parent_summaries",
+                "blocked_parent_summaries_incomplete",
+                "failed",
+            )
+        ) or document_run.get("status") not in {"complete", "empty"} or any(
             int((document_run.get("counts") or {}).get(key) or 0) > 0
-            for key in ("failed", "blocked_no_parent_summaries", "blocked_parent_summaries_incomplete")
+            for key in (
+                "failed",
+                "blocked_no_parent_summaries",
+                "blocked_parent_summaries_incomplete",
+            )
         ):
             status = "partial"
+        result["status"] = status
         finished_at = _now()
         await db["ingest_repair_runs"].update_one(
             {"run_id": run_id},
@@ -2524,12 +2702,14 @@ async def _run_deferred_summary_backfill(
             },
         )
         logger.info(
-            "batch %s deferred summary backfill %s: generated=%s indexed=%s status=%s",
+            "batch %s durable summary completion %s: parents=%d/%d "
+            "parent_jobs=%s document_jobs=%s",
             batch["batch_id"][:8],
             status,
-            result.get("generated"),
-            result.get("indexed"),
-            result.get("status"),
+            int(summarized_parent_count or 0),
+            int(required_parent_count or 0),
+            parent_run_counts,
+            document_run.get("counts") or {},
         )
         await reconcile_batch_enrichment_truth(
             db,
@@ -2560,12 +2740,12 @@ async def _run_deferred_summary_backfill(
                     "updated_at": finished_at,
                 },
                 "$addToSet": {
-                    "warnings": f"Deferred summary backfill failed: {message}"
+                    "warnings": f"Durable summary completion failed: {message}"
                 },
             },
         )
         logger.warning(
-            "batch %s deferred summary backfill failed: %s",
+            "batch %s durable summary completion failed: %s",
             batch["batch_id"][:8],
             message,
         )
@@ -2738,8 +2918,32 @@ async def run_local_batch(
                     batch_id[:8], _pass_target or "full", pass_plan,
                 )
             await asyncio.gather(*[_worker(idx, _rank) for idx in range(concurrency)])
+        refreshed = await refresh_batch_counts(db, batch_id, user_id=user_id)
+        if _batch_items_terminal(refreshed) and _batch_requires_summary_completion(
+            refreshed
+        ):
+            summary_result = await _run_deferred_summary_backfill(
+                db=db,
+                ingestion_service=ingestion_service,
+                batch=refreshed,
+            )
+            if summary_result is None:
+                await db[BATCHES].update_one(
+                    {"batch_id": batch_id},
+                    {
+                        "$set": {
+                            "summary_backfill_status": "failed",
+                            "summary_backfill_error": (
+                                "summary completion pass unavailable for a "
+                                "summary-enabled terminal file set"
+                            ),
+                            "updated_at": _now(),
+                        }
+                    },
+                )
+            refreshed = await refresh_batch_counts(db, batch_id, user_id=user_id)
         try:
-            report = await _batch_quality_report(db, batch)
+            report = await _batch_quality_report(db, refreshed)
             await db[BATCHES].update_one(
                 {"batch_id": batch_id},
                 {"$set": {"report": report, "updated_at": _now()}},
@@ -2747,14 +2951,6 @@ async def run_local_batch(
             logger.info("Batch %s quality report: %s", batch_id[:8], report)
         except Exception as exc:  # noqa: BLE001 — reporting never fails the batch
             logger.warning("Batch quality report failed: %s", exc)
-        refreshed = await refresh_batch_counts(db, batch_id, user_id=user_id)
-        if refreshed.get("status") in {BATCH_DONE, BATCH_PARTIAL}:
-            await _run_deferred_summary_backfill(
-                db=db,
-                ingestion_service=ingestion_service,
-                batch=refreshed,
-            )
-            refreshed = await refresh_batch_counts(db, batch_id, user_id=user_id)
         return refreshed
     finally:
         if lifecycle_hold_acquired:

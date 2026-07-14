@@ -178,11 +178,33 @@ def _safe_model_entry(entry: Any, *, lane: int) -> dict[str, Any]:
 
 def summary_provider_contract(corpus: dict[str, Any] | None) -> dict[str, Any]:
     cfg = ((corpus or {}).get("default_ingestion_config") or {})
-    pool = list(cfg.get("summary_models") or [])
+    configured = list(cfg.get("summary_models") or [])
+    from services.ingestion.summary_provider_pool import (
+        FLASH_MODEL_MARKER,
+        prepare_summary_provider_pool,
+    )
+
+    if not any(
+        FLASH_MODEL_MARKER in str(_safe_model_entry(entry, lane=0).get("model") or "").lower()
+        for entry in configured
+    ):
+        configured.insert(
+            0,
+            {
+                "provider_preset": "deepseek",
+                "model": "deepseek/deepseek-v4-flash",
+                "base_url": "https://api.deepseek.com",
+                "max_concurrent": 1,
+                "extra_params": {"disable_thinking": True},
+            },
+        )
+    pool, resolution = prepare_summary_provider_pool(configured)
     return {
-        "pool_source": "corpus_summary_models" if pool else "runtime_summary_settings",
+        "pool_source": "resolved_flash_primary",
         "pool_size": len(pool),
         "lanes": [_safe_model_entry(entry, lane=idx) for idx, entry in enumerate(pool)],
+        "demoted_provider_count": int(resolution.get("demoted_provider_count") or 0),
+        "hy3_canary_required_rows": resolution.get("hy3_canary_required_rows"),
     }
 
 
@@ -403,6 +425,7 @@ async def _document_summary_candidate_docs(
     corpus_id: str,
     user_id: str | None,
     limit: int,
+    doc_ids: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Return docs whose document-summary artifact pair is incomplete."""
 
@@ -414,6 +437,10 @@ async def _document_summary_candidate_docs(
     )
     if user_id:
         doc_match["user_id"] = user_id
+    if doc_ids is not None:
+        doc_match["doc_id"] = {
+            "$in": sorted({str(doc_id) for doc_id in doc_ids if str(doc_id)})
+        }
     projection = {
         "_id": 0,
         "doc_id": 1,
@@ -490,6 +517,10 @@ async def _document_summary_candidate_docs(
     )
     if user_id:
         fallback_query["user_id"] = user_id
+    if doc_ids is not None:
+        fallback_query["doc_id"] = {
+            "$in": sorted({str(doc_id) for doc_id in doc_ids if str(doc_id)})
+        }
     return await db["documents"].find(
         fallback_query,
         projection,
@@ -644,6 +675,7 @@ async def plan_summary_jobs(
     apply: bool = False,
     limit: int = 500,
     kinds: list[str] | None = None,
+    doc_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     limit = max(1, min(int(limit or 500), 10000))
     kinds_set = set(kinds or ["retrieval_parent_summary", "document_summary"])
@@ -680,6 +712,10 @@ async def plan_summary_jobs(
                 "$and": [parent_summary_required_clause(), MISSING_PARENT_SUMMARY_CLAUSE],
             }
         )
+        if doc_ids is not None:
+            parent_query["doc_id"] = {
+                "$in": sorted({str(doc_id) for doc_id in doc_ids if str(doc_id)})
+            }
         parent_rows = await db["parent_chunks"].find(
             parent_query,
             {
@@ -723,6 +759,7 @@ async def plan_summary_jobs(
             corpus_id=corpus_id,
             user_id=user_id,
             limit=remaining,
+            doc_ids=doc_ids,
         )
         parent_clause = parent_summary_required_clause()
         for doc in doc_rows:
@@ -1023,6 +1060,7 @@ async def run_summary_jobs(
     limit: int = 25,
     statuses: list[str] | None = None,
     kinds: list[str] | None = None,
+    doc_ids: list[str] | None = None,
     parent_runner: SummaryParentRunner | None = None,
     document_runner: SummaryDocumentRunner | None = None,
 ) -> dict[str, Any]:
@@ -1050,6 +1088,10 @@ async def run_summary_jobs(
     }
     if kinds:
         query["kind"] = {"$in": kinds}
+    if doc_ids is not None:
+        query["doc_id"] = {
+            "$in": sorted({str(doc_id) for doc_id in doc_ids if str(doc_id)})
+        }
 
     jobs = await db["summary_jobs"].find(
         query,
@@ -1106,8 +1148,18 @@ async def run_summary_jobs(
                     limit=len(parent_jobs),
                     doc_ids=doc_ids or None,
                 )
-                if runner_results["retrieval_parent_summary"].get("status") == "paused_pressure":
+                parent_result = runner_results["retrieval_parent_summary"]
+                if parent_result.get("status") == "paused_pressure":
                     paused_kinds.add("retrieval_parent_summary")
+                elif parent_result.get("generation_errors") or parent_result.get(
+                    "status"
+                ) not in {"healthy", "empty"}:
+                    details = parent_result.get("generation_errors") or [
+                        f"summary runner status={parent_result.get('status')}"
+                    ]
+                    errors_by_kind["retrieval_parent_summary"] = "; ".join(
+                        str(value) for value in details
+                    )[:500]
             except Exception as exc:  # noqa: BLE001 - bounded runner records failure per job
                 errors_by_kind["retrieval_parent_summary"] = str(exc)[:500]
                 runner_results["retrieval_parent_summary"] = {
@@ -1127,8 +1179,16 @@ async def run_summary_jobs(
                     limit=len(document_jobs),
                     doc_ids=doc_ids or None,
                 )
-                if runner_results["document_summary"].get("status") == "paused_pressure":
+                document_result = runner_results["document_summary"]
+                if document_result.get("status") == "paused_pressure":
                     paused_kinds.add("document_summary")
+                elif document_result.get("status") not in {"complete", "empty"} or int(
+                    document_result.get("failed") or 0
+                ) > 0:
+                    errors_by_kind["document_summary"] = (
+                        f"document summary runner status={document_result.get('status')} "
+                        f"failed={int(document_result.get('failed') or 0)}"
+                    )[:500]
             except Exception as exc:  # noqa: BLE001 - bounded runner records failure per job
                 errors_by_kind["document_summary"] = str(exc)[:500]
                 runner_results["document_summary"] = {

@@ -292,3 +292,24 @@ fixed pool (durable jobs), and resume g2→g10. No gate re-runs before the
 fixes land. The 3 latent-rows-missing-aliases = record as observation (the
 latent contract permits 0–3 aliases), not a gate criterion.
 Receipts + both tests committed with your next entry.
+
+## [2026-07-14T08:28:56Z] EXECUTOR → SENIOR :: RECEIPT
+CP1-D1 + CP1-D2 implementation is commit-ready; no official gate was rerun.
+D2a: summary-enabled batches now remain `running` until a durable, doc-scoped
+parent + document `summary_jobs` pass reconciles complete; partial/failed
+summary work cannot project `done`, and the old direct/fire-and-forget parent
+backfill bypass is forbidden by an asserting test. D2b: DeepSeek V4 Flash is
+resolved as primary from encrypted runtime settings, Hy3 entries are demoted
+until their own 3-row canary marker, and Ghost A drops a provider after 3
+consecutive empty/rejected logical artifacts with surfaced count/reason.
+Focused D2 suite: 88 passed, EXIT=0 (`/tmp/cp1_d2_focused_v4.log`), including
+the required batch-completeness and pool-drop tests. D1 structural regression:
+58 passed, EXIT=0 (`/tmp/cp1_d1_structural_regression_v2.log`). Adjacent
+non-integration ingestion/provider/readiness suite: 124 passed, 1 opt-in live
+integration test deselected, EXIT=0 (`/tmp/cp1_d2_adjacent_v5.log`). Live,
+secret-free official-corpus pool resolution: admitted models=[DeepSeek Flash],
+flash_primary=true, flash_key_available=true, Hy3 demoted=3, EXIT=0
+(`/tmp/cp1_d2_pool_resolution_v2.log`). BUILDLINE CP1-D2 implementation is
+test-green; next step after this commit/push is exact-overlay rebuild, a
+3-row Flash artifact canary, durable completion of the 19 missing summaries,
+then resume official g2 only.

@@ -36,7 +36,7 @@ def test_parser_strategy_keeps_md_txt_and_query_runtime_off_docling(adapter):
     assert adapter.parser_strategy("notes.txt", "text/plain") == "local_text"
     assert adapter.parser_strategy("products.csv", "text/csv") == "local_csv"
     assert adapter.parser_strategy("inventory.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") == "local_spreadsheet"
-    assert adapter.parser_strategy("book.pdf", "application/pdf") == "local_pdf_fast_text"
+    assert adapter.parser_strategy("book.pdf", "application/pdf") == "pdf_layout_then_local_fallback"
     assert adapter.parser_strategy("plan.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document") == "local_docx"
     assert adapter.parser_strategy("book.epub", "application/octet-stream") == "local_epub"
     assert adapter.docling_sidecar_needed("notes.md", "text/markdown") is False
@@ -149,22 +149,36 @@ async def test_docling_policy_off_fails_only_for_sidecar_formats(adapter, monkey
 
 
 @pytest.mark.asyncio
-async def test_pdf_with_ocr_disabled_uses_fast_text_path(adapter, monkeypatch):
-    """PDF + do_ocr=False bypasses Docling and uses local pypdf extraction."""
+async def test_digital_pdf_with_headings_uses_structural_fallback(adapter, monkeypatch):
+    """A text-layer PDF keeps headings even when the sidecar is disabled."""
     from services.ingestion import format_router
 
-    called = {}
-
     def fake_route(data: bytes, filename: str = "", mime_hint: str = ""):
-        called["args"] = (data, filename, mime_hint)
+        text = " ".join(["digital pdf body text"] * 30)
         return format_router.DecodeResult(
-            text="Page one text.\n\nPage two text.",
+            text=text,
             source_mime="application/pdf",
             doc_id="fake",
-            pages=["Page one text.", "Page two text."],
+            pages=[text],
         )
 
     monkeypatch.setattr(format_router, "route", fake_route)
+    monkeypatch.setattr(adapter, "DOCLING_SIDECAR_POLICY", "off")
+    monkeypatch.setattr(
+        adapter,
+        "_pdf_font_lines",
+        lambda _raw: (
+            [
+                ("Field Notes on Durable Systems", 26.0),
+                ("Author: General Example", 14.0),
+                ("Chapter 1: Structural Parsing", 19.0),
+                ("The body paragraph explains the shared parsing invariant.", 14.0),
+                ("Chapter 2: Retrieval", 19.0),
+                ("The next paragraph preserves a real heading path.", 14.0),
+            ],
+            ["digital pdf body text"],
+        ),
+    )
 
     result = await adapter.parse_document(
         raw_bytes=b"%PDF fake",
@@ -173,41 +187,174 @@ async def test_pdf_with_ocr_disabled_uses_fast_text_path(adapter, monkeypatch):
         do_ocr=False,
     )
 
-    assert called["args"] == (b"%PDF fake", "book.pdf", "application/pdf")
-    assert result.source_format == "pypdf_fast_text"
-    assert result.source_tier.value == "ocr_ast"
-    assert result.sections == []
-    assert result.pages == ["Page one text.", "Page two text."]
+    assert result.source_format == "pypdf_font_layout"
+    assert result.source_tier.value == "tier_a"
+    assert result.has_structure is True
+    assert result.parser_fallback_count == 1
+    assert result.parser_fallback_reason == "docling_sidecar_disabled"
+    assert {section.text for section in result.sections if section.element_type == "section_heading"} >= {
+        "Field Notes on Durable Systems",
+        "Chapter 1: Structural Parsing",
+        "Chapter 2: Retrieval",
+    }
+    assert any(
+        section.heading_path[-1:] == ["Chapter 1: Structural Parsing"]
+        for section in result.sections
+        if section.element_type == "paragraph"
+    )
+    adapter.finalize_source_meta(result, "book.pdf")
+    assert result.routing_trace["parser_fallback_count"] == 1
+    assert result.routing_trace["parser_fallback_reason"] == "docling_sidecar_disabled"
 
 
 @pytest.mark.asyncio
-async def test_pdf_do_ocr_true_is_ignored_by_policy(adapter, monkeypatch):
-    """OCR is dead-off: even legacy true values stay on the pypdf text path."""
+async def test_digital_pdf_prefers_no_ocr_sidecar_layout(adapter, monkeypatch):
+    from services.ingestion import format_router
+
+    text = " ".join(["digital pdf body text"] * 30)
+
+    def fake_route(data: bytes, filename: str = "", mime_hint: str = ""):
+        return format_router.DecodeResult(
+            text=text,
+            source_mime="application/pdf",
+            doc_id="fake",
+            pages=[text],
+        )
+
+    async def fake_sidecar(raw_bytes, filename, mime, **_kwargs):
+        assert raw_bytes == b"%PDF fake"
+        assert filename == "book.pdf"
+        assert mime == "application/pdf"
+        return adapter.DoclingParseResult(
+            text=text,
+            markdown="# Book\n\n## Chapter\n\nBody",
+            sections=[
+                adapter.Section(["Book"], "Book", "section_heading", level=1),
+                adapter.Section(["Book", "Chapter"], "Chapter", "section_heading", level=2),
+                adapter.Section(["Book", "Chapter"], "Body", "paragraph"),
+            ],
+            pages=[text],
+            has_structure=True,
+            source_tier=adapter.SourceTier.tier_a,
+            h1_count=1,
+            h2_count=1,
+            source_format="PDF",
+            filename=filename,
+        )
+
+    monkeypatch.setattr(format_router, "route", fake_route)
+    monkeypatch.setattr(adapter, "DOCLING_SIDECAR_POLICY", "auto")
+    monkeypatch.setattr(adapter, "_parse_with_docling_sidecar", fake_sidecar)
+    monkeypatch.setattr(
+        adapter,
+        "_parse_pdf_font_layout",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("available sidecar must win over local fallback")
+        ),
+    )
+
+    result = await adapter.parse_document(
+        raw_bytes=b"%PDF fake",
+        filename="book.pdf",
+        mime="application/pdf",
+        do_ocr=False,
+    )
+
+    assert result.source_format == "PDF"
+    assert result.source_tier.value == "tier_a"
+    assert result.parser_fallback_count == 0
+
+
+@pytest.mark.asyncio
+async def test_scanned_pdf_remains_on_ocr_ast_candidate_lane(adapter, monkeypatch):
+    """Sparse/image-only PDFs do not enter the digital layout fallback."""
     from services.ingestion import format_router
 
     def fake_route(data: bytes, filename: str = "", mime_hint: str = ""):
         return format_router.DecodeResult(
-            text="Sparse but available text.",
+            text="page 1",
             source_mime="application/pdf",
             doc_id="fake",
-            pages=["Sparse but available text."],
+            pages=["", "page 1", ""],
         )
 
-    async def fail_post(*_args, **_kwargs):  # pragma: no cover - should never run
-        raise AssertionError("Docling sidecar should not be called for PDF OCR")
-
     monkeypatch.setattr(format_router, "route", fake_route)
-    monkeypatch.setattr(adapter.httpx.AsyncClient, "post", fail_post, raising=False)
+    monkeypatch.setattr(
+        adapter,
+        "_parse_pdf_font_layout",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("scan must not use digital font-layout fallback")
+        ),
+    )
 
     result = await adapter.parse_document(
         raw_bytes=b"%PDF fake",
         filename="scanned.pdf",
         mime="application/pdf",
-        do_ocr=True,
+        do_ocr=False,
     )
 
     assert result.source_format == "pypdf_fast_text"
-    assert result.text == "Sparse but available text."
+    assert result.source_tier.value == "ocr_ast"
+    assert result.text == "page 1"
+    assert result.parser_fallback_count == 0
+
+
+@pytest.mark.asyncio
+async def test_structureless_digital_pdf_remains_tier_c(adapter, monkeypatch):
+    from services.ingestion import format_router
+
+    text = " ".join(["uniform body prose without headings"] * 20)
+
+    def fake_route(data: bytes, filename: str = "", mime_hint: str = ""):
+        return format_router.DecodeResult(
+            text=text,
+            source_mime="application/pdf",
+            doc_id="fake",
+            pages=[text],
+        )
+
+    monkeypatch.setattr(format_router, "route", fake_route)
+    monkeypatch.setattr(adapter, "DOCLING_SIDECAR_POLICY", "off")
+    monkeypatch.setattr(
+        adapter,
+        "_pdf_font_lines",
+        lambda _raw: (
+            [
+                ("Uniform body prose without headings continues here.", 12.0),
+                ("Every rendered line uses the same font size.", 12.0),
+            ],
+            [text],
+        ),
+    )
+
+    result = await adapter.parse_document(
+        raw_bytes=b"%PDF flat",
+        filename="flat.pdf",
+        mime="application/pdf",
+        do_ocr=False,
+    )
+
+    assert result.source_format == "pypdf_font_layout"
+    assert result.source_tier.value == "tier_c"
+    assert result.has_structure is False
+    assert result.h1_count == 0
+    assert result.h2_count == 0
+    assert result.parser_fallback_count == 1
+
+
+def test_pdf_table_only_layout_classifies_tier_b(adapter):
+    tier = adapter._classify_tier(
+        original_mime="application/pdf",
+        original_filename="table.pdf",
+        augmented=False,
+        h1_count=0,
+        h2_count=0,
+        num_pages=2,
+        has_structure=True,
+        has_tables=True,
+    )
+    assert tier.value == "tier_b"
 
 
 def test_fast_pdf_text_gate_accepts_digital_pdf(adapter):

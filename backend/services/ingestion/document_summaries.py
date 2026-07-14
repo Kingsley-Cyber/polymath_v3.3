@@ -30,27 +30,6 @@ MISSING_DOCUMENT_SUMMARY_CLAUSE: dict[str, Any] = {
 }
 
 
-def _ref_value(ref: Any, key: str, default: Any = None) -> Any:
-    if hasattr(ref, key):
-        value = getattr(ref, key)
-    elif isinstance(ref, dict):
-        value = ref.get(key)
-    else:
-        value = default
-    return default if value is None else value
-
-
-def _plaintext_key(value: str | None) -> str | None:
-    if not value:
-        return None
-    if isinstance(value, str) and value.startswith("gAAAAA"):
-        from services.secrets import decrypt
-
-        plaintext = decrypt(value)
-        return plaintext if plaintext is not None else value
-    return value
-
-
 async def _summary_tree_pool_for_corpus(
     db: Any,
     *,
@@ -72,30 +51,20 @@ async def _summary_tree_pool_for_corpus(
         await settings_service.get_runtime_ingestion_settings(effective_user_id)
     ).summary
     corpus_summary_models = list(cfg.summary_models or [])
-    if corpus_summary_models:
-        pool_refs = corpus_summary_models
-        source = "corpus"
-        global_cap = None
-    elif runtime_summary.enabled and runtime_summary.summary_models:
-        pool_refs = list(runtime_summary.summary_models)
-        source = "settings"
-        global_cap = runtime_summary.max_concurrent
-    else:
-        pool_refs = []
-        source = "none"
-        global_cap = None
+    from services.ingestion.summary_provider_pool import (
+        resolve_summary_provider_pool,
+    )
 
-    pool: list[dict[str, Any]] = [
-        {
-            "model": _ref_value(ref, "model"),
-            "base_url": _ref_value(ref, "base_url") or None,
-            "api_key": _plaintext_key(_ref_value(ref, "api_key") or None),
-            "max_concurrent": int(_ref_value(ref, "max_concurrent", 1) or 1),
-            "extra_params": _ref_value(ref, "extra_params", {}) or {},
-        }
-        for ref in pool_refs
-        if _ref_value(ref, "model")
-    ]
+    pool, pool_resolution = await resolve_summary_provider_pool(
+        configured_refs=corpus_summary_models,
+        runtime_refs=(
+            runtime_summary.summary_models if runtime_summary.enabled else []
+        ),
+        user_id=effective_user_id,
+        db=db,
+    )
+    source = "resolved_flash_primary"
+    global_cap = runtime_summary.max_concurrent if runtime_summary.enabled else None
     provider_capacity = sum(
         max(1, int(entry.get("max_concurrent") or 1)) for entry in pool
     )
@@ -115,6 +84,7 @@ async def _summary_tree_pool_for_corpus(
         "lanes": len(pool),
         "provider_capacity": provider_capacity,
         "max_concurrent": effective_max_concurrent,
+        "resolution": pool_resolution,
     }
     return (
         summary_tree_llm_from_pool(

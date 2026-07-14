@@ -13,6 +13,7 @@ from services.ghost_a import (
     summarize_parents,
 )
 from services.ingestion import model_lifecycle
+from services.ingestion.summary_provider_pool import prepare_summary_provider_pool
 
 
 class _BlankSummaryResponse:
@@ -426,6 +427,64 @@ async def test_blank_model_content_defers_instead_of_using_fallback(monkeypatch)
     assert "Produce this exact line-oriented contract" in (
         _CapturingBlankSummaryClient.payloads[1]["messages"][1]["content"]
     )
+
+
+@pytest.mark.asyncio
+async def test_summary_pool_drops_provider_after_consecutive_empty_artifacts(
+    monkeypatch,
+) -> None:
+    _CapturingBlankSummaryClient.payloads.clear()
+    monkeypatch.setattr(ghost_a.httpx, "AsyncClient", _CapturingBlankSummaryClient)
+    monkeypatch.setattr(ghost_a, "_SUMMARY_RETRY_ATTEMPTS", 0)
+    pool_status = {"drop_threshold": 3}
+
+    results = await summarize_parents(
+        [
+            SummaryTask(
+                parent_id=f"parent-{index}",
+                doc_id="doc-1",
+                corpus_id="corpus-1",
+                source_tier="parent",
+                text="A provider must return a valid durable summary artifact.",
+            )
+            for index in range(4)
+        ],
+        pool=[
+            {
+                "model": "unit/always-empty",
+                "base_url": None,
+                "api_key": None,
+                "max_concurrent": 1,
+                "extra_params": {"microbatch_size": 1},
+            }
+        ],
+        pool_status=pool_status,
+    )
+
+    assert results == []
+    assert pool_status["dropped_provider_count"] == 1
+    assert pool_status["dropped_providers"][0]["reason"] == (
+        "consecutive_empty_or_rejected"
+    )
+    assert pool_status["dropped_providers"][0]["consecutive_rejections"] == 3
+    assert len(_CapturingBlankSummaryClient.payloads) == 6
+
+
+def test_summary_pool_pins_flash_and_demotes_uncanaried_hy3() -> None:
+    pool, report = prepare_summary_provider_pool(
+        [
+            {"model": "openai/tencent/Hy3", "extra_params": {}},
+            {"model": "openai/LongCat-2.0", "extra_params": {}},
+            {"model": "deepseek/deepseek-v4-flash", "extra_params": {}},
+        ]
+    )
+
+    assert [entry["model"] for entry in pool] == [
+        "deepseek/deepseek-v4-flash",
+        "openai/LongCat-2.0",
+    ]
+    assert report["primary_model"] == "deepseek/deepseek-v4-flash"
+    assert report["demoted_provider_count"] == 1
 
 
 @pytest.mark.asyncio

@@ -912,9 +912,10 @@ def _coalesce_small_blocks(
     """Merge consecutive below-MIN BODY sections up to MAX_PARENT_TOKENS.
 
     Policy: if current block is BODY AND under MIN_PARENT_TOKENS AND combining
-    with the next block (also BODY) keeps us at or below MAX_PARENT_TOKENS,
-    fold them together and keep the first block's heading_path. Otherwise,
-    push current and advance.
+    with the next block (also BODY under the SAME heading_path) keeps us at or
+    below MAX_PARENT_TOKENS, fold them together. Distinct heading paths are a
+    structural boundary and must never be discarded merely to hit a parent
+    size target. Otherwise, push current and advance.
 
     Code lane: NEVER merges across a kind boundary. A small BODY block
     immediately followed by a CODE block (or vice versa) stays separate so
@@ -933,6 +934,7 @@ def _coalesce_small_blocks(
         if (
             cur_kind == ChunkKind.BODY
             and next_kind == ChunkKind.BODY
+            and cur_path == next_path
             and not cur_meta
             and not next_meta
         ):

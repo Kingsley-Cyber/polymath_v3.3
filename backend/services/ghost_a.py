@@ -44,6 +44,7 @@ from services.llm_lane_pool import (
 logger = logging.getLogger(__name__)
 _SUMMARY_RETRY_ATTEMPTS = 2
 _SUMMARY_RETRY_BACKOFF_SECONDS = 1.5
+SUMMARY_PROVIDER_DROP_THRESHOLD = 3
 _TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9_+-]{2,}")
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
 _STOPWORDS = {
@@ -459,6 +460,7 @@ async def summarize_parents(
     model: str | None = None,
     global_max_concurrent: int | None = None,
     telemetry_sink: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+    pool_status: dict[str, Any] | None = None,
 ) -> list[SummaryResult]:
     """
     Summarize parent chunks in parallel, round-robining tasks across the
@@ -521,6 +523,44 @@ async def summarize_parents(
     if ready_pool is not None:  # Compatibility with injected legacy test doubles.
         pool = ready_pool
 
+    def _model_signature(entry: dict[str, Any]) -> str:
+        card = resolve_extraction_provider_card(entry)
+        return f"{card.provider}:{entry.get('model') or 'unknown'}"
+
+    pool_status = pool_status if pool_status is not None else {}
+    try:
+        drop_threshold = max(
+            1,
+            int(
+                pool_status.get("drop_threshold")
+                or getattr(
+                    settings,
+                    "SUMMARY_PROVIDER_DROP_THRESHOLD",
+                    SUMMARY_PROVIDER_DROP_THRESHOLD,
+                )
+                or SUMMARY_PROVIDER_DROP_THRESHOLD
+            ),
+        )
+    except (TypeError, ValueError):
+        drop_threshold = SUMMARY_PROVIDER_DROP_THRESHOLD
+    consecutive_rejections: dict[str, int] = {
+        str(key): max(0, int(value or 0))
+        for key, value in (pool_status.get("consecutive_rejections") or {}).items()
+    }
+    dropped_signatures: set[str] = {
+        str(value) for value in (pool_status.get("dropped_signatures") or [])
+    }
+    dropped_providers: list[dict[str, Any]] = list(
+        pool_status.get("dropped_providers") or []
+    )
+    disabled_lanes: set[int] = {
+        idx
+        for idx, entry in enumerate(pool)
+        if _model_signature(entry) in dropped_signatures
+    }
+    lane_fatal_strikes: dict[int, int] = {}
+    _disabled_lock = asyncio.Lock()
+
     cap_logged = False
 
     def _lane_slot_plan(*, log_cap: bool = False) -> list[int]:
@@ -565,11 +605,8 @@ async def summarize_parents(
 
     results_by_parent_id: dict[str, SummaryResult] = {}
     _results_lock = asyncio.Lock()
-    disabled_lanes: set[int] = set()
-    lane_fatal_strikes: dict[int, int] = {}
     rejected_models_by_parent: dict[str, set[str]] = {}
     validation_flags_by_parent: dict[str, list[str]] = {}
-    _disabled_lock = asyncio.Lock()
     provider_sems = [
         shared_provider_semaphore(
             entry,
@@ -612,16 +649,81 @@ async def summarize_parents(
                 return
             disabled_lanes.add(pool_idx)
         entry = pool[pool_idx]
+        signature = _model_signature(entry)
+        dropped_signatures.add(signature)
+        if not any(row.get("signature") == signature for row in dropped_providers):
+            dropped_providers.append(
+                {
+                    "signature": signature,
+                    "model": str(entry.get("model") or ""),
+                    "reason": "fatal_provider_error",
+                    "consecutive_rejections": consecutive_rejections.get(
+                        signature, 0
+                    ),
+                }
+            )
         logger.error(
-            "GHOST A disabled summary lane=%d model=%s after fatal provider error: %s",
+            "phase=summary_pool_drop lane=%d model=%s reason=fatal_provider_error "
+            "dropped_provider_count=%d detail=%s",
             pool_idx,
             entry["model"],
+            len(dropped_providers),
             provider_error_summary(exc),
         )
 
-    def _model_signature(entry: dict[str, Any]) -> str:
-        card = resolve_extraction_provider_card(entry)
-        return f"{card.provider}:{entry.get('model') or 'unknown'}"
+    async def _record_lane_artifact_result(
+        pool_idx: int,
+        *,
+        accepted: int,
+    ) -> bool:
+        """Track consecutive empty/rejected logical calls and drop the lane."""
+
+        entry = pool[pool_idx]
+        signature = _model_signature(entry)
+        should_drop = False
+        async with _disabled_lock:
+            if pool_idx in disabled_lanes:
+                return True
+            if accepted > 0:
+                consecutive_rejections[signature] = 0
+                return False
+            strikes = consecutive_rejections.get(signature, 0) + 1
+            consecutive_rejections[signature] = strikes
+            if strikes >= drop_threshold and pool_idx not in disabled_lanes:
+                disabled_lanes.add(pool_idx)
+                dropped_signatures.add(signature)
+                should_drop = True
+        if not should_drop:
+            logger.warning(
+                "GHOST A summary lane=%d model=%s empty_or_reject=%d/%d",
+                pool_idx,
+                entry.get("model"),
+                consecutive_rejections.get(signature, 0),
+                drop_threshold,
+            )
+            return False
+        if not any(row.get("signature") == signature for row in dropped_providers):
+            dropped_providers.append(
+                {
+                    "signature": signature,
+                    "model": str(entry.get("model") or ""),
+                    "reason": "consecutive_empty_or_rejected",
+                    "consecutive_rejections": consecutive_rejections.get(
+                        signature, 0
+                    ),
+                }
+            )
+        logger.error(
+            "phase=summary_pool_drop lane=%d model=%s "
+            "reason=consecutive_empty_or_rejected consecutive=%d threshold=%d "
+            "dropped_provider_count=%d",
+            pool_idx,
+            entry.get("model"),
+            consecutive_rejections.get(signature, 0),
+            drop_threshold,
+            len(dropped_providers),
+        )
+        return True
 
     def _validation_failure_class(task: SummaryTask) -> str:
         flags = validation_flags_by_parent.get(task.parent_id) or []
@@ -1116,6 +1218,11 @@ async def summarize_parents(
                     await _clear_lane_strikes(pool_idx)
                     async with _results_lock:
                         results_by_parent_id.update(batch_results)
+                if await _record_lane_artifact_result(
+                    pool_idx,
+                    accepted=len(batch_results),
+                ):
+                    return
             finally:
                 for _task in batch_tasks:
                     task_queue.task_done()
@@ -1252,6 +1359,16 @@ async def summarize_parents(
                 f"{idx}:{pool[idx]['model']}" for idx in sorted(disabled_lanes)
             ),
         )
+    pool_status.update(
+        {
+            "drop_threshold": drop_threshold,
+            "consecutive_rejections": dict(consecutive_rejections),
+            "dropped_signatures": sorted(dropped_signatures),
+            "dropped_provider_count": len(dropped_providers),
+            "dropped_providers": dropped_providers,
+            "active_provider_count": max(0, len(pool) - len(disabled_lanes)),
+        }
+    )
     logger.info(
         "GHOST A complete: %d/%d parents summarized across %d model(s) [%s]",
         len(results),

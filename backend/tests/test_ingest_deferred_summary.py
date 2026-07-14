@@ -34,6 +34,16 @@ class _Collection:
     async def find_one(self, *_args: Any, **_kwargs: Any) -> dict[str, Any] | None:
         return self.rows[0] if self.rows else None
 
+    async def count_documents(self, query: dict[str, Any]) -> int:
+        rows = list(self.rows)
+        doc_scope = query.get("doc_id") or {}
+        if isinstance(doc_scope, dict) and doc_scope.get("$in") is not None:
+            allowed = set(doc_scope["$in"])
+            rows = [row for row in rows if row.get("doc_id") in allowed]
+        if "summary" in query:
+            rows = [row for row in rows if str(row.get("summary") or "").strip()]
+        return len(rows)
+
     async def update_one(
         self,
         _filter: dict[str, Any],
@@ -54,6 +64,9 @@ class _Db:
             batches.ITEMS: _Collection([{"doc_id": "doc-1"}, {"doc_id": "doc-1"}]),
             batches.BATCHES: _Collection(),
             "ingest_repair_runs": _Collection(),
+            "parent_chunks": _Collection(
+                [{"doc_id": "doc-1", "chunk_kind": "body", "summary": "done"}]
+            ),
         }
 
     def __getitem__(self, name: str) -> _Collection:
@@ -66,12 +79,7 @@ class _IngestionService:
         self.run_calls: list[dict[str, Any]] = []
 
     async def backfill_parent_summaries(self, *_args: Any, **_kwargs: Any) -> dict:
-        return {
-            "status": "healthy",
-            "generated": 1,
-            "indexed": 1,
-            "generation_errors": [],
-        }
+        raise AssertionError("batch completion must use durable summary jobs")
 
     async def plan_summary_jobs(self, **kwargs: Any) -> dict:
         self.plan_calls.append(kwargs)
@@ -83,10 +91,23 @@ class _IngestionService:
 
     async def run_summary_jobs(self, **kwargs: Any) -> dict:
         self.run_calls.append(kwargs)
+        is_parent = kwargs.get("kinds") == ["retrieval_parent_summary"]
+        prior_parent_calls = sum(
+            call.get("kinds") == ["retrieval_parent_summary"]
+            for call in self.run_calls[:-1]
+        )
+        if is_parent and prior_parent_calls:
+            return {
+                "status": "empty",
+                "claimed": 0,
+                "counts": {},
+                "runner_results": {},
+            }
         return {
             "status": "complete",
             "claimed": 1,
             "counts": {"succeeded": 1},
+            "runner_results": {},
             "batch_reconciliation": {"status": "complete", "promoted": 1},
         }
 
@@ -122,11 +143,18 @@ async def test_deferred_summary_run_record_has_no_created_at_update_conflict(
         ingestion_service=ingestion_service,
     )
 
-    assert result["status"] == "healthy"
+    assert result["status"] == "complete"
+    assert result["parent_summary_jobs"]["plan"]["planned"] == 1
+    assert result["parent_summary_jobs"]["missing_parent_count"] == 0
     assert result["document_summary_jobs"]["plan"]["planned"] == 1
     assert result["document_summary_jobs"]["run"]["counts"] == {"succeeded": 1}
-    assert ingestion_service.plan_calls[0]["kinds"] == ["document_summary"]
+    assert ingestion_service.plan_calls[0]["kinds"] == [
+        "retrieval_parent_summary"
+    ]
+    assert ingestion_service.plan_calls[0]["doc_ids"] == ["doc-1"]
+    assert ingestion_service.plan_calls[1]["kinds"] == ["document_summary"]
     assert ingestion_service.run_calls[0]["statuses"] == ["queued"]
+    assert ingestion_service.run_calls[-1]["kinds"] == ["document_summary"]
     run_update = db["ingest_repair_runs"].updates[0]["update"]
     assert "created_at" in run_update["$setOnInsert"]
     assert "created_at" not in run_update["$set"]

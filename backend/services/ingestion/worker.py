@@ -1563,42 +1563,58 @@ async def _run_ghosts_parallel(
             )
             for p in summary_parents
         ]
-        pool = _build_ghost_pool(config.summary_models)
+        runtime_summary_refs: list[Any] = []
         summary_max_concurrent: int | None = None
         max_summary_tokens = config.max_summary_tokens
-        if not pool or user_id:
-            try:
-                from services.settings import settings_service
+        try:
+            from services.settings import settings_service
 
-                runtime_ingestion = (
-                    await settings_service.get_runtime_ingestion_settings(user_id)
-                )
-                runtime_summary = runtime_ingestion.summary
-                summary_max_concurrent = runtime_summary.max_concurrent
-                default_tokens = IngestionConfig.model_fields[
-                    "max_summary_tokens"
-                ].default
-                if (
-                    max_summary_tokens == default_tokens
-                    and runtime_summary.max_summary_tokens != default_tokens
-                ):
-                    max_summary_tokens = runtime_summary.max_summary_tokens
-                if not pool and runtime_summary.summary_models:
-                    pool = _build_ghost_pool(runtime_summary.summary_models)
-            except Exception as exc:  # noqa: BLE001
-                logger.warning(
-                    "Ghost A global summary settings unavailable doc=%s corpus=%s: %s",
-                    doc_id[:12],
-                    corpus_id[:8],
-                    exc,
-                )
+            runtime_ingestion = (
+                await settings_service.get_runtime_ingestion_settings(user_id)
+            )
+            runtime_summary = runtime_ingestion.summary
+            summary_max_concurrent = (
+                runtime_summary.max_concurrent if runtime_summary.enabled else None
+            )
+            runtime_summary_refs = list(
+                runtime_summary.summary_models if runtime_summary.enabled else []
+            )
+            default_tokens = IngestionConfig.model_fields[
+                "max_summary_tokens"
+            ].default
+            if (
+                max_summary_tokens == default_tokens
+                and runtime_summary.max_summary_tokens != default_tokens
+            ):
+                max_summary_tokens = runtime_summary.max_summary_tokens
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Ghost A global summary settings unavailable doc=%s corpus=%s: %s",
+                doc_id[:12],
+                corpus_id[:8],
+                exc,
+            )
+        from services.ingestion.summary_provider_pool import (
+            resolve_summary_provider_pool,
+        )
+
+        pool, pool_resolution = await resolve_summary_provider_pool(
+            configured_refs=config.summary_models,
+            runtime_refs=runtime_summary_refs,
+            user_id=user_id,
+            db=db,
+        )
+        provider_pool_status: dict[str, Any] = {"resolution": pool_resolution}
         logger.info(
-            "Ghost A start doc=%s corpus=%s parents=%d pool=%d global_cap=%s",
+            "Ghost A start doc=%s corpus=%s parents=%d pool=%d global_cap=%s "
+            "primary=%s demoted=%d",
             doc_id[:12],
             corpus_id[:8],
             len(tasks),
             len(pool) or 1,
             summary_max_concurrent or "-",
+            pool_resolution.get("primary_model"),
+            int(pool_resolution.get("demoted_provider_count") or 0),
         )
         from services.ingestion.provider_call_telemetry import record_provider_call
 
@@ -1612,7 +1628,14 @@ async def _run_ghosts_parallel(
             model=model,
             global_max_concurrent=summary_max_concurrent,
             telemetry_sink=_summary_telemetry,
+            pool_status=provider_pool_status,
         )
+        if int(provider_pool_status.get("dropped_provider_count") or 0) > 0:
+            warnings.append(
+                "Summary provider pool dropped "
+                f"{provider_pool_status['dropped_provider_count']} lane(s) after "
+                "consecutive empty/rejected artifacts"
+            )
         if len(results) < len(tasks):
             if not results and tasks:
                 raise GhostAFailure(

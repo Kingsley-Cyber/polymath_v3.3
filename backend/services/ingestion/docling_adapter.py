@@ -7,8 +7,10 @@ adapter's `parse_document(...) -> DoclingParseResult` contract.
 
 Responsibilities split:
   • Sidecar parses bytes → DoclingDocument → flat sections + markdown.
-  • PDF uploads are text-first. Local pypdf extraction is the only PDF text
-    recovery path; OCR is disabled by policy and `do_ocr=True` is ignored.
+  • PDF uploads are text-first. Text-layer PDFs use Docling layout parsing
+    without OCR when the sidecar is available; a surfaced local font-layout
+    fallback preserves headings when the sidecar is unavailable. Sparse or
+    image-only PDFs remain on the OCR-AST candidate lane.
   • Adapter does ONE pre-processing step: when the upload looks like a
     structurally-implicit `.txt` file, run `inject_synthetic_headers` first
     so docling sees real `#`/`##` markers and can promote tier_b_plus.
@@ -165,6 +167,10 @@ _FAST_PDF_MIN_TOTAL_CHARS = 1200
 _FAST_PDF_MIN_AVG_CHARS_PER_PAGE = 80
 _FAST_PDF_MIN_NONEMPTY_PAGE_RATIO = 0.25
 _FAST_PDF_MAX_REPLACEMENT_RATIO = 0.03
+_PDF_TEXT_LAYER_MIN_CHARS = 24
+_PDF_HEADING_MIN_SIZE_RATIO = 1.22
+_PDF_HEADING_MIN_SIZE_DELTA = 2.0
+_PDF_HEADING_MAX_CHARS = 180
 _TABLE_PARSE_MAX_SHEETS = int(os.getenv("TABLE_PARSE_MAX_SHEETS", "20"))
 _TABLE_PARSE_MAX_ROWS_PER_SHEET = int(os.getenv("TABLE_PARSE_MAX_ROWS_PER_SHEET", "5000"))
 
@@ -409,6 +415,7 @@ def _apply_meta(result: "DoclingParseResult", meta: dict) -> None:
 _SOURCE_TYPE_BY_FORMAT = {
     "local_html": "webpage",
     "pypdf_fast_text": "pdf",
+    "pypdf_font_layout": "pdf",
     "local_docx": "document",
     "local_markdown": "markdown",
     "local_text": "text",
@@ -448,6 +455,8 @@ def finalize_source_meta(result: "DoclingParseResult", filename: str | None) -> 
         fmt = result.source_format or ""
         if fmt.startswith("code_"):
             result.source_type = "code"
+        elif _looks_like_pdf(fname, ""):
+            result.source_type = "pdf"
         else:
             result.source_type = _SOURCE_TYPE_BY_FORMAT.get(fmt, "document")
     tier = getattr(result.source_tier, "value", str(result.source_tier))
@@ -466,6 +475,10 @@ def finalize_source_meta(result: "DoclingParseResult", filename: str | None) -> 
     prior_provenance = prior_block.get("bibliographic_provenance") or {}
     result.routing_trace = {
         "parser": result.source_format or "docling_sidecar",
+        "parser_fallback_count": int(
+            getattr(result, "parser_fallback_count", 0) or 0
+        ),
+        "parser_fallback_reason": getattr(result, "parser_fallback_reason", None),
         "tier": tier,
         "has_structure": bool(result.has_structure),
         "augmented_headers": bool(result.augmented_with_synthetic_headers),
@@ -572,6 +585,8 @@ def docling_sidecar_needed(filename: str, mime: str) -> bool:
     if _looks_like_code(filename):
         return False
     if _looks_like_pdf(filename, mime):
+        # Digital PDFs prefer the sidecar, but the font-layout parser is a
+        # complete local fallback and therefore the sidecar is not required.
         return False
     if _looks_like_markdown(filename, mime):
         return False
@@ -593,7 +608,7 @@ def parser_strategy(filename: str, mime: str) -> str:
     if _looks_like_code(filename):
         return "local_code"
     if _looks_like_pdf(filename, mime):
-        return "local_pdf_fast_text"
+        return "pdf_layout_then_local_fallback"
     if _looks_like_markdown(filename, mime):
         return "local_markdown"
     if _looks_like_html(filename, mime):
@@ -663,6 +678,11 @@ class DoclingParseResult:
     # Per-document routing report — cascade decisions (intercept → sniff →
     # tier → parent strategy) recorded for /documents/{id} visibility.
     routing_trace: dict = field(default_factory=dict)
+    # CP1-D1: numeric accounting for parser fallbacks. A local PDF layout
+    # fallback is valid only when this counter and its reason are surfaced in
+    # the durable routing_trace; zero means the preferred parser ran.
+    parser_fallback_count: int = 0
+    parser_fallback_reason: str | None = None
 
 
 def _looks_like_plain_text(filename: str, mime: str) -> bool:
@@ -1947,12 +1967,15 @@ def _classify_tier(
     h2_count: int,
     num_pages: int,
     has_structure: bool,
+    has_tables: bool = False,
 ) -> SourceTier:
     """Mirror the rules of the legacy source_classifier but feed off docling
     output instead of regex hits.
 
     Order:
-      1. Multi-page PDF → ocr_ast (page-layout chunking)
+      1. Text-layer PDF with headings → tier_a; table-only → tier_b;
+         genuinely structureless → tier_c. Image-only PDFs are returned
+         on the OCR-AST candidate lane before this classifier is called.
       2. HTML / XHTML  → tier_b
       3. Augmented plain text with structure → tier_b_plus
       4. Native MD/DOCX with structure → tier_a
@@ -1961,8 +1984,12 @@ def _classify_tier(
     mime = (original_mime or "").lower()
     fname = (original_filename or "").lower()
 
-    if mime == "application/pdf" and num_pages > 1:
-        return SourceTier.ocr_ast
+    if mime == "application/pdf" or fname.endswith(".pdf"):
+        if (h1_count + h2_count) > 0:
+            return SourceTier.tier_a
+        if has_tables:
+            return SourceTier.tier_b
+        return SourceTier.tier_a if has_structure else SourceTier.tier_c
     if mime in ("text/html", "application/xhtml+xml") or fname.endswith((".html", ".htm", ".xhtml")):
         return SourceTier.tier_b
     if augmented and has_structure:
@@ -2035,6 +2062,186 @@ def _fast_pdf_text_is_usable(result: DoclingParseResult) -> bool:
     )
 
 
+def _pdf_has_text_layer(result: DoclingParseResult) -> bool:
+    """Distinguish a real text layer from empty/sparse scan artifacts.
+
+    This gate is intentionally more permissive than retrieval usability: a
+    short digital notice still deserves layout parsing, while a page number
+    or a few corrupt glyphs from an image-only scan do not.
+    """
+    text = result.text or result.markdown or ""
+    compact = "".join(text.split())
+    if len(compact) < _PDF_TEXT_LAYER_MIN_CHARS:
+        return False
+    if text.count("\ufffd") / max(1, len(text)) > _FAST_PDF_MAX_REPLACEMENT_RATIO:
+        return False
+    pages = result.pages or [text]
+    return any(
+        len("".join((page or "").split())) >= _PDF_TEXT_LAYER_MIN_CHARS
+        for page in pages
+    )
+
+
+def _weighted_median_font_size(lines: list[tuple[str, float]]) -> float:
+    weighted = sorted(
+        (size, max(1, min(len(text), 500)))
+        for text, size in lines
+        if text.strip() and size > 0
+    )
+    if not weighted:
+        return 0.0
+    total = sum(weight for _, weight in weighted)
+    seen = 0
+    for size, weight in weighted:
+        seen += weight
+        if seen * 2 >= total:
+            return size
+    return weighted[-1][0]
+
+
+def _pdf_font_lines(raw_bytes: bytes) -> tuple[list[tuple[str, float]], list[str]]:
+    """Extract ordered PDF lines with their dominant rendered font size."""
+    from pypdf import PdfReader
+
+    reader = PdfReader(BytesIO(raw_bytes))
+    all_lines: list[tuple[str, float]] = []
+    pages: list[str] = []
+
+    for page in reader.pages:
+        parts: list[str] = []
+        sizes: list[tuple[float, int]] = []
+
+        def flush() -> None:
+            text = re.sub(r"\s+", " ", "".join(parts)).strip()
+            if text:
+                weights: dict[float, int] = {}
+                for size, weight in sizes:
+                    weights[size] = weights.get(size, 0) + weight
+                dominant = max(
+                    weights,
+                    key=lambda size: (weights[size], size),
+                    default=0.0,
+                )
+                all_lines.append((text, dominant))
+            parts.clear()
+            sizes.clear()
+
+        def visitor(text, _cm, _tm, _font_dict, font_size) -> None:
+            size = float(font_size or 0.0)
+            chunks = re.split(r"(\r?\n)", str(text or ""))
+            for chunk in chunks:
+                if chunk in {"\n", "\r\n"}:
+                    flush()
+                    continue
+                if not chunk:
+                    continue
+                parts.append(chunk)
+                visible = len("".join(chunk.split()))
+                if visible:
+                    sizes.append((size, visible))
+
+        extracted = page.extract_text(visitor_text=visitor) or ""
+        flush()
+        pages.append(extracted)
+
+    return all_lines, pages
+
+
+def _parse_pdf_font_layout(
+    raw_bytes: bytes,
+    filename: str,
+    mime: str,
+    fast_result: DoclingParseResult,
+    *,
+    fallback_reason: str,
+) -> DoclingParseResult:
+    """Convert a digital PDF to heading-bearing Markdown using font layout.
+
+    This is the explicit CP1-D1 fallback for deployments where the Docling
+    sidecar is disabled or unavailable. It uses only relative typography and
+    document-wide body-font statistics; it contains no filename, corpus, or
+    fixture-specific rules.
+    """
+    lines, extracted_pages = _pdf_font_lines(raw_bytes)
+    body_size = _weighted_median_font_size(lines)
+    threshold = max(
+        body_size * _PDF_HEADING_MIN_SIZE_RATIO,
+        body_size + _PDF_HEADING_MIN_SIZE_DELTA,
+    )
+
+    marked: list[tuple[str, float, bool]] = []
+    for text, size in lines:
+        is_heading = bool(
+            body_size > 0
+            and size >= threshold
+            and len(text) <= _PDF_HEADING_MAX_CHARS
+            and len(text.split()) <= 24
+        )
+        if (
+            is_heading
+            and marked
+            and marked[-1][2]
+            and abs(marked[-1][1] - size) < 0.05
+        ):
+            prior_text, prior_size, _ = marked[-1]
+            marked[-1] = (f"{prior_text} {text}", prior_size, True)
+        else:
+            marked.append((text, size, is_heading))
+
+    heading_sizes = sorted(
+        {round(size, 2) for _, size, is_heading in marked if is_heading},
+        reverse=True,
+    )
+    level_by_size = {
+        size: min(index + 1, 6) for index, size in enumerate(heading_sizes)
+    }
+    markdown_lines: list[str] = []
+    for text, size, is_heading in marked:
+        if is_heading:
+            level = level_by_size[round(size, 2)]
+            markdown_lines.append(f"{'#' * level} {text}")
+        else:
+            markdown_lines.append(text)
+    markdown = "\n\n".join(markdown_lines).strip()
+    sections, h1, h2 = _markdown_sections(markdown)
+    has_tables = any(section.element_type == "table" for section in sections)
+    has_structure = (h1 + h2) > 0 or has_tables
+    tier = _classify_tier(
+        original_mime=mime,
+        original_filename=filename,
+        augmented=False,
+        h1_count=h1,
+        h2_count=h2,
+        num_pages=fast_result.num_pages,
+        has_structure=has_structure,
+        has_tables=has_tables,
+    )
+    logger.warning(
+        "phase=pdf_layout_fallback file=%s count=1 reason=%s "
+        "body_font=%.2f headings=%d tier=%s",
+        filename,
+        fallback_reason,
+        body_size,
+        h1 + h2,
+        tier.value,
+    )
+    return DoclingParseResult(
+        text=fast_result.text,
+        markdown=markdown or fast_result.markdown,
+        sections=sections,
+        pages=extracted_pages or fast_result.pages,
+        has_structure=has_structure,
+        source_tier=tier,
+        h1_count=h1,
+        h2_count=h2,
+        num_pages=fast_result.num_pages,
+        source_format="pypdf_font_layout",
+        filename=filename,
+        parser_fallback_count=1,
+        parser_fallback_reason=fallback_reason,
+    )
+
+
 def _sidecar_disabled() -> bool:
     return DOCLING_SIDECAR_POLICY in {"0", "false", "off", "disabled", "none", "local"}
 
@@ -2058,6 +2265,82 @@ async def unload_docling_sidecar() -> dict:
         resp = await client.post("/unload")
         resp.raise_for_status()
         return resp.json()
+
+
+async def _parse_with_docling_sidecar(
+    raw_bytes: bytes,
+    filename: str,
+    mime: str,
+    *,
+    augmented: bool = False,
+    audit: list[dict] | None = None,
+) -> DoclingParseResult:
+    """Run a no-OCR layout parse and normalize the sidecar response."""
+    files = {"file": (filename, raw_bytes, mime)}
+    data = {"do_ocr": "false"}
+
+    try:
+        async with httpx.AsyncClient(
+            base_url=DOCLING_URL,
+            timeout=httpx.Timeout(DOCLING_TIMEOUT_SECONDS, connect=30.0),
+        ) as client:
+            try:
+                resp = await client.post("/parse", files=files, data=data)
+            except httpx.RequestError as exc:
+                raise RuntimeError("Docling parser sidecar is unavailable") from exc
+            resp.raise_for_status()
+            payload = resp.json()
+    finally:
+        if DOCLING_AUTO_UNLOAD_AFTER_PARSE:
+            try:
+                await unload_docling_sidecar()
+            except Exception as exc:
+                logger.debug("Docling sidecar auto-unload failed: %s", exc)
+
+    sections = [
+        Section(
+            heading_path=list(section.get("heading_path") or []),
+            text=section.get("text", "") or "",
+            element_type=section.get("element_type", "paragraph"),
+            level=section.get("level"),
+            language=section.get("language"),
+            metadata=section.get("metadata") or {},
+        )
+        for section in payload.get("sections", [])
+    ]
+    h1 = int(payload.get("h1_count", 0))
+    h2 = int(payload.get("h2_count", 0))
+    has_tables = any(section.element_type == "table" for section in sections)
+    has_structure = bool(
+        payload.get("has_structure", False) or (h1 + h2) > 0 or has_tables
+    )
+    num_pages = int(payload.get("num_pages", 1))
+    tier = _classify_tier(
+        original_mime=mime,
+        original_filename=filename,
+        augmented=augmented,
+        h1_count=h1,
+        h2_count=h2,
+        num_pages=num_pages,
+        has_structure=has_structure,
+        has_tables=has_tables,
+    )
+    return DoclingParseResult(
+        text=payload.get("text", "") or "",
+        markdown=payload.get("markdown", "") or "",
+        sections=sections,
+        pages=payload.get("pages"),
+        has_structure=has_structure,
+        source_tier=tier,
+        h1_count=h1,
+        h2_count=h2,
+        num_pages=num_pages,
+        source_format=payload.get("source_format", "") or "",
+        augmented_with_synthetic_headers=augmented,
+        injected_headers_audit=list(audit or []),
+        language=None,
+        filename=filename,
+    )
 
 
 async def parse_document(
@@ -2120,9 +2403,54 @@ async def parse_document(
 
     if _looks_like_pdf(filename, mime):
         fast_result = _parse_pdf_fast_text(raw_bytes, filename, mime)
-        _apply_meta(fast_result, _meta_from_pdf(raw_bytes))  # M2 pdf info
-        if not do_ocr or _fast_pdf_text_is_usable(fast_result):
+        pdf_meta = _meta_from_pdf(raw_bytes)
+        _apply_meta(fast_result, pdf_meta)  # M2 pdf info
+        if not _pdf_has_text_layer(fast_result):
+            # OCR is disabled in this deployment, but image-only PDFs retain
+            # the page-grouped OCR-AST candidate contract instead of being
+            # misclassified as structureless digital documents.
+            fast_result.source_tier = SourceTier.ocr_ast
+            logger.info(
+                "phase=pdf_scan_candidate file=%s pages=%d text_chars=%d",
+                filename,
+                fast_result.num_pages,
+                len(fast_result.text or ""),
+            )
             return fast_result
+
+        if not _sidecar_disabled():
+            try:
+                layout_result = await _parse_with_docling_sidecar(
+                    raw_bytes,
+                    filename,
+                    mime,
+                )
+                _apply_meta(layout_result, pdf_meta)
+                return layout_result
+            except Exception as exc:
+                logger.warning(
+                    "Docling PDF layout parse failed for %s; using surfaced "
+                    "font-layout fallback: %s",
+                    filename,
+                    type(exc).__name__,
+                )
+                fallback_reason = (
+                    "docling_sidecar_unavailable"
+                    if isinstance(exc, RuntimeError)
+                    else "docling_sidecar_parse_error"
+                )
+        else:
+            fallback_reason = "docling_sidecar_disabled"
+
+        layout_result = _parse_pdf_font_layout(
+            raw_bytes,
+            filename,
+            mime,
+            fast_result,
+            fallback_reason=fallback_reason,
+        )
+        _apply_meta(layout_result, pdf_meta)
+        return layout_result
 
     local_result = _parse_local_text_document(raw_bytes, filename, mime)
     if local_result is not None:
@@ -2134,74 +2462,10 @@ async def parse_document(
 
     if _sidecar_disabled():
         raise _docling_required_error(filename, mime)
-
-    files = {"file": (aug_filename, aug_bytes, aug_mime)}
-    data = {"do_ocr": "false"}
-
-    try:
-        async with httpx.AsyncClient(
-            base_url=DOCLING_URL,
-            timeout=httpx.Timeout(DOCLING_TIMEOUT_SECONDS, connect=30.0),
-        ) as client:
-            try:
-                resp = await client.post("/parse", files=files, data=data)
-            except httpx.RequestError as exc:
-                raise RuntimeError(
-                    "Docling parser sidecar is unavailable. Markdown, text, HTML, "
-                    "and digital PDFs parse locally; this file type needs the "
-                    "`local-parser` profile. Start it with "
-                    "`docker compose --profile local-parser up -d docling`, or "
-                    "convert the file to .md/.txt before ingest."
-                ) from exc
-            resp.raise_for_status()
-            payload = resp.json()
-    finally:
-        if DOCLING_AUTO_UNLOAD_AFTER_PARSE:
-            try:
-                await unload_docling_sidecar()
-            except Exception as exc:
-                logger.debug("Docling sidecar auto-unload failed: %s", exc)
-
-    sections = [
-        Section(
-            heading_path=list(s.get("heading_path") or []),
-            text=s.get("text", "") or "",
-            element_type=s.get("element_type", "paragraph"),
-            level=s.get("level"),
-            language=s.get("language"),
-            metadata=s.get("metadata") or {},
-        )
-        for s in payload.get("sections", [])
-    ]
-
-    h1 = int(payload.get("h1_count", 0))
-    h2 = int(payload.get("h2_count", 0))
-    has_structure = bool(payload.get("has_structure", (h1 + h2) >= 2))
-    num_pages = int(payload.get("num_pages", 1))
-
-    tier = _classify_tier(
-        original_mime=mime,
-        original_filename=filename,
+    return await _parse_with_docling_sidecar(
+        aug_bytes,
+        aug_filename,
+        aug_mime,
         augmented=augmented,
-        h1_count=h1,
-        h2_count=h2,
-        num_pages=num_pages,
-        has_structure=has_structure,
-    )
-
-    return DoclingParseResult(
-        text=payload.get("text", "") or "",
-        markdown=payload.get("markdown", "") or "",
-        sections=sections,
-        pages=payload.get("pages"),
-        has_structure=has_structure,
-        source_tier=tier,
-        h1_count=h1,
-        h2_count=h2,
-        num_pages=num_pages,
-        source_format=payload.get("source_format", "") or "",
-        augmented_with_synthetic_headers=augmented,
-        injected_headers_audit=audit,
-        language=None,
-        filename=filename,
+        audit=audit,
     )

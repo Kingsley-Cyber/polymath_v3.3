@@ -32,6 +32,7 @@ INTERNAL_MODEL_FLAGS = frozenset(
         "max_context_tokens",
         "canary_max_concurrent",
         "provider_canary_passed",
+        "summary_canary_passed_rows",
     }
 )
 

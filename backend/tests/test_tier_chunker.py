@@ -455,6 +455,33 @@ def test_coalesce_does_not_merge_code_into_prose():
     assert code_count == 1
 
 
+def test_coalesce_preserves_distinct_heading_paths():
+    blocks = [
+        (["Guide", "Chapter One"], "first chapter " * 10, ChunkKind.BODY, None, {}),
+        (["Guide", "Chapter Two"], "second chapter " * 10, ChunkKind.BODY, None, {}),
+    ]
+    out = tier_chunker._coalesce_small_blocks(
+        blocks, min_parent_tokens=1000, max_parent_tokens=4000
+    )
+    assert [block[0] for block in out] == [
+        ["Guide", "Chapter One"],
+        ["Guide", "Chapter Two"],
+    ]
+
+
+def test_coalesce_still_merges_fragments_within_one_heading():
+    blocks = [
+        (["Guide", "Chapter One"], "fragment one " * 10, ChunkKind.BODY, None, {}),
+        (["Guide", "Chapter One"], "fragment two " * 10, ChunkKind.BODY, None, {}),
+    ]
+    out = tier_chunker._coalesce_small_blocks(
+        blocks, min_parent_tokens=1000, max_parent_tokens=4000
+    )
+    assert len(out) == 1
+    assert out[0][0] == ["Guide", "Chapter One"]
+    assert "fragment one" in out[0][1] and "fragment two" in out[0][1]
+
+
 def test_sections_to_parent_blocks_emits_code_blocks():
     sections = [
         _section("H1", element_type="section_heading", heading_path=["H1"], level=1),

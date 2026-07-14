@@ -125,7 +125,7 @@ def test_summary_provider_contract_masks_keys_and_hash_tracks_pool():
 
     contract = summary_provider_contract(corpus)
 
-    assert contract["pool_source"] == "corpus_summary_models"
+    assert contract["pool_source"] == "resolved_flash_primary"
     assert contract["pool_size"] == 1
     assert contract["lanes"][0]["model"] == "deepseek/deepseek-v4-flash"
     assert "never-persist" not in str(contract)
