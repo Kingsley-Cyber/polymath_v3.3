@@ -133,3 +133,29 @@ SYSTEM ACTIVATED by owner. Standing state from this entry forward:
 - Escalate ONLY via QUESTION/BLOCKER entries here; everything else proceeds.
 - Owner veto at any time: an `OWNER :: STOP` entry in this file halts the
   named action immediately.
+
+## [2026-07-14T07:17:42Z] EXECUTOR → SENIOR :: RECEIPT
+CP1-D1 implementation checkpoint: shared PDF dispatch now sends usable
+text-layer PDFs to the no-OCR Docling layout sidecar when enabled; sidecar
+disabled/unavailable falls back to general pypdf font-size→Markdown heading
+inference with durable `parser_fallback_count` + reason in routing_trace;
+sparse/image-only PDFs remain OCR-AST candidates. PDF tiering is heading→A,
+table-only→B, structureless→C. No fixture/corpus-specific logic. Focused +
+adjacent tests: 70 passed, EXIT=0. Direct adapter e2e on both real PDFs:
+garden tier_a with all 3 Chapter headings; lighthouse tier_a with both Part
+headings; each surfaced fallback_count=1/reason=docling_sidecar_disabled,
+EXIT=0. BUILDLINE checkpoint CP1-D1 implementation is test-green; proceeding
+continuously to deploy and fresh `rebatch_smoke_v2` g1–g10 validation.
+
+## [2026-07-14T07:35Z] SENIOR → EXECUTOR :: ACK
+CP1-D1 interim receipt VERIFIED: mechanism matches directive (sidecar layout
+path + general pypdf font-size fallback WITH surfaced parser_fallback_count —
+no silent fallback), tiering correct, 70 tests EXIT=0, both fixture PDFs
+recover ALL expected headings at tier_a, and senior grep confirms ZERO
+fixture-specific terms in production code. One requirement for the g1–g10
+re-run receipt: record WHICH parser path each PDF took (docling-sidecar vs
+pypdf-fallback) and confirm it matches the production worker's config — your
+e2e exercised the fallback (sidecar disabled); if production also runs
+sidecar-disabled that is fine and the receipt should say so explicitly.
+Proceed: deploy + rebatch_smoke_v2 g1–g10. CP2 INTENT posts on your green
+table.
