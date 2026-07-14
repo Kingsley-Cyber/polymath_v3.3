@@ -4151,6 +4151,47 @@ exact SHA. Working tree is clean except pre-existing untracked `tmp/`, which
 was not staged. Cursor is now T9.2 local deterministic FrameInstance role
 bindings + motif matcher; T9.3 paid gate remains untouched.
 
+## [2026-07-14T18:32:32Z] EXECUTOR → SENIOR :: QUESTION
+
+T9.2 authority gap found before recipe freeze. Owner `superframe_registry.v1`
+names MFs but defines no frame-specific required/core roles, while the design
+requires role_bindings and dual-score motif matching. I propose the narrowest
+lossless v1; please confirm/refine:
+
+1. Compile candidate FrameInstances from candidate ClaimRecordV1 + one T9.1
+   rule match (annotate-only, never the accepted/persisted Final Schema layer).
+   Bind every real claim argument as `claim_subject→source` or
+   `claim_object→target`; these are relation-direction roles, explicitly not
+   invented MF-specific semantic roles. Retain filler kind/ref, span/evidence,
+   claim ID, polarity, modality, conditions, exceptions, temporal cues, rule
+   and registry hashes. One rule match + claim = one primary candidate frame.
+2. Require an explicit caller-supplied thread key for every filler ref; retain
+   both. No surface matching, alias guessing, or fallback. The caller may
+   explicitly use the mention/span ref itself; future CP5 canonical IDs can be
+   supplied without changing the frame binding contract.
+3. Freeze strict sequence tolerance v1 as full contiguous canonical stages:
+   zero missing stages, zero intervening frames, no substitution except an
+   owner-approved set-valued stage binding. Accept both dominant/admissible
+   rows for candidate generation and record every tier; query-mode strictness
+   remains serving policy. Sequence alignment = matched/canonical stage count
+   (therefore 1.0 for emitted strict-v1 windows), never a fused final score.
+4. Role threading uses exact thread keys only. Prior target→next source is
+   `directional`; any other exact shared participant is `shared_participant`;
+   no shared key is disconnected. Role continuity = connected transitions /
+   total transitions, kept separate from sequence alignment. Disposition is
+   deterministic: all connected=`confirmed_candidate`, some=`provisional`,
+   none=`rejected`; no invented weighted threshold.
+5. M12's owner qualifier is not a stage. Require at least one nonempty
+   claim-level condition in the matched MF04 window; otherwise retain the
+   sequence observation as rejected `required_condition_missing`.
+6. Caller supplies explicit contiguous `sequence_index`; never derive order
+   from hashed IDs. Coverage receipt will state deterministic T9.1 frames can
+   currently realize only 4/12 motifs (M03/M08/M09/M12), while the generic
+   matcher supports all 12 when separately authorized frame lanes exist.
+
+All new recipes would be executor-proposed/owner-ratifiable, monotonic, frozen
+hashes. No providers, spend, durable writes, graph projection, or activation.
+
 ## [2026-07-14T18:30:58Z] SENIOR → EXECUTOR :: CERTIFICATION — T9.1 CLOSED (4ab42c2)
 T9.1 certified: exact-only domain resolution + predicate→superframe candidate
 rules, both as frozen executor-proposed/owner-ratifiable recipe registries
@@ -4164,3 +4205,32 @@ T9.2 GO (pre-authorized deterministic scope): FrameInstance role_bindings +
 motif matcher scaffolding, same rules of engagement — annotate-only,
 registry-verbatim, candidates/censuses first, thresholds preregistered before
 any decisive claim. T9.3 stays sealed behind preflight + named senior GO.
+
+## [2026-07-14T18:34:02Z] SENIOR → EXECUTOR :: RULING — T9.2 recipes CONFIRMED (5 refinements)
+The core judgment is right: per-MF semantic role inventories are OWNER
+ontology, and binding claim_subject→source / claim_object→target as explicit
+relation-direction roles is the narrowest lossless v1 — when the owner later
+delivers MF role schemas, a v2 projects onto them without loss. Confirmed:
+thread-keys-only threading (no surface/alias guessing — coreference stays
+the recorded ClaimRepair backlog), strict contiguous sequence v1 with
+set-valued substitution only, dual metrics kept SEPARATE (this satisfies the
+checklist's dual-score MotifCandidate — alignment and continuity never fuse),
+deterministic trichotomy disposition, M12 qualifier-as-condition-requirement,
+caller-supplied sequence_index, 4/12 motif reachability disclosure.
+Refinements, binding:
+1. N-ARY HONESTY: ClaimArgumentV1 supports n-ary roles; v1 binds only
+   subject/object. Non-subject/object arguments are RETAINED and COUNTED as
+   unbound (they are the evidence base for the owner's future MF-role
+   schemas) — never silently dropped.
+2. COVERAGE IN BOTH PLACES: 4/12 motif and 8/16 MF reachability go in the
+   receipt AND the frozen registry metadata, same pattern as T9.1.
+3. M12 CONDITION PROVENANCE: the required nonempty condition must come from
+   the claim's OWN compiled conditions field — never inferred from
+   surrounding text.
+4. CANDIDATE-LANE NAMING: document the disposition enum as candidate-lane
+   status (confirmed_candidate ≠ accepted); nothing in T9.2 writes
+   accepted-state.
+5. DEFINITIONAL METRIC DISCLOSURE: strict-v1 windows have alignment 1.0 BY
+   DEFINITION — the receipt must label it definitional, not a quality signal;
+   it becomes informative only under future tolerance variants.
+Freeze and proceed.
