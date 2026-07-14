@@ -2011,3 +2011,55 @@ are the output — spec §4) for the flash route and run the acceptance through
 it; wrapper pathologies are exactly what argument-shaped output eliminates.
 Record whichever tier passes in the capability registry as flash's verified
 digest path.
+
+## [2026-07-14T14:49:54Z] EXECUTOR → SENIOR :: RECEIPT
+Approved v5 focused gate GREEN: 33 passed, true EXIT=0
+(`/tmp/t44_prompt_v5_focused.log`); Black true EXIT=0
+(`/tmp/t44_prompt_v5_black.log`). Initial and repair messages both pin the
+schema-free top-level/no-wrapper contract, the universal prompt version is
+`parent-digest.v5`, and existing schema-separation assertions remain green.
+Proceeding through adjacent regression and canonical redeploy before the one
+authorized fresh v5 rerun.
+
+## [2026-07-14T14:50:23Z] EXECUTOR → SENIOR :: RECEIPT
+Approved v5 adjacent gate GREEN: 161 passed, 3 pre-existing Docker-only skips,
+true EXIT=0 (`/tmp/t44_prompt_v5_adjacent.log`). No semantic, provenance,
+provider-wire, repair/DLQ, envelope/hash, or registry regression. Proceeding
+to canonical shared-image redeploy.
+
+## [2026-07-14T14:51:34Z] EXECUTOR → SENIOR :: RECEIPT
+Approved v5 canonical deployment GREEN: three-overlay build/recreate true
+EXIT=0 (`/tmp/t44_prompt_v5_deploy.log`), runtime verifier true EXIT=0
+(`/tmp/t44_prompt_v5_runtime_verify.log`), and both shared-image containers
+pin v5 plus the no-wrapper initial/repair instruction with true EXIT=0
+(`/tmp/t44_prompt_v5_two_container.log`). Starting the one authorized fresh
+v5 Tier4 rerun now.
+
+## [2026-07-14T14:52:34Z] EXECUTOR → SENIOR :: BLOCKER
+The one authorized v5 Tier4 rerun FAILED and is STOPPED; true EXIT=1
+(`/tmp/t44_ugo_tier4_live_v5.log`). Shape-only evidence
+(`/tmp/t44_tier4_v5_failure_state.log`, EXIT=0) shows attempt 1 emitted a
+different legacy-like root vocabulary; attempt 2 added the required digest
+fields but retained forbidden claims/concepts/entities/relationships/motifs/
+proposals/metadata fields, omitted `parent_id`, and used the wrong
+`schema_version`. The bounded validator correctly DLQ'd attempts=2 with two
+hashes and `canonical_write=false`. Accepted cache remains 0 and the complete
+canonical census again exactly matches both prior snapshots. No more prompt
+iteration will occur.
+
+## [2026-07-14T14:52:35Z] EXECUTOR → SENIOR :: ACK
+Executing the pre-authorized next lever: implement real Tier3 forced
+`submit_semantic_digest(SemanticDigestV1)` tool arguments for flash, preserve
+the same two-attempt structural+semantic validation and targeted repair,
+record Tier3 as the verified digest path only if the live acceptance passes,
+and leave Tier1 native-schema provider-blocked. No provider-output unwrapping,
+schema prompt paste, validator relaxation, or extra attempt will be added.
+
+## [2026-07-14T14:53:58Z] SENIOR → EXECUTOR :: ACK — Tier-3 proceeding per pre-authorization
+v5's single rerun failing closes the prompt-iteration path exactly as ruled.
+Record in the capability registry: flash Tier-4 json_object = STRUCTURALLY
+UNRELIABLE for this contract (persistent unauthorized wrapper across v4/v5,
+receipts attached) — so if Tier-3 forced tool-call passes, it becomes flash's
+VERIFIED digest path for CP9. Same acceptance bar on the Tier-3 run: 0
+structural failures across the 10 packets, ≥1 exercised repair, dead-letter
+demo, provenance rows complete.
