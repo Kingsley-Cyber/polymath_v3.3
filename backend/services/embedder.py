@@ -29,7 +29,7 @@ import inspect
 import logging
 import os
 import time
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 
@@ -52,6 +52,19 @@ _DEFAULT_DIM = 1024  # fallback when caller doesn't specify (e.g. query path on 
 # (~8KB each), in-process, short TTL.
 _QUERY_EMBED_CACHE = TTLCache(maxsize=4096, ttl_seconds=600.0)
 
+# Qwen3's retrieval contract is deliberately asymmetric.  The shipped
+# SentenceTransformers config leaves the document prompt empty and instructs
+# only queries with ``Instruct: ...\nQuery:``.  Keep that serialization here,
+# before provider dispatch, so local/API/Modal/RunPod lanes receive identical
+# bytes and no sidecar can accidentally add a second prefix.
+EmbeddingRole = Literal["document", "query", "neutral"]
+QWEN3_RETRIEVAL_PROFILE_VERSION = "qwen3-retrieval-query-v1"
+QWEN3_QUERY_INSTRUCTION = (
+    "given the user question, retrieve the most relevant information"
+)
+QWEN3_QUERY_PREFIX = f"Instruct: {QWEN3_QUERY_INSTRUCTION}\nQuery:"
+_RAW_EMBEDDING_PROFILE_VERSION = "raw-embedding-v1"
+
 
 _LEGACY_MODE_ALIASES = {
     "local_st": "local",
@@ -67,6 +80,41 @@ _LEGACY_MODE_ALIASES = {
 RUNPOD_EMBED_CONTRACT_VERSION = "polymath.runpod_embed.v1"
 # Worker-side hard cap — requests are sliced to this size before submission.
 RUNPOD_EMBED_MAX_TEXTS_PER_REQUEST = 256
+
+
+def _is_qwen3_embedding_model(model_id: str | None) -> bool:
+    normalized = str(model_id or "").strip().casefold()
+    return "qwen3-embedding" in normalized
+
+
+def _embedding_profile_version(
+    role: EmbeddingRole,
+    model_id: str | None,
+) -> str:
+    if role == "query" and _is_qwen3_embedding_model(model_id):
+        return QWEN3_RETRIEVAL_PROFILE_VERSION
+    return _RAW_EMBEDDING_PROFILE_VERSION
+
+
+def _prepare_embedding_texts(
+    texts: list[str],
+    *,
+    role: EmbeddingRole,
+    model_id: str | None,
+) -> list[str]:
+    """Serialize raw caller text for one model/role exactly once.
+
+    Canonical Qwen3 documents remain raw.  ``neutral`` is reserved for health
+    probes and symmetric/non-retrieval embeddings.  A non-Qwen model is never
+    given a Qwen-specific instruction.
+    """
+
+    if role not in {"document", "query", "neutral"}:
+        raise ValueError(f"Unsupported embedding role: {role!r}")
+    normalized = [str(text or "") for text in texts]
+    if role == "query" and _is_qwen3_embedding_model(model_id):
+        return [f"{QWEN3_QUERY_PREFIX}{text}" for text in normalized]
+    return normalized
 
 
 def _decrypt_api_key(value: str | None) -> str | None:
@@ -133,6 +181,7 @@ async def embed_batch(
     api_pool: list[dict[str, Any]] | None = None,
     local_timeout_s: float | None = None,
     workload_class: str = "document_ingestion",
+    embedding_role: EmbeddingRole = "document",
 ) -> list[list[float]]:
     """Dispatch to the selected embedding provider.
 
@@ -158,6 +207,9 @@ async def embed_batch(
         api_pool: optional list of OpenAI-compatible embedding endpoints.
             When provided for mode='api', batches are round-robined across
             entries and each entry's max_concurrent gates in-flight calls.
+        embedding_role: semantic role for model-specific serialization.
+            Qwen3 query text receives its retrieval instruction; canonical
+            document and neutral text remain raw.
     """
     if not texts:
         return []
@@ -168,6 +220,14 @@ async def embed_batch(
 
     settings = get_settings()
     dim = expected_dim if expected_dim is not None else _DEFAULT_DIM
+    effective_model_id = expected_model_id or settings.EMBEDDER_MODEL_NAME
+    # From this point onward ``texts`` contains provider-ready input.  Retry,
+    # split, failover, and local fallback paths reuse it without re-serializing.
+    texts = _prepare_embedding_texts(
+        texts,
+        role=embedding_role,
+        model_id=effective_model_id,
+    )
 
     # ── Modal ────────────────────────────────────────────────────────────
     if mode == "modal":
@@ -690,6 +750,75 @@ async def _embed_batch_runpod(
     return [vector for vector in ordered if vector is not None]
 
 
+async def _embed_texts_for_role(
+    texts: list[str],
+    config: dict[str, Any] | None,
+    *,
+    role: EmbeddingRole,
+    workload_class: str,
+    local_timeout_s: float | None,
+) -> list[list[float]]:
+    """One config-aware seam shared by query and document helpers."""
+
+    if config:
+        raw_key = config.get("embed_api_key")
+        api_pool = _plaintext_embedding_pool(config.get("embedding_models"))
+        return await embed_batch(
+            texts,
+            mode=config.get("embed_mode") or "local",
+            expected_dim=config.get("embedding_dimension") or _DEFAULT_DIM,
+            expected_model_id=config.get("embedding_model_id"),
+            base_url=config.get("embed_base_url"),
+            api_key=_decrypt_api_key(raw_key),
+            max_concurrent=config.get("embed_max_concurrent"),
+            modal_containers=config.get("modal_containers"),
+            api_pool=api_pool,
+            local_timeout_s=local_timeout_s,
+            workload_class=workload_class,
+            embedding_role=role,
+        )
+    settings = get_settings()
+    return await embed_batch(
+        texts,
+        mode="local",
+        expected_dim=_DEFAULT_DIM,
+        expected_model_id=settings.EMBEDDER_MODEL_NAME,
+        local_timeout_s=local_timeout_s,
+        workload_class=workload_class,
+        embedding_role=role,
+    )
+
+
+async def embed_documents(
+    texts: list[str],
+    config: dict[str, Any] | None = None,
+    *,
+    workload_class: str = "document_ingestion",
+) -> list[list[float]]:
+    """Embed indexed retrieval material with the canonical document role.
+
+    Qwen3's official document prompt is empty, so this intentionally preserves
+    raw text.  The explicit helper prevents indexing code from accidentally
+    inheriting the instructed query path.
+    """
+
+    if not texts:
+        return []
+    return await _embed_texts_for_role(
+        [str(text or "") for text in texts],
+        config,
+        role="document",
+        workload_class=workload_class,
+        local_timeout_s=_LOCAL_TIMEOUT,
+    )
+
+
+def _effective_query_model_id(config: dict[str, Any] | None) -> str:
+    if config and config.get("embedding_model_id"):
+        return str(config["embedding_model_id"])
+    return str(get_settings().EMBEDDER_MODEL_NAME)
+
+
 class _QueryEmbedBatcher:
     """Coalesce concurrent embed_query calls into one embed_batch request.
 
@@ -716,8 +845,11 @@ class _QueryEmbedBatcher:
 
     @staticmethod
     def _group_key(config: dict[str, Any] | None) -> str:
+        profile_version = _embedding_profile_version(
+            "query", _effective_query_model_id(config)
+        )
         if not config:
-            return "local"
+            return hash_key("group", "local", profile_version)
         return hash_key(
             "group",
             config.get("embed_mode") or "local",
@@ -728,6 +860,7 @@ class _QueryEmbedBatcher:
             config.get("embed_max_concurrent"),
             config.get("modal_containers"),
             repr(config.get("embedding_models")),
+            profile_version,
         )
 
     async def embed(self, text: str, config: dict[str, Any] | None) -> list[float]:
@@ -773,27 +906,12 @@ class _QueryEmbedBatcher:
     async def _embed_texts(
         texts: list[str], config: dict[str, Any] | None
     ) -> list[list[float]]:
-        if config:
-            raw_key = config.get("embed_api_key")
-            api_pool = _plaintext_embedding_pool(config.get("embedding_models"))
-            return await embed_batch(
-                texts,
-                mode=config.get("embed_mode") or "local",
-                expected_dim=config.get("embedding_dimension") or _DEFAULT_DIM,
-                expected_model_id=config.get("embedding_model_id"),
-                base_url=config.get("embed_base_url"),
-                api_key=_decrypt_api_key(raw_key),
-                max_concurrent=config.get("embed_max_concurrent"),
-                modal_containers=config.get("modal_containers"),
-                api_pool=api_pool,
-                local_timeout_s=_QUERY_LOCAL_TIMEOUT,
-                workload_class="interactive_query",
-            )
-        return await _call_embed_batch_local(
+        return await _embed_texts_for_role(
             texts,
-            _DEFAULT_DIM,
-            timeout_s=_QUERY_LOCAL_TIMEOUT,
+            config,
+            role="query",
             workload_class="interactive_query",
+            local_timeout_s=_QUERY_LOCAL_TIMEOUT,
         )
 
 
@@ -812,17 +930,7 @@ async def embed_query(text: str, config: dict[str, Any] | None = None) -> list[f
     callers within a ~15ms window that share a backend go out as one batch
     request (see the class docstring for the contention evidence).
     """
-    if config:
-        cache_key = hash_key(
-            "api",
-            config.get("embed_mode") or "local",
-            config.get("embedding_model_id"),
-            config.get("embedding_dimension") or _DEFAULT_DIM,
-            config.get("embed_base_url"),
-            text,
-        )
-    else:
-        cache_key = hash_key("local", _DEFAULT_DIM, text)
+    cache_key = _query_cache_key(text, config)
     cached = _QUERY_EMBED_CACHE.get(cache_key)
     if cached is not None:
         return cached
@@ -834,16 +942,22 @@ async def embed_query(text: str, config: dict[str, Any] | None = None) -> list[f
 
 
 def _query_cache_key(text: str, config: dict[str, Any] | None) -> str:
+    profile_version = _embedding_profile_version(
+        "query", _effective_query_model_id(config)
+    )
     if config:
         return hash_key(
             "api",
+            "query",
             config.get("embed_mode") or "local",
             config.get("embedding_model_id"),
             config.get("embedding_dimension") or _DEFAULT_DIM,
             config.get("embed_base_url"),
+            repr(config.get("embedding_models")),
+            profile_version,
             text,
         )
-    return hash_key("local", _DEFAULT_DIM, text)
+    return hash_key("local", "query", _DEFAULT_DIM, profile_version, text)
 
 
 async def embed_queries(

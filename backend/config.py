@@ -67,6 +67,37 @@ class Settings(BaseSettings):
     QDRANT_GRPC_PORT: int = Field(
         default=6334, description="Qdrant gRPC port (used when QDRANT_PREFER_GRPC=true)"
     )
+    QDRANT_BINARY_QUANTIZATION_ENABLED: bool = Field(
+        default=True,
+        description=(
+            "Enable one-bit binary quantization for Polymath-owned dense Qdrant "
+            "vectors. Existing managed collections are reconciled in place; "
+            "unrelated collections are never touched."
+        ),
+    )
+    QDRANT_BINARY_QUANTIZATION_ALWAYS_RAM: bool = Field(
+        default=True,
+        description=(
+            "Keep Polymath's binary-quantized dense vectors resident in RAM. "
+            "Full-precision originals remain available for rescoring."
+        ),
+    )
+    QDRANT_BINARY_QUANTIZATION_RESCORE: bool = Field(
+        default=True,
+        description=(
+            "Rescore binary-quantized Qdrant candidates with the original "
+            "full-precision vectors to preserve retrieval quality."
+        ),
+    )
+    QDRANT_BINARY_QUANTIZATION_OVERSAMPLING: float = Field(
+        default=2.0,
+        ge=1.0,
+        le=10.0,
+        description=(
+            "Candidate oversampling factor for binary-quantized dense search "
+            "before full-precision rescoring."
+        ),
+    )
     HYDRATION_MODE: str = Field(
         default="child_summary",
         description=(

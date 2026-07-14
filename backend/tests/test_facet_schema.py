@@ -75,6 +75,7 @@ class _Db(dict):
 class _FakeQdrant:
     def __init__(self, points):
         self.points = points
+        self.calls = []
 
     async def get_collection(self, collection_name):
         del collection_name
@@ -85,7 +86,7 @@ class _FakeQdrant:
         )
 
     async def query_points(self, **kwargs):
-        del kwargs
+        self.calls.append(kwargs)
         return SimpleNamespace(points=self.points)
 
 
@@ -360,3 +361,5 @@ async def test_vector_facets_activate_semantic_near_doc_when_lexical_is_thin():
     assert vector_rows[0]["name"] == "perceiving_others_psychology_of_interpersonal"
     assert vector_rows[0]["semantic_matched"] is True
     assert vector_rows[0]["source"] == "vector_facet_probe"
+    assert qdrant.calls[0]["search_params"].quantization.rescore is True
+    assert qdrant.calls[0]["search_params"].quantization.oversampling == 2.0

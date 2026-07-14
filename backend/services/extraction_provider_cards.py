@@ -200,11 +200,26 @@ def resolve_extraction_provider_card(entry: Any) -> ExtractionProviderCard:
     semantic_mode: SemanticVerifierMode = "strict_with_direction_repair"
     concurrency_policy: ConcurrencyPolicy = "static_lane_cap"
 
-    if provider in {"openai", "deepseek"}:
+    if provider == "openai":
         supports_json_schema = True
         supports_json_object = True
         schema_mode = "json_schema"
         json_repair_mode = "provider_native"
+    elif provider == "deepseek":
+        supports_json_object = True
+        # Live V4 Flash canary (2026-07-13) accepts json_object but rejects
+        # OpenAI's json_schema response format with HTTP 400.  Keep older or
+        # explicitly overridden DeepSeek profiles on their existing contract,
+        # but do not spend a failed request per chunk on this known model.
+        if "deepseek-v4-flash" in model.lower():
+            supports_json_schema = False
+            schema_mode = "json_object"
+            json_repair_mode = "balanced_object_repair"
+            notes.append("deepseek_v4_flash_json_object_only_live_verified")
+        else:
+            supports_json_schema = True
+            schema_mode = "json_schema"
+            json_repair_mode = "provider_native"
     elif provider == "openrouter":
         supports_json_schema = "mistral-nemo" in model.lower()
         supports_json_object = True

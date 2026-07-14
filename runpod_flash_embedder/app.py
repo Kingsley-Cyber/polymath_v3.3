@@ -20,8 +20,9 @@ collections. That means, exactly:
                         Qwen3-Embedding) — never overridden here,
   - same normalization: ``normalize_embeddings=True`` (unit L2 norm), the
                         exact ``model.encode`` call both reference hosts use,
-  - no prompt/instruction prefixes: the local sidecar encodes raw text with
-                        no ``prompt_name``; so does this worker,
+  - no worker-side prompt mutation: the backend dispatcher owns any
+                        model/role serialization and sends provider-ready
+                        strings; this worker encodes those bytes unchanged,
   - same dimension:     1024 for the default model. The backend dispatcher
                         (``backend/services/embedder.py``) asserts the
                         dimension of every returned vector and raises on

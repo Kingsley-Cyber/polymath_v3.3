@@ -151,6 +151,9 @@ async def test_fast_funnel_b_uses_qdrant_dense_sparse_rrf_when_available(monkeyp
     assert isinstance(call["query"], qmodels.FusionQuery)
     assert call["query"].fusion == qmodels.Fusion.RRF
     assert {prefetch.using for prefetch in call["prefetch"]} == {"dense", "sparse"}
+    dense_prefetch = next(p for p in call["prefetch"] if p.using == "dense")
+    assert dense_prefetch.params.quantization.rescore is True
+    assert dense_prefetch.params.quantization.oversampling == 2.0
     assert "query_filter" not in call
     assert chunks[0].chunk_id == "chunk-1"
     retrievers = {item["retriever"] for item in chunks[0].provenance}
@@ -204,6 +207,8 @@ async def test_fast_funnel_b_falls_back_to_dense_for_legacy_collection(monkeypat
     call = client.calls[0]
     assert call["query"] == [0.1, 0.2]
     assert call["using"] == "dense"
+    assert call["search_params"].quantization.rescore is True
+    assert call["search_params"].quantization.oversampling == 2.0
     assert "prefetch" not in call
     assert chunks[0].provenance == [{"retriever": "qdrant_dense"}]
 
@@ -227,6 +232,7 @@ async def test_fast_funnel_b_rrf_failure_falls_back_to_dense(monkeypatch):
     assert isinstance(client.calls[0]["query"], qmodels.FusionQuery)
     assert client.calls[1]["query"] == [0.1, 0.2]
     assert client.calls[1]["using"] == "dense"
+    assert client.calls[1]["search_params"].quantization.rescore is True
     assert chunks[0].provenance == [{"retriever": "qdrant_dense"}]
 
 

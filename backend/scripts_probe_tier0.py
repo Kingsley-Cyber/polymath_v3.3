@@ -21,8 +21,9 @@ async def main(query: str, corpus_ids: list[str]) -> None:
     from qdrant_client import AsyncQdrantClient
     from qdrant_client import models as qm
 
-    from services.embedder import embed_batch
+    from services.embedder import embed_query
     from services.ingestion.tier0 import SHARED_DOCSUM
+    from services.storage.qdrant_writer import binary_quantization_search_params
 
     s = get_settings()
     client = AsyncQdrantClient(url=s.QDRANT_URL, timeout=30)
@@ -32,7 +33,14 @@ async def main(query: str, corpus_ids: list[str]) -> None:
     dim_info = await client.get_collection(SHARED_DOCSUM)
     vecs = dim_info.config.params.vectors
     dim = vecs["dense"].size if isinstance(vecs, dict) else vecs.size
-    vector = (await embed_batch([query], expected_dim=dim))[0]
+    vector = await embed_query(
+        query,
+        {
+            "embed_mode": "local",
+            "embedding_dimension": dim,
+            "embedding_model_id": s.EMBEDDER_MODEL_NAME,
+        },
+    )
 
     flt = None
     if corpus_ids:
@@ -46,6 +54,7 @@ async def main(query: str, corpus_ids: list[str]) -> None:
         query_filter=flt,
         limit=8,
         with_payload=True,
+        search_params=binary_quantization_search_params(),
     )
     print(f"\nquery: {query!r}  scope: {corpus_ids or 'ALL corpora'}")
     for h in hits.points:

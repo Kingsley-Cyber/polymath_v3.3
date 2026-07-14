@@ -1,0 +1,902 @@
+{
+  "device": "mps",
+  "fixture_schema": "polymath.semantic_extraction_gold.v1",
+  "gliner_only": {
+    "model": "urchade/gliner_medium-v2.1",
+    "model_load_seconds": 6.1897,
+    "performance": {
+      "chunks_per_second": 53.0936,
+      "latency_p50_s": 0.0188,
+      "latency_p95_s": 0.0188,
+      "wall_seconds": 10.1707
+    },
+    "score": {
+      "claim_qualifier_contract_available": false,
+      "entities": {
+        "f1": 0.56,
+        "fn": 15,
+        "fp": 7,
+        "precision": 0.6667,
+        "recall": 0.4828,
+        "tp": 14
+      },
+      "entity_type_accuracy_on_matched": 0.7143,
+      "missing_results": 0,
+      "relation_endpoint_valid_rate": null,
+      "relation_evidence_exact_rate": null,
+      "relations": {
+        "f1": 0.0,
+        "fn": 9,
+        "fp": 0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "tp": 0
+      },
+      "results": 9,
+      "samples": 9,
+      "schema_valid_results": 9
+    },
+    "threshold": 0.4
+  },
+  "gliner_then_glirel": {
+    "models": [
+      "urchade/gliner_medium-v2.1",
+      "/Users/king/polymath_v3.3/models/glirel_ghost_b_v1/best"
+    ],
+    "performance": {
+      "chunks_per_second": 47.7739,
+      "wall_seconds": 11.3032
+    },
+    "score": {
+      "claim_qualifier_contract_available": false,
+      "entities": {
+        "f1": 0.56,
+        "fn": 15,
+        "fp": 7,
+        "precision": 0.6667,
+        "recall": 0.4828,
+        "tp": 14
+      },
+      "entity_type_accuracy_on_matched": 0.7143,
+      "missing_results": 0,
+      "relation_endpoint_valid_rate": 1.0,
+      "relation_evidence_exact_rate": 1.0,
+      "relations": {
+        "f1": 0.1333,
+        "fn": 8,
+        "fp": 5,
+        "precision": 0.1667,
+        "recall": 0.1111,
+        "tp": 1
+      },
+      "results": 9,
+      "samples": 9,
+      "schema_valid_results": 9
+    }
+  },
+  "glirel_oracle_entities": {
+    "model": "/Users/king/polymath_v3.3/models/glirel_ghost_b_v1/best",
+    "model_load_seconds": 5.0126,
+    "performance": {
+      "chunks_per_second": 30.459,
+      "wall_seconds": 17.7287
+    },
+    "score": {
+      "claim_qualifier_contract_available": false,
+      "entities": {
+        "f1": 1.0,
+        "fn": 0,
+        "fp": 0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "tp": 29
+      },
+      "entity_type_accuracy_on_matched": 1.0,
+      "missing_results": 0,
+      "relation_endpoint_valid_rate": 1.0,
+      "relation_evidence_exact_rate": 1.0,
+      "relations": {
+        "f1": 0.1739,
+        "fn": 7,
+        "fp": 12,
+        "precision": 0.1429,
+        "recall": 0.2222,
+        "tp": 2
+      },
+      "results": 9,
+      "samples": 9,
+      "schema_valid_results": 9
+    },
+    "threshold": 0.5
+  },
+  "production_interpretation": {
+    "promotion_requires_diverse_heldout_chunks": true,
+    "quality_fixture_is_human_curated": true,
+    "stress_input_is_repeated": true,
+    "stress_run_proves_capacity_only": true
+  },
+  "scale_repetitions": 60,
+  "schema_version": "polymath.semantic_extraction_local_benchmark.v1",
+  "spacy": {
+    "bundle_counts": {
+      "analogy_limitation": {
+        "claim_candidates": 2,
+        "predicates": 2,
+        "qualifiers": 2,
+        "spans": 5
+      },
+      "attributed_hypothesis": {
+        "claim_candidates": 2,
+        "predicates": 2,
+        "qualifiers": 3,
+        "spans": 5
+      },
+      "condition_scope": {
+        "claim_candidates": 2,
+        "predicates": 2,
+        "qualifiers": 5,
+        "spans": 6
+      },
+      "direct_negation": {
+        "claim_candidates": 1,
+        "predicates": 1,
+        "qualifiers": 1,
+        "spans": 3
+      },
+      "exception_scope": {
+        "claim_candidates": 1,
+        "predicates": 1,
+        "qualifiers": 3,
+        "spans": 3
+      },
+      "explicit_causal": {
+        "claim_candidates": 1,
+        "predicates": 1,
+        "qualifiers": 1,
+        "spans": 3
+      },
+      "mechanism_definition": {
+        "claim_candidates": 1,
+        "predicates": 1,
+        "qualifiers": 0,
+        "spans": 3
+      },
+      "recommendation_temporal": {
+        "claim_candidates": 1,
+        "predicates": 1,
+        "qualifiers": 3,
+        "spans": 3
+      },
+      "temporal_revision": {
+        "claim_candidates": 2,
+        "predicates": 2,
+        "qualifiers": 2,
+        "spans": 6
+      }
+    },
+    "candidates_by_sample": {
+      "analogy_limitation": [
+        {
+          "arguments": [
+            {
+              "evidence_ref_id": "evidence:f6cc5bd8a5400f8bd54c272adac5ac2ed708c3e668c8006735604f8a16f58228",
+              "role": "subject",
+              "span_observation_id": "observation:54154da04aa4b8b43b12e6d5fc275e797409a67b931009e47714b886ba9c98b3",
+              "surface": "Human worth"
+            },
+            {
+              "evidence_ref_id": "evidence:f6cc5bd8a5400f8bd54c272adac5ac2ed708c3e668c8006735604f8a16f58228",
+              "role": "object",
+              "span_observation_id": "observation:e2cf233d8ed60e8fc28150985c4a37788482e5a51e24ac4dc03fd71c9103a65e",
+              "surface": "equivalent to market price"
+            }
+          ],
+          "assertion_mode": "reported",
+          "candidate_id": "claim-candidate:24f438d9cf75da3dac010e9e77129ef3c1fc75b499c3281c20ed81b5ef177342",
+          "canonical_proposition": "human worth NEGATED ASSERTED be equivalent to market price",
+          "claim_type": "comparison_or_contrast",
+          "conditions": [],
+          "evidence_ref_ids": [
+            "evidence:f6cc5bd8a5400f8bd54c272adac5ac2ed708c3e668c8006735604f8a16f58228"
+          ],
+          "exceptions": [],
+          "knowledge_status": "candidate",
+          "modal_force": "asserted",
+          "polarity": "negated",
+          "predicate_lemma": "be",
+          "predicate_surface": "is",
+          "producer": "spacy:en_core_web_sm",
+          "proposition_text": "Human worth is not equivalent to market price; the shared structure concerns reference updating only.",
+          "schema_version": "polymath.claim_candidate.v1",
+          "validation_status": "candidate"
+        },
+        {
+          "arguments": [
+            {
+              "evidence_ref_id": "evidence:f6cc5bd8a5400f8bd54c272adac5ac2ed708c3e668c8006735604f8a16f58228",
+              "role": "subject",
+              "span_observation_id": "observation:e0e22e2685200c97db91670cee92ed2cfea177d720f5df08a4398a3c6ee3a727",
+              "surface": "the shared structure concerns reference"
+            }
+          ],
+          "assertion_mode": "reported",
+          "candidate_id": "claim-candidate:31ed32bf1b189da04d95eb111c6a1d0e985accaf0ebe8cdb30760d20c3814107",
+          "canonical_proposition": "the shared structure concerns reference AFFIRMED ASSERTED update",
+          "claim_type": "description_or_observation",
+          "conditions": [],
+          "evidence_ref_ids": [
+            "evidence:f6cc5bd8a5400f8bd54c272adac5ac2ed708c3e668c8006735604f8a16f58228"
+          ],
+          "exceptions": [],
+          "knowledge_status": "candidate",
+          "modal_force": "asserted",
+          "polarity": "affirmed",
+          "predicate_lemma": "update",
+          "predicate_surface": "updating",
+          "producer": "spacy:en_core_web_sm",
+          "proposition_text": "Human worth is not equivalent to market price; the shared structure concerns reference updating only.",
+          "schema_version": "polymath.claim_candidate.v1",
+          "validation_status": "candidate"
+        }
+      ],
+      "attributed_hypothesis": [
+        {
+          "arguments": [
+            {
+              "evidence_ref_id": "evidence:cb1b3afa898bc836a71044063b000af8166649bfa972bd64ed9264676164801f",
+              "role": "subject",
+              "span_observation_id": "observation:5fca36dca7f84be2f75f70a363ef025ca02e02b17b45e53bf2f94f76420bce25",
+              "surface": "The authors"
+            }
+          ],
+          "assertion_mode": "reported",
+          "candidate_id": "claim-candidate:b6712b3a0a9aaa2c34f5050c781be7074e09b6b7a1d4bce18fef6ba2817edd6b",
+          "canonical_proposition": "the authors AFFIRMED ASSERTED hypothesize",
+          "claim_type": "description_or_observation",
+          "conditions": [],
+          "evidence_ref_ids": [
+            "evidence:cb1b3afa898bc836a71044063b000af8166649bfa972bd64ed9264676164801f"
+          ],
+          "exceptions": [],
+          "knowledge_status": "candidate",
+          "modal_force": "asserted",
+          "polarity": "affirmed",
+          "predicate_lemma": "hypothesize",
+          "predicate_surface": "hypothesize",
+          "producer": "spacy:en_core_web_sm",
+          "proposition_text": "The authors hypothesize that repeated criticism may lower a person's evaluation of competence.",
+          "schema_version": "polymath.claim_candidate.v1",
+          "validation_status": "candidate"
+        },
+        {
+          "arguments": [
+            {
+              "evidence_ref_id": "evidence:cb1b3afa898bc836a71044063b000af8166649bfa972bd64ed9264676164801f",
+              "role": "subject",
+              "span_observation_id": "observation:6046e906060679518ca78f4386c929e78850f58d50e6dd3f20fadbe93e7922ca",
+              "surface": "repeated criticism"
+            },
+            {
+              "evidence_ref_id": "evidence:cb1b3afa898bc836a71044063b000af8166649bfa972bd64ed9264676164801f",
+              "role": "object",
+              "span_observation_id": "observation:2e03bcae368289cd228a112fd4cc286d56bed82932dd9d4c1b599e6301154319",
+              "surface": "a person's evaluation of competence"
+            }
+          ],
+          "assertion_mode": "attributed",
+          "candidate_id": "claim-candidate:6a37cf3f000ace01a80976a1f2437cf626f599682a62d1934f0da42647b0d88e",
+          "canonical_proposition": "repeated criticism AFFIRMED POSSIBLE lower a person's evaluation of competence",
+          "claim_type": "causal",
+          "conditions": [],
+          "evidence_ref_ids": [
+            "evidence:cb1b3afa898bc836a71044063b000af8166649bfa972bd64ed9264676164801f"
+          ],
+          "exceptions": [],
+          "knowledge_status": "candidate",
+          "modal_force": "possible",
+          "polarity": "affirmed",
+          "predicate_lemma": "lower",
+          "predicate_surface": "lower",
+          "producer": "spacy:en_core_web_sm",
+          "proposition_text": "The authors hypothesize that repeated criticism may lower a person's evaluation of competence.",
+          "schema_version": "polymath.claim_candidate.v1",
+          "validation_status": "candidate"
+        }
+      ],
+      "condition_scope": [
+        {
+          "arguments": [
+            {
+              "evidence_ref_id": "evidence:618374fbb50428b7e7f0fa69aa58aa07e2dff09cbdd419d823b9fce92122d6d2",
+              "role": "subject",
+              "span_observation_id": "observation:fb67ea588edfdd94f37224be4ed17cf9d924f15583d7639ceae3b09fecf66749",
+              "surface": "buyers"
+            },
+            {
+              "evidence_ref_id": "evidence:618374fbb50428b7e7f0fa69aa58aa07e2dff09cbdd419d823b9fce92122d6d2",
+              "role": "object",
+              "span_observation_id": "observation:2815451aa20fb542c3b16768f2ed959c2d091216f793e0f7562305d058385df3",
+              "surface": "quality"
+            }
+          ],
+          "assertion_mode": "reported",
+          "candidate_id": "claim-candidate:6390cb41272cdd2d5e2d60772089c32946f82a67ffe19eab256b253cef7dacc1",
+          "canonical_proposition": "buyers NEGATED POSSIBLE inspect quality",
+          "claim_type": "description_or_observation",
+          "conditions": [],
+          "evidence_ref_ids": [
+            "evidence:618374fbb50428b7e7f0fa69aa58aa07e2dff09cbdd419d823b9fce92122d6d2"
+          ],
+          "exceptions": [],
+          "knowledge_status": "candidate",
+          "modal_force": "possible",
+          "polarity": "negated",
+          "predicate_lemma": "inspect",
+          "predicate_surface": "inspect",
+          "producer": "spacy:en_core_web_sm",
+          "proposition_text": "When buyers cannot directly inspect quality, price may signal product quality and influence purchase choice.",
+          "schema_version": "polymath.claim_candidate.v1",
+          "validation_status": "candidate"
+        },
+        {
+          "arguments": [
+            {
+              "evidence_ref_id": "evidence:618374fbb50428b7e7f0fa69aa58aa07e2dff09cbdd419d823b9fce92122d6d2",
+              "role": "subject",
+              "span_observation_id": "observation:d230cf0b5c90fa7a23373bda507af3fb676ffe79827407ca85d8362a860c5b2f",
+              "surface": "price"
+            },
+            {
+              "evidence_ref_id": "evidence:618374fbb50428b7e7f0fa69aa58aa07e2dff09cbdd419d823b9fce92122d6d2",
+              "role": "object",
+              "span_observation_id": "observation:bd972d28174e1bf9bd38f5b208346bf75bc259d508dc61da8d92071973ddaf1e",
+              "surface": "product quality and influence purchase choice"
+            }
+          ],
+          "assertion_mode": "hypothetical",
+          "candidate_id": "claim-candidate:2f673c30d2878badf56aaeb176f4db1c67373ae809242b36bc369601919429c1",
+          "canonical_proposition": "price AFFIRMED POSSIBLE signal product quality and influence purchase choice IF when buyers cannot directly inspect quality",
+          "claim_type": "causal",
+          "conditions": [
+            "When buyers cannot directly inspect quality"
+          ],
+          "evidence_ref_ids": [
+            "evidence:618374fbb50428b7e7f0fa69aa58aa07e2dff09cbdd419d823b9fce92122d6d2"
+          ],
+          "exceptions": [],
+          "knowledge_status": "candidate",
+          "modal_force": "possible",
+          "polarity": "affirmed",
+          "predicate_lemma": "signal",
+          "predicate_surface": "signal",
+          "producer": "spacy:en_core_web_sm",
+          "proposition_text": "When buyers cannot directly inspect quality, price may signal product quality and influence purchase choice.",
+          "schema_version": "polymath.claim_candidate.v1",
+          "validation_status": "candidate"
+        }
+      ],
+      "direct_negation": [
+        {
+          "arguments": [
+            {
+              "evidence_ref_id": "evidence:456a3376640e22e06fb15005691d9d189954af47d50b7fa42552cc6ef0f04398",
+              "role": "subject",
+              "span_observation_id": "observation:11bc422b30330a00b76c983675ff13f6e547422a0725b1653ce52ff018499fa7",
+              "surface": "A high price"
+            },
+            {
+              "evidence_ref_id": "evidence:456a3376640e22e06fb15005691d9d189954af47d50b7fa42552cc6ef0f04398",
+              "role": "object",
+              "span_observation_id": "observation:aabb8b0a64c2891be1c1efc127b3325ae358af71037b442bd1637dfbc3b0ea4b",
+              "surface": "high product quality"
+            }
+          ],
+          "assertion_mode": "reported",
+          "candidate_id": "claim-candidate:27b851584543e3ce53fe6f7748621e84e688d8523f4db144aff27bc84c850421",
+          "canonical_proposition": "a high price NEGATED ASSERTED guarantee high product quality",
+          "claim_type": "description_or_observation",
+          "conditions": [],
+          "evidence_ref_ids": [
+            "evidence:456a3376640e22e06fb15005691d9d189954af47d50b7fa42552cc6ef0f04398"
+          ],
+          "exceptions": [],
+          "knowledge_status": "candidate",
+          "modal_force": "asserted",
+          "polarity": "negated",
+          "predicate_lemma": "guarantee",
+          "predicate_surface": "guarantee",
+          "producer": "spacy:en_core_web_sm",
+          "proposition_text": "A high price does not guarantee high product quality.",
+          "schema_version": "polymath.claim_candidate.v1",
+          "validation_status": "candidate"
+        }
+      ],
+      "exception_scope": [
+        {
+          "arguments": [
+            {
+              "evidence_ref_id": "evidence:31a15cd997f3a5897894734beb4c8cfcbd8b5672eacf6255f6e409e7e2987530",
+              "role": "subject",
+              "span_observation_id": "observation:40d6e9434d5092e3390956a4ad7558847418fb70343117d84605d28a79748960",
+              "surface": "Discounting"
+            },
+            {
+              "evidence_ref_id": "evidence:31a15cd997f3a5897894734beb4c8cfcbd8b5672eacf6255f6e409e7e2987530",
+              "role": "object",
+              "span_observation_id": "observation:64a85ce4fa57b11e5926a123e23be4379291021586cb99ba4e4f5b76b249f203",
+              "surface": "reference price"
+            }
+          ],
+          "assertion_mode": "reported",
+          "candidate_id": "claim-candidate:fcfcd2df3422ffc37e105adce7e96f06afcafa5d37ebaa5224406297ee55909d",
+          "canonical_proposition": "discounting AFFIRMED ASSERTED lower reference price IF when the discount is clearly temporary EXCEPT except when the discount is clearly temporary",
+          "claim_type": "causal",
+          "conditions": [
+            "when the discount is clearly temporary"
+          ],
+          "evidence_ref_ids": [
+            "evidence:31a15cd997f3a5897894734beb4c8cfcbd8b5672eacf6255f6e409e7e2987530"
+          ],
+          "exceptions": [
+            "except when the discount is clearly temporary"
+          ],
+          "knowledge_status": "candidate",
+          "modal_force": "asserted",
+          "polarity": "affirmed",
+          "predicate_lemma": "lower",
+          "predicate_surface": "lowers",
+          "producer": "spacy:en_core_web_sm",
+          "proposition_text": "Discounting usually lowers reference price, except when the discount is clearly temporary.",
+          "schema_version": "polymath.claim_candidate.v1",
+          "validation_status": "candidate"
+        }
+      ],
+      "explicit_causal": [
+        {
+          "arguments": [
+            {
+              "evidence_ref_id": "evidence:96f8f3aac8fa2f420adb04350e9ac3c952088df9a80c0a4bb706aedf0461af29",
+              "role": "subject",
+              "span_observation_id": "observation:29b67c05b2a5179d1eb77f9c6fc63071bfae1c4622131c11a85cd0cdfe75a892",
+              "surface": "Repeated discounting"
+            },
+            {
+              "evidence_ref_id": "evidence:96f8f3aac8fa2f420adb04350e9ac3c952088df9a80c0a4bb706aedf0461af29",
+              "role": "object",
+              "span_observation_id": "observation:5b225fe8751680fad380368f5e3f381b5598784e2efbd39ad637f9072f38c43b",
+              "surface": "the consumer's internal reference price"
+            }
+          ],
+          "assertion_mode": "reported",
+          "candidate_id": "claim-candidate:030648a7627e5752bbb643ca209499cd1424472635247f38b0acf7f45c3e7cc5",
+          "canonical_proposition": "repeated discounting AFFIRMED ASSERTED lower the consumer's internal reference price",
+          "claim_type": "causal",
+          "conditions": [],
+          "evidence_ref_ids": [
+            "evidence:96f8f3aac8fa2f420adb04350e9ac3c952088df9a80c0a4bb706aedf0461af29"
+          ],
+          "exceptions": [],
+          "knowledge_status": "candidate",
+          "modal_force": "asserted",
+          "polarity": "affirmed",
+          "predicate_lemma": "lower",
+          "predicate_surface": "lowers",
+          "producer": "spacy:en_core_web_sm",
+          "proposition_text": "Repeated discounting lowers the consumer's internal reference price.",
+          "schema_version": "polymath.claim_candidate.v1",
+          "validation_status": "candidate"
+        }
+      ],
+      "mechanism_definition": [
+        {
+          "arguments": [
+            {
+              "evidence_ref_id": "evidence:8ee54f66c51daafb59b64091f5e9d1adba321f44b4370550e6a2b9bae29054de",
+              "role": "subject",
+              "span_observation_id": "observation:00b66ca65516155307ce6497c898f90f06b2ce02b6bd0db0f6dfb09232ac49e2",
+              "surface": "A mechanism motif"
+            },
+            {
+              "evidence_ref_id": "evidence:8ee54f66c51daafb59b64091f5e9d1adba321f44b4370550e6a2b9bae29054de",
+              "role": "object",
+              "span_observation_id": "observation:2c3f4250f5f13b4a657ebd8392f25254efbc0e10b2ee0642187c2df6d63abb8d",
+              "surface": "an ordered abstraction over validated frame instances and state transitions"
+            }
+          ],
+          "assertion_mode": "reported",
+          "candidate_id": "claim-candidate:d82d0dc567e974a26cd71cbb4ca8dc872ad86dd326a4b7489f15c150a7c12a6f",
+          "canonical_proposition": "a mechanism motif AFFIRMED ASSERTED be an ordered abstraction over validated frame instances and state transitions",
+          "claim_type": "definition",
+          "conditions": [],
+          "evidence_ref_ids": [
+            "evidence:8ee54f66c51daafb59b64091f5e9d1adba321f44b4370550e6a2b9bae29054de"
+          ],
+          "exceptions": [],
+          "knowledge_status": "candidate",
+          "modal_force": "asserted",
+          "polarity": "affirmed",
+          "predicate_lemma": "be",
+          "predicate_surface": "is",
+          "producer": "spacy:en_core_web_sm",
+          "proposition_text": "A mechanism motif is an ordered abstraction over validated frame instances and state transitions.",
+          "schema_version": "polymath.claim_candidate.v1",
+          "validation_status": "candidate"
+        }
+      ],
+      "recommendation_temporal": [
+        {
+          "arguments": [
+            {
+              "evidence_ref_id": "evidence:deffa79eacb5e3f23ee06f3ed87b1184516aa291f38510efdd13c7efdc38d7bc",
+              "role": "subject",
+              "span_observation_id": "observation:7eb328d9a6cbd38e7fc69fb7ecaaf98ace8161a2d1738cfa36edf44e82477f99",
+              "surface": "Analysts"
+            },
+            {
+              "evidence_ref_id": "evidence:deffa79eacb5e3f23ee06f3ed87b1184516aa291f38510efdd13c7efdc38d7bc",
+              "role": "object",
+              "span_observation_id": "observation:df598d5722300181917e6346bc84fb3dc7d0566c799250ebc13b6d0665de2dad",
+              "surface": "the reported price with a historical baseline"
+            }
+          ],
+          "assertion_mode": "attributed",
+          "candidate_id": "claim-candidate:39900680a3388eda84aa4fe2265343a37a7929670422ed0b2ea456def28e82eb",
+          "canonical_proposition": "analysts AFFIRMED RECOMMENDED compare the reported price with a historical baseline",
+          "claim_type": "recommendation_or_procedure",
+          "conditions": [],
+          "evidence_ref_ids": [
+            "evidence:deffa79eacb5e3f23ee06f3ed87b1184516aa291f38510efdd13c7efdc38d7bc"
+          ],
+          "exceptions": [],
+          "knowledge_status": "candidate",
+          "modal_force": "recommended",
+          "polarity": "affirmed",
+          "predicate_lemma": "compare",
+          "predicate_surface": "compare",
+          "producer": "spacy:en_core_web_sm",
+          "proposition_text": "Analysts should compare the reported price with a historical baseline before allocating capital.",
+          "schema_version": "polymath.claim_candidate.v1",
+          "validation_status": "candidate"
+        }
+      ],
+      "temporal_revision": [
+        {
+          "arguments": [
+            {
+              "evidence_ref_id": "evidence:0abc5b078e2c5c1c42cf84a08b14d14d5756444e9e046c2930636ed3040de635",
+              "role": "subject",
+              "span_observation_id": "observation:66bafda07da34e84119ea6ca53959bec89c939d0ff19698dcdb28299e6e09d46",
+              "surface": "The policy"
+            },
+            {
+              "evidence_ref_id": "evidence:0abc5b078e2c5c1c42cf84a08b14d14d5756444e9e046c2930636ed3040de635",
+              "role": "object",
+              "span_observation_id": "observation:5ef495b62e694575de6497e87c2569299893d29cbc112628d624dd5e07d46c6d",
+              "surface": "effective"
+            },
+            {
+              "evidence_ref_id": "evidence:0abc5b078e2c5c1c42cf84a08b14d14d5756444e9e046c2930636ed3040de635",
+              "role": "object",
+              "span_observation_id": "observation:3be214572aa75d9d0a32b240a97f27eb11a7ea24e20a5f4f4ed7761fc031c30a",
+              "surface": "2025-01-01"
+            }
+          ],
+          "assertion_mode": "reported",
+          "candidate_id": "claim-candidate:781fe374f2a89c86eaf9844a14536273251cd76405660c2ce824a6148b655927",
+          "canonical_proposition": "the policy AFFIRMED ASSERTED become effective | 2025-01-01",
+          "claim_type": "description_or_observation",
+          "conditions": [],
+          "evidence_ref_ids": [
+            "evidence:0abc5b078e2c5c1c42cf84a08b14d14d5756444e9e046c2930636ed3040de635"
+          ],
+          "exceptions": [],
+          "knowledge_status": "candidate",
+          "modal_force": "asserted",
+          "polarity": "affirmed",
+          "predicate_lemma": "become",
+          "predicate_surface": "became",
+          "producer": "spacy:en_core_web_sm",
+          "proposition_text": "The policy became effective on 2025-01-01 and was revised in March 2026.",
+          "schema_version": "polymath.claim_candidate.v1",
+          "validation_status": "candidate"
+        },
+        {
+          "arguments": [
+            {
+              "evidence_ref_id": "evidence:0abc5b078e2c5c1c42cf84a08b14d14d5756444e9e046c2930636ed3040de635",
+              "role": "subject",
+              "span_observation_id": "observation:66bafda07da34e84119ea6ca53959bec89c939d0ff19698dcdb28299e6e09d46",
+              "surface": "The policy"
+            },
+            {
+              "evidence_ref_id": "evidence:0abc5b078e2c5c1c42cf84a08b14d14d5756444e9e046c2930636ed3040de635",
+              "role": "object",
+              "span_observation_id": "observation:19e3466dbe8672c604046a56ac42406c487de6afd69cc6aa92f0481bc32ae20c",
+              "surface": "March 2026"
+            }
+          ],
+          "assertion_mode": "reported",
+          "candidate_id": "claim-candidate:4a7f2409e46610a6787812e46a93c18e34b7c73b26e1c4d8fc89233f4ef4beae",
+          "canonical_proposition": "the policy AFFIRMED ASSERTED revise march 2026",
+          "claim_type": "description_or_observation",
+          "conditions": [],
+          "evidence_ref_ids": [
+            "evidence:0abc5b078e2c5c1c42cf84a08b14d14d5756444e9e046c2930636ed3040de635"
+          ],
+          "exceptions": [],
+          "knowledge_status": "candidate",
+          "modal_force": "asserted",
+          "polarity": "affirmed",
+          "predicate_lemma": "revise",
+          "predicate_surface": "revised",
+          "producer": "spacy:en_core_web_sm",
+          "proposition_text": "The policy became effective on 2025-01-01 and was revised in March 2026.",
+          "schema_version": "polymath.claim_candidate.v1",
+          "validation_status": "candidate"
+        }
+      ]
+    },
+    "chunks_per_second": 196.3679,
+    "evidence_round_trip_errors": [],
+    "latency_p50_s": 0.0049,
+    "latency_p95_s": 0.0085,
+    "parser": "en_core_web_sm",
+    "pipeline": [
+      "tok2vec",
+      "tagger",
+      "parser",
+      "attribute_ruler",
+      "lemmatizer",
+      "ner"
+    ],
+    "qualifiers_by_sample": {
+      "analogy_limitation": [
+        {
+          "cue": "not",
+          "end": 18,
+          "kind": "negation",
+          "normalized_value": "negated",
+          "observation_id": "observation:3717bf1365ed888b47113656bad7f8db1b5ffc919ae5b09ac14272d0ec5be059",
+          "producer": "spacy:en_core_web_sm",
+          "start": 15,
+          "target_observation_id": "observation:ca4a72e0a18ca4c59c29ce2336366ed67ad8902d804e374736e79f478e74f8ef"
+        },
+        {
+          "cue": "equivalent",
+          "end": 29,
+          "kind": "comparison",
+          "normalized_value": "equivalent",
+          "observation_id": "observation:18059dc50978abf18e3a2ff811471814ab4cca61e1b412206ac4314c9c57458f",
+          "producer": "spacy:en_core_web_sm",
+          "start": 19,
+          "target_observation_id": "observation:ca4a72e0a18ca4c59c29ce2336366ed67ad8902d804e374736e79f478e74f8ef"
+        }
+      ],
+      "attributed_hypothesis": [
+        {
+          "cue": "hypothesize",
+          "end": 23,
+          "kind": "attribution",
+          "normalized_value": "hypothesize",
+          "observation_id": "observation:eb470abf94ae09332a09a0332b11775308b77394f1b02b16af87ccae183a33c9",
+          "producer": "spacy:en_core_web_sm",
+          "start": 12,
+          "target_observation_id": "observation:e73b4b51521ef9043e13f704d65f5f2ae1e64aa27b9aff22e53490cae6cefaf1"
+        },
+        {
+          "cue": "may",
+          "end": 51,
+          "kind": "modal",
+          "normalized_value": "possible",
+          "observation_id": "observation:17a6bd67f0dd0257f639ee9dfb5719dfdc81f3737af5193135fd60582f1ab700",
+          "producer": "spacy:en_core_web_sm",
+          "start": 48,
+          "target_observation_id": "observation:e73b4b51521ef9043e13f704d65f5f2ae1e64aa27b9aff22e53490cae6cefaf1"
+        },
+        {
+          "cue": "lower",
+          "end": 57,
+          "kind": "causal",
+          "normalized_value": "lower",
+          "observation_id": "observation:92273570b45dcb61b5581262accb33302b9d2992a93680b5ff9f6bba4c19e9bc",
+          "producer": "spacy:en_core_web_sm",
+          "start": 52,
+          "target_observation_id": "observation:e73b4b51521ef9043e13f704d65f5f2ae1e64aa27b9aff22e53490cae6cefaf1"
+        }
+      ],
+      "condition_scope": [
+        {
+          "cue": "When buyers cannot directly inspect quality",
+          "end": 43,
+          "kind": "condition",
+          "normalized_value": "conditional",
+          "observation_id": "observation:d3fcd3ca4ab603b9ff2c1e29237847099291fdc0bf58d9d52d63e336837f0154",
+          "producer": "spacy:en_core_web_sm",
+          "start": 0,
+          "target_observation_id": "observation:dbe23762534cf7157b71f23770c764906c31309ced516e7ae25f0b529121203c"
+        },
+        {
+          "cue": "can",
+          "end": 15,
+          "kind": "modal",
+          "normalized_value": "possible",
+          "observation_id": "observation:7a00e15baedbd47f2bb6fe0173368e43a84e09daa9d193f5ca0418d3bcd8e521",
+          "producer": "spacy:en_core_web_sm",
+          "start": 12,
+          "target_observation_id": "observation:fcfeac69d11ef91e8a8af095c291a23283f44ea9d4abe9f8c94e8f247486fed2"
+        },
+        {
+          "cue": "not",
+          "end": 18,
+          "kind": "negation",
+          "normalized_value": "negated",
+          "observation_id": "observation:dc5bf47de6df19597f86eca53a6f465f5d8b9f187aa2772d29cf92c9b200c827",
+          "producer": "spacy:en_core_web_sm",
+          "start": 15,
+          "target_observation_id": "observation:fcfeac69d11ef91e8a8af095c291a23283f44ea9d4abe9f8c94e8f247486fed2"
+        },
+        {
+          "cue": "may",
+          "end": 54,
+          "kind": "modal",
+          "normalized_value": "possible",
+          "observation_id": "observation:8bb46782b91d753c4fdce7e264c80473a49e7e27b571d57302f13a5e811a10d5",
+          "producer": "spacy:en_core_web_sm",
+          "start": 51,
+          "target_observation_id": "observation:dbe23762534cf7157b71f23770c764906c31309ced516e7ae25f0b529121203c"
+        },
+        {
+          "cue": "influence",
+          "end": 91,
+          "kind": "causal",
+          "normalized_value": "influence",
+          "observation_id": "observation:954d55d178ccf3c6384e25e5a4d553df39618b6716937445caa41946aadff46a",
+          "producer": "spacy:en_core_web_sm",
+          "start": 82,
+          "target_observation_id": "observation:dbe23762534cf7157b71f23770c764906c31309ced516e7ae25f0b529121203c"
+        }
+      ],
+      "direct_negation": [
+        {
+          "cue": "not",
+          "end": 21,
+          "kind": "negation",
+          "normalized_value": "negated",
+          "observation_id": "observation:0b888072c33b6e648f3c9ae6622c23409e6113f7c597fe69234ad7067d17f18c",
+          "producer": "spacy:en_core_web_sm",
+          "start": 18,
+          "target_observation_id": "observation:674fa813fbabede08da67ad4efe07c923d6f248ba456a31f0e7ec7e3a8a57d75"
+        }
+      ],
+      "exception_scope": [
+        {
+          "cue": "lowers",
+          "end": 26,
+          "kind": "causal",
+          "normalized_value": "lower",
+          "observation_id": "observation:211f7fb034f249f79a41642851060dad59d2a656ebbea2b1a81e042fb9a6cff7",
+          "producer": "spacy:en_core_web_sm",
+          "start": 20,
+          "target_observation_id": "observation:20d2209183731f7eb514d5410a48e5d0356278563f10663ccc7b375ebf55cecc"
+        },
+        {
+          "cue": "except when the discount is clearly temporary",
+          "end": 89,
+          "kind": "exception",
+          "normalized_value": "exception",
+          "observation_id": "observation:cfbe831f7ac13397b7b14f62dbd14517c77ac490b3ce7dbf2d8543ff03741731",
+          "producer": "spacy:en_core_web_sm",
+          "start": 44,
+          "target_observation_id": "observation:20d2209183731f7eb514d5410a48e5d0356278563f10663ccc7b375ebf55cecc"
+        },
+        {
+          "cue": "when the discount is clearly temporary",
+          "end": 89,
+          "kind": "condition",
+          "normalized_value": "conditional",
+          "observation_id": "observation:11a108d8da85cc954aab3d755f7c06de051d514bc5dc3fd7557d7e9100686eda",
+          "producer": "spacy:en_core_web_sm",
+          "start": 51,
+          "target_observation_id": "observation:20d2209183731f7eb514d5410a48e5d0356278563f10663ccc7b375ebf55cecc"
+        }
+      ],
+      "explicit_causal": [
+        {
+          "cue": "lowers",
+          "end": 27,
+          "kind": "causal",
+          "normalized_value": "lower",
+          "observation_id": "observation:47d065f9bd87a441a31b74af1ecb598e061184893479548bd7fe8880f3e6f336",
+          "producer": "spacy:en_core_web_sm",
+          "start": 21,
+          "target_observation_id": "observation:3a4f3f52745717aaea8538378bd5ac88f65a28bc2a7805ef00faa41b780827e3"
+        }
+      ],
+      "mechanism_definition": [],
+      "recommendation_temporal": [
+        {
+          "cue": "should",
+          "end": 15,
+          "kind": "modal",
+          "normalized_value": "recommended",
+          "observation_id": "observation:f20b1c7f46b11ba74f0b1c9c834d1b5a672847034f7b4cd2d32731934bf0e653",
+          "producer": "spacy:en_core_web_sm",
+          "start": 9,
+          "target_observation_id": "observation:fdab207bbcfbc54a0f368008fd2887927e048f04d95d3d470c83148d45f176fa"
+        },
+        {
+          "cue": "reported",
+          "end": 36,
+          "kind": "attribution",
+          "normalized_value": "report",
+          "observation_id": "observation:a12983d3380c94b789f1aa46381525f9b74459e8c495aeb1ce1ca2a6fcc130b9",
+          "producer": "spacy:en_core_web_sm",
+          "start": 28,
+          "target_observation_id": "observation:fdab207bbcfbc54a0f368008fd2887927e048f04d95d3d470c83148d45f176fa"
+        },
+        {
+          "cue": "before allocating capital",
+          "end": 95,
+          "kind": "temporal",
+          "normalized_value": "before",
+          "observation_id": "observation:ceed8eca107486138cb7cba0ae660c2a001bc2a2953b60ba79b6cb403f6dd397",
+          "producer": "spacy:en_core_web_sm",
+          "start": 70,
+          "target_observation_id": "observation:fdab207bbcfbc54a0f368008fd2887927e048f04d95d3d470c83148d45f176fa"
+        }
+      ],
+      "temporal_revision": [
+        {
+          "cue": "2025-01-01",
+          "end": 41,
+          "kind": "temporal",
+          "normalized_value": "temporal_reference",
+          "observation_id": "observation:3acca62a10892a3ceac1460598dc48935b91384fbb21328a15a6114bb478050a",
+          "producer": "spacy:en_core_web_sm",
+          "start": 31,
+          "target_observation_id": "observation:855decc497de720abdbfc57c24f718e3e3d99c36c98f3349e2a9e76e0164e787"
+        },
+        {
+          "cue": "March 2026",
+          "end": 71,
+          "kind": "temporal",
+          "normalized_value": "temporal_reference",
+          "observation_id": "observation:f857741d233937eb4a63d91231747f0a9e9d7dd5de060594a04709a0d2862420",
+          "producer": "spacy:en_core_web_sm",
+          "start": 61,
+          "target_observation_id": "observation:855decc497de720abdbfc57c24f718e3e3d99c36c98f3349e2a9e76e0164e787"
+        }
+      ]
+    },
+    "score": {
+      "claim_field_accuracy": {
+        "assertion_mode": 0.9091,
+        "claim_type": 1.0,
+        "modal_force": 1.0,
+        "polarity": 1.0
+      },
+      "claim_field_accuracy_overall": 0.9773,
+      "claim_match_rate": 0.9167,
+      "claim_qualifier_contract_available": true,
+      "condition_recall": 1.0,
+      "exception_recall": 1.0,
+      "expected_claims": 12,
+      "matched_claims": 11,
+      "missing_predicates": [
+        "analogy_limitation:concern"
+      ],
+      "qualifiers": {
+        "f1": 0.9189,
+        "fn": 0,
+        "fp": 3,
+        "precision": 0.85,
+        "recall": 1.0,
+        "tp": 17
+      }
+    },
+    "spacy_version": "3.8.14",
+    "wall_seconds": 0.0458
+  },
+  "stress_samples": 540,
+  "unique_samples": 9
+}

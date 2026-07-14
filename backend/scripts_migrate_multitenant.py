@@ -38,12 +38,18 @@ _INDEX_FIELDS = [
 
 
 async def _ensure(client: AsyncQdrantClient, name: str, dim: int) -> None:
-    if not await client.collection_exists(name):
-        await client.create_collection(
-            collection_name=name,
-            vectors_config={"dense": qm.VectorParams(size=dim, distance=qm.Distance.COSINE)},
-            sparse_vectors_config={"sparse": qm.SparseVectorParams(modifier=qm.Modifier.IDF)},
-        )
+    await qw._create_collection_with_retry(
+        client,
+        collection_name=name,
+        vectors_config={
+            "dense": qm.VectorParams(size=dim, distance=qm.Distance.COSINE)
+        },
+        sparse_vectors_config={
+            "sparse": qm.SparseVectorParams(modifier=qm.Modifier.IDF)
+        },
+        quantization_config=qw.binary_quantization_config(),
+    )
+    await qw.ensure_binary_quantization(client, name)
     for f in _INDEX_FIELDS:
         try:
             await client.create_payload_index(

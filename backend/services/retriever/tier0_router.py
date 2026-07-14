@@ -290,6 +290,10 @@ class Tier0DocumentRouter:
             diagnostics["reason"] = "missing_vectors_or_corpus_scope"
             return {}, diagnostics
 
+        from services.storage.qdrant_writer import binary_quantization_search_params
+
+        quantization_params = binary_quantization_search_params()
+
         async def _one(lane_id: str, vector: list[float], corpus_id: str):
             query_filter = models.Filter(
                 must=[
@@ -299,14 +303,17 @@ class Tier0DocumentRouter:
                     )
                 ]
             )
-            response = await self.client.query_points(
-                collection_name=SHARED_DOCSUM,
-                query=vector,
-                using="dense",
-                query_filter=query_filter,
-                limit=max(1, int(per_lane_per_corpus)),
-                with_payload=True,
-            )
+            kwargs = {
+                "collection_name": SHARED_DOCSUM,
+                "query": vector,
+                "using": "dense",
+                "query_filter": query_filter,
+                "limit": max(1, int(per_lane_per_corpus)),
+                "with_payload": True,
+            }
+            if quantization_params is not None:
+                kwargs["search_params"] = quantization_params
+            response = await self.client.query_points(**kwargs)
             return lane_id, corpus_id, list(response.points or [])
 
         tasks = [

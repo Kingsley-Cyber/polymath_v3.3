@@ -206,13 +206,17 @@ class FunnelA:
             # old name was removed in 1.13+. New corpora use named dense+sparse
             # vectors, so summary search can also run Qdrant-native RRF. Legacy
             # corpora keep the unnamed dense default.
-            from services.storage.qdrant_writer import _collection_layout
+            from services.storage.qdrant_writer import (
+                _collection_layout,
+                binary_quantization_search_params,
+            )
             from services.storage.sparse_encoder import encode_query
 
             has_named, has_sparse = await _collection_layout(
                 self.client, collection_name
             )
             sparse_query = encode_query(query_text)
+            quantization_params = binary_quantization_search_params()
             kwargs = {
                 "collection_name": collection_name,
                 "query": query_vector,
@@ -220,6 +224,8 @@ class FunnelA:
                 "limit": limit,
                 "with_payload": True,
             }
+            if quantization_params is not None:
+                kwargs["search_params"] = quantization_params
             retriever_provenance = [{"retriever": "qdrant_dense_summary"}]
             used_hybrid_rrf = False
             if has_named and has_sparse and getattr(sparse_query, "indices", None):
@@ -231,6 +237,7 @@ class FunnelA:
                             query=query_vector,
                             using="dense",
                             filter=query_filter,
+                            params=quantization_params,
                             limit=limit,
                         ),
                         models.Prefetch(
@@ -270,6 +277,8 @@ class FunnelA:
                     "with_payload": True,
                     "using": "dense",
                 }
+                if quantization_params is not None:
+                    fallback_kwargs["search_params"] = quantization_params
                 retriever_provenance = [{"retriever": "qdrant_dense_summary"}]
                 resp = await self.client.query_points(**fallback_kwargs)
             hits = resp.points

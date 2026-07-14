@@ -54,6 +54,58 @@ async def test_local_mode_hits_local_sidecar():
 
 
 @pytest.mark.asyncio
+async def test_qwen3_query_instruction_is_exact_and_documents_remain_raw(monkeypatch):
+    calls: list[list[str]] = []
+
+    async def fake_local(texts, _dim):
+        calls.append(list(texts))
+        return [[0.0] * 4 for _ in texts]
+
+    monkeypatch.setattr(embedder, "_embed_batch_local", fake_local)
+    model = "Qwen/Qwen3-Embedding-0.6B"
+
+    await embedder.embed_batch(
+        ["raw document"],
+        expected_dim=4,
+        expected_model_id=model,
+        embedding_role="document",
+    )
+    await embedder.embed_batch(
+        ["what matters?"],
+        expected_dim=4,
+        expected_model_id=model,
+        embedding_role="query",
+    )
+
+    assert calls == [
+        ["raw document"],
+        [
+            "Instruct: given the user question, retrieve the most relevant "
+            "information\nQuery:what matters?"
+        ],
+    ]
+
+
+@pytest.mark.asyncio
+async def test_non_qwen_query_does_not_receive_qwen_instruction(monkeypatch):
+    calls: list[list[str]] = []
+
+    async def fake_local(texts, _dim):
+        calls.append(list(texts))
+        return [[0.0] * 4 for _ in texts]
+
+    monkeypatch.setattr(embedder, "_embed_batch_local", fake_local)
+    await embedder.embed_batch(
+        ["question"],
+        expected_dim=4,
+        expected_model_id="text-embedding-3-small",
+        embedding_role="query",
+    )
+
+    assert calls == [["question"]]
+
+
+@pytest.mark.asyncio
 async def test_api_mode_hits_generic_openai_endpoint():
     """mode='api' with per-corpus base_url + api_key must POST to
     <base>/embeddings with a Bearer token."""
@@ -365,9 +417,10 @@ async def test_concurrent_embed_queries_coalesce_into_one_batch(monkeypatch):
     vectors = await asyncio.gather(*[embedder.embed_query(t) for t in texts])
 
     assert len(calls) == 1, f"expected one coalesced batch, got {len(calls)}: {calls}"
-    assert sorted(calls[0]) == sorted(texts)
+    expected_inputs = [f"{embedder.QWEN3_QUERY_PREFIX}{text}" for text in texts]
+    assert sorted(calls[0]) == sorted(expected_inputs)
     for text, vector in zip(texts, vectors):
-        assert vector == [float(len(text))] * 4
+        assert vector == [float(len(f"{embedder.QWEN3_QUERY_PREFIX}{text}"))] * 4
     # cache is populated per text — a repeat is a pure hit, no new batch
     again = await embedder.embed_query(texts[0])
     assert again == vectors[0]
@@ -391,7 +444,9 @@ async def test_batcher_dedupes_identical_inflight_texts(monkeypatch):
     vectors = await asyncio.gather(*[embedder.embed_query("same text") for _ in range(3)])
 
     assert len(calls) == 1
-    assert calls[0] == ["same text"]  # one row, three callers share it
+    assert calls[0] == [
+        f"{embedder.QWEN3_QUERY_PREFIX}same text"
+    ]  # one serialized row, three callers share it
     assert all(v == [1.0] * 4 for v in vectors)
 
 
@@ -438,6 +493,10 @@ async def test_batcher_separates_different_backend_groups(monkeypatch):
         embedder.embed_query("query one"),
         embedder.embed_query("query two", config=config),
     )
-    assert v1 == [1.0] * 4
+    assert v1 == [2.0] * 4
     assert v2 == [2.0] * 4
     assert len(batch_calls) == 2  # one per backend group
+    assert {model for model, _texts in batch_calls} == {
+        get_settings().EMBEDDER_MODEL_NAME,
+        "model-a",
+    }

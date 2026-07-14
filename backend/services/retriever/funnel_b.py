@@ -190,13 +190,17 @@ class FunnelB:
             # tokens such as identifiers, acronyms, section numbers, and error
             # codes that dense embeddings can smear away. Legacy collections
             # stay on the previous dense-only call shape.
-            from services.storage.qdrant_writer import _collection_layout
+            from services.storage.qdrant_writer import (
+                _collection_layout,
+                binary_quantization_search_params,
+            )
             from services.storage.sparse_encoder import encode_query
 
             has_named, has_sparse = await _collection_layout(
                 self.client, collection_name
             )
             sparse_query = encode_query(query_text)
+            quantization_params = binary_quantization_search_params()
             kwargs = {
                 "collection_name": collection_name,
                 "query": query_vector,
@@ -204,6 +208,8 @@ class FunnelB:
                 "limit": limit,
                 "with_payload": True,
             }
+            if quantization_params is not None:
+                kwargs["search_params"] = quantization_params
             retriever_provenance = [{"retriever": "qdrant_dense"}]
             used_hybrid_rrf = False
             if has_named and has_sparse and getattr(sparse_query, "indices", None):
@@ -215,6 +221,7 @@ class FunnelB:
                             query=query_vector,
                             using="dense",
                             filter=query_filter,
+                            params=quantization_params,
                             limit=limit,
                         ),
                         models.Prefetch(
@@ -254,6 +261,8 @@ class FunnelB:
                     "with_payload": True,
                     "using": "dense",
                 }
+                if quantization_params is not None:
+                    fallback_kwargs["search_params"] = quantization_params
                 retriever_provenance = [{"retriever": "qdrant_dense"}]
                 resp = await self.client.query_points(**fallback_kwargs)
             hits = resp.points

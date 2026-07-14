@@ -1,0 +1,394 @@
+{
+  "claim_refinement": {},
+  "fixture_schema": "polymath.semantic_extraction_gold.v1",
+  "lanes": {
+    "deepseek": {
+      "metrics": {
+        "failure_count": 0,
+        "failure_types": [],
+        "reported": {
+          "extracted_chunks": 9,
+          "failed_chunks": 0,
+          "requested_chunks": 9
+        },
+        "wall_chunks_per_second": 0.9619,
+        "wall_seconds": 9.3563
+      },
+      "results": [
+        {
+          "entities": [],
+          "facts": [],
+          "id": "attributed_hypothesis",
+          "relations": []
+        },
+        {
+          "entities": [
+            {
+              "canonical_name": "discounting",
+              "confidence": 0.9,
+              "definitional_phrase": "",
+              "entity_type": "Concept",
+              "object_kind": "method",
+              "query_aliases": [],
+              "surface_form": "Discounting"
+            },
+            {
+              "canonical_name": "reference price",
+              "confidence": 0.9,
+              "definitional_phrase": "",
+              "entity_type": "Concept",
+              "object_kind": "",
+              "query_aliases": [],
+              "surface_form": "reference price"
+            }
+          ],
+          "facts": [],
+          "id": "exception_scope",
+          "relations": [
+            {
+              "confidence": 0.9,
+              "evidence_phrase": "Discounting usually lowers reference price",
+              "object": "reference price",
+              "object_kind": "entity",
+              "predicate": "references",
+              "relation_cue": "",
+              "source_predicate": "causes",
+              "subject": "discounting",
+              "validation_status": "evidence_cue_repair"
+            }
+          ]
+        },
+        {
+          "entities": [
+            {
+              "canonical_name": "policy",
+              "confidence": 0.9,
+              "definitional_phrase": "",
+              "entity_type": "Rule",
+              "object_kind": "",
+              "query_aliases": [],
+              "surface_form": "policy"
+            },
+            {
+              "canonical_name": "2025-01-01",
+              "confidence": 0.9,
+              "definitional_phrase": "",
+              "entity_type": "TimeReference",
+              "object_kind": "",
+              "query_aliases": [],
+              "surface_form": "2025-01-01"
+            },
+            {
+              "canonical_name": "march 2026",
+              "confidence": 0.9,
+              "definitional_phrase": "",
+              "entity_type": "TimeReference",
+              "object_kind": "",
+              "query_aliases": [],
+              "surface_form": "March 2026"
+            }
+          ],
+          "facts": [],
+          "id": "temporal_revision",
+          "relations": [
+            {
+              "confidence": 0.9,
+              "evidence_phrase": "The policy became effective on 2025-01-01",
+              "object": "2025-01-01",
+              "object_kind": "entity",
+              "predicate": "preceded_by",
+              "relation_cue": "",
+              "source_predicate": "preceded_by",
+              "subject": "policy",
+              "validation_status": "domain_range_warn"
+            },
+            {
+              "confidence": 0.9,
+              "evidence_phrase": "was revised in March 2026",
+              "object": "march 2026",
+              "object_kind": "entity",
+              "predicate": "preceded_by",
+              "relation_cue": "",
+              "source_predicate": "preceded_by",
+              "subject": "policy",
+              "validation_status": "domain_range_warn"
+            }
+          ]
+        },
+        {
+          "entities": [
+            {
+              "canonical_name": "mechanism motif",
+              "confidence": 0.9,
+              "definitional_phrase": "An ordered abstraction over validated frame instances and state transitions.",
+              "entity_type": "Concept",
+              "object_kind": "theory",
+              "query_aliases": [],
+              "surface_form": "mechanism motif"
+            }
+          ],
+          "facts": [],
+          "id": "mechanism_definition",
+          "relations": []
+        },
+        {
+          "entities": [],
+          "facts": [],
+          "id": "analogy_limitation",
+          "relations": []
+        },
+        {
+          "entities": [
+            {
+              "canonical_name": "repeated discounting",
+              "confidence": 0.9,
+              "definitional_phrase": "",
+              "entity_type": "Concept",
+              "object_kind": "method",
+              "query_aliases": [],
+              "surface_form": "Repeated discounting"
+            },
+            {
+              "canonical_name": "consumer's internal reference price",
+              "confidence": 0.9,
+              "definitional_phrase": "",
+              "entity_type": "Concept",
+              "object_kind": "theory",
+              "query_aliases": [],
+              "surface_form": "consumer's internal reference price"
+            }
+          ],
+          "facts": [],
+          "id": "explicit_causal",
+          "relations": [
+            {
+              "confidence": 0.9,
+              "evidence_phrase": "Repeated discounting lowers the consumer's internal reference price.",
+              "object": "consumer's internal reference price",
+              "object_kind": "entity",
+              "predicate": "references",
+              "relation_cue": "",
+              "source_predicate": "causes",
+              "subject": "repeated discounting",
+              "validation_status": "evidence_cue_repair"
+            }
+          ]
+        },
+        {
+          "entities": [
+            {
+              "canonical_name": "buyers",
+              "confidence": 0.7,
+              "definitional_phrase": "",
+              "entity_type": "Person",
+              "object_kind": "",
+              "query_aliases": [],
+              "surface_form": "buyers"
+            },
+            {
+              "canonical_name": "price",
+              "confidence": 0.8,
+              "definitional_phrase": "",
+              "entity_type": "Concept",
+              "object_kind": "",
+              "query_aliases": [],
+              "surface_form": "price"
+            },
+            {
+              "canonical_name": "product quality",
+              "confidence": 0.8,
+              "definitional_phrase": "",
+              "entity_type": "Concept",
+              "object_kind": "",
+              "query_aliases": [],
+              "surface_form": "product quality"
+            },
+            {
+              "canonical_name": "purchase choice",
+              "confidence": 0.7,
+              "definitional_phrase": "",
+              "entity_type": "Concept",
+              "object_kind": "",
+              "query_aliases": [],
+              "surface_form": "purchase choice"
+            }
+          ],
+          "facts": [],
+          "id": "condition_scope",
+          "relations": [
+            {
+              "confidence": 0.7,
+              "evidence_phrase": "price may signal product quality and influence purchase choice",
+              "object": "purchase choice",
+              "object_kind": "entity",
+              "predicate": "causes",
+              "relation_cue": "",
+              "source_predicate": null,
+              "subject": "price",
+              "validation_status": null
+            },
+            {
+              "confidence": 0.7,
+              "evidence_phrase": "price may signal product quality",
+              "object": "product quality",
+              "object_kind": "entity",
+              "predicate": "represents",
+              "relation_cue": "",
+              "source_predicate": null,
+              "subject": "price",
+              "validation_status": null
+            }
+          ]
+        },
+        {
+          "entities": [
+            {
+              "canonical_name": "high price",
+              "confidence": 0.9,
+              "definitional_phrase": "",
+              "entity_type": "Concept",
+              "object_kind": "",
+              "query_aliases": [],
+              "surface_form": "high price"
+            },
+            {
+              "canonical_name": "high product quality",
+              "confidence": 0.9,
+              "definitional_phrase": "",
+              "entity_type": "Concept",
+              "object_kind": "",
+              "query_aliases": [],
+              "surface_form": "high product quality"
+            }
+          ],
+          "facts": [],
+          "id": "direct_negation",
+          "relations": [
+            {
+              "confidence": 0.9,
+              "evidence_phrase": "A high price does not guarantee high product quality.",
+              "object": "high product quality",
+              "object_kind": "entity",
+              "predicate": "contradicts",
+              "relation_cue": "",
+              "source_predicate": null,
+              "subject": "high price",
+              "validation_status": null
+            }
+          ]
+        },
+        {
+          "entities": [
+            {
+              "canonical_name": "analysts",
+              "confidence": 0.8,
+              "definitional_phrase": "",
+              "entity_type": "Person",
+              "object_kind": "",
+              "query_aliases": [],
+              "surface_form": "Analysts"
+            },
+            {
+              "canonical_name": "reported price",
+              "confidence": 0.8,
+              "definitional_phrase": "",
+              "entity_type": "Concept",
+              "object_kind": "",
+              "query_aliases": [],
+              "surface_form": "reported price"
+            },
+            {
+              "canonical_name": "historical baseline",
+              "confidence": 0.8,
+              "definitional_phrase": "",
+              "entity_type": "Concept",
+              "object_kind": "",
+              "query_aliases": [],
+              "surface_form": "historical baseline"
+            },
+            {
+              "canonical_name": "capital",
+              "confidence": 0.7,
+              "definitional_phrase": "",
+              "entity_type": "Concept",
+              "object_kind": "",
+              "query_aliases": [],
+              "surface_form": "capital"
+            }
+          ],
+          "facts": [],
+          "id": "recommendation_temporal",
+          "relations": [
+            {
+              "confidence": 0.8,
+              "evidence_phrase": "Analysts should compare the reported price with a historical baseline",
+              "object": "reported price",
+              "object_kind": "entity",
+              "predicate": "uses",
+              "relation_cue": "",
+              "source_predicate": null,
+              "subject": "analysts",
+              "validation_status": null
+            },
+            {
+              "confidence": 0.8,
+              "evidence_phrase": "compare the reported price with a historical baseline",
+              "object": "historical baseline",
+              "object_kind": "entity",
+              "predicate": "uses",
+              "relation_cue": "",
+              "source_predicate": null,
+              "subject": "analysts",
+              "validation_status": null
+            },
+            {
+              "confidence": 0.7,
+              "evidence_phrase": "before allocating capital",
+              "object": "capital",
+              "object_kind": "entity",
+              "predicate": "preceded_by",
+              "relation_cue": "",
+              "source_predicate": null,
+              "subject": "analysts",
+              "validation_status": null
+            }
+          ]
+        }
+      ],
+      "score": {
+        "claim_qualifier_contract_available": false,
+        "entities": {
+          "f1": 0.7234,
+          "fn": 12,
+          "fp": 1,
+          "precision": 0.9444,
+          "recall": 0.5862,
+          "tp": 17
+        },
+        "entity_type_accuracy_on_matched": 0.8824,
+        "missing_results": 0,
+        "relation_endpoint_valid_rate": 1.0,
+        "relation_evidence_exact_rate": 1.0,
+        "relations": {
+          "f1": 0.3158,
+          "fn": 6,
+          "fp": 7,
+          "precision": 0.3,
+          "recall": 0.3333,
+          "tp": 3
+        },
+        "results": 9,
+        "samples": 9,
+        "schema_valid_results": 9
+      }
+    }
+  },
+  "runpod_relation_threshold_override": null,
+  "sample_count": 9,
+  "schema_version": "polymath.semantic_extraction_remote_benchmark.v1",
+  "security": {
+    "credentials_from_encrypted_settings": true,
+    "plaintext_credentials_in_artifact": false,
+    "raw_provider_output_in_artifact": false
+  }
+}

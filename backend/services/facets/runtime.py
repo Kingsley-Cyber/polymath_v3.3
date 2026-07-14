@@ -329,7 +329,11 @@ async def matching_vector_facets(
 
     try:
         from qdrant_client import models
-        from services.storage.qdrant_writer import _col_for_corpus, _collection_layout
+        from services.storage.qdrant_writer import (
+            _col_for_corpus,
+            _collection_layout,
+            binary_quantization_search_params,
+        )
     except Exception:
         return []
 
@@ -370,6 +374,9 @@ async def matching_vector_facets(
                 "limit": per_collection_limit,
                 "with_payload": True,
             }
+            quantization_params = binary_quantization_search_params()
+            if quantization_params is not None:
+                kwargs["search_params"] = quantization_params
             try:
                 has_named, _ = await _collection_layout(qdrant, collection_name)
                 if has_named:

@@ -73,6 +73,31 @@ async def test_create_collection_retries_when_timeout_did_not_create(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_create_collection_forwards_binary_quantization_config():
+    class CaptureClient:
+        def __init__(self):
+            self.kwargs = None
+
+        async def collection_exists(self, _collection_name):
+            return False
+
+        async def create_collection(self, **kwargs):
+            self.kwargs = kwargs
+
+    client = CaptureClient()
+    desired = qdrant_writer.binary_quantization_config()
+
+    await qdrant_writer._create_collection_with_retry(
+        client,
+        collection_name="corpus_abcd_naive",
+        vectors_config={},
+        quantization_config=desired,
+    )
+
+    assert client.kwargs["quantization_config"] is desired
+
+
+@pytest.mark.asyncio
 async def test_payload_index_already_exists_is_idempotent():
     client = _PayloadIndexClient([RuntimeError("index already exists")])
 
@@ -116,6 +141,10 @@ async def test_search_compat_uses_query_points_on_qdrant_client_118():
     assert len(hits) == 1
     assert client.kwargs["query"] == [0.1, 0.2]
     assert client.kwargs["query_filter"] is query_filter
+    quantization = client.kwargs["search_params"].quantization
+    assert quantization.ignore is False
+    assert quantization.rescore is True
+    assert quantization.oversampling == 2.0
 
 
 @pytest.mark.asyncio
@@ -195,6 +224,8 @@ async def test_summary_tree_batch_search_preserves_query_order_and_filters():
     assert len(client.requests) == 2
     assert client.requests[0].limit == 5
     assert client.requests[1].limit == 3
+    assert client.requests[0].params.quantization.rescore is True
+    assert client.requests[0].params.quantization.oversampling == 2.0
 
 
 @pytest.mark.asyncio
@@ -343,22 +374,30 @@ class _ExistingCollectionClient:
         *,
         dim: int = 1024,
         payload_indexes: set[str] | None = None,
+        quantized: bool = True,
     ) -> None:
         self.dim = dim
         self.payload_indexes = payload_indexes or set()
         self.created_indexes: list[tuple[str, str]] = []
         self.created_collections: list[str] = []
+        self.update_calls: list[str] = []
+        self.quantization_configs: dict[str, object | None] = {}
+        self.quantized = quantized
 
     async def collection_exists(self, collection_name: str) -> bool:
         return True
 
     async def get_collection(self, collection_name: str):
+        quantization_config = self.quantization_configs.get(collection_name)
+        if collection_name not in self.quantization_configs and self.quantized:
+            quantization_config = qdrant_writer.binary_quantization_config()
         return SimpleNamespace(
             config=SimpleNamespace(
                 params=SimpleNamespace(
                     vectors={"dense": SimpleNamespace(size=self.dim)},
                     sparse_vectors={"sparse": object()},
-                )
+                ),
+                quantization_config=quantization_config,
             ),
             payload_schema={field: object() for field in self.payload_indexes},
         )
@@ -368,6 +407,11 @@ class _ExistingCollectionClient:
 
     async def create_collection(self, **kwargs) -> None:
         self.created_collections.append(kwargs["collection_name"])
+
+    async def update_collection(self, **kwargs) -> None:
+        name = kwargs["collection_name"]
+        self.update_calls.append(name)
+        self.quantization_configs[name] = kwargs["quantization_config"]
 
 
 @pytest.mark.asyncio
@@ -383,6 +427,51 @@ async def test_existing_collections_still_get_payload_indexes_repaired():
 
 
 @pytest.mark.asyncio
+async def test_existing_collections_get_binary_quantization_reconciled_once():
+    client = _ExistingCollectionClient(quantized=False)
+
+    await qdrant_writer.ensure_collections_for_corpus(client, "abcdef123456", dim=1024)
+    await qdrant_writer.ensure_collections_for_corpus(client, "abcdef123456", dim=1024)
+
+    assert client.update_calls == [
+        "corpus_abcdef12_naive",
+        "corpus_abcdef12_hrag",
+        "corpus_abcdef12_graph",
+        "corpus_abcdef12_schemas",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_quantization_timeout_is_accepted_after_matching_readback():
+    class TimeoutAfterApplyClient:
+        def __init__(self):
+            self.quantization_config = None
+            self.calls = 0
+
+        async def get_collection(self, _collection_name):
+            return SimpleNamespace(
+                config=SimpleNamespace(
+                    quantization_config=self.quantization_config,
+                )
+            )
+
+        async def update_collection(self, **kwargs):
+            self.calls += 1
+            self.quantization_config = kwargs["quantization_config"]
+            raise TimeoutError("read timed out")
+
+    client = TimeoutAfterApplyClient()
+
+    changed = await qdrant_writer.ensure_binary_quantization(
+        client,
+        "corpus_abcd_naive",
+    )
+
+    assert changed is True
+    assert client.calls == 1
+
+
+@pytest.mark.asyncio
 async def test_existing_payload_indexes_are_not_recreated_on_startup():
     client = _ExistingCollectionClient(
         payload_indexes=(
@@ -395,6 +484,7 @@ async def test_existing_payload_indexes_are_not_recreated_on_startup():
 
     assert client.created_collections == []
     assert client.created_indexes == []
+    assert client.update_calls == []
     assert qdrant_writer._COLLECTION_LAYOUT_CACHE["corpus_abcdef12_naive"] == (
         True,
         True,

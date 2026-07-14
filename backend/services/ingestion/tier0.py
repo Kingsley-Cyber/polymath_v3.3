@@ -26,17 +26,20 @@ _INDEX_FIELDS = ["corpus_id", "doc_id", "chunk_type", "source_type"]
 
 async def _ensure_collection(client, dim: int) -> None:
     from qdrant_client import models as qm
+    from services.storage import qdrant_writer as qw
 
-    if not await client.collection_exists(SHARED_DOCSUM):
-        await client.create_collection(
-            collection_name=SHARED_DOCSUM,
-            vectors_config={
-                "dense": qm.VectorParams(size=dim, distance=qm.Distance.COSINE)
-            },
-            sparse_vectors_config={
-                "sparse": qm.SparseVectorParams(modifier=qm.Modifier.IDF)
-            },
-        )
+    await qw._create_collection_with_retry(
+        client,
+        collection_name=SHARED_DOCSUM,
+        vectors_config={
+            "dense": qm.VectorParams(size=dim, distance=qm.Distance.COSINE)
+        },
+        sparse_vectors_config={
+            "sparse": qm.SparseVectorParams(modifier=qm.Modifier.IDF)
+        },
+        quantization_config=qw.binary_quantization_config(),
+    )
+    await qw.ensure_binary_quantization(client, SHARED_DOCSUM)
     for f in _INDEX_FIELDS:
         try:
             await client.create_payload_index(

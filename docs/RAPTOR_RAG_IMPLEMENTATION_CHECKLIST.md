@@ -11,6 +11,19 @@ and the critique of prior sequencing). Execute in S-order; a step's checklist
 anchors are listed per row. This ledger stays the item-level source of truth;
 the plan file is its ordering.
 
+The selective semantic-architecture decision for S11–S13 is
+`docs/SEMANTIC_RELATIONAL_ARCHITECTURE_DECISION_2026-07-13.md`. It replaces
+theme/string/topology-based bridging as the target with a source-backed
+claim/assertion → mechanism-frame → motif → validated-analogy layer. It does
+not replace the existing RAPTOR hierarchy, lexicon, ERE lanes, raw child
+vectors, standalone summary/tree vectors, or three-tier retrieval.
+
+The executable extraction feasibility receipt is
+`docs/SEMANTIC_EXTRACTION_PRODUCTION_READINESS_2026-07-13.md`. It confirms the
+provider-neutral deterministic-first seam while blocking promotion of the
+current GLiREL and joint GLiNER-Relex relation outputs. That report governs the
+S11 extraction lane split and staged RunPod quality gate below.
+
 ## Standing Rules (adopted 2026-07-13 from plan critique)
 
 1. **Capture-before-rebuild:** no summary/lexicon/card rebuild may run while an
@@ -128,11 +141,13 @@ Discarded by design: a weighted multi-signal `final_score` formula
 (conflicts with the standing "cross-encoder is the sole scoring authority /
 retire multi-score fusion" decision — those signals are admissible only for
 candidate generation and routing, never final-packet scoring); adopting the
-full "universal evidence packet" architecture now (overlapping pieces are
-already tracked as shelves/cards/bridges/sufficiency/receipts; the novel
-layers — epistemic ledger, artifact blueprint, domain compilers,
-post-synthesis usage ledger — are recorded as the post-checklist synthesis
-packet v2 design, not scope for this pass).
+full "universal evidence packet" architecture now. The later
+`SEMANTIC_RELATIONAL_ARCHITECTURE_DECISION_2026-07-13.md` selectively
+supersedes that blanket deferral only for the source-backed claim/assertion,
+mechanism-frame, motif, and validated-analogy slice because it closes a
+verified P2.5/P3.2 gap. The remaining novel layers — a broader artifact
+blueprint, domain compilers, and post-synthesis usage ledger — remain deferred;
+shelves/cards/sufficiency/receipts stay in their existing sections.
 
 Tracked work added by this audit:
 
@@ -209,18 +224,53 @@ cross-impact so no artifact is rebuilt twice:
   0 mixed families, 0 file-time publication dates, 0 unexplained nulls;
   parent collections byte-identical before/after)*
 - [ ] T-MAIN (after the P1.1 baseline and current retrieval work): report
-  Phases 2-7 — source versions/episodes/assertions + outbox, Qdrant payload
-  indexes + projection without re-embedding, versioned Neo4j `RELATES_TO`
-  edges (executed together with P2.5 typed-signature work — same edge-schema
-  migration), query temporal modes (CURRENT/AS_OF/BETWEEN/AS_KNOWN/EVOLUTION),
-  ONE eligibility service across Tier-0/Fast/Hybrid/Graph, shadow-then-enforce,
-  synthesis temporal receipts, and capability-specific readiness
+  Phases 2-7 — source versions/episodes plus ONE temporal+general
+  claim/assertion ledger and outbox (shared with P2.5a), Qdrant payload indexes
+  + projection without re-embedding, and asserted Neo4j structure plus the
+  legacy/versioned `RELATES_TO` migration (executed together with P2.5/P2.5a —
+  one edge-schema migration). Keep synthesized/analogy artifacts visibly
+  distinct. Add query temporal modes
+  (CURRENT/AS_OF/BETWEEN/AS_KNOWN/EVOLUTION), ONE eligibility service across
+  Tier-0/Fast/Hybrid/Graph, shadow-then-enforce, synthesis temporal receipts,
+  and capability-specific readiness
   (`temporal_unavailable|partial|strict_ready` — same seam as the
   operational-vs-metadata-quality readiness split adopted in Audit Delta 2).
 - Ordering rationale: field capture rides in-flight generation/backfills for
   free; retrieval-behavior changes are gated by the held-out suite; temporal
   eligibility needs the fields to exist first; re-extracting before the
   contract hook would force a second paid extraction pass.
+
+## Semantic-Relational Architecture Decision — Updated 5Ws
+
+Decision of record:
+`docs/SEMANTIC_RELATIONAL_ARCHITECTURE_DECISION_2026-07-13.md`.
+
+- **Who:** extraction/semantic-contract, graph, librarian/retrieval, and
+  evaluation owners; users asking cross-domain synthesis questions. The answer
+  LLM explains accepted paths but never upgrades their inference status.
+- **What:** add one versioned Claim/Assertion → FrameInstance/RoleBinding →
+  Motif → validated Analogy layer above the existing ERE, lexicon, hierarchy,
+  and cards, plus a controlled domain registry that remains orthogonal to the
+  mechanism layer. Replace only the future bridge-inference slice, not the
+  retrieval architecture.
+- **When:** after a dedicated labeled cross-domain slice and trustworthy exact
+  spans; capture lands before the PoC pair's mass re-extraction, then canary and
+  annotate-only gates precede graph/retrieval promotion.
+- **Where:** Mongo is authoritative for full semantic artifacts and evidence;
+  Neo4j holds bounded rebuildable structure; Qdrant generates candidates;
+  `corpus_lexicon` remains the concept/sense authority; the current summary
+  tree remains the hierarchy authority.
+- **Why:** current triples, exact-string mechanism overlap, embeddings, and
+  graph topology can nominate candidates but cannot preserve assertion scope,
+  modality, conditions, causal roles, analogy invariants, or break conditions.
+  The added layer makes transfer auditable without discarding working recall
+  lanes.
+
+The implementation schema, registry, prompts, storage names, Cypher, and
+migration mechanics are intentionally deferred to the owner-approved `HOW`
+phase. Fixed 18-theme routing, generic summary-prepended child vectors, the
+attachment's frame weights/thresholds, and an RDF/SHACL runtime are not adopted
+as defaults.
 
 ## Governing Librarian Planning Constraint
 
@@ -324,8 +374,11 @@ Milestone acceptance:
 - [ ] After the P1.1 baseline and P1.7 latency prerequisites exist, materialize
   P2.1 chunk-derived associations, usage frames, specificity statistics, and
   deterministic multi-point concept representations.
-- [ ] Optionally materialize `transfer_edge` rows as a pure evidence join:
-  shared principle/mechanism across documents with different central subjects.
+- [ ] Retain the existing pure evidence-join `transfer_edge` nomination
+  (shared principle/mechanism across documents with different central subjects)
+  only as the P3.2 baseline; an accepted semantic analogy additionally requires
+  validated claims, frame/role alignment, direction, invariant, break
+  conditions, and two-sided exact evidence.
 - [ ] Surface shelf, matched fields, evidence IDs, and rejected seat reasons
   directly from deterministic diagnostics.
 - [ ] Measure librarian behavior with P1.1 before enabling optional LLM stages.
@@ -884,6 +937,23 @@ Acceptance:
   representation points.
 - [ ] Use globally stable concept identity while retaining `corpus_id` and
   source ownership.
+- [ ] Add versioned source-local `sense_id` records before mapping ambiguous
+  surface forms to a stable global concept identity; preserve evidence and
+  mapping type (`exact|close|broad|narrow|related`) and never treat a lexical
+  mapping as a causal assertion.
+- [ ] Keep source/genre, domain, mechanism, epistemic status, and context as
+  separate typed facets. Do not collapse them into sibling universal themes or
+  let a broad domain/theme label prove cross-domain transfer.
+- [ ] Add one versioned controlled domain registry and deterministic resolver.
+  Treat the research draft's 16 macro-domain families as a seed application
+  taxonomy, not a universal standard; LLM-proposed aliases/specializations stay
+  provisional until existing-match, evidence-support, and human/policy gates
+  resolve them. Never create a permanent domain node from one model response.
+- [ ] Support evidence-bearing document/chapter/parent/claim domain profiles
+  through bottom-up aggregation and top-down disambiguation, with local claim
+  evidence dominant. Cardinality caps, aggregation weights, affinity priors,
+  and resolver thresholds are versioned experiment parameters, never hardcoded
+  universal facts or retrieval gates.
 - [ ] Define `librarian_card.v0` fields and deterministic seed contracts:
   - `central_subjects`: lexicon/Ghost B entities and profile concepts.
   - `mechanisms_taught`: promotion artifacts and validated summary mechanisms.
@@ -991,19 +1061,41 @@ Acceptance:
 - [ ] Storage/latency increase remains inside the measured budget and the cache
   invalidates correctly after lexicon/tree/document epoch changes.
 
-### P2.3 Add Query-Only Embedding Instructions
+### P2.3 Add Versioned Qwen3 Retrieval Embedding Instructions
 
-- [ ] Introduce a query-only embedding method distinct from document/concept/
-  tree embedding.
-- [ ] Make instructions model-specific and versioned.
-- [ ] Keep raw query plus instruction version in the cache key.
-- [ ] A/B test Qwen3 query instructions against the held-out suite.
-- [ ] Do not re-embed documents unless the evaluation proves a document-side
-  contract change is required.
+Owner directive adopted 2026-07-13: Qwen3 retrieval embeddings use distinct,
+versioned query and index roles. The proposed task text was
+`the following text is a document for rag retrieval` for indexed material and
+`given the user question, retrieve the most relevant information` for queries.
+Primary-source review of Qwen's shipped SentenceTransformers config resolves
+the indexing side to an empty document prompt: indexed material remains raw,
+while the query task is serialized in Qwen's `Instruct: ...\nQuery:...`
+envelope. A non-empty document prompt is a separate custom profile requiring a
+clone/re-embed/evaluate/cutover and is not mixed into the canonical profile.
+
+- [ ] Introduce explicit query and document embedding roles distinct from
+  concept/tree/schema embeddings; apply the query instruction exactly once and
+  the canonical empty document prompt at the shared client boundary across
+  local, Modal, SiliconFlow, and RunPod lanes.
+- [ ] Make instructions model-specific and versioned, and persist the embedding
+  profile with the corpus/index contract so incompatible vectors cannot mix.
+- [ ] Keep raw input, embedding role, model ID, and instruction/profile version
+  in every embedding cache key.
+- [ ] Route retrieval queries with the profile frozen on the target collection;
+  legacy collections remain on their legacy query contract until migrated.
+- [ ] If a custom non-empty document prompt is later promoted, re-embed
+  document, parent-summary, concept, tree, card, and schema lanes only through
+  a resumable clone/verify/cutover migration; never write prompted and
+  unprompted vectors into the same collection.
+- [ ] A/B test the Qwen3 instruction profile against the held-out three-tier
+  suite before the first production corpus cutover.
 
 Acceptance:
 
-- [ ] Recall improves without corrupting document-vector compatibility.
+- [ ] Query and document serialization is byte-exact in unit tests and identical
+  across every embedding provider used by a corpus.
+- [ ] Recall improves without corrupting document-vector compatibility; the
+  active query profile always matches the indexed collection profile.
 
 ## P2 - Extraction And RunPod Parity
 
@@ -1024,6 +1116,154 @@ Acceptance:
   remap edges automatically.
 - [ ] Measure violation rates by provider/model/corpus/predicate.
 - [ ] Promote hard/soft enforcement only after false-positive review.
+
+### P2.5a Unified Claim/Assertion And Mechanism-Frame Contract
+
+Architecture decision: this is a downstream, provider-neutral semantic layer
+beside existing ERE, not a replacement extraction engine. It must extend the
+planned T-MAIN assertion artifact rather than create a second semantic claim
+store that can disagree with temporal assertions.
+
+Feasibility receipt (2026-07-13): the 9-text/12-claim hand-labeled fixture,
+separate local models, authenticated provider runs, and RunPod threshold sweep
+are recorded in `SEMANTIC_EXTRACTION_PRODUCTION_READINESS_2026-07-13.md`.
+Deterministic spaCy candidate compilation matched 11/12 claims with 1.0 modal
+and polarity accuracy and 1.0 condition/exception recall. Current composed
+GLiNER→GLiREL relation F1 was 0.1333; joint RunPod Relex was 0 at threshold
+0.75 and 0.0976 at 0.40. Therefore the architecture is adopted but relation
+promotion remains blocked. This is a feasibility receipt, not completion of
+the unchecked production items.
+
+- [ ] Freeze one versioned authoritative claim/assertion contract carrying an
+  atomic proposition, claim type, modality, polarity, conditions/exceptions,
+  context/scope, inference status, source version, and provenance.
+- [ ] Require chunk-local exact `start`/`end`, quote, and source hash for every
+  accepted explicit claim; fail validation unless the quote round-trips to the
+  durable source exactly. Do not fabricate source-global/page offsets that the
+  current parse artifact does not possess.
+- [ ] Bind claim arguments to P2.1 source-local senses and stable lexicon IDs;
+  keep lexical/sense mapping distinct from factual and causal relations.
+- [ ] Define a small, versioned application frame registry with typed allowed
+  roles, cardinality, direction, and validation rules. Treat the attachment's
+  16 frames and one-primary/two-secondary cap as a canary hypothesis; permit
+  explicit abstention and revise from corpus error analysis.
+- [ ] Validate frame-specific role objects with strict typed/discriminated
+  contracts and deterministic policy. A schema-valid parse is not evidence of
+  truth and cannot bypass span/provenance checks.
+- [ ] Represent `ASSERTED`, `ENTAILED`, `CROSS_PASSAGE_SYNTHESIS`,
+  `STRUCTURAL_ANALOGY`, and `HYPOTHETICAL` explicitly; never project a derived
+  or analogy artifact as an author assertion.
+- [ ] Persist raw provider output plus schema/ontology/compiler/prompt/model
+  versions and an idempotent extraction identity so validation can be replayed
+  without paying for extraction again.
+- [ ] Put the capture hook and shared post-extraction validator on every active
+  provider lane before the scheduled PoC mass re-extraction; ERE outputs remain
+  durable recall inputs and candidate role fillers.
+- [ ] Pilot a deterministic-first candidate lane using a pinned trained spaCy
+  parser as the scoped claim/qualifier compiler, optional GLiNER span
+  candidates, and versioned registry rules for claims/domains/frames. Persist
+  current GLiREL and joint RunPod Relex relations as observations only until a
+  replacement/remediation clears relation gates. Compare every candidate lane
+  against the current provider-LLM lane on identical labels; “runs without
+  task-specific training” is not a quality conclusion or permission to retire
+  the comparison baseline.
+- [ ] Test the research draft's bounded parent semantic-digest call only after
+  accepted child claims are available. It must cite supporting claim IDs for
+  every domain/frame/motif/condition, and remain a separate recipe from current
+  Ghost A until before/after quality and cost results justify migration.
+- [ ] Land annotate-only with its first named consumer and diagnostics; do not
+  change graph or retrieval behavior until the held-out claim/frame gates pass.
+- [ ] Keep Mongo authoritative, make Neo4j/Qdrant projections deterministic and
+  rebuildable, and preserve the existing hierarchy and lexicon ownership.
+- [ ] Create no new generic `RELATED_TO` edge from this layer. Preserve legacy
+  edges as compatibility/candidate data until measured cutover and rollback
+  evidence exists.
+
+Acceptance:
+
+- [ ] Accepted explicit-claim spans have 100% exact round-trip integrity.
+- [ ] Report claim precision/span recall and frame macro-F1, core-role F1,
+  abstention, and errors by frame/provider/corpus on hand labels.
+- [ ] No synthesized, hypothetical, or analogy artifact is mislabeled
+  `ASSERTED`/`EXPLICIT` in positive or negative controls.
+- [ ] Provider parity, deterministic replay, and artifact identity are proven
+  on the UGO canary before the PoC pair.
+- [ ] The capture contract is live before any paid mass rebuild and does not
+  change Fast/Hybrid/Graph results while annotate-only.
+
+### P2.5b Canonical Semantic Artifact Envelope, Identity, And Projection Contract
+
+Decision of record:
+`docs/FINAL_SCHEMA_METADATA_ARCHITECTURE_2026-07-13.md`. This contract is the
+front gate of S11 and applies to new semantic artifacts without forcing an
+immediate rewrite of every legacy collection.
+
+Executable-slice receipt (2026-07-13):
+`models/semantic_artifacts.py` now proves canonical domain hashing, exact
+`EvidenceRef`, provider-neutral `ObservationBundle`, reference closure, and a
+candidate contract that rejects extractor self-promotion to `accepted`.
+`services/ingestion/semantic_observations.py` proves the spaCy adapter and
+candidate compiler. The full shared envelope, all hash namespaces, legacy
+adapters, Mongo validators/indexes, outbox, manifests, and UGO integration are
+still unchecked work below.
+
+- [ ] Implement one strict `polymath.artifact_envelope.v1` around linked typed
+  artifacts; do not build one giant parent JSON or a provider-specific truth
+  schema.
+- [ ] Implement one canonical JSON serializer with explicit set-valued fields,
+  recursive key ordering, UTC timestamp rules, finite JSON numbers, and no
+  implicit `default=str` coercion.
+- [ ] Freeze distinct names and recipes for source-content, normalized-text,
+  schema, registry, recipe, input-set, body, evidence-set, scope, motif,
+  projection-profile, work, raw-output, logical-artifact, and revision hashes.
+- [ ] Separate stable logical `doc_id` from immutable `source_version_id`;
+  preserve the current content-derived document ID as a compatibility alias and
+  never guess version lineage from filename/title similarity.
+- [ ] Bind new hierarchy-node identity to source version, hierarchy recipe,
+  node type, and an honest coordinate/ordinal contract; never fabricate page
+  or source-global offsets.
+- [ ] Add a provider-neutral `ObservationBundle` for spaCy, zero-shot,
+  provider-LLM, and legacy ERE candidate observations; observations cannot
+  carry asserted knowledge status.
+- [ ] Separate stable artifact ID, immutable artifact revision, deterministic
+  work ID, execution attempt, and raw-output artifact so retry/model/output
+  identity cannot overwrite semantic identity.
+- [ ] Keep full accepted artifacts authoritative in Mongo and add durable
+  projection-outbox intent/retry/reconciliation; no new request path may depend
+  on untracked Mongo+Qdrant+Neo4j dual writes.
+- [ ] Freeze a projection manifest/profile for every Qdrant/Neo4j family,
+  including source schema hashes, representation role, embedding/profile,
+  payload schema, quantization/search compatibility, and rollback predecessor.
+- [ ] Keep current Ghost A/tree output explicitly typed as `RetrievalSummary`;
+  create claim-grounded `SemanticDigest` as a separate recipe/revision until a
+  measured cutover is approved.
+- [ ] Ship adapters/dispositions for documents, source identity, parent/child
+  hierarchy, Ghost B rows, parent summaries, summary-tree nodes,
+  `corpus_lexicon`, librarian cards, Qdrant points, and Neo4j legacy edges.
+- [ ] Store versioned domain/frame/motif registry snapshots and hashes; keep
+  weights, caps, thresholds, and affinity matrices in recipe/policy versions,
+  not semantic identity.
+- [ ] Give every promoted metadata field a named filter, ranker, hydrator, or
+  diagnostic consumer in the same phase; otherwise mark it capture-only dark
+  data and block projection.
+- [ ] Make accepted artifact bodies immutable; corrections create new
+  revisions/assertions with explicit supersession, while validation/lifecycle
+  state remains outside semantic body identity.
+
+Acceptance:
+
+- [ ] Canonical JSON, every hash namespace, and every identifier recipe have
+  byte-exact golden test vectors and cross-process replay parity.
+- [ ] Legacy fixture adapters produce contract-valid equivalents without
+  rewriting or relabeling legacy observations as accepted claims.
+- [ ] Logical-document and source-version tests distinguish duplicate bytes,
+  changed versions, unrelated same-title files, and explicit owner lineage.
+- [ ] Mongo plus one projection manifest can reproduce exact Qdrant/Neo4j
+  identity sets; interruption/retry creates no duplicate semantic artifact.
+- [ ] Annotate-only canary leaves existing Fast/Hybrid/Graph results and legacy
+  hydration behavior unchanged.
+- [ ] P2.5b passes on UGO before the PoC pair's paid mass re-extraction or any
+  production graph/vector cutover.
 
 ### P2.6 Engine Parity And Provenance
 
@@ -1051,6 +1291,16 @@ Acceptance:
   rates against current cloud/local paths.
 - [ ] Verify retries never erase valid summaries, vectors, or graph artifacts.
 - [ ] Wire extraction/concept readiness into corpus strict-readiness.
+
+Quality-gate receipt (2026-07-13): the joint
+`knowledgator/gliner-relex-large-v0.5` endpoint completed all 9 adversarial
+samples without transport/schema failure, but relation F1 was 0 at the current
+0.75 threshold. Lowering the threshold to 0.40 emitted 32 relations with 2
+true positives and 30 false positives (precision 0.0625, F1 0.0976). The
+100/500/5,000 paid escalation was correctly stopped at the semantic gate; it
+must not resume until model/label/task remediation clears the expanded unique
+quality fixture. The 540 repeated-input local test is capacity-only and cannot
+satisfy this section's corpus-scale acceptance.
 
 Acceptance:
 
@@ -1129,53 +1379,87 @@ Acceptance:
 - [ ] Require profile presence and validated source support.
 - [ ] Detect polluted concept cards that would mis-reserve documents.
 
-## P3 - Thematic RAPTOR And Cross-Corpus Bridges
+## P3 - Semantic-Relational RAPTOR And Cross-Corpus Bridges
 
-### P3.1 Pilot Multi-Theme Semantic Routing
+### P3.1 Pilot Claim And Mechanism-Frame Routing
 
-- [ ] Start with `markbuildsbrands_transcripts` or another small healthy corpus.
-- [ ] Snapshot/scroll existing parent vectors without re-embedding.
-- [ ] Compare clustering methods and stability across corpus epochs, including
-  soft/non-exclusive membership rather than forcing each parent into one
-  exclusive thematic cluster.
-- [ ] Allow one parent, section, document, and concept to belong to multiple
-  evidence-backed themes.
-- [ ] Allow one query and each of its sub-queries to activate multiple themes
-  within and across selected corpora.
-- [ ] Generate evidence-backed summaries for themes with member parent IDs,
-  membership strength, and source provenance.
-- [ ] Index themes with explicit abstraction level, version, corpus ownership,
-  and soft member bindings.
-- [ ] Fuse evidence across activated themes; never use a single thematic winner
-  as a hard gate over all downstream retrieval.
-- [ ] Use themes as routers first; allow synthesis use only with hydrated
-  evidence.
-- [ ] Diagnose themes activated, themes covered, themes unsupported, and
-  contributions by activated themes to final evidence.
-- [ ] Evaluate broad recall, precision, storage, update cost, and latency.
+- [ ] Expand P1.1 with a separately held-out, manually labeled cross-domain
+  slice containing positive, near-miss, reversed-causality,
+  same-word/different-sense, harmful-analogy, and no-answer cases across at
+  least three unrelated domains; the current two cross-domain questions are
+  insufficient.
+- [ ] Start on UGO as the pipeline canary, then the designated mark/ecommerce
+  PoC pair; keep `polymath_v2` frozen for heavy operations.
+- [ ] Consume only validated P2.5a claim/assertion and frame artifacts with
+  exact evidence, scoped senses, ontology/policy version, and corpus ownership.
+- [ ] Compare the proposed 16-frame registry against observed corpus coverage,
+  overlap, abstention, and error; do not call the inventory universal until it
+  demonstrates recurrence across at least three unrelated domains.
+- [ ] Keep source/genre, domain, mechanism, epistemic status, and context as
+  separate features; no domain or theme label can prove a transfer.
+- [ ] Retain soft, nonexclusive themes as an experimental routing baseline only;
+  never make a single theme or frame a hard filter over downstream retrieval.
+- [ ] Use frame/motif hits to nominate documents and evidence paths; only
+  hydrated source evidence may support synthesis.
+- [ ] Preserve raw child, summary/tree, lexical, original-query, concept, and
+  current librarian-card lanes throughout the pilot.
+- [ ] Diagnose selected claims, frames, roles, abstentions, candidate motifs,
+  rejected mappings, evidence chains, and contributions to final evidence.
+- [ ] Evaluate document/evidence Recall@K, nDCG/MRR, focused-query regression,
+  broad/cross-domain coverage, hierarchical domain F1/proposal rate,
+  storage/write cost, and p50/p95.
 
 Acceptance:
 
-- [ ] Multiple relevant themes can survive routing and final evidence selection.
-- [ ] Themes materially improve broad/cross-document questions.
-- [ ] Focused questions do not lose source precision.
-- [ ] Only after success may the architecture claim a thematic RAPTOR layer.
+- [ ] Frame and role quality clears preregistered labeled-set gates with
+  provider/corpus breakdown and an honest abstention rate.
+- [ ] Cross-domain evidence recall improves over current mechanism overlap and
+  soft-theme baselines without direct/focused-query regression.
+- [ ] Fast, Hybrid, and Graph corpus isolation and negative controls remain
+  green; original-query evidence cannot be hard-filtered away.
+- [ ] Only after success may mechanism-frame routing become a production lane.
 
-### P3.2 Materialize Cross-Corpus Bridge Cards
+### P3.2 Deterministic Motif And Analogy Bridge Cards
 
-- [ ] Select only evidence-strong entities/relations spanning multiple corpora.
-- [ ] Exclude generic/high-degree `RELATES_TO` hubs without typed support.
-- [ ] Store bridge concepts, source corpora, documents, predicates, confidence,
-  and evidence IDs.
-- [ ] Use bridge cards for shelf/document routing, not unsupported final claims.
-- [ ] Evaluate non-obvious cross-domain recall and false-bridge rate.
-- [ ] Materialize deterministic `transfer_edge` rows when documents with
-  meaningfully different central subjects share a specific validated principle
-  or mechanism.
-- [ ] Store endpoint document/concept IDs, principle/mechanism ID, evidence IDs
-  on both sides, support counts, specificity, temporal scope, and policy
-  version.
-- [ ] Do not create transfer edges from embedding proximity alone.
+- [ ] Canonicalize ordered frame IDs, typed core roles, edge direction,
+  polarity/state transition, scope, and scale into a readable, versioned motif
+  record plus deterministic fingerprint; a hash is identity, not proof.
+- [ ] Use exact fingerprint buckets for high-precision nomination and a bounded
+  typed structural comparison for partial candidates; cap candidate work and
+  never run an unbounded all-claim pairwise scan.
+- [ ] Accept a bridge only with two-sided exact evidence, compatible core roles
+  and causal direction, source-local sense compatibility, explicit invariant,
+  explicit break/non-transfer conditions, and no forbidden transformation.
+- [ ] Calibrate any scoring weights and thresholds on the labeled cross-domain
+  slice. The attachment's `0.30/0.25/...`, `0.75`, and example `0.83` are
+  hypotheses, not defaults or receipts.
+- [ ] Preserve explicit `ASSERTED`, `SYNTHESIZED`, and `ANALOGY` status and
+  parent derivations; analogy is non-transitive.
+- [ ] Compute analogies query-time or retain only a bounded strongest set per
+  claim. Do not materialize all pairwise links.
+- [ ] Store endpoint claim, document, corpus, sense, frame/role, motif,
+  temporal scope, evidence, invariant, break conditions, model/compiler,
+  ontology, and policy versions on every accepted analogy card.
+- [ ] Reuse the current deterministic librarian bridge-seat gate and evidence
+  chains; an analogy card may route a shelf/document but never become an
+  unsupported final claim.
+- [ ] Exclude generic/high-degree `RELATES_TO` hubs and create no new generic
+  relation from embedding, theme, word overlap, topology, or fingerprint alone.
+- [ ] Evaluate non-obvious cross-domain recall, evidence coverage,
+  false-bridge rate, harmful-analogy rate, latency, storage, and replay.
+
+Acceptance:
+
+- [ ] Every accepted analogy exposes both evidence chains, its role map,
+  invariant, and non-transferable differences to diagnostics and synthesis.
+- [ ] Reversed-causality, homonym, near-miss, and harmful-analogy controls fail
+  closed.
+- [ ] Analogy/bridge false-positive and harmful-analogy rates clear
+  preregistered gates without reducing necessary corpus coverage.
+- [ ] Embeddings, themes, exact words, topology, or motif hash alone can never
+  materialize or seat a bridge.
+- [ ] Legacy bridge logic remains available for measured A/B and rollback until
+  the new artifact proves parity and improvement.
 
 ## P3 - Storage Architecture Experiments
 
@@ -1212,6 +1496,19 @@ Acceptance:
 - [ ] Evaluate recall@85, nDCG, routed-document coverage, final evidence
   coverage, p50/p95, and RAM; Qdrant latency alone is not the quality gate.
 - [ ] Adopt only if quality loss and latency meet agreed thresholds.
+
+Owner directive adopted 2026-07-13: add Qdrant binary quantization as the new
+candidate configuration, without bypassing the recall and cutover gates above.
+
+- [ ] Add a versioned binary-quantization collection profile with original-vector
+  rescoring and an explicit oversampling policy; apply it to every applicable
+  per-corpus vector lane at collection creation.
+- [ ] Reconcile existing collections idempotently and verify the effective
+  Qdrant collection configuration by readback; do not silently treat an
+  unsupported server/client combination as success.
+- [ ] Exercise exact/unquantized fallback and quantized+rescore searches in
+  automated tests, then measure held-out recall, p50/p95, and memory before
+  production-wide adoption.
 
 ### P3.5 Reranker Serving Alternatives - Experiment
 

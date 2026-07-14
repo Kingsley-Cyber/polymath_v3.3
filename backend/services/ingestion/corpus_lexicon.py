@@ -2787,7 +2787,7 @@ async def index_corpus_lexicon_slice(
     are deferred to :func:`finalize_corpus_lexicon_index`.
     """
 
-    from services.embedder import embed_queries
+    from services.embedder import embed_documents
     from services.storage.qdrant_writer import (
         _lexicon_payload,
         ensure_collections_for_corpus,
@@ -2876,7 +2876,7 @@ async def index_corpus_lexicon_slice(
             )
             owner_verified = True
         if to_embed:
-            vectors = await embed_queries(
+            vectors = await embed_documents(
                 [
                     str(
                         row.get("embedding_gloss")
@@ -3075,7 +3075,7 @@ async def index_corpus_lexicon(
     Qdrant failure leaves the previous searchable projection intact.
     """
 
-    from services.embedder import embed_queries
+    from services.embedder import embed_documents
     from services.storage.qdrant_writer import (
         delete_lexicon_entries,
         ensure_collections_for_corpus,
@@ -3119,7 +3119,7 @@ async def index_corpus_lexicon(
             )
             for entry in batch
         ]
-        vectors = await embed_queries(texts, config)
+        vectors = await embed_documents(texts, config)
         written += await upsert_lexicon_entries(
             qdrant_client,
             corpus_id,
@@ -3194,7 +3194,7 @@ async def index_affected_lexicon(
 ) -> dict[str, Any]:
     """Mirror one incremental identity closure without touching other points."""
 
-    from services.embedder import embed_queries
+    from services.embedder import embed_documents
     from services.storage.qdrant_writer import (
         delete_lexicon_entries,
         ensure_collections_for_corpus,
@@ -3219,7 +3219,7 @@ async def index_affected_lexicon(
     size = max(1, min(int(batch_size), 256))
     for start in range(0, len(eligible_entries), size):
         batch = eligible_entries[start : start + size]
-        vectors = await embed_queries(
+        vectors = await embed_documents(
             [
                 str(
                     row.get("embedding_gloss")

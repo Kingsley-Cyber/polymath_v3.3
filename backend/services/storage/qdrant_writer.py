@@ -27,6 +27,8 @@ import re
 from config import get_settings
 from qdrant_client import AsyncQdrantClient
 from qdrant_client.models import (
+    BinaryQuantization,
+    BinaryQuantizationConfig,
     CreateAlias,
     CreateAliasOperation,
     DeleteAlias,
@@ -41,6 +43,8 @@ from qdrant_client.models import (
     PointIdsList,
     PointStruct,
     QueryRequest,
+    QuantizationSearchParams,
+    SearchParams,
     SparseVector,
     SparseVectorParams,
     VectorParams,
@@ -48,6 +52,121 @@ from qdrant_client.models import (
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
+
+
+def binary_quantization_config() -> BinaryQuantization | None:
+    """Return the desired quantization policy for Polymath-owned collections."""
+
+    if not settings.QDRANT_BINARY_QUANTIZATION_ENABLED:
+        return None
+    return BinaryQuantization(
+        binary=BinaryQuantizationConfig(
+            always_ram=bool(settings.QDRANT_BINARY_QUANTIZATION_ALWAYS_RAM),
+        )
+    )
+
+
+def binary_quantization_search_params() -> SearchParams | None:
+    """Quality-preserving search parameters for binary-quantized dense vectors."""
+
+    if not settings.QDRANT_BINARY_QUANTIZATION_ENABLED:
+        return None
+    return SearchParams(
+        quantization=QuantizationSearchParams(
+            ignore=False,
+            rescore=bool(settings.QDRANT_BINARY_QUANTIZATION_RESCORE),
+            oversampling=float(settings.QDRANT_BINARY_QUANTIZATION_OVERSAMPLING),
+        )
+    )
+
+
+def _binary_quantization_matches(config: object | None) -> bool:
+    """Compare a Qdrant readback with the configured binary policy.
+
+    Qdrant may materialize omitted defaults (such as one-bit encoding) in a
+    readback, so reconciliation deliberately compares only the requested
+    binary type and ``always_ram`` value.
+    """
+
+    binary = getattr(config, "binary", None)
+    if binary is None and isinstance(config, dict):
+        binary = config.get("binary")
+    if binary is None:
+        return False
+    always_ram = getattr(binary, "always_ram", None)
+    if isinstance(binary, dict):
+        always_ram = binary.get("always_ram")
+    if always_ram is None:
+        always_ram = False
+    return bool(always_ram) == bool(settings.QDRANT_BINARY_QUANTIZATION_ALWAYS_RAM)
+
+
+async def ensure_binary_quantization(
+    client: AsyncQdrantClient,
+    collection_name: str,
+    *,
+    collection_info: object | None = None,
+    attempts: int = 3,
+) -> bool:
+    """Reconcile binary quantization on one known Polymath collection.
+
+    Returns ``True`` when an update was submitted and ``False`` for an
+    already-matching collection (or when the feature is disabled). Every
+    successful/timeout-tolerated update is read back before returning.
+    """
+
+    desired = binary_quantization_config()
+    if desired is None:
+        return False
+
+    info = collection_info or await client.get_collection(collection_name)
+    current = getattr(getattr(info, "config", None), "quantization_config", None)
+    if _binary_quantization_matches(current):
+        return False
+
+    last_exc: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            await client.update_collection(
+                collection_name=collection_name,
+                quantization_config=desired,
+            )
+        except Exception as exc:
+            last_exc = exc
+
+        try:
+            refreshed = await client.get_collection(collection_name)
+            readback = getattr(
+                getattr(refreshed, "config", None),
+                "quantization_config",
+                None,
+            )
+            if _binary_quantization_matches(readback):
+                logger.info(
+                    "Qdrant binary quantization ready: %s (always_ram=%s)",
+                    collection_name,
+                    settings.QDRANT_BINARY_QUANTIZATION_ALWAYS_RAM,
+                )
+                return True
+            last_exc = RuntimeError(
+                f"Qdrant binary quantization readback mismatch for {collection_name!r}"
+            )
+        except Exception as exc:
+            last_exc = exc
+
+        if attempt < attempts:
+            logger.warning(
+                "Qdrant quantization reconciliation failed for %s "
+                "(attempt %d/%d): %s",
+                collection_name,
+                attempt,
+                attempts,
+                last_exc,
+            )
+            await asyncio.sleep(0.75 * attempt)
+
+    assert last_exc is not None
+    raise last_exc
 
 
 def _upsert_batch_size() -> int:
@@ -308,6 +427,7 @@ async def _search_points_compat(
 ):
     """Support qdrant-client before and after ``search`` was removed in 1.18."""
 
+    search_params = binary_quantization_search_params()
     search = getattr(client, "search", None)
     if callable(search):
         kwargs = {
@@ -318,6 +438,8 @@ async def _search_points_compat(
             "with_payload": with_payload,
             "with_vectors": with_vectors,
         }
+        if search_params is not None:
+            kwargs["search_params"] = search_params
         if score_threshold is not None:
             kwargs["score_threshold"] = score_threshold
         return await search(**kwargs)
@@ -329,6 +451,7 @@ async def _search_points_compat(
         with_payload=with_payload,
         with_vectors=with_vectors,
         score_threshold=score_threshold,
+        search_params=search_params,
     )
     return list(getattr(response, "points", None) or [])
 
@@ -339,6 +462,7 @@ async def _create_collection_with_retry(
     collection_name: str,
     vectors_config,
     sparse_vectors_config=None,
+    quantization_config=None,
     attempts: int = 3,
 ) -> None:
     """Create a collection with timeout tolerance.
@@ -359,6 +483,8 @@ async def _create_collection_with_retry(
             }
             if sparse_vectors_config is not None:
                 kwargs["sparse_vectors_config"] = sparse_vectors_config
+            if quantization_config is not None:
+                kwargs["quantization_config"] = quantization_config
             await client.create_collection(**kwargs)
             return
         except Exception as exc:
@@ -555,6 +681,7 @@ async def ensure_collections_for_corpus(
     for kind in chunk_kinds:
         name = _col_for_corpus(corpus_id, kind)
         existing_payload_indexes: set[str] = set()
+        info: object | None = None
         if await client.collection_exists(name):
             info = await _assert_collection_dimension(
                 client,
@@ -578,7 +705,13 @@ async def ensure_collections_for_corpus(
                 sparse_vectors_config={
                     "sparse": SparseVectorParams(modifier=Modifier.IDF)
                 },
+                quantization_config=binary_quantization_config(),
             )
+        await ensure_binary_quantization(
+            client,
+            name,
+            collection_info=info,
+        )
         for field_name in _CHUNK_PAYLOAD_INDEXES:
             if field_name in existing_payload_indexes:
                 continue
@@ -594,6 +727,7 @@ async def ensure_collections_for_corpus(
 
     schemas_name = _col_for_corpus(corpus_id, "schemas")
     existing_schema_indexes: set[str] = set()
+    info = None
     if await client.collection_exists(schemas_name):
         info = await _assert_collection_dimension(
             client,
@@ -606,10 +740,16 @@ async def ensure_collections_for_corpus(
             client,
             collection_name=schemas_name,
             vectors_config=VectorParams(size=dim, distance=Distance.COSINE),
+            quantization_config=binary_quantization_config(),
         )
         logger.info(
             "Created Qdrant collection: %s (corpus %s)", schemas_name, corpus_id
         )
+    await ensure_binary_quantization(
+        client,
+        schemas_name,
+        collection_info=info,
+    )
     for field_name in _SCHEMA_PAYLOAD_INDEXES:
         if field_name in existing_schema_indexes:
             continue
@@ -1360,6 +1500,7 @@ async def search_summary_tree_entries_batch(
             QueryRequest(
                 query=query_vec,
                 filter=Filter(must=must),
+                params=binary_quantization_search_params(),
                 limit=max(1, min(int(spec.get("top_k") or 8), 32)),
                 with_payload=True,
                 with_vector=False,

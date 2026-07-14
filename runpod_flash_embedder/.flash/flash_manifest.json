@@ -1,0 +1,55 @@
+{
+  "version": "1.0",
+  "python_version": "3.12",
+  "generated_at": "2026-07-13T08:49:12.451883Z",
+  "project_name": "runpod_flash_embedder",
+  "resources": {
+    "polymath-embed-qwen3": {
+      "resource_type": "LiveServerless",
+      "file_path": "app.py",
+      "local_path_prefix": "/app",
+      "module_path": "app",
+      "functions": [
+        {
+          "name": "embed_texts",
+          "module": "app",
+          "is_async": true,
+          "is_class": false
+        }
+      ],
+      "is_load_balanced": false,
+      "is_live_resource": true,
+      "config_variable": null,
+      "makes_remote_calls": false,
+      "imageName": "runpod/flash:py3.12-latest",
+      "gpuIds": "ADA_24,AMPERE_24,-NVIDIA GeForce RTX 3090",
+      "workersMin": 0,
+      "workersMax": 2,
+      "idleTimeout": 60,
+      "scalerType": "REQUEST_COUNT",
+      "scalerValue": 1,
+      "locations": "US-CA-2,US-IL-1,US-KS-2,US-MO-1,US-MO-2,US-NC-2,US-NE-1,US-WA-1,EU-CZ-1,EU-RO-1,EUR-NO-1",
+      "minCudaVersion": "12.8",
+      "template": {
+        "containerDiskInGb": 64,
+        "dockerArgs": "",
+        "startScript": "",
+        "advancedStart": false,
+        "containerRegistryAuthId": ""
+      },
+      "handler_file": "handler_polymath-embed-qwen3.py",
+      "target_python_version": "3.12",
+      "env": {
+        "_FLASH_SOURCE_FINGERPRINT": "74293f321bb119a4c4e9a1586dc26c59f3b9af8e133f0a593b051b1d5990faae"
+      },
+      "endpoint_id": "hlp9h3o4zd0v4d"
+    }
+  },
+  "function_registry": {
+    "embed_texts": "polymath-embed-qwen3"
+  },
+  "source_fingerprint": "74293f321bb119a4c4e9a1586dc26c59f3b9af8e133f0a593b051b1d5990faae",
+  "resources_endpoints": {
+    "polymath-embed-qwen3": "https://api.runpod.ai/v2/hlp9h3o4zd0v4d"
+  }
+}

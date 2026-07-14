@@ -138,7 +138,7 @@ async def index_summary_tree_nodes(
     call. Stable node IDs make it safe to rerun after a summary tree changes.
     """
 
-    from services.embedder import embed_queries
+    from services.embedder import embed_documents
     from services.storage.qdrant_writer import (
         delete_summary_tree_entries,
         upsert_summary_tree_entries,
@@ -242,7 +242,7 @@ async def index_summary_tree_nodes(
             if row.get("passthrough_rollup_id"):
                 row["passthrough_lexicon_ids"] = list(row.get("lexicon_ids") or [])
     config = _config_dict(embedding_config)
-    embedding_call = embed_fn or embed_queries
+    embedding_call = embed_fn or embed_documents
     batch_size = max(1, min(int(batch_size or 128), 256))
     embedded_vectors: list[list[float]] = []
     for start in range(0, len(entries), batch_size):

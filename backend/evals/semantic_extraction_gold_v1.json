@@ -1,0 +1,211 @@
+{
+  "schema_version": "polymath.semantic_extraction_gold.v1",
+  "purpose": "Evidence, qualifier, entity, and relation parity across deterministic, zero-shot, joint, and generative extraction lanes.",
+  "entity_vocabulary": [
+    "Person",
+    "Organization",
+    "Location",
+    "Event",
+    "Concept",
+    "Method",
+    "Product",
+    "Software",
+    "Document",
+    "Standard",
+    "Rule",
+    "Law",
+    "Artifact",
+    "TimeReference"
+  ],
+  "relation_vocabulary": [
+    "part_of",
+    "member_of",
+    "located_in",
+    "works_for",
+    "created_by",
+    "owns",
+    "affiliated_with",
+    "synonym_of",
+    "instance_of",
+    "example_of",
+    "uses",
+    "references",
+    "implements",
+    "depends_on",
+    "produces",
+    "stores",
+    "detects",
+    "supports",
+    "defines",
+    "represents",
+    "maps_to",
+    "preceded_by",
+    "causes",
+    "overlaps",
+    "during",
+    "derived_from",
+    "contradicts",
+    "excepts",
+    "overrides",
+    "related_to"
+  ],
+  "samples": [
+    {
+      "id": "explicit_causal",
+      "text": "Repeated discounting lowers the consumer's internal reference price.",
+      "gold": {
+        "entities": [
+          {"canonical_name": "repeated discounting", "surface_form": "Repeated discounting", "entity_type": "Method"},
+          {"canonical_name": "internal reference price", "surface_form": "internal reference price", "entity_type": "Concept"}
+        ],
+        "relations": [
+          {"subject": "repeated discounting", "predicate": "causes", "object": "internal reference price"}
+        ],
+        "claims": [
+          {"predicate_lemma": "lower", "polarity": "affirmed", "modal_force": "asserted", "assertion_mode": "reported", "claim_type": "causal", "qualifiers": [{"kind": "causal", "cue_contains": "lowers"}]}
+        ]
+      }
+    },
+    {
+      "id": "condition_scope",
+      "text": "When buyers cannot directly inspect quality, price may signal product quality and influence purchase choice.",
+      "gold": {
+        "entities": [
+          {"canonical_name": "buyers", "surface_form": "buyers", "entity_type": "Person"},
+          {"canonical_name": "price", "surface_form": "price", "entity_type": "Concept"},
+          {"canonical_name": "product quality", "surface_form": "product quality", "entity_type": "Concept"},
+          {"canonical_name": "purchase choice", "surface_form": "purchase choice", "entity_type": "Concept"}
+        ],
+        "relations": [
+          {"subject": "price", "predicate": "represents", "object": "product quality"},
+          {"subject": "price", "predicate": "causes", "object": "purchase choice"}
+        ],
+        "claims": [
+          {"predicate_lemma": "inspect", "polarity": "negated", "modal_force": "possible", "assertion_mode": "reported", "claim_type": "description_or_observation", "qualifiers": [{"kind": "negation", "cue_contains": "not"}, {"kind": "modal", "cue_contains": "can"}]},
+          {"predicate_lemma": "signal", "polarity": "affirmed", "modal_force": "possible", "assertion_mode": "hypothetical", "claim_type": "causal", "conditions_contain": ["When buyers cannot directly inspect quality"], "qualifiers": [{"kind": "condition", "cue_contains": "When buyers cannot directly inspect quality"}, {"kind": "modal", "cue_contains": "may"}]}
+        ]
+      }
+    },
+    {
+      "id": "direct_negation",
+      "text": "A high price does not guarantee high product quality.",
+      "gold": {
+        "entities": [
+          {"canonical_name": "high price", "surface_form": "high price", "entity_type": "Concept"},
+          {"canonical_name": "high product quality", "surface_form": "high product quality", "entity_type": "Concept"}
+        ],
+        "relations": [],
+        "claims": [
+          {"predicate_lemma": "guarantee", "polarity": "negated", "modal_force": "asserted", "assertion_mode": "reported", "claim_type": "description_or_observation", "qualifiers": [{"kind": "negation", "cue_contains": "not"}]}
+        ]
+      }
+    },
+    {
+      "id": "recommendation_temporal",
+      "text": "Analysts should compare the reported price with a historical baseline before allocating capital.",
+      "gold": {
+        "entities": [
+          {"canonical_name": "analysts", "surface_form": "Analysts", "entity_type": "Person"},
+          {"canonical_name": "reported price", "surface_form": "reported price", "entity_type": "Concept"},
+          {"canonical_name": "historical baseline", "surface_form": "historical baseline", "entity_type": "Concept"},
+          {"canonical_name": "capital", "surface_form": "capital", "entity_type": "Concept"}
+        ],
+        "relations": [
+          {"subject": "analysts", "predicate": "uses", "object": "historical baseline"}
+        ],
+        "claims": [
+          {"predicate_lemma": "compare", "polarity": "affirmed", "modal_force": "recommended", "assertion_mode": "reported", "claim_type": "recommendation_or_procedure", "qualifiers": [{"kind": "modal", "cue_contains": "should"}, {"kind": "temporal", "cue_contains": "before allocating capital"}]}
+        ]
+      }
+    },
+    {
+      "id": "attributed_hypothesis",
+      "text": "The authors hypothesize that repeated criticism may lower a person's evaluation of competence.",
+      "gold": {
+        "entities": [
+          {"canonical_name": "authors", "surface_form": "authors", "entity_type": "Person"},
+          {"canonical_name": "repeated criticism", "surface_form": "repeated criticism", "entity_type": "Concept"},
+          {"canonical_name": "evaluation of competence", "surface_form": "evaluation of competence", "entity_type": "Concept"}
+        ],
+        "relations": [
+          {"subject": "repeated criticism", "predicate": "causes", "object": "evaluation of competence"}
+        ],
+        "claims": [
+          {"predicate_lemma": "lower", "polarity": "affirmed", "modal_force": "possible", "assertion_mode": "attributed", "claim_type": "causal", "qualifiers": [{"kind": "attribution", "cue_contains": "hypothesize"}, {"kind": "modal", "cue_contains": "may"}, {"kind": "causal", "cue_contains": "lower"}]}
+        ]
+      }
+    },
+    {
+      "id": "exception_scope",
+      "text": "Discounting usually lowers reference price, except when the discount is clearly temporary.",
+      "gold": {
+        "entities": [
+          {"canonical_name": "discounting", "surface_form": "Discounting", "entity_type": "Method"},
+          {"canonical_name": "reference price", "surface_form": "reference price", "entity_type": "Concept"},
+          {"canonical_name": "temporary discount", "surface_form": "the discount is clearly temporary", "entity_type": "Concept"}
+        ],
+        "relations": [
+          {"subject": "discounting", "predicate": "causes", "object": "reference price"}
+        ],
+        "claims": [
+          {"predicate_lemma": "lower", "polarity": "affirmed", "modal_force": "asserted", "assertion_mode": "reported", "claim_type": "causal", "exceptions_contain": ["except when the discount is clearly temporary"], "qualifiers": [{"kind": "causal", "cue_contains": "lowers"}, {"kind": "exception", "cue_contains": "except when the discount is clearly temporary"}]}
+        ]
+      }
+    },
+    {
+      "id": "temporal_revision",
+      "text": "The policy became effective on 2025-01-01 and was revised in March 2026.",
+      "gold": {
+        "entities": [
+          {"canonical_name": "policy", "surface_form": "policy", "entity_type": "Rule"},
+          {"canonical_name": "2025-01-01", "surface_form": "2025-01-01", "entity_type": "TimeReference"},
+          {"canonical_name": "march 2026", "surface_form": "March 2026", "entity_type": "TimeReference"}
+        ],
+        "relations": [
+          {"subject": "2025-01-01", "predicate": "preceded_by", "object": "march 2026"}
+        ],
+        "claims": [
+          {"predicate_lemma": "become", "polarity": "affirmed", "modal_force": "asserted", "assertion_mode": "reported", "claim_type": "description_or_observation", "qualifiers": [{"kind": "temporal", "cue_contains": "2025-01-01"}]},
+          {"predicate_lemma": "revise", "polarity": "affirmed", "modal_force": "asserted", "assertion_mode": "reported", "claim_type": "description_or_observation", "qualifiers": [{"kind": "temporal", "cue_contains": "March 2026"}]}
+        ]
+      }
+    },
+    {
+      "id": "mechanism_definition",
+      "text": "A mechanism motif is an ordered abstraction over validated frame instances and state transitions.",
+      "gold": {
+        "entities": [
+          {"canonical_name": "mechanism motif", "surface_form": "mechanism motif", "entity_type": "Concept"},
+          {"canonical_name": "ordered abstraction", "surface_form": "ordered abstraction", "entity_type": "Concept"},
+          {"canonical_name": "validated frame instances", "surface_form": "validated frame instances", "entity_type": "Concept"},
+          {"canonical_name": "state transitions", "surface_form": "state transitions", "entity_type": "Concept"}
+        ],
+        "relations": [
+          {"subject": "mechanism motif", "predicate": "defines", "object": "ordered abstraction"}
+        ],
+        "claims": [
+          {"predicate_lemma": "be", "polarity": "affirmed", "modal_force": "asserted", "assertion_mode": "reported", "claim_type": "definition", "qualifiers": []}
+        ]
+      }
+    },
+    {
+      "id": "analogy_limitation",
+      "text": "Human worth is not equivalent to market price; the shared structure concerns reference updating only.",
+      "gold": {
+        "entities": [
+          {"canonical_name": "human worth", "surface_form": "Human worth", "entity_type": "Concept"},
+          {"canonical_name": "market price", "surface_form": "market price", "entity_type": "Concept"},
+          {"canonical_name": "shared structure", "surface_form": "shared structure", "entity_type": "Concept"},
+          {"canonical_name": "reference updating", "surface_form": "reference updating", "entity_type": "Concept"}
+        ],
+        "relations": [
+          {"subject": "shared structure", "predicate": "related_to", "object": "reference updating"}
+        ],
+        "claims": [
+          {"predicate_lemma": "be", "polarity": "negated", "modal_force": "asserted", "assertion_mode": "reported", "claim_type": "comparison_or_contrast", "qualifiers": [{"kind": "negation", "cue_contains": "not"}, {"kind": "comparison", "cue_contains": "equivalent"}]},
+          {"predicate_lemma": "concern", "polarity": "affirmed", "modal_force": "asserted", "assertion_mode": "reported", "claim_type": "description_or_observation", "qualifiers": []}
+        ]
+      }
+    }
+  ]
+}

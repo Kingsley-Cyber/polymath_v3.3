@@ -44,6 +44,24 @@ def test_openrouter_mistral_nemo_uses_native_json_schema():
     assert card.supports_json_schema is True
 
 
+def test_deepseek_v4_flash_uses_live_verified_json_object_contract():
+    card = resolve_extraction_provider_card(
+        {
+            "provider_preset": "deepseek",
+            "model": "deepseek/deepseek-v4-flash",
+            "base_url": "https://api.deepseek.com/v1",
+        }
+    )
+
+    assert card.provider == "deepseek"
+    assert card.schema_mode == "json_object"
+    assert card.supports_json_schema is False
+    assert card.supports_json_object is True
+    assert card.json_repair_mode == "balanced_object_repair"
+    assert provider_payload_defaults(card) == {"thinking": {"type": "disabled"}}
+    assert "deepseek_v4_flash_json_object_only_live_verified" in card.notes
+
+
 def test_longcat_is_compiler_gated_and_disables_thinking():
     card = resolve_extraction_provider_card(
         {

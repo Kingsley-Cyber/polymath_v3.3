@@ -16,8 +16,11 @@ of every row before anything lands in Qdrant.
 Vectors from this worker are written into the same collections as vectors
 from the local sidecar, so they MUST be interchangeable: same model, same
 pooling (the model repo's sentence-transformers config), same
-`normalize_embeddings=True` L2 normalization, no prompt prefixes, same
-dimension (1024). See the module docstring in `app.py`. Do not change
+`normalize_embeddings=True` L2 normalization, and no worker-side prompt
+mutation. The backend may submit already-serialized role text; every provider
+must encode those bytes unchanged. Document ingestion is raw under the
+canonical Qwen3 profile. Dimension is 1024. See the module docstring in
+`app.py`. Do not change
 `POLYMATH_EMBED_MODEL_ID` unless every other embedding host and the corpus's
 frozen `embedding_model_id` change in lockstep.
 

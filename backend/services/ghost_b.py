@@ -1207,7 +1207,7 @@ def _lane_supports_json_schema(entry: dict) -> bool:
     valid JSON syntax (not shape).
 
     Production extraction should use this for known capable lanes by default:
-    OpenAI, DeepSeek, and managed vLLM. Operators can still set
+    OpenAI, model-specific DeepSeek profiles, and managed vLLM. Operators can still set
     extra_params.supports_json_schema=false to force JSONL for a broken or
     nonconformant provider. If a lane claims support but rejects the payload,
     _process_one records json_schema_unsupported and falls back to JSONL once.

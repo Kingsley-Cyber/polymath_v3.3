@@ -1250,7 +1250,11 @@ async def query_scope_entities(
         return set()
 
     from services.embedder import embed_query
-    from services.storage.qdrant_writer import _col_for_corpus, _collection_layout
+    from services.storage.qdrant_writer import (
+        _col_for_corpus,
+        _collection_layout,
+        binary_quantization_search_params,
+    )
 
     try:
         qv = await embed_query(query)
@@ -1266,6 +1270,9 @@ async def query_scope_entities(
             "limit": top_k,
             "with_payload": True,
         }
+        quantization_params = binary_quantization_search_params()
+        if quantization_params is not None:
+            kwargs["search_params"] = quantization_params
         has_named, _ = await _collection_layout(qdrant, collection)
         if has_named:
             kwargs["using"] = "dense"
@@ -1333,7 +1340,11 @@ async def query_scope_details(
         return VectorScopeResult()
 
     from services.embedder import embed_query
-    from services.storage.qdrant_writer import _col_for_corpus, _collection_layout
+    from services.storage.qdrant_writer import (
+        _col_for_corpus,
+        _collection_layout,
+        binary_quantization_search_params,
+    )
 
     try:
         qv = await embed_query(query)
@@ -1349,6 +1360,9 @@ async def query_scope_details(
             "limit": top_k,
             "with_payload": True,
         }
+        quantization_params = binary_quantization_search_params()
+        if quantization_params is not None:
+            kwargs["search_params"] = quantization_params
         has_named, _ = await _collection_layout(qdrant, collection)
         if has_named:
             kwargs["using"] = "dense"

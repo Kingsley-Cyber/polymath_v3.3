@@ -1,6 +1,10 @@
 import pytest
 
-from services.ingestion.tier0 import delete_doc_profile, embed_doc_profiles
+from services.ingestion.tier0 import (
+    _ensure_collection,
+    delete_doc_profile,
+    embed_doc_profiles,
+)
 
 
 class _Cursor:
@@ -44,12 +48,33 @@ class _Qdrant:
         self.indexes = []
         self.points = []
         self.deleted = []
+        self.updated = []
+        self.quantization_config = None
 
     async def collection_exists(self, _name):
         return self.exists
 
     async def create_collection(self, **kwargs):
         self.created.append(kwargs)
+        self.exists = True
+        self.quantization_config = kwargs.get("quantization_config")
+
+    async def get_collection(self, _collection_name):
+        return type(
+            "CollectionInfo",
+            (),
+            {
+                "config": type(
+                    "Config",
+                    (),
+                    {"quantization_config": self.quantization_config},
+                )()
+            },
+        )()
+
+    async def update_collection(self, **kwargs):
+        self.updated.append(kwargs)
+        self.quantization_config = kwargs["quantization_config"]
 
     async def create_payload_index(self, **kwargs):
         self.indexes.append(kwargs)
@@ -99,6 +124,8 @@ async def test_tier0_profiles_embed_in_one_batch_and_stamp_projection(monkeypatc
     assert result["embedded"] == 2
     assert calls == [(["First summary.", "Second summary."], 4, None)]
     assert len(qdrant.points) == 2
+    assert qdrant.created[0]["quantization_config"].binary.always_ram is True
+    assert qdrant.updated == []
     assert {point.payload["doc_id"] for point in qdrant.points} == {"doc-1", "doc-2"}
     assert len(db.documents.bulk_ops) == 2
     assert all(
@@ -116,3 +143,15 @@ async def test_tier0_profile_delete_targets_deterministic_shared_point():
     assert len(qdrant.deleted) == 1
     assert qdrant.deleted[0]["collection_name"] == "polymath_doc_summaries"
     assert len(qdrant.deleted[0]["points_selector"].points) == 1
+
+
+@pytest.mark.asyncio
+async def test_existing_tier0_collection_reconciles_binary_quantization_once():
+    qdrant = _Qdrant(exists=True)
+
+    await _ensure_collection(qdrant, 1024)
+    await _ensure_collection(qdrant, 1024)
+
+    assert len(qdrant.updated) == 1
+    assert qdrant.updated[0]["collection_name"] == "polymath_doc_summaries"
+    assert qdrant.quantization_config.binary.always_ram is True

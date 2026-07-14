@@ -5,7 +5,7 @@ Method: exhaustive claim extraction (14 chunks, 533 claims) → terminology reco
 Every claim in the implementation plan, resolved or not, appears below exactly once as an auditable action.
 How to audit a row: open the frozen line, run/inspect the Required receipt, confirm the Disposition.
 Companion: docs/PLAN_CRITIQUE_2026-07-13.md holds the S0–S14 sequencing rationale; this file holds the per-claim ledger.
-ASSEMBLY NOTE: the critique stage for 5 chunks (P1L, P2V, P2X, P3A, GTE) was cut off by the API monthly spend limit; their claims are rendered below with disposition `pending-critique` and will be filled by the cached-workflow resume. 9/14 chunks carry the full 5W+feasibility critique.
+ASSEMBLY NOTE (restamped 2026-07-13): the spend-limit cutoff was fully recovered — the continuation session re-ran the 5 interrupted critique chunks (P1L, P2V, P2X, P3A, GTE) and their artifacts were present at assembly time. ALL 14/14 chunks carry the full 5W+feasibility critique; zero rows pending (see Disposition Summary — no pending bucket). Source artifacts preserved in-repo (source_artifacts.json + deterministic rebuild script, commit d9ea44c).
 
 ## The Holistic End Goal — what all of this builds, end to end
 
@@ -1109,6 +1109,6 @@ after measurement); P2.4–2.6 (+ external contracts branch) → S11; S6 → S12
 - Frozen source: commit `f049041`, 1,398 lines, 409 checkbox lines.
 - Claims extracted: 533. Rendered ledger rows: 533.
 - Missing IDs: NONE. Duplicate IDs: NONE.
-- Critique coverage: 9/14 chunks (5W+feasibility complete); 5 chunks pending workflow resume (0 rows marked `pending-critique`).
-- Set math: extracted == rendered by construction of this assembler; the independent-agent re-verification re-runs on workflow resume.
+- Critique coverage: 14/14 chunks (5W+feasibility complete); 0 rows marked `pending-critique` — the 5 spend-limit-interrupted chunks were recovered by the continuation session before assembly.
+- Set math: extracted == rendered by construction of this assembler; source artifacts + deterministic rebuild script preserved in-repo (commit d9ea44c) for independent re-verification.
 
