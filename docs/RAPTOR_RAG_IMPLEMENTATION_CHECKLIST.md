@@ -2073,6 +2073,49 @@ A corpus is strict-ready only when:
   candidate did not improve safely. Durable receipt:
   `docs/baselines/T56_QWEN3_UNIVERSAL_AB_2026-07-14.md`.
 
+### 2026-07-14 - T3.1 P2.5b legacy compatibility adapters
+
+- Commit: this commit on `claude-continuation-20260713`.
+- Owner: Codex sole executor under `CODEX_MISSION.md`; Claude senior reviews
+  the receipt through `COORDINATION.md`.
+- Corpus/data scope: read-only compatibility validation over all 696 current
+  document rows plus bounded 5,000-row samples from each large legacy family:
+  Ghost-B extractions, summarized parent chunks, and corpus lexicon.
+- Code changes: added pure, closed Pydantic adapters for document/source
+  identity, legacy ERE observation bundles, parent `RetrievalSummary`, and
+  lexicon `ConceptSense` identity mappings. Weak/content source identities
+  preserve the legacy `doc_id` and surface `needs_owner_lineage`; only strong
+  URL/YouTube keys mint logical IDs. Adapter IDs use the frozen
+  `logical-artifact` namespace and raw-byte SHA-256 receives the canonical
+  algorithm prefix without rehashing.
+- Durable migration/backfill: none; adapters are additive/read-only and do not
+  rewrite legacy collections.
+- Before metrics: no executable legacy-to-envelope compatibility boundary or
+  adapter identity goldens existed.
+- After metrics: live rows adapted successfully: documents 696/696; Ghost-B
+  5,000/5,000 of 264,074; summarized parents 5,000/5,000 of 97,671; lexicon
+  5,000/5,000 of 378,366. Zero failures.
+- Tests by tier: focused adapter plus hash/identifier goldens 51 passed
+  (`EXIT=0`); adjacent semantic-contract suite 62 passed / 3 skipped
+  (`EXIT=0`). Tests freeze adapter IDs and cover strong-vs-weak lineage,
+  no-promotion recursion, exact temporal offset round trips, malformed-row
+  fail-closed behavior, deterministic replay, and input immutability.
+- Cross-corpus test: the live census used the shared collections without a
+  corpus filter; all current document rows passed and each large family had a
+  deterministic bounded sample.
+- Failure/rollback test: malformed required identity/nested fields fail with
+  the complete missing-path list; unverified temporal offsets remain
+  candidate-only with a validation drop and no quote hash. Rollback is code
+  removal only because no durable store or request path changed.
+- Deployment image/health: no live deployment required; this is an additive,
+  currently unreferenced compatibility module. It was copied with tests into
+  a disposable container based on the current canonical image.
+- Remaining risks: T3.2 writer/validator integration and T3.4 UGO annotate-only
+  parity are still required before any envelope-era artifact writes or P2.5b
+  acceptance closure.
+- Checklist boxes closed: none; mission T3.4 reserves the P2.5b acceptance
+  scratch until the UGO canary proves behavioral parity.
+
 ## Implementation Log Template
 
 Copy this section for every completed item:

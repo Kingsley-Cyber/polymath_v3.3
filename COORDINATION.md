@@ -1294,3 +1294,42 @@ instruction iterations are cheap. A universal-v2 wording iteration is queued
 as OPTIONAL Track B (new registry version + same harness) — do NOT iterate
 now. TRACK A CONTINUES: proceed to A1 = T3.1 legacy adapters. Update
 PROGRESS.md cursor.
+
+## [2026-07-14T12:57:07Z] EXECUTOR → SENIOR :: ACK
+A1/T3.1 started. Global objective: expose legacy documents, Ghost-B rows,
+parent summaries, and lexicon entries as deterministic contract-valid
+equivalents without changing retrieval or mutating legacy data. The symptom is
+not merely missing envelope fields; the bug class is epistemic/identity
+laundering at the compatibility boundary (invented lineage, fabricated spans,
+or legacy observations/summaries becoming accepted claims). Read-only live
+shape audit of the prepared adapter passed documents 696/696 and bounded
+5,000-row samples for each of ghost_b_extractions, summarized parent_chunks,
+and corpus_lexicon with zero failures. Before acceptance I am tightening its
+new IDs onto the frozen logical-artifact hash namespace, making the raw source
+SHA-256 translation explicit, and adding fixture tests for no-promotion,
+lineage, exact temporal offsets, deterministic replay, and input immutability.
+
+## [2026-07-14T13:01:43Z] EXECUTOR → SENIOR :: RECEIPT
+T3.1 legacy adapters GREEN. `models/legacy_adapters.py` now provides pure,
+closed Pydantic equivalents for documents/source identity, Ghost-B ERE
+observation bundles, parent RetrievalSummary records, and corpus-lexicon
+ConceptSense identity mappings. Hard invariants: weak/content identities keep
+the legacy doc_id plus `needs_owner_lineage=true`; only URL/YouTube strong
+keys mint logical IDs; raw-byte content SHA-256 is translated losslessly to
+the contract-prefixed form; all adapter artifact IDs use the frozen
+`logical-artifact` namespace; legacy entity/relation/fact rows remain
+`candidate`, summaries remain `unvalidated`, and accepted/valid legacy values
+survive only in explicitly `legacy_*` provenance echoes. Temporal offsets
+become verified only after exact text round-trip; no exact EvidenceRef is
+fabricated. Inputs are never mutated and malformed required fields fail with
+all missing paths.
+
+True-exit tests: focused adapter + hash/identifier goldens 51 passed, EXIT=0
+(`/tmp/t31_focused_tests.log`); adjacent semantic contracts 62 passed, 3
+skipped, EXIT=0 (`/tmp/t31_adjacent_tests.log`). Read-only live compatibility
+census EXIT=0 (`/tmp/t31_live_adapter_census.log`): documents 696/696; bounded
+samples ghost_b_extractions 5,000/5,000 of 264,074, summarized parent_chunks
+5,000/5,000 of 97,671, corpus_lexicon 5,000/5,000 of 378,366; zero adapter
+failures. No database/vector/graph write, retrieval behavior change, provider
+call, or live deployment occurred. P2.5b acceptance remains open until the
+mission's T3.4 annotate-only UGO canary. Proceeding to T3.2 after task commit.
