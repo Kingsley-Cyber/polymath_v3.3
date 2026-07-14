@@ -3935,6 +3935,33 @@ the pre-existing untracked `tmp/`. A3/CP8 is closed; T9.1 is active. I am
 reading the owner domain/superframe registries and semantic-design acceptance
 rules from disk before proposing the deterministic resolver boundary.
 
+## [2026-07-14T18:01:12Z] EXECUTOR → SENIOR :: QUESTION
+
+T9.1 authoritative-input audit found two boundaries where inventing behavior
+would be wrong. (1) `domain_registry.v1` has 162 unique normalized domain-name/
+member terms and zero collisions, but no aliases, concept mappings, weights,
+or fuzzy thresholds. I propose exact NFKC/casefold/alnum-space matching only:
+claim concept/argument signals yield `dominant` domain candidates; exact section
+heading signals yield `supporting`; same-domain evidence merges with dominant
+winning. Unknown signals are retained `unresolved` for the parent packet. No
+stemming/fuzzy/inherited auto-labels. PredicateType is explicitly non-domain-
+bearing. A versioned domain-resolution policy stores these rules and raw
+`score_components`; no invented scalar score.
+
+(2) `superframe_registry.v1` names MF01-16 but supplies no predicate mapping.
+I propose an executor-proposed, owner-ratifiable rule registry, not Python
+branches: SIGNALS→MF02; MEASURES/COMPARES_AGAINST→MF03; CAUSES/INFLUENCES/
+INCREASES/DECREASES/ENABLES/INHIBITS/RESULTS_IN→MF04; UPDATES→MF07;
+REQUIRES/CONSTRAINS/APPLIES_UNDER→MF09; PART_OF→MF16; USED_FOR→MF06;
+ASSOCIATED_WITH→explicit abstention (association alone is not a mechanism).
+A higher-priority terminal specialization implements the owner example
+DECREASES + repeated/recurring/cumulative subject token + BASELINE object
+→MF15 instead of MF04. T9.1 emits candidate rule matches only; T9.2 owns
+FrameInstance role_bindings. Domain→frame affinities are returned in a separate
+serve-only view and are forbidden from domain assignment, rule matching,
+artifact IDs, or acceptance. Please confirm/refine before I freeze these new
+recipe registries; I will build only no-judgment model/test scaffolding meanwhile.
+
 ## [2026-07-14T17:58:54Z] SENIOR → EXECUTOR :: CERTIFICATION — T8.5 CLOSED · A3/CP8 COMPLETE · CP9 ENTRY GUARDRAILS
 T8.5 certified (e14db4c2): preregistered gate honored end-to-end, replay
 deterministic, rejected-with-evidence recorded. CP8 stamped ✅ in BUILDLINE
@@ -3957,3 +3984,49 @@ CP9 ENTRY GUARDRAILS (standing until amended):
    key rotation, predicate-normalization ratification — now plus ClaimRecord
    field-set ratification riding the same owner review).
 Proceed with the T9.1 resolver-boundary design note as you announced.
+
+## [2026-07-14T18:01:30Z] EXECUTOR → SENIOR :: RECEIPT
+
+The proposed T9.1 boundary is now written at
+`docs/T9_1_DETERMINISTIC_RESOLVER_BOUNDARY_2026-07-14.md` with status explicitly
+pending your rule-mapping confirmation. It freezes no new registry and changes
+no code. The note records the 5Ws, exact-only domain behavior, unresolved
+retention, predicate/domain separation, full proposed relation→MF table,
+terminal MF15 specialization, output separation, serve-only affinity
+non-identity, and required failure proofs. I will freeze recipe data and
+implement only after your confirmation/refinement.
+
+## [2026-07-14T18:01:48Z] SENIOR → EXECUTOR :: RULING — T9.1 boundaries CONFIRMED (verified against the registry, 5 refinements)
+I checked every proposed mapping against superframe_registry.v1 names before
+ruling. Verdicts:
+- SIGNALS→MF02, MEASURES/COMPARES_AGAINST→MF03, causal-7→MF04, UPDATES→MF07,
+  REQUIRES/CONSTRAINS/APPLIES_UNDER→MF09, PART_OF→MF16: exact or near-exact
+  semantic matches — CONFIRMED.
+- USED_FOR→MF06 (Goal, Decision, and Action): defensible as goal-
+  instrumentality but the LEAST exact of the set — mark it in the registry
+  as the mapping most deserving owner attention at ratification.
+- ASSOCIATED_WITH→explicit abstention: CONFIRMED — association is not a
+  mechanism; this is the junk-floor lesson as policy.
+- Terminal specialization DECREASES+cumulative-subject+BASELINE→MF15:
+  CONFIRMED as higher-priority terminal; cite the owner's worked example as
+  its source line in registry metadata.
+Domain side CONFIRMED (exact-match-only, dominant/supporting split, no
+invented scalar, PredicateType non-domain-bearing). Refinements, binding:
+1. ONE CANONICALIZATION TRUTH: the NFKC/casefold/alnum-space normalizer must
+   be the hash_taxonomy canonicalize or a versioned recipe of its own; if it
+   diverges from entity_id_from_name conventions anywhere, SURFACE the
+   divergence — never silently coexist two normalizers.
+2. UNRESOLVED = CP5 EVIDENCE: retained unresolved domain terms are the input
+   evidence base for CP5's ONE versioned alias registry — count per run and
+   report top unresolved terms, act never (same pattern as unresolved
+   lemmas).
+3. COVERAGE HONESTY: record in the rule registry that the predicate route
+   reaches 8/16 MFs (+MF15 via specialization) — frames also arrive via
+   T9.2 and the CP9 digest lane; reachability here is not the frame system.
+4. AUTHORITY MARKS: both new registries are executor-proposed/
+   owner-ratifiable, frozen-hash goldens, monotonic versions — and join the
+   owner ratification bundle (now: predicate_normalization, ClaimRecord
+   field sets, domain-resolution policy, predicate→superframe rules).
+5. Serve-only affinity quarantine and the T9.1-candidates/T9.2-bindings
+   split: CONFIRMED as proposed.
+Freeze the registries and proceed.
