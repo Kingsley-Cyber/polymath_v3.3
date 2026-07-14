@@ -4995,3 +4995,97 @@ changes), implement the certified-route acceptance skip across prompt
 versions, and run PHASE 1B: 10 mark packets, ≥9/10 preregistered, ~$49.16
 remaining ceiling, same telemetry/auto-stop rules. Report the verdict
 verbatim whichever way it lands.
+
+## [2026-07-14T20:47:30Z] EXECUTOR → SENIOR :: RECEIPT
+
+Phase-1B pre-spend implementation gate GREEN: the unchanged adjacent command
+produced `104 passed, 7 existing warnings in 1.86s`, true `EXIT=0` in
+`/tmp/t93_phase1b_adjacent.log`. It covers the approved verbatim v6/v3 texts,
+independent current+legacy hashes, old-provenance parsing, certified v5
+acceptance under the cross-prompt skip contract, deterministic fresh selection,
+durable queue identity, target 9/10 checkpoint, and existing telemetry/
+auto-stop controls. The following live read-only preflight attempt returned
+true `EXIT=1` in `/tmp/t93_mark_phase1b_preflight.log` because its reporting
+expression used `sum(await ... for ...)`, producing an async generator
+TypeError. This is harness syntax after the reads, not a product assertion;
+provider calls=0, writes=0, and spend=0. Correcting only that expression to
+materialize the ten results explicitly, then rerunning the same preflight.
+
+## [2026-07-14T20:48:25Z] EXECUTOR → SENIOR :: RECEIPT
+
+Phase-1B live read-only preflight GREEN, true `EXIT=0` in
+`/tmp/t93_mark_phase1b_preflight_retry.log`; safe artifact
+`/tmp/t93_mark_phase1b_preflight_retry.json`. Corpus remains 103 docs / 989
+eligible, active ingest=0, active semantic jobs=0. All 8 accepted v5 mark
+digests revalidated under current schema+validator and the certified LongCat
+route skip; all 4 prior DLQ parents remain excluded. Deterministic phase-1B
+selection is exactly 10 never-attempted, noncached parents at ordinals 12–21,
+packet bytes 14,534–16,270; selected-with-prior-attempt=0 and selected-with-
+certified-acceptance=0. Frozen identities are v6 prompt hash
+`sha256:ee523bbf674d26a3974488e48fdfae6f0f4a4238e1df94ce39067dc9d35c10eb`
+and repair-v3 hash
+`sha256:0d4d7d5f50c0a98312cf4052510aa4225d1cc235b319df84c5eacf1c5801d145`.
+Spent remains `$0.28608085`; ceiling remaining `$49.16391915`. Provider
+calls=0, writes=0. Launching the explicitly authorized 10-packet phase 1B at
+concurrency 3; preregistered verdict is >=9/10 green, <=8/10 external stall.
+
+## [2026-07-14T20:57:13Z] EXECUTOR → SENIOR :: RECEIPT
+
+VERIFIED Phase 1B GREEN under the preregistered target-corpus bar: all 10/10
+fresh mark packets (ordinals 12–21) were accepted, 0 dead letters, true
+`EXIT=0` in `/tmp/t93_mark_phase1b.log`; safe machine receipt is
+`/tmp/t93_mark_phase1b.json`. The completed checkpoint reports acceptance
+`1.0`, minimum `0.9`, phase cost `$0.25738420`, cost/packet `$0.02573842`
+against the `$0.06` ceiling, 13 provider calls including 3 repair calls, and
+packet sizes 14,534–16,270 bytes (all below the 21,515-byte canaried maximum).
+Cumulative purchased cost is `$0.54346505` against the authorized `$49.45`
+ceiling. Canonical censuses before/after are exactly identical: Mongo semantic
+artifacts 0, Neo4j 1,361,818 nodes / 3,712,432 relationships, Qdrant 1,364,767
+total points. Provider contract is certified LongCat Tier3 at max_tokens 8192,
+temperature 0, thinking disabled, frozen parent-digest.v6 hash
+`sha256:ee523bbf674d26a3974488e48fdfae6f0f4a4238e1df94ce39067dc9d35c10eb`
+and repair-v3 hash
+`sha256:0d4d7d5f50c0a98312cf4052510aa4225d1cc235b319df84c5eacf1c5801d145`.
+This earns the ruled fresh 50-packet checkpoint; no phase-2 queue has been
+opened while I re-read the senior channel and preserve the review boundary.
+
+## [2026-07-14T20:58:13Z] EXECUTOR → SENIOR :: QUESTION
+
+Phase 1B earned the ruled fresh 50-packet checkpoint, but the current runner
+cannot lawfully express that new shape. Its `phase2` path is still sealed on
+every original `phase1` row having `phase1_checkpoint_green=True`; that
+checkpoint failed and 38 rows were canceled. The path also materializes the
+full eligible set rather than a deterministic fresh 50. Phase 1B currently
+computes but does not persist a green authorization marker. No further queue
+or provider call has been opened. Please name/approve the monotonic execution
+shape: my minimal proposal is a distinct fresh-50 selection/version and phase
+(excluding all attempted/purchased/certified-accepted parents), persisted
+Phase-1B green authorization + canonical checkpoint, then retain `phase2` for
+the remainder only after that fresh-50 gate is green. I will add selection,
+resume, sealing, and no-repurchase tests before any live preflight or spend.
+
+## [2026-07-14T20:59:13Z] SENIOR → EXECUTOR :: RULING — phase shape named and approved; 1C → phase 2; DLQ tail-retry defined
+Phase 1B verdict accepted: 10/10 under the preregistered target-corpus bar —
+the prompt-class remediation is PROVEN on mark (three successful pruning
+repairs are the v3 mandate working). Your minimal monotonic shape is approved
+with names and numbers fixed now:
+1. PHASE LEDGER: phase 1 = failed-closed (8 bought, 4 DLQ, 38 canceled);
+   phase 1B = GREEN (10 bought). Persist the 1B green authorization + its
+   canonical checkpoint exactly as you proposed.
+2. PHASE 1C = the ruled fresh 50: deterministic selection of 50
+   never-attempted/noncached/nonaccepted parents (new selection version,
+   excluding all 22 attempted/purchased), original checkpoint bar ≥95%
+   (48/50), same auto-stops, same telemetry. Green 1C releases PHASE 2.
+3. PHASE 2 = the remainder (≈917 parents after 989 − 22 − 50), original GO
+   rules: bounded concurrency 3 → may raise to 6 after 100 consecutive
+   clean, rolling-window and DLQ-streak auto-stops, hard ceiling $49.45
+   cumulative, accepted rows noncanonical, skip-if-accepted across prompt
+   versions.
+4. DLQ TAIL-RETRY (new, bounded): the 4 phase-1 DLQ parents were killed by a
+   prompt-era defect now fixed — permanent exclusion would leave 4 holes for
+   a wrong reason. AFTER phase 2 completes AND corpus-wide acceptance is
+   ≥95%, they may be re-attempted ONCE EACH under v6/repair-v3 (~$0.11).
+   Failures then are final honest losses; no third attempt without owner
+   words.
+5. TESTS BEFORE SPEND, as you listed: selection determinism, resume,
+   sealing, and no-repurchase — green before any live preflight.
