@@ -1694,6 +1694,16 @@ one reusable canary driver at the gateway boundary, cover exact 10-packet,
 repair, DLQ, cache/provenance, and Tier1/Tier4 paths, then deploy and call the
 real pinned model without printing or persisting plaintext credentials.
 
+## [2026-07-14T14:04:48Z] EXECUTOR → SENIOR :: ACK
+CORRECTION to my 14:03:31Z corpus-ID statement: live Mongo discovery proves
+`5a20bc21-...` is `markbuildsbrands_transcripts` (103 documents / 1,015
+parents), not UGO. The actual `UGO_CORPUS` is
+`bcf80054-7611-47d0-ae16-fa7fed259b13` (1 document / 203 parents). I caught
+this before any provider call or data mutation by resolving the name from the
+live `corpora` API-of-record and cross-checking document/parent counts. T4.4
+will use only the discovered UGO UUID; the earlier mistaken UUID will not
+enter code, fixtures, calls, or receipts.
+
 ## [2026-07-14T14:03:50Z] SENIOR → EXECUTOR :: ACK — T4.3 CERTIFIED
 Gateway engine certified (60 focused + 132 adjacent + integrity, capability
 adapter fail-closed with pinned flash Tier-1 test, self-corrected harness
@@ -1704,3 +1714,83 @@ with before/after counts), ladder downgrade test Tier1-vs-Tier4
 schema-identical, full provenance rows. This is the gateway's first real
 spend (~10 digest calls) — pre-authorized in-mission; receipt with per-packet
 outcomes.
+
+## [2026-07-14T14:11:17Z] EXECUTOR → SENIOR :: ACK
+T4.3 certification and the T4.4 before/after canonical-store ruling received.
+The canary will capture and require exact equality for Mongo
+`semantic_artifacts`, every Qdrant collection point count, and total Neo4j
+node/relationship counts around the live calls. Gateway cache and synthetic
+DLQ counts are reported separately as explicitly noncanonical writes.
+
+## [2026-07-14T14:11:18Z] EXECUTOR → SENIOR :: RECEIPT
+T4.4 driver focused gate GREEN: 33 passed, true EXIT=0
+(`/tmp/t44_focused_tests.log`). It covers even 10-of-203 sampling, valid-parent
+and accepted-extraction admission, deterministic interim evidence handles,
+Ghost A summary exclusion, entity whitelist/deduplication, transparent
+semantic-only attempt-1 fault injection, same-format pass-through, and
+provenance fail-closed behavior. No provider call or store mutation occurred
+in this unit gate.
+
+## [2026-07-14T14:12:48Z] EXECUTOR → SENIOR :: RECEIPT
+T4.4 adjacent semantic-contract gate GREEN after adding the canonical census:
+144 passed, 3 pre-existing Docker-only skips, true EXIT=0
+(`/tmp/t44_adjacent_tests.log`). Gateway, canary driver, validator, digest,
+hash/envelope/registry/observations, LiteLLM payload, and DeepSeek thinking
+paths all pass. Proceeding to the required canonical-overlay rebuild of both
+backend and ingest-worker before any live provider call.
+
+## [2026-07-14T14:13:52Z] EXECUTOR → SENIOR :: RECEIPT
+T4.4 canonical deployment gate GREEN. Exact three-overlay build/recreate of
+backend + ingest-worker exited 0 (`/tmp/t44_deploy.log`); runtime verifier
+exited 0 (`/tmp/t44_runtime_verify.log`); both containers import
+`SemanticGateway`, expose reserved `response_format`, contain the canary
+driver, and report healthy (`/tmp/t44_two_container_verify.log`, EXIT=0).
+Proceeding to the pre-authorized real UGO/flash canary with safe redacted
+receipt at `/tmp/t44_ugo_canary.json` in-container.
+
+## [2026-07-14T14:15:27Z] EXECUTOR → SENIOR :: BLOCKER
+T4.4 live Tier1 gate FAILED and is STOPPED; true EXIT=1
+(`/tmp/t44_live_canary.log`). Both first concurrent packets were rejected at
+the provider boundary before output. Redacted LiteLLM evidence is exact:
+DeepSeek HTTP 400 `invalid_request_error` — `This response_format type is
+unavailable now` (`/tmp/t44_litellm_error_redacted.log`). The gateway correctly
+failed closed and wrote two noncanonical Tier1 DLQs, each attempts=1,
+raw_output_hashes=[], error=`transport.attempt[1]: HTTPStatusError`; accepted
+cache rows=0, Mongo `semantic_artifacts`=0, active batches=0. No successful
+packet, repair, downgrade, or synthetic-DLQ acceptance step was reached; no
+receipt JSON was emitted.
+
+## [2026-07-14T14:15:28Z] EXECUTOR → SENIOR :: QUESTION
+Live evidence falsifies LiteLLM 1.31.3 metadata for the pinned flash route:
+the adapter says Tier1-capable, but DeepSeek currently rejects native
+`json_schema`. I will not silently downgrade, weaken T4.4, relabel Tier4 as
+Tier1, or rerun. Please rule the design-of-record conflict: either (A) amend
+flash to explicit Tier4 for T4.4 and select a separately proven native-schema
+model for the Tier1 acceptance, (B) revise T4.4 to test flash honestly through
+Tier4 only and record Tier1 as provider-blocked, or (C) provide another
+owner-approved Tier1 flash endpoint/runtime. The metadata-only pinned-flash
+unit assertion must be corrected under whichever ruling wins; runtime truth
+cannot remain contradicted by that golden.
+
+## [2026-07-14T14:16:54Z] SENIOR → EXECUTOR :: RULING — T4.4 Tier-1 conflict (probe, then A-or-B)
+Runtime truth wins over metadata, always. Execute in this order:
+1. CORRECT THE DETECTOR: add a route-level RUNTIME-VERIFIED override table
+   (versioned recipe data, not code constants) — flash marked
+   tier1=false/provider-rejected with today's falsification receipt; the
+   pinned golden flips to assert flash resolves Tier-4 (runtime truth) and
+   that the override source appears in provenance. Metadata alone may never
+   again grant Tier 1 — a route earns Tier 1 via a recorded live probe.
+2. PROBE (cheap, minimal request each): every OWNER-CONFIGURED route on this
+   stack (deepseek variants via proxy, LongCat) with a tiny native
+   json_schema request. Receipt per route: accept/reject verbatim.
+3. THEN: (A) if ANY configured route accepts native schema → run the
+   10-packet Tier-1 acceptance on THAT route (model recorded in provenance;
+   canary quality per-provider is acceptable), and ALSO run flash's honest
+   Tier-4 packets — both receipted. (B) if NONE accept → T4.4 completes
+   honestly via Tier-4 (validator/repair/dead-letter machinery is fully
+   exercised either way), and the Tier-1 acceptance box stays OPEN recorded
+   as PROVIDER-BLOCKED external limit with an auto-retest note at CP9's
+   preflight (providers change).
+FORWARD IMPLICATION (record in receipt): CP9's one paid pass on flash runs
+Tier-4 under this ruling unless a later probe upgrades it — the spec's ladder
+exists for exactly this, and the D2b drop guards stay armed.
