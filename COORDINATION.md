@@ -1091,3 +1091,64 @@ retrieval trace instead of the last authoritative one. Measurement-only
 correction APPROVED (same class as prior receipt-wrapper fixes); criteria
 unchanged. Fast tier resume shows all 3 cases complete EXIT=0. Proceed:
 Hybrid then Graph, each full 3-case command green before the next; then g10.
+
+## [2026-07-14T10:24:53Z] EXECUTOR → SENIOR :: RECEIPT
+g9 Hybrid Search (`qdrant_mongo`) PASS, 3/3 real `/api/chat` SSE cases.
+Exact command: `docker exec -e PYTHONPATH=/app -w /app
+polymath_v33-backend-1 python /tmp/rebatch_phase_a_g9.py --corpus-id
+62193743-4175-40da-b861-ba1e1e567b9a --tier qdrant_mongo`; direct and plain
+anchors complete with garden/lighthouse smoke citations; absent terms
+corpus-verified absent and fail_closed/model_skipped=true; effective tier
+remained qdrant_mongo for all cases; true EXIT=0
+(`/tmp/rebatch_phase_a_g9_qdrant_mongo.log`). Proceeding to Graph only.
+
+## [2026-07-14T10:26:32Z] EXECUTOR → SENIOR :: RECEIPT
+Official g9 PASS: 9/9 real `/api/chat` SSE cases across all three tiers.
+Graph command: `docker exec -e PYTHONPATH=/app -w /app
+polymath_v33-backend-1 python /tmp/rebatch_phase_a_g9.py --corpus-id
+62193743-4175-40da-b861-ba1e1e567b9a --tier qdrant_mongo_graph`; 3/3,
+true EXIT=0 (`/tmp/rebatch_phase_a_g9_qdrant_mongo_graph.log`). Graph direct
+and plain answers had complete ground-truth anchors and the correct smoke
+fixture citation; the corpus-verified absent case fail-closed with the model
+skipped. Requested graph tier remained effective for all. Together with the
+separate Fast and Hybrid receipts above, g9 is green. Proceeding to g10 only.
+
+## [2026-07-14T10:29:46Z] EXECUTOR → SENIOR :: BLOCKER
+g10 real authenticated repair-cycle completed but disposable harness exited
+1; CP1 stopped. Exact command: `docker exec -e PYTHONPATH=/app -w /app
+polymath_v33-backend-1 python /tmp/rebatch_phase_a_g10.py --corpus-id
+62193743-4175-40da-b861-ba1e1e567b9a`; true EXIT=1
+(`/tmp/rebatch_phase_a_g10.log`). The runbook's literal idempotency evidence
+is green: every corpus-scoped Mongo artifact count unchanged across 18
+collections; zero missing/duplicate identity groups across 15 identity
+surfaces; Qdrant unchanged naive/hrag/graph/schemas=186/186/106/510; Neo4j
+unchanged documents/chunks/entities/incident relationships=5/106/913/1412;
+readiness remained fully_enriched. One expected audit receipt row appended.
+
+Failure is an executor-added extra assertion absent from g10's contract:
+`changed_steps` had `promoted_extraction_mark_backfill` and
+`source_parse_job_plan`. Code diagnosis: the former reconciled metadata on
+existing rows without changing count; the latter defines `changed` as
+`planned=len(existing batch items)` and idempotently upserts the same five
+job IDs/last_planned timestamps, so it is true even with zero new rows and an
+empty runner. Proposed measurement-only correction: retain and report step
+statuses, but gate strictly on the specified invariant (all artifact counts
+unchanged + no duplicate/missing IDs + Qdrant/Neo4j unchanged +
+fully_enriched). Re-run the whole g10 command for a clean EXIT=0 receipt. No
+production mutation beyond the already completed canonical repair cycle.
+
+## [2026-07-14T17:35Z] SENIOR → EXECUTOR :: RULING (g10 — extra assertion, contract is green)
+The runbook's literal idempotency contract is fully satisfied by your own
+evidence: all counts unchanged (18 collections), zero identity
+missing/duplicates (15 surfaces), Qdrant/Neo4j unchanged, readiness
+fully_enriched. The failure came from an executor-added assertion
+(changed_steps empty) that is NOT part of g10's contract — and both flagged
+steps are honest no-ops at the data layer (metadata reconcile with no count
+change; a planner whose `changed` flag is true by definition on idempotent
+upserts). Remove the extra assertion, keep everything literal, re-run g10 for
+a single clean EXIT=0 receipt. Record one observation for the ledger: the
+ingest planner's `changed=true` on a zero-row idempotent upsert is misleading
+flag semantics — noted for P0.6/P2.7 hygiene, not tonight's scope.
+On the green g10: post the consolidated g1–g10 table RECEIPT with the
+provenance disclosures ruled earlier. Senior will then verify the table and
+post the CP2 INTENT.
