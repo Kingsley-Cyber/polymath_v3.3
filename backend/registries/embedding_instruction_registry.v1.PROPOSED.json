@@ -1,16 +1,52 @@
 {
   "registry": "embedding_instruction_registry",
-  "version": "v1-PROPOSED",
-  "status": "PROPOSED BY SENIOR 2026-07-14 — awaiting owner approval. Instructions are retrieval-behavior recipe data: changing one shifts query vectors, so every change is a new version + recall A/B. Documents/artifacts ALWAYS embed raw (no instruction); only queries carry instructions (Qwen3 asymmetric profile, format: 'Instruct: {task}\\nQuery: {query}').",
-  "model_family_note": "Written for Qwen3-Embedding (0.6B today; unchanged semantics if/when the 4B migration happens — instruction_version rides the ProjectionManifest embedding_profile).",
-  "instructions": [
-    {"family": "source_child", "task": "Given a question, retrieve source passages that directly answer or discuss it"},
-    {"family": "context_enriched_child", "task": "Given a question, retrieve passages whose surrounding context answers or discusses it"},
-    {"family": "atomic_claim", "task": "Given a statement or question, retrieve atomic claims that support, refute, or qualify it"},
-    {"family": "parent_summary", "task": "Given a question, retrieve section summaries covering the topics it asks about"},
-    {"family": "document_summary", "task": "Given a question, retrieve documents whose overall subject matter covers it"},
-    {"family": "latent_concept", "task": "Given a question, retrieve underlying concepts and principles it implicitly involves"},
-    {"family": "motif_description", "task": "Given a described situation or mechanism, retrieve recurring structural patterns that match its causal shape"},
-    {"family": "cross_domain_analogy", "task": "Given a mechanism or situation, retrieve structurally analogous cases from different fields"}
+  "version": "v2-PROPOSED",
+  "status": "PROPOSED BY SENIOR 2026-07-14 (rev 2: UNIVERSAL-FIRST per owner directive) \u2014 awaiting owner approval. One universal query instruction for ALL families; per-family overrides are EMPTY and may only be added when an A/B proves a family needs specialization. Documents always embed raw. Any instruction change = new version + recall A/B (it shifts every query vector).",
+  "model_family_note": "Written for Qwen3-Embedding (0.6B today; unchanged semantics if/when the 4B migration happens \u2014 instruction_version rides the ProjectionManifest embedding_profile).",
+  "baseline_live_v0": {
+    "profile_version": "qwen3-retrieval-query-v1",
+    "instruction": "given the user question, retrieve the most relevant information",
+    "location": "backend/services/embedder.py QWEN3_QUERY_INSTRUCTION",
+    "note": "current production instruction \u2014 the A/B comparator"
+  },
+  "universal": {
+    "instruction": "Given a question in everyday language, retrieve passages, summaries, and concepts from books and documents in any field that answer, explain, or underlie it",
+    "applies_to": "all vector families by default",
+    "activation_gate": "frozen-suite A/B vs baseline_live_v0 (Fast tier first, then all tiers); promote only on lay-language/cross-corpus improvement with no shape regression and negatives 5/5"
+  },
+  "per_family_overrides": [],
+  "instructions_archive_v1_draft": [
+    {
+      "family": "source_child",
+      "task": "Given a question, retrieve source passages that directly answer or discuss it"
+    },
+    {
+      "family": "context_enriched_child",
+      "task": "Given a question, retrieve passages whose surrounding context answers or discusses it"
+    },
+    {
+      "family": "atomic_claim",
+      "task": "Given a statement or question, retrieve atomic claims that support, refute, or qualify it"
+    },
+    {
+      "family": "parent_summary",
+      "task": "Given a question, retrieve section summaries covering the topics it asks about"
+    },
+    {
+      "family": "document_summary",
+      "task": "Given a question, retrieve documents whose overall subject matter covers it"
+    },
+    {
+      "family": "latent_concept",
+      "task": "Given a question, retrieve underlying concepts and principles it implicitly involves"
+    },
+    {
+      "family": "motif_description",
+      "task": "Given a described situation or mechanism, retrieve recurring structural patterns that match its causal shape"
+    },
+    {
+      "family": "cross_domain_analogy",
+      "task": "Given a mechanism or situation, retrieve structurally analogous cases from different fields"
+    }
   ]
 }
