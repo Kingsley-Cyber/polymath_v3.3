@@ -1,0 +1,87 @@
+{
+  "registry": "motif_matching_policy",
+  "version": "v1",
+  "authority": "executor-proposed, owner-ratifiable",
+  "owner_ratification_required": true,
+  "source": "docs/T9_2_FRAME_MOTIF_BOUNDARY_2026-07-14.md; senior rulings 2026-07-14T18:34:02Z and 2026-07-14T18:36:03Z",
+  "changes_require_new_version": true,
+  "policy_note": "Strict contiguous candidate-only motif matching with exact thread keys and separate definitional sequence-alignment and role-continuity metrics.",
+  "sequence_tolerance": {
+    "required_canonical_stage_coverage": "all",
+    "maximum_missing_stages": 0,
+    "maximum_intervening_frames_per_transition": 0,
+    "caller_supplies_sequence_index": true,
+    "required_sequence_index_step": 1,
+    "unregistered_substitution_allowed": false,
+    "approved_stage_binding_registry": "motif_stage_superframe_binding.v1",
+    "candidate_generation_tiers": [
+      "dominant",
+      "admissible"
+    ],
+    "tier_recording": "raw_score_components",
+    "query_mode_strictness": "serve_only_out_of_scope"
+  },
+  "role_threading": {
+    "key_source": "explicit_frame_role_binding_thread_key",
+    "surface_or_alias_matching_allowed": false,
+    "transition_rules": [
+      {
+        "priority": 200,
+        "classification": "directional",
+        "match": "prior_target_intersects_next_source"
+      },
+      {
+        "priority": 100,
+        "classification": "shared_participant",
+        "match": "any_exact_thread_key_intersection"
+      },
+      {
+        "priority": 0,
+        "classification": "disconnected",
+        "match": "no_exact_thread_key_intersection"
+      }
+    ]
+  },
+  "metrics": {
+    "sequence_alignment": {
+      "formula": "matched_stage_count / canonical_stage_count",
+      "strict_v1_value_for_emitted_windows": 1.0,
+      "interpretation": "definitional_under_strict_v1_not_quality_signal"
+    },
+    "role_continuity": {
+      "formula": "connected_transition_count / total_transition_count",
+      "raw_components_required": true
+    },
+    "metrics_must_remain_separate": true,
+    "fused_final_score": null
+  },
+  "candidate_lane_dispositions": {
+    "confirmed_candidate": "all_transitions_connected",
+    "provisional": "some_but_not_all_transitions_connected",
+    "rejected": "no_transitions_connected_or_required_qualifier_missing",
+    "confirmed_candidate_is_accepted": false
+  },
+  "qualifier_rules": [
+    {
+      "motif_id": "M12",
+      "qualifier": "UNDER CONDITION",
+      "requirement": "at_least_one_matched_frame_has_own_compiled_claim_condition",
+      "surrounding_text_inference_allowed": false,
+      "failure_reason": "required_condition_missing"
+    }
+  ],
+  "coverage": {
+    "generic_matcher_supported_motif_count": 12,
+    "total_motif_count": 12,
+    "predicate_lane_reachable_superframe_count": 8,
+    "total_superframe_count": 16,
+    "predicate_lane_reachable_motif_ids": [
+      "M03",
+      "M08",
+      "M09",
+      "M12"
+    ],
+    "predicate_lane_reachable_motif_count": 4,
+    "coverage_note": "The generic matcher interprets all owner motifs; current T9.1 predicate-route frames can realize only 4/12. Other motifs require separately authorized role-bound frame lanes."
+  }
+}

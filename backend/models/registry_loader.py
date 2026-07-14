@@ -37,6 +37,8 @@ FILES = {
     "predicate_normalization": "predicate_normalization.v1.json",
     "domain_resolution": "domain_resolution_policy.v1.json",
     "superframe_rule": "superframe_rule_registry.v1.json",
+    "frame_role_binding": "frame_role_binding_policy.v1.json",
+    "motif_matching": "motif_matching_policy.v1.json",
 }
 
 
@@ -381,6 +383,257 @@ def _validate_superframe_rules(
         raise RegistryError("predicate routing must honestly report 8/16 frames")
 
 
+def _validate_frame_role_binding_policy(
+    registry: dict[str, Any],
+    *,
+    known_superframes: set[str],
+    predicate_reachable_frames: set[str],
+) -> None:
+    expected_fields = {
+        "registry",
+        "version",
+        "authority",
+        "owner_ratification_required",
+        "source",
+        "changes_require_new_version",
+        "policy_note",
+        "current_claim_argument_role_vocabulary",
+        "hard_role_vocabulary_check",
+        "role_bindings",
+        "unbound_argument_policy",
+        "thread_key_policy",
+        "frame_instance_policy",
+        "frame_specific_semantic_roles",
+        "coverage",
+    }
+    if set(registry) != expected_fields:
+        raise RegistryError("frame role-binding policy fields are not exact")
+    _validate_proposed_v1_registry(
+        registry,
+        registry_id="frame_role_binding_policy",
+    )
+    if registry["current_claim_argument_role_vocabulary"] != [
+        "subject",
+        "object",
+    ]:
+        raise RegistryError("ClaimArgumentV1 role vocabulary policy drifted")
+    if registry["hard_role_vocabulary_check"] is not True:
+        raise RegistryError("ClaimArgumentV1 role vocabulary must fail closed")
+    if registry["role_bindings"] != [
+        {
+            "claim_argument_role": "subject",
+            "relation_direction_role": "source",
+        },
+        {
+            "claim_argument_role": "object",
+            "relation_direction_role": "target",
+        },
+    ]:
+        raise RegistryError("v1 relation-direction role bindings drifted")
+    if registry["unbound_argument_policy"] != {
+        "current_unbound_argument_count": 0,
+        "interpretation": (
+            "definitional_under_claim_record_v1_subject_object_literal"
+        ),
+        "future_role_behavior": "hard_error_requires_frame_instance_v2",
+    }:
+        raise RegistryError("v1 unbound-argument policy drifted")
+    if registry["thread_key_policy"] != {
+        "required_for_every_filler_ref": True,
+        "source": "explicit_caller_mapping",
+        "caller_may_explicitly_reuse_filler_ref": True,
+        "surface_matching": False,
+        "alias_guessing": False,
+        "implicit_fallback": False,
+        "coreference_backlog": "ClaimRepair",
+    }:
+        raise RegistryError("frame thread-key policy drifted")
+    if registry["frame_instance_policy"] != {
+        "cardinality": "one_per_claim_and_superframe_rule_match",
+        "instance_role": "primary",
+        "assignment_state": "candidate",
+        "accepted_state_allowed": False,
+        "derivation_method": "predicate_superframe_rule_role_binding",
+        "retained_claim_fields": [
+            "polarity",
+            "modality",
+            "conditions",
+            "exceptions",
+            "temporal_cues",
+            "evidence_sentence_ids",
+            "source_relation_ids",
+        ],
+    }:
+        raise RegistryError("frame-instance candidate policy drifted")
+    if registry["frame_specific_semantic_roles"] != {
+        "status": "deferred_to_owner_registry",
+        "v1_roles_are_relation_direction_only": True,
+    }:
+        raise RegistryError("frame-specific role deferral drifted")
+    coverage = registry["coverage"]
+    if set(coverage) != {
+        "predicate_lane_reachable_superframe_ids",
+        "predicate_lane_reachable_superframe_count",
+        "total_superframe_count",
+        "coverage_note",
+    }:
+        raise RegistryError("frame role-binding coverage fields are not exact")
+    if coverage["predicate_lane_reachable_superframe_ids"] != sorted(
+        predicate_reachable_frames
+    ):
+        raise RegistryError("frame role-binding reachable IDs are dishonest")
+    if coverage["predicate_lane_reachable_superframe_count"] != len(
+        predicate_reachable_frames
+    ):
+        raise RegistryError("frame role-binding reachable count is dishonest")
+    if coverage["total_superframe_count"] != len(known_superframes):
+        raise RegistryError("frame role-binding total count is dishonest")
+
+
+def _validate_motif_matching_policy(
+    registry: dict[str, Any],
+    *,
+    motifs: dict[str, dict[str, Any]],
+    bindings: dict[str, dict[str, Any]],
+    known_superframes: set[str],
+    predicate_reachable_frames: set[str],
+) -> None:
+    expected_fields = {
+        "registry",
+        "version",
+        "authority",
+        "owner_ratification_required",
+        "source",
+        "changes_require_new_version",
+        "policy_note",
+        "sequence_tolerance",
+        "role_threading",
+        "metrics",
+        "candidate_lane_dispositions",
+        "qualifier_rules",
+        "coverage",
+    }
+    if set(registry) != expected_fields:
+        raise RegistryError("motif matching policy fields are not exact")
+    _validate_proposed_v1_registry(
+        registry,
+        registry_id="motif_matching_policy",
+    )
+    if registry["sequence_tolerance"] != {
+        "required_canonical_stage_coverage": "all",
+        "maximum_missing_stages": 0,
+        "maximum_intervening_frames_per_transition": 0,
+        "caller_supplies_sequence_index": True,
+        "required_sequence_index_step": 1,
+        "unregistered_substitution_allowed": False,
+        "approved_stage_binding_registry": "motif_stage_superframe_binding.v1",
+        "candidate_generation_tiers": ["dominant", "admissible"],
+        "tier_recording": "raw_score_components",
+        "query_mode_strictness": "serve_only_out_of_scope",
+    }:
+        raise RegistryError("strict-v1 motif sequence tolerance drifted")
+    if registry["role_threading"] != {
+        "key_source": "explicit_frame_role_binding_thread_key",
+        "surface_or_alias_matching_allowed": False,
+        "transition_rules": [
+            {
+                "priority": 200,
+                "classification": "directional",
+                "match": "prior_target_intersects_next_source",
+            },
+            {
+                "priority": 100,
+                "classification": "shared_participant",
+                "match": "any_exact_thread_key_intersection",
+            },
+            {
+                "priority": 0,
+                "classification": "disconnected",
+                "match": "no_exact_thread_key_intersection",
+            },
+        ],
+    }:
+        raise RegistryError("exact motif role-threading policy drifted")
+    if registry["metrics"] != {
+        "sequence_alignment": {
+            "formula": "matched_stage_count / canonical_stage_count",
+            "strict_v1_value_for_emitted_windows": 1.0,
+            "interpretation": "definitional_under_strict_v1_not_quality_signal",
+        },
+        "role_continuity": {
+            "formula": "connected_transition_count / total_transition_count",
+            "raw_components_required": True,
+        },
+        "metrics_must_remain_separate": True,
+        "fused_final_score": None,
+    }:
+        raise RegistryError("motif dual-metric policy drifted")
+    if registry["candidate_lane_dispositions"] != {
+        "confirmed_candidate": "all_transitions_connected",
+        "provisional": "some_but_not_all_transitions_connected",
+        "rejected": "no_transitions_connected_or_required_qualifier_missing",
+        "confirmed_candidate_is_accepted": False,
+    }:
+        raise RegistryError("motif candidate-lane dispositions drifted")
+    if registry["qualifier_rules"] != [
+        {
+            "motif_id": "M12",
+            "qualifier": "UNDER CONDITION",
+            "requirement": (
+                "at_least_one_matched_frame_has_own_compiled_claim_condition"
+            ),
+            "surrounding_text_inference_allowed": False,
+            "failure_reason": "required_condition_missing",
+        }
+    ]:
+        raise RegistryError("M12 condition provenance policy drifted")
+
+    reachable_motifs = []
+    for motif_id, motif in motifs.items():
+        stages = bindings[motif_id]["stages"]
+        if len(stages) != len(motif["stages"]):
+            raise RegistryError(f"motif {motif_id} stage coverage drifted")
+        if all(
+            any(
+                row["superframe"] in predicate_reachable_frames
+                for row in stage["admissible"]
+            )
+            for stage in stages
+        ):
+            reachable_motifs.append(motif_id)
+    coverage = registry["coverage"]
+    if set(coverage) != {
+        "generic_matcher_supported_motif_count",
+        "total_motif_count",
+        "predicate_lane_reachable_superframe_count",
+        "total_superframe_count",
+        "predicate_lane_reachable_motif_ids",
+        "predicate_lane_reachable_motif_count",
+        "coverage_note",
+    }:
+        raise RegistryError("motif matching coverage fields are not exact")
+    if coverage["generic_matcher_supported_motif_count"] != len(motifs):
+        raise RegistryError("generic motif matcher coverage is dishonest")
+    if coverage["total_motif_count"] != len(motifs):
+        raise RegistryError("motif total count is dishonest")
+    if coverage["predicate_lane_reachable_superframe_count"] != len(
+        predicate_reachable_frames
+    ):
+        raise RegistryError("motif predicate-lane frame count is dishonest")
+    if coverage["total_superframe_count"] != len(known_superframes):
+        raise RegistryError("motif total-frame count is dishonest")
+    if coverage["predicate_lane_reachable_motif_ids"] != sorted(
+        reachable_motifs
+    ):
+        raise RegistryError("predicate-lane reachable motif IDs are dishonest")
+    if coverage["predicate_lane_reachable_motif_count"] != len(
+        reachable_motifs
+    ):
+        raise RegistryError("predicate-lane reachable motif count is dishonest")
+    if sorted(reachable_motifs) != ["M03", "M08", "M09", "M12"]:
+        raise RegistryError("predicate lane must honestly report 4/12 motifs")
+
+
 def _read(name: str) -> dict[str, Any]:
     path = REGISTRY_DIR / FILES[name]
     if not path.exists():
@@ -416,7 +669,12 @@ def load_all() -> dict[str, dict[str, Any]]:
                     f"affinity[{row['domain_id']}] references unknown superframe {mf}"
                 )
 
-    bindings = {b["motif_id"]: b for b in data["binding"]["bindings"]}
+    binding_rows = data["binding"]["bindings"]
+    bindings = {b["motif_id"]: b for b in binding_rows}
+    if len(bindings) != len(binding_rows):
+        raise RegistryError("motif stage-binding IDs must be unique")
+    if set(bindings) != set(motifs):
+        raise RegistryError("motif stage-binding coverage must exactly match motifs")
     for motif_id, motif in motifs.items():
         if motif_id not in bindings:
             raise RegistryError(f"motif {motif_id} has no stage bindings")
@@ -437,7 +695,20 @@ def load_all() -> dict[str, dict[str, Any]]:
                     f"{motif_id}/{stage['stage']}: expected exactly 1 dominant, "
                     f"found {len(dominants)}"
                 )
+            stage_frames = [a.get("superframe") for a in adm]
+            if len(stage_frames) != len(set(stage_frames)):
+                raise RegistryError(
+                    f"{motif_id}/{stage['stage']}: duplicate superframe binding"
+                )
             for a in adm:
+                if set(a) != {"superframe", "tier"}:
+                    raise RegistryError(
+                        f"{motif_id}/{stage['stage']}: binding fields are not exact"
+                    )
+                if a["tier"] not in {"dominant", "admissible"}:
+                    raise RegistryError(
+                        f"{motif_id}/{stage['stage']}: unknown binding tier"
+                    )
                 if a["superframe"] not in superframes:
                     raise RegistryError(
                         f"{motif_id}/{stage['stage']}: unknown superframe {a['superframe']}"
@@ -454,6 +725,21 @@ def load_all() -> dict[str, dict[str, Any]]:
         controlled_predicates=vocab["predicate_types"],
         known_superframes=set(superframes),
         known_entity_types=set(vocab["entity_types"]),
+    )
+    predicate_reachable_frames = set(
+        data["superframe_rule"]["coverage"]["reachable_superframe_ids"]
+    )
+    _validate_frame_role_binding_policy(
+        data["frame_role_binding"],
+        known_superframes=set(superframes),
+        predicate_reachable_frames=predicate_reachable_frames,
+    )
+    _validate_motif_matching_policy(
+        data["motif_matching"],
+        motifs=motifs,
+        bindings=bindings,
+        known_superframes=set(superframes),
+        predicate_reachable_frames=predicate_reachable_frames,
     )
 
     predicate_normalization = data["predicate_normalization"]
@@ -608,6 +894,18 @@ def superframe_rule_registry() -> dict[str, Any]:
     """Return the immutable candidate-only predicate→superframe recipe."""
 
     return load_all()["superframe_rule"]
+
+
+def frame_role_binding_policy() -> dict[str, Any]:
+    """Return the immutable relation-direction frame-binding recipe."""
+
+    return load_all()["frame_role_binding"]
+
+
+def motif_matching_policy() -> dict[str, Any]:
+    """Return the immutable strict-v1 motif matching recipe."""
+
+    return load_all()["motif_matching"]
 
 
 def is_controlled_predicate(predicate: str) -> bool:

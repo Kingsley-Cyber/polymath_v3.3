@@ -1,0 +1,79 @@
+{
+  "authority": "executor-proposed, owner-ratifiable",
+  "execution": {
+    "durable_writes": 0,
+    "mode": "local_deterministic_count_only",
+    "provider_calls": 0,
+    "spend_usd": 0
+  },
+  "frame_compilation": {
+    "accepted_state_count": 0,
+    "candidate_state_count": 27,
+    "compilation_recipe_hashes": [
+      "sha256:f8fa15588a5938de77900a7390654eb86a454b8c81d74020a9e2a12ecca5b602"
+    ],
+    "frame_counts": {
+      "MF02": 1,
+      "MF04": 10,
+      "MF06": 11,
+      "MF09": 5
+    },
+    "frame_instance_count": 27,
+    "role_binding_count": 54,
+    "source_binding_count": 27,
+    "target_binding_count": 27,
+    "unbound_argument_count": 0,
+    "unbound_count_is_definitional": true
+  },
+  "motif_matching": {
+    "accepted_state_count": 0,
+    "dispositions": {
+      "confirmed_candidate": 4,
+      "provisional": 1,
+      "rejected": 2
+    },
+    "fused_final_score_present": false,
+    "m12_required_condition_missing_count": 1,
+    "matcher_recipe_hashes": [
+      "sha256:1ab1f04a07d54989c4c17e801ed20254f03f7c18cad47fe53253d96866a5a2da"
+    ],
+    "negative_case_count": 3,
+    "positive_case_count": 7,
+    "role_continuity_values": [
+      0.0,
+      0.3333333333333333,
+      1.0
+    ],
+    "sequence_aligned_window_count": 7,
+    "sequence_alignment_is_definitional": true,
+    "sequence_alignment_values": [
+      1.0
+    ],
+    "stage_match_tiers": {
+      "admissible": 1,
+      "dominant": 25
+    },
+    "strict_negative_m03_match_count": 0,
+    "transition_classifications": {
+      "directional": 11,
+      "disconnected": 5,
+      "shared_participant": 3
+    }
+  },
+  "registries": {
+    "frame_role_binding_policy_hash": "sha256:104bbb48072ea4e9bdcd15313de2a74bb9a0ca04bdb86c20491024746e6dd540",
+    "generic_matcher_supported_motif_count": 12,
+    "motif_matching_policy_hash": "sha256:03b4dbf937008a8f8d50bca6786b46aacfc890a07efaca797d80b68c34eec2a7",
+    "predicate_lane_reachable_motif_count": 4,
+    "predicate_lane_reachable_motif_ids": [
+      "M03",
+      "M08",
+      "M09",
+      "M12"
+    ],
+    "predicate_lane_reachable_superframe_count": 8,
+    "total_motif_count": 12,
+    "total_superframe_count": 16
+  },
+  "schema_version": "frame_motif_t9_2_census.v1"
+}

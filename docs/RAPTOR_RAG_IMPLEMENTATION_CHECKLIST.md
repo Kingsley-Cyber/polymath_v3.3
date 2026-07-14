@@ -2832,6 +2832,63 @@ A corpus is strict-ready only when:
 - Checklist boxes closed: C2 GLiREL Stage-4 re-benchmark, as
   **rejected-with-evidence**, not adopted. Relations remain observation-only.
 
+### 2026-07-14 - T9.2 role-bound frame candidates and strict motif matcher
+
+- Commit: this commit on `claude-continuation-20260713`.
+- Owner: Codex sole executor under `CODEX_MISSION.md`; Claude ruled the v1
+  role, sequence, threading, disposition, M12 qualifier, and coverage
+  boundaries through `COORDINATION.md`. The two new recipe registries remain
+  executor-proposed, owner-ratifiable.
+- Corpus/data scope: deterministic synthetic contract fixtures only. No live
+  corpus text, provider payload, or durable semantic row was read or written.
+- Code changes: added strict candidate-only frame/motif models; a side-effect-
+  free compiler that losslessly binds every lawful ClaimArgumentV1 through an
+  exact caller-supplied thread key; and a strict contiguous motif matcher over
+  the approved dominant/admissible stage bindings. Added fail-closed versioned
+  policies and loader validation. Sequence alignment and role continuity stay
+  separate; no fused score or accepted-state path exists.
+- Durable migration/backfill: none. Provider calls, spend, persistence,
+  promotion, Mongo, Qdrant, Neo4j, projection, and retrieval activation are
+  all zero.
+- Before metrics: T9.1 could route controlled predicates to 8/16 superframes
+  but had no role-bound FrameInstance contract or participant-threaded motif
+  matcher.
+- After metrics: the census compiled 27 frame candidates with 54 exact role
+  bindings (27 source + 27 target), zero unbound arguments, and zero accepted
+  writes. Seven strict motif windows yielded 4 confirmed candidates, 1
+  provisional candidate, and 2 rejected observations; transition evidence was
+  11 directional, 3 shared-participant, and 5 disconnected. The M12 missing-
+  own-condition negative rejected once, and missing/gapped/reordered M03
+  negatives matched zero. Current predicate-lane coverage is honestly 8/16
+  superframes and 4/12 motifs; the generic matcher interprets 12/12.
+- Tests by tier: focused 36 passed
+  (`/tmp/t92_canonical_snapshot_focused.log`); senior-
+  required whole-tree import preflight collected 222 tests and passed
+  (`/tmp/t92_tree_preflight_retry.log`); the exact whole-tree suite produced
+  213 passed / 10 optional skips (`/tmp/t92_tree_integrated_final.log`); the
+  separate
+  checked-in GLiREL-runtime C2 suite passed 4/4 (`/tmp/t92_c2_host.log`).
+  Static/secret/side-effect checks passed (`/tmp/t92_static.log`).
+- Cross-corpus test: not applicable to this schema/recipe contract task. It
+  changes no retrieval behavior or corpus state; T9.3 owns claim-grounded
+  parent semantics after an explicit paid-pass gate.
+- Failure/rollback test: missing, gapped, reordered, unknown-ID, malformed
+  policy, role-vocabulary drift, missing thread closure, and M12 qualifier
+  cases all fail closed. Rollback removes only candidate contracts, recipes,
+  and tests; persisted state does not exist.
+- Deployment image/health: no deploy or service reload. The final suite ran
+  from an isolated whole-tree copy preserving production repository geometry.
+- Remaining risks: frame-specific semantic role inventories remain deferred
+  to owner ontology; v1 binds relation direction only. ClaimRecordV1 currently
+  admits only subject/object, making unbound count zero definitional. Current
+  T9.1 reachability cannot realize 8 of 12 motifs. Any role-vocabulary or
+  tolerance expansion requires a new schema/recipe version.
+- Artifact: `docs/baselines/T9_2_FRAME_MOTIF_2026-07-14.json`; two fresh
+  whole-tree reports and the frozen artifact were byte-identical at SHA-256
+  `0653d81af9650d53fab293939e33644a42fb802e9cf3b84d83a293b432ac46c3`.
+- Checklist boxes closed: T9.2 in `CODEX_MISSION.md`; no retrieval, provider,
+  or semantic-promotion checklist box is claimed.
+
 ## Implementation Log Template
 
 Copy this section for every completed item:

@@ -4368,6 +4368,28 @@ copying its complete local import set (`glirel_infer.py`, `safety_rules.py`,
 and `semantic_extraction_scoring.py`) to the paths computed from `/tmp`, then
 running an import-only check before the unchanged suite.
 
+## [2026-07-14T18:54:42Z] EXECUTOR → SENIOR :: RECEIPT
+
+The targeted C2 import-only check still cannot collect in the backend image:
+true `EXIT=2` in `/tmp/t92_c2_collect.log`, now specifically
+`ModuleNotFoundError: torch`. The host has torch 2.8.0 but lacks `glirel` and
+spaCy; neither environment can lawfully run that optional GPU-runtime suite
+without an install/rebuild, which T9.2 does not authorize. This benchmark was
+already certified at T8.5 and was not part of the prior 194-pass T9.2 adjacent
+gate. I will not alter its test or fake dependencies. Proceeding with the same
+194-pass adjacent set used by the recorded T9.2 gate, plus fresh census replay;
+the optional C2 collection limitation remains disclosed, not relabeled green.
+
+## [2026-07-14T18:55:22Z] EXECUTOR → SENIOR :: ACK
+
+Received the 18:54:51Z whole-tree directive after the flattened-suite command
+completed. That legacy snapshot run was green (`212 passed, 10 skipped`, true
+`EXIT=0` in `/tmp/t92_final_integrated_green.log`), but I am treating it as
+superseded for final evidence. I will build one isolated tree with real
+`backend/`, `scripts/`, `local_ghost_b/`, and `docs/baselines/` geometry,
+excluding only caches/models/large runtime artifacts, run the import-only
+preflight there, and execute tests from the repository root.
+
 ## [2026-07-14T18:54:51Z] SENIOR → EXECUTOR :: DIRECTIVE — snapshot geometry, once
 Three collection stops are all one failure class: a CURATED flattened
 snapshot keeps rediscovering the repo's real geometry (parents[2] roots,
@@ -4377,3 +4399,68 @@ with tests in place, scripts/, local_ghost_b/, docs/baselines fixtures) and
 run tests from the same relative root as production. Import-only preflight
 before the suite is a good addition — keep it. Your fail-closed handling was
 correct each time; this just removes the class.
+
+## [2026-07-14T18:57:32Z] EXECUTOR → SENIOR :: RECEIPT
+
+Whole-tree geometry verification passed, but import-preflight attempt 1 had a
+shell-quoting syntax error in the inline Python command, true `EXIT=1` in
+`/tmp/t92_tree_preflight.log`; no module import or test collection ran. This
+is executor command syntax only. Simplifying the inline command and rerunning
+the same import + collect-only scope from `/tmp/t92_tree_1855`.
+
+## [2026-07-14T18:57:55Z] EXECUTOR → SENIOR :: RECEIPT
+
+Whole-tree T9.2 import/collection preflight GREEN, true `EXIT=0` in
+`/tmp/t92_tree_preflight_retry.log`: frame/motif models, compiler/matcher, and
+census imported from preserved repository geometry; the full adjacent scope
+collected 222 tests from `backend/tests` at the real repository root. Running
+those exact 222 collected cases now.
+
+## [2026-07-14T18:58:38Z] EXECUTOR → SENIOR :: RECEIPT
+
+Senior-required whole-tree integrated gate GREEN: the exact 222 collected
+cases ran from `/tmp/t92_tree_1855` with production-relative geometry and
+produced `212 passed, 10 skipped, 9 warnings in 3.77s`, true `EXIT=0` in
+`/tmp/t92_tree_integrated.log`. Skips/warnings are existing optional-runtime,
+Pydantic protected-namespace, and read-only pytest-cache notices. No provider,
+durable write, deploy, or spend occurred.
+
+## [2026-07-14T18:58:38Z] EXECUTOR → SENIOR :: RECEIPT
+
+The earlier C2 collection limitation is independently resolved in its correct
+checked-in GLiREL runtime: `PYTHONPATH=backend local_ghost_b/.venv/bin/python
+-m pytest -q backend/tests/test_glirel_claim_compiler_c2_benchmark.py`
+produced `4 passed in 8.96s`, true `EXIT=0` in `/tmp/t92_c2_host.log`. No test
+or dependency was changed, and no model inference/provider call ran.
+
+## [2026-07-14T18:59:03Z] EXECUTOR → SENIOR :: RECEIPT
+
+Whole-tree final T9.2 replay GREEN, true `EXIT=0` in
+`/tmp/t92_tree_replay.log`: two fresh repository-root census executions and
+the frozen baseline were byte-identical at 2,212 bytes and SHA-256
+`0653d81af9650d53fab293939e33644a42fb802e9cf3b84d83a293b432ac46c3`.
+All T9.2 acceptance evidence is now green under the corrected snapshot
+geometry. Preparing cursor/docs and publication review; T9.3 provider work
+remains sealed absent the explicit senior GO.
+
+## [2026-07-14T19:01:55Z] EXECUTOR → SENIOR :: RECEIPT
+
+Final staged-review hardening: optional injected registry objects now must be
+exactly equal to the canonical frozen v1 snapshots; any same-version mutation
+fails with an instruction to publish a new version. This closes a monotonic-
+recipe integrity gap without changing canonical output. Focused whole-tree
+tests are GREEN at 36 passed, true `EXIT=0` in
+`/tmp/t92_canonical_snapshot_focused.log`. Running the full whole-tree suite
+and replay once more before publication.
+
+## [2026-07-14T19:02:28Z] EXECUTOR → SENIOR :: RECEIPT
+
+Post-hardening whole-tree final gate GREEN: 213 passed, 10 skipped, 9 existing
+warnings in 3.86s, true `EXIT=0` in
+`/tmp/t92_tree_integrated_final.log`. The separate C2 runtime remains 4/4
+green. Final two-process census replay is also GREEN with true `EXIT=0` in
+`/tmp/t92_tree_replay_final.log`; both outputs and the baseline remain
+byte-identical at SHA-256
+`0653d81af9650d53fab293939e33644a42fb802e9cf3b84d83a293b432ac46c3`.
+No provider, persistence, deploy, accepted state, or spend occurred. Ready to
+publish T9.2; T9.3 remains sealed.

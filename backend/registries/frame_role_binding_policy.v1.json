@@ -1,0 +1,73 @@
+{
+  "registry": "frame_role_binding_policy",
+  "version": "v1",
+  "authority": "executor-proposed, owner-ratifiable",
+  "owner_ratification_required": true,
+  "source": "docs/T9_2_FRAME_MOTIF_BOUNDARY_2026-07-14.md; senior rulings 2026-07-14T18:34:02Z and 2026-07-14T18:36:03Z",
+  "changes_require_new_version": true,
+  "policy_note": "Lossless candidate-only relation-direction bindings. Per-superframe semantic core roles remain owner ontology and are not invented in v1.",
+  "current_claim_argument_role_vocabulary": [
+    "subject",
+    "object"
+  ],
+  "hard_role_vocabulary_check": true,
+  "role_bindings": [
+    {
+      "claim_argument_role": "subject",
+      "relation_direction_role": "source"
+    },
+    {
+      "claim_argument_role": "object",
+      "relation_direction_role": "target"
+    }
+  ],
+  "unbound_argument_policy": {
+    "current_unbound_argument_count": 0,
+    "interpretation": "definitional_under_claim_record_v1_subject_object_literal",
+    "future_role_behavior": "hard_error_requires_frame_instance_v2"
+  },
+  "thread_key_policy": {
+    "required_for_every_filler_ref": true,
+    "source": "explicit_caller_mapping",
+    "caller_may_explicitly_reuse_filler_ref": true,
+    "surface_matching": false,
+    "alias_guessing": false,
+    "implicit_fallback": false,
+    "coreference_backlog": "ClaimRepair"
+  },
+  "frame_instance_policy": {
+    "cardinality": "one_per_claim_and_superframe_rule_match",
+    "instance_role": "primary",
+    "assignment_state": "candidate",
+    "accepted_state_allowed": false,
+    "derivation_method": "predicate_superframe_rule_role_binding",
+    "retained_claim_fields": [
+      "polarity",
+      "modality",
+      "conditions",
+      "exceptions",
+      "temporal_cues",
+      "evidence_sentence_ids",
+      "source_relation_ids"
+    ]
+  },
+  "frame_specific_semantic_roles": {
+    "status": "deferred_to_owner_registry",
+    "v1_roles_are_relation_direction_only": true
+  },
+  "coverage": {
+    "predicate_lane_reachable_superframe_ids": [
+      "MF02",
+      "MF03",
+      "MF04",
+      "MF06",
+      "MF07",
+      "MF09",
+      "MF15",
+      "MF16"
+    ],
+    "predicate_lane_reachable_superframe_count": 8,
+    "total_superframe_count": 16,
+    "coverage_note": "This policy binds T9.1 predicate-route frames only; 8/16 reachability is not full frame-system coverage."
+  }
+}

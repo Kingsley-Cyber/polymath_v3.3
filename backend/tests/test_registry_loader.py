@@ -8,10 +8,12 @@ change ships as a NEW version file plus updated goldens, never a silent edit.
 from __future__ import annotations
 
 import copy
+from typing import get_args
 
 import pytest
 
 import models.registry_loader as registry_loader
+from models.claim_record import ClaimArgumentV1
 from models.registry_loader import (
     RegistryError,
     admissible_superframes,
@@ -19,11 +21,13 @@ from models.registry_loader import (
     domain_affinity_priors,
     domain_resolution_policy,
     embedding_instruction_profile,
+    frame_role_binding_policy,
     is_controlled_predicate,
     is_entity_type,
     latent_budget,
     load_all,
     motif,
+    motif_matching_policy,
     normalize_predicate_lemma,
     registry_hashes,
     superframe,
@@ -42,6 +46,8 @@ FROZEN_HASHES = {
     "predicate_normalization": "sha256:a0870e5d4cd5f315719245c301ad074824857115ce6f1b9dd7a7d45cd6ca030d",
     "domain_resolution": "sha256:1c54da7c132562c25ab71ddce2cf27253f8405fc0c6a2e7c47f442557d8ced89",
     "superframe_rule": "sha256:7ad83a5735bec13baafef89851bac50f22420b89bbe617e86921a7bdf2dc89c8",
+    "frame_role_binding": "sha256:104bbb48072ea4e9bdcd15313de2a74bb9a0ca04bdb86c20491024746e6dd540",
+    "motif_matching": "sha256:03b4dbf937008a8f8d50bca6786b46aacfc890a07efaca797d80b68c34eec2a7",
 }
 
 
@@ -153,6 +159,60 @@ def test_superframe_rule_registry_has_honest_controlled_coverage():
     assert used_for[0]["owner_attention"] is True
 
 
+def test_frame_role_binding_policy_pins_current_claim_contract():
+    policy = frame_role_binding_policy()
+    code_roles = list(get_args(ClaimArgumentV1.model_fields["role"].annotation))
+    assert code_roles == ["subject", "object"]
+    assert policy["current_claim_argument_role_vocabulary"] == code_roles
+    assert policy["hard_role_vocabulary_check"] is True
+    assert policy["role_bindings"] == [
+        {
+            "claim_argument_role": "subject",
+            "relation_direction_role": "source",
+        },
+        {
+            "claim_argument_role": "object",
+            "relation_direction_role": "target",
+        },
+    ]
+    assert policy["unbound_argument_policy"] == {
+        "current_unbound_argument_count": 0,
+        "interpretation": (
+            "definitional_under_claim_record_v1_subject_object_literal"
+        ),
+        "future_role_behavior": "hard_error_requires_frame_instance_v2",
+    }
+    assert policy["coverage"]["predicate_lane_reachable_superframe_count"] == 8
+    assert policy["coverage"]["total_superframe_count"] == 16
+
+
+def test_motif_matching_policy_is_strict_separate_and_coverage_honest():
+    policy = motif_matching_policy()
+    tolerance = policy["sequence_tolerance"]
+    assert tolerance["maximum_missing_stages"] == 0
+    assert tolerance["maximum_intervening_frames_per_transition"] == 0
+    assert tolerance["candidate_generation_tiers"] == [
+        "dominant",
+        "admissible",
+    ]
+    assert policy["metrics"]["metrics_must_remain_separate"] is True
+    assert policy["metrics"]["fused_final_score"] is None
+    assert policy["metrics"]["sequence_alignment"]["interpretation"] == (
+        "definitional_under_strict_v1_not_quality_signal"
+    )
+    assert policy["candidate_lane_dispositions"][
+        "confirmed_candidate_is_accepted"
+    ] is False
+    assert policy["coverage"]["generic_matcher_supported_motif_count"] == 12
+    assert policy["coverage"]["predicate_lane_reachable_motif_ids"] == [
+        "M03",
+        "M08",
+        "M09",
+        "M12",
+    ]
+    assert policy["coverage"]["predicate_lane_reachable_motif_count"] == 4
+
+
 def _mutated_registries() -> dict[str, dict]:
     return {
         name: copy.deepcopy(registry_loader._read(name))
@@ -186,6 +246,39 @@ def test_domain_affinity_quarantine_drift_hard_error(monkeypatch):
     monkeypatch.setattr(registry_loader, "_read", lambda name: data[name])
     registry_loader.load_all.cache_clear()
     with pytest.raises(RegistryError, match="affinity quarantine drifted"):
+        registry_loader.load_all()
+    registry_loader.load_all.cache_clear()
+
+
+def test_frame_role_vocabulary_drift_hard_error(monkeypatch):
+    data = _mutated_registries()
+    data["frame_role_binding"]["current_claim_argument_role_vocabulary"].append(
+        "instrument"
+    )
+    monkeypatch.setattr(registry_loader, "_read", lambda name: data[name])
+    registry_loader.load_all.cache_clear()
+    with pytest.raises(RegistryError, match="role vocabulary policy drifted"):
+        registry_loader.load_all()
+    registry_loader.load_all.cache_clear()
+
+
+def test_motif_fused_score_drift_hard_error(monkeypatch):
+    data = _mutated_registries()
+    data["motif_matching"]["metrics"]["fused_final_score"] = 0.75
+    monkeypatch.setattr(registry_loader, "_read", lambda name: data[name])
+    registry_loader.load_all.cache_clear()
+    with pytest.raises(RegistryError, match="dual-metric policy drifted"):
+        registry_loader.load_all()
+    registry_loader.load_all.cache_clear()
+
+
+def test_motif_coverage_drift_hard_error(monkeypatch):
+    data = _mutated_registries()
+    data["motif_matching"]["coverage"][
+        "predicate_lane_reachable_motif_count"
+    ] = 12
+    monkeypatch.setattr(registry_loader, "_read", lambda name: data[name])
+    with pytest.raises(RegistryError, match="reachable motif count is dishonest"):
         registry_loader.load_all()
     registry_loader.load_all.cache_clear()
 
