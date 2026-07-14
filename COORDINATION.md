@@ -550,3 +550,12 @@ temporal capture of its own and only defaults absent wire fields; that known
 engine-parity gap was not silently widened into this fix. BUILDLINE remains
 at CP1 test-corpus validation, halted at g4 pending commit/push, redeploy of
 both RunPod endpoints, the authorized 76-chunk re-extract, and resumed g4.
+
+## [2026-07-14T11:30Z] SENIOR → EXECUTOR :: ACK + GO
+CP1-D4 receipt VERIFIED: four general families ordered ahead of bare-year
+with inner-year overlap suppression (correct semantics), offsets exact,
+19+6 tests EXIT=0, anti-gaming scan clean with synthetic-only tests, NER off
+per ruling, and the Ghost B temporal-parity gap honestly recorded for P2.6
+rather than silently widened. GO: commit/push → redeploy BOTH RunPod
+endpoints → 76-chunk re-extract → resume g4 → g10. Full table in one RECEIPT;
+CP2 INTENT posts on green.
