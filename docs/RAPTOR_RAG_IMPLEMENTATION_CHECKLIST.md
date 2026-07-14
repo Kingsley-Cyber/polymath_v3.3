@@ -1408,10 +1408,12 @@ digests. Registry-independent; first S11 build unit alongside P2.5b envelope.
   `supports_response_schema()`; Tier2 grammar-constrained local fallback
   (llama.cpp Metal path; MLX not trusted until proven); Tier3 forced tool-call;
   Tier4 JSON-mode+validate+one-retry (last resort, flagged in provenance).
-- [ ] Python semantic validator (claim refs exist+belong to parent; registry
+- [x] Python semantic validator (claim refs exist+belong to parent; registry
   ids exist or explicitly candidate; frames MF01-16 with support; latent needs
   claims in claim-grounded mode; motifs >=2 frames over proposed/validated
   frames; no self-links; LLM proposals never source-observed/validated).
+  *(T4.2: pure typed packet context + deterministic location-indexed errors;
+  39 focused and 128 adjacent tests passed.)*
 - [ ] Targeted repair loop: attempt-2 sends exact validation errors under the
   SAME constrained schema; failures -> dead-letter queue, never canonical
   writes; deterministic-safe fixes in Python only.
@@ -2221,6 +2223,48 @@ A corpus is strict-ready only when:
   may veto the senior erratum through an `OWNER ::` coordination entry.
 - Checklist boxes closed: P2.5c `SemanticDigestV1` contract + schema-hash
   golden only.
+
+### 2026-07-14 - T4.2 SemanticDigest semantic validator
+
+- Commit: this commit on `claude-continuation-20260713`.
+- Owner: Codex sole executor under the owner gateway spec §6 and
+  `CODEX_MISSION.md`; Claude reviews through `COORDINATION.md`.
+- Corpus/data scope: none. Tests load the checked-in immutable owner domain
+  registry read-only; no live corpus/provider/store is accessed.
+- Code changes: added a pure `semantic_validate()` boundary over one typed
+  `SemanticDigestV1` and immutable `SemanticValidationContext`. Errors are
+  deterministic and location-indexed. The context binds the supplied parent,
+  claim-to-parent ownership, owner domain IDs, externally validated frames,
+  claim-grounded mode, and explicit self-reference identities.
+- Durable migration/backfill: none.
+- Before metrics: structurally valid digest JSON could not be checked for
+  foreign/missing claim references, proposal authority, registry membership,
+  or motif/frame closure.
+- After metrics: every supporting-claim field family checks existence and
+  parent ownership; unknown domains are candidate-only; MF01–MF16 is enforced
+  for proposals and motif sequences; frames require support; latent concepts
+  require support in claim-grounded mode; motifs require at least two eligible
+  proposed/externally validated frames; rejected proposals do not authorize a
+  motif; self-links and LLM source-observed/validated promotion fail.
+- Tests by tier: final focused validator+digest suite 39 passed (`EXIT=0`);
+  adjacent registry/envelope/hash/identity/observation/manifest/outbox/adapter
+  suite 128 passed / 3 skipped (`EXIT=0`). Each §6 rule has positive and
+  negative coverage, including Pydantic-bypass defense for semantic frame and
+  proposal-state checks.
+- Cross-corpus test: not applicable; context scope is explicit and tested with
+  a foreign-parent claim. No retrieval behavior is involved.
+- Failure/rollback test: untyped boundaries; invalid/duplicate context; parent
+  mismatch; unknown/foreign/self claim links; unknown/non-candidate domains;
+  invalid/unsupported/rejected frames; empty grounded latent support; short or
+  unclosed motifs; and source-observed/validated proposals all return precise
+  errors or reject context construction. Rollback is code removal only.
+- Deployment image/health: no live deploy for this unreferenced pure module;
+  tests ran under the canonical Python 3.11/Pydantic 2.5.0 image. T4.3 owns
+  gateway wiring and deployment.
+- Remaining risks: structural/semantic retry, dead-letter non-canonical
+  isolation, capability ladder, provenance/cache, and UGO canary remain
+  T4.3/T4.4.
+- Checklist boxes closed: P2.5c Python semantic-validator item only.
 
 ## Implementation Log Template
 

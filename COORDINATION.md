@@ -1513,3 +1513,54 @@ and adjacent 90 passed / 3 skipped, all true EXIT=0; compile gate EXIT=0 and
 `git diff --check` clean. The checklist closes only the P2.5c contract/golden
 box, documents the erratum and initial test-assumption correction, and leaves
 T4.2–T4.4 open. PROGRESS now points to T4.2. No deploy or live/data mutation.
+
+## [2026-07-14T13:38:22Z] EXECUTOR → SENIOR :: ACK
+A2/T4.2 started. Global objective: make structural success insufficient unless
+every digest reference and proposal permission is semantically honest for the
+supplied parent packet. The immediate symptom is no `semantic_validate()`;
+the bug class is valid-JSON epistemic leakage (foreign/missing claims, unknown
+registries promoted, unsupported frames/latent/motifs, or an LLM self-
+validating). Repository search finds no validator/reference implementation;
+the owner registries already expose D01–D16 and MF01–MF16. Smallest shared fix:
+one pure validator over a typed digest plus immutable packet context, returning
+deterministic location-indexed errors. It will cover all seven §6 rules,
+parent-scope mismatch, every supporting-claim field family, source-observed/
+validated proposal bypasses, and motif eligibility from proposed + externally
+validated frames. T4.3 alone owns retries/dead-letter; no storage/provider/
+Ghost A code changes here.
+
+## [2026-07-14T13:41:33Z] EXECUTOR → SENIOR :: RECEIPT
+T4.2 focused semantic-validator gate GREEN: 37 passed, true EXIT=0
+(`/tmp/t42_focused_tests.log`). The pure boundary returns deterministic
+location-indexed errors and covers: digest-parent mismatch; unknown and
+foreign-parent claim IDs across all seven supporting-claim field families;
+unknown-domain candidate-only permission; MF01–MF16 validation; mandatory
+frame support; claim-grounded latent support with explicit interim-mode
+exception; motif length and proposed/external-validated-frame closure;
+rejected-frame exclusion; source_observed/validated self-promotion; explicit
+digest/artifact self-links; invalid/duplicate context; and untyped inputs.
+No repair, persistence, provider, or Ghost A code is touched.
+
+## [2026-07-14T13:42:44Z] EXECUTOR → SENIOR :: RECEIPT
+T4.2 adjacent semantic-contract gate GREEN after strict context-boundary
+hardening: validator + digest + registries + envelope + hash/ID goldens +
+observations + manifests/outbox + legacy adapters = 126 passed, 3 skipped,
+true EXIT=0 (`/tmp/t42_adjacent_tests.log`). Owner-registry context construction
+is read-only and immutable; duplicate claims, non-frozenset ID sets, non-bool
+mode, and unknown externally-validated frames fail before semantic checking.
+
+## [2026-07-14T13:43:34Z] EXECUTOR → SENIOR :: RECEIPT
+T4.2 final coverage gate GREEN after adding explicit owner-domain snapshot,
+motif-frame bypass, and domain self-link regressions: focused 39 passed and
+adjacent 128 passed / 3 skipped, both true EXIT=0
+(`/tmp/t42_final_focused.log`, `/tmp/t42_final_adjacent.log`). This now tests
+every §6 rule on its direct field plus adjacent nested/context paths. Proceeding
+to documentation/cursor/commit; no runtime deployment is warranted until T4.3
+wires this pure validator into the gateway.
+
+## [2026-07-14T13:44:41Z] EXECUTOR → SENIOR :: RECEIPT
+T4.2 COMPLETE pending commit/push. Final gates: focused 39/39; adjacent 128
+passed / 3 skipped; compile EXIT=0; `git diff --check` clean. The checklist
+closes only P2.5c semantic validation, documents all §6 invariants and rollback,
+and leaves retry/dead-letter/capability/canary open. PROGRESS points to T4.3.
+No live deploy, provider call, data write, or retrieval change occurred.
