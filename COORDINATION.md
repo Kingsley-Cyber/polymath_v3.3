@@ -5089,3 +5089,149 @@ with names and numbers fixed now:
    words.
 5. TESTS BEFORE SPEND, as you listed: selection determinism, resume,
    sealing, and no-repurchase — green before any live preflight.
+
+## [2026-07-14T20:59:20Z] EXECUTOR → SENIOR :: ACK
+
+ACK. I will engrave the approved monotonic ledger exactly: persist Phase-1B
+green + canonical checkpoint; Phase 1C selects 50 deterministic fresh parents
+excluding all 22 attempted/purchased, bar 48/50 with existing auto-stops;
+Phase 2 selects only the remainder and remains sealed on green 1C; the four
+old v5/v2 DLQs are excluded until a separately sealed tail-retry that requires
+completed Phase 2 plus corpus-wide acceptance >=95% and permits one v6/v3 job
+attempt per parent. I will first add and run determinism, resume, sealing, and
+cross-prompt no-repurchase tests. No provider call or queue release occurs
+before those tests and a read-only live preflight are green.
+
+## [2026-07-14T21:06:45Z] EXECUTOR → SENIOR :: RECEIPT
+
+First Phase-1C focused contract gate returned true `EXIT=1` in
+`/tmp/t93_phase1c_contract_focused.log`: 11 passed, 2 failed. Both failures
+occurred in the new synthetic `_planned_packets` test fixture before the
+selection assertions because `_packet_from_parent` correctly requires at
+least one accepted extraction child and the fixture passed none. Provider
+calls=0, queue/canonical writes=0. Correcting only the fixture to supply one
+status-ok `polymath.extract.v1` child per synthetic parent, then rerunning the
+same focused command; product logic and gate definitions remain unchanged.
+
+## [2026-07-14T21:07:11Z] EXECUTOR → SENIOR :: RECEIPT
+
+Focused retry again returned true `EXIT=1` in
+`/tmp/t93_phase1c_contract_focused_retry.log`: 11 passed, 2 fixture failures.
+The accepted child is now present, and `_packet_from_parent` advanced to its
+next lawful precondition: at least one accepted extraction entity. Selection
+logic still was not reached; calls/writes/spend remain zero. Adding one benign
+synthetic CONCEPT entity to that fixture only, then rerunning unchanged.
+
+## [2026-07-14T21:07:59Z] EXECUTOR → SENIOR :: RECEIPT
+
+Phase-1C focused contract gate GREEN on the unchanged retry command: 13/13
+passed, 7 existing Pydantic warnings, true `EXIT=0` in
+`/tmp/t93_phase1c_contract_focused_retry2.log`. Coverage now explicitly fixes
+and tests deterministic fresh selection, resume ordering/identity, all-row
+green release + one canonical checkpoint, 12+10=22 pre-1C purchase ledger,
+48/50 acceptance, and cross-prompt certified no-repurchase. Provider calls,
+spend, queue writes, and canonical writes remain zero. Proceeding to the
+adjacent gateway/queue/provider suite before any live preflight.
+
+## [2026-07-14T21:08:38Z] EXECUTOR → SENIOR :: RECEIPT
+
+Six-file adjacent gateway/queue/provider suite GREEN: 81/81 passed, 7 existing
+warnings, true `EXIT=0` in `/tmp/t93_phase1c_adjacent.log`. I cross-checked the
+earlier 104-test boundary and found it also included `test_llm_lane_pool.py`
+and `test_private_vllm_capacity.py`; adding those two untouched files and
+rerunning the full comparable boundary before live preflight. Calls/writes/
+spend remain zero.
+
+## [2026-07-14T21:09:14Z] EXECUTOR → SENIOR :: RECEIPT
+
+Eight-file adjacent suite GREEN: 93/93 passed, 7 existing warnings, true
+`EXIT=0` in `/tmp/t93_phase1c_adjacent_full.log`. This still does not recreate
+the prior 104-test count, so I am expanding once more to the directly adjacent
+SemanticDigestV1, semantic-validator, and hash-golden suites rather than
+claiming count equivalence. No assertion was weakened and calls/writes/spend
+remain zero.
+
+## [2026-07-14T21:09:56Z] EXECUTOR → SENIOR :: RECEIPT
+
+Expanded adjacent semantic/gateway/provider/queue gate GREEN: 153/153 passed,
+7 existing warnings, true `EXIT=0` in
+`/tmp/t93_phase1c_adjacent_expanded.log`. This includes SemanticDigestV1,
+semantic-validator, and hash-golden coverage in addition to the 93-test
+boundary. All mandated pre-spend contracts are now green. Next action is a
+zero-provider replay of the already-complete Phase-1B ledger solely to persist
+its approved green authorization/canonical checkpoint; it must report zero
+call receipts and unchanged cumulative spend/canonical census.
+
+## [2026-07-14T21:10:37Z] EXECUTOR → SENIOR :: RECEIPT
+
+Phase-1B release persistence GREEN: true `EXIT=0` in
+`/tmp/t93_phase1b_release.log`, safe report
+`/tmp/t93_phase1b_release.json`. Replay found 10/10 prior successes, emitted
+an empty call-receipt list (provider calls=0), recomputed the same 1.0
+checkpoint, and persisted `phase1b_checkpoint_green=True` plus the canonical
+checkpoint on exactly 10/10 selection rows. Cumulative purchased spend is
+unchanged at `$0.54346505`; canonical census remains exactly unchanged. This
+is the approved durable release marker, not a repurchase. Proceeding to the
+read-only live Phase-1C selection preflight.
+
+## [2026-07-14T21:12:08Z] EXECUTOR → SENIOR :: RECEIPT
+
+First read-only Phase-1C preflight returned true `EXIT=1` in
+`/tmp/t93_phase1c_live_preflight.log`; safe artifact
+`/tmp/t93_phase1c_live_preflight.json`. The product selector itself passed its
+exact exclusion check and returned 50 parents at ordinals 22–71, but the
+inline receipt's independent Mongo filters used `$or`/`$in`/`$gt` inside a
+nested double-quoted shell argument. The nested shell expanded those tokens,
+so harness-only attempted/tail counts read zero and projected remainder read
+921. All collection counts and canonical census were unchanged; provider
+calls=0, database writes=0, spend=0. Rerunning with one read-only corpus-row
+fetch and Python-side filtering, removing every shell-sensitive Mongo
+operator; product code and assertions remain unchanged.
+
+## [2026-07-14T21:13:24Z] EXECUTOR → SENIOR :: RECEIPT
+
+Corrected read-only preflight returned true `EXIT=1` in
+`/tmp/t93_phase1c_live_preflight_retry.log`; safe artifact
+`/tmp/t93_phase1c_live_preflight_retry.json`. Core ledger is now verified:
+22 attempted, 18 certified accepted, fresh 1C ordinals 22–71, prior-attempt/
+cache overlap zero, projected remainder 917, counts/canonical unchanged, and
+calls/writes/spend zero. Two state-shape assertions exposed: (a) 939 legacy
+v5-materialization rows remain `queued` but unphased/inert, while global
+running=0 and current-v6 queued=0; (b) the four exact Phase-1 DLQs have the
+correct `phase=phase1`/attempt/status ledger but predate per-job prompt-version
+fields, so the new tail selector's v5/v2 field filter would find zero. I am
+retaining the exact-four unique/failure/attempt/phase seal while removing only
+the unavailable prompt-field predicates, adding coverage, and changing the
+preflight active assertion to zero global-running + zero current-v6 queued;
+the 939 inert legacy rows will be reported, not silently rewritten.
+
+## [2026-07-14T21:14:37Z] EXECUTOR → SENIOR :: RECEIPT
+
+Tail-ledger correction focused gate GREEN: 14/14 passed, 7 existing warnings,
+true `EXIT=0` in `/tmp/t93_phase1c_contract_tailfix.log`. New coverage proves
+the tail query is sealed on corpus + certified route + `phase1` + attempted +
+terminal-failure and deliberately does not require prompt fields absent from
+the frozen rows; runtime still requires exactly four unique parents and a
+never-attempted/no-acceptance v6 job. Calls/writes/spend zero. Rerunning the
+expanded adjacent boundary, then the corrected read-only preflight.
+
+## [2026-07-14T21:15:02Z] EXECUTOR → SENIOR :: RECEIPT
+
+Post-correction expanded adjacent gate GREEN: 154/154 passed, 7 existing
+warnings, true `EXIT=0` in `/tmp/t93_phase1c_adjacent_tailfix.log`. No provider
+calls or live-state writes. Rerunning the read-only preflight with the ruled
+active condition expressed precisely as global running=0 and current-v6
+queued/running=0; the 939 legacy unphased queued rows remain reported as inert
+state and are not rewritten or hidden.
+
+## [2026-07-14T21:15:24Z] SENIOR → EXECUTOR :: ACK + one forward requirement
+Tail-ledger fix accepted (seal on fields that EXIST in the frozen rows;
+runtime exactly-four uniqueness). Preflight assertion change accepted
+(zero global-running + zero current-v6 queued; inert rows reported).
+FORWARD REQUIREMENT so it is on the record before phase 2 is built: the 939
+inert legacy v5-materialization rows are the same hazard class as the 10k
+ecom queue — dormant claimable rows beside a live consumer. Before phase 2
+materializes its fresh remainder, those 939 must be superseded backup-first
+(JSONL+hash, reason=superseded_by_phase2_v6_2026-07-14) exactly like the ecom
+fence. Report-don't-rewrite is correct for NOW; supersede is mandatory at
+phase-2 open.
