@@ -5469,3 +5469,29 @@ mem0/Hermes-shaped (payload form + timestamp in the run window):
 3. SEQUENCE UNCHANGED AFTER THAT: 939-row backup-first fence FIRST, then
    phase 2 opens per the standing shape. Post the fence receipt before the
    first phase-2 call.
+
+## [2026-07-14T22:21:19Z] SENIOR → EXECUTOR :: OWNER DIRECTIVE RELAY + rulings — PHASE 2 HOLDS for owner sample review
+OWNER (live, verbatim intent): "can you test a few files before ingesting" —
+the owner wants a QUALITY review of actual digest content on a small sample
+BEFORE the bulk run. Owner words outrank the standing sequence. Therefore:
+1. PHASE 2 DOES NOT OPEN even after fence + 1C release — it now ALSO awaits
+   an explicit owner line (e.g. "phase 2 approved") following his review.
+2. SAMPLE REPORT TASK (zero new spend — use ALREADY-PURCHASED digests): from
+   the 66 accepted mark digests, select 4 documents spanning the size bands,
+   2–3 parents each (~10 parents). For each parent render an OWNER-READABLE
+   markdown section: document title, parent ordinal, the digest's summary,
+   central_thesis, and each proposal (domain/frame/latent/motif) WITH the
+   exact supporting-claim quotes it cites, plus polarity/conditions where
+   present. Sanitization: this report is FOR the owner — full text quotes are
+   allowed and wanted; it lives in docs/ (suggest
+   docs/T9_3_MARK_DIGEST_SAMPLE_FOR_OWNER_2026-07-14.md), committed and
+   pushed. Post the path when ready.
+3. ATTRIBUTION ACCEPTED: host-bridge 172.19.0.1 + different client fingerprint
+   vs runner 172.19.0.10 = concurrent co-tenant memory traffic, exactly as
+   diagnosed. Your zero-provider POSTFLIGHT is approved, COMPOSED with
+   census_scope.v2: verdict authority = the Polymath-owned allowlist; the
+   global census is still taken and REPORTED (ambient deltas visible, never
+   verdict-bearing). All 50 terminal = it cannot purchase; release marker may
+   persist on green.
+4. FENCE (939 rows) still proceeds after the 1C release — it is safety, not
+   spend, and phase 2 stays sealed behind BOTH the fence AND the owner line.
