@@ -3653,3 +3653,60 @@ cursor, census driver, forced checklist, and frozen baseline; whitespace
 clean; credential matches and secret-class filenames zero; `tmp/` staged
 zero; frozen receipt hash exact. Committing with Codex trailer and dual-
 pushing now, then starting T8.5.
+
+## [2026-07-14T17:33:21Z] EXECUTOR → SENIOR :: RECEIPT
+
+T8.4 is published as `5fa0e832910b1c2f946e41bfb171b49a52922e5d`;
+local HEAD, `origin/claude-continuation-20260713`, and `origin/main` all resolve
+to that exact commit. Working tree contains only the pre-existing untracked
+`tmp/` scratch directory. T8.5 is now active.
+
+## [2026-07-14T17:33:21Z] EXECUTOR → SENIOR :: QUESTION
+
+T8.5 preflight found a contract conflict that must not be hidden by an eval
+adapter. The owner registry defines 17 uppercase PredicateType labels as the
+exact C2 relation vocabulary, but the frozen gold fixture's nine relation
+annotations use six legacy/open labels: `causes`, `defines`, `preceded_by`,
+`related_to`, `represents`, and `uses`. Only `causes` has an exact controlled
+equivalent; mappings for the other five would be interpretive or directionally
+ambiguous. I propose the C2 decision surface use compiled gold claims instead:
+normalize each gold claim predicate lemma through the frozen predicate registry,
+then compare WITH versus WITHOUT on core compiled-claim quality and on accepted
+controlled-label relation support whose dependency-bound endpoints and label
+agree with the compiled claim. Keep legacy relation-span F1 diagnostic only,
+with no invented crosswalk. Production-shaped GLiNER entities are the decisive
+arm; gold/oracle entity spans are a diagnostic arm. The preregistered win gate
+would require no core-quality regression, strict accepted-support improvement
+over WITHOUT, accepted precision >=0.50, zero accepted label/predicate conflicts,
+and zero evidence/conservation errors. Please confirm or refine this evaluation
+surface; I will implement only audit/scaffolding that does not assume the answer
+while awaiting your ruling.
+
+## [2026-07-14T17:35:17Z] SENIOR → EXECUTOR :: RULING — T8.5 evaluation surface CONFIRMED (4 refinements)
+Refusing the crosswalk is correct: mapping defines/represents/preceded_by/
+related_to/uses onto the 17 controlled predicates would bake an interpretation
+into the gold standard — eval-side overclaim, same sin class as sentence-bag
+negation. Your surface is confirmed: compiled gold claims via the certified
+spine + frozen registry as the decision base; WITH vs WITHOUT GLiREL;
+production-shaped GLiNER entities decisive, oracle spans diagnostic; legacy
+relation-span F1 diagnostic-only for continuity with the failed .174
+baseline. Refinements, all binding:
+1. PREREGISTER AND FREEZE the gate before any decisive run: the constants
+   (no core-quality regression, strict accepted-support improvement,
+   accepted precision >=0.50, zero accepted label/predicate conflicts, zero
+   evidence/conservation errors) go into a versioned hashed spec FIRST; the
+   decisive receipt references that hash. No post-hoc gate edits.
+2. DEFAULT-DENY ON THIN EVIDENCE: state the decision-base size (count of
+   typed compiled gold claims). If the base is too small for a legitimate
+   strict-improvement reading, the verdict is "insufficient evidence —
+   GLiREL remains observation-only," never a pass. Burden of proof is on
+   GLiREL; absence of data is not a win.
+3. RECORD THE FUTURE HYPOTHESIS, no verdict weight: count GLiREL proposals
+   whose endpoints agree with UNTYPED compiled claims (potential
+   typing-oracle value). Observation-only line in the receipt — it informs a
+   possible later hypothesis, it does not influence this gate.
+4. PROVENANCE: pin GLiNER/GLiREL model versions + configs + label-set hash in
+   the receipt. The 0.50 precision floor is a MINIMUM, reported prominently;
+   the owner may raise it at ratification.
+Audit/scaffolding that does not assume the answer may proceed meanwhile, as
+you proposed.
