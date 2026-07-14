@@ -255,14 +255,14 @@ def test_json_object_prompt_renders_strict_primary_contract():
     assert "predicate one of: part_of=X subcomponent of Y" in prompt
 
 
-def test_output_mode_prefers_structured_provider_modes_for_frontier_lanes():
+def test_output_mode_uses_deepseek_v4_live_contract():
     assert (
         _select_extraction_output_mode(
             "auto",
             {"model": "deepseek/deepseek-v4-flash", "base_url": None},
             profile_name="normal",
         )
-        == "json_schema"
+        == "json_object"
     )
     assert (
         _select_extraction_output_mode(
@@ -286,7 +286,7 @@ def test_output_mode_prefers_structured_provider_modes_for_frontier_lanes():
             {"model": "deepseek/deepseek-v4-flash", "base_url": None},
             profile_name="rescue",
         )
-        == "json_schema"
+        == "json_object"
     )
 
 
@@ -590,7 +590,7 @@ async def test_extraction_repairs_once_and_merges_accepted_primary_lines(monkeyp
 
 
 @pytest.mark.asyncio
-async def test_deepseek_auto_uses_json_schema_payload_on_primary(monkeypatch):
+async def test_deepseek_v4_uses_json_object_payload(monkeypatch):
     calls: list[dict] = []
     content = json.dumps(
         {
@@ -690,8 +690,8 @@ async def test_deepseek_auto_uses_json_schema_payload_on_primary(monkeypatch):
 
     assert len(calls) == 1
     assert calls[0]["thinking"] == {"type": "disabled"}
-    assert calls[0]["response_format"]["type"] == "json_schema"
-    assert calls[0]["response_format"]["json_schema"]["strict"] is True
+    assert calls[0]["response_format"]["type"] == "json_object"
+    assert "json_schema" not in calls[0]["response_format"]
     assert "Return exactly one valid JSON object" in calls[0]["messages"][1]["content"]
     assert "Output JSONL only" not in calls[0]["messages"][1]["content"]
     assert "entities: max 8" in calls[0]["messages"][1]["content"]
@@ -806,7 +806,9 @@ async def test_json_schema_rejection_degrades_retry_to_prompt_object(monkeypatch
             )
         ],
         pool=[{
-            "model": "deepseek/deepseek-v4-flash",
+            # V4 Flash is live-verified json_object-only; keep generic fallback
+            # coverage on the existing schema-capable non-V4 provider card.
+            "model": "deepseek/deepseek-chat",
             "base_url": "https://api.deepseek.com/v1",
             "api_key": None,
             "max_concurrent": 1,
@@ -914,7 +916,9 @@ async def test_json_schema_rejection_downgrades_lane_for_following_chunks(monkey
             ),
         ],
         pool=[{
-            "model": "deepseek/deepseek-v4-flash",
+            # V4 Flash is live-verified json_object-only; keep lane-downgrade
+            # coverage on the existing schema-capable non-V4 provider card.
+            "model": "deepseek/deepseek-chat",
             "base_url": "https://api.deepseek.com/v1",
             "api_key": None,
             "max_concurrent": 1,

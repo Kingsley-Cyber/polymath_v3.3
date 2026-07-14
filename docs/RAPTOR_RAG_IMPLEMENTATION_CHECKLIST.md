@@ -2613,8 +2613,12 @@ A corpus is strict-ready only when:
   gate reached 223 passed / 10 skips with four pre-existing provider-card
   assertion failures: those tests require DeepSeek v4 Flash `json_schema`
   while the live-verified card intentionally pins `json_object`; no T8.3 file
-  touches that seam. Static and final publication gates are recorded in
-  `COORDINATION.md`.
+  touches that seam. The identical four failures reproduced at pre-T8.3
+  commit `0d82515`; the separately authorized test-only reconciliation then
+  aligned V4 assertions to `json_object`, retained generic schema-rejection
+  coverage on the non-V4 card, and made the exact adjacent surface green at
+  227 passed / 10 skips (`EXIT=0`). Static and publication gates are recorded
+  in `COORDINATION.md`.
 - Cross-corpus test: the aggregate no-write census covered both UGO and the
   independently ingested smoke corpus with provider/model/run identities.
   Full PoC-pair semantic assessment remains deferred to the one paid pass.
@@ -2642,6 +2646,36 @@ A corpus is strict-ready only when:
   `negated` plus evidence-sentence boundaries, emitted-evidence-only parsing;
   P2.5 annotate-only `signature_valid` plus reason with no drop/remap. Parent
   sections remain open for the risks listed above.
+
+### 2026-07-14 - T8.3 provider-card test-debt reconciliation
+
+- Commit: this rollback-isolated follow-up commit.
+- Owner: Codex sole executor; senior-authorized and certified in
+  `COORDINATION.md` after the pre-existence proof.
+- Corpus/data scope: no corpus data; test contracts only.
+- Code changes: updated DeepSeek v4 Flash selection and payload assertions to
+  the live-verified versioned `json_object` provider card. The two generic
+  JSON-schema rejection tests now use the existing schema-capable non-V4 card,
+  preserving retry and lane-downgrade coverage. Production files changed: 0.
+- Durable migration/backfill: none.
+- Before metrics: the exact adjacent surface was 223 passed / 10 skips / 4
+  failures at both current state and pre-T8.3 commit `0d82515` because the
+  four tests asserted the live-falsified V4 `json_schema` contract.
+- After metrics: the four targeted tests pass 4/4; the exact adjacent surface
+  passes 227 / 227 with 10 disclosed trained-spaCy skips, true `EXIT=0`.
+- Tests by tier: targeted receipt
+  `/tmp/t83_provider_debt_reconcile_targeted.log`; adjacent receipt
+  `/tmp/t83_provider_debt_reconcile_adjacent.log`.
+- Cross-corpus test: not applicable; no corpus behavior or data path changed.
+- Failure/rollback test: pre-T8.3 detached receipt
+  `/tmp/t83_preexist_provider_debt.log` proves the identical four failures;
+  reverting this commit restores only stale tests, not provider behavior.
+- Deployment image/health: no deploy; canonical three-overlay compose with a
+  read-only backend bind mount supplied the deployed dependency environment.
+- Remaining risks: none for this closed test debt; provider capability
+  promotion remains governed by live canaries, never stale metadata.
+- Checklist boxes closed: none; this reconciles receipts rather than changing
+  product acceptance criteria.
 
 ## Implementation Log Template
 

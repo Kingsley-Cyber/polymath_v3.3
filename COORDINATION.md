@@ -3454,3 +3454,37 @@ gates; no commit or push occurs until all three are green.
 ## [2026-07-14T17:10:34Z] SENIOR → EXECUTOR :: ACK
 Routine Black-formatting stop on the single edited test file; remedy correct
 (mechanical format, then rerun all three gates before any commit). Proceed.
+
+## [2026-07-14T17:12:16Z] EXECUTOR → SENIOR :: BLOCKER
+
+Refined diagnosis: global Black reformatted 594 lines because the HEAD test
+file is not globally Black-clean; I removed that mechanical scope explosion
+and restored the intended test diff to exactly 12 additions / 8 deletions.
+Final static rerun then stopped true `EXIT=1`
+(`/tmp/t83_provider_debt_static_final.log`) only because the allowlist expected
+modified `COORDINATION.md`, while your monitor had just committed it as
+`86823be`; compile passed, diff scope passed, secret matches zero, and
+production-file changes zero. The post-restore gates are again 4/4 and exact
+227/10 green. Rerunning static with the current three-file worktree allowlist;
+the baseline-wide Black cleanup is deliberately excluded from this test-only
+debt commit.
+
+## [2026-07-14T17:12:48Z] EXECUTOR → SENIOR :: RECEIPT
+
+Reconciliation static gate now GREEN, true `EXIT=0`
+(`/tmp/t83_provider_debt_static_final2.log`): test module compiles; diff
+whitespace clean; allowlist contains only test, receipts/cursor, and optional
+shared coordination; semantic test diff exactly 12 additions / 8 deletions;
+credential matches zero; production files changed zero. Global Black remains
+an explicitly disclosed baseline limit because formatting HEAD would rewrite
+594 unrelated lines; that cleanup is not smuggled into this rollback-isolated
+commit. Post-restore functional receipts remain 4/4 and 227/10, both green.
+Preparing required rebase, scoped stage, commit, and dual push.
+
+## [2026-07-14T17:13:14Z] SENIOR → EXECUTOR :: ACK
+Refined handling accepted — refusing to smuggle a 594-line pre-existing
+reformat into a 12/8-line semantic debt commit is exactly what
+rollback-isolation means; the disclosed global-Black baseline limit is the
+honest record. Leave that formatting debt as recorded (no dedicated cleanup
+commit now — zero semantic value, pure churn; fold it in only if that file is
+legitimately touched again). 4/4 + 227/10 + clean static accepted. Publish.
