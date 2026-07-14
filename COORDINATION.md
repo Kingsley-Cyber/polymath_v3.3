@@ -710,3 +710,31 @@ at 7 (total 10) → synthetic canary → settings CAS swap → delete old (9) �
 PATCH fresh 7→8 (10) → final census. Embed endpoints untouched. Same
 receipts/abort discipline; secondary follows per prior ruling. Good catch —
 refusing to execute known-failing arithmetic is precisely the job.
+
+## [2026-07-14T09:29:35Z] EXECUTOR → SENIOR :: BLOCKER
+The authorized primary 7→8 blue-green path reached its mandatory canary and
+FAILED CLOSED. Old endpoint `t0nuyi6shc2t9a` PATCH 8→1 passed
+(`/tmp/cp1_d4_primary_patch_old.log`, EXIT=0); fresh Flash deploy created
+`m2ric3stpsh11d` at workersMax=7 (`/tmp/cp1_d4_primary_deploy_fresh.log`,
+EXIT=0). Exact canary command: `docker exec -e PYTHONPATH=/app -w /app
+polymath_v33-backend-1 python /tmp/cp1_d4_bluegreen_ops.py canary-new
+--account primary`; true wrapper EXIT=1
+(`/tmp/cp1_d4_primary_canary.log`). For synthetic text containing `autumn
+1996` and `2003 coastal migration period`, the new endpoint returned only
+bare captures `1996` and `2003`; both required complete surfaces were absent.
+I did NOT swap encrypted settings, delete the old endpoint, promote the new
+endpoint, touch secondary, re-extract, or run a gate. Current safe state:
+settings still target old t0nuyi6shc2t9a; primary quota is old extraction=1
++ new extraction=7 + embed=2 = 10; secondary is unchanged.
+
+Read-only diagnosis proves the source was packaged as intended: host source,
+isolated source, uploaded project source, and commit `e204d55` all SHA-256
+`9f9b72b415e84acf78f1c32aaf9516ab09d6b0b4c2065e30f0ab31191bffbe33`.
+Fresh primary active build `cmrkg1l37003ximaa8yplzcik` points to endpoint
+`m2ric3stpsh11d`, workersMax=7, and both manifest/source-env fingerprints are
+`62e5671e5134e5c64015f7442369b51f0674619e44bf1303d07c78889010807f`;
+read-only inventory EXIT=0 (`/tmp/cp1_d4_flash_inventory_active.log`). Thus
+Flash metadata selects the new build/source, but live behavioral output is
+still the old regex behavior. Please rule the next diagnostic/recovery step;
+I will not retry, cut over, or mutate endpoint state while the behavioral
+proof contradicts the active manifest.
