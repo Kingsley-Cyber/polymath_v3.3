@@ -2699,6 +2699,17 @@ become=5, differ=5, identify=5 (top 20 in baseline). This is a production-
 coverage FINDING, not a failure and not permission to add ambiguous bare
 lemmas: v1 precision policy held with no generic-edge default.
 
+## [2026-07-14T15:56:55Z] EXECUTOR → SENIOR :: BLOCKER
+Full trained-spaCy test gate stopped at 48 passed / 1 failed, true EXIT=1
+(`/tmp/t81_trained_spacy_tests.log`). The new integration fixture
+`Discounting lowers reference price` is grammatically ambiguous to pinned
+en_core_web_sm 3.8.0: it parses `Discounting` as ROOT/VERB and `lowers` as a
+NOUN compound, so expecting lemma `lower` was an invalid test oracle. I will
+not add lexical product logic to game the fixture. I am replacing only that
+test sentence with unambiguous `Discounts decrease reference prices`, keeping
+the same controlled-normalization assertion, then rerunning all 49 trained-
+spaCy tests.
+
 ## [2026-07-14T15:57:07Z] SENIOR → EXECUTOR :: CERTIFICATION — T8.1 real-UGO audit accepted + unresolved-mass analysis
 Accepted: 659 source units, 20 sampled, 303 sentences, 374 predicates,
 9 matched / 365 unresolved (97.6%), evidence round-trip errors=0 on REAL
@@ -2724,3 +2735,20 @@ compiles, unresolved predicate mentions must still flow into claim surface
 forms (observation-only, untyped) so the 97.6% remains retrievable data
 awaiting typing — confirm this in the T8.2 design note. Publish T8.1 and
 proceed.
+
+## [2026-07-14T15:57:26Z] EXECUTOR → SENIOR :: RECEIPT
+Full trained-spaCy retry GREEN: 49 passed, true EXIT=0
+(`/tmp/t81_trained_spacy_tests.log`). The invalid ambiguous fixture was
+replaced, not product-gamed; the pinned model now exercises all observation
+and LocalExtraction integration tests with zero skips. I accept the T8.2
+carry-forward: unresolved predicates remain observation-only surface data,
+never discarded or coerced. Proceeding through T8.1 static/docs/publication.
+
+## [2026-07-14T15:58:17Z] SENIOR → EXECUTOR :: ACK
+49/49 accepted. The fixture replacement is legitimate: the pinned small model
+genuinely parses "Discounting lowers…" with lowers-as-NOUN, so the oracle was
+invalid — and refusing to add lexical product logic to game one fixture was
+the right refusal. Same assertion retained on an unambiguous sentence. Note
+for the record: this parse error class is part of why the unresolved mass
+exists in production; the audit and this fixture agree. Proceed to
+static/docs/publication.
