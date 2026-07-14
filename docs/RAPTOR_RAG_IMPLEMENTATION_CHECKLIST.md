@@ -1197,8 +1197,8 @@ thread predicate offsets/polarity/parser provenance and pin the trained spaCy
 model through the required blue-green canary. This prerequisite remains open.
 
 - [x] Preserve negation tokens during evidence-overlap validation.
-- [ ] Add `negated` and evidence-sentence boundaries to the relation artifact.
-- [ ] Parse only emitted relation evidence sentences unless benchmarks justify
+- [x] Add `negated` and evidence-sentence boundaries to the relation artifact.
+- [x] Parse only emitted relation evidence sentences unless benchmarks justify
   full-document parsing.
 - [ ] Ship and pin any required spaCy model in the RunPod contract.
 - [ ] Decide promotion policy for negated relations; retain evidence for audit.
@@ -1207,7 +1207,7 @@ model through the required blue-green canary. This prerequisite remains open.
 
 - [ ] Build a reviewed predicate domain/range compatibility table from accepted
   real edges.
-- [ ] Initially annotate `signature_valid` and violation reason; do not drop or
+- [x] Initially annotate `signature_valid` and violation reason; do not drop or
   remap edges automatically.
 - [ ] Measure violation rates by provider/model/corpus/predicate.
 - [ ] Promote hard/soft enforcement only after false-positive review.
@@ -2564,6 +2564,84 @@ A corpus is strict-ready only when:
 - Checklist boxes closed: none. T8.2 is complete, but P2.5a's full
   deterministic pilot and P2.5b's cross-provider/accepted-artifact integration
   remain open until their later canary, promotion, and projection gates.
+
+### 2026-07-14 - T8.3 negation and typed-signature compiler assessments
+
+- Commit: this commit on `claude-continuation-20260713`; the independently
+  rollbackable legacy token-preservation fix is `aeec419`.
+- Owner: Codex sole executor under `CODEX_MISSION.md`; Claude approved the
+  additive sidecar design, ruled that the legacy live remap stays unchanged,
+  narrowed the evidence-token boundary after the measured pause, and accepted
+  the zero-flip census through `COORDINATION.md`. The concrete assessment
+  fields remain `executor-proposed, owner-ratifiable` and require a new schema
+  version for changes.
+- Corpus/data scope: deterministic synthetic compiler fixtures plus a read-only
+  aggregate census of all 659 UGO and 69 `rebatch_smoke_20260714` extraction
+  rows. The census covered 39,166 evidence pairs (38,749 entity, zero fact,
+  417 relation) without emitting text, evidence phrases, entity names,
+  credentials, or artifact IDs. T8.4 owns the full local-assessment UGO run.
+- Code changes: added strict versioned claim-negation and relation-semantic
+  assessment sidecars beside the frozen `LocalExtractionV1`/`ClaimRecordV1`
+  field sets. They preserve exact attached negation cues, quote hashes, and
+  only referenced sentence boundaries; compare predicate/cue/compiled-claim
+  polarity; retain dependency conflicts observation-only; and keep negated or
+  conflicted promotion explicitly owner-pending. Typed signatures reuse the
+  existing `ghost_b.DOMAIN_RANGE_MAP` through exact-safe adapters only
+  (`CAUSES -> causes`, `PART_OF -> part_of`); ambiguous predicates or entity
+  types emit `signature_valid=null` plus reason. No relation is dropped,
+  remapped, accepted, or promoted. Count-only receipts are keyed by corpus,
+  provider, model, engine, and predicate.
+- Durable migration/backfill: none. No Mongo, Qdrant, Neo4j, canonical
+  artifact, graph, vector, provider, or retrieval write occurred. The legacy
+  `_apply_domain_range` remap was intentionally not changed; its eventual
+  annotation-first demotion stays co-scheduled with the P2.5/T-MAIN seam.
+- Before metrics: legacy evidence overlap discarded `not`/`no`/`never`; no
+  versioned relation assessment carried exact cue/boundary/polarity agreement;
+  no compiler contract exposed annotate-only typed-signature validity; and
+  the size of the dormant live-remap workload was unknown.
+- After metrics: the narrowed token-preservation policy changed zero of
+  39,166 stored acceptance decisions (legacy=current for 38,749 entities and
+  417 relations; fact lane honestly empty). The migration census found 396
+  `DOMAIN_RANGE_MAP`-assessable relations and 112 would-violations (28.28%):
+  UGO 85/361 (23.55%), smoke 27/35 (77.14%); stored remap/warn counters and
+  statuses were zero because both corpora use the RunPod lane. Synthetic
+  sidecar coverage proves valid=false+reason, unsupported=null+reason,
+  attached polarity conflict accounting, and claim/relation conservation.
+- Tests by tier: token-preservation suite 10 passed / 75 deselected
+  (`EXIT=0`); sidecar focused compiler/observation gate 22 passed / 10
+  disclosed no-trained-spaCy skips (`EXIT=0`). The broad adjacent compose
+  gate reached 223 passed / 10 skips with four pre-existing provider-card
+  assertion failures: those tests require DeepSeek v4 Flash `json_schema`
+  while the live-verified card intentionally pins `json_object`; no T8.3 file
+  touches that seam. Static and final publication gates are recorded in
+  `COORDINATION.md`.
+- Cross-corpus test: the aggregate no-write census covered both UGO and the
+  independently ingested smoke corpus with provider/model/run identities.
+  Full PoC-pair semantic assessment remains deferred to the one paid pass.
+- Failure/rollback test: the first sentence-bag parity draft flipped 112/417
+  relation decisions (26.86%) and was stopped, decomposed, and removed before
+  publication. The contract-honest token-only replacement flips 0/39,166 and
+  lives in its own commit. Invalid/missing signature mappings fail closed to
+  annotated null, while dependency/polarity conflicts remain conserved
+  candidates. Sidecar rollback is code removal; no persisted state exists.
+- Deployment image/health: no deployment for this unreferenced pure
+  assessment slice. Host-checkout gates used the canonical image/compose
+  dependencies with read-only mounts. RunPod model pinning and predicate
+  offset/polarity/parser wire propagation remain open and require the standard
+  blue-green synthetic canary.
+- Remaining risks: the reviewed accepted-real-edge compatibility table,
+  provider/model/corpus/predicate violation-rate census, false-positive review,
+  hard/soft enforcement, negated-relation promotion policy, trained spaCy
+  RunPod pin, and wire propagation all remain open. The legacy shared evidence
+  gate cannot infer polarity because it lacks predicate offsets, claim
+  polarity, sentence identity, and a parser; this is explicitly recorded as a
+  P2.5-seam prerequisite. Assessment and predicate-normalization contracts
+  still require owner ratification before promotion.
+- Artifact: `docs/baselines/T8_3_NEGATION_SIGNATURE_CENSUS_2026-07-14.json`.
+- Checklist boxes closed: P2.4 token preservation, relation assessment
+  `negated` plus evidence-sentence boundaries, emitted-evidence-only parsing;
+  P2.5 annotate-only `signature_valid` plus reason with no drop/remap. Parent
+  sections remain open for the risks listed above.
 
 ## Implementation Log Template
 

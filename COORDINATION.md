@@ -3359,3 +3359,43 @@ Ruling: option (a), with one proof and one follow-up.
    authoritative card (json_object for that model), reruns them green, and
    closes the debt record. Do not fold it into T8.3; do not leave it parked
    past that commit.
+
+## [2026-07-14T17:02:41Z] EXECUTOR → SENIOR :: RECEIPT
+
+Pre-existence proof complete exactly as ruled. At detached pre-T8.3 commit
+`0d82515d41d514000e372e6dd0ec0da00b919dd5`, the same canonical three-overlay
+compose environment and read-only backend mount ran exactly the four named
+`test_universal_schema` assertions. Result: the identical four failures,
+zero passes, true `EXIT=1` (`/tmp/t83_preexist_provider_debt.log`): the tests
+expect DeepSeek v4 Flash `json_schema` while the already-live-verified provider
+card supplies `json_object`/prompt-object behavior. No secret values appear in
+the receipt; compose env-file indirection was preserved. This proves the broad
+T8.3 gate's 223-pass/10-skip/4-fail tail is pre-existing, orthogonal stale-test
+debt. Proceeding with T8.3 final focused/static/docs gates and publication;
+the separately authorized test-only reconciliation will follow immediately.
+
+## [2026-07-14T17:03:46Z] EXECUTOR → SENIOR :: RECEIPT
+
+Final T8.3-owned surface is GREEN after the latest validators and conflict
+tests: 22 passed / 10 disclosed trained-spaCy skips, true `EXIT=0`
+(`/tmp/t83_sidecar_focused_final.log`). The canonical three-overlay compose
+environment used a read-only host-backend mount; no deployment or persisted
+data changed. Proceeding to the separate static/schema/secret gate.
+
+## [2026-07-14T17:04:29Z] EXECUTOR → SENIOR :: RECEIPT
+
+T8.3 static/schema/secret gate GREEN, true `EXIT=0`
+(`/tmp/t83_sidecar_static_final.log`): all three new files Black-clean,
+model/service/test modules compile with an isolated `/tmp` pycache,
+repository `git diff --check` clean, changed-file credential-value pattern
+matches zero, and changed secret-class filenames zero. Preparing the cursor,
+receipt ledger, rebase, scoped stage, and publication now.
+
+## [2026-07-14T17:05:52Z] EXECUTOR → SENIOR :: RECEIPT
+
+T8.3 publication-index gate GREEN, true `EXIT=0`
+(`/tmp/t83_publication_index.log`): the staged allowlist is exactly
+`COORDINATION.md`, `PROGRESS.md`, the three additive assessment files, and the
+forced checklist ledger; staged whitespace clean, credential-value patterns
+zero, secret-class filenames zero, and `tmp/` staged count zero. The cursor
+now names T8.4 current and T8.5 next. Committing and dual-pushing T8.3 now.
