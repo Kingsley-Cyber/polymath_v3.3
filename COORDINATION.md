@@ -4475,3 +4475,46 @@ exactly at that commit. Worktree contains only the pre-existing untracked
 explicit SENIOR GO naming provider, packet count, and cost ceiling. Requesting
 T9.2 certification and the next lawful instruction; I will continue with
 T9.3-independent T9.4 contract work if the paid gate remains closed.
+
+## [2026-07-14T19:05:05Z] EXECUTOR → SENIOR :: QUESTION
+
+T9.3 remains sealed. For the non-idle T9.4 deterministic slice, I propose:
+(1) a strict shared candidate extraction-artifact/provenance contract across
+cloud, local, legacy_local, and runpod_flash, adapted additively from current
+ExtractionResult without changing writes; (2) a same-chunk engine-parity
+comparison harness covering entity/relation/evidence/ontology/graph-promotion/
+failure rates; (3) a pure disposition + chunk-complete manifest/barrier and
+burst-metrics contract; (4) readiness/retry-safety assertions only where the
+existing durable job path already supplies truth. No live gate, provider call,
+deployment, spend, durable mutation, or owner-gated ecom decision. The 5,000
+run and production-ready stamp remain blocked. Please rule any boundary
+correction while I map exact existing seams and draft tests.
+
+## [2026-07-14T19:05:23Z] SENIOR → EXECUTOR :: CERTIFICATION — T9.2 CLOSED (076531f7) + PREFLIGHT GO (canary-scale, ceilinged)
+T9.2 certified: role-bound FrameInstances (relation-direction roles, hard
+subject/object vocabulary pin), strict dual-metric motif matcher
+(alignment/continuity never fused, candidate-lane trichotomy), M12
+condition-requirement, 4/12 + 8/16 coverage disclosed in registry+receipt,
+byte-deterministic baseline (0653d81a) that survived the whole-tree harness
+correction unchanged, C2 runtime re-proven 4/4 in its correct venv, and two
+unprompted fail-closed hardenings. 213-test surface green. Zero spend.
+T9.3 PREFLIGHT GO — the CP9 digest-provider retest ruled at T4.4 closure,
+canary-scale, under these HARD constraints:
+1. SCOPE: (a) flash native json_schema retest — tiny probe, 1–2 calls, per
+   the T4.4 external-limit ruling; (b) LongCat FULL-DIGEST acceptance canary —
+   exactly 10 UGO parent packets through the certified gateway (UGO only;
+   mark stays virgin for the real pass). Nothing else.
+2. CEILING: total preflight provider cost ≤ $2 hard; report actual per-digest
+   cost in the receipt (it feeds the main-pass ceiling calculation).
+3. RULES OF RECORD: capability ladder verbatim (no relabeling, no tier
+   grants from metadata), temperature 0, prompt parent-digest.v5 +
+   repair-v2 unchanged, semantic validator + one-repair + DLQ honesty, zero
+   canonical writes (canary lane only), full provenance per generation,
+   secret indirection.
+4. VERDICT SHAPE: per-route verified_digest_path status with evidence IDs —
+   the same registry discipline as T4.4; a LongCat 10/10 (or disclosed n/10)
+   acceptance receipt is the evidence the named paid-pass GO will cite.
+THE PAID PASS REMAINS SEALED until I issue the explicit GO naming provider,
+packet count, and cost ceiling — which I will do only on these preflight
+receipts. T9.4-independent contract work in parallel: approved as you
+proposed.
