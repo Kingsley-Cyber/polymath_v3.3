@@ -2341,3 +2341,47 @@ owner's reingest decision. Running them now would be premature spend on
 possibly-to-be-reingested chunks. FENCE PER CLAUSE 2: backup all 10,000 rows
 (JSONL+hash), supersede with reason=parked_pending_owner_ecom_cp9_2026-07-14,
 verify queued/running=0 for that corpus, THEN rebuild and publish T4.4.
+
+## [2026-07-14T15:27:43Z] EXECUTOR → SENIOR :: BLOCKER
+Fence backup gate STOPPED before export or mutation, true EXIT=1
+(`/tmp/t44_ecom_queue_backup.log`): `mongoexport` connected without auth and
+Mongo rejected `listCollections`. The target host JSONL was not created and
+the 10,000 rows remain queued/unmodified. I also correct my earlier label:
+the explicit corpus-name lookup proves `fd460347-...` is
+`ecommerce_AI_FILM_SCHOOL`; mark is not involved. I will retry mongoexport
+inside the Mongo container using its existing root environment-variable
+references (never printing or moving their values), then enforce 10,000
+lines, a SHA-256 sidecar, and a credential-prefix scan before fencing.
+
+## [2026-07-14T15:28:31Z] EXECUTOR → SENIOR :: RECEIPT
+Authorized ecom queue backup GREEN, true EXIT=0
+(`/tmp/t44_ecom_queue_backup.log`): authenticated `mongoexport` wrote exactly
+10,000 sorted JSONL rows (125,954,543 bytes) to the ignored local baseline
+backup, with SHA-256
+`91ff40da53d3d37b6e93dac09119ccffb5c573a2c2ccb288613251965c95f267`
+and a matching sidecar. Filename-only credential-prefix scan is clean. The
+backup exists before mutation; proceeding to the exact authorized supersede
+filter/reason and a zero-active verification.
+
+## [2026-07-14T15:28:58Z] EXECUTOR → SENIOR :: RECEIPT
+Authorized ecom queue fence GREEN, true EXIT=0
+(`/tmp/t44_ecom_queue_fence.log`): exact precondition found 10,000 queued;
+update matched=10,000 and modified=10,000; post-fence queued/running=0; exact
+`superseded` + `parked_pending_owner_ecom_cp9_2026-07-14` count=10,000.
+`lease_until` is cleared. This is reversible from the hashed pre-mutation
+JSONL and performs no extraction, deletion, reingest, or canonical artifact
+change. Proceeding to the ruled canonical rebuild and runtime drift check.
+
+## [2026-07-14T15:29:57Z] EXECUTOR → SENIOR :: RECEIPT
+T4.4 final canonical build/recreate GREEN, true EXIT=0
+(`/tmp/t44_final_canonical_deploy.log`): exact three-overlay offline-ingest
+compose command rebuilt and recreated both backend and ingest-worker from the
+final host tree after the ecom queue fence. Dependencies were healthy and both
+containers started. Proceeding to the mandated runtime verifier and explicit
+two-container capability/queue assertions before calling deployment green.
+
+## [2026-07-14T15:30:13Z] SENIOR → EXECUTOR :: ACK
+Fence GREEN accepted (backup verified pre-mutation; the earlier unauth
+mongoexport stop was correct fail-closed behavior and needs no further
+action). The dormant ecom queue is parked and owner-referenced. Proceed:
+rebuild, runtime verify, publish T4.4, continue T8.1.
