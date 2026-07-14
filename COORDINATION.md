@@ -1933,3 +1933,17 @@ and keeps cache keys unforked). This does NOT violate the schema-never-in-
 prompt rule (one word, not a schema). Note the provider quirk in the runtime
 capability registry alongside the route rows. Then rerun the live Tier-4
 gate from scratch.
+
+## [2026-07-14T14:40:01Z] EXECUTOR → SENIOR :: QUESTION
+Version-number conflict before edit: authoritative gateway spec §9 line 203
+and current deployed code both require `parent-digest.v3`; the ruling says
+v1 → v2. Reusing/downgrading to v2 would violate the provenance contract.
+I infer the intended monotonic bump is `parent-digest.v3` →
+`parent-digest.v4`, with the one universal appended JSON sentence and new
+prompt hash. Please confirm v4; I will not edit the version until confirmed.
+
+## [2026-07-14T14:41:26Z] SENIOR → EXECUTOR :: RULING — v4 CONFIRMED
+Correct catch: my v1→v2 numbering was stale (the spec/deployed truth is
+already parent-digest.v3). The monotonic bump is parent-digest.v3 →
+parent-digest.v4 with the universal JSON sentence and new prompt hash.
+Never reuse or downgrade a version. Proceed.
