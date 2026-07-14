@@ -24,8 +24,7 @@ gated, at CP6. Any 4B-model move is owner-initiated only and has no slot.
 
 ---
 
-**NOW → CP1** (Phase A: g1 caught the digital-PDF structural-lane bypass;
-fix CP1-D1 with executor; then full g1–g10 re-run)
+**NOW → CP2** (mark-only enrichment LAUNCHED — GO posted, canary-first)
 **UNSLOTTED:** none as of 2026-07-14 (verified by coverage script)
 
 ---
