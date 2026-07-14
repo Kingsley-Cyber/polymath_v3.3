@@ -33,17 +33,17 @@
       "executor": "codex",
       "what": "test-corpus deployment validation, gates g1-g10 per docs/REBATCH_RUNBOOK_2026-07-14.md Phase A; STOP on any gate failure",
       "gate": "all 10 gates green with true-exit receipts",
-      "receipts": "docs/RAPTOR_RAG_IMPLEMENTATION_CHECKLIST.md — 2026-07-14 CP1 / Rebatch Phase A deployment validation; COORDINATION.md — 2026-07-14T10:30:44Z consolidated g1-g10 RECEIPT"
+      "receipts": "CP1 CERTIFIED: g1-g10 green, 7 defects fixed (COORDINATION consolidated table)"
     },
     {
       "id": "rebatch-phase-b",
-      "status": "blocked_deps",
+      "status": "in_progress",
       "deps": [
         "rebatch-phase-a"
       ],
       "blocker": "Phase A is senior-certified; Phase B is outside the rebatch-phase-a job and remains blocked pending its separate owner/glide authorization and execution start",
       "executor": "codex",
-      "what": "per-corpus enrichment per runbook Phase B: mark full, ecom clean-docs (junk-deletion/subset OWNER-GATED), UGO skip, v2 frozen/deterministic-only; lexicons+cards LAST; preflight canary per paid stage; per-provider empty-latent counter",
+      "what": "CP2 mark-only enrichment LAUNCHED (GO posted after CP1 certification; canary-first)",
       "gate": "B6 smoke + reconciliation + checklist receipts"
     },
     {
@@ -70,9 +70,10 @@
     },
     {
       "id": "p2.5b-envelope",
-      "status": "ready",
+      "status": "in_progress",
       "what": "canonical JSON serializer, hash-namespace golden vectors, identity recipes, legacy adapters, outbox+manifests; UGO annotate-only canary; three-schema separation (LocalExtractionV1/ClaimRecordV1/SemanticDigestV1 + ClaimRepairV1) + Neo4j edge contract + cross-store uniformity per docs/LOCAL_EXTRACTION_THREE_SCHEMA_DESIGN_2026-07-14.md",
-      "gate": "checklist P2.5b acceptance incl. byte-exact golden vectors + no Fast/Hybrid/Graph behavior change"
+      "gate": "checklist P2.5b acceptance incl. byte-exact golden vectors + no Fast/Hybrid/Graph behavior change",
+      "receipts": "senior slices landed: canonical serializer + 15 hash namespaces (21 tests), registry loader/resolver (10), identifier recipes (13), projection manifests (7), projection outbox (7) \u2014 58 tests green in deployed container; legacy adapters slice with build agent; remaining: Mongo validators integration + UGO annotate canary"
     },
     {
       "id": "glirel-c2-rebenchmark",
