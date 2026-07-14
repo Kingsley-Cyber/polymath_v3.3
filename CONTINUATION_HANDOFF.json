@@ -1,5 +1,5 @@
 {
-  "version": "2026-07-14.3",
+  "version": "2026-07-14.4",
   "purpose": "Machine-readable job queue for any continuing agent. Read CONTINUATION_HANDOFF.md first.",
   "authoritative_docs": [
     "CLAUDE.md",
@@ -9,13 +9,16 @@
     "docs/FINAL_SCHEMA_METADATA_ARCHITECTURE_2026-07-13.md",
     "docs/REBUTTAL_INTEGRATION_RESTATEMENT_2026-07-13.md",
     "docs/SEMANTIC_EXTRACTION_PRODUCTION_READINESS_2026-07-13.md",
-    "docs/EXECUTION_PLAN_2026-07-13.md"
+    "docs/EXECUTION_PLAN_2026-07-13.md",
+    "docs/LOCAL_EXTRACTION_THREE_SCHEMA_DESIGN_2026-07-14.md"
   ],
   "registries": {
     "domain": "backend/registries/domain_registry.v1.json",
     "superframe": "backend/registries/superframe_registry.v1.json",
     "affinity_priors": "backend/registries/domain_superframe_affinity.v1.json",
-    "motif": "backend/registries/motif_registry.v1.json"
+    "motif": "backend/registries/motif_registry.v1.json",
+    "extraction_vocabularies": "backend/registries/extraction_vocabularies.v1.json",
+    "motif_stage_superframe_binding": "backend/registries/motif_stage_superframe_binding.v1.PROPOSED.json (PROPOSED \u2014 owner must confirm before resolver use)"
   },
   "jobs": [
     {
@@ -35,13 +38,13 @@
     {
       "id": "p2.5b-envelope",
       "status": "ready",
-      "what": "canonical JSON serializer, hash-namespace golden vectors, identity recipes, legacy adapters, outbox+manifests; UGO annotate-only canary",
+      "what": "canonical JSON serializer, hash-namespace golden vectors, identity recipes, legacy adapters, outbox+manifests; UGO annotate-only canary; three-schema separation (LocalExtractionV1/ClaimRecordV1/SemanticDigestV1 + ClaimRepairV1) + Neo4j edge contract + cross-store uniformity per docs/LOCAL_EXTRACTION_THREE_SCHEMA_DESIGN_2026-07-14.md",
       "gate": "checklist P2.5b acceptance incl. byte-exact golden vectors + no Fast/Hybrid/Graph behavior change"
     },
     {
       "id": "glirel-c2-rebenchmark",
       "status": "ready",
-      "what": "compiled-claim quality WITH vs WITHOUT controlled-label GLiREL candidates on backend/evals/semantic_extraction_gold_v1.json",
+      "what": "compiled-claim quality WITH vs WITHOUT GLiREL candidates using the controlled PredicateType label set (extraction_vocabularies.v1) on backend/evals/semantic_extraction_gold_v1.json",
       "gate": "owner ruling C2; relations stay observation-only until pass"
     },
     {

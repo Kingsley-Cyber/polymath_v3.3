@@ -1,0 +1,62 @@
+{
+  "registry": "motif_stage_superframe_binding",
+  "version": "v1-PROPOSED",
+  "status": "PROPOSED BY AGENT 2026-07-14 — NOT owner-delivered. Resolvers MUST NOT use until the owner confirms/edits each binding. Bindings are recipe/policy data, never identity.",
+  "method": "Each motif stage label mapped to the superframe whose mechanism it names; alternates listed where genuinely ambiguous. Confidence: high = direct name match, medium = judgment call.",
+  "bindings": [
+    {"motif_id": "M01", "stages": [
+      {"stage": "SIGNAL", "superframe": "MF02", "confidence": "high"},
+      {"stage": "INTERPRETATION", "superframe": "MF02", "confidence": "high"},
+      {"stage": "VALUATION", "superframe": "MF05", "confidence": "high"},
+      {"stage": "CHOICE", "superframe": "MF06", "confidence": "high"}]},
+    {"motif_id": "M02", "stages": [
+      {"stage": "REPRESENTATION", "superframe": "MF01", "confidence": "high"},
+      {"stage": "ATTENTION", "superframe": "MF02", "alternates": ["MF01"], "confidence": "medium"},
+      {"stage": "BELIEF", "superframe": "MF07", "confidence": "high"},
+      {"stage": "ACTION", "superframe": "MF06", "confidence": "high"}]},
+    {"motif_id": "M03", "stages": [
+      {"stage": "GOAL", "superframe": "MF06", "confidence": "high"},
+      {"stage": "CONSTRAINT", "superframe": "MF09", "confidence": "high"},
+      {"stage": "DECISION", "superframe": "MF06", "confidence": "high"},
+      {"stage": "OUTCOME", "superframe": "MF04", "alternates": ["MF06"], "confidence": "medium"}]},
+    {"motif_id": "M04", "stages": [
+      {"stage": "ACTION", "superframe": "MF06", "confidence": "high"},
+      {"stage": "FEEDBACK", "superframe": "MF08", "confidence": "high"},
+      {"stage": "UPDATE", "superframe": "MF07", "confidence": "high"},
+      {"stage": "NEW ACTION", "superframe": "MF06", "confidence": "high"}]},
+    {"motif_id": "M05", "stages": [
+      {"stage": "SCARCITY", "superframe": "MF09", "alternates": ["MF10"], "confidence": "medium"},
+      {"stage": "ALLOCATION", "superframe": "MF10", "confidence": "high"},
+      {"stage": "TRADE-OFF", "superframe": "MF09", "confidence": "high"}]},
+    {"motif_id": "M06", "stages": [
+      {"stage": "IDENTITY/ROLE", "superframe": "MF11", "confidence": "high"},
+      {"stage": "NORM", "superframe": "MF11", "confidence": "high"},
+      {"stage": "BEHAVIOR", "superframe": "MF06", "confidence": "medium"},
+      {"stage": "SOCIAL FEEDBACK", "superframe": "MF08", "alternates": ["MF12"], "confidence": "medium"}]},
+    {"motif_id": "M07", "stages": [
+      {"stage": "VARIATION", "superframe": "MF13", "confidence": "high"},
+      {"stage": "SELECTION CRITERION", "superframe": "MF13", "confidence": "high"},
+      {"stage": "RETENTION", "superframe": "MF13", "alternates": ["MF15"], "confidence": "medium"}]},
+    {"motif_id": "M08", "stages": [
+      {"stage": "STOCK/FLOW", "superframe": "MF15", "confidence": "high"},
+      {"stage": "THRESHOLD", "superframe": "MF15", "confidence": "high"},
+      {"stage": "STATE TRANSITION", "superframe": "MF15", "confidence": "high"}]},
+    {"motif_id": "M09", "stages": [
+      {"stage": "COMPONENT INTERACTIONS", "superframe": "MF16", "confidence": "high"},
+      {"stage": "AGGREGATE PATTERN", "superframe": "MF16", "confidence": "high"},
+      {"stage": "EMERGENCE", "superframe": "MF16", "confidence": "high"}]},
+    {"motif_id": "M10", "stages": [
+      {"stage": "UNCERTAINTY", "superframe": "MF14", "confidence": "high"},
+      {"stage": "PROXY/HEURISTIC", "superframe": "MF03", "alternates": ["MF14"], "confidence": "medium"},
+      {"stage": "DECISION", "superframe": "MF06", "confidence": "high"}]},
+    {"motif_id": "M11", "stages": [
+      {"stage": "INTERDEPENDENCE", "superframe": "MF16", "alternates": ["MF12"], "confidence": "medium"},
+      {"stage": "TRUST/POWER MECHANISM", "superframe": "MF12", "confidence": "high"},
+      {"stage": "COORDINATION OUTCOME", "superframe": "MF12", "confidence": "high"}]},
+    {"motif_id": "M12", "stages": [
+      {"stage": "INTERVENTION", "superframe": "MF04", "confidence": "high"},
+      {"stage": "MEDIATOR", "superframe": "MF04", "confidence": "high"},
+      {"stage": "OUTCOME", "superframe": "MF04", "confidence": "high"}],
+     "qualifier": "UNDER CONDITION binds as claim-level condition (APPLIES_UNDER), not a stage"}
+  ]
+}

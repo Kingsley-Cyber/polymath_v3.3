@@ -1,0 +1,10 @@
+{
+  "registry": "extraction_vocabularies",
+  "version": "v1",
+  "source": "owner-delivered in-chat 2026-07-14 (LocalExtractionV1 design; verbatim literals)",
+  "policy_note": "Controlled vocabularies for the local extraction stage. PredicateType IS the controlled relation-label set for the C2 GLiREL re-benchmark and for GLiREL/Relex candidate production. Additions are new registry versions, never ad-hoc strings.",
+  "entity_types": ["PERSON", "ORGANIZATION", "PLACE", "PRODUCT", "DOCUMENT", "AGENT", "GROUP", "SYSTEM", "PROCESS", "BEHAVIOR", "STATE", "QUALITY", "CONCEPT", "METHOD", "SIGNAL", "BASELINE", "METRIC", "RESOURCE", "CONSTRAINT", "GOAL", "INTERVENTION", "OUTCOME", "CONDITION", "POPULATION", "TIME_PATTERN"],
+  "predicate_types": ["CAUSES", "INFLUENCES", "INCREASES", "DECREASES", "UPDATES", "SIGNALS", "MEASURES", "COMPARES_AGAINST", "ENABLES", "INHIBITS", "REQUIRES", "CONSTRAINS", "RESULTS_IN", "APPLIES_UNDER", "PART_OF", "USED_FOR", "ASSOCIATED_WITH"],
+  "modalities": ["asserted", "possible", "probable", "necessary", "recommended", "hypothetical"],
+  "polarities": ["positive", "negative"]
+}
