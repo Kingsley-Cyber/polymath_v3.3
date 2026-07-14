@@ -2128,15 +2128,113 @@ first-shot Tier-3 structure PASSED (12 root keys valid; failure was the
 semantic validator doing its job on unknown non-candidate domains) and the
 regression lives in the REPAIR path. AUTHORIZED, tightly scoped:
 1. Complete the Tier-3 repair implementation: the targeted-repair instruction
-   for tool-call mode must require corrections re-submitted through the SAME
-   forced tool with arguments at ROOT (12 keys, no 'parameters' or any
-   wrapper). This is a REPAIR-prompt version bump (its own versioned identity
-   + hash), pinned tests for the repair shape, redeploy.
+for tool-call mode must require corrections re-submitted through the SAME
+forced tool with arguments at ROOT (12 keys, no 'parameters' or any
+wrapper). This is a REPAIR-prompt version bump (its own versioned identity
++ hash), pinned tests for the repair shape, redeploy.
 2. IN THE SAME PREP, cheap Tier-3 capability probe of LongCat (one tiny
-   forced-tool request): if flash ultimately fails we must know whether ANY
-   configured route can serve digests BEFORE declaring CP9 blocked.
+forced-tool request): if flash ultimately fails we must know whether ANY
+configured route can serve digests BEFORE declaring CP9 blocked.
 3. ONE fresh 10-packet Tier-3 acceptance rerun on flash. PASS → flash
-   verified digest path = Tier-3; record and close T4.4. FAIL → T4.4 closes
-   as honest external provider limitation, flash digests blocked for CP9,
-   and the LongCat probe result + registry rows come to the senior for the
-   CP9 digest-provider decision. No further levers after this — final.
+verified digest path = Tier-3; record and close T4.4. FAIL → T4.4 closes
+as honest external provider limitation, flash digests blocked for CP9,
+and the LongCat probe result + registry rows come to the senior for the
+CP9 digest-provider decision. No further levers after this — final.
+
+## [2026-07-14T15:06:03Z] EXECUTOR → SENIOR :: RECEIPT
+Capability registry now records runtime truth without overclaim: flash
+`tier4_digest_status=structurally_unreliable`,
+`tier3_digest_status=repair_unstable`, `verified_digest_path=null`, with the
+three noncanonical DLQ IDs as evidence; all other routes remain not-tested for
+digest paths. Strict registry/receipt tests are 14/14, true EXIT=0
+(`/tmp/t44_registry_digest_status_tests.log`); Black true EXIT=0
+(`/tmp/t44_registry_digest_status_black.log`).
+
+## [2026-07-14T15:06:04Z] EXECUTOR → SENIOR :: ACK
+Final ruling received. I will introduce an explicit
+`parent-digest-repair.v2` identity/hash while keeping initial prompt v5,
+apply the root/no-`parameters` constraint only to Tier3 repair messages, pin
+provenance/cache and same-tool repair behavior, deploy, run exactly one tiny
+LongCat forced-tool probe, then exactly one fresh flash 10-packet Tier3 run.
+That result closes T4.4 with no further lever.
+
+## [2026-07-14T15:09:32Z] EXECUTOR → SENIOR :: RECEIPT
+Final Tier3-repair focused gate GREEN: 57 passed, true EXIT=0
+(`/tmp/t44_tier3_repair_v2_focused.log`); Black true EXIT=0
+(`/tmp/t44_tier3_repair_v2_black.log`). The generic initial prompt remains
+v5; repair now has independent `parent-digest-repair.v2` identity/hash in
+config, provenance, DLQ, and combined cache identity. Tier3 attempt 2 alone
+requires the SAME forced tool, all 12 fields at argument root, and explicitly
+forbids `parameters`/any wrapper. Generic Tier1/Tier4 repair stays unchanged.
+The LongCat tiny-tool probe parser rejects the exact `parameters` pathology
+and accepts only one named tool with closed `{ok:boolean}` arguments.
+Proceeding to adjacent regression.
+
+## [2026-07-14T15:10:11Z] EXECUTOR → SENIOR :: RECEIPT
+Final Tier3-repair adjacent gate GREEN: 168 passed, 3 pre-existing Docker-only
+skips, true EXIT=0 (`/tmp/t44_tier3_repair_v2_adjacent.log`). All prior
+gateway, semantic, envelope/hash, registry, provider-wire, and thinking paths
+remain green. Proceeding to the final canonical shared-image redeploy, then
+the mandated LongCat tiny probe before the one final flash rerun.
+
+## [2026-07-14T15:11:20Z] EXECUTOR → SENIOR :: RECEIPT
+Final Tier3-repair canonical deployment GREEN: three-overlay build/recreate
+true EXIT=0 (`/tmp/t44_tier3_repair_v2_deploy.log`), runtime verifier true
+EXIT=0 (`/tmp/t44_tier3_repair_v2_runtime_verify.log`), and both shared-image
+containers assert v5 initial + independent repair-v2 identities/hashes,
+root/no-`parameters` Tier3 repair, and baked LongCat probe with true EXIT=0
+(`/tmp/t44_tier3_repair_v2_two_container.log`). Running the mandated one-call
+LongCat tiny forced-tool probe next, before flash.
+
+## [2026-07-14T15:11:54Z] EXECUTOR → SENIOR :: RECEIPT
+Mandated LongCat tiny Tier3 probe GREEN: one forced `submit_tiny_probe` call
+returned exactly closed `{ok:boolean}` arguments, HTTP 200, true EXIT=0
+(`/tmp/t44_longcat_tier3_probe.log`; safe receipt
+`/tmp/t44_longcat_tier3_probe.json`). This proves tiny forced-tool capability
+only, NOT full SemanticDigest acceptance; LongCat's verified digest path
+remains null until a future full gate. Proceeding immediately to the one final
+authorized flash 10-packet Tier3 acceptance.
+
+## [2026-07-14T15:14:15Z] EXECUTOR → SENIOR :: BLOCKER
+FINAL T4.4 flash acceptance FAILED and is now CLOSED per ruling; true EXIT=1
+(`/tmp/t44_ugo_tier3_final_live.log`). The repair-v2 root constraint worked:
+the final attempt-2 arguments have exactly the 12 SemanticDigest root keys,
+not a wrapper. They still repeated three semantically invalid unknown-domain
+assignments as non-candidate, so the strict semantic validator exhausted the
+two-attempt budget and wrote noncanonical DLQ
+`semantic-dlq:c941b145...`. Safe final state
+(`/tmp/t44_tier3_final_failure_state.log`, EXIT=0) shows three repair-v2
+packets accepted before the concurrent failure (all attempts=2) plus the one
+older repair-v1 partial row; every cache row is `canonical_write=false`.
+Mongo semantic artifacts remain 0 and the complete Qdrant/Neo4j census is
+number-for-number identical to every prior snapshot. No synthetic DLQ step or
+10-packet completion was reached; those acceptance boxes remain OPEN.
+
+## [2026-07-14T15:14:16Z] EXECUTOR → SENIOR :: RECEIPT
+T4.4 closure verdict: flash native Tier1=provider-rejected; flash Tier4=
+structurally unreliable; flash Tier3=partial but repair-budget/semantic-
+correction unreliable; `verified_digest_path=null`. LongCat tiny Tier3 tool=
+accepted, full digest=unverified. Per the final ruling there will be no further
+lever or provider call. I am freezing these facts in the registry/baselines,
+leaving Tier1/10-packet/downgrade/dead-letter-demo boxes open, marking T4.4
+external-limit complete in PROGRESS, and surfacing the CP9 digest-provider
+decision to you before moving the core spine to T8.1.
+
+## [2026-07-14T15:15:43Z] SENIOR → EXECUTOR :: RULING — CP9 digest provider + spine continues
+T4.4 closure accepted as ruled; the honest verified_digest_path=null for
+flash is worth more than a laundered pass. CP9 DIGEST-PROVIDER RULING
+(senior authority: choosing among OWNER-CONFIGURED routes on documented
+capability evidence; owner may veto via OWNER :: entry):
+1. LongCat is the CANDIDATE digest provider. Run the SAME 10-packet
+   acceptance on LongCat Tier-3 (canary-class spend, ~10 calls) — not now,
+   but as the FIRST step of A4/CP9 preflight, alongside the mandated flash
+   retest (DeepSeek's rejection says "unavailable NOW" — it may reclaim the
+   path). Whichever passes becomes verified_digest_path for the paid pass;
+   flash keeps ALL non-digest bulk work per the owner's "use flash" standing
+   directive (that directive chose cost/speed for bulk summaries; it cannot
+   bind to a task the provider demonstrably cannot perform).
+2. If BOTH fail at CP9 preflight: digests are provider-blocked, documented
+   as the external limit, and the paid pass parks for an owner line.
+PROCEED NOW: A3/T8.1 — the claim spine (pure Python/spaCy/GLiNER, no LLM
+dependency), exactly as your PROGRESS cursor already points. The spine does
+not wait on providers.
