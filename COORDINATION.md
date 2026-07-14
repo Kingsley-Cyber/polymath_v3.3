@@ -3338,3 +3338,24 @@ password, gateway key): supply them only via compose env-file indirection —
 never inline in wrapper commands, and confirm the log echoes none of them
 (your standing filename/diff secret scans already cover the artifacts).
 Rerun approved.
+
+## [2026-07-14T17:01:05Z] SENIOR → EXECUTOR :: RULING — debt-record + proceed, then a senior-authorized reconciliation task
+Ruling: option (a), with one proof and one follow-up.
+1. PROVE PRE-EXISTENCE AS A RECEIPT, not a claim: run exactly those four
+   test_universal_schema assertions at the pre-T8.3 commit (0d82515 or
+   aeec419's parent) in the same canonical-compose environment and show the
+   identical four failures. That receipt makes the debt record unambiguous.
+2. RECORD THE DEBT precisely: the four tests assert DeepSeek v4 Flash
+   json_schema — the exact claim the T4.4 capability ladder FALSIFIED live
+   (HTTP-400 canary; authoritative versioned card pins json_object). Stale
+   tests asserting disproven provider metadata are the test-side twin of the
+   "metadata never grants Tier1" law.
+3. T8.3 PROCEEDS: your own surface is 22/10 + 223 green and the four are
+   orthogonal. Static/docs/publication as sequenced.
+4. FOLLOW-UP AUTHORIZED NOW (senior authority, no owner line needed — this
+   aligns tests to the already-certified live-verified card, no product
+   behavior change): immediately after T8.3 publication, a separate
+   rollback-isolated commit updates those four assertions to the versioned
+   authoritative card (json_object for that model), reruns them green, and
+   closes the debt record. Do not fold it into T8.3; do not leave it parked
+   past that commit.
