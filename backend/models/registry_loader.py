@@ -35,11 +35,350 @@ FILES = {
     "binding": "motif_stage_superframe_binding.v1.json",
     "embedding_instruction": "embedding_instruction_registry.v1.json",
     "predicate_normalization": "predicate_normalization.v1.json",
+    "domain_resolution": "domain_resolution_policy.v1.json",
+    "superframe_rule": "superframe_rule_registry.v1.json",
 }
 
 
 class RegistryError(ValueError):
     """A registry file is malformed, inconsistent, or referenced id is unknown."""
+
+
+_PROPOSED_AUTHORITY = "executor-proposed, owner-ratifiable"
+
+
+def _validate_proposed_v1_registry(
+    registry: dict[str, Any],
+    *,
+    registry_id: str,
+) -> None:
+    if registry.get("registry") != registry_id:
+        raise RegistryError(f"{registry_id} registry has the wrong identity")
+    if registry.get("version") != "v1":
+        raise RegistryError(f"{registry_id} registry version must be v1")
+    if registry.get("authority") != _PROPOSED_AUTHORITY:
+        raise RegistryError(f"{registry_id} authority mark is missing")
+    if registry.get("owner_ratification_required") is not True:
+        raise RegistryError(f"{registry_id} must remain owner-ratifiable")
+    if registry.get("changes_require_new_version") is not True:
+        raise RegistryError(f"{registry_id} must require monotonic versions")
+
+
+def _validate_domain_resolution_policy(registry: dict[str, Any]) -> None:
+    expected_fields = {
+        "registry",
+        "version",
+        "authority",
+        "owner_ratification_required",
+        "source",
+        "changes_require_new_version",
+        "policy_note",
+        "normalizer",
+        "match_policies",
+        "predicate_policy",
+        "merge_policy",
+        "score_components",
+        "scalar_score",
+        "cardinality_cap",
+        "unknown_policy",
+        "affinity_quarantine",
+    }
+    if set(registry) != expected_fields:
+        raise RegistryError("domain resolution policy fields are not exact")
+    _validate_proposed_v1_registry(
+        registry,
+        registry_id="domain_resolution_policy",
+    )
+
+    normalizer = registry["normalizer"]
+    if set(normalizer) != {
+        "normalizer_id",
+        "implementation",
+        "algorithm",
+        "graph_entity_id_divergence",
+        "reconciliation_owner",
+    }:
+        raise RegistryError("domain resolution normalizer fields are not exact")
+    if normalizer["normalizer_id"] != "corpus_lexicon.normalize_identity.v1":
+        raise RegistryError("domain resolution must reuse the CP5 identity keyspace")
+    if (
+        normalizer["implementation"]
+        != "services.ingestion.corpus_lexicon.normalize_identity"
+    ):
+        raise RegistryError("domain resolution normalizer implementation drifted")
+    if normalizer["algorithm"] != (
+        "NFKC; lowercase; underscores and hyphens to spaces; replace ASCII "
+        "non-alphanumeric characters with spaces; collapse whitespace"
+    ):
+        raise RegistryError("domain resolution normalizer algorithm drifted")
+    if not all(
+        marker in normalizer["graph_entity_id_divergence"]
+        for marker in ("canonicalize_entity_name", "NFKD", "alias map")
+    ):
+        raise RegistryError("graph entity-id normalizer divergence must be surfaced")
+    if normalizer["reconciliation_owner"] != "CP5 versioned alias registry":
+        raise RegistryError("CP5 alias registry reconciliation ownership drifted")
+
+    policies = registry["match_policies"]
+    expected_policies = [
+        {
+            "signal_kind": "claim_concept",
+            "match": "exact_normalized_domain_name_or_member",
+            "assignment_role": "dominant",
+            "evidence_authority": "claim_local",
+        },
+        {
+            "signal_kind": "section_heading",
+            "match": "exact_normalized_domain_name_or_member",
+            "assignment_role": "supporting",
+            "evidence_authority": "inherited_context",
+        },
+    ]
+    if policies != expected_policies:
+        raise RegistryError("domain exact-match policies drifted")
+    if registry["predicate_policy"] != {
+        "domain_bearing": False,
+        "reason": (
+            "PredicateType belongs to the independent mechanism axis and "
+            "cannot assign a domain"
+        ),
+    }:
+        raise RegistryError("PredicateType must remain non-domain-bearing")
+    if registry["merge_policy"] != {
+        "key": "domain_id",
+        "evidence": "union_sorted_unique",
+        "same_domain_role_precedence": ["dominant", "supporting"],
+    }:
+        raise RegistryError("domain merge policy drifted")
+    if registry["score_components"] != [
+        "exact_claim_concept_matches",
+        "exact_heading_matches",
+        "claim_evidence_ref_count",
+        "context_evidence_ref_count",
+    ]:
+        raise RegistryError("domain score components drifted")
+    if registry["scalar_score"] is not None:
+        raise RegistryError("domain resolution cannot invent a scalar score")
+    if registry["cardinality_cap"] is not None:
+        raise RegistryError("domain resolution cannot impose a cardinality cap")
+
+    unknown = registry["unknown_policy"]
+    if unknown != {
+        "assignment_state": "unresolved",
+        "reason": "no_exact_domain_registry_match",
+        "evidence_destination": "CP5_alias_registry_evidence",
+        "act_on_evidence": False,
+        "receipt": "count_per_run_and_top_normalized_terms",
+    }:
+        raise RegistryError("unresolved domain evidence policy drifted")
+    quarantine = registry["affinity_quarantine"]
+    if quarantine != {
+        "source_registry": "domain_superframe_affinity.v1",
+        "serve_only": True,
+        "may_assign_domain": False,
+        "may_assign_or_forbid_superframe": False,
+        "excluded_from_artifact_identity": True,
+        "excluded_from_acceptance": True,
+    }:
+        raise RegistryError("domain affinity quarantine drifted")
+
+
+def _validate_superframe_rules(
+    registry: dict[str, Any],
+    *,
+    controlled_predicates: list[str],
+    known_superframes: set[str],
+    known_entity_types: set[str],
+) -> None:
+    expected_fields = {
+        "registry",
+        "version",
+        "authority",
+        "owner_ratification_required",
+        "source",
+        "changes_require_new_version",
+        "policy_note",
+        "condition_vocabulary",
+        "coverage",
+        "rules",
+        "abstentions",
+    }
+    if set(registry) != expected_fields:
+        raise RegistryError("superframe rule registry fields are not exact")
+    _validate_proposed_v1_registry(
+        registry,
+        registry_id="superframe_rule_registry",
+    )
+
+    vocabulary = registry["condition_vocabulary"]
+    if vocabulary != {
+        "fields": ["subject_surface_tokens", "object_entity_types"],
+        "operators": ["contains_any"],
+    }:
+        raise RegistryError("superframe condition vocabulary drifted")
+    allowed_fields = set(vocabulary["fields"])
+    allowed_operators = set(vocabulary["operators"])
+
+    rules = registry["rules"]
+    if not isinstance(rules, list) or not rules:
+        raise RegistryError("superframe rule registry must contain rules")
+    expected_rule_fields = {
+        "rule_id",
+        "priority",
+        "predicates",
+        "conditions",
+        "frame_id",
+        "terminal",
+        "owner_attention",
+        "source_line",
+    }
+    rule_ids: list[str] = []
+    rule_predicates: set[str] = set()
+    reachable_frames: set[str] = set()
+    for rule in rules:
+        if not isinstance(rule, dict) or set(rule) != expected_rule_fields:
+            raise RegistryError("superframe rule fields are not exact")
+        rule_id = rule["rule_id"]
+        if not isinstance(rule_id, str) or not rule_id:
+            raise RegistryError("superframe rule_id must be nonempty")
+        rule_ids.append(rule_id)
+        if (
+            not isinstance(rule["priority"], int)
+            or isinstance(rule["priority"], bool)
+            or rule["priority"] < 0
+        ):
+            raise RegistryError(f"{rule_id}: priority must be a nonnegative integer")
+        predicates = rule["predicates"]
+        if (
+            not isinstance(predicates, list)
+            or not predicates
+            or len(predicates) != len(set(predicates))
+            or set(predicates) - set(controlled_predicates)
+        ):
+            raise RegistryError(f"{rule_id}: predicates are invalid or unknown")
+        if rule["frame_id"] not in known_superframes:
+            raise RegistryError(f"{rule_id}: unknown superframe {rule['frame_id']}")
+        if rule["terminal"] is not True:
+            raise RegistryError(f"{rule_id}: T9.1 rules must remain terminal")
+        if not isinstance(rule["owner_attention"], bool):
+            raise RegistryError(f"{rule_id}: owner_attention must be boolean")
+        if not isinstance(rule["source_line"], str) or not rule["source_line"]:
+            raise RegistryError(f"{rule_id}: source_line must be nonempty")
+
+        conditions = rule["conditions"]
+        if not isinstance(conditions, list):
+            raise RegistryError(f"{rule_id}: conditions must be a list")
+        for condition in conditions:
+            if not isinstance(condition, dict) or set(condition) != {
+                "field",
+                "operator",
+                "values",
+            }:
+                raise RegistryError(f"{rule_id}: condition fields are not exact")
+            if condition["field"] not in allowed_fields:
+                raise RegistryError(f"{rule_id}: unknown condition field")
+            if condition["operator"] not in allowed_operators:
+                raise RegistryError(f"{rule_id}: unknown condition operator")
+            values = condition["values"]
+            if (
+                not isinstance(values, list)
+                or not values
+                or values != sorted(set(values))
+            ):
+                raise RegistryError(
+                    f"{rule_id}: condition values must be sorted and unique"
+                )
+            if (
+                condition["field"] == "object_entity_types"
+                and set(values) - known_entity_types
+            ):
+                raise RegistryError(f"{rule_id}: unknown condition entity type")
+        rule_predicates.update(predicates)
+        reachable_frames.add(rule["frame_id"])
+    if len(rule_ids) != len(set(rule_ids)):
+        raise RegistryError("superframe rule IDs must be unique")
+
+    abstentions = registry["abstentions"]
+    if not isinstance(abstentions, list) or any(
+        not isinstance(item, dict)
+        or set(item) != {"predicate", "reason", "source_line"}
+        for item in abstentions
+    ):
+        raise RegistryError("superframe abstention fields are not exact")
+    abstention_predicates = [item["predicate"] for item in abstentions]
+    if any(
+        not isinstance(item["reason"], str)
+        or not item["reason"]
+        or not isinstance(item["source_line"], str)
+        or not item["source_line"]
+        for item in abstentions
+    ):
+        raise RegistryError("superframe abstentions require reason and source line")
+    if len(abstention_predicates) != len(set(abstention_predicates)):
+        raise RegistryError("superframe abstention predicates must be unique")
+    if set(abstention_predicates) - set(controlled_predicates):
+        raise RegistryError("superframe abstention references unknown predicate")
+    if rule_predicates & set(abstention_predicates):
+        raise RegistryError("a predicate cannot have both a rule and abstention")
+    if rule_predicates | set(abstention_predicates) != set(controlled_predicates):
+        raise RegistryError(
+            "every controlled predicate requires a rule or explicit abstention"
+        )
+    if abstention_predicates != ["ASSOCIATED_WITH"]:
+        raise RegistryError("ASSOCIATED_WITH must remain the explicit abstention")
+
+    used_for_rules = [rule for rule in rules if "USED_FOR" in rule["predicates"]]
+    if len(used_for_rules) != 1 or not used_for_rules[0]["owner_attention"]:
+        raise RegistryError("USED_FOR mapping must be flagged for owner attention")
+    if any(
+        rule["owner_attention"] and "USED_FOR" not in rule["predicates"]
+        for rule in rules
+    ):
+        raise RegistryError("only USED_FOR may carry the v1 owner-attention flag")
+
+    specialization = [
+        rule
+        for rule in rules
+        if rule["rule_id"] == "predicate_frame.decreases_cumulative_baseline.v1"
+    ]
+    if len(specialization) != 1 or specialization[0]["frame_id"] != "MF15":
+        raise RegistryError("the owner MF15 specialization is missing")
+    base_decreases_priorities = [
+        rule["priority"]
+        for rule in rules
+        if "DECREASES" in rule["predicates"] and rule["frame_id"] == "MF04"
+    ]
+    if not base_decreases_priorities or specialization[0]["priority"] <= max(
+        base_decreases_priorities
+    ):
+        raise RegistryError("MF15 specialization must outrank the MF04 base rule")
+
+    coverage = registry["coverage"]
+    expected_coverage_fields = {
+        "controlled_predicate_count",
+        "rule_covered_predicate_count",
+        "explicit_abstention_count",
+        "reachable_superframe_ids",
+        "reachable_superframe_count",
+        "total_superframe_count",
+        "coverage_note",
+    }
+    if set(coverage) != expected_coverage_fields:
+        raise RegistryError("superframe coverage fields are not exact")
+    if coverage["controlled_predicate_count"] != len(controlled_predicates):
+        raise RegistryError("superframe controlled-predicate count is dishonest")
+    if coverage["rule_covered_predicate_count"] != len(rule_predicates):
+        raise RegistryError("superframe rule-covered count is dishonest")
+    if coverage["explicit_abstention_count"] != len(abstention_predicates):
+        raise RegistryError("superframe abstention count is dishonest")
+    if coverage["reachable_superframe_ids"] != sorted(reachable_frames):
+        raise RegistryError("superframe reachable IDs are dishonest")
+    if coverage["reachable_superframe_count"] != len(reachable_frames):
+        raise RegistryError("superframe reachable count is dishonest")
+    if coverage["total_superframe_count"] != len(known_superframes):
+        raise RegistryError("superframe total-frame count is dishonest")
+    if len(reachable_frames) != 8:
+        raise RegistryError("predicate routing must honestly report 8/16 frames")
 
 
 def _read(name: str) -> dict[str, Any]:
@@ -108,6 +447,14 @@ def load_all() -> dict[str, dict[str, Any]]:
     for key in ("entity_types", "predicate_types", "modalities", "polarities"):
         if not vocab.get(key):
             raise RegistryError(f"extraction vocabulary missing {key}")
+
+    _validate_domain_resolution_policy(data["domain_resolution"])
+    _validate_superframe_rules(
+        data["superframe_rule"],
+        controlled_predicates=vocab["predicate_types"],
+        known_superframes=set(superframes),
+        known_entity_types=set(vocab["entity_types"]),
+    )
 
     predicate_normalization = data["predicate_normalization"]
     expected_normalization_fields = {
@@ -249,6 +596,18 @@ def domain_affinity_priors(domain_id: str) -> list[str]:
     if domain_id not in rows:
         raise RegistryError(f"unknown domain {domain_id}")
     return list(rows[domain_id]["dominant_superframes"])
+
+
+def domain_resolution_policy() -> dict[str, Any]:
+    """Return the immutable exact-match domain-resolution recipe."""
+
+    return load_all()["domain_resolution"]
+
+
+def superframe_rule_registry() -> dict[str, Any]:
+    """Return the immutable candidate-only predicate→superframe recipe."""
+
+    return load_all()["superframe_rule"]
 
 
 def is_controlled_predicate(predicate: str) -> bool:

@@ -4030,3 +4030,114 @@ invented scalar, PredicateType non-domain-bearing). Refinements, binding:
 5. Serve-only affinity quarantine and the T9.1-candidates/T9.2-bindings
    split: CONFIRMED as proposed.
 Freeze the registries and proceed.
+
+## [2026-07-14T18:02:02Z] EXECUTOR → SENIOR :: ACK
+
+T9.1 ruling received. I will reuse
+`services.ingestion.corpus_lexicon.normalize_identity` as the one domain-term
+keyspace (not add a near-copy), surface its deliberate divergence from graph
+`entity_id_from_name` normalization, retain/count unresolved terms for CP5,
+record 8/16 predicate-route MF reachability as limited coverage, flag USED_FOR
+for owner attention, freeze both new recipes with monotonic owner-ratifiable
+authority, and keep affinities quarantined from identity and acceptance.
+
+## [2026-07-14T18:16:04Z] EXECUTOR → SENIOR :: RECEIPT
+
+T9.1 focused gate GREEN: `PYTHONPATH=/app pytest -q
+/tmp/test_registry_loader.py /tmp/test_semantic_resolution.py` produced
+`49 passed in 0.20s`, true `EXIT=0` in `/tmp/t91_focused.log`. Frozen additive
+registry hashes are domain-resolution
+`sha256:1c54da7c132562c25ab71ddce2cf27253f8405fc0c6a2e7c47f442557d8ced89`
+and superframe-rules
+`sha256:7ad83a5735bec13baafef89851bac50f22420b89bbe617e86921a7bdf2dc89c8`.
+Proofs green: exact/no-fuzzy domain resolution, claim-local role precedence,
+unresolved CP5 evidence, PredicateType/domain separation, all 17 predicates
+(16 routed + ASSOCIATED_WITH abstention), terminal MF15 specialization,
+USED_FOR owner-attention flag, affinity non-identity, unknown-ID hard errors,
+no provider/write boundary, and byte-identical replay. No provider calls,
+spend, durable semantic writes, or owner ontology edits occurred. Proceeding
+to adjacent regression plus synthetic count-only T9.1 census.
+
+## [2026-07-14T18:17:02Z] EXECUTOR → SENIOR :: RECEIPT
+
+Adjacent gate attempt 1 did not reach pytest: the prep command used
+`compileall` against `/app` and the container user cannot write the baked
+`__pycache__` directories. Actual tail: three `PermissionError: [Errno 13]
+Permission denied` lines for the three touched modules; true `EXIT=1` in
+`/tmp/t91_adjacent.log`. Diagnosis is harness-only (zero tests collected or
+run), not a code assertion. Rerunning the same adjacent test set with
+`PYTHONPYCACHEPREFIX=/tmp/t91_pycache` so compilation remains write-free with
+respect to `/app`.
+
+## [2026-07-14T18:17:27Z] EXECUTOR → SENIOR :: RECEIPT
+
+Adjacent gate attempt 2 compiled the three T9.1 modules successfully, then
+pytest collection exposed the documented baked-source drift: `/app` lacks
+the current `models.claim_assessment`, so `test_claim_assessment.py` raised
+`ModuleNotFoundError`; true `EXIT=2` in `/tmp/t91_adjacent_retry.log`. Zero
+tests ran. This is not being treated as green or hidden. Corrective harness:
+Docker-copy the complete current local `backend/` to isolated
+`/tmp/t91_repo`, run from that snapshot with its own bytecode cache, and keep
+the live service process untouched.
+
+## [2026-07-14T18:17:59Z] EXECUTOR → SENIOR :: RECEIPT
+
+T9.1 adjacent gate GREEN from the isolated complete current-source snapshot:
+`PYTHONPYCACHEPREFIX=/tmp/t91_snapshot_pycache PYTHONPATH=/tmp/t91_repo pytest
+-q` over hash taxonomy, local extraction, claim compiler, claim assessment,
+semantic observations, semantic digest, semantic gateway, and semantic
+validator suites produced `128 passed, 10 skipped, 9 warnings in 4.25s`, true
+`EXIT=0` in `/tmp/t91_adjacent_snapshot.log`. Skips are existing optional
+runtime lanes; warnings are pre-existing Pydantic protected-namespace and
+read-only pytest-cache warnings. Compilation of all three T9.1 modules was
+green before pytest. No service process reload, provider call, or durable
+write occurred.
+
+## [2026-07-14T18:25:01Z] EXECUTOR → SENIOR :: RECEIPT
+
+T9.1 synthetic count-only census GREEN: `PYTHONPATH=/tmp/t91_repo python
+evals/semantic_resolution_t9_1_census.py` produced true `EXIT=0` in
+`/tmp/t91_census.log`. Counts: 162 normalized owner domain terms / 0
+collisions; 2 assignments (1 dominant, 1 supporting); 2 exact-near unknowns
+retained unresolved for CP5 and never acted on; 17 controlled predicates;
+17 candidate rule matches across exactly 8/16 reachable MFs; MF15 terminal
+specialization=1; explicit abstentions ASSOCIATED_WITH=1 and untyped=1;
+USED_FOR owner-attention=1; accepted-state count=0. Domain and frame replay
+were byte-identical. Affinity was serve-only/excluded from identity and
+acceptance. Provider calls=0, durable writes=0, spend=$0. Freezing this
+count-only output as the T9.1 baseline, then running final sanitization and
+publication gates.
+
+## [2026-07-14T18:26:01Z] EXECUTOR → SENIOR :: RECEIPT
+
+T9.1 frozen replay gate GREEN: two fresh current-source census runs and
+`docs/baselines/T9_1_DETERMINISTIC_RESOLUTION_2026-07-14.json` were byte-for-
+byte identical; all three SHA-256 values are
+`74e152ee2ed01de307d94e477a7fc15d0b9ddb0c0f1e5bcd4dea596dfce6fbda`;
+true `EXIT=0` in `/tmp/t91_replay_gate.log`. This freezes receipt data only,
+not the owner-ratifiable policy authority. Beginning final diff, secret,
+scope, and combined-test review before commit/push.
+
+## [2026-07-14T18:27:34Z] EXECUTOR → SENIOR :: RECEIPT
+
+T9.1 final publication gate GREEN: JSON/AST/whitespace/diff/secrets checks
+passed; combined focused+adjacent suite produced `177 passed, 10 skipped, 9
+warnings in 3.60s`; frozen census matched the baseline and SHA-256 remained
+`74e152ee2ed01de307d94e477a7fc15d0b9ddb0c0f1e5bcd4dea596dfce6fbda`;
+true `EXIT=0` in `/tmp/t91_final_gate.log`. The 10 skips and 9 warnings are
+the same existing optional-runtime and read-only-cache/Pydantic warnings from
+the adjacent run. Scope audit: no `tmp/` staged, no owner ontology edited, no
+provider/deploy/write path used. I am publishing T9.1 after the required
+pull-rebase-autostash and will move the cursor to pre-authorized T9.2; T9.3
+paid work remains blocked on its named-provider/cost-ceiling SENIOR GO.
+
+## [2026-07-14T18:29:37Z] EXECUTOR → SENIOR :: RECEIPT
+
+Post-review hardening gate GREEN. Empty injected registries now fail closed
+instead of falling back to defaults; malformed rule-condition containers now
+raise RegistryError; and CP5 normalizer/graph-divergence recipe fields receive
+strict runtime validation. Combined suite remained `177 passed, 10 skipped, 9
+warnings in 3.78s`; baseline bytes/hash unchanged; AST/JSON/whitespace/secrets
+checks green; true `EXIT=0` in `/tmp/t91_final_hardened_gate.log`. These are
+contract hardenings only, with no output or scope change. Re-running the
+mandatory pull-rebase-autostash immediately before commit.

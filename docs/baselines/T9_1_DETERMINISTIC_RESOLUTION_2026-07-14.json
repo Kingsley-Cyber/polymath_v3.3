@@ -1,0 +1,76 @@
+{
+  "affinity_quarantine": {
+    "excluded_from_acceptance": true,
+    "excluded_from_semantic_identity": true,
+    "prior_row_count": 2,
+    "serve_only": true
+  },
+  "authority": "executor-proposed, owner-ratifiable",
+  "domain_resolution": {
+    "assignment_count": 2,
+    "dominant_count": 1,
+    "resolution_recipe_hash": "sha256:1bd659e406f7ced96d5fb4de0a76acddab88d39d92fcf0783a311cd93fd98e62",
+    "supporting_count": 1,
+    "top_unresolved_terms": [
+      {
+        "count": 1,
+        "normalized_term": "data sciences"
+      },
+      {
+        "count": 1,
+        "normalized_term": "market"
+      }
+    ],
+    "unresolved_acted_on": false,
+    "unresolved_count": 2,
+    "unresolved_destination": "CP5_alias_registry_evidence"
+  },
+  "execution": {
+    "durable_writes": 0,
+    "mode": "local_deterministic_count_only",
+    "provider_calls": 0,
+    "spend_usd": 0
+  },
+  "invariants": {
+    "accepted_state_count": 0,
+    "affinity_enters_identity": false,
+    "domain_replay_byte_identical": true,
+    "frame_replay_byte_identical": true,
+    "predicate_is_domain_bearing": false,
+    "scalar_score_present": false
+  },
+  "registries": {
+    "controlled_predicate_count": 17,
+    "domain_owner_term_collision_count": 0,
+    "domain_owner_term_count": 162,
+    "domain_resolution_hash": "sha256:1c54da7c132562c25ab71ddce2cf27253f8405fc0c6a2e7c47f442557d8ced89",
+    "predicate_route_reachable_superframe_count": 8,
+    "superframe_rule_hash": "sha256:7ad83a5735bec13baafef89851bac50f22420b89bbe617e86921a7bdf2dc89c8",
+    "total_superframe_count": 16
+  },
+  "schema_version": "semantic_resolution_t9_1_census.v1",
+  "superframe_resolution": {
+    "abstention_counts": {
+      "claim_is_untyped": 1,
+      "generic_association_is_not_a_mechanism": 1
+    },
+    "assignment_states": [
+      "candidate"
+    ],
+    "candidate_match_count": 17,
+    "distinct_frame_count": 8,
+    "frame_counts": {
+      "MF02": 1,
+      "MF03": 2,
+      "MF04": 7,
+      "MF06": 1,
+      "MF07": 1,
+      "MF09": 3,
+      "MF15": 1,
+      "MF16": 1
+    },
+    "mf15_specialization_count": 1,
+    "owner_attention_count": 1,
+    "resolution_count": 19
+  }
+}

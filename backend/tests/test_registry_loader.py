@@ -7,13 +7,17 @@ change ships as a NEW version file plus updated goldens, never a silent edit.
 
 from __future__ import annotations
 
+import copy
+
 import pytest
 
+import models.registry_loader as registry_loader
 from models.registry_loader import (
     RegistryError,
     admissible_superframes,
     domain,
     domain_affinity_priors,
+    domain_resolution_policy,
     embedding_instruction_profile,
     is_controlled_predicate,
     is_entity_type,
@@ -23,6 +27,7 @@ from models.registry_loader import (
     normalize_predicate_lemma,
     registry_hashes,
     superframe,
+    superframe_rule_registry,
 )
 
 FROZEN_HASHES = {
@@ -35,6 +40,8 @@ FROZEN_HASHES = {
     "binding": "sha256:2811ff011e38762b349b9d14a1f0352edc798b683adf8673106535bcd370c797",
     "embedding_instruction": "sha256:0269d30bf0f852f489e15a8f2dc6b19a8b83b62adb49e346828ce54fc5e89f51",
     "predicate_normalization": "sha256:a0870e5d4cd5f315719245c301ad074824857115ce6f1b9dd7a7d45cd6ca030d",
+    "domain_resolution": "sha256:1c54da7c132562c25ab71ddce2cf27253f8405fc0c6a2e7c47f442557d8ced89",
+    "superframe_rule": "sha256:7ad83a5735bec13baafef89851bac50f22420b89bbe617e86921a7bdf2dc89c8",
 }
 
 
@@ -83,6 +90,104 @@ def test_set_valued_binding_preserved_for_contested_stages():
 def test_affinity_priors_serve_only():
     priors = domain_affinity_priors("D16")
     assert priors == ["MF04", "MF08", "MF13", "MF15", "MF16"]
+
+
+def test_domain_resolution_policy_is_exact_only_and_non_scoring():
+    policy = domain_resolution_policy()
+    assert policy["authority"] == "executor-proposed, owner-ratifiable"
+    assert policy["owner_ratification_required"] is True
+    assert policy["changes_require_new_version"] is True
+    assert policy["normalizer"]["implementation"] == (
+        "services.ingestion.corpus_lexicon.normalize_identity"
+    )
+    assert policy["predicate_policy"]["domain_bearing"] is False
+    assert policy["scalar_score"] is None
+    assert policy["cardinality_cap"] is None
+    assert policy["affinity_quarantine"] == {
+        "source_registry": "domain_superframe_affinity.v1",
+        "serve_only": True,
+        "may_assign_domain": False,
+        "may_assign_or_forbid_superframe": False,
+        "excluded_from_artifact_identity": True,
+        "excluded_from_acceptance": True,
+    }
+    owner_terms = sum(
+        1 + len(item["members"]) for item in load_all()["domain"]["domains"]
+    )
+    assert owner_terms == 162
+
+
+def test_superframe_rule_registry_has_honest_controlled_coverage():
+    registry = superframe_rule_registry()
+    coverage = registry["coverage"]
+    assert coverage["controlled_predicate_count"] == 17
+    assert coverage["rule_covered_predicate_count"] == 16
+    assert coverage["explicit_abstention_count"] == 1
+    assert coverage["reachable_superframe_count"] == 8
+    assert coverage["total_superframe_count"] == 16
+    assert coverage["reachable_superframe_ids"] == [
+        "MF02",
+        "MF03",
+        "MF04",
+        "MF06",
+        "MF07",
+        "MF09",
+        "MF15",
+        "MF16",
+    ]
+    assert registry["abstentions"] == [
+        {
+            "predicate": "ASSOCIATED_WITH",
+            "reason": "generic_association_is_not_a_mechanism",
+            "source_line": (
+                "Senior-confirmed junk-floor policy: generic association "
+                "cannot become a frame"
+            ),
+        }
+    ]
+    used_for = [
+        rule for rule in registry["rules"] if "USED_FOR" in rule["predicates"]
+    ]
+    assert len(used_for) == 1
+    assert used_for[0]["frame_id"] == "MF06"
+    assert used_for[0]["owner_attention"] is True
+
+
+def _mutated_registries() -> dict[str, dict]:
+    return {
+        name: copy.deepcopy(registry_loader._read(name))
+        for name in registry_loader.FILES
+    }
+
+
+def test_superframe_rule_unknown_ids_hard_error(monkeypatch):
+    data = _mutated_registries()
+    data["superframe_rule"]["rules"][0]["frame_id"] = "MF99"
+    monkeypatch.setattr(registry_loader, "_read", lambda name: data[name])
+    registry_loader.load_all.cache_clear()
+    with pytest.raises(RegistryError, match="unknown superframe"):
+        registry_loader.load_all()
+    registry_loader.load_all.cache_clear()
+
+
+def test_superframe_rule_dishonest_coverage_hard_error(monkeypatch):
+    data = _mutated_registries()
+    data["superframe_rule"]["coverage"]["reachable_superframe_count"] = 16
+    monkeypatch.setattr(registry_loader, "_read", lambda name: data[name])
+    registry_loader.load_all.cache_clear()
+    with pytest.raises(RegistryError, match="reachable count is dishonest"):
+        registry_loader.load_all()
+    registry_loader.load_all.cache_clear()
+
+
+def test_domain_affinity_quarantine_drift_hard_error(monkeypatch):
+    data = _mutated_registries()
+    data["domain_resolution"]["affinity_quarantine"]["may_assign_domain"] = True
+    monkeypatch.setattr(registry_loader, "_read", lambda name: data[name])
+    registry_loader.load_all.cache_clear()
+    with pytest.raises(RegistryError, match="affinity quarantine drifted"):
+        registry_loader.load_all()
+    registry_loader.load_all.cache_clear()
 
 
 def test_vocab_membership():

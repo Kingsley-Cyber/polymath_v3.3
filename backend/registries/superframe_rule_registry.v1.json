@@ -1,0 +1,136 @@
+{
+  "registry": "superframe_rule_registry",
+  "version": "v1",
+  "authority": "executor-proposed, owner-ratifiable",
+  "owner_ratification_required": true,
+  "source": "docs/T9_1_DETERMINISTIC_RESOLVER_BOUNDARY_2026-07-14.md; senior ruling 2026-07-14T18:01:48Z",
+  "changes_require_new_version": true,
+  "policy_note": "Candidate-only predicate-to-superframe recipe. Rules are interpreted generically; T9.2 owns FrameInstance role bindings.",
+  "condition_vocabulary": {
+    "fields": [
+      "subject_surface_tokens",
+      "object_entity_types"
+    ],
+    "operators": [
+      "contains_any"
+    ]
+  },
+  "coverage": {
+    "controlled_predicate_count": 17,
+    "rule_covered_predicate_count": 16,
+    "explicit_abstention_count": 1,
+    "reachable_superframe_ids": [
+      "MF02",
+      "MF03",
+      "MF04",
+      "MF06",
+      "MF07",
+      "MF09",
+      "MF15",
+      "MF16"
+    ],
+    "reachable_superframe_count": 8,
+    "total_superframe_count": 16,
+    "coverage_note": "Predicate routing reaches 8 of 16 superframes, including MF15 only through specialization. T9.2 frame-role rules and the CP9 digest lane are separate candidate paths; this is not full frame-system coverage."
+  },
+  "rules": [
+    {
+      "rule_id": "predicate_frame.signals.v1",
+      "priority": 100,
+      "predicates": ["SIGNALS"],
+      "conditions": [],
+      "frame_id": "MF02",
+      "terminal": true,
+      "owner_attention": false,
+      "source_line": "MF02 Signaling and Interpretation"
+    },
+    {
+      "rule_id": "predicate_frame.measurement_comparison.v1",
+      "priority": 100,
+      "predicates": ["MEASURES", "COMPARES_AGAINST"],
+      "conditions": [],
+      "frame_id": "MF03",
+      "terminal": true,
+      "owner_attention": false,
+      "source_line": "MF03 Measurement and Comparison"
+    },
+    {
+      "rule_id": "predicate_frame.causal_influence.v1",
+      "priority": 100,
+      "predicates": ["CAUSES", "INFLUENCES", "INCREASES", "DECREASES", "ENABLES", "INHIBITS", "RESULTS_IN"],
+      "conditions": [],
+      "frame_id": "MF04",
+      "terminal": true,
+      "owner_attention": false,
+      "source_line": "MF04 Causal Influence and Intervention"
+    },
+    {
+      "rule_id": "predicate_frame.used_for_goal_action.v1",
+      "priority": 100,
+      "predicates": ["USED_FOR"],
+      "conditions": [],
+      "frame_id": "MF06",
+      "terminal": true,
+      "owner_attention": true,
+      "source_line": "MF06 Goal, Decision, and Action; least exact direct mapping and must be revisited in the owner ratification bundle"
+    },
+    {
+      "rule_id": "predicate_frame.updates_belief.v1",
+      "priority": 100,
+      "predicates": ["UPDATES"],
+      "conditions": [],
+      "frame_id": "MF07",
+      "terminal": true,
+      "owner_attention": false,
+      "source_line": "MF07 Learning and Belief Update"
+    },
+    {
+      "rule_id": "predicate_frame.constraint_tradeoff.v1",
+      "priority": 100,
+      "predicates": ["REQUIRES", "CONSTRAINS", "APPLIES_UNDER"],
+      "conditions": [],
+      "frame_id": "MF09",
+      "terminal": true,
+      "owner_attention": false,
+      "source_line": "MF09 Constraint, Cost, and Trade-off"
+    },
+    {
+      "rule_id": "predicate_frame.part_of_composition.v1",
+      "priority": 100,
+      "predicates": ["PART_OF"],
+      "conditions": [],
+      "frame_id": "MF16",
+      "terminal": true,
+      "owner_attention": false,
+      "source_line": "MF16 Composition, Network, Scale, and Emergence"
+    },
+    {
+      "rule_id": "predicate_frame.decreases_cumulative_baseline.v1",
+      "priority": 200,
+      "predicates": ["DECREASES"],
+      "conditions": [
+        {
+          "field": "subject_surface_tokens",
+          "operator": "contains_any",
+          "values": ["cumulative", "recurring", "repeated"]
+        },
+        {
+          "field": "object_entity_types",
+          "operator": "contains_any",
+          "values": ["BASELINE"]
+        }
+      ],
+      "frame_id": "MF15",
+      "terminal": true,
+      "owner_attention": false,
+      "source_line": "docs/LOCAL_EXTRACTION_THREE_SCHEMA_DESIGN_2026-07-14.md line 62 owner worked example: DECREASES + repeated + BASELINE -> MF15"
+    }
+  ],
+  "abstentions": [
+    {
+      "predicate": "ASSOCIATED_WITH",
+      "reason": "generic_association_is_not_a_mechanism",
+      "source_line": "Senior-confirmed junk-floor policy: generic association cannot become a frame"
+    }
+  ]
+}

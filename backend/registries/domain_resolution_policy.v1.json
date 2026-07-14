@@ -1,0 +1,65 @@
+{
+  "registry": "domain_resolution_policy",
+  "version": "v1",
+  "authority": "executor-proposed, owner-ratifiable",
+  "owner_ratification_required": true,
+  "source": "docs/T9_1_DETERMINISTIC_RESOLVER_BOUNDARY_2026-07-14.md; senior ruling 2026-07-14T18:01:48Z",
+  "changes_require_new_version": true,
+  "policy_note": "Candidate-only exact concept-to-domain resolution. Owner domain ontology remains verbatim; this recipe supplies matching and merge behavior only.",
+  "normalizer": {
+    "normalizer_id": "corpus_lexicon.normalize_identity.v1",
+    "implementation": "services.ingestion.corpus_lexicon.normalize_identity",
+    "algorithm": "NFKC; lowercase; underscores and hyphens to spaces; replace ASCII non-alphanumeric characters with spaces; collapse whitespace",
+    "graph_entity_id_divergence": "services.graph.neo4j_writer.canonicalize_entity_name uses NFKD, Unicode word retention, and a curated alias map; T9.1 does not translate between these keyspaces",
+    "reconciliation_owner": "CP5 versioned alias registry"
+  },
+  "match_policies": [
+    {
+      "signal_kind": "claim_concept",
+      "match": "exact_normalized_domain_name_or_member",
+      "assignment_role": "dominant",
+      "evidence_authority": "claim_local"
+    },
+    {
+      "signal_kind": "section_heading",
+      "match": "exact_normalized_domain_name_or_member",
+      "assignment_role": "supporting",
+      "evidence_authority": "inherited_context"
+    }
+  ],
+  "predicate_policy": {
+    "domain_bearing": false,
+    "reason": "PredicateType belongs to the independent mechanism axis and cannot assign a domain"
+  },
+  "merge_policy": {
+    "key": "domain_id",
+    "evidence": "union_sorted_unique",
+    "same_domain_role_precedence": [
+      "dominant",
+      "supporting"
+    ]
+  },
+  "score_components": [
+    "exact_claim_concept_matches",
+    "exact_heading_matches",
+    "claim_evidence_ref_count",
+    "context_evidence_ref_count"
+  ],
+  "scalar_score": null,
+  "cardinality_cap": null,
+  "unknown_policy": {
+    "assignment_state": "unresolved",
+    "reason": "no_exact_domain_registry_match",
+    "evidence_destination": "CP5_alias_registry_evidence",
+    "act_on_evidence": false,
+    "receipt": "count_per_run_and_top_normalized_terms"
+  },
+  "affinity_quarantine": {
+    "source_registry": "domain_superframe_affinity.v1",
+    "serve_only": true,
+    "may_assign_domain": false,
+    "may_assign_or_forbid_superframe": false,
+    "excluded_from_artifact_identity": true,
+    "excluded_from_acceptance": true
+  }
+}
