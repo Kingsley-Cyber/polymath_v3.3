@@ -44,10 +44,46 @@ _MONTH_TOKEN = (
     "November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sept|Sep|Oct|Nov|Dec"
 )
 _YEAR_TOKEN = r"(?:19|20)\d{2}"
+_SEASON_TOKEN = r"(?:spring|summer|autumn|fall|winter)"
+_YEAR_QUALIFIER_TOKEN = r"(?:early|mid|late)"
+_EVENT_PERIOD_TOKEN = rf"(?:{_SEASON_TOKEN}|seasons?|quarters?|periods?)"
+# A bounded alphabetic modifier lets the capture retain a short event-period
+# noun phrase anchored by a year and a temporal period noun. The modifier is
+# intentionally lexical-agnostic: event vocabulary belongs to the source, not
+# this contract. Punctuation and four-or-more intervening tokens terminate the
+# candidate so ordinary year-bearing prose is not swallowed wholesale.
+_EVENT_PERIOD_MODIFIER_TOKEN = r"(?:[A-Za-z][A-Za-z'’\-]{0,31})"
 # Ordered by specificity; earlier families suppress overlapping later matches
 # (e.g. the bare year inside an ISO date or a quarter is not double-captured).
 _TIME_REGEX_FAMILY: tuple[tuple[str, "re.Pattern[str]"], ...] = (
     ("iso_date", re.compile(r"\b\d{4}-\d{2}-\d{2}\b")),
+    (
+        "year_range",
+        re.compile(
+            rf"\b{_YEAR_TOKEN}\s*(?:[-–—]|to|through|until)\s*{_YEAR_TOKEN}\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "year_event_period",
+        re.compile(
+            rf"\b{_YEAR_TOKEN}"
+            rf"(?:\s+{_EVENT_PERIOD_MODIFIER_TOKEN}){{0,3}}"
+            rf"\s+{_EVENT_PERIOD_TOKEN}\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "season_year",
+        re.compile(rf"\b{_SEASON_TOKEN}\s+{_YEAR_TOKEN}\b", re.IGNORECASE),
+    ),
+    (
+        "qualified_year",
+        re.compile(
+            rf"\b{_YEAR_QUALIFIER_TOKEN}(?:\s+|[-–—]){_YEAR_TOKEN}\b",
+            re.IGNORECASE,
+        ),
+    ),
     ("quarter", re.compile(rf"\bQ[1-4]\s+{_YEAR_TOKEN}\b")),
     ("month_year", re.compile(rf"\b(?:{_MONTH_TOKEN})\.?\s+{_YEAR_TOKEN}\b")),
     ("version", re.compile(r"\bv?\d+\.\d+(?:\.\d+)*\b")),

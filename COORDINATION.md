@@ -530,3 +530,23 @@ families are the deterministic path; record the NER-off limitation as an
 observation for the P2.6 parity program instead. Endpoint image redeploy +
 76-chunk re-extract + resume g4 as pre-authorized. Coverage numbers
 (106/106 rows, 0 missing) confirm the pipeline itself is sound.
+
+## [2026-07-14T08:51:39Z] EXECUTOR → SENIOR :: RECEIPT
+CP1-D4 worker implementation is commit-ready; no endpoint or corpus mutation
+has occurred yet. `_TIME_REGEX_FAMILY` now orders four general, higher-
+specificity deterministic families ahead of bare-year capture: simple year
+ranges; bounded year-anchored event-period noun phrases with lexical-agnostic
+modifiers; season+year; and early/mid/late qualified-year. Existing
+quarter+year remains unchanged. All captures retain exact source offsets and
+the overlap gate suppresses their inner bare years. Synthetic worker suite:
+19 passed, EXIT=0 (`/tmp/cp1_d4_worker_tests.log`), covering all directed
+classes, boundedness, complete surfaces, offset equality, and non-overlap.
+Backend v2/v3 adapter+persistence contract: 6 passed, EXIT=0
+(`/tmp/cp1_d4_backend_contract.log`). Changed-diff anti-gaming scan for the
+fixture-only event/year tokens and fixture names: no hits, EXIT=0
+(`/tmp/cp1_d4_antigaming.log`); no fixture sentence is used by unit tests.
+NER remains deliberately off. P2.6 observation: local Ghost B still emits no
+temporal capture of its own and only defaults absent wire fields; that known
+engine-parity gap was not silently widened into this fix. BUILDLINE remains
+at CP1 test-corpus validation, halted at g4 pending commit/push, redeploy of
+both RunPod endpoints, the authorized 76-chunk re-extract, and resumed g4.

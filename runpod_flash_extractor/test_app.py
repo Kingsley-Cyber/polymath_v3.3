@@ -98,6 +98,53 @@ def test_bare_year_inside_a_larger_expression_is_not_double_captured() -> None:
     assert [item["text"] for item in expressions] == ["2024-03-05", "Q4 2024"]
 
 
+def test_qualified_period_families_retain_complete_temporal_surfaces() -> None:
+    text = (
+        "Operations resumed in autumn 1996, expanded in early 2007, and "
+        "paused during the 2012 migration season. Mid-2014 planning led to "
+        "a late 2015 review before Q2 2025."
+    )
+    expressions, truncated = app._time_expressions(text, None)
+
+    assert truncated is False
+    assert [item["text"] for item in expressions] == [
+        "autumn 1996",
+        "early 2007",
+        "2012 migration season",
+        "Mid-2014",
+        "late 2015",
+        "Q2 2025",
+    ]
+    assert all(item["detector"] == "regex" for item in expressions)
+    assert all(
+        text[item["char_start"] : item["char_end"]] == item["text"]
+        for item in expressions
+    )
+
+
+def test_year_anchored_period_phrase_is_bounded_and_lexical_agnostic() -> None:
+    text = (
+        "The 2003 coastal migration period ended quietly. "
+        "A separate report from 2004 describes the outcome."
+    )
+    expressions, _ = app._time_expressions(text, None)
+
+    assert [item["text"] for item in expressions] == [
+        "2003 coastal migration period",
+        "2004",
+    ]
+
+
+def test_simple_year_ranges_are_single_nonoverlapping_expressions() -> None:
+    text = "The first series spans 1997–1999; the second ran 2005 through 2008."
+    expressions, _ = app._time_expressions(text, None)
+
+    assert [item["text"] for item in expressions] == [
+        "1997–1999",
+        "2005 through 2008",
+    ]
+
+
 def test_version_strings_require_an_adjacent_release_or_version_token() -> None:
     guarded, _ = app._time_expressions("The team released v1.2 in June.", None)
     assert [item["text"] for item in guarded] == ["v1.2"]
