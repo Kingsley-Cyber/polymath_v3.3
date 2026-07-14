@@ -363,3 +363,73 @@ Conditions:
    the receipt so CP2's after-eval watch-list can track them.
 Then g2 → g10, full table in one RECEIPT. No regeneration, no synthetic
 history, no gate changes.
+
+## [2026-07-14T08:35:41Z] EXECUTOR → SENIOR :: RECEIPT
+Official g2 RESUME PASS. Command: `docker exec -e PYTHONPATH=/app -w /app
+polymath_v33-backend-1 python /tmp/rebatch_phase_a_gate.py g2 --corpus-id
+62193743-4175-40da-b861-ba1e1e567b9a`; true wrapper EXIT=0. Required=80,
+summarized=80, missing=0; substantive=36, latent=26 (72.22% >=30%);
+missing temporal_class=0. Three latent rows have empty aliases, recorded as
+the authorized 0–3 observation only. Late-row census EXIT=0: all 19 are valid
+`parent_summary.v1`, provider/model=`siliconflow::openai/tencent/Hy3`; full
+field census is `/tmp/cp1_d2_late_summary_census.log`. Artifact completion for
+these rows predates D2 deployment and occurred via the now-forbidden direct
+backfill path; the durable mechanism is proven by test + canary + CP2.
+Explicit CP2 Hy3 watch list:
+`ac09625bbee8c1c4c761eb73135cf7230cf35c7757c2c430d60698562406a70e_parent_0008`,
+`ac09625bbee8c1c4c761eb73135cf7230cf35c7757c2c430d60698562406a70e_parent_0011`,
+`ac09625bbee8c1c4c761eb73135cf7230cf35c7757c2c430d60698562406a70e_parent_0012`,
+`ac09625bbee8c1c4c761eb73135cf7230cf35c7757c2c430d60698562406a70e_parent_0013`,
+`ac09625bbee8c1c4c761eb73135cf7230cf35c7757c2c430d60698562406a70e_parent_0014`,
+`ac09625bbee8c1c4c761eb73135cf7230cf35c7757c2c430d60698562406a70e_parent_0015`,
+`ac09625bbee8c1c4c761eb73135cf7230cf35c7757c2c430d60698562406a70e_parent_0016`,
+`ac09625bbee8c1c4c761eb73135cf7230cf35c7757c2c430d60698562406a70e_parent_0017`,
+`ac09625bbee8c1c4c761eb73135cf7230cf35c7757c2c430d60698562406a70e_parent_0018`,
+`ac09625bbee8c1c4c761eb73135cf7230cf35c7757c2c430d60698562406a70e_parent_0019`,
+`ac09625bbee8c1c4c761eb73135cf7230cf35c7757c2c430d60698562406a70e_parent_0020`,
+`ac09625bbee8c1c4c761eb73135cf7230cf35c7757c2c430d60698562406a70e_parent_0021`,
+`ac09625bbee8c1c4c761eb73135cf7230cf35c7757c2c430d60698562406a70e_parent_0022`,
+`ac09625bbee8c1c4c761eb73135cf7230cf35c7757c2c430d60698562406a70e_parent_0023`,
+`ac09625bbee8c1c4c761eb73135cf7230cf35c7757c2c430d60698562406a70e_parent_0024`,
+`ac09625bbee8c1c4c761eb73135cf7230cf35c7757c2c430d60698562406a70e_parent_0025`,
+`fda505f64a9476c88e09e32235bb89562266339b72f6c207756084a41d49ff03_parent_0000`,
+`fda505f64a9476c88e09e32235bb89562266339b72f6c207756084a41d49ff03_parent_0001`,
+`fda505f64a9476c88e09e32235bb89562266339b72f6c207756084a41d49ff03_parent_0002`.
+Proceeding to g3 only.
+
+## [2026-07-14T08:37:28Z] EXECUTOR → SENIOR :: BLOCKER
+Official g3 FAILED; Phase A stopped and g4–g10 were not run. Command:
+`docker exec -e PYTHONPATH=/app -w /app polymath_v33-backend-1 python
+/tmp/rebatch_phase_a_gate.py g3 --corpus-id
+62193743-4175-40da-b861-ba1e1e567b9a`; true wrapper EXIT=1. Both fixtures
+were found and their generic honest-null provenance passed, but garden stored
+author=null/date=null instead of Maria Okafor/2019 and lighthouse stored
+author=null/date=null instead of Edwin Halvorsen/2004. Read-only diagnosis
+EXIT=0 (`/tmp/rebatch_v2_g3_diagnosis.log`): both production rows used the
+surfaced `pypdf_font_layout` path; embedded PDF `/Author` is empty and only
+file creation/mod dates exist, so `_meta_from_pdf` correctly resolves
+`file_date_only`. However, visible first-page front matter explicitly contains
+`Author: Maria Okafor`, `Published: March 2019`, `Author: Edwin Halvorsen`,
+and `Published: 2004`. The structural fallback converts visible layout to
+Markdown but does not extract visible PDF front-matter bibliography into
+typed metadata/date candidates. No gate change, projection repair, or product
+fix was attempted after failure. BUILDLINE CP1 validation is halted at g3.
+
+## [2026-07-14T10:05Z] SENIOR → EXECUTOR :: RULING + DIRECTIVE (g3, proactive)
+g3 failure diagnosed from your logs: the pypdf fallback lane (the PRODUCTION
+PDF path while the sidecar is disabled) does not run the S2 deterministic
+bibliographic candidate extraction, so title-page "Author:/Published:" text
+never becomes document metadata. This violates the non-negotiable
+"all ingestion paths produce identical contract" — a new lane must carry ALL
+capture hooks (capture-parity), same class as the two earlier lane gaps.
+CP1-D3 (AUTO, execute): wire the EXISTING S2 bibliographic candidate
+machinery (front-matter/text-head conservative patterns + date-family
+de-conflation + honest-null reason codes) into the pypdf PDF lane result —
+and verify the docling-PDF lane has it too while you are in the seam. GENERAL
+patterns only (the S2 ones); nothing fixture-keyed. Unit tests: (1)
+title-page Author/Published lines → author/document_date with
+provenance=text_head; (2) XMP/docinfo-only PDF → metadata-sourced fields;
+(3) neither present → honest nulls with reason codes. Then rebuild (overlay),
+re-run bibliographic backfill for the official corpus only if capture is
+ingest-time-only (else re-parse the 2 PDFs' doc rows via the fixed lane), and
+resume g3 → g10. Same receipt discipline.
