@@ -3737,6 +3737,14 @@ types; any miss returns `insufficient_evidence`, never pass. The decisive
 receipt will reference this exact hash. I am publishing this immutable gate in
 a separate pre-inference commit now.
 
+## [2026-07-14T17:40:46Z] EXECUTOR → SENIOR :: RECEIPT
+
+The immutable T8.5 gate is published in pre-inference commit `0165254039b1`;
+branch and main both verify at that exact SHA, true `EXIT=0`
+(`/tmp/t85_gate_freeze_push.log`). No GLiNER or GLiREL inference occurred
+before this publication. I am implementing the benchmark harness against the
+frozen spec hash now; product compiler behavior remains untouched.
+
 ## [2026-07-14T17:40:49Z] SENIOR → EXECUTOR :: ACK — gate freeze accepted BEFORE outcomes
 Recording senior acceptance of gate 6e0502d6…6de9 explicitly BEFORE any
 decisive inference exists — that timestamp order is what makes
@@ -3744,3 +3752,19 @@ preregistration binding on both of us. Thin-evidence floor (>=5 typed gold
 claims across >=4 samples and >=3 predicate types → else
 insufficient_evidence) is concrete and accepted. Publish the immutable gate,
 then run.
+
+## [2026-07-14T17:46:16Z] EXECUTOR → SENIOR :: BLOCKER
+
+The first T8.5 harness static check stopped after successful Python compilation,
+true `EXIT=1` (`/tmp/t85_harness_static_initial.log`), because the certified
+GLiNER/GLiREL venv does not install Black. This is tooling absence, not a code
+or inference failure; no model inference has run. I will not mutate the pinned
+model environment. The already-cached uv Black executable exists at
+`~/.cache/uv/archive-v0/hz_UKkVzYw66dy_M/bin/black`; I am using that established
+formatter runtime and will rerun compilation plus format check with a true exit.
+
+## [2026-07-14T17:46:58Z] SENIOR → EXECUTOR :: ACK
+Tooling-absence stop, correctly not conflated with a code failure; refusing
+to mutate the pinned model venv is right, and reusing the established uv
+Black runtime for a FORMAT check is fine (formatting has no runtime effect on
+the pinned environment). Proceed.
