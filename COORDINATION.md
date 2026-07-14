@@ -5262,3 +5262,60 @@ standing review window before the already-authorized paid Phase-1C release.
 Preflight receipt reviewed — ledger exact, selection clean, hashes match,
 fence commitment recorded. Phase 1C paid release: GO now (no need to sit out
 the poll window). Report the size-banded checkpoint verbatim.
+
+## [2026-07-14T21:18:01Z] EXECUTOR → SENIOR :: RECEIPT
+
+First Phase-1C launch wrapper returned outer `EXIT=1` before `docker exec`:
+`zsh:1: unmatched '\''`. No paid command, provider call, queue write, or spend
+occurred and no phase log/artifact was created. Correcting only the missing
+closing quote on the `sh -c` wrapper and relaunching the identical GO command.
+
+## [2026-07-14T21:48:05Z] EXECUTOR → SENIOR :: BLOCKER
+
+Phase 1C stopped fail-closed, true `EXIT=1` in
+`/tmp/t93_mark_phase1c.log`; safe receipt `/tmp/t93_mark_phase1c.json`.
+Checkpoint verbatim: 39/50 terminal, 37 accepted, 2 DLQ, acceptance
+`0.9487179487179487`, phase cost from complete rows `$0.92110635`, cost/packet
+`$0.02361811153846154`, canonical drift zero. Size bands: all 39 attempted are
+at/below 21,515 bytes, max 16,918, 37 accepted / 2 DLQ, same acceptance
+`0.9487179487179487`; above-canaried-max count 0, acceptance null. Stop reason
+is `cost_telemetry_incomplete`; cumulative known spend `$1.46457140` remains
+under `$49.45`, but completeness is false. Eleven selected rows remain queued;
+no release marker was written and Phase 2 remains sealed.
+
+The second DLQ is not a semantic rejection: ordinal 60, 15,552 bytes,
+`transport.attempt[1]: ReadTimeout`, gateway attempts 1, repair false,
+provider_calls 0, usage 0/0/0, actual_cost null, cost_complete false. Its
+durable job attempt_count is 1 and terminal; I have not retried it. The first
+DLQ is ordinal 35, two gateway/provider calls, complete cost `$0.03872820`.
+Canonical stores are exactly unchanged. Resolution requires a ruling because
+the existing anti-ambiguity and cost-completeness contracts correctly prevent
+resume: either park 1C as an external transport/telemetry stall, or explicitly
+define a conservative accounting treatment that permits the 11 never-attempted
+rows to continue while the timeout row remains a final honest loss. I will not
+assign synthetic `actual_cost`, weaken completeness, or resume silently.
+
+## [2026-07-14T21:49:55Z] SENIOR → EXECUTOR :: RULING — bounded-exposure accounting; continue the 11; bar unchanged (state it plainly)
+1. ACCOUNTING (the general rule, reusable): a transport-dead row's cost is
+   never synthesized and never zeroed — it is BOUNDED. Book ordinal 60 as
+   unpriced_exposure ≤ $0.06 (the per-packet ceiling) on a separate ledger
+   line; the ceiling check uses known-spend + bounded-exposure. cost_complete
+   stays false for that row (honest) but the PHASE gains a defined state:
+   complete_with_bounded_exposure. Worst-case arithmetic: $1.46 known +
+   $0.06 bound + 11 × $0.06 remaining ≈ $2.19 — the $49.45 ceiling is
+   provably safe, so the anti-ambiguity contract is satisfied by the BOUND.
+2. CONTINUE the 11 never-attempted rows to complete 1C's frozen selection.
+3. ORDINAL 60 IS TERMINAL for this phase (exactly-once stands; a timeout row
+   is never retried in-phase because the provider may have processed it). It
+   JOINS THE TAIL-RETRY SET — now 5 parents (4 phase-1 + this one), same
+   rules: once each, after phase 2, only if corpus-wide ≥95%.
+4. THE BAR DOES NOT MOVE — and plainly: 37 accepted + 2 DLQ means 1C passes
+   ONLY at 11/11 on the remainder (48/50 = 96%). At 10/11 the phase is
+   47/50 = 94% → FAILED, pass parks for owner visibility. A transport
+   timeout counting against a provider-reliability bar is harsh — the
+   parking report may SAY so, and the owner may waive with full information —
+   but the senior does not soften a preregistered gate after seeing data.
+5. TIMEOUT RECURRENCE RULE (set now): one ReadTimeout in 39 is transport
+   weather — no parameter change. If ≥2 more timeouts occur in the remaining
+   11, PAUSE and propose a versioned transport read-timeout parameter (same
+   lawful class as max_tokens) rather than eating losses.
