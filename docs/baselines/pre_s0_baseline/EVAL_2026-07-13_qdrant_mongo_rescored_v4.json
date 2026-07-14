@@ -1,0 +1,1622 @@
+{
+  "captured_at": "2026-07-13T07:38:01Z",
+  "api": "http://127.0.0.1:8000",
+  "summary": {
+    "tier": "qdrant_mongo",
+    "n": 56,
+    "doc_hit_rate": 0.902,
+    "doc_recall_mean": 0.71,
+    "concept_recall_mean": 0.799,
+    "answerability_ok_rate": 0.929,
+    "latency_mean_s": 55.495,
+    "errors": 0,
+    "by_shape": {
+      "direct": {
+        "n": 8,
+        "ans_ok": 8,
+        "hits": 8,
+        "with_docs": 8
+      },
+      "list": {
+        "n": 6,
+        "ans_ok": 6,
+        "hits": 6,
+        "with_docs": 6
+      },
+      "procedural": {
+        "n": 6,
+        "ans_ok": 6,
+        "hits": 6,
+        "with_docs": 6
+      },
+      "naive": {
+        "n": 6,
+        "ans_ok": 6,
+        "hits": 6,
+        "with_docs": 6
+      },
+      "single_fact": {
+        "n": 5,
+        "ans_ok": 4,
+        "hits": 5,
+        "with_docs": 5
+      },
+      "comparison": {
+        "n": 3,
+        "ans_ok": 3,
+        "hits": 2,
+        "with_docs": 3
+      },
+      "broad": {
+        "n": 4,
+        "ans_ok": 4,
+        "hits": 2,
+        "with_docs": 4
+      },
+      "cross_domain": {
+        "n": 2,
+        "ans_ok": 2,
+        "hits": 1,
+        "with_docs": 2
+      },
+      "followup": {
+        "n": 3,
+        "ans_ok": 2,
+        "hits": 3,
+        "with_docs": 3
+      },
+      "negative_control": {
+        "n": 5,
+        "ans_ok": 3,
+        "hits": 0,
+        "with_docs": 0
+      },
+      "cross_corpus": {
+        "n": 6,
+        "ans_ok": 6,
+        "hits": 5,
+        "with_docs": 6
+      },
+      "cross_corpus_irrelevant": {
+        "n": 2,
+        "ans_ok": 2,
+        "hits": 2,
+        "with_docs": 2
+      }
+    },
+    "negative_controls_ok": "3/5",
+    "scorer_version": 3,
+    "answerability_ok_rate_v3": 0.946,
+    "scorer": "v4-lead-anchored (offline symmetric rescore)"
+  },
+  "results": [
+    {
+      "id": "q001",
+      "shape": "direct",
+      "tier": "qdrant_mongo",
+      "question": "What does Eric Berne mean by a 'game' in transactional analysis?",
+      "doc_hit": true,
+      "doc_recall": 1.0,
+      "concept_recall": 0.667,
+      "refused": false,
+      "answerability_ok": true,
+      "returned_doc_count": 2,
+      "returned_corpora": [
+        "999b5934-272e-4f20-a538-b5d422249a05"
+      ],
+      "total_s": 37.768,
+      "first_token_s": 27.48,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 16.821070633013733,
+        "chunks": 3,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "In transactional analysis, a **game** is a habitual, dysfunctional pattern of social interaction with a predictable outcome, designed to obtain psychological strokes \u2014 the recognition and attention people need \u2014 while re",
+      "refused_v4": false,
+      "answerability_ok_v3": true
+    },
+    {
+      "id": "q002",
+      "shape": "list",
+      "tier": "qdrant_mongo",
+      "question": "List the eight core drives of the Octalysis gamification framework.",
+      "doc_hit": true,
+      "doc_recall": 1.0,
+      "concept_recall": 1.0,
+      "refused": false,
+      "answerability_ok": true,
+      "returned_doc_count": 1,
+      "returned_corpora": [
+        "999b5934-272e-4f20-a538-b5d422249a05"
+      ],
+      "total_s": 39.402,
+      "first_token_s": 39.392,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 16.627387175016338,
+        "chunks": 3,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "The retrieved context identifies the **Octalysis framework** as having 8 Core Drives charted on an octagon, but only names four of them directly:\n\n| # | Core Drive | Key Nature (from retrieved context) |\n|---|-----------",
+      "refused_v4": false,
+      "answerability_ok_v3": true
+    },
+    {
+      "id": "q003",
+      "shape": "procedural",
+      "tier": "qdrant_mongo",
+      "question": "Walk me through fine-tuning a Llama 3.1 8B model with Unsloth.",
+      "doc_hit": true,
+      "doc_recall": 1.0,
+      "concept_recall": 1.0,
+      "refused": false,
+      "answerability_ok": true,
+      "returned_doc_count": 3,
+      "returned_corpora": [
+        "999b5934-272e-4f20-a538-b5d422249a05"
+      ],
+      "total_s": 51.824,
+      "first_token_s": 51.795,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 19.555664342013188,
+        "chunks": 6,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "## Fine-Tuning Llama 3.1 8B with Unsloth\n\nThe workflow uses **QLoRA** \u2014 an extension of LoRA that freezes the original model weights and injects low-rank adapter matrices, then adds quantization for ~33% additional memor",
+      "refused_v4": false,
+      "answerability_ok_v3": true
+    },
+    {
+      "id": "q004",
+      "shape": "naive",
+      "tier": "qdrant_mongo",
+      "question": "My brain fogs out when I study math. How can I actually learn it?",
+      "doc_hit": true,
+      "doc_recall": 1.0,
+      "concept_recall": 1.0,
+      "refused": false,
+      "answerability_ok": true,
+      "returned_doc_count": 2,
+      "returned_corpora": [
+        "999b5934-272e-4f20-a538-b5d422249a05"
+      ],
+      "total_s": 48.303,
+      "first_token_s": 35.322,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 12.177402504981728,
+        "chunks": 4,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "The fog you're experiencing during math study isn't a sign that you're bad at the subject\u2014it's your brain signaling that you're trying to learn in a way that works *against* its natural defaults. Barbara Oakley's *A Mind",
+      "refused_v4": false,
+      "answerability_ok_v3": true
+    },
+    {
+      "id": "q005",
+      "shape": "single_fact",
+      "tier": "qdrant_mongo",
+      "question": "What is the MAC/FAC model of similarity-based retrieval?",
+      "doc_hit": true,
+      "doc_recall": 1.0,
+      "concept_recall": 0.5,
+      "refused": false,
+      "answerability_ok": true,
+      "returned_doc_count": 1,
+      "returned_corpora": [
+        "999b5934-272e-4f20-a538-b5d422249a05"
+      ],
+      "total_s": 38.983,
+      "first_token_s": 38.965,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 16.633522839983925,
+        "chunks": 3,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "**MAC/FAC** is a two-stage cognitive model of similarity-based retrieval that resolves the paradox between surface-biased memory access and the structural demands of analogical mapping.\n\n## Core Architecture\n\nThe model's",
+      "refused_v4": false,
+      "answerability_ok_v3": true
+    },
+    {
+      "id": "q006",
+      "shape": "comparison",
+      "tier": "qdrant_mongo",
+      "question": "Compare how Alfred Adler and Carl Rogers understood what drives personal change in therapy.",
+      "doc_hit": true,
+      "doc_recall": 1.0,
+      "concept_recall": 0.333,
+      "refused": false,
+      "answerability_ok": true,
+      "returned_doc_count": 3,
+      "returned_corpora": [
+        "999b5934-272e-4f20-a538-b5d422249a05"
+      ],
+      "total_s": 64.114,
+      "first_token_s": 64.095,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 18.612686049978947,
+        "chunks": 5,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "## What Drives Personal Change: Adler vs. Rogers\n\nAdler and Rogers both departed from Freudian drive theory, but they rooted personal change in different engines. Adler located the driving force in the individual's striv",
+      "refused_v4": false,
+      "answerability_ok_v3": true
+    },
+    {
+      "id": "q007",
+      "shape": "broad",
+      "tier": "qdrant_mongo",
+      "question": "What do my sources say about building habits that actually stick?",
+      "doc_hit": true,
+      "doc_recall": 1.0,
+      "concept_recall": 0.667,
+      "refused": false,
+      "answerability_ok": true,
+      "returned_doc_count": 3,
+      "returned_corpora": [
+        "999b5934-272e-4f20-a538-b5d422249a05"
+      ],
+      "total_s": 42.639,
+      "first_token_s": 42.622,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 17.36352638300741,
+        "chunks": 3,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "The retrieved sources converge on a core insight: **habits that stick require both a shift in identity and the right kind of practice structure.**\n\nThe \"make-it-stick\" research distinguishes between *momentary strength*\u2014",
+      "refused_v4": false,
+      "answerability_ok_v3": true
+    },
+    {
+      "id": "q008",
+      "shape": "list",
+      "tier": "qdrant_mongo",
+      "question": "What are Marshall Rosenberg's four components of nonviolent communication?",
+      "doc_hit": true,
+      "doc_recall": 1.0,
+      "concept_recall": 1.0,
+      "refused": false,
+      "answerability_ok": true,
+      "returned_doc_count": 1,
+      "returned_corpora": [
+        "999b5934-272e-4f20-a538-b5d422249a05"
+      ],
+      "total_s": 28.315,
+      "first_token_s": 23.618,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 13.911810254998272,
+        "chunks": 4,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "**The Four-Part Nonviolent Communication Process** provides a structured way to express yourself and receive others without blame or criticism. Each component appears in two forms\u2014one for expressing yourself and one for ",
+      "refused_v4": false,
+      "answerability_ok_v3": true
+    },
+    {
+      "id": "q009",
+      "shape": "naive",
+      "tier": "qdrant_mongo",
+      "question": "I keep justifying my own bad decisions after the fact. Why do I do that?",
+      "doc_hit": true,
+      "doc_recall": 1.0,
+      "concept_recall": 0.5,
+      "refused": false,
+      "answerability_ok": true,
+      "returned_doc_count": 5,
+      "returned_corpora": [
+        "999b5934-272e-4f20-a538-b5d422249a05"
+      ],
+      "total_s": 51.44,
+      "first_token_s": 48.181,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 20.712665717990603,
+        "chunks": 6,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "The core answer lives in two mechanisms working together: a universal drive to protect your self-image, and a left-hemisphere interpreter that constructs justifications on the spot as if retrieving them from memory.\n\n**S",
+      "refused_v4": false,
+      "answerability_ok_v3": true
+    },
+    {
+      "id": "q010",
+      "shape": "cross_domain",
+      "tier": "qdrant_mongo",
+      "question": "How could item response theory improve the design of skill progression in games?",
+      "doc_hit": true,
+      "doc_recall": 0.5,
+      "concept_recall": 1.0,
+      "refused": false,
+      "answerability_ok": true,
+      "returned_doc_count": 9,
+      "returned_corpora": [
+        "999b5934-272e-4f20-a538-b5d422249a05"
+      ],
+      "total_s": 66.53,
+      "first_token_s": 66.506,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 22.919920552987605,
+        "chunks": 9,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "Item response theory offers a rigorous framework for modeling the relationship between player ability and task difficulty\u2014essentially treating game challenges the way psychometrics treats test items. The core IRT mechani",
+      "refused_v4": false,
+      "answerability_ok_v3": true
+    },
+    {
+      "id": "q011",
+      "shape": "procedural",
+      "tier": "qdrant_mongo",
+      "question": "How do I run Gemma or Llama locally inside a Flutter app?",
+      "doc_hit": true,
+      "doc_recall": 0.333,
+      "concept_recall": 1.0,
+      "refused": false,
+      "answerability_ok": true,
+      "returned_doc_count": 3,
+      "returned_corpora": [
+        "999b5934-272e-4f20-a538-b5d422249a05"
+      ],
+      "total_s": 62.914,
+      "first_token_s": 62.9,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 19.253502717008814,
+        "chunks": 4,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "The `flutter_gemma` plugin (0.12.6) is the primary vehicle for running Gemma locally on-device in Flutter. It wraps **MediaPipe GenAI v0.10.24** to enable direct model execution without cloud calls.\n\n## Starting steps\n\n|",
+      "refused_v4": false,
+      "answerability_ok_v3": true
+    },
+    {
+      "id": "q012",
+      "shape": "single_fact",
+      "tier": "qdrant_mongo",
+      "question": "What does John Ousterhout mean by 'deep modules'?",
+      "doc_hit": true,
+      "doc_recall": 1.0,
+      "concept_recall": 1.0,
+      "refused": false,
+      "answerability_ok": true,
+      "returned_doc_count": 2,
+      "returned_corpora": [
+        "999b5934-272e-4f20-a538-b5d422249a05"
+      ],
+      "total_s": 38.886,
+      "first_token_s": 38.874,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 17.09831142402254,
+        "chunks": 2,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "**Deep modules** are those that provide substantial functionality through a simple, narrow interface \u2014 they hide significant complexity behind a small door. Ousterhout frames this as a cost-versus-benefit model: a module",
+      "refused_v4": false,
+      "answerability_ok_v3": true
+    },
+    {
+      "id": "q013",
+      "shape": "list",
+      "tier": "qdrant_mongo",
+      "question": "What are the four key software delivery performance metrics described in Accelerate?",
+      "doc_hit": true,
+      "doc_recall": 1.0,
+      "concept_recall": 1.0,
+      "refused": false,
+      "answerability_ok": true,
+      "returned_doc_count": 3,
+      "returned_corpora": [
+        "999b5934-272e-4f20-a538-b5d422249a05"
+      ],
+      "total_s": 63.943,
+      "first_token_s": 63.935,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 18.609347591991536,
+        "chunks": 3,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "The four key software delivery performance metrics in **Accelerate** are:\n\n1. **Delivery lead time** \u2014 the time from deciding to implement a feature until it's released to users\n2. **Deployment frequency** \u2014 how often co",
+      "refused_v4": false,
+      "answerability_ok_v3": true
+    },
+    {
+      "id": "q014",
+      "shape": "naive",
+      "tier": "qdrant_mongo",
+      "question": "Why do I get anxious when my partner doesn't text back?",
+      "doc_hit": true,
+      "doc_recall": 1.0,
+      "concept_recall": 0.667,
+      "refused": false,
+      "answerability_ok": true,
+      "returned_doc_count": 2,
+      "returned_corpora": [
+        "999b5934-272e-4f20-a538-b5d422249a05"
+      ],
+      "total_s": 53.257,
+      "first_token_s": 53.24,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 21.54738080201787,
+        "chunks": 3,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "**Your anxious response when a partner doesn't text back is your attachment system firing \u2014 not a sign the relationship is particularly intense or that you love them more.**\n\nFrom an attachment theory perspective, anxiou",
+      "refused_v4": false,
+      "answerability_ok_v3": true
+    },
+    {
+      "id": "q015",
+      "shape": "broad",
+      "tier": "qdrant_mongo",
+      "question": "What are the big ideas across my sources about why people hold on to beliefs that aren't true?",
+      "doc_hit": false,
+      "doc_recall": 0.0,
+      "concept_recall": 1.0,
+      "refused": false,
+      "answerability_ok": true,
+      "returned_doc_count": 2,
+      "returned_corpora": [
+        "999b5934-272e-4f20-a538-b5d422249a05"
+      ],
+      "total_s": 62.49,
+      "first_token_s": 62.471,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 18.28796525800135,
+        "chunks": 5,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "People cling to false beliefs not because they're irrational or emotionally needy, but because **flawed rationality** makes those beliefs seem like the most sensible conclusions available. Thomas Gilovich draws this dist",
+      "refused_v4": false,
+      "answerability_ok_v3": true
+    },
+    {
+      "id": "q016",
+      "shape": "direct",
+      "tier": "qdrant_mongo",
+      "question": "What is Cialdini's concept of privileged moments in Pre-Suasion?",
+      "doc_hit": true,
+      "doc_recall": 1.0,
+      "concept_recall": 1.0,
+      "refused": false,
+      "answerability_ok": true,
+      "returned_doc_count": 1,
+      "returned_corpora": [
+        "999b5934-272e-4f20-a538-b5d422249a05"
+      ],
+      "total_s": 33.985,
+      "first_token_s": 25.68,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 17.132262924977113,
+        "chunks": 3,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "**Privileged moments** in Cialdini's framework are identifiable points in time when a person becomes particularly receptive to a communicator's message \u2014 windows of heightened susceptibility that follow pre-suasive opene",
+      "refused_v4": false,
+      "answerability_ok_v3": true
+    },
+    {
+      "id": "q017",
+      "shape": "comparison",
+      "tier": "qdrant_mongo",
+      "question": "Compare Clean Architecture's dependency rule with the design guidance in A Philosophy of Software Design.",
+      "doc_hit": false,
+      "doc_recall": 0.5,
+      "concept_recall": 0.667,
+      "refused": false,
+      "answerability_ok": true,
+      "returned_doc_count": 4,
+      "returned_corpora": [
+        "999b5934-272e-4f20-a538-b5d422249a05"
+      ],
+      "total_s": 68.869,
+      "first_token_s": 68.846,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 16.845593384001404,
+        "chunks": 4,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "**Both Clean Architecture and *A Philosophy of Software Design* share the central goal of managing complexity through deliberate design, though they approach it from different angles.**\n\nClean Architecture's Dependency R",
+      "refused_v4": false,
+      "answerability_ok_v3": true
+    },
+    {
+      "id": "q018",
+      "shape": "followup",
+      "tier": "qdrant_mongo",
+      "question": "What learning rate and LoRA rank does it recommend?",
+      "doc_hit": true,
+      "doc_recall": 1.0,
+      "concept_recall": 1.0,
+      "refused": false,
+      "answerability_ok": false,
+      "returned_doc_count": 4,
+      "returned_corpora": [
+        "999b5934-272e-4f20-a538-b5d422249a05"
+      ],
+      "total_s": 59.778,
+      "first_token_s": 59.769,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 18.92294967599446,
+        "chunks": 5,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "**Learning rate:** The retrieved sources don't specify an exact learning rate value for this task.\n\n**LoRA rank recommendations:**\n\n| Use case | Rank | Source |\n|---|---|---|\n| General starting point | 16 | Llama 3.1 8B ",
+      "refused_v4": true,
+      "answerability_ok_v3": true
+    },
+    {
+      "id": "q019",
+      "shape": "negative_control",
+      "tier": "qdrant_mongo",
+      "question": "What does the corpus say about EMDR trauma therapy protocols?",
+      "doc_hit": null,
+      "doc_recall": null,
+      "concept_recall": null,
+      "refused": false,
+      "answerability_ok": false,
+      "returned_doc_count": 2,
+      "returned_corpora": [
+        "999b5934-272e-4f20-a538-b5d422249a05"
+      ],
+      "total_s": 50.696,
+      "first_token_s": 50.678,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 17.256253300001845,
+        "chunks": 3,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "## What the Corpus Establishes About EMDR\n\nThe retrieved sources describe EMDR as a trauma therapy that integrates traumatic material into a coherent past event\u2014rather than merely reducing physiological arousal through e",
+      "answerability_ok_v3": false
+    },
+    {
+      "id": "q020",
+      "shape": "negative_control",
+      "tier": "qdrant_mongo",
+      "question": "Which chapter of Thinking, Fast and Slow explains prospect theory?",
+      "doc_hit": null,
+      "doc_recall": null,
+      "concept_recall": null,
+      "refused": false,
+      "answerability_ok": false,
+      "returned_doc_count": 2,
+      "returned_corpora": [
+        "999b5934-272e-4f20-a538-b5d422249a05"
+      ],
+      "total_s": 46.7,
+      "first_token_s": 46.694,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 18.56715525899199,
+        "chunks": 2,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "**Chapter 2** of *Thinking, Fast and Slow* introduces and explains prospect theory. The retrieved passage from that chapter (\"PROSPECT THEORY {.chapter2}\") covers the theory's key departures from expected utility, its bl",
+      "answerability_ok_v3": false
+    },
+    {
+      "id": "q021",
+      "shape": "direct",
+      "tier": "qdrant_mongo",
+      "question": "What is 'dry testing' and how is it used to validate products?",
+      "doc_hit": true,
+      "doc_recall": 1.0,
+      "concept_recall": 1.0,
+      "refused": false,
+      "answerability_ok": true,
+      "returned_doc_count": 5,
+      "returned_corpora": [
+        "5a20bc21-95df-42c2-80c8-f927b4e83904"
+      ],
+      "total_s": 51.09,
+      "first_token_s": 38.353,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 29.633580805006204,
+        "chunks": 5,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "\n## What is Dry Testing?\n\nDry testing is a product validation framework that inverts the traditional e-commerce launch sequence. Instead of spending days or weeks on product research, store building, ad creative, and sup",
+      "refused_v4": false,
+      "answerability_ok_v3": true
+    },
+    {
+      "id": "q022",
+      "shape": "procedural",
+      "tier": "qdrant_mongo",
+      "question": "How should I structure Facebook ad testing after the Andromeda update?",
+      "doc_hit": true,
+      "doc_recall": 0.5,
+      "concept_recall": 0.667,
+      "refused": false,
+      "answerability_ok": true,
+      "returned_doc_count": 3,
+      "returned_corpora": [
+        "5a20bc21-95df-42c2-80c8-f927b4e83904"
+      ],
+      "total_s": 48.954,
+      "first_token_s": 34.092,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 19.533329883997794,
+        "chunks": 3,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "# Facebook Ad Testing Structure After Andromeda\n\nThe core shift post-Andromeda is that **creative quality now outweighs structural complexity** \u2014 Facebook's AI analyzes every facet of your ad to find the right prospect, ",
+      "refused_v4": false,
+      "answerability_ok_v3": true
+    },
+    {
+      "id": "q023",
+      "shape": "naive",
+      "tier": "qdrant_mongo",
+      "question": "I can't sit still and focus for more than five minutes. What should I do?",
+      "doc_hit": true,
+      "doc_recall": 0.5,
+      "concept_recall": 1.0,
+      "refused": false,
+      "answerability_ok": true,
+      "returned_doc_count": 3,
+      "returned_corpora": [
+        "5a20bc21-95df-42c2-80c8-f927b4e83904"
+      ],
+      "total_s": 47.275,
+      "first_token_s": 27.994,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 17.65814313298324,
+        "chunks": 5,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "The core problem is almost certainly **dopamine baseline mismatch**\u2014your brain has grown accustomed to high-stimulation inputs (scrolling, notifications, quick-reward activities), which makes a five-minute transition int",
+      "refused_v4": false,
+      "answerability_ok_v3": true
+    },
+    {
+      "id": "q024",
+      "shape": "list",
+      "tier": "qdrant_mongo",
+      "question": "Which AI tools does the author rank highest for dropshipping work?",
+      "doc_hit": true,
+      "doc_recall": 0.5,
+      "concept_recall": 0.0,
+      "refused": false,
+      "answerability_ok": true,
+      "returned_doc_count": 1,
+      "returned_corpora": [
+        "5a20bc21-95df-42c2-80c8-f927b4e83904"
+      ],
+      "total_s": 29.04,
+      "first_token_s": 24.497,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 16.31326454898226,
+        "chunks": 2,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "**Gemini 2.5 Pro Experimental** earns the highest rank as an **S-tier** deep research tool \u2014 the source notes it delivered 226 sources and 36 pages versus competitors' thinner outputs. **Claude 3.7 Sonnet** takes **A-tie",
+      "refused_v4": false,
+      "answerability_ok_v3": true
+    },
+    {
+      "id": "q025",
+      "shape": "single_fact",
+      "tier": "qdrant_mongo",
+      "question": "What does the author claim is the core psychological mechanism behind quiz funnels?",
+      "doc_hit": true,
+      "doc_recall": 1.0,
+      "concept_recall": 0.0,
+      "refused": true,
+      "answerability_ok": false,
+      "returned_doc_count": 2,
+      "returned_corpora": [
+        "5a20bc21-95df-42c2-80c8-f927b4e83904"
+      ],
+      "total_s": 24.932,
+      "first_token_s": 24.931,
+      "answerability": {
+        "status": "weak",
+        "required_coverage": 0.25,
+        "answer_shape": "synthesis",
+        "diagnostic_source": "retriever_sufficiency+evidence_plan"
+      },
+      "retrieval_metadata": {
+        "duration_s": 19.659390510001685,
+        "chunks": 2,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "I cannot answer that as a source-backed result from the selected corpus. The retrieval found some related material, but it did not establish author, claim, psychological strongly enough to support the question. The neare",
+      "refused_v4": true,
+      "answerability_ok_v3": false
+    },
+    {
+      "id": "q026",
+      "shape": "broad",
+      "tier": "qdrant_mongo",
+      "question": "Summarize the recurring mindset advice across these videos.",
+      "doc_hit": false,
+      "doc_recall": 0.0,
+      "concept_recall": 0.0,
+      "refused": false,
+      "answerability_ok": true,
+      "returned_doc_count": 4,
+      "returned_corpora": [
+        "5a20bc21-95df-42c2-80c8-f927b4e83904"
+      ],
+      "total_s": 43.354,
+      "first_token_s": 27.761,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 15.919343841000227,
+        "chunks": 4,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "\nThe videos converge on a handful of interlocking mindset shifts: **lead with identity, not goals**; **act from the desired end state rather than grinding toward it**; and **keep moving regardless of comfort**.\n\n## Ident",
+      "refused_v4": false,
+      "answerability_ok_v3": true
+    },
+    {
+      "id": "q027",
+      "shape": "direct",
+      "tier": "qdrant_mongo",
+      "question": "What is the 'chad funnel' strategy?",
+      "doc_hit": true,
+      "doc_recall": 1.0,
+      "concept_recall": 1.0,
+      "refused": false,
+      "answerability_ok": true,
+      "returned_doc_count": 4,
+      "returned_corpora": [
+        "5a20bc21-95df-42c2-80c8-f927b4e83904"
+      ],
+      "total_s": 40.121,
+      "first_token_s": 35.245,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 16.15944121600478,
+        "chunks": 4,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "## Chad Funnel Strategy\n\nThe Chad funnel is a multi-step e-commerce sales strategy that adds a **pre-sales page (advertorial)** between the ad and the sales page, then routes buyers through a custom order page before pre",
+      "refused_v4": false,
+      "answerability_ok_v3": true
+    },
+    {
+      "id": "q028",
+      "shape": "procedural",
+      "tier": "qdrant_mongo",
+      "question": "How do I create AI video ads with Sora 2 according to these transcripts?",
+      "doc_hit": true,
+      "doc_recall": 1.0,
+      "concept_recall": 1.0,
+      "refused": false,
+      "answerability_ok": true,
+      "returned_doc_count": 2,
+      "returned_corpora": [
+        "5a20bc21-95df-42c2-80c8-f927b4e83904"
+      ],
+      "total_s": 48.785,
+      "first_token_s": 46.75,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 30.25739759701537,
+        "chunks": 2,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "# Creating AI Video Ads with Sora 2\n\n## The Core Workflow\n\nThe process combines Claude for script generation with Sora 2 for video production. You start by uploading all foundational brand documents\u2014guidelines, product d",
+      "refused_v4": false,
+      "answerability_ok_v3": true
+    },
+    {
+      "id": "q029",
+      "shape": "followup",
+      "tier": "qdrant_mongo",
+      "question": "And how much budget should each ad set get?",
+      "doc_hit": true,
+      "doc_recall": 0.667,
+      "concept_recall": 1.0,
+      "refused": false,
+      "answerability_ok": true,
+      "returned_doc_count": 3,
+      "returned_corpora": [
+        "5a20bc21-95df-42c2-80c8-f927b4e83904"
+      ],
+      "total_s": 27.934,
+      "first_token_s": 27.925,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 14.072709255997324,
+        "chunks": 4,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "Under a CBO model, you don't allocate budget per ad set\u2014Facebook does it for you.\n\nThe approach in the sources uses **campaign-level CBO only**, with no ad-set-level budgets at all. The speaker set a $90/day campaign bud",
+      "refused_v4": false,
+      "answerability_ok_v3": true
+    },
+    {
+      "id": "q030",
+      "shape": "negative_control",
+      "tier": "qdrant_mongo",
+      "question": "What does the channel recommend for selling print-on-demand products on Etsy?",
+      "doc_hit": null,
+      "doc_recall": null,
+      "concept_recall": null,
+      "refused": false,
+      "answerability_ok": true,
+      "returned_doc_count": 4,
+      "returned_corpora": [
+        "5a20bc21-95df-42c2-80c8-f927b4e83904"
+      ],
+      "total_s": 44.448,
+      "first_token_s": 37.946,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 27.342683261987986,
+        "chunks": 4,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "The retrieved transcripts don't specifically address Etsy as a platform. What the sources do cover is **print-on-demand as a general model**, ranked as B-tier in a 2025 money-making tier list.\n\nThe channel's take: print-",
+      "rescored_v3": true,
+      "answerability_ok_v3": true
+    },
+    {
+      "id": "q031",
+      "shape": "direct",
+      "tier": "qdrant_mongo",
+      "question": "Which facial action units combine in FACS to mark a genuine Duchenne smile?",
+      "doc_hit": true,
+      "doc_recall": 0.6,
+      "concept_recall": 0.667,
+      "refused": false,
+      "answerability_ok": true,
+      "returned_doc_count": 4,
+      "returned_corpora": [
+        "fd460347-61cc-4358-87fc-4b2a80533f0a"
+      ],
+      "total_s": 45.554,
+      "first_token_s": 45.546,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 19.319886091980152,
+        "chunks": 5,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "**AU6 + AU12** \u2014 the Duchenne smile is marked by simultaneous contraction of the orbicularis oculi (AU6, the cheek raiser that produces crow's-feet wrinkles around the eyes) and the zygomaticus major (AU12, the lip corne",
+      "refused_v4": false,
+      "answerability_ok_v3": true
+    },
+    {
+      "id": "q032",
+      "shape": "naive",
+      "tier": "qdrant_mongo",
+      "question": "How do I make an AI-generated character move less stiff and robotic?",
+      "doc_hit": true,
+      "doc_recall": 0.2,
+      "concept_recall": 0.25,
+      "refused": false,
+      "answerability_ok": true,
+      "returned_doc_count": 3,
+      "returned_corpora": [
+        "fd460347-61cc-4358-87fc-4b2a80533f0a"
+      ],
+      "total_s": 50.547,
+      "first_token_s": 47.216,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 17.907629799999995,
+        "chunks": 3,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "AI-generated characters appear stiff when prompts omit the physical logic that makes movement read as natural. The core fix is replacing vague action descriptions with an **atomic motion schema** that specifies *who init",
+      "refused_v4": false,
+      "answerability_ok_v3": true
+    },
+    {
+      "id": "q033",
+      "shape": "procedural",
+      "tier": "qdrant_mongo",
+      "question": "How should I light a night interior scene on a small budget?",
+      "doc_hit": true,
+      "doc_recall": 0.5,
+      "concept_recall": 0.667,
+      "refused": false,
+      "answerability_ok": true,
+      "returned_doc_count": 2,
+      "returned_corpora": [
+        "fd460347-61cc-4358-87fc-4b2a80533f0a"
+      ],
+      "total_s": 49.937,
+      "first_token_s": 36.219,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 23.373500635003438,
+        "chunks": 3,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "# Lighting a Night Interior on a Small Budget\n\nThe core principle is counterintuitive: **don't make it too dark.** The human eye adapts to low light remarkably well, so radically underexposed night scenes actually feel u",
+      "refused_v4": false,
+      "answerability_ok_v3": true
+    },
+    {
+      "id": "q034",
+      "shape": "list",
+      "tier": "qdrant_mongo",
+      "question": "What are the Five C's of cinematography?",
+      "doc_hit": true,
+      "doc_recall": 1.0,
+      "concept_recall": 1.0,
+      "refused": false,
+      "answerability_ok": true,
+      "returned_doc_count": 2,
+      "returned_corpora": [
+        "fd460347-61cc-4358-87fc-4b2a80533f0a"
+      ],
+      "total_s": 34.473,
+      "first_token_s": 34.466,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 22.653093468979932,
+        "chunks": 3,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "## The Five C's of Cinematography\n\nJoseph V. Mascelli's foundational text enumerates the five pillars as **Camera Angles, Continuity, Cutting, Close-Ups, and Composition**. These elements form a practical vocabulary for ",
+      "refused_v4": false,
+      "answerability_ok_v3": true
+    },
+    {
+      "id": "q035",
+      "shape": "single_fact",
+      "tier": "qdrant_mongo",
+      "question": "What does Walter Murch say is the most important criterion for deciding where to cut?",
+      "doc_hit": true,
+      "doc_recall": 1.0,
+      "concept_recall": 1.0,
+      "refused": false,
+      "answerability_ok": true,
+      "returned_doc_count": 2,
+      "returned_corpora": [
+        "fd460347-61cc-4358-87fc-4b2a80533f0a"
+      ],
+      "total_s": 29.178,
+      "first_token_s": 29.169,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 15.684914006997133,
+        "chunks": 3,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "**Emotion** is the most important criterion for deciding where to cut, according to Walter Murch.\n\nIn his *Rule of Six* hierarchy, Murch ranks six criteria in order of priority: emotion, story, rhythm, eye-trace, planari",
+      "refused_v4": false,
+      "answerability_ok_v3": true
+    },
+    {
+      "id": "q036",
+      "shape": "comparison",
+      "tier": "qdrant_mongo",
+      "question": "Compare Ogilvy's advertising philosophy with Gene Schwartz's Breakthrough Advertising.",
+      "doc_hit": true,
+      "doc_recall": 1.0,
+      "concept_recall": 0.333,
+      "refused": false,
+      "answerability_ok": true,
+      "returned_doc_count": 2,
+      "returned_corpora": [
+        "fd460347-61cc-4358-87fc-4b2a80533f0a"
+      ],
+      "total_s": 53.479,
+      "first_token_s": 35.907,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 16.451761215983424,
+        "chunks": 3,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "## Gene Schwartz vs. David Ogilvy: A Corpus-Based Comparison\n\n### Schwartz's Breakthrough Advertising Philosophy\n\nThe retrieved context grounds Schwartz's approach in a specific doctrine of **mass desire as a pre-existin",
+      "refused_v4": false,
+      "answerability_ok_v3": true
+    },
+    {
+      "id": "q037",
+      "shape": "broad",
+      "tier": "qdrant_mongo",
+      "question": "What do these books teach about composing shots for visual storytelling?",
+      "doc_hit": true,
+      "doc_recall": 0.25,
+      "concept_recall": 0.667,
+      "refused": false,
+      "answerability_ok": true,
+      "returned_doc_count": 3,
+      "returned_corpora": [
+        "fd460347-61cc-4358-87fc-4b2a80533f0a"
+      ],
+      "total_s": 38.681,
+      "first_token_s": 27.602,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 13.138553173019318,
+        "chunks": 3,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "## Core Teaching: Visual Storytelling Through Composed Shots\n\nThese three sources share a common philosophy: every compositional choice should communicate narrative meaning to the audience without explicit verbal explana",
+      "refused_v4": false,
+      "answerability_ok_v3": true
+    },
+    {
+      "id": "q038",
+      "shape": "direct",
+      "tier": "qdrant_mongo",
+      "question": "What are Laban's eight effort actions?",
+      "doc_hit": true,
+      "doc_recall": 0.333,
+      "concept_recall": 1.0,
+      "refused": false,
+      "answerability_ok": true,
+      "returned_doc_count": 2,
+      "returned_corpora": [
+        "fd460347-61cc-4358-87fc-4b2a80533f0a"
+      ],
+      "total_s": 48.64,
+      "first_token_s": 48.631,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 33.33198055700632,
+        "chunks": 5,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "\n**The eight Effort Actions** are: **Float, Punch, Glide, Slash, Wring, Dab, Flick, and Press**.\n\nThese actions emerge from the **Action Drive**, which combines three of Laban's four Effort qualities\u2014Weight, Space, and T",
+      "refused_v4": false,
+      "answerability_ok_v3": true
+    },
+    {
+      "id": "q039",
+      "shape": "followup",
+      "tier": "qdrant_mongo",
+      "question": "Which of them matters most for continuity editing?",
+      "doc_hit": true,
+      "doc_recall": 0.5,
+      "concept_recall": 1.0,
+      "refused": false,
+      "answerability_ok": true,
+      "returned_doc_count": 3,
+      "returned_corpora": [
+        "fd460347-61cc-4358-87fc-4b2a80533f0a"
+      ],
+      "total_s": 38.648,
+      "first_token_s": 38.637,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 15.46490992399049,
+        "chunks": 4,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "## Which C Matters Most for Continuity Editing?\n\n**Continuity** is the C that decides success or failure of a production.\n\nThe retrieved sources from Mascelli's text make this unambiguous: *\"A professional sound motion p",
+      "refused_v4": false,
+      "answerability_ok_v3": true
+    },
+    {
+      "id": "q040",
+      "shape": "cross_domain",
+      "tier": "qdrant_mongo",
+      "question": "How can FACS help an animator make facial performances read clearly?",
+      "doc_hit": false,
+      "doc_recall": 0.0,
+      "concept_recall": 1.0,
+      "refused": false,
+      "answerability_ok": true,
+      "returned_doc_count": 4,
+      "returned_corpora": [
+        "fd460347-61cc-4358-87fc-4b2a80533f0a"
+      ],
+      "total_s": 52.325,
+      "first_token_s": 32.237,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 17.41239792399574,
+        "chunks": 4,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "FACS gives animators a precise, muscle-grounded vocabulary for breaking down and reconstructing facial expressions, which directly improves performance clarity on screen.\n\n**Core contribution \u2014 taxonomic precision**\n\nFAC",
+      "refused_v4": false,
+      "answerability_ok_v3": true
+    },
+    {
+      "id": "q041",
+      "shape": "negative_control",
+      "tier": "qdrant_mongo",
+      "question": "What lens does the corpus recommend for macro insect photography?",
+      "doc_hit": null,
+      "doc_recall": null,
+      "concept_recall": null,
+      "refused": false,
+      "answerability_ok": true,
+      "returned_doc_count": 3,
+      "returned_corpora": [
+        "fd460347-61cc-4358-87fc-4b2a80533f0a"
+      ],
+      "total_s": 39.27,
+      "first_token_s": 33.564,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 16.405043589998968,
+        "chunks": 3,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "# Macro Lens Recommendations for Close-Up Photography\n\nThe retrieved sources don't explicitly name an \"insect photography lens,\" but they provide layered guidance on macro equipment that maps directly to that use case.\n\n",
+      "rescored_v3": true,
+      "answerability_ok_v3": true
+    },
+    {
+      "id": "q042",
+      "shape": "direct",
+      "tier": "qdrant_mongo",
+      "question": "What is Kinetic Motion Direction Prompting for AI video?",
+      "doc_hit": true,
+      "doc_recall": 1.0,
+      "concept_recall": 1.0,
+      "refused": false,
+      "answerability_ok": true,
+      "returned_doc_count": 2,
+      "returned_corpora": [
+        "fd460347-61cc-4358-87fc-4b2a80533f0a"
+      ],
+      "total_s": 27.726,
+      "first_token_s": 27.716,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 16.552964923990658,
+        "chunks": 3,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "**Kinetic Motion Direction Prompting** is a methodology for directing realistic, controllable motion in AI video generation \u2014 treating movement as a precise, describable system rather than letting the model randomize it.",
+      "refused_v4": false,
+      "answerability_ok_v3": true
+    },
+    {
+      "id": "q043",
+      "shape": "direct",
+      "tier": "qdrant_mongo",
+      "question": "How does culture shape consumer decision making according to this handbook?",
+      "doc_hit": true,
+      "doc_recall": 1.0,
+      "concept_recall": 1.0,
+      "refused": false,
+      "answerability_ok": true,
+      "returned_doc_count": 1,
+      "returned_corpora": [
+        "bcf80054-7611-47d0-ae16-fa7fed259b13"
+      ],
+      "total_s": 36.526,
+      "first_token_s": 24.08,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 10.039593421010068,
+        "chunks": 2,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "Culture shapes consumer decision making through **three intersecting pathways** identified across the handbook's fifteen chapters: how consumers process information, the basis on which they form preferences and make choi",
+      "refused_v4": false,
+      "answerability_ok_v3": true
+    },
+    {
+      "id": "q044",
+      "shape": "cross_corpus",
+      "tier": "qdrant_mongo",
+      "question": "How should cultural differences change how I write ad angles for a global dropshipping brand?",
+      "doc_hit": true,
+      "doc_recall": 0.333,
+      "concept_recall": 1.0,
+      "refused": false,
+      "answerability_ok": true,
+      "returned_doc_count": 5,
+      "returned_corpora": [
+        "5a20bc21-95df-42c2-80c8-f927b4e83904",
+        "bcf80054-7611-47d0-ae16-fa7fed259b13"
+      ],
+      "corpus_diversity_ok": true,
+      "total_s": 62.378,
+      "first_token_s": 62.357,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 29.455460596975172,
+        "chunks": 6,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "\nCultural differences fundamentally reshape ad angles because cultures don't just disagree on products\u2014they disagree on *how change works*. This has direct implications for dropshipping ad strategy.\n\n## Change: Linear vs",
+      "refused_v4": false,
+      "answerability_ok_v3": true
+    },
+    {
+      "id": "q045",
+      "shape": "cross_corpus",
+      "tier": "qdrant_mongo",
+      "question": "Why do faces communicate emotion so effectively, and how should animators or directors use that?",
+      "doc_hit": true,
+      "doc_recall": 0.5,
+      "concept_recall": 1.0,
+      "refused": false,
+      "answerability_ok": true,
+      "returned_doc_count": 7,
+      "returned_corpora": [
+        "999b5934-272e-4f20-a538-b5d422249a05",
+        "fd460347-61cc-4358-87fc-4b2a80533f0a"
+      ],
+      "corpus_diversity_ok": true,
+      "total_s": 96.236,
+      "first_token_s": 96.211,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 24.19079880299978,
+        "chunks": 7,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "Faces are the most direct channel for emotion because they are where automatic value responses become physically visible \u2014 the Facial Action Coding System maps this precisely by breaking expression into Action Units (AUs",
+      "refused_v4": false,
+      "answerability_ok_v3": true
+    },
+    {
+      "id": "q046",
+      "shape": "cross_corpus",
+      "tier": "qdrant_mongo",
+      "question": "What persuasion psychology explains why direct-response ad hooks work?",
+      "doc_hit": true,
+      "doc_recall": 0.5,
+      "concept_recall": 1.0,
+      "refused": false,
+      "answerability_ok": true,
+      "returned_doc_count": 3,
+      "returned_corpora": [
+        "5a20bc21-95df-42c2-80c8-f927b4e83904",
+        "999b5934-272e-4f20-a538-b5d422249a05"
+      ],
+      "corpus_diversity_ok": true,
+      "total_s": 118.535,
+      "first_token_s": 118.531,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 30.673302597017027,
+        "chunks": 3,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "Direct-response hooks work because they bypass surface-level conscious arguments and tap into deeper psychological layers \u2014 particularly **emotions, belief systems, and identity** \u2014 rather than relying on rational persua",
+      "refused_v4": false,
+      "answerability_ok_v3": true
+    },
+    {
+      "id": "q047",
+      "shape": "cross_corpus",
+      "tier": "qdrant_mongo",
+      "question": "Apply film editing principles to make video ads hold attention longer.",
+      "doc_hit": true,
+      "doc_recall": 0.5,
+      "concept_recall": 1.0,
+      "refused": false,
+      "answerability_ok": true,
+      "returned_doc_count": 4,
+      "returned_corpora": [
+        "5a20bc21-95df-42c2-80c8-f927b4e83904",
+        "fd460347-61cc-4358-87fc-4b2a80533f0a"
+      ],
+      "corpus_diversity_ok": true,
+      "total_s": 61.951,
+      "first_token_s": 61.923,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 28.746288597001694,
+        "chunks": 5,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "## Applying Film Editing Principles to Video Ads\n\nFilm editing theory, long documented from Reisz and Millar through Dancyger's comprehensive treatment, holds that **pace is the rudder that empowers a message** \u2014 and thi",
+      "refused_v4": false,
+      "answerability_ok_v3": true
+    },
+    {
+      "id": "q048",
+      "shape": "cross_corpus_irrelevant",
+      "tier": "qdrant_mongo",
+      "question": "What practical methods improve deep focus during study sessions?",
+      "doc_hit": true,
+      "doc_recall": 1.0,
+      "concept_recall": 1.0,
+      "refused": false,
+      "answerability_ok": true,
+      "returned_doc_count": 8,
+      "returned_corpora": [
+        "999b5934-272e-4f20-a538-b5d422249a05",
+        "fd460347-61cc-4358-87fc-4b2a80533f0a"
+      ],
+      "total_s": 128.194,
+      "first_token_s": 128.169,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 34.81036718300311,
+        "chunks": 8,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "The strongest retrieved evidence converges on a few practical, research-backed strategies for improving deep focus during study.\n\n**Interleaving over overlearning.** Doug Rohrer's research, cited in *A Mind for Numbers*,",
+      "refused_v4": false,
+      "answerability_ok_v3": true
+    },
+    {
+      "id": "q049",
+      "shape": "cross_corpus_irrelevant",
+      "tier": "qdrant_mongo",
+      "question": "How do I write video sales letters that convert?",
+      "doc_hit": true,
+      "doc_recall": 1.0,
+      "concept_recall": 0.667,
+      "refused": false,
+      "answerability_ok": true,
+      "returned_doc_count": 2,
+      "returned_corpora": [
+        "5a20bc21-95df-42c2-80c8-f927b4e83904"
+      ],
+      "total_s": 50.965,
+      "first_token_s": 38.311,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 26.189907053980278,
+        "chunks": 4,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "\n## How to Write Video Sales Letters That Convert\n\nThe core answer from the retrieved sources: **VSL writing is simple but not easy \u2014 preparation determines success**, and AI can handle most of the heavy lifting once you",
+      "refused_v4": false,
+      "answerability_ok_v3": true
+    },
+    {
+      "id": "q050",
+      "shape": "cross_corpus",
+      "tier": "qdrant_mongo",
+      "question": "What do all my corpora say about capturing and holding human attention?",
+      "doc_hit": true,
+      "doc_recall": 0.25,
+      "concept_recall": 1.0,
+      "refused": false,
+      "answerability_ok": true,
+      "returned_doc_count": 3,
+      "returned_corpora": [
+        "999b5934-272e-4f20-a538-b5d422249a05",
+        "fd460347-61cc-4358-87fc-4b2a80533f0a"
+      ],
+      "corpus_diversity_ok": true,
+      "total_s": 197.031,
+      "first_token_s": 197.017,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 33.145254931994714,
+        "chunks": 4,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "## Capturing and Holding Human Attention\n\nThe Cialdini source frames attention as a two-stage operation: first pulling focus onto a stimulus, then holding it there long enough for your message to land unchallenged. **Sel",
+      "refused_v4": false,
+      "answerability_ok_v3": true
+    },
+    {
+      "id": "q051",
+      "shape": "cross_corpus",
+      "tier": "qdrant_mongo",
+      "question": "Compare how game designers and film directors think about pacing.",
+      "doc_hit": false,
+      "doc_recall": 0.0,
+      "concept_recall": 0.5,
+      "refused": false,
+      "answerability_ok": true,
+      "returned_doc_count": 7,
+      "returned_corpora": [
+        "999b5934-272e-4f20-a538-b5d422249a05",
+        "fd460347-61cc-4358-87fc-4b2a80533f0a"
+      ],
+      "corpus_diversity_ok": true,
+      "total_s": 130.273,
+      "first_token_s": 130.253,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 27.74031334600295,
+        "chunks": 7,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "## Pacing: Game Designers vs. Film Directors\n\nThe core distinction is that **film pacing is authored and fixed** while **game pacing is authored and emergent**. A film director shapes how time moves for a captive audienc",
+      "refused_v4": false,
+      "answerability_ok_v3": true
+    },
+    {
+      "id": "q052",
+      "shape": "negative_control",
+      "tier": "qdrant_mongo",
+      "question": "What is the recommended AWS Lambda cold-start mitigation for Rust functions?",
+      "doc_hit": null,
+      "doc_recall": null,
+      "concept_recall": null,
+      "refused": true,
+      "answerability_ok": true,
+      "returned_doc_count": 3,
+      "returned_corpora": [
+        "5a20bc21-95df-42c2-80c8-f927b4e83904",
+        "999b5934-272e-4f20-a538-b5d422249a05"
+      ],
+      "total_s": 109.088,
+      "first_token_s": 109.078,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 30.756154973001685,
+        "chunks": 4,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "The retrieved corpus does not contain a direct answer on AWS Lambda cold-start mitigation for Rust functions.\n\nThe closest retrieved evidence comes from the microservices source, which identifies **fast-start runtimes** ",
+      "answerability_ok_v3": true
+    },
+    {
+      "id": "q053",
+      "shape": "naive",
+      "tier": "qdrant_mongo",
+      "question": "My fight scenes look fake. How do I choreograph them better?",
+      "doc_hit": true,
+      "doc_recall": 0.25,
+      "concept_recall": 0.333,
+      "refused": false,
+      "answerability_ok": true,
+      "returned_doc_count": 2,
+      "returned_corpora": [
+        "fd460347-61cc-4358-87fc-4b2a80533f0a"
+      ],
+      "total_s": 59.528,
+      "first_token_s": 41.372,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 23.755735468992498,
+        "chunks": 3,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "Fight choreography fails when it prioritizes realism over **camera-readiness** \u2014 the central insight from a case study in the retrieved sources: a filmmaker hired a real boxing champion to choreograph and star in a fight",
+      "refused_v4": false,
+      "answerability_ok_v3": true
+    },
+    {
+      "id": "q054",
+      "shape": "list",
+      "tier": "qdrant_mongo",
+      "question": "What are the four adult attachment styles described in Attached?",
+      "doc_hit": true,
+      "doc_recall": 1.0,
+      "concept_recall": 1.0,
+      "refused": false,
+      "answerability_ok": true,
+      "returned_doc_count": 1,
+      "returned_corpora": [
+        "999b5934-272e-4f20-a538-b5d422249a05"
+      ],
+      "total_s": 33.92,
+      "first_token_s": 29.99,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 20.395315467991168,
+        "chunks": 2,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "The four adult attachment styles described in *Attached* are **secure**, **anxious**, **avoidant**, and **fearful-avoidant**. They are determined by two underlying dimensions: comfort with intimacy and anxiety about a pa",
+      "refused_v4": false,
+      "answerability_ok_v3": true
+    },
+    {
+      "id": "q055",
+      "shape": "procedural",
+      "tier": "qdrant_mongo",
+      "question": "How do I compress long prompts for an LLM using LLMLingua-2?",
+      "doc_hit": true,
+      "doc_recall": 1.0,
+      "concept_recall": 1.0,
+      "refused": false,
+      "answerability_ok": true,
+      "returned_doc_count": 3,
+      "returned_corpora": [
+        "999b5934-272e-4f20-a538-b5d422249a05"
+      ],
+      "total_s": 55.029,
+      "first_token_s": 55.011,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 20.079818758997135,
+        "chunks": 5,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "# Compressing Long Prompts with LLMLingua-2\n\nLLMLingua-2 frames prompt compression as a **token classification problem** solved by a Transformer encoder, which captures full bidirectional context rather than the unidirec",
+      "refused_v4": false,
+      "answerability_ok_v3": true
+    },
+    {
+      "id": "q056",
+      "shape": "single_fact",
+      "tier": "qdrant_mongo",
+      "question": "What monthly revenue does the author attribute to AI-written advertorial landing pages?",
+      "doc_hit": true,
+      "doc_recall": 1.0,
+      "concept_recall": 1.0,
+      "refused": false,
+      "answerability_ok": true,
+      "returned_doc_count": 3,
+      "returned_corpora": [
+        "5a20bc21-95df-42c2-80c8-f927b4e83904"
+      ],
+      "total_s": 42.864,
+      "first_token_s": 42.857,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 25.816909844987094,
+        "chunks": 3,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "The author claims **$1.3 million per month** in revenue from AI-written advertorial landing pages built using his five-step process\u2014research, foundational docs, competitor swiping, AI-assisted copy generation, and chiefi",
+      "refused_v4": false,
+      "answerability_ok_v3": true
+    }
+  ]
+}

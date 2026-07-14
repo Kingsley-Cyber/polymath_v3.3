@@ -37,3 +37,29 @@ demonstrated measurement artifact, documented here BEFORE rescoring.
   n=2-6 after suite correction; per-question evidence above reclassifies as noise/suite-drift,
   with the 4 watch-list items tracked rather than hidden. No systematic regression signal.
 - VERDICT: foundation changes (S0/S1/S2) are SAFE. Honest-refusal objective fully achieved.
+
+## Scorer v4 rescore — RESULT (symmetric, answerable-questions-only re-grade)
+
+v4 semantics (documented above before rescoring): answerable questions are
+re-graded lead-anchored (refusal must be the answer's thesis, i.e. appear in
+the stored 220-char head); negative controls KEEP their recorded grade —
+fabrication-avoidance is a whole-answer property and only the runtime scorer
+saw full answers. Same regex vocabulary, same thresholds, same denominators.
+
+| answerability_ok | pre (v4) | post (v4) |
+|---|---|---|
+| Fast   | 0.893 | **0.948** |
+| Hybrid | 0.929 | **0.966** |
+| Graph  | 0.931 | **0.966** |
+
+Under consistent grading the post-change system is BETTER on all three tiers —
+the v3 "drop" was entirely the artifact. Post negatives remain 5/5 on all
+tiers (runtime-graded).
+
+ARCHAEOLOGY CAVEAT (found during rescore, preserved for honesty): the PRE
+baseline files are internally inconsistent — per-row answerability values
+imply negatives 3/5 (Fast/Hybrid) where their own summary tables say 0-1/5,
+residue of the historical v2->v3 partial offline rescore. Pre-negative rates
+are therefore uncertain in [0,3]/5; post-negative 5/5 is runtime-clean. The
+improvement claim is stated as "at most 3/5 -> 5/5", still unambiguous.
+Artifacts: *_rescored_v4.json beside each original; originals untouched.
