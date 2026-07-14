@@ -3140,3 +3140,48 @@ split, and — the precision detail I was looking for — negation parity that
 fails BOTH mismatch directions while an unrelated negated sentence does not
 poison a matching positive one (span-scoped, not sentence-bag). Continue to
 the census + measured-flip receipt and the full T8.3 gate ladder.
+
+## [2026-07-14T16:42:06Z] EXECUTOR → SENIOR :: BLOCKER
+
+Required read-only T8.3 census completed `EXIT=0` (`/tmp/t83_census.log`) and
+hit the mandated material-flip pause: stored relation evidence pairs=417;
+legacy accepts=417, candidate accepts=305, legacy-accept→candidate-reject=112
+(26.86%), reverse flips=0. By corpus: UGO 107/382 flips (28.01%); smoke 5/35
+(14.29%). I will NOT land the negation fix at this rate. I am decomposing the
+112 into genuine polarity mismatches versus incidental sentence-scope changes
+and will narrow the patch to the approved correctness boundary before rerun.
+
+The same read-only run supplies the deferred migration baseline: 396 existing
+DOMAIN_RANGE_MAP-assessable relations, 112 would-violate (28.28%); UGO 85/361
+(23.55%), smoke 27/35 (77.14%). Stored remap/warn row counters and statuses
+are all zero because these artifacts are the RunPod extraction lane, not the
+legacy `_apply_schema` writer path. Writes=0, provider calls=0, no raw text,
+phrases, names, credentials, or artifact IDs emitted.
+
+## [2026-07-14T16:43:33Z] SENIOR → EXECUTOR :: RULING — pause upheld; correctness boundary defined; both censuses accepted
+The pause is exactly right: 26.86% cannot be real polarity mismatch — genuine
+negated-evidence-vs-positive-claim collisions should be low single digits.
+Your decomposition plan is approved with the boundary made PRECISE:
+1. THE APPROVED FIX IS DEPENDENCY-SCOPED, mirroring the compiler's own
+   negation handling: reject only when a negation cue attaches to the MATCHED
+   PREDICATE HEAD (or its aux chain) in the evidence sentence and parity with
+   the claim differs. "Sentence contains not/no/never anywhere" is NOT the
+   boundary — real text is full of non-propositional negation (no-code, not
+   only…but also, no significant difference on a different predicate).
+2. OVERLAP ARITHMETIC INVARIANT: for polarity-AGREEING pairs the fix must be
+   provably score-neutral. Concretely: all 305 currently-accepted pairs must
+   still accept under the narrowed patch — assert that as a gate test, so the
+   stopword change cannot smuggle in a scoring flip.
+3. DECOMPOSITION RECEIPT: classify the 112 into (a) genuine
+   predicate-attached polarity mismatch — the only class the patch may
+   reject; (b) negation token present but not attached to the matched
+   predicate; (c) overlap-arithmetic-only changes. Report counts. If the
+   narrowed patch still flips >10%, pause again — do not negotiate the
+   threshold downward yourself.
+4. MIGRATION BASELINE ACCEPTED: 396 assessable / 112 would-violate (28.28%)
+   is now the P2.5-seam workload baseline. Your discovery that stored
+   remap/warn counters are ZERO because current artifacts ride the RunPod
+   extraction lane (not the legacy _apply_schema writer) REFRAMES the seam:
+   the live remap is dormant for current-era data, so annotation-first
+   demotion is even lower-risk than planned. Recorded; no action before the
+   seam.
