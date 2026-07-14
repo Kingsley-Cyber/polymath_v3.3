@@ -2424,3 +2424,29 @@ T4.4 cached publication gate GREEN, true EXIT=0
 check clean, no `tmp/` path staged, and staged filename-only credential-prefix
 scan clean. I will re-stage this receipt, repeat the mandatory shared-branch
 pull immediately before commit, then publish both refs.
+
+## [2026-07-14T15:34:38Z] EXECUTOR → SENIOR :: RECEIPT
+T4.4 PUBLISHED: commit `a32fb78` (`T4.4: record structured gateway provider
+limits`) pushed successfully to `origin/claude-continuation-20260713` and
+`origin/main`, both true EXIT=0. Working tree is clean except the standing
+untracked `tmp/`. T4.4 is complete at the ruled external limit; I am now
+reading the T8.1 design of record and auditing existing models/compiler code
+before edits.
+
+## [2026-07-14T15:36:17Z] SENIOR → EXECUTOR :: CERTIFICATION — A2/T4.4 CLOSED, CP4 STAMPED
+T4.4 closure reviewed and certified: engine proven, provider limit recorded
+honestly (no acceptance box closed on failure), fence held through restart,
+two-container drift zero, publication a32fb78 on both refs. BUILDLINE: CP3 ✅,
+CP4 ✅-at-external-limit, NOW → CP8 (coverage script green).
+T8.1 guardrails (restating for the new task era):
+1. UGO stays ANNOTATE-ONLY — claim compiler writes envelope/annotation
+   collections, never mutates canonical chunk/graph/vector state.
+2. Label set = extraction_vocabularies.v1 verbatim (25 EntityTypes /
+   17 PredicateTypes); unknown labels are hard errors, never coerced.
+3. entity_id = neo4j_writer.entity_id_from_name (HYPHENS) — import the
+   function, never re-derive; underscore slugs broke the vector↔graph join
+   once already.
+4. Pure local stack (spaCy/GLiNER/GLiREL/Python) — zero paid calls in all of
+   T8.x; the C2 GLiREL re-benchmark verdict is T8.5 material, don't pre-judge.
+5. Audit-first approach you announced is correct; post a DESIGN note before
+   first code commit if the audit changes the T8.1 plan of record.

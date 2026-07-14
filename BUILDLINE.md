@@ -24,7 +24,8 @@ gated, at CP6. Any 4B-model move is owner-initiated only and has no slot.
 
 ---
 
-**NOW → CP3** (envelope + identity; CP2 superseded — schema before spend)
+**NOW → CP8** (claim spine on UGO; Track A jump — CP5–CP7 are Track B
+fill-in, taken only while A is blocked)
 **UNSLOTTED:** none as of 2026-07-14 (verified by coverage script)
 
 ---
@@ -53,15 +54,24 @@ Mark full regen → lexicon → cards LAST → readiness → after-eval. Ecom RE
 receipts. Exit: coverage censuses + reconcile + no-regression eval.
 Authority: 2h GLIDE after CP1. Checklist: P0.1.
 
-## CP3 — Envelope + identity — [P2.5b · P0.8]
-Identifier recipes + golden vectors · legacy adapters · projection outbox ·
-ProjectionManifests (embedding_profile incl. instruction_version) · Mongo
-validators · typed writer-boundary acceptance (P0.8 last box) · UGO
-annotate-only canary. Exit: P2.5b acceptance. Checklist: P2.5b, P0.8.
+## CP3 — Envelope + identity ✅ DONE 2026-07-14 (T3.1/T3.2 certified) — [P2.5b · P0.8]
+Identifier recipes + golden vectors · legacy adapters (no-relabeling,
+needs_owner_lineage) · projection outbox model · ProjectionManifests
+(embedding_profile incl. instruction_version) · Mongo validators · typed
+writer-boundary acceptance (P0.8 last box) · UGO annotate-only canary.
+NOTE: outbox/projection ACTIVATION (T3.3/T3.4) rides CP9 by senior ruling.
+Exit: P2.5b acceptance. Checklist: P2.5b, P0.8.
 
-## CP4 — Structured-output gateway — [P2.5c]
+## CP4 — Structured-output gateway ✅ DONE 2026-07-14 AT EXTERNAL LIMIT (a32fb78) — [P2.5c]
 SemanticDigestV1 + capability ladder + semantic validator + targeted repair +
-dead-letter + provenance/cache; UGO 10-packet canary. Checklist: P2.5c.
+dead-letter + provenance/cache; UGO 10-packet canary. VERDICT: engine
+certified (contract/validator/ladder/repair/DLQ proven across 3 live failure
+modes, zero canonical pollution; 212-test regression) but flash has NO
+verified digest path (Tier1 provider-rejected 400; Tier4 wrapper-unreliable;
+Tier3 partial, repair-exhausted). Tier1/10-packet/downgrade acceptance boxes
+remain OPEN as provider-blocked external limits — retest at CP9 preflight;
+LongCat = CP9 digest candidate (tiny Tier3 probe passed, full digest
+unverified). Prompt parent-digest.v5 / repair.v2. Checklist: P2.5c.
 
 ## CP5 — Vocabulary/alias/instruction layer — [P1.7 · P2.1 · P2.3 · Librarian Ph.3]
 ONE versioned alias registry absorbing the 3 existing stores · qdrant latent
