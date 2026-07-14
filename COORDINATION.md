@@ -21,9 +21,11 @@ senior INTENT entries here start glide timers; silence past the window = GO.
    survival protocol, pre-authorizations, and the review contract. Read it
    FIRST, then PROGRESS.md (your cursor), then proceed. Never self-bound to a
    single job; never end the session before T12.8.
-3. CP2 is SUPERSEDED by owner sequencing ruling (schema before spend): no
-   paid enrichment until the gateway-digest era; mark's one paid pass is
-   CP9/T9.3. Begin at CP3/T3.1 per PROGRESS.md.
+3. CP2 superseded (schema before spend). EXECUTION ORDER = the TWO-TRACK law
+   in CODEX_MISSION §GOAL-DRIVEN PRIORITIZATION: Track A core spine first
+   (A0 instruction A/B → adapters → gateway → claim spine → one paid pass →
+   activation+measurement); Track B hygiene only when A is blocked. Begin at
+   A0 per PROGRESS.md.
 4. Senior reviews every RECEIPT here; pre-authorized items proceed after the
    20-minute poll window; blockers get parked, never idled on.
 5. Standing rules unchanged (handoff §Decision authority; blue-green+canary

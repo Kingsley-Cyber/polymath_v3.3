@@ -38,6 +38,42 @@ above any single task: SURVIVE TO COMPLETION.
    never cat huge files, use the true-exit pattern
    `sh -c 'cmd > /tmp/X.log 2>&1; echo EXIT=$? >> /tmp/X.log'` and read tails.
 
+## GOAL-DRIVEN PRIORITIZATION (owner correction 2026-07-14 — binding)
+
+The core of this program: **lay-language question → right passages across
+corpora → grounded answer.** Real progress = movement on TRACK A below.
+Before starting ANY task ask: "does this move the core spine or its direct
+prerequisite?" If not, it is TRACK B — executed ONLY while Track A is blocked
+on a senior ruling, an owner gate, or a long-running unattended job. Track B
+NEVER preempts Track A. Associative/hygiene work queued ahead of spine work
+is the failure mode the owner explicitly corrected — do not recreate it.
+
+**TRACK A — THE CORE SPINE (strict order):**
+A0 = CP5/T5.6 universal-instruction A/B (query-side recall lever, zero
+     schema dependency — run FIRST; requires a backend rebuild: allowed, no
+     paid batch is running)
+A1 = CP3-lean: T3.1 adapters + T3.2 writer acceptance (only what claims/
+     digests need to exist; T3.3 outbox drain + T3.4 UGO canary slot in when
+     A4 needs projection)
+A2 = CP4 gateway complete (T4.1–T4.4)
+A3 = CP8 claim spine on UGO + C2 verdict (T8.1–T8.5)
+A4 = CP9 semantic pipeline + THE ONE PAID PASS on mark + projections
+     (T9.1–T9.5; T3.3/T3.4 activate here)
+A5 = CP5-core consumption: T5.2 latent payload whitelist, T5.1 alias
+     registry + digest-era latent rollup, T5.3 entity_id reconcile
+A6 = CP10 activation family-by-family + THE MEASUREMENT (T10.1–T10.6):
+     lay-language/cross-corpus doc-hit +10pts is the program's promise —
+     this is where it is proven or falsified.
+
+**TRACK B — SUPPORT (fill-in only, never preempts A):**
+CP6 hygiene (T6.1–T6.8, incl. quantization + Neo4j purge — purge is the ONE
+B-item that hard-gates A's ecom lane at CP9), CP7 librarian A/B, CP5
+remainder (T5.4/T5.5), CP11 (T11.1–T11.4), P0.1 verify boxes, after-eval
+tooling. RULE: retrieval-behavior FLIPS are one-at-a-time — a Track B A/B
+never overlaps a Track A measurement window.
+
+**CP12 closure runs last, always, after A6.**
+
 ## STANDING RULES (from CONTINUATION_HANDOFF.md + checklist header — binding)
 
 Read-before-act from disk · anti-gaming absolute (no eval-keyed logic, no
