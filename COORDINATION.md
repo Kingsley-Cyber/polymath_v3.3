@@ -2238,3 +2238,46 @@ capability evidence; owner may veto via OWNER :: entry):
 PROCEED NOW: A3/T8.1 — the claim spine (pure Python/spaCy/GLiNER, no LLM
 dependency), exactly as your PROGRESS cursor already points. The spine does
 not wait on providers.
+
+## [2026-07-14T15:18:58Z] EXECUTOR → SENIOR :: RECEIPT
+T4.4 sanitized baseline gate GREEN: all three committed JSON receipts parse
+with `jq empty`, true EXIT=0. They freeze the 0/5 native-schema probe, the
+LongCat tiny Tier3-only acceptance, and the final UGO external-limit verdict
+with exact unchanged canonical census. No credential, packet text, or raw
+provider body is present. Acceptance remains explicitly false and
+`verified_digest_path=null`; CP9 owns both full provider retests.
+
+## [2026-07-14T15:20:16Z] EXECUTOR → SENIOR :: RECEIPT
+T4.4 final host-state focused gate GREEN: 53 passed, true EXIT=0
+(`/tmp/t44_final_focused.log`) under `PYTHONPATH=/app` with dummy database
+endpoints. This is the exact four-file gateway/canary/registry/probe suite
+after the final capability verdict; it is narrower than the earlier 57-test
+repair gate and does not replace that receipt.
+
+## [2026-07-14T15:21:15Z] EXECUTOR → SENIOR :: RECEIPT
+T4.4 final adjacent regression GREEN: 212 passed, 3 pre-existing Docker-only
+skips, true EXIT=0 (`/tmp/t44_final_adjacent.log`). This superset covers the
+final gateway/canary/registry/probes plus digest model/validator, envelope,
+hash taxonomy, registry loader, identities, observations, manifests, outbox,
+legacy adapters, LiteLLM wire parameters, and DeepSeek thinking behavior.
+
+## [2026-07-14T15:21:51Z] EXECUTOR → SENIOR :: BLOCKER
+T4.4 final static gate STOPPED with true EXIT=1
+(`/tmp/t44_final_static.log`): Black found one formatting-only three-line
+assertion in `test_structured_output_capabilities.py`; compile/diff/security
+steps did not run because the gate short-circuited. The shown Black diff has
+no semantic change. I am applying that exact formatter correction, then
+re-running the entire static gate without weakening it.
+
+## [2026-07-14T15:22:16Z] EXECUTOR → SENIOR :: RECEIPT
+T4.4 full static retry GREEN, true EXIT=0 (`/tmp/t44_final_static.log`):
+Black 9/9 unchanged, changed-module compileall clean, `git diff --check`
+clean, and filename-only scans found no DeepSeek/LongCat/RunPod credential
+prefix in any changed T4.4 code, registry, spec, baseline, or coordination
+artifact. The earlier formatting-only failure is resolved without changing
+behavior.
+
+## [2026-07-14T15:22:45Z] SENIOR → EXECUTOR :: ACK
+Static-gate transient noted; the clean full retry (EXIT=0) is accepted with
+the 212-test adjacent regression. T4.4 closure receipts are complete.
+Continue T8.1.
