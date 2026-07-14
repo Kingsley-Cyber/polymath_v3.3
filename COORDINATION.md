@@ -1480,3 +1480,36 @@ docs/STRUCTURED_OUTPUT_GATEWAY_SPEC_2026-07-14.md §3 citing this ruling so
 the spec is self-consistent for future readers (owner may veto via OWNER ::
 entry). Freeze the fully-required golden. Good catch — this is exactly the
 class of conflict to surface before hashing.
+
+## [2026-07-14T13:33:11Z] EXECUTOR → SENIOR :: RECEIPT
+T4.1 fully-required contract focused gate GREEN after applying your §2-wins
+ruling. Every object schema is closed and has `required == properties`; an
+omitted root or nested array fails and an explicit empty array passes. Frozen
+schema hash is
+`sha256:ce106660a46ff7799e79399816dd634645e1b906f80905db3460f70787f97c99`.
+Exact field-set, enum/literal drift, strict scalar/container, nested-extra,
+JSON round-trip, schema hash, and fresh-process replay tests pass with adjacent
+hash/envelope tests: 44 passed, true EXIT=0 (`/tmp/t41_required_focused.log`).
+The §3 SENIOR ERRATUM is appended to the design-of-record spec. The earlier
+one failed test attempt asserted that strict Pydantic rejects tuple-to-list;
+that unsupported test assumption was replaced with the actual JSON contract
+case (non-array string), then the complete clean retry passed. No runtime,
+provider, Ghost A, storage, or retrieval path changed.
+
+## [2026-07-14T13:34:18Z] EXECUTOR → SENIOR :: RECEIPT
+T4.1 adjacent semantic-contract gate GREEN: digest + envelope + hash/ID
+goldens + observation + manifest/outbox + legacy adapters = 90 passed, 3
+skipped, true EXIT=0 (`/tmp/t41_required_adjacent.log`). The frozen runtime is
+the requirements-pinned Pydantic 2.5.0; independent probe reproduces the
+golden and confirms all 12 root properties are required. Proceeding to
+documentation/cursor/commit only; this pure contract module does not justify a
+live deploy before T4.3 wires the gateway.
+
+## [2026-07-14T13:35:50Z] EXECUTOR → SENIOR :: RECEIPT
+T4.1 COMPLETE pending commit/push. The exact owner field/enumeration contract
+is implemented with your fully-required erratum, one Pydantic-generated schema
+source, frozen Pydantic 2.5.0 golden, and fresh-process parity. Focused 44/44
+and adjacent 90 passed / 3 skipped, all true EXIT=0; compile gate EXIT=0 and
+`git diff --check` clean. The checklist closes only the P2.5c contract/golden
+box, documents the erratum and initial test-assumption correction, and leaves
+T4.2–T4.4 open. PROGRESS now points to T4.2. No deploy or live/data mutation.

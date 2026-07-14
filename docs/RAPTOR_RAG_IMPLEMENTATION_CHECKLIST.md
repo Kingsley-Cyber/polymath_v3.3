@@ -1399,9 +1399,11 @@ Design of record: `docs/STRUCTURED_OUTPUT_GATEWAY_SPEC_2026-07-14.md`
 (owner-delivered 2026-07-14). RunPod = extraction; API via THIS gateway =
 digests. Registry-independent; first S11 build unit alongside P2.5b envelope.
 
-- [ ] `SemanticDigestV1` pydantic contract (portable subset: shallow, closed,
+- [x] `SemanticDigestV1` pydantic contract (portable subset: shallow, closed,
   fully-required, enum-driven, versioned) + `model_json_schema()` as the single
-  source of truth; golden schema-hash test.
+  source of truth; golden schema-hash test. *(T4.1: fully-required §2-wins
+  erratum applied; exact golden + fresh-process replay; 90 passed / 3 skipped
+  across the adjacent semantic-contract suite.)*
 - [ ] Capability ladder: Tier1 native strict json_schema via LiteLLM
   `supports_response_schema()`; Tier2 grammar-constrained local fallback
   (llama.cpp Metal path; MLX not trusted until proven); Tier3 forced tool-call;
@@ -2176,6 +2178,49 @@ A corpus is strict-ready only when:
   and T3.4 work at Track A4; no acceptance claim is made for those boxes.
 - Checklist boxes closed: P0.8 typed-model acceptance and the P2.5b strict
   shared-envelope implementation item only.
+
+### 2026-07-14 - T4.1 SemanticDigestV1 portable contract
+
+- Commit: this commit on `claude-continuation-20260713`.
+- Owner: owner-delivered gateway contract; Claude ruled the internal
+  fully-required conflict in `COORDINATION.md` at 2026-07-14T13:31:30Z.
+- Corpus/data scope: none. This is a pure provider-neutral contract and schema
+  identity task; no corpus, provider, retrieval, vector, graph, or Mongo data
+  was read or written.
+- Code changes: added `models/semantic_digest.py` with the owner field sets,
+  literals, enums, and strict closed nested records. Per the senior's
+  design-of-record ruling, every list is required and callers must send `[]`
+  explicitly; the spec now carries a short §3 erratum. No entity, relation,
+  claim, evidence-offset, store-projection, or provider-specific field entered
+  the digest.
+- Durable migration/backfill: none.
+- Before metrics: no executable `SemanticDigestV1` or canonical gateway schema
+  hash existed. The literal §3 transcription would have exposed only 4 of 12
+  root properties as required, conflicting with §2 and Tier 1 strict modes.
+- After metrics: all 12 root properties and every nested property are in each
+  object schema's `required`; every object is closed with
+  `additionalProperties=false`. The Pydantic 2.5.0 schema golden is
+  `sha256:ce106660a46ff7799e79399816dd634645e1b906f80905db3460f70787f97c99`.
+- Tests by tier: focused digest + hash/envelope suite 44 passed (`EXIT=0`);
+  adjacent semantic contract suite 90 passed / 3 skipped (`EXIT=0`). Tests
+  freeze exact field sets, all required properties, closed schemas,
+  enum/literal failure, strict types, root/nested extra rejection, explicit
+  empty arrays, JSON round-trip, exact schema hash, and fresh-process replay.
+- Cross-corpus test: not applicable; the new module has no corpus or runtime
+  consumer in T4.1.
+- Failure/rollback test: missing root/nested arrays, provider/store fields,
+  unknown frames/roles/states/schema versions, and wrong scalar/container
+  shapes fail closed. One initial test incorrectly expected strict Pydantic to
+  reject Python tuple-to-list conversion; it was replaced with the actual JSON
+  contract failure (a non-array string), followed by a clean full retry.
+- Deployment image/health: no live deploy is warranted for an unreferenced
+  pure model. Tests ran under the canonical image's requirements-pinned Python
+  3.11 / Pydantic 2.5.0 environment; T4.3 will wire and deploy the gateway.
+- Remaining risks: T4.2 semantic validation and T4.3/T4.4 capability,
+  repair/dead-letter, provenance/cache, and UGO canary remain open. The owner
+  may veto the senior erratum through an `OWNER ::` coordination entry.
+- Checklist boxes closed: P2.5c `SemanticDigestV1` contract + schema-hash
+  golden only.
 
 ## Implementation Log Template
 

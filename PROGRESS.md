@@ -2,12 +2,12 @@
 
 - Mission: CODEX_MISSION.md (CP2 → CP12)
 - Track: A (core spine)
-- Current task: A2 = T4.1 SemanticDigestV1 contract + schema-hash golden
-- Next task: A2 = T4.2 semantic validator (all spec rules)
+- Current task: A2 = T4.2 semantic validator (all spec rules)
+- Next task: A2 = T4.3 structured gateway capability/repair/dead-letter
 - Parked: none
 - Owner decisions received: none yet (see mission §OWNER DECISIONS)
-- Last completed: A1/T3.2 envelope validators + typed summary writer boundary;
-  receipt in
+- Last completed: A2/T4.1 fully-required SemanticDigestV1 contract + schema
+  hash golden; receipt in
   `docs/RAPTOR_RAG_IMPLEMENTATION_CHECKLIST.md` Implementation Log and
-  `COORDINATION.md` at 2026-07-14T13:24:47Z
-- Last update: 2026-07-14T13:25:14Z (executor)
+  `COORDINATION.md` at 2026-07-14T13:34:18Z
+- Last update: 2026-07-14T13:35:23Z (executor)

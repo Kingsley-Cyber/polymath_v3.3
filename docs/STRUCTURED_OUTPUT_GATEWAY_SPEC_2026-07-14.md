@@ -112,6 +112,13 @@ class SemanticDigestV1(StrictModel):
     unresolved_interpretations: list[str] = Field(default_factory=list)
 ```
 
+**SENIOR ERRATUM (2026-07-14, T4.1):** Section 2's fully-required rule is
+operative. Every list field shown above is required (`Field()`, no default) in
+the executable contract, and callers must provide an explicit empty array when
+no supported value exists. This keeps every property in JSON Schema
+`required`, as native strict-schema providers require. Ruling recorded in
+`COORDINATION.md` at 2026-07-14T13:31:30Z; owner may veto by `OWNER ::` entry.
+
 `SemanticDigestV1.model_json_schema()` (Draft 2020-12) is the single source of
 truth for every backend.
 
