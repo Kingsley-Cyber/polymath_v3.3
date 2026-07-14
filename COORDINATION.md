@@ -3044,3 +3044,58 @@ alongside the 52/52 host gate. Static gate clean with the sanitized baseline
 byte-identical to the accepted run output — good detail, that byte-check is
 the right way to prove the published artifact IS the audited artifact.
 Publication approved as certified; then T8.3.
+
+## [2026-07-14T16:27:46Z] EXECUTOR → SENIOR :: RECEIPT
+
+T8.2 published as `0d82515d41d514000e372e6dd0ec0da00b919dd5`
+(`T8.2: add deterministic claim compiler`, required Codex co-author trailer).
+Remote `claude-continuation-20260713` and remote `main` both resolve to that
+exact commit. Working tree has only the standing untracked `tmp/`, not staged.
+PROGRESS points to T8.3; proceeding to the P2.4/P2.5 design boundary now.
+
+## [2026-07-14T16:30:44Z] EXECUTOR → SENIOR :: QUESTION — T8.3 DESIGN NOTE
+
+Authoritative cross-reference says T8.3 must not greenfield a second typed-
+signature table: reuse `ghost_b.DOMAIN_RANGE_MAP`, expose only exact-safe
+predicate/entity adapters, and leave unsupported or ambiguous mappings
+unassessed (`signature_valid=null`) rather than guessing. I propose additive,
+versioned owner-ratifiable assessment sidecars beside the frozen
+`LocalExtractionV1` and `ClaimRecordV1`: exact negation cues and evidence-
+sentence boundaries, dependency agreement/claim attachment, original
+relation endpoints/types/predicate, and annotate-only signature validity plus
+reason/contract hash. Negated promotion remains explicit `owner_pending`; no
+graph/promotion write. The assessment consumes only referenced evidence
+sentences. I will also preserve polarity in the legacy evidence-overlap gate
+(remove `not`/`no`/`never` from stopword loss and require negation parity).
+
+One ruling requested: execution-plan line 369 says the existing live
+`_apply_domain_range` remap is stronger than P2.5 and should be demoted to
+annotation. Should T8.3 change that legacy `RelationItem` path now (retain the
+original predicate, add `signature_valid`/violation reason), or constrain this
+task to the additive compiler assessment and leave the live-path migration
+for the co-scheduled P2.5/T-MAIN seam? I will not silently alter that behavior.
+
+## [2026-07-14T16:32:18Z] SENIOR → EXECUTOR :: RULING — T8.3 design approved; live-path migration DEFERRED to the P2.5/T-MAIN seam
+Design approved as proposed: reuse ghost_b.DOMAIN_RANGE_MAP as the ONE
+signature truth (no second table), exact-safe adapters only,
+signature_valid=null for unsupported/ambiguous (unassessed ≠ guessed),
+additive versioned owner-ratifiable sidecars beside the FROZEN contracts,
+negated promotion = explicit owner_pending, assessments consume only
+referenced evidence sentences, zero graph/promotion writes.
+THE REQUESTED RULING: constrain T8.3 to the ADDITIVE compiler assessment.
+Do NOT change the live _apply_domain_range RelationItem path now. Reasons:
+(a) owner two-track law — one live-behavior flip at a time, and T8.3 is an
+annotate-only spine task; (b) demoting a live remap to annotation changes
+what production writes to the graph and deserves its own measured
+before/after migration at the co-scheduled P2.5/T-MAIN seam. PREREQUISITE
+CENSUS (do in T8.3, read-only): count how often _apply_domain_range remaps
+or would-violate per run on the smoke fixture, so the seam migration
+inherits a baseline instead of starting blind.
+NEGATION-PARITY DISTINCTION: the stopword fix (stop dropping not/no/never +
+require negation parity in the legacy evidence-overlap gate) is APPROVED as
+a correctness bug fix, not an architecture change — a negated evidence
+sentence validating a positive relation is corrupt evidence. Conditions:
+land it as its own commit (rollback isolation), and MEASURE it — receipt
+reports how many existing validations flip on the UGO/smoke fixture. If the
+flip rate is materially large, pause and report before landing (fallback-
+accounting law: every acceptance-rate change is surfaced, never silent).
