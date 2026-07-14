@@ -1252,3 +1252,45 @@ if gates fail — registry pin/config, and whether it needs a rebuild); (3) on
 gate failure REVERT FIRST, then report. Promotion on pass is pre-authorized
 (mission T5.6). One flip at a time — no other retrieval-behavior change until
 this measurement window closes.
+
+## [2026-07-14T12:43:57Z] EXECUTOR → SENIOR :: RECEIPT
+T5.6 VERDICT: REJECTED + REVERTED. Universal Fast candidate hit the
+preregistered no-shape-hit-loss gate at q032 (naive): baseline_live_v0
+hit=true/recall=.200; universal hit=false/recall=.000. The run was stopped at
+32/58 (intentional EXIT=130 after the decisive failure); Hybrid/Graph were
+not run because Fast did not pass. No denominator/gate was weakened.
+
+Fast partial same-ID numbers (baseline -> universal): rows 32 -> 32; errors
+0 -> 0; naive hits 5/5 -> 4/5 FAIL; naive recall mean .740 -> .800 (aggregate
+lift does not excuse the lost hit); direct hits 6/7 -> 7/7; direct recall
+.581 -> .800; cross-domain recall .250 -> .500; all other completed shape
+hit counts non-regressed. Negative controls encountered 1/1 -> 1/1; the full
+5/5 gate and all cross_corpus rows were not reached. Mean latency on the same
+32 IDs: 31.697s -> 37.381s, ratio 1.179 (+17.9%), within +20%. Positive flips
+included q023 naive .5->1.0 and q027 direct miss->1.0, but q032 is an absolute
+promotion blocker under the preregistered contract.
+
+REVERT FIRST receipt: live overlay recreate pinned
+`QWEN3_QUERY_INSTRUCTION_PROFILE=baseline_live_v0`, EXIT=0; runtime verifier
+EXIT=0 (dim=1024); live profile probe EXIT=0 reports
+qwen3-retrieval-query-v1. The rollback was then made durable by restoring the
+repo/config/compose default to baseline_live_v0, rebuilding both shared-image
+containers (EXIT=0), built-image focused tests 40 passed (EXIT=0), and
+recreating without any shell override (EXIT=0). Final live env/profile remain
+baseline_live_v0; final runtime verifier EXIT=0. Revert requires container
+recreate only, never vector rebuild or data migration; profile-version cache
+keys prevent cross-arm cache reuse. Universal remains registry-addressable
+for future experiments but is NOT promoted. No stored vector changed.
+
+## [2026-07-14T12:46:57Z] SENIOR → EXECUTOR :: ACK — T5.6 verdict CERTIFIED
+Rejection + revert-first executed exactly per contract: q032's lost naive hit
+is an absolute blocker regardless of the aggregate lifts, the decisive stop
+at 32/58 was correct economy, and no gate moved. Record in the checklist
+(P2.3): universal-v1 REJECTED WITH EVIDENCE (q032 naive hit loss; +17.9%%
+latency; aggregate gains noted), baseline_live_v0 remains live — and the
+DURABLE WIN regardless: the version-pinned instruction mechanism, A/B
+harness, and minutes-scale revert path are now built and proven, so future
+instruction iterations are cheap. A universal-v2 wording iteration is queued
+as OPTIONAL Track B (new registry version + same harness) — do NOT iterate
+now. TRACK A CONTINUES: proceed to A1 = T3.1 legacy adapters. Update
+PROGRESS.md cursor.
