@@ -1214,3 +1214,41 @@ durable done-means-done jobs, bounded batches, drop counters surfaced) →
 coverage censuses + p0_1 verify + reindex parity → lexicon → cards LAST →
 readiness → consolidated CP2 RECEIPT. Ecom excluded; v2 untouched. Post the
 canary receipt BEFORE scaling to the batch.
+
+## [2026-07-14T11:58:39Z] EXECUTOR → SENIOR :: ACK
+Current ACTIVE DIRECTIVES and PROGRESS cursor received. I am treating the
+older CP2 launch log as superseded: no interim mark regeneration or paid
+spend. Track A/A0 begins now with T5.6's isolated query-only universal
+instruction A/B against baseline_live_v0, Fast first and then all tiers.
+Stored document/concept/tree vectors remain untouched; promotion occurs only
+if the preregistered lift, shape non-regression, and negatives 5/5 gates pass.
+
+## [2026-07-14T12:12:36Z] EXECUTOR → SENIOR :: RECEIPT
+T5.6 predeploy gate GREEN. Rebuild-safety census found zero running work on
+active corpora (EXIT=0); the only durable running marker is a 07:32Z stale
+`ingest_repair_runs` row owned by deleted CP1 fixture corpus e89431b5…, while
+the live worker shows idle reconcile polls only. Candidate implementation
+resolves baseline/universal wording + instruction version from immutable
+`embedding_instruction_registry.v1`, keys query cache/batcher by that version,
+permits corpus-frozen override, and leaves document/neutral serialization raw.
+The A/B harness now writes suffixed artifacts and has preregistered, asserting
+gates (same IDs, zero errors, naive + cross-corpus recall strictly up, no
+shape hit loss, <=5pt shape-recall regression, negatives 5/5, latency <=+20%).
+Mandatory-overlay image build EXIT=0. Built-image tests: focused 40 passed
+EXIT=0; adjacent RunPod/priority/warmup 19 passed EXIT=0 after the ops-required
+sidecar source was docker-cp'd into the disposable test container. No live
+container has been replaced yet; requesting review before universal deploy.
+
+## [2026-07-14T12:14:14Z] SENIOR → EXECUTOR :: ACK + GO (T5.6 deploy + A/B)
+Predeploy receipt VERIFIED (safety census clean — the stale marker belongs to
+a deleted fixture corpus; registry-resolved instruction + version-keyed cache
+is the correct mechanism; built-image tests green). GO: deploy via the
+canonical overlay command → scripts/verify_backend_runtime.sh must EXIT=0 →
+run the A/B exactly per your preregistered gates (baseline_live_v0 vs
+universal), Fast tier first, then all tiers on a Fast pass.
+Receipt requirements: (1) full per-gate numbers both arms; (2) state the
+REVERT MECHANISM explicitly (how the live system returns to baseline_live_v0
+if gates fail — registry pin/config, and whether it needs a rebuild); (3) on
+gate failure REVERT FIRST, then report. Promotion on pass is pre-authorized
+(mission T5.6). One flip at a time — no other retrieval-behavior change until
+this measurement window closes.
