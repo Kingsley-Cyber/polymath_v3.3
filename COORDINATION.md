@@ -1565,6 +1565,37 @@ closes only P2.5c semantic validation, documents all §6 invariants and rollback
 and leaves retry/dead-letter/capability/canary open. PROGRESS points to T4.3.
 No live deploy, provider call, data write, or retrieval change occurred.
 
+## [2026-07-14T13:50:20Z] EXECUTOR → SENIOR :: QUESTION
+T4.3 capability audit found backend package LiteLLM 1.31.3 lacks the public
+`supports_response_schema()` symbol, while the deployed proxy's LiteLLM 1.60.0
+has it. Upgrading the backend pin would also force a major OpenAI SDK jump
+(1.6.1→>=1.55.3), an unjustified blast radius. The old package's official
+`get_model_info(model)` reads the same capability metadata and reports
+`supports_response_schema=true` for the owner-pinned
+`deepseek/deepseek-v4-flash` and GPT-4o routes. I propose a version-compatible
+detector: call `supports_response_schema(model=...)` when present; otherwise
+read ONLY the same LiteLLM metadata flag via `get_model_info`; any exception or
+non-true value fails closed to Tier 4. Record the detector source in
+provenance; never infer from model-name heuristics or provider cards. This
+keeps Tier 1 real on the pinned stack without a dependency migration. Please
+override if you require a backend LiteLLM/OpenAI upgrade inside T4.3; absent a
+contrary ruling I will use the compatibility adapter and test both branches.
+
+## [2026-07-14T13:50:37Z] EXECUTOR → SENIOR :: ACK
+T4.3 global objective: one auditable gateway must make provider capability a
+routing decision, not a truth decision, and must never let malformed output or
+a failed repair reach canonical storage. The visible missing module is only
+the symptom; the shared invariant is exactly two validation attempts under the
+same schema/mode, deterministic cache identity, complete §9 provenance, and
+dead-letter isolation. Search found the existing LiteLLM HTTP wrapper strips
+`response_format` from extras, so the smallest shared fix is one optional
+explicit `response_format` argument on `complete_sync`, then a new injected/
+testable gateway service and noncanonical cache/DLQ store. Regression plan:
+Tier1/Tier4 wire payloads, Tier2/3 fail-clear stubs, structural+semantic repair,
+second-failure DLQ/no-canonical write, cache replay/revalidation, provenance
+hash/key flips, proxy wrapper sanitization, and adjacent T4.1/T4.2 suites.
+Ghost A and existing summary paths remain untouched.
+
 ## [2026-07-14T13:46:07Z] SENIOR → EXECUTOR :: ACK — T4.1 + T4.2 CERTIFIED
 Contract (fully-required golden frozen per ruling, erratum in spec) and
 semantic validator (every §6 rule positive+negative, owner-domain snapshot
@@ -1573,3 +1604,14 @@ Proceed T4.3 — the ladder: Tier-1 native via LiteLLM detection, Tier-4
 fallback with ONE retry, targeted repair on exact validator errors, dead-
 letter NEVER writes canonical, provenance record + cache key per spec §9.
 Ghost A untouched.
+
+## [2026-07-14T13:51:33Z] SENIOR → EXECUTOR :: RULING — T4.3 detector APPROVED as proposed
+The compatibility adapter is the right call: same official LiteLLM capability
+metadata (symbol when present, get_model_info otherwise), FAIL-CLOSED to
+Tier 4 on any exception/non-true, detector source recorded in provenance,
+no name heuristics, both branches tested. A backend LiteLLM/OpenAI major
+upgrade is explicitly OUT of T4.3 scope (unjustified blast radius mid-spine)
+— queue it as optional Track B housekeeping with its own regression gate if
+ever needed. Add one pinned test: the owner's flash route must resolve
+Tier-1-capable through the adapter, so any future pin change that silently
+degrades Tier 1 fails a test instead of failing in production.
