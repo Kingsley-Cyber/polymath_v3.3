@@ -4262,3 +4262,118 @@ nothing else), unbound_argument_count=0 is definitional and disclosed as
 such, and the HARD CONTRACT CHECK on the role vocabulary means any future
 owner-approved participant roles break loudly and force a FrameInstance v2
 retain/count — never a silent pre-invention. Confirmed; freeze all six.
+
+## [2026-07-14T18:36:20Z] EXECUTOR → SENIOR :: ACK
+
+Reconciliation received. I will hard-pin ClaimArgumentV1 roles to
+subject/object, bind every lawful argument, disclose unbound count zero as
+definitional, and require a versioned FrameInstance v2 if the owner later
+expands that vocabulary. Freezing the two T9.2 recipes now; all other confirmed
+sequence/threading/condition/coverage rules remain exactly as ruled.
+
+## [2026-07-14T18:45:39Z] EXECUTOR → SENIOR :: RECEIPT
+
+T9.2 focused gate attempt 1: true `EXIT=1` in `/tmp/t92_focused.log`, with
+`33 passed, 1 failed`. The failure is isolated to a test harness that performs
+two deliberate registry corruptions in one monkeypatch scope: its second
+`_mutated_registries()` call read back the first corruption, so the expected
+coverage error was preempted by the already-injected fused-score error.
+Production frame/motif assertions were green. Splitting the two corruptions
+into independent tests; no gate weakening or implementation change.
+
+## [2026-07-14T18:46:08Z] EXECUTOR → SENIOR :: RECEIPT
+
+T9.2 focused gate GREEN after isolating the mutation fixtures:
+`PYTHONPATH=/tmp/t91_repo pytest -q tests/test_registry_loader.py
+tests/test_frame_motif.py` produced `35 passed in 1.61s`, true `EXIT=0` in
+`/tmp/t92_focused_retry.log`. Proofs green: exact ClaimArgument/evidence
+round-trip; explicit thread-key closure/no coercion; subject/object hard vocab
+pin and definitional unbound=0; dominant/admissible tiers; strict missing/gap/
+reorder rejection; directional/shared/disconnected trichotomy; separate
+definitional alignment and role-continuity metrics; M12 own-claim condition;
+unknown-ID hard errors; replay; accepted/provider/write paths zero.
+
+## [2026-07-14T18:46:42Z] EXECUTOR → SENIOR :: RECEIPT
+
+T9.2 adjacent gate GREEN from the current-source snapshot: focused T9.2 plus
+T9.1 resolution, hash taxonomy, local extraction, claim compiler/assessment,
+semantic observations/digest/gateway, and semantic validator suites produced
+`194 passed, 10 skipped, 9 warnings in 3.67s`, true `EXIT=0` in
+`/tmp/t92_adjacent.log`. Skips/warnings are the same existing optional-runtime
+and Pydantic/read-only-cache notices. No provider, durable write, or service
+reload occurred. Proceeding to count-only census/replay.
+
+## [2026-07-14T18:49:38Z] EXECUTOR → SENIOR :: RECEIPT
+
+T9.2 count-only census GREEN: the current-source snapshot produced true
+`EXIT=0` in `/tmp/t92_census.log`. It counted 27 frame candidates, 54 exact
+role bindings (27 source + 27 target), zero unbound arguments, zero accepted
+writes, and 7 strict motif windows. Candidate-lane dispositions were
+confirmed_candidate=4, provisional=1, rejected=2; transition classes were
+directional=11, shared_participant=3, disconnected=5. M12 missing-own-condition
+was rejected once; all three strict missing/gap/reorder negatives produced
+zero M03 matches. Alignment values were `[1.0]` by definition, not a quality
+claim. Coverage is explicitly 8/16 MFs and 4/12 currently reachable motifs,
+while the generic matcher registry supports 12/12. Provider calls, durable
+writes, accepted states, and spend were all zero. Proceeding to frozen-report
+byte replay.
+
+## [2026-07-14T18:50:30Z] EXECUTOR → SENIOR :: RECEIPT
+
+T9.2 deterministic replay gate GREEN, true `EXIT=0` in
+`/tmp/t92_replay.log`. Two fresh isolated-process census outputs and the
+frozen report at `docs/baselines/T9_2_FRAME_MOTIF_2026-07-14.json` were all
+byte-identical (2,212 bytes each), each with SHA-256
+`0653d81af9650d53fab293939e33644a42fb802e9cf3b84d83a293b432ac46c3`.
+Proceeding to formatting/static review and final integrated verification.
+
+## [2026-07-14T18:51:55Z] EXECUTOR → SENIOR :: RECEIPT
+
+T9.2 static integrity gate GREEN, true `EXIT=0` in `/tmp/t92_static.log`:
+tracked diff and new-file whitespace checks passed; all 3 new JSON artifacts
+parsed; all 6 changed Python modules/tests compiled; targeted secret scan was
+clean; and the side-effect module contained no provider, Mongo, Qdrant, or
+Neo4j imports/calls. No runtime state was changed. Proceeding to final
+integrated test and replay after refreshing the container snapshot.
+
+## [2026-07-14T18:52:40Z] EXECUTOR → SENIOR :: RECEIPT
+
+T9.2 final integrated attempt 1 stopped at collection with true `EXIT=2` in
+`/tmp/t92_final_integrated.log`; no tests executed. The isolated `/tmp/t91_repo`
+snapshot omitted existing `scripts/benchmark_glirel_claim_compiler_c2.py`, so
+the adjacent C2 benchmark test could not import its helper. This is a test
+snapshot assembly defect, not a product assertion failure. Copying the
+unchanged helper and frozen gate JSON into the isolated snapshot, then
+rerunning the exact same test command without weakening the set.
+
+## [2026-07-14T18:53:34Z] EXECUTOR → SENIOR :: RECEIPT
+
+T9.2 final integrated attempt 2 again stopped at collection with true
+`EXIT=2` in `/tmp/t92_final_integrated_retry.log`; no tests executed. The
+helper existed at `/tmp/t91_repo/scripts`, but this historical isolated
+snapshot flattens `backend/tests` to `/tmp/t91_repo/tests`; consequently that
+test's unchanged `Path(...).parents[2]` resolves repository root as `/tmp`.
+Verified the computed path in-container. Placing the unchanged helper and
+frozen gate fixture under `/tmp/scripts` and `/tmp/backend/evals`, as computed,
+then rerunning the same full set.
+
+## [2026-07-14T18:53:59Z] EXECUTOR → SENIOR :: RECEIPT
+
+T9.2 final integrated attempt 3 reached the copied benchmark helper but again
+stopped during collection, true `EXIT=2` in
+`/tmp/t92_final_integrated_retry2.log`; zero tests executed. Its unchanged
+transitive import `local_ghost_b/glirel_infer.py` was also absent from the
+flattened fixture. I inspected the helper import graph before the next retry;
+copying its complete local import set (`glirel_infer.py`, `safety_rules.py`,
+and `semantic_extraction_scoring.py`) to the paths computed from `/tmp`, then
+running an import-only check before the unchanged suite.
+
+## [2026-07-14T18:54:51Z] SENIOR → EXECUTOR :: DIRECTIVE — snapshot geometry, once
+Three collection stops are all one failure class: a CURATED flattened
+snapshot keeps rediscovering the repo's real geometry (parents[2] roots,
+transitive local imports) one file at a time. Stop paying that tax: build the
+isolated snapshot as a WHOLE-TREE copy preserving relative layout (backend/
+with tests in place, scripts/, local_ghost_b/, docs/baselines fixtures) and
+run tests from the same relative root as production. Import-only preflight
+before the suite is a good addition — keep it. Your fail-closed handling was
+correct each time; this just removes the class.
