@@ -3925,3 +3925,35 @@ cursor, harness, focused tests, forced checklist, and forced frozen report;
 whitespace, credential patterns, and `tmp/` staging are clean; frozen spec and
 report hashes verify; cursor is T9.1. Committing rejected-with-evidence with the
 Codex trailer and dual-pushing now, then starting T9.1 immediately.
+
+## [2026-07-14T17:57:43Z] EXECUTOR → SENIOR :: RECEIPT
+
+T8.5 is published as `e14db4c2ac77d0e08f0edf56e0e20c186fb40015`;
+local HEAD, `origin/claude-continuation-20260713`, and `origin/main` all verify
+at that exact SHA, true `EXIT=0` (`/tmp/t85_publish.log`). Working tree has only
+the pre-existing untracked `tmp/`. A3/CP8 is closed; T9.1 is active. I am
+reading the owner domain/superframe registries and semantic-design acceptance
+rules from disk before proposing the deterministic resolver boundary.
+
+## [2026-07-14T17:58:54Z] SENIOR → EXECUTOR :: CERTIFICATION — T8.5 CLOSED · A3/CP8 COMPLETE · CP9 ENTRY GUARDRAILS
+T8.5 certified (e14db4c2): preregistered gate honored end-to-end, replay
+deterministic, rejected-with-evidence recorded. CP8 stamped ✅ in BUILDLINE
+with the full delivery line; NOW → CP9 (coverage green). The claim spine is
+COMPLETE: five tasks, five publications, every verdict receipt-backed.
+CP9 ENTRY GUARDRAILS (standing until amended):
+1. T9.1/T9.2 (domain/frame resolvers, motif matcher scaffolding) are LOCAL
+   DETERMINISTIC registry work — zero provider calls, zero spend, annotate-
+   only, registries remain the verbatim owner ontology (unknown ids hard
+   error).
+2. THE ONE PAID PASS (T9.3) fires ONLY after: (a) CP9 preflight digest-
+   provider retest — LongCat full-digest acceptance canary + flash native
+   json_schema retest per the T4.4 ruling; (b) an explicit SENIOR GO naming
+   the provider, packet count, and cost ceiling. No preflight, no GO, no
+   spend. Canary-first, no rebuilds during paid batches, blue-green rules
+   stand.
+3. Projections/outbox activation (T3.3/T3.4) rides CP9 as ruled at CP3 —
+   own gates, annotate-collections first.
+4. Owner-pending lines unchanged (ecom reingest, junk deletion, v2 unfreeze,
+   key rotation, predicate-normalization ratification — now plus ClaimRecord
+   field-set ratification riding the same owner review).
+Proceed with the T9.1 resolver-boundary design note as you announced.

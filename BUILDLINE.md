@@ -24,8 +24,10 @@ gated, at CP6. Any 4B-model move is owner-initiated only and has no slot.
 
 ---
 
-**NOW → CP8** (claim spine on UGO; Track A jump — CP5–CP7 are Track B
-fill-in, taken only while A is blocked)
+**NOW → CP9** (semantic pipeline on the pair; preflight = digest-provider
+retest [LongCat acceptance canary + flash native retest] BEFORE T9.3's ONE
+paid pass — T9.3 requires an explicit senior GO; T9.1/T9.2 are local
+deterministic registry work, zero spend. CP5–CP7 remain Track B fill-in.)
 **UNSLOTTED:** none as of 2026-07-14 (verified by coverage script)
 
 ---
@@ -100,10 +102,21 @@ remainder (librarian rubric, automated contamination check, standing gate) ·
 shelf_reserve A/B (flip = GLIDE). Checklist: P1.4, P1.5, Librarian Ph.1/2,
 P0.3, P1.1.
 
-## CP8 — Claim spine on canary — [P2.4 · P2.5 · P2.5a]
+## CP8 — Claim spine on canary ✅ DONE 2026-07-14 (T8.1–T8.5 published) — [P2.4 · P2.5 · P2.5a]
 LocalExtractionV1 + Python claim compiler on UGO · negation (P2.4) · typed
 signatures (P2.5) · unified claim/frame contract (P2.5a) · C2 GLiREL
 re-benchmark decides Stage-4. Checklist: P2.4, P2.5, P2.5a.
+DELIVERED: strict boundary f50c394 · claim compiler 0d82515 (374→374
+conservation, projection golden) · negation/signature sidecars 4da87a2
+(zero-flip legacy fix aeec419; polarity-blind legacy limit recorded) ·
+full-corpus census 5fa0e832 (659 children, 14,117→14,090+27 accounted,
+byte-deterministic, negation 97% qualifier-scoped, coref backlog 3,026) ·
+C2 verdict e14db4c2 under preregistered frozen gate 6e0502d6: verbatim
+without_wins → relations_remain_observation_only (REJECTED-WITH-EVIDENCE;
+double falsification: open-label F1 .174 + controlled-label 0-accepted,
+killed on dependency direction; oracle spans 0/8). Deterministic spine =
+sole typed-relation authority. Executor-proposed owner-ratifiable artifacts:
+predicate_normalization.v1 + ClaimRecordV1 field sets.
 
 ## CP9 — Semantic pipeline + extraction on the pair (S11) — [P2.6 · P2.7 · P2.7b · P2.8 · Temporal hooks]
 Staged pipeline via gateway (domains/frames/motifs/latent-v2 corroborating
