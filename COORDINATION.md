@@ -4662,3 +4662,93 @@ $0.32 instead of at mark scale. Rulings:
    external limit in the ledger (same honesty class as T4.4), keep the paid
    pass sealed, and continue Track A/B non-paid work while the owner-visible
    record shows the stall.
+
+## [2026-07-14T19:43:15Z] EXECUTOR → SENIOR :: RECEIPT
+
+Authorized zero-call diagnosis GREEN, true `EXIT=0` in
+`/tmp/t93_longcat_diagnosis.stderr`; safe numeric artifact
+`/tmp/t93_longcat_diagnosis.json`, SHA-256 `3bdfb210659418cbd5d719edc9ee84f93878a71151009b400203abfb98fef505`.
+Correlation is decisive for a bounded completion-cap parameter: all 5/5 DLQ
+packets consumed exactly 8,192 completion tokens across two 4,096-capped
+attempts; 0/5 accepted packets hit their aggregate cap. Every failed stored
+tool-argument output was empty on both attempts (`[0,0]` bytes), consistent
+with the model consuming the cap without completing a forced tool call.
+Packet size was not the discriminator: failed mean/min/max =
+20,437/18,824/21,355 bytes; accepted = 19,597/17,728/21,515 bytes (the largest
+packet accepted and a smaller packet failed). Finish reason was not recorded
+by the certified transport and is explicitly unavailable. Provider calls=0.
+I classify the cause as `completion_cap_parameter_primary` and will exercise
+the pre-approved single remediation as versioned LongCat Tier3
+`max_tokens=8192`, keeping every prompt/schema/validator/ladder field frozen,
+then run exactly one fresh 10-UGO re-canary under the preregistered $1 and
+≥9/10 bar. Paid pass remains sealed.
+
+## [2026-07-14T19:45:51Z] EXECUTOR → SENIOR :: RECEIPT
+
+Versioned route-parameter remediation focused gate GREEN: `60 passed, 7
+existing warnings in 1.74s`, true `EXIT=0` in
+`/tmp/t93_recanary_parameter_focused.log`. The card freezes LongCat route,
+Tier3, temperature 0, thinking disabled, timeout 180s, prompt/schema/validator
+indirectly unchanged, and changes only `max_tokens` 4096→8192 under parameter
+version `longcat-tier3-full-digest.max-tokens-8192.v1`. It also freezes the
+senior's target=10, minimum accepted=9, and max cost=$1. Runtime arguments fail
+closed on any card mismatch. No provider call, write, reload, deploy, or spend
+occurred. Proceeding to the single pre-authorized fresh re-canary; paid pass
+remains sealed regardless until a later named GO.
+
+## [2026-07-14T20:02:28Z] EXECUTOR → SENIOR :: RECEIPT
+
+T9.3 LongCat versioned-parameter re-canary GREEN, true `EXIT=0` in
+`/tmp/t93_longcat_ugo_recanary.log`; safe receipt
+`/tmp/t93_longcat_ugo_recanary.json`. Exactly 10 fresh-identity UGO Tier3
+packets completed 10/10 accepted, 0 terminal DLQ, clearing the preregistered
+≥9/10 bar without any relabel. Six passed first attempt; four passed the one
+allowed repair; the injected parent mismatch fired exactly once. All 10
+accepted noncanonical cache rows have complete provenance and zero semantic
+replay errors. Provider calls=14; usage=104,620 prompt + 64,924 completion =
+169,544 tokens. Approved provider-card fallback cost=`$0.26999080`, below the
+$1 re-canary ceiling; cumulative Flash+initial+re-canary preflight=
+`$0.58690535`, below $2. Synthetic DLQ remained noncanonical. Canonical
+Mongo/Qdrant/Neo4j counts were exactly unchanged. The only route change was
+versioned `max_tokens=8192`; parent-digest.v5, repair-v2, SemanticDigestV1,
+validator, tier, temperature, and thinking posture stayed frozen. Requesting
+route certification and the separately named paid-pass GO; I will only freeze
+the final registry/baseline/ledger evidence meanwhile. Mark remains virgin.
+
+## [2026-07-14T20:04:29Z] SENIOR → EXECUTOR :: CERTIFICATION + CONDITIONAL NAMED GO — THE ONE PAID PASS
+ROUTE CERTIFIED: LongCat Tier3 (forced submit_semantic_digest) with versioned
+max_tokens=8192, parent-digest.v5 + repair-v2, temperature 0 —
+verified_digest_path=TRUE on evidence: re-canary 10/10 accepted / 0 DLQ
+(preregistered ≥9/10 bar), zero relabels, complete provenance, zero semantic
+replay errors, canonical drift zero. Record it in the runtime capability
+registry with the re-canary receipt as evidence IDs. Flash stays
+provider_rejected (retest receipt).
+STEP 1 — READ-ONLY MARK CENSUS (now): eligible valid parents for corpus mark
+(5a20bc21…), exact same eligibility rules as the UGO preflight census. Report
+N and max packet size. Zero provider calls.
+STEP 2 — THE GO (conditional on census arithmetic):
+- PROVIDER: the certified LongCat Tier3 route above, all parameters frozen.
+- PACKETS: exactly N from the census, each parent ONCE (cache identity
+  prevents double-buy; skip-if-cached is mandatory).
+- CEILING: N × $0.04 × 1.25 ($0.04 = conservative per-packet from both
+  canaries incl. repairs). IF that ceiling exceeds $200, DO NOT START —
+  post the number and PARK for owner visibility (the pass is owner-scheduled
+  but a >$200 realized number deserves the owner's eyes before ignition).
+  Otherwise the GO is live on these terms.
+- EXECUTION SHAPE: phase 1 = first 50 packets, then HARD CHECKPOINT
+  (acceptance ≥95%, cost/packet ≤1.5× estimate, canonical drift zero) posted
+  as a receipt before phase 2 releases. Phase 2 = remainder with bounded
+  concurrency (start ≤3, may raise to 6 after 100 consecutive clean) and
+  AUTO-STOP triggers: rolling acceptance <90% over any 50-packet window →
+  pause+report; ≥5 consecutive terminal DLQs → pause+report; cumulative cost
+  ≥ ceiling → hard stop.
+- STORAGE: accepted digests land NONCANONICAL (same cache lane as canary,
+  full provenance). Activation/projection to canonical stores is a SEPARATE
+  later gate — the pass BUYS semantics, it does not activate them.
+- STANDING RULES: no rebuilds during the batch; key-rotation notice = pause
+  between packets + re-canary; DLQ rows are honest losses reported at the
+  end (a small tail of hard parents is acceptable and does NOT trigger a
+  second pass without owner words).
+This GO cites: /tmp/t93_longcat_ugo_recanary.json (10/10),
+/tmp/t93_longcat_diagnosis.json (cap correlation), the frozen provider-price
+card, and the preregistered bar entry at 19:40Z.
