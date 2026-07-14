@@ -220,3 +220,75 @@ CP6, none blocking CP1/CP2):
 Spend-stop from 08:25Z stands satisfied (corpus purged; confirm no extraction
 jobs still queued for 0d296882 in your next receipt). Official g1–g10 run
 proceeds.
+
+## [2026-07-14T07:55:10Z] EXECUTOR → SENIOR :: RECEIPT
+Official `rebatch_smoke_v2` ingest is terminal green. API-discovered corpus
+`62193743-4175-40da-b861-ba1e1e567b9a`, batch
+`fb9271d9-ec89-4614-bd81-991cb07562e0`: done=5, failed=0, queued=0,
+running=0; poll wrapper EXIT=0. Worker assertion: exactly 5
+`phase=ghosts ... failed_chunks=0`, exactly 5 `phase=verify ok=true`,
+EXIT=0. Production config has Docling sidecar policy off; both PDFs therefore
+used the approved surfaced `pypdf_font_layout` fallback: garden count=1,
+headings=4, tier_a; lighthouse count=1, headings=3, tier_a. The refined
+spend-stop check for old corpus `0d296882…` finds extraction queued/running=0.
+One stale summary job remains `queued` (plus one blocked and four succeeded);
+I am not mutating this evidence because the newer 08:40 ruling explicitly
+requires the extraction check and says spend-stop is satisfied. Official g1
+now proceeds; please rule separately if that stale summary row should be
+operator-superseded before CP6.
+
+## [2026-07-14T07:55:41Z] EXECUTOR → SENIOR :: RECEIPT
+Official g1 PASS. Command: `docker exec -e PYTHONPATH=/app -w /app
+polymath_v33-backend-1 python /tmp/rebatch_phase_a_gate.py g1 --corpus-id
+62193743-4175-40da-b861-ba1e1e567b9a`; true wrapper EXIT=0. Key output:
+documents=5, parents=87, children=106, fixture_pdf_parents=7,
+fixture_pdf_empty_heading_parents=0, missing_fixture_headings=[]; all five
+owner-required Chapter/Part headings appear in heading_path. Two empty
+Markdown root/body paths are diagnostic only under the senior-approved g1
+contract. BUILDLINE CP1-D1 validation: g1 green; proceeding to g2 only.
+
+## [2026-07-14T07:56:50Z] EXECUTOR → SENIOR :: BLOCKER
+Official g2 FAILED; Phase A is stopped and g3–g10 were not run. Command:
+`docker exec -e PYTHONPATH=/app -w /app polymath_v33-backend-1 python
+/tmp/rebatch_phase_a_gate.py g2 --corpus-id
+62193743-4175-40da-b861-ba1e1e567b9a`; true wrapper EXIT=1. Gate output:
+summary_required=80, summarized=61, missing=19; substantive=36,
+substantive_with_latent=14 (38.89%, threshold passes); temporal-class
+missing=0; latent rows missing aliases=3. Read-only diagnosis: 16 missing
+summaries belong to `12-flutter-local-llms-privacy.md` (13 body, 3 table)
+and all 3 lighthouse PDF body parents are missing. No durable summary_jobs
+exist for this official corpus. Worker evidence shows preflight Hy3 EMPTY,
+batch marked done at 07:48:23Z, then its deferred summary backfill continued
+after terminal state; it is still emitting Hy3/Ghost-A structured-output
+rejections as of 07:56:49Z. Thus the official gate observed incomplete
+background enrichment despite terminal batch status; no gate was weakened or
+rerun and no retrieval/summary logic was changed. BUILDLINE CP1-D1
+validation is halted at g2 pending senior ruling.
+
+## [2026-07-14T09:00Z] SENIOR → EXECUTOR :: RULING + DIRECTIVE (g2 blocker)
+Your g2 stop is CORRECT and the gate stands as written. Diagnosis accepted.
+This is TWO real defects, both in-plan, neither a gate problem:
+
+D-A **Batch completeness lie**: batch reached `done` at 07:48Z while summary
+enrichment continued as a deferred background backfill with NO durable
+summary_jobs. Same honesty class as the delete endpoint ("no empty
+successes"). FIX (CP1-D2a): a batch with chunk_summarization=true may only
+reach `done` when its summary pass is complete — or, if architecture demands
+early terminal status, it must expose per-pass status
+(e.g. passes: {queryable: done, summaries: running}) and A2/g2 wait on ALL
+passes. Prefer the first (done means done). Durable jobs, not fire-and-forget
+backfill. Add an asserting test.
+
+D-B **Provider lane failing silently**: Hy3 preflight EMPTY + ongoing
+Ghost-A structured-output rejections stalled 19 parents. The runbook's Phase-B
+guard becomes a POOL-LEVEL feature now (CP1-D2b): per-provider
+consecutive-empty/reject counter, drop-from-pool after threshold with a
+SURFACED count (never silent), and pin deepseek-v4-flash as primary per the
+owner's standing "use flash" directive. Hy3 is DEMOTED from the summary pool
+until it passes its own 3-row canary. Add a pool-drop test.
+
+THEN: complete the 19 missing summaries for the official corpus through the
+fixed pool (durable jobs), and resume g2→g10. No gate re-runs before the
+fixes land. The 3 latent-rows-missing-aliases = record as observation (the
+latent contract permits 0–3 aliases), not a gate criterion.
+Receipts + both tests committed with your next entry.
