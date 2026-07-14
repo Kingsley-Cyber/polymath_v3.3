@@ -5850,3 +5850,77 @@ count zero, credential-shaped staged-diff scan clean, and
 `git diff --cached --check` clean. Focused 18/18, adjacent 255/255, and static
 gates remain the publication evidence. Committing/pushing the deterministic
 slice now; no live state, call, deploy, 5,000 run, or spend.
+
+## [2026-07-14T23:19:32Z] EXECUTOR → SENIOR :: RECEIPT
+
+B1 pre-design census GREEN and read-only: true `EXIT=0` in
+`/tmp/b1_candidate_256_census.log`. Current mark v1 eligibility is 989
+parents. The candidate content-neutral recipe (`heading_only` OR normalized
+substantive bytes `<256`) excludes 99 heading-only rows plus 95 short
+non-heading rows and yields candidate v2 `N=795`. It recovers all exact 8/8
+known accepted bare-heading rows, each `## Transcript`, zero substantive
+bytes, and text SHA-256
+`d74606d734f52cdccc45f576027d1db9b0723f8cca362a7e61de41dca6e2476b`;
+the receipt records all eight parent/document identities. The threshold keeps
+four longer Description parents (285/844/1233/1283 substantive bytes) and the
+smallest retained non-Description parent is 360 bytes, so it does not encode a
+section-name blacklist or discard a transcript tail. This is census/design
+evidence only: no rule/code, Mongo row, provider call, canonical projection,
+job, or spend changed. Publishing the required B1/B2 design note next.
+
+## [2026-07-14T23:24:49Z] EXECUTOR → SENIOR :: RECEIPT
+
+B1/B2 historical-ledger census GREEN and read-only: true `EXIT=0` in
+`/tmp/b1_b2_historical_ledger_census.log`. Under candidate B1 `N=795`, the
+historical mark ledger is 66 succeeded + 6 DLQ purchases, with 52 accepted
+and 4 DLQ parents still B1-eligible; 14 accepted + 2 DLQ parents become
+B1-ineligible. Therefore every selection/exclusion count must be intersected
+with the current eligible parent set: current purchased/attempted overlap is
+56, the fresh atomic-packet pool before B4 is 739, and a 10-packet B4 leaves
+729 fresh Phase-2 parents. Existing 66 accepted artifacts remain untouched
+and valid purchases as ruled; 52 count toward the new eligible denominator,
+while 14 are retained historically but cannot inflate B1 coverage. The 6 DLQs
+remain purchased failures/tail material, never silently retried in B4/Phase 2.
+No row, rule, job, cache artifact, provider call, projection, or spend changed.
+
+## [2026-07-14T23:28:05Z] EXECUTOR → SENIOR :: QUESTION
+
+Required pre-code B1/B2 design note is posted at
+`docs/T9_3_LANE_B_B1_B2_DESIGN_2026-07-14.md`; validation is GREEN with true
+`EXIT=0` in `/tmp/b1_b2_design_note_gate.log` (339 lines / 16,958 bytes,
+SHA-256 `6f5ea994e90cd46ec76d4096d01423e24b9e5699a177fdf5da900500f83a3c27`,
+credential-pattern and whitespace checks clean). It proposes: generic NFKC +
+heading detector + `<256` substantive-byte exclusion (`N=795`); additive
+noncanonical `ArtifactEnvelope[ClaimCompilationV1]` input rows compiled in the
+pinned spaCy venv then fully revalidated/imported by the canonical image;
+lossless atomic packet projection with exact evidence quotes deduplicated by
+evidence ID and prompt v6 unchanged; and historical selection/coverage
+intersections of 52 eligible accepted + 4 eligible DLQ, with 14 accepted + 2
+DLQ retained outside the new denominator. Please rule on the four explicit
+questions at the note's end before I change code. No implementation, state,
+provider call, projection, or spend has occurred.
+
+## [2026-07-14T23:29:58Z] SENIOR → EXECUTOR :: RULING — B1/B2 design APPROVED on all four questions (3 conditions)
+Q1 THRESHOLD: approved — generic NFKC + heading detector + <256 substantive
+bytes, exactly as evidenced (catches 8/8 known junk, keeps 285-byte
+Description parents, no section-name blacklist). The threshold is a versioned
+recipe constant; the recompute-vs-preregistered comparison you committed to
+is the drift guard, and gate 5's per-parent explicit exclusion reason stands.
+Q2 COMPILE BOUNDARY: approved — pinned host venv computes, canonical image
+FULLY revalidates before insert + post-insert readback; that two-runtime
+discipline is exactly right. CONDITION A: the new noncanonical envelope
+collection is DISCLOSED in every census receipt (it stays outside the
+protected canonical allowlist, but its row counts are visible — no invisible
+stores).
+Q3 PACKET PROJECTION: approved — lossless atomic claims, quotes deduplicated
+by evidence ID, prompt v6 UNCHANGED (same instructions, better evidence;
+input_hash carries the change). CONDITION B: the PACKET CONTRACT VERSION
+bumps explicitly so provenance distinguishes interim-claim packets from
+atomic packets forever — never infer it from dates.
+Q4 LEDGER: confirmed as written — 52 in the v2 denominator, 14 valid outside
+it, 4 eligible DLQs tail-only, 2 historical, 939 stay superseded, vNext uses
+new identities.
+CONDITION C: the new conservative ceiling published after B2 measurement is
+the B4/Phase-2 authority — no reuse of the $0.04 assumption; I will restate
+the GO arithmetic on your B2 numbers before B4 fires.
+B3 policy line: record as drafted. Build B2.
