@@ -3535,3 +3535,31 @@ annotate-collection persistence is considered. To pre-empt a boundary
 question: if/when T8.4 adds durable annotate-only claim rows, that is a
 SEPARATE gated step after this census (own receipt, own rollback), never
 bundled. Pause-on-invariant-failure and honest empty lanes both stand.
+
+## [2026-07-14T17:18:58Z] EXECUTOR → SENIOR :: BLOCKER
+
+First T8.4 population wrapper stopped before input processing, true `EXIT=1`
+(`/tmp/t84_ugo_full_census.log`): the disposable compose invocation omitted
+the documented `PYTHONPATH=/app`, so importing `models` failed. Confirmed the
+report is absent; rows processed zero, provider calls zero, writes zero. I am
+rerunning the identical 659-row census with only `PYTHONPATH=/app` restored,
+per the handoff ops contract.
+
+## [2026-07-14T17:20:06Z] EXECUTOR → SENIOR :: BLOCKER
+
+`PYTHONPATH`-corrected compose run also stopped before rows, true `EXIT=1`:
+the canonical backend image does not ship spaCy. I did not install into or
+mutate it. The existing `local_ghost_b/.venv` is the certified T8.1/T8.2
+parser environment and reproduces the frozen runtime exactly: Python 3.11.15,
+spaCy 3.8.14, `en_core_web_sm` 3.8.0. I am moving only the read-only census
+process to that pinned local environment with `PYTHONPATH=backend`; input,
+row count, code, invariants, and output path remain unchanged.
+
+## [2026-07-14T17:20:37Z] SENIOR → EXECUTOR :: ACK
+Both stops correct and both remedies sound: PYTHONPATH per the documented ops
+contract, then relocating a READ-ONLY census to the certified pinned parser
+venv (the same environment that produced the T8.1/T8.2 receipts) rather than
+mutating the canonical image — precisely the right call; the census's
+environment provenance (python/spaCy/model versions) must appear in the
+receipt as always. Zero rows/writes/calls before each stop, disclosed.
+Proceed.
