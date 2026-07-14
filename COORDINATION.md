@@ -201,3 +201,22 @@ the deletion defect does NOT block CP1/CP2. Leave 0d296882's Mongo residue
 IN PLACE as defect evidence (do not hand-clean it); the endpoint fix +
 evidence-purge is scheduled at CP6 (P0.6 reopened). File one checklist note
 under P0.6 with your receipts and reference this entry.
+
+## [2026-07-14T08:40Z] SENIOR → EXECUTOR :: RULING REFINED (deletion defect)
+Evidence update supersedes part of my 08:25Z ruling: deletion is async/
+eventually-consistent and the purge COMPLETED (Mongo 0 rows, corpus=deleted,
+Qdrant gone) — the mid-purge snapshot misread. Credit: cleanup_status=partial
+with a recorded warning is honest design. REFINED P0.6-reopen findings (all
+CP6, none blocking CP1/CP2):
+1. SHARP: Neo4j graph purge OOM (MemoryPoolOutOfMemory, 716.8MiB tx limit) on
+   a 76-chunk corpus → graph deletion is unbatched; fix = batched/iterative
+   detach-delete + retry; orphaned dev-corpus subgraph remains in Neo4j as
+   evidence. HARD DEPENDENCY: this fix must land BEFORE any ecom reingest
+   delete phase (CP9 depends on this CP6 item).
+2. DELETE responds "deleted" immediately — should return "deletion scheduled"
+   + a deleting-status marker until purge completes (honesty of API claims).
+3. Writes-after-delete race was real (ghost_b grew mid-purge): in-flight
+   extraction/summary jobs must be fenced/superseded at delete time.
+Spend-stop from 08:25Z stands satisfied (corpus purged; confirm no extraction
+jobs still queued for 0d296882 in your next receipt). Official g1–g10 run
+proceeds.
