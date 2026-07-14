@@ -1,0 +1,184 @@
+{
+  "family": "latent/underlying concepts",
+  "repo": "/Users/king/polymath_v3.3",
+  "generated": "2026-07-13",
+  "rows": [
+    {
+      "plan_term": "latent_concepts",
+      "code_symbols": [
+        {"symbol": "SUMMARY prompt contract 'latent_concepts' clause", "file_line": "backend/services/ingestion/summary_semantics.py:72-80", "role": "generation contract (Ghost A microbatch prompt; max 12, {concept, evidence_basis: direct|inferred, aliases<=3})"},
+        {"symbol": "parse_latent_concepts()", "file_line": "backend/services/ingestion/summary_semantics.py:82-116", "role": "deterministic clamp/normalizer (snake_case, whitelist basis, MAX_LATENT_CONCEPTS/MAX_LATENT_ALIASES)"},
+        {"symbol": "SummaryResult.latent_concepts", "file_line": "backend/services/ghost_a.py:260 (populated :649)", "role": "typed carrier from Ghost A to worker"},
+        {"symbol": "_build_parent_dicts row['latent_concepts']", "file_line": "backend/services/ingestion/worker.py:2288 (repair path :1152)", "role": "Mongo parent_chunks persistence"},
+        {"symbol": "summary_backfill result mapping", "file_line": "backend/services/ingestion/summary_backfill.py:195", "role": "backfill persistence"},
+        {"symbol": "PARENT_CHUNKS_SCHEMA.latent_concepts", "file_line": "backend/services/storage/schema_validators.py:41", "role": "Mongo schema validator"},
+        {"symbol": "card_builder latent seed (method='parent_latent_concept_direct')", "file_line": "backend/services/librarian/card_builder.py:450-459", "role": "SOLE consumer -> librarian_cards.candidate_latent_subjects (direct-basis only)"},
+        {"symbol": "_write_qdrant_summaries_for_doc summary_payloads['latent_concepts']", "file_line": "backend/services/ingestion/worker.py:2955", "role": "passed toward Qdrant but DROPPED: upsert_summaries payload projection (backend/services/storage/qdrant_writer.py:877-928) whitelists concept_tags and never latent_concepts"}
+      ],
+      "store_fields": [
+        "Mongo parent_chunks.latent_concepts[] = {concept, evidence_basis, aliases[]}",
+        "Mongo librarian_cards.candidate_latent_subjects[] (derived card projection)",
+        "Qdrant: NONE — summary point payload drops the field (qdrant_writer.py:877-928)"
+      ],
+      "verdict": "SAME",
+      "canonical": "latent_concepts (parent_chunks.latent_concepts)",
+      "aliases": ["latent concept", "hidden concept", "underlying concept", "latent-concept contract (capture side)", "candidate_latent_subjects (card projection)"],
+      "collision_note": "(a) word-collision: 'latent' also names an UNRELATED graph-discovery family — DiscoverResponse.latent_topics (backend/models/schemas.py:997, graph/orchestrator.py:5368 'signals') and trace latent_terms (schemas.py:878, polymath_mcp/tools.py:813). Never reconcile these with latent_concepts. (b) dark data: latent_concepts[].aliases are parsed+clamped but read by NOTHING (PLAN_CRITIQUE_2026-07-13.md:68,106) — S5 alias-registry must consume, not re-capture.",
+      "evidence": "Capture is implemented end-to-end into Mongo; consumption exists only via card_builder into candidate_latent_subjects, which shelf_engine treats as corroborate-only (shelf_engine.py:15-17). Coverage is the real gap: only 639 v2 parents carry it, PoC pair has zero (PLAN_CRITIQUE_2026-07-13.md:60,100)."
+    },
+    {
+      "plan_term": "latent concept",
+      "code_symbols": [
+        {"symbol": "same as latent_concepts", "file_line": "backend/services/ingestion/summary_semantics.py:82", "role": "prose form of the field name"},
+        {"symbol": "owner prompt asset", "file_line": "docs/LATENT_CONCEPT_PROMPT.md:15,46,58", "role": "P2.2 generation asset (gated behind P1.1+P1.7 per checklist:175-179)"}
+      ],
+      "store_fields": ["Mongo parent_chunks.latent_concepts[]"],
+      "verdict": "SAME",
+      "canonical": "latent_concepts (parent_chunks.latent_concepts)",
+      "aliases": ["latent_concepts", "hidden concept", "underlying concept"],
+      "collision_note": "None beyond the latent_topics/latent_terms word-collision noted on the latent_concepts row.",
+      "evidence": "docs/LATENT_CONCEPT_PROMPT.md and tests/test_summary_semantics_latent.py both use the prose and snake_case forms interchangeably for the same artifact."
+    },
+    {
+      "plan_term": "hidden concept",
+      "code_symbols": [],
+      "store_fields": [],
+      "verdict": "SAME",
+      "canonical": "latent_concepts (parent_chunks.latent_concepts)",
+      "aliases": ["latent concept", "latent_concepts", "underlying concept"],
+      "collision_note": "No code symbol named 'hidden*' exists anywhere in backend. Do not create one.",
+      "evidence": "Only textual occurrence: docs/LATENT_CONCEPT_PROMPT.md:15 'identify latent concepts, hidden mechanisms, aliases' — 'hidden' is rhetorical flavor for the same latent_concepts output, not a second artifact."
+    },
+    {
+      "plan_term": "underlying concept",
+      "code_symbols": [],
+      "store_fields": [],
+      "verdict": "SAME",
+      "canonical": "latent_concepts (parent_chunks.latent_concepts)",
+      "aliases": ["latent concept", "latent_concepts", "hidden concept"],
+      "collision_note": "Zero grep hits for 'underlying concept' in backend or the two plan docs — plan-conversation synonym only.",
+      "evidence": "grep -rn 'underlying' over docs/RAPTOR_RAG_IMPLEMENTATION_CHECKLIST.md, docs/PLAN_CRITIQUE_2026-07-13.md, backend/: no concept-family hits."
+    },
+    {
+      "plan_term": "parent-level keywords",
+      "code_symbols": [
+        {"symbol": "SummaryResult.key_terms", "file_line": "backend/services/ghost_a.py:249 (populated :638)", "role": "Ghost A per-parent '<=8 proper nouns or defined terms' (summary_semantics.py:60)"},
+        {"symbol": "worker parent dict 'key_terms'", "file_line": "backend/services/ingestion/worker.py:2314 (and :1141)", "role": "Mongo parent_chunks persistence"},
+        {"symbol": "CONCEPT_SOURCE_FIELDS = ('key_terms','mechanisms','concept_tags')", "file_line": "backend/services/ingestion/summary_tree.py:36", "role": "the exact 'parent-level keywords' set the plan means when it says backfill tree concepts from parent mechanisms/key_terms (checklist:159-160)"}
+      ],
+      "store_fields": [
+        "Mongo parent_chunks.key_terms[], parent_chunks.mechanisms[], parent_chunks.concept_tags[]",
+        "Qdrant summary point payload concept_tags[] only (qdrant_writer.py:897); key_terms are NOT projected to Qdrant"
+      ],
+      "verdict": "OVERLAPPING",
+      "canonical": "CONCEPT_SOURCE_FIELDS (parent_chunks.key_terms + mechanisms + concept_tags)",
+      "aliases": ["parent-level keywords", "parent mechanisms/key_terms (checklist phrasing)"],
+      "collision_note": "(a) the plan's singular 'keywords' hides that it is THREE distinct Ghost A fields with different semantics (proper nouns vs transferable mechanisms vs normalized concepts); (b) keep distinct from latent_concepts — key_terms must appear verbatim in the passage, latent_concepts may be inferred.",
+      "evidence": "checklist:157-163 Audit Delta 'backfill from parent mechanisms/key_terms' maps 1:1 onto summary_tree.py CONCEPT_SOURCE_FIELDS, which derive_node_concepts unions (summary_tree.py:39-68)."
+    },
+    {
+      "plan_term": "tree concepts",
+      "code_symbols": [
+        {"symbol": "derive_node_concepts()", "file_line": "backend/services/ingestion/summary_tree.py:39-68", "role": "deterministic, zero-LLM node concept derivation (cap NODE_CONCEPTS_CAP=16, union of CONCEPT_SOURCE_FIELDS, children roll up)"},
+        {"symbol": "TreeNode.concepts / construction sites", "file_line": "backend/services/ingestion/summary_tree.py:98,459,477,524,841", "role": "concepts computed at rollup/section/document construction"},
+        {"symbol": "backfill script", "file_line": "backend/scripts/backfill_tree_concepts.py:1-35", "role": "P0.2/P2.1 backfill of empty summary_tree.concepts, reuses derive_node_concepts so backfill can never drift from construction"}
+      ],
+      "store_fields": [
+        "Mongo summary_tree.concepts[] (per node: rollup/section/document)",
+        "Qdrant summary_tree point payload: NO concepts field, deliberately (_summary_tree_payload, qdrant_writer.py:1188-1218; documented in backfill_tree_concepts.py:22-27)"
+      ],
+      "verdict": "SAME",
+      "canonical": "summary_tree.concepts (derive_node_concepts)",
+      "aliases": ["tree concepts", "tree_concepts", "node concepts"],
+      "collision_note": "(a) bare field name 'concepts' means different scopes in three stores (summary_tree.concepts per node, doc_profile.concepts per doc, Qdrant doc_summary payload 'concepts') — always qualify with the collection; (b) duplicate-implementation guard: any new backfill/derivation MUST import derive_node_concepts, exactly as backfill_tree_concepts.py does.",
+      "evidence": "checklist:159-163 ('populate summary_tree.concepts at construction — the field exists but is never passed', merged 2026-07-13, 28,402 nodes filled) matches the shipped code."
+    },
+    {
+      "plan_term": "tree_concepts",
+      "code_symbols": [
+        {"symbol": "backfill_tree_concepts.py (script name only)", "file_line": "backend/scripts/backfill_tree_concepts.py:275 (backup file prefix 'tree_concepts_')", "role": "the ONLY place the compound token 'tree_concepts' exists; the real field is summary_tree.concepts"}
+      ],
+      "store_fields": ["Mongo summary_tree.concepts[] — there is NO field literally named tree_concepts anywhere"],
+      "verdict": "SAME",
+      "canonical": "summary_tree.concepts (derive_node_concepts)",
+      "aliases": ["tree concepts"],
+      "collision_note": "Naming trap: a reader grepping for a 'tree_concepts' field finds only the script; do not add a field with this name — the Mongo field is 'concepts' on the summary_tree collection.",
+      "evidence": "grep -rn tree_concepts backend/ hits only the script filename/backup prefix (backfill_tree_concepts.py:31,275)."
+    },
+    {
+      "plan_term": "doc profile concepts",
+      "code_symbols": [
+        {"symbol": "doc_profile assembly", "file_line": "backend/services/ingestion/summary_tree.py:883-891", "role": "documents.doc_profile = {summary_id, summary, concepts: profile.concepts, domains, section_ids,...} where profile = the L4 document TreeNode (concepts from derive_node_concepts at :524)"},
+        {"symbol": "embed_doc_profiles payload 'concepts'", "file_line": "backend/services/ingestion/tier0.py:117 (also scripts_migrate_multitenant.py:112)", "role": "Qdrant Tier-0 shared doc_summaries point payload carries concepts+section_ids (summary is the embedded text)"},
+        {"symbol": "card_builder doc_profile_concept seed", "file_line": "backend/services/librarian/card_builder.py:383-388 (profile read :267-271)", "role": "doc_profile.concepts -> librarian_cards.central_subjects entries with method='doc_profile_concept'"}
+      ],
+      "store_fields": [
+        "Mongo documents.doc_profile.concepts[]",
+        "Qdrant shared doc_summaries collection payload field 'concepts' (tier0.py:117)",
+        "librarian_cards.central_subjects (as one of three seed methods)"
+      ],
+      "verdict": "OVERLAPPING",
+      "canonical": "documents.doc_profile.concepts",
+      "aliases": ["doc profile concepts", "profile concepts (checklist:855)", "Tier-0 routing-card concepts"],
+      "collision_note": "(b) duplicate-implementation risk vs tree concepts: doc_profile.concepts IS the L4 document node's derive_node_concepts output stored a second time on documents — same lineage, one implementation, two stores. S5's rollup step 'parent latent_concepts -> doc profile concepts' (PLAN_CRITIQUE:84) must extend THIS projection, not derive a parallel doc-level concept list.",
+      "evidence": "summary_tree.py:887 'concepts': profile.concepts with profile = nodes[-1] (document node built at :524 from section concepts); consumed by tier0 embed and card_builder — three names, one derivation."
+    },
+    {
+      "plan_term": "concept contract",
+      "code_symbols": [
+        {"symbol": "(referent 1) LEXICON_SCHEMA_VERSION='corpus_lexicon.v3'", "file_line": "backend/services/ingestion/corpus_lexicon.py:37-41", "role": "the existing corpus vocabulary the P2.1 'universal concept contract' versions and extends (salience counters, associated_concepts, usage_frames, semantic_profile, DF/specificity are checklist items at docs/RAPTOR_RAG_IMPLEMENTATION_CHECKLIST.md:815-846, NOT yet in code)"},
+        {"symbol": "(referent 2) Ghost A summary capture contract", "file_line": "backend/services/ingestion/summary_semantics.py:44-80 + backend/tests/test_summary_semantics_latent.py:1 ('latent-concept contract clamps')", "role": "the per-parent summary JSON contract that carries latent_concepts; T-HOOK-2 (checklist:196-200) extends THIS seam with temporal_class/time_expressions"}
+      ],
+      "store_fields": [
+        "referent 1: Mongo corpus_lexicon + corpus_lexicon_sources (+ Qdrant 'schemas' mirror)",
+        "referent 2: Mongo parent_chunks summary-semantics fields"
+      ],
+      "verdict": "OVERLAPPING",
+      "canonical": "SPLIT REQUIRED: 'universal concept contract' = corpus_lexicon entry schema (corpus_lexicon.v3); 'summary capture contract' = Ghost A summary JSON contract",
+      "aliases": ["universal concept contract (P2.1)", "latent-concept contract (P2.2 capture)", "Ghost A summary contract (T-HOOK-2)"],
+      "collision_note": "(a) CONFIRMED one-word-two-meanings: 'concept contract' names the corpus_lexicon card contract in P2.1 (checklist:813+, PLAN_CRITIQUE:36) and the Ghost A summary capture contract in P2.2/T-HOOK-2 (checklist:196-200, test_summary_semantics_latent.py:1). They live at different pipeline stages (per-parent capture vs corpus-level materialization). Any task saying just 'the concept contract' is ambiguous and must be disambiguated before implementation.",
+      "evidence": "PLAN_CRITIQUE:36 groups 18 open P2.1 items under 'concept contract' (all lexicon-side); checklist:198 uses 'the Ghost A summary contract — the same seam that carries latent_concepts' for the other referent."
+    },
+    {
+      "plan_term": "semantic_profile",
+      "code_symbols": [],
+      "store_fields": [],
+      "verdict": "PLAN-ONLY",
+      "canonical": "semantic_profile (to-be-built P2.1 lexicon/card field)",
+      "aliases": [],
+      "collision_note": "(a) name-adjacency hazard with THREE existing symbols: parent_chunks.semantic_chunk_type (its own aggregation source, summary_semantics.py:26 SEMANTIC_CHUNK_TYPES; card_builder.py:356,463), metadata.semantic_facets (worker.py:2916 _metadata_with_facets), and semantic_split chunking. Grep confirms zero 'semantic_profile' occurrences in backend code — it exists only at checklist:836-840.",
+      "evidence": "Nearest existing seams to build on: (1) source = parent_chunks.semantic_chunk_type distribution over a concept's supporting parents (already read by card_builder for risks_or_likely_misuse); (2) home = corpus_lexicon entry materialization in backend/services/ingestion/corpus_lexicon.py (the P2.1 contract file); (3) validated mechanism IDs already flow via card_builder mechanisms_taught (card_builder.py:427-447)."
+    },
+    {
+      "plan_term": "central_subjects",
+      "code_symbols": [
+        {"symbol": "card_builder central_subjects assembly", "file_line": "backend/services/librarian/card_builder.py:365-421 (field written :574)", "role": "three deterministic seed methods: lexicon_canonical_term, doc_profile_concept, ghost_b_entity — exactly the checklist:855 seed contract"},
+        {"symbol": "_CARD_FIELD_SUBJECTS", "file_line": "backend/services/librarian/shelf_engine.py:88 (semantics :13-35,72-75)", "role": "query-time consumer: direct-role overlap, adjacent/bridge different-subject bound, counterbalance trigger"},
+        {"symbol": "_SHELF_RESERVE_CARD_PROJECTION", "file_line": "backend/services/chat_orchestrator.py:3544-3556", "role": "P1.5 shelf_reserve Mongo projection feeding shelf_engine"},
+        {"symbol": "slim_card_payload 'subjects'", "file_line": "backend/services/librarian/card_builder.py:598-615", "role": "slim Tier-0 routing projection RENAMES central_subjects -> subjects (returned only; no Qdrant write in this module)"}
+      ],
+      "store_fields": [
+        "Mongo librarian_cards.central_subjects[] (entry contract: value/value_key/method/source_ids/confidence/support)",
+        "slim routing payload field 'subjects' (flat value list, cap _SLIM_SUBJECTS)"
+      ],
+      "verdict": "SAME",
+      "canonical": "librarian_cards.central_subjects",
+      "aliases": ["subjects (slim routing payload)", "central subjects"],
+      "collision_note": "(b) duplicate-implementation guard: central_subjects deliberately EXCLUDES latent_concepts — those go to the separate candidate_latent_subjects field because they are LLM-generated at ingest (card_builder.py:57-63) and can corroborate but never solely qualify a direct shelf (shelf_engine.py:15-17). S5/S8 rebuild work that 'rolls latent into the card' must preserve this two-field separation, not merge latent into central_subjects. Also note the cross-store rename central_subjects->subjects in slim payloads.",
+      "evidence": "Implementation matches checklist:855 verbatim ('central_subjects: lexicon/Ghost B entities and profile concepts'); 673 cards built 2026-07-13 but pair cards miss the latent family entirely (PLAN_CRITIQUE:103) — an input-coverage gap, not a schema gap."
+    }
+  ],
+  "failure_mode_summary": {
+    "one_word_two_meanings": [
+      "'latent' — parent_chunks.latent_concepts (retrieval capture) vs DiscoverResponse.latent_topics + trace latent_terms (graph-discovery emerging signals; models/schemas.py:997,878) — unrelated, never merge",
+      "'concept contract' — P2.1 universal/lexicon contract (corpus_lexicon.py) vs P2.2/T-HOOK-2 Ghost A summary capture contract (summary_semantics.py)",
+      "'concepts' bare — summary_tree.concepts (node) vs documents.doc_profile.concepts (doc) vs Qdrant doc_summaries payload 'concepts' vs parent concept_tags; and central_subjects renamed to 'subjects' in slim payloads"
+    ],
+    "duplicate_implementation_risk": [
+      "doc-level concept derivation: doc_profile.concepts already IS the L4 tree node's derive_node_concepts output — S5 must extend, not re-derive",
+      "latent-into-cards: candidate_latent_subjects already implements the latent->card path; merging into central_subjects or adding a second latent seed would duplicate and break the corroborate-only rule",
+      "alias registries: corpus_lexicon aliases (identity evidence) + latent_concepts[].aliases (user phrasings, currently read by nothing) — S5's versioned alias registry must fold BOTH, not become a third store",
+      "semantic_profile: planned as an aggregation over existing parent_chunks.semantic_chunk_type — build as projection in corpus_lexicon, not a new extraction lane"
+    ]
+  }
+}

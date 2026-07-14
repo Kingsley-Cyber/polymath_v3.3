@@ -1,0 +1,229 @@
+{
+  "family": "retrieval mechanics",
+  "repo": "/Users/king/polymath_v3.3",
+  "generated": "2026-07-13",
+  "sources_consulted": [
+    "docs/PLAN_CRITIQUE_2026-07-13.md",
+    "docs/RAPTOR_RAG_IMPLEMENTATION_CHECKLIST.md",
+    "backend/services (grep -rn)",
+    "backend/models (grep -rn)",
+    "backend/scripts (grep -rn)"
+  ],
+  "rows": [
+    {
+      "plan_term": "tier",
+      "code_symbols": [
+        {"symbol": "class RetrievalTier(str, Enum)", "file_line": "backend/models/_schemas_legacy.py:1068", "role": "the request-level store-strategy enum: qdrant_only | qdrant_mongo | qdrant_mongo_graph"},
+        {"symbol": "ChatRequest.retrieval_tier", "file_line": "backend/models/_schemas_legacy.py:214", "role": "per-chat requested tier (default qdrant_mongo per settings.py:159)"},
+        {"symbol": "SourceChunk.source_tier", "file_line": "backend/models/_schemas_legacy.py:1086", "role": "DIFFERENT concept despite the word: per-chunk retriever-provenance string, e.g. 'document_anchor+lexical' (document_anchor.py:359)"},
+        {"symbol": "three_tier_eval ROUTES", "file_line": "backend/services/retriever/three_tier_eval.py:25-35", "role": "eval harness enumerating the three RetrievalTier values"},
+        {"symbol": "tier_chunker Tier A/B/B+/C", "file_line": "backend/services/ingestion/tier_chunker.py:1-17", "role": "UNRELATED concept: ingestion document-format tiers for parent/child splitting"}
+      ],
+      "store_fields": ["Mongo conversations/chat request field retrieval_tier", "diagnostics requested_tier/effective_tier (backend/models/_schemas_legacy.py:1204-1205)"],
+      "verdict": "OVERLAPPING",
+      "canonical": "retrieval_tier (RetrievalTier)",
+      "aliases": ["tier", "route", "fast/hybrid/graph (eval_metrics.py:214-245 normalization)", "3-tier"],
+      "collision_note": "FAILURE MODE (a): 'tier' names four unrelated things — RetrievalTier store strategy; SourceChunk.source_tier retriever-provenance label; Tier-0 document-routing layer (not a RetrievalTier value); tier_chunker's ingestion format Tiers A/B/C. Any plan sentence saying just 'tier' must disambiguate.",
+      "evidence": "RetrievalTier defined models/_schemas_legacy.py:1068-1073; source_tier holds strings like 'document_anchor+lexical' (retriever/document_anchor.py:359), i.e. lane provenance not store strategy; tier_chunker.py header defines Tier A/B/C as docling section formats; retriever/eval_metrics.py:214-245 maps route aliases onto the enum."
+    },
+    {
+      "plan_term": "qdrant_only",
+      "code_symbols": [
+        {"symbol": "RetrievalTier.qdrant_only", "file_line": "backend/models/_schemas_legacy.py:1071", "role": "enum value: vector-store-only retrieval, no Mongo hydration"},
+        {"symbol": "ranking_policy tier branches", "file_line": "backend/services/retriever/ranking_policy.py:146,497,937", "role": "tier-conditional ranking behavior"},
+        {"symbol": "route_metric_profile 'fast' family", "file_line": "backend/services/retriever/eval_metrics.py:214", "role": "normalizes aliases fast/fast_search/vector/vector_retrieval → qdrant_only"}
+      ],
+      "store_fields": ["ChatRequest.retrieval_tier value 'qdrant_only'"],
+      "verdict": "SAME",
+      "canonical": "RetrievalTier.qdrant_only",
+      "aliases": ["fast", "fast_search", "vector", "vector_retrieval", "Fast (checklist line 208 'Tier-0/Fast/Hybrid/Graph')"],
+      "collision_note": "None beyond the checklist sometimes writing 'Fast' — eval_metrics.py:214 is the authoritative alias map.",
+      "evidence": "three_tier_eval.py:25 pins {'tier': 'qdrant_only'} as the fast route; eval_metrics.py:214 lists the alias set explicitly."
+    },
+    {
+      "plan_term": "qdrant_mongo",
+      "code_symbols": [
+        {"symbol": "RetrievalTier.qdrant_mongo", "file_line": "backend/models/_schemas_legacy.py:1072", "role": "enum value: vector recall + Mongo parent-text hydration (the 'hydrated tier'); default tier (settings.py:159)"},
+        {"symbol": "RetrievalTier.qdrant_mongo_graph", "file_line": "backend/models/_schemas_legacy.py:1073", "role": "sibling value adding Neo4j graph augmentation; orchestrator downgrades to qdrant_mongo when Neo4j disabled (graph/orchestrator.py:8633-8637)"},
+        {"symbol": "route_metric_profile 'hybrid' family", "file_line": "backend/services/retriever/eval_metrics.py:223", "role": "normalizes hybrid/hybrid_search/mongo_hybrid → qdrant_mongo"}
+      ],
+      "store_fields": ["ChatRequest.retrieval_tier value 'qdrant_mongo'", "settings default_tier='qdrant_mongo' (services/settings.py:159)"],
+      "verdict": "SAME",
+      "canonical": "RetrievalTier.qdrant_mongo",
+      "aliases": ["hybrid", "hybrid_search", "mongo_hybrid", "Hybrid (checklist line 208)", "hydrated tier (document_anchor.py:1 'hydrated retrieval tiers')"],
+      "collision_note": "Watch qdrant_mongo vs qdrant_mongo_graph: several call sites collapse graph→qdrant_mongo silently on Neo4j-disabled (chat_orchestrator.py:3952-3953, graph/orchestrator.py:8633-8637); diagnostics carry requested_tier vs effective_tier (models/_schemas_legacy.py:1204-1205) to keep this honest.",
+      "evidence": "eval_metrics.py:223 alias set; graph/orchestrator.py:8633 downgrade comment; chat_orchestrator.py:730-734 tier value dispatch."
+    },
+    {
+      "plan_term": "grounded planner",
+      "code_symbols": [
+        {"symbol": "run_grounded_planner()", "file_line": "backend/services/retriever/grounded_planner.py:291", "role": "the constrained LLM planner call with durable Mongo cache + call-budget lease"},
+        {"symbol": "should_run_grounded_planner()", "file_line": "backend/services/retriever/grounded_planner.py:120", "role": "selective trigger logic (P1.2 '[x] Selective trigger logic exists')"},
+        {"symbol": "grounded_planner_lanes()", "file_line": "backend/services/retriever/grounded_planner.py:489", "role": "converts validated plan into extra recall lanes; stamps original_lane_protected=True (line 646)"},
+        {"symbol": "retriever wiring", "file_line": "backend/services/retriever/__init__.py:1601-1674", "role": "invocation + vocabulary_diagnostics['grounded_planner'] surface"}
+      ],
+      "store_fields": ["Mongo collection grounded_query_plans (grounded_planner.py:27, durable plan cache)", "Mongo collection grounded_query_planner_usage (grounded_planner.py:28, call-budget lease)", "diagnostics vocabulary.grounded_planner{status,provider_calls,cache_hit} (chat_orchestrator.py:6260-6328)"],
+      "verdict": "SAME",
+      "canonical": "grounded_planner",
+      "aliases": ["planner (in P1.2 context)", "constrained grounded planner", "LLM planner"],
+      "collision_note": "FAILURE MODE (a): bare 'planner' is ambiguous — the deterministic query planner (retriever/query_plan.py, QueryPlanV2) is a different component from the LLM grounded_planner; query_plan.py:838 itself notes reference resolution 'belongs to the grounded planner, not topic rules'. The critique's 'positional 6-match planner cap' (S5) is in the deterministic/vocabulary path, not grounded_planner.py. Always qualify: query planner (deterministic) vs grounded planner (LLM).",
+      "evidence": "grounded_planner.py exists and is wired dark (P1.2 boxes '[x] exist' but '[ ] block production activation' — checklist:594-604); model unset per critique header line 89."
+    },
+    {
+      "plan_term": "anchoring",
+      "code_symbols": [
+        {"symbol": "class DocumentAnchorRetriever", "file_line": "backend/services/retriever/document_anchor.py:300", "role": "EXISTS: document-title anchored recall lane; emits source_tier='document_anchor+lexical' (line 359), provenance retriever='document_anchor' (line 366)"},
+        {"symbol": "_is_confident_document_anchor / _is_query_grounded_document_anchor", "file_line": "backend/services/retriever/ranking_policy.py:91,95", "role": "anchor-confidence gates used as ranking priors and special-lane grounding (lines 1207, 1326-1327)"},
+        {"symbol": "graph anchors", "file_line": "backend/services/graph/agentic_retriever.py:178,380", "role": "UNRELATED sense: Neo4j anchor entities per query packet; also Mongo graph_anchor_cache (services/portability.py:44)"},
+        {"symbol": "summary child anchors", "file_line": "backend/services/ingestion/summary_semantics.py:9,514", "role": "UNRELATED sense: key_points' child-chunk evidence anchors in summary contract"}
+      ],
+      "store_fields": ["Mongo graph_anchor_cache (graph sense only)", "SourceChunk.provenance[].retriever='document_anchor'"],
+      "verdict": "PLAN-ONLY",
+      "canonical": "conversation_anchoring (P1.3, to-be-built); keep document_anchor for the existing title-recall lane",
+      "aliases": ["open-book anchoring", "conversation and open-book anchoring", "anchors as ranking priors", "accepted document/source anchors"],
+      "collision_note": "FAILURE MODE (a), severe: 'anchor' means four things — (1) P1.3 conversation/open-book anchors (NO code: zero hits for session/conversation/accepted anchors; all 8 P1.3 boxes open, checklist:615-627); (2) DocumentAnchorRetriever title-recall lane (exists, live); (3) graph anchor entities; (4) summary key_point child anchors. P2.8's 'document-anchor protection' (checklist:1110) refers to sense (2) + lane protection, not P1.3. Nearest existing seam for P1.3: DocumentAnchorRetriever + ranking_policy anchor-confidence priors (76-96) + conversation service (services/conversation.py) — anchors-as-priors machinery already exists per-query and needs a session-carryover feed, not a new ranker.",
+      "evidence": "grep for conversation/session/open_book/accepted anchor symbols returns nothing in backend/services|models; document_anchor.py:300+ is the only retrieval 'anchor' implementation; checklist P1.3 has 0 checked boxes."
+    },
+    {
+      "plan_term": "answer shape",
+      "code_symbols": [
+        {"symbol": "AnswerShape (Literal)", "file_line": "backend/services/retriever/query_plan.py:40", "role": "the shape vocabulary (single_fact, enumeration, comparison, relationship, synthesis, ...)"},
+        {"symbol": "QueryPlanV2.answer_shape", "file_line": "backend/services/retriever/query_plan.py:313", "role": "plan-level classified shape; classifier _answer_shape() at query_plan.py:650"},
+        {"symbol": "RetrievalProbe.answer_type", "file_line": "backend/services/retriever/query_plan.py:283", "role": "SAME type under a second field name at probe granularity (filled from answer_shape at query_plan.py:1051)"},
+        {"symbol": "coverage_threshold(answer_shape)", "file_line": "backend/services/answerability_tuning.py:85", "role": "P0.4 shipped consumer: sufficiency thresholds calibrated by shape (broad -0.20 etc., checklist:1363)"},
+        {"symbol": "broad_document_routing by answer_shape", "file_line": "backend/services/retriever/__init__.py:1452", "role": "existing breadth heuristic (comparison/enumeration/relationship/synthesis widen document routing)"},
+        {"symbol": "prioritize_enumeration_candidates", "file_line": "backend/services/retriever/planned_fusion.py:1187", "role": "existing enumeration-shape special-casing (also retriever/__init__.py:3094)"}
+      ],
+      "store_fields": ["diagnostics answerability.answer_shape (chat_orchestrator.py:1164)", "query_plan diagnostics answer_shape (query_plan.py:1448)", "heldout eval rows answer_shape (backend/scripts/run_heldout_eval.py:167)"],
+      "verdict": "OVERLAPPING",
+      "canonical": "answer_shape",
+      "aliases": ["answer_type (RetrievalProbe field)", "query/answer shape (P0.4 wording)", "shape"],
+      "collision_note": "FAILURE MODE (b), mild: the same value is stored under answer_shape (plan) and answer_type (probe) — unify on answer_shape when touching the probe contract. P1.6 'Route By Answer Shape' is only partially built: classifier + threshold calibration + breadth/enumeration heuristics exist; formal shape policies, summary scaffolds, hydrate-before-cite, sibling expansion, dynamic-K-by-score-cliff are all open (checklist:688-699, 0/5 checked). New P1.6 work must extend answer_shape consumers, not add a second shape classifier.",
+      "evidence": "query_plan.py:650 _answer_shape is the only classifier; answerability_tuning.py:85-102 is the shipped P0.4 consumer; checklist P1.6 all boxes open."
+    },
+    {
+      "plan_term": "answerability",
+      "code_symbols": [
+        {"symbol": "_build_retrieval_answerability_gate()", "file_line": "backend/services/chat_orchestrator.py:950", "role": "the REFUSAL ARBITER: converts retriever sufficiency diagnostics into the chat-time answerable/refusal contract (RELATIONSHIP_GATE loosening lives here)"},
+        {"symbol": "_evaluate_sufficiency()", "file_line": "backend/services/retriever/ranking_policy.py:1074", "role": "the REPAIR DRIVER: strict evidence-atom sufficiency ('answerable': coverage>=0.80 and no missing critical atoms, line 1115); NOTE at 1080-1087 documents the deliberate two-gate split"},
+        {"symbol": "selection_diagnostics['sufficiency'] producers", "file_line": "backend/services/retriever/__init__.py:3159,3172,3191", "role": "three sufficiency payload producers with 'source': query_plan_required_lanes | evidence_atom_sufficiency | evidence_presence"},
+        {"symbol": "answerability_tuning module", "file_line": "backend/services/answerability_tuning.py:48-121", "role": "shared knobs: relationship_gate, lane_strong_score, coverage_threshold, partial_floor, inject_cross_doc_atom"}
+      ],
+      "store_fields": ["diagnostics answerability{answerable, required_atoms, covered_required_atoms, missing_atoms, missing_critical_atoms, required_coverage, answer_shape, lane_coverage-as-telemetry} (chat_orchestrator.py:1102-1164)", "sufficiency.answerable bool in retriever selection diagnostics"],
+      "verdict": "SAME",
+      "canonical": "answerability (chat gate = decision; retriever 'sufficiency' = its upstream repair signal)",
+      "aliases": ["sufficiency (retriever-side)", "evidence sufficiency", "answerable (the bool field)", "honest answerability (P0.4)"],
+      "collision_note": "One concept, two INTENTIONAL mirror implementations — chat refusal gate vs retriever repair sufficiency (documented at ranking_policy.py:1080-1087: 'Do not loosen criticality here'). Not a duplicate to merge; it IS a duplicate-implementation risk if someone tunes one side only — all shared knobs must go through answerability_tuning.py. Secondary risk (b): three sufficiency-producer branches in retriever/__init__.py:3159-3200 each rebuild the same payload shape by hand; the 'source' field is the only discriminator.",
+      "evidence": "P0.4 checklist:439-462 explicitly renamed/split lane coverage from answerability; memory + code NOTE confirm the two-gate architecture is deliberate."
+    },
+    {
+      "plan_term": "lane coverage",
+      "code_symbols": [
+        {"symbol": "selection_diagnostics['lane_coverage']", "file_line": "backend/services/retriever/__init__.py:3135", "role": "SENSE 1 — recall-lane coverage TELEMETRY over QueryPlan lanes (required_lane_ids vs grounded supported_lane_ids incl. synthetic fallback probe); explicitly NOT the refusal signal (comment 3123-3130)"},
+        {"symbol": "_evidence_lane_coverage()", "file_line": "backend/services/chat_orchestrator.py:4240", "role": "SENSE 2 — evidence-plan SIDE coverage in chat: per EvidenceLane, strong-score (>= lane_strong_score) hits in >= min_sources DISTINCT documents"},
+        {"symbol": "evidence_allocation.lane_coverage()", "file_line": "backend/services/retriever/evidence_allocation.py:166", "role": "pure, unit-tested implementation of SENSE 2 — ZERO production callers (tests only: backend/tests/test_evidence_allocation.py:141-293); chat re-implements it inline"},
+        {"symbol": "required_lane_coverage in eval", "file_line": "backend/services/retriever/three_tier_eval.py:404,628-636", "role": "eval consumer of SENSE 1"}
+      ],
+      "store_fields": ["diagnostics selection.lane_coverage{required_lane_ids, supported_lane_ids, coverage, synthetic_lane_ids}", "answerability payload lane_coverage telemetry (chat_orchestrator.py:1156-1159)", "evidence-plan coverage {covered_lanes, missing_lanes, lane_doc_ids} (chat_orchestrator.py ~4290, evidence_allocation.py:207-213)"],
+      "verdict": "OVERLAPPING",
+      "canonical": "recall_lane_coverage (SENSE 1, selection.lane_coverage) and evidence_lane_coverage (SENSE 2) — two real concepts, keep both names distinct",
+      "aliases": ["lane coverage (ambiguous plan usage)", "required_lane_coverage", "covered/missing lanes", "side coverage"],
+      "collision_note": "BOTH failure modes. (a) One word, two meanings: retriever 'lane' = QueryPlan recall lane (lane_id, role core/original); chat 'lane' = EvidencePlan side (a comparison side needing min_sources distinct docs). The plan says 'lane coverage' for both. (b) Duplicate implementation: evidence_allocation.lane_coverage (unit-tested) vs chat_orchestrator._evidence_lane_coverage (production) compute the same strong-score/distinct-doc coverage; production never calls the tested one, so tests certify dead code while the live copy drifts (chat's adds doc_names/chunk_ids/best_score). Chat DOES delegate select_lane_support/cap_chunks_per_doc to evidence_allocation (chat_orchestrator.py:64-68, 4422) — coverage should be delegated the same way.",
+      "evidence": "grep 'lane_coverage(' shows only tests call the pure fn; chat_orchestrator.py:4621,4889 call the inline copy; retriever/__init__.py:3123 comment separates coverage-telemetry from answerability."
+    },
+    {
+      "plan_term": "reranker",
+      "code_symbols": [
+        {"symbol": "class RerankerService", "file_line": "backend/services/reranker.py:172", "role": "the sole cross-encoder scoring client (HTTP sidecar :8081, torch fp16 CE); .rerank() at 202"},
+        {"symbol": "class RerankPassAborted", "file_line": "backend/services/reranker.py:167", "role": "timeout/circuit-breaker signal → caller falls back to rank-fusion ordering (no split-retry, reranker.py:584-587)"},
+        {"symbol": "rank-fusion fallback ordering", "file_line": "backend/services/retriever/__init__.py:4598-4630", "role": "no-rerank/degraded path orders by RRF ('ordering': 'rrf_rank_fusion')"},
+        {"symbol": "hydrate_rerank_texts / hydrate_summary_rerank_texts", "file_line": "backend/services/retriever/hydrate.py:569,725", "role": "text hydration specifically for CE input"}
+      ],
+      "store_fields": ["diagnostics rerank status/timings (three_tier_eval.py; checklist:1249 'rerank' timing row)", "no Mongo/Qdrant fields — reranker is stateless"],
+      "verdict": "SAME",
+      "canonical": "reranker (RerankerService)",
+      "aliases": ["cross-encoder", "CE", "rerank sidecar (:8081)", "adaptive rerank (P1.9-dup)", "reranker serving (P3.5)"],
+      "collision_note": "No name collision. Plan splits its future into two checklist ids that share a number (both 'P1.9' — critique C4 flags the duplicate section id): Qdrant hot-path audit vs adaptive rerank. Production redesign makes CE the SOLE scoring authority (checklist:129 context) — any new 'scorer' term should resolve to this component.",
+      "evidence": "reranker.py:172-666 is the only rerank client; retriever/__init__.py:4583-4630 shows cap + fallback seam."
+    },
+    {
+      "plan_term": "evidence atom",
+      "code_symbols": [
+        {"symbol": "required_atoms_for_query()", "file_line": "backend/services/retriever/query_semantics.py:886", "role": "generates the atom set for a query: concept:{group.key} atoms + operator atoms"},
+        {"symbol": "required_operator_atoms()", "file_line": "backend/services/retriever/query_semantics.py:834", "role": "operator atoms: definition | relationship | methods_tasks | procedure (marker-driven)"},
+        {"symbol": "fingerprint atoms", "file_line": "backend/services/retriever/ranking_policy.py:996", "role": "per-chunk coverage: metadata['evidence_atoms'] = sorted(fp['atoms'])"},
+        {"symbol": "_evaluate_sufficiency atom accounting", "file_line": "backend/services/retriever/ranking_policy.py:1074-1117", "role": "required/covered/missing/missing_critical atoms + cross-doc relationship atom injection"},
+        {"symbol": "lane-derived atoms", "file_line": "backend/services/retriever/__init__.py:3144-3162", "role": "SECOND generator: synthesizes 'concept:{lane_id}' atoms from query-plan lane ids for the refusal sufficiency payload"}
+      ],
+      "store_fields": ["chunk.metadata.evidence_atoms (in-process diagnostic, not persisted to Qdrant payload)", "diagnostics sufficiency.required_atoms/covered_required_atoms/missing_atoms/missing_critical_atoms"],
+      "verdict": "SAME",
+      "canonical": "evidence_atom",
+      "aliases": ["atom", "required atoms", "coverage atoms (query_plan.py:871 _clause_concepts docstring)", "operator atoms", "concept atoms"],
+      "collision_note": "FAILURE MODE (b), mild: 'concept:*' atoms are minted by two independent generators — query_semantics.concept_groups (concept:{group.key}) and retriever lane-id synthesis (concept:{lane_id}, retriever/__init__.py:3144). The strings look identical downstream but the namespaces differ (curated concept keys vs lane slugs); a lane id that happens to equal a concept key would silently alias. Chat gate consumes both without distinguishing (chat_orchestrator.py:962-990).",
+      "evidence": "P0.4 partial box (checklist:442-449) names 'the strict evidence-atom gate' = ranking_policy._evaluate_sufficiency; contradiction checks confirmed absent from the atom path."
+    },
+    {
+      "plan_term": "protected lane",
+      "code_symbols": [
+        {"symbol": "protected_lane_ids = lanes with role=='original'", "file_line": "backend/services/retriever/__init__.py:1445-1447", "role": "the definition: the original-query lane(s) are the protected lanes"},
+        {"symbol": "fuse_planned_pools(protected_lane_ids=...)", "file_line": "backend/services/retriever/planned_fusion.py:304-321,378-389", "role": "fusion preserves >=1 candidate per protected lane through filtering"},
+        {"symbol": "reserve_planned_finalists protected-lane reservations", "file_line": "backend/services/retriever/planned_fusion.py:761,800-903", "role": "post-rerank finalist seat per protected lane; stamps metadata planned_protected_lane_reservations"},
+        {"symbol": "original_lane_protected", "file_line": "backend/services/retriever/grounded_planner.py:646", "role": "grounded planner asserts it never displaces the original lane (P1.2 'Preserve original-query... lanes' — original half EXISTS)"},
+        {"symbol": "exact-query candidate protection", "file_line": "backend/services/retriever/__init__.py:2522-2528", "role": "nearest seam for the P1.2 'exact-string lane': fusion protects one exact-query candidate via required=(role=='original' or core+required)"}
+      ],
+      "store_fields": ["chunk.metadata.planned_protected_lane_reservations (planned_fusion.py:901-903)", "diagnostics protected_lane_ids (planned_fusion.py:1171) and protected_recall_lanes (retriever/__init__.py:3366)"],
+      "verdict": "OVERLAPPING",
+      "canonical": "protected_recall_lane (role=='original' lane protection in planned fusion)",
+      "aliases": ["original-query lane", "original lane", "protected_lane_ids", "protected_recall_lanes", "lane preservation (P1.2 wording)"],
+      "collision_note": "FAILURE MODE (a): three distinct 'protection' mechanisms share the verb — (1) protected recall lanes (this row); (2) corpus reservation seats (reservation_policy.py:1-27: 'protection is what shields a candidate from the overflow trim', calibrated bound, P0.3); (3) per-doc-cap protect_fn shielding per-side support chunks (evidence_allocation.py:225). P2.8's 'document-anchor protection' (checklist:1110-1111) would be a FOURTH protect mechanism — wire it through reservation_policy's single-discipline contract, not a new ad-hoc shield. P1.2's 'exact-string lane' has no dedicated symbol (PLAN-ONLY half); nearest seam is the exact-query candidate protection at retriever/__init__.py:2522.",
+      "evidence": "reservation_policy.py header documents the two-decider ordering contract precisely because protection paths already collided once (P0.3 consolidation, checklist:408-414)."
+    },
+    {
+      "plan_term": "fusion",
+      "code_symbols": [
+        {"symbol": "fuse_planned_pools()", "file_line": "backend/services/retriever/planned_fusion.py:617", "role": "SENSE 1 — cross-lane candidate pool fusion (the module the plan means by 'planned_fusion'); re-run for graph (retriever/__init__.py:2730) and repair (2872) pools"},
+        {"symbol": "Qdrant FusionQuery(Fusion.RRF)", "file_line": "backend/services/retriever/funnel_a.py:228; funnel_b.py:187-212", "role": "SENSE 2 — server-side dense+sparse RRF inside one Qdrant query"},
+        {"symbol": "rank-fusion fallback ordering", "file_line": "backend/services/retriever/__init__.py:4598-4630; reranker.py:584", "role": "SENSE 3 — RRF ordering used when the reranker is skipped/aborted ('rrf_rank_fusion', 'deadline_fallback_rank_fusion' at 2986)"},
+        {"symbol": "multi-score fusion (being retired)", "file_line": "docs/RAPTOR_RAG_IMPLEMENTATION_CHECKLIST.md:129", "role": "SENSE 4 — ranking_policy's multi-signal score blending, which the production redesign retires (CE = sole scoring authority)"}
+      ],
+      "store_fields": ["diagnostics fusion (retriever/__init__.py:3327: fusion_diagnostics incl. graph/repair sub-blocks, pre_rerank_document_cap, structural_noise_filter)", "counts pool_rank_fusion_per_corpus (retriever/__init__.py:4344)"],
+      "verdict": "DISTINCT",
+      "canonical": "planned_pool_fusion (fuse_planned_pools) for the lane-merge sense; qualify the others as qdrant_rrf, rank_fusion_fallback, multi_score_fusion",
+      "aliases": ["planned fusion", "pool fusion", "RRF", "rank fusion", "rank-fusion ordering"],
+      "collision_note": "FAILURE MODE (a), severe: four mechanisms answer to 'fusion'. Sense 4 (multi-score fusion) is scheduled for retirement while sense 1 (planned fusion) is load-bearing and recently consolidated with ranking_policy (checklist:414, 1293) — a plan sentence like 'retire fusion' or 'candidate counts before/after fusion' (checklist:1246) is executable only after naming which sense. No duplicate implementation risk: the four do different jobs at different stages.",
+      "evidence": "fuse_planned_pools call sites retriever/__init__.py:2610/2730/2872; funnel_a.py:228; __init__.py:4611 rrf_rank_fusion; checklist:129 'retire multi-score fusion'."
+    },
+    {
+      "plan_term": "hydration",
+      "code_symbols": [
+        {"symbol": "hydrate_chunks()", "file_line": "backend/services/retriever/hydrate.py:357", "role": "THE hydration seam: Mongo parent_chunks text + corpus/doc metadata onto SourceChunks (what makes qdrant_mongo 'hydrated')"},
+        {"symbol": "_assemble_hydrated_text() + HYDRATION_MODE", "file_line": "backend/services/retriever/hydrate.py:109,494", "role": "mode-switched text assembly (parent | child_summary; PARENT_EXCERPT knobs) — the seam the owner-architecture 'hydration waterfall full→summary→skip' redesigns"},
+        {"symbol": "hydrate_rerank_texts / hydrate_summary_rerank_texts", "file_line": "backend/services/retriever/hydrate.py:569,725", "role": "hydration variants feeding the cross-encoder"},
+        {"symbol": "attach source hashes pre-fusion", "file_line": "backend/services/retriever/hydrate.py:164", "role": "hydration also carries dedup identity ('before cross-corpus fusion/reranking')"},
+        {"symbol": "_rehydrate_* (ingestion)", "file_line": "backend/services/ingestion/worker.py:1050,1172; document_pipeline_executors.py:165", "role": "UNRELATED sense: deserializing staged extraction rows — not retrieval hydration"}
+      ],
+      "store_fields": ["Mongo parent_chunks (text, summary), chunks (parent_id resolution), documents.parent_chunks[] legacy fallback, corpora.name — all read at hydrate time (hydrate.py:357-510)", "SourceChunk.corpus_name/doc_name 'populated during hydration' (models/_schemas_legacy.py:1090-1092)"],
+      "verdict": "OVERLAPPING",
+      "canonical": "parent_hydration (hydrate_chunks)",
+      "aliases": ["Mongo hydration (checklist:806)", "hydrate (timing row, checklist:1249)", "hydrated tier", "hydrate-before-cite (P1.6, to-be-built)", "hydration waterfall (owner architecture, to-be-built)"],
+      "collision_note": "Code hydration = chunk-text enrichment, and it EXISTS. Two plan usages are to-be-built policies on this same seam: P1.6 'hydrate child/parent evidence before treating a generated summary as a citation' (checklist:693-694, open) and the owner-architecture deterministic waterfall (full→summary→skip) which supersedes the child_summary HYDRATION_MODE default. Minor (a): ingestion _rehydrate_* is an unrelated deserialization idiom — don't count those call sites when auditing hydration. Build P1.6/waterfall inside hydrate.py's mode dispatch, not as a parallel module (duplicate-implementation risk if a 'summary scaffold hydrator' appears elsewhere).",
+      "evidence": "hydrate.py docstring lists Pass 0-3; HYDRATION_MODE getattr default 'parent' (494); child_summary mode comment (505-507)."
+    },
+    {
+      "plan_term": "Tier-0",
+      "code_symbols": [
+        {"symbol": "ingestion/tier0.py (writer)", "file_line": "backend/services/ingestion/tier0.py:1-23", "role": "embeds documents.doc_profile.summary as a ROUTING CARD ('never evidence') into the universal Qdrant collection; SHARED_DOCSUM='polymath_doc_summaries' (line 23)"},
+        {"symbol": "embed_doc_profiles() / delete_doc_profile() / reconcile_doc_profile_projection_state()", "file_line": "backend/services/ingestion/tier0.py:51,189,231", "role": "projection lifecycle incl. durable Mongo readiness stamping"},
+        {"symbol": "class Tier0DocumentRouter.route_lanes()", "file_line": "backend/services/retriever/tier0_router.py:251,261", "role": "the reader: per-lane vector search over routing cards → DocumentRoute candidates"},
+        {"symbol": "TIER0_ROUTING gate in query path", "file_line": "backend/services/retriever/__init__.py:1707-1734", "role": "consumption wiring exists but is flag-gated (default false); retriever='tier0_document_summary' provenance; card reuse at 1990-2015 ('store': 'tier0_document_profile')"},
+        {"symbol": "TIER0_AUTO_EMBED at ingest", "file_line": "backend/services/ingestion/worker.py:4572-4596", "role": "write side ON by default (default true), read side OFF — write/read flag asymmetry"}
+      ],
+      "store_fields": ["Qdrant collection polymath_doc_summaries; payload: corpus_id, doc_id, chunk_type, source_type (indexed, tier0.py:24), plus title, summary, concepts[], section_ids[] (read at tier0_router.py:328-347)", "Mongo documents.doc_profile.summary (source), projection-state fields with reason 'missing_tier0_document_profile' (document_pipeline_jobs.py:309,529-533)"],
+      "verdict": "SAME",
+      "canonical": "tier0_routing_card (Tier-0 document routing layer)",
+      "aliases": ["doc_profile projection", "document routing card", "tier0_document_profile", "tier0_document_summary (retriever provenance)", "doc_summaries collection", "slim Tier-0 card payloads (checklist:891)"],
+      "collision_note": "FAILURE MODE (a): 'Tier-0' is NOT a RetrievalTier — it precedes all three tiers as document routing; checklist:208 'Tier-0/Fast/Hybrid/Graph' correctly treats it as a fourth stage, but bare 'tier' sentences conflate them. Checklist Phase 2 'Tier-0 candidate gen wiring' (critique table row) = flipping/finishing the TIER0_ROUTING-gated path that already exists at retriever/__init__.py:1707 — do NOT build a second router. Note tier0.py's own docstring ('zero query-path call sites', line 8) is stale: the gated call site exists. Adjacent-but-distinct store: Mongo librarian_cards (card_builder.py) — cards degrade TO the Tier-0 document path (card_builder.py:262, checklist:285), they are not the same artifact.",
+      "evidence": "tier0.py:23 SHARED_DOCSUM; tier0_router.py:251-347; retriever/__init__.py:1709 flag check; owner-architecture memory: 'parent summaries NEVER embedded (doc_summaries = only summary vectors, Tier-0 routing)'."
+    }
+  ]
+}

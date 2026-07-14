@@ -1,0 +1,213 @@
+{
+  "family": "hierarchy & headers",
+  "repo": "/Users/king/polymath_v3.3",
+  "generated": "2026-07-13",
+  "rows": [
+    {
+      "plan_term": "heading_path",
+      "code_symbols": [
+        {"symbol": "ChildChunk.heading_path", "file_line": "backend/services/ingestion/tier_chunker.py:87", "role": "child chunk field set at chunking"},
+        {"symbol": "ParentChunk.heading_path", "file_line": "backend/services/ingestion/tier_chunker.py:110", "role": "parent chunk field set at chunking"},
+        {"symbol": "SectionElement.heading_path", "file_line": "backend/services/ingestion/docling_adapter.py:450", "role": "parser element carrying the path from docling"},
+        {"symbol": "ParentSummaryIn.heading_path", "file_line": "backend/services/ingestion/summary_tree.py:83", "role": "tree-build input; top heading drives group_by_section"},
+        {"symbol": "ChunkMetadata.section_path  # heading_path", "file_line": "backend/models/contracts.py:107", "role": "typed contract RENAMES the same field to section_path"},
+        {"symbol": "_clean_heading_path", "file_line": "backend/services/ingestion/tier_chunker.py:292", "role": "normalizer (anchor/link scrub)"}
+      ],
+      "store_fields": [
+        "Mongo parent_chunks.heading_path (worker.py:2275)",
+        "Mongo chunks.heading_path (worker.py:2354)",
+        "Qdrant child payload heading_path (qdrant_writer.py upsert_children, ~:746)",
+        "Qdrant summary payload heading_path (worker.py:2965)"
+      ],
+      "verdict": "SAME",
+      "canonical": "heading_path",
+      "aliases": ["section_path (models/contracts.py:107)", "heading path", "section (display: chat_orchestrator.py:1412 renders last 2 segments)"],
+      "collision_note": "Failure mode (a): the typed-contract layer (contracts.ChunkMetadata) calls the identical concept section_path while every store and dataclass calls it heading_path; the P0.8 typed-writer-boundary work (open) will collide these two names at the writer seam if not reconciled.",
+      "evidence": "contracts.py:107 literally comments '# heading_path' next to section_path; live probe (PLAN_CRITIQUE_2026-07-13.md section 2) shows heading_path non-empty on 86-100% of parents per corpus."
+    },
+    {
+      "plan_term": "parent chunk",
+      "code_symbols": [
+        {"symbol": "class ParentChunk", "file_line": "backend/services/ingestion/tier_chunker.py:105", "role": "in-memory chunking unit (heading-bounded, 400-1800 tok)"},
+        {"symbol": "_build_parent_dicts", "file_line": "backend/services/ingestion/worker.py:2255", "role": "assembles Mongo rows, folds Ghost-A summary fields onto the parent row"},
+        {"symbol": "upsert_summaries (chunk_type='summary', chunk_id=f'{parent_id}_summary')", "file_line": "backend/services/storage/qdrant_writer.py:819,887-888", "role": "the parent's VECTOR proxy — parents themselves are never embedded; their Ghost-A summary is"}
+      ],
+      "store_fields": [
+        "Mongo collection parent_chunks (worker.py:2493; summary_jobs.py:108)",
+        "Qdrant per-corpus corpus_{cid8}_naive/hrag points chunk_type='summary' keyed by parent_id (qdrant_writer.py:888)"
+      ],
+      "verdict": "SAME",
+      "canonical": "parent_chunk",
+      "aliases": ["parent", "parent row", "L1 (summary_tree.py docstring)", "parent summary point (its Qdrant projection)"],
+      "collision_note": "Failure mode (a): 'parent' means three things — (1) parent_chunk; (2) TreeNode.parent_ids (summary_tree.py:95) which are MEMBER parent-chunk ids, NOT tree-parents (tree children live in child_node_ids); (3) qdrant passthrough_parent_ids (parent-chunk ids again). A reader assuming parent_ids = tree ancestry will invert the hierarchy.",
+      "evidence": "summary_tree.py:95-96: parent_ids '# L1 members (rollups)' vs child_node_ids '# tree children' — same row, both 'parent/child' words, orthogonal meanings."
+    },
+    {
+      "plan_term": "child chunk",
+      "code_symbols": [
+        {"symbol": "class ChildChunk", "file_line": "backend/services/ingestion/tier_chunker.py:81", "role": "retrieval unit under a parent (64-256 tok, semantic_split default)"},
+        {"symbol": "_build_child_dicts", "file_line": "backend/services/ingestion/worker.py:2338", "role": "Mongo row builder"},
+        {"symbol": "upsert_children (chunk_type='child')", "file_line": "backend/services/storage/qdrant_writer.py:704,744", "role": "child vector writer"}
+      ],
+      "store_fields": [
+        "Mongo collection chunks (worker.py:2496)",
+        "Qdrant corpus_{cid8}_naive/hrag points chunk_type='child'",
+        "parent_chunks.child_ids + summary rows source_child_ids (worker.py:2307-2321)"
+      ],
+      "verdict": "SAME",
+      "canonical": "child_chunk",
+      "aliases": ["child", "chunks (the Mongo collection name)", "chunk_type='child'"],
+      "collision_note": "Failure mode (a): 'child' spans three id spaces — child_chunk ids (chunk_id), summary provenance source_child_ids (P0.1 'verify summary has child IDs' means THESE), and tree child_node_ids (P0.2 'one-child section' means THESE, they are rollup node ids). The Mongo collection for child chunks is named plain 'chunks', hiding the parent/child asymmetry (parent_chunks vs chunks).",
+      "evidence": "P0.1 checklist line 367 vs P0.2 line 385 use 'child' for different stores; contracts.py:128 chunk_type enum child|summary|doc_summary."
+    },
+    {
+      "plan_term": "passthrough",
+      "code_symbols": [
+        {"symbol": "index_summary_tree_nodes (sets passthrough_rollup_id/passthrough_parent_ids/passthrough_lexicon_ids)", "file_line": "backend/services/ingestion/summary_tree.py:171-172,242-243", "role": "computes the one-child-section shortcut contract at index time"},
+        {"symbol": "_summary_tree_payload", "file_line": "backend/services/storage/qdrant_writer.py:1205-1212", "role": "projects the three passthrough_* fields onto Qdrant points"},
+        {"symbol": "passthrough_hits consumption", "file_line": "backend/services/retriever/summary_tree_navigator.py:232-290", "role": "query-time: a section whose single child matches skips the rollup vector search (P0.2 acceptance 'one-child descent performs no redundant vector search')"},
+        {"symbol": "backfill_passthrough_sections.py", "file_line": "backend/scripts/backfill_passthrough_sections.py:1-40", "role": "P0.2 backfill for pre-fix Mongo rows (20,880 sections backfilled, checklist:387)"}
+      ],
+      "store_fields": [
+        "Mongo summary_tree.passthrough_rollup_id / passthrough_parent_ids / passthrough_lexicon_ids (backfilled)",
+        "Qdrant corpus_{cid8}_schemas kind='summary_tree' payload: same three fields"
+      ],
+      "verdict": "SAME",
+      "canonical": "passthrough section (fields passthrough_rollup_id / passthrough_parent_ids / passthrough_lexicon_ids)",
+      "aliases": ["singleton section", "one-child section", "one-child descent"],
+      "collision_note": "Failure mode (a): 'passthrough' elsewhere in the codebase means OpenAI-compatible provider passthrough (chat_orchestrator.py:6642, provider_presets.py:18, ghost_b.py:3974) and schema_lens id passthrough (ghost_b_local.py:322) — grep for 'passthrough' returns two unrelated subsystems.",
+      "evidence": "backfill script docstring names the identity explicitly: 'singleton-section passthrough contract' (scripts/backfill_passthrough_sections.py:4)."
+    },
+    {
+      "plan_term": "singleton",
+      "code_symbols": [
+        {"symbol": "(tree sense) only in prose: 'singleton-section passthrough contract'", "file_line": "backend/scripts/backfill_passthrough_sections.py:4", "role": "docstring alias; no code symbol is named singleton in the tree subsystem"}
+      ],
+      "store_fields": ["same as passthrough (no distinct storage)"],
+      "verdict": "SAME",
+      "canonical": "passthrough section (one-child section)",
+      "aliases": ["singleton section", "one-child section"],
+      "collision_note": "Failure mode (a), strong: 'Singleton' appears ~20x in backend meaning service-instance singletons (auth.py:294, llm.py:1237, tool_registry.py:215, facet_tagger.py:42...). The P0.2 open decision 'future singleton sections physically omitted or retained as aliases' (checklist:388-390) is PLAN-ONLY — no omit/alias branch exists in summary_tree.py; today every one-child section is retained and stamped with passthrough fields.",
+      "evidence": "grep -rn singleton backend/services: zero tree-related hits; the concept lives entirely under the passthrough_* names."
+    },
+    {
+      "plan_term": "page_start",
+      "code_symbols": [
+        {"symbol": "ChildChunk.page_start/page_end + ParentChunk.page_start/page_end", "file_line": "backend/services/ingestion/tier_chunker.py:90-91,113-114", "role": "declared on both chunk dataclasses, default None"},
+        {"symbol": "_page_blocks", "file_line": "backend/services/ingestion/tier_chunker.py:1181,1440", "role": "the ONLY producer — ocr_ast tier page-block lane"},
+        {"symbol": "readers", "file_line": "backend/services/graph/orchestrator.py:2937,4703,4752; backend/services/ingestion/document_pipeline_executors.py:188,212", "role": "consume page_start when present"}
+      ],
+      "store_fields": [
+        "Mongo parent_chunks.page_start/page_end (worker.py:2277-2278)",
+        "Mongo chunks.page_start/page_end (worker.py:2357-2358)"
+      ],
+      "verdict": "OVERLAPPING",
+      "canonical": "page_start",
+      "aliases": ["page offsets", "page anchors"],
+      "collision_note": "Failure mode (b) variant — implemented-but-dead: the field, writers, and readers all exist, but live data is 0 populated on all four corpora (PLAN_CRITIQUE section 2 table; checklist Audit Delta 2 'parent page_start/entity char offsets are 0'). Plan S3 codifies it: 'page_start is absent everywhere and only a reingest lane can ever add it'. Any new plan item that 'adds page anchors' would duplicate this existing plumbing instead of feeding it.",
+      "evidence": "Only the ocr_ast branch (tier_chunker.py:1429-1473) passes non-None values; heading-bound tiers A/B/B+ never set it."
+    },
+    {
+      "plan_term": "hierarchy descent",
+      "code_symbols": [
+        {"symbol": "SummaryTreeNavigator.navigate, strategy='document_gated_adaptive_tree_descent'", "file_line": "backend/services/retriever/summary_tree_navigator.py:484,503", "role": "the implemented descent: Tier-0 routed doc -> sections (top) -> gated rollups -> union parent_ids (<=48/doc)"},
+        {"symbol": "_tree_routing_lane_ids ('full RAPTOR descent for required obligations')", "file_line": "backend/services/retriever/__init__.py:152-153", "role": "chooses which lanes get tree descent"},
+        {"symbol": "lane diagnostics 'descent': document_tree_parent_child_fair | document_parent_child | document_child_fallback | global_wildcard", "file_line": "backend/services/retriever/__init__.py:2542-2560", "role": "per-lane descent mode labels"},
+        {"symbol": "SummaryTreeRoute", "file_line": "backend/services/retriever/summary_tree_navigator.py:39", "role": "descent output: section_ids/rollup_ids/parent_ids per routed doc"}
+      ],
+      "store_fields": ["none (query-time only); reads Qdrant kind='summary_tree' points + Mongo summary_tree pointers"],
+      "verdict": "OVERLAPPING",
+      "canonical": "tree descent (document_gated_adaptive_tree_descent)",
+      "aliases": ["hierarchy descent (qdrant_writer.py:1449 comment)", "RAPTOR descent", "tree -> parent -> child descent (checklist:300)", "source-evidence descent (checklist:905)", "one-child descent (checklist:397)"],
+      "collision_note": "Partial: descent over Tier-0-routed documents is BUILT; the Phase-2 item 'Descend reserved documents through tree -> parent -> child evidence' (checklist:300) — descent driven from shelf_reserve seats — is not, because shelf_reserve itself has no code symbol (PLAN_CRITIQUE section 2). Wiring risk: implementing seat-descent as a new path instead of feeding reserved doc_ids into the existing SummaryTreeNavigator would be failure mode (b).",
+      "evidence": "summary_tree_navigator.py:503 names the strategy; retriever/__init__.py:2225 comment 'derived probes may narrow through Tier-0 and the RAPTOR tree'."
+    },
+    {
+      "plan_term": "RAPTOR tree",
+      "code_symbols": [
+        {"symbol": "comments/scripts naming the summary tree 'RAPTOR'", "file_line": "backend/services/retriever/summary_tree_navigator.py:5; backend/services/storage/qdrant_writer.py:1189; backend/scripts/capture_raptor_baseline.py:2; backend/scripts/backfill_summary_tree_index.py:1", "role": "informal name for the SAME artifact as summary_tree"},
+        {"symbol": "raptor_ancestors", "file_line": "backend/services/retriever/vocabulary.py:932,1630; backend/services/retriever/grounded_planner.py:392-400", "role": "lexicon->tree ancestor resolution handed to the grounded planner — the only SYMBOL carrying 'raptor'"}
+      ],
+      "store_fields": ["identical to summary tree (no separate store)"],
+      "verdict": "SAME",
+      "canonical": "summary_tree",
+      "aliases": ["RAPTOR tree", "RAPTOR", "the tree", "L2-L4 hierarchy"],
+      "collision_note": "Failure mode (b), explicit: the built tree is NOT RAPTOR — RAPTOR_RAG_CRITIQUE_AND_ROADMAP.md:39 calls it 'closer to a doc-summary index + auto-merging than to RAPTOR' (no clustering, doc-gated). Meanwhile P3.1 plans a real clustering-based 'thematic RAPTOR layer' (checklist:1094,1124) as future work. Two different concepts share the name RAPTOR: the existing heading-grouped summary_tree (misnomer) and the to-be-built thematic layer. A grep-driven implementer could 'extend RAPTOR' in either place.",
+      "evidence": "checklist:1124 'Only after success may the architecture claim a thematic RAPTOR layer' — the ledger itself acknowledges the current tree does not earn the name."
+    },
+    {
+      "plan_term": "summary tree",
+      "code_symbols": [
+        {"symbol": "class TreeNode (node_type: rollup | section | document)", "file_line": "backend/services/ingestion/summary_tree.py:89", "role": "node record; parent_ids=L1 members, child_node_ids=tree children, section_range, concepts"},
+        {"symbol": "build_and_store_tree", "file_line": "backend/services/ingestion/summary_tree.py:676", "role": "builder: parents -> rollups (12-20 window) -> sections (group_by_section:302) -> document profile node"},
+        {"symbol": "index_summary_tree_nodes / upsert_summary_tree_entries", "file_line": "backend/services/ingestion/summary_tree.py:125; backend/services/storage/qdrant_writer.py:1220", "role": "embeds section+rollup nodes into Qdrant (document node NOT embedded here)"},
+        {"symbol": "class SummaryTreeNavigator", "file_line": "backend/services/retriever/summary_tree_navigator.py:484", "role": "query-time consumer"},
+        {"symbol": "SUMMARY_TREE_SCHEMA", "file_line": "backend/services/storage/schema_validators.py:74,95", "role": "P0.8 warn-mode Mongo validator"},
+        {"symbol": "_is_page_heading / _PAGE_HEADING_RE", "file_line": "backend/services/ingestion/summary_tree.py:288,298", "role": "P0.2 'Page N headings are non-semantic' fix — page labels inherit the last real heading"}
+      ],
+      "store_fields": [
+        "Mongo collection summary_tree (node_id-keyed, summary_tree.py:864; schema_version polymath.summary_tree.v1)",
+        "Qdrant corpus_{cid8}_schemas points kind='summary_tree' (SUMMARY_TREE_SCHEMA_KIND, qdrant_writer.py:1185)",
+        "Mongo documents.summary_tree_status / summary_tree_indexed_nodes / summary_tree_index_error (summary_tree.py:915-931)"
+      ],
+      "verdict": "SAME",
+      "canonical": "summary_tree",
+      "aliases": ["RAPTOR tree", "document summary tree (checklist:1239)", "L2-L4 summary hierarchy", "tree"],
+      "collision_note": "None internally — this is the one well-named concept; but note its Qdrant home is the generically-named 'schemas' collection kind shared with the entity lexicon (LEXICON_SCHEMA_KIND, qdrant_writer.py:1184), distinguished only by payload kind field.",
+      "evidence": "Verified counts checklist:86 — 21,432 sections / 23,394 rollups; 20,942 one-child sections drove the passthrough work."
+    },
+    {
+      "plan_term": "doc summary",
+      "code_symbols": [
+        {"symbol": "TreeNode(node_type='document', node_id=f'docsum_{doc_id[:12]}')", "file_line": "backend/services/ingestion/summary_tree.py:516-522", "role": "the document PROFILE node of the summary tree (never embedded as a tree point)"},
+        {"symbol": "documents.doc_profile writeback (+ sync_document_profile_from_existing_tree)", "file_line": "backend/services/ingestion/summary_tree.py:600,665-668", "role": "tree document node -> Mongo documents.doc_profile.summary + doc_artifact (_attach_doc_artifact:544)"},
+        {"symbol": "tier0.embed_doc_profiles / SHARED_DOCSUM='polymath_doc_summaries'", "file_line": "backend/services/ingestion/tier0.py:23,51,113", "role": "embeds doc_profile.summary as the Tier-0 ROUTING CARD, chunk_type='doc_summary', shared cross-corpus collection"},
+        {"symbol": "chunk_type enum 'doc_summary'", "file_line": "backend/models/contracts.py:128", "role": "typed contract value"}
+      ],
+      "store_fields": [
+        "Mongo documents.doc_profile (summary, doc_artifact, concepts)",
+        "Qdrant SHARED collection polymath_doc_summaries, chunk_type='doc_summary' (corpus_id in payload)",
+        "contrast: per-PARENT summary vectors are chunk_type='summary' in per-corpus naive/hrag (qdrant_writer.py:888) — NOT doc summaries"
+      ],
+      "verdict": "OVERLAPPING",
+      "canonical": "doc_profile (Mongo truth) -> polymath_doc_summaries routing-card projection",
+      "aliases": ["document profile", "docsum node", "Tier-0 doc card", "document routing card", "doc summary"],
+      "collision_note": "Failure mode (a): 'summary' spans two levels — parent summaries (chunk_type='summary', Funnel A breadth, Ghost A parent_summary.v1) vs document summaries (chunk_type='doc_summary', Tier-0 routing only, '§10.2: routing card, NEVER evidence'). The owner-architecture line 'doc_summaries = only summary vectors' reads ambiguously against the live schema where parent-summary vectors dominate the naive collection. Plan phrase 'document summary tree' (checklist:1239) means the whole per-doc summary_tree, a third referent.",
+      "evidence": "tier0.py:2-10 docstring states the card/evidence split; contracts.py:128 keeps the two as distinct enum values."
+    },
+    {
+      "plan_term": "boundaries",
+      "code_symbols": [
+        {"symbol": "SummaryTask.child_boundaries (+ prompt 'CHILD BOUNDARIES:')", "file_line": "backend/services/ghost_a.py:96,177; backend/services/ingestion/worker.py:1558", "role": "meaning 1 — per-parent child-chunk boundary text fed to Ghost A; the P0.1 'summary has child IDs, boundaries' verify target (open)"},
+        {"symbol": "_split_at_boundary / _semantic_boundaries", "file_line": "backend/services/ingestion/tier_chunker.py:302,628", "role": "meaning 2 — chunker split boundaries (paragraph/sentence/semantic-dip)"},
+        {"symbol": "TreeNode.section_range", "file_line": "backend/services/ingestion/summary_tree.py:96; backend/services/storage/qdrant_writer.py:1196", "role": "meaning 3 — tree-node extent label; the P0.2 'validate profile/section/rollup/parent/child boundaries on fixtures' target (open)"},
+        {"symbol": "storage-boundary validators", "file_line": "backend/services/storage/schema_validators.py:14", "role": "meaning 4 — architectural writer boundary (P0.8), unrelated to text extents"}
+      ],
+      "store_fields": [
+        "Mongo parent_chunks.source_child_ids / child_ids (the durable child-boundary provenance)",
+        "Mongo+Qdrant summary_tree.section_range",
+        "planned only: evidence_spans 'exact boundaries' (checklist:865, P2.1)"
+      ],
+      "verdict": "DISTINCT",
+      "canonical": "no single concept — use child_boundaries (Ghost A), split boundary (chunker), section_range (tree), storage boundary (P0.8) explicitly",
+      "aliases": ["child boundaries", "sentence boundaries", "section range", "source boundary (checklist:473)", "corpus boundary (checklist:50)"],
+      "collision_note": "Failure mode (a), worst in family: one word, at least four implementations plus one PLAN-ONLY (evidence_spans exact boundaries, P2.1). P0.1's open verify item and P0.2's open fixture item both say 'boundaries' but target different stores (summary provenance vs tree node extents); implementing one validator for both would be wrong, implementing two under the same name invites failure mode (b).",
+      "evidence": "grep -rn boundar backend/services returns ghost_a prompt, chunker splitters, schema_validators architectural sense, and answerability_tuning.py:116 coverage-boundary — all unrelated."
+    },
+    {
+      "plan_term": "mid-document header",
+      "code_symbols": [
+        {"symbol": "(no exact counterpart — phrase absent from docs/ and backend/)", "file_line": "n/a", "role": "to-be-built / vocabulary-only"},
+        {"symbol": "nearest seam: inject_synthetic_headers", "file_line": "backend/services/ingestion/b_plus_normalizer.py:131", "role": "pre-parse promotion of plain-text 'Chapter N'/'PART IV'/'1.2 ...' lines into markdown #/## headers, audited in injected_headers"},
+        {"symbol": "nearest seam: section_heading element handling", "file_line": "backend/services/ingestion/docling_adapter.py:452,819; backend/services/ingestion/tier_chunker.py:989-1003", "role": "docling-emitted headings become heading_path segments and parent boundaries"},
+        {"symbol": "nearest seam: _is_page_heading demotion", "file_line": "backend/services/ingestion/summary_tree.py:288-300", "role": "P0.2 fix demoting parser-emitted 'Page N' pseudo-headers"}
+      ],
+      "store_fields": ["documents routing_trace.augmented_headers + injected_headers audit (docling_adapter.py:322,474)"],
+      "verdict": "PLAN-ONLY",
+      "canonical": "mid-document header (unclaimed term)",
+      "aliases": ["synthetic header (b_plus_normalizer)", "section_heading (docling element_type)", "OCR-corrupt heading (P0.5 open audit, checklist:462)"],
+      "collision_note": "If this term denotes headers appearing mid-flow that should split/route chunks, that behavior already exists across THREE seams (synthetic injection pre-parse, docling section_heading blocks, page-heading demotion in the tree). A new 'mid-document header' feature built fresh would be failure mode (b); it should be specified as a change to one of these seams. The open plan work nearest to it is P0.5 'Audit OCR-corrupt heading paths and define a source-safe repair rule' (checklist:462) and plan S3's heading/OCR quality audit.",
+      "evidence": "grep -rniE 'mid.document' over docs/, CONTINUITY/, backend/, frontend/ returns zero hits."
+    }
+  ]
+}

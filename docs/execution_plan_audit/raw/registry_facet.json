@@ -1,0 +1,184 @@
+{
+  "family": "facets & lenses",
+  "repo": "/Users/king/polymath_v3.3",
+  "generated": "2026-07-13",
+  "rows": [
+    {
+      "plan_term": "facet",
+      "code_symbols": [
+        {"symbol": "FACET_SCHEMA_VERSION = \"polymath.facets.v1\"", "file_line": "backend/services/facets/normalizer.py:16", "role": "schema version for the stored (ingest) facet system"},
+        {"symbol": "_facet_record()", "file_line": "backend/services/facets/normalizer.py:450", "role": "constructs one stored facet: {facet_id, display_name, aliases, search_terms, source_level, source_refs, confidence}"},
+        {"symbol": "build_ingest_facet_profile()", "file_line": "backend/services/facets/normalizer.py:840", "role": "builds doc/parent/child facet metadata at ingest"},
+        {"symbol": "_CHAT_COVERAGE_FACETS", "file_line": "backend/services/chat_orchestrator.py:239", "role": "hand-authored QUERY-SIDE coverage facets: {name, label, triggers, support_terms} — a different runtime concept"},
+        {"symbol": "matching_ingest_facets()", "file_line": "backend/services/facets/runtime.py:229", "role": "bridge: promotes stored doc facets into chat coverage-facet rows (source=ingest_facet_profile)"},
+        {"symbol": "matching_vector_facets()", "file_line": "backend/services/facets/runtime.py:306", "role": "bridge: promotes doc facets near the query vector into coverage rows (source=vector_facet_probe)"},
+        {"symbol": "class FacetCandidate / select_facet_final()", "file_line": "backend/services/facets/final_selector.py:51 and :105", "role": "final-context selector where coverage facets become 'lanes' on scored chunks"},
+        {"symbol": "specificity ranking of coverage facets", "file_line": "backend/services/graph/orchestrator.py:4048", "role": "graph-side consumer of coverage-facet rows"}
+      ],
+      "store_fields": [
+        "Mongo documents.facet_profile (doc_facets[], facet_ids, facet_text, primary_facet_id) — written via worker._document_facet_profile (backend/services/ingestion/worker.py:2224)",
+        "Mongo parent_chunks.{facet_ids,facet_text,content_facet_*,metadata.semantic_facets} (worker.py:2326-2331)",
+        "Mongo chunks.{facet_ids,facet_text,content_facet_*,metadata.semantic_facets} (worker.py:2370-2375)",
+        "Qdrant summary/child point payloads {facet_ids, facet_text, content_facet_*, doc_facet_ids, facet_schema_version} (worker.py:2969-2979 and :3069-3076)"
+      ],
+      "verdict": "OVERLAPPING",
+      "canonical": "ingest_facet (stored semantic facet) — keep 'coverage_lane' as the separate canonical name for the chat/query-side concept",
+      "aliases": ["semantic facet", "document facet", "doc_facets row", "facet record", "facet_profile entry", "coverage facet (chat lane concept only)", "evidence lane", "facet lane"],
+      "collision_note": "FAILURE MODE (a): one word, two runtime concepts. 'Facet' = (1) stored ingest metadata (facets/normalizer.py, polymath.facets.v1) and (2) query-side coverage lanes (_CHAT_COVERAGE_FACETS chat_orchestrator.py:239, FacetCandidate.lanes final_selector.py:51). They meet only through matching_ingest_facets/matching_vector_facets. FAILURE MODE (b): _CHAT_COVERAGE_FACETS trigger/support-term rows duplicate the same concepts as _CONTENT_FACET_ALIASES (normalizer.py:167) — on_device_llm, privacy, knowledge_graph appear verbatim in BOTH hand-maintained tables (chat_orchestrator.py:241/279/307 vs normalizer.py:296/338/168); editing one silently diverges the other.",
+      "evidence": "normalizer.py:1-7 states facets give docs/chunks 'a stable semantic handle'; final_selector.py:1-9 says selector consumes 'facet/lane tags'; runtime.py:1-7 'metadata-only' helpers bridge the two."
+    },
+    {
+      "plan_term": "facet_ids",
+      "code_symbols": [
+        {"symbol": "_chunk_facets() -> {\"facet_ids\": ...}", "file_line": "backend/services/facets/normalizer.py:751-798", "role": "chunk-scope list: own-heading ids + evidence-gated doc-facet inheritance, cap 8"},
+        {"symbol": "build_ingest_facet_profile() -> {\"facet_ids\": doc_facet_ids}", "file_line": "backend/services/facets/normalizer.py:927", "role": "DOC-scope list under the same key inside facet_profile"},
+        {"symbol": "metadata_with_facets()", "file_line": "backend/services/facets/runtime.py:99-151", "role": "merges payload facet_ids/doc_facet_ids/content_facet_ids into metadata.semantic_facets at retrieval"},
+        {"symbol": "_collect_semantic_facet_ids-style merge", "file_line": "backend/services/chat_orchestrator.py:3468-3474", "role": "chat reads all three id fields from semantic_facets and metadata"}
+      ],
+      "store_fields": [
+        "Mongo parent_chunks.facet_ids / chunks.facet_ids (chunk scope)",
+        "Mongo documents.facet_profile.facet_ids (doc scope, same key name)",
+        "Qdrant payload facet_ids (chunk scope) AND doc_facet_ids (doc scope) on the same point (worker.py:2969/2977, 3069/3075)",
+        "metadata.semantic_facets.facet_ids / .doc_facet_ids (runtime.py:129-131)"
+      ],
+      "verdict": "SAME",
+      "canonical": "facet_ids (chunk scope); doc_facet_ids (doc scope)",
+      "aliases": ["facet_profile.facet_ids (== doc_facet_ids, name drift)", "semantic_facets.facet_ids"],
+      "collision_note": "FAILURE MODE (a): the key 'facet_ids' changes meaning by carrier — on a chunk row it is the chunk's list; inside documents.facet_profile it is the document's list, which is then RENAMED to doc_facet_ids when copied onto Qdrant payloads (worker.py:2926 doc_facet_ids = facet_profile['facet_ids']). Any consumer that greps for 'facet_ids' without knowing the carrier gets the wrong scope. Recommend: plan text should always say chunk facet_ids vs doc_facet_ids.",
+      "evidence": "worker.py:2926 `doc_facet_ids = (facet_profile or {}).get(\"facet_ids\")`; normalizer.py:927 doc list stored under plain 'facet_ids'; runtime.py:107-131 handles both keys side by side."
+    },
+    {
+      "plan_term": "content_facet_ids",
+      "code_symbols": [
+        {"symbol": "_content_facets()", "file_line": "backend/services/facets/normalizer.py:649-711", "role": "derives content_facet_ids from the row's OWN text: _CONTENT_FACET_ALIASES matches + deterministic phrase mining (_content_phrase_facets:591), cap 6"},
+        {"symbol": "classify_facets() evidence set", "file_line": "backend/scripts/p0_5_facet_decontamination.py:101", "role": "content_facet_ids serve as per-row EVIDENCE deciding whether a lens facet may stay in facet_ids"},
+        {"symbol": "row_evidence gate", "file_line": "backend/services/facets/normalizer.py:773-785", "role": "same evidence role at ingest time"}
+      ],
+      "store_fields": [
+        "Mongo parent_chunks/chunks: content_facet_ids, content_facet_text, content_facet_source, content_facet_confidence",
+        "Qdrant payloads: same four fields (worker.py:2971-2976, 3071-3076)",
+        "metadata.semantic_facets.content_facet_ids (runtime.py:134-135)"
+      ],
+      "verdict": "DISTINCT",
+      "canonical": "content_facet_ids",
+      "aliases": ["content facets", "mined facets", "per-content evidence"],
+      "collision_note": "DISTINCT from facet_ids by design and must stay so: facet_ids is the retrievable handle (headings + gated inheritance), content_facet_ids is own-text evidence. p0_5 decontamination explicitly 'Never touches content_facet_ids' (p0_5_facet_decontamination.py:38). Sub-field 'content_facet_source' (values chunk_text/parent_summary/child_text/parent_text/document_content, normalizer.py:709) is part of the 'source' word overload — see source_level row.",
+      "evidence": "normalizer.py:649-660 docstring: 'soft retrieval hints ... avoid model calls'; p0_5 script:81-86 uses them as the evidence side of the contamination rule."
+    },
+    {
+      "plan_term": "lens",
+      "code_symbols": [
+        {"symbol": "class SchemaLens", "file_line": "backend/services/ghost_b.py:1072", "role": "corpus reading frame for Ghost B extraction: corpus_domains, canonical_families, object_kinds, preferred_entity_types/relations, relation_aliases"},
+        {"symbol": "get_or_create_schema_lens() / build_deterministic_schema_lens() / merge_schema_lenses()", "file_line": "backend/services/ingestion/schema_lens.py:786 / :500 / :659", "role": "lens lifecycle; SCHEMA_LENS_VERSION polymath.schema_lens.v1 (:30)"},
+        {"symbol": "_schema_lens_facets()", "file_line": "backend/services/facets/normalizer.py:476-496", "role": "maps lens fields to facet records with source_level schema_lens_domain/_family/_object_kind — THE contamination source the plan means by 'corpus lens'"},
+        {"symbol": "schema_lens_facet_ids()", "file_line": "backend/services/facets/normalizer.py:499-507", "role": "exact production lens-to-facet mapping, exported for the decontamination script"},
+        {"symbol": "_retrieval_tier_lens_name() / <retrieval_synthesis_lens>", "file_line": "backend/services/chat_orchestrator.py:5524-5668", "role": "UNRELATED third meaning: per-tier answer-shaping prompt block in chat synthesis"}
+      ],
+      "store_fields": [
+        "Mongo corpora.schema_lens (schema_lens.py:819-851)",
+        "Mongo documents.schema_lens (extraction_jobs.py:165, p0_5 script:169)",
+        "documents ingest metrics ghost_b_metrics.schema_lens (worker.py:2111, 2471)"
+      ],
+      "verdict": "OVERLAPPING",
+      "canonical": "schema_lens",
+      "aliases": ["corpus lens", "corpus schema lens", "SchemaLens", "reading frame", "lens (in facet-contamination context)"],
+      "collision_note": "FAILURE MODE (a): 'lens' has three meanings in this codebase: (1) SchemaLens extraction guidance (intended role, ghost_b.py:1072 docstring: 'guides extraction prompts; never creates permanent schema labels'); (2) the lens-as-facet-source misuse that P0.5 decontaminated (normalizer.py:476); (3) the chat retrieval-synthesis lens (chat_orchestrator.py:5524), a prompt-shaping construct with zero relation to facets. Plan text saying bare 'lens' in a retrieval section is ambiguous between (2) and (3). Always qualify: schema_lens vs synthesis lens.",
+      "evidence": "SCHEMA_LENS_VERSION vs FACET_SCHEMA_VERSION are separate schemas; chat_orchestrator.py:5548 emits literal tag <retrieval_synthesis_lens>."
+    },
+    {
+      "plan_term": "facet contamination",
+      "code_symbols": [
+        {"symbol": "classify_facets()", "file_line": "backend/scripts/p0_5_facet_decontamination.py:73-107", "role": "the rule: facet id is lens-inherited iff in lens id set AND absent from row evidence (content_facet_ids + heading-derived ids)"},
+        {"symbol": "audit_corpus() / _apply_removals()", "file_line": "backend/scripts/p0_5_facet_decontamination.py:154 / :301", "role": "measure + strip stored contamination (parent_chunks + documents), with backup"},
+        {"symbol": "ingest-time prevention gate (row_evidence)", "file_line": "backend/services/facets/normalizer.py:770-785", "role": "lens-derived doc facets no longer blanket-inherit to chunks"},
+        {"symbol": "doc-level prevention gate (doc_content_evidence)", "file_line": "backend/services/facets/normalizer.py:877-882", "role": "lens facet attaches to a document only with own content evidence"},
+        {"symbol": "tests", "file_line": "backend/tests/test_facet_decontamination.py:142-297", "role": "asserting coverage of the rule"}
+      ],
+      "store_fields": [
+        "operates on Mongo parent_chunks.facet_ids and documents.facet_profile.facet_ids; never touches content_facet_ids/facet_text/corpus schema_lens (p0_5 script:38)"
+      ],
+      "verdict": "SAME",
+      "canonical": "lens-inherited facet (decontamination = its removal)",
+      "aliases": ["facet contamination", "corpus-lens facet contamination", "corpus-lens-inherited facets", "lens_inherited (code name)"],
+      "collision_note": "FAILURE MODE (a): 'contamination' also names an unrelated concept in the same checklist: held-out EVAL contamination (backend/services/eval_firewall.py:1 'contamination firewall', backend/scripts/freeze_heldout_eval.py:10, checklist P1.1 line 578/895). A grep or a checklist row saying just 'contamination' conflates data-leak-into-eval with lens-leak-into-facets. Status nuance: decontamination is merged/live (checklist:158, 68,943 parents + 271 docs) but PLAN_CRITIQUE:109 notes it deliberately LEFT the broad-alias family stamped — 'facet contamination' in the critique now mostly refers to that residue, which is a different mechanism (hand-authored aliases, not lens inheritance).",
+      "evidence": "checklist:118 'corpus-lens facet contamination is real (68% of sampled ecommerce parents)'; p0_5 script docstring lines 19-45."
+    },
+    {
+      "plan_term": "source_level",
+      "code_symbols": [
+        {"symbol": "_facet_record(source_level=...)", "file_line": "backend/services/facets/normalizer.py:453,470", "role": "provenance enum on each stored facet: doc | heading | document_content | schema_lens_domain | schema_lens_family | schema_lens_object_kind (values at :481-483,:526,:830,:860)"},
+        {"symbol": "vector-facet preference check", "file_line": "backend/services/facets/runtime.py:425", "role": "only runtime consumer: prefers primary or source_level=='doc' facets for the vector probe"}
+      ],
+      "store_fields": [
+        "Mongo documents.facet_profile.doc_facets[].source_level"
+      ],
+      "verdict": "SAME",
+      "canonical": "source_level",
+      "aliases": ["facet source (plan wording in checklist:467)", "facet provenance level"],
+      "collision_note": "FAILURE MODE (a): the 'source' word family is 5-way overloaded around facets: (1) source_level (facet provenance, this row); (2) content_facet_source (which text produced content facets: chunk_text/parent_summary/child_text/parent_text/document_content, normalizer.py:709); (3) semantic_facets.source='ingestion' (normalizer.py:723); (4) coverage-facet 'source' = ingest_facet_profile | vector_facet_probe (runtime.py:281,470); (5) source_tier / source_refs (document provenance). Checklist P0.5 'Add artifact diagnostics for facet source, confidence, and evidence' (:467, unchecked) must specify WHICH — recommend it surface source_level AND content_facet_source under those exact names.",
+      "evidence": "normalizer.py:470 writes the field; runtime.py:425 reads it; no other consumer in backend (grep source_level = 7 hits, all facets/*)."
+    },
+    {
+      "plan_term": "DF / document frequency",
+      "code_symbols": [
+        {"symbol": "facet_df / removal_df Counters, parent_df report field", "file_line": "backend/scripts/p0_5_facet_decontamination.py:177,230,273", "role": "IMPLEMENTED measurement: per-corpus count of parents carrying each facet_id (audit/report only)"},
+        {"symbol": "Qdrant server-side IDF (Modifier.IDF)", "file_line": "backend/services/storage/sparse_encoder.py:21-22; backend/services/storage/qdrant_writer.py:568-579; backend/services/ingestion/tier0.py:37", "role": "DIFFERENT concept: term-level BM25 inverse document frequency for lexical retrieval"},
+        {"symbol": "(none) DF-based facet retrieval-rights rule", "file_line": "PLAN-ONLY — PLAN_CRITIQUE_2026-07-13.md:86 (S7)", "role": "planned: facet with per-corpus parent-DF above threshold loses retrieval/expansion rights"},
+        {"symbol": "(none) P2.1 DF/specificity contract fields", "file_line": "PLAN-ONLY — PLAN_CRITIQUE_2026-07-13.md:36,84", "role": "planned concept-contract salience/DF fields fed by S5 rollup"}
+      ],
+      "store_fields": [
+        "none persisted — parent_df exists only in the p0_5 report dict; no Mongo/Qdrant field stores facet DF today"
+      ],
+      "verdict": "PLAN-ONLY",
+      "canonical": "parent_df (per-corpus facet document frequency)",
+      "aliases": ["DF", "document frequency", "facet DF", "per-corpus parent-DF"],
+      "collision_note": "FAILURE MODE (b) risk: three DF-shaped stats could get built in parallel — (1) p0_5 parent_df (facet-level, computed ad hoc), (2) Qdrant server-side IDF (term-level, already live for BM25), (3) planned P2.1 DF/specificity fields and S7 threshold rule. S7 and P2.1 should both consume ONE persisted facet-DF stat derived from the p0_5 audit code path (audit_corpus:177-236 is the nearest existing seam; batch its cleanup backfill with S5 reindex per PLAN_CRITIQUE:86). Note checklist:156 'measure facet DF per corpus' is DONE (audit exists); the ADMISSION RULE is not.",
+      "evidence": "p0_5 script:230 '\"parent_df\": df'; grep for df_floor/document_frequency/term admission in backend returns nothing else."
+    },
+    {
+      "plan_term": "broad-alias family",
+      "code_symbols": [
+        {"symbol": "_CONTENT_FACET_ALIASES", "file_line": "backend/services/facets/normalizer.py:167-357", "role": "the hand-authored alias table that CONTAINS the family; agency_preservation (:225) and emotional_patterns (:237) carry broad one-word aliases ('agency','choice','values','control','emotion','mood','stress','anxiety')"},
+        {"symbol": "_specific_content_alias()", "file_line": "backend/services/facets/normalizer.py:632-646", "role": "IMPLEMENTED forward gate: rejects broad one-word aliases unless canonical name or protected acronym (checklist P0.5 [x] line 461)"},
+        {"symbol": "SINGLE_TOKEN_ALIAS_DETECTION_KEYS", "file_line": "backend/services/retriever/query_semantics.py:490-497,754", "role": "SECOND, independent broad-alias gate on the query side (scoped allowlist: product_positioning)"},
+        {"symbol": "(none) named family / rights-removal", "file_line": "PLAN-ONLY — PLAN_CRITIQUE_2026-07-13.md:69,86 (S7)", "role": "no code symbol names the set {agency_preservation, emotional_patterns}; stored stamps untouched pending owner decision"}
+      ],
+      "store_fields": [
+        "legacy stamps live in parent_chunks.facet_ids / content_facet_ids and Qdrant payloads: agency_preservation on 89,088 parents, emotional_patterns on 38,492 (PLAN_CRITIQUE:69, verified)"
+      ],
+      "verdict": "PLAN-ONLY",
+      "canonical": "broad-alias facet family (proposed code name: HIGH_DF_FACET_FAMILY, pending S7 owner decision)",
+      "aliases": ["legacy broad-alias facet family", "DF-worthless facets", "{agency_preservation, emotional_patterns}"],
+      "collision_note": "FAILURE MODE (b): broad-alias suppression is already implemented TWICE — ingest-side _specific_content_alias (normalizer.py:632) and query-side SINGLE_TOKEN_ALIAS_DETECTION_KEYS (query_semantics.py:490); S7's DF rule would be a third mechanism. They gate different stages (stamping vs query alias detection vs retrieval rights) but the plan should say so explicitly or one will be rebuilt as the other. Also note _specific_content_alias only blocks ONE-WORD aliases — multiword broad aliases (e.g. 'self determination') still stamp, and the 89k/38k historical stamps remain in stores.",
+      "evidence": "PLAN_CRITIQUE:69 'the family the P0.5 decontamination deliberately left stamps 71-100% of every corpus, i.e. DF-worthless'; checklist:472 acceptance 'No broad incidental word stamps unrelated domain facets' still unchecked."
+    },
+    {
+      "plan_term": "emotional_patterns",
+      "code_symbols": [
+        {"symbol": "_CONTENT_FACET_ALIASES[\"emotional_patterns\"]", "file_line": "backend/services/facets/normalizer.py:237-247", "role": "facet id with aliases emotion/emotional/affect/affective/mood/feeling/sentiment/stress/anxiety — all broad single words, now blocked forward by _specific_content_alias but historically stamped"}
+      ],
+      "store_fields": [
+        "value inside parent_chunks/chunks facet_ids and content_facet_ids; Qdrant payload facet_ids; 38,492 parents globally (PLAN_CRITIQUE:65,69)"
+      ],
+      "verdict": "SAME",
+      "canonical": "emotional_patterns",
+      "aliases": ["(alias surface) emotion, affect, mood, feeling, sentiment, stress, anxiety"],
+      "collision_note": "Plan and code use the identical id. Member of the broad-alias family (S7 decision pending). Every alias in its list is one word, so under the current _specific_content_alias gate the facet can effectively no longer be stamped by alias match at all — the id survives only in legacy stored data.",
+      "evidence": "normalizer.py:237; PLAN_CRITIQUE:65 table row 'Parents w/ facet in {emotional_patterns, agency_preservation}'."
+    },
+    {
+      "plan_term": "agency_preservation",
+      "code_symbols": [
+        {"symbol": "_CONTENT_FACET_ALIASES[\"agency_preservation\"]", "file_line": "backend/services/facets/normalizer.py:225-236", "role": "facet id with aliases agency/autonomy/choice/authorship/self determination/values/value alignment/personal meaning/control"}
+      ],
+      "store_fields": [
+        "value inside parent_chunks/chunks facet_ids and content_facet_ids; Qdrant payload facet_ids; 89,088 parents globally — the single largest contaminant (PLAN_CRITIQUE:69)"
+      ],
+      "verdict": "SAME",
+      "canonical": "agency_preservation",
+      "aliases": ["(alias surface) agency, autonomy, choice, authorship, values, control, self-determination, value alignment, personal meaning"],
+      "collision_note": "Identical id in plan and code. Multiword aliases ('self determination', 'value alignment', 'personal meaning') still pass the one-word specificity gate, so unlike emotional_patterns this facet CAN still be stamped on new ingests — S7 cannot be treated as legacy-only cleanup for this id.",
+      "evidence": "normalizer.py:225-236; _specific_content_alias (:632) only rejects len(words)==1 aliases."
+    }
+  ]
+}

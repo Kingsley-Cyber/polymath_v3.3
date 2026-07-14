@@ -1,5 +1,5 @@
 {
-  "version": "2026-07-14.2",
+  "version": "2026-07-14.3",
   "purpose": "Machine-readable job queue for any continuing agent. Read CONTINUATION_HANDOFF.md first.",
   "authoritative_docs": [
     "CLAUDE.md",
@@ -30,7 +30,7 @@
       "status": "blocked_owner",
       "blocker": "key rotation",
       "what": "quarantine+regen 1,004 capture-stale mark parents (latent+temporal), then reindex + verify counts + P0.1 verify green",
-      "driver": "container /tmp/s4_quarantine_stale.py + scripts/polymath_summary_backfill_scoped.py"
+      "driver": "backend/scripts/s4_quarantine_stale.py (docker cp into container /tmp + PYTHONPATH=/app) + scripts/polymath_summary_backfill_scoped.py"
     },
     {
       "id": "p2.5b-envelope",
@@ -98,5 +98,6 @@
     "key rotation (deepseek/longcat/runpod)",
     "S3 matrix \u00a78 sign-off",
     "S7 facet DF rule approval"
-  ]
+  ],
+  "raw_artifacts": "docs/execution_plan_audit/raw/ (claims/critiques/registries/frozen checklist/assembler), docs/baselines/container_backups/ (S1/S2/S4 durable-row backups pulled from container volume)"
 }

@@ -1,0 +1,228 @@
+{
+  "family": "extraction & parity",
+  "repo": "/Users/king/polymath_v3.3",
+  "generated": "2026-07-13",
+  "sources_of_truth": [
+    "backend/services",
+    "backend/models",
+    "backend/scripts",
+    "runpod_flash_extractor/app.py",
+    "local_ghost_b/",
+    "docs/PLAN_CRITIQUE_2026-07-13.md",
+    "docs/RAPTOR_RAG_IMPLEMENTATION_CHECKLIST.md"
+  ],
+  "rows": [
+    {
+      "plan_term": "ghost_b",
+      "code_symbols": [
+        {"symbol": "services/ghost_b.py (module: universal schemas, prompt, validation, ExtractionResult)", "file_line": "backend/services/ghost_b.py:152,169,1988,2026", "role": "cloud/provider-LLM extraction lane + shared artifact dataclasses (EntityItem/RelationItem/FactItem/ExtractionResult) used by ALL engines"},
+        {"symbol": "services/ghost_b_local.py (in-process or HTTP :8084 sidecar lane)", "file_line": "backend/services/ghost_b_local.py:24-56,126", "role": "GLiNER+GLiREL local lane; LOCAL_GHOST_B_EXTRACT_URL default http://host.docker.internal:8084"},
+        {"symbol": "LLMEntity / LLMRelation / LLMFact / ExtractionResponse", "file_line": "backend/services/ghost_b_schemas.py:94,137,170,189", "role": "LLM-facing wire models parsed into artifact dataclasses"},
+        {"symbol": "GHOST_B_EXTRACTIONS_SCHEMA (Mongo validator)", "file_line": "backend/services/storage/schema_validators.py:45-58", "role": "storage-boundary schema for the durable artifact store"},
+        {"symbol": "graph_promotion_jobs (reads durable store)", "file_line": "backend/services/ingestion/graph_promotion_jobs.py:264", "role": "'ghost_b_extractions is the durable extraction artifact store' — promotion to Neo4j"}
+      ],
+      "store_fields": ["mongo: ghost_b_extractions{corpus_id,doc_id,schema_version,extractor,entities[],relations[],temporal_captures[],temporal_capture_version}", "mongo: ghost_b_failures (resume/backfill staging, ghost_b_local.py:952)"],
+      "verdict": "OVERLAPPING",
+      "canonical": "Ghost B extraction stage (durable store: ghost_b_extractions)",
+      "aliases": ["ghost_b", "extraction", "extraction stage", "ghost_b_local (local lane)", "legacy_local (engine name for the sidecar lane)"],
+      "collision_note": "(a) one word, two scopes: 'ghost_b' names BOTH the whole extraction stage (any engine writes ghost_b_extractions — including runpod_flash) AND specifically services/ghost_b.py's provider-LLM lane. The engine enum makes this concrete: engine='local' now means a private provider LLM running ghost_b.py's contract, while the old GLiNER/GLiREL sidecar is 'legacy_local' (extraction_contract.py:15-19) — the word 'local' silently changed meaning across the rename.",
+      "evidence": "worker.py:1923-1928 comments enumerate the engines; runpod_flash_extraction.py returns 'the same validated wire shape as ghost_b_local' (module docstring) and all engines persist to ghost_b_extractions."
+    },
+    {
+      "plan_term": "GLiNER",
+      "code_symbols": [
+        {"symbol": "get_gliner() lazy singleton", "file_line": "backend/services/ingestion/facet_tagger.py:78", "role": "local lane pass-1 entity tagger + pass-2 object_kind facet labelling (same cached model)"},
+        {"symbol": "ghost_b_local pipeline doc (GLiNER pass-1/pass-2)", "file_line": "backend/services/ghost_b_local.py:9,16,89", "role": "local 5-stage pipeline: GLiNER entities -> ... -> GLiREL relations -> GLiNER facets"},
+        {"symbol": "GLiNER.from_pretrained(model_id) in RunPod worker", "file_line": "runpod_flash_extractor/app.py:312-316", "role": "remote burst worker loads knowledgator/gliner-relex-large-v0.5 (JOINT entity+relation 'relex' variant)"},
+        {"symbol": "RunpodFlashExtractionSettings.model_id", "file_line": "backend/models/schemas.py:631-633", "role": "pinned worker model: knowledgator/gliner-relex-large-v0.5; endpoint_name polymath-gliner-relex"},
+        {"symbol": "sidecar health gliner{backend,device,providers}", "file_line": "backend/services/extraction_validation.py:48-70", "role": "fleet endpoint probe validates GLiNER backend/device (ONNX-CUDA vs torch-MPS)"}
+      ],
+      "store_fields": ["ghost_b_extractions.entities[] (GLiNER-sourced on local/runpod engines)", "settings: ingestion.runpod_flash.model_id/model_revision"],
+      "verdict": "OVERLAPPING",
+      "canonical": "GLiNER (entity model family); distinguish plain GLiNER (local, entity-only) from GLiNER-ReLEX (RunPod, joint entity+relation)",
+      "aliases": ["gliner", "GLiNER-ReLEX", "gliner-relex", "joint_relex (output_mode)", "polymath-gliner-relex (endpoint name)"],
+      "collision_note": "(a) 'GLiNER' means two different models in two places: local lane = entity-only GLiNER + separate GLiREL for relations; RunPod lane = gliner-relex joint model doing both. P2.7b's 'GLiNER-ReLEX + spaCy windows... in the worker' is the remote stack; the local stack is a DIFFERENT composition producing the same artifact shape — this is exactly the parity surface P2.6/P2.7 must measure, not an accidental duplicate.",
+      "evidence": "ghost_b_local.py:9-16 (two GLiNER passes + GLiREL) vs runpod_flash_extractor/app.py:312,607 (single relex model, entity-only execution path note); test_runpod_flash_extraction.py:113 asserts output_mode=='joint_relex'."
+    },
+    {
+      "plan_term": "GLiREL",
+      "code_symbols": [
+        {"symbol": "GliRELClassifier (fine-tuned, sentence-windowed, type-gated)", "file_line": "local_ghost_b/glirel_infer.py", "role": "local relation classifier implementation imported by the sidecar/in-process lane"},
+        {"symbol": "_build_glirel / _get_glirel / _get_glirel_cpu", "file_line": "backend/services/ghost_b_local.py:271,294,303", "role": "lazy cached GLiREL (MPS) + optional dual-lane CPU second instance (default OFF)"},
+        {"symbol": "GLiREL stage in local pipeline (30 Ghost B predicates)", "file_line": "backend/services/ghost_b_local.py:13,18", "role": "relations with GLiREL score as confidence sentinel"}
+      ],
+      "store_fields": ["ghost_b_extractions.relations[] (GLiREL-sourced on legacy_local engine only)"],
+      "verdict": "DISTINCT",
+      "canonical": "GLiREL relation classifier (local lane only)",
+      "aliases": ["glirel", "glirel_infer", "GliRELClassifier"],
+      "collision_note": "(b) duplicate-implementation risk (intentional, must stay measured): relation extraction exists twice — GLiREL locally vs gliner-relex remotely (and a third time via provider-LLM RelationItems in ghost_b.py). GLiREL is NOT shipped in the RunPod worker (app.py deps list gliner+spacy only, app.py:538-539), so 'burst runs the full local stack remotely' (P2.7b) is currently false in the strict sense — the burst runs the RELEX stack, not the GLiNER+GLiREL stack.",
+      "evidence": "runpod_flash_extractor/app.py:538-546 pip deps contain gliner==0.2.27 and spacy but no glirel; ghost_b_local.py:262-263 imports gliner AND glirel for in-process mode."
+    },
+    {
+      "plan_term": "spaCy",
+      "code_symbols": [
+        {"symbol": "_nlp(pipeline) — spacy.blank / spacy.load(exclude ner,lemmatizer)", "file_line": "runpod_flash_extractor/app.py:292-299", "role": "worker-side sentence segmentation / doc windows for relex + time-expression capture"},
+        {"symbol": "_time_expressions(text, doc) — spacy-source spans", "file_line": "runpod_flash_extractor/app.py:213,245", "role": "T-HOOK-1 temporal CAPTURE; spans tagged source='spacy'"},
+        {"symbol": "RunpodFlashExtractionSettings.spacy_pipeline", "file_line": "backend/models/schemas.py:641", "role": "pinned pipeline name, default 'blank:en' (P2.4 'ship and pin spaCy model in the RunPod contract' — the pin field exists)"},
+        {"symbol": "request field spacy_pipeline in wire payload", "file_line": "backend/services/runpod_flash_extraction.py:551", "role": "backend forwards the pinned pipeline per request"}
+      ],
+      "store_fields": ["settings: ingestion.runpod_flash.spacy_pipeline"],
+      "verdict": "SAME",
+      "canonical": "spacy_pipeline (RunPod worker segmentation/temporal capture)",
+      "aliases": ["spaCy windows (P2.7b phrasing)", "blank:en"],
+      "collision_note": "None serious, but note the asymmetry: spaCy exists ONLY in the RunPod worker; the local GLiREL lane does its own sentence windowing without spaCy (glirel_infer.py). 'spaCy windows' in P2.7b describes the remote stack only.",
+      "evidence": "grep 'spacy' across backend hits only runpod_flash_extraction.py:551 and schemas.py:641; worker app.py:292-299 is the sole loader."
+    },
+    {
+      "plan_term": "relations",
+      "code_symbols": [
+        {"symbol": "RelationItem dataclass {subject,predicate,object,object_kind,confidence,evidence_phrase,relation_cue,source_predicate,validation_status}", "file_line": "backend/services/ghost_b.py:1988-1998", "role": "canonical artifact relation shape (no negated field, no sentence boundaries)"},
+        {"symbol": "LLMRelation (wire, evidence_phrase required 1-500 chars)", "file_line": "backend/services/ghost_b_schemas.py:137-152", "role": "LLM/worker wire relation"},
+        {"symbol": "UNIVERSAL_RELATION_SCHEMA (approved predicate list)", "file_line": "backend/services/ghost_b.py:169", "role": "closed predicate vocabulary; related_to = RELATION_SENTINEL catchall"},
+        {"symbol": "RELATION_FAMILY_MAP / relation_family_for_predicate", "file_line": "backend/services/graph/neo4j_writer.py:98,357", "role": "graph promotion buckets predicates into edge families (WeakAssociation default)"},
+        {"symbol": "factual_relations projection on lexicon entries", "file_line": "backend/services/ingestion/corpus_lexicon.py:1935; backend/services/storage/qdrant_writer.py:~1470", "role": "bounded per-concept relation list projected into corpus_lexicon and its Qdrant payload (capped 24)"}
+      ],
+      "store_fields": ["mongo: ghost_b_extractions.relations[]", "neo4j: typed edges via RELATION_FAMILY_MAP", "mongo: corpus_lexicon.factual_relations[]", "qdrant lexicon payload: factual_relations (kind='entity_lexicon', qdrant_writer.py:1184)"],
+      "verdict": "OVERLAPPING",
+      "canonical": "typed factual relations (RelationItem -> ghost_b_extractions.relations -> Neo4j edge -> lexicon factual_relations projection)",
+      "aliases": ["relations", "relation artifact", "edges", "factual_relations"],
+      "collision_note": "(a) one word, four layers (wire relation / durable artifact / graph edge / lexicon projection) — all the same concept flowing downstream, but line-item plan language like 'relation artifact' (P2.4) means the ghost_b_extractions row, not the Neo4j edge. Separately, P2.1 PLANS 'associated_concepts' (co-occurrence associations) and explicitly orders them kept DISTINCT from typed factual relations — associated_concepts has zero code today; do not implement it as another relations[] field.",
+      "evidence": "checklist P2.1 'Keep these associations distinct from typed factual graph relations'; grep associated_concepts/usage_frames/semantic_profile in backend = no hits."
+    },
+    {
+      "plan_term": "typed signatures",
+      "code_symbols": [
+        {"symbol": "DOMAIN_RANGE_MAP (predicate -> subject_types/object_types)", "file_line": "backend/services/ghost_b.py:289", "role": "the existing hand-authored predicate domain/range compatibility table"},
+        {"symbol": "_relation_domain_range_ok / _apply_domain_range", "file_line": "backend/services/ghost_b.py:2609,2734", "role": "per-relation check; mismatch -> warn-keep (domain_range_warn) or soft remap to related_to (domain_range_mismatch), original predicate preserved in source_predicate"},
+        {"symbol": "counters domain_range_remap_count / domain_range_warn_count", "file_line": "backend/services/ghost_b.py:2049-2050,2309-2310", "role": "existing per-batch violation-rate measurement (plan P2.5 bullet 3 partially built)"},
+        {"symbol": "tests test_domain_range_*", "file_line": "backend/tests/test_universal_schema.py:1893,2032,2127", "role": "asserting coverage of remap/warn/keep paths"}
+      ],
+      "store_fields": ["ghost_b_extractions.relations[].validation_status ('domain_range_warn'|'domain_range_mismatch')", "relations[].source_predicate (pre-remap intent)"],
+      "verdict": "OVERLAPPING",
+      "canonical": "domain/range validation (DOMAIN_RANGE_MAP + _apply_domain_range)",
+      "aliases": ["typed signatures", "typed relation signatures", "signature_valid (planned field name)", "predicate domain/range compatibility table"],
+      "collision_note": "(b) HIGH duplicate-implementation risk: P2.5 reads as green-field ('build a reviewed compatibility table', 'annotate signature_valid') but the table and enforcement ALREADY exist under the domain_range name — and current behavior is STRONGER than the plan wants (it remaps/warns; P2.5 says annotate-only, no drop/remap). Implementing signature_valid beside _apply_domain_range would double the mechanism. Correct move: evolve DOMAIN_RANGE_MAP into the reviewed table and demote remap to annotation, one mechanism.",
+      "evidence": "ghost_b.py:2734-2760 remap path; P2.5 'Initially annotate signature_valid and violation reason; do not drop or remap edges automatically' — direct contradiction with the deployed remap-to-related_to behavior."
+    },
+    {
+      "plan_term": "negation",
+      "code_symbols": [
+        {"symbol": "_EVIDENCE_STOPWORDS includes 'not','no' under '# negation / generic quantifiers'", "file_line": "backend/services/ghost_b.py:682-684", "role": "THE defect P2.4 bullet 1 targets: negation tokens are stripped as stopwords during evidence-overlap validation"},
+        {"symbol": "_evidence_token_overlap / _validate_evidence", "file_line": "backend/services/ghost_b.py:690,715", "role": "evidence gate where negation must be preserved (nearest seam for the fix)"},
+        {"symbol": "_negated_concept_terms (query-side)", "file_line": "backend/services/retriever/query_plan.py:387,1322", "role": "UNRELATED mechanism: filters negated concepts out of query plans"},
+        {"symbol": "reason 'negated_query_concept' (query-side)", "file_line": "backend/services/retriever/vocabulary.py:163,1361", "role": "UNRELATED mechanism: lexicon identity negated in the user query"}
+      ],
+      "store_fields": ["PLANNED: relations[].negated + evidence-sentence boundaries — no such fields exist on RelationItem/LLMRelation today"],
+      "verdict": "PLAN-ONLY",
+      "canonical": "relation negation capture (to-be-built: negated flag on RelationItem)",
+      "aliases": ["negation", "negated (planned field)"],
+      "collision_note": "(a) 'negation' already means something else in shipped code: retriever-side negated-query-concept filtering (query_plan.py/vocabulary.py). P2.4's negation is extraction-side and has NO code counterpart. Nearest seams: RelationItem (ghost_b.py:1988) for the negated field, _EVIDENCE_STOPWORDS/_evidence_token_overlap (ghost_b.py:682,690) for token preservation, and the worker's spaCy parse (app.py:292) for evidence-sentence boundaries.",
+      "evidence": "grep 'negated' in backend/services: only ghost_b.py:682 comment + retriever hits; RelationItem field list has no negated."
+    },
+    {
+      "plan_term": "utility gloss",
+      "code_symbols": [
+        {"symbol": "_build_utility_gloss(entry)", "file_line": "backend/services/ingestion/corpus_lexicon.py:1466,1587,1980", "role": "deterministic builder; stamped on every materialized lexicon entry and included in the rebuild digest (:2633)"},
+        {"symbol": "utility_gloss in Qdrant lexicon payload (capped 900 chars)", "file_line": "backend/services/storage/qdrant_writer.py:1454", "role": "projected beside retrieval_gloss (1800) and embedding_gloss (900)"},
+        {"symbol": "utility_gloss consumed at query time", "file_line": "backend/services/retriever/vocabulary.py:140,321-322", "role": "vocabulary matching / diagnostics surface"},
+        {"symbol": "functional contextual-usage method list shared with card builder", "file_line": "backend/services/librarian/card_builder.py:138", "role": "'the exact set _build_utility_gloss' uses — cards and gloss share method vocabulary"}
+      ],
+      "store_fields": ["mongo: corpus_lexicon.utility_gloss", "qdrant lexicon payload: utility_gloss (kind='entity_lexicon')"],
+      "verdict": "SAME",
+      "canonical": "utility_gloss (corpus_lexicon field)",
+      "aliases": ["utility gloss", "utility (P2.2 representation_method — planned embedded projection of the same material)"],
+      "collision_note": "(a) THREE-way word collision: 1) 'utility' is also a query-MODEL KIND (settings.py:739, chat_orchestrator.py:6974 resolve_query_model_kind(user_id,'utility')) — a cheap-LLM role, nothing to do with glosses; 2) 'gloss' is also UNIVERSAL_ENTITY_GLOSSES (ghost_b.py:217-223) — prompt-only entity-type disambiguation glosses, explicitly 'not consumed by any storage code'; 3) siblings retrieval_gloss/embedding_gloss are different fields — the checklist's 'one compromise gloss vector' critique (line ~892) refers to embedding_gloss being the single embedded surface, and the planned representation_method='utility' point (line 911) would embed utility_gloss content as its own vector. representation_method itself is PLAN-ONLY (only test fixture mentions of utility_gloss exist outside these files).",
+      "evidence": "grep representation_method in backend = tests only; qdrant_writer.py:1452-1454 shows all three gloss fields side by side."
+    },
+    {
+      "plan_term": "engine parity",
+      "code_symbols": [
+        {"symbol": "ENGINES tuple + ExtractionContract + resolve_extraction_contract", "file_line": "backend/services/ingestion/extraction_contract.py:31,82,164", "role": "deterministic per-doc engine resolution (off/local/cloud/runpod_flash/legacy_local/dual/local_then_*) — the 'which engine' half"},
+        {"symbol": "shared artifact shape: runpod adapter reuses ghost_b_local._to_results + SCHEMA_VERSION", "file_line": "backend/services/runpod_flash_extraction.py:28-29; backend/services/ghost_b_local.py:93", "role": "parity-by-construction of the durable artifact across legacy_local and runpod_flash"},
+        {"symbol": "schema_version stamps polymath.extract.v1 / v2", "file_line": "backend/services/ghost_b.py:1852,3391,3566; backend/services/ghost_b_local.py:93", "role": "versioned artifact contract (P2.6 bullet 1 partially built)"},
+        {"symbol": "extractor engine-identity field + backfill", "file_line": "backend/services/storage/schema_validators.py:54; backend/scripts/normalize_extraction_provenance.py:12,37-38", "role": "P0.8: extractor recorded/backfilled ('legacy_unknown' default) — P2.6 'record extraction engine' seam"},
+        {"symbol": "_local_pipeline_version / validate_endpoints (sidecar version-match probe)", "file_line": "backend/services/extraction_validation.py:40,48,132", "role": "existing runtime parity check: sidecar PIPELINE_VERSION vs in-repo version, GLiNER backend/device"},
+        {"symbol": "engine-independent lexicon projector (reads ghost_b_extractions regardless of engine)", "file_line": "backend/services/ingestion/corpus_lexicon.py", "role": "P2.6 final bullet's 'same post-extraction projector for all engines' — already true structurally"}
+      ],
+      "store_fields": ["ghost_b_extractions.schema_version", "ghost_b_extractions.extractor", "settings: per-corpus extraction engine (contract source 'corpus'|'global'|'default')"],
+      "verdict": "OVERLAPPING",
+      "canonical": "extraction artifact contract + engine identity (schema_version + extractor + ExtractionContract)",
+      "aliases": ["engine parity", "extraction parity", "P2.6", "contract hash (planned)", "parity compare (planned harness)"],
+      "collision_note": "(a) 'parity' means three unrelated things in this repo: 1) P2.6/P2.7 engine/extraction parity (this row — measurement harness is PLAN-ONLY, no comparison script exists); 2) Mongo<->Qdrant eligible-ID parity in lexicon backfill (backend/scripts/backfill_corpus_lexicon.py:516, corpus_lexicon.py:2734); 3) runpod-EMBED cosine parity promotion gate (P1.9, checklist line ~790: local-mxfp8 vs remote-fp = 0.98). When the plan says 'parity compare' in P2.7 it means engine-vs-engine yield/quality on the SAME chunks — nothing shipped does that today.",
+      "evidence": "grep -rni parity backend --include=*.py returns only Mongo/Qdrant and score-parity hits; no engine-comparison harness exists in backend/scripts."
+    },
+    {
+      "plan_term": "RunPod",
+      "code_symbols": [
+        {"symbol": "extract_entities (adapter entrypoint) / _submit_and_wait / _validate_wire_result", "file_line": "backend/services/runpod_flash_extraction.py:424,131,281", "role": "queue adapter: batches chunks, polls api.runpod.ai/v2, validates wire results into ExtractionResult"},
+        {"symbol": "RunpodFlashExtractionSettings / RunpodFlashAccount / accounts[]", "file_line": "backend/models/schemas.py:612,578,623", "role": "settings incl. multi-account registry (P2.7c, shipped+live-verified)"},
+        {"symbol": "runpod_flash_extractor/app.py (worker)", "file_line": "runpod_flash_extractor/app.py:23,516,546", "role": "serverless worker: contract check, gliner-relex + spaCy + deterministic normalization"},
+        {"symbol": "register_runpod_account.py", "file_line": "backend/scripts/register_runpod_account.py:2,185", "role": "account registration; also carries optional EMBED endpoint id"},
+        {"symbol": "_embed_batch_runpod + RUNPOD_EMBED_CONTRACT_VERSION (embedding lane)", "file_line": "backend/services/embedder.py:559,67,488", "role": "P1.8 burst EMBEDDING on the same account registry, reusing _AccountDispatcher/_submit_and_wait from the extraction adapter"}
+      ],
+      "store_fields": ["settings: ingestion.runpod_flash.{endpoint_id,model_id,model_revision,thresholds,accounts[]}", "encrypted keys: api_keys.runpod + api_keys.runpod_accounts.<name>"],
+      "verdict": "OVERLAPPING",
+      "canonical": "Runpod Flash (serverless burst lane; two sub-lanes: runpod_flash extraction, runpod embed)",
+      "aliases": ["RunPod", "runpod_flash", "Flash", "runpod (embed mode string)", "P2.7/P2.7c"],
+      "collision_note": "(a) 'RunPod' names two lanes with different contracts and different workers: extraction (runpod_flash_extractor/, polymath.runpod_gliner_relex.vN) and embedding (runpod_flash_embedder/, polymath.runpod_embed.v1, embedder.py mode='runpod'). NOT a duplicate implementation — the embed lane deliberately imports _AccountDispatcher and _submit_and_wait from runpod_flash_extraction.py (embedder.py:581), so routing/polling exists once. Keep it that way: any P2.7b dispatch changes land in runpod_flash_extraction.py and both lanes inherit.",
+      "evidence": "embedder.py:566-581 ('the enabled account with the least in-flight batches wins... services.runpod_flash_extraction._AccountDispatcher')."
+    },
+    {
+      "plan_term": "burst orchestration",
+      "code_symbols": [
+        {"symbol": "_AccountDispatcher (least-in-flight, weight-tiebroken, bounded failover) + _AccountState semaphores", "file_line": "backend/services/runpod_flash_extraction.py:231,204,220-228", "role": "SHIPPED half: multi-account batch routing (P2.7c live-verified)"},
+        {"symbol": "'runpod_burst' INGEST_PROFILES entry", "file_line": "backend/services/ingestion/batches.py:106,137-142", "role": "ingest profile: autoscaling extraction, summaries overlap, no endpoint pinning"},
+        {"symbol": "resource_planner 'runpod_burst' branch", "file_line": "backend/services/ingestion/resource_planner.py:410", "role": "profile-aware resource planning"},
+        {"symbol": "request_batch_size x request_concurrency knobs", "file_line": "backend/models/schemas.py:612-690 (RunpodFlashExtractionSettings)", "role": "the sizing knobs P2.7b's saturating dispatch must drive"}
+      ],
+      "store_fields": ["settings: ingestion.runpod_flash.{request_batch_size,request_concurrency,max_workers,min_workers,idle_timeout}", "diagnostics: per-account {batches,failures,failovers} (runpod_flash_extraction.py:268-276)"],
+      "verdict": "OVERLAPPING",
+      "canonical": "Runpod burst dispatch (shipped: _AccountDispatcher + runpod_burst profile; planned: P2.7b orchestration layer)",
+      "aliases": ["burst orchestration", "P2.7b", "runpod_burst (profile name)", "saturating burst dispatch (planned)", "chunk-complete barrier (planned)"],
+      "collision_note": "(a) 'burst' is used for three unrelated things: extraction bursts (this row), embed bursts (embedder.py:8,62), and upload-admission bursts ('500-file simultaneous burst', ingestion/admission.py:12) plus incidental 'burst-load DNS blip' in llm.py. (b) build-vs-built split inside P2.7b itself: account routing/failover is DONE; disposition matrix, chunk-complete barrier, eligible-chunk manifest, per-burst chunks/sec + worker-seconds + cost-per-1k-chunks recording have NO code — grep 'barrier|manifest|disposition' in backend/services/ingestion returns nothing relevant. Nearest seam for the barrier: worker.py pass_plan/batch machinery (batches.py INGEST_PROFILES) which already sequences queryable-vs-enrichment passes.",
+      "evidence": "checklist P2.7b bullets vs code: only bullet 'dispatch routes request batches across enabled accounts' is checked [x]; batches.py:137 runpod_burst profile has no barrier semantics."
+    },
+    {
+      "plan_term": "disposition matrix",
+      "code_symbols": [],
+      "store_fields": ["PLANNED artifact: per-corpus classification reingest | re-extract-only | projection-only, owner-signed before any mass job; current known values live only in prose (checklist Active PoC Scope: v2=projection-only(frozen), mark+ecom=re-extract-only, UGO=canary)"],
+      "verdict": "PLAN-ONLY",
+      "canonical": "per-corpus disposition matrix (to-be-built)",
+      "aliases": ["disposition matrix", "P2.7b matrix", "S3 sign-off artifact", "reingest / re-extract-only / projection-only"],
+      "collision_note": "No code symbol, no Mongo field. It is a GATE artifact, not a config: S3 (PLAN_CRITIQUE:82) produces it from the heading/OCR audit and it must precede S4's paid pass and S11's burst. Nearest existing seams: (1) per-corpus engine stamp resolved by resolve_extraction_contract (extraction_contract.py:164 — corpus-level extraction config already exists and is the natural home for a disposition field), (2) corpus strict-readiness (services/ingestion/readiness.py) which P2.7 already plans to wire extraction/concept readiness into. Risk (b): teams could encode disposition twice — once as a doc/table for sign-off and again ad hoc as engine toggles; make the corpus settings field the single source and render the sign-off table from it.",
+      "evidence": "grep -rni disposition backend --include=*.py = zero hits; PLAN_CRITIQUE_2026-07-13.md:82-83 and checklist P2.7b bullet 1 define it only in prose."
+    },
+    {
+      "plan_term": "wire contract",
+      "code_symbols": [
+        {"symbol": "RUNPOD_CONTRACT_VERSION='polymath.runpod_gliner_relex.v2' / _V3 + ACCEPTED_CONTRACT_VERSIONS", "file_line": "backend/services/runpod_flash_extraction.py:35-45", "role": "extraction wire contract, versioned; v3 additively adds time_expressions (T-HOOK-1); requests stamped v2 for rolling worker compat"},
+        {"symbol": "worker _CONTRACT_VERSION + _ACCEPTED_CONTRACT_VERSIONS + rejection on mismatch", "file_line": "runpod_flash_extractor/app.py:23-28,546", "role": "worker side of the same contract"},
+        {"symbol": "_validate_wire_result", "file_line": "backend/services/runpod_flash_extraction.py:281", "role": "response-shape enforcement before artifact conversion"},
+        {"symbol": "time_expressions (wire) -> temporal_captures + temporal_capture_version (artifact)", "file_line": "backend/services/runpod_flash_extraction.py:414-419; backend/services/ghost_b.py:2088-2089; runpod_flash_extractor/app.py:504-505", "role": "T-HOOK-1 field, RENAMED at the wire->artifact boundary"},
+        {"symbol": "tests test_temporal_capture_contract.py / test_runpod_flash_extraction.py", "file_line": "backend/tests/test_temporal_capture_contract.py:51-59", "role": "asserting contract-version and capture-field coverage"}
+      ],
+      "store_fields": ["ghost_b_extractions.temporal_captures[] + temporal_capture_version", "wire-only: contract_version, time_expressions, time_expressions_truncated, output_mode='joint_relex'"],
+      "verdict": "SAME",
+      "canonical": "Runpod extraction wire contract (polymath.runpod_gliner_relex.vN)",
+      "aliases": ["wire contract", "T-HOOK-1 contract", "contract_version", "wire shape"],
+      "collision_note": "(a) 'contract' is overloaded FOUR ways in this family: 1) this wire contract (runpod_gliner_relex.vN, request/response shape); 2) the embed wire contract polymath.runpod_embed.v1 (embedder.py:63-67, different worker); 3) the durable ARTIFACT schema polymath.extract.v1/v2 (ghost_b_extractions.schema_version — survives in Mongo, wire does not); 4) ExtractionContract (extraction_contract.py:82 — which-engine-runs resolution, no wire at all). Also note the deliberate name drift time_expressions (wire) vs temporal_captures (artifact): SAME concept, two names on either side of _validate_wire_result — cite both when auditing T-HOOK-2 backfills.",
+      "evidence": "runpod_flash_extraction.py:414-419 performs the rename; PLAN_CRITIQUE:67 confirms the fields 'exist only in runpod_flash_extraction.py (T-HOOK-1 wire capture)'."
+    },
+    {
+      "plan_term": "provenance",
+      "code_symbols": [
+        {"symbol": "extractor + schema_version on extraction rows (validator + backfill)", "file_line": "backend/services/storage/schema_validators.py:52-54; backend/scripts/normalize_extraction_provenance.py:11-13,37-38", "role": "engine-identity provenance; backfill stamps extractor='legacy_unknown', schema_version='polymath.extract.v1', provenance_normalized_at"},
+        {"symbol": "summary_model refusal at storage boundary", "file_line": "backend/services/storage/qdrant_writer.py:846-852", "role": "summary provenance: no producing model => refused; legacy imports must say 'legacy_unknown' explicitly"},
+        {"symbol": "corpus_lexicon bounded source provenance (source_document_ids/source_parent_ids/source_chunk_ids/alias_evidence)", "file_line": "backend/services/storage/qdrant_writer.py:1448-1462; backend/services/ingestion/corpus_lexicon.py:9", "role": "concept-to-source provenance projected into Qdrant (P2.8's 'concept provenance ... exists' checkbox)"},
+        {"symbol": "librarian card per-field provenance contract", "file_line": "backend/services/librarian/card_builder.py:34,83", "role": "card fields carry aggregated id-list provenance (673 cards live)"},
+        {"symbol": "RelationItem.source_predicate + validation_status", "file_line": "backend/services/ghost_b.py:1996-1998,2634", "role": "relation-level provenance of remaps/repairs (original intent preserved)"}
+      ],
+      "store_fields": ["ghost_b_extractions.{extractor,schema_version,provenance_normalized_at}", "parent_chunks.summary_model", "corpus_lexicon.{source_document_ids,source_parent_ids,source_chunk_ids,alias_evidence}", "relations[].{source_predicate,validation_status}", "PLANNED: provenance classes extracted|derived|attested|generated (checklist:864-866) — no provenance_class field exists anywhere"],
+      "verdict": "OVERLAPPING",
+      "canonical": "provenance (umbrella; concrete mechanisms: extractor/schema_version, summary_model, lexicon source-ID lists, relation source_predicate)",
+      "aliases": ["provenance", "engine identity", "field-level provenance", "provenance classes (planned)", "per-field provenance (cards)"],
+      "collision_note": "(a) one word, four shipped mechanisms plus one planned taxonomy: plan sentences using bare 'provenance' must be resolved per-context — P0.1/P0.8 mean extractor/summary_model stamps, P2.8 means lexicon source-ID lists, P2.1/P2.2 mean the FOUR-CLASS taxonomy (extracted/derived/attested/generated) which is PLAN-ONLY (grep provenance_class = zero hits; nearest seam = corpus_lexicon entry builder + _lexicon_payload). Risk (b): the four-class field could get implemented separately on lexicon entries, Qdrant representation points, and cards; it should be one enum defined once (corpus_lexicon) and projected.",
+      "evidence": "checklist:864-866 defines the four classes; card_builder.py:34 'provenance contract' and qdrant_writer.py:1448 comment show the two shipped projection surfaces."
+    }
+  ]
+}

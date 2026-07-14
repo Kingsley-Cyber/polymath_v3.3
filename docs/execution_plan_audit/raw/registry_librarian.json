@@ -1,0 +1,243 @@
+{
+  "family": "librarian cards/shelves/seats",
+  "repo": "/Users/king/polymath_v3.3",
+  "generated": "2026-07-13",
+  "sources_of_truth": [
+    "backend/services/librarian/{card_builder.py,shelf_engine.py,shelf_policy_data.py}",
+    "backend/services/facets/final_selector.py",
+    "backend/services/retriever/{reservation_policy.py,ranking_policy.py,planned_fusion.py}",
+    "backend/services/chat_orchestrator.py",
+    "backend/scripts/{build_librarian_cards.py,probe_shelf_roles.py}",
+    "docs/RAPTOR_RAG_IMPLEMENTATION_CHECKLIST.md",
+    "docs/PLAN_CRITIQUE_2026-07-13.md"
+  ],
+  "rows": [
+    {
+      "plan_term": "librarian card",
+      "code_symbols": [
+        {"symbol": "build_librarian_card", "file_line": "backend/services/librarian/card_builder.py:255", "role": "per-(corpus_id,doc_id) deterministic card builder, zero LLM"},
+        {"symbol": "build_corpus_cards", "file_line": "backend/services/librarian/card_builder.py:633", "role": "corpus-wide build + Mongo upsert, skips zero-seed docs"},
+        {"symbol": "CARD_COLLECTION = \"librarian_cards\"", "file_line": "backend/services/librarian/card_builder.py:114", "role": "Mongo collection name"},
+        {"symbol": "CARD_SCHEMA_VERSION = \"librarian_card.v0\"", "file_line": "backend/services/librarian/card_builder.py:113", "role": "schema version constant"},
+        {"symbol": "slim_card_payload", "file_line": "backend/services/librarian/card_builder.py:598", "role": "slim Tier-0 routing projection — RETURNED only, never written to Qdrant yet"},
+        {"symbol": "scripts/build_librarian_cards.py", "file_line": "backend/scripts/build_librarian_cards.py:2", "role": "CLI: dry-run/--apply upsert"}
+      ],
+      "store_fields": [
+        "Mongo librarian_cards keyed (corpus_id, doc_id)",
+        "fields: schema_version, built_at, builder_version, rejected_value_count",
+        "entry fields (each [{value, value_key, method, source_ids, confidence, support}]): central_subjects, mechanisms_taught, candidate_latent_subjects, capabilities_developed, problems_addressed, transferable_principles, risks_or_likely_misuse",
+        "counterbalancing_concepts: [] (empty in v0)",
+        "evidence_spans: {source_parent_ids, source_chunk_ids, section_ids}",
+        "Qdrant: NO card payload exists yet; planned slim payload = {schema_version, corpus_id, doc_id, subjects(8), mechanisms(6), capabilities(6)} from slim_card_payload"
+      ],
+      "verdict": "SAME",
+      "canonical": "librarian_card.v0",
+      "aliases": ["librarian card", "card", "librarian_cards (Mongo collection)", "slim routing projection (its Tier-0 face)"],
+      "collision_note": "The word 'card' names THREE different planned artifacts: (1) librarian_card.v0 per-document (built, 673 live), (2) P1.4 'corpus/shelf profile card' per-corpus (PLAN-ONLY), (3) P3.2 'bridge cards' per cross-corpus concept (PLAN-ONLY). Only (1) exists in code.",
+      "evidence": "card_builder.py:20-95 schema docstring; checklist Phase 1 items marked [x] '673 cards live'; checklist:271 'Qdrant/Tier-0 write is deliberately NOT in wave 1'"
+    },
+    {
+      "plan_term": "librarian_card.v0",
+      "code_symbols": [
+        {"symbol": "CARD_SCHEMA_VERSION", "file_line": "backend/services/librarian/card_builder.py:113", "role": "exact string 'librarian_card.v0' stamped on every card"},
+        {"symbol": "BUILDER_VERSION = \"librarian_card_builder.v0.1\"", "file_line": "backend/services/librarian/card_builder.py:115", "role": "builder provenance"}
+      ],
+      "store_fields": ["librarian_cards.schema_version = 'librarian_card.v0'"],
+      "verdict": "SAME",
+      "canonical": "librarian_card.v0",
+      "aliases": ["librarian card", "card.v0"],
+      "collision_note": "None — plan string and code string are byte-identical.",
+      "evidence": "card_builder.py:26,113; shelf_engine.py:4 and final_selector.py:41 both reference 'librarian_card.v0 dicts' by this exact name"
+    },
+    {
+      "plan_term": "shelf",
+      "code_symbols": [
+        {"symbol": "ROLE_DIRECT/FOUNDATIONAL/ADJACENT/BRIDGE/COUNTERBALANCE, ALL_ROLES", "file_line": "backend/services/librarian/shelf_engine.py:54-65", "role": "the ONLY code meaning of 'shelf': a query-relative role bucket"},
+        {"symbol": "shelf_counts / skipped_roles", "file_line": "backend/services/librarian/shelf_engine.py:466-490", "role": "per-role counts in assign_shelf_roles output"}
+      ],
+      "store_fields": ["nothing persisted — roles are computed per query and NEVER stored on documents (shelf_engine.py:7-8)"],
+      "verdict": "OVERLAPPING",
+      "canonical": "shelf role (say 'shelf role' for P1.5; reserve bare 'shelf' for the P1.4 corpus meaning)",
+      "aliases": ["role", "shelf role", "retrieval role", "librarian selection role"],
+      "collision_note": "FAILURE MODE (a) — one word, two meanings. P1.4 'Route Shelves Before Books' (checklist:622-629) and the P0.3 acceptance line \"corpus_floor.skipped reports why a selected SHELF was omitted\" (checklist:430) use shelf = CORPUS. P1.5/shelf_engine uses shelf = query-relative ROLE bucket. Only the role meaning exists in code; the corpus meaning is plan-only.",
+      "evidence": "shelf_engine.py:1-8 ('query-relative shelf-role engine ... roles NEVER persisted'); checklist:430 uses 'shelf' where code says corpus (ranking_policy corpus_floor_meta.skipped, ranking_policy.py:1801)"
+    },
+    {
+      "plan_term": "shelf_reserve",
+      "code_symbols": [
+        {"symbol": "settings.SHELF_RESERVE_ENABLED (default False)", "file_line": "backend/config.py:392", "role": "dark-launch flag"},
+        {"symbol": "_shelf_reserve_query_concepts", "file_line": "backend/services/chat_orchestrator.py:3560", "role": "query->concept-id resolution (vocabulary_resolution canonical_key primary, concept_groups fallback, cap 12)"},
+        {"symbol": "_shelf_reserve_context_for_pool / _SHELF_RESERVE_CARD_PROJECTION", "file_line": "backend/services/chat_orchestrator.py:3611,3545", "role": "one Mongo find on librarian_cards for pooled docs"},
+        {"symbol": "ShelfReserveContext", "file_line": "backend/services/facets/final_selector.py:34", "role": "pure-data carrier into the selector"},
+        {"symbol": "reserve_shelf_roles / _SHELF_RESERVE_ROLES=(bridge,counterbalance)", "file_line": "backend/services/facets/final_selector.py:364,31", "role": "the seat pass itself: at most 1 seat per role, pool-only, gated by passes_corpus_reservation"},
+        {"symbol": "tests/test_shelf_reserve_wiring.py", "file_line": "backend/tests/test_shelf_reserve_wiring.py:1", "role": "wiring tests"}
+      ],
+      "store_fields": ["diagnostics only: selector_meta['shelf_reserve'] (final_selector.py:596) surfaced as retrieval_diagnostics['shelf_reserve'] (chat_orchestrator.py:7371) with {enabled, roles_considered, seated[], skipped{}, policy_version, reading_path[]}"],
+      "verdict": "SAME",
+      "canonical": "shelf_reserve (P1.5 seat pass)",
+      "aliases": ["seat pass", "role-diversity reserve (checklist P1.5 wording)", "shelf-role seat pass"],
+      "collision_note": "Near-name collision with 'shelf routing' (P1.4) — unrelated concepts. Also: docs/PLAN_CRITIQUE_2026-07-13.md:71 states 'shelf_reserve as a symbol does not exist in backend code' — STALE since merge f049041 (wave3/reserve); the symbol family now exists, dark behind SHELF_RESERVE_ENABLED=False.",
+      "evidence": "git log f049041 'Merge wave3/reserve — shelf_reserve dark wiring'; final_selector.py:364-538; checklist:294-297 '[IN CODE — wave3/reserve, dark, pending before/after evals]'"
+    },
+    {
+      "plan_term": "shelf routing",
+      "code_symbols": [],
+      "store_fields": ["planned: corpus-level profile cards indexed with distinct kind + corpus ownership (checklist:624-626) — no collection, no Qdrant kind, no router exists"],
+      "verdict": "PLAN-ONLY",
+      "canonical": "shelf routing (P1.4, to-be-built)",
+      "aliases": ["route shelves before books", "corpus routing", "corpus/shelf profile card"],
+      "collision_note": "FAILURE MODE (a): 'shelf' here means corpus, not role. Do NOT reuse librarian_card.v0 or shelf_engine names for it. Nearest existing seams: (1) slim_card_payload (card_builder.py:598) is the per-DOC routing projection the per-CORPUS card should aggregate from; (2) Tier-0 doc_summaries routing (owner architecture) is the routing stage it plugs into; (3) 'preserve user-selected corpora even when shelf routing is weak' (checklist:629) is ALREADY implemented as the corpus floor (ranking_policy.py:1682, final_selector.reserve_corpora:312).",
+      "evidence": "grep for shelf_routing/corpus profile card in backend/ returns zero code hits; checklist:622-636 all unchecked"
+    },
+    {
+      "plan_term": "shelf roles",
+      "code_symbols": [
+        {"symbol": "assign_shelf_roles", "file_line": "backend/services/librarian/shelf_engine.py:368", "role": "pure engine entry point: (query_concepts, cards) -> {assignments, shelf_counts, skipped_roles, policy_version}"},
+        {"symbol": "_role_direct/_role_foundational/_role_adjacent/_role_bridge/_role_counterbalance", "file_line": "backend/services/librarian/shelf_engine.py:185,216,253,289,341", "role": "per-role eligibility builders (indexed field overlap only)"},
+        {"symbol": "scripts/probe_shelf_roles.py", "file_line": "backend/scripts/probe_shelf_roles.py:4", "role": "READ-ONLY dry-run over live librarian_cards"}
+      ],
+      "store_fields": ["none persisted (query-relative by contract); consumed in-process by final_selector.reserve_shelf_roles"],
+      "verdict": "SAME",
+      "canonical": "shelf role (assign_shelf_roles)",
+      "aliases": ["librarian selection roles (P1.5 title)", "retrieval roles", "query-relative roles"],
+      "collision_note": "None within the role meaning; see 'shelf' row for the shelf-as-corpus collision.",
+      "evidence": "checklist P1.5 items [x] 'merged + live-probed 2026-07-13 on the PoC pair'"
+    },
+    {
+      "plan_term": "bridge",
+      "code_symbols": [
+        {"symbol": "ROLE_BRIDGE", "file_line": "backend/services/librarian/shelf_engine.py:57", "role": "role constant"},
+        {"symbol": "_role_bridge", "file_line": "backend/services/librarian/shelf_engine.py:289", "role": "eligibility: shared transferable_principles/mechanisms_taught ids, subject_overlap < 0.25, evidence on BOTH sides"},
+        {"symbol": "principle_bridge", "file_line": "backend/services/librarian/shelf_engine.py:161", "role": "evidence-backed shared-id matcher"},
+        {"symbol": "chains (document->concept->transferable_principle->user_goal)", "file_line": "backend/services/librarian/shelf_engine.py:308-319", "role": "mandated explanation chain per bridge"},
+        {"symbol": "_SHELF_RESERVE_ROLES[0]", "file_line": "backend/services/facets/final_selector.py:31", "role": "bridge is first seat priority in shelf_reserve"}
+      ],
+      "store_fields": ["role output fields: matched_fields, evidence_ids, query_evidence_ids, chains, score; nothing persisted"],
+      "verdict": "SAME",
+      "canonical": "bridge (shelf role)",
+      "aliases": ["bridge seat", "bridge role"],
+      "collision_note": "FAILURE MODE (b) — duplicate-implementation risk: P3.2 'bridge cards' (checklist:1141-1147, PLAN-ONLY) and 'transfer_edge' rows (checklist:319,1149-1155, PLAN-ONLY) both materialize the SAME evidence join _role_bridge computes at query time (shared principle/mechanism + different central subjects + two-sided evidence). If built without reusing shelf_engine.principle_bridge/_role_bridge criteria, the bridge notion will exist twice with drifting thresholds. Also FAILURE MODE (a): 'bridge' additionally names the answerability-gate 'LLM bridges' behavior in relationship queries (services/answerability_tuning.py family) — unrelated mechanism, same word.",
+      "evidence": "shelf_engine.py:24-29 docstring; checklist:235-246 hard bridge-seat rule; checklist:1149 transfer_edge stores 'principle/mechanism ID, evidence IDs on both sides' — the exact _role_bridge inputs"
+    },
+    {
+      "plan_term": "counterbalance",
+      "code_symbols": [
+        {"symbol": "ROLE_COUNTERBALANCE / _role_counterbalance", "file_line": "backend/services/librarian/shelf_engine.py:58,341", "role": "role: triggered only by policy data, scores coverage of COUNTERBALANCE_KEYS"},
+        {"symbol": "HIGH_MISUSE_KEYS / COUNTERBALANCE_KEYS / POLICY_VERSION='shelf_policy.v0'", "file_line": "backend/services/librarian/shelf_policy_data.py:20-40", "role": "versioned owner-curated policy DATA (trigger + qualifier vocabularies)"},
+        {"symbol": "_SHELF_RESERVE_ROLES[1]", "file_line": "backend/services/facets/final_selector.py:31", "role": "second seat priority in shelf_reserve"}
+      ],
+      "store_fields": ["librarian_cards.counterbalancing_concepts — schema field EXISTS but is hardwired empty in v0 (card_builder.py:81); role assignment reads central_subjects, not this field"],
+      "verdict": "SAME",
+      "canonical": "counterbalance (shelf role, policy-triggered under shelf_policy.v0)",
+      "aliases": ["counterbalancing sources", "counterbalancing_concepts (card field, empty v0)", "COUNTERBALANCE_KEYS (policy data)"],
+      "collision_note": "Three artifacts share the stem with distinct jobs: role (per-query), policy keys (versioned data), card field (persisted, currently always empty — effectively PLAN-ONLY until Phase 4 LLM enrichment). Keep the card field distinct from the policy vocabulary or Phase 4 will double-implement the qualifier source.",
+      "evidence": "shelf_engine.py:30-35 role contract; shelf_policy_data.py:1-16 'DATA, not logic'; card_builder.py:81 'counterbalancing_concepts: [] # empty in v0'"
+    },
+    {
+      "plan_term": "foundational",
+      "code_symbols": [
+        {"symbol": "ROLE_FOUNDATIONAL / _role_foundational", "file_line": "backend/services/librarian/shelf_engine.py:56,216", "role": "capabilities_developed overlap >= 0.25 AND >=1 mechanisms_taught entry with source ids"},
+        {"symbol": "FOUNDATIONAL_MIN_CAPABILITY_OVERLAP = 0.25", "file_line": "backend/services/librarian/shelf_engine.py:78", "role": "named bound"}
+      ],
+      "store_fields": ["none persisted"],
+      "verdict": "SAME",
+      "canonical": "foundational (shelf role)",
+      "aliases": [],
+      "collision_note": "None. Live probe honestly skipped it on the PoC pair (no qualifying candidate) — checklist P1.5 note.",
+      "evidence": "shelf_engine.py:17-19 eligibility docstring matches checklist:648 'capability overlap supported by mechanisms/evidence' verbatim in intent"
+    },
+    {
+      "plan_term": "adjacent",
+      "code_symbols": [
+        {"symbol": "ROLE_ADJACENT / _role_adjacent", "file_line": "backend/services/librarian/shelf_engine.py:57,253", "role": "shared capabilities/mechanisms with subject_overlap strictly < 0.25"},
+        {"symbol": "ADJACENT_MAX_SUBJECT_OVERLAP = 0.25", "file_line": "backend/services/librarian/shelf_engine.py:75", "role": "named bound; BRIDGE_MAX_SUBJECT_OVERLAP aliases it (line 81) — one shared 'different subjects' notion"}
+      ],
+      "store_fields": ["none persisted"],
+      "verdict": "SAME",
+      "canonical": "adjacent (shelf role)",
+      "aliases": [],
+      "collision_note": "None.",
+      "evidence": "shelf_engine.py:20-23; checklist:649-650"
+    },
+    {
+      "plan_term": "reading path",
+      "code_symbols": [
+        {"symbol": "shelf_meta['reading_path'] seed", "file_line": "backend/services/facets/final_selector.py:394,523-537", "role": "role-ordered (direct->foundational->adjacent->bridge->counterbalance) list of {doc_id, corpus_id, role} over seated + already-present docs"},
+        {"symbol": "retrieval_diagnostics['shelf_reserve'].reading_path", "file_line": "backend/services/chat_orchestrator.py:7364-7371", "role": "surfaced into the retrieval trace metadata only"}
+      ],
+      "store_fields": ["diagnostics-only; not persisted, not rendered to users"],
+      "verdict": "OVERLAPPING",
+      "canonical": "reading_path",
+      "aliases": ["reading-path seed"],
+      "collision_note": "Plan (checklist:668-671) wants a user-facing reading path 'not merely a flat chunk list' for librarian-mode questions; code has only the diagnostics SEED, dark behind SHELF_RESERVE_ENABLED. The answer-shaping half is to-be-built — nearest seam is the trace-metadata consumer in the frontend live-trace tabs.",
+      "evidence": "checklist:668-671 '[IN CODE — wave3/reserve (diagnostics seed: meta.shelf_reserve.reading_path), dark]'"
+    },
+    {
+      "plan_term": "seat",
+      "code_symbols": [
+        {"symbol": "reservation_policy module docstring 'final evidence seats'", "file_line": "backend/services/retriever/reservation_policy.py:1", "role": "concept definition: a protected slot in the final evidence packet"},
+        {"symbol": "weakest_unprotected_pos / swap_selected / protected_keys", "file_line": "backend/services/facets/final_selector.py:250,278", "role": "seat replace/protect machinery shared by corpus floor + shelf_reserve"},
+        {"symbol": "shelf_meta['seated']", "file_line": "backend/services/facets/final_selector.py:514", "role": "seated role docs diagnostic"},
+        {"symbol": "selected_by='corpus_floor'", "file_line": "backend/services/retriever/ranking_policy.py:1778,1821-1827", "role": "seat protection expressed as selection REASON, never a score bonus (P0.3 contract)"}
+      ],
+      "store_fields": ["expressed in diagnostics only: selected_by, planned_corpus_reservations, shelf_reserve.seated; deliberately never a score field"],
+      "verdict": "SAME",
+      "canonical": "seat (protected final-packet slot)",
+      "aliases": ["reserved seat", "protected seat", "seated"],
+      "collision_note": "Consistent meaning across P0.3/P1.5 code and plan. Note there is no symbol literally named 'seat' — it lives in docstrings, diagnostics keys (seated), and reasons; grep for 'seat' not 'Seat class'.",
+      "evidence": "reservation_policy.py:19-24 'Neither path may inflate a score to protect a seat'"
+    },
+    {
+      "plan_term": "reservation",
+      "code_symbols": [
+        {"symbol": "passes_corpus_reservation / corpus_reservation_bound", "file_line": "backend/services/retriever/reservation_policy.py:50,38", "role": "THE shared calibrated gate (P0.3): MIN_SCORE=0.25, MIN_SCORE_RATIO=0.30 of top"},
+        {"symbol": "reserve_planned_finalists", "file_line": "backend/services/retriever/planned_fusion.py:751 (gate at 422,1079)", "role": "post-rerank finalist corpus reservations, uses the shared gate"},
+        {"symbol": "select_with_diversity corpus floor", "file_line": "backend/services/retriever/ranking_policy.py:1256 (gate at 1699,1722)", "role": "diversity-selection corpus floor, uses the shared gate"},
+        {"symbol": "reserve_shelf_roles", "file_line": "backend/services/facets/final_selector.py:364 (gate at 486)", "role": "shelf_reserve seat pass, uses the shared gate"},
+        {"symbol": "reserve_lanes", "file_line": "backend/services/facets/final_selector.py:228", "role": "DIFFERENT concept: facet-lane coverage reservation, no corpus gate"},
+        {"symbol": "reserve_corpora", "file_line": "backend/services/facets/final_selector.py:312 (own bound _strong_score_floor at 97,331)", "role": "chat-side corpus floor NOT on the shared gate"}
+      ],
+      "store_fields": ["diagnostics: corpus_reservation_details, corpus_floor_candidates_preserved/skipped (planned_fusion.py:447-448), corpus_floor.reservation_bound (ranking_policy.py:1699)"],
+      "verdict": "OVERLAPPING",
+      "canonical": "corpus reservation (the reservation_policy gate); qualify other uses as 'lane reservation' / 'finalist reservation'",
+      "aliases": ["reserved seat gate", "calibrated eligibility discipline", "reservation bound"],
+      "collision_note": "FAILURE MODE (a): 'reserve/reservation' spans four mechanisms — lane reservation (reserve_lanes), corpus floor (3 implementations), planned-finalist reservation, and the shelf-role seat pass. Only three of the four corpus-seat paths use the shared reservation_policy gate; final_selector.reserve_corpora still applies its own _strong_score_floor (0.80 ratio && 0.35 abs) — a stricter, uncalibrated sibling.",
+      "evidence": "reservation_policy.py:3-10 names exactly two sanctioned deciders; final_selector.py:331 calls _strong_score_floor not passes_corpus_reservation"
+    },
+    {
+      "plan_term": "corpus floor",
+      "code_symbols": [
+        {"symbol": "corpus_floor_meta in select_with_diversity", "file_line": "backend/services/retriever/ranking_policy.py:1682-1905", "role": "retriever-side floor (calibrated via reservation_policy; eligibility trace, skip reasons; meta key 'corpus_floor' at 1905)"},
+        {"symbol": "reserve_planned_finalists preservation", "file_line": "backend/services/retriever/planned_fusion.py:422-448,1079-1118", "role": "fusion-side floor twin (calibrated)"},
+        {"symbol": "reserve_corpora", "file_line": "backend/services/facets/final_selector.py:312-362 -> selector_meta['corpus_floor'] at 593", "role": "chat/selector-side floor (UNcalibrated: _strong_score_floor)"}
+      ],
+      "store_fields": ["diagnostics: retrieval selection.corpus_floor (ranking_policy) AND final_selector meta.corpus_floor — two keys with the SAME NAME from DIFFERENT mechanisms; also corpus_floor_candidates_preserved/skipped; consumed by backend/scripts/run_heldout_eval.py:157"],
+      "verdict": "OVERLAPPING",
+      "canonical": "corpus_floor (per-corpus coverage floor) — needs a single gate; today it is one idea, three implementations, two bounds",
+      "aliases": ["reserve_corpora (final_selector)", "corpus-floor calibration (P0.3)", "unconditional corpus floor (retired behavior)"],
+      "collision_note": "FAILURE MODE (b) CONFIRMED: the corpus-floor idea is implemented three times; ranking_policy + planned_fusion share the calibrated P0.3 gate, but final_selector.reserve_corpora keeps its own discipline. The checklist itself flags it (2026-07-13 ledger, checklist:1291-1293: 'reserve_corpora still uses its own discipline; superseded by shelf_reserve in P1.5') — but that supersession claim is WRONG in code: reserve_shelf_roles seats only bridge/counterbalance roles and does not do per-corpus coverage, and reserve_corpora still executes unconditionally (final_selector.py:572) even with SHELF_RESERVE_ENABLED on. Plus FAILURE MODE (a): two diagnostics keys both named 'corpus_floor' report different mechanisms.",
+      "evidence": "final_selector.py:572+576 run both passes back-to-back; reservation_policy.py:3-10 sanctions only two deciders, reserve_corpora is a third"
+    },
+    {
+      "plan_term": "reservation_policy",
+      "code_symbols": [
+        {"symbol": "services/retriever/reservation_policy.py", "file_line": "backend/services/retriever/reservation_policy.py:1", "role": "P0.3 module: single corpus-reservation discipline"},
+        {"symbol": "CORPUS_RESERVATION_MIN_SCORE=0.25 / CORPUS_RESERVATION_MIN_SCORE_RATIO=0.30", "file_line": "backend/services/retriever/reservation_policy.py:35-36", "role": "calibrated bounds (0..1 score families only; uncalibrated families pass through)"},
+        {"symbol": "tests/test_corpus_floor_calibration.py", "file_line": "backend/tests/test_corpus_floor_calibration.py:1", "role": "7-test contract suite"}
+      ],
+      "store_fields": ["none (pure policy module); bound echoed in diagnostics as corpus_floor.reservation_bound"],
+      "verdict": "SAME",
+      "canonical": "reservation_policy (P0.3 calibrated corpus-reservation gate)",
+      "aliases": ["calibrated eligibility discipline (checklist P1.5 wording)", "shared seat gate", "P0.3 bound"],
+      "collision_note": "Module name is singular-purpose but the plan sometimes says 'reservation policy' to mean the whole seat behavior including reserve_corpora — which is NOT on this module. Cite the module path when you mean the gate.",
+      "evidence": "checklist:1271-1283 P0.3 ledger entry names the module and its consumers explicitly"
+    }
+  ],
+  "to_be_built": [
+    {"concept": "shelf routing / corpus profile card (P1.4)", "nearest_seam": "slim_card_payload (card_builder.py:598) aggregated per-corpus + Tier-0 doc_summaries routing stage; user-selected-corpora preservation already covered by corpus floor"},
+    {"concept": "Qdrant slim card payload write (Tier-0)", "nearest_seam": "slim_card_payload returned dict; deliberately deferred from wave 1 (checklist:271)"},
+    {"concept": "bridge cards / transfer_edge (P3.2, Phase 3 item)", "nearest_seam": "shelf_engine.principle_bridge + _role_bridge criteria — MUST be the shared implementation to avoid duplicate bridge logic"},
+    {"concept": "counterbalancing_concepts card enrichment (Phase 4)", "nearest_seam": "existing empty card field + shelf_policy_data vocabularies"},
+    {"concept": "user-facing reading path answer shape", "nearest_seam": "meta.shelf_reserve.reading_path diagnostics seed"}
+  ]
+}

@@ -1,0 +1,129 @@
+{
+  "family": "temporal metadata",
+  "repo": "/Users/king/polymath_v3.3",
+  "plan_sources": [
+    "docs/RAPTOR_RAG_IMPLEMENTATION_CHECKLIST.md (Temporal RAG Program, lines 181-213; P2.1 gains, lines 164-171)",
+    "docs/PLAN_CRITIQUE_2026-07-13.md (S1/S2/S4/S6/S12, C1)",
+    "docs/TEMPORAL_RAG_E2E_IMPLEMENTATION_REPORT_2026-07-12.md (spec of record)"
+  ],
+  "rows": [
+    {
+      "plan_term": "temporal_class",
+      "code_symbols": [],
+      "store_fields": [],
+      "verdict": "PLAN-ONLY",
+      "canonical": "temporal_class",
+      "aliases": [],
+      "collision_note": "One name planned on FOUR carriers (document metadata spec:211, summary nodes spec:101, fact assertions spec:265, Qdrant payload spec:591). Must stay ONE enum (evergreen|slowly_evolving|versioned|event|ephemeral|unknown) fed by ONE classifier, or per-carrier drift becomes failure mode (a).",
+      "evidence": "grep -rn temporal_class backend/ = 0 hits; PLAN_CRITIQUE_2026-07-13.md:67 confirms 'zero rows anywhere carry temporal_class'. T-HOOK-2 (CHECKLIST:195-198) targets the Ghost A summary contract. Nearest existing seam: backend/services/ghost_a.py:239-260 SummaryResult dataclass — latent_concepts sits at ghost_a.py:260 and is hydrated at ghost_a.py:649; temporal_class is specified to ride that exact seam. Backfill for existing rows = deterministic classifier (T-MAIN Phase 3), never paid regen."
+    },
+    {
+      "plan_term": "time_expressions",
+      "code_symbols": [
+        {"symbol": "validate row: time_expressions -> temporal_captures rename", "file_line": "backend/services/runpod_flash_extraction.py:415-420", "role": "wire-boundary mapper (T-HOOK-1, contract v3): worker returns time_expressions, Polymath persists temporal_captures + temporal_capture_version"},
+        {"symbol": "ExtractionResult.temporal_captures / .temporal_capture_version", "file_line": "backend/services/ghost_b.py:2088-2089", "role": "canonical in-process dataclass fields (class ExtractionResult at ghost_b.py:2025)"},
+        {"symbol": "round-trip guard (never erase persisted captures)", "file_line": "backend/services/ingestion/worker.py:1095-1097; backend/services/ingestion/graph_backfill.py:242-244; backend/services/ghost_b_local.py:884-885", "role": "re-hydration from Mongo rows on backfill/local paths"}
+      ],
+      "store_fields": ["Mongo ghost_b_extractions.temporal_captures (list of {expression, span, role_candidates})", "Mongo ghost_b_extractions.temporal_capture_version (worker.py:2409 comment: extraction rows live in ghost_b_extractions)"],
+      "verdict": "SAME",
+      "canonical": "temporal_captures",
+      "aliases": ["time_expressions (RunPod wire contract v3 field)", "temporal CAPTURE fields (CHECKLIST T-HOOK-1 prose)"],
+      "collision_note": "FAILURE MODE (a): the same name time_expressions is ALSO planned as a NEW Ghost A summary-contract field (T-HOOK-2, CHECKLIST:195-198) — summary-level time expressions, a different seam from the built chunk-level extraction capture. When S1 builds it, either persist the summary field under a distinct name or document scope explicitly: chunk-level = temporal_captures (built), summary-level = T-HOOK-2 (unbuilt).",
+      "evidence": "runpod_flash_extraction.py:411-420 comment states the rename explicitly ('extraction rows persist them as temporal_captures + temporal_capture_version'). One concept, deliberate name drift at the wire boundary."
+    },
+    {
+      "plan_term": "published_at",
+      "code_symbols": [
+        {"symbol": "_merged_doc_metadata alias key list", "file_line": "backend/services/graph/orchestrator.py:2840-2852", "role": "read-side probe: published_at is one of several accepted metadata spellings"},
+        {"symbol": "_metadata_value('publication_date','published_at','date_published','publish_date','dc:date')", "file_line": "backend/services/graph/orchestrator.py:2986-2996", "role": "alias coalescing into a source label's publication_date"},
+        {"symbol": "documents projection includes published_at", "file_line": "backend/services/graph/orchestrator.py:4731", "role": "Mongo read projection — field exists opportunistically on documents rows, never canonically written"}
+      ],
+      "store_fields": ["Mongo documents.published_at (opportunistic, source-dependent; NOT canonically populated — spec:70 shows ecommerce_pdf 1/79 has any date)"],
+      "verdict": "OVERLAPPING",
+      "canonical": "source_published_at",
+      "aliases": ["published_at", "publication_date", "date_published", "publish_date", "dc:date", "temporal_scope (CHECKLIST:166 only, undefined elsewhere — likely shorthand for valid_from/valid_to)"],
+      "collision_note": "FAILURE MODE (b): publication time is planned under TWO names in the same checklist — P2.1 gains say 'published_at / temporal_scope' (CHECKLIST:166) while T-HOOK-3 and the spec say 'source_published_at' (CHECKLIST:202, spec:207,336). CHECKLIST:200 declares T-HOOK-3 merged with P2.1 as 'one implementation', so the duplicate-build risk is acknowledged, but the field NAME is not reconciled. Pick source_published_at (spec §5.1) and treat published_at as a read-side alias only.",
+      "evidence": "In code published_at is only ever READ as one of many alias spellings (orchestrator.py:2846,2993,3008,4731); no writer produces it canonically."
+    },
+    {
+      "plan_term": "document_date",
+      "code_symbols": [
+        {"symbol": "docling frontmatter mapping (date/created/published/publish_date/pubdate -> document_date)", "file_line": "backend/services/ingestion/docling_adapter.py:210-211", "role": "conflation site #1: any of five keys becomes document_date"},
+        {"symbol": "DOCX core-properties created -> document_date", "file_line": "backend/services/ingestion/docling_adapter.py:243", "role": "conflation site #2: file-creation time"},
+        {"symbol": "PDF /CreationDate -> document_date", "file_line": "backend/services/ingestion/docling_adapter.py:263", "role": "conflation site #3: file-creation time"},
+        {"symbol": "ParsedDocMeta.document_date", "file_line": "backend/services/ingestion/docling_adapter.py:487", "role": "adapter dataclass field; propagated at :1377,:1405"},
+        {"symbol": "doc_record M2 keys (title/author/document_date/...)", "file_line": "backend/services/ingestion/worker.py:2459", "role": "Mongo documents write path"},
+        {"symbol": "ChunkMetadata.document_date", "file_line": "backend/models/contracts.py:106", "role": "chunk provenance contract (M2, ISO)"},
+        {"symbol": "RetrievalPayload.document_date", "file_line": "backend/models/contracts.py:151", "role": "Qdrant payload contract — declared, sparsely populated, not operational (spec:53)"}
+      ],
+      "store_fields": ["Mongo documents.document_date", "Mongo chunk metadata document_date", "Qdrant payload document_date (declared in RetrievalPayload)"],
+      "verdict": "DISTINCT",
+      "canonical": "document_date",
+      "aliases": [],
+      "collision_note": "FAILURE MODE (a) — the family's worst instance: ONE field carries THREE meanings (publication date, file-creation date, revision date) because docling_adapter.py:210-263 funnels all of them into document_date. This is exactly what T-HOOK-3 de-conflates. Spec:230 rules document_date remains a compatibility projection during migration, then deprecated — do NOT extend new features onto it.",
+      "evidence": "spec TEMPORAL_RAG_E2E_IMPLEMENTATION_REPORT_2026-07-12.md:52 names this conflation verbatim; population is near-zero anyway (spec:70 — 1 of 79 ecommerce_pdf docs)."
+    },
+    {
+      "plan_term": "source_published_at",
+      "code_symbols": [],
+      "store_fields": [],
+      "verdict": "PLAN-ONLY",
+      "canonical": "source_published_at",
+      "aliases": ["published_at (CHECKLIST P2.1:166 spelling of the same concept)"],
+      "collision_note": "See published_at row: same concept named twice across P2.1 and T-HOOK-3; one implementation is mandated (CHECKLIST:200), name must be settled as source_published_at.",
+      "evidence": "grep -rn source_published_at backend/ = 0 hits. Spec §5.1:207 defines it on the document temporal contract; spec:336 gives the mapping rule 'frontmatter published -> source_published_at'. Nearest existing seam: the docling metadata mapper docling_adapter.py:210-263 (currently writes document_date) + the doc_record write worker.py:2455-2460."
+    },
+    {
+      "plan_term": "episodes",
+      "code_symbols": [],
+      "store_fields": ["PLANNED Mongo collection: source_episodes (spec:611), key episode_id (spec:238), index (corpus_id, temporal_class, source_published_at) on sibling source_versions (spec:621)"],
+      "verdict": "PLAN-ONLY",
+      "canonical": "source_episodes",
+      "aliases": ["source episode", "episode (T-MAIN Phase 2-7 prose)"],
+      "collision_note": "No code collision — 'episode' is unused in backend/. Design lineage is Graphiti's episode concept (spec:147-153).",
+      "evidence": "grep -rn episode backend/services backend/models backend/scripts = 0 relevant hits. Nearest existing seams: document versioning fields ChunkMetadata.supersedes/superseded_by/is_latest (backend/models/contracts.py:112-115) and immutable per-chunk evidence rows in Mongo ghost_b_extractions (worker.py:2409) — episodes generalize these into an immutable evidence unit."
+    },
+    {
+      "plan_term": "assertions",
+      "code_symbols": [],
+      "store_fields": ["PLANNED Mongo collection: fact_assertions (spec:612), unique(assertion_id) sha256(source_version+span+triple+scope+validity) (spec:255,624), fields valid_from/valid_to/recorded_at/superseded_at/assertion_modality/temporal_class", "PLANNED Qdrant points chunk_type='temporal_assertion' with pointer to source chunk (spec:516)"],
+      "verdict": "PLAN-ONLY",
+      "canonical": "fact_assertions",
+      "aliases": ["assertion", "fact assertion", "versioned assertion", "temporal_assertion (Qdrant chunk_type)"],
+      "collision_note": "Two collisions. (a1) fact_type='timestamp' EXISTS in Ghost B FACT_TYPES (backend/services/ghost_b.py:134-137) and is the tempting-but-forbidden carrier — spec:347 explicitly rules 'Do not overload fact_type=timestamp'; assertion validity is a separate envelope. (a2) superseded_at ALREADY exists with a different meaning: job-lease supersession (backend/services/ingestion/job_leases.py:435, job_control.py:60,113) and chunk superseded_by (contracts.py:115) — three lifecycles will share one word once fact_assertions.superseded_at lands; keep them namespaced by collection. Also note 'assertion' pervasively means test-assertion in scripts (e.g. backend/scripts/p0_1_summary_integrity.py:28) — grep noise, not a real conflict.",
+      "evidence": "grep for fact_assertions/assertion_id in backend/ = 0 hits. Nearest existing seams: ExtractedFact/facts on ExtractionResult (contracts.py:90-93, ghost_b.py FACT_TYPES) and Neo4j RELATES_TO edges whose timeless-collapse (spec:59, MERGE aggregates all evidence onto one edge) is the defect assertions fix; versioned RELATES_TO rides the P2.5 edge migration (critique S12, one migration)."
+    },
+    {
+      "plan_term": "temporal eligibility",
+      "code_symbols": [],
+      "store_fields": ["PLANNED: shared Qdrant filter over assertion/payload temporal fields (spec:509-546); the fields it would filter exist as declared-but-dead contract fields RetrievalPayload.document_date/valid_from/valid_to (backend/models/contracts.py:151-153)"],
+      "verdict": "PLAN-ONLY",
+      "canonical": "temporal eligibility service (ONE service across Tier-0/Fast/Hybrid/Graph)",
+      "aliases": ["eligibility predicate", "temporal_eligibility(intent) (spec:546)", "shared eligibility filter"],
+      "collision_note": "FAILURE MODE (a): do NOT confuse with the BUILT temporal_support/has_temporal machinery in the insight orchestrator (_has_temporal_source_support backend/services/graph/orchestrator.py:3003-3014, flags at :605,:1265,:5726) — that answers 'does this evidence row carry ANY date metadata' for packet curation/prompt hints; it is not validity filtering and must not be reused as the eligibility predicate. Second nearby-but-distinct seam: query_plan.py ConstraintKind 'temporal' (backend/services/retriever/query_plan.py:39, temporal_day_0 at :362-370) is lexical query-constraint tagging, not eligibility.",
+      "evidence": "CHECKLIST:209 'ONE eligibility service across Tier-0/Fast/Hybrid/Graph'; spec:25,441-450 (LLM never generates the predicate; code compiles TemporalIntent into storage filters). No code implements it; contracts.py:151-153 valid_from/valid_to are the dormant fields it needs (spec:53 'the shape exists ... not operational')."
+    },
+    {
+      "plan_term": "date de-conflation",
+      "code_symbols": [
+        {"symbol": "the conflation site to be fixed (not the fix)", "file_line": "backend/services/ingestion/docling_adapter.py:210-263", "role": "five frontmatter keys + DOCX created + PDF /CreationDate all collapse into document_date — T-HOOK-3's target"}
+      ],
+      "store_fields": [],
+      "verdict": "PLAN-ONLY",
+      "canonical": "T-HOOK-3 date de-conflation (merged with P2.1 bibliographic capture — one implementation)",
+      "aliases": ["docling date de-conflation", "publication-vs-file-date de-conflation (critique S2)", "bibliographic/date de-conflation"],
+      "collision_note": "FAILURE MODE (b) — pre-empted but watch it: T-HOOK-3 and the P2.1 'deterministic bibliographic capture/backfill' describe the same work; CHECKLIST:200 and critique S2 both pin them to ONE implementation. Residual risk is only the field-name split (published_at vs source_published_at, see those rows).",
+      "evidence": "CHECKLIST:200-202; PLAN_CRITIQUE S2 (row 81): 'T-HOOK-3 = P2.1 bibliographic item', deterministic doc-level backfill (498 v2 documents-only rows, no parent rewrites, inside the freeze). No de-conflated fields exist yet in code."
+    },
+    {
+      "plan_term": "temporal_unavailable",
+      "code_symbols": [],
+      "store_fields": ["PLANNED: per-corpus capability readiness value temporal_unavailable|partial|strict_ready riding the corpus readiness record"],
+      "verdict": "PLAN-ONLY",
+      "canonical": "temporal capability readiness (enum temporal_unavailable|partial|strict_ready)",
+      "aliases": ["strict_ready", "capability-specific readiness (CHECKLIST:209-211)", "temporal capability (critique S6)"],
+      "collision_note": "Lands on the SAME seam as the S6 readiness split (operational vs metadata-quality vs temporal capability); the enum must live beside — not inside — fully_enriched, because fully_enriched is a pipeline-stage label (backend/services/ingestion/readiness.py:112 FULLY_ENRICHED_STAGES) that must stop implying librarian-grade or temporal-grade metadata (CHECKLIST:169-171).",
+      "evidence": "grep -rn temporal_unavailable backend/ = 0 hits. Nearest existing seam: backend/services/ingestion/readiness.py — build_corpus_readiness_record (:309), build_corpus_readiness_snapshot (:330), compute_corpus_readiness (:1105); CHECKLIST:210 says 'same seam as the operational-vs-metadata-quality readiness split adopted in Audit Delta 2'."
+    }
+  ]
+}

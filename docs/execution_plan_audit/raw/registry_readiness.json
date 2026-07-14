@@ -1,0 +1,141 @@
+{
+  "family": "readiness & enrichment states",
+  "repo": "/Users/king/polymath_v3.3",
+  "generated": "2026-07-13",
+  "note_on_output_path": "Caller passed literal 'undefined' as the output directory; written to session scratchpad instead.",
+  "rows": [
+    {
+      "plan_term": "fully_enriched",
+      "code_symbols": [
+        {"symbol": "FULLY_ENRICHED_STAGES = {\"complete\", \"fully_enriched\"}", "file_line": "backend/services/ingestion/readiness.py:112", "role": "stage-set that counts as fully enriched (legacy alias 'complete' folded in)"},
+        {"symbol": "status = \"fully_enriched\" (corpus-level status derivation)", "file_line": "backend/services/ingestion/readiness.py:672-673", "role": "corpus readiness status value when fully_enriched >= doc_total"},
+        {"symbol": "fully_enriched = min(fully_enriched, lexicon_ready / summary_tree_index_ready / document_profile_index_ready)", "file_line": "backend/services/ingestion/readiness.py:368-454", "role": "fully_enriched is min-gated by lexicon + Qdrant index projection readiness"},
+        {"symbol": "final_stage = \"fully_enriched\" if verified_complete", "file_line": "backend/services/ingestion/worker.py:5002-5005", "role": "worker promotes a document's ingest_stage only after mongo+qdrant+summaries+neo4j+verification"},
+        {"symbol": "QUERYABLE_INGEST_STAGES (contains fully_enriched)", "file_line": "backend/services/ingestion_service.py:39-47", "role": "queryable is a WEAKER set than fully_enriched (pending graph/summary variants included)"},
+        {"symbol": "_PHASE_TO_STAGE {\"complete\": \"fully_enriched\"} and state[\"fully_enriched\"] bool", "file_line": "backend/services/ingestion/batches.py:83-84,424,562-581", "role": "batch item state exposes a third, boolean form of the same word"}
+      ],
+      "store_fields": [
+        "Mongo documents.ingest_stage = 'fully_enriched' (per-document stage enum)",
+        "Mongo corpus_readiness.status = 'fully_enriched' (per-corpus rollup, collection corpus_readiness, schema corpus_readiness.v2)",
+        "Mongo ingest_batch_items / ingest_batches document state.fully_enriched (boolean)"
+      ],
+      "verdict": "SAME",
+      "canonical": "fully_enriched",
+      "aliases": ["complete (legacy stage alias, readiness.py:112)", "verified_complete (worker-local flag)"],
+      "collision_note": "Failure mode (a): one string, three scopes — document ingest_stage value, corpus readiness status value, and a batch-state boolean. Grep hits are not interchangeable. Plan S6 explicitly wants fully_enriched to STOP implying librarian-grade metadata; today it already means only operational completeness (artifacts+projections+verification), never bibliographic quality.",
+      "evidence": "readiness.py:368-454 shows fully_enriched is purely operational (counts min-gated by lexicon_ready, summary_tree_index_ready, document_profile_index_ready); no bibliographic/card field participates."
+    },
+    {
+      "plan_term": "strict ready (Definition Of Strict Ready)",
+      "code_symbols": [],
+      "store_fields": [],
+      "verdict": "PLAN-ONLY",
+      "canonical": "strict_ready",
+      "aliases": ["Definition Of Strict Ready (RAPTOR_RAG_IMPLEMENTATION_CHECKLIST.md:1252-1268)", "strict-readiness (checklist:1041)", "strict-ready corpus (checklist:377,906)"],
+      "collision_note": "Failure mode (b) HIGH RISK: no strict_ready symbol exists anywhere in backend (grep -rniE 'strict[_ -]read' backend/ = zero hits), yet ~80% of its definition is ALREADY computed by compute_corpus_readiness (queryable/summary/tree-sync/lexicon-projection/no-failed-jobs/denominator exclusions, readiness.py:1105+). Building strict_ready as a parallel computation would duplicate corpus_readiness.v2. It should be an extension of that snapshot (add: ontology-violation count, extraction/concept promotion gate — 'unpromoted_extraction_docs' already counted at readiness.py:456-457,1008 — and 3-tier smoke-probe receipts). Failure mode (a) inside the plan itself: 'strict_ready' is ALSO the top value of the temporal capability enum (temporal_unavailable|partial|strict_ready, checklist:210) — same word, corpus publication gate vs temporal capability tier.",
+      "evidence": "Checklist:1252-1268 lists 10 gates; readiness.py already measures 8 of them; missing: ontology predicate/entity-type violations, tier smoke/negative-control probes."
+    },
+    {
+      "plan_term": "readiness (unqualified)",
+      "code_symbols": [
+        {"symbol": "compute_corpus_readiness / materialize_corpus_readiness / get_materialized_corpus_readiness", "file_line": "backend/services/ingestion/readiness.py:1105,2260,2253", "role": "MEANING 1: corpus enrichment readiness read-model (READINESS_SCHEMA_VERSION='corpus_readiness.v2' at :29, READINESS_COLLECTION='corpus_readiness' at :30)"},
+        {"symbol": "class CorpusReadinessReport / ensure_corpus_retrieval_ready / repair_retrieval_readiness_for_all_corpora", "file_line": "backend/services/retrieval_readiness.py:29,114,195", "role": "MEANING 2: storage-layer schema readiness (Qdrant collections + payload indexes + Neo4j constraints exist) — infrastructure, not enrichment"},
+        {"symbol": "inference_ready tri-state handling (P1.8)", "file_line": "backend/services/health_service.py:239-257", "role": "MEANING 3: sidecar inference readiness (model_loaded vs inference_ready warmup split)"},
+        {"symbol": "extraction_validation.py docstring 'deploy-readiness probes for extraction endpoints'", "file_line": "backend/services/extraction_validation.py:1-20", "role": "MEANING 4: extraction endpoint deploy readiness (reachable/healthy/warm/gpu_active/version_match)"},
+        {"symbol": "lexicon_state == 'lexicon_ready' gates", "file_line": "backend/services/ingestion/corpus_lexicon.py:3018,3033; backend/services/ingestion/readiness.py:1285", "role": "MEANING 5: lexicon projection readiness (per-document and per-corpus lexicon_state)"}
+      ],
+      "store_fields": [
+        "Mongo corpus_readiness collection (_id=corpus_id, status, documents{total,queryable,fully_enriched,verified}, summary/graph/lexicon counters)",
+        "Mongo documents.lexicon_state / corpora.lexicon_state ('lexicon_pending|lexicon_materialized|lexicon_indexing|lexicon_ready')",
+        "Mongo documents.write_state.verified (per-doc artifact verification, services/ingestion/verify.py:6)",
+        "Mongo documents.write_state.document_profile_indexed (Tier-0 Qdrant projection readiness, tier0.py:288)"
+      ],
+      "verdict": "DISTINCT",
+      "canonical": "corpus_readiness (for the enrichment/operational meaning); qualify all others (retrieval_readiness, inference_ready, extraction deploy-readiness, lexicon_ready)",
+      "aliases": ["readiness (plan, unqualified)", "corpus readiness", "corpus_readiness.v2"],
+      "collision_note": "Failure mode (a) CONFIRMED, 5-way: 'readiness' names five distinct mechanisms. Worst sub-collision: retrieval_readiness.py's class is literally named CorpusReadinessReport (:29) while ingestion/readiness.py owns the 'corpus_readiness' Mongo collection — same noun, disjoint semantics (schema-exists vs enrichment-complete). Any new plan work saying 'readiness' must pick a qualifier.",
+      "evidence": "Five files, five meanings, all grep 'readiness': readiness.py:1 ('Computed corpus-readiness contract'), retrieval_readiness.py:1 ('Retrieval readiness guards'), health_service.py:239 (P1.8 tri-state), extraction_validation.py:1 (deploy-readiness probes), corpus_lexicon.py:2966 ('publish readiness' = flip lexicon_state)."
+    },
+    {
+      "plan_term": "operational readiness",
+      "code_symbols": [
+        {"symbol": "compute_corpus_readiness (status: fully_enriched|queryable_partial|needs_repair|graph_pending|summaries_pending|lexicon_pending|extraction_pending|needs_review|ingestion_pending|not_ready)", "file_line": "backend/services/ingestion/readiness.py:640-677,1105", "role": "the existing implementation of exactly what the plan calls operational readiness: artifacts exist + projections reconcile + no failed jobs"}
+      ],
+      "store_fields": ["Mongo corpus_readiness.status + counters (same store as 'readiness' meaning 1)"],
+      "verdict": "SAME",
+      "canonical": "corpus_readiness",
+      "aliases": ["operational readiness (PLAN_CRITIQUE_2026-07-13.md:85 S6; RAPTOR checklist:167)", "artifacts/projections reconcile"],
+      "collision_note": "Failure mode (b): 'operational readiness' has NO code symbol of its own — it is a plan-side rename of the existing corpus_readiness.v2 computation. S6's readiness split should be implemented as a field split INSIDE corpus_readiness (e.g. readiness.operational / readiness.metadata_quality / readiness.temporal), not as a new service; otherwise the same gates get computed twice (readiness.py already reconciles projections via lexicon_ready, summary_tree_index_ready, document_profile_index_ready mins at :376,:441,:454).",
+      "evidence": "PLAN_CRITIQUE S6 defines operational readiness as 'artifacts/projections reconcile' — that is verbatim what readiness.py measures today; it just publishes the result under the name fully_enriched."
+    },
+    {
+      "plan_term": "metadata-quality (readiness)",
+      "code_symbols": [
+        {"symbol": "build_librarian_card / librarian_card.v0 schema (nearest seam)", "file_line": "backend/services/librarian/card_builder.py:1-60", "role": "card availability + provenance-rejection counters are the only existing metadata-quality signals"},
+        {"symbol": "rejected_value_count (card build-time provenance rejection)", "file_line": "backend/services/librarian/card_builder.py:31,47-48", "role": "closest existing quality metric (empty-not-fabricated)"}
+      ],
+      "store_fields": [
+        "Mongo librarian_cards collection (upsert on corpus_id+doc_id, schema_version='librarian_card.v0') — card availability leg",
+        "Bibliographic leg DOES NOT EXIST yet: author/title/language/source_published_at fields are S2/T-HOOK-3 (critique S2: 'verified state is 0-1 docs populated anywhere')"
+      ],
+      "verdict": "PLAN-ONLY",
+      "canonical": "metadata_quality_readiness",
+      "aliases": ["metadata-quality readiness (checklist:168)", "librarian-grade metadata (checklist:170)", "bibliographic/facet-precision/card-availability gates (S6)"],
+      "collision_note": "No code symbol, no store field, no grep hit for metadata_quality anywhere in backend/. To-be-built. Nearest seams: (1) librarian_cards presence per doc (card_builder.py), (2) the S2/T-HOOK-3 bibliographic backfill fields once they land on documents, (3) facet-precision leftovers from P0.5 decontamination. Must be a NEW leg of corpus_readiness, gated separately from fully_enriched per S6.",
+      "evidence": "grep -rniE 'metadata[_-]quality|operational_readiness' backend/ --include='*.py' returns nothing; card_builder.py has zero readiness references (no publication gate either)."
+    },
+    {
+      "plan_term": "temporal capability",
+      "code_symbols": [
+        {"symbol": "ExtractionResult.temporal_captures / temporal_capture_version (T-HOOK-1, landed)", "file_line": "backend/services/ghost_b.py:2088-2089; backend/services/runpod_flash_extraction.py:411-418", "role": "capture-only temporal surface from the v3 extraction contract — raw material, not a capability state"},
+        {"symbol": "worker round-trip of temporal_captures on resume", "file_line": "backend/services/ingestion/worker.py:1093-1098", "role": "persistence guarantee for the captured fields"},
+        {"symbol": "temporal/versioning M2 fields (document_status, is_latest, document_date, valid_from, valid_to)", "file_line": "backend/models/contracts.py:148-153", "role": "declared contract seam for bitemporal document versioning (mostly unpopulated)"},
+        {"symbol": "InsightPacketSummary.temporal_support / GraphInsightPacketEvidence.has_temporal / GraphInsightPacket.temporal_support", "file_line": "backend/models/schemas.py:805,1292,1334", "role": "UNRELATED existing use of 'temporal': graph-synthesis flag meaning 'evidence carries dates', NOT a readiness capability"}
+      ],
+      "store_fields": [
+        "Mongo ghost_b_extractions.temporal_captures + temporal_capture_version (both write sites _persist_extraction_rows and mongo_writer.stash_ghost_b, per ghost_b.py:2084-2087 comment)",
+        "The capability enum store (temporal_unavailable|partial|strict_ready) DOES NOT EXIST"
+      ],
+      "verdict": "PLAN-ONLY",
+      "canonical": "temporal_capability",
+      "aliases": ["capability-specific readiness (checklist:209-211)", "temporal_unavailable|partial|strict_ready (T-MAIN)", "temporal eligibility (critique S12 'ONE eligibility service')"],
+      "collision_note": "Two collisions. (a) 'temporal_support' already exists in models/schemas.py meaning 'this graph packet's evidence has dates' — do not reuse that name for the capability tier. (a-bis) the enum's top value 'strict_ready' collides with the corpus-level Definition Of Strict Ready (see strict ready row): one word, two gates at two scopes. Recommend the enum live as corpus_readiness.temporal_capability with values temporal_unavailable|temporal_partial|temporal_strict to break the collision.",
+      "evidence": "grep for temporal_unavailable|temporal_class|temporal_scope|source_published_at|strict_ready in backend/ = zero hits; only capture-side fields (T-HOOK-1) exist."
+    },
+    {
+      "plan_term": "publication gate",
+      "code_symbols": [
+        {"symbol": "get_materialized_corpus_readiness (the gate's intended input)", "file_line": "backend/services/ingestion/readiness.py:2253", "role": "nearest seam: readiness read-model a card-publication gate would consult"},
+        {"symbol": "build_librarian_card (the gate's intended subject — currently ungated)", "file_line": "backend/services/librarian/card_builder.py:1; backend/scripts/build_librarian_cards.py", "role": "card builder has ZERO readiness references today; cards build regardless of corpus readiness"}
+      ],
+      "store_fields": ["None. No publish/published flag on librarian_cards rows; no readiness check in the build path."],
+      "verdict": "PLAN-ONLY",
+      "canonical": "card_publication_gate",
+      "aliases": ["publication gate (checklist:257 'Keep corpus readiness as the publication gate for librarian cards')", "readiness publication gate (critique:14)"],
+      "collision_note": "Failure mode (a): the verb 'publish' already has a DIFFERENT code meaning in this family — corpus_lexicon.finalize_corpus_lexicon_index docstring 'reconcile ... then publish readiness' (corpus_lexicon.py:2966) means flipping lexicon_state to lexicon_ready, not card publication. A 'publication gate' grep will hit the lexicon path first. To-be-built: a check in build_librarian_cards/card consumption that requires corpus_readiness.status (or future strict_ready/metadata_quality legs) before cards become retrieval-visible.",
+      "evidence": "grep -n 'readiness|gate|fully_enriched|queryable' on card_builder.py and build_librarian_cards.py returns only an unrelated 'Trustworthy-projection gate' comment (card_builder.py:326) about lexicon-flagged entries."
+    },
+    {
+      "plan_term": "reconciliation",
+      "code_symbols": [
+        {"symbol": "classify_failure_row_staleness / classify_stale_failure_rows / build_document_failure_reconciliation", "file_line": "backend/services/ingestion/failure_reconciliation.py:90,129,212", "role": "Ghost B failure metadata vs live chunk truth; feeds readiness action 'reconcile_stale_failures' (readiness.py:687-696)"},
+        {"symbol": "reconcile_satisfied_summary_jobs / _reconcile_claimed_summary_jobs", "file_line": "backend/services/ingestion/summary_jobs.py:60,575", "role": "summary job queue vs durable artifacts (P0.1 land)"},
+        {"symbol": "reconcile_doc_profile_projection_state", "file_line": "backend/services/ingestion/tier0.py:231", "role": "Tier-0 shared docsum Qdrant points vs Mongo -> write_state.document_profile_indexed"},
+        {"symbol": "finalize_corpus_lexicon_index ('Reconcile exact Mongo/Qdrant identity sets, then publish readiness')", "file_line": "backend/services/ingestion/corpus_lexicon.py:2960-3033", "role": "lexicon identity-set reconcile; refuses to finalize on missing IDs, deletes stale IDs"},
+        {"symbol": "scripts/reconcile_verified_documents.py", "file_line": "backend/scripts/reconcile_verified_documents.py:118,140", "role": "artifact reverify without re-embedding; re-derives ingest_stage fully_enriched|queryable"},
+        {"symbol": "scripts/reconcile_tier0_profiles.py", "file_line": "backend/scripts/reconcile_tier0_profiles.py:1", "role": "CLI wrapper over tier0 projection reconcile"}
+      ],
+      "store_fields": [
+        "Mongo documents.write_state.document_profile_indexed / document_profile_index_checked_at (tier0.py:288-300)",
+        "Mongo summary_jobs.artifact_reconciled_at / last_reconciled_at (summary_jobs.py:140,615)",
+        "Mongo ghost_b_errors stale statuses: stale_chunk_reference / stale_chunk_hash_mismatch / stale_extraction_contract_mismatch (failure_reconciliation.py:22-25)",
+        "Mongo corpora/documents.lexicon_state transitions (corpus_lexicon.py)"
+      ],
+      "verdict": "OVERLAPPING",
+      "canonical": "reconciliation (family umbrella); each mechanism keeps its scoped name (failure_reconciliation, summary-job reconcile, tier0 projection reconcile, lexicon identity reconcile, verified-document reverify)",
+      "aliases": ["projections reconcile (S6 operational readiness definition)", "scheduled reconciliation (critique:24)", "queue reconcile (checklist log 2026-07-13 P0.1)"],
+      "collision_note": "Failure mode (a): one plan word, at least six distinct code mechanisms that share only the invariant 'durable stores must agree; job/failure rows are not truth'. One member is PLAN-ONLY: 'scheduled ownership reconciliation with report-only default' (checklist:515, unchecked) — nearest seam scripts/orphan_ownership_manifest.py (P0.6 dry-run manifest) + services/ingestion/repair_scheduler.py. Failure mode (b) watch: S6 defines operational readiness AS 'projections reconcile' — the reconcile results are ALREADY folded into readiness via lexicon_ready/summary_tree_index_ready/document_profile_index_ready mins; a new operational-readiness implementation must consume these, not re-derive them.",
+      "evidence": "readiness.py:14 imports classify_stale_failure_rows directly — reconciliation outputs are already first-class readiness inputs."
+    }
+  ]
+}

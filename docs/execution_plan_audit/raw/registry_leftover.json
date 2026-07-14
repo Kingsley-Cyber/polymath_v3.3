@@ -1,0 +1,764 @@
+{
+  "family": "harvested terms not in any seeded family (leftover)",
+  "repo": "/Users/king/polymath_v3.3",
+  "generated": "2026-07-13",
+  "sources_consulted": [
+    "docs/PLAN_CRITIQUE_2026-07-13.md",
+    "docs/RAPTOR_RAG_IMPLEMENTATION_CHECKLIST.md",
+    "CLAUDE.md (north-star section)",
+    "backend/services (grep)",
+    "backend/models (grep)",
+    "backend/scripts (grep)",
+    "scripts/apple_ml_services (grep)",
+    "docs/baselines (ls)"
+  ],
+  "rows": [
+    {
+      "plan_term": "ledger",
+      "code_symbols": [],
+      "store_fields": [],
+      "verdict": "SAME",
+      "canonical": "implementation ledger (docs/RAPTOR_RAG_IMPLEMENTATION_CHECKLIST.md)",
+      "aliases": ["ledger", "implementation ledger", "checklist", "item-level source of truth"],
+      "collision_note": "None — 'ledger' and 'implementation ledger' are one artifact; the checklist self-declares it.",
+      "evidence": "RAPTOR_RAG_IMPLEMENTATION_CHECKLIST.md:34 'This file is the implementation ledger'; :11 'This ledger stays the item-level source of truth'. Not code — a governance doc."
+    },
+    {
+      "plan_term": "implementation ledger",
+      "code_symbols": [],
+      "store_fields": [],
+      "verdict": "SAME",
+      "canonical": "implementation ledger (docs/RAPTOR_RAG_IMPLEMENTATION_CHECKLIST.md)",
+      "aliases": ["ledger", "checklist"],
+      "collision_note": "",
+      "evidence": "Same row as 'ledger'."
+    },
+    {
+      "plan_term": "execution plan",
+      "code_symbols": [],
+      "store_fields": [],
+      "verdict": "SAME",
+      "canonical": "sequenced plan of record (S0-S14, docs/PLAN_CRITIQUE_2026-07-13.md section 3)",
+      "aliases": ["execution plan", "sequenced plan of record", "s0-s14", "execution order", "finalized sequenced plan"],
+      "collision_note": "The ledger is item truth, the plan file is its ORDERING (checklist:8-12) — two docs, one plan-of-record; do not treat them as independent plans.",
+      "evidence": "RAPTOR_RAG_IMPLEMENTATION_CHECKLIST.md:6-12 'Execution Order — SEQUENCED PLAN OF RECORD ... docs/PLAN_CRITIQUE_2026-07-13.md (S0-S14)'; PLAN_CRITIQUE_2026-07-13.md:73-93 (S0-S14 table)."
+    },
+    {
+      "plan_term": "s0-s14",
+      "code_symbols": [],
+      "store_fields": [],
+      "verdict": "SAME",
+      "canonical": "sequenced plan of record (S0-S14)",
+      "aliases": ["execution plan steps", "S-order"],
+      "collision_note": "Step ids exist only in the plan doc; session Tasks #18/#19 mirror S1/S3 by name — keep ids in sync when the plan is re-sequenced.",
+      "evidence": "PLAN_CRITIQUE_2026-07-13.md:77-93 rows S0..S14; checklist:10 'Execute in S-order'."
+    },
+    {
+      "plan_term": "plan critique",
+      "code_symbols": [],
+      "store_fields": [],
+      "verdict": "PLAN-ONLY",
+      "canonical": "plan critique C1-C4 (PLAN_CRITIQUE_2026-07-13.md section 4)",
+      "aliases": ["critique", "C1-C4"],
+      "collision_note": "COLLISION (a): 'critique' also names a DIFFERENT 2026-07-12 artifact set — docs/RAPTOR_RAG_CRITIQUE_AND_ROADMAP.md + RAPTOR_CRITIQUE_RESPONSE_2026-07-12.md + RAPTOR_CRITIQUE_ACKNOWLEDGEMENT_2026-07-12.md (external review + maintainer response). The 2026-07-13 plan critique is a separate sequencing audit. Cite the date.",
+      "evidence": "PLAN_CRITIQUE_2026-07-13.md:97-109 (C1-C4); docs/RAPTOR_CRITIQUE_RESPONSE_2026-07-12.md:1-5."
+    },
+    {
+      "plan_term": "baseline commit",
+      "code_symbols": [],
+      "store_fields": [],
+      "verdict": "PLAN-ONLY",
+      "canonical": "ledger baseline commit (git ref in checklist header)",
+      "aliases": ["Baseline commit: d3159b8"],
+      "collision_note": "COLLISION (a): 'baseline' means three things — (1) this git ref (checklist:4), (2) the durable-data baseline captured by backend/scripts/capture_raptor_baseline.py into docs/baselines/BASELINE_2026-07-13.json ('Current Durable Baseline' section, checklist:75-95), (3) the held-out eval baseline (docs/baselines/EVAL_2026-07-13_*.json, S8 A/B 'vs the 2026-07-13 baseline'). Always qualify which baseline.",
+      "evidence": "RAPTOR_RAG_IMPLEMENTATION_CHECKLIST.md:4; backend/scripts/capture_raptor_baseline.py:1-12 docstring; docs/baselines/ contains BASELINE_2026-07-13.json, EVAL_2026-07-13_{qdrant_only,qdrant_mongo,qdrant_mongo_graph}.json, LATENCY_2026-07-13.json."
+    },
+    {
+      "plan_term": "capture-before-rebuild",
+      "code_symbols": [],
+      "store_fields": [],
+      "verdict": "PLAN-ONLY",
+      "canonical": "standing rule 1: capture-before-rebuild",
+      "aliases": ["rebuild freeze", "no rebuild while adopted capture hook unbuilt"],
+      "collision_note": "No code enforcement exists — the rule is prose in the ledger + repo CLAUDE.md north-star. Nearest seam for a guard: the rebuild entry points backend/scripts/build_librarian_cards.py, backend/scripts/backfill_corpus_lexicon.py, backend/services/ingestion/summary_backfill.py.",
+      "evidence": "RAPTOR_RAG_IMPLEMENTATION_CHECKLIST.md:16-19; PLAN_CRITIQUE_2026-07-13.md:112; CLAUDE.md:9-33 (north-star: rebuild freeze while adopted capture hooks unbuilt)."
+    },
+    {
+      "plan_term": "capture hook",
+      "code_symbols": [
+        {"symbol": "T-HOOK-1 time_expressions wire capture", "file_line": "backend/services/runpod_flash_extraction.py:36,415", "role": "landed — extraction envelope additively appends per-chunk time_expressions"},
+        {"symbol": "ParentSummaryArtifact.temporal_class / .time_expressions", "file_line": "backend/services/ghost_a.py:261-262,652-653", "role": "T-HOOK-2 fields now present in the Ghost A summary contract (S1 seam; plan critique measured them absent on 2026-07-13, so this landed with/after S0)"},
+        {"symbol": "parse_latent_concepts", "file_line": "backend/services/ingestion/summary_semantics.py:112", "role": "the earlier capture hook of the same shape (latent_concepts + aliases at the summary contract seam)"}
+      ],
+      "store_fields": ["parent_chunks.temporal_class (0 rows populated)", "parent_chunks.latent_concepts", "summary rows time_expressions"],
+      "verdict": "OVERLAPPING",
+      "canonical": "capture hook (T-HOOK-n at a contract seam)",
+      "aliases": ["T-HOOK-1", "T-HOOK-2", "T-HOOK-3", "adopted capture hook", "summary-contract capture seam (S1)"],
+      "collision_note": "T-HOOK-3 (docling publication-vs-file-date de-conflation, S2) has NO code counterpart yet — to-be-built; nearest seam backend/services/ingestion/docling_adapter.py. Fields existing in the contract is NOT data coverage: plan-verified 0 rows carry temporal_class.",
+      "evidence": "PLAN_CRITIQUE_2026-07-13.md:67,80-83,100; grep temporal_class → only ghost_a.py + runpod_flash_extraction.py."
+    },
+    {
+      "plan_term": "owner waiver",
+      "code_symbols": [],
+      "store_fields": [],
+      "verdict": "PLAN-ONLY",
+      "canonical": "explicit owner waiver (standing rule 1 escape hatch)",
+      "aliases": ["owner sign-off", "owner decision (S3 disposition matrix, S7 DF-facet rule)"],
+      "collision_note": "Pure process; no code or store records a waiver. If waivers matter, the ledger is the only ledger of them.",
+      "evidence": "RAPTOR_RAG_IMPLEMENTATION_CHECKLIST.md:18; PLAN_CRITIQUE_2026-07-13.md:82,86 (S3/S7 owner decisions)."
+    },
+    {
+      "plan_term": "dark fields",
+      "code_symbols": [
+        {"symbol": "parse_latent_concepts (aliases clamped to 3, read by nothing)", "file_line": "backend/services/ingestion/summary_semantics.py:54,112,121", "role": "the live example of dark data the rule was written against"}
+      ],
+      "store_fields": ["parent_chunks.latent_concepts[].aliases (captured, zero consumers)"],
+      "verdict": "PLAN-ONLY",
+      "canonical": "no-dark-fields rule (standing rule 2)",
+      "aliases": ["dark data", "dark code (S0 variant: merged-but-undeployed)"],
+      "collision_note": "'Dark fields' (captured field without consumer) vs 'dark code' (merged code not deployed, S0/C3) are sibling but distinct hygiene failures — the plan uses both; don't collapse them.",
+      "evidence": "RAPTOR_RAG_IMPLEMENTATION_CHECKLIST.md:20-22; PLAN_CRITIQUE_2026-07-13.md:68,79,105-106 (C3)."
+    },
+    {
+      "plan_term": "status tag",
+      "code_symbols": [],
+      "store_fields": [],
+      "verdict": "PLAN-ONLY",
+      "canonical": "ledger status tag ([x], PARTIAL, IN PROGRESS, IN CODE, Experiment, Migration)",
+      "aliases": ["status legend entries", "checkbox state"],
+      "collision_note": "'IN CODE' is used in the critique table but is NOT defined in the Status Legend (checklist:38-44) — undefined tag in the vocabulary; worth adding to the legend.",
+      "evidence": "RAPTOR_RAG_IMPLEMENTATION_CHECKLIST.md:23-25,38-44; PLAN_CRITIQUE_2026-07-13.md:9 table header 'IN CODE / PARTIAL'."
+    },
+    {
+      "plan_term": "status legend",
+      "code_symbols": [],
+      "store_fields": [],
+      "verdict": "SAME",
+      "canonical": "ledger status tag (Status Legend section)",
+      "aliases": ["status tag definitions"],
+      "collision_note": "",
+      "evidence": "RAPTOR_RAG_IMPLEMENTATION_CHECKLIST.md:38-44."
+    },
+    {
+      "plan_term": "stale",
+      "code_symbols": [
+        {"symbol": "vocabulary cache epoch invalidation (P1.7)", "file_line": "backend/services/retriever/vocabulary.py (cache + epoch, IN CODE per plan)", "role": "code-side 'stale' = cache entry older than corpus epoch"}
+      ],
+      "store_fields": [],
+      "verdict": "OVERLAPPING",
+      "canonical": "stale status tag (standing rule 3: tag contradicted by later verification)",
+      "aliases": ["receipts refresh tags", "restamp"],
+      "collision_note": "COLLISION (a): ledger-'stale' (a status tag contradicted by a green verify, e.g. P0.1's two IN PROGRESS tags) vs code-'stale' (cache/epoch staleness, provider_canary_cache). Same word, unrelated mechanisms.",
+      "evidence": "RAPTOR_RAG_IMPLEMENTATION_CHECKLIST.md:23-25; PLAN_CRITIQUE_2026-07-13.md:19,70,108-109 (C4); backend/services/ingestion/provider_canary_cache.py."
+    },
+    {
+      "plan_term": "migration",
+      "code_symbols": [
+        {"symbol": "_global collection lookup 'used only by the migration'", "file_line": "backend/services/storage/qdrant_writer.py:125", "role": "legacy global→per-corpus Qdrant collection migration path"},
+        {"symbol": "backfill_*.py script family (15+)", "file_line": "backend/scripts/backfill_corpus_lexicon.py:1 et al.", "role": "how durable-artifact migrations are actually executed"}
+      ],
+      "store_fields": [],
+      "verdict": "OVERLAPPING",
+      "canonical": "migration (ledger tag: durable artifacts must be changed/rebuilt)",
+      "aliases": ["backfill", "rematerialization (S5)", "edge migration (S12 P2.5+T-MAIN)", "collection consolidation migration (P3.3)"],
+      "collision_note": "COLLISION (a): one word covers (1) the Status Legend tag, (2) the executed backfill scripts, (3) the pending Neo4j edge migration (S12) and Qdrant collection consolidation (P3.3). Standing rule 4 'one migration per seam' governs (3). In code the executed form is almost always called 'backfill', not 'migration' — name drift.",
+      "evidence": "RAPTOR_RAG_IMPLEMENTATION_CHECKLIST.md:44,26-27; qdrant_writer.py:125; ls backend/scripts | grep backfill (15 hits)."
+    },
+    {
+      "plan_term": "seam",
+      "code_symbols": [
+        {"symbol": "parent_summary.v1 contract (Ghost A)", "file_line": "backend/services/ghost_a.py:90,100", "role": "the 'summary-contract capture seam' (S1) instance"},
+        {"symbol": "polymath.extract.v2 contract", "file_line": "backend/services/ingestion/extraction_contract.py", "role": "the extraction seam instance"}
+      ],
+      "store_fields": [],
+      "verdict": "PLAN-ONLY",
+      "canonical": "seam (plan vocabulary: the single contract touchpoint where related changes must ride together)",
+      "aliases": ["contract seam", "capture seam"],
+      "collision_note": "Not a code symbol; each named seam resolves to a concrete contract module. Keep the plan's seam→file mapping explicit or 'one migration per seam' is unenforceable.",
+      "evidence": "RAPTOR_RAG_IMPLEMENTATION_CHECKLIST.md:18,26-27; PLAN_CRITIQUE_2026-07-13.md:80 (S1 'same seam as latent_concepts')."
+    },
+    {
+      "plan_term": "read-before-act",
+      "code_symbols": [],
+      "store_fields": [],
+      "verdict": "PLAN-ONLY",
+      "canonical": "read-before-act rule (standing rule 5; re-read the ledger from disk each phase)",
+      "aliases": ["no cached-plan execution", "re-read from disk"],
+      "collision_note": "No enforcement hook exists; the rule lives in checklist:28-30 and CLAUDE.md north-star. Nearest seam if automated: a Claude Code hook that re-opens the checklist at phase start.",
+      "evidence": "RAPTOR_RAG_IMPLEMENTATION_CHECKLIST.md:28-30; CLAUDE.md:9-14."
+    },
+    {
+      "plan_term": "session memory",
+      "code_symbols": [],
+      "store_fields": [],
+      "verdict": "PLAN-ONLY",
+      "canonical": "session memory (the failure source read-before-act bans)",
+      "aliases": ["cached plan", "working from memory of the plan"],
+      "collision_note": "Do not confuse with mem0/agent memory systems elsewhere in the user's stack — here it strictly means an agent acting on its recollection of the ledger instead of the file on disk (the C1/C2 root cause).",
+      "evidence": "RAPTOR_RAG_IMPLEMENTATION_CHECKLIST.md:29-30; CLAUDE.md:13-14 ('agent worked from its session memory of the plan instead of the file')."
+    },
+    {
+      "plan_term": "acceptance tests",
+      "code_symbols": [
+        {"symbol": "backend/tests/test_*.py suites", "file_line": "backend/tests/ (e.g. test_planned_retrieval.py:225)", "role": "unit/behavioral acceptance for code-level items"},
+        {"symbol": "p0_1_summary_integrity.py verify subcommand", "file_line": "backend/scripts/p0_1_summary_integrity.py:516", "role": "exit-0 durable-data acceptance gate (the pattern for 'verified')"},
+        {"symbol": "run_heldout_eval.py", "file_line": "backend/scripts/run_heldout_eval.py:1", "role": "held-out eval acceptance (P1.1)"}
+      ],
+      "store_fields": [],
+      "verdict": "OVERLAPPING",
+      "canonical": "acceptance test (ledger meaning: the listed per-section acceptance items must pass before [x])",
+      "aliases": ["acceptance", "verify pass", "asserting e2e"],
+      "collision_note": "Ledger 'acceptance' includes durable-data probes and live probes, not just pytest; many acceptance lines have no automated counterpart yet (e.g. the 16x3 regression matrix, checklist:52) — those are to-be-built, nearest seam three_tier_eval/run_heldout_eval.",
+      "evidence": "RAPTOR_RAG_IMPLEMENTATION_CHECKLIST.md:34-36; PLAN_CRITIQUE_2026-07-13.md:52 (regression matrix row)."
+    },
+    {
+      "plan_term": "partial",
+      "code_symbols": [],
+      "store_fields": [],
+      "verdict": "PLAN-ONLY",
+      "canonical": "PARTIAL status tag (some sub-items complete, parent outcome not)",
+      "aliases": ["Partial"],
+      "collision_note": "COLLISION (a): 'partial' also appears as partial-stage retry (checklist:502, P0.6 job semantics) and as the planned temporal capability level 'temporal_partial' (S6). Tag vs mechanism vs capability level.",
+      "evidence": "RAPTOR_RAG_IMPLEMENTATION_CHECKLIST.md:42,502; PLAN_CRITIQUE_2026-07-13.md:85 (S6 temporal_unavailable/partial/strict_ready)."
+    },
+    {
+      "plan_term": "experiment",
+      "code_symbols": [],
+      "store_fields": [],
+      "verdict": "PLAN-ONLY",
+      "canonical": "Experiment status tag (no production adoption until before/after evaluation)",
+      "aliases": ["clone-first experiment (P3.4)", "isolated experiment"],
+      "collision_note": "No experiment framework exists in code; the before/after harness is run_heldout_eval.py + docs/baselines artifacts — nearest seam for P3.4/P3.5 experiments.",
+      "evidence": "RAPTOR_RAG_IMPLEMENTATION_CHECKLIST.md:43; PLAN_CRITIQUE_2026-07-13.md:49-50,92."
+    },
+    {
+      "plan_term": "retrieval tiers",
+      "code_symbols": [
+        {"symbol": "class RetrievalTier(str, Enum)", "file_line": "backend/models/_schemas_legacy.py:1068-1073", "role": "THE tier enum: qdrant_only | qdrant_mongo | qdrant_mongo_graph"},
+        {"symbol": "default_tier=\"qdrant_mongo\"", "file_line": "backend/services/settings.py:159", "role": "default tier"}
+      ],
+      "store_fields": ["chat request field retrieval_tier"],
+      "verdict": "SAME",
+      "canonical": "RetrievalTier (qdrant_only | qdrant_mongo | qdrant_mongo_graph)",
+      "aliases": ["retrieval tiers", "three tiers", "fast/hybrid/graph", "3-tier"],
+      "collision_note": "COLLISION (a): 'tier' also names Tier-0 doc-summary routing (config.py TIER0_ROUTING — a routing stage, not a RetrievalTier) and SourceChunk.source_tier (per-chunk provenance). See registry_retrieval.json 'tier' row.",
+      "evidence": "backend/models/_schemas_legacy.py:1068; backend/scripts/probe_tier_latency.py:190-204 maps fast/hybrid/graph labels onto the enum values."
+    },
+    {
+      "plan_term": "fast",
+      "code_symbols": [
+        {"symbol": "RetrievalTier.qdrant_only", "file_line": "backend/models/_schemas_legacy.py:1071", "role": "the enum value 'fast' names"},
+        {"symbol": "probe config (\"fast_single\", ..., \"qdrant_only\")", "file_line": "backend/scripts/probe_tier_latency.py:190", "role": "probe label"}
+      ],
+      "store_fields": [],
+      "verdict": "SAME",
+      "canonical": "RetrievalTier.qdrant_only",
+      "aliases": ["fast", "Fast tier", "fast_single"],
+      "collision_note": "'Fast' is a human label that exists only in docs/probe names; code always says qdrant_only. Note test_planned_retrieval.py:225 'planned fast' = QueryPlanV2 over qdrant_only — same tier, planned route.",
+      "evidence": "probe_tier_latency.py:13,190; checklist:48-49,91."
+    },
+    {
+      "plan_term": "hybrid",
+      "code_symbols": [
+        {"symbol": "RetrievalTier.qdrant_mongo", "file_line": "backend/models/_schemas_legacy.py:1072", "role": "the enum value 'hybrid' names (also the default, settings.py:159)"}
+      ],
+      "store_fields": [],
+      "verdict": "SAME",
+      "canonical": "RetrievalTier.qdrant_mongo",
+      "aliases": ["hybrid", "Hybrid tier", "hybrid_single", "hybrid_cross"],
+      "collision_note": "COLLISION (a): 'hybrid' ALSO means dense+sparse hybrid vector search inside Qdrant (qdrant_writer.py:958 'named=... sparse=...') — a scoring mechanism orthogonal to the store tier. A 'hybrid' result can come from any tier.",
+      "evidence": "backend/models/_schemas_legacy.py:1072; probe_tier_latency.py:191; qdrant_writer.py:958."
+    },
+    {
+      "plan_term": "graph",
+      "code_symbols": [
+        {"symbol": "RetrievalTier.qdrant_mongo_graph", "file_line": "backend/models/_schemas_legacy.py:1073", "role": "the enum value 'graph' names in tier context"},
+        {"symbol": "services/graph/* (orchestrator.py, graph_query.py, neo4j_writer.py)", "file_line": "backend/services/graph/orchestrator.py:3203", "role": "the Neo4j graph subsystem — a different referent"},
+        {"symbol": "_col_for_corpus kind='graph'", "file_line": "backend/services/storage/qdrant_writer.py:168-176", "role": "a Qdrant collection KIND suffix — a third referent"}
+      ],
+      "store_fields": ["Qdrant collections corpus_<id8>_graph"],
+      "verdict": "OVERLAPPING",
+      "canonical": "RetrievalTier.qdrant_mongo_graph (when the plan says 'Graph tier')",
+      "aliases": ["Graph tier", "graph_single"],
+      "collision_note": "COLLISION (a), strong: 'graph' = (1) the tier, (2) the Neo4j subsystem, (3) the _graph Qdrant collection kind, (4) Graph View frontend. Plan text usually means (1); code greps for 'graph' hit all four.",
+      "evidence": "_schemas_legacy.py:1073; graph/orchestrator.py:3203 requested_tier='qdrant_mongo_graph'; qdrant_writer.py:172 kinds {naive, hrag, graph, schemas}."
+    },
+    {
+      "plan_term": "qdrant_mongo_graph",
+      "code_symbols": [
+        {"symbol": "RetrievalTier.qdrant_mongo_graph", "file_line": "backend/models/_schemas_legacy.py:1073", "role": "exact enum value"}
+      ],
+      "store_fields": [],
+      "verdict": "SAME",
+      "canonical": "RetrievalTier.qdrant_mongo_graph",
+      "aliases": ["graph tier", "Graph (qdrant_mongo_graph)"],
+      "collision_note": "",
+      "evidence": "chat_orchestrator.py:730-734 tier dispatch; graph/orchestrator.py:3218."
+    },
+    {
+      "plan_term": "cross-corpus",
+      "code_symbols": [
+        {"symbol": "dedupe_cross_corpus_evidence", "file_line": "backend/services/retriever/__init__.py:50,2902,2949", "role": "cross-corpus evidence dedup at fusion"},
+        {"symbol": "_repair_cross_corpus_missing_concepts", "file_line": "backend/services/retriever/__init__.py:1088,3472", "role": "cross-corpus repair pass"},
+        {"symbol": "probe 'hybrid_cross'", "file_line": "backend/scripts/probe_tier_latency.py:197", "role": "cross-corpus latency probe"}
+      ],
+      "store_fields": [],
+      "verdict": "SAME",
+      "canonical": "cross-corpus retrieval",
+      "aliases": ["cross-corpus", "multi-corpus"],
+      "collision_note": "",
+      "evidence": "retriever/__init__.py:2902; checklist:50 invariant; checklist:91 'cross-corpus Hybrid 23.3s'."
+    },
+    {
+      "plan_term": "corpus boundary",
+      "code_symbols": [
+        {"symbol": "selected_corpus_ids / corpus_ids threading", "file_line": "backend/services/retriever/planned_fusion.py:303,398,621,713,756", "role": "the user-selected corpus filter carried through planned retrieval"},
+        {"symbol": "_col_for_corpus", "file_line": "backend/services/storage/qdrant_writer.py:168", "role": "physical boundary — per-corpus Qdrant collections"},
+        {"symbol": "Entity.corpus_ids[] (Neo4j isolation)", "file_line": "backend/services/graph/neo4j_writer.py", "role": "graph-side boundary via properties, never ID-prefixing"}
+      ],
+      "store_fields": ["Qdrant payload corpus_id", "Neo4j Entity.corpus_ids[]", "Mongo corpus_id on every row"],
+      "verdict": "OVERLAPPING",
+      "canonical": "user-selected corpus boundary (selected_corpus_ids filter)",
+      "aliases": ["corpus isolation", "corpus filter"],
+      "collision_note": "No single 'boundary' symbol; the invariant is enforced at three layers (filter threading, per-corpus collections, graph properties). A test asserting the invariant end-to-end does not exist as one artifact — checklist:50 remains open.",
+      "evidence": "planned_fusion.py:303,398; qdrant_writer.py:168-176; checklist:50."
+    },
+    {
+      "plan_term": "top-down retrieval",
+      "code_symbols": [
+        {"symbol": "TIER0_ROUTING flag", "file_line": "backend/config.py:650-656", "role": "'top-down query-time document routing over polymath_doc_summaries before parent/child evidence retrieval'"},
+        {"symbol": "QueryPlanV2 planned top-down route", "file_line": "backend/services/retriever/planned_fusion.py (asserted by backend/tests/test_planned_retrieval.py:225-231)", "role": "planned route contract for the Fast tier"},
+        {"symbol": "summary_tree_navigator", "file_line": "backend/services/retriever/summary_tree_navigator.py", "role": "document→section→parent descent"}
+      ],
+      "store_fields": ["Qdrant collection polymath_doc_summaries (Tier-0 vectors)"],
+      "verdict": "OVERLAPPING",
+      "canonical": "top-down routing (Tier-0 doc routing + planned descent)",
+      "aliases": ["top-down retrieval", "corpus/shelf -> document -> hierarchy -> evidence", "Tier-0 routing"],
+      "collision_note": "The invariant (checklist:51-52) is broader than any one flag: TIER0_ROUTING covers doc routing; shelf routing (P1.4) and tree descent (Phase 2) are separate unbuilt/partial pieces of the same invariant. Duplicate-implementation risk (b): Tier-0 routing and P1.4 shelf routing both answer 'which documents first' — S-plan must wire shelf routing THROUGH Tier-0, not beside it.",
+      "evidence": "config.py:650-656; test_planned_retrieval.py:231; checklist:51-52."
+    },
+    {
+      "plan_term": "original query",
+      "code_symbols": [
+        {"symbol": "lane.role == \"original\" → protected_lane_ids", "file_line": "backend/services/retriever/__init__.py:1445-1447", "role": "the protected original-query lane"},
+        {"symbol": "protected_recall_lanes diagnostic", "file_line": "backend/services/retriever/__init__.py:3366", "role": "surfacing lane protection in diagnostics"},
+        {"symbol": "original_query params in chat scoring", "file_line": "backend/services/chat_orchestrator.py:1742,3114,3177", "role": "query-fit scoring against the user's wording"}
+      ],
+      "store_fields": [],
+      "verdict": "SAME",
+      "canonical": "original-query protected lane (lane role 'original')",
+      "aliases": ["original query", "protected retrieval lane", "original lane"],
+      "collision_note": "",
+      "evidence": "retriever/__init__.py:1445-1447; checklist:53 invariant."
+    },
+    {
+      "plan_term": "semantic drift",
+      "code_symbols": [
+        {"symbol": "protected_lane_ids (original lane never replaced by expansion)", "file_line": "backend/services/retriever/__init__.py:1445,2914,3017,3060", "role": "the anti-drift mechanism"},
+        {"symbol": "anti-drift comment on hypothetical-answer expansion", "file_line": "backend/services/chat_orchestrator.py:9331", "role": "documented drift hazard at HyDE-style expansion"}
+      ],
+      "store_fields": [],
+      "verdict": "OVERLAPPING",
+      "canonical": "original-query protected lane (drift = what the lane protection prevents)",
+      "aliases": ["semantic drift", "query-expansion drift"],
+      "collision_note": "No symbol named 'drift'; the invariant (checklist:54-55) is realized by lane protection plus S5's 'gated query-expansion consumption (original-query lane protected)'. Same concept as the 'original query' row.",
+      "evidence": "checklist:54-55; retriever/__init__.py:1445; PLAN_CRITIQUE_2026-07-13.md:84 (S5)."
+    },
+    {
+      "plan_term": "final evidence",
+      "code_symbols": [
+        {"symbol": "reservation_policy.py module docstring 'final evidence seats'", "file_line": "backend/services/retriever/reservation_policy.py:1-31", "role": "seat discipline over the final packet"},
+        {"symbol": "final selection / finalist set", "file_line": "backend/services/retriever/ranking_policy.py:1717-1855", "role": "where the final packet is assembled (corpus-floor seats, no_replaceable_seat)"},
+        {"symbol": "select_facet_final (cap=8)", "file_line": "backend/services/facets/final_selector.py", "role": "facet-final selection stage"}
+      ],
+      "store_fields": ["evidence rows retain corpus_id, doc_id, parent/child identity, heading/boundary metadata (checklist:56-57 invariant)"],
+      "verdict": "OVERLAPPING",
+      "canonical": "final evidence packet (finalist set after ranking + reservation)",
+      "aliases": ["final evidence", "evidence packet", "finalist set", "final selection"],
+      "collision_note": "No `final_evidence` symbol; three modules co-own finalization (ranking_policy, reservation_policy, final_selector). Checklist:479 'no separator/navigation artifact can enter a final evidence packet' is still open — nearest seam is the NOISY_KINDS junk filter.",
+      "evidence": "reservation_policy.py:1-19; ranking_policy.py:1717,1855; checklist:56,479."
+    },
+    {
+      "plan_term": "corpus_id",
+      "code_symbols": [
+        {"symbol": "corpus_id (universal key)", "file_line": "backend/services/storage/qdrant_writer.py:109,939 (_summary_point_id(corpus_id, parent_id))", "role": "identity component everywhere"},
+        {"symbol": "librarian_cards upsert key (corpus_id, doc_id)", "file_line": "backend/services/librarian/card_builder.py:21", "role": "card identity"}
+      ],
+      "store_fields": ["Mongo: corpus_id on documents/parent_chunks/summary_tree/ghost_b_extractions/librarian_cards", "Qdrant payload corpus_id", "Neo4j Entity.corpus_ids[]"],
+      "verdict": "SAME",
+      "canonical": "corpus_id",
+      "aliases": [],
+      "collision_note": "Note Neo4j uses the PLURAL corpus_ids[] (shared entities across corpora) — same identity, different cardinality by store.",
+      "evidence": "qdrant_writer.py:939; card_builder.py:21."
+    },
+    {
+      "plan_term": "doc_id",
+      "code_symbols": [
+        {"symbol": "doc_id (document identity)", "file_line": "backend/services/ingestion/summary_tree.py:453 (node_id=f\"rollup_{doc_id[:12]}_...\")", "role": "document key used in derived ids"},
+        {"symbol": "librarian_cards key (corpus_id, doc_id)", "file_line": "backend/services/librarian/card_builder.py:21", "role": "card identity"}
+      ],
+      "store_fields": ["Mongo documents._id / doc_id on chunks", "Qdrant payload doc_id"],
+      "verdict": "SAME",
+      "canonical": "doc_id",
+      "aliases": ["document id"],
+      "collision_note": "",
+      "evidence": "summary_tree.py:453; card_builder.py:21; checklist:56 invariant."
+    },
+    {
+      "plan_term": "schema version",
+      "code_symbols": [
+        {"symbol": "schema_version field + extract_schema_version", "file_line": "backend/tests/test_contracts.py:75,87 ('polymath.extract.v2')", "role": "extraction envelope version"},
+        {"symbol": "parent_summary.v1 contract", "file_line": "backend/services/ghost_a.py:90,100,147", "role": "summary artifact version"},
+        {"symbol": "librarian_card.v0 schema_version", "file_line": "backend/services/librarian/card_builder.py:26", "role": "card version"},
+        {"symbol": "METRICS_CACHE_SCHEMA_VERSION", "file_line": "backend/services/graph/analytics.py", "role": "cache schema version"}
+      ],
+      "store_fields": ["schema_version on extraction rows, summary artifacts, librarian_cards"],
+      "verdict": "SAME",
+      "canonical": "schema_version (per-artifact versioned contract id)",
+      "aliases": ["contract version", "polymath.extract.v1/v2", "parent_summary.v1", "librarian_card.v0"],
+      "collision_note": "One field name, many independent version namespaces — that is by design; the invariant (checklist:58-59) requires it on every generated artifact family.",
+      "evidence": "test_contracts.py:75-87; ghost_a.py:90; card_builder.py:26."
+    },
+    {
+      "plan_term": "abstractive summary",
+      "code_symbols": [
+        {"symbol": "unmodeled-summary skip ('not an abstraction artifact')", "file_line": "backend/services/storage/qdrant_writer.py:847-866", "role": "writer refuses summary points without a producing model"},
+        {"symbol": "stamp-legacy (summary_model='legacy_unknown')", "file_line": "backend/scripts/p0_1_summary_integrity.py:11", "role": "provenance stamping of real legacy abstractive summaries"}
+      ],
+      "store_fields": ["summary_model non-empty on Mongo summary rows and Qdrant summary-point payloads (qdrant_writer.py:905)"],
+      "verdict": "SAME",
+      "canonical": "modeled abstractive summary (summary_model non-empty)",
+      "aliases": ["abstractive summary", "real summary", "abstraction artifact"],
+      "collision_note": "Defined negatively in code: abstractive = NOT an extractive-fallback and NOT an empty-model placeholder. The positive marker is the summary_model provenance field.",
+      "evidence": "qdrant_writer.py:847-866; checklist:60-61 invariant; checklist:1322-1334."
+    },
+    {
+      "plan_term": "extractive fallback",
+      "code_symbols": [
+        {"symbol": "_extractive_fallback_summary", "file_line": "backend/services/ghost_a.py:349,1184", "role": "parent-summary seam fallback"},
+        {"symbol": "_extractive_fallback", "file_line": "backend/services/ingestion/summary_tree.py:380,414", "role": "summary-tree node seam fallback"},
+        {"symbol": "fallback contract note", "file_line": "backend/services/ingestion/summary_semantics.py:16", "role": "'extractive fallback fills summary ONLY — structure is never fabricated'"}
+      ],
+      "store_fields": ["fallback rows carry empty/placeholder summary_model — the thing P0.1 removed from retrieval eligibility"],
+      "verdict": "OVERLAPPING",
+      "canonical": "extractive fallback",
+      "aliases": ["extractive placeholder", "fallback summary"],
+      "collision_note": "DUPLICATE-IMPLEMENTATION (b): the same idea is implemented twice under near-identical names — ghost_a._extractive_fallback_summary (parents) and summary_tree._extractive_fallback (tree nodes). Per-seam duplication is currently intentional, but checklist:955 ('never create extractive fallback placeholders after provider failure') must be enforced at BOTH sites; fixing one will not fix the other.",
+      "evidence": "ghost_a.py:349; summary_tree.py:380; config.py:321."
+    },
+    {
+      "plan_term": "hardcoded topic rules",
+      "code_symbols": [
+        {"symbol": "is_curated_concept + curated multi-word concept anchors", "file_line": "backend/services/retriever/query_semantics.py:848-849,310,796,912", "role": "the existing in-Python curated alias/concept lists the invariant targets"}
+      ],
+      "store_fields": ["target state: versioned alias registry / corpus_lexicon rows (S5), not Python conditionals"],
+      "verdict": "OVERLAPPING",
+      "canonical": "curated concept rules in Python (to migrate to the versioned alias registry, S5)",
+      "aliases": ["hardcoded topic rules", "curated aliases in Python", "Python conditionals"],
+      "collision_note": "The term names an ANTI-pattern: code exists (query_semantics curated lists) and the plan's work is its removal/migration (checklist:62-63 invariant; P0.5 'curated aliases -> versioned lexicon'; S5 registry). Grepping for a 'topic_rules' symbol finds nothing — the rules hide inside query_semantics constants.",
+      "evidence": "query_semantics.py:848; checklist:62-63; PLAN_CRITIQUE_2026-07-13.md:84."
+    },
+    {
+      "plan_term": "fail closed",
+      "code_symbols": [
+        {"symbol": "ranking_policy._evaluate_sufficiency (retriever-side gate)", "file_line": "backend/services/answerability_tuning.py:6 (naming), services/retriever/ranking_policy.py", "role": "strict repair-driving sufficiency gate"},
+        {"symbol": "_build_retrieval_answerability_gate (chat-side arbiter)", "file_line": "backend/services/chat_orchestrator.py:950,7485", "role": "refusal arbiter"},
+        {"symbol": "fail-closed comment", "file_line": "backend/services/retriever/__init__.py:3170", "role": "'fail closed while grounded broad questions answer'"},
+        {"symbol": "probe 'hybrid_negative'", "file_line": "backend/scripts/probe_tier_latency.py:204", "role": "negative-control probe"}
+      ],
+      "store_fields": [],
+      "verdict": "SAME",
+      "canonical": "answerability gates fail-closed on negative controls",
+      "aliases": ["fail closed", "negative controls", "honest refusal"],
+      "collision_note": "TWO mirror gates share the knobs (services/answerability_tuning.py): keep retriever gate STRICT, tune chat gate — loosening the wrong one breaks either fail-closed or answer coverage.",
+      "evidence": "answerability_tuning.py:6-7; chat_orchestrator.py:950; checklist:64,1359."
+    },
+    {
+      "plan_term": "pressure gates",
+      "code_symbols": [
+        {"symbol": "build_ingestion_pressure_snapshot / _pressure_level", "file_line": "backend/services/ingestion/pressure.py:121,34", "role": "ingestion pressure snapshot + level"},
+        {"symbol": "qdrant_pressure_from_prometheus / sample_qdrant_pressure", "file_line": "backend/services/ingestion/storage_pressure.py:91,210", "role": "storage-side pressure sampling"},
+        {"symbol": "provider-pressure gating in worker", "file_line": "backend/services/ingestion/worker.py:2168-2172,3657", "role": "gating rationale at dispatch"}
+      ],
+      "store_fields": [],
+      "verdict": "SAME",
+      "canonical": "pressure gates (ingestion + storage pressure snapshots gating backfills)",
+      "aliases": ["pressure gates", "provider pressure", "store pressure"],
+      "collision_note": "Two modules (pressure.py = pipeline/provider, storage_pressure.py = Qdrant memory) — complementary, not duplicates; the invariant (checklist:65-66) requires BOTH active during backfills.",
+      "evidence": "pressure.py:121; storage_pressure.py:91,210; worker.py:3657."
+    },
+    {
+      "plan_term": "provider cooldowns",
+      "code_symbols": [
+        {"symbol": "provider_lane_health cooldown status + cooldown_keys", "file_line": "backend/services/ingestion/provider_lane_health.py:123,132,156-164", "role": "per provider/model cooldown bookkeeping and enforcement"},
+        {"symbol": "provider_canary_cache", "file_line": "backend/services/ingestion/provider_canary_cache.py", "role": "canary result caching feeding lane health"}
+      ],
+      "store_fields": ["health doc cooldown_keys[]"],
+      "verdict": "SAME",
+      "canonical": "provider lane cooldown (provider_lane_health)",
+      "aliases": ["provider cooldowns", "cooldown_keys"],
+      "collision_note": "",
+      "evidence": "provider_lane_health.py:123-164."
+    },
+    {
+      "plan_term": "durable leases",
+      "code_symbols": [
+        {"symbol": "acquire_lane_lease / release_lane_lease / renew_lane_lease / corpus_lane_lease / lease_deadline", "file_line": "backend/services/ingestion/job_leases.py:39,98,126,157,207", "role": "ingestion job/lane leases (batches resume under lease, batches.py:6)"},
+        {"symbol": "cleanup_lease_until + _heartbeat_cleanup_lease", "file_line": "backend/services/ingestion_service.py:450,1851,1920-1935,1954", "role": "P0.6 corpus purge/cleanup lease with heartbeat"}
+      ],
+      "store_fields": ["Mongo corpora.cleanup_lease_until", "lane-lease rows in job control collections"],
+      "verdict": "OVERLAPPING",
+      "canonical": "durable lease — two distinct kinds: lane lease (job_leases) and cleanup lease (cleanup_lease_until)",
+      "aliases": ["durable leases", "purge lease", "lane lease"],
+      "collision_note": "COLLISION (a): one plan term, two implementations with different semantics and test surfaces. The P0.6 open 'lease test matrix' (restart-before-expiry, purge-beyond-lease) targets the CLEANUP lease only — a green lane-lease suite proves nothing about it.",
+      "evidence": "job_leases.py:39-207; ingestion_service.py:1954; checklist:24 (P0.6 row), 104-105."
+    },
+    {
+      "plan_term": "idempotent replay",
+      "code_symbols": [
+        {"symbol": "batches under lease, idempotent restart", "file_line": "backend/services/ingestion/batches.py:6,441", "role": "batch resume: 'existing idempotent ingestion worker under a lease, so a process restart can...'"},
+        {"symbol": "slice retry overwrites (cursor-range idempotency)", "file_line": "backend/services/ingestion/corpus_lexicon.py:2785", "role": "projection rebuild idempotency"},
+        {"symbol": "full_replay fallback", "file_line": "backend/services/ingestion/graph_backfill.py:682-691,767; graph_promotion_jobs.py:285,632", "role": "graph promotion replay"},
+        {"symbol": "idempotent startup readiness", "file_line": "backend/services/retrieval_readiness.py:13", "role": "runs on every startup/resume"}
+      ],
+      "store_fields": [],
+      "verdict": "OVERLAPPING",
+      "canonical": "idempotent job replay (durable-job upsert + lease resume)",
+      "aliases": ["idempotent replay", "full_replay", "resume-safe backfill"],
+      "collision_note": "No single symbol; the invariant (checklist:65-66) is a property each job family implements separately (summary jobs, extraction jobs, graph promotion, lexicon slices). checklist:502 adds partial-stage retry to the same family.",
+      "evidence": "batches.py:6,441; graph_backfill.py:682; corpus_lexicon.py:2785."
+    },
+    {
+      "plan_term": "api keys",
+      "code_symbols": [
+        {"symbol": "encrypted api_key / lifecycle_api_key handling", "file_line": "backend/services/settings.py:253,271,323,364-366", "role": "keys encrypted at rest in settings"},
+        {"symbol": "get_system_runpod_flash_accounts (api_keys.runpod_accounts.<name>)", "file_line": "backend/services/settings.py:487-521", "role": "P2.7c multi-account key store; each API key = a distinct account"}
+      ],
+      "store_fields": ["Mongo settings: api_keys.runpod, api_keys.runpod_accounts.<name>, per-endpoint api_key/lifecycle_api_key (encrypted)"],
+      "verdict": "SAME",
+      "canonical": "encrypted provider api_keys (settings key store)",
+      "aliases": ["api keys", "provider credentials", "runpod_accounts keys"],
+      "collision_note": "Invariant (checklist:67-68) is about never printing/committing them; enforcement is convention + encryption at the settings boundary, no scanner exists in-repo.",
+      "evidence": "settings.py:253-366,487-521; checklist:1090."
+    },
+    {
+      "plan_term": "deterministic policy",
+      "code_symbols": [
+        {"symbol": "reservation_policy module (calibrated bound, 'neither path may inflate a score')", "file_line": "backend/services/retriever/reservation_policy.py:1-31,51", "role": "deterministic corpus-seat discipline"},
+        {"symbol": "shelf_engine deterministic role rules", "file_line": "backend/services/librarian/shelf_engine.py:83,185-200", "role": "librarian seats: LLM-generated fields can NEVER solely qualify a direct seat"},
+        {"symbol": "Deterministic librarian_card.v0 builder", "file_line": "backend/services/librarian/card_builder.py:1", "role": "cards are deterministic projections"}
+      ],
+      "store_fields": [],
+      "verdict": "SAME",
+      "canonical": "deterministic seat policy (only evidence-backed deterministic code grants seats; LLM may explain, never seat)",
+      "aliases": ["deterministic policy", "deterministic-first librarian", "LLM explain-not-select"],
+      "collision_note": "Spans two layers (retriever reservation + librarian roles) — see the 'document seats' collision row; the invariant text (checklist:69-73) covers both.",
+      "evidence": "reservation_policy.py:19; shelf_engine.py:192; checklist:69-73."
+    },
+    {
+      "plan_term": "document seats",
+      "code_symbols": [
+        {"symbol": "corpus/chunk seats in final evidence", "file_line": "backend/services/retriever/reservation_policy.py:3-51; ranking_policy.py:476-479,1717,1855", "role": "seat = a protected slot in the final evidence packet (chunk granularity, corpus-floor reservation)"},
+        {"symbol": "librarian direct/book seats", "file_line": "backend/services/librarian/shelf_engine.py:83,192", "role": "seat = a document/book admitted to the selection (Phase 2 seat policy)"}
+      ],
+      "store_fields": [],
+      "verdict": "OVERLAPPING",
+      "canonical": "seat — qualify the layer: evidence seat (reservation/ranking_policy) vs document seat (librarian shelf_engine)",
+      "aliases": ["document seats", "final document seats", "seat policy", "bridge seat", "corpus-floor seat"],
+      "collision_note": "COLLISION (a) + duplicate-implementation risk (b): two seat systems at different granularity. S8 wires shelf_reserve THROUGH reservation_policy ('never the old unconditional floor') — building librarian seats as a second independent reservation path is the explicitly-banned duplicate.",
+      "evidence": "reservation_policy.py:1-19; shelf_engine.py:192; PLAN_CRITIQUE_2026-07-13.md:71,87 (S8)."
+    },
+    {
+      "plan_term": "summary points",
+      "code_symbols": [
+        {"symbol": "_summary_point_id(corpus_id, parent_id)", "file_line": "backend/services/storage/qdrant_writer.py:109,939", "role": "stable Qdrant point id for a parent's summary vector"},
+        {"symbol": "point_label=\"summary\" upsert", "file_line": "backend/services/storage/qdrant_writer.py:954,958", "role": "'Upserted %d summary points' write path"},
+        {"symbol": "preserve_summary_points flag", "file_line": "backend/services/storage/qdrant_writer.py:978", "role": "delete/rewrite guard"}
+      ],
+      "store_fields": ["Qdrant per-corpus collections, payload: summary_model, corpus_id, parent_id (qdrant_writer.py:905,939)"],
+      "verdict": "SAME",
+      "canonical": "Qdrant summary point",
+      "aliases": ["summary points", "summary vectors"],
+      "collision_note": "Distinct from Tier-0 doc-summary vectors in polymath_doc_summaries (doc-level, config.py:645) — 'summary point' in the durable-baseline counts (checklist:77-84) means the parent-level points.",
+      "evidence": "qdrant_writer.py:109,954-958; capture_raptor_baseline.py:10 'per-corpus summary-point totals'."
+    },
+    {
+      "plan_term": "empty summary_model",
+      "code_symbols": [
+        {"symbol": "unmodeled summary placeholder skip at write", "file_line": "backend/services/storage/qdrant_writer.py:847-866", "role": "prevention: summary_model=='' never re-enters Qdrant"},
+        {"symbol": "empty_model_points verify metric", "file_line": "backend/scripts/p0_1_summary_integrity.py:516", "role": "detection/acceptance: explicit_empty_model == 0 gate (checklist:375)"}
+      ],
+      "store_fields": ["Qdrant payload summary_model == \"\" (legacy placeholders)", "Mongo summary rows summary_model"],
+      "verdict": "SAME",
+      "canonical": "empty summary_model placeholder",
+      "aliases": ["empty summary_model", "explicit empty-model", "unmodeled summary"],
+      "collision_note": "",
+      "evidence": "qdrant_writer.py:847-866; p0_1_summary_integrity.py:516; checklist:77-84,353,375."
+    },
+    {
+      "plan_term": "polymath_v2",
+      "code_symbols": [
+        {"symbol": "ACTIVE corpus list entry", "file_line": "backend/scripts/cleanup_orphan_catalog.py:31", "role": "literal corpus name"}
+      ],
+      "store_fields": ["Mongo corpora.name == 'polymath_v2' (130,503 parents; FROZEN for heavy ops)"],
+      "verdict": "SAME",
+      "canonical": "polymath_v2 (frozen main corpus)",
+      "aliases": ["v2", "main corpus"],
+      "collision_note": "'v2' shorthand in the plan always means this corpus, not schema polymath.extract.v2 — beware when grepping.",
+      "evidence": "cleanup_orphan_catalog.py:31; PLAN_CRITIQUE_2026-07-13.md:5,59."
+    },
+    {
+      "plan_term": "ecommerce_ai_film_school",
+      "code_symbols": [
+        {"symbol": "ACTIVE corpus list entry (exact casing)", "file_line": "backend/scripts/cleanup_orphan_catalog.py:32", "role": "literal corpus name 'ecommerce_AI_FILM_SCHOOL'"},
+        {"symbol": "probe arg", "file_line": "backend/scripts/probe_shelf_roles.py:14", "role": "PoC-pair usage"}
+      ],
+      "store_fields": ["Mongo corpora.name == 'ecommerce_AI_FILM_SCHOOL' (10,222 parents)"],
+      "verdict": "SAME",
+      "canonical": "ecommerce_AI_FILM_SCHOOL (PoC pair member)",
+      "aliases": ["ecommerce_ai_film_school (lowercased drift)", "ecom", "ecommerce"],
+      "collision_note": "Name-case drift: harvested term is lowercase but the store name is mixed-case — case-sensitive Mongo queries with the lowercase form return nothing.",
+      "evidence": "cleanup_orphan_catalog.py:32; PLAN_CRITIQUE_2026-07-13.md:5."
+    },
+    {
+      "plan_term": "markbuildsbrands_transcripts",
+      "code_symbols": [
+        {"symbol": "ACTIVE corpus list entry", "file_line": "backend/scripts/cleanup_orphan_catalog.py:33", "role": "literal corpus name"},
+        {"symbol": "probe arg", "file_line": "backend/scripts/probe_shelf_roles.py:13", "role": "PoC-pair usage"}
+      ],
+      "store_fields": ["Mongo corpora.name == 'markbuildsbrands_transcripts' (1,015 parents)"],
+      "verdict": "SAME",
+      "canonical": "markbuildsbrands_transcripts (PoC pair member; pilot corpus for P2.2/P3.1)",
+      "aliases": ["mark", "markbuilds"],
+      "collision_note": "",
+      "evidence": "cleanup_orphan_catalog.py:33; PLAN_CRITIQUE_2026-07-13.md:5,89."
+    },
+    {
+      "plan_term": "ugo_corpus",
+      "code_symbols": [
+        {"symbol": "ACTIVE corpus list entry", "file_line": "backend/scripts/cleanup_orphan_catalog.py:34", "role": "literal corpus name 'UGO_CORPUS'"},
+        {"symbol": "card-builder example", "file_line": "backend/scripts/build_librarian_cards.py:15", "role": "canary usage"}
+      ],
+      "store_fields": ["Mongo corpora.name == 'UGO_CORPUS' (203 parents; canary)"],
+      "verdict": "SAME",
+      "canonical": "UGO_CORPUS (canary corpus)",
+      "aliases": ["ugo_corpus (lowercased drift)", "UGO", "canary"],
+      "collision_note": "Same case-drift hazard as ecommerce_AI_FILM_SCHOOL.",
+      "evidence": "cleanup_orphan_catalog.py:34; PLAN_CRITIQUE_2026-07-13.md:5,83."
+    },
+    {
+      "plan_term": "authentic_library",
+      "code_symbols": [
+        {"symbol": "orphan-residue cleanup ('Facts first — usually the bulk of authentic_library residue')", "file_line": "backend/scripts/cleanup_orphan_catalog.py:116", "role": "deleted-corpus residue handling"}
+      ],
+      "store_fields": ["deleted/quarantined Mongo corpus; historical Qdrant collections still exist (checklist:87-88); orphan manifest docs/baselines/ORPHAN_MANIFEST_2026-07-13.json"],
+      "verdict": "SAME",
+      "canonical": "authentic_library (deleted corpus, orphan-cleanup subject)",
+      "aliases": [],
+      "collision_note": "",
+      "evidence": "cleanup_orphan_catalog.py:116; checklist:87-88,506."
+    },
+    {
+      "plan_term": "summary jobs",
+      "code_symbols": [
+        {"symbol": "db[\"summary_jobs\"] durable job collection", "file_line": "backend/services/ingestion/summary_jobs.py:69,150,635,811-817", "role": "Mongo collection access"},
+        {"symbol": "reconcile_satisfied_summary_jobs / build_parent_summary_job / build_document_summary_job / summary_job_id", "file_line": "backend/services/ingestion/summary_jobs.py:60,217,275,202", "role": "job lifecycle"}
+      ],
+      "store_fields": ["Mongo summary_jobs (status: succeeded/queued/superseded — checklist:85)"],
+      "verdict": "SAME",
+      "canonical": "summary_jobs (Mongo durable job collection)",
+      "aliases": ["summary jobs", "summary job queue"],
+      "collision_note": "",
+      "evidence": "summary_jobs.py:69; checklist:85,356."
+    },
+    {
+      "plan_term": "rollups",
+      "code_symbols": [
+        {"symbol": "rollup node generation (node_id=f\"rollup_{doc_id[:12]}_{r_idx:04d}\")", "file_line": "backend/services/ingestion/summary_tree.py:447-483", "role": "summary-tree rollup nodes"},
+        {"symbol": "passthrough_rollup_id (one-child skip)", "file_line": "backend/services/ingestion/summary_tree.py:171,242", "role": "P0.2 duplicate-rollup skip for passthrough sections"}
+      ],
+      "store_fields": ["Mongo summary_tree rows with rollup node ids (23,394 rollups — checklist:86)"],
+      "verdict": "SAME",
+      "canonical": "summary-tree rollup node",
+      "aliases": ["rollups", "section rollup"],
+      "collision_note": "Do not confuse with S5 'alias/latent rollup' (PLAN_CRITIQUE:84) — that is a DIFFERENT, to-be-built aggregation (parent latent_concepts -> doc profile -> lexicon), sharing only the word. Flag when reading S5.",
+      "evidence": "summary_tree.py:447-483; checklist:86,387."
+    },
+    {
+      "plan_term": "qdrant collections",
+      "code_symbols": [
+        {"symbol": "_col_for_corpus (single source of truth; f\"corpus_{corpus_id[:8]}_{kind}\", kinds naive/hrag/graph/schemas)", "file_line": "backend/services/storage/qdrant_writer.py:168-176", "role": "per-corpus collection naming"},
+        {"symbol": "legacy global collection lookup (migration-only)", "file_line": "backend/services/storage/qdrant_writer.py:125", "role": "legacy path"},
+        {"symbol": "ensure_collections_for_corpus", "file_line": "backend/services/retrieval_readiness.py:23 (import)", "role": "readiness-time creation"},
+        {"symbol": "polymath_doc_summaries universal collection", "file_line": "backend/config.py:645-647", "role": "Tier-0 doc-summary vectors"}
+      ],
+      "store_fields": ["Qdrant: corpus_<id8>_{naive,hrag,graph,schemas} + polymath_doc_summaries + historical authentic_library collections"],
+      "verdict": "SAME",
+      "canonical": "per-corpus Qdrant collections (_col_for_corpus) + universal polymath_doc_summaries",
+      "aliases": ["qdrant collections", "vector collections"],
+      "collision_note": "P3.3 'collection consolidation' plans to change this layout — a migration-tagged item; until then _col_for_corpus is the only legal resolver.",
+      "evidence": "qdrant_writer.py:125,168-176; config.py:645; checklist:87-88,506."
+    },
+    {
+      "plan_term": "latency probes",
+      "code_symbols": [
+        {"symbol": "probe_tier_latency.py (three-tier live streaming probe)", "file_line": "backend/scripts/probe_tier_latency.py:1-8,190-204", "role": "the deployed-latency probe: fast/hybrid/graph single + hybrid_cross + hybrid_negative"}
+      ],
+      "store_fields": ["artifact docs/baselines/LATENCY_2026-07-13.json"],
+      "verdict": "SAME",
+      "canonical": "three-tier latency probe (probe_tier_latency.py)",
+      "aliases": ["latency probes", "deployed latency probe"],
+      "collision_note": "The checklist's 'Recent deployed latency probes: Fast 39.8s degraded...' (line 91) are this script's outputs; P1.9 per-stage timing is a separate, unbuilt finer-grained instrument.",
+      "evidence": "probe_tier_latency.py:1-8; docs/baselines/LATENCY_2026-07-13.json; checklist:91."
+    },
+    {
+      "plan_term": "reranker readiness",
+      "code_symbols": [
+        {"symbol": "reranker startup real-inference warmup (_warmup_complete, WARMUP_CANDIDATE_SHAPES)", "file_line": "scripts/apple_ml_services/reranker_mlx/main.py:89,118,297-310", "role": "readiness includes completed real inference (checklist:93)"},
+        {"symbol": "GET /health", "file_line": "scripts/apple_ml_services/reranker_mlx/main.py:4", "role": "health endpoint"}
+      ],
+      "store_fields": [],
+      "verdict": "SAME",
+      "canonical": "reranker startup-inference readiness (reranker_mlx sidecar)",
+      "aliases": ["reranker readiness", "reranker warmup"],
+      "collision_note": "The DEPLOYED reranker per user memory is the torch fp16 sidecar on :8081 (plist-managed) while reranker_mlx is the rollback backend — verify which binary serves :8081 before trusting readiness semantics. Repo also contains a /reranker docker service with NO warmup (grep empty) — third implementation of 'the reranker'.",
+      "evidence": "reranker_mlx/main.py:297-310; checklist:93 'Reranker readiness includes real startup inference'; grep warmup reranker/main.py -> no hits."
+    },
+    {
+      "plan_term": "embedder /health",
+      "code_symbols": [
+        {"symbol": "health payload warmup{complete, duration_s, vector_dim, model, error}", "file_line": "scripts/apple_ml_services/embedder_mlx/main.py:11,134-140", "role": "P1.8 tri-state readiness: inference_ready == warmup complete"},
+        {"symbol": "backend warmup test (loads sidecar via SIDECAR_PATH)", "file_line": "backend/tests/test_embedder_warmup.py:25-34,70-118", "role": "asserting suite for the warmup states"}
+      ],
+      "store_fields": [],
+      "verdict": "SAME",
+      "canonical": "embedder /health warmup status (embedder_mlx sidecar :8082)",
+      "aliases": ["embedder /health", "embedder readiness", "warmup status split"],
+      "collision_note": "DUPLICATE-IMPLEMENTATION (b): TWO embedder services exist — repo /embedder (docker, NO warmup code) and scripts/apple_ml_services/embedder_mlx (host MLX :8082, has P1.8 warmup). The deployed one is embedder_mlx (docker-compose.override routes EMBEDDER_URL to host :8082). Checklist line 93-95 ('Embedder /health ... does not certify a completed inference warmup') predates the merged warmup — now stale per checklist:746-761 receipts.",
+      "evidence": "embedder_mlx/main.py:11,49-51,134-140; checklist:746-761 (merged @7f8e7b2, live :8082/health receipts); grep warmup embedder/main.py -> no hits."
+    },
+    {
+      "plan_term": "inference warmup",
+      "code_symbols": [
+        {"symbol": "WARMUP_TEXTS fixed neutral batch + _warmup_complete/_warmup_seconds/_warmup_vector_dim/_warmup_error", "file_line": "scripts/apple_ml_services/embedder_mlx/main.py:49-51,137-140", "role": "embedder-side warmup"},
+        {"symbol": "reranker warmup_query + shape sweep", "file_line": "scripts/apple_ml_services/reranker_mlx/main.py:297-310", "role": "reranker-side warmup"}
+      ],
+      "store_fields": [],
+      "verdict": "SAME",
+      "canonical": "sidecar inference warmup (P1.8)",
+      "aliases": ["inference warmup", "startup warmup", "real-inference warmup"],
+      "collision_note": "Distinct from P1.9 'keepalive after startup warmup' (checklist:809) and Qdrant compile/inference warmup cost (checklist:816) — same word 'warmup', different subsystems; P1.9 items remain unbuilt.",
+      "evidence": "embedder_mlx/main.py:49-51; reranker_mlx/main.py:299; checklist:743-761,809,816; PLAN_CRITIQUE:79 (S0 'merge wave1/warm')."
+    },
+    {
+      "plan_term": "claim audit",
+      "code_symbols": [],
+      "store_fields": [],
+      "verdict": "PLAN-ONLY",
+      "canonical": "claim audit (external verification pass over ledger claims, integrated as Audit Delta sections)",
+      "aliases": ["2026-07-12 claim audit", "audit delta", "metadata audit (2026-07-13)"],
+      "collision_note": "No code; the auditable-claims machinery is capture_raptor_baseline.py + the verify subcommands (nearest seam), and session Task #17 'Exec-plan audit workflow: every checklist claim -> auditable action' is the unbuilt automation. Related but distinct docs: RAPTOR_CRITIQUE_RESPONSE_2026-07-12.md (maintainer response) and PLAN_CRITIQUE_2026-07-13.md (sequencing critique).",
+      "evidence": "RAPTOR_RAG_IMPLEMENTATION_CHECKLIST.md:97-121 (Audit Delta 1+2); P0.7 'doc/claim integrity' COMPLETE (PLAN_CRITIQUE:25)."
+    }
+  ]
+}

@@ -1,0 +1,204 @@
+{
+  "family": "aliases & vocabulary",
+  "repo": "/Users/king/polymath_v3.3",
+  "generated": "2026-07-13",
+  "rows": [
+    {
+      "plan_term": "alias",
+      "code_symbols": [
+        {"symbol": "clean_alias()", "file_line": "backend/services/ingestion/corpus_lexicon.py:387", "role": "alias admission filter (noise/year/page rejection) at lexicon build"},
+        {"symbol": "add_identity_alias()", "file_line": "backend/services/ingestion/corpus_lexicon.py:949", "role": "accumulates alias evidence per reconciled identity"},
+        {"symbol": "mine_acronym_pairs()", "file_line": "backend/services/ingestion/corpus_lexicon.py:223", "role": "Schwartz-Hearst short/long form alias mining"},
+        {"symbol": "_TRUSTED_EXACT_ALIAS_METHODS", "file_line": "backend/services/retriever/vocabulary.py:55", "role": "query-time trust gate on alias provenance methods (explicit_alias_pattern, schwartz_hearst_acronym, extraction_surface_form)"}
+      ],
+      "store_fields": [
+        "Mongo corpus_lexicon.aliases / aliases_normalized / abbreviations / abbreviations_normalized / alias_evidence (corpus_lexicon.py:1268-1276)",
+        "Qdrant corpus_{cid8}_schemas payload: aliases[:32], aliases_normalized[:32], abbreviations[:16], alias_evidence[:12] (qdrant_writer.py:1441-1449)"
+      ],
+      "verdict": "SAME",
+      "canonical": "lexicon alias (identity evidence)",
+      "aliases": ["aliases", "aliases_normalized", "alias_evidence", "abbreviation", "surface form"],
+      "collision_note": "The core concept is clean: an alias is extraction-derived identity evidence for one lexicon entry. But the bare word 'alias' is heavily overloaded elsewhere — see the 'aliases' row.",
+      "evidence": "corpus_lexicon.py:1-18 docstring: 'Aliases are identity evidence.' Alias fields flow Mongo->Qdrant via _lexicon_payload (qdrant_writer.py:1432)."
+    },
+    {
+      "plan_term": "aliases",
+      "code_symbols": [
+        {"symbol": "corpus_lexicon aliases fields", "file_line": "backend/services/ingestion/corpus_lexicon.py:1268", "role": "meaning 1: lexicon identity aliases (extraction evidence)"},
+        {"symbol": "CONCEPT_ALIASES", "file_line": "backend/services/retriever/query_semantics.py:527", "role": "meaning 2: hand-curated query-side concept alias dict in Python"},
+        {"symbol": "latent_concepts[].aliases", "file_line": "backend/services/ingestion/summary_semantics.py:100-109", "role": "meaning 3: LLM-captured user phrasings per latent concept, clamped to MAX_LATENT_ALIASES=3 — read by NOTHING (dead data; PLAN_CRITIQUE line 68)"},
+        {"symbol": "_alias_values() facet aliases", "file_line": "backend/services/facets/normalizer.py:438-469", "role": "meaning 4: facet-value phrasing aliases stamped into chunk metadata ('aliases' + 'search_terms')"},
+        {"symbol": "_load_alias_lookup() / entity_aliases.json", "file_line": "backend/services/graph/neo4j_writer.py:43,821-843", "role": "meaning 5: curated graph identity-merge alias map applied inside canonicalize_entity_name"}
+      ],
+      "store_fields": [
+        "Mongo corpus_lexicon.aliases", "Mongo parent_chunks summary latent_concepts[].aliases", "chunk facet payload aliases/search_terms", "backend/services/graph/entity_aliases.json"
+      ],
+      "verdict": "OVERLAPPING",
+      "canonical": "lexicon alias (per subsystem, qualify the word: lexicon alias / curated concept alias / latent alias / facet alias / graph alias map)",
+      "aliases": ["alias", "surface form", "phrasing", "synonym"],
+      "collision_note": "FAILURE MODE (a): one word, five different concepts in five keyspaces. Only meaning 1 is normalize_identity-keyed and retrieval-live; meaning 3 is captured-but-unread; meanings 2 and 5 are separate curated stores. Any plan sentence saying just 'aliases' is ambiguous.",
+      "evidence": "grep -rn aliases across backend/services hits corpus_lexicon.py, query_semantics.py:527, summary_semantics.py:100, facets/normalizer.py:438, neo4j_writer.py:43 — five independent producers, no shared type."
+    },
+    {
+      "plan_term": "alias registry",
+      "code_symbols": [],
+      "store_fields": [],
+      "verdict": "PLAN-ONLY",
+      "canonical": "versioned alias registry (to be built, S5)",
+      "aliases": ["versioned alias registry", "versioned lexicon dataset"],
+      "collision_note": "FAILURE MODE (b) risk: three curated alias data stores ALREADY exist (CONCEPT_ALIASES in query_semantics.py:527, entity_aliases.json neo4j_writer.py:43, canonical_families.json neo4j_writer.py:46) plus the machine-built corpus_lexicon. If S5 builds the registry as a new store instead of absorbing these, it becomes the 4th/5th parallel alias system — exactly what checklist line 817 forbids ('Keep one corpus-lexicon system; do not create a parallel concept store').",
+      "evidence": "PLAN_CRITIQUE_2026-07-13.md:84 (S5: 'corpus_lexicon/vocabulary join -> versioned alias registry -> gated query-expansion consumption; fold P0.5 curated-aliases-out-of-Python into the same registry'). No code symbol named registry exists (grep alias_registry = 0 hits). Nearest existing seams: corpus_lexicon materialize_entries (corpus_lexicon.py:1593) for storage+epoch invalidation, and the versioned-data pattern of shelf_policy_data.py:3 ('DATA, not logic: owner-curated, versioned as a unit')."
+    },
+    {
+      "plan_term": "curated aliases",
+      "code_symbols": [
+        {"symbol": "CONCEPT_ALIASES", "file_line": "backend/services/retriever/query_semantics.py:527", "role": "the primary referent: hardcoded dict of concept_key -> alias tuple used for lane phrasing"},
+        {"symbol": "is_curated_concept()", "file_line": "backend/services/retriever/query_semantics.py:848", "role": "membership test; decides deterministic plan vs LLM re-decomposition"},
+        {"symbol": "concept_support_phrases()", "file_line": "backend/services/retriever/query_semantics.py:856", "role": "deterministic recall expansion from curated aliases"},
+        {"symbol": "_curated_group_for_concept() / _best_surface use", "file_line": "backend/services/retriever/query_plan.py:554,502-506", "role": "maps free concepts onto curated groups; picks longest curated surface present in query"},
+        {"symbol": "resolve_canonical_family() + canonical_families.json", "file_line": "backend/services/graph/neo4j_writer.py:945,46", "role": "graph-side 'curated aliases' (docstring uses the exact phrase) for cross-type family labels"},
+        {"symbol": "entity_aliases.json via resolve_entity_alias()", "file_line": "backend/services/graph/neo4j_writer.py:43,843", "role": "graph-side curated identity merges"}
+      ],
+      "store_fields": ["backend/services/graph/canonical_families.json", "backend/services/graph/entity_aliases.json", "(CONCEPT_ALIASES lives in Python source, not a store — that is the plan's complaint)"],
+      "verdict": "OVERLAPPING",
+      "canonical": "curated concept aliases (CONCEPT_ALIASES) — retrieval-side; graph entity alias map is a DISTINCT sibling",
+      "aliases": ["hand-authored aliases", "curated concepts", "concept alias dict"],
+      "collision_note": "FAILURE MODE (a)+(b): the phrase 'curated aliases' names the retrieval-side CONCEPT_ALIASES in checklist lines 63/312/465 but the graph-side canonical_families docstring (neo4j_writer.py:945) uses the identical phrase for a different mechanism in a different keyspace (canonicalize_entity_name, NFKD, alias-map). The S5 registry migration must state which of the three curated stores it absorbs.",
+      "evidence": "RAPTOR checklist:63 'Curated aliases belong in versioned data, not Python conditionals'; :312 'Move remaining curated aliases/rules into versioned lexicon/policy data'; :465 'Move remaining curated content aliases from Python into a versioned lexicon dataset'."
+    },
+    {
+      "plan_term": "vocabulary",
+      "code_symbols": [
+        {"symbol": "class CorpusVocabularyResolver.resolve()", "file_line": "backend/services/retriever/vocabulary.py:1053-1054", "role": "query-time vocabulary resolution against lexicon points (VOCABULARY_RESOLVER_VERSION='corpus_vocabulary.v3', vocabulary.py:26)"},
+        {"symbol": "vocabulary_cache (module)", "file_line": "backend/services/retriever/vocabulary_cache.py:1", "role": "P1.7 resolution cache: sha256(query+lanes+corpora+knobs)+per-corpus epoch; TTL 300s"},
+        {"symbol": "corpus_lexicon module docstring", "file_line": "backend/services/ingestion/corpus_lexicon.py:1", "role": "the STORE also self-describes as 'durable corpus vocabulary materialization'"}
+      ],
+      "store_fields": ["diagnostics dict retrieval_diagnostics.vocabulary_resolution.matches[] (consumed at chat_orchestrator.py:3568,3599)"],
+      "verdict": "OVERLAPPING",
+      "canonical": "vocabulary resolution (query-time stage); call the store corpus_lexicon, never 'vocabulary'",
+      "aliases": ["vocabulary resolver", "corpus_vocabulary.v3", "vocabulary_resolution (diagnostics key)"],
+      "collision_note": "FAILURE MODE (a): 'vocabulary' means the query-time resolver in P1.7/P1.2 checklist items but the materialized store in the corpus_lexicon docstring and in 'concept vocabulary' (checklist:31). S5's 'corpus_lexicon/vocabulary join' only parses if vocabulary = resolver-facing projection of the same lexicon; it is not a second store.",
+      "evidence": "vocabulary.py:1-7 ('Corpus-grounded vocabulary resolution... reads only the corpus's Qdrant entity_lexicon points'); corpus_lexicon.py:1; checklist P1.7:699-724."
+    },
+    {
+      "plan_term": "corpus_lexicon",
+      "code_symbols": [
+        {"symbol": "LEXICON_COLLECTION / LEXICON_SOURCE_COLLECTION / LEXICON_RUN_COLLECTION", "file_line": "backend/services/ingestion/corpus_lexicon.py:39-41", "role": "Mongo collection names: corpus_lexicon, corpus_lexicon_sources, lexicon_backfill_runs"},
+        {"symbol": "materialize_corpus_lexicon() / materialize_affected_lexicon()", "file_line": "backend/services/ingestion/corpus_lexicon.py:2308,2250", "role": "full and incremental materialization (bumps vocabulary_cache epoch)"},
+        {"symbol": "build_document_lexicon_sources()", "file_line": "backend/services/ingestion/corpus_lexicon.py:848", "role": "per-document projection from ghost_b_extractions (deletion/update boundary)"},
+        {"symbol": "backfill_corpus_lexicon.py", "file_line": "backend/scripts/backfill_corpus_lexicon.py:1", "role": "operational backfill script"},
+        {"symbol": "upsert lexicon mirror", "file_line": "backend/services/storage/qdrant_writer.py:1490-1501", "role": "mirrors Mongo entries into per-corpus Qdrant collection"}
+      ],
+      "store_fields": [
+        "Mongo: corpus_lexicon (schema_version corpus_lexicon.v3), corpus_lexicon_sources (corpus_lexicon_source.v3), lexicon_backfill_runs",
+        "Qdrant: collection corpus_{cid8}_schemas, points kind='entity_lexicon' (qdrant_writer.py:8,1184)"
+      ],
+      "verdict": "SAME",
+      "canonical": "corpus_lexicon (the store)",
+      "aliases": ["lexicon", "corpus lexicon", "durable corpus vocabulary", "entity_lexicon (its Qdrant mirror kind)"],
+      "collision_note": "Name drift, not concept drift: the Qdrant mirror lives in the 'schemas' collection family (corpus_{cid8}_schemas, settings.QDRANT_SCHEMAS) under kind='entity_lexicon' — three names (lexicon/schemas/entity_lexicon) for one store depending on layer.",
+      "evidence": "corpus_lexicon.py:1-19 docstring defines both collections; qdrant_writer.py:1490 'Mirror Mongo lexicon entries into the isolated schemas collection.'"
+    },
+    {
+      "plan_term": "lexicon entry",
+      "code_symbols": [
+        {"symbol": "materialize_entries()", "file_line": "backend/services/ingestion/corpus_lexicon.py:1593", "role": "builds corpus-scoped entries from source rows (union-find merge over canonical_keys)"},
+        {"symbol": "lexicon_id assignment", "file_line": "backend/services/ingestion/corpus_lexicon.py:1780-1785", "role": "sha256-derived stable entry id; unique index (corpus_id, lexicon_id) at :2059-2060"},
+        {"symbol": "_lexicon_payload()", "file_line": "backend/services/storage/qdrant_writer.py:1432", "role": "bounded Qdrant projection of one entry"},
+        {"symbol": "_build_embedding_gloss/_build_utility_gloss/_build_retrieval_gloss", "file_line": "backend/services/ingestion/corpus_lexicon.py:1402,1466,1498", "role": "per-entry gloss texts that get embedded"}
+      ],
+      "store_fields": [
+        "Mongo corpus_lexicon doc: lexicon_id, canonical_key, canonical_name, member_keys, aliases*, abbreviations*, alias_evidence, definitions, structural_contexts, contextual_usages, entity_ids, entity_types, object_kinds, source_document_ids, source_parent_ids, source_chunk_ids, components, component_of, application_contexts, factual_relations, cooccurrence_counts, support_count, glosses",
+        "Qdrant payload mirror of the same fields, bounded (qdrant_writer.py:1432-1470)"
+      ],
+      "verdict": "SAME",
+      "canonical": "lexicon entry (one corpus_lexicon document, keyed lexicon_id)",
+      "aliases": ["entry", "concept entry", "entity_lexicon point (Qdrant form)", "lexicon row"],
+      "collision_note": "P2.1 (checklist:890-901) plans SPLITTING one entry into multiple representation points (name_alias/definition/utility) each carrying canonical_key+lexicon_id — today one entry = one point with concatenated glosses. Same concept, planned finer granularity; not a duplicate store as long as lexicon_id back-pointers stay mandatory (checklist:846,896).",
+      "evidence": "corpus_lexicon.py:1780-1785 (lexicon_id), :2059 unique (corpus_id,lexicon_id) index; checklist:846 'Keep Mongo corpus_lexicon authoritative and make every Qdrant concept [point] removable'."
+    },
+    {
+      "plan_term": "canonical_key",
+      "code_symbols": [
+        {"symbol": "canonical_key = normalize_identity(canonical_name)", "file_line": "backend/services/ingestion/corpus_lexicon.py:284,360,406,1265", "role": "identity keyspace value for lexicon merge and joins"},
+        {"symbol": "_choose_canonical_name()", "file_line": "backend/services/ingestion/corpus_lexicon.py:1344", "role": "elects display canonical_name per merged entry"},
+        {"symbol": "vocabulary matches[].canonical_key consumer", "file_line": "backend/services/chat_orchestrator.py:3568,3599", "role": "shelf_reserve exact-join to librarian card value_key (same keyspace)"},
+        {"symbol": "librarian card value_key", "file_line": "backend/services/librarian/card_builder.py:37,180", "role": "value_key = normalize_identity(value) — deliberately the same keyspace"}
+      ],
+      "store_fields": [
+        "Mongo corpus_lexicon.canonical_key + canonical_keys[] + member_keys[]",
+        "Mongo corpus_lexicon_sources.canonical_key (root) (corpus_lexicon.py:1265)",
+        "Qdrant schemas payload canonical_key (qdrant_writer.py:1440)",
+        "librarian card value_key (same keyspace by construction)"
+      ],
+      "verdict": "SAME",
+      "canonical": "canonical_key (normalize_identity keyspace)",
+      "aliases": ["value_key (librarian cards)", "identity key", "root (union-find root key)"],
+      "collision_note": "FAILURE MODE (a) adjacent: 'canonical' also appears in the GRAPH keyspace — canonical_name/canonicalize_entity_name (neo4j_writer.py:848, NFKD + curated alias map) which is NOT the normalize_identity keyspace. canonical_key always means the lexicon keyspace; graph 'canonical name' is a different normalization.",
+      "evidence": "shelf_policy_data.py:13 and chat_orchestrator.py:3568-3572 both document the shared keyspace contract explicitly."
+    },
+    {
+      "plan_term": "normalize_identity",
+      "code_symbols": [
+        {"symbol": "def normalize_identity()", "file_line": "backend/services/ingestion/corpus_lexicon.py:192", "role": "THE identity normalizer: NFKC, lower, _/- -> space, strip non-alnum, collapse spaces"},
+        {"symbol": "imports in retriever", "file_line": "backend/services/retriever/vocabulary.py:21", "role": "query-side exact-term generation (query_exact_terms, vocabulary.py:65)"},
+        {"symbol": "imports in librarian", "file_line": "backend/services/librarian/shelf_engine.py:47, backend/services/librarian/card_builder.py:107", "role": "card/shelf key derivation"}
+      ],
+      "store_fields": ["(function, not a field — produces canonical_key/value_key/aliases_normalized values)"],
+      "verdict": "SAME",
+      "canonical": "normalize_identity",
+      "aliases": ["identity normalization", "normalized alias", "the canonical_key function"],
+      "collision_note": "DISTINCT from the graph normalizer normalize_entity_name (neo4j_writer.py:812: NFKD, keeps underscores because \\w matches _, deletes hyphens WITHOUT inserting a space). Example divergence: 'Box2D-Lite' -> normalize_identity 'box2d lite' vs normalize_entity_name 'box2dlite'. Two legitimate keyspaces, but code that mixes them silently breaks joins (see entity_id row).",
+      "evidence": "corpus_lexicon.py:192-198 vs neo4j_writer.py:812-817 — different unicode form, different hyphen/underscore treatment."
+    },
+    {
+      "plan_term": "query expansion",
+      "code_symbols": [
+        {"symbol": "grounded expansion gate", "file_line": "backend/services/retriever/vocabulary.py:1412", "role": "rejects candidates 'below_grounded_expansion_threshold'; provenance-tagged acceptance reasons"},
+        {"symbol": "association/definition_reference expansion counters + rejected_expansions", "file_line": "backend/services/retriever/vocabulary.py:1682-1690", "role": "diagnostics: every expansion counted and surfaced"},
+        {"symbol": "rejected_expansions in planner dossier", "file_line": "backend/services/retriever/grounded_planner.py:135,246,447", "role": "grounded planner consumes and re-emits rejected expansions"},
+        {"symbol": "concept_support_phrases()", "file_line": "backend/services/retriever/query_semantics.py:856", "role": "deterministic curated-alias recall expansion (repair pass)"},
+        {"symbol": "original-query lane protection", "file_line": "backend/services/retriever/query_plan.py:5,31,1093-1099", "role": "role='original' is the mandatory recall lane expansions can never displace"}
+      ],
+      "store_fields": ["diagnostics: vocabulary_resolution.rejected_expansions[:24], association_expansion_count, definition_reference_expansion_count, lane_lexicon_ids"],
+      "verdict": "OVERLAPPING",
+      "canonical": "grounded vocabulary expansion",
+      "aliases": ["expansion", "corpus-specific expansion", "translation lane", "planner expansion"],
+      "collision_note": "FAILURE MODE (b) watch: S5 plans 'gated query-expansion consumption' of the new alias registry. The gate machinery ALREADY exists (grounded threshold + rejected_expansions + original-lane protection + lexicon-ID rejection, checklist:597). S5 should feed registry aliases through this existing gate, not build a second expansion path.",
+      "evidence": "checklist:54 'Query expansion cannot replace or semantically drift from the original'; query_plan.py:5 'keeps the original user query as the mandatory recall lane'."
+    },
+    {
+      "plan_term": "strong match",
+      "code_symbols": [
+        {"symbol": "VOCAB_STRONG_MATCH_ABS_FLOOR=0.55 / VOCAB_STRONG_MATCH_TOP_RATIO=0.75 / VOCAB_STRONG_LANE_BONUS=4", "file_line": "backend/services/retriever/vocabulary.py:1710-1712", "role": "universal strength bound (max(abs_floor, top*ratio))"},
+        {"symbol": "select_strong_vocabulary_matches()", "file_line": "backend/services/retriever/vocabulary.py:1722", "role": "strength-first selection so no consumer loses a strong match to positional truncation"},
+        {"symbol": "translation-lane strength override", "file_line": "backend/services/retriever/vocabulary.py:1864-1893", "role": "bonus lanes beyond tier round-robin cap; rescue-only"},
+        {"symbol": "planner dossier admission", "file_line": "backend/services/retriever/grounded_planner.py:375", "role": "strong matches admitted to P1.2/P1.5 dossier regardless of tier position"}
+      ],
+      "store_fields": ["match rows carry evidence_adjusted_score/score, lexicon_id, canonical_name — scored in the vocabulary_resolution diagnostics"],
+      "verdict": "SAME",
+      "canonical": "strong vocabulary match (select_strong_vocabulary_matches)",
+      "aliases": ["strength override", "strength-first selection", "obligation-aware selection (plan phrasing)"],
+      "collision_note": "Plan-vs-code staleness: PLAN_CRITIQUE:106 says the positional 6-match cap fix 'is still open (L)', but the fix IS in code (vocabulary.py:1705 'Audit Delta 2' comment, grounded_planner.py:375). Checklist:171-172 phrases the same thing as 'obligation-aware selection'. One concept, three names, and the critique doc is behind the code.",
+      "evidence": "vocabulary.py:1705-1709 documents the 0.909-at-position-14 drop this fixes — the exact incident PLAN_CRITIQUE:106 cites as unfixed."
+    },
+    {
+      "plan_term": "entity_id",
+      "code_symbols": [
+        {"symbol": "entity_id_from_name()", "file_line": "backend/services/graph/neo4j_writer.py:1116", "role": "CANONICAL id builder: 'entity:{slug}' via canonicalize_entity_name (NFKD + curated entity_aliases.json merge) then spaces->hyphens; type intentionally ignored"},
+        {"symbol": "_entity_id()", "file_line": "backend/services/ingestion/corpus_lexicon.py:567", "role": "DUPLICATE private builder: 'entity:{slug}' via normalize_identity — used as fallback at :1039 when extraction rows lack entity_id"},
+        {"symbol": "Neo4j neighbor query e.entity_id", "file_line": "backend/services/retriever/vocabulary.py:851-859", "role": "the vector->graph join key at query time"}
+      ],
+      "store_fields": [
+        "Neo4j Entity.entity_id (indexed; canonical per memory + fact-seed fix)",
+        "Mongo corpus_lexicon.entity_ids[:32] (corpus_lexicon.py:1300)",
+        "Qdrant schemas payload entity_ids[:32] (qdrant_writer.py:1458) and chunk payload entity_ids (qdrant_writer.py:250,775)"
+      ],
+      "verdict": "OVERLAPPING",
+      "canonical": "entity_id (neo4j_writer.entity_id_from_name is the single source of truth)",
+      "aliases": ["entity id", "entity:{slug}", "entity_ids (payload plural)"],
+      "collision_note": "FAILURE MODE (b) CONFIRMED IN CODE: two id builders exist. They agree on plain multi-word names but DIVERGE on hyphen/underscore/unicode names: 'Box2D-Lite' -> graph 'entity:box2dlite' vs lexicon fallback 'entity:box2d-lite'; and the lexicon fallback skips the curated entity_aliases.json merge entirely. Any lexicon entity_ids minted by the :567 fallback can fail the vocabulary.py:851 Neo4j join silently — same class of bug as the underscore-slug incident fixed in b40da18.",
+      "evidence": "neo4j_writer.py:1112-1127 vs corpus_lexicon.py:567-569; normalizer divergence shown at neo4j_writer.py:812-817 vs corpus_lexicon.py:192-198."
+    }
+  ]
+}

@@ -1,0 +1,189 @@
+[
+  {
+    "id": "TMP:L181",
+    "line_start": 181,
+    "line_end": 181,
+    "section": "Temporal RAG Program — adopted 2026-07-13 with sequencing hooks",
+    "kind": "decision",
+    "ledger_status": "na",
+    "verbatim": "Temporal RAG Program — adopted 2026-07-13 with sequencing hooks",
+    "receipt": "adopted 2026-07-13",
+    "terms": ["temporal rag", "sequencing hooks", "adoption"]
+  },
+  {
+    "id": "TMP:L183",
+    "line_start": 183,
+    "line_end": 184,
+    "section": "Temporal RAG Program — adopted 2026-07-13 with sequencing hooks",
+    "kind": "fact-claim",
+    "ledger_status": "na",
+    "verbatim": "Specification of record: TEMPORAL_RAG_E2E_IMPLEMENTATION_REPORT_2026-07-12.md (bitemporal, assertion-based, projection-safe; explicitly no full reingest).",
+    "receipt": "TEMPORAL_RAG_E2E_IMPLEMENTATION_REPORT_2026-07-12.md",
+    "terms": ["specification of record", "bitemporal", "assertion-based", "projection-safe", "no full reingest"]
+  },
+  {
+    "id": "TMP:L185",
+    "line_start": 185,
+    "line_end": 186,
+    "section": "Temporal RAG Program — adopted 2026-07-13 with sequencing hooks",
+    "kind": "fact-claim",
+    "ledger_status": "na",
+    "verbatim": "Verdict: FEASIBLE and compatible with every standing invariant. Sequenced by cross-impact so no artifact is rebuilt twice",
+    "receipt": null,
+    "terms": ["feasible", "standing invariant", "cross-impact sequencing", "no artifact rebuilt twice"]
+  },
+  {
+    "id": "TMP:L188",
+    "line_start": 188,
+    "line_end": 194,
+    "section": "Temporal RAG Program — adopted 2026-07-13 with sequencing hooks",
+    "kind": "work",
+    "ledger_status": "x",
+    "verbatim": "[x] T-HOOK-1 (blocks the authorized corpus-scale re-extraction): extend the extraction wire contract with temporal CAPTURE fields (raw time expressions, role candidates, exact spans — capture-only, resolution stays Polymath-side) and redeploy the RunPod worker, so mass re-extraction runs ONCE",
+    "receipt": "merged + redeployed both accounts (t0nuyi6shc2t9a/t5wjsqmvpjm0lm) + live-proven 2026-07-13",
+    "terms": ["t-hook-1", "extraction wire contract", "temporal capture fields", "runpod worker", "re-extraction", "time expressions", "role candidates", "exact spans"]
+  },
+  {
+    "id": "TMP:L192",
+    "line_start": 192,
+    "line_end": 193,
+    "section": "Temporal RAG Program — adopted 2026-07-13 with sequencing hooks",
+    "kind": "fact-claim",
+    "ledger_status": "na",
+    "verbatim": "The 1/100/500-chunk gates passed on the v2 contract; the 5,000-chunk gate runs after this hook lands.",
+    "receipt": "1/100/500-chunk gates passed; 5,000-chunk gate pending",
+    "terms": ["chunk gates", "v2 contract", "5000-chunk gate", "t-hook-1"]
+  },
+  {
+    "id": "TMP:L194",
+    "line_start": 194,
+    "line_end": 194,
+    "section": "Temporal RAG Program — adopted 2026-07-13 with sequencing hooks",
+    "kind": "status-tag",
+    "ledger_status": "na",
+    "verbatim": "(merged + redeployed both accounts (t0nuyi6shc2t9a/t5wjsqmvpjm0lm) + live-proven 2026-07-13: v3 captures with exact offsets and cue role-candidates flow to ExtractionResult)",
+    "receipt": "2026-07-13; RunPod accounts t0nuyi6shc2t9a/t5wjsqmvpjm0lm",
+    "terms": ["v3 contract", "exact offsets", "cue role-candidates", "extractionresult", "live-proven", "runpod redeploy"]
+  },
+  {
+    "id": "TMP:L195",
+    "line_start": 195,
+    "line_end": 199,
+    "section": "Temporal RAG Program — adopted 2026-07-13 with sequencing hooks",
+    "kind": "work",
+    "ledger_status": "open",
+    "verbatim": "[ ] T-HOOK-2 (immediate, future-only): add temporal_class (evergreen|slowly_evolving|versioned|event|ephemeral|unknown) and time_expressions to the Ghost A summary contract — the same seam that carries latent_concepts; existing rows get the deterministic classifier backfill in T-MAIN Phase 3",
+    "receipt": null,
+    "terms": ["t-hook-2", "temporal_class", "time_expressions", "ghost a summary contract", "latent_concepts", "deterministic classifier backfill", "t-main phase 3"]
+  },
+  {
+    "id": "TMP:L200",
+    "line_start": 200,
+    "line_end": 202,
+    "section": "Temporal RAG Program — adopted 2026-07-13 with sequencing hooks",
+    "kind": "work",
+    "ledger_status": "open",
+    "verbatim": "[ ] T-HOOK-3 (merged with the P2.1 bibliographic item — one implementation): docling date de-conflation (publication vs file-creation vs revision), source_published_at capture, deterministic doc-date backfill.",
+    "receipt": null,
+    "terms": ["t-hook-3", "p2.1 bibliographic", "docling", "date de-conflation", "source_published_at", "doc-date backfill"]
+  },
+  {
+    "id": "TMP:L203",
+    "line_start": 203,
+    "line_end": 211,
+    "section": "Temporal RAG Program — adopted 2026-07-13 with sequencing hooks",
+    "kind": "work",
+    "ledger_status": "open",
+    "verbatim": "[ ] T-MAIN (after the P1.1 baseline and current retrieval work): report Phases 2-7 — source versions/episodes/assertions + outbox, Qdrant payload indexes + projection without re-embedding, versioned Neo4j RELATES_TO edges (with P2.5 typed-signature work), query temporal modes, ONE eligibility service, shadow-then-enforce, synthesis temporal receipts, capability-specific readiness",
+    "receipt": null,
+    "terms": ["t-main", "p1.1 baseline", "phases 2-7", "assertions", "outbox", "qdrant payload indexes", "projection without re-embedding", "relates_to", "p2.5 typed-signature", "temporal modes", "eligibility service", "shadow-then-enforce", "temporal receipts", "capability-specific readiness", "audit delta 2"]
+  },
+  {
+    "id": "TMP:L212",
+    "line_start": 212,
+    "line_end": 215,
+    "section": "Temporal RAG Program — adopted 2026-07-13 with sequencing hooks",
+    "kind": "decision",
+    "ledger_status": "na",
+    "verbatim": "Ordering rationale: field capture rides in-flight generation/backfills for free; retrieval-behavior changes are gated by the held-out suite; temporal eligibility needs the fields to exist first; re-extracting before the contract hook would force a second paid extraction pass.",
+    "receipt": null,
+    "terms": ["ordering rationale", "field capture", "held-out suite", "temporal eligibility", "paid extraction pass"]
+  },
+  {
+    "id": "TMP:L219",
+    "line_start": 219,
+    "line_end": 221,
+    "section": "Governing Librarian Planning Constraint",
+    "kind": "standing-rule",
+    "ledger_status": "na",
+    "verbatim": "The librarian must ship from trustworthy existing projections before any generative card enrichment becomes a dependency",
+    "receipt": null,
+    "terms": ["librarian", "existing projections", "generative card enrichment", "dependency"]
+  },
+  {
+    "id": "TMP:L223",
+    "line_start": 223,
+    "line_end": 223,
+    "section": "Governing Librarian Planning Constraint",
+    "kind": "standing-rule",
+    "ledger_status": "na",
+    "verbatim": "v1: seat only what indexed overlap + deterministic rules can defend",
+    "receipt": null,
+    "terms": ["librarian v1", "indexed overlap", "deterministic rules", "seats"]
+  },
+  {
+    "id": "TMP:L224",
+    "line_start": 224,
+    "line_end": 225,
+    "section": "Governing Librarian Planning Constraint",
+    "kind": "standing-rule",
+    "ledger_status": "na",
+    "verbatim": "v2: optional LLM enriches fields, retrieves candidates, explains paths, and fills evidence-backed gaps",
+    "receipt": null,
+    "terms": ["librarian v2", "llm enrichment", "candidate retrieval", "evidence-backed gaps"]
+  },
+  {
+    "id": "TMP:L226",
+    "line_start": 226,
+    "line_end": 226,
+    "section": "Governing Librarian Planning Constraint",
+    "kind": "invariant",
+    "ledger_status": "na",
+    "verbatim": "never: an LLM decides which documents receive final seats",
+    "receipt": null,
+    "terms": ["llm", "final seats", "never rule", "librarian"]
+  },
+  {
+    "id": "TMP:L229",
+    "line_start": 229,
+    "line_end": 233,
+    "section": "Governing Librarian Planning Constraint",
+    "kind": "invariant",
+    "ledger_status": "na",
+    "verbatim": "Deterministic seat eligibility is query-relative. Cards store universal facts; they do not permanently label a document Direct, Foundational, Adjacent, Bridge, or Counterbalance. A document may satisfy multiple roles and multiple themes for the same query, but it appears once in the final packet",
+    "receipt": null,
+    "terms": ["seat eligibility", "query-relative", "cards", "universal facts", "roles", "final packet", "validated reasons"]
+  },
+  {
+    "id": "TMP:L235",
+    "line_start": 235,
+    "line_end": 242,
+    "section": "Governing Librarian Planning Constraint",
+    "kind": "standing-rule",
+    "ledger_status": "na",
+    "verbatim": "Hard rule for Bridge seats: query goal/capability IDs -> shared transferable_principle or mechanism IDs -> candidate document -> evidence IDs/spans in both the query-side and candidate-side sources",
+    "receipt": null,
+    "terms": ["bridge seats", "capability ids", "transferable_principle", "mechanism ids", "evidence spans", "chain"]
+  },
+  {
+    "id": "TMP:L244",
+    "line_start": 244,
+    "line_end": 246,
+    "section": "Governing Librarian Planning Constraint",
+    "kind": "invariant",
+    "ledger_status": "na",
+    "verbatim": "If the chain cannot be resolved from indexed IDs and source evidence, the candidate is not granted a Bridge seat. Dense similarity alone is candidate generation, never bridge proof.",
+    "receipt": null,
+    "terms": ["bridge seat", "indexed ids", "source evidence", "dense similarity", "candidate generation", "bridge proof"]
+  }
+]

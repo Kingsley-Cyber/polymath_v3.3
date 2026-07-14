@@ -1,0 +1,175 @@
+{
+  "family": "evaluation & gates",
+  "repo": "/Users/king/polymath_v3.3",
+  "plan_sources": [
+    "docs/RAPTOR_RAG_IMPLEMENTATION_CHECKLIST.md",
+    "docs/PLAN_CRITIQUE_2026-07-13.md"
+  ],
+  "rows": [
+    {
+      "plan_term": "held-out",
+      "code_symbols": [
+        {"symbol": "eval_firewall.is_heldout_query", "file_line": "backend/services/eval_firewall.py:46", "role": "membership test: is a query one of the frozen held-out questions"},
+        {"symbol": "eval_firewall.heldout_query_hash", "file_line": "backend/services/eval_firewall.py:33", "role": "normalized sha256 identity of a held-out question"},
+        {"symbol": "freeze_heldout_eval.main", "file_line": "backend/scripts/freeze_heldout_eval.py:66", "role": "validates the suite (shapes, Mongo ground truth) and freezes hashes"},
+        {"symbol": "run_heldout_eval.main", "file_line": "backend/scripts/run_heldout_eval.py:214", "role": "drives the suite through live /api/chat per tier and writes EVAL_*.json"}
+      ],
+      "store_fields": [
+        "backend/evals/heldout_questions.jsonl: id, shape, question, corpora, answerable, expected_doc_ids, expected_all_docs, expected_concepts, history(optional)",
+        "backend/evals/heldout_hashes.json: frozen_at, question_count, hash_count, hashes[]"
+      ],
+      "verdict": "SAME",
+      "canonical": "heldout suite",
+      "aliases": ["held-out", "held-out suite", "the held-out 56", "P1.1 evaluation set", "golden set (eval_metrics.py:4 docstring wording)"],
+      "collision_note": "Identifier drift, not concept drift: plan and critique say 56 questions ('the held-out 56', PLAN_CRITIQUE:87) but heldout_hashes.json is frozen at question_count=58 (frozen_at 2026-07-13T07:55:14Z) while all three captured EVAL_2026-07-13_*.json baselines have n=56. Two questions were added after baseline capture; any A/B against 'the 56' must subset by id or re-baseline.",
+      "evidence": "Code spells it 'heldout' (files/functions), plan spells it 'held-out'; both denote exactly backend/evals/heldout_questions.jsonl + its frozen hashes. Shape census on disk: direct 10 (checklist:564 says 8) confirms post-freeze additions."
+    },
+    {
+      "plan_term": "contamination firewall",
+      "code_symbols": [
+        {"symbol": "services/eval_firewall.py (module)", "file_line": "backend/services/eval_firewall.py:1", "role": "the firewall: frozen-hash exclusion of held-out queries from any persisted representation"},
+        {"symbol": "eval_firewall.is_heldout_query", "file_line": "backend/services/eval_firewall.py:46", "role": "mandatory per-query gate for harvesting pipelines"},
+        {"symbol": "eval_firewall.firewall_active", "file_line": "backend/services/eval_firewall.py:55", "role": "precondition check: frozen hashes present before harvesting may run"},
+        {"symbol": "eval_firewall.normalize_eval_query", "file_line": "backend/services/eval_firewall.py:28", "role": "normalization so reformatting cannot bypass the firewall"}
+      ],
+      "store_fields": [
+        "backend/evals/heldout_hashes.json: hashes[] (the firewall's only store; no Mongo/Qdrant fields exist)"
+      ],
+      "verdict": "SAME",
+      "canonical": "eval_firewall",
+      "aliases": ["contamination firewall", "firewall primitive", "automated contamination eval-run check (the unbuilt half)"],
+      "collision_note": "FAILURE MODE (a): 'contamination' means two unrelated things. Here = eval-set leakage into production representations. In P0.5 it = facet metadata pollution ('corpus-lens facet contamination', CHECKLIST:118; backend/scripts/p0_5_facet_decontamination.py). Do not route P0.5 facet work through eval_firewall or vice versa. Also note: is_heldout_query has ZERO production call sites today — its only importer is freeze_heldout_eval.py:29; the checklist's automated eval-run contamination check (CHECKLIST:584-587) is deferred to P2.2 and is PLAN-ONLY.",
+      "evidence": "grep for eval_firewall|is_heldout_query|firewall_active across backend/*.py returns only the module itself and freeze_heldout_eval.py — the firewall exists but nothing harvest-shaped consults it yet, exactly as CHECKLIST:586 records."
+    },
+    {
+      "plan_term": "eval",
+      "code_symbols": [
+        {"symbol": "run_heldout_eval.score / main", "file_line": "backend/scripts/run_heldout_eval.py:182", "role": "harness 1: P1.1 quality eval over the heldout suite (doc_hit/recall/answerability)"},
+        {"symbol": "three_tier_eval.evaluate_route_result", "file_line": "backend/services/retriever/three_tier_eval.py:472", "role": "harness 2: route-contract validator (issues: fail/warn codes) for the three UI tiers"},
+        {"symbol": "scripts/retrieval_three_tier_eval.py", "file_line": "scripts/retrieval_three_tier_eval.py:1", "role": "harness 2's live runner over scripts/retrieval_three_tier_queries.json (5 queries)"},
+        {"symbol": "eval_metrics (recall_at_k / ndcg_at_k / reciprocal_rank_at_k / evaluate_case / summarize_route_eval)", "file_line": "backend/services/retriever/eval_metrics.py:108,191,60,337,381", "role": "harness 3: offline labeled-relevance metric library, deliberately not on the live path"}
+      ],
+      "store_fields": [
+        "docs/baselines/EVAL_<date>_<tier>.json: summary{doc_hit_rate, doc_recall_mean, concept_recall_mean, answerability_ok_rate, latency_mean_s, negative_controls_ok, scorer_version, by_shape}, results[]",
+        "data_eval/ (ad-hoc probe artifacts, e.g. citation_probe_*.json, audience_pooled_relevance.json)"
+      ],
+      "verdict": "OVERLAPPING",
+      "canonical": "split: 'heldout eval' (P1.1 gate) / 'three-tier eval' (route contract) / 'eval_metrics' (metric library)",
+      "aliases": ["eval", "evaluation run", "eval harness", "eval suite", "golden-set eval"],
+      "collision_note": "FAILURE MODE (b): the plan's single word 'eval' is three disjoint code harnesses that do not share scoring code. run_heldout_eval.score() re-implements recall/hit inline and never imports eval_metrics (eval_metrics' only consumer is three_tier_eval.py:14). Concretely: P1.1 box CHECKLIST:570-571 is checked [x] claiming 'nDCG/MRR' were captured, but the heldout runner computes no nDCG/MRR and EVAL_*.json summaries contain no such keys — nDCG/MRR exist only in the un-wired eval_metrics.py. The checked box overstates what the deployed scorer measures.",
+      "evidence": "eval_metrics.py:1-6 docstring: 'intentionally not imported by the live retrieval path... belong in golden-set eval runs'; grep shows sole importer three_tier_eval.py:14. run_heldout_eval.py:182-211 computes its own doc_recall/concept_recall."
+    },
+    {
+      "plan_term": "baseline",
+      "code_symbols": [
+        {"symbol": "capture_raptor_baseline.py", "file_line": "backend/scripts/capture_raptor_baseline.py:2 (baseline dict at :130)", "role": "durable-state census baseline (Mongo/Qdrant/Neo4j counts) -> BASELINE_<date>.json"},
+        {"symbol": "probe_tier_latency.py", "file_line": "backend/scripts/probe_tier_latency.py:2", "role": "latency baseline (5 live probes incl. negative control) -> LATENCY_<date>.json"},
+        {"symbol": "run_heldout_eval.main", "file_line": "backend/scripts/run_heldout_eval.py:281-292", "role": "quality baseline (heldout scores per tier) -> EVAL_<date>_<tier>.json"}
+      ],
+      "store_fields": [
+        "docs/baselines/BASELINE_2026-07-13.json (census)",
+        "docs/baselines/LATENCY_2026-07-13.json (latency)",
+        "docs/baselines/EVAL_2026-07-13_{qdrant_only,qdrant_mongo,qdrant_mongo_graph}.json (quality)"
+      ],
+      "verdict": "OVERLAPPING",
+      "canonical": "docs/baselines artifact family — qualify as census-baseline / latency-baseline / eval-baseline",
+      "aliases": ["baseline", "the 2026-07-13 baseline", "durable baseline", "baseline metric capture", "baselines re-captured (S14)"],
+      "collision_note": "FAILURE MODE (a): one word, three artifact species. In P1.1/S8 ('A/B on the held-out 56 vs the 2026-07-13 baseline', PLAN_CRITIQUE:87) 'baseline' = EVAL_*.json quality scores. In the Implementation Log ('Baseline capture (pre-edit requirement)', CHECKLIST:1272) 'baseline' = the census BASELINE_*.json + LATENCY_*.json. P1.2's acceptance 'improves materially over baseline' (CHECKLIST:611) means the EVAL numbers. A reader who fetches the wrong species will compare counts against recall rates.",
+      "evidence": "All three writers target docs/baselines/ with distinct filename prefixes; capture_raptor_baseline.py:14, probe_tier_latency.py:22, run_heldout_eval.py:289-291."
+    },
+    {
+      "plan_term": "regression matrix",
+      "code_symbols": [
+        {"symbol": "scripts/retrieval_three_tier_queries.json", "file_line": "scripts/retrieval_three_tier_queries.json (5 queries: id, query, intent, anchor_groups, expected_atoms, expected_best_route)", "role": "nearest existing seam: the query-case format the matrix rows would extend"},
+        {"symbol": "three_tier_eval.evaluate_route_result", "file_line": "backend/services/retriever/three_tier_eval.py:472", "role": "nearest existing seam: per-run record/issue contract the matrix's 8-field record contract maps onto"},
+        {"symbol": "test_retrieval_three_tier_validation.py", "file_line": "backend/tests/test_retrieval_three_tier_validation.py:429", "role": "unit coverage of the validator incl. negative-control lexicon rule"}
+      ],
+      "store_fields": [],
+      "verdict": "PLAN-ONLY",
+      "canonical": "three-tier regression matrix (to-be-built; CHECKLIST:1219-1250, 0 boxes checked per PLAN_CRITIQUE:52)",
+      "aliases": ["Required Three-Tier Regression Matrix", "3-tier regression matrix", "16 rows x 3 tiers", "full regression matrix (S14 final gate)"],
+      "collision_note": "FAILURE MODE (b), high risk: matrix rows 1-12 (CHECKLIST:1224-1235: expert direct hit, naive bridge, single fact, broad, list, procedural, comparison, follow-up, negative control, cross-domain, cross-corpus, cross-corpus-irrelevant) are the heldout suite's shape taxonomy under different names (heldout shapes: direct, naive, single_fact, broad, list, procedural, comparison, followup, negative_control, cross_domain, cross_corpus, cross_corpus_irrelevant — freeze_heldout_eval.py:31-44). Only rows 13-16 (no-tree corpus, deleted corpus, cold-start, concurrent-ingest) are new. Building the matrix as a third standalone harness would triplicate scoring; the honest build is heldout shapes + 4 ops rows + evaluate_route_result's record contract. Also (a): 'regression suite' elsewhere means the ordinary pytest suite (docs/QUERY_PLAN_V2_RETRIEVAL.md:221) — not this matrix.",
+      "evidence": "PLAN_CRITIQUE:52 counts the matrix as 24 open / 0 done; the live three-tier query set has only 5 queries and no negative-control/forbidden_lexicon_terms row despite the validator supporting one (three_tier_eval.py:328-337)."
+    },
+    {
+      "plan_term": "doc_hit",
+      "code_symbols": [
+        {"symbol": "run_heldout_eval.score -> doc_hit", "file_line": "backend/scripts/run_heldout_eval.py:188-191", "role": "per-question binary: any expected doc returned (ALL expected docs when expected_all_docs=true)"},
+        {"symbol": "summary doc_hit_rate", "file_line": "backend/scripts/run_heldout_eval.py:266", "role": "suite-level mean, the headline number ('Fast 84.3% doc-hit', CHECKLIST:573)"},
+        {"symbol": "eval_metrics.exact_source_hit_at_k", "file_line": "backend/services/retriever/eval_metrics.py:147", "role": "DUPLICATE: '1.0 when at least one exact gold source is recovered in top-k' — same idea, never wired to the heldout runner"}
+      ],
+      "store_fields": [
+        "docs/baselines/EVAL_*.json: results[].doc_hit, results[].doc_recall, summary.doc_hit_rate, summary.doc_recall_mean"
+      ],
+      "verdict": "SAME",
+      "canonical": "doc_hit",
+      "aliases": ["doc-hit", "doc-hit rate", "hit", "exact_source_hit_at_k (eval_metrics twin)", "document recall@any"],
+      "collision_note": "FAILURE MODE (b): one idea implemented twice — run_heldout_eval.doc_hit and eval_metrics.exact_source_hit_at_k compute the same binary hit independently, and their semantics already diverge: doc_hit flips to ALL-expected-docs-required when the question sets expected_all_docs (run_heldout_eval.py:188-191); exact_source_hit_at_k is fixed any-hit@k with a k cutoff the heldout runner doesn't apply. Any consolidation must preserve the expected_all_docs branch or list/comparison questions will silently score easier.",
+      "evidence": "run_heldout_eval.py:9-14 docstring defines doc_hit; eval_metrics.py:147-158 defines the twin; no cross-reference exists between the two files."
+    },
+    {
+      "plan_term": "negative controls",
+      "code_symbols": [
+        {"symbol": "freeze_heldout_eval SHAPES + validation", "file_line": "backend/scripts/freeze_heldout_eval.py:40,89-94", "role": "impl 1 (answer level): shape negative_control MUST be answerable=false with no expected_doc_ids"},
+        {"symbol": "run_heldout_eval.REFUSAL_RE", "file_line": "backend/scripts/run_heldout_eval.py:43-53", "role": "impl 1 scorer: refusal/honest-absence detection = fail-closed credit"},
+        {"symbol": "three_tier_eval forbidden_lexicon_terms -> forbidden_vocabulary_expansion", "file_line": "backend/services/retriever/three_tier_eval.py:328-337,600-606", "role": "impl 2 (vocabulary level): fail when 'a negative-control vocabulary concept was introduced'"},
+        {"symbol": "probe_tier_latency config 5", "file_line": "backend/scripts/probe_tier_latency.py:15", "role": "impl 3 (smoke level): 'Hybrid negative control — deliberately unanswerable query' (the tungsten probe)"}
+      ],
+      "store_fields": [
+        "backend/evals/heldout_questions.jsonl: shape='negative_control' (5 rows), answerable=false",
+        "docs/baselines/EVAL_*.json: summary.negative_controls_ok (e.g. '3/5'), results[].refused",
+        "query-case field forbidden_lexicon_terms (three-tier query set schema; currently unused in the live 5-query set)"
+      ],
+      "verdict": "OVERLAPPING",
+      "canonical": "negative_control (heldout shape) — call impl 2 'forbidden-vocabulary control' to keep them apart",
+      "aliases": ["negative control", "negative-control probe", "tungsten negative control", "fail-closed probe", "forbidden_lexicon_terms / forbidden_vocabulary_expansion"],
+      "collision_note": "FAILURE MODE (a): one phrase, two different assertions — (i) 'an unanswerable question must be refused' (heldout shape + REFUSAL_RE + probe_tier_latency) and (ii) 'this vocabulary term must never be introduced by expansion' (three_tier_eval forbidden lexicon). Also mild (b): the unanswerable-question control exists three times (heldout suite, latency probe, strict-ready smoke requirement CHECKLIST:1268) with no shared question source — the tungsten query is hardcoded in the probe, not drawn from the suite's 5 negative_control rows.",
+      "evidence": "three_tier_eval.py:605 literally says 'a negative-control vocabulary concept was introduced' — same words, vocabulary-level meaning; freeze_heldout_eval.py:89-90 enforces the answer-level meaning."
+    },
+    {
+      "plan_term": "before/after",
+      "code_symbols": [
+        {"symbol": "config.SHELF_RESERVE_ENABLED (dark flag)", "file_line": "backend/config.py:392 (desc 'Ships dark (False) pending before/after evals' at :402)", "role": "nearest seam: feature held OFF awaiting a before/after result"},
+        {"symbol": "config.WATERFALL_ASSEMBLY (dark flag)", "file_line": "backend/config.py:290 ('OFF until the A/B gate (golden battery + 5-doc probes) is green' at :296)", "role": "second dark flag gated on the same unbuilt comparison"},
+        {"symbol": "docs/baselines/EVAL_*.json artifacts", "file_line": "backend/scripts/run_heldout_eval.py:289-291", "role": "the timestamped snapshots a before/after diff would compare — no diff/compare tool exists"}
+      ],
+      "store_fields": [],
+      "verdict": "PLAN-ONLY",
+      "canonical": "before/after gate (to-be-built; nearest seam = re-run run_heldout_eval per tier and diff EVAL_*.json summaries)",
+      "aliases": ["before/after result", "standing before/after gate", "A/B (S8 'A/B on the held-out 56')", "A/B gate", "golden battery", "Before metrics / After metrics (Implementation Log template)"],
+      "collision_note": "FAILURE MODE (a): CHECKLIST:1246 'Candidate counts before/after fusion' uses the identical words for per-run pipeline-stage counts inside one query — unrelated to change gating. FAILURE MODE (b): 'before/after evals' (shelf_reserve), 'A/B gate + golden battery' (waterfall), and P1.1's acceptance gate (CHECKLIST:591-592, unchecked) all describe the same missing comparison harness under three names — real risk each feature grows its own one-off A/B script.",
+      "evidence": "P1.1's only acceptance box — 'No ranking... change ships without a before/after result on this suite' (CHECKLIST:591-592) — is open; grep finds no script that loads two EVAL_*.json files and diffs them."
+    },
+    {
+      "plan_term": "preregistered thresholds",
+      "code_symbols": [
+        {"symbol": "ROUTE_LATENCY_BUDGETS", "file_line": "backend/services/retriever/three_tier_eval.py:43", "role": "nearest seam: numeric budgets declared ahead of runs (latency only)"},
+        {"symbol": "query-case min_lexicon_recall / min_document_route_recall", "file_line": "backend/services/retriever/three_tier_eval.py:588,616", "role": "nearest seam: per-case numeric floors the validator fails on — the preregistration mechanism, per-case"}
+      ],
+      "store_fields": [
+        "scripts/retrieval_three_tier_queries.json per-case min_* fields (schema supports them; live set doesn't set them)"
+      ],
+      "verdict": "PLAN-ONLY",
+      "canonical": "preregistered thresholds (to-be-built; the phrase appears nowhere in the repo)",
+      "aliases": ["numeric targets set in advance", "promotion gate numbers (e.g. CHECKLIST:811 'PROMOTION GATE: cosine = 0.98')", "acceptance thresholds"],
+      "collision_note": "FAILURE MODE (a) adjacent: 'threshold' in code overwhelmingly means runtime production gates (ANSWERABILITY_COVERAGE_THRESHOLD, backend/services/answerability_tuning.py:97) — tuning knobs, not eval pass/fail bars; do not preregister by reusing those settings. The substantive gap: the checklist's eval acceptance criteria are qualitative ('improves materially over baseline' CHECKLIST:611, 'no held-out recall/nDCG loss' CHECKLIST:831) with no stored numbers, so today nothing is preregistered — the only pre-declared numerics anywhere are the latency budgets and the (unset) per-case min_* floors.",
+      "evidence": "grep -riE 'preregist' across backend/ and docs/ returns nothing; ROUTE_LATENCY_BUDGETS comment (three_tier_eval.py:44-46) is the sole 'targets declared before the run' artifact."
+    },
+    {
+      "plan_term": "scorer",
+      "code_symbols": [
+        {"symbol": "run_heldout_eval.score + REFUSAL_RE", "file_line": "backend/scripts/run_heldout_eval.py:182,43", "role": "THE eval scorer the plan means — versioned (v1->v2 commit 7be5a53, v3 commit e1d4a4f 'generalized absence detection')"},
+        {"symbol": "three_tier_eval.grounding_quality / evaluate_route_result", "file_line": "backend/services/retriever/three_tier_eval.py:299,472", "role": "parallel eval scorer #2 (route contract, issue codes)"},
+        {"symbol": "eval_metrics.evaluate_case / summarize_route_eval", "file_line": "backend/services/retriever/eval_metrics.py:337,381", "role": "parallel eval scorer #3 (labeled-relevance metrics, unconsumed by either runner directly)"}
+      ],
+      "store_fields": [
+        "docs/baselines/EVAL_*.json: summary.scorer_version (=3), results[].rescored_v3 (offline-rescored rows), results[].refused"
+      ],
+      "verdict": "OVERLAPPING",
+      "canonical": "heldout scorer (run_heldout_eval.score, stamped as scorer_version in artifacts)",
+      "aliases": ["scorer v2/v3", "REFUSAL_RE", "absence detection", "rescored_v3"],
+      "collision_note": "FAILURE MODE (a): 'scorer' elsewhere in the codebase means production RANKING scorers — services/retriever/lexical.py:49 (fallback lexical scorer), services/retriever/evidence_allocation.py:13,66 (metadata-aware scorer), services/graph/orchestrator.py:2715 (graph ranking-signal scorer). Same word, retrieval-time concept, never an eval concept. FAILURE MODE (b): three parallel eval scorers (score(), evaluate_route_result, evaluate_case) with no shared code. Hygiene bug: the in-file comment still says 'scorer v2' (run_heldout_eval.py:45) while HEAD is v3 (commit e1d4a4f) and artifacts stamp scorer_version=3 — the comment is the kind of stale tag PLAN_CRITIQUE C4 warns about.",
+      "evidence": "git log on run_heldout_eval.py: f2fb6e2 (v1) -> 7be5a53 (v2) -> e1d4a4f (v3, offline rescore, rescored_v3=true rows); EVAL_2026-07-13_qdrant_only.json:88 'scorer_version': 3."
+    }
+  ]
+}
