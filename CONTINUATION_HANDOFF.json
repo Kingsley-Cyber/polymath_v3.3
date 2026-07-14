@@ -1,5 +1,5 @@
 {
-  "version": "2026-07-14.10",
+  "version": "2026-07-14.11",
   "purpose": "Machine-readable job queue for any continuing agent. Read CONTINUATION_HANDOFF.md first.",
   "authoritative_docs": [
     "BUILDLINE.md (temporal north-star: checkpoint order, NOW pointer, no-design-without-a-slot rule)",
@@ -139,6 +139,16 @@
       "executor": "codex",
       "what": "query-side optimization per docs/RETRIEVAL_OPTIMIZATION_PLAN_2026-07-14.md + checklist P2.2c; family-by-family activation each behind A/B",
       "gate": "P2.2c acceptance boxes"
+    },
+    {
+      "id": "p2.2d-forced-latent-sweep",
+      "status": "blocked_deps",
+      "deps": [
+        "s9-s14"
+      ],
+      "executor": "codex",
+      "what": "domain-conditioned forced latent sweep per checklist P2.2d \u2014 comparison A/B vs deterministic bridges at CP10; needs claim spine (CP9) for corroboration",
+      "gate": "P2.2d acceptance: CROSS_DOMAIN/EXPLORATORY improvement, no FACTUAL regression, negatives 5/5, cost within budget"
     }
   ],
   "owner_pending": [

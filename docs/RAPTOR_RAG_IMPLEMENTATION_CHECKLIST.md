@@ -1094,6 +1094,38 @@ Acceptance:
   FACTUAL answers ground only in validated source-backed claims/evidence.
 - [ ] Whole-query latency within +20% of tier baseline at every activation.
 
+### P2.2d Forced Latent Sweep — comparison experiment (owner-adopted 2026-07-14)
+
+Owner design: systematic domain-conditioned latent generation — for each
+artifact, EACH swept domain yields a generated latent concept binding the
+artifact to that domain, or an explicit abstention. Supply-side feed for
+CROSS_DOMAIN / EXPLORATORY / CREATIVE_TRANSFER and cross-corpus bridges.
+
+- [ ] Sweep recipe (versioned): candidate domains per artifact = affinity
+  priors + embedding neighborhood top-N + exactly ONE wildcard distant domain
+  per pass (structured serendipity); budgets ride latent_concept_policy
+  (generation/storage/usage separation).
+- [ ] Output contract: domain-keyed LatentConceptProposal via the P2.5c
+  gateway (supporting_claim_ids validated; abstention = empty array is a
+  rewarded output; never marked validated by the producer).
+- [ ] Provenance: derivation_method=`llm_forced_sweep` on every swept
+  proposal — never mixable with spontaneous digest proposals or corroborated
+  concepts.
+- [ ] Corroboration path: swept candidates that bind superframe roles/motif
+  stages over real claims are promotable per the permission ladder; unbound
+  ones stay candidates.
+- [ ] Storage: domain-keyed latent families in the registry/rollup (each
+  domain's generated latent concept addressable per artifact).
+
+Acceptance (the comparison test):
+
+- [ ] A/B on the frozen suite + cross-corpus shapes: forced-sweep candidates
+  ON vs deterministic-only bridge mining — CROSS_DOMAIN/EXPLORATORY answer
+  improvement with no FACTUAL regression and negatives 5/5; per-domain sweep
+  yield + abstention-rate census reported.
+- [ ] Cost receipt: calls per artifact within recipe budget; empty-yield
+  domains identified for prior tuning.
+
 ### P2.3 Add Versioned Qwen3 Retrieval Embedding Instructions
 
 Owner directive adopted 2026-07-13: Qwen3 retrieval embeddings use distinct,

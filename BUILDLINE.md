@@ -101,9 +101,14 @@ Checklist: P2.6, P2.7, P2.7b, P2.8, Temporal Program hooks.
 Representation points (context-enriched children etc.) · mode→family matrix ·
 lineage dedupe · rank fusion · P1.2 grounded-planner activation · Librarian
 Phase 4 LLM amplification (planner-when-thin, explain-not-select). EACH
-family/behavior behind its own A/B. Exit: the preregistered program target —
-lay-language/cross-corpus doc-hit +10pts, no material regression.
-Checklist: P2.2, P2.2c, P1.2, Librarian Phase 4.
+family/behavior behind its own A/B · **P2.2d Forced Latent Sweep (owner-
+adopted 2026-07-14): domain-conditioned latent generation per artifact
+(affinity-prior top-N + one wildcard domain, gateway-validated, derivation=
+llm_forced_sweep, abstention legal) — COMPARISON TEST vs deterministic-only
+bridges on the frozen suite; needs CP9's claim spine for corroboration
+binding**. Exit: the preregistered program target — lay-language/cross-corpus
+doc-hit +10pts, no material regression.
+Checklist: P2.2, P2.2c, P2.2d, P1.2, Librarian Phase 4.
 
 ## CP11 — Time, anchors, shapes, rerank serving
 P1.3 conversation/open-book anchoring · P1.6 answer-shape routing · T-MAIN
@@ -153,6 +158,7 @@ Invariants.
 | P2.1 Version The Universal Concept Contract | CP5 |
 | P2.2 Build Two-Sided Multi-Point Concept Representations | CP10 |
 | P2.2c Query-Side Retrieval Optimization | CP10 |
+| P2.2d Forced Latent Sweep | CP10 |
 | P2.3 Add Versioned Qwen3 Retrieval Embedding Instructions | CP5 |
 | P2.4 Negation And Relation Correctness | CP8 |
 | P2.5 Typed Relation Signatures | CP8 |
