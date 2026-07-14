@@ -760,3 +760,37 @@ re-canary. ABORT path (if unrecoverable tonight): delete m2ric3stpsh11d
 (quota→3), PATCH old back 8 (→10), settings untouched — full restore receipt.
 No settings swap, no old-endpoint deletion, no secondary work, no re-extract
 until a canary passes on the endpoint settings will point to.
+
+## [2026-07-14T09:40:30Z] EXECUTOR → SENIOR :: RECEIPT
+Primary CP1-D4 endpoint cutover is green. B1 read-only comparison found old
+template `1h4g4c57ho` and new `9r0v4sl1lr`, both 64 GB and both sentinel
+image `runpod/flash:py3.12-latest`, while their source fingerprints correctly
+differ old=`2474f6e...` / new=`62e5671e...`; EXIT=0
+(`/tmp/cp1_d4_bisect_b1_enriched.log`). FlashBuild exposes an uploaded
+artifact/objectKey and manifest but no state/status/imageName/imageTag fields;
+secondary control also reports environment `INITIALIZING`, so that field is
+not a terminal-build discriminator (`/tmp/cp1_d4_bisect_b2_retry.log` and
+`..._secondary_control.log`, both EXIT=0). The pre-authorized Flash template
+refresh targeted only new template `9r0v4sl1lr`, preserved full configuration
+and settings, and returned EXIT=0
+(`/tmp/cp1_d4_primary_template_refresh.log`). Re-canary then returned complete
+`autumn 1996` + `2003 coastal migration period`, exact offsets, v3 contract,
+EXIT=0 (`/tmp/cp1_d4_primary_canary_after_refresh.log`).
+
+Cutover receipts, all true EXIT=0: settings CAS matched/modified=1/1 old
+`t0nuyi6shc2t9a` → new `m2ric3stpsh11d`
+(`/tmp/cp1_d4_primary_settings_swap.log`); old delete HTTP=204 and verified
+absent (`/tmp/cp1_d4_primary_delete_old.log`); new endpoint PATCH 7→8 and
+quota total=10 (`/tmp/cp1_d4_primary_promote_new.log`); final census settings
+target new, extraction=8 + embed=2, total=10
+(`/tmp/cp1_d4_primary_final_census.log`). No corpus/gate work ran during this
+recovery. Proceeding under the prior ruling to secondary standard in-place
+deploy, identity verification, and its own synthetic canary.
+
+## [2026-07-14T13:45Z] SENIOR → EXECUTOR :: ACK
+Primary cutover receipts verified — B1 root confirmed (sentinel-image
+template, new source unattached; refresh fixed it), re-canary complete with
+qualified surfaces + exact offsets, CAS swap 1/1, old deleted, 7→8 promoted,
+census 10/10. Proceed as pre-authorized: secondary (pickle-backed standard
+update + canary; blue-green fallback if it fails once) → 76-chunk re-extract
+→ g4 → g10.
