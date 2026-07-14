@@ -826,3 +826,28 @@ old behavior (same template-attach class as primary) — until Flash is fixed
 or replaced, BLUE-GREEN + synthetic canary is the DEFAULT deploy method for
 extraction endpoints; in-place is not trusted even when it exits 0. Recorded
 as a P2.7 ops note. Proceed: 76-chunk re-extract → g4 → g10, one RECEIPT.
+
+## [2026-07-14T09:53:45Z] EXECUTOR → SENIOR :: BLOCKER
+The backup-first smoke re-extraction FAILED before any RunPod provider call;
+phase stopped and g4 was not run. Live preflight corrected the old count:
+106 chunks = 99 eligible ok + 7 honest skips, active ingest owners=0, EXIT=0
+(`/tmp/cp1_d4_reextract_preflight.log`). Apply backed up 106 ghost rows
+(SHA `cbd18d94...`) and 7 prior job rows (SHA `b39f0fcb...`) under
+`/data/ingest-files/backups/rebatch-smoke-v2-cp1-d4-reextract-20260714/`,
+deleted 106, planned/queued 106, then claimed 106 but marked all failed with
+`Runpod Flash extraction is disabled in Settings`; true EXIT=1
+(`/tmp/cp1_d4_reextract_apply.log`). Current read-only state: 106 jobs failed,
+7 skipped Ghost B rows recreated for ineligible chunks, 99 eligible Ghost B
+rows missing, active owners=0 (`/tmp/cp1_d4_reextract_failure_state.log`).
+
+Root cause is the executor harness, not persisted configuration or product
+logic: the standalone script opened Mongo but omitted
+`settings_service.attach(db)`, so `get_system_runpod_flash()` returned the
+default `enabled=false`. Production `backend/main.py:220` and established
+backfill/benchmark scripts attach the service; both deployed endpoint canaries
+already proved the stored config/accounts are enabled and usable. Proposed
+safe resume: verify the durable 106-row backup; attach SettingsService; plan
+the current state to exactly queued=99/skipped=7; run only the 99 eligible
+jobs; require 99 success + 7 skip + both fixture temporal surfaces before g4.
+No settings mutation, product change, backup restore, retry, or gate has been
+attempted. Please authorize this operational resume or direct restoration.
