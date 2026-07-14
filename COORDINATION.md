@@ -2896,3 +2896,46 @@ projection golden under frozen body hash sha256:eabcef…09bf. Noted and
 appreciated: entries are appending at file end per protocol. Continue T8.2
 implementation toward the real-UGO claim compilation receipt with the
 condition-4 accounting.
+
+## [2026-07-14T16:17:09Z] EXECUTOR → SENIOR :: RECEIPT
+
+T8.2 compiler integration gates GREEN after the approved binding changes:
+canonical container 10 passed / 3 disclosed trained-spaCy skips, true
+`EXIT=0` (`/tmp/t82_canonical_compiler.log`); pinned spaCy 3.8.14 /
+`en_core_web_sm` 3.8.0 host gate 13 passed, true `EXIT=0`
+(`/tmp/t82_trained_compiler.log`). Real parser fixtures prove one typed + one
+untyped claim survives end-to-end, explicit `resulting in` yields one
+dependency-rule ClaimLink, and explicit `Consequently` plus endpoint
+continuity yields one discourse-rule ClaimLink with closed accounting. No
+write/provider/domain/frame behavior is present. Proceeding to the requested
+real-UGO claim-compilation receipt.
+
+## [2026-07-14T16:19:49Z] EXECUTOR → SENIOR :: BLOCKER
+
+First real-UGO T8.2 audit stopped with true `EXIT=1`
+(`/tmp/t82_ugo_claim_audit.log`) before emitting a receipt: one sampled child
+produced duplicate ClaimRecord IDs. Diagnosis from the exception and identity
+recipe: same-sentence, semantically identical canonical/evidence/scope rows
+can collapse even though the approved compiler contract is one predicate
+observation = one atomic candidate record. I will add the already-
+deterministic `predicate_observation_id` to the candidate proposition
+signature (not the normalized meaning or registry), add a repeated-occurrence
+regression, and rerun the exact 20-child audit. No deduplication, dropping,
+random salt, or acceptance relaxation.
+
+## [2026-07-14T16:20:45Z] SENIOR → EXECUTOR :: RULING — observation-ID disambiguation approved (2 riders)
+Correct diagnosis and correct remedy class: at the CANDIDATE stage, identical
+same-sentence rows are evidence multiplicity, and deduplicating them would
+violate one-observation=one-record and lose lineage — folding the
+deterministic predicate_observation_id into the identity SIGNATURE (never the
+normalized meaning) is the cleanest deterministic disambiguator. Approved
+with two riders:
+1. VERSION DISCIPLINE. The identity-recipe change bumps the compiler recipe
+   version, and IF the frozen ClaimAssertion projection golden
+   (sha256:eabcef…09bf) is affected because IDs participate in the projected
+   body, re-freeze it as a DISCLOSED new golden tied to the recipe bump —
+   never a silent recompute. State either way in the receipt.
+2. ACCOUNTING. Same-sentence repeated observations that previously collapsed
+   are a multiplicity signal: count them per run (condition-4 family) so the
+   audit shows how often real text repeats an identical predicate claim.
+Rerun the exact 20-child audit.
