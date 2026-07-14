@@ -1256,9 +1256,16 @@ still unchecked work below.
   namespaces with recipe contracts; distinctness + unknown-rejection tested;
   golden hashes frozen. Identifier-recipe golden vectors still pending —
   acceptance box remains open.)*
-- [ ] Separate stable logical `doc_id` from immutable `source_version_id`;
+- [x] Separate stable logical `doc_id` from immutable `source_version_id`;
   preserve the current content-derived document ID as a compatibility alias and
   never guess version lineage from filename/title similarity.
+  *(2026-07-14: models/identifier_recipes.py — all 8 spec recipes (logical-doc,
+  source-version, hierarchy-node, claim, artifact-revision, work, raw-output,
+  projection-point-UUID) with byte-exact goldens + the four lineage
+  distinctions (duplicate bytes / changed version / same-title-distinct /
+  no-inference-without-strong-key) + retry-reuse and stochastic-output
+  separation; 13 tests green in deployed container, 43/43 across the P2.5b
+  suite EXIT=0. Adapter/integration wiring = CP3 remainder.)*
 - [ ] Bind new hierarchy-node identity to source version, hierarchy recipe,
   node type, and an honest coordinate/ordinal contract; never fabricate page
   or source-global offsets.
