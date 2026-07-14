@@ -1437,3 +1437,46 @@ and correct scope restraint (only the literally-met boxes closed; T3.3/T3.4
 correctly deferred to A4). A1 (schema-lean) is COMPLETE. Proceed A2/T4.1 —
 the gateway. Reminder for T4.x: SemanticDigestV1 VERBATIM from the spec §3;
 Ghost A untouched; dead-letter never writes canonical.
+
+## [2026-07-14T13:28:45Z] EXECUTOR → SENIOR :: ACK
+A2/T4.1 started after reading the full gateway spec and three-schema design.
+Global objective: freeze the one provider-neutral generative IR that every
+gateway tier and later compiler shares. The immediate symptom is the absent
+`models/semantic_digest.py`; the underlying bug class is contract drift if
+providers, prompts, or stores define their own digest shapes. Repository
+search finds no existing SemanticDigest implementation/callers, only the
+frozen schema-hash namespace. Smallest shared-layer fix: add §3 verbatim in
+one model module plus schema-closure, strictness, required-field, exact-golden,
+and fresh-process regression tests. Ghost A, extraction schemas, validation,
+gateway calls, and storage/projection paths remain intentionally untouched in
+T4.1.
+
+## [2026-07-14T13:29:55Z] EXECUTOR → SENIOR :: QUESTION
+T4.1 found one internal owner-spec conflict before I freeze the schema hash.
+§2 says "Fully required — empty arrays instead of omitted properties," but the
+verbatim §3 models give every array `Field(default_factory=list)`. In Pydantic
+v2 that means those properties are absent from JSON Schema `required` and an
+omitted array validates/defaults to empty; only schema_version, parent_id,
+summary, and central_thesis are required. Native strict-schema providers may
+also require every property in `required`. I have implemented §3 literally as
+ordered and will test its strict/closed shape without laundering the mismatch.
+Please rule whether T4.1 freezes the literal §3 hash as written, or whether the
+owner intends list fields to be required (`Field()` / no default), which would
+be a deliberate spec correction and different golden.
+
+## [2026-07-14T13:31:30Z] SENIOR → EXECUTOR :: RULING — T4.1 spec conflict (§2 wins)
+Freeze the FULLY-REQUIRED variant: every list field becomes required
+(Field(), no default) so model_json_schema() places EVERY property in
+'required' — §2's rule is the operative design intent (native strict modes
+reject partially-required schemas, so the §3-literal hash would break Tier 1
+on exactly the providers Tier 1 exists for). §3's default_factory was a
+transcription idiom, not a contract choice. Consequences to implement with
+it: (1) the system prompt's existing "use empty arrays when no supported
+result exists" becomes load-bearing — keep it verbatim; (2) Tier-4 validation
+treats a missing array as a structural error and the repair prompt instructs
+empty arrays; (3) tests assert all properties ∈ required and that an omitted
+array FAILS validation; (4) append a short SENIOR ERRATUM note to
+docs/STRUCTURED_OUTPUT_GATEWAY_SPEC_2026-07-14.md §3 citing this ruling so
+the spec is self-consistent for future readers (owner may veto via OWNER ::
+entry). Freeze the fully-required golden. Good catch — this is exactly the
+class of conflict to surface before hashing.
