@@ -5295,6 +5295,20 @@ define a conservative accounting treatment that permits the 11 never-attempted
 rows to continue while the timeout row remains a final honest loss. I will not
 assign synthetic `actual_cost`, weaken completeness, or resume silently.
 
+## [2026-07-14T21:50:05Z] EXECUTOR → SENIOR :: QUESTION
+
+Zero-call conservative bound available if you choose the continue lane:
+ordinal 60's exact initial Tier-3 request serialization is 22,314 UTF-8 bytes.
+Using one token per byte as an input upper bound at `$0.75/M`, plus the full
+8,192 output-token cap at `$2.95/M`, reserves `$0.04090190`, below the `$0.06`
+packet gate. I would preserve `actual_cost_usd=null` and telemetry-incomplete,
+add a separately named/versioned `cost_upper_bound_usd` +
+`cost_accounting_basis=conservative_timeout_reservation`, and allow budget
+completeness only to sum actual costs plus explicit reservations; the job stays
+terminal and never retries. Please approve that exact accounting distinction
+for the 11-row continuation, or park Phase 1C. No state was changed to compute
+this bound.
+
 ## [2026-07-14T21:49:55Z] SENIOR → EXECUTOR :: RULING — bounded-exposure accounting; continue the 11; bar unchanged (state it plainly)
 1. ACCOUNTING (the general rule, reusable): a transport-dead row's cost is
    never synthesized and never zeroed — it is BOUNDED. Book ordinal 60 as
@@ -5319,3 +5333,139 @@ assign synthetic `actual_cost`, weaken completeness, or resume silently.
    weather — no parameter change. If ≥2 more timeouts occur in the remaining
    11, PAUSE and propose a versioned transport read-timeout parameter (same
    lawful class as max_tokens) rather than eating losses.
+
+## [2026-07-14T21:51:35Z] EXECUTOR → SENIOR :: ACK
+
+ACK. I will preserve ordinal 60 as terminal with `actual_cost_usd=null` and
+row `cost_complete=false`, book a separate `$0.06` unpriced-exposure bound,
+and make ceiling arithmetic use known actual + explicit bounds while exposing
+phase state `complete_with_bounded_exposure`. The 11 queued rows alone resume;
+1C passes only at 11/11 (final 48/50) and otherwise fails unchanged. Ordinal 60
+joins a five-parent tail set gated after Phase 2 and corpus-wide >=95%. I will
+persist the ReadTimeout class for recurrence accounting and pause if the phase
+reaches three total ReadTimeouts. Tests and a zero-call resume preflight run
+before provider release; no timeout parameter changes now.
+
+## [2026-07-14T21:58:25Z] EXECUTOR → SENIOR :: RECEIPT
+
+Bounded-exposure continuation focused gate GREEN: 19/19 passed, 7 existing
+warnings, true `EXIT=0` in `/tmp/t93_phase1c_bounded_focused.log`. Coverage
+keeps row actual cost null/incomplete, books a distinct `$0.06` exposure,
+makes only the ceiling basis complete, preserves the 48/50 acceptance bar,
+fails unbounded missing cost, pauses at three total ReadTimeouts, fixes tail
+count at five, and uses a deterministic authorization-scoped tail job ID so
+the original v6 timeout attempt remains immutable. Calls/writes/spend zero.
+Running the expanded adjacent gate, then a zero-call live resume preflight.
+
+## [2026-07-14T21:59:00Z] EXECUTOR → SENIOR :: RECEIPT
+
+Bounded-exposure expanded adjacent gate GREEN: 159/159 passed, 7 existing
+warnings, true `EXIT=0` in `/tmp/t93_phase1c_bounded_adjacent.log`. No provider
+calls or live-state writes. Proceeding to the promised read-only live resume
+preflight; it will prove the one-row booking target, 11 untouched queued rows,
+immutable ordinal 60, five-parent tail identity, and worst-case ceiling math
+before the approved booking write or provider continuation.
+
+## [2026-07-14T22:00:09Z] EXECUTOR → SENIOR :: RECEIPT
+
+Bounded-resume live preflight GREEN: true `EXIT=0` in
+`/tmp/t93_phase1c_bounded_resume_preflight.log`; safe artifact
+`/tmp/t93_phase1c_bounded_resume_preflight.json`. Exact persisted selection
+resumes 50 rows at 37 succeeded / 2 DLQ / 11 queued / 0 running. Ordinal 60 is
+the sole unbooked exposure, attempt_count 1, actual null, row cost_complete
+false, durable DLQ says ReadTimeout. Simulated approved booking yields phase
+known `$0.92110635` + bound `$0.06` = ceiling basis `$0.98110635`; cumulative
+known `$1.46457140` + bound `$0.06` = `$1.52457140`, state
+`complete_with_bounded_exposure`. Worst case after 11 × `$0.06` is
+`$2.18457140` < `$49.45`. Tail set is exactly five with five distinct
+authorization-scoped IDs, all distinct from original jobs. Collection counts
+and canonical stores unchanged; calls=0, writes=0. Ready to book the one
+approved exposure row, verify it zero-call, then resume only the 11 queued
+rows; bar remains 11/11.
+
+## [2026-07-14T22:01:27Z] EXECUTOR → SENIOR :: RECEIPT
+
+Approved exposure booking GREEN: true `EXIT=0` in
+`/tmp/t93_phase1c_exposure_booking.log`; safe artifact
+`/tmp/t93_phase1c_exposure_booking.json`. Exactly one job-metadata row changed.
+Ordinal 60 remains terminal `dead_letter`, attempt_count 1,
+`actual_cost_usd=null`, row `cost_complete=false`; it now records
+`transport_error_class=ReadTimeout`, bound `$0.06`, basis
+`bounded_transport_exposure.v1`. Phase counts remain 37/2/11/0. Cumulative
+known actual is `$1.46457140`, one bound `$0.06`, ceiling basis `$1.52457140`,
+state `complete_with_bounded_exposure`. Cache/DLQ/artifact counts and canonical
+stores unchanged; provider calls=0, canonical writes=0. The runner now sees a
+complete budget ledger and will claim only the 11 existing queued jobs; all
+prior jobs remain terminal/exactly-once. Awaiting review, then executing the
+ruled continuation with the unchanged 11/11 requirement.
+
+## [2026-07-14T22:17:32Z] EXECUTOR → SENIOR :: BLOCKER
+
+Phase-1C continuation stopped fail-closed, true `EXIT=1` in
+`/tmp/t93_mark_phase1c_resume.log`; safe receipt
+`/tmp/t93_mark_phase1c_resume.json`, SHA-256
+`dc8ef8ec5d060554910a5fb6d316812c0657dc0051348b22f054fe8c53ac4b82`.
+The approved remainder was 11/11 accepted, yielding the frozen 48/50 = 96%
+quality bar. All 50 are terminal (48 accepted, 2 DLQ), known phase actual
+`$1.14107950` plus one `$0.06` bound = `$1.20107950`; cumulative known actual
+`$1.68454455` plus `$0.06` bound = `$1.74454455` < `$49.45`. ReadTimeout count
+remained one. Size bands: all 50 attempted at/below 21,515 bytes, max 16,918,
+48 accepted / 2 DLQ / 96%; above-max count zero.
+
+The gate is RED solely because the global canonical census changed during the
+run: Qdrant `hermes_memories` increased 608→609, making qdrant total
+1,364,767→1,364,768; every named corpus collection, Mongo semantic artifact
+count, and Neo4j node/relationship count is identical before/after. The runner
+correctly set `canonical_drift_zero=false`, `all_green=false`, returned EXIT=1,
+and wrote no Phase-1C release. Phase 2 remains sealed. I am diagnosing the one
+ambient `hermes_memories` write read-only; I will not redefine the gate,
+retroactively move its census, or open Phase 2 without a senior ruling.
+
+## [2026-07-14T22:19:10Z] EXECUTOR → SENIOR :: QUESTION
+
+Read-only attribution is exact. `hermes_memories` contains exactly one point
+created inside the run window, at `2026-07-14T22:14:43.635422Z`, point
+`94d03015-e759-4876-9ceb-1e6450bed0b4`, payload hash
+`74b3338f4c4a59f06e24b46696159f11`; no semantic content was read or printed.
+Qdrant access log records its write as `PUT
+/collections/hermes_memories/points?wait=true` from `172.19.0.1` using
+`python-client/1.18.0 python/3.11.15`. That source is the Docker host bridge;
+the paid runner's backend container is `172.19.0.10`. The write is therefore
+concurrent host-side memory traffic, not the paid runner, and all Polymath
+corpus collections remained exact.
+
+Proposed fail-closed recovery, requiring your ruling: run the identical Phase
+1C command once more as a zero-provider postflight. All 50 jobs are terminal,
+so it cannot claim or purchase; it will take a fresh global before/after census
+and persist the release only if that census is exactly unchanged while also
+revalidating 48/50, bounded accounting, hashes, and canonical immutability. If
+any ambient write recurs, it stays red. This does not erase or relabel the
+failed paid-run receipt. Approve that zero-call recensus lane, or rule Phase 1C
+parked despite the attributable external write. Phase 2 remains sealed.
+
+## [2026-07-14T22:19:43Z] SENIOR → EXECUTOR :: RULING — census scope corrected to the protected asset class; old receipt stands; v2 re-evaluation
+First: the gate caught a ONE-point change in 1.36M — that is the drift watch
+working, and your refusal to redefine anything mid-flight is correct.
+Context the senior holds: `hermes_memories` is the HERMES agent's mem0
+memory collection — a CO-TENANT application on the shared Qdrant instance
+(King's personal agent writes memories there in ordinary operation). It is
+not Polymath data and nothing in the digest path writes to Qdrant at all.
+Rulings, contingent on your read-only diagnosis confirming the new point is
+mem0/Hermes-shaped (payload form + timestamp in the run window):
+1. CENSUS SCOPE was accidentally OVER-BROAD (global Qdrant totals include
+   co-tenants). Correct it PROSPECTIVELY as census_scope.v2: an explicit
+   versioned ALLOWLIST of Polymath-owned collections (the named corpus
+   collections, doc_summaries, and Polymath semantic stores) — hashed like
+   every other recipe. Co-tenant collections are excluded from the RED/GREEN
+   verdict but their deltas are still REPORTED in every receipt as ambient
+   (visibility is preserved; only verdict authority changes). Any change in
+   a POLYMATH-owned collection remains RED. This narrows the gate to its
+   actual protected asset class — the protected surface loses nothing, so
+   this is correction, not weakening; owner may veto by OWNER :: entry.
+2. THE RED RECEIPT STANDS AS WRITTEN — no retroactive edit. Re-evaluate 1C
+   under census_scope.v2 as a NEW receipt referencing both the old receipt
+   and this ruling. With Polymath-scope drift zero and 48/50 = 96%, the 1C
+   release marker may then be written.
+3. SEQUENCE UNCHANGED AFTER THAT: 939-row backup-first fence FIRST, then
+   phase 2 opens per the standing shape. Post the fence receipt before the
+   first phase-2 call.
