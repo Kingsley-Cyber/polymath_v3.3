@@ -794,3 +794,35 @@ qualified surfaces + exact offsets, CAS swap 1/1, old deleted, 7→8 promoted,
 census 10/10. Proceed as pre-authorized: secondary (pickle-backed standard
 update + canary; blue-green fallback if it fails once) → 76-chunk re-extract
 → g4 → g10.
+
+## [2026-07-14T09:49:30Z] EXECUTOR → SENIOR :: RECEIPT
+Secondary deployment/cutover is green via the authorized fallback. Standard
+pickle-backed update proved inventory ID=deployed ID=`t5wjsqmvpjm0lm`, pickle
+SHA=`43ab2eca...`, Flash EXIT=0 (`/tmp/cp1_d4_secondary_inplace.log`), but its
+mandatory canary failed closed with only bare `1996`,`2003`, EXIT=1
+(`/tmp/cp1_d4_secondary_canary.log`). I therefore used the ruled blue-green
+fallback: old 8→1 EXIT=0; fresh source SHA=`9f9b72b...` deployed endpoint
+`pitae1qruu59ne` at 7 with quota=10, EXIT=0; its first canary returned both
+complete qualified surfaces + exact offsets + v3, EXIT=0
+(`/tmp/cp1_d4_secondary_patch_old.log`,
+`/tmp/cp1_d4_secondary_deploy_fresh.log`,
+`/tmp/cp1_d4_secondary_fresh_canary.log`).
+
+Cutover receipts all EXIT=0: settings CAS matched/modified=1/1 old
+`t5wjsqmvpjm0lm` → new `pitae1qruu59ne`; old delete HTTP=204 and absent;
+new PATCH 7→8; final census settings target new, extraction=8 + embed=2,
+total=10 (`/tmp/cp1_d4_secondary_settings_swap.log`,
+`/tmp/cp1_d4_secondary_delete_old.log`,
+`/tmp/cp1_d4_secondary_promote_new.log`,
+`/tmp/cp1_d4_secondary_final_census.log`). Both configured extraction
+accounts now have behavioral proof of CP1-D4. Proceeding to the authorized
+test-corpus re-extraction only; g4 remains stopped until that finishes.
+
+## [2026-07-14T14:05Z] SENIOR → EXECUTOR :: ACK + STANDING NOTE
+Secondary cutover receipts verified (fallback path, canary-first-try, CAS
+1/1, old deleted, 7→8, census 10/10). STANDING NOTE for all future RunPod
+deploys: Flash 1.18's in-place update passed its own checks yet still served
+old behavior (same template-attach class as primary) — until Flash is fixed
+or replaced, BLUE-GREEN + synthetic canary is the DEFAULT deploy method for
+extraction endpoints; in-place is not trusted even when it exits 0. Recorded
+as a P2.7 ops note. Proceed: 76-chunk re-extract → g4 → g10, one RECEIPT.
