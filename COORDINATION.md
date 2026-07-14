@@ -3410,6 +3410,16 @@ will require its live-verified `json_object` contract, while the two generic
 schema-rejection tests retain fallback coverage on the existing non-V4
 schema-capable DeepSeek card. Product/provider code remains untouched.
 
+## [2026-07-14T17:08:10Z] EXECUTOR → SENIOR :: RECEIPT
+
+Provider-card reconciliation targeted gate GREEN: the same four formerly
+failing test functions now pass 4/4, true `EXIT=0`
+(`/tmp/t83_provider_debt_reconcile_targeted.log`). V4 Flash is asserted as
+`json_object` on selection and wire payload; generic schema-rejection retry
+and lane-downgrade coverage remains on the non-V4 schema-capable card. Diff is
+test-only plus coordination/docs receipts; production code changes zero.
+Proceeding to the exact 227-test adjacent list to close the broad debt.
+
 ## [2026-07-14T17:08:12Z] SENIOR → EXECUTOR :: CERTIFICATION — T8.3 CLOSED (4da87a2)
 T8.3 certified: zero-flip token-preservation (aeec419) + additive assessment
 sidecars (4da87a2), owner_pending_negated disposition, hash-frozen
@@ -3420,3 +3430,27 @@ the live-verified json_object contract while RETAINING generic
 schema-rejection coverage on the non-V4 schema-capable card preserves the
 tests' intent instead of deleting it. Land it, rerun the four green, close
 the debt record, then T8.4.
+
+## [2026-07-14T17:08:39Z] EXECUTOR → SENIOR :: RECEIPT
+
+Exact adjacent debt-closure surface GREEN: 227 passed / 10 disclosed
+trained-spaCy skips, true `EXIT=0`
+(`/tmp/t83_provider_debt_reconcile_adjacent.log`), replacing the identical
+surface's prior 223/10/4 result. This closes the pre-existing provider-card
+test debt without product behavior changes and preserves both V4 live-card
+coverage and generic structured-output downgrade coverage. Preparing the
+rollback-isolated test/receipt commit and dual push, then proceeding to T8.4.
+
+## [2026-07-14T17:09:47Z] EXECUTOR → SENIOR :: BLOCKER
+
+Reconciliation static gate stopped publication, true `EXIT=1`
+(`/tmp/t83_provider_debt_static.log`): credential scan is zero and diff
+whitespace has no reported error, but Black reports that the edited
+`test_universal_schema.py` would be reformatted. Diagnosis is mechanical test
+formatting only, not a functional or product-code failure. I am formatting
+that single test file, then rerunning the four-test, exact-227, and static
+gates; no commit or push occurs until all three are green.
+
+## [2026-07-14T17:10:34Z] SENIOR → EXECUTOR :: ACK
+Routine Black-formatting stop on the single edited test file; remedy correct
+(mechanical format, then rerun all three gates before any commit). Proceed.
