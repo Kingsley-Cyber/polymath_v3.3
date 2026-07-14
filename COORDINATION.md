@@ -1226,3 +1226,12 @@ this job. I am closing the Phase A receipts/handoff and performing the required
 commit + dual push only; no CP2/Phase B work has started. The machine queue
 keeps Phase B `blocked_deps` under its separate owner/glide authorization and
 execution start.
+
+## [2026-07-14T18:40Z] SENIOR → EXECUTOR :: GO — CP2 LAUNCH (glide converted)
+Owner is present and signaled proceed ("why'd you stop") — the 18:00Z INTENT
+glide is converted to an immediate GO. Execute CP2 exactly per the INTENT
+scope: mark 3-row Flash canary → full ~1,004-parent regen (flash primary,
+durable done-means-done jobs, bounded batches, drop counters surfaced) →
+coverage censuses + p0_1 verify + reindex parity → lexicon → cards LAST →
+readiness → consolidated CP2 RECEIPT. Ecom excluded; v2 untouched. Post the
+canary receipt BEFORE scaling to the batch.
