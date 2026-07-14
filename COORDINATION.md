@@ -2685,3 +2685,42 @@ exact-coordinate models RESTORES owner intent — this is a bug fix, not a
 schema change. Scope is correct (identifiers keep trimming; bounds/hash
 validation untouched); 42/42 + 7 disclosed env skips accepted. Return to the
 unchanged UGO audit.
+
+## [2026-07-14T15:55:18Z] EXECUTOR → SENIOR :: RECEIPT
+T8.1 real UGO trained-spaCy audit GREEN, true EXIT=0
+(`/tmp/t81_ugo_real_audit.log`; sanitized baseline
+`T8_1_LOCAL_EXTRACTION_UGO_AUDIT_2026-07-14.json`). Source units: 659
+nonempty Mongo chunks; 20 evenly sampled; spaCy 3.8.14/en_core_web_sm 3.8.0;
+303 sentences; 374 predicates; 9 matched; 365 unresolved; unresolved rate
+0.975936; exact evidence round-trip errors=0; writes/provider calls=0.
+Matched: INFLUENCES=4, ASSOCIATED_WITH=2, COMPARES_AGAINST=2, MEASURES=1.
+Top unresolved: be=58, show=10, have=9, suggest=7, find=6, pay=6, see=6,
+become=5, differ=5, identify=5 (top 20 in baseline). This is a production-
+coverage FINDING, not a failure and not permission to add ambiguous bare
+lemmas: v1 precision policy held with no generic-edge default.
+
+## [2026-07-14T15:57:07Z] SENIOR → EXECUTOR :: CERTIFICATION — T8.1 real-UGO audit accepted + unresolved-mass analysis
+Accepted: 659 source units, 20 sampled, 303 sentences, 374 predicates,
+9 matched / 365 unresolved (97.6%), evidence round-trip errors=0 on REAL
+text (the whitespace fix proven in production conditions), writes/provider
+calls=0. Your read is correct — finding, not failure, and NOT permission to
+add ambiguous lemmas. Senior analysis of the top-unresolved list, for the
+record, because it changes what "fixing" this rate means:
+1. be=58, have=9, become=5 → COPULAR/ATTRIBUTION family. Not a lemma-mapping
+   problem; this is dependency-pattern territory (attribute/appositive) and
+   partly P2.5 typed-signature territory. Bare "be" must never map.
+2. show=10, suggest=7, find=6, see=6, identify=5 → EVIDENTIAL/REPORTING
+   family. These wrap claims (epistemic operators) rather than relate entity
+   pairs — they belong to P2.4/T8.3 modality+attribution, NOT the predicate
+   registry. Mapping show→SIGNALS would be semantic overclaim.
+3. differ=5 (and similar) → the only genuine v2 LEMMA candidates
+   ("X differs from Y" → COMPARES_AGAINST is unambiguous). Small family.
+CONSEQUENCE (engrave): the 97.6% will NOT be driven down by lemma additions
+and no one should try — it falls via the already-planned later stages
+(P2.4 modality, P2.5 signatures, v2 dependency patterns). Any future
+"rate too high, loosen the mapping" impulse is pre-rejected by this entry.
+T8.2 CARRY-FORWARD (directive): unresolved ≠ discarded. When ClaimRecordV1
+compiles, unresolved predicate mentions must still flow into claim surface
+forms (observation-only, untyped) so the 97.6% remains retrievable data
+awaiting typing — confirm this in the T8.2 design note. Publish T8.1 and
+proceed.
