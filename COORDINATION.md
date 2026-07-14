@@ -13,25 +13,38 @@ senior INTENT entries here start glide timers; silence past the window = GO.
 
 # ACTIVE DIRECTIVES (senior, rewritten in place — current truth)
 
-1. CONTINUE Phase A exactly per docs/REBATCH_RUNBOOK_2026-07-14.md. Let the
-   batch reach a terminal state; do NOT intervene on the mid-flight
-   `summaries=0` observation — the deep preset runs queryable-first passes,
-   summary passes may land later in the batch; g2 is the judge, evidence over
-   log-lines. If the batch terminates `partial`/`failed`: STOP + BLOCKER entry
-   with the failing item receipts.
-2. Your two receipt self-corrections are APPROVED (set -e wrapper; dropping
-   the non-runbook `runner_started=true` assertion — dedicated ingest-worker
-   ownership is the deployed design, INGEST_RUNNERS_ENABLED split confirmed).
-3. The per-user vs system RunPod contract mismatch is ACCEPTED AS A REAL
-   DEFECT, non-blocking for Phase A (the worker's system-scope resolution is
-   the executing path and shows 2 usable accounts). Logged by senior as an
-   API-hygiene item; do not fix it mid-phase; reference it in your final
-   report's observations.
-4. When all 10 gates are green: write the Implementation Log receipts, update
-   CONTINUATION_HANDOFF.json (rebatch-phase-a → done), commit + push branch
-   AND HEAD:main, then append a RECEIPT entry here with the gate table. Do
-   NOT start Phase B — it needs senior verification + owner GO, which will
-   arrive as entries in this file.
+1. g1 STOP verified and ACCEPTED — correct execution. Root cause confirmed by
+   senior at backend/services/ingestion/docling_adapter.py:1975
+   (`_parse_pdf_fast_text`): digital PDFs bypass structure parsing entirely →
+   no sections → tier_c/ocr_ast flat parents, empty heading_path. Your
+   tier_c inference was right.
+2. NEW JOB CP1-D1 (AUTO, execute now) — digital-PDF structural lane:
+   OBJECTIVE: PDFs with a text layer parse into markdown/sections with real
+   headings and flow the SAME structural lane as markdown (tier_a when
+   headings exist; tier_b tables; tier_c only when genuinely structureless).
+   OCR remains reserved for image-only PDFs. NO fixture-keyed logic — general
+   PDF handling only (anti-gaming absolute).
+   PREFERRED MECHANISM: route digital PDFs through the docling sidecar layout
+   parse (no OCR) to get markdown+sections; if the sidecar is unavailable,
+   a local font-size heading-inference pdf→markdown fallback is acceptable
+   ONLY with a surfaced fallback counter (no silent fallbacks).
+   TESTS: unit tests on the adapter (digital PDF w/ headings → sections +
+   tier_a; scanned PDF → OCR lane unchanged; structureless PDF → tier_c) +
+   re-ingest of the two fixture PDFs as e2e.
+   THEN: create rebatch_smoke_v2 corpus (or purge and re-upload the smoke
+   corpus — it is senior-created fixture data, deletion approved), re-run the
+   full batch and gates g1–g10. Commit + push per protocol; receipts here.
+3. PHASE B RESCOPE (senior ruling under capture-before-rebuild): the PDF fix
+   changes the ecom disposition — its heading poverty is now a PIPELINE
+   artifact, not source-baked, so ecom's true fix is REINGEST through the
+   fixed lane. Therefore ecom enrichment is REMOVED from tonight's Phase B
+   (spending ~9.5k summary calls on flat parents that a reingest would
+   invalidate = paying twice). Tonight's Phase B = MARK ONLY (transcripts,
+   unaffected by the PDF lane) + UGO/none else. Ecom becomes:
+   fix (CP1-D1) → owner §8/reingest decision with corrected evidence →
+   reingest → single enrichment pass.
+4. Phase B (mark-only) still gates on g1–g10 green after CP1-D1. Do not start
+   it before a SENIOR :: GO or a posted INTENT glide window expiring.
 5. Work proceeds down BUILDLINE.md checkpoints (NOW pointer = current truth);
    stamp checkpoint status in your receipts. New designs with no BUILDLINE
    slot are planning defects — raise as QUESTION.
@@ -89,3 +102,11 @@ lighthouse PDF is one body parent with no headings; transcript has
 `["Transcript"]`. Both PDFs contain the expected headings in parent text but
 were parsed tier_c into one unstructured parent each. No repair or product
 change was attempted due the owner-gated heading-repair prohibition.
+
+## [2026-07-14T07:55Z] SENIOR → EXECUTOR :: RULING + DIRECTIVE
+g1 receipts verified — your stop was correct and the finding is material.
+Root cause: _parse_pdf_fast_text bypass (docling_adapter.py:1975) — digital
+PDFs never reach structure parsing. This REWRITES the ecom disposition (its
+page-slug headings are pipeline artifacts, not source-baked), so ecom leaves
+tonight's Phase B under capture-before-rebuild. Execute CP1-D1 per ACTIVE
+DIRECTIVES #2; mark-only Phase B follows green gates. Owner has been briefed.

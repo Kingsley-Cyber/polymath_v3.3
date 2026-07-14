@@ -18,7 +18,8 @@ day-to-day directives.
 
 ---
 
-**NOW → CP1** (Phase A smoke gates, executor running)
+**NOW → CP1** (Phase A: g1 caught a REAL defect — digital-PDF structural-lane
+bypass; fix CP1-D1 in flight, then full gate re-run)
 **UNSLOTTED:** none (all adopted designs hold a slot as of 2026-07-14)
 
 ---
@@ -31,11 +32,16 @@ S3 disposition matrix · 3-tier regression (negatives 5/5 all tiers; scorer v4)
 docs/baselines/EVAL_POSTS2_COMPARISON_RECEIPT_2026-07-14.md.
 
 ## CP1 — Deployment validation (Phase A) ⏳ ACTIVE (executor)
+**2026-07-14 g1 FINDING:** digital PDFs bypass structure parsing
+(_parse_pdf_fast_text) → flat tier_c/ocr_ast parents, empty heading_path.
+CP1-D1 fix directive issued (COORDINATION #2). Also rewrites ecom evidence:
+heading poverty = pipeline artifact → ecom exits CP2, gets
+fix→reingest→single-enrichment path (owner §8 decision with corrected facts).
 Consumes: docs/REBATCH_RUNBOOK_2026-07-14.md §Phase A.
 Exit gate: g1–g10 green with fixture ground-truth assertions; senior verifies
 receipts. Authority: senior AUTO. Failure = STOP + diagnose, no gate weakening.
 
-## CP2 — Corpus enrichment (Phase B) — next
+## CP2 — Corpus enrichment (Phase B, MARK-ONLY per g1 finding) — next
 Consumes: runbook §Phase B; latent_concept_policy.v1 (interim-v1 capture).
 mark full regen → ecom clean-docs → lexicons → cards LAST → readiness →
 after-eval vs today's baselines. Exit gate: coverage censuses + reconciliation
