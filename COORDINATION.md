@@ -1373,3 +1373,58 @@ P0.8's last box — typed acceptance rejects malformed at the boundary for new
 writes; existing green suites must stay green (run the summary/writer suites
 in the receipt). No semantic writes activate. This is exactly what T4 digests
 and T8 claims will persist through — build it once, correctly.
+
+## [2026-07-14T13:21:17Z] EXECUTOR → SENIOR :: RECEIPT
+T3.2 canonical deployment gate GREEN. The required backend + offline-ingest
+overlay command rebuilt and recreated both shared-image containers with true
+EXIT=0 (`/tmp/t32_deploy.log`); backend and ingest-worker are both healthy.
+The future semantic collections remain empty/dark and no semantic write was
+activated. Proceeding to the required runtime/drift verifier before applying
+the already parser-proven warn-first validators.
+
+## [2026-07-14T13:21:48Z] EXECUTOR → SENIOR :: RECEIPT
+T3.2 runtime gate GREEN. `scripts/verify_backend_runtime.sh` against the
+recreated backend reports live embedder reachable at dimension 1024 and true
+EXIT=0 (`/tmp/t32_runtime_verify.log`). No two-container wiring drift was
+observed. Proceeding to live warn-first validator application and exact
+server-side readback under your 13:06 scope ruling.
+
+## [2026-07-14T13:22:08Z] EXECUTOR → SENIOR :: RECEIPT
+T3.2 validator-apply gate GREEN. The eight validator definitions applied with
+`validationAction=warn`, true EXIT=0 (`/tmp/t32_validator_apply.log`): five
+existing collections were modified and the three authorized future
+collections were created. I am now checking exact server options/schema
+equality and proving all three new collections still contain zero documents.
+
+## [2026-07-14T13:22:54Z] EXECUTOR → SENIOR :: RECEIPT
+T3.2 exact validator readback GREEN, true EXIT=0
+(`/tmp/t32_validator_readback.log`). All eight collections report
+`validationAction=warn`, `validationLevel=moderate`, and byte-structure exact
+validator equality with the checked-in definitions. Existing counts are
+documents=696, parent_chunks=142092, ghost_b=264074, lexicon=378366,
+summary_tree=45397. `semantic_artifacts`, `projection_manifests`, and
+`projection_outbox` each read back documents=0. No semantic data was written.
+
+## [2026-07-14T13:24:47Z] EXECUTOR → SENIOR :: RECEIPT
+T3.2 deployed-source parity gate GREEN, true EXIT=0
+(`/tmp/t32_container_parity.log`). SHA-256 for all seven changed runtime files
+matches host=backend=ingest-worker exactly; both containers import
+`ArtifactEnvelope`, `ParentSummaryWrite`, and the central writer successfully.
+This closes the two-container drift concern for the T3.2 runtime slice.
+
+## [2026-07-14T13:26:17Z] EXECUTOR → SENIOR :: RECEIPT
+T3.2 COMPLETE pending commit/push. Implementation: strict typed shared
+envelope with frozen canonical schema/body/revision goldens; three closed
+future-collection validators; and the central typed summary writer used by
+generation, ingestion backfill, valid repair, and tree-heal. Test gates:
+summary/writer 59 passed, envelope+validator/projection 52 passed, combined
+focused 170 passed, canonical built-image 170 passed; every clean gate true
+EXIT=0. Live dry run found zero violations in bounded samples of all five
+existing families and zero rows in the three future families. Apply/readback,
+canonical deploy, runtime verifier, and two-container source parity all
+EXIT=0. Initial failed attempts were harness-only (tree fake missing
+`bulk_write`; disposable test env missing required config) and both received
+clean full retries. No retrieval/vector/graph/provider operation or semantic
+body write occurred. Checklist closes only P0.8's typed-writer box and the
+P2.5b strict-envelope implementation box; T3.3/T3.4 remain deferred to A4.
+PROGRESS now points to A2/T4.1.

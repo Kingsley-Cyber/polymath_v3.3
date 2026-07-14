@@ -15,6 +15,7 @@ Composition:
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -321,3 +322,63 @@ class ParentSummaryRecord(BaseModel):
         if not value.strip():
             raise ValueError("summary must contain non-whitespace text")
         return value
+
+
+class ParentSummaryWrite(BaseModel):
+    """Typed command accepted by the Mongo parent-summary writer.
+
+    Identity and source text are write-time context, not fields in the
+    summary artifact itself. ``source_text`` is excluded from serialization;
+    it exists only so the boundary can prove every temporal offset against the
+    durable parent text before constructing a Mongo update.
+    """
+
+    model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=False)
+
+    parent_id: str = Field(min_length=1)
+    doc_id: str = Field(min_length=1)
+    corpus_id: str = Field(min_length=1)
+    record: ParentSummaryRecord
+    summary_updated_at: datetime
+    source_text: Optional[str] = Field(default=None, exclude=True)
+
+    @model_validator(mode="after")
+    def validate_source_spans(self) -> "ParentSummaryWrite":
+        expressions = self.record.time_expressions
+        if not expressions:
+            return self
+        if self.source_text is None:
+            raise ValueError(
+                "source_text is required when a summary carries time expressions"
+            )
+        for expression in expressions:
+            start = expression.char_start
+            end = expression.char_end
+            if start is None or end is None:
+                raise ValueError(
+                    "time expression offsets are required at the Mongo writer "
+                    f"boundary: {expression.text!r}"
+                )
+            if not (0 <= start < end <= len(self.source_text)):
+                raise ValueError(
+                    "time expression offsets are outside parent text bounds: "
+                    f"{expression.text!r} [{start}:{end}] "
+                    f"len={len(self.source_text)}"
+                )
+            if self.source_text[start:end] != expression.text:
+                raise ValueError(
+                    "time expression offsets do not select the verbatim parent "
+                    f"text: {expression.text!r} != "
+                    f"{self.source_text[start:end]!r}"
+                )
+        return self
+
+    def mongo_update_fields(self) -> dict:
+        """Return only validated artifact fields plus the write timestamp."""
+
+        return {
+            # Include explicit None values so regeneration clears stale fields
+            # from a prior summary revision instead of silently retaining them.
+            **self.record.model_dump(mode="python"),
+            "summary_updated_at": self.summary_updated_at,
+        }

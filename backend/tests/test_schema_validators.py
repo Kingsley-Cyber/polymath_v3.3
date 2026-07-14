@@ -1,13 +1,16 @@
-"""P0.8 schema-validator tests: constants are permissive/structurally sound
-and apply_validators drives collMod (with create fallback) against a fake db.
-Never touches a live store."""
+"""P0.8 schema-validator tests.
+
+Legacy constants stay permissive; dark envelope-era collections are closed
+contracts under warn-first application. Fake-db tests never touch a live store.
+"""
 
 import pytest
 
 from services.storage import schema_validators as sv
 
-# The identity spine per collection — the ONLY fields a validator may require.
-IDENTITY_SPINE = {
+# The identity spine for pre-envelope collections — the ONLY fields their
+# permissive legacy validators may require.
+LEGACY_IDENTITY_SPINE = {
     "documents": {"doc_id", "corpus_id"},
     "parent_chunks": {"parent_id", "doc_id", "corpus_id"},
     "ghost_b_extractions": {"corpus_id", "doc_id"},
@@ -17,36 +20,43 @@ IDENTITY_SPINE = {
 
 
 # ---------------------------------------------------------------------------
-# Structural soundness of the five $jsonSchema constants
+# Structural soundness of legacy + envelope-era $jsonSchema constants
 # ---------------------------------------------------------------------------
 
 
-def test_validators_cover_exactly_the_five_durable_collections():
-    assert set(sv.VALIDATORS) == set(IDENTITY_SPINE)
+ENVELOPE_COLLECTIONS = {
+    "semantic_artifacts",
+    "projection_manifests",
+    "projection_outbox",
+}
 
 
-@pytest.mark.parametrize("collection", sorted(IDENTITY_SPINE))
+def test_validators_cover_legacy_and_dark_envelope_collections():
+    assert set(sv.VALIDATORS) == set(LEGACY_IDENTITY_SPINE) | ENVELOPE_COLLECTIONS
+
+
+@pytest.mark.parametrize("collection", sorted(LEGACY_IDENTITY_SPINE))
 def test_schema_shape_and_required_is_subset_of_identity_spine(collection):
     schema = sv.VALIDATORS[collection]
     assert set(schema) == {"$jsonSchema"}
     body = schema["$jsonSchema"]
     assert body["bsonType"] == "object"
     required = set(body["required"])
-    assert required <= IDENTITY_SPINE[collection], (
+    assert required <= LEGACY_IDENTITY_SPINE[collection], (
         f"{collection} requires non-identity fields: "
-        f"{required - IDENTITY_SPINE[collection]}"
+        f"{required - LEGACY_IDENTITY_SPINE[collection]}"
     )
     # Every required field must also be described in properties.
     assert required <= set(body["properties"])
 
 
-@pytest.mark.parametrize("collection", sorted(IDENTITY_SPINE))
+@pytest.mark.parametrize("collection", sorted(LEGACY_IDENTITY_SPINE))
 def test_additional_properties_stays_allowed(collection):
     body = sv.VALIDATORS[collection]["$jsonSchema"]
     assert body.get("additionalProperties") is not False
 
 
-@pytest.mark.parametrize("collection", sorted(IDENTITY_SPINE))
+@pytest.mark.parametrize("collection", sorted(LEGACY_IDENTITY_SPINE))
 def test_optional_type_checks_tolerate_null(collection):
     """Non-required type-checked fields must accept null (permissive unions)."""
     body = sv.VALIDATORS[collection]["$jsonSchema"]
@@ -63,6 +73,45 @@ def test_optional_type_checks_tolerate_null(collection):
 def test_summary_tree_node_type_enum():
     props = sv.SUMMARY_TREE_SCHEMA["$jsonSchema"]["properties"]
     assert set(props["node_type"]["enum"]) == {"rollup", "section", "document"}
+
+
+@pytest.mark.parametrize("collection", sorted(ENVELOPE_COLLECTIONS))
+def test_new_envelope_collection_contracts_are_closed(collection):
+    body = sv.VALIDATORS[collection]["$jsonSchema"]
+    assert body["additionalProperties"] is False
+    assert set(body["required"]) <= set(body["properties"])
+
+
+def test_semantic_artifact_validator_requires_the_literal_envelope():
+    body = sv.SEMANTIC_ARTIFACTS_SCHEMA["$jsonSchema"]
+    assert body["properties"]["envelope_version"] == {
+        "enum": ["polymath.artifact_envelope.v1"]
+    }
+    assert {
+        "ownership",
+        "integrity",
+        "provenance",
+        "validation",
+        "lifecycle",
+        "body",
+    } <= set(body["required"])
+    assert body["properties"]["artifact_revision_id"]["pattern"].startswith(
+        "^rev:"
+    )
+
+
+def test_projection_validator_versions_match_typed_contracts():
+    manifest = sv.PROJECTION_MANIFESTS_SCHEMA["$jsonSchema"]["properties"]
+    outbox = sv.PROJECTION_OUTBOX_SCHEMA["$jsonSchema"]["properties"]
+    assert manifest["schema_version"] == {"enum": ["projection_manifest.v1"]}
+    assert outbox["schema_version"] == {"enum": ["projection_outbox.v1"]}
+    assert set(outbox["state"]["enum"]) == {
+        "pending",
+        "in_flight",
+        "applied",
+        "failed",
+        "dead",
+    }
 
 
 # ---------------------------------------------------------------------------

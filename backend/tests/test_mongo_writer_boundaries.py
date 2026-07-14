@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
 
+from models.contracts import ParentSummaryRecord, ParentSummaryWrite
 from services.storage import mongo_writer, schema_validators
 
 
@@ -216,6 +218,76 @@ async def test_upsert_parent_chunks_allows_structural_row_without_summary():
     await mongo_writer.upsert_parent_chunks(db, [row])
 
     assert len(db.parent_chunks.bulk_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_summary_writer_rejects_untyped_batch_before_bulk_write():
+    db = _FakeDb()
+
+    with pytest.raises(TypeError, match="only ParentSummaryWrite"):
+        await mongo_writer.write_parent_summaries(
+            db,
+            [{"parent_id": "parent-1"}],  # type: ignore[list-item]
+        )
+
+    assert db.parent_chunks.bulk_calls == []
+
+
+@pytest.mark.asyncio
+async def test_summary_writer_accepts_typed_command_and_serializes_record():
+    db = _FakeDb()
+    updated_at = datetime(2026, 7, 14, 12, 0, 0)
+    write = ParentSummaryWrite(
+        parent_id="parent-1",
+        doc_id="doc-1",
+        corpus_id="corpus-1",
+        record=ParentSummaryRecord(
+            summary="A typed summary.",
+            temporal_class="unknown",
+        ),
+        summary_updated_at=updated_at,
+        source_text="Source parent text.",
+    )
+
+    await mongo_writer.write_parent_summaries(db, [write])
+
+    assert len(db.parent_chunks.bulk_calls) == 1
+    operations, ordered = db.parent_chunks.bulk_calls[0]
+    assert ordered is False
+    assert len(operations) == 1
+    operation = operations[0]
+    assert operation._filter == {
+        "parent_id": "parent-1",
+        "doc_id": "doc-1",
+        "corpus_id": "corpus-1",
+    }
+    assert operation._doc["$set"]["summary"] == "A typed summary."
+    assert operation._doc["$set"]["summary_updated_at"] == updated_at
+    assert "source_text" not in operation._doc["$set"]
+
+
+def test_typed_summary_write_requires_exact_temporal_source_roundtrip():
+    record = ParentSummaryRecord(
+        summary="The policy changed in March 2024.",
+        time_expressions=[
+            {
+                "text": "March 2024",
+                "role": "revision_time",
+                "char_start": 4,
+                "char_end": 14,
+            }
+        ],
+    )
+
+    with pytest.raises(ValidationError, match="verbatim parent text"):
+        ParentSummaryWrite(
+            parent_id="parent-1",
+            doc_id="doc-1",
+            corpus_id="corpus-1",
+            record=record,
+            summary_updated_at=datetime.utcnow(),
+            source_text="The wrong source text.",
+        )
 
 
 def test_parent_schema_mirrors_nested_summary_capture_bounds():

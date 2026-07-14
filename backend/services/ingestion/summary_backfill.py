@@ -35,6 +35,7 @@ import os
 from datetime import datetime, timezone
 
 from config import get_settings
+from models.contracts import ParentSummaryRecord, ParentSummaryWrite
 from services.ingestion.summary_semantics import (
     PARENT_SUMMARY_SCHEMA_VERSION,
     looks_like_raw_json_text,
@@ -173,20 +174,10 @@ async def child_context_for_rows(
 _child_context_for_rows = child_context_for_rows
 
 
-def summary_result_fields(result, *, updated_at: datetime) -> dict:
-    """Return the complete canonical parent-summary persistence payload.
+def summary_record_from_result(result) -> ParentSummaryRecord:
+    """Translate one ``SummaryResult`` into the strict artifact model."""
 
-    P0.8 typed-model acceptance at the Mongo summary-writer boundary: the
-    payload is built THROUGH models.contracts.ParentSummaryRecord, so every
-    summary generate/backfill writer (this module's --generate loop and
-    IngestionService.backfill_parent_summaries) persists only a validated
-    typed shape — a malformed artifact raises pydantic.ValidationError loudly
-    instead of landing in ``parent_chunks`` as durable junk. Existing callers
-    keep passing SummaryResult; no call-site change required.
-    """
-    from models.contracts import ParentSummaryRecord
-
-    record = ParentSummaryRecord(
+    return ParentSummaryRecord(
         summary=result.summary,
         domain=getattr(result, "domain", None),
         topics=getattr(result, "topics", None),
@@ -216,7 +207,37 @@ def summary_result_fields(result, *, updated_at: datetime) -> dict:
         quality_flags=getattr(result, "quality_flags", None),
         retrieval_text=getattr(result, "retrieval_text", None),
     )
-    return {**record.model_dump(), "summary_updated_at": updated_at}
+
+
+def summary_write_from_result(
+    result,
+    *,
+    source_text: str | None,
+    updated_at: datetime,
+) -> ParentSummaryWrite:
+    """Build the only command accepted by the Mongo summary writer."""
+
+    return ParentSummaryWrite(
+        parent_id=result.parent_id,
+        doc_id=result.doc_id,
+        corpus_id=result.corpus_id,
+        record=summary_record_from_result(result),
+        summary_updated_at=updated_at,
+        source_text=source_text,
+    )
+
+
+def summary_result_fields(write: ParentSummaryWrite) -> dict:
+    """Serialize a typed write command for diagnostics and compatibility.
+
+    Production persistence uses ``mongo_writer.write_parent_summaries``.
+    This helper intentionally rejects raw ``SummaryResult``/dict inputs so no
+    caller can bypass typed-model acceptance while constructing ``$set``.
+    """
+
+    if not isinstance(write, ParentSummaryWrite):
+        raise TypeError("summary_result_fields requires ParentSummaryWrite")
+    return write.mongo_update_fields()
 
 
 def summary_index_text(row: dict) -> str:
@@ -396,18 +417,19 @@ async def generate(
                 continue
             consecutive_empty = 0
             # persist
-            from pymongo import UpdateOne
+            from services.storage.mongo_writer import write_parent_summaries
 
             now = datetime.now(timezone.utc)
-            ops = [
-                UpdateOne(
-                    {"parent_id": r.parent_id, "corpus_id": corpus_id},
-                    {"$set": summary_result_fields(r, updated_at=now)},
+            source_text_by_parent = {task.parent_id: task.text for task in tasks}
+            writes = [
+                summary_write_from_result(
+                    result,
+                    source_text=source_text_by_parent.get(result.parent_id),
+                    updated_at=now,
                 )
-                for r in results
+                for result in results
             ]
-            if ops:
-                await db["parent_chunks"].bulk_write(ops, ordered=False)
+            await write_parent_summaries(db, writes)
             made += len(results)
             cov = len(results) / len(tasks)
             print(
@@ -453,6 +475,7 @@ async def repair_existing(
     qc = _qdrant() if reindex and apply else None
     scanned = changed = repaired = quarantined = indexed = raw_json = 0
     ops: list[UpdateOne] = []
+    writes: list[ParentSummaryWrite] = []
     reindex_buf: list[dict] = []
     tracked = [
         "summary_id",
@@ -481,12 +504,17 @@ async def repair_existing(
     ]
 
     async def flush_updates() -> None:
-        nonlocal ops
-        if not ops:
+        nonlocal ops, writes
+        if not ops and not writes:
             return
         if apply:
-            await db["parent_chunks"].bulk_write(ops, ordered=False)
+            from services.storage.mongo_writer import write_parent_summaries
+
+            await write_parent_summaries(db, writes)
+            if ops:
+                await db["parent_chunks"].bulk_write(ops, ordered=False)
         ops = []
+        writes = []
 
     async def flush_reindex() -> None:
         nonlocal indexed, reindex_buf
@@ -528,24 +556,63 @@ async def repair_existing(
             }
             if diff:
                 changed += 1
-                diff["summary_repaired_at"] = now
-                if fixed.get("validation_status") == "quarantined":
+                if fixed.get("validation_status") == "valid":
+                    payload = {
+                        name: fixed.get(name, row.get(name))
+                        for name in ParentSummaryRecord.model_fields
+                    }
+                    payload["latent_concepts"] = payload.get("latent_concepts") or []
+                    payload["temporal_class"] = (
+                        payload.get("temporal_class") or "unknown"
+                    )
+                    payload["time_expressions"] = (
+                        payload.get("time_expressions") or []
+                    )
+                    writes.append(
+                        ParentSummaryWrite(
+                            parent_id=str(row.get("parent_id") or ""),
+                            doc_id=str(row.get("doc_id") or ""),
+                            corpus_id=str(row.get("corpus_id") or ""),
+                            record=ParentSummaryRecord.model_validate(payload),
+                            summary_updated_at=now,
+                            source_text=str(
+                                row.get("text") or row.get("parent_text") or ""
+                            ),
+                        )
+                    )
+                    # Repair bookkeeping is lifecycle metadata outside the
+                    # typed summary body and is persisted separately.
+                    ops.append(
+                        UpdateOne(
+                            {
+                                "corpus_id": row.get("corpus_id"),
+                                "doc_id": row.get("doc_id"),
+                                "parent_id": row.get("parent_id"),
+                            },
+                            {"$set": {"summary_repaired_at": now}},
+                        )
+                    )
+                else:
+                    # Quarantine never accepts a new summary body. It only
+                    # records rejection/lifecycle fields so the invalid legacy
+                    # payload cannot masquerade as a typed accepted write.
+                    diff["summary_repaired_at"] = now
                     diff["summary_quarantine_reason"] = fixed.get("quality_flags") or []
                     if before_raw:
                         diff["summary_quarantine_raw"] = row.get("summary")
-                ops.append(
-                    UpdateOne(
-                        {
-                            "corpus_id": row.get("corpus_id"),
-                            "doc_id": row.get("doc_id"),
-                            "parent_id": row.get("parent_id"),
-                        },
-                        {"$set": diff},
+                    ops.append(
+                        UpdateOne(
+                            {
+                                "corpus_id": row.get("corpus_id"),
+                                "doc_id": row.get("doc_id"),
+                                "parent_id": row.get("parent_id"),
+                            },
+                            {"$set": diff},
+                        )
                     )
-                )
             if reindex and apply and fixed.get("validation_status") == "valid":
                 reindex_buf.append({**row, **fixed})
-            if len(ops) >= batch:
+            if len(ops) + len(writes) >= batch:
                 await flush_updates()
             if len(reindex_buf) >= min(batch, 256):
                 await flush_reindex()

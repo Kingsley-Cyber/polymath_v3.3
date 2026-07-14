@@ -19,6 +19,7 @@ import asyncio
 import json
 import re
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Sequence
 
 from services.ingestion.section_classifier import should_summarize_parent
@@ -806,6 +807,9 @@ async def build_and_store_tree(
                     "entity_hints": artifact["entity_hints"] or None,
                     "retrieval_uses": artifact["retrieval_uses"] or None,
                     "abstraction_level": artifact["abstraction_level"],
+                    "latent_concepts": sem.get("latent_concepts") or [],
+                    "temporal_class": sem.get("temporal_class") or "unknown",
+                    "time_expressions": sem.get("time_expressions") or [],
                     "source_child_ids": artifact["source_child_ids"]
                     or source_child_ids,
                     "summary_id": artifact["summary_id"],
@@ -826,10 +830,28 @@ async def build_and_store_tree(
                 r["key_terms"] = update_fields["key_terms"]
                 r["mechanisms"] = update_fields["mechanisms"]
                 r["concept_tags"] = update_fields["concept_tags"]
-                await db["parent_chunks"].update_one(
-                    {"corpus_id": corpus_id, "parent_id": r["parent_id"]},
-                    {"$set": update_fields},
+                from models.contracts import ParentSummaryRecord, ParentSummaryWrite
+                from services.storage.mongo_writer import write_parent_summaries
+
+                topic_key = update_fields.pop("topic_key")
+                write = ParentSummaryWrite(
+                    parent_id=str(r["parent_id"]),
+                    doc_id=doc_id,
+                    corpus_id=corpus_id,
+                    record=ParentSummaryRecord.model_validate(update_fields),
+                    summary_updated_at=datetime.now(timezone.utc),
+                    source_text=str(r.get("text") or r.get("parent_text") or ""),
                 )
+                await write_parent_summaries(db, [write])
+                if topic_key:
+                    await db["parent_chunks"].update_one(
+                        {
+                            "corpus_id": corpus_id,
+                            "doc_id": doc_id,
+                            "parent_id": r["parent_id"],
+                        },
+                        {"$set": {"topic_key": topic_key}},
+                    )
                 healed += 1
 
     parents = [

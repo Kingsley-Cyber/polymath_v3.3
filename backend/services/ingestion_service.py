@@ -3805,8 +3805,9 @@ class IngestionService:
                         break
                     from services.ingestion.summary_backfill import (
                         child_context_for_rows,
-                        summary_result_fields,
+                        summary_write_from_result,
                     )
+                    from services.storage.mongo_writer import write_parent_summaries
 
                     child_context = await child_context_for_rows(
                         self._db,
@@ -3854,20 +3855,21 @@ class IngestionService:
                         break
 
                     now = datetime.utcnow()
-                    await self._db["parent_chunks"].bulk_write(
+                    source_text_by_parent = {
+                        task.parent_id: task.text for task in tasks
+                    }
+                    await write_parent_summaries(
+                        self._db,
                         [
-                            UpdateOne(
-                                {"parent_id": r.parent_id, "corpus_id": corpus_id},
-                                {
-                                    "$set": summary_result_fields(
-                                        r,
-                                        updated_at=now,
-                                    )
-                                },
+                            summary_write_from_result(
+                                result,
+                                source_text=source_text_by_parent.get(
+                                    result.parent_id
+                                ),
+                                updated_at=now,
                             )
-                            for r in results
+                            for result in results
                         ],
-                        ordered=False,
                     )
                     generated_parent_ids.extend(str(r.parent_id) for r in results)
                     generated += len(results)

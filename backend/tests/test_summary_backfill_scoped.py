@@ -4,7 +4,11 @@ import pytest
 
 from scripts.polymath_summary_backfill_scoped import _summary_plan
 from services.ghost_a import SummaryResult
-from services.ingestion.summary_backfill import summary_index_text, summary_result_fields
+from services.ingestion.summary_backfill import (
+    summary_index_text,
+    summary_result_fields,
+    summary_write_from_result,
+)
 from services.ingestion.summary_semantics import repair_parent_summary_row
 
 
@@ -153,7 +157,12 @@ def test_summary_result_fields_preserves_canonical_artifact_metadata():
         retrieval_text="A validated provider summary.",
     )
 
-    fields = summary_result_fields(result, updated_at=updated_at)
+    write = summary_write_from_result(
+        result,
+        source_text="Source parent text.",
+        updated_at=updated_at,
+    )
+    fields = summary_result_fields(write)
 
     assert fields["summary_model"] == "openai/tencent/Hy3"
     assert fields["schema_version"] == "parent_summary.v1"

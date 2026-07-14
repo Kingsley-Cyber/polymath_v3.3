@@ -14,7 +14,10 @@ from pydantic import ValidationError
 
 from models.contracts import ParentSummaryRecord
 from services.ghost_a import parse_tagged_summary_response
-from services.ingestion.summary_backfill import summary_result_fields
+from services.ingestion.summary_backfill import (
+    summary_result_fields,
+    summary_write_from_result,
+)
 from services.ingestion.summary_semantics import (
     MAX_TIME_EXPRESSIONS,
     SEMANTIC_SUMMARY_INSTRUCTION,
@@ -386,15 +389,20 @@ def test_repair_preserves_latent_aliases_and_temporal_capture():
 
 
 def test_summary_result_fields_normalizes_missing_temporal_values():
-    fields = summary_result_fields(
+    write = summary_write_from_result(
         SimpleNamespace(
+            parent_id="parent-1",
+            doc_id="doc-1",
+            corpus_id="corpus-1",
             summary="A typed persistence summary.",
             latent_concepts=None,
             temporal_class=None,
             time_expressions=None,
         ),
+        source_text="Source parent text.",
         updated_at=datetime.now(timezone.utc),
     )
+    fields = summary_result_fields(write)
 
     assert fields["latent_concepts"] == []
     assert fields["temporal_class"] == "unknown"

@@ -189,6 +189,11 @@ class _FakeCollection:
                 row.update(update.get("$set", {}))
                 break
 
+    async def bulk_write(self, operations, *, ordered):
+        assert ordered is False
+        for operation in operations:
+            await self.update_one(operation._filter, operation._doc)
+
     async def replace_one(self, query, record, upsert=False):
         self.replacements.append((query, record, upsert))
 

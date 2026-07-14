@@ -156,9 +156,11 @@ Tracked work added by this audit:
 - [x] Add additive Mongo JSON-schema validators (warn-first, then enforce)
   for documents, parent_chunks, ghost_b_extractions, corpus_lexicon, and
   summary_tree. *(merged; validators applied warn-mode live 2026-07-13)*
-- [ ] Enforce typed-model acceptance at the Mongo writer boundary (close the
+- [x] Enforce typed-model acceptance at the Mongo writer boundary (close the
   B0 "writers accept ONLY typed models" gap) without breaking existing
-  callers.
+  callers. *(T3.2: `ParentSummaryWrite` is now the only accepted command at
+  the central summary writer; generation, backfill, valid repair, and
+  tree-heal paths use it; focused/deployed-image suites 170 passed.)*
 - [x] Normalize extraction `schema_version` (v1/v2/missing) and backfill
   `extractor` engine identity where derivable from provenance.
   *(merged; validators applied warn-mode live 2026-07-13)*
@@ -1289,9 +1291,11 @@ candidate compiler. The full shared envelope, all hash namespaces, legacy
 adapters, Mongo validators/indexes, outbox, manifests, and UGO integration are
 still unchecked work below.
 
-- [ ] Implement one strict `polymath.artifact_envelope.v1` around linked typed
+- [x] Implement one strict `polymath.artifact_envelope.v1` around linked typed
   artifacts; do not build one giant parent JSON or a provider-specific truth
-  schema.
+  schema. *(T3.2: frozen strict envelope/nested contract, typed body,
+  namespace hashes, immutable revision recipe, explicit knowledge status,
+  and byte-exact cross-process goldens implemented.)*
 - [x] Implement one canonical JSON serializer with explicit set-valued fields,
   recursive key ordering, UTC timestamp rules, finite JSON numbers, and no
   implicit `default=str` coercion. *(2026-07-14: models/hash_taxonomy.py
@@ -2115,6 +2119,63 @@ A corpus is strict-ready only when:
   acceptance closure.
 - Checklist boxes closed: none; mission T3.4 reserves the P2.5b acceptance
   scratch until the UGO canary proves behavioral parity.
+
+### 2026-07-14 - T3.2 envelope validators and typed summary writer boundary
+
+- Commit: this commit on `claude-continuation-20260713`.
+- Owner: Codex sole executor under `CODEX_MISSION.md`; Claude confirmed the
+  exact (envelope + validators + writer) scope in `COORDINATION.md` at
+  2026-07-14T13:06:18Z.
+- Corpus/data scope: additive contract deployment against the live Polymath
+  Mongo database. No corpus artifact was regenerated, no retrieval path or
+  vector changed, and no semantic artifact body was written.
+- Code changes: added the strict shared `polymath.artifact_envelope.v1` with
+  typed bodies, canonical schema/body hashes, immutable revision identity,
+  explicit knowledge status, and lifecycle/validation outside body identity.
+  Added `ParentSummaryWrite` plus one central writer used by summary
+  generation, ingestion backfill, valid deterministic repair, and tree heal.
+  Added closed warn-first validators for `semantic_artifacts`,
+  `projection_manifests`, and `projection_outbox` while retaining the five
+  existing validators.
+- Durable migration/backfill: the eight definitions were attached with
+  `validationAction=warn` / `validationLevel=moderate`. The three future
+  collections were created empty/dark; no document migration or semantic
+  write occurred.
+- Before metrics: five legacy validators existed; no executable shared
+  envelope or future-collection validators existed; summary writers could
+  independently construct raw Mongo update dictionaries.
+- After metrics: exact live readback matches all eight checked-in validator
+  structures. Existing counts: documents=696, parent_chunks=142092,
+  ghost_b_extractions=264074, corpus_lexicon=378366, summary_tree=45397.
+  New counts: semantic_artifacts=0, projection_manifests=0,
+  projection_outbox=0.
+- Tests by tier: summary/writer focused suite 59 passed (`EXIT=0`); envelope,
+  validator, manifest, and outbox suite 52 passed (`EXIT=0`); combined focused
+  suite 170 passed (`EXIT=0`); the same 170 passed in a disposable canonical
+  built-image container (`EXIT=0`). Identity tests include exact schema/body/
+  revision goldens and fresh-process replay. An initial writer test attempt
+  exposed an incomplete fake lacking `bulk_write`, and the first disposable
+  container attempt lacked required test-only config variables; both harness
+  defects were corrected and clean full retries are the reported gates.
+- Cross-corpus test: read-only live dry run sampled up to 2,000 rows from each
+  existing collection with zero proposed-schema violations; the three new
+  collections were empty. This contract task does not alter corpus-scoped
+  retrieval, so no retrieval A/B applies.
+- Failure/rollback test: malformed/untyped summary commands fail before any
+  bulk operation; invalid hashes, revision reuse, bare-dict bodies, missing
+  knowledge status, naïve datetimes, and extra fields fail closed. Validators
+  are warn-first and can be removed/replaced by `collMod`; application and
+  exact readback both returned true `EXIT=0`.
+- Deployment image/health: canonical compose overlays rebuilt/recreated the
+  backend and ingest worker (`EXIT=0`); runtime verifier reports live embedding
+  dimension 1024 (`EXIT=0`). SHA-256 parity for all seven changed runtime
+  files is exact across host/backend/worker, and both containers import the
+  new boundary types (`EXIT=0`).
+- Remaining risks: the three semantic collections remain deliberately dark.
+  Outbox drain/activation and UGO annotate-only behavioral parity remain T3.3
+  and T3.4 work at Track A4; no acceptance claim is made for those boxes.
+- Checklist boxes closed: P0.8 typed-model acceptance and the P2.5b strict
+  shared-envelope implementation item only.
 
 ## Implementation Log Template
 

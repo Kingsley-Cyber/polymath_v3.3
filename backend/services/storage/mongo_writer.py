@@ -16,7 +16,7 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from pymongo import ReplaceOne, UpdateOne
 from pymongo.errors import DuplicateKeyError
 
-from models.contracts import ParentSummaryRecord
+from models.contracts import ParentSummaryRecord, ParentSummaryWrite
 from services.ingestion.bibliographic import (
     BIBLIO_DOC_FIELDS,
     merge_persisted_bibliographic,
@@ -64,34 +64,20 @@ def _validate_parent_summary_row(parent: dict) -> dict:
         payload["temporal_class"] = "unknown"
     if payload.get("time_expressions") is None:
         payload["time_expressions"] = []
-    normalized = ParentSummaryRecord.model_validate(payload).model_dump(
-        mode="python",
-        exclude_none=True,
-    )
+    record = ParentSummaryRecord.model_validate(payload)
 
     source_text = row.get("text")
     if source_text is None:
         source_text = row.get("parent_text")
-    if isinstance(source_text, str):
-        for expression in normalized.get("time_expressions") or []:
-            start = expression.get("char_start")
-            end = expression.get("char_end")
-            literal = expression["text"]
-            if start is None or end is None:
-                raise ValueError(
-                    "time expression offsets are required when parent text "
-                    f"is available: {literal!r}"
-                )
-            if not (0 <= start < end <= len(source_text)):
-                raise ValueError(
-                    "time expression offsets are outside parent text bounds: "
-                    f"{literal!r} [{start}:{end}] len={len(source_text)}"
-                )
-            if source_text[start:end] != literal:
-                raise ValueError(
-                    "time expression offsets do not select the verbatim "
-                    f"parent text: {literal!r} != {source_text[start:end]!r}"
-                )
+    write = ParentSummaryWrite(
+        parent_id=row["parent_id"],
+        doc_id=row["doc_id"],
+        corpus_id=row["corpus_id"],
+        record=record,
+        summary_updated_at=row.get("summary_updated_at") or datetime.utcnow(),
+        source_text=source_text if isinstance(source_text, str) else None,
+    )
+    normalized = write.record.model_dump(mode="python", exclude_none=True)
 
     # Replace every contract-owned field with its validated representation.
     # This prevents a legacy/null value from surviving next to normalized
@@ -206,6 +192,44 @@ async def upsert_parent_chunks(
                 upsert=True,
             )
         )
+    await db["parent_chunks"].bulk_write(ops, ordered=False)
+
+
+async def write_parent_summaries(
+    db: AsyncIOMotorDatabase,
+    writes: list[ParentSummaryWrite],
+) -> None:
+    """Persist parent-summary updates through typed commands only.
+
+    The runtime ``isinstance`` gate is intentional: callers may not pass a
+    dict that merely resembles a validated artifact. The complete batch is
+    type-checked before any operation is constructed, so one untyped/malformed
+    command cannot produce a partial write.
+    """
+
+    if not writes:
+        return
+    invalid = [
+        type(item).__name__
+        for item in writes
+        if not isinstance(item, ParentSummaryWrite)
+    ]
+    if invalid:
+        raise TypeError(
+            "write_parent_summaries accepts only ParentSummaryWrite models; "
+            f"received {invalid}"
+        )
+    ops = [
+        UpdateOne(
+            {
+                "parent_id": write.parent_id,
+                "doc_id": write.doc_id,
+                "corpus_id": write.corpus_id,
+            },
+            {"$set": write.mongo_update_fields()},
+        )
+        for write in writes
+    ]
     await db["parent_chunks"].bulk_write(ops, ordered=False)
 
 
