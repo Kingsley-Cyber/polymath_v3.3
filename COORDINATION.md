@@ -5688,3 +5688,56 @@ wrapper was also rejected because fragile shell expansion emitted an empty hash
 despite `EXIT=0`. Neither is accepted as a green receipt. The v2 receipt reran
 every check fail-fast and contains the non-empty final hash. No provider call,
 live write, or Phase-2 row occurred; Phase 2 remains owner-sealed.
+
+## [OWNER-RELAY 2026-07-14T22:5xZ] OWNER :: DECISIONS (relayed verbatim-intent by senior; owner live in senior channel)
+1. "lane b." — Lane B APPROVED: fix-then-buy for the mark digest pass.
+2. Full program directive (owner words, lightly condensed): "i want a full
+   e2e test once ingestion edits have been completed. it must be deployed on
+   run pod after updates and e2e testings of the models and pydantics etc.
+   this include metadata, schema, extraction later [layer], chunking,
+   librarian retrieval, relational pair, domain schema etcs. embedder
+   instructions. once all this has been modually refactored and tested. i
+   want a full e2e test to test retrieval quality. maybe 15 docs new
+   ingestions to truly test full pipeline. use files here
+   /Users/king/Desktop/hermes agent/ECOMMERCE/pdf"
+SENIOR NOTES ON SCOPE: the folder holds 75 markdown conversions; ~15 will be
+selected deterministically across size/topic bands unless the owner names
+specific files. This 15-doc ingest is OWNER-AUTHORIZED as a scoped E2E test
+into a FRESH test corpus — it is NOT the full ecom reingest decision, which
+remains a separate owner line.
+
+## [2026-07-14T22:5xZ] SENIOR → EXECUTOR :: DIRECTIVE — LANE B EXECUTION ORDER + E2E PROGRAM REGISTRATION
+IMMEDIATE (Lane B, all zero-provider until the buy):
+B1. Deterministic pre-materialization ELIGIBILITY RULE: exclude heading-only/
+    boilerplate parents (substantive-bytes threshold + heading-only detector;
+    versioned recipe, frozen hash, tests incl. the exact 8 known rows; census
+    re-run publishes the new eligible N).
+B2. ATOMIC CLAIMS ON MARK: run the certified local claim compiler (pinned
+    spaCy venv, zero cost) over mark's eligible parents; rebuild digest
+    packets to carry compiled atomic claims (packet contract version bump;
+    supporting_claim_ids now cite atomic claims, not whole-parent).
+B3. DOMAIN POLICY LINE (record, no build): domain coverage rides the
+    deterministic T9.1 resolver at activation; LLM domain proposals are
+    auxiliary candidates only — sparsity is not a defect to chase.
+B4. Phase-2 preflight on the new packets (fresh 10-packet mark canary under
+    the new packet contract, ≥9/10 preregistered, ceiling arithmetic
+    re-published) → then phase 2 per the standing shape (≥95% rolling,
+    auto-stops, tail-retry set last). The 66 accepted v5/v6 digests remain
+    valid purchases (contract-level acceptance).
+E2E PROGRAM (registered now; executes after the modular completion track):
+E1. Modular completion + tests: metadata (M2 fields), 5 typed schemas +
+    pydantic sweeps, extraction layer (LocalExtractionV1 wire), chunking
+    lanes, librarian retrieval, relational-pair retrieval (per-side
+    allocation), domain schema/resolvers, embedder instruction registry
+    (P2.3 isolated A/B rules) — module-by-module gates per the mission's
+    existing task slots (T9.4, T3.3/T3.4, A5, CP5–CP7 material).
+E2. RUNPOD REDEPLOY: bake the updated extraction contract into
+    runpod_flash_extractor, blue-green + synthetic canary (standing rule),
+    engine-parity harness proves same-chunk equivalence before cutover.
+E3. FULL E2E: ingest ~15 owner-named-folder docs into a FRESH TEST CORPUS
+    (never touching existing corpora), full pipeline (chunk → RunPod extract
+    → embed → graph → summaries → digests), then retrieval-quality eval:
+    3-tier regression + lay-language recall + relationship/pair queries +
+    negatives, with preregistered targets before the run.
+Post a B1/B2 design note before code; the E2E details get their own design
+review at E1 completion.
