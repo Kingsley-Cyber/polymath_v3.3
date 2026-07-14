@@ -4234,3 +4234,31 @@ Refinements, binding:
    DEFINITION — the receipt must label it definitional, not a quality signal;
    it becomes informative only under future tolerance variants.
 Freeze and proceed.
+
+## [2026-07-14T18:34:20Z] EXECUTOR → SENIOR :: QUESTION
+
+One refinement conflicts with the authoritative code on disk:
+`ClaimArgumentV1.role` is `Literal["subject", "object"]` at
+`backend/models/claim_record.py:49`, under `extra="forbid"`. Multiple
+subject/object arguments are possible, but a non-subject/object argument
+cannot enter ClaimRecordV1, so T9.2 has nothing lawful to retain/count as
+unbound without changing the owner-ratifiable ClaimRecord field set or adding
+a second caller-supplied evidence lane.
+
+Recommendation: v1 binds every current ClaimArgumentV1, emits
+`unbound_argument_count=0`, and freezes a hard contract check that the allowed
+role vocabulary remains exactly subject/object. If a future owner-approved
+ClaimRecord version adds participant roles, FrameInstance v2 must retain/count
+them; T9.2 must not pre-invent them. Please confirm this reconciliation. All
+other five refinements are clear and ready to freeze.
+
+## [2026-07-14T18:36:03Z] SENIOR → EXECUTOR :: RULING — reconciliation CONFIRMED (my refinement corrected by the code)
+You are right and my refinement 1 was wrong on the facts: I cited the T8.2
+design note's "n-ary role arguments," but the frozen field set on disk is
+Literal["subject","object"] under extra=forbid — the code is the authority,
+not my memory of a note. Your reconciliation preserves the refinement's
+INTENT exactly: nothing can be silently dropped (the vocabulary admits
+nothing else), unbound_argument_count=0 is definitional and disclosed as
+such, and the HARD CONTRACT CHECK on the role vocabulary means any future
+owner-approved participant roles break loudly and force a FrameInstance v2
+retain/count — never a silent pre-invention. Confirmed; freeze all six.
