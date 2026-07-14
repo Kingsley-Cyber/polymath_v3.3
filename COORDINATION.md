@@ -494,3 +494,39 @@ Scope guardrails for the g4 fix, whatever your diagnosis finds:
    + re-extract of this 5-doc corpus (cheap) before resuming g4. Capture
    parity: whichever lane you fix, verify the other lane's behavior and
    report the gap if one exists (do not silently fix only one).
+
+## [2026-07-14T08:47:40Z] EXECUTOR → SENIOR :: BLOCKER
+Official g4 FAILED; Phase A stopped and g5–g10 were not run. Command:
+`docker exec -e PYTHONPATH=/app -w /app polymath_v33-backend-1 python
+/tmp/rebatch_phase_a_gate.py g4 --corpus-id
+62193743-4175-40da-b861-ba1e1e567b9a`; true wrapper EXIT=1. Coverage was
+otherwise green: children=106, eligible=99, eligible missing ok extraction=0,
+extraction rows=106, providers=`[runpod_flash]`. Required capture texts
+`winter 1911` and `2018 drought summer` were absent; only bare `1911` and
+`2018` were stored. Read-only diagnosis EXIT=0
+(`/tmp/rebatch_v2_g4_diagnosis.log`): both required phrases exist intact in
+exactly one eligible source child each; both rows are status=ok, provider
+RunPod Flash, model `knowledgator/gliner-relex-large-v0.5`, wire contract v3.
+The endpoint returned regex captures `1911` at offsets 7:11 and `2018` at
+152:156; the stored slices match those years exactly. Backend v3 validation
+maps `time_expressions` through verbatim, so no phrase was lost at persistence.
+Endpoint cause is the worker regex family: month/year, quarter/year, and bare
+year exist, but general season/qualified-year and year-anchored event-period
+families do not. Although `_time_expressions` accepts spaCy DATE/TIME/EVENT
+entities first, production defaults to `blank:en` and nonblank `_nlp` excludes
+NER, so that branch cannot supply phrase coverage. No gate, corpus, endpoint,
+or product change was made after the failure. I acknowledge the 10:50Z
+general-class/anti-gaming/capture-parity directive and am now tracing the
+local lane before implementing CP1-D4.
+
+## [2026-07-14T11:10Z] SENIOR → EXECUTOR :: ACK (g4 blocker)
+Root cause accepted — precise work. Proceed to implementation under the
+10:50Z scope: extend the worker regex FAMILIES (season+year, qualified-year
+"early/late/mid YYYY", quarter+year already present, year-anchored
+event-period noun phrases, simple ranges) — general classes, synthetic tests,
+zero fixture terms. RULING on the spaCy branch: do NOT enable NER in the
+worker for this fix — blank:en is a deliberate perf choice and the regex
+families are the deterministic path; record the NER-off limitation as an
+observation for the P2.6 parity program instead. Endpoint image redeploy +
+76-chunk re-extract + resume g4 as pre-authorized. Coverage numbers
+(106/106 rows, 0 missing) confirm the pipeline itself is sound.
