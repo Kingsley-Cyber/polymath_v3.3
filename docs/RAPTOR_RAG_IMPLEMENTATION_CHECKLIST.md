@@ -1167,6 +1167,18 @@ Acceptance:
 - [ ] Recall improves without corrupting document-vector compatibility; the
   active query profile always matches the indexed collection profile.
 
+Experiment receipt (2026-07-14): `universal-v1` was **REJECTED WITH
+EVIDENCE** on the Fast-first gate. It improved several rows and the completed
+naïve cohort's mean recall, but lost q032's naïve document hit
+(`true/.200 -> false/.000`) and raised same-ID partial mean latency by 17.9%.
+The candidate was stopped at 32/58, reverted before reporting, and
+`baseline_live_v0` remains live. The durable registry resolver,
+instruction-version cache isolation, suffixed A/B harness, and container-only
+revert path are deployed and proven. A new wording requires a NEW registry
+version and the same gate; it is optional Track B and does not preempt the
+core spine. Receipt:
+`docs/baselines/T56_QWEN3_UNIVERSAL_AB_2026-07-14.md`.
+
 ## P2 - Extraction And RunPod Parity
 
 ### P2.4 Negation And Relation Correctness
@@ -2016,6 +2028,50 @@ A corpus is strict-ready only when:
   (g1-g10), senior-certified in `COORDINATION.md`. Phase B is outside this
   job and remains blocked under its separate owner/glide gate; no Phase B
   work was started by this completion entry.
+
+### 2026-07-14 - T5.6 Qwen3 universal query-instruction A/B (rejected)
+
+- Commit: this commit.
+- Owner: owner-approved registry wording; executor ran the pre-authorized A/B;
+  senior verified predeploy receipts and authorized deployment.
+- Corpus/data scope: read-only held-out retrieval against the existing active
+  corpora. Stored document/concept/tree vectors and durable corpus artifacts
+  were not written.
+- Code changes: query instructions now resolve from the immutable
+  `embedding_instruction_registry.v1`; cache and batch-group identity includes
+  instruction version; corpus-frozen profile override is supported; document
+  and neutral serialization remains raw. The held-out runner gained safe
+  suffixed output, and an asserting A/B comparator preregisters the promotion
+  gates.
+- Durable migration/backfill: none.
+- Before metrics: on the 32 Fast IDs reached before early stop,
+  baseline_live_v0 mean latency 31.697s; naïve hits 5/5 and recall .740.
+- After metrics: universal mean latency 37.381s (+17.9%); naïve recall .800
+  but hits fell to 4/5. Decisive row q032 changed from hit=true/recall=.200
+  to hit=false/recall=.000. Candidate rejected immediately; Hybrid/Graph not
+  run because Fast is the prerequisite gate.
+- Tests by tier: Fast partial 32/58, zero runtime errors; one reached negative
+  remained fail-closed. Candidate was intentionally interrupted at the first
+  absolute failure; the complete 5/5 negative and cross-corpus gates were not
+  reached. Built-image unit/adjacent suites passed 40 + 19 before candidate
+  deploy; durable-revert image focused suite passed 40.
+- Cross-corpus test: not run because Fast failed before cross-corpus rows and
+  the contract forbids advancing to later gates after a Fast failure.
+- Failure/rollback test: live profile was reverted first via config pin +
+  container recreate, then repository/config/compose defaults were restored
+  to baseline_live_v0 and redeployed without an override. Profile-versioned
+  cache keys prevent cross-arm reuse. No vector rebuild is required.
+- Deployment image/health: canonical compose overlays rebuilt/recreated both
+  shared-image containers; runtime verifier passed before the A/B and after
+  both immediate and durable reverts (live dimension 1024). Final live profile
+  is baseline_live_v0 / qwen3-retrieval-query-v1.
+- Remaining risks: the universal wording produced several useful positive
+  flips but is not safe as a global default. A future attempt needs a new
+  registry version and another frozen-suite A/B; this rejected profile must
+  not be promoted by configuration drift.
+- Checklist boxes closed: none. P2.3 acceptance remains open because the
+  candidate did not improve safely. Durable receipt:
+  `docs/baselines/T56_QWEN3_UNIVERSAL_AB_2026-07-14.md`.
 
 ## Implementation Log Template
 

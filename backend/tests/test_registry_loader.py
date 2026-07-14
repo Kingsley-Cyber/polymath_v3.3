@@ -14,6 +14,7 @@ from models.registry_loader import (
     admissible_superframes,
     domain,
     domain_affinity_priors,
+    embedding_instruction_profile,
     is_controlled_predicate,
     is_entity_type,
     latent_budget,
@@ -31,6 +32,7 @@ FROZEN_HASHES = {
     "vocab": "sha256:bd39855c608e2ce677587c63603eb51caef407fa422cb6575b549dcf68216aa5",
     "latent_policy": "sha256:1bd709eed623b1b6191a4563bd736e1a20544608b1ef94d9c5603f21d3debcd9",
     "binding": "sha256:2811ff011e38762b349b9d14a1f0352edc798b683adf8673106535bcd370c797",
+    "embedding_instruction": "sha256:0269d30bf0f852f489e15a8f2dc6b19a8b83b62adb49e346828ce54fc5e89f51",
 }
 
 
@@ -90,6 +92,21 @@ def test_latent_budgets():
     }
     with pytest.raises(RegistryError):
         latent_budget("galaxy")
+
+
+def test_embedding_instruction_profiles_are_versioned_registry_data():
+    assert embedding_instruction_profile("baseline_live_v0") == {
+        "profile_name": "baseline_live_v0",
+        "instruction": "given the user question, retrieve the most relevant information",
+        "instruction_version": "qwen3-retrieval-query-v1",
+    }
+    universal = embedding_instruction_profile("universal")
+    assert universal["instruction"].startswith("Given a question in everyday language")
+    assert universal["instruction_version"] == (
+        "embedding_instruction_registry.v1.universal"
+    )
+    with pytest.raises(RegistryError):
+        embedding_instruction_profile("silent-unversioned-edit")
 
 
 def test_unknown_ids_hard_error():

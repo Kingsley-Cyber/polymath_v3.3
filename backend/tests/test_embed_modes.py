@@ -75,15 +75,52 @@ async def test_qwen3_query_instruction_is_exact_and_documents_remain_raw(monkeyp
         expected_dim=4,
         expected_model_id=model,
         embedding_role="query",
+        query_instruction_profile="universal",
     )
 
     assert calls == [
         ["raw document"],
         [
-            "Instruct: given the user question, retrieve the most relevant "
-            "information\nQuery:what matters?"
+            "Instruct: Given a question in everyday language, retrieve passages, "
+            "summaries, and concepts from books and documents in any field that "
+            "answer, explain, or underlie it\nQuery:what matters?"
         ],
     ]
+
+
+@pytest.mark.asyncio
+async def test_qwen3_baseline_profile_override_is_exact_and_cache_distinct(monkeypatch):
+    calls: list[list[str]] = []
+
+    async def fake_local(texts, _dim):
+        calls.append(list(texts))
+        return [[0.0] * 4 for _ in texts]
+
+    monkeypatch.setattr(embedder, "_embed_batch_local", fake_local)
+    model = "Qwen/Qwen3-Embedding-0.6B"
+    baseline_config = {
+        "embed_mode": "local",
+        "embedding_model_id": model,
+        "embedding_dimension": 4,
+        "query_instruction_profile": "baseline_live_v0",
+    }
+    universal_config = {**baseline_config, "query_instruction_profile": "universal"}
+
+    await embedder.embed_batch(
+        ["what matters?"],
+        expected_dim=4,
+        expected_model_id=model,
+        embedding_role="query",
+        query_instruction_profile="baseline_live_v0",
+    )
+
+    assert calls == [[
+        "Instruct: given the user question, retrieve the most relevant "
+        "information\nQuery:what matters?"
+    ]]
+    assert embedder._query_cache_key("same raw query", baseline_config) != (
+        embedder._query_cache_key("same raw query", universal_config)
+    )
 
 
 @pytest.mark.asyncio

@@ -34,6 +34,7 @@ from typing import Any, Literal
 import httpx
 
 from config import get_settings
+from models.registry_loader import embedding_instruction_profile
 from services.cache_util import TTLCache, hash_key
 
 logger = logging.getLogger(__name__)
@@ -58,12 +59,15 @@ _QUERY_EMBED_CACHE = TTLCache(maxsize=4096, ttl_seconds=600.0)
 # before provider dispatch, so local/API/Modal/RunPod lanes receive identical
 # bytes and no sidecar can accidentally add a second prefix.
 EmbeddingRole = Literal["document", "query", "neutral"]
-QWEN3_RETRIEVAL_PROFILE_VERSION = "qwen3-retrieval-query-v1"
-QWEN3_QUERY_INSTRUCTION = (
-    "given the user question, retrieve the most relevant information"
-)
-QWEN3_QUERY_PREFIX = f"Instruct: {QWEN3_QUERY_INSTRUCTION}\nQuery:"
 _RAW_EMBEDDING_PROFILE_VERSION = "raw-embedding-v1"
+
+# Compatibility aliases describe the promoted default only. Runtime query
+# serialization resolves the selected immutable profile on every cache-key /
+# batch boundary, so a corpus-frozen override cannot be masked by constants.
+_DEFAULT_QWEN3_PROFILE = embedding_instruction_profile("baseline_live_v0")
+QWEN3_RETRIEVAL_PROFILE_VERSION = _DEFAULT_QWEN3_PROFILE["instruction_version"]
+QWEN3_QUERY_INSTRUCTION = _DEFAULT_QWEN3_PROFILE["instruction"]
+QWEN3_QUERY_PREFIX = f"Instruct: {QWEN3_QUERY_INSTRUCTION}\nQuery:"
 
 
 _LEGACY_MODE_ALIASES = {
@@ -90,10 +94,45 @@ def _is_qwen3_embedding_model(model_id: str | None) -> bool:
 def _embedding_profile_version(
     role: EmbeddingRole,
     model_id: str | None,
+    query_instruction_profile: str | None = None,
 ) -> str:
     if role == "query" and _is_qwen3_embedding_model(model_id):
-        return QWEN3_RETRIEVAL_PROFILE_VERSION
+        return _qwen3_query_profile(query_instruction_profile)[
+            "instruction_version"
+        ]
     return _RAW_EMBEDDING_PROFILE_VERSION
+
+
+def _qwen3_query_profile(profile_name: str | None = None) -> dict[str, str]:
+    selected = profile_name or get_settings().QWEN3_QUERY_INSTRUCTION_PROFILE
+    return embedding_instruction_profile(str(selected))
+
+
+def query_embedding_profile(
+    model_id: str | None = None,
+    profile_name: str | None = None,
+) -> dict[str, str]:
+    """Return the effective query serialization contract for diagnostics.
+
+    This contains no credentials or request text. It is safe to include in
+    deployment receipts and makes instruction drift directly observable.
+    """
+
+    effective_model_id = str(model_id or get_settings().EMBEDDER_MODEL_NAME)
+    if not _is_qwen3_embedding_model(effective_model_id):
+        return {
+            "model_id": effective_model_id,
+            "profile_name": "raw",
+            "instruction": "",
+            "instruction_version": _RAW_EMBEDDING_PROFILE_VERSION,
+            "serialized_prefix": "",
+        }
+    profile = _qwen3_query_profile(profile_name)
+    return {
+        "model_id": effective_model_id,
+        **profile,
+        "serialized_prefix": f"Instruct: {profile['instruction']}\nQuery:",
+    }
 
 
 def _prepare_embedding_texts(
@@ -101,6 +140,7 @@ def _prepare_embedding_texts(
     *,
     role: EmbeddingRole,
     model_id: str | None,
+    query_instruction_profile: str | None = None,
 ) -> list[str]:
     """Serialize raw caller text for one model/role exactly once.
 
@@ -113,7 +153,11 @@ def _prepare_embedding_texts(
         raise ValueError(f"Unsupported embedding role: {role!r}")
     normalized = [str(text or "") for text in texts]
     if role == "query" and _is_qwen3_embedding_model(model_id):
-        return [f"{QWEN3_QUERY_PREFIX}{text}" for text in normalized]
+        prefix = query_embedding_profile(
+            model_id=model_id,
+            profile_name=query_instruction_profile,
+        )["serialized_prefix"]
+        return [f"{prefix}{text}" for text in normalized]
     return normalized
 
 
@@ -182,6 +226,7 @@ async def embed_batch(
     local_timeout_s: float | None = None,
     workload_class: str = "document_ingestion",
     embedding_role: EmbeddingRole = "document",
+    query_instruction_profile: str | None = None,
 ) -> list[list[float]]:
     """Dispatch to the selected embedding provider.
 
@@ -210,6 +255,8 @@ async def embed_batch(
         embedding_role: semantic role for model-specific serialization.
             Qwen3 query text receives its retrieval instruction; canonical
             document and neutral text remain raw.
+        query_instruction_profile: optional corpus-frozen Qwen3 query profile.
+            When omitted, Settings.QWEN3_QUERY_INSTRUCTION_PROFILE is used.
     """
     if not texts:
         return []
@@ -227,6 +274,7 @@ async def embed_batch(
         texts,
         role=embedding_role,
         model_id=effective_model_id,
+        query_instruction_profile=query_instruction_profile,
     )
 
     # ── Modal ────────────────────────────────────────────────────────────
@@ -776,6 +824,7 @@ async def _embed_texts_for_role(
             local_timeout_s=local_timeout_s,
             workload_class=workload_class,
             embedding_role=role,
+            query_instruction_profile=config.get("query_instruction_profile"),
         )
     settings = get_settings()
     return await embed_batch(
@@ -786,6 +835,7 @@ async def _embed_texts_for_role(
         local_timeout_s=local_timeout_s,
         workload_class=workload_class,
         embedding_role=role,
+        query_instruction_profile=settings.QWEN3_QUERY_INSTRUCTION_PROFILE,
     )
 
 
@@ -819,6 +869,14 @@ def _effective_query_model_id(config: dict[str, Any] | None) -> str:
     return str(get_settings().EMBEDDER_MODEL_NAME)
 
 
+def _effective_query_instruction_profile(
+    config: dict[str, Any] | None,
+) -> str:
+    if config and config.get("query_instruction_profile"):
+        return str(config["query_instruction_profile"])
+    return str(get_settings().QWEN3_QUERY_INSTRUCTION_PROFILE)
+
+
 class _QueryEmbedBatcher:
     """Coalesce concurrent embed_query calls into one embed_batch request.
 
@@ -846,7 +904,9 @@ class _QueryEmbedBatcher:
     @staticmethod
     def _group_key(config: dict[str, Any] | None) -> str:
         profile_version = _embedding_profile_version(
-            "query", _effective_query_model_id(config)
+            "query",
+            _effective_query_model_id(config),
+            _effective_query_instruction_profile(config),
         )
         if not config:
             return hash_key("group", "local", profile_version)
@@ -943,7 +1003,9 @@ async def embed_query(text: str, config: dict[str, Any] | None = None) -> list[f
 
 def _query_cache_key(text: str, config: dict[str, Any] | None) -> str:
     profile_version = _embedding_profile_version(
-        "query", _effective_query_model_id(config)
+        "query",
+        _effective_query_model_id(config),
+        _effective_query_instruction_profile(config),
     )
     if config:
         return hash_key(

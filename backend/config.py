@@ -864,6 +864,15 @@ class Settings(BaseSettings):
         default="Qwen3-Embedding-0.6B",
         description="Display name of the loaded embedding model — must match MODEL_NAME env var in embedder container",
     )
+    QWEN3_QUERY_INSTRUCTION_PROFILE: Literal[
+        "baseline_live_v0", "universal"
+    ] = Field(
+        default="baseline_live_v0",
+        description=(
+            "Versioned query-only instruction profile resolved from "
+            "embedding_instruction_registry.v1.json. Documents remain raw."
+        ),
+    )
     EMBED_BATCH_SIZE: int = Field(
         default=32,
         ge=1,

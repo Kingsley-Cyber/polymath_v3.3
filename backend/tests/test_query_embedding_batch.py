@@ -24,18 +24,15 @@ async def test_embed_queries_batches_unique_cache_misses_once(monkeypatch):
     assert len(calls) == 1
 
 
-def test_query_cache_key_includes_qwen_profile_revision(monkeypatch):
-    config = {
+def test_query_cache_key_includes_qwen_profile_revision():
+    baseline = {
         "embed_mode": "local",
         "embedding_model_id": "qwen3-embedding-0.6b-v1",
         "embedding_dimension": 1024,
+        "query_instruction_profile": "baseline_live_v0",
     }
-    before = embedder._query_cache_key("same raw query", config)
-    monkeypatch.setattr(
-        embedder,
-        "QWEN3_RETRIEVAL_PROFILE_VERSION",
-        "qwen3-retrieval-query-v2",
-    )
-    after = embedder._query_cache_key("same raw query", config)
+    universal = {**baseline, "query_instruction_profile": "universal"}
+    before = embedder._query_cache_key("same raw query", baseline)
+    after = embedder._query_cache_key("same raw query", universal)
 
     assert before != after

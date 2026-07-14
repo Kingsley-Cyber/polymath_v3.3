@@ -19,9 +19,10 @@ Scores per question:
 
 Usage:
     TOKEN=$(docker exec polymath_v33-backend-1 cat /tmp/probe_token) \
-        python3 backend/scripts/run_heldout_eval.py --tier qdrant_mongo
+        python3 backend/scripts/run_heldout_eval.py --tier qdrant_mongo \
+        --out-suffix universal_v1
 
-Writes docs/baselines/EVAL_<UTCdate>_<tier>.json. Read-only for stores
+Writes docs/baselines/EVAL_<UTCdate>_<tier>[_<suffix>].json. Read-only for stores
 (each probe creates a throwaway conversation via the normal chat path).
 """
 
@@ -217,7 +218,14 @@ def main() -> int:
                     choices=["qdrant_only", "qdrant_mongo", "qdrant_mongo_graph"])
     ap.add_argument("--ids", nargs="*", help="run only these question ids")
     ap.add_argument("--limit", type=int, default=None)
+    ap.add_argument(
+        "--out-suffix",
+        default="",
+        help="safe artifact suffix for isolated A/B runs (never overwrite baseline)",
+    )
     args = ap.parse_args()
+    if args.out_suffix and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", args.out_suffix):
+        ap.error("--out-suffix must contain only letters, digits, dot, underscore, or dash")
     token = os.environ.get("TOKEN") or ""
     if not token:
         print("ERROR: set TOKEN")
@@ -281,13 +289,15 @@ def main() -> int:
     out = {
         "captured_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "api": API,
+        "run": {"out_suffix": args.out_suffix or None},
         "summary": summary,
         "results": results,
     }
     out_dir = REPO / "docs" / "baselines"
     out_dir.mkdir(parents=True, exist_ok=True)
+    suffix = f"_{args.out_suffix}" if args.out_suffix else ""
     out_path = out_dir / (
-        f"EVAL_{time.strftime('%Y-%m-%d', time.gmtime())}_{args.tier}.json"
+        f"EVAL_{time.strftime('%Y-%m-%d', time.gmtime())}_{args.tier}{suffix}.json"
     )
     out_path.write_text(json.dumps(out, indent=2, default=str) + "\n")
     print("SUMMARY", json.dumps(summary, indent=2))

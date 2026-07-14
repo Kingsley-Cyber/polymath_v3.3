@@ -1,6 +1,6 @@
 """Versioned owner-registry loader + resolver (P2.5b registries job).
 
-Loads the six owner-delivered registry snapshots from backend/registries/,
+Loads the owner-delivered registry snapshots from backend/registries/,
 validates their internal shape AND cross-registry references, and exposes a
 read-only resolver. Registry files are versioned immutable data: any change
 must be a NEW version file — the frozen snapshot hashes in the golden tests
@@ -33,6 +33,7 @@ FILES = {
     "vocab": "extraction_vocabularies.v1.json",
     "latent_policy": "latent_concept_policy.v1.json",
     "binding": "motif_stage_superframe_binding.v1.json",
+    "embedding_instruction": "embedding_instruction_registry.v1.json",
 }
 
 
@@ -110,6 +111,18 @@ def load_all() -> dict[str, dict[str, Any]]:
             if not (raw[0] <= raw[1] and kept[0] <= kept[1] and kept[1] <= raw[1]):
                 raise RegistryError(f"latent budget for {level} is incoherent: {spec}")
 
+    embedding_instructions = data["embedding_instruction"]
+    if embedding_instructions.get("registry") != "embedding_instruction_registry":
+        raise RegistryError("embedding instruction registry has the wrong identity")
+    if not embedding_instructions.get("version"):
+        raise RegistryError("embedding instruction registry is missing its version")
+    for profile_name in ("baseline_live_v0", "universal"):
+        profile = embedding_instructions.get(profile_name)
+        if not isinstance(profile, dict) or not str(profile.get("instruction") or "").strip():
+            raise RegistryError(
+                f"embedding instruction profile {profile_name!r} is missing canonical text"
+            )
+
     return data
 
 
@@ -174,3 +187,31 @@ def latent_budget(level: str) -> dict[str, Any]:
     if level not in budgets:
         raise RegistryError(f"unknown latent budget level {level!r}")
     return budgets[level]
+
+
+def embedding_instruction_profile(profile_name: str) -> dict[str, str]:
+    """Resolve one immutable Qwen3 query-instruction profile.
+
+    ``baseline_live_v0`` retains its historical profile version so existing
+    cache keys remain stable. New registry profiles derive a version from the
+    immutable registry id/version/profile tuple; the canonical wording stays
+    in registry data rather than Python conditionals.
+    """
+
+    registry = load_all()["embedding_instruction"]
+    if profile_name not in {"baseline_live_v0", "universal"}:
+        raise RegistryError(
+            f"unknown embedding instruction profile {profile_name!r}; "
+            "valid: ['baseline_live_v0', 'universal']"
+        )
+    profile = registry[profile_name]
+    instruction_version = str(profile.get("profile_version") or "").strip()
+    if not instruction_version:
+        instruction_version = (
+            f"{registry['registry']}.{registry['version']}.{profile_name}"
+        )
+    return {
+        "profile_name": profile_name,
+        "instruction": str(profile["instruction"]).strip(),
+        "instruction_version": instruction_version,
+    }

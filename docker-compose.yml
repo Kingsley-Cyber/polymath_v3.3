@@ -521,6 +521,9 @@ services:
       EMBEDDER_URL: http://embedder:80
       EMBEDDER_LOCAL_TIMEOUT_SECONDS: ${EMBEDDER_LOCAL_TIMEOUT_SECONDS:-120}
       EMBEDDER_QUERY_TIMEOUT_SECONDS: ${EMBEDDER_QUERY_TIMEOUT_SECONDS:-30}
+      # Query-side only; document/concept/tree inputs remain byte-raw.
+      # Profile text + version resolve from the immutable owner registry.
+      QWEN3_QUERY_INSTRUCTION_PROFILE: ${QWEN3_QUERY_INSTRUCTION_PROFILE:-baseline_live_v0}
       QUERY_PLAN_V2: ${QUERY_PLAN_V2:-true}
       QUERY_PLAN_V2_SHADOW: ${QUERY_PLAN_V2_SHADOW:-true}
       QUERY_PLAN_QUALITY_FIRST: ${QUERY_PLAN_QUALITY_FIRST:-true}
