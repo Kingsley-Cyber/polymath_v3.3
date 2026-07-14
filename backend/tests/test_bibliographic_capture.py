@@ -232,6 +232,21 @@ class TestExtractTextHead:
         methods = {c.method: c.raw for c in out["candidates"]}
         assert methods.get("text_head_date_line") == "Dec 24, 2025"
 
+    def test_labelled_title_page_fields(self):
+        head = (
+            "# A Short History of Logistics\n\n"
+            "Author: Edwin Halvorsen\n"
+            "Published: 2004\n"
+            "Language: English\n"
+        )
+        out = extract_text_head_biblio(head)
+        assert out["author"] == "Edwin Halvorsen"
+        assert out["language"] == "english"
+        resolution = resolve_document_dates(out["candidates"])
+        assert resolution["document_date"] == "2004-01-01"
+        assert resolution["method"] == "text_head_published"
+        assert resolution["source"] == "text_head:published"
+
     def test_plain_transcript_head_yields_nothing(self):
         head = ("## Description\n\nApply for my mentorship Brand Builders "
                 "Academy:\n\nJoin my free email list:\n")

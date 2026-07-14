@@ -47,6 +47,7 @@ CONFIDENCE_BY_METHOD: dict[str, str] = {
     # explicit publication metadata
     "frontmatter_published": "high",
     "html_meta_published": "high",
+    "text_head_published": "high",
     # conventional-but-unlabelled publication signals
     "frontmatter_date": "medium",
     "epub_dc_date": "medium",
@@ -134,6 +135,9 @@ _DAY_MONTH_NAME_YEAR_RE = re.compile(
 _YEAR_MONTH_NAME_RE = re.compile(
     r"\b(1[89]\d\d|20\d\d)\s+([A-Za-z]{3,9})\b"
 )
+_MONTH_NAME_YEAR_RE = re.compile(
+    r"\b([A-Za-z]{3,9})\.?\s+(1[89]\d\d|20\d\d)\b"
+)
 
 
 def _valid_ymd(y: int, m: int, d: int) -> bool:
@@ -181,6 +185,10 @@ def normalize_date_string(raw: str) -> tuple[Optional[str], Optional[str]]:
     m = _YEAR_MONTH_NAME_RE.search(s)
     if m and m.group(2).lower() in _MONTHS:
         return f"{int(m.group(1)):04d}-{_MONTHS[m.group(2).lower()]:02d}-01", "month"
+
+    m = _MONTH_NAME_YEAR_RE.search(s)
+    if m and m.group(1).lower() in _MONTHS:
+        return f"{int(m.group(2)):04d}-{_MONTHS[m.group(1).lower()]:02d}-01", "month"
 
     m = _YEAR_RE.search(s)
     if m:
@@ -397,6 +405,13 @@ _STANDALONE_DATE_LINE_RE = re.compile(
 )
 _MD_HEAD_LINE_RE = re.compile(r"^#{1,6}\s+(.+)$")
 _SOURCE_LINE_RE = re.compile(r"^\*\*Source:\*\*\s*`?([^`\n]+)`?\s*$")
+_TEXT_HEAD_FIELD_RE = re.compile(
+    r"^(?:#{1,6}\s+)?(?:\*\*)?"
+    r"(?P<label>title|author|authors|creator|by|published|publish[ _-]?date|"
+    r"publication[ _-]?date|pubdate|date|language|lang)"
+    r"(?:\*\*)?\s*:\s*(?P<value>.+?)\s*$",
+    re.IGNORECASE,
+)
 
 DEFAULT_HEAD_CHARS = 600
 
@@ -405,6 +420,7 @@ def extract_text_head_biblio(head_text: str) -> dict:
     """Deterministic bibliographic signals from a document's first chars.
 
     Recognizes ONLY:
+      * explicit labelled title-page fields (Title/Author/Published/Language);
       * a first markdown heading that is itself a citation-style filename
         (scraped-book exports put the original filename there);
       * a ``**Source:** path`` metadata line (same exports);
@@ -422,6 +438,49 @@ def extract_text_head_biblio(head_text: str) -> dict:
     for line in head.splitlines()[:20]:
         line = line.strip()
         if not line:
+            continue
+        field_match = _TEXT_HEAD_FIELD_RE.match(line)
+        if field_match:
+            label = re.sub(
+                r"[ _-]+", "_", field_match.group("label").strip().lower()
+            )
+            value = re.sub(r"\s+", " ", field_match.group("value")).strip()
+            if label == "title" and value and not out.get("title"):
+                out["title"] = value[:300]
+            elif label in {"author", "authors", "creator", "by"}:
+                if (
+                    _AUTHOR_SANITY_RE.match(value)
+                    and 1 <= len(value.split()) <= 6
+                    and not out.get("author")
+                ):
+                    out["author"] = value[:200]
+            elif label in {
+                "published",
+                "publish_date",
+                "publication_date",
+                "pubdate",
+            }:
+                out["candidates"].append(
+                    DateCandidate(
+                        raw=value[:80],
+                        kind=KIND_PUBLICATION,
+                        method="text_head_published",
+                        source=f"text_head:{label}",
+                    )
+                )
+            elif label == "date":
+                out["candidates"].append(
+                    DateCandidate(
+                        raw=value[:80],
+                        kind=KIND_AMBIGUOUS,
+                        method="text_head_date_line",
+                        source="text_head:date",
+                    )
+                )
+            elif label in {"language", "lang"} and not out.get("language"):
+                language = normalize_language(value)
+                if language:
+                    out["language"] = language
             continue
         hm = _MD_HEAD_LINE_RE.match(line)
         sm = _SOURCE_LINE_RE.match(line)

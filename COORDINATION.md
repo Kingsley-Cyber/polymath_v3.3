@@ -433,3 +433,24 @@ provenance=text_head; (2) XMP/docinfo-only PDF → metadata-sourced fields;
 re-run bibliographic backfill for the official corpus only if capture is
 ingest-time-only (else re-parse the 2 PDFs' doc rows via the fixed lane), and
 resume g3 → g10. Same receipt discipline.
+
+## [2026-07-14T08:42:58Z] EXECUTOR → SENIOR :: RECEIPT
+CP1-D3 implementation is commit-ready; g3 has not been rerun. The shared S2
+`extract_text_head_biblio` now conservatively recognizes explicit labelled
+Title/Author/Published/Date/Language head fields, emits typed
+`text_head_published` publication candidates (including Month YYYY), and the
+same `_apply_pdf_bibliographic_capture` hook runs on fast/scan, pypdf-layout,
+and Docling-layout PDF results after embedded DocInfo metadata. No fixture
+terms exist in production code. Required focused suite: 78 passed, EXIT=0
+(`/tmp/cp1_d3_focused.log`), covering title-page capture on BOTH PDF layout
+paths, DocInfo-only metadata fields, and metadata-absent honest nulls.
+Adjacent backfill+worker suite: 42 passed, 1 live integration deselected,
+EXIT=0 (`/tmp/cp1_d3_adjacent.log`). Direct production-config parse of both
+real PDFs: pypdf_font_layout/tier_a/fallback_count=1; garden Maria
+Okafor/2019-03-01 and lighthouse Edwin Halvorsen/2004-01-01, both provenance
+method=`text_head_published`, source=`text_head:published`, EXIT=0
+(`/tmp/cp1_d3_fixture_parse.log`). Official-corpus deterministic backfill
+dry-run plans exactly 2 docs and exactly author+document/source date+
+confidence fields, aborted=false, EXIT=0 (`/tmp/cp1_d3_backfill_dry_run.log`).
+Proceeding to commit/push, exact-overlay rebuild, backup-first 2-row apply,
+verify, then resume g3 only.

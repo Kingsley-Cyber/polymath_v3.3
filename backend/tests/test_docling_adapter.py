@@ -357,6 +357,90 @@ def test_pdf_table_only_layout_classifies_tier_b(adapter):
     assert tier.value == "tier_b"
 
 
+def _pdf_bibliographic_result(adapter, markdown, source_format):
+    return adapter.DoclingParseResult(
+        text=markdown,
+        markdown=markdown,
+        sections=[],
+        pages=[markdown],
+        has_structure=True,
+        source_tier=adapter.SourceTier.tier_a,
+        source_format=source_format,
+        filename="paper.pdf",
+    )
+
+
+@pytest.mark.parametrize("source_format", ["pypdf_font_layout", "PDF"])
+def test_pdf_title_page_bibliography_capture_parity(adapter, source_format):
+    result = _pdf_bibliographic_result(
+        adapter,
+        (
+            "# Field Notes on Durable Systems\n\n"
+            "Author: Maria Okafor\n\n"
+            "Published: March 2019\n\n"
+            "Language: English\n"
+        ),
+        source_format,
+    )
+
+    adapter._apply_pdf_bibliographic_capture(result, b"not-a-pdf")
+    adapter.finalize_source_meta(result, "paper.pdf")
+
+    bibliography = result.routing_trace["bibliographic"]
+    assert result.author == "Maria Okafor"
+    assert result.document_date == "2019-03-01"
+    assert result.language_meta == "english"
+    assert bibliography["source_published_at"] == "2019-03-01"
+    assert bibliography["bibliographic_provenance"]["method"] == "text_head_published"
+    assert bibliography["bibliographic_provenance"]["source"] == "text_head:published"
+
+
+def test_pdf_docinfo_only_uses_metadata_fields(adapter):
+    from pypdf import PdfWriter
+
+    writer = PdfWriter()
+    writer.add_blank_page(width=72, height=72)
+    writer.add_metadata({"/Title": "Metadata Title", "/Author": "Edwin Halvorsen"})
+    raw = io.BytesIO()
+    writer.write(raw)
+    result = _pdf_bibliographic_result(
+        adapter,
+        "# Body\n\nNo visible title-page metadata.",
+        "PDF",
+    )
+
+    adapter._apply_pdf_bibliographic_capture(result, raw.getvalue())
+    adapter.finalize_source_meta(result, "paper.pdf")
+
+    bibliography = result.routing_trace["bibliographic"]
+    assert result.title == "Metadata Title"
+    assert result.author == "Edwin Halvorsen"
+    assert result.document_date is None
+    assert bibliography["bibliographic_provenance"]["reason"] == "no_date_source"
+
+
+def test_pdf_without_metadata_or_title_page_fields_stays_honest_null(adapter):
+    from pypdf import PdfWriter
+
+    writer = PdfWriter()
+    writer.add_blank_page(width=72, height=72)
+    raw = io.BytesIO()
+    writer.write(raw)
+    result = _pdf_bibliographic_result(
+        adapter,
+        "# Body\n\nNo bibliographic fields are present.",
+        "pypdf_font_layout",
+    )
+
+    adapter._apply_pdf_bibliographic_capture(result, raw.getvalue())
+    adapter.finalize_source_meta(result, "paper.pdf")
+
+    bibliography = result.routing_trace["bibliographic"]
+    assert result.author is None
+    assert result.document_date is None
+    assert bibliography["bibliographic_provenance"]["reason"] == "no_date_source"
+
+
 def test_fast_pdf_text_gate_accepts_digital_pdf(adapter):
     text = " ".join(["usable digital pdf text"] * 100)
     result = adapter.DoclingParseResult(

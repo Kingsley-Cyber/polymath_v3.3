@@ -43,6 +43,7 @@ from services.ingestion.bibliographic import (
     KIND_REVISION,
     DateCandidate,
     build_provenance,
+    extract_text_head_biblio,
     normalize_language,
     resolve_document_dates,
 )
@@ -410,6 +411,25 @@ def _apply_meta(result: "DoclingParseResult", meta: dict) -> None:
         result.document_date = resolve_document_dates(
             getattr(result, "date_candidates", None) or []
         )["document_date"]
+
+
+def _apply_pdf_bibliographic_capture(
+    result: "DoclingParseResult",
+    raw_bytes: bytes,
+    *,
+    pdf_meta: dict | None = None,
+) -> None:
+    """Apply the shared S2 capture contract to every PDF parser lane."""
+
+    _apply_meta(result, pdf_meta if pdf_meta is not None else _meta_from_pdf(raw_bytes))
+    head = extract_text_head_biblio(result.markdown or result.text or "")
+    text_meta = {
+        "title": head.get("title"),
+        "author": head.get("author"),
+        "language_meta": head.get("language"),
+        "date_candidates": head.get("candidates") or [],
+    }
+    _apply_meta(result, text_meta)
 
 
 _SOURCE_TYPE_BY_FORMAT = {
@@ -2404,7 +2424,11 @@ async def parse_document(
     if _looks_like_pdf(filename, mime):
         fast_result = _parse_pdf_fast_text(raw_bytes, filename, mime)
         pdf_meta = _meta_from_pdf(raw_bytes)
-        _apply_meta(fast_result, pdf_meta)  # M2 pdf info
+        _apply_pdf_bibliographic_capture(
+            fast_result,
+            raw_bytes,
+            pdf_meta=pdf_meta,
+        )
         if not _pdf_has_text_layer(fast_result):
             # OCR is disabled in this deployment, but image-only PDFs retain
             # the page-grouped OCR-AST candidate contract instead of being
@@ -2425,7 +2449,11 @@ async def parse_document(
                     filename,
                     mime,
                 )
-                _apply_meta(layout_result, pdf_meta)
+                _apply_pdf_bibliographic_capture(
+                    layout_result,
+                    raw_bytes,
+                    pdf_meta=pdf_meta,
+                )
                 return layout_result
             except Exception as exc:
                 logger.warning(
@@ -2449,7 +2477,11 @@ async def parse_document(
             fast_result,
             fallback_reason=fallback_reason,
         )
-        _apply_meta(layout_result, pdf_meta)
+        _apply_pdf_bibliographic_capture(
+            layout_result,
+            raw_bytes,
+            pdf_meta=pdf_meta,
+        )
         return layout_result
 
     local_result = _parse_local_text_document(raw_bytes, filename, mime)
