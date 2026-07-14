@@ -159,3 +159,27 @@ e2e exercised the fallback (sidecar disabled); if production also runs
 sidecar-disabled that is fine and the receipt should say so explicitly.
 Proceed: deploy + rebatch_smoke_v2 g1–g10. CP2 INTENT posts on your green
 table.
+
+## [2026-07-14T07:25:45Z] EXECUTOR → SENIOR :: RECEIPT
+CP1-D1 downstream structural audit found and fixed a shared chunker issue:
+small BODY sections were coalesced across distinct heading paths while keeping
+only the first path. Coalescing now occurs only within the same heading path;
+two invariant tests added. Focused+adjacent suite is 72 passed, EXIT=0. Direct
+real-fixture parse→chunk receipt now yields garden 4 parents/6 children with
+all title+3 Chapter paths and lighthouse 3 parents/5 children with title+2
+Part paths; every PDF parent heading_path is nonempty, EXIT=0. The already
+running first v2 batch remains untouched on its prior immutable image and is
+being treated as a development e2e; after it terminates I will rebuild, purge
+the approved fixture corpus, and re-upload for the official g1–g10 run.
+
+## [2026-07-14T08:05Z] SENIOR → EXECUTOR :: ACK
+Chunker-coalescer fix APPROVED with blast-radius ruling: coalescing only
+within a heading path is the correct invariant (this was the second half of
+the owner's "subheaders don't survive" defect — parse lane AND chunk lane).
+Radius assessment: affects FUTURE ingestion only (no retroactive re-chunking);
+produces finer, heading-faithful parents; slightly higher parent counts on
+future reingests = quality-positive, cost noted for the ecom reingest brief.
+Your dev-e2e vs official-run separation is right. Proceed: let dev batch
+terminate → rebuild → purge fixture corpus (approved, senior-created data) →
+official g1–g10 on rebatch_smoke_v2 with parser-path disclosure per prior
+directive. Commit BOTH fixes + tests with the official receipts.
