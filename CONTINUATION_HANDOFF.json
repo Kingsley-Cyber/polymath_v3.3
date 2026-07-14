@@ -1,5 +1,5 @@
 {
-  "version": "2026-07-14.5",
+  "version": "2026-07-14.6",
   "purpose": "Machine-readable job queue for any continuing agent. Read CONTINUATION_HANDOFF.md first.",
   "authoritative_docs": [
     "CLAUDE.md",
@@ -10,7 +10,8 @@
     "docs/REBUTTAL_INTEGRATION_RESTATEMENT_2026-07-13.md",
     "docs/SEMANTIC_EXTRACTION_PRODUCTION_READINESS_2026-07-13.md",
     "docs/EXECUTION_PLAN_2026-07-13.md",
-    "docs/LOCAL_EXTRACTION_THREE_SCHEMA_DESIGN_2026-07-14.md"
+    "docs/LOCAL_EXTRACTION_THREE_SCHEMA_DESIGN_2026-07-14.md",
+    "docs/REBATCH_RUNBOOK_2026-07-14.md"
   ],
   "registries": {
     "domain": "backend/registries/domain_registry.v1.json",
@@ -18,9 +19,27 @@
     "affinity_priors": "backend/registries/domain_superframe_affinity.v1.json",
     "motif": "backend/registries/motif_registry.v1.json",
     "extraction_vocabularies": "backend/registries/extraction_vocabularies.v1.json",
-    "motif_stage_superframe_binding": "backend/registries/motif_stage_superframe_binding.v1.json (OWNER-APPROVED v1)"
+    "motif_stage_superframe_binding": "backend/registries/motif_stage_superframe_binding.v1.json (OWNER-APPROVED v1)",
+    "latent_concept_policy": "backend/registries/latent_concept_policy.v1.json"
   },
   "jobs": [
+    {
+      "id": "rebatch-phase-a",
+      "status": "ready",
+      "executor": "codex",
+      "what": "test-corpus deployment validation, gates g1-g10 per docs/REBATCH_RUNBOOK_2026-07-14.md Phase A; STOP on any gate failure",
+      "gate": "all 10 gates green with true-exit receipts"
+    },
+    {
+      "id": "rebatch-phase-b",
+      "status": "blocked_deps",
+      "deps": [
+        "rebatch-phase-a"
+      ],
+      "executor": "codex",
+      "what": "per-corpus enrichment per runbook Phase B: mark full, ecom clean-docs (junk-deletion/subset OWNER-GATED), UGO skip, v2 frozen/deterministic-only; lexicons+cards LAST; preflight canary per paid stage; per-provider empty-latent counter",
+      "gate": "B6 smoke + reconciliation + checklist receipts"
+    },
     {
       "id": "eval-post-s2",
       "status": "in_flight",
@@ -30,10 +49,11 @@
     },
     {
       "id": "s4-mark-batch",
-      "status": "blocked_owner",
+      "status": "superseded",
       "blocker": "key rotation",
       "what": "quarantine+regen 1,004 capture-stale mark parents (latent+temporal), then reindex + verify counts + P0.1 verify green",
-      "driver": "backend/scripts/s4_quarantine_stale.py (docker cp into container /tmp + PYTHONPATH=/app) + scripts/polymath_summary_backfill_scoped.py"
+      "driver": "backend/scripts/s4_quarantine_stale.py (docker cp into container /tmp + PYTHONPATH=/app) + scripts/polymath_summary_backfill_scoped.py",
+      "superseded_by": "rebatch-phase-b (B1)"
     },
     {
       "id": "p2.5b-envelope",
@@ -102,5 +122,10 @@
     "S3 matrix \u00a78 sign-off",
     "S7 facet DF rule approval"
   ],
-  "raw_artifacts": "docs/execution_plan_audit/raw/ (claims/critiques/registries/frozen checklist/assembler), docs/baselines/container_backups/ (S1/S2/S4 durable-row backups pulled from container volume)"
+  "raw_artifacts": "docs/execution_plan_audit/raw/ (claims/critiques/registries/frozen checklist/assembler), docs/baselines/container_backups/ (S1/S2/S4 durable-row backups pulled from container volume)",
+  "roles": {
+    "claude": "senior dev + planner (specs, gates, review)",
+    "codex": "executor (runs runbooks, attaches receipts)",
+    "owner": "gates: \u00a78 sign-off, S7 DF rule, key rotation (this week), v2 unfreeze"
+  }
 }

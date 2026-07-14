@@ -117,3 +117,40 @@ extract frame instances
 
 Stage→superframe bindings: OWNER-APPROVED v1
 (backend/registries/motif_stage_superframe_binding.v1.json, set-valued).
+
+## Corrected ownership table (owner-delivered 2026-07-14 — FINAL AUTHORITY column added)
+
+| Semantic object | Primary owner | Supporting owner | Final authority |
+|---|---|---|---|
+| Sentences and paragraphs | Python + spaCy | Document parser | **Python** |
+| Named entities | GLiNER | Alias resolver | **Python** |
+| Semantic entities | GLiNER | spaCy noun phrases | **Python** |
+| Predicates | spaCy | Predicate normalizer | **Python** |
+| Predicate qualifiers | spaCy | Rules | **Python** |
+| Explicit relations | GLiREL/Relex | spaCy dependencies | **Python** |
+| Atomic claims | Python claim compiler | All local extractors | **Python** |
+| Explicit concepts | GLiNER + spaCy | Concept registry | **Python** |
+| Initial domains | Python resolver | Concepts, headings, metadata | **Python** |
+| Adjacent domains | Parent LLM | Claim/domain evidence | **Python** |
+| Superframes | Python frame rules | Relations and roles | **Python** |
+| Latent pattern candidates | Python | Claims and frames | **Python** |
+| Latent concept naming | Parent LLM | Detected patterns | **Python** |
+| Motifs | Python motif compiler | LLM for implicit patterns | **Python** |
+| Cross-book candidates | Python matcher | Frames, motifs, concepts | **Python** |
+| Cross-link explanation | LLM | Accepted candidate structure | **Python controls persistence** |
+
+Rule: no row grants an LLM final authority over anything durable. LLMs name,
+explain, and propose; Python detects, validates, clusters, and persists.
+
+## Latent concepts (owner spec 2026-07-14 — full policy at backend/registries/latent_concept_policy.v1.json)
+
+Two-part creation: Python detects unnamed structural patterns from accepted
+claims/frames ({pattern_id, supporting_claim_ids, abstract_roles,
+frame_sequence}) → parent LLM names+defines → Python normalizes, clusters into
+canonical families (raw candidates kept as generated_aliases), stores as
+candidates. Budgets separate generation / storage / retrieval-usage; the
+retention rule (new abstraction | mechanism interpretation | bridge | query
+vocabulary | distinction) governs promotion, not existence. INTERIM v1: until
+the claim layer exists, Ghost A emits latent candidates directly
+(derivation=llm_proposal, no supporting_claim_ids) — retained as candidates,
+corroborated when claim-grounded v2 lands.

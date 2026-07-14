@@ -1,0 +1,32 @@
+{
+  "registry": "latent_concept_policy",
+  "version": "v1",
+  "source": "owner-delivered in-chat 2026-07-14 (verbatim rules + budgets; owner stance: 'not a big fan of unlimited but dont like to restrict i need a good standard')",
+  "policy_note": "Recipe/policy data, never identity. The standard separates three capacities: GENERATION (bounded by budgets), STORAGE (candidates + generated aliases retained in provisional index), RETRIEVAL USAGE (only promoted/top-ranked per query mode). Budgets are operational, not permanent schema limits — they control promotion and per-query usage, not what may exist.",
+  "definition": "A latent concept is an underlying semantic abstraction inferred from one or more claims, even when the source never names it directly. Explicit concept: 'reference price'. Latent concept: 'repeated external signals reshape internal valuation baselines'.",
+  "creation_process": {
+    "step_1_python_detects": "Python examines accepted claims, predicates, relations, and superframes; emits an UNNAMED structural candidate: {pattern_id, supporting_claim_ids[], abstract_roles[], frame_sequence[]}",
+    "step_2_llm_names": "The parent-summary LLM call receives the detected pattern and proposes {preferred_label, definition, supporting_claim_ids[]}",
+    "step_3_python_normalizes": "Python normalizes, dedupes/clusters into concept families (originals retained as generated aliases), stores as candidate with assignment_state",
+    "interim_v1_note": "Until the claim layer exists, Ghost A emits latent candidates directly from parent text (derivation_method=llm_proposal, supporting_claim_ids=[]). These remain CANDIDATES; when claim-grounded detection (v2) lands, v1 candidates are corroborated->promoted or remain provisional. Consistent with the permission ladder — no wasted capture."
+  },
+  "not_a_latent_concept": ["ordinary named entities", "generic themes (growth, value, behavior)", "domains (psychology, marketing)", "superframes (learning, valuation)", "motifs themselves", "unrestricted LLM associations"],
+  "scope_levels": ["parent-local", "chapter-recurring", "document-central", "cross-domain", "cross-corpus bridge (generated lazily after indexing; most valuable for polymath-style retrieval)"],
+  "budgets": {
+    "child_chunk": {"raw_generated": [0, 3], "retained_distinct": [0, 2]},
+    "parent_group": {"raw_generated": [5, 12], "retained_distinct": [3, 8]},
+    "chapter": {"raw_generated": [8, 25], "retained_distinct": [5, 15]},
+    "document": {"raw_generated": [15, 50], "retained_distinct": [8, 30]},
+    "cross_corpus": {"raw_generated": "lazy / unbounded generation-capacity", "retained_distinct": "top-ranked; promotion-gated"}
+  },
+  "retention_rule": {
+    "retain_if_contributes_any": ["new abstraction", "new mechanism interpretation", "new cross-domain bridge", "new query vocabulary", "new distinction from existing concepts"],
+    "reject_or_merge_if_only": ["synonym of an existing concept", "vague theme (growth, value)", "restatement of one claim", "domain label disguised as a concept", "unsupported metaphor"]
+  },
+  "alias_clustering": "Python clusters near-duplicate candidates into canonical concept families; the raw candidates persist as generated_aliases on the family (they feed query-vocabulary matching); only canonical families power retrieval seats.",
+  "domain_vs_latent": {
+    "domain": "classified field of knowledge — answers 'in what body of knowledge does this belong'",
+    "adjacent_domain": "a field the passage meaningfully touches without using its vocabulary — still a DOMAIN classification",
+    "latent_concept": "the inferred idea underneath the claims — may be domain-local, cross-domain, document-level, parent-level, or a cross-corpus bridge"
+  }
+}
