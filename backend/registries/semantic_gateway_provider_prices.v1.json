@@ -1,0 +1,20 @@
+{
+  "schema_version": "polymath.semantic_gateway_provider_prices.v1",
+  "source_checked_at": "2026-07-14T19:15:00Z",
+  "routes": [
+    {
+      "route_id": "longcat-api__longcat-2.0",
+      "provider": "longcat",
+      "model_id": "openai/LongCat-2.0",
+      "api_base": "https://api.longcat.chat/openai/v1",
+      "currency": "USD",
+      "price_unit_tokens": 1000000,
+      "uncached_input_usd": 0.75,
+      "cached_input_usd": 0.015,
+      "output_usd": 2.95,
+      "fallback_input_basis": "uncached_input_conservative",
+      "price_tier": "published_list_price",
+      "source_url": "https://longcat.chat/platform/docs/Pricing/LongCat-2.0.html"
+    }
+  ]
+}

@@ -185,6 +185,111 @@ the tool-arguments root and no `parameters` or other wrapper. Its independent
 hash is recorded in provenance and participates in the combined prompt hash,
 so repair-contract changes always change the cache identity.
 
+### 5.1 Frozen target-corpus remediation text (senior-approved)
+
+Status: **approved verbatim and frozen at 2026-07-14T20:38:14Z**. This prompt
+contract responds to
+the mark phase-1 evidence that 4/12 packets dead-lettered with nonempty output:
+three unsupported motif/frame proposal classes and one structurally invalid
+`latent_concepts` value. It does not change `SemanticDigestV1`, the semantic
+validator, temperature, provider route, or permission ladder.
+
+Frozen universal system prompt, `parent-digest.v6` (exact text):
+
+> Generate a SemanticDigestV1 from the supplied evidence. Use only claim IDs
+> present in the input. Do not invent registry IDs. Use empty arrays when no
+> supported result exists. Treat latent concepts and motifs as proposals, not
+> facts. Separate source-backed conclusions from proposed interpretations.
+> Never mark your own proposal as validated. Every domain, frame, latent-
+> concept, or motif proposal must have a non-empty supporting_claim_ids array
+> containing only claim IDs present in the input; otherwise omit that
+> proposal. Propose a motif only when every frame_id in its frame_sequence
+> also appears in frame_proposals, and use at least two frames. Every
+> latent_concepts item must contain exactly these five fields: preferred_label
+> as a string, definition as a string, assignment_state as candidate,
+> corroborated, unresolved, or rejected, supporting_claim_ids as an array of
+> input claim IDs, and aliases as an array of strings. Fewer proposals are
+> correct when support is uncertain; empty proposal arrays are always lawful.
+> Return only a JSON object. Return the SemanticDigestV1 object itself at the
+> top level. Do not wrap it under digest or add other top-level fields.
+
+Frozen generic targeted repair instruction,
+`parent-digest-repair.v3` (exact text):
+
+> Correct only the validation failures. When a validation error names an
+> unsupported proposal or an invalid proposal reference, remove that entire
+> optional proposal. Never preserve a failing proposal by inventing,
+> substituting, or reassigning claims, frames, registry IDs, aliases,
+> definitions, or justification. Preserve valid content. Fewer proposals are
+> correct; empty proposal arrays are always lawful. Return every required
+> array, using an empty array when no supported result exists. Return the
+> SemanticDigestV1 object itself at the top level. Do not wrap it under digest
+> or add other top-level fields.
+
+Frozen Tier 3 repair suffix (exact text, appended to repair-v3):
+
+> Resubmit the correction through the SAME forced submit_semantic_digest tool.
+> Put all 12 SemanticDigestV1 fields directly at the tool-arguments root. Do
+> not nest them under parameters or any other wrapper.
+
+The two versions and hashes change independently in provenance;
+their combined prompt identity changes the generation cache key. Accepted
+digests from the previously certified route remain contract-valid purchases
+and are skipped by parent acceptance, regardless of prompt version.
+
+### 5.2 Paid-pass transport exposure accounting (senior-approved)
+
+A transport-dead job is terminal and is never retried in-phase because the
+provider may have processed the timed-out request. Missing provider telemetry
+is not rewritten as zero and is not synthesized as actual cost:
+`actual_cost_usd` remains null and row `cost_complete` remains false. The
+operator may instead book an explicit, versioned
+`unpriced_exposure_upper_bound_usd` on a separate ledger line. Budget ceiling
+checks sum known actual cost plus these bounds; when every unknown cost has a
+lawful bound, phase accounting state is
+`complete_with_bounded_exposure` while actual-cost completeness remains false.
+
+The current mark ruling fixes the bound at `$0.06` per transport-dead row
+(`bounded_transport_exposure.v1`). This accounting distinction does not
+change acceptance: Phase 1C still requires 48/50. Its ordinal-60 ReadTimeout
+is a final Phase-1C loss and joins the separately sealed post-Phase-2 tail set;
+tail retries use authorization-scoped durable job IDs so the original attempt
+ledger remains immutable. Three total Phase-1C ReadTimeouts pause the pass for
+a versioned transport-timeout proposal; they do not silently change runtime
+parameters.
+
+### 5.3 Canonical census scope v2 (senior-approved)
+
+Canonical drift verdicts protect Polymath-owned assets, not unrelated
+applications that share the same database server. The versioned
+`canonical_store_census.scope.v2` recipe is hashed under the registered
+`scope` namespace. Its current recipe hash is
+`sha256:d5a5c1344898d397f1b687b4569fff2613da67d2b8d27a53542d97b7983c8773`.
+
+Verdict-bearing counts are:
+
+- Mongo `semantic_artifacts`;
+- all nodes and relationships in Polymath's Neo4j instance;
+- Qdrant's exact shared Polymath collections `polymath_children` and
+  `polymath_doc_summaries`; and
+- per-corpus Qdrant collections matching the frozen naming rule
+  `^corpus_[0-9a-f]{8}_(graph|hrag|naive|schemas)$`.
+
+Every other Qdrant collection is an ambient co-tenant observation. Its before
+and after count and any per-collection delta remain visible in every receipt,
+but it has no RED/GREEN verdict authority. A change in any allowlisted count
+is RED. A missing or malformed scope version, recipe hash, protected count,
+ambient partition, or total reconciliation is also RED. This is a prospective
+scope correction: earlier global-v1 receipts remain immutable and are never
+relabeled.
+
+The triggering Phase-1C receipt therefore remains RED because it observed a
+one-point `hermes_memories` change. Read-only attribution proved that point was
+written by the host-side Hermes/mem0 co-tenant, not the paid backend. A new,
+zero-provider v2 postflight referenced the RED receipt and senior ruling,
+revalidated the frozen quality/cost ledger, observed no protected drift, and
+then wrote the Phase-1C release marker.
+
 ## 6. Semantic validation (structure ≠ meaning; Python enforces after Pydantic)
 
 Every referenced claim ID exists AND belongs to the supplied parent · every

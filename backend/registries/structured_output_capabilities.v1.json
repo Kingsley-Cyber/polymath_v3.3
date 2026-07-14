@@ -1,7 +1,7 @@
 {
   "schema_version": "polymath.structured_output_capabilities.v1",
   "recipe_version": "structured-output-capability.runtime-probe.v1",
-  "generated_at": "2026-07-14T15:13:13.240000Z",
+  "generated_at": "2026-07-14T20:01:50.770642Z",
   "policy": {
     "metadata_can_grant_tier1": false,
     "unverified_default": "tier4"
@@ -13,7 +13,7 @@
       "api_base": "https://api.deepseek.com/v1",
       "native_json_schema": false,
       "verification_status": "provider_rejected",
-      "verified_at": "2026-07-14T14:26:39.928137Z",
+      "verified_at": "2026-07-14T19:18:11.281776Z",
       "verified_digest_path": null,
       "tier3_digest_status": "partial_acceptance_repair_budget_exhausted",
       "tier4_digest_status": "structurally_unreliable",
@@ -21,7 +21,8 @@
         "semantic-dlq:c17065513de69beb42fcbe80547408ecf1ded594948db048894c39c68931195a",
         "semantic-dlq:06bfaf8e065e67047029756674830e717883849d96e6bca0dc1c31d417d4588a",
         "semantic-dlq:b8cb39acdcdc912e6809cb5bcccb0f1fab4f27ca6b04bdce1c6574224fab4914",
-        "semantic-dlq:c941b145d966d041bb2c83ff29a2de4b2f0f4b06cd6da7880e23712252192b4d"
+        "semantic-dlq:c941b145d966d041bb2c83ff29a2de4b2f0f4b06cd6da7880e23712252192b4d",
+        "polymath.structured_output_capability_probe.v1:deepseek-api__deepseek-v4-flash:2026-07-14T19:18:11.281776Z"
       ],
       "tier4_prompt_requirement": "json_object_prompt_must_contain_literal_json",
       "probe_receipt": {
@@ -98,12 +99,35 @@
       "api_base": "https://api.longcat.chat/openai/v1",
       "native_json_schema": false,
       "verification_status": "provider_rejected",
-      "verified_at": "2026-07-14T14:26:43.104359Z",
-      "verified_digest_path": null,
-      "tier3_digest_status": "tiny_tool_accepted_digest_unverified",
+      "verified_at": "2026-07-14T20:01:50.770642Z",
+      "verified_digest_path": "tier3",
+      "tier3_digest_status": "full_digest_recanary_10_of_10_accepted",
       "tier4_digest_status": "not_tested",
       "digest_evidence_receipts": [
-        "polymath.tier3_tool_capability_probe.v1:longcat-api__longcat-2.0:2026-07-14T15:11:44.136938Z"
+        "polymath.tier3_tool_capability_probe.v1:longcat-api__longcat-2.0:2026-07-14T15:11:44.136938Z",
+        "polymath.t9_3_provider_preflight.v1:longcat-api__longcat-2.0:2026-07-14T19:37:43.830165Z",
+        "sha256:e5a14447409daaad74cee3c820c94a36ebb2a6402900b68a85e4f0a2cd4b2e51",
+        "sha256:a43f5e4e8be1131fdf5f989191bc7e0801f7e411c7b960b5685992210d95fd2a",
+        "sha256:be672a6b286bbf7fd95ef353700123854aa666306c43d39f2ac32f60f4de55be",
+        "sha256:f6534693abb0880aa87e96fefde24079a9ae92121e270929c1f8b5c2523e44a6",
+        "sha256:3406b3242c16b7b33cbcbb3d175a878415e61a7d83a1a1fc8345184075b5350e",
+        "semantic-dlq:c2a997266bf29670043b577874a757e8cfc183e5597571240ecf5cbdc8ba5258",
+        "semantic-dlq:8bfdd4b0b1f996748af57122be268eef5f3c050d20d9e4b383d572b24a932586",
+        "semantic-dlq:71654b43a658266b916f7aafe0e23534f4122c201eebe486d74bea1384d2946d",
+        "semantic-dlq:36b5fe78a1cab2e1340680481511ea5f7acede0158cd0d1132f2e22d0b0e6acc",
+        "semantic-dlq:df441264418f8263255105e7b196422c661099228e869e0e84b149008830ae9c",
+        "polymath.t9_3_provider_recanary.v1:longcat-api__longcat-2.0:2026-07-14T20:01:50.770642Z",
+        "sha256:e09961e498056a8f0e07c6bd91f8cf836d1bf816971d4ebd2264925bc1efe966",
+        "sha256:4d8a654980d5c3bf79b342945534caf16d0318be167aacd6fd8c6ed5e388f751",
+        "sha256:c688cc8d719711518b8efb6d38366174ffa1fd2a64ab5a6f767847550fb0e64f",
+        "sha256:5bcdd3293de235fa4aecc4b0ed6fc6a53179d028577f80eec6a4b48ebb19bdce",
+        "sha256:ea3fb1f3f0f59446456e8e2e60eb992ec807d6d70728f85a57d9d8caea56ef04",
+        "sha256:50aa4cdb4d06df1fcb64aa01d8f513b41103adc0bf9ad73fabdb6e19e50c2572",
+        "sha256:04ab1707bb357d108e63befc019d0cbde095bb32a29b4b6b555fc255de1c9c78",
+        "sha256:62364b8b73d2d6fa33939b7cf6fadb3463624ef23bba688bdb7003fd93aacdba",
+        "sha256:f43d7938eed1b0fa4ebf0f1e38eb37e2ad93b051d3e5b204b35f242329e60c62",
+        "sha256:5139a20f9680eb09bd36c976d00cb186667568cd1e9db2fe5a2a615c66a484e6",
+        "semantic-dlq:fa9ed9e62ff4a2eac22a52ae11d250a4d178e731d9bbb2d9898fd80b87cc789c"
       ],
       "tier4_prompt_requirement": "not_runtime_verified",
       "probe_receipt": {

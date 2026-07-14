@@ -1,0 +1,229 @@
+{
+  "acceptance": {
+    "all_green": true,
+    "phase_complete": true
+  },
+  "canonical_store_census": {
+    "after": {
+      "ambient_qdrant_collection_points": {
+        "hermes_memories": 609,
+        "mem0migrations": 0
+      },
+      "ambient_qdrant_total_points": 609,
+      "census_scope_recipe_hash": "sha256:d5a5c1344898d397f1b687b4569fff2613da67d2b8d27a53542d97b7983c8773",
+      "census_scope_version": "canonical_store_census.scope.v2",
+      "mongo_semantic_artifacts": 0,
+      "neo4j_nodes": 1361818,
+      "neo4j_relationships": 3712432,
+      "observed_qdrant_total_points": 1364768,
+      "qdrant_collection_points": {
+        "corpus_0d296882_graph": 76,
+        "corpus_0d296882_hrag": 95,
+        "corpus_0d296882_naive": 99,
+        "corpus_0d296882_schemas": 437,
+        "corpus_5a20bc21_graph": 3687,
+        "corpus_5a20bc21_hrag": 4696,
+        "corpus_5a20bc21_naive": 4696,
+        "corpus_5a20bc21_schemas": 2490,
+        "corpus_62193743_graph": 106,
+        "corpus_62193743_hrag": 186,
+        "corpus_62193743_naive": 186,
+        "corpus_62193743_schemas": 510,
+        "corpus_999b5934_graph": 222783,
+        "corpus_999b5934_hrag": 280175,
+        "corpus_999b5934_naive": 309661,
+        "corpus_999b5934_schemas": 291535,
+        "corpus_bcf80054_graph": 659,
+        "corpus_bcf80054_hrag": 862,
+        "corpus_bcf80054_naive": 862,
+        "corpus_bcf80054_schemas": 7494,
+        "corpus_e89431b5_graph": 0,
+        "corpus_e89431b5_hrag": 0,
+        "corpus_e89431b5_naive": 0,
+        "corpus_e89431b5_schemas": 0,
+        "corpus_fd460347_graph": 55774,
+        "corpus_fd460347_hrag": 65227,
+        "corpus_fd460347_naive": 65227,
+        "corpus_fd460347_schemas": 45949,
+        "polymath_children": 3,
+        "polymath_doc_summaries": 684
+      },
+      "qdrant_total_points": 1364159
+    },
+    "ambient_change_observed": false,
+    "ambient_qdrant_collection_deltas": {},
+    "before": {
+      "ambient_qdrant_collection_points": {
+        "hermes_memories": 609,
+        "mem0migrations": 0
+      },
+      "ambient_qdrant_total_points": 609,
+      "census_scope_recipe_hash": "sha256:d5a5c1344898d397f1b687b4569fff2613da67d2b8d27a53542d97b7983c8773",
+      "census_scope_version": "canonical_store_census.scope.v2",
+      "mongo_semantic_artifacts": 0,
+      "neo4j_nodes": 1361818,
+      "neo4j_relationships": 3712432,
+      "observed_qdrant_total_points": 1364768,
+      "qdrant_collection_points": {
+        "corpus_0d296882_graph": 76,
+        "corpus_0d296882_hrag": 95,
+        "corpus_0d296882_naive": 99,
+        "corpus_0d296882_schemas": 437,
+        "corpus_5a20bc21_graph": 3687,
+        "corpus_5a20bc21_hrag": 4696,
+        "corpus_5a20bc21_naive": 4696,
+        "corpus_5a20bc21_schemas": 2490,
+        "corpus_62193743_graph": 106,
+        "corpus_62193743_hrag": 186,
+        "corpus_62193743_naive": 186,
+        "corpus_62193743_schemas": 510,
+        "corpus_999b5934_graph": 222783,
+        "corpus_999b5934_hrag": 280175,
+        "corpus_999b5934_naive": 309661,
+        "corpus_999b5934_schemas": 291535,
+        "corpus_bcf80054_graph": 659,
+        "corpus_bcf80054_hrag": 862,
+        "corpus_bcf80054_naive": 862,
+        "corpus_bcf80054_schemas": 7494,
+        "corpus_e89431b5_graph": 0,
+        "corpus_e89431b5_hrag": 0,
+        "corpus_e89431b5_naive": 0,
+        "corpus_e89431b5_schemas": 0,
+        "corpus_fd460347_graph": 55774,
+        "corpus_fd460347_hrag": 65227,
+        "corpus_fd460347_naive": 65227,
+        "corpus_fd460347_schemas": 45949,
+        "polymath_children": 3,
+        "polymath_doc_summaries": 684
+      },
+      "qdrant_total_points": 1364159
+    },
+    "exactly_unchanged": true,
+    "protected_exactly_unchanged": true,
+    "scope_recipe_hash": "sha256:d5a5c1344898d397f1b687b4569fff2613da67d2b8d27a53542d97b7983c8773",
+    "scope_valid": true,
+    "scope_version": "canonical_store_census.scope.v2"
+  },
+  "checkpoint": {
+    "acceptance": 0.96,
+    "acceptance_by_packet_size_band": {
+      "above_canaried_max": {
+        "acceptance": null,
+        "accepted_count": 0,
+        "dead_letter_count": 0,
+        "max_packet_bytes": null,
+        "packet_count": 0,
+        "threshold_bytes": 21515
+      },
+      "at_or_below_canaried_max": {
+        "acceptance": 0.96,
+        "accepted_count": 48,
+        "dead_letter_count": 2,
+        "max_packet_bytes": 16918,
+        "packet_count": 50,
+        "threshold_bytes": 21515
+      }
+    },
+    "acceptance_green": true,
+    "accepted_count": 48,
+    "actual_cost_usd": 1.1410794999999998,
+    "all_green": true,
+    "ambient_qdrant_collection_deltas": {},
+    "attempted_count": 50,
+    "bounded_exposure_usd": 0.06,
+    "budget_accounting_complete": true,
+    "canonical_census_scope_recipe_hash": "sha256:d5a5c1344898d397f1b687b4569fff2613da67d2b8d27a53542d97b7983c8773",
+    "canonical_census_scope_valid": true,
+    "canonical_census_scope_version": "canonical_store_census.scope.v2",
+    "canonical_drift_zero": true,
+    "complete": true,
+    "cost_accounting_state": "complete_with_bounded_exposure",
+    "cost_ceiling_basis_per_packet_usd": 0.024021589999999995,
+    "cost_ceiling_basis_usd": 1.2010794999999999,
+    "cost_complete": false,
+    "cost_green": true,
+    "cost_per_packet_usd": 0.022821589999999996,
+    "dead_letter_count": 2,
+    "max_cost_per_packet_usd": 0.06,
+    "minimum_acceptance": 0.95,
+    "row_count": 50,
+    "target_count": 50,
+    "terminal_count": 50,
+    "unpriced_exposure_count": 1
+  },
+  "corpus": {
+    "corpus_id": "5a20bc21-95df-42c2-80c8-f927b4e83904",
+    "document_count": 103,
+    "eligible_packet_count": 989,
+    "name": "markbuildsbrands_transcripts",
+    "packet_bytes": {
+      "max": 25574,
+      "min": 1007
+    }
+  },
+  "corpus_acceptance_before_tail": null,
+  "cost_accounting": {
+    "authorized_ceiling_usd": 49.45,
+    "bounded_exposure_usd": 0.06,
+    "budget_accounting_complete": true,
+    "ceiling_basis_usd": 1.7445445499999994,
+    "cost_accounting_state": "complete_with_bounded_exposure",
+    "cost_complete": false,
+    "cumulative_actual_cost_usd": 1.6845445499999994,
+    "estimated_cost_per_packet_usd": 0.04,
+    "safety_multiplier": 1.25,
+    "unpriced_exposure_count": 1,
+    "within_ceiling": true
+  },
+  "durable_queue": {
+    "accepted_count": 48,
+    "booked_exposure_count": 0,
+    "call_receipts": [],
+    "collection": "semantic_digest_jobs",
+    "dead_letter_count": 2,
+    "phase_selection": "mark-phase1c.parent-digest.v6.v1",
+    "phase_target": 50,
+    "planned_counts": {
+      "dead_letter": 2,
+      "succeeded": 48
+    },
+    "terminal_count": 50
+  },
+  "generated_at": "2026-07-14T22:29:29Z",
+  "phase": "phase1c",
+  "prerequisite_release": {
+    "phase": "phase1b",
+    "present": true
+  },
+  "provider_contract": {
+    "api_base_origin": "api.longcat.chat",
+    "capability_tier": "tier3",
+    "credential_source": "encrypted settings.api_keys.longcat",
+    "max_tokens": 8192,
+    "model_id": "openai/LongCat-2.0",
+    "parameter_version": "longcat-tier3-full-digest.max-tokens-8192.v1",
+    "prompt_hash": "sha256:ee523bbf674d26a3974488e48fdfae6f0f4a4238e1df94ce39067dc9d35c10eb",
+    "prompt_version": "parent-digest.v6",
+    "repair_prompt_hash": "sha256:0d4d7d5f50c0a98312cf4052510aa4225d1cc235b319df84c5eacf1c5801d145",
+    "repair_prompt_version": "parent-digest-repair.v3",
+    "route_id": "longcat-api__longcat-2.0",
+    "runtime_version": "longcat-api.openai-compatible.2026-07-14.cp9-recanary-mt8192-v1",
+    "temperature": 0,
+    "thinking": "disabled"
+  },
+  "re_evaluation": {
+    "authorization_reference": "COORDINATION.md#2026-07-14T22:19:43Z",
+    "mode": "zero_provider_postflight",
+    "prior_receipt_sha256": "sha256:dc8ef8ec5d060554910a5fb6d316812c0657dc0051348b22f054fe8c53ac4b82",
+    "provider_call_count": 0
+  },
+  "schema_version": "polymath.semantic_digest_paid_pass.v1",
+  "security": {
+    "canonical_write": false,
+    "credentials_from_encrypted_settings": true,
+    "packet_text_in_receipt": false,
+    "plaintext_credentials_in_receipt": false,
+    "raw_provider_output_in_receipt": false
+  },
+  "stop_reason": null
+}

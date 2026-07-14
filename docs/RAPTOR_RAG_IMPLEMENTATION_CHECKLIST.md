@@ -2889,6 +2889,152 @@ A corpus is strict-ready only when:
 - Checklist boxes closed: T9.2 in `CODEX_MISSION.md`; no retrieval, provider,
   or semantic-promotion checklist box is claimed.
 
+### 2026-07-14 - T9.3 digest-provider preflight and LongCat Tier3 route verification
+
+- Commit: this commit on `claude-continuation-20260713`; the paid parent pass
+  remains a separate sealed action pending a named senior GO.
+- Owner: Codex sole executor under `CODEX_MISSION.md`; Claude authorized one
+  Flash probe, one 10-packet LongCat canary, zero-call diagnosis, and one
+  versioned parameter-only re-canary with a preregistered 9/10 minimum.
+- Corpus/data scope: exactly 10 evenly sampled valid parents from the one-
+  document `UGO_CORPUS` (`bcf80054-7611-47d0-ae16-fa7fed259b13`, 203 eligible
+  parents). Mark remained virgin. Packets use accepted parent text and
+  `polymath.extract.v1` entities, never Ghost A summary text.
+- Code changes: added redacted LiteLLM usage/cost telemetry, single-route
+  capability probing, serial ceiling enforcement, honest per-packet success/
+  DLQ receipts, a versioned LongCat price card, and an exact versioned route-
+  parameter card. The only provider remediation was `max_tokens` 4096→8192.
+  Prompt `parent-digest.v5`, repair `parent-digest-repair.v2`, SemanticDigestV1,
+  semantic validator, Tier3 forced tool, temperature 0, and thinking disabled
+  were unchanged.
+- Durable migration/backfill: none. Accepted digests live only in
+  `semantic_digest_cache` with `canonical_write=false`; failures live only in
+  `semantic_digest_dead_letters`. Mongo `semantic_artifacts`, Qdrant points,
+  and Neo4j counts were exactly unchanged before/after both canaries.
+- Before metrics: Flash again rejected native `json_schema` in one tiny call
+  (HTTP 400, cost $0). The first LongCat run at 4,096 output tokens accepted
+  5/10, terminal-DLQ'd 5/10, made 19 calls, used 212,353 tokens, and cost
+  $0.31691455 by the approved published-list provider-card fallback.
+- After metrics: zero-call diagnosis found all 5/5 DLQs exactly at their two-
+  attempt 8,192-token aggregate cap and 0/5 accepted packets at cap; packet
+  byte size did not separate outcomes. With the frozen 8,192 route cap, the
+  single re-canary accepted 10/10 with zero terminal DLQ: 6 first-attempt and
+  4 repaired, including the injected semantic mismatch. All 10 provenance
+  rows are complete and semantic replay is clean. Fourteen calls used 169,544
+  tokens and cost $0.26999080; cumulative preflight cost was $0.58690535,
+  below the $2 envelope.
+- Tests by tier: telemetry/pricing focused gates passed 58 tests
+  (`/tmp/t93_telemetry_pricing_focused.log`); parameter-card and registry gate
+  passed 60 (`/tmp/t93_recanary_parameter_focused.log`); read-only live
+  preflight passed (`/tmp/t93_live_preflight.log`); Flash probe true `EXIT=0`
+  (`/tmp/t93_flash_probe.log`); first LongCat acceptance correctly failed
+  `EXIT=1` (`/tmp/t93_longcat_ugo_canary.log`); diagnosis passed `EXIT=0`
+  (`/tmp/t93_longcat_diagnosis.stderr`); re-canary passed true `EXIT=0`
+  (`/tmp/t93_longcat_ugo_recanary.log`).
+- Cross-corpus test: intentionally not applicable to the senior-bounded UGO-
+  only preflight. Mark is reserved for the one paid pass and was not sampled.
+- Failure/rollback test: the 5/10 initial result was not weakened or retried
+  silently. Five exact DLQ IDs and five accepted cache IDs were frozen. The
+  diagnosis changed no provider state. Route arguments now fail closed on any
+  drift from the versioned 8,192 card. Rollback removes telemetry/cards and
+  noncanonical canary rows only; canonical stores require no rollback.
+- Deployment image/health: no production deploy or service reload. Live calls
+  ran from an isolated current-source copy of the healthy deployed backend
+  image through the existing healthy LiteLLM proxy, using encrypted Mongo
+  credentials only.
+- Remaining risks: the provider route is verified only for Tier3 at the frozen
+  8,192 parameter version; native Tier1 remains rejected. LiteLLM lacks a
+  numeric LongCat price mapping, so cost uses usage × the versioned published
+  list price (conservative uncached input), explicitly named in every receipt.
+  The paid pass remains sealed until the senior names provider, packet count,
+  and cost ceiling.
+- Artifacts: `docs/baselines/T9_3_PROVIDER_PREFLIGHT_2026-07-14.json` preserves
+  the failed initial canary; `docs/baselines/T9_3_PROVIDER_RECANARY_2026-07-14.json`
+  preserves the green route evidence; runtime permission is recorded in
+  `backend/registries/structured_output_capabilities.v1.json`.
+- Checklist boxes closed: provider preflight only. T9.3's paid pass,
+  projection, and activation work remain open and separately gated.
+
+### 2026-07-14 - T9.3 mark Phase-1C release, legacy fence, and owner quality sample
+
+- Commit: this commit on `claude-continuation-20260713`; Phase 2 remains
+  explicitly owner-sealed.
+- Owner: Codex sole executor under `CODEX_MISSION.md`; Claude froze the v6/v3
+  prompt remediation, phase-selection ledger, bounded-exposure accounting,
+  five-parent tail, census_scope.v2 correction, and backup-first fence. The
+  owner required an actual digest sample before authorizing Phase 2.
+- Corpus/data scope: `markbuildsbrands_transcripts`, corpus
+  `5a20bc21-95df-42c2-80c8-f927b4e83904`, 103 documents / 989 eligible
+  parents. Phase 1 bought 12 v5/v2 packets, Phase 1B bought 10 fresh v6/v3
+  packets, and Phase 1C bought 50 fresh v6/v3 packets. Accepted cross-prompt
+  cache rows were never repurchased.
+- Code changes: added the durable paid-pass runner with deterministic fresh
+  selection, checkpoint/release prerequisites, exactly-once claims, certified
+  cross-prompt cache skip, cost/size/acceptance stops, and an authorization-
+  scoped tail identity. Added honest transport exposure accounting: unknown
+  actual cost remains null/incomplete while a separate versioned `$0.06`
+  bound participates in ceiling arithmetic. Added hashed
+  `canonical_store_census.scope.v2`: only explicit Polymath Qdrant collection
+  rules have verdict authority; co-tenant counts/deltas remain visible.
+- Durable migration/backfill: 66 accepted noncanonical cache rows and 6 DLQs
+  exist across the 72 purchased target packets. Thirty-eight unattempted
+  Phase-1 materializations remain checkpoint-cancelled. Before Phase 2, 939
+  inert legacy v5/v2 queued rows were exported to sorted canonical JSONL and
+  then superseded with reason `superseded_by_phase2_v6_2026-07-14`; active
+  target rows are zero. No semantic artifact, Qdrant point, Neo4j node, or
+  canonical projection was written.
+- Before metrics: Phase 1 accepted 8/12 and DLQ'd 4/12. Senior-approved v6/v3
+  Phase 1B accepted 10/10. Phase 1C first stopped at 37 accepted / 2 DLQ / 11
+  untouched because ordinal 60 had a transport ReadTimeout, no usage telemetry,
+  and null actual cost.
+- After metrics: the approved continuation accepted 11/11, so Phase 1C is
+  48/50 = 96% with two final DLQs and one bounded transport exposure. Phase-1C
+  known actual is `$1.14107950` plus `$0.06` bound; cumulative mark known
+  actual is `$1.68454455`, ceiling basis `$1.74454455` under `$49.45`. All 50
+  packets are at/below 21,515 bytes, max 16,918. Fifty green release and
+  canonical checkpoint markers persist. Frozen Phase-2 remainder is 917.
+- Tests by tier: bounded accounting focused 19/19 and adjacent 159/159; final
+  census_scope.v2 focused 41/41, immediate adjacent 91/91, and broad adjacent
+  193 passed / 7 optional skips. The zero-provider v2 postflight returned true
+  `EXIT=0` with empty call receipts. Backup and fence gates both returned true
+  `EXIT=0`; owner-report structure/secret/diff validation returned true
+  `EXIT=0`.
+- Cross-corpus test: census_scope.v2 observes all live Qdrant collections,
+  partitions exact Polymath-owned collections from ambient co-tenants, and
+  still fails on any protected Mongo/Qdrant/Neo4j drift. The triggering global-
+  v1 receipt detected one `hermes_memories` point; access logs and payload
+  shape attributed it to the host-side Hermes/mem0 co-tenant. The RED receipt
+  remains immutable. The new v2 postflight reported ambient counts and found
+  protected drift zero.
+- Failure/rollback test: no failed gate was relabeled. The ReadTimeout was not
+  retried in-phase or assigned synthetic cost. The 939-row fence is reversible
+  from its pre-mutation JSONL, SHA-256
+  `eceff199ac6ed56933d21793860005cef743b81484c07dff20b3321a7b26e72d`.
+  Phase 2 cannot materialize until the release marker exists and now remains
+  additionally blocked by the owner decision.
+- Deployment image/health: no rebuild or restart occurred during paid work.
+  Tests and operations ran from the exact isolated source overlay on the
+  healthy deployed backend image. Host/container hashes matched before the
+  postflight. Credentials came only from encrypted Mongo settings.
+- Remaining risks: the owner sample proves that acceptance is contract/grounding
+  reliability, not semantic richness. Eight of 66 accepted digests are bare
+  headings (two still propose a latent concept); evidence is one whole-parent
+  interim claim rather than an atomic compiled claim; domain proposals cover
+  only 13/66 accepted parents. The owner report recommends keeping Phase 2 on
+  hold until choosing candidate-only bulk execution or a deterministic noise,
+  claim-granularity, and domain-coverage policy. The five-parent tail remains
+  sealed until Phase 2 and corpus-wide acceptance at least 95%.
+- Artifacts: immutable RED continuation receipt
+  `docs/baselines/T9_3_MARK_PHASE1C_CONTINUATION_RED_2026-07-14.json`; green v2
+  release receipt
+  `docs/baselines/T9_3_MARK_PHASE1C_CENSUS_V2_RELEASE_2026-07-14.json`; owner
+  report `docs/T9_3_MARK_DIGEST_SAMPLE_FOR_OWNER_2026-07-14.md`; backup
+  `docs/baselines/t93_backups/T9_3_MARK_LEGACY_SEMANTIC_DIGEST_JOBS_QUEUED_2026-07-14.jsonl`
+  plus its SHA-256 sidecar.
+- Checklist boxes closed: Phase-1C release and the pre-Phase-2 legacy fence.
+  T9.3 remains open: Phase 2, corpus-wide completion, and bounded tail are
+  owner/sequencing gated; no projection or retrieval activation is claimed.
+
 ## Implementation Log Template
 
 Copy this section for every completed item:

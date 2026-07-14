@@ -6,6 +6,7 @@
 import asyncio
 import json
 import logging
+import math
 from typing import Any, AsyncGenerator
 
 import httpx
@@ -34,6 +35,49 @@ _TRANSIENT_STREAM_ERROR_MARKERS = (
     "timed out",
     "timeout",
 )
+
+
+def _provider_response_telemetry(
+    response: Any,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    """Return redacted usage/cost telemetry from one LiteLLM response.
+
+    LiteLLM computes the routed provider cost and returns it in a response
+    header. Only numeric token counts and that numeric cost cross this seam;
+    provider bodies, credentials, request text, and model output do not.
+    """
+
+    raw_usage = payload.get("usage")
+    usage: dict[str, int] = {}
+    if isinstance(raw_usage, dict):
+        for field in ("prompt_tokens", "completion_tokens", "total_tokens"):
+            value = raw_usage.get(field)
+            if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+                usage[field] = value
+
+    headers = getattr(response, "headers", None)
+    raw_cost = (
+        headers.get("x-litellm-response-cost")
+        if headers is not None and hasattr(headers, "get")
+        else None
+    )
+    cost: float | None = None
+    if raw_cost not in (None, "", "None"):
+        try:
+            candidate = float(raw_cost)
+        except (TypeError, ValueError):
+            candidate = float("nan")
+        if math.isfinite(candidate) and candidate >= 0:
+            cost = candidate
+
+    return {
+        "usage": usage,
+        "actual_cost_usd": cost,
+        "cost_source": (
+            "litellm.x-litellm-response-cost" if cost is not None else None
+        ),
+    }
 
 
 def _is_transient_stream_error(exc: Exception) -> bool:
@@ -756,7 +800,12 @@ class LLMService:
         data = resp.json()
         choices = data.get("choices") or []
         if not choices:
-            return {"tool_calls": [], "content": "", "reasoning_content": ""}
+            return {
+                "tool_calls": [],
+                "content": "",
+                "reasoning_content": "",
+                "provider_telemetry": _provider_response_telemetry(resp, data),
+            }
 
         message = choices[0].get("message") or {}
         return {
@@ -764,6 +813,7 @@ class LLMService:
             "content": message.get("content") or "",
             "reasoning_content": message.get("reasoning_content") or "",
             "finish_reason": choices[0].get("finish_reason"),
+            "provider_telemetry": _provider_response_telemetry(resp, data),
         }
 
     async def stream_chat(

@@ -22,7 +22,7 @@ from models.structured_output_capabilities import (
 )
 
 
-SYSTEM_PROMPT = (
+LEGACY_SYSTEM_PROMPT_V5 = (
     "Generate a SemanticDigestV1 from the supplied evidence. Use only claim "
     "IDs present in the input. Do not invent registry IDs. Use empty arrays "
     "when no supported result exists. Treat latent concepts and motifs as "
@@ -31,20 +31,60 @@ SYSTEM_PROMPT = (
     "a JSON object. Return the SemanticDigestV1 object itself at the top "
     "level. Do not wrap it under digest or add other top-level fields."
 )
-PROMPT_VERSION = "parent-digest.v5"
-REPAIR_PROMPT_VERSION = "parent-digest-repair.v2"
-REPAIR_INSTRUCTION = (
+SYSTEM_PROMPT_V6 = (
+    "Generate a SemanticDigestV1 from the supplied evidence. Use only claim IDs "
+    "present in the input. Do not invent registry IDs. Use empty arrays when no "
+    "supported result exists. Treat latent concepts and motifs as proposals, not "
+    "facts. Separate source-backed conclusions from proposed interpretations. "
+    "Never mark your own proposal as validated. Every domain, frame, latent-"
+    "concept, or motif proposal must have a non-empty supporting_claim_ids array "
+    "containing only claim IDs present in the input; otherwise omit that "
+    "proposal. Propose a motif only when every frame_id in its frame_sequence "
+    "also appears in frame_proposals, and use at least two frames. Every "
+    "latent_concepts item must contain exactly these five fields: preferred_label "
+    "as a string, definition as a string, assignment_state as candidate, "
+    "corroborated, unresolved, or rejected, supporting_claim_ids as an array of "
+    "input claim IDs, and aliases as an array of strings. Fewer proposals are "
+    "correct when support is uncertain; empty proposal arrays are always lawful. "
+    "Return only a JSON object. Return the SemanticDigestV1 object itself at the "
+    "top level. Do not wrap it under digest or add other top-level fields."
+)
+PROMPT_VERSION = "parent-digest.v6"
+REPAIR_PROMPT_VERSION = "parent-digest-repair.v3"
+LEGACY_REPAIR_INSTRUCTION_V2 = (
     "Correct only the validation failures. Return every required array; use "
     "an empty array when no supported result exists. Return the "
     "SemanticDigestV1 object itself at the top level. Do not wrap it under "
     "digest or add other top-level fields."
 )
-TIER3_REPAIR_INSTRUCTION = (
-    REPAIR_INSTRUCTION + " Resubmit the correction through the SAME forced "
+REPAIR_INSTRUCTION_V3 = (
+    "Correct only the validation failures. When a validation error names an "
+    "unsupported proposal or an invalid proposal reference, remove that entire "
+    "optional proposal. Never preserve a failing proposal by inventing, "
+    "substituting, or reassigning claims, frames, registry IDs, aliases, "
+    "definitions, or justification. Preserve valid content. Fewer proposals are "
+    "correct; empty proposal arrays are always lawful. Return every required "
+    "array, using an empty array when no supported result exists. Return the "
+    "SemanticDigestV1 object itself at the top level. Do not wrap it under digest "
+    "or add other top-level fields."
+)
+TIER3_REPAIR_SUFFIX = (
+    " Resubmit the correction through the SAME forced "
     "submit_semantic_digest tool. Put all 12 SemanticDigestV1 fields directly "
     "at the tool-arguments root. Do not nest them under parameters or any "
     "other wrapper."
 )
+SYSTEM_PROMPTS = {
+    "parent-digest.v5": LEGACY_SYSTEM_PROMPT_V5,
+    "parent-digest.v6": SYSTEM_PROMPT_V6,
+}
+REPAIR_INSTRUCTIONS = {
+    "parent-digest-repair.v2": LEGACY_REPAIR_INSTRUCTION_V2,
+    "parent-digest-repair.v3": REPAIR_INSTRUCTION_V3,
+}
+SYSTEM_PROMPT = SYSTEM_PROMPTS[PROMPT_VERSION]
+REPAIR_INSTRUCTION = REPAIR_INSTRUCTIONS[REPAIR_PROMPT_VERSION]
+TIER3_REPAIR_INSTRUCTION = REPAIR_INSTRUCTION + TIER3_REPAIR_SUFFIX
 
 CACHE_COLLECTION = "semantic_digest_cache"
 DEAD_LETTER_COLLECTION = "semantic_digest_dead_letters"
@@ -79,8 +119,10 @@ class SemanticGatewayConfig(StrictModel):
     runtime_version: str = Field(min_length=1)
     tokenizer_id: str = Field(min_length=1)
     chat_template_hash: str
-    prompt_version: Literal["parent-digest.v5"] = PROMPT_VERSION
-    repair_prompt_version: Literal["parent-digest-repair.v2"] = REPAIR_PROMPT_VERSION
+    prompt_version: Literal["parent-digest.v5", "parent-digest.v6"] = PROMPT_VERSION
+    repair_prompt_version: Literal[
+        "parent-digest-repair.v2", "parent-digest-repair.v3"
+    ] = REPAIR_PROMPT_VERSION
     requested_tier: RequestedTier = "auto"
     max_tokens: int = Field(default=4096, ge=1)
     timeout_seconds: float = Field(default=120.0, gt=0)
@@ -108,9 +150,9 @@ class SemanticGatewayProvenance(StrictModel):
     chat_template_hash: str
     schema_version: Literal["semantic_digest.v1"]
     schema_hash: str
-    prompt_version: Literal["parent-digest.v5"]
+    prompt_version: Literal["parent-digest.v5", "parent-digest.v6"]
     prompt_hash: str
-    repair_prompt_version: Literal["parent-digest-repair.v2"]
+    repair_prompt_version: Literal["parent-digest-repair.v2", "parent-digest-repair.v3"]
     repair_prompt_hash: str
     temperature: Literal[0]
     input_hash: str
@@ -224,6 +266,13 @@ class LiteLLMProxyTransport:
 
             service = llm_service
         self._service = service
+        self._call_telemetry: list[dict[str, Any]] = []
+
+    @property
+    def call_telemetry(self) -> tuple[dict[str, Any], ...]:
+        """Redacted per-call usage/cost receipts, never provider content."""
+
+        return tuple(dict(row) for row in self._call_telemetry)
 
     async def complete(
         self,
@@ -271,6 +320,11 @@ class LiteLLMProxyTransport:
             extra_params=dict(route.extra_params or {}),
             timeout=config.timeout_seconds,
         )
+        telemetry = (
+            response.get("provider_telemetry") if isinstance(response, dict) else None
+        )
+        if isinstance(telemetry, dict):
+            self._call_telemetry.append(dict(telemetry))
         calls = response.get("tool_calls") if isinstance(response, dict) else None
         if not isinstance(calls, list) or len(calls) != 1:
             return ""
@@ -446,25 +500,42 @@ def semantic_digest_schema_hash() -> str:
     return namespace_hash("schema", SemanticDigestV1.model_json_schema())
 
 
-def semantic_digest_repair_prompt_hash() -> str:
+def semantic_digest_repair_prompt_hash(
+    repair_prompt_version: str = REPAIR_PROMPT_VERSION,
+) -> str:
+    try:
+        generic_instruction = REPAIR_INSTRUCTIONS[repair_prompt_version]
+    except KeyError as exc:
+        raise ValueError(
+            f"unsupported repair prompt version: {repair_prompt_version}"
+        ) from exc
     return namespace_hash(
         "recipe",
         {
-            "repair_prompt_version": REPAIR_PROMPT_VERSION,
-            "generic_instruction": REPAIR_INSTRUCTION,
-            "tier3_instruction": TIER3_REPAIR_INSTRUCTION,
+            "repair_prompt_version": repair_prompt_version,
+            "generic_instruction": generic_instruction,
+            "tier3_instruction": generic_instruction + TIER3_REPAIR_SUFFIX,
         },
     )
 
 
-def semantic_digest_prompt_hash() -> str:
+def semantic_digest_prompt_hash(
+    prompt_version: str = PROMPT_VERSION,
+    repair_prompt_version: str = REPAIR_PROMPT_VERSION,
+) -> str:
+    try:
+        system_prompt = SYSTEM_PROMPTS[prompt_version]
+    except KeyError as exc:
+        raise ValueError(f"unsupported prompt version: {prompt_version}") from exc
     return namespace_hash(
         "recipe",
         {
-            "prompt_version": PROMPT_VERSION,
-            "system_prompt": SYSTEM_PROMPT,
-            "repair_prompt_version": REPAIR_PROMPT_VERSION,
-            "repair_prompt_hash": semantic_digest_repair_prompt_hash(),
+            "prompt_version": prompt_version,
+            "system_prompt": system_prompt,
+            "repair_prompt_version": repair_prompt_version,
+            "repair_prompt_hash": semantic_digest_repair_prompt_hash(
+                repair_prompt_version
+            ),
         },
     )
 
@@ -575,9 +646,13 @@ def _select_tier(
     return "tier1" if capability.supported else "tier4"
 
 
-def _initial_messages(packet: dict[str, Any]) -> list[dict[str, str]]:
+def _initial_messages(
+    packet: dict[str, Any],
+    *,
+    prompt_version: str = PROMPT_VERSION,
+) -> list[dict[str, str]]:
     return [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": SYSTEM_PROMPTS[prompt_version]},
         {
             "role": "user",
             "content": "Evidence packet:\n" + canonical_json_v1(packet),
@@ -591,8 +666,15 @@ def _repair_messages(
     original_output: str,
     validation_errors: list[str],
     tier: Literal["tier1", "tier3", "tier4"],
+    prompt_version: str = PROMPT_VERSION,
+    repair_prompt_version: str = REPAIR_PROMPT_VERSION,
 ) -> list[dict[str, str]]:
-    instruction = TIER3_REPAIR_INSTRUCTION if tier == "tier3" else REPAIR_INSTRUCTION
+    generic_instruction = REPAIR_INSTRUCTIONS[repair_prompt_version]
+    instruction = (
+        generic_instruction + TIER3_REPAIR_SUFFIX
+        if tier == "tier3"
+        else generic_instruction
+    )
     repair_packet = {
         "evidence_packet": packet,
         "original_output": original_output,
@@ -600,7 +682,7 @@ def _repair_messages(
         "instruction": instruction,
     }
     return [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": SYSTEM_PROMPTS[prompt_version]},
         {
             "role": "user",
             "content": canonical_json_v1(repair_packet),
@@ -667,8 +749,13 @@ class SemanticGateway:
         route = route or SemanticGatewayRoute()
         input_hash = semantic_digest_input_hash(canonical_packet)
         schema_hash = semantic_digest_schema_hash()
-        prompt_hash = semantic_digest_prompt_hash()
-        repair_prompt_hash = semantic_digest_repair_prompt_hash()
+        prompt_hash = semantic_digest_prompt_hash(
+            config.prompt_version,
+            config.repair_prompt_version,
+        )
+        repair_prompt_hash = semantic_digest_repair_prompt_hash(
+            config.repair_prompt_version
+        )
         cache_key = semantic_digest_cache_key(
             input_hash=input_hash,
             model_id=config.model_id,
@@ -725,13 +812,18 @@ class SemanticGateway:
         validation_errors: list[str] = []
         for attempt in (1, 2):
             messages = (
-                _initial_messages(canonical_packet)
+                _initial_messages(
+                    canonical_packet,
+                    prompt_version=config.prompt_version,
+                )
                 if attempt == 1
                 else _repair_messages(
                     packet=canonical_packet,
                     original_output=raw_outputs[0],
                     validation_errors=validation_errors,
                     tier=tier,
+                    prompt_version=config.prompt_version,
+                    repair_prompt_version=config.repair_prompt_version,
                 )
             )
             try:

@@ -13,6 +13,7 @@ import argparse
 import asyncio
 from datetime import datetime, timezone
 import json
+import math
 from pathlib import Path
 import re
 import sys
@@ -143,6 +144,44 @@ def _validate_success(
     return True, "", "native json_schema accepted and tiny closed schema enforced"
 
 
+def _response_telemetry(response: httpx.Response) -> dict[str, Any]:
+    """Extract only numeric usage and LiteLLM's routed response cost."""
+
+    try:
+        payload = response.json()
+    except (json.JSONDecodeError, ValueError):
+        payload = {}
+    raw_usage = payload.get("usage") if isinstance(payload, dict) else None
+    usage: dict[str, int] = {}
+    if isinstance(raw_usage, dict):
+        for field in ("prompt_tokens", "completion_tokens", "total_tokens"):
+            value = raw_usage.get(field)
+            if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+                usage[field] = value
+
+    raw_cost = response.headers.get("x-litellm-response-cost")
+    cost: float | None = None
+    if raw_cost not in (None, "", "None"):
+        try:
+            candidate = float(raw_cost)
+        except (TypeError, ValueError):
+            candidate = float("nan")
+        if math.isfinite(candidate) and candidate >= 0:
+            cost = candidate
+    if cost is not None:
+        source = "litellm.x-litellm-response-cost"
+    elif response.status_code >= 400 and not usage:
+        cost = 0.0
+        source = "provider_rejected_before_generation"
+    else:
+        source = None
+    return {
+        "usage": usage,
+        "actual_cost_usd": cost,
+        "cost_source": source,
+    }
+
+
 async def _probe_route(
     client: httpx.AsyncClient,
     *,
@@ -197,6 +236,7 @@ async def _probe_route(
             secret=provider_key,
         )
     outcome = "accepted" if accepted else "provider_rejected"
+    telemetry = _response_telemetry(response)
     return {
         "route_id": route["route_id"],
         "credential_provider": route["credential_provider"],
@@ -213,11 +253,18 @@ async def _probe_route(
             "response_format_type": "json_schema",
         },
         "elapsed_ms": elapsed_ms,
+        "provider_telemetry": telemetry,
     }
 
 
 async def run(args: argparse.Namespace) -> dict[str, Any]:
     routes = _load_routes(args.routes)
+    if args.route_id:
+        routes = [route for route in routes if route["route_id"] == args.route_id]
+        if len(routes) != 1:
+            raise CapabilityProbeError(
+                f"route selector {args.route_id!r} did not resolve exactly once"
+            )
     settings = get_settings()
     mongo = AsyncIOMotorClient(settings.MONGODB_URI)
     try:
@@ -239,15 +286,29 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         ) as client:
             receipts = []
             for route in routes:
-                receipts.append(
-                    await _probe_route(
-                        client,
-                        proxy_url=settings.LITELLM_URL,
-                        proxy_key=settings.LITELLM_MASTER_KEY,
-                        route=route,
-                        provider_key=key_cache[route["credential_provider"]],
-                    )
+                receipt = await _probe_route(
+                    client,
+                    proxy_url=settings.LITELLM_URL,
+                    proxy_key=settings.LITELLM_MASTER_KEY,
+                    route=route,
+                    provider_key=key_cache[route["credential_provider"]],
                 )
+                receipts.append(receipt)
+                cost = receipt["provider_telemetry"]["actual_cost_usd"]
+                if cost is None:
+                    raise CapabilityProbeError(
+                        f"route {route['route_id']} returned no numeric cost telemetry"
+                    )
+                if (
+                    sum(
+                        row["provider_telemetry"]["actual_cost_usd"] for row in receipts
+                    )
+                    > args.max_provider_cost_usd
+                ):
+                    raise CapabilityProbeError("provider cost ceiling exceeded")
+        actual_cost = sum(
+            row["provider_telemetry"]["actual_cost_usd"] for row in receipts
+        )
         return {
             "schema_version": REPORT_SCHEMA_VERSION,
             "generated_at": _now(),
@@ -257,6 +318,12 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                 not bool(row["native_json_schema"]) for row in receipts
             ),
             "routes": receipts,
+            "cost_accounting": {
+                "actual_cost_usd": actual_cost,
+                "max_provider_cost_usd": args.max_provider_cost_usd,
+                "cost_complete": True,
+                "within_ceiling": actual_cost <= args.max_provider_cost_usd,
+            },
             "security": {
                 "credentials_from_encrypted_settings": True,
                 "plaintext_credentials_in_receipt": False,
@@ -280,8 +347,10 @@ def _write_report(path: Path, report: dict[str, Any]) -> None:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--routes", type=Path, default=DEFAULT_ROUTES)
+    parser.add_argument("--route-id")
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--timeout-seconds", type=float, default=90.0)
+    parser.add_argument("--max-provider-cost-usd", type=float, default=2.0)
     return parser.parse_args()
 
 

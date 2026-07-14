@@ -5495,3 +5495,196 @@ BEFORE the bulk run. Owner words outrank the standing sequence. Therefore:
    persist on green.
 4. FENCE (939 rows) still proceeds after the 1C release — it is safety, not
    spend, and phase 2 stays sealed behind BOTH the fence AND the owner line.
+
+## [2026-07-14T22:26:01Z] EXECUTOR → SENIOR :: RECEIPT
+
+First census_scope.v2 focused contract gate RED before collection: true
+`EXIT=2` in `/tmp/t93_census_scope_v2_focused.log`. The only error is the
+hash taxonomy rejecting the new literal namespace
+`canonical-store-census-scope`; its registered valid namespaces include
+`scope`. No test body, provider call, live-state read, or write occurred.
+Correcting only the recipe hash to use registered namespace `scope`, retaining
+the exact recipe body and version, then rerunning the same focused gate.
+
+## [2026-07-14T22:26:02Z] EXECUTOR → SENIOR :: ACK
+
+ACK owner sample-review hold. After a green v2 zero-provider postflight I will
+execute the 939-row backup-first fence, but Phase 2 will remain sealed behind
+both that fence and an explicit owner approval. I will produce the requested
+zero-spend owner-readable sample from already-purchased accepted digests and
+post its committed path before seeking that approval.
+
+## [2026-07-14T22:26:35Z] EXECUTOR → SENIOR :: RECEIPT
+
+census_scope.v2 focused gate GREEN after the registered-namespace correction:
+41/41 passed, 7 existing warnings, true `EXIT=0` in
+`/tmp/t93_census_scope_v2_focused_retry.log`. Tests prove the hashed recipe and
+explicit collection rules, visible/non-authoritative Hermes deltas, red
+Polymath-owned drift, fail-closed invalid scope data, bounded-accounting
+composition, and exact zero-provider re-evaluation references. Calls/writes/
+spend zero. Running the expanded adjacent boundary before the live postflight.
+
+## [2026-07-14T22:27:59Z] EXECUTOR → SENIOR :: RECEIPT
+
+census_scope.v2 immediate adjacent boundary GREEN: 91/91 passed, 7 existing
+warnings, true `EXIT=0` in `/tmp/t93_census_scope_v2_adjacent.log`. This covers
+queue integrity, provider parameter contracts, capability registry, gateway,
+UGO canary, and paid-pass runner together. Calls/writes/spend zero. Expanding
+once more across digest/validator/hash/lease and semantic-observation models
+before the live zero-provider postflight.
+
+## [2026-07-14T22:28:28Z] EXECUTOR → SENIOR :: RECEIPT
+
+First broad adjacent invocation returned true `EXIT=1` in
+`/tmp/t93_census_scope_v2_expanded.log`: 193 passed, 6 skipped, and the sole
+failure was `FileNotFoundError` for the existing semantic gold fixture in the
+isolated `/tmp/t93_phase1_repo` overlay. Fixture exists on disk with SHA-256
+`866d1b2104c7bc7d3a5696462058053a6bb041c8bd6784eae59a1f390d5e7816`.
+No product assertion, call, live read, write, or spend failed. Copying that
+unchanged fixture into the temporary overlay and rerunning the identical
+boundary.
+
+## [2026-07-14T22:29:04Z] EXECUTOR → SENIOR :: RECEIPT
+
+census_scope.v2 broad adjacent boundary GREEN after restoring the unchanged
+fixture to the temp overlay: 193 passed, 7 expected skips, 7 existing warnings,
+true `EXIT=0` in `/tmp/t93_census_scope_v2_expanded_retry.log`. Host/container
+code hashes match: UGO/census
+`bd6b86a13ddf0a95c28d3d2ab5a88b680c3745e79edcb40dab754a7c2a967fe5`,
+paid runner
+`02fd079e389c47dcb3ac7b2a9e34586a232bf9348e5876754ef0ef52b1a3566d`.
+Calls/writes/spend zero. Executing the approved zero-provider postflight now;
+the runner contract refuses if any of the 50 rows is claimable.
+
+## [2026-07-14T22:29:50Z] EXECUTOR → SENIOR :: RECEIPT
+
+Phase-1C census_scope.v2 zero-provider postflight GREEN: true `EXIT=0` in
+`/tmp/t93_mark_phase1c_census_v2_reeval.log`; safe receipt
+`/tmp/t93_mark_phase1c_census_v2_reeval.json`, SHA-256
+`8a0ede8dc9bca7dd03f55deac5764a01226a2100fd1452d28d6518f0abb32d39`.
+The receipt references prior RED SHA-256
+`dc8ef8ec5d060554910a5fb6d316812c0657dc0051348b22f054fe8c53ac4b82`
+and the `2026-07-14T22:19:43Z` ruling. Provider call receipts are exactly empty.
+
+Checkpoint: 50/50 terminal, 48 accepted / 2 DLQ = 96%; all packets at/below
+21,515 bytes, max 16,918; phase known actual `$1.14107950` + `$0.06` bound =
+`$1.20107950`; cumulative known actual `$1.68454455` + `$0.06` bound =
+`$1.74454455` < `$49.45`; one ReadTimeout. census_scope.v2 recipe hash is
+`sha256:d5a5c1344898d397f1b687b4569fff2613da67d2b8d27a53542d97b7983c8773`,
+scope valid, protected Mongo/Qdrant/Neo4j exact, ambient before/after both
+Hermes=609 and mem0migrations=0 with zero ambient delta. Durable verification
+finds exactly 50/50 green markers and 50/50 canonical checkpoints. Phase 1C is
+released. Proceeding to the mandatory backup-first 939-row legacy fence;
+Phase 2 remains sealed behind both the fence and explicit owner approval.
+
+## [2026-07-14T22:32:52Z] EXECUTOR → SENIOR :: RECEIPT
+
+Phase-2 legacy-row backup gate GREEN: true `EXIT=0` in
+`/tmp/t93_legacy_phase2_backup.log`. Authenticated `mongoexport` wrote exactly
+939 job-id-sorted canonical-Extended-JSON lines (1,287,099 bytes) to
+`docs/baselines/t93_backups/T9_3_MARK_LEGACY_SEMANTIC_DIGEST_JOBS_QUEUED_2026-07-14.jsonl`,
+with SHA-256
+`eceff199ac6ed56933d21793860005cef743b81484c07dff20b3321a7b26e72d`
+and matching sidecar. Credential-pattern filename-only scan is clean. The
+exact pre-mutation identity is 939 unique jobs/parents, ordinal 50–988,
+queued, attempt_count=0, lease null, no phase/selection/prompt-version fields,
+and frozen v5/v2 hashes. Backup exists and verifies before mutation. Applying
+the established `status=superseded`, `reason`, `superseded_at`, cleared-lease
+fence with the senior-fixed reason; Phase 2 remains sealed.
+
+## [2026-07-14T22:34:01Z] EXECUTOR → SENIOR :: RECEIPT
+
+Mandatory 939-row Phase-2 fence GREEN: true `EXIT=0` in
+`/tmp/t93_legacy_phase2_fence.log`. Exact precondition=939; update matched=939,
+modified=939; post exact queued=0; old-identity queued/running=0; exact
+`status=superseded`, `reason=superseded_by_phase2_v6_2026-07-14`, cleared
+lease count=939. The pre-mutation backup still verifies against SHA-256
+`eceff199ac6ed56933d21793860005cef743b81484c07dff20b3321a7b26e72d`.
+Broader target ledger is 66 succeeded / 6 DLQ / 38 checkpoint-cancelled / 939
+superseded, global running=0, target queued/running=0, Phase-1C green markers=50,
+and Phase-2 rows=0. No provider call, extraction, deletion, reingest, or
+canonical projection occurred. Safety fence prerequisite is satisfied; Phase
+2 remains sealed solely behind explicit owner approval after sample review.
+
+## [2026-07-14T22:40:27Z] EXECUTOR → SENIOR :: RECEIPT
+
+Owner digest-sample report validation GREEN: true `EXIT=0` in
+`/tmp/t93_owner_sample_validate.log`. Report path:
+`docs/T9_3_MARK_DIGEST_SAMPLE_FOR_OWNER_2026-07-14.md`; 4 documents, 10
+parents, 10 exact supporting-claim quote blocks, 1,079 lines / 54,523 bytes,
+SHA-256 `09eb2009a86585a969d4bb235e705ca7f856b75767bbf0304042157148b468d9`;
+credential-pattern scan and `git diff --check` clean. Live recheck remains
+Phase-2 rows=0 and target queued/running=0.
+
+Quality verdict is explicit: HOLD Phase 2 pending owner decision. Substantive
+large-packet digests are coherent and correctly evidence-identified, but the
+accepted ledger contains 8/66 bare-heading rows (2 still generated latent
+concepts), supporting claims are whole-parent/coarse rather than atomic, and
+domain coverage is 13/66 versus frames 41/66, latent 59/66, motifs 36/66.
+The report distinguishes the deliberately edge-heavy 4/10 sample from the
+full-ledger 8/66 prevalence and records strengths, conditions, exceptions,
+assignment states, and two owner decision lanes without changing any rule or
+output. Updating the implementation log/cursor, then committing and pushing
+the report plus T9.3 receipts as directed.
+
+## [2026-07-14T22:43:09Z] EXECUTOR → SENIOR :: RECEIPT
+
+First final Black invocation returned true `EXIT=1` before formatting checks:
+Black could not write its default `/app/.cache` inside the isolated overlay.
+No source file or live state changed. Compile, JSON parsing, `git diff --check`,
+and report validation remain green. Rerunning the identical Black file set
+with only `BLACK_CACHE_DIR=/tmp/black-cache` added.
+
+## [2026-07-14T22:43:37Z] EXECUTOR → SENIOR :: RECEIPT
+
+Cache-corrected Black check returned true `EXIT=1` in
+`/tmp/t93_final_black.log`: seven modified Python files require mechanical
+Black formatting; four are already clean. This is a source-style gate, not a
+test or runtime failure. Formatting the isolated copies, copying only those
+seven files back, then rerunning compile, Black, and the contract regressions.
+
+## [2026-07-14T22:44:11Z] EXECUTOR → SENIOR :: RECEIPT
+
+First format-apply attempt failed on the same seven files because Docker-copied
+overlay files are root-owned; Black reported permission denied and changed
+zero files. The following copy-back therefore preserved the unformatted host
+bytes. Rerunning Black as container root against only the temporary overlay,
+then copying the seven formatted results back and re-verifying hashes/tests.
+
+## [2026-07-14T22:44:58Z] EXECUTOR → SENIOR :: RECEIPT
+
+Final formatting/static gate GREEN: Black 11/11 unchanged, true `EXIT=0` in
+`/tmp/t93_final_black_retry.log`; host compile, `git diff --check`, and JSON
+parsing are green. Seven files were mechanically formatted; no logic or live
+state changed. Rerunning focused and broad contract suites before staging.
+
+## [2026-07-14T22:45:31Z] EXECUTOR → SENIOR :: RECEIPT
+
+Final post-format regressions GREEN: focused census/paid contracts 41/41,
+true `EXIT=0` in `/tmp/t93_final_focused.log`; broad boundary 193 passed / 7
+optional skips, true `EXIT=0` in `/tmp/t93_final_expanded.log`. No provider
+call or live write. Proceeding through the required pull-rebase-autostash,
+intentional staging, secret scan, commit, and dual push. Phase 2 remains zero
+rows and owner-sealed.
+
+## [2026-07-14T22:49:30Z] EXECUTOR → SENIOR :: RECEIPT
+
+Corrected final staged-sanitization gate GREEN: true `EXIT=0` in
+`/tmp/t93_staged_sanitization_strict_v2.log`. `tmp/` staged count is zero;
+credential-shaped staged-diff scan, `git diff --cached --check`, all 13 staged
+JSON parses, and the 939-row backup sidecar verification are green. The owner
+report remains 4 documents / 10 parents / 10 exact supporting-claim quote
+blocks / 1,079 lines. Mechanical trailing-whitespace normalization changed its
+final size to 54,302 bytes and SHA-256 to
+`9484d347a3cc5a10e763840c349698ce298836ea79c4ab6a88bdabc10b0c022d`;
+quoted wording and evidence IDs are unchanged, while the quality note now
+accurately says "verbatim visible text" rather than claiming insignificant
+trailing whitespace is byte-for-byte preserved.
+
+Correction record: the earlier unstaged report receipt's hash is superseded by
+the final normalized artifact above. The first staged wrapper was invalid
+because it continued after `git diff --cached --check` errors; the first strict
+wrapper was also rejected because fragile shell expansion emitted an empty hash
+despite `EXIT=0`. Neither is accepted as a green receipt. The v2 receipt reran
+every check fail-fast and contains the non-empty final hash. No provider call,
+live write, or Phase-2 row occurred; Phase 2 remains owner-sealed.

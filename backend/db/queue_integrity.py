@@ -28,6 +28,7 @@ DURABLE_JOB_COLLECTIONS: tuple[str, ...] = (
     "extraction_jobs",
     "summary_jobs",
     "graph_promotion_jobs",
+    "semantic_digest_jobs",
 )
 
 _SUCCESS_PRIORITY: dict[str, dict[str, int]] = {
@@ -36,6 +37,7 @@ _SUCCESS_PRIORITY: dict[str, dict[str, int]] = {
     "extraction_jobs": {"promoted": 130, "succeeded": 120, "skipped": 110},
     "summary_jobs": {"succeeded": 120, "skipped": 110},
     "graph_promotion_jobs": {"done": 130, "noop": 120, "partial": 110},
+    "semantic_digest_jobs": {"succeeded": 120},
 }
 
 _GENERIC_STATUS_PRIORITY: dict[str, int] = {
@@ -71,9 +73,7 @@ def _row_rank(collection_name: str, row: dict[str, Any], *, now: datetime) -> tu
     )
     lease_until = row.get("lease_until")
     expired_running = (
-        status == "running"
-        and isinstance(lease_until, datetime)
-        and lease_until <= now
+        status == "running" and isinstance(lease_until, datetime) and lease_until <= now
     )
     if expired_running:
         priority = _GENERIC_STATUS_PRIORITY["queued"]
@@ -113,15 +113,17 @@ def _dedup_update(
         "queue_integrity_checked_at": now,
         "duplicate_rows_removed": len(rows) - 1,
     }
-    created_values = [row.get("created_at") for row in rows if isinstance(row.get("created_at"), datetime)]
+    created_values = [
+        row.get("created_at")
+        for row in rows
+        if isinstance(row.get("created_at"), datetime)
+    ]
     if created_values:
         set_fields["created_at"] = min(created_values)
 
     lease_until = winner.get("lease_until")
     expired_running = (
-        status == "running"
-        and isinstance(lease_until, datetime)
-        and lease_until <= now
+        status == "running" and isinstance(lease_until, datetime) and lease_until <= now
     )
     unset_fields: dict[str, str] = {}
     if expired_running:
@@ -229,7 +231,10 @@ async def ensure_unique_job_id_index(
             )
             return {**totals, "status": "ready", "index": index_name}
         except (DuplicateKeyError, OperationFailure) as exc:
-            duplicate_error = isinstance(exc, DuplicateKeyError) or getattr(exc, "code", None) == 11000
+            duplicate_error = (
+                isinstance(exc, DuplicateKeyError)
+                or getattr(exc, "code", None) == 11000
+            )
             if not duplicate_error or attempt == 3:
                 raise
             logger.warning(
@@ -250,7 +255,9 @@ async def ensure_durable_job_queue_integrity(db: Any) -> dict[str, Any]:
         )
     removed = sum(int(report.get("removed_rows") or 0) for report in reports.values())
     if removed:
-        logger.warning("Durable queue integrity removed %d duplicate rows: %s", removed, reports)
+        logger.warning(
+            "Durable queue integrity removed %d duplicate rows: %s", removed, reports
+        )
     else:
         logger.info("Durable queue identities verified unique")
     return {"status": "ready", "removed_rows": removed, "collections": reports}
@@ -270,10 +277,14 @@ async def bulk_upsert_durable_jobs(collection: Any, ops: list[Any]) -> Any:
         return await collection.bulk_write(ops, ordered=False)
     except BulkWriteError as exc:
         write_errors = list((exc.details or {}).get("writeErrors") or [])
-        if not write_errors or any(int(error.get("code") or 0) != 11000 for error in write_errors):
+        if not write_errors or any(
+            int(error.get("code") or 0) != 11000 for error in write_errors
+        ):
             raise
         retry_ops = [
-            UpdateOne(op._filter, op._doc, upsert=False)  # noqa: SLF001 - pymongo op replay
+            UpdateOne(
+                op._filter, op._doc, upsert=False
+            )  # noqa: SLF001 - pymongo op replay
             for op in ops
         ]
         logger.info(

@@ -266,7 +266,7 @@ async def test_tier4_fallback_is_explicit_in_provenance_and_uses_json_mode():
 
     assert result.provenance.capability_tier == "tier4"
     assert result.provenance.capability_detection == "litellm.capability_unavailable"
-    assert result.provenance.prompt_version == "parent-digest.v5"
+    assert result.provenance.prompt_version == "parent-digest.v6"
     assert transport.calls[0]["response_format"] == {"type": "json_object"}
     system_prompt = transport.calls[0]["messages"][0]["content"]
     assert "json" in system_prompt.casefold()
@@ -274,6 +274,43 @@ async def test_tier4_fallback_is_explicit_in_provenance_and_uses_json_mode():
     assert "Do not wrap it under digest" in system_prompt
     assert "$defs" not in system_prompt
     assert "additionalProperties" not in system_prompt
+
+
+def test_v6_prompt_freezes_conservative_proposal_contract_verbatim():
+    assert PROMPT_VERSION == "parent-digest.v6"
+    assert REPAIR_PROMPT_VERSION == "parent-digest-repair.v3"
+    assert (
+        "Every domain, frame, latent-concept, or motif proposal must have a "
+        "non-empty supporting_claim_ids array"
+    ) in SYSTEM_PROMPT
+    assert (
+        "every frame_id in its frame_sequence also appears in frame_proposals"
+        in SYSTEM_PROMPT
+    )
+    assert (
+        "assignment_state as candidate, corroborated, unresolved, or rejected"
+        in SYSTEM_PROMPT
+    )
+    assert "empty proposal arrays are always lawful" in SYSTEM_PROMPT
+    assert "assignment_state as candidate, corroborated, validated" not in SYSTEM_PROMPT
+
+
+def test_repair_v3_requires_pruning_and_forbids_invented_support():
+    assert "remove that entire optional proposal" in REPAIR_INSTRUCTION
+    assert "Never preserve a failing proposal by inventing" in REPAIR_INSTRUCTION
+    assert "empty proposal arrays are always lawful" in REPAIR_INSTRUCTION
+    assert TIER3_REPAIR_INSTRUCTION.startswith(REPAIR_INSTRUCTION)
+    assert "SAME forced submit_semantic_digest tool" in TIER3_REPAIR_INSTRUCTION
+
+
+def test_legacy_v5_and_v2_hashes_remain_reconstructable_for_skip_validation():
+    legacy_repair = semantic_digest_repair_prompt_hash("parent-digest-repair.v2")
+    legacy_prompt = semantic_digest_prompt_hash(
+        "parent-digest.v5", "parent-digest-repair.v2"
+    )
+
+    assert legacy_repair != semantic_digest_repair_prompt_hash()
+    assert legacy_prompt != semantic_digest_prompt_hash()
 
 
 @pytest.mark.asyncio
@@ -757,6 +794,15 @@ async def test_litellm_transport_returns_only_forced_tool_arguments():
                     }
                 ],
                 "content": "must-not-be-used",
+                "provider_telemetry": {
+                    "usage": {
+                        "prompt_tokens": 120,
+                        "completion_tokens": 80,
+                        "total_tokens": 200,
+                    },
+                    "actual_cost_usd": 0.0004,
+                    "cost_source": "litellm.x-litellm-response-cost",
+                },
             }
 
     service = _FakeLLMService()
@@ -782,6 +828,17 @@ async def test_litellm_transport_returns_only_forced_tool_arguments():
     assert service.kwargs["overrides"].temperature == 0
     assert service.kwargs["overrides"].max_tokens == 2048
     assert "response_format" not in service.kwargs
+    assert transport.call_telemetry == (
+        {
+            "usage": {
+                "prompt_tokens": 120,
+                "completion_tokens": 80,
+                "total_tokens": 200,
+            },
+            "actual_cost_usd": 0.0004,
+            "cost_source": "litellm.x-litellm-response-cost",
+        },
+    )
 
 
 class _MongoCollection:

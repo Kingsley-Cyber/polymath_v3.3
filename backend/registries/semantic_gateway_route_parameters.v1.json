@@ -1,0 +1,23 @@
+{
+  "schema_version": "polymath.semantic_gateway_route_parameters.v1",
+  "generated_at": "2026-07-14T19:43:15Z",
+  "routes": [
+    {
+      "route_id": "longcat-api__longcat-2.0",
+      "model_id": "openai/LongCat-2.0",
+      "api_base": "https://api.longcat.chat/openai/v1",
+      "capability_tier": "tier3",
+      "temperature": 0,
+      "thinking": "disabled",
+      "max_tokens": 8192,
+      "timeout_seconds": 180.0,
+      "parameter_version": "longcat-tier3-full-digest.max-tokens-8192.v1",
+      "runtime_version": "longcat-api.openai-compatible.2026-07-14.cp9-recanary-mt8192-v1",
+      "tokenizer_id": "longcat-2.0.provider-managed",
+      "diagnosis_evidence": "polymath.t9_3_longcat_readonly_diagnosis.v1:sha256:3bdfb210659418cbd5d719edc9ee84f93878a71151009b400203abfb98fef505",
+      "recanary_target_packets": 10,
+      "recanary_minimum_accepted": 9,
+      "recanary_max_cost_usd": 1.0
+    }
+  ]
+}

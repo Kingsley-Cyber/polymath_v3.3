@@ -5,15 +5,96 @@ import pytest
 
 from models.hash_taxonomy import namespace_hash
 from scripts.semantic_gateway_ugo_canary import (
+    CANONICAL_CENSUS_SCOPE_RECIPE,
+    CANONICAL_CENSUS_SCOPE_RECIPE_HASH,
+    CANONICAL_CENSUS_SCOPE_VERSION,
+    DEFAULT_PROVIDER_PRICE_CARDS,
+    DEFAULT_ROUTE_PARAMETER_CARDS,
     PACKET_SCHEMA_VERSION,
     CanaryError,
+    _apply_provider_price_fallback,
+    _canonical_store_census_comparison,
+    _canonical_store_census_receipt,
+    _canonical_store_census_snapshot,
     _FirstResponseParentFaultTransport,
     _interim_claim_id,
+    _load_provider_price_card,
+    _load_route_parameter_card,
     _packet_from_parent,
     _provenance_complete,
     _sample_evenly,
     _validate_run_args,
+    _validate_route_parameter_args,
 )
+
+
+def test_census_scope_v2_reports_cotenant_drift_without_verdict_authority():
+    before = _canonical_store_census_snapshot(
+        mongo_count=0,
+        qdrant_counts={
+            "corpus_5a20bc21_naive": 10,
+            "polymath_children": 3,
+            "polymath_doc_summaries": 684,
+            "hermes_memories": 608,
+            "mem0migrations": 0,
+        },
+        neo4j_nodes=100,
+        neo4j_relationships=200,
+    )
+    after = _canonical_store_census_snapshot(
+        mongo_count=0,
+        qdrant_counts={
+            "corpus_5a20bc21_naive": 10,
+            "polymath_children": 3,
+            "polymath_doc_summaries": 684,
+            "hermes_memories": 609,
+            "mem0migrations": 0,
+        },
+        neo4j_nodes=100,
+        neo4j_relationships=200,
+    )
+
+    receipt = _canonical_store_census_receipt(before, after)
+
+    assert receipt["scope_version"] == CANONICAL_CENSUS_SCOPE_VERSION
+    assert receipt["scope_recipe_hash"] == CANONICAL_CENSUS_SCOPE_RECIPE_HASH
+    assert receipt["scope_valid"] is True
+    assert receipt["protected_exactly_unchanged"] is True
+    assert receipt["exactly_unchanged"] is True
+    assert receipt["ambient_change_observed"] is True
+    assert receipt["ambient_qdrant_collection_deltas"] == {
+        "hermes_memories": {"before": 608, "after": 609, "delta": 1}
+    }
+    assert "hermes_memories" not in before["qdrant_collection_points"]
+    assert before["ambient_qdrant_collection_points"]["hermes_memories"] == 608
+
+
+def test_census_scope_v2_fails_closed_on_polymath_drift_or_bad_recipe():
+    before = _canonical_store_census_snapshot(
+        mongo_count=0,
+        qdrant_counts={"corpus_5a20bc21_graph": 10},
+        neo4j_nodes=100,
+        neo4j_relationships=200,
+    )
+    protected_drift = _canonical_store_census_snapshot(
+        mongo_count=0,
+        qdrant_counts={"corpus_5a20bc21_graph": 11},
+        neo4j_nodes=100,
+        neo4j_relationships=200,
+    )
+    comparison = _canonical_store_census_comparison(before, protected_drift)
+    assert comparison["scope_valid"] is True
+    assert comparison["protected_exactly_unchanged"] is False
+
+    wrong_recipe = dict(before)
+    wrong_recipe["census_scope_recipe_hash"] = "sha256:wrong"
+    comparison = _canonical_store_census_comparison(before, wrong_recipe)
+    assert comparison["scope_valid"] is False
+    assert comparison["protected_exactly_unchanged"] is False
+    assert CANONICAL_CENSUS_SCOPE_RECIPE_HASH == namespace_hash(
+        "scope",
+        CANONICAL_CENSUS_SCOPE_RECIPE,
+    )
 
 
 def _parent(**updates):
@@ -229,3 +310,86 @@ def test_test_fixture_contains_no_credential_shaped_value():
     assert "sk-" not in fixture
     assert "api_key" not in fixture
     assert namespace_hash("body", {"fixture": fixture}).startswith("sha256:")
+
+
+def test_versioned_longcat_price_card_is_route_exact_and_secret_free():
+    card = _load_provider_price_card(
+        DEFAULT_PROVIDER_PRICE_CARDS,
+        route_id="longcat-api__longcat-2.0",
+        model_id="openai/LongCat-2.0",
+        api_base="https://api.longcat.chat/openai/v1",
+    )
+
+    assert card.uncached_input_usd == 0.75
+    assert card.output_usd == 2.95
+    assert card.receipt_source.endswith("published-list-uncached-input")
+    raw = DEFAULT_PROVIDER_PRICE_CARDS.read_text(encoding="utf-8")
+    assert "api_key" not in raw
+    assert "ciphertext" not in raw
+
+
+def test_provider_price_fallback_uses_usage_and_names_versioned_source():
+    card = _load_provider_price_card(
+        DEFAULT_PROVIDER_PRICE_CARDS,
+        route_id="longcat-api__longcat-2.0",
+        model_id="openai/LongCat-2.0",
+        api_base="https://api.longcat.chat/openai/v1",
+    )
+
+    rows = _apply_provider_price_fallback(
+        [
+            {
+                "usage": {
+                    "prompt_tokens": 1_000_000,
+                    "completion_tokens": 1_000_000,
+                    "total_tokens": 2_000_000,
+                },
+                "actual_cost_usd": None,
+                "cost_source": None,
+            }
+        ],
+        card,
+    )
+
+    assert rows[0]["actual_cost_usd"] == 3.70
+    assert rows[0]["cost_source"] == card.receipt_source
+
+
+def test_versioned_route_parameter_card_freezes_only_completion_cap_change():
+    card = _load_route_parameter_card(
+        DEFAULT_ROUTE_PARAMETER_CARDS,
+        route_id="longcat-api__longcat-2.0",
+        model_id="openai/LongCat-2.0",
+        api_base="https://api.longcat.chat/openai/v1",
+    )
+
+    assert card.capability_tier == "tier3"
+    assert card.temperature == 0
+    assert card.thinking == "disabled"
+    assert card.max_tokens == 8192
+    assert card.recanary_target_packets == 10
+    assert card.recanary_minimum_accepted == 9
+    assert card.recanary_max_cost_usd == 1.0
+
+
+def test_recanary_arguments_must_match_versioned_route_parameters():
+    card = _load_route_parameter_card(
+        DEFAULT_ROUTE_PARAMETER_CARDS,
+        route_id="longcat-api__longcat-2.0",
+        model_id="openai/LongCat-2.0",
+        api_base="https://api.longcat.chat/openai/v1",
+    )
+    args = Namespace(
+        canary_tier="tier3",
+        max_tokens=8192,
+        timeout_seconds=180.0,
+        runtime_version=card.runtime_version,
+        tokenizer_id=card.tokenizer_id,
+        count=10,
+        max_provider_cost_usd=1.0,
+    )
+
+    _validate_route_parameter_args(args, card)
+    args.max_tokens = 4096
+    with pytest.raises(CanaryError, match="max_tokens"):
+        _validate_route_parameter_args(args, card)

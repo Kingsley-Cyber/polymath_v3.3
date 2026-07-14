@@ -14,6 +14,7 @@ from scripts.probe_structured_output_capabilities import (
     DEFAULT_ROUTES,
     _error_fields,
     _load_routes,
+    _response_telemetry,
     _safe_text,
     _validate_success,
 )
@@ -47,7 +48,11 @@ def test_checked_in_capability_registry_records_all_runtime_rejections():
     assert route.verified_digest_path is None
     assert route.tier3_digest_status == "partial_acceptance_repair_budget_exhausted"
     assert route.tier4_digest_status == "structurally_unreliable"
-    assert len(route.digest_evidence_receipts) == 4
+    assert len(route.digest_evidence_receipts) == 5
+    assert route.digest_evidence_receipts[-1] == (
+        "polymath.structured_output_capability_probe.v1:"
+        "deepseek-api__deepseek-v4-flash:2026-07-14T19:18:11.281776Z"
+    )
 
     longcat = registry.resolve(
         model_id="openai/LongCat-2.0",
@@ -57,10 +62,18 @@ def test_checked_in_capability_registry_records_all_runtime_rejections():
     assert longcat.probe_receipt["http_status"] == 200
     assert longcat.probe_receipt["error_code"] == "invalid_structured_output"
     assert longcat.tier4_prompt_requirement == "not_runtime_verified"
-    assert longcat.verified_digest_path is None
-    assert longcat.tier3_digest_status == "tiny_tool_accepted_digest_unverified"
+    assert longcat.verified_digest_path == "tier3"
+    assert longcat.tier3_digest_status == ("full_digest_recanary_10_of_10_accepted")
     assert longcat.tier4_digest_status == "not_tested"
-    assert len(longcat.digest_evidence_receipts) == 1
+    assert len(longcat.digest_evidence_receipts) == 24
+    assert any(
+        value.startswith("polymath.t9_3_provider_preflight.v1:")
+        for value in longcat.digest_evidence_receipts
+    )
+    assert any(
+        value.startswith("polymath.t9_3_provider_recanary.v1:")
+        for value in longcat.digest_evidence_receipts
+    )
 
 
 def test_capability_registry_does_not_match_model_without_exact_route():
@@ -176,6 +189,42 @@ def test_probe_success_requires_closed_schema_content():
         "schema_not_enforced",
         "2xx response did not enforce the tiny closed schema",
     )
+
+
+def test_probe_telemetry_uses_only_numeric_usage_and_litellm_cost():
+    response = httpx.Response(
+        200,
+        headers={"x-litellm-response-cost": "0.00075"},
+        json={
+            "usage": {
+                "prompt_tokens": 9,
+                "completion_tokens": 3,
+                "total_tokens": 12,
+                "provider_detail": "ignored",
+            },
+            "choices": [],
+        },
+    )
+
+    assert _response_telemetry(response) == {
+        "usage": {
+            "prompt_tokens": 9,
+            "completion_tokens": 3,
+            "total_tokens": 12,
+        },
+        "actual_cost_usd": 0.00075,
+        "cost_source": "litellm.x-litellm-response-cost",
+    }
+
+
+def test_rejected_probe_without_generation_is_zero_cost():
+    response = httpx.Response(400, json={"error": {"message": "unsupported"}})
+
+    assert _response_telemetry(response) == {
+        "usage": {},
+        "actual_cost_usd": 0.0,
+        "cost_source": "provider_rejected_before_generation",
+    }
 
 
 def test_probe_text_sanitizer_removes_explicit_secret_and_bearer_token():

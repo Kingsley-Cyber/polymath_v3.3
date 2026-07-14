@@ -88,6 +88,8 @@ class _StreamClient:
 
 
 class _PostResponse:
+    headers = {"x-litellm-response-cost": "0.00125"}
+
     def raise_for_status(self) -> None:
         return None
 
@@ -98,7 +100,12 @@ class _PostResponse:
                     "message": {"content": "ok", "tool_calls": []},
                     "finish_reason": "stop",
                 }
-            ]
+            ],
+            "usage": {
+                "prompt_tokens": 30,
+                "completion_tokens": 10,
+                "total_tokens": 40,
+            },
         }
 
 
@@ -185,6 +192,15 @@ async def test_sync_and_tool_calls_use_sanitized_hy3_payload(monkeypatch) -> Non
 
     assert result == "ok"
     assert tools["content"] == "ok"
+    assert tools["provider_telemetry"] == {
+        "usage": {
+            "prompt_tokens": 30,
+            "completion_tokens": 10,
+            "total_tokens": 40,
+        },
+        "actual_cost_usd": 0.00125,
+        "cost_source": "litellm.x-litellm-response-cost",
+    }
     assert len(client.bodies) == 2
     for index, body in enumerate(client.bodies):
         assert body["enable_thinking"] is False
