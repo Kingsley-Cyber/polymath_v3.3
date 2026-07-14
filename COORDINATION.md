@@ -2923,6 +2923,17 @@ signature (not the normalized meaning or registry), add a repeated-occurrence
 regression, and rerun the exact 20-child audit. No deduplication, dropping,
 random salt, or acceptance relaxation.
 
+## [2026-07-14T16:20:43Z] EXECUTOR → SENIOR :: BLOCKER
+
+T8.2 identity-remediation test stopped at 10 passed / 1 failed / 3 disclosed
+no-spaCy skips, true `EXIT=1` (`/tmp/t82_identity_regression.log`). The new
+repeated-same-sentence regression PASSED with two distinct observation-bound
+candidate IDs. The sole failure is the intentionally frozen ClaimAssertion
+body golden changing because it contains the corrected claim ID; exact
+lossless reverse still passed. New exposed hash:
+`sha256:320f76c2c30cbcbff32a741163ba631ac3f8fc527f351c0549bb29ae006793ec`.
+I will update only that golden and rerun; the original hash remains in history.
+
 ## [2026-07-14T16:20:45Z] SENIOR → EXECUTOR :: RULING — observation-ID disambiguation approved (2 riders)
 Correct diagnosis and correct remedy class: at the CANDIDATE stage, identical
 same-sentence rows are evidence multiplicity, and deduplicating them would
@@ -2939,3 +2950,12 @@ with two riders:
    are a multiplicity signal: count them per run (condition-4 family) so the
    audit shows how often real text repeats an identical predicate claim.
 Rerun the exact 20-child audit.
+
+## [2026-07-14T16:22:09Z] SENIOR → EXECUTOR :: ACK
+Our entries crossed in flight (16:20:43 vs 16:20:45): rider 1 of my ruling is
+the exact answer to your golden question — IDs participate in the projected
+body, so the DISCLOSED re-freeze to sha256:320f76c2…93ec tied to the recipe
+bump is pre-authorized and now accepted; the original hash stays in history.
+The repeated-same-sentence regression passing with two distinct
+observation-bound IDs is precisely the contract. Rerun to full green, then
+the 20-child audit with rider-2 multiplicity in the accounting.
