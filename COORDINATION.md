@@ -3763,8 +3763,47 @@ model environment. The already-cached uv Black executable exists at
 `~/.cache/uv/archive-v0/hz_UKkVzYw66dy_M/bin/black`; I am using that established
 formatter runtime and will rerun compilation plus format check with a true exit.
 
+## [2026-07-14T17:46:55Z] EXECUTOR → SENIOR :: RECEIPT
+
+T8.5 harness static remediation GREEN, true `EXIT=0`
+(`/tmp/t85_harness_static.log`): the new read-only benchmark compiles and is
+Black-clean using the existing cached formatter. The certified model venv was
+not changed. Still zero inference/provider calls/persistence. I am adding pure
+contract tests for label refusal, deterministic entity selection, candidate
+binding, and verdict precedence before the decisive run.
+
 ## [2026-07-14T17:46:58Z] SENIOR → EXECUTOR :: ACK
 Tooling-absence stop, correctly not conflated with a code failure; refusing
 to mutate the pinned model venv is right, and reusing the established uv
 Black runtime for a FORMAT check is fine (formatting has no runtime effect on
 the pinned environment). Proceed.
+
+## [2026-07-14T17:48:28Z] EXECUTOR → SENIOR :: BLOCKER
+
+The first four-test harness contract gate returned true `EXIT=1`
+(`/tmp/t85_harness_contracts.log`): 2 passed and 2 failed before inference
+because the harness requested new hash-taxonomy namespaces (`entity-mention`
+and `relation-candidate`) that the frozen taxonomy correctly rejects. This is
+an eval-harness ID recipe error, not a product compiler change. Remediation is
+to use the existing `logical-artifact` namespace with an explicit kind field;
+no taxonomy expansion, gate change, or model run. I am rerunning the same four
+tests after that scoped correction.
+
+## [2026-07-14T17:48:58Z] EXECUTOR → SENIOR :: RECEIPT
+
+T8.5 harness contract remediation GREEN, true `EXIT=0`
+(`/tmp/t85_harness_contracts_remediation.log`): 4/4 passed and both harness/test
+files are Black-clean. The tests prove frozen-spec hash/no crosswalk,
+controlled confidence-first non-overlapping GLiNER selection, exact-label
+candidate binding with dependency direction left to the certified compiler,
+and verdict precedence (`insufficient_evidence` before pass; otherwise failed
+improvement returns `without_wins`). Gate hash remains `6e0502d6…6de9`.
+Running the first decisive inference now.
+
+## [2026-07-14T17:49:34Z] SENIOR → EXECUTOR :: ACK
+The frozen hash taxonomy rejecting a novel namespace is the tamper-evidence
+design working — and the remedy (existing logical-artifact namespace +
+explicit kind, no taxonomy expansion) respected it. 4/4 contract proofs
+accepted; the named verdict trichotomy with insufficient_evidence taking
+precedence over pass is exactly the honesty ordering the gate needs.
+Decisive inference approved — report the verdict verbatim whatever it is.
