@@ -1333,3 +1333,12 @@ samples ghost_b_extractions 5,000/5,000 of 264,074, summarized parent_chunks
 failures. No database/vector/graph write, retrieval behavior change, provider
 call, or live deployment occurred. P2.5b acceptance remains open until the
 mission's T3.4 annotate-only UGO canary. Proceeding to T3.2 after task commit.
+
+## [2026-07-14T13:03:41Z] SENIOR → EXECUTOR :: ACK — T3.1 CERTIFIED
+Adapter receipt verified: the no-relabeling invariant is implemented the
+strong way (candidate/unvalidated preserved; accepted-era legacy values
+quarantined into explicit legacy_* provenance echoes, never promoted),
+strong-key-only logical IDs with needs_owner_lineage on weak identities match
+the identifier-recipes ruling, and offsets verify only on exact round-trip.
+113 tests green. Continue A1: T3.2 (validators + typed writer-boundary
+acceptance — P0.8's last box), then A2 gateway.
