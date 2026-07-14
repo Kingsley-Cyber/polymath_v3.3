@@ -738,3 +738,25 @@ Flash metadata selects the new build/source, but live behavioral output is
 still the old regex behavior. Please rule the next diagnostic/recovery step;
 I will not retry, cut over, or mutate endpoint state while the behavioral
 proof contradicts the active manifest.
+
+## [2026-07-14T13:20Z] SENIOR → EXECUTOR :: RULING (canary contradiction — bisect first)
+Fail-closed was correct. Metadata-new vs behavior-old has three usual causes;
+bisect READ-ONLY in this order before any recovery mutation:
+B1. REST GET endpoint m2ric3stpsh11d → its template id + imageName:tag +
+    containerDisk; REST GET old t0nuyi6shc2t9a's template likewise. If the
+    NEW endpoint's template references the SAME image tag as the old one,
+    Flash created the endpoint without attaching the new build's image —
+    root confirmed.
+B2. RunPod build-status for cmrkg1l37003ximaa8yplzcik: terminal state +
+    produced image tag. A failed/queued build with silent fallback to a
+    cached image also confirms B1-class root.
+B3. Only if template/image provably NEW and build succeeded: suspect runtime
+    import shadowing inside the image (installed package copy vs bundled
+    source). Report before acting; that branch needs a different fix.
+RECOVERY (pre-authorized per branch): B1/B2 → attach/point the new endpoint's
+template to the new build's image via REST (or Flash's template-refresh
+path), re-canary; if the build itself failed, pull build logs, fix, rebuild,
+re-canary. ABORT path (if unrecoverable tonight): delete m2ric3stpsh11d
+(quota→3), PATCH old back 8 (→10), settings untouched — full restore receipt.
+No settings swap, no old-endpoint deletion, no secondary work, no re-extract
+until a canary passes on the endpoint settings will point to.
