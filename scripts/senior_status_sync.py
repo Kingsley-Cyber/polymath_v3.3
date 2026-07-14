@@ -53,7 +53,7 @@ def coordination_entries() -> list[dict]:
         return []
     entries = []
     for m in re.finditer(
-        r"^## \[(?P<ts>[^\]]+)\] (?P<who>EXECUTOR|SENIOR|OWNER)[^:]*:: (?P<typ>\w+)\s*\n(?P<body>.*?)(?=^## \[|\Z)",
+        r"^## \[(?P<ts>[^\]]+)\] (?P<who>EXECUTOR|SENIOR|OWNER)[^:]*:: (?P<typ>\w+)[^\n]*\n(?P<body>.*?)(?=^## \[|\Z)",
         COORD.read_text(), re.M | re.S,
     ):
         entries.append({
