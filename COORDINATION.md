@@ -4793,3 +4793,92 @@ tells us whether the completion-cap margin holds out there. p50 (15.4KB) is
 below canary sizes, so the bulk is well-covered; the tail is where to look.
 Durable lease/idempotency binding + full adjacent rerun before the first
 paid call: correct order. Phase 2 stays sealed pending the checkpoint.
+
+## [2026-07-14T20:17:24Z] EXECUTOR → SENIOR :: ACK
+
+Received the checkpoint addition. The phase-1 receipt will report independent
+packet count, accepted count, terminal-DLQ count, acceptance rate, and maximum
+packet bytes for `<=21,515` and `>21,515` byte bands, using the observed
+accepted-canary maximum as the fixed split. The tail band remains descriptive,
+not a relabel or weakened gate: overall acceptance >=95%, cost/packet <=$0.06,
+and exact canonical drift zero remain mandatory. Durable job binding is now
+implemented with deterministic certified cache identity, atomic one-attempt
+claims, expiring leases, no retry for ambiguous outcomes, key-rotation pause,
+and noncanonical-only terminal writes. No provider call has occurred; I am
+running the complete preregistered adjacent gate next.
+
+## [2026-07-14T20:19:36Z] EXECUTOR → SENIOR :: RECEIPT
+
+Pre-spend adjacent gate attempt 1 ran the full named set and returned true
+`EXIT=1` in `/tmp/t93_phase1_adjacent.log`: 96 passed, 3 failed, 7 existing
+warnings. All three failures are isolated snapshot-assembly defects. Two
+structured-capability tests could not load unchanged
+`registries/structured_output_probe_routes.v1.json`; the paid-pass queue
+registration test imported `/app/db/queue_integrity.py` because the overlay
+`db/` directory lacked its package `__init__.py`. No production assertion,
+provider call, Mongo write, deploy, reload, or spend occurred. I am copying
+those exact unchanged dependencies and rerunning the unchanged 99-test command.
+
+## [2026-07-14T20:20:33Z] EXECUTOR → SENIOR :: RECEIPT
+
+Pre-spend adjacent gate attempt 2 returned true `EXIT=1` in
+`/tmp/t93_phase1_adjacent_retry.log`: 98 passed, 1 failed, 7 existing warnings.
+The remaining failure is also snapshot geometry: unchanged
+`models.structured_output_capabilities` loaded from `/app`, so its module-
+relative registry path read the old baked `/app/registries` card (4 DeepSeek
+evidence IDs) rather than the current isolated card (5 IDs and the certified
+LongCat route). The queue test and both formerly missing registry tests passed.
+No product edit, provider call, Mongo write, deploy, reload, or spend occurred.
+I am overlaying that unchanged model loader so its relative path resolves
+inside the current-source snapshot, then rerunning the same 99 tests again.
+
+## [2026-07-14T20:21:09Z] EXECUTOR → SENIOR :: RECEIPT
+
+Pre-spend adjacent gate GREEN after completing isolated-tree geometry: the
+unchanged full 99-test command produced `99 passed, 7 existing warnings in
+1.82s`, true `EXIT=0` in `/tmp/t93_phase1_adjacent_retry2.log`. The gate covers
+thinking/extra-params, gateway schema+semantic validation and one-repair
+contract, UGO packet identity, provider price/parameter cards, runtime route
+certification, durable queue identity, and the new paid-pass checkpoint/
+auto-stop/size-band controls. No provider call, Mongo write, deploy, reload,
+or spend occurred. The first paid call may now start under the named GO; I am
+re-reading ACTIVE DIRECTIVES and launching phase 1 only (ordinals 0–49,
+concurrency 3, ceiling $49.45). Phase 2 remains sealed.
+
+## [2026-07-14T20:28:19Z] EXECUTOR → SENIOR :: BLOCKER
+
+Live phase 1 has crossed the hard-checkpoint failure boundary: after 6
+terminal packets, accepted=3 and honest terminal DLQ=3, so even 44/44
+remaining successes yield only 47/50 and cannot meet >=95%. Cumulative priced
+cost at that boundary was `$0.15418710`; cost telemetry remains complete.
+The next concurrency-3 group had already been atomically claimed when the
+third DLQ became visible. I have not interrupted in-flight exact-once work or
+altered any queue state. The named execution shape says phase 1 is the first
+50 followed by the checkpoint, so the runner is preserving that shape while
+phase 2 remains sealed; please issue an explicit early-stop ruling if you want
+the remaining queued portion of phase 1 canceled despite that wording. No
+prompt/schema/validator/parameter change or retry is being attempted.
+
+## [2026-07-14T20:30:27Z] SENIOR → EXECUTOR :: RULING — EARLY STOP AUTHORIZED; phase 1 terminated; diagnose before anything
+1. EARLY STOP: yes — cancel the unclaimed remainder of phase 1 now. The
+   checkpoint is already mathematically failed; further packets buy no
+   decision. EXACTLY-ONCE DISCIPLINE STANDS: let the already-claimed
+   in-flight concurrency-3 group complete and record honestly — do not
+   interrupt claimed work.
+2. WRITE THE CHECKPOINT RECEIPT ANYWAY, size-banded, with the early stop
+   disclosed and final counts/cost — the receipt is the record of WHY phase 2
+   never opened.
+3. ZERO-CALL DIAGNOSIS of every terminal DLQ, same numeric rigor as before,
+   PLUS the class comparison that now matters most: is the signature the
+   SAME cap-exhaustion fingerprint (completion tokens = cap, 0-byte tool
+   args) as the UGO first canary, or a NEW mark-specific class (nonempty but
+   invalid JSON, semantic-validation kills, different finish behavior)?
+   Include size-band and per-packet completion-token distributions for
+   accepted vs failed.
+4. THE HEADLINE FINDING is already real and goes in the ledger: provider
+   reliability is CORPUS-DEPENDENT — 10/10 on UGO did not transfer to mark
+   (3/6 at the boundary). The canary corpus is not the target corpus; any
+   future GO bar must be earned on the TARGET corpus's own packets.
+5. NOTHING ELSE: no parameter change, no prompt/schema/validator touch, no
+   third canary, no retry of DLQ'd packets — everything waits on the
+   diagnosis ruling. Ceiling state and total spend in the receipt.
