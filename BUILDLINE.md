@@ -1,120 +1,173 @@
 # BUILDLINE — the temporal north-star (authoritative build order)
 
-**What this is:** the single time-ordered line of checkpoints from today's repo
-state to Definition of Pass. The checklist holds item-level truth; the design
-docs hold architectural truth; THIS file holds temporal truth — what is being
-built NOW, what gates it, which documents it consumes, and what comes next.
+**What this is:** the single time-ordered checkpoint line from the repo's
+current state to Definition of Pass. Item truth = the checklist
+(/Users/king/polymath_v3.3/docs/RAPTOR_RAG_IMPLEMENTATION_CHECKLIST.md);
+architectural truth = the design docs; temporal truth = THIS file.
 
-**The standing rule that prevents the Qwen-instruction class of gap:** every
-adopted design decision MUST claim a checkpoint slot the same day it is
-adopted. A design with no slot is listed under UNSLOTTED at the top and is a
-planning defect until placed. (The embedding-instruction gap survived weeks
-because nothing enforced this; it is now CP5.)
+**Derivation rule (owner correction 2026-07-14):** this file is DERIVED FROM
+THE CHECKLIST ON DISK, never from any agent's memory. Every checklist section
+with open work maps to exactly one checkpoint in the COVERAGE MAP below;
+`scripts/check_buildline_coverage.py` verifies the mapping and fails loudly on
+any unmapped section. Every newly adopted design claims a slot the same day
+(UNSLOTTED list = planning defects).
 
-**Maintenance:** senior updates the NOW pointer and stamps; executor stamps a
-checkpoint's status as part of its receipts; owner vetoes via COORDINATION.
-Precedence: OWNER > CONTINUATION_HANDOFF §Decision authority > this order >
-day-to-day directives.
+**Maintenance:** senior updates NOW pointer + stamps; executor stamps status in
+receipts; owner vetoes via COORDINATION.md. Precedence: OWNER >
+CONTINUATION_HANDOFF §Decision authority > this order > daily directives.
+
+**Model note (owner ruling 2026-07-14):** NO embedding/reranker model change is
+planned. Qdrant binary quantization (~32-40x memory compression with
+oversampling + full-vector rescoring, already implemented and promotion-gated)
+is COMMITTED work on the CURRENT 1024-dim vectors — clone-first, recall-A/B
+gated, at CP6. Any 4B-model move is owner-initiated only and has no slot.
 
 ---
 
-**NOW → CP1** (Phase A: g1 caught a REAL defect — digital-PDF structural-lane
-bypass; fix CP1-D1 in flight, then full gate re-run)
-**UNSLOTTED:** none (all adopted designs hold a slot as of 2026-07-14)
+**NOW → CP1** (Phase A: g1 caught the digital-PDF structural-lane bypass;
+fix CP1-D1 with executor; then full g1–g10 re-run)
+**UNSLOTTED:** none as of 2026-07-14 (verified by coverage script)
 
 ---
 
 ## CP0 — Foundation ✅ DONE 2026-07-14
-S0 dark-code landing · S1 temporal summary seam · S2 bibliographic capture ·
-S3 disposition matrix · 3-tier regression (negatives 5/5 all tiers; scorer v4)
-· all 8 owner registries persisted + loader/resolver + hash taxonomy (31 tests)
-· glide-path authority ratified. Receipts: checklist Implementation Log;
-docs/baselines/EVAL_POSTS2_COMPARISON_RECEIPT_2026-07-14.md.
+S0–S3 landed · 3-tier regression (negatives 5/5; scorer v4) · 8 owner
+registries + loader/resolver + hash taxonomy (31 tests) · glide authority.
 
-## CP1 — Deployment validation (Phase A) ⏳ ACTIVE (executor)
-**2026-07-14 g1 FINDING:** digital PDFs bypass structure parsing
-(_parse_pdf_fast_text) → flat tier_c/ocr_ast parents, empty heading_path.
-CP1-D1 fix directive issued (COORDINATION #2). Also rewrites ecom evidence:
-heading poverty = pipeline artifact → ecom exits CP2, gets
-fix→reingest→single-enrichment path (owner §8 decision with corrected facts).
-Consumes: docs/REBATCH_RUNBOOK_2026-07-14.md §Phase A.
-Exit gate: g1–g10 green with fixture ground-truth assertions; senior verifies
-receipts. Authority: senior AUTO. Failure = STOP + diagnose, no gate weakening.
+## CP1 — Deployment validation (Phase A) ⏳ ACTIVE
+g1 FINDING: `_parse_pdf_fast_text` bypass → digital PDFs lose structure.
+CP1-D1: text-layer PDFs → docling layout (no OCR) → markdown/sections →
+structural lane; OCR only for image-only scans; fallback counter; general
+logic only. Exit: g1–g10 green on re-run. Consumes: REBATCH_RUNBOOK §Phase A.
 
-## CP2 — Corpus enrichment (Phase B, MARK-ONLY per g1 finding) — next
-Consumes: runbook §Phase B; latent_concept_policy.v1 (interim-v1 capture).
-mark full regen → mark lexicon → mark cards LAST → readiness → after-eval vs
-today's baselines. ECOM REMOVED (g1 finding): its path is now
-CP1-D1 fix → owner §8/reingest decision on corrected evidence → reingest →
-ONE enrichment pass (never twice). Exit gate: coverage censuses +
-reconciliation + no-regression eval. Authority: 2h GLIDE after CP1
-verification. OWNER-ONLY carve-outs: ecom junk deletion, v2 unfreeze.
+## CP2 — Mark-only enrichment (Phase B rescoped) + P0.1 closure
+Mark full regen → lexicon → cards LAST → readiness → after-eval. Ecom REMOVED
+(fix→owner reingest decision→ONE pass). P0.1's 4 verify boxes ride these
+receipts. Exit: coverage censuses + reconcile + no-regression eval.
+Authority: 2h GLIDE after CP1. Checklist: P0.1.
 
-## CP3 — P2.5b envelope completion
-Consumes: FINAL_SCHEMA §Shared envelope/§hash taxonomy/§Identifier recipes;
-models/hash_taxonomy.py + registry_loader.py (built).
-Remaining: identifier recipes + golden vectors · legacy adapters ·
-projection outbox + ProjectionManifests (incl. embedding_profile w/
-instruction_version) · Mongo validators · UGO annotate-only canary.
-Exit gate: P2.5b acceptance boxes (byte-exact vectors, adapter parity,
-manifest-reproducible identity sets, no live-behavior change). AUTO.
+## CP3 — Envelope + identity (P2.5b completion, P0.8 closure)
+Identifier recipes + golden vectors · legacy adapters · projection outbox ·
+ProjectionManifests (embedding_profile incl. instruction_version) · Mongo
+validators · typed writer-boundary acceptance (P0.8 last box) · UGO
+annotate-only canary. Exit: P2.5b acceptance. Checklist: P2.5b, P0.8.
 
-## CP4 — P2.5c structured-output gateway
-Consumes: docs/STRUCTURED_OUTPUT_GATEWAY_SPEC_2026-07-14.md.
+## CP4 — Structured-output gateway (P2.5c)
 SemanticDigestV1 + capability ladder + semantic validator + targeted repair +
-dead-letter + provenance/cache. Exit gate: P2.5c acceptance (UGO 10-packet
-canary, ladder downgrade test, Ghost A untouched). AUTO.
+dead-letter + provenance/cache; UGO 10-packet canary. Checklist: P2.5c.
 
-## CP5 — S5 rollup + query-side activation round 1
-Consumes: REBUTTAL restatement (alias absorption); registry-audit collisions
-(3 alias stores → ONE registry; qdrant latent payload-whitelist fix; dual
-entity_id reconcile); embedding_instruction_registry.v1 (APPROVED wording).
-Exit gate: rollup censuses + the ISOLATED universal-instruction A/B
-(vs baseline_live_v0; lay-language/cross-corpus up, no shape regression,
-negatives 5/5). Authority: build AUTO; instruction flip GLIDE 4h.
+## CP5 — Vocabulary/alias/instruction layer (S5 + P1.7 + P2.1 + P2.3 + Librarian Ph.3)
+ONE versioned alias registry absorbing the 3 existing stores · qdrant latent
+payload-whitelist fix · dual entity_id reconcile · P1.7 remainder
+(gather-before-fanout, vector reuse, per-corpus batching, lexical-only
+baseline) · P2.1 concept-contract fields (DF/specificity, senses, salience,
+slim payloads) · P2.3 versioned Qwen3 instructions — the APPROVED universal
+instruction's ISOLATED A/B vs baseline_live_v0 (flip = GLIDE 4h) · Librarian
+Phase 3 hardening. Checklist: P1.7, P2.1, P2.3, Librarian Phase 3.
 
-## CP6 — Honesty layers
-S6 readiness split (operational/metadata-quality/temporal inside
-corpus_readiness) · S7 facet DF rule behind its A/B (GLIDE) · v2-naive +68k
-reconciliation via ProjectionManifest audit. Exit gate: readiness recompute
-receipts + facet A/B + reconcile explanation. 
+## CP6 — Repo-level RAG hygiene + Qdrant optimization (the "outside the
+refactors" work, owner-flagged 2026-07-14)
+P0.2 hierarchy repair remainder · P0.4 contradiction-check scope · P0.5
+chunk/metadata hygiene remainder · P0.6 lease/reconciliation remainder ·
+Librarian Phase 0 trustworthy-catalog reconcile · **P1.9 Qdrant hot-path audit
+(20 items: per-stage timing, payload selectors, batching, filter/29-index
+audit, prevent_unoptimized, topology, image pin, priority classes, keepalive)
+· P3.4 QUANTIZATION — the owner's 40x: binary quantization on current
+vectors, clone-first, oversampling+rescore, recall A/B, then promote** ·
+v2-naive +68k reconciliation via manifests. Checklist: P0.2, P0.4, P0.5,
+P0.6, Librarian Phase 0, P1.9 hot-path, P3.4.
 
-## CP7 — Librarian measurement moment
-S8: pair card rebuild FINAL (post-capture) + shelf_reserve A/B on frozen suite
-(flip via GLIDE if gates pass) + watch-list re-check. Exit gate: preregistered
-thresholds. Consumes: PLAN_CRITIQUE S8 row.
+## CP7 — Librarian measurement moment (S8)
+Pair/mark card rebuild FINAL · P1.4 shelf routing · P1.5 remainder ·
+Librarian Phases 1–2 milestones · P0.3 cross-corpus acceptance · P1.1
+remainder (librarian rubric, automated contamination check, standing gate) ·
+shelf_reserve A/B (flip = GLIDE). Checklist: P1.4, P1.5, Librarian Ph.1/2,
+P0.3, P1.1.
 
-## CP8 — Claim spine proven on canary
-Consumes: docs/LOCAL_EXTRACTION_THREE_SCHEMA_DESIGN_2026-07-14.md +
-extraction_vocabularies.v1 + backend/evals/semantic_extraction_gold_v1.json.
-LocalExtractionV1 + Python claim compiler on UGO; C2 GLiREL re-benchmark
-(WITH vs WITHOUT controlled-label candidates on compiled-claim quality).
-Exit gate: C2 verdict decides Stage-4 GLiREL; claims annotate-only. AUTO.
+## CP8 — Claim spine on canary (P2.4/P2.5/P2.5a)
+LocalExtractionV1 + Python claim compiler on UGO · negation (P2.4) · typed
+signatures (P2.5) · unified claim/frame contract (P2.5a) · C2 GLiREL
+re-benchmark decides Stage-4. Checklist: P2.4, P2.5, P2.5a.
 
-## CP9 — Semantic pipeline on the PoC pair (S11)
-Consumes: FINAL_SCHEMA owner-rebuttal addendum (staged pipeline, permission
-ladder) + all registries + motif matcher contract (sequence-tolerance +
-role-threading recipes, MotifCandidate dual scores) + latent policy (claim-
-grounded v2 corroborates interim-v1). Exit gate: assignment-state censuses,
-observation-lane discipline (nothing self-promotes), no-regression eval. AUTO
-build; any cutover GLIDE.
+## CP9 — Semantic pipeline + extraction program on the pair (S11)
+Staged pipeline via gateway (domains/frames/motifs/latent-v2 corroborating
+interim-v1) · motif matcher (sequence-tolerance + role-threading recipes,
+dual-score MotifCandidate) · P2.6 engine parity · P2.7 remainder (5,000 gate,
+parity compare, retry safety) · P2.7b burst orchestration · P2.8 concept→doc
+grounding · ecom reingest-after-fix + its ONE enrichment pass (post owner §8).
+Checklist: P2.6, P2.7, P2.7b, P2.8, Temporal Program hooks.
 
-## CP10 — Retrieval activation family-by-family
-Consumes: docs/RETRIEVAL_OPTIMIZATION_PLAN_2026-07-14.md + P2.2/P2.2c boxes.
-Representation points (incl. context-enriched children) + mode→family matrix +
-lineage dedupe + rank fusion; EACH family earns its seat via its own A/B.
-Exit gate: the preregistered program target — lay-language/cross-corpus
-doc-hit +10pts, no material regression. This is where the program's promise
-is measured. GLIDE per family flip.
+## CP10 — Retrieval activation family-by-family (P2.2 + P2.2c + P1.2 + Librarian Ph.4)
+Representation points (context-enriched children etc.) · mode→family matrix ·
+lineage dedupe · rank fusion · P1.2 grounded-planner activation · Librarian
+Phase 4 LLM amplification (planner-when-thin, explain-not-select). EACH
+family/behavior behind its own A/B. Exit: the preregistered program target —
+lay-language/cross-corpus doc-hit +10pts, no material regression.
+Checklist: P2.2, P2.2c, P1.2, Librarian Phase 4.
 
-## CP11 — Time, anchors, and the model decision
-S9 anchoring + P1.6 answer shapes · S12 T-MAIN temporal phases · target-stack
-decision: 4B embedder + binary quantization as ONE migration (RunPod re-embed,
-combined recall A/B) + reranker cascade A/B (may run earlier as its own slice).
-OWNER decision on the migration budget.
+## CP11 — Time, anchors, shapes, rerank serving
+P1.3 conversation/open-book anchoring · P1.6 answer-shape routing · T-MAIN
+temporal phases (assertions/episodes/eligibility/query modes) · P1.9
+adaptive reranking + P3.5 reranker serving alternatives (cascade experiments;
+NO model commitment). Checklist: P1.3, P1.6, Temporal Program (T-MAIN),
+P1.9 adaptive rerank, P3.5.
 
-## CP12 — Closure
-S13 experiments (thematic pilot, bridge cards) · S14: full 16×3 regression
-matrix, strict-ready verification, restart/rollback/concurrency test sweep,
-deploy-from-main real-inference reproduction, final report distinguishing
-implemented/migrated/deployed/rejected/external-limits. Definition of Pass.
+## CP12 — Experiments + closure
+P3.1 thematic routing pilot · P3.2 bridge cards · P3.3 collection
+consolidation · Quick Upload decision · Non-Negotiable Invariants final sweep
+· Required 16×3 regression matrix · Definition of Strict Ready per corpus ·
+restart/rollback/concurrency sweep · deploy-from-main real-inference
+reproduction · final report (implemented/migrated/deployed/rejected/limits).
+Checklist: P3.1, P3.2, P3.3, Quick Upload, Regression Matrix, Strict Ready,
+Invariants.
+
+---
+
+## COVERAGE MAP (checklist section → checkpoint; machine-checked)
+
+| Checklist section | CP |
+|---|---|
+| Non-Negotiable Invariants | CP12 (+ every CP exit gate) |
+| P0.8 Schema Enforcement At Storage Boundaries | CP3 |
+| Temporal RAG Program | CP9 (hooks) / CP11 (T-MAIN) |
+| Phase 0 - Trustworthy Catalog | CP6 |
+| Phase 1 - Deterministic `librarian_card.v0` | CP7 |
+| Phase 2 - Deterministic Query And Seat Policy | CP7 |
+| Phase 3 - Deterministic Hardening | CP5 |
+| Phase 4 - Optional LLM Amplification | CP10 |
+| P0.1 Stop Placeholder Summaries | CP2 |
+| P0.2 Repair Degenerate Hierarchy | CP6 |
+| P0.3 Finish Corpus-Floor Calibration | CP7 |
+| P0.4 Make Answerability Honest | CP6 |
+| P0.5 Complete Chunk And Metadata Hygiene | CP6 |
+| P0.6 Corpus Deletion And Orphan Cleanup | CP6 |
+| P1.1 Establish The Evaluation Set First | CP7 |
+| P1.2 Activate The Grounded Planner Safely | CP10 |
+| P1.3 Add Conversation And Open-Book Anchoring | CP11 |
+| P1.4 Route Shelves Before Books | CP7 |
+| P1.5 Implement Librarian Selection Roles | CP7 |
+| P1.6 Route By Answer Shape | CP11 |
+| P1.7 Batch And Cache Vocabulary Work | CP5 |
+| P1.9 Qdrant Hot-Path And Contention Audit | CP6 |
+| P1.9 Make Reranking Adaptive | CP11 |
+| P2.1 Version The Universal Concept Contract | CP5 |
+| P2.2 Build Two-Sided Multi-Point Concept Representations | CP10 |
+| P2.2c Query-Side Retrieval Optimization | CP10 |
+| P2.3 Add Versioned Qwen3 Retrieval Embedding Instructions | CP5 |
+| P2.4 Negation And Relation Correctness | CP8 |
+| P2.5 Typed Relation Signatures | CP8 |
+| P2.5a Unified Claim/Assertion And Mechanism-Frame Contract | CP8 |
+| P2.5b Canonical Semantic Artifact Envelope | CP3 |
+| P2.5c Structured-Output Gateway | CP4 |
+| P2.6 Engine Parity And Provenance | CP9 |
+| P2.7 RunPod Production Validation | CP9 |
+| P2.7b RunPod Burst Orchestration | CP9 |
+| P2.8 Direct Concept-To-Document Grounding | CP9 |
+| P3.1 Pilot Claim And Mechanism-Frame Routing | CP12 |
+| P3.2 Deterministic Motif And Analogy Bridge Cards | CP12 |
+| P3.3 Collection Consolidation - Migration | CP12 |
+| P3.4 Quantization - Experiment | CP6 (owner-committed 40x) |
+| P3.5 Reranker Serving Alternatives - Experiment | CP11 |
+| Quick Upload And Filesystem Contract | CP12 |
+| Required Three-Tier Regression Matrix | CP12 |
+| Definition Of Strict Ready | CP12 |
