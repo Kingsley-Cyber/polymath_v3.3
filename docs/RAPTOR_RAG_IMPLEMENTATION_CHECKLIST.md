@@ -322,6 +322,11 @@ Milestone acceptance:
 
 ### Phase 1 - Deterministic `librarian_card.v0`
 
+- [ ] Decide + implement the card-production contract for NEW ingests:
+  either ingestion auto-produces cards as a final deterministic pass, or the
+  post-ingest builder step is a documented required stage (adopted 2026-07-14
+  from smoke-gate g6: fresh corpus had lexicon but no cards until the builder
+  ran).
 - [x] Build cards from existing lexicon, Ghost B, summary semantics, document
   profiles, tree bindings, and promotion artifacts only.
   *(merged + built 2026-07-13: 673 cards live — v2 495, mark 101, ecom 76, UGO 1; per-field provenance; zero-seed docs skipped, never fabricated)*

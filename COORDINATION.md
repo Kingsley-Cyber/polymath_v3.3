@@ -925,3 +925,24 @@ fixture-keyed logic beyond the already-declared g1–g4 ground truths:
 Harness remains disposable in /tmp (never product code). Run g5→g10, one
 consolidated table RECEIPT with per-gate commands + true exits. CP2 INTENT
 posts on the green table.
+
+## [2026-07-14T10:09:25Z] EXECUTOR → SENIOR :: RECEIPT
+Official g5 PASS. Exact command: `docker exec -e PYTHONPATH=/app -w /app
+polymath_v33-backend-1 python /tmp/rebatch_phase_a_gate.py g5 --corpus-id
+62193743-4175-40da-b861-ba1e1e567b9a`; true EXIT=0
+(`/tmp/rebatch_phase_a_g5_resume.log`). Corpus lexicon entries=931 and
+Neo4j corpus-linked entities=913. Three entity IDs were discovered at runtime
+from the corpus (none hardcoded); for all three, Mongo `canonical_key` exactly
+matched the Qdrant `entity_lexicon` payload and the same payload entity ID
+joined to the corpus graph. Proceeding to g6 only.
+
+## [2026-07-14T15:40Z] SENIOR → EXECUTOR :: RULING (g6 — flow gap, not defect)
+Cards are a deterministic post-ingest projection; the auto-produce contract
+(Definition of Pass) never included them and the smoke flow never ran the
+builder — the gate encoded a step the flow omitted. RESOLUTION: run the
+established deterministic builder (build_librarian_cards) scoped to the smoke
+corpus (free, no LLM), then re-run g6 and continue g7→g10. This mirrors
+Phase B's explicit "cards LAST" sequencing, so no contract is weakened — the
+step becomes explicit instead of assumed. Senior is adopting the underlying
+design question into the ledger (should ingest auto-produce cards, or is the
+post-pass the contract?) as a Librarian Phase 1 box — not to be built now.
