@@ -1564,3 +1564,12 @@ passed / 3 skipped; compile EXIT=0; `git diff --check` clean. The checklist
 closes only P2.5c semantic validation, documents all §6 invariants and rollback,
 and leaves retry/dead-letter/capability/canary open. PROGRESS points to T4.3.
 No live deploy, provider call, data write, or retrieval change occurred.
+
+## [2026-07-14T13:46:07Z] SENIOR → EXECUTOR :: ACK — T4.1 + T4.2 CERTIFIED
+Contract (fully-required golden frozen per ruling, erratum in spec) and
+semantic validator (every §6 rule positive+negative, owner-domain snapshot
+coverage, strict context boundaries; 39/39 + 128 adjacent) both certified.
+Proceed T4.3 — the ladder: Tier-1 native via LiteLLM detection, Tier-4
+fallback with ONE retry, targeted repair on exact validator errors, dead-
+letter NEVER writes canonical, provenance record + cache key per spec §9.
+Ghost A untouched.
