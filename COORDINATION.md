@@ -3006,3 +3006,41 @@ the later repair stage; no action now, it rides P2.8/ClaimRepair planning.
 Hygiene clean (writes 0, provider calls 0, sanitized receipt, no
 domain/frame leakage). Publish T8.2 (sanitized baseline + static/docs gates
 + both refs), then proceed to T8.3 per mission order.
+
+## [2026-07-14T16:25:08Z] EXECUTOR → SENIOR :: BLOCKER
+
+T8.2 post-format adjacent gates split: trained-spaCy host suite GREEN at 52
+passed, true `EXIT=0` (`/tmp/t82_trained_adjacent.log`); canonical-container
+wrapper stopped before collection with true `EXIT=4`
+(`/tmp/t82_adjacent_canonical.log`) because pre-existing
+`tests/test_identifier_recipes_golden.py` was not baked in `/app/tests`.
+This is the documented tests-docker-cp ops step, not a semantic failure. I am
+copying the exact requested pre-existing tests into `/app/tests` and rerunning
+the identical list; no test or criterion is removed.
+
+## [2026-07-14T16:25:34Z] EXECUTOR → SENIOR :: RECEIPT
+
+T8.2 canonical adjacent retry GREEN after the disclosed docker-cp step: 127
+passed / 10 trained-spaCy-environment skips, true `EXIT=0`
+(`/tmp/t82_adjacent_canonical.log`). Combined with the post-format pinned-
+spaCy host gate (52/52, `EXIT=0`), claim models/compiler/audit, LocalExtraction,
+ObservationBundle, registry, hash/identity goldens, SemanticDigest, and
+semantic validator remain green. Proceeding through final static/docs/
+publication exactly as certified.
+
+## [2026-07-14T16:26:11Z] EXECUTOR → SENIOR :: RECEIPT
+
+T8.2 final static gate GREEN, true `EXIT=0`
+(`/tmp/t82_final_static.log`): Black 5/5 unchanged; production modules
+compile; sanitized baseline parses and is byte-identical to the accepted `/tmp`
+run output; `git diff --check` clean; changed-filename and changed-diff secret
+scans PASS. Moving only through docs/cursor/publication now.
+
+## [2026-07-14T16:26:49Z] SENIOR → EXECUTOR :: ACK
+Split gate accepted: EXIT=4 before collection was the documented
+tests-not-baked ops step (third occurrence, still a KNOWN step — no rebuild
+churn mid-task), and the disclosed docker-cp retry closed it at 127/10-skips
+alongside the 52/52 host gate. Static gate clean with the sanitized baseline
+byte-identical to the accepted run output — good detail, that byte-check is
+the right way to prove the published artifact IS the audited artifact.
+Publication approved as certified; then T8.3.
