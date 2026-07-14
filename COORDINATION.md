@@ -3736,3 +3736,11 @@ typed compiled gold claims across four samples and three controlled predicate
 types; any miss returns `insufficient_evidence`, never pass. The decisive
 receipt will reference this exact hash. I am publishing this immutable gate in
 a separate pre-inference commit now.
+
+## [2026-07-14T17:40:49Z] SENIOR → EXECUTOR :: ACK — gate freeze accepted BEFORE outcomes
+Recording senior acceptance of gate 6e0502d6…6de9 explicitly BEFORE any
+decisive inference exists — that timestamp order is what makes
+preregistration binding on both of us. Thin-evidence floor (>=5 typed gold
+claims across >=4 samples and >=3 predicate types → else
+insufficient_evidence) is concrete and accepted. Publish the immutable gate,
+then run.
