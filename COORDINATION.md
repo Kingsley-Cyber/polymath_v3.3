@@ -3275,3 +3275,66 @@ scoped `git diff --check` clean, true `EXIT=0` (`/tmp/t83_token_static.log`).
 The docs limit records the polarity-blind legacy contract and RunPod
 blank-parser/wire prerequisite without closing those open items. Preparing
 the required rebase, scoped stage, standalone commit, and dual push now.
+
+## [2026-07-14T16:53:39Z] EXECUTOR → SENIOR :: RECEIPT
+
+Rollback-isolated token-preservation commit published as
+`aeec419e74679b2fc47f94559ae01a116ef3e058` (`T8.3: preserve negation
+evidence tokens`, required Codex co-author trailer). Remote
+`claude-continuation-20260713` and remote `main` both resolve to that exact
+commit. The three additive sidecar files remain untracked and were not part
+of the commit; `tmp/` remains untracked and unstaged. Proceeding to the
+separate assessment-contract gate ladder now.
+
+## [2026-07-14T16:57:05Z] EXECUTOR → SENIOR :: RECEIPT
+
+T8.3 sidecar focused gate GREEN: 22 passed / 10 disclosed trained-spaCy skips,
+true `EXIT=0` (`/tmp/t83_sidecar_focused.log`). Beyond the accepted core, the
+strict schemas now reject cues outside referenced sentence boundaries,
+unexplained null signatures, unavailable reasons on false signatures, and
+mapped signatures missing endpoints. Both parsed-disagreement directions are
+explicit (`predicate_flag_without_attached_cue` vs
+`attached_cue_missing_predicate_flag`); owner-pending disposition closes from
+negation/conflict state. The exact existing-table subset is compared directly
+to `DOMAIN_RANGE_MAP` and frozen at
+`sha256:bc5f9fd57613a26524e98c2b3484c62a9261b192d0d767062e067cef7c327239`;
+fixture assessment recipe golden is also pinned. Proceeding to adjacent/full
+contract gates and static hygiene before docs/publication.
+
+## [2026-07-14T16:58:01Z] EXECUTOR → SENIOR :: BLOCKER
+
+T8.3 broad adjacent wrapper reached collection but ended true `EXIT=1`
+(`/tmp/t83_adjacent_full.log`): 206 passed / 10 trained-spaCy skips / 21
+legacy `test_universal_schema` failures. Every failure has the same setup
+cause: the plain disposable image omitted required `LITELLM_MASTER_KEY`,
+`AUTH_SECRET_KEY`, and `DEFAULT_ADMIN_PASSWORD`, so `get_settings()` failed
+before the legacy assertion. No sidecar test failed. I am rerunning the exact
+227-test list through the canonical three-overlay compose environment, still
+with the host checkout bind-mounted read-only; no criterion or test is
+removed and no deployed container is changed.
+
+## [2026-07-14T16:59:14Z] EXECUTOR → SENIOR :: BLOCKER
+
+Canonical-compose retry reduced the broad result to 223 passed / 10 skips /
+4 failed, true `EXIT=1` (`/tmp/t83_adjacent_full.log`). The four are not an
+environment toggle and are unrelated to T8.3: existing
+`test_universal_schema` assertions require DeepSeek v4 Flash
+`json_schema`, while the current authoritative provider card explicitly pins
+that exact model to live-verified `json_object` after its HTTP-400 canary.
+This contradiction exists at HEAD; no assessment/token code touches output
+mode or provider cards. I will not change live provider behavior or weaken/
+skip the stale assertions inside T8.3. Focused sidecar+compiler+observation
+gate remains 22/10 green; the remaining 223 adjacent assertions are green.
+Request ruling whether to record these four as a pre-existing provider-card
+test debt and proceed with T8.3 static/docs, or park publication pending their
+separate owner/senior-authorized reconciliation.
+
+## [2026-07-14T16:59:27Z] SENIOR → EXECUTOR :: ACK
+Setup-cause failure correctly identified (21 legacy failures, one cause:
+get_settings() needs the deployed env), zero sidecar failures, remedy right:
+canonical three-overlay compose env + read-only bind mount, criteria intact.
+One hygiene line since the missing vars are SECRET-CLASS (auth key, admin
+password, gateway key): supply them only via compose env-file indirection —
+never inline in wrapper commands, and confirm the log echoes none of them
+(your standing filename/diff secret scans already cover the artifacts).
+Rerun approved.
