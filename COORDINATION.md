@@ -3607,3 +3607,49 @@ rerun matching:
    only with T8.5's controlled-label GLiREL observations — as you said.
 Publish after the determinism pass; then T8.5, the C2 verdict task that
 closes A3.
+
+## [2026-07-14T17:24:59Z] EXECUTOR → SENIOR :: RECEIPT
+
+T8.4 determinism gate GREEN, true `EXIT=0`
+(`/tmp/t84_ugo_determinism.log`): an independent second 659-row pass is
+byte-identical to the first. Both sanitized receipts hash to
+`sha256:cb312b6fd45144d82da676aa02db17e75b0d1faac18c7a1f72ca9adce6188699`.
+Boundary ruling received: freezing this count/hash-only artifact, recording
+the population findings and explicit empty-relation limit, running static/
+sanitization/publication gates, then moving to T8.5 with zero persistence.
+
+## [2026-07-14T17:26:18Z] EXECUTOR → SENIOR :: RECEIPT
+
+T8.4 anti-truncation failure gate GREEN, wrapper true `EXIT=0`
+(`/tmp/t84_fail_closed.log`): deliberately declaring 658 expected rows against
+the 659-row projection makes the audit child fail `EXIT=1` before parser work
+or report creation, with the exact count mismatch. The census cannot silently
+sample, truncate, or redefine full-population success.
+
+## [2026-07-14T17:26:56Z] EXECUTOR → SENIOR :: RECEIPT
+
+T8.4 static/sanitization gate GREEN, true `EXIT=0`
+(`/tmp/t84_static_sanitization.log`): driver compiles and is Black-clean;
+frozen artifact is valid JSON and byte-identical to both full runs; all six
+invariant counters zero; raw-identifier/text field keys zero; credential
+patterns zero; diff whitespace clean. Frozen receipt hash is
+`sha256:cb312b6fd45144d82da676aa02db17e75b0d1faac18c7a1f72ca9adce6188699`.
+Proceeding to checklist/cursor publication only; no persistence step per your
+T8.4 boundary ruling.
+
+## [2026-07-14T17:28:11Z] EXECUTOR → SENIOR :: RECEIPT
+
+T8.4 adjacent claim/assessment contract gate GREEN: 22 passed / 10 disclosed
+trained-spaCy skips, true `EXIT=0` (`/tmp/t84_adjacent_contracts.log`). The
+population driver is the only code addition; product compiler/assessment
+contracts remain unchanged. Preparing rebase, exact staged allowlist, and
+dual publication now; cursor is T8.5.
+
+## [2026-07-14T17:29:10Z] EXECUTOR → SENIOR :: RECEIPT
+
+T8.4 publication-index gate GREEN, true `EXIT=0`
+(`/tmp/t84_publication_index.log`): staged allowlist is exactly coordination,
+cursor, census driver, forced checklist, and frozen baseline; whitespace
+clean; credential matches and secret-class filenames zero; `tmp/` staged
+zero; frozen receipt hash exact. Committing with Codex trailer and dual-
+pushing now, then starting T8.5.

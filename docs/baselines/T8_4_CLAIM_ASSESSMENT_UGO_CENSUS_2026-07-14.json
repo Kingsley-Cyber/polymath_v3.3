@@ -1,0 +1,117 @@
+{
+  "assessment_census": {
+    "claim_assessment_count": 14090,
+    "claim_negation_derivations": {
+      "not_negated": 13564,
+      "predicate_and_qualifier_agree": 16,
+      "qualifier_only": 510
+    },
+    "dependency_agree_count": 0,
+    "dependency_conflict_count": 0,
+    "dependency_conflict_reasons": {},
+    "negated_claim_count": 526,
+    "negated_claim_rate": 0.037331440738112134,
+    "negated_relation_count": 0,
+    "polarity_conflict_count": 0,
+    "polarity_conflict_reasons": {},
+    "promotion_dispositions": {},
+    "qualifier_only_share_of_negated_claims": 0.9695817490494296,
+    "relation_assessment_count": 0,
+    "relation_negation_derivations": {},
+    "relations_by_predicate": {},
+    "signature_assessed_count": 0,
+    "signature_assessment_reasons": {},
+    "signature_invalid_count": 0,
+    "signature_unassessed_count": 0,
+    "signature_valid_count": 0
+  },
+  "compiler_census": {
+    "claim_count": 14090,
+    "claim_yield_rate": 0.9980874123397322,
+    "cross_sentence_accepted_count": 0,
+    "cross_sentence_candidate_count": 173,
+    "cross_sentence_rejected_count": 173,
+    "emitted_relation_count": 0,
+    "glirel_agree_count": 0,
+    "glirel_conflict_count": 0,
+    "link_count": 82,
+    "links_by_connective_family": {
+      "discourse_result": 0,
+      "explicit_result_phrase": 82
+    },
+    "observed_predicate_count": 14117,
+    "same_sentence_repeated_claim_count": 27,
+    "sentence_count": 10014,
+    "skipped_typed_predicate_count": 27,
+    "skipped_typed_predicate_reason": "missing_subject_argument",
+    "typed_claim_count": 495,
+    "typed_predicate_count": 522,
+    "unresolved_coreference_count": 3026,
+    "unresolved_predicate_count": 13595,
+    "untyped_claim_count": 13595
+  },
+  "contract": {
+    "assessment_authority": "executor-proposed, owner-ratifiable",
+    "assessment_recipe_hash": "sha256:d6915504566d7159aee417fd14c6a0d18ded72c9e3596555f0301578539698c7",
+    "assessment_schema_hash": "sha256:57925916b3801d91af3302b91ca8d0d1a9361f92b7b0626be28cd93b4f12c59e",
+    "assessment_version": "claim_semantic_assessment.v1",
+    "change_policy": "changes-require-new-schema-version",
+    "claim_negation_schema_hash": "sha256:d9610b0264364c8dd26a99d8113fbf2babd6801a0ad567cc23425c3c5fe52784",
+    "claim_record_schema_hash": "sha256:35dd5d0f67d7458bb4be1f3797cdb2878a2e7cac4433d9a8fbeb6f4ab1c8782d",
+    "compiler_recipe_hash": "sha256:58a6b9403fcc7473546038843221e2117f8a6f9b254b686ea984865afef76043",
+    "compiler_version": "claim_compiler.v2",
+    "normalization_recipe_hash": "sha256:4aaf0cf9821894705cf1af5c2de0eb3dad87d1a45bbfea7c75362c2ea5ef2526",
+    "owner_ratification_required": true,
+    "relation_assessment_schema_hash": "sha256:03172edb0503a6468ce57094e5446078b7a63ff823692313bd940c9cb5cb5ed9",
+    "signature_compatibility_source": "services.ghost_b.DOMAIN_RANGE_MAP",
+    "signature_contract_hash": "sha256:bc5f9fd57613a26524e98c2b3484c62a9261b192d0d767062e067cef7c327239",
+    "signature_contract_id": "relation_signature_adapter.v1"
+  },
+  "corpus": {
+    "corpus_id": "bcf80054-7611-47d0-ae16-fa7fed259b13",
+    "input_projection_hash": "sha256:180be6adbaf3df18fc42ff68d1e7af84d1abdb202d9eae11a160b56145dfed50",
+    "name": "Unspoken Global Outcomes",
+    "processed_child_rows": 659,
+    "selection": "all_sanitized_nonempty_child_rows",
+    "source_child_rows": 659,
+    "source_version_id": "srcv:189c8c42b4ee2eb7b5e7c4bb6a960fd25ba9fc7d9ef7a264b6db2bc9ffbf83f3"
+  },
+  "invariants": {
+    "candidate_status_errors": 0,
+    "claim_conservation_errors": 0,
+    "claim_polarity_errors": 0,
+    "evidence_round_trip_errors": 0,
+    "receipt_accounting_errors": 0,
+    "relation_conservation_errors": 0
+  },
+  "provenance_dimensions": {
+    "corpus_id": "bcf80054-7611-47d0-ae16-fa7fed259b13",
+    "engine": "spacy_observation+claim_compiler+claim_assessment.v1",
+    "model": "en_core_web_sm@3.8.0",
+    "provider": "deterministic_local"
+  },
+  "runtime": {
+    "parser_version": "spacy:3.8.14;model:3.8.0",
+    "spacy_library_version": "3.8.14",
+    "spacy_model": "en_core_web_sm",
+    "spacy_model_version": "3.8.0"
+  },
+  "schema_version": "polymath.claim_assessment_ugo_census.v1",
+  "scope": {
+    "annotation_writes": 0,
+    "child_ids_in_receipt": false,
+    "claims_are_candidates": true,
+    "domains_frames_motifs_out_of_scope": true,
+    "empty_relation_lane_is_observed_not_inferred": true,
+    "graph_writes": 0,
+    "persistence_writes": 0,
+    "promotion_writes": 0,
+    "provider_calls": 0,
+    "raw_text_in_receipt": false,
+    "read_only": true,
+    "relations_are_observation_only": true,
+    "signature_enforcement": "annotate_only_no_drop_no_remap",
+    "typed_signature_rate_requires_relation_candidates": true,
+    "vector_writes": 0
+  }
+}

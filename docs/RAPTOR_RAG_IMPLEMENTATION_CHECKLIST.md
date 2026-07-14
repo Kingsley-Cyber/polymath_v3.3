@@ -2677,6 +2677,70 @@ A corpus is strict-ready only when:
 - Checklist boxes closed: none; this reconciles receipts rather than changing
   product acceptance criteria.
 
+### 2026-07-14 - T8.4 full UGO candidate-claim assessment census
+
+- Commit: this commit on `claude-continuation-20260713`.
+- Owner: Codex sole executor under `CODEX_MISSION.md`; Claude accepted the
+  full-population findings and ruled that T8.4 closes at census,
+  byte-determinism, and publication with zero durable annotation rows.
+- Corpus/data scope: all 659 nonempty rows in the sanitized UGO child-text
+  projection, not the prior 20-row sample. The source projection is frozen by
+  `sha256:180be6adbaf3df18fc42ff68d1e7af84d1abdb202d9eae11a160b56145dfed50`;
+  raw text and child IDs remain outside the committed receipt.
+- Code changes: added a read-only, count-only census driver that runs the
+  pinned trained-spaCy observation compiler, deterministic ClaimRecord
+  compiler, and additive T8.3 negation/signature assessment sidecar over an
+  exact expected row count. It verifies conservation, candidate-only state,
+  evidence/polarity closure, signature accounting, and stable recipe/schema/
+  provenance identities; it cannot silently sample or truncate.
+- Durable migration/backfill: none. Annotation, persistence, provider,
+  promotion, Mongo, Qdrant, Neo4j, graph, and vector writes are all zero.
+  Persistence is deferred to CP9 activation or its own separately gated step.
+- Before metrics: the 20-row T8.2 sample had 303 sentences, 374 observed
+  predicates, 374 candidate claims (9 typed / 365 untyped), one explicit
+  result link, 73 unresolved-coreference observations, and no population
+  negation census.
+- After metrics: 659 rows contain 10,014 sentences and 14,117 observed
+  predicates. They produce 14,090 conserved candidate claims (495 typed,
+  13,595 untyped) plus 27 fully accounted typed skips for missing subjects,
+  a 99.8087% claim yield. The compiler emits 82 explicit-result links;
+  173/173 cross-sentence candidates remain conservatively rejected; 3,026
+  unresolved-coreference observations quantify the ClaimRepair backlog.
+  Negation is 526/14,090 claims (3.7331%): 510 qualifier-only and 16 predicate
+  plus qualifier, so 96.9582% of negated claims are qualifier-scoped. Every
+  evidence, conservation, polarity, candidate-status, and receipt-accounting
+  error is zero.
+- Tests by tier: full population `EXIT=0`
+  (`/tmp/t84_ugo_full_census_final.log`); independent full rerun byte-identical
+  with receipt hash
+  `sha256:cb312b6fd45144d82da676aa02db17e75b0d1faac18c7a1f72ca9adce6188699`
+  (`/tmp/t84_ugo_determinism.log`); driver compile/Black, frozen-byte match,
+  JSON invariants, sanitization, secret scan, and whitespace gate `EXIT=0`
+  (`/tmp/t84_static_sanitization.log`).
+- Cross-corpus test: not applicable to the mission's UGO population canary.
+  The T8.3 migration census already covered UGO plus the independent smoke
+  corpus; the later one-paid-pass work retains the PoC-pair requirement.
+- Failure/rollback test: declaring 658 expected rows against the 659-row input
+  fails before parser work or report creation (`/tmp/t84_fail_closed.log`),
+  proving the run cannot game population success by truncation. Rollback is
+  removal of the driver and count-only receipt; persisted state does not exist.
+- Deployment image/health: the canonical backend image correctly lacks spaCy
+  and was not mutated. The census used the same certified pinned parser
+  environment as T8.1/T8.2: Python 3.11.15, spaCy 3.8.14, and
+  `en_core_web_sm` 3.8.0. No endpoint was deployed or restarted.
+- Remaining risks: the deterministic local lane emitted zero relation
+  candidates, so dependency/polarity relation counts and typed-signature rates
+  are honestly empty, not zero-quality claims. T8.5 introduces controlled-
+  label GLiREL observations and owns the first real signature/compiled-claim
+  comparison. The 13,595 untyped claims, 3,026 coreference observations, 27
+  subject-missing skips, owner-ratifiable schemas, and RunPod parser/wire pin
+  remain explicit downstream work.
+- Artifact:
+  `docs/baselines/T8_4_CLAIM_ASSESSMENT_UGO_CENSUS_2026-07-14.json`.
+- Checklist boxes closed: none. T8.4 closes a mission population gate without
+  pretending the empty relation lane satisfies P2.5's real-edge violation-rate
+  or P2.5a's relation-integrated pilot requirements.
+
 ## Implementation Log Template
 
 Copy this section for every completed item:
