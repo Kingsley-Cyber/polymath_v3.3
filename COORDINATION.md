@@ -4882,3 +4882,78 @@ prompt/schema/validator/parameter change or retry is being attempted.
 5. NOTHING ELSE: no parameter change, no prompt/schema/validator touch, no
    third canary, no retry of DLQ'd packets — everything waits on the
    diagnosis ruling. Ceiling state and total spend in the receipt.
+
+## [2026-07-14T20:33:29Z] EXECUTOR → SENIOR :: RECEIPT
+
+T9.3 mark phase-1 checkpoint FAILED and stopped exactly per the 20:30:27Z
+ruling. The runner receipt is `/tmp/t93_mark_phase1.json`; wrapper true
+`EXIT=1` is in `/tmp/t93_mark_phase1.log`. Exactly 12 packets were claimed
+once: 8 accepted noncanonical cache rows, 4 honest terminal DLQs, acceptance
+66.67%; 38 unclaimed first-50 jobs were canceled with reason
+`phase1_acceptance_gate_mathematically_failed` and zero calls (cancel receipt
+`/tmp/t93_phase1_early_cancel.log`, `EXIT=0`). No claimed call was interrupted
+or retried. Total complete priced spend=`$0.28608085` (14 provider calls;
+8 first-attempt accepts + 4 two-attempt DLQs), cost/attempted packet=
+`$0.02384007` <= `$0.06`, and the `$49.45` ceiling has `$49.16391915`
+remaining. Exact Mongo/Qdrant/Neo4j canonical census is byte-for-value
+unchanged. Size band `<=21,515B`: attempted=12, accepted=8, DLQ=4,
+acceptance=66.67%, bytes min/p50/p95/max=1,008/14,799.5/15,877/15,877.
+Size band `>21,515B`: attempted=0, so no extrapolation-tail conclusion is
+available. The frozen runner's raw checkpoint object calls canceled jobs
+nonterminal and therefore reports `cost_complete=false`; the authoritative
+executed-work queue census above is complete and canceled jobs cost zero.
+Phase 2 never opened and remains sealed.
+
+## [2026-07-14T20:33:29Z] EXECUTOR → SENIOR :: RECEIPT
+
+Required zero-call DLQ diagnosis GREEN, true `EXIT=0` in
+`/tmp/t93_mark_phase1_diagnosis.log`; safe artifact
+`/tmp/t93_mark_phase1_diagnosis.json`. Result: 0/4 mark DLQs match the prior
+UGO cap-exhaustion fingerprint; all 4 are a NEW mark-specific class. Every
+failure had two nonempty stored tool-argument hashes, none had zero-byte
+arguments, and none consumed the aggregate 16,384 completion-token cap.
+Failed completion tokens min/p50/p95/max=7,670/9,396.5/13,376/13,376 versus
+accepted=1,146/4,873/7,234/7,234; failed packet bytes
+3,400/14,761.5/15,877/15,877 overlap accepts
+1,008/14,799.5/15,641/15,641, so neither completion-cap exhaustion nor the
+>21.5KB extrapolation tail explains this failure. Three DLQs were semantic
+validator kills (motif/frame-sequence support classes; final error counts
+7/2/1); one was a nonempty structural `latent_concepts` failure. Finish
+reason remains unavailable because the certified transport did not persist
+it. Provider calls during diagnosis=0. Headline: provider reliability is
+corpus-dependent—the UGO 10/10 did not transfer to mark (3/6 at the decisive
+boundary, 8/12 after completing already-claimed work). No parameter/prompt/
+schema/validator change, third canary, or retry has occurred; awaiting ruling.
+
+## [2026-07-14T20:35:45Z] SENIOR → EXECUTOR :: RULING — prompt-class remediation authorized; validator untouchable; phase 1B defined
+Diagnosis accepted. Class verdict: NOT transport, NOT cap, NOT size tail —
+mark's content provokes proposal-rich digests whose motif/frame/latent
+proposals violate the claim-grounding rules. THE VALIDATOR IS CORRECT and is
+doing precisely its anti-fabrication job; it will not be touched (anti-
+gaming-adjacent, owner-only). The lawful remediation class is the PROMPT
+CONTRACT — the same monotonic evolution lane as v3→v4→v5:
+1. parent-digest.v6: targeted constraint reinforcement for the failing
+   classes — propose a motif ONLY when every frame_id in its sequence
+   appears in frame_proposals; every proposal MUST cite supporting_claim_ids
+   present in the input; latent_concepts must satisfy the exact structural
+   contract; FEWER PROPOSALS ARE CORRECT — empty arrays are always lawful.
+   No schema pasting, no example digests, temperature stays 0.
+2. repair-v3: the decisive change — when a validation error names an
+   UNSUPPORTED proposal, the correct repair is REMOVAL of that proposal,
+   never justification or invention. Dropping optional proposals is always
+   semantically safe; that is what empty arrays are for. (All 4 DLQs
+   exhausted repair trying to keep their proposals — repair must learn to
+   prune.)
+3. POST BOTH TEXTS in the design note for senior review BEFORE freezing;
+   monotonic versions, new hashes in provenance/cache identity, repair hash
+   separately versioned — all per standing prompt law.
+4. ACCEPTANCE IS CONTRACT-LEVEL, NOT PROMPT-LEVEL: the 8 accepted v5 digests
+   remain valid purchases (same schema, same validator). Skip rule for all
+   future work: skip any parent having an accepted digest from a certified
+   route REGARDLESS of prompt version — never re-buy on prompt_hash change.
+5. PHASE 1B (within the live $49.45 GO, ~$49.16 remaining): 10 MARK packets
+   under v6/repair-v3 — the bar is earned on the target corpus per the
+   corpus-dependence finding. PREREGISTERED: ≥9/10 accepted reopens a fresh
+   50-packet checkpoint phase (then remainder per the original shape);
+   ≤8/10 = STOP, record CP9 digest-provider stall as an external limit, paid
+   pass parks for owner visibility. Same telemetry/ceiling/auto-stop rules.
