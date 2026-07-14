@@ -1,0 +1,126 @@
+{
+  "compiler": {
+    "evidence_round_trip_errors": 0,
+    "matched_counts": {
+      "ASSOCIATED_WITH": 2,
+      "COMPARES_AGAINST": 2,
+      "INFLUENCES": 4,
+      "MEASURES": 1
+    },
+    "matched_predicate_count": 9,
+    "normalization_registry": "predicate_normalization",
+    "normalization_registry_hash": "sha256:a0870e5d4cd5f315719245c301ad074824857115ce6f1b9dd7a7d45cd6ca030d",
+    "normalization_registry_version": "v1",
+    "observed_predicate_count": 374,
+    "recipe_hash": "sha256:4aaf0cf9821894705cf1af5c2de0eb3dad87d1a45bbfea7c75362c2ea5ef2526",
+    "sentence_count": 303,
+    "top_unresolved_lemmas": [
+      {
+        "count": 58,
+        "lemma": "be"
+      },
+      {
+        "count": 10,
+        "lemma": "show"
+      },
+      {
+        "count": 9,
+        "lemma": "have"
+      },
+      {
+        "count": 7,
+        "lemma": "suggest"
+      },
+      {
+        "count": 6,
+        "lemma": "find"
+      },
+      {
+        "count": 6,
+        "lemma": "pay"
+      },
+      {
+        "count": 6,
+        "lemma": "see"
+      },
+      {
+        "count": 5,
+        "lemma": "become"
+      },
+      {
+        "count": 5,
+        "lemma": "differ"
+      },
+      {
+        "count": 5,
+        "lemma": "identify"
+      },
+      {
+        "count": 4,
+        "lemma": "consist"
+      },
+      {
+        "count": 4,
+        "lemma": "evaluate"
+      },
+      {
+        "count": 4,
+        "lemma": "examine"
+      },
+      {
+        "count": 4,
+        "lemma": "make"
+      },
+      {
+        "count": 4,
+        "lemma": "seem"
+      },
+      {
+        "count": 4,
+        "lemma": "use"
+      },
+      {
+        "count": 3,
+        "lemma": "ask"
+      },
+      {
+        "count": 3,
+        "lemma": "feel"
+      },
+      {
+        "count": 3,
+        "lemma": "form"
+      },
+      {
+        "count": 3,
+        "lemma": "fulfill"
+      }
+    ],
+    "unresolved_predicate_count": 365,
+    "unresolved_rate": 0.9759358288770054
+  },
+  "corpus": {
+    "corpus_id": "bcf80054-7611-47d0-ae16-fa7fed259b13",
+    "name": "Unspoken Global Outcomes",
+    "sample_strategy": "evenly_spaced_by_child_id",
+    "sampled_child_rows": 20,
+    "source_child_rows": 659,
+    "source_version_id": "srcv:189c8c42b4ee2eb7b5e7c4bb6a960fd25ba9fc7d9ef7a264b6db2bc9ffbf83f3"
+  },
+  "runtime": {
+    "parser_version": "spacy:3.8.14;model:3.8.0",
+    "spacy_library_version": "3.8.14",
+    "spacy_model": "en_core_web_sm",
+    "spacy_model_version": "3.8.0"
+  },
+  "schema_version": "polymath.local_extraction_ugo_audit.v1",
+  "scope": {
+    "annotation_writes": 0,
+    "child_ids_in_receipt": false,
+    "provider_calls": 0,
+    "raw_text_in_receipt": false,
+    "read_only": true,
+    "top_unresolved_lemmas_are_aggregate_only": true,
+    "unresolved_rate_is_finding_not_failure": true
+  }
+}

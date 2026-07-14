@@ -2413,6 +2413,72 @@ A corpus is strict-ready only when:
   10-packet Tier1, synthetic DLQ demonstration, and Tier1/Tier4 parity remain
   open without redefining passing.
 
+### 2026-07-14 - T8.1 strict LocalExtractionV1 and spaCy observation boundary
+
+- Commit: this commit on `claude-continuation-20260713`.
+- Owner: Codex sole executor under `CODEX_MISSION.md`; Claude certified the
+  owner-verbatim boundary, conservative normalization seed, real-UGO audit,
+  unresolved-mass interpretation, and publication through `COORDINATION.md`.
+- Corpus/data scope: read-only, evenly spaced 20-child sample from all 659
+  source-child rows in `Unspoken Global Outcomes`, corpus
+  `bcf80054-7611-47d0-ae16-fa7fed259b13`. Temporary exact-field source text
+  stayed under `/tmp`; the committed receipt contains no raw text or child IDs.
+- Code changes: added strict owner-field-exact `EntityMention`,
+  `PredicateMention`, `RelationCandidate`, and `LocalExtractionV1` models using
+  the exact 25/17/6/2 vocabulary literals; added a 23-lemma conservative
+  predicate-normalization v1 registry and strict loader; added deterministic
+  spaCy-to-local-extraction compilation with registry/recipe hash provenance,
+  matched-count receipts, and unknown predicates routed to
+  `unresolved_spans`. Entity/relation arrays remain empty in T8.1: no GLiNER,
+  GLiREL, or generic relation is fabricated. Exact-coordinate artifact models
+  now preserve boundary whitespace so quotes continue to hash and round-trip.
+- Durable migration/backfill: none. This task made no annotation, canonical,
+  vector, graph, retrieval, or provider write. The normalization authority is
+  explicitly `executor-proposed, owner-ratifiable`; owner ratification remains
+  required before promotion.
+- Before metrics: the repository had a provider-neutral `ObservationBundle`
+  and partial spaCy observations, but no full owner-field-exact
+  `LocalExtractionV1`, no strict predicate normalization registry, and no
+  count-only real-corpus compiler audit.
+- After metrics: 20 UGO children yielded 303 sentences and 374 observed
+  predicates. Nine mapped conservatively (INFLUENCES 4, ASSOCIATED_WITH 2,
+  COMPARES_AGAINST 2, MEASURES 1); 365 remained unresolved, rate
+  0.9759358288770054. Evidence round-trip errors=0, annotation writes=0, and
+  provider calls=0. The high unresolved rate is a finding, not a weakened or
+  failed acceptance criterion.
+- Tests by tier: owner-model gate 20 passed; registry/model gate 33 passed;
+  compiler unit gate 39 passed; exact-coordinate focused gate 42 passed / 7
+  known no-spaCy skips; adjacent contract gate 157 passed / 7 known no-spaCy
+  skips. After formatting, the trained-spaCy 3.8.14 / `en_core_web_sm` 3.8.0
+  suite passed 49/49 (`EXIT=0`). Final static gate passed Black 9/9,
+  compileall, both JSON parses, `git diff --check`, and changed-filename secret
+  scan (`EXIT=0`). Earlier failed attempts and their true exits remain logged.
+- Cross-corpus test: not applicable to this UGO-only annotate/read-only task.
+  T8.4 owns the full canary census; later pair work retains the cross-corpus
+  gate.
+- Failure/rollback test: strict input rejected Mongo's extra `_id`; the input
+  was projected to the exact three audit fields rather than relaxing the
+  boundary. Unknown lemmas stayed unresolved rather than becoming
+  `ASSOCIATED_WITH`. A real boundary-whitespace quote exposed inherited string
+  stripping; focused and adjacent tests prove the narrow fix. Rollback is code
+  and registry removal; no persisted semantic or retrieval state exists.
+- Deployment image/health: no live deployment for this unreferenced pure
+  model/compiler slice. Canonical-container tests used Docker-copied files
+  because tests are not baked, while the real trained-parser gate used the
+  existing pinned local spaCy environment. No endpoint or worker behavior was
+  activated.
+- Remaining risks: 97.5936% of observed predicate lemmas are intentionally
+  unresolved; copular/evidential predicates need dependency-, modality-, or
+  signature-aware treatment rather than ambiguous seed expansion. T8.2 must
+  carry unresolved predicate surface forms forward as observation-only/untyped
+  candidates, never discard or coerce them. Predicate-normalization v1 still
+  needs owner ratification; empty RESULTS_IN/APPLIES_UNDER/PART_OF/USED_FOR
+  seed rows remain intentional pending dependency rules.
+- Artifact: `docs/baselines/T8_1_LOCAL_EXTRACTION_UGO_AUDIT_2026-07-14.json`.
+- Checklist boxes closed: none. T8.1 is complete, but P2.5a's deterministic
+  pilot and P2.5b's every-provider ObservationBundle items remain open until
+  their later integration and acceptance gates.
+
 ## Implementation Log Template
 
 Copy this section for every completed item:

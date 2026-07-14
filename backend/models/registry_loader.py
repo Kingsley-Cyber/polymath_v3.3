@@ -34,6 +34,7 @@ FILES = {
     "latent_policy": "latent_concept_policy.v1.json",
     "binding": "motif_stage_superframe_binding.v1.json",
     "embedding_instruction": "embedding_instruction_registry.v1.json",
+    "predicate_normalization": "predicate_normalization.v1.json",
 }
 
 
@@ -67,7 +68,9 @@ def load_all() -> dict[str, dict[str, Any]]:
 
     for row in data["affinity"]["affinities"]:
         if row["domain_id"] not in domains:
-            raise RegistryError(f"affinity references unknown domain {row['domain_id']}")
+            raise RegistryError(
+                f"affinity references unknown domain {row['domain_id']}"
+            )
         for mf in row["dominant_superframes"]:
             if mf not in superframes:
                 raise RegistryError(
@@ -86,7 +89,9 @@ def load_all() -> dict[str, dict[str, Any]]:
         for stage in bindings[motif_id]["stages"]:
             adm = stage.get("admissible") or []
             if not adm:
-                raise RegistryError(f"{motif_id}/{stage['stage']}: no admissible superframes")
+                raise RegistryError(
+                    f"{motif_id}/{stage['stage']}: no admissible superframes"
+                )
             dominants = [a for a in adm if a.get("tier") == "dominant"]
             if len(dominants) != 1:
                 raise RegistryError(
@@ -104,6 +109,74 @@ def load_all() -> dict[str, dict[str, Any]]:
         if not vocab.get(key):
             raise RegistryError(f"extraction vocabulary missing {key}")
 
+    predicate_normalization = data["predicate_normalization"]
+    expected_normalization_fields = {
+        "registry",
+        "version",
+        "authority",
+        "owner_ratification_required",
+        "source",
+        "unknown_policy",
+        "default_predicate",
+        "match_field",
+        "negation_modality_polarity_out_of_scope",
+        "changes_require_new_version",
+        "normalizations",
+    }
+    if set(predicate_normalization) != expected_normalization_fields:
+        raise RegistryError("predicate normalization registry fields are not exact")
+    if predicate_normalization["registry"] != "predicate_normalization":
+        raise RegistryError("predicate normalization registry has the wrong identity")
+    if predicate_normalization["version"] != "v1":
+        raise RegistryError("predicate normalization registry version must be v1")
+    if predicate_normalization["authority"] != "executor-proposed, owner-ratifiable":
+        raise RegistryError("predicate normalization authority mark is missing")
+    if predicate_normalization["owner_ratification_required"] is not True:
+        raise RegistryError("predicate normalization must remain owner-ratifiable")
+    if predicate_normalization["unknown_policy"] != "unresolved_spans":
+        raise RegistryError("unknown predicate lemmas must become unresolved spans")
+    if predicate_normalization["default_predicate"] is not None:
+        raise RegistryError("predicate normalization cannot define a default predicate")
+    if predicate_normalization["match_field"] != "spacy_lemma_lowercase":
+        raise RegistryError("predicate normalization must match lowercase spaCy lemmas")
+    if predicate_normalization["negation_modality_polarity_out_of_scope"] is not True:
+        raise RegistryError("predicate normalization cannot absorb qualifier semantics")
+    if predicate_normalization["changes_require_new_version"] is not True:
+        raise RegistryError("predicate normalization must require monotonic versions")
+
+    rows = predicate_normalization["normalizations"]
+    if not isinstance(rows, list) or any(
+        not isinstance(row, dict) or set(row) != {"predicate_type", "lemmas"}
+        for row in rows
+    ):
+        raise RegistryError("predicate normalization rows must have exact fields")
+    predicate_order = [row["predicate_type"] for row in rows]
+    if predicate_order != vocab["predicate_types"]:
+        raise RegistryError(
+            "predicate normalization must cover vocab predicates in order"
+        )
+    all_lemmas: list[str] = []
+    for row in rows:
+        lemmas = row["lemmas"]
+        if not isinstance(lemmas, list) or lemmas != sorted(set(lemmas)):
+            raise RegistryError(
+                f"predicate normalization lemmas for {row['predicate_type']} "
+                "must be sorted and unique"
+            )
+        if any(
+            not isinstance(lemma, str)
+            or not lemma
+            or lemma != lemma.strip().lower()
+            or not lemma.replace("-", "").isalpha()
+            for lemma in lemmas
+        ):
+            raise RegistryError(
+                "predicate normalization lemmas must be lowercase words"
+            )
+        all_lemmas.extend(lemmas)
+    if len(all_lemmas) != len(set(all_lemmas)):
+        raise RegistryError("predicate normalization lemmas must map uniquely")
+
     budgets = data["latent_policy"]["budgets"]
     for level, spec in budgets.items():
         raw, kept = spec.get("raw_generated"), spec.get("retained_distinct")
@@ -118,7 +191,10 @@ def load_all() -> dict[str, dict[str, Any]]:
         raise RegistryError("embedding instruction registry is missing its version")
     for profile_name in ("baseline_live_v0", "universal"):
         profile = embedding_instructions.get(profile_name)
-        if not isinstance(profile, dict) or not str(profile.get("instruction") or "").strip():
+        if (
+            not isinstance(profile, dict)
+            or not str(profile.get("instruction") or "").strip()
+        ):
             raise RegistryError(
                 f"embedding instruction profile {profile_name!r} is missing canonical text"
             )
@@ -132,6 +208,7 @@ def registry_hashes() -> dict[str, str]:
 
 
 # ── resolver API ─────────────────────────────────────────────────────────────
+
 
 def domain(domain_id: str) -> dict[str, Any]:
     d = {x["domain_id"]: x for x in load_all()["domain"]["domains"]}
@@ -180,6 +257,23 @@ def is_controlled_predicate(predicate: str) -> bool:
 
 def is_entity_type(entity_type: str) -> bool:
     return entity_type in load_all()["vocab"]["entity_types"]
+
+
+def normalize_predicate_lemma(lemma: str) -> dict[str, str] | None:
+    """Resolve one lowercase lemma without ever inventing a default edge."""
+
+    normalized = str(lemma or "").strip().lower()
+    registry = load_all()["predicate_normalization"]
+    for row in registry["normalizations"]:
+        if normalized in row["lemmas"]:
+            return {
+                "lemma": normalized,
+                "predicate_type": row["predicate_type"],
+                "registry": registry["registry"],
+                "registry_version": registry["version"],
+                "authority": registry["authority"],
+            }
+    return None
 
 
 def latent_budget(level: str) -> dict[str, Any]:

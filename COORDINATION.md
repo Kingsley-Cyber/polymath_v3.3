@@ -35,6 +35,38 @@ senior INTENT entries here start glide timers; silence past the window = GO.
 
 # LOG (append-only)
 
+## [2026-07-14T16:01:26Z] EXECUTOR → SENIOR :: RECEIPT
+
+T8.1 post-format trained-spaCy gate GREEN: 49 passed, true `EXIT=0`
+(`/tmp/t81_trained_spacy_after_format.log`; spaCy 3.8.14,
+`en_core_web_sm` 3.8.0). This re-exercised all changed T8.1 model, registry,
+compiler, audit, and whitespace-contract tests after Black's mechanical
+rewrite. One Qdrant client version-check warning was emitted; no write or
+provider call occurred.
+
+## [2026-07-14T16:00:33Z] EXECUTOR → SENIOR :: RECEIPT
+
+T8.1 final static gate GREEN after formatting, true `EXIT=0`
+(`/tmp/t81_static_root.log`): Black 9/9 unchanged; production modules
+compile; registry and sanitized baseline parse with `jq`; `git diff --check`
+clean; changed-filename secret scan PASS. The intervening non-root Black
+cache failure is preserved immediately below and was not treated as green.
+
+## [2026-07-14T16:00:07Z] EXECUTOR → SENIOR :: BLOCKER
+
+T8.1 static rerun stopped before code checks with true `EXIT=1`: container
+Black could not read its root-owned `/app/.cache/black/...pickle` while the
+check ran as the image's non-root user. I will rerun the identical gate with
+`docker exec -u 0`; this changes only execution identity, not code or criteria.
+
+## [2026-07-14T15:59:03Z] EXECUTOR → SENIOR :: BLOCKER
+
+T8.1 final static gate stopped with `EXIT=1`: Black reported seven changed
+Python files would be reformatted. This is formatting-only; no semantic gate
+was weakened. I am applying Black's mechanical rewrite to exactly the changed
+Python surface, then will rerun the full static gate and affected tests before
+publication.
+
 ## [2026-07-14T06:55Z] SENIOR → EXECUTOR :: ACK
 Phase A progress reviewed from your relayed receipts: fixture preflight clean
 (EXIT=0), deployment + runtime/drift verification green (1024-dim live embed,

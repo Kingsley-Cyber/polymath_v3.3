@@ -1,0 +1,82 @@
+{
+  "registry": "predicate_normalization",
+  "version": "v1",
+  "authority": "executor-proposed, owner-ratifiable",
+  "owner_ratification_required": true,
+  "source": "T8.1 conservative engineering mapping into extraction_vocabularies.v1; senior-approved 2026-07-14",
+  "unknown_policy": "unresolved_spans",
+  "default_predicate": null,
+  "match_field": "spacy_lemma_lowercase",
+  "negation_modality_polarity_out_of_scope": true,
+  "changes_require_new_version": true,
+  "normalizations": [
+    {
+      "predicate_type": "CAUSES",
+      "lemmas": ["cause"]
+    },
+    {
+      "predicate_type": "INFLUENCES",
+      "lemmas": ["influence"]
+    },
+    {
+      "predicate_type": "INCREASES",
+      "lemmas": ["boost", "increase", "raise"]
+    },
+    {
+      "predicate_type": "DECREASES",
+      "lemmas": ["decrease", "lower", "reduce"]
+    },
+    {
+      "predicate_type": "UPDATES",
+      "lemmas": ["revise", "update"]
+    },
+    {
+      "predicate_type": "SIGNALS",
+      "lemmas": ["signal"]
+    },
+    {
+      "predicate_type": "MEASURES",
+      "lemmas": ["measure", "quantify"]
+    },
+    {
+      "predicate_type": "COMPARES_AGAINST",
+      "lemmas": ["benchmark", "compare"]
+    },
+    {
+      "predicate_type": "ENABLES",
+      "lemmas": ["enable"]
+    },
+    {
+      "predicate_type": "INHIBITS",
+      "lemmas": ["inhibit"]
+    },
+    {
+      "predicate_type": "REQUIRES",
+      "lemmas": ["necessitate", "require"]
+    },
+    {
+      "predicate_type": "CONSTRAINS",
+      "lemmas": ["constrain", "restrict"]
+    },
+    {
+      "predicate_type": "RESULTS_IN",
+      "lemmas": []
+    },
+    {
+      "predicate_type": "APPLIES_UNDER",
+      "lemmas": []
+    },
+    {
+      "predicate_type": "PART_OF",
+      "lemmas": []
+    },
+    {
+      "predicate_type": "USED_FOR",
+      "lemmas": []
+    },
+    {
+      "predicate_type": "ASSOCIATED_WITH",
+      "lemmas": ["associate", "correlate"]
+    }
+  ]
+}

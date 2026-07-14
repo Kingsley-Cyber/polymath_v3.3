@@ -8,9 +8,13 @@ runtime dependency and makes parser/model identity explicit in the recipe.
 from __future__ import annotations
 
 from collections import defaultdict
+from dataclasses import dataclass
 import re
-from typing import Any, Iterable
+from typing import Any, Iterable, cast
 
+from models.hash_taxonomy import namespace_hash
+from models.local_extraction import LocalExtractionV1, PredicateMention, PredicateType
+from models.registry_loader import normalize_predicate_lemma, registry_hashes
 from models.semantic_artifacts import (
     ClaimArgumentCandidate,
     ClaimAssertionCandidate,
@@ -37,7 +41,15 @@ _MODAL_FORCE = {
     "must": "required",
     "need": "required",
 }
-_CONDITION_MARKERS = {"if", "unless", "when", "whenever", "provided", "assuming", "under"}
+_CONDITION_MARKERS = {
+    "if",
+    "unless",
+    "when",
+    "whenever",
+    "provided",
+    "assuming",
+    "under",
+}
 _EXCEPTION_MARKERS = {"except", "excluding", "apart"}
 _ATTRIBUTION_LEMMAS = {
     "argue",
@@ -75,6 +87,44 @@ _TEMPORAL_SURFACE_RE = re.compile(
 _PREDICATE_DEPS = {"ROOT", "conj", "advcl", "ccomp", "xcomp", "relcl"}
 _SUBJECT_DEPS = {"nsubj", "nsubjpass", "csubj", "csubjpass"}
 _OBJECT_DEPS = {"dobj", "obj", "attr", "oprd", "dative", "acomp"}
+_LOCAL_MODALITY_MAP = {
+    "possible": "possible",
+    "probable": "probable",
+    "predicted": "probable",
+    "recommended": "recommended",
+    "required": "necessary",
+}
+
+
+@dataclass(frozen=True)
+class LocalExtractionCompileResult:
+    """Owner payload plus non-payload provenance/fallback accounting."""
+
+    extraction: LocalExtractionV1
+    normalization_registry: str
+    normalization_registry_version: str
+    normalization_registry_hash: str
+    recipe_hash: str
+    observed_predicate_count: int
+    matched_predicate_count: int
+    unresolved_predicate_count: int
+    unresolved_rate: float
+    matched_counts: tuple[tuple[str, int], ...]
+
+    def receipt(self) -> dict[str, Any]:
+        """Return a text-free run receipt suitable for envelope provenance."""
+
+        return {
+            "normalization_registry": self.normalization_registry,
+            "normalization_registry_version": self.normalization_registry_version,
+            "normalization_registry_hash": self.normalization_registry_hash,
+            "recipe_hash": self.recipe_hash,
+            "observed_predicate_count": self.observed_predicate_count,
+            "matched_predicate_count": self.matched_predicate_count,
+            "unresolved_predicate_count": self.unresolved_predicate_count,
+            "unresolved_rate": self.unresolved_rate,
+            "matched_counts": dict(self.matched_counts),
+        }
 
 
 def _token_span(token: Any) -> tuple[int, int]:
@@ -126,7 +176,9 @@ def _phrase_span(token: Any) -> tuple[int, int]:
     return start, end
 
 
-def _nearest_predicate_token(token: Any, predicate_by_token: dict[int, str]) -> int | None:
+def _nearest_predicate_token(
+    token: Any, predicate_by_token: dict[int, str]
+) -> int | None:
     current = token
     seen: set[int] = set()
     for _ in range(12):
@@ -153,12 +205,16 @@ def _predicate_tokens(sentence: Any) -> list[Any]:
         # is stronger evidence in that narrow case: a ROOT with both a
         # subject and an object is still a predicate candidate.  This is a
         # general repair, not a lexical exception.
-        root_argument_shape = dep == "ROOT" and any(
-            str(getattr(child, "dep_", "")) in _SUBJECT_DEPS
-            for child in token.children
-        ) and any(
-            str(getattr(child, "dep_", "")) in _OBJECT_DEPS
-            for child in token.children
+        root_argument_shape = (
+            dep == "ROOT"
+            and any(
+                str(getattr(child, "dep_", "")) in _SUBJECT_DEPS
+                for child in token.children
+            )
+            and any(
+                str(getattr(child, "dep_", "")) in _OBJECT_DEPS
+                for child in token.children
+            )
         )
         if (pos in {"VERB", "AUX"} and dep in _PREDICATE_DEPS) or root_argument_shape:
             items.append(token)
@@ -185,7 +241,9 @@ def _inherit_subjects(token: Any) -> list[Any]:
 
 def _objects(token: Any) -> list[Any]:
     objects = _children(token, _OBJECT_DEPS)
-    for prep in [child for child in token.children if str(child.dep_) in {"prep", "agent"}]:
+    for prep in [
+        child for child in token.children if str(child.dep_) in {"prep", "agent"}
+    ]:
         objects.extend(_children(prep, {"pobj"}))
     return objects
 
@@ -199,7 +257,9 @@ def _add_span(
     label: str,
     producer: str,
 ) -> str:
-    start, end = _subtree_span(token) if kind in {"subject", "object"} else _token_span(token)
+    start, end = (
+        _subtree_span(token) if kind in {"subject", "object"} else _token_span(token)
+    )
     surface = text[start:end]
     observation_id = _span_id(kind, start, end, surface)
     spans.setdefault(
@@ -320,7 +380,11 @@ def build_spacy_observation_bundle(
             normalized = ""
             start, end = _token_span(token)
             target_index = _nearest_predicate_token(token, predicate_by_token)
-            target = predicate_by_token.get(target_index) if target_index is not None else root_id
+            target = (
+                predicate_by_token.get(target_index)
+                if target_index is not None
+                else root_id
+            )
 
             if dep == "neg" or lower in {"not", "never", "n't"}:
                 kind, normalized = "negation", "negated"
@@ -382,7 +446,9 @@ def build_spacy_observation_bundle(
                     and sent_start <= int(entity.start_char)
                     and int(entity.end_char) <= sent_end
                 ):
-                    temporal_spans.append((int(entity.start_char), int(entity.end_char)))
+                    temporal_spans.append(
+                        (int(entity.start_char), int(entity.end_char))
+                    )
             temporal_spans.extend(
                 (match.start(), match.end())
                 for match in _TEMPORAL_SURFACE_RE.finditer(text, sent_start, sent_end)
@@ -453,7 +519,133 @@ def _modal_force(qualifiers: Iterable[QualifierObservation]) -> str:
     return max(values, key=lambda item: ranking[item]) if values else "asserted"
 
 
-def _claim_type(predicate: PredicateObservation, qualifiers: list[QualifierObservation]) -> str:
+def _local_modality(qualifiers: Iterable[QualifierObservation]) -> str:
+    observed = list(qualifiers)
+    modal = _modal_force(observed)
+    if modal in _LOCAL_MODALITY_MAP:
+        return _LOCAL_MODALITY_MAP[modal]
+    if any(item.kind == "condition" for item in observed):
+        return "hypothetical"
+    return "asserted"
+
+
+def compile_local_extraction_v1(
+    bundle: ObservationBundle,
+    *,
+    document_id: str,
+    child_id: str,
+) -> LocalExtractionCompileResult:
+    """Normalize spaCy predicate observations into the owner child contract.
+
+    GLiNER entities and GLiREL/Relex relations are deliberately not fabricated
+    here.  T8.2 merges those observation lanes after their own candidate
+    boundaries exist. Unknown lemmas remain explicit unresolved spans.
+    """
+
+    if child_id != bundle.hierarchy_node_id:
+        raise ValueError("child_id must equal the observation hierarchy_node_id")
+
+    spans = {item.observation_id: item for item in bundle.spans}
+    qualifiers_by_target: dict[str, list[QualifierObservation]] = defaultdict(list)
+    for qualifier in bundle.qualifiers:
+        qualifiers_by_target[qualifier.target_observation_id].append(qualifier)
+
+    normalization = load_normalization_identity()
+    recipe = {
+        "compiler": "local_extraction_spacy.v1",
+        "normalization_registry": normalization["registry"],
+        "normalization_registry_version": normalization["version"],
+        "normalization_registry_hash": normalization["hash"],
+        "sentence_identity": "observation_bundle.evidence_ref_id",
+        "unknown_policy": "unresolved_spans",
+        "entity_lane": "not_fabricated_t8_1",
+        "relation_lane": "not_fabricated_t8_1",
+    }
+    recipe_hash = namespace_hash("recipe", recipe)
+    predicate_mentions: list[PredicateMention] = []
+    unresolved_spans: list[str] = []
+    matched_counts: dict[str, int] = defaultdict(int)
+
+    for predicate in bundle.predicates:
+        predicate_span = spans.get(predicate.predicate_span_id)
+        if predicate_span is None:
+            raise ValueError("predicate observation references an unknown span")
+        resolved = normalize_predicate_lemma(predicate.predicate_lemma)
+        if resolved is None:
+            unresolved_spans.append(
+                f"{predicate_span.start}:{predicate_span.end}:{predicate_span.text}"
+            )
+            continue
+        predicate_type = cast(PredicateType, resolved["predicate_type"])
+        qualifiers = qualifiers_by_target[predicate.observation_id]
+        identity = {
+            "document_id": document_id,
+            "child_id": child_id,
+            "predicate_observation_id": predicate.observation_id,
+            "predicate_lemma": resolved["lemma"],
+            "normalized_predicate": predicate_type,
+            "normalization_registry_version": resolved["registry_version"],
+            "normalization_registry_hash": normalization["hash"],
+            "recipe_hash": recipe_hash,
+        }
+        predicate_mentions.append(
+            PredicateMention(
+                predicate_id="predicate:"
+                + namespace_hash("logical-artifact", identity).split(":", 1)[1],
+                surface_text=predicate_span.text,
+                lemma=resolved["lemma"],
+                normalized_predicate=predicate_type,
+                start_char=predicate_span.start,
+                end_char=predicate_span.end,
+                negated=any(item.kind == "negation" for item in qualifiers),
+                modality=_local_modality(qualifiers),
+                confidence=1.0,
+            )
+        )
+        matched_counts[predicate_type] += 1
+
+    observed_count = len(bundle.predicates)
+    unresolved_count = len(unresolved_spans)
+    extraction = LocalExtractionV1(
+        schema_version="local_extraction.v1",
+        document_id=document_id,
+        child_id=child_id,
+        sentence_ids=[item.evidence_ref_id for item in bundle.evidence_refs],
+        entities=[],
+        predicates=predicate_mentions,
+        relations=[],
+        unresolved_spans=unresolved_spans,
+    )
+    return LocalExtractionCompileResult(
+        extraction=extraction,
+        normalization_registry=normalization["registry"],
+        normalization_registry_version=normalization["version"],
+        normalization_registry_hash=normalization["hash"],
+        recipe_hash=recipe_hash,
+        observed_predicate_count=observed_count,
+        matched_predicate_count=len(predicate_mentions),
+        unresolved_predicate_count=unresolved_count,
+        unresolved_rate=(unresolved_count / observed_count if observed_count else 0.0),
+        matched_counts=tuple(sorted(matched_counts.items())),
+    )
+
+
+def load_normalization_identity() -> dict[str, str]:
+    """Load the active mapping identity once per compilation boundary."""
+
+    from models.registry_loader import load_all
+
+    registry = load_all()["predicate_normalization"]
+    return {
+        "registry": registry["registry"],
+        "version": registry["version"],
+        "hash": registry_hashes()["predicate_normalization"],
+    }
+
+
+def _claim_type(
+    predicate: PredicateObservation, qualifiers: list[QualifierObservation]
+) -> str:
     lemma = predicate.predicate_lemma
     modal = _modal_force(qualifiers)
     if modal in {"recommended", "required"}:

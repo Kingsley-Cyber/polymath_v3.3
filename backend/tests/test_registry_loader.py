@@ -20,6 +20,7 @@ from models.registry_loader import (
     latent_budget,
     load_all,
     motif,
+    normalize_predicate_lemma,
     registry_hashes,
     superframe,
 )
@@ -33,6 +34,7 @@ FROZEN_HASHES = {
     "latent_policy": "sha256:1bd709eed623b1b6191a4563bd736e1a20544608b1ef94d9c5603f21d3debcd9",
     "binding": "sha256:2811ff011e38762b349b9d14a1f0352edc798b683adf8673106535bcd370c797",
     "embedding_instruction": "sha256:0269d30bf0f852f489e15a8f2dc6b19a8b83b62adb49e346828ce54fc5e89f51",
+    "predicate_normalization": "sha256:a0870e5d4cd5f315719245c301ad074824857115ce6f1b9dd7a7d45cd6ca030d",
 }
 
 
@@ -66,9 +68,13 @@ def test_resolver_lookups():
 
 def test_set_valued_binding_preserved_for_contested_stages():
     contested = [
-        ("M02", "ATTENTION"), ("M03", "OUTCOME"), ("M05", "SCARCITY"),
-        ("M06", "SOCIAL FEEDBACK"), ("M07", "RETENTION"),
-        ("M10", "PROXY/HEURISTIC"), ("M11", "INTERDEPENDENCE"),
+        ("M02", "ATTENTION"),
+        ("M03", "OUTCOME"),
+        ("M05", "SCARCITY"),
+        ("M06", "SOCIAL FEEDBACK"),
+        ("M07", "RETENTION"),
+        ("M10", "PROXY/HEURISTIC"),
+        ("M11", "INTERDEPENDENCE"),
     ]
     for motif_id, stage in contested:
         assert len(admissible_superframes(motif_id, stage)) == 2, (motif_id, stage)
@@ -86,9 +92,47 @@ def test_vocab_membership():
     assert not is_entity_type("THINGY")
 
 
+def test_predicate_normalization_is_conservative_and_versioned():
+    assert normalize_predicate_lemma(" Lower ") == {
+        "lemma": "lower",
+        "predicate_type": "DECREASES",
+        "registry": "predicate_normalization",
+        "registry_version": "v1",
+        "authority": "executor-proposed, owner-ratifiable",
+    }
+    assert normalize_predicate_lemma("increase")["predicate_type"] == "INCREASES"
+    assert normalize_predicate_lemma("vibes") is None
+    assert normalize_predicate_lemma("") is None
+
+
+def test_predicate_normalization_seed_counts_and_unmapped_classes():
+    rows = load_all()["predicate_normalization"]["normalizations"]
+    counts = {row["predicate_type"]: len(row["lemmas"]) for row in rows}
+    assert counts == {
+        "CAUSES": 1,
+        "INFLUENCES": 1,
+        "INCREASES": 3,
+        "DECREASES": 3,
+        "UPDATES": 2,
+        "SIGNALS": 1,
+        "MEASURES": 2,
+        "COMPARES_AGAINST": 2,
+        "ENABLES": 1,
+        "INHIBITS": 1,
+        "REQUIRES": 2,
+        "CONSTRAINS": 2,
+        "RESULTS_IN": 0,
+        "APPLIES_UNDER": 0,
+        "PART_OF": 0,
+        "USED_FOR": 0,
+        "ASSOCIATED_WITH": 2,
+    }
+
+
 def test_latent_budgets():
     assert latent_budget("parent_group") == {
-        "raw_generated": [5, 12], "retained_distinct": [3, 8],
+        "raw_generated": [5, 12],
+        "retained_distinct": [3, 8],
     }
     with pytest.raises(RegistryError):
         latent_budget("galaxy")

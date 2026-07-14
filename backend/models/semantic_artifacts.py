@@ -46,6 +46,10 @@ class StrictModel(BaseModel):
 
 
 class EvidenceRef(StrictModel):
+    # Quotes are coordinate-bearing source bytes. Trimming them would break
+    # both exact round trips and the quote hash.
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=False)
+
     evidence_ref_id: str
     source_version_id: str
     hierarchy_node_id: str
@@ -100,6 +104,9 @@ def make_evidence_ref(
 
 
 class SpanObservation(StrictModel):
+    # ``text`` must remain byte-for-byte aligned with start/end coordinates.
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=False)
+
     observation_id: str
     kind: Literal["subject", "predicate", "object", "entity", "concept"]
     label: str = Field(min_length=1)
@@ -127,6 +134,9 @@ class PredicateObservation(StrictModel):
 
 
 class QualifierObservation(StrictModel):
+    # Qualifier cues also retain exact source coordinates.
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=False)
+
     observation_id: str
     target_observation_id: str
     kind: Literal[
@@ -154,9 +164,9 @@ class QualifierObservation(StrictModel):
 
 class ObservationBundle(StrictModel):
     bundle_id: str
-    schema_version: Literal["polymath.observation_bundle.v1"] = (
+    schema_version: Literal[
         "polymath.observation_bundle.v1"
-    )
+    ] = "polymath.observation_bundle.v1"
     source_version_id: str
     hierarchy_node_id: str
     text_hash: str
@@ -204,9 +214,9 @@ class ClaimArgumentCandidate(StrictModel):
 
 class ClaimAssertionCandidate(StrictModel):
     candidate_id: str
-    schema_version: Literal["polymath.claim_candidate.v1"] = (
+    schema_version: Literal[
         "polymath.claim_candidate.v1"
-    )
+    ] = "polymath.claim_candidate.v1"
     proposition_text: str = Field(min_length=1)
     canonical_proposition: str = Field(min_length=1)
     claim_type: Literal[
