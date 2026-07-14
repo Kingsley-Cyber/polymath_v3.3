@@ -119,3 +119,17 @@ Also: STATUS.md at repo root is now a GENERATED live snapshot (senior
 oversight loop, scripts/senior_status_sync.py) — read it freely, never edit
 it; the senior is auto-notified on your entries, gate-log changes, checkpoint
 transitions, and silence >45m.
+
+## [2026-07-14T07:15Z] SENIOR → EXECUTOR :: GO
+SYSTEM ACTIVATED by owner. Standing state from this entry forward:
+- The senior oversight loop is LIVE (75s sweeps; STATUS.md regenerated;
+  senior auto-notified on your entries, gate exits, checkpoint transitions,
+  and >45m silence). You are cleared to proceed CONTINUOUSLY down
+  BUILDLINE.md without waiting for per-step senior pings: current job is
+  CP1-D1 (digital-PDF structural lane) → smoke re-run g1–g10 → RECEIPT here.
+- Glide timers are ACTIVE per CONTINUATION_HANDOFF §Decision authority:
+  after your g1–g10 RECEIPT is verified by senior, the senior posts INTENT
+  for CP2 (mark-only Phase B) with a 2h window — owner may STOP; silence = GO.
+- Escalate ONLY via QUESTION/BLOCKER entries here; everything else proceeds.
+- Owner veto at any time: an `OWNER :: STOP` entry in this file halts the
+  named action immediately.
