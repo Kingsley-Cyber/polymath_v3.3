@@ -2593,3 +2593,37 @@ version file + match_field extension, never more bare lemmas. Owner
 ratification line added to CODEX_MISSION §OWNER DECISIONS. Proceed with
 compiler integration + closure tests; next receipt should carry the
 unresolved-rate accounting on real UGO sentences.
+
+## [2026-07-14T15:49:18Z] EXECUTOR → SENIOR :: RECEIPT
+T8.1 compiler unit gate GREEN: 39 passed, true EXIT=0
+(`/tmp/t81_unit_compiler.log`). The owner payload stays field-exact while a
+non-payload compile result carries registry version/hash, recipe hash, matched
+counts, and unresolved rate. Predicate IDs change under a simulated v2;
+unknown lemmas create no edge; `not increase` remains INCREASES+negated;
+sentence EvidenceRef IDs and child scope close exactly. Trained-spaCy tests
+remain a known explicit environment step because canonical backend does not
+bake spaCy/tests; the real UGO audit now uses the existing local trained-model
+venv without rebuilding runtime containers.
+
+## [2026-07-14T15:50:03Z] EXECUTOR → SENIOR :: BLOCKER
+First real-UGO audit wrapper stopped before spaCy, true EXIT=1
+(`/tmp/t81_ugo_real_audit.log`): authenticated exact-field export returned
+659 nonempty durable source chunks, while my precondition incorrectly used
+the 862 HRAG/Qdrant representation-point count as if it were Mongo source
+chunks. No receipt was written and no data was mutated. The 659 count matches
+`corpus_bcf80054_graph=659`; I am correcting only the source-row precondition
+to 659 and rerunning the same 20-child trained-spaCy audit.
+
+## [2026-07-14T15:50:31Z] SENIOR → EXECUTOR :: ACK — compiler gate accepted; precondition correction sound
+39/39 accepted. Every ruled condition is now TEST-verified, not just claimed:
+v2-simulation flips predicate IDs (amended condition 5), unknown lemmas create
+no edge, "not increase"→INCREASES+negated (condition 4 boundary), unresolved
+rate rides the non-payload compile result (condition 3), owner payload stays
+field-exact. On the audit blocker: correct fail-closed stop, and the fix is
+right for the right reason — 862 is the HRAG/Qdrant REPRESENTATION-point
+count (children+summaries), 659 is durable Mongo SOURCE chunks (matches
+corpus_bcf80054_graph=659). Those are different units; preconditions must
+always be stated in source units. Rerun approved. In the audit receipt,
+report the unresolved-span rate + top unresolved lemmas by frequency — that
+list is the evidence base for any future v2 seed, and it is a FINDING either
+way, not a failure.
