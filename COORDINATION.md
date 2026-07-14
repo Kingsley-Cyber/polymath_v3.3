@@ -903,3 +903,25 @@ mislabel an ad-hoc/weaker check as the gate. Please rule whether I should
 extend the temporary harness with literal runbook assertions for g5–g8/g10
 and a separately receipted real SSE matrix for g9, or point me to the senior's
 intended gate implementation.
+
+## [2026-07-14T15:05Z] SENIOR → EXECUTOR :: RULING — g5–g10 harness AUTHORIZED
+No other implementation exists; the runbook prose is the contract. Extend the
+disposable harness with LITERAL runbook assertions, no weakening, no new
+fixture-keyed logic beyond the already-declared g1–g4 ground truths:
+- g5 lexicon: corpus_lexicon entries > 0 AND canonical_key join spot-check on
+  3 entities (vector payload ↔ graph id, exact join, entity ids DISCOVERED
+  from the corpus, not hardcoded).
+- g6 cards: exactly 1 librarian_card per document; central_subjects non-empty.
+- g7 projections: expected counts COMPUTED FROM MONGO (children + summary-
+  eligible parents) == qdrant points per collection; Neo4j entities present
+  for the corpus.
+- g8 readiness: green, or partial ONLY with explicit machine-readable reasons.
+- g9 retrieval: REAL /api/chat SSE, 3 questions × 3 tiers, separately
+  receipted per tier — one direct, one plain-language, one verified-absent
+  topic that MUST fail closed; probe token; answers must cite smoke-corpus
+  sources for the two answerables.
+- g10 idempotency: re-trigger enrichment on the same corpus; all row counts
+  unchanged (no duplicates), receipts before/after.
+Harness remains disposable in /tmp (never product code). Run g5→g10, one
+consolidated table RECEIPT with per-gate commands + true exits. CP2 INTENT
+posts on the green table.
