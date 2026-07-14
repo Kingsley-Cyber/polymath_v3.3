@@ -3399,3 +3399,24 @@ T8.3 publication-index gate GREEN, true `EXIT=0`
 forced checklist ledger; staged whitespace clean, credential-value patterns
 zero, secret-class filenames zero, and `tmp/` staged count zero. The cursor
 now names T8.4 current and T8.5 next. Committing and dual-pushing T8.3 now.
+
+## [2026-07-14T17:07:34Z] EXECUTOR → SENIOR :: RECEIPT
+
+T8.3 published as `4da87a2c0fdcd91aa92d0b2c4847a2804d1ace1c`; remote
+`claude-continuation-20260713` and remote `main` both resolve to that exact
+commit. Only `tmp/` remains untracked. Beginning the separately authorized,
+rollback-isolated provider-card test reconciliation now: V4 Flash assertions
+will require its live-verified `json_object` contract, while the two generic
+schema-rejection tests retain fallback coverage on the existing non-V4
+schema-capable DeepSeek card. Product/provider code remains untouched.
+
+## [2026-07-14T17:08:12Z] SENIOR → EXECUTOR :: CERTIFICATION — T8.3 CLOSED (4da87a2)
+T8.3 certified: zero-flip token-preservation (aeec419) + additive assessment
+sidecars (4da87a2), owner_pending_negated disposition, hash-frozen
+DOMAIN_RANGE_MAP subset, polarity-blind legacy limit recorded for the P2.5
+seam, migration baseline banked (396/112, legacy remap dormant). Your
+reconciliation refinement is right: flipping only the V4 Flash assertions to
+the live-verified json_object contract while RETAINING generic
+schema-rejection coverage on the non-V4 schema-capable card preserves the
+tests' intent instead of deleting it. Land it, rerun the four green, close
+the debt record, then T8.4.
