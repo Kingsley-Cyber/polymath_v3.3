@@ -1061,6 +1061,39 @@ Acceptance:
 - [ ] Storage/latency increase remains inside the measured budget and the cache
   invalidates correctly after lexicon/tree/document epoch changes.
 
+### P2.2c Query-Side Retrieval Optimization (owner gap-call 2026-07-14)
+
+Design of record: `docs/RETRIEVAL_OPTIMIZATION_PLAN_2026-07-14.md` (owner store
+layout: 16 Mongo collections, 8 vector families incl. illustrative claim
+vectors, 13 Neo4j node types). Activation is family-by-family, each behind its
+own before/after A/B.
+
+- [ ] Per-family query-instruction registry (Qwen3 asymmetric: raw documents,
+  instructed queries) — owner approves embedding_instruction_registry v1;
+  instruction_version recorded in every ProjectionManifest embedding_profile;
+  instruction changes = new version + recall A/B, never silent.
+- [ ] Mode->family search matrix as versioned policy data (FACTUAL/EXPLANATORY/
+  CROSS_DOMAIN/EXPLORATORY/CREATIVE_TRANSFER/CONTRAST); recall permission
+  separate from grounding permission (permission ladder enforced at assembly).
+- [ ] Lineage dedupe before fusion: one parent reachable via child/summary/
+  claim/latent routes = ONE candidate with a family-hit profile; unit-tested.
+- [ ] Cross-family fusion is rank-based; raw cosine never compared across
+  families; per-family calibration data recorded for later learned fusion.
+- [ ] Rerank sees SOURCE TEXT only — recall lanes must not leak generated
+  descriptions (latent/motif text) into cross-encoder scoring.
+- [ ] Per-stage latency budgets + per-family Qdrant server-time measurement
+  (separate from embed/fuse/rerank/hydrate), reported in retrieval diagnostics.
+- [ ] Graph expansion budgets (<=2 hops, <=200 nodes, partition-permissioned
+  per mode) as recipe params.
+
+Acceptance:
+
+- [ ] Each activated family earns its seat: lay-language/cross-corpus doc-hit
+  improvement with no shape regression on the frozen suite, else stays dark.
+- [ ] Permission tests: a mode's forbidden family contributes zero candidates;
+  FACTUAL answers ground only in validated source-backed claims/evidence.
+- [ ] Whole-query latency within +20% of tier baseline at every activation.
+
 ### P2.3 Add Versioned Qwen3 Retrieval Embedding Instructions
 
 Owner directive adopted 2026-07-13: Qwen3 retrieval embeddings use distinct,

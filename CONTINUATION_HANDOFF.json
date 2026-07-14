@@ -1,5 +1,5 @@
 {
-  "version": "2026-07-14.8",
+  "version": "2026-07-14.9",
   "purpose": "Machine-readable job queue for any continuing agent. Read CONTINUATION_HANDOFF.md first.",
   "authoritative_docs": [
     "CLAUDE.md",
@@ -12,7 +12,8 @@
     "docs/EXECUTION_PLAN_2026-07-13.md",
     "docs/LOCAL_EXTRACTION_THREE_SCHEMA_DESIGN_2026-07-14.md",
     "docs/REBATCH_RUNBOOK_2026-07-14.md",
-    "docs/STRUCTURED_OUTPUT_GATEWAY_SPEC_2026-07-14.md"
+    "docs/STRUCTURED_OUTPUT_GATEWAY_SPEC_2026-07-14.md",
+    "docs/RETRIEVAL_OPTIMIZATION_PLAN_2026-07-14.md"
   ],
   "registries": {
     "domain": "backend/registries/domain_registry.v1.json",
@@ -21,7 +22,8 @@
     "motif": "backend/registries/motif_registry.v1.json",
     "extraction_vocabularies": "backend/registries/extraction_vocabularies.v1.json",
     "motif_stage_superframe_binding": "backend/registries/motif_stage_superframe_binding.v1.json (OWNER-APPROVED v1)",
-    "latent_concept_policy": "backend/registries/latent_concept_policy.v1.json"
+    "latent_concept_policy": "backend/registries/latent_concept_policy.v1.json",
+    "embedding_instructions": "backend/registries/embedding_instruction_registry.v1.PROPOSED.json (PROPOSED \u2014 owner approval pending)"
   },
   "jobs": [
     {
@@ -125,12 +127,24 @@
       "id": "s9-s14",
       "status": "blocked_deps",
       "what": "anchoring/answer shapes, P2.2 pilot (incl. context-enriched child points), P2.4-2.8 + S11 staged pipeline, T-MAIN, P3, full 16x3 regression matrix + deploy from main + final report"
+    },
+    {
+      "id": "p2.2c-retrieval-optimization",
+      "status": "blocked_deps",
+      "deps": [
+        "s5-rollup",
+        "p2.5b-envelope"
+      ],
+      "executor": "codex",
+      "what": "query-side optimization per docs/RETRIEVAL_OPTIMIZATION_PLAN_2026-07-14.md + checklist P2.2c; family-by-family activation each behind A/B",
+      "gate": "P2.2c acceptance boxes"
     }
   ],
   "owner_pending": [
     "key rotation (deepseek/longcat/runpod)",
     "S3 matrix \u00a78 sign-off",
-    "S7 facet DF rule approval"
+    "S7 facet DF rule approval",
+    "embedding instruction registry v1 approval"
   ],
   "raw_artifacts": "docs/execution_plan_audit/raw/ (claims/critiques/registries/frozen checklist/assembler), docs/baselines/container_backups/ (S1/S2/S4 durable-row backups pulled from container volume)",
   "roles": {

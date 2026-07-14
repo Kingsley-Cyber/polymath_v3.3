@@ -1,0 +1,16 @@
+{
+  "registry": "embedding_instruction_registry",
+  "version": "v1-PROPOSED",
+  "status": "PROPOSED BY SENIOR 2026-07-14 — awaiting owner approval. Instructions are retrieval-behavior recipe data: changing one shifts query vectors, so every change is a new version + recall A/B. Documents/artifacts ALWAYS embed raw (no instruction); only queries carry instructions (Qwen3 asymmetric profile, format: 'Instruct: {task}\\nQuery: {query}').",
+  "model_family_note": "Written for Qwen3-Embedding (0.6B today; unchanged semantics if/when the 4B migration happens — instruction_version rides the ProjectionManifest embedding_profile).",
+  "instructions": [
+    {"family": "source_child", "task": "Given a question, retrieve source passages that directly answer or discuss it"},
+    {"family": "context_enriched_child", "task": "Given a question, retrieve passages whose surrounding context answers or discusses it"},
+    {"family": "atomic_claim", "task": "Given a statement or question, retrieve atomic claims that support, refute, or qualify it"},
+    {"family": "parent_summary", "task": "Given a question, retrieve section summaries covering the topics it asks about"},
+    {"family": "document_summary", "task": "Given a question, retrieve documents whose overall subject matter covers it"},
+    {"family": "latent_concept", "task": "Given a question, retrieve underlying concepts and principles it implicitly involves"},
+    {"family": "motif_description", "task": "Given a described situation or mechanism, retrieve recurring structural patterns that match its causal shape"},
+    {"family": "cross_domain_analogy", "task": "Given a mechanism or situation, retrieve structurally analogous cases from different fields"}
+  ]
+}
