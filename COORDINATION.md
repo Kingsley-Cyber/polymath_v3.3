@@ -13,44 +13,19 @@ senior INTENT entries here start glide timers; silence past the window = GO.
 
 # ACTIVE DIRECTIVES (senior, rewritten in place — current truth)
 
-1. g1 STOP verified and ACCEPTED — correct execution. Root cause confirmed by
-   senior at backend/services/ingestion/docling_adapter.py:1975
-   (`_parse_pdf_fast_text`): digital PDFs bypass structure parsing entirely →
-   no sections → tier_c/ocr_ast flat parents, empty heading_path. Your
-   tier_c inference was right.
-2. NEW JOB CP1-D1 (AUTO, execute now) — digital-PDF structural lane:
-   OBJECTIVE: PDFs with a text layer parse into markdown/sections with real
-   headings and flow the SAME structural lane as markdown (tier_a when
-   headings exist; tier_b tables; tier_c only when genuinely structureless).
-   OCR remains reserved for image-only PDFs. NO fixture-keyed logic — general
-   PDF handling only (anti-gaming absolute).
-   PREFERRED MECHANISM: route digital PDFs through the docling sidecar layout
-   parse (no OCR) to get markdown+sections; if the sidecar is unavailable,
-   a local font-size heading-inference pdf→markdown fallback is acceptable
-   ONLY with a surfaced fallback counter (no silent fallbacks).
-   TESTS: unit tests on the adapter (digital PDF w/ headings → sections +
-   tier_a; scanned PDF → OCR lane unchanged; structureless PDF → tier_c) +
-   re-ingest of the two fixture PDFs as e2e.
-   THEN: create rebatch_smoke_v2 corpus (or purge and re-upload the smoke
-   corpus — it is senior-created fixture data, deletion approved), re-run the
-   full batch and gates g1–g10. Commit + push per protocol; receipts here.
-3. PHASE B RESCOPE (senior ruling under capture-before-rebuild): the PDF fix
-   changes the ecom disposition — its heading poverty is now a PIPELINE
-   artifact, not source-baked, so ecom's true fix is REINGEST through the
-   fixed lane. Therefore ecom enrichment is REMOVED from tonight's Phase B
-   (spending ~9.5k summary calls on flat parents that a reingest would
-   invalidate = paying twice). Tonight's Phase B = MARK ONLY (transcripts,
-   unaffected by the PDF lane) + UGO/none else. Ecom becomes:
-   fix (CP1-D1) → owner §8/reingest decision with corrected evidence →
-   reingest → single enrichment pass.
-4. Phase B (mark-only) still gates on g1–g10 green after CP1-D1. Do not start
-   it before a SENIOR :: GO or a posted INTENT glide window expiring.
-5. Work proceeds down BUILDLINE.md checkpoints (NOW pointer = current truth);
-   stamp checkpoint status in your receipts. New designs with no BUILDLINE
-   slot are planning defects — raise as QUESTION.
-6. Standing: pull --rebase --autostash before any commit (senior also commits
-   to this branch); stage only your files; never touch docs/baselines/
-   pre_s0_baseline/ or the *_rescored_v4.json artifacts.
+1. ROLE LAW (owner-engraved, CLAUDE.md): the senior NEVER executes and NEVER
+   spawns subagents. CODEX is the SOLE executor of the entire remaining
+   program. All prior subagent lanes are terminated; their specs are absorbed
+   into CODEX_MISSION.md.
+2. YOUR MISSION IS CODEX_MISSION.md — the complete CP2→CP12 task list with
+   survival protocol, pre-authorizations, and the review contract. Read it
+   FIRST, then PROGRESS.md (your cursor), then proceed. Never self-bound to a
+   single job; never end the session before T12.8.
+3. CP2 remains PRE-AUTHORIZED (owner GO stands). Begin at T2.1.
+4. Senior reviews every RECEIPT here; pre-authorized items proceed after the
+   20-minute poll window; blockers get parked, never idled on.
+5. Standing rules unchanged (handoff §Decision authority; blue-green+canary
+   for endpoint deploys; no rebuilds during paid batches; keys encrypted).
 
 ---
 

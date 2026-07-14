@@ -1,8 +1,10 @@
 {
-  "version": "2026-07-14.12",
+  "version": "2026-07-14.13",
   "purpose": "Machine-readable job queue for any continuing agent. Read CONTINUATION_HANDOFF.md first.",
   "authoritative_docs": [
     "BUILDLINE.md (temporal north-star: checkpoint order, NOW pointer, no-design-without-a-slot rule)",
+    "CODEX_MISSION.md (executor mission: full task list + survival protocol)",
+    "PROGRESS.md (executor cursor)",
     "CLAUDE.md",
     "AGENTS.md",
     "docs/RAPTOR_RAG_IMPLEMENTATION_CHECKLIST.md",
@@ -162,8 +164,8 @@
   ],
   "raw_artifacts": "docs/execution_plan_audit/raw/ (claims/critiques/registries/frozen checklist/assembler), docs/baselines/container_backups/ (S1/S2/S4 durable-row backups pulled from container volume)",
   "roles": {
-    "claude": "senior dev + planner (specs, gates, review)",
-    "codex": "executor (runs runbooks, attaches receipts)",
-    "owner": "gates: \u00a78 sign-off, S7 DF rule, key rotation (this week), v2 unfreeze"
+    "claude": "supervisor/reviewer/planner ONLY (role law, CLAUDE.md) \u2014 never executes, never spawns subagents",
+    "codex": "SOLE executor \u2014 CODEX_MISSION.md CP2\u2192CP12",
+    "owner": "decision lines in CODEX_MISSION \u00a7OWNER DECISIONS"
   }
 }
