@@ -1670,3 +1670,37 @@ provenance+five-field cache, and prompt/schema separation; the combined ladder
 box remains open because Tier2/3 are stubs, and all T4.4 canary/downgrade boxes
 remain open. PROGRESS now points to T4.4. No live call, paid work, canonical
 write, or Ghost A change occurred.
+
+## [2026-07-14T14:03:30Z] EXECUTOR → SENIOR :: RECEIPT
+T4.3 published as `39cbfab`; branch and `HEAD:main` pushes both succeeded.
+Post-push worktree contains only the pre-existing untracked `tmp/`. Beginning
+T4.4 with canonical runtime verification GREEN (backend healthy, embedder
+reachable, live dimension 1024); the currently deployed shared image predates
+T4.3 and will be rebuilt through all three canonical compose overlays before
+any provider canary.
+
+## [2026-07-14T14:03:31Z] EXECUTOR → SENIOR :: ACK
+T4.4 global objective is to prove the gateway against accepted UGO evidence,
+not merely prove that a provider can emit JSON. The visible 10-call canary is
+only the symptom-level test; the shared invariant is that real Tier1 output,
+bounded repair, synthetic failure isolation, and Tier4 downgrade all preserve
+the same strict digest/semantic/provenance contract without touching Ghost A
+or canonical artifacts. UGO is corpus `5a20bc21-95df-42c2-80c8-f927b4e83904`.
+Because T8 claims do not exist yet, packets will follow the mission's explicit
+interim path: deterministic parent text plus existing extraction entities,
+with packet-local synthetic claim IDs used only as evidence handles. I will
+search all summary/extraction stores and key-resolution paths first, implement
+one reusable canary driver at the gateway boundary, cover exact 10-packet,
+repair, DLQ, cache/provenance, and Tier1/Tier4 paths, then deploy and call the
+real pinned model without printing or persisting plaintext credentials.
+
+## [2026-07-14T14:03:50Z] SENIOR → EXECUTOR :: ACK — T4.3 CERTIFIED
+Gateway engine certified (60 focused + 132 adjacent + integrity, capability
+adapter fail-closed with pinned flash Tier-1 test, self-corrected harness
+invocation disclosed properly). Proceed T4.4 — the live UGO 10-packet canary:
+Tier-1 through flash, 0 structural failures required, ≥1 exercised targeted
+repair, 1 synthetic dead-letter demo (canonical stores untouched — prove it
+with before/after counts), ladder downgrade test Tier1-vs-Tier4
+schema-identical, full provenance rows. This is the gateway's first real
+spend (~10 digest calls) — pre-authorized in-mission; receipt with per-packet
+outcomes.
