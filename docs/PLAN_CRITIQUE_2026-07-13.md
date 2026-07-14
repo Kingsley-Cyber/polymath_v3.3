@@ -1,8 +1,44 @@
 # Plan Critique & Finalized Sequenced Plan — 2026-07-13
 
-Auditor: planning agent (read-only pass; this file is the only write).
+Auditor: planning agent (original read-only audit; later semantic addenda are
+documentation-only updates).
 Evidence labels: **V** = VERIFIED (auditor ran the probe today), **L** = LEDGER (from RAPTOR_RAG_IMPLEMENTATION_CHECKLIST.md text).
 Scope ground rules honored throughout: `polymath_v2` frozen for heavy ops; PoC pair = `markbuildsbrands_transcripts` + `ecommerce_AI_FILM_SCHOOL`; `UGO_CORPUS` = canary. (L)
+
+## 0. Semantic-Relational Decision Addendum — 2026-07-13
+
+Decision of record:
+`docs/SEMANTIC_RELATIONAL_ARCHITECTURE_DECISION_2026-07-13.md`, with the final
+logical schema, metadata, identity, hash, ownership, and projection contract in
+`docs/FINAL_SCHEMA_METADATA_ARCHITECTURE_2026-07-13.md`.
+
+The attachment review does **not** replace this plan's S0–S14 dependency spine.
+It preserves S0–S10 and selectively supersedes the future semantic work in
+S11–S13: one controlled domain registry, one source-backed claim/assertion
+ledger, typed mechanism frames and roles, deterministic motif candidates, and
+bounded validated analogy cards now replace broad theme/string/topology
+inference as the target bridge method.
+Soft themes remain a baseline; existing hierarchy, lexicon, ERE, raw child and
+separate summary vectors, protected original-query lane, and all three
+retrieval tiers remain intact.
+
+5Ws: deterministic ingestion/validation owns evidence, identity, registries,
+and persistence while extraction/graph/librarian/evaluation consume bounded
+artifacts (**Who**); add one shared envelope and versioned SourceVersion →
+Observation → ClaimAssertion → Sense/Domain/Frame/Role → Motif → Digest/Analogy
+layer (**What**) after labeled
+fixtures and trustworthy spans but before the PoC mass re-extraction and P3
+materialization (**When**), with Mongo authoritative, Neo4j structural, Qdrant
+candidate-only, and existing lexicon/tree ownership preserved (**Where**),
+because current identities and hashes are fragmented and current triples and
+overlap signals cannot defend exact evidence, assertion scope, local sense,
+causal roles, invariants, or break conditions (**Why**).
+
+The logical implementation schema and metadata contract are no longer
+deferred: P2.5b freezes them before capture. Concrete Pydantic modules, prompts,
+Cypher, physical storage names, indexes, adapters, and rollout commands remain
+the owner-approved `HOW` phase. This addendum does not rewrite unrelated
+historical receipts in this audit document.
 
 ## 1. Checklist Status Table (all counts L; box = work + milestone + acceptance)
 
@@ -33,18 +69,20 @@ Scope ground rules honored throughout: `polymath_v2` frozen for heavy ops; PoC p
 | P1.8 sidecar isolation | 3 | 3 | 0 | Embedder warmup / status split / readiness diag all IN CODE (wave1/warm, pending merge) |
 | P1.9 Qdrant hot-path audit | 0 | — | 17 | Per-stage timing; payload selectors; batching; filter-index audit; 29-index audit; profiles; prevent_unoptimized; topology; image pin; priority classes; reranker admission; keepalive; runpod-embed A/B (deployed, promotion-gated L); 4 acceptance |
 | P1.9(dup id) adaptive rerank | 0 | — | 7 | All (latency-by-shape, excerpts, budget-by-cliff, cascade eval; 2 acceptance) |
-| P2.1 concept contract | 0 | — | 18 | All (contract fields, provenance classes, salience, co-occurrence, usage_frames, semantic_profile, DF/specificity, card.v0 seed contracts, hub penalty, slim payloads) |
+| P2.1 concept contract | 0 | — | 22 | All (contract fields, provenance classes, salience, co-occurrence, usage_frames, semantic_profile, DF/specificity, scoped senses/mappings, separated semantic facets, controlled domain registry/resolver and evidence-bearing hierarchy profiles, card.v0 seed contracts, hub penalty, slim payloads) |
 | P2.2 multi-point reps | 0 | — | 29 | All (4 prereqs incl. P1.7; 6 projection; 6 attested-loop; 4 generated; 2 downstream; 7 acceptance) |
 | P2.3 query-only instructions | 0 | — | 6 | All |
 | P2.4 negation | 0 | — | 5 | All |
 | P2.5 typed signatures | 0 | — | 4 | All |
+| P2.5a unified claim/frame | 0 | — | 18 | One claim/assertion artifact; exact spans; senses; versioned frame registry; inference status; raw/idempotent provenance; deterministic GLiNER-Relex+spaCy candidate baseline vs provider LLM; bounded parent-digest recipe; annotate-only capture-before-rebuild; 5 acceptance gates |
+| P2.5b artifact envelope/identity | 0 | — | 20 | Shared envelope; canonical JSON/hash namespaces; logical doc/source version; hierarchy/observation/summary adapters; immutable revisions; Mongo outbox; projection manifests; 6 acceptance gates |
 | P2.6 engine parity | 0 | — | 7 | All |
 | P2.7 RunPod validation | 1 | — | 6 | Pinned artifact; canary/100/500/**5,000** gates; parity compare; retry safety; readiness wiring; acceptance |
 | P2.7b burst orchestration | 0 | — | 5 | Disposition matrix; chunk-complete barrier; saturating dispatch; full-stack-in-worker; T-HOOK-1-first sequencing (hook landed L) |
 | P2.7c multi-account routing | 3 | — | 0 | COMPLETE |
 | P2.8 concept→doc grounding | 1 | — | 4 | Core-lane provenance routing; anchor protection; profile+source gates; polluted-card detection |
-| P3.1 thematic routing pilot | 0 | — | 15 | All (pilot on mark) |
-| P3.2 bridge cards | 0 | — | 8 | All |
+| P3.1 claim/frame routing pilot | 0 | — | 14 | Labeled cross-domain slice; UGO→PoC; frame/role evaluation; soft themes baseline; protected existing lanes; diagnostics; 4 acceptance gates |
+| P3.2 motif/analogy bridge cards | 0 | — | 15 | Versioned fingerprints; bounded candidate compare; role/direction/evidence/invariant/break gates; calibrated thresholds; epistemic separation; capped materialization; 5 acceptance gates |
 | P3.3 collection consolidation | 0 | — | 9 | All (migration) |
 | P3.4 quantization | 1 | — | 5 | Experiment (clone-first) |
 | P3.5 reranker serving | 0 | — | 4 | Experiment |
@@ -68,7 +106,7 @@ Scope ground rules honored throughout: `polymath_v2` frozen for heavy ops; PoC p
 - latent_concepts[].aliases consumer: **none**. Only `services/librarian/card_builder.py` reads latent_concepts, and it uses concept/evidence_basis/confidence only — aliases are captured (`summary_semantics.py`, clamped to 3) and then read by nothing. (V)
 - Legacy broad-alias facet family globally: agency_preservation on **89,088** parents, emotional_patterns on **38,492** — the family the P0.5 decontamination deliberately left stamps 71–100% of every corpus, i.e. DF-worthless as a discriminator. (V)
 - P0.1 verify: PASS on all four corpora, exit 0 (`p0_1_summary_integrity.py verify`, host run today). The checklist's two IN PROGRESS tags on P0.1 are stale. (V)
-- `shelf_reserve` as a symbol does not exist in backend code (V); its calibrated substrate (`services/retriever/reservation_policy.py`, P0.3) is merged and live-probed (L). "Dark-built" = substrate + seat-policy pieces, not a wired A/B.
+- `shelf_reserve` as a symbol does not exist in backend code (V). *(RESTAMP 2026-07-13, per registry audit: stale — shelf_reserve merged DARK to main @f049041, SHELF_RESERVE_ENABLED=False; A/B still pending at S8.)* Its calibrated substrate (`services/retriever/reservation_policy.py`, P0.3) is merged and live-probed (L).
 
 ## 3. Finalized Sequenced Plan (dependency order; each item: what / why-now / riding data pass / anchor)
 
@@ -87,10 +125,10 @@ Deploy-train rule: every step below that changes backend code ships in the next 
 | S8 | Pair card rebuild FINAL + shelf_reserve A/B | Rebuild librarian cards for the pair (now with latent+bibliographic+clean facets); wire shelf_reserve through P0.3's calibrated reservation_policy (never the old unconditional floor); A/B on the held-out 56 vs the 2026-07-13 baseline | Cards rebuilt exactly once after ALL capture (constraint); A/B on pre-capture cards would measure the wrong artifact | Card rebuild (Mongo + slim Tier-0 projection this time) | Phase 2 shelf_reserve, P1.5 remainder, P1.1 gate |
 | S9 | P1.3 anchoring + P1.6 answer-shape routing | Conversation/open-book anchors as priors; shape-keyed breadth/K and sibling expansion | Consume the substrate; both are held-out-gated behaviors, cheapest after S8's eval harness is warm | None | P1.3, P1.6 |
 | S10 | P2.2 gated multi-point consumption | Prereqs now real: P1.1 baseline [x], P1.7 batching+lexical-only baseline (S0/S5), admission fields (S5); pilot on mark with per-concept point caps; contamination eval-run check lands here with the first representation store | The lay-language recall payoff; illegal earlier by its own prerequisites | Representation-point projection (pilot corpus only) | P2.2, P1.1 contamination box |
-| S11 | Extraction program: P2.4→P2.6, P2.7 5,000-gate + P2.7b burst, P2.8 | Negation, typed signatures (annotate-only), engine parity, then the corpus-scale burst on the pair per the signed disposition matrix (T-HOOK-1 already aboard, L); P2.8 grounding after | Re-extraction runs ONCE with temporal capture + parity contract; earlier burst would re-buy extraction after P2.6 contract changes | The mass re-extraction pass (pair only; v2 frozen) | P2.4–P2.8, P2.7b |
-| S12 | T-MAIN temporal phases 2–7 | Assertions/episodes/outbox, projection w/o re-embed, versioned RELATES_TO co-scheduled with P2.5 edge migration (one migration), query modes, ONE eligibility service, shadow-then-enforce | Fields exist (S1/S2/S4), readiness seam exists (S6), edge migration pairs with P2.5 (S11) | Neo4j edge migration + Qdrant payload indexes | T-MAIN |
-| S13 | P3 program | P3.1 thematic pilot (mark), P3.2 bridge cards; P3.3 consolidation + P3.4 quantization as isolated experiments | Explicitly last among features by their own prerequisites | Clone/pilot corpora only | P3.1–P3.5 |
-| S14 | Full regression matrix + image rebuild + final report | All 16 rows x 3 tiers with full record contract; rebuild+deploy; baselines re-captured; final report distinguishing deployed/migrated/future-only per P0.7 convention | The completion gate the ledger's header promises | Final probes | Regression matrix, strict-ready |
+| S11 | Semantic contract freeze + extraction/domain/claim/frame capture: P2.1, P2.4→P2.6 (including P2.5a/P2.5b), quality-gated P2.7 scale + P2.7b burst, P2.8 | First freeze the shared artifact envelope, canonical hash namespaces, source-version and hierarchy identity, provider-neutral observation bundle, registry snapshots, legacy adapters, Mongo outbox, and projection manifests. Then keep negation and typed signatures annotate-only; add the controlled domain resolver, unified claim/assertion capture contract, exact-span verifier, scoped-sense refs, frame candidates, inference status, raw/idempotent provenance, and one shared validator. The 2026-07-13 feasibility result makes a pinned trained spaCy parser the scoped claim/qualifier compiler, permits GLiNER as optional span candidates, and keeps current GLiREL/joint Relex relations observation-only; DeepSeek/LongCat remain identical-label baselines or bounded refiners. Test the parent semantic digest only after accepted child artifacts and as a separate recipe from Ghost A. Resume RunPod 100/500/5,000 scaling only after an expanded unique quality fixture clears; P2.8 grounding follows | The identity/schema front gate prevents the one paid re-extraction from producing semantically useful but mutually incompatible artifacts. Bursting first would make the pair back-level. The current joint RunPod model failed the 9-sample relation gate at both 0.75 and 0.40 thresholds, current RunPod defaults to blank spaCy, and Ghost A does not consume accepted child claims. Scaling or treating the draft as implemented now would repeat C1/C3 | The mass re-extraction pass (pair only; v2 frozen), after P2.5b, expanded semantic-quality gates, and UGO capture/parity/parent-recipe canaries | P2.1, P2.4–P2.8, especially P2.5a/P2.5b; P2.7b; `SEMANTIC_EXTRACTION_PRODUCTION_READINESS_2026-07-13.md` |
+| S12 | Unified T-MAIN claim/assertion phases 2–7 | Source versions/evidence episodes plus ONE authoritative temporal+general `ClaimAssertion` ledger; projection via the P2.5b outbox/manifests without blind re-embed; asserted structure projected separately from synthesized/analogy artifacts; legacy/versioned edge migration co-scheduled with P2.5/P2.5a/P2.5b; temporal query modes, one eligibility service, shadow-then-enforce | S11 supplies exact, versioned semantic capture and S1/S2/S4 supply temporal metadata; unifying here prevents two claim stores and keeps one migration per seam | Neo4j assertion-keyed compatibility projection + Qdrant payload/index shadow; full artifact stays Mongo-authoritative | T-MAIN, P2.5, P2.5a, P2.5b |
+| S13 | Semantic-relational P3 program | P3.1 claim/mechanism-frame routing pilot (UGO→mark/ecommerce), P3.2 deterministic motif/analogy cards; compare soft themes and existing bridges as baselines; P3.3 consolidation, P3.4 quantization, and any contextual-vector recipe remain separate clone-only experiments | Frame/motif promotion depends on labeled fixtures, exact spans, unified assertions, and S11/S12 parity; experiment isolation prevents Qwen/context/quantization changes from confounding semantic conclusions | Canary/pilot corpora and cloned collections only; no production-wide reindex | P3.1–P3.5 |
+| S14 | Full regression matrix + semantic quality gates + image rebuild + final report | All 16 rows x 3 tiers with full record contract plus claim precision/span recall, frame/role F1 and abstention, analogy false-positive/harmful-analogy controls, canonical-hash replay, Mongo/projection reconciliation, cost/write amplification; rebuild+deploy only promoted slices; baselines re-captured; report deployed/migrated/future-only | The completion gate must prove better cross-domain evidence without direct-query, corpus-isolation, latency, provenance, identity, or replay regression | Final probes and scorer-versioned semantic eval artifact | Regression matrix, strict-ready, P2.5a/P2.5b/P3 acceptance |
 
 Parallelizable: S2+S3 (independent of S1); S6 alongside S5; P0.2/P0.6 test-matrix remainders can fill any gap — they touch nothing above.
 
@@ -103,7 +141,7 @@ T-HOOK-2 was adopted 2026-07-13 and labeled "immediate" (L). The same day, the P
 673 librarian cards were built 2026-07-13 (L). `card_builder.py` consumes `latent_concepts` as a card seed (V) — and its input was empty on 100% of pair parents (V). The pair's cards are structurally missing a field family they were designed to carry, plus all bibliographic fields (V: author/language/date ≈ 0). Cost: full pair card rebuild (S8) — tolerable only because cards are cheap deterministic projections; the pattern is not tolerable for paid artifacts.
 
 **C3. Capture without consumers; code without deployment.**
-latent aliases are parsed, clamped, validated — and read by nothing (V). The planner's positional 6-match cap that demonstrably dropped a 0.909 concept is still open (L). Meanwhile 6 boxes sit IN CODE unmerged (P1.7 cache, P1.8 warm) while newer feature work landed. The system is accumulating dark data and dark code at both ends of the pipeline; each is a silent invalidation risk for every measurement taken in between.
+latent aliases are parsed, clamped, validated — and read by nothing (V). The planner's positional 6-match cap that demonstrably dropped a 0.909 concept is still open (L). *(RESTAMP 2026-07-13, per registry audit: the cap fix is IN CODE under other names — strength override vocabulary.py:1705 + obligation-aware selection grounded_planner.py:375 — S5 verifies rather than builds it.)* Meanwhile 6 boxes sit IN CODE unmerged (P1.7 cache, P1.8 warm) while newer feature work landed. The system is accumulating dark data and dark code at both ends of the pipeline; each is a silent invalidation risk for every measurement taken in between.
 
 **C4. Ledger hygiene drift.**
 P0.1's two IN PROGRESS tags contradict its own verified acceptance lines and today's green verify (V). Section id "P1.9" is used twice. The P0.5 facet decontamination is recorded as merged/complete-shaped while leaving a facet family stamped on 71–100% of every corpus (V) with no recorded owner decision. None fatal; all erode the header's contract that a checkbox means deployed + reconciled + verified.
