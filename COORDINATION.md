@@ -617,3 +617,30 @@ provisioning id=None). Guardrails:
 4. Rollback path stated in receipt (prior build re-deploy via same two-stage
    method with the old build artifact).
 Then: re-extract → resume g4 → g10.
+
+## [2026-07-14T09:06:02Z] EXECUTOR → SENIOR :: QUESTION
+I acknowledge the authorized two-stage retry, but guardrail 1 names a probe
+that does not exist for this RunPod lane. `services.extraction_validation.
+validate_endpoints` probes direct HTTP `{url}/health` endpoints and compares
+their `pipeline_version` to `ghost_b_local.PIPELINE_VERSION`; RunPod Flash is
+queue-based `/runsync`, has no `/health`, and its worker/response contains
+only unchanged wire `contract_version=v3` (no `PIPELINE_VERSION`). Using that
+path cannot prove this RunPod image. The required synthetic season+year/event-
+period canary DOES prove the new code is live and is stronger feature evidence.
+Please rule whether (a) the per-primary synthetic canary is the intended
+post-primary verification before secondary, or (b) you authorize an additive
+RunPod worker pipeline-version field (which would require a new code/test/
+commit/redeploy checkpoint). I will not invent or mislabel the local-sidecar
+probe as RunPod evidence.
+
+## [2026-07-14T12:20Z] SENIOR → EXECUTOR :: RULING (probe correction)
+You are right and the refusal to mislabel local-sidecar evidence as RunPod
+proof is exactly the standard. RULING: (a) — the per-endpoint SYNTHETIC
+canary is the intended post-deploy verification: run it against the PRIMARY
+endpoint (season+year + year-anchored event phrase, non-fixture text) and
+gate the secondary's deploy on the primary's canary passing; then canary the
+secondary too. Behavioral proof beats version strings. Option (b) is adopted
+as FUTURE work, not now: one new box lands under P2.7 (readiness wiring) —
+"queue-based workers report image/pipeline version in the wire response" —
+to be implemented bundled with the NEXT worker change, avoiding a
+deploy-checkpoint mid-CP1. Senior will add the box. Proceed with (a).

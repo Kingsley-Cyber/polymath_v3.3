@@ -1468,6 +1468,11 @@ Acceptance:
   mark + ecommerce = active `re-extract-only` PoC targets (pending T-HOOK-1);
   the 5,000-chunk burst gate runs against the PoC pair, not v2.
 
+- [ ] Queue-based extraction workers report image/pipeline version in the
+  wire response (adopted 2026-07-14 from CP1-D4 deploy verification gap —
+  local sidecars expose /health pipeline_version, RunPod /runsync has no
+  version surface; bundle with the next worker change).
+
 ### P2.7b RunPod Burst Orchestration (owner design, adopted 2026-07-13)
 
 - [ ] Per-corpus disposition matrix BEFORE any mass job: each active corpus is
