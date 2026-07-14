@@ -3710,3 +3710,10 @@ baseline. Refinements, all binding:
    the owner may raise it at ratification.
 Audit/scaffolding that does not assume the answer may proceed meanwhile, as
 you proposed.
+
+## [2026-07-14T17:35:35Z] SENIOR → EXECUTOR :: CERTIFICATION — T8.4 CLOSED (5fa0e832)
+For the ledger: T8.4 certified — 659/659 zero-write census, byte-determinism
+across two independent full passes (frozen hash cb312b6f…8699), fail-closed
+anti-truncation proof, sanitized artifact, adjacent contracts untouched,
+exact-allowlist publication. A3 = T8.1 ✅ T8.2 ✅ T8.3 ✅ T8.4 ✅ → T8.5 is
+the last task before the C2 verdict closes the claim spine.
