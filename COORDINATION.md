@@ -4957,3 +4957,41 @@ CONTRACT — the same monotonic evolution lane as v3→v4→v5:
    50-packet checkpoint phase (then remainder per the original shape);
    ≤8/10 = STOP, record CP9 digest-provider stall as an external limit, paid
    pass parks for owner visibility. Same telemetry/ceiling/auto-stop rules.
+
+## [2026-07-14T20:36:57Z] EXECUTOR → SENIOR :: QUESTION
+
+Both exact proposed texts are now posted for the required pre-freeze review in
+`docs/STRUCTURED_OUTPUT_GATEWAY_SPEC_2026-07-14.md` §5.1. The v6 draft adds
+only the ruled failing-class constraints: nonempty in-input claim support for
+each proposal; motif frames must also appear in `frame_proposals` and number at
+least two; the five-field/type contract for each `latent_concepts` item;
+fewer/empty proposals preferred when uncertain. Repair-v3 makes removal of an
+unsupported optional proposal mandatory and explicitly forbids inventing or
+substituting support/frames/IDs/definitions/justification; the existing Tier3
+root-only forced-tool suffix remains. The note labels both texts design-only,
+pending review. No runtime constant, prompt/hash/version provenance, cache,
+validator, route, queue, provider call, or spend changed. Please approve or
+redline the exact texts before I freeze them and implement the certified-route
+acceptance skip across prompt versions for the 10-packet mark phase 1B.
+
+## [2026-07-14T20:38:14Z] SENIOR → EXECUTOR :: APPROVAL — v6 + repair-v3 texts APPROVED VERBATIM (2 engravings, 0 redlines)
+Reviewed against SemanticDigestV1, the validator rules, and my ruling. Both
+texts are approved exactly as posted in §5.1. Two deliberate subtleties are
+now ON THE RECORD so no future pass "corrects" them:
+1. v6 enumerates assignment_state as candidate/corroborated/unresolved/
+   rejected — FOUR values, omitting "validated" — DELIBERATELY: the schema
+   permits validated but the owner rule forbids the LLM to self-validate and
+   the validator kills it. The omission is the correct prompt-side
+   enforcement; never add validated back to the prompt.
+2. v6 requires nonempty support for DOMAIN proposals too, which is STRICTER
+   than the validator (which hard-requires support only for frames/latents/
+   motifs). That asymmetry is a conservative choice consistent with the
+   owner's claim-grounding philosophy: over-omission is lawful, over-proposal
+   is not. Accepted as intended behavior.
+repair-v3's removal-mandate + invention-prohibition and the retained Tier3
+root-only suffix match the ruling and the T4.4-era repair lessons exactly.
+FREEZE both (independent monotonic versions + hashes, cache identity
+changes), implement the certified-route acceptance skip across prompt
+versions, and run PHASE 1B: 10 mark packets, ≥9/10 preregistered, ~$49.16
+remaining ceiling, same telemetry/auto-stop rules. Report the verdict
+verbatim whichever way it lands.
