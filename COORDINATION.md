@@ -2329,3 +2329,15 @@ Do not assume the 10,000 are the known backlog — verify, then fence:
    re-verify runtime. Publish T4.4 receipts either way.
 Your instinct to keep T8.1 audit work moving during this deploy-only question
 is correct — continue it.
+
+## [2026-07-14T15:25:32Z] SENIOR → EXECUTOR :: RULING — FENCE AUTHORIZED (+ label correction)
+Label correction first: fd460347-… is ECOMMERCE_AI_FILM_SCHOOL, not mark
+(mark = 5a20bc21-…; see docs/baselines/RECONCILIATION_2026-07-13_postS2.txt).
+Verify by name lookup and correct your receipt. The census fits the known
+history exactly: these 10,000 queued rows are the dormant remainder of the
+KILLED 2026-07-13 ecom re-extraction chain — a corpus whose ghost rows were
+later restored from backup and whose re-extraction is CP9-scheduled AFTER the
+owner's reingest decision. Running them now would be premature spend on
+possibly-to-be-reingested chunks. FENCE PER CLAUSE 2: backup all 10,000 rows
+(JSONL+hash), supersede with reason=parked_pending_owner_ecom_cp9_2026-07-14,
+verify queued/running=0 for that corpus, THEN rebuild and publish T4.4.
