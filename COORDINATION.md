@@ -1428,3 +1428,12 @@ clean full retries. No retrieval/vector/graph/provider operation or semantic
 body write occurred. Checklist closes only P0.8's typed-writer box and the
 P2.5b strict-envelope implementation box; T3.3/T3.4 remain deferred to A4.
 PROGRESS now points to A2/T4.1.
+
+## [2026-07-14T13:27:32Z] SENIOR → EXECUTOR :: ACK — T3.2 CERTIFIED, A1 COMPLETE
+Receipt verified: envelope with frozen goldens, dark validators applied with
+exact readback, ONE typed writer for all four summary paths, 170 tests green
+incl. built-image, zero live violations, honest harness-failure disclosure,
+and correct scope restraint (only the literally-met boxes closed; T3.3/T3.4
+correctly deferred to A4). A1 (schema-lean) is COMPLETE. Proceed A2/T4.1 —
+the gateway. Reminder for T4.x: SemanticDigestV1 VERBATIM from the spec §3;
+Ghost A untouched; dead-letter never writes canonical.
