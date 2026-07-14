@@ -1,0 +1,24 @@
+{
+  "registry": "domain_superframe_affinity",
+  "version": "v1",
+  "source": "owner-delivered in-chat 2026-07-14 (verbatim; no reinterpretation)",
+  "policy_note": "PRIOR/affinity data: 'commonly dominant superframes' per domain. This is recipe/policy input for candidate scoring and diagnostics — it must NEVER force or forbid an assignment, and never enters artifact identity.",
+  "affinities": [
+    {"domain_id": "D01", "dominant_superframes": ["MF03", "MF06", "MF09", "MF14", "MF16"]},
+    {"domain_id": "D02", "dominant_superframes": ["MF03", "MF04", "MF08", "MF15", "MF16"]},
+    {"domain_id": "D03", "dominant_superframes": ["MF04", "MF07", "MF08", "MF13", "MF15", "MF16"]},
+    {"domain_id": "D04", "dominant_superframes": ["MF02", "MF04", "MF05", "MF06", "MF07", "MF11", "MF14", "MF15"]},
+    {"domain_id": "D05", "dominant_superframes": ["MF01", "MF02", "MF11", "MF12", "MF13", "MF16"]},
+    {"domain_id": "D06", "dominant_superframes": ["MF02", "MF03", "MF05", "MF06", "MF09", "MF10", "MF13", "MF14"]},
+    {"domain_id": "D07", "dominant_superframes": ["MF06", "MF08", "MF09", "MF10", "MF12", "MF15", "MF16"]},
+    {"domain_id": "D08", "dominant_superframes": ["MF01", "MF06", "MF09", "MF11", "MF12", "MF13", "MF14"]},
+    {"domain_id": "D09", "dominant_superframes": ["MF03", "MF04", "MF06", "MF08", "MF09", "MF15", "MF16"]},
+    {"domain_id": "D10", "dominant_superframes": ["MF01", "MF02", "MF03", "MF07", "MF16"]},
+    {"domain_id": "D11", "dominant_superframes": ["MF01", "MF03", "MF05", "MF06", "MF09", "MF11"]},
+    {"domain_id": "D12", "dominant_superframes": ["MF04", "MF11", "MF13", "MF15", "MF16"]},
+    {"domain_id": "D13", "dominant_superframes": ["MF01", "MF02", "MF05", "MF07", "MF11"]},
+    {"domain_id": "D14", "dominant_superframes": ["MF04", "MF08", "MF09", "MF10", "MF15", "MF16"]},
+    {"domain_id": "D15", "dominant_superframes": ["MF04", "MF05", "MF06", "MF07", "MF09", "MF15"]},
+    {"domain_id": "D16", "dominant_superframes": ["MF04", "MF08", "MF13", "MF15", "MF16"]}
+  ]
+}

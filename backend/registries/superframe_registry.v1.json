@@ -1,0 +1,24 @@
+{
+  "registry": "superframe_registry",
+  "version": "v1",
+  "source": "owner-delivered in-chat 2026-07-14 (verbatim; no reinterpretation)",
+  "policy_note": "Superframes are how a mechanism operates (domain = where knowledge belongs; motif = ordered multi-frame pattern). Assignment rules live in a versioned rule registry (recipe), never hardcoded branches. Hard cardinalities are policy defaults, not schema.",
+  "superframes": [
+    {"mf_id": "MF01", "name": "Representation and Framing"},
+    {"mf_id": "MF02", "name": "Signaling and Interpretation"},
+    {"mf_id": "MF03", "name": "Measurement and Comparison"},
+    {"mf_id": "MF04", "name": "Causal Influence and Intervention"},
+    {"mf_id": "MF05", "name": "Valuation and Preference"},
+    {"mf_id": "MF06", "name": "Goal, Decision, and Action"},
+    {"mf_id": "MF07", "name": "Learning and Belief Update"},
+    {"mf_id": "MF08", "name": "Feedback and Regulation"},
+    {"mf_id": "MF09", "name": "Constraint, Cost, and Trade-off"},
+    {"mf_id": "MF10", "name": "Resource Allocation and Exchange"},
+    {"mf_id": "MF11", "name": "Identity, Role, and Norm"},
+    {"mf_id": "MF12", "name": "Coordination, Trust, and Power"},
+    {"mf_id": "MF13", "name": "Competition and Selection"},
+    {"mf_id": "MF14", "name": "Risk and Uncertainty"},
+    {"mf_id": "MF15", "name": "Accumulation, Threshold, and Path Dependence"},
+    {"mf_id": "MF16", "name": "Composition, Network, Scale, and Emergence"}
+  ]
+}

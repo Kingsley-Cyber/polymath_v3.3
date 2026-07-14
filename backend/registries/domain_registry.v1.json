@@ -1,0 +1,25 @@
+{
+  "registry": "domain_registry",
+  "version": "v1",
+  "source": "owner-delivered in-chat 2026-07-14 (verbatim; no reinterpretation)",
+  "policy_note": "Registry membership is versioned snapshot DATA. Weights, caps, thresholds, and affinities are recipe/policy parameters, never artifact identity (FINAL_SCHEMA 'Owner rebuttal integration' addendum).",
+  "guidance": "Use approximately 12-16 macro-domain families. These are broad enough for nearly all books, papers, reports, websites, transcripts, and technical documentation. Specific domains can fall back to defensible broader domains.",
+  "domains": [
+    {"domain_id": "D01", "name": "Formal and Mathematical Systems", "members": ["Mathematics", "Statistics", "Logic", "Probability", "Decision theory", "Operations research", "Information theory", "Formal methods"]},
+    {"domain_id": "D02", "name": "Physical and Chemical Systems", "members": ["Physics", "Chemistry", "Astronomy", "Earth science", "Materials science", "Energy systems", "Climate science"]},
+    {"domain_id": "D03", "name": "Biological and Health Systems", "members": ["Biology", "Neuroscience", "Genetics", "Evolution", "Ecology", "Medicine", "Public health", "Nutrition", "Human physiology"]},
+    {"domain_id": "D04", "name": "Mind and Behavior", "members": ["Psychology", "Cognitive science", "Behavioral science", "Emotion", "Motivation", "Personality", "Learning", "Mental models", "Self-development"]},
+    {"domain_id": "D05", "name": "Social and Cultural Systems", "members": ["Sociology", "Anthropology", "Culture", "Communication", "Demography", "Family systems", "Religion", "Media studies", "Gender studies", "Community studies"]},
+    {"domain_id": "D06", "name": "Economic and Commercial Systems", "members": ["Economics", "Finance", "Accounting", "Markets", "Marketing", "Consumer behavior", "Pricing", "Sales", "Commerce", "Entrepreneurship"]},
+    {"domain_id": "D07", "name": "Organizations, Management, and Operations", "members": ["Management", "Leadership", "Organizational behavior", "Strategy", "Operations", "Logistics", "Supply chains", "Human resources", "Project management", "Institutional design"]},
+    {"domain_id": "D08", "name": "Politics, Law, and Governance", "members": ["Political science", "Law", "Public policy", "Government", "International relations", "Security studies", "Military studies", "Regulation", "Public administration"]},
+    {"domain_id": "D09", "name": "Technology and Engineered Systems", "members": ["Computer science", "Software engineering", "Artificial intelligence", "Data science", "Cybersecurity", "Electrical engineering", "Mechanical engineering", "Infrastructure", "Robotics", "Telecommunications"]},
+    {"domain_id": "D10", "name": "Language, Knowledge, and Information", "members": ["Linguistics", "Library science", "Knowledge representation", "Ontology", "Epistemology", "Education", "Pedagogy", "Research methods", "Documentation", "Information retrieval"]},
+    {"domain_id": "D11", "name": "Philosophy, Ethics, and Meaning", "members": ["Philosophy", "Ethics", "Metaphysics", "Aesthetics", "Philosophy of mind", "Philosophy of science", "Existential studies", "Moral reasoning"]},
+    {"domain_id": "D12", "name": "History and Temporal Change", "members": ["History", "Archaeology", "Historical sociology", "Economic history", "Intellectual history", "Military history", "Technological history"]},
+    {"domain_id": "D13", "name": "Arts, Narrative, and Creative Practice", "members": ["Literature", "Film", "Music", "Visual arts", "Design", "Storytelling", "Rhetoric", "Creative writing", "Advertising creative", "Performance"]},
+    {"domain_id": "D14", "name": "Environment, Space, and Built Systems", "members": ["Geography", "Urban planning", "Architecture", "Transportation", "Environmental studies", "Agriculture", "Land use", "Housing", "Regional development"]},
+    {"domain_id": "D15", "name": "Everyday Practice and Applied Life", "members": ["Personal finance", "Career development", "Relationships", "Productivity", "Fitness", "Parenting", "Lifestyle", "Craft", "Cooking", "Travel"]},
+    {"domain_id": "D16", "name": "Cross-Domain and Systems Inquiry", "members": ["Complexity", "Systems science", "Cybernetics", "Network science", "Interdisciplinary studies", "Futures studies", "Risk studies", "Sustainability", "Human-computer interaction", "Science and technology studies"]}
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "version": "2026-07-14",
+  "purpose": "Machine-readable job queue for any continuing agent. Read CONTINUATION_HANDOFF.md first.",
+  "authoritative_docs": [
+    "CLAUDE.md",
+    "AGENTS.md",
+    "docs/RAPTOR_RAG_IMPLEMENTATION_CHECKLIST.md",
+    "docs/PLAN_CRITIQUE_2026-07-13.md",
+    "docs/FINAL_SCHEMA_METADATA_ARCHITECTURE_2026-07-13.md",
+    "docs/REBUTTAL_INTEGRATION_RESTATEMENT_2026-07-13.md",
+    "docs/SEMANTIC_EXTRACTION_PRODUCTION_READINESS_2026-07-13.md",
+    "docs/EXECUTION_PLAN_2026-07-13.md"
+  ],
+  "registries": {
+    "domain": "backend/registries/domain_registry.v1.json",
+    "superframe": "backend/registries/superframe_registry.v1.json",
+    "affinity_priors": "backend/registries/domain_superframe_affinity.v1.json",
+    "motif": "NOT_DELIVERED — owner input pending; do not invent"
+  },
+  "jobs": [
+    {"id": "eval-post-s2", "status": "in_flight", "what": "3-tier held-out regression vs pre_s0_baseline; threshold report", "gate": "no shape >5pts regression; negatives 5/5; latency +20% max", "artifacts": "docs/baselines/EVAL_2026-07-13_postS2_*.json"},
+    {"id": "s4-mark-batch", "status": "blocked_owner", "blocker": "key rotation", "what": "quarantine+regen 1,004 capture-stale mark parents (latent+temporal), then reindex + verify counts + P0.1 verify green", "driver": "container /tmp/s4_quarantine_stale.py + scripts/polymath_summary_backfill_scoped.py"},
+    {"id": "p2.5b-envelope", "status": "ready", "what": "canonical JSON serializer, hash-namespace golden vectors, identity recipes, legacy adapters, outbox+manifests; UGO annotate-only canary", "gate": "checklist P2.5b acceptance incl. byte-exact golden vectors + no Fast/Hybrid/Graph behavior change"},
+    {"id": "glirel-c2-rebenchmark", "status": "ready", "what": "compiled-claim quality WITH vs WITHOUT controlled-label GLiREL candidates on backend/evals/semantic_extraction_gold_v1.json", "gate": "owner ruling C2; relations stay observation-only until pass"},
+    {"id": "p2.5b-registries", "status": "partially_blocked_owner", "blocker": "motif registry undelivered", "what": "versioned snapshot loaders + resolver for domain/superframe registries (delivered) + motif (pending)"},
+    {"id": "s5-rollup", "status": "ready_after_s4", "what": "alias/latent rollup: absorb 3 existing alias stores into ONE versioned registry; fix qdrant_writer summary payload whitelist dropping latent_concepts; reconcile dual entity_id builders", "anchor": "PLAN_CRITIQUE S5 + registry audit collisions"},
+    {"id": "s6-readiness-split", "status": "ready_after_s2", "what": "operational vs metadata-quality vs temporal readiness inside corpus_readiness (field split, not new symbol)"},
+    {"id": "s7-facet-df", "status": "blocked_owner", "blocker": "owner phrase 'facet DF rule approved'", "what": "DF-based facet retrieval-rights rule + ingest-side gate + cleanup riding S5 rewrite"},
+    {"id": "s8-cards-shelf-ab", "status": "blocked_deps", "deps": ["s4-mark-batch", "s5-rollup", "s6-readiness-split"], "what": "pair card rebuild FINAL + shelf_reserve before/after A/B vs frozen held-out baseline"},
+    {"id": "s3-signoff", "status": "blocked_owner", "blocker": "matrix §8 empty", "what": "owner signs per-corpus dispositions; then ecom subset reingest lane + projection heading-repair + 3 junk-doc deletions"},
+    {"id": "v2-naive-reconcile", "status": "ready", "what": "explain/remediate +68,785 unexplained points in corpus_999b5934_naive via ProjectionManifest-driven audit (additive, versioned)", "artifacts": "docs/baselines/RECONCILIATION_2026-07-13_postS2.txt"},
+    {"id": "s9-s14", "status": "blocked_deps", "what": "anchoring/answer shapes, P2.2 pilot (incl. context-enriched child points), P2.4-2.8 + S11 staged pipeline, T-MAIN, P3, full 16x3 regression matrix + deploy from main + final report"}
+  ],
+  "owner_pending": ["key rotation (deepseek/longcat/runpod)", "motif registry schema", "S3 matrix §8 sign-off", "S7 facet DF rule approval"]
+}
