@@ -559,3 +559,61 @@ per ruling, and the Ghost B temporal-parity gap honestly recorded for P2.6
 rather than silently widened. GO: commit/push → redeploy BOTH RunPod
 endpoints → 76-chunk re-extract → resume g4 → g10. Full table in one RECEIPT;
 CP2 INTENT posts on green.
+
+## [2026-07-14T09:01:03Z] EXECUTOR → SENIOR :: BLOCKER
+The first CP1-D4 endpoint deploy FAILED; deployment stopped immediately, the
+secondary endpoint was not attempted, no corpus work ran, and g4 remains
+stopped. Command: backend-only in-memory-key helper invoking `flash deploy
+--app runpod_flash_extractor --env production --python-version 3.12` for each
+configured account; true wrapper EXIT=1 (`/tmp/cp1_d4_deploy_both.log`). The
+primary build completed (117.2 MB) and uploaded, but reconciliation attempted
+to provision `LiveServerless:None` as a NEW 8-worker resource. RunPod rejected
+it: account quota=10 already allocated; allowed additional workers=0. No
+endpoint success was reported. Read-only inventory EXIT=0
+(`/tmp/cp1_d4_flash_inventory.log`) proves both account bindings still exist:
+primary app `runpod_flash_extractor`/production/resource
+`polymath-gliner-relex` -> `t0nuyi6shc2t9a`; secondary same app/env/resource ->
+`t5wjsqmvpjm0lm`. Root cause is deployment packaging identity, not RunPod
+configuration: I built each account from an isolated source-only directory,
+so its new local `.flash/flash_manifest.json` lacked the existing
+`endpoint_id`/`resources_endpoints` state. Flash 1.18 reconciles against the
+newly uploaded build manifest and therefore constructed a resource with
+id=None instead of performing an in-place update. The safe retry is to seed
+each isolated build with the matching existing account-specific manifest
+(same tracked config/source, only its already-authoritative endpoint ID/URL),
+then deploy; this preserves in-place identity and cannot request a third
+endpoint. Please authorize that operational retry or provide a different
+in-place deploy method. No retry has been attempted.
+
+## [2026-07-14T09:03:18Z] EXECUTOR → SENIOR :: QUESTION
+One precision after reading Flash 1.18's builder: `run_build()` always
+overwrites `.flash/flash_manifest.json`, so placing an old manifest in the
+project before `flash deploy` would NOT preserve endpoint identity and I will
+not try it. The safe in-place path is two-stage: run the standard builder;
+then, before upload/reconcile, add only the inventory-verified existing
+`endpoint_id` and `resources_endpoints` to that generated manifest for the
+current account; then call Flash's standard upload/deploy functions. This is
+the exact metadata Flash writes after a successful deploy, and it makes
+ResourceManager hydrate/update the existing endpoint rather than provision
+`id=None`. Is that two-stage per-account retry authorized?
+
+## [2026-07-14T12:05Z] SENIOR → EXECUTOR :: RULING (flash deploy) — AUTHORIZED
+The two-stage per-account retry is APPROVED: standard builder → inject ONLY
+the inventory-verified existing endpoint_id + resources_endpoints for that
+account into the freshly generated manifest → Flash's standard
+upload/deploy. Your reasoning is correct (it reproduces exactly the state
+Flash writes post-success, so ResourceManager updates in place instead of
+provisioning id=None). Guardrails:
+1. SEQUENTIAL: primary account first; verify before touching secondary
+   (worker PIPELINE_VERSION probe via the existing validate_endpoints path
+   must show the NEW version); abort on mismatch.
+2. Echo the injected endpoint ids in the receipt next to the inventory ids
+   (t0nuyi6shc2t9a / t5wjsqmvpjm0lm) — a wrong-id injection updates the wrong
+   resource, so the receipt must prove the match.
+3. Post-deploy, run a 1-chunk canary extraction on a synthetic sentence
+   containing a season+year and a year-anchored event phrase (NOT fixture
+   text) proving the new families are live on the endpoint BEFORE the
+   76-chunk re-extract.
+4. Rollback path stated in receipt (prior build re-deploy via same two-stage
+   method with the old build artifact).
+Then: re-extract → resume g4 → g10.
