@@ -1026,3 +1026,68 @@ COMPUTED from Mongo under that documented rule (cite the receipt in the
 harness comment), re-run g7, continue g8→g10. This corrects the measurement
 to the documented contract — the store rule is unchanged, no denominator is
 being redefined post-hoc: the receipt predates this gate by a day.
+
+## [2026-07-14T10:16:26Z] EXECUTOR → SENIOR :: ACK
+Owner continuation received: continuous execution remains authorized under
+the standing GO. I am applying the g7 disposable-harness correction exactly
+as ruled (Mongo-computed naive/hrag=children+eligible summaries;
+graph=children), then will re-run g7 unchanged from that documented contract
+and continue gate-by-gate only while green.
+
+## [2026-07-14T10:17:14Z] EXECUTOR → SENIOR :: RECEIPT
+Official g7 RESUME PASS under the pre-existing per-collection contract.
+Exact command: `docker exec -e PYTHONPATH=/app -w /app
+polymath_v33-backend-1 python /tmp/rebatch_phase_a_gate.py g7 --corpus-id
+62193743-4175-40da-b861-ba1e1e567b9a`; Mongo-computed expectations and
+actual Qdrant counts both naive=186, hrag=186, graph=106; Neo4j corpus
+entities=913; true EXIT=0 (`/tmp/rebatch_phase_a_g7_resume.log`).
+Proceeding to g8 only.
+
+## [2026-07-14T10:17:52Z] EXECUTOR → SENIOR :: RECEIPT
+Official g8 PASS through the real authenticated readiness endpoint. Exact
+command: `docker exec -e PYTHONPATH=/app -w /app
+polymath_v33-backend-1 python /tmp/rebatch_phase_a_gate.py g8 --corpus-id
+62193743-4175-40da-b861-ba1e1e567b9a`; endpoint status=`fully_enriched`,
+stale=false, blocking=[]; an ephemeral probe bearer was minted in memory and
+not printed or persisted; true EXIT=0 (`/tmp/rebatch_phase_a_g8.log`).
+Proceeding to g9 only.
+
+## [2026-07-14T10:22:32Z] EXECUTOR → SENIOR :: BLOCKER
+g9 Fast Search stopped on its first direct case; remaining eight SSE cases
+and g10 are unrun. Exact tier command: `docker exec -e PYTHONPATH=/app -w
+/app polymath_v33-backend-1 python /tmp/rebatch_phase_a_g9.py --corpus-id
+62193743-4175-40da-b861-ba1e1e567b9a --tier qdrant_only`; true EXIT=1
+(`/tmp/rebatch_phase_a_g9_qdrant_only.log`), assertion=`effective tier
+mismatch`.
+
+Read-only persisted-turn diagnosis proves the live system did NOT downgrade:
+assistant `strategy_used=qdrant_only`, `downgrade_reason=None`; answer exactly
+contained Maria Okafor + March 2019; its citation source had the smoke corpus
+ID and the garden fixture doc ID. Root cause is disposable parser ordering:
+the SSE emits an early `Local RAG retrieval` trace without `effective_tier`
+and a later authoritative one with `effective_tier=qdrant_only`; the harness
+returned the first. Proposed harness-only correction: select the last Local
+RAG trace carrying nonempty `effective_tier`, and map citation doc IDs to
+Mongo-discovered filenames because Fast Search's citation has blank
+`doc_name`. No gate criterion or production code changes. I will re-run the
+tier from case 1 after this measurement correction; no later tier starts
+until Fast Search's full 3-case command is green.
+
+## [2026-07-14T10:23:45Z] EXECUTOR → SENIOR :: RECEIPT
+g9 Fast Search (`qdrant_only`) RESUME PASS, 3/3 real `/api/chat` SSE cases.
+Exact command is the blocker command above with the corrected disposable
+trace selector; true EXIT=0 (`/tmp/rebatch_phase_a_g9_qdrant_only_resume.log`).
+Direct: Maria Okafor+2019 present, 1/1 citation from garden fixture. Plain:
+oil+alternating nights+two groundings present, 1/1 citation from lighthouse
+fixture. Absent nonce terms verified absent from all corpus child/parent text;
+fail_closed=true and model_skipped=true. Effective tier stayed
+`qdrant_only` for all three. Proceeding to Hybrid Search only.
+
+## [2026-07-14T17:00Z] SENIOR → EXECUTOR :: ACK
+g9 diagnosis verified: live system honored qdrant_only (strategy_used
+confirmed, no downgrade) and the direct answer contained the fixture ground
+truth with correct citation — the failure was the harness reading the first
+retrieval trace instead of the last authoritative one. Measurement-only
+correction APPROVED (same class as prior receipt-wrapper fixes); criteria
+unchanged. Fast tier resume shows all 3 cases complete EXIT=0. Proceed:
+Hybrid then Graph, each full 3-case command green before the next; then g10.
