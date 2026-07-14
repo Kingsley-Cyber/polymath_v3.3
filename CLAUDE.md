@@ -5,8 +5,10 @@ costly mistakes from recurring on any device or by any AI agent.
 
 ## 🧭 North star: the implementation checklist — never execute from memory
 
-`docs/RAPTOR_RAG_IMPLEMENTATION_CHECKLIST.md` is the **single execution ledger
-and north star** for all RAG/ingestion work. It is a live file edited by
+`docs/RAPTOR_RAG_IMPLEMENTATION_CHECKLIST.md` is the **item-level execution
+ledger**, and `BUILDLINE.md` is the **temporal north-star** (checkpoint order,
+NOW pointer). Item truth lives in the checklist; time truth lives in BUILDLINE;
+every adopted design must hold a BUILDLINE slot the day it is adopted. It is a live file edited by
 multiple agents in parallel — any in-head copy of it is stale by construction.
 
 **The habit this section kills — "cached-plan" execution.** On 2026-07-13 the

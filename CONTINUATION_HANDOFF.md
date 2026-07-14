@@ -9,6 +9,8 @@ this file with zero chat-history dependence. Updated 2026-07-14.
    `claude-continuation-20260713` (kept in sync with `main` via
    `git push origin HEAD:main`).
 2. Read FROM DISK, fully, before any edit (never from your own memory of them):
+   - `BUILDLINE.md` (temporal north-star — the checkpoint you are in gates
+     what you may work on; adopted designs MUST hold a checkpoint slot)
    - `CLAUDE.md` (north-star rules: read-before-act, adopt-then-execute,
      rebuild freeze, receipts; applies to every agent, not just Claude)
    - `AGENTS.md` (Goal Drift + Qdrant references)

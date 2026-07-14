@@ -1,7 +1,8 @@
 {
-  "version": "2026-07-14.9",
+  "version": "2026-07-14.10",
   "purpose": "Machine-readable job queue for any continuing agent. Read CONTINUATION_HANDOFF.md first.",
   "authoritative_docs": [
+    "BUILDLINE.md (temporal north-star: checkpoint order, NOW pointer, no-design-without-a-slot rule)",
     "CLAUDE.md",
     "AGENTS.md",
     "docs/RAPTOR_RAG_IMPLEMENTATION_CHECKLIST.md",

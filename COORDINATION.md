@@ -32,7 +32,10 @@ senior INTENT entries here start glide timers; silence past the window = GO.
    AND HEAD:main, then append a RECEIPT entry here with the gate table. Do
    NOT start Phase B — it needs senior verification + owner GO, which will
    arrive as entries in this file.
-5. Standing: pull --rebase --autostash before any commit (senior also commits
+5. Work proceeds down BUILDLINE.md checkpoints (NOW pointer = current truth);
+   stamp checkpoint status in your receipts. New designs with no BUILDLINE
+   slot are planning defects — raise as QUESTION.
+6. Standing: pull --rebase --autostash before any commit (senior also commits
    to this branch); stage only your files; never touch docs/baselines/
    pre_s0_baseline/ or the *_rescored_v4.json artifacts.
 
