@@ -1408,21 +1408,30 @@ digests. Registry-independent; first S11 build unit alongside P2.5b envelope.
   `supports_response_schema()`; Tier2 grammar-constrained local fallback
   (llama.cpp Metal path; MLX not trusted until proven); Tier3 forced tool-call;
   Tier4 JSON-mode+validate+one-retry (last resort, flagged in provenance).
+  *(T4.3 implements and tests Tier1 plus fail-closed Tier4; Tier2/3 are public
+  clear-failure stubs exactly as the mission requires. This combined box stays
+  open until those local/tool paths are separately implemented and proven.)*
 - [x] Python semantic validator (claim refs exist+belong to parent; registry
   ids exist or explicitly candidate; frames MF01-16 with support; latent needs
   claims in claim-grounded mode; motifs >=2 frames over proposed/validated
   frames; no self-links; LLM proposals never source-observed/validated).
   *(T4.2: pure typed packet context + deterministic location-indexed errors;
   39 focused and 128 adjacent tests passed.)*
-- [ ] Targeted repair loop: attempt-2 sends exact validation errors under the
+- [x] Targeted repair loop: attempt-2 sends exact validation errors under the
   SAME constrained schema; failures -> dead-letter queue, never canonical
-  writes; deterministic-safe fixes in Python only.
-- [ ] Determinism/provenance record on every generation (model/runtime/
+  writes; deterministic-safe fixes in Python only. *(T4.3: structural and
+  location-indexed semantic failures exercise exactly one repair; second
+  failure and transport failure write only the noncanonical DLQ.)*
+- [x] Determinism/provenance record on every generation (model/runtime/
   tokenizer/template/schema/prompt hashes, temp 0, input/output hashes) +
-  cache keyed on input+model+schema+prompt+runtime.
-- [ ] Prompt/schema separation: compact rule prompt; schema only via
+  cache keyed on input+model+schema+prompt+runtime. *(T4.3: all five cache-key
+  inputs have identity-flip tests; accepted cache entries are structurally and
+  semantically revalidated before reuse.)*
+- [x] Prompt/schema separation: compact rule prompt; schema only via
   response_format; scope discipline (digest never emits entities/triples/
-  claims/Cypher/records/payloads/embeddings).
+  claims/Cypher/records/payloads/embeddings). *(T4.3: the owner prompt is
+  compact and the generated Pydantic schema appears only in Tier1
+  `response_format`, never in initial or repair prompt text.)*
 
 Acceptance:
 
@@ -2265,6 +2274,57 @@ A corpus is strict-ready only when:
   isolation, capability ladder, provenance/cache, and UGO canary remain
   T4.3/T4.4.
 - Checklist boxes closed: P2.5c Python semantic-validator item only.
+
+### 2026-07-14 - T4.3 Structured semantic gateway
+
+- Commit: this commit on `claude-continuation-20260713`.
+- Owner: Codex sole executor under the owner gateway spec §§4, 5, 7, 8, and
+  9; Claude approved the pinned-LiteLLM compatibility detector in
+  `COORDINATION.md` at 2026-07-14T13:51:33Z.
+- Corpus/data scope: none. Tests use typed in-memory parent packets and fake
+  transports/stores. No real provider call, corpus mutation, paid batch,
+  canonical artifact write, graph/vector write, or Ghost A cutover occurred.
+- Code changes: added the injected `SemanticGateway`, strict config/result/
+  provenance models, official LiteLLM capability detection, Tier1 native
+  strict-schema and Tier4 JSON-mode paths, explicit Tier2/3 clear-failure
+  stubs, one same-mode targeted repair, noncanonical Mongo cache/DLQ stores,
+  and deterministic hashes. The existing LiteLLM wrapper gained one reserved
+  explicit `response_format` argument so pool extras cannot override the
+  gateway contract.
+- Durable migration/backfill: none. The cache and DLQ collections are created
+  lazily by Mongo on first T4.4 use; no canonical collection is referenced by
+  the store implementation.
+- Before metrics: structurally or semantically malformed digest output had no
+  single bounded provider boundary, repair policy, capability routing,
+  replay-safe cache identity, or isolated failure receipt.
+- After metrics: one gateway routes the pinned flash model to Tier1 through
+  public LiteLLM metadata, fails unknown capability closed to explicitly
+  flagged Tier4, reuses the exact same `response_format` for at most one
+  targeted repair, revalidates accepted cache rows, and dead-letters a second
+  failure without a success/canonical write.
+- Tests by tier: focused gateway/provider suite 60 passed (`EXIT=0`); corrected
+  adjacent digest/validator/hash/envelope/registry/observation/provider suite
+  132 passed / 3 pre-existing Docker-only skips (`EXIT=0`). Black, compileall,
+  `git diff --check`, and changed-diff credential-pattern scan all exited 0.
+- Cross-corpus test: not applicable; no retrieval or corpus path is active.
+  A foreign-parent claim remains rejected by the adjacent semantic-validator
+  suite.
+- Failure/rollback test: forced unsupported Tier1 and unimplemented Tier2/3
+  fail before a provider call; structural and semantic attempt-1 failures get
+  exact targeted repair; a second invalid response and transport exception
+  write only DLQ state; corrupt cache state is not served; exception details
+  and route credentials are absent from persisted/error receipts. Rollback is
+  code removal plus the backward-compatible optional wrapper argument.
+- Deployment image/health: no live deploy for this not-yet-called module.
+  Tests ran under the canonical requirements-pinned backend image. T4.4 owns
+  the canonical-image deployment and real UGO provider canary.
+- Remaining risks: Tier2/3 are deliberately unimplemented stubs; the real
+  provider may expose schema dialect or model-route differences not visible
+  to fake transports. T4.4 must prove 10 Tier1 UGO packets, at least one
+  repair, a synthetic DLQ, and Tier1/Tier4 shape parity before any cutover.
+- Checklist boxes closed: P2.5c targeted repair/dead-letter,
+  determinism/provenance/cache, and prompt/schema separation only. The
+  combined capability-ladder item and all UGO/downgrade acceptance stay open.
 
 ## Implementation Log Template
 

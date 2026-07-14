@@ -1615,3 +1615,58 @@ upgrade is explicitly OUT of T4.3 scope (unjustified blast radius mid-spine)
 ever needed. Add one pinned test: the owner's flash route must resolve
 Tier-1-capable through the adapter, so any future pin change that silently
 degrades Tier 1 fails a test instead of failing in production.
+
+## [2026-07-14T13:58:00Z] EXECUTOR → SENIOR :: RECEIPT
+T4.3 first focused gateway gate GREEN: 60 passed, true EXIT=0
+(`/tmp/t43_focused_tests_retry.log`). It covers real pinned-flash Tier-1
+capability, direct-symbol + metadata-compat + exception fail-closed detection,
+Tier1 strict schema, explicit Tier4 JSON fallback/provenance, Tier2/3 clear
+stubs, structural and semantic targeted repair under the SAME response format,
+second-failure and transport-failure DLQ, no canonical collection access,
+cache revalidation, all five cache-key inputs, secret-free persistence, and
+the explicit LiteLLM wrapper wire contract. The first test command failed only
+during collection because the disposable container lacked its three required
+test-only Settings env variables; no product test ran. The identical suite
+with dummy test-only env completed cleanly. No real provider/data call yet.
+
+## [2026-07-14T14:00:14Z] EXECUTOR → SENIOR :: RECEIPT
+T4.3 post-format gate GREEN: the formatted focused suite remains 60/60 with
+true EXIT=0 (`/tmp/t43_focused_after_format.log`), and Black reports all four
+changed Python files unchanged with true EXIT=0
+(`/tmp/t43_black_after_format.log`). The preceding Black check returned
+EXIT=1 only because the two new files had not yet been mechanically formatted;
+no product logic changed during formatting. Proceeding to the adjacent
+semantic-contract regression gate.
+
+## [2026-07-14T14:00:39Z] EXECUTOR → SENIOR :: RECEIPT
+T4.3 adjacent invocation correction: the first adjacent command exited 4
+before collection because I named nonexistent `tests/test_semantic_models.py`;
+`/tmp/t43_adjacent_tests.log` says `no tests ran`. This is a disclosed harness
+error, not a product result. Test paths were rediscovered with `rg --files`;
+the intended suite is being rerun without that filename and will be judged
+only by its true exit code.
+
+## [2026-07-14T14:01:13Z] EXECUTOR → SENIOR :: RECEIPT
+T4.3 corrected adjacent semantic-contract gate GREEN: 132 passed, 3 skipped,
+true EXIT=0 (`/tmp/t43_adjacent_tests_retry.log`). Coverage includes gateway,
+validator, digest/schema golden, hash taxonomy, envelope, registries,
+semantic observations, LiteLLM provider payloads, and DeepSeek thinking
+normalization. The three skips are pre-existing Docker-only registry-loader
+tests; no new skip or warning category was introduced by the gateway.
+
+## [2026-07-14T14:01:51Z] EXECUTOR → SENIOR :: RECEIPT
+T4.3 static/integrity gate GREEN: compileall true EXIT=0
+(`/tmp/t43_compile.log`), `git diff --check` true EXIT=0
+(`/tmp/t43_diff_check.log`), and changed-diff credential-pattern scan true
+EXIT=0 (`/tmp/t43_secret_scan.log`). The gateway has no live call site yet, so
+T4.3 requires no deployment/data mutation; T4.4 owns canonical-image deploy
+and the real UGO provider canary.
+
+## [2026-07-14T14:02:46Z] EXECUTOR → SENIOR :: RECEIPT
+T4.3 COMPLETE pending mandatory rebase/commit/push. Final evidence is 60
+focused passed, 132 adjacent passed / 3 pre-existing skips, Black/compile/diff/
+secret gates all EXIT=0. Checklist closes only repair+DLQ,
+provenance+five-field cache, and prompt/schema separation; the combined ladder
+box remains open because Tier2/3 are stubs, and all T4.4 canary/downgrade boxes
+remain open. PROGRESS now points to T4.4. No live call, paid work, canonical
+write, or Ghost A change occurred.

@@ -160,12 +160,21 @@ async def test_sync_and_tool_calls_use_sanitized_hy3_payload(monkeypatch) -> Non
 
     monkeypatch.setattr(service, "_get_client", fake_get_client)
     monkeypatch.setattr(service, "_resolve_api_key", fake_resolve_api_key)
-    extras = {"disable_thinking": True, "routing_policy": "balanced"}
+    response_format = {
+        "type": "json_schema",
+        "json_schema": {"name": "demo", "strict": True, "schema": {}},
+    }
+    extras = {
+        "disable_thinking": True,
+        "routing_policy": "balanced",
+        "response_format": {"type": "json_object"},
+    }
 
     result = await service.complete_sync(
         [{"role": "user", "content": "answer"}],
         model="openai/tencent/Hy3",
         extra_params=extras,
+        response_format=response_format,
     )
     tools = await service.complete_tool_calls(
         [{"role": "user", "content": "choose"}],
@@ -177,8 +186,12 @@ async def test_sync_and_tool_calls_use_sanitized_hy3_payload(monkeypatch) -> Non
     assert result == "ok"
     assert tools["content"] == "ok"
     assert len(client.bodies) == 2
-    for body in client.bodies:
+    for index, body in enumerate(client.bodies):
         assert body["enable_thinking"] is False
         assert "thinking" not in body
         assert "disable_thinking" not in body
         assert "routing_policy" not in body
+        if index == 0:
+            assert body["response_format"] == response_format
+        else:
+            assert "response_format" not in body

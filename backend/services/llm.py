@@ -540,6 +540,7 @@ class LLMService:
         api_base: str | None = None,
         api_key: str | None = None,
         extra_params: dict | None = None,
+        response_format: dict[str, Any] | None = None,
         timeout: float = 120.0,
     ) -> str:
         """
@@ -555,9 +556,10 @@ class LLMService:
                 LiteLLM as `api_base` in the request body.
             api_key: per-call plaintext API key (pool entry override). Wins
                 over the auto-resolved key.
-            extra_params: extra body params merged in. Reserved keys
-                {model, messages, temperature, max_tokens, stream} are NOT
-                clobbered.
+            extra_params: extra body params merged in. Reserved request and
+                credential fields are never clobbered.
+            response_format: explicit JSON mode or strict JSON-Schema contract.
+                It cannot be supplied or overridden through model-pool extras.
             timeout: hard wall on the call. Phase 24: callers (HyDE,
                 reasoning cascade) pass a tight budget so a reasoning model
                 that accidentally got picked can't burn the whole turn.
@@ -587,6 +589,8 @@ class LLMService:
         }
         if api_base:
             body["api_base"] = api_base
+        if response_format is not None:
+            body["response_format"] = response_format
         # Pool/profile-supplied key wins over the auto-resolved one.
         if api_key:
             body["api_key"] = api_key
@@ -606,6 +610,7 @@ class LLMService:
                     "stream",
                     "api_base",
                     "api_key",
+                    "response_format",
                 }
             ),
         )
