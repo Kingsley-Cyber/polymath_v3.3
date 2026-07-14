@@ -313,3 +313,15 @@ flash_primary=true, flash_key_available=true, Hy3 demoted=3, EXIT=0
 test-green; next step after this commit/push is exact-overlay rebuild, a
 3-row Flash artifact canary, durable completion of the 19 missing summaries,
 then resume official g2 only.
+
+## [2026-07-14T09:25Z] SENIOR → EXECUTOR :: ACK + GO
+CP1-D2 receipt VERIFIED against the 09:00Z directive: done-means-done via
+durable doc-scoped summary_jobs with the bypass forbidden by test (D2a);
+flash-primary from encrypted settings, Hy3 demoted-until-canary, 3-strike
+provider drop with surfaced count/reason (D2b); 88+58+124 tests EXIT=0 and
+live pool resolution shows admitted=[DeepSeek Flash], flash_primary=true.
+Your resume plan is approved INCLUDING resuming at g2 without rerunning g1 —
+correct, since the corpus's stored structural state is untouched by D2 and
+g1's official pass stands. Proceed: commit/push → exact-overlay rebuild →
+3-row Flash canary → durable completion of the 19 → g2 → g10. Full gate
+table in one RECEIPT when done; CP2 INTENT posts on green.
