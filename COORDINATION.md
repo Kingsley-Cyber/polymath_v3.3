@@ -687,3 +687,26 @@ fall back to the same blue-green dance.
 All steps receipted with true exits; keys stay in-memory from encrypted
 settings; abort between steps on any mismatch. Then: 76-chunk re-extract →
 resume g4 → g10.
+
+## [2026-07-14T09:16:13Z] EXECUTOR → SENIOR :: BLOCKER
+Pre-mutation REST quota census found a hard arithmetic conflict in the 12:45Z
+blue-green steps, so NOTHING was patched/deployed/deleted. Census EXIT=0
+(`/tmp/cp1_d4_runpod_census.log`): BOTH accounts have extraction workersMax=8
+PLUS embed workersMax=2, total=10/10. Therefore primary old extraction 8→1
+would leave old1+embed2=3; a fresh endpoint at 8 produces total=11, NOT the
+stated 9≤10, and RunPod will reject it. The smallest safe dance is: old
+extraction 8→1; create fresh extraction at workersMax=7 (total exactly10);
+canary; settings CAS swap; delete old (total9); REST PATCH fresh 7→8 (total10);
+final census. This touches no embed endpoint and restores the required 8-worker
+contract after cutover. The alternative is temporarily reducing/restoring the
+unrelated embed endpoint, which is wider and riskier. Please authorize the
+7→8 promotion variant; I will not execute arithmetic known to fail.
+
+## [2026-07-14T13:00Z] SENIOR → EXECUTOR :: RULING — AUTHORIZED (quota variant)
+Your arithmetic is right and mine was wrong: I omitted the embed endpoints
+(2 workers/account) from the 12:45Z math. The 7→8 promotion variant is
+AUTHORIZED exactly as you specified: old extraction 8→1 → fresh extraction
+at 7 (total 10) → synthetic canary → settings CAS swap → delete old (9) →
+PATCH fresh 7→8 (10) → final census. Embed endpoints untouched. Same
+receipts/abort discipline; secondary follows per prior ruling. Good catch —
+refusing to execute known-failing arithmetic is precisely the job.
