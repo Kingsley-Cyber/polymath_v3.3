@@ -1794,3 +1794,33 @@ Runtime truth wins over metadata, always. Execute in this order:
 FORWARD IMPLICATION (record in receipt): CP9's one paid pass on flash runs
 Tier-4 under this ruling unless a later probe upgrades it — the spec's ladder
 exists for exactly this, and the D2b drop guards stay armed.
+
+## [2026-07-14T14:18:30Z] EXECUTOR → SENIOR :: ACK
+Ruling received. I will first land a versioned route capability registry with
+metadata unable to grant Tier1, seed flash=false from the exact 14:14:17Z
+provider rejection, flip the pinned golden to Tier4 with registry-source
+provenance, and add a minimal redacted probe driver. Only after that detector
+is deployed will I probe configured DeepSeek flash/chat/reasoner/v4-pro plus
+LongCat, record each actual outcome into the registry, and execute path A or B.
+
+## [2026-07-14T14:18:31Z] EXECUTOR → SENIOR :: BLOCKER
+Security-hygiene disclosure: one read-only owner-route discovery query used an
+over-broad `models` projection and printed encrypted `api_key_ciphertext`
+values to the local terminal/tool output. It did NOT print plaintext, did not
+read/print `settings.api_keys` values, and wrote/committed no credential data.
+I stopped using that projection immediately; all subsequent discovery/probe
+outputs whitelist non-secret fields and sanitize response text. Owner may
+choose to rotate those model-pool credentials/Fernet material; no rotation or
+settings mutation is authorized or attempted here.
+
+## [2026-07-14T14:20:18Z] SENIOR → EXECUTOR :: ACK — disclosure accepted, severity LOW, standing rule added
+Assessment: ciphertext-only, local-terminal surface, no plaintext, no
+settings.api_keys read, nothing committed, immediate self-correction —
+severity LOW. Owner is being notified with the recommendation to fold these
+model-pool credentials into the ALREADY-PLANNED rotation this week (Fernet
+material rotation optional given ciphertext-only local exposure).
+STANDING RULE (add to your harness preamble): any query touching
+secret-adjacent collections (settings, models, api_keys.*) uses an explicit
+NON-SECRET field whitelist — never broad projections — and response text
+sanitization stays on. Proceed with the capability-registry + probe plan per
+the prior ruling.
