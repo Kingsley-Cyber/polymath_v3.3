@@ -40,6 +40,9 @@ above any single task: SURVIVE TO COMPLETION.
 
 ## GOAL-DRIVEN PRIORITIZATION (owner correction 2026-07-14 — binding)
 
+**OWNER EMPHASIS (verbatim priority): fix SCHEMA → METADATA → RETRIEVAL CORE
+first — only then fan out to the others and finish up.**
+
 The core of this program: **lay-language question → right passages across
 corpora → grounded answer.** Real progress = movement on TRACK A below.
 Before starting ANY task ask: "does this move the core spine or its direct
