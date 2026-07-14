@@ -3834,3 +3834,51 @@ the preregistration protecting the run, and the FROZEN artifact is the
 authority — the verifier conforms to the preregistered jq-line recipe
 (LF included), never the reverse. Direct both-hash reproduction is the proof
 standard; golden test locks it. Rerun decisive.
+
+## [2026-07-14T17:52:03Z] EXECUTOR → SENIOR :: RECEIPT
+
+T8.5 decisive C2 run completed, true `EXIT=0`
+(`/tmp/t85_decisive_retry.log`), frozen gate `6e0502d6…6de9`: verdict is
+verbatim **`without_wins`**; Stage-4 disposition is
+`relations_remain_observation_only`. The legitimate decision base is 6 typed
+compiled gold claims across 6 samples and 4 predicate types, so all three
+thin-evidence minima passed. Production-shaped GLiNER selected 25 controlled
+mentions. Controlled GLiREL emitted 4 proposals (`SIGNALS` 3, `PART_OF` 1):
+2 bound to same-label typed predicates, 1 had ambiguous endpoints, 1 lacked a
+same-label typed predicate. The certified compiler rejected both bound
+candidates for dependency direction, leaving 0 accepted: WITH support F1
+0.0 and precision 0.0 versus WITHOUT F1 0.0 and the frozen precision minimum
+0.50. Core claim material/quality are exactly unchanged; evidence,
+conservation, references, label violations, and accepted label/predicate
+conflicts are all zero. One proposal agreed with an untyped claim's endpoints,
+recorded hypothesis-only with zero verdict weight. Oracle spans also accepted
+0/8 controlled proposals. The local transformers stack emitted its existing
+DeBERTa tokenizer-regex warning; I am recording that provenance limitation,
+not changing the frozen model/config. Next: independent replay and sanitized
+artifact/static gates.
+
+## [2026-07-14T17:53:44Z] SENIOR → EXECUTOR :: REVIEW — verdict accepted pending replay; the hypothesis is now doubly closed
+Verdict without_wins accepted at face value pending your independent replay.
+Senior read of what this MEANS, for the record:
+1. This was a FAIR loss, not a data punt: the base cleared every
+   preregistered thin-evidence minimum (6/6/4 vs 5/4/3), production-shaped
+   GLiNER supplied 25 controlled mentions, and even ORACLE spans accepted
+   0/8 — the failure is GLiREL's, not the harness's.
+2. The kill mechanism matters: both label-bound candidates died on
+   DEPENDENCY DIRECTION — the exact anti-overclaim contract from T8.2
+   (relations attach only when source/predicate/target agree with parsed
+   arguments) doing its job. GLiREL proposes plausible labels between
+   plausible endpoints with unreliable direction; that is not corroboration.
+3. DOUBLE FALSIFICATION now on receipts: open-label F1 .174 (pivot era) AND
+   controlled-label 0-accepted under a preregistered frozen gate. The
+   "labels were the problem" hypothesis is CLOSED. checklist disposition =
+   rejected-with-evidence; relations_remain_observation_only stands as the
+   Stage-4 answer. No GLiREL re-litigation absent a genuinely new evidence
+   class (e.g., different model generation), which would be owner-initiated.
+4. PIPELINE CONSEQUENCE: the deterministic spine is the SOLE typed-relation
+   authority. Typed coverage grows via predicate-registry v2 dependency
+   patterns and the P2.4/P2.5 stages — CP9 consumes claims, not GLiREL
+   relations. The untyped-endpoint agreement stays a recorded
+   hypothesis-only line, as ruled.
+Replay + sanitized artifacts + publication, then A3/CP8 closes and Track A
+advances to A4/CP9.
