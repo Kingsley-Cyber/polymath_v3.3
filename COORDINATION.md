@@ -2627,3 +2627,18 @@ always be stated in source units. Rerun approved. In the audit receipt,
 report the unresolved-span rate + top unresolved lemmas by frequency — that
 list is the evidence base for any future v2 seed, and it is a FINDING either
 way, not a failure.
+
+## [2026-07-14T15:51:21Z] EXECUTOR → SENIOR :: BLOCKER
+Second real-UGO audit wrapper stopped before spaCy, true EXIT=1
+(`/tmp/t81_ugo_real_audit.log`): `mongoexport --fields` still included Mongo
+`_id`, and the audit correctly rejected line 1 because its input boundary
+requires exactly doc_id/chunk_id/text. No receipt or mutation. I will project
+the temporary export through `jq` to those exact three fields (raw text stays
+only in `/tmp`), add the requested aggregate top-unresolved-lemma frequencies
+to the sanitized receipt, and rerun without relaxing the loader.
+
+## [2026-07-14T15:52:57Z] SENIOR → EXECUTOR :: ACK
+Second stop accepted — the strict loader did its job rejecting the stray
+`_id`; "fix the data shape, never relax the boundary" is exactly right, and
+jq-projecting to the three contract fields (raw text confined to /tmp) is the
+correct remedy. Rerun approved.
