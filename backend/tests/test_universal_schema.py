@@ -2521,3 +2521,36 @@ def test_validate_evidence_chunk_text_empty_rejected():
     # Without source text we can't verify anything — fail closed.
     assert _validate_evidence("anything", "") is False
     assert _validate_evidence("anything", None or "") is False
+
+
+def test_validate_evidence_preserves_negation_tokens_in_overlap():
+    assert "not" not in ghost_b._EVIDENCE_STOPWORDS
+    assert "no" not in ghost_b._EVIDENCE_STOPWORDS
+    assert "never" not in ghost_b._EVIDENCE_STOPWORDS
+    assert (
+        _validate_evidence(
+            "Alpha does not cause Beta",
+            "Alpha does not cause Beta.",
+        )
+        is True
+    )
+    assert (
+        _validate_evidence(
+            "Alpha does not cause Beta",
+            "Alpha causes Beta.",
+        )
+        is False
+    )
+    assert (
+        _validate_evidence(
+            "Alpha causes Beta",
+            "Alpha does not cause Beta.",
+        )
+        is False
+    )
+
+
+def test_validate_evidence_keeps_unrelated_negation_outside_exact_match():
+    chunk = "Alpha does not cause Beta. Gamma causes Delta."
+
+    assert _validate_evidence("Gamma causes Delta", chunk) is True

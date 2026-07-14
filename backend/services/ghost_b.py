@@ -678,9 +678,10 @@ _EVIDENCE_STOPWORDS: frozenset[str] = frozenset({
     "if", "then", "because", "although", "though", "while", "whereas",
     # frequency / generic adverbs that rarely carry topical signal
     "also", "just", "only", "very", "really", "still", "even", "ever",
-    "always", "never", "often", "sometimes", "usually",
-    # negation / generic quantifiers
-    "not", "no", "yes",
+    "always", "often", "sometimes", "usually",
+    # generic quantifiers. Negation tokens (not/no/never) are deliberately
+    # absent: evidence phrases must preserve their own polarity tokens.
+    "yes",
     "more", "most", "less", "least", "much", "many", "some", "any",
     "all", "each", "every", "few", "several",
 })

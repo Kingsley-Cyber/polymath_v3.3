@@ -1,0 +1,180 @@
+{
+  "schema_version": "t83_negation_signature_census.v1",
+  "read_only": true,
+  "writes": 0,
+  "provider_calls": 0,
+  "raw_text_in_output": false,
+  "artifact_ids_in_output": false,
+  "legacy_evidence_policy": "whole_chunk_overlap_drops_not_no_never",
+  "current_evidence_policy": "whole_chunk_overlap_preserves_not_no_never",
+  "domain_range_source": "services.ghost_b.DOMAIN_RANGE_MAP",
+  "aggregate": {
+    "current_accept": 39166,
+    "entities": 38749,
+    "evidence_flip_rate": 0.0,
+    "evidence_pairs": 39166,
+    "extraction_rows": 728,
+    "facts": 0,
+    "legacy_accept": 39166,
+    "legacy_accept_current_reject": 0,
+    "legacy_reject_current_accept": 0,
+    "missing_chunk_text": 0,
+    "missing_evidence_phrase": 0,
+    "relations": 417,
+    "row_counter_domain_range_remap": 0,
+    "row_counter_domain_range_warn": 0,
+    "signature_assessable": 396,
+    "signature_would_violate": 112,
+    "signature_would_violate_rate": 0.2828282828282828,
+    "stored_domain_range_mismatch_relations": 0,
+    "stored_domain_range_warn_relations": 0
+  },
+  "gate_families": {
+    "entity": {
+      "current_accept": 38749,
+      "evidence_flip_rate": 0.0,
+      "evidence_pairs": 38749,
+      "legacy_accept": 38749,
+      "legacy_accept_current_reject": 0,
+      "legacy_reject_current_accept": 0,
+      "missing_chunk_text": 0,
+      "missing_evidence_phrase": 0
+    },
+    "fact": {
+      "current_accept": 0,
+      "evidence_flip_rate": 0.0,
+      "evidence_pairs": 0,
+      "legacy_accept": 0,
+      "legacy_accept_current_reject": 0,
+      "legacy_reject_current_accept": 0,
+      "missing_chunk_text": 0,
+      "missing_evidence_phrase": 0
+    },
+    "relation": {
+      "current_accept": 417,
+      "evidence_flip_rate": 0.0,
+      "evidence_pairs": 417,
+      "legacy_accept": 417,
+      "legacy_accept_current_reject": 0,
+      "legacy_reject_current_accept": 0,
+      "missing_chunk_text": 0,
+      "missing_evidence_phrase": 0
+    }
+  },
+  "corpora": [
+    {
+      "corpus_name": "UGO_CORPUS",
+      "corpus_id": "bcf80054-7611-47d0-ae16-fa7fed259b13",
+      "aggregate": {
+        "current_accept": 37912,
+        "entities": 37530,
+        "evidence_flip_rate": 0.0,
+        "evidence_pairs": 37912,
+        "extraction_rows": 659,
+        "facts": 0,
+        "legacy_accept": 37912,
+        "legacy_accept_current_reject": 0,
+        "legacy_reject_current_accept": 0,
+        "missing_chunk_text": 0,
+        "missing_evidence_phrase": 0,
+        "relations": 382,
+        "row_counter_domain_range_remap": 0,
+        "row_counter_domain_range_warn": 0,
+        "signature_assessable": 361,
+        "signature_would_violate": 85,
+        "signature_would_violate_rate": 0.23545706371191136,
+        "stored_domain_range_mismatch_relations": 0,
+        "stored_domain_range_warn_relations": 0
+      },
+      "gate_families": {
+        "entity": {
+          "current_accept": 37530,
+          "evidence_flip_rate": 0.0,
+          "evidence_pairs": 37530,
+          "legacy_accept": 37530,
+          "legacy_accept_current_reject": 0,
+          "legacy_reject_current_accept": 0,
+          "missing_chunk_text": 0,
+          "missing_evidence_phrase": 0
+        },
+        "fact": {
+          "current_accept": 0,
+          "evidence_flip_rate": 0.0,
+          "evidence_pairs": 0,
+          "legacy_accept": 0,
+          "legacy_accept_current_reject": 0,
+          "legacy_reject_current_accept": 0,
+          "missing_chunk_text": 0,
+          "missing_evidence_phrase": 0
+        },
+        "relation": {
+          "current_accept": 382,
+          "evidence_flip_rate": 0.0,
+          "evidence_pairs": 382,
+          "legacy_accept": 382,
+          "legacy_accept_current_reject": 0,
+          "legacy_reject_current_accept": 0,
+          "missing_chunk_text": 0,
+          "missing_evidence_phrase": 0
+        }
+      }
+    },
+    {
+      "corpus_name": "rebatch_smoke_20260714",
+      "corpus_id": "0d296882-85f9-4182-8533-c0a4a5b6f529",
+      "aggregate": {
+        "current_accept": 1254,
+        "entities": 1219,
+        "evidence_flip_rate": 0.0,
+        "evidence_pairs": 1254,
+        "extraction_rows": 69,
+        "facts": 0,
+        "legacy_accept": 1254,
+        "legacy_accept_current_reject": 0,
+        "legacy_reject_current_accept": 0,
+        "missing_chunk_text": 0,
+        "missing_evidence_phrase": 0,
+        "relations": 35,
+        "row_counter_domain_range_remap": 0,
+        "row_counter_domain_range_warn": 0,
+        "signature_assessable": 35,
+        "signature_would_violate": 27,
+        "signature_would_violate_rate": 0.7714285714285715,
+        "stored_domain_range_mismatch_relations": 0,
+        "stored_domain_range_warn_relations": 0
+      },
+      "gate_families": {
+        "entity": {
+          "current_accept": 1219,
+          "evidence_flip_rate": 0.0,
+          "evidence_pairs": 1219,
+          "legacy_accept": 1219,
+          "legacy_accept_current_reject": 0,
+          "legacy_reject_current_accept": 0,
+          "missing_chunk_text": 0,
+          "missing_evidence_phrase": 0
+        },
+        "fact": {
+          "current_accept": 0,
+          "evidence_flip_rate": 0.0,
+          "evidence_pairs": 0,
+          "legacy_accept": 0,
+          "legacy_accept_current_reject": 0,
+          "legacy_reject_current_accept": 0,
+          "missing_chunk_text": 0,
+          "missing_evidence_phrase": 0
+        },
+        "relation": {
+          "current_accept": 35,
+          "evidence_flip_rate": 0.0,
+          "evidence_pairs": 35,
+          "legacy_accept": 35,
+          "legacy_accept_current_reject": 0,
+          "legacy_reject_current_accept": 0,
+          "missing_chunk_text": 0,
+          "missing_evidence_phrase": 0
+        }
+      }
+    }
+  ]
+}

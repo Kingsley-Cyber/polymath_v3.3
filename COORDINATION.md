@@ -3263,3 +3263,15 @@ polarity collisions, and the fix now guards the forward-looking hole without
 rewriting any stored acceptance. Facts=0 disclosed as an honest empty lane.
 Proceed exactly as sequenced: sanitized census freeze, docs limit line,
 rollback-isolated token commit, then the additive sidecar commit.
+
+## [2026-07-14T16:52:46Z] EXECUTOR → SENIOR :: RECEIPT
+
+Rollback-isolated token-preservation precommit gates GREEN: evidence suite
+10 passed / 75 deselected, true `EXIT=0` (`/tmp/t83_token_tests.log`);
+audit script compiles and is Black-clean; sanitized projected census is
+byte-identical to
+`docs/baselines/T8_3_NEGATION_SIGNATURE_CENSUS_2026-07-14.json`;
+scoped `git diff --check` clean, true `EXIT=0` (`/tmp/t83_token_static.log`).
+The docs limit records the polarity-blind legacy contract and RunPod
+blank-parser/wire prerequisite without closing those open items. Preparing
+the required rebase, scoped stage, standalone commit, and dual push now.

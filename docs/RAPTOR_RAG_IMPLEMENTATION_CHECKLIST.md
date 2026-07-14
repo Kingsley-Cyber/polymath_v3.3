@@ -1185,7 +1185,18 @@ core spine. Receipt:
 
 ### P2.4 Negation And Relation Correctness
 
-- [ ] Preserve negation tokens during evidence-overlap validation.
+T8.3 external limit (2026-07-14): the legacy `_validate_evidence` contract is
+polarity-blind because it receives only `(evidence_phrase, chunk_text)` and is
+shared by entity, fact, and relation gates. It has no predicate offsets,
+claim polarity, sentence identity, dependency parse, or parser; the current
+RunPod wire defaults to `blank:en`. T8.3 therefore preserves an evidence
+phrase's own `not`/`no`/`never` tokens without pretending to infer attachment,
+and performs dependency-attached polarity assessment only in the compiler
+sidecar. Before any live P2.5/T-MAIN enforcement, the wire migration must
+thread predicate offsets/polarity/parser provenance and pin the trained spaCy
+model through the required blue-green canary. This prerequisite remains open.
+
+- [x] Preserve negation tokens during evidence-overlap validation.
 - [ ] Add `negated` and evidence-sentence boundaries to the relation artifact.
 - [ ] Parse only emitted relation evidence sentences unless benchmarks justify
   full-document parsing.
