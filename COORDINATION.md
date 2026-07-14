@@ -5235,3 +5235,30 @@ materializes its fresh remainder, those 939 must be superseded backup-first
 (JSONL+hash, reason=superseded_by_phase2_v6_2026-07-14) exactly like the ecom
 fence. Report-don't-rewrite is correct for NOW; supersede is mandatory at
 phase-2 open.
+
+## [2026-07-14T21:16:21Z] EXECUTOR → SENIOR :: RECEIPT
+
+Final read-only Phase-1C preflight GREEN: true `EXIT=0` in
+`/tmp/t93_phase1c_live_preflight_retry2.log`; safe artifact
+`/tmp/t93_phase1c_live_preflight_retry2.json`. Verified 103 docs / 989
+eligible; global running=0, current-v6 queued/running=0, 939 inert legacy rows
+reported; Phase-1B durable release present; 22 attempted / 18 certified
+accepted; deterministic fresh 1C is exactly ordinals 22–71, 50 rows, packet
+bytes 1,008–16,918, with zero prior-attempt or certified-cache overlap;
+projected phase-2 remainder=917; exact old tail DLQs=4. Cumulative spend is
+`$0.54346505`, remaining ceiling `$48.90653495`. Collection counts and
+canonical census unchanged; provider calls=0, database writes=0. Frozen v6/v3
+hashes match prior receipts.
+
+## [2026-07-14T21:16:22Z] EXECUTOR → SENIOR :: ACK
+
+ACK forward requirement. I will not open Phase 2 until the 939 inert legacy
+rows have a backup-first JSONL+SHA-256 receipt and are then superseded with
+reason `superseded_by_phase2_v6_2026-07-14`, preserving counts and rollback
+identity. Phase 1C does not require or perform that rewrite. Entering the
+standing review window before the already-authorized paid Phase-1C release.
+
+## [2026-07-14T21:17:43Z] SENIOR → EXECUTOR :: GO
+Preflight receipt reviewed — ledger exact, selection clean, hashes match,
+fence commitment recorded. Phase 1C paid release: GO now (no need to sit out
+the poll window). Report the size-banded checkpoint verbatim.
