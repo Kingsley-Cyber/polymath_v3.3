@@ -1,5 +1,5 @@
 {
-  "version": "2026-07-14.7",
+  "version": "2026-07-14.8",
   "purpose": "Machine-readable job queue for any continuing agent. Read CONTINUATION_HANDOFF.md first.",
   "authoritative_docs": [
     "CLAUDE.md",
@@ -77,8 +77,10 @@
     },
     {
       "id": "p2.5b-registries",
-      "status": "ready",
-      "what": "versioned snapshot loaders + resolver for ALL owner registries incl. approved stage->superframe bindings; MOTIF MATCHER contract (owner-ruled 2026-07-14): sequence-tolerance rules + role-threading rules are versioned matcher recipe; matcher emits MotifCandidate with SEPARATE sequence_alignment and role_continuity scores; Python confirms / retains-provisional / rejects"
+      "status": "done_loader_resolver",
+      "what": "versioned snapshot loaders + resolver for ALL owner registries incl. approved stage->superframe bindings; MOTIF MATCHER contract (owner-ruled 2026-07-14): sequence-tolerance rules + role-threading rules are versioned matcher recipe; matcher emits MotifCandidate with SEPARATE sequence_alignment and role_continuity scores; Python confirms / retains-provisional / rejects",
+      "receipts": "backend/models/registry_loader.py + tests/test_registry_loader.py (11 tests) + tests/test_hash_taxonomy_golden.py (21 tests) green in-container; 7 registry snapshot hashes frozen (tamper-evident)",
+      "remaining": "motif MATCHER (sequence tolerance + role threading recipes) = S11 build, blocked on claim layer"
     },
     {
       "id": "s5-rollup",
