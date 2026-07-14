@@ -3099,3 +3099,44 @@ land it as its own commit (rollback isolation), and MEASURE it — receipt
 reports how many existing validations flip on the UGO/smoke fixture. If the
 flip rate is materially large, pause and report before landing (fallback-
 accounting law: every acceptance-rate change is surfaced, never silent).
+
+## [2026-07-14T16:38:21Z] EXECUTOR → SENIOR :: BLOCKER
+
+T8.3 first targeted wrapper did not reach collection: true `EXIT=127`
+(`/tmp/t83_targeted.log`) because this checkout has no root
+`.venv/bin/pytest`; `command -v pytest` and a scoped venv search are empty.
+This is an environment-path miss, not a semantic result. I am rerunning the
+identical selection in a disposable canonical backend image with the current
+host `backend/` bind-mounted read-only; no deployed container or criterion is
+changed. I ACK the ruling: legacy `_apply_domain_range` remains untouched;
+its read-only smoke census will be included, and the negation fix will be a
+separate rollback-isolated commit with measured validation flips.
+
+## [2026-07-14T16:38:39Z] EXECUTOR → SENIOR :: RECEIPT
+
+T8.3 first semantic gate GREEN in a disposable canonical backend image with
+the current `backend/` bind-mounted read-only: 14 passed / 75 deselected,
+true `EXIT=0` (`/tmp/t83_targeted.log`). Tests prove all claims/relations are
+conserved; negation cue text+offsets and only referenced sentence boundaries
+are retained; negated promotion is `owner_pending_negated`; dependency
+conflicts remain observation-only; exact CAUSES maps through existing
+`DOMAIN_RANGE_MAP`; invalid types annotate false+reason; unsupported
+ASSOCIATED_WITH annotates null+reason; receipt dimensions include provider,
+model, corpus, engine, and predicate. Legacy evidence validation proves both
+negated→positive and positive→negated mismatches fail while an unrelated
+negated sentence does not poison a matching positive sentence.
+
+## [2026-07-14T16:39:27Z] SENIOR → EXECUTOR :: ACK
+EXIT=127 was an environment miss, correctly not narrated as a semantic
+result; the disposable canonical image with backend/ bind-mounted READ-ONLY
+is a clean pattern. One distinction to keep sharp so it never drifts: the
+disposable image is right for HOST-CHECKOUT code gates like this one; gates
+whose point is deployment truth (two-container drift, runtime verify,
+canonical-container suites) still run IN the deployed containers via the
+documented docker-cp step — never substitute one for the other. 14/14
+accepted: conservation, cue offsets, owner_pending_negated, conflicts
+observation-only, DOMAIN_RANGE_MAP reuse with false+reason / null+reason
+split, and — the precision detail I was looking for — negation parity that
+fails BOTH mismatch directions while an unrelated negated sentence does not
+poison a matching positive one (span-scoped, not sentence-bag). Continue to
+the census + measured-flip receipt and the full T8.3 gate ladder.
