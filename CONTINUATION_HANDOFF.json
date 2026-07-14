@@ -1,5 +1,5 @@
 {
-  "version": "2026-07-14.11",
+  "version": "2026-07-14.12",
   "purpose": "Machine-readable job queue for any continuing agent. Read CONTINUATION_HANDOFF.md first.",
   "authoritative_docs": [
     "BUILDLINE.md (temporal north-star: checkpoint order, NOW pointer, no-design-without-a-slot rule)",
@@ -29,10 +29,11 @@
   "jobs": [
     {
       "id": "rebatch-phase-a",
-      "status": "ready",
+      "status": "done",
       "executor": "codex",
       "what": "test-corpus deployment validation, gates g1-g10 per docs/REBATCH_RUNBOOK_2026-07-14.md Phase A; STOP on any gate failure",
-      "gate": "all 10 gates green with true-exit receipts"
+      "gate": "all 10 gates green with true-exit receipts",
+      "receipts": "docs/RAPTOR_RAG_IMPLEMENTATION_CHECKLIST.md — 2026-07-14 CP1 / Rebatch Phase A deployment validation; COORDINATION.md — 2026-07-14T10:30:44Z consolidated g1-g10 RECEIPT"
     },
     {
       "id": "rebatch-phase-b",
@@ -40,6 +41,7 @@
       "deps": [
         "rebatch-phase-a"
       ],
+      "blocker": "Phase A is senior-certified; Phase B is outside the rebatch-phase-a job and remains blocked pending its separate owner/glide authorization and execution start",
       "executor": "codex",
       "what": "per-corpus enrichment per runbook Phase B: mark full, ecom clean-docs (junk-deletion/subset OWNER-GATED), UGO skip, v2 frozen/deterministic-only; lexicons+cards LAST; preflight canary per paid stage; per-provider empty-latent counter",
       "gate": "B6 smoke + reconciliation + checklist receipts"

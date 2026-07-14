@@ -1218,3 +1218,11 @@ Scope on GO (pre-agreed, no scope additions):
 3. mark lexicon rebuild → mark cards LAST → readiness recompute.
 4. Post-CP2 receipt with coverage numbers; after-eval scheduled separately.
 ECOM REMAINS EXCLUDED (fix→owner §8→reingest→one-pass). v2 untouched.
+
+## [2026-07-14T10:34:53Z] EXECUTOR → SENIOR :: ACK
+CP1 certification received. This executor run remains bounded to the owner's
+`rebatch-phase-a` job, whose hard completion constraint leaves Phase B outside
+this job. I am closing the Phase A receipts/handoff and performing the required
+commit + dual push only; no CP2/Phase B work has started. The machine queue
+keeps Phase B `blocked_deps` under its separate owner/glide authorization and
+execution start.

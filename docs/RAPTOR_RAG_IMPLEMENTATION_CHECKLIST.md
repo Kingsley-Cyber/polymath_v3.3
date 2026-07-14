@@ -1923,6 +1923,100 @@ A corpus is strict-ready only when:
   Phase 3 rather than paid regeneration.
 - Checklist boxes closed: T-HOOK-2, T-HOOK-3.
 
+### 2026-07-14 - CP1 / Rebatch Phase A deployment validation (g1-g10)
+
+- Commit: implementation commits `ee78daf` (CP1-D1/D2), `0d898db`
+  (CP1-D3), and `e204d55` (CP1-D4); consolidated receipt/handoff in this
+  commit on `claude-continuation-20260713`.
+- Owner: Codex executor under the owner-activated continuous GO; Claude
+  senior supplied/rule-checked the runbook gates and measurement corrections.
+- Corpus/data scope: fresh real-API corpus `rebatch_smoke_v2`, API-discovered
+  corpus ID `62193743-4175-40da-b861-ba1e1e567b9a`, batch ID
+  `fb9271d9-ec89-4614-bd81-991cb07562e0`; five files (2 PDF, 2 Markdown,
+  1 transcript-style Markdown). `polymath_v2` remained frozen; no production
+  corpus deletion, subset reingest, heading projection repair, or semantic
+  layer build occurred.
+- Code changes: CP1-D1 routes text-layer PDFs through no-OCR layout parsing
+  with a surfaced pypdf font-layout fallback and preserves OCR for image-only
+  PDFs; CP1-D2 makes summary-enabled batch completion durable/honest and
+  adds Flash-primary provider-pool rejection handling; CP1-D3 applies the
+  shared deterministic bibliographic capture hook to all PDF paths; CP1-D4
+  captures general qualified temporal-expression families with exact offsets.
+  Gate harnesses remained disposable under `/tmp` and were not product code.
+- Durable migration/backfill: the two fixture document rows received a
+  backup-first deterministic bibliography repair (2/2, SHA-256
+  `673055fc215755442f570e1afde2493cf20e155d308a4c10aad2006d1c46ae8d`);
+  the smoke corpus's 106 Ghost B rows were backed up before CP1-D4
+  re-extraction (SHA-256
+  `cbd18d94caea4d7f172e581caadad2f8b1757a196aab1fdd7f144a81d7b18fbd`),
+  then recreated as 99 valid RunPod Flash artifacts plus 7 honest skips.
+  The senior-authorized deterministic card pass built 5/5 cards with no
+  skips/rejections. g10 appended repair audit history only; artifact row
+  counts remained unchanged.
+- Before metrics: original g1 found digital PDFs on a flat text-layer bypass;
+  first fresh-corpus g2 saw 61/80 required summaries and exposed premature
+  batch completion/provider rejection; g3 found both fixture authors/dates
+  null despite visible title-page labels; g4 initially retained bare years
+  instead of qualified date phrases. These were treated as general lane or
+  capture-parity defects, never fixture-keyed exceptions.
+- After metrics:
+
+  | Gate | Verified deployed result | EXIT |
+  |---|---|---:|
+  | g1 | 5 documents, 87 parents, 106 children; 0 empty fixture structural heading paths; all five declared Chapter/Part headings present | 0 |
+  | g2 | 80/80 required summaries; latent coverage 26/36 (72.22%); temporal class missing 0 | 0 |
+  | g3 | 5/5 bibliographically supported or honestly null; Maria Okafor/2019 and Edwin Halvorsen/2004 exact | 0 |
+  | g4 | 106/106 extraction rows, 99/99 eligible valid, RunPod Flash provider; `winter 1911` and `2018 drought summer` complete | 0 |
+  | g5 | 931 lexicon rows, 913 linked graph entities, 3/3 runtime-discovered Mongo/Qdrant/Neo4j joins exact | 0 |
+  | g6 | 5 cards for 5 documents, exactly one each, all `central_subjects` nonempty | 0 |
+  | g7 | Mongo-computed equals Qdrant: naive 186, hrag 186, graph 106; Neo4j entities 913 | 0 |
+  | g8 | Real authenticated readiness endpoint `fully_enriched`, non-stale, no blockers | 0 |
+  | g9 | 9/9 real `/api/chat` SSE cases across Fast/Hybrid/Graph; answerable cases have correct smoke citations; verified-absent case model-skipped/fail-closed on every tier | 0/0/0 |
+  | g10 | 18 Mongo artifact deltas all zero; 15 identity surfaces have 0 missing/duplicate groups; Qdrant and Neo4j counts unchanged; readiness remains `fully_enriched` | 0 |
+
+  Exact commands, output-tail numbers, true exits, and `/tmp` log pointers are
+  preserved in `COORDINATION.md` entry
+  `2026-07-14T10:30:44Z EXECUTOR -> SENIOR :: RECEIPT` and its preceding
+  per-gate receipts. All wrappers captured the inner exit before appending
+  `EXIT=<n>`; no piped exit status was used.
+- Tests by tier: CP1-D1 focused/adjacent adapter coverage 70 passed; D2 suites
+  88 + 58 + 124 passed (one opt-in live test deselected); D3 suites 78 + 42
+  passed (one opt-in live test deselected); D4 focused + adjacent suites 19 +
+  6 passed. Live g9 executed three question shapes on all three retrieval
+  tiers with an ephemeral in-memory probe bearer.
+- Cross-corpus test: this job intentionally mutated only the fresh smoke
+  corpus. Existing production corpora and frozen `polymath_v2` were not
+  re-enriched or repaired. CP1 fixes are general and unit-tested with
+  synthetic non-fixture examples; the two fixture PDFs served only as e2e
+  ground truth.
+- Failure/rollback test: all durable backfills were backup-first; PDF parsing
+  fallbacks surface counters/reasons; RunPod Flash deployment used
+  blue-green endpoints plus synthetic behavioral canaries after in-place
+  deployment proved untrustworthy. Old endpoints were deleted only after both
+  replacement fleets passed. g10's synchronous repair-cycle restart left
+  every artifact/identity/vector/graph count unchanged.
+- Deployment image/health: backend and ingest worker rebuilt with the exact
+  compose overlays; changed runtime files were hash-identical; runtime
+  verifier passed with the live 1,024-dimensional embedder. Both upgraded
+  RunPod Flash accounts passed qualified-temporal canaries and were exercised
+  by production re-extraction (primary 5 batches, secondary 1).
+- Remaining risks: artifact completion for the 19 late g2 rows predates D2
+  deployment and occurred via the now-forbidden direct backfill path; the
+  durable mechanism is proven by test + canary + CP2. All 19 were Hy3 and
+  remain on the explicit CP2 watch list in `COORDINATION.md`. g6 required an
+  explicit deterministic post-ingest card pass; automatic-vs-post-pass card
+  production is deferred to the Librarian Phase 1 ledger. Flash 1.18
+  in-place deploy success is not behavioral proof, so blue-green + canary is
+  the standing method. `source_parse_job_plan.changed=true` on idempotent
+  same-ID upserts is misleading telemetry reserved for P0.6/P2.7 hygiene.
+  One diagnostic emitted encrypted ciphertext to local tool output; no
+  plaintext was exposed and no value was persisted, moved, or committed;
+  subsequent probes used explicit projections and in-memory bearer tokens.
+- Checklist boxes closed: Rebatch Runbook Phase A / BUILDLINE CP1 exit
+  (g1-g10), senior-certified in `COORDINATION.md`. Phase B is outside this
+  job and remains blocked under its separate owner/glide gate; no Phase B
+  work was started by this completion entry.
+
 ## Implementation Log Template
 
 Copy this section for every completed item:
