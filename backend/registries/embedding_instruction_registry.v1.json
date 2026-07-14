@@ -1,7 +1,7 @@
 {
   "registry": "embedding_instruction_registry",
-  "version": "v2-PROPOSED",
-  "status": "PROPOSED BY SENIOR 2026-07-14 (rev 2: UNIVERSAL-FIRST per owner directive) \u2014 awaiting owner approval. One universal query instruction for ALL families; per-family overrides are EMPTY and may only be added when an A/B proves a family needs specialization. Documents always embed raw. Any instruction change = new version + recall A/B (it shifts every query vector).",
+  "version": "v1",
+  "status": "OWNER-APPROVED 2026-07-14 ('universal instruction approved'). Wording is canon. ACTIVATION remains A/B-gated per the one-variable rule: isolated frozen-suite A/B vs baseline_live_v0 after tonight's Phase B settles; promote only on lay-language/cross-corpus improvement, no shape regression, negatives 5/5.",
   "model_family_note": "Written for Qwen3-Embedding (0.6B today; unchanged semantics if/when the 4B migration happens \u2014 instruction_version rides the ProjectionManifest embedding_profile).",
   "baseline_live_v0": {
     "profile_version": "qwen3-retrieval-query-v1",

@@ -100,6 +100,35 @@ latent_concepts payload-whitelist drop), S6 readiness split, S7 (after owner
 phrase), S8 pair card rebuild FINAL + shelf_reserve A/B, S9–S14 per
 PLAN_CRITIQUE.
 
+## Decision authority & glide path (owner-ratified 2026-07-14)
+
+Replaces the owner as human-in-the-middle wherever the owner shouldn't need to
+be. Precedence: OWNER > this section > senior directives > executor discretion.
+
+**AUTO — senior decides, receipts required, owner informed after the fact:**
+plan-internal sequencing; dark merges of flag-off code; deterministic
+backfills/repairs WITH backups; measurement corrections with symmetric
+evidence (scorer-v4 pattern); retries/resumes; test fixtures; running
+pre-approved A/Bs; spend inside already-authorized job classes (e.g. PoC-pair
+summary enrichment). 
+
+**GLIDE — senior posts `SENIOR :: INTENT` in COORDINATION.md with a timer;
+proceeds after the window unless an `OWNER :: STOP` lands. Default window 4h
+(2h for phase advances). Everything gliding must be reversible with a written
+rollback:**
+- flag flips whose preregistered A/B gates PASSED (shelf_reserve after S8;
+  universal-instruction activation after its isolated A/B);
+- S7 facet DF rule enforcement after its A/B shows no regression;
+- reversible metadata repairs (e.g. ecom heading projection-repair);
+- phase advances whose gates are verified green (e.g. Phase B start after
+  Phase A verification — 2h glide).
+
+**OWNER-ONLY — never glides:** irreversible deletions (ecom junk docs);
+unfreezing polymath_v2; NEW spend classes or budget increases; key material;
+registry/ontology CONTENT (bindings, instruction wording, domain/frame/motif
+entries); anti-gaming-adjacent changes (thresholds, denominators, held-out
+suite edits); anything published/external.
+
 ## Job queue
 
 Machine-readable: `CONTINUATION_HANDOFF.json` (same directory). Human order of
