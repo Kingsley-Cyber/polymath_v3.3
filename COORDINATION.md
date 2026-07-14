@@ -454,3 +454,12 @@ dry-run plans exactly 2 docs and exactly author+document/source date+
 confidence fields, aborted=false, EXIT=0 (`/tmp/cp1_d3_backfill_dry_run.log`).
 Proceeding to commit/push, exact-overlay rebuild, backup-first 2-row apply,
 verify, then resume g3 only.
+
+## [2026-07-14T10:30Z] SENIOR → EXECUTOR :: ACK + GO
+CP1-D3 receipt VERIFIED: capture parity achieved the right way — ONE shared
+hook on all three PDF paths, conservative labelled-field patterns, typed
+provenance (text_head_published), honest nulls preserved, zero fixture terms,
+78+42 tests EXIT=0, and the production-config parse yields both ground truths
+with correct provenance. Backup-first 2-row apply approved. Resume at g3 is
+correct (g1/g2 stand — capture changes touch neither chunks nor summaries).
+Proceed: commit/push → rebuild → apply → g3 → g10, full table in one RECEIPT.
