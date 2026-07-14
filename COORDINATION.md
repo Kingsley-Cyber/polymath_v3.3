@@ -936,6 +936,30 @@ from the corpus (none hardcoded); for all three, Mongo `canonical_key` exactly
 matched the Qdrant `entity_lexicon` payload and the same payload entity ID
 joined to the corpus graph. Proceeding to g6 only.
 
+## [2026-07-14T10:10:59Z] EXECUTOR → SENIOR :: BLOCKER
+Official g6 FAIL; Phase A stopped and g7–g10 are unrun. Exact gate command:
+`docker exec -e PYTHONPATH=/app -w /app polymath_v33-backend-1 python
+/tmp/rebatch_phase_a_gate.py g6 --corpus-id
+62193743-4175-40da-b861-ba1e1e567b9a`; true EXIT=1
+(`/tmp/rebatch_phase_a_g6.log`). Durable truth is documents=5,
+`librarian_cards`=0, so all five documents lack the required exactly-one card.
+
+Read-only diagnosis proves inputs and builder are healthy: documents=5,
+lexicon=931, lexicon_sources=978, Ghost B=106, parents=87. The repository's
+documented dry-run builder produced `cards_buildable=5`, skipped=0,
+central_subjects present on 5/5, with no writes and EXIT=0
+(`/tmp/rebatch_phase_a_g6_diagnosis.log`). Searches of the ingest worker,
+ingestion service/router, and worker/backend logs found no card-builder
+invocation or card-build failure; the only apply path is the separate
+`scripts/build_librarian_cards.py --apply`. This is an orchestration omission,
+not unusable source artifacts.
+
+Planning conflict: CP1 exit requires g1–g10 green, including auto-produced
+g6 cards, but BUILDLINE maps deterministic librarian cards to CP7 and CP2
+says cards are built last during mark enrichment. No silent manual apply or
+pipeline wiring was attempted. Please rule the scoped remedy and BUILDLINE
+slot; g6 cannot pass on the real fresh-ingest path as deployed.
+
 ## [2026-07-14T15:40Z] SENIOR → EXECUTOR :: RULING (g6 — flow gap, not defect)
 Cards are a deterministic post-ingest projection; the auto-produce contract
 (Definition of Pass) never included them and the smoke flow never ran the
@@ -946,3 +970,32 @@ Phase B's explicit "cards LAST" sequencing, so no contract is weakened — the
 step becomes explicit instead of assumed. Senior is adopting the underlying
 design question into the ledger (should ingest auto-produce cards, or is the
 post-pass the contract?) as a Librarian Phase 1 box — not to be built now.
+
+## [2026-07-14T10:11:49Z] EXECUTOR → SENIOR :: ACK
+Ruling received. I will run the established deterministic card builder with
+`--apply` scoped only to smoke corpus `62193743-4175-40da-b861-ba1e1e567b9a`,
+capture a true-exit receipt, re-run g6 unchanged, and proceed only if green.
+No ingest automation or other product logic will be added in this job.
+
+## [2026-07-14T10:12:54Z] EXECUTOR → SENIOR :: RECEIPT
+Authorized explicit card step completed. Builder command:
+`docker exec -e PYTHONPATH=/app -w /app polymath_v33-backend-1 python
+scripts/build_librarian_cards.py --corpus
+62193743-4175-40da-b861-ba1e1e567b9a --apply`; documents scanned=5,
+cards built=5, skips=0, rejected values=0, central_subjects coverage=5/5,
+true EXIT=0 (`/tmp/rebatch_phase_a_g6_card_build.log`). Unchanged official
+g6 re-run PASS: documents=5, cards=5, missing/duplicate/foreign=0,
+empty central_subjects=0, true EXIT=0 (`/tmp/rebatch_phase_a_g6_resume.log`).
+Proceeding to g7 only.
+
+## [2026-07-14T16:20Z] SENIOR → EXECUTOR :: RULING (g7 — harness expectation, store is correct)
+The store matches the DOCUMENTED projection contract; the harness asserted a
+single expected count for all collections. Per the committed reconciliation
+interpretation (docs/baselines/RECONCILIATION_2026-07-13_postS2.txt — the rule
+that reconciled all four production corpora): naive = hrag = children +
+summary-eligible parents; graph = children only. Your numbers ARE that
+contract: 186/186/106. Correct the harness's g7 to per-collection expectations
+COMPUTED from Mongo under that documented rule (cite the receipt in the
+harness comment), re-run g7, continue g8→g10. This corrects the measurement
+to the documented contract — the store rule is unchanged, no denominator is
+being redefined post-hoc: the receipt predates this gate by a day.
