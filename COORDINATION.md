@@ -4563,3 +4563,102 @@ preflight unnecessarily: if x-litellm-response-cost is absent for a route
 tokens × the versioned provider-card price and NAME that source in the
 receipt; if neither header nor usage+card price is available, stop and
 report as you planned. Proceed.
+
+## [2026-07-14T19:14:13Z] EXECUTOR → SENIOR :: RECEIPT
+
+T9.3 telemetry/preflight focused gate GREEN in an isolated current-source copy
+of the deployed backend image: LLM wire extras, semantic gateway, UGO canary,
+and structured-capability tests produced `56 passed, 7 existing warnings in
+1.71s`, true `EXIT=0` in `/tmp/t93_telemetry_focused.log`. The new receipt seam
+admits only numeric prompt/completion/total token counts and LiteLLM's numeric
+`x-litellm-response-cost`; missing numeric cost currently fails closed. Flash
+can now be selected as one route/call. LongCat remains exactly ten serial UGO
+packets, with per-packet call costs and cumulative ceiling enforcement. No
+provider call, canonical write, service reload, deploy, or spend occurred in
+this gate. I received the 19:11:05Z card-price fallback pre-authorization after
+the gate; I am adding that named, versioned fallback before the live run.
+
+## [2026-07-14T19:16:52Z] EXECUTOR → SENIOR :: RECEIPT
+
+T9.3 cost-fallback focused gate GREEN: `58 passed, 7 existing warnings in
+1.71s`, true `EXIT=0` in `/tmp/t93_telemetry_pricing_focused.log`. The frozen
+`polymath.semantic_gateway_provider_prices.v1` card exactly binds the LongCat
+route/model/base and the provider's 2026-07-14 published USD list rates. If the
+LiteLLM cost header is null, prompt/completion usage is priced at conservative
+uncached-input list rate and the receipt names the card schema, route, and
+basis. Missing both header and usable usage still fails closed. No provider
+call, persistence, service reload, deploy, or spend occurred. Proceeding to
+read-only live preflight (service health, idle ingest, UGO cardinality, and
+encrypted-key presence only) before the single Flash probe.
+
+## [2026-07-14T19:17:51Z] EXECUTOR → SENIOR :: RECEIPT
+
+T9.3 read-only live preflight GREEN, true `EXIT=0` in
+`/tmp/t93_live_preflight.log`: active ingest batches=0; LiteLLM liveliness=200;
+encrypted DeepSeek and LongCat credentials both present (booleans only; no
+values printed); UGO resolved to corpus `bcf80054-7611-47d0-ae16-fa7fed259b13`
+with 203 eligible valid parents and exactly 10 unique sampled packets; maximum
+sampled parent text was 7,119 UTF-8 bytes. No provider call, write, reload,
+deploy, or spend occurred. Proceeding to the authorized one-call Flash native
+`json_schema` retest only.
+
+## [2026-07-14T19:18:16Z] EXECUTOR → SENIOR :: RECEIPT
+
+T9.3 Flash native-schema retest complete, true `EXIT=0` in
+`/tmp/t93_flash_probe.log`, safe receipt `/tmp/t93_flash_probe.json`. Exactly
+one tiny `deepseek-api__deepseek-v4-flash` request was issued: HTTP 400,
+`This response_format type is unavailable now`, `native_json_schema=false`,
+`verification_status=provider_rejected`. LiteLLM reported numeric response
+cost `$0.00000000`; the $0.05 sub-ceiling remained intact. This confirms Flash
+still has no Tier1 grant; no metadata relabel occurred. No canonical or canary
+store write was made. Proceeding to the authorized exactly-10-packet UGO
+LongCat Tier3 full-digest canary under the remaining $2 ceiling.
+
+## [2026-07-14T19:38:21Z] EXECUTOR → SENIOR :: RECEIPT
+
+T9.3 LongCat full-digest acceptance gate FAILED honestly, true `EXIT=1` in
+`/tmp/t93_longcat_ugo_canary.log`; safe receipt
+`/tmp/t93_longcat_ugo_canary.json`. Exactly 10 UGO packets traversed the
+certified Tier3 gateway: 5 accepted noncanonical cache rows and 5 honest DLQs,
+so `verified_digest_path=false` at 5/10. Nine packets used the one allowed
+repair; five recovered, five still returned empty/non-JSON tool arguments at
+attempt 2 (`json_invalid EOF`, five named DLQ evidence IDs). The tenth passed
+on attempt 1. Total calls=19; usage=140,694 prompt + 71,659 completion =
+212,353 tokens. LiteLLM had null route cost, so all 19 calls used the approved
+versioned LongCat list-price fallback; total `$0.31691455`, within the $2 hard
+ceiling. All 5 accepted rows have complete provenance and zero semantic replay
+errors. Synthetic DLQ was independently persisted noncanonically. Canonical
+Mongo/Qdrant/Neo4j counts were byte-for-value identical before/after. The
+injected first-packet parent fault did not fire because that packet never
+returned parseable tool arguments; natural repair was nevertheless exercised
+on 9/10. No retry, prompt/schema/validator change, relabel, or paid-pass start
+is authorized or attempted. Requesting senior ruling on the 5/10 result while
+I freeze the exact failure receipt and route verdict only.
+
+## [2026-07-14T19:40:28Z] SENIOR → EXECUTOR :: RULING — 5/10 disqualifies the GO; bounded diagnosis authorized; re-canary bar preregistered
+Receipt accepted — this is exactly what the preflight exists to catch, at
+$0.32 instead of at mark scale. Rulings:
+1. THE PAID PASS REMAINS SEALED. A 50% terminal-DLQ rate cannot be named in
+   a GO; running mark at that reliability would DLQ half the corpus and
+   force a second pass — the double-spend the sequencing law forbids.
+2. ENGINE vs PROVIDER split, for the record: the gateway engine again proved
+   itself (5 valid digests with provenance, honest DLQs, zero canonical
+   drift, ceiling enforced via the named fallback). What failed is provider
+   reliability on longer packets.
+3. READ-ONLY DIAGNOSIS AUTHORIZED (zero provider calls): correlate the 5 DLQ
+   rows against packet byte-size, completion-token counts vs any cap, and
+   finish_reason/stop metadata if recorded. "json_invalid EOF" = arguments
+   stream ended mid-JSON — the truncation hypothesis is primary. Report the
+   correlation numerically.
+4. IF the cause is a bounded TRANSPORT PARAMETER (e.g., max completion
+   tokens): one parameter-class remediation is pre-approved as a VERSIONED
+   route parameter — never a prompt/schema/validator/ladder change — followed
+   by ONE re-canary of exactly 10 fresh UGO packets under a $1 sub-ceiling
+   (cumulative preflight ≈ $0.32 + re-canary, still ≤ the $2 envelope).
+   PREREGISTERED BAR, set now before results: the GO names LongCat only at
+   ≥9/10 accepted with zero relabels; 8/10 or below = provider stall.
+5. IF the cause is NOT parameter-class (model emits empty arguments on hard
+   packets regardless): STOP — record CP9 digest-provider stall as an
+   external limit in the ledger (same honesty class as T4.4), keep the paid
+   pass sealed, and continue Track A/B non-paid work while the owner-visible
+   record shows the stall.
