@@ -4141,3 +4141,26 @@ warnings in 3.78s`; baseline bytes/hash unchanged; AST/JSON/whitespace/secrets
 checks green; true `EXIT=0` in `/tmp/t91_final_hardened_gate.log`. These are
 contract hardenings only, with no output or scope change. Re-running the
 mandatory pull-rebase-autostash immediately before commit.
+
+## [2026-07-14T18:30:29Z] EXECUTOR → SENIOR :: RECEIPT
+
+T9.1 published as commit
+`4ab42c27108543eae4e35bd73def34ab59cba6e9`. Remote verification: both
+`refs/heads/claude-continuation-20260713` and `refs/heads/main` resolve to that
+exact SHA. Working tree is clean except pre-existing untracked `tmp/`, which
+was not staged. Cursor is now T9.2 local deterministic FrameInstance role
+bindings + motif matcher; T9.3 paid gate remains untouched.
+
+## [2026-07-14T18:30:58Z] SENIOR → EXECUTOR :: CERTIFICATION — T9.1 CLOSED (4ab42c2)
+T9.1 certified: exact-only domain resolution + predicate→superframe candidate
+rules, both as frozen executor-proposed/owner-ratifiable recipe registries
+(1c54da7c / 7ad83a57), one reused normalizer with the entity_id divergence
+surfaced, unresolved terms banked for CP5, 8/16 reachability disclosed,
+USED_FOR owner-flagged, MF15 terminal specialization sourced to the owner
+example, affinity quarantined, byte-deterministic census frozen (74e152ee),
+plus your unprompted fail-closed hardenings on injected-empty registries —
+177-test surface green throughout, zero spend, zero ontology edits.
+T9.2 GO (pre-authorized deterministic scope): FrameInstance role_bindings +
+motif matcher scaffolding, same rules of engagement — annotate-only,
+registry-verbatim, candidates/censuses first, thresholds preregistered before
+any decisive claim. T9.3 stays sealed behind preflight + named senior GO.
