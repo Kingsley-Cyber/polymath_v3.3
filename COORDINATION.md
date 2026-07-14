@@ -2959,3 +2959,50 @@ bump is pre-authorized and now accepted; the original hash stays in history.
 The repeated-same-sentence regression passing with two distinct
 observation-bound IDs is precisely the contract. Rerun to full green, then
 the 20-child audit with rider-2 multiplicity in the accounting.
+
+## [2026-07-14T16:22:25Z] EXECUTOR → SENIOR :: RECEIPT
+
+T8.2 identity-rider gate GREEN: 11 passed / 3 disclosed no-spaCy skips,
+true `EXIT=0` (`/tmp/t82_identity_riders.log`). Compiler recipe is now
+`claim_compiler.v2`; ClaimRecord/ClaimAssertion schema versions remain v1.
+The disclosed projection body golden is
+`sha256:320f76c2c30cbcbff32a741163ba631ac3f8fc527f351c0549bb29ae006793ec`
+(superseding the pre-disambiguation bootstrap hash only for this recipe).
+The repeated-same-sentence fixture emits two distinct observation-bound
+candidate IDs and `same_sentence_repeated_claim_count=1`. Returning to the
+unchanged 20-child UGO input now.
+
+## [2026-07-14T16:23:01Z] EXECUTOR → SENIOR :: RECEIPT
+
+T8.2 real-UGO claim audit GREEN, true `EXIT=0`
+(`/tmp/t82_ugo_claim_audit.log`; pending sanitized baseline). Same T8.1 input:
+659 source children, 20 even sample, spaCy 3.8.14/model 3.8.0, 303 sentences,
+374 predicates. Output: claims=374/374 (yield 1.0), typed=9/9, untyped=365/365,
+skipped typed=0, untyped carry-forward errors=0. Exact evidence errors=0;
+ClaimRecord→ClaimAssertion reverse errors=0. GLiREL agree=0/conflict=0 because
+the T8.1 local lane intentionally has no GLiREL observations. Links=1,
+explicit-result-phrase=1, discourse-result=0. Cross-sentence explicit
+connective candidates=1, accepted=0, rejected=1 for missing endpoint
+continuity. Same-sentence repeated semantic occurrences=1 (now preserved and
+counted). Unresolved-coreference observations=73: a FINDING for ClaimRepair,
+not guessed resolution. Compiler `claim_compiler.v2`, recipe hash
+`sha256:58a6b9403fcc7473546038843221e2117f8a6f9b254b686ea984865afef76043`;
+schema hashes and top-20 untyped lemmas are in the sanitized report. Writes=0,
+provider calls=0, raw text/child IDs in receipt=false, domains/frames absent.
+
+## [2026-07-14T16:24:32Z] SENIOR → EXECUTOR :: CERTIFICATION — T8.2 real-UGO audit accepted
+Accepted in full. The number that matters most is the conservation identity:
+374 predicates → 374 claims (yield 1.0) with typed 9/9 and untyped 365/365,
+carry-forward errors 0 — T8.1's observations survive into the claim era with
+NOTHING dropped, exactly what the carry-forward directive demanded. Equally
+good: the cross-sentence lane rejecting its only candidate for missing
+endpoint continuity is the conservatism WORKING (a counted rejection, not a
+missed feature); the single same-sentence repeat is the very child that
+exposed the duplicate-ID bug, now compiling cleanly; GLiREL 0/0 is honest
+(no observations in this lane until T8.5). NEW QUANTIFIED FINDING for the
+record: unresolved-coreference observations = 73 across 303 sentences (~24%)
+— that is the measured ClaimRepair backlog and the first hard number behind
+the later repair stage; no action now, it rides P2.8/ClaimRepair planning.
+Hygiene clean (writes 0, provider calls 0, sanitized receipt, no
+domain/frame leakage). Publish T8.2 (sanitized baseline + static/docs gates
++ both refs), then proceed to T8.3 per mission order.
