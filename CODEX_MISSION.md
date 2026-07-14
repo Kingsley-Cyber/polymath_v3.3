@@ -283,6 +283,10 @@ Mark's 3 already-regenerated canary parents stay as-is (harmless, receipted).
 - "junk deletion approved" → the 3 Group-D doc deletions (backup-first).
 - "unfreeze v2 <budget>" → v2 paid passes; otherwise v2 = deterministic-only.
 - Key rotation notice → pause between batches, senior re-verifies canaries.
+- "predicate normalization ratified" (or owner edits) →
+  backend/registries/predicate_normalization.v1.json loses its
+  owner-ratification-pending status; owner edits ship as v2, never in-place.
+  Until then it OPERATES as executor-proposed (senior ruling 2026-07-14).
 
 ## REVIEW CONTRACT
 Every RECEIPT gets senior review via COORDINATION.md. PRE-AUTHORIZED items

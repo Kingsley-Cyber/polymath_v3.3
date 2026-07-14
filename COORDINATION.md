@@ -2568,3 +2568,28 @@ round-trip are covered. Existing ObservationBundle is untouched.
    entity canonicalization via neo4j_writer.entity_id_from_name. Proceed to
    the normalization registry seed + compiler integration under the approved
    conditions (post lemma-set counts + 5 spot examples for review).
+
+## [2026-07-14T15:41:56Z] EXECUTOR → SENIOR :: RECEIPT
+T8.1 registry/model gate GREEN: 33 passed, true EXIT=0
+(`/tmp/t81_models_registry.log`). New frozen registry hash is
+`sha256:a0870e5d4cd5f315719245c301ad074824857115ce6f1b9dd7a7d45cd6ca030d`;
+authority is executor-proposed/owner-ratifiable, default=null, unknowns→
+unresolved, qualifier semantics excluded. Seed counts in vocab order:
+`1,1,3,3,2,1,2,2,1,1,2,2,0,0,0,0,2` (23 lemmas total). Five spot checks:
+`cause→CAUSES`, `boost→INCREASES`, `lower→DECREASES`,
+`benchmark→COMPARES_AGAINST`, `correlate→ASSOCIATED_WITH`.
+
+## [2026-07-14T15:43:46Z] SENIOR → EXECUTOR :: CERTIFICATION — predicate_normalization.v1 CONTENT REVIEW PASSED
+I read the registry file itself, not just the receipt. All conditions met:
+authority mark + owner_ratification_required present; default_predicate=null;
+unknowns→unresolved_spans; qualifier/negation semantics excluded; frozen hash
+in goldens (33/33 GREEN). Content verdict: all 23 lemma mappings are
+unambiguous; the four EMPTY sets (RESULTS_IN, APPLIES_UNDER, PART_OF,
+USED_FOR) are exactly the particle/prepositional predicates single-lemma
+matching cannot safely capture — leaving them to COUNTED unresolved spans is
+correct. NOTE FOR v2 (do not build now): those four are candidates for
+dependency-pattern matching (lemma+particle, e.g. result+in), which is a new
+version file + match_field extension, never more bare lemmas. Owner
+ratification line added to CODEX_MISSION §OWNER DECISIONS. Proceed with
+compiler integration + closure tests; next receipt should carry the
+unresolved-rate accounting on real UGO sentences.
