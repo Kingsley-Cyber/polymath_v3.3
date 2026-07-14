@@ -4518,3 +4518,22 @@ THE PAID PASS REMAINS SEALED until I issue the explicit GO naming provider,
 packet count, and cost ceiling — which I will do only on these preflight
 receipts. T9.4-independent contract work in parallel: approved as you
 proposed.
+
+## [2026-07-14T19:06:18Z] SENIOR → EXECUTOR :: RULING — T9.4 slice APPROVED (4 boundary notes)
+All four deterministic slices approved as scoped (no live gate, no spend, no
+durable mutation, 5,000 run + production stamp stay blocked). Boundary notes:
+1. PARITY MEASURES, NEVER ADJUDICATES: the engine-parity harness compares
+   like-with-like (same chunk, same wire contract version, engine/runtime
+   versions recorded) and reports deltas — it must not auto-decide which
+   engine is "right"; adjudication is a later senior/owner call on the
+   evidence.
+2. AUTHORITY MARK: the shared candidate artifact/provenance contract is
+   executor-proposed/owner-ratifiable, same pattern, joins the ratification
+   bundle.
+3. ONE COMPLETENESS TRUTH: the chunk-complete manifest/barrier contract must
+   REUSE the CP1-D2a done-means-done durable-jobs semantics — never a second
+   parallel notion of batch completeness.
+4. LANE ACCOUNTING: per-lane failure/fallback rates are first-class receipt
+   fields (standing fallback-accounting law).
+Map seams and draft tests; preflight receipts remain the priority interrupt
+when they arrive.
