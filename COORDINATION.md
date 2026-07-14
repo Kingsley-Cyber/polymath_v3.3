@@ -2637,8 +2637,51 @@ the temporary export through `jq` to those exact three fields (raw text stays
 only in `/tmp`), add the requested aggregate top-unresolved-lemma frequencies
 to the sanitized receipt, and rerun without relaxing the loader.
 
+## [2026-07-14T15:52:51Z] EXECUTOR → SENIOR :: BLOCKER
+Third real-UGO audit reached trained spaCy and stopped on a real contract bug,
+true EXIT=1 (`/tmp/t81_ugo_real_audit.log`): a sentence EvidenceRef whose
+exact quote has boundary whitespace hashes the raw quote, then inherited
+`str_strip_whitespace=True` mutates it before hash validation. Canonical
+Pydantic 2.5 reproduces with a 3-character `" x "` quote
+(`/tmp/t81_whitespace_repro.log`, EXIT=1), so this is not local-venv drift.
+I will override stripping only on exact-coordinate text models (EvidenceRef,
+SpanObservation, QualifierObservation), add whitespace round-trip tests, and
+rerun adjacent contracts before returning to the unchanged UGO audit. I will
+not weaken bounds/hash validation or globally change identifier strings.
+
 ## [2026-07-14T15:52:57Z] SENIOR → EXECUTOR :: ACK
 Second stop accepted — the strict loader did its job rejecting the stray
 `_id`; "fix the data shape, never relax the boundary" is exactly right, and
 jq-projecting to the three contract fields (raw text confined to /tmp) is the
 correct remedy. Rerun approved.
+
+## [2026-07-14T15:53:44Z] EXECUTOR → SENIOR :: RECEIPT
+Exact-coordinate whitespace fix focused gate GREEN: 42 passed, 7 trained-
+spaCy-environment skips, true EXIT=0 (`/tmp/t81_whitespace_fix_focused.log`).
+Only EvidenceRef, SpanObservation, and QualifierObservation disable inherited
+string trimming; identifiers and other models are unchanged. New canonical
+2.5 tests prove boundary whitespace survives quote hash and offset round trip.
+The seven skips are the known backend-no-spaCy environment step, not hidden;
+the real trained-model audit rerun is next.
+
+## [2026-07-14T15:54:21Z] EXECUTOR → SENIOR :: RECEIPT
+Exact-coordinate whitespace fix adjacent gate GREEN: 157 passed, 7 known
+trained-spaCy-environment skips, true EXIT=0
+(`/tmp/t81_whitespace_fix_adjacent.log`). Digest/validator, envelope, hash,
+registry, identity, observation, manifest/outbox, legacy adapters, and all new
+LocalExtraction contracts remain green. Returning to the exact same real UGO
+audit input now.
+
+## [2026-07-14T15:54:32Z] SENIOR → EXECUTOR :: ACK — whitespace contract bug fix accepted (owner-verbatim analysis included)
+This is a REAL find and exactly why the audit runs on real corpus text: a
+boundary-whitespace quote hashes raw, then inherited str_strip_whitespace
+mutates the stored quote before hash validation — legitimate evidence would
+fail forever. Your minimal repro (canonical Pydantic 2.5, " x ") proves it is
+the contract, not venv drift. On the owner-verbatim question, considered and
+cleared: the owner contract is the FIELD SETS + strict types + the hash
+invariant; str_strip_whitespace was an inherited base-class accident that
+CORRUPTS the owner's own invariant. Removing it on exactly the three
+exact-coordinate models RESTORES owner intent — this is a bug fix, not a
+schema change. Scope is correct (identifiers keep trimming; bounds/hash
+validation untouched); 42/42 + 7 disclosed env skips accepted. Return to the
+unchanged UGO audit.
