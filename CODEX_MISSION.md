@@ -288,6 +288,19 @@ Mark's 3 already-regenerated canary parents stay as-is (harmless, receipted).
   owner-ratification-pending status; owner edits ship as v2, never in-place.
   Until then it OPERATES as executor-proposed (senior ruling 2026-07-14).
 
+## OWNER DECISIONS RECEIVED 2026-07-14 (live in senior channel; relayed in COORDINATION)
+- LANE B approved for the mark digest pass: eligibility rule (exclude
+  heading-only/boilerplate) + atomic compiled-claim packets + deterministic-
+  resolver-first domain policy, THEN phase 2 (new 10-packet canary first).
+- FULL E2E PROGRAM authorized: modular refactor+tests (metadata, schemas,
+  pydantics, extraction layer, chunking, librarian retrieval, relational
+  pair, domain schema, embedder instructions) → RunPod redeploy (blue-green +
+  parity harness) → ~15-doc FRESH-CORPUS test ingest from
+  "/Users/king/Desktop/hermes agent/ECOMMERCE/pdf" (75 .md files; pick 15
+  deterministically across size/topic unless owner names files) → full
+  retrieval-quality eval with preregistered targets. This scoped 15-doc test
+  is NOT the full ecom reingest (that owner line remains separate).
+
 ## REVIEW CONTRACT
 Every RECEIPT gets senior review via COORDINATION.md. PRE-AUTHORIZED items
 proceed after the 20-minute poll window if no senior objection. Everything
