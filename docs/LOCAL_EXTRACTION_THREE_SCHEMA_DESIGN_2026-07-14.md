@@ -96,3 +96,24 @@ derivation-method fields everywhere — enforced through P2.5b's envelope,
 ProjectionManifests, and outbox. The four Neo4j partitions (asserted claims /
 validated semantic / provisional expansion / analogy) carry assignment_state so
 permissioned query modes work identically across stores.
+
+## Motif matcher contract (owner-ruled 2026-07-14)
+
+Sequence tolerance and role threading are MATCHER implementation details —
+versioned recipe policy, not ingestion-schema changes:
+
+1. **Sequence tolerance rules** (recipe): whether a match may contain extra,
+   missing, optional, or substituted superframes vs the canonical pattern.
+2. **Role-threading rules** (recipe): entities/states/concepts must flow
+   coherently frame-to-frame — order of frame IDs alone is insufficient.
+
+```
+extract frame instances
+→ compare sequence with canonical motif (uses approved stage→superframe bindings)
+→ verify role/entity continuity
+→ produce MotifCandidate {sequence_alignment: score, role_continuity: score}  # SEPARATE scores
+→ Python confirms | retains provisionally | rejects
+```
+
+Stage→superframe bindings: OWNER-APPROVED v1
+(backend/registries/motif_stage_superframe_binding.v1.json, set-valued).

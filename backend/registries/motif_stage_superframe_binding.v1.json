@@ -1,7 +1,7 @@
 {
   "registry": "motif_stage_superframe_binding",
-  "version": "v1-PROPOSED",
-  "status": "PROPOSED BY AGENT 2026-07-14 (rev 2, set-valued) \u2014 NOT owner-delivered. Resolvers MUST NOT use until owner confirms. Bindings are recipe/policy data, never identity.",
+  "version": "v1",
+  "status": "OWNER-APPROVED 2026-07-14 (set-valued rev2 approved as-is: 'the plan has already been created and you reviewed it with no issues or rebuttal just preferences with no danger or significant optimization. so yes i approve'). Resolvers may consume. Bindings remain recipe/policy data, never identity; revisions = new versions.",
   "method": "SET-VALUED bindings: each stage lists ALL admissible superframes, exactly one flagged dominant. Matchers record match tier (dominant|admissible) in score_components; query modes set strictness (FACTUAL/EXPLANATORY may require dominant-only; EXPLORATORY/CREATIVE_TRANSFER accept admissible). No stage is collapsed to a single frame \u2014 consistent with the owner's no-forced-cardinality rule.",
   "bindings": [
     {
