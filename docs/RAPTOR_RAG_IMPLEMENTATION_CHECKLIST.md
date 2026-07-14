@@ -2479,6 +2479,81 @@ A corpus is strict-ready only when:
   pilot and P2.5b's every-provider ObservationBundle items remain open until
   their later integration and acceptance gates.
 
+### 2026-07-14 - T8.2 deterministic ClaimRecordV1 compiler
+
+- Commit: this commit on `claude-continuation-20260713`.
+- Owner: Codex sole executor under `CODEX_MISSION.md`; Claude approved the
+  bounded field design with authority, projection, link-provenance, scope,
+  and accounting conditions, then certified the real-UGO receipt through
+  `COORDINATION.md`.
+- Corpus/data scope: read-only, same evenly spaced 20-child sample from all 659
+  source-child rows in `Unspoken Global Outcomes`, corpus
+  `bcf80054-7611-47d0-ae16-fa7fed259b13`. Temporary exact-field source text
+  stayed under `/tmp`; the committed receipt contains no raw text or child IDs.
+- Code changes: added strict candidate-only `ClaimArgumentV1`,
+  `ClaimRecordV1`, `ClaimLinkV1`, and `ClaimCompilationV1` contracts; their
+  concrete engineering field sets are explicitly
+  `executor-proposed, owner-ratifiable`, owner ratification is required, and
+  changes require a new schema version. Added a dual-input compiler that
+  fail-closes ObservationBundle/LocalExtraction child, evidence, coordinate,
+  predicate, and active-normalization closure; preserves every unresolved
+  predicate as an untyped observation-only claim surface; binds GLiNER IDs
+  only on unique deterministic span containment; and attaches GLiREL relation
+  IDs only when source/predicate/target direction agrees with spaCy arguments.
+  Explicit-connective-only `RESULTS_IN` artifacts are separate candidate
+  claim-to-claim links carrying the connective and rule ID. Domains and frames
+  remain T9.1/T9.2.
+- Durable migration/backfill: none. No annotation, canonical, vector, graph,
+  retrieval, domain/frame, or provider write occurred. The compiler and audit
+  are not referenced by a live endpoint or worker.
+- Before metrics: T8.1 accounted for 374 predicate observations but emitted
+  only nine controlled PredicateMentions; 365 unresolved predicate surfaces
+  had no claim-era carrier, and no deterministic ClaimRecord-to-ClaimAssertion
+  projection or claim-link accounting existed.
+- After metrics: the same 20 UGO children and 303 sentences produced 374 claim
+  records from 374 predicate observations (yield 1.0): typed=9/9,
+  untyped=365/365, skipped typed=0, carry-forward errors=0. Exact evidence and
+  ClaimRecord-to-ClaimAssertion reverse errors were both zero. One explicit
+  result-phrase ClaimLink was emitted; one cross-sentence explicit-connective
+  candidate was rejected for missing endpoint continuity; one repeated
+  same-sentence semantic occurrence was preserved as two observation-bound
+  candidate IDs and counted. GLiREL agree/conflict was honestly 0/0 because
+  the T8.1 lane contains no GLiREL observations.
+- Tests by tier: final focused identity-rider gate 11 passed / 3 disclosed
+  no-spaCy skips (`EXIT=0`); post-format pinned-spaCy adjacent gate 52/52
+  (`EXIT=0`); canonical adjacent retry 127 passed / 10 disclosed trained-spaCy
+  skips (`EXIT=0`) after the documented tests-not-baked docker-cp step. Final
+  static gate passed Black 5/5, compileall, exact baseline/run comparison,
+  JSON parse, `git diff --check`, and both secret scans (`EXIT=0`). Earlier
+  failed wrappers and true exits remain in the coordination log.
+- Cross-corpus test: not applicable to this UGO-only read-only compiler audit.
+  T8.4 owns the full annotate-only canary census and later PoC work retains the
+  cross-corpus gate.
+- Failure/rollback test: the first real audit rejected duplicate claim IDs
+  when two same-sentence predicate observations shared semantic/evidence/scope
+  identity. No row was deduplicated or dropped: the deterministic observation
+  ID was added only to the candidate signature, compiler recipe advanced to
+  `claim_compiler.v2`, multiplicity became a receipt count, and the projection
+  body golden was disclosed and re-frozen as
+  `sha256:320f76c2c30cbcbff32a741163ba631ac3f8fc527f351c0549bb29ae006793ec`.
+  Synthetic relation-direction conflict remains counted observation-only.
+  Rollback is code removal; no persisted semantic/retrieval state exists.
+- Deployment image/health: no live deployment for this unreferenced pure
+  model/compiler slice. Canonical-image tests used Docker-copied files/tests;
+  the real parser and UGO audit used the existing pinned local spaCy 3.8.14 /
+  `en_core_web_sm` 3.8.0 environment.
+- Remaining risks: 365/374 claim records remain deliberately untyped pending
+  dependency/signature work; 73 unresolved-coreference observations across
+  303 sentences (~24%) quantify the future ClaimRepair backlog and are not
+  guessed here. T8.3 owns richer negation and typed-signature semantics;
+  T8.5 owns the GLiREL WITH/WITHOUT compiled-claim decision. ClaimRecord v1 and
+  predicate-normalization v1 still require owner ratification before
+  promotion.
+- Artifact: `docs/baselines/T8_2_CLAIM_COMPILER_UGO_AUDIT_2026-07-14.json`.
+- Checklist boxes closed: none. T8.2 is complete, but P2.5a's full
+  deterministic pilot and P2.5b's cross-provider/accepted-artifact integration
+  remain open until their later canary, promotion, and projection gates.
+
 ## Implementation Log Template
 
 Copy this section for every completed item:
