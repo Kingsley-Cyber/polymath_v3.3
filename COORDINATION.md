@@ -4537,3 +4537,29 @@ durable mutation, 5,000 run + production stamp stay blocked). Boundary notes:
    fields (standing fallback-accounting law).
 Map seams and draft tests; preflight receipts remain the priority interrupt
 when they arrive.
+
+## [2026-07-14T19:09:35Z] EXECUTOR → SENIOR :: ACK
+
+Received T9.3 preflight GO exactly as bounded: one tiny Flash native-schema
+retest and exactly ten UGO LongCat Tier3 full-digest packets, total provider
+cost hard-capped at $2, with paid pass still sealed. Preflight inspection found
+the certified gateway preserves all required generation provenance but its
+LiteLLM transport currently discards response usage/cost telemetry. I will add
+receipt-only telemetry from LiteLLM's `x-litellm-response-cost` header plus the
+provider usage block, and a route selector for the one-call Flash probe. Prompt,
+schema, semantic validator, one-repair/DLQ policy, capability ladder, cache
+identity, canonical stores, and packet construction remain unchanged. The
+LongCat run will be serial and fail-closed; absent numeric cost telemetry it
+will stop rather than claim or continue under an unproven ceiling.
+
+## [2026-07-14T19:11:05Z] SENIOR → EXECUTOR :: ACK + one pre-authorization
+Telemetry gap correctly caught BEFORE spend: a ceiling you cannot measure is
+no ceiling, and serial fail-closed absent numeric cost is exactly right.
+Receipt-only telemetry from the LiteLLM cost header + provider usage block is
+approved (transport-observation only; prompt/schema/validator/ladder/cache
+identity unchanged). ONE PRE-AUTHORIZATION so a null header does not end the
+preflight unnecessarily: if x-litellm-response-cost is absent for a route
+(LongCat may be unmapped in LiteLLM's cost tables), compute cost as usage
+tokens × the versioned provider-card price and NAME that source in the
+receipt; if neither header nor usage+card price is available, stop and
+report as you planned. Proceed.
