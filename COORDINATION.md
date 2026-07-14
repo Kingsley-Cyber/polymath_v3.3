@@ -3882,3 +3882,46 @@ Senior read of what this MEANS, for the record:
    hypothesis-only line, as ruled.
 Replay + sanitized artifacts + publication, then A3/CP8 closes and Track A
 advances to A4/CP9.
+
+## [2026-07-14T17:53:49Z] EXECUTOR → SENIOR :: RECEIPT
+
+T8.5 independent replay GREEN, true `EXIT=0`
+(`/tmp/t85_decisive_determinism.log`): two fresh full benchmark executions are
+byte-identical at
+`sha256:e25b48d4725367dfd059f1bc80bc9d138cda23c62c553ab7b787321296c2c33a`.
+Both per-arm internal inference replays preserve identical relation structure;
+both full artifacts preserve `without_wins`, 6/6/4 decision-base coverage,
+4 production proposals, 2 compiler conflicts, 0 accepted relations, WITH F1
+0.0/precision 0.0, and the one no-weight untyped-endpoint observation. Runtime
+warnings are now explicit provenance limitations in the frozen report; no
+config was changed. Proceeding to adjacent contracts plus artifact/static/
+sanitization gates, then rejected-with-evidence publication and T9.1.
+
+## [2026-07-14T17:54:22Z] EXECUTOR → SENIOR :: RECEIPT
+
+T8.5 focused plus adjacent extraction/claim contracts GREEN, true `EXIT=0`
+(`/tmp/t85_adjacent_contracts.log`): 52 passed across the new C2 harness,
+ClaimRecord compiler, LocalExtractionV1, and spaCy observation contracts. No
+product compiler files changed. Running the final static, artifact schema,
+credential, and no-write sanitization gate now.
+
+## [2026-07-14T17:55:15Z] EXECUTOR → SENIOR :: RECEIPT
+
+T8.5 final static/sanitization gate GREEN, true `EXIT=0`
+(`/tmp/t85_static_sanitization.log`): harness/tests compile and are Black-clean;
+spec/report JSON and exact hashes verify; gate verdict/disposition and all
+zero-write/invariant fields verify; banned raw-payload keys, absolute paths,
+fixture text/entity surfaces, credential patterns, and diff whitespace errors
+are all zero. Frozen report is
+`sha256:e25b48d4725367dfd059f1bc80bc9d138cda23c62c553ab7b787321296c2c33a`.
+I am recording rejected-with-evidence in the checklist, advancing the cursor
+to T9.1, and preparing exact-allowlist dual publication.
+
+## [2026-07-14T17:57:02Z] EXECUTOR → SENIOR :: RECEIPT
+
+T8.5 publication-index gate GREEN, true `EXIT=0`
+(`/tmp/t85_publication_index.log`): staged allowlist is exactly coordination,
+cursor, harness, focused tests, forced checklist, and forced frozen report;
+whitespace, credential patterns, and `tmp/` staging are clean; frozen spec and
+report hashes verify; cursor is T9.1. Committing rejected-with-evidence with the
+Codex trailer and dual-pushing now, then starting T9.1 immediately.

@@ -1374,9 +1374,12 @@ docs/REBUTTAL_INTEGRATION_RESTATEMENT_2026-07-13.md and the FINAL_SCHEMA
   versioned snapshot data (delivery pending — C4); no invented registry ids.
 - [ ] Build the parent evidence-packet ASSEMBLER over existing structure
   (128-token children + structural parents stand; no re-chunking — C1).
-- [ ] GLiREL Stage-4 re-benchmark gate (C2): compiled-claim quality WITH vs
-  WITHOUT controlled-label GLiREL candidates on the gold fixture; relations
-  stay observation-only until this passes.
+- [x] GLiREL Stage-4 re-benchmark gate (C2): compiled-claim quality WITH vs
+  WITHOUT controlled-label GLiREL candidates on the gold fixture. **REJECTED
+  WITH EVIDENCE (2026-07-14):** `without_wins`; zero accepted controlled-label
+  relations in both production-shaped and oracle-span arms, so relations stay
+  observation-only and the deterministic compiler remains the typed-relation
+  authority. See the T8.5 Implementation Log receipt.
 - [ ] Context-enriched child embeddings ship as a P2.2 representation-point
   kind (C3), inheriting P2.2 prereqs/caps — not a new mechanism.
 - [ ] Enumerate ProjectionManifests for all owner-ruled families: Qdrant
@@ -2740,6 +2743,94 @@ A corpus is strict-ready only when:
 - Checklist boxes closed: none. T8.4 closes a mission population gate without
   pretending the empty relation lane satisfies P2.5's real-edge violation-rate
   or P2.5a's relation-integrated pilot requirements.
+
+### 2026-07-14 - T8.5 C2 controlled-label GLiREL compiled-claim verdict
+
+- Commit: frozen preregistration published before inference as `0165254`;
+  benchmark harness, rejected-with-evidence report, and cursor closure are in
+  this commit on `claude-continuation-20260713`.
+- Owner: Codex sole executor under `CODEX_MISSION.md`; Claude confirmed the
+  no-crosswalk evaluation surface, accepted the concrete thin-evidence floor,
+  accepted the gate hash before outcomes, and reviewed the verbatim
+  `without_wins` result through `COORDINATION.md`. Owner-approved C2 governs;
+  this negative result does not ratify the executor-proposed ClaimRecord or
+  predicate-normalization schemas.
+- Corpus/data scope: frozen
+  `backend/evals/semantic_extraction_gold_v1.json` (9 samples, 29 gold entity
+  spans, 9 legacy relations, 12 gold claims), sha256
+  `866d1b2104c7bc7d3a5696462058053a6bb041c8bd6784eae59a1f390d5e7816`.
+  The legitimate decision base was 6 typed compiled gold claims across 6
+  samples and 4 controlled predicate types, clearing preregistered minima
+  5/4/3. Legacy relation labels were never mapped into owner PredicateType.
+- Code changes: added an immutable versioned gate spec, a read-only local
+  benchmark, and four contract tests. WITH and WITHOUT share identical spaCy
+  observations, GLiNER mentions, typed predicates, and compiler inputs; WITH
+  adds only exact-controlled-label GLiREL candidates. The binder resolves a
+  candidate only to a unique endpoint pair, evidence sentence, and unique
+  same-label typed predicate; dependency direction remains independently
+  enforced by the certified ClaimRecord compiler. Oracle spans, exact legacy
+  span score, and untyped-endpoint agreement are explicitly diagnostic-only.
+  Product extraction and compiler files changed: zero.
+- Durable migration/backfill: none. Provider calls, persistence, promotion,
+  Mongo, Qdrant, Neo4j, graph, and vector writes are all zero. Candidate and
+  observation permissions remain unchanged.
+- Before metrics: the 2026-07-13 open-label baseline produced relation F1
+  0.1739 with oracle entities and 0.1333 for GLiNER→GLiREL. The owner's
+  controlled-label/compiled-claim hypothesis had not been tested, and T8.4's
+  deterministic population lane emitted no relation candidates.
+- After metrics: production-shaped GLiNER selected 25/25 controlled mentions.
+  GLiREL emitted 4 proposals (`SIGNALS` 3, `PART_OF` 1): 2 bound to typed
+  predicates, 1 had ambiguous endpoints, and 1 had no same-label typed
+  predicate. The compiler rejected both bound proposals for dependency
+  direction, so accepted support remained 0/6: WITH F1 0.0 and precision 0.0
+  versus WITHOUT F1 0.0 and the frozen precision minimum 0.50. The oracle-span
+  arm emitted 8 proposals, bound 2, and likewise accepted zero. Core claim
+  material and quality are exactly equal WITH/WITHOUT; evidence,
+  conservation, references, controlled-label violations, and accepted
+  label/predicate conflicts are all zero. One proposal agreed with an untyped
+  claim's endpoints; it is retained as a no-weight future hypothesis only.
+  Verdict: `without_wins`; disposition: `relations_remain_observation_only`.
+- Tests by tier: gate freeze verification `EXIT=0`
+  (`/tmp/t85_gate_freeze.log`); focused plus adjacent extraction/claim
+  contracts 52 passed, `EXIT=0` (`/tmp/t85_adjacent_contracts.log`); two fresh
+  full benchmark runs are byte-identical at
+  `sha256:e25b48d4725367dfd059f1bc80bc9d138cda23c62c553ab7b787321296c2c33a`
+  (`/tmp/t85_decisive_determinism.log`); compile/Black, schema/hash,
+  zero-write/invariant, raw-text/identifier, absolute-path, credential, and
+  whitespace sanitization gate `EXIT=0` (`/tmp/t85_static_sanitization.log`).
+- Cross-corpus test: not applicable to C2's owner-specified frozen gold
+  fixture. The decision uses a production-shaped GLiNER arm and a separate
+  oracle-span diagnostic arm; neither is allowed to borrow legacy gold labels
+  through an eval adapter.
+- Failure/rollback test: the harness twice failed closed before model inference
+  while its ID namespace and compact-label-hash recipes disagreed with frozen
+  contracts; the corrections conformed the harness to existing taxonomy and
+  the already-published gate rather than changing either authority. Reversing
+  a controlled relation in the contract test binds it but makes the compiler
+  reject it, proving dependency direction owns acceptance. Rollback removes
+  only the harness/tests/report; no durable state exists.
+- Deployment image/health: no deployment or restart. The benchmark ran fully
+  offline on the pinned local environment: Python 3.11.15, spaCy 3.8.14,
+  `en_core_web_sm` 3.8.0, GLiNER 0.2.26 revision
+  `40ec419335d09393f298636f471328b722c6da9e`, and GLiREL 1.2.1 checkpoint
+  weights sha256 `05849c34aa6910b6cdcc37ceaab023272c5c9dcccb5a9eb9e94e3ad447200c31`
+  on MPS. Exact config, model, trained-label, and inference-label hashes live
+  in the frozen artifact.
+- Remaining risks: the installed transformers stack reports its known
+  DeBERTa tokenizer-regex limitation, and GLiNER's used batch API is deprecated;
+  neither frozen config was altered after outcomes. The combined open-label
+  and controlled-label evidence closes GLiREL as current Stage-4 owner; no
+  re-litigation occurs without an owner-initiated genuinely new evidence class.
+  CP9 consumes compiled claims, not GLiREL relations. Typed coverage grows
+  through deterministic dependency patterns and a future owner-ratified
+  predicate registry, while the single untyped-endpoint observation has no
+  current acceptance or promotion power.
+- Artifact:
+  `docs/baselines/GLIREL_C2_CLAIM_COMPILER_2026-07-14.json`; preregistered gate
+  `backend/evals/glirel_claim_compiler_c2_gate_v1.json` at sha256
+  `6e0502d6352786286a583d0943fe083a8abaf1feb506ee4bd31b14d6ddef6de9`.
+- Checklist boxes closed: C2 GLiREL Stage-4 re-benchmark, as
+  **rejected-with-evidence**, not adopted. Relations remain observation-only.
 
 ## Implementation Log Template
 

@@ -1,0 +1,590 @@
+{
+  "decisive": {
+    "binding": {
+      "bound_candidates": 2,
+      "endpoint_ambiguous": 1,
+      "predicate_missing": 1,
+      "raw_proposals": 4
+    },
+    "decision_weight": true,
+    "entity_mention_count": 25,
+    "future_hypothesis_observation_only": {
+      "decision_weight": false,
+      "untyped_claim_endpoint_agreeing_proposals": 1
+    },
+    "gliner_selection": {
+      "raw": 25,
+      "selected": 25
+    },
+    "invariants": {
+      "accepted_label_predicate_conflicts": 0,
+      "claim_conservation_errors": 0,
+      "controlled_label_violations": 0,
+      "core_claim_material_equal": true,
+      "core_quality_equal": true,
+      "evidence_round_trip_errors": 0,
+      "relation_reference_errors": 0
+    },
+    "legacy_exact_span_diagnostic": {
+      "decision_weight": false,
+      "entities": {
+        "f1": 0.4815,
+        "fn": 16,
+        "fp": 12,
+        "precision": 0.52,
+        "recall": 0.4483,
+        "tp": 13
+      },
+      "label_crosswalk": null,
+      "relation_endpoint_valid_rate": 1.0,
+      "relation_evidence_exact_rate": 1.0,
+      "relations": {
+        "f1": 0.0,
+        "fn": 9,
+        "fp": 4,
+        "precision": 0.0,
+        "recall": 0.0,
+        "tp": 0
+      }
+    },
+    "name": "production_shaped_gliner",
+    "per_sample_counts": [
+      {
+        "accepted_relations": 0,
+        "bound_relation_candidates": 0,
+        "entities": 2,
+        "raw_relation_proposals": 0,
+        "rejected_relations": 0,
+        "sample_id": "explicit_causal"
+      },
+      {
+        "accepted_relations": 0,
+        "bound_relation_candidates": 2,
+        "entities": 7,
+        "raw_relation_proposals": 3,
+        "rejected_relations": 2,
+        "sample_id": "condition_scope"
+      },
+      {
+        "accepted_relations": 0,
+        "bound_relation_candidates": 0,
+        "entities": 2,
+        "raw_relation_proposals": 0,
+        "rejected_relations": 0,
+        "sample_id": "direct_negation"
+      },
+      {
+        "accepted_relations": 0,
+        "bound_relation_candidates": 0,
+        "entities": 1,
+        "raw_relation_proposals": 0,
+        "rejected_relations": 0,
+        "sample_id": "recommendation_temporal"
+      },
+      {
+        "accepted_relations": 0,
+        "bound_relation_candidates": 0,
+        "entities": 4,
+        "raw_relation_proposals": 0,
+        "rejected_relations": 0,
+        "sample_id": "attributed_hypothesis"
+      },
+      {
+        "accepted_relations": 0,
+        "bound_relation_candidates": 0,
+        "entities": 1,
+        "raw_relation_proposals": 0,
+        "rejected_relations": 0,
+        "sample_id": "exception_scope"
+      },
+      {
+        "accepted_relations": 0,
+        "bound_relation_candidates": 0,
+        "entities": 3,
+        "raw_relation_proposals": 0,
+        "rejected_relations": 0,
+        "sample_id": "temporal_revision"
+      },
+      {
+        "accepted_relations": 0,
+        "bound_relation_candidates": 0,
+        "entities": 2,
+        "raw_relation_proposals": 1,
+        "rejected_relations": 0,
+        "sample_id": "mechanism_definition"
+      },
+      {
+        "accepted_relations": 0,
+        "bound_relation_candidates": 0,
+        "entities": 3,
+        "raw_relation_proposals": 0,
+        "rejected_relations": 0,
+        "sample_id": "analogy_limitation"
+      }
+    ],
+    "raw_relation_labels": {
+      "PART_OF": 1,
+      "SIGNALS": 3
+    },
+    "raw_relation_proposals": 4,
+    "relation_structure_replay_equal": true,
+    "with": {
+      "accepted_support": {
+        "accepted_relation_predictions": 0,
+        "decision_base_distinct_predicate_types": 4,
+        "decision_base_distinct_samples": 6,
+        "decision_base_typed_compiled_gold_claims": 6,
+        "f1": 0.0,
+        "fn": 6,
+        "fp": 0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "tp": 0
+      },
+      "compiler_receipt": {
+        "claim_count": 13,
+        "compiler_recipe_hashes": [
+          "sha256:52d4823bd44e5773431c7d3c1845fa616acf6f5240f8785fb0a661835500f326"
+        ],
+        "cross_sentence_accepted_count": 0,
+        "cross_sentence_candidate_count": 0,
+        "cross_sentence_rejected_count": 0,
+        "glirel_agree_count": 0,
+        "glirel_conflict_count": 2,
+        "link_count": 0,
+        "same_sentence_repeated_claim_count": 0,
+        "skipped_predicate_count": 0,
+        "typed_claim_count": 7,
+        "unresolved_coreference_count": 0,
+        "untyped_claim_count": 6
+      },
+      "core_quality": {
+        "claim_field_accuracy": {
+          "assertion_mode": 0.8182,
+          "claim_type": 1.0,
+          "modal_force": 0.9091,
+          "polarity": 1.0
+        },
+        "claim_field_accuracy_overall": 0.9318,
+        "claim_match_rate": 0.9167,
+        "claim_qualifier_contract_available": true,
+        "condition_recall": 1.0,
+        "exception_recall": 1.0,
+        "expected_claims": 12,
+        "matched_claims": 11,
+        "missing_predicates": [
+          "analogy_limitation:concern"
+        ],
+        "qualifiers": {
+          "f1": 0.9189,
+          "fn": 0,
+          "fp": 3,
+          "precision": 0.85,
+          "recall": 1.0,
+          "tp": 17
+        }
+      }
+    },
+    "without": {
+      "accepted_support": {
+        "accepted_relation_predictions": 0,
+        "decision_base_distinct_predicate_types": 4,
+        "decision_base_distinct_samples": 6,
+        "decision_base_typed_compiled_gold_claims": 6,
+        "f1": 0.0,
+        "fn": 6,
+        "fp": 0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "tp": 0
+      },
+      "compiler_receipt": {
+        "claim_count": 13,
+        "compiler_recipe_hashes": [
+          "sha256:52d4823bd44e5773431c7d3c1845fa616acf6f5240f8785fb0a661835500f326"
+        ],
+        "cross_sentence_accepted_count": 0,
+        "cross_sentence_candidate_count": 0,
+        "cross_sentence_rejected_count": 0,
+        "glirel_agree_count": 0,
+        "glirel_conflict_count": 0,
+        "link_count": 0,
+        "same_sentence_repeated_claim_count": 0,
+        "skipped_predicate_count": 0,
+        "typed_claim_count": 7,
+        "unresolved_coreference_count": 0,
+        "untyped_claim_count": 6
+      },
+      "core_quality": {
+        "claim_field_accuracy": {
+          "assertion_mode": 0.8182,
+          "claim_type": 1.0,
+          "modal_force": 0.9091,
+          "polarity": 1.0
+        },
+        "claim_field_accuracy_overall": 0.9318,
+        "claim_match_rate": 0.9167,
+        "claim_qualifier_contract_available": true,
+        "condition_recall": 1.0,
+        "exception_recall": 1.0,
+        "expected_claims": 12,
+        "matched_claims": 11,
+        "missing_predicates": [
+          "analogy_limitation:concern"
+        ],
+        "qualifiers": {
+          "f1": 0.9189,
+          "fn": 0,
+          "fp": 3,
+          "precision": 0.85,
+          "recall": 1.0,
+          "tp": 17
+        }
+      }
+    }
+  },
+  "diagnostic_oracle_spans": {
+    "binding": {
+      "bound_candidates": 2,
+      "predicate_missing": 6,
+      "raw_proposals": 8
+    },
+    "decision_weight": false,
+    "entity_mention_count": 29,
+    "future_hypothesis_observation_only": {
+      "decision_weight": false,
+      "untyped_claim_endpoint_agreeing_proposals": 1
+    },
+    "invariants": {
+      "accepted_label_predicate_conflicts": 0,
+      "claim_conservation_errors": 0,
+      "controlled_label_violations": 0,
+      "core_claim_material_equal": true,
+      "core_quality_equal": true,
+      "evidence_round_trip_errors": 0,
+      "relation_reference_errors": 0
+    },
+    "legacy_exact_span_diagnostic": {
+      "decision_weight": false,
+      "entities": {
+        "f1": 1.0,
+        "fn": 0,
+        "fp": 0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "tp": 29
+      },
+      "label_crosswalk": null,
+      "relation_endpoint_valid_rate": 1.0,
+      "relation_evidence_exact_rate": 1.0,
+      "relations": {
+        "f1": 0.2353,
+        "fn": 7,
+        "fp": 6,
+        "precision": 0.25,
+        "recall": 0.2222,
+        "tp": 2
+      }
+    },
+    "name": "oracle_gold_spans",
+    "nonlexical_entity_crosswalks": [
+      "Rule->CONSTRAINT",
+      "TimeReference->TIME_PATTERN"
+    ],
+    "per_sample_counts": [
+      {
+        "accepted_relations": 0,
+        "bound_relation_candidates": 0,
+        "entities": 2,
+        "raw_relation_proposals": 1,
+        "rejected_relations": 0,
+        "sample_id": "explicit_causal"
+      },
+      {
+        "accepted_relations": 0,
+        "bound_relation_candidates": 1,
+        "entities": 4,
+        "raw_relation_proposals": 1,
+        "rejected_relations": 1,
+        "sample_id": "condition_scope"
+      },
+      {
+        "accepted_relations": 0,
+        "bound_relation_candidates": 0,
+        "entities": 2,
+        "raw_relation_proposals": 1,
+        "rejected_relations": 0,
+        "sample_id": "direct_negation"
+      },
+      {
+        "accepted_relations": 0,
+        "bound_relation_candidates": 1,
+        "entities": 4,
+        "raw_relation_proposals": 1,
+        "rejected_relations": 1,
+        "sample_id": "recommendation_temporal"
+      },
+      {
+        "accepted_relations": 0,
+        "bound_relation_candidates": 0,
+        "entities": 3,
+        "raw_relation_proposals": 1,
+        "rejected_relations": 0,
+        "sample_id": "attributed_hypothesis"
+      },
+      {
+        "accepted_relations": 0,
+        "bound_relation_candidates": 0,
+        "entities": 3,
+        "raw_relation_proposals": 0,
+        "rejected_relations": 0,
+        "sample_id": "exception_scope"
+      },
+      {
+        "accepted_relations": 0,
+        "bound_relation_candidates": 0,
+        "entities": 3,
+        "raw_relation_proposals": 0,
+        "rejected_relations": 0,
+        "sample_id": "temporal_revision"
+      },
+      {
+        "accepted_relations": 0,
+        "bound_relation_candidates": 0,
+        "entities": 4,
+        "raw_relation_proposals": 3,
+        "rejected_relations": 0,
+        "sample_id": "mechanism_definition"
+      },
+      {
+        "accepted_relations": 0,
+        "bound_relation_candidates": 0,
+        "entities": 4,
+        "raw_relation_proposals": 0,
+        "rejected_relations": 0,
+        "sample_id": "analogy_limitation"
+      }
+    ],
+    "raw_relation_labels": {
+      "ASSOCIATED_WITH": 1,
+      "CAUSES": 2,
+      "COMPARES_AGAINST": 1,
+      "PART_OF": 3,
+      "SIGNALS": 1
+    },
+    "raw_relation_proposals": 8,
+    "relation_structure_replay_equal": true,
+    "with": {
+      "accepted_support": {
+        "accepted_relation_predictions": 0,
+        "decision_base_distinct_predicate_types": 4,
+        "decision_base_distinct_samples": 6,
+        "decision_base_typed_compiled_gold_claims": 6,
+        "f1": 0.0,
+        "fn": 6,
+        "fp": 0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "tp": 0
+      },
+      "compiler_receipt": {
+        "claim_count": 13,
+        "compiler_recipe_hashes": [
+          "sha256:52d4823bd44e5773431c7d3c1845fa616acf6f5240f8785fb0a661835500f326"
+        ],
+        "cross_sentence_accepted_count": 0,
+        "cross_sentence_candidate_count": 0,
+        "cross_sentence_rejected_count": 0,
+        "glirel_agree_count": 0,
+        "glirel_conflict_count": 2,
+        "link_count": 0,
+        "same_sentence_repeated_claim_count": 0,
+        "skipped_predicate_count": 0,
+        "typed_claim_count": 7,
+        "unresolved_coreference_count": 0,
+        "untyped_claim_count": 6
+      },
+      "core_quality": {
+        "claim_field_accuracy": {
+          "assertion_mode": 0.8182,
+          "claim_type": 1.0,
+          "modal_force": 0.9091,
+          "polarity": 1.0
+        },
+        "claim_field_accuracy_overall": 0.9318,
+        "claim_match_rate": 0.9167,
+        "claim_qualifier_contract_available": true,
+        "condition_recall": 1.0,
+        "exception_recall": 1.0,
+        "expected_claims": 12,
+        "matched_claims": 11,
+        "missing_predicates": [
+          "analogy_limitation:concern"
+        ],
+        "qualifiers": {
+          "f1": 0.9189,
+          "fn": 0,
+          "fp": 3,
+          "precision": 0.85,
+          "recall": 1.0,
+          "tp": 17
+        }
+      }
+    },
+    "without": {
+      "accepted_support": {
+        "accepted_relation_predictions": 0,
+        "decision_base_distinct_predicate_types": 4,
+        "decision_base_distinct_samples": 6,
+        "decision_base_typed_compiled_gold_claims": 6,
+        "f1": 0.0,
+        "fn": 6,
+        "fp": 0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "tp": 0
+      },
+      "compiler_receipt": {
+        "claim_count": 13,
+        "compiler_recipe_hashes": [
+          "sha256:52d4823bd44e5773431c7d3c1845fa616acf6f5240f8785fb0a661835500f326"
+        ],
+        "cross_sentence_accepted_count": 0,
+        "cross_sentence_candidate_count": 0,
+        "cross_sentence_rejected_count": 0,
+        "glirel_agree_count": 0,
+        "glirel_conflict_count": 0,
+        "link_count": 0,
+        "same_sentence_repeated_claim_count": 0,
+        "skipped_predicate_count": 0,
+        "typed_claim_count": 7,
+        "unresolved_coreference_count": 0,
+        "untyped_claim_count": 6
+      },
+      "core_quality": {
+        "claim_field_accuracy": {
+          "assertion_mode": 0.8182,
+          "claim_type": 1.0,
+          "modal_force": 0.9091,
+          "polarity": 1.0
+        },
+        "claim_field_accuracy_overall": 0.9318,
+        "claim_match_rate": 0.9167,
+        "claim_qualifier_contract_available": true,
+        "condition_recall": 1.0,
+        "exception_recall": 1.0,
+        "expected_claims": 12,
+        "matched_claims": 11,
+        "missing_predicates": [
+          "analogy_limitation:concern"
+        ],
+        "qualifiers": {
+          "f1": 0.9189,
+          "fn": 0,
+          "fp": 3,
+          "precision": 0.85,
+          "recall": 1.0,
+          "tp": 17
+        }
+      }
+    }
+  },
+  "fixture": {
+    "gold_claims": 12,
+    "gold_entities": 29,
+    "legacy_gold_relations": 9,
+    "legacy_relation_crosswalk": null,
+    "path": "backend/evals/semantic_extraction_gold_v1.json",
+    "samples": 9,
+    "sha256": "866d1b2104c7bc7d3a5696462058053a6bb041c8bd6784eae59a1f390d5e7816"
+  },
+  "frozen_gate": {
+    "path": "backend/evals/glirel_claim_compiler_c2_gate_v1.json",
+    "published_pre_inference_commit": "0165254039b175903288298b1f546d42d801b52a",
+    "sha256": "6e0502d6352786286a583d0943fe083a8abaf1feb506ee4bd31b14d6ddef6de9"
+  },
+  "gate": {
+    "all_non_thin_checks_pass": false,
+    "checks": {
+      "accepted_label_predicate_conflicts_zero": true,
+      "accepted_support_f1_strictly_improves": false,
+      "accepted_support_precision_minimum": false,
+      "claim_conservation_errors_zero": true,
+      "controlled_label_violations_zero": true,
+      "core_claim_projection_with_equals_without": true,
+      "evidence_round_trip_errors_zero": true,
+      "relation_reference_errors_zero": true,
+      "thin_evidence_distinct_predicates": true,
+      "thin_evidence_distinct_samples": true,
+      "thin_evidence_typed_claims": true
+    },
+    "minimum_accepted_precision": 0.5,
+    "stage4_disposition": "relations_remain_observation_only",
+    "thin_evidence_minimums": {
+      "distinct_predicate_types": 3,
+      "distinct_samples": 4,
+      "typed_compiled_gold_claims": 5
+    },
+    "verdict": "without_wins"
+  },
+  "historical_open_label_diagnostic": {
+    "decision_weight": false,
+    "gliner_then_glirel_relation_f1": 0.1333,
+    "glirel_oracle_relation_f1": 0.1739,
+    "path": "docs/baselines/SEMANTIC_EXTRACTION_LOCAL_2026-07-13.json",
+    "sha256": "aa86090f8d111717a38719c4755f7c89df0ddc583a3eef6aa5a1b2b442f9364f"
+  },
+  "provenance": {
+    "gliner": {
+      "config_sha256": "a8f3c2ecc57deb70077be6940962aa60e82d861a153a5cd2839b91795968ae7d",
+      "entity_label_count": 25,
+      "entity_labels_sha256": "a213a7ab6bfb9d258e361da09b4d251d3a32250e007ff75c28c07ff3f8c32c11",
+      "model_id": "urchade/gliner_medium-v2.1",
+      "package_version": "0.2.26",
+      "revision": "40ec419335d09393f298636f471328b722c6da9e",
+      "threshold": 0.4,
+      "weights_sha256": "922214c0c60f7835bb5c00f52ad1769d38518d5183f85de7bc03893a8403c023"
+    },
+    "glirel": {
+      "checkpoint": "models/glirel_ghost_b_v1/best",
+      "config_sha256": "92f9814daf40c6157306886f5dc4711ca6ad29d63dd1fff90d7078c1d07042a1",
+      "device": "mps",
+      "fixed_relation_types": true,
+      "inference_predicate_label_count": 17,
+      "inference_predicate_labels_sha256": "977b96634f09799faa22f13b531f2251f8a946336de241bd66187bdd83956be8",
+      "legacy_type_gate": false,
+      "package_version": "1.2.1",
+      "threshold": 0.4,
+      "trained_labels_file_sha256": "f8fd558faf3f51d819a29e2fc95b4cdfc8e1d7d450ef79e086b851647066f548",
+      "weights_sha256": "05849c34aa6910b6cdcc37ceaab023272c5c9dcccb5a9eb9e94e3ad447200c31"
+    },
+    "predicate_normalization_sha256": "0ba7cdc3d8dd6f643e7ccce74b46f4711940947fa73020adaf130f5efd727ce8",
+    "python": "3.11.15",
+    "runtime_limitations": [
+      "The installed transformers stack emitted its known incorrect-regex warning while loading the frozen DeBERTa tokenizers; the benchmark did not alter tokenizer or checkpoint configuration.",
+      "GLiNER 0.2.26 marks batch_predict_entities deprecated; this frozen benchmark retained the preregistered API and model behavior."
+    ],
+    "spacy": "3.8.14",
+    "spacy_model": {
+      "id": "en_core_web_sm",
+      "pipeline": [
+        "tok2vec",
+        "tagger",
+        "parser",
+        "attribute_ruler",
+        "lemmatizer",
+        "ner"
+      ],
+      "version": "3.8.0"
+    }
+  },
+  "run_mode": {
+    "graph_writes": 0,
+    "persistence_writes": 0,
+    "promotions": 0,
+    "provider_calls": 0,
+    "read_only": true,
+    "vector_writes": 0
+  },
+  "schema_version": "polymath.glirel_claim_compiler_c2_benchmark.v1"
+}
