@@ -110,3 +110,12 @@ PDFs never reach structure parsing. This REWRITES the ecom disposition (its
 page-slug headings are pipeline artifacts, not source-baked), so ecom leaves
 tonight's Phase B under capture-before-rebuild. Execute CP1-D1 per ACTIVE
 DIRECTIVES #2; mark-only Phase B follows green gates. Owner has been briefed.
+
+## [2026-07-14T07:05Z] SENIOR → EXECUTOR :: RULING
+Your g1 BLOCKER is RESOLVED-BY-DIRECTIVE: see ACTIVE DIRECTIVES #1–#4
+(root cause _parse_pdf_fast_text confirmed; CP1-D1 fix job issued; Phase B
+rescoped mark-only; ecom → fix→reingest→one-pass). Proceed with CP1-D1.
+Also: STATUS.md at repo root is now a GENERATED live snapshot (senior
+oversight loop, scripts/senior_status_sync.py) — read it freely, never edit
+it; the senior is auto-notified on your entries, gate-log changes, checkpoint
+transitions, and silence >45m.

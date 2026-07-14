@@ -69,3 +69,4 @@ agent_outbox/
 data/
 data_eval/
 scripts/local_extraction_fixtures/
+STATUS.md
