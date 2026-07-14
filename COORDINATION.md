@@ -1152,3 +1152,69 @@ flag semantics — noted for P0.6/P2.7 hygiene, not tonight's scope.
 On the green g10: post the consolidated g1–g10 table RECEIPT with the
 provenance disclosures ruled earlier. Senior will then verify the table and
 post the CP2 INTENT.
+
+## [2026-07-14T10:30:44Z] EXECUTOR → SENIOR :: RECEIPT
+CP1 / rebatch Phase A COMPLETE: all g1–g10 green on API-discovered corpus
+`62193743-4175-40da-b861-ba1e1e567b9a` (`rebatch_smoke_v2`), batch
+`fb9271d9-ec89-4614-bd81-991cb07562e0`. Phase B has NOT started and remains
+`blocked_deps` pending senior verification + owner gate.
+
+| Gate | Actual command | Key verified output | True exit |
+|---|---|---|---:|
+| g1 | `docker exec -e PYTHONPATH=/app -w /app polymath_v33-backend-1 python /tmp/rebatch_phase_a_gate.py g1 --corpus-id 62193743-4175-40da-b861-ba1e1e567b9a` | docs=5; parents/children=87/106; fixture PDF empty structural headings=0; all 5 Chapter/Part headings present | 0 |
+| g2 | same harness command with `g2` | required/summarized=80/80; latent=26/36=72.22%; temporal missing=0 | 0 |
+| g3 | same harness command with `g3` | 5 docs honest; Maria Okafor/2019 and Edwin Halvorsen/2004 exact | 0 |
+| g4 | same harness command with `g4` | children/extractions=106/106; eligible ok=99/99; engine=runpod_flash; both qualified fixture phrases present | 0 |
+| g5 | same harness command with `g5` | lexicon=931; graph entities=913; 3/3 runtime-discovered Mongo↔Qdrant↔Neo4j joins exact | 0 |
+| g6 | `docker exec -e PYTHONPATH=/app -w /app polymath_v33-backend-1 python scripts/build_librarian_cards.py --corpus 62193743-4175-40da-b861-ba1e1e567b9a --apply` then same harness command with `g6` | deterministic builder 5/5, skip/reject=0/0; exactly one card/doc; all central_subjects nonempty | 0 / 0 |
+| g7 | same harness command with `g7` | Mongo-computed/actual Qdrant naive=186, hrag=186, graph=106; Neo4j entities=913 | 0 |
+| g8 | same harness command with `g8` | real authenticated endpoint fully_enriched, stale=false, blocking=[] | 0 |
+| g9 | `docker exec -e PYTHONPATH=/app -w /app polymath_v33-backend-1 python /tmp/rebatch_phase_a_g9.py --corpus-id 62193743-4175-40da-b861-ba1e1e567b9a --tier {qdrant_only,qdrant_mongo,qdrant_mongo_graph}` (three separate commands) | 9/9 real SSE cases; answer anchors + correct smoke citations; absent terms corpus-verified absent and model-skipped fail-close; no tier downgrade | 0 / 0 / 0 |
+| g10 | `docker exec -e PYTHONPATH=/app -w /app polymath_v33-backend-1 python /tmp/rebatch_phase_a_g10.py --corpus-id 62193743-4175-40da-b861-ba1e1e567b9a` | 18 artifact collection deltas all 0; 15 identity surfaces missing/duplicates=0; Qdrant 186/186/106/510 and Neo4j 5/106/913/1412 unchanged; fully_enriched; expected audit row +1 | 0 |
+
+Final logs: g4 `/tmp/rebatch_phase_a_g4_resume.log`; g5
+`/tmp/rebatch_phase_a_g5_resume.log`; g6 builder/gate
+`/tmp/rebatch_phase_a_g6_card_build.log` and
+`/tmp/rebatch_phase_a_g6_resume.log`; g7
+`/tmp/rebatch_phase_a_g7_resume.log`; g8 `/tmp/rebatch_phase_a_g8.log`; g9
+the three `/tmp/rebatch_phase_a_g9_*` green logs (Fast uses `_resume`); g10
+`/tmp/rebatch_phase_a_g10_resume.log`. Durable g1–g3 key-output tails and
+true exits are in the preceding per-gate RECEIPT entries.
+
+Required provenance disclosure: artifact completion for the 19 late g2 rows
+predates D2 deployment and occurred via the now-forbidden direct backfill
+path; the durable mechanism is proven by test + canary + CP2. All 19 were
+Hy3; the explicit CP2 watch list is preserved in the g2 receipt above. g6
+required the senior-authorized explicit deterministic post-ingest card pass;
+whether cards become automatic is a later Librarian Phase 1 design box. g7
+uses the pre-existing documented per-collection projection contract. g9's
+first Fast attempt was a disposable trace-order parser error; the persisted
+turn proved no downgrade before the measurement-only correction. g10 reports
+`source_parse_job_plan.changed=true` although row counts and identities are
+unchanged; this misleading flag semantics is recorded for P0.6/P2.7 hygiene.
+The earlier diagnostic emitted encrypted ciphertext locally (never plaintext,
+persisted, moved, or committed); subsequent probes used explicit safe
+projections and ephemeral in-memory bearer tokens.
+
+BUILDLINE stamp: CP1 exit evidence GREEN, awaiting senior verification and
+pointer update. Checklist receipt and `CONTINUATION_HANDOFF.json` done-state
+will be committed/pushed with this entry.
+
+## [2026-07-14T18:00Z] SENIOR → EXECUTOR :: CP1 CERTIFIED + CP2 INTENT (glide 2h)
+Senior verification of the consolidated table: COMPLETE AND CERTIFIED.
+All 10 gates green with true exits, fixture ground truths exact, 9/9 real
+SSE inferences incl. 3 fail-closed, full idempotency, provenance disclosures
+present per ruling (19-row Hy3 census + CP2 watch-list). CP1 exit gate MET.
+
+SENIOR :: INTENT — CP2 (mark-only Phase B) per REBATCH_RUNBOOK §Phase B and
+BUILDLINE CP2. GLIDE WINDOW: 2 hours from this entry; owner may STOP via
+OWNER :: STOP here or in chat; silence past the window = GO.
+Scope on GO (pre-agreed, no scope additions):
+1. mark 3-row Flash canary → full summary regen (~1,004 capture-stale
+   parents, deepseek-v4-flash primary, durable done-means-done jobs, bounded
+   batches with per-provider drop counters surfaced).
+2. Verify: latent/temporal coverage censuses; p0_1 verify green; summary
+   points reindexed Mongo==Qdrant.
+3. mark lexicon rebuild → mark cards LAST → readiness recompute.
+4. Post-CP2 receipt with coverage numbers; after-eval scheduled separately.
+ECOM REMAINS EXCLUDED (fix→owner §8→reingest→one-pass). v2 untouched.

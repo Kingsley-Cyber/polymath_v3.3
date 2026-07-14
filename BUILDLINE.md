@@ -34,7 +34,13 @@ fix CP1-D1 with executor; then full g1–g10 re-run)
 S0–S3 landed · 3-tier regression (negatives 5/5; scorer v4) · 8 owner
 registries + loader/resolver + hash taxonomy (31 tests) · glide authority.
 
-## CP1 — Deployment validation (Phase A) ⏳ ACTIVE
+## CP1 — Deployment validation (Phase A) ✅ DONE 2026-07-14 (certified 18:00Z)
+All g1–g10 green on rebatch_smoke_v2; SEVEN defects found+fixed en route:
+PDF structure bypass (D1), cross-heading chunk merge, batch done-means-done
+(D2a), provider 3-strike pool guard + flash pinned (D2b), PDF-lane biblio
+capture parity (D3), qualified temporal-expression families + fleet blue-green
+cutover (D4), unbatched Neo4j purge (P0.6 reopened, CP6). Consolidated table
++ provenance censuses in COORDINATION 17:5xZ entries.
 g1 FINDING: `_parse_pdf_fast_text` bypass → digital PDFs lose structure.
 CP1-D1: text-layer PDFs → docling layout (no OCR) → markdown/sections →
 structural lane; OCR only for image-only scans; fallback counter; general
