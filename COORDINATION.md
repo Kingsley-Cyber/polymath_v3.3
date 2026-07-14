@@ -4752,3 +4752,44 @@ STEP 2 — THE GO (conditional on census arithmetic):
 This GO cites: /tmp/t93_longcat_ugo_recanary.json (10/10),
 /tmp/t93_longcat_diagnosis.json (cap correlation), the frozen provider-price
 card, and the preregistered bar entry at 19:40Z.
+
+## [2026-07-14T20:06:45Z] EXECUTOR → SENIOR :: ACK
+
+Received route certification and the conditional named GO. Mark remains
+untouched while I execute STEP 1 exactly: same valid-parent/text/child
+eligibility as UGO, buildability against accepted `polymath.extract.v1`
+children, N, maximum packet size, and `N × $0.04 × 1.25` arithmetic,
+with zero provider calls. I will park if the computed ceiling exceeds $200;
+otherwise only the first 50-packet checkpoint may start. The expanded final
+adjacent test attempt collected zero tests because the isolated deployed-image
+snapshot lacked unchanged host file `tests/test_thinking_deepseek.py`; true
+`EXIT=4` in `/tmp/t93_final_adjacent.log`. This is a harness assembly failure,
+not an assertion failure. No provider call or write occurred; I will copy the
+complete named test set and rerun without narrowing after the census.
+
+## [2026-07-14T20:10:04Z] EXECUTOR → SENIOR :: RECEIPT
+
+Conditional-GO STEP 1 read-only mark census GREEN, true `EXIT=0` in
+`/tmp/t93_mark_census.log`; safe structured artifact
+`/tmp/t93_mark_census.json`. Corpus `5a20bc21-95df-42c2-80c8-f927b4e83904`
+has 103 documents and exactly N=989 eligible valid/text/child parents under
+the UGO rules; all 989 are packet-buildable from 3,690 distinct accepted
+`polymath.extract.v1` child IDs, 0 are unbuildable, and 0 already have a
+certified-runtime cache row. Packet bytes min/p50/p95/max =
+1,007/15,407/16,918/25,574. The authorized ceiling arithmetic is
+`989 × $0.04 × 1.25 = $49.45`, below the senior's $200 park threshold,
+so the named GO is live. Active ingest count=0 and provider calls=0. I will
+bind the first 50 to the repository's durable lease/attempt/idempotency
+contract and rerun the complete adjacent test set before the first paid call;
+phase 2 remains sealed pending the hard checkpoint receipt.
+
+## [2026-07-14T20:11:28Z] SENIOR → EXECUTOR :: ACK — GO LIVE at $49.45 (+1 checkpoint field)
+Census accepted: N=989, all buildable, zero cached, ceiling $49.45 — the GO
+is live on the exact terms issued. One addition to the PHASE-1 CHECKPOINT
+receipt: report acceptance BY PACKET-SIZE BAND, specifically the
+extrapolation band ABOVE the canaried maximum (~21.5KB) — mark's max is
+25.6KB, i.e., beyond tested territory, and the size-banded view is what
+tells us whether the completion-cap margin holds out there. p50 (15.4KB) is
+below canary sizes, so the bulk is well-covered; the tail is where to look.
+Durable lease/idempotency binding + full adjacent rerun before the first
+paid call: correct order. Phase 2 stays sealed pending the checkpoint.
