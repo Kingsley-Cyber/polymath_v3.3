@@ -862,3 +862,44 @@ recreated, provider census (both new endpoints exercised), and presence of
 qualified temporal surfaces on the chunks that contain them. Then g4 → g10.
 Also: add the attach requirement to your harness preamble so this class
 cannot recur in later phases.
+
+## [2026-07-14T09:58:16Z] EXECUTOR → SENIOR :: RECEIPT
+The authorized resume was completed by the production auto-repair loop before
+an executor retry ran. Ingest-worker log shows at 09:55:21Z:
+`extraction={'status':'complete','claimed':99}` and repair tick changed=1;
+read-only log capture EXIT=0 (`/tmp/cp1_d4_auto_repair_ingest_worker.log`).
+No manual plan/run or restore occurred after the failed harness attempt.
+
+Completion verification is green: persisted RunPod settings resolve
+enabled=true with both new accounts/key-present; corpus has 106/106 Ghost B
+rows, status ok=99 + honest skipped=7, jobs succeeded=99 + skipped=7,
+provider runpod_flash=99; required `winter 1911` and `2018 drought summer`
+captures are both present. True EXIT=0
+(`/tmp/cp1_d4_reextract_auto_verify.log`). Provider dispatch census proves
+both upgraded endpoints were exercised: primary `m2ric3stpsh11d`=5 POST
+batches, secondary `pitae1qruu59ne`=1 POST batch, EXIT=0
+(`/tmp/cp1_d4_auto_repair_provider_census.log`). Original 106-row backup and
+hash remain intact. Harness preamble now attaches SettingsService immediately
+after opening Mongo. Resuming g4 only.
+
+## [2026-07-14T09:59:09Z] EXECUTOR → SENIOR :: RECEIPT
+Official g4 RESUME PASS. Exact command: `docker exec -e PYTHONPATH=/app -w
+/app polymath_v33-backend-1 python /tmp/rebatch_phase_a_gate.py g4
+--corpus-id 62193743-4175-40da-b861-ba1e1e567b9a`; true EXIT=0
+(`/tmp/rebatch_phase_a_g4_resume.log`). Children/extraction rows=106/106;
+eligible=99, eligible missing ok extraction=0; provider=`runpod_flash`;
+missing required temporal phrases=[]; both `winter 1911` and `2018 drought
+summer` are present as complete captures. Proceeding to g5 only.
+
+## [2026-07-14T09:59:51Z] EXECUTOR → SENIOR :: BLOCKER
+g5 did not execute; phase stopped and g6–g10 are unrun. Exact attempted
+command: `docker exec -e PYTHONPATH=/app -w /app
+polymath_v33-backend-1 python /tmp/rebatch_phase_a_gate.py g5 --corpus-id
+62193743-4175-40da-b861-ba1e1e567b9a`; true EXIT=2
+(`/tmp/rebatch_phase_a_g5.log`). Argparse reports the deployed temporary gate
+harness supports only `{g1,g2,g3,g4}`. Repository/filesystem search found no
+authoritative g5–g10 executable; only the runbook prose contract. I will not
+mislabel an ad-hoc/weaker check as the gate. Please rule whether I should
+extend the temporary harness with literal runbook assertions for g5–g8/g10
+and a separately receipted real SSE matrix for g9, or point me to the senior's
+intended gate implementation.
