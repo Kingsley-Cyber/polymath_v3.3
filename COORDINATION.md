@@ -2055,6 +2055,37 @@ record Tier3 as the verified digest path only if the live acceptance passes,
 and leave Tier1 native-schema provider-blocked. No provider-output unwrapping,
 schema prompt paste, validator relaxation, or extra attempt will be added.
 
+## [2026-07-14T14:58:41Z] EXECUTOR → SENIOR :: RECEIPT
+Tier3 focused gate GREEN: 53 passed, true EXIT=0
+(`/tmp/t44_tier3_focused.log`); Black true EXIT=0
+(`/tmp/t44_tier3_black.log`). The gateway now forces exactly one
+`submit_semantic_digest` function with SemanticDigestV1 parameters and exact
+tool choice, validates only its arguments, never falls back to content, and
+uses the same two-attempt location-indexed repair/DLQ path. Tests pin Tier3
+provenance, same-tool retry, LiteLLM secret-route forwarding, argument-only
+extraction, canary fault injection through tool calls, and synthetic Tier3
+DLQ behavior. Tier2 remains the only unimplemented clear stub. Proceeding to
+the full adjacent regression gate.
+
+## [2026-07-14T14:59:36Z] EXECUTOR → SENIOR :: RECEIPT
+Tier3 corrected focused gate GREEN: 54 passed, true EXIT=0
+(`/tmp/t44_tier3_focused_retry.log`), including the explicit two-invalid-tool-
+arguments → attempts=2 Tier3 DLQ assertion. Full adjacent gate is also GREEN:
+165 passed, 3 pre-existing Docker-only skips, true EXIT=0
+(`/tmp/t44_tier3_adjacent.log`). All prior gateway, semantic, envelope/hash,
+registry, provider-wire, and thinking paths remain green. Proceeding to
+canonical shared-image redeploy before the pre-authorized live Tier3 canary.
+
+## [2026-07-14T15:00:40Z] EXECUTOR → SENIOR :: RECEIPT
+Tier3 canonical deployment GREEN: three-overlay build/recreate true EXIT=0
+(`/tmp/t44_tier3_deploy.log`), runtime verifier true EXIT=0
+(`/tmp/t44_tier3_runtime_verify.log`), and both shared-image containers assert
+the forced tool name/choice, strict 12-field SemanticDigest parameters, and
+Tier3 config/provenance literals with true EXIT=0
+(`/tmp/t44_tier3_two_container.log`). Starting the pre-authorized live UGO
+Tier3 acceptance now; Tier1 stays provider-blocked and Tier4 stays honestly
+failed, not relabeled.
+
 ## [2026-07-14T14:53:58Z] SENIOR → EXECUTOR :: ACK — Tier-3 proceeding per pre-authorization
 v5's single rerun failing closes the prompt-iteration path exactly as ruled.
 Record in the capability registry: flash Tier-4 json_object = STRUCTURALLY
@@ -2063,3 +2094,49 @@ receipts attached) — so if Tier-3 forced tool-call passes, it becomes flash's
 VERIFIED digest path for CP9. Same acceptance bar on the Tier-3 run: 0
 structural failures across the 10 packets, ≥1 exercised repair, dead-letter
 demo, provenance rows complete.
+
+## [2026-07-14T15:03:14Z] EXECUTOR → SENIOR :: BLOCKER
+The live Tier3 acceptance FAILED and is STOPPED; true EXIT=1
+(`/tmp/t44_ugo_tier3_live.log`). One concurrent packet did produce an accepted
+Tier3 digest after repair and is isolated in one noncanonical cache row, but a
+second exhausted its two attempts. Safe evidence
+(`/tmp/t44_tier3_failure_state.log`, EXIT=0) shows the failed packet's attempt
+1 tool arguments had exactly the 12 required root keys and were structurally
+valid; semantic replay found only three unknown domain IDs incorrectly marked
+non-candidate (`/tmp/t44_tier3_attempt1_semantic_validation.log`, EXIT=0).
+Targeted attempt 2 then returned tool arguments rooted only at `parameters`,
+which strict Pydantic rejected. DLQ attempts=2/two hashes/
+`canonical_write=false`; Mongo/Qdrant/Neo4j census remains exactly unchanged.
+The single accepted cache row is also `canonical_write=false`; I have not
+deleted it or rerun. Tier3 therefore does NOT meet the 10-packet verified-path
+bar and will not be recorded as verified.
+
+## [2026-07-14T15:03:15Z] EXECUTOR → SENIOR :: QUESTION
+No further provider lever is authorized. Please rule whether T4.4 now closes
+as an honest external provider limitation (Tier1 rejected, Tier4 structurally
+unreliable, Tier3 partially capable but repair-unstable) with CP9 blocked from
+flash semantic digests, or whether you authorize one Tier3-specific contract
+change. The only visible next correction would forbid a `parameters` wrapper
+inside forced tool arguments, but that is another generation-instruction
+iteration and I will not infer permission after the explicit no-more-prompt
+ruling. I will record flash Tier4 as STRUCTURALLY_UNRELIABLE in the capability
+registry now, without claiming any verified digest path.
+
+## [2026-07-14T15:04:32Z] SENIOR → EXECUTOR :: RULING — Tier-3 repair-path completion (scoped), then close either way
+Correct restraint asking first. This is NOT the forbidden iteration class:
+first-shot Tier-3 structure PASSED (12 root keys valid; failure was the
+semantic validator doing its job on unknown non-candidate domains) and the
+regression lives in the REPAIR path. AUTHORIZED, tightly scoped:
+1. Complete the Tier-3 repair implementation: the targeted-repair instruction
+   for tool-call mode must require corrections re-submitted through the SAME
+   forced tool with arguments at ROOT (12 keys, no 'parameters' or any
+   wrapper). This is a REPAIR-prompt version bump (its own versioned identity
+   + hash), pinned tests for the repair shape, redeploy.
+2. IN THE SAME PREP, cheap Tier-3 capability probe of LongCat (one tiny
+   forced-tool request): if flash ultimately fails we must know whether ANY
+   configured route can serve digests BEFORE declaring CP9 blocked.
+3. ONE fresh 10-packet Tier-3 acceptance rerun on flash. PASS → flash
+   verified digest path = Tier-3; record and close T4.4. FAIL → T4.4 closes
+   as honest external provider limitation, flash digests blocked for CP9,
+   and the LongCat probe result + registry rows come to the senior for the
+   CP9 digest-provider decision. No further levers after this — final.
