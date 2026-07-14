@@ -1,62 +1,466 @@
 {
   "registry": "motif_stage_superframe_binding",
   "version": "v1-PROPOSED",
-  "status": "PROPOSED BY AGENT 2026-07-14 — NOT owner-delivered. Resolvers MUST NOT use until the owner confirms/edits each binding. Bindings are recipe/policy data, never identity.",
-  "method": "Each motif stage label mapped to the superframe whose mechanism it names; alternates listed where genuinely ambiguous. Confidence: high = direct name match, medium = judgment call.",
+  "status": "PROPOSED BY AGENT 2026-07-14 (rev 2, set-valued) \u2014 NOT owner-delivered. Resolvers MUST NOT use until owner confirms. Bindings are recipe/policy data, never identity.",
+  "method": "SET-VALUED bindings: each stage lists ALL admissible superframes, exactly one flagged dominant. Matchers record match tier (dominant|admissible) in score_components; query modes set strictness (FACTUAL/EXPLANATORY may require dominant-only; EXPLORATORY/CREATIVE_TRANSFER accept admissible). No stage is collapsed to a single frame \u2014 consistent with the owner's no-forced-cardinality rule.",
   "bindings": [
-    {"motif_id": "M01", "stages": [
-      {"stage": "SIGNAL", "superframe": "MF02", "confidence": "high"},
-      {"stage": "INTERPRETATION", "superframe": "MF02", "confidence": "high"},
-      {"stage": "VALUATION", "superframe": "MF05", "confidence": "high"},
-      {"stage": "CHOICE", "superframe": "MF06", "confidence": "high"}]},
-    {"motif_id": "M02", "stages": [
-      {"stage": "REPRESENTATION", "superframe": "MF01", "confidence": "high"},
-      {"stage": "ATTENTION", "superframe": "MF02", "alternates": ["MF01"], "confidence": "medium"},
-      {"stage": "BELIEF", "superframe": "MF07", "confidence": "high"},
-      {"stage": "ACTION", "superframe": "MF06", "confidence": "high"}]},
-    {"motif_id": "M03", "stages": [
-      {"stage": "GOAL", "superframe": "MF06", "confidence": "high"},
-      {"stage": "CONSTRAINT", "superframe": "MF09", "confidence": "high"},
-      {"stage": "DECISION", "superframe": "MF06", "confidence": "high"},
-      {"stage": "OUTCOME", "superframe": "MF04", "alternates": ["MF06"], "confidence": "medium"}]},
-    {"motif_id": "M04", "stages": [
-      {"stage": "ACTION", "superframe": "MF06", "confidence": "high"},
-      {"stage": "FEEDBACK", "superframe": "MF08", "confidence": "high"},
-      {"stage": "UPDATE", "superframe": "MF07", "confidence": "high"},
-      {"stage": "NEW ACTION", "superframe": "MF06", "confidence": "high"}]},
-    {"motif_id": "M05", "stages": [
-      {"stage": "SCARCITY", "superframe": "MF09", "alternates": ["MF10"], "confidence": "medium"},
-      {"stage": "ALLOCATION", "superframe": "MF10", "confidence": "high"},
-      {"stage": "TRADE-OFF", "superframe": "MF09", "confidence": "high"}]},
-    {"motif_id": "M06", "stages": [
-      {"stage": "IDENTITY/ROLE", "superframe": "MF11", "confidence": "high"},
-      {"stage": "NORM", "superframe": "MF11", "confidence": "high"},
-      {"stage": "BEHAVIOR", "superframe": "MF06", "confidence": "medium"},
-      {"stage": "SOCIAL FEEDBACK", "superframe": "MF08", "alternates": ["MF12"], "confidence": "medium"}]},
-    {"motif_id": "M07", "stages": [
-      {"stage": "VARIATION", "superframe": "MF13", "confidence": "high"},
-      {"stage": "SELECTION CRITERION", "superframe": "MF13", "confidence": "high"},
-      {"stage": "RETENTION", "superframe": "MF13", "alternates": ["MF15"], "confidence": "medium"}]},
-    {"motif_id": "M08", "stages": [
-      {"stage": "STOCK/FLOW", "superframe": "MF15", "confidence": "high"},
-      {"stage": "THRESHOLD", "superframe": "MF15", "confidence": "high"},
-      {"stage": "STATE TRANSITION", "superframe": "MF15", "confidence": "high"}]},
-    {"motif_id": "M09", "stages": [
-      {"stage": "COMPONENT INTERACTIONS", "superframe": "MF16", "confidence": "high"},
-      {"stage": "AGGREGATE PATTERN", "superframe": "MF16", "confidence": "high"},
-      {"stage": "EMERGENCE", "superframe": "MF16", "confidence": "high"}]},
-    {"motif_id": "M10", "stages": [
-      {"stage": "UNCERTAINTY", "superframe": "MF14", "confidence": "high"},
-      {"stage": "PROXY/HEURISTIC", "superframe": "MF03", "alternates": ["MF14"], "confidence": "medium"},
-      {"stage": "DECISION", "superframe": "MF06", "confidence": "high"}]},
-    {"motif_id": "M11", "stages": [
-      {"stage": "INTERDEPENDENCE", "superframe": "MF16", "alternates": ["MF12"], "confidence": "medium"},
-      {"stage": "TRUST/POWER MECHANISM", "superframe": "MF12", "confidence": "high"},
-      {"stage": "COORDINATION OUTCOME", "superframe": "MF12", "confidence": "high"}]},
-    {"motif_id": "M12", "stages": [
-      {"stage": "INTERVENTION", "superframe": "MF04", "confidence": "high"},
-      {"stage": "MEDIATOR", "superframe": "MF04", "confidence": "high"},
-      {"stage": "OUTCOME", "superframe": "MF04", "confidence": "high"}],
-     "qualifier": "UNDER CONDITION binds as claim-level condition (APPLIES_UNDER), not a stage"}
+    {
+      "motif_id": "M01",
+      "stages": [
+        {
+          "stage": "SIGNAL",
+          "admissible": [
+            {
+              "superframe": "MF02",
+              "tier": "dominant"
+            }
+          ]
+        },
+        {
+          "stage": "INTERPRETATION",
+          "admissible": [
+            {
+              "superframe": "MF02",
+              "tier": "dominant"
+            }
+          ]
+        },
+        {
+          "stage": "VALUATION",
+          "admissible": [
+            {
+              "superframe": "MF05",
+              "tier": "dominant"
+            }
+          ]
+        },
+        {
+          "stage": "CHOICE",
+          "admissible": [
+            {
+              "superframe": "MF06",
+              "tier": "dominant"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "motif_id": "M02",
+      "stages": [
+        {
+          "stage": "REPRESENTATION",
+          "admissible": [
+            {
+              "superframe": "MF01",
+              "tier": "dominant"
+            }
+          ]
+        },
+        {
+          "stage": "ATTENTION",
+          "admissible": [
+            {
+              "superframe": "MF02",
+              "tier": "dominant"
+            },
+            {
+              "superframe": "MF01",
+              "tier": "admissible"
+            }
+          ]
+        },
+        {
+          "stage": "BELIEF",
+          "admissible": [
+            {
+              "superframe": "MF07",
+              "tier": "dominant"
+            }
+          ]
+        },
+        {
+          "stage": "ACTION",
+          "admissible": [
+            {
+              "superframe": "MF06",
+              "tier": "dominant"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "motif_id": "M03",
+      "stages": [
+        {
+          "stage": "GOAL",
+          "admissible": [
+            {
+              "superframe": "MF06",
+              "tier": "dominant"
+            }
+          ]
+        },
+        {
+          "stage": "CONSTRAINT",
+          "admissible": [
+            {
+              "superframe": "MF09",
+              "tier": "dominant"
+            }
+          ]
+        },
+        {
+          "stage": "DECISION",
+          "admissible": [
+            {
+              "superframe": "MF06",
+              "tier": "dominant"
+            }
+          ]
+        },
+        {
+          "stage": "OUTCOME",
+          "admissible": [
+            {
+              "superframe": "MF04",
+              "tier": "dominant"
+            },
+            {
+              "superframe": "MF06",
+              "tier": "admissible"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "motif_id": "M04",
+      "stages": [
+        {
+          "stage": "ACTION",
+          "admissible": [
+            {
+              "superframe": "MF06",
+              "tier": "dominant"
+            }
+          ]
+        },
+        {
+          "stage": "FEEDBACK",
+          "admissible": [
+            {
+              "superframe": "MF08",
+              "tier": "dominant"
+            }
+          ]
+        },
+        {
+          "stage": "UPDATE",
+          "admissible": [
+            {
+              "superframe": "MF07",
+              "tier": "dominant"
+            }
+          ]
+        },
+        {
+          "stage": "NEW ACTION",
+          "admissible": [
+            {
+              "superframe": "MF06",
+              "tier": "dominant"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "motif_id": "M05",
+      "stages": [
+        {
+          "stage": "SCARCITY",
+          "admissible": [
+            {
+              "superframe": "MF09",
+              "tier": "dominant"
+            },
+            {
+              "superframe": "MF10",
+              "tier": "admissible"
+            }
+          ]
+        },
+        {
+          "stage": "ALLOCATION",
+          "admissible": [
+            {
+              "superframe": "MF10",
+              "tier": "dominant"
+            }
+          ]
+        },
+        {
+          "stage": "TRADE-OFF",
+          "admissible": [
+            {
+              "superframe": "MF09",
+              "tier": "dominant"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "motif_id": "M06",
+      "stages": [
+        {
+          "stage": "IDENTITY/ROLE",
+          "admissible": [
+            {
+              "superframe": "MF11",
+              "tier": "dominant"
+            }
+          ]
+        },
+        {
+          "stage": "NORM",
+          "admissible": [
+            {
+              "superframe": "MF11",
+              "tier": "dominant"
+            }
+          ]
+        },
+        {
+          "stage": "BEHAVIOR",
+          "admissible": [
+            {
+              "superframe": "MF06",
+              "tier": "dominant"
+            }
+          ]
+        },
+        {
+          "stage": "SOCIAL FEEDBACK",
+          "admissible": [
+            {
+              "superframe": "MF08",
+              "tier": "dominant"
+            },
+            {
+              "superframe": "MF12",
+              "tier": "admissible"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "motif_id": "M07",
+      "stages": [
+        {
+          "stage": "VARIATION",
+          "admissible": [
+            {
+              "superframe": "MF13",
+              "tier": "dominant"
+            }
+          ]
+        },
+        {
+          "stage": "SELECTION CRITERION",
+          "admissible": [
+            {
+              "superframe": "MF13",
+              "tier": "dominant"
+            }
+          ]
+        },
+        {
+          "stage": "RETENTION",
+          "admissible": [
+            {
+              "superframe": "MF13",
+              "tier": "dominant"
+            },
+            {
+              "superframe": "MF15",
+              "tier": "admissible"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "motif_id": "M08",
+      "stages": [
+        {
+          "stage": "STOCK/FLOW",
+          "admissible": [
+            {
+              "superframe": "MF15",
+              "tier": "dominant"
+            }
+          ]
+        },
+        {
+          "stage": "THRESHOLD",
+          "admissible": [
+            {
+              "superframe": "MF15",
+              "tier": "dominant"
+            }
+          ]
+        },
+        {
+          "stage": "STATE TRANSITION",
+          "admissible": [
+            {
+              "superframe": "MF15",
+              "tier": "dominant"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "motif_id": "M09",
+      "stages": [
+        {
+          "stage": "COMPONENT INTERACTIONS",
+          "admissible": [
+            {
+              "superframe": "MF16",
+              "tier": "dominant"
+            }
+          ]
+        },
+        {
+          "stage": "AGGREGATE PATTERN",
+          "admissible": [
+            {
+              "superframe": "MF16",
+              "tier": "dominant"
+            }
+          ]
+        },
+        {
+          "stage": "EMERGENCE",
+          "admissible": [
+            {
+              "superframe": "MF16",
+              "tier": "dominant"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "motif_id": "M10",
+      "stages": [
+        {
+          "stage": "UNCERTAINTY",
+          "admissible": [
+            {
+              "superframe": "MF14",
+              "tier": "dominant"
+            }
+          ]
+        },
+        {
+          "stage": "PROXY/HEURISTIC",
+          "admissible": [
+            {
+              "superframe": "MF03",
+              "tier": "dominant"
+            },
+            {
+              "superframe": "MF14",
+              "tier": "admissible"
+            }
+          ]
+        },
+        {
+          "stage": "DECISION",
+          "admissible": [
+            {
+              "superframe": "MF06",
+              "tier": "dominant"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "motif_id": "M11",
+      "stages": [
+        {
+          "stage": "INTERDEPENDENCE",
+          "admissible": [
+            {
+              "superframe": "MF16",
+              "tier": "dominant"
+            },
+            {
+              "superframe": "MF12",
+              "tier": "admissible"
+            }
+          ]
+        },
+        {
+          "stage": "TRUST/POWER MECHANISM",
+          "admissible": [
+            {
+              "superframe": "MF12",
+              "tier": "dominant"
+            }
+          ]
+        },
+        {
+          "stage": "COORDINATION OUTCOME",
+          "admissible": [
+            {
+              "superframe": "MF12",
+              "tier": "dominant"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "motif_id": "M12",
+      "stages": [
+        {
+          "stage": "INTERVENTION",
+          "admissible": [
+            {
+              "superframe": "MF04",
+              "tier": "dominant"
+            }
+          ]
+        },
+        {
+          "stage": "MEDIATOR",
+          "admissible": [
+            {
+              "superframe": "MF04",
+              "tier": "dominant"
+            }
+          ]
+        },
+        {
+          "stage": "OUTCOME",
+          "admissible": [
+            {
+              "superframe": "MF04",
+              "tier": "dominant"
+            }
+          ]
+        }
+      ],
+      "qualifier": "UNDER CONDITION binds as claim-level condition (APPLIES_UNDER), not a stage"
+    }
   ]
 }
