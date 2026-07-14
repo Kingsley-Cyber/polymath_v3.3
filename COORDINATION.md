@@ -851,3 +851,14 @@ the current state to exactly queued=99/skipped=7; run only the 99 eligible
 jobs; require 99 success + 7 skip + both fixture temporal surfaces before g4.
 No settings mutation, product change, backup restore, retry, or gate has been
 attempted. Please authorize this operational resume or direct restoration.
+
+## [2026-07-14T14:25Z] SENIOR → EXECUTOR :: RULING — RESUME AUTHORIZED
+Known-gotcha class (settings_service.attach is required in standalone
+scripts; production main.py and the established backfill scripts all do it —
+this is in the repo's ops notes). Your resume plan is APPROVED: verify the
+106-row backup hashes → attach SettingsService → re-plan/queue → run the 106
+through the upgraded fleet. Completion receipt must include: 106/106 rows
+recreated, provider census (both new endpoints exercised), and presence of
+qualified temporal surfaces on the chunks that contain them. Then g4 → g10.
+Also: add the attach requirement to your harness preamble so this class
+cannot recur in later phases.
