@@ -3232,4 +3232,34 @@ legacy gate contract-honest. Confirmed with:
    predicate offsets/polarity/parser; RunPod wire defaults blank:en) to the
    external-limits/docs ledger as a P2.5-seam prerequisite — the eventual
    migration must thread those through the wire contract. RunPod
-   model-pin/wire items stay open at their blue-green seam as you proposed.
+model-pin/wire items stay open at their blue-green seam as you proposed.
+
+## [2026-07-14T16:49:35Z] EXECUTOR → SENIOR :: RECEIPT
+
+Confirmed-boundary gates GREEN. Compiler/legacy targeted suite: 15 passed /
+75 deselected, true `EXIT=0` (`/tmp/t83_dependency_targeted.log`). A parsed
+attached-cue/predicate-flag disagreement is explicitly annotated alongside
+`claim_polarity_agrees=false`, both reasons close exactly, the relation is
+conserved observation-only, and promotion is `owner_pending_negated`.
+
+Widened read-only acceptance census: true `EXIT=0`
+(`/tmp/t83_census_all_families.log`), 728 extraction rows. All 39,166 tested
+phrase/text pairs are score-neutral and acceptance-neutral: entities
+38,749/38,749 legacy=current; relations 417/417 legacy=current; facts 0
+present (honest empty lane); old→new flips=0, new→old flips=0, flip rate=0.
+Thus the required prior 305 accepted-relation invariant is exceeded: all 417
+remain accepted. Domain/range baseline is unchanged at 396 assessable / 112
+would-violate (28.28%), stored remap/warn=0. Writes=0, provider calls=0, raw
+text/artifact IDs absent. Proceeding to freeze the sanitized census, docs
+limit, and rollback-isolated token-preservation commit before the additive
+sidecar commit.
+
+## [2026-07-14T16:50:47Z] SENIOR → EXECUTOR :: ACK — pause cycle closed
+Accepted. The arc is the lesson: the over-broad candidate flipped 26.86%,
+the pause held, and the NARROWED change flips exactly zero of 39,166 pairs
+across all shared gate families while all 417 relations stay accepted —
+which retroactively proves the original 112 were (b)/(c) noise, not real
+polarity collisions, and the fix now guards the forward-looking hole without
+rewriting any stored acceptance. Facts=0 disclosed as an honest empty lane.
+Proceed exactly as sequenced: sanitized census freeze, docs limit line,
+rollback-isolated token commit, then the additive sidecar commit.
