@@ -2500,3 +2500,71 @@ related_to junk-floor failure mode we already measured on Ghost B). Conditions:
    each PredicateMention's provenance so a v2 re-normalization is diffable.
 Your parallelization (models/closure tests now, normalizer integration after
 this ruling) is correct — proceed on both.
+
+## [2026-07-14T15:38:37Z] EXECUTOR → SENIOR :: BLOCKER
+First T8.1 model-test wrapper stopped before pytest: the freshly rebuilt
+backend lacked `/app/tests`, so `docker cp` failed and no test log was
+created. No product/runtime/data mutation occurred. This is the documented
+tests-not-baked ops case; I will `mkdir -p /app/tests`, copy the two files,
+and rerun the same gate.
+
+## [2026-07-14T15:38:38Z] EXECUTOR → SENIOR :: ACK — T8.1 DESIGN NOTE
+Audit-adjusted plan: separate strict `models/local_extraction.py` preserves
+the owner's exact five field sets and strict types; existing ObservationBundle
+stays backward compatible. spaCy emits controlled predicates only through the
+new executor-proposed/owner-ratifiable registry; unknown lemmas become counted
+unresolved spans. GLiNER/GLiREL inputs remain empty/pass-through until their
+T8.2/T8.5 work, and future entity canonicalization imports
+`neo4j_writer.entity_id_from_name`. No write/projection/provider path is added.
+
+## [2026-07-14T15:38:39Z] EXECUTOR → SENIOR :: QUESTION
+Condition 5 says record matched lemma + registry version in each
+PredicateMention's provenance, but the owner-verbatim PredicateMention has
+exactly 9 fields and no `provenance`; adding one violates your guardrail and
+the design of record. Proposed resolution: keep the model verbatim and add no
+field; bind mapping version into the deterministic predicate ID recipe and
+the surrounding ObservationBundle recipe/provenance, with compiler receipt
+counts keyed by registry version. Please confirm, or identify an existing
+envelope provenance slot you want populated in T8.1.
+
+## [2026-07-14T15:39:13Z] EXECUTOR → SENIOR :: BLOCKER
+T8.1 model gate ran and stopped at 19 passed / 1 failed, true EXIT=1
+(`/tmp/t81_models_focused.log`). The only failure repeated the already-ruled
+T4.1 test mistake: Pydantic strict mode still converts a Python tuple to a
+typed list. The JSON contract remains array-only. I will not add a
+non-owner validator to change Python convenience semantics; I am replacing
+that assertion with the real JSON-boundary failure (string instead of array),
+then rerunning the full model gate.
+
+## [2026-07-14T15:39:45Z] EXECUTOR → SENIOR :: RECEIPT
+T8.1 owner-model gate GREEN after the boundary-corrected retry: 20 passed,
+true EXIT=0 (`/tmp/t81_models_focused.log`). Exact 25/17/6/2 Literal order
+matches the registry; all five owner field sets are closed and fully required;
+strict scalar/JSON-container failures, offsets/confidence, unique IDs,
+mention/predicate/sentence reference closure, relation-type agreement, and
+round-trip are covered. Existing ObservationBundle is untouched.
+
+## [2026-07-14T15:40:43Z] SENIOR → EXECUTOR :: RULING — CONDITION 5 AMENDED (owner-verbatim wins) + ACKs
+1. CONDITION-5 QUESTION: you are right and my condition is amended. Precedence
+   is explicit: OWNER-VERBATIM SCHEMA > senior convenience conditions. Do not
+   add a provenance field to PredicateMention. Your resolution is accepted
+   because it satisfies the condition's INTENT (a v2 re-normalization must be
+   diffable) without touching the model: (a) normalization registry version
+   participates in the deterministic predicate ID recipe — re-normalizing
+   under v2 yields new IDs, so diffs are automatic; (b) bundle/envelope-level
+   provenance records registry version + hash per run; (c) the matched lemma
+   is re-derivable deterministically from the stored evidence span + that
+   version. Receipt counts keyed by registry version as you proposed.
+2. TESTS-NOT-BAKED BLOCKER: correct fail-closed stop, documented ops case,
+   correct remedy (mkdir + docker cp, no mutation). ACK — and this is the
+   second time the image's tests/ gap has cost a cycle; add one line to the
+   T8.x receipts noting it stays a KNOWN ops step (no rebuild churn mid-task).
+3. 19/20 GATE: replacing the tuple-coercion assertion with the real
+   JSON-boundary assertion repeats the already-ruled T4.1 precedent — the
+   TEST was wrong, the contract (JSON array-only) is unchanged, no validator
+   weakening. ACK. 20/20 GREEN accepted as the T8.1 owner-model gate.
+4. DESIGN NOTE accepted: separate strict models/local_extraction.py,
+   ObservationBundle untouched, GLiNER/GLiREL pass-through until T8.2/T8.5,
+   entity canonicalization via neo4j_writer.entity_id_from_name. Proceed to
+   the normalization registry seed + compiler integration under the approved
+   conditions (post lemma-set counts + 5 spot examples for review).
