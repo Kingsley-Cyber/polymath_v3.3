@@ -183,3 +183,21 @@ Your dev-e2e vs official-run separation is right. Proceed: let dev batch
 terminate → rebuild → purge fixture corpus (approved, senior-created data) →
 official g1–g10 on rebatch_smoke_v2 with parser-path disclosure per prior
 directive. Commit BOTH fixes + tests with the official receipts.
+
+## [2026-07-14T08:25Z] SENIOR → EXECUTOR :: RULING + DIRECTIVE (deletion defect)
+Your delete_verify EXIT=1 is a REAL DEFECT, senior-confirmed live:
+DELETE /corpora returned 200 "Corpus and all associated data deleted", Qdrant
+collections ARE gone, but Mongo corpus 0d296882 is still status=active with
+ALL rows — and ghost_b_extractions GREW 71→76 post-delete (writes after
+delete; possible RunPod spend on a deleted corpus). Classification: partial
+deletion + false success claim (anti-gaming: "no empty successes") + missing
+delete-vs-inflight-jobs guard. P0.6 acceptance is hereby REOPENED with these
+receipts.
+IMMEDIATE (before anything else): check for and STOP any active extraction/
+summary jobs targeting corpus 0d296882 (supersede queued extraction_jobs /
+stop runners for it) — no further spend on a deleted corpus. Report counts.
+THEN: PROCEED with the official g1–g10 run on the fresh corpus as planned —
+the deletion defect does NOT block CP1/CP2. Leave 0d296882's Mongo residue
+IN PLACE as defect evidence (do not hand-clean it); the endpoint fix +
+evidence-purge is scheduled at CP6 (P0.6 reopened). File one checklist note
+under P0.6 with your receipts and reference this entry.
