@@ -1586,8 +1586,8 @@ async def _run_ghosts_parallel(
         try:
             from services.settings import settings_service
 
-            runtime_ingestion = (
-                await settings_service.get_runtime_ingestion_settings(user_id)
+            runtime_ingestion = await settings_service.get_runtime_ingestion_settings(
+                user_id
             )
             runtime_summary = runtime_ingestion.summary
             summary_max_concurrent = (
@@ -1596,9 +1596,7 @@ async def _run_ghosts_parallel(
             runtime_summary_refs = list(
                 runtime_summary.summary_models if runtime_summary.enabled else []
             )
-            default_tokens = IngestionConfig.model_fields[
-                "max_summary_tokens"
-            ].default
+            default_tokens = IngestionConfig.model_fields["max_summary_tokens"].default
             if (
                 max_summary_tokens == default_tokens
                 and runtime_summary.max_summary_tokens != default_tokens
@@ -1795,11 +1793,12 @@ async def _run_ghosts_parallel(
                     db,
                     corpus_id=corpus_id,
                 )
-                filtered_pool, skipped_lanes = (
-                    filter_extraction_pool_by_provider_health(
-                        pool,
-                        provider_health,
-                    )
+                (
+                    filtered_pool,
+                    skipped_lanes,
+                ) = filter_extraction_pool_by_provider_health(
+                    pool,
+                    provider_health,
                 )
                 if skipped_lanes:
                     logger.warning(
@@ -2000,6 +1999,10 @@ async def _run_ghosts_parallel(
                     _runpod_kwargs = {
                         "endpoint_id": config.runpod_endpoint_id_override,
                         "account_name": config.runpod_account_name_override,
+                        "routes": [
+                            route.model_dump(mode="json")
+                            for route in config.runpod_local_extraction_routes
+                        ],
                         "user_id": user_id,
                     }
                 report = await _runpod_extract(
@@ -3036,9 +3039,7 @@ async def _write_qdrant_summaries_for_doc(
                 "content_facet_ids": facet_meta.get("content_facet_ids") or [],
                 "content_facet_text": facet_meta.get("content_facet_text") or "",
                 "content_facet_source": facet_meta.get("content_facet_source") or "",
-                "content_facet_confidence": facet_meta.get(
-                    "content_facet_confidence"
-                ),
+                "content_facet_confidence": facet_meta.get("content_facet_confidence"),
                 "doc_facet_ids": doc_facet_ids,
                 "facet_schema_version": schema_version,
             }
@@ -3054,9 +3055,7 @@ async def _write_qdrant_summaries_for_doc(
         summary_sparse_map.get(summary.parent_id) for summary in summaries
     ]
     summary_kinds = [
-        kind
-        for kind in config.target_qdrant_collections
-        if kind in ("naive", "hrag")
+        kind for kind in config.target_qdrant_collections if kind in ("naive", "hrag")
     ]
     written = await qdrant_writer.upsert_summaries(
         qdrant_client,
@@ -3938,14 +3937,16 @@ async def run_ingest_job(
                 corpus_id[:8],
                 _pathological_chunk_trigger,
             )
-            parents, children, injected_headers = (
-                await _chunk_with_pathological_fallback(
-                    parse_result,
-                    doc_id,
-                    corpus_id,
-                    ingestion_config,
-                    timeout=_fallback_timeout,
-                )
+            (
+                parents,
+                children,
+                injected_headers,
+            ) = await _chunk_with_pathological_fallback(
+                parse_result,
+                doc_id,
+                corpus_id,
+                ingestion_config,
+                timeout=_fallback_timeout,
             )
             _pathological_chunk_fallback_used = True
         else:
@@ -3966,14 +3967,16 @@ async def run_ingest_job(
         )
         _pathological_chunk_trigger = f"timeout:{_chunk_timeout}s"
         try:
-            parents, children, injected_headers = (
-                await _chunk_with_pathological_fallback(
-                    parse_result,
-                    doc_id,
-                    corpus_id,
-                    ingestion_config,
-                    timeout=_fallback_timeout,
-                )
+            (
+                parents,
+                children,
+                injected_headers,
+            ) = await _chunk_with_pathological_fallback(
+                parse_result,
+                doc_id,
+                corpus_id,
+                ingestion_config,
+                timeout=_fallback_timeout,
             )
             _pathological_chunk_fallback_used = True
             logger.warning(

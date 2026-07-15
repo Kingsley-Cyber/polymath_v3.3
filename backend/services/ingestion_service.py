@@ -80,6 +80,7 @@ FROZEN_CONFIG_FIELDS: frozenset[str] = frozenset(
         "runpod_wire_contract",
         "runpod_endpoint_id_override",
         "runpod_account_name_override",
+        "runpod_local_extraction_routes",
         "docling_ocr_enabled",
         "preset",
     }

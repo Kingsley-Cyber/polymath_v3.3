@@ -11,16 +11,24 @@ before it can enter durable ingestion state.
 from __future__ import annotations
 
 import asyncio
+import fcntl
 import hashlib
 import json
+import os
 import time
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 import httpx
 
 from models.extraction_registry import extraction_registry_hashes
 from models.local_extraction import LocalExtractionV1
-from models.schemas import RunpodFlashAccount, RunpodFlashExtractionSettings
+from models.schemas import (
+    RunpodFlashAccount,
+    RunpodFlashExtractionSettings,
+    RunpodLocalExtractionRoute,
+)
 from services.ghost_b import (
     EntityItem,
     ExtractionBatchReport,
@@ -123,6 +131,93 @@ _TEMPORAL_FIELDS = {
     "role_candidates",
 }
 _NLP: Any = None
+JOURNAL_VERSION = "polymath.runpod_job_journal.v1"
+DEFAULT_JOB_JOURNAL_DIR = "/tmp/polymath-runpod-job-journals"
+
+
+def _persist_job_event(path: Path, event: dict[str, Any]) -> None:
+    """Append and fsync one bounded, non-secret provider lifecycle event."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    row = {
+        "journal_version": JOURNAL_VERSION,
+        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        **event,
+    }
+    encoded = (
+        json.dumps(
+            row,
+            ensure_ascii=False,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n"
+    )
+    with path.open("a", encoding="utf-8") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            handle.write(encoded)
+            handle.flush()
+            os.fsync(handle.fileno())
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def _journal_path(
+    task_rows: list[dict[str, str]],
+    *,
+    job_journal_dir: str | None,
+) -> Path:
+    corpus_ids = {row["corpus_id"] for row in task_rows}
+    if len(corpus_ids) != 1:
+        raise RuntimeError("LocalExtractionV1 task set must belong to one corpus")
+    root = Path(
+        job_journal_dir
+        or os.environ.get("RUNPOD_JOB_JOURNAL_DIR")
+        or DEFAULT_JOB_JOURNAL_DIR
+    )
+    if not root.is_absolute():
+        raise RuntimeError("LocalExtractionV1 job journal directory must be absolute")
+    corpus_id = next(iter(corpus_ids))
+    corpus_hash = hashlib.sha256(corpus_id.encode("utf-8")).hexdigest()
+    return root / f"corpus-{corpus_hash}.jsonl"
+
+
+def _route_rows(
+    *,
+    endpoint_id: str | None,
+    account_name: str | None,
+    routes: list[RunpodLocalExtractionRoute | dict[str, Any]] | None,
+) -> list[RunpodLocalExtractionRoute]:
+    endpoint = str(endpoint_id or "").strip()
+    account = str(account_name or "").strip()
+    if routes:
+        if endpoint or account:
+            raise RuntimeError(
+                "LocalExtractionV1 accepts singular identity or routes, never both"
+            )
+        validated = [RunpodLocalExtractionRoute.model_validate(row) for row in routes]
+        if len(validated) < 2:
+            raise RuntimeError("LocalExtractionV1 burst routing requires two routes")
+    else:
+        if not endpoint or not account:
+            raise RuntimeError(
+                "LocalExtractionV1 requires explicit endpoint and account identity"
+            )
+        validated = [
+            RunpodLocalExtractionRoute(
+                endpoint_id=endpoint,
+                account_name=account,
+            )
+        ]
+    route_accounts = [row.account_name for row in validated]
+    route_endpoints = [row.endpoint_id for row in validated]
+    if len(set(route_accounts)) != len(route_accounts):
+        raise RuntimeError("LocalExtractionV1 route accounts must be unique")
+    if len(set(route_endpoints)) != len(route_endpoints):
+        raise RuntimeError("LocalExtractionV1 route endpoints must be unique")
+    return validated
 
 
 def _load_nlp() -> Any:
@@ -275,6 +370,7 @@ def _compile_result(
     nlp: Any,
     endpoint_id: str,
     account_name: str,
+    concurrency_policy: str,
 ) -> ExtractionResult:
     if not isinstance(raw, dict) or set(raw) != _RESULT_FIELDS:
         raise RuntimeError("LocalExtractionV1 result shape drifted")
@@ -381,7 +477,7 @@ def _compile_result(
             "endpoint": endpoint_id,
             "account": account_name,
             "wire_contract": CONTRACT_VERSION,
-            "concurrency_policy": "single_account_pinned_endpoint",
+            "concurrency_policy": concurrency_policy,
         },
     )
 
@@ -399,14 +495,16 @@ async def extract_entities(
     enable_facts: bool | None = None,
     audit_event_sink: Any = None,
     audit_run_id: str | None = None,
-    endpoint_id: str | None,
-    account_name: str | None,
+    endpoint_id: str | None = None,
+    account_name: str | None = None,
+    routes: list[RunpodLocalExtractionRoute | dict[str, Any]] | None = None,
     user_id: str | None = None,
     runpod_config: RunpodFlashExtractionSettings | None = None,
     accounts: list[tuple[RunpodFlashAccount, str]] | None = None,
     http_client: httpx.AsyncClient | None = None,
+    job_journal_dir: str | None = None,
 ) -> list[ExtractionResult] | ExtractionBatchReport:
-    """Dispatch through one named encrypted account and one pinned endpoint."""
+    """Dispatch through explicit pinned routes without failover or fallback."""
 
     del schema, schema_lens, chunk_vectors, schema_resolver, pool, model
     del enable_facts, audit_event_sink, audit_run_id, user_id
@@ -422,14 +520,11 @@ async def extract_entities(
             },
         )
         return empty if return_report else []
-    endpoint = str(endpoint_id or "").strip()
-    selected_name = str(account_name or "").strip()
-    if not endpoint or not selected_name:
-        raise RuntimeError(
-            "LocalExtractionV1 requires explicit endpoint and account identity"
-        )
-    if not endpoint.isalnum():
-        raise RuntimeError("LocalExtractionV1 endpoint identity is malformed")
+    selected_routes = _route_rows(
+        endpoint_id=endpoint_id,
+        account_name=account_name,
+        routes=routes,
+    )
     if runpod_config is None or accounts is None:
         from services.settings import settings_service
 
@@ -439,45 +534,83 @@ async def extract_entities(
             accounts = await settings_service.get_system_runpod_flash_accounts()
     if not runpod_config.enabled:
         raise RuntimeError("RunPod extraction is disabled in system Settings")
-    matches = [
-        (account, key)
-        for account, key in accounts
-        if account.enabled and account.name == selected_name and key
-    ]
-    if len(matches) != 1:
-        raise RuntimeError(
-            "LocalExtractionV1 named account did not resolve exactly once"
-        )
-    account, api_key = matches[0]
     task_rows = [_task_dict(task) for task in tasks]
     if len({row["child_id"] for row in task_rows}) != len(task_rows):
         raise RuntimeError("LocalExtractionV1 child identities are not unique")
+    journal_path = _journal_path(task_rows, job_journal_dir=job_journal_dir)
+    await asyncio.to_thread(
+        _persist_job_event,
+        journal_path,
+        {
+            "event": "journal_preflight",
+            "corpus_id": task_rows[0]["corpus_id"],
+            "route_count": len(selected_routes),
+        },
+    )
+    resolved_routes: list[dict[str, Any]] = []
+    for route in selected_routes:
+        matches = [
+            (account, key)
+            for account, key in accounts
+            if account.enabled and account.name == route.account_name and key
+        ]
+        if len(matches) != 1:
+            raise RuntimeError(
+                "LocalExtractionV1 named account did not resolve exactly once"
+            )
+        account, api_key = matches[0]
+        request_limit = min(
+            int(runpod_config.request_concurrency),
+            int(account.request_concurrency),
+        )
+        resolved_routes.append(
+            {
+                "account": account,
+                "api_key": api_key,
+                "endpoint_id": route.endpoint_id,
+                "semaphore": asyncio.Semaphore(max(1, request_limit)),
+                "request_limit": max(1, request_limit),
+            }
+        )
     batch_size = min(64, int(runpod_config.request_batch_size))
     slices = [
         task_rows[start : start + batch_size]
         for start in range(0, len(task_rows), batch_size)
     ]
-    request_limit = min(
-        int(runpod_config.request_concurrency),
-        int(account.request_concurrency),
-    )
-    semaphore = asyncio.Semaphore(max(1, request_limit))
     owns_client = http_client is None
     client = http_client or httpx.AsyncClient(
         timeout=httpx.Timeout(runpod_config.timeout_seconds + 30, connect=20)
     )
     started = time.perf_counter()
 
-    async def run_slice(index: int, rows: list[dict[str, str]]) -> tuple[int, Any]:
+    async def run_slice(
+        index: int,
+        rows: list[dict[str, str]],
+    ) -> tuple[int, Any, dict[str, Any]]:
         request = _request(rows)
-        async with semaphore:
+        route = resolved_routes[index % len(resolved_routes)]
+        selected_account: RunpodFlashAccount = route["account"]
+
+        async def journal_event(event: dict[str, Any]) -> None:
+            await asyncio.to_thread(
+                _persist_job_event,
+                journal_path,
+                {
+                    **event,
+                    "account_name": selected_account.name,
+                    "endpoint_id": route["endpoint_id"],
+                },
+            )
+
+        async with route["semaphore"]:
             output = await _submit_and_wait(
                 client,
-                endpoint_id=endpoint,
-                api_key=api_key,
+                endpoint_id=route["endpoint_id"],
+                api_key=route["api_key"],
                 request=request,
                 timeout_seconds=runpod_config.timeout_seconds,
                 poll_interval_seconds=runpod_config.poll_interval_seconds,
+                job_event_sink=journal_event,
             )
         if not isinstance(output, dict) or set(output) != _OUTPUT_FIELDS:
             raise RuntimeError("LocalExtractionV1 response shape drifted")
@@ -496,7 +629,7 @@ async def extract_entities(
         remote_rows = output.get("results")
         if not isinstance(remote_rows, list) or len(remote_rows) != len(rows):
             raise RuntimeError("LocalExtractionV1 response cardinality mismatch")
-        return index, output
+        return index, output, route
 
     try:
         completed = await asyncio.gather(
@@ -509,7 +642,16 @@ async def extract_entities(
     nlp = _load_nlp()
     results_by_child: dict[str, ExtractionResult] = {}
     remote_jobs: list[dict[str, Any]] = []
-    for index, output in sorted(completed, key=lambda item: item[0]):
+    route_batch_counts = {route.account_name: 0 for route in selected_routes}
+    concurrency_policy = (
+        "single_account_pinned_endpoint"
+        if len(selected_routes) == 1
+        else "explicit_pinned_routes_round_robin_no_failover"
+    )
+    for index, output, route in sorted(completed, key=lambda item: item[0]):
+        selected_account: RunpodFlashAccount = route["account"]
+        selected_endpoint = str(route["endpoint_id"])
+        route_batch_counts[selected_account.name] += 1
         rows = slices[index]
         task_by_child = {row["child_id"]: row for row in rows}
         for raw in output["results"]:
@@ -525,10 +667,18 @@ async def extract_entities(
                 raw,
                 task=task,
                 nlp=nlp,
-                endpoint_id=endpoint,
-                account_name=selected_name,
+                endpoint_id=selected_endpoint,
+                account_name=selected_account.name,
+                concurrency_policy=concurrency_policy,
             )
-        remote_jobs.append(dict(output.get("_runpod_job") or {}))
+        remote_jobs.append(
+            {
+                **dict(output.get("_runpod_job") or {}),
+                "account": selected_account.name,
+                "endpoint": selected_endpoint,
+                "batch_id": str(output.get("batch_id") or ""),
+            }
+        )
     expected_children = {row["child_id"] for row in task_rows}
     if set(results_by_child) != expected_children:
         raise RuntimeError("LocalExtractionV1 result closure is incomplete")
@@ -544,9 +694,26 @@ async def extract_entities(
         "failed_chunks": 0,
         "request_batches": len(slices),
         "request_batch_size": batch_size,
-        "request_concurrency": request_limit,
-        "account": selected_name,
-        "endpoint": endpoint,
+        "request_concurrency": sum(
+            int(route["request_limit"]) for route in resolved_routes
+        ),
+        "account": (
+            selected_routes[0].account_name if len(selected_routes) == 1 else None
+        ),
+        "endpoint": (
+            selected_routes[0].endpoint_id if len(selected_routes) == 1 else None
+        ),
+        "dispatch_policy": concurrency_policy,
+        "routes": [
+            {
+                "account": route.account_name,
+                "endpoint": route.endpoint_id,
+                "request_concurrency": int(resolved["request_limit"]),
+                "request_batches": route_batch_counts[route.account_name],
+            }
+            for route, resolved in zip(selected_routes, resolved_routes, strict=True)
+        ],
+        "job_journal": str(journal_path),
         "duration_seconds": round(duration, 3),
         "chunks_per_second": round(len(ordered) / duration, 3) if duration else 0.0,
         "remote_jobs": remote_jobs,

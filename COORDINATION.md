@@ -10157,3 +10157,107 @@ Owner has submitted the RunPod worker-quota increase request ("i sent it").
 When granted, the burst configuration may claim the new cap under the
 standing burst directive (f8ca747) — same laws, updated fleet arithmetic,
 receipts state the granted number.
+
+## [2026-07-15T20:04:17Z] EXECUTOR → SENIOR :: RECEIPT
+
+Full-scope E2E read-only preflight is VERIFIED green with true `EXIT=0` at
+every gate. Frozen preregistration verifies hashes
+`da7b94c152dd...af00` (15-document selection) and
+`8f70b1d37512...c110` (17 queries / 51 tier executions); staging discovers
+exactly 15 selected documents and excludes 15 AppleDouble files with zero
+content-hash mismatches. All six active-work counts and both new cost-ledger
+counts are zero. The only admitted API summary route is the certified
+DeepSeek V4 Flash owner route; the configured hard summary authority will be
+`$30` within the owner's combined `$35` authority. Endpoint census confirms
+both blue and both embed endpoints at their prior maxima, primary green at
+max 1, no secondary green, both registry-auth records present, and primary
+green pinned to immutable image digest
+`sha256:4cb084572687...f896`; `secret_values_emitted=0`. No corpus, provider,
+endpoint, or production-data mutation occurred.
+
+## [2026-07-15T20:04:17Z] EXECUTOR → SENIOR :: ACK
+
+MAX-BURST dispatch exposed one required zero-provider implementation seam
+before scaling: the deployed strict local adapter accepts only one explicit
+account/endpoint pair and records a RunPod job ID only after the job reaches a
+terminal state. I am implementing the directive narrowly as an additive,
+backward-compatible explicit multi-route contract plus fsync job journal:
+deterministic route splitting, exact named-account/endpoint pairing, no
+fallback/failover, immediate submitted-ID receipt before polling, and the
+existing strict deterministic compiler unchanged. Focused tests and the
+canonical two-container rebuild/parity gates will precede any endpoint scale
+or paid call.
+
+## [2026-07-15T20:10:06Z] EXECUTOR → SENIOR :: RECEIPT
+
+Dual-route/journal focused gate is VERIFIED green with true `EXIT=0`: 23
+tests passed across the strict LocalExtractionV1 adapter and shared RunPod
+transport. New proofs cover mutually exclusive singular/plural corpus
+contracts, unique explicit routes, deterministic 2/2 round-robin split across
+four slices, exact account-key/green pairing despite blue IDs in Settings,
+no failover policy, journal writability refusal before provider dispatch,
+immediate submitted job-ID persistence before the first status poll, terminal
+timing persistence, and no text/key fields in journal rows. Legacy singular
+selection remains green. The host pytest attempt was invalid (`EXIT=127`,
+pytest absent) and is not counted; the valid gate used Docker-copied test
+source with `PYTHONPATH` and left deployed `/app` untouched. No provider,
+endpoint, corpus, or production-data mutation occurred.
+
+## [2026-07-15T20:12:07Z] EXECUTOR → SENIOR :: RECEIPT
+
+Dual-route adjacent gate is VERIFIED green on unchanged rerun: `281 passed,
+1 skipped`, true `EXIT=0`, across frozen/mutable config, ingestion batches and
+idempotency, worker phases, staging, resource planning, summaries, chunking,
+universal schema, and both RunPod adapters. The first adjacent run was
+correctly RED (`280 passed, 1 failed, 1 skipped`, true `EXIT=1`) because the
+new route field was absent from the total config partition. The only fix was
+to classify `runpod_local_extraction_routes` as frozen, matching the standing
+law that a non-empty corpus cannot change its pinned extraction route. No
+guard or test was weakened, and no provider/production mutation occurred.
+
+## [2026-07-15T20:13:41Z] EXECUTOR → SENIOR :: RECEIPT
+
+Complete current-tree backend gate is VERIFIED green with true `EXIT=0`:
+`3325 passed, 7 skipped, 23 warnings in 36.90s`; only the already rejected
+C2/GLiREL benchmark was excluded per ACTIVE DIRECTIVES. The valid run used a
+non-`/tmp`, repo-relative stage assembled from Git-tracked current-worktree
+files. A prior invocation did not reach pytest because its assumed old stage
+was absent and a broad copy encountered an untracked HF cache; it has no test
+result and is not counted. This closes the zero-provider implementation gate;
+no external or production-data mutation occurred.
+
+## [2026-07-15T20:17:27Z] EXECUTOR → SENIOR :: RECEIPT
+
+Pre-deploy zero-work census and canonical rebuild are VERIFIED green. The
+census reports all six active-work counts zero, true `EXIT=0`; an initial
+attempt was invalid `EXIT=2` because its temporary script was absent, then the
+repo's equivalent read-only census was copied and rerun unchanged. The exact
+authoritative compose command rebuilt and recreated backend+ingest-worker and
+returned true `EXIT=0`; both containers reached healthy. No provider call or
+corpus/production-data write occurred.
+
+## [2026-07-15T20:17:27Z] EXECUTOR → SENIOR :: RECEIPT
+
+Post-deploy dual-route integrity gate is VERIFIED green. Backend and worker
+each produce a live 1024-dimensional MLX embedding; host MLX reports
+Qwen3-Embedding-0.6B-mxfp8 at dimension 1024. The permanent 49-file closure
+has zero mismatches, all five changed runtime files are exact across
+host/backend/worker, and both containers load Python UID 1000, spaCy 3.8.14,
+`en_core_web_sm` 3.8.0 with six pipeline components. The worker fsync
+preflight succeeds at persistent
+`/data/ingest-files/runpod-job-journals`. Docker-copied deployed-byte tests
+pass `23/23` in backend and `23/23` in worker, each true `EXIT=0`, with test
+journals redirected to `/tmp`; no test was baked. All listed subgates have
+true `EXIT=0`; no provider or production-data mutation occurred.
+
+## [2026-07-15T20:18:39Z] EXECUTOR → SENIOR :: RECEIPT
+
+Dual-route publication scope gate is VERIFIED green. Required
+pull/rebase/autostash reports already up to date, true `EXIT=0`. Exactly eight
+scoped paths are staged: coordination, five production Python modules, one
+focused test module, and the offline worker's persistent-journal environment
+binding; `tmp/` remains untracked and unstaged. Staged `git diff --check` and
+credential-pattern scan both return true `EXIT=0`, with
+`secret_like_matches=0`. I am committing the deployed bytes with the required
+Codex co-author trailer, then pushing the branch and `HEAD:main` before any
+endpoint mutation.

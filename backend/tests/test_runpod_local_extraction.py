@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import copy
+import json
 
+import httpx
 import pytest
 from pydantic import ValidationError
 
@@ -10,6 +12,7 @@ from models.schemas import (
     IngestionConfig,
     RunpodFlashAccount,
     RunpodFlashExtractionSettings,
+    RunpodLocalExtractionRoute,
 )
 from services import runpod_flash_extraction, runpod_local_extraction
 from services.ghost_b import ExtractionTask
@@ -38,13 +41,17 @@ def _account(name: str, endpoint: str) -> RunpodFlashAccount:
     )
 
 
-def _task(text: str = "Prices increase.") -> ExtractionTask:
+def _task(
+    text: str = "Prices increase.",
+    *,
+    suffix: str = "test",
+) -> ExtractionTask:
     return ExtractionTask(
-        chunk_id="child:test",
-        doc_id="doc:test",
+        chunk_id=f"child:{suffix}",
+        doc_id=f"doc:{suffix}",
         corpus_id="corpus:test",
         text=text,
-        metadata={"source_version_id": "srcv:test"},
+        metadata={"source_version_id": f"srcv:{suffix}"},
     )
 
 
@@ -75,19 +82,25 @@ def _runtime_identity() -> dict:
     }
 
 
-def _remote_result(text: str = "Prices increase.") -> dict:
+def _remote_result(
+    text: str = "Prices increase.",
+    *,
+    document_id: str = "doc:test",
+    child_id: str = "child:test",
+    source_version_id: str = "srcv:test",
+) -> dict:
     bundle = build_spacy_observation_bundle(
         text=text,
         nlp=runpod_local_extraction._load_nlp(),
-        source_version_id="srcv:test",
-        hierarchy_node_id="child:test",
+        source_version_id=source_version_id,
+        hierarchy_node_id=child_id,
         parser_id=runpod_local_extraction.SPACY_MODEL,
         parser_version=runpod_local_extraction.PARSER_VERSION,
     )
     compiled = compile_local_extraction_v1(
         bundle,
-        document_id="doc:test",
-        child_id="child:test",
+        document_id=document_id,
+        child_id=child_id,
     )
     extraction = compiled.extraction.model_dump(mode="json")
     extraction["entities"] = [
@@ -102,9 +115,9 @@ def _remote_result(text: str = "Prices increase.") -> dict:
         }
     ]
     return {
-        "document_id": "doc:test",
-        "child_id": "child:test",
-        "source_version_id": "srcv:test",
+        "document_id": document_id,
+        "child_id": child_id,
+        "source_version_id": source_version_id,
         "extraction": extraction,
         "temporal_captures": [],
         "temporal_captures_truncated": False,
@@ -114,13 +127,22 @@ def _remote_result(text: str = "Prices increase.") -> dict:
 
 
 def _remote_output(request: dict, text: str = "Prices increase.") -> dict:
+    results = [
+        _remote_result(
+            str(row["text"]),
+            document_id=str(row["document_id"]),
+            child_id=str(row["child_id"]),
+            source_version_id=str(row["source_version_id"]),
+        )
+        for row in request["tasks"]
+    ]
     return {
         "contract_version": runpod_local_extraction.CONTRACT_VERSION,
         "batch_id": request["batch_id"],
-        "results": [_remote_result(text)],
+        "results": results,
         "runtime_identity": _runtime_identity(),
         "metrics": {
-            "chunks": 1,
+            "chunks": len(results),
             "windows": 1,
             "entities": 1,
             "predicates": 1,
@@ -153,6 +175,20 @@ def test_default_config_preserves_legacy_v2_v3_adapter() -> None:
         is runpod_local_extraction.extract_entities
     )
 
+    burst = IngestionConfig(
+        extraction_engine="runpod_flash",
+        runpod_wire_contract="local_extraction_v1",
+        runpod_local_extraction_routes=[
+            {"account_name": "primary", "endpoint_id": "greenprimary"},
+            {"account_name": "secondary", "endpoint_id": "greensecondary"},
+        ],
+    )
+    assert burst.runpod_endpoint_id_override is None
+    assert [row.account_name for row in burst.runpod_local_extraction_routes] == [
+        "primary",
+        "secondary",
+    ]
+
 
 def test_local_artifacts_round_trip_through_resume_staging() -> None:
     row = {
@@ -183,6 +219,31 @@ def test_local_artifacts_round_trip_through_resume_staging() -> None:
             "extraction_engine": "runpod_flash",
             "runpod_wire_contract": "local_extraction_v1",
             "runpod_endpoint_id_override": "greenendpoint",
+        },
+        {
+            "extraction_engine": "runpod_flash",
+            "runpod_wire_contract": "local_extraction_v1",
+            "runpod_local_extraction_routes": [
+                {"account_name": "primary", "endpoint_id": "greenprimary"}
+            ],
+        },
+        {
+            "extraction_engine": "runpod_flash",
+            "runpod_wire_contract": "local_extraction_v1",
+            "runpod_endpoint_id_override": "greenendpoint",
+            "runpod_account_name_override": "primary",
+            "runpod_local_extraction_routes": [
+                {"account_name": "primary", "endpoint_id": "greenprimary"},
+                {"account_name": "secondary", "endpoint_id": "greensecondary"},
+            ],
+        },
+        {
+            "extraction_engine": "runpod_flash",
+            "runpod_wire_contract": "local_extraction_v1",
+            "runpod_local_extraction_routes": [
+                {"account_name": "primary", "endpoint_id": "greenprimary"},
+                {"account_name": "primary", "endpoint_id": "greensecondary"},
+            ],
         },
     ],
 )
@@ -318,3 +379,165 @@ async def test_missing_source_version_fails_before_dispatch(
             accounts=[(_account("primary", "blue-primary"), "key-primary")],
         )
     assert dispatched is False
+
+
+@pytest.mark.asyncio
+async def test_explicit_routes_split_deterministically_without_failover(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    calls: dict[str, tuple[str, str]] = {}
+
+    async def fake_submit(
+        _client,
+        *,
+        endpoint_id,
+        api_key,
+        request,
+        job_event_sink,
+        **_kwargs,
+    ):
+        child_id = request["tasks"][0]["child_id"]
+        calls[child_id] = (endpoint_id, api_key)
+        await job_event_sink(
+            {
+                "event": "submitted",
+                "batch_id": request["batch_id"],
+                "job_id": f"job-{child_id}",
+            }
+        )
+        output = _remote_output(request)
+        output["_runpod_job"]["job_id"] = f"job-{child_id}"
+        return output
+
+    monkeypatch.setattr(runpod_local_extraction, "_submit_and_wait", fake_submit)
+    config = _config().model_copy(
+        update={"request_batch_size": 1, "request_concurrency": 2}
+    )
+    tasks = [_task(suffix=str(index)) for index in range(4)]
+    report = await runpod_local_extraction.extract_entities(
+        tasks,
+        routes=[
+            RunpodLocalExtractionRoute(
+                account_name="primary",
+                endpoint_id="greenprimary",
+            ),
+            RunpodLocalExtractionRoute(
+                account_name="secondary",
+                endpoint_id="greensecondary",
+            ),
+        ],
+        runpod_config=config,
+        accounts=[
+            (_account("primary", "blueprimary"), "key-primary"),
+            (_account("secondary", "bluesecondary"), "key-secondary"),
+        ],
+        job_journal_dir=str(tmp_path),
+        return_report=True,
+    )
+
+    assert calls == {
+        "child:0": ("greenprimary", "key-primary"),
+        "child:1": ("greensecondary", "key-secondary"),
+        "child:2": ("greenprimary", "key-primary"),
+        "child:3": ("greensecondary", "key-secondary"),
+    }
+    assert report.metrics["dispatch_policy"] == (
+        "explicit_pinned_routes_round_robin_no_failover"
+    )
+    assert [row["request_batches"] for row in report.metrics["routes"]] == [2, 2]
+    assert {
+        (row["account"], row["endpoint"]) for row in report.metrics["remote_jobs"]
+    } == {
+        ("primary", "greenprimary"),
+        ("secondary", "greensecondary"),
+    }
+    assert [row.provider_card["account"] for row in report.results] == [
+        "primary",
+        "secondary",
+        "primary",
+        "secondary",
+    ]
+    journal_rows = [
+        json.loads(line)
+        for line in next(tmp_path.glob("corpus-*.jsonl")).read_text().splitlines()
+    ]
+    assert journal_rows[0]["event"] == "journal_preflight"
+    assert {row["job_id"] for row in journal_rows[1:]} == {
+        "job-child:0",
+        "job-child:1",
+        "job-child:2",
+        "job-child:3",
+    }
+    assert all("text" not in row and "api_key" not in row for row in journal_rows)
+
+
+@pytest.mark.asyncio
+async def test_unwritable_journal_refuses_before_provider_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    dispatched = False
+
+    async def fake_submit(*_args, **_kwargs):
+        nonlocal dispatched
+        dispatched = True
+        raise AssertionError("provider reached with unwritable journal")
+
+    blocked = tmp_path / "not-a-directory"
+    blocked.write_text("blocked")
+    monkeypatch.setattr(runpod_local_extraction, "_submit_and_wait", fake_submit)
+    with pytest.raises((FileExistsError, NotADirectoryError)):
+        await runpod_local_extraction.extract_entities(
+            [_task()],
+            endpoint_id="greenendpoint",
+            account_name="primary",
+            runpod_config=_config(),
+            accounts=[(_account("primary", "blueprimary"), "key-primary")],
+            job_journal_dir=str(blocked),
+        )
+    assert dispatched is False
+
+
+@pytest.mark.asyncio
+async def test_transport_journals_submitted_id_before_first_poll() -> None:
+    events: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/run"):
+            return httpx.Response(200, json={"id": "job-immediate"})
+        if "/status/" in request.url.path:
+            assert [row["event"] for row in events] == ["submitted"]
+            return httpx.Response(
+                200,
+                json={
+                    "status": "COMPLETED",
+                    "output": {"results": []},
+                    "delayTime": 11,
+                    "executionTime": 22,
+                },
+            )
+        return httpx.Response(404)
+
+    async def sink(event: dict) -> None:
+        events.append(copy.deepcopy(event))
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        output = await runpod_flash_extraction._submit_and_wait(
+            client,
+            endpoint_id="greenendpoint",
+            api_key="test-secret",
+            request={"batch_id": "batch:test", "tasks": []},
+            timeout_seconds=30,
+            poll_interval_seconds=0.25,
+            job_event_sink=sink,
+        )
+
+    assert [row["event"] for row in events] == ["submitted", "terminal"]
+    assert events[0]["job_id"] == "job-immediate"
+    assert events[1]["status"] == "COMPLETED"
+    assert output["_runpod_job"] == {
+        "job_id": "job-immediate",
+        "delay_time_ms": 11,
+        "execution_time_ms": 22,
+    }

@@ -176,6 +176,30 @@ def _universal_relation_schema() -> list[str]:
     return UNIVERSAL_RELATION_SCHEMA
 
 
+class RunpodLocalExtractionRoute(BaseModel):
+    """One explicitly pinned account/endpoint pair for LocalExtractionV1."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    account_name: str = Field(min_length=1, max_length=60)
+    endpoint_id: str = Field(min_length=1, max_length=120)
+
+    @field_validator("account_name", "endpoint_id")
+    @classmethod
+    def strip_route_identity(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("RunPod route identity cannot be empty")
+        return normalized
+
+    @field_validator("endpoint_id")
+    @classmethod
+    def validate_endpoint_identity(cls, value: str) -> str:
+        if not value.isalnum():
+            raise ValueError("RunPod endpoint identity must be alphanumeric")
+        return value
+
+
 class IngestionConfig(BaseModel):
     """Source-backed ingestion config for the current pipeline."""
 
@@ -258,6 +282,15 @@ class IngestionConfig(BaseModel):
     )
     runpod_endpoint_id_override: str | None = Field(default=None, max_length=120)
     runpod_account_name_override: str | None = Field(default=None, max_length=60)
+    runpod_local_extraction_routes: list[RunpodLocalExtractionRoute] = Field(
+        default_factory=list,
+        max_length=64,
+        description=(
+            "Ordered explicit account/endpoint pairs for deterministic "
+            "LocalExtractionV1 burst dispatch. Empty preserves the singular "
+            "endpoint/account override contract."
+        ),
+    )
 
     # Default to the universal vocab so freshly-instantiated configs match
     # what the lifespan migration patches existing corpora to. Ghost B's
@@ -338,22 +371,40 @@ class IngestionConfig(BaseModel):
     def validate_runpod_wire_contract(self) -> "IngestionConfig":
         endpoint = (self.runpod_endpoint_id_override or "").strip()
         account = (self.runpod_account_name_override or "").strip()
+        routes = self.runpod_local_extraction_routes
+        singular_present = (
+            self.runpod_endpoint_id_override is not None
+            or self.runpod_account_name_override is not None
+        )
         if self.runpod_wire_contract == "local_extraction_v1":
             if self.extraction_engine != "runpod_flash":
                 raise ValueError(
                     "local_extraction_v1 requires extraction_engine=runpod_flash"
                 )
-            if not endpoint or not account:
+            if routes and singular_present:
+                raise ValueError(
+                    "local_extraction_v1 requires either singular overrides or "
+                    "explicit routes, never both"
+                )
+            if not routes and (not endpoint or not account):
                 raise ValueError(
                     "local_extraction_v1 requires explicit RunPod endpoint and "
                     "account overrides"
                 )
-        elif (
-            self.runpod_endpoint_id_override is not None
-            or self.runpod_account_name_override is not None
-        ):
+            if routes:
+                if len(routes) < 2:
+                    raise ValueError(
+                        "local_extraction_v1 route lists require at least two routes"
+                    )
+                route_accounts = [row.account_name for row in routes]
+                route_endpoints = [row.endpoint_id for row in routes]
+                if len(set(route_accounts)) != len(route_accounts):
+                    raise ValueError("LocalExtractionV1 route accounts must be unique")
+                if len(set(route_endpoints)) != len(route_endpoints):
+                    raise ValueError("LocalExtractionV1 route endpoints must be unique")
+        elif singular_present or routes:
             raise ValueError(
-                "RunPod endpoint/account overrides require local_extraction_v1"
+                "RunPod endpoint/account routes require local_extraction_v1"
             )
         return self
 

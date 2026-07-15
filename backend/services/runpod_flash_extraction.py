@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import inspect
 import json
 import logging
 import math
@@ -58,7 +59,9 @@ def _task_dict(task: Any) -> dict[str, Any]:
     }
 
 
-def _batch_id(tasks: list[dict[str, Any]], config: RunpodFlashExtractionSettings) -> str:
+def _batch_id(
+    tasks: list[dict[str, Any]], config: RunpodFlashExtractionSettings
+) -> str:
     identity = {
         "chunks": [task["chunk_id"] for task in tasks],
         "model": config.model_id,
@@ -125,7 +128,9 @@ async def _cancel_job(
             f"{RUNPOD_API_BASE}/{endpoint_id}/cancel/{job_id}", headers=headers
         )
     except Exception:  # noqa: BLE001 - cancellation is best effort
-        logger.debug("Runpod cancellation failed endpoint=%s job=%s", endpoint_id, job_id)
+        logger.debug(
+            "Runpod cancellation failed endpoint=%s job=%s", endpoint_id, job_id
+        )
 
 
 async def _submit_and_wait(
@@ -136,6 +141,7 @@ async def _submit_and_wait(
     request: dict[str, Any],
     timeout_seconds: int,
     poll_interval_seconds: float,
+    job_event_sink: Any = None,
 ) -> dict[str, Any]:
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -162,20 +168,44 @@ async def _submit_and_wait(
     job_id = str(submitted.get("id") or "")
     if not job_id:
         raise RuntimeError("Runpod submission returned no job id")
+    if job_event_sink is not None:
+        emitted = job_event_sink(
+            {
+                "event": "submitted",
+                "endpoint_id": endpoint_id,
+                "batch_id": str(request.get("batch_id") or ""),
+                "job_id": job_id,
+            }
+        )
+        if inspect.isawaitable(emitted):
+            await emitted
 
     deadline = time.monotonic() + timeout_seconds
     status_url = f"{RUNPOD_API_BASE}/{endpoint_id}/status/{job_id}"
     try:
         while True:
             if time.monotonic() >= deadline:
+                if job_event_sink is not None:
+                    emitted = job_event_sink(
+                        {
+                            "event": "terminal",
+                            "endpoint_id": endpoint_id,
+                            "batch_id": str(request.get("batch_id") or ""),
+                            "job_id": job_id,
+                            "status": "CLIENT_TIMEOUT",
+                        }
+                    )
+                    if inspect.isawaitable(emitted):
+                        await emitted
                 await _cancel_job(client, endpoint_id, job_id, headers)
-                raise TimeoutError(
-                    f"Runpod job exceeded {timeout_seconds}s timeout"
-                )
+                raise TimeoutError(f"Runpod job exceeded {timeout_seconds}s timeout")
             status_response: httpx.Response | None = None
             for attempt in range(3):
                 status_response = await client.get(status_url, headers=headers)
-                if status_response.status_code < 500 and status_response.status_code != 429:
+                if (
+                    status_response.status_code < 500
+                    and status_response.status_code != 429
+                ):
                     break
                 if attempt < 2:
                     await asyncio.sleep(_retry_delay(status_response, attempt))
@@ -184,6 +214,20 @@ async def _submit_and_wait(
             body = status_response.json()
             status = str(body.get("status") or "").upper()
             if status == "COMPLETED":
+                if job_event_sink is not None:
+                    emitted = job_event_sink(
+                        {
+                            "event": "terminal",
+                            "endpoint_id": endpoint_id,
+                            "batch_id": str(request.get("batch_id") or ""),
+                            "job_id": job_id,
+                            "status": status,
+                            "delay_time_ms": body.get("delayTime"),
+                            "execution_time_ms": body.get("executionTime"),
+                        }
+                    )
+                    if inspect.isawaitable(emitted):
+                        await emitted
                 output = _extract_output(body)
                 output["_runpod_job"] = {
                     "job_id": job_id,
@@ -192,6 +236,20 @@ async def _submit_and_wait(
                 }
                 return output
             if status in TERMINAL_FAILURES:
+                if job_event_sink is not None:
+                    emitted = job_event_sink(
+                        {
+                            "event": "terminal",
+                            "endpoint_id": endpoint_id,
+                            "batch_id": str(request.get("batch_id") or ""),
+                            "job_id": job_id,
+                            "status": status,
+                            "delay_time_ms": body.get("delayTime"),
+                            "execution_time_ms": body.get("executionTime"),
+                        }
+                    )
+                    if inspect.isawaitable(emitted):
+                        await emitted
                 raise RuntimeError(
                     f"Runpod job {status.lower()}: {_safe_error(body.get('error'))}"
                 )
