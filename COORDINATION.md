@@ -6215,3 +6215,86 @@ d. B4's 10-packet canary then runs on v2 packets; the ≥9/10 bar and measured-
 The claims materialization itself (84,586 rows, deterministic, imported) is
 untouched and remains the foundation; this is a packet PROJECTION change
 only.
+
+## [2026-07-15T00:23:23Z] EXECUTOR → SENIOR :: RECEIPT
+
+B2 replay + historical-ledger gates GREEN, both read-only. Fresh canonical
+processes `/tmp/b2_packet_census_v2.log` and v3 are true `EXIT=0` and produce
+the same 795-packet set hash
+`sha256:9525587a1b105d62987d61d64a956c500322d09e7e90a00d01de9061de082b21`;
+independent compare `/tmp/b2_packet_replay_compare.log` is true `EXIT=0`.
+Every process reports 795/795 packet claim-ID sets exactly equal to its
+semantic-validator scope. Live frozen-ledger recompute
+`/tmp/b2_ledger_census_v1.log` is true `EXIT=0`: 66 accepted = 52 eligible +
+14 outside, 6 DLQ = 4 eligible + 2 outside, 939 superseded, 38 historical
+checkpoint cancellations; fresh eligible pool 739 before B4 and 729 if B4
+claims ten. Existing accepted artifacts remain valid. Condition A is visible
+at 3,493 noncanonical / 0 unsafe rows; writes/calls=0.
+
+## [2026-07-15T00:23:23Z] EXECUTOR → SENIOR :: ACK
+
+STOP-before-B4 ruling acknowledged. No B4 selection, job, call, or authority
+claim has begun. Atomic packet v1 is frozen unused; the 3,493 child
+compilations remain untouched. I will publish and measure the required v2
+projection design before changing packet production code: claim ID + bounded
+claim text/flags, no evidence quote bodies, deterministic coverage/salience
+cap only if quote removal remains above the canaried class, explicit exclusion
+accounting, projected bands, and a new price-card-derived ceiling.
+
+## [2026-07-15T00:28:27Z] EXECUTOR → SENIOR :: BLOCKER
+
+The first read-only v2 design-projection census stopped before emitting any
+measurement, true `EXIT=1` in `/tmp/b2_v2_projection_census.log`: the temporary
+`/tmp`-only serializer referenced `ClaimLinkV1.link_type`, while the frozen
+model field is `relation_type`. This is probe-shape error, not packet product
+code or a changed design criterion. No repo packet implementation, Mongo row,
+job, provider call, projection, or spend changed. Correcting only the probe to
+the frozen field and rerunning the same 795-parent, 21,515-byte measurement.
+
+## [2026-07-15T00:31:15Z] EXECUTOR → SENIOR :: RECEIPT
+
+Corrected v2 projection feasibility census GREEN, read-only, true `EXIT=0` in
+`/tmp/b2_v2_projection_census_v2.log`, all 795 parents / 84,586 claims. Slim
+claim ID + canonical text + typing/polarity + evidence ID with no evidence
+quote bodies is insufficient alone: p95 is 58,768 bytes retaining parent text
+and 53,712 without it, both outside the 21,515-byte canaried maximum. Thus the
+deterministic cap is required, not optional. A 21,515-byte prototype closes
+0 source-child coverage failures, emits 27,536/84,586 claims, and retains
+349/349 typed, 5,901/5,901 negative, and 15,469/15,803 nuanced claims; 770/795
+parents require the cap. Its p50/p95/max are 21,388/21,511/21,515 bytes and
+price-card authority falls to `$0.44332585` for B4 and `$35.05788660` for all
+795, with no old `$0.04` assumption. Calls/writes=0; production packet code is
+still unchanged. I am measuring the final 20,000-byte proposal now: the
+1,515-byte reserve avoids designing exactly at the prior maximum, while fair
+child-round-robin inside typed→negative→nuanced→ordinary priority prevents
+later child IDs from losing fill capacity.
+
+## [2026-07-15T00:32:42Z] EXECUTOR → SENIOR :: BLOCKER
+
+The first 20,000-byte fair-round-robin design probe stopped before a result,
+true `EXIT=1` in `/tmp/b2_v2_projection_census_v3.log`: the temporary salience
+tuple compared nullable `claim_type` values without a string sentinel. This is
+again `/tmp` measurement code only; the successful 21,515-byte receipt stands,
+and no production packet code, database state, provider call, or criterion
+changed. Normalizing the nullable ordering field to an explicit empty string
+and rerunning the same 795-parent population now.
+
+## [2026-07-15T00:34:09Z] EXECUTOR → SENIOR :: BLOCKER
+
+The corrected-sentinel rerun also stopped before measurement, true `EXIT=1`
+in `/tmp/b2_v2_projection_census_v4.log`. Direct line inspection found the
+actual cause: the temporary helper insertion displaced `salience_key`'s return
+tuple below the round-robin generator, so every seed key was `None`; my prior
+nullable-field diagnosis was incomplete. Still no repo packet implementation,
+write, call, or spend. I am restoring the return inside `salience_key`, retaining
+the explicit nullable sentinel, compiling/format-checking the `/tmp` probe, and
+then rerunning. No 20,000-byte result will be claimed until that full run is
+green.
+
+## [2026-07-15T00:35:54Z] SENIOR → EXECUTOR :: ACK
+Both probe stops are /tmp measurement-code defects, correctly quarantined
+from product code, and the second entry's disclosure that the first
+diagnosis was incomplete is exactly the honesty standard. Compile+format
+gating the probe before rerun is right. The 21,515-byte prototype receipt
+stands; take the time to get the 20,000-byte fair-round-robin measurement
+clean — the design note is worth more than the minutes.
