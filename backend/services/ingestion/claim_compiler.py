@@ -42,7 +42,6 @@ from services.ingestion.semantic_observations import (
     normalized_cue,
 )
 
-
 COMPILER_VERSION = "claim_compiler.v2"
 _RESULT_PHRASE_RE = re.compile(
     r"^(?:result(?:s|ed|ing)?\s+in|lead(?:s|ing|ed)?\s+to)\b",
@@ -227,12 +226,16 @@ def _canonical_proposition(
             predicate,
             objects,
             "IF " + " | ".join(map(normalized_cue, conditions)) if conditions else "",
-            "EXCEPT " + " | ".join(map(normalized_cue, exceptions))
-            if exceptions
-            else "",
-            "WHEN " + " | ".join(map(normalized_cue, temporal_cues))
-            if temporal_cues
-            else "",
+            (
+                "EXCEPT " + " | ".join(map(normalized_cue, exceptions))
+                if exceptions
+                else ""
+            ),
+            (
+                "WHEN " + " | ".join(map(normalized_cue, temporal_cues))
+                if temporal_cues
+                else ""
+            ),
         )
         if part
     )
@@ -584,19 +587,7 @@ def compile_claim_records_v1(
     )
 
     normalization = load_normalization_identity()
-    recipe = {
-        "compiler": COMPILER_VERSION,
-        "observation_recipe_hash": bundle.recipe_hash,
-        "normalization_registry": normalization["registry"],
-        "normalization_registry_version": normalization["version"],
-        "normalization_registry_hash": normalization["hash"],
-        "normalization_accounting": "typed_or_unresolved_exact_coordinate",
-        "entity_binding": "unique_containment_or_exact.v1",
-        "relation_policy": "dependency_direction_agreement_observation_only.v1",
-        "result_link_rules": "explicit_result_phrase_and_continuity.v1",
-        "knowledge_status": "candidate",
-    }
-    recipe_hash = namespace_hash("recipe", recipe)
+    recipe_hash = claim_compiler_recipe_hash(bundle.recipe_hash)
     claims: list[ClaimRecordV1] = []
     claims_with_positions: list[tuple[ClaimRecordV1, int, int]] = []
     rejected_relations: set[str] = set()
@@ -753,3 +744,24 @@ def compile_claim_records_v1(
         cross_sentence_rejected_count=cross_sentence_rejected,
         compiler_recipe_hash=recipe_hash,
     )
+
+
+def claim_compiler_recipe_hash(observation_recipe_hash: str) -> str:
+    """Return the certified v2 compiler identity for one observation recipe."""
+
+    if not observation_recipe_hash.strip():
+        raise ValueError("observation recipe hash must be nonempty")
+    normalization = load_normalization_identity()
+    recipe = {
+        "compiler": COMPILER_VERSION,
+        "observation_recipe_hash": observation_recipe_hash,
+        "normalization_registry": normalization["registry"],
+        "normalization_registry_version": normalization["version"],
+        "normalization_registry_hash": normalization["hash"],
+        "normalization_accounting": "typed_or_unresolved_exact_coordinate",
+        "entity_binding": "unique_containment_or_exact.v1",
+        "relation_policy": "dependency_direction_agreement_observation_only.v1",
+        "result_link_rules": "explicit_result_phrase_and_continuity.v1",
+        "knowledge_status": "candidate",
+    }
+    return namespace_hash("recipe", recipe)

@@ -1,0 +1,32 @@
+{
+  "registry": "semantic_parent_eligibility",
+  "version": "v2",
+  "schema_version": "semantic_parent_eligibility.v2",
+  "authority": "owner-authorized, senior-approved",
+  "source": "COORDINATION.md senior ruling 2026-07-14T23:29:58Z",
+  "changes_require_new_version": true,
+  "unicode_normalization": "NFKC",
+  "outer_whitespace_policy": "strip",
+  "line_whitespace_policy": "strip_and_drop_blank",
+  "heading_pattern": "^\\s{0,3}#{1,6}(?:\\s+|$)",
+  "heading_only_policy": "at_least_one_nonblank_line_and_all_nonblank_lines_match",
+  "substantive_line_policy": "non_heading_lines_in_source_order",
+  "url_pattern": "https?://\\S+|www\\.\\S+",
+  "lexical_nonword_pattern": "[^\\w]+",
+  "lexical_regex_mode": "unicode",
+  "substantive_byte_encoding": "utf-8",
+  "substantive_byte_min": 256,
+  "comparison": "greater_than_or_equal",
+  "reason_precedence": [
+    "heading_only",
+    "below_substantive_byte_min",
+    "eligible"
+  ],
+  "production_bans": [
+    "corpus_ids",
+    "parent_ids",
+    "section_name_blacklists",
+    "promotional_phrase_blacklists",
+    "evaluation_keys"
+  ]
+}

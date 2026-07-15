@@ -26,7 +26,6 @@ from models.semantic_artifacts import (
     make_evidence_ref,
 )
 
-
 _MODAL_FORCE = {
     "may": "possible",
     "might": "possible",
@@ -473,17 +472,15 @@ def build_spacy_observation_bundle(
                     )
                 )
 
-    recipe = {
-        "parser_id": parser_id,
-        "parser_version": parser_version,
-        "compiler": "semantic_observations.v1",
-        "qualifier_rules": "qualifier_rules.v1",
-    }
+    recipe_hash = semantic_observation_recipe_hash(
+        parser_id=parser_id,
+        parser_version=parser_version,
+    )
     identity = {
         "source_version_id": source_version_id,
         "hierarchy_node_id": hierarchy_node_id,
         "text_hash": domain_hash("normalized-text", text),
-        "recipe_hash": domain_hash("semantic-observation-recipe", recipe),
+        "recipe_hash": recipe_hash,
     }
     return ObservationBundle(
         bundle_id="observation-bundle:"
@@ -500,6 +497,20 @@ def build_spacy_observation_bundle(
         qualifiers=qualifiers,
         evidence_refs=evidence_refs,
     )
+
+
+def semantic_observation_recipe_hash(*, parser_id: str, parser_version: str) -> str:
+    """Return the frozen observation recipe identity without parsing text."""
+
+    if not parser_id.strip() or not parser_version.strip():
+        raise ValueError("parser identity must be nonempty")
+    recipe = {
+        "parser_id": parser_id,
+        "parser_version": parser_version,
+        "compiler": "semantic_observations.v1",
+        "qualifier_rules": "qualifier_rules.v1",
+    }
+    return domain_hash("semantic-observation-recipe", recipe)
 
 
 def _modal_force(qualifiers: Iterable[QualifierObservation]) -> str:
@@ -551,17 +562,7 @@ def compile_local_extraction_v1(
         qualifiers_by_target[qualifier.target_observation_id].append(qualifier)
 
     normalization = load_normalization_identity()
-    recipe = {
-        "compiler": "local_extraction_spacy.v1",
-        "normalization_registry": normalization["registry"],
-        "normalization_registry_version": normalization["version"],
-        "normalization_registry_hash": normalization["hash"],
-        "sentence_identity": "observation_bundle.evidence_ref_id",
-        "unknown_policy": "unresolved_spans",
-        "entity_lane": "not_fabricated_t8_1",
-        "relation_lane": "not_fabricated_t8_1",
-    }
-    recipe_hash = namespace_hash("recipe", recipe)
+    recipe_hash = local_extraction_recipe_hash()
     predicate_mentions: list[PredicateMention] = []
     unresolved_spans: list[str] = []
     matched_counts: dict[str, int] = defaultdict(int)
@@ -643,6 +644,23 @@ def load_normalization_identity() -> dict[str, str]:
     }
 
 
+def local_extraction_recipe_hash() -> str:
+    """Return the frozen local-extraction recipe identity without source text."""
+
+    normalization = load_normalization_identity()
+    recipe = {
+        "compiler": "local_extraction_spacy.v1",
+        "normalization_registry": normalization["registry"],
+        "normalization_registry_version": normalization["version"],
+        "normalization_registry_hash": normalization["hash"],
+        "sentence_identity": "observation_bundle.evidence_ref_id",
+        "unknown_policy": "unresolved_spans",
+        "entity_lane": "not_fabricated_t8_1",
+        "relation_lane": "not_fabricated_t8_1",
+    }
+    return namespace_hash("recipe", recipe)
+
+
 def _claim_type(
     predicate: PredicateObservation, qualifiers: list[QualifierObservation]
 ) -> str:
@@ -715,9 +733,11 @@ def compile_claim_candidates(
         assertion_mode = (
             "attributed"
             if any(item.kind == "attribution" for item in observed_qualifiers)
-            else "hypothetical"
-            if conditions and modal_force == "possible"
-            else "reported"
+            else (
+                "hypothetical"
+                if conditions and modal_force == "possible"
+                else "reported"
+            )
         )
         evidence_item = evidence[predicate.evidence_ref_id]
         subject_text = " | ".join(

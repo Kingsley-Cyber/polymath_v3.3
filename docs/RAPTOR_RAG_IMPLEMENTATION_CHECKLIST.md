@@ -1266,6 +1266,9 @@ the unchecked production items.
   accepted child claims are available. It must cite supporting claim IDs for
   every domain/frame/motif/condition, and remain a separate recipe from current
   Ghost A until before/after quality and cost results justify migration.
+- [ ] At activation, every Mongo consumer of
+  `semantic_digest_claim_compilations` must request timezone-aware BSON and
+  strictly revalidate the typed row; default naive datetime decoding is barred.
 - [ ] Land annotate-only with its first named consumer and diagnostics; do not
   change graph or retrieval behavior until the held-out claim/frame gates pass.
 - [ ] Keep Mongo authoritative, make Neo4j/Qdrant projections deterministic and
@@ -3099,6 +3102,135 @@ A corpus is strict-ready only when:
 - Checklist boxes closed: the first six P2.6 shared-contract/provenance/
   grounding-rule bullets only. P2.6 projector parity, all corpus-scale P2.7
   acceptance, and live P2.7b orchestration remain open.
+
+### 2026-07-15 - T9.3 Lane B B1/B2/B3 zero-spend closure
+
+- Commit: this commit on `claude-continuation-20260713`; B4 and Phase 2 remain
+  separately gated and no provider execution is included.
+- Owner: owner selected Lane B fix-then-buy. The senior approved the generic
+  B1 threshold, pinned-host/canonical-image B2 compiler boundary, explicit
+  packet-contract bump, historical ledger, bounded packet-v2 design, two
+  no-claim-child exclusions, three-negative capacity residual, and B3 policy;
+  senior certification is recorded at 2026-07-15T01:12:21Z in
+  `COORDINATION.md`.
+- Corpus/data scope: `markbuildsbrands_transcripts`, corpus
+  `5a20bc21-95df-42c2-80c8-f927b4e83904`, 99 documents. B1 classifies 989
+  structurally valid nonempty parents as 99 heading-only, 95 below the
+  256-substantive-byte threshold, and 795 eligible. B2 closes over 3,493
+  unique child chunks.
+- Code changes: added frozen `semantic_parent_eligibility.v2`, strict result
+  model, mark audit, and 8-row known-heading fixture; immutable
+  `ClaimCompilationMaterializationRowV1` export/import/readback boundary;
+  bounded `semantic_parent_packet.atomic_claims.v2` with exact five-field
+  provider claims, one-per-child closure, 20,000-byte typed→negative→nuanced→
+  ordinary child-round-robin skip-and-continue selection, emitted-only
+  validator scope, full source/emitted/excluded manifests, and byte-decision
+  ledgers. B3 records that T9.1 owns domain coverage and model proposals are
+  auxiliary, lawfully sparse candidates.
+- Durable migration/backfill: additive collection
+  `semantic_digest_claim_compilations` contains exactly 3,493 immutable
+  `canonical_write=false` candidates and zero unsafe/missing flags. Canonical
+  semantic artifacts, Qdrant, Neo4j, retrieval, projections, summaries, and
+  historical accepted digests were not changed.
+- Before metrics: 989 structural parents included 194 deterministic noise
+  rows. The first lossless atomic packet projection measured p50 301,642 / p95
+  360,251 / max 549,701 bytes and was frozen unused. Historical ledger is 66
+  accepted, 6 DLQ, 939 superseded, and 38 checkpoint-cancelled; 52 accepted +
+  4 DLQ overlap B1 eligibility.
+- After metrics: compiler export contains 84,586 claims (349 typed / 84,237
+  untyped), 30,880 evidence sentences, and 2 claim links; two independent
+  exports are byte-identical at raw JSONL SHA-256
+  `d29215a412e68bace7395291a3387d44a02c5b1d1d88afeae5a7a6e13b6a0a52`.
+  Production packet-v2 resolves 793 ready + 2 permanently ledgered
+  `source_child_without_atomic_claim` parents. Ready claims are 84,247 source /
+  20,960 emitted; typed retention is 347/347 and negative is 5,873/5,876. The
+  three excluded negatives all belong to one parent, were attempted twice,
+  exceeded the cap by 109–115 bytes, and remain locally authoritative. Packet
+  bytes p0/p50/p95/max are 9,142/19,870/19,996/20,000; complete fresh-process
+  receipts are byte-identical with 793 unique packets and set hash
+  `sha256:00960dbeb9d1704421a79ea1abd3b71112e316c66143b2cfe507c709c624bf04`.
+- Tests by tier: B1 host/canonical 9/9 each; packet-v2 final focused host 44/44
+  and canonical 33 passed / 11 expected trained-spaCy skips. Full production
+  census and replay are `EXIT=0`; complete JSON comparison is `EXIT=0`.
+  Formatting and static gates are green after all disclosed harness/assertion/
+  formatting corrections. Receipt pointers:
+  `/tmp/b2_v2_priority_exception_host.log`,
+  `/tmp/b2_v2_priority_exception_canonical.log`,
+  `/tmp/b2_packet_v2_census_v3.log`,
+  `/tmp/b2_packet_v2_census_replay.log`, and
+  `/tmp/b2_packet_v2_replay_compare.log`.
+- Cross-corpus test: intentionally not applicable. This mark-only lane changes
+  no retrieval or shared live projection. The later owner-authorized fresh
+  ecommerce E2E remains sequenced behind modular completion and RunPod parity.
+- Failure/rollback test: missing source closure, source drift, missing atomic
+  claims, duplicate rows, noncanonical-flag drift, packet oversize, schema
+  extras, invalid timestamps, packet nondeterminism, and exclusion-accounting
+  drift fail closed. Rollback removes candidate rows and additive code only;
+  no canonical state requires rollback.
+- Deployment image/health: no deploy, rebuild, restart, endpoint change, or
+  paid batch. Canonical gates used all five active compose overlays with a
+  read-only `/app` source bind; pinned host performed the certified spaCy
+  compile. Credentials were neither printed nor moved.
+- Remaining risks: provider proposal space is deliberately bounded to emitted
+  claims; excluded claims remain local. Two parents require a separately
+  approved compiler-policy decision if revisited. B4 must freeze size strata,
+  include top-decile representation, use current price cards, and perform a
+  visible per-packet summary-faithfulness review. Phase 2 remains blocked on
+  senior verification plus owner/standing gates.
+- Artifacts: `docs/T9_3_LANE_B_B1_B2_DESIGN_2026-07-14.md`,
+  `docs/T9_3_ATOMIC_PACKET_V2_BOUNDED_DESIGN_2026-07-15.md`, and
+  `docs/T9_3_B3_DETERMINISTIC_DOMAIN_AUTHORITY_2026-07-15.md`.
+- Checklist boxes closed: B1 eligibility, B2 atomic compilation/bounded packet
+  contract, and B3 domain-authority policy only. T9.3 B4, Phase 2,
+  corpus-wide acceptance, bounded tail, projection, and activation stay open.
+
+### 2026-07-15 - T9.3 Lane B B4 zero-provider preflight and paid-run seal
+
+- Commit: this commit on `claude-continuation-20260713`; it publishes tested
+  execution code but contains no provider output or paid-call receipt.
+- Owner: the owner selected Lane B. The senior restated exact B4 GO at
+  2026-07-15T01:31:30Z for ten packets, ceiling `$0.42995425`, >=9/10
+  acceptance, all-ten summary review, and noncanonical storage only.
+- Corpus/data scope: mark's 793 packet-ready parents minus 56 historically
+  purchased-ready = 737 fresh; two no-claim-child parents remain permanent
+  nonready exclusions and were not purchased.
+- Code changes: added a versioned five-band selector and credential-blind
+  preflight; exposed its immutable prepared selection to a separate paid
+  runner. The runner rederives every full packet/selection/prompt/repair/schema
+  hash, requires the exact decimal authority, uses serial max-attempts=1 jobs,
+  selection-scoped cost accounting, a two-ReadTimeout pause, and protected
+  census_scope.v2 before/after comparison.
+- Durable migration/backfill: none. The preflight and negative execution-seal
+  test made no job/cache/canonical write. Post-seal census found zero B4
+  selection rows, zero B4 phase rows, and zero active B4 lane leases.
+- Before metrics: 737 fresh packets. Rank-band populations are 185/184/184/
+  111/73 at q00–25/q25–50/q50–75/q75–90/top-decile.
+- After metrics: exactly two packets per band, ten unique documents, total
+  198,938 packet bytes, population hash
+  `sha256:00960dbeb9d1704421a79ea1abd3b71112e316c66143b2cfe507c709c624bf04`,
+  selection hash
+  `sha256:55ab1e846c40ef2e3a233a01f3333758b9660451b3237241f1976e271d9f203f`,
+  exact selected ceiling `$0.42995425`, and 727 fresh remaining after B4.
+- Tests by tier: combined B1–B4 host regression 34/34; runner/preflight host
+  16/16 plus compile; canonical image 16/16 plus Black; diff check green.
+  Receipt pointers: `/tmp/b123_b4_combined_host_v3.log`,
+  `/tmp/b4_runner_host_gate.log`, `/tmp/b4_runner_compile_gate.log`,
+  `/tmp/b4_runner_canonical_gate_v2.log`,
+  `/tmp/b4_runner_canonical_black_gate_v2.log`.
+- Cross-corpus test: not applicable to this frozen mark-only paid canary.
+- Failure/rollback test: invalid authorization completed the full live
+  read-only reconstruction then failed before credentials, job writes, or
+  calls (`/tmp/b4_atomic_seal_negative.log`, expected-negative wrapper green;
+  post-state `/tmp/b4_atomic_seal_state_v2.log`). Exact identity, count,
+  provider-card, cost, active-job, and canonical-drift checks fail closed.
+- Deployment image/health: no rebuild or endpoint deploy. Pure gates and live
+  seal used the healthy canonical backend image with current source mounted;
+  credentials were not printed or moved.
+- Remaining risks: the paid command and per-digest faithfulness review remain
+  next. Phase 2 stays sealed through final B4 review and the owner window.
+- Checklist boxes closed: B4 zero-provider selection/cost preflight and
+  execution seal only; paid acceptance, Phase 2, tail, projection, and
+  activation remain open.
 
 ## Implementation Log Template
 

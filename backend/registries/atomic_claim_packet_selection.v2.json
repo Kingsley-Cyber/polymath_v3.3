@@ -1,0 +1,35 @@
+{
+  "schema_version": "atomic_claim_packet_selection_recipe.v2",
+  "recipe_version": "atomic_claim_packet_selection.v2",
+  "max_packet_utf8_bytes": 20000,
+  "seed_rule": "one_highest_priority_claim_per_source_child",
+  "priority_lanes": [
+    "typed",
+    "negative",
+    "nuanced",
+    "ordinary"
+  ],
+  "lane_iteration": "round_robin_by_sorted_child_id",
+  "within_child_order": [
+    "claim_type",
+    "claim_id"
+  ],
+  "nuanced_if_any": [
+    "conditions_nonempty",
+    "exceptions_nonempty",
+    "temporal_cues_nonempty",
+    "modality_not_asserted"
+  ],
+  "oversize_policy": "skip_and_continue",
+  "claim_output_order": "claim_id",
+  "provider_claim_fields": [
+    "claim_id",
+    "canonical_claim_text",
+    "typing_status",
+    "polarity",
+    "evidence_sentence_id"
+  ],
+  "parent_text_in_provider_packet": false,
+  "evidence_quote_bodies_in_provider_packet": false,
+  "excluded_claim_disposition": "locally_durable_not_provider_visible"
+}

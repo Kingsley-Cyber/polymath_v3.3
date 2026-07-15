@@ -6736,3 +6736,54 @@ GO for the B4 canary on precisely these terms:
   words, phase 2 fires on my standing GO: 727 fresh packets, authority
   $31.1917106, ≥95% rolling bar, standing auto-stops, tail-retry set last.
 Execute B4.
+
+## [2026-07-15T01:32:23Z] EXECUTOR → SENIOR :: ACK
+
+B4 GO received exactly as restated: LongCat Tier3 / digest-v6 + repair-v3,
+atomic-claims-v2 population `00960dbe…`, frozen 10-row selection `55ab1e…`,
+hard ceiling `$0.42995425`, emitted-only schema+semantic acceptance at >=9/10,
+all-ten summary-faithfulness review, noncanonical storage only, and pause at
+two ReadTimeouts. I will not use the superseded whole-parent packet runner.
+The immediately preceding combined publication command had an operator path
+error (`/Users/king/miniconda3/bin/python` absent), true `EXIT=127` in
+`/tmp/b123_b4_combined_host.log`; no test or provider path ran and no state
+changed. I am rerunning it with the pinned repository environment before any
+execution runner is eligible.
+
+## [2026-07-15T01:33:14Z] EXECUTOR → SENIOR :: RECEIPT
+
+Combined B1/B2/B3/B4 publication regression is GREEN: 34/34, true `EXIT=0`
+in `/tmp/b123_b4_combined_host_v3.log`, using the pinned repository Python and
+environment loaded without emitting values. The intermediate corrected-Python
+attempt reached collection but lacked required local settings, true `EXIT=2`
+in `/tmp/b123_b4_combined_host_v2.log`; it ran no tests, provider path, or
+database action. These two operator setup errors are superseded by the green
+receipt and remain disclosed. I am proceeding to a separate atomic-B4 runner
+with the GO identities and ceiling fail-closed; no call occurs until its pure
+and canonical-image gates pass.
+
+## [2026-07-15T01:43:48Z] EXECUTOR → SENIOR :: RECEIPT
+
+Atomic-B4 execution seal gates are GREEN. Host pure tests 16/16 and compile
+true `EXIT=0` in `/tmp/b4_runner_host_gate.log` and
+`/tmp/b4_runner_compile_gate.log`. Canonical-image tests 16/16 and Black clean,
+true `EXIT=0` in `/tmp/b4_runner_canonical_gate_v2.log` and
+`/tmp/b4_runner_canonical_black_gate_v2.log`; diff check `EXIT=0`. The first
+canonical Black pass correctly found one test-file formatting delta
+(`/tmp/b4_runner_canonical_black_gate.log`, `EXIT=1`), mechanically formatted
+and superseded by the clean pass. Host Black was unavailable and canonical
+Black is authority; canonical Ruff was also unavailable and explicitly
+skipped, not reported green.
+
+The live invalid-authorization seal behaved exactly fail-closed: runner
+command `EXIT=1`, expected-negative wrapper `EXIT=0` in
+`/tmp/b4_atomic_seal_negative.log`; it returned only `PaidPassError`, no
+credential or content. Read-only post-seal census true `EXIT=0` in
+`/tmp/b4_atomic_seal_state_v2.log`: selection rows=0, phase rows=0, active B4
+lane leases=0. The initial host census used Docker-only Mongo DNS and failed
+before querying (`/tmp/b4_atomic_seal_state.log`, `EXIT=1`), then was corrected
+in-container. The execution runner now rederives both certified hashes,
+requires every full prompt/schema hash and exact decimal `$0.42995425`, runs
+serial durable max-attempts=1, accounts cost only over the frozen selection,
+pauses at two ReadTimeouts, and checks census_scope.v2 before/after. I will
+publish this tested code before dispatching the authorized paid command.

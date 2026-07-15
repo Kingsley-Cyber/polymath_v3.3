@@ -1,0 +1,42 @@
+{
+  "schema_version": "polymath.mark_heading_only_known.v1",
+  "corpus_name": "markbuildsbrands_transcripts",
+  "source": "read-only accepted-ledger census 2026-07-14",
+  "expected_reason": "heading_only",
+  "text": "## Transcript",
+  "text_sha256": "d74606d734f52cdccc45f576027d1db9b0723f8cca362a7e61de41dca6e2476b",
+  "rows": [
+    {
+      "doc_id": "0014fd0b27b94c150fef36768742b408ec8e29dbdfe91345b89603df21b903c4",
+      "parent_id": "0014fd0b27b94c150fef36768742b408ec8e29dbdfe91345b89603df21b903c4_parent_0001"
+    },
+    {
+      "doc_id": "02d1d93080f1ca97d29a0107f25f0976d7fc46606216569be5ab0f9f2fa94066",
+      "parent_id": "02d1d93080f1ca97d29a0107f25f0976d7fc46606216569be5ab0f9f2fa94066_parent_0001"
+    },
+    {
+      "doc_id": "02e459af3d5105765bbca19b5077ca330f68e16ce3de6e8f096703b217204bb9",
+      "parent_id": "02e459af3d5105765bbca19b5077ca330f68e16ce3de6e8f096703b217204bb9_parent_0001"
+    },
+    {
+      "doc_id": "0658018339e53f90a759fd91c5922cb1650d276ed220a196bb04f5899b30a9fe",
+      "parent_id": "0658018339e53f90a759fd91c5922cb1650d276ed220a196bb04f5899b30a9fe_parent_0001"
+    },
+    {
+      "doc_id": "077f954daf38252f03aa2ce200be33f9828ea28b61b6d8bce480ecd325f1eeb5",
+      "parent_id": "077f954daf38252f03aa2ce200be33f9828ea28b61b6d8bce480ecd325f1eeb5_parent_0001"
+    },
+    {
+      "doc_id": "0c4cf7dfb7c7eb6fbb86fab09613bdb9594a4f3b6c3f467ff9254d15dda25766",
+      "parent_id": "0c4cf7dfb7c7eb6fbb86fab09613bdb9594a4f3b6c3f467ff9254d15dda25766_parent_0001"
+    },
+    {
+      "doc_id": "0c72a3455a3bdaa045cee61aac42505c0b1dd94bd8108e9e9b74cb8750efca7d",
+      "parent_id": "0c72a3455a3bdaa045cee61aac42505c0b1dd94bd8108e9e9b74cb8750efca7d_parent_0001"
+    },
+    {
+      "doc_id": "0e24bdfb56579a848f7164229d04e36c34916c77ca2afd9d619e345d991d7783",
+      "parent_id": "0e24bdfb56579a848f7164229d04e36c34916c77ca2afd9d619e345d991d7783_parent_0001"
+    }
+  ]
+}
