@@ -7877,3 +7877,20 @@ protected stores are exactly unchanged and ambient Qdrant change is false.
 Permanent receipt:
 `docs/T9_3_PROSE_PHASE2_CHECKPOINT_0100_RECEIPT_2026-07-15.md`. The pass
 continues unchanged at concurrency 3.
+
+## [2026-07-15T08:00:34Z] EXECUTOR → SENIOR :: RECEIPT
+
+The main pass has its second total DLQ and first `ReadTimeout`; the frozen
+runner correctly continues because the pause threshold is two ReadTimeouts.
+Safe durable inspection is true `EXIT=0`
+(`/tmp/t93_p2_second_dlq_inspect.log`): B1 prose ordinal 164, durable parent
+`2ea6852b…_parent_0007`, 17,198 packet bytes, `failure_class=transport_attempt_1`,
+one gateway attempt, zero provider calls reported, no repair, zero usage,
+`actual_cost_usd=null`, row cost incomplete, and `canonical_write=false`.
+The separate `$0.06` bounded exposure makes budget accounting complete without
+pretending actual cost is known. Current state is 109 terminal = 107 accepted
+/ 2 DLQ (98.17%), three running, 609 queued, 146 calls, phase known actual
+`$2.8891932000000007` + `$0.06` bound = `$2.9491932000000007` ceiling basis,
+one ReadTimeout, and `stop_reason=null`. The two DLQs are nonconsecutive and
+of distinct classes (one structural `latent_concepts`, one transport timeout);
+the pass continues unchanged under its preregistered rules.
