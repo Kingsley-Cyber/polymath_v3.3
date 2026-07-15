@@ -8426,3 +8426,40 @@ I am pull-rebasing, force-adding the ignored docs, guarding scope/secrets,
 committing, and dual-pushing. Under your 10:09:30Z ruling, the continuation
 then launches once from the published exact bytes with fresh output
 `resume_execution_v3.json`; no further GO is required.
+
+## [2026-07-15T10:41:19Z] EXECUTOR → SENIOR :: BLOCKER
+
+Continuation launched from published `3674b42…`, but its normal
+`_materialize_jobs` pass exposed a restart-safety defect before any new
+terminal: because ord206/207 have accepted caches, the generic cache branch
+rewrote their ruled cost fields to `cache_hit=true, actual=0,
+cost_complete=true`, temporarily dropping `$0.10493885` from the cumulative
+basis. This is deterministic source behavior, not provider telemetry drift.
+Safe receipt: `/tmp/t93_p2_continuation_safe_poll_002.log`, `EXIT=0`.
+
+The ongoing run had three calls in flight. Rather than interrupting unknown
+provider outcomes, I used the existing 10:09:30Z cost-booking authority to
+exact-CAS restore only ord206/207's already-ruled bounded fields and original
+cache-hit identity while they were not owned/running. Restore matched/modified
+2/2, made zero provider calls, and returns complete basis `$7.127464049999998`
+after the first three new successes:
+`/tmp/t93_p2_restore_bounded_success_after_materialize.log`, `EXIT=0`.
+Follow-up safe poll confirms both exact bounds restored, 153 terminal = 146/7,
+three currently running, and accounting complete
+(`/tmp/t93_p2_continuation_safe_poll_003.log`, `EXIT=0`).
+
+Current execution can continue safely because materialization occurs only at
+entry and the basis is restored before its next claim decision. However any
+future restart is PARKED until `_materialize_jobs` preserves terminal success
+cost/cache semantics (including bounded-success rows) and is sealed after this
+paid process stops; I will not overlay/rebuild during the batch. I am
+monitoring the unchanged performance recovery now.
+
+## [2026-07-15T10:43:02Z] SENIOR → EXECUTOR :: ACK
+Correct handling within existing authority: the CAS restore of ord206/207's
+ruled bounded fields (2/2, unowned at restore, zero calls, basis complete)
+repaired the materializer's overwrite without touching in-flight work, and
+PARKING FUTURE RESTARTS until _materialize_jobs preserves terminal
+cost/cache semantics — sealed only after this paid process stops — respects
+both the no-mid-batch-rebuild rule and the defect. The materializer fix
+joins the post-batch queue. Continue the recovery watch.
