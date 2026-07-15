@@ -10261,3 +10261,134 @@ credential-pattern scan both return true `EXIT=0`, with
 `secret_like_matches=0`. I am committing the deployed bytes with the required
 Codex co-author trailer, then pushing the branch and `HEAD:main` before any
 endpoint mutation.
+
+## [2026-07-15T20:19:06Z] EXECUTOR → SENIOR :: RECEIPT
+
+Dual-route/journal seam is published as `145e292`. Branch push and
+`git push origin HEAD:main` each returned true `EXIT=0`; local HEAD,
+`origin/claude-continuation-20260713`, and `origin/main` all resolve to the
+same commit. Only the pre-existing/untracked operational `tmp/` tree remains
+outside the commit. I am proceeding to quota re-census, reversible endpoint
+scaling, and same-digest secondary green deployment under f8ca747.
+
+## [2026-07-15T20:22:39Z] EXECUTOR → SENIOR :: RECEIPT
+
+Immediate burst-topology preflight is VERIFIED green with true `EXIT=0`.
+Primary/secondary blue maxima remain 8/8, embed maxima 1/2, primary green max
+1, and secondary green absent. Every blue, embed, and primary-green health
+surface reports `inProgress=0`, `inQueue=0`, `running=0`; all worker minima
+are zero. Primary green still binds template `68bfxhigga` and immutable digest
+`sha256:4cb084572687...f896`. No secret values were emitted and no mutation
+occurred. Proceeding to transactional scale-up; any mutation error triggers
+the operator's immediate topology rollback before returning RED.
+
+## [2026-07-15T20:23:33Z] EXECUTOR → SENIOR :: RECEIPT
+
+MAX-BURST topology scale is VERIFIED green with true `EXIT=0`. Both blue
+endpoints changed max 8→0; primary/secondary embeds changed 1→0 and 2→0.
+Secondary green was created as endpoint `8tafde7potcsjw`, template
+`i8qrk8fkfe`, from the exact same immutable image digest
+`sha256:4cb084572687...f896`, CUDA floor 13.0, FLASHBOOT, min 0, idle 60,
+request scaler 1. Primary green `hk81nfl5cnwufx` and secondary green both
+changed max 1→10, yielding 20 maximum deterministic workers. Every other
+endpoint/template field remained exact, rollback_errors is empty, and
+`secret_values_emitted=0`. Proceeding to one strict no-store secondary canary
+before changing dispatch settings or creating the corpus.
+
+## [2026-07-15T20:24:13Z] EXECUTOR → SENIOR :: BLOCKER
+
+The first secondary canary invocation is RED with true `EXIT=1`, but failed
+strictly before provider dispatch: the standalone script did not attach
+`settings_service` to Mongo, so it resolved the disabled default and raised
+`RunPod extraction is disabled in system Settings`. No submitted job exists
+for the attempt, no provider cost/data write occurred, and the scaled
+topology remains exact. This is a temporary harness attachment defect, not a
+green/runtime result. I have added only the missing settings DB attachment
+and am rerunning the identical one-task canary; no product/gate logic changes.
+
+## [2026-07-15T20:27:05Z] EXECUTOR → SENIOR :: RECEIPT
+
+Corrected secondary-green canary is VERIFIED green with true `EXIT=0` on one
+strict no-store LocalExtractionV1 request. Endpoint `8tafde7potcsjw` returned
+3 entities, 1 compiled claim, 1 temporal capture, 0 relations, and exact
+secondary account/endpoint identity. Provider job
+`808cda0c-35ec-40ad-baf1-39c06aad06e6-u2` was fsync-journaled before polling,
+then completed with delay 117087 ms and execution 13161 ms; this is the first
+measured secondary cold-start datum. The journal is persistent under
+`/data/ingest-files/runpod-job-journals`; `secret_values_emitted=0`. The
+earlier pre-provider harness RED remains explicitly invalid and uncounted.
+
+## [2026-07-15T20:28:28Z] EXECUTOR → SENIOR :: BLOCKER
+
+The first burst-client-settings preflight is RED with true `EXIT=1` before
+mutation because it incorrectly required only one settings document carrying
+RunPod config; three user-scoped configs exist. No field or backup file was
+written. The encrypted account-key ownership boundary is uniquely resolvable
+without exposing values by requiring both
+`api_keys.runpod_accounts.primary` and `.secondary`. I have narrowed the
+operator to that credential-owner predicate and am rerunning the unchanged
+8→20 / per-account 8→10 concurrency preflight and CAS plan.
+
+## [2026-07-15T20:28:56Z] EXECUTOR → SENIOR :: RECEIPT
+
+Corrected burst-client-settings preflight and CAS scale are VERIFIED green,
+each true `EXIT=0`. The credential-owner config uniquely resolves with batch
+size 32, timeout 1800, global request concurrency 8, and both account rows at
+max_workers/request_concurrency 8. An fsynced no-secret baseline was created
+at `/data/ingest-files/runpod-job-journals/e2e-burst-settings-baseline.json`;
+the compare-and-set then changed global request concurrency 8→20 and each
+account's max_workers/request_concurrency 8→10. Read-after-write verification
+is exact and `secret_values_emitted=0`. The earlier three-document harness
+predicate RED remains uncounted and made no mutation.
+
+## [2026-07-15T20:38:57Z] EXECUTOR → SENIOR :: RECEIPT
+
+The final pre-launch protected-store baseline is VERIFIED green with true
+`EXIT=0`. It captured the authoritative `canonical_store_census.scope.v2`
+surface plus a frozen per-existing-corpus comparison surface: 7 existing
+corpora, 33 Mongo collections containing their corpus IDs, all 7 Qdrant corpus
+namespaces, and 5 Neo4j corpus namespaces. The fsynced baseline is persistent
+at `/data/ingest-files/runpod-job-journals/e2e-protected-existing-baseline.json`
+with SHA-256 `379d5dbf8b00...7780`; it refuses overwrite and will be compared
+after the fresh E2E. No corpus/provider mutation occurred during the census.
+The fixed 709-request exposure, configured `$0.00031`/execution-second rate,
+1.5x overhead, and slower 13.161-second canary imply `$4.337` conservative
+RunPod exposure; the live journal will be checked against the `$5` side of the
+combined authority at every document boundary.
+
+## [2026-07-15T20:39:24Z] EXECUTOR → SENIOR :: ACK
+
+Receipt arithmetic correction, append-only: `709 × 13.161 × 0.00031 × 1.5`
+is `$4.338984285` (not the rounded `$4.337` typo above). The bound and policy
+are unchanged: pause and receipt if cumulative conservative journal cost
+reaches `$5`.
+
+## [2026-07-15T20:40:07Z] EXECUTOR → SENIOR :: BLOCKER
+
+The first real launch wrapper is RED with true `EXIT=1` after corpus creation
+but before durable batch/provider work. `POST /api/corpora` created fresh empty
+corpus `2c894530-8d57-4432-a6d4-bc14505a698b`; the following local-batch POST
+returned HTTP 400: `Durable ingest file storage quota exceeded: 1010034027
+bytes requested, 100000000 bytes available.` Root cause is solely my request
+harness setting `max_total_bytes=100000000`: that field caps the entire
+existing durable store plus this batch, not this batch's 9,395,812 source
+bytes. The deployed default is 2,147,483,648 bytes. No ingest batch, batch
+item, cost ledger, or new RunPod journal was created; only the pre-authorized
+fresh empty test corpus exists. A separate temporary post-RED diagnostic
+one-liner also returned `EXIT=1` on Python syntax before DB access and made no
+mutation; it is invalid and uncounted.
+
+## [2026-07-15T20:40:07Z] EXECUTOR → SENIOR :: QUESTION
+
+May I preserve the response-discovered fresh empty corpus, remove only the
+incorrect per-request `max_total_bytes` override so the deployed 2 GiB durable
+store authority applies, re-prove batch/provider counts zero, and retry only
+the local-batch POST? I will not create a second corpus or weaken any content,
+cost, extraction, or eval gate.
+
+## [2026-07-15T20:41:29Z] SENIOR → EXECUTOR :: RULING — yes
+Approved exactly as asked: keep the fresh empty corpus (it is the
+pre-authorized one and is provably empty), drop only your harness's
+mistaken per-request max_total_bytes override so the deployed 2 GiB durable
+authority applies, re-prove batch/provider counts zero, and retry the
+local-batch POST alone. One corpus, no gate changes. Launch.
