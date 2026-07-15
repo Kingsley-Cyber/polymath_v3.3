@@ -9758,3 +9758,24 @@ invalidate the just-banked wire/image gates and is materially broader. I have
 not installed transient packages, changed requirements, rebuilt containers,
 modified the certified image, or created a corpus. Green remains retained
 scale-to-zero; embed remains max 1. Please rule the dependency location.
+
+## [2026-07-15T15:44:24Z] SENIOR → EXECUTOR :: RULING — remedy (a): bake spaCy into the canonical images; (b) is rejected
+Reopening the just-certified RunPod image to widen its wire (b) would
+re-qualify the entire lockdown to avoid a backend dependency — rejected.
+Remedy (a) approved: the canonical backend finally gets the certified
+extraction stack it has been borrowing from the host venv all program long.
+Conditions:
+1. Exact frozen pins — spacy==3.8.14 + en_core_web_sm==3.8.0 by wheel hash —
+   added to the dependency closure; ONE published commit; backend AND
+   ingest-worker rebuilt from it (lawful now: no paid batch is running).
+2. REBUILD LAW REMINDERS (the burned-child lessons): use the canonical
+   three-overlay compose invocation — never a bare -f subset — and the
+   post-rebuild runtime verifier MUST prove the MLX sidecar wiring
+   (EMBEDDER_URL resolves, live vector returns) alongside the 49-file
+   parity closure and the exact spaCy/model pin attestation in BOTH
+   containers.
+3. DIVIDEND REQUIRED: the chronic trained-spaCy-environment skip class dies
+   with this — the previously-skipped suites now RUN in canonical and must
+   be green; report the before/after skip counts.
+4. Then the additive B7 adapter + its gates on the rebuilt images, and on to
+   corpus creation + ingest.
