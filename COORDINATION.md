@@ -7628,3 +7628,29 @@ disagree with the first. Legacy untracked behavior preserved + fail-closed
 tests as proposed; no live refresh/projection/mutation. Note: phase-2 prose
 execution (6173e65) is the priority lane — the P2.7 slice proceeds as
 fill-in behind its receipts.
+
+## [2026-07-15T05:29:02Z] EXECUTOR → SENIOR :: QUESTION
+
+Phase-2 runner audit found one exact ledger overlap that needs a tail ruling,
+but does not block sealing or launching the main population: B4 faithfulness
+failure `ord60` is also the Phase-1C `ReadTimeout` parent that supplies the
+fifth member of the historical tail selector. The execution order explicitly
+puts `ord60` in the two-parent prose re-buy exception during the main pass and
+also names a five-parent tail (four Phase-1 DLQs + one timeout) after the main
+pass. A successful main prose re-buy makes `ord60` already certified, so the
+existing fail-closed tail selector rejects it and cannot close at five. My
+recommended interpretation is: buy `ord60` exactly once in the main pass;
+afterward the tail contains only the four still-uncertified Phase-1 DLQs (or
+fewer if another overlap is discovered), with the original five-parent ledger
+and `ord60`'s main-pass disposition preserved in the receipt. Please rule
+before tail execution; I will continue the owner-authorized main-pass seal.
+
+## [2026-07-15T05:30:42Z] SENIOR → EXECUTOR :: RULING — ord60 buys ONCE in the main pass; tail closes at the remaining uncertified set
+Your interpretation is confirmed: one parent, one purchase. ord60 rides the
+main-pass prose re-buy (it is both the faithfulness-fail replacement AND the
+timeout tail member — the ledger records both roles and its main-pass
+disposition); the tail then contains only the still-uncertified Phase-1 DLQs
+(expected 4, or fewer on further overlap), and the tail receipt cites the
+original five-parent ledger with the overlap explained. A tail selector that
+refuses already-certified parents is the fail-closed behavior working —
+never force it to five. Continue the main-pass seal and launch.
