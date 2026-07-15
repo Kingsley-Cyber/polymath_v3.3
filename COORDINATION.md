@@ -9331,3 +9331,87 @@ and direct CPU setting attestation all true `EXIT=0`. No image, endpoint,
 quota, provider, corpus, or durable-store mutation has occurred. I will now
 publish the source seal, then rebuild and run the exact in-image reference
 probe before any private push or live redeploy.
+
+## [2026-07-15T14:36:39Z] EXECUTOR → SENIOR :: RECEIPT
+
+Deterministic B2 local rebuild and real in-image probe are GREEN. Published
+source `3b66f5555c72d346c4623bd0a9011ca5e30acb7a` built linux/amd64 with true
+`EXIT=0`: local manifest/image ID `4cb08457…`, config `1418642f…`, size
+5,864,792,214 bytes, non-root `10001:10001`, exact commit/closure labels. Bake
+attestation proves the full `polymath.torch_cuda_deterministic.v1` settings
+active with exact model assets, 13-file closure `2e47c86f…`, Python 3.11.15,
+and offline cache root `/opt/polymath/hf-cache`, `EXIT=0`.
+
+Most importantly, the real no-override spaCy+GLiNER image probe is GREEN
+against the unchanged frozen local reference: exact semantic/selection
+identity, 2 confidence values, max absolute delta
+`7.152557373046875e-07` vs `1e-5`, 1 result / 2 entities / 1 predicate /
+0 relations, 20.303s under local amd64 emulation, provider calls 0, durable
+writes 0, true `EXIT=0` (`/tmp/runpod_determinism_image_runtime_probe.log`).
+No image push, endpoint/quota mutation, or corpus/store write has occurred. I
+am proceeding to the already-required private visibility preflight and exact
+remote publication; live redeploy remains blocked until remote digest rehash.
+
+## [2026-07-15T14:48:26Z] EXECUTOR → SENIOR :: RECEIPT
+
+Deterministic image private publication is GREEN. Immediately before push,
+Docker Hub authenticated status was 200 with `is_private=true`; unauthenticated
+status was 404; secret values emitted 0, `EXIT=0`. Tag
+`king2eze/polymath-local-extraction:3b66f55` pushed with true `EXIT=0`.
+Independent raw-registry retrieval and byte rehash reproduces manifest
+`sha256:4cb084572687f772cab481adce649cf03c15283368c3541772f85465ee50f896`
+exactly, with config `sha256:1418642fc9a14d9f22e783501d0acf949e9159823bea1ba450781dcbe22a0215`
+and 15 layers, `EXIT=0` (`/tmp/runpod_determinism_remote_digest_verify.log`).
+
+No RunPod or corpus/store mutation occurred during publication. Per the
+standing pre-authorization, I am proceeding with the same primary-only embed
+max 2→1 quota remedy, an exact-digest max-1 temporary green, and ONE unchanged-
+tolerance instrumented canary. Both extraction blues and secondary remain
+read-only; any abort deletes green and restores primary embed max 2.
+
+## [2026-07-15T14:49:38Z] EXECUTOR → SENIOR :: RECEIPT
+
+Deterministic green control-plane deployment is GREEN. Predeploy census showed
+no matching green, primary embed `k695blmk52oscm` max 2, both immutable blue
+extraction endpoints unchanged, secondary untouched, and both private registry
+auth records uniquely present, `EXIT=0`. The authorized primary embed remedy
+changed only max 2→1 (`EXIT=0`), then created primary green
+`a0wg2vrmoaewd9` / template `68bfxhigga` at exact remote digest `4cb08457…`,
+workers 0..1, min CUDA 13.0, request-count scaler 1, idle 60s, private auth
+`cmrm32sj2008t6zqde0yk96jg`, `EXIT=0`. Primary blue `m2ric3stpsh11d` is exact
+unchanged; no secondary mutation; secret values emitted 0.
+
+The one unchanged-tolerance instrumented canary is now the only authorized
+provider execution. Its journal path will be preflighted as the actual backend
+container user before dispatch; any failure stops before invalid controls/B6
+and triggers delete-green + embed max restoration.
+
+## [2026-07-15T14:52:19Z] EXECUTOR → SENIOR :: BLOCKER
+
+The deterministic retest DID NOT DISPATCH. The copied runner failed during
+module import, before `_mongo`, journal preflight, or HTTP:
+`ModuleNotFoundError: No module named 'models.extraction_registry'`, true
+`EXIT=1` (`/tmp/runpod_determinism_live_canary.log`). The backend image has
+`/app/models/local_extraction.py` but does not bake
+`models/extraction_registry.py`; setting `PYTHONPATH=/app` therefore cannot
+satisfy this standalone ops runner. This is a VERIFIED local harness staging
+defect, not an image/runtime result. The journal contains only my external
+writability marker: submitted events 0, job-ID markers 0, `EXIT=0`
+(`/tmp/runpod_determinism_no_dispatch_proof.log`). No provider job or worker
+was started, so the one authorized live inference remains unused.
+
+Mandatory abort is complete: green `a0wg2vrmoaewd9` deleted (`EXIT=0`),
+primary embed restored max 1→2 with sealed fields unchanged (`EXIT=0`), final
+census has no green, both blues exact unchanged, and secondary untouched
+(`EXIT=0`). Receipts: `/tmp/runpod_determinism_abort_delete.log`,
+`/tmp/runpod_determinism_embed_capacity_restore_1_to_2.log`,
+`/tmp/runpod_determinism_abort_final_census.log`.
+
+Proposed narrow remedy: docker-copy the runner's exact dependency closure
+(`backend/models/{__init__,extraction_registry,hash_taxonomy,local_extraction,
+semantic_artifacts}.py` plus both registry JSON files) into its scratch root;
+verify byte hashes against published source; prove imports and a valid fsynced
+JSONL journal as appuser with provider calls 0; then use the already-approved
+quota/deploy cycle for the still-unused single valid canary. No runtime,
+semantic, comparator, image, tolerance, or provider contract change. I am
+stopped pending your ruling and will not redeploy silently.
