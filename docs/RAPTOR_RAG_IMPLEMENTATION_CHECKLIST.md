@@ -4021,6 +4021,43 @@ A corpus is strict-ready only when:
   subsequently authorized a narrow versioned deterministic-runtime rebuild
   and one unchanged-tolerance retest; that remediation is not a gate pass.
 
+### 2026-07-15 - P2.7 deterministic B4/B5/B6 lockdown green
+
+- Commit: deterministic source `3b66f55`; control runner correction `5cc4199`;
+  900-second/warmth transport correction `fce624d`; permanent receipt in this
+  publication commit on `claude-continuation-20260713`.
+- Owner: owner finish-line order and senior full-chain pre-authorization;
+  frozen parity/refusal gates were not weakened.
+- Corpus/data scope: 12 frozen same-chunk tasks plus three invalid controls;
+  no corpus, graph, vector, or database write.
+- Code changes: versioned deterministic worker profile; invalid-control
+  provider-status validation; fsynced job/case receipts; 900-second control
+  transport patience and pre-submit warmth journaling.
+- Durable migration/backfill: none.
+- Before metrics: nondeterministic image max confidence delta
+  `0.0001373291015625` (RED); first control retry encountered provider capacity
+  and produced no contract verdict.
+- After metrics: 12/12 results, 126 controlled entities, 56 predicates, both
+  temporal phrases, zero relations/missing/semantic mismatches; confidence max
+  delta `2.384185791015625e-06` under `1e-05`. All three controls return exact
+  named refusal. Independent replay has exact results and confidence delta 0.
+- Tests by tier: runner focused 10/10; Black, compile, diff, local image probe,
+  live canary, replay compare, semantic-hash compare, and final controls true
+  `EXIT=0`.
+- Cross-corpus test: not yet run; fresh 15-document E2E is next after B7.
+- Failure/rollback test: earlier failed deployments were deleted and primary
+  embed restored. Current green is retained scale-to-zero after GREEN B4–B6;
+  rollback remains delete-green + restore embed max 2.
+- Deployment image/health: immutable private digest `4cb08457…`; current green
+  `hk81nfl5cnwufx`; both invalid-control warmth probes ready 1/throttled 0.
+- Remaining risks: B7 real-ingest adapter/cutover is contract-RED because the
+  published production adapter accepts only legacy v2/v3; no production-ready
+  or corpus-scale claim. Permanent receipt:
+  `docs/RUNPOD_DETERMINISTIC_LOCKDOWN_B4_B6_RECEIPT_2026-07-15.md`.
+- Checklist boxes closed: pinned endpoint artifact and retry-safety evidence
+  are satisfied for the locked small gate; the parent P2.7 production-ready
+  acceptance remains open until B7, fresh-corpus E2E, and scale/readiness work.
+
 ## Implementation Log Template
 
 Copy this section for every completed item:

@@ -1,41 +1,23 @@
 # PROGRESS — executor cursor (Codex updates after EVERY task)
 
 - Mission: CODEX_MISSION.md (CP2 → CP12)
-- Track: A4/T9.3 owner-authorized paid interim-prose Phase 2.
-- Current task: T9.3 digest work is safely PARKED by owner order. Final state
-  is 186 terminal = 178 accepted / 8 DLQ, 535 queued, zero running; recovery
-  reached terminal 159 and final rolling is 48/50. The live second cumulative
-  ReadTimeout stopped the run with complete `$8.036609449999998` ceiling
-  basis and protected canonical invariance. Receipt:
-  `docs/T9_3_PROSE_PHASE2_RECOVERY_PAUSE_RECEIPT_2026-07-15.md`.
-- Next task: OWNER FINISH LINE — B4 first canary is RED, diagnosed, and safely
-  rolled back. The real job reached queued→initializing then `FAILED`; no
-  invalid controls or downstream work ran. Green `whs9pjd34h2hs2` is deleted,
-  primary embed `k695blmk52oscm` is restored max 1→2 with all other fields
-  unchanged, both extraction blues are unchanged, and secondary is untouched.
-  Exact-image reproduction identifies a baked-model cache-root mismatch:
-  assets are under `/opt/polymath/hf-cache`, while runtime searched another
-  offline cache. Adding only the exact runtime override makes the immutable
-  image's real spaCy+GLiNER probe green. Corrective source now seals that env,
-  verifies bake/runtime path containment, adds an enforce-runtime image probe,
-  and fsyncs provider job IDs before polling. Permanent receipt:
-  `docs/RUNPOD_CUSTOM_IMAGE_B4_FIRST_CANARY_FAILURE_RECEIPT_2026-07-15.md`.
-  Corrective source commit `8708f37` is published and the new image is locally
-  and remotely GREEN: index `c03416dc…`, amd64 child `2bdb966e…`; its real
-  no-override runtime probe passes and Docker Hub remains private. Receipt:
-  `docs/RUNPOD_CUSTOM_IMAGE_B4_CORRECTED_REBUILD_RECEIPT_2026-07-15.md`.
-  The one instrumented live canary completed its valid job in 1.196s with all
-  functional semantics green (12 chunks, 126 entities, 56 predicates, both
-  temporal phrases, zero relations/missing/semantic mismatches), but frozen
-  confidence parity is RED: max delta `0.0001373291015625` vs `0.00001`,
-  81/126 values above tolerance. No invalid controls/B6/corpus work ran.
-  Mandatory abort is complete: corrected green deleted, primary embed restored
-  max 1→2, blues unchanged, secondary untouched. Receipt:
-  `docs/RUNPOD_B4_B5_PARITY_FAILURE_RECEIPT_2026-07-15.md`. Senior authorized
-  a narrow determinism remediation: versioned worker profile, TF32 off,
-  deterministic algorithms on, fixed reduction/thread settings, rebuild, and
-  one retest against the unchanged `0.00001` bar. Source seal is green at
-  closure `2e47c86f…`; image/live proof remains pending.
+- Track: owner-priority RunPod finish line (CP9/P2.7), ahead of all other work.
+- Current task: B4/B5/B6 deterministic extraction lockdown is GREEN. The live
+  12-task valid canary has zero semantic mismatches and confidence max delta
+  `2.384185791015625e-06` under the unchanged `1e-05` bar; all three invalid
+  controls returned provider `FAILED` plus exact named fail-closed output; the
+  independent B6 replay is byte-semantically identical with confidence delta
+  0 and zero durable writes. Retained primary green `hk81nfl5cnwufx` is exact
+  private digest `4cb08457…`, min 0/max 1; blues and secondary are unchanged.
+  Permanent receipt:
+  `docs/RUNPOD_DETERMINISTIC_LOCKDOWN_B4_B6_RECEIPT_2026-07-15.md`.
+- Next task: B7 is stopped before corpus creation pending the senior's ruling.
+  The real ingest adapter still sends/accepts only legacy RunPod v2/v3 while
+  the locked worker requires `polymath.runpod_local_extraction.v1`. Proposed
+  scope is the bake-plan-promised additive green test route, strict
+  LocalExtractionV1 validation/claim compilation, and no legacy/blue change;
+  after B7, create the preregistered 15-document fresh corpus and run retrieval
+  eval. No incompatible job or corpus mutation has occurred.
 - Parked: the distinct five-parent bounded tail remains after the main pass
   and only if corpus-wide certified acceptance is at least 95%. The rejected
   structured v2/v3 contracts remain closed failed; the owner explicitly chose
@@ -141,4 +123,4 @@
   793+2 parents and finds sentence→atomic mapping coverage 80.944158%; the
   optional-ID ordered-unit shape is p50 13,930 bytes, max 25,613 bytes, with
   maximum-any-ten authority `$0.83486975` under the corrected envelope.
-- Last update: 2026-07-15T14:25:38Z (executor)
+- Last update: 2026-07-15T15:35:01Z (executor)
