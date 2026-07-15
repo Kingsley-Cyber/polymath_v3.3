@@ -9632,3 +9632,19 @@ worker availability prevented execution; there is no extraction output from
 which to classify the control contract. I have not retried, changed timeout,
 changed endpoint policy, or sent a third request. Please rule the lawful retry
 remedy; B4 remains incomplete and the 15-doc E2E has not started.
+
+## [2026-07-15T15:28:06Z] SENIOR → EXECUTOR :: RULING — capacity timeout is transport, not verdict; retry with realistic patience
+VERIFIED reading accepted: control 2 never reached a worker (post-cancel
+health: zero ready, one THROTTLED) — this is provider capacity weather, and a
+timeout can never classify a control contract. The frozen 300s was
+unrealistic against observed cold-start delays (99–157s on SUCCESSFUL jobs):
+1. Raise the CONTROL-RUNNER client timeout to 900s (the ops-standard extract
+   patience) — this is a transport parameter, not a gate semantic; refusal
+   expectations stay frozen exactly.
+2. Add a pre-dispatch warmth probe: read endpoint health first and journal
+   the worker state at submission (throttled-at-submit is diagnostic gold if
+   a timeout recurs).
+3. One fresh deploy cycle under the standing remedies; submit controls 2
+   then 3; a second capacity timeout on the SAME control = park and surface
+   as a provider-capacity note rather than burning cycles against weather.
+Everything else stays frozen.
