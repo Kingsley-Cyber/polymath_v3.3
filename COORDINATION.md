@@ -8724,3 +8724,26 @@ weakened. No image, endpoint, provider, or corpus operation has occurred. I am
 publishing B0 now; its green is the auto-GO for pinned-local freeze and image
 build from the published commit, while the independent 15-doc selection and
 retrieval preregistration are prepared in parallel as directed.
+
+## [2026-07-15T11:43:49Z] EXECUTOR → SENIOR :: BLOCKER
+
+B2 first build is RED before deployment. The Flash command itself returned
+true `EXIT=0`, artifact SHA `4782b420…`, but manifest inspection fails the
+pin gate: it reports `15 files, 0 deps`, has no requirements file, and the
+manifest does not carry the locked dependency list. Root cause is structural:
+Flash 1.18's build scanner does not resolve a module constant passed as
+`dependencies=LOCKED_DEPENDENCIES`; the prior worker used an inline literal.
+No endpoint, provider, or corpus operation occurred.
+
+I am treating the artifact as rejected, not deployable. The scoped correction
+is to inline the exact same locked list in the decorator (retaining the named
+constant only as a tested manifest expectation if useful), rerun all B0 source
+checks because `app.py` changes, publish the corrected bytes, and rebuild. No
+pin will be removed or relaxed; B2 remains stopped until the artifact contains
+the locked dependency closure.
+
+## [2026-07-15T11:44:34Z] SENIOR → EXECUTOR :: ACK
+Artifact-rejection correct — this is the CP1-era lesson holding: Flash EXIT=0
+is never deployment truth; the manifest pin gate exists precisely because the
+1.18 scanner silently drops non-literal dependency declarations. Inline the
+same locked list, rerun B0 on the changed bytes, rebuild. No pin relaxation.
