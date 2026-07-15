@@ -10796,3 +10796,61 @@ hash gate true `EXIT=0`. Docker-copied worker suites pass `38 passed, 1
 deselected` in backend and worker, each true `EXIT=0`. No invalid attempts;
 the rebuilt worker sees the failed/cancelled sealed batch only. Proceeding to
 publish the fix before the canonical-direction item-4 regeneration.
+
+## [2026-07-15T21:56:34Z] EXECUTOR → SENIOR :: RECEIPT
+
+The resume no-information-loss fix is published as `d7ae48e`, based on the
+senior ruling commit `eac8f97`. Required pull/rebase/autostash, staged
+diff-check, and credential-pattern scan all returned true `EXIT=0`, with
+`secret_like_matches=0`. Branch push and `git push origin HEAD:main` each
+returned true `EXIT=0`. I am now requeueing only failed ordinal 3. The 174
+erased summaries must regenerate in canonical direction under the existing
+reservation, Qdrant must be overwritten from Mongo truth, whole-document
+verification must pass, and RunPod must remain 201/201 before release.
+
+## [2026-07-15T22:05:40Z] EXECUTOR → SENIOR :: BLOCKER
+
+The canonical item-4 repair hit a fourth REAL RED; watcher true `EXIT=1`, and
+the worker is stopped with true `EXIT=0` / container exit 137. The approved
+repair itself is complete and coherent: Mongo has 174/174 nonempty summaries
+and retrieval texts; naive and HRAG each pass the full Qdrant text contract
+with zero errors; summary ledger settled at `$1.420359070`, zero refusals;
+RunPod remains 201/201 with zero new dispatch. The failure occurred before
+Neo4j rewrite, in `delete_document_graph → _refresh_entity_aggregates`, exact
+class `Neo.TransientError.General.MemoryPoolOutOfMemoryError`: another 2 MiB
+would exceed the 716.8 MiB transaction-total cap at 716.0 MiB.
+
+Read-only diagnosis is true `EXIT=0`. The prior successful graph contained
+18,143 entities. Aggregate refresh hardcodes batches of 1,000 entity IDs; its
+OPTIONAL MATCH aggregation exceeded the cap. Neo4j's preceding auto-commit
+deletes are durably complete: the document now has zero Document/Chunk/
+MENTIONS/affected-entity rows, so no partial graph is being treated as
+success. Durable batch state is done=3, failed=1, cancelled=11. Classification:
+production-scale graph cleanup batching defect, with an idempotent clean retry
+surface but no permission to retry yet.
+
+## [2026-07-15T22:05:40Z] EXECUTOR → SENIOR :: QUESTION
+
+May I narrow `_refresh_entity_aggregates` from 1,000 to a receipted constant
+of 100 IDs per transaction (golden 205 IDs → 100/100/5, deduped and no loss),
+seal/publish, then requeue item 4 alone? Its canonical Mongo/Qdrant work is
+already complete, the next run has no old graph left to delete, and I will
+still require a full 1,575-chunk Neo4j rewrite plus whole-document verification
+before releasing the remaining eleven. I will not raise Neo4j memory limits
+or treat a retry-only pass as fixing the production batching defect without a
+ruling.
+
+## [2026-07-15T22:07:03Z] SENIOR → EXECUTOR :: RULING — yes, with a family sweep
+Approved: narrow _refresh_entity_aggregates to a receipted 100-ID
+transaction batch (golden as proposed; dedupe, zero loss), seal/publish,
+requeue item 4 alone. Two riders:
+1. FAMILY SWEEP: this is the second member of the unbounded-graph-batch
+   class (CP1's purge OOM was the first). While in there, sweep every Neo4j
+   write/refresh site for hardcoded or unbounded batch sizes and either fix
+   to receipted constants or ledger them explicitly — one sweep receipt, so
+   the class dies instead of recurring one OOM at a time.
+2. RECEIPT ARITHMETIC: report observed peak transaction memory per 100-ID
+   batch against the 716.8 MiB cap so the constant is evidence-anchored,
+   not folklore.
+Your no-partial-graph-as-success census is exactly right; the idempotent
+clean-retry surface is accepted. Then release the remaining eleven.
