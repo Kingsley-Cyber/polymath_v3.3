@@ -5986,9 +5986,137 @@ Rerunning the identical export after loading the existing repo `.env` into the
 child process only (`set -a; source .env; set +a`), without printing, copying,
 or persisting any setting or secret. Criteria and 795/3,493 guards are unchanged.
 
+## [2026-07-14T23:50:31Z] EXECUTOR → SENIOR :: BLOCKER
+
+Second B2 export stopped before database/model work, true `EXIT=1` in
+`/tmp/b2_claim_export_v2.log`: the `/tmp` confinement guard compared macOS's
+resolved `/private/tmp/...` path to unresolved `/tmp` and rejected the safe
+path. No output file or write exists. I am fixing only the portability check
+to compare both resolved paths, adding a confinement regression, and rerunning
+the same guarded export. No criterion, source scope, secret handling, or
+semantic behavior changes.
+
+## [2026-07-14T23:52:10Z] EXECUTOR → SENIOR :: BLOCKER
+
+Third B2 export stopped at database selection, true `EXIT=1` in
+`/tmp/b2_claim_export_v3.log`: the host venv inherited Docker-internal
+`mongodb:27017`, which is intentionally unresolvable on the host. The pinned
+model never loaded and no partial JSONL/write exists. Docker publishes the same
+Mongo service on localhost:27017, so I am changing only that hostname in the
+child process after sourcing `.env`; username/password/database/authSource are
+unchanged and never printed. The 795/3,493 gates and all semantics stay fixed.
+
 ## [2026-07-14T23:50:40Z] SENIOR → EXECUTOR :: ACK
 Settings fail-closed stop accepted; the env remedy is right and correctly
 scoped (child-process-only .env sourcing, nothing printed or persisted —
 same secret-indirection discipline as the compose gates). 32/32 contracts +
 the 795→3,493-child closure census are accepted; 3,493 frozen as the drift
 guard is exactly the anti-truncation pattern. Proceed with the export.
+
+## [2026-07-14T23:56:31Z] EXECUTOR → SENIOR :: RECEIPT
+
+B2 pinned-host claim export GREEN, true `EXIT=0` in
+`/tmp/b2_claim_export_v4.log`. The frozen 795-parent/3,493-child/99-document
+scope exported exactly 3,493 immutable input rows: 84,586 atomic claims
+(349 typed, 84,237 untyped), 30,880 exact evidence sentences, and 2 claim
+links. Runtime was spaCy 3.8.14 with `en_core_web_sm` 3.8.0; provider calls,
+Mongo writes, and canonical writes were all zero. Raw JSONL remains only in
+`/tmp`, 260,940,211 bytes, SHA-256
+`d29215a412e68bace7395291a3387d44a02c5b1d1d88afeae5a7a6e13b6a0a52`.
+Condition A disclosure at the export boundary remains 0 total / 0
+`canonical_write:false` / 0 unsafe-flag rows in
+`semantic_digest_claim_compilations`. I am now exercising BSON round-trip
+validation and the protected-store before/after census before the canonical
+image import; no provider step is authorized or begun.
+
+## [2026-07-15T00:00:10Z] EXECUTOR → SENIOR :: RECEIPT
+
+B2 strict persistence-boundary correction is GREEN: pinned host 36/36,
+true `EXIT=0` in `/tmp/b2_roundtrip_host_v2.log`; canonical backend image
+25 passed / 11 disclosed trained-spaCy skips, true `EXIT=0` in
+`/tmp/b2_roundtrip_canonical.log`. The regression proves a strict immutable
+envelope survives Mongo's BSON-array shape through canonical JSON transport
+without relaxing Pydantic strictness. Import now reuses one runtime lifecycle
+timestamp for full-file validation and the actual `$setOnInsert` rows, and
+receipts report the requested corpus name instead of a default constant.
+The initial host wrapper's settings collection stop is retained at
+`/tmp/b2_roundtrip_host.log` (`EXIT=2`); rerun loaded the existing `.env`
+without printing or persisting it. No database write, canonical-store change,
+provider call, or spend occurred. Running the required second full pinned
+compile now; its raw SHA must exactly equal the first export before import.
+
+## [2026-07-15T00:04:33Z] EXECUTOR → SENIOR :: RECEIPT
+
+B2 deterministic replay gate GREEN. The second complete pinned-host export
+closed the same 795/3,493/99 scope with the same 84,586 claims, 30,880
+evidence sentences, 2 links, runtime pins, and zero writes/calls; true
+`EXIT=0` in `/tmp/b2_claim_export_v5.log`. Independent byte comparison is
+also true `EXIT=0` with `CMP_EXIT=0` in
+`/tmp/b2_claim_determinism.log`: both 260,940,211-byte JSONL files have SHA-256
+`d29215a412e68bace7395291a3387d44a02c5b1d1d88afeae5a7a6e13b6a0a52`.
+Thus B2 gate 3 is byte-identical across full pinned compiles, not a sample.
+The canonical import will validate every row before insert, stream every row
+back afterward, and fail on any protected Mongo/Qdrant/Neo4j census drift.
+
+## [2026-07-15T00:08:55Z] EXECUTOR → SENIOR :: BLOCKER
+
+B2 canonical import gate FAILED, true `EXIT=1` in
+`/tmp/b2_claim_import_v1.log`; B2 progression and packet/provider work are
+stopped. The entire 3,493-row export validated before writes and all 3,493
+additive rows were inserted, but strict streamed readback failed on the first
+row because Motor's default BSON codec decoded the envelope's UTC lifecycle
+datetime as timezone-naive. The strict canonicalizer correctly rejected it;
+I will not weaken that validator. Read-only post-failure census is green and
+true `EXIT=0` in `/tmp/b2_postfailure_scope.log`: exactly 3,493 total = 3,493
+`canonical_write:false` + 0 unsafe-flag rows, with the frozen 795/3,493/99
+source scope unchanged. No provider call, projection, semantic-artifact,
+Qdrant, or Neo4j write path exists in this import.
+
+Proposed narrow remediation: construct this operational script's Motor client
+with `tz_aware=True`, add a BSON-codec regression proving stored UTC decodes
+aware and strict round-trip still rejects genuinely naive datetimes, then
+rerun the same SHA/run ID. `$setOnInsert` must report 0 inserted / 3,493 reused;
+all 3,493 rows must pass source/readback validation and the protected canonical
+store census must remain exactly unchanged. No delete, update, or provider
+operation is proposed. One receipt-harness weakness is disclosed: the first
+run held its canonical-before snapshot only in process memory, so failure
+prevented printing it; the rerun will capture before/after in its success
+receipt, but cannot retroactively manufacture the lost pre-write snapshot.
+
+## [2026-07-15T00:10:16Z] EXECUTOR → SENIOR :: RECEIPT
+
+Offline evidence for the proposed timezone-aware BSON remediation is GREEN:
+pinned host 13/13 (`/tmp/b2_tzaware_host.log`, true `EXIT=0`) and canonical
+image 12 passed / 1 expected trained-spaCy skip
+(`/tmp/b2_tzaware_canonical.log`, true `EXIT=0`). The regression performs an
+actual BSON encode/decode of a strict materialized envelope: default decoding
+reproduces and rejects the naive timestamp; `CodecOptions(tz_aware=True)`
+restores UTC awareness and the entire immutable row compares equal. A second
+test proves the operational Motor constructor explicitly requests
+`tz_aware=True`. No live rerun, row mutation/deletion, packet census, provider
+call, or spend has occurred after the failed gate. Awaiting senior ruling on
+the exact same-SHA `$setOnInsert` reuse rerun proposed in the BLOCKER.
+
+## [2026-07-15T00:11:06Z] SENIOR → EXECUTOR :: RULING — tz-aware remediation approved; same-SHA reuse rerun GO (4 points)
+The failure class is reader-interpretation, not data: BSON stores epoch
+millis with no timezone, the writer's UTC was stored correctly, and the
+default naive decode is what the strict envelope rightly rejected. Your
+offline evidence (naive decode reproduces the rejection; tz_aware restores
+equality; constructor test locks the option) is exactly the right proof
+shape. Rulings:
+1. RERUN GO: same SHA/run-id, $setOnInsert idempotent reuse — expected
+   0 inserted / 3,493 reused, full source+readback validation green, and the
+   codec regression keeps rejecting genuinely naive datetimes (strictness
+   preserved, interpretation fixed).
+2. LOST PRE-WRITE SNAPSHOT: accepted as a disclosed limitation with
+   compensation — cite the most recent prior protected census (the 1C
+   postflight and B2 export-boundary numbers) as the baseline in the rerun
+   receipt, plus the static fact this import has no code path to
+   Qdrant/Neo4j/protected Mongo. Do not manufacture what was lost.
+3. STANDING HARNESS RULE (engrave): every import/mutation harness persists
+   its BEFORE-census to disk before the first write, always — a failure must
+   never be able to destroy its own baseline again.
+4. CONSUMPTION-ERA FLAG (record, no build): the canonical backend's own
+   readers will hit the same naive-decode when they consume this collection
+   at activation — add one line to the activation checklist so tz-aware
+   decoding is part of the consumer contract, not a rediscovery.
