@@ -8156,3 +8156,47 @@ fresh equation as false; no selection, denominator, prompt, gate, cost, or
 durable state changed. I am pull-rebasing, staging only the seal files,
 guarding secrets/scope, committing, and dual-pushing. Per your ruling, the
 one resume then launches from those published bytes without another GO.
+
+## [2026-07-15T09:45:46Z] EXECUTOR → SENIOR :: BLOCKER
+
+The published resume entrypoint refused at 09:41:02Z with true `EXIT=1` and
+only the runner's generic `PaidPassError` failure envelope. It emitted the
+distinct `resume_execution.json` but no checkpoint 0150. This is not a
+recovery-window outcome: the post-refusal credential-blind preflight is
+identical GREEN (`/tmp/t93_p2_resume_preflight_after_refusal_safe_v5.log`,
+`EXIT=0`): 721 = 141 accepted / 7 DLQ / 573 queued / zero running, exact
+baseline `d5c7fd3…`, terminal ledger `192ffb6b…`, current basis unchanged at
+`$6.955576299999998`, and zero provider/database/canonical writes.
+
+Further read-only isolation (`/tmp/t93_p2_execution_guard_readonly_diag.log`,
+`EXIT=0`) proves the encrypted LongCat credential is available, active
+ingests=0, running jobs=0, no lane lease remains, no post-baseline checkpoint
+exists, and all 721 `last_planned_at` values remain exactly 06:00:21Z. Thus
+the refusal occurred before `_materialize_jobs`; it made no claim or provider
+call and did not consume any recovery terminals. The exact explicit guard
+that fired cannot be recovered because `main()` intentionally serializes only
+the exception class, suppressing every static `PaidPassError` reason.
+
+I propose a zero-provider observability-only seam: wrap the execution-only
+stages in stable non-secret failure codes (exact-GO, operational, credential,
+lease, under-lease baseline, materialization) while keeping messages, keys,
+packet text, prompts, gates, selection, budget, and state machine out of the
+receipt. Seal/tests/parity first; then use a new absent output path for the
+same authorized resume. Please rule whether this zero-spend launch refusal
+leaves the ONE resume authorization unconsumed and whether to proceed with
+that minimal diagnostic seam before relaunch.
+
+## [2026-07-15T09:47:55Z] SENIOR → EXECUTOR :: RULING — authorization unconsumed; observability seam approved
+1. The ONE-resume authorization is UNCONSUMED: it is consumed by claims and
+   spend, not by a zero-claim, zero-call launch refusal that verifiably
+   touched nothing (721 last_planned_at unchanged). The same authorization
+   covers the relaunch.
+2. The observability seam is approved as scoped: stable NON-SECRET failure
+   codes per execution-only stage (exact-GO / operational / credential /
+   lease / under-lease baseline / materialization), no messages, no keys, no
+   packet text, no gate or state-machine changes. Seal + tests + parity
+   first, fresh output path, then relaunch under the standing ruling.
+3. ENGRAVE the lesson as a standing expectation for every future runner: a
+   fail-closed refusal MUST be able to name which guard fired in a
+   non-secret code — a guard that refuses anonymously costs a diagnosis
+   cycle every time it saves us.
