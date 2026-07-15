@@ -10392,3 +10392,96 @@ pre-authorized one and is provably empty), drop only your harness's
 mistaken per-request max_total_bytes override so the deployed 2 GiB durable
 authority applies, re-prove batch/provider counts zero, and retry the
 local-batch POST alone. One corpus, no gate changes. Launch.
+
+## [2026-07-15T20:42:03Z] EXECUTOR → SENIOR :: RECEIPT
+
+The senior-approved local-batch-only retry is VERIFIED green with true
+`EXIT=0`. Before retry, the response-discovered corpus had doc/ready/chunk
+counts `0/0/0`; documents, parents, children, batches, batch items, summary
+cost runs/claims were all zero; its RunPod journal was absent; both pinned
+routes were intact. Removing only the mistaken request-local storage cap let
+the real durable API create batch `ce1f9e25-0eb1-43d7-a9e6-9c1e9b3ee2e3`
+for corpus `2c894530-8d57-4432-a6d4-bc14505a698b`: exactly 15 files, profile
+`runpod_burst`, local API runner false as required by offline-ingest, summary
+authority `$30`, RunPod authority `$5`, combined `$35`, 22,675 expected tasks
+and 709 expected requests. Launch state was fsynced to the persistent job
+journal directory. I am monitoring claim/dispatch at document boundaries;
+any failed item or ceiling reach stops the run.
+
+## [2026-07-15T20:47:51Z] EXECUTOR → SENIOR :: RECEIPT
+
+Rolling boundary 1/15 is VERIFIED green, true snapshot `EXIT=0`. The Bayesian
+Laban paper is durable `done`, document verification true, 24 parents / 200
+children, 7 RunPod requests, and zero failed chunks. Anatomy for Sculptors is
+now in Ghost A/B; its 2,510 extraction chunks have already closed through the
+journal. Cumulative burst truth is 84 submitted = 84 `COMPLETED`, 0
+outstanding, split primary/secondary 43/41, 205.874 worker-seconds,
+`$0.095731410` conservative cost, 272.637 seconds from first-ever dispatch to
+latest terminal. Delay distribution is 0.547s min / 4.782s p50 / 18.862s p95 /
+24.106s max. Summary accounting is `$0.204270710` settled with `$0.052160510`
+outstanding reserved under `$30`; calls refused 0. No item, provider job, or
+ceiling failure is present.
+
+## [2026-07-15T20:54:55Z] EXECUTOR → SENIOR :: RECEIPT
+
+Rolling boundary 2/15 is VERIFIED green, true snapshot `EXIT=0`. Anatomy for
+Sculptors is durable `done` and document verification true: 2,129 parents,
+2,510 children, 2,456 deterministic extraction tasks, 77 journaled requests,
+zero failed chunks. The 54-child delta is the production skip-kind contract;
+therefore the no-write 709-request figure is explicitly an approximation and
+final closure will be each document's durable `request_batches` matched by job
+ID to every journal row, never ordinal coincidence. Cinematography is now in
+Ghost A/B. At snapshot: 108 submitted, 92 `COMPLETED`, 16 in flight, zero
+failed terminals; 222.684 completed worker-seconds; `$0.103548060`
+conservative RunPod cost. Summary ledger is `$0.432499120` settled plus
+`$0.084174200` reserved, refused calls 0. Batch items are 2 done / 1 running /
+12 queued / 0 failed.
+
+## [2026-07-15T20:59:57Z] EXECUTOR → SENIOR :: BLOCKER
+
+The E2E has a real RED and the phase is stopped. The true-exit watcher returned
+`EXIT=1` after item 3, `Blain Brown - Cinematography - Theory and Practice
+(2016).md`, became durable `failed` in `phase=ghosts` with exact error
+`LocalExtractionV1 entity canonical label is empty`. All 150 extraction jobs
+through that document had reached provider `COMPLETED`; the failure occurred
+in the strict local compiler. The offline batch worker advanced to item 4
+before the watcher observed the item failure, so at the RED snapshot item 4
+was running with 15 jobs outstanding. Batch counts were done=2, failed=1,
+running=1, queued=11. Journal totals were submitted=199, terminal=184,
+primary/secondary=101/98, 546.544 worker-seconds, conservative RunPod cost
+`$0.254142960`. Summary ceiling basis was `$1.007807390` under `$30`, with
+zero refusals. Retrieval, embeddings, graph, census, and eval have not run.
+I am using only the supported batch/provider stop path to prevent further paid
+dispatch, then will capture exact failure and restoration evidence; I will not
+change the compiler, retry the item, or weaken any gate without a ruling.
+
+## [2026-07-15T20:59:57Z] EXECUTOR → SENIOR :: QUESTION
+
+After stop/rollback evidence is complete, is a narrow product fix and a retry
+of the failed document authorized, or should this E2E remain terminal RED for
+owner review? The suspected contract site will be diagnosed read-only and
+reported with tests/proposed invariant before any edit.
+
+## [2026-07-15T21:01:58Z] SENIOR → EXECUTOR :: RULING — narrow fix authorized; this is what the E2E exists to catch
+This is a REAL product finding on real book content and the owner's mandate
+is to finish the test — fix narrowly and resume. Rulings:
+1. THE FIX SHAPE (pending your read-only diagnosis confirming the class): an
+   entity whose canonical label is EMPTY after normalization is not a valid
+   entity — it is extractor noise (symbol runs, stripped glyphs). The lawful
+   handling is MENTION-LEVEL COUNTED EXCLUSION (reason=empty_canonical_label,
+   surfaced per fallback-accounting law) — the same pattern as T8.4's 27
+   counted subject-missing skips — never a document-level hard fail on one
+   noise mention, and never silent coercion or fabricated labels. Strictness
+   is preserved at finer granularity: refuse the mention, count it, keep the
+   document. Invariant + goldens + the offending surface's SHAPE CLASS in
+   the receipt (no raw text).
+2. RETRY ECONOMICS: item 3's 150 provider-COMPLETED extraction results are
+   paid and journaled — the retry RECOMPILES from stored outputs; zero
+   re-extraction dispatch. Verify the reuse in the receipt.
+3. Item 4's in-flight jobs settle exactly-once as normal; the batch resumes
+   after the fix is sealed (focused tests + both-container parity on the
+   changed compiler surface).
+4. E2E continues to completion afterward — same ceilings, same laws. If the
+   diagnosis reveals a DIFFERENT class than empty-noise (e.g., a legitimate
+   entity losing its label to a canonicalization bug), STOP and report — that
+   would be a deeper contract defect deserving its own ruling.
