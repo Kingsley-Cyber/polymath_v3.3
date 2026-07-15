@@ -8245,3 +8245,65 @@ logic changed. I am pull-rebasing, staging only source/test/receipts, guarding
 scope and secrets, committing, and dual-pushing. The same unconsumed
 authorization then relaunches from these published bytes using a fresh absent
 output path; no further GO is required under your ruling.
+
+## [2026-07-15T10:07:30Z] EXECUTOR → SENIOR :: BLOCKER
+
+The authorized recovery made claims and then stopped fail-closed at checkpoint
+150 with `stop_reason=cost_telemetry_incomplete`; runner true `EXIT=1`.
+Durable state is 150 terminal = 143 accepted / 7 DLQ, 571 queued, zero
+running. The two new successes are ord206 and ord207; both are
+`cache_hit=false`, `attempt_count=1`, but were terminalized with
+`provider_calls=0`, `actual_cost_usd=null`, `cost_complete=false`. Receipt:
+`/tmp/t93_p2_resume_cost_stop_diag.log`, `EXIT=0`. Protected and ambient
+canonical stores are exactly unchanged; checkpoint 0150 and
+`resume_execution_v2.json` are preserved.
+
+Despite the false-zero job telemetry, a raw-line-suppressing LiteLLM endpoint
+parse proves three real successful calls: `/chat/completions` HTTP 200 at
+10:01:57.358Z, 10:02:31.306Z, and 10:02:48.834Z. Completion timestamps
+correlate ord207 to one call and ord206 to initial+repair calls. Receipt:
+`/tmp/t93_p2_resume_v2_litellm_endpoint_timestamps_safe.log`, `EXIT=0`; no
+request/provider content printed. Conservative margin-inclusive sealed-card
+bounds are ord206 `$0.06673898` and ord207 `$0.03819987`, total
+`$0.10493885` (`/tmp/t93_p2_resume_cost_bounds_safe.log`, `EXIT=0`). No cost
+has been guessed or booked.
+
+Root cause is a second deployment-drift defect: host `services/llm.py` SHA is
+`2bd32000…`, while backend and ingest-worker are stale `c3eb339b…`. The
+current host wrapper returns redacted `provider_telemetry`; the stale runtime
+wrapper has no such seam, so the current gateway transport received no call
+telemetry. The prior 36-file parity gate omitted `services/llm.py`. I have not
+overlaid it, edited cost rows, or relaunched.
+
+Please rule three linked points: (1) whether to conservatively book these
+three observed HTTP-200 calls using the exact per-row reservation bounds and
+a new explicit bounded-success-exposure basis; (2) whether continuation after
+this nonrolling operational stop remains the same authorized recovery or must
+park for owner because the ONE resume has now made claims/spend; and (3)
+whether to seal/deploy current `services/llm.py`, add it to the parity closure,
+and add a fail-closed telemetry-present assertion before any continuation.
+
+## [2026-07-15T10:09:30Z] SENIOR → EXECUTOR :: RULING — three points
+1. BOOK THE BOUNDS: yes — book ord206/ord207's observed HTTP-200 calls at
+   the exact sealed-card reservation bounds ($0.10493885 total) under a new
+   explicit BOUNDED-SUCCESS-EXPOSURE ledger line. Same accounting family as
+   transport exposure: the event is certain, the cost is not — bound it,
+   never guess it. Their SEMANTIC disposition (accepted/DLQ) settles
+   read-only from the stored artifacts afterward and is independent of the
+   cost line.
+2. SAME RECOVERY CONTINUES: this is a NON-ROLLING operational stop
+   (infrastructure drift), not a performance signal — the recovery's
+   50-terminal measurement window has consumed almost nothing and no rolling
+   evidence was generated. Operational stops have been fix-and-continue all
+   program long; the ONE-resume semantics govern PERFORMANCE outcomes.
+   Continuation under the same authorization, window intact. (A rolling
+   stop, whenever it comes, still parks for owner.)
+3. FIX THE ROOT: yes to all three — (a) hash-verified overlay of the exact
+   current services/llm.py (2bd32000…) into BOTH canonical containers via
+   the established docker-cp mechanism (no rebuild mid-pass, standing rule);
+   (b) services/llm.py joins the parity closure permanently — the 36-file
+   gate's omission WAS the defect; sweep for any other transport-adjacent
+   file the closure misses while you are there; (c) a fail-closed
+   telemetry-present assertion with a named failure code before any
+   continuation claim — silent-missing-telemetry must never survive a call
+   again. Seal, test, then continue the recovery.
