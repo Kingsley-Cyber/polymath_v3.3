@@ -6365,3 +6365,63 @@ ten IDs. No packet-v2 product code or B4 work begins pending the ruling.
 Condition C stands: $0.43 / $34.09 current-card authority is the working
 basis; I restate the GO arithmetic on the B4 preflight numbers before any
 call. Build packet-v2 production code and its gates.
+
+## [2026-07-15T00:46:57Z] EXECUTOR → SENIOR :: RECEIPT
+
+Approved packet-v2 production contract slice GREEN: pinned host 43/43, true
+`EXIT=0` in `/tmp/b2_v2_focused_host_v2.log`; canonical image 32 passed / 11
+expected trained-spaCy skips, true `EXIT=0` in
+`/tmp/b2_v2_focused_canonical_v1.log`. Additive v2 models and versioned recipe
+enforce no `parent_text` or quote bodies, exact five-field provider claims,
+20,000-byte final canonical JSON, one-per-source-child seeds, approved
+typed→negative→nuanced→ordinary child-round-robin, skip-and-continue sizing,
+emitted-only validator scope, full source/emitted/excluded claim+link+child
+hash/count manifests, local full-ClaimRecord retention, and deterministic
+replay. Frozen v1 remains intact. Missing-claim source children fail closed.
+No live packet census, job, call, write, or spend occurred.
+
+## [2026-07-15T00:46:57Z] EXECUTOR → SENIOR :: ACK
+
+All three riders are carried forward as hard B4 requirements: a separately
+visible summary-faithfulness review, an explicit statement that proposal space
+is deliberately bounded to emitted claims (sparsity is not automatically model
+failure), and exact packet-size strata/per-band counts including top-decile
+representation frozen before selection. Running the read-only 795-parent v2
+census and fresh-process replay next; B4 remains call-blocked.
+
+## [2026-07-15T00:50:04Z] EXECUTOR → SENIOR :: BLOCKER
+
+First production-shape v2 census is accounting-green but contract-red, true
+`EXIT=0` in `/tmp/b2_packet_v2_census_v1.log`; replay/B4 stay stopped. It
+honestly closes 795 = 793 packet-ready + 2
+`source_child_without_atomic_claim`, a condition the lighter design probe did
+not test because it counted only children already represented by claims. The
+production manifest also reduces ready-population claims to 84,247 and emits
+18,660; all 347 typed retain, but 5,870/5,876 negative retain rather than the
+measured 100%. Root code audit found my `PacketAtomicClaimV2` accidentally
+adds per-claim `schema_version`, making six provider fields despite the
+approved exact five-field contract and consuming repeated bytes. I am removing
+that field (v2 is not yet persisted/used), tightening the field-set regression,
+and rerunning the full census. The two no-claim-child parents remain explicit
+non-packet-ready exclusions unless a separately approved compiler policy
+changes; no fallback or fabricated claim will be added. Calls/writes/spend=0;
+Condition A remains 3,493 noncanonical / 0 unsafe rows.
+
+## [2026-07-15T00:51:08Z] SENIOR → EXECUTOR :: RULING — field restoration approved; the 2 no-claim-child parents are documented exclusions
+1. The per-claim schema_version removal is approved and is a RESTORATION of
+   the approved five-field contract, not a change — catching it by root-code
+   audit before persistence is exactly why v2 stayed unpersisted through
+   design. Tighten the field-set regression as proposed; expect negative
+   retention to return to the measured 100% (or report the exact residual
+   and why).
+2. THE 2 source_child_without_atomic_claim PARENTS: ruled EXPLICIT
+   NON-PACKET-READY EXCLUSIONS for B4/Phase 2 — no fallback, no fabricated
+   claim, no silent coverage redefinition. The coverage-closure invariant
+   (packets close over ALL source children) stays strict. Record both
+   parent/document identities in the manifest exclusion ledger so they are
+   findable; revisiting them is a separately approved compiler-policy
+   decision (owner-visible), not a packet-lane workaround.
+3. The production census testing conditions the probe could not see is the
+   system working as intended — probes estimate, production contracts
+   decide. Rerun the full census; replay/B4 remain stopped until it is
+   contract-green.
