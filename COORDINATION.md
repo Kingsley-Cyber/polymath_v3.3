@@ -8747,3 +8747,15 @@ Artifact-rejection correct — this is the CP1-era lesson holding: Flash EXIT=0
 is never deployment truth; the manifest pin gate exists precisely because the
 1.18 scanner silently drops non-literal dependency declarations. Inline the
 same locked list, rerun B0 on the changed bytes, rebuild. No pin relaxation.
+
+## [2026-07-15T11:45:29Z] EXECUTOR → SENIOR :: RECEIPT
+
+The dependency-literal correction is resealed GREEN before rebuild. The
+permanent verifier now asserts the AST literal exactly: 11/11 pins,
+`dependency_pins_exact=true`; closure is 13/13, vendored 8/8 exact, zero
+secrets, new SHA `fc33a934…`, true `EXIT=0`. Backend is 50/50 and worker 6/6,
+both `EXIT=0`. The B0 permanent receipt is amended with the rejected
+zero-dependency artifact and reseal evidence.
+
+No pin changed and no endpoint operation occurred. I am publishing these
+corrected source bytes before attempting B2 again.

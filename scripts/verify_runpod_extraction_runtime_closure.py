@@ -35,6 +35,24 @@ EXPECTED_WORKER_FILES = {
     "services/ingestion/__init__.py",
     *VENDORED_MAP,
 }
+EXPECTED_DEPENDENCIES = [
+    "torch==2.12.0",
+    "transformers==4.57.6",
+    "tokenizers==0.22.2",
+    "numpy==2.2.6",
+    "safetensors==0.7.0",
+    "sentencepiece==0.2.1",
+    "huggingface_hub==0.36.2",
+    "pydantic==2.13.4",
+    "gliner==0.2.26",
+    "spacy==3.8.14",
+    (
+        "en_core_web_sm @ "
+        "https://github.com/explosion/spacy-models/releases/download/"
+        "en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl"
+        "#sha256=1932429db727d4bff3deed6b34cfc05df17794f4a52eeb26cf8928f7c1a0fb85"
+    ),
+]
 FORBIDDEN_PATTERNS = {
     "credential_literal": re.compile(
         r"\b(?:api[_-]?key|secret|password)\s*=\s*['\"][^'\"]+['\"]",
@@ -76,6 +94,27 @@ def _local_import_roots(path: Path) -> set[str]:
         elif isinstance(node, ast.ImportFrom) and node.module:
             roots.add(node.module.split(".", 1)[0])
     return roots & {"models", "services", "registries"}
+
+
+def _endpoint_dependencies(path: Path) -> list[str]:
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    for node in tree.body:
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        for decorator in node.decorator_list:
+            if not isinstance(decorator, ast.Call):
+                continue
+            for keyword in decorator.keywords:
+                if keyword.arg == "dependencies":
+                    value = ast.literal_eval(keyword.value)
+                    if not isinstance(value, list) or not all(
+                        isinstance(item, str) for item in value
+                    ):
+                        raise ValueError(
+                            "Endpoint dependencies must be a string literal list"
+                        )
+                    return value
+    raise ValueError("Endpoint dependency literal was not found")
 
 
 def verify() -> dict[str, Any]:
@@ -127,6 +166,8 @@ def verify() -> dict[str, Any]:
             )
         )
     )
+    endpoint_dependencies = _endpoint_dependencies(WORKER / "app.py")
+    dependency_pins_exact = endpoint_dependencies == EXPECTED_DEPENDENCIES
     return {
         "schema_version": "polymath.runpod_extraction_runtime_closure.v1",
         "python_target": "3.11.15",
@@ -140,6 +181,9 @@ def verify() -> dict[str, Any]:
         "unexpected_files": unexpected_files,
         "missing_files": missing_files,
         "local_import_roots": import_roots,
+        "endpoint_dependencies": endpoint_dependencies,
+        "dependency_pin_count": len(endpoint_dependencies),
+        "dependency_pins_exact": dependency_pins_exact,
         "secret_finding_count": len(secret_findings),
         "secret_findings": secret_findings,
         "all_green": not (
@@ -148,6 +192,7 @@ def verify() -> dict[str, Any]:
             or missing_files
             or secret_findings
             or import_roots != ["models", "services"]
+            or not dependency_pins_exact
         ),
     }
 

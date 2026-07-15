@@ -20,8 +20,10 @@ and deterministic Python mention selection/predicate compilation.
 
 - Worker closure: 13/13 declared files, zero missing/unexpected.
 - Closure SHA-256:
-  `e0f25225e3c17f6e6661c7a97f56ebb93f628027a64d146097cfa7e405780b4c`.
+  `fc33a9347aa792629309a1aa9e7bb3e961b1040174abc2e9f1b45013068b6378`.
 - Vendored backend parity: 8/8 exact, zero mismatches.
+- Flash dependency literal: 11/11 exact pins, including the hashed spaCy
+  model wheel; ranges and module-variable indirection are rejected.
 - Extraction vocabulary SHA-256:
   `47ea44fee2341c3cc65ef2bb4f99795947aa0c1cc9e1d55314efc7647af89612`.
 - Predicate normalization SHA-256:
@@ -37,28 +39,28 @@ and deterministic Python mention selection/predicate compilation.
 ### Backend contract focus
 
 ```bash
-sh -c 'PYTHONPATH=backend local_ghost_b/.venv/bin/python -m pytest -q backend/tests/test_gliner_mentions.py backend/tests/test_local_extraction.py backend/tests/test_semantic_observations.py backend/tests/test_claim_compiler.py > /tmp/runpod_b0_backend_seal.log 2>&1; echo EXIT=$? >> /tmp/runpod_b0_backend_seal.log'
+sh -c 'PYTHONPATH=backend local_ghost_b/.venv/bin/python -m pytest -q backend/tests/test_gliner_mentions.py backend/tests/test_local_extraction.py backend/tests/test_semantic_observations.py backend/tests/test_claim_compiler.py > /tmp/runpod_b0_backend_dependency_reseal.log 2>&1; echo EXIT=$? >> /tmp/runpod_b0_backend_dependency_reseal.log'
 ```
 
 Output tail:
 
 ```text
 ..................................................                       [100%]
-50 passed in 5.24s
+50 passed in 5.38s
 EXIT=0
 ```
 
 ### Worker contract focus
 
 ```bash
-sh -c 'cd runpod_flash_extractor && PYTHONPATH=. ../local_ghost_b/.venv/bin/python -m pytest -q test_app.py > /tmp/runpod_b0_worker_seal.log 2>&1; echo EXIT=$? >> /tmp/runpod_b0_worker_seal.log'
+sh -c 'cd runpod_flash_extractor && PYTHONPATH=. ../local_ghost_b/.venv/bin/python -m pytest -q test_app.py > /tmp/runpod_b0_worker_dependency_reseal.log 2>&1; echo EXIT=$? >> /tmp/runpod_b0_worker_dependency_reseal.log'
 ```
 
 Output tail:
 
 ```text
 ......                                                                   [100%]
-6 passed in 1.09s
+6 passed in 1.10s
 EXIT=0
 ```
 
@@ -70,7 +72,7 @@ compilation, `relations=[]`, exact offsets, and the temporal phrases
 ### Permanent closure verifier
 
 ```bash
-sh -c 'python3 scripts/verify_runpod_extraction_runtime_closure.py --json-out /tmp/runpod_b0_closure_seal.json > /tmp/runpod_b0_closure_seal.log 2>&1; echo EXIT=$? >> /tmp/runpod_b0_closure_seal.log'
+sh -c 'python3 scripts/verify_runpod_extraction_runtime_closure.py --json-out /tmp/runpod_b0_closure_dependency_reseal.json > /tmp/runpod_b0_closure_dependency_reseal.log 2>&1; echo EXIT=$? >> /tmp/runpod_b0_closure_dependency_reseal.log'
 ```
 
 Key output:
@@ -80,7 +82,9 @@ Key output:
 "worker_file_count": 13
 "vendored_mismatch_count": 0
 "secret_finding_count": 0
-"source_closure_sha256": "e0f25225e3c17f6e6661c7a97f56ebb93f628027a64d146097cfa7e405780b4c"
+"dependency_pin_count": 11
+"dependency_pins_exact": true
+"source_closure_sha256": "fc33a9347aa792629309a1aa9e7bb3e961b1040174abc2e9f1b45013068b6378"
 EXIT=0
 ```
 
@@ -129,6 +133,13 @@ second encountered a read-only cache; the third correctly reported three
 unformatted new files. Those files were mechanically formatted and the final
 check above is green. None of these commands touched a runtime container path
 outside `/tmp`.
+
+The first B2 build returned `EXIT=0` but its manifest truthfully reported zero
+dependencies because Flash 1.18 does not resolve a module constant used in the
+decorator. That artifact (SHA `4782b420…`) was rejected before deployment.
+The same 11 exact pins were moved inline, the permanent closure verifier gained
+an AST assertion for their exact ordered literal, and B0 reran from scratch:
+backend 50/50, worker 6/6, closure `EXIT=0`. No dependency changed.
 
 ## Scope and next gate
 

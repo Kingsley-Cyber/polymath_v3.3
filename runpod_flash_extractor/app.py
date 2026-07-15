@@ -10,26 +10,6 @@ from runpod_flash import Endpoint, GpuType, ServerlessScalerType
 from runtime import extract_local_batch
 
 
-LOCKED_DEPENDENCIES = [
-    "torch==2.12.0",
-    "transformers==4.57.6",
-    "tokenizers==0.22.2",
-    "numpy==2.2.6",
-    "safetensors==0.7.0",
-    "sentencepiece==0.2.1",
-    "huggingface_hub==0.36.2",
-    "pydantic==2.13.4",
-    "gliner==0.2.26",
-    "spacy==3.8.14",
-    (
-        "en_core_web_sm @ "
-        "https://github.com/explosion/spacy-models/releases/download/"
-        "en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl"
-        "#sha256=1932429db727d4bff3deed6b34cfc05df17794f4a52eeb26cf8928f7c1a0fb85"
-    ),
-]
-
-
 @Endpoint(
     name=os.getenv(
         "RUNPOD_FLASH_ENDPOINT_NAME",
@@ -51,7 +31,26 @@ LOCKED_DEPENDENCIES = [
     execution_timeout_ms=int(os.getenv("RUNPOD_FLASH_EXECUTION_TIMEOUT_MS", "1800000")),
     flashboot=True,
     accelerate_downloads=True,
-    dependencies=LOCKED_DEPENDENCIES,
+    # Flash 1.18's build scanner requires an inline literal here. A module
+    # constant silently yields a zero-dependency artifact.
+    dependencies=[
+        "torch==2.12.0",
+        "transformers==4.57.6",
+        "tokenizers==0.22.2",
+        "numpy==2.2.6",
+        "safetensors==0.7.0",
+        "sentencepiece==0.2.1",
+        "huggingface_hub==0.36.2",
+        "pydantic==2.13.4",
+        "gliner==0.2.26",
+        "spacy==3.8.14",
+        (
+            "en_core_web_sm @ "
+            "https://github.com/explosion/spacy-models/releases/download/"
+            "en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl"
+            "#sha256=1932429db727d4bff3deed6b34cfc05df17794f4a52eeb26cf8928f7c1a0fb85"
+        ),
+    ],
 )
 def extract_batch(payload: dict[str, Any]) -> dict[str, Any]:
     """Execute the strict credential-free extraction contract."""
