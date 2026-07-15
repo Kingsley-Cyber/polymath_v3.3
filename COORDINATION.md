@@ -8463,3 +8463,51 @@ PARKING FUTURE RESTARTS until _materialize_jobs preserves terminal
 cost/cache semantics — sealed only after this paid process stops — respects
 both the no-mid-batch-rebuild rule and the defect. The materializer fix
 joins the post-batch queue. Continue the recovery watch.
+
+## [2026-07-15T10:48:01Z] EXECUTOR → SENIOR :: RECEIPT
+
+Performance recovery is now GREEN in live observation. At terminal 159 the
+ledger is 152 accepted / 7 DLQ; last-50 is 45/50 as failure completion-rank
+109 leaves the window. All nine continuation terminals are accepted with
+complete telemetry, no new DLQ/ReadTimeout, and cumulative accounting is
+complete at `$7.327889599999998` including the restored `$0.10493885` bounds.
+Safe receipt: `/tmp/t93_p2_continuation_safe_poll_011.log`, `EXIT=0`.
+
+VERIFIED: exact durable counts, rolling 45/5, costs, three next claims running.
+INFERRED from the sealed deterministic state machine plus the subsequent
+claims: recovery latched at terminal 159 and the original rolling gate is now
+re-enabled. The execution receipt will settle that latch explicitly. The
+runner continues the main pass; any later last-50 fall below 90% still parks.
+
+## [OWNER-RELAY 2026-07-15T10:53:50Z] OWNER :: SCOPE RULING (verbatim intent)
+"just worry about run pod deployment... this whole pipeline focuses on gliner
+glirel, spacy and python for main extractions. if we lockdown runpod it can
+validate somewhat local and cloud since its kinda both. please just focus on
+runpod."
+
+## [2026-07-15T10:53:50Z] SENIOR → EXECUTOR :: DIRECTIVE — RUNPOD LOCKDOWN IS THE FOCUS (P2.6 descoped by owner)
+1. P2.6 DESCOPED: the four-lane live parity matrix is OFF. The built harness
+   and shared contract remain as assets. The ONE validation that matters:
+   RunPod output ≡ the certified pinned-local reference (the same
+   GLiNER/spaCy/Python stack) on same-chunk comparisons — that single
+   comparison transitively covers the stack per the owner's ruling.
+2. P2.7 RUNPOD LOCKDOWN becomes the active Track-A objective, sequenced:
+   a. BAKE: current contracts into runpod_flash_extractor (LocalExtractionV1
+      wire, claim-spine stack versions, the 49-file closure files that apply,
+      spaCy/GLiNER pins matching the certified venv) — image built and
+      hash-receipted.
+   b. DEPLOY: blue-green per standing law (new endpoint beside
+      m2ric3stpsh11d/pitae1qruu59ne, synthetic canary, never in-place).
+   c. VALIDATE: same-chunk RunPod-vs-pinned-local comparison (the descoped
+      parity harness reused for exactly this pair), then the 5,000-chunk
+      production gate with retry-safety assertions.
+   d. Only then: cutover + the owner's 15-doc E2E (E3) on the locked fleet.
+3. PARALLELISM RULE: image bake + zero-provider gates may proceed NOW in
+   parallel with the running digest pass (different lane; no backend/worker
+   rebuild — the no-rebuild-during-paid-batch law protects those containers
+   and the parked runner). Endpoint DEPLOY/cutover waits until the digest
+   pass settles or pauses, so two money-adjacent live operations never run
+   unsupervised simultaneously.
+4. P2.7b/P2.8 queue BEHIND the lockdown; they are not the focus.
+Post the bake plan (image contents, pins, gate list) as a short design note
+before building.
