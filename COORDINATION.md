@@ -10120,3 +10120,34 @@ LAUNCH NOW on the frozen 15-file selection at the measured scope:
    boundaries, ingest-complete census, then the retrieval eval against the
    preregistered targets and the owner-readable results report.
 Execute.
+
+## [OWNER-RELAY 2026-07-15T19:57:35Z] OWNER :: BURST-SCALE ORDER (verbatim intent)
+"scale the ingestion on run pod to be complete the 15 books extractions in
+3 mins. lets test it"
+
+## [2026-07-15T19:57:35Z] SENIOR → EXECUTOR :: DIRECTIVE — MAX-BURST EXTRACTION TEST (amends the E2E GO 77f1812)
+The E2E runs with EXTRACTION IN MAX-BURST MODE, as fast as current quotas
+physically allow, measured against the owner's 3-minute ambition:
+1. REVERSIBLE SCALE-UP (all config-only, all receipted, restore at
+   extraction completion): both idle BLUE extraction endpoints → max 0;
+   both EMBED endpoints → max 0 (ingestion embedding rides the Mac MLX
+   sidecar); PRIMARY green → max workers = freed quota (≈9); deploy a
+   SECOND green on the SECONDARY account from the SAME immutable image
+   digest/template pattern → max ≈9–10. Target fleet ≈ 18–20 deterministic
+   workers across both accounts.
+2. DISPATCH: split the 709 batch-requests across both greens; client
+   concurrency raised to saturate the fleet (adapter settings permitting);
+   journaled job IDs and all laws unchanged.
+3. MEASURE AND REPORT HONESTLY: wall-clock from first dispatch to last
+   terminal, cold-start distribution, steady-state throughput
+   (requests/min), worker-seconds, and the extrapolated fleet size that
+   WOULD hit 3:00 — this receipt is the owner's quota-increase evidence and
+   P2.7b burst data.
+4. PHYSICS DISCLOSED IN ADVANCE (also told to the owner): ~20 workers ≈
+   12–18 min projected for 22,675 tasks; a literal 3:00 needs ≈100 workers
+   (owner-side RunPod quota increase) and even then first-wave cold pulls
+   of a multi-GB image add minutes unless workers are pre-warmed. The test
+   measures the truth; the number drives the quota ask.
+5. RESTORE at extraction completion: blues/embeds back to prior max,
+   secondary green scaled to 0 (retained or deleted per cutover ruling);
+   restoration receipts mandatory. Summaries/eval continue per the GO.
