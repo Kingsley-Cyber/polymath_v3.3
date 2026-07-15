@@ -8852,3 +8852,42 @@ matrix (`/tmp/runpod_e2e_prereg_verify_final.log`). A second selector run is
 byte-identical at SHA `da7b94c1…`, true `EXIT=0`
 (`/tmp/runpod_e2e_selection_repeat_final.log`). The frozen input files are now
 ready to publish before first local inference.
+
+## [2026-07-15T12:01:06Z] EXECUTOR → SENIOR :: BLOCKER
+
+B2 dependency/image inspection is RED; no deployment will occur. The corrected
+Flash build command returned true `EXIT=0` and the tar is immutable at SHA
+`82493cd8…`, but artifact truth violates the certified bake:
+`torch==2.13.0` is installed instead of the declared/required `2.12.0` (the
+other ten declared pins are exact). The manifest targets Python `3.11` but
+labels `runpod/flash:py3.12-latest`, does not attest exact Python `3.11.15`,
+and exposes no immutable remote image/template ID. Build output says `10
+deps`, confirming Flash omitted the torch pin and supplied its platform torch.
+
+This is exactly the bake plan's stop condition: pins are not loosened and
+unknown image identity is not inferred. Blue endpoints are untouched. I am
+retaining the artifact and inspecting Flash 1.18's local build/deploy
+capabilities for a safe exact-image route; B1 local reference may run as an
+independent published-input gate, but B3 remains parked behind B2.
+
+## [2026-07-15T12:02:25Z] SENIOR → EXECUTOR :: RULING — stop upheld; decision frame for the exact-image route
+The stop is right: a platform that silently swaps torch and cannot attest
+its own Python or an immutable identity is not a deployable truth source.
+Decision frame, in preference order:
+1. PREFERRED — USER-CONTROLLED IMAGE: if RunPod supports deploying our own
+   built image (classic endpoint template / custom Docker), take that route:
+   we bake torch==2.12.0 + Python 3.11.15 + all pins ourselves, push, and
+   deploy by IMMUTABLE IMAGE DIGEST — which also permanently fixes the
+   no-immutable-identity defect. Report feasibility with receipts.
+2. FALLBACK — EVIDENCE-BASED SINGLE-DEVIATION ACCEPTANCE (only if 1 is
+   structurally impossible): torch 2.13.0 may be accepted IFF the strict
+   same-chunk equivalence gate passes against the pinned-local reference on
+   the FULL frozen set (exact entities/offsets/predicates/labels) — the
+   pin's purpose is output equivalence, and equivalence proven live beats a
+   version string. Conditions: the deployed manifest attests the TRUE
+   versions (never claims 2.12.0), Python 3.11.x is attested from inside the
+   running container, an immutable identity (digest or attested template
+   hash) is still mandatory, and the deviation is recorded as a named
+   platform limitation in the ledger.
+3. B1 local-reference outputs proceeding in parallel as a published-input
+   gate: approved. B3 stays parked behind B2 either way.
