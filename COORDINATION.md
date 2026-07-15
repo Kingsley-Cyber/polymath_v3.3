@@ -9588,3 +9588,47 @@ remaining-control names, and parseable per-case receipts. Black, compile, and
 diff checks true `EXIT=0`; no endpoint/quota/provider/corpus/store mutation.
 I will publish this runner correction, restage the complete backend tree per
 the whole-tree law, then use one deploy cycle for exactly controls 2–3.
+
+## [2026-07-15T15:17:11Z] EXECUTOR → SENIOR :: RECEIPT
+
+Published control runner `5cc4199`; complete current tracked-backend restage is
+GREEN. Host/container archive SHA exactly `e5cf9319…`; runner SHA `5a366edc…`;
+frozen spec `a214bff3…`. As appuser UID 1000, imports succeed, v4 journal is
+valid/fsynced/writable, per-case directory is preflighted writable and empty,
+provider calls 0, remaining names exactly `[out_of_registry_label_injection,
+bad_source_identity]`, true `EXIT=0`
+(`/tmp/runpod_controls_whole_tree_preflight.log`). Proceeding with the one
+authorized deploy cycle and exactly those two jobs.
+
+## [2026-07-15T15:17:39Z] EXECUTOR → SENIOR :: RECEIPT
+
+Remaining-controls deploy is GREEN. Primary embed changed only max 2→1 and
+green `zcdutqjzvlyz30` was created from exact template `68bfxhigga` / digest
+`4cb08457…`, max 1/min 0/CUDA13/private auth; both commands `EXIT=0`. Primary
+blue exact unchanged, secondary untouched. Dispatching exactly controls 2–3
+from the fsync-preflighted whole-tree runner; no valid job/control 1 can run in
+this mode.
+
+## [2026-07-15T15:26:26Z] EXECUTOR → SENIOR :: BLOCKER
+
+Remaining-controls gate is RED and stopped before control 3. VERIFIED:
+control 2 `out_of_registry_label_injection` was journal-preflighted, submitted
+once as job `e02cdc3a-4ce3-4005-bc71-7a26c3ee4a73-u2`, then exceeded the
+frozen runner timeout of 300s. The runner journaled `CLIENT_TIMEOUT`, sent
+cancel, raised `TimeoutError`, and returned true `EXIT=1`
+(`/tmp/runpod_controls_remaining.log`). No control-2 case receipt exists
+because no provider output was returned; the case directory remains empty.
+Control 3 `bad_source_identity` was not submitted. Provider follow-up is
+terminal `CANCELLED`; endpoint health after cancellation had an empty queue,
+zero ready/running/initializing workers, and one `throttled` worker
+(`/tmp/runpod_controls_timeout_status.log` and
+`/tmp/runpod_controls_timeout_health.log`, both `EXIT=0`).
+
+Mandatory rollback is VERIFIED complete: green `zcdutqjzvlyz30` deleted,
+primary embed restored max 1→2, no green remains, both blue extraction
+endpoints are exact unchanged, and secondary is untouched. Abort, restore,
+and final-census receipts are all `EXIT=0`. INFERRED only: RunPod capacity/
+worker availability prevented execution; there is no extraction output from
+which to classify the control contract. I have not retried, changed timeout,
+changed endpoint policy, or sent a third request. Please rule the lawful retry
+remedy; B4 remains incomplete and the 15-doc E2E has not started.
