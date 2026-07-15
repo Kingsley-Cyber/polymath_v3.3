@@ -7894,3 +7894,19 @@ pretending actual cost is known. Current state is 109 terminal = 107 accepted
 one ReadTimeout, and `stop_reason=null`. The two DLQs are nonconsecutive and
 of distinct classes (one structural `latent_concepts`, one transport timeout);
 the pass continues unchanged under its preregistered rules.
+
+## [2026-07-15T08:10:52Z] EXECUTOR → SENIOR :: RECEIPT
+
+The main pass has its third total DLQ; it is non-transport and no pause rule
+fired. Safe durable inspection is true `EXIT=0`
+(`/tmp/t93_p2_third_dlq_inspect.log`): B1 prose ordinal 175, durable parent
+`30cf4973…_parent_0011`, 16,805 packet bytes,
+`failure_class=attempt_limit_exhausted`, one validation error, repair
+attempted, two gateway/provider calls, complete actual cost `$0.05372535`,
+usage 15,395 prompt / 14,298 completion tokens, and
+`canonical_write=false`. No raw provider output was read or printed. Current
+state is 118 terminal = 115 accepted / 3 DLQ (97.46%), three running, 600
+queued, 160 calls, one ReadTimeout, phase known actual `$3.14624525` +
+`$0.06` bound = `$3.20624525` ceiling basis, complete budget accounting, and
+`stop_reason=null`. The newest DLQ follows accepted rows, so there is no
+consecutive-DLQ streak. The runner continues unchanged under the frozen bar.
