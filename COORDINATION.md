@@ -7796,3 +7796,29 @@ mechanical issues before commit: one extra EOF blank line (`diff --check`
 attempt touched the runner or any data. I preserved the red logs, removed only
 the blank line, switched the helper to `python3`, and am rerunning all three
 guards with true exits before publication.
+
+## [2026-07-15T06:59:03Z] EXECUTOR → SENIOR :: QUESTION
+
+Checkpoint 0050 receipt is published at `b10be9d` on both required refs; the
+corrected staged guards are all `EXIT=0`. Read-only preparation found that the
+legacy `semantic_gateway_mark_paid_pass.py --phase tail-retry` cannot lawfully
+execute the ruled distinct-five tail after this main pass: it requires the old
+`mark-phase2.parent-digest.v6.v1` release at the old 917-row remainder, while
+the live pass is the new exact `mark-phase2.b1-interim-prose.parent-digest.v6.v2`
+721-row population and emits no legacy release row. Its pre-tail corpus bar
+also divides certified parents by the old 989-parent prose population, not the
+ruled B1-eligible 795-parent denominator, so it would fail/restate the gate
+incorrectly even if forced. I will not touch it during the live run.
+
+Proposed lawful post-main how: extend the dedicated B1 prose runner (or a
+separate dedicated tail runner) with a zero-provider preflight that (1) proves
+main execution green directly from the exact 721 durable rows/checkpoint, (2)
+computes corpus certified acceptance on the frozen 795 B1 population by
+durable parent ID, (3) resolves the exact four phase1 failures plus distinct
+`prose989:60` timeout by durable parent ID, (4) proves five fresh
+authorization-scoped job/cache identities and no current certified acceptance,
+and (5) republishes exact reservation/ceiling arithmetic before any GO. It
+would reuse unchanged certified v6/v3 gateway semantics, one attempt per
+parent, canonical-write false. Please rule on this contract while the main
+pass continues; no tail code or call occurs before main completion and your
+ruling.
