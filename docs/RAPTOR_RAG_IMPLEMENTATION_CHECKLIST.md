@@ -3503,6 +3503,51 @@ A corpus is strict-ready only when:
   activation remain open.
 - Checklist boxes closed: launch seal only. T9.3 paid completion remains open.
 
+### 2026-07-15 - T9.3 B1 interim-prose Phase-2 rolling-stop closure
+
+- Commit: this receipt commit on `claude-continuation-20260713`.
+- Owner: owner authorized the paid interim-prose pass; senior accepted the
+  exact preregistered stop and ordered read-only diagnosis under a decision
+  criterion fixed before diagnosis.
+- Corpus/data scope: mark only; exact 721-parent Phase-2 selection. The first
+  attempt settled at 148 terminal = 141 accepted / 7 DLQ, with 573 queued and
+  zero running.
+- Code changes: none. The published exact-GO runner and frozen provider,
+  packet, prompt, repair, schema, budget, and pause contracts were unchanged.
+- Durable migration/backfill: 721 durable jobs were materialized; 141 accepted
+  noncanonical cache rows and 7 honest DLQs are terminal. One successful B4
+  re-buy has append-only supersession history; the other remains queued with
+  its source cache unchanged.
+- Before metrics: checkpoint 0100 was 99 accepted / 1 structural DLQ, 99%
+  acceptance, no timeout, no stop reason, and concurrency 3.
+- After metrics: overall attempted acceptance 141/148 = 95.27%, but the
+  authoritative completion-order final window is 44/50 = 88%, below the
+  frozen 90% floor. Stop reason is
+  `rolling_acceptance_below_90_percent`; provider calls are 206. Phase cost is
+  `$4.079086600000001` known actual + `$0.12` bounded exposure =
+  `$4.199086600000001`; corpus-wide basis is `$6.955576299999998`.
+- Tests by tier: immutable execution report runner `EXIT=1` as required for
+  RED; safe final-ledger, rolling-window, and re-buy inspections each true
+  `EXIT=0`. Execution JSON SHA-256 is
+  `a902153e7f9fe02c371e1246719e842e8181c58b78b46eaf4969ecebfeb263ce`.
+  Permanent receipt:
+  `docs/T9_3_PROSE_PHASE2_ROLLING_STOP_FAILURE_RECEIPT_2026-07-15.md`.
+- Cross-corpus test: not applicable; this paid lane is mark-only.
+  `canonical_store_census.scope.v2` remains valid, protected stores exactly
+  unchanged, and ambient Qdrant change false.
+- Failure/rollback test: the frozen rolling gate fired without redefinition;
+  no new job was claimed after stop. Purchased results and DLQs are an
+  append-only ledger and are not rolled back.
+- Deployment image/health: no rebuild, restart, deploy, projection, or
+  retrieval activation occurred during the paid attempt.
+- Remaining risks: read-only diagnosis must determine document clustering
+  versus provider-health drift. At most one unchanged-gate resume is
+  conditionally authorized; a second rolling stop parks for owner. Tail,
+  three-digest owner sample, corpus-wide completion, projection, and
+  activation remain open.
+- Checklist boxes closed: this failed execution attempt and boundary-stop
+  receipt only. T9.3 paid completion and all downstream boxes remain open.
+
 ## Implementation Log Template
 
 Copy this section for every completed item:

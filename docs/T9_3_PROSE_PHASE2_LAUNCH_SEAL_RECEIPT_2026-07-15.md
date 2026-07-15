@@ -112,7 +112,10 @@ any failed or green seal gate.
 
 ## Open execution receipts
 
-- Paid launch and exact-N durable materialization.
+- Paid launch and exact-N durable materialization occurred. The first attempt
+  correctly stopped RED at the rolling gate after 148 terminal rows; permanent
+  receipt:
+  `docs/T9_3_PROSE_PHASE2_ROLLING_STOP_FAILURE_RECEIPT_2026-07-15.md`.
 - First-50 checkpoint is GREEN: 50/50 accepted, zero dead letters/timeouts,
   true inspection `EXIT=0`; permanent receipt:
   `docs/T9_3_PROSE_PHASE2_CHECKPOINT_0050_RECEIPT_2026-07-15.md`.
@@ -120,8 +123,12 @@ any failed or green seal gate.
   ReadTimeouts, concurrency correctly remains 3, true inspection `EXIT=0`;
   permanent receipt:
   `docs/T9_3_PROSE_PHASE2_CHECKPOINT_0100_RECEIPT_2026-07-15.md`.
-- Subsequent rolling checkpoints.
-- Final 721-row ledger or boundary-stop ledger.
+- No checkpoint 0150 was emitted because the stop occurred at 148 terminal.
+- Boundary-stop ledger is published: 141 accepted / 7 DLQ / 573 queued,
+  last-50 acceptance 44/50 = 88%, runner `EXIT=1`.
+- Senior-ordered read-only diagnosis and preregistered resume/park decision.
+- If the one conditionally authorized resume occurs, final 721-row ledger or
+  a second boundary-stop ledger.
 - Three readable accepted digests for the owner record.
 - Distinct five-parent tail only after corpus-wide certified acceptance is at
   least 95%.

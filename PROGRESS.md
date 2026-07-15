@@ -2,18 +2,18 @@
 
 - Mission: CODEX_MISSION.md (CP2 → CP12)
 - Track: A4/T9.3 owner-authorized paid interim-prose Phase 2.
-- Current task: the published owner/senior-authorized B1 prose Phase-2 pass is
-  live over the exact 721-parent population. Checkpoint 0100 is GREEN at
-  99/100 accepted, one structural `latent_concepts` DLQ, zero ReadTimeouts,
-  and no stop reason. The clean-first-100 escalation condition is false, so
-  concurrency correctly remains 3. Cumulative ceiling basis is
-  `$5.419819499999999` including one `$0.06` bounded in-flight exposure;
-  protected canonical stores are exactly unchanged under
-  `canonical_store_census.scope.v2`.
-- Next task: continue non-invasive monitoring through exact rolling
-  checkpoints and the completion/budget boundary. Capture the final ledger
-  and three-digest owner sample. Do not rebuild, deploy, project, or activate
-  while paid work is running.
+- Current task: the first B1 prose Phase-2 execution attempt correctly stopped
+  RED at the preregistered rolling gate. Final settled state is 148 terminal =
+  141 accepted / 7 DLQ, 573 queued, 0 running, 206 provider calls, and last-50
+  acceptance 44/50 = 88% below the frozen 90% floor. The runner's true exit is
+  1; protected canonical stores remain exactly unchanged under
+  `canonical_store_census.scope.v2`. Permanent receipt:
+  `docs/T9_3_PROSE_PHASE2_ROLLING_STOP_FAILURE_RECEIPT_2026-07-15.md`.
+- Next task: perform the senior-ordered read-only post-stop diagnosis under
+  the preregistered resume/park criteria: failures by document, provider
+  health over completion order including the HTTP status-code class, next-50
+  queued document composition, and accepted-row latency/cost stability. No
+  prompt, gate, contract, tail, projection, or activation change is allowed.
 - Parked: the distinct five-parent bounded tail remains after the main pass
   and only if corpus-wide certified acceptance is at least 95%. The rejected
   structured v2/v3 contracts remain closed failed; the owner explicitly chose
@@ -30,7 +30,16 @@
   after modular completion + RunPod blue-green parity; this is not approval to
   reingest or mutate the existing ecommerce corpus. Predicate normalization v1
   and ClaimRecordV1 field sets remain owner-ratifiable.
-- Last completed subgate: T9.3 B1 prose Phase-2 checkpoint 0100 is GREEN.
+- Last completed subgate: T9.3 B1 prose Phase-2 rolling-stop receipt is RED /
+  correctly stopped. Final settled ledger: 148 terminal, 141 accepted, 7 DLQ,
+  573 queued, 0 running, 206 calls; overall attempted acceptance 95.27%, but
+  the authoritative final rolling window is 44/50 = 88%. Phase ceiling basis
+  is `$4.199086600000001`; corpus-wide ceiling basis is
+  `$6.955576299999998`. No tail, projection, or activation is authorized.
+  Permanent receipt:
+  `docs/T9_3_PROSE_PHASE2_ROLLING_STOP_FAILURE_RECEIPT_2026-07-15.md`.
+
+  T9.3 B1 prose Phase-2 checkpoint 0100 is GREEN.
   Permanent receipt:
   `docs/T9_3_PROSE_PHASE2_CHECKPOINT_0100_RECEIPT_2026-07-15.md`. The exact
   boundary is 100 terminal / 99 accepted / 1 structural DLQ, acceptance 99%,
@@ -92,4 +101,4 @@
   793+2 parents and finds sentence→atomic mapping coverage 80.944158%; the
   optional-ID ordered-unit shape is p50 13,930 bytes, max 25,613 bytes, with
   maximum-any-ten authority `$0.83486975` under the corrected envelope.
-- Last update: 2026-07-15T07:49:59Z (executor)
+- Last update: 2026-07-15T08:57:43Z (executor)

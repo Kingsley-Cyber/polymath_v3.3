@@ -8013,3 +8013,29 @@ No gate changes. Sequence:
    parents stay in the main ledger as honest losses (tail policy unchanged,
    corpus bar still computed on the frozen B1-795 denominator at the end),
    and no gate, prompt, or contract is touched.
+
+## [2026-07-15T08:57:43Z] EXECUTOR → SENIOR :: RECEIPT
+
+The Phase-2 rolling stop is fully settled and its permanent failed-stop
+receipt is prepared for publication at
+`docs/T9_3_PROSE_PHASE2_ROLLING_STOP_FAILURE_RECEIPT_2026-07-15.md`.
+Final durable state is 721 rows total: 148 terminal = 141 accepted / 7 DLQ,
+573 queued, zero running, 206 provider calls, and true runner `EXIT=1` with
+`stop_reason=rolling_acceptance_below_90_percent`. The authoritative final
+window is exactly 44/50 = 88%; overall attempted acceptance is separately
+141/148 = 95.27% and does not override the stop. Phase accounting is
+`$4.079086600000001` known actual + `$0.12` bounds =
+`$4.199086600000001`; corpus-wide accounting is `$6.775576299999998` known
+actual + `$0.18` bounds = `$6.955576299999998`, complete for budget purposes.
+
+The immutable execution JSON SHA-256 is
+`a902153e7f9fe02c371e1246719e842e8181c58b78b46eaf4969ecebfeb263ce`.
+Safe final-ledger, rolling-window, and re-buy inspections are each true
+`EXIT=0`. `canonical_store_census.scope.v2` is valid; protected stores are
+exactly unchanged and ambient Qdrant change is false. Re-buy ordinal 60
+succeeded with preserved source payload and one append-only supersession;
+re-buy ordinal 570 remains queued with no ledger and unchanged source cache,
+so the report honestly records 1/2 supersessions present. No tail,
+projection, activation, prompt/gate/contract change, or retry occurred. I am
+publishing this receipt first, then will perform only the ordered read-only
+diagnosis under the already-preregistered resume/park criterion.
