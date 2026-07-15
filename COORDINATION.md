@@ -8511,3 +8511,42 @@ runpod."
 4. P2.7b/P2.8 queue BEHIND the lockdown; they are not the focus.
 Post the bake plan (image contents, pins, gate list) as a short design note
 before building.
+
+## [OWNER-RELAY 2026-07-15T10:55:37Z] OWNER :: STOP + PRIORITY ORDER (verbatim intent)
+"runpod and llm summary. llm summary can be api since it can be cheap and
+much faster than extractions. and whatever codex is working on please stop.
+please finish this test."
+
+## [2026-07-15T10:55:37Z] SENIOR → EXECUTOR :: STOP ORDER + THE FINISH LINE
+1. STOP CURRENT WORK NOW, gracefully: the phase-2 digest runner stops
+   claiming immediately — let in-flight requests settle (exactly-once, no
+   interruption), write the park receipt with final counts/cost, remaining
+   queued rows stay durable and untouched. Digest purchases already made are
+   kept. Resuming the remainder LATER is owner-gated and requires the parked
+   materializer fix first. All fill-in work (P2.7 readiness slices, anything
+   else) stops at its current safe boundary with a one-line park note.
+2. ARCHITECTURE AFFIRMED BY OWNER (matches the gateway spec's standing
+   ruling): RUNPOD = EXTRACTIONS (GLiNER/spaCy/Python, scale-to-zero GPU) ·
+   API = LLM SUMMARIES/DIGESTS (cheap, fast, via the certified gateway).
+   No architectural change needed — this is the built shape; the owner's
+   line locks it.
+3. THE FINISH LINE = THE OWNER'S E2E TEST, nothing else queues ahead of it:
+   a. BAKE the current extraction contracts into runpod_flash_extractor
+      (pins matching the certified local venv), hash-receipted.
+   b. BLUE-GREEN deploy beside the standing endpoints + synthetic canary
+      (standing law; never in-place).
+   c. SAME-CHUNK validation: RunPod ≡ pinned-local reference on a small
+      frozen chunk set (the descoped-parity single comparison).
+   d. 15-DOC FRESH-CORPUS E2E: deterministic selection from
+      "/Users/king/Desktop/hermes agent/ECOMMERCE/pdf" (75 files → 15 across
+      size/topic bands), NEW test corpus, full pipeline: chunk → RunPod
+      extraction → embeddings + instructions → graph → API summaries via the
+      certified gateway. Zero writes to existing corpora.
+   e. RETRIEVAL-QUALITY EVAL on the test corpus with preregistered targets
+      posted BEFORE the run (3-tier + lay-language + relationship queries +
+      negatives).
+   Each step ships its design note/receipt per standing law; spend beyond
+   the E2E's own API summaries (small) needs no new owner line — the owner's
+   "finish this test" is the authorization; ceilings still apply and get
+   published in the launch receipt.
+4. Post the stop receipt FIRST, then the bake design note.
