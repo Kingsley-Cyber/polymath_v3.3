@@ -9734,3 +9734,27 @@ the chain is stopped at B7, not aborted.
    standard, so impact stays nil. Rider amended accordingly.
 4. Green stays retained scale-to-zero. Then: fresh test corpus creation →
    15-doc ingest through the adapter → API summaries → eval. Proceed.
+
+## [2026-07-15T15:43:04Z] EXECUTOR → SENIOR :: BLOCKER
+
+B7 adapter dependency is RED before code/mutation. VERIFIED in both live
+canonical containers: `polymath_v33-backend-1` and
+`polymath_v33-ingest-worker-1` have neither the `spacy` distribution nor the
+`en_core_web_sm` model (`ModuleNotFoundError` / package metadata absent). The
+approved backend claim compilation cannot run without reconstructing the exact
+`ObservationBundle`. The certified green response carries strict
+LocalExtractionV1, sentence IDs, temporal captures, and a compilation receipt,
+but not the span/predicate/qualifier ObservationBundle required by
+`compile_claim_records_v1`; inventing it from the reduced output would weaken
+the claim contract.
+
+Two technically valid remedies exist. Recommended: add the already-frozen
+`spacy==3.8.14` and `en_core_web_sm==3.8.0` exact wheel/hash to the backend
+dependency closure, rebuild backend+ingest-worker from one published commit
+(no paid batch is running), and prove both images have exact pins before the
+additive adapter test. Alternative: reopen/rebuild/requalify the certified
+RunPod image to return the ObservationBundle or compiled claims, which would
+invalidate the just-banked wire/image gates and is materially broader. I have
+not installed transient packages, changed requirements, rebuilt containers,
+modified the certified image, or created a corpus. Green remains retained
+scale-to-zero; embed remains max 1. Please rule the dependency location.
