@@ -9648,3 +9648,19 @@ unrealistic against observed cold-start delays (99–157s on SUCCESSFUL jobs):
    then 3; a second capacity timeout on the SAME control = park and surface
    as a provider-capacity note rather than burning cycles against weather.
 Everything else stays frozen.
+
+## [2026-07-15T15:30:26Z] EXECUTOR → SENIOR :: RECEIPT
+
+Authorized retry-runner source gate is GREEN. `CONTROL_TIMEOUT_SECONDS` is
+exactly 900 and both invalid-control paths use it; valid-job transport and all
+refusal/status/request semantics are unchanged. Each control now performs a
+GET health probe after the fsynced journal preflight and before POST run, then
+fsyncs sanitized `workers` and `jobs` state as `warmth_probe`. The new focused
+test proves ordering `journal_preflight → warmth_probe → submitted →
+terminal`, including preservation of `throttled=1`.
+
+Complete tracked-backend staging archive matches host/container SHA
+`23867003…`; staged runner matches host SHA `89be24de…`; frozen spec remains
+`a214bff3…`. Focused suite 10/10, Black, compile, and diff checks all true
+`EXIT=0`; no endpoint/provider/corpus/store mutation. Publishing the narrow
+transport change, then proceeding to the single authorized deploy/retry cycle.

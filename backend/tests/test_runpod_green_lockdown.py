@@ -7,6 +7,7 @@ import httpx
 import pytest
 
 from scripts.run_runpod_green_lockdown import (
+    CONTROL_TIMEOUT_SECONDS,
     REMAINING_CONTROL_NAMES,
     _persist_case_receipt,
     _submit_and_wait,
@@ -120,6 +121,7 @@ def test_invalid_cases_are_general_contract_mutations() -> None:
         "out_of_registry_label_injection",
         "bad_source_identity",
     )
+    assert CONTROL_TIMEOUT_SECONDS == 900
 
 
 def test_refusal_requires_named_fail_closed_code() -> None:
@@ -235,6 +237,71 @@ async def test_failed_control_requires_failed_status_and_named_refusal(
 
     assert validate_refusal("malformed_contract", output)["success"] is False
     assert receipt["provider_status"] == "FAILED"
+
+
+@pytest.mark.asyncio
+async def test_control_warmth_is_fsynced_before_submission(tmp_path) -> None:
+    paths: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        paths.append(request.url.path)
+        if request.method == "GET" and request.url.path.endswith("/health"):
+            return httpx.Response(
+                200,
+                json={
+                    "workers": {
+                        "idle": 0,
+                        "initializing": 0,
+                        "ready": 0,
+                        "running": 0,
+                        "throttled": 1,
+                        "unhealthy": 0,
+                    },
+                    "jobs": {"inQueue": 0, "inProgress": 0},
+                },
+            )
+        if request.method == "POST" and request.url.path.endswith("/run"):
+            return httpx.Response(200, json={"id": "control-job-warmth"})
+        return httpx.Response(
+            200,
+            json={
+                "id": "control-job-warmth",
+                "status": "FAILED",
+                "output": {
+                    "success": False,
+                    "error_code": "extraction_contract_rejected",
+                },
+            },
+        )
+
+    journal = tmp_path / "jobs.jsonl"
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        await _submit_and_wait(
+            client,
+            endpoint_id="endpoint-1",
+            api_key="unit-secret",
+            payload={"contract_version": "invalid"},
+            timeout_seconds=CONTROL_TIMEOUT_SECONDS,
+            case_name="out_of_registry_label_injection",
+            job_journal=journal,
+            expected_terminal_status="FAILED",
+            journal_warmth=True,
+        )
+
+    rows = [json.loads(line) for line in journal.read_text().splitlines()]
+    assert paths == [
+        "/v2/endpoint-1/health",
+        "/v2/endpoint-1/run",
+        "/v2/endpoint-1/status/control-job-warmth",
+    ]
+    assert [row["event"] for row in rows] == [
+        "journal_preflight",
+        "warmth_probe",
+        "submitted",
+        "terminal",
+    ]
+    assert rows[1]["workers"]["throttled"] == 1
+    assert rows[1]["jobs"] == {"inProgress": 0, "inQueue": 0}
 
 
 @pytest.mark.asyncio

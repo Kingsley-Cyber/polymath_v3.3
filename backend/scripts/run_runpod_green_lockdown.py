@@ -37,6 +37,7 @@ EXPECTED_SOURCE_CLOSURE_SHA256 = (
 RUNPOD_API_BASE = "https://api.runpod.ai/v2"
 GRAPHQL_URL = "https://api.runpod.io/graphql"
 TERMINAL_FAILURES = {"FAILED", "CANCELLED", "TIMED_OUT"}
+CONTROL_TIMEOUT_SECONDS = 900
 REMAINING_CONTROL_NAMES = (
     "out_of_registry_label_injection",
     "bad_source_identity",
@@ -178,6 +179,7 @@ async def _submit_and_wait(
     case_name: str,
     job_journal: Path,
     expected_terminal_status: str = "COMPLETED",
+    journal_warmth: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     if expected_terminal_status not in {"COMPLETED", "FAILED"}:
         raise ValueError("expected terminal status must be COMPLETED or FAILED")
@@ -191,6 +193,26 @@ async def _submit_and_wait(
             "endpoint_id": endpoint_id,
         },
     )
+    if journal_warmth:
+        health_response = await client.get(
+            f"{RUNPOD_API_BASE}/{endpoint_id}/health", headers=headers
+        )
+        health_response.raise_for_status()
+        health = health_response.json()
+        if not isinstance(health, dict):
+            raise RuntimeError("RunPod health returned non-object output")
+        workers = health.get("workers")
+        jobs = health.get("jobs")
+        _persist_job_event(
+            job_journal,
+            {
+                "event": "warmth_probe",
+                "case": case_name,
+                "endpoint_id": endpoint_id,
+                "workers": workers if isinstance(workers, dict) else {},
+                "jobs": jobs if isinstance(jobs, dict) else {},
+            },
+        )
     response = await client.post(
         f"{RUNPOD_API_BASE}/{endpoint_id}/run",
         headers=headers,
@@ -504,10 +526,11 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                         endpoint_id=endpoint_id,
                         api_key=api_key,
                         payload=invalid,
-                        timeout_seconds=300,
+                        timeout_seconds=CONTROL_TIMEOUT_SECONDS,
                         case_name=name,
                         job_journal=args.job_journal,
                         expected_terminal_status="FAILED",
+                        journal_warmth=True,
                     )
                     receipt_path = _persist_case_receipt(
                         args.case_receipt_dir,
@@ -568,10 +591,11 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                             endpoint_id=endpoint_id,
                             api_key=api_key,
                             payload=invalid,
-                            timeout_seconds=300,
+                            timeout_seconds=CONTROL_TIMEOUT_SECONDS,
                             case_name=name,
                             job_journal=args.job_journal,
                             expected_terminal_status="FAILED",
+                            journal_warmth=True,
                         )
                         receipt_path = _persist_case_receipt(
                             args.case_receipt_dir,
