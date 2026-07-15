@@ -1,0 +1,42 @@
+FROM python:3.11.15-slim-bookworm@sha256:b18992999dbe963a45a8a4da40ac2b1975be1a776d939d098c647482bcad5cba
+
+ARG POLYMATH_SOURCE_COMMIT
+ARG POLYMATH_SOURCE_CLOSURE
+
+LABEL org.opencontainers.image.title="Polymath LocalExtractionV1 worker" \
+      org.opencontainers.image.revision="${POLYMATH_SOURCE_COMMIT}" \
+      io.polymath.base-amd64-digest="sha256:28255a3ace7eb4c48bc1b57b90af29e1bc82b4fd6c60614a8e3dce61b87ff941" \
+      io.polymath.source-closure="${POLYMATH_SOURCE_CLOSURE}" \
+      io.polymath.contract="polymath.runpod_local_extraction.v1"
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONHASHSEED=0 \
+    HF_HOME=/opt/polymath/hf-cache \
+    POLYMATH_LOCAL_FILES_ONLY=1 \
+    TOKENIZERS_PARALLELISM=false
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY runpod_flash_extractor/requirements.custom-image.lock /tmp/requirements.lock
+RUN python -m pip install --no-cache-dir --require-hashes -r /tmp/requirements.lock \
+    && rm /tmp/requirements.lock
+
+WORKDIR /app
+COPY runpod_flash_extractor/app.py runpod_flash_extractor/runtime.py ./
+COPY runpod_flash_extractor/models ./models
+COPY runpod_flash_extractor/services ./services
+COPY runpod_flash_extractor/registries ./registries
+COPY scripts/bake_runpod_extraction_assets.py /tmp/bake_assets.py
+
+RUN python /tmp/bake_assets.py --report /opt/polymath/bake-report.json \
+    && rm /tmp/bake_assets.py \
+    && python -m py_compile app.py runtime.py models/*.py services/*.py services/ingestion/*.py
+
+RUN useradd --create-home --uid 10001 polymath \
+    && chown -R polymath:polymath /app /opt/polymath
+
+USER 10001:10001
+CMD ["python", "app.py"]

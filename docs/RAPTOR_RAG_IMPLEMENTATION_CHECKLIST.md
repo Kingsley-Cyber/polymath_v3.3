@@ -3769,6 +3769,36 @@ A corpus is strict-ready only when:
   `docs/RUNPOD_FINISH_LINE_PREREGISTRATION_RECEIPT_2026-07-15.md`.
 - Checklist boxes closed: none; this freezes inputs for the open P2.7 gates.
 
+### 2026-07-15 - P2.7 custom-image B0 feasibility seal
+
+- Commit: this custom-image source commit on
+  `claude-continuation-20260713`.
+- Owner: full RunPod finish line authorized; exact-image remediation follows
+  the senior's preferred-route ruling after Flash B2 failed.
+- Corpus/data scope: source/build validation only; zero corpus or durable-store
+  writes.
+- Code changes: standalone RunPod queue envelope on the existing strict worker,
+  immutable-base Dockerfile, hashed 147-distribution lock, in-image model bake
+  verifier, and custom-image contract verifier.
+- Durable migration/backfill: none.
+- Before metrics: Flash's tar excludes torch and its immutable base attests
+  Python 3.12 / torch 2.9.1, not the certified runtime.
+- After metrics: exact 13 critical/runtime pins, 147 hashed distributions,
+  source closure `41a2c0db…`, zero secret findings, non-root/offline model
+  contract, warning-free Docker check.
+- Tests by tier: backend deterministic spine 50/50; worker 6/6; standalone
+  handler 3/3; closure and custom contract verifiers true `EXIT=0`.
+- Cross-corpus test: not applicable to the source seal; frozen 15-document E2E
+  remains downstream.
+- Failure/rollback test: malformed custom envelopes fail closed; the original
+  Flash artifact remains rejected and no blue endpoint changed.
+- Deployment image/health: no image built/pushed and no endpoint operation.
+- Remaining risks: build-time CUDA-13 closure and runtime GPU behavior require
+  local image attestation plus the live canary; registry push is an external
+  publication boundary. Permanent receipt:
+  `docs/RUNPOD_CUSTOM_IMAGE_B0_FEASIBILITY_RECEIPT_2026-07-15.md`.
+- Checklist boxes closed: none; B2 remains open until image/digest attestation.
+
 ## Implementation Log Template
 
 Copy this section for every completed item:

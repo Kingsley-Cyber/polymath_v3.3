@@ -56,3 +56,54 @@ def extract_batch(payload: dict[str, Any]) -> dict[str, Any]:
     """Execute the strict credential-free extraction contract."""
 
     return extract_local_batch(payload)
+
+
+def handle_serverless_job(job: dict[str, Any]) -> dict[str, Any]:
+    """Standalone custom-image RunPod queue handler.
+
+    Flash's generated queue handler calls ``extract_batch(payload=...)``.  The
+    custom image preserves that exact input envelope while avoiding any
+    provider, database, graph, or vector client in the worker image.
+    """
+
+    if not isinstance(job, dict):
+        return {
+            "success": False,
+            "error_code": "invalid_job_envelope",
+            "error": "RunPod job must be an object",
+        }
+    raw_input = job.get("input")
+    if not isinstance(raw_input, dict):
+        return {
+            "success": False,
+            "error_code": "invalid_input_envelope",
+            "error": "RunPod job input must be an object",
+        }
+    normalized = dict(raw_input)
+    normalized.pop("__empty", None)
+    if set(normalized) != {"payload"} or not isinstance(normalized["payload"], dict):
+        return {
+            "success": False,
+            "error_code": "invalid_payload_envelope",
+            "error": "RunPod job input must contain only an object payload",
+        }
+    try:
+        return extract_batch(normalized["payload"])
+    except Exception as exc:
+        return {
+            "success": False,
+            "error_code": "extraction_contract_rejected",
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+
+
+def main() -> None:
+    """Start the queue worker when this module is the custom-image entrypoint."""
+
+    import runpod
+
+    runpod.serverless.start({"handler": handle_serverless_job})
+
+
+if __name__ == "__main__":
+    main()

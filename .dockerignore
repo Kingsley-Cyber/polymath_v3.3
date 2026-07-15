@@ -32,6 +32,12 @@
 download
 downloads
 models
+!runpod_flash_extractor/models
+!runpod_flash_extractor/models/**
+!runpod_flash_extractor/services
+!runpod_flash_extractor/services/**
+!runpod_flash_extractor/registries
+!runpod_flash_extractor/registries/**
 books_4096
 graphify-out
 graphify_scope

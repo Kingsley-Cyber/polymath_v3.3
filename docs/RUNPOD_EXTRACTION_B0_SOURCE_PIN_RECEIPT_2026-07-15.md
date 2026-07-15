@@ -152,3 +152,23 @@ ASSUMED: none.
 B1/B2 may now run from the published commit: deterministic pinned-local
 reference, then immutable Flash image build/identity. The standing blue
 endpoints remain untouched.
+
+## 2026-07-15 custom-image source reseal after Flash artifact rejection
+
+The Flash artifact was not deployable: Flash 1.18 excludes torch and its
+immutable base is Python 3.12 over RunPod torch 2.9.1. The senior-approved
+preferred route is now a standalone custom image. Adding only the exact
+RunPod queue envelope to `app.py` changed the source closure, so B0 reran from
+scratch before any image build.
+
+The new closure is
+`41a2c0db7aa35c7d0c30105f18df42687e0a459368d66f269f1a7248224c1415`:
+13/13 files, 8/8 vendored bytes exact, 11/11 endpoint pins exact, zero secret
+findings, backend 50/50, worker 6/6, and standalone handler 3/3. The custom
+image contract verifier binds a hashed 147-distribution lock, official Python
+3.11.15 index + amd64 child digests, offline model bake, non-root runtime, and
+source identity labels. BuildKit's final static check is warning-free.
+
+Permanent feasibility receipt:
+`docs/RUNPOD_CUSTOM_IMAGE_B0_FEASIBILITY_RECEIPT_2026-07-15.md`. No image,
+registry, endpoint, provider, or corpus operation occurred in this reseal.

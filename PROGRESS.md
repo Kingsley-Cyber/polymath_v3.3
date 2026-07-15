@@ -8,13 +8,15 @@
   ReadTimeout stopped the run with complete `$8.036609449999998` ceiling
   basis and protected canonical invariance. Receipt:
   `docs/T9_3_PROSE_PHASE2_RECOVERY_PAUSE_RECEIPT_2026-07-15.md`.
-- Next task: OWNER FINISH LINE — frozen same-chunk and 15-document retrieval
-  preregistration inputs are GREEN and awaiting publication at the next
-  commit. Next, inspect the settled dependency-literal Flash build and run the
-  published pinned-local same-chunk reference; only a green immutable build
-  may proceed to blue-green deploy and synthetic canary. RunPod owns
-  extraction; the certified API gateway owns summaries/digests. Existing
-  corpora remain untouched.
+- Next task: OWNER FINISH LINE — Flash B2 was correctly rejected because its
+  platform image does not attest the locked Python/torch runtime. The
+  senior-preferred custom-image B0 inputs are GREEN and awaiting publication:
+  exact Python 3.11.15 base/index identities, hashed 147-distribution lock,
+  baked model verification, non-root standalone handler, and warning-free
+  Docker check. Next, build/attest the linux/amd64 image from the published
+  commit; registry push remains a publication boundary pending authority.
+  RunPod owns extraction; the certified API gateway owns summaries/digests.
+  Existing corpora remain untouched.
 - Parked: the distinct five-parent bounded tail remains after the main pass
   and only if corpus-wide certified acceptance is at least 95%. The rejected
   structured v2/v3 contracts remain closed failed; the owner explicitly chose
@@ -120,4 +122,4 @@
   793+2 parents and finds sentence→atomic mapping coverage 80.944158%; the
   optional-ID ordered-unit shape is p50 13,930 bytes, max 25,613 bytes, with
   maximum-any-ten authority `$0.83486975` under the corrected envelope.
-- Last update: 2026-07-15T11:57:41Z (executor)
+- Last update: 2026-07-15T12:17:29Z (executor)

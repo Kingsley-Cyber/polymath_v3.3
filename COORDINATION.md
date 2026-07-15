@@ -8891,3 +8891,69 @@ Decision frame, in preference order:
    platform limitation in the ledger.
 3. B1 local-reference outputs proceeding in parallel as a published-input
    gate: approved. B3 stays parked behind B2 either way.
+
+## [2026-07-15T12:10:24Z] EXECUTOR → SENIOR :: RECEIPT
+
+B1 pinned-local reference is GREEN, true `EXIT=0`
+(`/tmp/runpod_b1_local_reference.log`). Twelve frozen tasks ran twice with
+identical normalized output SHA `0ac30ee5…`; task-input SHA is `596d5e2a…`.
+The reference has 126 entities, 56 predicates, 14 windows, and zero relations,
+provider calls, database writes, graph writes, or vector writes. Its file SHA
+is `2afc6e44…`; runtime identity attests Python 3.11.15, all 11 exact
+distributions, model/registry hashes, and source closure `fc33a934…`.
+
+Correction to my first B2 diagnosis: `torch==2.13.0` exists only in Flash's
+local dependency staging directory and is excluded from the tar. The actual
+immutable Flash base provenance is Python 3.12 over RunPod torch 2.9.1
+(`runpod/flash` amd64 digest `97209262…`); therefore the deployable artifact
+attests neither required Python nor torch at all. The RED verdict is stronger
+and unchanged.
+
+Preferred-route feasibility is positive locally: Flash accepts a custom
+`image=` and the machine has an authenticated Docker Hub namespace. I will
+build from the immutable official Python 3.11.15 amd64 digest, bake the exact
+critical closure plus model hashes, and use a standalone RunPod handler. An
+external registry push is a publication boundary; unless the owner's full
+RunPod redeploy authorization is deemed to cover that necessary operation, I
+will stop before push and ask for an `OWNER ::` line while retaining the
+verified local image.
+
+## [2026-07-15T12:15:45Z] EXECUTOR → SENIOR :: BLOCKER
+
+The first custom-image Dockerfile static check is RED before build, true
+`EXIT=1` (`/tmp/runpod_custom_docker_check.log`). BuildKit verified the exact
+amd64 base digest but warned that the Dockerfile did not bind the `FROM`
+platform while the host is arm64; its check path treated the host platform as
+expected even though the command passed `--platform linux/amd64`. No image was
+built or pushed. I will make the target-platform binding explicit through
+BuildKit's automatic `$TARGETPLATFORM` argument, rerun the contract verifier,
+and require a warning-free Docker check. This changes no dependency, asset,
+wire, or comparison contract.
+
+## [2026-07-15T12:16:48Z] EXECUTOR → SENIOR :: BLOCKER
+
+The explicit `$TARGETPLATFORM` correction is also RED under BuildKit's static
+checker, true `EXIT=1` (`/tmp/runpod_custom_docker_check_v2.log`): the checker
+both calls the explicit binding redundant and still evaluates the platform
+against the arm64 host. No build/push occurred. The correct cross-platform
+form is an immutable multi-arch index digest in `FROM`, with the expected
+linux/amd64 child digest recorded as an image label and verified after build;
+`--platform linux/amd64` then selects that child without a host-platform
+contradiction. I will make only that identity representation correction and
+rerun warning-free.
+
+## [2026-07-15T12:17:29Z] EXECUTOR → SENIOR :: RECEIPT
+
+Custom-image source/contract preflight is GREEN. BuildKit's third check is
+warning-free with true `EXIT=0` (`/tmp/runpod_custom_docker_check_v3.log`):
+the immutable multi-arch Python 3.11.15 index is bound, and the expected amd64
+child digest is separately labeled. The custom contract verifier is also
+GREEN, true `EXIT=0` (`/tmp/runpod_custom_contract_v3.log`): 147 distributions
+locked with hashes; all 13 critical/runtime pins exact; non-root/offline-model
+and source labels present; zero secret findings. Handler envelope tests are
+3/3, worker tests 6/6, backend spine tests 50/50, and the resealed 13-file
+source closure is `41a2c0db…`, all true `EXIT=0`.
+
+No image, registry, endpoint, provider, or corpus operation has occurred. I am
+publishing these build inputs before the local amd64 image build, per the
+published-source rule.
