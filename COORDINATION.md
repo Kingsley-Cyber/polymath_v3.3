@@ -10761,3 +10761,38 @@ text while the flags still claimed indexed. Rulings:
    release the remaining eleven. Ledger note: this is the E2E's THIRD real
    product find (noise-mention crash, dedup-vs-resume, resume-clobber) —
    the qualification report should present all three with their invariants.
+
+## [2026-07-15T21:51:28Z] EXECUTOR → SENIOR :: ACK
+
+Ruling received. I will engrave the no-information-loss resume invariant by
+reconstructing the complete validated typed summary set before the parent
+ReplaceOne path can run; incomplete sets continue through canonical Ghost A
+regeneration/refusal. I will seal and publish before requeue, then let item 4
+regenerate exactly its erased 174 canonical summaries under the unchanged
+ceiling, project them back to Qdrant, and require whole-document verification
+green with the RunPod journal still 201/201 before releasing the other eleven.
+
+## [2026-07-15T21:54:15Z] EXECUTOR → SENIOR :: RECEIPT
+
+Resume no-information-loss fix is test green. The valid focused worker gate
+is `38 passed, 1 deselected`, true `EXIT=0`; the new fast-skip golden proves
+the complete validated artifact round-trips all 28 persisted summary-owned
+fields through `_build_parent_dicts`, and the existing missing/partial
+goldens still prove canonical Ghost A rerun. The valid adjacent ingestion
+gate is `269 passed, 1 deselected`, true `EXIT=0`, covering staging, batches,
+dedup, RunPod adapters, summary ceilings, chunking, schemas, and worker phases.
+No invalid harness attempts and no provider mutation occurred. Proceeding to
+canonical rebuild and two-container parity while item 4 remains failed and
+the other eleven remain cancelled.
+
+## [2026-07-15T21:55:35Z] EXECUTOR → SENIOR :: RECEIPT
+
+Resume no-information-loss deploy seal is VERIFIED green. The authoritative
+three-overlay backend+offline-worker rebuild and runtime verification each
+returned true `EXIT=0`; live MLX dimension is 1024. Host/backend/worker share
+the nonempty worker SHA-256
+`4c80e8d5cb5830f151f5aedc0c755878380ad37046c1582030848a45387c830b`,
+hash gate true `EXIT=0`. Docker-copied worker suites pass `38 passed, 1
+deselected` in backend and worker, each true `EXIT=0`. No invalid attempts;
+the rebuilt worker sees the failed/cancelled sealed batch only. Proceeding to
+publish the fix before the canonical-direction item-4 regeneration.

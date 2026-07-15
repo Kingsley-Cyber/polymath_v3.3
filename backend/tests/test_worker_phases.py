@@ -1055,6 +1055,129 @@ async def test_ghost_a_qdrant_written_without_summaries_reconstructs_for_reindex
 
 
 @pytest.mark.asyncio
+async def test_ghost_a_indexed_fast_skip_preserves_full_typed_parent_summary():
+    """A verified fast-skip must return the durable typed artifact.
+
+    Ghost B may still upsert parent rows during the same resume, so returning
+    ``summaries=None`` here would let ReplaceOne erase canonical summary fields.
+    """
+    doc_id, corpus_id = "doc-summary-fast-skip", "c" * 36
+    parent, child = _parent(doc_id, corpus_id, pid="p0", child_id="c0")
+    parsed = parse_semantic_summary(
+        '{"summary":"A durable summary preserves every typed field during '
+        'resume.","central_claim":"Resume must not erase durable summary '
+        'state.","key_points":[{"text":"Typed fields survive.",'
+        '"supporting_child_ids":["c0"]}],"main_mechanism":"Typed '
+        'reconstruction","concept_tags":["resume","durability"],'
+        '"entity_hints":["MongoDB"],"retrieval_uses":["mechanism"],'
+        '"abstraction_level":"medium","temporal_class":"evergreen"}',
+        source_child_ids=["c0"],
+        source_text=parent.text,
+    )
+    artifact = canonical_parent_summary_fields(
+        parsed,
+        parent_id=parent.parent_id,
+        doc_id=doc_id,
+        corpus_id=corpus_id,
+        source_text=parent.text,
+        source_child_ids=["c0"],
+        summary_model="unit-model",
+    )
+    existing_parent = {
+        **artifact,
+        "parent_id": parent.parent_id,
+        "doc_id": doc_id,
+        "corpus_id": corpus_id,
+        "source_tier": parent.source_tier,
+        "text": parent.text,
+        "domain": "durability",
+        "semantic_chunk_type": "mechanism",
+        "key_terms": ["resume"],
+        "mechanisms": ["typed reconstruction"],
+        "child_ids": ["c0"],
+    }
+    ws = WriteState(
+        mongo_written=True,
+        qdrant_written=True,
+        summaries_indexed=True,
+        summary_points=1,
+        neo4j_written=False,
+    )
+    cfg = IngestionConfig(
+        use_neo4j=False,
+        chunk_summarization=True,
+        target_qdrant_collections=["naive", "hrag"],
+    )
+    summarize_mock = AsyncMock()
+    summary_check = AsyncMock(return_value=True)
+
+    with patch.object(
+        worker.mongo_reader,
+        "get_parent_chunks",
+        new_callable=AsyncMock,
+    ) as parent_mock, patch.object(
+        worker,
+        "summarize_parents",
+        summarize_mock,
+    ), patch.object(
+        worker,
+        "_qdrant_has_summary_points",
+        summary_check,
+    ), patch.object(worker.settings, "NEO4J_ENABLED", True):
+        parent_mock.return_value = [existing_parent]
+        result = await worker._run_ghosts_parallel(
+            config=cfg,
+            parents=[parent],
+            children=[child],
+            doc_id=doc_id,
+            corpus_id=corpus_id,
+            model="m",
+            db=MagicMock(),
+            qdrant_client=MagicMock(),
+            neo4j_driver=MagicMock(),
+            existing_doc=None,
+            ws=ws,
+        )
+
+    assert summarize_mock.await_count == 0
+    assert summary_check.await_count == 1
+    assert result.summaries is not None
+    assert len(result.summaries) == 1
+    rebuilt = worker._build_parent_dicts([parent], result.summaries)[0]
+    preserved_fields = {
+        "summary",
+        "schema_version",
+        "summary_type",
+        "central_claim",
+        "key_points",
+        "main_mechanism",
+        "concept_tags",
+        "entity_hints",
+        "retrieval_uses",
+        "latent_concepts",
+        "temporal_class",
+        "time_expressions",
+        "abstraction_level",
+        "summary_id",
+        "source_hash",
+        "summary_model",
+        "summary_created_at",
+        "validation_status",
+        "repair_status",
+        "quality_score",
+        "quality_flags",
+        "retrieval_text",
+        "source_child_ids",
+        "domain",
+        "semantic_chunk_type",
+        "key_terms",
+        "mechanisms",
+    }
+    for field in preserved_fields:
+        assert rebuilt[field] == existing_parent[field], field
+
+
+@pytest.mark.asyncio
 async def test_ghost_a_summaries_indexed_without_mongo_text_reruns_llm():
     """Qdrant summary points alone are not a safe resume skip.
 

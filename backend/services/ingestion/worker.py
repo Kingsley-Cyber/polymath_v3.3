@@ -1383,6 +1383,28 @@ async def _run_ghosts_parallel(
                 corpus_id[:8],
                 expected_summary_count,
             )
+        else:
+            # A resume path may never ReplaceOne a parent row with less
+            # information than its durable predecessor. Reconstruct the full
+            # validated typed artifact before declaring the provider lane
+            # skippable, because the Ghost B resume path can still upsert the
+            # parent rows later in this run.
+            reconstructed = _reconstruct_summaries_from_mongo(
+                parents,
+                existing_parent_chunks,
+            )
+            if len(reconstructed) == expected_summary_count:
+                summaries_from_mongo = reconstructed
+            else:
+                ws.summaries_indexed = False
+                logger.warning(
+                    "phase=ghost_a_resume reason=mongo_summary_contract_invalid "
+                    "doc=%s corpus=%s expected=%d reconstructed=%d",
+                    doc_id[:12],
+                    corpus_id[:8],
+                    expected_summary_count,
+                    len(reconstructed),
+                )
         # This is the only safe fast-skip: the canonical Mongo parent summary
         # text and the Qdrant summary points must both exist.
     if need_ghost_a and ws.summaries_indexed:
