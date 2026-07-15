@@ -6425,3 +6425,136 @@ Condition A remains 3,493 noncanonical / 0 unsafe rows.
    system working as intended — probes estimate, production contracts
    decide. Rerun the full census; replay/B4 remain stopped until it is
    contract-green.
+
+## [2026-07-15T00:51:34Z] EXECUTOR → SENIOR :: ACK
+
+Field-restoration ruling received. The provider claim model now has exactly
+the approved five fields and the regression asserts that exact set. The two
+`source_child_without_atomic_claim` parents remain strict, documented
+non-packet-ready exclusions; I will record their parent/document identities
+in the exclusion ledger and will not add fallback or fabricated claims.
+Running formatting plus host/canonical focused gates, then the full production
+census. Replay and B4 remain stopped until the census is contract-green.
+
+## [2026-07-15T00:52:28Z] EXECUTOR → SENIOR :: BLOCKER
+
+The first field-restoration host-test wrapper stopped during collection,
+true `EXIT=2` in `/tmp/b2_v2_field_restore_host.log`: my invocation omitted
+the three required non-secret test environment values, so settings validation
+failed before any test ran. This is a harness invocation defect, not a product
+failure; no source, database, packet, call, or spend changed. The format gate
+itself is green (`5 files would be left unchanged`, `EXIT=0` in
+`/tmp/b2_v2_field_restore_black_v2.log`). Rerunning the identical focused
+tests with explicit dummy test-only settings now.
+
+## [2026-07-15T00:53:57Z] EXECUTOR → SENIOR :: RECEIPT
+
+Five-field restoration gates GREEN. Format check: 5 files unchanged,
+`EXIT=0` in `/tmp/b2_v2_field_restore_black_v2.log`. Pinned host focused
+suite: 43/43 passed, `EXIT=0` in
+`/tmp/b2_v2_field_restore_host_v3.log`. Canonical image with all five active
+compose overlays and read-only `/app` source bind: 32 passed / 11 expected
+trained-spaCy skips, `EXIT=0` in
+`/tmp/b2_v2_field_restore_canonical.log`. The initial host collection miss
+remains disclosed separately above. No packet persistence, provider call,
+canonical write, or spend occurred. Starting the full read-only production
+packet-v2 census; replay/B4 remain stopped pending its result.
+
+## [2026-07-15T00:55:28Z] EXECUTOR → SENIOR :: BLOCKER
+
+The first exclusion-ledger regression run is product-green but test-red:
+43 passed / 1 failed, true `EXIT=1` in
+`/tmp/b2_v2_exclusion_ledger_host.log`. The helper emitted the repository's
+canonical `srcv:` document-source identity, while my new assertion incorrectly
+expected `source-version:`. The frozen identifier recipe and golden test both
+confirm `srcv:`. Correcting only that assertion and rerunning host/canonical
+focused suites; no packet, database, provider call, canonical write, or spend
+changed.
+
+## [2026-07-15T00:56:10Z] EXECUTOR → SENIOR :: RECEIPT
+
+Exclusion-ledger gates GREEN after the disclosed assertion correction:
+pinned host 44/44, true `EXIT=0` in
+`/tmp/b2_v2_exclusion_ledger_host_v2.log`; canonical image 33 passed / 11
+expected trained-spaCy skips, true `EXIT=0` in
+`/tmp/b2_v2_exclusion_ledger_canonical.log`; formatting 2 files unchanged,
+`EXIT=0` in `/tmp/b2_v2_exclusion_ledger_black.log`. The read-only census
+receipt now records each excluded parent ID, document ID, canonical `srcv:`
+document-source identity, all source-child IDs, and the exact child IDs with
+no atomic claims. Starting the full census now; no provider calls or writes.
+
+## [2026-07-15T00:59:07Z] EXECUTOR → SENIOR :: BLOCKER
+
+Five-field production census completed true `EXIT=0` in
+`/tmp/b2_packet_v2_census_v2.log`, but replay/B4 remain stopped on a retention
+residual. Accounting closes 795 = 793 packet-ready + the 2 approved
+`source_child_without_atomic_claim` exclusions; both exclusions now carry
+parent/document/`srcv:`/missing-child identity ledgers. Ready population:
+84,247 source claims, 20,960 emitted, 63,287 locally retained exclusions;
+347/347 typed emit, but 5,873/5,876 negative emit (3 excluded), versus the
+design-probe's measured 100%. Packet bytes p0/p50/p95/max are
+9,142/19,870/19,996/20,000; set hash
+`sha256:00960dbeb9d1704421a79ea1abd3b71112e316c66143b2cfe507c709c624bf04`.
+Calls/writes/canonical_writes=0; B4 ceiling `$0.4308304`, all-ready ceiling
+`$34.02797992`. I am tracing the exact three claim IDs and cap decisions
+without changing the approved 20,000-byte cap, priority order, or coverage
+invariant; I will report the exact cause for ruling before replay.
+
+## [2026-07-15T01:01:04Z] EXECUTOR → SENIOR :: RECEIPT
+
+Priority-exception diagnostic gates GREEN. The first Black check correctly
+reported 2 files needing formatting (`EXIT=1` in
+`/tmp/b2_v2_priority_exception_black.log`); deterministic Black rewrite then
+closed 3/3 unchanged, `EXIT=0` in
+`/tmp/b2_v2_priority_exception_black_v2.log`. Pinned host focused suite is
+44/44, `EXIT=0` in `/tmp/b2_v2_priority_exception_host.log`; canonical image
+is 33 passed / 11 expected trained-spaCy skips, `EXIT=0` in
+`/tmp/b2_v2_priority_exception_canonical.log`. The local build result now
+accounts every excluded claim with first/last attempted packet bytes,
+rejection count, and frozen maximum; the census discloses only typed/negative
+exceptions by parent/document/`srcv:`/child/claim identity, never claim text.
+Rerunning the read-only census to obtain the exact three-negative ledger.
+
+## [2026-07-15T01:04:04Z] EXECUTOR → SENIOR :: QUESTION
+
+Exact negative-retention cause is now proven in the green diagnostic census,
+true `EXIT=0` in `/tmp/b2_packet_v2_census_v3.log`. All 3 exceptions belong
+to parent `96a98f…_parent_0006` / document `96a98f…` / source version
+`srcv:826a32…`; stable claim IDs end `…ee38`, `…c5464`, and `…c725` on child
+IDs `_0061`, `_0057`, `_0055`. Each was attempted twice by the approved
+overlapping priority traversal and both attempts exceeded the 20,000-byte cap:
+20,109, 20,115, and 20,110 bytes respectively (overshoot 109–115 bytes).
+The packet set hash remains byte-identical to v2 census 2,
+`sha256:00960dbeb9d1704421a79ea1abd3b71112e316c66143b2cfe507c709c624bf04`,
+proving diagnostic-only behavior. Thus production retention is
+5,873/5,876 = 99.9489%; all 347 typed retain, all exclusions remain locally
+authoritative, and calls/writes/spend=0.
+
+Please rule whether this exact, ledgered 3-claim byte-bound residual is
+contract-green under the already approved 20,000-byte skip-and-continue
+tradeoff, allowing fresh-process replay, or whether you require a separately
+specified packet-policy change. I recommend accepting the measured residual:
+raising the cap for 3 claims would break the frozen safety reserve, while
+special eviction/swap logic would change the approved deterministic recipe.
+B4 remains stopped either way.
+
+## [2026-07-15T01:05:00Z] SENIOR → EXECUTOR :: RULING — measured residual is CONTRACT-GREEN; replay may proceed
+Accepted: the 3-claim residual is the inherent capacity case — one
+negation-dense parent whose higher-priority content fills to within ~100
+bytes of the cap, each claim attempted twice per the approved traversal,
+overshoot 109–115 bytes, fully identity-ledgered, byte-identical set hash
+proving diagnostic-only instrumentation. Your recommendation is correct on
+both counts: raising the cap for 3 claims would break the frozen safety
+reserve for the entire population, and eviction/swap logic would trade a
+proven deterministic recipe for marginal gain. 5,873/5,876 = 99.9489%
+retention with the residual ON THE LEDGER is the skip-and-continue tradeoff
+working as approved. Two riders:
+1. In the replay receipt, state whether lower-priority claims emitted for
+   that parent AFTER the three failures — expected and lawful under
+   skip-and-continue (priority is attempt-order, not eviction), but say it
+   explicitly so the record shows it was seen, not missed.
+2. The 3-claim ledger joins the standing exclusion manifest permanently;
+   the excluded negatives remain locally authoritative for any
+   activation-era consumer.
+Fresh-process replay GO; then close B2 and bring the B4 preflight with
+frozen strata for the GO restatement.
