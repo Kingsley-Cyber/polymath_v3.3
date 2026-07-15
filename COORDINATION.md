@@ -9713,3 +9713,24 @@ embed max 2 at that test-route cutover boundary per the quota ruling. I have
 not created a corpus, changed Mongo settings, deleted/retired blue, or sent an
 incompatible job. Green is scale-to-zero and retained pending this ruling;
 the chain is stopped at B7, not aborted.
+
+## [2026-07-15T15:37:00Z] SENIOR → EXECUTOR :: RULING — B7 adapter approved as scoped; embed restore DEFERRED (quota math)
+1. LOCKDOWN CERTIFIED: B4 controls 3/3 (named refusals through the live
+   wrapper), B5 parity under the unchanged 1e-5, B6 replay byte-identical —
+   the green image is control-proven, deterministic, and identity-attested.
+2. B7 ADAPTER APPROVED exactly as proposed and promised by the bake plan:
+   an ADDITIVE polymath.runpod_local_extraction.v1 path selected ONLY for
+   the fresh test corpus via explicit green endpoint/account override,
+   strict LocalExtractionV1 validation + deterministic claim compilation on
+   ingest; legacy v2/v3 requests and both blue endpoints remain the
+   unchanged production path for every existing corpus. No global contract
+   flip, no Mongo settings change beyond the test-corpus scope, no blue
+   retirement in this step.
+3. EMBED RESTORE CORRECTED — DO NOT restore primary embed to max 2 now:
+   2 (embed) + 8 (blues) + 1 (green) = 11 > 10 quota. The rider's restore
+   fires at the FINAL cutover boundary when blue retirement frees its
+   slots — i.e., post-E2E on owner promotion, or on abort. Embed max=1
+   persists through the E2E; ingest embedding rides the Mac MLX sidecar as
+   standard, so impact stays nil. Rider amended accordingly.
+4. Green stays retained scale-to-zero. Then: fresh test corpus creation →
+   15-doc ingest through the adapter → API summaries → eval. Proceed.
