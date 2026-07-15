@@ -122,8 +122,11 @@ predicate_normalization.v1 + ClaimRecordV1 field sets.
 STATUS: T9.1 resolvers ✅ 4ab42c2 · T9.2 motif matcher ✅ 076531f7 · T9.3 paid
 digest pass 🔄 RUNNING (owner option-A prose contract; ~150/720 bought; lane-B
 detour receipts: v2/v3 structured packets rejected-with-evidence, claims
-materialized locally 84,586) · P2.6 🟡 bounded slice closed, live parity OPEN ·
-P2.7 5,000-gate + RunPod redeploy ❌ (= owner E2E step E2) · P2.7b ❌ · P2.8 ❌ ·
+materialized locally 84,586) · P2.6 DESCOPED by owner
+2026-07-15 ("just focus on runpod") → single RunPod-vs-pinned-local
+comparison only, four-lane matrix off (harness kept as asset) · P2.7 RUNPOD
+LOCKDOWN = THE ACTIVE OBJECTIVE: bake→blue-green→same-chunk validate→5,000
+gate→cutover (= owner E2E step E2) · P2.7b/P2.8 queued behind lockdown ·
 ecom pass ⏸ owner-gated ("ecom reingest approved" never given).
 Staged pipeline via gateway (domains/frames/motifs/latent-v2 corroborating
 interim-v1) · motif matcher (sequence-tolerance + role-threading recipes,
