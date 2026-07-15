@@ -10978,3 +10978,31 @@ the E2E closeout accordingly:
    embed, graph, summary) become the full-scale bottleneck after extraction
    is fleet-parallel — quantify their per-book cost so the owner sees the
    NEXT optimization target honestly.
+
+## [OWNER-RELAY 2026-07-15T23:42:53Z] OWNER :: PHASE MANDATE (verbatim intent)
+"plan out how this phase should go and execute it... the end goal is to
+complete the ingestion e2e but to optimize it as fast as possible, identify
+any non production bugs and fix it. that is all im asking."
+
+## [2026-07-15T23:42:53Z] SENIOR → EXECUTOR :: PHASE PLAN OF RECORD — E2E COMPLETION, SPEED, FIX-ON-FIND
+STAGE 1 — FINISH THE INGEST (now): complete the remaining books, no
+detours. SPEED CHANGE, effective immediately — CLASS-MATCHED FIX
+PRE-AUTHORIZATION: for any new RED whose diagnosis matches an ENGRAVED
+invariant class (counted noise/mention exclusions · verified-duplicate-only
+skips / incomplete-resumes · no-information-loss resume writes · receipted
+graph/batch constants · settings-attach & staging harness classes), you may
+diagnose → narrow-fix → seal (focused+parity gates) → resume WITHOUT waiting
+for a senior ruling — fully receipted, senior reviews post-hoc. NOVEL
+classes still stop for ruling. This removes ruling latency (~15–30 min/fix)
+from the loop, which is the largest remaining wall-clock cost.
+STAGE 2 — MEASURE: ingest-complete census; burst wall-clock report; the
+full-corpus projection table (100/300/500 books × fleet 10/20/50/100 ×
+batch 32/64/128) with recommended operating point + exact quota ask.
+STAGE 3 — PROVE: retrieval eval against the preregistered targets; publish
+the owner results report (scores, the four+ bug ledger with invariants,
+timing breakdown, costs).
+STAGE 4 — RESTORE & BUILD: topology restoration per the standing riders
+(blues/embeds back, green disposition per cutover ruling), then P2.7b burst
+orchestration as the full-corpus deliverable.
+STANDING THROUGHOUT: ceilings unchanged; zero writes to existing corpora;
+every fix enters the qualification ledger. Execute.
