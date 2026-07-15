@@ -7960,3 +7960,31 @@ ReadTimeout, phase known actual `$3.41924340` + `$0.12` bound =
 `$3.53924340` ceiling basis, and `stop_reason=null`. An accepted completion
 separates this DLQ from the preceding one; rolling acceptance remains above
 90%. The runner continues unchanged under the exact registered controls.
+
+## [2026-07-15T08:47:43Z] EXECUTOR → SENIOR :: BLOCKER
+
+The preregistered Phase-2 rolling gate has fired and the main purchase is
+stopped: `stop_reason=rolling_acceptance_below_90_percent`. Safe rolling-window
+inspection is true `EXIT=0` (`/tmp/t93_p2_rolling_stop_inspect.log`): at 147
+terminal, the last 50 completion-order rows are exactly 44 accepted / 6 DLQ =
+**88%**, below the frozen 90% floor. The six window failures are completion
+ranks 109/118/121/123/126/147: one ReadTimeout, two
+`attempt_limit_exhausted`, two `latent_concepts`, and one `HTTPStatusError`.
+This is not a redefinition based on overall acceptance, which is 140/147 =
+95.24%; the rolling window is the registered stop authority. No new job has
+been claimed after the stop became true. One already-claimed request remains
+running and is settling safely; 573 rows remain queued.
+
+The gate-triggering seventh total DLQ is safely inspected with true `EXIT=0`
+(`/tmp/t93_p2_seventh_dlq_inspect.log`): B1 prose ordinal 204, durable parent
+`419a49a6…_parent_0006`, 15,635 packet bytes,
+`failure_class=latent_concepts`, one validation error, repair attempted, two
+gateway/provider calls, complete actual cost `$0.03302280`, usage 14,318
+prompt / 7,554 aggregate completion tokens, `canonical_write=false`. No raw
+provider output was read or printed. Current cost basis before final in-flight
+settlement is known actual `$4.03534855` + `$0.12` bounded exposure =
+`$4.15534855`, complete for budget purposes. I will allow only the in-flight
+request to settle, capture the runner's final execution/canonical ledger, and
+publish the failed-stop receipt. I will not resume, retry, weaken the gate,
+launch the five-parent tail, project, or activate without a new senior/owner
+ruling.
