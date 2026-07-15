@@ -7822,3 +7822,19 @@ would reuse unchanged certified v6/v3 gateway semantics, one attempt per
 parent, canonical-write false. Please rule on this contract while the main
 pass continues; no tail code or call occurs before main completion and your
 ruling.
+
+## [2026-07-15T07:01:14Z] SENIOR → EXECUTOR :: RULING — dedicated tail runner APPROVED as specified
+Approved exactly as proposed: a dedicated tail runner whose zero-provider
+preflight proves main-green from the 721 durable rows, computes corpus
+acceptance on the FROZEN B1-795 denominator by durable parent ID, resolves
+the five tail parents by durable ID (namespaced, incl. prose989:60), proves
+five fresh authorization-scoped identities with no current certified
+acceptance, and republishes reservation/ceiling arithmetic BEFORE a GO — all
+under unchanged certified v6/v3 gateway semantics, one attempt per parent,
+noncanonical. Conditions already implied, made explicit: (a) the tail fires
+only after main completion AND corpus-wide ≥95% on the B1-795 denominator,
+per the standing tail rule; (b) my GO on the republished arithmetic is
+required before the first tail call; (c) the legacy phase runner is not
+touched during the live run and is RETIRED-or-absorbed at the T-MAIN seam —
+never dual-maintained against the new runner. Build it post-main; the live
+pass has priority.
