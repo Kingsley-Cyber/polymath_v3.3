@@ -3464,6 +3464,45 @@ A corpus is strict-ready only when:
   that exist now. P2.7 live/corpus-scale parity and every production gate stay
   open.
 
+### 2026-07-15 - T9.3 B1 interim-prose Phase-2 launch seal
+
+- Commit: this commit on `claude-continuation-20260713`; paid execution follows
+  only from the published exact bytes.
+- Owner: owner selected the proven plain-prose digest contract; senior issued
+  the exact execution order at `COORDINATION.md#2026-07-15T05:24:45Z`.
+- Corpus/data scope: mark only; 795 B1-eligible parents; exact selection 721 =
+  719 fresh plus two rejected-v2 B4-parent re-buys.
+- Code changes: dedicated exact-GO Phase-2 runner with durable-ID selection,
+  per-claim two-attempt reservation, completion-order rolling stops, exact
+  checkpoints, concurrency 3→6 after 100/100 clean, and noncanonical
+  supersession history. Certified packet/prompt/gateway behavior is unchanged.
+- Durable migration/backfill: none at seal time; zero Phase-2 jobs, calls,
+  cache rows, supersessions, projections, or canonical writes.
+- Before metrics: prior cumulative basis `$2.7564896999999995`; remaining
+  umbrella `$46.69`; old sample-era runner could not express the B1 population
+  or durable re-buy identities.
+- After metrics: selection hash `ee876928...`; packet-set hash `f867e622...`;
+  absolute guard `$49.4464896999999995`; max next reservation `$0.09536318`;
+  full two-attempt worst case `$56.48863913`, honestly boundary-guarded.
+- Tests by tier: canonical focused 75/75; Black 6/6 unchanged; corrected live
+  preflight true `EXIT=0`; invalid-GO true `EXIT=1` followed by exact zero-write
+  postcheck true `EXIT=0`. Permanent receipt:
+  `docs/T9_3_PROSE_PHASE2_LAUNCH_SEAL_RECEIPT_2026-07-15.md`.
+- Cross-corpus test: not applicable; this paid lane is mark-only and
+  noncanonical. census_scope.v2 still observes all protected and ambient
+  stores.
+- Failure/rollback test: three pre-provider failures caught identity, budget-
+  interpretation, and hash-namespace defects; all caused zero provider calls
+  and zero writes. Runner publication is additive and revertible; purchased
+  calls are not.
+- Deployment image/health: isolated overlay only; no rebuild, restart, deploy,
+  or endpoint mutation before the batch.
+- Remaining risks: the `$46.69` umbrella can stop the lane before 721 if actual
+  spend plus next worst-case reservation reaches the guard. Main execution,
+  50/rolling receipts, completion ledger, owner sample, tail, projection, and
+  activation remain open.
+- Checklist boxes closed: launch seal only. T9.3 paid completion remains open.
+
 ## Implementation Log Template
 
 Copy this section for every completed item:

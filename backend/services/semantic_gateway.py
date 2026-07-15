@@ -351,7 +351,11 @@ class MongoSemanticGatewayStore:
 
     async def load_success(self, cache_key: str) -> dict[str, Any] | None:
         return await self._db[CACHE_COLLECTION].find_one(
-            {"_id": cache_key},
+            {
+                "_id": cache_key,
+                "status": "accepted_cache",
+                "serving_eligible": {"$ne": False},
+            },
             {"_id": 0},
         )
 
@@ -360,6 +364,7 @@ class MongoSemanticGatewayStore:
         doc = {
             "_id": result.provenance.cache_key,
             "status": "accepted_cache",
+            "serving_eligible": True,
             "canonical_write": False,
             "digest": result.digest.model_dump(mode="python"),
             "provenance": result.provenance.model_dump(mode="python"),

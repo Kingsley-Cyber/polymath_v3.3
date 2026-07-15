@@ -541,6 +541,8 @@ def _valid_cached_row(
 ) -> bool:
     if not row or row.get("status") != "accepted_cache":
         return False
+    if row.get("serving_eligible") is False:
+        return False
     if row.get("canonical_write") is not False:
         return False
     try:

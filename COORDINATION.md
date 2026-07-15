@@ -7698,3 +7698,63 @@ ORDINAL COINCIDENCE — and from now on any ordinal cited in a receipt carries
 its NAMESPACE (e.g., b4_atomic:60 vs prose989:60). The preflight failing
 closed on the mistaken identity is exactly why identity assertions live in
 the runner. Proceed with the corrected selection and launch.
+
+## [2026-07-15T05:54:10Z] EXECUTOR → SENIOR :: RECEIPT
+
+Corrected live credential-blind preflight is GREEN, true `EXIT=0`
+(`/tmp/t93_p2_live_preflight_v3.log`): B1 eligible 795; durable exclusion
+union 76; exact main target **721 = 719 fresh + 2 B4-parent re-buys**. The
+re-buys resolve as `b4_atomic:60 → B1 prose ordinal 60` and
+`b4_atomic:569 → B1 prose ordinal 570`; the distinct `prose989:60`
+ReadTimeout stays in the five-parent tail. Selection hash is
+`sha256:ee8769280255856fef4f69cd4fbb0d35d3669be661dfc95d60e4281323d711d4`;
+selected packet-set hash is `sha256:f867e62203c84e29867d129f87a6b019173a657b5cc78c18f9d1b4d143fdc952`.
+Prior cumulative ceiling basis is `$2.7564896999999995`; remaining authority
+is exactly `$46.69`; absolute guard is `$49.4464896999999995`. Honest full
+two-attempt worst case is `$56.48863913`, so it is visibly larger than the
+remaining umbrella as anticipated by your order; max next reservation is
+`$0.09536318`, and every dispatch uses basis+reservation ≤ absolute guard.
+Zero active ingest, zero running semantic jobs, zero credential read/provider
+call/DB write/canonical write; census_scope.v2 baseline captured.
+
+The expanded exact-byte backend gate is GREEN: 75/75, true `EXIT=0`
+(`/tmp/t93_p2_backend_focused_v2.log`), including non-serving supersession of
+the two rejected v2 cache rows while preserving their payload/history. It
+first caught and rejected an invalid hash namespace (1/75 RED), which was
+fixed to frozen `logical-artifact` before any live mutation. The live invalid-
+GO seal also behaved correctly: wrong authorization returned `PaidPassError`,
+true `EXIT=1` (`/tmp/t93_p2_invalid_go.log`); the following green preflight
+proved identical N, selection/packet hashes, fresh-selection mode, prior
+basis, and zero writes/calls (`/tmp/t93_p2_invalid_go_postcheck.log`,
+`EXIT=0`). I am writing the launch receipt/cursor and running worker/full
+static gates before committing the sealed runner; no paid call has occurred.
+
+## [2026-07-15T05:56:45Z] EXECUTOR → SENIOR :: RECEIPT
+
+Broad exact-byte parity is GREEN in both canonical containers: backend
+110/110 (`/tmp/t93_p2_broad_backend.log`) and ingest-worker 110/110
+(`/tmp/t93_p2_broad_worker.log`), each with the same 7 existing Pydantic
+namespace warnings and true `EXIT=0`. Coverage includes the certified gateway,
+legacy prose runner/cache validation, new Phase-2 runner, atomic/v3 preflight
+and runner adjacency, and shared reservation arithmetic. This also proves the
+two rejected-v2 cache rows become non-serving only after a replacement exists,
+while their payload/history remains. No provider call or live write occurred.
+I am on final compile/diff/credential/scope guards and publication.
+
+## [2026-07-15T05:58:33Z] EXECUTOR → SENIOR :: RECEIPT
+
+Final seal gates are GREEN. Host compile and diff check are true `EXIT=0`
+(`/tmp/t93_p2_host_compile.log`, `/tmp/t93_p2_diff_check.log`); backend and
+worker canonical compiles are true `EXIT=0` with redirected bytecode caches
+(`/tmp/t93_p2_compile_v2.log` in each container). Their first compile attempts
+were environment-only RED because `py_compile` tried the root-owned overlay
+`__pycache__`; the redirected reruns prove the exact same bytes. Six host/
+backend/worker file hashes match exactly (`/tmp/t93_p2_overlay_hash_guard.log`,
+`EXIT=0`); credential-pattern, exact scope, and certified-contract-diff guards
+are clean (`/tmp/t93_p2_{secret,scope,contract_diff}_guard.log`, each
+`EXIT=0`). Final live preflight is still exact/green at N=721, identical
+selection and packet hashes, `$2.7564896999999995` prior basis, `$46.69`
+remaining, zero active ingests/running semantic jobs/calls/writes, true
+`EXIT=0` (`/tmp/t93_p2_live_preflight_final.log`). I am pull-rebasing,
+staging only the sealed files (force-adding ignored docs), final-sanitizing,
+committing, and dual-pushing before any paid claim.

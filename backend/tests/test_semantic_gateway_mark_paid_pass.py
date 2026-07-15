@@ -436,6 +436,8 @@ def test_certified_v5_acceptance_remains_valid_under_v6_skip_contract():
         )
         is True
     )
+    row["serving_eligible"] = False
+    assert _valid_cached_row(row, item=item, config=config, cache_key=None) is False
 
 
 def test_phase1_checkpoint_accepts_exactly_95_percent_with_cost_and_no_drift():

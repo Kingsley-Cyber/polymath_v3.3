@@ -849,6 +849,13 @@ class _MongoCollection:
         row = self.rows.get(query["_id"])
         if row is None:
             return None
+        if query.get("status") and row.get("status") != query["status"]:
+            return None
+        if (
+            query.get("serving_eligible") == {"$ne": False}
+            and row.get("serving_eligible") is False
+        ):
+            return None
         return {key: value for key, value in row.items() if key != "_id"}
 
     async def replace_one(self, query, doc, *, upsert):
@@ -904,9 +911,13 @@ async def test_mongo_store_separates_accepted_cache_and_dead_letter_from_canonic
     cache_doc = next(iter(db.collections[CACHE_COLLECTION].rows.values()))
     dead_doc = next(iter(db.collections[DEAD_LETTER_COLLECTION].rows.values()))
     assert cache_doc["status"] == "accepted_cache"
+    assert cache_doc["serving_eligible"] is True
     assert cache_doc["canonical_write"] is False
     assert dead_doc["status"] == "dead_letter"
     assert dead_doc["canonical_write"] is False
     assert dead_doc["repair_prompt_version"] == REPAIR_PROMPT_VERSION
     assert dead_doc["repair_prompt_hash"] == semantic_digest_repair_prompt_hash()
     assert "secret-never-stored" not in str(db.collections)
+    assert await mongo_store.load_success(result.provenance.cache_key) is not None
+    cache_doc["serving_eligible"] = False
+    assert await mongo_store.load_success(result.provenance.cache_key) is None

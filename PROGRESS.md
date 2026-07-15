@@ -1,24 +1,23 @@
 # PROGRESS — executor cursor (Codex updates after EVERY task)
 
 - Mission: CODEX_MISSION.md (CP2 → CP12)
-- Track: A4/T9.3 paid lane owner-blocked; continuing non-paid Track-A/E1 work
-  while the owner rules on the provider-shape options.
-- Current task: T9.4 current-field lexicon-projector parity implementation is
-  GREEN and receipt-ready. Cloud, local, legacy-local/RTX, and RunPod strict
-  candidate labels with the same semantic payload produce field-identical
-  current document/corpus projections; backend and worker canonical suites are
-  each 30/30. No live row, provider, image, or readiness surface changed.
-- Next task: commit/push this bounded T9.4 slice after the senior receipt
-  window, then continue the next pre-authorized zero-provider E1 module. Do
-  not run a paid provider lane, live projection, rebuild, or activation while
-  the T9.3 owner decision is pending.
-- Parked: T9.3 Phase 2, the owner sample window, and the five-parent bounded
-  tail. Phase 2 is sealed because ordered-unit v3 achieved 2/10 against the
-  >=9/10 bar; the prior 727-packet standing GO and `$31.1917106` authority are
-  void. Any future paid lane requires a new senior/owner contract ruling and
-  fresh exact GO. The green-only three-digest sample/window did not open
-  because only two accepted digests exist. The tail remains after a future
-  corpus-wide certified acceptance of at least 95%.
+- Track: A4/T9.3 owner-authorized paid interim-prose Phase 2.
+- Current task: sealed dedicated B1-scoped prose runner and exact live launch
+  population. Credential-blind preflight is GREEN at 721 parents (719 fresh +
+  the exact two rejected-v2 B4 durable parents), with selection hash
+  `ee876928...`, prior cumulative basis `$2.7564896999999995`, remaining
+  authority `$46.69`, and absolute guard `$49.4464896999999995`. No paid call
+  or durable Phase-2 row exists yet.
+- Next task: finish worker/static/diff/secret gates, publish the sealed runner,
+  then execute the exact owner/senior GO. Capture the exact 50-parent
+  checkpoint, rolling receipts, completion/boundary ledger, and three-digest
+  owner sample. Do not rebuild, deploy, project, or activate while paid work
+  is running.
+- Parked: the distinct five-parent bounded tail remains after the main pass
+  and only if corpus-wide certified acceptance is at least 95%. The rejected
+  structured v2/v3 contracts remain closed failed; the owner explicitly chose
+  the already-proven interim-prose contract instead. Projection/activation
+  remain after paid completion.
   T9.4's pinned deployment, actual PoC-pair engine comparison, future
   P2.1/P2.2 projector fields, 100/500/5,000 gates, retry safety, live readiness
   wiring, and production stamp remain open under the senior's production
@@ -30,7 +29,16 @@
   after modular completion + RunPod blue-green parity; this is not approval to
   reingest or mutate the existing ecommerce corpus. Predicate normalization v1
   and ClaimRecordV1 field sets remain owner-ratifiable.
-- Last completed subgate: T9.4 current-field shared-projector parity is GREEN.
+- Last completed subgate: T9.3 B1 prose Phase-2 launch seal is GREEN.
+  Permanent receipt:
+  `docs/T9_3_PROSE_PHASE2_LAUNCH_SEAL_RECEIPT_2026-07-15.md`. Canonical focused
+  tests are 75/75; invalid-GO refusal and zero-write postcheck are green. The
+  exact selection is 721, and every re-buy is resolved from its B4 durable
+  parent ID rather than ordinal coincidence. The full two-attempt worst case
+  `$56.48863913` exceeds the remaining umbrella as anticipated; the runner
+  dispatches only while each next reservation fits the absolute guard.
+
+  T9.4 current-field shared-projector parity is also GREEN.
   Host focused tests are 2/2; backend and ingest-worker canonical overlays are
   each 30/30 with 7 existing warnings; scoped Black, host/backend/worker
   compile, engine-blind scope audit, and diff checks are true `EXIT=0`.
@@ -70,4 +78,4 @@
   793+2 parents and finds sentence→atomic mapping coverage 80.944158%; the
   optional-ID ordered-unit shape is p50 13,930 bytes, max 25,613 bytes, with
   maximum-any-ten authority `$0.83486975` under the corrected envelope.
-- Last update: 2026-07-15T05:12:52Z (executor)
+- Last update: 2026-07-15T05:54:10Z (executor)
