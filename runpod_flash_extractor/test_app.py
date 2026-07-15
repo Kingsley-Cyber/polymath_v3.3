@@ -44,6 +44,7 @@ def payload(text: str) -> dict:
         "model_revision": runtime.GLINER_MODEL_REVISION,
         "spacy_pipeline": runtime.SPACY_MODEL,
         "asset_contract": dict(runtime.EXPECTED_ASSET_CONTRACT),
+        "determinism_profile": runtime.DETERMINISM_PROFILE,
         "tasks": [
             {
                 "document_id": "doc:test",
@@ -85,7 +86,9 @@ def test_locked_contract_compiles_entities_predicates_and_temporal(nlp):
         ("reference prices", "CONCEPT"),
         ("2018 drought summer", "TIME_PATTERN"),
     ]
-    reduction = next(row for row in extraction["predicates"] if row["lemma"] == "reduce")
+    reduction = next(
+        row for row in extraction["predicates"] if row["lemma"] == "reduce"
+    )
     assert reduction["normalized_predicate"] == "DECREASES"
     assert reduction["negated"] is True
     assert extraction["sentence_ids"]
@@ -113,24 +116,39 @@ def test_legacy_contract_and_asset_drift_fail_closed():
     request = payload("Discounting lowers prices.")
     request["contract_version"] = "polymath.runpod_gliner_relex.v3"
     with pytest.raises(ValueError, match="unsupported extraction contract"):
-        runtime.extract_local_batch(request, nlp=object(), model=object(), enforce_runtime=False)
+        runtime.extract_local_batch(
+            request, nlp=object(), model=object(), enforce_runtime=False
+        )
 
     request = payload("Discounting lowers prices.")
     request["asset_contract"]["gliner_weights_sha256"] = "0" * 64
     with pytest.raises(ValueError, match="asset contract"):
-        runtime.extract_local_batch(request, nlp=object(), model=object(), enforce_runtime=False)
+        runtime.extract_local_batch(
+            request, nlp=object(), model=object(), enforce_runtime=False
+        )
+
+    request = payload("Discounting lowers prices.")
+    request["determinism_profile"] = "polymath.torch_cuda_deterministic.invalid"
+    with pytest.raises(ValueError, match="determinism profile"):
+        runtime.extract_local_batch(
+            request, nlp=object(), model=object(), enforce_runtime=False
+        )
 
 
 def test_task_shape_and_identity_fail_closed():
     request = payload("Discounting lowers prices.")
     request["tasks"][0]["unexpected"] = True
     with pytest.raises(ValueError, match="task fields"):
-        runtime.extract_local_batch(request, nlp=object(), model=object(), enforce_runtime=False)
+        runtime.extract_local_batch(
+            request, nlp=object(), model=object(), enforce_runtime=False
+        )
 
     request = payload("Discounting lowers prices.")
     request["tasks"].append(deepcopy(request["tasks"][0]))
     with pytest.raises(ValueError, match="child_id values must be unique"):
-        runtime.extract_local_batch(request, nlp=object(), model=object(), enforce_runtime=False)
+        runtime.extract_local_batch(
+            request, nlp=object(), model=object(), enforce_runtime=False
+        )
 
 
 def test_source_closure_is_exact_and_credential_free():
@@ -138,7 +156,9 @@ def test_source_closure_is_exact_and_credential_free():
     assert manifest["file_count"] == 13
     assert set(manifest["files"]) == set(runtime._SOURCE_CLOSURE)
     root = Path(runtime.__file__).resolve().parent
-    joined = "\n".join((root / path).read_text(encoding="utf-8") for path in manifest["files"])
+    joined = "\n".join(
+        (root / path).read_text(encoding="utf-8") for path in manifest["files"]
+    )
     for forbidden in (
         "api_key",
         "mongodb://",
@@ -151,6 +171,16 @@ def test_source_closure_is_exact_and_credential_free():
 
 
 def test_runtime_contract_matches_certified_versions_and_hashes():
+    assert runtime.DETERMINISM_PROFILE == "polymath.torch_cuda_deterministic.v1"
+    assert runtime.EXPECTED_DETERMINISM_ENV == {
+        "CUBLAS_WORKSPACE_CONFIG": ":4096:8",
+        "NVIDIA_TF32_OVERRIDE": "0",
+        "OMP_NUM_THREADS": "1",
+        "MKL_NUM_THREADS": "1",
+        "OPENBLAS_NUM_THREADS": "1",
+        "NUMEXPR_NUM_THREADS": "1",
+        "PYTHONHASHSEED": "0",
+    }
     assert runtime.PYTHON_VERSION == "3.11.15"
     assert runtime.SPACY_VERSION == "3.8.14"
     assert runtime.SPACY_MODEL_VERSION == "3.8.0"
@@ -160,3 +190,12 @@ def test_runtime_contract_matches_certified_versions_and_hashes():
         "extraction_vocabulary_sha256": runtime.EXTRACTION_VOCABULARY_SHA256,
         "predicate_normalization_sha256": runtime.PREDICATE_NORMALIZATION_SHA256,
     }
+
+
+def test_determinism_environment_drift_fails_before_torch_configuration(
+    monkeypatch,
+):
+    monkeypatch.delenv("CUBLAS_WORKSPACE_CONFIG", raising=False)
+    runtime._DETERMINISM_IDENTITY = None
+    with pytest.raises(RuntimeError, match="determinism environment"):
+        runtime._configure_determinism()

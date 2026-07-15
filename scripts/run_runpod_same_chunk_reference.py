@@ -93,6 +93,7 @@ def main() -> int:
         "model_revision": runtime.GLINER_MODEL_REVISION,
         "spacy_pipeline": runtime.SPACY_MODEL,
         "asset_contract": dict(runtime.EXPECTED_ASSET_CONTRACT),
+        "determinism_profile": runtime.DETERMINISM_PROFILE,
         "tasks": tasks,
     }
     outputs = [stable_output(runtime.extract_local_batch(request)) for _ in range(2)]

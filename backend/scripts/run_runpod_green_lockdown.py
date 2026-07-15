@@ -29,8 +29,11 @@ from models.local_extraction import LocalExtractionV1
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SPEC = ROOT / "evals/runpod_same_chunk_lockdown_v1.json"
-GREEN_NAME = "polymath-local-extraction-green-8708f37"
 CONTRACT_VERSION = "polymath.runpod_local_extraction.v1"
+DETERMINISM_PROFILE = "polymath.torch_cuda_deterministic.v1"
+EXPECTED_SOURCE_CLOSURE_SHA256 = (
+    "2e47c86fe41db25b3a0fc81408ff775a829be59871a5479a1bfd1a4dad0e8010"
+)
 RUNPOD_API_BASE = "https://api.runpod.ai/v2"
 GRAPHQL_URL = "https://api.runpod.io/graphql"
 TERMINAL_FAILURES = {"FAILED", "CANCELLED", "TIMED_OUT"}
@@ -109,6 +112,7 @@ def build_request(
         "model_revision": identity["gliner_model_revision"],
         "spacy_pipeline": identity["spacy_model"],
         "asset_contract": identity["asset_contract"],
+        "determinism_profile": DETERMINISM_PROFILE,
         "tasks": tasks,
     }
     if canonical_hash(tasks) != baseline["task_input_sha256"]:
@@ -131,7 +135,7 @@ def _mongo() -> tuple[AsyncIOMotorClient, Any, Any]:
 
 
 async def _discover_green(
-    client: httpx.AsyncClient, api_key: str
+    client: httpx.AsyncClient, api_key: str, green_name: str
 ) -> tuple[str, dict[str, Any], dict[str, Any]]:
     response = await client.post(
         GRAPHQL_URL,
@@ -143,7 +147,7 @@ async def _discover_green(
         raise RuntimeError("RunPod green discovery failed")
     myself = (body.get("data") or {}).get("myself") or {}
     matches = [
-        row for row in myself.get("endpoints") or [] if row.get("name") == GREEN_NAME
+        row for row in myself.get("endpoints") or [] if row.get("name") == green_name
     ]
     if len(matches) != 1:
         raise RuntimeError(
@@ -345,6 +349,8 @@ def _normalized_for_exact(value: dict[str, Any]) -> tuple[dict[str, Any], list[f
     normalized = copy.deepcopy(value)
     normalized.get("metrics", {}).pop("duration_seconds", None)
     normalized.get("runtime_identity", {}).pop("platform", None)
+    normalized.get("runtime_identity", {}).pop("determinism", None)
+    normalized.get("runtime_identity", {}).pop("source_closure", None)
     confidences: list[float] = []
     for row in normalized.get("results") or []:
         for entity in row["extraction"]["entities"]:
@@ -355,6 +361,33 @@ def _normalized_for_exact(value: dict[str, Any]) -> tuple[dict[str, Any], list[f
 def compare_to_reference(
     reference: dict[str, Any], live: dict[str, Any], tolerance: float
 ) -> dict[str, Any]:
+    determinism = live.get("runtime_identity", {}).get("determinism")
+    if not isinstance(determinism, dict):
+        raise AssertionError("green determinism attestation is missing")
+    if determinism.get("profile") != DETERMINISM_PROFILE:
+        raise AssertionError("green determinism profile mismatch")
+    source_closure = live.get("runtime_identity", {}).get("source_closure")
+    if not isinstance(source_closure, dict):
+        raise AssertionError("green source closure attestation is missing")
+    if source_closure.get("closure_sha256") != EXPECTED_SOURCE_CLOSURE_SHA256:
+        raise AssertionError("green source closure differs from deterministic seal")
+    expected_determinism = {
+        "torch_deterministic_algorithms": True,
+        "torch_deterministic_warn_only": False,
+        "torch_float32_matmul_precision": "highest",
+        "cuda_matmul_allow_tf32": False,
+        "cudnn_allow_tf32": False,
+        "cudnn_benchmark": False,
+        "cudnn_deterministic": True,
+        "cuda_matmul_allow_fp16_reduced_precision_reduction": False,
+        "cuda_matmul_allow_bf16_reduced_precision_reduction": False,
+        "torch_num_threads": 1,
+        "torch_num_interop_threads": 1,
+    }
+    if any(
+        determinism.get(key) != value for key, value in expected_determinism.items()
+    ):
+        raise AssertionError("green determinism settings are not locked")
     reference_normalized, reference_confidences = _normalized_for_exact(reference)
     live_normalized, live_confidences = _normalized_for_exact(live)
     if reference_normalized != live_normalized:
@@ -377,6 +410,8 @@ def compare_to_reference(
         "confidence_max_abs_delta": maximum,
         "confidence_tolerance": tolerance,
         "threshold_side_selection_match": True,
+        "determinism_profile": DETERMINISM_PROFILE,
+        "source_closure_sha256": EXPECTED_SOURCE_CLOSURE_SHA256,
     }
 
 
@@ -421,7 +456,9 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
             raise RuntimeError("primary RunPod account must resolve exactly once")
         account, api_key = primary[0]
         async with httpx.AsyncClient(timeout=60) as http:
-            endpoint_id, endpoint, template = await _discover_green(http, api_key)
+            endpoint_id, endpoint, template = await _discover_green(
+                http, api_key, args.green_name
+            )
             live_output, valid_job = await _submit_and_wait(
                 http,
                 endpoint_id=endpoint_id,
@@ -491,6 +528,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--mode", choices=("canary", "retry"), required=True)
+    parser.add_argument("--green-name", required=True)
     parser.add_argument("--spec", type=Path, default=DEFAULT_SPEC)
     parser.add_argument("--baseline", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)

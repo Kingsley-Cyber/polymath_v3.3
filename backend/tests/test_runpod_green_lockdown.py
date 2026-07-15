@@ -19,7 +19,29 @@ def _output(confidence: float = 0.5) -> dict:
         "contract_version": "polymath.runpod_local_extraction.v1",
         "batch_id": "b",
         "metrics": {"chunks": 1, "duration_seconds": 1.2},
-        "runtime_identity": {"platform": "different-by-device", "python": "3.11.15"},
+        "runtime_identity": {
+            "platform": "different-by-device",
+            "python": "3.11.15",
+            "source_closure": {
+                "closure_sha256": (
+                    "2e47c86fe41db25b3a0fc81408ff775a829be59871a5479a1bfd1a4dad0e8010"
+                )
+            },
+            "determinism": {
+                "profile": "polymath.torch_cuda_deterministic.v1",
+                "torch_deterministic_algorithms": True,
+                "torch_deterministic_warn_only": False,
+                "torch_float32_matmul_precision": "highest",
+                "cuda_matmul_allow_tf32": False,
+                "cudnn_allow_tf32": False,
+                "cudnn_benchmark": False,
+                "cudnn_deterministic": True,
+                "cuda_matmul_allow_fp16_reduced_precision_reduction": False,
+                "cuda_matmul_allow_bf16_reduced_precision_reduction": False,
+                "torch_num_threads": 1,
+                "torch_num_interop_threads": 1,
+            },
+        },
         "results": [
             {
                 "document_id": "d",
@@ -65,6 +87,16 @@ def test_compare_rejects_semantic_or_confidence_drift() -> None:
         compare_to_reference(_output(), changed, 1e-5)
     with pytest.raises(AssertionError, match="exceeds tolerance"):
         compare_to_reference(_output(), _output(0.50002), 1e-5)
+
+    unattested = _output()
+    unattested["runtime_identity"].pop("determinism")
+    with pytest.raises(AssertionError, match="attestation is missing"):
+        compare_to_reference(_output(), unattested, 1e-5)
+
+    wrong_source = _output()
+    wrong_source["runtime_identity"]["source_closure"]["closure_sha256"] = "0" * 64
+    with pytest.raises(AssertionError, match="source closure"):
+        compare_to_reference(_output(), wrong_source, 1e-5)
 
 
 def test_invalid_cases_are_general_contract_mutations() -> None:

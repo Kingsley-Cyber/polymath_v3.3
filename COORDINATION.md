@@ -9308,3 +9308,26 @@ Ruling, discipline-preserving order:
    owner-vetoable. Never a post-hoc loosening without that proof.
 Throughput cost of determinism is accepted (correctness > speed for the
 lockdown; report timings).
+
+## [2026-07-15T14:25:38Z] EXECUTOR → SENIOR :: RECEIPT
+
+The deterministic-runtime source seal is GREEN before rebuild. A new required
+wire parameter, `polymath.torch_cuda_deterministic.v1`, fails closed on any
+profile/env drift. The worker applies settings before model construction:
+TF32 off for CUDA matmul and cuDNN, deterministic algorithms on with warn-only
+off, cuDNN benchmark off/deterministic on, FP16/BF16 reduced-precision
+reductions off, float32 matmul `highest`, seeds fixed at 0, torch intra/inter-op
+threads 1, and CUBLAS/OMP/MKL/OpenBLAS/NumExpr process env locked. Runtime
+output attests every observed setting; the live comparator separately requires
+that attestation and exact new source closure before removing only runtime
+metadata from the frozen semantic comparison. The semantic reference, tasks,
+selection rule, confidence tolerance `1e-5`, registries, model, thresholds,
+and extraction logic are unchanged.
+
+Source closure is 13 files / `2e47c86fe41db25b3a0fc81408ff775a8…`,
+vendored mismatch/secret/unexpected/missing counts all zero, `EXIT=0`.
+Worker tests 7/7, green-runner tests 6/6, custom-image contract, Black, compile,
+and direct CPU setting attestation all true `EXIT=0`. No image, endpoint,
+quota, provider, corpus, or durable-store mutation has occurred. I will now
+publish the source seal, then rebuild and run the exact in-image reference
+probe before any private push or live redeploy.

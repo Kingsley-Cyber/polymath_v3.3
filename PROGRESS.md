@@ -24,7 +24,18 @@
   and remotely GREEN: index `c03416dc…`, amd64 child `2bdb966e…`; its real
   no-override runtime probe passes and Docker Hub remains private. Receipt:
   `docs/RUNPOD_CUSTOM_IMAGE_B4_CORRECTED_REBUILD_RECEIPT_2026-07-15.md`.
-  Next is approved narrow green redeploy → B4/B5/B6.
+  The one instrumented live canary completed its valid job in 1.196s with all
+  functional semantics green (12 chunks, 126 entities, 56 predicates, both
+  temporal phrases, zero relations/missing/semantic mismatches), but frozen
+  confidence parity is RED: max delta `0.0001373291015625` vs `0.00001`,
+  81/126 values above tolerance. No invalid controls/B6/corpus work ran.
+  Mandatory abort is complete: corrected green deleted, primary embed restored
+  max 1→2, blues unchanged, secondary untouched. Receipt:
+  `docs/RUNPOD_B4_B5_PARITY_FAILURE_RECEIPT_2026-07-15.md`. Senior authorized
+  a narrow determinism remediation: versioned worker profile, TF32 off,
+  deterministic algorithms on, fixed reduction/thread settings, rebuild, and
+  one retest against the unchanged `0.00001` bar. Source seal is green at
+  closure `2e47c86f…`; image/live proof remains pending.
 - Parked: the distinct five-parent bounded tail remains after the main pass
   and only if corpus-wide certified acceptance is at least 95%. The rejected
   structured v2/v3 contracts remain closed failed; the owner explicitly chose
@@ -130,4 +141,4 @@
   793+2 parents and finds sentence→atomic mapping coverage 80.944158%; the
   optional-ID ordered-unit shape is p50 13,930 bytes, max 25,613 bytes, with
   maximum-any-ten authority `$0.83486975` under the corrected envelope.
-- Last update: 2026-07-15T14:06:05Z (executor)
+- Last update: 2026-07-15T14:25:38Z (executor)

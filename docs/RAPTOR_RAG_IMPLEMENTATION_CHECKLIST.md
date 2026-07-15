@@ -3986,6 +3986,41 @@ A corpus is strict-ready only when:
   `docs/RUNPOD_CUSTOM_IMAGE_B4_CORRECTED_REBUILD_RECEIPT_2026-07-15.md`.
 - Checklist boxes closed: corrected B2 identity only; B4 remains open.
 
+### 2026-07-15 - P2.7 B4/B5 instrumented parity failure and rollback
+
+- Commit: harness preflight commit `ac8bc4a`; this terminal RED receipt commit
+  on `claude-continuation-20260713`.
+- Owner: one instrumented canary authorized after senior ruled the first
+  uninstrumented orphan diagnostic-only; frozen gates remained absolute.
+- Corpus/data scope: two green requests total (one diagnostic-only orphan, one
+  instrumented valid job); zero provider-setting, corpus, graph, vector, or
+  database write.
+- Code changes: journal writability is now fsynced before provider dispatch;
+  unwritable paths refuse before any HTTP call.
+- Durable migration/backfill: none.
+- Before metrics: corrected image/runtime probe green; first live harness path
+  was not writable and therefore not a valid bar execution.
+- After metrics: instrumented job completed with 1,780ms delay / 1,196ms
+  execution. Functional semantics: 12 chunks, 126 entities, 56 predicates,
+  2/2 temporal phrases, zero relations/missing/semantic mismatches. Confidence
+  max delta `0.0001373291015625` exceeds frozen `0.00001`; 81/126 values fail.
+- Tests by tier: runner 6/6; actual-container-user journal preflight,
+  functional canary diagnostic, confidence diagnostic, status preservation,
+  and rollback census true `EXIT=0`; instrumented gate correctly `EXIT=1`.
+- Cross-corpus test: not run; B5 failure stops B6, fresh-corpus E2E, and
+  retrieval evaluation.
+- Failure/rollback test: job ID survived; full output preserved; green deleted;
+  primary embed restored max 1→2; both blues unchanged; secondary untouched.
+- Deployment image/health: corrected image boots and serves, but required
+  pinned-local confidence parity is not green; no production/cutover claim.
+- Remaining risks: device-level confidence variation is inferred, not proven;
+  tolerance/contract changes require explicit respecification and were not
+  attempted. Permanent receipt:
+  `docs/RUNPOD_B4_B5_PARITY_FAILURE_RECEIPT_2026-07-15.md`.
+- Checklist boxes closed: none; P2.7 production readiness remains open. Senior
+  subsequently authorized a narrow versioned deterministic-runtime rebuild
+  and one unchanged-tolerance retest; that remediation is not a gate pass.
+
 ## Implementation Log Template
 
 Copy this section for every completed item:

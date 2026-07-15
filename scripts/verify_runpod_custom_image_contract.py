@@ -109,10 +109,14 @@ def verify() -> dict[str, Any]:
         "require_hashes": "--require-hashes",
         "non_root": "USER 10001:10001",
         "entrypoint": 'CMD ["python", "app.py"]',
-        "baked_model_cache_runtime": (
-            "POLYMATH_HF_CACHE_ROOT=/opt/polymath/hf-cache"
-        ),
+        "baked_model_cache_runtime": ("POLYMATH_HF_CACHE_ROOT=/opt/polymath/hf-cache"),
         "offline_model_runtime": "POLYMATH_LOCAL_FILES_ONLY=1",
+        "cublas_deterministic_workspace": "CUBLAS_WORKSPACE_CONFIG=:4096:8",
+        "nvidia_tf32_disabled": "NVIDIA_TF32_OVERRIDE=0",
+        "omp_threads_fixed": "OMP_NUM_THREADS=1",
+        "mkl_threads_fixed": "MKL_NUM_THREADS=1",
+        "openblas_threads_fixed": "OPENBLAS_NUM_THREADS=1",
+        "numexpr_threads_fixed": "NUMEXPR_NUM_THREADS=1",
         "source_commit_label": "org.opencontainers.image.revision",
         "source_closure_label": "io.polymath.source-closure",
     }

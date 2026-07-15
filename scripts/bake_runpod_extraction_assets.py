@@ -34,6 +34,7 @@ def sha256(path: Path) -> str:
 def bake() -> dict[str, Any]:
     from huggingface_hub import snapshot_download
 
+    determinism = runtime._configure_determinism()
     snapshot = Path(
         snapshot_download(
             repo_id=runtime.GLINER_MODEL_ID,
@@ -71,6 +72,7 @@ def bake() -> dict[str, Any]:
         "runtime_cache_root": str(runtime_cache_root),
         "snapshot_path": str(snapshot),
         "runtime_identity": identity,
+        "determinism": determinism,
     }
 
 

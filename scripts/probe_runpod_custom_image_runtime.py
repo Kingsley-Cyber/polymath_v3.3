@@ -9,6 +9,7 @@ executes the real offline spaCy + GLiNER path without provider or data writes.
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 from pathlib import Path
@@ -22,7 +23,7 @@ def sha256(path: Path) -> str:
 
 def run(repo: Path, worker_root: Path) -> dict[str, Any]:
     sys.path.insert(0, str(worker_root))
-    from runtime import extract_local_batch
+    from runtime import DETERMINISM_PROFILE, extract_local_batch
 
     spec_path = repo / "backend/evals/runpod_same_chunk_lockdown_v1.json"
     spec = json.loads(spec_path.read_text(encoding="utf-8"))
@@ -52,6 +53,7 @@ def run(repo: Path, worker_root: Path) -> dict[str, Any]:
         "model_revision": identity["gliner_model_revision"],
         "spacy_pipeline": identity["spacy_model"],
         "asset_contract": identity["asset_contract"],
+        "determinism_profile": DETERMINISM_PROFILE,
         "tasks": [task],
     }
     output = extract_local_batch(payload)
@@ -70,6 +72,40 @@ def run(repo: Path, worker_root: Path) -> dict[str, Any]:
             raise RuntimeError("runtime probe entity span failed round trip")
     if extraction.get("relations"):
         raise RuntimeError("runtime probe relations must remain empty")
+    baseline_result = next(
+        row
+        for row in baseline["output"]["results"]
+        if row["child_id"] == task["child_id"]
+    )
+    expected_result = copy.deepcopy(baseline_result)
+    observed_result = copy.deepcopy(result)
+    expected_confidences = [
+        float(entity.pop("confidence"))
+        for entity in expected_result["extraction"]["entities"]
+    ]
+    observed_confidences = [
+        float(entity.pop("confidence"))
+        for entity in observed_result["extraction"]["entities"]
+    ]
+    if expected_result != observed_result:
+        raise RuntimeError("runtime probe semantic result differs from reference")
+    if len(expected_confidences) != len(observed_confidences):
+        raise RuntimeError("runtime probe confidence cardinality mismatch")
+    confidence_deltas = [
+        abs(left - right)
+        for left, right in zip(expected_confidences, observed_confidences, strict=True)
+    ]
+    tolerance = float(spec["comparison"]["confidence_absolute_tolerance"])
+    maximum_delta = max(confidence_deltas, default=0.0)
+    if maximum_delta > tolerance:
+        raise RuntimeError(
+            f"runtime probe confidence delta {maximum_delta} exceeds {tolerance}"
+        )
+    observed_determinism = output.get("runtime_identity", {}).get("determinism")
+    if not isinstance(observed_determinism, dict):
+        raise RuntimeError("runtime probe determinism attestation missing")
+    if observed_determinism.get("profile") != DETERMINISM_PROFILE:
+        raise RuntimeError("runtime probe determinism profile mismatch")
     return {
         "schema_version": "polymath.runpod_custom_image_runtime_probe.v1",
         "success": True,
@@ -79,6 +115,12 @@ def run(repo: Path, worker_root: Path) -> dict[str, Any]:
         "metrics": output.get("metrics"),
         "result_count": 1,
         "runtime_identity": output.get("runtime_identity"),
+        "reference_comparison": {
+            "selection_identity": True,
+            "confidence_count": len(confidence_deltas),
+            "confidence_max_abs_delta": maximum_delta,
+            "confidence_tolerance": tolerance,
+        },
         "provider_calls": 0,
         "durable_writes": 0,
     }

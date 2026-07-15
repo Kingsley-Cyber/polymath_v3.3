@@ -12,6 +12,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import random
 import re
 import sys
 import time
@@ -30,6 +31,7 @@ from services.ingestion.semantic_observations import (
 
 
 CONTRACT_VERSION = "polymath.runpod_local_extraction.v1"
+DETERMINISM_PROFILE = "polymath.torch_cuda_deterministic.v1"
 PYTHON_VERSION = "3.11.15"
 SPACY_VERSION = "3.8.14"
 SPACY_MODEL = "en_core_web_sm"
@@ -76,6 +78,15 @@ EXPECTED_ASSET_CONTRACT = {
     "gliner_config_sha256": GLINER_CONFIG_SHA256,
     "gliner_weights_sha256": GLINER_WEIGHTS_SHA256,
 }
+EXPECTED_DETERMINISM_ENV = {
+    "CUBLAS_WORKSPACE_CONFIG": ":4096:8",
+    "NVIDIA_TF32_OVERRIDE": "0",
+    "OMP_NUM_THREADS": "1",
+    "MKL_NUM_THREADS": "1",
+    "OPENBLAS_NUM_THREADS": "1",
+    "NUMEXPR_NUM_THREADS": "1",
+    "PYTHONHASHSEED": "0",
+}
 
 _ROOT = Path(__file__).resolve().parent
 _SOURCE_CLOSURE = (
@@ -96,6 +107,7 @@ _SOURCE_CLOSURE = (
 _NLP: Any = None
 _MODEL: Any = None
 _MODEL_SNAPSHOT: Path | None = None
+_DETERMINISM_IDENTITY: dict[str, Any] | None = None
 
 
 def _sha256(path: Path) -> str:
@@ -147,6 +159,88 @@ def _distribution_versions() -> dict[str, str]:
     return observed
 
 
+def _configure_determinism() -> dict[str, Any]:
+    """Apply and attest the locked production inference determinism profile."""
+
+    global _DETERMINISM_IDENTITY
+    if _DETERMINISM_IDENTITY is not None:
+        return dict(_DETERMINISM_IDENTITY)
+
+    observed_env = {key: os.getenv(key) for key in EXPECTED_DETERMINISM_ENV}
+    if observed_env != EXPECTED_DETERMINISM_ENV:
+        raise RuntimeError(
+            "determinism environment differs from locked profile "
+            f"{DETERMINISM_PROFILE}"
+        )
+
+    import numpy as np
+    import torch
+
+    random.seed(0)
+    np.random.seed(0)
+    torch.manual_seed(0)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(0)
+
+    torch.set_num_threads(1)
+    try:
+        torch.set_num_interop_threads(1)
+    except RuntimeError:
+        if torch.get_num_interop_threads() != 1:
+            raise
+    torch.set_float32_matmul_precision("highest")
+    torch.backends.cuda.matmul.allow_tf32 = False
+    torch.backends.cudnn.allow_tf32 = False
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+    torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False
+    torch.use_deterministic_algorithms(True, warn_only=False)
+
+    identity = {
+        "profile": DETERMINISM_PROFILE,
+        "seed": 0,
+        "environment": observed_env,
+        "torch_deterministic_algorithms": (
+            torch.are_deterministic_algorithms_enabled()
+        ),
+        "torch_deterministic_warn_only": (
+            torch.is_deterministic_algorithms_warn_only_enabled()
+        ),
+        "torch_float32_matmul_precision": torch.get_float32_matmul_precision(),
+        "cuda_matmul_allow_tf32": torch.backends.cuda.matmul.allow_tf32,
+        "cudnn_allow_tf32": torch.backends.cudnn.allow_tf32,
+        "cudnn_benchmark": torch.backends.cudnn.benchmark,
+        "cudnn_deterministic": torch.backends.cudnn.deterministic,
+        "cuda_matmul_allow_fp16_reduced_precision_reduction": (
+            torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction
+        ),
+        "cuda_matmul_allow_bf16_reduced_precision_reduction": (
+            torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction
+        ),
+        "torch_num_threads": torch.get_num_threads(),
+        "torch_num_interop_threads": torch.get_num_interop_threads(),
+        "cuda_available": torch.cuda.is_available(),
+    }
+    expected = {
+        "torch_deterministic_algorithms": True,
+        "torch_deterministic_warn_only": False,
+        "torch_float32_matmul_precision": "highest",
+        "cuda_matmul_allow_tf32": False,
+        "cudnn_allow_tf32": False,
+        "cudnn_benchmark": False,
+        "cudnn_deterministic": True,
+        "cuda_matmul_allow_fp16_reduced_precision_reduction": False,
+        "cuda_matmul_allow_bf16_reduced_precision_reduction": False,
+        "torch_num_threads": 1,
+        "torch_num_interop_threads": 1,
+    }
+    if any(identity[key] != value for key, value in expected.items()):
+        raise RuntimeError("PyTorch determinism settings failed closed")
+    _DETERMINISM_IDENTITY = identity
+    return dict(identity)
+
+
 def runtime_identity(*, model_snapshot: Path | None = None) -> dict[str, Any]:
     if platform.python_version() != PYTHON_VERSION:
         raise RuntimeError(
@@ -173,6 +267,7 @@ def runtime_identity(*, model_snapshot: Path | None = None) -> dict[str, Any]:
         "asset_contract": dict(EXPECTED_ASSET_CONTRACT),
         "registry_namespace_hashes": extraction_registry_hashes(),
         "source_closure": source_closure_manifest(),
+        "determinism": _configure_determinism(),
     }
     if model_snapshot is not None:
         identity["model_snapshot"] = {
@@ -221,9 +316,11 @@ def _load_model() -> tuple[Any, Path]:
     global _MODEL, _MODEL_SNAPSHOT
     if _MODEL is not None and _MODEL_SNAPSHOT is not None:
         return _MODEL, _MODEL_SNAPSHOT
+    import torch
+
+    _configure_determinism()
     from gliner import GLiNER
     from huggingface_hub import snapshot_download
-    import torch
 
     snapshot = Path(
         snapshot_download(
@@ -417,6 +514,7 @@ def _validate_payload(payload: dict[str, Any]) -> list[dict[str, str]]:
         "model_revision",
         "spacy_pipeline",
         "asset_contract",
+        "determinism_profile",
         "tasks",
     }:
         raise ValueError("request fields do not match the locked wire contract")
@@ -430,6 +528,8 @@ def _validate_payload(payload: dict[str, Any]) -> list[dict[str, str]]:
         raise ValueError("spaCy pipeline differs from locked contract")
     if payload["asset_contract"] != EXPECTED_ASSET_CONTRACT:
         raise ValueError("request asset contract differs from locked assets")
+    if payload["determinism_profile"] != DETERMINISM_PROFILE:
+        raise ValueError("request determinism profile differs from locked runtime")
     batch_id = payload["batch_id"]
     if not isinstance(batch_id, str) or not batch_id.strip() or len(batch_id) > 200:
         raise ValueError("batch_id must be a bounded nonempty string")
@@ -470,6 +570,7 @@ def extract_local_batch(
 
     snapshot: Path | None = None
     if enforce_runtime:
+        _configure_determinism()
         nlp = nlp or _load_nlp()
         if model is None:
             model, snapshot = _load_model()
