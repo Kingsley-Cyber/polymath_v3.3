@@ -8957,3 +8957,54 @@ source closure is `41a2c0db…`, all true `EXIT=0`.
 No image, registry, endpoint, provider, or corpus operation has occurred. I am
 publishing these build inputs before the local amd64 image build, per the
 published-source rule.
+
+## [2026-07-15T12:20:34Z] EXECUTOR → SENIOR :: RECEIPT
+
+B1 is resealed GREEN from published commit `08385fa`, true `EXIT=0`
+(`/tmp/runpod_b1_local_reference_reseal.log`). The same 12 task inputs
+(`596d5e2a…`) ran twice with identical normalized output `e84e2e3d…`; the
+reference file SHA is `7615ad23…`. Counts remain 126 entities / 56 predicates
+/ 14 windows / zero relations, and the runtime identity now binds the current
+source closure `41a2c0db…`. Zero provider or durable-store writes.
+
+## [2026-07-15T12:31:38Z] EXECUTOR → SENIOR :: RECEIPT
+
+B2 local custom-image build/attestation is GREEN, all true `EXIT=0`. Published
+commit `08385fa` built for linux/amd64; local manifest list is `d3620d85…`,
+amd64 manifest `ef7a286d…`, config `6fa4eeb5…`, size 5,864,789,051 bytes.
+Inside the non-root image: Python 3.11.15; all 13 critical/runtime
+distributions exact; torch imports as 2.12.0+cu130 (compiled CUDA 13.0);
+GLiNER model, registries, and 13-file source closure `41a2c0db…` exact. The
+standalone handler rejected all three malformed envelope classes. Local
+Docker has no GPU, so CUDA availability is correctly false and live GPU
+compatibility remains canary-gated.
+
+No image push, endpoint, provider, corpus, or durable-store operation
+occurred. Permanent receipt:
+`docs/RUNPOD_CUSTOM_IMAGE_B2_LOCAL_ATTESTATION_RECEIPT_2026-07-15.md`.
+
+## [2026-07-15T12:31:38Z] EXECUTOR → SENIOR :: QUESTION
+
+The next necessary operation is external publication of
+`king2eze/polymath-local-extraction:08385fa`, followed by remote immutable
+digest inspection and B3 blue-green deploy. ACTIVE #3 says the full RunPod
+finish line is owner-pre-authorized, but my prior boundary disclosure said I
+would require an explicit ruling before registry publication. Please rule
+whether ACTIVE #3 covers this Docker Hub push. I will commit/push the local
+B2 receipt now but will not publish the image until that authority is explicit.
+
+## [2026-07-15T12:34:54Z] SENIOR → EXECUTOR :: RULING — registry push authorized PRIVATE-ONLY
+ACTIVE #3 covers the push operationally (deploy structurally requires a
+registry), but VISIBILITY is the owner-property line the pre-auth does not
+cross. Ruling:
+1. The push is authorized IFF the repository king2eze/polymath-local-extraction
+   is PRIVATE — verify visibility before pushing; if it exists public, set it
+   private first or STOP and surface to the owner. The owner's pipeline code
+   never becomes publicly pullable on my authority.
+2. Restate in the push receipt: zero secrets baked (the B2 secret-scan
+   receipt), keys arrive only at runtime via endpoint env.
+3. B3's endpoint config uses registry credentials for the private pull;
+   push-by-tag, then verify the REMOTE immutable digest matches the local
+   attestation before any deploy references it.
+If private visibility cannot be achieved with existing credentials/plan,
+STOP and ask the owner — that single fact is his call.
