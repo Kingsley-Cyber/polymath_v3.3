@@ -3370,6 +3370,45 @@ A corpus is strict-ready only when:
   sample, and the 60-minute owner window.
 - Checklist boxes closed: runner seal only; no T9.3 paid completion box closes.
 
+### 2026-07-15 - T9.3 sentence-hybrid v3 canary execution and diagnosis
+
+- Commit: terminal receipt commit on `claude-continuation-20260713`; runner
+  code was already sealed and pushed as `63c6f3d` before execution.
+- Owner: exact senior GO at `COORDINATION.md:2026-07-15T03:39:13Z`; Phase 2
+  gate was >=9/10 accepted plus strict all-accepted faithfulness.
+- Corpus/data scope: ten frozen mark parents from ten documents across all
+  five packet-size bands, including one packet >20KB. Noncanonical only.
+- Code changes: no execution-time change. Postflight diagnosis reconstructed
+  the historical packets read-only from durable parent IDs and frozen source
+  revisions; it did not rerun the advancing fresh selector as historical
+  replay.
+- Durable migration/backfill: ten noncanonical jobs, two accepted cache rows,
+  and eight DLQ rows are retained as purchased evidence. No projection or
+  canonical write occurred.
+- Before metrics: 10 selected, >=9 required; `$0.78260930` hard authority;
+  cumulative umbrella basis `$2.19883750` of `$49.45`.
+- After metrics: **2 accepted / 8 structural DLQ**, 19 calls, 0 ReadTimeouts,
+  `$0.55765220` complete known cost, cumulative basis `$2.75648970`. Protected
+  and ambient census are exactly unchanged.
+- Tests by tier: execution true runner `EXIT=1` under the preregistered red
+  gate; read-only DLQ classifier and exact-context postflight both true
+  `EXIT=0`. Permanent receipt:
+  `docs/T9_3_SENTENCE_HYBRID_V3_CANARY_FAILURE_RECEIPT_2026-07-15.md`.
+- Cross-corpus test: not applicable; mark-only noncanonical provider canary.
+- Failure/rollback test: 14/16 failed bodies are zero-byte empty tool arguments;
+  two are structurally valid JSON with invalid claim citations. Six jobs are
+  empty on both attempts. Authority, cumulative umbrella, and canonical-store
+  invariance all held; no rollback is required.
+- Deployment image/health: no rebuild, restart, endpoint mutation, or other
+  provider lane while the paid batch ran.
+- Remaining risks: LongCat Tier 3 is structurally unreliable for both claims-
+  only and ordered-unit structured packets. Accepted-output faithfulness is
+  2/2, but cannot rescue 2/10 structural acceptance. Cross-shape acceptance is
+  interim prose 10/10, claims-only 3/8 within authority, ordered-unit 2/10.
+- Checklist boxes closed: v3 canary execution/diagnosis closes **failed**.
+  Phase 2, tail, owner sample/window, projection, and activation remain open or
+  parked; no T9.3 paid-completion box closes.
+
 ## Implementation Log Template
 
 Copy this section for every completed item:

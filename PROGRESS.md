@@ -1,22 +1,24 @@
 # PROGRESS — executor cursor (Codex updates after EVERY task)
 
 - Mission: CODEX_MISSION.md (CP2 → CP12)
-- Track: A (core spine)
-- Current task: A4/T9.3 sentence-hybrid v3 canary execution. The v3-specific
-  paid runner now has a complete pure/canonical/static/live negative seal
-  against the senior's exact 2026-07-15T03:39:13Z GO for selection
-  `6aed7b1a...` and hard authority `$0.78260930`. No credential read or paid
-  call has yet been made under that GO.
-- Next task: commit/push the sealed runner, then execute only the ten authorized
-  packets from that commit. Stop on any preregistered bar failure; Phase 2
-  remains separately gated by canary receipt, three-digest sample, and the
-  owner window.
+- Track: A4/T9.3 paid lane owner-blocked; continuing non-paid Track-A/E1 work
+  while the owner rules on the provider-shape options.
+- Current task: A4/T9.3 sentence-hybrid v3 canary is terminal **failed and
+  diagnosed**: 2/10 accepted, 8 structural DLQ, 19 calls, `$0.55765220`, no
+  timeouts, authority/umbrella held, and canonical stores unchanged. Strict
+  faithfulness is 2/2 for accepted outputs. Phase 2 is parked.
+- Next task: commit/push the terminal failure package, then restore and audit
+  the parked T9.4 deterministic engine-parity slice from `stash@{0}` against
+  current HEAD and resume its non-paid module/test gates. Do not run a paid
+  provider lane, live projection, rebuild, or activation while the T9.3 owner
+  decision is pending.
 - Parked: T9.3 Phase 2, the owner sample window, and the five-parent bounded
-  tail. Phase 2 is sealed because B4 failed; the prior 727-packet standing GO
-  and `$31.1917106` authority are void. Any future paid lane requires the
-  reservation control, corrected two-attempt authority, approved v3, and a
-  fresh senior GO. The tail remains after a future corpus-wide certified
-  acceptance of at least 95%.
+  tail. Phase 2 is sealed because ordered-unit v3 achieved 2/10 against the
+  >=9/10 bar; the prior 727-packet standing GO and `$31.1917106` authority are
+  void. Any future paid lane requires a new senior/owner contract ruling and
+  fresh exact GO. The green-only three-digest sample/window did not open
+  because only two accepted digests exist. The tail remains after a future
+  corpus-wide certified acceptance of at least 95%.
   T9.4's pinned deployment, actual PoC-pair engine comparison, 100/500/5,000
   gates, live readiness wiring, full lexicon-projector parity, and production
   stamp remain open under the senior's production boundary. Ecom reingest/
@@ -28,14 +30,15 @@
   after modular completion + RunPod blue-green parity; this is not approval to
   reingest or mutate the existing ecommerce corpus. Predicate normalization v1
   and ClaimRecordV1 field sets remain owner-ratifiable.
-- Last completed subgate: T9.3 ordered-unit v3 paid-runner seal green. Host,
-  backend canonical, and worker canonical focused suites are 43/43; Black,
-  host/backend/worker compile, and diff checks are true `EXIT=0`. A live
-  wrong-authorization replay rederived the exact approved population, stopped
-  on `PaidPassError`, and left 0 v3 rows, provider-call rows, selection rows,
-  or lane leases. Permanent receipt:
-  `docs/T9_3_SENTENCE_HYBRID_V3_RUNNER_SEAL_RECEIPT_2026-07-15.md`.
-  The preceding credential-blind preflight is also green.
+- Last completed subgate: T9.3 ordered-unit v3 canary execution/diagnosis
+  closed **failed**. Terminal closure is 2 accepted / 8 structural DLQ, 19
+  calls, `$0.55765220`, 0 ReadTimeouts, complete accounting, and exact
+  canonical/ambient invariance. Fourteen of sixteen failed bodies are empty;
+  two are nonempty JSON with invalid claim citations. Accepted faithfulness is
+  2/2. Cross-shape acceptance is prose 10/10, claims-only 3/8 within authority,
+  ordered-unit 2/10. Permanent receipt:
+  `docs/T9_3_SENTENCE_HYBRID_V3_CANARY_FAILURE_RECEIPT_2026-07-15.md`.
+  The runner seal and preceding credential-blind preflight remain green.
   The live population is 793 ready + the same two no-claim-child exclusions,
   with all 30,694 sentences present (24,845 mapped / 5,849 context-only), zero
   drops, max 25,601 bytes, and exactly three packets >20KB. Packet/schema/
@@ -59,4 +62,4 @@
   793+2 parents and finds sentence→atomic mapping coverage 80.944158%; the
   optional-ID ordered-unit shape is p50 13,930 bytes, max 25,613 bytes, with
   maximum-any-ten authority `$0.83486975` under the corrected envelope.
-- Last update: 2026-07-15T03:57:06Z (executor)
+- Last update: 2026-07-15T04:57:01Z (executor)
