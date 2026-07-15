@@ -10563,3 +10563,68 @@ mkdir ran on the host instead of the container so one test loaded the old
 deployed module (`19 passed, 1 failed`, `EXIT=1`); neither changed product or
 provider state. The corrected nonempty hash gate and rebuilt-container suites
 above are the valid receipts.
+
+## [2026-07-15T21:15:48Z] EXECUTOR → SENIOR :: RECEIPT
+
+The sealed narrow fix is published as `47fee92`. Required pull/rebase/autostash
+was already up to date (`EXIT=0`); staged diff-check and credential-pattern
+scan each returned `EXIT=0`, with `secret_like_matches=0`. Branch push and
+`git push origin HEAD:main` each returned true `EXIT=0`. Only the untracked
+operational `tmp/` tree remains outside the commit. I am now requeuing item 3
+alone so its durable 66-request slice closure (150 cumulative through item 3)
+must replay from completed job outputs with submitted/terminal counts frozen
+at 200/200 before any remaining item is released.
+
+## [2026-07-15T21:28:40Z] EXECUTOR → SENIOR :: RECEIPT
+
+Paid-result replay is VERIFIED green, true watcher `EXIT=0`. Requeuing only
+item 3 returned `EXIT=0`; the repaired document then completed and verified in
+735.231 seconds. Durable metrics close at 66 logical request batches, all 66
+`reused_request_batches`, zero `new_request_batches`, and exactly one counted
+`empty_canonical_label` exclusion. The fsynced provider journal remained
+exactly 200 submitted / 200 terminal `COMPLETED` throughout and gained 66
+`reused_terminal_output` audit rows—zero replacement dispatch and zero added
+RunPod execution cost. Local completion phases were Ghost A/B 227.28s, MLX
+embedding 170.07s, Qdrant 125.38s, Neo4j 189.59s, then verification true.
+I am releasing the remaining twelve cancelled items now and resuming the
+standing document-boundary watcher under unchanged ceilings.
+
+## [2026-07-15T21:30:04Z] EXECUTOR → SENIOR :: BLOCKER
+
+The resumed E2E has a second real RED and is stopping again. The remaining-item
+requeue itself returned true `EXIT=0` (12 cancelled → 12 queued), but item 4
+`Elemental Magic.md`—which had been interrupted at local embedding after all
+50 of its extraction jobs completed—was immediately marked durable `skipped`
+by exact-source duplicate handling. Its existing document is NOT verified and
+is absent from completed-document closure. Current snapshot true `EXIT=0`
+shows done=3, skipped=1, running=1, queued=10; documents=5 but only 3 verified.
+The new item 5 extraction job had already completed before this was observed,
+so the journal is 201 submitted = 201 terminal `COMPLETED`, zero outstanding,
+conservative RunPod cost `$0.285251460`; summary basis `$1.273862190`, zero
+refusals. A 14-done+1-skipped batch cannot satisfy the preregistered 15/15 gate.
+I am stopping the worker and durably cancelling only the running/queued items;
+no duplicate deletion, document reset, or resume fix will be attempted without
+a ruling.
+
+## [2026-07-15T21:30:04Z] EXECUTOR → SENIOR :: QUESTION
+
+May I diagnose and narrowly fix the duplicate policy so an exact-source match
+to an incomplete/unverified document resumes that durable document rather than
+claiming a successful skip, then requeue item 4 in isolation and prove its 50
+completed outputs replay with zero new dispatch before releasing the rest?
+
+## [2026-07-15T21:31:51Z] SENIOR → EXECUTOR :: RULING — yes; a skip may only claim a VERIFIED duplicate
+Approved exactly as proposed. The defect is a dedup/resume boundary error: an
+exact-source match may claim "skip" ONLY against a COMPLETE, VERIFIED
+document; matching an incomplete/unverified document must RESUME that durable
+document from its stored work. Riders:
+1. ONE COMPLETENESS TRUTH: the predicate is the existing verified/
+   done-means-done closure state — never a new parallel notion of complete.
+2. AUDITABLE SKIPS: every skip receipt names the verified document it
+   matched.
+3. GOLDENS: exact-source+verified → skip · exact-source+incomplete → resume
+   · new source → ingest.
+4. SEQUENCE as you stated: fix + seal → requeue item 4 ALONE → prove its 50
+   stored outputs replay with ZERO new dispatch → then release the remaining
+   items. The 15/15 preregistered gate stands — no skipped-as-done
+   accounting.
