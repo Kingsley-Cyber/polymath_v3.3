@@ -9017,3 +9017,56 @@ the required stop/owner escalation unless it can be made private through the
 existing authorized account plan. The push receipt will restate zero baked
 secrets/runtime-only keys, and no deploy will reference the image until the
 remote immutable digest is verified against the local attestation.
+
+## [2026-07-15T12:57:09Z] EXECUTOR → SENIOR :: RECEIPT
+
+Private registry publication and remote B2 identity are GREEN. Docker Hub
+repository creation returned 201 with `is_private=true`; authenticated lookup
+is 200/private and unauthenticated lookup is 404. The image config/history
+secret scan has zero findings. Push returned true `EXIT=0` and remote raw-OCI
+rehash independently reproduces index `d3620d85…`; its sole linux/amd64 child
+is exactly `ef7a286d…`. Both match the local attestation. No endpoint was
+referenced before the remote digest gate.
+
+Named private-pull credentials were then created in both RunPod accounts with
+`secret_values_emitted=0`; RunPod keys remained inside the backend encrypted-
+settings boundary and Docker credentials flowed only credential-helper stdin
+→ RunPod secret storage. Blue extraction IDs remained unchanged.
+
+## [2026-07-15T12:57:09Z] EXECUTOR → SENIOR :: BLOCKER
+
+B3 primary green deploy is RED and stopped before canary, true `EXIT=1`
+(`/tmp/runpod_green_primary_deploy.log`). RunPod rejected the new endpoint:
+`Max workers across all endpoints must not exceed your workers quota (10)`;
+with current allocations 2 (Qwen3 embed) + 8 (blue extraction), it permits at
+most 0 for green. Secondary has the identical 2+8 allocation. Read-only
+postcheck is GREEN: blue extraction endpoints/config are byte-equivalent to
+predeploy, green endpoint count is zero in both accounts, and only the exact
+immutable primary green template `zepw9ehfnj` was created.
+
+I will not alter the read-only blue extraction surfaces or fake workersMax=0.
+The least-blast-radius feasible remedy appears to be a temporary max-workers
+reallocation on each separate Qwen3 embedding endpoint from 2→1, preserving
+its ID/template/min=0 and freeing one quota slot for a 0..1 green extraction
+endpoint; restore only after the old extraction endpoint is retired at the
+post-E2E cutover boundary. That is an external capacity mutation outside the
+explicit blue-green wording, so I am parked pending your ruling. Alternatives
+are owner/RunPod quota increase or a third account.
+
+## [2026-07-15T12:58:59Z] SENIOR → EXECUTOR :: RULING — quota reallocation approved, NARROWED to primary-only
+The quota math is the CP1-D4 lesson again (embed endpoints count against the
+same pool). Your remedy is approved with the blast radius narrowed further:
+1. PRIMARY ACCOUNT ONLY: Qwen3 embed max-workers 2→1 (ID/template/min=0
+   preserved), freeing exactly one slot; deploy green extraction 0..1 on
+   primary. SECONDARY stays byte-untouched — the dual-account green symmetry
+   completes at the cutover boundary when retiring blue frees 8 slots.
+2. OPERATIONAL IMPACT ACCEPTED AND BOUNDED: ingestion embed rides the Mac
+   MLX sidecar; the RunPod embed lane is bulk/backfill and idle. One green
+   worker is sufficient for same-chunk validation + a 15-doc E2E — slower is
+   acceptable, wrong is not; report durations.
+3. RESTORE CONDITION (binding): embed max returns to 2 at the cutover
+   boundary OR on any abort of the chain — whichever comes first; the
+   restore is its own receipt. Before/after endpoint configs (IDs, min/max,
+   template) in both mutation receipts.
+4. Blue extraction surfaces remain read-only throughout, as you already
+   enforce. No quota increase purchase without owner words.
