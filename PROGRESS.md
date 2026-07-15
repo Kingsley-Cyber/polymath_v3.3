@@ -2,13 +2,13 @@
 
 - Mission: CODEX_MISSION.md (CP2 → CP12)
 - Track: A4/T9.3 owner-authorized paid interim-prose Phase 2.
-- Current task: the senior-authorized bounded Phase-2 resume seam is sealed
-  GREEN. Exact baseline is 721 rows = 141 accepted / 7 DLQ / 573 queued,
-  rolling ranks 99–148 at 44/50, baseline hash `d5c7fd3…`, fixed original
-  absolute ceiling `$49.4464896999999995`, and next checkpoint 150. Expanded
-  tests are 79/79 in both containers with 36-file overlay parity. Permanent
-  receipt: `docs/T9_3_PROSE_PHASE2_RESUME_SEAL_RECEIPT_2026-07-15.md`.
-- Next task: publish the exact resume bytes and seal, then launch the one
+- Current task: the senior-authorized bounded Phase-2 resume launch fix is
+  sealed GREEN after a zero-claim refusal exposed aware-vs-naive UTC baseline
+  serialization. Equivalent Mongo datetimes now hash identically while
+  preserving exact baseline `d5c7fd3…`; allowlisted message-free guard codes
+  are present. Backend and worker are each 85/85 with 36-file parity. Receipt:
+  `docs/T9_3_PROSE_PHASE2_RESUME_LAUNCH_FIX_SEAL_RECEIPT_2026-07-15.md`.
+- Next task: publish the exact launch-fix bytes and seal, then launch the one
   authorized recovery. Only the historical window is latched; every other
   stop is live. Recovery must occur by terminal 198, and either failure to
   recover or a later rolling fall parks for owner. No tail, projection, or
@@ -29,7 +29,17 @@
   after modular completion + RunPod blue-green parity; this is not approval to
   reingest or mutate the existing ecommerce corpus. Predicate normalization v1
   and ClaimRecordV1 field sets remain owner-ratifiable.
-- Last completed subgate: T9.3 B1 prose Phase-2 bounded-resume seal is GREEN.
+- Last completed subgate: T9.3 B1 prose Phase-2 resume launch-fix seal is
+  GREEN. Permanent receipt:
+  `docs/T9_3_PROSE_PHASE2_RESUME_LAUNCH_FIX_SEAL_RECEIPT_2026-07-15.md`.
+  The first entrypoint attempt refused before materialization because the same
+  BSON UTC instants serialized as aware in preflight and naive under lease.
+  Post-fix both paths reproduce baseline `d5c7fd3…`; a zero-write boundary
+  probe reaches materialization, and message-free failure codes identify the
+  six execution guard stages. Backend and worker are each 85/85; Black,
+  compiles, 36-file parity, invalid-GO, and live preflight are green.
+
+  The preceding T9.3 B1 prose Phase-2 bounded-resume seal is GREEN.
   Permanent receipt:
   `docs/T9_3_PROSE_PHASE2_RESUME_SEAL_RECEIPT_2026-07-15.md`. Final read-only
   preflight proves exact baseline hash `d5c7fd3…`, original window ranks
@@ -108,4 +118,4 @@
   793+2 parents and finds sentence→atomic mapping coverage 80.944158%; the
   optional-ID ordered-unit shape is p50 13,930 bytes, max 25,613 bytes, with
   maximum-any-ten authority `$0.83486975` under the corrected envelope.
-- Last update: 2026-07-15T09:37:41Z (executor)
+- Last update: 2026-07-15T09:58:50Z (executor)

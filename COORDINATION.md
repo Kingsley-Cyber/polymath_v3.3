@@ -8200,3 +8200,48 @@ that minimal diagnostic seam before relaunch.
    fail-closed refusal MUST be able to name which guard fired in a
    non-secret code — a guard that refuses anonymously costs a diagnosis
    cycle every time it saves us.
+
+## [2026-07-15T09:50:19Z] EXECUTOR → SENIOR :: ACK
+
+Ruling received; the ONE resume remains unconsumed. Zero-provider boundary
+instrumentation has now recovered the exact cause: the preflight DB client
+returns timezone-aware UTC `completed_at` values, while the execution DB
+client returns the same BSON instants as naive UTC. The baseline identity
+serialized aware values with `+00:00` but naive values without it, producing
+preflight `d5c7fd3…` versus under-lease `c82162c1…`; job IDs, statuses,
+completion order, costs, and every instant are otherwise identical. Receipt:
+`/tmp/t93_p2_pre_materialization_boundary_diag_v3.log`, true `EXIT=1` at the
+expected guard, zero materialization/provider/canonical writes.
+
+I am applying the minimal semantic fix: canonicalize equivalent aware/naive
+Mongo datetimes to UTC before baseline hashing, preserving the already-sealed
+aware hash `d5c7fd3…`. I will also add the approved allowlisted non-secret
+stage codes and regression tests proving timezone-equivalent hashes and
+message-free failure receipts. No DB client mode, selection, prompt, gate,
+budget, checkpoint, or recovery-state behavior changes.
+
+## [2026-07-15T09:58:50Z] EXECUTOR → SENIOR :: RECEIPT
+
+The resume launch fix and approved observability seam are GREEN. Permanent
+supplemental seal:
+`docs/T9_3_PROSE_PHASE2_RESUME_LAUNCH_FIX_SEAL_RECEIPT_2026-07-15.md`.
+Backend and ingest-worker expanded suites are each 85/85 (`EXIT=0`); Black,
+both compiles, and 36-file host/backend/worker parity are green. Exact runner
+SHA in all three locations is `937c4b97…`.
+
+The zero-write boundary probe now reads the ledger through both client paths,
+produces the same sealed baseline `d5c7fd3…`, terminal identity `192ffb6b…`,
+rolling identity `04affd4f…`, and reaches the materialization boundary with
+true `EXIT=0` (`/tmp/t93_p2_resume_fix_boundary_green_v2.log`). It invokes no
+materialization, provider, job, or canonical write. A deliberately wrong
+baseline returns expected `EXIT=1` with only
+`error_class=PaidPassError,error_code=exact_go_guard`; no exception message
+or sensitive field is present. The following live preflight is exact GREEN
+with 141/7/573, zero running, unchanged `$6.955576299999998` basis, and
+`EXIT=0` (`/tmp/t93_p2_resume_fix_preflight_safe_v6.log`).
+
+No provider contract, selection, budget, gate, checkpoint, or recovery-state
+logic changed. I am pull-rebasing, staging only source/test/receipts, guarding
+scope and secrets, committing, and dual-pushing. The same unconsumed
+authorization then relaunches from these published bytes using a fresh absent
+output path; no further GO is required under your ruling.

@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -12,8 +12,12 @@ from scripts.semantic_gateway_mark_prose_phase2 import (
     INITIAL_CONCURRENCY,
     REMAINING_UMBRELLA_USD,
     REBUY_ORDINALS,
+    EXECUTION_FAILURE_CODES,
+    ProsePhase2ExecutionStageError,
     ProsePhase2ResumeControl,
     _assert_go_contract,
+    _execution_failure_stage,
+    _failure_receipt,
     _phase2_selection,
     _persist_rebuy_supersessions,
     _resume_baseline_receipt,
@@ -288,6 +292,27 @@ def test_resume_baseline_binds_exact_terminal_ranks_and_fixed_ceiling():
     )
     assert _resume_next_checkpoint(148) == 150
 
+    aware = [dict(row) for row in terminal + queued]
+    for row in aware:
+        if isinstance(row.get("completed_at"), datetime):
+            row["completed_at"] = row["completed_at"].replace(tzinfo=timezone.utc)
+    aware_baseline = _resume_baseline_receipt(
+        aware,
+        selection_set_hash="sha256:selection",
+        selected_packet_set_hash="sha256:packets",
+        cumulative_cost=cumulative,
+        max_next_claim_reservation_usd=Decimal("0.09536318"),
+    )
+    assert aware_baseline["baseline_hash"] == baseline["baseline_hash"]
+    assert (
+        aware_baseline["terminal_ledger_identity_hash"]
+        == baseline["terminal_ledger_identity_hash"]
+    )
+    assert (
+        aware_baseline["rolling_window"]["identity_hash"]
+        == baseline["rolling_window"]["identity_hash"]
+    )
+
     changed = [dict(row) for row in terminal + queued]
     changed[147]["status"] = "succeeded"
     changed_baseline = _resume_baseline_receipt(
@@ -310,6 +335,20 @@ def test_concurrency_escalates_only_after_one_hundred_clean_completions():
     assert phase2_prose_concurrency(ninety_nine) == INITIAL_CONCURRENCY
     assert phase2_prose_concurrency(hundred) == ESCALATED_CONCURRENCY
     assert phase2_prose_concurrency(one_failure) == INITIAL_CONCURRENCY
+
+
+@pytest.mark.parametrize("error_code", sorted(EXECUTION_FAILURE_CODES))
+def test_execution_failure_receipts_expose_only_allowlisted_stage_code(error_code):
+    with pytest.raises(ProsePhase2ExecutionStageError) as caught:
+        with _execution_failure_stage(error_code):
+            raise PaidPassError("sensitive diagnostic detail")
+
+    report = _failure_receipt(caught.value, mode="resume")
+
+    assert report["error_class"] == "PaidPassError"
+    assert report["error_code"] == error_code
+    assert "message" not in report
+    assert "sensitive diagnostic detail" not in str(report)
 
 
 def _prepared_receipt():

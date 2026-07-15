@@ -3627,6 +3627,46 @@ A corpus is strict-ready only when:
 - Checklist boxes closed: bounded-resume seal only. T9.3 paid completion
   remains open.
 
+### 2026-07-15 - T9.3 B1 Phase-2 resume launch-fix seal
+
+- Commit: this supplemental seal commit on `claude-continuation-20260713`;
+  relaunch occurs only from the dual-published exact bytes.
+- Owner: senior ruled at `COORDINATION.md#2026-07-15T09:47:55Z` that the
+  zero-claim refusal left the ONE-resume authorization unconsumed and approved
+  the message-free execution-stage observability seam.
+- Corpus/data scope: mark only; exact persisted 721-row selection remains 141
+  accepted / 7 DLQ / 573 queued / zero running. No checkpoint 0150 exists.
+- Code changes: canonicalize aware and naive Mongo UTC completion instants to
+  the same baseline-hash form; attach allowlisted non-secret codes to the six
+  execution-only guard stages; emit no exception message.
+- Durable migration/backfill: none. Failed launch and diagnostics made zero
+  job, provider, or canonical writes; all `last_planned_at` values remained
+  unchanged.
+- Before metrics: preflight hash `d5c7fd3…`; under-lease hash `c82162c1…`
+  solely because identical UTC instants serialized with versus without
+  `+00:00`.
+- After metrics: both paths reproduce exact baseline `d5c7fd3…`, terminal
+  identity `192ffb6b…`, rolling identity `04affd4f…`, and current basis
+  `$6.955576299999998`.
+- Tests by tier: backend 85/85 and worker 85/85; Black and both compiles
+  green; 36-file host/backend/worker parity green; zero-write boundary reaches
+  materialization with identical hashes; wrong GO returns expected `EXIT=1`
+  with only `error_code=exact_go_guard`; final preflight `EXIT=0`. Permanent
+  receipt:
+  `docs/T9_3_PROSE_PHASE2_RESUME_LAUNCH_FIX_SEAL_RECEIPT_2026-07-15.md`.
+- Cross-corpus test: not applicable; this is deterministic timestamp
+  normalization in a mark-only noncanonical lane.
+- Failure/rollback test: the original refusal remains preserved; no checkpoint
+  or paid row was created. Code is additive/revertible, and the next execution
+  must use a fresh absent output path.
+- Deployment image/health: no rebuild or restart; exact source overlay is
+  byte-identical on backend and ingest-worker.
+- Remaining risks: the authorized recovery still must satisfy the unchanged
+  rolling, timeout, consecutive-DLQ, budget, and canonical-invariance gates;
+  the second rolling stop parks for owner.
+- Checklist boxes closed: launch-fix seal only. T9.3 paid completion remains
+  open.
+
 ## Implementation Log Template
 
 Copy this section for every completed item:

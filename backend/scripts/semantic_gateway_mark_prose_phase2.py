@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 from collections import Counter
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -128,6 +129,36 @@ RESUME_RECOVERY_TERMINAL_LIMIT = 50
 COST_MARGIN = Decimal("1.10")
 SUPERSESSION_COLLECTION = "semantic_digest_supersessions"
 SUPERSESSION_REASON = "faithfulness_rejected_unsupported_synthesis"
+EXECUTION_FAILURE_CODES = frozenset(
+    {
+        "exact_go_guard",
+        "operational_guard",
+        "credential_guard",
+        "lane_lease_guard",
+        "under_lease_baseline_guard",
+        "materialization_guard",
+    }
+)
+
+
+class ProsePhase2ExecutionStageError(PaidPassError):
+    """Attach one allowlisted, non-secret execution-stage failure code."""
+
+    def __init__(self, error_code: str, cause: Exception):
+        if error_code not in EXECUTION_FAILURE_CODES:
+            raise ValueError("execution failure code is not allowlisted")
+        self.error_code = error_code
+        super().__init__(str(cause))
+
+
+@contextmanager
+def _execution_failure_stage(error_code: str):
+    try:
+        yield
+    except ProsePhase2ExecutionStageError:
+        raise
+    except Exception as exc:
+        raise ProsePhase2ExecutionStageError(error_code, exc) from exc
 
 
 @dataclass(frozen=True)
@@ -160,6 +191,16 @@ def _utc_now() -> str:
         .isoformat()
         .replace("+00:00", "Z")
     )
+
+
+def _canonical_utc_iso(value: Any) -> str | None:
+    if not isinstance(value, datetime):
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    else:
+        value = value.astimezone(timezone.utc)
+    return value.isoformat()
 
 
 def _selection_job_id(*, corpus_id: str, row: PlannedPacket) -> str:
@@ -320,11 +361,7 @@ def _resume_baseline_receipt(
             "completion_rank": rank,
             "job_id": str(row.get("job_id") or ""),
             "status": str(row.get("status") or ""),
-            "completed_at": (
-                row["completed_at"].isoformat()
-                if isinstance(row.get("completed_at"), datetime)
-                else None
-            ),
+            "completed_at": _canonical_utc_iso(row.get("completed_at")),
         }
         for rank, row in enumerate(terminal, start=1)
     ]
@@ -1471,87 +1508,104 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
     prepared = await _prepare(args)
     if args.mode in {"preflight", "resume-preflight"}:
         return prepared.receipt
-    common_required = {
-        "authorization_reference": args.authorization_reference,
-        "expected_selection_count": args.expected_selection_count,
-        "expected_selection_set_hash": args.expected_selection_set_hash,
-        "expected_prompt_hash": args.expected_prompt_hash,
-        "expected_repair_prompt_hash": args.expected_repair_prompt_hash,
-        "expected_schema_hash": args.expected_schema_hash,
-        "expected_prior_basis_usd": args.expected_prior_basis_usd,
-        "remaining_authority_usd": args.remaining_authority_usd,
-    }
-    if any(value is None for value in common_required.values()):
-        raise PaidPassError("execution mode requires every common exact-GO argument")
     is_resume = args.mode == "resume"
-    if is_resume:
-        resume_required = {
-            "resume_authorization_reference": args.resume_authorization_reference,
-            "expected_selected_packet_set_hash": (
-                args.expected_selected_packet_set_hash
-            ),
-            "expected_absolute_authority_usd": (args.expected_absolute_authority_usd),
-            "expected_current_basis_usd": args.expected_current_basis_usd,
-            "expected_resume_baseline_hash": args.expected_resume_baseline_hash,
+    with _execution_failure_stage("exact_go_guard"):
+        common_required = {
+            "authorization_reference": args.authorization_reference,
+            "expected_selection_count": args.expected_selection_count,
+            "expected_selection_set_hash": args.expected_selection_set_hash,
+            "expected_prompt_hash": args.expected_prompt_hash,
+            "expected_repair_prompt_hash": args.expected_repair_prompt_hash,
+            "expected_schema_hash": args.expected_schema_hash,
+            "expected_prior_basis_usd": args.expected_prior_basis_usd,
+            "remaining_authority_usd": args.remaining_authority_usd,
         }
-        if any(value is None for value in resume_required.values()):
-            raise PaidPassError("resume mode requires every resume exact-GO argument")
-        if args.out.name == "execution.json":
+        if any(value is None for value in common_required.values()):
             raise PaidPassError(
-                "resume output must not overwrite failed execution.json"
+                "execution mode requires every common exact-GO argument"
             )
-        _assert_resume_go_contract(
-            prepared,
-            authorization_reference=args.authorization_reference,
-            resume_authorization_reference=args.resume_authorization_reference,
-            expected_selection_count=args.expected_selection_count,
-            expected_selection_set_hash=args.expected_selection_set_hash,
-            expected_selected_packet_set_hash=(args.expected_selected_packet_set_hash),
-            expected_prompt_hash=args.expected_prompt_hash,
-            expected_repair_prompt_hash=args.expected_repair_prompt_hash,
-            expected_schema_hash=args.expected_schema_hash,
-            expected_original_prior_basis_usd=Decimal(args.expected_prior_basis_usd),
-            remaining_authority_usd=Decimal(args.remaining_authority_usd),
-            expected_absolute_authority_usd=Decimal(
-                args.expected_absolute_authority_usd
-            ),
-            expected_current_basis_usd=Decimal(args.expected_current_basis_usd),
-            expected_resume_baseline_hash=args.expected_resume_baseline_hash,
-        )
-    else:
-        _assert_go_contract(
-            prepared,
-            authorization_reference=args.authorization_reference,
-            expected_selection_count=args.expected_selection_count,
-            expected_selection_set_hash=args.expected_selection_set_hash,
-            expected_prompt_hash=args.expected_prompt_hash,
-            expected_repair_prompt_hash=args.expected_repair_prompt_hash,
-            expected_schema_hash=args.expected_schema_hash,
-            expected_prior_basis_usd=Decimal(args.expected_prior_basis_usd),
-            remaining_authority_usd=Decimal(args.remaining_authority_usd),
-        )
-    settings = get_settings()
-    client = AsyncIOMotorClient(settings.MONGODB_URI)
+        if is_resume:
+            resume_required = {
+                "resume_authorization_reference": args.resume_authorization_reference,
+                "expected_selected_packet_set_hash": (
+                    args.expected_selected_packet_set_hash
+                ),
+                "expected_absolute_authority_usd": (
+                    args.expected_absolute_authority_usd
+                ),
+                "expected_current_basis_usd": args.expected_current_basis_usd,
+                "expected_resume_baseline_hash": args.expected_resume_baseline_hash,
+            }
+            if any(value is None for value in resume_required.values()):
+                raise PaidPassError(
+                    "resume mode requires every resume exact-GO argument"
+                )
+            if args.out.name == "execution.json":
+                raise PaidPassError(
+                    "resume output must not overwrite failed execution.json"
+                )
+            _assert_resume_go_contract(
+                prepared,
+                authorization_reference=args.authorization_reference,
+                resume_authorization_reference=args.resume_authorization_reference,
+                expected_selection_count=args.expected_selection_count,
+                expected_selection_set_hash=args.expected_selection_set_hash,
+                expected_selected_packet_set_hash=(
+                    args.expected_selected_packet_set_hash
+                ),
+                expected_prompt_hash=args.expected_prompt_hash,
+                expected_repair_prompt_hash=args.expected_repair_prompt_hash,
+                expected_schema_hash=args.expected_schema_hash,
+                expected_original_prior_basis_usd=Decimal(
+                    args.expected_prior_basis_usd
+                ),
+                remaining_authority_usd=Decimal(args.remaining_authority_usd),
+                expected_absolute_authority_usd=Decimal(
+                    args.expected_absolute_authority_usd
+                ),
+                expected_current_basis_usd=Decimal(args.expected_current_basis_usd),
+                expected_resume_baseline_hash=args.expected_resume_baseline_hash,
+            )
+        else:
+            _assert_go_contract(
+                prepared,
+                authorization_reference=args.authorization_reference,
+                expected_selection_count=args.expected_selection_count,
+                expected_selection_set_hash=args.expected_selection_set_hash,
+                expected_prompt_hash=args.expected_prompt_hash,
+                expected_repair_prompt_hash=args.expected_repair_prompt_hash,
+                expected_schema_hash=args.expected_schema_hash,
+                expected_prior_basis_usd=Decimal(args.expected_prior_basis_usd),
+                remaining_authority_usd=Decimal(args.remaining_authority_usd),
+            )
+    with _execution_failure_stage("operational_guard"):
+        settings = get_settings()
+        client = AsyncIOMotorClient(settings.MONGODB_URI)
     try:
-        try:
-            db = client.get_default_database()
-        except Exception:
-            db = client[settings.MONGODB_DATABASE]
-        active_ingests = await db["ingest_batches"].count_documents(
-            {"status": {"$in": ["queued", "running"]}}
-        )
-        running_jobs = await db[JOB_COLLECTION].count_documents({"status": "running"})
-        if active_ingests or running_jobs:
-            raise PaidPassError(
-                "Phase-2 prose execution requires zero active ingests and semantic jobs"
+        with _execution_failure_stage("operational_guard"):
+            try:
+                db = client.get_default_database()
+            except Exception:
+                db = client[settings.MONGODB_DATABASE]
+            active_ingests = await db["ingest_batches"].count_documents(
+                {"status": {"$in": ["queued", "running"]}}
             )
-        canonical_before = await _canonical_store_census(db=db, settings=settings)
-        settings_service.attach(db)
-        api_key = await settings_service.get_plaintext_key_any_user(
-            DEFAULT_CREDENTIAL_PROVIDER
-        )
-        if not api_key:
-            raise PaidPassError("encrypted LongCat credential is not configured")
+            running_jobs = await db[JOB_COLLECTION].count_documents(
+                {"status": "running"}
+            )
+            if active_ingests or running_jobs:
+                raise PaidPassError(
+                    "Phase-2 prose execution requires zero active ingests and "
+                    "semantic jobs"
+                )
+            canonical_before = await _canonical_store_census(db=db, settings=settings)
+        with _execution_failure_stage("credential_guard"):
+            settings_service.attach(db)
+            api_key = await settings_service.get_plaintext_key_any_user(
+                DEFAULT_CREDENTIAL_PROVIDER
+            )
+            if not api_key:
+                raise PaidPassError("encrypted LongCat credential is not configured")
         prior_basis = Decimal(args.expected_prior_basis_usd)
         absolute_authority = (
             ABSOLUTE_AUTHORIZED_CEILING_USD
@@ -1566,74 +1620,78 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
             owner=owner,
             lease_seconds=12 * 60 * 60,
         ) as lease:
-            if not lease:
-                raise PaidPassError("semantic digest paid-pass lane lease is busy")
-            active_ingests = await db["ingest_batches"].count_documents(
-                {"status": {"$in": ["queued", "running"]}}
-            )
-            running_jobs = await db[JOB_COLLECTION].count_documents(
-                {"status": "running"}
-            )
-            if active_ingests or running_jobs:
-                raise PaidPassError("operational state changed after Phase-2 lease")
+            with _execution_failure_stage("lane_lease_guard"):
+                if not lease:
+                    raise PaidPassError("semantic digest paid-pass lane lease is busy")
+            with _execution_failure_stage("operational_guard"):
+                active_ingests = await db["ingest_batches"].count_documents(
+                    {"status": {"$in": ["queued", "running"]}}
+                )
+                running_jobs = await db[JOB_COLLECTION].count_documents(
+                    {"status": "running"}
+                )
+                if active_ingests or running_jobs:
+                    raise PaidPassError("operational state changed after Phase-2 lease")
             resume_control = None
             if is_resume:
-                if any(
-                    (args.checkpoint_dir / f"checkpoint_{count:04d}.json").exists()
-                    for count in range(
-                        _resume_next_checkpoint(RESUME_BASELINE_TERMINAL_COUNT),
-                        len(prepared.selected) + ROLLING_WINDOW,
-                        ROLLING_WINDOW,
+                with _execution_failure_stage("under_lease_baseline_guard"):
+                    if any(
+                        (args.checkpoint_dir / f"checkpoint_{count:04d}.json").exists()
+                        for count in range(
+                            _resume_next_checkpoint(RESUME_BASELINE_TERMINAL_COUNT),
+                            len(prepared.selected) + ROLLING_WINDOW,
+                            ROLLING_WINDOW,
+                        )
+                    ):
+                        raise PaidPassError(
+                            "resume checkpoint namespace already contains a "
+                            "post-baseline receipt"
+                        )
+                    current_rows = await _selection_rows(db, selected=prepared.selected)
+                    current_cumulative = await _cumulative_cost(
+                        db, corpus_id=prepared.receipt["corpus"]["corpus_id"]
                     )
-                ):
-                    raise PaidPassError(
-                        "resume checkpoint namespace already contains a "
-                        "post-baseline receipt"
+                    current_baseline = _resume_baseline_receipt(
+                        current_rows,
+                        selection_set_hash=prepared.receipt["selection"][
+                            "selection_set_hash"
+                        ],
+                        selected_packet_set_hash=prepared.receipt["selection"][
+                            "selected_packet_set_hash"
+                        ],
+                        cumulative_cost=current_cumulative,
+                        max_next_claim_reservation_usd=Decimal(
+                            prepared.receipt["cost_authority"][
+                                "max_next_claim_reservation_usd"
+                            ]
+                        ),
                     )
-                current_rows = await _selection_rows(db, selected=prepared.selected)
-                current_cumulative = await _cumulative_cost(
-                    db, corpus_id=prepared.receipt["corpus"]["corpus_id"]
+                    _assert_exact(
+                        "under-lease resume baseline hash",
+                        current_baseline["baseline_hash"],
+                        args.expected_resume_baseline_hash,
+                    )
+                    if current_baseline["all_green"] is not True:
+                        raise PaidPassError("under-lease resume baseline is not green")
+                    resume_control = ProsePhase2ResumeControl(
+                        baseline_terminal_count=current_baseline["terminal_count"],
+                        baseline_hash=current_baseline["baseline_hash"],
+                    )
+            with _execution_failure_stage("materialization_guard"):
+                planned_counts = await _materialize_jobs(
+                    db,
+                    corpus_id=prepared.receipt["corpus"]["corpus_id"],
+                    planned=prepared.selected,
+                    config=prepared.config,
+                    parameter_card=prepared.parameter_card,
                 )
-                current_baseline = _resume_baseline_receipt(
-                    current_rows,
-                    selection_set_hash=prepared.receipt["selection"][
-                        "selection_set_hash"
-                    ],
-                    selected_packet_set_hash=prepared.receipt["selection"][
-                        "selected_packet_set_hash"
-                    ],
-                    cumulative_cost=current_cumulative,
-                    max_next_claim_reservation_usd=Decimal(
-                        prepared.receipt["cost_authority"][
-                            "max_next_claim_reservation_usd"
-                        ]
-                    ),
+                await _persist_phase_selection(
+                    db,
+                    selected=prepared.selected,
+                    config=prepared.config,
+                    phase=PHASE,
+                    selection_name=SELECTION_NAME,
                 )
-                _assert_exact(
-                    "under-lease resume baseline hash",
-                    current_baseline["baseline_hash"],
-                    args.expected_resume_baseline_hash,
-                )
-                if current_baseline["all_green"] is not True:
-                    raise PaidPassError("under-lease resume baseline is not green")
-                resume_control = ProsePhase2ResumeControl(
-                    baseline_terminal_count=current_baseline["terminal_count"],
-                    baseline_hash=current_baseline["baseline_hash"],
-                )
-            planned_counts = await _materialize_jobs(
-                db,
-                corpus_id=prepared.receipt["corpus"]["corpus_id"],
-                planned=prepared.selected,
-                config=prepared.config,
-                parameter_card=prepared.parameter_card,
-            )
-            await _persist_phase_selection(
-                db,
-                selected=prepared.selected,
-                config=prepared.config,
-                phase=PHASE,
-                selection_name=SELECTION_NAME,
-            )
             receipts, stop_reason, checkpoints, resume_control = await _execute(
                 db,
                 prepared=prepared,
@@ -1805,6 +1863,23 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _failure_receipt(exc: Exception, *, mode: str) -> dict[str, Any]:
+    report = {
+        "schema_version": "polymath.semantic_digest_prose_phase2.failure.v1",
+        "generated_at": _utc_now(),
+        "mode": mode,
+        "error_class": (
+            "PaidPassError"
+            if isinstance(exc, ProsePhase2ExecutionStageError)
+            else type(exc).__name__
+        ),
+        "all_green": False,
+    }
+    if isinstance(exc, ProsePhase2ExecutionStageError):
+        report["error_code"] = exc.error_code
+    return report
+
+
 def main() -> int:
     args = _parser().parse_args()
     if args.mode == "resume" and (
@@ -1822,13 +1897,7 @@ def main() -> int:
     try:
         report = asyncio.run(run(args))
     except Exception as exc:
-        report = {
-            "schema_version": "polymath.semantic_digest_prose_phase2.failure.v1",
-            "generated_at": _utc_now(),
-            "mode": args.mode,
-            "error_class": type(exc).__name__,
-            "all_green": False,
-        }
+        report = _failure_receipt(exc, mode=args.mode)
         _write_json(args.out, report)
         print(json.dumps(report, sort_keys=True))
         return 1
