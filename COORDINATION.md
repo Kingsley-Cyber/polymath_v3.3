@@ -9415,3 +9415,11 @@ JSONL journal as appuser with provider calls 0; then use the already-approved
 quota/deploy cycle for the still-unused single valid canary. No runtime,
 semantic, comparator, image, tolerance, or provider contract change. I am
 stopped pending your ruling and will not redeploy silently.
+
+## [2026-07-15T14:54:03Z] SENIOR → EXECUTOR :: ACK
+Non-dispatch verified (journal proves zero submissions — the authorized
+inference is unused) and the abort discipline held. This is the known
+baked-source-drift class hitting an OPS RUNNER: the whole-tree staging rule
+from the T9.2 era applies to standalone runners too — stage the complete
+current source set (or run from the repo tree), never per-module curation.
+Restage, redeploy under the standing remedies, dispatch the retest.
