@@ -7219,3 +7219,31 @@ about the seal — MaterializationError means the invalid-GO assertion was
 never reached, so the refusal path is unproven. Diagnose the preflight drift
 read-only; the paid dispatch waits until the seal demonstrably trips on
 PaidPassError with a clean state census.
+
+## [2026-07-15T03:56:08Z] EXECUTOR → SENIOR :: RECEIPT
+
+The corrected live invalid-GO seal is now GREEN for the intended reason. The
+first invocation named nonexistent corpus `mark`; the frozen corpus identity
+is `markbuildsbrands_transcripts`. With that invocation corrected, the runner
+rederived the full approved population and stopped on `PaidPassError`, with
+`RUNNER_EXIT=1` and the wrapper's expected-failure `EXIT=0`
+(`/tmp/t9_3_v3_negative_seal_v3.log`). The immediate independent state census
+is true `EXIT=0` and shows `phase_rows=0`, provider-call rows 0, selection rows
+0, lane leases 0, active ingests 0, and running semantic jobs 0
+(`/tmp/t9_3_v3_negative_seal_state_v3.log`). No credential was read and no
+paid call or write occurred. I am completing compile/diff gates, then will
+commit/push this exact runner before using the authorized GO.
+
+## [2026-07-15T03:57:06Z] EXECUTOR → SENIOR :: RECEIPT
+
+Runner static seal complete: host compile, backend canonical compile, worker
+canonical compile, Black, and `git diff --check` are all true `EXIT=0`
+(`/tmp/t9_3_v3_runner_host_compile.log`,
+`/tmp/t9_3_v3_runner_backend_compile_v2.log`,
+`/tmp/t9_3_v3_runner_worker_compile_v2.log`,
+`/tmp/t9_3_v3_runner_black.log`, `/tmp/t9_3_v3_runner_diff.log`). The initial
+two container compile attempts hit only root-owned temporary `__pycache__`
+permissions; redirecting bytecode to fresh `/tmp` prefixes made the same
+source pass without a code change or image rebuild. All runner seal gates are
+now green. I am updating the durable cursor and committing/pushing the exact
+runner before paid execution.

@@ -2,15 +2,15 @@
 
 - Mission: CODEX_MISSION.md (CP2 → CP12)
 - Track: A (core spine)
-- Current task: A4/T9.3 sentence-hybrid v3 canary execution. The strict v3
-  model/builder/validator, deterministic sentence→atomic expansion, frozen
-  selector, and credential-blind live preflight are green. The senior issued
-  exact selected-ten GO at 2026-07-15T03:39:13Z for selection `6aed7b1a...`
-  and hard authority `$0.78260930`; no call has yet been made under that GO.
-- Next task: implement and seal the v3-specific paid runner against the exact
-  preregistered hashes/authority, then execute only the ten authorized packets.
-  Stop on any seal or preregistered bar failure; Phase 2 remains separately
-  gated by canary receipt, three-digest sample, and the owner window.
+- Current task: A4/T9.3 sentence-hybrid v3 canary execution. The v3-specific
+  paid runner now has a complete pure/canonical/static/live negative seal
+  against the senior's exact 2026-07-15T03:39:13Z GO for selection
+  `6aed7b1a...` and hard authority `$0.78260930`. No credential read or paid
+  call has yet been made under that GO.
+- Next task: commit/push the sealed runner, then execute only the ten authorized
+  packets from that commit. Stop on any preregistered bar failure; Phase 2
+  remains separately gated by canary receipt, three-digest sample, and the
+  owner window.
 - Parked: T9.3 Phase 2, the owner sample window, and the five-parent bounded
   tail. Phase 2 is sealed because B4 failed; the prior 727-packet standing GO
   and `$31.1917106` authority are void. Any future paid lane requires the
@@ -28,7 +28,14 @@
   after modular completion + RunPod blue-green parity; this is not approval to
   reingest or mutate the existing ecommerce corpus. Predicate normalization v1
   and ClaimRecordV1 field sets remain owner-ratifiable.
-- Last completed subgate: T9.3 ordered-unit v3 zero-provider preflight green.
+- Last completed subgate: T9.3 ordered-unit v3 paid-runner seal green. Host,
+  backend canonical, and worker canonical focused suites are 43/43; Black,
+  host/backend/worker compile, and diff checks are true `EXIT=0`. A live
+  wrong-authorization replay rederived the exact approved population, stopped
+  on `PaidPassError`, and left 0 v3 rows, provider-call rows, selection rows,
+  or lane leases. Permanent receipt:
+  `docs/T9_3_SENTENCE_HYBRID_V3_RUNNER_SEAL_RECEIPT_2026-07-15.md`.
+  The preceding credential-blind preflight is also green.
   The live population is 793 ready + the same two no-claim-child exclusions,
   with all 30,694 sentences present (24,845 mapped / 5,849 context-only), zero
   drops, max 25,601 bytes, and exactly three packets >20KB. Packet/schema/
@@ -52,4 +59,4 @@
   793+2 parents and finds sentence→atomic mapping coverage 80.944158%; the
   optional-ID ordered-unit shape is p50 13,930 bytes, max 25,613 bytes, with
   maximum-any-ten authority `$0.83486975` under the corrected envelope.
-- Last update: 2026-07-15T03:39:13Z (executor)
+- Last update: 2026-07-15T03:57:06Z (executor)

@@ -59,7 +59,6 @@ from services.ingestion.paid_cost_reservation import (
 from services.semantic_gateway import SemanticGatewayRoute
 from services.settings import settings_service
 
-
 PHASE = "b4_atomic"
 LANE = "semantic_digest_atomic_b4"
 TARGET_COUNT = 10
@@ -160,6 +159,9 @@ def _checkpoint(
     canonical_after: dict[str, Any],
     authorized_ceiling: Decimal,
     stop_reason: str | None,
+    target_count: int = TARGET_COUNT,
+    minimum_accepted_count: int = MIN_ACCEPTED_COUNT,
+    max_read_timeouts: int = MAX_READ_TIMEOUTS,
 ) -> dict[str, Any]:
     terminal = _terminal_rows(rows)
     accepted = sum(row.get("status") == SUCCESS_STATUS for row in terminal)
@@ -167,8 +169,8 @@ def _checkpoint(
     cost = _cost_accounting(terminal)
     canonical = _canonical_store_census_receipt(canonical_before, canonical_after)
     ceiling_green = Decimal(str(cost["ceiling_basis_usd"])) <= authorized_ceiling
-    execution_complete = len(rows) == TARGET_COUNT and len(terminal) == TARGET_COUNT
-    acceptance_green = accepted >= MIN_ACCEPTED_COUNT
+    execution_complete = len(rows) == target_count and len(terminal) == target_count
+    acceptance_green = accepted >= minimum_accepted_count
     execution_green = bool(
         execution_complete
         and acceptance_green
@@ -178,12 +180,12 @@ def _checkpoint(
         and stop_reason is None
     )
     return {
-        "target_count": TARGET_COUNT,
+        "target_count": target_count,
         "row_count": len(rows),
         "terminal_count": len(terminal),
         "accepted_count": accepted,
         "dead_letter_count": dead_lettered,
-        "minimum_accepted_count": MIN_ACCEPTED_COUNT,
+        "minimum_accepted_count": minimum_accepted_count,
         "acceptance_green": acceptance_green,
         "execution_complete": execution_complete,
         "known_actual_cost_usd": cost["known_actual_cost_usd"],
@@ -195,7 +197,7 @@ def _checkpoint(
         "authorized_ceiling_usd": float(authorized_ceiling),
         "ceiling_green": ceiling_green,
         "read_timeout_count": _read_timeout_count(rows),
-        "read_timeout_pause_threshold": MAX_READ_TIMEOUTS,
+        "read_timeout_pause_threshold": max_read_timeouts,
         "canonical_store_census": canonical,
         "stop_reason": stop_reason,
         "summary_faithfulness_review_pending": accepted > 0,
@@ -208,6 +210,8 @@ async def _selection_rows(
     *,
     job_ids: Sequence[str],
     selection_name: str,
+    phase: str = PHASE,
+    lane_label: str = "atomic B4",
 ) -> list[dict[str, Any]]:
     rows = (
         await db[JOB_COLLECTION]
@@ -215,20 +219,20 @@ async def _selection_rows(
             {
                 "job_id": {"$in": list(job_ids)},
                 "phase_selection": selection_name,
-                "phase": PHASE,
+                "phase": phase,
             },
             {"_id": 0},
         )
         .sort("ordinal", 1)
         .to_list(length=None)
     )
-    if len(rows) != TARGET_COUNT:
+    if len(rows) != len(job_ids):
         raise PaidPassError(
-            f"atomic B4 durable row count drifted: expected {TARGET_COUNT}, "
+            f"{lane_label} durable row count drifted: expected {len(job_ids)}, "
             f"found {len(rows)}"
         )
     if {str(row.get("job_id") or "") for row in rows} != set(job_ids):
-        raise PaidPassError("atomic B4 durable selection identity drifted")
+        raise PaidPassError(f"{lane_label} durable selection identity drifted")
     return rows
 
 
@@ -261,10 +265,13 @@ async def _execute_serial(
     price_card: ProviderPriceCard,
     initial_api_key: str,
     authorized_ceiling: Decimal,
+    phase: str = PHASE,
+    runner_prefix: str = "semantic-digest-atomic-b4",
+    lane_label: str = "atomic B4",
 ) -> tuple[list[dict[str, Any]], str | None]:
     job_ids = [row.job_id for row in selected]
     by_job_id = {row.job_id: row for row in selected}
-    runner = f"semantic-digest-atomic-b4:{uuid4().hex}"
+    runner = f"{runner_prefix}:{uuid4().hex}"
     initial_fingerprint = _credential_fingerprint(initial_api_key)
     safe_call_receipts: list[dict[str, Any]] = []
     while True:
@@ -272,6 +279,8 @@ async def _execute_serial(
             db,
             job_ids=job_ids,
             selection_name=selection_name,
+            phase=phase,
+            lane_label=lane_label,
         )
         if _read_timeout_count(rows) >= MAX_READ_TIMEOUTS:
             return safe_call_receipts, "read_timeout_recurrence_pause"
@@ -331,7 +340,7 @@ async def _execute_serial(
             await _mark_cached_success(
                 db,
                 planned=planned,
-                phase=PHASE,
+                phase=phase,
                 accepted_cache=accepted_cache,
             )
             safe_call_receipts.append(
@@ -355,7 +364,7 @@ async def _execute_serial(
             runner=runner,
             increment_attempt=True,
             max_attempts=1,
-            set_fields={"phase": PHASE, "phase_run_id": runner},
+            set_fields={"phase": phase, "phase_run_id": runner},
         )
         if not claimed:
             continue

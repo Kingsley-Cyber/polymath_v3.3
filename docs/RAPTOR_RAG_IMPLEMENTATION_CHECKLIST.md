@@ -3336,6 +3336,40 @@ A corpus is strict-ready only when:
   preflight only. Paid canary, owner sample/window, Phase 2, tail, projection,
   and activation remain open.
 
+### 2026-07-15 - T9.3 sentence-hybrid v3 paid-runner seal
+
+- Commit: this commit on `claude-continuation-20260713`; the runner is committed
+  before any use of the senior's paid GO.
+- Owner: Lane B is owner-selected; the exact selected-ten canary GO is the
+  senior entry at `COORDINATION.md:2026-07-15T03:39:13Z`.
+- Corpus/data scope: read-only rederivation of the frozen mark population and
+  selection. No provider output or canonical store is in this change.
+- Code changes: v3-only serial runner; exact GO/population/provider/authority
+  assertions; shared two-attempt reservation guard; before/after cumulative
+  umbrella checks; phase-parametric reuse of the previously sealed B4 queue
+  helpers; safe failure receipt.
+- Durable migration/backfill: none. The live invalid-GO seal stopped before
+  job materialization and left zero v3 phase rows, calls, selections, or lane
+  leases.
+- Before metrics: approved packet/schema/selection hashes `89ace7ed...` /
+  `5c600d30...` / `6aed7b1a...`; exact ten-packet authority `$0.78260930`.
+- After metrics: no paid outcome yet. The wrong-authorization replay reached
+  the intended `PaidPassError` boundary and its independent state census was
+  all zero.
+- Tests by tier: host/backend/worker 43/43 each; Black, host/backend/worker
+  compile, and diff checks all true `EXIT=0`. Permanent pointer:
+  `docs/T9_3_SENTENCE_HYBRID_V3_RUNNER_SEAL_RECEIPT_2026-07-15.md`.
+- Cross-corpus test: not applicable; noncanonical mark-only paid runner.
+- Failure/rollback test: every GO identity and authority argument, exact and
+  one-quantum-short umbrella boundaries, bad authorization before paid-path
+  settings/credential access, and no-claim-without-reservation are covered.
+- Deployment image/health: no rebuild, restart, deployment, or endpoint
+  mutation. Current source was tested in isolated backend and worker overlays.
+- Remaining risks: the canary result and all-output faithfulness review remain
+  unobserved. Phase 2 remains gated by a green canary, three-digest owner
+  sample, and the 60-minute owner window.
+- Checklist boxes closed: runner seal only; no T9.3 paid completion box closes.
+
 ## Implementation Log Template
 
 Copy this section for every completed item:
