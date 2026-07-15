@@ -7,6 +7,8 @@ import httpx
 import pytest
 
 from scripts.run_runpod_green_lockdown import (
+    REMAINING_CONTROL_NAMES,
+    _persist_case_receipt,
     _submit_and_wait,
     compare_to_reference,
     invalid_requests,
@@ -114,6 +116,10 @@ def test_invalid_cases_are_general_contract_mutations() -> None:
         "contract_version": "polymath.runpod_local_extraction.v1",
         "tasks": [{"source_version_id": "s"}],
     }
+    assert REMAINING_CONTROL_NAMES == (
+        "out_of_registry_label_injection",
+        "bad_source_identity",
+    )
 
 
 def test_refusal_requires_named_fail_closed_code() -> None:
@@ -194,3 +200,95 @@ async def test_unwritable_journal_refuses_before_provider_submission(
                 job_journal=journal_directory,
             )
     assert calls == 0
+
+
+@pytest.mark.asyncio
+async def test_failed_control_requires_failed_status_and_named_refusal(
+    tmp_path,
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST" and request.url.path.endswith("/run"):
+            return httpx.Response(200, json={"id": "control-job-1"})
+        return httpx.Response(
+            200,
+            json={
+                "id": "control-job-1",
+                "status": "FAILED",
+                "output": {
+                    "success": False,
+                    "error_code": "extraction_contract_rejected",
+                },
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        output, receipt = await _submit_and_wait(
+            client,
+            endpoint_id="endpoint-1",
+            api_key="unit-secret",
+            payload={"contract_version": "invalid"},
+            timeout_seconds=10,
+            case_name="malformed_contract",
+            job_journal=tmp_path / "jobs.jsonl",
+            expected_terminal_status="FAILED",
+        )
+
+    assert validate_refusal("malformed_contract", output)["success"] is False
+    assert receipt["provider_status"] == "FAILED"
+
+
+@pytest.mark.asyncio
+async def test_failed_control_rejects_missing_or_wrong_refusal_output(
+    tmp_path,
+) -> None:
+    output_by_job = {
+        "missing-output": None,
+        "wrong-output": {"success": False, "error_code": "wrong_code"},
+    }
+
+    async def submit(job_id: str):
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.method == "POST" and request.url.path.endswith("/run"):
+                return httpx.Response(200, json={"id": job_id})
+            return httpx.Response(
+                200,
+                json={
+                    "id": job_id,
+                    "status": "FAILED",
+                    "output": output_by_job[job_id],
+                },
+            )
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            return await _submit_and_wait(
+                client,
+                endpoint_id="endpoint-1",
+                api_key="unit-secret",
+                payload={"contract_version": "invalid"},
+                timeout_seconds=10,
+                case_name=job_id,
+                job_journal=tmp_path / f"{job_id}.jsonl",
+                expected_terminal_status="FAILED",
+            )
+
+    with pytest.raises(RuntimeError, match="non-object output"):
+        await submit("missing-output")
+    wrong, _ = await submit("wrong-output")
+    with pytest.raises(AssertionError, match="wrong refusal code"):
+        validate_refusal("wrong-output", wrong)
+
+
+def test_case_receipt_is_parseable_and_complete(tmp_path) -> None:
+    output = {"success": False, "error_code": "extraction_contract_rejected"}
+    job = {"job_id": "control-job-1", "provider_status": "FAILED"}
+    path = _persist_case_receipt(
+        tmp_path,
+        case_name="bad_source_identity",
+        output=output,
+        job=job,
+    )
+    assert json.loads(path.read_text()) == {
+        "case": "bad_source_identity",
+        "job": job,
+        "output": output,
+    }

@@ -37,6 +37,10 @@ EXPECTED_SOURCE_CLOSURE_SHA256 = (
 RUNPOD_API_BASE = "https://api.runpod.ai/v2"
 GRAPHQL_URL = "https://api.runpod.io/graphql"
 TERMINAL_FAILURES = {"FAILED", "CANCELLED", "TIMED_OUT"}
+REMAINING_CONTROL_NAMES = (
+    "out_of_registry_label_injection",
+    "bad_source_identity",
+)
 
 ENDPOINT_QUERY = """
 query EndpointState {
@@ -173,7 +177,10 @@ async def _submit_and_wait(
     timeout_seconds: int,
     case_name: str,
     job_journal: Path,
+    expected_terminal_status: str = "COMPLETED",
 ) -> tuple[dict[str, Any], dict[str, Any]]:
+    if expected_terminal_status not in {"COMPLETED", "FAILED"}:
+        raise ValueError("expected terminal status must be COMPLETED or FAILED")
     headers = {"Authorization": f"Bearer {api_key}"}
     started = time.monotonic()
     _persist_job_event(
@@ -226,7 +233,7 @@ async def _submit_and_wait(
         status_response.raise_for_status()
         body = status_response.json()
         status = str(body.get("status") or "").upper()
-        if status == "COMPLETED":
+        if status == "COMPLETED" or status in TERMINAL_FAILURES:
             _persist_job_event(
                 job_journal,
                 {
@@ -239,32 +246,24 @@ async def _submit_and_wait(
                     "execution_time_ms": body.get("executionTime"),
                 },
             )
+            if status != expected_terminal_status:
+                raise RuntimeError(
+                    f"RunPod job_id={job_id} terminated status={status}; "
+                    f"expected={expected_terminal_status}"
+                )
             output = body.get("output")
             if isinstance(output, dict) and isinstance(output.get("output"), dict):
                 output = output["output"]
             if not isinstance(output, dict):
-                raise RuntimeError("RunPod completed with non-object output")
+                raise RuntimeError(f"RunPod status={status} returned non-object output")
             receipt = {
                 "job_id": job_id,
+                "provider_status": status,
                 "delay_time_ms": body.get("delayTime"),
                 "execution_time_ms": body.get("executionTime"),
                 "wall_seconds": round(time.monotonic() - started, 6),
             }
             return output, receipt
-        if status in TERMINAL_FAILURES:
-            _persist_job_event(
-                job_journal,
-                {
-                    "event": "terminal",
-                    "case": case_name,
-                    "endpoint_id": endpoint_id,
-                    "job_id": job_id,
-                    "status": status,
-                    "delay_time_ms": body.get("delayTime"),
-                    "execution_time_ms": body.get("executionTime"),
-                },
-            )
-            raise RuntimeError(f"RunPod job_id={job_id} terminated status={status}")
         await asyncio.sleep(2.0)
 
 
@@ -281,6 +280,41 @@ def _persist_job_event(path: Path, event: dict[str, Any]) -> None:
         handle.write(encoded)
         handle.flush()
         os.fsync(handle.fileno())
+
+
+def _preflight_case_receipt_dir(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+    probe = path / ".write-preflight"
+    with probe.open("w", encoding="utf-8") as handle:
+        handle.write("ok\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    probe.unlink()
+
+
+def _persist_case_receipt(
+    directory: Path,
+    *,
+    case_name: str,
+    output: dict[str, Any],
+    job: dict[str, Any],
+) -> Path:
+    path = directory / f"{case_name}.json"
+    encoded = (
+        json.dumps(
+            {"case": case_name, "job": job, "output": output},
+            ensure_ascii=False,
+            allow_nan=False,
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    )
+    with path.open("w", encoding="utf-8") as handle:
+        handle.write(encoded)
+        handle.flush()
+        os.fsync(handle.fileno())
+    return path
 
 
 def validate_canary(
@@ -448,6 +482,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         raise ValueError("baseline/spec identity mismatch")
     request = build_request(baseline, tasks)
     tolerance = float(spec["comparison"]["confidence_absolute_tolerance"])
+    _preflight_case_receipt_dir(args.case_receipt_dir)
     mongo_client, _, runtime_settings_service = _mongo()
     try:
         accounts = await runtime_settings_service.get_system_runpod_flash_accounts()
@@ -459,20 +494,11 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
             endpoint_id, endpoint, template = await _discover_green(
                 http, api_key, args.green_name
             )
-            live_output, valid_job = await _submit_and_wait(
-                http,
-                endpoint_id=endpoint_id,
-                api_key=api_key,
-                payload=request,
-                timeout_seconds=args.timeout_seconds,
-                case_name="valid_same_chunk",
-                job_journal=args.job_journal,
-            )
-            canary = validate_canary(live_output, tasks)
-            parity = compare_to_reference(baseline["output"], live_output, tolerance)
             refusals = []
-            if args.mode == "canary":
-                for name, invalid in invalid_requests(request).items():
+            if args.mode == "controls-remaining":
+                remaining = invalid_requests(request)
+                for name in REMAINING_CONTROL_NAMES:
+                    invalid = remaining[name]
                     invalid_output, job = await _submit_and_wait(
                         http,
                         endpoint_id=endpoint_id,
@@ -481,38 +507,115 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                         timeout_seconds=300,
                         case_name=name,
                         job_journal=args.job_journal,
+                        expected_terminal_status="FAILED",
+                    )
+                    receipt_path = _persist_case_receipt(
+                        args.case_receipt_dir,
+                        case_name=name,
+                        output=invalid_output,
+                        job=job,
                     )
                     refusals.append(
-                        {**validate_refusal(name, invalid_output), "job": job}
+                        {
+                            **validate_refusal(name, invalid_output),
+                            "job": job,
+                            "receipt_path": str(receipt_path),
+                        }
                     )
-        result = {
-            "schema_version": "polymath.runpod_green_lockdown_receipt.v1",
-            "mode": args.mode,
-            "account": account.name,
-            "endpoint": endpoint,
-            "template": {
-                "id": template.get("id"),
-                "imageName": template.get("imageName"),
-                "containerRegistryAuthId_present": bool(
-                    template.get("containerRegistryAuthId")
-                ),
-            },
-            "spec_sha256": sha256(args.spec),
-            "task_input_sha256": canonical_hash(tasks),
-            "canary": canary,
-            "parity": parity,
-            "valid_job": valid_job,
-            "invalid_refusals": refusals,
-            "live_output_sha256": canonical_hash(_normalized_for_exact(live_output)[0]),
-            "live_output": live_output,
-            "run_mode": {
-                "provider_calls": 0,
-                "database_writes": 0,
-                "graph_writes": 0,
-                "vector_writes": 0,
-            },
-            "secret_values_emitted": 0,
-        }
+                result = {
+                    "schema_version": "polymath.runpod_green_controls_receipt.v1",
+                    "mode": args.mode,
+                    "account": account.name,
+                    "endpoint": endpoint,
+                    "template": {
+                        "id": template.get("id"),
+                        "imageName": template.get("imageName"),
+                        "containerRegistryAuthId_present": bool(
+                            template.get("containerRegistryAuthId")
+                        ),
+                    },
+                    "spec_sha256": sha256(args.spec),
+                    "task_input_sha256": canonical_hash(tasks),
+                    "invalid_refusals": refusals,
+                    "runpod_jobs": len(refusals),
+                    "worker_durable_writes": 0,
+                    "secret_values_emitted": 0,
+                }
+            else:
+                live_output, valid_job = await _submit_and_wait(
+                    http,
+                    endpoint_id=endpoint_id,
+                    api_key=api_key,
+                    payload=request,
+                    timeout_seconds=args.timeout_seconds,
+                    case_name="valid_same_chunk",
+                    job_journal=args.job_journal,
+                )
+                _persist_case_receipt(
+                    args.case_receipt_dir,
+                    case_name="valid_same_chunk",
+                    output=live_output,
+                    job=valid_job,
+                )
+                canary = validate_canary(live_output, tasks)
+                parity = compare_to_reference(
+                    baseline["output"], live_output, tolerance
+                )
+                if args.mode == "canary":
+                    for name, invalid in invalid_requests(request).items():
+                        invalid_output, job = await _submit_and_wait(
+                            http,
+                            endpoint_id=endpoint_id,
+                            api_key=api_key,
+                            payload=invalid,
+                            timeout_seconds=300,
+                            case_name=name,
+                            job_journal=args.job_journal,
+                            expected_terminal_status="FAILED",
+                        )
+                        receipt_path = _persist_case_receipt(
+                            args.case_receipt_dir,
+                            case_name=name,
+                            output=invalid_output,
+                            job=job,
+                        )
+                        refusals.append(
+                            {
+                                **validate_refusal(name, invalid_output),
+                                "job": job,
+                                "receipt_path": str(receipt_path),
+                            }
+                        )
+                result = {
+                    "schema_version": "polymath.runpod_green_lockdown_receipt.v1",
+                    "mode": args.mode,
+                    "account": account.name,
+                    "endpoint": endpoint,
+                    "template": {
+                        "id": template.get("id"),
+                        "imageName": template.get("imageName"),
+                        "containerRegistryAuthId_present": bool(
+                            template.get("containerRegistryAuthId")
+                        ),
+                    },
+                    "spec_sha256": sha256(args.spec),
+                    "task_input_sha256": canonical_hash(tasks),
+                    "canary": canary,
+                    "parity": parity,
+                    "valid_job": valid_job,
+                    "invalid_refusals": refusals,
+                    "live_output_sha256": canonical_hash(
+                        _normalized_for_exact(live_output)[0]
+                    ),
+                    "live_output": live_output,
+                    "run_mode": {
+                        "provider_calls": 0,
+                        "database_writes": 0,
+                        "graph_writes": 0,
+                        "vector_writes": 0,
+                    },
+                    "secret_values_emitted": 0,
+                }
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(
             json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
@@ -527,12 +630,17 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--mode", choices=("canary", "retry"), required=True)
+    parser.add_argument(
+        "--mode",
+        choices=("canary", "retry", "controls-remaining"),
+        required=True,
+    )
     parser.add_argument("--green-name", required=True)
     parser.add_argument("--spec", type=Path, default=DEFAULT_SPEC)
     parser.add_argument("--baseline", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--job-journal", type=Path, required=True)
+    parser.add_argument("--case-receipt-dir", type=Path, required=True)
     parser.add_argument("--timeout-seconds", type=int, default=1800)
     return parser.parse_args()
 

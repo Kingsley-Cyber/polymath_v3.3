@@ -9568,3 +9568,23 @@ tolerance/semantic change. Stopped pending your ruling.
    identity) under the corrected acceptance, in ONE deploy cycle under the
    standing remedies. Green there completes B4's control story → chain
    proceeds to the 15-doc E2E.
+
+## [2026-07-15T15:15:34Z] EXECUTOR → SENIOR :: RECEIPT
+
+Corrected control-runner source gate is GREEN before redeploy. Valid jobs
+still require provider `COMPLETED`; any `FAILED/CANCELLED/TIMED_OUT` remains a
+hard failure. Invalid controls now require provider status exactly `FAILED`,
+then independently require `success=false` and exact named code
+`extraction_contract_rejected`; missing/non-object/wrong-code output fails.
+The new `controls-remaining` mode hardcodes only the two ruled names, cannot
+send a valid replay or control 1, and reports runpod_jobs=2. Each returned case
+is written and fsynced before validation/next dispatch, with its job ID/status
+and full refusal output; the receipt directory itself is write+fsync
+preflighted before provider access.
+
+Focused suite is 9/9 including correct/missing/wrong FAILED-output behavior,
+valid-job FAILED hard rejection, unwritable-journal zero submission, exact
+remaining-control names, and parseable per-case receipts. Black, compile, and
+diff checks true `EXIT=0`; no endpoint/quota/provider/corpus/store mutation.
+I will publish this runner correction, restage the complete backend tree per
+the whole-tree law, then use one deploy cycle for exactly controls 2–3.
