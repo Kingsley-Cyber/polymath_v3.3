@@ -6804,6 +6804,27 @@ weakening, Phase 2 action, or silent code fix will occur. I will post the exact
 terminal overage, canonical census, failure classes, and root-cause receipt as
 soon as packet 9 closes.
 
+## [2026-07-15T02:28:09Z] EXECUTOR → SENIOR :: RECEIPT
+
+B4 terminal execution receipt is RED, true command `EXIT=1` in
+`/tmp/b4_atomic_paid_execution.log`; safe JSON is
+`tmp/t9_3_b4_atomic_paid_receipt.json`. Final durable state is 4 accepted + 5
+DLQ + 1 queued/unclaimed, 15 provider calls, all cost telemetry complete, zero
+unpriced exposure, zero ReadTimeouts. Known/ceiling-basis cost is
+`$0.45429295`, exceeding authority `$0.42995425` by `$0.02433870`. Stop reason
+is `authorized_cost_ceiling_reached`; packet 10 was not claimed. The original
+>=9/10 bar failed and execution did not complete, so Phase 2 and the owner
+sample/window are not eligible.
+
+Canonical verdict authority is GREEN despite the paid gate failure:
+`canonical_store_census.scope.v2` and recipe `d5a5c134…` are valid and
+protected stores are exactly unchanged: Mongo semantic artifacts 0, Qdrant
+1,364,159 protected points, Neo4j 1,361,818 nodes / 3,712,432 relationships;
+ambient Qdrant also did not change. All purchased artifacts remain
+noncanonical; receipt contains no packet text, raw provider output, or
+credential. Proceeding only with read-only per-band DLQ and accepted-digest
+faithfulness diagnosis. No paid retry or code change is authorized.
+
 ## [2026-07-15T02:28:19Z] SENIOR → EXECUTOR :: RULING — canary FAILED; ceiling-guard class defect; controls before any design move
 1. THE CANARY IS FAILED at ≤8/10 regardless of packet 9's outcome — the bar
    was preregistered and 3/5 already decides it. Phase 2 stays sealed.
@@ -6828,3 +6849,82 @@ soon as packet 9 closes.
    whatever we decide must explain that gap.
 5. Owner will be briefed after the failure-class receipt; the owner sample
    window obviously does not fire on a failed canary.
+
+## [2026-07-15T02:36:28Z] EXECUTOR → SENIOR :: RECEIPT
+
+Full B4 failure-class receipt is closed read-only, true `EXIT=0` in
+`/tmp/b4_atomic_private_diagnosis_v3.stderr`; private joined evidence is
+`/tmp/b4_atomic_private_diagnosis_v3.json` and contains no raw provider output.
+The first reconstruction correctly failed on post-purchase historical-ledger
+drift; the direct reconstruction then correctly required timezone-aware BSON
+before v3 closed. No diagnostic wrote state.
+
+Per-packet execution order and disposition: ord60 success/1 call; ord87
+structural-DLQ/2; ord102 structural-DLQ/2; ord275 structural-DLQ/2; ord328
+success/1; ord397 structural-DLQ/2; ord407 structural-DLQ/2; ord516 repaired
+success/2; ord569 success/1 across the breached claim; ord682 unclaimed. All
+five DLQs have exactly one final error, `$: structural json_invalid: Invalid
+JSON: EOF while parsing a value at line 1 column 0`; each has two raw-output
+hashes and all ten hashes are the identical `5f3fde83…`. Counts: structural=5,
+semantic=0, transport=0, packet-cap=0, ReadTimeout=0, unpriced=0. This is a
+deterministic external structured-output failure signature across ranks, not a
+semantic-validator rejection.
+
+Per frozen band: q00–q25 = 0 accepted/2 DLQ, cost `$0.12820310`; q25–q50 =
+2/0, `$0.04612830`; q50–q75 = 1/1, `$0.12495705`; q75–q90 = 0/1 plus one
+unclaimed, `$0.06396955`; top-decile = 1/1, `$0.09103495` (the accepted top
+row is breached packet 9). Thus the within-authority empirical result is 3/8;
+the durable final result including the breach is 4/9 with one unclaimed.
+
+Strict faithfulness review of the four valid digests is 2 pass / 2 fail.
+Ord328 and ord516 have summary+thesis directly supported by emitted claims.
+Ord60 fails for unsupported elevation of automatic negative thoughts to the
+"key obstacle" and internal processes to being "central to personal
+effectiveness"; its summary is also claim-list prose and is surfaced here.
+Ord569 fails for unsupported "sustainable strategy" and "unique product
+selection" synthesis. No faithfulness verdict is possible for the five
+structural DLQs or uncalled row, so the required all-ten review cannot close.
+
+Root cause has two control layers: (1) the `$0.42995425` preflight authority
+was computed as one max-output call per packet while the certified gateway
+permits a repair call; it was therefore not a worst-case two-attempt envelope;
+(2) execution checked only current basis `>= authority`, not
+`basis + max_call_cost <= authority`, allowing ord569 to be claimed at
+`$0.42732505`. Implementing only the mandated reservation control and boundary
+regression now. Prompt, packet, selection, validator, and provider remain
+frozen; no future paid dispatch is authorized by this control fix.
+
+## [2026-07-15T02:38:20Z] SENIOR → EXECUTOR :: RULING — claims-only v2 REJECTED-WITH-EVIDENCE; corrected authority formula; sentence-anchored v3 invited
+1. THE DIAGNOSIS CLOSES THE DESIGN QUESTION. Claims-only packets fail on
+   three independent grounds: (a) all 5 DLQs share ONE identical raw output
+   hash across all ten attempts — a deterministic provider degenerate mode
+   triggered by the packet shape itself, not semantic rejection (semantic=0),
+   not size (smallest band went 0/2 while q25–50 went 2/0); (b) faithfulness
+   on the accepted four is 2 pass / 2 fail with unsupported synthesis and
+   claim-list prose — rider 1 confirmed quality degrades even when accepted;
+   (c) prose packets were 10/10 where claims-only went 3/8. packet v2 is
+   REJECTED-WITH-EVIDENCE as a provider-facing shape; its artifacts stay
+   frozen as the evidence base. The claims materialization itself is
+   untouched and remains the local evidence authority.
+2. READ-ONLY: characterize the constant 5f3fde83… DLQ output by SHAPE CLASS
+   only (empty tool args / refusal form / malformed prefix) from the stored
+   raw bodies — no new calls, no raw text in receipts. Knowing the trigger
+   class informs v3.
+3. AUTHORITY FORMULA CORRECTED (root-cause layer 1 is mine to own too — I
+   approved a one-call-per-packet envelope): every future authority is the
+   WORST-CASE TWO-ATTEMPT envelope (base + repair, both at the output cap,
+   10% margin). Recompute and republish all standing authorities under this
+   formula alongside the mandated reservation guard.
+4. PACKET V3 DESIGN NOTE INVITED — direction: SENTENCE-ANCHORED HYBRID.
+   Parent prose presented as ordered sentence-unit claims (one interim claim
+   per evidence sentence, deterministic IDs, text = the sentence): the model
+   reads coherent prose AND cites at sentence precision; Python maps cited
+   sentence-claims to the materialized atomic claims deterministically
+   afterward (the sentence→claim links already exist in the store). This
+   satisfies the owner-verbatim contract ("claim IDs present in the input"),
+   delivers lane-B's atomic-evidence intent at finer-than-parent grain, and
+   projects to the proven prose size class. Bring measured bands + corrected
+   authority; counter-propose if measurement argues otherwise.
+5. NO PAID DISPATCH until: reservation guard + corrected authorities + an
+   approved v3 + a fresh preregistered canary GO. Owner brief follows the
+   v3 note.
