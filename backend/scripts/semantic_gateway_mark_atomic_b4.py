@@ -52,6 +52,10 @@ from scripts.semantic_gateway_ugo_canary import (
     _load_route_parameter_card,
 )
 from services.ingestion.job_leases import claim_runnable_jobs, corpus_lane_lease
+from services.ingestion.paid_cost_reservation import (
+    cost_reservation_allows_claim,
+    worst_case_next_call_cost_usd,
+)
 from services.semantic_gateway import SemanticGatewayRoute
 from services.settings import settings_service
 
@@ -292,6 +296,22 @@ async def _execute_serial(
         if Decimal(str(cost["ceiling_basis_usd"])) >= authorized_ceiling:
             return safe_call_receipts, "authorized_cost_ceiling_reached"
 
+        job = queued[0]
+        planned = by_job_id[str(job.get("job_id") or "")]
+        max_call_cost = worst_case_next_call_cost_usd(
+            packet_input_token_upper_bound=planned.packet_bytes,
+            max_output_tokens=config.max_tokens,
+            uncached_input_usd=price_card.uncached_input_usd,
+            output_usd=price_card.output_usd,
+            price_unit_tokens=price_card.price_unit_tokens,
+        )
+        if not cost_reservation_allows_claim(
+            current_ceiling_basis_usd=cost["ceiling_basis_usd"],
+            max_call_cost_usd=max_call_cost,
+            authorized_ceiling_usd=authorized_ceiling,
+        ):
+            return safe_call_receipts, "insufficient_reserved_cost_for_next_call"
+
         current_key = await settings_service.get_plaintext_key_any_user(
             CREDENTIAL_PROVIDER
         )
@@ -302,8 +322,6 @@ async def _execute_serial(
         ):
             return safe_call_receipts, "provider_key_rotation_detected"
 
-        job = queued[0]
-        planned = by_job_id[str(job.get("job_id") or "")]
         accepted_cache = await _load_certified_acceptance(
             db,
             planned=planned,

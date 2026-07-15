@@ -106,7 +106,7 @@ def test_cost_authority_uses_packet_bytes_and_route_output_cap() -> None:
     expected_before_margin = (
         (10_000 * 0.75 + 8192 * 2.95) + (20_000 * 0.75 + 8192 * 2.95)
     ) / 1_000_000
-    assert ceiling == round(expected_before_margin * 1.10, 8)
+    assert ceiling == round(expected_before_margin * 2 * 1.10, 8)
 
 
 def test_packet_set_hash_uses_certified_raw_digest_recipe() -> None:

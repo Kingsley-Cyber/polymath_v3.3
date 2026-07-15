@@ -6928,3 +6928,76 @@ frozen; no future paid dispatch is authorized by this control fix.
 5. NO PAID DISPATCH until: reservation guard + corrected authorities + an
    approved v3 + a fresh preregistered canary GO. Owner brief follows the
    v3 note.
+
+## [2026-07-15T02:47:25Z] EXECUTOR → SENIOR :: RECEIPT
+
+The mandatory hard-ceiling control and corrected authority implementation are
+test-green. Both paid runner paths now compute a ceiling-rounded reservation
+for the full durable claim envelope (base + repair, each with packet-byte
+input upper bound and 8,192-token output cap, then 10% margin) before claim;
+the concurrent path reserves cumulatively and submits only its affordable
+prefix. The exact boundary is inclusive, while one USD quantum inside the
+next-call envelope returns `insufficient_reserved_cost_for_next_call` without
+calling `claim_runnable_jobs`. Authority-producing B2/B4 census and preflight
+paths now use the same two-attempt formula.
+
+Host focused/adjacent tests: 57/57, true `EXIT=0` in
+`/tmp/paid_reservation_authority_host_gate.log`. Isolated canonical image:
+57/57, true `EXIT=0` in
+`/tmp/paid_reservation_authority_canonical_gate.log`. Canonical Black, compile,
+and diff checks are each `EXIT=0` in
+`/tmp/paid_reservation_authority_black_gate.log`,
+`/tmp/paid_reservation_authority_compile_gate.log`, and
+`/tmp/paid_reservation_authority_diff_gate.log`. The first host attempt omitted
+the local settings environment and stopped at collection, `EXIT=2` in
+`/tmp/paid_reservation_host_gate.log`; no test body, database, credential, or
+provider path ran, and the corrected invocation loaded values without
+emitting them.
+
+The requested B4 DLQ body-shape classification is also closed read-only, true
+`EXIT=0` in `/tmp/b4_dlq_shape_classification_v2.log`: all 5 DLQ artifacts are
+present; all 10 stored attempts are exactly zero characters / zero UTF-8 bytes
+and classify `empty_tool_arguments`. This rules out refusal text and malformed
+prefixes. The classifier emitted no raw text, made zero provider calls and no
+writes. Its first attempt imported non-baked operator scripts and failed before
+Mongo connection, `EXIT=1` in `/tmp/b4_dlq_shape_classification.log`, then was
+corrected to baked configuration/database services only. Publishing the full
+failure receipt, doubled standing authorities, and sentence-anchored v3 design
+note next. No paid dispatch is authorized or attempted.
+
+## [2026-07-15T02:59:26Z] EXECUTOR → SENIOR :: QUESTION
+
+The full B4 failure receipt and measured v3 design note are ready in
+`docs/T9_3_B4_FAILURE_RECEIPT_2026-07-15.md` and
+`docs/T9_3_SENTENCE_ANCHORED_PACKET_V3_PROPOSAL_2026-07-15.md`. Read-only v3
+measurement is true `EXIT=0` in
+`/tmp/t9_3_sentence_hybrid_v3_measure_v4.log`: 795 eligible, 793 ready, same two
+no-claim-child exclusions, zero calls/writes. It found a material contract gap
+in the invited literal shape: only 24,845 / 30,694 evidence sentences
+(80.944158%) have an existing sentence→atomic-claim mapping; 5,849 do not. A
+claim ID on every sentence would therefore falsely assert that missing map.
+
+Measured packet bytes also reject the literal object-per-sentence draft:
+min/p25/p50/p75/p90/max 3,856/16,799/20,548/22,816/24,668/42,794, with 433/793
+above 20 KB. I counter-propose typed ordered sentence units that retain every
+source sentence as prose but expose the existing deterministic evidence-
+sentence `claim_id` only when its atomic mapping is nonempty; unmapped units
+remain context-only and are absent from validator citation scope. That shape is
+3,435/12,988/13,930/14,685/15,218/25,613 bytes with only three above 20 KB, so
+a frozen 26,000-byte cap covers all 793 without dropping prose. It is smaller
+than proven prose v1 from p25 through p90 and preserves typed JSON; I reject the
+slightly smaller tagged-string alternative because it shifts structure into
+prompt parsing.
+
+Mapping fanout is min/p25/p50/p75/p90/max 1/1/2/4/7/45. The note therefore
+preserves sentence IDs as direct faithfulness citations and records the sorted
+atomic union only as deterministic expansion, never as a claim that one atom
+was uniquely intended. Corrected historical v2 authorities are selected-10
+`$0.85990850`, max-any-10 `$0.86166080`, remaining-727 `$62.38342120`, and
+all-793 `$68.05595984`. Proposed ordered-unit v3 max-any-10 is `$0.83486975`
+and all-793 is `$59.93523899`; these are measurements, not spend authority.
+
+Please rule on the optional-ID ordered-unit contract and 26,000-byte cap. I
+will not implement provider-facing v3 or dispatch anything without approval;
+while review is pending I will park T9.3 after publication and continue the
+next non-paid Track-A work per mission protocol.

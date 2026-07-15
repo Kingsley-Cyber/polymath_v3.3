@@ -15,6 +15,7 @@ import argparse
 import asyncio
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
+from decimal import Decimal
 import hashlib
 import hmac
 import json
@@ -65,6 +66,10 @@ from services.ingestion.job_leases import (  # noqa: E402
     claim_runnable_jobs,
     corpus_lane_lease,
     normalize_failure_class,
+)
+from services.ingestion.paid_cost_reservation import (  # noqa: E402
+    cost_reservation_allows_claim,
+    worst_case_next_call_cost_usd,
 )
 from services.semantic_gateway import (  # noqa: E402
     LiteLLMProxyTransport,
@@ -1664,10 +1669,32 @@ async def _execute_phase(
         if not uncached:
             continue
 
+        reserved_basis = Decimal(str(cumulative_cost["ceiling_basis_usd"]))
+        reserved_jobs: list[dict[str, Any]] = []
+        for job in uncached:
+            planned_row = by_job_id[str(job.get("job_id") or "")]
+            max_call_cost = worst_case_next_call_cost_usd(
+                packet_input_token_upper_bound=planned_row.packet_bytes,
+                max_output_tokens=config.max_tokens,
+                uncached_input_usd=provider_price_card.uncached_input_usd,
+                output_usd=provider_price_card.output_usd,
+                price_unit_tokens=provider_price_card.price_unit_tokens,
+            )
+            if not cost_reservation_allows_claim(
+                current_ceiling_basis_usd=reserved_basis,
+                max_call_cost_usd=max_call_cost,
+                authorized_ceiling_usd=cost_ceiling_usd,
+            ):
+                break
+            reserved_jobs.append(job)
+            reserved_basis += max_call_cost
+        if not reserved_jobs:
+            return safe_receipts, "insufficient_reserved_cost_for_next_call"
+
         claimed = await claim_runnable_jobs(
             db,
             collection_name=JOB_COLLECTION,
-            jobs=uncached,
+            jobs=reserved_jobs,
             runnable_statuses={"queued"},
             runner=runner,
             increment_attempt=True,

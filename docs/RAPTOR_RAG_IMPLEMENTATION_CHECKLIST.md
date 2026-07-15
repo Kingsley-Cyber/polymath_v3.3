@@ -3232,6 +3232,62 @@ A corpus is strict-ready only when:
   execution seal only; paid acceptance, Phase 2, tail, projection, and
   activation remain open.
 
+### 2026-07-15 - T9.3 Lane B B4 failed canary, ceiling control, and v3 proposal
+
+- Commit: this commit on `claude-continuation-20260713`.
+- Owner: B4 used the exact senior GO at 2026-07-15T01:31:30Z. The senior
+  classified the canary failed, rejected claims-only v2 with evidence, mandated
+  the universal reservation/two-attempt authority control, and invited a
+  sentence-anchored v3 note. No new paid GO exists.
+- Corpus/data scope: frozen mark ten-row selection from 793 packet-ready
+  parents. Purchased artifacts remain noncanonical; two no-claim-child parents
+  remain excluded. No corpus, projection, or retrieval state was changed.
+- Code changes: added shared ceiling-rounded two-attempt cost authority and
+  per-claim reservation. Both serial and concurrent paid paths reserve before
+  claim; concurrent claims are limited to the cumulatively affordable prefix.
+  B2/B4 authority producers use the same formula. Exact-boundary, one-quantum-
+  inside, fail-closed inputs, and runner-does-not-claim regressions are present.
+- Durable migration/backfill: none. The canary wrote only its durable
+  noncanonical job/cache/DLQ evidence. Control and design measurements made no
+  database writes.
+- Before metrics: B4 authority `$0.42995425`, acceptance bar >=9/10, ten queued
+  packets, protected stores Mongo semantic 0 / Qdrant 1,364,159 / Neo4j
+  1,361,818 nodes and 3,712,432 relationships.
+- After metrics: 4 accepted, 5 DLQ, 1 queued/unclaimed, 15 calls, known cost
+  `$0.45429295`; exact ceiling overage `$0.02433870`. Protected and ambient
+  canonical census is exactly unchanged. Within-authority acceptance was 3/8;
+  final durable acceptance 4/9; strict faithfulness 2/4.
+- Tests by tier: host and isolated canonical focused/adjacent suites 57/57;
+  canonical Black, compile, and diff checks all true `EXIT=0`. Exact pointers
+  are `/tmp/paid_reservation_authority_host_gate.log`,
+  `/tmp/paid_reservation_authority_canonical_gate.log`,
+  `/tmp/paid_reservation_authority_black_gate.log`,
+  `/tmp/paid_reservation_authority_compile_gate.log`, and
+  `/tmp/paid_reservation_authority_diff_gate.log`.
+- Cross-corpus test: not applicable; no retrieval behavior or shared live
+  projection changed. The reservation helper is corpus-agnostic and is wired
+  into both paid mark execution paths.
+- Failure/rollback test: all five DLQs are structural EOF failures. Read-only
+  raw-body classification proves all ten attempts are zero-byte
+  `empty_tool_arguments`; semantic/transport/cap/unpriced counts are zero.
+  The boundary regression proves no durable claim when basis is within one
+  reserved envelope of authority. Additive code can be reverted; purchased
+  evidence is retained and never rewritten.
+- Deployment image/health: no rebuild, deploy, restart, or endpoint mutation.
+  Isolated tests used the canonical image and read-only source mount. No key or
+  raw provider text was printed, moved, or committed.
+- Remaining risks: claims-only v2 is rejected; Phase 2 and owner sample window
+  are sealed. The measured v3 note finds only 80.944158% of evidence sentences
+  have atomic mappings and counter-proposes ordered units with optional claim
+  IDs. Senior/owner must approve the contract and 26,000-byte cap; any future
+  canary requires pure tests, live zero-provider preflight, corrected exact
+  selected authority, and a fresh GO.
+- Artifacts: `docs/T9_3_B4_FAILURE_RECEIPT_2026-07-15.md` and
+  `docs/T9_3_SENTENCE_ANCHORED_PACKET_V3_PROPOSAL_2026-07-15.md`.
+- Checklist boxes closed: B4 execution and diagnosis are closed as **failed**;
+  the universal ceiling control is implemented/tested. T9.3 paid completion,
+  Phase 2, tail, canonical projection, and activation remain open.
+
 ## Implementation Log Template
 
 Copy this section for every completed item:

@@ -56,6 +56,7 @@ from services.ingestion.semantic_digest_claim_inputs import (
     document_source_version_id,
     validate_materialized_row_against_source,
 )
+from services.ingestion.paid_cost_reservation import worst_case_authority_usd
 from services.semantic_gateway import (
     SemanticGatewayConfig,
     semantic_digest_prompt_hash,
@@ -226,12 +227,16 @@ def _cost_upper_bound(
     price_unit: int,
     max_output_tokens: int,
 ) -> float:
-    before_margin = sum(
-        (row.packet_bytes * uncached_input_rate + max_output_tokens * output_rate)
-        / price_unit
-        for row in rows
+    return float(
+        worst_case_authority_usd(
+            packet_input_token_upper_bounds=[row.packet_bytes for row in rows],
+            max_output_tokens=max_output_tokens,
+            uncached_input_usd=uncached_input_rate,
+            output_usd=output_rate,
+            price_unit_tokens=price_unit,
+            safety_margin=COST_MARGIN,
+        )
     )
-    return round(before_margin * COST_MARGIN, 8)
 
 
 def _packet_population_set_hash(

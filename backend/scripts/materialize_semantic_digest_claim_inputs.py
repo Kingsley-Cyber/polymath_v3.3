@@ -46,6 +46,7 @@ from services.ingestion.semantic_parent_eligibility import (
     classify_parent_text_v2,
     parent_eligibility_recipe_hash,
 )
+from services.ingestion.paid_cost_reservation import worst_case_authority_usd
 from services.settings import settings_service
 from scripts.semantic_gateway_ugo_canary import (
     _canonical_store_census,
@@ -919,13 +920,21 @@ async def _packet_census(args: argparse.Namespace) -> dict[str, Any]:
         input_rate = float(price["uncached_input_usd"])
         output_rate = float(price["output_usd"])
         output_cap = int(parameters["max_tokens"])
-        per_packet_upper = [
-            (size * input_rate + output_cap * output_rate) / unit
-            for size in packet_bytes
-        ]
-        max_any_ten = sum(sorted(per_packet_upper, reverse=True)[:10])
-        b4_authority_ceiling = max_any_ten * 1.10
-        all_ready_ceiling = sum(per_packet_upper) * 1.10
+        largest_ten_packet_bounds = sorted(packet_bytes, reverse=True)[:10]
+        b4_authority_ceiling = worst_case_authority_usd(
+            packet_input_token_upper_bounds=largest_ten_packet_bounds,
+            max_output_tokens=output_cap,
+            uncached_input_usd=input_rate,
+            output_usd=output_rate,
+            price_unit_tokens=unit,
+        )
+        all_ready_ceiling = worst_case_authority_usd(
+            packet_input_token_upper_bounds=packet_bytes,
+            max_output_tokens=output_cap,
+            uncached_input_usd=input_rate,
+            output_usd=output_rate,
+            price_unit_tokens=unit,
+        )
 
         receipt = _receipt_base("packet-census", scope, corpus_name=args.corpus_name)
         receipt.update(
@@ -985,10 +994,10 @@ async def _packet_census(args: argparse.Namespace) -> dict[str, Any]:
                     "output_usd_per_million": output_rate,
                     "max_any_10_packet_cost_before_margin_usd": round(max_any_ten, 8),
                     "b4_10_packet_authority_ceiling_usd": round(
-                        b4_authority_ceiling, 8
+                        float(b4_authority_ceiling), 8
                     ),
                     "all_packet_ready_authority_ceiling_usd": round(
-                        all_ready_ceiling, 8
+                        float(all_ready_ceiling), 8
                     ),
                     "old_fixed_0_04_assumption_used": False,
                 },

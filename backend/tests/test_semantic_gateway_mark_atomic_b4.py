@@ -182,3 +182,37 @@ def test_two_read_timeouts_are_the_exact_pause_threshold() -> None:
         {"transport_error_class": "ConnectTimeout"},
     ]
     assert runner._read_timeout_count(rows) == runner.MAX_READ_TIMEOUTS
+
+
+@pytest.mark.asyncio
+async def test_execute_serial_never_claims_without_two_attempt_reservation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    planned = SimpleNamespace(job_id="job:one", packet_bytes=20_000, ordinal=1)
+
+    async def selection_rows(*args: object, **kwargs: object) -> list[dict[str, str]]:
+        return [{"job_id": planned.job_id, "status": "queued"}]
+
+    async def forbidden_claim(*args: object, **kwargs: object) -> list[object]:
+        raise AssertionError("claim_runnable_jobs must not be called")
+
+    monkeypatch.setattr(runner, "_selection_rows", selection_rows)
+    monkeypatch.setattr(runner, "claim_runnable_jobs", forbidden_claim)
+
+    receipts, stop_reason = await runner._execute_serial(
+        object(),
+        corpus_id="corpus:mark",
+        selected=[planned],
+        selection_name="test-boundary",
+        config=SimpleNamespace(max_tokens=8_192),
+        price_card=SimpleNamespace(
+            uncached_input_usd=Decimal("0.75"),
+            output_usd=Decimal("2.95"),
+            price_unit_tokens=1_000_000,
+        ),
+        initial_api_key="not-read-at-this-boundary",
+        authorized_ceiling=Decimal("0.08616607"),
+    )
+
+    assert receipts == []
+    assert stop_reason == "insufficient_reserved_cost_for_next_call"
