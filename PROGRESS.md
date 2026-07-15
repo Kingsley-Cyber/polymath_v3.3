@@ -3,15 +3,15 @@
 - Mission: CODEX_MISSION.md (CP2 → CP12)
 - Track: A4/T9.3 paid lane owner-blocked; continuing non-paid Track-A/E1 work
   while the owner rules on the provider-shape options.
-- Current task: A4/T9.3 sentence-hybrid v3 canary is terminal **failed and
-  diagnosed**: 2/10 accepted, 8 structural DLQ, 19 calls, `$0.55765220`, no
-  timeouts, authority/umbrella held, and canonical stores unchanged. Strict
-  faithfulness is 2/2 for accepted outputs. Phase 2 is parked.
-- Next task: commit/push the terminal failure package, then restore and audit
-  the parked T9.4 deterministic engine-parity slice from `stash@{0}` against
-  current HEAD and resume its non-paid module/test gates. Do not run a paid
-  provider lane, live projection, rebuild, or activation while the T9.3 owner
-  decision is pending.
+- Current task: T9.4 current-field lexicon-projector parity implementation is
+  GREEN and receipt-ready. Cloud, local, legacy-local/RTX, and RunPod strict
+  candidate labels with the same semantic payload produce field-identical
+  current document/corpus projections; backend and worker canonical suites are
+  each 30/30. No live row, provider, image, or readiness surface changed.
+- Next task: commit/push this bounded T9.4 slice after the senior receipt
+  window, then continue the next pre-authorized zero-provider E1 module. Do
+  not run a paid provider lane, live projection, rebuild, or activation while
+  the T9.3 owner decision is pending.
 - Parked: T9.3 Phase 2, the owner sample window, and the five-parent bounded
   tail. Phase 2 is sealed because ordered-unit v3 achieved 2/10 against the
   >=9/10 bar; the prior 727-packet standing GO and `$31.1917106` authority are
@@ -19,10 +19,10 @@
   fresh exact GO. The green-only three-digest sample/window did not open
   because only two accepted digests exist. The tail remains after a future
   corpus-wide certified acceptance of at least 95%.
-  T9.4's pinned deployment, actual PoC-pair engine comparison, 100/500/5,000
-  gates, live readiness wiring, full lexicon-projector parity, and production
-  stamp remain open under the senior's production boundary. Ecom reingest/
-  extraction remains separately owner-gated.
+  T9.4's pinned deployment, actual PoC-pair engine comparison, future
+  P2.1/P2.2 projector fields, 100/500/5,000 gates, retry safety, live readiness
+  wiring, and production stamp remain open under the senior's production
+  boundary. Ecom reingest/extraction remains separately owner-gated.
 - Owner decisions received: owner selected Lane B (fix-then-buy) after the
   zero-spend sample exposed 8/66 bare headings and whole-parent evidence. Owner
   also authorized a later full E2E on ~15 deterministic files from
@@ -30,7 +30,15 @@
   after modular completion + RunPod blue-green parity; this is not approval to
   reingest or mutate the existing ecommerce corpus. Predicate normalization v1
   and ClaimRecordV1 field sets remain owner-ratifiable.
-- Last completed subgate: T9.3 ordered-unit v3 canary execution/diagnosis
+- Last completed subgate: T9.4 current-field shared-projector parity is GREEN.
+  Host focused tests are 2/2; backend and ingest-worker canonical overlays are
+  each 30/30 with 7 existing warnings; scoped Black, host/backend/worker
+  compile, engine-blind scope audit, and diff checks are true `EXIT=0`.
+  Invalid ownership, duplicate/missing chunks, stale source, contract drift,
+  and failed artifacts reject. Permanent receipt:
+  `docs/T9_4_CURRENT_FIELD_LEXICON_PROJECTOR_RECEIPT_2026-07-15.md`. This is
+  pure same-input parity, not a live engine-output or production-readiness
+  claim. The preceding T9.3 ordered-unit v3 canary execution/diagnosis
   closed **failed**. Terminal closure is 2 accepted / 8 structural DLQ, 19
   calls, `$0.55765220`, 0 ReadTimeouts, complete accounting, and exact
   canonical/ambient invariance. Fourteen of sixteen failed bodies are empty;
@@ -62,4 +70,4 @@
   793+2 parents and finds sentence→atomic mapping coverage 80.944158%; the
   optional-ID ordered-unit shape is p50 13,930 bytes, max 25,613 bytes, with
   maximum-any-ten authority `$0.83486975` under the corrected envelope.
-- Last update: 2026-07-15T04:57:01Z (executor)
+- Last update: 2026-07-15T05:12:52Z (executor)

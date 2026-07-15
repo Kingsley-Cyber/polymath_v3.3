@@ -1497,10 +1497,19 @@ Acceptance:
 - [x] Keep deterministic alias/definition rules in shared backend validation.
   *(T9.4 adapters ignore provider aliases/definitions and recompute through
   `services.ingestion.enrich`.)*
-- [ ] Run the same post-extraction lexicon projector (co-occurrence, usage
+- [x] Run the same post-extraction lexicon projector (co-occurrence, usage
   frames, semantic profile, DF/specificity, and representation admission) for
   cloud, local, RTX, and RunPod artifacts so provider choice cannot change the
-  query-translation contract.
+  query-translation contract. *(T9.4 current-field implementation: strict
+  candidate artifacts from cloud, local, legacy-local/RTX, and RunPod enter
+  one compatibility adapter and the existing engine-blind document/corpus
+  projector. Same-input synthetic parity is field-identical after removing
+  only `updated_at`; ownership, duplicate/missing chunks, contract/source
+  drift, and failed artifacts reject. This closes the shared-projector
+  implementation for fields that exist now, not a claim that the planned
+  P2.1/P2.2 usage-frame/semantic-profile/DF fields already exist. Those future
+  fields must land only in this projector; actual engine-output/corpus-scale
+  parity remains open under P2.7.)*
 
 ### P2.7 RunPod Production Validation
 
@@ -3408,6 +3417,52 @@ A corpus is strict-ready only when:
 - Checklist boxes closed: v3 canary execution/diagnosis closes **failed**.
   Phase 2, tail, owner sample/window, projection, and activation remain open or
   parked; no T9.3 paid-completion box closes.
+
+### 2026-07-15 - T9.4 current-field lexicon-projector parity
+
+- Commit: this commit on `claude-continuation-20260713`.
+- Owner: non-paid Track-A/E1 continuation under the senior's standing mission
+  directive; no live/paid production authority is consumed.
+- Corpus/data scope: pure synthetic same-document candidate artifacts only.
+  No UGO, mark, ecommerce, or v2 row was read or written.
+- Code changes: added one candidate-artifact compatibility adapter and an
+  optional explicit-artifact input to the existing document projector. The
+  legacy `ghost_b_extractions` path is unchanged when the new input is absent;
+  engine/runtime/model provenance never branches projector behavior.
+- Durable migration/backfill: none. No artifact, lexicon source, lexicon row,
+  vector, graph edge, readiness row, job, or manifest was persisted.
+- Before metrics: strict candidates and the existing lexicon projector had no
+  direct pure seam proving all four candidate engine labels used the same
+  query-translation projection.
+- After metrics: cloud, local, legacy-local/RTX, and RunPod artifacts carrying
+  the same semantic payload produce field-identical document sources and
+  materialized current fields after excluding only nondeterministic
+  `updated_at`. Covered outputs include co-occurrence, parent-derived
+  contextual usage, source-backed factual relations, retrieval gloss, and
+  representation eligibility.
+- Tests by tier: host focused 2/2; final backend canonical 30/30 and worker
+  canonical 30/30, each with 7 existing Pydantic namespace warnings; scoped
+  Black, host/backend/worker compile, engine-blind audit, and diff checks all
+  true `EXIT=0`. Permanent receipt:
+  `docs/T9_4_CURRENT_FIELD_LEXICON_PROJECTOR_RECEIPT_2026-07-15.md`.
+- Cross-corpus test: intentionally not run. This proves projector
+  engine-blindness for equal strict inputs, not empirical equality of outputs
+  produced by different engines on the PoC pair.
+- Failure/rollback test: wrong document ownership, duplicate or absent chunks,
+  stale source text, shared-contract drift, and failed artifacts reject before
+  projection. Rollback removes additive code/tests only; durable rollback is
+  unnecessary.
+- Deployment image/health: no rebuild, restart, deploy, endpoint call, or
+  production stamp. Exact working-tree bytes passed isolated overlays of both
+  healthy canonical containers.
+- Remaining risks: the host Pydantic 2.13.4 venv derives a different generated
+  JSON-schema hash than deployed Pydantic 2.5.0, so canonical runtime pinning
+  remains material. Actual engine-output comparison, future P2.1/P2.2 fields,
+  pinned endpoint, 100/500/5,000 gates, retry safety, readiness wiring, and
+  production acceptance remain open.
+- Checklist boxes closed: P2.6 shared-projector implementation for all fields
+  that exist now. P2.7 live/corpus-scale parity and every production gate stay
+  open.
 
 ## Implementation Log Template
 

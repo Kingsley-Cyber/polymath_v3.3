@@ -3,6 +3,10 @@ from __future__ import annotations
 import pytest
 
 from services.ingestion import corpus_lexicon
+from services.ingestion.extraction_artifacts import (
+    adapt_extraction_failure,
+    adapt_extraction_result,
+)
 from services.ingestion.corpus_lexicon import (
     LEXICON_SCHEMA_VERSION,
     build_document_lexicon_sources,
@@ -80,6 +84,210 @@ def _entity(name, *, surface=None, aliases=None, definition="", confidence=0.98)
         "query_aliases": aliases or [],
         "definitional_phrase": definition,
     }
+
+
+def _candidate_artifact(engine: str, *, text: str):
+    return adapt_extraction_result(
+        {
+            "schema_version": "polymath.extract.v1",
+            "corpus_id": "c1",
+            "doc_id": "d1",
+            "chunk_id": "chunk-1",
+            "text": text,
+            "entities": [
+                {
+                    "canonical_name": "Facial Action Coding System",
+                    "surface_form": "Facial Action Coding System",
+                    "entity_type": "Concept",
+                    "confidence": 0.98,
+                },
+                {
+                    "canonical_name": "Action Unit 12",
+                    "surface_form": "Action Unit 12",
+                    "entity_type": "Concept",
+                    "confidence": 0.95,
+                },
+            ],
+            "relations": [
+                {
+                    "subject": "Facial Action Coding System",
+                    "predicate": "uses",
+                    "object": "Action Unit 12",
+                    "object_kind": "entity",
+                    "confidence": 0.9,
+                    "evidence_phrase": text,
+                    "relation_cue": "uses",
+                    "validation_status": "accepted",
+                }
+            ],
+            "facts": [],
+            "model": f"{engine}-model",
+            "attempts": 1,
+        },
+        engine=engine,
+        engine_runtime_version=f"{engine}-runtime.1",
+        source_wire_contract_version=f"{engine}-wire.1",
+        source_contract_hash="sha256:source-contract",
+        model_id=f"{engine}-model",
+    )
+
+
+@pytest.mark.asyncio
+async def test_all_candidate_engines_share_the_exact_lexicon_projector() -> None:
+    text = "Facial Action Coding System (FACS) uses Action Unit 12."
+    db = _Db(
+        {
+            "chunks": _Collection(
+                [
+                    {
+                        "corpus_id": "c1",
+                        "doc_id": "d1",
+                        "chunk_id": "chunk-1",
+                        "parent_id": "parent-1",
+                        "text": text,
+                        "heading_path": ["Facial Performance"],
+                    }
+                ]
+            ),
+            "parent_chunks": _Collection(
+                [
+                    {
+                        "corpus_id": "c1",
+                        "doc_id": "d1",
+                        "parent_id": "parent-1",
+                        "central_claim": (
+                            "Facial Action Coding System connects facial movement "
+                            "to reproducible action units."
+                        ),
+                        "main_mechanism": (
+                            "Observers code visible muscle actions as numbered units."
+                        ),
+                        "retrieval_uses": [
+                            "Use action units to compare facial performances."
+                        ],
+                        "quality_score": 0.96,
+                        "validation_status": "valid",
+                    }
+                ]
+            ),
+        }
+    )
+    projected = []
+    for engine in ("cloud", "local", "legacy_local", "runpod_flash"):
+        sources = await build_document_lexicon_sources(
+            db,
+            corpus_id="c1",
+            doc_id="d1",
+            candidate_artifacts=[_candidate_artifact(engine, text=text)],
+        )
+        projected.append(
+            [
+                {key: value for key, value in row.items() if key != "updated_at"}
+                for row in sources
+            ]
+        )
+
+    assert projected[1:] == [projected[0], projected[0], projected[0]]
+    entries = materialize_entries(projected[0], "c1")
+    by_key = {row["canonical_key"]: row for row in entries}
+    assert by_key["facial action coding system"]["cooccurrence_neighbors"]
+    assert any(
+        item["method"] == "parent_retrieval_use"
+        for item in by_key["facial action coding system"]["contextual_usages"]
+    )
+    assert any(
+        relation["evidence_phrase"] == text
+        for relation in by_key["facial action coding system"]["factual_relations"]
+    )
+    assert by_key["facial action coding system"]["retrieval_gloss"]
+    assert by_key["facial action coding system"]["retrieval_eligible"] is True
+
+
+@pytest.mark.asyncio
+async def test_candidate_lexicon_projection_fails_closed_on_invalid_scope() -> None:
+    text = "Facial Action Coding System uses Action Unit 12."
+    db = _Db(
+        {
+            "chunks": _Collection(
+                [
+                    {
+                        "corpus_id": "c1",
+                        "doc_id": "d1",
+                        "chunk_id": "chunk-1",
+                        "parent_id": "parent-1",
+                        "text": text,
+                    }
+                ]
+            ),
+            "parent_chunks": _Collection([]),
+        }
+    )
+    artifact = _candidate_artifact("runpod_flash", text=text)
+    stale = _candidate_artifact("runpod_flash", text="Different source text.")
+    wrong_owner = artifact.model_copy(update={"doc_id": "d2"})
+    missing_chunk = artifact.model_copy(update={"chunk_id": "chunk-missing"})
+    drifted_provenance = artifact.provenance.model_copy(
+        update={"shared_contract_hash": "sha256:drifted"}
+    )
+    drifted_contract = artifact.model_copy(update={"provenance": drifted_provenance})
+    failure = adapt_extraction_failure(
+        {
+            "corpus_id": "c1",
+            "doc_id": "d1",
+            "chunk_id": "chunk-1",
+            "error_type": "TimeoutError",
+            "error_message": "timeout",
+        },
+        engine="runpod_flash",
+        engine_runtime_version="runpod-runtime.1",
+        source_wire_contract_version="runpod-wire.1",
+        source_contract_hash="sha256:source-contract",
+        source_text=text,
+        model_id="runpod-model",
+    )
+
+    with pytest.raises(ValueError, match="duplicate chunk"):
+        await build_document_lexicon_sources(
+            db,
+            corpus_id="c1",
+            doc_id="d1",
+            candidate_artifacts=[artifact, artifact],
+        )
+    with pytest.raises(ValueError, match="ownership escapes"):
+        await build_document_lexicon_sources(
+            db,
+            corpus_id="c1",
+            doc_id="d1",
+            candidate_artifacts=[wrong_owner],
+        )
+    with pytest.raises(ValueError, match="contract hash drifted"):
+        await build_document_lexicon_sources(
+            db,
+            corpus_id="c1",
+            doc_id="d1",
+            candidate_artifacts=[drifted_contract],
+        )
+    with pytest.raises(ValueError, match="chunk is absent"):
+        await build_document_lexicon_sources(
+            db,
+            corpus_id="c1",
+            doc_id="d1",
+            candidate_artifacts=[missing_chunk],
+        )
+    with pytest.raises(ValueError, match="source text is stale"):
+        await build_document_lexicon_sources(
+            db,
+            corpus_id="c1",
+            doc_id="d1",
+            candidate_artifacts=[stale],
+        )
+    with pytest.raises(ValueError, match="only candidate"):
+        await build_document_lexicon_sources(
+            db,
+            corpus_id="c1",
+            doc_id="d1",
+            candidate_artifacts=[failure],
+        )
 
 
 def test_alias_cleaning_preserves_real_acronyms_and_rejects_noise():

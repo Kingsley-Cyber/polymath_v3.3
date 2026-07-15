@@ -32,6 +32,14 @@ from typing import Any, Iterable
 
 from pymongo import ReplaceOne, UpdateOne
 
+from models.extraction_artifact import (
+    CANDIDATE_EXTRACTION_SCHEMA_HASH,
+    CandidateExtractionArtifact,
+)
+from services.ingestion.extraction_artifacts import (
+    candidate_artifact_to_lexicon_row,
+)
+
 logger = logging.getLogger(__name__)
 
 LEXICON_SCHEMA_VERSION = "corpus_lexicon.v3"
@@ -850,25 +858,43 @@ async def build_document_lexicon_sources(
     *,
     corpus_id: str,
     doc_id: str,
+    candidate_artifacts: Iterable[CandidateExtractionArtifact] | None = None,
 ) -> list[dict[str, Any]]:
-    """Build document contributions from extraction and durable chunk text."""
+    """Build contributions through one projector for every extraction engine."""
 
-    rows = (
-        await db["ghost_b_extractions"]
-        .find(
-            {"corpus_id": corpus_id, "doc_id": doc_id, "status": "ok"},
-            {
-                "_id": 0,
-                "chunk_id": 1,
-                "chunk_hash": 1,
-                "extraction_contract_hash": 1,
-                "entities": 1,
-                "relations": 1,
-                "facts": 1,
-            },
+    artifacts = list(candidate_artifacts) if candidate_artifacts is not None else None
+    if artifacts is None:
+        rows = (
+            await db["ghost_b_extractions"]
+            .find(
+                {"corpus_id": corpus_id, "doc_id": doc_id, "status": "ok"},
+                {
+                    "_id": 0,
+                    "chunk_id": 1,
+                    "chunk_hash": 1,
+                    "extraction_contract_hash": 1,
+                    "entities": 1,
+                    "relations": 1,
+                    "facts": 1,
+                },
+            )
+            .to_list(length=None)
         )
-        .to_list(length=None)
-    )
+    else:
+        if any(
+            artifact.corpus_id != corpus_id or artifact.doc_id != doc_id
+            for artifact in artifacts
+        ):
+            raise ValueError("candidate artifact ownership escapes document scope")
+        chunk_ids = [artifact.chunk_id for artifact in artifacts]
+        if len(chunk_ids) != len(set(chunk_ids)):
+            raise ValueError("candidate artifacts contain duplicate chunk identities")
+        if any(
+            artifact.provenance.shared_contract_hash != CANDIDATE_EXTRACTION_SCHEMA_HASH
+            for artifact in artifacts
+        ):
+            raise ValueError("candidate artifact shared contract hash drifted")
+        rows = [candidate_artifact_to_lexicon_row(artifact) for artifact in artifacts]
     if not rows:
         return []
 
@@ -889,6 +915,19 @@ async def build_document_lexicon_sources(
             },
         )
     }
+    if artifacts is not None:
+        for artifact in artifacts:
+            context = chunk_context.get(artifact.chunk_id)
+            if context is None:
+                raise ValueError("candidate artifact chunk is absent from the document")
+            current_hash = (
+                "sha256:"
+                + hashlib.sha256(
+                    str(context.get("text") or "").encode("utf-8")
+                ).hexdigest()
+            )
+            if artifact.source_text_sha256 != current_hash:
+                raise ValueError("candidate artifact source text is stale")
     parent_ids = {
         str(context.get("parent_id") or "")
         for context in chunk_context.values()

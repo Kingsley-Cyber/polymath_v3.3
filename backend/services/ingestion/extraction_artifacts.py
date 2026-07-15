@@ -393,6 +393,58 @@ def adapt_extraction_result(
     )
 
 
+def candidate_artifact_to_lexicon_row(
+    artifact: CandidateExtractionArtifact,
+) -> dict[str, Any]:
+    """Adapt one accepted candidate into the existing lexicon projector input.
+
+    This is a compatibility boundary, not a second vocabulary implementation.
+    Shared aliases and definitions have already been deterministically
+    recomputed by :func:`adapt_extraction_result`; relation/fact evidence is
+    copied only from exact evidence references carried by the strict artifact.
+    """
+
+    if artifact.artifact_status != "candidate":
+        raise ValueError("only candidate extraction artifacts can feed the lexicon")
+    if artifact.provenance.shared_contract_hash != CANDIDATE_EXTRACTION_SCHEMA_HASH:
+        raise ValueError("candidate extraction shared contract hash drifted")
+
+    evidence_by_id = {item.evidence_id: item for item in artifact.evidence}
+
+    def exact_evidence_text(evidence_ids: list[str]) -> str:
+        for evidence_id in evidence_ids:
+            evidence = evidence_by_id.get(evidence_id)
+            if evidence is not None and evidence.method == "exact_source_substring":
+                return evidence.text
+        return ""
+
+    return {
+        "corpus_id": artifact.corpus_id,
+        "doc_id": artifact.doc_id,
+        "status": "ok",
+        "chunk_id": artifact.chunk_id,
+        "chunk_hash": artifact.source_text_sha256,
+        "extraction_contract_hash": artifact.provenance.shared_contract_hash,
+        "entities": [item.model_dump(mode="python") for item in artifact.entities],
+        "relations": [
+            {
+                **item.model_dump(mode="python"),
+                "evidence_phrase": exact_evidence_text(item.evidence_ids),
+            }
+            for item in artifact.relations
+        ],
+        "facts": [
+            {
+                **item.model_dump(mode="python"),
+                "evidence_phrase": exact_evidence_text(item.evidence_ids),
+            }
+            for item in artifact.facts
+        ],
+        "candidate_artifact_id": artifact.artifact_id,
+        "candidate_engine": artifact.provenance.engine,
+    }
+
+
 def adapt_extraction_failure(
     failure: Any,
     *,
