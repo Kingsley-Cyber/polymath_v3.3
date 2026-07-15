@@ -7323,3 +7323,59 @@ DURABLE parent identities + frozen source revisions; never rerun a live
 selector to reproduce history (selectors advance — that is their contract).
 Deliver faithfulness on the two accepted and the cross-shape table; the owner
 brief follows on your numbers.
+
+## [2026-07-15T04:57:01Z] EXECUTOR → SENIOR :: RECEIPT
+
+Correction/refinement after exact context reconstruction: my `7/8 failed jobs
+have only empty bodies` line was wrong; the exact count is **6/8** pure
+empty+empty jobs. Across all 16 failed attempts, 14 are zero-byte empty and 2
+are **structurally valid, nonempty JSON that fails semantic citation
+validation**, not invalid JSON: ordinal 479's repair has 4 unknown claim-ID
+references; ordinal 576's initial output has 75 unknown claim-ID references.
+The other attempt in each mixed job is empty. Thus the dominant degenerate
+family conclusion stands, but the exact signature is 14 empty + 2 semantically
+invalid citation sets.
+
+Strict accepted-output faithfulness is **2/2 PASS**. Ordinal 218's summary and
+thesis are directly supported by 28 citable sentence units (six-step VSSL
+process, Operator/ChatGPT research, brief/avatar preparation, writing becoming
+simple after correct preparation); ordinal 287's are directly supported by 49
+citable units (safety-net removal, age-19 near-eviction, necessity over
+motivation, consequence inflection, reps/action over analysis paralysis).
+Every supported proposal/condition/exception reference is in the citable set:
+40 references / 18 unique for 218 and 61 / 26 unique for 287, with **0 unknown
+or context-only citations**; each packet had 7 uncitable context-only units.
+No unsupported synthesis was found, and the second digest preserves its
+pressure-personality condition/exception rather than presenting the advice as
+unqualified.
+
+Owner decision table: interim prose `10/10`; claims-only structured `3/8`
+within authority; ordered-unit structured `2/10`. The read-only reconstruction
+matches selection `6aed7b1a...`, made zero calls/writes, and is true `EXIT=0`;
+receipt SHA-256 `598ecbb7ae1e18ab82e57d0a9032fc1fb43de59ee08b0cc053821bd0721ae12b`
+(`/tmp/t9_3_v3_postflight_extract_v3.json`). The green-only three-digest owner
+sample is not produced because only two digests exist and the canary is red.
+T9.3 Phase 2 remains parked.
+
+## [2026-07-15T04:58:22Z] SENIOR → OWNER :: DECISION REQUESTED — digest-purchase path for mark's remaining ~728 parents
+Cross-shape empirical table (all receipts on file):
+· interim PROSE packets — 10/10 accepted, owner-sample-rated coherent
+· claims-only structured — 3/8 within authority, quality degraded
+· ordered-unit structured — 2/10, but those 2 are the best digests produced
+  (precise sentence citations, zero unsupported synthesis)
+Provider verdict: LongCat digests PROSE reliably and collapses to zero-byte
+refusals on structured packet families ~80% of the time. External limit,
+prompt-independent, twice-diagnosed.
+OPTIONS:
+A (senior recommendation) — buy the remaining ~728 under the PROVEN prose
+  contract (fresh 10-packet prose canary ~$0.26 first, then phase 2;
+  realistic total ~$19). Model evidence stays parent-level; ATOMIC evidence
+  attaches deterministically at activation from the locally materialized
+  84,586-claim store (already built, free). All lane-B quality fixes
+  survive: junk filter, faithfulness criteria, local claims.
+B — probe a second provider for structured packets (e.g. DeepSeek v4-pro
+  Tier 3): small probe cost, unknown outcome, delays the buy; can also be
+  done LATER independently of A.
+C — park all digest purchases; proceed to E1 refactor / E2E program now.
+Awaiting owner words: "option A" / "option B" / "option C" (or any variant).
+T9.3 stays parked until then; non-paid Track A/E1 work continues meanwhile.
