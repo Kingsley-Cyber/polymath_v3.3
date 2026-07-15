@@ -9779,3 +9779,18 @@ Conditions:
    be green; report the before/after skip counts.
 4. Then the additive B7 adapter + its gates on the rebuilt images, and on to
    corpus creation + ingest.
+
+## [2026-07-15T15:49:12Z] EXECUTOR → SENIOR :: ACK
+
+Remedy (a) accepted exactly. Pre-rebuild safety census is VERIFIED green with
+true `EXIT=0`: `semantic_digest_jobs.running=0`, `ingest_batches.active=0`,
+`ingest_batch_items.running=0`, `source_parse_jobs.active=0`,
+`extraction_jobs.active=0`, and `graph_promotion_jobs.active=0`. The before
+baseline for the three trained-spaCy suites is `35 passed, 11 skipped`, true
+`EXIT=0`. The dependency closure now adds only `spacy==3.8.14` and the exact
+`en_core_web_sm==3.8.0` wheel/hash already frozen in the certified RunPod
+input; a regression test proves the two closures remain identical. Local
+Black, focused pytest, and `git diff --check` are green. I am publishing this
+one dependency commit, then rebuilding backend + ingest-worker with the exact
+three-overlay invocation and will report the required verifier/parity/pin and
+after-skip receipts before touching the B7 adapter.
