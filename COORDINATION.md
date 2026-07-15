@@ -6120,3 +6120,98 @@ shape. Rulings:
    readers will hit the same naive-decode when they consume this collection
    at activation — add one line to the activation checklist so tz-aware
    decoding is part of the consumer contract, not a rediscovery.
+
+## [2026-07-15T00:13:11Z] EXECUTOR → SENIOR :: ACK
+
+All four ruling points are implemented before rerun. The import now requires
+and atomically persists a count-only BEFORE-census file under `/tmp` before
+its first write; host 14/14 and canonical 13 passed / 1 expected spaCy skip
+prove both persistence and the tz-aware strict codec boundary, true `EXIT=0`
+in `/tmp/b2_before_census_host.log` and
+`/tmp/b2_before_census_canonical.log`. The activation checklist now explicitly
+bars default naive BSON decoding for every future consumer of this collection.
+Black is green across all 12 B1/B2 files (`/tmp/b2_black_check_v2.log`,
+`EXIT=0`), and post-format B1/B2 suites are host 46/46 and canonical 35 passed
+/ 11 expected skips, both true `EXIT=0`. Starting the ruled same-SHA/run-id
+reuse rerun with a host-mounted crash-surviving BEFORE receipt; expected
+0 inserted / 3,493 reused remains a hard gate.
+
+## [2026-07-15T00:17:23Z] EXECUTOR → SENIOR :: RECEIPT
+
+B2 canonical import reuse rerun GREEN, true `EXIT=0` in
+`/tmp/b2_claim_import_v2.log`. Same input SHA and run ID validated all 3,493
+rows before the mutation boundary, then reported exactly 0 inserted / 3,493
+reused via immutable `$setOnInsert`; streamed readback source/ownership/hash/
+evidence/envelope validation passed 3,493/3,493. Condition A closes at 3,493
+total = 3,493 `canonical_write:false` + 0 unsafe-flag rows before and after.
+Provider calls, canonical writes, and writes were all 0 on the reuse rerun.
+
+The crash-surviving BEFORE census was persisted before reuse at 2,003 bytes,
+SHA-256 `cae5df8524154f8374f380558b2c7b1e2077653ce642c49eb8ee420b2b35af83`;
+independent hash receipt `/tmp/b2_import_before_hash.log` is true `EXIT=0`.
+Protected scope v2 is valid and exactly unchanged before/after: Mongo
+`semantic_artifacts` 0; protected Qdrant 1,364,159 points with every per-
+collection count equal; Neo4j 1,361,818 nodes / 3,712,432 relationships.
+The most recent Phase-1C v2 postflight baseline
+`/tmp/t93_mark_phase1c_census_v2_reeval.log` has those same four protected
+values. Ambient `hermes_memories` is visibly 617 now versus 609 at 1C, but is
+unchanged across this rerun and has no verdict authority under the approved
+scope-v2 recipe. Compensation for the lost first-run pre-write snapshot is
+therefore explicit, not reconstructed: prior 1C protected values match; B2's
+export boundary was 0 compilation rows; the failed import's immediate census
+was 3,493 safe noncanonical rows; and static import code has no Qdrant,
+Neo4j, `semantic_artifacts`, projection, or provider write path. Proceeding to
+the read-only full 795-parent atomic packet census; no provider work begins.
+
+## [2026-07-15T00:19:12Z] EXECUTOR → SENIOR :: RECEIPT
+
+B2 full atomic-parent packet census GREEN and read-only, true `EXIT=0` in
+`/tmp/b2_packet_census_v1.log`: all 795/795 approved parents are packet-ready,
+with no fallback and therefore no exclusion reasons to hide. There are 795
+unique packet hashes. The explicit contract is
+`semantic_parent_packet.atomic_claims.v1`; prompt remains unchanged v6;
+`claims_interim=false`; quotes deduplicate only by exact evidence ID. Packet
+claims p0/p50/p95/p100 = 8/109/136/283; evidence rows = 3/35/48/107; bytes =
+22,347/301,642/360,251/549,701; total bytes 233,125,078. Condition A remains
+3,493 total/noncanonical, 0 unsafe flags. Writes/calls/canonical writes=0.
+
+Condition C is now measured rather than inherited: using published LongCat
+rates, route max output 8,192, deliberately conservative one-input-token-per-
+UTF8-byte, and 10% margin, max-any-10 authority is `$3.73343328`; all-ready
+authority is `$213.46170615`. The prior fixed `$0.04` assumption is explicitly
+false. These are authority ceilings, not predicted spend. I am adding one
+aggregate packet-set replay hash and rerunning in a fresh process to close
+cross-process parity, then closing the frozen historical ledger and adjacent
+no-drift gates. No provider call is authorized or begun.
+
+## [2026-07-15T00:21:27Z] SENIOR → EXECUTOR :: RULING — STOP before B4: packet contract must be BOUNDED first (design note required)
+Census accepted, and the measurement is the finding: atomic packets at
+p50=301,642 / p95=360,251 / max=549,701 bytes are ~20× the canaried size
+class (interim p50 15.4KB, canaried max 21.5KB). Three consequences:
+1. THE $213 ALL-READY AUTHORITY CROSSES THE $200 OWNER-PARK LINE — phase 2
+   cannot fire under this packet contract without owner sign-off even if
+   everything else were green.
+2. WORSE THAN COST: 300–550KB prompts are a different reliability regime
+   from anything canaried — context-limit risk on the tail, attention
+   dilution on claim citation, and a larger semantic-validation surface (the
+   phase-1 kill class) on proposal-rich outputs. Money is the smaller risk.
+3. THE DESIGN CAUSE IS VISIBLE: packets embed all ~109 claims AND 30,880
+   evidence-quote bodies. The model needs claim TEXTS to reason and claim
+   IDs to cite — it does not need the exact quote bodies, which live in the
+   noncanonical store where PYTHON validates citations after generation.
+DIRECTIVE — atomic packet v2 design note BEFORE any B4 call:
+a. Carry claim IDs + canonical claim texts (+ minimal typed/polarity flags);
+   DROP evidence-quote bodies from the packet (evidence IDs only). Python-
+   side citation validation is unchanged — it never depended on the model
+   echoing quotes.
+b. If p95 still exceeds the canaried class after (a), propose a deterministic
+   salience/coverage cap with named rules — never random truncation — and
+   count what a cap excludes.
+c. Publish projected byte/claim bands + the same conservative cost authority
+   for v2; target the canaried size class (justify the bound you pick).
+d. B4's 10-packet canary then runs on v2 packets; the ≥9/10 bar and measured-
+   ceiling restatement stand. v1 atomic packets remain a frozen, unused
+   contract version — nothing is deleted.
+The claims materialization itself (84,586 rows, deterministic, imported) is
+untouched and remains the foundation; this is a packet PROJECTION change
+only.
