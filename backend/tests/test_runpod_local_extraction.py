@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 
 import httpx
@@ -354,6 +355,209 @@ async def test_remote_identity_or_span_drift_fails_closed(
             accounts=[(_account("primary", "blue-primary"), "key-primary")],
             return_report=True,
         )
+
+
+@pytest.mark.asyncio
+async def test_normalization_empty_noise_is_counted_and_excluded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_submit(_client, *, request, **_kwargs):
+        output = _remote_output(request)
+        output["results"][0]["extraction"]["entities"] = [
+            {
+                "mention_id": "mention:punctuation-noise",
+                "text": ".",
+                "entity_type": "CONCEPT",
+                "start_char": 15,
+                "end_char": 16,
+                "canonical_label": "",
+                "confidence": 0.9,
+            }
+        ]
+        output["results"][0]["mention_selection_counts"] = {
+            "raw": 1,
+            "selected": 1,
+        }
+        return output
+
+    monkeypatch.setattr(runpod_local_extraction, "_submit_and_wait", fake_submit)
+    report = await runpod_local_extraction.extract_entities(
+        [_task()],
+        endpoint_id="greenendpoint",
+        account_name="primary",
+        runpod_config=_config(),
+        accounts=[(_account("primary", "blue-primary"), "key-primary")],
+        return_report=True,
+    )
+
+    assert report.results[0].entities == []
+    assert report.results[0].local_extraction["entities"] == []
+    assert report.results[0].provider_card["mention_selection_counts"] == {
+        "empty_canonical_label": 1,
+        "raw": 1,
+        "selected": 0,
+    }
+    assert report.metrics["mention_exclusion_counts"] == {
+        "empty_canonical_label": 1
+    }
+
+
+@pytest.mark.asyncio
+async def test_empty_canonical_non_noise_surface_still_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_submit(_client, *, request, **_kwargs):
+        output = _remote_output(request)
+        output["results"][0]["extraction"]["entities"][0]["canonical_label"] = ""
+        return output
+
+    monkeypatch.setattr(runpod_local_extraction, "_submit_and_wait", fake_submit)
+    with pytest.raises(RuntimeError, match="non-noise surface"):
+        await runpod_local_extraction.extract_entities(
+            [_task()],
+            endpoint_id="greenendpoint",
+            account_name="primary",
+            runpod_config=_config(),
+            accounts=[(_account("primary", "blue-primary"), "key-primary")],
+            return_report=True,
+        )
+
+
+@pytest.mark.asyncio
+async def test_retry_reuses_retained_completed_output_without_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    task = _task()
+    task_row = runpod_local_extraction._task_dict(task)
+    request = runpod_local_extraction._request([task_row])
+    journal_path = tmp_path / (
+        "corpus-" + hashlib.sha256(task.corpus_id.encode()).hexdigest() + ".jsonl"
+    )
+    journal_path.write_text(
+        "\n".join(
+            json.dumps(row)
+            for row in (
+                {
+                    "event": "submitted",
+                    "batch_id": request["batch_id"],
+                    "job_id": "job-retained",
+                    "endpoint_id": "greenendpoint",
+                    "account_name": "primary",
+                },
+                {
+                    "event": "terminal",
+                    "status": "COMPLETED",
+                    "batch_id": request["batch_id"],
+                    "job_id": "job-retained",
+                    "endpoint_id": "greenendpoint",
+                    "account_name": "primary",
+                },
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    dispatched = False
+
+    async def forbidden_submit(*_args, **_kwargs):
+        nonlocal dispatched
+        dispatched = True
+        raise AssertionError("retry created a new provider job")
+
+    monkeypatch.setattr(runpod_local_extraction, "_submit_and_wait", forbidden_submit)
+    retained_output = _remote_output(request)
+    retained_output.pop("_runpod_job")
+
+    def handler(http_request: httpx.Request) -> httpx.Response:
+        assert http_request.url.path.endswith("/status/job-retained")
+        return httpx.Response(
+            200,
+            json={
+                "status": "COMPLETED",
+                "output": retained_output,
+                "delayTime": 11,
+                "executionTime": 22,
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        report = await runpod_local_extraction.extract_entities(
+            [task],
+            endpoint_id="greenendpoint",
+            account_name="primary",
+            runpod_config=_config(),
+            accounts=[(_account("primary", "blue-primary"), "key-primary")],
+            http_client=client,
+            job_journal_dir=str(tmp_path),
+            return_report=True,
+        )
+
+    assert dispatched is False
+    assert report.metrics["reused_request_batches"] == 1
+    assert report.metrics["new_request_batches"] == 0
+    assert report.metrics["remote_jobs"][0]["job_id"] == "job-retained"
+    assert report.metrics["remote_jobs"][0]["reused"] is True
+    rows = [json.loads(line) for line in journal_path.read_text().splitlines()]
+    assert rows[-1]["event"] == "reused_terminal_output"
+
+
+@pytest.mark.asyncio
+async def test_partial_reusable_closure_refuses_before_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    tasks = [_task(suffix="0"), _task(suffix="1")]
+    config = _config().model_copy(update={"request_batch_size": 1})
+    first_request = runpod_local_extraction._request(
+        [runpod_local_extraction._task_dict(tasks[0])]
+    )
+    journal_path = tmp_path / (
+        "corpus-" + hashlib.sha256(tasks[0].corpus_id.encode()).hexdigest() + ".jsonl"
+    )
+    journal_path.write_text(
+        "\n".join(
+            json.dumps(row)
+            for row in (
+                {
+                    "event": "submitted",
+                    "batch_id": first_request["batch_id"],
+                    "job_id": "job-retained",
+                    "endpoint_id": "greenendpoint",
+                    "account_name": "primary",
+                },
+                {
+                    "event": "terminal",
+                    "status": "COMPLETED",
+                    "batch_id": first_request["batch_id"],
+                    "job_id": "job-retained",
+                    "endpoint_id": "greenendpoint",
+                    "account_name": "primary",
+                },
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    dispatched = False
+
+    async def forbidden_submit(*_args, **_kwargs):
+        nonlocal dispatched
+        dispatched = True
+        raise AssertionError("partial replay reached provider dispatch")
+
+    monkeypatch.setattr(runpod_local_extraction, "_submit_and_wait", forbidden_submit)
+    with pytest.raises(RuntimeError, match="closure is partial"):
+        await runpod_local_extraction.extract_entities(
+            tasks,
+            endpoint_id="greenendpoint",
+            account_name="primary",
+            runpod_config=config,
+            accounts=[(_account("primary", "blue-primary"), "key-primary")],
+            job_journal_dir=str(tmp_path),
+            return_report=True,
+        )
+    assert dispatched is False
 
 
 @pytest.mark.asyncio

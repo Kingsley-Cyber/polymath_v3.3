@@ -10482,6 +10482,84 @@ is to finish the test — fix narrowly and resume. Rulings:
    after the fix is sealed (focused tests + both-container parity on the
    changed compiler surface).
 4. E2E continues to completion afterward — same ceilings, same laws. If the
-   diagnosis reveals a DIFFERENT class than empty-noise (e.g., a legitimate
-   entity losing its label to a canonicalization bug), STOP and report — that
-   would be a deeper contract defect deserving its own ruling.
+diagnosis reveals a DIFFERENT class than empty-noise (e.g., a legitimate
+entity losing its label to a canonicalization bug), STOP and report — that
+would be a deeper contract defect deserving its own ruling.
+
+## [2026-07-15T21:02:38Z] EXECUTOR → SENIOR :: RECEIPT
+
+The fail-closed operational stop is VERIFIED green. Immediately before stop,
+item 4 had reached local `embedding`; all its remote work had settled, making
+the journal exactly 200 submitted = 200 terminal `COMPLETED`, zero outstanding,
+primary/secondary 101/99, 603.773 worker-seconds, conservative RunPod cost
+`$0.280754445`. The offline worker then stopped with command true `EXIT=0`
+(container exit 137 after the one-second bounded stop). Because the product has
+no standalone batch-cancel surface, a fail-closed launch-state-bound operator
+preserved the one failed and two done items, changed only the one running plus
+eleven queued items to durable `cancelled_red_gate`, and set the one fresh
+batch `cancelled`; operator true `EXIT=0`, secret values emitted 0. No remote
+job was orphaned or cancelled, and no existing corpus was touched.
+
+## [2026-07-15T21:02:38Z] EXECUTOR → SENIOR :: ACK
+
+Narrow-fix ruling received. I will confirm the offending surface is the ruled
+empty-after-normalization noise class, implement counted mention-level
+exclusion with invariant/goldens, prove paid-result reuse and zero retry
+dispatch, seal focused tests plus both-container parity, then requeue only this
+fresh batch's failed/cancelled items and continue under the unchanged ceilings.
+
+## [2026-07-15T21:07:49Z] EXECUTOR → SENIOR :: RECEIPT
+
+Read-only retained-output diagnosis confirms exactly the ruled class, true
+`EXIT=0`: all 200 journaled completed jobs remained queryable; failed item 3
+resolved by durable document ID to 66 outputs / 2,096 child results / 14,613
+entity proposals. Exactly one proposal had an empty canonical label. Its
+surface shape is one Unicode `Po` punctuation code point, length 1, zero
+letters/numbers; the source span round-trips exactly, confidence/type remain
+valid, and the same locked normalizer deterministically produces empty. No raw
+text, key, or secret was emitted. This is normalization-empty non-alphanumeric
+noise, not legitimate entity content lost by canonicalization.
+
+## [2026-07-15T21:07:49Z] EXECUTOR → SENIOR :: RECEIPT
+
+The narrow local-boundary fix is focused-test green: `19 passed`, true
+`EXIT=0`. It excludes only canonical-empty surfaces that independently
+normalize empty and contain no alphanumeric character; non-noise surfaces
+with empty canonicals still fail closed. The exclusion is counted as
+`empty_canonical_label`, decrements selected closure, and is surfaced per
+result and in batch metrics. A deterministic journal replay seam resolves an
+exactly-one submitted+COMPLETED job for the same batch/account/endpoint and
+reads its retained output by status without POST; the golden proves dispatch
+is never called and records `reused_terminal_output`. Proceeding to adjacent
+tests, canonical rebuild, and both-container parity before durable requeue.
+
+## [2026-07-15T21:09:10Z] EXECUTOR → SENIOR :: RECEIPT
+
+Narrow-fix adjacent gate is VERIFIED green on the valid invocation: `265
+passed, 1 deselected`, true `EXIT=0`, covering both RunPod adapters, Ghost B
+staging, durable batches, worker phases, idempotency, resource planning,
+summary ceilings, chunking, and universal schema. The first invocation was
+RED (`265 passed, 1 failed`, `EXIT=1`) solely because the temporary copied-test
+command omitted the suite's standing `not integration` selector and therefore
+ran the explicitly opt-in live Ollama integration smoke; no product edit
+followed. The identical suite rerun with `-m "not integration"` is the valid
+gate. Proceeding to the authoritative overlay rebuild while the E2E remains
+durably cancelled and all provider jobs terminal.
+
+## [2026-07-15T21:13:38Z] EXECUTOR → SENIOR :: RECEIPT
+
+Narrow-fix deploy seal is VERIFIED green. The authoritative three-overlay
+backend+offline-worker rebuild returned true `EXIT=0`; runtime verification
+returned true `EXIT=0` with live MLX dimension 1024. Final SHA-256 is identical
+across host/backend/worker:
+`31d26f56e4732d2071390baa8c1e159fde97baf1f9bd44a21c33b7d2ab9fcf5b`.
+Docker-copied focused tests pass `20/20` in backend and `20/20` in worker,
+each true `EXIT=0`. The added golden proves all-or-none retained-job closure:
+if even one slice matches a paid completed job while another does not, the
+entire call refuses before dispatch. Two harness attempts are explicitly
+invalid and uncounted: an awk-escaping error produced three empty hashes that
+compared equal (`EXIT=0`, rejected as empty success), and a candidate-stage
+mkdir ran on the host instead of the container so one test loaded the old
+deployed module (`19 passed, 1 failed`, `EXIT=1`); neither changed product or
+provider state. The corrected nonempty hash gate and rebuilt-container suites
+above are the valid receipts.

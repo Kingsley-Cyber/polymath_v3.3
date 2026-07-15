@@ -16,6 +16,7 @@ import hashlib
 import json
 import os
 import time
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -39,7 +40,12 @@ from services.ingestion.semantic_observations import (
     build_spacy_observation_bundle,
     compile_local_extraction_v1,
 )
-from services.runpod_flash_extraction import _submit_and_wait
+from services.runpod_flash_extraction import (
+    RUNPOD_API_BASE,
+    _extract_output,
+    _retry_delay,
+    _submit_and_wait,
+)
 
 
 CONTRACT_VERSION = "polymath.runpod_local_extraction.v1"
@@ -162,6 +168,91 @@ def _persist_job_event(path: Path, event: dict[str, Any]) -> None:
             os.fsync(handle.fileno())
         finally:
             fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def _reusable_completed_job(
+    path: Path,
+    *,
+    batch_id: str,
+    endpoint_id: str,
+    account_name: str,
+) -> str | None:
+    """Resolve exactly one retained completed job for a deterministic slice."""
+
+    if not path.exists():
+        return None
+    submitted: set[str] = set()
+    completed: set[str] = set()
+    with path.open("r", encoding="utf-8") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_SH)
+        try:
+            for line in handle:
+                if not line.strip():
+                    continue
+                row = json.loads(line)
+                if (
+                    row.get("batch_id") != batch_id
+                    or row.get("endpoint_id") != endpoint_id
+                    or row.get("account_name") != account_name
+                ):
+                    continue
+                job_id = str(row.get("job_id") or "")
+                if not job_id:
+                    raise RuntimeError(
+                        "LocalExtractionV1 reusable journal identity is empty"
+                    )
+                if row.get("event") == "submitted":
+                    submitted.add(job_id)
+                elif (
+                    row.get("event") == "terminal"
+                    and row.get("status") == "COMPLETED"
+                ):
+                    completed.add(job_id)
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    candidates = submitted & completed
+    if not candidates:
+        return None
+    if len(candidates) != 1:
+        raise RuntimeError(
+            "LocalExtractionV1 reusable completed job did not resolve exactly once"
+        )
+    return next(iter(candidates))
+
+
+async def _load_reusable_completed_output(
+    client: httpx.AsyncClient,
+    *,
+    endpoint_id: str,
+    api_key: str,
+    job_id: str,
+) -> dict[str, Any]:
+    """Read a retained terminal output without creating a provider job."""
+
+    response: httpx.Response | None = None
+    headers = {"Authorization": f"Bearer {api_key}"}
+    for attempt in range(3):
+        response = await client.get(
+            f"{RUNPOD_API_BASE}/{endpoint_id}/status/{job_id}",
+            headers=headers,
+        )
+        if response.status_code < 500 and response.status_code != 429:
+            break
+        if attempt < 2:
+            await asyncio.sleep(_retry_delay(response, attempt))
+    assert response is not None
+    response.raise_for_status()
+    body = response.json()
+    if str(body.get("status") or "").upper() != "COMPLETED":
+        raise RuntimeError("LocalExtractionV1 reusable job is no longer completed")
+    output = _extract_output(body)
+    output["_runpod_job"] = {
+        "job_id": job_id,
+        "delay_time_ms": body.get("delayTime"),
+        "execution_time_ms": body.get("executionTime"),
+        "reused": True,
+    }
+    return output
 
 
 def _journal_path(
@@ -391,11 +482,43 @@ def _compile_result(
         raise RuntimeError("LocalExtractionV1 extraction ownership mismatch")
     if extraction.relations:
         raise RuntimeError("LocalExtractionV1 relation lane must remain empty")
+    counts = raw.get("mention_selection_counts")
+    if (
+        not isinstance(counts, dict)
+        or any(type(key) is not str for key in counts)
+        or any(type(value) is not int or value < 0 for value in counts.values())
+    ):
+        raise RuntimeError("LocalExtractionV1 mention-selection accounting drifted")
+    mention_counts = dict(counts)
+    accepted_entities = []
+    empty_canonical_count = 0
     for entity in extraction.entities:
         if not entity.canonical_label.strip():
-            raise RuntimeError("LocalExtractionV1 entity canonical label is empty")
+            from services.ingestion.gliner_mentions import normalize_mention_name
+
+            if normalize_mention_name(entity.text) or any(
+                character.isalnum() for character in entity.text
+            ):
+                raise RuntimeError(
+                    "LocalExtractionV1 canonical label is empty for a non-noise surface"
+                )
+            empty_canonical_count += 1
+        else:
+            accepted_entities.append(entity)
         if task["text"][entity.start_char : entity.end_char] != entity.text:
             raise RuntimeError("LocalExtractionV1 entity span failed source round trip")
+    if empty_canonical_count:
+        selected = mention_counts.get("selected")
+        if selected is not None:
+            if selected < empty_canonical_count:
+                raise RuntimeError(
+                    "LocalExtractionV1 empty-canonical exclusion accounting drifted"
+                )
+            mention_counts["selected"] = selected - empty_canonical_count
+        mention_counts["empty_canonical_label"] = (
+            mention_counts.get("empty_canonical_label", 0) + empty_canonical_count
+        )
+        extraction = extraction.model_copy(update={"entities": accepted_entities})
     for predicate in extraction.predicates:
         if (
             task["text"][predicate.start_char : predicate.end_char]
@@ -425,13 +548,6 @@ def _compile_result(
         raise RuntimeError("LocalExtractionV1 remote/local spaCy compilation drifted")
     if raw.get("compilation_receipt") != local_compile.receipt():
         raise RuntimeError("LocalExtractionV1 compilation receipt drifted")
-    counts = raw.get("mention_selection_counts")
-    if (
-        not isinstance(counts, dict)
-        or any(type(key) is not str for key in counts)
-        or any(type(value) is not int or value < 0 for value in counts.values())
-    ):
-        raise RuntimeError("LocalExtractionV1 mention-selection accounting drifted")
     truncated = raw.get("temporal_captures_truncated")
     if type(truncated) is not bool:
         raise RuntimeError("LocalExtractionV1 temporal truncation flag is invalid")
@@ -478,6 +594,12 @@ def _compile_result(
             "account": account_name,
             "wire_contract": CONTRACT_VERSION,
             "concurrency_policy": concurrency_policy,
+            "mention_selection_counts": dict(sorted(mention_counts.items())),
+            "mention_exclusion_counts": {
+                "empty_canonical_label": int(
+                    mention_counts.get("empty_canonical_label", 0)
+                )
+            },
         },
     )
 
@@ -577,6 +699,27 @@ async def extract_entities(
         task_rows[start : start + batch_size]
         for start in range(0, len(task_rows), batch_size)
     ]
+    slice_requests = [_request(rows) for rows in slices]
+    reusable_job_ids = await asyncio.gather(
+        *(
+            asyncio.to_thread(
+                _reusable_completed_job,
+                journal_path,
+                batch_id=request["batch_id"],
+                endpoint_id=resolved_routes[index % len(resolved_routes)][
+                    "endpoint_id"
+                ],
+                account_name=resolved_routes[index % len(resolved_routes)][
+                    "account"
+                ].name,
+            )
+            for index, request in enumerate(slice_requests)
+        )
+    )
+    if any(reusable_job_ids) and not all(reusable_job_ids):
+        raise RuntimeError(
+            "LocalExtractionV1 reusable completed-job closure is partial"
+        )
     owns_client = http_client is None
     client = http_client or httpx.AsyncClient(
         timeout=httpx.Timeout(runpod_config.timeout_seconds + 30, connect=20)
@@ -587,7 +730,7 @@ async def extract_entities(
         index: int,
         rows: list[dict[str, str]],
     ) -> tuple[int, Any, dict[str, Any]]:
-        request = _request(rows)
+        request = slice_requests[index]
         route = resolved_routes[index % len(resolved_routes)]
         selected_account: RunpodFlashAccount = route["account"]
 
@@ -602,16 +745,32 @@ async def extract_entities(
                 },
             )
 
+        reusable_job_id = reusable_job_ids[index]
         async with route["semaphore"]:
-            output = await _submit_and_wait(
-                client,
-                endpoint_id=route["endpoint_id"],
-                api_key=route["api_key"],
-                request=request,
-                timeout_seconds=runpod_config.timeout_seconds,
-                poll_interval_seconds=runpod_config.poll_interval_seconds,
-                job_event_sink=journal_event,
-            )
+            if reusable_job_id:
+                output = await _load_reusable_completed_output(
+                    client,
+                    endpoint_id=route["endpoint_id"],
+                    api_key=route["api_key"],
+                    job_id=reusable_job_id,
+                )
+                await journal_event(
+                    {
+                        "event": "reused_terminal_output",
+                        "batch_id": request["batch_id"],
+                        "job_id": reusable_job_id,
+                    }
+                )
+            else:
+                output = await _submit_and_wait(
+                    client,
+                    endpoint_id=route["endpoint_id"],
+                    api_key=route["api_key"],
+                    request=request,
+                    timeout_seconds=runpod_config.timeout_seconds,
+                    poll_interval_seconds=runpod_config.poll_interval_seconds,
+                    job_event_sink=journal_event,
+                )
         if not isinstance(output, dict) or set(output) != _OUTPUT_FIELDS:
             raise RuntimeError("LocalExtractionV1 response shape drifted")
         if output.get("contract_version") != CONTRACT_VERSION:
@@ -717,6 +876,47 @@ async def extract_entities(
         "duration_seconds": round(duration, 3),
         "chunks_per_second": round(len(ordered) / duration, 3) if duration else 0.0,
         "remote_jobs": remote_jobs,
+        "reused_request_batches": sum(
+            1 for row in remote_jobs if bool(row.get("reused"))
+        ),
+        "new_request_batches": sum(
+            1 for row in remote_jobs if not bool(row.get("reused"))
+        ),
+        "mention_selection_counts": dict(
+            sorted(
+                Counter(
+                    {
+                        key: sum(
+                            int(
+                                (result.provider_card.get(
+                                    "mention_selection_counts"
+                                ) or {}).get(key, 0)
+                            )
+                            for result in ordered
+                        )
+                        for key in {
+                            key
+                            for result in ordered
+                            for key in (
+                                result.provider_card.get(
+                                    "mention_selection_counts"
+                                ) or {}
+                            )
+                        }
+                    }
+                ).items()
+            )
+        ),
+        "mention_exclusion_counts": {
+            "empty_canonical_label": sum(
+                int(
+                    (result.provider_card.get("mention_exclusion_counts") or {}).get(
+                        "empty_canonical_label", 0
+                    )
+                )
+                for result in ordered
+            )
+        },
         "claims_compiled": sum(
             len((row.claim_compilation or {}).get("claims") or []) for row in ordered
         ),
