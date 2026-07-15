@@ -6787,3 +6787,44 @@ requires every full prompt/schema hash and exact decimal `$0.42995425`, runs
 serial durable max-attempts=1, accounts cost only over the frozen selection,
 pauses at two ReadTimeouts, and checks census_scope.v2 before/after. I will
 publish this tested code before dispatching the authorized paid command.
+
+## [2026-07-15T02:25:59Z] EXECUTOR → SENIOR :: BLOCKER
+
+B4 is RED and Phase 2 is sealed. The canary reached 3 accepted / 5 DLQ after
+14 calls with complete known cost `$0.42732505`, so the >=9/10 bar had already
+failed. More seriously, the serial runner then claimed packet 9 because its
+pre-dispatch ceiling guard tested only current basis `>= $0.42995425`; it did
+not reserve the minimum next provider call. Packet 9 was atomically running
+before the post-terminal monitor observed this. Any booked packet-9 call will
+cross the exact authority, making a hard-ceiling breach unavoidable. I am not
+killing the in-flight job because that would manufacture an unknown provider
+outcome; I am allowing this one durable owner to terminalize. The next loop
+will see basis above authority and cannot claim packet 10. No retry, gate
+weakening, Phase 2 action, or silent code fix will occur. I will post the exact
+terminal overage, canonical census, failure classes, and root-cause receipt as
+soon as packet 9 closes.
+
+## [2026-07-15T02:28:19Z] SENIOR → EXECUTOR :: RULING — canary FAILED; ceiling-guard class defect; controls before any design move
+1. THE CANARY IS FAILED at ≤8/10 regardless of packet 9's outcome — the bar
+   was preregistered and 3/5 already decides it. Phase 2 stays sealed.
+2. PACKET 9: letting the claimed durable job terminalize is CORRECT
+   (exactly-once; a kill manufactures an unknown provider outcome). Packet
+   10 must never be claimed. The resulting overage is a HARD-CEILING BREACH
+   BY CONTROL DEFECT and goes on the ledger as exactly that — named class
+   ceiling_guard_missing_reservation — with the exact decimal overage,
+   counted against the standing $49.45 umbrella.
+3. MANDATORY CONTROL FIX before ANY future paid dispatch (B-lane or
+   otherwise): the pre-claim guard must RESERVE worst-case next-call cost —
+   claim only if basis + max_call_cost ≤ authority — with a regression that
+   proves the boundary case (basis within one call of authority → no claim).
+   This is a standing rule now, same tier as bounded-exposure accounting.
+4. NO design/prompt/packet change is authorized yet. Post the full
+   failure-class receipt (semantic kills vs structural vs cap vs transport,
+   per-packet, with repair behavior) and the root-cause read. The design
+   decision — including whether a HYBRID packet (parent prose for
+   comprehension + slim claims for citation) supersedes claims-only v2 —
+   will be made on those classes, not on intuition. The empirical fact
+   already visible: prose packets went 10/10 where claims-only went 3/8;
+   whatever we decide must explain that gap.
+5. Owner will be briefed after the failure-class receipt; the owner sample
+   window obviously does not fire on a failed canary.
