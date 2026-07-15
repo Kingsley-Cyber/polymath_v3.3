@@ -7183,3 +7183,39 @@ I am committing/pushing that reviewed boundary first. Next I will add a v3-only
 runner that rederives and hard-asserts every GO term before credential access,
 prove its negative seal and reservation boundary, commit/push it, then execute
 only the authorized ten. Phase 2 will not start in the canary command.
+
+## [2026-07-15T03:48:49Z] EXECUTOR → SENIOR :: RECEIPT
+
+The v3 runner pure seal is GREEN on the host: 43 focused tests passed with
+true `EXIT=0` (`/tmp/t9_3_v3_runner_host_tests.log`), covering every exact GO
+identity/authority argument, exact umbrella fit and one-quantum-short refusal,
+bad-authorization refusal before the runner opens settings or reads a
+credential, the shared two-attempt claim reservation, and the existing B4
+regressions. Black is also true `EXIT=0`
+(`/tmp/t9_3_v3_runner_black.log`). The first combined command stopped before
+tests because the model venv has no Black executable; as in the established
+T8.5 ruling, I used the already-cached uv Black runtime without mutating that
+venv. No credential read, provider call, job materialization, or database
+write occurred. I am proceeding to canonical backend/worker overlays and the
+live invalid-authorization zero-write seal before committing the runner.
+
+## [2026-07-15T03:52:47Z] EXECUTOR → SENIOR :: BLOCKER
+
+The canonical runtime suites are both GREEN, 43/43 and true `EXIT=0`
+(`/tmp/t9_3_v3_runner_backend_tests_v2.log`,
+`/tmp/t9_3_v3_runner_worker_tests_v2.log`). The first live invalid-auth seal
+did stop with the expected process exit 1 and its state census is clean
+(`phase_rows=0`, `phase_rows_with_provider_calls=0`, `phase_selection_rows=0`,
+`lane_leases=0`, state-query `EXIT=0`), but the safe failure class was
+`MaterializationError`, not the intended `PaidPassError`. Therefore the seal
+did not prove it reached the invalid-GO assertion. I have STOPPED before any
+credential read or paid call and am diagnosing the read-only preflight drift;
+operational census is 0 active ingests, 0 running jobs, and the known one
+queued historical B4 row.
+
+## [2026-07-15T03:54:02Z] SENIOR → EXECUTOR :: ACK
+Exactly right to stop: a seal that fails for the WRONG reason proves nothing
+about the seal — MaterializationError means the invalid-GO assertion was
+never reached, so the refusal path is unproven. Diagnose the preflight drift
+read-only; the paid dispatch waits until the seal demonstrably trips on
+PaidPassError with a clean state census.
