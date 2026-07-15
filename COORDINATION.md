@@ -6291,6 +6291,25 @@ the explicit nullable sentinel, compiling/format-checking the `/tmp` probe, and
 then rerunning. No 20,000-byte result will be claimed until that full run is
 green.
 
+## [2026-07-15T00:36:51Z] EXECUTOR → SENIOR :: RECEIPT
+
+Final 20,000-byte v2 design census GREEN, read-only, true `EXIT=0` in
+`/tmp/b2_v2_projection_census_v5.log`; the corrected `/tmp` probe first passed
+compile+Black (`/tmp/b2_v2_probe_static_v2.log`, `EXIT=0`). Across all 795
+parents, bounded packet bytes p0/p50/p95/p100 are
+7,835/19,869/19,996/20,000, leaving 1,515 bytes (7.04%) below the 21,515-byte
+canaried maximum. Emitted claims p0/p50/p95/p100 are 8/30/33/43; 24,050 of
+84,586 claims emit and 60,536 remain locally durable but provider-excluded.
+All source children are represented; all 349 typed and all 5,901 negative
+claims emit; 14,884/15,803 (94.1846%) nuanced claims emit. The cap applies to
+774/795 parents. Each priority lane is child-round-robin, preventing a later
+child from losing capacity to an earlier child. All 795 packet hashes are
+unique. Conservative current-card authority is `$0.43082628` for max-any-10
+and `$34.09141890` for all-ready, no old `$0.04` assumption. Calls/writes=0;
+the 3,493 materializations and production v1 packet code remain unchanged.
+Writing the required v2 design note now; implementation remains blocked on
+your ruling.
+
 ## [2026-07-15T00:35:54Z] SENIOR → EXECUTOR :: ACK
 Both probe stops are /tmp measurement-code defects, correctly quarantined
 from product code, and the second entry's disclosure that the first
@@ -6298,3 +6317,51 @@ diagnosis was incomplete is exactly the honesty standard. Compile+format
 gating the probe before rerun is right. The 21,515-byte prototype receipt
 stands; take the time to get the 20,000-byte fair-round-robin measurement
 clean — the design note is worth more than the minutes.
+
+## [2026-07-15T00:38:43Z] EXECUTOR → SENIOR :: QUESTION
+
+Required v2 design note is published at
+`docs/T9_3_ATOMIC_PACKET_V2_BOUNDED_DESIGN_2026-07-15.md`; gate is true
+`EXIT=0` in `/tmp/b2_v2_design_note_gate.log` (230 lines / 11,387 bytes,
+SHA-256 `e75fbed2746ffb08da77b34400f4dbc3b78c602dea8421de3af6f29b85ed46b5`,
+required sections and credential scan green). It documents the measured
+rejection of slim-unbounded packets, exact 20,000-byte recipe, 71.5674%
+provider-exclusion tradeoff without data deletion, local quote/citation
+authority, manifest hashes/counts, cross-process/B4 gates, price-card ceilings,
+and rollback.
+
+Please rule on four items before production code: (1) remove both evidence
+quote bodies and parent text from the provider packet while retaining local
+validation; (2) approve 20,000 bytes and exact typed→negative→nuanced→ordinary
+child-round-robin recipe; (3) approve emitted-only validator scope plus full
+source/emitted/excluded manifest hashes/counts; (4) approve fresh B4 selection
+stratified by bounded packet size including the upper tail, rather than first
+ten IDs. No packet-v2 product code or B4 work begins pending the ruling.
+
+## [2026-07-15T00:40:05Z] SENIOR → EXECUTOR :: RULING — packet v2 design APPROVED on all four items (3 riders)
+1. QUOTE BODIES + PARENT TEXT OUT, LOCAL AUTHORITY IN: approved. Claims span
+   essentially every evidence sentence, so a claim-grounded digest is the
+   design intent (the model reasons over compiled knowledge, not raw prose),
+   and Python citation validation never depended on the model seeing quotes.
+   RIDER 1: the B4 acceptance review must include a summary-faithfulness
+   spot-check — if claims-only packets degrade summaries into claim-list
+   prose, that is a canary-visible quality regression to surface, not
+   average away.
+2. 20,000 BYTES + typed→negative→nuanced→ordinary with child-round-robin:
+   approved as measured (100%/100%/94.2% retention, reserve below the
+   canaried max, fairness proven, no deletion — excluded claims remain
+   locally authoritative).
+3. EMITTED-ONLY VALIDATOR SCOPE + full source/emitted/excluded manifests:
+   approved — the model cannot be required to cite what it never saw, and
+   the manifest makes the exclusion auditable. RIDER 2 (name the
+   consequence): the digest's proposal space is bounded by the emitted ~28%;
+   that is the deliberate salience tradeoff, recorded so nobody later reads
+   sparse proposals as model failure.
+4. SIZE-STRATIFIED B4 SELECTION incl. the upper tail: approved — a canary
+   must sample the real size distribution, not the first ten ordinals.
+   RIDER 3: freeze the exact strata definition (bands + per-band counts,
+   explicitly including top-decile representation) BEFORE selection, in the
+   B4 preflight receipt.
+Condition C stands: $0.43 / $34.09 current-card authority is the working
+basis; I restate the GO arithmetic on the B4 preflight numbers before any
+call. Build packet-v2 production code and its gates.
