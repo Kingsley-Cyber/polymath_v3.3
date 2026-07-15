@@ -1,0 +1,77 @@
+{
+  "schema_version": "polymath.runpod_same_chunk_lockdown.v1",
+  "preregistered_at_utc": "2026-07-15T11:46:00Z",
+  "purpose": "One pinned_local versus runpod_green LocalExtractionV1 comparison on identical frozen chunks; fixture gold is never read by inference.",
+  "runtime_commit": "bc04a315dbdf5db7552d02ffe054fdba922bf2be",
+  "source_fixture": {
+    "path": "backend/evals/semantic_extraction_gold_v1.json",
+    "sha256": "866d1b2104c7bc7d3a5696462058053a6bb041c8bd6784eae59a1f390d5e7816",
+    "sample_ids": [
+      "explicit_causal",
+      "condition_scope",
+      "direct_negation",
+      "recommendation_temporal",
+      "attributed_hypothesis",
+      "exception_scope",
+      "temporal_revision",
+      "mechanism_definition",
+      "analogy_limitation"
+    ]
+  },
+  "synthetic_samples": [
+    {
+      "id": "temporal_specificity",
+      "text": "Garden records published in winter 1911 were revised after the 2018 drought summer."
+    },
+    {
+      "id": "negation_modality_multi_predicate",
+      "text": "A reviewer should compare the baseline, but the intervention does not reduce the measured outcome unless the population changes."
+    },
+    {
+      "id": "long_window_overlap",
+      "repeat_text": "Repeated observation may influence the measured baseline under the stated condition. ",
+      "repeat_count": 45,
+      "suffix": "The final intervention reduces the outcome in winter 1911."
+    }
+  ],
+  "identity_recipe": {
+    "document_id": "doc:runpod-lockdown:<sample_id>",
+    "child_id": "child:runpod-lockdown:<sample_id>",
+    "source_version_id": "srcv:runpod-lockdown:<sample_id>"
+  },
+  "comparison": {
+    "engines": [
+      "pinned_local",
+      "runpod_green"
+    ],
+    "exact_fields": [
+      "schema_version",
+      "document_id",
+      "child_id",
+      "sentence_ids",
+      "entities.*.mention_id",
+      "entities.*.text",
+      "entities.*.entity_type",
+      "entities.*.start_char",
+      "entities.*.end_char",
+      "entities.*.canonical_label",
+      "predicates",
+      "relations",
+      "unresolved_spans",
+      "temporal_captures",
+      "temporal_captures_truncated",
+      "ordering"
+    ],
+    "confidence_absolute_tolerance": 0.00001,
+    "threshold_side_selection_must_match": true,
+    "relations_expected": [],
+    "missing_or_extra_results_max": 0,
+    "semantic_mismatches_max": 0
+  },
+  "anti_gaming": [
+    "No sample id, source text, or gold answer may branch inference.",
+    "The semantic gold fixture supplies text only; gold entities, relations, and claims are never loaded.",
+    "Thresholds, labels, normalization, comparison fields, and tolerance are immutable after the first inference.",
+    "Both engines receive byte-identical task JSON and frozen asset identities."
+  ]
+}

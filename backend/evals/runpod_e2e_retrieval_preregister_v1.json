@@ -1,0 +1,296 @@
+{
+  "schema_version": "polymath.runpod_e2e_retrieval_preregister.v1",
+  "preregistered_at_utc": "2026-07-15T11:50:30Z",
+  "selection_manifest": {
+    "path": "backend/evals/runpod_e2e_15doc_selection_v1.json",
+    "sha256": "da7b94c152dd5e72d52db1fd80a68f0cc2797d85ed1fd4899f9a8c19874eaf00"
+  },
+  "tiers": [
+    "qdrant_only",
+    "qdrant_mongo",
+    "qdrant_mongo_graph"
+  ],
+  "top_k": 10,
+  "queries": [
+    {
+      "id": "direct_facs",
+      "shape": "direct_expert",
+      "question": "What is the Facial Action Coding System used to code?",
+      "expected_any": [
+        "Paul Ekman - Facial Action Coding System Manual (0).md"
+      ],
+      "expected_min_distinct": 1,
+      "evidence_anchors": {
+        "Paul Ekman - Facial Action Coding System Manual (0).md": [
+          "Facial Action Coding System"
+        ]
+      }
+    },
+    {
+      "id": "direct_rule_of_six",
+      "shape": "direct_expert",
+      "question": "What factors make up Walter Murch's Rule of Six for deciding a cut?",
+      "expected_any": [
+        "Walter Murch - In the Blink of an Eye (2001).md"
+      ],
+      "expected_min_distinct": 1,
+      "evidence_anchors": {
+        "Walter Murch - In the Blink of an Eye (2001).md": [
+          "The Rule of Six"
+        ]
+      }
+    },
+    {
+      "id": "direct_laban_machine",
+      "shape": "direct_expert",
+      "question": "How is Bayesian reasoning applied to Laban Movement Analysis in human-machine interaction?",
+      "expected_any": [
+        "[International Journal of Reasoning-based Intelligent Systems vol. 2 iss. 1] Bayesian reasoning for Laban Movement Analysis used in human-machine interaction{Rett, Jorg_ Dias, Jorge_ Ahuactzin, Juan Manuel}(2010)[1.md"
+      ],
+      "expected_min_distinct": 1,
+      "evidence_anchors": {
+        "[International Journal of Reasoning-based Intelligent Systems vol. 2 iss. 1] Bayesian reasoning for Laban Movement Analysis used in human-machine interaction{Rett, Jorg_ Dias, Jorge_ Ahuactzin, Juan Manuel}(2010)[1.md": [
+          "Laban Movement Analysis",
+          "human-machine interaction"
+        ]
+      }
+    },
+    {
+      "id": "direct_edit_grammar",
+      "shape": "direct_expert",
+      "question": "What does Grammar of the Edit teach about when and where to cut a visual story?",
+      "expected_any": [
+        "Grammar of the Edit.md"
+      ],
+      "expected_min_distinct": 1,
+      "evidence_anchors": {
+        "Grammar of the Edit.md": [
+          "Grammar of the Edit",
+          "when"
+        ]
+      }
+    },
+    {
+      "id": "direct_anatomy_masses",
+      "shape": "direct_expert",
+      "question": "How do movable body masses combine in figure anatomy for sculptors?",
+      "expected_any": [
+        "Anatomy for Sculptors.md"
+      ],
+      "expected_min_distinct": 1,
+      "evidence_anchors": {
+        "Anatomy for Sculptors.md": [
+          "POSITION COMBINATIONS OF MOVABLE MASSES"
+        ]
+      }
+    },
+    {
+      "id": "direct_elemental_novel",
+      "shape": "direct_fact",
+      "question": "Which fantasy story in this corpus opens with Born of Water?",
+      "expected_any": [
+        "Elemental Magic.md"
+      ],
+      "expected_min_distinct": 1,
+      "evidence_anchors": {
+        "Elemental Magic.md": [
+          "Born of Water"
+        ]
+      }
+    },
+    {
+      "id": "lay_dynamic_figure",
+      "shape": "lay_language",
+      "question": "How can I make a drawn or sculpted person feel less stiff and more alive?",
+      "expected_any": [
+        "Force Dynamic Life Drawing.md",
+        "Anatomy for Sculptors.md"
+      ],
+      "expected_min_distinct": 1,
+      "evidence_anchors": {
+        "Force Dynamic Life Drawing.md": [
+          "Key Concepts"
+        ],
+        "Anatomy for Sculptors.md": [
+          "UNDERSTANDING THE HUMAN FIGURE"
+        ]
+      }
+    },
+    {
+      "id": "lay_natural_cut",
+      "shape": "lay_language",
+      "question": "Why can a movie cut feel natural instead of jolting the viewer?",
+      "expected_any": [
+        "Walter Murch - In the Blink of an Eye (2001).md",
+        "Grammar of the Edit.md"
+      ],
+      "expected_min_distinct": 1,
+      "evidence_anchors": {
+        "Walter Murch - In the Blink of an Eye (2001).md": [
+          "Why Do Cuts Work?"
+        ],
+        "Grammar of the Edit.md": [
+          "effective visual stories"
+        ]
+      }
+    },
+    {
+      "id": "lay_safe_fight",
+      "shape": "lay_language",
+      "question": "How do I make a staged fight look convincing while keeping performers safe and in character?",
+      "expected_any": [
+        "Stage Combat Arts.md",
+        "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md"
+      ],
+      "expected_min_distinct": 1,
+      "evidence_anchors": {
+        "Stage Combat Arts.md": [
+          "Integrated Approach to Acting"
+        ],
+        "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md": [
+          "DIRECTING"
+        ]
+      }
+    },
+    {
+      "id": "lay_manga_attention",
+      "shape": "lay_language",
+      "question": "How can a manga creator guide the reader's attention without losing the story's main path?",
+      "expected_any": [
+        "Manga in Theory and Practice.md"
+      ],
+      "expected_min_distinct": 1,
+      "evidence_anchors": {
+        "Manga in Theory and Practice.md": [
+          "The Golden Way",
+          "Never Lose Sight"
+        ]
+      }
+    },
+    {
+      "id": "relationship_shoot_edit_emotion",
+      "shape": "relationship_multi_document",
+      "question": "How do cinematography choices and edit timing work together to preserve emotion and direct attention?",
+      "expected_any": [
+        "Blain Brown - Cinematography - Theory and Practice (2016).md",
+        "Grammar of the Edit.md",
+        "Walter Murch - In the Blink of an Eye (2001).md"
+      ],
+      "expected_min_distinct": 2,
+      "evidence_anchors": {
+        "Blain Brown - Cinematography - Theory and Practice (2016).md": [
+          "cinematography"
+        ],
+        "Grammar of the Edit.md": [
+          "visual stories"
+        ],
+        "Walter Murch - In the Blink of an Eye (2001).md": [
+          "Emotion"
+        ]
+      }
+    },
+    {
+      "id": "relationship_fight_camera_direction",
+      "shape": "relationship_multi_document",
+      "question": "How should stage-combat craft, directing, and camera planning cooperate in a filmed fight sequence?",
+      "expected_any": [
+        "Stage Combat Arts.md",
+        "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md",
+        "Blain Brown - Cinematography - Theory and Practice (2016).md"
+      ],
+      "expected_min_distinct": 2,
+      "evidence_anchors": {
+        "Stage Combat Arts.md": [
+          "STAGE COMBAT ARTS"
+        ],
+        "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md": [
+          "FILM TECHNIQUES AND AESTHETICS"
+        ],
+        "Blain Brown - Cinematography - Theory and Practice (2016).md": [
+          "cinematographers"
+        ]
+      }
+    },
+    {
+      "id": "relationship_vfx_story_pipeline",
+      "shape": "relationship_multi_document",
+      "question": "How should visual-effects planning connect with directing and cinematography so the effect serves the filmed story?",
+      "expected_any": [
+        "VES Handbook of Visual Effects.md",
+        "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md",
+        "Blain Brown - Cinematography - Theory and Practice (2016).md"
+      ],
+      "expected_min_distinct": 2,
+      "evidence_anchors": {
+        "VES Handbook of Visual Effects.md": [
+          "Industry Standard VFX Practices and Procedures"
+        ],
+        "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md": [
+          "DIRECTING"
+        ],
+        "Blain Brown - Cinematography - Theory and Practice (2016).md": [
+          "cinematography"
+        ]
+      }
+    },
+    {
+      "id": "relationship_movement_machine_figure",
+      "shape": "relationship_multi_document",
+      "question": "How could formal movement analysis inform both human-machine interaction and more dynamic figure drawing?",
+      "expected_any": [
+        "[International Journal of Reasoning-based Intelligent Systems vol. 2 iss. 1] Bayesian reasoning for Laban Movement Analysis used in human-machine interaction{Rett, Jorg_ Dias, Jorge_ Ahuactzin, Juan Manuel}(2010)[1.md",
+        "Force Dynamic Life Drawing.md"
+      ],
+      "expected_min_distinct": 2,
+      "evidence_anchors": {
+        "[International Journal of Reasoning-based Intelligent Systems vol. 2 iss. 1] Bayesian reasoning for Laban Movement Analysis used in human-machine interaction{Rett, Jorg_ Dias, Jorge_ Ahuactzin, Juan Manuel}(2010)[1.md": [
+          "Laban Movement Analysis"
+        ],
+        "Force Dynamic Life Drawing.md": [
+          "force"
+        ]
+      }
+    },
+    {
+      "id": "negative_quantum",
+      "shape": "negative_control",
+      "question": "Which quantum error-correcting code in these documents gives the best logical qubit threshold?",
+      "expected_any": [],
+      "expected_min_distinct": 0,
+      "must_refuse": true
+    },
+    {
+      "id": "negative_genomics",
+      "shape": "negative_control",
+      "question": "What CRISPR guide RNA sequence should be used to edit the CFTR gene?",
+      "expected_any": [],
+      "expected_min_distinct": 0,
+      "must_refuse": true
+    },
+    {
+      "id": "negative_tax_law",
+      "shape": "negative_control",
+      "question": "What was the statutory wool tax rate in fourteenth-century Burgundy?",
+      "expected_any": [],
+      "expected_min_distinct": 0,
+      "must_refuse": true
+    }
+  ],
+  "gates": {
+    "all_tiers_required": true,
+    "corpus_boundary_precision": 1.0,
+    "direct_doc_hit_rate_min": 0.85,
+    "lay_language_doc_hit_rate_min": 0.75,
+    "relationship_query_min_distinct_target_rate_min": 0.75,
+    "negative_refusal_rate_min": 1.0,
+    "citation_source_membership_rate_min": 1.0,
+    "no_existing_corpus_write_required": true
+  },
+  "anti_gaming": [
+    "No query text or expected filename may appear in retrieval routing code.",
+    "Targets and thresholds are immutable after the first test-corpus query.",
+    "Dense similarity may generate candidates but cannot satisfy a multi-document relationship target alone without returned source evidence.",
+    "Negative controls must fail closed on every tier.",
+    "Only the new corpus ID discovered from the create API response may be queried or written."
+  ]
+}

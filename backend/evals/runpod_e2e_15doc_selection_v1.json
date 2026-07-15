@@ -1,0 +1,325 @@
+{
+  "preregistered_at_utc": "2026-07-15T11:46:00Z",
+  "run_constraints": {
+    "corpus_id_discovery": "real create API response",
+    "existing_corpus_writes": 0,
+    "new_corpus_only": true
+  },
+  "schema_version": "polymath.runpod_e2e_15doc_selection.v1",
+  "selected": [
+    {
+      "byte_size": 129,
+      "filename": "Mateu-Mestre - Framed Ink 2 (2021).md",
+      "selection_rank": 1,
+      "sha256": "2efab7d6f6b1347bedb84d19ad9e8e63b7d0466e9b7916d49726c4ced71c7639",
+      "size_band": "small",
+      "topic_band": 0,
+      "topic_terms": [
+        "framed",
+        "ink",
+        "mateu",
+        "mestre",
+        "design",
+        "breakthrough"
+      ]
+    },
+    {
+      "byte_size": 199162,
+      "filename": "Anatomy for Sculptors.md",
+      "selection_rank": 2,
+      "sha256": "cbe65859c88b240033ed7887077764ff3f06afccb39331a0c493d84ad092a96e",
+      "size_band": "medium",
+      "topic_band": 0,
+      "topic_terms": [
+        "framed",
+        "ink",
+        "mateu",
+        "mestre",
+        "design",
+        "breakthrough"
+      ]
+    },
+    {
+      "byte_size": 1008139,
+      "filename": "Blain Brown - Cinematography - Theory and Practice (2016).md",
+      "selection_rank": 3,
+      "sha256": "b98c51f5e20af3b5ceda2ffa0a45a856b1e56124e15b8071b92d1ac200a4436c",
+      "size_band": "large",
+      "topic_band": 0,
+      "topic_terms": [
+        "framed",
+        "ink",
+        "mateu",
+        "mestre",
+        "design",
+        "breakthrough"
+      ]
+    },
+    {
+      "byte_size": 5078,
+      "filename": "epub_backfill_status_report.md",
+      "selection_rank": 4,
+      "sha256": "4fc5583afae8874400362dc794ae0fb2291336194cbbfa2b0a82053f93832b7a",
+      "size_band": "small",
+      "topic_band": 1,
+      "topic_terms": [
+        "laban",
+        "movement",
+        "elemental",
+        "magic",
+        "actors",
+        "reasoning"
+      ]
+    },
+    {
+      "byte_size": 98924,
+      "filename": "[International Journal of Reasoning-based Intelligent Systems vol. 2 iss. 1] Bayesian reasoning for Laban Movement Analysis used in human-machine interaction{Rett, Jorg_ Dias, Jorge_ Ahuactzin, Juan Manuel}(2010)[1.md",
+      "selection_rank": 5,
+      "sha256": "5918c2bc5ffd56881601f012a72ab4d01f43e472055ec40334f96f08d5c6395c",
+      "size_band": "medium",
+      "topic_band": 1,
+      "topic_terms": [
+        "laban",
+        "movement",
+        "elemental",
+        "magic",
+        "actors",
+        "reasoning"
+      ]
+    },
+    {
+      "byte_size": 655829,
+      "filename": "Elemental Magic.md",
+      "selection_rank": 6,
+      "sha256": "0f4285034ae68948b96b567d48183224088f528e956aa38baf830ec817bb661c",
+      "size_band": "large",
+      "topic_band": 1,
+      "topic_terms": [
+        "laban",
+        "movement",
+        "elemental",
+        "magic",
+        "actors",
+        "reasoning"
+      ]
+    },
+    {
+      "byte_size": 180408,
+      "filename": "Force Dynamic Life Drawing.md",
+      "selection_rank": 7,
+      "sha256": "fb9541462c305502312185b3bd36d1f4a38b03b7225f117eea4167e2208f546f",
+      "size_band": "small",
+      "topic_band": 2,
+      "topic_terms": [
+        "film",
+        "grammar",
+        "directing",
+        "video",
+        "life",
+        "cinematic"
+      ]
+    },
+    {
+      "byte_size": 690942,
+      "filename": "Grammar of the Edit.md",
+      "selection_rank": 8,
+      "sha256": "03814008085eecbee104e312916ae8b467e95b60a3922d1f1a8f208e9b057b6e",
+      "size_band": "medium",
+      "topic_band": 2,
+      "topic_terms": [
+        "film",
+        "grammar",
+        "directing",
+        "video",
+        "life",
+        "cinematic"
+      ]
+    },
+    {
+      "byte_size": 1625142,
+      "filename": "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md",
+      "selection_rank": 9,
+      "sha256": "0954f369bc418cb01a45f111778b29e4e7a4fc2b284c7f6d56d0a6ccd1855e53",
+      "size_band": "large",
+      "topic_band": 2,
+      "topic_terms": [
+        "film",
+        "grammar",
+        "directing",
+        "video",
+        "life",
+        "cinematic"
+      ]
+    },
+    {
+      "byte_size": 197,
+      "filename": "Richard Williams - The Animator's Survival Kit (2002, Faber & Faber).md",
+      "selection_rank": 10,
+      "sha256": "387d23d8d7c74d49bf00cbb7ec909e4d0c29b3fd911b8cac6db9dce3e862f9cf",
+      "size_band": "small",
+      "topic_band": 3,
+      "topic_terms": [
+        "manga",
+        "ocr",
+        "making",
+        "draw",
+        "how",
+        "completion"
+      ]
+    },
+    {
+      "byte_size": 239821,
+      "filename": "Manga in Theory and Practice.md",
+      "selection_rank": 11,
+      "sha256": "913dc6fd4a45e9a4e81766edf77f041c915556e92644ad142a690e449b294fbc",
+      "size_band": "medium",
+      "topic_band": 3,
+      "topic_terms": [
+        "manga",
+        "ocr",
+        "making",
+        "draw",
+        "how",
+        "completion"
+      ]
+    },
+    {
+      "byte_size": 1149595,
+      "filename": "Paul Ekman - Facial Action Coding System Manual (0).md",
+      "selection_rank": 12,
+      "sha256": "8b5a6e51729c4c919b619fc0592e525498699ec157550cd78fe734bf19462059",
+      "size_band": "large",
+      "topic_band": 3,
+      "topic_terms": [
+        "manga",
+        "ocr",
+        "making",
+        "draw",
+        "how",
+        "completion"
+      ]
+    },
+    {
+      "byte_size": 214082,
+      "filename": "Walter Murch - In the Blink of an Eye (2001).md",
+      "selection_rank": 13,
+      "sha256": "249c24d17c1b226b41ca0ef5c92049c5d35b985fee757161e93a8d9c78ec18ba",
+      "size_band": "small",
+      "topic_band": 4,
+      "topic_terms": [
+        "effects",
+        "handbook",
+        "sound",
+        "combat",
+        "expressive",
+        "power"
+      ]
+    },
+    {
+      "byte_size": 553398,
+      "filename": "Stage Combat Arts.md",
+      "selection_rank": 14,
+      "sha256": "5ccf419287e567416dab934b468ffe0de863ec180b8c915b3551f3e33a9d21af",
+      "size_band": "medium",
+      "topic_band": 4,
+      "topic_terms": [
+        "effects",
+        "handbook",
+        "sound",
+        "combat",
+        "expressive",
+        "power"
+      ]
+    },
+    {
+      "byte_size": 2774966,
+      "filename": "VES Handbook of Visual Effects.md",
+      "selection_rank": 15,
+      "sha256": "ccd685232dbb15be96dd48a1e81aa3633ef3e22c7590eeaff2b6d9ce2b588f2c",
+      "size_band": "large",
+      "topic_band": 4,
+      "topic_terms": [
+        "effects",
+        "handbook",
+        "sound",
+        "combat",
+        "expressive",
+        "power"
+      ]
+    }
+  ],
+  "selection_count": 15,
+  "selection_method": {
+    "appledouble_policy": "exclude filenames beginning ._",
+    "cluster_refinement": "deterministic cosine medoid, maximum 20 iterations",
+    "content_or_gold_read": false,
+    "initial_medoids": "lexical first then farthest-first cosine distance",
+    "size_bands": "minimum, lower-median, maximum byte size within each topic band",
+    "topic_bands": "five deterministic balanced filename-TF-IDF k-medoids clusters of 15"
+  },
+  "source_count": 75,
+  "source_manifest_sha256": "fd3319adffb5ed3b07cce6c76ea16d1be022360b928cc7c0a2af42fa0f807329",
+  "source_root": "/Users/king/Desktop/hermes agent/ECOMMERCE/pdf",
+  "topic_bands": [
+    {
+      "candidate_count": 15,
+      "top_filename_terms": [
+        "framed",
+        "ink",
+        "mateu",
+        "mestre",
+        "design",
+        "breakthrough"
+      ],
+      "topic_band": 0
+    },
+    {
+      "candidate_count": 15,
+      "top_filename_terms": [
+        "laban",
+        "movement",
+        "elemental",
+        "magic",
+        "actors",
+        "reasoning"
+      ],
+      "topic_band": 1
+    },
+    {
+      "candidate_count": 15,
+      "top_filename_terms": [
+        "film",
+        "grammar",
+        "directing",
+        "video",
+        "life",
+        "cinematic"
+      ],
+      "topic_band": 2
+    },
+    {
+      "candidate_count": 15,
+      "top_filename_terms": [
+        "manga",
+        "ocr",
+        "making",
+        "draw",
+        "how",
+        "completion"
+      ],
+      "topic_band": 3
+    },
+    {
+      "candidate_count": 15,
+      "top_filename_terms": [
+        "effects",
+        "handbook",
+        "sound",
+        "combat",
+        "expressive",
+        "power"
+      ],
+      "topic_band": 4
+    }
+  ]
+}

@@ -8814,6 +8814,15 @@ hashes, and finds zero evidence-anchor misses. The frozen matrix is 17 queries
 4 relationship/multi-document, and 3 refusal controls. No inference,
 endpoint, provider, corpus, or existing-store write occurred.
 
+## [2026-07-15T11:56:19Z] EXECUTOR → SENIOR :: RECEIPT
+
+The 15-document selection repeatability gate is GREEN, true `EXIT=0`
+(`/tmp/runpod_e2e_selection_repeat.log`). A fresh run over the same 75-file
+source produced a byte-identical manifest: both SHA-256 values are
+`da7b94c152dd5e72d52db1fd80a68f0cc2797d85ed1fd4899f9a8c19874eaf00`.
+The deterministic source-manifest identity remains `fd3319ad…`; no hand
+selection or content/gold read occurred.
+
 ## [2026-07-15T11:56:17Z] SENIOR → EXECUTOR :: RULING — RUNPOD FINISH LINE IS AHEAD; A0 is DONE-REJECTED, never rerun
 Direct answer: YES — the RunPod finish line (a→e) remains the active priority;
 PROGRESS.md and BUILDLINE.md were the truth. The A0 pointer you read was a
@@ -8825,3 +8834,21 @@ were exactly right. UNPARK the finish-line preregistration artifacts and
 resume the chain where it stood: dependency-literal rebuild → deploy →
 canary → same-chunk validation → 15-doc E2E → eval. Full-chain
 pre-authorization stands.
+
+## [2026-07-15T11:57:17Z] EXECUTOR → SENIOR :: ACK
+
+Ruling received. A0 remains closed rejected and `baseline_live_v0` stands. I
+have unparked the RunPod finish-line chain. The preregistration static gate is
+also GREEN: all three prep scripts compile, Black `--check` passes, and
+`git diff --check` passes with true `EXIT=0`
+(`/tmp/runpod_prereg_static.log`). I am resealing the formatted scripts'
+deterministic outputs and will publish the frozen inputs before inference.
+
+## [2026-07-15T11:57:41Z] EXECUTOR → SENIOR :: RECEIPT
+
+Post-format preregistration reseal is GREEN. The verifier again returns true
+`EXIT=0`, 15/15 source hashes exact, zero anchor misses, and the same 51-run
+matrix (`/tmp/runpod_e2e_prereg_verify_final.log`). A second selector run is
+byte-identical at SHA `da7b94c1…`, true `EXIT=0`
+(`/tmp/runpod_e2e_selection_repeat_final.log`). The frozen input files are now
+ready to publish before first local inference.

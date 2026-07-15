@@ -3736,6 +3736,39 @@ A corpus is strict-ready only when:
   materializer preservation fix. T9.3 paid completion remains open.
 - Checklist boxes closed: pause receipt only.
 
+### 2026-07-15 - P2.7 RunPod finish-line preregistration freeze
+
+- Commit: this preregistration commit on
+  `claude-continuation-20260713`.
+- Owner: owner-authorized full RunPod finish line; full chain pre-authorized
+  by the senior in `COORDINATION.md`.
+- Corpus/data scope: read-only 75-file owner source inspection for filename,
+  size, hash, and preregistered evidence anchors; no corpus created yet and
+  existing corpora received zero writes.
+- Code changes: deterministic balanced filename-TF-IDF selector, retrieval
+  preregistration verifier, and pinned-local same-chunk reference runner.
+- Durable migration/backfill: none.
+- Before metrics: unconstrained topic clustering failed its representation
+  gate; first balanced execution failed on a Python 3.9 compatibility-only
+  keyword.
+- After metrics: 15/15 frozen source hashes exact; deterministic selection is
+  byte-identical on repeat at `da7b94c1…`; 17 queries × 3 tiers = 51 frozen
+  retrieval executions; zero evidence-anchor misses.
+- Tests by tier: preregistration covers Qdrant-only, Qdrant+Mongo, and
+  Qdrant+Mongo+Graph; final verifier, selector repeat, compile, Black, and diff
+  gates all return true `EXIT=0`.
+- Cross-corpus test: four relationship/multi-document queries are frozen;
+  corpus-boundary and citation-membership gates are both 1.0.
+- Failure/rollback test: targets and thresholds freeze before first query;
+  new-corpus-only identity and zero-existing-write rules fail closed.
+- Deployment image/health: no inference, image promotion, endpoint operation,
+  provider call, or deployment occurred.
+- Remaining risks: local reference, immutable build inspection, blue-green
+  canary, live same-chunk parity, fresh-corpus ingest, and summary spend
+  ceiling remain open. Permanent receipt:
+  `docs/RUNPOD_FINISH_LINE_PREREGISTRATION_RECEIPT_2026-07-15.md`.
+- Checklist boxes closed: none; this freezes inputs for the open P2.7 gates.
+
 ## Implementation Log Template
 
 Copy this section for every completed item:
