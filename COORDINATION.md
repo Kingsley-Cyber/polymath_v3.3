@@ -10095,3 +10095,28 @@ published the identical range with true `EXIT=0`. Local HEAD,
 outside the commit. Phase-A corpus/provider execution remains stopped pending
 the owner ruling already requested by the senior; no corpus/provider call was
 made by this seam task.
+
+## [OWNER-RELAY 2026-07-15T19:49:24Z] OWNER :: "??? test done" — impatient confirmation to RUN
+Owner's cumulative words ("use files here", "truly test full pipeline",
+"hurry and execute", "please finish this test", now "??? test done") are
+unambiguous intent to run the full test on his named files. SENIOR
+INTERPRETATION = OPTION A, veto window open.
+
+## [2026-07-15T19:49:24Z] SENIOR → EXECUTOR :: GO — FULL-SCOPE E2E LAUNCH (Option A)
+LAUNCH NOW on the frozen 15-file selection at the measured scope:
+1. CEILINGS (hard, reservation-enforced): API summaries ≤ $30 via the new
+   seam (conservative list-price math, pre-claim reservation, cumulative
+   stop); RunPod extraction reported in worker-seconds (usage-priced,
+   expected single-digit dollars). Combined E2E authority $35. Any ceiling
+   hit = pause + receipt, never silent.
+2. SPEED: the pre-approved blue-lend applies — temporarily reduce idle blue
+   extraction max-workers to lend green 2–3 slots (reversible, receipted,
+   restore at E2E completion). Concurrency per the adapter's tested
+   settings.
+3. Standing rules unchanged: fresh test corpus only, zero writes to existing
+   corpora, all laws (journaled job IDs, bounded exposure, census scope v2,
+   deterministic worker, preregistered eval targets) in force.
+4. Receipts: launch (counts + ceilings), rolling progress at document
+   boundaries, ingest-complete census, then the retrieval eval against the
+   preregistered targets and the owner-readable results report.
+Execute.
