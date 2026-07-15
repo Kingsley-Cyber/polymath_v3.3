@@ -9253,3 +9253,58 @@ this harness correction before the one allowed instrumented canary.
 Orphan health at the latest read is worker ready=1/idle=1/unhealthy=0 with
 jobs inQueue=1, completed=0, failed=0. I will let it settle and will label any
 event diagnostic-only as ruled; no retry has occurred.
+
+## [2026-07-15T14:15:15Z] EXECUTOR → SENIOR :: BLOCKER
+
+The one authorized instrumented canary is RED on the preregistered confidence
+tolerance; B5/B6 and all corpus work are stopped. The corrected green job
+`50ded71a-63c9-49da-8a95-c94e411f0a1a-u1` was durably journaled before await
+and completed: delay 1,780 ms, execution 1,196 ms. Functional canary semantics
+pass exactly: 12 chunks, 126 entities, 56 predicates, all four modalities,
+one negated predicate, both required temporal phrases, zero relations, zero
+missing/extra results, zero semantic mismatches, threshold-side selection
+match. Confidence parity fails: max absolute delta `0.0001373291015625` vs
+frozen `0.00001`; 81/126 values exceed tolerance, median delta
+`0.000015914440155029297`, and 7 exceed `0.0001`. Runner true `EXIT=1`:
+`/tmp/runpod_b4_fix_instrumented_canary.log`. No invalid-control jobs ran.
+
+The full completed provider output was preserved before abort
+(`/tmp/runpod_b4_fix_failed_parity_job_status.json`, status probe `EXIT=0`).
+Mandatory rollback is complete: green `l8l0ckyjnfzm9m` deleted, primary embed
+`k695blmk52oscm` restored max 1→2 with all other sealed fields unchanged,
+both extraction blues unchanged, secondary untouched, final census `EXIT=0`.
+Receipts: `/tmp/runpod_b4_fix_abort_delete.log`,
+`/tmp/runpod_b4_fix_embed_capacity_restore_1_to_2.log`, and
+`/tmp/runpod_b4_fix_abort_final_census.log`.
+
+I will not weaken the tolerance, redefine semantic equality, run B6, or change
+retrieval/extraction logic. The likely mechanism is device-level GPU-vs-local
+floating-point variation (all discrete/semantic outputs are stable), but that
+is INFERRED; the gate result itself is VERIFIED and terminal under the frozen
+bar. I am writing the permanent RED receipt and parking the dependent chain.
+
+## [2026-07-15T14:16:48Z] SENIOR → EXECUTOR :: RULING — fix the runtime to meet the bar before any talk of the bar
+First: the instrumentation laws worked — job journaled before await, full
+output preserved, rollback exemplary. And functionally this canary is a
+PASS in every semantic dimension: identical entities, predicates, modalities,
+negation, temporal sentinels, and — decisive — IDENTICAL SELECTION. The red
+is pure confidence-float drift (max 1.37e-4), which at CPU-arm64 vs
+CUDA-amd64 is the classic TF32/kernel-order signature.
+Ruling, discipline-preserving order:
+1. DO NOT MOVE THE PREREGISTERED BAR. Remove the variance source instead:
+   bake worker-side DETERMINISM as a versioned runtime parameter — TF32 off
+   (matmul + cuDNN), deterministic algorithms on where supported, fixed
+   reduction/thread settings. This is the same lawful parameter class as
+   max_tokens. Side benefit: production extraction becomes reproducible
+   run-to-run on RunPod, which a main-ingestion pathway should be anyway.
+2. Rebuild → in-image probe (confidence deltas vs reference locally where
+   measurable) → private push → redeploy under the standing quota remedy →
+   ONE retest canary against the UNCHANGED 1e-5 tolerance.
+3. ONLY IF determinism is proven ON and residual deltas still exceed 1e-5:
+   that residual is an irreducible platform limit — then and only then an
+   EVIDENCE-BASED respecification is lawful: selection-identity stays
+   MANDATORY (hard gate), confidence tolerance re-frozen at measured
+   residual × safety margin, recorded as a named platform-class parameter,
+   owner-vetoable. Never a post-hoc loosening without that proof.
+Throughput cost of determinism is accepted (correctness > speed for the
+lockdown; report timings).
