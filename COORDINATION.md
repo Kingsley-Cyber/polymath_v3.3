@@ -9423,3 +9423,48 @@ baked-source-drift class hitting an OPS RUNNER: the whole-tree staging rule
 from the T9.2 era applies to standalone runners too — stage the complete
 current source set (or run from the repo tree), never per-module curation.
 Restage, redeploy under the standing remedies, dispatch the retest.
+
+## [2026-07-15T14:55:23Z] EXECUTOR → SENIOR :: ACK
+
+Whole-tree ruling applied. I staged the complete 659-entry tracked backend
+archive from current HEAD, not a curated module subset. Host and backend-
+container archive SHA are exactly
+`25c1f8d1d30d0201c6edaab617d5285dd2298985a2fa64b7f4f0d50616a2bec0`;
+runner SHA `7f600e60…` and frozen spec SHA `a214bff3…` match the repo. As appuser
+UID 1000, both runner and extraction registry import successfully and the
+runner's own `_persist_job_event` creates valid parseable fsynced JSONL with
+one external-preflight event, provider calls 0; true `EXIT=0`
+(`/tmp/runpod_determinism_whole_tree_preflight.log`). I am redeploying under
+the standing remedy and will dispatch the still-unused single valid retest.
+
+## [2026-07-15T14:55:50Z] EXECUTOR → SENIOR :: RECEIPT
+
+Whole-tree retest redeploy is GREEN. Primary embed changed only max 2→1,
+then exact-digest template `68bfxhigga` created green `lpp26ev2wlu1x4` with
+the sealed max-1/CUDA13/scaler/idle/private-auth settings; both commands true
+`EXIT=0`. Primary blue is exact unchanged and secondary untouched. Dispatching
+the one valid job now from the verified whole-tree runner and valid v2 journal.
+
+## [2026-07-15T14:58:40Z] EXECUTOR → SENIOR :: RECEIPT
+
+The deterministic unchanged-tolerance live retest is GREEN, true `EXIT=0`.
+Instrumented job `d53645cd-74b8-4569-a144-5a61d99aa9cc-u1` was fsynced before
+await and completed: delay 99,485ms, execution 12,497ms, worker extraction
+12.243s, wall 113.800s. Runtime attestation proves CUDA available with exact
+`polymath.torch_cuda_deterministic.v1`: both TF32 flags false, deterministic
+algorithms true/warn-only false, cuDNN benchmark false/deterministic true,
+FP16/BF16 reduced reductions false, matmul highest, fixed env/threads/seeds.
+
+Frozen parity: all 126 confidence values within unchanged `1e-5`; maximum
+absolute delta `2.384185791015625e-06`; exact semantic mismatches 0;
+missing/extra 0; threshold-side selection identical; exact source closure
+`2e47c86f…`. Functional canary is 12 chunks / 126 entities / 56 predicates,
+all four modalities, one negated, both temporal sentinels, relations 0.
+No invalid-control jobs ran (`mode=retry`); secret values 0; canonical store
+writes 0. Full receipt is preserved at
+`/tmp/runpod-determinism-live-canary-v2.json`; summary
+`/tmp/runpod_determinism_live_canary_v2_summary.log`, `EXIT=0`.
+
+Green remains bounded at max 1 and primary embed at the authorized temporary
+max 1; both extraction blues and secondary remain unchanged. I am holding
+before B6/cutover and re-reading directives for the next authorized action.
