@@ -9664,3 +9664,52 @@ Complete tracked-backend staging archive matches host/container SHA
 `a214bff3…`. Focused suite 10/10, Black, compile, and diff checks all true
 `EXIT=0`; no endpoint/provider/corpus/store mutation. Publishing the narrow
 transport change, then proceeding to the single authorized deploy/retry cycle.
+
+## [2026-07-15T15:32:19Z] EXECUTOR → SENIOR :: RECEIPT
+
+Fresh retry deployment gate is GREEN. Pre-census had no green, primary embed
+max 2, both blue extraction endpoints exact, secondary untouched. Primary
+embed changed only 2→1, then green `hk81nfl5cnwufx` was created from exact
+template `68bfxhigga` / private digest `4cb08457…`, max 1/min 0/CUDA13;
+pre-census, capacity, and deploy receipts all true `EXIT=0`. Frozen baseline
+copies are byte-identical SHA `7615ad23…` and bind spec `a214bff3…`. Starting
+exactly controls 2 then 3 with fresh v5 journal/case receipts and 900s control
+patience; no valid request or control 1 is in this runner mode.
+
+## [2026-07-15T15:35:01Z] EXECUTOR → SENIOR :: RECEIPT
+
+B4 remaining controls are GREEN; combined B4/B5/B6 lockdown is now complete
+on live evidence. Control 2 job
+`4c20c5f1-15fb-4d5c-9372-d7018e4abefd-u1` saw warmth ready=1,
+throttled=0, then provider `FAILED` with exact
+`{success:false,error_code:extraction_contract_rejected}`, delay 9,522ms,
+execution 294ms. Control 3 job
+`347ef356-4a80-4241-bca8-c8faa3a21864-u2` saw ready=1/throttled=0 and the
+same exact named refusal, delay 387ms, execution 334ms. Both fsynced full case
+receipts before validation; runner reports two jobs, durable writes 0,
+secrets 0, true `EXIT=0`. V5 result SHA `9d6df662…`, journal SHA
+`771a6525…`, case SHAs `7983aa53…` / `560a5103…`. Together with accepted
+control 1 and accepted exact B6 replay, all three refusals and idempotence are
+banked. Green `hk81nfl5cnwufx` remains min 0/max 1 for the pre-authorized E2E;
+blue surfaces and secondary remain untouched.
+
+## [2026-07-15T15:35:01Z] EXECUTOR → SENIOR :: BLOCKER
+
+B7/E2E real-ingest handoff is contract-RED before corpus creation. VERIFIED
+from current published source: `services/runpod_flash_extraction.py` builds
+legacy `polymath.runpod_gliner_relex.v2` requests, accepts only v2/v3, maps
+through `_to_results`, and has no `polymath.runpod_local_extraction.v1`
+adapter. The locked green correctly rejects that legacy request; therefore
+pointing settings at green would fail or require a silent production-contract
+change. This is the exact additive backend test-route adapter already promised
+by the bake plan's Wire/Compatibility and B7 sections, not new scope.
+
+Please rule the cutover boundary: my proposed narrow implementation is an
+additive local-extraction-v1 path selected only for the fresh test corpus,
+with explicit green endpoint/account override, strict LocalExtractionV1
+validation and deterministic claim compilation, while legacy v2/v3 and both
+blue endpoints remain unchanged/available through E2E. Then restore primary
+embed max 2 at that test-route cutover boundary per the quota ruling. I have
+not created a corpus, changed Mongo settings, deleted/retired blue, or sent an
+incompatible job. Green is scale-to-zero and retained pending this ruling;
+the chain is stopped at B7, not aborted.
