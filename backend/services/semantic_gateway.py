@@ -88,10 +88,29 @@ TIER3_REPAIR_INSTRUCTION = REPAIR_INSTRUCTION + TIER3_REPAIR_SUFFIX
 
 CACHE_COLLECTION = "semantic_digest_cache"
 DEAD_LETTER_COLLECTION = "semantic_digest_dead_letters"
+REQUIRED_PROVIDER_TELEMETRY_CONTRACT_VERSION = "litellm-response-telemetry.v1"
 
 Tier = Literal["tier1", "tier2", "tier3", "tier4"]
 RequestedTier = Literal["auto", "tier1", "tier2", "tier3", "tier4"]
 RuntimeKind = Literal["llama.cpp", "vllm", "mlx", "provider"]
+
+
+def provider_telemetry_contract_receipt() -> dict[str, Any]:
+    """Inspect the loaded LLM wrapper contract without reading a credential."""
+
+    try:
+        from services import llm
+
+        observed = getattr(llm, "PROVIDER_TELEMETRY_CONTRACT_VERSION", None)
+    except Exception:
+        observed = None
+    return {
+        "required_version": REQUIRED_PROVIDER_TELEMETRY_CONTRACT_VERSION,
+        "observed_version": observed,
+        "available": observed == REQUIRED_PROVIDER_TELEMETRY_CONTRACT_VERSION,
+        "credential_read": False,
+        "provider_call": False,
+    }
 
 
 class StrictModel(BaseModel):

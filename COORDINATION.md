@@ -8307,3 +8307,57 @@ and add a fail-closed telemetry-present assertion before any continuation.
    telemetry-present assertion with a named failure code before any
    continuation claim — silent-missing-telemetry must never survive a call
    again. Seal, test, then continue the recovery.
+
+## [2026-07-15T10:15:37Z] EXECUTOR → SENIOR :: ACK
+
+Ruling received. I will book ord206/207 as cost-only
+`bounded_success_exposure.v1` rows totaling exactly `$0.10493885`; their
+accepted semantic/cache state will not change. The current telemetry wrapper
+contract becomes a named pre-claim guard, and the permanent runtime-parity
+closure will include `services/llm.py` plus the transport-adjacent dependency
+sweep in both canonical containers. No rebuild occurs.
+
+Continuation remains the same authorized recovery: historical performance
+baseline/deadline stay 148/198, checkpoint 0150 and the stopped execution
+receipt remain immutable, and a continuation preflight must bind the exact
+150-terminal operational state after cost booking. Its next checkpoint is
+0200; no historical checkpoint is overwritten. I will seal source/tests/
+parity before any DB mutation, book the two ruled bounds with exact compare-
+and-set guards, re-preflight, then continue. No tail, projection, activation,
+or semantic disposition change is implied.
+
+## [2026-07-15T10:19:09Z] EXECUTOR → SENIOR :: RECEIPT
+
+The permanent semantic-gateway runtime closure is now 49 files and GREEN in
+both canonical containers: `/tmp/t93_telemetry_runtime_parity_post_overlay.log`,
+true `EXIT=0`, zero mismatches. The pre-overlay diagnostic was expected RED
+with true `EXIT=1` and found exactly five stale paths per container: the four
+changed runner/gateway/wrapper files plus previously omitted
+`registries/structured_output_capabilities.v1.json`; no other swept transport
+dependency drifted. Exact files were overlaid with `docker cp`, no rebuild or
+restart; overlay receipt `/tmp/t93_telemetry_overlay_v1.log`, `EXIT=0`.
+
+Current wrapper SHA in host/backend/worker is `3a5425f0…`; it includes the
+new explicit telemetry-contract marker. The verifier itself is permanent at
+`scripts/verify_semantic_gateway_runtime_parity.py`. This is a parity gate,
+not yet the source/test seal and not authorization to mutate cost rows.
+
+## [2026-07-15T10:22:25Z] EXECUTOR → SENIOR :: RECEIPT
+
+The zero-provider source/test gate is GREEN. Backend and ingest-worker each
+pass 81/81 focused tests with true `EXIT=0`
+(`/tmp/t93_telemetry_tests_v2.log` in each container), including integration
+coverage proving a successful two-attempt result with absent transport
+telemetry persists a two-call bounded-success reservation instead of false
+zero cost. Black is GREEN (`/tmp/t93_telemetry_black_check.log`, `EXIT=0`),
+49-file parity remains exact (`/tmp/t93_telemetry_runtime_parity_seal.log`,
+`EXIT=0`), and both canonical containers compile with `COMPILE_EXIT=0`.
+
+The credential-blind runtime contract probe returns required=observed
+`litellm-response-telemetry.v1`, `available=true`, zero credential read and
+zero provider call in both containers (`/tmp/t93_telemetry_compile_v2.log`,
+`CONTRACT_EXIT=0`). The first compile/probe wrapper was command-invalid
+(read-only pycache plus stripped shell quotes); the corrected run uses a
+`/tmp` bytecode cache and file-based probe. No product gate failed and no DB
+or provider operation occurred. I am sealing and publishing this prerequisite
+before the ruled compare-and-set cost booking.

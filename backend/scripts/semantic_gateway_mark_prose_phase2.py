@@ -91,6 +91,7 @@ from services.semantic_gateway import (  # noqa: E402
     PROMPT_VERSION,
     REPAIR_PROMPT_VERSION,
     SemanticGatewayRoute,
+    provider_telemetry_contract_receipt,
     semantic_digest_prompt_hash,
     semantic_digest_repair_prompt_hash,
     semantic_digest_schema_hash,
@@ -137,6 +138,7 @@ EXECUTION_FAILURE_CODES = frozenset(
         "lane_lease_guard",
         "under_lease_baseline_guard",
         "materialization_guard",
+        "provider_telemetry_contract_guard",
     }
 )
 
@@ -722,6 +724,7 @@ async def _prepare(args: argparse.Namespace) -> ProsePhase2Prepared:
         absolute_authority = prior_basis + REMAINING_UMBRELLA_USD
         settings = get_settings()
         canonical = await _canonical_store_census(db=db, settings=settings)
+        telemetry_contract = provider_telemetry_contract_receipt()
         status_counts = Counter(str(row.get("status") or "") for row in historical_rows)
         selected_ids = {row.item.parent_id for row in selected}
         eligible_ids = {row.item.parent_id for row in base_planned}
@@ -757,6 +760,7 @@ async def _prepare(args: argparse.Namespace) -> ProsePhase2Prepared:
                 "temperature": parameter_card.temperature,
                 "thinking": parameter_card.thinking,
                 "credential_plaintext_read": False,
+                "telemetry_contract": telemetry_contract,
             },
             "selection": {
                 "selection_name": SELECTION_NAME,
@@ -846,6 +850,7 @@ async def _prepare(args: argparse.Namespace) -> ProsePhase2Prepared:
                     rebuy_ids=rebuy_ids,
                 )
                 and max_next_call <= REMAINING_UMBRELLA_USD
+                and telemetry_contract["available"] is True
             ),
         }
         if args.mode in {"resume-preflight", "resume"}:
@@ -921,6 +926,7 @@ async def _prepare(args: argparse.Namespace) -> ProsePhase2Prepared:
                 and resume_selection_identity_closes
                 and max_next_call <= REMAINING_UMBRELLA_USD
                 and resume_baseline["all_green"]
+                and telemetry_contract["available"] is True
             )
         return ProsePhase2Prepared(
             receipt=receipt,
@@ -1508,6 +1514,12 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
     prepared = await _prepare(args)
     if args.mode in {"preflight", "resume-preflight"}:
         return prepared.receipt
+    with _execution_failure_stage("provider_telemetry_contract_guard"):
+        if (
+            prepared.receipt["provider_contract"]["telemetry_contract"]["available"]
+            is not True
+        ):
+            raise PaidPassError("provider telemetry contract is unavailable")
     is_resume = args.mode == "resume"
     with _execution_failure_stage("exact_go_guard"):
         common_required = {

@@ -17,6 +17,7 @@ from services.streaming_normalizer import StreamingNormalizer, extract_stream_de
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
+PROVIDER_TELEMETRY_CONTRACT_VERSION = "litellm-response-telemetry.v1"
 
 # Markers for TRANSIENT connection failures worth retrying before the first
 # token streams (a burst-load DNS blip on the LiteLLM endpoint, a dropped
@@ -99,6 +100,8 @@ class LLMService:
     message.thinking chunks that the pinned LiteLLM proxy drops.
     Model names use provider/model format: ollama/llama3.2:3b, openai/gpt-4o
     """
+
+    provider_telemetry_contract_version = PROVIDER_TELEMETRY_CONTRACT_VERSION
 
     def __init__(self) -> None:
         """Initialize LLM service with settings."""

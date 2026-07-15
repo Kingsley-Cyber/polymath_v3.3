@@ -1,10 +1,14 @@
 from argparse import Namespace
+from decimal import Decimal
+from types import SimpleNamespace
 
 import pytest
+import scripts.semantic_gateway_mark_paid_pass as paid_pass_module
 
 from db.queue_integrity import DURABLE_JOB_COLLECTIONS
 from models.hash_taxonomy import namespace_hash
 from scripts.semantic_gateway_ugo_canary import (
+    ProviderPriceCard,
     _canonical_store_census_snapshot,
     _packet_from_parent,
 )
@@ -24,10 +28,12 @@ from scripts.semantic_gateway_mark_paid_pass import (
     TAIL_RETRY_LIMIT,
     UNPRICED_EXPOSURE_BASIS,
     UNPRICED_EXPOSURE_BOUND_USD,
+    BOUNDED_SUCCESS_EXPOSURE_BASIS,
     PlannedPacket,
     PaidPassError,
     _deterministic_fresh_selection,
     _cost_accounting,
+    _bounded_success_exposure_fields,
     _job_id,
     _phase1_tail_failure_query,
     _phase1c_timeout_tail_query,
@@ -528,6 +534,119 @@ def test_unbounded_missing_cost_remains_incomplete_and_fails_closed():
     assert ledger["actual_cost_complete"] is False
     assert ledger["budget_accounting_complete"] is False
     assert ledger["cost_accounting_state"] == "incomplete"
+
+
+def test_bounded_success_exposure_closes_budget_without_guessing_actual_cost():
+    card = ProviderPriceCard(
+        schema_version="provider-price-card.v1",
+        route_id="longcat",
+        model_id="openai/LongCat-2.0",
+        api_base="https://api.longcat.chat/openai/v1",
+        price_unit_tokens=1_000_000,
+        uncached_input_usd=0.7,
+        output_usd=2.8,
+        source_checked_at="2026-07-15T00:00:00Z",
+        source_url="https://example.invalid/card",
+    )
+    fields = _bounded_success_exposure_fields(
+        planned=_planned_packets(1)[0],
+        provider_calls=2,
+        provider_price_card=card,
+        max_output_tokens=8192,
+    )
+
+    assert fields["cost_accounting_basis"] == BOUNDED_SUCCESS_EXPOSURE_BASIS
+    assert fields["provider_calls"] == 2
+    assert fields["actual_cost_usd"] is None
+    assert fields["cost_complete"] is False
+    assert fields["cost_exposure_call_count"] == 2
+    assert (
+        fields["cost_reservation_upper_bound_usd"]
+        == fields["unpriced_exposure_upper_bound_usd"]
+    )
+    assert Decimal(str(fields["unpriced_exposure_upper_bound_usd"])) > 0
+    ledger = _cost_accounting([fields])
+    assert ledger["budget_accounting_complete"] is True
+    assert ledger["actual_cost_complete"] is False
+    assert ledger["cost_accounting_state"] == "complete_with_bounded_exposure"
+
+    mismatched = dict(fields, cost_exposure_call_count=1)
+    assert _cost_accounting([mismatched])["budget_accounting_complete"] is False
+
+
+@pytest.mark.asyncio
+async def test_success_without_transport_telemetry_persists_attempt_bound(monkeypatch):
+    card = ProviderPriceCard(
+        schema_version="provider-price-card.v1",
+        route_id="longcat",
+        model_id="openai/LongCat-2.0",
+        api_base="https://api.longcat.chat/openai/v1",
+        price_unit_tokens=1_000_000,
+        uncached_input_usd=0.7,
+        output_usd=2.8,
+        source_checked_at="2026-07-15T00:00:00Z",
+        source_url="https://example.invalid/card",
+    )
+    planned = _planned_packets(1)[0]
+    captured: dict = {}
+
+    class FakeTransport:
+        call_telemetry: list[dict] = []
+
+    class FakeGateway:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def generate(self, **_kwargs):
+            return SimpleNamespace(
+                cache_hit=False,
+                provenance=SimpleNamespace(
+                    attempts=2,
+                    output_hash="sha256:output",
+                    repair_attempted=True,
+                ),
+            )
+
+    async def fake_persist(_db, *, claimed, status, fields):
+        captured.update({"claimed": claimed, "status": status, "fields": fields})
+
+    monkeypatch.setattr(paid_pass_module, "LiteLLMProxyTransport", FakeTransport)
+    monkeypatch.setattr(paid_pass_module, "SemanticGateway", FakeGateway)
+    monkeypatch.setattr(paid_pass_module, "_persist_terminal_job", fake_persist)
+    monkeypatch.setattr(
+        paid_pass_module,
+        "_result_receipt",
+        lambda *_args, **_kwargs: {
+            "provider_calls": 0,
+            "usage": {},
+            "actual_cost_usd": None,
+            "cost_complete": False,
+            "provenance_complete": True,
+            "semantic_validation_errors": [],
+        },
+    )
+
+    result = await paid_pass_module._run_claimed_job(
+        object(),
+        claimed={"job_id": planned.job_id, "runner": "test"},
+        planned=planned,
+        config=SimpleNamespace(max_tokens=8192),
+        route=SimpleNamespace(),
+        provider_price_card=card,
+    )
+
+    assert result["provider_calls"] == 2
+    assert result["actual_cost_usd"] is None
+    assert result["cost_complete"] is False
+    assert captured["status"] == "succeeded"
+    assert captured["fields"]["cost_accounting_basis"] == (
+        BOUNDED_SUCCESS_EXPOSURE_BASIS
+    )
+    assert captured["fields"]["cost_exposure_call_count"] == 2
+    assert (
+        captured["fields"]["cost_reservation_upper_bound_usd"]
+        == captured["fields"]["unpriced_exposure_upper_bound_usd"]
+    )
 
 
 def test_phase1_checkpoint_fails_each_hard_gate_independently():

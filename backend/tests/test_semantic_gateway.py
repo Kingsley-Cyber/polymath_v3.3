@@ -5,6 +5,7 @@ import sys
 from types import SimpleNamespace
 
 import pytest
+from services import llm as llm_module
 
 from models.hash_taxonomy import namespace_hash
 from models.semantic_validator import ClaimScope, SemanticValidationContext
@@ -23,8 +24,10 @@ from services.semantic_gateway import (
     SemanticGatewayConfig,
     SemanticGatewayRoute,
     StructuredGenerationError,
+    REQUIRED_PROVIDER_TELEMETRY_CONTRACT_VERSION,
     call_tier2_grammar_constrained,
     detect_response_schema_capability,
+    provider_telemetry_contract_receipt,
     semantic_digest_cache_key,
     semantic_digest_input_hash,
     semantic_digest_prompt_hash,
@@ -33,6 +36,26 @@ from services.semantic_gateway import (
     tier3_tool_choice,
     tier3_tool_definition,
 )
+
+
+def test_provider_telemetry_contract_is_versioned_and_fail_closed(monkeypatch):
+    receipt = provider_telemetry_contract_receipt()
+    assert receipt == {
+        "required_version": REQUIRED_PROVIDER_TELEMETRY_CONTRACT_VERSION,
+        "observed_version": REQUIRED_PROVIDER_TELEMETRY_CONTRACT_VERSION,
+        "available": True,
+        "credential_read": False,
+        "provider_call": False,
+    }
+
+    monkeypatch.setattr(
+        llm_module,
+        "PROVIDER_TELEMETRY_CONTRACT_VERSION",
+        "stale-contract.v0",
+    )
+    stale = provider_telemetry_contract_receipt()
+    assert stale["available"] is False
+    assert stale["observed_version"] == "stale-contract.v0"
 
 
 def _digest_payload() -> dict:

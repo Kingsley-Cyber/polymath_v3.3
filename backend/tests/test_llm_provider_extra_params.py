@@ -6,7 +6,15 @@ import json
 
 import pytest
 
-from services.llm import LLMService
+from services.llm import PROVIDER_TELEMETRY_CONTRACT_VERSION, LLMService
+
+
+def test_llm_wrapper_exposes_versioned_provider_telemetry_contract() -> None:
+    assert PROVIDER_TELEMETRY_CONTRACT_VERSION == "litellm-response-telemetry.v1"
+    assert (
+        LLMService.provider_telemetry_contract_version
+        == PROVIDER_TELEMETRY_CONTRACT_VERSION
+    )
 
 
 def test_provider_extra_params_strip_internal_flags_and_disable_thinking() -> None:

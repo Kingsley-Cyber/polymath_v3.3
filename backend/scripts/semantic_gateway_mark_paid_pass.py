@@ -140,6 +140,7 @@ PHASE2_MAX_CONSECUTIVE_DLQ = 5
 CANARIED_MAX_PACKET_BYTES = 21_515
 UNPRICED_EXPOSURE_BOUND_USD = 0.06
 UNPRICED_EXPOSURE_BASIS = "bounded_transport_exposure.v1"
+BOUNDED_SUCCESS_EXPOSURE_BASIS = "bounded_success_exposure.v1"
 PHASE1C_READ_TIMEOUT_PAUSE_COUNT = 3
 
 
@@ -309,6 +310,29 @@ def _cost_accounting(rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
             bounded_exposure += float(bound)
             unpriced_exposure_count += 1
             continue
+        reservation = row.get("cost_reservation_upper_bound_usd")
+        provider_calls = row.get("provider_calls")
+        price_source = row.get("cost_exposure_price_source")
+        if (
+            row.get("cost_accounting_basis") == BOUNDED_SUCCESS_EXPOSURE_BASIS
+            and row.get("cost_complete") is False
+            and value is None
+            and isinstance(bound, (int, float))
+            and not isinstance(bound, bool)
+            and isinstance(reservation, (int, float))
+            and not isinstance(reservation, bool)
+            and float(bound) > 0
+            and float(bound) == float(reservation)
+            and isinstance(provider_calls, int)
+            and not isinstance(provider_calls, bool)
+            and 1 <= provider_calls <= 2
+            and row.get("cost_exposure_call_count") == provider_calls
+            and isinstance(price_source, str)
+            and price_source.startswith("provider-card:")
+        ):
+            bounded_exposure += float(bound)
+            unpriced_exposure_count += 1
+            continue
         budget_accounting_complete = False
     state = (
         "incomplete"
@@ -325,6 +349,37 @@ def _cost_accounting(rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
         "actual_cost_complete": actual_cost_complete,
         "budget_accounting_complete": budget_accounting_complete,
         "cost_accounting_state": state,
+    }
+
+
+def _bounded_success_exposure_fields(
+    *,
+    planned: PlannedPacket,
+    provider_calls: int,
+    provider_price_card: ProviderPriceCard,
+    max_output_tokens: int,
+) -> dict[str, Any]:
+    if isinstance(provider_calls, bool) or provider_calls not in {1, 2}:
+        raise PaidPassError("bounded success exposure requires one or two calls")
+    bound = worst_case_next_call_cost_usd(
+        packet_input_token_upper_bound=planned.packet_bytes,
+        max_output_tokens=max_output_tokens,
+        uncached_input_usd=provider_price_card.uncached_input_usd,
+        output_usd=provider_price_card.output_usd,
+        price_unit_tokens=provider_price_card.price_unit_tokens,
+        max_provider_calls=provider_calls,
+        safety_margin=Decimal("1.10"),
+    )
+    numeric_bound = float(bound)
+    return {
+        "provider_calls": provider_calls,
+        "actual_cost_usd": None,
+        "cost_complete": False,
+        "unpriced_exposure_upper_bound_usd": numeric_bound,
+        "cost_reservation_upper_bound_usd": numeric_bound,
+        "cost_accounting_basis": BOUNDED_SUCCESS_EXPOSURE_BASIS,
+        "cost_exposure_call_count": provider_calls,
+        "cost_exposure_price_source": provider_price_card.receipt_source,
     }
 
 
@@ -1322,6 +1377,26 @@ async def _run_claimed_job(
                     "call_cost_sources": [],
                 }
             )
+        elif receipt["cost_complete"] is not True:
+            receipt.update(
+                _bounded_success_exposure_fields(
+                    planned=planned,
+                    provider_calls=result.provenance.attempts,
+                    provider_price_card=provider_price_card,
+                    max_output_tokens=config.max_tokens,
+                )
+            )
+        bounded_success_fields = {
+            key: receipt[key]
+            for key in (
+                "unpriced_exposure_upper_bound_usd",
+                "cost_reservation_upper_bound_usd",
+                "cost_accounting_basis",
+                "cost_exposure_call_count",
+                "cost_exposure_price_source",
+            )
+            if key in receipt
+        }
         await _persist_terminal_job(
             db,
             claimed=claimed,
@@ -1337,6 +1412,7 @@ async def _run_claimed_job(
                 "cost_complete": receipt["cost_complete"],
                 "provenance_complete": receipt["provenance_complete"],
                 "semantic_replay_green": not receipt["semantic_validation_errors"],
+                **bounded_success_fields,
             },
         )
         return {
@@ -1560,7 +1636,11 @@ async def _cumulative_cost(db: Any, *, corpus_id: str) -> dict[str, Any]:
                 "actual_cost_usd": 1,
                 "cost_complete": 1,
                 "unpriced_exposure_upper_bound_usd": 1,
+                "cost_reservation_upper_bound_usd": 1,
                 "cost_accounting_basis": 1,
+                "provider_calls": 1,
+                "cost_exposure_call_count": 1,
+                "cost_exposure_price_source": 1,
             },
         )
         .to_list(length=None)
