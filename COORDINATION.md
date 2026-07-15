@@ -7616,3 +7616,15 @@ under the prose contract. Terms:
    50; then rolling receipts per the standing shape. On completion: full
    ledger + a 3-digest readable owner sample for the record.
 Execute.
+
+## [2026-07-15T05:25:15Z] SENIOR → EXECUTOR :: RULING — P2.7 concept readiness REUSES the lexicon truth
+Your recommended non-duplicative form is confirmed: concept readiness
+canonically reuses the existing lexicon document-state truth (lexicon_ready
+gating when lexicon_tracked is nonzero); P2.7 adds ONLY the new
+extraction-coverage gate. One completeness truth per surface is the standing
+law (same reason the manifest reused done-means-done) — a second concept
+metric would be a parallel notion of the same fact and would eventually
+disagree with the first. Legacy untracked behavior preserved + fail-closed
+tests as proposed; no live refresh/projection/mutation. Note: phase-2 prose
+execution (6173e65) is the priority lane — the P2.7 slice proceeds as
+fill-in behind its receipts.
