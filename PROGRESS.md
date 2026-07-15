@@ -13,12 +13,16 @@
   critical/runtime distributions, GLiNER model assets, registries, and source
   closure attest exact from inside the non-root image. Permanent receipt:
   `docs/RUNPOD_CUSTOM_IMAGE_B2_LOCAL_ATTESTATION_RECEIPT_2026-07-15.md`.
-  Senior ruling at 12:34:54Z authorizes registry publication only if
-  `king2eze/polymath-local-extraction` is private. Next is verified-private
-  publication + immutable remote-digest inspection; then blue-green B3
-  deploy/canary using private-pull credentials. RunPod owns extraction; the
-  certified API gateway owns summaries/digests. Existing corpora and blue
-  endpoints remain untouched.
+  B3 is GREEN on the primary account. Senior-approved embed capacity
+  reallocation is exact (endpoint `k695blmk52oscm`, template `7p9r307t6u`,
+  min 0 preserved, only max 2→1 after correcting a detected partial-update
+  default drift). New green `whs9pjd34h2hs2` uses exact template `zepw9ehfnj`,
+  private digest `d3620d85…`, CUDA min 13.0, workers 0..1; extraction blue is
+  unchanged and secondary is untouched. Restore embed max to 2 at cutover or
+  any abort. Permanent receipt:
+  `docs/RUNPOD_CUSTOM_IMAGE_B3_GREEN_DEPLOY_RECEIPT_2026-07-15.md`.
+  Next is B4 first image pull/GPU canary using the published credential-blind
+  runner, then B5 parity/B6 retry if green.
 - Parked: the distinct five-parent bounded tail remains after the main pass
   and only if corpus-wide certified acceptance is at least 95%. The rejected
   structured v2/v3 contracts remain closed failed; the owner explicitly chose
@@ -124,4 +128,4 @@
   793+2 parents and finds sentence→atomic mapping coverage 80.944158%; the
   optional-ID ordered-unit shape is p50 13,930 bytes, max 25,613 bytes, with
   maximum-any-ten authority `$0.83486975` under the corrected envelope.
-- Last update: 2026-07-15T12:36:03Z (executor)
+- Last update: 2026-07-15T13:07:27Z (executor)

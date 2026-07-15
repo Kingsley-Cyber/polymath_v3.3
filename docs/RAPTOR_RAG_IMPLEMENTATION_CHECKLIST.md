@@ -3858,6 +3858,65 @@ A corpus is strict-ready only when:
   `docs/RUNPOD_CUSTOM_IMAGE_B2_LOCAL_ATTESTATION_RECEIPT_2026-07-15.md`.
 - Checklist boxes closed: none; remote B2/B3 remain open.
 
+### 2026-07-15 - P2.7 custom-image B2 private remote identity / B3 quota stop
+
+- Commit: this receipt commit on `claude-continuation-20260713`; image source
+  is published commit `08385fa`.
+- Owner: full RunPod finish line authorized; senior explicitly restricted
+  registry publication to private visibility.
+- Corpus/data scope: private Docker Hub publication and RunPod control-plane
+  template/credential operations only; zero corpus/provider/durable-store
+  writes.
+- Code changes: none; operator helper remained untracked in `tmp/` and was
+  never staged.
+- Durable migration/backfill: none.
+- Before metrics: repository absent; no RunPod private-registry credentials;
+  both accounts allocated worker maxima 2 embed + 8 blue extraction.
+- After metrics: repository private; remote index `d3620d85…` and amd64 child
+  `ef7a286d…` exactly match local; two private-pull credentials stored with
+  zero secret values emitted; green endpoint count remains zero.
+- Tests by tier: authenticated/unauthenticated visibility, image config/history
+  secret scan, push true exit, raw OCI digest/child rehash, account credential
+  postcheck, and unchanged-blue census.
+- Cross-corpus test: blocked behind B3; not run.
+- Failure/rollback test: primary endpoint create correctly failed at RunPod's
+  quota gate, true `EXIT=1`; both blue extraction endpoints/config are
+  unchanged and no canary ran.
+- Deployment image/health: exact inert primary template `zepw9ehfnj`; no green
+  endpoint and no health claim.
+- Remaining risks: B3 requires quota increase, third account, or explicitly
+  authorized capacity reallocation. Permanent receipt:
+  `docs/RUNPOD_CUSTOM_IMAGE_B2_REMOTE_PUBLICATION_RECEIPT_2026-07-15.md`.
+- Checklist boxes closed: B2 remote image identity complete; B3 remains open.
+
+### 2026-07-15 - P2.7 B3 primary green control-plane deployment
+
+- Commit: this runner/receipt commit on `claude-continuation-20260713`.
+- Owner: full finish line pre-authorized; senior approved primary-only embed
+  max 2→1 reallocation with mandatory restore at cutover-or-abort.
+- Corpus/data scope: RunPod control plane only; no inference, provider, corpus,
+  or durable-store write.
+- Code changes: credential-blind green canary/parity/retry runner plus four
+  focused comparator/refusal tests.
+- Durable migration/backfill: none.
+- Before metrics: green create quota rejection at 2 embed + 8 blue extraction;
+  green endpoint count zero.
+- After metrics: primary embed exact except max=1; green endpoint
+  `whs9pjd34h2hs2`, template `zepw9ehfnj`, workers 0..1; blue unchanged;
+  secondary untouched.
+- Tests by tier: runner 4/4; compile, Black, diff true `EXIT=0`; post-mutation
+  GraphQL identity/config checks true `EXIT=0`.
+- Cross-corpus test: downstream after canary/parity; not run here.
+- Failure/rollback test: rejected quota and partial-field update candidates
+  retained; helper caught default drift and full-field correction restored it.
+  Mandatory embed max restore command is sealed for cutover-or-abort.
+- Deployment image/health: control-plane GREEN only; first image pull/GPU
+  inference remains B4.
+- Remaining risks: 5.86 GB private pull/cold start, CUDA-13 GPU compatibility,
+  B4 canary, B5 parity, B6 retry. Permanent receipt:
+  `docs/RUNPOD_CUSTOM_IMAGE_B3_GREEN_DEPLOY_RECEIPT_2026-07-15.md`.
+- Checklist boxes closed: B3 green deploy; health/canary remains open.
+
 ## Implementation Log Template
 
 Copy this section for every completed item:

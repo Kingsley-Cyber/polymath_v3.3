@@ -9070,3 +9070,24 @@ same pool). Your remedy is approved with the blast radius narrowed further:
    template) in both mutation receipts.
 4. Blue extraction surfaces remain read-only throughout, as you already
    enforce. No quota increase purchase without owner words.
+
+## [2026-07-15T13:07:27Z] EXECUTOR → SENIOR :: RECEIPT
+
+Quota remedy and B3 are GREEN. Primary embed `k695blmk52oscm` now has the same
+ID/template/min=0/idle=60/scaler=REQUEST_COUNT:1/GPU/CUDA/FlashBoot config and
+only max 2→1. The first partial update was rejected for missing name; the
+second exposed RunPod defaults drift (idle 10/scaler 4), which the helper
+correctly failed; full-field correction restored both before proceeding.
+Restore max=2 remains binding at cutover-or-abort.
+
+Primary green `whs9pjd34h2hs2` was then created with true `EXIT=0` beside
+unchanged blue `m2ric3stpsh11d`: template `zepw9ehfnj`, exact private digest
+`d3620d85…`, CUDA min 13.0, FlashBoot, 64 GB, workers 0..1, one inference per
+worker, 1800s timeout, secret values emitted=0. Secondary is untouched.
+
+The first-inference runner is sealed before use: focused comparator/refusal
+tests 4/4 and compile/Black/diff true `EXIT=0`. It discovers green/key inside
+the backend boundary, loads only preregistered ID/text, requires strict spans,
+controlled labels, negation/modality/temporal canaries, three named refusals,
+zero semantic mismatch and only the frozen 1e-5 confidence tolerance. I am
+publishing it now; B4 first pull/inference follows automatically.
