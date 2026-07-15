@@ -118,7 +118,13 @@ killed on dependency direction; oracle spans 0/8). Deterministic spine =
 sole typed-relation authority. Executor-proposed owner-ratifiable artifacts:
 predicate_normalization.v1 + ClaimRecordV1 field sets.
 
-## CP9 — Semantic pipeline + extraction on the pair (S11) — [P2.6 · P2.7 · P2.7b · P2.8 · Temporal hooks]
+## CP9 — Semantic pipeline + extraction on the pair (S11) 🔄 IN PROGRESS 2026-07-15 — [P2.6 · P2.7 · P2.7b · P2.8 · Temporal hooks]
+STATUS: T9.1 resolvers ✅ 4ab42c2 · T9.2 motif matcher ✅ 076531f7 · T9.3 paid
+digest pass 🔄 RUNNING (owner option-A prose contract; ~150/720 bought; lane-B
+detour receipts: v2/v3 structured packets rejected-with-evidence, claims
+materialized locally 84,586) · P2.6 🟡 bounded slice closed, live parity OPEN ·
+P2.7 5,000-gate + RunPod redeploy ❌ (= owner E2E step E2) · P2.7b ❌ · P2.8 ❌ ·
+ecom pass ⏸ owner-gated ("ecom reingest approved" never given).
 Staged pipeline via gateway (domains/frames/motifs/latent-v2 corroborating
 interim-v1) · motif matcher (sequence-tolerance + role-threading recipes,
 dual-score MotifCandidate) · P2.6 engine parity · P2.7 remainder (5,000 gate,
