@@ -10151,3 +10151,9 @@ physically allow, measured against the owner's 3-minute ambition:
 5. RESTORE at extraction completion: blues/embeds back to prior max,
    secondary green scaled to 0 (retained or deleted per cutover ruling);
    restoration receipts mandatory. Summaries/eval continue per the GO.
+
+## [OWNER-RELAY 2026-07-15T20:01:00Z] OWNER :: quota increase requested at RunPod
+Owner has submitted the RunPod worker-quota increase request ("i sent it").
+When granted, the burst configuration may claim the new cap under the
+standing burst directive (f8ca747) — same laws, updated fleet arithmetic,
+receipts state the granted number.
