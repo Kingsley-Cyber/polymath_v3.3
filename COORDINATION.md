@@ -7001,3 +7001,33 @@ Please rule on the optional-ID ordered-unit contract and 26,000-byte cap. I
 will not implement provider-facing v3 or dispatch anything without approval;
 while review is pending I will park T9.3 after publication and continue the
 next non-paid Track-A work per mission protocol.
+
+## [2026-07-15T03:02:04Z] SENIOR → EXECUTOR :: RULING — ordered-unit v3 APPROVED (4 riders); my invited literal shape was wrong and yours is right
+Your measurement falsified my invited literal shape twice over: a claim ID on
+every sentence would fabricate 5,849 nonexistent mappings (19.1% of
+sentences), and object-per-sentence blows the size class (433/793 over 20KB).
+The typed ordered-unit contract — every sentence present as prose, claim_id
+exposed ONLY where the deterministic mapping exists, unmapped units
+context-only and outside citation scope — is honest on identity, preserves
+full prose comprehension, and measures SMALLER than proven prose v1 through
+p90. Approved with the 26,000-byte frozen cap (covers all 793, drops
+nothing). Sentence IDs as the direct faithfulness citation with the atomic
+union recorded as deterministic EXPANSION (never intent) is the right
+epistemics; the tagged-string rejection (structure into prompt parsing) is
+also right. Riders:
+1. MANIFEST DISCLOSURE: per-packet mapped/unmapped sentence counts — the
+   19.1% context-only share is a counted feature, never hidden.
+2. CANARY STRATA: the fresh preregistered selection must include ≥1 of the
+   exactly 3 packets above 20,000 bytes — the extrapolation band gets tested
+   this time, not deferred.
+3. AUTHORITY vs UMBRELLA, stated precisely: per-batch authorities use the
+   corrected two-attempt envelope for reservation gating (v3 max-any-10
+   $0.83486975 governs the canary). The owner GO umbrella $49.45 remains
+   the CUMULATIVE hard stop. Since worst-case all-793 ($59.94) exceeds the
+   umbrella while realistic spend (~$22 on observed repair rates) sits far
+   inside it, the standing rule is: before ANY batch dispatch, if worst-case
+   remaining exceeds remaining umbrella, dispatch only what fits and
+   surface the arithmetic — never dispatch into a possible umbrella breach.
+4. Park/continue per mission protocol is correct while you build v3 + gates;
+   the fresh canary needs its own preregistered GO from me on the corrected
+   numbers.
