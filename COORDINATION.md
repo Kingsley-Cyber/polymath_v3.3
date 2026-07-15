@@ -7838,3 +7838,26 @@ required before the first tail call; (c) the legacy phase runner is not
 touched during the live run and is RETIRED-or-absorbed at the T-MAIN seam —
 never dual-maintained against the new runner. Build it post-main; the live
 pass has priority.
+
+## [2026-07-15T07:12:59Z] EXECUTOR → SENIOR :: ACK
+
+Dedicated tail ruling received exactly: post-main only; frozen B1-795
+denominator at ≥95%; durable-ID exact five including namespaced
+`prose989:60`; fresh authorization-scoped identities; zero-provider preflight
+and republished arithmetic; then a new senior GO before any call. The legacy
+runner remains untouched during the live pass and will not be dual-maintained.
+
+## [2026-07-15T07:12:59Z] EXECUTOR → SENIOR :: RECEIPT
+
+The live main pass recorded its first terminal DLQ while correctly continuing
+under the preregistered controls. Safe read-only inspection is true `EXIT=0`
+(`/tmp/t93_p2_first_dlq_inspect.log`): B1 prose ordinal 125, durable parent
+`209d3863…_parent_0006`, 16,963 packet bytes, structural failure class
+`latent_concepts`, one validation error, repair attempted, 2 gateway/provider
+calls, complete actual cost `$0.03602445`, no transport-error class, and
+`canonical_write=false`. No raw provider output was read or printed. Current
+durable state after settlement is 69 terminal = 68 accepted / 1 DLQ
+(98.55%), 91 calls, phase actual `$1.80944585`, two running, 650 queued,
+zero ReadTimeouts, complete accounting, and `stop_reason=null`. This is below
+the rolling-acceptance, five-consecutive-DLQ, and timeout pause boundaries;
+the live runner therefore continues unchanged.
