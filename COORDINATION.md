@@ -9832,3 +9832,121 @@ new files/schema and `git diff --check` are green. I am publishing, then will
 run the no-active-work census, canonical two-container rebuild, parity/pin/
 MLX attestations, both-container tests, and a no-write live adapter canary
 before corpus creation.
+
+## [2026-07-15T16:16:19Z] EXECUTOR → SENIOR :: RECEIPT
+
+B7 adapter deploy + live no-write canary are VERIFIED green. Commit `c141864`
+is published to branch + `main`; exact three-overlay rebuild true `EXIT=0`,
+both containers healthy. BOTH live MLX verifiers returned dim `1024`, the
+49-file semantic closure has `0` mismatches, the separate five-file B7 runtime
+closure is hash-identical host/backend/worker, and both containers attest exact
+spaCy/model pins, all true `EXIT=0`. Whole-tree staged canonical tests are
+`64 passed` in backend and `64 passed` in ingest-worker, each `EXIT=0` (the
+first isolated-test attempt had 63 passes + one missing relative eval fixture;
+the required whole-tree retry is the accepted receipt).
+
+Live adapter canary job `6bfcbbcb-efbd-4d02-a39c-d0ba8f523f65-u2` through
+retained green `hk81nfl5cnwufx` and encrypted account `primary` completed with
+delay `109,659ms`, execution `9,196ms`, true `EXIT=0`: 1 chunk, 7 entities,
+1 predicate, 2 deterministic claims, 0 relations, and both `winter 1911` /
+`2018 drought summer` temporal captures. Before/after counts remained zero in
+documents, parent_chunks, ghost_b_extractions, ingest_batches, and
+ingest_batch_items; safe Settings fingerprint was unchanged. Thus endpoint
+selection, encrypted-key lookup, strict remote identity validation, local
+spaCy recompile, claim compilation, and no-write boundary are live-proven.
+Per auto-GO I am proceeding to the preregistered fresh 15-document corpus;
+blue endpoints stay untouched and primary embed remains max 1.
+
+## [2026-07-15T16:18:43Z] EXECUTOR → SENIOR :: RECEIPT
+
+Fresh-corpus preregistration preflight is VERIFIED green before any corpus or
+provider write. The live verification used the frozen owner source root and
+returned true `EXIT=0`: selection SHA
+`da7b94c152dd5e72d52db1fd80a68f0cc2797d85ed1fd4899f9a8c19874eaf00`,
+retrieval SHA
+`8f70b1d375120862712fa4a44abad5ca7eb38eb0fbc7d3a3a86e79f4827bc110`,
+15 selected of 75 source files, zero source-hash mismatches, zero evidence
+anchor misses, 17 frozen queries across 3 tiers = 51 executions. Shape counts
+remain 5 direct-expert, 1 direct-fact, 4 lay-language, 4 relationship, and 3
+negative controls. No target, threshold, or selected source changed; no
+AppleDouble file is selected. I am now checking the exact real-create/ingest
+API contract and a fresh zero-active-work census before the first durable
+test-corpus write.
+
+## [2026-07-15T16:20:06Z] EXECUTOR → SENIOR :: RECEIPT
+
+The immediate pre-mutation work census is VERIFIED green with true `EXIT=0`:
+`semantic_digest_jobs.running=0`, `ingest_batches.active=0`,
+`ingest_batch_items.running=0`, `source_parse_jobs.active=0`,
+`extraction_jobs.active=0`, and `graph_promotion_jobs.active=0`. The backend
+real-create and durable local-folder batch routes are confirmed; the source
+mount is read-only at `/ingest-source`, so I will stage exactly the frozen 15
+byte-verified files under the host mount, then create the corpus through
+`POST /api/corpora` and discover its corpus ID only from that response.
+
+## [2026-07-15T16:21:59Z] EXECUTOR → SENIOR :: RECEIPT
+
+The owner-folder staging gate is VERIFIED green through the production
+`discover_local_files` path, true `EXIT=0`: exactly 15 files discovered,
+zero hash mismatches, source visible in-container at
+`/ingest-source/runpod_e2e_15doc_20260715`. The flash drive regenerated 15
+AppleDouble companions as predicted. The first host staging wrapper copied
+and hash-verified every real file but returned `EXIT=1` only because it had
+incorrectly asserted zero physical `._*` companions. I retained that failed
+log, corrected only the harness policy to the authoritative exclude rule, and
+the production path proves all 15 AppleDouble files are excluded before stat.
+No corpus/provider/database/vector/graph write occurred during either check.
+I am proceeding to the real create API with the complete frozen green adapter
+configuration, followed by response-ID-only local batch creation.
+
+## [2026-07-15T16:49:00Z] EXECUTOR → SENIOR :: BLOCKER
+
+Fresh-corpus launch preflight is RED before corpus creation because the exact
+frozen 15-file selection is not the assumed small paid E2E. A no-write run of
+the production parser/chunker in the canonical ingest-worker completed with
+true `EXIT=0` and measured `7,031` parents, `22,675` child extraction tasks,
+and `6,757` summary-required parents. This implies exactly `709` RunPod
+requests at the live adapter's resolved batch size 32 (green remains max 1;
+client/account request concurrency 8; per-request timeout 1,800s), not a small
+canary. One FACS file alone consumed about 9.5 minutes of normal chunking,
+close to the worker's 600s fallback boundary, while staying inside memory.
+
+The API summary exposure is also currently unbounded relative to the standing
+reservation law: `6,757` initial DeepSeek Flash calls, up to `20,271` calls if
+the existing two missing-artifact retry rounds fire, with one-attempt output
+cap exposure `1,729,792` tokens (three-attempt cap `5,189,376`) plus parent
+inputs. The resolver itself is GREEN and admits only
+`deepseek/deepseek-v4-flash` with encrypted key available; all unqualified Hy3
+entries are demoted. But Ghost A records token/call telemetry only, drops the
+LiteLLM response-cost header, and has no pre-claim dollar reservation or
+authorized ceiling enforcement. Therefore I cannot truthfully publish the
+required cost estimate/ceiling or call this bounded exposure. The owner's
+authorization explicitly described the E2E summaries as small; this measured
+scope is materially different.
+
+No corpus/API/provider/Mongo/Qdrant/Neo4j write has occurred. Frozen manifests,
+targets, endpoints, settings, blues, and embed max 1 are unchanged; staged
+files are retained. Please rule before any durable write: either obtain an
+owner numeric authority for this measured 22,675/6,757 scope plus approve a
+reservation-enforced summary lane, or owner-authorize a new smaller frozen
+selection/ceiling. I will not weaken or silently revise the preregistration.
+
+## [2026-07-15T16:52:03Z] SENIOR → EXECUTOR :: RULING — preregistration honesty upheld; owner decision requested; build the ceiling seam NOW
+Your refusal to launch is correct on both grounds: the measured scope
+(7,031 parents / 22,675 extraction tasks / 6,757 summary parents) is
+materially different from the "small" characterization the owner was given,
+and a summary lane with no cost telemetry, no reservation, and no ceiling
+cannot lawfully claim bounded exposure under the reservation law.
+1. ZERO-PROVIDER WORK AUTHORIZED NOW (needed under every option): retrofit
+   the Ghost A summary lane with the digest-lane accounting pattern —
+   conservative list-price cost math from its existing token telemetry,
+   pre-claim reservation against a hard authority, cumulative ceiling stop,
+   and per-run receipts. This is a permanent dividend for ALL future
+   ingests, not just the E2E.
+2. OWNER DECISION REQUESTED (posted to him with numbers): full measured
+   scope under hard ceilings vs a smaller frozen selection. No durable
+   write, corpus creation, or provider call until his words.
+3. If the owner chooses full scope, quota note: both blues are idle — a
+   temporary, reversible blue max-workers reduction to lend green 2–3 slots
+   (same reallocation class already ruled) is pre-approved to cut extraction
+   wall-time ~3–4×; restore at E2E completion.
