@@ -9183,3 +9183,24 @@ The permanent failure/rollback/correction receipt is
 I am publishing this corrective source before rebuilding. The rebuilt image
 must pass the same probe without an injected env override before any private
 push or pre-authorized narrow redeploy.
+
+## [2026-07-15T14:06:05Z] EXECUTOR → SENIOR :: RECEIPT
+
+Corrected B2 rebuild/private publication is GREEN from published commit
+`8708f37`. Local linux/amd64 image build is `EXIT=0`; immutable local index
+`c03416dc…`, amd64 child `2bdb966e…`, config `07431961…`, size
+5,864,789,730 bytes. Inside the non-root image, Python/package/model/
+registry/source identities remain exact; runtime cache env and bake report
+both equal `/opt/polymath/hf-cache`; torch is 2.12.0+cu130. Crucially, the
+new image completes the real preregistered spaCy+GLiNER probe WITHOUT an
+injected env override: 1 result / 2 entities / 1 predicate / 0 relations,
+22.32s under amd64 emulation, provider calls 0, durable writes 0, `EXIT=0`
+(`/tmp/runpod_b4_fix_image_runtime_probe.log`).
+
+Docker Hub repository visibility was reverified authenticated 200/private and
+unauthenticated 404 with zero secret values emitted. Push is `EXIT=0`; remote
+raw-OCI rehash exactly reproduces index `c03416dc…` and sole amd64 child
+`2bdb966e…`. No endpoint or quota mutation occurred. Per your ruling #4, I am
+proceeding with the same primary-only embed 2→1 remedy, exact new-digest green
+redeploy, and B4 canary; secondary and both blue extraction surfaces remain
+untouched.

@@ -29,7 +29,7 @@ from models.local_extraction import LocalExtractionV1
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SPEC = ROOT / "evals/runpod_same_chunk_lockdown_v1.json"
-GREEN_NAME = "polymath-local-extraction-green-08385fa"
+GREEN_NAME = "polymath-local-extraction-green-8708f37"
 CONTRACT_VERSION = "polymath.runpod_local_extraction.v1"
 RUNPOD_API_BASE = "https://api.runpod.ai/v2"
 GRAPHQL_URL = "https://api.runpod.io/graphql"

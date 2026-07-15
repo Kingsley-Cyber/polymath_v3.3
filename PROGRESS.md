@@ -20,8 +20,11 @@
   verifies bake/runtime path containment, adds an enforce-runtime image probe,
   and fsyncs provider job IDs before polling. Permanent receipt:
   `docs/RUNPOD_CUSTOM_IMAGE_B4_FIRST_CANARY_FAILURE_RECEIPT_2026-07-15.md`.
-  Next is publish corrective source → rebuild/attest/private-publish a new
-  immutable image → approved narrow green redeploy → B4/B5/B6.
+  Corrective source commit `8708f37` is published and the new image is locally
+  and remotely GREEN: index `c03416dc…`, amd64 child `2bdb966e…`; its real
+  no-override runtime probe passes and Docker Hub remains private. Receipt:
+  `docs/RUNPOD_CUSTOM_IMAGE_B4_CORRECTED_REBUILD_RECEIPT_2026-07-15.md`.
+  Next is approved narrow green redeploy → B4/B5/B6.
 - Parked: the distinct five-parent bounded tail remains after the main pass
   and only if corpus-wide certified acceptance is at least 95%. The rejected
   structured v2/v3 contracts remain closed failed; the owner explicitly chose
@@ -127,4 +130,4 @@
   793+2 parents and finds sentence→atomic mapping coverage 80.944158%; the
   optional-ID ordered-unit shape is p50 13,930 bytes, max 25,613 bytes, with
   maximum-any-ten authority `$0.83486975` under the corrected envelope.
-- Last update: 2026-07-15T13:42:44Z (executor)
+- Last update: 2026-07-15T14:06:05Z (executor)

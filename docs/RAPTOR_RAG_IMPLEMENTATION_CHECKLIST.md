@@ -3955,6 +3955,37 @@ A corpus is strict-ready only when:
   `docs/RUNPOD_CUSTOM_IMAGE_B4_FIRST_CANARY_FAILURE_RECEIPT_2026-07-15.md`.
 - Checklist boxes closed: none; B4 remains open.
 
+### 2026-07-15 - P2.7 B4 corrected rebuild and private publication
+
+- Commit: corrective image source `8708f37`; this receipt/runner-identity
+  commit on `claude-continuation-20260713`.
+- Owner: full finish line pre-authorized; evidence-gated redeploy approved by
+  senior after the first-canary failure class was identified and remedied.
+- Corpus/data scope: local image build/probe plus private registry publication;
+  zero RunPod endpoint, provider-setting, corpus, graph, vector, or database
+  mutation.
+- Code changes: green runner discovery identity advanced to the corrected image
+  name; no extraction/retrieval semantic change.
+- Durable migration/backfill: none.
+- Before metrics: old image deterministically could not locate its baked model
+  offline.
+- After metrics: corrected 5,864,789,730-byte image runs real offline inference
+  without override; private remote index `c03416dc…` and amd64 child
+  `2bdb966e…` equal local.
+- Tests by tier: source closure, static Docker, 147-package contract, build,
+  full asset/package attestation, no-override runtime probe, malformed handler
+  refusals, private-visibility preflight, push, and raw-OCI rehash all true
+  `EXIT=0`.
+- Cross-corpus test: not run; remains downstream of B4/B5/B6.
+- Failure/rollback test: no external compute/control-plane mutation occurred;
+  both blue endpoints and restored embed capacity remain untouched.
+- Deployment image/health: immutable corrected image is private and deployable;
+  live GPU health is not yet claimed.
+- Remaining risks: green deploy, live GPU canary, same-chunk parity/retry,
+  fresh-corpus E2E, and retrieval eval. Permanent receipt:
+  `docs/RUNPOD_CUSTOM_IMAGE_B4_CORRECTED_REBUILD_RECEIPT_2026-07-15.md`.
+- Checklist boxes closed: corrected B2 identity only; B4 remains open.
+
 ## Implementation Log Template
 
 Copy this section for every completed item:
