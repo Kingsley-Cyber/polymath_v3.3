@@ -44,10 +44,17 @@ from models.semantic_parent_packet import (
     PacketEvidenceContractV2,
     PacketEvidenceSentenceV1,
     PacketExtractionEntityV1,
+    PacketCitableSentenceUnitV3,
+    PacketEvidenceContractV3,
+    PacketSentenceCountsV3,
+    PacketSentenceUnitV3,
     PacketSelectionManifestV2,
+    SENTENCE_HYBRID_PACKET_MAX_UTF8_BYTES,
+    SENTENCE_HYBRID_PACKET_SCHEMA_VERSION,
     SelectionLaneAccountingV2,
     SemanticParentPacketAtomicClaimsV1,
     SemanticParentPacketAtomicClaimsV2,
+    SemanticParentPacketSentenceHybridV3,
 )
 from models.semantic_validator import ClaimScope, SemanticValidationContext
 from services.ingestion.claim_compiler import (
@@ -89,8 +96,9 @@ class ClaimInputError(ValueError):
 class PacketNotReadyError(ClaimInputError):
     """A B1-eligible parent has one explicit non-packet-ready reason."""
 
-    def __init__(self, reason: str) -> None:
+    def __init__(self, reason: str, **details: Any) -> None:
         self.reason = reason
+        self.details = dict(details)
         super().__init__(reason)
 
 
@@ -133,6 +141,42 @@ class BoundedAtomicParentPacketBuild:
     emitted_claim_records: tuple[ClaimRecordV1, ...]
     excluded_claim_records: tuple[ClaimRecordV1, ...]
     excluded_claim_byte_decisions: tuple[BoundedClaimByteExclusion, ...]
+
+
+@dataclass(frozen=True)
+class SentenceAtomicExpansionV3:
+    sentence_claim_id: str
+    parent_id: str
+    child_id: str
+    source_version_id: str
+    source_compilation_revision_id: str
+    atomic_claim_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class SentenceHybridParentPacketBuild:
+    packet: SemanticParentPacketSentenceHybridV3
+    context: SemanticValidationContext
+    parent_id: str
+    doc_id: str
+    entity_count: int
+    source_child_ids: tuple[str, ...]
+    source_compilation_revision_ids: tuple[str, ...]
+    ordered_evidence_sentence_ids: tuple[str, ...]
+    sentence_atomic_expansions: tuple[SentenceAtomicExpansionV3, ...]
+    source_child_order_hash: str
+    source_compilation_set_hash: str
+    sentence_order_hash: str
+    packet_utf8_bytes: int
+
+
+@dataclass(frozen=True)
+class ExpandedSentenceClaimsV3:
+    sentence_claim_ids: tuple[str, ...]
+    supporting_atomic_claim_ids: tuple[str, ...]
+    mapping_cardinalities: tuple[int, ...]
+    source_compilation_set_hash: str
+    disposition: str = "deterministic_expansion_not_semantic_selection"
 
 
 def load_bounded_selection_recipe() -> tuple[AtomicClaimPacketSelectionRecipeV2, str]:
@@ -655,6 +699,250 @@ def build_atomic_parent_packet(
         claim_count=len(claim_models),
         link_count=len(link_models),
         evidence_count=len(evidence_models),
+    )
+
+
+def _ordered_parent_child_ids(parent: Mapping[str, Any]) -> list[str]:
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for raw in parent.get("child_ids") or []:
+        child_id = str(raw).strip()
+        if child_id and child_id not in seen:
+            seen.add(child_id)
+            ordered.append(child_id)
+    return ordered
+
+
+def build_sentence_hybrid_parent_packet(
+    *,
+    corpus_id: str,
+    corpus_name: str,
+    parent: Mapping[str, Any],
+    compilation_rows: Mapping[str, ClaimCompilationMaterializationRowV1],
+    extraction_rows: Sequence[Mapping[str, Any]],
+    max_entities: int,
+) -> SentenceHybridParentPacketBuild:
+    """Build the approved ordered-unit v3 packet without provider side effects."""
+
+    source_build = build_atomic_parent_packet(
+        corpus_id=corpus_id,
+        corpus_name=corpus_name,
+        parent=parent,
+        compilation_rows=compilation_rows,
+        extraction_rows=extraction_rows,
+        max_entities=max_entities,
+    )
+    source_child_ids = _ordered_parent_child_ids(parent)
+    if set(source_child_ids) != set(
+        source_build.packet.evidence_contract.source_child_ids
+    ):
+        raise ClaimInputError("sentence-hybrid source child order does not close")
+    if any(
+        not compilation_rows[child_id].envelope.body.claims
+        for child_id in source_child_ids
+    ):
+        raise PacketNotReadyError("source_child_without_atomic_claim")
+
+    sentence_units: list[PacketCitableSentenceUnitV3 | PacketSentenceUnitV3] = []
+    ordered_evidence_ids: list[str] = []
+    expansions: list[SentenceAtomicExpansionV3] = []
+    seen_evidence_ids: set[str] = set()
+    revision_ids: list[str] = []
+    for child_id in source_child_ids:
+        row = compilation_rows[child_id]
+        revision_ids.append(row.row_id)
+        atomic_by_sentence: dict[str, set[str]] = {}
+        for claim in row.envelope.body.claims:
+            for evidence_id in claim.evidence_sentence_ids:
+                atomic_by_sentence.setdefault(evidence_id, set()).add(claim.claim_id)
+
+        child_evidence_ids: set[str] = set()
+        for ref in sorted(
+            row.evidence_refs,
+            key=lambda item: (item.start, item.end, item.evidence_ref_id),
+        ):
+            if ref.evidence_ref_id in seen_evidence_ids:
+                raise ClaimInputError(
+                    "sentence-hybrid evidence ID is duplicated across source order"
+                )
+            seen_evidence_ids.add(ref.evidence_ref_id)
+            child_evidence_ids.add(ref.evidence_ref_id)
+            ordered_evidence_ids.append(ref.evidence_ref_id)
+            atomic_claim_ids = tuple(
+                sorted(atomic_by_sentence.get(ref.evidence_ref_id, set()))
+            )
+            if atomic_claim_ids:
+                sentence_units.append(
+                    PacketCitableSentenceUnitV3(
+                        claim_id=ref.evidence_ref_id,
+                        text=ref.quote,
+                    )
+                )
+                expansions.append(
+                    SentenceAtomicExpansionV3(
+                        sentence_claim_id=ref.evidence_ref_id,
+                        parent_id=source_build.parent_id,
+                        child_id=child_id,
+                        source_version_id=row.source_version_id,
+                        source_compilation_revision_id=row.row_id,
+                        atomic_claim_ids=atomic_claim_ids,
+                    )
+                )
+            else:
+                sentence_units.append(PacketSentenceUnitV3(text=ref.quote))
+        if set(atomic_by_sentence) - child_evidence_ids:
+            raise ClaimInputError(
+                "sentence-hybrid atomic mapping references absent child evidence"
+            )
+
+    if not sentence_units:
+        raise PacketNotReadyError("zero_source_sentences")
+    mapped_count = len(expansions)
+    sentence_counts = PacketSentenceCountsV3(
+        mapped=mapped_count,
+        unmapped=len(sentence_units) - mapped_count,
+    )
+    evidence_contract = PacketEvidenceContractV3(
+        claims_interim=True,
+        sentence_order="parent_child_order_then_source_offset",
+        context_only_units_uncitable=True,
+        post_validation_mapping="sentence_claim_id_to_local_atomic_claim_ids",
+    )
+    packet_values = {
+        "packet_schema_version": SENTENCE_HYBRID_PACKET_SCHEMA_VERSION,
+        "corpus_id": source_build.packet.corpus_id,
+        "corpus_name": source_build.packet.corpus_name,
+        "doc_id": source_build.packet.doc_id,
+        "parent_id": source_build.packet.parent_id,
+        "sentence_units": [item.model_dump(mode="python") for item in sentence_units],
+        "extraction_entities": [
+            item.model_dump(
+                mode="python",
+                exclude_none=True,
+                exclude_defaults=True,
+            )
+            for item in source_build.packet.extraction_entities
+        ],
+        "sentence_counts": sentence_counts.model_dump(mode="python"),
+        "evidence_contract": evidence_contract.model_dump(mode="python"),
+    }
+    packet_utf8_bytes = len(canonical_json_v1(packet_values).encode("utf-8"))
+    if packet_utf8_bytes > SENTENCE_HYBRID_PACKET_MAX_UTF8_BYTES:
+        raise PacketNotReadyError(
+            "sentence_hybrid_packet_exceeds_byte_bound",
+            packet_utf8_bytes=packet_utf8_bytes,
+            max_packet_utf8_bytes=SENTENCE_HYBRID_PACKET_MAX_UTF8_BYTES,
+        )
+    packet = SemanticParentPacketSentenceHybridV3.model_validate(packet_values)
+    context = SemanticValidationContext.from_owner_registries(
+        parent_id=source_build.parent_id,
+        claims=tuple(
+            ClaimScope(item.sentence_claim_id, source_build.parent_id)
+            for item in expansions
+        ),
+        claim_grounded_mode=True,
+    )
+    source_compilation_set_hash = namespace_hash("input-set", frozenset(revision_ids))
+    return SentenceHybridParentPacketBuild(
+        packet=packet,
+        context=context,
+        parent_id=source_build.parent_id,
+        doc_id=source_build.doc_id,
+        entity_count=source_build.entity_count,
+        source_child_ids=tuple(source_child_ids),
+        source_compilation_revision_ids=tuple(revision_ids),
+        ordered_evidence_sentence_ids=tuple(ordered_evidence_ids),
+        sentence_atomic_expansions=tuple(expansions),
+        source_child_order_hash=namespace_hash(
+            "work",
+            {
+                "work_kind": "sentence_hybrid_source_child_order.v3",
+                "parent_id": source_build.parent_id,
+                "source_child_ids": source_child_ids,
+            },
+        ),
+        source_compilation_set_hash=source_compilation_set_hash,
+        sentence_order_hash=namespace_hash(
+            "work",
+            {
+                "work_kind": "sentence_hybrid_sentence_order.v3",
+                "parent_id": source_build.parent_id,
+                "ordered_evidence_sentence_ids": ordered_evidence_ids,
+            },
+        ),
+        packet_utf8_bytes=packet_utf8_bytes,
+    )
+
+
+def expand_sentence_claim_ids(
+    build: SentenceHybridParentPacketBuild,
+    sentence_claim_ids: Sequence[str],
+    *,
+    expected_parent_id: str,
+    expected_source_compilation_revision_ids: Sequence[str],
+) -> ExpandedSentenceClaimsV3:
+    """Expand direct sentence citations without asserting unique model intent."""
+
+    if expected_parent_id != build.parent_id:
+        raise ClaimInputError("sentence expansion parent closure drifted")
+    expected_revisions = tuple(expected_source_compilation_revision_ids)
+    if len(expected_revisions) != len(set(expected_revisions)):
+        raise ClaimInputError("sentence expansion revisions are duplicated")
+    if namespace_hash("input-set", frozenset(expected_revisions)) != (
+        build.source_compilation_set_hash
+    ):
+        raise ClaimInputError("sentence expansion compilation revisions are stale")
+
+    revision_by_child = dict(
+        zip(
+            build.source_child_ids,
+            build.source_compilation_revision_ids,
+            strict=True,
+        )
+    )
+    expansion_by_sentence: dict[str, SentenceAtomicExpansionV3] = {}
+    for row in build.sentence_atomic_expansions:
+        if row.parent_id != build.parent_id:
+            raise ClaimInputError("sentence expansion mapping crosses parent closure")
+        if revision_by_child.get(row.child_id) != row.source_compilation_revision_id:
+            raise ClaimInputError("sentence expansion mapping crosses child closure")
+        if not row.source_version_id:
+            raise ClaimInputError("sentence expansion mapping lacks source version")
+        if not row.atomic_claim_ids or row.atomic_claim_ids != tuple(
+            sorted(set(row.atomic_claim_ids))
+        ):
+            raise ClaimInputError(
+                "sentence expansion atomic mapping is empty or unstable"
+            )
+        if row.sentence_claim_id in expansion_by_sentence:
+            raise ClaimInputError("sentence expansion mapping is duplicated")
+        expansion_by_sentence[row.sentence_claim_id] = row
+
+    direct_ids = tuple(sentence_claim_ids)
+    if len(direct_ids) != len(set(direct_ids)):
+        raise ClaimInputError("sentence citations are duplicated")
+    selected: list[SentenceAtomicExpansionV3] = []
+    for sentence_id in direct_ids:
+        row = expansion_by_sentence.get(sentence_id)
+        if row is None:
+            raise ClaimInputError(
+                "sentence citation is context-only or outside closure"
+            )
+        selected.append(row)
+    atomic_ids = tuple(
+        sorted(
+            {
+                atomic_claim_id
+                for row in selected
+                for atomic_claim_id in row.atomic_claim_ids
+            }
+        )
+    )
+    return ExpandedSentenceClaimsV3(
+        sentence_claim_ids=direct_ids,
+        supporting_atomic_claim_ids=atomic_ids,
+        mapping_cardinalities=tuple(len(row.atomic_claim_ids) for row in selected),
+        source_compilation_set_hash=build.source_compilation_set_hash,
     )
 
 

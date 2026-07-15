@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+from dataclasses import replace
 
 import pytest
 from bson import BSON
@@ -10,7 +11,7 @@ from bson.codec_options import CodecOptions
 from pydantic import ValidationError
 
 from models.claim_record import ClaimArgumentV1, ClaimCompilationV1, ClaimRecordV1
-from models.hash_taxonomy import namespace_hash
+from models.hash_taxonomy import canonical_json_v1, namespace_hash
 from models.semantic_artifacts import domain_hash, make_evidence_ref
 from models.semantic_digest_claim_input import (
     CompiledChildCandidateExportV1,
@@ -20,21 +21,30 @@ from models.semantic_parent_packet import (
     ATOMIC_PACKET_SCHEMA_VERSION,
     BOUNDED_ATOMIC_PACKET_SCHEMA_VERSION,
     BOUNDED_PACKET_MAX_UTF8_BYTES,
+    SENTENCE_HYBRID_PACKET_MAX_UTF8_BYTES,
+    SENTENCE_HYBRID_PACKET_SCHEMA_VERSION,
     SemanticParentPacketAtomicClaimsV1,
     SemanticParentPacketAtomicClaimsV2,
+    SemanticParentPacketSentenceHybridV3,
     semantic_parent_packet_atomic_schema_hash,
     semantic_parent_packet_bounded_schema_hash,
+    semantic_parent_packet_sentence_hybrid_schema_hash,
 )
+from models.semantic_digest import SemanticDigestV1
+from models.semantic_validator import semantic_validate
 from services.ingestion.claim_compiler import claim_compiler_recipe_hash
 from services.ingestion.semantic_digest_claim_inputs import (
     PARSER_VERSION,
     SPACY_MODEL,
     ClaimInputError,
+    PacketNotReadyError,
     _expected_observation_bundle_id,
     build_atomic_parent_packet,
     build_bounded_atomic_parent_packet,
+    build_sentence_hybrid_parent_packet,
     compile_child_candidate,
     document_source_version_id,
+    expand_sentence_claim_ids,
     materialize_candidate_row,
     load_bounded_selection_recipe,
     validate_candidate_against_source,
@@ -73,13 +83,14 @@ def _claim(
     *,
     document_id: str = "doc:test",
     child_id: str = "child:test",
+    proposition_text: str = "Feedback changes the operating baseline.",
 ) -> ClaimRecordV1:
     return ClaimRecordV1(
         schema_version="claim_record.v1",
         claim_id=claim_id,
         document_id=document_id,
         child_id=child_id,
-        proposition_text="Feedback changes the operating baseline.",
+        proposition_text=proposition_text,
         canonical_proposition=f"feedback POSITIVE ASSERTED change baseline {claim_id}",
         claim_type="causal",
         predicate_observation_id=f"predicate-observation:{claim_id}",
@@ -152,6 +163,7 @@ def _candidate(
             evidence.evidence_ref_id,
             document_id=document_id,
             child_id=child_id,
+            proposition_text=evidence.quote,
         )
         for index in range(claim_count)
     ]
@@ -214,6 +226,93 @@ def _row(
         corpus_id="corpus:test",
         document=_document(document_id),
         child=_child(text, child_id=child_id, document_id=document_id),
+        run_id="run:test",
+        now=dt.datetime(2026, 7, 14, 20, 0, tzinfo=dt.timezone.utc),
+    )
+
+
+def _row_with_context(
+    context_text: str = "Context preserves continuity.",
+    *,
+    claim_count: int = 2,
+):
+    document = _document()
+    claim_text = "Feedback changes the operating baseline."
+    text = f"{claim_text} {context_text}"
+    child = _child(text)
+    source_version = document_source_version_id(document)
+    claim_ref = make_evidence_ref(
+        text=text,
+        start=0,
+        end=len(claim_text),
+        source_version_id=source_version,
+        hierarchy_node_id=child["chunk_id"],
+    )
+    context_ref = make_evidence_ref(
+        text=text,
+        start=len(claim_text) + 1,
+        end=len(text),
+        source_version_id=source_version,
+        hierarchy_node_id=child["chunk_id"],
+    )
+    observation_recipe = semantic_observation_recipe_hash(
+        parser_id=SPACY_MODEL,
+        parser_version=PARSER_VERSION,
+    )
+    compiler_recipe = claim_compiler_recipe_hash(observation_recipe)
+    claims = [
+        _claim(
+            f"claim:child:test:{index}",
+            claim_ref.evidence_ref_id,
+            proposition_text=claim_ref.quote,
+        )
+        for index in range(claim_count)
+    ]
+    compilation = ClaimCompilationV1(
+        schema_version="claim_compilation.v1",
+        document_id=document["doc_id"],
+        child_id=child["chunk_id"],
+        claims=claims,
+        links=[],
+        rejected_relation_ids=[],
+        unresolved_coreference_spans=[],
+        skipped_predicate_observation_ids=[],
+        same_sentence_repeated_claim_count=max(0, claim_count - 1),
+        cross_sentence_candidate_count=0,
+        cross_sentence_rejected_count=0,
+        compiler_recipe_hash=compiler_recipe,
+    )
+    source_text_hash = domain_hash("normalized-text", text)
+    candidate = CompiledChildCandidateExportV1(
+        schema_version="semantic_digest_claim_compilation_export.v1",
+        corpus_id="corpus:test",
+        document_id=document["doc_id"],
+        source_version_id=source_version,
+        child_id=child["chunk_id"],
+        source_text_hash=source_text_hash,
+        observation_bundle_id=_expected_observation_bundle_id(
+            source_version_id_=source_version,
+            child_id=child["chunk_id"],
+            source_text_hash=source_text_hash,
+            observation_recipe_hash=observation_recipe,
+        ),
+        observation_recipe_hash=observation_recipe,
+        local_extraction_recipe_hash=local_extraction_recipe_hash(),
+        normalization_registry_hash=load_normalization_identity()["hash"],
+        compiler_version="claim_compiler.v2",
+        compiler_recipe_hash=compiler_recipe,
+        spacy_library_version="3.8.14",
+        spacy_model="en_core_web_sm",
+        spacy_model_version="3.8.0",
+        parser_version=PARSER_VERSION,
+        evidence_refs=[claim_ref, context_ref],
+        compilation=compilation,
+    )
+    return materialize_candidate_row(
+        candidate,
+        corpus_id="corpus:test",
+        document=document,
+        child=child,
         run_id="run:test",
         now=dt.datetime(2026, 7, 14, 20, 0, tzinfo=dt.timezone.utc),
     )
@@ -443,6 +542,212 @@ def test_bounded_packet_rejects_raw_parent_or_quote_body_fields() -> None:
     values["parent_text"] = "must stay local"
     with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
         SemanticParentPacketAtomicClaimsV2.model_validate(values)
+
+
+def _sentence_hybrid_build():
+    row = _row_with_context()
+    return build_sentence_hybrid_parent_packet(
+        corpus_id="corpus:test",
+        corpus_name="test",
+        parent=_parent(),
+        compilation_rows={"child:test": row},
+        extraction_rows=[_extraction()],
+        max_entities=40,
+    )
+
+
+def _digest_citing(parent_id: str, claim_id: str) -> SemanticDigestV1:
+    return SemanticDigestV1(
+        schema_version="semantic_digest.v1",
+        parent_id=parent_id,
+        summary="Grounded summary.",
+        central_thesis="Grounded thesis.",
+        underlying_meanings=[
+            {
+                "text": "Grounded meaning.",
+                "supporting_claim_ids": [claim_id],
+            }
+        ],
+        domain_proposals=[],
+        frame_proposals=[],
+        latent_concepts=[],
+        motif_proposals=[],
+        conditions=[],
+        exceptions=[],
+        unresolved_interpretations=[],
+    )
+
+
+def test_sentence_hybrid_packet_preserves_all_ordered_prose_and_discloses_mapping() -> (
+    None
+):
+    built = _sentence_hybrid_build()
+    packet = built.packet
+    values = packet.provider_payload()
+
+    assert packet.packet_schema_version == SENTENCE_HYBRID_PACKET_SCHEMA_VERSION
+    assert [item.text for item in packet.sentence_units] == [
+        "Feedback changes the operating baseline.",
+        "Context preserves continuity.",
+    ]
+    assert "claim_id" in values["sentence_units"][0]
+    assert "claim_id" not in values["sentence_units"][1]
+    assert "object_kind" not in values["extraction_entities"][0]
+    assert packet.sentence_counts.mapped == 1
+    assert packet.sentence_counts.unmapped == 1
+    assert packet.evidence_contract.claims_interim is True
+    assert "claims" not in values
+    assert "provider_atomic_claims_visible" not in values["evidence_contract"]
+    assert [item.claim_id for item in built.context.claims] == [
+        built.ordered_evidence_sentence_ids[0]
+    ]
+    assert built.packet_utf8_bytes == len(canonical_json_v1(values).encode("utf-8"))
+    assert built.packet_utf8_bytes <= SENTENCE_HYBRID_PACKET_MAX_UTF8_BYTES
+
+
+def test_sentence_hybrid_order_replays_parent_child_then_source_offsets() -> None:
+    rows = {
+        "child:z": _row(
+            claim_count=1,
+            child_id="child:z",
+            text="Zeta evidence closes first.",
+        ),
+        "child:a": _row(
+            claim_count=1,
+            child_id="child:a",
+            text="Alpha evidence closes second.",
+        ),
+    }
+    kwargs = {
+        "corpus_id": "corpus:test",
+        "corpus_name": "test",
+        "parent": _parent(child_ids=["child:z", "child:a", "child:z"]),
+        "compilation_rows": rows,
+        "extraction_rows": [_extraction("child:z"), _extraction("child:a")],
+        "max_entities": 40,
+    }
+
+    first = build_sentence_hybrid_parent_packet(**kwargs)
+    replay = build_sentence_hybrid_parent_packet(**kwargs)
+
+    assert first.packet == replay.packet
+    assert first.source_child_ids == ("child:z", "child:a")
+    assert [item.text for item in first.packet.sentence_units] == [
+        "Zeta evidence closes first.",
+        "Alpha evidence closes second.",
+    ]
+    assert first.ordered_evidence_sentence_ids == (
+        rows["child:z"].evidence_refs[0].evidence_ref_id,
+        rows["child:a"].evidence_refs[0].evidence_ref_id,
+    )
+    assert first.source_child_order_hash == replay.source_child_order_hash
+    assert first.sentence_order_hash == replay.sentence_order_hash
+
+
+def test_context_only_sentence_is_absent_from_validator_scope() -> None:
+    built = _sentence_hybrid_build()
+    context_only_id = built.ordered_evidence_sentence_ids[1]
+
+    errors = semantic_validate(
+        _digest_citing(built.parent_id, context_only_id),
+        built.context,
+    )
+
+    assert any("unknown claim_id" in error for error in errors)
+
+
+def test_sentence_expansion_preserves_direct_ids_and_records_sorted_atomic_union() -> (
+    None
+):
+    built = _sentence_hybrid_build()
+    sentence_id = built.ordered_evidence_sentence_ids[0]
+
+    expanded = expand_sentence_claim_ids(
+        built,
+        [sentence_id],
+        expected_parent_id=built.parent_id,
+        expected_source_compilation_revision_ids=(
+            built.source_compilation_revision_ids
+        ),
+    )
+
+    assert expanded.sentence_claim_ids == (sentence_id,)
+    assert expanded.supporting_atomic_claim_ids == (
+        "claim:child:test:0",
+        "claim:child:test:1",
+    )
+    assert expanded.mapping_cardinalities == (2,)
+    assert expanded.disposition == "deterministic_expansion_not_semantic_selection"
+
+
+def test_sentence_expansion_fails_on_context_stale_or_cross_closure_mapping() -> None:
+    built = _sentence_hybrid_build()
+    mapped_id, context_id = built.ordered_evidence_sentence_ids
+    kwargs = {
+        "expected_parent_id": built.parent_id,
+        "expected_source_compilation_revision_ids": (
+            built.source_compilation_revision_ids
+        ),
+    }
+
+    with pytest.raises(ClaimInputError, match="context-only or outside closure"):
+        expand_sentence_claim_ids(built, [context_id], **kwargs)
+    with pytest.raises(ClaimInputError, match="revisions are stale"):
+        expand_sentence_claim_ids(
+            built,
+            [mapped_id],
+            expected_parent_id=built.parent_id,
+            expected_source_compilation_revision_ids=["revision:stale"],
+        )
+
+    cross_parent = replace(
+        built,
+        sentence_atomic_expansions=(
+            replace(built.sentence_atomic_expansions[0], parent_id="parent:other"),
+        ),
+    )
+    with pytest.raises(ClaimInputError, match="crosses parent closure"):
+        expand_sentence_claim_ids(cross_parent, [mapped_id], **kwargs)
+
+    empty_map = replace(
+        built,
+        sentence_atomic_expansions=(
+            replace(built.sentence_atomic_expansions[0], atomic_claim_ids=()),
+        ),
+    )
+    with pytest.raises(ClaimInputError, match="empty or unstable"):
+        expand_sentence_claim_ids(empty_map, [mapped_id], **kwargs)
+
+
+def test_sentence_hybrid_cap_fails_closed_without_dropping_context() -> None:
+    row = _row_with_context("x" * SENTENCE_HYBRID_PACKET_MAX_UTF8_BYTES)
+
+    with pytest.raises(
+        PacketNotReadyError,
+        match="sentence_hybrid_packet_exceeds_byte_bound",
+    ):
+        build_sentence_hybrid_parent_packet(
+            corpus_id="corpus:test",
+            corpus_name="test",
+            parent=_parent(),
+            compilation_rows={"child:test": row},
+            extraction_rows=[_extraction()],
+            max_entities=40,
+        )
+
+
+def test_sentence_hybrid_model_rejects_count_tampering() -> None:
+    values = _sentence_hybrid_build().packet.model_dump(mode="python")
+    values["sentence_counts"]["unmapped"] = 0
+
+    with pytest.raises(ValidationError, match="unmapped count disagrees"):
+        SemanticParentPacketSentenceHybridV3.model_validate(values)
+
+
+def test_sentence_hybrid_schema_hash_is_frozen() -> None:
+    assert semantic_parent_packet_sentence_hybrid_schema_hash() == (
+        "sha256:5c600d3047807541a09be38d01933b6e048f5a3f730de1b5e2cf6c48991f2e40"
+    )
 
 
 def test_packet_fails_closed_instead_of_using_parent_fallback() -> None:

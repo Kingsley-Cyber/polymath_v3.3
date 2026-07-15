@@ -21,6 +21,8 @@ ATOMIC_PACKET_SCHEMA_VERSION = "semantic_parent_packet.atomic_claims.v1"
 BOUNDED_ATOMIC_PACKET_SCHEMA_VERSION = "semantic_parent_packet.atomic_claims.v2"
 BOUNDED_SELECTION_RECIPE_VERSION = "atomic_claim_packet_selection.v2"
 BOUNDED_PACKET_MAX_UTF8_BYTES = 20_000
+SENTENCE_HYBRID_PACKET_SCHEMA_VERSION = "semantic_parent_packet.sentence_hybrid.v3"
+SENTENCE_HYBRID_PACKET_MAX_UTF8_BYTES = 26_000
 
 
 class StrictModel(BaseModel):
@@ -422,4 +424,137 @@ def semantic_parent_packet_bounded_schema_hash() -> str:
     return namespace_hash(
         "schema",
         SemanticParentPacketAtomicClaimsV2.model_json_schema(),
+    )
+
+
+class PacketSentenceUnitV3(StrictModel):
+    """Context-only prose unit; absence of ``claim_id`` is structural."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+        strict=True,
+        protected_namespaces=(),
+        str_strip_whitespace=False,
+    )
+
+    text: str = Field(min_length=1)
+
+
+class PacketCitableSentenceUnitV3(PacketSentenceUnitV3):
+    """Sentence unit backed by one or more local atomic claims."""
+
+    claim_id: str = Field(min_length=1)
+
+
+class PacketSentenceCountsV3(StrictModel):
+    mapped: int = Field(ge=0)
+    unmapped: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def validate_sentence_accounting(self) -> "PacketSentenceCountsV3":
+        if self.mapped + self.unmapped <= 0:
+            raise ValueError("sentence count disclosure must be nonempty")
+        return self
+
+
+class PacketEvidenceContractV3(StrictModel):
+    claims_interim: Literal[True]
+    sentence_order: Literal["parent_child_order_then_source_offset"]
+    context_only_units_uncitable: Literal[True]
+    post_validation_mapping: Literal["sentence_claim_id_to_local_atomic_claim_ids"]
+
+
+class SemanticParentPacketSentenceHybridV3(StrictModel):
+    packet_schema_version: Literal["semantic_parent_packet.sentence_hybrid.v3"]
+    corpus_id: str = Field(min_length=1)
+    corpus_name: str = Field(min_length=1)
+    doc_id: str = Field(min_length=1)
+    parent_id: str = Field(min_length=1)
+    sentence_units: list[PacketCitableSentenceUnitV3 | PacketSentenceUnitV3]
+    extraction_entities: list[PacketExtractionEntityV1]
+    sentence_counts: PacketSentenceCountsV3
+    evidence_contract: PacketEvidenceContractV3
+
+    def provider_payload(self) -> dict[str, object]:
+        """Return the measured provider shape with absent entity metadata omitted."""
+
+        return self.model_dump(
+            mode="python",
+            exclude_none=True,
+            exclude_defaults=True,
+        )
+
+    @model_validator(mode="after")
+    def validate_sentence_hybrid_closure(
+        self,
+    ) -> "SemanticParentPacketSentenceHybridV3":
+        if not self.sentence_units:
+            raise ValueError("sentence-hybrid packet requires source sentences")
+        if not self.extraction_entities:
+            raise ValueError("sentence-hybrid packet requires an extraction entity")
+
+        claim_ids = [
+            item.claim_id
+            for item in self.sentence_units
+            if isinstance(item, PacketCitableSentenceUnitV3)
+        ]
+        if len(claim_ids) != len(set(claim_ids)):
+            raise ValueError("sentence-hybrid claim IDs must be unique")
+        counts = self.sentence_counts
+        if counts.mapped != len(claim_ids):
+            raise ValueError("sentence mapped count disagrees with packet")
+        if counts.unmapped != len(self.sentence_units) - len(claim_ids):
+            raise ValueError("sentence unmapped count disagrees with packet")
+
+        size = len(canonical_json_v1(self.provider_payload()).encode("utf-8"))
+        if size > SENTENCE_HYBRID_PACKET_MAX_UTF8_BYTES:
+            raise ValueError("sentence-hybrid packet exceeds byte maximum")
+        return self
+
+
+def semantic_parent_packet_sentence_hybrid_schema_contract() -> dict[str, object]:
+    """Version-neutral frozen schema identity, independent of Pydantic internals."""
+
+    return {
+        "packet_schema_version": SENTENCE_HYBRID_PACKET_SCHEMA_VERSION,
+        "max_provider_packet_utf8_bytes": SENTENCE_HYBRID_PACKET_MAX_UTF8_BYTES,
+        "top_level_fields": [
+            "packet_schema_version",
+            "corpus_id",
+            "corpus_name",
+            "doc_id",
+            "parent_id",
+            "sentence_units",
+            "extraction_entities",
+            "sentence_counts",
+            "evidence_contract",
+        ],
+        "extra_fields": "forbidden",
+        "sentence_unit_variants": {
+            "citable": ["claim_id", "text"],
+            "context_only": ["text"],
+        },
+        "sentence_counts_fields": ["mapped", "unmapped"],
+        "extraction_entity_required_fields": ["canonical_name", "entity_type"],
+        "extraction_entity_optional_fields": [
+            "surface_form",
+            "object_kind",
+            "definitional_phrase",
+            "query_aliases",
+            "confidence",
+        ],
+        "provider_serialization": ("omit_absent_or_default_optional_entity_metadata"),
+        "evidence_contract_literals": {
+            "claims_interim": True,
+            "sentence_order": "parent_child_order_then_source_offset",
+            "context_only_units_uncitable": True,
+            "post_validation_mapping": ("sentence_claim_id_to_local_atomic_claim_ids"),
+        },
+    }
+
+
+def semantic_parent_packet_sentence_hybrid_schema_hash() -> str:
+    return namespace_hash(
+        "schema",
+        semantic_parent_packet_sentence_hybrid_schema_contract(),
     )

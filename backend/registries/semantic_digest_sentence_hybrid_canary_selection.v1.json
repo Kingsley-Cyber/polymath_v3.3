@@ -1,0 +1,68 @@
+{
+  "schema_version": "polymath.semantic_digest_sentence_hybrid_canary_selection.v1",
+  "selection_name": "mark-sentence-hybrid-v3.parent-digest-v6.canary.v1",
+  "packet_schema_version": "semantic_parent_packet.sentence_hybrid.v3",
+  "prompt_version": "parent-digest.v6",
+  "target_count": 10,
+  "population_rule": "packet_ready_and_parent_not_previously_purchased",
+  "historical_purchase_statuses": [
+    "blocked_missing_cached_artifact",
+    "blocked_unrecognized_status",
+    "dead_letter",
+    "dead_letter_unknown_outcome",
+    "succeeded"
+  ],
+  "population_order": [
+    "packet_utf8_bytes",
+    "parent_id"
+  ],
+  "percentile_basis_points_formula": "floor(rank_zero_based * 10000 / population_count)",
+  "bands": [
+    {
+      "band_id": "q00_q25",
+      "lower_basis_points_inclusive": 0,
+      "upper_basis_points_exclusive": 2500,
+      "selection_count": 2
+    },
+    {
+      "band_id": "q25_q50",
+      "lower_basis_points_inclusive": 2500,
+      "upper_basis_points_exclusive": 5000,
+      "selection_count": 2
+    },
+    {
+      "band_id": "q50_q75",
+      "lower_basis_points_inclusive": 5000,
+      "upper_basis_points_exclusive": 7500,
+      "selection_count": 2
+    },
+    {
+      "band_id": "q75_q90",
+      "lower_basis_points_inclusive": 7500,
+      "upper_basis_points_exclusive": 9000,
+      "selection_count": 2
+    },
+    {
+      "band_id": "top_decile_q90_q100",
+      "lower_basis_points_inclusive": 9000,
+      "upper_basis_points_exclusive": 10000,
+      "selection_count": 2
+    }
+  ],
+  "within_band_order": "namespace_hash_work_recipe_parent_packet",
+  "unique_document_across_selection": true,
+  "long_packet_threshold_bytes_exclusive": 20000,
+  "minimum_long_packet_selection_count": 1,
+  "long_packet_reservation_order": [
+    "packet_utf8_bytes_desc",
+    "parent_id"
+  ],
+  "oversize_policy": "fail_closed_no_sentence_drops",
+  "summary_faithfulness_review": {
+    "review_count": 10,
+    "summary_and_thesis_must_be_supported_by_citable_sentence_units": true,
+    "context_only_units_may_be_cited": false,
+    "unsupported_synthesis_allowed": false,
+    "atomic_expansion_disposition": "record_expansion_never_treat_as_unique_model_intent"
+  }
+}

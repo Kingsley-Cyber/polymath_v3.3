@@ -3288,6 +3288,54 @@ A corpus is strict-ready only when:
   the universal ceiling control is implemented/tested. T9.3 paid completion,
   Phase 2, tail, canonical projection, and activation remain open.
 
+### 2026-07-15 - T9.3 sentence-hybrid v3 contract and zero-provider preflight
+
+- Commit: this commit on `claude-continuation-20260713`; no provider output or
+  paid execution is included.
+- Owner: Lane B remains the owner-selected route. The senior approved ordered-
+  unit v3 with a 26KB cap and four riders at 2026-07-15T03:02:04Z, then issued
+  a separate exact canary GO only after this preflight at 03:39:13Z.
+- Corpus/data scope: mark's 795 eligible parents; 793 packet-ready and the same
+  two `source_child_without_atomic_claim` exclusions. Candidate compilations
+  were read; no corpus, canonical semantic, graph, or vector row was changed.
+- Code changes: strict citable/context-only sentence unit models; mapped/
+  unmapped per-packet disclosure; deterministic source-order builder; local
+  sentence→atomic expansion with stale/cross-closure failure; version-neutral
+  schema-contract hash; frozen five-band/long-packet selector; credential-blind
+  preflight with corrected reservations and cumulative-umbrella arithmetic.
+- Durable migration/backfill: none. The live preflight made zero provider
+  calls, credential plaintext reads, database writes, canonical writes, and
+  projection writes.
+- Before metrics: measured proposal was 793+2, 30,694 evidence sentences with
+  80.944158% mapping, max 25,613 bytes, max-any-ten `$0.83486975`. One first
+  strict serialization attempt exposed 28,041 bytes because absent optional
+  entity fields were emitted as null/defaults; it failed before any call/write.
+- After metrics: all 30,694 sentences retained, 24,845 mapped / 5,849 context-
+  only, dropped=0. Packet bytes min/p50/p90/p99/max are 3,421/13,917/15,206/
+  16,091/25,601; 3 are >20KB and 0 >26KB. Packet/schema hashes are `89ace7ed...`
+  / `5c600d30...`. Fresh population is 728 after 81 purchased parents; the
+  unique-document selection hash is `6aed7b1a...`, includes one >20KB packet,
+  and has exact authority `$0.78260930`. Max-any-ten is `$0.83466680`.
+- Tests by tier: host 28/28; backend and ingest-worker isolated canonical
+  overlays each 27 passed + one expected trained-spaCy skip. Live preflight,
+  Black, both-container compile, and diff checks all true `EXIT=0`. Receipt:
+  `docs/T9_3_SENTENCE_HYBRID_V3_PREFLIGHT_RECEIPT_2026-07-15.md`.
+- Cross-corpus test: not applicable; this is a mark-only noncanonical provider-
+  packet change and changes no retrieval or shared projection.
+- Failure/rollback test: context-only citations, stale revisions, cross-parent/
+  child mappings, empty/unstable maps, count tampering, over-26KB packets, long-
+  stratum loss, document duplication, and reservation-boundary breach fail
+  closed. Additive code can be reverted; no canonical rollback is required.
+- Deployment image/health: no rebuild, restart, endpoint mutation, or paid
+  batch. Both running image roles were tested using isolated current-source
+  overlays; protected census_scope.v2 was exactly unchanged.
+- Remaining risks: the authorized ten-packet canary is not executed in this
+  commit. Its runner must seal exact hashes and `$0.78260930`, then all accepted
+  outputs require strict faithfulness review. Phase 2 remains separately gated.
+- Checklist boxes closed: ordered-unit v3 pure contract and live zero-provider
+  preflight only. Paid canary, owner sample/window, Phase 2, tail, projection,
+  and activation remain open.
+
 ## Implementation Log Template
 
 Copy this section for every completed item:

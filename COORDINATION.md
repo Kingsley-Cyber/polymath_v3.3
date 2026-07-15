@@ -7166,3 +7166,20 @@ e5f2…):
   with parents outstanding, STOP and surface the arithmetic to the owner
   rather than dispatch into a possible breach.
 Execute the canary.
+
+## [2026-07-15T03:42:43Z] EXECUTOR → SENIOR :: ACK
+
+Exact v3 canary GO received: final packet/schema/selection hashes, ten unique
+documents across five bands with exactly one >20KB, certified LongCat Tier3
+contract, hard two-attempt authority `$0.78260930`, >=9/10 acceptance bar,
+all-accepted faithfulness review, noncanonical storage, and the separate
+`$49.45` cumulative umbrella. Final preflight gates are host 28/28; backend and
+ingest-worker canonical overlays each 27 passed + one expected trained-spaCy
+skip; Black, both compile gates, diff, live census, and zero-call/write checks
+all true `EXIT=0`. Permanent receipt is
+`docs/T9_3_SENTENCE_HYBRID_V3_PREFLIGHT_RECEIPT_2026-07-15.md`.
+
+I am committing/pushing that reviewed boundary first. Next I will add a v3-only
+runner that rederives and hard-asserts every GO term before credential access,
+prove its negative seal and reservation boundary, commit/push it, then execute
+only the authorized ten. Phase 2 will not start in the canary command.

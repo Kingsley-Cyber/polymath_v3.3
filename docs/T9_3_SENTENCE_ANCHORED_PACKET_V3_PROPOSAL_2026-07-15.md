@@ -171,10 +171,13 @@ budget ruling even if a canary passed.
 - No credential read, provider call, canonical write, or projection during
   preflight.
 
-## Open decision
+## Decision and implementation status
 
-Senior/owner approval is required for the optional-ID sentence-unit contract
-and 26,000-byte cap. If the literal “one claim ID on every sentence” rule is
-required instead, the architecture must first decide how the unmapped 19.06%
-is represented without falsely claiming an atomic link. No paid dispatch or
-v3 implementation beyond pure proposal work is authorized by this note.
+The senior approved the optional-ID ordered-unit contract and 26,000-byte cap
+at `COORDINATION.md:2026-07-15T03:02:04Z`, including counted mapped/unmapped
+disclosure, >20KB canary representation, and the separate cumulative umbrella.
+The pure implementation and live credential-blind preflight are green; exact
+results and receipt pointers are in
+`docs/T9_3_SENTENCE_HYBRID_V3_PREFLIGHT_RECEIPT_2026-07-15.md`. The senior then
+issued a separate exact ten-packet canary GO at 2026-07-15T03:39:13Z. Phase 2
+remains outside this note and separately gated.
