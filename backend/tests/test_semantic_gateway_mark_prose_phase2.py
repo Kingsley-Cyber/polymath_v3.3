@@ -7,14 +7,19 @@ import pytest
 from scripts.semantic_gateway_mark_paid_pass import PaidPassError, PlannedPacket
 from scripts.semantic_gateway_mark_prose_phase2 import (
     AUTHORIZATION_REFERENCE,
+    ABSOLUTE_AUTHORIZED_CEILING_USD,
     ESCALATED_CONCURRENCY,
     INITIAL_CONCURRENCY,
     REMAINING_UMBRELLA_USD,
     REBUY_ORDINALS,
+    ProsePhase2ResumeControl,
     _assert_go_contract,
     _phase2_selection,
     _persist_rebuy_supersessions,
+    _resume_baseline_receipt,
+    _resume_next_checkpoint,
     phase2_prose_concurrency,
+    phase2_prose_resume_stop_reason,
     phase2_prose_stop_reason,
     receipt_accounting_closes,
 )
@@ -169,6 +174,131 @@ def test_stop_reason_fails_closed_on_unbounded_cost_but_accepts_bound():
         cost_accounting_basis="bounded_transport_exposure.v1",
     )
     assert phase2_prose_stop_reason(bounded) is None
+
+
+def test_resume_latches_only_historical_red_window_until_recovery():
+    statuses = ["succeeded"] * 50
+    for index in (9, 18, 21, 23, 26, 47):
+        statuses[index] = "dead_letter"
+    rows = [_row(index, status) for index, status in enumerate(statuses)]
+    control = ProsePhase2ResumeControl(
+        baseline_terminal_count=50,
+        baseline_hash="sha256:baseline",
+    )
+
+    assert phase2_prose_resume_stop_reason(rows, control=control) is None
+    assert control.recovery_reached is False
+
+    rows.extend(_row(50 + index) for index in range(11))
+    assert phase2_prose_resume_stop_reason(rows, control=control) is None
+    assert control.recovery_reached is True
+    assert control.recovery_reached_at_terminal_count == 61
+
+
+def test_resume_keeps_nonrolling_stops_live_from_first_new_terminal():
+    rows = [_row(index) for index in range(44)]
+    rows.extend(_row(44 + index, "dead_letter") for index in range(6))
+    rows[44]["transport_error_class"] = "ReadTimeout"
+    rows[45]["transport_error_class"] = "ReadTimeout"
+    control = ProsePhase2ResumeControl(
+        baseline_terminal_count=50,
+        baseline_hash="sha256:baseline",
+    )
+
+    assert (
+        phase2_prose_resume_stop_reason(rows, control=control)
+        == "read_timeout_recurrence_pause"
+    )
+
+
+def test_resume_parks_if_recovery_misses_limit_or_later_falls():
+    control = ProsePhase2ResumeControl(
+        baseline_terminal_count=50,
+        baseline_hash="sha256:baseline",
+    )
+    rows = [_row(index) for index in range(50)]
+    assert phase2_prose_resume_stop_reason(rows, control=control) is None
+    assert control.recovery_reached is True
+
+    later = [_row(index) for index in range(44)]
+    later.extend(_row(44 + index, "dead_letter") for index in range(6))
+    assert (
+        phase2_prose_resume_stop_reason(later, control=control)
+        == "rolling_acceptance_below_90_percent_after_recovery"
+    )
+
+    missed = ProsePhase2ResumeControl(
+        baseline_terminal_count=50,
+        baseline_hash="sha256:baseline",
+    )
+    deadline = [_row(index) for index in range(50)]
+    deadline.extend(_row(50 + index) for index in range(44))
+    deadline.extend(_row(94 + index, "dead_letter") for index in range(6))
+    assert (
+        phase2_prose_resume_stop_reason(deadline, control=missed)
+        == "rolling_recovery_not_reached_by_terminal_limit"
+    )
+    assert missed.recovery_reached is False
+
+
+def test_resume_baseline_binds_exact_terminal_ranks_and_fixed_ceiling():
+    terminal = [_row(0, "dead_letter")]
+    terminal.extend(_row(index) for index in range(1, 98))
+    final_statuses = ["succeeded"] * 44 + ["dead_letter"] * 6
+    terminal.extend(
+        _row(98 + index, status) for index, status in enumerate(final_statuses)
+    )
+    for index, row in enumerate(terminal):
+        row["job_id"] = f"job:{index:03d}"
+    queued = [
+        {
+            "job_id": f"job:{148 + index:03d}",
+            "ordinal": 148 + index,
+            "status": "queued",
+        }
+        for index in range(573)
+    ]
+    cumulative = {
+        "ceiling_basis_usd": 6.955576299999998,
+        "budget_accounting_complete": True,
+    }
+
+    baseline = _resume_baseline_receipt(
+        terminal + queued,
+        selection_set_hash="sha256:selection",
+        selected_packet_set_hash="sha256:packets",
+        cumulative_cost=cumulative,
+        max_next_claim_reservation_usd=Decimal("0.09536318"),
+    )
+
+    assert baseline["all_green"] is True
+    assert baseline["terminal_count"] == 148
+    assert baseline["accepted_count"] == 141
+    assert baseline["failure_count"] == 7
+    assert baseline["rolling_window"] == {
+        "completion_rank_min": 99,
+        "completion_rank_max": 148,
+        "accepted_count": 44,
+        "failure_count": 6,
+        "failure_completion_ranks": [143, 144, 145, 146, 147, 148],
+        "identity_hash": baseline["rolling_window"]["identity_hash"],
+    }
+    assert baseline["absolute_authorized_ceiling_usd"] == str(
+        ABSOLUTE_AUTHORIZED_CEILING_USD
+    )
+    assert _resume_next_checkpoint(148) == 150
+
+    changed = [dict(row) for row in terminal + queued]
+    changed[147]["status"] = "succeeded"
+    changed_baseline = _resume_baseline_receipt(
+        changed,
+        selection_set_hash="sha256:selection",
+        selected_packet_set_hash="sha256:packets",
+        cumulative_cost=cumulative,
+        max_next_claim_reservation_usd=Decimal("0.09536318"),
+    )
+    assert changed_baseline["baseline_hash"] != baseline["baseline_hash"]
+    assert changed_baseline["all_green"] is False
 
 
 def test_concurrency_escalates_only_after_one_hundred_clean_completions():

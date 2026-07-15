@@ -2,18 +2,17 @@
 
 - Mission: CODEX_MISSION.md (CP2 → CP12)
 - Track: A4/T9.3 owner-authorized paid interim-prose Phase 2.
-- Current task: the senior-ordered read-only post-stop diagnosis is GREEN for
-  the preregistered one-resume branch. Document `333dd5a6…` owns 3/7 total and
-  3/6 rolling-window failures; the next 50 queued rows contain only one row
-  from any failure document and none from `333dd5a6…`. Accepted-row latency/
-  cost are stable, and the one `HTTPStatusError` is a single correlated 500,
-  not repeated 5xx behavior. Permanent receipt:
-  `docs/T9_3_PROSE_PHASE2_POSTSTOP_DIAGNOSIS_2026-07-15.md`.
-- Next task: publish the diagnosis, then execute the one conditionally
-  authorized resume through the exact published runner with every prompt,
-  gate, provider contract, budget law, and canonical fence unchanged. A
-  second rolling stop parks the pass for the owner. No tail, projection, or
-  activation is authorized by the diagnosis.
+- Current task: the senior-authorized bounded Phase-2 resume seam is sealed
+  GREEN. Exact baseline is 721 rows = 141 accepted / 7 DLQ / 573 queued,
+  rolling ranks 99–148 at 44/50, baseline hash `d5c7fd3…`, fixed original
+  absolute ceiling `$49.4464896999999995`, and next checkpoint 150. Expanded
+  tests are 79/79 in both containers with 36-file overlay parity. Permanent
+  receipt: `docs/T9_3_PROSE_PHASE2_RESUME_SEAL_RECEIPT_2026-07-15.md`.
+- Next task: publish the exact resume bytes and seal, then launch the one
+  authorized recovery. Only the historical window is latched; every other
+  stop is live. Recovery must occur by terminal 198, and either failure to
+  recover or a later rolling fall parks for owner. No tail, projection, or
+  activation is authorized by the seal.
 - Parked: the distinct five-parent bounded tail remains after the main pass
   and only if corpus-wide certified acceptance is at least 95%. The rejected
   structured v2/v3 contracts remain closed failed; the owner explicitly chose
@@ -30,7 +29,15 @@
   after modular completion + RunPod blue-green parity; this is not approval to
   reingest or mutate the existing ecommerce corpus. Predicate normalization v1
   and ClaimRecordV1 field sets remain owner-ratifiable.
-- Last completed subgate: T9.3 B1 prose Phase-2 rolling-stop receipt is RED /
+- Last completed subgate: T9.3 B1 prose Phase-2 bounded-resume seal is GREEN.
+  Permanent receipt:
+  `docs/T9_3_PROSE_PHASE2_RESUME_SEAL_RECEIPT_2026-07-15.md`. Final read-only
+  preflight proves exact baseline hash `d5c7fd3…`, original window ranks
+  99–148 and failure ranks 109/118/121/123/126/147, zero active work/calls/
+  writes, and no budget refresh. Backend and worker are each 79/79; immutable
+  original execution output and invalid-GO refusals are green.
+
+  T9.3 B1 prose Phase-2 rolling-stop receipt is RED /
   correctly stopped. Final settled ledger: 148 terminal, 141 accepted, 7 DLQ,
   573 queued, 0 running, 206 calls; overall attempted acceptance 95.27%, but
   the authoritative final rolling window is 44/50 = 88%. Phase ceiling basis
@@ -101,4 +108,4 @@
   793+2 parents and finds sentence→atomic mapping coverage 80.944158%; the
   optional-ID ordered-unit shape is p50 13,930 bytes, max 25,613 bytes, with
   maximum-any-ten authority `$0.83486975` under the corrected envelope.
-- Last update: 2026-07-15T09:05:03Z (executor)
+- Last update: 2026-07-15T09:37:41Z (executor)

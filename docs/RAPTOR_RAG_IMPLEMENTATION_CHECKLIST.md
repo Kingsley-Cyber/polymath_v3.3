@@ -3583,6 +3583,50 @@ A corpus is strict-ready only when:
   final ledger, tail, owner sample, projection, and activation remain open.
 - Checklist boxes closed: diagnosis only. T9.3 paid completion remains open.
 
+### 2026-07-15 - T9.3 B1 Phase-2 bounded-resume seal
+
+- Commit: this seal commit on `claude-continuation-20260713`; resume launches
+  only from the published exact bytes.
+- Owner: senior approved the bounded historical-window recovery state machine
+  at `COORDINATION.md#2026-07-15T09:10:30Z`; no further GO is required after
+  green seal publication.
+- Corpus/data scope: mark only; persisted exact 721-row selection at 148
+  terminal = 141 accepted / 7 DLQ, 573 queued, zero running. Baseline hash is
+  `sha256:d5c7fd3cd86ae961ec71ab5719c79020dbb489530c8bc97ab203bd69f734ab0c`.
+- Code changes: add exact resume-preflight/resume modes; bind the original
+  44/50 ranks 99–148 window and failure ranks; latch only that historical
+  condition; preserve every other stop; require recovery by terminal 198;
+  re-enable the original rolling gate after recovery; continue checkpoints at
+  150; refuse execution-output/checkpoint collisions.
+- Durable migration/backfill: none at seal time; no provider calls or Mongo/
+  canonical writes.
+- Before metrics: current runner would immediately re-observe the old rolling
+  stop and overwrite checkpoint paths with zero progress.
+- After metrics: recovery is bounded and exactly authorized. Original absolute
+  ceiling remains `$49.4464896999999995`; current basis
+  `$6.955576299999998`; maximum next reservation `$0.09536318`; the resume
+  does not refresh the `$46.69` umbrella.
+- Tests by tier: backend 79/79 and worker 79/79; Black and both compiles green;
+  36-file host/backend/worker parity green; invalid baseline GO expected
+  `EXIT=1` followed by identical green baseline; immutable failed-execution
+  collision expected `EXIT=1` with SHA unchanged. Final live preflight true
+  `EXIT=0`. Permanent receipt:
+  `docs/T9_3_PROSE_PHASE2_RESUME_SEAL_RECEIPT_2026-07-15.md`.
+- Cross-corpus test: not applicable; mark-only noncanonical lane. Canonical
+  census is read-only and zero active ingest/running semantic jobs are proven.
+- Failure/rollback test: missing overlay files/cards and the inappropriate
+  fresh-selection-at-resume equation failed closed without provider calls or
+  DB writes. Resume code is additive/revertible; purchased rows remain an
+  append-only ledger.
+- Deployment image/health: no rebuild/restart. Exact overlays and registries
+  are byte-identical across backend and ingest-worker.
+- Remaining risks: failure to recover by terminal 198 or a later rolling fall
+  parks for owner; second cumulative ReadTimeout and all other original stops
+  remain live. Completion, tail, owner sample, projection, and activation stay
+  open.
+- Checklist boxes closed: bounded-resume seal only. T9.3 paid completion
+  remains open.
+
 ## Implementation Log Template
 
 Copy this section for every completed item:

@@ -8120,3 +8120,39 @@ performance immediately. The design preserves every principle:
   continues at 150.
 Zero-provider specification/tests are authorized now; the resume itself
 launches on your seal receipts under this ruling — no further GO needed.
+
+## [2026-07-15T09:37:41Z] EXECUTOR → SENIOR :: RECEIPT
+
+The bounded-resume seam is GREEN and ready for publication; permanent seal:
+`docs/T9_3_PROSE_PHASE2_RESUME_SEAL_RECEIPT_2026-07-15.md`. The final
+credential-blind live preflight is true `EXIT=0`
+(`/tmp/t93_p2_resume_preflight_safe_v4.log`) and binds exactly 721 rows = 141
+accepted / 7 DLQ / 573 queued / zero running, rolling ranks 99–148 with 44
+accepted / 6 failed at ranks 109/118/121/123/126/147, baseline hash
+`d5c7fd3…`, rolling identity `04affd4f…`, exact unchanged selection
+`ee876928…`, and packet set `f867e622…`. It reports zero active ingests,
+running jobs, provider calls, DB writes, and canonical writes.
+
+The state machine matches your ruling exactly: only that historical window is
+latched; all other stops are live; recovery ≥90% re-enables the original gate;
+no recovery by terminal 198 or a later rolling fall explicitly parks for
+owner; claims cannot overshoot the recovery deadline; next checkpoint is 150.
+The original absolute ceiling remains `$49.4464896999999995` from prior basis
+`$2.7564896999999995` + `$46.69`; current basis is
+`$6.955576299999998`, remaining under the fixed ceiling
+`$42.4909134000000015`, max next reservation `$0.09536318`, and the resume
+cannot refresh the umbrella.
+
+Backend and worker expanded suites are each 79/79 (`EXIT=0`); Black, both
+compiles, and 36-file host/backend/worker parity are green. Wrong-baseline GO
+refuses with expected `EXIT=1`, followed by an identical green baseline.
+Attempting resume output at the immutable failed `execution.json` refuses
+with expected `EXIT=1` and preserves SHA `a902153e…` exactly. Three live
+preflight REDs are preserved: missing eligibility registry overlay, missing
+route/price overlay, and generic fresh-selection accounting after 141 current
+rows became certified. The last was corrected by explicitly using the
+persisted exact selection identity for resume while still disclosing the
+fresh equation as false; no selection, denominator, prompt, gate, cost, or
+durable state changed. I am pull-rebasing, staging only the seal files,
+guarding secrets/scope, committing, and dual-pushing. Per your ruling, the
+one resume then launches from those published bytes without another GO.
