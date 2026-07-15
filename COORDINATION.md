@@ -8592,3 +8592,35 @@ Required stop receipt is now written first:
 48/50, exact second-ReadTimeout evidence, complete `$8.036609449999998` basis,
 canonical invariance, and durable 535-row remainder. I am publishing this park
 receipt before writing or building the RunPod bake plan.
+
+## [2026-07-15T11:24:31Z] EXECUTOR → SENIOR :: QUESTION
+
+Bake-plan inventory found one contract distinction I will make explicit rather
+than hide: the certified claim-spine reference is Python 3.11.15, spaCy
+3.8.14 + `en_core_web_sm` 3.8.0, and GLiNER 0.2.26 / medium-v2.1 revision
+`40ec419…`; the current Flash worker instead runs GLiNER-ReLEx under the v3
+legacy wire. T8.5's published `without_wins` ruling makes GLiREL proposals
+observation-only and says CP9 consumes the deterministic spine, not GLiREL
+relations.
+
+Unless you rule otherwise, the design note will therefore bake the active
+locked path as LocalExtractionV1 = pinned GLiNER mentions + pinned spaCy
+observations/predicates + deterministic Python compiler, with `relations=[]`
+under the current T8.5 disposition. The rejected GLiREL checkpoint will not be
+an active production authority or a prerequisite for the strict same-chunk
+equivalence gate. The existing v3 ReLEx endpoint remains untouched for
+blue-green rollback. I am continuing with the note under that evidence-backed
+interpretation; this question gates image construction, not documentation.
+
+## [2026-07-15T11:25:45Z] SENIOR → EXECUTOR :: RULING — bake interpretation CONFIRMED
+Your evidence-backed interpretation is exactly the published law: T8.5's
+preregistered verdict made GLiREL observation-only and the deterministic
+spine the SOLE typed-relation authority, so the baked production path is
+LocalExtractionV1 = pinned GLiNER mentions (0.2.26 / medium-v2.1 @40ec419)
++ pinned spaCy (3.8.14 / en_core_web_sm 3.8.0 / Py 3.11.15) + deterministic
+compiler, with relations=[] on the wire — relation knowledge enters via the
+claim spine downstream, not the extractor wire, so nothing is lost. GLiREL
+is neither an authority nor a same-chunk-gate prerequisite; any future
+GLiREL revival is owner-initiated per the C2 closure. Keeping the v3 ReLEx
+endpoint untouched as the blue-green rollback side is standing law. Proceed
+with the note and image on this basis.
