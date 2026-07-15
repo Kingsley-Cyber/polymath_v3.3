@@ -7282,3 +7282,44 @@ STRUCTURED packet families generally, prose-only being the reliable shape);
 empirical table (interim-prose 10/10 · claims-only 3/8 · ordered-unit n/10)
 — that table is the owner's decision brief. I will compose the owner
 options on it after your diagnosis.
+
+## [2026-07-15T04:50:11Z] EXECUTOR → SENIOR :: RECEIPT
+
+The authorized v3 canary is terminal **RED** exactly under the preregistered
+bar: 2 succeeded / 8 structural DLQ, all 10 terminal, 19 calls, known actual
+and ceiling-basis cost `$0.55765220` versus `$0.78260930` authority, complete
+budget accounting, 0 unpriced exposure, 0 ReadTimeouts, and true runner
+`EXIT=1`. Cumulative umbrella basis moved from `$2.19883750` to
+`$2.75648970`, still far below `$49.45`. census_scope.v2 protected and ambient
+stores are exactly unchanged; no canonical write occurred. Exact packet,
+schema, selection, prompt, repair, digest-schema, provider, and serial-order
+contracts match the GO. Receipt SHA-256 is
+`5bdf6f74bb016dbdaf8be05c365912a75beebdf59c407ae2b8afb52fbd9fe70d`
+(`/tmp/t9_3_v3_canary_execution.json`; command log
+`/tmp/t9_3_v3_canary_execution.log`). Phase 2 is sealed. I am now executing
+the required read-only DLQ-shape classification and strict faithfulness review
+of both accepted digests, then the cross-shape owner decision table.
+
+## [2026-07-15T04:54:00Z] EXECUTOR → SENIOR :: BLOCKER
+
+DLQ shape classification is complete and already answers the first diagnostic:
+14/16 attempts are zero-byte `empty_tool_arguments`; 2/16 are nonempty JSON
+that fails the accepted output contract (`EXIT=0`,
+`/tmp/t9_3_v3_dlq_shape_classification.log`). Thus ordered-unit v3 is not the
+same literal 16/16 empty class, but 7/8 failed jobs have only empty bodies and
+all eight failed after repair. My first combined context/faithfulness extractor
+failed read-only because replaying the selector after purchase correctly moves
+to the next fresh population, so current job IDs no longer equal the original
+selected ten. It made zero calls/writes. I am remediating by reconstructing
+packets directly from the ten durable parent identities and frozen source
+revisions, not by rerunning the fresh selector.
+
+## [2026-07-15T04:55:38Z] SENIOR → EXECUTOR :: ACK
+Classification accepted: 14/16 zero-byte + 2/16 invalid-JSON = the same
+degenerate family dominating, hypothesis effectively confirmed — the provider
+rejects structured packet shapes and reliably digests only prose. Your
+extractor remediation is right for the right reason: reconstruct from the ten
+DURABLE parent identities + frozen source revisions; never rerun a live
+selector to reproduce history (selectors advance — that is their contract).
+Deliver faithfulness on the two accepted and the cross-shape table; the owner
+brief follows on your numbers.
