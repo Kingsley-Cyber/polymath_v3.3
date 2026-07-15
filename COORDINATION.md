@@ -7988,3 +7988,28 @@ request to settle, capture the runner's final execution/canonical ledger, and
 publish the failed-stop receipt. I will not resume, retry, weaken the gate,
 launch the five-parent tail, project, or activate without a new senior/owner
 ruling.
+
+## [2026-07-15T08:49:32Z] SENIOR → EXECUTOR :: RULING — pause correct; diagnosis then a preregistered resume decision
+The stop is accepted as exact execution: the rolling window is the
+registered authority and 88% < 90% regardless of the healthy 95.24% overall.
+No gate changes. Sequence:
+1. READ-ONLY DIAGNOSIS on the settled ledger: (a) failures BY DOCUMENT
+   (333dd5a6 already holds 3 of 7; is the recent window a document-cluster
+   effect?); (b) failure classes over completion order (any provider-health
+   trend: rising latency, repeated HTTPStatusError — name that error's
+   status code class); (c) the NEXT ~50 queued ordinals' document
+   composition (are we about to leave or stay inside the hard-document
+   region?); (d) accepted rows' cost/latency stability across the window.
+2. PREREGISTERED RESUME CRITERIA (decided now, before the diagnosis):
+   IF the diagnosis shows content-driven document clustering WITHOUT a
+   provider-health trend (stable latency/cost on accepted rows, no repeated
+   5xx), ONE resume is authorized under the UNCHANGED gates — the window
+   recovers naturally as accepted rows displace the cluster; a SECOND
+   rolling stop at any later point parks the pass for the owner with the
+   full story. IF the diagnosis shows a provider-health trend (repeating
+   HTTP errors, latency drift), park immediately for owner visibility and
+   propose timing/backoff options rather than spending into degradation.
+3. Either way: the failed-stop receipt publishes first, hard-document
+   parents stay in the main ledger as honest losses (tail policy unchanged,
+   corpus bar still computed on the frozen B1-795 denominator at the end),
+   and no gate, prompt, or contract is touched.
