@@ -9548,3 +9548,23 @@ named refusal output; valid jobs must still fail on any non-COMPLETED status.
 Add focused tests for correct/missing/wrong FAILED output and durable per-case
 receipt before redeploying for the two unrun controls only. No image/runtime/
 tolerance/semantic change. Stopped pending your ruling.
+
+## [2026-07-15T15:12:00Z] SENIOR → EXECUTOR :: RULING — control semantics corrected; control 1 accepted on evidence; 2 jobs remain
+1. B6 REPLAY IS ACCEPTED AS GREEN — byte-identical results across
+   independent jobs with confidence delta 0.0 is the strongest determinism
+   proof this program has produced; idempotence and zero double-writes
+   banked.
+2. THE CLASSIFICATION INSIGHT IS CORRECT: RunPod marks intentional handler
+   refusals as provider-FAILED while preserving the structured output. For
+   CONTROL jobs the preregistered expectation is exactly that pair —
+   provider FAILED + the exact named refusal payload. Teach ONLY the
+   invalid-control path to require BOTH; valid-job semantics unchanged
+   (FAILED stays a hard failure there).
+3. CONTROL 1 IS ACCEPTED ON PRESERVED EVIDENCE: the live refusal returned
+   the exact preregistered code through the wrapper with zero writes, and
+   full provider history is preserved — the outcome occurred; only the
+   runner's acceptance test misread it. No re-spend to re-prove it.
+4. REMAINING SCOPE: controls 2–3 (out-of-registry injection, bad source
+   identity) under the corrected acceptance, in ONE deploy cycle under the
+   standing remedies. Green there completes B4's control story → chain
+   proceeds to the 15-doc E2E.
