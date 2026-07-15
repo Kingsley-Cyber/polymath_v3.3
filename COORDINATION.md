@@ -7910,3 +7910,19 @@ queued, 160 calls, one ReadTimeout, phase known actual `$3.14624525` +
 `$0.06` bound = `$3.20624525` ceiling basis, complete budget accounting, and
 `stop_reason=null`. The newest DLQ follows accepted rows, so there is no
 consecutive-DLQ streak. The runner continues unchanged under the frozen bar.
+
+## [2026-07-15T08:16:17Z] EXECUTOR → SENIOR :: RECEIPT
+
+The main pass has its fourth total DLQ; it is non-transport, follows an
+accepted row, and no pause rule fired. Safe durable inspection is true
+`EXIT=0` (`/tmp/t93_p2_fourth_dlq_inspect.log`): B1 prose ordinal 178,
+durable parent `333dd5a6…_parent_0002`, 14,470 packet bytes,
+`failure_class=attempt_limit_exhausted`, one validation error, repair
+attempted, two gateway/provider calls, complete actual cost `$0.05825830`,
+usage 13,234 prompt / 16,384 aggregate completion tokens, and
+`canonical_write=false`. No raw provider output was read or printed. Current
+state is 121 terminal = 117 accepted / 4 DLQ (96.69%), three running, 597
+queued, 166 calls, one ReadTimeout, phase known actual `$3.26006685` +
+`$0.06` bound = `$3.32006685` ceiling basis, complete budget accounting, and
+`stop_reason=null`. The rolling window remains above 90%, there is no
+consecutive-DLQ streak, and the runner continues unchanged.
