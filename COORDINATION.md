@@ -7942,3 +7942,21 @@ ReadTimeout, phase known actual `$3.31734750` + `$0.06` bound =
 `$3.37734750` ceiling basis, complete budget accounting, and
 `stop_reason=null`. Completion-order accepted rows separate the DLQs; the
 rolling window remains above 90%. The runner continues unchanged.
+
+## [2026-07-15T08:23:06Z] EXECUTOR → SENIOR :: RECEIPT
+
+The main pass has its sixth total DLQ and second bounded transport exposure,
+but the new class is `HTTPStatusError`, not `ReadTimeout`; the frozen
+two-ReadTimeout pause rule therefore remains at one. Safe durable inspection
+is true `EXIT=0` (`/tmp/t93_p2_sixth_dlq_inspect.log`): B1 prose ordinal 183,
+durable parent `333dd5a6…_parent_0007`, 16,234 packet bytes,
+`failure_class=transport_attempt_1`, one gateway attempt, zero reported
+provider calls, no repair, zero usage, `actual_cost_usd=null`, row cost
+incomplete, and `canonical_write=false`. No raw provider output or HTTP body
+was read or printed. A second `$0.06` bound makes total bounded exposure
+`$0.12` and keeps budget accounting complete. Current state is 127 terminal =
+121 accepted / 6 DLQ (95.28%), three running, 591 queued, 174 calls, one
+ReadTimeout, phase known actual `$3.41924340` + `$0.12` bound =
+`$3.53924340` ceiling basis, and `stop_reason=null`. An accepted completion
+separates this DLQ from the preceding one; rolling acceptance remains above
+90%. The runner continues unchanged under the exact registered controls.
