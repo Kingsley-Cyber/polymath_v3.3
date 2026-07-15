@@ -116,6 +116,10 @@ any failed or green seal gate.
 - First-50 checkpoint is GREEN: 50/50 accepted, zero dead letters/timeouts,
   true inspection `EXIT=0`; permanent receipt:
   `docs/T9_3_PROSE_PHASE2_CHECKPOINT_0050_RECEIPT_2026-07-15.md`.
+- Checkpoint 0100 is GREEN: 99/100 accepted, one structural DLQ, zero
+  ReadTimeouts, concurrency correctly remains 3, true inspection `EXIT=0`;
+  permanent receipt:
+  `docs/T9_3_PROSE_PHASE2_CHECKPOINT_0100_RECEIPT_2026-07-15.md`.
 - Subsequent rolling checkpoints.
 - Final 721-row ledger or boundary-stop ledger.
 - Three readable accepted digests for the owner record.

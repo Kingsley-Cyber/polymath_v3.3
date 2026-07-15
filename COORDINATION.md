@@ -7861,3 +7861,19 @@ durable state after settlement is 69 terminal = 68 accepted / 1 DLQ
 zero ReadTimeouts, complete accounting, and `stop_reason=null`. This is below
 the rolling-acceptance, five-consecutive-DLQ, and timeout pause boundaries;
 the live runner therefore continues unchanged.
+
+## [2026-07-15T07:49:59Z] EXECUTOR → SENIOR :: RECEIPT
+
+The immutable checkpoint 0100 boundary is GREEN, true inspection `EXIT=0`
+(`/tmp/t93_p2_checkpoint_0100_inspect.log`): 100 terminal / 99 accepted / 1
+structural DLQ = 99% acceptance, zero ReadTimeouts, and no stop reason. Since
+the first 100 are not 100/100 clean, the preregistered escalation condition is
+false and concurrency correctly remains 3. One request was in flight at
+checkpoint emission, so cumulative accounting is honestly complete with
+bounded exposure: `$5.3598194999999995` known actual + `$0.06` bound =
+`$5.419819499999999` ceiling basis, below the absolute
+`$49.4464896999999995` guard. `canonical_store_census.scope.v2` is valid;
+protected stores are exactly unchanged and ambient Qdrant change is false.
+Permanent receipt:
+`docs/T9_3_PROSE_PHASE2_CHECKPOINT_0100_RECEIPT_2026-07-15.md`. The pass
+continues unchanged at concurrency 3.

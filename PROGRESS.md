@@ -3,11 +3,13 @@
 - Mission: CODEX_MISSION.md (CP2 → CP12)
 - Track: A4/T9.3 owner-authorized paid interim-prose Phase 2.
 - Current task: the published owner/senior-authorized B1 prose Phase-2 pass is
-  live over the exact 721-parent population. Checkpoint 0050 is GREEN at
-  50/50 accepted, zero dead letters, zero ReadTimeouts, concurrency 3, and
-  cumulative ceiling basis `$3.9983889499999994` including one `$0.06`
-  bounded in-flight exposure. Protected canonical stores are exactly
-  unchanged under `canonical_store_census.scope.v2`.
+  live over the exact 721-parent population. Checkpoint 0100 is GREEN at
+  99/100 accepted, one structural `latent_concepts` DLQ, zero ReadTimeouts,
+  and no stop reason. The clean-first-100 escalation condition is false, so
+  concurrency correctly remains 3. Cumulative ceiling basis is
+  `$5.419819499999999` including one `$0.06` bounded in-flight exposure;
+  protected canonical stores are exactly unchanged under
+  `canonical_store_census.scope.v2`.
 - Next task: continue non-invasive monitoring through exact rolling
   checkpoints and the completion/budget boundary. Capture the final ledger
   and three-digest owner sample. Do not rebuild, deploy, project, or activate
@@ -28,7 +30,14 @@
   after modular completion + RunPod blue-green parity; this is not approval to
   reingest or mutate the existing ecommerce corpus. Predicate normalization v1
   and ClaimRecordV1 field sets remain owner-ratifiable.
-- Last completed subgate: T9.3 B1 prose Phase-2 checkpoint 0050 is GREEN.
+- Last completed subgate: T9.3 B1 prose Phase-2 checkpoint 0100 is GREEN.
+  Permanent receipt:
+  `docs/T9_3_PROSE_PHASE2_CHECKPOINT_0100_RECEIPT_2026-07-15.md`. The exact
+  boundary is 100 terminal / 99 accepted / 1 structural DLQ, acceptance 99%,
+  zero ReadTimeouts, no stop reason, concurrency 3, and protected
+  canonical-store invariance.
+
+  T9.3 B1 prose Phase-2 checkpoint 0050 is also GREEN.
   Permanent receipt:
   `docs/T9_3_PROSE_PHASE2_CHECKPOINT_0050_RECEIPT_2026-07-15.md`. The exact
   boundary is 50 terminal / 50 accepted, acceptance 100%, no dead letters,
@@ -83,4 +92,4 @@
   793+2 parents and finds sentence→atomic mapping coverage 80.944158%; the
   optional-ID ordered-unit shape is p50 13,930 bytes, max 25,613 bytes, with
   maximum-any-ten authority `$0.83486975` under the corrected envelope.
-- Last update: 2026-07-15T06:52:14Z (executor)
+- Last update: 2026-07-15T07:49:59Z (executor)
