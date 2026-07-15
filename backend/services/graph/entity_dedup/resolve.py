@@ -12,10 +12,15 @@ survivor so those follow through instead of silently dropping the entity.
 Merges are single-level by design (a survivor is never itself a dup in the same
 run), so one hop suffices; we loop-guard anyway in case of chained runs.
 """
+
 from typing import Iterable
 
+ENTITY_ID_RESOLUTION_BATCH_SIZE = 100
 
-async def resolve_entity_ids(session, ids: Iterable[str], *, max_hops: int = 3) -> dict[str, str]:
+
+async def resolve_entity_ids(
+    session, ids: Iterable[str], *, max_hops: int = 3
+) -> dict[str, str]:
     """Return {original_id: survivor_id} for any id that has been merged away.
     Ids that are still live (no tombstone) are omitted, so callers can do
     `mapping.get(i, i)`."""
@@ -23,13 +28,17 @@ async def resolve_entity_ids(session, ids: Iterable[str], *, max_hops: int = 3) 
     if not pending:
         return {}
     mapping: dict[str, str] = {}
-    q = ("UNWIND $ids AS i "
+    q = (
+        "UNWIND $ids AS i "
          "MATCH (t:Entity {entity_id: 'tombstone:' + i}) "
          "WHERE t.merged_into IS NOT NULL "
-         "RETURN i AS orig, t.merged_into AS sur")
+        "RETURN i AS orig, t.merged_into AS sur"
+    )
     for _ in range(max_hops):
-        res = await session.run(q, ids=pending)
         hop: dict[str, str] = {}
+        for idx in range(0, len(pending), ENTITY_ID_RESOLUTION_BATCH_SIZE):
+            batch = pending[idx : idx + ENTITY_ID_RESOLUTION_BATCH_SIZE]
+            res = await session.run(q, ids=batch)
         async for r in res:
             row = dict(r)
             orig = row.get("orig")

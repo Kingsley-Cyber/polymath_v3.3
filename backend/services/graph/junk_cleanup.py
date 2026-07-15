@@ -99,9 +99,9 @@ RETURN matched
 _DELETE_ORPHAN_FACTS = """
 MATCH (f:Fact)
 WHERE NOT EXISTS { MATCH (:Entity)-[:HAS_FACT]->(f) }
-WITH collect(f) AS facts, count(f) AS matched
-FOREACH (fact IN facts | DETACH DELETE fact)
-RETURN matched
+WITH f LIMIT $batch_size
+DETACH DELETE f
+RETURN count(f) AS matched
 """
 
 
@@ -152,11 +152,17 @@ async def apply_cleanup(session, *, batch_size: int) -> dict[str, Any]:
         if deleted == 0:
             break
 
-    orphan_facts_deleted = await _single_value(
-        session,
-        _DELETE_ORPHAN_FACTS,
-        "matched",
-    )
+    orphan_facts_deleted = 0
+    while True:
+        deleted = await _single_value(
+            session,
+            _DELETE_ORPHAN_FACTS,
+            "matched",
+            batch_size=batch_size,
+        )
+        orphan_facts_deleted += deleted
+        if deleted == 0:
+            break
     after = await _baseline(session)
     remaining, examples = await find_candidates(session, limit=20)
     return {

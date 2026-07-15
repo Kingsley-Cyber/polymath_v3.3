@@ -25,6 +25,7 @@ from services.storage.qdrant_writer import (
 )
 
 QDRANT_KINDS = ("naive", "hrag", "graph", "schemas")
+PORTABILITY_NEO4J_WRITE_BATCH_SIZE = 100
 
 MONGO_COLLECTIONS = (
     "corpora",
@@ -67,6 +68,17 @@ def _jsonable_to_bson(value: Any) -> Any:
     return json_util.loads(json.dumps(value))
 
 
+async def _run_neo4j_row_batches(
+    session, query: str, rows: list[dict[str, Any]]
+) -> None:
+    """Restore archive rows without forming an archive-sized transaction."""
+    for idx in range(0, len(rows), PORTABILITY_NEO4J_WRITE_BATCH_SIZE):
+        await session.run(
+            query,
+            rows=rows[idx : idx + PORTABILITY_NEO4J_WRITE_BATCH_SIZE],
+        )
+
+
 def _write_json(zf: zipfile.ZipFile, name: str, value: Any) -> None:
     zf.writestr(name, json.dumps(_json_ready(value), ensure_ascii=False, indent=2))
 
@@ -87,12 +99,23 @@ async def _owned_corpus_ids(db: Any, user_id: str) -> list[str]:
     return [row["corpus_id"] async for row in cursor]
 
 
-def _mongo_query(collection: str, user_id: str, corpus_ids: list[str]) -> dict[str, Any]:
+def _mongo_query(
+    collection: str, user_id: str, corpus_ids: list[str]
+) -> dict[str, Any]:
     if collection in {"corpora", "documents", "chunks", "graph_sessions"}:
         return {"corpus_id": {"$in": corpus_ids}}
-    if collection in {"settings", "model_pool", "model_profiles", "user_query_preferences"}:
+    if collection in {
+        "settings",
+        "model_pool",
+        "model_profiles",
+        "user_query_preferences",
+    }:
         return {"user_id": user_id}
-    if collection in {"graph_domain_cache", "graph_metrics_cache", "graph_anchor_cache"}:
+    if collection in {
+        "graph_domain_cache",
+        "graph_metrics_cache",
+        "graph_anchor_cache",
+    }:
         return {"corpus_id": {"$in": corpus_ids}}
     # tools/skills/conversations/messages are legacy global collections in this
     # app, so include them whole. This preserves the single-user desktop flow.
@@ -109,7 +132,9 @@ async def export_portability_archive(user_id: str) -> tuple[Path, dict[str, Any]
 
     corpus_ids = await _owned_corpus_ids(db, user_id)
     created_at = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
-    tmp = tempfile.NamedTemporaryFile(prefix="polymath-portability-", suffix=".zip", delete=False)
+    tmp = tempfile.NamedTemporaryFile(
+        prefix="polymath-portability-", suffix=".zip", delete=False
+    )
     tmp_path = Path(tmp.name)
     tmp.close()
 
@@ -199,7 +224,9 @@ async def export_portability_archive(user_id: str) -> tuple[Path, dict[str, Any]
                     """,
                     corpus_ids=corpus_ids,
                 )
-                graph_payload["nodes"] = [record.data() async for record in nodes_result]
+                graph_payload["nodes"] = [
+                    record.data() async for record in nodes_result
+                ]
 
                 rels_result = await session.run(
                     """
@@ -227,7 +254,9 @@ async def export_portability_archive(user_id: str) -> tuple[Path, dict[str, Any]
     return tmp_path, stats
 
 
-async def import_portability_archive(archive_path: Path, user_id: str) -> dict[str, Any]:
+async def import_portability_archive(
+    archive_path: Path, user_id: str
+) -> dict[str, Any]:
     db = ingestion_service.db
     qdrant = ingestion_service.qdrant_client
     if db is None:
@@ -266,16 +295,26 @@ async def import_portability_archive(archive_path: Path, user_id: str) -> dict[s
                     doc = _strip_id(doc)
                     doc["user_id"] = user_id
                     await db[collection].replace_one(
-                        {"corpus_id": doc["corpus_id"], "chunk_id": doc.get("chunk_id")}
+                        (
+                            {
+                                "corpus_id": doc["corpus_id"],
+                                "chunk_id": doc.get("chunk_id"),
+                            }
                         if collection == "chunks"
-                        else {"corpus_id": doc["corpus_id"], "doc_id": doc["doc_id"]},
+                            else {
+                                "corpus_id": doc["corpus_id"],
+                                "doc_id": doc["doc_id"],
+                            }
+                        ),
                         doc,
                         upsert=True,
                     )
                 elif collection in {"settings", "user_query_preferences"}:
                     doc = _strip_id(doc)
                     doc["user_id"] = user_id
-                    await db[collection].replace_one({"user_id": user_id}, doc, upsert=True)
+                    await db[collection].replace_one(
+                        {"user_id": user_id}, doc, upsert=True
+                    )
                 elif collection in {"model_pool", "model_profiles"}:
                     doc = _strip_id(doc)
                     doc["user_id"] = user_id
@@ -286,7 +325,12 @@ async def import_portability_archive(archive_path: Path, user_id: str) -> dict[s
                     else:
                         key = {"user_id": user_id, "label": doc.get("label")}
                     await db[collection].replace_one(key, doc, upsert=True)
-                elif collection in {"graph_domain_cache", "graph_metrics_cache", "graph_anchor_cache", "graph_sessions"}:
+                elif collection in {
+                    "graph_domain_cache",
+                    "graph_metrics_cache",
+                    "graph_anchor_cache",
+                    "graph_sessions",
+                }:
                     doc = _strip_id(doc)
                     if "user_id" in doc:
                         doc["user_id"] = user_id
@@ -298,7 +342,9 @@ async def import_portability_archive(archive_path: Path, user_id: str) -> dict[s
                     await db[collection].replace_one(key or doc, doc, upsert=True)
                 else:
                     if "_id" in doc:
-                        await db[collection].replace_one({"_id": doc["_id"]}, doc, upsert=True)
+                        await db[collection].replace_one(
+                            {"_id": doc["_id"]}, doc, upsert=True
+                        )
                     else:
                         await db[collection].insert_one(doc)
                 imported += 1
@@ -306,10 +352,12 @@ async def import_portability_archive(archive_path: Path, user_id: str) -> dict[s
 
         corpus_meta = {
             doc["corpus_id"]: doc
-            for doc in await db["corpora"].find(
+            for doc in await db["corpora"]
+            .find(
                 {"corpus_id": {"$in": corpus_ids}},
                 {"corpus_id": 1, "name": 1, "default_ingestion_config": 1, "_id": 0},
-            ).to_list(length=None)
+            )
+            .to_list(length=None)
         }
 
         for name in zf.namelist():
@@ -346,7 +394,10 @@ async def import_portability_archive(archive_path: Path, user_id: str) -> dict[s
                 imported += len(batch)
             stats["qdrant_points"][collection_name] = imported
 
-        if "neo4j/graph.json" in zf.namelist() and ingestion_service.neo4j_driver is not None:
+        if (
+            "neo4j/graph.json" in zf.namelist()
+            and ingestion_service.neo4j_driver is not None
+        ):
             graph = json.loads(zf.read("neo4j/graph.json"))
             stats.update(await _import_neo4j_graph(graph, user_id))
 
@@ -412,43 +463,48 @@ async def _import_neo4j_graph(graph: dict[str, Any], user_id: str) -> dict[str, 
 
     async with driver.session() as session:
         if rows_by_label["Document"]:
-            await session.run(
+            await _run_neo4j_row_batches(
+                session,
                 """
                 UNWIND $rows AS row
                 MERGE (n:Document {doc_id: row.id})
                 SET n += row.props
                 """,
-                rows=rows_by_label["Document"],
+                rows_by_label["Document"],
             )
         if rows_by_label["Chunk"]:
-            await session.run(
+            await _run_neo4j_row_batches(
+                session,
                 """
                 UNWIND $rows AS row
                 MERGE (n:Chunk {chunk_id: row.id})
                 SET n += row.props
                 """,
-                rows=rows_by_label["Chunk"],
+                rows_by_label["Chunk"],
             )
         if rows_by_label["Entity"]:
-            await session.run(
+            await _run_neo4j_row_batches(
+                session,
                 """
                 UNWIND $rows AS row
                 MERGE (n:Entity {entity_id: row.id})
                 SET n += row.props
                 """,
-                rows=rows_by_label["Entity"],
+                rows_by_label["Entity"],
             )
         if rows_by_label["Fact"]:
-            await session.run(
+            await _run_neo4j_row_batches(
+                session,
                 """
                 UNWIND $rows AS row
                 MERGE (n:Fact {fact_id: row.id})
                 SET n += row.props
                 """,
-                rows=rows_by_label["Fact"],
+                rows_by_label["Fact"],
             )
         if relationship_rows["HAS_CHUNK"]:
-            await session.run(
+            await _run_neo4j_row_batches(
+                session,
                 """
                 UNWIND $rows AS row
                 MATCH (a:Document {doc_id: row.start})
@@ -456,10 +512,11 @@ async def _import_neo4j_graph(graph: dict[str, Any], user_id: str) -> dict[str, 
                 MERGE (a)-[r:HAS_CHUNK]->(b)
                 SET r += row.props
                 """,
-                rows=relationship_rows["HAS_CHUNK"],
+                relationship_rows["HAS_CHUNK"],
             )
         if relationship_rows["MENTIONS"]:
-            await session.run(
+            await _run_neo4j_row_batches(
+                session,
                 """
                 UNWIND $rows AS row
                 MATCH (a:Chunk {chunk_id: row.start})
@@ -467,10 +524,11 @@ async def _import_neo4j_graph(graph: dict[str, Any], user_id: str) -> dict[str, 
                 MERGE (a)-[r:MENTIONS]->(b)
                 SET r += row.props
                 """,
-                rows=relationship_rows["MENTIONS"],
+                relationship_rows["MENTIONS"],
             )
         if relationship_rows["RELATES_TO"]:
-            await session.run(
+            await _run_neo4j_row_batches(
+                session,
                 """
                 UNWIND $rows AS row
                 MATCH (a:Entity {entity_id: row.start})
@@ -478,10 +536,11 @@ async def _import_neo4j_graph(graph: dict[str, Any], user_id: str) -> dict[str, 
                 MERGE (a)-[r:RELATES_TO {predicate: coalesce(row.props.predicate, 'related_to')}]->(b)
                 SET r += row.props
                 """,
-                rows=relationship_rows["RELATES_TO"],
+                relationship_rows["RELATES_TO"],
             )
         if relationship_rows["HAS_FACT"]:
-            await session.run(
+            await _run_neo4j_row_batches(
+                session,
                 """
                 UNWIND $rows AS row
                 MATCH (a:Entity {entity_id: row.start})
@@ -489,10 +548,11 @@ async def _import_neo4j_graph(graph: dict[str, Any], user_id: str) -> dict[str, 
                 MERGE (a)-[r:HAS_FACT]->(b)
                 SET r += row.props
                 """,
-                rows=relationship_rows["HAS_FACT"],
+                relationship_rows["HAS_FACT"],
             )
         if relationship_rows["SUPPORTS_FACT"]:
-            await session.run(
+            await _run_neo4j_row_batches(
+                session,
                 """
                 UNWIND $rows AS row
                 MATCH (a:Chunk {chunk_id: row.start})
@@ -500,7 +560,7 @@ async def _import_neo4j_graph(graph: dict[str, Any], user_id: str) -> dict[str, 
                 MERGE (a)-[r:SUPPORTS_FACT]->(b)
                 SET r += row.props
                 """,
-                rows=relationship_rows["SUPPORTS_FACT"],
+                relationship_rows["SUPPORTS_FACT"],
             )
 
     return {

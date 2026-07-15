@@ -2,6 +2,11 @@ import pytest
 
 from services.ghost_b import EntityItem, ExtractionResult, FactItem, RelationItem
 from services.graph.neo4j_writer import (
+    GRAPH_DELETE_BATCH_SIZE,
+    GRAPH_ENTITY_AGGREGATE_BATCH_SIZE,
+    GRAPH_RELATION_PRUNE_BATCH_SIZE,
+    GRAPH_WRITE_ROW_BATCH_SIZE,
+    _refresh_entity_aggregates,
     delete_corpus_graph,
     delete_document_graph,
     fact_id_from_parts,
@@ -23,11 +28,13 @@ class FakeSession:
     async def run(self, query, **params):
         self.calls.append((query, params))
         if "tombstone:" in query:
-            return FakeResult([
+            return FakeResult(
+                [
                 {"orig": old, "sur": self.tombstone_map[old]}
                 for old in params.get("ids", [])
                 if old in self.tombstone_map
-            ])
+                ]
+            )
         return FakeResult([])
 
 
@@ -124,9 +131,7 @@ async def test_write_document_graph_persists_structured_facts():
     )
 
     fact_calls = [
-        (query, params)
-        for query, params in driver.calls
-        if "MERGE (f:Fact" in query
+        (query, params) for query, params in driver.calls if "MERGE (f:Fact" in query
     ]
     assert len(fact_calls) == 1
     query, params = fact_calls[0]
@@ -393,16 +398,30 @@ async def test_delete_document_graph_prunes_relation_provenance_before_nodes():
     await delete_document_graph(driver, corpus_id="corp1", doc_id="d1")
 
     queries = [query for query, _params in driver.calls]
-    assert "RETURN collect(DISTINCT e.entity_id) AS entity_ids" in queries[0]
-    assert "r.evidence_doc_ids" in queries[1]
-    assert "r.support_count" in queries[1]
-    assert "r.avg_confidence" in queries[1]
-    assert "r.support_confidence_chunk_ids" in queries[1]
-    assert "r.support_confidence_values" in queries[1]
-    assert "remaining_corpus_support" in queries[1]
-    assert "MATCH (n {doc_id: $doc_id, corpus_id: $corpus_id})" in queries[2]
-    assert "NOT EXISTS { MATCH (:Chunk)-[:MENTIONS]->(e) }" in queries[3]
-    assert "coalesce(e.tombstone, false) = false" in queries[3]
+    assert "RETURN DISTINCT e.entity_id AS entity_id" in queries[0]
+    prune_idx = next(
+        idx
+        for idx, query in enumerate(queries)
+        if "MATCH ()-[r:RELATES_TO]->()" in query
+    )
+    delete_idx = next(
+        idx for idx, query in enumerate(queries) if "DETACH DELETE n" in query
+    )
+    orphan_idx = next(
+        idx for idx, query in enumerate(queries) if "DETACH DELETE e" in query
+    )
+    assert "r.evidence_doc_ids" in queries[prune_idx]
+    assert "r.support_count" in queries[prune_idx]
+    assert "r.avg_confidence" in queries[prune_idx]
+    assert "r.support_confidence_chunk_ids" in queries[prune_idx]
+    assert "r.support_confidence_values" in queries[prune_idx]
+    assert "remaining_corpus_support" in queries[prune_idx]
+    assert "LIMIT $batch_size" in queries[prune_idx]
+    assert driver.calls[prune_idx][1]["batch_size"] == GRAPH_RELATION_PRUNE_BATCH_SIZE
+    assert "MATCH (n {doc_id: $doc_id, corpus_id: $corpus_id})" in queries[delete_idx]
+    assert driver.calls[delete_idx][1]["batch_size"] == GRAPH_DELETE_BATCH_SIZE
+    assert "NOT EXISTS { MATCH (:Chunk)-[:MENTIONS]->(e) }" in queries[orphan_idx]
+    assert "coalesce(e.tombstone, false) = false" in queries[orphan_idx]
 
 
 @pytest.mark.asyncio
@@ -429,17 +448,24 @@ async def test_write_document_graph_clears_stale_payload_before_rewrite():
     )
 
     queries = [query for query, _params in driver.calls]
-    assert "RETURN collect(DISTINCT e.entity_id) AS entity_ids" in queries[0]
-    assert "r.evidence_doc_ids" in queries[1]
-    assert "MATCH (n {doc_id: $doc_id, corpus_id: $corpus_id})" in queries[2]
-    assert "WHERE NOT n:Document" in queries[2]
+    assert "RETURN DISTINCT e.entity_id AS entity_id" in queries[0]
+    prune_idx = next(
+        idx
+        for idx, query in enumerate(queries)
+        if "MATCH ()-[r:RELATES_TO]->()" in query
+    )
+    clear_idx = next(
+        idx for idx, query in enumerate(queries) if "WHERE NOT n:Document" in query
+    )
+    assert "r.evidence_doc_ids" in queries[prune_idx]
+    assert "MATCH (n {doc_id: $doc_id, corpus_id: $corpus_id})" in queries[clear_idx]
     document_write_idx = next(
         idx for idx, query in enumerate(queries) if "MERGE (d:Document" in query
     )
     chunk_write_idx = next(
         idx for idx, query in enumerate(queries) if "MERGE (c:Chunk" in query
     )
-    assert document_write_idx > 2
+    assert document_write_idx > clear_idx
     assert chunk_write_idx > document_write_idx
 
 
@@ -490,9 +516,7 @@ async def test_write_document_graph_uses_mongo_chunk_ids_as_authoritative():
     )
 
     chunk_call = next(
-        (query, params)
-        for query, params in driver.calls
-        if "MERGE (c:Chunk" in query
+        (query, params) for query, params in driver.calls if "MERGE (c:Chunk" in query
     )
     mention_call = next(
         (query, params)
@@ -510,17 +534,103 @@ async def test_delete_corpus_graph_prunes_array_scoped_relations_before_nodes():
     await delete_corpus_graph(driver, corpus_id="corp1")
 
     queries = [query for query, _params in driver.calls]
-    assert "RETURN collect(DISTINCT e.entity_id) AS entity_ids" in queries[0]
-    assert "r.corpus_ids" in queries[1]
-    assert "r.evidence_doc_ids" in queries[1]
-    assert "r.support_count" in queries[1]
-    assert "r.avg_confidence" in queries[1]
-    assert "r.support_confidence_chunk_ids" in queries[1]
-    assert "r.support_confidence_values" in queries[1]
-    assert "WHERE size(coalesce(r.corpus_ids, [])) = 0" in queries[1]
-    assert "MATCH (n {corpus_id: $corpus_id})" in queries[2]
-    assert "NOT EXISTS { MATCH (:Chunk)-[:MENTIONS]->(e) }" in queries[3]
-    assert "coalesce(e.tombstone, false) = false" in queries[3]
+    assert "RETURN DISTINCT e.entity_id AS entity_id" in queries[0]
+    prune_idx = next(
+        idx
+        for idx, query in enumerate(queries)
+        if "MATCH ()-[r:RELATES_TO]->()" in query
+    )
+    delete_idx = next(
+        idx for idx, query in enumerate(queries) if "DETACH DELETE n" in query
+    )
+    orphan_idx = next(
+        idx for idx, query in enumerate(queries) if "DETACH DELETE e" in query
+    )
+    assert "r.corpus_ids" in queries[prune_idx]
+    assert "r.evidence_doc_ids" in queries[prune_idx]
+    assert "r.support_count" in queries[prune_idx]
+    assert "r.avg_confidence" in queries[prune_idx]
+    assert "r.support_confidence_chunk_ids" in queries[prune_idx]
+    assert "r.support_confidence_values" in queries[prune_idx]
+    assert "delete_relation" in queries[prune_idx]
+    assert "MATCH (n {corpus_id: $corpus_id})" in queries[delete_idx]
+    assert driver.calls[delete_idx][1]["batch_size"] == GRAPH_DELETE_BATCH_SIZE
+    assert "NOT EXISTS { MATCH (:Chunk)-[:MENTIONS]->(e) }" in queries[orphan_idx]
+    assert "coalesce(e.tombstone, false) = false" in queries[orphan_idx]
+
+
+@pytest.mark.asyncio
+async def test_refresh_entity_aggregates_batches_205_deduped_ids_100_100_5():
+    calls = []
+    session = FakeSession(calls)
+    entity_ids = [f"entity:{idx}" for idx in range(205)]
+
+    await _refresh_entity_aggregates(
+        session,
+        entity_ids + [entity_ids[0], "", entity_ids[204]],
+    )
+
+    batches = [
+        params["entity_ids"] for query, params in calls if "UNWIND $entity_ids" in query
+    ]
+    assert [len(batch) for batch in batches] == [100, 100, 5]
+    assert [entity_id for batch in batches for entity_id in batch] == entity_ids
+    assert all(len(batch) <= GRAPH_ENTITY_AGGREGATE_BATCH_SIZE for batch in batches)
+
+
+@pytest.mark.asyncio
+async def test_write_document_graph_bounds_large_unwind_payloads():
+    driver = FakeDriver()
+    results = [
+        ExtractionResult(
+            schema_version="polymath.extract.v1",
+            chunk_id=f"c{idx}",
+            doc_id="d-large",
+            corpus_id="corp1",
+            entities=[
+                EntityItem(
+                    canonical_name=f"bounded entity {idx}",
+                    surface_form=f"Bounded Entity {idx}",
+                    entity_type="Concept",
+                    confidence=0.9,
+                )
+            ],
+            relations=[],
+            facts=[],
+        )
+        for idx in range(205)
+    ]
+
+    await write_document_graph(
+        driver=driver,
+        doc_id="d-large",
+        corpus_id="corp1",
+        extraction_results=results,
+        user_id="u1",
+        file_id="f1",
+        all_chunk_ids=[f"c{idx}" for idx in range(205)],
+    )
+
+    chunk_batches = [
+        params["rows"]
+        for query, params in driver.calls
+        if "MERGE (c:Chunk {chunk_id: row.chunk_id})" in query
+    ]
+    mention_batches = [
+        params["rows"]
+        for query, params in driver.calls
+        if "MERGE (e:Entity {entity_id: row.entity_id})" in query
+    ]
+    redirect_batches = [
+        params["ids"] for query, params in driver.calls if "tombstone:" in query
+    ]
+    assert [len(batch) for batch in chunk_batches] == [100, 100, 5]
+    assert [len(batch) for batch in mention_batches] == [100, 100, 5]
+    assert [len(batch) for batch in redirect_batches] == [100, 100, 5]
+    assert all(
+        len(batch) <= GRAPH_WRITE_ROW_BATCH_SIZE
+        for batch in chunk_batches + mention_batches
+    )
 
 
 @pytest.mark.asyncio
@@ -589,25 +699,22 @@ async def test_write_document_graph_redirects_tombstoned_entities_before_merge()
     )
     entity_query, entity_params = entity_call
     flame_row = next(
-        row for row in entity_params["rows"]
+        row
+        for row in entity_params["rows"]
         if row["resolved_from_entity_id"] == "entity:flame_audio"
     )
     assert flame_row["entity_id"] == "entity:flameaudio"
     assert "row.resolved_from_entity_id IS NULL" in entity_query
 
     relation_params = next(
-        params
-        for query, params in driver.calls
-        if "MERGE (s)-[r:RELATES_TO" in query
+        params for query, params in driver.calls if "MERGE (s)-[r:RELATES_TO" in query
     )
     relation_row = relation_params["rows"][0]
     assert relation_row["subject_id"] == "entity:flameaudio"
     assert relation_row["object_id"] == "entity:dart"
 
     fact_params = next(
-        params
-        for query, params in driver.calls
-        if "MERGE (f:Fact" in query
+        params for query, params in driver.calls if "MERGE (f:Fact" in query
     )
     fact_row = fact_params["rows"][0]
     assert fact_row["subject_entity_id"] == "entity:flameaudio"
@@ -693,12 +800,6 @@ async def test_write_document_graph_filters_junk_entities_before_merge():
         "Nash equilibrium"
     ]
     assert not [
-        params
-        for query, params in driver.calls
-        if "MERGE (s)-[r:RELATES_TO" in query
+        params for query, params in driver.calls if "MERGE (s)-[r:RELATES_TO" in query
     ]
-    assert not [
-        params
-        for query, params in driver.calls
-        if "MERGE (f:Fact" in query
-    ]
+    assert not [params for query, params in driver.calls if "MERGE (f:Fact" in query]

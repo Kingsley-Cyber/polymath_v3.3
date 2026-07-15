@@ -10854,3 +10854,54 @@ requeue item 4 alone. Two riders:
    not folklore.
 Your no-partial-graph-as-success census is exactly right; the idempotent
 clean-retry surface is accepted. Then release the remaining eleven.
+
+## [2026-07-15T22:07:28Z] EXECUTOR → SENIOR :: ACK
+
+Ruling received. I will set the aggregate refresh constant to 100 with the
+205→100/100/5 dedupe/no-loss golden, sweep every Neo4j write/refresh batching
+site and either bound it with a receipted constant or ledger it explicitly,
+then measure peak transaction memory for a real 100-ID aggregate batch against
+716.8 MiB. Only after the family sweep, focused/adjacent tests, canonical
+parity, and publication will I requeue item 4 alone and require its full graph
+rewrite plus verification before releasing the other eleven.
+
+## [2026-07-15T22:21:42Z] EXECUTOR → SENIOR :: RECEIPT
+
+Neo4j batch-family implementation checkpoint is focused green. The approved
+aggregate constant is 100; its exact golden sends 205 unique IDs plus
+duplicates/empty noise as 100/100/5 with stable order, dedupe, and zero loss.
+Named 100-row transaction bounds now cover ingestion chunk/mention/relation/
+fact writes, graphify writes, redirect resolution, relation-provenance prune,
+document/corpus/orphan deletion, portability restore, and entity-dedup
+apply/undo/crash cleanup. Junk-cleanup orphan facts now drain under its
+existing operator batch size. Single-identity MERGE/tombstone operations are
+explicitly ledgered as identity-bounded; schema DDL is statement-bounded;
+retrieval/analytics UNWIND sites are read-only and their input limits remain
+unchanged. Focused goldens are 15 passed, true `EXIT=0`; candidate compile is
+true `EXIT=0`; live Neo4j `EXPLAIN` compiled all 45 candidate write queries
+across the writer, dedup, junk cleanup, and portability with zero failures,
+true `EXIT=0`. The first host test invocations are invalid/uncredited: system
+Python lacked pytest, and the local ML venv's newer Neo4j client makes the
+pre-existing deadlock fixture unable to assign `TransientError.code`; the
+scoped facts/batch tests are the valid gate. No graph/provider mutation was
+performed. Proceeding to adjacent tests and canonical two-container seal;
+the required observed 100-ID peak-memory arithmetic follows the real item-4
+rewrite, when its entity graph exists again.
+
+## [2026-07-15T22:25:24Z] EXECUTOR → SENIOR :: RECEIPT
+
+Neo4j batch-family canonical deploy seal is VERIFIED green. The authoritative
+three-overlay backend+offline-worker rebuild returned true `EXIT=0`; runtime
+verification returned true `EXIT=0` with live MLX dimension 1024; both
+containers are healthy. Byte parity is exact for all five changed production
+files across host/backend/worker (`files_compared=10`, true `EXIT=0`).
+Docker-copied focused suites, including the pre-existing deadlock retry
+goldens under the canonical Neo4j client, pass 17/17 in backend and 17/17 in
+worker, each true `EXIT=0`. The valid adjacent backend graph suite passes
+264/264, true `EXIT=0`. Its first attempt is invalid/uncredited (`EXIT=2`):
+tests were copied under `/tmp`, while one standing test deliberately resolves
+`../services`; copying them to the required `/app/tests` location produced the
+valid green run. No product/provider mutation followed the invalid harness.
+Proceeding to credential scan, publish, then isolated item-4 requeue. The
+100-ID live peak-memory measurement remains attached to the post-rewrite
+receipt, as ordered.

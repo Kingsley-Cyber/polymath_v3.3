@@ -50,6 +50,15 @@ ENTITY_ID_PREFIX = "entity"
 GRAPH_PROMOTE_VERSION = "polymath.promote.v1"
 GRAPH_WRITE_MAX_ATTEMPTS = 3
 GRAPH_WRITE_DEADLOCK_BACKOFF_SECONDS = 0.75
+# Neo4j transaction-memory safety.  These constants bound every data-sized
+# production write/refresh in this module; callers must not replace them with
+# a whole-document/corpus list.  Aggregate refresh is intentionally the most
+# conservative because its two OPTIONAL MATCH aggregations are the highest-
+# memory graph write in the ingestion path.
+GRAPH_ENTITY_AGGREGATE_BATCH_SIZE = 100
+GRAPH_WRITE_ROW_BATCH_SIZE = 100
+GRAPH_DELETE_BATCH_SIZE = 100
+GRAPH_RELATION_PRUNE_BATCH_SIZE = 100
 GENERIC_ENTITY_TERMS = {
     "agent",
     "attention",
@@ -135,7 +144,9 @@ RELATION_FAMILY_MAP = {
     "related_to": "WeakAssociation",
 }
 _APPROVED_SPECIFIC_RELATIONS = {
-    value for value in UNIVERSAL_RELATION_SCHEMA if value != SchemaContext.RELATION_SENTINEL
+    value
+    for value in UNIVERSAL_RELATION_SCHEMA
+    if value != SchemaContext.RELATION_SENTINEL
 }
 _ONTOLOGY_ALLOWED_PAIR_RAW: dict[str, tuple[tuple[str, str], ...]] = {
     # Mirrored from config/ontology.yaml. The backend Docker build context is
@@ -143,88 +154,166 @@ _ONTOLOGY_ALLOWED_PAIR_RAW: dict[str, tuple[tuple[str, str], ...]] = {
     # runtime. Keep the raw legacy names here and normalize through
     # normalize_relation_predicate_alias() below.
     "includes": (
-        ("Concept", "Concept"), ("Concept", "Method"), ("Concept", "Software"),
-        ("Software", "Method"), ("Software", "Artifact"), ("Product", "Artifact"),
+        ("Concept", "Concept"),
+        ("Concept", "Method"),
+        ("Concept", "Software"),
+        ("Software", "Method"),
+        ("Software", "Artifact"),
+        ("Product", "Artifact"),
         ("Document", "Concept"),
     ),
     "uses": (
-        ("Person", "Software"), ("Person", "Method"), ("Organization", "Software"),
-        ("Organization", "Method"), ("Software", "Software"), ("Software", "Method"),
-        ("Software", "Standard"), ("Software", "Artifact"), ("Method", "Software"),
-        ("Method", "Concept"), ("Concept", "Method"), ("Concept", "Software"),
+        ("Person", "Software"),
+        ("Person", "Method"),
+        ("Organization", "Software"),
+        ("Organization", "Method"),
+        ("Software", "Software"),
+        ("Software", "Method"),
+        ("Software", "Standard"),
+        ("Software", "Artifact"),
+        ("Method", "Software"),
+        ("Method", "Concept"),
+        ("Concept", "Method"),
+        ("Concept", "Software"),
         ("Artifact", "Software"),
     ),
     "supports": (
-        ("Software", "Method"), ("Software", "Concept"), ("Software", "Artifact"),
-        ("Artifact", "Method"), ("Artifact", "Concept"), ("Method", "Concept"),
-        ("Concept", "Method"), ("Organization", "Software"), ("Product", "Method"),
+        ("Software", "Method"),
+        ("Software", "Concept"),
+        ("Software", "Artifact"),
+        ("Artifact", "Method"),
+        ("Artifact", "Concept"),
+        ("Method", "Concept"),
+        ("Concept", "Method"),
+        ("Organization", "Software"),
+        ("Product", "Method"),
     ),
     "produces": (
-        ("Software", "Artifact"), ("Software", "Document"), ("Software", "Concept"),
-        ("Method", "Artifact"), ("Method", "Concept"), ("Person", "Document"),
-        ("Organization", "Product"), ("Product", "Artifact"),
+        ("Software", "Artifact"),
+        ("Software", "Document"),
+        ("Software", "Concept"),
+        ("Method", "Artifact"),
+        ("Method", "Concept"),
+        ("Person", "Document"),
+        ("Organization", "Product"),
+        ("Product", "Artifact"),
     ),
     "implements": (
-        ("Software", "Method"), ("Software", "Standard"), ("Software", "Rule"),
-        ("Artifact", "Method"), ("Artifact", "Standard"), ("Method", "Concept"),
+        ("Software", "Method"),
+        ("Software", "Standard"),
+        ("Software", "Rule"),
+        ("Artifact", "Method"),
+        ("Artifact", "Standard"),
+        ("Method", "Concept"),
         ("Product", "Method"),
     ),
     "has_part": (
-        ("Concept", "Concept"), ("Concept", "Method"), ("Software", "Software"),
-        ("Software", "Artifact"), ("Product", "Artifact"), ("Document", "Concept"),
+        ("Concept", "Concept"),
+        ("Concept", "Method"),
+        ("Software", "Software"),
+        ("Software", "Artifact"),
+        ("Product", "Artifact"),
+        ("Document", "Concept"),
         ("Organization", "Organization"),
     ),
     "instance_of": (
-        ("Software", "Concept"), ("Product", "Concept"), ("Method", "Concept"),
-        ("Artifact", "Concept"), ("Person", "Concept"), ("Organization", "Concept"),
+        ("Software", "Concept"),
+        ("Product", "Concept"),
+        ("Method", "Concept"),
+        ("Artifact", "Concept"),
+        ("Person", "Concept"),
+        ("Organization", "Concept"),
         ("Document", "Concept"),
     ),
     "references": (
-        ("Document", "Document"), ("Document", "Concept"), ("Software", "Document"),
-        ("Software", "Standard"), ("Method", "Document"), ("Concept", "Document"),
-        ("Person", "Document"), ("Organization", "Document"),
+        ("Document", "Document"),
+        ("Document", "Concept"),
+        ("Software", "Document"),
+        ("Software", "Standard"),
+        ("Method", "Document"),
+        ("Concept", "Document"),
+        ("Person", "Document"),
+        ("Organization", "Document"),
     ),
     "depends_on": (
-        ("Software", "Software"), ("Software", "Artifact"), ("Software", "Standard"),
-        ("Method", "Software"), ("Method", "Concept"), ("Concept", "Concept"),
+        ("Software", "Software"),
+        ("Software", "Artifact"),
+        ("Software", "Standard"),
+        ("Method", "Software"),
+        ("Method", "Concept"),
+        ("Concept", "Concept"),
         ("Product", "Software"),
     ),
     "causes": (
-        ("Concept", "Concept"), ("Concept", "Method"), ("Method", "Concept"),
-        ("Software", "Concept"), ("Event", "Event"), ("Rule", "Concept"),
+        ("Concept", "Concept"),
+        ("Concept", "Method"),
+        ("Method", "Concept"),
+        ("Software", "Concept"),
+        ("Event", "Event"),
+        ("Rule", "Concept"),
     ),
     "synonym_of": (
-        ("Concept", "Concept"), ("Method", "Method"), ("Software", "Software"),
-        ("Artifact", "Artifact"), ("Standard", "Standard"), ("Product", "Product"),
+        ("Concept", "Concept"),
+        ("Method", "Method"),
+        ("Software", "Software"),
+        ("Artifact", "Artifact"),
+        ("Standard", "Standard"),
+        ("Product", "Product"),
     ),
     "member_of": (
-        ("Person", "Organization"), ("Organization", "Organization"),
-        ("Software", "Concept"), ("Product", "Concept"), ("Concept", "Concept"),
+        ("Person", "Organization"),
+        ("Organization", "Organization"),
+        ("Software", "Concept"),
+        ("Product", "Concept"),
+        ("Concept", "Concept"),
     ),
     "example_of": (
-        ("Software", "Concept"), ("Product", "Concept"), ("Method", "Concept"),
-        ("Artifact", "Concept"), ("Document", "Concept"), ("Person", "Concept"),
+        ("Software", "Concept"),
+        ("Product", "Concept"),
+        ("Method", "Concept"),
+        ("Artifact", "Concept"),
+        ("Document", "Concept"),
+        ("Person", "Concept"),
     ),
     "deploys": (
-        ("Person", "Software"), ("Organization", "Software"), ("Software", "Location"),
-        ("Software", "Artifact"), ("Method", "Software"), ("Product", "Software"),
+        ("Person", "Software"),
+        ("Organization", "Software"),
+        ("Software", "Location"),
+        ("Software", "Artifact"),
+        ("Method", "Software"),
+        ("Product", "Software"),
     ),
     "creates": (
-        ("Person", "Document"), ("Person", "Product"), ("Person", "Software"),
-        ("Organization", "Product"), ("Organization", "Software"),
-        ("Software", "Artifact"), ("Method", "Artifact"),
+        ("Person", "Document"),
+        ("Person", "Product"),
+        ("Person", "Software"),
+        ("Organization", "Product"),
+        ("Organization", "Software"),
+        ("Software", "Artifact"),
+        ("Method", "Artifact"),
     ),
     "trains": (
-        ("Person", "Method"), ("Organization", "Method"), ("Method", "Software"),
-        ("Software", "Software"), ("Concept", "Software"), ("Artifact", "Software"),
+        ("Person", "Method"),
+        ("Organization", "Method"),
+        ("Method", "Software"),
+        ("Software", "Software"),
+        ("Concept", "Software"),
+        ("Artifact", "Software"),
     ),
     "runs": (
-        ("Software", "Software"), ("Software", "Location"), ("Software", "Artifact"),
-        ("Product", "Software"), ("Method", "Software"),
+        ("Software", "Software"),
+        ("Software", "Location"),
+        ("Software", "Artifact"),
+        ("Product", "Software"),
+        ("Method", "Software"),
     ),
     "located_in": (
-        ("Person", "Location"), ("Organization", "Location"), ("Software", "Location"),
-        ("Product", "Location"), ("Artifact", "Location"), ("Concept", "Location"),
+        ("Person", "Location"),
+        ("Organization", "Location"),
+        ("Software", "Location"),
+        ("Product", "Location"),
+        ("Artifact", "Location"),
+        ("Concept", "Location"),
     ),
 }
 _ONTOLOGY_PREDICATE_COMPAT_ALIASES = {
@@ -286,27 +375,68 @@ _PRODUCTION_HINTS = (
     "producer",
 )
 _RELATION_CUE_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("trained_on", ("trained on", "trained with", "training data", "training set", "learns from")),
-    ("runs_on", ("runs on", "run on", "executes on", "deployed on", "on-device", "on device")),
-    ("stores", ("stores", "stored in", "persists", "persisted in", "saves to", "saved to")),
+    (
+        "trained_on",
+        ("trained on", "trained with", "training data", "training set", "learns from"),
+    ),
+    (
+        "runs_on",
+        ("runs on", "run on", "executes on", "deployed on", "on-device", "on device"),
+    ),
+    (
+        "stores",
+        ("stores", "stored in", "persists", "persisted in", "saves to", "saved to"),
+    ),
     # `extracts` was merged into `detects`; both verb classes route here so
     # cue-based predicate inference produces a single canonical edge label.
-    ("detects", (
-        "detects", "identifies", "recognizes", "finds", "object detection",
-        "extracts", "extract ", "extracted from", "feature extraction",
-        "entity extraction", "pulls from",
-    )),
-    ("classifies", ("classifies", "classification", "predicts", "assigns category", "labels as")),
+    (
+        "detects",
+        (
+            "detects",
+            "identifies",
+            "recognizes",
+            "finds",
+            "object detection",
+            "extracts",
+            "extract ",
+            "extracted from",
+            "feature extraction",
+            "entity extraction",
+            "pulls from",
+        ),
+    ),
+    (
+        "classifies",
+        ("classifies", "classification", "predicts", "assigns category", "labels as"),
+    ),
     # `calls` was merged into `uses`; the API-invocation cues route to `uses`.
-    ("uses", (
-        "uses", "using", "utilizes", "consumes", "powered by",
-        "calls", "invokes", "requests", "queries", "api call", "endpoint",
-    )),
+    (
+        "uses",
+        (
+            "uses",
+            "using",
+            "utilizes",
+            "consumes",
+            "powered by",
+            "calls",
+            "invokes",
+            "requests",
+            "queries",
+            "api call",
+            "endpoint",
+        ),
+    ),
     # New canonicalization / typing / affiliation cues.
     ("synonym_of", ("aka", "also known as", "same as", "alias", "synonym")),
-    ("instance_of", ("is a kind of", "is a type of", "is an instance of", "subclass of")),
+    (
+        "instance_of",
+        ("is a kind of", "is a type of", "is an instance of", "subclass of"),
+    ),
     ("owns", ("owns", "owned by", "holds title to")),
-    ("affiliated_with", ("affiliated with", "associated with", "partner of", "sponsored by")),
+    (
+        "affiliated_with",
+        ("affiliated with", "associated with", "partner of", "sponsored by"),
+    ),
     ("overlaps", ("overlaps with", "concurrent with", "co-occurs with", "during")),
     ("maps_to", ("maps to", "maps onto", "converts", "transforms", "translates")),
     ("represents", ("represents", "models", "modeled as", "encodes")),
@@ -317,7 +447,10 @@ _RELATION_CUE_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
     # the duplicate plain-`uses` entry that lived here has been removed.
     ("implements", ("implements", "realizes", "embodies", "concrete form")),
     ("references", ("references", "cites", "mentions", "according to", "described in")),
-    ("derived_from", ("derived from", "based on", "adapted from", "inspired by", "built on")),
+    (
+        "derived_from",
+        ("derived from", "based on", "adapted from", "inspired by", "built on"),
+    ),
     ("causes", ("causes", "leads to", "results in", "because of")),
     ("preceded_by", ("preceded by", "after", "followed by")),
     ("contradicts", ("contradicts", "conflicts with", "inconsistent with", "opposes")),
@@ -413,7 +546,9 @@ def _predicate_from_evidence(*parts: str | None) -> str | None:
 
 
 def _normalized_specific_predicate(predicate: str | None) -> str | None:
-    normalized, _reverse = normalize_relation_predicate_alias(str(predicate or "").strip())
+    normalized, _reverse = normalize_relation_predicate_alias(
+        str(predicate or "").strip()
+    )
     if normalized in _APPROVED_SPECIFIC_RELATIONS:
         return normalized
     return None
@@ -437,7 +572,9 @@ def _ontology_unique_predicate_by_pair() -> dict[tuple[str, str], str]:
         ):
             continue
         for subject_type, object_type in pairs:
-            pair = (object_type, subject_type) if reverse else (subject_type, object_type)
+            pair = (
+                (object_type, subject_type) if reverse else (subject_type, object_type)
+            )
             candidates.setdefault(pair, set()).add(predicate)
     return {
         pair: next(iter(predicates))
@@ -514,7 +651,11 @@ def build_relation_edge_mitigation(
     )
 
     if refined_predicate != sentinel:
-        edge_state = "refined" if predicate_refined and extracted_predicate == sentinel else "typed"
+        edge_state = (
+            "refined"
+            if predicate_refined and extracted_predicate == sentinel
+            else "typed"
+        )
         return RelationEdgeMitigation(
             edge_state=edge_state,
             relation_family=relation_family_for_predicate(refined_predicate),
@@ -523,7 +664,9 @@ def build_relation_edge_mitigation(
             candidate_predicates=[p for p, _score, _source in candidates],
             candidate_scores=[score for _p, score, _source in candidates],
             candidate_score_sources=[source for _p, _score, source in candidates],
-            promoted_by="deterministic_related_to_refinement" if edge_state == "refined" else "",
+            promoted_by=(
+                "deterministic_related_to_refinement" if edge_state == "refined" else ""
+            ),
             fallback_evidence_phrase="",
             related_to_query_weight=1.0,
             related_to_max_hops=2,
@@ -534,8 +677,12 @@ def build_relation_edge_mitigation(
         for predicate, _score, _source in candidates
         if relation_family_for_predicate(predicate) != "WeakAssociation"
     }
-    fallback_family = next(iter(candidate_families)) if len(candidate_families) == 1 else ""
-    relation_family = fallback_family or relation_family_for_predicate(refined_predicate)
+    fallback_family = (
+        next(iter(candidate_families)) if len(candidate_families) == 1 else ""
+    )
+    relation_family = fallback_family or relation_family_for_predicate(
+        refined_predicate
+    )
     return RelationEdgeMitigation(
         edge_state="family" if fallback_family else "fallback",
         relation_family=relation_family,
@@ -579,8 +726,12 @@ def _relation_compatible_with_facets(
     if not subject_identity or not object_identity:
         return False
 
-    subject_domain, subject_kind, subject_type = _identity_domain_kind_type(subject_identity)
-    object_domain, object_kind, object_type = _identity_domain_kind_type(object_identity)
+    subject_domain, subject_kind, subject_type = _identity_domain_kind_type(
+        subject_identity
+    )
+    object_domain, object_kind, object_type = _identity_domain_kind_type(
+        object_identity
+    )
     operational_subject = (
         _has_any(subject_domain, _OPERATIONAL_SUBJECT_DOMAINS)
         or subject_type in {"Artifact", "Method", "Organization", "Product"}
@@ -614,30 +765,64 @@ def _relation_compatible_with_facets(
         )
     if predicate in {"detects", "classifies"}:
         return operational_subject and object_type in {
-            "Artifact", "Concept", "Document", "Event", "Location",
-            "Organization", "Person", "Product",
+            "Artifact",
+            "Concept",
+            "Document",
+            "Event",
+            "Location",
+            "Organization",
+            "Person",
+            "Product",
         }
     if predicate == "produces":
         return operational_subject and (
             object_domain in _OUTPUT_OBJECT_DOMAINS | {"DataObject", "Dataset"}
             or object_kind in _OUTPUT_OBJECT_KINDS | {"Dataset", "DataObject"}
-            or object_type in {"Artifact", "Concept", "Document", "Event", "Method", "Product"}
+            or object_type
+            in {"Artifact", "Concept", "Document", "Event", "Method", "Product"}
         )
     if predicate == "depends_on":
         return object_domain in _CONSTRAINT_OBJECT_DOMAINS or object_type in {
-            "Artifact", "Concept", "Document", "Law", "Method", "Product", "Rule"
+            "Artifact",
+            "Concept",
+            "Document",
+            "Law",
+            "Method",
+            "Product",
+            "Rule",
         }
     if predicate == "implements":
-        return operational_subject and object_type in {"Concept", "Method", "Rule", "Law"}
+        return operational_subject and object_type in {
+            "Concept",
+            "Method",
+            "Rule",
+            "Law",
+        }
     if predicate in {"references", "derived_from", "represents", "maps_to"}:
         return object_type in {
-            "Artifact", "Concept", "Document", "Event", "Method",
-            "Organization", "Person", "Product", "Rule", "Law",
+            "Artifact",
+            "Concept",
+            "Document",
+            "Event",
+            "Method",
+            "Organization",
+            "Person",
+            "Product",
+            "Rule",
+            "Law",
         }
     if predicate in {"part_of", "member_of", "created_by", "works_for", "located_in"}:
         return True
     if predicate in {"causes", "preceded_by", "contradicts", "excepts", "overrides"}:
-        return object_type in {"Concept", "Document", "Event", "Law", "Method", "Rule", "TimeReference"}
+        return object_type in {
+            "Concept",
+            "Document",
+            "Event",
+            "Law",
+            "Method",
+            "Rule",
+            "TimeReference",
+        }
     return False
 
 
@@ -697,7 +882,9 @@ def refine_related_to_predicate(
     original_predicate, _ = normalize_relation_predicate_alias(original_predicate)
     if (
         original_predicate in _APPROVED_SPECIFIC_RELATIONS
-        and _relation_compatible_with_facets(original_predicate, subject_identity, object_identity)
+        and _relation_compatible_with_facets(
+            original_predicate, subject_identity, object_identity
+        )
     ):
         return original_predicate
     if _recover_source_predicate_with_evidence(
@@ -963,7 +1150,9 @@ def resolve_canonical_family(
             continue
         for term in [*(spec.get("members") or []), *(spec.get("synonyms") or [])]:
             term_norm = canonicalize_entity_name(str(term)).replace("_", " ")
-            if term_norm and (name_norm == term_norm or _norm_contains(haystack, term_norm)):
+            if term_norm and (
+                name_norm == term_norm or _norm_contains(haystack, term_norm)
+            ):
                 return str(family)
     return None
 
@@ -1012,7 +1201,9 @@ def resolve_facets(
     # Extension and filename checks catch common document/code artifacts before
     # general synonym matching.
     if entity_type == "Document":
-        if raw_lower.endswith((".pdf", ".doc", ".docx")) or _norm_contains(haystack, "report"):
+        if raw_lower.endswith((".pdf", ".doc", ".docx")) or _norm_contains(
+            haystack, "report"
+        ):
             spec = type_taxonomy.get("Report", {})
             return _facet("Report", spec)
         if raw_lower.endswith((".md", ".txt")) and _norm_contains(haystack, "tutorial"):
@@ -1165,7 +1356,8 @@ def _relation_support_records(
         row_doc_id = str(row.get("doc_id") or doc_id)
         parent_id = str(row.get("parent_id") or parent_lookup.get(chunk_id) or "")
         edge_key = "|".join([source_entity_id, predicate, target_entity_id])
-        records.append({
+        records.append(
+            {
             "support_id": _support_id_for_row(
                 edge_key=edge_key,
                 corpus_id=corpus_id,
@@ -1190,22 +1382,28 @@ def _relation_support_records(
             "fallback_family": row.get("fallback_family") or "",
             "candidate_predicates": list(row.get("candidate_predicates") or []),
             "candidate_scores": list(row.get("candidate_scores") or []),
-            "candidate_score_sources": list(row.get("candidate_score_sources") or []),
+                "candidate_score_sources": list(
+                    row.get("candidate_score_sources") or []
+                ),
             "promoted_by": row.get("promoted_by") or "",
-            "related_to_query_weight": float(row.get("related_to_query_weight") or 1.0),
+                "related_to_query_weight": float(
+                    row.get("related_to_query_weight") or 1.0
+                ),
             "related_to_max_hops": int(row.get("related_to_max_hops") or 2),
             "relation_cue": row.get("relation_cue") or "",
             "validation_status": row.get("validation_status") or "",
-            "extract_schema_version": row.get("schema_version") or "polymath.extract.v1",
+                "extract_schema_version": row.get("schema_version")
+                or "polymath.extract.v1",
             "promote_version": GRAPH_PROMOTE_VERSION,
-        })
+            }
+        )
     return records
 
 
 async def _refresh_entity_aggregates(session, entity_ids: list[str]) -> None:
     unique_ids = [eid for eid in dict.fromkeys(entity_ids) if eid]
-    for idx in range(0, len(unique_ids), 1000):
-        batch = unique_ids[idx: idx + 1000]
+    for idx in range(0, len(unique_ids), GRAPH_ENTITY_AGGREGATE_BATCH_SIZE):
+        batch = unique_ids[idx : idx + GRAPH_ENTITY_AGGREGATE_BATCH_SIZE]
         await session.run(
             """
             UNWIND $entity_ids AS entity_id
@@ -1246,6 +1444,70 @@ async def _resolve_entity_id_redirects(session, ids: list[str]) -> dict[str, str
     if not unique_ids:
         return {}
     return await resolve_entity_ids(session, unique_ids)
+
+
+def _row_batches(rows: list[Any], *, batch_size: int) -> list[list[Any]]:
+    """Return stable, non-empty slices for transaction-bounded graph writes."""
+    if batch_size <= 0:
+        raise ValueError("batch_size must be positive")
+    return [rows[idx : idx + batch_size] for idx in range(0, len(rows), batch_size)]
+
+
+async def _collect_distinct_entity_ids(
+    session,
+    *,
+    corpus_id: str,
+    doc_id: str | None = None,
+) -> list[str]:
+    """Stream affected entity IDs without a server-side unbounded ``collect``."""
+    if doc_id is None:
+        query = """
+            MATCH (c:Chunk {corpus_id: $corpus_id})-[:MENTIONS]->(e:Entity)
+            RETURN DISTINCT e.entity_id AS entity_id
+        """
+        params = {"corpus_id": corpus_id}
+    else:
+        query = """
+            MATCH (c:Chunk {doc_id: $doc_id, corpus_id: $corpus_id})-[:MENTIONS]->(e:Entity)
+            RETURN DISTINCT e.entity_id AS entity_id
+        """
+        params = {"doc_id": doc_id, "corpus_id": corpus_id}
+    result = await session.run(query, **params)
+    entity_ids: list[str] = []
+    async for row in result:
+        entity_id = str(row.get("entity_id") or "")
+        if entity_id:
+            entity_ids.append(entity_id)
+    return entity_ids
+
+
+async def _collect_chunk_rows(
+    session,
+    *,
+    corpus_id: str,
+    doc_id: str | None = None,
+) -> list[dict[str, str]]:
+    """Stream chunk/doc identities used by bounded provenance pruning."""
+    if doc_id is None:
+        query = """
+            MATCH (c:Chunk {corpus_id: $corpus_id})
+            RETURN DISTINCT c.chunk_id AS chunk_id, c.doc_id AS doc_id
+        """
+        params = {"corpus_id": corpus_id}
+    else:
+        query = """
+            MATCH (c:Chunk {doc_id: $doc_id, corpus_id: $corpus_id})
+            RETURN DISTINCT c.chunk_id AS chunk_id, c.doc_id AS doc_id
+        """
+        params = {"doc_id": doc_id, "corpus_id": corpus_id}
+    result = await session.run(query, **params)
+    rows: list[dict[str, str]] = []
+    async for row in result:
+        chunk_id = str(row.get("chunk_id") or "")
+        row_doc_id = str(row.get("doc_id") or "")
+        if chunk_id or row_doc_id:
+            rows.append({"chunk_id": chunk_id, "doc_id": row_doc_id})
+    return rows
 
 
 async def _redirect_graph_write_rows(
@@ -1470,14 +1732,14 @@ async def update_document_anchor_metrics(
             chunk_count=int(chunk_count) if chunk_count is not None else None,
             parent_count=int(parent_count) if parent_count is not None else None,
             ghost_b_success_rate=(
-                float(ghost_b_success_rate) if ghost_b_success_rate is not None else None
+                float(ghost_b_success_rate)
+                if ghost_b_success_rate is not None
+                else None
             ),
             ghost_b_extracted=(
                 int(ghost_b_extracted) if ghost_b_extracted is not None else None
             ),
-            ghost_b_total=(
-                int(ghost_b_total) if ghost_b_total is not None else None
-            ),
+            ghost_b_total=(int(ghost_b_total) if ghost_b_total is not None else None),
             schema_lens_id=schema_lens_id,
             dominant_family=dominant_family,
             dominant_entity_type=dominant_entity_type,
@@ -1638,7 +1900,9 @@ async def _upsert_entity_and_mention(
             ontology_version=ontology.get("ontology_version"),
             # Pt 10c — query-facing fields. Both default-safe.
             query_aliases=list(getattr(entity, "query_aliases", []) or []),
-            definitional_phrase=(getattr(entity, "definitional_phrase", "") or "")[:200],
+            definitional_phrase=(getattr(entity, "definitional_phrase", "") or "")[
+                :200
+            ],
             chunk_id=chunk_id,
             corpus_id=corpus_id,
         )
@@ -1727,15 +1991,22 @@ async def _upsert_relation(
 
 
 async def _delete_orphan_entities(session) -> None:
-    """Remove Entity nodes that no longer have chunk evidence."""
-    await session.run(
+    """Remove Entity nodes without chunk evidence in bounded transactions."""
+    while True:
+        result = await session.run(
         """
         MATCH (e:Entity)
         WHERE coalesce(e.tombstone, false) = false
           AND NOT EXISTS { MATCH (:Chunk)-[:MENTIONS]->(e) }
+            WITH e LIMIT $batch_size
         DETACH DELETE e
-        """
+            RETURN count(e) AS deleted
+            """,
+            batch_size=GRAPH_DELETE_BATCH_SIZE,
     )
+        row = await result.single()
+        if not row or int(row.get("deleted") or 0) == 0:
+            break
 
 
 async def _prune_relates_to_for_document(
@@ -1750,18 +2021,26 @@ async def _prune_relates_to_for_document(
     documents. Deleting a document should therefore prune only that document's
     evidence, then delete the relationship when no corpus still supports it.
     """
-    await session.run(
+    chunk_rows = await _collect_chunk_rows(
+        session,
+        corpus_id=corpus_id,
+        doc_id=doc_id,
+    )
+    batches = _row_batches(
+        chunk_rows,
+        batch_size=GRAPH_RELATION_PRUNE_BATCH_SIZE,
+    ) or [[]]
+    for batch in batches:
+        chunk_ids = [row["chunk_id"] for row in batch if row["chunk_id"]]
+        while True:
+            result = await session.run(
         """
-        MATCH (c:Chunk {doc_id: $doc_id, corpus_id: $corpus_id})
-        WITH collect(DISTINCT c.chunk_id) AS chunk_ids,
-             [did IN collect(DISTINCT c.doc_id) WHERE did IS NOT NULL] AS found_doc_ids
-        WITH chunk_ids,
-             CASE WHEN size(found_doc_ids) = 0 THEN [$doc_id] ELSE found_doc_ids END AS doc_ids
         MATCH ()-[r:RELATES_TO]->()
-        WHERE any(chunk_id IN coalesce(r.evidence_chunk_ids, []) WHERE chunk_id IN chunk_ids)
-           OR any(rel_doc_id IN coalesce(r.evidence_doc_ids, []) WHERE rel_doc_id IN doc_ids)
-           OR r.latest_doc_id IN doc_ids
-        WITH r, chunk_ids, doc_ids,
+        WHERE any(chunk_id IN coalesce(r.evidence_chunk_ids, []) WHERE chunk_id IN $chunk_ids)
+           OR $doc_id IN coalesce(r.evidence_doc_ids, [])
+           OR r.latest_doc_id = $doc_id
+        WITH r LIMIT $batch_size
+        WITH r, $chunk_ids AS chunk_ids, [$doc_id] AS doc_ids,
              coalesce(r.support_confidence_chunk_ids, []) AS support_ids,
              coalesce(r.support_confidence_values, []) AS support_values
         SET r.evidence_chunk_ids = [
@@ -1807,13 +2086,18 @@ async def _prune_relates_to_for_document(
                 ELSE reduce(total = 0.0, conf IN coalesce(r.support_confidence_values, []) | total + toFloat(conf))
                      / size(coalesce(r.support_confidence_values, []))
             END
-        WITH r
-        WHERE size(coalesce(r.corpus_ids, [])) = 0
-        DELETE r
+        WITH r, size(coalesce(r.corpus_ids, [])) = 0 AS delete_relation
+        FOREACH (_ IN CASE WHEN delete_relation THEN [1] ELSE [] END | DELETE r)
+        RETURN count(*) AS updated
         """,
         corpus_id=corpus_id,
         doc_id=doc_id,
+                chunk_ids=chunk_ids,
+                batch_size=GRAPH_RELATION_PRUNE_BATCH_SIZE,
     )
+            row = await result.single()
+            if not row or int(row.get("updated") or 0) == 0:
+                break
 
 
 async def _prune_relates_to_for_corpus(
@@ -1822,14 +2106,23 @@ async def _prune_relates_to_for_corpus(
     corpus_id: str,
 ) -> None:
     """Remove an entire corpus from RELATES_TO provenance arrays."""
-    await session.run(
+    chunk_rows = await _collect_chunk_rows(session, corpus_id=corpus_id)
+    batches = _row_batches(
+        chunk_rows,
+        batch_size=GRAPH_RELATION_PRUNE_BATCH_SIZE,
+    ) or [[]]
+    for batch in batches:
+        chunk_ids = [row["chunk_id"] for row in batch if row["chunk_id"]]
+        doc_ids = list(dict.fromkeys(row["doc_id"] for row in batch if row["doc_id"]))
+        while True:
+            result = await session.run(
         """
-        MATCH (c:Chunk {corpus_id: $corpus_id})
-        WITH collect(DISTINCT c.chunk_id) AS chunk_ids,
-             [did IN collect(DISTINCT c.doc_id) WHERE did IS NOT NULL] AS doc_ids
         MATCH ()-[r:RELATES_TO]->()
         WHERE $corpus_id IN coalesce(r.corpus_ids, [])
-        WITH r, chunk_ids, doc_ids,
+           OR any(chunk_id IN coalesce(r.evidence_chunk_ids, []) WHERE chunk_id IN $chunk_ids)
+           OR any(rel_doc_id IN coalesce(r.evidence_doc_ids, []) WHERE rel_doc_id IN $doc_ids)
+        WITH r LIMIT $batch_size
+        WITH r, $chunk_ids AS chunk_ids, $doc_ids AS doc_ids,
              coalesce(r.support_confidence_chunk_ids, []) AS support_ids,
              coalesce(r.support_confidence_values, []) AS support_values
         SET r.corpus_ids = [
@@ -1868,12 +2161,18 @@ async def _prune_relates_to_for_corpus(
                 ELSE reduce(total = 0.0, conf IN coalesce(r.support_confidence_values, []) | total + toFloat(conf))
                      / size(coalesce(r.support_confidence_values, []))
             END
-        WITH r
-        WHERE size(coalesce(r.corpus_ids, [])) = 0
-        DELETE r
+        WITH r, size(coalesce(r.corpus_ids, [])) = 0 AS delete_relation
+        FOREACH (_ IN CASE WHEN delete_relation THEN [1] ELSE [] END | DELETE r)
+        RETURN count(*) AS updated
         """,
         corpus_id=corpus_id,
+                chunk_ids=chunk_ids,
+                doc_ids=doc_ids,
+                batch_size=GRAPH_RELATION_PRUNE_BATCH_SIZE,
     )
+            row = await result.single()
+            if not row or int(row.get("updated") or 0) == 0:
+                break
 
 
 async def delete_document_graph(
@@ -1884,29 +2183,31 @@ async def delete_document_graph(
 ) -> None:
     """Delete Neo4j graph state for one document and prune shared edges."""
     async with driver.session() as session:
-        affected_res = await session.run(
-            """
-            MATCH (c:Chunk {doc_id: $doc_id, corpus_id: $corpus_id})-[:MENTIONS]->(e:Entity)
-            RETURN collect(DISTINCT e.entity_id) AS entity_ids
-            """,
-            doc_id=doc_id,
+        affected_entity_ids = await _collect_distinct_entity_ids(
+            session,
             corpus_id=corpus_id,
+            doc_id=doc_id,
         )
-        affected_row = await affected_res.single()
-        affected_entity_ids = list((affected_row or {}).get("entity_ids") or [])
         await _prune_relates_to_for_document(
             session,
             corpus_id=corpus_id,
             doc_id=doc_id,
         )
-        await session.run(
+        while True:
+            result = await session.run(
             """
             MATCH (n {doc_id: $doc_id, corpus_id: $corpus_id})
+                WITH n LIMIT $batch_size
             DETACH DELETE n
+                RETURN count(n) AS deleted
             """,
             doc_id=doc_id,
             corpus_id=corpus_id,
+                batch_size=GRAPH_DELETE_BATCH_SIZE,
         )
+            row = await result.single()
+            if not row or int(row.get("deleted") or 0) == 0:
+                break
         await _delete_orphan_entities(session)
         if affected_entity_ids:
             await _refresh_entity_aggregates(session, affected_entity_ids)
@@ -1926,30 +2227,32 @@ async def _clear_document_graph_payload(
     chunk set. Keep the Document anchor and clear only corpus-scoped payload.
     """
     async with driver.session() as session:
-        affected_res = await session.run(
-            """
-            MATCH (c:Chunk {doc_id: $doc_id, corpus_id: $corpus_id})-[:MENTIONS]->(e:Entity)
-            RETURN collect(DISTINCT e.entity_id) AS entity_ids
-            """,
-            doc_id=doc_id,
+        affected_entity_ids = await _collect_distinct_entity_ids(
+            session,
             corpus_id=corpus_id,
+            doc_id=doc_id,
         )
-        affected_row = await affected_res.single()
-        affected_entity_ids = list((affected_row or {}).get("entity_ids") or [])
         await _prune_relates_to_for_document(
             session,
             corpus_id=corpus_id,
             doc_id=doc_id,
         )
-        await session.run(
+        while True:
+            result = await session.run(
             """
             MATCH (n {doc_id: $doc_id, corpus_id: $corpus_id})
             WHERE NOT n:Document
+                WITH n LIMIT $batch_size
             DETACH DELETE n
+                RETURN count(n) AS deleted
             """,
             doc_id=doc_id,
             corpus_id=corpus_id,
+                batch_size=GRAPH_DELETE_BATCH_SIZE,
         )
+            row = await result.single()
+            if not row or int(row.get("deleted") or 0) == 0:
+                break
         await _delete_orphan_entities(session)
         if affected_entity_ids:
             await _refresh_entity_aggregates(session, affected_entity_ids)
@@ -1964,28 +2267,24 @@ async def delete_corpus_graph(
 
     Batched: a single DETACH DELETE over a large corpus (~1.7M nodes+edges on
     a 496-book corpus) runs one giant transaction that exceeds the proxy
-    timeout AND can exhaust Neo4j's heap. Deleting in 10k auto-commit batches
-    keeps each transaction small and bounded — loop until none remain."""
+    timeout AND can exhaust Neo4j's heap. Named bounded auto-commit batches
+    keep each transaction small — loop until none remain."""
     async with driver.session() as session:
-        affected_res = await session.run(
-            """
-            MATCH (c:Chunk {corpus_id: $corpus_id})-[:MENTIONS]->(e:Entity)
-            RETURN collect(DISTINCT e.entity_id) AS entity_ids
-            """,
+        affected_entity_ids = await _collect_distinct_entity_ids(
+            session,
             corpus_id=corpus_id,
         )
-        affected_row = await affected_res.single()
-        affected_entity_ids = list((affected_row or {}).get("entity_ids") or [])
         await _prune_relates_to_for_corpus(session, corpus_id=corpus_id)
         while True:
             res = await session.run(
                 """
                 MATCH (n {corpus_id: $corpus_id})
-                WITH n LIMIT 10000
+                WITH n LIMIT $batch_size
                 DETACH DELETE n
                 RETURN count(n) AS deleted
                 """,
                 corpus_id=corpus_id,
+                batch_size=GRAPH_DELETE_BATCH_SIZE,
             )
             row = await res.single()
             if not row or int(row["deleted"]) == 0:
@@ -2082,7 +2381,9 @@ async def _write_document_graph_once(
         allowed_chunk_ids = set(canonical_chunk_ids)
         original_result_count = len(extraction_results)
         extraction_results = [
-            result for result in extraction_results if result.chunk_id in allowed_chunk_ids
+            result
+            for result in extraction_results
+            if result.chunk_id in allowed_chunk_ids
         ]
         dropped_stale_results = original_result_count - len(extraction_results)
         if dropped_stale_results:
@@ -2193,7 +2494,7 @@ async def _write_document_graph_once(
                 group["text_chunks"].append(result_text)
             # Pt 10c — union query_aliases case-insensitively. Skip aliases
             # equal to the canonical or display name (no signal value).
-            for alias in (getattr(entity, "query_aliases", None) or []):
+            for alias in getattr(entity, "query_aliases", None) or []:
                 alias_clean = str(alias).strip()
                 if not alias_clean or len(group["query_aliases"]) >= 8:
                     continue
@@ -2271,7 +2572,8 @@ async def _write_document_graph_once(
                 domain_resolution_count += 1
             if identity.get("canonical_family"):
                 family_resolution_count += 1
-            mention_rows.append({
+            mention_rows.append(
+                {
                 "chunk_id": r.chunk_id,
                 "entity_id": identity["entity_id"],
                 "normalized_name": canonical_normalized,
@@ -2302,7 +2604,8 @@ async def _write_document_graph_once(
                 # accumulate aliases and stash the definitional phrase.
                 "query_aliases": identity.get("query_aliases") or [],
                 "definitional_phrase": identity.get("definitional_phrase") or "",
-            })
+                }
+            )
 
     relation_rows: list[dict] = []
     related_to_refinement_count = 0
@@ -2312,9 +2615,10 @@ async def _write_document_graph_once(
             if relation.object_kind != "entity":
                 continue
             source_predicate_raw = relation.source_predicate or relation.predicate
-            normalized_source_predicate, reverse_relation = normalize_relation_predicate_alias(
-                source_predicate_raw
-            )
+            (
+                normalized_source_predicate,
+                reverse_relation,
+            ) = normalize_relation_predicate_alias(source_predicate_raw)
             subject_name = relation.object if reverse_relation else relation.subject
             object_name = relation.subject if reverse_relation else relation.object
             subject_canonical = canonicalize_entity_name(subject_name)
@@ -2359,7 +2663,8 @@ async def _write_document_graph_once(
                 relation_cue=relation.relation_cue,
                 predicate_refined=predicate_refined,
             )
-            relation_rows.append({
+            relation_rows.append(
+                {
                 "subject_id": subject_identity["entity_id"],
                 "object_id": object_identity["entity_id"],
                 "predicate": refined_predicate,
@@ -2388,7 +2693,8 @@ async def _write_document_graph_once(
                 "confidence": relation.confidence,
                 "chunk_id": r.chunk_id,
                 "doc_id": r.doc_id or doc_id,
-            })
+                }
+            )
 
     fact_rows: list[dict] = []
     skipped_facts_missing_subject = 0
@@ -2399,7 +2705,8 @@ async def _write_document_graph_once(
             if not subject_identity:
                 skipped_facts_missing_subject += 1
                 continue
-            fact_rows.append({
+            fact_rows.append(
+                {
                 "fact_id": fact_id_from_parts(
                     doc_id=doc_id,
                     chunk_id=r.chunk_id,
@@ -2418,25 +2725,38 @@ async def _write_document_graph_once(
                 "condition": fact.condition,
                 "confidence": fact.confidence,
                 "evidence_phrase": fact.evidence_phrase,
-            })
+                }
+            )
 
     if alias_resolution_count:
         logger.info(
             "Neo4j alias resolution: doc=%s corpus=%s aliases=%d",
-            doc_id[:12], corpus_id[:8], alias_resolution_count,
+            doc_id[:12],
+            corpus_id[:8],
+            alias_resolution_count,
         )
     if facet_resolution_count or domain_resolution_count or family_resolution_count:
         logger.info(
             "Neo4j ontology resolution: doc=%s corpus=%s object_kind=%d domain_type=%d family=%d version=%s",
-            doc_id[:12], corpus_id[:8], facet_resolution_count,
-            domain_resolution_count, family_resolution_count, ONTOLOGY_VERSION,
+            doc_id[:12],
+            corpus_id[:8],
+            facet_resolution_count,
+            domain_resolution_count,
+            family_resolution_count,
+            ONTOLOGY_VERSION,
         )
     if related_to_refinement_count:
         logger.info(
             "Neo4j relation refinement: doc=%s corpus=%s related_to_refined=%d",
-            doc_id[:12], corpus_id[:8], related_to_refinement_count,
+            doc_id[:12],
+            corpus_id[:8],
+            related_to_refinement_count,
         )
-    if skipped_junk_entities or skipped_relations_missing_endpoint or skipped_facts_missing_subject:
+    if (
+        skipped_junk_entities
+        or skipped_relations_missing_endpoint
+        or skipped_facts_missing_subject
+    ):
         logger.info(
             "Neo4j graph cleaning: doc=%s corpus=%s junk_entities=%d dropped_relations=%d dropped_facts=%d",
             doc_id[:12],
@@ -2446,8 +2766,8 @@ async def _write_document_graph_once(
             skipped_facts_missing_subject,
         )
 
-    # 3. Single session for all remaining writes. Each query uses UNWIND to
-    # fan out over its list.
+    # 3. Single session for all remaining writes. Every UNWIND is sliced into
+    # a named, transaction-bounded batch.
     async with driver.session() as session:
         await _redirect_graph_write_rows(
             session,
@@ -2458,7 +2778,9 @@ async def _write_document_graph_once(
 
         if db is not None:
             try:
-                from services.storage.mongo_writer import replace_relation_support_for_document
+                from services.storage.mongo_writer import (
+                    replace_relation_support_for_document,
+                )
 
                 support_records = _relation_support_records(
                     relation_rows=relation_rows,
@@ -2486,7 +2808,10 @@ async def _write_document_graph_once(
                 )
 
         # Chunks + HAS_CHUNK edges.
-        if chunk_rows:
+        for row_batch in _row_batches(
+            chunk_rows,
+            batch_size=GRAPH_WRITE_ROW_BATCH_SIZE,
+        ):
             await session.run(
                 """
                 UNWIND $rows AS row
@@ -2496,13 +2821,16 @@ async def _write_document_graph_once(
                 MATCH (d:Document {doc_id: $doc_id, corpus_id: $corpus_id})
                 MERGE (d)-[:HAS_CHUNK]->(c)
                 """,
-                rows=chunk_rows,
+                rows=row_batch,
                 doc_id=doc_id,
                 corpus_id=corpus_id,
             )
 
         # Entities + MENTIONS edges.
-        if mention_rows:
+        for row_batch in _row_batches(
+            mention_rows,
+            batch_size=GRAPH_WRITE_ROW_BATCH_SIZE,
+        ):
             await session.run(
                 """
                 UNWIND $rows AS row
@@ -2606,12 +2934,15 @@ async def _write_document_graph_once(
                     ELSE m.extracted_types + [row.extracted_type]
                 END
                 """,
-                rows=mention_rows,
+                rows=row_batch,
                 corpus_id=corpus_id,
             )
 
         # RELATES_TO edges between entities (entity_id lookup).
-        if relation_rows:
+        for row_batch in _row_batches(
+            relation_rows,
+            batch_size=GRAPH_WRITE_ROW_BATCH_SIZE,
+        ):
             await session.run(
                 """
                 UNWIND $rows AS row
@@ -2741,7 +3072,7 @@ async def _write_document_graph_once(
                     r.promote_version = $promote_version,
                     r.last_seen_at = timestamp()
                 """,
-                rows=relation_rows,
+                rows=row_batch,
                 corpus_id=corpus_id,
                 promote_version=GRAPH_PROMOTE_VERSION,
             )
@@ -2755,11 +3086,14 @@ async def _write_document_graph_once(
                 MATCH (s)-[weak:RELATES_TO {predicate: 'related_to'}]-(o)
                 DELETE weak
                 """,
-                rows=relation_rows,
+                rows=row_batch,
             )
 
         # Structured facts/properties stay separate from entity-to-entity edges.
-        if fact_rows:
+        for row_batch in _row_batches(
+            fact_rows,
+            batch_size=GRAPH_WRITE_ROW_BATCH_SIZE,
+        ):
             await session.run(
                 """
                 UNWIND $rows AS row
@@ -2785,7 +3119,7 @@ async def _write_document_graph_once(
                 MERGE (e)-[:HAS_FACT]->(f)
                 MERGE (c)-[:SUPPORTS_FACT]->(f)
                 """,
-                rows=fact_rows,
+                rows=row_batch,
                 corpus_id=corpus_id,
             )
 
@@ -2845,7 +3179,8 @@ async def write_graphify_enrichment(
             "source_location": source_location or "",
         }
         for src, dst, source_file, source_location in enrichment.call_edges
-        if normalize_entity_name(src) and normalize_entity_name(dst)
+        if normalize_entity_name(src)
+        and normalize_entity_name(dst)
         and normalize_entity_name(src) != normalize_entity_name(dst)
     ]
     community_label_rows = [
@@ -2858,7 +3193,10 @@ async def write_graphify_enrichment(
         return
 
     async with driver.session() as session:
-        if community_rows:
+        for row_batch in _row_batches(
+            community_rows,
+            batch_size=GRAPH_WRITE_ROW_BATCH_SIZE,
+        ):
             # Stamp community ID on entities. We match on normalized_name so
             # graphify's "Combat.PunchAttack" finds the Phase-4-written entity
             # that has canonical_name="combatpunchattack" — the existing
@@ -2869,20 +3207,26 @@ async def write_graphify_enrichment(
                 MATCH (e:Entity {normalized_name: row.normalized_name})
                 SET e.graphify_community = row.community
                 """,
-                rows=community_rows,
+                rows=row_batch,
             )
 
-        if community_label_rows:
+        for row_batch in _row_batches(
+            community_label_rows,
+            batch_size=GRAPH_WRITE_ROW_BATCH_SIZE,
+        ):
             await session.run(
                 """
                 UNWIND $rows AS row
                 MATCH (e:Entity {graphify_community: row.community})
                 SET e.graphify_community_label = row.label
                 """,
-                rows=community_label_rows,
+                rows=row_batch,
             )
 
-        if call_rows:
+        for row_batch in _row_batches(
+            call_rows,
+            batch_size=GRAPH_WRITE_ROW_BATCH_SIZE,
+        ):
             # CALLS edges between Entity nodes. MATCH by normalized_name on
             # both endpoints; only create the edge if BOTH entities already
             # exist (Phase 4 should have created them from symbols_defined).
@@ -2910,12 +3254,15 @@ async def write_graphify_enrichment(
                         ELSE r.corpus_ids + [$corpus_id]
                     END
                 """,
-                rows=call_rows,
+                rows=row_batch,
                 corpus_id=corpus_id,
             )
 
     logger.info(
         "Phase 4.5 graphify enrichment written: corpus=%s communities=%d "
         "community_labels=%d call_edges=%d",
-        corpus_id, len(community_rows), len(community_label_rows), len(call_rows),
+        corpus_id,
+        len(community_rows),
+        len(community_label_rows),
+        len(call_rows),
     )

@@ -27,6 +27,7 @@ UNDO (per merged dup, from the Mongo audit):
 node/edge counts return to baseline. This is the reversibility GATE: it must be
 green before any real apply. The selftest uses the safest same-type proposals.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -39,6 +40,7 @@ from config import get_settings
 
 MERGE_LOG = "graph_entity_dedup_merge_log"
 PREVIEW = "graph_entity_dedup_preview"
+ENTITY_DEDUP_WRITE_BATCH_SIZE = 100
 
 
 def _A(s: Any, *names: str, default: Any = None) -> Any:
@@ -52,16 +54,20 @@ def _A(s: Any, *names: str, default: Any = None) -> Any:
 def _driver():
     s = get_settings()
     from neo4j import AsyncGraphDatabase
+
     return AsyncGraphDatabase.driver(
         _A(s, "NEO4J_URI", "NEO4J_URL"),
-        auth=(_A(s, "NEO4J_USER", "NEO4J_USERNAME", default="neo4j"),
-              _A(s, "NEO4J_PASSWORD", "NEO4J_PASS")),
+        auth=(
+            _A(s, "NEO4J_USER", "NEO4J_USERNAME", default="neo4j"),
+            _A(s, "NEO4J_PASSWORD", "NEO4J_PASS"),
+        ),
     )
 
 
 def _mongo():
     s = get_settings()
     from motor.motor_asyncio import AsyncIOMotorClient
+
     mc = AsyncIOMotorClient(_A(s, "MONGODB_URI", "MONGODB_URL"))
     return mc, mc[_A(s, "MONGODB_DB", default="polymath")]
 
@@ -120,35 +126,43 @@ _REPOINT = [
     """
     MATCH (c:Chunk)-[m:MENTIONS]->(d:Entity {entity_id:$did})
     MATCH (s:Entity {entity_id:$sid})
+    WITH c, m, s LIMIT $batch_size
     MERGE (c)-[m2:MENTIONS]->(s)
       ON CREATE SET m2 = properties(m), m2.merge_run=$run, m2.merged_from=$did
     DELETE m
+    RETURN count(m) AS changed
     """,
     # outgoing RELATES_TO: (d)->(x)  =>  (s)->(x), collapse by predicate
     """
     MATCH (d:Entity {entity_id:$did})-[ro:RELATES_TO]->(x:Entity)
     WHERE x.entity_id <> $sid AND x.entity_id <> $did
     MATCH (s:Entity {entity_id:$sid})
+    WITH d, ro, x, s LIMIT $batch_size
     MERGE (s)-[r2:RELATES_TO {predicate: coalesce(ro.predicate,'')}]->(x)
       ON CREATE SET r2 = properties(ro), r2.merge_run=$run, r2.merged_from=$did
     DELETE ro
+    RETURN count(ro) AS changed
     """,
     # incoming RELATES_TO: (y)->(d)  =>  (y)->(s)
     """
     MATCH (y:Entity)-[ri:RELATES_TO]->(d:Entity {entity_id:$did})
     WHERE y.entity_id <> $sid AND y.entity_id <> $did
     MATCH (s:Entity {entity_id:$sid})
+    WITH y, ri, d, s LIMIT $batch_size
     MERGE (y)-[r2:RELATES_TO {predicate: coalesce(ri.predicate,'')}]->(s)
       ON CREATE SET r2 = properties(ri), r2.merge_run=$run, r2.merged_from=$did
     DELETE ri
+    RETURN count(ri) AS changed
     """,
     # HAS_FACT: (d)->(f)  =>  (s)->(f)
     """
     MATCH (d:Entity {entity_id:$did})-[hf:HAS_FACT]->(f:Fact)
     MATCH (s:Entity {entity_id:$sid})
+    WITH d, hf, f, s LIMIT $batch_size
     MERGE (s)-[h2:HAS_FACT]->(f)
       ON CREATE SET h2 = properties(hf), h2.merge_run=$run, h2.merged_from=$did
     DELETE hf
+    RETURN count(hf) AS changed
     """,
 ]
 
@@ -168,9 +182,24 @@ async def _apply_one(sess, dup_id: str, sur_id: str, run: str) -> dict | None:
     snap["survivor_id"] = sur_id
     snap["merge_run"] = run
     for q in _REPOINT:
-        await sess.run(q, did=dup_id, sid=sur_id, run=run)
-    await sess.run(_TOMBSTONE, did=dup_id, sid=sur_id, run=run,
-                   ts=datetime.now(timezone.utc).isoformat())
+        while True:
+            result = await sess.run(
+                q,
+                did=dup_id,
+                sid=sur_id,
+                run=run,
+                batch_size=ENTITY_DEDUP_WRITE_BATCH_SIZE,
+            )
+            row = await result.single()
+            if not row or int(row.get("changed") or 0) == 0:
+                break
+    await sess.run(
+        _TOMBSTONE,
+        did=dup_id,
+        sid=sur_id,
+        run=run,
+        ts=datetime.now(timezone.utc).isoformat(),
+    )
     return snap
 
 
@@ -178,7 +207,9 @@ async def _apply_one(sess, dup_id: str, sur_id: str, run: str) -> dict | None:
 _UNDO_DELETE_CREATED = """
 MATCH (s:Entity {entity_id:$sid})-[r]-()
 WHERE r.merge_run=$run AND r.merged_from=$did
+WITH r LIMIT $batch_size
 DELETE r
+RETURN count(r) AS changed
 """
 _UNDO_DROP_TOMBSTONE = "MATCH (t:Entity {entity_id:'tombstone:'+$did}) DETACH DELETE t"
 _UNDO_RECREATE_NODE = "CREATE (d:Entity) SET d = $dprops"
@@ -211,24 +242,41 @@ CREATE (d)-[r:HAS_FACT]->(f) SET r = row.props
 
 async def _undo_one(sess, snap: dict) -> None:
     did, sid, run = snap["dup_id"], snap["survivor_id"], snap["merge_run"]
-    await sess.run(_UNDO_DELETE_CREATED, sid=sid, did=did, run=run)
+    while True:
+        result = await sess.run(
+            _UNDO_DELETE_CREATED,
+            sid=sid,
+            did=did,
+            run=run,
+            batch_size=ENTITY_DEDUP_WRITE_BATCH_SIZE,
+        )
+        row = await result.single()
+        if not row or int(row.get("changed") or 0) == 0:
+            break
     await sess.run(_UNDO_DROP_TOMBSTONE, did=did)
     await sess.run(_UNDO_RECREATE_NODE, dprops=snap["dprops"])
-    if snap["mentions"]:
-        await sess.run(_UNDO_MENTIONS, did=did, rows=snap["mentions"])
-    if snap["rel_out"]:
-        await sess.run(_UNDO_REL_OUT, did=did, rows=snap["rel_out"])
-    if snap["rel_in"]:
-        await sess.run(_UNDO_REL_IN, did=did, rows=snap["rel_in"])
-    if snap["self_loops"]:
-        await sess.run(_UNDO_SELF, did=did, rows=snap["self_loops"])
-    if snap["facts"]:
-        await sess.run(_UNDO_FACTS, did=did, rows=snap["facts"])
+    for query, rows in (
+        (_UNDO_MENTIONS, snap["mentions"]),
+        (_UNDO_REL_OUT, snap["rel_out"]),
+        (_UNDO_REL_IN, snap["rel_in"]),
+        (_UNDO_SELF, snap["self_loops"]),
+        (_UNDO_FACTS, snap["facts"]),
+    ):
+        for idx in range(0, len(rows), ENTITY_DEDUP_WRITE_BATCH_SIZE):
+            await sess.run(
+                query,
+                did=did,
+                rows=rows[idx : idx + ENTITY_DEDUP_WRITE_BATCH_SIZE],
+            )
 
 
 # ── proposal loading ─────────────────────────────────────────────────────────
-async def _load_proposals(db, corpus_id: str, decisions: set[str], limit: int | None) -> list[dict]:
-    doc = await db[PREVIEW].find_one({"corpus_id": corpus_id}, sort=[("created_at", -1)])
+async def _load_proposals(
+    db, corpus_id: str, decisions: set[str], limit: int | None
+) -> list[dict]:
+    doc = await db[PREVIEW].find_one(
+        {"corpus_id": corpus_id}, sort=[("created_at", -1)]
+    )
     if not doc:
         raise SystemExit("No preview doc found — run the dry run first.")
     props = [p for p in doc["proposals"] if p["decision"] in decisions]
@@ -259,10 +307,13 @@ async def run_selftest(corpus_id: str, n: int) -> bool:
                 await _undo_one(sess, snap)
             after = await baseline_counts(sess)
             print(f"after undo: {after}")
-            ok = (after == before)
+            ok = after == before
             print(f"\nROUND-TRIP EXACT: {ok}")
             if not ok:
-                print("  DIFF:", {k: (before[k], after[k]) for k in before if before[k] != after[k]})
+                print(
+                    "  DIFF:",
+                    {k: (before[k], after[k]) for k in before if before[k] != after[k]},
+                )
         return ok
     finally:
         await drv.close()
@@ -276,26 +327,37 @@ async def run_apply(corpus_id: str, decisions: set[str], limit: int | None) -> s
     run = "dedup-" + uuid.uuid4().hex[:12]
     try:
         props = await _load_proposals(db, corpus_id, decisions, limit)
-        await db[MERGE_LOG].insert_one({
-            "merge_run": run, "corpus_id": corpus_id, "kind": "run_header",
-            "decisions": sorted(decisions), "planned": len(props),
+        await db[MERGE_LOG].insert_one(
+            {
+                "merge_run": run,
+                "corpus_id": corpus_id,
+                "kind": "run_header",
+                "decisions": sorted(decisions),
+                "planned": len(props),
             "created_at": datetime.now(timezone.utc),
-        })
+            }
+        )
         applied = 0
         async with drv.session() as sess:
             for p in props:
                 snap = await _apply_one(sess, p["dup_id"], p["survivor_id"], run)
                 if snap:
-                    await db[MERGE_LOG].insert_one({**snap, "kind": "merge",
-                                                    "corpus_id": corpus_id})
+                    await db[MERGE_LOG].insert_one(
+                        {**snap, "kind": "merge", "corpus_id": corpus_id}
+                    )
                     applied += 1
                     if applied % 500 == 0:
                         print(f"  applied {applied}/{len(props)}")
         cleared = await invalidate_caches(db, corpus_id)
         await db[MERGE_LOG].update_one(
             {"merge_run": run, "kind": "run_header"},
-            {"$set": {"applied": applied, "caches_cleared": cleared,
-                      "finished_at": datetime.now(timezone.utc)}},
+            {
+                "$set": {
+                    "applied": applied,
+                    "caches_cleared": cleared,
+                    "finished_at": datetime.now(timezone.utc),
+                }
+            },
         )
         print(f"APPLIED {applied} merges under run {run}; caches cleared: {cleared}")
         return run
@@ -325,7 +387,9 @@ async def run_undo(run: str) -> int:
     drv = _driver()
     try:
         header = await db[MERGE_LOG].find_one({"merge_run": run, "kind": "run_header"})
-        snaps = [d async for d in db[MERGE_LOG].find({"merge_run": run, "kind": "merge"})]
+        snaps = [
+            d async for d in db[MERGE_LOG].find({"merge_run": run, "kind": "merge"})
+        ]
         n = 0
         async with drv.session() as sess:
             for snap in reversed(snaps):  # reverse application order
@@ -347,18 +411,35 @@ async def run_undo(run: str) -> int:
 # recovered from the preview proposal (cn/pt). Collapsed (unmarked) edges are
 # not recoverable, but fragments rarely have any.
 _CLEANUP_MOVES = [
-    ("MATCH (c:Chunk)-[m:MENTIONS {merged_from:$did, merge_run:$run}]->(:Entity {entity_id:$sid}) "
-     "MATCH (d:Entity {entity_id:$did}) CREATE (c)-[m2:MENTIONS]->(d) "
-     "SET m2=properties(m) REMOVE m2.merged_from, m2.merge_run DELETE m"),
-    ("MATCH (:Entity {entity_id:$sid})-[r:RELATES_TO {merged_from:$did, merge_run:$run}]->(x) "
-     "MATCH (d:Entity {entity_id:$did}) CREATE (d)-[r2:RELATES_TO]->(x) "
-     "SET r2=properties(r) REMOVE r2.merged_from, r2.merge_run DELETE r"),
-    ("MATCH (y)-[r:RELATES_TO {merged_from:$did, merge_run:$run}]->(:Entity {entity_id:$sid}) "
-     "MATCH (d:Entity {entity_id:$did}) CREATE (y)-[r2:RELATES_TO]->(d) "
-     "SET r2=properties(r) REMOVE r2.merged_from, r2.merge_run DELETE r"),
-    ("MATCH (:Entity {entity_id:$sid})-[h:HAS_FACT {merged_from:$did, merge_run:$run}]->(f) "
-     "MATCH (d:Entity {entity_id:$did}) CREATE (d)-[h2:HAS_FACT]->(f) "
-     "SET h2=properties(h) REMOVE h2.merged_from, h2.merge_run DELETE h"),
+    (
+        "MATCH (c:Chunk)-[m:MENTIONS {merged_from:$did, merge_run:$run}]->(:Entity {entity_id:$sid}) "
+        "MATCH (d:Entity {entity_id:$did}) "
+        "WITH c, m, d LIMIT $batch_size "
+        "CREATE (c)-[m2:MENTIONS]->(d) "
+        "SET m2=properties(m) REMOVE m2.merged_from, m2.merge_run DELETE m "
+        "RETURN count(m) AS changed"
+    ),
+    (
+        "MATCH (:Entity {entity_id:$sid})-[r:RELATES_TO {merged_from:$did, merge_run:$run}]->(x) "
+        "MATCH (d:Entity {entity_id:$did}) WITH r, x, d LIMIT $batch_size "
+        "CREATE (d)-[r2:RELATES_TO]->(x) "
+        "SET r2=properties(r) REMOVE r2.merged_from, r2.merge_run DELETE r "
+        "RETURN count(r) AS changed"
+    ),
+    (
+        "MATCH (y)-[r:RELATES_TO {merged_from:$did, merge_run:$run}]->(:Entity {entity_id:$sid}) "
+        "MATCH (d:Entity {entity_id:$did}) WITH y, r, d LIMIT $batch_size "
+        "CREATE (y)-[r2:RELATES_TO]->(d) "
+        "SET r2=properties(r) REMOVE r2.merged_from, r2.merge_run DELETE r "
+        "RETURN count(r) AS changed"
+    ),
+    (
+        "MATCH (:Entity {entity_id:$sid})-[h:HAS_FACT {merged_from:$did, merge_run:$run}]->(f) "
+        "MATCH (d:Entity {entity_id:$did}) WITH h, f, d LIMIT $batch_size "
+        "CREATE (d)-[h2:HAS_FACT]->(f) "
+        "SET h2=properties(h) REMOVE h2.merged_from, h2.merge_run DELETE h "
+        "RETURN count(h) AS changed"
+    ),
 ]
 
 
@@ -366,24 +447,48 @@ async def run_cleanup(corpus_id: str, run: str = "selftest") -> int:
     mc, db = _mongo()
     drv = _driver()
     try:
-        doc = await db[PREVIEW].find_one({"corpus_id": corpus_id}, sort=[("created_at", -1)])
+        doc = await db[PREVIEW].find_one(
+            {"corpus_id": corpus_id}, sort=[("created_at", -1)]
+        )
         prop_by_dup = {p["dup_id"]: p for p in (doc["proposals"] if doc else [])}
         n = 0
         async with drv.session() as sess:
-            tombs = [dict(r) async for r in await sess.run(
+            tombs = [
+                dict(r)
+                async for r in await sess.run(
                 "MATCH (t:Entity {tombstone:true, merge_run:$run}) "
-                "RETURN t.original_entity_id AS did, t.merged_into AS sid", run=run)]
+                    "RETURN t.original_entity_id AS did, t.merged_into AS sid",
+                    run=run,
+                )
+            ]
             for t in tombs:
                 did, sid = t["did"], t["sid"]
                 p = prop_by_dup.get(did, {})
                 await sess.run(
                     "MERGE (d:Entity {entity_id:$did}) SET d.canonical_name=$cn, "
                     "d.primary_entity_type=$pt, d.normalized_name=$nn, d.restored_from=$run",
-                    did=did, cn=p.get("dup_cn", did), pt=p.get("dup_pt", "other"),
-                    nn=(p.get("dup_cn") or did).lower(), run=run)
+                    did=did,
+                    cn=p.get("dup_cn", did),
+                    pt=p.get("dup_pt", "other"),
+                    nn=(p.get("dup_cn") or did).lower(),
+                    run=run,
+                )
                 for q in _CLEANUP_MOVES:
-                    await sess.run(q, did=did, sid=sid, run=run)
-                await sess.run("MATCH (t:Entity {entity_id:'tombstone:'+$did}) DETACH DELETE t", did=did)
+                    while True:
+                        result = await sess.run(
+                            q,
+                            did=did,
+                            sid=sid,
+                            run=run,
+                            batch_size=ENTITY_DEDUP_WRITE_BATCH_SIZE,
+                        )
+                        row = await result.single()
+                        if not row or int(row.get("changed") or 0) == 0:
+                            break
+                await sess.run(
+                    "MATCH (t:Entity {entity_id:'tombstone:'+$did}) DETACH DELETE t",
+                    did=did,
+                )
                 n += 1
                 print(f"  reversed {did} <- {sid}")
         print(f"CLEANUP reversed {n} leftover '{run}' merges")
@@ -396,11 +501,19 @@ async def run_cleanup(corpus_id: str, run: str = "selftest") -> int:
 def main() -> None:
     ap = argparse.ArgumentParser(description="Entity dedup apply/undo")
     ap.add_argument("--corpus", required=True)
-    ap.add_argument("--selftest", type=int, metavar="N", help="apply+undo N, assert round-trip")
+    ap.add_argument(
+        "--selftest", type=int, metavar="N", help="apply+undo N, assert round-trip"
+    )
     ap.add_argument("--apply", action="store_true")
     ap.add_argument("--undo", metavar="RUN_ID")
-    ap.add_argument("--cleanup", metavar="RUN_ID", help="reverse leftover merges by marker (e.g. selftest)")
-    ap.add_argument("--decisions", default="auto", help="comma list: auto,auto_cross_type")
+    ap.add_argument(
+        "--cleanup",
+        metavar="RUN_ID",
+        help="reverse leftover merges by marker (e.g. selftest)",
+    )
+    ap.add_argument(
+        "--decisions", default="auto", help="comma list: auto,auto_cross_type"
+    )
     ap.add_argument("--limit", type=int, default=None)
     args = ap.parse_args()
     if args.selftest:
