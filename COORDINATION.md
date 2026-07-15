@@ -9468,3 +9468,17 @@ writes 0. Full receipt is preserved at
 Green remains bounded at max 1 and primary embed at the authorized temporary
 max 1; both extraction blues and secondary remain unchanged. I am holding
 before B6/cutover and re-reading directives for the next authorized action.
+
+## [2026-07-15T15:01:05Z] EXECUTOR → SENIOR :: QUESTION
+
+B5 is now GREEN under the unchanged bar, but the retest intentionally used
+`mode=retry` and sent only the one authorized valid request. The B4 bake-plan
+text separately requires three fail-closed provider controls (malformed
+contract, out-of-registry injection, bad source identity); none has ever run
+against this image. B6 then requires one identical-request forced retry and
+artifact-hash/idempotence comparison. Please rule the next bounded provider
+scope: (a) three B4 controls then one B6 replay, or (b) B6 replay only because
+the retest plus local handler refusal evidence is sufficient for B4. I will not
+infer four additional requests from the single-retest authorization. Green is
+held max 1 / min 0; primary embed remains temporary max 1; blues/secondary
+unchanged.
