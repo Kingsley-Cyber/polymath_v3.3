@@ -9494,3 +9494,57 @@ identical-request replay (idempotence: identical artifact hashes, no
 double-write, journaled job IDs). Preregister the four expected outcomes in
 the dispatch receipt. Then the pathway is control-proven and the chain
 proceeds to the 15-doc E2E.
+
+## [2026-07-15T15:03:40Z] EXECUTOR → SENIOR :: ACK
+
+Four-job scope preregistered before dispatch, in runner order:
+1. identical valid replay: completes with exact semantic hash
+   `781d22ac130cc40e0f42ae8a8cfa87c9ffc2532aa0b862192625a60a4b024f71`,
+   confidence-inclusive `results` hash
+   `7ba87c12d322b61468527bd07d248f335643533734ca7b18fd767448ffc48d9d`,
+   unchanged-tolerance parity/selection green, a new journaled job ID, and
+   durable writes 0;
+2. malformed contract: `success=false`, named code
+   `extraction_contract_rejected`, durable writes 0;
+3. out-of-registry top-level injection: same named refusal and zero writes;
+4. empty source identity: same named refusal and zero writes.
+
+Any deviation stops; no fifth request. The whole-tree runner/spec/baseline and
+valid v3 journal will be preflighted as appuser before dispatch. Green remains
+exact digest/max 1; blues and secondary remain read-only.
+
+## [2026-07-15T15:10:02Z] EXECUTOR → SENIOR :: BLOCKER
+
+The four-job gate stopped after job 2; jobs 3-4 were not sent. B6 replay job
+`ce5835e5-bcdb-463d-9d31-320404824a85-u2` completed and is independently
+GREEN: new journaled ID, exact preregistered semantic hash `781d22ac…`, exact
+confidence-inclusive results hash `7ba87c12…`, full results byte-semantically
+equal to the first live job, confidence max delta 0.0 across 126, durable/
+canonical writes 0. Delay 157,028ms, execution 12,649ms. Provider history
+remained readable after abort and full replay output is preserved in
+`/tmp/runpod_determinism_replay_status_after_abort.log`; compare receipts
+`/tmp/runpod_determinism_b6_replay_compare.log` and
+`/tmp/runpod_determinism_b6_semantic_hash.log`, both `EXIT=0`.
+
+First control `malformed_contract`, job
+`18b5e861-a2bb-4f26-a9df-d63b0ae46bbc-u1`, returned EXACT preregistered
+refusal output `{success:false,error_code:"extraction_contract_rejected"}`
+with `ValueError: unsupported extraction contract`, delay 628ms, execution
+328ms—but RunPod terminal status is `FAILED`, not `COMPLETED`. The current
+runner hard-fails on every provider `FAILED` before handing its output to
+`validate_refusal`, so overall runner true `EXIT=1`
+(`/tmp/runpod_determinism_controls_b6.log`). Full provider evidence is
+preserved at `/tmp/runpod_determinism_failed_control_status.log`, `EXIT=0`.
+This proves live wrapper/serialization refusal and named code, but only 1/3
+controls ran; I do not declare B4 complete or reinterpret runner failure.
+
+Mandatory abort complete: green `lpp26ev2wlu1x4` deleted, primary embed
+restored max 1→2, final census no green/both blues exact/secondary untouched;
+all rollback receipts `EXIT=0`. Proposed classification/remedy for ruling:
+RunPod treats the handler's intentional top-level `error` refusal as provider
+`FAILED` while retaining the exact structured output. Lawfully teach only the
+invalid-control path to require BOTH provider status `FAILED` and the exact
+named refusal output; valid jobs must still fail on any non-COMPLETED status.
+Add focused tests for correct/missing/wrong FAILED output and durable per-case
+receipt before redeploying for the two unrun controls only. No image/runtime/
+tolerance/semantic change. Stopped pending your ruling.
