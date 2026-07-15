@@ -3548,6 +3548,41 @@ A corpus is strict-ready only when:
 - Checklist boxes closed: this failed execution attempt and boundary-stop
   receipt only. T9.3 paid completion and all downstream boxes remain open.
 
+### 2026-07-15 - T9.3 B1 Phase-2 post-stop read-only diagnosis
+
+- Commit: this diagnosis commit on `claude-continuation-20260713`.
+- Owner: senior preregistered the resume/park criterion before diagnosis; no
+  new owner scope was inferred.
+- Corpus/data scope: read-only inspection of the exact 721-row Phase-2 job set,
+  its seven dead letters, document metadata, next 50 queued ordinals, and a
+  four-minute LiteLLM status-only log window.
+- Code changes: none. Temporary `/tmp` diagnostic helpers read only safe
+  metadata and suppress raw log lines/provider output.
+- Durable migration/backfill: none; durable state remains 141 accepted / 7
+  DLQ / 573 queued / zero running.
+- Before metrics: final rolling window 44/50 accepted; causal branch unknown.
+- After metrics: `333dd5a6…` accounts for 3/7 total and 3/6 rolling-window
+  failures at 30% within-document attempted failure rate. The next 50 queued
+  rows span six documents and only one row overlaps any failure document.
+  Accepted latency prior-vs-final window is p50 126.537→136.331 seconds and
+  p95 273.553→258.548; cost p50 `$0.02460110`→`$0.02688350` and p95
+  `$0.04851501`→`$0.04675222`. One timestamp-correlated HTTP 500 exists; no
+  repeated 5xx.
+- Tests by tier: durable diagnosis true `EXIT=0`; status-only Docker-log parse
+  `DOCKER_EXIT=0`. Permanent receipt:
+  `docs/T9_3_PROSE_PHASE2_POSTSTOP_DIAGNOSIS_2026-07-15.md`.
+- Cross-corpus test: not applicable; no corpus content or canonical stores
+  were read or changed beyond safe mark document labels.
+- Failure/rollback test: no mutation occurred. The failed-stop receipt's first
+  structural DLQ completion rank is corrected from the live total-count
+  shorthand 69 to final completion rank 68.
+- Deployment image/health: no rebuild, restart, deploy, provider call,
+  projection, or activation.
+- Remaining risks: exactly one unchanged-gate resume is conditionally
+  authorized; any second rolling stop parks for owner. Hard-document failures,
+  final ledger, tail, owner sample, projection, and activation remain open.
+- Checklist boxes closed: diagnosis only. T9.3 paid completion remains open.
+
 ## Implementation Log Template
 
 Copy this section for every completed item:

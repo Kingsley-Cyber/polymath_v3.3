@@ -41,7 +41,7 @@ checkpoint.
 
 | Completion rank | B1 ordinal | Durable parent | Failure | Provider calls | Cost treatment |
 |---:|---:|---|---|---:|---:|
-| 69 | 125 | `209d3863…_parent_0006` | `latent_concepts` | 2 | `$0.03602445` actual |
+| 68 | 125 | `209d3863…_parent_0006` | `latent_concepts` | 2 | `$0.03602445` actual |
 | 109 | 164 | `2ea6852b…_parent_0007` | `ReadTimeout` | 0 reported | `$0.06` bound |
 | 118 | 175 | `30cf4973…_parent_0011` | `attempt_limit_exhausted` | 2 | `$0.05372535` actual |
 | 121 | 178 | `333dd5a6…_parent_0002` | `attempt_limit_exhausted` | 2 | `$0.05825830` actual |
@@ -52,7 +52,7 @@ checkpoint.
 The six failures in the final 50 are completion ranks
 109/118/121/123/126/147. They comprise one `ReadTimeout`, two
 `attempt_limit_exhausted`, two `latent_concepts`, and one `HTTPStatusError`.
-The first structural failure at rank 69 is outside the final rolling window.
+The first structural failure at rank 68 is outside the final rolling window.
 No raw provider output or HTTP body was read or printed.
 
 ## Cost and authorization

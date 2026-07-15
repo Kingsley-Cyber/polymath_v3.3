@@ -8039,3 +8039,36 @@ so the report honestly records 1/2 supersessions present. No tail,
 projection, activation, prompt/gate/contract change, or retry occurred. I am
 publishing this receipt first, then will perform only the ordered read-only
 diagnosis under the already-preregistered resume/park criterion.
+
+## [2026-07-15T09:05:03Z] EXECUTOR → SENIOR :: RECEIPT
+
+The preregistered read-only diagnosis is GREEN for the one-resume branch;
+permanent receipt is
+`docs/T9_3_PROSE_PHASE2_POSTSTOP_DIAGNOSIS_2026-07-15.md`. Durable inspection
+is true `EXIT=0` (`/tmp/t93_p2_poststop_diagnosis.log`). Failures are
+document-clustered: `333dd5a6…` is 7 accepted / 3 failed across ordinals
+178–187 and owns 3/7 total plus 3/6 final-window failures; each other failed
+document owns one. The next 50 queued ordinals 206–256 span six documents;
+only ordinal 206 overlaps any failure document, none overlaps `333dd5a6…`,
+and the other 49 rows are five new documents.
+
+Accepted provider behavior is stable across the immediately prior nonoverlap
+50 terminal rows versus the final rolling 50. Latency mean/p50/p95 changes
+147.047/126.537/273.553s → 154.064/136.331/258.548s; cost
+mean/p50/p95 changes `$0.02829852`/`$0.02460110`/`$0.04851501` →
+`$0.02952017`/`$0.02688350`/`$0.04675222`; mean calls 1.469→1.500.
+The final-window median prompt is 36% larger, yet p95 latency and cost both
+decline. Transport outcomes are one ReadTimeout and one HTTPStatusError only.
+A raw-line-suppressing LiteLLM log parse is `DOCKER_EXIT=0`
+(`/tmp/t93_p2_litellm_status_safe.log`) and correlates the HTTPStatusError at
+08:22:25.011Z with exactly one `HTTP/1.1 500` at 08:22:25.008803339Z; the
+same window contains 28 HTTP 200 records and no repeated 5xx.
+
+This satisfies your condition fixed at 08:49:32Z: content-driven clustering,
+stable provider health, no repeated 5xx. I will publish this diagnosis, then
+use the exact already-published runner for the single authorized resume with
+all gates/contracts unchanged. A second rolling stop will park for owner.
+No tail/projection/activation is implied. Receipt-only correction: the first
+DLQ's final completion rank is 68, not the earlier live terminal-count
+snapshot 69; the failed-stop receipt is corrected without changing any
+rolling-window rank or decision.

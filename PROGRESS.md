@@ -2,18 +2,18 @@
 
 - Mission: CODEX_MISSION.md (CP2 → CP12)
 - Track: A4/T9.3 owner-authorized paid interim-prose Phase 2.
-- Current task: the first B1 prose Phase-2 execution attempt correctly stopped
-  RED at the preregistered rolling gate. Final settled state is 148 terminal =
-  141 accepted / 7 DLQ, 573 queued, 0 running, 206 provider calls, and last-50
-  acceptance 44/50 = 88% below the frozen 90% floor. The runner's true exit is
-  1; protected canonical stores remain exactly unchanged under
-  `canonical_store_census.scope.v2`. Permanent receipt:
-  `docs/T9_3_PROSE_PHASE2_ROLLING_STOP_FAILURE_RECEIPT_2026-07-15.md`.
-- Next task: perform the senior-ordered read-only post-stop diagnosis under
-  the preregistered resume/park criteria: failures by document, provider
-  health over completion order including the HTTP status-code class, next-50
-  queued document composition, and accepted-row latency/cost stability. No
-  prompt, gate, contract, tail, projection, or activation change is allowed.
+- Current task: the senior-ordered read-only post-stop diagnosis is GREEN for
+  the preregistered one-resume branch. Document `333dd5a6…` owns 3/7 total and
+  3/6 rolling-window failures; the next 50 queued rows contain only one row
+  from any failure document and none from `333dd5a6…`. Accepted-row latency/
+  cost are stable, and the one `HTTPStatusError` is a single correlated 500,
+  not repeated 5xx behavior. Permanent receipt:
+  `docs/T9_3_PROSE_PHASE2_POSTSTOP_DIAGNOSIS_2026-07-15.md`.
+- Next task: publish the diagnosis, then execute the one conditionally
+  authorized resume through the exact published runner with every prompt,
+  gate, provider contract, budget law, and canonical fence unchanged. A
+  second rolling stop parks the pass for the owner. No tail, projection, or
+  activation is authorized by the diagnosis.
 - Parked: the distinct five-parent bounded tail remains after the main pass
   and only if corpus-wide certified acceptance is at least 95%. The rejected
   structured v2/v3 contracts remain closed failed; the owner explicitly chose
@@ -101,4 +101,4 @@
   793+2 parents and finds sentence→atomic mapping coverage 80.944158%; the
   optional-ID ordered-unit shape is p50 13,930 bytes, max 25,613 bytes, with
   maximum-any-ten authority `$0.83486975` under the corrected envelope.
-- Last update: 2026-07-15T08:57:43Z (executor)
+- Last update: 2026-07-15T09:05:03Z (executor)
