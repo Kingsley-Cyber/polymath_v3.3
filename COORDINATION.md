@@ -10905,3 +10905,76 @@ valid green run. No product/provider mutation followed the invalid harness.
 Proceeding to credential scan, publish, then isolated item-4 requeue. The
 100-ID live peak-memory measurement remains attached to the post-rewrite
 receipt, as ordered.
+
+## [2026-07-15T22:26:22Z] EXECUTOR → SENIOR :: RECEIPT
+
+The Neo4j transaction-family fix is published as `74d2317`. Required
+pull/rebase/autostash was up to date, staged diff-check returned true
+`EXIT=0`, and credential-pattern scan returned true `EXIT=0` with
+`secret_like_matches=0`. Branch push and `git push origin HEAD:main` each
+returned true `EXIT=0`. I am now requeueing only failed ordinal 3 against its
+clean graph surface. Mongo/Qdrant summaries and 1,575 staged extractions must
+remain intact, RunPod must stay 201/201, Neo4j must rewrite all 1,575 chunks,
+and whole-document verification must be true before any other item is
+released.
+
+## [2026-07-15T22:43:15Z] EXECUTOR → SENIOR :: RECEIPT
+
+Isolated item 4 is VERIFIED green after the Neo4j batch-family fix. The valid
+launch-state-bound requeue returned true `EXIT=0`; its first attempt refused
+before mutation because the historical failed document stores `verified`
+absent/null rather than explicit false. Read-only diagnosis proved every
+substantive precondition unchanged, so the corrected operator used the
+existing one-completeness truth (`verified is not true`) and requeued exactly
+one item. Watcher true `EXIT=0`: item done/complete in 849.539s, ingest stage
+fully_enriched, verified=true, 174/174 canonical summaries and retrieval
+texts, 174 projected summary points, zero verify errors, 1,575 graph chunks,
+50 stored extraction batches, failed_chunks=0. RunPod stayed exactly 201
+submitted = 201 terminal with 66 historical reuse receipts; summary calls
+delta=0, ceiling basis stayed `$1.420359070`, refusals=0, reservations=0.
+
+The ordered live memory receipt sampled 109 real aggregate-refresh
+transactions at batch size 100. Observed peak was 2.0 MiB, which is
+0.279018% of the 716.8 MiB transaction-total cap, leaving 714.8 MiB measured
+headroom; the memory watcher returned true `EXIT=0`. The retry also drained
+the pre-existing global orphan backlog in bounded commits before rebuilding;
+read-only censuses observed 27,297 → 16,597 → 6,697 → 0, never claiming a
+partial graph as success. I am now releasing exactly the remaining eleven
+cancelled items under the unchanged ceilings and full-batch watchdog.
+
+## [2026-07-15T22:48:37Z] EXECUTOR → SENIOR :: RECEIPT
+
+The exact remaining-item release gate is green. The launch-state-bound
+operator returned true `EXIT=0`: prestate done=4/cancelled=11 and poststate
+done=4/queued=11, with no failed, skipped, or running item manufactured by
+the operator. Pre-release closure was documents=4 verified=4; RunPod stayed
+201 submitted = 201 terminal, and summary ceiling basis stayed
+`$1.420359070`. The document-boundary watcher remains fail-closed. Its first
+new extraction completed 15/15 jobs with zero outstanding; the following
+document verified true and the next source is now active. Current live
+closure is done=6, queued=8, running=1, RunPod 216/216, summary basis
+`$1.467820460`, zero refusals. No topology or concurrency restoration is
+attempted until all 15 preregistered extraction preflights are terminal.
+
+## [OWNER-RELAY 2026-07-15T23:38:48Z] OWNER :: EMPHASIS — full-corpus-scale extraction is the goal
+"yes im more focused also on ensuring full corpus scale extraction"
+
+## [2026-07-15T23:38:48Z] SENIOR → EXECUTOR :: DIRECTIVE — the burst report must SPEC full-corpus scale (P2.7b becomes the deliverable)
+The owner's target is his real libraries (hundreds of books), not 15. Amend
+the E2E closeout accordingly:
+1. THE BURST REPORT EXTRAPOLATES TO FULL CORPUS: from measured per-task
+   worker-seconds and per-request overhead, publish the projection table —
+   tasks/cost/wall-clock for 100/300/500-book corpora at fleet sizes
+   10/20/50/100 and batch sizes 32/64/128 — plus the recommended
+   (fleet, batch) operating point and the exact quota ask.
+2. P2.7b BURST ORCHESTRATION is the next build after E2E closeout: wave
+   dispatch with checkpointed document boundaries, resume-safe under ALL
+   four new invariants (counted noise exclusions, verified-duplicate-only
+   skips, no-information-loss resume, receipted graph batch constants),
+   dual-account routing, reservation-gated ceilings per wave. The E2E's four
+   fixes ARE full-scale blockers retired in advance (an 18k-entity OOM or a
+   resume clobber at book 400 would have been catastrophic).
+3. Note for the report: today's serial per-document stages (chunk, Mac
+   embed, graph, summary) become the full-scale bottleneck after extraction
+   is fleet-parallel — quantify their per-book cost so the owner sees the
+   NEXT optimization target honestly.
