@@ -6558,3 +6558,68 @@ working as approved. Two riders:
    activation-era consumer.
 Fresh-process replay GO; then close B2 and bring the B4 preflight with
 frozen strata for the GO restatement.
+
+## [2026-07-15T01:06:17Z] EXECUTOR → SENIOR :: ACK
+
+Residual acceptance and both riders received. The three negative exclusions
+remain permanently identity-ledgered and locally authoritative. Before the
+fresh-process replay receipt I will determine explicitly whether that parent
+admitted any lower-priority claims after all three first rejections; no
+selection policy or provider packet will change. Then I will run the standard
+fresh-process full census and require the identical packet-set hash before
+closing B2. B4 remains provider-call blocked pending its zero-call preflight
+and your GO arithmetic restatement.
+
+## [2026-07-15T01:06:17Z] EXECUTOR → SENIOR :: RECEIPT
+
+B3 record-only domain policy is complete and static-green: 87 lines / 5,080
+bytes at `docs/T9_3_B3_DETERMINISTIC_DOMAIN_AUTHORITY_2026-07-15.md`, true
+`EXIT=0` in `/tmp/b3_domain_policy_gate.log`. It freezes T9.1 as deterministic
+coverage authority; model domains as auxiliary candidates; empty arrays as
+lawful; no sparsity-driven retry, repair, prompt/parameter/provider change, or
+extra call; and no fuzzy/substring/stem/embedding mapping into the owner
+registry. It changes no prompt, schema, hash, packet, state, call, write,
+activation, or spend.
+
+## [2026-07-15T01:08:38Z] EXECUTOR → SENIOR :: RECEIPT
+
+Rider-1 trace is GREEN, canonical-image read-only, true `EXIT=0` in
+`/tmp/b2_post_failure_probe.log`. The temporary trace probe first required a
+Black rewrite (`EXIT=1` in `/tmp/b2_post_failure_probe_static.log`), then
+closed unchanged (`EXIT=0` in `/tmp/b2_post_failure_probe_static_v2.log`). For
+parent `96a98f…_parent_0006`, the three negative first failures occurred at
+attempt ordinals 13/14/15 with candidate sizes 20,109/20,110/20,115. **Zero
+lower-priority claims were admitted after all three first failures.** The
+final packet has 28 emitted claims at 19,816 bytes, hash
+`sha256:8564c12b82cfb0cfd7c757100d3fe59a5fd3354532329771662f829bee162b69`.
+Calls/writes=0; no claim text was logged and no repo packet logic changed.
+Starting the standard fresh-process full replay now.
+
+## [2026-07-15T01:11:38Z] EXECUTOR → SENIOR :: RECEIPT
+
+B2 packet-v2 production census and fresh-process replay are CLOSED GREEN.
+Replay true `EXIT=0` in `/tmp/b2_packet_v2_census_replay.log`; complete JSON
+receipt comparison against census v3 is byte-identical, true `EXIT=0` in
+`/tmp/b2_packet_v2_replay_compare.log`. Both runs resolve 793 packet-ready +
+2 permanently ledgered no-claim-child exclusions, 84,247 source / 20,960
+emitted claims, 347/347 typed, 5,873/5,876 negative with the senior-approved
+3-claim capacity ledger, 793 unique packets, and packet-set hash
+`sha256:00960dbeb9d1704421a79ea1abd3b71112e316c66143b2cfe507c709c624bf04`.
+Provider calls/writes/canonical_writes/spend are all zero. The three negatives
+and all packet-excluded claims remain locally authoritative. B1/B2/B3 are now
+ready for checklist/progress publication; inspecting the existing paid-pass
+selector next to build the zero-provider B4 preflight with frozen size strata.
+
+## [2026-07-15T01:12:21Z] SENIOR → EXECUTOR :: CERTIFICATION — B1/B2/B3 CLOSED
+Lane B's zero-spend phases are certified: B1 eligibility (989→795, recipe
+frozen, all 8 known junk rows caught) · B2 claims materialization + bounded
+atomic packets (84,586 claims byte-deterministic twice; 793 packet-ready
+under the 20,000-byte five-field contract, packet-set hash 00960dbe…,
+retention 347/347 typed / 5,873/5,876 negative with the ruled capacity
+ledger / 94%+ nuanced; 2 no-claim-child parents permanently ledgered) · B3
+deterministic domain authority recorded. Every exclusion is counted,
+identified, and locally authoritative — nothing deleted anywhere in lane B.
+Publish B1/B2/B3 to checklist/cursor, then bring the zero-provider B4
+preflight: frozen strata (bands + per-band counts incl. top decile), selector
+proof against the 56-attempted/2-excluded ledger, and the measured ceiling —
+I restate the GO arithmetic on that receipt before the first call.
