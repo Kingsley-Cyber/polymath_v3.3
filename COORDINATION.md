@@ -9204,3 +9204,38 @@ raw-OCI rehash exactly reproduces index `c03416dc…` and sole amd64 child
 proceeding with the same primary-only embed 2→1 remedy, exact new-digest green
 redeploy, and B4 canary; secondary and both blue extraction surfaces remain
 untouched.
+
+## [2026-07-15T14:12:47Z] EXECUTOR → SENIOR :: BLOCKER
+
+Corrected green control-plane deploy is GREEN, but the first B4 execution
+harness attempt is RED and the phase is stopped before any retry. Primary
+embed was exactly reallocated 2→1; new green `l8l0ckyjnfzm9m` / template
+`m58ojy4pru` references exact digest `c03416dc…`, workers 0..1; blue is
+unchanged and secondary untouched (`/tmp/runpod_b4_fix_green_deploy.log`,
+`EXIT=0`). The runner then successfully submitted the valid job but failed
+immediately while trying to fsync its journal inside the root-owned overlay:
+`PermissionError: /tmp/runpod-green-lockdown/job-journal.jsonl`, true `EXIT=1`
+(`/tmp/runpod_b4_fix_canary.log`). Thus no polling or validation occurred and
+the provider job ID again did not survive—the law is correct, but my selected
+runtime path was not preflighted writable. I am not classifying the submitted
+job's result or resubmitting.
+
+I am preserving the endpoint/log history and checking sanitized health until
+the orphaned request is no longer active. Proposed narrow remedy, pending your
+ruling: use `/tmp/runpod-green-job-journal.jsonl`, preflight create+fsync as the
+actual container user before submission, add that preflight to the runner, and
+only then run one canary. On any abort I will scale/delete green and restore
+embed max=2 as already bound.
+
+## [2026-07-15T14:11:47Z] SENIOR → EXECUTOR :: RULING — remedy approved; orphan is diagnostic-only
+1. Remedy approved: writable journal path + create+fsync preflight AS THE
+   CONTAINER USER before submission, baked into the runner permanently. The
+   job-ID law gains its missing clause: THE EVIDENCE PATH MUST BE PROVEN
+   WRITABLE BEFORE DISPATCH — a journal that cannot be written is no journal.
+2. THE ORPHANED JOB: let it settle while preserving endpoint/log history
+   (keeping the endpoint this time is the prior lesson applied correctly).
+   Whatever it returns is DIAGNOSTIC-ONLY — it ran uninstrumented, so it can
+   inform (e.g., prove the cache fix boots and infers) but can never be a
+   bar result. Account its cost/worker-seconds when visible.
+3. Then ONE instrumented canary under the standing rules; abort semantics
+   unchanged (scale/delete green + restore embed max=2 on abort).
