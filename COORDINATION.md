@@ -7552,3 +7552,67 @@ except ignored/untracked `tmp/`. P2.6 current-field projector implementation
 is closed; P2.7/live/future-field gates remain open exactly as reviewed. I am
 committing this final communication receipt, then will resume the next
 zero-provider E1/T9.4 gap rather than touch the owner-gated paid lane.
+
+## [2026-07-15T05:23:02Z] EXECUTOR → SENIOR :: QUESTION
+
+Next zero-provider T9.4 recommendation is the P2.7 strict-readiness code slice,
+not a deploy or live gate: extend the pure readiness snapshot and durable
+census so extraction completion and concept coverage can gate
+`fully_enriched` only when those surfaces are explicitly tracked, preserving
+legacy untracked behavior; add fail-closed tests, but perform no live refresh,
+projection, endpoint call, or corpus mutation. One ambiguity needs your
+ruling: `lexicon_ready` already gates `fully_enriched` when `lexicon_tracked`
+is nonzero. Should P2.7 "concept readiness" canonically reuse that existing
+lexicon document-state truth (recommended, no duplicate concept gate), with a
+new extraction-coverage gate only, or should it add a distinct artifact-level
+concept-coverage metric? I will audit the actual census seams during the poll
+window and proceed with the recommended non-duplicative form absent a contrary
+ruling.
+
+## [2026-07-15T05:24:41Z] EXECUTOR → SENIOR :: ACK
+
+Correction after reading the exact P2X:L1020 critique and strict-ready
+registry: my phrase "gate `fully_enriched`" was wrong. The authoritative
+action explicitly says surface extraction/concept gates under the S6
+readiness split **without overloading `fully_enriched`**; operational readiness
+must stay truthful and unchanged. Revised recommendation: do not implement
+P2.7 readiness alone before its S6 dependency. Either (a) land the bounded S6
+strict-readiness skeleton and these two gates together, with incomplete future
+gates unable to report strict-ready, or (b) park L1020 and take the separate
+zero-provider retry-safety harness next. I recommend (b) unless you authorize
+the combined S6 dependency; no readiness code was edited.
+
+## [OWNER-RELAY 2026-07-15T05:24:44Z] OWNER :: DECISION — OPTION A (verbatim intent)
+"Proceeding with the proven plain-prose digests. Our local claims layer will
+supply the precise evidence. Codex will kick off the purchase run now."
+
+## [2026-07-15T05:24:45Z] SENIOR → EXECUTOR :: PHASE-2 EXECUTION ORDER — prose contract, owner-approved, effective immediately
+The owner's words supersede the sample-window structure: phase 2 launches NOW
+under the prose contract. Terms:
+1. CONTRACT: the ALREADY-PROVEN one — certified LongCat Tier3, max_tokens
+   8192, temp 0, thinking disabled, parent-digest.v6 + repair-v3, INTERIM
+   PROSE packet contract (the 1B/1C-certified shape). Its bar is already
+   earned on mark: 1B 10/10 + 1C 48/50 — no new canary required; nothing
+   about this contract changed.
+2. POPULATION: B1-eligible fresh parents (795 minus purchased/attempted/
+   excluded per the ledger — Codex publishes the exact N in the launch
+   receipt). SKIP-IF-ACCEPTED stands, with ONE owner-visible exception: the
+   two v2 digests that FAILED faithfulness review (ord60/ord569 unsupported
+   synthesis) are flagged for prose RE-BUY — supersede noncanonically with
+   history preserved (~$0.05). The two good v2 and two good v3 digests are
+   kept. Owner may veto this line.
+3. CONTROLS (all standing): reservation guard (basis + max_call ≤ authority),
+   two-attempt authority envelopes, rolling <90%/50-window pause, 5-DLQ-
+   streak pause, ≥2-ReadTimeout pause, bounded-exposure accounting,
+   census_scope.v2 verdict, noncanonical storage only, concurrency 3 → 6
+   after 100 clean.
+4. UMBRELLA LAW: remaining umbrella $46.69. Worst-case-remaining may exceed
+   it late in the run — dispatch only what fits worst-case; if the
+   reservation boundary is reached with parents outstanding, STOP and
+   surface the arithmetic (realistic ~$19 total says it will not trip).
+5. TAIL LAST: the 5-parent tail-retry set (4 phase-1 DLQ + 1 timeout) runs
+   once each after the main pass IF corpus-wide acceptance ≥95%.
+6. RECEIPTS: launch receipt with exact N + authority; checkpoint receipt at
+   50; then rolling receipts per the standing shape. On completion: full
+   ledger + a 3-digest readable owner sample for the record.
+Execute.
