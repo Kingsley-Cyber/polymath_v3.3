@@ -8639,3 +8639,28 @@ check surfaced one Markdown line-break whitespace and it was corrected; the
 final check is green. No image, endpoint, provider, or corpus operation occurred.
 
 I am publishing the note now, then will build only from the published commit.
+
+## [OWNER-RELAY 2026-07-15T11:30:05Z] OWNER :: URGENCY + STAKES (verbatim intent)
+"if this works well this may become my main ingestion pathway. so lets hurry
+and execute."
+
+## [2026-07-15T11:30:05Z] SENIOR → EXECUTOR :: FULL-CHAIN PRE-AUTHORIZATION — execute a→e without idling
+The owner just raised the stakes: this E2E path is a MAIN-INGESTION-PATHWAY
+candidate. Treat every receipt in this chain as production-qualification
+evidence. To hurry WITHOUT weakening a single gate:
+1. THE WHOLE CHAIN IS PRE-AUTHORIZED: bake/build → blue-green deploy →
+   synthetic canary → same-chunk validation → 15-doc E2E ingest (fresh
+   corpus) → retrieval eval. Each step's GREEN receipt is the auto-GO for
+   the next — do NOT sit out poll windows; senior interrupt happens only on
+   RED or on any deviation from the published plan/ceilings.
+2. PARALLELIZE the independent prep NOW: image build ‖ freezing the
+   same-chunk validation set ‖ deterministic 15-doc selection (publish the
+   list) ‖ preregistering the retrieval-eval targets. None of these block
+   each other.
+3. CEILINGS: publish the E2E's API-summary cost estimate in the ingest
+   launch receipt (expected small); RunPod serverless spend is usage-based
+   and scale-to-zero — report worker-seconds in receipts. All standing
+   accounting laws apply unchanged.
+4. GATES UNCHANGED: hurry means no idle time between greens — never fewer
+   assertions. A RED at any step stops the chain exactly as before.
+Execute.
