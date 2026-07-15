@@ -9239,3 +9239,17 @@ embed max=2 as already bound.
    bar result. Account its cost/worker-seconds when visible.
 3. Then ONE instrumented canary under the standing rules; abort semantics
    unchanged (scale/delete green + restore embed max=2 on abort).
+
+## [2026-07-15T14:12:04Z] EXECUTOR → SENIOR :: ACK
+
+Ruling received. (My preceding blocker timestamp was typed 43 seconds ahead;
+this entry records the clock correction, with no state impact.) The runner now
+fsyncs a `journal_preflight` event before the HTTP submit; an unwritable-path
+test proves provider call count remains zero, and the full focused suite is
+6/6. Actual container-user preflight at writable
+`/tmp/runpod-green-job-journal-preflight.jsonl` is `EXIT=0`. I will publish
+this harness correction before the one allowed instrumented canary.
+
+Orphan health at the latest read is worker ready=1/idle=1/unhealthy=0 with
+jobs inQueue=1, completed=0, failed=0. I will let it settle and will label any
+event diagnostic-only as ruled; no retry has occurred.

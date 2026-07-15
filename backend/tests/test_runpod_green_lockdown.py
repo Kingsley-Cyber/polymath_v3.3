@@ -128,6 +128,37 @@ async def test_job_id_is_fsynced_before_terminal_failure(tmp_path) -> None:
 
     rows = [json.loads(line) for line in journal.read_text().splitlines()]
     assert calls == 2
-    assert [row["event"] for row in rows] == ["submitted", "terminal"]
-    assert {row["job_id"] for row in rows} == {"provider-job-1"}
-    assert rows[1]["status"] == "FAILED"
+    assert [row["event"] for row in rows] == [
+        "journal_preflight",
+        "submitted",
+        "terminal",
+    ]
+    assert {row["job_id"] for row in rows[1:]} == {"provider-job-1"}
+    assert rows[2]["status"] == "FAILED"
+
+
+@pytest.mark.asyncio
+async def test_unwritable_journal_refuses_before_provider_submission(
+    tmp_path,
+) -> None:
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(200, json={"id": "must-not-submit"})
+
+    journal_directory = tmp_path / "journal-is-a-directory"
+    journal_directory.mkdir()
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(IsADirectoryError):
+            await _submit_and_wait(
+                client,
+                endpoint_id="endpoint-1",
+                api_key="unit-secret",
+                payload={"contract_version": "unit"},
+                timeout_seconds=10,
+                case_name="valid_same_chunk",
+                job_journal=journal_directory,
+            )
+    assert calls == 0

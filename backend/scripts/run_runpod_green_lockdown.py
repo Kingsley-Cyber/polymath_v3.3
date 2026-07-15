@@ -172,6 +172,14 @@ async def _submit_and_wait(
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     headers = {"Authorization": f"Bearer {api_key}"}
     started = time.monotonic()
+    _persist_job_event(
+        job_journal,
+        {
+            "event": "journal_preflight",
+            "case": case_name,
+            "endpoint_id": endpoint_id,
+        },
+    )
     response = await client.post(
         f"{RUNPOD_API_BASE}/{endpoint_id}/run",
         headers=headers,
