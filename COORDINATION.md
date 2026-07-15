@@ -7379,3 +7379,156 @@ B — probe a second provider for structured packets (e.g. DeepSeek v4-pro
 C — park all digest purchases; proceed to E1 refactor / E2E program now.
 Awaiting owner words: "option A" / "option B" / "option C" (or any variant).
 T9.3 stays parked until then; non-paid Track A/E1 work continues meanwhile.
+
+## [2026-07-15T05:00:38Z] EXECUTOR → SENIOR :: RECEIPT
+
+Terminal v3 failure package committed as
+`27c9c4cfa0a8c508b993026ac54abb5257d65539` and pushed to both the
+continuation branch and `main`. Permanent receipt is
+`docs/T9_3_SENTENCE_HYBRID_V3_CANARY_FAILURE_RECEIPT_2026-07-15.md`; checklist
+and durable cursor are updated. T9.3 Phase 2 remains parked pending the owner
+option. Per your instruction to continue non-paid Track A/E1, I am resuming
+the parked T9.4 candidate-artifact→lexicon projector parity slice from
+`stash@{0}` and will re-audit it against current HEAD before any commit. No
+paid call, live projection, rebuild, or activation is included.
+
+## [2026-07-15T05:04:18Z] EXECUTOR → SENIOR :: RECEIPT
+
+T9.4 restored-slice initial host diagnostic is non-green: 27 passed / 3
+failed, true `EXIT=1` (`/tmp/t94_projector_host_initial.log`). Two failures
+are pre-existing full-file tests importing settings without the canonical
+container's required environment; the third is the committed strict-artifact
+hash assertion running under the host venv's Pydantic 2.13.4, which derives
+`f38195...` instead of the pinned canonical `370661...`. This is diagnosis,
+not a weakened gate: I will run the focused projector nodes plus the adjacent
+contract suite inside isolated overlays of both canonical backend/worker
+containers and preserve the host drift as an explicit observation. No code,
+state, provider, or image mutation occurred.
+
+## [2026-07-15T05:05:10Z] EXECUTOR → SENIOR :: RECEIPT
+
+The two newly restored projector tests are independently GREEN on the host:
+2/2 passed, true `EXIT=0` (`/tmp/t94_projector_host_focused.log`). They prove
+all four accepted candidate engine labels enter the same document projector
+and produce field-identical current lexicon sources/materializations after
+removing only `updated_at`; duplicate chunks, document-scope escape, stale
+source text, and failed artifacts are fail-closed. Canonical-container and
+worker parity gates remain pending; no closure is claimed yet.
+
+## [2026-07-15T05:06:36Z] EXECUTOR → SENIOR :: RECEIPT
+
+The strengthened host test iteration is RED at 1 passed / 1 failed, true
+`EXIT=1` (`/tmp/t94_projector_host_focused_v2.log`), for a test-only field
+name mistake: document-source rows expose `relations`, while final materialized
+entries intentionally expose the same rows as `factual_relations`. The actual
+four-engine field-equality assertion and every new fail-closed assertion passed
+before that lookup. I am correcting only the assertion to the canonical final
+field and will rerun; production code is unchanged by this diagnosis.
+
+## [2026-07-15T05:07:05Z] EXECUTOR → SENIOR :: RECEIPT
+
+Strengthened host projector gate is now GREEN: 2/2 passed, true `EXIT=0`
+(`/tmp/t94_projector_host_focused_v3.log`). The field-identical comparison now
+includes non-empty co-occurrence, parent-derived contextual usage,
+source-backed factual-relation evidence, retrieval gloss, and representation
+eligibility; invalid ownership, duplicate/missing chunks, source drift,
+contract drift, and failed artifacts all reject. Canonical overlays remain
+the authoritative runtime gate.
+
+## [2026-07-15T05:08:17Z] EXECUTOR → SENIOR :: RECEIPT
+
+First backend overlay invocation failed collection with true `EXIT=2`
+(`/tmp/t94_projector_backend_full.log`) because it ran from `/app`: Python's
+leading empty-path entry resolved the baked `/app/services/ingestion` package
+before the isolated overlay, so the not-yet-baked T9.4 adapter was absent.
+This is an invocation-precedence error, not a test result. Inspection confirms
+the copied files exist and `/app` was unchanged. I will rerun from `/tmp` with
+the overlay first in `PYTHONPATH`; no image rebuild or source mutation.
+
+## [2026-07-15T05:08:37Z] EXECUTOR → SENIOR :: RECEIPT
+
+Canonical backend overlay gate is GREEN: 30/30 passed with 7 existing
+Pydantic namespace warnings, true `EXIT=0`
+(`/tmp/t94_projector_backend_full_v2.log`). This covers the full corpus
+lexicon suite plus the strict candidate-artifact contract under the pinned
+Pydantic 2.5.0 runtime, including the exact shared schema hash. The run used
+`/tmp` overlay source ahead of `/app`, no cache provider, and a redirected
+bytecode prefix; no baked file, service, image, or durable row changed. Worker
+overlay parity is next.
+
+## [2026-07-15T05:08:57Z] EXECUTOR → SENIOR :: RECEIPT
+
+Canonical ingest-worker overlay gate is also GREEN: 30/30 passed with the
+same 7 existing Pydantic namespace warnings, true `EXIT=0`
+(`/tmp/t94_projector_worker_full.log`). Backend and worker therefore agree on
+the strict artifact hash and the engine-blind current-field projection under
+their deployed runtime. This remains pure/synthetic parity: no live engine
+comparison, projection write, readiness change, provider call, or production
+stamp. I am proceeding to static/diff gates and the bounded receipt update.
+
+## [2026-07-15T05:09:30Z] EXECUTOR → SENIOR :: RECEIPT
+
+Black completed on the three changed Python files with true `EXIT=0`
+(`/tmp/t94_projector_black.log`); all three were mechanically reformatted.
+Because formatting changed the exact overlay bytes after the green runtime
+tests, I will refresh both isolated overlays and rerun the focused canonical
+nodes before final compile/diff receipts.
+
+## [2026-07-15T05:10:01Z] EXECUTOR → SENIOR :: RECEIPT
+
+Post-Black exact-byte reruns are GREEN in both canonical containers: backend
+30/30 (`/tmp/t94_projector_backend_post_black.log`) and worker 30/30
+(`/tmp/t94_projector_worker_post_black.log`), each with the same 7 existing
+warnings and true `EXIT=0`. The formatted working-tree bytes are therefore the
+tested bytes. Final compile, Black-check, diff, and scope audits remain.
+
+## [2026-07-15T05:10:31Z] EXECUTOR → SENIOR :: RECEIPT
+
+Static gates are all GREEN with true `EXIT=0`: Black check
+(`/tmp/t94_projector_black_check.log`), host compile
+(`/tmp/t94_projector_host_compile.log`), backend canonical compile
+(`/tmp/t94_projector_backend_compile.log`), worker canonical compile
+(`/tmp/t94_projector_worker_compile.log`), and `git diff --check`
+(`/tmp/t94_projector_diff_check.log`). I am doing the final engine-blind/scope
+audit and then will update only the bounded checklist/cursor receipt.
+
+## [2026-07-15T05:12:14Z] EXECUTOR → SENIOR :: RECEIPT
+
+Final scope audit is GREEN, true `EXIT=0`
+(`/tmp/t94_projector_engine_blind_audit.log`): one candidate adapter, the
+legacy durable query path preserved, and zero engine/provenance branches in
+the shared projector. I also removed Black's unrelated mechanical rewrites
+outside the changed regions; scoped Black checks for the projector, adapter,
+and tests are each true `EXIT=0`
+(`/tmp/t94_projector_black_scope_{corpus,adapter,test}.log`). Because those
+restorations changed exact file bytes without changing the AST, I will do one
+final overlay refresh plus full backend/worker rerun before writing receipts.
+
+## [2026-07-15T05:12:52Z] EXECUTOR → SENIOR :: RECEIPT
+
+Final exact-byte gates are GREEN: backend canonical 30/30 with 7 existing
+warnings (`/tmp/t94_projector_backend_final.log`), worker canonical 30/30 with
+the same warnings (`/tmp/t94_projector_worker_final.log`), host compile
+(`/tmp/t94_projector_host_compile_final.log`), and diff check
+(`/tmp/t94_projector_diff_check_final.log`), all true `EXIT=0`. This is the
+bounded P2.6 current-field projector implementation receipt; future
+co-occurrence/usage-frame/semantic-profile/DF/admission extensions still must
+land only here, and P2.7 live/corpus-scale parity stays open.
+
+## [2026-07-15T05:15:45Z] EXECUTOR → SENIOR :: RECEIPT
+
+Bounded permanent documentation is written and clean: checklist P2.6 closes
+only the current-field shared-projector implementation, its implementation log
+keeps every P2.7/live/future-field gate open, and `PROGRESS.md` points to
+`docs/T9_4_CURRENT_FIELD_LEXICON_PROJECTOR_RECEIPT_2026-07-15.md`. Final log
+hashes re-match the receipt; documentation diff check is true `EXIT=0`
+(`/tmp/t94_projector_docs_diff_check.log`), and the scoped credential-pattern
+scan found no secret-shaped addition. I am holding publication through the
+standing senior review window, then will pull-rebase-autostash, stage exactly
+the bounded files (force-adding ignored docs), re-sanitize, commit, and dual
+push absent a new ruling.
+
+## [2026-07-15T05:16:49Z] SENIOR → EXECUTOR :: GO
+Bounded P2.6 closure reviewed — implementation-only scope with P2.7/live
+gates explicitly held open is the right honesty shape. Publish; no need to
+sit out the window.
