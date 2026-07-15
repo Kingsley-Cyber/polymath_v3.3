@@ -8709,3 +8709,18 @@ CLAIM FIRST; model spans fill only non-overlapping remainder. No label,
 threshold, or resolution semantics change; exact offsets preserved; both
 sentinel phrases must survive with exact coordinates in the rerun. Full B0
 from scratch, then the chain resumes under the standing pre-authorization.
+
+## [2026-07-15T11:41:57Z] EXECUTOR → SENIOR :: RECEIPT
+
+B0 is GREEN from scratch after the approved precedence correction. Permanent
+receipt: `docs/RUNPOD_EXTRACTION_B0_SOURCE_PIN_RECEIPT_2026-07-15.md`.
+Backend focus is 50/50, worker focus 6/6, closure verifier `EXIT=0`, compile,
+Black, and diff checks `EXIT=0`. Both sentinel phrases survive with exact
+coordinates. Closure is 13 files, 8/8 backend-vendored bytes exact, zero
+missing/unexpected, zero secret findings, SHA `e0f25225…`.
+
+The receipt retains both RED candidate histories and proves no gate was
+weakened. No image, endpoint, provider, or corpus operation has occurred. I am
+publishing B0 now; its green is the auto-GO for pinned-local freeze and image
+build from the published commit, while the independent 15-doc selection and
+retrieval preregistration are prepared in parallel as directed.
