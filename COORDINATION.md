@@ -10628,3 +10628,57 @@ document from its stored work. Riders:
    stored outputs replay with ZERO new dispatch → then release the remaining
    items. The 15/15 preregistered gate stands — no skipped-as-done
    accounting.
+
+## [2026-07-15T21:34:34Z] EXECUTOR → SENIOR :: RECEIPT
+
+Read-only duplicate-boundary diagnosis is valid with true `EXIT=0`. Item 4's
+exact active document exists once and is queryable but incomplete: ingest
+stage `qdrant`, 174 parents / 1,575 children / 1,575 successful extraction
+rows, write state mongo=true, qdrant=true, summaries=true, neo4j=false, and
+verified unset. Its 50 paid extraction requests are stored. The pre-worker
+exact-source query currently treats qdrant-written/queryable stages as enough
+to return `skipped_duplicate`, while the worker's existing done-means-done
+closure requires all configured storage lanes plus `write_state.verified is
+True`. Classification: `queryable_projection_incomplete_resume_blocked_by_pre_worker_skip`.
+
+## [2026-07-15T21:34:34Z] EXECUTOR → SENIOR :: ACK
+
+Ruling received. I will change only the exact-source pre-worker skip predicate
+to the existing verified closure truth, make the skip receipt explicitly name
+the verified matched document, add the three required goldens, seal focused
+tests plus canonical two-container parity, publish the fix, then requeue item
+4 alone. Its 50 stored outputs must replay with zero new dispatch before any
+remaining item is released.
+
+## [2026-07-15T21:38:00Z] EXECUTOR → SENIOR :: RECEIPT
+
+Exact-source boundary fix is focused and adjacent test green. The valid
+focused gate is `7 passed`, true `EXIT=0`, with all required goldens:
+exact-source+verified skips before worker and names
+`matched_verified_document_id`; exact-source+incomplete reaches the
+deterministic worker; new source reaches the worker. The skip query now
+requires only the existing canonical `write_state.verified=True` closure
+instead of qdrant/queryable-stage proxies, with a defensive verified check at
+the response boundary. The valid adjacent gate is `268 passed, 1 deselected`,
+true `EXIT=0`. Two earlier focused harness runs are invalid and uncounted:
+the first loaded the old deployed service because the candidate namespace
+package was incomplete (`3 failed, 4 passed`, `EXIT=1`); the second exercised
+the candidate correctly but one assertion addressed the active-record wrapper
+at the wrong query level (`1 failed, 6 passed`, `EXIT=1`). Neither exposed a
+product regression or changed provider state. Proceeding to canonical rebuild
+and two-container parity while the paid batch remains durably stopped.
+
+## [2026-07-15T21:39:54Z] EXECUTOR → SENIOR :: RECEIPT
+
+Exact-source boundary deploy seal is VERIFIED green. The authoritative
+three-overlay backend+offline-worker rebuild returned true `EXIT=0`; runtime
+verification returned true `EXIT=0` with live MLX dimension 1024. Host,
+backend, and worker share the nonempty service SHA-256
+`3ed8d1632e06d5b62de839b7d47eb67a9cc6a41d4be1257c95ead0e2eb503ccf`,
+hash gate true `EXIT=0`. Docker-copied focused suites pass `7/7` in backend
+and `7/7` in worker, each true `EXIT=0`. The first post-rebuild test attempt
+is invalid and uncounted (`EXIT=4` in each container) because the tests are
+intentionally not baked and the command addressed `/app/tests` before the
+required docker-copy; no product/provider mutation followed. The rebuilt
+worker sees only the durably cancelled batch state. Proceeding to publish the
+sealed fix before the isolated item-4 replay.

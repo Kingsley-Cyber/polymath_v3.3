@@ -36,7 +36,8 @@ def test_exact_source_duplicate_query_uses_strong_key_and_content_hash():
     assert "source_identity.content_sha256" in rendered
     assert "content_sha256" in rendered
     assert "source_file_hash" in rendered
-    assert "write_state.qdrant_written" in rendered
+    assert "write_state.verified" in rendered
+    assert "write_state.qdrant_written" not in rendered
     assert "skipped_duplicate" in rendered
 
 
@@ -79,6 +80,7 @@ async def test_ingest_skips_exact_duplicate_before_worker(monkeypatch):
             "doc_id": "doc-existing",
             "filename": "original.md",
             "source_tier": "tier_b",
+            "write_state": {"verified": True},
         }
     )
     seen_doc_ids = []
@@ -114,10 +116,102 @@ async def test_ingest_skips_exact_duplicate_before_worker(monkeypatch):
     assert result.status == "skipped_duplicate"
     assert result.doc_id == "doc-existing"
     assert result.source_tier == "tier_b"
-    assert "Exact source duplicate skipped" in (result.error or "")
+    assert "matches verified existing document" in (result.error or "")
     assert seen_doc_ids == ["doc-existing"]
     assert seen_phases[0][0] == "skipped_duplicate"
+    assert seen_phases[0][1]["matched_verified_document_id"] == "doc-existing"
     assert service._db.documents.find_one_calls
+
+
+@pytest.mark.asyncio
+async def test_ingest_resumes_exact_source_match_when_existing_is_incomplete(monkeypatch):
+    service = IngestionService()
+    service._db = _FakeDb(
+        {
+            "doc_id": "doc-incomplete",
+            "filename": "interrupted.md",
+            "source_tier": "tier_b",
+            "write_state": {
+                "mongo_written": True,
+                "qdrant_written": True,
+                "verified": False,
+            },
+        }
+    )
+    calls = []
+
+    async def fake_worker(**kwargs):
+        calls.append(kwargs)
+        return IngestJobResponse(
+            job_id=kwargs["job_id"],
+            doc_id="doc-incomplete",
+            corpus_id=kwargs["corpus_id"],
+            filename=kwargs["filename"],
+            source_tier="tier_b",
+            status="done",
+        )
+
+    monkeypatch.setattr("services.ingestion.worker.run_ingest_job", fake_worker)
+
+    result = await service.ingest(
+        data=b"same source",
+        filename="interrupted.md",
+        corpus_id="corpus-1",
+        user_id="user-1",
+        ingestion_config=IngestionConfig(),
+        model="",
+        source_identity={
+            "source_kind": "content_hash",
+            "source_key": "sha256:abc123",
+            "content_sha256": "abc123",
+        },
+    )
+
+    assert result.status == "done"
+    assert result.doc_id == "doc-incomplete"
+    assert len(calls) == 1
+    query, projection = service._db.documents.find_one_calls[0]
+    assert "'write_state.verified': True" in str(query)
+    assert projection["write_state.verified"] == 1
+
+
+@pytest.mark.asyncio
+async def test_ingest_runs_worker_for_new_exact_source(monkeypatch):
+    service = IngestionService()
+    service._db = _FakeDb(None)
+    calls = []
+
+    async def fake_worker(**kwargs):
+        calls.append(kwargs)
+        return IngestJobResponse(
+            job_id=kwargs["job_id"],
+            doc_id="doc-new",
+            corpus_id=kwargs["corpus_id"],
+            filename=kwargs["filename"],
+            source_tier="tier_b",
+            status="done",
+        )
+
+    monkeypatch.setattr("services.ingestion.worker.run_ingest_job", fake_worker)
+
+    result = await service.ingest(
+        data=b"new source",
+        filename="new.md",
+        corpus_id="corpus-1",
+        user_id="user-1",
+        ingestion_config=IngestionConfig(),
+        model="",
+        source_identity={
+            "source_kind": "content_hash",
+            "source_key": "sha256:def456",
+            "content_sha256": "def456",
+        },
+    )
+
+    assert result.status == "done"
+    assert result.doc_id == "doc-new"
+    assert len(calls) == 1
+    assert len(service._db.documents.find_one_calls) == 1
 
 
 @pytest.mark.asyncio

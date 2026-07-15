@@ -36,15 +36,6 @@ logger = logging.getLogger(__name__)
 STRONG_SOURCE_KINDS: frozenset[str] = frozenset(
     {"youtube_video", "url", "content_hash"}
 )
-QUERYABLE_INGEST_STAGES: frozenset[str] = frozenset(
-    {
-        "complete",
-        "fully_enriched",
-        "queryable_with_pending_graph",
-        "queryable_with_pending_summary",
-        "queryable_with_pending_summary_and_graph",
-    }
-)
 CORPUS_CLEANUP_LEASE_MINUTES = 30
 
 
@@ -223,14 +214,12 @@ def exact_source_duplicate_query(
             "ingest_stage": {
                 "$nin": ["skipped_duplicate", "skipped_nonsemantic"]
             },
-            "$and": [
-                {
-                    "$or": [
-                        {"write_state.qdrant_written": True},
-                        {"ingest_stage": {"$in": sorted(QUERYABLE_INGEST_STAGES)}},
-                    ]
-                }
-            ],
+            # Exact-source deduplication is a terminal-success shortcut, so it
+            # must use the same closure truth as corpus readiness and the
+            # worker's done-means-done transition. Queryable-but-incomplete
+            # documents deliberately fall through to the deterministic worker
+            # resume path.
+            "write_state.verified": True,
             "$or": clauses,
         }
     )
@@ -898,13 +887,17 @@ class IngestionService:
                         "source_key": 1,
                         "source_identity.content_sha256": 1,
                         "ingest_stage": 1,
+                        "write_state.verified": 1,
                     },
                 )
-                if existing:
+                # The query already requires this closure truth. Keep the
+                # explicit check fail-closed against stale/mocked query layers:
+                # an incomplete match must resume, never claim a skip.
+                if (existing or {}).get("write_state", {}).get("verified") is True:
                     existing_doc_id = str(existing.get("doc_id") or "")
                     reason = (
                         "Exact source duplicate skipped: "
-                        f"{filename!r} matches existing document "
+                        f"{filename!r} matches verified existing document "
                         f"{existing.get('filename') or existing_doc_id} "
                         f"({existing_doc_id}). Pass duplicate_policy='allow' "
                         "to intentionally ingest another copy."
@@ -917,6 +910,7 @@ class IngestionService:
                             "doc_id": existing_doc_id,
                             "corpus_id": corpus_id,
                             "duplicate_of": existing_doc_id,
+                            "matched_verified_document_id": existing_doc_id,
                             "source_key": source_identity.get("source_key"),
                         },
                     )
