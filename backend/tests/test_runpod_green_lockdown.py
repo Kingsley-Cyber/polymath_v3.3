@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import copy
+import json
 
+import httpx
 import pytest
 
 from scripts.run_runpod_green_lockdown import (
+    _submit_and_wait,
     compare_to_reference,
     invalid_requests,
     validate_refusal,
@@ -90,3 +93,41 @@ def test_refusal_requires_named_fail_closed_code() -> None:
     )
     with pytest.raises(AssertionError, match="did not fail closed"):
         validate_refusal("bad", {"success": True})
+
+
+@pytest.mark.asyncio
+async def test_job_id_is_fsynced_before_terminal_failure(tmp_path) -> None:
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if request.method == "POST" and request.url.path.endswith("/run"):
+            return httpx.Response(200, json={"id": "provider-job-1"})
+        return httpx.Response(
+            200,
+            json={
+                "id": "provider-job-1",
+                "status": "FAILED",
+                "delayTime": 123,
+            },
+        )
+
+    journal = tmp_path / "jobs.jsonl"
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(RuntimeError, match="job_id=provider-job-1"):
+            await _submit_and_wait(
+                client,
+                endpoint_id="endpoint-1",
+                api_key="unit-secret",
+                payload={"contract_version": "unit"},
+                timeout_seconds=10,
+                case_name="valid_same_chunk",
+                job_journal=journal,
+            )
+
+    rows = [json.loads(line) for line in journal.read_text().splitlines()]
+    assert calls == 2
+    assert [row["event"] for row in rows] == ["submitted", "terminal"]
+    assert {row["job_id"] for row in rows} == {"provider-job-1"}
+    assert rows[1]["status"] == "FAILED"

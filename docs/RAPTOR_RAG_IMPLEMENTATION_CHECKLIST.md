@@ -3917,6 +3917,44 @@ A corpus is strict-ready only when:
   `docs/RUNPOD_CUSTOM_IMAGE_B3_GREEN_DEPLOY_RECEIPT_2026-07-15.md`.
 - Checklist boxes closed: B3 green deploy; health/canary remains open.
 
+### 2026-07-15 - P2.7 B4 first-canary failure, rollback, and corrective seal
+
+- Commit: this corrective source/receipt commit on
+  `claude-continuation-20260713`.
+- Owner: full finish line pre-authorized; senior accepted the abort rollback,
+  required provider job-ID persistence before await, and pre-authorized
+  evidence-gated redeploy after remedy.
+- Corpus/data scope: one live 12-task green request followed by read-only local
+  exact-image diagnosis; no corpus, provider-setting, graph, vector, or
+  database write.
+- Code changes: exact baked-cache runtime env binding, bake/runtime path
+  containment assertion, enforce-runtime image probe, and fsynced pre-await
+  provider job journal in the B4 runner.
+- Durable migration/backfill: none.
+- Before metrics: green job queued→initializing→`FAILED` after approximately
+  19 minutes; no output envelope; original runner failed to retain job ID.
+- After metrics: exact-image failure reproduced before inference; corrected-env
+  exact-image probe returns one result / two entities / one predicate / zero
+  relations in 20.43 seconds under amd64 emulation, with zero provider calls
+  and durable writes.
+- Tests by tier: runner 5/5; image contract all green with 147 exact locked
+  distributions and zero secret findings; exact-image corrected-env probe,
+  Black, compile, and diff checks true `EXIT=0`.
+- Cross-corpus test: not run; dependent chain stopped before B5/B6 and the
+  fresh 15-document corpus.
+- Failure/rollback test: green endpoint deleted; primary embed restored max
+  1→2 with all other sealed fields unchanged; both extraction blues unchanged;
+  secondary untouched; final census true `EXIT=0`.
+- Deployment image/health: old private digest remains failed for B4 and will
+  not be redeployed. Corrected source is not yet built/published; inert template
+  and private registry-auth records allocate no workers.
+- Remaining risks: corrected immutable build must pass the runtime probe
+  without an injected env override; remote digest, GPU canary, same-chunk
+  parity/retry, fresh-corpus E2E, and retrieval eval remain open. Permanent
+  receipt:
+  `docs/RUNPOD_CUSTOM_IMAGE_B4_FIRST_CANARY_FAILURE_RECEIPT_2026-07-15.md`.
+- Checklist boxes closed: none; B4 remains open.
+
 ## Implementation Log Template
 
 Copy this section for every completed item:

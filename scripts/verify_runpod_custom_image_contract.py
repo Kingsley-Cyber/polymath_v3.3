@@ -109,6 +109,9 @@ def verify() -> dict[str, Any]:
         "require_hashes": "--require-hashes",
         "non_root": "USER 10001:10001",
         "entrypoint": 'CMD ["python", "app.py"]',
+        "baked_model_cache_runtime": (
+            "POLYMATH_HF_CACHE_ROOT=/opt/polymath/hf-cache"
+        ),
         "offline_model_runtime": "POLYMATH_LOCAL_FILES_ONLY=1",
         "source_commit_label": "org.opencontainers.image.revision",
         "source_closure_label": "io.polymath.source-closure",

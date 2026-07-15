@@ -8,21 +8,20 @@
   ReadTimeout stopped the run with complete `$8.036609449999998` ceiling
   basis and protected canonical invariance. Receipt:
   `docs/T9_3_PROSE_PHASE2_RECOVERY_PAUSE_RECEIPT_2026-07-15.md`.
-- Next task: OWNER FINISH LINE — custom-image B2 is GREEN locally. The
-  published `08385fa` source built as linux/amd64; Python 3.11.15, all 13
-  critical/runtime distributions, GLiNER model assets, registries, and source
-  closure attest exact from inside the non-root image. Permanent receipt:
-  `docs/RUNPOD_CUSTOM_IMAGE_B2_LOCAL_ATTESTATION_RECEIPT_2026-07-15.md`.
-  B3 is GREEN on the primary account. Senior-approved embed capacity
-  reallocation is exact (endpoint `k695blmk52oscm`, template `7p9r307t6u`,
-  min 0 preserved, only max 2→1 after correcting a detected partial-update
-  default drift). New green `whs9pjd34h2hs2` uses exact template `zepw9ehfnj`,
-  private digest `d3620d85…`, CUDA min 13.0, workers 0..1; extraction blue is
-  unchanged and secondary is untouched. Restore embed max to 2 at cutover or
-  any abort. Permanent receipt:
-  `docs/RUNPOD_CUSTOM_IMAGE_B3_GREEN_DEPLOY_RECEIPT_2026-07-15.md`.
-  Next is B4 first image pull/GPU canary using the published credential-blind
-  runner, then B5 parity/B6 retry if green.
+- Next task: OWNER FINISH LINE — B4 first canary is RED, diagnosed, and safely
+  rolled back. The real job reached queued→initializing then `FAILED`; no
+  invalid controls or downstream work ran. Green `whs9pjd34h2hs2` is deleted,
+  primary embed `k695blmk52oscm` is restored max 1→2 with all other fields
+  unchanged, both extraction blues are unchanged, and secondary is untouched.
+  Exact-image reproduction identifies a baked-model cache-root mismatch:
+  assets are under `/opt/polymath/hf-cache`, while runtime searched another
+  offline cache. Adding only the exact runtime override makes the immutable
+  image's real spaCy+GLiNER probe green. Corrective source now seals that env,
+  verifies bake/runtime path containment, adds an enforce-runtime image probe,
+  and fsyncs provider job IDs before polling. Permanent receipt:
+  `docs/RUNPOD_CUSTOM_IMAGE_B4_FIRST_CANARY_FAILURE_RECEIPT_2026-07-15.md`.
+  Next is publish corrective source → rebuild/attest/private-publish a new
+  immutable image → approved narrow green redeploy → B4/B5/B6.
 - Parked: the distinct five-parent bounded tail remains after the main pass
   and only if corpus-wide certified acceptance is at least 95%. The rejected
   structured v2/v3 contracts remain closed failed; the owner explicitly chose
@@ -128,4 +127,4 @@
   793+2 parents and finds sentence→atomic mapping coverage 80.944158%; the
   optional-ID ordered-unit shape is p50 13,930 bytes, max 25,613 bytes, with
   maximum-any-ten authority `$0.83486975` under the corrected envelope.
-- Last update: 2026-07-15T13:07:27Z (executor)
+- Last update: 2026-07-15T13:42:44Z (executor)

@@ -12,8 +12,10 @@ from __future__ import annotations
 import argparse
 import asyncio
 import copy
+from datetime import datetime, timezone
 import hashlib
 import json
+import os
 from pathlib import Path
 import time
 from typing import Any
@@ -165,6 +167,8 @@ async def _submit_and_wait(
     api_key: str,
     payload: dict[str, Any],
     timeout_seconds: int,
+    case_name: str,
+    job_journal: Path,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     headers = {"Authorization": f"Bearer {api_key}"}
     started = time.monotonic()
@@ -178,13 +182,32 @@ async def _submit_and_wait(
     job_id = str(submitted.get("id") or "")
     if not job_id:
         raise RuntimeError("RunPod submission returned no job ID")
+    _persist_job_event(
+        job_journal,
+        {
+            "event": "submitted",
+            "case": case_name,
+            "endpoint_id": endpoint_id,
+            "job_id": job_id,
+        },
+    )
     deadline = time.monotonic() + timeout_seconds
     while True:
         if time.monotonic() >= deadline:
+            _persist_job_event(
+                job_journal,
+                {
+                    "event": "terminal",
+                    "case": case_name,
+                    "endpoint_id": endpoint_id,
+                    "job_id": job_id,
+                    "status": "CLIENT_TIMEOUT",
+                },
+            )
             await client.post(
                 f"{RUNPOD_API_BASE}/{endpoint_id}/cancel/{job_id}", headers=headers
             )
-            raise TimeoutError(f"RunPod job exceeded {timeout_seconds}s")
+            raise TimeoutError(f"RunPod job_id={job_id} exceeded {timeout_seconds}s")
         status_response = await client.get(
             f"{RUNPOD_API_BASE}/{endpoint_id}/status/{job_id}", headers=headers
         )
@@ -192,6 +215,18 @@ async def _submit_and_wait(
         body = status_response.json()
         status = str(body.get("status") or "").upper()
         if status == "COMPLETED":
+            _persist_job_event(
+                job_journal,
+                {
+                    "event": "terminal",
+                    "case": case_name,
+                    "endpoint_id": endpoint_id,
+                    "job_id": job_id,
+                    "status": status,
+                    "delay_time_ms": body.get("delayTime"),
+                    "execution_time_ms": body.get("executionTime"),
+                },
+            )
             output = body.get("output")
             if isinstance(output, dict) and isinstance(output.get("output"), dict):
                 output = output["output"]
@@ -205,8 +240,35 @@ async def _submit_and_wait(
             }
             return output, receipt
         if status in TERMINAL_FAILURES:
-            raise RuntimeError(f"RunPod job terminated status={status}")
+            _persist_job_event(
+                job_journal,
+                {
+                    "event": "terminal",
+                    "case": case_name,
+                    "endpoint_id": endpoint_id,
+                    "job_id": job_id,
+                    "status": status,
+                    "delay_time_ms": body.get("delayTime"),
+                    "execution_time_ms": body.get("executionTime"),
+                },
+            )
+            raise RuntimeError(f"RunPod job_id={job_id} terminated status={status}")
         await asyncio.sleep(2.0)
+
+
+def _persist_job_event(path: Path, event: dict[str, Any]) -> None:
+    """Append and fsync one non-secret provider-job lifecycle receipt."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    row = {
+        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        **event,
+    }
+    encoded = json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n"
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(encoded)
+        handle.flush()
+        os.fsync(handle.fileno())
 
 
 def validate_canary(
@@ -358,6 +420,8 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                 api_key=api_key,
                 payload=request,
                 timeout_seconds=args.timeout_seconds,
+                case_name="valid_same_chunk",
+                job_journal=args.job_journal,
             )
             canary = validate_canary(live_output, tasks)
             parity = compare_to_reference(baseline["output"], live_output, tolerance)
@@ -370,6 +434,8 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                         api_key=api_key,
                         payload=invalid,
                         timeout_seconds=300,
+                        case_name=name,
+                        job_journal=args.job_journal,
                     )
                     refusals.append(
                         {**validate_refusal(name, invalid_output), "job": job}
@@ -420,6 +486,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--spec", type=Path, default=DEFAULT_SPEC)
     parser.add_argument("--baseline", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--job-journal", type=Path, required=True)
     parser.add_argument("--timeout-seconds", type=int, default=1800)
     return parser.parse_args()
 

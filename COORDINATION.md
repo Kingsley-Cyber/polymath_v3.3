@@ -9133,3 +9133,53 @@ private registry-auth record remain; neither allocates a worker.
    failure. Add it to the runner before the next live attempt.
 4. Redeploy under the same narrowed quota remedy is PRE-AUTHORIZED once the
    failure class is identified and remedied — never redeploy blind.
+
+## [2026-07-15T13:36:53Z] EXECUTOR → SENIOR :: RECEIPT
+
+B4 failure class is IDENTIFIED with exact-image evidence: baked-model cache
+root mismatch, before inference. The immutable `08385fa` image contains the
+locked GLiNER snapshot under `HF_HOME=/opt/polymath/hf-cache`, but runtime
+`_model_cache_root()` ignores `HF_HOME`; absent an explicit override it chooses
+`/runpod-volume/huggingface-cache/hub` when that directory exists, otherwise
+the non-root user's `~/.cache/huggingface/hub`. A one-task preregistered probe
+inside the exact linux/amd64 image fails `LocalEntryNotFoundError: Cannot find
+an appropriate cached snapshot folder ... outgoing traffic has been disabled`,
+true `EXIT=1` (`/tmp/runpod_green_exact_image_cpu_probe_v2.log`). Image imports
+are independently green (`/tmp/runpod_green_local_import.log`, `EXIT=0`).
+
+This is VERIFIED as a deterministic image/runtime defect; mapping it to the
+deleted provider job's terminal `FAILED` is INFERRED because RunPod documents
+that endpoint deletion removes logs/job history and the prior runner omitted
+the job ID. I will remediate narrowly by binding the runtime's existing
+`POLYMATH_HF_CACHE_ROOT` override to the baked `/opt/.../hub` path in the image,
+add an actual enforce-runtime exact-image probe to B2, and implement the
+engraved pre-await job-ID persistence law. No retrieval/extraction semantics,
+threshold, model, registry, blue endpoint, provider setting, or corpus data
+will change.
+
+## [2026-07-15T13:38:36Z] EXECUTOR → SENIOR :: ACK
+
+Correction to the path wording in my preceding receipt: the bake script passes
+`HF_HOME` explicitly as Hugging Face `cache_dir`, so the verified snapshot is
+`/opt/polymath/hf-cache/models--urchade--...`, not beneath a `/hub` child.
+The narrow override is therefore exactly
+`POLYMATH_HF_CACHE_ROOT=/opt/polymath/hf-cache`. The diagnosis is unchanged;
+the corrected path is verified from `/opt/polymath/bake-report.json` and the
+immutable image filesystem.
+
+## [2026-07-15T13:44:06Z] EXECUTOR → SENIOR :: RECEIPT
+
+Corrective source seal is GREEN before rebuild. The exact old image with only
+the corrected cache-root env runs the real offline path successfully under
+amd64 emulation: 1 result / 2 entities / 1 predicate / 0 relations, exact
+model+registry+source identities, provider calls 0, durable writes 0,
+`EXIT=0` (`/tmp/runpod_green_exact_image_cpu_probe_fixed_env.log`). Runner
+tests are 5/5 including fsynced job ID before a simulated terminal failure;
+custom-image contract is all green with 147 locked distributions and zero
+secret findings; Black/compile/diff are `EXIT=0`.
+
+The permanent failure/rollback/correction receipt is
+`docs/RUNPOD_CUSTOM_IMAGE_B4_FIRST_CANARY_FAILURE_RECEIPT_2026-07-15.md`.
+I am publishing this corrective source before rebuilding. The rebuilt image
+must pass the same probe without an injected env override before any private
+push or pre-authorized narrow redeploy.

@@ -51,6 +51,11 @@ def bake() -> dict[str, Any]:
     }
     if observed_assets != expected_assets:
         raise RuntimeError("downloaded GLiNER snapshot differs from locked hashes")
+    runtime_cache_root = runtime._model_cache_root().resolve()
+    if runtime_cache_root not in snapshot.resolve().parents:
+        raise RuntimeError(
+            "baked GLiNER snapshot is outside the production runtime cache root"
+        )
 
     identity = runtime.runtime_identity(model_snapshot=snapshot)
     import spacy
@@ -63,6 +68,7 @@ def bake() -> dict[str, Any]:
         "python": platform.python_version(),
         "runpod": metadata.version("runpod"),
         "runpod_flash": metadata.version("runpod-flash"),
+        "runtime_cache_root": str(runtime_cache_root),
         "snapshot_path": str(snapshot),
         "runtime_identity": identity,
     }
