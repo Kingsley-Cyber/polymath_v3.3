@@ -1,0 +1,2480 @@
+{
+  "byte_deterministic": true,
+  "comparison_contract": {
+    "confidence_absolute_tolerance": 1e-05,
+    "engines": [
+      "pinned_local",
+      "runpod_green"
+    ],
+    "exact_fields": [
+      "schema_version",
+      "document_id",
+      "child_id",
+      "sentence_ids",
+      "entities.*.mention_id",
+      "entities.*.text",
+      "entities.*.entity_type",
+      "entities.*.start_char",
+      "entities.*.end_char",
+      "entities.*.canonical_label",
+      "predicates",
+      "relations",
+      "unresolved_spans",
+      "temporal_captures",
+      "temporal_captures_truncated",
+      "ordering"
+    ],
+    "missing_or_extra_results_max": 0,
+    "relations_expected": [],
+    "semantic_mismatches_max": 0,
+    "threshold_side_selection_must_match": true
+  },
+  "output": {
+    "batch_id": "runpod-lockdown:same-chunk-v1",
+    "contract_version": "polymath.runpod_local_extraction.v1",
+    "metrics": {
+      "chunks": 12,
+      "entities": 126,
+      "predicates": 56,
+      "relations": 0,
+      "windows": 14
+    },
+    "results": [
+      {
+        "child_id": "child:runpod-lockdown:explicit_causal",
+        "compilation_receipt": {
+          "matched_counts": {
+            "DECREASES": 1
+          },
+          "matched_predicate_count": 1,
+          "normalization_registry": "predicate_normalization",
+          "normalization_registry_hash": "sha256:a0870e5d4cd5f315719245c301ad074824857115ce6f1b9dd7a7d45cd6ca030d",
+          "normalization_registry_version": "v1",
+          "observed_predicate_count": 1,
+          "recipe_hash": "sha256:4aaf0cf9821894705cf1af5c2de0eb3dad87d1a45bbfea7c75362c2ea5ef2526",
+          "unresolved_predicate_count": 0,
+          "unresolved_rate": 0.0
+        },
+        "document_id": "doc:runpod-lockdown:explicit_causal",
+        "extraction": {
+          "child_id": "child:runpod-lockdown:explicit_causal",
+          "document_id": "doc:runpod-lockdown:explicit_causal",
+          "entities": [
+            {
+              "canonical_label": "repeated discounting",
+              "confidence": 0.5642371773719788,
+              "end_char": 20,
+              "entity_type": "PROCESS",
+              "mention_id": "mention:9e462bb0663c5bb71675a7551547d300806a5c3c9dfeddf11b5fa6697b17301b",
+              "start_char": 0,
+              "text": "Repeated discounting"
+            },
+            {
+              "canonical_label": "consumer",
+              "confidence": 0.7498051524162292,
+              "end_char": 40,
+              "entity_type": "PERSON",
+              "mention_id": "mention:441ae3e6421cdaac71a4cd06d2311ac63e9c235acdb1548b0bafeb6ba10cd0d9",
+              "start_char": 32,
+              "text": "consumer"
+            }
+          ],
+          "predicates": [
+            {
+              "confidence": 1.0,
+              "end_char": 27,
+              "lemma": "lower",
+              "modality": "asserted",
+              "negated": false,
+              "normalized_predicate": "DECREASES",
+              "predicate_id": "predicate:f9ed2a0297b9b5029804f9b3119d1acad35229f76a36ccaf18ed5aa2561a0add",
+              "start_char": 21,
+              "surface_text": "lowers"
+            }
+          ],
+          "relations": [],
+          "schema_version": "local_extraction.v1",
+          "sentence_ids": [
+            "evidence:3568eb8a8308433d0a1ffa89f207d2160e6c17435683ece72ac6e2a357380392"
+          ],
+          "unresolved_spans": []
+        },
+        "mention_selection_counts": {
+          "raw": 2,
+          "selected": 2
+        },
+        "source_version_id": "srcv:runpod-lockdown:explicit_causal",
+        "temporal_captures": [],
+        "temporal_captures_truncated": false
+      },
+      {
+        "child_id": "child:runpod-lockdown:condition_scope",
+        "compilation_receipt": {
+          "matched_counts": {
+            "SIGNALS": 1
+          },
+          "matched_predicate_count": 1,
+          "normalization_registry": "predicate_normalization",
+          "normalization_registry_hash": "sha256:a0870e5d4cd5f315719245c301ad074824857115ce6f1b9dd7a7d45cd6ca030d",
+          "normalization_registry_version": "v1",
+          "observed_predicate_count": 2,
+          "recipe_hash": "sha256:4aaf0cf9821894705cf1af5c2de0eb3dad87d1a45bbfea7c75362c2ea5ef2526",
+          "unresolved_predicate_count": 1,
+          "unresolved_rate": 0.5
+        },
+        "document_id": "doc:runpod-lockdown:condition_scope",
+        "extraction": {
+          "child_id": "child:runpod-lockdown:condition_scope",
+          "document_id": "doc:runpod-lockdown:condition_scope",
+          "entities": [
+            {
+              "canonical_label": "buyers",
+              "confidence": 0.5103809237480164,
+              "end_char": 11,
+              "entity_type": "GROUP",
+              "mention_id": "mention:a52d77ef06b449cfa00c3c0f30a6ae5e43ae0b3357e61b8fe177a8facc65a4f9",
+              "start_char": 5,
+              "text": "buyers"
+            },
+            {
+              "canonical_label": "quality",
+              "confidence": 0.8804715275764465,
+              "end_char": 43,
+              "entity_type": "QUALITY",
+              "mention_id": "mention:a8e76d6f893ce2d776d8628ddd5d662f4de83964e42c53955e155721e9f601c2",
+              "start_char": 36,
+              "text": "quality"
+            },
+            {
+              "canonical_label": "price",
+              "confidence": 0.42764151096343994,
+              "end_char": 50,
+              "entity_type": "SIGNAL",
+              "mention_id": "mention:c5cc22d4f7ca22fc6fdb57135eafdae5a8823b93fecd38bf21b3ac4c44d78260",
+              "start_char": 45,
+              "text": "price"
+            },
+            {
+              "canonical_label": "signal",
+              "confidence": 0.5964339375495911,
+              "end_char": 61,
+              "entity_type": "SIGNAL",
+              "mention_id": "mention:f993a19438887df3b2a18743d411bb8aef81cac7273cbc06c06de1fea985981a",
+              "start_char": 55,
+              "text": "signal"
+            },
+            {
+              "canonical_label": "product",
+              "confidence": 0.8359904885292053,
+              "end_char": 69,
+              "entity_type": "PRODUCT",
+              "mention_id": "mention:8eb4bdb3ceb4bbc4a1f2426f013c2aa17556e8d7dca6fe34c74a6600a4fe69e7",
+              "start_char": 62,
+              "text": "product"
+            },
+            {
+              "canonical_label": "quality",
+              "confidence": 0.9442501664161682,
+              "end_char": 77,
+              "entity_type": "QUALITY",
+              "mention_id": "mention:5cde80cdff63c8f4c14b369b64b53e00ef00543fb190a500233c3ad7e9f60987",
+              "start_char": 70,
+              "text": "quality"
+            },
+            {
+              "canonical_label": "purchase choice",
+              "confidence": 0.4123423993587494,
+              "end_char": 107,
+              "entity_type": "SIGNAL",
+              "mention_id": "mention:ac31f55609f73786946fe6384c6ba96cdeb21092b22d87ea065eb63fcc958c51",
+              "start_char": 92,
+              "text": "purchase choice"
+            }
+          ],
+          "predicates": [
+            {
+              "confidence": 1.0,
+              "end_char": 61,
+              "lemma": "signal",
+              "modality": "possible",
+              "negated": false,
+              "normalized_predicate": "SIGNALS",
+              "predicate_id": "predicate:a422a5ed4695e4bfea4090987fb2e6ba5f3cb35e1ed5a03a1e69093b3b70a253",
+              "start_char": 55,
+              "surface_text": "signal"
+            }
+          ],
+          "relations": [],
+          "schema_version": "local_extraction.v1",
+          "sentence_ids": [
+            "evidence:5dcb7dcee8d2d817faf9f7abd4286d9adce3548a23f0af53bd11bc8fdd47b723"
+          ],
+          "unresolved_spans": [
+            "28:35:inspect"
+          ]
+        },
+        "mention_selection_counts": {
+          "raw": 7,
+          "selected": 7
+        },
+        "source_version_id": "srcv:runpod-lockdown:condition_scope",
+        "temporal_captures": [],
+        "temporal_captures_truncated": false
+      },
+      {
+        "child_id": "child:runpod-lockdown:direct_negation",
+        "compilation_receipt": {
+          "matched_counts": {},
+          "matched_predicate_count": 0,
+          "normalization_registry": "predicate_normalization",
+          "normalization_registry_hash": "sha256:a0870e5d4cd5f315719245c301ad074824857115ce6f1b9dd7a7d45cd6ca030d",
+          "normalization_registry_version": "v1",
+          "observed_predicate_count": 1,
+          "recipe_hash": "sha256:4aaf0cf9821894705cf1af5c2de0eb3dad87d1a45bbfea7c75362c2ea5ef2526",
+          "unresolved_predicate_count": 1,
+          "unresolved_rate": 1.0
+        },
+        "document_id": "doc:runpod-lockdown:direct_negation",
+        "extraction": {
+          "child_id": "child:runpod-lockdown:direct_negation",
+          "document_id": "doc:runpod-lockdown:direct_negation",
+          "entities": [
+            {
+              "canonical_label": "product",
+              "confidence": 0.8447663187980652,
+              "end_char": 44,
+              "entity_type": "PRODUCT",
+              "mention_id": "mention:e0eb1960949b4fc4c556f09ac2aa08b91439df83d7d9048191c77741f47b4569",
+              "start_char": 37,
+              "text": "product"
+            },
+            {
+              "canonical_label": "quality",
+              "confidence": 0.750056266784668,
+              "end_char": 52,
+              "entity_type": "QUALITY",
+              "mention_id": "mention:ffff7d0be2116a62c33a907ccc87d31e77921852795514d523ca6b68138762c9",
+              "start_char": 45,
+              "text": "quality"
+            }
+          ],
+          "predicates": [],
+          "relations": [],
+          "schema_version": "local_extraction.v1",
+          "sentence_ids": [
+            "evidence:95c003f17f61ba1396a7f2753aab8e219fd0cbb73d1bad3535fa0822ffffdf30"
+          ],
+          "unresolved_spans": [
+            "22:31:guarantee"
+          ]
+        },
+        "mention_selection_counts": {
+          "raw": 2,
+          "selected": 2
+        },
+        "source_version_id": "srcv:runpod-lockdown:direct_negation",
+        "temporal_captures": [],
+        "temporal_captures_truncated": false
+      },
+      {
+        "child_id": "child:runpod-lockdown:recommendation_temporal",
+        "compilation_receipt": {
+          "matched_counts": {
+            "COMPARES_AGAINST": 1
+          },
+          "matched_predicate_count": 1,
+          "normalization_registry": "predicate_normalization",
+          "normalization_registry_hash": "sha256:a0870e5d4cd5f315719245c301ad074824857115ce6f1b9dd7a7d45cd6ca030d",
+          "normalization_registry_version": "v1",
+          "observed_predicate_count": 1,
+          "recipe_hash": "sha256:4aaf0cf9821894705cf1af5c2de0eb3dad87d1a45bbfea7c75362c2ea5ef2526",
+          "unresolved_predicate_count": 0,
+          "unresolved_rate": 0.0
+        },
+        "document_id": "doc:runpod-lockdown:recommendation_temporal",
+        "extraction": {
+          "child_id": "child:runpod-lockdown:recommendation_temporal",
+          "document_id": "doc:runpod-lockdown:recommendation_temporal",
+          "entities": [
+            {
+              "canonical_label": "historical baseline",
+              "confidence": 0.9580268859863281,
+              "end_char": 69,
+              "entity_type": "BASELINE",
+              "mention_id": "mention:9ac4d5719494f2e411f4f8f291a05dfa04c8ffcf22190fd67f04ea4068af9b72",
+              "start_char": 50,
+              "text": "historical baseline"
+            }
+          ],
+          "predicates": [
+            {
+              "confidence": 1.0,
+              "end_char": 23,
+              "lemma": "compare",
+              "modality": "recommended",
+              "negated": false,
+              "normalized_predicate": "COMPARES_AGAINST",
+              "predicate_id": "predicate:c98c753dc41ea2c85764927e14140c0ad36e249ff9d250da52f6c27f8b083fb2",
+              "start_char": 16,
+              "surface_text": "compare"
+            }
+          ],
+          "relations": [],
+          "schema_version": "local_extraction.v1",
+          "sentence_ids": [
+            "evidence:a2903cd792d5717009515d3e13954bf0541f53eff2e530616557c4dce56d5997"
+          ],
+          "unresolved_spans": []
+        },
+        "mention_selection_counts": {
+          "raw": 1,
+          "selected": 1
+        },
+        "source_version_id": "srcv:runpod-lockdown:recommendation_temporal",
+        "temporal_captures": [],
+        "temporal_captures_truncated": false
+      },
+      {
+        "child_id": "child:runpod-lockdown:attributed_hypothesis",
+        "compilation_receipt": {
+          "matched_counts": {
+            "DECREASES": 1
+          },
+          "matched_predicate_count": 1,
+          "normalization_registry": "predicate_normalization",
+          "normalization_registry_hash": "sha256:a0870e5d4cd5f315719245c301ad074824857115ce6f1b9dd7a7d45cd6ca030d",
+          "normalization_registry_version": "v1",
+          "observed_predicate_count": 2,
+          "recipe_hash": "sha256:4aaf0cf9821894705cf1af5c2de0eb3dad87d1a45bbfea7c75362c2ea5ef2526",
+          "unresolved_predicate_count": 1,
+          "unresolved_rate": 0.5
+        },
+        "document_id": "doc:runpod-lockdown:attributed_hypothesis",
+        "extraction": {
+          "child_id": "child:runpod-lockdown:attributed_hypothesis",
+          "document_id": "doc:runpod-lockdown:attributed_hypothesis",
+          "entities": [
+            {
+              "canonical_label": "the authors",
+              "confidence": 0.675470232963562,
+              "end_char": 11,
+              "entity_type": "DOCUMENT",
+              "mention_id": "mention:a2cb59650e1de7b60ce5a3562548b205cba9ddbe1afcccf0b14b033ac8b5f67a",
+              "start_char": 0,
+              "text": "The authors"
+            },
+            {
+              "canonical_label": "person",
+              "confidence": 0.8089790344238281,
+              "end_char": 66,
+              "entity_type": "PERSON",
+              "mention_id": "mention:d14748abf37452352d15a7ca217f086f02e0b0a1f33ff81cc5e69c6b5f8d6804",
+              "start_char": 60,
+              "text": "person"
+            },
+            {
+              "canonical_label": "evaluation",
+              "confidence": 0.49388355016708374,
+              "end_char": 79,
+              "entity_type": "QUALITY",
+              "mention_id": "mention:707954937da3c8e829751b9ef77c551992486af744fcf18840043d765c0315a4",
+              "start_char": 69,
+              "text": "evaluation"
+            },
+            {
+              "canonical_label": "competence",
+              "confidence": 0.7401735186576843,
+              "end_char": 93,
+              "entity_type": "QUALITY",
+              "mention_id": "mention:65da75d61fbc94f91e88ef5dc3e90ad76527226c95c4a360e40529d26f2a206d",
+              "start_char": 83,
+              "text": "competence"
+            }
+          ],
+          "predicates": [
+            {
+              "confidence": 1.0,
+              "end_char": 57,
+              "lemma": "lower",
+              "modality": "possible",
+              "negated": false,
+              "normalized_predicate": "DECREASES",
+              "predicate_id": "predicate:9f9a3f373571a79fee3dd1c961cd2d5a1f06134d9e3d3eb6961ca27fbbd2d7f2",
+              "start_char": 52,
+              "surface_text": "lower"
+            }
+          ],
+          "relations": [],
+          "schema_version": "local_extraction.v1",
+          "sentence_ids": [
+            "evidence:1b2ca51fc231fcc944afd81d448d3812682761a6ad1f7e01e86fba8809bbbe8b"
+          ],
+          "unresolved_spans": [
+            "12:23:hypothesize"
+          ]
+        },
+        "mention_selection_counts": {
+          "raw": 4,
+          "selected": 4
+        },
+        "source_version_id": "srcv:runpod-lockdown:attributed_hypothesis",
+        "temporal_captures": [],
+        "temporal_captures_truncated": false
+      },
+      {
+        "child_id": "child:runpod-lockdown:exception_scope",
+        "compilation_receipt": {
+          "matched_counts": {
+            "DECREASES": 1
+          },
+          "matched_predicate_count": 1,
+          "normalization_registry": "predicate_normalization",
+          "normalization_registry_hash": "sha256:a0870e5d4cd5f315719245c301ad074824857115ce6f1b9dd7a7d45cd6ca030d",
+          "normalization_registry_version": "v1",
+          "observed_predicate_count": 1,
+          "recipe_hash": "sha256:4aaf0cf9821894705cf1af5c2de0eb3dad87d1a45bbfea7c75362c2ea5ef2526",
+          "unresolved_predicate_count": 0,
+          "unresolved_rate": 0.0
+        },
+        "document_id": "doc:runpod-lockdown:exception_scope",
+        "extraction": {
+          "child_id": "child:runpod-lockdown:exception_scope",
+          "document_id": "doc:runpod-lockdown:exception_scope",
+          "entities": [
+            {
+              "canonical_label": "discounting",
+              "confidence": 0.878173828125,
+              "end_char": 11,
+              "entity_type": "PROCESS",
+              "mention_id": "mention:216f3a009650d24310e0882f40b3a801646b948300d22c0e176b5003ce74f606",
+              "start_char": 0,
+              "text": "Discounting"
+            }
+          ],
+          "predicates": [
+            {
+              "confidence": 1.0,
+              "end_char": 26,
+              "lemma": "lower",
+              "modality": "hypothetical",
+              "negated": false,
+              "normalized_predicate": "DECREASES",
+              "predicate_id": "predicate:cd79492250290fdacf2c4bc1fbe7bb2363a11cd36d1236ff6be632fa96fd349d",
+              "start_char": 20,
+              "surface_text": "lowers"
+            }
+          ],
+          "relations": [],
+          "schema_version": "local_extraction.v1",
+          "sentence_ids": [
+            "evidence:db8048c7e893e82c3e4fc7537bb57c1a3cd6fe8bb8652173cdd931de4bf8394c"
+          ],
+          "unresolved_spans": []
+        },
+        "mention_selection_counts": {
+          "raw": 1,
+          "selected": 1
+        },
+        "source_version_id": "srcv:runpod-lockdown:exception_scope",
+        "temporal_captures": [],
+        "temporal_captures_truncated": false
+      },
+      {
+        "child_id": "child:runpod-lockdown:temporal_revision",
+        "compilation_receipt": {
+          "matched_counts": {
+            "UPDATES": 1
+          },
+          "matched_predicate_count": 1,
+          "normalization_registry": "predicate_normalization",
+          "normalization_registry_hash": "sha256:a0870e5d4cd5f315719245c301ad074824857115ce6f1b9dd7a7d45cd6ca030d",
+          "normalization_registry_version": "v1",
+          "observed_predicate_count": 2,
+          "recipe_hash": "sha256:4aaf0cf9821894705cf1af5c2de0eb3dad87d1a45bbfea7c75362c2ea5ef2526",
+          "unresolved_predicate_count": 1,
+          "unresolved_rate": 0.5
+        },
+        "document_id": "doc:runpod-lockdown:temporal_revision",
+        "extraction": {
+          "child_id": "child:runpod-lockdown:temporal_revision",
+          "document_id": "doc:runpod-lockdown:temporal_revision",
+          "entities": [
+            {
+              "canonical_label": "the policy",
+              "confidence": 0.8224242329597473,
+              "end_char": 10,
+              "entity_type": "DOCUMENT",
+              "mention_id": "mention:f30ad603b5366bce2bae1e9129c334549434cb429f12631f3ad2f9e7e2c4b048",
+              "start_char": 0,
+              "text": "The policy"
+            },
+            {
+              "canonical_label": "2025 01 01",
+              "confidence": 0.7492805123329163,
+              "end_char": 41,
+              "entity_type": "TIME_PATTERN",
+              "mention_id": "mention:8b6940185e6c5826a62eb1ba8e5bc3812cbf9539b7930c7af5ff61c40dee9605",
+              "start_char": 31,
+              "text": "2025-01-01"
+            },
+            {
+              "canonical_label": "march 2026",
+              "confidence": 0.502778947353363,
+              "end_char": 71,
+              "entity_type": "TIME_PATTERN",
+              "mention_id": "mention:9a32c7f696e168ac705a8adf0552b9155aa8f7e003103473d4a5388a0c06fcb0",
+              "start_char": 61,
+              "text": "March 2026"
+            }
+          ],
+          "predicates": [
+            {
+              "confidence": 1.0,
+              "end_char": 57,
+              "lemma": "revise",
+              "modality": "asserted",
+              "negated": false,
+              "normalized_predicate": "UPDATES",
+              "predicate_id": "predicate:79d1caddd0c782b0aae09e9fdfefd2e41bb6f7ad24759ca6d24437d38f34bae3",
+              "start_char": 50,
+              "surface_text": "revised"
+            }
+          ],
+          "relations": [],
+          "schema_version": "local_extraction.v1",
+          "sentence_ids": [
+            "evidence:6d01d5ef283cacb551d3b874432d1b5a13dedc256ace3e5a4131064a4b818c34"
+          ],
+          "unresolved_spans": [
+            "11:17:became"
+          ]
+        },
+        "mention_selection_counts": {
+          "raw": 3,
+          "selected": 3
+        },
+        "source_version_id": "srcv:runpod-lockdown:temporal_revision",
+        "temporal_captures": [
+          {
+            "char_end": 41,
+            "char_start": 31,
+            "detector": "regex",
+            "role_candidates": [
+              "revision",
+              "effective"
+            ],
+            "text": "2025-01-01"
+          },
+          {
+            "char_end": 71,
+            "char_start": 61,
+            "detector": "regex",
+            "role_candidates": [
+              "revision"
+            ],
+            "text": "March 2026"
+          }
+        ],
+        "temporal_captures_truncated": false
+      },
+      {
+        "child_id": "child:runpod-lockdown:mechanism_definition",
+        "compilation_receipt": {
+          "matched_counts": {},
+          "matched_predicate_count": 0,
+          "normalization_registry": "predicate_normalization",
+          "normalization_registry_hash": "sha256:a0870e5d4cd5f315719245c301ad074824857115ce6f1b9dd7a7d45cd6ca030d",
+          "normalization_registry_version": "v1",
+          "observed_predicate_count": 1,
+          "recipe_hash": "sha256:4aaf0cf9821894705cf1af5c2de0eb3dad87d1a45bbfea7c75362c2ea5ef2526",
+          "unresolved_predicate_count": 1,
+          "unresolved_rate": 1.0
+        },
+        "document_id": "doc:runpod-lockdown:mechanism_definition",
+        "extraction": {
+          "child_id": "child:runpod-lockdown:mechanism_definition",
+          "document_id": "doc:runpod-lockdown:mechanism_definition",
+          "entities": [
+            {
+              "canonical_label": "mechanism motif",
+              "confidence": 0.8264257907867432,
+              "end_char": 17,
+              "entity_type": "CONCEPT",
+              "mention_id": "mention:264fa50f7618aae40b69e944bbb4ccdb87c2f38a875084d6f3a20247953a43ec",
+              "start_char": 2,
+              "text": "mechanism motif"
+            },
+            {
+              "canonical_label": "state transitions",
+              "confidence": 0.7524613738059998,
+              "end_char": 96,
+              "entity_type": "STATE",
+              "mention_id": "mention:badb1214efaa5027e1ee2a6a90c373a3f729c00c7b0fc28baff1284e3a912d98",
+              "start_char": 79,
+              "text": "state transitions"
+            }
+          ],
+          "predicates": [],
+          "relations": [],
+          "schema_version": "local_extraction.v1",
+          "sentence_ids": [
+            "evidence:4773b9aa7e311637caf6f8396aacf4c7af41f8d385752a719c8aa4ecdd8745ba"
+          ],
+          "unresolved_spans": [
+            "18:20:is"
+          ]
+        },
+        "mention_selection_counts": {
+          "raw": 2,
+          "selected": 2
+        },
+        "source_version_id": "srcv:runpod-lockdown:mechanism_definition",
+        "temporal_captures": [],
+        "temporal_captures_truncated": false
+      },
+      {
+        "child_id": "child:runpod-lockdown:analogy_limitation",
+        "compilation_receipt": {
+          "matched_counts": {
+            "UPDATES": 1
+          },
+          "matched_predicate_count": 1,
+          "normalization_registry": "predicate_normalization",
+          "normalization_registry_hash": "sha256:a0870e5d4cd5f315719245c301ad074824857115ce6f1b9dd7a7d45cd6ca030d",
+          "normalization_registry_version": "v1",
+          "observed_predicate_count": 2,
+          "recipe_hash": "sha256:4aaf0cf9821894705cf1af5c2de0eb3dad87d1a45bbfea7c75362c2ea5ef2526",
+          "unresolved_predicate_count": 1,
+          "unresolved_rate": 0.5
+        },
+        "document_id": "doc:runpod-lockdown:analogy_limitation",
+        "extraction": {
+          "child_id": "child:runpod-lockdown:analogy_limitation",
+          "document_id": "doc:runpod-lockdown:analogy_limitation",
+          "entities": [
+            {
+              "canonical_label": "human worth",
+              "confidence": 0.7858561277389526,
+              "end_char": 11,
+              "entity_type": "QUALITY",
+              "mention_id": "mention:c76b160c911776fab9a1af584359dcbb9951d0cdd73c48b2fb4a6ced3c96a0c9",
+              "start_char": 0,
+              "text": "Human worth"
+            },
+            {
+              "canonical_label": "market price",
+              "confidence": 0.5260577201843262,
+              "end_char": 45,
+              "entity_type": "QUALITY",
+              "mention_id": "mention:51e301637110885e523f70052cdf7f52c1056cab4f1b3168765eb883ecff490c",
+              "start_char": 33,
+              "text": "market price"
+            },
+            {
+              "canonical_label": "shared structure",
+              "confidence": 0.46405282616615295,
+              "end_char": 67,
+              "entity_type": "SYSTEM",
+              "mention_id": "mention:58ce2aad76e799b618354438e46b2bb3dae063b61819313d8ea46241bace726e",
+              "start_char": 51,
+              "text": "shared structure"
+            }
+          ],
+          "predicates": [
+            {
+              "confidence": 1.0,
+              "end_char": 95,
+              "lemma": "update",
+              "modality": "asserted",
+              "negated": false,
+              "normalized_predicate": "UPDATES",
+              "predicate_id": "predicate:539a6f0bd6e179f97feab6f35c0e31ec46288d6d1835c6e5c513539e098b44b6",
+              "start_char": 87,
+              "surface_text": "updating"
+            }
+          ],
+          "relations": [],
+          "schema_version": "local_extraction.v1",
+          "sentence_ids": [
+            "evidence:e10494552d1b14d0db49b4824ac61c1770369eba2560e48a83a79353346dd0c8"
+          ],
+          "unresolved_spans": [
+            "12:14:is"
+          ]
+        },
+        "mention_selection_counts": {
+          "raw": 3,
+          "selected": 3
+        },
+        "source_version_id": "srcv:runpod-lockdown:analogy_limitation",
+        "temporal_captures": [],
+        "temporal_captures_truncated": false
+      },
+      {
+        "child_id": "child:runpod-lockdown:temporal_specificity",
+        "compilation_receipt": {
+          "matched_counts": {
+            "UPDATES": 1
+          },
+          "matched_predicate_count": 1,
+          "normalization_registry": "predicate_normalization",
+          "normalization_registry_hash": "sha256:a0870e5d4cd5f315719245c301ad074824857115ce6f1b9dd7a7d45cd6ca030d",
+          "normalization_registry_version": "v1",
+          "observed_predicate_count": 1,
+          "recipe_hash": "sha256:4aaf0cf9821894705cf1af5c2de0eb3dad87d1a45bbfea7c75362c2ea5ef2526",
+          "unresolved_predicate_count": 0,
+          "unresolved_rate": 0.0
+        },
+        "document_id": "doc:runpod-lockdown:temporal_specificity",
+        "extraction": {
+          "child_id": "child:runpod-lockdown:temporal_specificity",
+          "document_id": "doc:runpod-lockdown:temporal_specificity",
+          "entities": [
+            {
+              "canonical_label": "garden records",
+              "confidence": 0.8623660802841187,
+              "end_char": 14,
+              "entity_type": "DOCUMENT",
+              "mention_id": "mention:5db5f7571f230262b9b8f0c27b770bf0f47acb5855e99f0e1b228a0a9141826d",
+              "start_char": 0,
+              "text": "Garden records"
+            },
+            {
+              "canonical_label": "winter 1911",
+              "confidence": 0.5089317560195923,
+              "end_char": 39,
+              "entity_type": "TIME_PATTERN",
+              "mention_id": "mention:dd001aa0df8cb5d0e8352d596dcbb5237c1fb499b6d1839b0f485993134c4074",
+              "start_char": 28,
+              "text": "winter 1911"
+            },
+            {
+              "canonical_label": "2018",
+              "confidence": 0.6424703598022461,
+              "end_char": 67,
+              "entity_type": "TIME_PATTERN",
+              "mention_id": "mention:00368246ca6735901a680b7d8e3f736e3dbc76fb111b9317497fcf00b74e54a5",
+              "start_char": 63,
+              "text": "2018"
+            },
+            {
+              "canonical_label": "drought",
+              "confidence": 0.5748912692070007,
+              "end_char": 75,
+              "entity_type": "CONDITION",
+              "mention_id": "mention:8252455f33b1bb7cf8eed209b27caf2f48a9f280d62f5668433090707768618a",
+              "start_char": 68,
+              "text": "drought"
+            },
+            {
+              "canonical_label": "summer",
+              "confidence": 0.4805268347263336,
+              "end_char": 82,
+              "entity_type": "TIME_PATTERN",
+              "mention_id": "mention:79fb05ec20e29f83e05511d7f3efb79c77f87f15cf811869a999f5a1be57f7a0",
+              "start_char": 76,
+              "text": "summer"
+            }
+          ],
+          "predicates": [
+            {
+              "confidence": 1.0,
+              "end_char": 52,
+              "lemma": "revise",
+              "modality": "asserted",
+              "negated": false,
+              "normalized_predicate": "UPDATES",
+              "predicate_id": "predicate:d25261be1c605d5a91888d98ead081005df84eee8ba165102e7631f50d59e46b",
+              "start_char": 45,
+              "surface_text": "revised"
+            }
+          ],
+          "relations": [],
+          "schema_version": "local_extraction.v1",
+          "sentence_ids": [
+            "evidence:82fdb9727afb4e7841b223ff47077a8c9a4ceebb39a954ffd9ef8f25bfc434ef"
+          ],
+          "unresolved_spans": []
+        },
+        "mention_selection_counts": {
+          "raw": 5,
+          "selected": 5
+        },
+        "source_version_id": "srcv:runpod-lockdown:temporal_specificity",
+        "temporal_captures": [
+          {
+            "char_end": 39,
+            "char_start": 28,
+            "detector": "regex",
+            "role_candidates": [
+              "publication",
+              "revision"
+            ],
+            "text": "winter 1911"
+          },
+          {
+            "char_end": 82,
+            "char_start": 63,
+            "detector": "regex",
+            "role_candidates": [
+              "revision"
+            ],
+            "text": "2018 drought summer"
+          }
+        ],
+        "temporal_captures_truncated": false
+      },
+      {
+        "child_id": "child:runpod-lockdown:negation_modality_multi_predicate",
+        "compilation_receipt": {
+          "matched_counts": {
+            "COMPARES_AGAINST": 1,
+            "DECREASES": 1
+          },
+          "matched_predicate_count": 2,
+          "normalization_registry": "predicate_normalization",
+          "normalization_registry_hash": "sha256:a0870e5d4cd5f315719245c301ad074824857115ce6f1b9dd7a7d45cd6ca030d",
+          "normalization_registry_version": "v1",
+          "observed_predicate_count": 3,
+          "recipe_hash": "sha256:4aaf0cf9821894705cf1af5c2de0eb3dad87d1a45bbfea7c75362c2ea5ef2526",
+          "unresolved_predicate_count": 1,
+          "unresolved_rate": 0.3333333333333333
+        },
+        "document_id": "doc:runpod-lockdown:negation_modality_multi_predicate",
+        "extraction": {
+          "child_id": "child:runpod-lockdown:negation_modality_multi_predicate",
+          "document_id": "doc:runpod-lockdown:negation_modality_multi_predicate",
+          "entities": [
+            {
+              "canonical_label": "reviewer",
+              "confidence": 0.6075013279914856,
+              "end_char": 10,
+              "entity_type": "PERSON",
+              "mention_id": "mention:b4d0c1d2e5f28b9c5cc3d2a31fa19f506910267b11910913430c5e71c72a6e7c",
+              "start_char": 2,
+              "text": "reviewer"
+            },
+            {
+              "canonical_label": "baseline",
+              "confidence": 0.9610557556152344,
+              "end_char": 38,
+              "entity_type": "BASELINE",
+              "mention_id": "mention:0976171b9f46201e1ef268fdbd6e84cc7fe25abc1b93b3c9d4b813fbf792cb1f",
+              "start_char": 30,
+              "text": "baseline"
+            },
+            {
+              "canonical_label": "intervention",
+              "confidence": 0.782650887966156,
+              "end_char": 60,
+              "entity_type": "INTERVENTION",
+              "mention_id": "mention:22a4bfed937cf637d7fd198ba89814369f7b4b1cf5d7719005fb5f12ae1fc23a",
+              "start_char": 48,
+              "text": "intervention"
+            },
+            {
+              "canonical_label": "population",
+              "confidence": 0.9236488938331604,
+              "end_char": 119,
+              "entity_type": "POPULATION",
+              "mention_id": "mention:f4aa27670c81330d02bfaf9be9ea6e30091489e80a58ed96746d48e2e6fa89dd",
+              "start_char": 109,
+              "text": "population"
+            }
+          ],
+          "predicates": [
+            {
+              "confidence": 1.0,
+              "end_char": 25,
+              "lemma": "compare",
+              "modality": "recommended",
+              "negated": false,
+              "normalized_predicate": "COMPARES_AGAINST",
+              "predicate_id": "predicate:6b4689898da622bef6f69b717ecd36db8ff05eb7b1277d33dff23dac12e59db2",
+              "start_char": 18,
+              "surface_text": "compare"
+            },
+            {
+              "confidence": 1.0,
+              "end_char": 76,
+              "lemma": "reduce",
+              "modality": "asserted",
+              "negated": true,
+              "normalized_predicate": "DECREASES",
+              "predicate_id": "predicate:e3fafa955a6fbab776e22128e5930946d8e4fbac3823df498271b679a7168965",
+              "start_char": 70,
+              "surface_text": "reduce"
+            }
+          ],
+          "relations": [],
+          "schema_version": "local_extraction.v1",
+          "sentence_ids": [
+            "evidence:94b724e11807f2e315892d4ce6170b917b2f68803f4b659bc6a75d58e191e516"
+          ],
+          "unresolved_spans": [
+            "120:127:changes"
+          ]
+        },
+        "mention_selection_counts": {
+          "raw": 4,
+          "selected": 4
+        },
+        "source_version_id": "srcv:runpod-lockdown:negation_modality_multi_predicate",
+        "temporal_captures": [],
+        "temporal_captures_truncated": false
+      },
+      {
+        "child_id": "child:runpod-lockdown:long_window_overlap",
+        "compilation_receipt": {
+          "matched_counts": {
+            "DECREASES": 1,
+            "INFLUENCES": 45
+          },
+          "matched_predicate_count": 46,
+          "normalization_registry": "predicate_normalization",
+          "normalization_registry_hash": "sha256:a0870e5d4cd5f315719245c301ad074824857115ce6f1b9dd7a7d45cd6ca030d",
+          "normalization_registry_version": "v1",
+          "observed_predicate_count": 46,
+          "recipe_hash": "sha256:4aaf0cf9821894705cf1af5c2de0eb3dad87d1a45bbfea7c75362c2ea5ef2526",
+          "unresolved_predicate_count": 0,
+          "unresolved_rate": 0.0
+        },
+        "document_id": "doc:runpod-lockdown:long_window_overlap",
+        "extraction": {
+          "child_id": "child:runpod-lockdown:long_window_overlap",
+          "document_id": "doc:runpod-lockdown:long_window_overlap",
+          "entities": [
+            {
+              "canonical_label": "measured baseline",
+              "confidence": 0.843310534954071,
+              "end_char": 56,
+              "entity_type": "BASELINE",
+              "mention_id": "mention:a7ba9f67c95f1bb68acc87da22b4358a57442e35724ffd2d212d243227df2dfa",
+              "start_char": 39,
+              "text": "measured baseline"
+            },
+            {
+              "canonical_label": "stated condition",
+              "confidence": 0.8980926275253296,
+              "end_char": 83,
+              "entity_type": "CONDITION",
+              "mention_id": "mention:b426b57cd277da8ba27238abd9d13f2be40fa77e803133c8080c8b5ffcd016c0",
+              "start_char": 67,
+              "text": "stated condition"
+            },
+            {
+              "canonical_label": "measured baseline",
+              "confidence": 0.7915962338447571,
+              "end_char": 141,
+              "entity_type": "BASELINE",
+              "mention_id": "mention:a60b0cfa6ab79397a66d1aee52ca10977d3c28e50a0c401cc32b6565eede20ea",
+              "start_char": 124,
+              "text": "measured baseline"
+            },
+            {
+              "canonical_label": "stated condition",
+              "confidence": 0.920300304889679,
+              "end_char": 168,
+              "entity_type": "CONDITION",
+              "mention_id": "mention:022f501f4f147a81398306d0a8cc69a86e388d1f637e1f9753a283e560d176a1",
+              "start_char": 152,
+              "text": "stated condition"
+            },
+            {
+              "canonical_label": "measured baseline",
+              "confidence": 0.7573803067207336,
+              "end_char": 226,
+              "entity_type": "BASELINE",
+              "mention_id": "mention:00e4e4d81c10a6de71427e479d8c44364d77eb565030eed4631309bd0d022099",
+              "start_char": 209,
+              "text": "measured baseline"
+            },
+            {
+              "canonical_label": "stated condition",
+              "confidence": 0.8780580163002014,
+              "end_char": 253,
+              "entity_type": "CONDITION",
+              "mention_id": "mention:5f26e570601df4f753ea857fd38c808e5cc11bf7379d8c23bd8f0a4ed2935478",
+              "start_char": 237,
+              "text": "stated condition"
+            },
+            {
+              "canonical_label": "measured baseline",
+              "confidence": 0.7188704609870911,
+              "end_char": 311,
+              "entity_type": "BASELINE",
+              "mention_id": "mention:f69087dddb0d9d429a576bc3104164bed3fb996eefdd8922bf55d0360b831cb3",
+              "start_char": 294,
+              "text": "measured baseline"
+            },
+            {
+              "canonical_label": "stated condition",
+              "confidence": 0.8941608667373657,
+              "end_char": 338,
+              "entity_type": "CONDITION",
+              "mention_id": "mention:8bf6d9a161c2bf1d4c5b6c94e9f8840eeb57cfa4c9d633eb948b1541b2d69180",
+              "start_char": 322,
+              "text": "stated condition"
+            },
+            {
+              "canonical_label": "measured baseline",
+              "confidence": 0.7323075532913208,
+              "end_char": 396,
+              "entity_type": "BASELINE",
+              "mention_id": "mention:decc61f00379b260629678fd7ba06e3bec09121148df52283903714238d87f01",
+              "start_char": 379,
+              "text": "measured baseline"
+            },
+            {
+              "canonical_label": "stated condition",
+              "confidence": 0.8693686723709106,
+              "end_char": 423,
+              "entity_type": "CONDITION",
+              "mention_id": "mention:192a414756ea1ff5158b26679b58a4d154c11928bed99ad0cea96cd343e4dbb5",
+              "start_char": 407,
+              "text": "stated condition"
+            },
+            {
+              "canonical_label": "measured baseline",
+              "confidence": 0.6984857320785522,
+              "end_char": 481,
+              "entity_type": "BASELINE",
+              "mention_id": "mention:172f97b3325924a61f73300d34152adac2d06f9999ada3c492c8e7b5c0fdfa04",
+              "start_char": 464,
+              "text": "measured baseline"
+            },
+            {
+              "canonical_label": "stated condition",
+              "confidence": 0.8766200542449951,
+              "end_char": 508,
+              "entity_type": "CONDITION",
+              "mention_id": "mention:3996952999910d504b3b6d7a1a9b8ac5062156c43314bc00eaba51aa26f57fc8",
+              "start_char": 492,
+              "text": "stated condition"
+            },
+            {
+              "canonical_label": "measured baseline",
+              "confidence": 0.7077101469039917,
+              "end_char": 566,
+              "entity_type": "BASELINE",
+              "mention_id": "mention:76c48de3a62a54a85ae6d20860f20fa81462f2d59dc40e4dde34372b4042b0fd",
+              "start_char": 549,
+              "text": "measured baseline"
+            },
+            {
+              "canonical_label": "stated condition",
+              "confidence": 0.8670153617858887,
+              "end_char": 593,
+              "entity_type": "CONDITION",
+              "mention_id": "mention:2c0572436fa2fbcd38cd35f0be6b5bd7315bdb835e8ebccfb260cc98cd4666e3",
+              "start_char": 577,
+              "text": "stated condition"
+            },
+            {
+              "canonical_label": "measured baseline",
+              "confidence": 0.691990315914154,
+              "end_char": 651,
+              "entity_type": "BASELINE",
+              "mention_id": "mention:45a254c8a93b8a3654616f29ce2997ccab6566a946e1c85efd05ca60dff5e256",
+              "start_char": 634,
+              "text": "measured baseline"
+            },
+            {
+              "canonical_label": "stated condition",
+              "confidence": 0.8705257177352905,
+              "end_char": 678,
+              "entity_type": "CONDITION",
+              "mention_id": "mention:bb38e73161a2ed3911cea6d79bcd41baa5484c7f36878ca1f3079c24df8a0c07",
+              "start_char": 662,
+              "text": "stated condition"
+            },
+            {
+              "canonical_label": "measured baseline",
+              "confidence": 0.693781852722168,
+              "end_char": 736,
+              "entity_type": "BASELINE",
+              "mention_id": "mention:aecddc4796a61dd25555c55d8b77d47e6415decd2afafedbe3df70180d683d14",
+              "start_char": 719,
+              "text": "measured baseline"
+            },
+            {
+              "canonical_label": "stated condition",
+              "confidence": 0.8658308386802673,
+              "end_char": 763,
+              "entity_type": "CONDITION",
+              "mention_id": "mention:a3bf7edcd3283b7482314677826b1a1a79700b882fdc574c2315062e3af7c869",
+              "start_char": 747,
+              "text": "stated condition"
+            },
+            {
+              "canonical_label": "measured baseline",
+              "confidence": 0.6857990622520447,
+              "end_char": 821,
+              "entity_type": "BASELINE",
+              "mention_id": "mention:f4add4808ce352f890de970272c4913812b8d3b649a789b740f616026951f00a",
+              "start_char": 804,
+              "text": "measured baseline"
+            },
+            {
+              "canonical_label": "stated condition",
+              "confidence": 0.8670966029167175,
+              "end_char": 848,
+              "entity_type": "CONDITION",
+              "mention_id": "mention:f9165bcb04e8fb0b64b2a11460223cbdf25e5132574ee7adf7d08a152b6c9c43",
+              "start_char": 832,
+              "text": "stated condition"
+            },
+            {
+              "canonical_label": "measured baseline",
+              "confidence": 0.6779713034629822,
+              "end_char": 906,
+              "entity_type": "BASELINE",
+              "mention_id": "mention:f881e8d2a113c951614e63acc3cde9020342428d6912ad7bd7b2afb11fb0003f",
+              "start_char": 889,
+              "text": "measured baseline"
+            },
+            {
+              "canonical_label": "stated condition",
+              "confidence": 0.8647660613059998,
+              "end_char": 933,
+              "entity_type": "CONDITION",
+              "mention_id": "mention:e362394841fbff5afbb876d7b355e5125f5d5c3a6c97ade00a89ff889bb4ca24",
+              "start_char": 917,
+              "text": "stated condition"
+            },
+            {
+              "canonical_label": "measured baseline",
+              "confidence": 0.6744964718818665,
+              "end_char": 991,
+              "entity_type": "BASELINE",
+              "mention_id": "mention:235693768603e9f37de15cf565a4b485695881b5ceb6a23e7a60604b1cff348e",
+              "start_char": 974,
+              "text": "measured baseline"
+            },
+            {
+              "canonical_label": "stated condition",
+              "confidence": 0.8642001748085022,
+              "end_char": 1018,
+              "entity_type": "CONDITION",
+              "mention_id": "mention:6ea7eddb567c58d4a1aca99a401fc9ba08f2d964c97994c86189bf99c5808a41",
+              "start_char": 1002,
+              "text": "stated condition"
+            },
+            {
+              "canonical_label": "measured baseline",
+              "confidence": 0.6649904847145081,
+              "end_char": 1076,
+              "entity_type": "BASELINE",
+              "mention_id": "mention:f40dfefc87df706696635380c6d10f201a2c20779890af15fa38d18b3c89ff5c",
+              "start_char": 1059,
+              "text": "measured baseline"
+            },
+            {
+              "canonical_label": "stated condition",
+              "confidence": 0.8629274964332581,
+              "end_char": 1103,
+              "entity_type": "CONDITION",
+              "mention_id": "mention:49ac68c94d50e0407d626fa2d587c1ecbf9323b3d7a2a698cfda6ffc3138499c",
+              "start_char": 1087,
+              "text": "stated condition"
+            },
+            {
+              "canonical_label": "measured baseline",
+              "confidence": 0.6598761081695557,
+              "end_char": 1161,
+              "entity_type": "BASELINE",
+              "mention_id": "mention:5d26f88bceb4c9b0d8142078e07f57dde9dd6a9c87890d04782ede1369294930",
+              "start_char": 1144,
+              "text": "measured baseline"
+            },
+            {
+              "canonical_label": "stated condition",
+              "confidence": 0.8640172481536865,
+              "end_char": 1188,
+              "entity_type": "CONDITION",
+              "mention_id": "mention:149f4d4f48a1beec71de055c85afe40c4eca84f2987d41063effeccfbc49a68a",
+              "start_char": 1172,
+              "text": "stated condition"
+            },
+            {
+              "canonical_label": "measured baseline",
+              "confidence": 0.6522213816642761,
+              "end_char": 1246,
+              "entity_type": "BASELINE",
+              "mention_id": "mention:37aadf80fb15de3c104e072faecf577147ce805a54808e600e0d0ae81b543894",
+              "start_char": 1229,
+              "text": "measured baseline"
+            },
+            {
+              "canonical_label": "stated condition",
+              "confidence": 0.8613811135292053,
+              "end_char": 1273,
+              "entity_type": "CONDITION",
+              "mention_id": "mention:4c12d07c15a3cad3f2da1ee766524a2ad2a5e90aea9f5fd3dd4cf093d1ada8bb",
+              "start_char": 1257,
+              "text": "stated condition"
+            },
+            {
+              "canonical_label": "measured baseline",
+              "confidence": 0.6529132127761841,
+              "end_char": 1331,
+              "entity_type": "BASELINE",
+              "mention_id": "mention:0e7845ba158828b5c90ca17a9c7f37df3cd223cbfe957d04ca207c53c5d98947",
+              "start_char": 1314,
+              "text": "measured baseline"
+            },
+            {
+              "canonical_label": "stated condition",
+              "confidence": 0.8649857044219971,
+              "end_char": 1358,
+              "entity_type": "CONDITION",
+              "mention_id": "mention:fa20f3f318700a49a15c6f9c7b5f8d4e2ff919d70aefe112e5ace900e13b88c4",
+              "start_char": 1342,
+              "text": "stated condition"
+            },
+            {
+              "canonical_label": "measured baseline",
+              "confidence": 0.6586296558380127,
+              "end_char": 1416,
+              "entity_type": "BASELINE",
+              "mention_id": "mention:6588426f8b3dd23142aba975744c8a7e36f6219e96c9158ef3ccc674f32bf169",
+              "start_char": 1399,
+              "text": "measured baseline"
+            },
+            {
+              "canonical_label": "stated condition",
+              "confidence": 0.8636919260025024,
+              "end_char": 1443,
+              "entity_type": "CONDITION",
+              "mention_id": "mention:68deda42b4ebb7399559bc40be1a3d6107dbd12866fe7548ceff31e329cd558a",
+              "start_char": 1427,
+              "text": "stated condition"
+            },
+            {
+              "canonical_label": "measured baseline",
+              "confidence": 0.6503574252128601,
+              "end_char": 1501,
+              "entity_type": "BASELINE",
+              "mention_id": "mention:7ea4f72003b59f294bcbadfe06303529f48ad126d20d93516ac03de2388a8035",
+              "start_char": 1484,
+              "text": "measured baseline"
+            },
+            {
+              "canonical_label": "stated condition",
+              "confidence": 0.8664470911026001,
+              "end_char": 1528,
+              "entity_type": "CONDITION",
+              "mention_id": "mention:23bbc62448c18b3065c7844f0b279bdb6afa36e8fb652cecd32d7dfdf6b4bcb4",
+              "start_char": 1512,
+              "text": "stated condition"
+            },
+            {
+              "canonical_label": "measured baseline",
+              "confidence": 0.6559023857116699,
+              "end_char": 1586,
+              "entity_type": "BASELINE",
+              "mention_id": "mention:ca72201164c006e200dcd170bd4ada771c3ad404871b21024b54aa738b4e2ef6",
+              "start_char": 1569,
+              "text": "measured baseline"
+            },
+            {
+              "canonical_label": "stated condition",
+              "confidence": 0.8638809323310852,
+              "end_char": 1613,
+              "entity_type": "CONDITION",
+              "mention_id": "mention:beb00dc8bd6d6be0fe99e2d82062b3c54b6ab95fd35b6298c26683519565424c",
+              "start_char": 1597,
+              "text": "stated condition"
+            },
+            {
+              "canonical_label": "measured baseline",
+              "confidence": 0.6499041318893433,
+              "end_char": 1671,
+              "entity_type": "BASELINE",
+              "mention_id": "mention:f22643a01f3c0406273ba454c1727b19fa9619f1ba58666f28162f998429052d",
+              "start_char": 1654,
+              "text": "measured baseline"
+            },
+            {
+              "canonical_label": "stated condition",
+              "confidence": 0.8659525513648987,
+              "end_char": 1698,
+              "entity_type": "CONDITION",
+              "mention_id": "mention:5f8a67044c9007feb6305691a46aeb87fd412c4313b9254fa946d5923a57743e",
+              "start_char": 1682,
+              "text": "stated condition"
+            },
+            {
+              "canonical_label": "measured baseline",
+              "confidence": 0.6657610535621643,
+              "end_char": 1756,
+              "entity_type": "BASELINE",
+              "mention_id": "mention:54977ddbe2bdd6ac0ec8106588fe5107d3a4c0b6714c2b8e68337ff0cea5a311",
+              "start_char": 1739,
+              "text": "measured baseline"
+            },
+            {
+              "canonical_label": "stated condition",
+              "confidence": 0.8683285713195801,
+              "end_char": 1783,
+              "entity_type": "CONDITION",
+              "mention_id": "mention:8e94dc24a0b64a603dae580b8b311c0bac799bd94a71799520c06dc094493440",
+              "start_char": 1767,
+              "text": "stated condition"
+            },
+            {
+              "canonical_label": "measured baseline",
+              "confidence": 0.6919457316398621,
+              "end_char": 1841,
+              "entity_type": "BASELINE",
+              "mention_id": "mention:622d7a6a936138459acbe3aaf4e1dd56102afc22ca51c66e4a95d75c822f8bd2",
+              "start_char": 1824,
+              "text": "measured baseline"
+            },
+            {
+              "canonical_label": "stated condition",
+              "confidence": 0.8777194619178772,
+              "end_char": 1868,
+              "entity_type": "CONDITION",
+              "mention_id": "mention:1b7abfb87b17c5bce029124b76f39cd0bdd7eb8020025ce6a15f2fc2fca2e34f",
+              "start_char": 1852,
+              "text": "stated condition"
+            },
+            {
+              "canonical_label": "measured baseline",
+              "confidence": 0.843310534954071,
+              "end_char": 1926,
+              "entity_type": "BASELINE",
+              "mention_id": "mention:922dfd886c5bfd7455ccabb4506159aa46f8f27e4b472cd01edbba389fb8431f",
+              "start_char": 1909,
+              "text": "measured baseline"
+            },
+            {
+              "canonical_label": "stated condition",
+              "confidence": 0.9235581159591675,
+              "end_char": 1953,
+              "entity_type": "CONDITION",
+              "mention_id": "mention:689f5cdb0f97ce5eef49947a3163d614b641270f7370138f016cacb166dad274",
+              "start_char": 1937,
+              "text": "stated condition"
+            },
+            {
+              "canonical_label": "measured baseline",
+              "confidence": 0.7915962338447571,
+              "end_char": 2011,
+              "entity_type": "BASELINE",
+              "mention_id": "mention:8802aa1d5a474f703f6cdc22b80a43261bd56739d9287d959ff978f19ab38694",
+              "start_char": 1994,
+              "text": "measured baseline"
+            },
+            {
+              "canonical_label": "stated condition",
+              "confidence": 0.920300304889679,
+              "end_char": 2038,
+              "entity_type": "CONDITION",
+              "mention_id": "mention:b67758f26b7b3f1d32aa7bc81c6916669cd5cedeb7ddbcf47bbd824aa394c877",
+              "start_char": 2022,
+              "text": "stated condition"
+            },
+            {
+              "canonical_label": "measured baseline",
+              "confidence": 0.7573803067207336,
+              "end_char": 2096,
+              "entity_type": "BASELINE",
+              "mention_id": "mention:64d3d227fce7a7358ce46ebf0f68bef4bec5d72990a8152e04b62e2832d23ba4",
+              "start_char": 2079,
+              "text": "measured baseline"
+            },
+            {
+              "canonical_label": "stated condition",
+              "confidence": 0.8780580163002014,
+              "end_char": 2123,
+              "entity_type": "CONDITION",
+              "mention_id": "mention:482d8a840b31b83bf2d01dcdda5face3f4e88e5bc872e97041807b5395354634",
+              "start_char": 2107,
+              "text": "stated condition"
+            },
+            {
+              "canonical_label": "measured baseline",
+              "confidence": 0.7188704609870911,
+              "end_char": 2181,
+              "entity_type": "BASELINE",
+              "mention_id": "mention:a18481eaee9a9ecdb97d920815690670d2c92994abf65a1ee7db9c9866154666",
+              "start_char": 2164,
+              "text": "measured baseline"
+            },
+            {
+              "canonical_label": "stated condition",
+              "confidence": 0.8941608667373657,
+              "end_char": 2208,
+              "entity_type": "CONDITION",
+              "mention_id": "mention:200a7d685420649c622b593f80faa4981da40d55e97ff82f88d7735563fc9812",
+              "start_char": 2192,
+              "text": "stated condition"
+            },
+            {
+              "canonical_label": "measured baseline",
+              "confidence": 0.7323075532913208,
+              "end_char": 2266,
+              "entity_type": "BASELINE",
+              "mention_id": "mention:73d981829f08c3f0ca5bf50235c85ff787d3c20f96f1e947797fa82dc4e02558",
+              "start_char": 2249,
+              "text": "measured baseline"
+            },
+            {
+              "canonical_label": "stated condition",
+              "confidence": 0.8693686723709106,
+              "end_char": 2293,
+              "entity_type": "CONDITION",
+              "mention_id": "mention:b39c0d3876ef7c7f9c37635702d4559add776987527258780f62e2802a1a9252",
+              "start_char": 2277,
+              "text": "stated condition"
+            },
+            {
+              "canonical_label": "measured baseline",
+              "confidence": 0.6984857320785522,
+              "end_char": 2351,
+              "entity_type": "BASELINE",
+              "mention_id": "mention:00c0fcb4c1b850d7a775e1a79bb9d4e53c2798f12377c308b12c6d7ddf780dad",
+              "start_char": 2334,
+              "text": "measured baseline"
+            },
+            {
+              "canonical_label": "stated condition",
+              "confidence": 0.8766200542449951,
+              "end_char": 2378,
+              "entity_type": "CONDITION",
+              "mention_id": "mention:ee44523692f181987ccc9e2010d71e9c861dc03400cd83a8660e90cafa975671",
+              "start_char": 2362,
+              "text": "stated condition"
+            },
+            {
+              "canonical_label": "measured baseline",
+              "confidence": 0.7077101469039917,
+              "end_char": 2436,
+              "entity_type": "BASELINE",
+              "mention_id": "mention:7129214f0472b532bbefad759b821fff153495ec4620297e592b88df1c22c5a4",
+              "start_char": 2419,
+              "text": "measured baseline"
+            },
+            {
+              "canonical_label": "stated condition",
+              "confidence": 0.8670153617858887,
+              "end_char": 2463,
+              "entity_type": "CONDITION",
+              "mention_id": "mention:b0eb754776cbe9dceae4c83fc6ad490155516a58f9b67d6dd329af5439f0c75a",
+              "start_char": 2447,
+              "text": "stated condition"
+            },
+            {
+              "canonical_label": "measured baseline",
+              "confidence": 0.691990315914154,
+              "end_char": 2521,
+              "entity_type": "BASELINE",
+              "mention_id": "mention:33a9523ed6d85bca0b7650168e588ad884fda243b65768bd9dc451be87022015",
+              "start_char": 2504,
+              "text": "measured baseline"
+            },
+            {
+              "canonical_label": "stated condition",
+              "confidence": 0.8705257177352905,
+              "end_char": 2548,
+              "entity_type": "CONDITION",
+              "mention_id": "mention:65afdb642f2b6c1878dc69951bd2147d3bc3ebfe61540b52b0cc7178177b5f7f",
+              "start_char": 2532,
+              "text": "stated condition"
+            },
+            {
+              "canonical_label": "measured baseline",
+              "confidence": 0.693781852722168,
+              "end_char": 2606,
+              "entity_type": "BASELINE",
+              "mention_id": "mention:d391939584f9289bfa3939eab67cf64e25a5d19df60488c550c73e394d123e28",
+              "start_char": 2589,
+              "text": "measured baseline"
+            },
+            {
+              "canonical_label": "stated condition",
+              "confidence": 0.8658308386802673,
+              "end_char": 2633,
+              "entity_type": "CONDITION",
+              "mention_id": "mention:856a2c7805a2fce0e0cfd1079ab433a9fd8dd9d7e9bbd9c251bb1b9ff57a0326",
+              "start_char": 2617,
+              "text": "stated condition"
+            },
+            {
+              "canonical_label": "measured baseline",
+              "confidence": 0.6857990622520447,
+              "end_char": 2691,
+              "entity_type": "BASELINE",
+              "mention_id": "mention:0acc90e4b19f2aa8c538725b3f6336e7327e3d940cf148ba534db6e36f53446e",
+              "start_char": 2674,
+              "text": "measured baseline"
+            },
+            {
+              "canonical_label": "stated condition",
+              "confidence": 0.8670966029167175,
+              "end_char": 2718,
+              "entity_type": "CONDITION",
+              "mention_id": "mention:fbcffe17a76269156d45a64ff52a9ca25d273348b66c57860e861b4beb6e2c73",
+              "start_char": 2702,
+              "text": "stated condition"
+            },
+            {
+              "canonical_label": "measured baseline",
+              "confidence": 0.6779713034629822,
+              "end_char": 2776,
+              "entity_type": "BASELINE",
+              "mention_id": "mention:e0cfacf29730f52379180d5bef2b9853cfebae38fd006fa87a431d75feb4f09c",
+              "start_char": 2759,
+              "text": "measured baseline"
+            },
+            {
+              "canonical_label": "stated condition",
+              "confidence": 0.8647660613059998,
+              "end_char": 2803,
+              "entity_type": "CONDITION",
+              "mention_id": "mention:05fcf48e648d8e29bac34fb59b632168c6ae07185c6333dee26c257155838545",
+              "start_char": 2787,
+              "text": "stated condition"
+            },
+            {
+              "canonical_label": "measured baseline",
+              "confidence": 0.6744964718818665,
+              "end_char": 2861,
+              "entity_type": "BASELINE",
+              "mention_id": "mention:8b06870da014bc77135f87f92cf83a8a7241549441e890d6339648a865024dfa",
+              "start_char": 2844,
+              "text": "measured baseline"
+            },
+            {
+              "canonical_label": "stated condition",
+              "confidence": 0.8642001748085022,
+              "end_char": 2888,
+              "entity_type": "CONDITION",
+              "mention_id": "mention:18cfdf9ac79c71151b20c54aa16911f7ab7448723867c36abe256b9fb47b416d",
+              "start_char": 2872,
+              "text": "stated condition"
+            },
+            {
+              "canonical_label": "measured baseline",
+              "confidence": 0.6649904847145081,
+              "end_char": 2946,
+              "entity_type": "BASELINE",
+              "mention_id": "mention:adca9350e3dcc1ce6885d8152d75af234f24ad21837a4f65c160f5ef23bd7f26",
+              "start_char": 2929,
+              "text": "measured baseline"
+            },
+            {
+              "canonical_label": "stated condition",
+              "confidence": 0.8629274964332581,
+              "end_char": 2973,
+              "entity_type": "CONDITION",
+              "mention_id": "mention:c9847bd1f9ce1c99fcdc11b9d7877e36ca30cbdfc957a6c1aad3a7c0608f5bc8",
+              "start_char": 2957,
+              "text": "stated condition"
+            },
+            {
+              "canonical_label": "measured baseline",
+              "confidence": 0.6598761081695557,
+              "end_char": 3031,
+              "entity_type": "BASELINE",
+              "mention_id": "mention:4d4a5bf5fc8ef156bded01e4bcef448ef927fa4b68c3bdf04399636f472aa0aa",
+              "start_char": 3014,
+              "text": "measured baseline"
+            },
+            {
+              "canonical_label": "stated condition",
+              "confidence": 0.8640172481536865,
+              "end_char": 3058,
+              "entity_type": "CONDITION",
+              "mention_id": "mention:793ba8c529b3e118d4ae655ae7aba2a8f33a960a8b24efa5bb2d9403d3473ba3",
+              "start_char": 3042,
+              "text": "stated condition"
+            },
+            {
+              "canonical_label": "measured baseline",
+              "confidence": 0.6522213816642761,
+              "end_char": 3116,
+              "entity_type": "BASELINE",
+              "mention_id": "mention:b88b072429299e55a285e08535895726e68ca9dd9ca480bef513dedf1f3cd422",
+              "start_char": 3099,
+              "text": "measured baseline"
+            },
+            {
+              "canonical_label": "stated condition",
+              "confidence": 0.8613811135292053,
+              "end_char": 3143,
+              "entity_type": "CONDITION",
+              "mention_id": "mention:6bfdb9d2c9772728cacd21f9ee29a11b514d31b4e919d2ffa5b08af2cbfe1523",
+              "start_char": 3127,
+              "text": "stated condition"
+            },
+            {
+              "canonical_label": "measured baseline",
+              "confidence": 0.6529132127761841,
+              "end_char": 3201,
+              "entity_type": "BASELINE",
+              "mention_id": "mention:6cd49103a80825b8672708744effdaea7f6387d089863e8d48aed275e233cd11",
+              "start_char": 3184,
+              "text": "measured baseline"
+            },
+            {
+              "canonical_label": "stated condition",
+              "confidence": 0.8649857044219971,
+              "end_char": 3228,
+              "entity_type": "CONDITION",
+              "mention_id": "mention:1f173b78470e351c693e23530eba3b1574661217cdedc13663f8e7c9bbaca13e",
+              "start_char": 3212,
+              "text": "stated condition"
+            },
+            {
+              "canonical_label": "measured baseline",
+              "confidence": 0.6586296558380127,
+              "end_char": 3286,
+              "entity_type": "BASELINE",
+              "mention_id": "mention:a229f44219d419efc78c12ae695417dc1fbaae0458feab5a3fbc2147320729d0",
+              "start_char": 3269,
+              "text": "measured baseline"
+            },
+            {
+              "canonical_label": "stated condition",
+              "confidence": 0.8636919260025024,
+              "end_char": 3313,
+              "entity_type": "CONDITION",
+              "mention_id": "mention:f093289fd1fe3ed239ddfceff7941dbc43a996d6b311278d305f9e995ae08522",
+              "start_char": 3297,
+              "text": "stated condition"
+            },
+            {
+              "canonical_label": "measured baseline",
+              "confidence": 0.6503574252128601,
+              "end_char": 3371,
+              "entity_type": "BASELINE",
+              "mention_id": "mention:a9ea4fe52393695234c4154b0ccf66700821338b2087c4f013cd6bd5bf1656d1",
+              "start_char": 3354,
+              "text": "measured baseline"
+            },
+            {
+              "canonical_label": "stated condition",
+              "confidence": 0.8664470911026001,
+              "end_char": 3398,
+              "entity_type": "CONDITION",
+              "mention_id": "mention:84232af3434a5ef5c6f7edf6b895b65bd06971071a9556441d0ab02f12e92d2d",
+              "start_char": 3382,
+              "text": "stated condition"
+            },
+            {
+              "canonical_label": "measured baseline",
+              "confidence": 0.6559023857116699,
+              "end_char": 3456,
+              "entity_type": "BASELINE",
+              "mention_id": "mention:2070df910ea26fb682c4f34d548988ad803166bfa1392db0c7c97b39f9d55d60",
+              "start_char": 3439,
+              "text": "measured baseline"
+            },
+            {
+              "canonical_label": "stated condition",
+              "confidence": 0.8638809323310852,
+              "end_char": 3483,
+              "entity_type": "CONDITION",
+              "mention_id": "mention:ce64c4ee63f885b377fb3699472d7d267c593fa16b42b6df7a5e84d0251fea59",
+              "start_char": 3467,
+              "text": "stated condition"
+            },
+            {
+              "canonical_label": "measured baseline",
+              "confidence": 0.6499041318893433,
+              "end_char": 3541,
+              "entity_type": "BASELINE",
+              "mention_id": "mention:8c138c16ec5b5b79b42372baf384fdb28194c83fb611796971c0feb2a0d0b309",
+              "start_char": 3524,
+              "text": "measured baseline"
+            },
+            {
+              "canonical_label": "stated condition",
+              "confidence": 0.8659525513648987,
+              "end_char": 3568,
+              "entity_type": "CONDITION",
+              "mention_id": "mention:712619d6995faa7d99134be7d17006830e1db203910ee424eb48d7734a2d932e",
+              "start_char": 3552,
+              "text": "stated condition"
+            },
+            {
+              "canonical_label": "measured baseline",
+              "confidence": 0.6657610535621643,
+              "end_char": 3626,
+              "entity_type": "BASELINE",
+              "mention_id": "mention:2e22822e723b5bed522b1f17ef850374b929387c3dbaa7566d35222a2ae52a17",
+              "start_char": 3609,
+              "text": "measured baseline"
+            },
+            {
+              "canonical_label": "stated condition",
+              "confidence": 0.8683285713195801,
+              "end_char": 3653,
+              "entity_type": "CONDITION",
+              "mention_id": "mention:66c7e04255d6d9a3500cf4bead18c95c29788cde603726ca6d0dcf32d7110132",
+              "start_char": 3637,
+              "text": "stated condition"
+            },
+            {
+              "canonical_label": "measured baseline",
+              "confidence": 0.6919457316398621,
+              "end_char": 3711,
+              "entity_type": "BASELINE",
+              "mention_id": "mention:9da03ed704bee4215dcb26cf42786fd8feb2b2d72bb6ebc9cbceb09958cad444",
+              "start_char": 3694,
+              "text": "measured baseline"
+            },
+            {
+              "canonical_label": "stated condition",
+              "confidence": 0.8777194619178772,
+              "end_char": 3738,
+              "entity_type": "CONDITION",
+              "mention_id": "mention:5acb775eb925a922a7996ef2e3a3eff931623fd44707562ee2a88ddabb982ef3",
+              "start_char": 3722,
+              "text": "stated condition"
+            },
+            {
+              "canonical_label": "measured baseline",
+              "confidence": 0.8988385200500488,
+              "end_char": 3796,
+              "entity_type": "BASELINE",
+              "mention_id": "mention:8300bee94cf1f0ee77ac223405e2dae0c87fd5e8b85f867773cd257126c1f704",
+              "start_char": 3779,
+              "text": "measured baseline"
+            },
+            {
+              "canonical_label": "stated condition",
+              "confidence": 0.9235581159591675,
+              "end_char": 3823,
+              "entity_type": "CONDITION",
+              "mention_id": "mention:dd174de2e2fa75596692190cf8aeb0103d53e0e5213bb097e310a6de1332718d",
+              "start_char": 3807,
+              "text": "stated condition"
+            },
+            {
+              "canonical_label": "final intervention",
+              "confidence": 0.782738983631134,
+              "end_char": 3847,
+              "entity_type": "INTERVENTION",
+              "mention_id": "mention:fa060e8b07cddd3b69ffb9e7e760cf638c0d6ebec622adc18988dc573194c5f6",
+              "start_char": 3829,
+              "text": "final intervention"
+            },
+            {
+              "canonical_label": "winter 1911",
+              "confidence": 0.7695534229278564,
+              "end_char": 3882,
+              "entity_type": "TIME_PATTERN",
+              "mention_id": "mention:e1645269eacd26f39981e9323bed18e500beb78515d550b5fcc7312efadc7abe",
+              "start_char": 3871,
+              "text": "winter 1911"
+            }
+          ],
+          "predicates": [
+            {
+              "confidence": 1.0,
+              "end_char": 34,
+              "lemma": "influence",
+              "modality": "possible",
+              "negated": false,
+              "normalized_predicate": "INFLUENCES",
+              "predicate_id": "predicate:8d727aeca16667e83685658d5d91ea2a225e702a4c5552a3fe882e3bf8884c01",
+              "start_char": 25,
+              "surface_text": "influence"
+            },
+            {
+              "confidence": 1.0,
+              "end_char": 119,
+              "lemma": "influence",
+              "modality": "possible",
+              "negated": false,
+              "normalized_predicate": "INFLUENCES",
+              "predicate_id": "predicate:0692e564ee67cfad8bfdd74fe467162dcde64b8a3a744f81298c4f8ef6cb4bcd",
+              "start_char": 110,
+              "surface_text": "influence"
+            },
+            {
+              "confidence": 1.0,
+              "end_char": 204,
+              "lemma": "influence",
+              "modality": "possible",
+              "negated": false,
+              "normalized_predicate": "INFLUENCES",
+              "predicate_id": "predicate:22f2a967920ee2160bc3252ee9b80174d5f1bba7f80e487e8eaf238c58b15565",
+              "start_char": 195,
+              "surface_text": "influence"
+            },
+            {
+              "confidence": 1.0,
+              "end_char": 289,
+              "lemma": "influence",
+              "modality": "possible",
+              "negated": false,
+              "normalized_predicate": "INFLUENCES",
+              "predicate_id": "predicate:b9b0e016d76229f896d2b3c44b194af25d9214b413505270082a69cd42428730",
+              "start_char": 280,
+              "surface_text": "influence"
+            },
+            {
+              "confidence": 1.0,
+              "end_char": 374,
+              "lemma": "influence",
+              "modality": "possible",
+              "negated": false,
+              "normalized_predicate": "INFLUENCES",
+              "predicate_id": "predicate:597b84fcce8f0d2a81cd5a19b09c29ad7129c88b1e605fd9e4d4442cec1d4f01",
+              "start_char": 365,
+              "surface_text": "influence"
+            },
+            {
+              "confidence": 1.0,
+              "end_char": 459,
+              "lemma": "influence",
+              "modality": "possible",
+              "negated": false,
+              "normalized_predicate": "INFLUENCES",
+              "predicate_id": "predicate:c3c38aee4149f643407e2e29ac07a3bab93e2563328b6e3bbd9d55978a015683",
+              "start_char": 450,
+              "surface_text": "influence"
+            },
+            {
+              "confidence": 1.0,
+              "end_char": 544,
+              "lemma": "influence",
+              "modality": "possible",
+              "negated": false,
+              "normalized_predicate": "INFLUENCES",
+              "predicate_id": "predicate:254841a1f66f54b11af539711eefac2345c72da842f12c11bedbac142347a1d2",
+              "start_char": 535,
+              "surface_text": "influence"
+            },
+            {
+              "confidence": 1.0,
+              "end_char": 629,
+              "lemma": "influence",
+              "modality": "possible",
+              "negated": false,
+              "normalized_predicate": "INFLUENCES",
+              "predicate_id": "predicate:d5feb692cf0e2291a0095a63f7655da3414288175c9b748c80cbf282f73d01d9",
+              "start_char": 620,
+              "surface_text": "influence"
+            },
+            {
+              "confidence": 1.0,
+              "end_char": 714,
+              "lemma": "influence",
+              "modality": "possible",
+              "negated": false,
+              "normalized_predicate": "INFLUENCES",
+              "predicate_id": "predicate:54b7e83c780420d8383bc809ce677ee4cd8b12bf58817761f2be27dcc6922524",
+              "start_char": 705,
+              "surface_text": "influence"
+            },
+            {
+              "confidence": 1.0,
+              "end_char": 799,
+              "lemma": "influence",
+              "modality": "possible",
+              "negated": false,
+              "normalized_predicate": "INFLUENCES",
+              "predicate_id": "predicate:386d1129e066962305abd3ceb46c83948d6fe18d147771d987bade1c1b42221a",
+              "start_char": 790,
+              "surface_text": "influence"
+            },
+            {
+              "confidence": 1.0,
+              "end_char": 884,
+              "lemma": "influence",
+              "modality": "possible",
+              "negated": false,
+              "normalized_predicate": "INFLUENCES",
+              "predicate_id": "predicate:a9727a294cd1480a3ed7e6ad768e0f0d0908a5583d3e36b02d21a5741bf6687a",
+              "start_char": 875,
+              "surface_text": "influence"
+            },
+            {
+              "confidence": 1.0,
+              "end_char": 969,
+              "lemma": "influence",
+              "modality": "possible",
+              "negated": false,
+              "normalized_predicate": "INFLUENCES",
+              "predicate_id": "predicate:3eef6b7e2f8ad21eeadc1fb74a88575397e7c2347f072877bbf80dcccdcbdb9c",
+              "start_char": 960,
+              "surface_text": "influence"
+            },
+            {
+              "confidence": 1.0,
+              "end_char": 1054,
+              "lemma": "influence",
+              "modality": "possible",
+              "negated": false,
+              "normalized_predicate": "INFLUENCES",
+              "predicate_id": "predicate:712044bbc8bbfc9b81b28a97381d796ff2190dafadeefb3e55fb46d0dfea78e1",
+              "start_char": 1045,
+              "surface_text": "influence"
+            },
+            {
+              "confidence": 1.0,
+              "end_char": 1139,
+              "lemma": "influence",
+              "modality": "possible",
+              "negated": false,
+              "normalized_predicate": "INFLUENCES",
+              "predicate_id": "predicate:d857479405def9d704783240f0e099345190a971ce689b9c5e8c1d9c4ce73c4a",
+              "start_char": 1130,
+              "surface_text": "influence"
+            },
+            {
+              "confidence": 1.0,
+              "end_char": 1224,
+              "lemma": "influence",
+              "modality": "possible",
+              "negated": false,
+              "normalized_predicate": "INFLUENCES",
+              "predicate_id": "predicate:2dbffda46d28a1cc5a06c2d8c592faecd9ed356ff4bb773355dc77569a4692bb",
+              "start_char": 1215,
+              "surface_text": "influence"
+            },
+            {
+              "confidence": 1.0,
+              "end_char": 1309,
+              "lemma": "influence",
+              "modality": "possible",
+              "negated": false,
+              "normalized_predicate": "INFLUENCES",
+              "predicate_id": "predicate:8e787751b7e5fa87e5fe05a86fedac1b6bf88da74d4b439d05c54269579330ea",
+              "start_char": 1300,
+              "surface_text": "influence"
+            },
+            {
+              "confidence": 1.0,
+              "end_char": 1394,
+              "lemma": "influence",
+              "modality": "possible",
+              "negated": false,
+              "normalized_predicate": "INFLUENCES",
+              "predicate_id": "predicate:79484d539e53fea946538dbe4e17a661a8154f23cf144ab9cb2a3c07c475d126",
+              "start_char": 1385,
+              "surface_text": "influence"
+            },
+            {
+              "confidence": 1.0,
+              "end_char": 1479,
+              "lemma": "influence",
+              "modality": "possible",
+              "negated": false,
+              "normalized_predicate": "INFLUENCES",
+              "predicate_id": "predicate:01556991388c5f78b1e6a511777da58cab1f90887b5851b31c02156e4b20357c",
+              "start_char": 1470,
+              "surface_text": "influence"
+            },
+            {
+              "confidence": 1.0,
+              "end_char": 1564,
+              "lemma": "influence",
+              "modality": "possible",
+              "negated": false,
+              "normalized_predicate": "INFLUENCES",
+              "predicate_id": "predicate:246178770769f1bbc68faf059ff44c10843aaee514f9744539632595270dd233",
+              "start_char": 1555,
+              "surface_text": "influence"
+            },
+            {
+              "confidence": 1.0,
+              "end_char": 1649,
+              "lemma": "influence",
+              "modality": "possible",
+              "negated": false,
+              "normalized_predicate": "INFLUENCES",
+              "predicate_id": "predicate:cc14b92f27a02a1af7adc9bc042bc16b99fac3ceff43102ad88820cbc22271b3",
+              "start_char": 1640,
+              "surface_text": "influence"
+            },
+            {
+              "confidence": 1.0,
+              "end_char": 1734,
+              "lemma": "influence",
+              "modality": "possible",
+              "negated": false,
+              "normalized_predicate": "INFLUENCES",
+              "predicate_id": "predicate:0e17c153f736cf484fd758e915dd850e052ae88a11a2c436f9ca10172a9b5f3f",
+              "start_char": 1725,
+              "surface_text": "influence"
+            },
+            {
+              "confidence": 1.0,
+              "end_char": 1819,
+              "lemma": "influence",
+              "modality": "possible",
+              "negated": false,
+              "normalized_predicate": "INFLUENCES",
+              "predicate_id": "predicate:a372ee7b98616e8b4e98844b1203c016e83a80937757416cbce7836dbc5dba6b",
+              "start_char": 1810,
+              "surface_text": "influence"
+            },
+            {
+              "confidence": 1.0,
+              "end_char": 1904,
+              "lemma": "influence",
+              "modality": "possible",
+              "negated": false,
+              "normalized_predicate": "INFLUENCES",
+              "predicate_id": "predicate:aec5aa23b3aa0c1df051f1f4f7af0df5a0e3c5b8acf84104decc1b38a39a86b8",
+              "start_char": 1895,
+              "surface_text": "influence"
+            },
+            {
+              "confidence": 1.0,
+              "end_char": 1989,
+              "lemma": "influence",
+              "modality": "possible",
+              "negated": false,
+              "normalized_predicate": "INFLUENCES",
+              "predicate_id": "predicate:ed6b2bd7dee35113a585781b9e74b7df4fcfe20e8cd6a27e4ed29eff2e43b0d6",
+              "start_char": 1980,
+              "surface_text": "influence"
+            },
+            {
+              "confidence": 1.0,
+              "end_char": 2074,
+              "lemma": "influence",
+              "modality": "possible",
+              "negated": false,
+              "normalized_predicate": "INFLUENCES",
+              "predicate_id": "predicate:b30b2cf445318c680ce46c16d0a24cc55f4375376cb177968e062ac4dddce841",
+              "start_char": 2065,
+              "surface_text": "influence"
+            },
+            {
+              "confidence": 1.0,
+              "end_char": 2159,
+              "lemma": "influence",
+              "modality": "possible",
+              "negated": false,
+              "normalized_predicate": "INFLUENCES",
+              "predicate_id": "predicate:c9511c1b169ab7e9939c7597b6241fff665087eb7db1afd8c1795cea4eb14072",
+              "start_char": 2150,
+              "surface_text": "influence"
+            },
+            {
+              "confidence": 1.0,
+              "end_char": 2244,
+              "lemma": "influence",
+              "modality": "possible",
+              "negated": false,
+              "normalized_predicate": "INFLUENCES",
+              "predicate_id": "predicate:875887d9fbffc8f44c6cdfded39ff35d13e4c1b4e82a24288083511aba1972ed",
+              "start_char": 2235,
+              "surface_text": "influence"
+            },
+            {
+              "confidence": 1.0,
+              "end_char": 2329,
+              "lemma": "influence",
+              "modality": "possible",
+              "negated": false,
+              "normalized_predicate": "INFLUENCES",
+              "predicate_id": "predicate:cd1a7a38a182a0f4c596e752c150c491f09d83fe2b0aaa37fdf7cac27a6db35d",
+              "start_char": 2320,
+              "surface_text": "influence"
+            },
+            {
+              "confidence": 1.0,
+              "end_char": 2414,
+              "lemma": "influence",
+              "modality": "possible",
+              "negated": false,
+              "normalized_predicate": "INFLUENCES",
+              "predicate_id": "predicate:dba3447a615817b0cde7dae7e4ff4c3986e40197989d55c29d2c4fdab0e9a124",
+              "start_char": 2405,
+              "surface_text": "influence"
+            },
+            {
+              "confidence": 1.0,
+              "end_char": 2499,
+              "lemma": "influence",
+              "modality": "possible",
+              "negated": false,
+              "normalized_predicate": "INFLUENCES",
+              "predicate_id": "predicate:ef4dba2b87d9e5aea4b2d2e7833072c404ea74ac874258812995586a174fd343",
+              "start_char": 2490,
+              "surface_text": "influence"
+            },
+            {
+              "confidence": 1.0,
+              "end_char": 2584,
+              "lemma": "influence",
+              "modality": "possible",
+              "negated": false,
+              "normalized_predicate": "INFLUENCES",
+              "predicate_id": "predicate:085ab1b7c26fb55c80ce17ac1f7b42aea2dfd9df113501a655789e521a235621",
+              "start_char": 2575,
+              "surface_text": "influence"
+            },
+            {
+              "confidence": 1.0,
+              "end_char": 2669,
+              "lemma": "influence",
+              "modality": "possible",
+              "negated": false,
+              "normalized_predicate": "INFLUENCES",
+              "predicate_id": "predicate:c6ca8c9bc9908cfb6236014db3affc51115c735dfa797ebc8713fad0de7b7288",
+              "start_char": 2660,
+              "surface_text": "influence"
+            },
+            {
+              "confidence": 1.0,
+              "end_char": 2754,
+              "lemma": "influence",
+              "modality": "possible",
+              "negated": false,
+              "normalized_predicate": "INFLUENCES",
+              "predicate_id": "predicate:cb481112917cf9c27289696bde22d9489c85bfc1b34a764a80b17c671c63cf79",
+              "start_char": 2745,
+              "surface_text": "influence"
+            },
+            {
+              "confidence": 1.0,
+              "end_char": 2839,
+              "lemma": "influence",
+              "modality": "possible",
+              "negated": false,
+              "normalized_predicate": "INFLUENCES",
+              "predicate_id": "predicate:80e513d50aa8ce5594c5f89e7e37378e5623565905e8adeaac7e3e11a1529fa9",
+              "start_char": 2830,
+              "surface_text": "influence"
+            },
+            {
+              "confidence": 1.0,
+              "end_char": 2924,
+              "lemma": "influence",
+              "modality": "possible",
+              "negated": false,
+              "normalized_predicate": "INFLUENCES",
+              "predicate_id": "predicate:a5df94c55336dede10b5a314c939a64da2c3f528501cf70696b342d0328ed37d",
+              "start_char": 2915,
+              "surface_text": "influence"
+            },
+            {
+              "confidence": 1.0,
+              "end_char": 3009,
+              "lemma": "influence",
+              "modality": "possible",
+              "negated": false,
+              "normalized_predicate": "INFLUENCES",
+              "predicate_id": "predicate:5db841a9330070afea770df426b9f586a399476c5759e61ec44f1bf8ae65a44a",
+              "start_char": 3000,
+              "surface_text": "influence"
+            },
+            {
+              "confidence": 1.0,
+              "end_char": 3094,
+              "lemma": "influence",
+              "modality": "possible",
+              "negated": false,
+              "normalized_predicate": "INFLUENCES",
+              "predicate_id": "predicate:6669925b1d301d413409a42f68eff3e9ec280d608fdc25a26488f7fd59833b67",
+              "start_char": 3085,
+              "surface_text": "influence"
+            },
+            {
+              "confidence": 1.0,
+              "end_char": 3179,
+              "lemma": "influence",
+              "modality": "possible",
+              "negated": false,
+              "normalized_predicate": "INFLUENCES",
+              "predicate_id": "predicate:729f97d4949284acddb25bbccffdb54e1262b53ae938efac9d006a2bc99325d7",
+              "start_char": 3170,
+              "surface_text": "influence"
+            },
+            {
+              "confidence": 1.0,
+              "end_char": 3264,
+              "lemma": "influence",
+              "modality": "possible",
+              "negated": false,
+              "normalized_predicate": "INFLUENCES",
+              "predicate_id": "predicate:0a2ef0039cef083b4cd5914d78b30e6b1dbeb004c71b8827f88a7a8fd90c3525",
+              "start_char": 3255,
+              "surface_text": "influence"
+            },
+            {
+              "confidence": 1.0,
+              "end_char": 3349,
+              "lemma": "influence",
+              "modality": "possible",
+              "negated": false,
+              "normalized_predicate": "INFLUENCES",
+              "predicate_id": "predicate:35ccec56e7327716fdd4118d0c91a710831323bcc4fc2f738b535bdaac8f1723",
+              "start_char": 3340,
+              "surface_text": "influence"
+            },
+            {
+              "confidence": 1.0,
+              "end_char": 3434,
+              "lemma": "influence",
+              "modality": "possible",
+              "negated": false,
+              "normalized_predicate": "INFLUENCES",
+              "predicate_id": "predicate:5141fa20c8a1f374a6b688a131d3aa361595480e55d01a10689fe9d1070c44e9",
+              "start_char": 3425,
+              "surface_text": "influence"
+            },
+            {
+              "confidence": 1.0,
+              "end_char": 3519,
+              "lemma": "influence",
+              "modality": "possible",
+              "negated": false,
+              "normalized_predicate": "INFLUENCES",
+              "predicate_id": "predicate:c947c385424448e1d54ab3ab32dc93d5b188b4c236860d8051e92862067a6933",
+              "start_char": 3510,
+              "surface_text": "influence"
+            },
+            {
+              "confidence": 1.0,
+              "end_char": 3604,
+              "lemma": "influence",
+              "modality": "possible",
+              "negated": false,
+              "normalized_predicate": "INFLUENCES",
+              "predicate_id": "predicate:e6c6d6d818b31eadf5330a5dbd2810d82b783b2e565723e1defa9f2737a5c193",
+              "start_char": 3595,
+              "surface_text": "influence"
+            },
+            {
+              "confidence": 1.0,
+              "end_char": 3689,
+              "lemma": "influence",
+              "modality": "possible",
+              "negated": false,
+              "normalized_predicate": "INFLUENCES",
+              "predicate_id": "predicate:abc235bc21f6ec0fc2d7fb907fab38c5348d132494da6b4f7f05b046357651c9",
+              "start_char": 3680,
+              "surface_text": "influence"
+            },
+            {
+              "confidence": 1.0,
+              "end_char": 3774,
+              "lemma": "influence",
+              "modality": "possible",
+              "negated": false,
+              "normalized_predicate": "INFLUENCES",
+              "predicate_id": "predicate:43e492aaa4b7829d3e0688ecc2be0faba71a39b50658fc8bfdbdb0e3193f20c8",
+              "start_char": 3765,
+              "surface_text": "influence"
+            },
+            {
+              "confidence": 1.0,
+              "end_char": 3855,
+              "lemma": "reduce",
+              "modality": "asserted",
+              "negated": false,
+              "normalized_predicate": "DECREASES",
+              "predicate_id": "predicate:f4fb2fcb614a71cb8c8c091a458a2d9702fa0810dbb76e65ac2bc393c2765289",
+              "start_char": 3848,
+              "surface_text": "reduces"
+            }
+          ],
+          "relations": [],
+          "schema_version": "local_extraction.v1",
+          "sentence_ids": [
+            "evidence:1fffb680984754ef18c61a881c3a36de278a67d7bca8c9ead525e9a3b98cc093",
+            "evidence:0b3dd74bbfa50edf3961bf3ab98732299c0a1625f61c343f7c6afae2dd79c87c",
+            "evidence:82bb27be5f8ce7893e1165d8e26f4771d083a038bd83658adda3fe4ff238f12d",
+            "evidence:57f01e2ee5d45e09862698c7eaa404aee1be9274fcab932852a92e25c19c258d",
+            "evidence:5bccbce68c5e970820844b9880a0f5cae92fcdd7cc9bf1ce35b1e5b9fc0a8109",
+            "evidence:8f30055564f52857fda16f56a5ef39bdf4bb4a3d12549037034850d758615f20",
+            "evidence:7645d75bd50691778b04b22f62e9c9ad281096b455d55b12961296375c9e80eb",
+            "evidence:df4369ab923ba1d0f959b47266d1ed2d596dff7f3f87dc2cc2393bac5341a12e",
+            "evidence:bd37e84922f4797dbb9c2e11e9a5ca62d84b97afe76725cb7f96b87642721db1",
+            "evidence:8cf8c4ed05dec00f56b571233ea4467e38df6f1a9432cd2c6efa3a224c4d2479",
+            "evidence:e529479ec5196bec870431b0ee21681cd2a927b4a39769e23329ee3236a3fe76",
+            "evidence:b3427bb163deadc161f195ea8f0120addf097b8b61f94784e6d9353cf8ee240d",
+            "evidence:576697bce206a3f81cac7a187c1d89afa1e18b316762f69a6ba3f615f8bbe877",
+            "evidence:c541a39b2b96777ff273144cf03199b09a566a9bb771c0f4dbd530660524186d",
+            "evidence:7efadf5fb714cc07b4ca92678f743f0b9dc5747bea79052ee83525ce7d241a1f",
+            "evidence:7e3c6891b3da63c883bdbda8931291cbdeba553451197984e540d23e12b9819f",
+            "evidence:d6082fcd3f387cdbbdc6cfc94ad58d3be9619b64504e0879f80349eab9b60401",
+            "evidence:f799b5b212ec86b0810533f5fcaaf195194a26d7c499303b93af42249c78f99f",
+            "evidence:8c897312a205ea7da14dcfa3106cd5325caec04f329ae7010dd13f01f9209749",
+            "evidence:324467ce20cef21e74236d44f22d527a8eb54be3aa7336474b3423e805a307ce",
+            "evidence:cd5718d7846d420bca9a0bd89497e584f5337ab47f1322bd7b089cec0afeeb39",
+            "evidence:f744c534408d73588a520dbf631120607e10325dad64bd4602469376d0a685f3",
+            "evidence:91474b32e6a6d58e8a1ac986178a49e734aff88c9db2210800fea034329ca494",
+            "evidence:aacb75a42af1bff57d1399f8ff2bb0dc605172d0c9634bce2b674a08d5216a5b",
+            "evidence:2e333001441044ac7bb2e6bafb30d142c191936bdb7eecb04da3b7ddfa693219",
+            "evidence:2dcd12c02ef9695478082b38811126adef6ea869f9393cdb5cf425522baafc48",
+            "evidence:e4ce192db59a9e42ae07b571432c7aa62a06c56c2561dfffef06e3a8f957b886",
+            "evidence:9f756a87f98e218d5350b9612706f251500f046217f3d448463432fd8f0b1fa1",
+            "evidence:816099c6322f75feb8b2bf650741ecf27ab1f1fa97d508eae4f8bc4b8f09a3cd",
+            "evidence:31302ac67e3e8469d392154b87bb951642cdc3c2128c19793a7fddb56f4a0d82",
+            "evidence:f382dd011c081e874622349f9c25e2dba06ed496e43e1cb6a7ace7644fe4a888",
+            "evidence:c90ff2d305f0a774540189c41b0feb331510c975ce5e617049a8a434323c477f",
+            "evidence:71a20891bd870c6ae7e6d43b10d3bb28610746fe981545deb9bad1a91bf7447e",
+            "evidence:189a3c97991cdd44d0e7fa32be9f33b598d2876884e5f06ffee09336411c3814",
+            "evidence:f5140f605a91be0f9705b58241555b1ca0a5a12f6322f2f666a7a5b50f5dcf5f",
+            "evidence:3f8d9f325dac1fd606a69afea90392dd5714bb0fee9f0c949271d507c00370bf",
+            "evidence:b6775bb6702b22d03c920523918d485bf2f924c33861513c55d9ddf626797871",
+            "evidence:ccaac16ef1fff363361c238cb4866aa45b5d3602223122d234cdd5cc394c817c",
+            "evidence:22a69c1220cafd26e64e1f37595ac8e284b62debdfd21b36b263b828a194aa72",
+            "evidence:afb4fb08f83ab0dbb7fa0d6850a8a1acef0982de941c73da51ed6b9a2d8b4820",
+            "evidence:0807d26a856f038f4ac649f8dc568035c8f49be4fec269195e8c4867da98ca51",
+            "evidence:2b5078176dc3df080f7960f0d3183c3549b8a27a768eaf659c2d43a4153c6580",
+            "evidence:5842ab592d32c1e25837086c097a9d23df704b78689e8d206f6a126821aa0545",
+            "evidence:f0daf9c355c9338c876e4904567a38339734700d6f625e11c0938a6cc25d31cd",
+            "evidence:579d8b44a5407f73683aeb0e276d1b5d78d24bef63cd5a8cac7db5b7b40b951e",
+            "evidence:8b423351acfd637f728cb5c76b592ac77987157a3c90eef0d85697b80095afa7"
+          ],
+          "unresolved_spans": []
+        },
+        "mention_selection_counts": {
+          "raw": 96,
+          "same_span_dropped": 4,
+          "selected": 92
+        },
+        "source_version_id": "srcv:runpod-lockdown:long_window_overlap",
+        "temporal_captures": [
+          {
+            "char_end": 3882,
+            "char_start": 3871,
+            "detector": "regex",
+            "role_candidates": [],
+            "text": "winter 1911"
+          }
+        ],
+        "temporal_captures_truncated": false
+      }
+    ],
+    "runtime_identity": {
+      "asset_contract": {
+        "extraction_vocabulary_sha256": "47ea44fee2341c3cc65ef2bb4f99795947aa0c1cc9e1d55314efc7647af89612",
+        "gliner_config_sha256": "a8f3c2ecc57deb70077be6940962aa60e82d861a153a5cd2839b91795968ae7d",
+        "gliner_weights_sha256": "922214c0c60f7835bb5c00f52ad1769d38518d5183f85de7bc03893a8403c023",
+        "predicate_normalization_sha256": "0ba7cdc3d8dd6f643e7ccce74b46f4711940947fa73020adaf130f5efd727ce8"
+      },
+      "distributions": {
+        "en-core-web-sm": "3.8.0",
+        "gliner": "0.2.26",
+        "huggingface-hub": "0.36.2",
+        "numpy": "2.2.6",
+        "pydantic": "2.13.4",
+        "safetensors": "0.7.0",
+        "sentencepiece": "0.2.1",
+        "spacy": "3.8.14",
+        "tokenizers": "0.22.2",
+        "torch": "2.12.0",
+        "transformers": "4.57.6"
+      },
+      "gliner_model_id": "urchade/gliner_medium-v2.1",
+      "gliner_model_revision": "40ec419335d09393f298636f471328b722c6da9e",
+      "model_snapshot": {
+        "config_sha256": "a8f3c2ecc57deb70077be6940962aa60e82d861a153a5cd2839b91795968ae7d",
+        "weights_sha256": "922214c0c60f7835bb5c00f52ad1769d38518d5183f85de7bc03893a8403c023"
+      },
+      "parser_version": "spacy:3.8.14;model:3.8.0",
+      "platform": "macOS-26.4.1-arm64-arm-64bit",
+      "python": "3.11.15",
+      "registry_namespace_hashes": {
+        "predicate_normalization": "sha256:a0870e5d4cd5f315719245c301ad074824857115ce6f1b9dd7a7d45cd6ca030d",
+        "vocab": "sha256:bd39855c608e2ce677587c63603eb51caef407fa422cb6575b549dcf68216aa5"
+      },
+      "source_closure": {
+        "closure_sha256": "41a2c0db7aa35c7d0c30105f18df42687e0a459368d66f269f1a7248224c1415",
+        "file_count": 13,
+        "files": {
+          "app.py": "7b6a472a99515e24f7678ec914795c24e8ff5e1ea004e74a40e17ee7c7dc76d4",
+          "models/__init__.py": "5a925b1aecd61d91bf1626abb623ff2a7f525dbf64a9be9a6dc6001e82eb5d3c",
+          "models/extraction_registry.py": "50d1c28043667fac1cbf152e68eae47119fd4043ed292133d8c086194ac275f7",
+          "models/hash_taxonomy.py": "593c9c7862859cffe56c0291bc9f88d5393104fbbeed6457d64fd697855bac74",
+          "models/local_extraction.py": "42cf0e38d9df681676f13c1d681d682888c3e0f7a53004cd4eafd5cdc37e703e",
+          "models/semantic_artifacts.py": "31b80e2fa05627e15a55382f423aec01275b24be5224514e806cdb321b08fc4c",
+          "registries/extraction_vocabularies.v1.json": "47ea44fee2341c3cc65ef2bb4f99795947aa0c1cc9e1d55314efc7647af89612",
+          "registries/predicate_normalization.v1.json": "0ba7cdc3d8dd6f643e7ccce74b46f4711940947fa73020adaf130f5efd727ce8",
+          "runtime.py": "b5d41cc0350873c0341d0575da1937d8024312afa029aaf0f6b695dd49f0e79d",
+          "services/__init__.py": "f594a90c1155ef4bc0866f6ac00cd110eb5da13e039604d219e9e31599c8ef54",
+          "services/ingestion/__init__.py": "73b4ab126a955582f62b1a5935fda61c042e5ad504aa4f4fbc48a6f7e3229c93",
+          "services/ingestion/gliner_mentions.py": "6317e164f26cf8d48496444be6afbac03203aed12978b7d8b5b51de51e5ae3d5",
+          "services/ingestion/semantic_observations.py": "7930c8f2e86f4b857f209f63288c3fad66b152a61bf80d55100c5709b6bcc048"
+        }
+      },
+      "spacy_model": "en_core_web_sm",
+      "spacy_model_version": "3.8.0"
+    }
+  },
+  "run_hashes": [
+    "e84e2e3da1a1d698a3fdb6005a40d4e5ddba2ee3515797fac973b345e3517df6",
+    "e84e2e3da1a1d698a3fdb6005a40d4e5ddba2ee3515797fac973b345e3517df6"
+  ],
+  "run_mode": {
+    "database_writes": 0,
+    "graph_writes": 0,
+    "provider_calls": 0,
+    "vector_writes": 0
+  },
+  "runtime_identity": {
+    "asset_contract": {
+      "extraction_vocabulary_sha256": "47ea44fee2341c3cc65ef2bb4f99795947aa0c1cc9e1d55314efc7647af89612",
+      "gliner_config_sha256": "a8f3c2ecc57deb70077be6940962aa60e82d861a153a5cd2839b91795968ae7d",
+      "gliner_weights_sha256": "922214c0c60f7835bb5c00f52ad1769d38518d5183f85de7bc03893a8403c023",
+      "predicate_normalization_sha256": "0ba7cdc3d8dd6f643e7ccce74b46f4711940947fa73020adaf130f5efd727ce8"
+    },
+    "distributions": {
+      "en-core-web-sm": "3.8.0",
+      "gliner": "0.2.26",
+      "huggingface-hub": "0.36.2",
+      "numpy": "2.2.6",
+      "pydantic": "2.13.4",
+      "safetensors": "0.7.0",
+      "sentencepiece": "0.2.1",
+      "spacy": "3.8.14",
+      "tokenizers": "0.22.2",
+      "torch": "2.12.0",
+      "transformers": "4.57.6"
+    },
+    "gliner_model_id": "urchade/gliner_medium-v2.1",
+    "gliner_model_revision": "40ec419335d09393f298636f471328b722c6da9e",
+    "model_snapshot": {
+      "config_sha256": "a8f3c2ecc57deb70077be6940962aa60e82d861a153a5cd2839b91795968ae7d",
+      "weights_sha256": "922214c0c60f7835bb5c00f52ad1769d38518d5183f85de7bc03893a8403c023"
+    },
+    "parser_version": "spacy:3.8.14;model:3.8.0",
+    "platform": "macOS-26.4.1-arm64-arm-64bit",
+    "python": "3.11.15",
+    "registry_namespace_hashes": {
+      "predicate_normalization": "sha256:a0870e5d4cd5f315719245c301ad074824857115ce6f1b9dd7a7d45cd6ca030d",
+      "vocab": "sha256:bd39855c608e2ce677587c63603eb51caef407fa422cb6575b549dcf68216aa5"
+    },
+    "source_closure": {
+      "closure_sha256": "41a2c0db7aa35c7d0c30105f18df42687e0a459368d66f269f1a7248224c1415",
+      "file_count": 13,
+      "files": {
+        "app.py": "7b6a472a99515e24f7678ec914795c24e8ff5e1ea004e74a40e17ee7c7dc76d4",
+        "models/__init__.py": "5a925b1aecd61d91bf1626abb623ff2a7f525dbf64a9be9a6dc6001e82eb5d3c",
+        "models/extraction_registry.py": "50d1c28043667fac1cbf152e68eae47119fd4043ed292133d8c086194ac275f7",
+        "models/hash_taxonomy.py": "593c9c7862859cffe56c0291bc9f88d5393104fbbeed6457d64fd697855bac74",
+        "models/local_extraction.py": "42cf0e38d9df681676f13c1d681d682888c3e0f7a53004cd4eafd5cdc37e703e",
+        "models/semantic_artifacts.py": "31b80e2fa05627e15a55382f423aec01275b24be5224514e806cdb321b08fc4c",
+        "registries/extraction_vocabularies.v1.json": "47ea44fee2341c3cc65ef2bb4f99795947aa0c1cc9e1d55314efc7647af89612",
+        "registries/predicate_normalization.v1.json": "0ba7cdc3d8dd6f643e7ccce74b46f4711940947fa73020adaf130f5efd727ce8",
+        "runtime.py": "b5d41cc0350873c0341d0575da1937d8024312afa029aaf0f6b695dd49f0e79d",
+        "services/__init__.py": "f594a90c1155ef4bc0866f6ac00cd110eb5da13e039604d219e9e31599c8ef54",
+        "services/ingestion/__init__.py": "73b4ab126a955582f62b1a5935fda61c042e5ad504aa4f4fbc48a6f7e3229c93",
+        "services/ingestion/gliner_mentions.py": "6317e164f26cf8d48496444be6afbac03203aed12978b7d8b5b51de51e5ae3d5",
+        "services/ingestion/semantic_observations.py": "7930c8f2e86f4b857f209f63288c3fad66b152a61bf80d55100c5709b6bcc048"
+      }
+    },
+    "spacy_model": "en_core_web_sm",
+    "spacy_model_version": "3.8.0"
+  },
+  "schema_version": "polymath.runpod_same_chunk_local_reference.v1",
+  "spec_path": "backend/evals/runpod_same_chunk_lockdown_v1.json",
+  "spec_sha256": "a214bff374e5684e0f4b521eb042d6e253c4b28e07846cd7bfd935ce0cdde6f8",
+  "task_count": 12,
+  "task_input_sha256": "596d5e2af36bf196b33b1c8f06127f3cc38310104fe7dd37b4582d329dfd26e3"
+}

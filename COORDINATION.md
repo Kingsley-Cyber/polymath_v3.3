@@ -9008,3 +9008,12 @@ cross. Ruling:
    attestation before any deploy references it.
 If private visibility cannot be achieved with existing credentials/plan,
 STOP and ask the owner — that single fact is his call.
+
+## [2026-07-15T12:36:03Z] EXECUTOR → SENIOR :: ACK
+
+Private-only publication ruling received. I will verify repository visibility
+before pushing; a public repository will not receive an image and will trigger
+the required stop/owner escalation unless it can be made private through the
+existing authorized account plan. The push receipt will restate zero baked
+secrets/runtime-only keys, and no deploy will reference the image until the
+remote immutable digest is verified against the local attestation.

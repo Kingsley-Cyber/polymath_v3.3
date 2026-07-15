@@ -3799,6 +3799,65 @@ A corpus is strict-ready only when:
   `docs/RUNPOD_CUSTOM_IMAGE_B0_FEASIBILITY_RECEIPT_2026-07-15.md`.
 - Checklist boxes closed: none; B2 remains open until image/digest attestation.
 
+### 2026-07-15 - P2.7 same-chunk B1 pinned-local reference
+
+- Commit: this receipt commit on `claude-continuation-20260713`; executed from
+  published source commit `08385fa`.
+- Owner: owner-authorized full RunPod finish line; this is the frozen local
+  comparison half.
+- Corpus/data scope: 12 preregistered synthetic extraction tasks; zero corpus
+  reads or writes.
+- Code changes: none after the published preregistration runner.
+- Durable migration/backfill: none.
+- Before metrics: live green output does not yet exist; no parity claim.
+- After metrics: both local normalized output hashes are identical at
+  `e84e2e3d…`; 126 entities, 56 predicates, 14 windows, zero relations.
+- Tests by tier: two complete runs, byte determinism, exact runtime/model/
+  registry/source identities, and zero provider/database/graph/vector writes;
+  true `EXIT=0`.
+- Cross-corpus test: not applicable to same-chunk extraction parity.
+- Failure/rollback test: comparison contract requires zero missing, extra, or
+  semantic mismatches and exact threshold-side selection in the live gate.
+- Deployment image/health: pinned-local only; no endpoint operation.
+- Remaining risks: live green endpoint must reproduce the reference across all
+  12 tasks. Permanent receipt:
+  `docs/RUNPOD_SAME_CHUNK_B1_LOCAL_REFERENCE_RECEIPT_2026-07-15.md` and frozen
+  baseline `docs/baselines/RUNPOD_SAME_CHUNK_LOCAL_REFERENCE_2026-07-15.json`
+  (SHA `7615ad23…`).
+- Checklist boxes closed: none; live same-chunk parity remains open.
+
+### 2026-07-15 - P2.7 custom-image B2 local bake and attestation
+
+- Commit: this receipt commit on `claude-continuation-20260713`; image inputs
+  are the already-published commit `08385fa`.
+- Owner: full RunPod finish line authorized; senior ruling at 12:34:54Z
+  authorizes registry publication only after private visibility is verified.
+- Corpus/data scope: local Docker build and read-only in-image inspection;
+  zero corpus, provider, or durable-store writes.
+- Code changes: none after the published B0 source contract.
+- Durable migration/backfill: none.
+- Before metrics: Flash's platform artifact was rejected because it could not
+  attest the locked Python/torch runtime or an immutable deploy identity.
+- After metrics: local linux/amd64 image is 5,864,789,051 bytes; Python
+  3.11.15; all 13 critical/runtime distributions exact; model, registry, and
+  13-file source closure hashes exact; non-root UID 10001.
+- Tests by tier: image build, selected config inspection, full in-image bake
+  report, torch import, and malformed handler-envelope checks all true
+  `EXIT=0`.
+- Cross-corpus test: not applicable to the local image gate; frozen 15-document
+  E2E remains downstream.
+- Failure/rollback test: three malformed envelope classes reject fail-closed;
+  no registry or endpoint mutation occurred, so existing blue endpoints are
+  unchanged.
+- Deployment image/health: local manifest list `d3620d85…`; linux/amd64
+  manifest `ef7a286d…`; config `6fa4eeb5…`. These are local build identities,
+  not a claimed registry digest. GPU health remains a live-canary gate.
+- Remaining risks: registry push/digest, CUDA-13 GPU compatibility,
+  blue-green endpoint deploy, canary, and same-chunk parity remain open.
+  Permanent receipt:
+  `docs/RUNPOD_CUSTOM_IMAGE_B2_LOCAL_ATTESTATION_RECEIPT_2026-07-15.md`.
+- Checklist boxes closed: none; remote B2/B3 remain open.
+
 ## Implementation Log Template
 
 Copy this section for every completed item:
