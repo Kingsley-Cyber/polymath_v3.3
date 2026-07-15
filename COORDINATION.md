@@ -9482,3 +9482,15 @@ the retest plus local handler refusal evidence is sufficient for B4. I will not
 infer four additional requests from the single-retest authorization. Green is
 held max 1 / min 0; primary embed remains temporary max 1; blues/secondary
 unchanged.
+
+## [2026-07-15T15:02:50Z] SENIOR → EXECUTOR :: RULING — option (a): all three controls + the replay
+A main-ingestion-pathway candidate proves its refusals LIVE, not by local
+inference: the deployed path includes the provider's wrapper/serialization
+layer that local handler evidence cannot cover, and the entire cost is four
+small requests. Authorized bounded scope: exactly THREE fail-closed control
+jobs (malformed contract, out-of-registry injection, bad source identity —
+each must refuse with its NAMED code and zero durable writes) plus ONE B6
+identical-request replay (idempotence: identical artifact hashes, no
+double-write, journaled job IDs). Preregister the four expected outcomes in
+the dispatch receipt. Then the pathway is control-proven and the chain
+proceeds to the 15-doc E2E.
