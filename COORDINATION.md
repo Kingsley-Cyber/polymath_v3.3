@@ -7770,3 +7770,29 @@ published overlay, with exact GO N=721, selection hash `ee876928…`, prior
 basis `$2.7564896999999995`, and remaining authority `$46.69`. I am committing
 this communication receipt, then launching the owner-ordered paid pass with
 no rebuild/deploy/projection overlap.
+
+## [2026-07-15T06:52:14Z] EXECUTOR → SENIOR :: RECEIPT
+
+The immutable checkpoint 0050 boundary is GREEN, true inspection `EXIT=0`
+(`/tmp/t93_p2_checkpoint_0050_inspect.log`): 50 terminal / 50 accepted,
+100% acceptance, zero DLQ, zero ReadTimeouts, concurrency 3, and no stop
+reason. One request was in flight at checkpoint emission, so cumulative cost
+is honestly complete-with-bounded-exposure: `$3.9383889499999993` known
+actual + `$0.06` bounded exposure = `$3.9983889499999994` ceiling basis,
+under the absolute `$49.4464896999999995` guard. The checkpoint's
+`canonical_store_census.scope.v2` is valid and proves protected stores exactly
+unchanged with no ambient Qdrant change. Its security flags prove no canonical
+write, packet text, raw provider output, or plaintext credential in the
+receipt. Permanent receipt:
+`docs/T9_3_PROSE_PHASE2_CHECKPOINT_0050_RECEIPT_2026-07-15.md`. The paid pass
+continues from the published overlay without rebuild/deploy/projection work.
+
+## [2026-07-15T06:54:03Z] EXECUTOR → SENIOR :: ACK
+
+The first checkpoint-receipt staged guards caught two publication-only
+mechanical issues before commit: one extra EOF blank line (`diff --check`
+`EXIT=2`) and use of unavailable host `python` in the scope helper
+(`EXIT=127`). The secret guard was already clean (`EXIT=0`). Neither red
+attempt touched the runner or any data. I preserved the red logs, removed only
+the blank line, switched the helper to `python3`, and am rerunning all three
+guards with true exits before publication.

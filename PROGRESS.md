@@ -2,17 +2,16 @@
 
 - Mission: CODEX_MISSION.md (CP2 → CP12)
 - Track: A4/T9.3 owner-authorized paid interim-prose Phase 2.
-- Current task: sealed dedicated B1-scoped prose runner and exact live launch
-  population. Credential-blind preflight is GREEN at 721 parents (719 fresh +
-  the exact two rejected-v2 B4 durable parents), with selection hash
-  `ee876928...`, prior cumulative basis `$2.7564896999999995`, remaining
-  authority `$46.69`, and absolute guard `$49.4464896999999995`. No paid call
-  or durable Phase-2 row exists yet.
-- Next task: finish worker/static/diff/secret gates, publish the sealed runner,
-  then execute the exact owner/senior GO. Capture the exact 50-parent
-  checkpoint, rolling receipts, completion/boundary ledger, and three-digest
-  owner sample. Do not rebuild, deploy, project, or activate while paid work
-  is running.
+- Current task: the published owner/senior-authorized B1 prose Phase-2 pass is
+  live over the exact 721-parent population. Checkpoint 0050 is GREEN at
+  50/50 accepted, zero dead letters, zero ReadTimeouts, concurrency 3, and
+  cumulative ceiling basis `$3.9983889499999994` including one `$0.06`
+  bounded in-flight exposure. Protected canonical stores are exactly
+  unchanged under `canonical_store_census.scope.v2`.
+- Next task: continue non-invasive monitoring through exact rolling
+  checkpoints and the completion/budget boundary. Capture the final ledger
+  and three-digest owner sample. Do not rebuild, deploy, project, or activate
+  while paid work is running.
 - Parked: the distinct five-parent bounded tail remains after the main pass
   and only if corpus-wide certified acceptance is at least 95%. The rejected
   structured v2/v3 contracts remain closed failed; the owner explicitly chose
@@ -29,7 +28,13 @@
   after modular completion + RunPod blue-green parity; this is not approval to
   reingest or mutate the existing ecommerce corpus. Predicate normalization v1
   and ClaimRecordV1 field sets remain owner-ratifiable.
-- Last completed subgate: T9.3 B1 prose Phase-2 launch seal is GREEN.
+- Last completed subgate: T9.3 B1 prose Phase-2 checkpoint 0050 is GREEN.
+  Permanent receipt:
+  `docs/T9_3_PROSE_PHASE2_CHECKPOINT_0050_RECEIPT_2026-07-15.md`. The exact
+  boundary is 50 terminal / 50 accepted, acceptance 100%, no dead letters,
+  no ReadTimeouts, no stop reason, and protected canonical-store invariance.
+
+  T9.3 B1 prose Phase-2 launch seal is also GREEN.
   Permanent receipt:
   `docs/T9_3_PROSE_PHASE2_LAUNCH_SEAL_RECEIPT_2026-07-15.md`. Canonical focused
   tests are 75/75; invalid-GO refusal and zero-write postcheck are green. The
@@ -78,4 +83,4 @@
   793+2 parents and finds sentence→atomic mapping coverage 80.944158%; the
   optional-ID ordered-unit shape is p50 13,930 bytes, max 25,613 bytes, with
   maximum-any-ten authority `$0.83486975` under the corrected envelope.
-- Last update: 2026-07-15T05:54:10Z (executor)
+- Last update: 2026-07-15T06:52:14Z (executor)

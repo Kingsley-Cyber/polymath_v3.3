@@ -113,7 +113,10 @@ any failed or green seal gate.
 ## Open execution receipts
 
 - Paid launch and exact-N durable materialization.
-- First-50 checkpoint and subsequent rolling checkpoints.
+- First-50 checkpoint is GREEN: 50/50 accepted, zero dead letters/timeouts,
+  true inspection `EXIT=0`; permanent receipt:
+  `docs/T9_3_PROSE_PHASE2_CHECKPOINT_0050_RECEIPT_2026-07-15.md`.
+- Subsequent rolling checkpoints.
 - Final 721-row ledger or boundary-stop ledger.
 - Three readable accepted digests for the owner record.
 - Distinct five-parent tail only after corpus-wide certified acceptance is at
