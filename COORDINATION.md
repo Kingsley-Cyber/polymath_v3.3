@@ -8479,6 +8479,33 @@ claims: recovery latched at terminal 159 and the original rolling gate is now
 re-enabled. The execution receipt will settle that latch explicitly. The
 runner continues the main pass; any later last-50 fall below 90% still parks.
 
+## [2026-07-15T11:17:14Z] EXECUTOR → SENIOR :: BLOCKER
+
+The recovered pass stopped correctly on the live second-cumulative-ReadTimeout
+guard: `resume_execution_v3.json` SHA `eec2db4f…`, runner true `EXIT=1`,
+`stop_reason=read_timeout_recurrence_pause`. Final state is 186 terminal =
+178 accepted / 8 DLQ, 535 queued, zero running; rolling is 48/50. Recovery is
+explicitly latched at terminal 159, no rolling second-stop occurred, and the
+execution receipt says `owner_park_required=false`.
+
+The new timeout is ord242 at completion rank 185, packet 16,182 bytes,
+attempt 1, zero priced calls, safely bounded `$0.06` under
+`bounded_transport_exposure.v1`. The prior timeout is ord164 at rank 109;
+there are exactly two cumulative. Post-continuation-baseline performance is
+35/36 = 97.22% accepted. There is no terminal failure streak. Complete cost
+basis is known `$7.691670599999999` + bounded `$0.34493884999999996` =
+`$8.036609449999998`. Protected canonical stores are exact; ambient
+`hermes_memories` changed +2 only. Diagnostic:
+`/tmp/t93_p2_continuation_stop_diag.log`, `EXIT=0`; stopped execution log:
+`/tmp/t93_p2_resume_continuation_v3.log`, true `EXIT=1`.
+
+No checkpoint 0200 was reached; checkpoint 0150 remains exact `3370b7bf…`.
+Future restart is already PARKED on the materializer defect acknowledged at
+10:43:02Z. I will now seal the post-batch materializer preservation fix and
+the exact 186-terminal continuation baseline without provider calls. Please
+rule after those receipts whether this nonrolling timeout pause may continue
+or remains parked; I will not relaunch or retry ord242 meanwhile.
+
 ## [OWNER-RELAY 2026-07-15T10:53:50Z] OWNER :: SCOPE RULING (verbatim intent)
 "just worry about run pod deployment... this whole pipeline focuses on gliner
 glirel, spacy and python for main extractions. if we lockdown runpod it can
@@ -8550,3 +8577,18 @@ please finish this test."
    "finish this test" is the authorization; ceilings still apply and get
    published in the launch receipt.
 4. Post the stop receipt FIRST, then the bake design note.
+
+## [2026-07-15T11:17:14Z] EXECUTOR → SENIOR :: ACK
+
+Owner stop and finish-line order received. The runner had already settled on
+its second-ReadTimeout guard when this entry became visible: 186 terminal =
+178 accepted / 8 DLQ, 535 queued, zero running. No request is interrupted and
+no unknown outcome remains. I have stopped the local materializer work at its
+undeployed boundary and will not relaunch or retry the digest remainder.
+
+Required stop receipt is now written first:
+`docs/T9_3_PROSE_PHASE2_RECOVERY_PAUSE_RECEIPT_2026-07-15.md`. It records the
+97.22% post-baseline acceptance, recovery at terminal 159, final rolling
+48/50, exact second-ReadTimeout evidence, complete `$8.036609449999998` basis,
+canonical invariance, and durable 535-row remainder. I am publishing this park
+receipt before writing or building the RunPod bake plan.

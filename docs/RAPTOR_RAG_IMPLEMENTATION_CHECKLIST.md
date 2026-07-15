@@ -3707,6 +3707,35 @@ A corpus is strict-ready only when:
 - Checklist boxes closed: operational-continuation seal only. T9.3 paid
   completion remains open.
 
+### 2026-07-15 - T9.3 B1 Phase-2 recovery pause
+
+- Commit: this pause receipt commit on `claude-continuation-20260713`.
+- Owner: owner stop/priority order at
+  `COORDINATION.md#OWNER-RELAY-2026-07-15T10:55:37Z`; the remaining digest
+  queue is owner-gated and the RunPod extraction E2E is the finish line.
+- Corpus/data scope: mark only; exact 721-row selection, 186 terminal = 178
+  accepted / 8 DLQ, 535 queued, zero running.
+- Code changes: none sealed by this receipt. A materializer preservation fix
+  is locally drafted but undeployed and parked.
+- Durable migration/backfill: exact restoration of the already-authorized
+  ord206/207 bounded-success fields after materialization temporarily
+  reclassified them as zero-cost cache hits; 2/2 CAS, zero provider calls.
+- Before metrics: recovery baseline 150 terminal, rolling 44/50.
+- After metrics: recovery reached terminal 159; final rolling 48/50; post-
+  baseline 35/36 accepted; stopped on second cumulative ReadTimeout.
+- Tests by tier: stop diagnostic `EXIT=0`; execution expected `EXIT=1` on live
+  guard; budget accounting complete; protected canonical stores exact.
+  Permanent receipt:
+  `docs/T9_3_PROSE_PHASE2_RECOVERY_PAUSE_RECEIPT_2026-07-15.md`.
+- Cross-corpus test: not applicable; mark paid lane. Ambient
+  `hermes_memories` +2 disclosed separately.
+- Failure/rollback test: zero running, no checkpoint 0200, no retry of ord242,
+  and 535 queued rows remain durable.
+- Deployment image/health: no rebuild/restart during the paid run.
+- Remaining risks: future resume requires an owner line and a sealed
+  materializer preservation fix. T9.3 paid completion remains open.
+- Checklist boxes closed: pause receipt only.
+
 ## Implementation Log Template
 
 Copy this section for every completed item:

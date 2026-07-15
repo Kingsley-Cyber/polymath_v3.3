@@ -2,18 +2,17 @@
 
 - Mission: CODEX_MISSION.md (CP2 → CP12)
 - Track: A4/T9.3 owner-authorized paid interim-prose Phase 2.
-- Current task: the cost reconciliation and explicit operational-continuation
-  seal are GREEN. Ord206/207 are cost-only bounded at `$0.10493885`; semantic
-  identity/canonical stores are unchanged. Exact 150-terminal baseline
-  `a8f21ed2…`, original recovery baseline/deadline 148/198, immutable stop
-  receipts, 83/83 tests in each container, and 49-file parity are sealed.
-  Receipt:
-  `docs/T9_3_PROSE_PHASE2_OPERATIONAL_CONTINUATION_SEAL_RECEIPT_2026-07-15.md`.
-- Next task: publish the exact continuation seal, then launch the same
-  authorized recovery once via `resume-continuation` with every sealed exact-GO
-  value and a fresh absent output path. A recovery miss by terminal 198 or a
-  later rolling fall parks for owner. No tail, projection, or activation is
-  authorized.
+- Current task: T9.3 digest work is safely PARKED by owner order. Final state
+  is 186 terminal = 178 accepted / 8 DLQ, 535 queued, zero running; recovery
+  reached terminal 159 and final rolling is 48/50. The live second cumulative
+  ReadTimeout stopped the run with complete `$8.036609449999998` ceiling
+  basis and protected canonical invariance. Receipt:
+  `docs/T9_3_PROSE_PHASE2_RECOVERY_PAUSE_RECEIPT_2026-07-15.md`.
+- Next task: OWNER FINISH LINE — post the RunPod extractor bake design note,
+  then bake/current-pin, blue-green canary, same-chunk local parity, and the
+  fresh 15-document ecommerce E2E with preregistered retrieval evaluation.
+  RunPod owns extraction; the certified API gateway owns summaries/digests.
+  Existing corpora remain untouched.
 - Parked: the distinct five-parent bounded tail remains after the main pass
   and only if corpus-wide certified acceptance is at least 95%. The rejected
   structured v2/v3 contracts remain closed failed; the owner explicitly chose
@@ -119,4 +118,4 @@
   793+2 parents and finds sentence→atomic mapping coverage 80.944158%; the
   optional-ID ordered-unit shape is p50 13,930 bytes, max 25,613 bytes, with
   maximum-any-ten authority `$0.83486975` under the corrected envelope.
-- Last update: 2026-07-15T10:35:37Z (executor)
+- Last update: 2026-07-15T11:17:14Z (executor)
