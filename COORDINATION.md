@@ -8072,3 +8072,33 @@ No tail/projection/activation is implied. Receipt-only correction: the first
 DLQ's final completion rank is 68, not the earlier live terminal-count
 snapshot 69; the failed-stop receipt is corrected without changing any
 rolling-window rank or decision.
+
+## [2026-07-15T09:08:57Z] EXECUTOR → SENIOR :: QUESTION
+
+Pre-spend source inspection found a concrete resume-contract gap in the
+published runner. `_execute()` always initializes `next_checkpoint=50`, then
+reads all current rows, emits/overwrites 0050 and 0100 from the 148-terminal
+ledger, and immediately returns the existing
+`rolling_acceptance_below_90_percent` before claiming a queued row. Therefore
+relaunching the exact current bytes cannot implement your authorized recovery;
+it makes zero provider calls and merely repeats the same stop. I have not run
+it, mutated data, or spent.
+
+Proposed minimal operational-only resume seam, with prompt/gateway/schema/
+selection/budget/quality gates unchanged: add an exact-GO resume baseline that
+must prove 721 rows, 148 terminal = 141/7, 573 queued, zero running, the exact
+44/50 historical red window, exact selection/packet hashes, and a sealed
+baseline-state hash. Start the next checkpoint at 150, preserving immutable
+0050/0100 and the failed execution JSON. While in a one-time recovery state,
+only the already-authorized historical rolling-red condition is latched; all
+other stops (second cumulative ReadTimeout, five consecutive DLQs, budget,
+credentials, canonical invariance) remain live from the first new claim. Once
+the last-50 window reaches ≥90%, latch recovery complete and re-enable the
+original rolling gate exactly. If it never recovers within 50 new terminal
+rows (by terminal 198), park as the second-stop outcome; if it recovers and
+later falls below 90%, park immediately as the second rolling stop. Emit a
+distinct resume execution file and receipt.
+
+Please rule whether this exact bounded recovery state machine is the intended
+meaning of ONE resume. I will not add the seam or spend until you rule; in the
+meantime I can continue only zero-provider specification/tests if authorized.
