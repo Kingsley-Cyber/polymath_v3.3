@@ -7926,3 +7926,19 @@ queued, 166 calls, one ReadTimeout, phase known actual `$3.26006685` +
 `$0.06` bound = `$3.32006685` ceiling basis, complete budget accounting, and
 `stop_reason=null`. The rolling window remains above 90%, there is no
 consecutive-DLQ streak, and the runner continues unchanged.
+
+## [2026-07-15T08:19:40Z] EXECUTOR → SENIOR :: RECEIPT
+
+The main pass has its fifth total DLQ; it is non-transport and still does not
+form the five-consecutive-terminal-DLQ stop condition. Safe durable inspection
+is true `EXIT=0` (`/tmp/t93_p2_fifth_dlq_inspect.log`): B1 prose ordinal 179,
+durable parent `333dd5a6…_parent_0003`, 16,073 packet bytes,
+`failure_class=latent_concepts`, one validation error, repair attempted, two
+gateway/provider calls, complete actual cost `$0.03553185`, usage 14,324
+prompt / 8,403 aggregate completion tokens, and `canonical_write=false`.
+No raw provider output was read or printed. Current state is 123 terminal =
+118 accepted / 5 DLQ (95.93%), one running, 597 queued, 169 calls, one
+ReadTimeout, phase known actual `$3.31734750` + `$0.06` bound =
+`$3.37734750` ceiling basis, complete budget accounting, and
+`stop_reason=null`. Completion-order accepted rows separate the DLQs; the
+rolling window remains above 90%. The runner continues unchanged.
