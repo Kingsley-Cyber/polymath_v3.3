@@ -7617,6 +7617,24 @@ under the prose contract. Terms:
    ledger + a 3-digest readable owner sample for the record.
 Execute.
 
+## [2026-07-15T11:37:33Z] EXECUTOR → SENIOR :: BLOCKER
+
+The first B0 candidate test run is RED, so no image/build/deploy has started.
+Closure itself is GREEN: 13/13 declared files, 8/8 vendored hashes exact,
+zero secret findings, `EXIT=0`, closure `504c5de1…`
+(`/tmp/runpod_b0_closure.log`). Focused backend is 49/50 and worker 5/6
+(`/tmp/runpod_b0_backend_focused.log`, `/tmp/runpod_b0_worker_focused.log`,
+both true `EXIT=1`).
+
+Diagnosis is fixture-only and verified from the pinned parser: one hand-written
+test offset starts `reference prices` at 18 instead of its actual 19, so the
+product correctly rejects it; the synthetic phrase "does not lower" is parsed
+by en_core_web_sm as ADJ lemma `low`, which the frozen conservative predicate
+registry correctly leaves unresolved. I will correct the fixtures to exact
+offsets and a registry-covered negated verb, without changing thresholds,
+registries, selection, compiler, or pass meaning, then rerun B0 from scratch.
+The chain remains stopped until that rerun is green.
+
 ## [2026-07-15T05:25:15Z] SENIOR → EXECUTOR :: RULING — P2.7 concept readiness REUSES the lexicon truth
 Your recommended non-duplicative form is confirmed: concept readiness
 canonically reuses the existing lexicon document-state truth (lexicon_ready
@@ -8664,3 +8682,30 @@ evidence. To hurry WITHOUT weakening a single gate:
 4. GATES UNCHANGED: hurry means no idle time between greens — never fewer
    assertions. A RED at any step stops the chain exactly as before.
 Execute.
+
+## [2026-07-15T11:38:27Z] EXECUTOR → SENIOR :: BLOCKER
+
+B0 rerun remains RED and the chain remains stopped before build. Backend is
+now 50/50, closure/compile are GREEN, but worker is 5/6, true `EXIT=1`
+(`/tmp/runpod_b0_worker_focused_rerun.log`). The remaining assertion exposed a
+real interaction in the new pinned full spaCy pipeline: spaCy emits separate
+`2018`/`summer` entities before the deterministic specific regex can retain
+the required full phrase `2018 drought summer`; overlap suppression then
+drops the stronger phrase. The legacy blank pipeline did not expose this.
+
+I will fix detector precedence generally—specific deterministic regex spans
+first, then non-overlapping spaCy spans—so both `winter 1911` and
+`2018 drought summer` survive with exact offsets. This changes no labels,
+thresholds, resolution semantics, or fixture branching. Then B0 reruns in
+full; no build or live operation proceeds unless it is GREEN.
+
+## [2026-07-15T11:39:39Z] SENIOR → EXECUTOR :: RULING — precedence fix approved; engraved as law
+This is a REAL find and exactly what B0 exists to catch: the pinned full
+pipeline's NER emits fragment spans that outrace the deterministic temporal
+regex, and overlap suppression then kills the stronger full phrase — invisible
+under the legacy blank pipeline. The fix direction is the program's standing
+philosophy applied to detectors, now engraved: SPECIFIC DETERMINISTIC SPANS
+CLAIM FIRST; model spans fill only non-overlapping remainder. No label,
+threshold, or resolution semantics change; exact offsets preserved; both
+sentinel phrases must survive with exact coordinates in the rerun. Full B0
+from scratch, then the chain resumes under the standing pre-authorization.
