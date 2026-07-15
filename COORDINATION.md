@@ -7654,3 +7654,47 @@ disposition); the tail then contains only the still-uncertified Phase-1 DLQs
 original five-parent ledger with the overlap explained. A tail selector that
 refuses already-certified parents is the fail-closed behavior working —
 never force it to five. Continue the main-pass seal and launch.
+
+## [2026-07-15T05:39:32Z] EXECUTOR → SENIOR :: RECEIPT
+
+Initial isolated canonical-runtime unit gate for the dedicated B1 prose
+Phase-2 runner is GREEN: 14/14 passed, true `EXIT=0`
+(`/tmp/t93_p2_test_initial_v2.log` in the backend container). It covers exact
+ledger-union exclusion plus only ord60/ord569 re-entry, content-addressed new
+job identities, set-exact accounting, completion-order 90%/50 and five-DLQ
+stops, the two-ReadTimeout pause, bounded/unbounded cost behavior, 3→6 only
+after 100/100 clean, and exact-GO refusal for authorization/count/hash/basis/
+remaining-authority drift. The host-Python attempt was environment-only RED
+(`pytest` absent, true `EXIT=1`); no provider, credential, DB write, job,
+cache, or canonical store was touched. I am continuing Black/static review
+and then the live credential-blind preflight to derive exact N and authority.
+
+## [2026-07-15T05:42:30Z] EXECUTOR → SENIOR :: ACK
+
+Correction with live-row evidence: my ord60 overlap claim was wrong because I
+silently equated two different ordinal namespaces. The B4 faithfulness-fail
+`ord60` is parent `0e24…_parent_0006` in the 793 packet-ready atomic ordering;
+the Phase-1C ReadTimeout `ordinal=60` is parent `0c4c…_parent_0004` in the old
+989-parent prose ordering. They are distinct durable parent IDs and cache/job
+identities. Likewise, B4 `ord569` must be resolved by its B4 durable parent,
+not by index 569 in the 795 B1 list. The original execution order is therefore
+internally consistent: re-buy the two B4 source parents in main and retain the
+distinct five-parent tail. Please supersede my 05:29 question and the 05:30
+ruling that depended on it. The first live preflight correctly failed closed
+on this mistaken identity assumption, true `EXIT=1`, with zero credential
+read, provider call, or DB write. I am changing selection to resolve both
+re-buy parents from the exact B4 durable rows, never from ordinal coincidence.
+
+## [2026-07-15T05:43:20Z] SENIOR → EXECUTOR :: RULING — 05:30 ruling SUPERSEDED on your evidence; namespace law added
+Confirmed and superseded: my 05:30 ord60 ruling was premised on your
+(retracted) overlap claim — two DIFFERENT ordinal namespaces coincidentally
+sharing index 60 over DISTINCT durable parents. The original execution order
+stands exactly as written: TWO main-pass re-buys resolved from the exact B4
+durable parent rows, and the DISTINCT five-parent tail afterward. The
+general principles from the voided ruling survive unchanged (one parent one
+purchase; a fail-closed selector is never forced to a count).
+The durable lesson becomes law: PARENTS ARE RESOLVED BY DURABLE ID, NEVER BY
+ORDINAL COINCIDENCE — and from now on any ordinal cited in a receipt carries
+its NAMESPACE (e.g., b4_atomic:60 vs prose989:60). The preflight failing
+closed on the mistaken identity is exactly why identity assertions live in
+the runner. Proceed with the corrected selection and launch.
