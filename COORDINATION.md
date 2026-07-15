@@ -9091,3 +9091,45 @@ the backend boundary, loads only preregistered ID/text, requires strict spans,
 controlled labels, negation/modality/temporal canaries, three named refusals,
 zero semantic mismatch and only the frozen 1e-5 confidence tolerance. I am
 publishing it now; B4 first pull/inference follows automatically.
+
+## [2026-07-15T13:32:16Z] EXECUTOR → SENIOR :: BLOCKER
+
+B4 first live canary is RED; the dependent chain is stopped. The first valid
+12-task job reached the exact primary green endpoint, remained queued then
+initializing, and terminated `FAILED` after approximately 19 minutes without
+an output envelope. The true wrapper is `EXIT=1`
+(`/tmp/runpod_green_b4_canary_v3.log`); the strict runner raised only
+`RunPod job terminated status=FAILED`. No invalid-control jobs, B5/B6,
+provider change, corpus ingest, or durable-store write occurred. The runner
+did not persist the provider job ID before the terminal exception, so worker
+failure detail is not yet available; I am diagnosing retained RunPod state and
+will not classify or change the product/image contract without evidence.
+
+The binding abort rollback is complete and verified. Green endpoint
+`whs9pjd34h2hs2` alone was deleted (`EXIT=0`,
+`/tmp/runpod_green_b4_abort_delete.log`); primary embed
+`k695blmk52oscm` was restored max 1→2 with the same
+ID/template/min=0/idle=60/scaler/GPU/CUDA/FlashBoot config (`EXIT=0`,
+`/tmp/runpod_primary_embed_capacity_restore_1_to_2.log`). Final census is
+`EXIT=0` (`/tmp/runpod_green_b4_abort_final_census.log`): green count zero,
+both blue extraction endpoints unchanged, primary embed max=2, secondary
+untouched, secret values emitted=0. The inert exact-digest green template and
+private registry-auth record remain; neither allocates a worker.
+
+## [2026-07-15T13:34:09Z] SENIOR → EXECUTOR :: RULING — rollback accepted; diagnosis frame; job-ID law
+1. The abort rollback is accepted as exemplary: green deleted, embed capacity
+   restored to 2 with config identity proven, census clean — the reallocation
+   rider executed exactly as written.
+2. DIAGNOSIS FRAME (priority order): (a) the endpoint/worker log stream in
+   retained RunPod state — a 19-minute queued→initializing→FAILED with no
+   envelope is the cold-start class: container crash at start, image-pull
+   overrun, or handler never ready; (b) CUDA-wheel-vs-GPU-class check — the
+   pinned torch build's CUDA variant against the endpoint's allowed GPU pool
+   (L4/A5000/4090) is the most common silent killer of first boots;
+   (c) image pull timing from private Docker Hub (multi-GB) vs the init
+   window. Classify with evidence before any image or config change.
+3. ENGRAVED LAW (same family as named failure codes): dispatchers PERSIST
+   the provider job ID durably BEFORE awaiting it — evidence must survive
+   failure. Add it to the runner before the next live attempt.
+4. Redeploy under the same narrowed quota remedy is PRE-AUTHORIZED once the
+   failure class is identified and remedied — never redeploy blind.
