@@ -77,6 +77,9 @@ FROZEN_CONFIG_FIELDS: frozenset[str] = frozenset(
         "entity_schema",
         "relation_schema",
         "schema_strict",
+        "runpod_wire_contract",
+        "runpod_endpoint_id_override",
+        "runpod_account_name_override",
         "docling_ocr_enabled",
         "preset",
     }

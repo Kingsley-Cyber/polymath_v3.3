@@ -1095,6 +1095,9 @@ def _rehydrate_ghost_b_staging(staged: list[dict]) -> list[ExtractionResult]:
                 # persisted temporal captures are never silently erased.
                 temporal_captures=list(r.get("temporal_captures") or []),
                 temporal_capture_version=r.get("temporal_capture_version"),
+                source_version_id=r.get("source_version_id"),
+                local_extraction=r.get("local_extraction"),
+                claim_compilation=r.get("claim_compilation"),
             )
         )
     return out
@@ -1289,6 +1292,18 @@ async def _find_near_duplicate_documents(
     return candidates[:limit]
 
 
+def _runpod_extractor_for_config(config: IngestionConfig):
+    """Select the additive RunPod adapter without changing the legacy default."""
+
+    if config.runpod_wire_contract == "local_extraction_v1":
+        from services.runpod_local_extraction import extract_entities
+
+        return extract_entities
+    from services.runpod_flash_extraction import extract_entities
+
+    return extract_entities
+
+
 async def _run_ghosts_parallel(
     *,
     config: IngestionConfig,
@@ -1297,6 +1312,7 @@ async def _run_ghosts_parallel(
     doc_id: str,
     corpus_id: str,
     user_id: str | None = None,
+    source_version_id: str | None = None,
     model: str,
     filename: str | None = None,
     db: AsyncIOMotorDatabase,
@@ -1710,7 +1726,14 @@ async def _run_ghosts_parallel(
                 corpus_id=c.corpus_id,
                 text=c.text,
                 chunk_kind=getattr(c, "chunk_kind", None) or ChunkKind.BODY,
-                metadata=getattr(c, "metadata", None) or {},
+                metadata={
+                    **(getattr(c, "metadata", None) or {}),
+                    **(
+                        {"source_version_id": source_version_id}
+                        if source_version_id
+                        else {}
+                    ),
+                },
             )
             for c in body_children
         ]
@@ -1968,11 +1991,19 @@ async def _run_ghosts_parallel(
 
                 report = await _cloud_extract(tasks, **_extract_kwargs)
             elif extraction_engine == "runpod_flash":
-                from services.runpod_flash_extraction import (
-                    extract_entities as _runpod_extract,
+                _runpod_extract = _runpod_extractor_for_config(config)
+                _runpod_kwargs: dict[str, Any] = {}
+                if config.runpod_wire_contract == "local_extraction_v1":
+                    _runpod_kwargs = {
+                        "endpoint_id": config.runpod_endpoint_id_override,
+                        "account_name": config.runpod_account_name_override,
+                        "user_id": user_id,
+                    }
+                report = await _runpod_extract(
+                    tasks,
+                    **_extract_kwargs,
+                    **_runpod_kwargs,
                 )
-
-                report = await _runpod_extract(tasks, **_extract_kwargs)
             elif extraction_engine == "legacy_local":
                 report = await extract_entities(
                     tasks,
@@ -3575,6 +3606,18 @@ async def run_ingest_job(
         r"\s+", " ", (parse_result.markdown or parse_result.text or "").strip()
     )
     doc_id = hashlib.sha256(_norm.encode("utf-8")).hexdigest()
+    from models.identifier_recipes import source_version_id as make_source_version_id
+
+    source_content_hash = str(
+        (source_identity or {}).get("content_sha256")
+        or hashlib.sha256(data).hexdigest()
+    ).strip()
+    if not source_content_hash.startswith("sha256:"):
+        source_content_hash = f"sha256:{source_content_hash}"
+    document_source_version_id = make_source_version_id(
+        doc_id,
+        source_content_hash,
+    )
     source_tier = parse_result.source_tier
     source_mime = mime_hint or "application/octet-stream"
     logger.info(
@@ -4051,6 +4094,7 @@ async def run_ingest_job(
             doc_id=doc_id,
             corpus_id=corpus_id,
             user_id=user_id,
+            source_version_id=document_source_version_id,
             filename=filename,
             model=model,
             db=db,

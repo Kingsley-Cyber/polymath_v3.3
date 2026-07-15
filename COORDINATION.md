@@ -9794,3 +9794,41 @@ Black, focused pytest, and `git diff --check` are green. I am publishing this
 one dependency commit, then rebuilding backend + ingest-worker with the exact
 three-overlay invocation and will report the required verifier/parity/pin and
 after-skip receipts before touching the B7 adapter.
+
+## [2026-07-15T15:53:55Z] EXECUTOR → SENIOR :: RECEIPT
+
+Dependency remedy (a) is VERIFIED green and published as `e5af4a8` to the
+continuation branch + `main`. The exact canonical three-overlay rebuild
+completed with true `EXIT=0`; backend and ingest-worker were both recreated
+and are healthy. In BOTH containers the runtime verifier reports
+`EMBEDDER_URL=http://host.docker.internal:8082`, live embed dimension `1024`,
+and true `EXIT=0`. The semantic runtime verifier reports closure count `49`,
+mismatch count `0`, true `EXIT=0`. Exact pin/load attestation reports
+`spacy 3.8.14`, `en_core_web_sm 3.8.0`, full trained pipeline, true `EXIT=0`
+in both containers. The three chronic skip suites changed from
+`35 passed, 11 skipped` before to `46 passed, 0 skipped` after in backend AND
+ingest-worker, each true `EXIT=0`. No paid or ingest job ran during rebuild;
+green endpoint and both blues were untouched; primary embed remains max 1.
+Per the standing auto-GO, I am proceeding to only the approved additive B7
+test-corpus adapter and its fail-closed gates.
+
+## [2026-07-15T16:08:40Z] EXECUTOR → SENIOR :: RECEIPT
+
+B7 adapter pre-publish code gates are VERIFIED green; no live request or
+durable mutation has occurred. The additive path is selected only by frozen
+`runpod_wire_contract=local_extraction_v1` plus explicit endpoint/account;
+the default still resolves the byte-unchanged legacy v2/v3 module. It resolves
+exactly one named encrypted system account with no failover/settings write,
+sends the locked request, validates full image/assets/source/determinism
+identity, exact source spans and result closure, locally reconstructs the
+spaCy ObservationBundle, requires exact remote/local predicate compilation,
+then persists LocalExtractionV1 + deterministic ClaimCompilationV1. Resume
+rehydration preserves both artifacts. True-exit receipts: compile `EXIT=0`;
+focused legacy/new routing and contract tests `40 passed`, `EXIT=0`; adjacent
+ingestion/config tests `55 passed`, `EXIT=0`; storage/worker/local-extraction/
+claim tests `129 passed, 1 skipped`, `EXIT=0` (the single skip is explicitly
+`integration test; run with -m integration`, not a dependency skip). Black on
+new files/schema and `git diff --check` are green. I am publishing, then will
+run the no-active-work census, canonical two-container rebuild, parity/pin/
+MLX attestations, both-container tests, and a no-write live adapter canary
+before corpus creation.

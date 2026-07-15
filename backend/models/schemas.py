@@ -245,6 +245,19 @@ class IngestionConfig(BaseModel):
         "local_then_cloud",
         "local_then_enrich",
     ] = Field(default="inherit")
+    runpod_wire_contract: Literal[
+        "legacy_v2_v3",
+        "local_extraction_v1",
+    ] = Field(
+        default="legacy_v2_v3",
+        description=(
+            "Corpus-scoped RunPod wire selector. The default preserves the "
+            "production GLiNER-Relex v2/v3 adapter; local_extraction_v1 is "
+            "reserved for an explicitly pinned endpoint/account on a fresh corpus."
+        ),
+    )
+    runpod_endpoint_id_override: str | None = Field(default=None, max_length=120)
+    runpod_account_name_override: str | None = Field(default=None, max_length=60)
 
     # Default to the universal vocab so freshly-instantiated configs match
     # what the lifespan migration patches existing corpora to. Ghost B's
@@ -320,6 +333,29 @@ class IngestionConfig(BaseModel):
             ):
                 data.pop(f"{prefix}_{suffix}", None)
         return data
+
+    @model_validator(mode="after")
+    def validate_runpod_wire_contract(self) -> "IngestionConfig":
+        endpoint = (self.runpod_endpoint_id_override or "").strip()
+        account = (self.runpod_account_name_override or "").strip()
+        if self.runpod_wire_contract == "local_extraction_v1":
+            if self.extraction_engine != "runpod_flash":
+                raise ValueError(
+                    "local_extraction_v1 requires extraction_engine=runpod_flash"
+                )
+            if not endpoint or not account:
+                raise ValueError(
+                    "local_extraction_v1 requires explicit RunPod endpoint and "
+                    "account overrides"
+                )
+        elif (
+            self.runpod_endpoint_id_override is not None
+            or self.runpod_account_name_override is not None
+        ):
+            raise ValueError(
+                "RunPod endpoint/account overrides require local_extraction_v1"
+            )
+        return self
 
 
 class WriteState(BaseModel):

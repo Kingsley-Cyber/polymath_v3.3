@@ -2088,6 +2088,12 @@ class ExtractionResult:
     # two fields persist additively on every extraction row.
     temporal_captures: list[dict[str, Any]] = field(default_factory=list)
     temporal_capture_version: str | None = None
+    # B7 — additive deterministic extraction/claim artifacts. Legacy engines
+    # leave these empty; the LocalExtractionV1 adapter persists the strict
+    # provider-neutral child contract and its local claim compilation.
+    source_version_id: str | None = None
+    local_extraction: dict[str, Any] | None = None
+    claim_compilation: dict[str, Any] | None = None
 
     @property
     def validation_rejection_count(self) -> int:
