@@ -6623,3 +6623,116 @@ Publish B1/B2/B3 to checklist/cursor, then bring the zero-provider B4
 preflight: frozen strata (bands + per-band counts incl. top decile), selector
 proof against the 56-attempted/2-excluded ledger, and the measured ceiling —
 I restate the GO arithmetic on that receipt before the first call.
+
+## [2026-07-15T01:19:51Z] EXECUTOR → SENIOR :: RECEIPT
+
+B1/B2/B3 publication gate GREEN, true `EXIT=0` in
+`/tmp/b123_publication_gate.log`. Both design notes now distinguish certified
+production results from probe estimates; the checklist implementation log
+records the 989→795 eligibility, 3,493-row/84,586-claim materialization,
+793+2 packet accounting, permanent 3-negative capacity ledger, complete test/
+replay receipts, non-effects, rollback, and open gates; `PROGRESS.md` now
+points to B4 and keeps Phase 2 sealed. No runtime state, call, write, or spend
+changed. The B4 preflight code path remains read-only and credential-blind;
+running its pure contract tests next.
+
+## [2026-07-15T01:20:27Z] EXECUTOR → SENIOR :: RECEIPT
+
+B4 zero-provider preflight contract gates GREEN. Pinned host: 10/10,
+`EXIT=0` in `/tmp/b4_atomic_preflight_host.log`; canonical image: 10/10,
+`EXIT=0` in `/tmp/b4_atomic_preflight_canonical.log`; compile/diff static gate
+`EXIT=0` in `/tmp/b4_atomic_preflight_static.log`; post-format Black gate 3/3
+unchanged in `/tmp/b4_atomic_preflight_black_v2.log` (the initial expected
+formatting-red receipt remains `/tmp/b4_atomic_preflight_black.log`). The
+versioned recipe freezes five rank bands 0–25/25–50/50–75/75–90/top-decile,
+two packets each, deterministic hash order, and 10 unique documents. The
+script has no execution mode, does not read plaintext credentials, and makes
+no writes. Running the live read-only preflight now.
+
+## [2026-07-15T01:23:45Z] EXECUTOR → SENIOR :: BLOCKER
+
+First live B4 preflight is operationally/count/cost green but receipt-identity
+red, so it is NOT the GO receipt. True command `EXIT=0` in
+`/tmp/b4_atomic_preflight_live.log`; it proved 793 ready, 56 historical
+purchased-ready, 737 fresh, 10 selected / 727 remaining, zero active ingest/
+semantic jobs, 10 unique documents, 2 per each frozen band including top
+decile, selected ceiling `$0.42995425`, and calls/writes/credential reads=0.
+However its packet-set field is `49b69a…`, not certified `00960d…`. Root cause
+is a receipt-only namespace input mismatch: this new preflight fed
+`sha256:`-prefixed packet hashes to `namespace_hash(input-set, ...)`; the
+certified census feeds raw 64-hex digests. Packet bytes and selection are
+unchanged. Restoring the established set-hash recipe, adding a regression,
+and rerunning tests + full preflight; no provider execution is authorized.
+
+## [2026-07-15T01:25:05Z] EXECUTOR → SENIOR :: RECEIPT
+
+Packet-set receipt restoration gates GREEN. The new regression freezes raw
+64-hex packet digests as the certified `input-set` members; pinned host 11/11,
+true `EXIT=0` in `/tmp/b4_hash_restore_host.log`; canonical image 11/11, true
+`EXIT=0` in `/tmp/b4_hash_restore_canonical.log`; two-file Black check
+`EXIT=0` in `/tmp/b4_hash_restore_black.log`. No packet, selection recipe,
+selection row, database state, call, credential, or cost changed. Rerunning
+the full zero-provider preflight and requiring both certified population hash
+`00960d…` and unchanged selection hash `55ab1e…`.
+
+## [2026-07-15T01:29:20Z] EXECUTOR → SENIOR :: RECEIPT
+
+Corrected B4 zero-provider live preflight is GREEN. The actual command receipt
+is `/tmp/b4_atomic_preflight_live_v2.log`, true `EXIT=0`; an independent
+full-JSON comparison excluding only the two packet-set receipt fields proves
+the stopped and corrected selections/censuses are otherwise byte-identical,
+true `EXIT=0` in `/tmp/b4_atomic_preflight_restore_compare.log`. The certified
+packet population hash is restored to
+`sha256:00960dbeb9d1704421a79ea1abd3b71112e316c66143b2cfe507c709c624bf04`;
+the frozen selection-set hash remains
+`sha256:55ab1e846c40ef2e3a233a01f3333758b9660451b3237241f1976e271d9f203f`.
+
+Ledger arithmetic: 793 packet-ready minus 56 historically purchased-ready =
+737 fresh; B4 selects 10, leaving 727. The two permanent no-claim-child
+exclusions are nonready and neither was purchased. Rank-band populations and
+byte ranges are: q00–q25 185 (9,142–19,789), q25–q50 184
+(19,790–19,871), q50–q75 184 (19,871–19,954), q75–q90 111
+(19,954–19,991), top-decile 73 (19,991–20,000); exactly two selected per
+band and all 10 source documents are unique. Boundary-byte overlap reflects
+rank-based bands with tied sizes, not band overlap.
+
+Current route-card arithmetic (input $0.75/M, output $2.95/M, 8,192-token
+output cap, 10% safety margin): exact selected-10 ceiling `$0.42995425`;
+maximum-any-fresh-10 ceiling `$0.4308304`; post-B4 727-fresh ceiling
+`$31.1917106`; all-793-ready ceiling `$34.02797992`. The retired flat `$0.04`
+estimate is not used. Review is frozen for all 10 outputs: summary and thesis
+must be supported by emitted claims, unsupported synthesis is failure,
+claim-list prose is surfaced for senior review, excluded-local claims are not
+required, and sparse auxiliary domain proposals do not automatically fail.
+
+Preflight observed zero active ingest and semantic jobs; zero provider calls,
+writes, canonical writes, spend, and plaintext credential reads. Canonical
+before-state remains Mongo 0, Qdrant 1,364,159 protected points, Neo4j
+1,361,818 nodes / 3,712,432 relationships. Provider execution remains sealed.
+Please restate the exact B4 GO arithmetic before the first call.
+
+## [2026-07-15T01:31:30Z] SENIOR → EXECUTOR :: B4 GO — exact restated arithmetic (Condition C satisfied)
+GO for the B4 canary on precisely these terms:
+- PROVIDER/CONTRACT: certified LongCat Tier3, max_tokens=8192, temperature 0,
+  thinking disabled; parent-digest.v6 (ee523bbf…) + repair-v3 (0d4d7d5f…);
+  packet contract semantic_parent_packet.atomic_claims.v2; certified
+  population hash 00960dbe…; the frozen 10-packet selection (2 per band,
+  10 unique documents) under its unchanged selection hash.
+- CEILING: exact selected-10 authority $0.42995425 (route card $0.75/M in,
+  $2.95/M out, 8,192 output cap, 10% margin) — hard stop; cost telemetry
+  complete-or-bounded per standing rules (bounded-exposure for any
+  transport-dead row; ≥2 ReadTimeouts → pause and propose).
+- BAR (preregistered, unchanged): ≥9/10 accepted → phase-2 lane reopens;
+  ≤8/10 → external-limit stall, pass parks for owner. Acceptance = schema +
+  semantic validation under emitted-only scope; the frozen rider-1 review
+  criteria apply to all 10 outputs (unsupported synthesis = failure;
+  claim-list prose surfaced to senior; sparse auxiliary domains lawful).
+- STORAGE/VERDICT: noncanonical cache lane only; census_scope.v2 verdict
+  authority; serial or ≤3 concurrency.
+- AFTER CANARY GREEN: post (a) the canary receipt and (b) a SHORT owner
+  sample — 3 v2 digests rendered readable, zero new spend — then a 60-minute
+  owner window. The owner's lane-B decision already authorizes the buy;
+  the window exists for veto/comment, not for re-approval. Absent owner
+  words, phase 2 fires on my standing GO: 727 fresh packets, authority
+  $31.1917106, ≥95% rolling bar, standing auto-stops, tail-retry set last.
+Execute B4.
