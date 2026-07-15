@@ -3667,6 +3667,46 @@ A corpus is strict-ready only when:
 - Checklist boxes closed: launch-fix seal only. T9.3 paid completion remains
   open.
 
+### 2026-07-15 - T9.3 B1 Phase-2 operational-continuation seal
+
+- Commit: this operational-continuation seal commit on
+  `claude-continuation-20260713`; continuation launches only from the
+  dual-published exact bytes.
+- Owner: senior ruled at `COORDINATION.md#2026-07-15T10:09:30Z` to book the
+  two bounded-success exposures and continue the same recovery because the
+  checkpoint-150 telemetry stop was nonrolling infrastructure drift.
+- Corpus/data scope: mark only; exact persisted 721-row selection at 150
+  terminal = 143 accepted / 7 DLQ, 571 queued, zero running. Continuation
+  baseline is `sha256:a8f21ed25b3ebdba6946432d73f9ac5b576b7dee347b5d5e69b1696647f406f1`.
+- Code changes: add explicit continuation preflight/execution modes; exact-GO
+  and under-lease hashes for the 150-terminal ledger, checkpoint 0150, and
+  stopped execution; preserve original performance baseline/deadline 148/198;
+  advance the next writable checkpoint to 200.
+- Durable migration/backfill: exact compare-and-set cost-only booking for
+  ord206/207: 2 + 1 observed calls bounded at `$0.06673898` + `$0.03819987` =
+  `$0.10493885`. Actual cost stays null; semantic/cache identities unchanged.
+- Before metrics: cumulative accounting was incomplete after stale runtime
+  telemetry recorded two successes as zero calls.
+- After metrics: accounting closes with known `$6.775576299999998`, bounded
+  `$0.28493884999999997`, and ceiling basis `$7.060515149999998`.
+- Tests by tier: backend 83/83 and worker 83/83; Black, both compiles, and
+  49-file parity green; invalid GO expected `EXIT=1`; exact-GO under-lease
+  boundary and final credential-blind preflight both `EXIT=0`. Permanent
+  receipt:
+  `docs/T9_3_PROSE_PHASE2_OPERATIONAL_CONTINUATION_SEAL_RECEIPT_2026-07-15.md`.
+- Cross-corpus test: not applicable; mark-only noncanonical paid lane.
+  Protected canonical and ambient Qdrant stores are exactly unchanged.
+- Failure/rollback test: compare-and-set refuses any row drift; immutable stop
+  hashes are enforced twice; checkpoint 0150 cannot be overwritten; wrong GO
+  emits only allowlisted `exact_go_guard`.
+- Deployment image/health: no rebuild or restart. Current runner SHA
+  `30968e82…` and the 49-file closure are exact in backend and worker.
+- Remaining risks: recovery failure by terminal 198 or a later rolling fall
+  parks for owner. Completion, tail, owner sample, projection, and activation
+  remain open.
+- Checklist boxes closed: operational-continuation seal only. T9.3 paid
+  completion remains open.
+
 ## Implementation Log Template
 
 Copy this section for every completed item:

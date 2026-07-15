@@ -106,6 +106,7 @@ SELECTION_NAME = "mark-phase2.b1-interim-prose.parent-digest.v6.v2"
 LANE = "semantic_digest_paid_pass"
 AUTHORIZATION_REFERENCE = "COORDINATION.md#2026-07-15T05:24:45Z"
 RESUME_AUTHORIZATION_REFERENCE = "COORDINATION.md#2026-07-15T09:10:30Z"
+CONTINUATION_AUTHORIZATION_REFERENCE = "COORDINATION.md#2026-07-15T10:09:30Z"
 EXPECTED_PARENT_COUNT = 795
 EXPECTED_CHILD_COUNT = 3493
 REBUY_ORDINALS = (60, 569)
@@ -127,6 +128,20 @@ RESUME_BASELINE_QUEUED_COUNT = 573
 RESUME_BASELINE_ROLLING_ACCEPTED_COUNT = 44
 RESUME_BASELINE_ROLLING_FAILURE_COUNT = 6
 RESUME_RECOVERY_TERMINAL_LIMIT = 50
+CONTINUATION_BASELINE_TERMINAL_COUNT = 150
+CONTINUATION_BASELINE_ACCEPTED_COUNT = 143
+CONTINUATION_BASELINE_FAILURE_COUNT = 7
+CONTINUATION_BASELINE_QUEUED_COUNT = 571
+CONTINUATION_NEXT_CHECKPOINT = 200
+ORIGINAL_RESUME_BASELINE_HASH = (
+    "sha256:d5c7fd3cd86ae961ec71ab5719c79020dbb489530c8bc97ab203bd69f734ab0c"
+)
+CHECKPOINT_0150_SHA256 = (
+    "3370b7bf80decdcba90b3351918e8bb1c30c206b9c3065671797e620909314ab"
+)
+STOPPED_RESUME_EXECUTION_SHA256 = (
+    "ffaa6a224d361f7f94eeeaea6b8f33d6261ba92bf70e90029209d86ee9c9883d"
+)
 COST_MARGIN = Decimal("1.10")
 SUPERSESSION_COLLECTION = "semantic_digest_supersessions"
 SUPERSESSION_REASON = "faithfulness_rejected_unsupported_synthesis"
@@ -180,6 +195,8 @@ class ProsePhase2ResumeControl:
     recovery_terminal_limit: int = RESUME_RECOVERY_TERMINAL_LIMIT
     recovery_reached: bool = False
     recovery_reached_at_terminal_count: int | None = None
+    next_checkpoint_terminal_count: int | None = None
+    continuation_baseline_hash: str | None = None
 
     @property
     def deadline_terminal_count(self) -> int:
@@ -203,6 +220,16 @@ def _canonical_utc_iso(value: Any) -> str | None:
     else:
         value = value.astimezone(timezone.utc)
     return value.isoformat()
+
+
+def _path_sha256(path: Path) -> str | None:
+    if not path.is_file():
+        return None
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _selection_job_id(*, corpus_id: str, row: PlannedPacket) -> str:
@@ -414,6 +441,120 @@ def _resume_baseline_receipt(
         and rolling_accepted == RESUME_BASELINE_ROLLING_ACCEPTED_COUNT
         and rolling_failures == RESUME_BASELINE_ROLLING_FAILURE_COUNT
         and phase2_prose_stop_reason(rows) == "rolling_acceptance_below_90_percent"
+        and cumulative_cost["budget_accounting_complete"] is True
+        and Decimal(str(cumulative_cost["ceiling_basis_usd"]))
+        + max_next_claim_reservation_usd
+        <= ABSOLUTE_AUTHORIZED_CEILING_USD
+    )
+    return payload
+
+
+def _resume_continuation_baseline_receipt(
+    rows: Sequence[dict[str, Any]],
+    *,
+    selection_set_hash: str,
+    selected_packet_set_hash: str,
+    cumulative_cost: dict[str, Any],
+    max_next_claim_reservation_usd: Decimal,
+    checkpoint_dir: Path,
+) -> dict[str, Any]:
+    terminal = _terminal_rows_in_completion_order(rows)
+    window = terminal[-ROLLING_WINDOW:] if len(terminal) >= ROLLING_WINDOW else []
+    accepted = sum(row.get("status") == SUCCESS_STATUS for row in terminal)
+    failures = sum(row.get("status") in FAILURE_STATUSES for row in terminal)
+    rolling_accepted = sum(row.get("status") == SUCCESS_STATUS for row in window)
+    ranked_terminal = [
+        {
+            "completion_rank": rank,
+            "job_id": str(row.get("job_id") or ""),
+            "status": str(row.get("status") or ""),
+            "completed_at": _canonical_utc_iso(row.get("completed_at")),
+        }
+        for rank, row in enumerate(terminal, start=1)
+    ]
+    checkpoint_sha256 = _path_sha256(checkpoint_dir / "checkpoint_0150.json")
+    stopped_execution_sha256 = _path_sha256(checkpoint_dir / "resume_execution_v2.json")
+    post_checkpoint_paths = [
+        str(checkpoint_dir / f"checkpoint_{count:04d}.json")
+        for count in range(
+            CONTINUATION_NEXT_CHECKPOINT,
+            len(rows) + ROLLING_WINDOW,
+            ROLLING_WINDOW,
+        )
+        if (checkpoint_dir / f"checkpoint_{count:04d}.json").exists()
+    ]
+    control = ProsePhase2ResumeControl(
+        baseline_terminal_count=RESUME_BASELINE_TERMINAL_COUNT,
+        baseline_hash=ORIGINAL_RESUME_BASELINE_HASH,
+        next_checkpoint_terminal_count=CONTINUATION_NEXT_CHECKPOINT,
+    )
+    payload = {
+        "schema_version": (
+            "polymath.semantic_digest_prose_phase2_resume_continuation_baseline.v1"
+        ),
+        "selection_name": SELECTION_NAME,
+        "selection_set_hash": selection_set_hash,
+        "selected_packet_set_hash": selected_packet_set_hash,
+        "row_count": len(rows),
+        "status_counts": dict(
+            sorted(Counter(str(row.get("status") or "") for row in rows).items())
+        ),
+        "terminal_count": len(terminal),
+        "accepted_count": accepted,
+        "failure_count": failures,
+        "queued_count": sum(row.get("status") == "queued" for row in rows),
+        "running_count": sum(row.get("status") == "running" for row in rows),
+        "rolling_window": {
+            "completion_rank_min": len(terminal) - len(window) + 1 if window else None,
+            "completion_rank_max": len(terminal) if window else None,
+            "accepted_count": rolling_accepted,
+            "failure_count": len(window) - rolling_accepted,
+            "failure_completion_ranks": [
+                row["completion_rank"]
+                for row in ranked_terminal[-ROLLING_WINDOW:]
+                if row["status"] in FAILURE_STATUSES
+            ],
+            "identity_hash": namespace_hash("work", ranked_terminal[-ROLLING_WINDOW:]),
+        },
+        "terminal_ledger_identity_hash": namespace_hash("work", ranked_terminal),
+        "current_cumulative_ceiling_basis_usd": str(
+            cumulative_cost["ceiling_basis_usd"]
+        ),
+        "absolute_authorized_ceiling_usd": str(ABSOLUTE_AUTHORIZED_CEILING_USD),
+        "max_next_claim_reservation_usd": str(max_next_claim_reservation_usd),
+        "recovery_contract": {
+            "original_baseline_terminal_count": RESUME_BASELINE_TERMINAL_COUNT,
+            "original_baseline_hash": ORIGINAL_RESUME_BASELINE_HASH,
+            "deadline_terminal_count": (
+                RESUME_BASELINE_TERMINAL_COUNT + RESUME_RECOVERY_TERMINAL_LIMIT
+            ),
+            "consumed_new_terminal_count": (
+                len(terminal) - RESUME_BASELINE_TERMINAL_COUNT
+            ),
+            "next_checkpoint_terminal_count": CONTINUATION_NEXT_CHECKPOINT,
+            "historical_window_latch_only": True,
+            "all_other_stops_live": True,
+        },
+        "immutable_stop_receipts": {
+            "checkpoint_0150_sha256": checkpoint_sha256,
+            "stopped_resume_execution_sha256": stopped_execution_sha256,
+            "post_0150_checkpoint_paths": post_checkpoint_paths,
+        },
+    }
+    payload["baseline_hash"] = namespace_hash("work", payload)
+    payload["all_green"] = bool(
+        len(rows) == 721
+        and len(terminal) == CONTINUATION_BASELINE_TERMINAL_COUNT
+        and accepted == CONTINUATION_BASELINE_ACCEPTED_COUNT
+        and failures == CONTINUATION_BASELINE_FAILURE_COUNT
+        and payload["queued_count"] == CONTINUATION_BASELINE_QUEUED_COUNT
+        and payload["running_count"] == 0
+        and checkpoint_sha256 == CHECKPOINT_0150_SHA256
+        and stopped_execution_sha256 == STOPPED_RESUME_EXECUTION_SHA256
+        and not post_checkpoint_paths
+        and phase2_prose_stop_reason(rows) == "rolling_acceptance_below_90_percent"
+        and phase2_prose_resume_stop_reason(rows, control=control) is None
+        and control.recovery_reached is False
         and cumulative_cost["budget_accounting_complete"] is True
         and Decimal(str(cumulative_cost["ceiling_basis_usd"]))
         + max_next_claim_reservation_usd
@@ -853,25 +994,57 @@ async def _prepare(args: argparse.Namespace) -> ProsePhase2Prepared:
                 and telemetry_contract["available"] is True
             ),
         }
-        if args.mode in {"resume-preflight", "resume"}:
+        if args.mode in {
+            "resume-preflight",
+            "resume",
+            "resume-continuation-preflight",
+            "resume-continuation",
+        }:
             if not current_selection_rows:
                 raise PaidPassError("resume requires the persisted exact selection")
             resume_rows = await _selection_rows(db, selected=selected)
-            resume_baseline = _resume_baseline_receipt(
-                resume_rows,
-                selection_set_hash=receipt["selection"]["selection_set_hash"],
-                selected_packet_set_hash=receipt["selection"][
-                    "selected_packet_set_hash"
-                ],
-                cumulative_cost=current_cost,
-                max_next_claim_reservation_usd=max_next_call,
-            )
-            receipt[
-                "schema_version"
-            ] = "polymath.semantic_digest_prose_phase2_resume_preflight.v1"
-            receipt["mode"] = "zero_provider_read_only_resume_preflight"
+            is_continuation = args.mode in {
+                "resume-continuation-preflight",
+                "resume-continuation",
+            }
+            if is_continuation:
+                resume_baseline = _resume_continuation_baseline_receipt(
+                    resume_rows,
+                    selection_set_hash=receipt["selection"]["selection_set_hash"],
+                    selected_packet_set_hash=receipt["selection"][
+                        "selected_packet_set_hash"
+                    ],
+                    cumulative_cost=current_cost,
+                    max_next_claim_reservation_usd=max_next_call,
+                    checkpoint_dir=args.checkpoint_dir,
+                )
+                receipt["schema_version"] = (
+                    "polymath.semantic_digest_prose_phase2_"
+                    "resume_continuation_preflight.v1"
+                )
+                receipt[
+                    "mode"
+                ] = "zero_provider_read_only_resume_continuation_preflight"
+                receipt[
+                    "continuation_authorization_reference"
+                ] = CONTINUATION_AUTHORIZATION_REFERENCE
+                receipt["resume_continuation_baseline"] = resume_baseline
+            else:
+                resume_baseline = _resume_baseline_receipt(
+                    resume_rows,
+                    selection_set_hash=receipt["selection"]["selection_set_hash"],
+                    selected_packet_set_hash=receipt["selection"][
+                        "selected_packet_set_hash"
+                    ],
+                    cumulative_cost=current_cost,
+                    max_next_claim_reservation_usd=max_next_call,
+                )
+                receipt[
+                    "schema_version"
+                ] = "polymath.semantic_digest_prose_phase2_resume_preflight.v1"
+                receipt["mode"] = "zero_provider_read_only_resume_preflight"
+                receipt["resume_baseline"] = resume_baseline
             receipt["resume_authorization_reference"] = RESUME_AUTHORIZATION_REFERENCE
-            receipt["resume_baseline"] = resume_baseline
             resume_selection_identity_closes = bool(
                 selection_mode == "resume_persisted_exact"
                 and len(selected) == 721
@@ -919,6 +1092,13 @@ async def _prepare(args: argparse.Namespace) -> ProsePhase2Prepared:
                 "recovery_threshold": str(MIN_ROLLING_ACCEPTANCE),
                 "all_other_stops_live": True,
                 "second_rolling_stop_parks": True,
+                "operational_continuation": is_continuation,
+                "continuation_baseline_terminal_count": (
+                    CONTINUATION_BASELINE_TERMINAL_COUNT if is_continuation else None
+                ),
+                "next_checkpoint_terminal_count": (
+                    CONTINUATION_NEXT_CHECKPOINT if is_continuation else 150
+                ),
             }
             receipt["all_green"] = bool(
                 len(base_planned) == args.expected_parent_count
@@ -1089,6 +1269,115 @@ def _assert_resume_go_contract(
     )
     if baseline.get("all_green") is not True or receipt["all_green"] is not True:
         raise PaidPassError("credential-blind resume preflight is not green")
+
+
+def _assert_resume_continuation_go_contract(
+    prepared: ProsePhase2Prepared,
+    *,
+    authorization_reference: str,
+    resume_authorization_reference: str,
+    continuation_authorization_reference: str,
+    expected_selection_count: int,
+    expected_selection_set_hash: str,
+    expected_selected_packet_set_hash: str,
+    expected_prompt_hash: str,
+    expected_repair_prompt_hash: str,
+    expected_schema_hash: str,
+    expected_original_prior_basis_usd: Decimal,
+    remaining_authority_usd: Decimal,
+    expected_absolute_authority_usd: Decimal,
+    expected_current_basis_usd: Decimal,
+    expected_continuation_baseline_hash: str,
+    expected_checkpoint_0150_sha256: str,
+    expected_stopped_execution_sha256: str,
+) -> None:
+    receipt = prepared.receipt
+    baseline = receipt.get("resume_continuation_baseline") or {}
+    immutable = baseline.get("immutable_stop_receipts") or {}
+    _assert_exact(
+        "authorization reference", authorization_reference, AUTHORIZATION_REFERENCE
+    )
+    _assert_exact(
+        "resume authorization reference",
+        resume_authorization_reference,
+        RESUME_AUTHORIZATION_REFERENCE,
+    )
+    _assert_exact(
+        "continuation authorization reference",
+        continuation_authorization_reference,
+        CONTINUATION_AUTHORIZATION_REFERENCE,
+    )
+    _assert_exact(
+        "selection count",
+        receipt["selection"]["target_count"],
+        expected_selection_count,
+    )
+    _assert_exact(
+        "selection set hash",
+        receipt["selection"]["selection_set_hash"],
+        expected_selection_set_hash,
+    )
+    _assert_exact(
+        "selected packet set hash",
+        receipt["selection"]["selected_packet_set_hash"],
+        expected_selected_packet_set_hash,
+    )
+    _assert_exact(
+        "prompt hash", receipt["provider_contract"]["prompt_hash"], expected_prompt_hash
+    )
+    _assert_exact(
+        "repair prompt hash",
+        receipt["provider_contract"]["repair_prompt_hash"],
+        expected_repair_prompt_hash,
+    )
+    _assert_exact(
+        "schema hash", receipt["provider_contract"]["schema_hash"], expected_schema_hash
+    )
+    _assert_exact(
+        "original prior basis",
+        expected_original_prior_basis_usd,
+        ORIGINAL_PRIOR_BASIS_USD,
+    )
+    _assert_exact(
+        "remaining authority", remaining_authority_usd, REMAINING_UMBRELLA_USD
+    )
+    _assert_exact(
+        "absolute authority",
+        expected_absolute_authority_usd,
+        ABSOLUTE_AUTHORIZED_CEILING_USD,
+    )
+    _assert_exact(
+        "current basis",
+        Decimal(str(baseline.get("current_cumulative_ceiling_basis_usd"))),
+        expected_current_basis_usd,
+    )
+    _assert_exact(
+        "continuation baseline hash",
+        baseline.get("baseline_hash"),
+        expected_continuation_baseline_hash,
+    )
+    _assert_exact(
+        "checkpoint 0150 hash",
+        immutable.get("checkpoint_0150_sha256"),
+        expected_checkpoint_0150_sha256,
+    )
+    _assert_exact(
+        "checkpoint 0150 sealed hash",
+        expected_checkpoint_0150_sha256,
+        CHECKPOINT_0150_SHA256,
+    )
+    _assert_exact(
+        "stopped execution hash",
+        immutable.get("stopped_resume_execution_sha256"),
+        expected_stopped_execution_sha256,
+    )
+    _assert_exact(
+        "stopped execution sealed hash",
+        expected_stopped_execution_sha256,
+        STOPPED_RESUME_EXECUTION_SHA256,
+    )
+    if baseline.get("all_green") is not True or receipt["all_green"] is not True:
+        raise PaidPassError("credential-blind continuation preflight is not green")
 
 
 async def _selection_rows(
@@ -1281,7 +1570,8 @@ async def _execute(
     receipts: list[dict[str, Any]] = []
     checkpoint_paths: list[str] = []
     next_checkpoint = (
-        _resume_next_checkpoint(resume_control.baseline_terminal_count)
+        resume_control.next_checkpoint_terminal_count
+        or _resume_next_checkpoint(resume_control.baseline_terminal_count)
         if resume_control
         else ROLLING_WINDOW
     )
@@ -1314,6 +1604,9 @@ async def _execute(
                 checkpoint["stop_reason"] = stop
                 checkpoint["resume_recovery"] = {
                     "baseline_hash": resume_control.baseline_hash,
+                    "continuation_baseline_hash": (
+                        resume_control.continuation_baseline_hash
+                    ),
                     "historical_window_latch_active": (
                         not resume_control.recovery_reached
                     ),
@@ -1512,7 +1805,11 @@ async def _execute(
 
 async def run(args: argparse.Namespace) -> dict[str, Any]:
     prepared = await _prepare(args)
-    if args.mode in {"preflight", "resume-preflight"}:
+    if args.mode in {
+        "preflight",
+        "resume-preflight",
+        "resume-continuation-preflight",
+    }:
         return prepared.receipt
     with _execution_failure_stage("provider_telemetry_contract_guard"):
         if (
@@ -1520,7 +1817,8 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
             is not True
         ):
             raise PaidPassError("provider telemetry contract is unavailable")
-    is_resume = args.mode == "resume"
+    is_continuation = args.mode == "resume-continuation"
+    is_resume = args.mode in {"resume", "resume-continuation"}
     with _execution_failure_stage("exact_go_guard"):
         common_required = {
             "authorization_reference": args.authorization_reference,
@@ -1546,8 +1844,28 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                     args.expected_absolute_authority_usd
                 ),
                 "expected_current_basis_usd": args.expected_current_basis_usd,
-                "expected_resume_baseline_hash": args.expected_resume_baseline_hash,
             }
+            if is_continuation:
+                resume_required.update(
+                    {
+                        "continuation_authorization_reference": (
+                            args.continuation_authorization_reference
+                        ),
+                        "expected_continuation_baseline_hash": (
+                            args.expected_continuation_baseline_hash
+                        ),
+                        "expected_checkpoint_0150_sha256": (
+                            args.expected_checkpoint_0150_sha256
+                        ),
+                        "expected_stopped_execution_sha256": (
+                            args.expected_stopped_execution_sha256
+                        ),
+                    }
+                )
+            else:
+                resume_required[
+                    "expected_resume_baseline_hash"
+                ] = args.expected_resume_baseline_hash
             if any(value is None for value in resume_required.values()):
                 raise PaidPassError(
                     "resume mode requires every resume exact-GO argument"
@@ -1556,28 +1874,67 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                 raise PaidPassError(
                     "resume output must not overwrite failed execution.json"
                 )
-            _assert_resume_go_contract(
-                prepared,
-                authorization_reference=args.authorization_reference,
-                resume_authorization_reference=args.resume_authorization_reference,
-                expected_selection_count=args.expected_selection_count,
-                expected_selection_set_hash=args.expected_selection_set_hash,
-                expected_selected_packet_set_hash=(
-                    args.expected_selected_packet_set_hash
-                ),
-                expected_prompt_hash=args.expected_prompt_hash,
-                expected_repair_prompt_hash=args.expected_repair_prompt_hash,
-                expected_schema_hash=args.expected_schema_hash,
-                expected_original_prior_basis_usd=Decimal(
-                    args.expected_prior_basis_usd
-                ),
-                remaining_authority_usd=Decimal(args.remaining_authority_usd),
-                expected_absolute_authority_usd=Decimal(
-                    args.expected_absolute_authority_usd
-                ),
-                expected_current_basis_usd=Decimal(args.expected_current_basis_usd),
-                expected_resume_baseline_hash=args.expected_resume_baseline_hash,
-            )
+            if is_continuation:
+                _assert_resume_continuation_go_contract(
+                    prepared,
+                    authorization_reference=args.authorization_reference,
+                    resume_authorization_reference=(
+                        args.resume_authorization_reference
+                    ),
+                    continuation_authorization_reference=(
+                        args.continuation_authorization_reference
+                    ),
+                    expected_selection_count=args.expected_selection_count,
+                    expected_selection_set_hash=args.expected_selection_set_hash,
+                    expected_selected_packet_set_hash=(
+                        args.expected_selected_packet_set_hash
+                    ),
+                    expected_prompt_hash=args.expected_prompt_hash,
+                    expected_repair_prompt_hash=args.expected_repair_prompt_hash,
+                    expected_schema_hash=args.expected_schema_hash,
+                    expected_original_prior_basis_usd=Decimal(
+                        args.expected_prior_basis_usd
+                    ),
+                    remaining_authority_usd=Decimal(args.remaining_authority_usd),
+                    expected_absolute_authority_usd=Decimal(
+                        args.expected_absolute_authority_usd
+                    ),
+                    expected_current_basis_usd=Decimal(args.expected_current_basis_usd),
+                    expected_continuation_baseline_hash=(
+                        args.expected_continuation_baseline_hash
+                    ),
+                    expected_checkpoint_0150_sha256=(
+                        args.expected_checkpoint_0150_sha256
+                    ),
+                    expected_stopped_execution_sha256=(
+                        args.expected_stopped_execution_sha256
+                    ),
+                )
+            else:
+                _assert_resume_go_contract(
+                    prepared,
+                    authorization_reference=args.authorization_reference,
+                    resume_authorization_reference=(
+                        args.resume_authorization_reference
+                    ),
+                    expected_selection_count=args.expected_selection_count,
+                    expected_selection_set_hash=args.expected_selection_set_hash,
+                    expected_selected_packet_set_hash=(
+                        args.expected_selected_packet_set_hash
+                    ),
+                    expected_prompt_hash=args.expected_prompt_hash,
+                    expected_repair_prompt_hash=args.expected_repair_prompt_hash,
+                    expected_schema_hash=args.expected_schema_hash,
+                    expected_original_prior_basis_usd=Decimal(
+                        args.expected_prior_basis_usd
+                    ),
+                    remaining_authority_usd=Decimal(args.remaining_authority_usd),
+                    expected_absolute_authority_usd=Decimal(
+                        args.expected_absolute_authority_usd
+                    ),
+                    expected_current_basis_usd=Decimal(args.expected_current_basis_usd),
+                    expected_resume_baseline_hash=args.expected_resume_baseline_hash,
+                )
         else:
             _assert_go_contract(
                 prepared,
@@ -1647,10 +2004,15 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
             resume_control = None
             if is_resume:
                 with _execution_failure_stage("under_lease_baseline_guard"):
+                    checkpoint_start = (
+                        CONTINUATION_NEXT_CHECKPOINT
+                        if is_continuation
+                        else _resume_next_checkpoint(RESUME_BASELINE_TERMINAL_COUNT)
+                    )
                     if any(
                         (args.checkpoint_dir / f"checkpoint_{count:04d}.json").exists()
                         for count in range(
-                            _resume_next_checkpoint(RESUME_BASELINE_TERMINAL_COUNT),
+                            checkpoint_start,
                             len(prepared.selected) + ROLLING_WINDOW,
                             ROLLING_WINDOW,
                         )
@@ -1663,32 +2025,71 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                     current_cumulative = await _cumulative_cost(
                         db, corpus_id=prepared.receipt["corpus"]["corpus_id"]
                     )
-                    current_baseline = _resume_baseline_receipt(
-                        current_rows,
-                        selection_set_hash=prepared.receipt["selection"][
-                            "selection_set_hash"
-                        ],
-                        selected_packet_set_hash=prepared.receipt["selection"][
-                            "selected_packet_set_hash"
-                        ],
-                        cumulative_cost=current_cumulative,
-                        max_next_claim_reservation_usd=Decimal(
-                            prepared.receipt["cost_authority"][
-                                "max_next_claim_reservation_usd"
-                            ]
-                        ),
-                    )
-                    _assert_exact(
-                        "under-lease resume baseline hash",
-                        current_baseline["baseline_hash"],
-                        args.expected_resume_baseline_hash,
-                    )
-                    if current_baseline["all_green"] is not True:
-                        raise PaidPassError("under-lease resume baseline is not green")
-                    resume_control = ProsePhase2ResumeControl(
-                        baseline_terminal_count=current_baseline["terminal_count"],
-                        baseline_hash=current_baseline["baseline_hash"],
-                    )
+                    if is_continuation:
+                        current_baseline = _resume_continuation_baseline_receipt(
+                            current_rows,
+                            selection_set_hash=prepared.receipt["selection"][
+                                "selection_set_hash"
+                            ],
+                            selected_packet_set_hash=prepared.receipt["selection"][
+                                "selected_packet_set_hash"
+                            ],
+                            cumulative_cost=current_cumulative,
+                            max_next_claim_reservation_usd=Decimal(
+                                prepared.receipt["cost_authority"][
+                                    "max_next_claim_reservation_usd"
+                                ]
+                            ),
+                            checkpoint_dir=args.checkpoint_dir,
+                        )
+                        _assert_exact(
+                            "under-lease continuation baseline hash",
+                            current_baseline["baseline_hash"],
+                            args.expected_continuation_baseline_hash,
+                        )
+                        if current_baseline["all_green"] is not True:
+                            raise PaidPassError(
+                                "under-lease continuation baseline is not green"
+                            )
+                        resume_control = ProsePhase2ResumeControl(
+                            baseline_terminal_count=RESUME_BASELINE_TERMINAL_COUNT,
+                            baseline_hash=ORIGINAL_RESUME_BASELINE_HASH,
+                            next_checkpoint_terminal_count=(
+                                CONTINUATION_NEXT_CHECKPOINT
+                            ),
+                            continuation_baseline_hash=current_baseline[
+                                "baseline_hash"
+                            ],
+                        )
+                    else:
+                        current_baseline = _resume_baseline_receipt(
+                            current_rows,
+                            selection_set_hash=prepared.receipt["selection"][
+                                "selection_set_hash"
+                            ],
+                            selected_packet_set_hash=prepared.receipt["selection"][
+                                "selected_packet_set_hash"
+                            ],
+                            cumulative_cost=current_cumulative,
+                            max_next_claim_reservation_usd=Decimal(
+                                prepared.receipt["cost_authority"][
+                                    "max_next_claim_reservation_usd"
+                                ]
+                            ),
+                        )
+                        _assert_exact(
+                            "under-lease resume baseline hash",
+                            current_baseline["baseline_hash"],
+                            args.expected_resume_baseline_hash,
+                        )
+                        if current_baseline["all_green"] is not True:
+                            raise PaidPassError(
+                                "under-lease resume baseline is not green"
+                            )
+                        resume_control = ProsePhase2ResumeControl(
+                            baseline_terminal_count=current_baseline["terminal_count"],
+                            baseline_hash=current_baseline["baseline_hash"],
+                        )
             with _execution_failure_stage("materialization_guard"):
                 planned_counts = await _materialize_jobs(
                     db,
@@ -1743,7 +2144,10 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
             )
             return {
                 "schema_version": (
-                    "polymath.semantic_digest_prose_phase2_resume_execution.v1"
+                    "polymath.semantic_digest_prose_phase2_"
+                    "resume_continuation_execution.v1"
+                    if is_continuation
+                    else "polymath.semantic_digest_prose_phase2_resume_execution.v1"
                     if is_resume
                     else "polymath.semantic_digest_prose_phase2_execution.v1"
                 ),
@@ -1752,6 +2156,15 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                 **(
                     {"resume_authorization_reference": (RESUME_AUTHORIZATION_REFERENCE)}
                     if is_resume
+                    else {}
+                ),
+                **(
+                    {
+                        "continuation_authorization_reference": (
+                            CONTINUATION_AUTHORIZATION_REFERENCE
+                        )
+                    }
+                    if is_continuation
                     else {}
                 ),
                 "corpus": prepared.receipt["corpus"],
@@ -1789,7 +2202,11 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                 **(
                     {
                         "resume_recovery": {
-                            "baseline": prepared.receipt["resume_baseline"],
+                            "baseline": (
+                                prepared.receipt["resume_continuation_baseline"]
+                                if is_continuation
+                                else prepared.receipt["resume_baseline"]
+                            ),
                             "new_terminal_count": (
                                 len(terminal) - RESUME_BASELINE_TERMINAL_COUNT
                             ),
@@ -1844,7 +2261,14 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--mode",
-        choices=("preflight", "execute", "resume-preflight", "resume"),
+        choices=(
+            "preflight",
+            "execute",
+            "resume-preflight",
+            "resume",
+            "resume-continuation-preflight",
+            "resume-continuation",
+        ),
         required=True,
     )
     parser.add_argument("--corpus-name", default=DEFAULT_CORPUS_NAME)
@@ -1857,6 +2281,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-entities", type=int, default=40)
     parser.add_argument("--authorization-reference")
     parser.add_argument("--resume-authorization-reference")
+    parser.add_argument("--continuation-authorization-reference")
     parser.add_argument("--expected-selection-count", type=int)
     parser.add_argument("--expected-selection-set-hash")
     parser.add_argument("--expected-selected-packet-set-hash")
@@ -1868,6 +2293,9 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--expected-absolute-authority-usd")
     parser.add_argument("--expected-current-basis-usd")
     parser.add_argument("--expected-resume-baseline-hash")
+    parser.add_argument("--expected-continuation-baseline-hash")
+    parser.add_argument("--expected-checkpoint-0150-sha256")
+    parser.add_argument("--expected-stopped-execution-sha256")
     parser.add_argument(
         "--checkpoint-dir", type=Path, default=Path("/tmp/t93_prose_phase2")
     )
@@ -1894,7 +2322,7 @@ def _failure_receipt(exc: Exception, *, mode: str) -> dict[str, Any]:
 
 def main() -> int:
     args = _parser().parse_args()
-    if args.mode == "resume" and (
+    if args.mode in {"resume", "resume-continuation"} and (
         args.out.name == "execution.json" or args.out.exists()
     ):
         report = {
@@ -1917,7 +2345,8 @@ def main() -> int:
     print(json.dumps(report, sort_keys=True))
     green = (
         report.get("all_green")
-        if args.mode in {"preflight", "resume-preflight"}
+        if args.mode
+        in {"preflight", "resume-preflight", "resume-continuation-preflight"}
         else report.get("execution_green")
     )
     return 0 if green is True else 1

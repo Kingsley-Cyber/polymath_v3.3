@@ -3,29 +3,39 @@ from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
+import scripts.semantic_gateway_mark_prose_phase2 as prose_phase2_module
 
 from scripts.semantic_gateway_mark_paid_pass import PaidPassError, PlannedPacket
 from scripts.semantic_gateway_mark_prose_phase2 import (
     AUTHORIZATION_REFERENCE,
     ABSOLUTE_AUTHORIZED_CEILING_USD,
+    CHECKPOINT_0150_SHA256,
+    CONTINUATION_AUTHORIZATION_REFERENCE,
+    CONTINUATION_NEXT_CHECKPOINT,
     ESCALATED_CONCURRENCY,
     INITIAL_CONCURRENCY,
     REMAINING_UMBRELLA_USD,
     REBUY_ORDINALS,
     EXECUTION_FAILURE_CODES,
+    ORIGINAL_PRIOR_BASIS_USD,
+    ORIGINAL_RESUME_BASELINE_HASH,
     ProsePhase2ExecutionStageError,
     ProsePhase2ResumeControl,
     _assert_go_contract,
+    _assert_resume_continuation_go_contract,
     _execution_failure_stage,
     _failure_receipt,
     _phase2_selection,
     _persist_rebuy_supersessions,
     _resume_baseline_receipt,
+    _resume_continuation_baseline_receipt,
     _resume_next_checkpoint,
     phase2_prose_concurrency,
     phase2_prose_resume_stop_reason,
     phase2_prose_stop_reason,
     receipt_accounting_closes,
+    RESUME_AUTHORIZATION_REFERENCE,
+    STOPPED_RESUME_EXECUTION_SHA256,
 )
 
 
@@ -324,6 +334,122 @@ def test_resume_baseline_binds_exact_terminal_ranks_and_fixed_ceiling():
     )
     assert changed_baseline["baseline_hash"] != baseline["baseline_hash"]
     assert changed_baseline["all_green"] is False
+
+
+def test_continuation_baseline_preserves_original_window_and_immutable_stop(
+    monkeypatch, tmp_path
+):
+    terminal = [_row(0, "dead_letter")]
+    terminal.extend(_row(index) for index in range(1, 98))
+    final_statuses = ["succeeded"] * 44 + ["dead_letter"] * 6
+    terminal.extend(
+        _row(98 + index, status) for index, status in enumerate(final_statuses)
+    )
+    terminal.extend([_row(148), _row(149)])
+    for index, row in enumerate(terminal):
+        row["job_id"] = f"job:{index:03d}"
+    queued = [
+        {
+            "job_id": f"job:{150 + index:03d}",
+            "ordinal": 150 + index,
+            "status": "queued",
+        }
+        for index in range(571)
+    ]
+
+    monkeypatch.setattr(
+        prose_phase2_module,
+        "_path_sha256",
+        lambda path: (
+            CHECKPOINT_0150_SHA256
+            if path.name == "checkpoint_0150.json"
+            else STOPPED_RESUME_EXECUTION_SHA256
+        ),
+    )
+    baseline = _resume_continuation_baseline_receipt(
+        terminal + queued,
+        selection_set_hash="sha256:selection",
+        selected_packet_set_hash="sha256:packets",
+        cumulative_cost={
+            "ceiling_basis_usd": 7.060515149999998,
+            "budget_accounting_complete": True,
+        },
+        max_next_claim_reservation_usd=Decimal("0.09536318"),
+        checkpoint_dir=tmp_path,
+    )
+
+    assert baseline["all_green"] is True
+    assert baseline["terminal_count"] == 150
+    assert baseline["accepted_count"] == 143
+    assert baseline["failure_count"] == 7
+    assert baseline["queued_count"] == 571
+    assert baseline["rolling_window"]["accepted_count"] == 44
+    assert baseline["rolling_window"]["failure_count"] == 6
+    assert baseline["recovery_contract"] == {
+        "original_baseline_terminal_count": 148,
+        "original_baseline_hash": ORIGINAL_RESUME_BASELINE_HASH,
+        "deadline_terminal_count": 198,
+        "consumed_new_terminal_count": 2,
+        "next_checkpoint_terminal_count": CONTINUATION_NEXT_CHECKPOINT,
+        "historical_window_latch_only": True,
+        "all_other_stops_live": True,
+    }
+    control = ProsePhase2ResumeControl(
+        baseline_terminal_count=148,
+        baseline_hash=ORIGINAL_RESUME_BASELINE_HASH,
+        next_checkpoint_terminal_count=CONTINUATION_NEXT_CHECKPOINT,
+    )
+    assert control.deadline_terminal_count == 198
+    assert control.next_checkpoint_terminal_count == 200
+
+
+def test_continuation_exact_go_binds_operational_and_immutable_receipts():
+    prepared = SimpleNamespace(
+        receipt={
+            "all_green": True,
+            "selection": {
+                "target_count": 721,
+                "selection_set_hash": "sha256:selection",
+                "selected_packet_set_hash": "sha256:packets",
+            },
+            "provider_contract": {
+                "prompt_hash": "sha256:prompt",
+                "repair_prompt_hash": "sha256:repair",
+                "schema_hash": "sha256:schema",
+            },
+            "resume_continuation_baseline": {
+                "all_green": True,
+                "current_cumulative_ceiling_basis_usd": "7.060515149999998",
+                "baseline_hash": "sha256:continuation",
+                "immutable_stop_receipts": {
+                    "checkpoint_0150_sha256": CHECKPOINT_0150_SHA256,
+                    "stopped_resume_execution_sha256": (
+                        STOPPED_RESUME_EXECUTION_SHA256
+                    ),
+                },
+            },
+        }
+    )
+
+    _assert_resume_continuation_go_contract(
+        prepared,
+        authorization_reference=AUTHORIZATION_REFERENCE,
+        resume_authorization_reference=RESUME_AUTHORIZATION_REFERENCE,
+        continuation_authorization_reference=CONTINUATION_AUTHORIZATION_REFERENCE,
+        expected_selection_count=721,
+        expected_selection_set_hash="sha256:selection",
+        expected_selected_packet_set_hash="sha256:packets",
+        expected_prompt_hash="sha256:prompt",
+        expected_repair_prompt_hash="sha256:repair",
+        expected_schema_hash="sha256:schema",
+        expected_original_prior_basis_usd=ORIGINAL_PRIOR_BASIS_USD,
+        remaining_authority_usd=REMAINING_UMBRELLA_USD,
+        expected_absolute_authority_usd=ABSOLUTE_AUTHORIZED_CEILING_USD,
+        expected_current_basis_usd=Decimal("7.060515149999998"),
+        expected_continuation_baseline_hash="sha256:continuation",
+        expected_checkpoint_0150_sha256=CHECKPOINT_0150_SHA256,
+        expected_stopped_execution_sha256=STOPPED_RESUME_EXECUTION_SHA256,
+    )
 
 
 def test_concurrency_escalates_only_after_one_hundred_clean_completions():

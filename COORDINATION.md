@@ -8361,3 +8361,68 @@ zero provider call in both containers (`/tmp/t93_telemetry_compile_v2.log`,
 `/tmp` bytecode cache and file-based probe. No product gate failed and no DB
 or provider operation occurred. I am sealing and publishing this prerequisite
 before the ruled compare-and-set cost booking.
+
+## [2026-07-15T10:26:20Z] EXECUTOR → SENIOR :: RECEIPT
+
+Published prerequisite is exact at commit `8c4df2e892ce…` on both the branch
+and `main`. The subsequent zero-write reconciliation preflight is GREEN:
+`/tmp/t93_p2_bounded_success_preflight.log`, true `EXIT=0`. It proves
+ord206/207 still match the exact stopped compare-and-set state, both accepted
+caches exist, the sealed bounds recompute exactly as `$0.06673898` and
+`$0.03819987` (`$0.10493885` total), and semantic identity is
+`sha256:7f8f3e75…`. It made zero DB/canonical writes and zero provider calls.
+
+I am now applying the senior-authorized two-row cost-only compare-and-set from
+the published bytes. Any mismatch refuses; no semantic/cache field is in the
+update document.
+
+## [2026-07-15T10:27:00Z] EXECUTOR → SENIOR :: RECEIPT
+
+The ruled bounded-success booking is GREEN:
+`/tmp/t93_p2_bounded_success_apply.log`, true `EXIT=0`. Exact compare-and-set
+matched/modified 2/2 rows. Ord206 is booked as two calls at `$0.06673898`;
+ord207 as one call at `$0.03819987`; total `$0.10493885`. Actual costs remain
+null and `cost_complete=false`. Cumulative accounting now closes with known
+actual `$6.775576299999998`, five bounded exposures totaling
+`$0.28493884999999997`, and ceiling basis `$7.060515149999998`.
+
+Semantic identity is byte-identical before/after (`sha256:7f8f3e75…`), and
+protected canonical stores plus ambient Qdrant are exactly unchanged. Only
+cost-accounting metadata changed. I am now sealing the explicit 150-terminal
+continuation contract; no provider continuation will run until that seam has
+tests, parity, immutable-file guards, and a green credential-blind preflight.
+
+## [2026-07-15T10:32:50Z] EXECUTOR → SENIOR :: RECEIPT
+
+The explicit continuation seam is GREEN in its first live preflight:
+`/tmp/t93_p2_continuation_preflight.log`, true `EXIT=0`. It binds 721 rows =
+143 accepted / 7 DLQ / 571 queued / zero running; continuation baseline
+`sha256:a8f21ed2…`, terminal identity `sha256:1ad27941…`, rolling ranks
+101–150 = 44/50 with the same six failures at
+109/118/121/123/126/147, and exact selection/packet hashes
+`ee876928…` / `f867e622…`. Current basis is `$7.060515149999998`.
+
+It also binds immutable checkpoint 0150 `3370b7bf…` and stopped execution
+`ffaa6a22…`, proves no checkpoint 0200+, preserves original recovery baseline
+`d5c7fd3…` at terminal 148 and deadline 198, and sets next checkpoint 200.
+Telemetry contract is available; preflight reports zero credential read,
+provider calls, DB writes, and canonical writes. Backend and worker are each
+83/83; 49-file parity is exact. I am completing invalid-GO/immutability and
+compile/format seals before publication; no continuation has launched.
+
+## [2026-07-15T10:35:37Z] EXECUTOR → SENIOR :: RECEIPT
+
+Operational-continuation seal is fully GREEN; permanent receipt:
+`docs/T9_3_PROSE_PHASE2_OPERATIONAL_CONTINUATION_SEAL_RECEIPT_2026-07-15.md`.
+Backend/worker are each 83/83; Black, both compiles, and 49-file parity are
+green. Wrong baseline refuses message-free with expected `EXIT=1`, then an
+identical 150-terminal preflight returns `EXIT=0`. Exact valid GO reaches the
+under-lease materialization boundary with zero job materialization/provider/
+canonical writes (`/tmp/t93_p2_continuation_boundary_probe.log`, `EXIT=0`).
+Final preflight is exact GREEN (`/tmp/t93_p2_continuation_preflight_final.log`,
+`EXIT=0`); checkpoint 0150 and stopped execution hashes remain unchanged.
+
+I am pull-rebasing, force-adding the ignored docs, guarding scope/secrets,
+committing, and dual-pushing. Under your 10:09:30Z ruling, the continuation
+then launches once from the published exact bytes with fresh output
+`resume_execution_v3.json`; no further GO is required.

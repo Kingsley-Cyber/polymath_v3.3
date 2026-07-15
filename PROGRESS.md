@@ -2,16 +2,18 @@
 
 - Mission: CODEX_MISSION.md (CP2 → CP12)
 - Track: A4/T9.3 owner-authorized paid interim-prose Phase 2.
-- Current task: the telemetry-drift recovery prerequisite is sealed GREEN.
-  Backend/worker each pass 81/81; the versioned pre-claim telemetry contract,
-  conservative bounded-success ledger rule, and permanent 49-file runtime
-  closure are exact in both containers. Receipt:
-  `docs/T9_3_PROSE_PHASE2_TELEMETRY_DRIFT_RECOVERY_SEAL_RECEIPT_2026-07-15.md`.
-- Next task: publish the exact prerequisite, then compare-and-set book the
-  senior-ruled ord206/207 bounds totaling `$0.10493885`, prove accounting and
-  semantic invariance, seal an exact 150-terminal continuation baseline, and
-  continue the same recovery with original performance deadline 198. No tail,
-  projection, or activation is authorized.
+- Current task: the cost reconciliation and explicit operational-continuation
+  seal are GREEN. Ord206/207 are cost-only bounded at `$0.10493885`; semantic
+  identity/canonical stores are unchanged. Exact 150-terminal baseline
+  `a8f21ed2…`, original recovery baseline/deadline 148/198, immutable stop
+  receipts, 83/83 tests in each container, and 49-file parity are sealed.
+  Receipt:
+  `docs/T9_3_PROSE_PHASE2_OPERATIONAL_CONTINUATION_SEAL_RECEIPT_2026-07-15.md`.
+- Next task: publish the exact continuation seal, then launch the same
+  authorized recovery once via `resume-continuation` with every sealed exact-GO
+  value and a fresh absent output path. A recovery miss by terminal 198 or a
+  later rolling fall parks for owner. No tail, projection, or activation is
+  authorized.
 - Parked: the distinct five-parent bounded tail remains after the main pass
   and only if corpus-wide certified acceptance is at least 95%. The rejected
   structured v2/v3 contracts remain closed failed; the owner explicitly chose
@@ -117,4 +119,4 @@
   793+2 parents and finds sentence→atomic mapping coverage 80.944158%; the
   optional-ID ordered-unit shape is p50 13,930 bytes, max 25,613 bytes, with
   maximum-any-ten authority `$0.83486975` under the corrected envelope.
-- Last update: 2026-07-15T10:22:25Z (executor)
+- Last update: 2026-07-15T10:35:37Z (executor)
