@@ -7031,3 +7031,138 @@ also right. Riders:
 4. Park/continue per mission protocol is correct while you build v3 + gates;
    the fresh canary needs its own preregistered GO from me on the corrected
    numbers.
+
+## [2026-07-15T03:04:50Z] EXECUTOR → SENIOR :: ACK
+
+Ordered-unit v3 approval and all four riders received. I am parking the
+uncommitted, test-green T9.4 projector seam without publishing it so the
+unblocked T9.3 spine retakes priority. V3 will expose `claim_id` only on
+sentence units with a nonempty deterministic atomic mapping; every sentence
+remains ordered prose; context-only units stay outside validator citation
+scope. The packet manifest will close mapped + unmapped counts per parent and
+the frozen canary selector will require at least one of the exactly three
+packets above 20,000 bytes. The 26,000-byte cap is hard and drop-free.
+
+Cost receipts will distinguish the selected-batch two-attempt authority from
+the cumulative `$49.45` umbrella. Preflight will compute the affordable batch
+prefix whenever worst-case remaining exceeds remaining umbrella and will
+surface the arithmetic; it will never treat expected spend as authority. I am
+building pure model/builder/validator + credential-blind preflight only. No
+provider call or paid dispatch occurs without your fresh preregistered GO.
+
+## [2026-07-15T03:23:28Z] EXECUTOR → SENIOR :: RECEIPT
+
+Ordered-unit v3's pure contract/policy gate is green: 28/28, true `EXIT=0` in
+`/tmp/t9_3_v3_pure_host_gate.log`. The provider packet uses two strict sentence
+unit types: citable units require `claim_id`, while context-only units have no
+such field in their schema or serialization. The per-packet manifest closes
+mapped + context-only = source sentences with dropped=0; only mapped sentence
+IDs enter `SemanticValidationContext`. Local expansion preserves direct
+sentence citations and emits the sorted atomic union with cardinality while
+failing stale revision, cross-parent/child, empty-map, duplicate, and
+context-only citations. The 26,000-byte cap fails closed without truncation.
+
+The frozen read-only canary recipe reserves the largest fresh >20KB packet
+before filling the same five size strata, requires ten unique documents, and
+has pure tests for deterministic replay. Cost tests use the shared two-attempt
+reservation functions, sum per-claim reservations, stop an affordable prefix
+before the exact cumulative-umbrella boundary, and never use expected spend as
+authority. The preflight has no paid runner or provider route construction.
+Proceeding to the live credential-blind zero-provider census; no call or write
+is authorized or attempted.
+
+## [2026-07-15T03:24:24Z] EXECUTOR → SENIOR :: RECEIPT
+
+The first live preflight invocation stopped before module import, true
+`EXIT=1` in the container's `/tmp/t9_3_v3_live_preflight.log`:
+`ModuleNotFoundError: models.semantic_digest_claim_input`. This is the known
+non-baked image drift, not a data or contract gate result: the running image
+has `/app/models/semantic_parent_packet.py` but lacks the previously committed
+claim-input model, parent-eligibility service, and materializer script. No
+preflight body, database connection, credential path, provider path, or write
+ran. Correcting with an isolated full source overlay under `/tmp` and
+`PYTHONPATH` precedence; the deployed `/app` runtime remains otherwise
+untouched and no rebuild occurs.
+
+## [2026-07-15T03:30:34Z] EXECUTOR → SENIOR :: RECEIPT
+
+The corrected-overlay live gate reached the approved population assertion and
+failed closed, true `EXIT=1` in
+`/tmp/t9_3_v3_live_preflight_diagnosis_v2.log`; zero calls/writes. Actual was
+792 ready + 3 excluded rather than 793+2, with 30,579 sentences = 24,738
+mapped + 5,841 context-only and 2 packets >20KB. The single new exclusion was
+exactly 115 sentences (107 mapped + 8 context-only) and attempted 28,041 bytes
+against 26,000. The other two exclusions remain
+`source_child_without_atomic_claim`.
+
+Root cause is serialization, not approved content: `PacketExtractionEntityV1`
+internally materializes every absent optional field as JSON null and every
+empty alias list as `[]`; at up to 40 entities this added ~2.4KB that the
+approved measured shape correctly omitted. I am preserving all present entity
+metadata and every sentence, but making v3's explicit `provider_payload()`
+omit only absent/default entity values (`exclude_none` + `exclude_defaults`),
+matching the measured provider contract. Pure tests remain 28/28 green after
+that correction. Cap stays 26,000 and dropped sentences stay zero; rerunning
+the live zero-provider gate now.
+
+## [2026-07-15T03:37:30Z] EXECUTOR → SENIOR :: RECEIPT
+
+Final credential-blind live preflight is green, true `EXIT=0` in
+`/tmp/t9_3_v3_live_preflight_final.log`; zero provider calls, database writes,
+canonical writes, or projection writes, with protected canonical census
+exactly unchanged. Population closes 793 ready + the same 2
+`source_child_without_atomic_claim` exclusions; all 30,694 sentences are
+present, 24,845 mapped and 5,849 context-only, with dropped=0. Packet bytes are
+min/p25/p50/p75/p90/p95/p99/max
+3,421/12,975/13,917/14,673/15,206/15,528/16,091/25,601; exactly 3 exceed
+20KB and none exceed 26KB. Packet-set hash is
+`sha256:89ace7ede4eab1d00f7f8d062b92d756cc5f7243fe4d0c3d0c7e0fec131b2d43`;
+version-neutral schema-contract hash is
+`sha256:5c600d3047807541a09be38d01933b6e048f5a3f730de1b5e2cf6c48991f2e40`.
+
+Fresh selection excludes 81 purchased parents, leaves 728, selects 10 unique
+documents across all five bands, and reserves one >20KB packet. Selection hash
+is `sha256:e5f2d08dd184621956e4c60a48a0273e35d13a61ede941b515a22851d7a6949b`
+from the pre-compaction run and is superseded by the final compact-packet hash
+that I am extracting into the permanent receipt before commit. Exact selected
+two-attempt authority is `$0.78260930`; max-any-ten is `$0.83466680`, below the
+approved `$0.83486975` design bound; all-793 is `$59.91857894` and fresh-728 is
+`$54.98061844`. Cumulative basis is `$2.19883750`, leaving `$47.25116250` of
+the separate `$49.45` umbrella. The current ordinal prefix fits 626 claims at
+`$47.21649988`, leaving `$0.03466262`; claim 627 reserves `$0.07667363` and is
+therefore excluded. These are preregistration numbers, not execution authority.
+No paid runner exists in this change and a fresh senior GO remains mandatory.
+
+## [2026-07-15T03:37:56Z] EXECUTOR → SENIOR :: RECEIPT
+
+Correction to the immediately preceding live-preflight receipt: the final
+compact-packet selection hash is
+`sha256:6aed7b1a967c1ad8889a0f058091e7f47691053d25185ff03cac797b3875f595`
+(10 unique documents, 152,090 total packet bytes, one >20KB). The quoted
+`e5f2...` value is explicitly superseded and must not be preregistered.
+
+## [2026-07-15T03:39:13Z] SENIOR → EXECUTOR :: v3 CANARY GO — exact preregistered terms
+GO for the v3 canary on these terms, superseding hash noted (6aed7b1a…, not
+e5f2…):
+- CONTRACT: certified LongCat Tier3, max_tokens 8192, temperature 0, thinking
+  disabled; parent-digest.v6 + repair-v3; ordered-unit packet v3 under the
+  26,000-byte cap; population/packet/schema hashes as receipted; selection
+  6aed7b1a… (10 unique documents, all five bands, exactly one >20KB packet —
+  rider 2 satisfied).
+- AUTHORITY: exact selected-10 two-attempt envelope $0.78260930 — hard stop
+  with the reservation guard live (claim only if basis + max_call ≤
+  authority). Bounded-exposure and ≥2-ReadTimeout rules stand.
+- BAR (preregistered): ≥9/10 accepted → phase-2 lane reopens; ≤8/10 →
+  external-limit stall, pass parks for owner. Acceptance = schema + semantic
+  validation, emitted-scope; the frozen faithfulness criteria apply to all
+  accepted outputs (unsupported synthesis = failure; claim-list prose
+  surfaced; sparse auxiliary domains lawful; unmapped sentences uncitable).
+- STORAGE/VERDICT: noncanonical lane; census_scope.v2 authority; serial or
+  ≤3 concurrency.
+- AFTER GREEN: canary receipt + 3-digest readable owner sample + 60-minute
+  owner window (veto/comment; the lane-B decision already authorizes the
+  buy), then phase 2 on the fresh-728 under the umbrella law — reservation
+  gating at the $47.25 remaining umbrella; if the boundary is ever reached
+  with parents outstanding, STOP and surface the arithmetic to the owner
+  rather than dispatch into a possible breach.
+Execute the canary.
