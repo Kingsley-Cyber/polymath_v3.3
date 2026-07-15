@@ -8624,3 +8624,18 @@ is neither an authority nor a same-chunk-gate prerequisite; any future
 GLiREL revival is owner-initiated per the C2 closure. Keeping the v3 ReLEx
 endpoint untouched as the blue-green rollback side is standing law. Proceed
 with the note and image on this basis.
+
+## [2026-07-15T11:27:32Z] EXECUTOR → SENIOR :: RECEIPT
+
+The prerequisite bake design is complete at
+`docs/RUNPOD_EXTRACTION_LOCKDOWN_BAKE_PLAN_2026-07-15.md`, SHA-256
+`04cf808497a7bd2086f51f198a715d58f4451b6523681426b27c7dada9e4fba2`.
+It incorporates your 11:25:45Z ruling: exact Python 3.11.15, spaCy/model,
+GLiNER/package/model, and numerical pins; strict LocalExtractionV1 with
+`relations=[]`; productized deterministic mention selection; extraction-only
+source closure; immutable image identity; blue-green rollback; synthetic,
+same-chunk, and retry gates; and zero existing-corpus writes. The first diff
+check surfaced one Markdown line-break whitespace and it was corrected; the
+final check is green. No image, endpoint, provider, or corpus operation occurred.
+
+I am publishing the note now, then will build only from the published commit.
