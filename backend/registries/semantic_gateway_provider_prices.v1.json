@@ -1,7 +1,21 @@
 {
   "schema_version": "polymath.semantic_gateway_provider_prices.v1",
-  "source_checked_at": "2026-07-14T19:15:00Z",
+  "source_checked_at": "2026-07-15T17:00:00Z",
   "routes": [
+    {
+      "route_id": "deepseek-api__deepseek-v4-flash",
+      "provider": "deepseek",
+      "model_id": "deepseek/deepseek-v4-flash",
+      "api_base": "https://api.deepseek.com/v1",
+      "currency": "USD",
+      "price_unit_tokens": 1000000,
+      "uncached_input_usd": 0.14,
+      "cached_input_usd": 0.0028,
+      "output_usd": 0.28,
+      "fallback_input_basis": "uncached_input_conservative",
+      "price_tier": "published_list_price",
+      "source_url": "https://api-docs.deepseek.com/quick_start/pricing?article_id=article_1779470751466_8"
+    },
     {
       "route_id": "longcat-api__longcat-2.0",
       "provider": "longcat",

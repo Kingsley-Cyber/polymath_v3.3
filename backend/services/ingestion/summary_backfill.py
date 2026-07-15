@@ -32,6 +32,7 @@ import argparse
 import asyncio
 import json
 import os
+import uuid
 from datetime import datetime, timezone
 
 from config import get_settings
@@ -298,7 +299,12 @@ async def index_existing(corpus_id: str, *, batch: int = 256) -> dict:
 
 # ── generate (cloud, guardrailed) ────────────────────────────────────────────
 async def generate(
-    corpus_id: str, *, batch: int = 400, limit: int | None = None
+    corpus_id: str,
+    *,
+    batch: int = 400,
+    limit: int | None = None,
+    summary_cost_run_id: str | None = None,
+    summary_cost_authority_usd: str | None = None,
 ) -> dict:
     """Summarize parents with summary=None via the pool. Batched + resumable.
     ABORTS if a batch yields 0 (all lanes exhausted) instead of finishing partial.
@@ -307,6 +313,15 @@ async def generate(
 
     pool = _load_pool()
     mc, db = _mongo()
+    from services.ingestion.summary_cost_control import SummaryCostController
+
+    cost_controller = await SummaryCostController.open(
+        db,
+        run_id=summary_cost_run_id,
+        corpus_id=corpus_id,
+        user_id="summary_backfill_cli",
+        authority_usd=summary_cost_authority_usd,
+    )
     made = 0
     batches = 0
     aborted = False
@@ -390,6 +405,8 @@ async def generate(
                 tasks,
                 pool=pool,
                 telemetry_sink=_telemetry,
+                cost_controller=cost_controller,
+                require_cost_control=True,
             )
             results = [x for x in results if x and getattr(x, "summary", None)]
             # parents attempted but not summarized (thinking-empty / transient):
@@ -443,13 +460,15 @@ async def generate(
             f"GENERATE done: made={made} batches={batches} "
             f"skipped_this_run={len(failed_ids)} remaining={remaining} aborted={aborted}"
         )
-        return {
+        result = {
             "made": made,
             "batches": batches,
             "skipped": len(failed_ids),
             "remaining": remaining,
             "aborted": aborted,
         }
+        result["summary_cost_receipt"] = await cost_controller.snapshot()
+        return result
     finally:
         mc.close()
 
@@ -754,12 +773,22 @@ def main() -> None:
     ap.add_argument(
         "--limit", type=int, default=None, help="cap parents processed this run (probe)"
     )
+    ap.add_argument(
+        "--cost-authority-usd",
+        help="hard USD authority required for --generate",
+    )
+    ap.add_argument(
+        "--cost-run-id",
+        help="optional durable cost run id (generated when omitted)",
+    )
     args = ap.parse_args()
     if args.heal_all:
         asyncio.run(heal_all(apply=args.apply_heal))
         return
     if not args.corpus:
         ap.error("--corpus is required for --verify / --index / --generate")
+    if args.generate and not args.cost_authority_usd:
+        ap.error("--cost-authority-usd is required for --generate")
     if args.verify:
         asyncio.run(verify(args.corpus))
     if args.repair:
@@ -775,7 +804,18 @@ def main() -> None:
     if args.index:
         asyncio.run(index_existing(args.corpus, batch=min(256, args.batch)))
     if args.generate:
-        asyncio.run(generate(args.corpus, batch=args.batch, limit=args.limit))
+        asyncio.run(
+            generate(
+                args.corpus,
+                batch=args.batch,
+                limit=args.limit,
+                summary_cost_run_id=(
+                    args.cost_run_id
+                    or f"summary_backfill_cli_{args.corpus[:8]}_{uuid.uuid4().hex[:8]}"
+                ),
+                summary_cost_authority_usd=args.cost_authority_usd,
+            )
+        )
     if not (args.verify or args.repair or args.index or args.generate):
         ap.error(
             "pass at least one of --verify / --repair / --index / --generate / --heal-all"

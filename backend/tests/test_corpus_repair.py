@@ -414,9 +414,18 @@ async def test_repair_cycle_runs_document_summary_backfill(monkeypatch):
             "schema_version": "corpus_readiness.v1",
         }
 
-    async def fake_doc_backfill(*_args, **kwargs):
-        calls.append(("doc_backfill", kwargs["limit"]))
-        return {"status": "complete", "attempted": 2, "built": 2, "skipped": 0, "failed": 0}
+    class _SummaryService:
+        async def backfill_document_summaries(self, **kwargs):
+            calls.append(("doc_backfill", kwargs["limit"]))
+            assert kwargs["summary_cost_run_id"] == "repair-cost-run"
+            assert kwargs["summary_cost_authority_usd"] == "1.00"
+            return {
+                "status": "complete",
+                "attempted": 2,
+                "built": 2,
+                "skipped": 0,
+                "failed": 0,
+            }
 
     async def fake_plan_summary(*_args, **_kwargs):
         calls.append("plan_summary")
@@ -425,12 +434,12 @@ async def test_repair_cycle_runs_document_summary_backfill(monkeypatch):
     monkeypatch.setattr(corpus_repair, "compute_corpus_readiness", fake_readiness)
     monkeypatch.setattr(corpus_repair, "materialize_corpus_readiness", fake_materialize)
     monkeypatch.setattr(corpus_repair, "plan_summary_jobs", fake_plan_summary)
-    monkeypatch.setattr(corpus_repair, "backfill_document_summaries", fake_doc_backfill)
 
     result = await corpus_repair.run_bounded_corpus_repair_cycle(
         _FakeDb(),
         corpus_id="corpus-1",
         user_id="user-1",
+        ingestion_service=_SummaryService(),
         apply=True,
         reconcile_failures=False,
         plan_source_parse_job_rows=False,
@@ -439,6 +448,8 @@ async def test_repair_cycle_runs_document_summary_backfill(monkeypatch):
         plan_extraction_job_rows=False,
         run_document_summaries=True,
         document_summary_limit=7,
+        summary_cost_run_id="repair-cost-run",
+        summary_cost_authority_usd="1.00",
         record_run=False,
     )
 

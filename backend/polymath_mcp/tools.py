@@ -16,6 +16,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import logging
+import uuid
 from datetime import date, datetime
 from enum import Enum
 from typing import Any, Literal
@@ -2117,6 +2118,7 @@ async def _ingest_bytes(
     content_type: str | None = None,
     source_identity: dict[str, Any] | None = None,
     duplicate_policy: Literal["skip", "allow"] = "skip",
+    summary_cost_authority_usd: float | None = None,
 ) -> dict[str, Any]:
     """Shared ingestion path used by both polymath_ingest_from_url and
     polymath_upload_document. Builds the effective IngestionConfig from the
@@ -2147,6 +2149,11 @@ async def _ingest_bytes(
         raise ValueError(f"corpus_id {corpus_id!r} not found")
     base_cfg_dict = corpus.get("default_ingestion_config") or {}
     cfg = IngestionConfig(**base_cfg_dict)
+    if cfg.chunk_summarization and summary_cost_authority_usd is None:
+        raise ValueError(
+            "summary_cost_authority_usd is required because this corpus has "
+            "parent summary generation enabled"
+        )
 
     source_identity = source_identity or build_source_identity(
         filename=filename,
@@ -2199,6 +2206,8 @@ async def _ingest_bytes(
             source_url=source_url,
             source_identity=source_identity,
             duplicate_policy=duplicate_policy,
+            summary_cost_run_id=f"mcp_ingest_{uuid.uuid4().hex}",
+            summary_cost_authority_usd=summary_cost_authority_usd,
         )
         return {
             "status": "queued",
@@ -2231,6 +2240,7 @@ async def polymath_ingest_from_url(
     url: str,
     filename: str | None = None,
     duplicate_policy: Literal["skip", "allow"] = "skip",
+    summary_cost_authority_usd: float | None = None,
 ) -> dict[str, Any]:
     """Fetch a document from a public URL and queue it for ingestion.
 
@@ -2255,6 +2265,8 @@ async def polymath_ingest_from_url(
         filename: Optional override; inferred from URL tail if omitted.
         duplicate_policy: "skip" (default) refuses already-tracked sources;
             "allow" forces a new ingest.
+        summary_cost_authority_usd: Required hard USD ceiling when the target
+            corpus has parent summary generation enabled.
 
     Returns:
         {"status": "queued", "doc_id", "job_id", "corpus_id", "filename",
@@ -2331,6 +2343,7 @@ async def polymath_ingest_from_url(
         source_url=url,
         source_identity=None,
         duplicate_policy=duplicate_policy,
+        summary_cost_authority_usd=summary_cost_authority_usd,
     )
 
 
@@ -2340,6 +2353,7 @@ async def polymath_upload_document(
     content_base64: str,
     source_url: str | None = None,
     duplicate_policy: Literal["skip", "allow"] = "skip",
+    summary_cost_authority_usd: float | None = None,
 ) -> dict[str, Any]:
     """Upload a document body (base64-encoded) and queue it for ingestion.
 
@@ -2361,6 +2375,8 @@ async def polymath_upload_document(
             for a transcript file fetched elsewhere.
         duplicate_policy: "skip" (default) refuses already-tracked sources;
             "allow" forces a new ingest.
+        summary_cost_authority_usd: Required hard USD ceiling when the target
+            corpus has parent summary generation enabled.
 
     Returns:
         {"status": "queued", "doc_id", "job_id", "corpus_id", "filename",
@@ -2395,6 +2411,7 @@ async def polymath_upload_document(
         user_id=uid,
         source_url=source_url,
         duplicate_policy=duplicate_policy,
+        summary_cost_authority_usd=summary_cost_authority_usd,
     )
 
 

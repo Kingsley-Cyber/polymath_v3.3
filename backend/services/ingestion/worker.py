@@ -1323,6 +1323,7 @@ async def _run_ghosts_parallel(
     extraction_endpoint_urls: list[str] | None = None,
     defer_summaries: bool = False,
     defer_ghost_b: bool = False,
+    summary_cost_controller: Any | None = None,
 ) -> GhostRunResult:
     """Fan out GHOST A + GHOST B in parallel. Either branch may be disabled
     by config OR skipped via resume gates (Decision D).
@@ -1645,6 +1646,8 @@ async def _run_ghosts_parallel(
             global_max_concurrent=summary_max_concurrent,
             telemetry_sink=_summary_telemetry,
             pool_status=provider_pool_status,
+            cost_controller=summary_cost_controller,
+            require_cost_control=summary_cost_controller is not None,
         )
         if int(provider_pool_status.get("dropped_provider_count") or 0) > 0:
             warnings.append(
@@ -3530,6 +3533,8 @@ async def run_ingest_job(
     # Run-level summary safe mode: preserve chunk/extraction/graph progress when
     # the summary pool is known dead/exhausted for this batch.
     defer_summaries: bool = False,
+    summary_cost_run_id: str | None = None,
+    summary_cost_authority_usd: Any | None = None,
 ) -> IngestJobResponse:
     """Run the locked ingestion pipeline for a single document.
 
@@ -3577,6 +3582,22 @@ async def run_ingest_job(
     )
     # Rebind the name so all downstream reads use the effective config.
     ingestion_config = effective_config
+    summary_cost_controller = None
+    summary_provider_work_enabled = bool(
+        ingestion_config.chunk_summarization
+        and not defer_summaries
+        and str(target_stage or "").lower() not in {"indexed", "queryable"}
+    )
+    if summary_provider_work_enabled and summary_cost_run_id:
+        from services.ingestion.summary_cost_control import SummaryCostController
+
+        summary_cost_controller = await SummaryCostController.open(
+            db,
+            run_id=summary_cost_run_id,
+            corpus_id=corpus_id,
+            user_id=user_id,
+            authority_usd=summary_cost_authority_usd,
+        )
     startup_profile = _resource_profile_for_config(
         ingestion_config,
         source_location=source_url,
@@ -4105,6 +4126,7 @@ async def run_ingest_job(
             extraction_endpoint_urls=extraction_endpoint_urls,
             defer_summaries=summary_deferred_by_run,
             defer_ghost_b=queryable_first_pass,
+            summary_cost_controller=summary_cost_controller,
         )
     if isinstance(ghost_result, GhostRunResult):
         summaries = ghost_result.summaries
@@ -4235,6 +4257,8 @@ async def run_ingest_job(
                         _summary_tree_llm_from_pool(
                             _summary_tree_pool,
                             getattr(ingestion_config, "max_summary_tokens", 300),
+                            cost_controller=summary_cost_controller,
+                            require_cost_control=summary_cost_controller is not None,
                         )
                         if getattr(ingestion_config, "chunk_summarization", False)
                         else None
@@ -4256,6 +4280,10 @@ async def run_ingest_job(
                         _tree_counts,
                     )
             except Exception as _tree_exc:  # noqa: BLE001
+                from services.ingestion.summary_cost_control import SummaryCostError
+
+                if isinstance(_tree_exc, SummaryCostError):
+                    raise
                 logger.warning(
                     "phase=summary_tree doc=%s FAILED (non-fatal): %s",
                     doc_id[:12],

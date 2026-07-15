@@ -9950,3 +9950,137 @@ cannot lawfully claim bounded exposure under the reservation law.
    temporary, reversible blue max-workers reduction to lend green 2–3 slots
    (same reallocation class already ruled) is pre-approved to cut extraction
    wall-time ~3–4×; restore at E2E completion.
+
+## [2026-07-15T17:12:35Z] EXECUTOR → SENIOR :: RECEIPT
+
+Summary ceiling seam unit gate is VERIFIED green with true `EXIT=0`: 7 tests
+prove the exact DeepSeek V4 Flash price-card match (root and `/v1` aliases),
+uncached list-price math, UTF-8-byte prompt upper bound, concurrent atomic
+pre-claim refusal, idempotent settlement, full-reservation charging when usage
+is missing, and authority validation. The first invocation returned true
+`EXIT=4` before collection because `/app/tests` is intentionally absent; the
+second reached tests but exposed a fake-DB array-equality defect (`6 passed, 1
+failed`, true `EXIT=1`). I corrected only that test double to match Mongo's
+scalar-on-array equality and the unchanged production tests then passed 7/7.
+No HTTP/provider call, corpus, or durable production-data write occurred.
+
+## [2026-07-15T17:15:43Z] EXECUTOR → SENIOR :: RECEIPT
+
+Cost-seam integration closure is VERIFIED green, true `EXIT=0`: after an
+explicit byte-for-byte runtime copy of every changed module, 146 focused tests
+passed across cost control, Ghost A fallback/microbatch behavior, summary
+trees, durable summary jobs, scoped backfill, ingest batches, deferred
+summaries, and MCP ingest tools. Three added Ghost A proofs show (a) missing
+authority refuses before client construction, (b) reservation precedes HTTP
+and usage settlement follows it, and (c) ceiling refusal produces zero HTTP
+calls. The earlier 143-pass attempt is explicitly invalid because a zsh copy
+loop emitted `lstat` errors and exercised pre-change modules; it was rerun
+correctly. Run and call ledgers now use their deterministic IDs as Mongo `_id`,
+closing concurrent first-open duplicate-row risk without a migration/index.
+No provider call or production-data write occurred.
+
+## [2026-07-15T17:27:31Z] EXECUTOR → SENIOR :: RECEIPT
+
+Targeted regression closure is VERIFIED green with true `EXIT=0`: the exact
+command was `cd /app && PYTHONPATH=/app pytest -q` over cost control, Ghost A,
+summary tree, corpus repair, ingestion-router readiness, ingestion-service
+backpressure, and ingestion-service idempotency tests. Actual tail:
+`65 passed, 10 warnings in 2.78s` and `EXIT=0`. The five prior failures were
+stale fixtures: one monkeypatched a removed unmetered document-summary
+function, one omitted the router's new authority field, and three invoked
+provider-backed service lanes without the required run ID/authority. Fixtures
+now exercise the cost-controlled service path and assert propagation; no
+production fail-closed guard was weakened. No HTTP/provider call, corpus, or
+durable production-data write occurred.
+
+## [2026-07-15T17:30:59Z] EXECUTOR → SENIOR :: RECEIPT
+
+Complete backend current-tree gate is VERIFIED green with true `EXIT=0`.
+The exact command was
+`cd /app/summary-cost-repo-stage && PYTHONPATH=/app/summary-cost-repo-stage/backend pytest -q backend/tests --ignore=backend/tests/test_glirel_claim_compiler_c2_benchmark.py`.
+Actual tail: `3319 passed, 7 skipped, 23 warnings in 32.33s` and `EXIT=0`.
+The sole excluded file is the already rejected-with-evidence C2/GLiREL
+benchmark named in ACTIVE DIRECTIVES. A prior `/tmp`-root attempt returned
+`EXIT=1` only because seven tests require complete repo-relative RunPod/MLX
+assets or a repo path outside `/tmp`; repackaging the unchanged complete
+current tree at a non-`/tmp` path closed all seven. No provider call, corpus,
+or durable production-data write occurred.
+
+## [2026-07-15T17:32:15Z] EXECUTOR → SENIOR :: RECEIPT
+
+Immediate pre-rebuild safety census is VERIFIED green with true `EXIT=0`:
+`semantic_digest_jobs.running=0`, `ingest_batches.active=0`,
+`ingest_batch_items.running=0`, `source_parse_jobs.active=0`,
+`extraction_jobs.active=0`, and `graph_promotion_jobs.active=0`. The exact
+read-only command was `cd /app && PYTHONPATH=/app python
+/tmp/e2e_post_blocker_census.py`; its output contains counts only. No provider
+call, corpus, or durable production-data write occurred. Proceeding to the
+authoritative two-container compose rebuild.
+
+## [2026-07-15T17:33:22Z] EXECUTOR → SENIOR :: RECEIPT
+
+Canonical backend+ingest-worker rebuild is VERIFIED green with true `EXIT=0`.
+The exact command was `docker compose -f docker-compose.yml -f
+docker-compose.override.yml -f docker-compose.offline-ingest.yml --profile
+offline-ingest up -d --build backend ingest-worker`. Both images built, both
+containers were recreated from the same current source, all declared
+dependencies reached healthy, and both target containers started. No provider
+call, corpus, or durable production-data write occurred. Post-deploy health,
+source parity, test closure, and MLX checks follow as separate gates.
+
+## [2026-07-15T17:35:05Z] EXECUTOR → SENIOR :: RECEIPT
+
+Post-deploy runtime integrity gate is VERIFIED green. Backend and ingest-worker
+health are `healthy`, both live runtime verifiers resolve
+`EMBEDDER_URL=http://host.docker.internal:8082` and return dimension `1024`,
+the permanent semantic closure is `49` files with `0` mismatches, and both
+containers attest `spacy==3.8.14`, `en_core_web_sm==3.8.0`, and the complete
+trained pipeline. All 14 production paths changed by this seam are separately
+SHA-256-identical host/backend/worker, including the new cost controller and
+price registry. Each of health, backend MLX, worker MLX, 49-file parity,
+pin/load, and changed-source parity has true `EXIT=0`. No provider call,
+corpus, or durable production-data write occurred.
+
+## [2026-07-15T17:36:20Z] EXECUTOR → SENIOR :: BLOCKER
+
+The first post-rebuild both-container focused-test invocation is invalid and
+stopped at collection in both containers, true `EXIT=2`, because the temporary
+test-only stage omitted `services/ingestion/verify.py`; legacy
+`test_verify_summary_expectation.py` opens that file by a relative path before
+collection. This is a harness completeness error, not a runtime/test failure:
+zero selected tests ran, deployed sources remain hash-sealed, and no provider
+call or durable write occurred. I am adding only that exact source file to
+both temporary test stages and rerunning the unchanged test selection.
+
+## [2026-07-15T17:37:17Z] EXECUTOR → SENIOR :: RECEIPT
+
+Post-rebuild both-container focused closure is VERIFIED green after correcting
+only the temporary test-stage completeness error. The unchanged selection
+covers cost control, Ghost A, summary trees/semantics/jobs/backfills, corpus
+repair, batch/deferred ingestion, router readiness, service backpressure and
+idempotency, parent-summary contracts, and MCP ingest. Backend: `234 passed,
+8 warnings in 3.36s`, true `EXIT=0`. Ingest-worker: `234 passed, 8 warnings in
+3.16s`, true `EXIT=0`. Tests were copied into `/tmp` as required and ran with
+`PYTHONPATH=/app`; no test was baked into either image. No provider call,
+corpus, or durable production-data write occurred.
+
+## [2026-07-15T17:38:16Z] EXECUTOR → SENIOR :: RECEIPT
+
+Final pre-publication gate is VERIFIED green. Host syntax compile plus price
+registry JSON parse, backend syntax compile, ingest-worker syntax compile, and
+`git diff --check` each returned true `EXIT=0`. The final read-only census is
+also true `EXIT=0`: all six active-work counts remain zero, and the new
+production collections `summary_cost_runs` and `summary_cost_call_receipts`
+both have total count zero. This directly confirms the work made no provider,
+corpus, or cost-ledger write. I am proceeding through the required
+pull--rebase--autostash, scope-only stage, commit, and dual push.
+
+## [2026-07-15T17:39:37Z] EXECUTOR → SENIOR :: RECEIPT
+
+Publication scope gate is VERIFIED green. Required pull/rebase/autostash is
+true `EXIT=0` and reports already up to date. Exactly 19 scoped paths are
+staged: coordination, 14 production paths, two new/three adjusted test paths;
+`tmp/` remains untracked and unstaged. Staged `git diff --check` is true
+`EXIT=0`, and a credential-pattern scan reports `secret_like_matches=0`, true
+`EXIT=0`. I am committing `feat: enforce hard summary cost ceilings` with the
+required Codex co-author trailer, then pushing branch and `HEAD:main`.

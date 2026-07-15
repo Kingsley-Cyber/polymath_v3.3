@@ -11,7 +11,6 @@ from datetime import datetime
 from typing import Any
 from uuid import uuid4
 
-from services.ingestion.document_summaries import backfill_document_summaries
 from services.ingestion.document_pipeline_jobs import plan_document_pipeline_jobs
 from services.ingestion.failure_reconciliation import reconcile_ghost_b_failure_metadata
 from services.ingestion.extraction_jobs import plan_extraction_jobs, run_extraction_jobs
@@ -324,6 +323,8 @@ async def run_bounded_corpus_repair_cycle(
     run_graph_jobs: bool = False,
     graph_run_limit: int = 3,
     record_run: bool = True,
+    summary_cost_run_id: str | None = None,
+    summary_cost_authority_usd: Any | None = None,
 ) -> dict[str, Any]:
     """Run one safe repair cycle.
 
@@ -653,6 +654,8 @@ async def run_bounded_corpus_repair_cycle(
                     corpus_id=corpus_id,
                     user_id=user_id,
                     limit=summary_job_run_limit,
+                    summary_cost_run_id=summary_cost_run_id,
+                    summary_cost_authority_usd=summary_cost_authority_usd,
                 )
                 steps.append(
                     {
@@ -727,6 +730,8 @@ async def run_bounded_corpus_repair_cycle(
                     user_id=user_id,
                     limit=summary_job_run_limit,
                     kinds=["document_summary"],
+                    summary_cost_run_id=summary_cost_run_id,
+                    summary_cost_authority_usd=summary_cost_authority_usd,
                 )
                 steps.append(
                     {
@@ -851,12 +856,16 @@ async def run_bounded_corpus_repair_cycle(
                     )
                 )
             else:
-                result = await backfill_document_summaries(
-                    db,
+                if ingestion_service is None:
+                    raise RuntimeError(
+                        "ingestion_service is required for cost-controlled document summaries"
+                    )
+                result = await ingestion_service.backfill_document_summaries(
                     corpus_id=corpus_id,
-                    qdrant_client=qdrant_client,
                     user_id=user_id,
                     limit=document_summary_limit,
+                    summary_cost_run_id=summary_cost_run_id,
+                    summary_cost_authority_usd=summary_cost_authority_usd,
                 )
                 steps.append(
                     {

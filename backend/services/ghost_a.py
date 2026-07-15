@@ -461,6 +461,8 @@ async def summarize_parents(
     global_max_concurrent: int | None = None,
     telemetry_sink: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     pool_status: dict[str, Any] | None = None,
+    cost_controller: Any | None = None,
+    require_cost_control: bool = False,
 ) -> list[SummaryResult]:
     """
     Summarize parent chunks in parallel, round-robining tasks across the
@@ -485,6 +487,14 @@ async def summarize_parents(
     """
     if not tasks:
         return []
+    if require_cost_control and cost_controller is None:
+        from services.ingestion.summary_cost_control import (
+            SummaryCostAuthorityRequired,
+        )
+
+        raise SummaryCostAuthorityRequired(
+            "Ghost A provider dispatch requires a durable summary cost authority"
+        )
 
     settings = get_settings()
     cap = max_summary_tokens or settings.SUMMARY_MAX_TOKENS
@@ -615,6 +625,50 @@ async def summarize_parents(
         )
         for pool_idx, entry in enumerate(pool)
     ]
+
+    async def _provider_post(
+        *,
+        payload: dict[str, Any],
+        entry: dict[str, Any],
+        card: Any,
+        pool_idx: int,
+        item_count: int,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        reservation = None
+        if cost_controller is not None:
+            reservation = await cost_controller.reserve(
+                provider=card.provider,
+                model=entry.get("model"),
+                api_base=entry.get("base_url"),
+                messages=payload["messages"],
+                max_output_tokens=int(payload.get("max_tokens") or 0),
+                item_count=item_count,
+            )
+        try:
+            async with provider_sems[pool_idx]:
+                async with httpx.AsyncClient(timeout=120.0) as client:
+                    resp = await client.post(
+                        f"{settings.LITELLM_URL}/chat/completions",
+                        json=payload,
+                        headers=headers,
+                    )
+                resp.raise_for_status()
+                body = resp.json()
+        except Exception as exc:
+            if reservation is not None:
+                await cost_controller.settle(
+                    reservation,
+                    usage=None,
+                    failure_class=type(exc).__name__,
+                )
+            raise
+        cost_fields: dict[str, Any] = {}
+        if reservation is not None:
+            cost_fields = await cost_controller.settle(
+                reservation,
+                usage=body.get("usage") if isinstance(body, dict) else None,
+            )
+        return body, cost_fields
 
     async def _lane_disable_ready(pool_idx: int, exc: Exception) -> bool:
         tier = provider_error_tier(exc)
@@ -867,27 +921,25 @@ async def summarize_parents(
             payload.setdefault(key, value)
         started = time.perf_counter()
         try:
-            async with provider_sems[pool_idx]:
-                async with httpx.AsyncClient(timeout=120.0) as client:
-                    resp = await client.post(
-                        f"{settings.LITELLM_URL}/chat/completions",
-                        json=payload,
-                        headers=headers,
-                    )
-                resp.raise_for_status()
-                body = resp.json()
-                raw = body["choices"][0]["message"]["content"].strip()
-                result = _compile_result(
-                    task,
-                    raw=raw,
-                    entry=entry,
-                    tagged_rescue=tagged_rescue,
-                )
-                usage = body.get("usage") or {}
-                finish_reason = str(
-                    body.get("choices", [{}])[0].get("finish_reason") or ""
-                ).lower()
-                await _emit_telemetry({
+            body, cost_fields = await _provider_post(
+                payload=payload,
+                entry=entry,
+                card=card,
+                pool_idx=pool_idx,
+                item_count=1,
+            )
+            raw = body["choices"][0]["message"]["content"].strip()
+            result = _compile_result(
+                task,
+                raw=raw,
+                entry=entry,
+                tagged_rescue=tagged_rescue,
+            )
+            usage = body.get("usage") or {}
+            finish_reason = str(
+                body.get("choices", [{}])[0].get("finish_reason") or ""
+            ).lower()
+            await _emit_telemetry({
                     "corpus_id": task.corpus_id,
                     "phase": "summary",
                     "provider": card.provider,
@@ -908,8 +960,9 @@ async def summarize_parents(
                             else _validation_failure_class(task)
                         )
                     ),
+                    **cost_fields,
                 })
-                return result
+            return result
         except Exception as exc:
             await _emit_telemetry({
                 "corpus_id": task.corpus_id,
@@ -926,6 +979,10 @@ async def summarize_parents(
                 "rate_limited": is_rate_limit_provider_error(exc),
                 "failure_class": type(exc).__name__,
             })
+            from services.ingestion.summary_cost_control import SummaryCostError
+
+            if isinstance(exc, SummaryCostError):
+                raise
             if is_rate_limit_provider_error(exc):
                 raise RateLimitedLaneError(
                     exc,
@@ -994,16 +1051,14 @@ async def summarize_parents(
             payload.setdefault(key, value)
         started = time.perf_counter()
         try:
-            async with provider_sems[pool_idx]:
-                async with httpx.AsyncClient(timeout=120.0) as client:
-                    resp = await client.post(
-                        f"{settings.LITELLM_URL}/chat/completions",
-                        json=payload,
-                        headers=headers,
-                    )
-                resp.raise_for_status()
-                body = resp.json()
-                raw = body["choices"][0]["message"]["content"].strip()
+            body, cost_fields = await _provider_post(
+                payload=payload,
+                entry=entry,
+                card=card,
+                pool_idx=pool_idx,
+                item_count=len(batch_tasks),
+            )
+            raw = body["choices"][0]["message"]["content"].strip()
             raw_artifacts = parse_summary_microbatch_response(
                 raw,
                 allowed_target_ids={task.parent_id for task in batch_tasks},
@@ -1043,6 +1098,7 @@ async def summarize_parents(
                         else "validation_rejected"
                     )
                 ),
+                **cost_fields,
             })
 
             # Some OpenAI-compatible providers accept the batch prompt but
@@ -1077,7 +1133,14 @@ async def summarize_parents(
                     strict=True,
                 ):
                     if isinstance(fallback_result, Exception):
-                        if isinstance(fallback_result, (RateLimitedLaneError, FatalLaneError)):
+                        from services.ingestion.summary_cost_control import (
+                            SummaryCostError,
+                        )
+
+                        if isinstance(
+                            fallback_result,
+                            (RateLimitedLaneError, FatalLaneError, SummaryCostError),
+                        ):
                             raise fallback_result
                         logger.warning(
                             "GHOST A single-target fallback failed parent_id=%s: %s",
@@ -1105,6 +1168,10 @@ async def summarize_parents(
                 "rate_limited": is_rate_limit_provider_error(exc),
                 "failure_class": type(exc).__name__,
             })
+            from services.ingestion.summary_cost_control import SummaryCostError
+
+            if isinstance(exc, SummaryCostError):
+                raise
             if is_rate_limit_provider_error(exc):
                 raise RateLimitedLaneError(
                     exc,
@@ -1237,7 +1304,17 @@ async def summarize_parents(
             for _ in range(slots):
                 workers.append(asyncio.create_task(_lane_worker(pool_idx)))
         if workers:
-            await asyncio.gather(*workers, return_exceptions=False)
+            try:
+                await asyncio.gather(*workers, return_exceptions=False)
+            except Exception as exc:
+                from services.ingestion.summary_cost_control import SummaryCostError
+
+                if isinstance(exc, SummaryCostError):
+                    for worker in workers:
+                        if not worker.done():
+                            worker.cancel()
+                    await asyncio.gather(*workers, return_exceptions=True)
+                raise
 
     def _enabled_lane_count() -> int:
         lane_slots = _lane_slot_plan()

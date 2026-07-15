@@ -1,8 +1,23 @@
 import asyncio
+from unittest.mock import AsyncMock
 
 import pytest
 
 from services.ingestion_service import IngestionService
+
+
+class _FakeSummaryCostController:
+    async def snapshot(self):
+        return {"run_id": "test-summary-cost-run", "authorized_usd": "1.000000000"}
+
+
+def _install_fake_summary_cost_controller(monkeypatch):
+    open_controller = AsyncMock(return_value=_FakeSummaryCostController())
+    monkeypatch.setattr(
+        "services.ingestion.summary_cost_control.SummaryCostController.open",
+        open_controller,
+    )
+    return open_controller
 
 
 def _paused_result(lane_key: str, operation: str) -> dict:
@@ -226,6 +241,7 @@ async def test_summary_backfill_respects_backpressure(monkeypatch):
     monkeypatch.setattr(service, "_get_corpus_raw", fake_corpus)
     monkeypatch.setattr(service, "_backpressure_pause_result", fake_pause)
     monkeypatch.setattr("services.ghost_a.summarize_parents", fail_summarize)
+    open_controller = _install_fake_summary_cost_controller(monkeypatch)
 
     result = await service.backfill_parent_summaries(
         "corpus-1",
@@ -233,6 +249,8 @@ async def test_summary_backfill_respects_backpressure(monkeypatch):
         generate=True,
         index=True,
         limit=10,
+        summary_cost_run_id="test-summary-cost-run",
+        summary_cost_authority_usd="1.00",
     )
 
     assert result["status"] == "paused_pressure"
@@ -244,6 +262,7 @@ async def test_summary_backfill_respects_backpressure(monkeypatch):
     assert result["before"]["retrieval_parent_count"] == 5
     assert result["before"]["body_parent_count"] == 5
     assert result["after"] == result["before"]
+    open_controller.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -312,6 +331,7 @@ async def test_direct_summary_backfill_generates_but_defers_indexing_under_qdran
         return None
 
     monkeypatch.setattr(service, "_materialize_corpus_readiness_safely", fake_materialize)
+    open_controller = _install_fake_summary_cost_controller(monkeypatch)
 
     result = await service.backfill_parent_summaries(
         "corpus-1",
@@ -319,6 +339,8 @@ async def test_direct_summary_backfill_generates_but_defers_indexing_under_qdran
         generate=True,
         index=True,
         limit=1,
+        summary_cost_run_id="test-summary-cost-run",
+        summary_cost_authority_usd="1.00",
     )
 
     assert result["status"] == "degraded"
@@ -328,6 +350,7 @@ async def test_direct_summary_backfill_generates_but_defers_indexing_under_qdran
     assert result["index_scope"] == "skipped"
     assert result["index_deferred_by_pressure"] is True
     assert service._db.parent_chunks.writes
+    open_controller.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -374,11 +397,14 @@ async def test_summary_jobs_generate_but_defer_indexing_under_qdrant_pressure(mo
     monkeypatch.setattr(service, "_compute_corpus_readiness_safely", fake_readiness)
     monkeypatch.setattr(service, "backfill_parent_summaries", fake_parent_backfill)
     monkeypatch.setattr("services.ingestion.summary_jobs.run_summary_jobs", fake_summary_job_runner)
+    open_controller = _install_fake_summary_cost_controller(monkeypatch)
 
     result = await service.run_summary_jobs(
         corpus_id="corpus-1",
         user_id="user-1",
         limit=3,
+        summary_cost_run_id="test-summary-cost-run",
+        summary_cost_authority_usd="1.00",
     )
 
     assert result["status"] == "complete"
@@ -389,6 +415,7 @@ async def test_summary_jobs_generate_but_defer_indexing_under_qdrant_pressure(mo
     assert parent_result["indexed"] == 0
     assert parent_result["index_scope"] == "paused_qdrant_pressure"
     assert parent_result["index_deferred_by_pressure"] is True
+    open_controller.assert_awaited_once()
 
 
 @pytest.mark.asyncio

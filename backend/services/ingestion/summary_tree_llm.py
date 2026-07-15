@@ -15,11 +15,21 @@ def summary_tree_llm_from_pool(
     max_tokens: int,
     *,
     global_max_concurrent: int | None = None,
+    cost_controller: Any | None = None,
+    require_cost_control: bool = False,
 ) -> LlmFn | None:
     """Build a summary-tree LLM hook from the corpus Summary pool."""
 
     if not pool:
         return None
+    if require_cost_control and cost_controller is None:
+        from services.ingestion.summary_cost_control import (
+            SummaryCostAuthorityRequired,
+        )
+
+        raise SummaryCostAuthorityRequired(
+            "summary-tree provider dispatch requires a durable summary cost authority"
+        )
 
     settings = get_settings()
     lane_idx = 0
@@ -64,14 +74,44 @@ def summary_tree_llm_from_pool(
             "Authorization": f"Bearer {settings.LITELLM_MASTER_KEY}",
             "Content-Type": "application/json",
         }
+        reservation = None
+        if cost_controller is not None:
+            from services.extraction_provider_cards import (
+                resolve_extraction_provider_card,
+            )
+
+            card = resolve_extraction_provider_card(entry)
+            reservation = await cost_controller.reserve(
+                provider=card.provider,
+                model=entry.get("model"),
+                api_base=entry.get("base_url"),
+                messages=payload["messages"],
+                max_output_tokens=int(payload["max_tokens"]),
+                item_count=1,
+            )
         async with global_semaphore, lane_semaphores[selected_lane]:
-            async with httpx.AsyncClient(timeout=120.0) as client:
-                resp = await client.post(
-                    f"{settings.LITELLM_URL}/chat/completions",
-                    json=payload,
-                    headers=headers,
-                )
+            try:
+                async with httpx.AsyncClient(timeout=120.0) as client:
+                    resp = await client.post(
+                        f"{settings.LITELLM_URL}/chat/completions",
+                        json=payload,
+                        headers=headers,
+                    )
                 resp.raise_for_status()
-                return str(resp.json()["choices"][0]["message"]["content"] or "").strip()
+                body = resp.json()
+            except Exception as exc:
+                if reservation is not None:
+                    await cost_controller.settle(
+                        reservation,
+                        usage=None,
+                        failure_class=type(exc).__name__,
+                    )
+                raise
+            if reservation is not None:
+                await cost_controller.settle(
+                    reservation,
+                    usage=body.get("usage") if isinstance(body, dict) else None,
+                )
+            return str(body["choices"][0]["message"]["content"] or "").strip()
 
     return _call

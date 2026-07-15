@@ -410,9 +410,32 @@ async def _gen(llm_fn: LlmFn | None, prompt: str, fallback_texts: Sequence[str])
             out = (await llm_fn(prompt) or "").strip()
             if out:
                 return out
-        except Exception:
+        except Exception as exc:
+            from services.ingestion.summary_cost_control import SummaryCostError
+
+            if isinstance(exc, SummaryCostError):
+                raise
             pass  # best-effort — deterministic fallback below
     return _extractive_fallback(fallback_texts)
+
+
+async def _gather_generation(coroutines: Sequence[Awaitable[str]]) -> list[str]:
+    """Cancel sibling provider work immediately when the cost guard stops."""
+
+    tasks = [asyncio.create_task(coroutine) for coroutine in coroutines]
+    if not tasks:
+        return []
+    try:
+        return await asyncio.gather(*tasks)
+    except Exception as exc:
+        from services.ingestion.summary_cost_control import SummaryCostError
+
+        if isinstance(exc, SummaryCostError):
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+        raise
 
 
 async def build_tree(
@@ -481,7 +504,7 @@ async def build_tree(
         sections.append(sec)
         section_rollups.append(rollups)
 
-    rollup_summaries = await asyncio.gather(*rollup_generators)
+    rollup_summaries = await _gather_generation(rollup_generators)
     for node, summary in zip(
         (node for rollups in section_rollups for node in rollups),
         rollup_summaries,
@@ -505,7 +528,7 @@ async def build_tree(
                 [rollup.summary for rollup in rollups],
             )
         )
-    section_summaries = await asyncio.gather(*section_generators)
+    section_summaries = await _gather_generation(section_generators)
     for section_index, summary in zip(
         generated_section_indexes,
         section_summaries,
@@ -536,12 +559,6 @@ async def build_tree(
 
 
 # ── persistence + ingest hook (PARENT summaries in → DOCUMENT profile out) ──
-async def _default_llm(prompt: str) -> str:
-    from services.llm import llm_service
-
-    return await llm_service.complete_chat([{"role": "user", "content": prompt}])
-
-
 async def _attach_doc_artifact(
     db: Any,
     *,
@@ -732,7 +749,15 @@ async def build_and_store_tree(
     summary_rows = [
         r for r in rows if should_summarize_parent(str(r.get("chunk_kind") or "body"))
     ]
-    fn = llm_fn if llm_fn is not None else (_default_llm if use_llm else None)
+    if use_llm and llm_fn is None:
+        from services.ingestion.summary_cost_control import (
+            SummaryCostAuthorityRequired,
+        )
+
+        raise SummaryCostAuthorityRequired(
+            "summary-tree generation requires an injected cost-controlled LLM"
+        )
+    fn = llm_fn if use_llm else None
 
     # GUARD RAIL — the summarized-parent invariant. Ghost A is conditional
     # (global enabled flag + model pool); this backstop ensures each

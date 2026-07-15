@@ -886,6 +886,7 @@ async def create_local_batch(
     model: str = "",
     concurrency: int | None = None,
     profile: str | None = None,
+    summary_cost_authority_usd: Any | None = None,
 ) -> dict[str, Any]:
     root, files = discover_local_files(
         root_path,
@@ -969,6 +970,12 @@ async def create_local_batch(
             "model": model or "",
             "concurrency": worker_count,
             "profile": normalized_profile,
+            "summary_cost_run_id": batch_id,
+            "summary_cost_authority_usd": (
+                str(summary_cost_authority_usd)
+                if summary_cost_authority_usd is not None
+                else None
+            ),
         },
         "created_at": now,
         "updated_at": now,
@@ -1007,6 +1014,7 @@ async def create_upload_batch(
     model: str = "",
     concurrency: int | None = None,
     profile: str | None = None,
+    summary_cost_authority_usd: Any | None = None,
 ) -> dict[str, Any]:
     """Create a durable one-off browser-upload batch from already-read bytes."""
     if not files:
@@ -1105,6 +1113,12 @@ async def create_upload_batch(
             "model": model or "",
             "concurrency": worker_count,
             "profile": normalized_profile,
+            "summary_cost_run_id": batch_id,
+            "summary_cost_authority_usd": (
+                str(summary_cost_authority_usd)
+                if summary_cost_authority_usd is not None
+                else None
+            ),
         },
         "created_at": now,
         "updated_at": now,
@@ -1157,6 +1171,13 @@ async def get_batch(
     )
     if not batch:
         return None
+    run_id = str((batch.get("options") or {}).get("summary_cost_run_id") or "")
+    if run_id:
+        from services.ingestion.summary_cost_control import summary_cost_snapshot
+
+        receipt = await summary_cost_snapshot(db, run_id)
+        if receipt is not None:
+            batch["summary_cost_receipt"] = receipt
     if include_items:
         batch["items"] = await db[ITEMS].find(
             {"batch_id": batch_id, "user_id": user_id},
@@ -2082,6 +2103,12 @@ async def _process_local_item(
             target_stage=(batch.get("options") or {}).get("target_stage") or None,
             extraction_endpoint_urls=_profile_endpoint_urls(batch),
             defer_summaries=_batch_defer_summaries(batch),
+            summary_cost_run_id=(batch.get("options") or {}).get(
+                "summary_cost_run_id"
+            ),
+            summary_cost_authority_usd=(batch.get("options") or {}).get(
+                "summary_cost_authority_usd"
+            ),
         )
         if result.status == "staged":
             # §13-S: durable through the pass target; next pass re-leases it.
@@ -2556,6 +2583,10 @@ async def _run_deferred_summary_backfill(
                 statuses=["queued"],
                 kinds=["retrieval_parent_summary"],
                 doc_ids=doc_ids,
+                summary_cost_run_id=options.get("summary_cost_run_id"),
+                summary_cost_authority_usd=options.get(
+                    "summary_cost_authority_usd"
+                ),
             )
             parent_runs.append(parent_run)
             if int(parent_run.get("claimed") or 0) <= 0:
@@ -2618,6 +2649,10 @@ async def _run_deferred_summary_backfill(
                 statuses=["queued"],
                 kinds=["document_summary"],
                 doc_ids=doc_ids,
+                summary_cost_run_id=options.get("summary_cost_run_id"),
+                summary_cost_authority_usd=options.get(
+                    "summary_cost_authority_usd"
+                ),
             )
         result: dict[str, Any] = {
             "status": "complete" if parent_complete else "partial",
@@ -2951,6 +2986,26 @@ async def run_local_batch(
             logger.info("Batch %s quality report: %s", batch_id[:8], report)
         except Exception as exc:  # noqa: BLE001 — reporting never fails the batch
             logger.warning("Batch quality report failed: %s", exc)
+        summary_cost_run_id = str(
+            (refreshed.get("options") or {}).get("summary_cost_run_id") or ""
+        )
+        if summary_cost_run_id:
+            from services.ingestion.summary_cost_control import summary_cost_snapshot
+
+            summary_cost_receipt = await summary_cost_snapshot(
+                db, summary_cost_run_id
+            )
+            if summary_cost_receipt is not None:
+                await db[BATCHES].update_one(
+                    {"batch_id": batch_id},
+                    {
+                        "$set": {
+                            "summary_cost_receipt": summary_cost_receipt,
+                            "updated_at": _now(),
+                        }
+                    },
+                )
+                refreshed["summary_cost_receipt"] = summary_cost_receipt
         return refreshed
     finally:
         if lifecycle_hold_acquired:

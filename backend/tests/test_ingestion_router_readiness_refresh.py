@@ -80,17 +80,21 @@ async def test_summary_job_run_returns_fresh_readiness(monkeypatch):
         "get_corpus",
         AsyncMock(return_value={"corpus_id": "corpus-1"}),
     )
+    run_jobs = AsyncMock(return_value={"status": "complete", "claimed": 2})
     monkeypatch.setattr(
         router.ingestion_service,
         "run_summary_jobs",
-        AsyncMock(return_value={"status": "complete", "claimed": 2}),
+        run_jobs,
     )
 
     result = await router.run_summary_jobs(
         "corpus-1",
-        router.SummaryJobRunRequest(limit=2),
+        router.SummaryJobRunRequest(limit=2, summary_cost_authority_usd="1.00"),
         current_user={"user_id": "user-1"},
     )
 
     assert result["status"] == "complete"
     assert result["readiness"]["status"] == "summaries_pending"
+    call = run_jobs.await_args.kwargs
+    assert call["summary_cost_run_id"].startswith("summary_jobs_corpus-1_")
+    assert str(call["summary_cost_authority_usd"]) == "1.00"

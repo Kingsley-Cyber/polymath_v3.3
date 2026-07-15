@@ -35,6 +35,8 @@ async def _summary_tree_pool_for_corpus(
     *,
     corpus_id: str,
     user_id: str | None,
+    summary_cost_controller: Any | None = None,
+    require_cost_control: bool = False,
 ) -> tuple[Any | None, dict[str, Any], IngestionConfig | None]:
     from services.settings import settings_service
 
@@ -91,6 +93,8 @@ async def _summary_tree_pool_for_corpus(
             pool,
             cfg.max_summary_tokens,
             global_max_concurrent=effective_max_concurrent,
+            cost_controller=summary_cost_controller,
+            require_cost_control=require_cost_control,
         ),
         contract,
         cfg,
@@ -106,6 +110,8 @@ async def backfill_document_summaries(
     limit: int = 25,
     doc_ids: list[str] | None = None,
     parent_heal_limit: int = 2000,
+    summary_cost_controller: Any | None = None,
+    require_cost_control: bool = False,
 ) -> dict[str, Any]:
     """Build missing document-level summary profiles from parent summaries."""
 
@@ -116,6 +122,8 @@ async def backfill_document_summaries(
         db,
         corpus_id=corpus_id,
         user_id=user_id,
+        summary_cost_controller=summary_cost_controller,
+        require_cost_control=require_cost_control,
     )
     if cfg is None:
         return {
@@ -264,6 +272,10 @@ async def backfill_document_summaries(
                             "error": f"{type(exc).__name__}: {exc}"[:500],
                         }
             except Exception as exc:  # noqa: BLE001 - bounded repair reports per doc
+                from services.ingestion.summary_cost_control import SummaryCostError
+
+                if isinstance(exc, SummaryCostError):
+                    raise
                 return {
                     "doc_id": doc_id,
                     "status": "failed",
@@ -275,7 +287,18 @@ async def backfill_document_summaries(
                 "result": tree_result,
             }
 
-    processed = await asyncio.gather(*(_process_row(row) for row in rows))
+    process_tasks = [asyncio.create_task(_process_row(row)) for row in rows]
+    try:
+        processed = await asyncio.gather(*process_tasks)
+    except Exception as exc:
+        from services.ingestion.summary_cost_control import SummaryCostError
+
+        if isinstance(exc, SummaryCostError):
+            for task in process_tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*process_tasks, return_exceptions=True)
+        raise
     results = [result for result in processed if result is not None]
     attempted = len(results)
     built = sum(1 for result in results if result.get("status") == "built")

@@ -839,6 +839,8 @@ class IngestionService:
         extraction_endpoint_urls: list[str] | None = None,
         defer_summaries: bool = False,
         duplicate_policy: str = "skip",
+        summary_cost_run_id: str | None = None,
+        summary_cost_authority_usd: Any | None = None,
     ) -> IngestJobResponse:
         """Run the full ingestion pipeline for one document.
 
@@ -855,6 +857,7 @@ class IngestionService:
         neo4j, verifying, complete, or failed.
         """
         from services.ingestion.worker import run_ingest_job
+        from services.ingestion.summary_cost_control import parse_authority_usd
         from services.ingestion.source_identity import (
             build_deterministic_filename,
             build_source_identity,
@@ -928,6 +931,17 @@ class IngestionService:
                         error=reason,
                     )
 
+        if ingestion_config.chunk_summarization:
+            if not str(summary_cost_run_id or "").strip():
+                from services.ingestion.summary_cost_control import (
+                    SummaryCostAuthorityRequired,
+                )
+
+                raise SummaryCostAuthorityRequired(
+                    "summary_cost_run_id is required when chunk_summarization is enabled"
+                )
+            parse_authority_usd(summary_cost_authority_usd)
+
         return await run_ingest_job(
             job_id=str(uuid.uuid4()),
             data=data,
@@ -947,6 +961,8 @@ class IngestionService:
             target_stage=target_stage,
             extraction_endpoint_urls=extraction_endpoint_urls,
             defer_summaries=defer_summaries,
+            summary_cost_run_id=summary_cost_run_id,
+            summary_cost_authority_usd=summary_cost_authority_usd,
         )
 
     async def _embed_and_upsert_schema_terms(
@@ -2719,8 +2735,19 @@ class IngestionService:
         statuses: list[str] | None = None,
         kinds: list[str] | None = None,
         doc_ids: list[str] | None = None,
+        summary_cost_run_id: str | None = None,
+        summary_cost_authority_usd: Any | None = None,
     ) -> dict:
         from services.ingestion.summary_jobs import run_summary_jobs
+        from services.ingestion.summary_cost_control import SummaryCostController
+
+        summary_cost_controller = await SummaryCostController.open(
+            self._db,
+            run_id=summary_cost_run_id,
+            corpus_id=corpus_id,
+            user_id=str(user_id or ""),
+            authority_usd=summary_cost_authority_usd,
+        )
 
         pressure_readiness = await self._compute_corpus_readiness_safely(corpus_id)
         paused = await self._backpressure_pause_result(
@@ -2738,6 +2765,7 @@ class IngestionService:
                     "counts": {},
                     "runner_results": {},
                     "jobs": [],
+                    "summary_cost_receipt": await summary_cost_controller.snapshot(),
                 }
             )
             return paused
@@ -2760,6 +2788,8 @@ class IngestionService:
                 limit=limit,
                 batch=min(max(int(limit or 1), 1), 32),
                 doc_ids=doc_ids,
+                summary_cost_run_id=summary_cost_run_id,
+                summary_cost_authority_usd=summary_cost_authority_usd,
             )
             if not summary_indexing_allowed:
                 result["index_scope"] = "paused_qdrant_pressure"
@@ -2774,6 +2804,8 @@ class IngestionService:
                 user_id=user_id,
                 limit=limit,
                 doc_ids=doc_ids,
+                summary_cost_run_id=summary_cost_run_id,
+                summary_cost_authority_usd=summary_cost_authority_usd,
             )
 
         async def _execute_summary_lane() -> dict:
@@ -2798,6 +2830,7 @@ class IngestionService:
         readiness = await self._materialize_corpus_readiness_safely(corpus_id)
         if readiness is not None:
             result["readiness"] = readiness
+        result["summary_cost_receipt"] = await summary_cost_controller.snapshot()
         return result
 
     async def run_bounded_corpus_repair_cycle(
@@ -2840,6 +2873,8 @@ class IngestionService:
         run_graph_jobs: bool = False,
         graph_run_limit: int = 3,
         record_run: bool = True,
+        summary_cost_run_id: str | None = None,
+        summary_cost_authority_usd: Any | None = None,
     ) -> dict:
         from services.ingestion.corpus_repair import run_bounded_corpus_repair_cycle
 
@@ -2886,6 +2921,8 @@ class IngestionService:
             run_graph_jobs=run_graph_jobs,
             graph_run_limit=graph_run_limit,
             record_run=record_run,
+            summary_cost_run_id=summary_cost_run_id,
+            summary_cost_authority_usd=summary_cost_authority_usd,
         )
 
     async def run_auto_corpus_repair_tick(
@@ -3336,6 +3373,8 @@ class IngestionService:
         user_id: str | None = None,
         limit: int = 25,
         doc_ids: list[str] | None = None,
+        summary_cost_run_id: str | None = None,
+        summary_cost_authority_usd: Any | None = None,
     ) -> dict[str, Any]:
         from services.ingestion.document_summaries import backfill_document_summaries
 
@@ -3348,6 +3387,15 @@ class IngestionService:
             paused.update({"attempted": 0, "built": 0, "skipped": 0, "failed": 0})
             return paused
 
+        from services.ingestion.summary_cost_control import SummaryCostController
+
+        summary_cost_controller = await SummaryCostController.open(
+            self._db,
+            run_id=summary_cost_run_id,
+            corpus_id=corpus_id,
+            user_id=str(user_id or ""),
+            authority_usd=summary_cost_authority_usd,
+        )
         result = await backfill_document_summaries(
             self._db,
             corpus_id=corpus_id,
@@ -3355,10 +3403,13 @@ class IngestionService:
             user_id=user_id,
             limit=limit,
             doc_ids=doc_ids,
+            summary_cost_controller=summary_cost_controller,
+            require_cost_control=summary_cost_controller is not None,
         )
         readiness = await self._materialize_corpus_readiness_safely(corpus_id)
         if readiness is not None:
             result["readiness"] = readiness
+        result["summary_cost_receipt"] = await summary_cost_controller.snapshot()
         return result
 
     async def audit_corpus_idempotency(
@@ -3525,6 +3576,8 @@ class IngestionService:
         batch: int = 32,
         doc_ids: list[str] | None = None,
         index_existing_doc_summaries: bool = False,
+        summary_cost_run_id: str | None = None,
+        summary_cost_authority_usd: Any | None = None,
     ) -> dict[str, Any]:
         """Repair parent-summary retrieval for an existing corpus.
 
@@ -3558,6 +3611,17 @@ class IngestionService:
 
         cfg = IngestionConfig(**(corpus.get("default_ingestion_config") or {}))
         effective_user_id = user_id or str(corpus.get("user_id") or "")
+        summary_cost_controller = None
+        if generate and (limit is None or int(limit or 0) > 0):
+            from services.ingestion.summary_cost_control import SummaryCostController
+
+            summary_cost_controller = await SummaryCostController.open(
+                self._db,
+                run_id=summary_cost_run_id,
+                corpus_id=corpus_id,
+                user_id=effective_user_id,
+                authority_usd=summary_cost_authority_usd,
+            )
         batch = max(1, min(int(batch or 32), 128))
         if limit is not None:
             limit = max(0, int(limit))
@@ -3849,6 +3913,8 @@ class IngestionService:
                         global_max_concurrent=global_max_concurrent,
                         telemetry_sink=_summary_telemetry,
                         pool_status=provider_pool_status,
+                        cost_controller=summary_cost_controller,
+                        require_cost_control=True,
                     )
                     results = [r for r in results if r and r.summary]
                     if not results:
@@ -4056,6 +4122,8 @@ class IngestionService:
             "before": before,
             "after": after,
         }
+        if summary_cost_controller is not None:
+            result["summary_cost_receipt"] = await summary_cost_controller.snapshot()
         readiness = await self._materialize_corpus_readiness_safely(corpus_id)
         if readiness is not None:
             result["readiness"] = readiness

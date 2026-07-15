@@ -17,6 +17,7 @@ import logging
 import re
 import time
 from datetime import datetime, timedelta
+from decimal import Decimal
 from typing import Any, Literal
 from uuid import uuid4
 
@@ -220,6 +221,11 @@ class LocalIngestBatchRequest(BaseModel):
     chunk_summarization: bool | None = None
     model: str = ""
     concurrency: int | None = Field(default=None, ge=1, le=32)
+    summary_cost_authority_usd: Decimal | None = Field(
+        default=None,
+        gt=0,
+        le=Decimal("10000"),
+    )
     start: bool = True
 
 
@@ -274,6 +280,11 @@ class SummaryJobRunRequest(BaseModel):
     limit: int = Field(default=25, ge=1, le=500)
     statuses: list[str] | None = None
     kinds: list[str] | None = None
+    summary_cost_authority_usd: Decimal | None = Field(
+        default=None,
+        gt=0,
+        le=Decimal("10000"),
+    )
 
 
 class DocumentPipelineJobPlanRequest(BaseModel):
@@ -325,6 +336,11 @@ class CorpusRepairCycleRequest(BaseModel):
     summary_stage_identity_backfill_limit: int = Field(default=1000, ge=0, le=50000)
     run_summary_jobs: bool = False
     summary_job_run_limit: int = Field(default=25, ge=1, le=500)
+    summary_cost_authority_usd: Decimal | None = Field(
+        default=None,
+        gt=0,
+        le=Decimal("10000"),
+    )
     run_document_summaries: bool = False
     document_summary_limit: int = Field(default=10, ge=1, le=500)
     run_graph_jobs: bool = False
@@ -358,6 +374,11 @@ class SummaryBackfillRequest(BaseModel):
         default=False,
         description="Queue the bounded summary repair as a background repair run.",
     )
+    summary_cost_authority_usd: Decimal | None = Field(
+        default=None,
+        gt=0,
+        le=Decimal("10000"),
+    )
 
 
 class DocumentSummaryBackfillRequest(BaseModel):
@@ -365,6 +386,11 @@ class DocumentSummaryBackfillRequest(BaseModel):
 
     limit: int = Field(default=25, ge=1, le=500)
     doc_ids: list[str] | None = None
+    summary_cost_authority_usd: Decimal | None = Field(
+        default=None,
+        gt=0,
+        le=Decimal("10000"),
+    )
 
 
 class RescanIngestBatchRequest(BaseModel):
@@ -1556,6 +1582,14 @@ async def backfill_corpus_summaries(
     corpus = await ingestion_service.get_corpus(corpus_id)
     if not corpus:
         raise HTTPException(status_code=404, detail="Corpus not found")
+    if body.generate and body.summary_cost_authority_usd is None:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "summary_cost_authority_usd is required when summary generation "
+                "is enabled"
+            ),
+        )
     if body.index_existing_doc_summaries and not body.doc_ids:
         raise HTTPException(
             status_code=400,
@@ -1604,6 +1638,8 @@ async def backfill_corpus_summaries(
                     index_existing_doc_summaries=(
                         body.index_existing_doc_summaries
                     ),
+                    summary_cost_run_id=run_id,
+                    summary_cost_authority_usd=body.summary_cost_authority_usd,
                 )
                 finished = datetime.utcnow()
                 status = "complete" if result.get("status") in {"healthy", "empty"} else "partial"
@@ -1680,6 +1716,8 @@ async def backfill_corpus_summaries(
         batch=body.batch,
         doc_ids=body.doc_ids,
         index_existing_doc_summaries=body.index_existing_doc_summaries,
+        summary_cost_run_id=f"summary_backfill_sync_{corpus_id[:8]}_{uuid4().hex[:8]}",
+        summary_cost_authority_usd=body.summary_cost_authority_usd,
     )
 
 
@@ -1693,11 +1731,21 @@ async def backfill_corpus_document_summaries(
     corpus = await ingestion_service.get_corpus(corpus_id)
     if not corpus:
         raise HTTPException(status_code=404, detail="Corpus not found")
+    if body.summary_cost_authority_usd is None:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "summary_cost_authority_usd is required for document summary "
+                "generation"
+            ),
+        )
     return await ingestion_service.backfill_document_summaries(
         corpus_id=corpus_id,
         user_id=current_user["user_id"],
         limit=body.limit,
         doc_ids=body.doc_ids,
+        summary_cost_run_id=f"document_summary_{corpus_id[:8]}_{uuid4().hex[:8]}",
+        summary_cost_authority_usd=body.summary_cost_authority_usd,
     )
 
 
@@ -2071,12 +2119,20 @@ async def run_summary_jobs(
     if not existing:
         raise HTTPException(status_code=404, detail="Corpus not found")
     body = body or SummaryJobRunRequest()
+    if body.summary_cost_authority_usd is None:
+        raise HTTPException(
+            status_code=400,
+            detail="summary_cost_authority_usd is required for summary job execution",
+        )
+    summary_cost_run_id = f"summary_jobs_{corpus_id[:8]}_{uuid4().hex[:8]}"
     result = await ingestion_service.run_summary_jobs(
         corpus_id=corpus_id,
         user_id=current_user["user_id"],
         limit=body.limit,
         statuses=body.statuses,
         kinds=body.kinds,
+        summary_cost_run_id=summary_cost_run_id,
+        summary_cost_authority_usd=body.summary_cost_authority_usd,
     )
     return await _attach_corpus_readiness(
         result,
@@ -2228,6 +2284,18 @@ async def run_corpus_repair_cycle(
     if not existing:
         raise HTTPException(status_code=404, detail="Corpus not found")
     body = body or CorpusRepairCycleRequest()
+    if (
+        (body.apply or body.background)
+        and (body.run_summary_jobs or body.run_document_summaries)
+        and body.summary_cost_authority_usd is None
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "summary_cost_authority_usd is required when a repair cycle "
+                "executes provider-backed summary work"
+            ),
+        )
     if body.background:
         if not body.apply:
             raise HTTPException(
@@ -2399,6 +2467,8 @@ async def run_corpus_repair_cycle(
                     run_graph_jobs=body.run_graph_jobs,
                     graph_run_limit=body.graph_run_limit,
                     record_run=False,
+                    summary_cost_run_id=run_id,
+                    summary_cost_authority_usd=body.summary_cost_authority_usd,
                 )
                 finished = datetime.utcnow()
                 await ingestion_service.db["ingest_repair_runs"].update_one(
@@ -2471,6 +2541,11 @@ async def run_corpus_repair_cycle(
             response["readiness"] = readiness
         return response
 
+    summary_cost_run_id = (
+        f"corpus_repair_{corpus_id[:8]}_{uuid4().hex[:8]}"
+        if body.run_summary_jobs or body.run_document_summaries
+        else None
+    )
     return await ingestion_service.run_bounded_corpus_repair_cycle(
         corpus_id=corpus_id,
         user_id=current_user["user_id"],
@@ -2508,6 +2583,8 @@ async def run_corpus_repair_cycle(
         document_summary_limit=body.document_summary_limit,
         run_graph_jobs=body.run_graph_jobs,
         graph_run_limit=body.graph_run_limit,
+        summary_cost_run_id=summary_cost_run_id,
+        summary_cost_authority_usd=body.summary_cost_authority_usd,
     )
 
 
@@ -2527,6 +2604,22 @@ async def create_local_ingest_batch(
     corpus = await ingestion_service.get_corpus(corpus_id)
     if not corpus:
         raise HTTPException(status_code=404, detail="Corpus not found")
+    corpus_summary_enabled = bool(
+        (corpus.get("default_ingestion_config") or {}).get("chunk_summarization")
+    )
+    summary_enabled = (
+        body.chunk_summarization
+        if body.chunk_summarization is not None
+        else corpus_summary_enabled
+    )
+    if summary_enabled and body.summary_cost_authority_usd is None:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "summary_cost_authority_usd is required when chunk_summarization "
+                "is enabled"
+            ),
+        )
     try:
         batch = await ingest_batches.create_local_batch(
             db=ingestion_service.db,
@@ -2543,6 +2636,7 @@ async def create_local_ingest_batch(
             model=body.model,
             concurrency=body.concurrency,
             profile=body.profile,
+            summary_cost_authority_usd=body.summary_cost_authority_usd,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -2567,12 +2661,29 @@ async def create_upload_ingest_batch(
         "mac_safe", "mac_queryable_first", "rtx_assisted", "runpod_burst"
     ] | None = Form(default=None),
     start: bool = Form(default=True),
+    summary_cost_authority_usd: Decimal | None = Form(default=None, gt=0, le=10000),
     current_user: dict = Depends(get_current_user),
 ):
     """Create a durable browser-upload batch for quick one-off files."""
     corpus = await ingestion_service.get_corpus(corpus_id)
     if not corpus:
         raise HTTPException(status_code=404, detail="Corpus not found")
+    corpus_summary_enabled = bool(
+        (corpus.get("default_ingestion_config") or {}).get("chunk_summarization")
+    )
+    summary_enabled = (
+        chunk_summarization
+        if chunk_summarization is not None
+        else corpus_summary_enabled
+    )
+    if summary_enabled and summary_cost_authority_usd is None:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "summary_cost_authority_usd is required when chunk_summarization "
+                "is enabled"
+            ),
+        )
     if not files:
         raise HTTPException(status_code=400, detail="No files uploaded")
     if len(files) > 25:
@@ -2612,6 +2723,7 @@ async def create_upload_ingest_batch(
             model=model,
             concurrency=concurrency,
             profile=profile,
+            summary_cost_authority_usd=summary_cost_authority_usd,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))

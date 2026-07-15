@@ -23,6 +23,11 @@ def _float(value: Any) -> float:
         return 0.0
 
 
+def _text(value: Any, limit: int) -> str | None:
+    text = str(value or "").strip()
+    return text[:limit] or None
+
+
 def provider_family(value: Any) -> str:
     text = str(value or "unknown").strip().lower()
     if "longcat" in text:
@@ -59,6 +64,38 @@ async def record_provider_call(db: Any, event: dict[str, Any]) -> None:
         "retries": _int(event.get("retries")),
         "rate_limited": bool(event.get("rate_limited")),
         "failure_class": str(event.get("failure_class") or "")[:120] or None,
+        "summary_cost_run_id": _text(event.get("summary_cost_run_id"), 200),
+        "summary_cost_reservation_id": _text(
+            event.get("summary_cost_reservation_id"), 200
+        ),
+        "summary_cost_route_id": _text(event.get("summary_cost_route_id"), 200),
+        "summary_cost_reserved_nanos": _int(
+            event.get("summary_cost_reserved_nanos")
+        ),
+        "summary_cost_accounted_nanos": _int(
+            event.get("summary_cost_accounted_nanos")
+        ),
+        "summary_cost_reported_usage_nanos": _int(
+            event.get("summary_cost_reported_usage_nanos")
+        ),
+        "summary_cost_reserved_usd": _text(
+            event.get("summary_cost_reserved_usd"), 40
+        ),
+        "summary_cost_accounted_usd": _text(
+            event.get("summary_cost_accounted_usd"), 40
+        ),
+        "summary_cost_reported_usage_usd": _text(
+            event.get("summary_cost_reported_usage_usd"), 40
+        ),
+        "summary_cost_price_source_url": _text(
+            event.get("summary_cost_price_source_url"), 500
+        ),
+        "summary_cost_usage_complete": bool(
+            event.get("summary_cost_usage_complete")
+        ),
+        "summary_cost_settlement_overrun": bool(
+            event.get("summary_cost_settlement_overrun")
+        ),
         "created_at": event.get("created_at") or datetime.now(timezone.utc),
     }
     if not doc["corpus_id"]:
