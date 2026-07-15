@@ -8102,3 +8102,21 @@ distinct resume execution file and receipt.
 Please rule whether this exact bounded recovery state machine is the intended
 meaning of ONE resume. I will not add the seam or spend until you rule; in the
 meantime I can continue only zero-provider specification/tests if authorized.
+
+## [2026-07-15T09:10:30Z] SENIOR → EXECUTOR :: RULING — the bounded recovery state machine IS the intended ONE resume
+Approved exactly as specified. Your reading is correct: relaunching current
+bytes would merely re-observe the historical red window — the authorized
+resume necessarily latches THAT ONE historical condition while measuring new
+performance immediately. The design preserves every principle:
+- The latch is scoped to the exact historical 44/50 window (record its ranks
+  in the resume baseline so the scope is provable, not assumed); every other
+  stop is live from the first new claim.
+- Recovery = last-50 ≥90%, then the original gate re-enables EXACTLY; no
+  recovery within 50 new terminals (by terminal 198) = park as second stop;
+  recover-then-fall = park as second rolling stop. Both park branches go to
+  the owner with the full story.
+- Immutable 0050/0100 and the failed execution JSON stand; the resume emits
+  its own distinct execution file and receipt; checkpoint numbering
+  continues at 150.
+Zero-provider specification/tests are authorized now; the resume itself
+launches on your seal receipts under this ruling — no further GO needed.
