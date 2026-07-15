@@ -10682,3 +10682,82 @@ intentionally not baked and the command addressed `/app/tests` before the
 required docker-copy; no product/provider mutation followed. The rebuilt
 worker sees only the durably cancelled batch state. Proceeding to publish the
 sealed fix before the isolated item-4 replay.
+
+## [2026-07-15T21:41:21Z] EXECUTOR → SENIOR :: RECEIPT
+
+The exact-source resume fix is published as `0c3d123`. Required
+pull/rebase/autostash was up to date (`EXIT=0`); staged diff-check and
+credential-pattern scan returned true `EXIT=0` with
+`secret_like_matches=0`. Branch push and `git push origin HEAD:main` each
+returned true `EXIT=0`. I am now requeueing only ordinal 3 / item 4. Its
+durable 1,575 extraction rows from 50 completed request batches must carry
+forward, document verification must become true, and the provider journal
+must remain frozen at 201 submitted = 201 terminal before the other eleven
+items are released.
+
+## [2026-07-15T21:48:55Z] EXECUTOR → SENIOR :: BLOCKER
+
+The isolated item-4 resume hit a third REAL RED at verification; watcher true
+`EXIT=1`, and the worker is stopped with true `EXIT=0` / container exit 137.
+The lawful resume path did preserve all 1,575 extraction rows, reported
+`ghost_b_skip reason=staging_complete`, wrote Neo4j successfully, and kept the
+provider journal exactly 201 submitted = 201 terminal with reuse audit rows
+frozen at 66—zero new RunPod dispatch. Verification then failed exactly:
+`174 summary payload(s) missing Mongo text` in each of naive and HRAG. The
+other eleven items remain cancelled and were never released.
+
+Read-only diagnosis returned true `EXIT=0`: each Qdrant collection has exactly
+174 nonempty summary payloads, all 174 IDs and parent IDs match the current
+174 Mongo parents, with zero orphans and zero absent expected IDs. But all
+174 Mongo parent rows now have empty summary and retrieval_text fields while
+the document still says summaries_indexed=true / summary_points=174.
+Code-path evidence identifies the resume clobber: Ghost A first proves Mongo
+summaries complete plus Qdrant points present and logs `summaries indexed`,
+then returns `summaries=None`; because Ghost B staging is non-null, the resume
+checkpoint calls `_build_parent_dicts(..., summaries=None)` and ReplaceOne
+upserts all parents, erasing the validated summaries before verification.
+
+## [2026-07-15T21:48:55Z] EXECUTOR → SENIOR :: QUESTION
+
+May I narrowly fix the fast-skip path to reconstruct its already-validated
+Mongo summaries before any parent upsert (goldens: complete summary resume
+preserves every typed field; incomplete summary state still reruns/refuses),
+seal and publish it, then requeue item 4 alone? Because this RED already
+erased canonical Mongo summary text, the clean replay would let Ghost A
+regenerate those 174 summaries under the unchanged `$30` reservation ceiling
+and overwrite the matching Qdrant points; I will not reverse-copy Qdrant into
+Mongo or bypass verification unless explicitly ruled otherwise.
+
+## [2026-07-15T21:50:52Z] EXECUTOR → SENIOR :: RECEIPT
+
+Post-RED sealed snapshot behaved fail-closed with expected true `EXIT=1`
+because the batch contains one failed item. Durable state is done=3,
+failed=1, cancelled=11, running/queued/skipped=0; worker stopped; RunPod
+201/201 `COMPLETED`, zero outstanding, `$0.285251460`. Summary ledger remains
+open with `$1.273862190` ceiling basis, zero refusals, zero outstanding
+reservations, and `$28.726137810` remaining authority. This confirms the
+proposed 174-summary canonical regeneration can remain inside the existing
+authority if approved; nothing has been released or mutated after the RED.
+
+## [2026-07-15T21:51:03Z] SENIOR → EXECUTOR :: RULING — yes; and the general invariant is engraved
+The find is serious and the verification gate earned its keep: a resume
+ReplaceOne rebuilt parents with summaries=None and ERASED validated canonical
+text while the flags still claimed indexed. Rulings:
+1. FIX APPROVED as proposed — the fast-skip path reconstructs its validated
+   Mongo summaries BEFORE any parent upsert; goldens both directions
+   (complete → every typed field preserved; incomplete → rerun/refuse).
+2. ENGRAVED INVARIANT (general, permanent): A RESUME PATH MAY NEVER WRITE A
+   PARENT DOCUMENT CONTAINING LESS INFORMATION THAN THE DURABLE STORE
+   ALREADY HOLDS — carry stage-owned fields forward field-by-field or refuse
+   to write. ReplaceOne on partially-rebuilt dicts is exactly the anti-
+   pattern this bans.
+3. REPAIR DIRECTION: regenerate the erased 174 summaries via Ghost A under
+   the unchanged $30 ceiling and overwrite the matching Qdrant points —
+   canonical-direction repair (Mongo is truth, Qdrant is projection). NO
+   reverse-copy from Qdrant into Mongo; your instinct not to bypass
+   verification is correct and verification must pass on the whole document
+   afterward.
+4. SEQUENCE: seal + publish → requeue item 4 ALONE → verification green →
+   release the remaining eleven. Ledger note: this is the E2E's THIRD real
+   product find (noise-mention crash, dedup-vs-resume, resume-clobber) —
+   the qualification report should present all three with their invariants.
