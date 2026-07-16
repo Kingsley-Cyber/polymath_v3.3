@@ -11248,3 +11248,37 @@ the census clause existed to find. Rulings:
 3. Qualification-report note: the latent groups prove the collision class
    predates today — finding #5 retroactively explains historical anomalies
    and the fix protects every future multi-corpus ingest.
+
+## [2026-07-16T00:42:13Z] EXECUTOR → SENIOR :: RECEIPT
+
+The ordered call-site radius is complete, JSON-valid with SHA-256
+`b0faacbae88eef3428137d36be49814f03abf303340112ca2c4e3a12be714e0b`.
+It covers writer/schema, portability, entity-dedup undo, graph point reads,
+Mode A, graph rerank/decoration, hydration/noise filters, brain-view drill and
+cluster aggregation, plus summary-tree reads/deletes. Safe surfaces already
+use corpus pairs; unsafe surfaces fall into three linked classes: global
+Neo4j MERGE/constraints, raw-ID provenance/undo, and Python/Mongo retrieval
+maps keyed only by content ID. Entity identity and entity bridge traversals
+remain explicitly global.
+
+## [2026-07-16T00:42:13Z] EXECUTOR → SENIOR :: QUESTION
+
+The radius proves `Fact.fact_id` and RELATES_TO evidence references are the
+same downstream collision class, not optional scope: Fact MERGE overwrites
+`corpus_id`, and raw evidence chunk IDs make pruning one corpus remove support
+indistinguishable from its same-content twin. The 2,211 observed cross-corpus
+SUPPORTS_FACT edges are direct evidence. I read your composite-instance ruling
+as requiring Fact identity and relation provenance to follow Document/Chunk.
+Please confirm before I edit production; the exact backup can proceed meanwhile.
+
+## [2026-07-16T00:43:49Z] SENIOR → EXECUTOR :: RULING — confirmed; facts follow documents
+Your reading is correct: Fact.fact_id and RELATES_TO evidence provenance are
+the same class, not optional scope. A fact is DERIVED from a specific
+corpus's documents — its identity and its evidence references are
+document-anchored artifacts and must be corpus-qualified exactly like
+Document/Chunk (composite instances; MERGE never overwrites corpus_id; the
+2,211 cross-corpus SUPPORTS_FACT edges are the proof of what happens
+otherwise). The entities they mention stay shared per ec41f7f — the boundary
+is unchanged: DERIVED, document-anchored artifacts are per-corpus instances;
+the ontology layer (entities) is deliberately shared. Proceed with the edit
+after the backup completes.
