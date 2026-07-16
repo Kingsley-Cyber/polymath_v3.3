@@ -11397,3 +11397,78 @@ groups. Two formatting-only helper attempts are invalid/uncredited (`EXIT=1`
 then `123`) and stopped before the live schema query; the formatted helper's
 actual seal is the credited command. Proceeding to the exact 15-group repair;
 the immutable backup fence remains unchanged.
+
+## [2026-07-16T01:57:06Z] EXECUTOR → SENIOR :: RECEIPT
+
+The deployed composite-identity fix is published immutably as `a8c25dc`.
+Required pull/rebase/autostash was up to date, staged diff-check was clean,
+and the staged-additions credential-shape scan found
+`secret_like_matches=0`, all true `EXIT=0`. The repository-wide scanner is
+invalid/uncredited for this gate (`EXIT=1`) because it reports three existing
+synthetic placeholder assignments in unchanged tests; it did not identify a
+new staged value. Branch push and `git push origin HEAD:main` each returned
+true `EXIT=0`. Only the untracked operational `tmp/` tree remains. Beginning
+the read-only exact repair preflight now; mutation still waits on its frozen
+15-ID plan and latent-group invariance guard.
+
+## [2026-07-16T02:18:20Z] EXECUTOR → SENIOR :: RECEIPT
+
+The exact repair preflight is green and still read-only. Black+compile are
+green; live `EXPLAIN` compiled all 39 production+repair Cypher statements with
+zero failures and 10/10 dynamic read probes, true `EXIT=0`. The final
+manifest-bound plan is true `EXIT=0`: exactly 15 frozen IDs; 20,659 distinct
+target graph chunk IDs with zero third-corpus owners; protected inputs are
+14,641 graph chunks / 14,641 successful extraction rows / zero failures;
+E2E inputs are 18,790 / 18,790 / zero; no code-synthesis gap; current protected
+target residue is 1,884 Chunk + 2,305 Fact nodes, while E2E owns 15 Document +
+18,790 Chunk nodes. There are zero current target RELATES_TO provenance edges,
+so the ambiguous-edge cleanup is expected to be a no-op but remains sealed for
+idempotent reruns.
+
+The tree plan restores exactly 310 protected rows from 295 intact protected
+Qdrant rollup/section artifacts + 15 intact document profiles, with concepts
+derived deterministically from surviving protected parents. Protected tree is
+currently 0; E2E's 669 rows are frozen by content hash
+`a8731a78858fa35b90776c07b8cf0cebfeab8e018dd4d618b94f5c0436cf7b23`.
+The first plan is invalid/uncredited (`EXIT=1`) because today's grouping
+algorithm did not reproduce one original Qdrant topology; it changed nothing.
+The corrected plan preserves the original Qdrant node IDs/topology instead of
+silently modernizing protected structure. Crossing the manifest-confirmed
+mutation gate now; verification still requires exact protected baseline graph
+closure and unchanged latent/E2E hashes.
+
+## [OWNER-RELAY 2026-07-16T05:28:51Z] OWNER :: WORKFLOW CORRECTION + finish order (verbatim intent)
+"finish the repair and get me the eval scores... something needs to change
+with the workflow. codex is taking forever because you are not planning what
+codex should do and giving it guidance. you need to do more planning. for
+example have you reviewed the librarian curation analysis, if the schema or
+metadata is being used and can answer dated questions"
+
+## [2026-07-16T05:28:51Z] SENIOR → EXECUTOR :: FORWARD WORK PLAN (senior mode change: planned packages, not reactive rulings)
+EVAL ADDITION (non-gate): append a DIAGNOSTIC temporal query set to the eval
+run — 6–8 dated questions against the test corpus ("what happened in <year>",
+before/after framings) — REPORT-ONLY, clearly separated from the frozen
+preregistered gate. Expected result is honest weakness (T-MAIN unwired);
+the report states it as the CP11 gap with the captured-metadata evidence.
+
+FINISH SEQUENCE (unchanged, active): repair → isolation census → eval (frozen
+gate + temporal diagnostics) → report.
+
+POST-REPORT PACKAGE QUEUE (pre-planned with acceptance criteria — execute in
+order, no per-package senior wait unless a package says so):
+P1. LATENT-COLLISION MIGRATION — the 5 queued groups under the composite fix;
+    accept: collision census reads zero repo-wide, backups+receipts.
+P2. CUTOVER DECISION PACKAGE — evidence brief for green-replaces-blue
+    (parity, cost, determinism), embed restore math; OWNER decides.
+P3. P2.7b BURST/POD ORCHESTRATION — dual-mode (serverless burst / pod-hour
+    batch), N-account routing, wave checkpoints under all invariants;
+    accept: dry-run receipts + priced modes table.
+P4. DIGEST PHASE-2 REMAINDER — resume decision brief (535 queued parents,
+    materializer fix precondition); OWNER decides.
+P5. CP7 LIBRARIAN — card rebuild from the curation analysis + shelf routing
+    activation behind A/B; accept: card-field gaps closed, routing measured.
+P6. CP11 TEMPORAL WIRING (the owner's dated-questions ask) — T-MAIN query
+    modes consuming the captured temporal_class/time_expressions; accept:
+    the diagnostic temporal set flips from weak to target on re-run.
+Each package ships its own design note ONLY where a seam is ambiguous;
+otherwise build against these acceptance criteria directly.
