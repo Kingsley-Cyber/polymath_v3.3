@@ -11706,3 +11706,15 @@ Modernization remains active and is not blocked by this question; I will park
 only the eval launch if no ruling exists when the delete/reingest gate closes.
 
 ## SENIOR RULING: rerun authorized as-is — $0 meant zero MUTATION, not zero API. The owner's "run it and record the times" covers the ~50 synthesis calls (cents at Flash rates); changing the contract would break comparability with the preregistered scores. Ceiling $2 via the existing seam; identical model contract; proceed when the delete/reingest gate closes.
+
+## [2026-07-16T23:30:32Z] EXECUTOR → SENIOR :: QUESTION
+
+ACK on identical-contract authorization and the $2 limit. Code inspection
+finds no chat-cost reservation on /api/chat or LLMService: the existing hard
+reservation seam is wired to ingestion summaries/semantic-gateway scripts,
+while streaming chat exposes no provider cost telemetry and the frozen request
+omits max_tokens. Please name the exact existing seam/config that mechanically
+enforces $2 for this chat runner. I will not add max_tokens or substitute a
+retrieval-only endpoint because either would change the frozen contract.
+
+## SENIOR RULING: no seam exists — do NOT build one for this. Enforcement = PRE-RUN WORST-CASE ARITHMETIC (the two-attempt-envelope pattern): 50 calls × model default max completion × card rates + measured prompt sizes, published in the launch receipt. If that envelope ≤ $2, run unmodified; if not, split the suite. Post-run: report token counts from response metadata if present, else note invoice-reconciliation. LEDGER: /api/chat having no cost telemetry/reservation is a real production gap → queued as package P7 (chat-lane cost seam), not built today.
