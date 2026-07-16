@@ -211,14 +211,18 @@ async def _bounded_discover_without_legacy(
                 qdrant=qdrant,
             )
             if not seeds:
-                return cid, {
-                    "nodes": [],
-                    "links": [],
-                    "bridges": [],
-                    "gaps": [],
-                    "hubs": [],
-                    "seeds": [],
-                }, None
+                return (
+                    cid,
+                    {
+                        "nodes": [],
+                        "links": [],
+                        "bridges": [],
+                        "gaps": [],
+                        "hubs": [],
+                        "seeds": [],
+                    },
+                    None,
+                )
             seed_ids = [s["entity_id"] for s in seeds if s.get("entity_id")]
             seed_scores = {
                 s["entity_id"]: float(s.get("score") or 0.0)
@@ -249,26 +253,34 @@ async def _bounded_discover_without_legacy(
                 metrics=metrics,
             )
             hubs = find_hubs(nodes, links, metrics=metrics)
-            return cid, {
-                "nodes": nodes,
-                "links": links,
-                "bridges": bridges,
-                "gaps": gaps,
-                "hubs": hubs,
-                "seeds": seeds,
-                "trace": subgraph.get("trace") or {},
-            }, None
+            return (
+                cid,
+                {
+                    "nodes": nodes,
+                    "links": links,
+                    "bridges": bridges,
+                    "gaps": gaps,
+                    "hubs": hubs,
+                    "seeds": seeds,
+                    "trace": subgraph.get("trace") or {},
+                },
+                None,
+            )
         except Exception as exc:  # noqa: BLE001
             logger.warning("bounded discover corpus=%s failed: %s", cid, exc)
-            return cid, {
-                "nodes": [],
-                "links": [],
-                "bridges": [],
-                "gaps": [],
-                "hubs": [],
-                "seeds": [],
-                "trace": {"error": str(exc)},
-            }, str(exc)
+            return (
+                cid,
+                {
+                    "nodes": [],
+                    "links": [],
+                    "bridges": [],
+                    "gaps": [],
+                    "hubs": [],
+                    "seeds": [],
+                    "trace": {"error": str(exc)},
+                },
+                str(exc),
+            )
 
     sem = _asyncio.Semaphore(4)
 
@@ -417,7 +429,7 @@ async def _bounded_discover_without_legacy(
         }
         for link in links
         if link.get("source") and link.get("target")
-    ][: _PACKET_MAX_EDGES]
+    ][:_PACKET_MAX_EDGES]
 
     working_entities = [
         {
@@ -446,7 +458,7 @@ async def _bounded_discover_without_legacy(
             reverse=True,
         )
         if node.get("id") or node.get("entity_id")
-    ][: _PACKET_MAX_ENTITIES]
+    ][:_PACKET_MAX_ENTITIES]
 
     questions = [
         {
@@ -521,10 +533,14 @@ async def _bounded_discover_without_legacy(
                 or node.get("id")
                 or ""
             ),
-            "kind": str(node.get("entity_type") or node.get("primary_entity_type") or "concept"),
+            "kind": str(
+                node.get("entity_type") or node.get("primary_entity_type") or "concept"
+            ),
             "role": "seed" if node.get("is_seed") else "context",
             "size": float(node.get("mention_count") or 1),
-            "weight": float(node.get("pagerank_score") or node.get("confidence") or 0.0),
+            "weight": float(
+                node.get("pagerank_score") or node.get("confidence") or 0.0
+            ),
             "evidence_count": int(node.get("mention_count") or 0),
             "top_entities": [],
             "source_corpus": str(node.get("source_corpus") or ""),
@@ -588,7 +604,11 @@ async def _bounded_discover_without_legacy(
             "errors_per_corpus": errors,
         },
         domain_map_summary=[],
-        graph={"nodes": nodes, "links": links, "trace": {"graph_edge_policy": graph_traces}},
+        graph={
+            "nodes": nodes,
+            "links": links,
+            "trace": {"graph_edge_policy": graph_traces},
+        },
         anchors=seeds,
         concept_communities=hubs,
         entity_concept_map={},
@@ -816,6 +836,7 @@ def _packet_caps_for_mode(synthesis_mode: str = "research") -> _PacketCaps:
         )
     return _DEFAULT_PACKET_CAPS
 
+
 # Synthesis-time LLM budget. Keep the call fast; the packet is bounded so the
 # model has plenty of room without burning the whole turn budget. Longer essay
 # paragraphs (5-7 sentences each, ~3 themes + 2 bridges + 2 gaps + 2 signals)
@@ -930,7 +951,9 @@ def _query_relevant_entity_ids(
     query-matching concepts while dropping unrelated corpus neighborhoods.
     """
 
-    node_ids = {str(raw.get("id") or "").strip() for raw in graph_nodes if raw.get("id")}
+    node_ids = {
+        str(raw.get("id") or "").strip() for raw in graph_nodes if raw.get("id")
+    }
     terms = _graph_relevance_terms(query)
     if not node_ids or not terms:
         return node_ids
@@ -939,7 +962,9 @@ def _query_relevant_entity_ids(
         str(raw.get("id") or "").strip()
         for raw in graph_nodes
         if raw.get("id")
-        and any(term in _entity_relevance_text(raw, entity_concept_map) for term in terms)
+        and any(
+            term in _entity_relevance_text(raw, entity_concept_map) for term in terms
+        )
     }
     if not core_ids:
         return node_ids
@@ -985,7 +1010,10 @@ def _trace_with_stages(trace: dict[str, Any] | None) -> dict[str, Any]:
         {
             "stage": "working_set",
             "label": "Working set",
-            "count": int(expansion.get("working_entities") or len(trace.get("working_entities") or [])),
+            "count": int(
+                expansion.get("working_entities")
+                or len(trace.get("working_entities") or [])
+            ),
             "status": "ok" if trace.get("working_entities") else "watch",
             "detail": "Bounded entities selected for synthesis.",
         },
@@ -1246,21 +1274,30 @@ def _insight_packet_summary_from_result(result: Any) -> dict[str, Any]:
     trace = getattr(result, "trace", {}) or {}
     counts = {
         "anchors": len(getattr(result, "anchors", []) or []),
-        "working_entities": len((trace.get("working_entities") if isinstance(trace, dict) else []) or []),
+        "working_entities": len(
+            (trace.get("working_entities") if isinstance(trace, dict) else []) or []
+        ),
         "themes": len(getattr(result, "themes", []) or []),
         "bridges": len(getattr(result, "bridges_v2", []) or []),
         "gaps": len(getattr(result, "gaps_v2", []) or []),
         "emerging_signals": len(getattr(result, "latent_topics", []) or []),
         "weak_links": len(getattr(result, "weak_links", []) or []),
-        "evidence_chunks": len((trace.get("source_docs") if isinstance(trace, dict) else []) or []),
+        "evidence_chunks": len(
+            (trace.get("source_docs") if isinstance(trace, dict) else []) or []
+        ),
         "web_evidence_chunks": len(
             [
                 doc
-                for doc in ((trace.get("source_docs") if isinstance(trace, dict) else []) or [])
-                if isinstance(doc, dict) and str(doc.get("source_tier") or "") == "web_search"
+                for doc in (
+                    (trace.get("source_docs") if isinstance(trace, dict) else []) or []
+                )
+                if isinstance(doc, dict)
+                and str(doc.get("source_tier") or "") == "web_search"
             ]
         ),
-        "context_edges": len((trace.get("selected_edges") if isinstance(trace, dict) else []) or []),
+        "context_edges": len(
+            (trace.get("selected_edges") if isinstance(trace, dict) else []) or []
+        ),
     }
     temporal_support = any(
         bool(doc.get("created_at") or doc.get("updated_at") or doc.get("date"))
@@ -1271,15 +1308,12 @@ def _insight_packet_summary_from_result(result: Any) -> dict[str, Any]:
     if not isinstance(evidence_filter, dict):
         evidence_filter = {}
     evidence_all_rejected = bool(evidence_filter.get("all_rejected"))
-    sparse = (
-        evidence_all_rejected
-        or (
-            counts["evidence_chunks"] == 0
-            and counts["anchors"] == 0
-            and counts["themes"] < 2
-            and counts["bridges"] == 0
-            and counts["gaps"] == 0
-        )
+    sparse = evidence_all_rejected or (
+        counts["evidence_chunks"] == 0
+        and counts["anchors"] == 0
+        and counts["themes"] < 2
+        and counts["bridges"] == 0
+        and counts["gaps"] == 0
     )
     return {
         "sparse": sparse,
@@ -1288,7 +1322,10 @@ def _insight_packet_summary_from_result(result: Any) -> dict[str, Any]:
         "evidence_sources": {
             "chunks": counts["evidence_chunks"],
             "web_search": counts["web_evidence_chunks"],
-            "cached_metrics": counts["themes"] + counts["bridges"] + counts["gaps"] + counts["emerging_signals"],
+            "cached_metrics": counts["themes"]
+            + counts["bridges"]
+            + counts["gaps"]
+            + counts["emerging_signals"],
             "bounded_neo4j_edges": counts["context_edges"],
             "provenance_warnings": counts["weak_links"],
         },
@@ -1309,7 +1346,11 @@ def _context_graph_from_result(result: Any) -> dict[str, Any]:
 
     graph = getattr(result, "graph", {}) or {"nodes": [], "links": []}
     trace = _coerce_dict(getattr(result, "trace", {}) or {})
-    evidence_filter = trace.get("evidence_filter") if isinstance(trace.get("evidence_filter"), dict) else {}
+    evidence_filter = (
+        trace.get("evidence_filter")
+        if isinstance(trace.get("evidence_filter"), dict)
+        else {}
+    )
     if evidence_filter.get("all_rejected"):
         return {
             "nodes": [],
@@ -1330,7 +1371,9 @@ def _context_graph_from_result(result: Any) -> dict[str, Any]:
             },
         }
     entity_concept_map = getattr(result, "entity_concept_map", {}) or {}
-    graph_nodes_raw = [raw for raw in (graph.get("nodes", []) or []) if isinstance(raw, dict)]
+    graph_nodes_raw = [
+        raw for raw in (graph.get("nodes", []) or []) if isinstance(raw, dict)
+    ]
     selected_edges_raw = [
         edge for edge in (trace.get("selected_edges") or []) if isinstance(edge, dict)
     ]
@@ -1425,12 +1468,20 @@ def _context_graph_from_result(result: Any) -> dict[str, Any]:
         if label not in group["entities"]:
             group["entities"].append(label)
         group["degree"] += float(raw.get("degree") or 0)
-        if str(raw.get("emphasis") or "") in {"bridge", "bridge_anchor", "frontier", "transfer_hub"} or eid in bridge_entities:
+        if (
+            str(raw.get("emphasis") or "")
+            in {"bridge", "bridge_anchor", "frontier", "transfer_hub"}
+            or eid in bridge_entities
+        ):
             group["bridge_count"] += 1
 
     sorted_groups = sorted(
         group_index.values(),
-        key=lambda g: (len(g["entities"]), float(g.get("degree") or 0), int(g.get("bridge_count") or 0)),
+        key=lambda g: (
+            len(g["entities"]),
+            float(g.get("degree") or 0),
+            int(g.get("bridge_count") or 0),
+        ),
         reverse=True,
     )[:_CONTEXT_MAX_GROUPS]
     visible_group_ids = {str(group["id"]) for group in sorted_groups}
@@ -1442,11 +1493,17 @@ def _context_graph_from_result(result: Any) -> dict[str, Any]:
         source_id = str(raw.get("source") or "")
         target_id = str(raw.get("target") or "")
         if relevance_entity_ids and (
-            source_id not in relevance_entity_ids or target_id not in relevance_entity_ids
+            source_id not in relevance_entity_ids
+            or target_id not in relevance_entity_ids
         ):
             continue
         emphasis = str(raw.get("emphasis") or "")
-        if "bridge" in emphasis or emphasis in {"gap_edge", "weak_edge", "fragile_bridge", "ghost_analogy"}:
+        if "bridge" in emphasis or emphasis in {
+            "gap_edge",
+            "weak_edge",
+            "fragile_bridge",
+            "ghost_analogy",
+        }:
             if raw.get("source"):
                 required_entity_ids.add(str(raw.get("source")))
             if raw.get("target"):
@@ -1462,15 +1519,22 @@ def _context_graph_from_result(result: Any) -> dict[str, Any]:
             role_score += 60.0
         elif role in {"frontier", "analogy_anchor", "analogy"}:
             role_score += 35.0
-        return (role_score + float(raw.get("degree") or 0), float(raw.get("degree") or 0))
+        return (
+            role_score + float(raw.get("degree") or 0),
+            float(raw.get("degree") or 0),
+        )
 
     visible_entity_ids = {
         str(raw.get("id"))
-        for raw in sorted(graph_nodes_for_map, key=_node_rank, reverse=True)[:_CONTEXT_MAX_CONCEPT_NODES]
+        for raw in sorted(graph_nodes_for_map, key=_node_rank, reverse=True)[
+            :_CONTEXT_MAX_CONCEPT_NODES
+        ]
         if raw.get("id")
     }
     visible_entity_ids |= {
-        eid for eid in required_entity_ids if any(str(raw.get("id") or "") == eid for raw in graph_nodes_for_map)
+        eid
+        for eid in required_entity_ids
+        if any(str(raw.get("id") or "") == eid for raw in graph_nodes_for_map)
     }
     hidden_concept_count = max(0, len(graph_nodes_for_map) - len(visible_entity_ids))
 
@@ -1483,11 +1547,22 @@ def _context_graph_from_result(result: Any) -> dict[str, Any]:
             "kind": "topic",
             "role": "query_concept_neighborhood",
             "topic_id": gid,
-            "size": max(8.0, float(len(group["entities"])) * 2.0 + float(group.get("bridge_count") or 0)),
+            "size": max(
+                8.0,
+                float(len(group["entities"])) * 2.0
+                + float(group.get("bridge_count") or 0),
+            ),
             "weight": float(group.get("degree") or len(group["entities"])),
             "evidence_count": len(group["entities"]),
             "top_entities": [str(v) for v in group["entities"][:8]],
-            "jump_targets": [{"section": "themes", "label": "theme", "detail": str(group.get("label") or "Query neighborhood"), "target_id": cluster_id}],
+            "jump_targets": [
+                {
+                    "section": "themes",
+                    "label": "theme",
+                    "detail": str(group.get("label") or "Query neighborhood"),
+                    "target_id": cluster_id,
+                }
+            ],
         }
 
     for raw in graph_nodes_for_map:
@@ -1499,15 +1574,57 @@ def _context_graph_from_result(result: Any) -> dict[str, Any]:
         raw_cluster_id = str(concept.get("concept_id") or "").strip()
         jumps = []
         if group_id:
-            jumps.append({"section": "themes", "label": "neighborhood", "detail": str(concept.get("label") or raw.get("concept") or raw.get("domain") or "Query neighborhood"), "target_id": raw_cluster_id or group_id})
+            jumps.append(
+                {
+                    "section": "themes",
+                    "label": "neighborhood",
+                    "detail": str(
+                        concept.get("label")
+                        or raw.get("concept")
+                        or raw.get("domain")
+                        or "Query neighborhood"
+                    ),
+                    "target_id": raw_cluster_id or group_id,
+                }
+            )
         if eid in bridge_entities:
-            jumps.append({"section": "bridges", "label": "bridge", "detail": "Bridge evidence involving this concept", "target_id": eid})
-        if raw_cluster_id in gap_clusters or (group_id in visible_group_ids and raw_cluster_id in gap_clusters):
-            jumps.append({"section": "gaps", "label": "gap", "detail": "Gap candidate involving this query neighborhood", "target_id": raw_cluster_id or group_id})
+            jumps.append(
+                {
+                    "section": "bridges",
+                    "label": "bridge",
+                    "detail": "Bridge evidence involving this concept",
+                    "target_id": eid,
+                }
+            )
+        if raw_cluster_id in gap_clusters or (
+            group_id in visible_group_ids and raw_cluster_id in gap_clusters
+        ):
+            jumps.append(
+                {
+                    "section": "gaps",
+                    "label": "gap",
+                    "detail": "Gap candidate involving this query neighborhood",
+                    "target_id": raw_cluster_id or group_id,
+                }
+            )
         if eid in weak_entities:
-            jumps.append({"section": "trace", "label": "weak link", "detail": "Provenance warning involving this concept", "target_id": eid})
+            jumps.append(
+                {
+                    "section": "trace",
+                    "label": "weak link",
+                    "detail": "Provenance warning involving this concept",
+                    "target_id": eid,
+                }
+            )
         if not jumps:
-            jumps.append({"section": "trace", "label": "trace", "detail": "Working-set trace for this selected graph", "target_id": eid})
+            jumps.append(
+                {
+                    "section": "trace",
+                    "label": "trace",
+                    "detail": "Working-set trace for this selected graph",
+                    "target_id": eid,
+                }
+            )
         nodes[eid] = {
             "id": eid,
             "label": raw.get("label") or eid,
@@ -1522,15 +1639,17 @@ def _context_graph_from_result(result: Any) -> dict[str, Any]:
         }
         topic_id = f"topic:{group_id}" if group_id else ""
         if topic_id in nodes:
-            links.append({
-                "source": topic_id,
-                "target": eid,
-                "kind": "membership",
-                "role": "query_neighborhood",
-                "weight": 0.45,
-                "suggested": False,
-                "evidence": "entity grouped by query-scoped concept/facet similarity",
-            })
+            links.append(
+                {
+                    "source": topic_id,
+                    "target": eid,
+                    "kind": "membership",
+                    "role": "query_neighborhood",
+                    "weight": 0.45,
+                    "suggested": False,
+                    "evidence": "entity grouped by query-scoped concept/facet similarity",
+                }
+            )
 
     # Unique source documents from the LLM evidence packet. They are not merged
     # into corpus buckets; the map shows each file that contributed chunks.
@@ -1538,7 +1657,12 @@ def _context_graph_from_result(result: Any) -> dict[str, Any]:
     for raw in trace.get("source_docs") or []:
         if not isinstance(raw, dict):
             continue
-        doc_id = str(raw.get("doc_id") or raw.get("document_id") or raw.get("id") or "unknown-doc").strip()
+        doc_id = str(
+            raw.get("doc_id")
+            or raw.get("document_id")
+            or raw.get("id")
+            or "unknown-doc"
+        ).strip()
         chunk_id = str(raw.get("chunk_id") or raw.get("id") or "").strip()
         source_label = _source_label_from_row(raw, doc_id=doc_id, chunk_id=chunk_id)
         row = files_by_id.setdefault(
@@ -1549,18 +1673,28 @@ def _context_graph_from_result(result: Any) -> dict[str, Any]:
                 "chunk_count": 0,
                 "chunk_ids": [],
                 "has_temporal": False,
-                "source": raw.get("source") if isinstance(raw.get("source"), dict) else {},
+                "source": raw.get("source")
+                if isinstance(raw.get("source"), dict)
+                else {},
             },
         )
         row["chunk_count"] += 1
         if chunk_id:
             row["chunk_ids"].append(chunk_id)
-        row["has_temporal"] = bool(row["has_temporal"] or _has_temporal_source_support(raw))
+        row["has_temporal"] = bool(
+            row["has_temporal"] or _has_temporal_source_support(raw)
+        )
         if not row.get("source") and isinstance(raw.get("source"), dict):
             row["source"] = raw.get("source") or {}
 
     primary_groups = [str(group["id"]) for group in sorted_groups[:3]]
-    for doc in sorted(files_by_id.values(), key=lambda d: (-int(d.get("chunk_count") or 0), str(d.get("source_label") or "")))[:_CONTEXT_MAX_DOCUMENT_NODES]:
+    for doc in sorted(
+        files_by_id.values(),
+        key=lambda d: (
+            -int(d.get("chunk_count") or 0),
+            str(d.get("source_label") or ""),
+        ),
+    )[:_CONTEXT_MAX_DOCUMENT_NODES]:
         doc_node_id = f"doc:{doc['doc_id']}"
         primary_group = primary_groups[0] if primary_groups else None
         nodes[doc_node_id] = {
@@ -1574,20 +1708,29 @@ def _context_graph_from_result(result: Any) -> dict[str, Any]:
             "evidence_count": int(doc.get("chunk_count") or 0),
             "source": doc.get("source") or {},
             "top_entities": [str(v) for v in (doc.get("chunk_ids") or [])[:6]],
-            "jump_targets": [{"section": "trace", "label": "file", "detail": str(doc.get("source_label") or doc.get("doc_id")), "target_id": str(doc.get("doc_id") or "")}],
+            "jump_targets": [
+                {
+                    "section": "trace",
+                    "label": "file",
+                    "detail": str(doc.get("source_label") or doc.get("doc_id")),
+                    "target_id": str(doc.get("doc_id") or ""),
+                }
+            ],
         }
         for gid in primary_groups:
             topic_id = f"topic:{gid}"
             if topic_id in nodes:
-                links.append({
-                    "source": doc_node_id,
-                    "target": topic_id,
-                    "kind": "evidence_context",
-                    "role": "document_context",
-                    "weight": 0.25,
-                    "suggested": False,
-                    "evidence": "source file contributed chunks to the bounded LLM packet",
-                })
+                links.append(
+                    {
+                        "source": doc_node_id,
+                        "target": topic_id,
+                        "kind": "evidence_context",
+                        "role": "document_context",
+                        "weight": 0.25,
+                        "suggested": False,
+                        "evidence": "source file contributed chunks to the bounded LLM packet",
+                    }
+                )
 
     for raw in graph.get("links", []) or []:
         if not isinstance(raw, dict):
@@ -1598,17 +1741,26 @@ def _context_graph_from_result(result: Any) -> dict[str, Any]:
         ):
             continue
         emphasis = str(raw.get("emphasis") or "context")
-        if str(raw.get("source") or "") not in nodes or str(raw.get("target") or "") not in nodes:
+        if (
+            str(raw.get("source") or "") not in nodes
+            or str(raw.get("target") or "") not in nodes
+        ):
             continue
-        links.append({
-            "source": raw.get("source"),
-            "target": raw.get("target"),
-            "kind": raw.get("classification") or "context",
-            "role": emphasis,
-            "weight": 2.2 if emphasis == "bridge" else 1.3 if "bridge" in emphasis else 0.6,
-            "suggested": emphasis == "gap_edge",
-            "evidence": raw.get("evidence") or raw.get("predicate") or "",
-        })
+        links.append(
+            {
+                "source": raw.get("source"),
+                "target": raw.get("target"),
+                "kind": raw.get("classification") or "context",
+                "role": emphasis,
+                "weight": 2.2
+                if emphasis == "bridge"
+                else 1.3
+                if "bridge" in emphasis
+                else 0.6,
+                "suggested": emphasis == "gap_edge",
+                "evidence": raw.get("evidence") or raw.get("predicate") or "",
+            }
+        )
 
     for gap in getattr(result, "gaps_v2", []) or []:
         if not isinstance(gap, dict):
@@ -1620,15 +1772,18 @@ def _context_graph_from_result(result: Any) -> dict[str, Any]:
         source = f"topic:{a}"
         target = f"topic:{b}"
         if source in nodes and target in nodes:
-            links.append({
-                "source": source,
-                "target": target,
-                "kind": "suggested_gap",
-                "role": "gap_suggestion",
-                "weight": 0.2,
-                "suggested": True,
-                "evidence": gap.get("question") or "suggested gap, not a Neo4j edge",
-            })
+            links.append(
+                {
+                    "source": source,
+                    "target": target,
+                    "kind": "suggested_gap",
+                    "role": "gap_suggestion",
+                    "weight": 0.2,
+                    "suggested": True,
+                    "evidence": gap.get("question")
+                    or "suggested gap, not a Neo4j edge",
+                }
+            )
 
     return {
         "nodes": list(nodes.values()),
@@ -1641,8 +1796,12 @@ def _context_graph_from_result(result: Any) -> dict[str, Any]:
             "grouping_basis": "Only concepts/documents surfaced by this query are grouped; cached corpus communities are not used as default islands.",
             "corpus_bucketed": False,
             "topic_count": len([n for n in nodes.values() if n.get("kind") == "topic"]),
-            "document_count": len([n for n in nodes.values() if n.get("kind") == "document"]),
-            "concept_count": len([n for n in nodes.values() if n.get("kind") == "concept"]),
+            "document_count": len(
+                [n for n in nodes.values() if n.get("kind") == "document"]
+            ),
+            "concept_count": len(
+                [n for n in nodes.values() if n.get("kind") == "concept"]
+            ),
             "hidden_concept_count": hidden_concept_count,
             "visible_concept_cap": _CONTEXT_MAX_CONCEPT_NODES,
         },
@@ -1789,8 +1948,8 @@ def _local_graph_structural_signals(
                 continue
             union_count = max(1, len(source_neighbors | target_neighbors))
             jaccard = len(shared) / union_count
-            touches_seed = source in seed_ids or target in seed_ids or bool(
-                set(shared) & seed_ids
+            touches_seed = (
+                source in seed_ids or target in seed_ids or bool(set(shared) & seed_ids)
             )
             if not touches_seed:
                 continue
@@ -1965,7 +2124,10 @@ def _local_graph_structural_signals(
                 "domain": domain(neighbor),
                 "topology_sim": round(
                     len(adjacency.get(hub, set()) & adjacency.get(neighbor, set()))
-                    / max(1, len(adjacency.get(hub, set()) | adjacency.get(neighbor, set()))),
+                    / max(
+                        1,
+                        len(adjacency.get(hub, set()) | adjacency.get(neighbor, set())),
+                    ),
                     3,
                 ),
             }
@@ -1981,7 +2143,10 @@ def _local_graph_structural_signals(
                 "target_domain": analogs[0]["domain"] if analogs else "",
                 "target_domains": target_domains,
                 "analogs": analogs,
-                "cd_pagerank": _maybe_float(node_index.get(hub, {}).get("pagerank_score")) or 0.0,
+                "cd_pagerank": _maybe_float(
+                    node_index.get(hub, {}).get("pagerank_score")
+                )
+                or 0.0,
                 "rationale": (
                     f"{name(hub)} connects multiple local neighbors "
                     f"({', '.join(a['name'] for a in analogs[:3] if a.get('name'))}); "
@@ -2031,7 +2196,9 @@ def _local_graph_structural_signals(
                 "source_domain": domain(source_id),
                 "target_domain": str(bridge.get("entity_type") or domain(bridge_id)),
                 "bridge_type": bridge_type,
-                "classification": "structural_analog" if bridge_type == "path_count" else "conceptual",
+                "classification": "structural_analog"
+                if bridge_type == "path_count"
+                else "conceptual",
                 "path_count": connected_count,
                 "path_entity_ids": connected,
                 "path_entities": [name(seed_id) for seed_id in connected[:5]],
@@ -2056,15 +2223,33 @@ def _local_graph_structural_signals(
             ),
             "degree": len(adjacency.get(entity_id, set())),
             "domains_touched": list(
-                dict.fromkeys(domain(neighbor) for neighbor in adjacency.get(entity_id, set()) if domain(neighbor))
+                dict.fromkeys(
+                    domain(neighbor)
+                    for neighbor in adjacency.get(entity_id, set())
+                    if domain(neighbor)
+                )
             )[:5],
             "cross_domain_potential": round(
-                min(1.0, len({domain(neighbor) for neighbor in adjacency.get(entity_id, set()) if domain(neighbor)}) / 4),
+                min(
+                    1.0,
+                    len(
+                        {
+                            domain(neighbor)
+                            for neighbor in adjacency.get(entity_id, set())
+                            if domain(neighbor)
+                        }
+                    )
+                    / 4,
+                ),
                 3,
             ),
-            "mention_count": int(node_index.get(entity_id, {}).get("mention_count") or 0),
+            "mention_count": int(
+                node_index.get(entity_id, {}).get("mention_count") or 0
+            ),
             "context": "seed" if entity_id in seed_ids else "direct_seed_neighbor",
-            "source_corpora": list(node_index.get(entity_id, {}).get("source_corpora") or []),
+            "source_corpora": list(
+                node_index.get(entity_id, {}).get("source_corpora") or []
+            ),
         }
         for entity_id in sorted(
             query_scope,
@@ -2137,7 +2322,9 @@ def _local_graph_structural_signals(
             structural_analogies=analogies[:max_items],
             transfer_candidates=transfers[:max_items],
             fragile_bridges=[
-                item for item in weak_links if item.get("weakness_type") in {"fragile_bridge", "thin_evidence"}
+                item
+                for item in weak_links
+                if item.get("weakness_type") in {"fragile_bridge", "thin_evidence"}
             ][:max_items],
             terminological_gaps=terminological[:max_items],
         ),
@@ -2152,7 +2339,9 @@ def _local_graph_structural_signals(
     }
 
 
-def _public_web_grounding_terms(packet: dict[str, Any], *, limit: int = 10) -> list[str]:
+def _public_web_grounding_terms(
+    packet: dict[str, Any], *, limit: int = 10
+) -> list[str]:
     terms: list[str] = []
     seen: set[str] = set()
 
@@ -2178,7 +2367,13 @@ def _public_web_grounding_terms(packet: dict[str, Any], *, limit: int = 10) -> l
         for item in packet.get(bucket) or []:
             if not isinstance(item, dict):
                 continue
-            for key in ("source_name", "target_name", "hub_name", "source_domain", "target_domain"):
+            for key in (
+                "source_name",
+                "target_name",
+                "hub_name",
+                "source_domain",
+                "target_domain",
+            ):
                 add(item.get(key))
     return terms[:limit]
 
@@ -2212,7 +2407,9 @@ async def _retrieve_web_grounding_evidence(
 
         settings = get_settings()
         if not settings.LIVE_WEB_SEARCH_ENABLED:
-            meta.update({"status": "disabled", "reason": "LIVE_WEB_SEARCH_ENABLED=false"})
+            meta.update(
+                {"status": "disabled", "reason": "LIVE_WEB_SEARCH_ENABLED=false"}
+            )
             return [], meta
 
         max_results = max(1, min(int(max_results or 5), 10))
@@ -2255,7 +2452,12 @@ async def _retrieve_web_grounding_evidence(
             max_results=candidate_limit,
             time_range=time_range,
         )
-        fetched, fetch_stats, hits_to_fetch, pipeline = await live_web_search._fetch_pages_for_search(
+        (
+            fetched,
+            fetch_stats,
+            hits_to_fetch,
+            pipeline,
+        ) = await live_web_search._fetch_pages_for_search(
             search_query=search_query,
             hits=hits,
             max_results=max_results,
@@ -2263,7 +2465,10 @@ async def _retrieve_web_grounding_evidence(
             youtube_transcripts_enabled=True,
             max_fetch_pages=min(
                 max_results,
-                int(getattr(settings, "LIVE_WEB_FETCH_MAX_PAGES", max_results) or max_results),
+                int(
+                    getattr(settings, "LIVE_WEB_FETCH_MAX_PAGES", max_results)
+                    or max_results
+                ),
             ),
         )
         fetch_stats_by_url = {str(item.get("url")): item for item in fetch_stats}
@@ -2282,7 +2487,9 @@ async def _retrieve_web_grounding_evidence(
         )
         rows = _source_docs_from_retrieval_chunks(selected, max_chunks=max_results)
         for row in rows:
-            metadata = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
+            metadata = (
+                row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
+            )
             row["source_tier"] = "web_search"
             row["retriever"] = "live_web_search"
             row["source"] = {
@@ -2333,7 +2540,12 @@ async def _maybe_add_web_grounding_to_packet(
         fetch_depth=fetch_depth,
         max_results=max_results,
     )
-    web_evidence, rejected, temporal_support, rejection_reasons = _curated_evidence_rows(
+    (
+        web_evidence,
+        rejected,
+        temporal_support,
+        rejection_reasons,
+    ) = _curated_evidence_rows(
         rows,
         query=query,
         max_evidence=max_results,
@@ -2342,7 +2554,9 @@ async def _maybe_add_web_grounding_to_packet(
         item["evidence_id"] = f"w{idx}"
         item["source_tier"] = "web_search"
         source = item.get("source") if isinstance(item.get("source"), dict) else {}
-        metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+        metadata = (
+            item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+        )
         if metadata.get("url"):
             source = {**source, "url": metadata.get("url")}
         if metadata.get("source_type"):
@@ -2357,7 +2571,9 @@ async def _maybe_add_web_grounding_to_packet(
     ][: caps.evidence]
     packet["web_evidence"] = web_evidence
     packet["evidence"] = local_evidence + web_evidence
-    packet["temporal_support"] = bool(packet.get("temporal_support") or temporal_support)
+    packet["temporal_support"] = bool(
+        packet.get("temporal_support") or temporal_support
+    )
     evidence_filter = packet.get("evidence_filter")
     if not isinstance(evidence_filter, dict):
         evidence_filter = {}
@@ -2395,14 +2611,17 @@ def _web_evidence_payload_from_packet(
     """
 
     trace = trace if isinstance(trace, dict) else {}
-    meta = trace.get("web_grounding") if isinstance(trace.get("web_grounding"), dict) else {}
+    meta = (
+        trace.get("web_grounding")
+        if isinstance(trace.get("web_grounding"), dict)
+        else {}
+    )
     raw_depth = str(fetch_depth or meta.get("fetch_depth") or "normal").lower()
     depth = raw_depth if raw_depth in {"snippets", "normal", "deep"} else "normal"
     rows = [
         item
         for item in (packet.get("web_evidence") or [])
-        if isinstance(item, dict)
-        and str(item.get("source_tier") or "") == "web_search"
+        if isinstance(item, dict) and str(item.get("source_tier") or "") == "web_search"
     ]
     try:
         requested_max = int(
@@ -2438,7 +2657,11 @@ def _web_evidence_payload_from_packet(
             or "Web source",
             180,
         )
-        key = url or title or _text(row.get("chunk_id") or row.get("evidence_id") or "", 120)
+        key = (
+            url
+            or title
+            or _text(row.get("chunk_id") or row.get("evidence_id") or "", 120)
+        )
         if key in seen:
             continue
         seen.add(key)
@@ -2453,7 +2676,9 @@ def _web_evidence_payload_from_packet(
                 "chunk_id": _text(row.get("chunk_id") or "", 160),
                 "evidence_id": _text(row.get("evidence_id") or "", 80),
                 "source_type": _text(
-                    source.get("source_type") or metadata.get("source_type") or "webpage",
+                    source.get("source_type")
+                    or metadata.get("source_type")
+                    or "webpage",
                     80,
                 ),
             }
@@ -2472,9 +2697,13 @@ def _web_evidence_payload_from_packet(
         "sources": sources,
         "trace": {
             "status": meta.get("status") if isinstance(meta, dict) else None,
-            "search_query": meta.get("search_query") if isinstance(meta, dict) else None,
+            "search_query": meta.get("search_query")
+            if isinstance(meta, dict)
+            else None,
             "result_count": len(sources),
-            "cache_status": meta.get("cache_status") if isinstance(meta, dict) else None,
+            "cache_status": meta.get("cache_status")
+            if isinstance(meta, dict)
+            else None,
         },
     }
 
@@ -2489,7 +2718,9 @@ def _attach_web_evidence_payload(
 ) -> None:
     payload = _web_evidence_payload_from_packet(
         packet,
-        getattr(result, "trace", {}) if isinstance(getattr(result, "trace", None), dict) else {},
+        getattr(result, "trace", {})
+        if isinstance(getattr(result, "trace", None), dict)
+        else {},
         enabled=enabled,
         fetch_depth=fetch_depth,
         max_results=max_results,
@@ -2515,10 +2746,20 @@ _LOW_VALUE_EVIDENCE_RE = re.compile(
     r")\b",
     re.IGNORECASE,
 )
-_LOW_VALUE_EVIDENCE_FLAGS = {"low_value_section", "index_like", "front_matter_like", "appendix_like", "back_matter_like"}
+_LOW_VALUE_EVIDENCE_FLAGS = {
+    "low_value_section",
+    "index_like",
+    "front_matter_like",
+    "appendix_like",
+    "back_matter_like",
+}
 _INDEX_ROW_RE = re.compile(r"\b[A-Za-z][A-Za-z -]{2,},\s*\d{1,4}\b")
-_FILE_EXT_RE = re.compile(r"\.(md|markdown|pdf|docx?|txt|rst|html?|epub)$", re.IGNORECASE)
-_SOURCE_PATH_RE = re.compile(r"\s+-\s+(?:libgen|annas[\s_-]archive|libgen\.li|z-library)[^.]*", re.IGNORECASE)
+_FILE_EXT_RE = re.compile(
+    r"\.(md|markdown|pdf|docx?|txt|rst|html?|epub)$", re.IGNORECASE
+)
+_SOURCE_PATH_RE = re.compile(
+    r"\s+-\s+(?:libgen|annas[\s_-]archive|libgen\.li|z-library)[^.]*", re.IGNORECASE
+)
 
 
 def _build_synonym_clusters(pairs: list[tuple[str, str]]) -> list[list[str]]:
@@ -2543,7 +2784,9 @@ def _build_synonym_clusters(pairs: list[tuple[str, str]]) -> list[list[str]]:
     return [sorted(set(members)) for members in groups.values() if len(members) >= 2]
 
 
-def _clean_prompt_source_label(label: str, *, source: dict[str, Any] | None = None) -> str:
+def _clean_prompt_source_label(
+    label: str, *, source: dict[str, Any] | None = None
+) -> str:
     """Tighten the source label for the synthesis prompt.
 
     Files in this corpus are ingested with messy markdown/pdf filenames that
@@ -2612,8 +2855,7 @@ def _query_terms_for_evidence(query: str) -> set[str]:
         "explore",
     }
     terms = {
-        term.lower()
-        for term in re.findall(r"[A-Za-z][A-Za-z0-9_-]{1,}", query or "")
+        term.lower() for term in re.findall(r"[A-Za-z][A-Za-z0-9_-]{1,}", query or "")
     }
     return {
         term
@@ -2670,7 +2912,12 @@ def _gap_cluster_terms(gap: dict[str, Any], side: str) -> set[str]:
     if isinstance(anchors, list):
         terms.update(_terms_from_values(*anchors))
     coherence = gap.get("coherence") if isinstance(gap.get("coherence"), dict) else {}
-    for key in ("shared_terms", "shared_families", "shared_domain_types", "shared_neighbors"):
+    for key in (
+        "shared_terms",
+        "shared_families",
+        "shared_domain_types",
+        "shared_neighbors",
+    ):
         values = coherence.get(key)
         if isinstance(values, list):
             terms.update(_terms_from_values(*values))
@@ -2707,7 +2954,9 @@ def _gap_supported_by_scope(
     return False, "off_scope_cluster_not_in_evidence"
 
 
-def _evidence_quality(raw: dict[str, Any], query_terms: set[str]) -> tuple[float, list[str]]:
+def _evidence_quality(
+    raw: dict[str, Any], query_terms: set[str]
+) -> tuple[float, list[str]]:
     """Score for ordering, not gating.
 
     The gate in `_curated_evidence_rows` keeps every chunk the retriever
@@ -2864,7 +3113,9 @@ def _source_label_from_row(
 
     doc = doc or {}
     source = row.get("source") if isinstance(row.get("source"), dict) else {}
-    source_meta = row.get("source_meta") if isinstance(row.get("source_meta"), dict) else {}
+    source_meta = (
+        row.get("source_meta") if isinstance(row.get("source_meta"), dict) else {}
+    )
     identity_values = (
         doc_id,
         row.get("doc_id"),
@@ -2948,8 +3199,12 @@ def _schema_hints(schema_lens: Any) -> dict[str, Any]:
         return {}
     hints = {
         "domains": [str(v) for v in (schema_lens.get("corpus_domains") or [])[:2] if v],
-        "object_kinds": [str(v) for v in (schema_lens.get("object_kinds") or [])[:2] if v],
-        "relations": [str(v) for v in (schema_lens.get("preferred_relations") or [])[:3] if v],
+        "object_kinds": [
+            str(v) for v in (schema_lens.get("object_kinds") or [])[:2] if v
+        ],
+        "relations": [
+            str(v) for v in (schema_lens.get("preferred_relations") or [])[:3] if v
+        ],
     }
     return {key: value for key, value in hints.items() if value}
 
@@ -2965,7 +3220,9 @@ def _compact_source_meta(
 ) -> dict[str, Any]:
     metadata = _merged_document_metadata(doc)
     filename = _first_metadata_text(doc.get("filename"), row.get("filename"), limit=160)
-    source_mime = _first_metadata_text(doc.get("source_mime"), row.get("source_mime"), limit=80)
+    source_mime = _first_metadata_text(
+        doc.get("source_mime"), row.get("source_mime"), limit=80
+    )
     title = _metadata_value(metadata, "title", "dc:title", limit=160)
 
     source: dict[str, Any] = {
@@ -2981,7 +3238,9 @@ def _compact_source_meta(
             doc.get("source_tier"),
             limit=60,
         ),
-        "author": _metadata_value(metadata, "author", "authors", "creator", "dc:creator"),
+        "author": _metadata_value(
+            metadata, "author", "authors", "creator", "dc:creator"
+        ),
         "publisher": _metadata_value(metadata, "publisher", "dc:publisher"),
         "publication_date": _metadata_value(
             metadata,
@@ -2992,17 +3251,23 @@ def _compact_source_meta(
             "dc:date",
         ),
         "genre": _metadata_value(metadata, "genre", "category", "subject"),
-        "description": _metadata_value(metadata, "description", "summary", "abstract", limit=220),
+        "description": _metadata_value(
+            metadata, "description", "summary", "abstract", limit=220
+        ),
         "hints": _schema_hints(doc.get("schema_lens")),
     }
     if source_mime:
         source["mime"] = source_mime
-    return {key: value for key, value in source.items() if value not in ("", [], {}, None)}
+    return {
+        key: value for key, value in source.items() if value not in ("", [], {}, None)
+    }
 
 
 def _has_temporal_source_support(row: dict[str, Any]) -> bool:
     source = row.get("source") if isinstance(row.get("source"), dict) else {}
-    source_meta = row.get("source_meta") if isinstance(row.get("source_meta"), dict) else {}
+    source_meta = (
+        row.get("source_meta") if isinstance(row.get("source_meta"), dict) else {}
+    )
     return bool(
         row.get("publication_date")
         or row.get("published_at")
@@ -3045,13 +3310,20 @@ def _curated_evidence_rows(
         chunk_id = str(raw.get("chunk_id") or raw.get("id") or "").strip()
         if not chunk_id:
             continue
-        text = _text(raw.get("text") or raw.get("chunk_text") or "", _PACKET_EVIDENCE_TEXT_LIMIT)
+        text = _text(
+            raw.get("text") or raw.get("chunk_text") or "", _PACKET_EVIDENCE_TEXT_LIMIT
+        )
         if not text:
             continue
         has_temporal = _has_temporal_source_support(raw)
         temporal_support = bool(temporal_support or has_temporal)
         score, reasons = _evidence_quality(raw, query_terms)
-        candidate = (score, idx, {**raw, "text": text, "has_temporal": has_temporal}, reasons)
+        candidate = (
+            score,
+            idx,
+            {**raw, "text": text, "has_temporal": has_temporal},
+            reasons,
+        )
         existing = best_by_chunk.get(chunk_id)
         if existing is None:
             best_by_chunk[chunk_id] = candidate
@@ -3115,7 +3387,9 @@ def _curated_evidence_rows(
                 # Parent-chunk summary is an extraction layer the LLM should
                 # see alongside the raw excerpt — gives one-paragraph context
                 # for where the chunk sits in the document.
-                "summary": _text(row.get("summary") or row.get("parent_summary") or "", 320),
+                "summary": _text(
+                    row.get("summary") or row.get("parent_summary") or "", 320
+                ),
                 "source_label": _source_label_from_row(
                     row,
                     doc_id=str(row.get("doc_id") or ""),
@@ -3137,7 +3411,12 @@ def _curated_evidence_rows(
             }
         )
 
-    return evidence, max(0, len(ranked) - len(evidence)), temporal_support, rejection_reasons
+    return (
+        evidence,
+        max(0, len(ranked) - len(evidence)),
+        temporal_support,
+        rejection_reasons,
+    )
 
 
 def _source_docs_from_retrieval_chunks(
@@ -3173,7 +3452,9 @@ def _source_docs_from_retrieval_chunks(
                 "corpus_id": str(getattr(chunk, "corpus_id", "") or ""),
                 "text": text,
                 "summary": getattr(chunk, "summary", None),
-                "source_label": str(getattr(chunk, "doc_name", "") or doc_id or chunk_id),
+                "source_label": str(
+                    getattr(chunk, "doc_name", "") or doc_id or chunk_id
+                ),
                 "source_tier": str(getattr(chunk, "source_tier", "") or "retriever"),
                 "heading_path": getattr(chunk, "heading_path", None) or [],
                 "score": float(getattr(chunk, "score", 0.0) or 0.0),
@@ -3237,7 +3518,8 @@ async def _retrieve_packet_source_docs(
     meta.update(
         {
             "status": "ok",
-            "requested_tier": getattr(requested, "value", requested) or "qdrant_mongo_graph",
+            "requested_tier": getattr(requested, "value", requested)
+            or "qdrant_mongo_graph",
             "effective_tier": getattr(effective, "value", effective) or "",
             "downgrade_reason": getattr(retrieval, "downgrade_reason", None) or "",
         }
@@ -3253,7 +3535,9 @@ async def _retrieve_packet_source_docs(
         corpus_id=corpus_id,
     )
     hydrated_rows = [
-        row for row in (hydrated_trace.get("source_docs") or rows) if isinstance(row, dict)
+        row
+        for row in (hydrated_trace.get("source_docs") or rows)
+        if isinstance(row, dict)
     ][: caps.evidence]
     meta["hydrated_chunks"] = len(hydrated_rows)
     return hydrated_rows, meta
@@ -3287,7 +3571,9 @@ def _ideation_cross_source_terms(packet: dict[str, Any]) -> list[str]:
         add(gap.get("question"), 140)
         for key in ("source_domain", "target_domain"):
             add(gap.get(key), 60)
-        coherence = gap.get("coherence") if isinstance(gap.get("coherence"), dict) else {}
+        coherence = (
+            gap.get("coherence") if isinstance(gap.get("coherence"), dict) else {}
+        )
         for value in (coherence.get("shared_terms") or [])[:4]:
             add(value, 50)
         for value in (coherence.get("shared_neighbors") or [])[:4]:
@@ -3660,7 +3946,9 @@ def _semantic_facet_text(query: str, packet: dict[str, Any]) -> str:
     return " ".join(parts).lower()
 
 
-def _semantic_facets_for_query(query: str, packet: dict[str, Any]) -> list[dict[str, Any]]:
+def _semantic_facets_for_query(
+    query: str, packet: dict[str, Any]
+) -> list[dict[str, Any]]:
     """Detect query facets that deserve separate evidence coverage.
 
     This is intentionally deterministic and tiny. It does not classify the
@@ -3686,7 +3974,11 @@ def _semantic_facets_for_query(query: str, packet: dict[str, Any]) -> list[dict[
             "matched": matched[:5],
             "query_matched": bool(query_matched),
             "first_match_pos": min(
-                [query_haystack.find(term) for term in query_matched if query_haystack.find(term) >= 0]
+                [
+                    query_haystack.find(term)
+                    for term in query_matched
+                    if query_haystack.find(term) >= 0
+                ]
                 or [999999]
             ),
             "support_terms": [str(t) for t in (facet.get("support_terms") or []) if t],
@@ -3757,7 +4049,10 @@ def _merge_semantic_facets(
         if row.get("facet_doc_ids"):
             existing["facet_doc_ids"] = list(
                 dict.fromkeys(
-                    [*(existing.get("facet_doc_ids") or []), *(row.get("facet_doc_ids") or [])]
+                    [
+                        *(existing.get("facet_doc_ids") or []),
+                        *(row.get("facet_doc_ids") or []),
+                    ]
                 )
             )[:8]
         if row.get("facet_docs"):
@@ -3793,7 +4088,9 @@ async def _semantic_facets_for_query_with_corpus(
 ) -> list[dict[str, Any]]:
     base = _semantic_facets_for_query(query, packet)
     try:
-        dynamic = await matching_ingest_facets(db, query, [corpus_id], limit=_SEMANTIC_FACET_MAX_LANES)
+        dynamic = await matching_ingest_facets(
+            db, query, [corpus_id], limit=_SEMANTIC_FACET_MAX_LANES
+        )
     except Exception as exc:
         logger.debug("graph ingest facet match skipped: %s", exc)
         dynamic = []
@@ -3841,16 +4138,18 @@ def _semantic_hub_facets_for_query(query_haystack: str) -> list[dict[str, Any]]:
         if not query_matched:
             continue
         first_pos = min(
-            [query_haystack.find(term) for term in query_matched if query_haystack.find(term) >= 0]
+            [
+                query_haystack.find(term)
+                for term in query_matched
+                if query_haystack.find(term) >= 0
+            ]
             or [999999]
         )
         for index, subfacet in enumerate(hub.get("subfacets") or ()):
             name = str(subfacet.get("name") or "")
             if not name:
                 continue
-            support_terms = [
-                str(t) for t in (subfacet.get("support_terms") or []) if t
-            ]
+            support_terms = [str(t) for t in (subfacet.get("support_terms") or []) if t]
             rows.append(
                 {
                     "name": name,
@@ -3894,7 +4193,9 @@ def _semantic_facet_row_score(row: dict[str, Any], facet: dict[str, Any]) -> int
     if not isinstance(row, dict):
         return 0
     facet_name = str(facet.get("name") or "")
-    support_facet = row.get("support_facet") if isinstance(row.get("support_facet"), dict) else {}
+    support_facet = (
+        row.get("support_facet") if isinstance(row.get("support_facet"), dict) else {}
+    )
     metadata = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
     score = 0
     if str(support_facet.get("name") or "") == facet_name:
@@ -4015,7 +4316,11 @@ def _semantic_facet_coverage_scores(
     for facet in facets:
         name = str(facet.get("name") or "")
         scores[name] = max(
-            (_semantic_facet_row_score(row, facet) for row in evidence if isinstance(row, dict)),
+            (
+                _semantic_facet_row_score(row, facet)
+                for row in evidence
+                if isinstance(row, dict)
+            ),
             default=0,
         )
     return scores
@@ -4045,7 +4350,10 @@ def _semantic_support_facet_order(
 
     def rank_key(facet: dict[str, Any]) -> tuple[int, int, int, int, str]:
         name = str(facet.get("name") or "")
-        specificity = max((len(_semantic_norm(term).split()) for term in facet.get("matched") or []), default=1)
+        specificity = max(
+            (len(_semantic_norm(term).split()) for term in facet.get("matched") or []),
+            default=1,
+        )
         # Prefer facets not represented by the one dominant source first.
         return (
             1 if name == dominant else 0,
@@ -4057,7 +4365,9 @@ def _semantic_support_facet_order(
 
     ordered = sorted(candidates, key=rank_key)
     if dominant and len(ordered) > 1:
-        ordered = [facet for facet in ordered if str(facet.get("name") or "") != dominant]
+        ordered = [
+            facet for facet in ordered if str(facet.get("name") or "") != dominant
+        ]
     return ordered[: max(0, max_support)], {
         "detected_facets": [
             {
@@ -4072,7 +4382,9 @@ def _semantic_support_facet_order(
         "coverage_threshold": _SEMANTIC_FACET_COVERAGE_THRESHOLD,
         "max_lanes": _SEMANTIC_FACET_MAX_LANES,
         "dominant_facet": dominant,
-        "selected_facets": [str(facet.get("name") or "") for facet in ordered[: max(0, max_support)]],
+        "selected_facets": [
+            str(facet.get("name") or "") for facet in ordered[: max(0, max_support)]
+        ],
     }
 
 
@@ -4142,7 +4454,11 @@ async def _graph_edge_support_candidates(
         {"source_docs": rows},
         corpus_id=corpus_id,
     )
-    return [row for row in (hydrated_trace.get("source_docs") or rows) if isinstance(row, dict)]
+    return [
+        row
+        for row in (hydrated_trace.get("source_docs") or rows)
+        if isinstance(row, dict)
+    ]
 
 
 def _choose_semantic_facet_candidate(
@@ -4176,10 +4492,7 @@ def _choose_semantic_facet_candidate(
         if lane_score < _SEMANTIC_FACET_COVERAGE_THRESHOLD:
             continue
         query_fit = _semantic_query_fit_score(row, original_query, facet)
-        if (
-            query_fit < _SEMANTIC_FACET_QUERY_FIT_FLOOR
-            and not facet.get("parent_hub")
-        ):
+        if query_fit < _SEMANTIC_FACET_QUERY_FIT_FLOOR and not facet.get("parent_hub"):
             continue
         if (
             query_fit < _SEMANTIC_FACET_QUERY_FIT_FLOOR
@@ -4189,7 +4502,9 @@ def _choose_semantic_facet_candidate(
             continue
         retrieval_score = float(row.get("score") or 0.0)
         source_bonus = 1.5 if doc_id else 0.0
-        final_score = (lane_score * 10.0) + (query_fit * 2.0) + retrieval_score + source_bonus
+        final_score = (
+            (lane_score * 10.0) + (query_fit * 2.0) + retrieval_score + source_bonus
+        )
         if best is None or final_score > best[0]:
             row["support_activation"] = {
                 "facet_score": lane_score,
@@ -4219,7 +4534,9 @@ async def _semantic_facet_support_evidence(
     """
 
     evidence = [row for row in (packet.get("evidence") or []) if isinstance(row, dict)]
-    existing_doc_ids = {str(row.get("doc_id") or "") for row in evidence if row.get("doc_id")}
+    existing_doc_ids = {
+        str(row.get("doc_id") or "") for row in evidence if row.get("doc_id")
+    }
     if not evidence:
         return []
 
@@ -4296,7 +4613,9 @@ async def _semantic_facet_support_evidence(
             facet_name = str(facet.get("name") or "")
             lane_report = reports_by_name.get(facet_name)
             facet_terms = [str(t) for t in (facet.get("support_terms") or [])[:8] if t]
-            facet_label = str(facet.get("label") or facet.get("name") or "semantic facet")
+            facet_label = str(
+                facet.get("label") or facet.get("name") or "semantic facet"
+            )
             support_query = " ".join(
                 [
                     f"{synthesis_mode} support facet:",
@@ -4341,10 +4660,14 @@ async def _semantic_facet_support_evidence(
             )
             candidates = [
                 row
-                for row in [*graph_candidates, *((hydrated_trace.get("source_docs") or rows))]
+                for row in [
+                    *graph_candidates,
+                    *((hydrated_trace.get("source_docs") or rows)),
+                ]
                 if isinstance(row, dict)
                 and str(row.get("doc_id") or "") not in seen_doc_ids
-                and str(row.get("chunk_id") or row.get("id") or "") not in seen_chunk_ids
+                and str(row.get("chunk_id") or row.get("id") or "")
+                not in seen_chunk_ids
             ]
             attempt["returned"] = len(candidates)
             if not candidates:
@@ -4392,7 +4715,9 @@ async def _semantic_facet_support_evidence(
             if lane_report is not None:
                 lane_report["status"] = "selected"
                 lane_report["selected_doc_id"] = doc_id
-                lane_report["selected_doc_name"] = str(row.get("doc_name") or row.get("title") or "")
+                lane_report["selected_doc_name"] = str(
+                    row.get("doc_name") or row.get("title") or ""
+                )
                 lane_report["selected_chunk_id"] = chunk_id
                 lane_report["support_activation"] = row.get("support_activation")
                 lane_report["attempts"].append(attempt)
@@ -4405,14 +4730,20 @@ async def _semantic_facet_support_evidence(
         packet.setdefault("evidence_filter", {})["semantic_coverage_support"] = {
             **meta,
             "added_candidates": len(support_rows),
-            "support_doc_ids": [str(row.get("doc_id") or "") for row in support_rows if row.get("doc_id")],
+            "support_doc_ids": [
+                str(row.get("doc_id") or "")
+                for row in support_rows
+                if row.get("doc_id")
+            ],
         }
         return support_rows
 
     packet.setdefault("evidence_filter", {})["semantic_coverage_support"] = {
         **meta,
         "added_candidates": len(support_rows),
-        "support_doc_ids": [str(row.get("doc_id") or "") for row in support_rows if row.get("doc_id")],
+        "support_doc_ids": [
+            str(row.get("doc_id") or "") for row in support_rows if row.get("doc_id")
+        ],
     }
     if support_rows:
         logger.info(
@@ -4446,7 +4777,9 @@ async def _ideation_cross_source_support_evidence(
     doc_ids = {str(row.get("doc_id") or "") for row in evidence if row.get("doc_id")}
     if len(doc_ids) != 1:
         return []
-    if not any(packet.get(key) for key in ("bridges", "analogies", "transfers", "gaps")):
+    if not any(
+        packet.get(key) for key in ("bridges", "analogies", "transfers", "gaps")
+    ):
         return []
 
     support_terms = _ideation_cross_source_terms(packet)
@@ -4537,13 +4870,16 @@ def _merge_ideation_cross_source_support(
     additions = [
         row
         for row in support
-        if str(row.get("chunk_id") or "") and str(row.get("chunk_id") or "") not in existing_chunk_ids
+        if str(row.get("chunk_id") or "")
+        and str(row.get("chunk_id") or "") not in existing_chunk_ids
     ][: max(0, int(max_additions or 0))]
     if not additions:
         return 0
 
     max_evidence = max(1, int(max_evidence or _PACKET_MAX_EVIDENCE))
-    reserved_support_slots = min(len(additions), max_additions, max(0, max_evidence - 1))
+    reserved_support_slots = min(
+        len(additions), max_additions, max(0, max_evidence - 1)
+    )
     base_prefill_limit = max(1, max_evidence - reserved_support_slots)
     soft_doc_cap = max(2, max_evidence // 4)
     hard_doc_cap = max(3, max_evidence // 3)
@@ -4607,9 +4943,7 @@ def _merge_ideation_cross_source_support(
     evidence_filter["accepted"] = len(packet["evidence"])
     mode = (synthesis_mode or "research").strip().lower()
     actual_additions = [
-        row
-        for row in merged
-        if str(row.get("chunk_id") or "") in support_added_chunks
+        row for row in merged if str(row.get("chunk_id") or "") in support_added_chunks
     ]
     support_roles = sorted(
         {
@@ -4644,11 +4978,15 @@ def _merge_ideation_cross_source_support(
         "reason": reason,
         "support_roles": support_roles,
         "support_lanes": [
-            str(row.get("support_lane") or "") for row in actual_additions if row.get("support_lane")
+            str(row.get("support_lane") or "")
+            for row in actual_additions
+            if row.get("support_lane")
         ],
         "support_facets": support_facets,
         "support_doc_ids": [
-            str(row.get("doc_id") or "") for row in actual_additions if row.get("doc_id")
+            str(row.get("doc_id") or "")
+            for row in actual_additions
+            if row.get("doc_id")
         ],
         "reserved_support_slots": reserved_support_slots,
     }
@@ -4678,7 +5016,9 @@ async def _hydrate_trace_source_docs(
         return trace
 
     rows = [dict(row) for row in source_docs if isinstance(row, dict)]
-    chunk_ids = [str(row.get("chunk_id") or row.get("id") or "").strip() for row in rows]
+    chunk_ids = [
+        str(row.get("chunk_id") or row.get("id") or "").strip() for row in rows
+    ]
     chunk_ids = [cid for cid in chunk_ids if cid]
     doc_ids = {
         str(row.get("doc_id") or row.get("document_id") or "").strip()
@@ -4689,7 +5029,9 @@ async def _hydrate_trace_source_docs(
     chunk_by_id: dict[str, dict[str, Any]] = {}
     if chunk_ids:
         cursor = db["chunks"].find(
-            with_active_records({"corpus_id": corpus_id, "chunk_id": {"$in": chunk_ids}}),
+            with_active_records(
+                {"corpus_id": corpus_id, "chunk_id": {"$in": chunk_ids}}
+            ),
             {
                 "_id": 0,
                 "chunk_id": 1,
@@ -4712,13 +5054,17 @@ async def _hydrate_trace_source_docs(
             },
         )
         chunk_by_id = {str(row.get("chunk_id")): row async for row in cursor}
-        doc_ids.update(str(row.get("doc_id")) for row in chunk_by_id.values() if row.get("doc_id"))
+        doc_ids.update(
+            str(row.get("doc_id")) for row in chunk_by_id.values() if row.get("doc_id")
+        )
 
     doc_meta: dict[str, dict[str, Any]] = {}
     parent_by_doc: dict[str, dict[str, dict[str, Any]]] = {}
     if doc_ids:
         cursor = db["documents"].find(
-            with_active_records({"corpus_id": corpus_id, "doc_id": {"$in": list(doc_ids)}}),
+            with_active_records(
+                {"corpus_id": corpus_id, "doc_id": {"$in": list(doc_ids)}}
+            ),
             {
                 "_id": 0,
                 "doc_id": 1,
@@ -4773,9 +5119,13 @@ async def _hydrate_trace_source_docs(
     for row in rows:
         chunk_id = str(row.get("chunk_id") or row.get("id") or "").strip()
         chunk = chunk_by_id.get(chunk_id, {})
-        doc_id = str(row.get("doc_id") or chunk.get("doc_id") or row.get("document_id") or "").strip()
+        doc_id = str(
+            row.get("doc_id") or chunk.get("doc_id") or row.get("document_id") or ""
+        ).strip()
         doc = doc_meta.get(doc_id, {})
-        parent_id = str(chunk.get("parent_id") or _parent_id_from_summary_chunk(chunk_id))
+        parent_id = str(
+            chunk.get("parent_id") or _parent_id_from_summary_chunk(chunk_id)
+        )
         parent = parent_by_doc.get(doc_id, {}).get(parent_id, {})
         source_label = _source_label_from_row(
             row,
@@ -4875,7 +5225,9 @@ async def _hydrate_trace_source_docs(
                     or parent.get("metadata")
                     or {}
                 ),
-                "chunk_kind": str(chunk.get("chunk_kind") or row.get("chunk_kind") or ""),
+                "chunk_kind": str(
+                    chunk.get("chunk_kind") or row.get("chunk_kind") or ""
+                ),
                 "source_tier": (
                     chunk.get("source_tier")
                     or parent.get("source_tier")
@@ -4895,7 +5247,11 @@ def _graph_shape_hint(packet: dict[str, Any]) -> dict[str, str]:
     groups = [g for g in (packet.get("communities") or []) if isinstance(g, dict)]
     edges = [e for e in (packet.get("edges") or []) if isinstance(e, dict)]
     gaps = [g for g in (packet.get("gaps") or []) if isinstance(g, dict)]
-    evidence_filter = packet.get("evidence_filter") if isinstance(packet.get("evidence_filter"), dict) else {}
+    evidence_filter = (
+        packet.get("evidence_filter")
+        if isinstance(packet.get("evidence_filter"), dict)
+        else {}
+    )
     if evidence_filter.get("all_rejected"):
         return {
             "label": "evidence withheld",
@@ -4909,7 +5265,9 @@ def _graph_shape_hint(packet: dict[str, Any]) -> dict[str, str]:
             "rationale": "no_scoped_graph_groups",
         }
 
-    group_sizes = [max(int(g.get("scope_count") or 0), int(g.get("size") or 0), 1) for g in groups]
+    group_sizes = [
+        max(int(g.get("scope_count") or 0), int(g.get("size") or 0), 1) for g in groups
+    ]
     total = sum(group_sizes) or 1
     top_share = max(group_sizes) / total if group_sizes else 0.0
     bridge_count = sum(int(g.get("bridge_count") or 0) for g in groups)
@@ -4945,7 +5303,9 @@ def _graph_gateway_hints(packet: dict[str, Any]) -> list[dict[str, Any]]:
         return []
 
     names_by_id = {
-        str(e.get("entity_id") or ""): _text(e.get("canonical_name") or e.get("entity_id") or "", 80)
+        str(e.get("entity_id") or ""): _text(
+            e.get("canonical_name") or e.get("entity_id") or "", 80
+        )
         for e in entities
         if e.get("entity_id")
     }
@@ -4955,8 +5315,12 @@ def _graph_gateway_hints(packet: dict[str, Any]) -> list[dict[str, Any]]:
         target = str(edge.get("target") or "")
         if not source or not target:
             continue
-        incident.setdefault(source, []).append(_text(edge.get("target_name") or names_by_id.get(target) or target, 60))
-        incident.setdefault(target, []).append(_text(edge.get("source_name") or names_by_id.get(source) or source, 60))
+        incident.setdefault(source, []).append(
+            _text(edge.get("target_name") or names_by_id.get(target) or target, 60)
+        )
+        incident.setdefault(target, []).append(
+            _text(edge.get("source_name") or names_by_id.get(source) or source, 60)
+        )
 
     def score(entity: dict[str, Any]) -> tuple[float, str]:
         eid = str(entity.get("entity_id") or "")
@@ -4967,7 +5331,9 @@ def _graph_gateway_hints(packet: dict[str, Any]) -> list[dict[str, Any]]:
         if "frontier" in role:
             role_score += 4.0
         return (
-            role_score + (len(incident.get(eid, [])) * 3.0) + float(entity.get("degree") or 0),
+            role_score
+            + (len(incident.get(eid, [])) * 3.0)
+            + float(entity.get("degree") or 0),
             _text(entity.get("canonical_name") or eid, 80),
         )
 
@@ -4986,7 +5352,9 @@ def _graph_gateway_hints(packet: dict[str, Any]) -> list[dict[str, Any]]:
                 "id": eid,
                 "name": name,
                 "connects": connects[:4],
-                "reason": "connects packet edges" if connects else "anchors the query working set",
+                "reason": "connects packet edges"
+                if connects
+                else "anchors the query working set",
             }
         )
         if len(gateways) >= _PACKET_MAX_GATEWAYS:
@@ -4997,7 +5365,9 @@ def _graph_gateway_hints(packet: dict[str, Any]) -> list[dict[str, Any]]:
 def _graph_gap_depths(packet: dict[str, Any]) -> list[dict[str, Any]]:
     depths = ("near", "deeper", "lateral")
     out: list[dict[str, Any]] = []
-    for idx, gap in enumerate([g for g in (packet.get("gaps") or []) if isinstance(g, dict)]):
+    for idx, gap in enumerate(
+        [g for g in (packet.get("gaps") or []) if isinstance(g, dict)]
+    ):
         between = [
             _text(gap.get("cluster_a_label") or gap.get("cluster_a") or "", 70),
             _text(gap.get("cluster_b_label") or gap.get("cluster_b") or "", 70),
@@ -5015,7 +5385,9 @@ def _graph_gap_depths(packet: dict[str, Any]) -> list[dict[str, Any]]:
 
 def _supporting_statement_hints(packet: dict[str, Any]) -> list[dict[str, str]]:
     statements: list[dict[str, str]] = []
-    for idx, item in enumerate([e for e in (packet.get("evidence") or []) if isinstance(e, dict)], start=1):
+    for idx, item in enumerate(
+        [e for e in (packet.get("evidence") or []) if isinstance(e, dict)], start=1
+    ):
         text = _text(item.get("text") or "", 260)
         if not text:
             continue
@@ -5043,7 +5415,11 @@ def _graph_hint_from_packet(packet: dict[str, Any]) -> dict[str, Any]:
     """InfraNodus-style read of the bounded packet without new graph work."""
 
     shape = _graph_shape_hint(packet)
-    evidence_filter = packet.get("evidence_filter") if isinstance(packet.get("evidence_filter"), dict) else {}
+    evidence_filter = (
+        packet.get("evidence_filter")
+        if isinstance(packet.get("evidence_filter"), dict)
+        else {}
+    )
     if evidence_filter.get("all_rejected"):
         return {
             "shape": shape,
@@ -5057,13 +5433,19 @@ def _graph_hint_from_packet(packet: dict[str, Any]) -> dict[str, Any]:
     supporting = _supporting_statement_hints(packet)
     hint_parts = [shape.get("description") or ""]
     if gateways:
-        names = ", ".join(gateway["name"] for gateway in gateways[:3] if gateway.get("name"))
+        names = ", ".join(
+            gateway["name"] for gateway in gateways[:3] if gateway.get("name")
+        )
         if names:
             hint_parts.append(f"Follow gateway concepts: {names}.")
     if gap_depths:
-        hint_parts.append("Treat gap questions as routes to inspect, not as known missing facts.")
+        hint_parts.append(
+            "Treat gap questions as routes to inspect, not as known missing facts."
+        )
     if supporting:
-        ids = ", ".join(item["evidence_id"] for item in supporting[:3] if item.get("evidence_id"))
+        ids = ", ".join(
+            item["evidence_id"] for item in supporting[:3] if item.get("evidence_id")
+        )
         if ids:
             hint_parts.append(f"Ground claims in {ids}.")
     return {
@@ -5164,8 +5546,12 @@ def _build_insight_packet(
                 "entity_id": eid,
                 "canonical_name": str(raw.get("name") or node.get("label") or eid),
                 "domain": str(node.get("domain") or raw.get("domain") or ""),
-                "domain_type": str(node.get("domain_type") or raw.get("domain_type") or ""),
-                "object_kind": str(node.get("object_kind") or raw.get("object_kind") or ""),
+                "domain_type": str(
+                    node.get("domain_type") or raw.get("domain_type") or ""
+                ),
+                "object_kind": str(
+                    node.get("object_kind") or raw.get("object_kind") or ""
+                ),
                 "canonical_family": str(
                     node.get("canonical_family") or raw.get("canonical_family") or ""
                 ),
@@ -5211,7 +5597,10 @@ def _build_insight_packet(
         if isinstance(t, dict)
     }
     community_id_by_label = {
-        str(c.get("label") or "").strip().lower(): str(c.get("concept_id") or "").strip()
+        str(c.get("label") or "")
+        .strip()
+        .lower(): str(c.get("concept_id") or "")
+        .strip()
         for c in (getattr(result, "concept_communities", []) or [])
         if isinstance(c, dict) and c.get("label") and c.get("concept_id")
     }
@@ -5234,7 +5623,11 @@ def _build_insight_packet(
         ).strip()
         if not cid:
             cid = community_id_by_label.get(label.lower(), "")
-        gid = f"concept:{cid}" if cid else f"facet:{label.lower().replace(' ', '-')[:80] or eid}"
+        gid = (
+            f"concept:{cid}"
+            if cid
+            else f"facet:{label.lower().replace(' ', '-')[:80] or eid}"
+        )
         group = scoped_groups.setdefault(
             gid,
             {
@@ -5250,7 +5643,12 @@ def _build_insight_packet(
         group["size"] += 1
         group["scope_count"] += 1
         group["degree"] += float(raw.get("degree") or 0)
-        if str(raw.get("emphasis") or "") in {"bridge", "bridge_anchor", "frontier", "transfer_hub"}:
+        if str(raw.get("emphasis") or "") in {
+            "bridge",
+            "bridge_anchor",
+            "frontier",
+            "transfer_hub",
+        }:
             group["bridge_count"] += 1
         entity_label = str(raw.get("label") or eid)
         if entity_label not in group["top_entities"]:
@@ -5259,7 +5657,10 @@ def _build_insight_packet(
     communities: list[dict[str, Any]] = []
     for group in sorted(
         scoped_groups.values(),
-        key=lambda row: (int(row.get("scope_count") or 0), float(row.get("degree") or 0)),
+        key=lambda row: (
+            int(row.get("scope_count") or 0),
+            float(row.get("degree") or 0),
+        ),
         reverse=True,
     )[: caps.communities]:
         communities.append(
@@ -5269,7 +5670,9 @@ def _build_insight_packet(
                 "size": int(group.get("size") or 0),
                 "scope_count": int(group.get("scope_count") or 0),
                 "bridge_count": int(group.get("bridge_count") or 0),
-                "top_entities": [str(e) for e in (group.get("top_entities") or [])[:6] if e],
+                "top_entities": [
+                    str(e) for e in (group.get("top_entities") or [])[:6] if e
+                ],
             }
         )
 
@@ -5282,7 +5685,9 @@ def _build_insight_packet(
         t = str(raw.get("target") or raw.get("target_entity_id") or "").strip()
         if not s or not t:
             continue
-        if relevance_entity_ids and (s not in relevance_entity_ids or t not in relevance_entity_ids):
+        if relevance_entity_ids and (
+            s not in relevance_entity_ids or t not in relevance_entity_ids
+        ):
             continue
         predicate = str(raw.get("predicate") or raw.get("relation_family") or "")
         key = (s, t, predicate)
@@ -5312,7 +5717,12 @@ def _build_insight_packet(
     if not isinstance(source_docs, list):
         source_docs = []
     raw_evidence_count = len([row for row in source_docs if isinstance(row, dict)])
-    evidence, evidence_rejected, temporal_support, rejection_reasons = _curated_evidence_rows(
+    (
+        evidence,
+        evidence_rejected,
+        temporal_support,
+        rejection_reasons,
+    ) = _curated_evidence_rows(
         source_docs,
         query=query,
         max_evidence=caps.evidence,
@@ -5329,7 +5739,7 @@ def _build_insight_packet(
         for group in communities
         if str(group.get("concept_id") or "").startswith("concept:")
     }
-    for gap in (getattr(result, "gaps_v2", []) or []):
+    for gap in getattr(result, "gaps_v2", []) or []:
         if len(gaps) >= caps.gaps:
             break
         if not isinstance(gap, dict):
@@ -5353,14 +5763,20 @@ def _build_insight_packet(
                 "cluster_a_label": str(gap.get("cluster_a_label") or ""),
                 "cluster_b_label": str(gap.get("cluster_b_label") or ""),
                 "question": str(gap.get("question") or ""),
-                "gap_type": str(gap.get("gap_type") or gap.get("type") or "missing_edge"),
+                "gap_type": str(
+                    gap.get("gap_type") or gap.get("type") or "missing_edge"
+                ),
                 "source_domain": str(gap.get("source_domain") or ""),
                 "target_domain": str(gap.get("target_domain") or ""),
                 "topology_sim": _maybe_float(gap.get("topology_sim")),
                 "neighbor_jaccard": _maybe_float(gap.get("neighbor_jaccard")),
                 "cd_pagerank": _maybe_float(gap.get("cd_pagerank")),
-                "coherence": gap.get("coherence") if isinstance(gap.get("coherence"), dict) else {},
-                "anchor_concepts": [str(v) for v in (gap.get("anchor_concepts") or [])[:6] if v],
+                "coherence": gap.get("coherence")
+                if isinstance(gap.get("coherence"), dict)
+                else {},
+                "anchor_concepts": [
+                    str(v) for v in (gap.get("anchor_concepts") or [])[:6] if v
+                ],
                 "support_status": support_status,
             }
         )
@@ -5368,7 +5784,7 @@ def _build_insight_packet(
     # ── signals (latent topics — never call them "trends") ─────────────────
     signals: list[dict[str, Any]] = []
     relevance_terms = _graph_relevance_terms(query)
-    for topic in (getattr(result, "latent_topics", []) or []):
+    for topic in getattr(result, "latent_topics", []) or []:
         if len(signals) >= caps.signals:
             break
         if not isinstance(topic, dict):
@@ -5418,7 +5834,9 @@ def _build_insight_packet(
             signal_name = str(group.get("label") or "Query-scoped signal")
             signals.append(
                 {
-                    "entity_id": str(group.get("concept_id") or f"signal:{len(signals) + 1}"),
+                    "entity_id": str(
+                        group.get("concept_id") or f"signal:{len(signals) + 1}"
+                    ),
                     "canonical_name": signal_name,
                     "domain": "query_scope",
                     "mention_count": mentions,
@@ -5440,9 +5858,7 @@ def _build_insight_packet(
 
     # ── conceptual bridge material for nuance / ideation ───────────────────
     metrics_blob = (
-        getattr(result, "_packet_metrics", None)
-        or getattr(result, "metrics", {})
-        or {}
+        getattr(result, "_packet_metrics", None) or getattr(result, "metrics", {}) or {}
     )
 
     def _metric_items(name: str) -> list[dict[str, Any]]:
@@ -5466,13 +5882,19 @@ def _build_insight_packet(
 
     analogies: list[dict[str, Any]] = []
     seen_analogy_keys: set[tuple[str, str]] = set()
-    for raw in list(getattr(result, "analogies", []) or []) + _metric_items("structural_analogies"):
+    for raw in list(getattr(result, "analogies", []) or []) + _metric_items(
+        "structural_analogies"
+    ):
         if len(analogies) >= caps.analogies:
             break
         if not isinstance(raw, dict):
             continue
-        source = str(raw.get("source") or raw.get("entity_a_id") or raw.get("a") or "").strip()
-        target = str(raw.get("target") or raw.get("entity_b_id") or raw.get("b") or "").strip()
+        source = str(
+            raw.get("source") or raw.get("entity_a_id") or raw.get("a") or ""
+        ).strip()
+        target = str(
+            raw.get("target") or raw.get("entity_b_id") or raw.get("b") or ""
+        ).strip()
         if not source or not target or not _touches_scope(source, target):
             continue
         key = tuple(sorted((source, target)))
@@ -5484,27 +5906,37 @@ def _build_insight_packet(
                 "source": source,
                 "target": target,
                 "source_name": str(
-                    raw.get("source_name") or raw.get("entity_a_name") or _name_for_entity(source)
+                    raw.get("source_name")
+                    or raw.get("entity_a_name")
+                    or _name_for_entity(source)
                 ),
                 "target_name": str(
-                    raw.get("target_name") or raw.get("entity_b_name") or _name_for_entity(target)
+                    raw.get("target_name")
+                    or raw.get("entity_b_name")
+                    or _name_for_entity(target)
                 ),
                 "source_domain": str(raw.get("source_domain") or ""),
                 "target_domain": str(raw.get("target_domain") or ""),
                 "topology_sim": _maybe_float(raw.get("topology_sim")),
                 "neighbor_jaccard": _maybe_float(raw.get("neighbor_jaccard")),
-                "rationale": _text(raw.get("rationale") or raw.get("question") or "", 220),
+                "rationale": _text(
+                    raw.get("rationale") or raw.get("question") or "", 220
+                ),
             }
         )
 
     transfers: list[dict[str, Any]] = []
     seen_transfer_keys: set[tuple[str, str]] = set()
-    for raw in list(getattr(result, "transfers", []) or []) + _metric_items("transfer_candidates"):
+    for raw in list(getattr(result, "transfers", []) or []) + _metric_items(
+        "transfer_candidates"
+    ):
         if len(transfers) >= caps.transfers:
             break
         if not isinstance(raw, dict):
             continue
-        hub = str(raw.get("hub") or raw.get("source") or raw.get("entity_a_id") or "").strip()
+        hub = str(
+            raw.get("hub") or raw.get("source") or raw.get("entity_a_id") or ""
+        ).strip()
         target = str(raw.get("target") or raw.get("entity_b_id") or "").strip()
         analogs_raw = raw.get("analogs") or []
         analogs = [
@@ -5520,37 +5952,68 @@ def _build_insight_packet(
         analog_entity_ids = [a.get("entity") for a in analogs if a.get("entity")]
         if not hub or not _touches_scope(hub, target, *analog_entity_ids):
             continue
-        key = (hub, target or ",".join(sorted(str(a.get("domain") or "") for a in analogs)))
+        key = (
+            hub,
+            target or ",".join(sorted(str(a.get("domain") or "") for a in analogs)),
+        )
         if key in seen_transfer_keys:
             continue
         seen_transfer_keys.add(key)
         transfers.append(
             {
                 "hub": hub,
-                "hub_name": str(raw.get("hub_name") or raw.get("source_name") or _name_for_entity(hub)),
-                "hub_domain": str(raw.get("hub_domain") or raw.get("source_domain") or ""),
+                "hub_name": str(
+                    raw.get("hub_name")
+                    or raw.get("source_name")
+                    or _name_for_entity(hub)
+                ),
+                "hub_domain": str(
+                    raw.get("hub_domain") or raw.get("source_domain") or ""
+                ),
                 "target": target,
-                "target_name": str(raw.get("target_name") or raw.get("entity_b_name") or _name_for_entity(target)),
+                "target_name": str(
+                    raw.get("target_name")
+                    or raw.get("entity_b_name")
+                    or _name_for_entity(target)
+                ),
                 "target_domain": str(raw.get("target_domain") or ""),
-                "target_domains": [str(v) for v in (raw.get("target_domains") or [])[:4] if v],
+                "target_domains": [
+                    str(v) for v in (raw.get("target_domains") or [])[:4] if v
+                ],
                 "analogs": analogs,
                 "cd_pagerank": _maybe_float(raw.get("cd_pagerank")),
-                "rationale": _text(raw.get("rationale") or raw.get("question") or "", 220),
+                "rationale": _text(
+                    raw.get("rationale") or raw.get("question") or "", 220
+                ),
             }
         )
 
     bridge_candidates: list[dict[str, Any]] = []
     seen_bridge_keys: set[tuple[str, str, str]] = set()
-    for raw in list(getattr(result, "bridges_v2", []) or []) + list(getattr(result, "bridges", []) or []):
+    for raw in list(getattr(result, "bridges_v2", []) or []) + list(
+        getattr(result, "bridges", []) or []
+    ):
         if len(bridge_candidates) >= caps.bridges:
             break
         if not isinstance(raw, dict):
             continue
-        source = str(raw.get("source_entity_id") or raw.get("source") or raw.get("entity_a_id") or "").strip()
-        target = str(raw.get("target_entity_id") or raw.get("target") or raw.get("entity_b_id") or "").strip()
+        source = str(
+            raw.get("source_entity_id")
+            or raw.get("source")
+            or raw.get("entity_a_id")
+            or ""
+        ).strip()
+        target = str(
+            raw.get("target_entity_id")
+            or raw.get("target")
+            or raw.get("entity_b_id")
+            or ""
+        ).strip()
         if not source or not target or not _touches_scope(source, target):
             continue
-        bridge_type = str(raw.get("bridge_type") or raw.get("kind") or raw.get("type") or "bridge")
+        bridge_type = str(
+            raw.get("bridge_type") or raw.get("kind") or raw.get("type") or "bridge"
+        )
         key = (source, target, bridge_type)
         if key in seen_bridge_keys:
             continue
@@ -5559,13 +6022,29 @@ def _build_insight_packet(
             {
                 "source": source,
                 "target": target,
-                "source_name": str(raw.get("source_name") or raw.get("entity_a_name") or _name_for_entity(source)),
-                "target_name": str(raw.get("target_name") or raw.get("entity_b_name") or _name_for_entity(target)),
+                "source_name": str(
+                    raw.get("source_name")
+                    or raw.get("entity_a_name")
+                    or _name_for_entity(source)
+                ),
+                "target_name": str(
+                    raw.get("target_name")
+                    or raw.get("entity_b_name")
+                    or _name_for_entity(target)
+                ),
                 "source_domain": str(raw.get("source_domain") or ""),
                 "target_domain": str(raw.get("target_domain") or ""),
                 "bridge_type": bridge_type,
-                "shared_terms": [str(v) for v in (raw.get("shared_terms") or [])[:4] if v],
-                "rationale": _text(raw.get("rationale") or raw.get("evidence") or raw.get("question") or "", 220),
+                "shared_terms": [
+                    str(v) for v in (raw.get("shared_terms") or [])[:4] if v
+                ],
+                "rationale": _text(
+                    raw.get("rationale")
+                    or raw.get("evidence")
+                    or raw.get("question")
+                    or "",
+                    220,
+                ),
             }
         )
 
@@ -5586,21 +6065,27 @@ def _build_insight_packet(
                 "source_domain": str(raw.get("source_domain") or ""),
                 "target_domain": str(raw.get("target_domain") or ""),
                 "path_count": raw.get("path_count"),
-                "path_entities": [str(v) for v in (raw.get("path_entities") or [])[:5] if v],
+                "path_entities": [
+                    str(v) for v in (raw.get("path_entities") or [])[:5] if v
+                ],
                 "evidence": _text(raw.get("evidence") or "", 220),
             }
         )
 
     # ── weak links (provenance warnings, not gaps) ─────────────────────────
     weak_links: list[dict[str, Any]] = []
-    for weak in (getattr(result, "weak_links", []) or []):
+    for weak in getattr(result, "weak_links", []) or []:
         if len(weak_links) >= caps.weak_links:
             break
         if not isinstance(weak, dict):
             continue
         weak_source = str(weak.get("source") or "")
         weak_target = str(weak.get("target") or "")
-        if relevance_entity_ids and weak_source not in relevance_entity_ids and weak_target not in relevance_entity_ids:
+        if (
+            relevance_entity_ids
+            and weak_source not in relevance_entity_ids
+            and weak_target not in relevance_entity_ids
+        ):
             continue
         weak_links.append(
             {
@@ -5610,12 +6095,14 @@ def _build_insight_packet(
                 "target_name": str(weak.get("target_name") or ""),
                 "weakness_type": str(weak.get("weakness_type") or ""),
                 "severity": str(weak.get("severity") or "medium"),
-                "rationale": _text(weak.get("rationale") or weak.get("evidence") or "", 240),
+                "rationale": _text(
+                    weak.get("rationale") or weak.get("evidence") or "", 240
+                ),
             }
         )
 
     tensions: list[dict[str, Any]] = []
-    for raw in (getattr(result, "tensions", []) or []):
+    for raw in getattr(result, "tensions", []) or []:
         if len(tensions) >= caps.tensions:
             break
         if not isinstance(raw, dict):
@@ -5625,7 +6112,9 @@ def _build_insight_packet(
             if isinstance(frame, dict):
                 frames.append(
                     {
-                        "label": _text(frame.get("label") or frame.get("name") or "", 40),
+                        "label": _text(
+                            frame.get("label") or frame.get("name") or "", 40
+                        ),
                         "body": _text(
                             frame.get("body")
                             or frame.get("summary")
@@ -5666,19 +6155,16 @@ def _build_insight_packet(
     # Sparse ⇔ no evidence chunks AND not enough graph signal to write a
     # meaningful narrative. Mirrors _insight_packet_summary_from_result so
     # the two stay in sync.
-    sparse = (
-        evidence_all_rejected
-        or (
-            len(evidence) == 0
-            and len(anchors) == 0
-            and len(entities) < 2
-            and len(communities) < 2
-            and len(edges) == 0
-            and len(gaps) == 0
-            and len(analogies) == 0
-            and len(transfers) == 0
-            and len(bridge_candidates) == 0
-        )
+    sparse = evidence_all_rejected or (
+        len(evidence) == 0
+        and len(anchors) == 0
+        and len(entities) < 2
+        and len(communities) < 2
+        and len(edges) == 0
+        and len(gaps) == 0
+        and len(analogies) == 0
+        and len(transfers) == 0
+        and len(bridge_candidates) == 0
     )
 
     packet = {
@@ -5779,7 +6265,10 @@ def _llm_context_trace_from_packet(
 
     files = sorted(
         files_by_id.values(),
-        key=lambda row: (-int(row.get("chunk_count") or 0), str(row.get("source_label") or "")),
+        key=lambda row: (
+            -int(row.get("chunk_count") or 0),
+            str(row.get("source_label") or ""),
+        ),
     )
 
     caps = _packet_caps_for_mode(synthesis_mode)
@@ -5862,35 +6351,35 @@ def _llm_context_trace_from_packet(
 # maps internal labels to natural-language phrases BEFORE they reach the
 # prompt, so the LLM only ever sees human-readable predicates.
 _PREDICATE_HUMAN_MAP: dict[str, str] = {
-    "RELATES_TO":     "co-occurs with",
-    "MENTIONS":       "appears alongside",
-    "PART_OF":        "is part of",
-    "MEMBER_OF":      "is a member of",
-    "USES":           "uses",
-    "DEPENDS_ON":     "depends on",
-    "IMPLEMENTS":     "implements",
-    "PRODUCES":       "produces",
-    "CALLS":          "calls",
-    "DERIVED_FROM":   "is derived from",
-    "REFERENCES":     "references",
-    "DEFINES":        "defines",
-    "EXAMPLE_OF":     "is an example of",
-    "DURING":         "occurs during",
-    "OWNED_BY":       "is owned by",
-    "OWNS":           "owns",
+    "RELATES_TO": "co-occurs with",
+    "MENTIONS": "appears alongside",
+    "PART_OF": "is part of",
+    "MEMBER_OF": "is a member of",
+    "USES": "uses",
+    "DEPENDS_ON": "depends on",
+    "IMPLEMENTS": "implements",
+    "PRODUCES": "produces",
+    "CALLS": "calls",
+    "DERIVED_FROM": "is derived from",
+    "REFERENCES": "references",
+    "DEFINES": "defines",
+    "EXAMPLE_OF": "is an example of",
+    "DURING": "occurs during",
+    "OWNED_BY": "is owned by",
+    "OWNS": "owns",
     "AFFILIATED_WITH": "is affiliated with",
-    "LOCATED_IN":     "is located in",
-    "CREATED_BY":     "is created by",
-    "WORKS_FOR":      "works for",
-    "SYNONYM_OF":     "is a synonym of",
-    "INSTANCE_OF":    "is an instance of",
-    "OVERLAPS":       "overlaps with",
-    "STORES":         "stores",
-    "RUNS_ON":        "runs on",
-    "TRAINED_ON":     "was trained on",
-    "DETECTS":        "detects",
-    "CLASSIFIES":     "classifies",
-    "SUPPORTS":       "supports",
+    "LOCATED_IN": "is located in",
+    "CREATED_BY": "is created by",
+    "WORKS_FOR": "works for",
+    "SYNONYM_OF": "is a synonym of",
+    "INSTANCE_OF": "is an instance of",
+    "OVERLAPS": "overlaps with",
+    "STORES": "stores",
+    "RUNS_ON": "runs on",
+    "TRAINED_ON": "was trained on",
+    "DETECTS": "detects",
+    "CLASSIFIES": "classifies",
+    "SUPPORTS": "supports",
 }
 
 
@@ -6000,8 +6489,8 @@ _SYNTHESIS_SYSTEM_PROMPT = (
     "file name, entity name, or concrete mechanism. If you cannot be "
     "specific in a paragraph, drop the paragraph.\n"
     "- Distinguish observed evidence from graph-derived support from "
-    "hypothesis. Hedges are allowed when warranted (e.g. \"the graph "
-    "suggests…\" is fine WHEN the claim is graph-structural rather "
+    'hypothesis. Hedges are allowed when warranted (e.g. "the graph '
+    'suggests…" is fine WHEN the claim is graph-structural rather '
     "than text-evidence), but don't use hedge language as a substitute "
     "for stating what the connection actually carries.\n"
     "- Sparse packet: write fewer paragraphs and say plainly what is "
@@ -6417,9 +6906,15 @@ def _render_packet_user_prompt(
         intent = compact.get("intent_profile") or {}
         if isinstance(intent, dict) and intent.get("intent_type"):
             confidence = intent.get("confidence")
-            confidence_text = f" (confidence: {confidence})" if confidence is not None else ""
-            rationale = _text(intent.get("rationale") or intent.get("reason") or "", 220)
-            line = f"Detected query intent: {intent.get('intent_type')}{confidence_text}."
+            confidence_text = (
+                f" (confidence: {confidence})" if confidence is not None else ""
+            )
+            rationale = _text(
+                intent.get("rationale") or intent.get("reason") or "", 220
+            )
+            line = (
+                f"Detected query intent: {intent.get('intent_type')}{confidence_text}."
+            )
             if rationale:
                 line += f" Rationale: {rationale}"
             lines.append(line)
@@ -6459,7 +6954,9 @@ def _render_packet_user_prompt(
             if gap_profile.get("synthesis_rule"):
                 lines.append("Domain rule: " + str(gap_profile["synthesis_rule"]))
             if gap_profile.get("calculation_policy"):
-                lines.append("Calculation policy: " + str(gap_profile["calculation_policy"]))
+                lines.append(
+                    "Calculation policy: " + str(gap_profile["calculation_policy"])
+                )
 
     docs_in_scope = compact.get("documents_in_scope") or []
     if docs_in_scope:
@@ -6510,7 +7007,9 @@ def _render_packet_user_prompt(
             source = item.get("source") or {}
             source_label = source.get("label") or source.get("title") or "source"
             heading = " › ".join(
-                str(h).strip() for h in (item.get("heading_path") or []) if str(h).strip()
+                str(h).strip()
+                for h in (item.get("heading_path") or [])
+                if str(h).strip()
             )[:160]
             summary = (item.get("summary") or "").strip().replace("\n", " ")
             excerpt = (item.get("text") or "").strip().replace("\n", " ")
@@ -6570,9 +7069,7 @@ def _render_packet_user_prompt(
             if rationale:
                 lines.append(f'    mechanism: "{rationale}"')
             elif symbols:
-                lines.append(
-                    f'    mechanism: calls {", ".join(symbols[:4])}'
-                )
+                lines.append(f'    mechanism: calls {", ".join(symbols[:4])}')
 
             # `source:` — file_path:line_number for code, or rely on the
             # numbered evidence list for prose (caller cites [n]).
@@ -6585,9 +7082,7 @@ def _render_packet_user_prompt(
             # `symbols:` — only for code-derived edges with non-trivial
             # symbol surface; saves tokens on prose edges.
             if symbols:
-                lines.append(
-                    f"    symbols: {', '.join(symbols[:6])}"
-                )
+                lines.append(f"    symbols: {', '.join(symbols[:6])}")
 
     entity_facets = compact.get("entity_facets") or []
     if entity_facets:
@@ -6637,14 +7132,18 @@ def _render_packet_user_prompt(
                 for value in (bridge.get("source_domain"), bridge.get("target_domain"))
                 if value
             )
-            detail = bridge.get("rationale") or ", ".join(bridge.get("shared_terms") or [])
+            detail = bridge.get("rationale") or ", ".join(
+                bridge.get("shared_terms") or []
+            )
             suffix = f" ({domains})" if domains else ""
             lines.append(
                 f"- [BRIDGE:{bridge.get('bridge_type') or 'bridge'}] {ends}{suffix}: {detail or 'explicit cross-domain connector'}"
             )
         for analogy in analogies[:4]:
             ends = " <-> ".join(
-                value for value in (analogy.get("source"), analogy.get("target")) if value
+                value
+                for value in (analogy.get("source"), analogy.get("target"))
+                if value
             )
             metrics = []
             if analogy.get("topology_sim") is not None:
@@ -6653,21 +7152,24 @@ def _render_packet_user_prompt(
                 metrics.append(f"neighbor_jaccard={analogy['neighbor_jaccard']}")
             domains = " / ".join(
                 value
-                for value in (analogy.get("source_domain"), analogy.get("target_domain"))
+                for value in (
+                    analogy.get("source_domain"),
+                    analogy.get("target_domain"),
+                )
                 if value
             )
             detail = analogy.get("rationale") or "; ".join(metrics)
             suffix = f" ({domains})" if domains else ""
-            lines.append(f"- [ANALOGY] {ends}{suffix}: {detail or 'structural homolog'}")
+            lines.append(
+                f"- [ANALOGY] {ends}{suffix}: {detail or 'structural homolog'}"
+            )
         for transfer in transfers[:4]:
             analog_bits = [
                 f"{a.get('name')} in {a.get('domain')}"
                 for a in (transfer.get("analogs") or [])[:3]
                 if a.get("name") or a.get("domain")
             ]
-            targets = transfer.get("target_domains") or [
-                transfer.get("target_domain")
-            ]
+            targets = transfer.get("target_domains") or [transfer.get("target_domain")]
             target_text = ", ".join(str(v) for v in targets if v)
             analog_text = "; analogs: " + ", ".join(analog_bits) if analog_bits else ""
             lines.append(
@@ -6712,10 +7214,14 @@ def _render_packet_user_prompt(
             if basis.get("shared_terms"):
                 basis_bits.append("shared_terms=" + ", ".join(basis["shared_terms"]))
             if basis.get("shared_neighbors"):
-                basis_bits.append("shared_neighbors=" + ", ".join(basis["shared_neighbors"]))
+                basis_bits.append(
+                    "shared_neighbors=" + ", ".join(basis["shared_neighbors"])
+                )
             if basis_bits or gap.get("support"):
                 support = f"support={gap.get('support')}" if gap.get("support") else ""
-                lines.append("    basis: " + " | ".join([v for v in basis_bits + [support] if v]))
+                lines.append(
+                    "    basis: " + " | ".join([v for v in basis_bits + [support] if v])
+                )
 
     signals = compact.get("signals") or []
     if signals:
@@ -6772,7 +7278,9 @@ def _source_brief_for_prompt(item: dict[str, Any]) -> dict[str, Any]:
     hint_brief = {key: value for key, value in hint_brief.items() if value}
     if hint_brief:
         brief["hints"] = hint_brief
-    return {key: value for key, value in brief.items() if value not in ("", [], {}, None)}
+    return {
+        key: value for key, value in brief.items() if value not in ("", [], {}, None)
+    }
 
 
 def _ideation_idea_budget(compact: dict[str, Any]) -> dict[str, Any]:
@@ -6805,11 +7313,7 @@ def _ideation_idea_budget(compact: dict[str, Any]) -> dict[str, Any]:
         if value > 0
     )
     invention_signals = (
-        bridge_count
-        + analogy_count
-        + transfer_count
-        + min(gap_count, 3)
-        + signal_count
+        bridge_count + analogy_count + transfer_count + min(gap_count, 3) + signal_count
     )
     grounding_strength = evidence_count + min(edge_count, 4) + min(doc_count, 3)
 
@@ -6847,17 +7351,21 @@ def _ideation_idea_budget(compact: dict[str, Any]) -> dict[str, Any]:
 def _compact_gap_profile(raw: Any) -> dict[str, Any]:
     if not isinstance(raw, dict):
         return {}
-    domain_scores = raw.get("domain_scores") if isinstance(raw.get("domain_scores"), dict) else {}
-    matched = raw.get("matched_indicators") if isinstance(raw.get("matched_indicators"), dict) else {}
+    domain_scores = (
+        raw.get("domain_scores") if isinstance(raw.get("domain_scores"), dict) else {}
+    )
+    matched = (
+        raw.get("matched_indicators")
+        if isinstance(raw.get("matched_indicators"), dict)
+        else {}
+    )
     compact = {
         "version": _text(raw.get("version") or "", 32),
         "gap_intent": bool(raw.get("gap_intent")),
         "primary_domain": _text(raw.get("primary_domain") or "", 32),
         "primary_label": _text(raw.get("primary_label") or "", 80),
         "secondary_domains": [
-            str(v)
-            for v in (raw.get("secondary_domains") or [])[:3]
-            if v
+            str(v) for v in (raw.get("secondary_domains") or [])[:3] if v
         ],
         "confidence": _maybe_float(raw.get("confidence")),
         "domain_scores": {
@@ -6867,9 +7375,15 @@ def _compact_gap_profile(raw: Any) -> dict[str, Any]:
         },
         "method_frame": _text(raw.get("method_frame") or "", 180),
         "output_shape": _text(raw.get("output_shape") or "", 80),
-        "required_metrics": [str(v) for v in (raw.get("required_metrics") or [])[:6] if v],
-        "required_evidence": [str(v) for v in (raw.get("required_evidence") or [])[:6] if v],
-        "likely_missing_data": [str(v) for v in (raw.get("likely_missing_data") or [])[:6] if v],
+        "required_metrics": [
+            str(v) for v in (raw.get("required_metrics") or [])[:6] if v
+        ],
+        "required_evidence": [
+            str(v) for v in (raw.get("required_evidence") or [])[:6] if v
+        ],
+        "likely_missing_data": [
+            str(v) for v in (raw.get("likely_missing_data") or [])[:6] if v
+        ],
         "matched_indicators": {
             str(k): [str(v) for v in (values or [])[:6] if v]
             for k, values in list(matched.items())[:6]
@@ -6878,7 +7392,9 @@ def _compact_gap_profile(raw: Any) -> dict[str, Any]:
         "synthesis_rule": _text(raw.get("synthesis_rule") or "", 220),
         "calculation_policy": _text(raw.get("calculation_policy") or "", 220),
     }
-    return {key: value for key, value in compact.items() if value not in ("", [], {}, None)}
+    return {
+        key: value for key, value in compact.items() if value not in ("", [], {}, None)
+    }
 
 
 def _compact_packet_for_prompt(
@@ -6887,30 +7403,39 @@ def _compact_packet_for_prompt(
     synthesis_mode: str = "nuance",
 ) -> dict[str, Any]:
     caps = _packet_caps_for_mode(synthesis_mode)
-    evidence_filter = packet.get("evidence_filter") if isinstance(packet.get("evidence_filter"), dict) else {}
+    evidence_filter = (
+        packet.get("evidence_filter")
+        if isinstance(packet.get("evidence_filter"), dict)
+        else {}
+    )
     graph_context_allowed = not bool(evidence_filter.get("all_rejected"))
     web_evidence_count = len(
-        [
-            item
-            for item in (packet.get("web_evidence") or [])
-            if isinstance(item, dict)
-        ]
+        [item for item in (packet.get("web_evidence") or []) if isinstance(item, dict)]
     )
     evidence_limit = caps.evidence + web_evidence_count
     evidence = []
-    for idx, item in enumerate((packet.get("evidence") or [])[:evidence_limit], start=1):
+    for idx, item in enumerate(
+        (packet.get("evidence") or [])[:evidence_limit], start=1
+    ):
         if not isinstance(item, dict):
             continue
         brief = _source_brief_for_prompt(item)
         if isinstance(brief, dict):
-            label_field = brief.get("label") or brief.get("title") or item.get("source_label") or ""
+            label_field = (
+                brief.get("label")
+                or brief.get("title")
+                or item.get("source_label")
+                or ""
+            )
             cleaned = _clean_prompt_source_label(str(label_field), source=brief)
             brief = {**brief, "label": cleaned, "title": cleaned}
         evidence.append(
             {
                 "id": str(item.get("evidence_id") or f"e{idx}"),
                 "source": brief,
-                "heading_path": [str(h) for h in (item.get("heading_path") or []) if h][:6],
+                "heading_path": [str(h) for h in (item.get("heading_path") or []) if h][
+                    :6
+                ],
                 "summary": _text(item.get("summary") or "", 320),
                 "text": _text(item.get("text") or "", 360),
                 "source_tier": _text(item.get("source_tier") or "", 32),
@@ -6939,7 +7464,9 @@ def _compact_packet_for_prompt(
                 45,
             ),
             "role": _text(edge.get("role") or edge.get("relation_family") or "", 35),
-            "family": _text(edge.get("relation_family") or edge.get("family") or "", 35),
+            "family": _text(
+                edge.get("relation_family") or edge.get("family") or "", 35
+            ),
             "conf": round(float(edge.get("confidence") or edge.get("conf") or 0.0), 2),
             "rationale": _text(edge.get("rationale") or "", 220),
             # Phase B3 — code metadata enrichment. Threaded through compaction
@@ -6979,12 +7506,16 @@ def _compact_packet_for_prompt(
         if not isinstance(entity, dict):
             continue
         facets = {
-            "name": _text(entity.get("canonical_name") or entity.get("entity_id") or "", 60),
+            "name": _text(
+                entity.get("canonical_name") or entity.get("entity_id") or "", 60
+            ),
             "object_kind": _text(entity.get("object_kind") or "", 40),
             "domain_type": _text(entity.get("domain_type") or "", 40),
             "canonical_family": _text(entity.get("canonical_family") or "", 40),
         }
-        if not (facets["object_kind"] or facets["domain_type"] or facets["canonical_family"]):
+        if not (
+            facets["object_kind"] or facets["domain_type"] or facets["canonical_family"]
+        ):
             continue
         entity_facets.append(facets)
 
@@ -7007,7 +7538,9 @@ def _compact_packet_for_prompt(
             "hub_domain": _text(item.get("hub_domain") or "", 60),
             "target": _text(item.get("target_name") or item.get("target") or "", 70),
             "target_domain": _text(item.get("target_domain") or "", 60),
-            "target_domains": [str(v) for v in (item.get("target_domains") or [])[:4] if v],
+            "target_domains": [
+                str(v) for v in (item.get("target_domains") or [])[:4] if v
+            ],
             "analogs": [
                 {
                     "name": _text(a.get("name") or a.get("entity") or "", 60),
@@ -7043,7 +7576,9 @@ def _compact_packet_for_prompt(
             "source_domain": _text(item.get("source_domain") or "", 60),
             "target_domain": _text(item.get("target_domain") or "", 60),
             "path_count": item.get("path_count"),
-            "path_entities": [str(v) for v in (item.get("path_entities") or [])[:5] if v],
+            "path_entities": [
+                str(v) for v in (item.get("path_entities") or [])[:5] if v
+            ],
             "evidence": _text(item.get("evidence") or "", 180),
         }
         for item in (packet.get("fragile_bridges") or [])[: caps.fragile_bridges]
@@ -7097,15 +7632,21 @@ def _compact_packet_for_prompt(
             "basis": {
                 "shared_terms": [
                     str(v)
-                    for v in ((gap.get("coherence") or {}).get("shared_terms") or [])[:4]
+                    for v in ((gap.get("coherence") or {}).get("shared_terms") or [])[
+                        :4
+                    ]
                     if v
                 ],
                 "shared_neighbors": [
                     str(v)
-                    for v in ((gap.get("coherence") or {}).get("shared_neighbors") or [])[:4]
+                    for v in (
+                        (gap.get("coherence") or {}).get("shared_neighbors") or []
+                    )[:4]
                     if v
                 ],
-                "anchors": [str(v) for v in (gap.get("anchor_concepts") or [])[:4] if v],
+                "anchors": [
+                    str(v) for v in (gap.get("anchor_concepts") or [])[:4] if v
+                ],
             },
         }
         for idx, gap in enumerate((packet.get("gaps") or [])[: caps.gaps], start=1)
@@ -7117,7 +7658,9 @@ def _compact_packet_for_prompt(
             "name": _text(sig.get("canonical_name") or "", 60),
             "why": _text(sig.get("rationale") or "", 120),
         }
-        for idx, sig in enumerate((packet.get("signals") or [])[: caps.signals], start=1)
+        for idx, sig in enumerate(
+            (packet.get("signals") or [])[: caps.signals], start=1
+        )
         if graph_context_allowed and isinstance(sig, dict)
     ]
     gateway_focus = [
@@ -7128,7 +7671,9 @@ def _compact_packet_for_prompt(
         for edge in edges[:5]
         if edge.get("s") and edge.get("t")
     ]
-    graph_hint = packet.get("graph_hint") if isinstance(packet.get("graph_hint"), dict) else {}
+    graph_hint = (
+        packet.get("graph_hint") if isinstance(packet.get("graph_hint"), dict) else {}
+    )
     compact_graph_hint = {
         "shape": graph_hint.get("shape") or {},
         "gateways": (graph_hint.get("gateways") or [])[:3],
@@ -7174,7 +7719,12 @@ def _compact_packet_for_prompt(
         "documents_in_scope": [
             {
                 "label": _clean_prompt_source_label(
-                    str(d.get("filename") or d.get("source_label") or d.get("doc_id") or ""),
+                    str(
+                        d.get("filename")
+                        or d.get("source_label")
+                        or d.get("doc_id")
+                        or ""
+                    ),
                 ),
                 "summary": _text(d.get("summary") or "", 220),
             }
@@ -7221,7 +7771,7 @@ def _strip_code_fences(text: str) -> str:
         # Drop opening fence + optional language hint.
         text = re.sub(r"^```[a-zA-Z]*\n?", "", text, count=1)
         if text.endswith("```"):
-            text = text[: -3]
+            text = text[:-3]
     return text.strip()
 
 
@@ -7248,7 +7798,7 @@ async def _resolve_graph_model(
 
             raw = await settings_service.get_models_raw(user_id)
             wanted = name.strip().lower()
-            for entry in (raw.get("query_model_pool") or []):
+            for entry in raw.get("query_model_pool") or []:
                 if not isinstance(entry, dict):
                     continue
                 entry_id = str(entry.get("entry_id") or "").strip()
@@ -7286,7 +7836,9 @@ async def _resolve_graph_model(
 
             resolved = await resolve_by_entry_id(user_id, entry_id)
         except Exception as exc:
-            logger.warning("Graph synthesis model resolution failed for %s: %s", model, exc)
+            logger.warning(
+                "Graph synthesis model resolution failed for %s: %s", model, exc
+            )
             resolved = None
         if resolved:
             return {
@@ -7395,27 +7947,27 @@ _CRITIQUE_SYSTEM_PROMPT = (
     "object with a `problems` array; nothing else.\n\n"
     "Each problem must point to a SPECIFIC sentence in the draft and "
     "name a SPECIFIC issue. Use these problem categories:\n"
-    "  - \"fabricated_term\": the sentence bolds or names an API/file/"
+    '  - "fabricated_term": the sentence bolds or names an API/file/'
     "    entity that does NOT appear verbatim in the evidence packet.\n"
-    "  - \"missing_citation\": the sentence makes a claim grounded in "
+    '  - "missing_citation": the sentence makes a claim grounded in '
     "    the evidence but has no [n] inline citation.\n"
-    "  - \"shell_sentence\": the sentence is empty narration "
-    "    (\"a relationship exists between\", \"the graph suggests\", "
-    "    \"these are connected\", \"a bridge exists\") without naming "
+    '  - "shell_sentence": the sentence is empty narration '
+    '    ("a relationship exists between", "the graph suggests", '
+    '    "these are connected", "a bridge exists") without naming '
     "    the actual mechanism.\n"
-    "  - \"internal_label_leak\": the sentence contains a raw "
+    '  - "internal_label_leak": the sentence contains a raw '
     "    ALL_CAPS_UNDERSCORED label like RELATES_TO or MENTIONS.\n"
-    "  - \"contradicts_evidence\": the sentence states X about Y but "
+    '  - "contradicts_evidence": the sentence states X about Y but '
     "    the cited evidence shows the opposite.\n\n"
     "Output schema:\n"
     "{\n"
-    "  \"problems\": [\n"
-    "    {\"sentence\": \"<exact quote, ≤200 chars>\",\n"
-    "     \"category\": \"<one of the categories above>\",\n"
-    "     \"detail\": \"<one sentence explaining the issue>\"}\n"
+    '  "problems": [\n'
+    '    {"sentence": "<exact quote, ≤200 chars>",\n'
+    '     "category": "<one of the categories above>",\n'
+    '     "detail": "<one sentence explaining the issue>"}\n'
     "  ]\n"
     "}\n\n"
-    "If the draft has no problems, return `{\"problems\": []}`. Do not "
+    'If the draft has no problems, return `{"problems": []}`. Do not '
     "invent issues to fill the list — a clean draft IS the success "
     "case. Cap at 10 problems even if more exist; surface the most "
     "load-bearing ones first."
@@ -7437,8 +7989,8 @@ _REVISE_SYSTEM_PROMPT = (
     "  beyond what the original draft already had (minus the dropped "
     "  bad sentences).\n"
     "- Do NOT explain your edits — output ONLY the corrected "
-    "  markdown synthesis, nothing else. No \"Here is the revised "
-    "  version:\" preamble.\n"
+    '  markdown synthesis, nothing else. No "Here is the revised '
+    '  version:" preamble.\n'
     "- If every sentence is flagged and removing them would empty "
     "  the document, return a one-paragraph honest statement that "
     "  the evidence was too thin to support a synthesis."
@@ -7462,9 +8014,7 @@ async def _critique_synthesis(
     import re
 
     critique_user = (
-        user_prompt
-        + "\n\n--- DRAFT SYNTHESIS TO AUDIT ---\n"
-        + draft_markdown
+        user_prompt + "\n\n--- DRAFT SYNTHESIS TO AUDIT ---\n" + draft_markdown
     )
     messages = [
         {"role": "system", "content": _CRITIQUE_SYSTEM_PROMPT},
@@ -7624,11 +8174,12 @@ async def _call_llm_synthesis(
     if creds.get("model"):
         candidates.append(creds)
     else:
-        logger.warning("Graph synthesis has no resolved primary model; using fallback lane")
+        logger.warning(
+            "Graph synthesis has no resolved primary model; using fallback lane"
+        )
 
     fallback_model = (
-        os.environ.get("GRAPH_SYNTHESIS_FALLBACK_MODEL", "deepseek/deepseek-chat")
-        or ""
+        os.environ.get("GRAPH_SYNTHESIS_FALLBACK_MODEL", "deepseek/deepseek-chat") or ""
     ).strip()
     retry_fallback_model = str(
         os.environ.get("GRAPH_SYNTHESIS_RETRY_FALLBACK_MODEL", "false") or ""
@@ -7665,11 +8216,13 @@ async def _call_llm_synthesis(
             len(messages[0]["content"]),
             len(messages[1]["content"]),
             (len(messages[0]["content"]) + len(messages[1]["content"])) // 4,
-            len({
-                str(item.get("doc_id") or "")
-                for item in evidence_items
-                if item.get("doc_id")
-            }),
+            len(
+                {
+                    str(item.get("doc_id") or "")
+                    for item in evidence_items
+                    if item.get("doc_id")
+                }
+            ),
             len(evidence_items),
             ",".join((packet.get("collections") or {}).values()),
         )
@@ -7712,7 +8265,9 @@ async def _call_llm_synthesis(
     headline_match = _SYNTHESIS_HEADLINE_RE.search(prose)
     if headline_match:
         headline = headline_match.group(1).strip()
-        markdown = (prose[: headline_match.start()] + prose[headline_match.end():]).strip()
+        markdown = (
+            prose[: headline_match.start()] + prose[headline_match.end() :]
+        ).strip()
     else:
         headline = ""
         markdown = prose
@@ -7743,10 +8298,10 @@ async def _call_llm_synthesis(
                 llm_service=llm_service,
                 draft_markdown=markdown,
                 user_prompt=messages[1]["content"],
-            problems=problems,
-            creds=creds,
-            max_tokens=max_tokens,
-        )
+                problems=problems,
+                creds=creds,
+                max_tokens=max_tokens,
+            )
             critique_meta["revise_error"] = revise_err
             if revised and not revise_err:
                 # Re-extract headline from the revised draft in case the
@@ -7755,7 +8310,7 @@ async def _call_llm_synthesis(
                 if rev_match:
                     headline = rev_match.group(1).strip()
                     markdown = (
-                        revised[: rev_match.start()] + revised[rev_match.end():]
+                        revised[: rev_match.start()] + revised[rev_match.end() :]
                     ).strip()
                 else:
                     markdown = revised
@@ -7796,7 +8351,9 @@ def _synthesis_sources_from_packet(
     evidence = [
         item for item in (packet.get("evidence") or []) if isinstance(item, dict)
     ]
-    cited = sorted({int(m) for m in _SYNTHESIS_CITATION_RE.findall(markdown or "") if m.isdigit()})
+    cited = sorted(
+        {int(m) for m in _SYNTHESIS_CITATION_RE.findall(markdown or "") if m.isdigit()}
+    )
     indexes = cited if cited else list(range(1, len(evidence) + 1))
 
     receipts: list[dict[str, Any]] = []
@@ -7849,20 +8406,18 @@ def _deterministic_prose_fallback(
     chunks = packet.get("evidence") or []
     edges = packet.get("edges") or []
     groups = [
-        g.get("label") for g in (packet.get("communities") or []) if isinstance(g, dict) and g.get("label")
+        g.get("label")
+        for g in (packet.get("communities") or [])
+        if isinstance(g, dict) and g.get("label")
     ]
     gaps = [
-        g for g in (packet.get("gaps") or []) if isinstance(g, dict) and g.get("question")
+        g
+        for g in (packet.get("gaps") or [])
+        if isinstance(g, dict) and g.get("question")
     ]
-    analogies = [
-        a for a in (packet.get("analogies") or []) if isinstance(a, dict)
-    ]
-    transfers = [
-        t for t in (packet.get("transfers") or []) if isinstance(t, dict)
-    ]
-    bridges = [
-        b for b in (packet.get("bridges") or []) if isinstance(b, dict)
-    ]
+    analogies = [a for a in (packet.get("analogies") or []) if isinstance(a, dict)]
+    transfers = [t for t in (packet.get("transfers") or []) if isinstance(t, dict)]
+    bridges = [b for b in (packet.get("bridges") or []) if isinstance(b, dict)]
 
     evidence_index = {id(item): idx for idx, item in enumerate(chunks, start=1)}
     local_chunks = [
@@ -7887,7 +8442,9 @@ def _deterministic_prose_fallback(
         return f"- [{idx}] {label}"
 
     concepts = [
-        str(item.get("canonical_name") or item.get("name") or item.get("label") or "").strip()
+        str(
+            item.get("canonical_name") or item.get("name") or item.get("label") or ""
+        ).strip()
         for item in (packet.get("entities") or [])
         if isinstance(item, dict)
     ]
@@ -7930,11 +8487,7 @@ def _deterministic_prose_fallback(
     if chunks:
         paragraphs.append(
             f"The packet anchored **{len(local_chunks)} local chunks**"
-            + (
-                f" plus **{len(web_chunks)} web chunks**"
-                if web_chunks
-                else ""
-            )
+            + (f" plus **{len(web_chunks)} web chunks**" if web_chunks else "")
             + f" across {len({str(c.get('doc_id') or '') for c in chunks if c.get('doc_id')})} sources."
         )
     else:
@@ -7942,12 +8495,14 @@ def _deterministic_prose_fallback(
 
     if local_chunks:
         paragraphs.append(
-            "Corpus evidence:\n" + "\n".join(evidence_line(item) for item in local_chunks[:4])
+            "Corpus evidence:\n"
+            + "\n".join(evidence_line(item) for item in local_chunks[:4])
         )
 
     if web_chunks:
         paragraphs.append(
-            "Web grounding lane:\n" + "\n".join(evidence_line(item) for item in web_chunks[:3])
+            "Web grounding lane:\n"
+            + "\n".join(evidence_line(item) for item in web_chunks[:3])
         )
 
     if groups:
@@ -8044,13 +8599,38 @@ def _sync_headline_from_auto_synthesis(result: Any) -> None:
 
 def _snapshot_from_result(result: Any) -> dict[str, Any]:
     keys = [
-        "session_id", "corpus_id", "corpus_ids", "query", "mode", "interpretation",
-        "frontier", "analogies", "bridges", "weak_links", "transfers",
-        "questions", "strategic_read", "intent_profile", "atomic_trace",
-        "socratic_prompts", "metrics", "domain_map_summary", "graph",
-        "anchors", "concept_communities", "entity_concept_map", "headline",
-        "themes", "bridges_v2", "gaps_v2", "latent_topics", "tensions",
-        "trace", "auto_synthesis", "insight_packet_summary", "context_graph",
+        "session_id",
+        "corpus_id",
+        "corpus_ids",
+        "query",
+        "mode",
+        "interpretation",
+        "frontier",
+        "analogies",
+        "bridges",
+        "weak_links",
+        "transfers",
+        "questions",
+        "strategic_read",
+        "intent_profile",
+        "atomic_trace",
+        "socratic_prompts",
+        "metrics",
+        "domain_map_summary",
+        "graph",
+        "anchors",
+        "concept_communities",
+        "entity_concept_map",
+        "headline",
+        "themes",
+        "bridges_v2",
+        "gaps_v2",
+        "latent_topics",
+        "tensions",
+        "trace",
+        "auto_synthesis",
+        "insight_packet_summary",
+        "context_graph",
         "web_evidence",
     ]
     return {key: getattr(result, key, None) for key in keys}
@@ -8104,10 +8684,23 @@ async def _enrich_packet_with_extractions(
         WHERE $corpus_id IN coalesce(r.corpus_ids, [])
            OR EXISTS {
                MATCH (c:Chunk {corpus_id: $corpus_id})
-               WHERE c.chunk_id IN coalesce(r.evidence_chunk_ids, [])
+               WHERE c.corpus_id + '|' + c.chunk_id IN coalesce(r.evidence_chunk_keys, [])
+                  OR (
+                      none(key IN coalesce(r.evidence_chunk_keys, [])
+                           WHERE key STARTS WITH $corpus_id + '|')
+                      AND c.chunk_id IN coalesce(r.evidence_chunk_ids, [])
+                  )
            }
+        OPTIONAL MATCH (evidence:Chunk {corpus_id: $corpus_id})
+        WHERE evidence.corpus_id + '|' + evidence.chunk_id IN coalesce(r.evidence_chunk_keys, [])
+           OR (
+               none(key IN coalesce(r.evidence_chunk_keys, [])
+                    WHERE key STARTS WITH $corpus_id + '|')
+               AND evidence.chunk_id IN coalesce(r.evidence_chunk_ids, [])
+           )
+        WITH triple, r, collect(DISTINCT evidence.chunk_id) AS chunk_ids
         RETURN triple.s AS s, triple.t AS t, triple.p AS p,
-               coalesce(r.evidence_chunk_ids, []) AS chunk_ids,
+               chunk_ids,
                coalesce(r.relation_family, 'WeakAssociation') AS relation_family,
                r.confidence AS confidence
         """
@@ -8119,7 +8712,9 @@ async def _enrich_packet_with_extractions(
                     corpus_id=corpus_id,
                 )
                 async for rec in result:
-                    chunk_ids = [str(cid) for cid in (rec.get("chunk_ids") or []) if cid]
+                    chunk_ids = [
+                        str(cid) for cid in (rec.get("chunk_ids") or []) if cid
+                    ]
                     edge_meta[(rec["s"], rec["t"], rec["p"])] = {
                         "evidence_chunk_ids": chunk_ids[:3],
                         "relation_family": rec.get("relation_family") or "",
@@ -8142,10 +8737,12 @@ async def _enrich_packet_with_extractions(
     if rationale_chunk_ids and db is not None:
         try:
             cursor = db["chunks"].find(
-                with_active_records({
-                    "corpus_id": corpus_id,
-                    "chunk_id": {"$in": list(rationale_chunk_ids)[:24]},
-                }),
+                with_active_records(
+                    {
+                        "corpus_id": corpus_id,
+                        "chunk_id": {"$in": list(rationale_chunk_ids)[:24]},
+                    }
+                ),
                 {
                     "_id": 0,
                     "chunk_id": 1,
@@ -8183,9 +8780,7 @@ async def _enrich_packet_with_extractions(
                 if lang or file_path or symbols_called or symbols_defined:
                     raw_line = meta_blob.get("line_number")
                     try:
-                        line_number = (
-                            int(raw_line) if raw_line is not None else None
-                        )
+                        line_number = int(raw_line) if raw_line is not None else None
                     except Exception:
                         line_number = None
                     chunk_code_meta_by_id[cid] = {
@@ -8260,7 +8855,9 @@ async def _enrich_packet_with_extractions(
                         "domain_type": str(rec.get("domain_type") or ""),
                         "canonical_family": str(rec.get("canonical_family") or ""),
                         "observed_entity_types": [
-                            str(t) for t in (rec.get("observed_entity_types") or []) if t
+                            str(t)
+                            for t in (rec.get("observed_entity_types") or [])
+                            if t
                         ][:4],
                     }
         except Exception as exc:
@@ -8275,7 +8872,9 @@ async def _enrich_packet_with_extractions(
             for key in ("object_kind", "domain_type", "canonical_family"):
                 if facets.get(key) and not entity.get(key):
                     entity[key] = facets[key]
-            if facets.get("observed_entity_types") and not entity.get("observed_entity_types"):
+            if facets.get("observed_entity_types") and not entity.get(
+                "observed_entity_types"
+            ):
                 entity["observed_entity_types"] = facets["observed_entity_types"]
 
     # ── Documents-in-scope orientation: pull a one-line summary per unique doc
@@ -8283,12 +8882,16 @@ async def _enrich_packet_with_extractions(
     # before the chunk-level details. Bounded by the number of unique docs in
     # evidence, so cost is at most ~_PACKET_MAX_EVIDENCE single-doc reads.
     evidence = [e for e in (packet.get("evidence") or []) if isinstance(e, dict)]
-    doc_ids_in_scope = list({str(e.get("doc_id") or "") for e in evidence if e.get("doc_id")})
+    doc_ids_in_scope = list(
+        {str(e.get("doc_id") or "") for e in evidence if e.get("doc_id")}
+    )
     documents_in_scope: list[dict[str, Any]] = []
     if doc_ids_in_scope and db is not None:
         try:
             cursor = db["documents"].find(
-                with_active_records({"corpus_id": corpus_id, "doc_id": {"$in": doc_ids_in_scope[:8]}}),
+                with_active_records(
+                    {"corpus_id": corpus_id, "doc_id": {"$in": doc_ids_in_scope[:8]}}
+                ),
                 {
                     "_id": 0,
                     "doc_id": 1,
@@ -8304,7 +8907,9 @@ async def _enrich_packet_with_extractions(
                 parents = doc.get("parent_chunks") or []
                 head_summary = ""
                 if parents and isinstance(parents[0], dict):
-                    head_summary = str(parents[0].get("summary") or parents[0].get("text") or "")
+                    head_summary = str(
+                        parents[0].get("summary") or parents[0].get("text") or ""
+                    )
                 documents_in_scope.append(
                     {
                         "doc_id": str(doc.get("doc_id") or ""),
@@ -8438,7 +9043,11 @@ async def discover(
         # result to keep schema compatibility, then patch corpus_ids.
         try:
             first_success = next(
-                (r for _, r, err in per_corpus_results if err is None and r is not None),
+                (
+                    r
+                    for _, r, err in per_corpus_results
+                    if err is None and r is not None
+                ),
                 None,
             )
             if first_success is not None:
@@ -8480,7 +9089,11 @@ async def discover(
     # back, but discover always behaves as auto-synthesis.
     result.mode = mode or "auto"
     result.trace = _trace_with_stages(getattr(result, "trace", {}) or {})
-    legacy_source_docs = list(result.trace.get("source_docs") or []) if isinstance(result.trace, dict) else []
+    legacy_source_docs = (
+        list(result.trace.get("source_docs") or [])
+        if isinstance(result.trace, dict)
+        else []
+    )
     retrieved_source_docs, retrieval_meta = await _retrieve_packet_source_docs(
         db,
         corpus_id=corpus_id,
@@ -8491,7 +9104,9 @@ async def discover(
         result.trace["graph_scope_source_docs"] = legacy_source_docs
         result.trace["retrieval_evidence"] = retrieval_meta
         result.trace["source_docs"] = retrieved_source_docs
-    result.trace = await _hydrate_trace_source_docs(db, result.trace, corpus_id=corpus_id)
+    result.trace = await _hydrate_trace_source_docs(
+        db, result.trace, corpus_id=corpus_id
+    )
 
     # Nuance mode depends on the detector lists (structural analogies,
     # transfer candidates, fragile bridges) that live in the cache, not just
@@ -8547,8 +9162,7 @@ async def discover(
             support_evidence.extend(graph_signal_support)
             remaining_support = max(
                 0,
-                min(_SEMANTIC_FACET_MAX_LANES, caps.evidence)
-                - len(support_evidence),
+                min(_SEMANTIC_FACET_MAX_LANES, caps.evidence) - len(support_evidence),
             )
             if remaining_support:
                 semantic_support = await _semantic_facet_support_evidence(
@@ -8590,9 +9204,9 @@ async def discover(
                 max_files=_semantic_source_cap,
             )
             if isinstance(result.trace, dict) and added:
-                result.trace["cross_source_support"] = packet.get("evidence_filter", {}).get(
-                    "cross_source_support"
-                )
+                result.trace["cross_source_support"] = packet.get(
+                    "evidence_filter", {}
+                ).get("cross_source_support")
                 result.trace["semantic_coverage_support"] = packet.get(
                     "evidence_filter", {}
                 ).get("semantic_coverage_support")
@@ -8667,7 +9281,8 @@ async def discover(
                 except Exception as exc:
                     logger.debug(
                         "agentic retrieve_for_entity(%r) retriever call failed: %s",
-                        entity_name, exc,
+                        entity_name,
+                        exc,
                     )
                     return []
 
@@ -8684,19 +9299,21 @@ async def discover(
                         or "source"
                     )
                     cid = str(getattr(chunk, "chunk_id", "") or "")
-                    evidence_items.append({
-                        "evidence_id": f"agentic:{entity_name}:{cid}",
-                        "doc_id": getattr(chunk, "doc_id", None),
-                        "chunk_id": cid,
-                        "source": {"label": str(label)[:80]},
-                        "source_label": str(label)[:80],
-                        "heading_path": list(
-                            getattr(chunk, "heading_path", None) or []
-                        ),
-                        "text": str(getattr(chunk, "text", "") or "")[:360],
-                        "summary": str(getattr(chunk, "summary", "") or "")[:320],
-                        "agentic_deepened_for": entity_name,
-                    })
+                    evidence_items.append(
+                        {
+                            "evidence_id": f"agentic:{entity_name}:{cid}",
+                            "doc_id": getattr(chunk, "doc_id", None),
+                            "chunk_id": cid,
+                            "source": {"label": str(label)[:80]},
+                            "source_label": str(label)[:80],
+                            "heading_path": list(
+                                getattr(chunk, "heading_path", None) or []
+                            ),
+                            "text": str(getattr(chunk, "text", "") or "")[:360],
+                            "summary": str(getattr(chunk, "summary", "") or "")[:320],
+                            "agentic_deepened_for": entity_name,
+                        }
+                    )
                 return evidence_items
 
             packet = await run_agentic_loop(
@@ -8823,6 +9440,7 @@ def _empty_discover_result_like(template: Any) -> Any:
     except Exception:
         # Fallback: a SimpleNamespace with the template's attrs zeroed.
         from types import SimpleNamespace
+
         return SimpleNamespace(**{k: None for k in vars(template).keys()})
 
 
@@ -8896,6 +9514,7 @@ def merge_discover_results(
     if not successes:
         # No corpus succeeded — return a stub with errors envelope.
         from types import SimpleNamespace
+
         return SimpleNamespace(
             session_id="",
             corpus_id=corpus_ids[0] if corpus_ids else "",
@@ -8934,10 +9553,26 @@ def merge_discover_results(
                     "errors": errors,
                 },
             },
-            auto_synthesis={"markdown": "", "sources": [], "fallback": True, "fallback_reason": "all_corpora_failed"},
-            insight_packet_summary={"sparse": True, "temporal_support": False, "counts": {}, "evidence_sources": {}, "fallback_reason": "all_corpora_failed"},
+            auto_synthesis={
+                "markdown": "",
+                "sources": [],
+                "fallback": True,
+                "fallback_reason": "all_corpora_failed",
+            },
+            insight_packet_summary={
+                "sparse": True,
+                "temporal_support": False,
+                "counts": {},
+                "evidence_sources": {},
+                "fallback_reason": "all_corpora_failed",
+            },
             context_graph={"nodes": [], "links": [], "meta": {}},
-            web_evidence={"enabled": False, "fetch_depth": "normal", "max_results": 0, "sources": []},
+            web_evidence={
+                "enabled": False,
+                "fetch_depth": "normal",
+                "max_results": 0,
+                "sources": [],
+            },
         )
 
     # Use the first success as the merged result template, then overlay.
@@ -8947,8 +9582,10 @@ def merge_discover_results(
         seen: set = set() if key_fn else set()
         out: list = []
         for cid, res in successes:
-            for item in (getattr(res, attr, None) or []):
-                stamped = _stamp_source(dict(item) if isinstance(item, dict) else item, cid)
+            for item in getattr(res, attr, None) or []:
+                stamped = _stamp_source(
+                    dict(item) if isinstance(item, dict) else item, cid
+                )
                 if key_fn:
                     k = key_fn(stamped)
                     if k in seen:
@@ -8975,7 +9612,11 @@ def merge_discover_results(
     merged_socratic = _merge_list("socratic_prompts", cap=16)
     merged_concepts = _merge_list(
         "concept_communities",
-        key_fn=lambda c: str((c or {}).get("concept_id") if isinstance(c, dict) else getattr(c, "concept_id", "")),
+        key_fn=lambda c: str(
+            (c or {}).get("concept_id")
+            if isinstance(c, dict)
+            else getattr(c, "concept_id", "")
+        ),
         cap=64,
     )
 
@@ -9011,7 +9652,12 @@ def merge_discover_results(
                 continue
             stamped = dict(source)
             stamped["source_corpus"] = stamped.get("source_corpus") or cid
-            key = str(stamped.get("url") or stamped.get("chunk_id") or stamped.get("title") or "")
+            key = str(
+                stamped.get("url")
+                or stamped.get("chunk_id")
+                or stamped.get("title")
+                or ""
+            )
             if key and key in web_seen:
                 continue
             if key:
@@ -9039,16 +9685,18 @@ def merge_discover_results(
     merged_links: dict[tuple[str, str, str], dict] = {}
     for cid, res in successes:
         graph = getattr(res, "graph", None) or {}
-        for n in (graph.get("nodes") or []):
+        for n in graph.get("nodes") or []:
             nid = _node_id(n)
             if not nid:
                 continue
             existing = merged_nodes.get(nid)
             if existing is None:
-                merged_nodes[nid] = _stamp_source(dict(n) if isinstance(n, dict) else n, cid)
+                merged_nodes[nid] = _stamp_source(
+                    dict(n) if isinstance(n, dict) else n, cid
+                )
             else:
                 _stamp_source(existing, cid)
-        for link in (graph.get("links") or []):
+        for link in graph.get("links") or []:
             k = _link_key(link)
             existing = merged_links.get(k)
             if existing is None:
@@ -9077,16 +9725,20 @@ def merge_discover_results(
     ctx_links: dict[tuple[str, str, str], dict] = {}
     for cid, res in successes:
         ctx = getattr(res, "context_graph", None) or {}
-        for n in (ctx.get("nodes") or []):
-            nid = str((n or {}).get("id") if isinstance(n, dict) else getattr(n, "id", ""))
+        for n in ctx.get("nodes") or []:
+            nid = str(
+                (n or {}).get("id") if isinstance(n, dict) else getattr(n, "id", "")
+            )
             if not nid:
                 continue
             existing = ctx_nodes.get(nid)
             if existing is None:
-                ctx_nodes[nid] = _stamp_source(dict(n) if isinstance(n, dict) else n, cid)
+                ctx_nodes[nid] = _stamp_source(
+                    dict(n) if isinstance(n, dict) else n, cid
+                )
             else:
                 _stamp_source(existing, cid)
-        for link in (ctx.get("links") or []):
+        for link in ctx.get("links") or []:
             k = _link_key(link)
             existing = ctx_links.get(k)
             if existing is None:
@@ -9118,11 +9770,13 @@ def merge_discover_results(
             md = getattr(auto, "markdown", "") or ""
             sources = getattr(auto, "sources", []) or []
         if md:
-            per_corpus_synthesis.append({
-                "corpus_id": cid,
-                "markdown": md,
-                "sources": sources,
-            })
+            per_corpus_synthesis.append(
+                {
+                    "corpus_id": cid,
+                    "markdown": md,
+                    "sources": sources,
+                }
+            )
 
     # Build the merged Result by mutating a shallow copy of the best result.
     merged = best
@@ -9213,7 +9867,9 @@ if _legacy is not None:
     _legacy_list_sessions = getattr(_legacy, "list_sessions", None)
     _legacy_get_session = getattr(_legacy, "get_session", None)
     _legacy_find_resume_candidate = getattr(_legacy, "find_resume_candidate", None)
-    _legacy_build_corpus_suggestions = getattr(_legacy, "build_corpus_suggestions", None)
+    _legacy_build_corpus_suggestions = getattr(
+        _legacy, "build_corpus_suggestions", None
+    )
     _legacy_delete_session = getattr(_legacy, "delete_session", None)
 
 
@@ -9251,14 +9907,25 @@ async def list_sessions(
     }
     if user_id:
         flt["user_id"] = user_id
-    cursor = db["graph_sessions"].find(
-        flt,
-        {
-            "session_id": 1, "corpus_id": 1, "corpus_ids": 1, "title": 1,
-            "created_at": 1, "updated_at": 1, "turn_count": 1,
-            "first_query": 1, "_id": 0,
-        },
-    ).sort("updated_at", -1).limit(200)
+    cursor = (
+        db["graph_sessions"]
+        .find(
+            flt,
+            {
+                "session_id": 1,
+                "corpus_id": 1,
+                "corpus_ids": 1,
+                "title": 1,
+                "created_at": 1,
+                "updated_at": 1,
+                "turn_count": 1,
+                "first_query": 1,
+                "_id": 0,
+            },
+        )
+        .sort("updated_at", -1)
+        .limit(200)
+    )
     return [doc async for doc in cursor]
 
 
@@ -9401,7 +10068,11 @@ async def build_corpus_suggestions(
         }
     if len(ids) == 1:
         return await _legacy_build_corpus_suggestions(
-            qdrant=qdrant, neo4j_driver=neo4j_driver, db=db, corpus_id=ids[0], user_id=user_id
+            qdrant=qdrant,
+            neo4j_driver=neo4j_driver,
+            db=db,
+            corpus_id=ids[0],
+            user_id=user_id,
         )
 
     import asyncio as _asyncio
@@ -9412,8 +10083,11 @@ async def build_corpus_suggestions(
         async with sem:
             try:
                 return await _legacy_build_corpus_suggestions(
-                    qdrant=qdrant, neo4j_driver=neo4j_driver, db=db,
-                    corpus_id=cid, user_id=user_id,
+                    qdrant=qdrant,
+                    neo4j_driver=neo4j_driver,
+                    db=db,
+                    corpus_id=cid,
+                    user_id=user_id,
                 )
             except Exception as exc:
                 logger.debug("build_corpus_suggestions failed for %s: %s", cid, exc)
@@ -9426,7 +10100,7 @@ async def build_corpus_suggestions(
     for cid, payload in zip(ids, results):
         if not payload:
             continue
-        for s in (payload.get("suggestions") or []):
+        for s in payload.get("suggestions") or []:
             text = str((s or {}).get("text") or "").strip()
             if not text or text in seen_text:
                 continue
@@ -9436,7 +10110,7 @@ async def build_corpus_suggestions(
             suggestions.append(entry)
             if len(suggestions) >= 16:
                 break
-        for d in (payload.get("domain_map_summary") or []):
+        for d in payload.get("domain_map_summary") or []:
             entry = dict(d) if isinstance(d, dict) else {"label": str(d)}
             entry["source_corpus"] = cid
             domain_summary.append(entry)

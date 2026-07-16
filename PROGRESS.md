@@ -2,22 +2,18 @@
 
 - Mission: CODEX_MISSION.md (CP2 → CP12)
 - Track: owner-priority RunPod finish line (CP9/P2.7), ahead of all other work.
-- Current task: B4/B5/B6 deterministic extraction lockdown is GREEN. The live
-  12-task valid canary has zero semantic mismatches and confidence max delta
-  `2.384185791015625e-06` under the unchanged `1e-05` bar; all three invalid
-  controls returned provider `FAILED` plus exact named fail-closed output; the
-  independent B6 replay is byte-semantically identical with confidence delta
-  0 and zero durable writes. Retained primary green `hk81nfl5cnwufx` is exact
-  private digest `4cb08457…`, min 0/max 1; blues and secondary are unchanged.
-  Permanent receipt:
-  `docs/RUNPOD_DETERMINISTIC_LOCKDOWN_B4_B6_RECEIPT_2026-07-15.md`.
-- Next task: B7 is stopped before corpus creation pending the senior's ruling.
-  The real ingest adapter still sends/accepts only legacy RunPod v2/v3 while
-  the locked worker requires `polymath.runpod_local_extraction.v1`. Proposed
-  scope is the bake-plan-promised additive green test route, strict
-  LocalExtractionV1 validation/claim compilation, and no legacy/blue change;
-  after B7, create the preregistered 15-document fresh corpus and run retrieval
-  eval. No incompatible job or corpus mutation has occurred.
+- Current task: the preregistered 15-document E2E is ingest-complete, but its
+  isolation census exposed Finding #5: globally unique content-derived graph
+  and summary-tree identities let the fresh corpus steal the same 15 source
+  documents from protected ecom. The composite `(corpus_id, content_id)` fix
+  is implemented, test-sealed, canonically deployed to backend+worker, and
+  live schema-sealed; shared Entity identity remains deliberately global.
+- Next task: repair only the 15 E2E/ecom collision groups from the immutable
+  exact backup, re-derive both corpus-qualified graph instances and ecom's 310
+  deterministic summary-tree rows, then require original-baseline isolation
+  closure and the three protected-corpus probes before the frozen retrieval
+  eval. Five older collision groups remain constant and queued post-E2E by
+  senior ruling.
 - Parked: the distinct five-parent bounded tail remains after the main pass
   and only if corpus-wide certified acceptance is at least 95%. The rejected
   structured v2/v3 contracts remain closed failed; the owner explicitly chose
@@ -123,4 +119,4 @@
   793+2 parents and finds sentence→atomic mapping coverage 80.944158%; the
   optional-ID ordered-unit shape is p50 13,930 bytes, max 25,613 bytes, with
   maximum-any-ten authority `$0.83486975` under the corrected envelope.
-- Last update: 2026-07-15T15:35:01Z (executor)
+- Last update: 2026-07-16T01:54:25Z (executor)

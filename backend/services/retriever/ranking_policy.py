@@ -57,6 +57,8 @@ _PERSONALITY_FRAMEWORK_RE = re.compile(
     r")\b",
     re.IGNORECASE,
 )
+
+
 @dataclass(frozen=True)
 class DiversityResult:
     candidates: list[SourceChunk]
@@ -133,10 +135,15 @@ def candidate_kind(chunk: SourceChunk) -> str:
 
     if source_tier == "graph_fact_seed" or "neo4j_fact" in retrievers:
         return "fact"
-    if "+lexical" in source_tier or "lexical" in retrievers or "qdrant_sparse" in retrievers:
+    if (
+        "+lexical" in source_tier
+        or "lexical" in retrievers
+        or "qdrant_sparse" in retrievers
+    ):
         return "lexical"
     if "summary" in source_tier or (
-        chunk.summary and (chunk.text == chunk.summary or chunk.chunk_id.endswith("_summary"))
+        chunk.summary
+        and (chunk.text == chunk.summary or chunk.chunk_id.endswith("_summary"))
     ):
         return "summary"
     return "child"
@@ -192,6 +199,7 @@ def apply_candidate_weights(
     weighted.sort(
         key=lambda c: (
             -float(c.score or 0.0),
+            c.corpus_id or "",
             c.parent_id or "",
             c.doc_id or "",
             c.chunk_id or "",
@@ -288,9 +296,7 @@ def _apply_metadata_signals(
     score. Returns the adjusted score plus a small diagnostics dict for the
     trace. Penalty subtracts, bonus adds — sign-safe on unbounded scores."""
     penalty = _heading_section_penalty(chunk)
-    distinct, density = _answer_bearingness(
-        chunk.text or chunk.summary or "", terms
-    )
+    distinct, density = _answer_bearingness(chunk.text or chunk.summary or "", terms)
     coverage = (distinct / len(terms)) if terms else 0.0
     delta = (coverage * _BEARING_BONUS) - penalty
     if not bounded:
@@ -417,8 +423,15 @@ def apply_query_grounding(
     return annotated
 
 
-def _candidate_identity(chunk: SourceChunk) -> tuple[str, str, str]:
+def _scoped_content_key(chunk: SourceChunk, value: str | None) -> str:
+    content_id = str(value or "")
+    corpus_id = str(chunk.corpus_id or "")
+    return f"{corpus_id}|{content_id}" if corpus_id and content_id else content_id
+
+
+def _candidate_identity(chunk: SourceChunk) -> tuple[str, str, str, str]:
     return (
+        str(chunk.corpus_id or ""),
         chunk.parent_id or chunk.chunk_id or "",
         chunk.doc_id or "",
         " / ".join(chunk.heading_path or []),
@@ -775,7 +788,10 @@ def _candidate_atoms(chunk: SourceChunk) -> set[str]:
         )
     ):
         atoms.add("distinction_caveat")
-    if _is_graph_expansion(chunk) or (chunk.source_tier or "").lower() == "graph_fact_seed":
+    if (
+        _is_graph_expansion(chunk)
+        or (chunk.source_tier or "").lower() == "graph_fact_seed"
+    ):
         atoms.add("graph_evidence")
     if not atoms:
         atoms.add(candidate_kind(chunk))
@@ -785,15 +801,14 @@ def _candidate_atoms(chunk: SourceChunk) -> set[str]:
 def _fingerprint(chunk: SourceChunk) -> dict[str, Any]:
     parent_key = chunk.parent_id or chunk.chunk_id or ""
     metadata = chunk.metadata or {}
-    document_key = str(
-        chunk.doc_id
-        or metadata.get("source_file_hash")
-        or chunk.doc_name
-        or ""
-    ).strip().lower()
+    document_key = (
+        str(chunk.doc_id or metadata.get("source_file_hash") or chunk.doc_name or "")
+        .strip()
+        .lower()
+    )
     return {
-        "doc": document_key,
-        "parent": str(parent_key),
+        "doc": _scoped_content_key(chunk, document_key),
+        "parent": _scoped_content_key(chunk, str(parent_key)),
         "identity": _candidate_identity(chunk),
         "tokens": _token_set(_chunk_text(chunk)),
         "atoms": _candidate_atoms(chunk),
@@ -1012,7 +1027,9 @@ def _required_atoms_for_query(query: str | None) -> set[str]:
     return semantic_required_atoms_for_query(query, max_concepts=4)
 
 
-def _atom_counts(selected_indices: list[int], fingerprints: list[dict[str, Any]]) -> dict[str, int]:
+def _atom_counts(
+    selected_indices: list[int], fingerprints: list[dict[str, Any]]
+) -> dict[str, int]:
     counts: dict[str, int] = {}
     for idx in selected_indices:
         for atom in fingerprints[idx]["atoms"]:
@@ -1020,7 +1037,9 @@ def _atom_counts(selected_indices: list[int], fingerprints: list[dict[str, Any]]
     return counts
 
 
-def _selected_doc_count(selected_indices: list[int], fingerprints: list[dict[str, Any]]) -> int:
+def _selected_doc_count(
+    selected_indices: list[int], fingerprints: list[dict[str, Any]]
+) -> int:
     return len(
         {
             fingerprints[idx]["doc"]
@@ -1039,7 +1058,7 @@ def _near_duplicate_pairs(
     pairs = 0
     for pos, left_idx in enumerate(selected_indices):
         left = fingerprints[left_idx]
-        for right_idx in selected_indices[pos + 1:]:
+        for right_idx in selected_indices[pos + 1 :]:
             right = fingerprints[right_idx]
             if _jaccard(left["tokens"], right["tokens"]) >= threshold:
                 pairs += 1
@@ -1188,10 +1207,14 @@ def _repair_sufficiency(
                     passes_floor = relevance_by_idx.get(idx, 0.0) >= 0.25
             if not passes_floor:
                 continue
-            if any(fp["parent"] and fp["parent"] == current["parent"] for current in current_fps):
+            if any(
+                fp["parent"] and fp["parent"] == current["parent"]
+                for current in current_fps
+            ):
                 continue
             if any(
-                _jaccard(fp["tokens"], current["tokens"]) >= policy.near_duplicate_similarity
+                _jaccard(fp["tokens"], current["tokens"])
+                >= policy.near_duplicate_similarity
                 for current in current_fps
             ):
                 continue
@@ -1225,10 +1248,14 @@ def _repair_sufficiency(
                 unique_required = [
                     atom
                     for atom in fp["atoms"]
-                    if atom in sufficiency["required_atoms"] and atom_counts.get(atom, 0) == 1
+                    if atom in sufficiency["required_atoms"]
+                    and atom_counts.get(atom, 0) == 1
                 ]
                 protected_penalty = 0.45 * len(unique_required)
-                score = selected_scores.get(idx, relevance_by_idx.get(idx, 0.0)) + protected_penalty
+                score = (
+                    selected_scores.get(idx, relevance_by_idx.get(idx, 0.0))
+                    + protected_penalty
+                )
                 if score < replace_score:
                     replace_score = score
                     replace_pos = pos
@@ -1285,9 +1312,7 @@ def select_with_diversity(
     fingerprints = [_fingerprint(chunk) for chunk in ranked]
     top_score = float(ranked[0].score or 0.0)
     bounded = 0.0 <= top_score <= 1.0
-    rel_floor = (
-        max(_MAIN_ABS_FLOOR, top_score * _MAIN_FLOOR_RATIO) if bounded else 0.0
-    )
+    rel_floor = max(_MAIN_ABS_FLOOR, top_score * _MAIN_FLOOR_RATIO) if bounded else 0.0
 
     chosen_idx: set[int] = set()
     selected_indices: list[int] = []
@@ -1395,10 +1420,7 @@ def select_with_diversity(
 
         relevance = relevance_by_idx.get(idx, 0.0)
         redundancy = (
-            max(
-                _similarity(fp, selected_fp, tier=tier)
-                for selected_fp in selected_fps
-            )
+            max(_similarity(fp, selected_fp, tier=tier) for selected_fp in selected_fps)
             if selected_fps
             else 0.0
         )
@@ -1487,16 +1509,15 @@ def select_with_diversity(
         specific_floor = max(_MAIN_ABS_FLOOR, top_score * _SPECIFIC_FLOOR_RATIO)
         kept: list[int] = []
         for idx in selected_indices:
-            if (
-                float(ranked[idx].score or 0.0) >= specific_floor
-                or _passes_relevance_floor(
-                    idx=idx,
-                    candidate=ranked[idx],
-                    fp=fingerprints[idx],
-                    relevance_by_idx=relevance_by_idx,
-                    policy=policy,
-                    top_score=top_score,
-                )
+            if float(
+                ranked[idx].score or 0.0
+            ) >= specific_floor or _passes_relevance_floor(
+                idx=idx,
+                candidate=ranked[idx],
+                fp=fingerprints[idx],
+                relevance_by_idx=relevance_by_idx,
+                policy=policy,
+                top_score=top_score,
             ):
                 kept.append(idx)
                 continue
@@ -1584,7 +1605,9 @@ def select_with_diversity(
     if (
         tier == RetrievalTier.qdrant_only
         and len(selected_indices) < final_top_k
-        and not any(candidate_kind(ranked[idx]) == "summary" for idx in selected_indices)
+        and not any(
+            candidate_kind(ranked[idx]) == "summary" for idx in selected_indices
+        )
     ):
         for idx, candidate in enumerate(ranked[:final_top_k]):
             if idx in chosen_idx or candidate_kind(candidate) != "summary":
@@ -1661,18 +1684,22 @@ def select_with_diversity(
                     covered_atoms.update(fingerprints[selected_idx]["atoms"])
             graph_need -= 1
 
-    selected_indices, selected_scores, selected_by, sufficiency, repair_rounds = (
-        _repair_sufficiency(
-            query=query,
-            ranked=ranked,
-            fingerprints=fingerprints,
-            relevance_by_idx=relevance_by_idx,
-            selected_indices=selected_indices,
-            selected_scores=selected_scores,
-            selected_by=selected_by,
-            policy=policy,
-            final_top_k=final_top_k,
-        )
+    (
+        selected_indices,
+        selected_scores,
+        selected_by,
+        sufficiency,
+        repair_rounds,
+    ) = _repair_sufficiency(
+        query=query,
+        ranked=ranked,
+        fingerprints=fingerprints,
+        relevance_by_idx=relevance_by_idx,
+        selected_indices=selected_indices,
+        selected_scores=selected_scores,
+        selected_by=selected_by,
+        policy=policy,
+        final_top_k=final_top_k,
     )
     chosen_idx = set(selected_indices)
     covered_atoms.clear()
@@ -1783,7 +1810,9 @@ def select_with_diversity(
                 selected_indices=selected_indices,
                 fingerprints=fingerprints,
             )
-            if old_sufficiency.get("answerable") and not new_sufficiency.get("answerable"):
+            if old_sufficiency.get("answerable") and not new_sufficiency.get(
+                "answerable"
+            ):
                 selected_indices[pos] = old_idx
                 chosen_idx.discard(new_idx)
                 chosen_idx.add(old_idx)
@@ -1832,7 +1861,9 @@ def select_with_diversity(
             replace_pos: int | None = None
             replace_score = float("inf")
             for pos, selected_idx in enumerate(selected_indices):
-                selected_corpus = str(getattr(ranked[selected_idx], "corpus_id", "") or "")
+                selected_corpus = str(
+                    getattr(ranked[selected_idx], "corpus_id", "") or ""
+                )
                 if not selected_corpus or corpus_counts.get(selected_corpus, 0) <= 1:
                     continue
                 if selected_by.get(selected_idx) in protected_reasons:
@@ -1891,7 +1922,13 @@ def select_with_diversity(
         ),
         "specific_floor_trimmed": specific_floor_trimmed,
         "min_selected_relevance": round(
-            min((relevance_by_idx.get(idx, 0.0) for idx in selected_indices[:final_top_k]), default=0.0),
+            min(
+                (
+                    relevance_by_idx.get(idx, 0.0)
+                    for idx in selected_indices[:final_top_k]
+                ),
+                default=0.0,
+            ),
             4,
         ),
         "relevance_floor": policy.relevance_floor,

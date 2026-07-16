@@ -45,7 +45,7 @@ def test_goldfarb_windowing():
     assert sum(len(w) for w in wins) == 1727
     a = [len(w) for w in windows(_parents(1727))]
     b = [len(w) for w in windows(_parents(1727))]
-    assert a == b                                     # deterministic
+    assert a == b  # deterministic
 
 
 def test_small_section_single_window():
@@ -63,14 +63,26 @@ def test_group_by_section_consecutive():
 def test_profile_input_bounded():
     async def run():
         return await build_tree(
-            doc_id="x" * 24, corpus_id="k", title="Definitive XML",
-            source_type="book", parents=_parents(1727), llm_fn=None)
+            doc_id="x" * 24,
+            corpus_id="k",
+            title="Definitive XML",
+            source_type="book",
+            parents=_parents(1727),
+            llm_fn=None,
+        )
+
     nodes = asyncio.run(run())
     sections = [n for n in nodes if n.node_type == "section"]
     from services.ingestion.summary_tree import PROFILE_MAX_SECTIONS
-    text = build_profile_input("Definitive XML", "book", sections,
-                               {"xml": 1151, "schema_design": 576}, {"XML": 900})
-    assert len(text.split()) < 1500                   # words << 2k tokens
+
+    text = build_profile_input(
+        "Definitive XML",
+        "book",
+        sections,
+        {"xml": 1151, "schema_design": 576},
+        {"XML": 900},
+    )
+    assert len(text.split()) < 1500  # words << 2k tokens
     assert "Detected domains" in text and "xml(1151)" in text
     assert text.count("- ") <= PROFILE_MAX_SECTIONS
 
@@ -84,13 +96,20 @@ def test_tree_shapes_and_stable_ids():
         return "A dense merged summary."
 
     async def run():
-        return await build_tree(doc_id="d" * 24, corpus_id="k", title="T",
-                                source_type="book", parents=_parents(45), llm_fn=fake_llm)
+        return await build_tree(
+            doc_id="d" * 24,
+            corpus_id="k",
+            title="T",
+            source_type="book",
+            parents=_parents(45),
+            llm_fn=fake_llm,
+        )
+
     nodes = asyncio.run(run())
     kinds = {}
     for n in nodes:
         kinds[n.node_type] = kinds.get(n.node_type, 0) + 1
-    assert kinds == {"rollup": 3, "section": 1, "document": 1}   # 45 → 3 windows
+    assert kinds == {"rollup": 3, "section": 1, "document": 1}  # 45 → 3 windows
     rollup_members = [m for n in nodes if n.node_type == "rollup" for m in n.parent_ids]
     assert len(rollup_members) == 45 and len(set(rollup_members)) == 45
     doc = [n for n in nodes if n.node_type == "document"][0]
@@ -107,23 +126,38 @@ def test_llm_failure_falls_back_extractively():
         raise RuntimeError("model down")
 
     async def run():
-        return await build_tree(doc_id="e" * 24, corpus_id="k", title="T",
-                                source_type="book", parents=_parents(14), llm_fn=dead_llm)
+        return await build_tree(
+            doc_id="e" * 24,
+            corpus_id="k",
+            title="T",
+            source_type="book",
+            parents=_parents(14),
+            llm_fn=dead_llm,
+        )
+
     nodes = asyncio.run(run())
-    assert all(n.summary for n in nodes)              # deterministic fallback, no raise
+    assert all(n.summary for n in nodes)  # deterministic fallback, no raise
     assert "Parent 0 establishes point number 0" in nodes[0].summary
 
 
 def test_single_rollup_section_reuses_summary():
     async def fake(prompt):
         return "merged"
+
     async def run():
-        return await build_tree(doc_id="f" * 24, corpus_id="k", title="T",
-                                source_type="book", parents=_parents(10), llm_fn=fake)
+        return await build_tree(
+            doc_id="f" * 24,
+            corpus_id="k",
+            title="T",
+            source_type="book",
+            parents=_parents(10),
+            llm_fn=fake,
+        )
+
     nodes = asyncio.run(run())
     r = [n for n in nodes if n.node_type == "rollup"][0]
     s = [n for n in nodes if n.node_type == "section"][0]
-    assert s.summary == r.summary                     # no wasted LLM call
+    assert s.summary == r.summary  # no wasted LLM call
 
 
 def test_rollup_generation_is_bounded_and_concurrent():
@@ -201,34 +235,50 @@ class _FakeCollection:
 class _FakeDb:
     def __init__(self):
         self.collections = {
-            "documents": _FakeCollection([{
-                "doc_id": "doc_1",
-                "corpus_id": "corpus_1",
-                "filename": "artifact.md",
-                "source_type": "markdown",
-            }]),
-            "parent_chunks": _FakeCollection([{
-                "parent_id": "parent_1",
-                "doc_id": "doc_1",
-                "corpus_id": "corpus_1",
-                "summary": None,
-                "text": "Polymath summaries preserve child evidence anchors.",
-                "heading_path": ["Overview"],
-                "domain": "machine_learning",
-                "chunk_kind": "body",
-                "child_ids": ["child_1"],
-            }]),
+            "documents": _FakeCollection(
+                [
+                    {
+                        "doc_id": "doc_1",
+                        "corpus_id": "corpus_1",
+                        "filename": "artifact.md",
+                        "source_type": "markdown",
+                    }
+                ]
+            ),
+            "parent_chunks": _FakeCollection(
+                [
+                    {
+                        "parent_id": "parent_1",
+                        "doc_id": "doc_1",
+                        "corpus_id": "corpus_1",
+                        "summary": None,
+                        "text": "Polymath summaries preserve child evidence anchors.",
+                        "heading_path": ["Overview"],
+                        "domain": "machine_learning",
+                        "chunk_kind": "body",
+                        "child_ids": ["child_1"],
+                    }
+                ]
+            ),
             "summary_tree": _FakeCollection(),
-            "corpora": _FakeCollection([{
-                "corpus_id": "corpus_1",
-                "description": "Owner corpus note: use this as reference context.",
-            }]),
-            "ghost_b_extractions": _FakeCollection([{
-                "doc_id": "doc_1",
-                "corpus_id": "corpus_1",
-                "status": "ok",
-                "entities": [{"canonical_name": "Polymath"}],
-            }]),
+            "corpora": _FakeCollection(
+                [
+                    {
+                        "corpus_id": "corpus_1",
+                        "description": "Owner corpus note: use this as reference context.",
+                    }
+                ]
+            ),
+            "ghost_b_extractions": _FakeCollection(
+                [
+                    {
+                        "doc_id": "doc_1",
+                        "corpus_id": "corpus_1",
+                        "status": "ok",
+                        "entities": [{"canonical_name": "Polymath"}],
+                    }
+                ]
+            ),
         }
 
     def __getitem__(self, name):
@@ -259,12 +309,14 @@ def test_heal_missing_summary_persists_parent_artifact_fields():
             """
         return "Merged summary."
 
-    result = asyncio.run(build_and_store_tree(
-        db=db,
-        doc_id="doc_1",
-        corpus_id="corpus_1",
-        llm_fn=fake_llm,
-    ))
+    result = asyncio.run(
+        build_and_store_tree(
+            db=db,
+            doc_id="doc_1",
+            corpus_id="corpus_1",
+            llm_fn=fake_llm,
+        )
+    )
 
     assert result["summaries_healed"] == 1
     update = db["parent_chunks"].updates[0][1]["$set"]
@@ -274,8 +326,16 @@ def test_heal_missing_summary_persists_parent_artifact_fields():
     assert update["key_points"][0]["supporting_child_ids"] == ["child_1"]
     doc_profile = db["documents"].updates[-1][1]["$set"]["doc_profile"]
     assert doc_profile["doc_artifact"]["artifact_version"] == "polymath.doc_artifact.v1"
-    assert doc_profile["doc_artifact"]["field_provenance"]["owner_intent"] == "corpus_description"
+    assert (
+        doc_profile["doc_artifact"]["field_provenance"]["owner_intent"]
+        == "corpus_description"
+    )
     assert doc_profile["doc_artifact"]["synthesis_hint"]
+    assert db["summary_tree"].replacements
+    assert all(
+        query.get("corpus_id") == "corpus_1" and query.get("node_id")
+        for query, _record, _upsert in db["summary_tree"].replacements
+    )
 
 
 def test_attach_doc_artifact_runs_directly_without_recursion():
@@ -302,7 +362,9 @@ def test_attach_doc_artifact_runs_directly_without_recursion():
 
 
 def _run_all():
-    tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
+    tests = [
+        v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)
+    ]
     failed = 0
     for t in tests:
         try:

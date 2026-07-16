@@ -89,6 +89,7 @@ def _install_stubs_if_missing() -> None:
                 def limit(self, *_a, **_kw):
                     def _decorator(fn):
                         return fn
+
                     return _decorator
 
             def _get_remote_address(_request):  # pragma: no cover
@@ -145,15 +146,32 @@ class _FakeDriver:
 
 def _build_cypher_driver(rows):
     """Driver that returns the same rows for every session.run call."""
+
     def on_run(cypher, **kwargs):
-        return _FakeResult(rows)
+        corpora_by_chunk = {
+            str(ref["chunk_id"]): str(ref["corpus_id"])
+            for ref in kwargs.get("chunk_refs", [])
+        }
+        return _FakeResult(
+            [
+                {
+                    **row,
+                    "corpus_id": row.get("corpus_id")
+                    or corpora_by_chunk.get(str(row.get("chunk_id") or ""), ""),
+                }
+                for row in rows
+            ]
+        )
+
     return _FakeDriver(on_run)
 
 
 class _StubChunk:
     """SourceChunk shape sufficient for the rerank function."""
+
     def __init__(self, chunk_id: str, score: float):
         self.chunk_id = chunk_id
+        self.corpus_id = "corp-1"
         self.score = score
 
 
@@ -163,12 +181,16 @@ class _StubChunk:
 @pytest.mark.asyncio
 async def test_empty_chunks_is_noop():
     """No chunks → returns the empty list, no Cypher call."""
+
     def on_run(*a, **k):  # pragma: no cover — should not be called
         raise AssertionError("Cypher should not run on empty chunks")
 
     driver = _FakeDriver(on_run)
     out = await graph_rerank.apply_graph_degree_boost_metrics_aware(
-        chunks=[], corpus_ids=["corp-1"], neo4j_driver=driver, db=MagicMock(),
+        chunks=[],
+        corpus_ids=["corp-1"],
+        neo4j_driver=driver,
+        db=MagicMock(),
     )
     assert out == []
 
@@ -178,7 +200,10 @@ async def test_no_neo4j_driver_is_noop():
     """neo4j_driver=None → returns chunks unchanged."""
     chunks = [_StubChunk("c1", 1.0)]
     out = await graph_rerank.apply_graph_degree_boost_metrics_aware(
-        chunks=chunks, corpus_ids=["corp-1"], neo4j_driver=None, db=MagicMock(),
+        chunks=chunks,
+        corpus_ids=["corp-1"],
+        neo4j_driver=None,
+        db=MagicMock(),
     )
     assert out[0].score == 1.0
 
@@ -191,7 +216,10 @@ async def test_db_none_falls_back_to_degree_only():
     rows = [{"chunk_id": "c1", "entities": [{"entity_id": "e1", "degree": 10}]}]
     driver = _build_cypher_driver(rows)
     await graph_rerank.apply_graph_degree_boost_metrics_aware(
-        chunks=chunks, corpus_ids=["corp-1"], neo4j_driver=driver, db=None,
+        chunks=chunks,
+        corpus_ids=["corp-1"],
+        neo4j_driver=driver,
+        db=None,
     )
     # multiplier = 1 + 0.15 * log1p(min(10, 50)) = 1 + 0.15 * log1p(10)
     expected = 1.0 + 0.15 * math.log1p(10)
@@ -206,13 +234,16 @@ async def test_metrics_aware_cypher_carries_entity_flags_across_with():
 
     def on_run(cypher, **kwargs):
         captured["cypher"] = cypher
-        return _FakeResult([
-            {"chunk_id": "c1", "entities": [{"entity_id": "e1", "degree": 1}]}
-        ])
+        return _FakeResult(
+            [{"chunk_id": "c1", "entities": [{"entity_id": "e1", "degree": 1}]}]
+        )
 
     driver = _FakeDriver(on_run)
     await graph_rerank.apply_graph_degree_boost_metrics_aware(
-        chunks=chunks, corpus_ids=["corp-1"], neo4j_driver=driver, db=None,
+        chunks=chunks,
+        corpus_ids=["corp-1"],
+        neo4j_driver=driver,
+        db=None,
     )
 
     cypher = captured["cypher"]
@@ -230,13 +261,20 @@ async def test_cold_cache_no_metrics_row_falls_back_to_degree():
     rows = [{"chunk_id": "c1", "entities": [{"entity_id": "e1", "degree": 10}]}]
     driver = _build_cypher_driver(rows)
     with (
-        patch("services.graph.analytics.compute_corpus_change_signature",
-              new=AsyncMock(return_value="sig")),
-        patch("services.graph.analytics.get_cached_metrics",
-              new=AsyncMock(return_value=None)),
+        patch(
+            "services.graph.analytics.compute_corpus_change_signature",
+            new=AsyncMock(return_value="sig"),
+        ),
+        patch(
+            "services.graph.analytics.get_cached_metrics",
+            new=AsyncMock(return_value=None),
+        ),
     ):
         await graph_rerank.apply_graph_degree_boost_metrics_aware(
-            chunks=chunks, corpus_ids=["corp-1"], neo4j_driver=driver, db=MagicMock(),
+            chunks=chunks,
+            corpus_ids=["corp-1"],
+            neo4j_driver=driver,
+            db=MagicMock(),
         )
     expected = 1.0 + 0.15 * math.log1p(10)
     assert chunks[0].score == pytest.approx(expected)
@@ -257,13 +295,20 @@ async def test_warm_cache_entity_in_top_k_uses_pagerank_signal():
         top_pagerank=[{"entity_id": "e1", "score": 0.08}],
     )
     with (
-        patch("services.graph.analytics.compute_corpus_change_signature",
-              new=AsyncMock(return_value="sig")),
-        patch("services.graph.analytics.get_cached_metrics",
-              new=AsyncMock(return_value=fake_metrics)),
+        patch(
+            "services.graph.analytics.compute_corpus_change_signature",
+            new=AsyncMock(return_value="sig"),
+        ),
+        patch(
+            "services.graph.analytics.get_cached_metrics",
+            new=AsyncMock(return_value=fake_metrics),
+        ),
     ):
         await graph_rerank.apply_graph_degree_boost_metrics_aware(
-            chunks=chunks, corpus_ids=["corp-1"], neo4j_driver=driver, db=MagicMock(),
+            chunks=chunks,
+            corpus_ids=["corp-1"],
+            neo4j_driver=driver,
+            db=MagicMock(),
         )
     # Combined signal = max(min(3, 50), min(40, 50)) = 40.
     expected = 1.0 + 0.15 * math.log1p(40)
@@ -284,13 +329,20 @@ async def test_warm_cache_entity_not_in_top_k_uses_degree():
         top_pagerank=[{"entity_id": "different-entity", "score": 0.99}],
     )
     with (
-        patch("services.graph.analytics.compute_corpus_change_signature",
-              new=AsyncMock(return_value="sig")),
-        patch("services.graph.analytics.get_cached_metrics",
-              new=AsyncMock(return_value=fake_metrics)),
+        patch(
+            "services.graph.analytics.compute_corpus_change_signature",
+            new=AsyncMock(return_value="sig"),
+        ),
+        patch(
+            "services.graph.analytics.get_cached_metrics",
+            new=AsyncMock(return_value=fake_metrics),
+        ),
     ):
         await graph_rerank.apply_graph_degree_boost_metrics_aware(
-            chunks=chunks, corpus_ids=["corp-1"], neo4j_driver=driver, db=MagicMock(),
+            chunks=chunks,
+            corpus_ids=["corp-1"],
+            neo4j_driver=driver,
+            db=MagicMock(),
         )
     expected = 1.0 + 0.15 * math.log1p(10)
     assert chunks[0].score == pytest.approx(expected)
@@ -309,13 +361,20 @@ async def test_degree_wins_when_higher_than_pagerank_pseudo():
         top_pagerank=[{"entity_id": "e1", "score": 0.02}],
     )
     with (
-        patch("services.graph.analytics.compute_corpus_change_signature",
-              new=AsyncMock(return_value="sig")),
-        patch("services.graph.analytics.get_cached_metrics",
-              new=AsyncMock(return_value=fake_metrics)),
+        patch(
+            "services.graph.analytics.compute_corpus_change_signature",
+            new=AsyncMock(return_value="sig"),
+        ),
+        patch(
+            "services.graph.analytics.get_cached_metrics",
+            new=AsyncMock(return_value=fake_metrics),
+        ),
     ):
         await graph_rerank.apply_graph_degree_boost_metrics_aware(
-            chunks=chunks, corpus_ids=["corp-1"], neo4j_driver=driver, db=MagicMock(),
+            chunks=chunks,
+            corpus_ids=["corp-1"],
+            neo4j_driver=driver,
+            db=MagicMock(),
         )
     expected = 1.0 + 0.15 * math.log1p(45)
     assert chunks[0].score == pytest.approx(expected)
@@ -335,13 +394,20 @@ async def test_max_degree_cap_clips_outlier_pagerank():
         top_pagerank=[{"entity_id": "e1", "score": 0.5}],
     )
     with (
-        patch("services.graph.analytics.compute_corpus_change_signature",
-              new=AsyncMock(return_value="sig")),
-        patch("services.graph.analytics.get_cached_metrics",
-              new=AsyncMock(return_value=fake_metrics)),
+        patch(
+            "services.graph.analytics.compute_corpus_change_signature",
+            new=AsyncMock(return_value="sig"),
+        ),
+        patch(
+            "services.graph.analytics.get_cached_metrics",
+            new=AsyncMock(return_value=fake_metrics),
+        ),
     ):
         await graph_rerank.apply_graph_degree_boost_metrics_aware(
-            chunks=chunks, corpus_ids=["corp-1"], neo4j_driver=driver, db=MagicMock(),
+            chunks=chunks,
+            corpus_ids=["corp-1"],
+            neo4j_driver=driver,
+            db=MagicMock(),
         )
     expected = 1.0 + 0.15 * math.log1p(graph_rerank.MAX_DEGREE_CAP)
     assert chunks[0].score == pytest.approx(expected)
@@ -355,13 +421,20 @@ async def test_cache_lookup_failure_falls_back_to_degree():
     rows = [{"chunk_id": "c1", "entities": [{"entity_id": "e1", "degree": 8}]}]
     driver = _build_cypher_driver(rows)
     with (
-        patch("services.graph.analytics.compute_corpus_change_signature",
-              new=AsyncMock(side_effect=RuntimeError("mongo down"))),
-        patch("services.graph.analytics.get_cached_metrics",
-              new=AsyncMock(return_value=None)),
+        patch(
+            "services.graph.analytics.compute_corpus_change_signature",
+            new=AsyncMock(side_effect=RuntimeError("mongo down")),
+        ),
+        patch(
+            "services.graph.analytics.get_cached_metrics",
+            new=AsyncMock(return_value=None),
+        ),
     ):
         await graph_rerank.apply_graph_degree_boost_metrics_aware(
-            chunks=chunks, corpus_ids=["corp-1"], neo4j_driver=driver, db=MagicMock(),
+            chunks=chunks,
+            corpus_ids=["corp-1"],
+            neo4j_driver=driver,
+            db=MagicMock(),
         )
     expected = 1.0 + 0.15 * math.log1p(8)
     assert chunks[0].score == pytest.approx(expected)
@@ -379,7 +452,10 @@ async def test_cypher_failure_returns_chunks_unchanged():
 
     driver = _FakeDriver(on_run)
     out = await graph_rerank.apply_graph_degree_boost_metrics_aware(
-        chunks=chunks, corpus_ids=["corp-1"], neo4j_driver=driver, db=MagicMock(),
+        chunks=chunks,
+        corpus_ids=["corp-1"],
+        neo4j_driver=driver,
+        db=MagicMock(),
     )
     assert out[0].score == 1.0  # unchanged
 
@@ -406,13 +482,17 @@ async def test_multi_corpus_merges_top_pagerank_lookups():
         return metrics_by_corpus.get(corpus_id)
 
     with (
-        patch("services.graph.analytics.compute_corpus_change_signature",
-              new=AsyncMock(return_value="sig")),
+        patch(
+            "services.graph.analytics.compute_corpus_change_signature",
+            new=AsyncMock(return_value="sig"),
+        ),
         patch("services.graph.analytics.get_cached_metrics", new=fake_get),
     ):
         await graph_rerank.apply_graph_degree_boost_metrics_aware(
-            chunks=chunks, corpus_ids=["corp-A", "corp-B"],
-            neo4j_driver=driver, db=MagicMock(),
+            chunks=chunks,
+            corpus_ids=["corp-A", "corp-B"],
+            neo4j_driver=driver,
+            db=MagicMock(),
         )
     # The higher 0.09 score should win on the merge.
     # pseudo_degree = 0.09 * 500 = 45.
@@ -428,13 +508,20 @@ async def test_zero_degree_no_pagerank_skips_boost():
     rows = [{"chunk_id": "c1", "entities": [{"entity_id": "e1", "degree": 0}]}]
     driver = _build_cypher_driver(rows)
     with (
-        patch("services.graph.analytics.compute_corpus_change_signature",
-              new=AsyncMock(return_value="sig")),
-        patch("services.graph.analytics.get_cached_metrics",
-              new=AsyncMock(return_value=None)),
+        patch(
+            "services.graph.analytics.compute_corpus_change_signature",
+            new=AsyncMock(return_value="sig"),
+        ),
+        patch(
+            "services.graph.analytics.get_cached_metrics",
+            new=AsyncMock(return_value=None),
+        ),
     ):
         await graph_rerank.apply_graph_degree_boost_metrics_aware(
-            chunks=chunks, corpus_ids=["corp-1"], neo4j_driver=driver, db=MagicMock(),
+            chunks=chunks,
+            corpus_ids=["corp-1"],
+            neo4j_driver=driver,
+            db=MagicMock(),
         )
     assert chunks[0].score == 1.0  # unchanged
 
@@ -469,14 +556,20 @@ async def test_zero_edge_corpus_skips_pagerank_contribution():
         ],
     )
     with (
-        patch("services.graph.analytics.compute_corpus_change_signature",
-              new=AsyncMock(return_value="sig")),
-        patch("services.graph.analytics.get_cached_metrics",
-              new=AsyncMock(return_value=fake_metrics)),
+        patch(
+            "services.graph.analytics.compute_corpus_change_signature",
+            new=AsyncMock(return_value="sig"),
+        ),
+        patch(
+            "services.graph.analytics.get_cached_metrics",
+            new=AsyncMock(return_value=fake_metrics),
+        ),
     ):
         await graph_rerank.apply_graph_degree_boost_metrics_aware(
-            chunks=chunks, corpus_ids=["corp-sparse"],
-            neo4j_driver=driver, db=MagicMock(),
+            chunks=chunks,
+            corpus_ids=["corp-sparse"],
+            neo4j_driver=driver,
+            db=MagicMock(),
         )
     # Guard fired → PR lookup skipped → degree-only → degree=0 → no
     # multiplier applied → score unchanged.
@@ -512,13 +605,17 @@ async def test_multi_corpus_only_dense_corpus_contributes_pr():
         return metrics_by_corpus.get(corpus_id)
 
     with (
-        patch("services.graph.analytics.compute_corpus_change_signature",
-              new=AsyncMock(return_value="sig")),
+        patch(
+            "services.graph.analytics.compute_corpus_change_signature",
+            new=AsyncMock(return_value="sig"),
+        ),
         patch("services.graph.analytics.get_cached_metrics", new=fake_get),
     ):
         await graph_rerank.apply_graph_degree_boost_metrics_aware(
-            chunks=chunks, corpus_ids=["corp-sparse", "corp-dense"],
-            neo4j_driver=driver, db=MagicMock(),
+            chunks=chunks,
+            corpus_ids=["corp-sparse", "corp-dense"],
+            neo4j_driver=driver,
+            db=MagicMock(),
         )
     # Combined signal = max(min(degree=5, 50), min(pseudo=10, 50)) = 10.
     # Multiplier = 1 + 0.15 * log1p(10).
@@ -547,14 +644,20 @@ async def test_zero_edge_corpus_still_uses_local_degree():
         top_pagerank=[{"entity_id": "e1", "score": 0.111}],  # uniform PR
     )
     with (
-        patch("services.graph.analytics.compute_corpus_change_signature",
-              new=AsyncMock(return_value="sig")),
-        patch("services.graph.analytics.get_cached_metrics",
-              new=AsyncMock(return_value=fake_metrics)),
+        patch(
+            "services.graph.analytics.compute_corpus_change_signature",
+            new=AsyncMock(return_value="sig"),
+        ),
+        patch(
+            "services.graph.analytics.get_cached_metrics",
+            new=AsyncMock(return_value=fake_metrics),
+        ),
     ):
         await graph_rerank.apply_graph_degree_boost_metrics_aware(
-            chunks=chunks, corpus_ids=["corp-1"],
-            neo4j_driver=driver, db=MagicMock(),
+            chunks=chunks,
+            corpus_ids=["corp-1"],
+            neo4j_driver=driver,
+            db=MagicMock(),
         )
     # PR skipped, degree=8 contributes → multiplier = 1 + 0.15 * log1p(8).
     expected = 1.0 + 0.15 * math.log1p(8)

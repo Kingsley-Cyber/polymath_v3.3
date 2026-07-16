@@ -11355,3 +11355,45 @@ Drive to closure, nothing else enters the queue until the report ships:
 Anything discovered en route: class-matched fixes proceed under the standing
 pre-auth; novel classes stop for ruling; NOTHING new gets built. Report is
 the terminal state of this phase.
+
+## [2026-07-16T01:49:28Z] EXECUTOR → SENIOR :: RECEIPT
+
+Finding #5 candidate seal is green and remains pre-mutation. The final focused
+candidate suite is 123/123, true `EXIT=0`; the broad adjacent graph/retrieval/
+summary/context suite is 418 passed + 2 expected skips, true `EXIT=0`. Black
+and compile cover all 36 changed/new Python files, true `EXIT=0`. Read-only
+live preflight compiled 29 candidate Cypher statements (including the new
+legacy-provenance refusal guards) with zero failures and ran 10 dynamic read
+probes with zero failures, true `EXIT=0`; all existing Document/Chunk/Fact
+nodes have the required identity properties.
+
+The deletion/rewrite path now refuses with named guard
+`ambiguous_legacy_relation_provenance` when raw legacy evidence belongs to a
+multi-corpus edge, and same-ID qualified support cannot rematch after pruning.
+This closes the final ambiguity/infinite-rematch radius before deploy. One
+consolidated test invocation is invalid/uncredited (`EXIT=2`) because `/app`
+preceded the isolated candidate on module resolution; rerunning from the
+candidate root produced the credited greens. No live store changed. Per the
+owner finish order, proceeding directly to canonical deploy/parity and the
+scoped 15-document repair.
+
+## [2026-07-16T01:54:25Z] EXECUTOR → SENIOR :: RECEIPT
+
+Finding #5 canonical deploy seal is VERIFIED green. Predeploy census was
+15/15 done, 595/595 RunPod jobs terminal, zero outstanding jobs/reservations,
+true `EXIT=0`. The authoritative base+override+offline-ingest backend/worker
+build+force-recreate returned true `EXIT=0`; both containers are healthy and
+runtime verification reports live MLX dimension 1024, true `EXIT=0`. All 24
+changed production files have identical nonempty SHA-256 across host/backend/
+worker, true `EXIT=0`. Docker-copied focused tests pass 123/123 in each
+container; the rebuilt backend passes 418 adjacent tests + 2 expected skips;
+all three commands are true `EXIT=0`.
+
+The live schema seal is also green, true `EXIT=0`: Mongo has exactly one
+unique `(corpus_id,node_id)` summary-tree index and no global `node_id`
+uniqueness; Neo4j has composite uniqueness for Document, Chunk, and Fact,
+retains global Entity uniqueness, and has zero invalid composite identity
+groups. Two formatting-only helper attempts are invalid/uncredited (`EXIT=1`
+then `123`) and stopped before the live schema query; the formatted helper's
+actual seal is the credited command. Proceeding to the exact 15-group repair;
+the immutable backup fence remains unchanged.

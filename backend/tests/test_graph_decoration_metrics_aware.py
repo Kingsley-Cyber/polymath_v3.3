@@ -83,6 +83,7 @@ def _install_stubs_if_missing() -> None:
                 def limit(self, *_a, **_kw):
                     def _decorator(fn):
                         return fn
+
                     return _decorator
 
             def _get_remote_address(_request):  # pragma: no cover
@@ -186,7 +187,7 @@ async def test_relates_to_decoration_uses_evidence_chunk_ids_not_neighbor_fanout
     decorator._driver = _CaptureDriver(capture)
 
     await decorator._decorate_via_relates_to(
-        winning_chunk_ids=["winner-1"],
+        winning_chunk_refs=[{"corpus_id": "corpus-1", "chunk_id": "winner-1"}],
         corpus_ids=["corpus-1"],
         wanted_families=None,
         neighbor_limit=8,
@@ -197,7 +198,7 @@ async def test_relates_to_decoration_uses_evidence_chunk_ids_not_neighbor_fanout
     query = capture["query"]
     params = capture["params"]
     assert "(neighbor)<-[:MENTIONS]-(evidence:Chunk)" not in query
-    assert "evidence.chunk_id IN evidence_ids" in query
+    assert "evidence.corpus_id + '|' + evidence.chunk_id" in query
     assert "predicate = 'related_to'" in query
     assert "edge_evidence <> ''" in query
     assert "related_to_query_weight" in query
@@ -215,7 +216,7 @@ async def test_graph_decoration_blocks_generic_entity_expansion(decorator, monke
 
     decorator._driver = _CaptureDriver(relates_capture)
     await decorator._decorate_via_relates_to(
-        winning_chunk_ids=["winner-1"],
+        winning_chunk_refs=[{"corpus_id": "corpus-1", "chunk_id": "winner-1"}],
         corpus_ids=["corpus-1"],
         wanted_families=None,
         neighbor_limit=8,
@@ -225,7 +226,7 @@ async def test_graph_decoration_blocks_generic_entity_expansion(decorator, monke
 
     decorator._driver = _CaptureDriver(calls_capture)
     await decorator._decorate_via_calls(
-        winning_chunk_ids=["winner-1"],
+        winning_chunk_refs=[{"corpus_id": "corpus-1", "chunk_id": "winner-1"}],
         corpus_ids=["corpus-1"],
         neighbor_limit=8,
         chunks_per_neighbor=2,
@@ -256,13 +257,19 @@ async def test_warm_cache_annotates_betweenness_and_pagerank(decorator):
         fragile_bridges=[],
     )
     with (
-        patch("services.graph.analytics.compute_corpus_change_signature",
-              new=AsyncMock(return_value="sig")),
-        patch("services.graph.analytics.get_cached_metrics",
-              new=AsyncMock(return_value=metrics)),
+        patch(
+            "services.graph.analytics.compute_corpus_change_signature",
+            new=AsyncMock(return_value="sig"),
+        ),
+        patch(
+            "services.graph.analytics.get_cached_metrics",
+            new=AsyncMock(return_value=metrics),
+        ),
     ):
         await decorator._annotate_from_cache(
-            decorations, corpus_ids=["corp-1"], db=MagicMock(),
+            decorations,
+            corpus_ids=["corp-1"],
+            db=MagicMock(),
         )
     d = decorations[0]
     assert d.seed_betweenness == pytest.approx(0.42)
@@ -277,9 +284,12 @@ async def test_fragile_bridge_flag_set_symmetric(decorator):
     """A fragile_bridge entry matching (seed, neighbor) OR
     (neighbor, seed) sets is_fragile_bridge=True. Direction-agnostic."""
     # First direction
-    decorations_a = [_make_decoration(
-        seed_id="ent:a", neighbor_id="ent:b",
-    )]
+    decorations_a = [
+        _make_decoration(
+            seed_id="ent:a",
+            neighbor_id="ent:b",
+        )
+    ]
     metrics_a = SimpleNamespace(
         edge_count=42,
         entity_betweenness={},
@@ -287,26 +297,38 @@ async def test_fragile_bridge_flag_set_symmetric(decorator):
         fragile_bridges=[{"source": "ent:a", "target": "ent:b"}],
     )
     with (
-        patch("services.graph.analytics.compute_corpus_change_signature",
-              new=AsyncMock(return_value="sig")),
-        patch("services.graph.analytics.get_cached_metrics",
-              new=AsyncMock(return_value=metrics_a)),
+        patch(
+            "services.graph.analytics.compute_corpus_change_signature",
+            new=AsyncMock(return_value="sig"),
+        ),
+        patch(
+            "services.graph.analytics.get_cached_metrics",
+            new=AsyncMock(return_value=metrics_a),
+        ),
     ):
         await decorator._annotate_from_cache(
-            decorations_a, corpus_ids=["c"], db=MagicMock(),
+            decorations_a,
+            corpus_ids=["c"],
+            db=MagicMock(),
         )
     assert decorations_a[0].is_fragile_bridge is True
 
     # Reverse direction — same fixture matched against swapped IDs.
     decorations_b = [_make_decoration(seed_id="ent:b", neighbor_id="ent:a")]
     with (
-        patch("services.graph.analytics.compute_corpus_change_signature",
-              new=AsyncMock(return_value="sig")),
-        patch("services.graph.analytics.get_cached_metrics",
-              new=AsyncMock(return_value=metrics_a)),
+        patch(
+            "services.graph.analytics.compute_corpus_change_signature",
+            new=AsyncMock(return_value="sig"),
+        ),
+        patch(
+            "services.graph.analytics.get_cached_metrics",
+            new=AsyncMock(return_value=metrics_a),
+        ),
     ):
         await decorator._annotate_from_cache(
-            decorations_b, corpus_ids=["c"], db=MagicMock(),
+            decorations_b,
+            corpus_ids=["c"],
+            db=MagicMock(),
         )
     assert decorations_b[0].is_fragile_bridge is True
 
@@ -315,10 +337,12 @@ async def test_fragile_bridge_flag_set_symmetric(decorator):
 async def test_entity_id_missing_from_cache_leaves_fields_none(decorator):
     """Cache present but entity_id not in any cache field → all
     annotations stay None / False. Doesn't crash."""
-    decorations = [_make_decoration(
-        seed_id="ent:not-in-cache",
-        neighbor_id="ent:also-not-in-cache",
-    )]
+    decorations = [
+        _make_decoration(
+            seed_id="ent:not-in-cache",
+            neighbor_id="ent:also-not-in-cache",
+        )
+    ]
     metrics = SimpleNamespace(
         edge_count=42,
         entity_betweenness={"ent:different-entity": 0.5},
@@ -326,13 +350,19 @@ async def test_entity_id_missing_from_cache_leaves_fields_none(decorator):
         fragile_bridges=[],
     )
     with (
-        patch("services.graph.analytics.compute_corpus_change_signature",
-              new=AsyncMock(return_value="sig")),
-        patch("services.graph.analytics.get_cached_metrics",
-              new=AsyncMock(return_value=metrics)),
+        patch(
+            "services.graph.analytics.compute_corpus_change_signature",
+            new=AsyncMock(return_value="sig"),
+        ),
+        patch(
+            "services.graph.analytics.get_cached_metrics",
+            new=AsyncMock(return_value=metrics),
+        ),
     ):
         await decorator._annotate_from_cache(
-            decorations, corpus_ids=["c"], db=MagicMock(),
+            decorations,
+            corpus_ids=["c"],
+            db=MagicMock(),
         )
     d = decorations[0]
     assert d.seed_betweenness is None
@@ -348,13 +378,19 @@ async def test_cache_returns_none_falls_through_cleanly(decorator):
     at defaults. No exception."""
     decorations = [_make_decoration()]
     with (
-        patch("services.graph.analytics.compute_corpus_change_signature",
-              new=AsyncMock(return_value="sig")),
-        patch("services.graph.analytics.get_cached_metrics",
-              new=AsyncMock(return_value=None)),
+        patch(
+            "services.graph.analytics.compute_corpus_change_signature",
+            new=AsyncMock(return_value="sig"),
+        ),
+        patch(
+            "services.graph.analytics.get_cached_metrics",
+            new=AsyncMock(return_value=None),
+        ),
     ):
         await decorator._annotate_from_cache(
-            decorations, corpus_ids=["c"], db=MagicMock(),
+            decorations,
+            corpus_ids=["c"],
+            db=MagicMock(),
         )
     assert decorations[0].seed_betweenness is None
     assert decorations[0].is_fragile_bridge is False
@@ -366,14 +402,20 @@ async def test_signature_failure_caught(decorator):
     fields stay defaulted. No exception escapes."""
     decorations = [_make_decoration()]
     with (
-        patch("services.graph.analytics.compute_corpus_change_signature",
-              new=AsyncMock(side_effect=RuntimeError("mongo down"))),
-        patch("services.graph.analytics.get_cached_metrics",
-              new=AsyncMock(return_value=None)),
+        patch(
+            "services.graph.analytics.compute_corpus_change_signature",
+            new=AsyncMock(side_effect=RuntimeError("mongo down")),
+        ),
+        patch(
+            "services.graph.analytics.get_cached_metrics",
+            new=AsyncMock(return_value=None),
+        ),
     ):
         # Should NOT raise.
         await decorator._annotate_from_cache(
-            decorations, corpus_ids=["c"], db=MagicMock(),
+            decorations,
+            corpus_ids=["c"],
+            db=MagicMock(),
         )
     assert decorations[0].seed_betweenness is None
 
@@ -400,12 +442,16 @@ async def test_multi_corpus_merges_betweenness_and_pagerank(decorator):
         return metrics_by_corpus.get(cid)
 
     with (
-        patch("services.graph.analytics.compute_corpus_change_signature",
-              new=AsyncMock(return_value="sig")),
+        patch(
+            "services.graph.analytics.compute_corpus_change_signature",
+            new=AsyncMock(return_value="sig"),
+        ),
         patch("services.graph.analytics.get_cached_metrics", new=fake_get),
     ):
         await decorator._annotate_from_cache(
-            decorations, corpus_ids=["corp-A", "corp-B"], db=MagicMock(),
+            decorations,
+            corpus_ids=["corp-A", "corp-B"],
+            db=MagicMock(),
         )
     # Higher of the two values wins on the merge.
     assert decorations[0].seed_betweenness == pytest.approx(0.7)
@@ -417,17 +463,22 @@ async def test_empty_decorations_short_circuits(decorator):
     """Empty decoration list → no cache call, no error."""
     decorations = []
     fake_sig = AsyncMock(return_value="sig")
-    fake_get = AsyncMock(return_value=SimpleNamespace(
-        edge_count=42,
-        entity_betweenness={}, top_pagerank=[], fragile_bridges=[],
-    ))
+    fake_get = AsyncMock(
+        return_value=SimpleNamespace(
+            edge_count=42,
+            entity_betweenness={},
+            top_pagerank=[],
+            fragile_bridges=[],
+        )
+    )
     with (
-        patch("services.graph.analytics.compute_corpus_change_signature",
-              new=fake_sig),
+        patch("services.graph.analytics.compute_corpus_change_signature", new=fake_sig),
         patch("services.graph.analytics.get_cached_metrics", new=fake_get),
     ):
         await decorator._annotate_from_cache(
-            decorations, corpus_ids=["c"], db=MagicMock(),
+            decorations,
+            corpus_ids=["c"],
+            db=MagicMock(),
         )
     # Cache lookups did still run (per-corpus loop), but no annotation
     # work because the list is empty. The function returns silently.
@@ -439,8 +490,11 @@ async def test_graphdecoration_model_has_new_fields():
     """Sanity: the model carries the new optional fields with the
     documented defaults."""
     d = GraphDecoration(
-        winner_chunk_id="w", seed_entity="A", neighbor_entity="B",
-        predicate="x", relation_family="y",
+        winner_chunk_id="w",
+        seed_entity="A",
+        neighbor_entity="B",
+        predicate="x",
+        relation_family="y",
     )
     assert d.seed_entity_id == ""
     assert d.neighbor_entity_id == ""

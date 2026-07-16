@@ -53,6 +53,7 @@ def _representative_priority(chunk: SourceChunk) -> int:
 
 def _candidate_snapshot(chunk: SourceChunk) -> dict:
     return {
+        "corpus_id": chunk.corpus_id,
         "chunk_id": chunk.chunk_id,
         "parent_id": chunk.parent_id,
         "doc_id": chunk.doc_id,
@@ -66,13 +67,19 @@ def _merge_representative_metadata(target: SourceChunk, *chunks: SourceChunk) ->
     metadata = dict(target.metadata or {})
     reps = list(metadata.get("merged_parent_representatives") or [])
     seen = {
-        str(item.get("chunk_id") or item.get("parent_id") or "")
+        (
+            str(item.get("corpus_id") or ""),
+            str(item.get("chunk_id") or item.get("parent_id") or ""),
+        )
         for item in reps
         if isinstance(item, dict)
     }
     for chunk in chunks:
-        key = str(chunk.chunk_id or chunk.parent_id or "")
-        if not key or key in seen:
+        key = (
+            str(chunk.corpus_id or ""),
+            str(chunk.chunk_id or chunk.parent_id or ""),
+        )
+        if not key[1] or key in seen:
             continue
         seen.add(key)
         reps.append(_candidate_snapshot(chunk))
@@ -108,9 +115,12 @@ def merge_pools(
             # and child vectors as distinct evidence by passing
             # dedupe_by_parent=False.
             key = (
-                chunk.parent_id
-                if dedupe_by_parent and chunk.parent_id
-                else chunk.chunk_id
+                str(chunk.corpus_id or ""),
+                str(
+                    chunk.parent_id
+                    if dedupe_by_parent and chunk.parent_id
+                    else chunk.chunk_id
+                ),
             )
 
             if key not in merged_dict:
@@ -127,15 +137,16 @@ def merge_pools(
                     chunk.provenance,
                 )
 
-                keep_new_identity = (
-                    _representative_priority(chunk) > _representative_priority(existing_chunk)
-                    or (
-                        _representative_priority(chunk)
-                        == _representative_priority(existing_chunk)
-                        and chunk.score > existing_chunk.score
-                    )
+                keep_new_identity = _representative_priority(
+                    chunk
+                ) > _representative_priority(existing_chunk) or (
+                    _representative_priority(chunk)
+                    == _representative_priority(existing_chunk)
+                    and chunk.score > existing_chunk.score
                 )
-                best_score = max(float(existing_chunk.score or 0.0), float(chunk.score or 0.0))
+                best_score = max(
+                    float(existing_chunk.score or 0.0), float(chunk.score or 0.0)
+                )
                 if keep_new_identity:
                     # Inherit the stronger evidence identity/text, but keep the
                     # highest parent-level score and provenance from every lane.
@@ -153,7 +164,9 @@ def merge_pools(
                     existing_chunk.score = best_score
                     existing_chunk.source_tier = merged_source_tier
                     existing_chunk.provenance = merged_provenance
-                    _merge_representative_metadata(existing_chunk, existing_chunk, chunk)
+                    _merge_representative_metadata(
+                        existing_chunk, existing_chunk, chunk
+                    )
 
                 # If we come across a summary, ensure the coalesced chunk retains the summary text
                 # (useful for Context Manager synthesis later).

@@ -61,17 +61,26 @@ def _load_entity_stoplist() -> tuple[list[str], str]:
     try:
         data = json.loads(ENTITY_STOPLIST_PATH.read_text(encoding="utf-8"))
     except FileNotFoundError:
-        logger.warning("Entity stop-list missing at %s — running with no filter", ENTITY_STOPLIST_PATH)
+        logger.warning(
+            "Entity stop-list missing at %s — running with no filter",
+            ENTITY_STOPLIST_PATH,
+        )
         return [], "$^"
     except Exception as exc:
-        logger.warning("Entity stop-list failed to load (%s) — running with no filter", exc)
+        logger.warning(
+            "Entity stop-list failed to load (%s) — running with no filter", exc
+        )
         return [], "$^"
 
     exact_raw = data.get("exact_lowercase") or []
-    exact_list = sorted({str(s).strip().lower() for s in exact_raw if isinstance(s, str) and s.strip()})
+    exact_list = sorted(
+        {str(s).strip().lower() for s in exact_raw if isinstance(s, str) and s.strip()}
+    )
 
     patterns = data.get("patterns") or []
-    pattern_parts = [str(p).strip() for p in patterns if isinstance(p, str) and p.strip()]
+    pattern_parts = [
+        str(p).strip() for p in patterns if isinstance(p, str) and p.strip()
+    ]
     # Combine via | so a single =~ call covers all patterns. "$^" never
     # matches and serves as the "no patterns" sentinel.
     combined = "|".join(f"(?:{p})" for p in pattern_parts) if pattern_parts else "$^"
@@ -302,7 +311,12 @@ async def get_brain_view(
         return {
             "documents": [],
             "bridges": [],
-            "meta": {"corpus_count": 0, "total_documents": 0, "total_bridges": 0, "limit_applied": limit},
+            "meta": {
+                "corpus_count": 0,
+                "total_documents": 0,
+                "total_bridges": 0,
+                "limit_applied": limit,
+            },
         }
 
     stop_exact, stop_pattern = _load_entity_stoplist()
@@ -392,7 +406,7 @@ async def get_brain_view(
 
 
 _DRILLDOWN_CYPHER = """
-MATCH (d:Document {doc_id: $doc_id})
+MATCH (d:Document {corpus_id: $corpus_id, doc_id: $doc_id})
 WHERE d.is_cluster_anchor = true
 
 CALL {
@@ -487,6 +501,7 @@ RETURN
 
 async def get_book_drilldown(
     driver: AsyncDriver,
+    corpus_id: str,
     doc_id: str,
     other_corpus_ids: list[str],
     *,
@@ -500,7 +515,7 @@ async def get_book_drilldown(
     the selected corpora. `limit` caps the local_entities list — relations and
     bridges are derived from those entities so the cap controls total payload.
     """
-    if not doc_id:
+    if not corpus_id or not doc_id:
         return {
             "anchor": None,
             "local_entities": [],
@@ -513,6 +528,7 @@ async def get_book_drilldown(
         async with driver.session() as session:
             result = await session.run(
                 _DRILLDOWN_CYPHER,
+                corpus_id=corpus_id,
                 doc_id=doc_id,
                 other_corpus_ids=list(other_corpus_ids or []),
                 limit=int(limit),

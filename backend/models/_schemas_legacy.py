@@ -176,8 +176,7 @@ class ChatAttachment(BaseModel):
         max_len = 28 * 1024 * 1024
         if len(value) > max_len:
             raise ValueError(
-                f"attachment content exceeds {max_len} chars "
-                f"(got {len(value)})"
+                f"attachment content exceeds {max_len} chars " f"(got {len(value)})"
             )
         return value
 
@@ -587,9 +586,9 @@ class ChatLLMSettings(BaseModel):
 class RetrievalSettings(BaseModel):
     """Retrieval pipeline defaults — per-query overrides take precedence."""
 
-    default_tier: Literal["qdrant_only", "qdrant_mongo", "qdrant_mongo_graph"] = (
-        "qdrant_mongo"
-    )
+    default_tier: Literal[
+        "qdrant_only", "qdrant_mongo", "qdrant_mongo_graph"
+    ] = "qdrant_mongo"
     top_k_child: int = Field(default=60, ge=1, le=100)
     top_k_summary: int = Field(default=20, ge=0, le=100)
     reranker_model: str = "Qwen/Qwen3-Reranker-0.6B"
@@ -1087,9 +1086,9 @@ class SourceChunk(BaseModel):
     chunk_kind: str = "body"
     corpus_name: str | None = None  # populated during hydration from corpora collection
     doc_name: str | None = None  # basename of source_path, populated during hydration
-    heading_path: list[str] | None = (
-        None  # populated from Qdrant payload / parent chunk
-    )
+    heading_path: list[
+        str
+    ] | None = None  # populated from Qdrant payload / parent chunk
     # Code lane (Phase 1) — language tag and AST-derived metadata (symbols_defined,
     # symbols_called, imports, ast_signature, file_path). Empty/None for prose chunks.
     language: str | None = None
@@ -1139,6 +1138,7 @@ class GraphDecorationEvidence(BaseModel):
     """A single supporting chunk for a graph-decoration arrow."""
 
     chunk_id: str
+    corpus_id: str | None = None
     doc_id: str | None = None
     parent_boost: int = 1  # 2 = same parent doc as the winner, 1 = cross-doc
 
@@ -1161,6 +1161,7 @@ class GraphDecoration(BaseModel):
     """
 
     winner_chunk_id: str
+    winner_corpus_id: str | None = None
     seed_entity: str
     neighbor_entity: str
     predicate: str

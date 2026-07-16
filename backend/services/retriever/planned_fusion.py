@@ -331,9 +331,7 @@ def filter_grounded_planned_candidates(
         required = [lane for lane in required if lane != FALLBACK_PROBE_ID]
         diagnostics["required_lane_ids"] = required
         diagnostics["synthetic_lanes_excluded"] = synthetic_dropped
-        diagnostics["grounded_lane_ids"] = grounded_planned_lane_ids(
-            chunks, required
-        )
+        diagnostics["grounded_lane_ids"] = grounded_planned_lane_ids(chunks, required)
     if not required:
         diagnostics["reason"] = (
             "synthetic_fallback_lane_fail_open"
@@ -359,10 +357,13 @@ def filter_grounded_planned_candidates(
         output: list[str] = []
         for lane_id, value in grounding.items():
             source_lane_id = str(lane_id or "")
-            if not (
-                source_lane_id.startswith("translation_")
-                or source_lane_id.startswith("planner_translation_")
-            ) or source_lane_id in required:
+            if (
+                not (
+                    source_lane_id.startswith("translation_")
+                    or source_lane_id.startswith("planner_translation_")
+                )
+                or source_lane_id in required
+            ):
                 continue
             try:
                 score = float(value or 0.0)
@@ -408,9 +409,7 @@ def filter_grounded_planned_candidates(
             if corpus_id in represented:
                 continue
             corpus_chunks = [
-                chunk
-                for chunk in chunks
-                if str(chunk.corpus_id or "") == corpus_id
+                chunk for chunk in chunks if str(chunk.corpus_id or "") == corpus_id
             ]
             if not corpus_chunks:
                 skipped_preservations.append(
@@ -459,16 +458,22 @@ def filter_grounded_planned_candidates(
 
 
 def _candidate_key(chunk: SourceChunk) -> str:
-    return str(chunk.chunk_id or chunk.parent_id or "")
+    content_id = str(chunk.chunk_id or chunk.parent_id or "")
+    if not content_id:
+        return ""
+    return f"{str(chunk.corpus_id or '')}|{content_id}"
 
 
 def _candidate_document_key(chunk: SourceChunk) -> str:
     metadata = chunk.metadata or {}
-    return (
+    document_id = (
         str(chunk.doc_id or metadata.get("source_file_hash") or chunk.doc_name or "")
         .strip()
         .lower()
     )
+    if not document_id:
+        return ""
+    return f"{str(chunk.corpus_id or '')}|{document_id}"
 
 
 def limit_candidates_per_document(
@@ -497,8 +502,7 @@ def limit_candidates_per_document(
             (
                 chunk
                 for chunk in chunks
-                if lane_id
-                in set((chunk.metadata or {}).get("planned_lanes") or [])
+                if lane_id in set((chunk.metadata or {}).get("planned_lanes") or [])
             ),
             None,
         )
@@ -1008,9 +1012,7 @@ def reserve_planned_finalists(
 
     for lane_id, key in lane_reservations.items():
         metadata = dict(by_key[key].metadata or {})
-        reservations = set(
-            metadata.get("planned_required_lane_reservations") or []
-        )
+        reservations = set(metadata.get("planned_required_lane_reservations") or [])
         reservations.add(lane_id)
         metadata["planned_required_lane_reservations"] = sorted(reservations)
         by_key[key].metadata = metadata
@@ -1158,7 +1160,7 @@ def reserve_planned_finalists(
 
     # Preserve the cross-encoder's order among the selected candidates.
     output = [by_key[key] for key in ranked_keys if key in selected_set][:limit]
-    routed_documents_selected = sorted(
+    routed_document_refs_selected = sorted(
         {
             _candidate_document_key(chunk)
             for chunk in output
@@ -1166,17 +1168,44 @@ def reserve_planned_finalists(
             and _candidate_document_key(chunk)
         }
     )
+    routed_documents_selected = sorted(
+        {
+            str(chunk.doc_id or "")
+            for chunk in output
+            if dict((chunk.metadata or {}).get("document_route_lanes") or {})
+            and str(chunk.doc_id or "")
+        }
+    )
+
+    def public_candidate_ids(values: dict[str, str]) -> dict[str, str]:
+        return {
+            label: str(by_key[key].chunk_id or by_key[key].parent_id or "")
+            for label, key in values.items()
+        }
+
     return output, {
         "required_lane_ids": list(dict.fromkeys(required_lane_ids)),
         "protected_lane_ids": list(dict.fromkeys(protected_lane_ids or [])),
-        "protected_lane_reservations": protected_lane_reservations,
-        "lane_reservations": lane_reservations,
+        "protected_lane_reservations": public_candidate_ids(
+            protected_lane_reservations
+        ),
+        "protected_lane_reservation_refs": protected_lane_reservations,
+        "lane_reservations": public_candidate_ids(lane_reservations),
+        "lane_reservation_refs": lane_reservations,
         "lane_candidates": lane_candidate_diagnostics,
-        "corpus_reservations": corpus_reservations,
+        "corpus_reservations": public_candidate_ids(corpus_reservations),
+        "corpus_reservation_refs": corpus_reservations,
         "skipped_corpus_reservations": skipped_corpus_reservations,
         "corpus_reservation_details": corpus_reservation_details,
-        "routed_document_reservations": routed_document_reservations,
+        "routed_document_reservations": {
+            str(by_key[key].doc_id or document_ref): str(
+                by_key[key].chunk_id or by_key[key].parent_id or ""
+            )
+            for document_ref, key in routed_document_reservations.items()
+        },
+        "routed_document_reservation_refs": routed_document_reservations,
         "routed_documents_selected": routed_documents_selected,
+        "routed_document_refs_selected": routed_document_refs_selected,
         "routed_document_budget": route_limit,
         "preferred_route_lane_ids": sorted(preferred_route_lanes),
         "selected_candidates": len(output),
@@ -1215,7 +1244,11 @@ def prioritize_enumeration_candidates(
         key = _candidate_key(chunk)
         if not key or key in selected_keys or len(selected) >= limit:
             return False
-        parent_key = str(chunk.parent_id or "").strip()
+        parent_key = (
+            f"{str(chunk.corpus_id or '')}|{str(chunk.parent_id or '').strip()}"
+            if chunk.parent_id
+            else ""
+        )
         document_key = _candidate_document_key(chunk)
         if answer and parent_key and parent_counts.get(parent_key, 0) >= 2:
             return False
@@ -1346,13 +1379,14 @@ def dedupe_parent_finalists(
     """Collapse multiple child winners that hydrate to the same parent."""
 
     output: list[SourceChunk] = []
-    index_by_parent: dict[str, int] = {}
+    index_by_parent: dict[tuple[str, str], int] = {}
     dropped = 0
     for chunk in chunks:
-        parent_key = str(chunk.parent_id or "").strip()
-        if not parent_key:
+        parent_id = str(chunk.parent_id or "").strip()
+        if not parent_id:
             output.append(chunk)
             continue
+        parent_key = (str(chunk.corpus_id or ""), parent_id)
         existing_index = index_by_parent.get(parent_key)
         if existing_index is None:
             index_by_parent[parent_key] = len(output)
@@ -1388,9 +1422,7 @@ def dedupe_parent_finalists(
             "document_route_lanes",
         ):
             merged_scores = dict(existing_meta.get(score_map_key) or {})
-            for lane_id, value in dict(
-                duplicate_meta.get(score_map_key) or {}
-            ).items():
+            for lane_id, value in dict(duplicate_meta.get(score_map_key) or {}).items():
                 try:
                     merged_scores[str(lane_id)] = max(
                         float(merged_scores.get(str(lane_id)) or 0.0),
@@ -1409,7 +1441,7 @@ def dedupe_parent_finalists(
             {
                 "retriever": "parent_finalist_dedupe",
                 "chunk_id": chunk.chunk_id,
-                "parent_id": parent_key,
+                "parent_id": parent_id,
             }
         )
         existing.provenance = provenance
@@ -1468,9 +1500,7 @@ def dedupe_document_lane_finalists(
             "document_route_lanes",
         ):
             merged_scores = dict(existing_meta.get(score_map_key) or {})
-            for lane_id, value in dict(
-                duplicate_meta.get(score_map_key) or {}
-            ).items():
+            for lane_id, value in dict(duplicate_meta.get(score_map_key) or {}).items():
                 try:
                     merged_scores[str(lane_id)] = max(
                         float(merged_scores.get(str(lane_id)) or 0.0),

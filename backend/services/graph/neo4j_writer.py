@@ -59,6 +59,7 @@ GRAPH_ENTITY_AGGREGATE_BATCH_SIZE = 100
 GRAPH_WRITE_ROW_BATCH_SIZE = 100
 GRAPH_DELETE_BATCH_SIZE = 100
 GRAPH_RELATION_PRUNE_BATCH_SIZE = 100
+IDENTITY_KEY_SEPARATOR = "|"
 GENERIC_ENTITY_TERMS = {
     "agent",
     "attention",
@@ -75,6 +76,16 @@ GENERIC_ENTITY_TERMS = {
     "user",
     "value",
 }
+
+
+def corpus_content_key(corpus_id: str, content_id: str) -> str:
+    """Stable, parseable identity for provenance stored on global edges."""
+
+    if IDENTITY_KEY_SEPARATOR in corpus_id or IDENTITY_KEY_SEPARATOR in content_id:
+        raise ValueError("corpus/content identity contains reserved separator")
+    return f"{corpus_id}{IDENTITY_KEY_SEPARATOR}{content_id}"
+
+
 ENTITY_TYPE_PRIORITY = [
     # Phase 5 — scoped Roblox/Luau types come BEFORE the generic universal
     # types so an entity observed as both "RobloxService" (from Phase 5's
@@ -464,13 +475,13 @@ _RECOVERABLE_SOURCE_PREDICATES = {
     "affiliated_with",
     "synonym_of",
     "instance_of",
-    "uses",          # absorbs legacy `calls`
+    "uses",  # absorbs legacy `calls`
     "references",
     "implements",
     "depends_on",
     "produces",
     "stores",
-    "detects",       # absorbs legacy `extracts`
+    "detects",  # absorbs legacy `extracts`
     "classifies",
     "runs_on",
     "trained_on",
@@ -1358,43 +1369,43 @@ def _relation_support_records(
         edge_key = "|".join([source_entity_id, predicate, target_entity_id])
         records.append(
             {
-            "support_id": _support_id_for_row(
-                edge_key=edge_key,
-                corpus_id=corpus_id,
-                doc_id=row_doc_id,
-                parent_id=parent_id,
-                chunk_id=chunk_id,
-            ),
-            "edge_key": edge_key,
-            "source_entity_id": source_entity_id,
-            "predicate": predicate,
-            "target_entity_id": target_entity_id,
-            "corpus_id": corpus_id,
-            "doc_id": row_doc_id,
-            "parent_id": parent_id,
-            "chunk_id": chunk_id,
-            "evidence_quote": row.get("evidence_phrase") or "",
-            "confidence": float(row.get("confidence") or 0.0),
-            "relation_family": row.get("relation_family") or "",
-            "source_predicate": row.get("source_predicate") or predicate,
-            "edge_state": row.get("edge_state") or "",
-            "fallback": bool(row.get("fallback") or False),
-            "fallback_family": row.get("fallback_family") or "",
-            "candidate_predicates": list(row.get("candidate_predicates") or []),
-            "candidate_scores": list(row.get("candidate_scores") or []),
+                "support_id": _support_id_for_row(
+                    edge_key=edge_key,
+                    corpus_id=corpus_id,
+                    doc_id=row_doc_id,
+                    parent_id=parent_id,
+                    chunk_id=chunk_id,
+                ),
+                "edge_key": edge_key,
+                "source_entity_id": source_entity_id,
+                "predicate": predicate,
+                "target_entity_id": target_entity_id,
+                "corpus_id": corpus_id,
+                "doc_id": row_doc_id,
+                "parent_id": parent_id,
+                "chunk_id": chunk_id,
+                "evidence_quote": row.get("evidence_phrase") or "",
+                "confidence": float(row.get("confidence") or 0.0),
+                "relation_family": row.get("relation_family") or "",
+                "source_predicate": row.get("source_predicate") or predicate,
+                "edge_state": row.get("edge_state") or "",
+                "fallback": bool(row.get("fallback") or False),
+                "fallback_family": row.get("fallback_family") or "",
+                "candidate_predicates": list(row.get("candidate_predicates") or []),
+                "candidate_scores": list(row.get("candidate_scores") or []),
                 "candidate_score_sources": list(
                     row.get("candidate_score_sources") or []
                 ),
-            "promoted_by": row.get("promoted_by") or "",
+                "promoted_by": row.get("promoted_by") or "",
                 "related_to_query_weight": float(
                     row.get("related_to_query_weight") or 1.0
                 ),
-            "related_to_max_hops": int(row.get("related_to_max_hops") or 2),
-            "relation_cue": row.get("relation_cue") or "",
-            "validation_status": row.get("validation_status") or "",
+                "related_to_max_hops": int(row.get("related_to_max_hops") or 2),
+                "relation_cue": row.get("relation_cue") or "",
+                "validation_status": row.get("validation_status") or "",
                 "extract_schema_version": row.get("schema_version")
                 or "polymath.extract.v1",
-            "promote_version": GRAPH_PROMOTE_VERSION,
+                "promote_version": GRAPH_PROMOTE_VERSION,
             }
         )
     return records
@@ -1608,10 +1619,9 @@ async def _upsert_document(
     async with driver.session() as session:
         await session.run(
             """
-            MERGE (d:Document {doc_id: $doc_id})
+            MERGE (d:Document {corpus_id: $corpus_id, doc_id: $doc_id})
             ON CREATE SET d.ingested_at = datetime()
-            SET d.corpus_id = $corpus_id,
-                d.user_id = $user_id,
+            SET d.user_id = $user_id,
                 d.file_id = $file_id,
                 d.is_cluster_anchor = true,
                 d.kind = 'book',
@@ -1694,6 +1704,7 @@ def summarize_dominant_facets(
 async def update_document_anchor_metrics(
     driver: AsyncDriver,
     doc_id: str,
+    corpus_id: str,
     *,
     chunk_count: int | None = None,
     parent_count: int | None = None,
@@ -1717,7 +1728,7 @@ async def update_document_anchor_metrics(
     async with driver.session() as session:
         await session.run(
             """
-            MATCH (d:Document {doc_id: $doc_id})
+            MATCH (d:Document {doc_id: $doc_id, corpus_id: $corpus_id})
             SET d.updated_at = datetime(),
                 d.chunk_count = coalesce($chunk_count, d.chunk_count),
                 d.parent_count = coalesce($parent_count, d.parent_count),
@@ -1729,6 +1740,7 @@ async def update_document_anchor_metrics(
                 d.dominant_entity_type = coalesce($dominant_entity_type, d.dominant_entity_type)
             """,
             doc_id=doc_id,
+            corpus_id=corpus_id,
             chunk_count=int(chunk_count) if chunk_count is not None else None,
             parent_count=int(parent_count) if parent_count is not None else None,
             ghost_b_success_rate=(
@@ -1755,8 +1767,8 @@ async def _upsert_chunk(
     async with driver.session() as session:
         await session.run(
             """
-            MERGE (c:Chunk {chunk_id: $chunk_id})
-            SET c.doc_id = $doc_id, c.corpus_id = $corpus_id
+            MERGE (c:Chunk {corpus_id: $corpus_id, chunk_id: $chunk_id})
+            SET c.doc_id = $doc_id
             WITH c
             MATCH (d:Document {doc_id: $doc_id, corpus_id: $corpus_id})
             MERGE (d)-[:HAS_CHUNK]->(c)
@@ -1994,7 +2006,7 @@ async def _delete_orphan_entities(session) -> None:
     """Remove Entity nodes without chunk evidence in bounded transactions."""
     while True:
         result = await session.run(
-        """
+            """
         MATCH (e:Entity)
         WHERE coalesce(e.tombstone, false) = false
           AND NOT EXISTS { MATCH (:Chunk)-[:MENTIONS]->(e) }
@@ -2003,7 +2015,7 @@ async def _delete_orphan_entities(session) -> None:
             RETURN count(e) AS deleted
             """,
             batch_size=GRAPH_DELETE_BATCH_SIZE,
-    )
+        )
         row = await result.single()
         if not row or int(row.get("deleted") or 0) == 0:
             break
@@ -2026,75 +2038,149 @@ async def _prune_relates_to_for_document(
         corpus_id=corpus_id,
         doc_id=doc_id,
     )
+    chunk_ids_all = [row["chunk_id"] for row in chunk_rows if row["chunk_id"]]
+    corpus_prefix = f"{corpus_id}{IDENTITY_KEY_SEPARATOR}"
+    doc_key = corpus_content_key(corpus_id, doc_id)
+    ambiguity = await session.run(
+        """
+        MATCH ()-[r:RELATES_TO]->()
+        WHERE $corpus_id IN coalesce(r.corpus_ids, [])
+          AND (
+              any(chunk_id IN coalesce(r.evidence_chunk_ids, []) WHERE chunk_id IN $chunk_ids)
+              OR $doc_id IN coalesce(r.evidence_doc_ids, [])
+              OR r.latest_doc_id = $doc_id
+          )
+          AND none(key IN coalesce(r.evidence_chunk_keys, []) WHERE key IN $chunk_keys)
+          AND NOT $doc_key IN coalesce(r.evidence_doc_keys, [])
+          AND coalesce(r.latest_doc_key, '') <> $doc_key
+          AND (
+              any(cid IN coalesce(r.corpus_ids, []) WHERE cid <> $corpus_id)
+              OR any(key IN coalesce(r.evidence_chunk_keys, []) WHERE NOT key STARTS WITH $corpus_prefix)
+              OR any(key IN coalesce(r.evidence_doc_keys, []) WHERE NOT key STARTS WITH $corpus_prefix)
+          )
+        RETURN count(r) AS ambiguous
+        """,
+        corpus_id=corpus_id,
+        corpus_prefix=corpus_prefix,
+        doc_id=doc_id,
+        doc_key=doc_key,
+        chunk_ids=chunk_ids_all,
+        chunk_keys=[corpus_content_key(corpus_id, value) for value in chunk_ids_all],
+    )
+    ambiguity_row = await ambiguity.single()
+    ambiguous = int(ambiguity_row.get("ambiguous") or 0) if ambiguity_row else 0
+    if ambiguous:
+        raise RuntimeError(
+            "ambiguous_legacy_relation_provenance: "
+            f"document {corpus_id}/{doc_id} has {ambiguous} shared RELATES_TO edges "
+            "without corpus-qualified evidence"
+        )
     batches = _row_batches(
         chunk_rows,
         batch_size=GRAPH_RELATION_PRUNE_BATCH_SIZE,
     ) or [[]]
     for batch in batches:
         chunk_ids = [row["chunk_id"] for row in batch if row["chunk_id"]]
+        chunk_keys = [corpus_content_key(corpus_id, value) for value in chunk_ids]
         while True:
             result = await session.run(
-        """
-        MATCH ()-[r:RELATES_TO]->()
-        WHERE any(chunk_id IN coalesce(r.evidence_chunk_ids, []) WHERE chunk_id IN $chunk_ids)
-           OR $doc_id IN coalesce(r.evidence_doc_ids, [])
-           OR r.latest_doc_id = $doc_id
-        WITH r LIMIT $batch_size
-        WITH r, $chunk_ids AS chunk_ids, [$doc_id] AS doc_ids,
-             coalesce(r.support_confidence_chunk_ids, []) AS support_ids,
-             coalesce(r.support_confidence_values, []) AS support_values
-        SET r.evidence_chunk_ids = [
-                chunk_id IN coalesce(r.evidence_chunk_ids, [])
-                WHERE NOT chunk_id IN chunk_ids
-            ],
-            r.evidence_doc_ids = [
-                rel_doc_id IN coalesce(r.evidence_doc_ids, [])
-                WHERE NOT rel_doc_id IN doc_ids
-            ],
-            r.latest_doc_id = CASE
-                WHEN r.latest_doc_id IN doc_ids THEN NULL
-                ELSE r.latest_doc_id
-            END,
-            r.support_confidence_chunk_ids = [
-                support_id IN support_ids
-                WHERE NOT support_id IN chunk_ids
-            ],
-            r.support_confidence_values = CASE
-                WHEN size(support_ids) = 0 THEN []
-                ELSE [
-                    idx IN range(0, size(support_ids) - 1)
-                    WHERE idx < size(support_values)
-                      AND NOT support_ids[idx] IN chunk_ids
-                    | support_values[idx]
-                ]
-            END
-        WITH r
-        OPTIONAL MATCH (remaining:Chunk {corpus_id: $corpus_id})
-        WHERE remaining.chunk_id IN coalesce(r.evidence_chunk_ids, [])
-        WITH r, count(remaining) AS remaining_corpus_support
-        SET r.corpus_ids = CASE
-            WHEN remaining_corpus_support = 0 THEN [
-                cid IN coalesce(r.corpus_ids, [])
-                WHERE cid <> $corpus_id
-            ]
-            ELSE coalesce(r.corpus_ids, [])
-        END
-        WITH r
-        SET r.support_count = size(coalesce(r.evidence_chunk_ids, [])),
-            r.avg_confidence = CASE
-                WHEN size(coalesce(r.support_confidence_values, [])) = 0 THEN toFloat(coalesce(r.confidence, 0.0))
-                ELSE reduce(total = 0.0, conf IN coalesce(r.support_confidence_values, []) | total + toFloat(conf))
-                     / size(coalesce(r.support_confidence_values, []))
-            END
-        WITH r, size(coalesce(r.corpus_ids, [])) = 0 AS delete_relation
-        FOREACH (_ IN CASE WHEN delete_relation THEN [1] ELSE [] END | DELETE r)
-        RETURN count(*) AS updated
-        """,
-        corpus_id=corpus_id,
-        doc_id=doc_id,
+                """
+                MATCH ()-[r:RELATES_TO]->()
+                WHERE any(key IN coalesce(r.evidence_chunk_keys, []) WHERE key IN $chunk_keys)
+                   OR $doc_key IN coalesce(r.evidence_doc_keys, [])
+                   OR r.latest_doc_key = $doc_key
+                   OR (
+                       $corpus_id IN coalesce(r.corpus_ids, [])
+                       AND size(coalesce(r.evidence_chunk_keys, [])) = 0
+                       AND size(coalesce(r.evidence_doc_keys, [])) = 0
+                       AND none(cid IN coalesce(r.corpus_ids, []) WHERE cid <> $corpus_id)
+                       AND any(chunk_id IN coalesce(r.evidence_chunk_ids, []) WHERE chunk_id IN $chunk_ids)
+                   )
+                   OR (
+                       $corpus_id IN coalesce(r.corpus_ids, [])
+                       AND size(coalesce(r.evidence_chunk_keys, [])) = 0
+                       AND size(coalesce(r.evidence_doc_keys, [])) = 0
+                       AND none(cid IN coalesce(r.corpus_ids, []) WHERE cid <> $corpus_id)
+                       AND ($doc_id IN coalesce(r.evidence_doc_ids, []) OR r.latest_doc_id = $doc_id)
+                   )
+                WITH r LIMIT $batch_size
+                WITH r,
+                     any(key IN coalesce(r.evidence_chunk_keys, []) WHERE key STARTS WITH $corpus_prefix) AS had_scoped_chunk_keys,
+                     any(key IN coalesce(r.evidence_doc_keys, []) WHERE key STARTS WITH $corpus_prefix) AS had_scoped_doc_keys,
+                     any(key IN coalesce(r.support_confidence_chunk_keys, []) WHERE key STARTS WITH $corpus_prefix) AS had_scoped_support_keys,
+                     [key IN coalesce(r.evidence_chunk_keys, []) WHERE NOT key IN $chunk_keys] AS remaining_chunk_keys,
+                     [key IN coalesce(r.evidence_doc_keys, []) WHERE key <> $doc_key] AS remaining_doc_keys,
+                     coalesce(r.support_confidence_chunk_keys, []) AS support_keys,
+                     coalesce(r.support_confidence_values_v2, []) AS support_values_v2
+                SET r.evidence_chunk_keys = remaining_chunk_keys,
+                    r.evidence_doc_keys = remaining_doc_keys,
+                    r.latest_doc_key = CASE WHEN r.latest_doc_key = $doc_key THEN NULL ELSE r.latest_doc_key END,
+                    r.evidence_chunk_ids = [
+                        chunk_id IN coalesce(r.evidence_chunk_ids, [])
+                        WHERE NOT chunk_id IN $chunk_ids
+                           OR (had_scoped_chunk_keys AND any(key IN remaining_chunk_keys WHERE split(key, $separator)[1] = chunk_id))
+                    ],
+                    r.evidence_doc_ids = [
+                        rel_doc_id IN coalesce(r.evidence_doc_ids, [])
+                        WHERE rel_doc_id <> $doc_id
+                           OR (had_scoped_doc_keys AND any(key IN remaining_doc_keys WHERE split(key, $separator)[1] = rel_doc_id))
+                    ],
+                    r.latest_doc_id = CASE
+                        WHEN r.latest_doc_id = $doc_id
+                         AND NOT any(key IN remaining_doc_keys WHERE split(key, $separator)[1] = $doc_id)
+                        THEN NULL ELSE r.latest_doc_id
+                    END,
+                    r.support_confidence_chunk_keys = [key IN support_keys WHERE NOT key IN $chunk_keys],
+                    r.support_confidence_values_v2 = CASE
+                        WHEN size(support_keys) = 0 THEN []
+                        ELSE [
+                            idx IN range(0, size(support_keys) - 1)
+                            WHERE idx < size(support_values_v2) AND NOT support_keys[idx] IN $chunk_keys
+                            | support_values_v2[idx]
+                        ]
+                    END,
+                    r.support_confidence_chunk_ids = [
+                        support_id IN coalesce(r.support_confidence_chunk_ids, [])
+                        WHERE NOT support_id IN $chunk_ids OR had_scoped_support_keys
+                    ]
+                WITH r
+                OPTIONAL MATCH (remaining:Chunk {corpus_id: $corpus_id})
+                WHERE remaining.chunk_id IN coalesce(r.evidence_chunk_ids, [])
+                  AND remaining.doc_id <> $doc_id
+                WITH r, count(remaining) AS remaining_corpus_support
+                SET r.corpus_ids = CASE
+                    WHEN remaining_corpus_support = 0
+                     AND none(key IN coalesce(r.evidence_chunk_keys, []) WHERE key STARTS WITH $corpus_prefix)
+                    THEN [cid IN coalesce(r.corpus_ids, []) WHERE cid <> $corpus_id]
+                    ELSE coalesce(r.corpus_ids, [])
+                END
+                SET r.support_count = CASE
+                        WHEN size(coalesce(r.evidence_chunk_keys, [])) > size(coalesce(r.evidence_chunk_ids, []))
+                        THEN size(coalesce(r.evidence_chunk_keys, []))
+                        ELSE size(coalesce(r.evidence_chunk_ids, []))
+                    END,
+                    r.avg_confidence = CASE
+                        WHEN size(coalesce(r.support_confidence_values_v2, [])) > 0
+                        THEN reduce(total = 0.0, conf IN r.support_confidence_values_v2 | total + toFloat(conf))
+                             / size(r.support_confidence_values_v2)
+                        WHEN size(coalesce(r.support_confidence_values, [])) > 0
+                        THEN reduce(total = 0.0, conf IN r.support_confidence_values | total + toFloat(conf))
+                             / size(r.support_confidence_values)
+                        ELSE toFloat(coalesce(r.confidence, 0.0))
+                    END
+                WITH r, size(coalesce(r.corpus_ids, [])) = 0 AS delete_relation
+                FOREACH (_ IN CASE WHEN delete_relation THEN [1] ELSE [] END | DELETE r)
+                RETURN count(*) AS updated
+                """,
+                corpus_id=corpus_id,
+                corpus_prefix=corpus_prefix,
+                doc_id=doc_id,
+                doc_key=doc_key,
                 chunk_ids=chunk_ids,
+                chunk_keys=chunk_keys,
+                separator=IDENTITY_KEY_SEPARATOR,
                 batch_size=GRAPH_RELATION_PRUNE_BATCH_SIZE,
-    )
+            )
             row = await result.single()
             if not row or int(row.get("updated") or 0) == 0:
                 break
@@ -2111,65 +2197,121 @@ async def _prune_relates_to_for_corpus(
         chunk_rows,
         batch_size=GRAPH_RELATION_PRUNE_BATCH_SIZE,
     ) or [[]]
-    for batch in batches:
-        chunk_ids = [row["chunk_id"] for row in batch if row["chunk_id"]]
-        doc_ids = list(dict.fromkeys(row["doc_id"] for row in batch if row["doc_id"]))
-        while True:
-            result = await session.run(
+    corpus_prefix = f"{corpus_id}{IDENTITY_KEY_SEPARATOR}"
+    ambiguity = await session.run(
         """
         MATCH ()-[r:RELATES_TO]->()
         WHERE $corpus_id IN coalesce(r.corpus_ids, [])
-           OR any(chunk_id IN coalesce(r.evidence_chunk_ids, []) WHERE chunk_id IN $chunk_ids)
-           OR any(rel_doc_id IN coalesce(r.evidence_doc_ids, []) WHERE rel_doc_id IN $doc_ids)
-        WITH r LIMIT $batch_size
-        WITH r, $chunk_ids AS chunk_ids, $doc_ids AS doc_ids,
-             coalesce(r.support_confidence_chunk_ids, []) AS support_ids,
-             coalesce(r.support_confidence_values, []) AS support_values
-        SET r.corpus_ids = [
-                cid IN coalesce(r.corpus_ids, [])
-                WHERE cid <> $corpus_id
-            ],
-            r.evidence_chunk_ids = [
-                chunk_id IN coalesce(r.evidence_chunk_ids, [])
-                WHERE NOT chunk_id IN chunk_ids
-            ],
-            r.evidence_doc_ids = [
-                rel_doc_id IN coalesce(r.evidence_doc_ids, [])
-                WHERE NOT rel_doc_id IN doc_ids
-            ],
-            r.latest_doc_id = CASE
-                WHEN r.latest_doc_id IN doc_ids THEN NULL
-                ELSE r.latest_doc_id
-            END,
-            r.support_confidence_chunk_ids = [
-                support_id IN support_ids
-                WHERE NOT support_id IN chunk_ids
-            ],
-            r.support_confidence_values = CASE
-                WHEN size(support_ids) = 0 THEN []
-                ELSE [
-                    idx IN range(0, size(support_ids) - 1)
-                    WHERE idx < size(support_values)
-                      AND NOT support_ids[idx] IN chunk_ids
-                    | support_values[idx]
-                ]
-            END
-        WITH r
-        SET r.support_count = size(coalesce(r.evidence_chunk_ids, [])),
-            r.avg_confidence = CASE
-                WHEN size(coalesce(r.support_confidence_values, [])) = 0 THEN toFloat(coalesce(r.confidence, 0.0))
-                ELSE reduce(total = 0.0, conf IN coalesce(r.support_confidence_values, []) | total + toFloat(conf))
-                     / size(coalesce(r.support_confidence_values, []))
-            END
-        WITH r, size(coalesce(r.corpus_ids, [])) = 0 AS delete_relation
-        FOREACH (_ IN CASE WHEN delete_relation THEN [1] ELSE [] END | DELETE r)
-        RETURN count(*) AS updated
+          AND none(key IN coalesce(r.evidence_chunk_keys, []) WHERE key STARTS WITH $corpus_prefix)
+          AND none(key IN coalesce(r.evidence_doc_keys, []) WHERE key STARTS WITH $corpus_prefix)
+          AND any(cid IN coalesce(r.corpus_ids, []) WHERE cid <> $corpus_id)
+        RETURN count(r) AS ambiguous
         """,
         corpus_id=corpus_id,
-                chunk_ids=chunk_ids,
-                doc_ids=doc_ids,
-                batch_size=GRAPH_RELATION_PRUNE_BATCH_SIZE,
+        corpus_prefix=corpus_prefix,
     )
+    ambiguity_row = await ambiguity.single()
+    ambiguous = int(ambiguity_row.get("ambiguous") or 0) if ambiguity_row else 0
+    if ambiguous:
+        raise RuntimeError(
+            "ambiguous_legacy_relation_provenance: "
+            f"corpus {corpus_id} has {ambiguous} shared RELATES_TO edges "
+            "without corpus-qualified evidence"
+        )
+    for batch in batches:
+        chunk_ids = [row["chunk_id"] for row in batch if row["chunk_id"]]
+        doc_ids = list(dict.fromkeys(row["doc_id"] for row in batch if row["doc_id"]))
+        chunk_keys = [corpus_content_key(corpus_id, value) for value in chunk_ids]
+        doc_keys = [corpus_content_key(corpus_id, value) for value in doc_ids]
+        while True:
+            result = await session.run(
+                """
+                MATCH ()-[r:RELATES_TO]->()
+                WHERE $corpus_id IN coalesce(r.corpus_ids, [])
+                   OR any(key IN coalesce(r.evidence_chunk_keys, []) WHERE key STARTS WITH $corpus_prefix)
+                   OR any(key IN coalesce(r.evidence_doc_keys, []) WHERE key STARTS WITH $corpus_prefix)
+                   OR (
+                       $corpus_id IN coalesce(r.corpus_ids, [])
+                       AND size(coalesce(r.evidence_chunk_keys, [])) = 0
+                       AND size(coalesce(r.evidence_doc_keys, [])) = 0
+                       AND none(cid IN coalesce(r.corpus_ids, []) WHERE cid <> $corpus_id)
+                       AND any(chunk_id IN coalesce(r.evidence_chunk_ids, []) WHERE chunk_id IN $chunk_ids)
+                   )
+                   OR (
+                       $corpus_id IN coalesce(r.corpus_ids, [])
+                       AND size(coalesce(r.evidence_chunk_keys, [])) = 0
+                       AND size(coalesce(r.evidence_doc_keys, [])) = 0
+                       AND none(cid IN coalesce(r.corpus_ids, []) WHERE cid <> $corpus_id)
+                       AND any(rel_doc_id IN coalesce(r.evidence_doc_ids, []) WHERE rel_doc_id IN $doc_ids)
+                   )
+                WITH r LIMIT $batch_size
+                WITH r,
+                     any(key IN coalesce(r.evidence_chunk_keys, []) WHERE key STARTS WITH $corpus_prefix) AS had_scoped_chunk_keys,
+                     any(key IN coalesce(r.evidence_doc_keys, []) WHERE key STARTS WITH $corpus_prefix) AS had_scoped_doc_keys,
+                     any(key IN coalesce(r.support_confidence_chunk_keys, []) WHERE key STARTS WITH $corpus_prefix) AS had_scoped_support_keys,
+                     [key IN coalesce(r.evidence_chunk_keys, []) WHERE NOT key STARTS WITH $corpus_prefix] AS remaining_chunk_keys,
+                     [key IN coalesce(r.evidence_doc_keys, []) WHERE NOT key STARTS WITH $corpus_prefix] AS remaining_doc_keys,
+                     coalesce(r.support_confidence_chunk_keys, []) AS support_keys,
+                     coalesce(r.support_confidence_values_v2, []) AS support_values_v2
+                SET r.corpus_ids = [cid IN coalesce(r.corpus_ids, []) WHERE cid <> $corpus_id],
+                    r.evidence_chunk_keys = remaining_chunk_keys,
+                    r.evidence_doc_keys = remaining_doc_keys,
+                    r.latest_doc_key = CASE WHEN r.latest_doc_key STARTS WITH $corpus_prefix THEN NULL ELSE r.latest_doc_key END,
+                    r.evidence_chunk_ids = [
+                        chunk_id IN coalesce(r.evidence_chunk_ids, [])
+                        WHERE NOT chunk_id IN $chunk_ids
+                           OR (had_scoped_chunk_keys AND any(key IN remaining_chunk_keys WHERE split(key, $separator)[1] = chunk_id))
+                    ],
+                    r.evidence_doc_ids = [
+                        rel_doc_id IN coalesce(r.evidence_doc_ids, [])
+                        WHERE NOT rel_doc_id IN $doc_ids
+                           OR (had_scoped_doc_keys AND any(key IN remaining_doc_keys WHERE split(key, $separator)[1] = rel_doc_id))
+                    ],
+                    r.latest_doc_id = CASE
+                        WHEN r.latest_doc_id IN $doc_ids
+                         AND NOT any(key IN remaining_doc_keys WHERE split(key, $separator)[1] = r.latest_doc_id)
+                        THEN NULL ELSE r.latest_doc_id
+                    END,
+                    r.support_confidence_chunk_keys = [key IN support_keys WHERE NOT key STARTS WITH $corpus_prefix],
+                    r.support_confidence_values_v2 = CASE
+                        WHEN size(support_keys) = 0 THEN []
+                        ELSE [
+                            idx IN range(0, size(support_keys) - 1)
+                            WHERE idx < size(support_values_v2) AND NOT support_keys[idx] STARTS WITH $corpus_prefix
+                            | support_values_v2[idx]
+                        ]
+                    END,
+                    r.support_confidence_chunk_ids = [
+                        support_id IN coalesce(r.support_confidence_chunk_ids, [])
+                        WHERE NOT support_id IN $chunk_ids OR had_scoped_support_keys
+                    ]
+                SET r.support_count = CASE
+                        WHEN size(coalesce(r.evidence_chunk_keys, [])) > size(coalesce(r.evidence_chunk_ids, []))
+                        THEN size(coalesce(r.evidence_chunk_keys, []))
+                        ELSE size(coalesce(r.evidence_chunk_ids, []))
+                    END,
+                    r.avg_confidence = CASE
+                        WHEN size(coalesce(r.support_confidence_values_v2, [])) > 0
+                        THEN reduce(total = 0.0, conf IN r.support_confidence_values_v2 | total + toFloat(conf))
+                             / size(r.support_confidence_values_v2)
+                        WHEN size(coalesce(r.support_confidence_values, [])) > 0
+                        THEN reduce(total = 0.0, conf IN r.support_confidence_values | total + toFloat(conf))
+                             / size(r.support_confidence_values)
+                        ELSE toFloat(coalesce(r.confidence, 0.0))
+                    END
+                WITH r, size(coalesce(r.corpus_ids, [])) = 0 AS delete_relation
+                FOREACH (_ IN CASE WHEN delete_relation THEN [1] ELSE [] END | DELETE r)
+                RETURN count(*) AS updated
+                """,
+                corpus_id=corpus_id,
+                corpus_prefix=corpus_prefix,
+                chunk_ids=chunk_ids,
+                chunk_keys=chunk_keys,
+                doc_ids=doc_ids,
+                doc_keys=doc_keys,
+                separator=IDENTITY_KEY_SEPARATOR,
+                batch_size=GRAPH_RELATION_PRUNE_BATCH_SIZE,
+            )
             row = await result.single()
             if not row or int(row.get("updated") or 0) == 0:
                 break
@@ -2195,16 +2337,16 @@ async def delete_document_graph(
         )
         while True:
             result = await session.run(
-            """
+                """
             MATCH (n {doc_id: $doc_id, corpus_id: $corpus_id})
                 WITH n LIMIT $batch_size
             DETACH DELETE n
                 RETURN count(n) AS deleted
             """,
-            doc_id=doc_id,
-            corpus_id=corpus_id,
+                doc_id=doc_id,
+                corpus_id=corpus_id,
                 batch_size=GRAPH_DELETE_BATCH_SIZE,
-        )
+            )
             row = await result.single()
             if not row or int(row.get("deleted") or 0) == 0:
                 break
@@ -2239,17 +2381,17 @@ async def _clear_document_graph_payload(
         )
         while True:
             result = await session.run(
-            """
+                """
             MATCH (n {doc_id: $doc_id, corpus_id: $corpus_id})
             WHERE NOT n:Document
                 WITH n LIMIT $batch_size
             DETACH DELETE n
                 RETURN count(n) AS deleted
             """,
-            doc_id=doc_id,
-            corpus_id=corpus_id,
+                doc_id=doc_id,
+                corpus_id=corpus_id,
                 batch_size=GRAPH_DELETE_BATCH_SIZE,
-        )
+            )
             row = await result.single()
             if not row or int(row.get("deleted") or 0) == 0:
                 break
@@ -2574,36 +2716,36 @@ async def _write_document_graph_once(
                 family_resolution_count += 1
             mention_rows.append(
                 {
-                "chunk_id": r.chunk_id,
-                "entity_id": identity["entity_id"],
-                "normalized_name": canonical_normalized,
-                "canonical_name": identity["canonical_name"],
-                "display_name": identity["display_name"],
-                "generic_entity": identity["generic_entity"],
-                "surface_form": entity.surface_form or entity.canonical_name,
-                # PRD parity — keep the chunk-grounded evidence phrase on the
-                # MENTIONS edge so downstream retrieval can render "this is
-                # WHY we think the chunk mentions this entity".
-                "evidence_phrase": getattr(entity, "evidence_phrase", None),
-                "primary_entity_type": identity["primary_entity_type"],
-                "entity_type": identity["primary_entity_type"],
-                "extracted_type": entity.entity_type,
-                "observed_entity_types": identity["observed_entity_types"],
-                "confidence": entity.confidence,
-                "object_kind": identity.get("object_kind"),
-                "object_kind_parent": identity.get("object_kind_parent"),
-                "object_kind_root": identity.get("object_kind_root"),
-                "domain_type": identity.get("domain_type"),
-                "domain_type_parent": identity.get("domain_type_parent"),
-                "domain_type_root": identity.get("domain_type_root"),
-                "canonical_family": identity.get("canonical_family"),
-                "ontology_version": identity.get("ontology_version"),
-                # Pt 10c — query-facing fields. Identity dict already
-                # aggregated these across mentions; pass through to the
-                # UNWIND row so the Cypher SET CASE-merge can additively
-                # accumulate aliases and stash the definitional phrase.
-                "query_aliases": identity.get("query_aliases") or [],
-                "definitional_phrase": identity.get("definitional_phrase") or "",
+                    "chunk_id": r.chunk_id,
+                    "entity_id": identity["entity_id"],
+                    "normalized_name": canonical_normalized,
+                    "canonical_name": identity["canonical_name"],
+                    "display_name": identity["display_name"],
+                    "generic_entity": identity["generic_entity"],
+                    "surface_form": entity.surface_form or entity.canonical_name,
+                    # PRD parity — keep the chunk-grounded evidence phrase on the
+                    # MENTIONS edge so downstream retrieval can render "this is
+                    # WHY we think the chunk mentions this entity".
+                    "evidence_phrase": getattr(entity, "evidence_phrase", None),
+                    "primary_entity_type": identity["primary_entity_type"],
+                    "entity_type": identity["primary_entity_type"],
+                    "extracted_type": entity.entity_type,
+                    "observed_entity_types": identity["observed_entity_types"],
+                    "confidence": entity.confidence,
+                    "object_kind": identity.get("object_kind"),
+                    "object_kind_parent": identity.get("object_kind_parent"),
+                    "object_kind_root": identity.get("object_kind_root"),
+                    "domain_type": identity.get("domain_type"),
+                    "domain_type_parent": identity.get("domain_type_parent"),
+                    "domain_type_root": identity.get("domain_type_root"),
+                    "canonical_family": identity.get("canonical_family"),
+                    "ontology_version": identity.get("ontology_version"),
+                    # Pt 10c — query-facing fields. Identity dict already
+                    # aggregated these across mentions; pass through to the
+                    # UNWIND row so the Cypher SET CASE-merge can additively
+                    # accumulate aliases and stash the definitional phrase.
+                    "query_aliases": identity.get("query_aliases") or [],
+                    "definitional_phrase": identity.get("definitional_phrase") or "",
                 }
             )
 
@@ -2665,34 +2807,36 @@ async def _write_document_graph_once(
             )
             relation_rows.append(
                 {
-                "subject_id": subject_identity["entity_id"],
-                "object_id": object_identity["entity_id"],
-                "predicate": refined_predicate,
-                "schema_version": r.schema_version,
-                "source_predicate": source_predicate_raw,
-                "relation_family": edge_mitigation.relation_family,
-                "predicate_refined": predicate_refined,
-                "direction_repaired": reverse_relation,
-                "edge_strength": edge_strength,
-                "eligible_for_synthesis": relation_eligible_for_synthesis(
-                    refined_predicate, relation.confidence, validation_status
-                ),
-                "edge_state": edge_mitigation.edge_state,
-                "fallback": edge_mitigation.fallback,
-                "fallback_family": edge_mitigation.fallback_family,
-                "candidate_predicates": edge_mitigation.candidate_predicates,
-                "candidate_scores": edge_mitigation.candidate_scores,
-                "candidate_score_sources": edge_mitigation.candidate_score_sources,
-                "promoted_by": edge_mitigation.promoted_by,
-                "fallback_evidence_phrase": edge_mitigation.fallback_evidence_phrase,
-                "related_to_query_weight": edge_mitigation.related_to_query_weight,
-                "related_to_max_hops": edge_mitigation.related_to_max_hops,
-                "validation_status": validation_status,
-                "evidence_phrase": relation.evidence_phrase,
-                "relation_cue": relation.relation_cue,
-                "confidence": relation.confidence,
-                "chunk_id": r.chunk_id,
-                "doc_id": r.doc_id or doc_id,
+                    "subject_id": subject_identity["entity_id"],
+                    "object_id": object_identity["entity_id"],
+                    "predicate": refined_predicate,
+                    "schema_version": r.schema_version,
+                    "source_predicate": source_predicate_raw,
+                    "relation_family": edge_mitigation.relation_family,
+                    "predicate_refined": predicate_refined,
+                    "direction_repaired": reverse_relation,
+                    "edge_strength": edge_strength,
+                    "eligible_for_synthesis": relation_eligible_for_synthesis(
+                        refined_predicate, relation.confidence, validation_status
+                    ),
+                    "edge_state": edge_mitigation.edge_state,
+                    "fallback": edge_mitigation.fallback,
+                    "fallback_family": edge_mitigation.fallback_family,
+                    "candidate_predicates": edge_mitigation.candidate_predicates,
+                    "candidate_scores": edge_mitigation.candidate_scores,
+                    "candidate_score_sources": edge_mitigation.candidate_score_sources,
+                    "promoted_by": edge_mitigation.promoted_by,
+                    "fallback_evidence_phrase": edge_mitigation.fallback_evidence_phrase,
+                    "related_to_query_weight": edge_mitigation.related_to_query_weight,
+                    "related_to_max_hops": edge_mitigation.related_to_max_hops,
+                    "validation_status": validation_status,
+                    "evidence_phrase": relation.evidence_phrase,
+                    "relation_cue": relation.relation_cue,
+                    "confidence": relation.confidence,
+                    "chunk_id": r.chunk_id,
+                    "doc_id": r.doc_id or doc_id,
+                    "chunk_key": corpus_content_key(corpus_id, r.chunk_id),
+                    "doc_key": corpus_content_key(corpus_id, r.doc_id or doc_id),
                 }
             )
 
@@ -2707,24 +2851,24 @@ async def _write_document_graph_once(
                 continue
             fact_rows.append(
                 {
-                "fact_id": fact_id_from_parts(
-                    doc_id=doc_id,
-                    chunk_id=r.chunk_id,
-                    subject=fact.subject,
-                    property_name=fact.property_name,
-                    value=fact.value,
-                ),
-                "subject_entity_id": subject_identity["entity_id"],
-                "subject": subject_identity["canonical_name"],
-                "doc_id": doc_id,
-                "chunk_id": r.chunk_id,
-                "fact_type": fact.fact_type,
-                "property_name": fact.property_name,
-                "value": fact.value,
-                "unit": fact.unit,
-                "condition": fact.condition,
-                "confidence": fact.confidence,
-                "evidence_phrase": fact.evidence_phrase,
+                    "fact_id": fact_id_from_parts(
+                        doc_id=doc_id,
+                        chunk_id=r.chunk_id,
+                        subject=fact.subject,
+                        property_name=fact.property_name,
+                        value=fact.value,
+                    ),
+                    "subject_entity_id": subject_identity["entity_id"],
+                    "subject": subject_identity["canonical_name"],
+                    "doc_id": doc_id,
+                    "chunk_id": r.chunk_id,
+                    "fact_type": fact.fact_type,
+                    "property_name": fact.property_name,
+                    "value": fact.value,
+                    "unit": fact.unit,
+                    "condition": fact.condition,
+                    "confidence": fact.confidence,
+                    "evidence_phrase": fact.evidence_phrase,
                 }
             )
 
@@ -2815,8 +2959,8 @@ async def _write_document_graph_once(
             await session.run(
                 """
                 UNWIND $rows AS row
-                MERGE (c:Chunk {chunk_id: row.chunk_id})
-                SET c.doc_id = $doc_id, c.corpus_id = $corpus_id
+                MERGE (c:Chunk {corpus_id: $corpus_id, chunk_id: row.chunk_id})
+                SET c.doc_id = $doc_id
                 WITH c
                 MATCH (d:Document {doc_id: $doc_id, corpus_id: $corpus_id})
                 MERGE (d)-[:HAS_CHUNK]->(c)
@@ -2950,8 +3094,8 @@ async def _write_document_graph_once(
                 MATCH (o:Entity {entity_id: row.object_id})
                 MERGE (s)-[r:RELATES_TO {predicate: row.predicate}]->(o)
                 WITH r, row,
-                     row.chunk_id IN coalesce(r.evidence_chunk_ids, []) AS chunk_already_supported,
-                     row.chunk_id IN coalesce(r.support_confidence_chunk_ids, []) AS confidence_already_supported
+                     row.chunk_key IN coalesce(r.evidence_chunk_keys, []) AS chunk_already_supported,
+                     row.chunk_key IN coalesce(r.support_confidence_chunk_keys, []) AS confidence_already_supported
                 SET r.confidence = CASE
                         WHEN r.confidence IS NULL OR row.confidence > r.confidence THEN row.confidence
                         ELSE r.confidence
@@ -2988,15 +3132,30 @@ async def _write_document_graph_once(
                     WHEN row.chunk_id IN r.evidence_chunk_ids THEN r.evidence_chunk_ids
                     ELSE r.evidence_chunk_ids + [row.chunk_id]
                 END
+                SET r.evidence_chunk_keys = CASE
+                    WHEN r.evidence_chunk_keys IS NULL THEN [row.chunk_key]
+                    WHEN row.chunk_key IN r.evidence_chunk_keys THEN r.evidence_chunk_keys
+                    ELSE r.evidence_chunk_keys + [row.chunk_key]
+                END
                 SET r.evidence_doc_ids = CASE
                     WHEN row.doc_id IS NULL OR row.doc_id = '' THEN coalesce(r.evidence_doc_ids, [])
                     WHEN r.evidence_doc_ids IS NULL THEN [row.doc_id]
                     WHEN row.doc_id IN r.evidence_doc_ids THEN r.evidence_doc_ids
                     ELSE r.evidence_doc_ids + [row.doc_id]
                 END,
+                    r.evidence_doc_keys = CASE
+                    WHEN row.doc_key IS NULL OR row.doc_key = '' THEN coalesce(r.evidence_doc_keys, [])
+                    WHEN r.evidence_doc_keys IS NULL THEN [row.doc_key]
+                    WHEN row.doc_key IN r.evidence_doc_keys THEN r.evidence_doc_keys
+                    ELSE r.evidence_doc_keys + [row.doc_key]
+                END,
                     r.latest_doc_id = CASE
                         WHEN row.doc_id IS NULL OR row.doc_id = '' THEN r.latest_doc_id
                         ELSE row.doc_id
+                    END,
+                    r.latest_doc_key = CASE
+                        WHEN row.doc_key IS NULL OR row.doc_key = '' THEN r.latest_doc_key
+                        ELSE row.doc_key
                     END
                 SET r.evidence_phrases = CASE
                         WHEN row.evidence_phrase IS NULL OR row.evidence_phrase = '' THEN coalesce(r.evidence_phrases, [])
@@ -3050,11 +3209,23 @@ async def _write_document_graph_once(
                     WHEN r.support_confidence_chunk_ids IS NULL THEN [row.chunk_id]
                     ELSE r.support_confidence_chunk_ids + [row.chunk_id]
                 END,
+                    r.support_confidence_chunk_keys = CASE
+                    WHEN row.chunk_key IS NULL OR row.chunk_key = '' THEN coalesce(r.support_confidence_chunk_keys, [])
+                    WHEN chunk_already_supported OR confidence_already_supported THEN coalesce(r.support_confidence_chunk_keys, [])
+                    WHEN r.support_confidence_chunk_keys IS NULL THEN [row.chunk_key]
+                    ELSE r.support_confidence_chunk_keys + [row.chunk_key]
+                END,
                     r.support_confidence_values = CASE
                     WHEN row.chunk_id IS NULL OR row.chunk_id = '' THEN coalesce(r.support_confidence_values, [])
                     WHEN chunk_already_supported OR confidence_already_supported THEN coalesce(r.support_confidence_values, [])
                     WHEN r.support_confidence_values IS NULL THEN [toFloat(coalesce(row.confidence, 0.0))]
                     ELSE r.support_confidence_values + [toFloat(coalesce(row.confidence, 0.0))]
+                END,
+                    r.support_confidence_values_v2 = CASE
+                    WHEN row.chunk_key IS NULL OR row.chunk_key = '' THEN coalesce(r.support_confidence_values_v2, [])
+                    WHEN chunk_already_supported OR confidence_already_supported THEN coalesce(r.support_confidence_values_v2, [])
+                    WHEN r.support_confidence_values_v2 IS NULL THEN [toFloat(coalesce(row.confidence, 0.0))]
+                    ELSE r.support_confidence_values_v2 + [toFloat(coalesce(row.confidence, 0.0))]
                 END
                 SET r.extract_schema_versions = CASE
                     WHEN row.schema_version IS NULL OR row.schema_version = '' THEN coalesce(r.extract_schema_versions, [])
@@ -3062,11 +3233,19 @@ async def _write_document_graph_once(
                     WHEN row.schema_version IN r.extract_schema_versions THEN r.extract_schema_versions
                     ELSE r.extract_schema_versions + [row.schema_version]
                 END
-                SET r.support_count = size(coalesce(r.evidence_chunk_ids, [])),
+                SET r.support_count = CASE
+                        WHEN size(coalesce(r.evidence_chunk_keys, [])) > size(coalesce(r.evidence_chunk_ids, []))
+                        THEN size(coalesce(r.evidence_chunk_keys, []))
+                        ELSE size(coalesce(r.evidence_chunk_ids, []))
+                    END,
                     r.avg_confidence = CASE
-                        WHEN size(coalesce(r.support_confidence_values, [])) = 0 THEN toFloat(coalesce(r.confidence, row.confidence, 0.0))
-                        ELSE reduce(total = 0.0, conf IN coalesce(r.support_confidence_values, []) | total + toFloat(conf))
+                        WHEN size(coalesce(r.support_confidence_values_v2, [])) > 0
+                        THEN reduce(total = 0.0, conf IN coalesce(r.support_confidence_values_v2, []) | total + toFloat(conf))
+                             / size(coalesce(r.support_confidence_values_v2, []))
+                        WHEN size(coalesce(r.support_confidence_values, [])) > 0
+                        THEN reduce(total = 0.0, conf IN coalesce(r.support_confidence_values, []) | total + toFloat(conf))
                              / size(coalesce(r.support_confidence_values, []))
+                        ELSE toFloat(coalesce(r.confidence, row.confidence, 0.0))
                     END,
                     r.extract_schema_version = coalesce(r.extract_schema_version, row.schema_version, 'polymath.extract.v1'),
                     r.promote_version = $promote_version,
@@ -3099,9 +3278,8 @@ async def _write_document_graph_once(
                 UNWIND $rows AS row
                 MATCH (e:Entity {entity_id: row.subject_entity_id})
                 MATCH (c:Chunk {chunk_id: row.chunk_id, corpus_id: $corpus_id})
-                MERGE (f:Fact {fact_id: row.fact_id})
-                SET f.corpus_id = $corpus_id,
-                    f.doc_id = row.doc_id,
+                MERGE (f:Fact {corpus_id: $corpus_id, fact_id: row.fact_id})
+                SET f.doc_id = row.doc_id,
                     f.chunk_id = row.chunk_id,
                     f.subject = row.subject,
                     f.fact_type = row.fact_type,

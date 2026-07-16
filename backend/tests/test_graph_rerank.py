@@ -63,7 +63,7 @@ def test_compute_multiplier_max_boost_bounded():
 
 
 def _chunk(chunk_id: str, score: float) -> SimpleNamespace:
-    return SimpleNamespace(chunk_id=chunk_id, score=score)
+    return SimpleNamespace(chunk_id=chunk_id, corpus_id="c1", score=score)
 
 
 def _stub_neo4j_driver(degrees_by_chunk_id: dict[str, int]):
@@ -77,12 +77,14 @@ def _stub_neo4j_driver(degrees_by_chunk_id: dict[str, int]):
             return False
 
         async def run(self, _cypher: str, **kwargs):
-            chunk_ids = kwargs.get("chunk_ids", [])
+            chunk_refs = kwargs.get("chunk_refs", [])
 
             async def _gen():
-                for cid in chunk_ids:
+                for ref in chunk_refs:
+                    cid = ref["chunk_id"]
                     if cid in degrees_by_chunk_id:
                         yield {
+                            "corpus_id": ref["corpus_id"],
                             "chunk_id": cid,
                             "max_degree": degrees_by_chunk_id[cid],
                         }

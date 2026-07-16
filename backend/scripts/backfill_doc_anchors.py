@@ -66,7 +66,9 @@ async def _amain(corpus_ids: list[str] | None, dry_run: bool) -> int:
         or "bolt://neo4j:7687"
     )
     neo4j_user = os.environ.get("NEO4J_USER", "neo4j")
-    neo4j_password = os.environ.get("NEO4J_PASSWORD") or os.environ.get("NEO4J_AUTH_PASSWORD")
+    neo4j_password = os.environ.get("NEO4J_PASSWORD") or os.environ.get(
+        "NEO4J_AUTH_PASSWORD"
+    )
     if not neo4j_password:
         logger.error("NEO4J_PASSWORD not set")
         return 2
@@ -83,12 +85,13 @@ async def _amain(corpus_ids: list[str] | None, dry_run: bool) -> int:
     from neo4j import AsyncDriver as _D  # noqa: F401 (typing reuse)
 
     async def _compute_dominant_facets(
-        nd, doc_id: str
+        nd, corpus_id: str, doc_id: str
     ) -> tuple[str | None, str | None]:
         async with nd.session() as session:
             r = await session.run(
                 """
-                MATCH (d:Document {doc_id: $doc_id})-[:HAS_CHUNK]->(c:Chunk)-[:MENTIONS]->(e:Entity)
+                MATCH (d:Document {corpus_id: $corpus_id, doc_id: $doc_id})
+                      -[:HAS_CHUNK]->(c:Chunk)-[:MENTIONS]->(e:Entity)
                 WITH e.canonical_family AS fam, e.primary_entity_type AS typ
                 WITH collect(fam) AS fams, collect(typ) AS types
                 RETURN
@@ -103,6 +106,7 @@ async def _amain(corpus_ids: list[str] | None, dry_run: bool) -> int:
                               size([y IN [x IN types WHERE x IS NOT NULL] WHERE y = top]) THEN t
                          ELSE top END) AS dom_type
                 """,
+                corpus_id=corpus_id,
                 doc_id=doc_id,
             )
             row = await r.single()
@@ -156,15 +160,18 @@ async def _amain(corpus_ids: list[str] | None, dry_run: bool) -> int:
         success_rate = metrics.get("success_rate")
         extracted = metrics.get("extracted_chunks")
         total = metrics.get("requested_chunks")
-        schema_lens_id = (
-            (doc.get("ingestion_config") or {}).get("schema_lens_id")
-            or metrics.get("schema_lens")
-        )
+        schema_lens_id = (doc.get("ingestion_config") or {}).get(
+            "schema_lens_id"
+        ) or metrics.get("schema_lens")
 
         # Pt 6 add-on: compute dominant_family / dominant_entity_type for
         # this legacy doc by querying its Entity graph in Neo4j (since the
         # in-memory ExtractionResult list isn't available for backfill).
-        dom_family, dom_type = await _compute_dominant_facets(driver, doc_id)
+        dom_family, dom_type = await _compute_dominant_facets(
+            driver,
+            corpus_id,
+            doc_id,
+        )
 
         if dry_run:
             logger.info(
@@ -190,7 +197,9 @@ async def _amain(corpus_ids: list[str] | None, dry_run: bool) -> int:
             chunk_count=chunk_count,
             parent_count=parent_count,
             schema_lens_id=schema_lens_id if isinstance(schema_lens_id, str) else None,
-            ghost_b_success_rate=float(success_rate) if success_rate is not None else None,
+            ghost_b_success_rate=float(success_rate)
+            if success_rate is not None
+            else None,
             ghost_b_extracted=int(extracted) if extracted is not None else None,
             ghost_b_total=int(total) if total is not None else None,
             dominant_family=dom_family,
@@ -214,14 +223,18 @@ async def _amain(corpus_ids: list[str] | None, dry_run: bool) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Backfill :Document anchor properties from MongoDB.")
+    parser = argparse.ArgumentParser(
+        description="Backfill :Document anchor properties from MongoDB."
+    )
     parser.add_argument(
         "--corpus-id",
         action="append",
         default=None,
         help="Restrict to one or more corpora (repeatable). Defaults to all.",
     )
-    parser.add_argument("--dry-run", action="store_true", help="Report counts without writing.")
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Report counts without writing."
+    )
     args = parser.parse_args()
 
     return asyncio.run(_amain(args.corpus_id, args.dry_run))

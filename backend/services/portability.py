@@ -300,7 +300,7 @@ async def import_portability_archive(
                                 "corpus_id": doc["corpus_id"],
                                 "chunk_id": doc.get("chunk_id"),
                             }
-                        if collection == "chunks"
+                            if collection == "chunks"
                             else {
                                 "corpus_id": doc["corpus_id"],
                                 "doc_id": doc["doc_id"],
@@ -404,15 +404,18 @@ async def import_portability_archive(
     return stats
 
 
-def _node_id(labels: list[str], props: dict[str, Any]) -> tuple[str, str] | None:
+def _node_id(
+    labels: list[str], props: dict[str, Any]
+) -> tuple[str, str, str | None] | None:
     if "Entity" in labels and props.get("entity_id"):
-        return "Entity", props["entity_id"]
-    if "Chunk" in labels and props.get("chunk_id"):
-        return "Chunk", props["chunk_id"]
-    if "Document" in labels and props.get("doc_id"):
-        return "Document", props["doc_id"]
-    if "Fact" in labels and props.get("fact_id"):
-        return "Fact", props["fact_id"]
+        return "Entity", props["entity_id"], None
+    corpus_id = str(props.get("corpus_id") or "")
+    if "Chunk" in labels and props.get("chunk_id") and corpus_id:
+        return "Chunk", props["chunk_id"], corpus_id
+    if "Document" in labels and props.get("doc_id") and corpus_id:
+        return "Document", props["doc_id"], corpus_id
+    if "Fact" in labels and props.get("fact_id") and corpus_id:
+        return "Fact", props["fact_id"], corpus_id
     return None
 
 
@@ -435,8 +438,10 @@ async def _import_neo4j_graph(graph: dict[str, Any], user_id: str) -> dict[str, 
             props["user_id"] = user_id
         node_key = _node_id(labels, props)
         if node_key:
-            label, value = node_key
-            rows_by_label[label].append({"id": value, "props": props})
+            label, value, corpus_id = node_key
+            rows_by_label[label].append(
+                {"id": value, "corpus_id": corpus_id, "props": props}
+            )
 
     relationship_rows: dict[str, list[dict[str, Any]]] = {
         "HAS_CHUNK": [],
@@ -456,7 +461,9 @@ async def _import_neo4j_graph(graph: dict[str, Any], user_id: str) -> dict[str, 
         relationship_rows[rel_type].append(
             {
                 "start": start[1],
+                "start_corpus_id": start[2],
                 "end": end[1],
+                "end_corpus_id": end[2],
                 "props": rel.get("props") or {},
             }
         )
@@ -467,7 +474,7 @@ async def _import_neo4j_graph(graph: dict[str, Any], user_id: str) -> dict[str, 
                 session,
                 """
                 UNWIND $rows AS row
-                MERGE (n:Document {doc_id: row.id})
+                MERGE (n:Document {corpus_id: row.corpus_id, doc_id: row.id})
                 SET n += row.props
                 """,
                 rows_by_label["Document"],
@@ -477,7 +484,7 @@ async def _import_neo4j_graph(graph: dict[str, Any], user_id: str) -> dict[str, 
                 session,
                 """
                 UNWIND $rows AS row
-                MERGE (n:Chunk {chunk_id: row.id})
+                MERGE (n:Chunk {corpus_id: row.corpus_id, chunk_id: row.id})
                 SET n += row.props
                 """,
                 rows_by_label["Chunk"],
@@ -497,7 +504,7 @@ async def _import_neo4j_graph(graph: dict[str, Any], user_id: str) -> dict[str, 
                 session,
                 """
                 UNWIND $rows AS row
-                MERGE (n:Fact {fact_id: row.id})
+                MERGE (n:Fact {corpus_id: row.corpus_id, fact_id: row.id})
                 SET n += row.props
                 """,
                 rows_by_label["Fact"],
@@ -507,8 +514,8 @@ async def _import_neo4j_graph(graph: dict[str, Any], user_id: str) -> dict[str, 
                 session,
                 """
                 UNWIND $rows AS row
-                MATCH (a:Document {doc_id: row.start})
-                MATCH (b:Chunk {chunk_id: row.end})
+                MATCH (a:Document {corpus_id: row.start_corpus_id, doc_id: row.start})
+                MATCH (b:Chunk {corpus_id: row.end_corpus_id, chunk_id: row.end})
                 MERGE (a)-[r:HAS_CHUNK]->(b)
                 SET r += row.props
                 """,
@@ -519,7 +526,7 @@ async def _import_neo4j_graph(graph: dict[str, Any], user_id: str) -> dict[str, 
                 session,
                 """
                 UNWIND $rows AS row
-                MATCH (a:Chunk {chunk_id: row.start})
+                MATCH (a:Chunk {corpus_id: row.start_corpus_id, chunk_id: row.start})
                 MATCH (b:Entity {entity_id: row.end})
                 MERGE (a)-[r:MENTIONS]->(b)
                 SET r += row.props
@@ -544,7 +551,7 @@ async def _import_neo4j_graph(graph: dict[str, Any], user_id: str) -> dict[str, 
                 """
                 UNWIND $rows AS row
                 MATCH (a:Entity {entity_id: row.start})
-                MATCH (b:Fact {fact_id: row.end})
+                MATCH (b:Fact {corpus_id: row.end_corpus_id, fact_id: row.end})
                 MERGE (a)-[r:HAS_FACT]->(b)
                 SET r += row.props
                 """,
@@ -555,8 +562,8 @@ async def _import_neo4j_graph(graph: dict[str, Any], user_id: str) -> dict[str, 
                 session,
                 """
                 UNWIND $rows AS row
-                MATCH (a:Chunk {chunk_id: row.start})
-                MATCH (b:Fact {fact_id: row.end})
+                MATCH (a:Chunk {corpus_id: row.start_corpus_id, chunk_id: row.start})
+                MATCH (b:Fact {corpus_id: row.end_corpus_id, fact_id: row.end})
                 MERGE (a)-[r:SUPPORTS_FACT]->(b)
                 SET r += row.props
                 """,

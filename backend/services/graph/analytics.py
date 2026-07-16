@@ -68,17 +68,43 @@ QUERY_CONCEPT_MATCH_LIMIT = 10
 SHORT_QUERY_CONCEPT_TOKENS = {"ai", "ml", "kg", "llm", "rag"}
 QUERY_CONCEPT_EXPANSIONS = {
     "ai": {
-        "artificial", "intelligence", "neural", "network", "networks",
-        "perceptron", "machine", "learning", "model", "models", "classifier",
-        "classification", "algorithm", "algorithms", "generative",
+        "artificial",
+        "intelligence",
+        "neural",
+        "network",
+        "networks",
+        "perceptron",
+        "machine",
+        "learning",
+        "model",
+        "models",
+        "classifier",
+        "classification",
+        "algorithm",
+        "algorithms",
+        "generative",
     },
     "genai": {
-        "generative", "artificial", "intelligence", "neural", "network",
-        "model", "models", "algorithm", "algorithms",
+        "generative",
+        "artificial",
+        "intelligence",
+        "neural",
+        "network",
+        "model",
+        "models",
+        "algorithm",
+        "algorithms",
     },
     "generative": {
-        "generation", "generative", "design", "art", "algorithm",
-        "algorithms", "genetic", "evolution", "evolutionary",
+        "generation",
+        "generative",
+        "design",
+        "art",
+        "algorithm",
+        "algorithms",
+        "genetic",
+        "evolution",
+        "evolutionary",
     },
     "users": {"user", "identity", "personal", "profile", "data", "information"},
     "user": {"users", "identity", "personal", "profile", "data", "information"},
@@ -270,6 +296,7 @@ class VectorScopeResult:
 
 # ── Pipeline primitives ────────────────────────────────────────────────────
 
+
 def _dense_vector_from_qdrant(value) -> list[float] | None:
     """Normalize Qdrant vector payloads across legacy and named-vector layouts."""
     if value is None:
@@ -347,7 +374,9 @@ async def get_doc_fingerprints(qdrant, corpus_id: str) -> dict[str, list[float]]
 
     logger.info(
         "Doc fingerprints: corpus=%s docs=%d collection=%s",
-        corpus_id, len(fingerprints), collection,
+        corpus_id,
+        len(fingerprints),
+        collection,
     )
     return fingerprints
 
@@ -388,7 +417,8 @@ def cluster_docs(fingerprints: dict[str, list[float]]) -> dict[str, int]:
             return {doc_ids[i]: int(labels[i]) for i in range(len(doc_ids))}
         logger.info(
             "HDBSCAN produced %d valid clusters (< %d threshold) — k-means fallback",
-            n_valid, KMEANS_FALLBACK_THRESHOLD,
+            n_valid,
+            KMEANS_FALLBACK_THRESHOLD,
         )
     except ImportError:
         logger.warning("sklearn HDBSCAN unavailable — k-means fallback")
@@ -445,9 +475,7 @@ async def top_entities_per_cluster(
                 # Some Entity nodes can have null/empty canonical_name —
                 # skip them rather than poisoning the labeler prompt.
                 names = [
-                    record["name"]
-                    async for record in result
-                    if record.get("name")
+                    record["name"] async for record in result if record.get("name")
                 ]
                 cluster_entities[cid] = names
     except Exception as exc:
@@ -482,9 +510,9 @@ def _build_labeler_prompt(cluster_entities: dict[int, list[str]]) -> Optional[st
         "(3-5 words, Title Case). The name should reflect the intellectual "
         "domain — not a description or a list.\n\n"
         + "\n".join(lines)
-        + '\n\nRespond with JSON only, mapping cluster id (as string) to '
-          'domain name. Example: {"0": "Flutter UI Development", '
-          '"1": "Bayesian Inference"}'
+        + "\n\nRespond with JSON only, mapping cluster id (as string) to "
+        'domain name. Example: {"0": "Flutter UI Development", '
+        '"1": "Bayesian Inference"}'
     )
 
 
@@ -500,7 +528,8 @@ def _parse_labeler_response(
     except (json.JSONDecodeError, ValueError) as exc:
         logger.warning(
             "Labeler JSON parse failed (%s) — placeholder labels; raw=%r",
-            exc, (raw or "")[:120],
+            exc,
+            (raw or "")[:120],
         )
         return labels
 
@@ -559,7 +588,9 @@ async def label_clusters(
     except Exception as exc:
         logger.warning(
             "Labeler LLM call failed (model=%s user=%s): %s — placeholder labels",
-            creds["model"], user_id, exc,
+            creds["model"],
+            user_id,
+            exc,
         )
         return _placeholder_labels(cluster_entities)
 
@@ -569,10 +600,14 @@ async def label_clusters(
 async def compute_corpus_change_signature(db, corpus_id: str) -> str:
     """sha256 of sorted doc_ids paired with their updated_at timestamps.
     Signature changes whenever a doc is added, removed, or re-ingested."""
-    cursor = db["documents"].find(
-        {"corpus_id": corpus_id},
-        {"doc_id": 1, "updated_at": 1, "_id": 0},
-    ).sort("doc_id", 1)
+    cursor = (
+        db["documents"]
+        .find(
+            {"corpus_id": corpus_id},
+            {"doc_id": 1, "updated_at": 1, "_id": 0},
+        )
+        .sort("doc_id", 1)
+    )
     docs = await cursor.to_list(length=None)
     parts = []
     for d in docs:
@@ -658,7 +693,10 @@ async def get_corpus_cache_status(db, corpus_id: str) -> dict:
     def _classify(record: dict | None, *, check_schema_version: bool = False) -> str:
         if not record:
             return "missing"
-        if check_schema_version and record.get("schema_version") != METRICS_CACHE_SCHEMA_VERSION:
+        if (
+            check_schema_version
+            and record.get("schema_version") != METRICS_CACHE_SCHEMA_VERSION
+        ):
             return "warming"
         if record.get("corpus_change_signature") != sig:
             return "warming"
@@ -684,6 +722,7 @@ async def get_corpus_cache_status(db, corpus_id: str) -> dict:
 
 
 # ── Public orchestrator ────────────────────────────────────────────────────
+
 
 async def emerge_domains(
     qdrant,
@@ -716,9 +755,7 @@ async def emerge_domains(
             {"corpus_id": corpus_id, "corpus_change_signature": signature}
         )
         if cached:
-            logger.info(
-                "Domain cache HIT corpus=%s sig=%s", corpus_id, signature[:8]
-            )
+            logger.info("Domain cache HIT corpus=%s sig=%s", corpus_id, signature[:8])
             domain_map = _deserialize_domain_map(cached)
             # The metrics chain must run on the HIT path too: a corpus with a
             # fresh domain map but missing/stale metrics (warmup died midway,
@@ -727,15 +764,16 @@ async def emerge_domains(
             # is signature-cached, so this is a no-op when metrics are fresh.
             try:
                 await asyncio.to_thread(
-                    _compute_metrics_isolated, corpus_id, domain_map, False)
+                    _compute_metrics_isolated, corpus_id, domain_map, False
+                )
             except Exception:  # noqa: BLE001
-                logger.exception(
-                    "metrics computation failed corpus=%s", corpus_id)
+                logger.exception("metrics computation failed corpus=%s", corpus_id)
             return domain_map
 
     logger.info(
         "Domain cache MISS corpus=%s sig=%s — running emergence",
-        corpus_id, signature[:8],
+        corpus_id,
+        signature[:8],
     )
 
     fingerprints = await get_doc_fingerprints(qdrant, corpus_id)
@@ -806,15 +844,15 @@ async def emerge_domains(
     # thread with its own event loop and its own short-lived DB clients —
     # never the caller's loop-bound clients.
     try:
-        await asyncio.to_thread(
-            _compute_metrics_isolated, corpus_id, domain_map, force)
+        await asyncio.to_thread(_compute_metrics_isolated, corpus_id, domain_map, force)
     except Exception:  # noqa: BLE001 — a metrics failure must not void the domain map
         logger.exception("metrics computation failed corpus=%s", corpus_id)
     return domain_map
 
 
-def _compute_metrics_isolated(corpus_id: str, domain_map: "DomainMap",
-                              force: bool) -> None:
+def _compute_metrics_isolated(
+    corpus_id: str, domain_map: "DomainMap", force: bool
+) -> None:
     """Run compute_all_metrics on a private event loop with private clients.
 
     Called via asyncio.to_thread from emerge_domains. Motor/neo4j clients are
@@ -850,6 +888,7 @@ def _compute_metrics_isolated(corpus_id: str, domain_map: "DomainMap",
 
 
 # ── Cache I/O ──────────────────────────────────────────────────────────────
+
 
 async def _cache_domain_map(db, dm: DomainMap) -> None:
     await db["graph_domain_cache"].update_one(
@@ -920,9 +959,32 @@ def _deserialize_domain_map(doc: dict) -> DomainMap:
 
 
 _STOPWORDS = {
-    "a", "an", "and", "are", "as", "at", "by", "for", "from", "how",
-    "in", "into", "is", "it", "me", "of", "on", "or", "so", "that",
-    "the", "this", "to", "with", "what", "why",
+    "a",
+    "an",
+    "and",
+    "are",
+    "as",
+    "at",
+    "by",
+    "for",
+    "from",
+    "how",
+    "in",
+    "into",
+    "is",
+    "it",
+    "me",
+    "of",
+    "on",
+    "or",
+    "so",
+    "that",
+    "the",
+    "this",
+    "to",
+    "with",
+    "what",
+    "why",
 }
 
 
@@ -936,7 +998,8 @@ def _normalize_anchor_text(value: str) -> str:
 
 def _anchor_tokens(value: str) -> set[str]:
     return {
-        t for t in _normalize_anchor_text(value).split()
+        t
+        for t in _normalize_anchor_text(value).split()
         if len(t) > 2 and t not in _STOPWORDS
     }
 
@@ -1011,13 +1074,15 @@ async def _entity_anchor_rows(neo4j_driver, corpus_id: str) -> list[dict]:
             async for rec in result:
                 label = rec.get("label") or rec.get("anchor_id")
                 if label:
-                    rows.append({
-                        "anchor_type": "entity",
-                        "anchor_id": rec["anchor_id"],
-                        "label": label,
-                        "source": "entity_name",
-                        "normalized": _normalize_anchor_text(label),
-                    })
+                    rows.append(
+                        {
+                            "anchor_type": "entity",
+                            "anchor_id": rec["anchor_id"],
+                            "label": label,
+                            "source": "entity_name",
+                            "normalized": _normalize_anchor_text(label),
+                        }
+                    )
     except Exception as exc:
         logger.warning("anchor_index: entity anchor load failed: %s", exc)
     return rows
@@ -1063,26 +1128,30 @@ async def _load_or_build_anchor_rows(db, neo4j_driver, corpus_id: str) -> list[d
             ):
                 norm = _normalize_anchor_text(label)
                 if norm:
-                    anchors.append({
-                        "anchor_type": "document",
-                        "anchor_id": doc_id,
-                        "doc_id": doc_id,
-                        "label": label,
-                        "source": source,
-                        "normalized": norm,
-                    })
+                    anchors.append(
+                        {
+                            "anchor_type": "document",
+                            "anchor_id": doc_id,
+                            "doc_id": doc_id,
+                            "label": label,
+                            "source": source,
+                            "normalized": norm,
+                        }
+                    )
             for parent in doc.get("parent_chunks") or []:
                 for heading in _heading_aliases_from_text(parent.get("text", "")):
                     norm = _normalize_anchor_text(heading)
                     if norm:
-                        anchors.append({
-                            "anchor_type": "heading",
-                            "anchor_id": parent.get("parent_id") or doc_id,
-                            "doc_id": doc_id,
-                            "label": heading,
-                            "source": "document_heading",
-                            "normalized": norm,
-                        })
+                        anchors.append(
+                            {
+                                "anchor_type": "heading",
+                                "anchor_id": parent.get("parent_id") or doc_id,
+                                "doc_id": doc_id,
+                                "label": heading,
+                                "source": "document_heading",
+                                "normalized": norm,
+                            }
+                        )
 
         anchors.extend(await _entity_anchor_rows(neo4j_driver, corpus_id))
 
@@ -1108,7 +1177,9 @@ async def _load_or_build_anchor_rows(db, neo4j_driver, corpus_id: str) -> list[d
         )
         logger.info(
             "anchor_index: built corpus=%s anchors=%d sig=%s",
-            corpus_id, len(deduped), sig[:8],
+            corpus_id,
+            len(deduped),
+            sig[:8],
         )
         return deduped
     except Exception as exc:
@@ -1133,14 +1204,16 @@ async def resolve_query_anchors(
         score = _score_anchor_match(query_norm, row.get("normalized", ""))
         if score < QUERY_ANCHOR_THRESHOLD:
             continue
-        scored.append(QueryAnchor(
-            anchor_type=row.get("anchor_type") or "unknown",
-            anchor_id=row.get("anchor_id") or "",
-            doc_id=row.get("doc_id"),
-            label=row.get("label") or row.get("anchor_id") or "",
-            score=round(score, 3),
-            source=row.get("source") or "anchor_index",
-        ))
+        scored.append(
+            QueryAnchor(
+                anchor_type=row.get("anchor_type") or "unknown",
+                anchor_id=row.get("anchor_id") or "",
+                doc_id=row.get("doc_id"),
+                label=row.get("label") or row.get("anchor_id") or "",
+                score=round(score, 3),
+                source=row.get("source") or "anchor_index",
+            )
+        )
 
     type_rank = {"document": 4, "heading": 3, "entity": 2}
     scored.sort(
@@ -1161,7 +1234,8 @@ async def resolve_query_anchors(
     if out:
         logger.info(
             "query_anchors: corpus=%s query=%r anchors=%s",
-            corpus_id, query[:60],
+            corpus_id,
+            query[:60],
             [(a.anchor_type, a.label, a.score) for a in out],
         )
     return out
@@ -1176,9 +1250,14 @@ async def _anchor_scope_entities(
 ) -> list[str]:
     if neo4j_driver is None or not anchors or entity_cap <= 0:
         return []
-    doc_ids = [a.doc_id or a.anchor_id for a in anchors
-               if a.anchor_type in {"document", "heading"} and (a.doc_id or a.anchor_id)]
-    entity_ids = [a.anchor_id for a in anchors if a.anchor_type == "entity" and a.anchor_id]
+    doc_ids = [
+        a.doc_id or a.anchor_id
+        for a in anchors
+        if a.anchor_type in {"document", "heading"} and (a.doc_id or a.anchor_id)
+    ]
+    entity_ids = [
+        a.anchor_id for a in anchors if a.anchor_type == "entity" and a.anchor_id
+    ]
     weights: dict[str, float] = defaultdict(float)
     try:
         async with neo4j_driver.session() as s:
@@ -1315,7 +1394,12 @@ async def query_scope_entities(
 
     logger.info(
         "query_scope: corpus=%s query=%r chunks=%d raw_entities=%d scope=%d cap=%d",
-        corpus_id, query[:60], len(chunk_rank), len(ranked), len(scope), entity_cap,
+        corpus_id,
+        query[:60],
+        len(chunk_rank),
+        len(ranked),
+        len(scope),
+        entity_cap,
     )
     return scope
 
@@ -1387,13 +1471,15 @@ async def query_scope_details(
         # `chunk_text`; older callers used `text`. Accept both so graph
         # synthesis receives evidence instead of empty excerpt slots.
         text = str(payload.get("text") or payload.get("chunk_text") or "").strip()
-        chunk_refs.append({
-            "chunk_id": str(chunk_id),
-            "doc_id": str(doc_id or ""),
-            "score": round(float(getattr(hit, "score", 0.0) or 0.0), 4),
-            "heading_path": payload.get("heading_path") or [],
-            "text": text[:1200],
-        })
+        chunk_refs.append(
+            {
+                "chunk_id": str(chunk_id),
+                "doc_id": str(doc_id or ""),
+                "score": round(float(getattr(hit, "score", 0.0) or 0.0), 4),
+                "heading_path": payload.get("heading_path") or [],
+                "text": text[:1200],
+            }
+        )
     if not chunk_rank:
         return VectorScopeResult(query_embedding=qv)
 
@@ -1428,7 +1514,12 @@ async def query_scope_details(
 
     logger.info(
         "query_scope_details: corpus=%s query=%r chunks=%d raw_entities=%d scope=%d cap=%d",
-        corpus_id, query[:60], len(chunk_rank), len(ranked), len(scope), entity_cap,
+        corpus_id,
+        query[:60],
+        len(chunk_rank),
+        len(ranked),
+        len(scope),
+        entity_cap,
     )
     return VectorScopeResult(
         entity_ids=scope,
@@ -1482,8 +1573,7 @@ async def resolve_query_scope(
         )
 
     anchor_scores = {
-        eid: round(1.0 - (idx * 0.02), 4)
-        for idx, eid in enumerate(anchor_entities)
+        eid: round(1.0 - (idx * 0.02), 4) for idx, eid in enumerate(anchor_entities)
     }
     entity_scores = dict(vector_scope.entity_scores)
     for eid, score in anchor_scores.items():
@@ -1499,8 +1589,13 @@ async def resolve_query_scope(
     logger.info(
         "query_scope_resolved: corpus=%s query=%r anchors=%d anchor_entities=%d "
         "vector_entities=%d total=%d cap=%d",
-        corpus_id, query[:60], len(anchors), len(anchor_entities),
-        len(vector_scope.entity_ids), len(combined), entity_cap,
+        corpus_id,
+        query[:60],
+        len(anchors),
+        len(anchor_entities),
+        len(vector_scope.entity_ids),
+        len(combined),
+        entity_cap,
     )
     return QueryScopeResult(
         entity_ids=combined,
@@ -1583,23 +1678,22 @@ def filter_metrics_to_scope(
         return ordered
 
     from dataclasses import replace as _replace
+
     scoped_frontier = [
         f for f in metrics.frontier_candidates if f.get("entity_id") in scope
     ]
     scoped_frontier = _diversify_items(
         scoped_frontier,
-        key_fn=lambda it: metrics.entity_concept_map
-        .get(it.get("entity_id"), {})
-        .get("concept_id"),
+        key_fn=lambda it: metrics.entity_concept_map.get(it.get("entity_id"), {}).get(
+            "concept_id"
+        ),
     )
-    scoped_transfers = [
-        t for t in metrics.transfer_candidates if t.get("hub") in scope
-    ]
+    scoped_transfers = [t for t in metrics.transfer_candidates if t.get("hub") in scope]
     scoped_transfers = _diversify_items(
         scoped_transfers,
-        key_fn=lambda it: metrics.entity_concept_map
-        .get(it.get("hub"), {})
-        .get("concept_id"),
+        key_fn=lambda it: metrics.entity_concept_map.get(it.get("hub"), {}).get(
+            "concept_id"
+        ),
     )
     scoped_concept_ids = {
         str(c.get("concept_id"))
@@ -1607,7 +1701,8 @@ def filter_metrics_to_scope(
         if (c := metrics.entity_concept_map.get(eid))
     }
     scoped_cluster_gaps = [
-        g for g in metrics.cluster_pair_gaps
+        g
+        for g in metrics.cluster_pair_gaps
         if str(g.get("cluster_a")) in scoped_concept_ids
         or str(g.get("cluster_b")) in scoped_concept_ids
     ] or metrics.cluster_pair_gaps[:5]
@@ -1628,7 +1723,11 @@ def filter_metrics_to_scope(
             or metrics.top_pagerank[:5]
         ),
         top_cross_domain_pagerank=(
-            [p for p in metrics.top_cross_domain_pagerank if p.get("entity_id") in scope]
+            [
+                p
+                for p in metrics.top_cross_domain_pagerank
+                if p.get("entity_id") in scope
+            ]
             or metrics.top_cross_domain_pagerank[:5]
         ),
         concept_communities=relevant_concept_communities(metrics, scope),
@@ -1713,12 +1812,17 @@ def select_working_entities(
                 best_idx = idx
         _, eid = remaining.pop(best_idx)
         selected.append(eid)
-        concept_id = str(metrics.entity_concept_map.get(eid, {}).get("concept_id") or "")
+        concept_id = str(
+            metrics.entity_concept_map.get(eid, {}).get("concept_id") or ""
+        )
         concept_counts[concept_id] += 1
 
     logger.info(
         "working_entity_select: mode=%s scope=%d selected=%d concepts=%d",
-        mode, len(scope), len(selected), len([c for c in concept_counts if c]),
+        mode,
+        len(scope),
+        len(selected),
+        len([c for c in concept_counts if c]),
     )
     return set(selected)
 
@@ -1731,6 +1835,7 @@ def select_working_entities(
 @dataclass
 class CorpusMetrics:
     """Cached structural snapshot of the Neo4j graph for one corpus."""
+
     corpus_id: str
     corpus_change_signature: str
     computed_at: datetime
@@ -1741,7 +1846,9 @@ class CorpusMetrics:
     modularity_proxy: float  # fraction of edges inside same domain
     domain_density: dict[str, float]  # domain_id_str → density
     per_domain_edge_counts: dict[str, dict[str, int]]  # {domain: {internal, external}}
-    relation_family_counts: dict[str, int]  # Structural / Operational / WeakAssociation, etc.
+    relation_family_counts: dict[
+        str, int
+    ]  # Structural / Operational / WeakAssociation, etc.
     top_pagerank: list[dict[str, Any]]
     top_cross_domain_pagerank: list[dict[str, Any]]
     node_domain_map: dict[str, str]  # entity_id → primary domain name
@@ -1761,7 +1868,9 @@ class CorpusMetrics:
     cluster_pair_gaps: list[dict[str, Any]] = field(default_factory=list)
     latent_topics: list[dict[str, Any]] = field(default_factory=list)
     metrics_engine: str = "networkx"
-    relation_edge_state_counts: dict[str, int] = field(default_factory=dict)  # typed / refined / family / fallback
+    relation_edge_state_counts: dict[str, int] = field(
+        default_factory=dict
+    )  # typed / refined / family / fallback
 
 
 # ── Graph construction from Neo4j ───────────────────────────────────────────
@@ -1792,7 +1901,12 @@ WHERE a.entity_id IN $entity_ids AND b.entity_id IN $entity_ids
       $corpus_id IN coalesce(r.corpus_ids, [])
       OR EXISTS {
           MATCH (c:Chunk {corpus_id: $corpus_id})
-          WHERE c.chunk_id IN coalesce(r.evidence_chunk_ids, [])
+          WHERE c.corpus_id + '|' + c.chunk_id IN coalesce(r.evidence_chunk_keys, [])
+             OR (
+                 none(key IN coalesce(r.evidence_chunk_keys, [])
+                      WHERE key STARTS WITH $corpus_id + '|')
+                 AND c.chunk_id IN coalesce(r.evidence_chunk_ids, [])
+             )
       }
   )
 RETURN a.entity_id AS source,
@@ -1845,7 +1959,9 @@ RETURN e.entity_id AS entity_id,
 
 
 async def _load_entities_with_mentions(
-    session, corpus_id: str, doc_to_domain: dict[str, str],
+    session,
+    corpus_id: str,
+    doc_to_domain: dict[str, str],
     entity_ids: Optional[list[str]] = None,
 ) -> tuple[
     dict[str, str],
@@ -1856,7 +1972,8 @@ async def _load_entities_with_mentions(
     dict[str, int],
 ]:
     """Read entities + their per-document mention counts from Neo4j.
-    Returns (entity_to_name, entity_to_type, entity_to_facets, entity_to_domain_counts)."""
+    Returns (entity_to_name, entity_to_type, entity_to_facets, entity_to_domain_counts).
+    """
     entity_to_name: dict[str, str] = {}
     entity_to_type: dict[str, str] = {}
     entity_to_facets: dict[str, dict[str, Any]] = {}
@@ -1967,7 +2084,8 @@ async def _load_relations_into_graph(
             )
         else:
             G.add_edge(
-                s, t,
+                s,
+                t,
                 predicate=rec.get("predicate") or "related_to",
                 relation_family=rec.get("relation_family") or "WeakAssociation",
                 relation_families=[rec.get("relation_family") or "WeakAssociation"],
@@ -2052,8 +2170,10 @@ async def load_graph_from_neo4j(
 
 # ── Core metrics ────────────────────────────────────────────────────────────
 
+
 def compute_pagerank(G) -> dict[str, float]:
     import networkx as nx
+
     if G.number_of_nodes() == 0:
         return {}
     try:
@@ -2102,7 +2222,9 @@ def compute_cross_domain_edge_pct(G, node_to_domain: dict[str, str]) -> float:
 def compute_per_domain_edge_counts(
     G, node_to_domain: dict[str, str]
 ) -> dict[str, dict[str, int]]:
-    counts: dict[str, dict[str, int]] = defaultdict(lambda: {"internal": 0, "external": 0})
+    counts: dict[str, dict[str, int]] = defaultdict(
+        lambda: {"internal": 0, "external": 0}
+    )
     for u, v in G.edges:
         du = node_to_domain.get(u, "unknown")
         dv = node_to_domain.get(v, "unknown")
@@ -2142,6 +2264,7 @@ def compute_relation_edge_state_counts(G) -> dict[str, int]:
 
 def compute_domain_density(G, node_to_domain: dict[str, str]) -> dict[str, float]:
     import networkx as nx
+
     by_domain: dict[str, list[str]] = defaultdict(list)
     for node, domain in node_to_domain.items():
         by_domain[domain].append(node)
@@ -2168,6 +2291,7 @@ def compute_cd_pagerank(
 
 
 # ── Concept communities ────────────────────────────────────────────────────
+
 
 def _node_entity_type(G, node: str) -> str:
     return str(G.nodes[node].get("entity_type") or "").strip().lower()
@@ -2328,7 +2452,9 @@ def compute_concept_communities(
 
     logger.info(
         "Concept communities computed: nodes=%d edges=%d communities=%d",
-        H.number_of_nodes(), H.number_of_edges(), len(summaries),
+        H.number_of_nodes(),
+        H.number_of_edges(),
+        len(summaries),
     )
     return summaries, entity_map
 
@@ -2541,15 +2667,14 @@ def compute_cluster_pair_gaps(
         if not a_members:
             continue
         a_tokens = _concept_semantic_tokens(a)
-        for b in ranked[i + 1:]:
+        for b in ranked[i + 1 :]:
             b_members = set(b.get("member_ids") or [])
             if not b_members:
                 continue
             b_tokens = _concept_semantic_tokens(b)
             token_union = a_tokens | b_tokens
             lexical_similarity = (
-                len(a_tokens & b_tokens) / len(token_union)
-                if token_union else 0.0
+                len(a_tokens & b_tokens) / len(token_union) if token_union else 0.0
             )
             a_neighbors = _community_external_neighbors(G, a_members, b_members)
             b_neighbors = _community_external_neighbors(G, b_members, a_members)
@@ -2557,7 +2682,8 @@ def compute_cluster_pair_gaps(
             neighbor_union = a_neighbors | b_neighbors
             shared_neighbor_jaccard = (
                 len(shared_neighbor_nodes) / len(neighbor_union)
-                if neighbor_union else 0.0
+                if neighbor_union
+                else 0.0
             )
             shared_neighbor_names = [
                 _node_name(G, node)
@@ -2589,13 +2715,18 @@ def compute_cluster_pair_gaps(
             # comparable. This prevents ML-library ↔ finance false positives.
             bridge_prior = min(
                 0.16,
-                (int(a.get("bridge_count") or 0) + int(b.get("bridge_count") or 0)) / 220.0,
+                (int(a.get("bridge_count") or 0) + int(b.get("bridge_count") or 0))
+                / 220.0,
             )
-            facet_boost = 0.06 if (
-                coherence["shared_families"] or coherence["shared_domain_types"]
-            ) else 0.0
+            facet_boost = (
+                0.06
+                if (coherence["shared_families"] or coherence["shared_domain_types"])
+                else 0.0
+            )
             semantic_similarity = max(lexical_similarity + facet_boost, bridge_prior)
-            semantic_similarity = max(semantic_similarity, shared_neighbor_jaccard * 1.4)
+            semantic_similarity = max(
+                semantic_similarity, shared_neighbor_jaccard * 1.4
+            )
             if semantic_similarity < 0.08:
                 continue
 
@@ -2613,22 +2744,24 @@ def compute_cluster_pair_gaps(
             if gap_score <= 0.04:
                 continue
 
-            scored.append({
-                "cluster_a": str(a.get("concept_id") or ""),
-                "cluster_b": str(b.get("concept_id") or ""),
-                "cluster_a_label": str(a.get("label") or "Concept Neighborhood"),
-                "cluster_b_label": str(b.get("label") or "Concept Neighborhood"),
-                "semantic_similarity": round(float(semantic_similarity), 4),
-                "structural_connectivity": round(float(density), 6),
-                "expected_connectivity": round(float(expected), 4),
-                "gap_score": round(float(gap_score), 4),
-                "edge_count": int(inter_edges),
-                "coherence": coherence,
-                "anchor_concepts": (
-                    list(a.get("top_entities") or [])[:3]
-                    + list(b.get("top_entities") or [])[:3]
-                )[:6],
-            })
+            scored.append(
+                {
+                    "cluster_a": str(a.get("concept_id") or ""),
+                    "cluster_b": str(b.get("concept_id") or ""),
+                    "cluster_a_label": str(a.get("label") or "Concept Neighborhood"),
+                    "cluster_b_label": str(b.get("label") or "Concept Neighborhood"),
+                    "semantic_similarity": round(float(semantic_similarity), 4),
+                    "structural_connectivity": round(float(density), 6),
+                    "expected_connectivity": round(float(expected), 4),
+                    "gap_score": round(float(gap_score), 4),
+                    "edge_count": int(inter_edges),
+                    "coherence": coherence,
+                    "anchor_concepts": (
+                        list(a.get("top_entities") or [])[:3]
+                        + list(b.get("top_entities") or [])[:3]
+                    )[:6],
+                }
+            )
 
     scored.sort(
         key=lambda row: (
@@ -2672,21 +2805,23 @@ def detect_latent_topics(
         latent_score = evidence_weight / integration_penalty
         if latent_score <= 0:
             continue
-        scored.append({
-            "entity_id": str(node),
-            "canonical_name": _node_name(G, node),
-            "domain": node_primary.get(node, "unknown"),
-            "mention_count": mentions,
-            "doc_count": doc_count,
-            "degree": degree,
-            "pagerank": round(pr, 8),
-            "betweenness": round(btw, 8),
-            "latent_score": round(float(latent_score), 4),
-            "rationale": (
-                "Mentioned across the corpus but only lightly connected to "
-                "nearby concepts."
-            ),
-        })
+        scored.append(
+            {
+                "entity_id": str(node),
+                "canonical_name": _node_name(G, node),
+                "domain": node_primary.get(node, "unknown"),
+                "mention_count": mentions,
+                "doc_count": doc_count,
+                "degree": degree,
+                "pagerank": round(pr, 8),
+                "betweenness": round(btw, 8),
+                "latent_score": round(float(latent_score), 4),
+                "rationale": (
+                    "Mentioned across the corpus but only lightly connected to "
+                    "nearby concepts."
+                ),
+            }
+        )
 
     scored.sort(
         key=lambda row: (
@@ -2743,9 +2878,7 @@ def expand_scope_with_concepts(
     if not scope or not metrics.entity_concept_map or not metrics.concept_communities:
         return scope
 
-    concept_by_id = {
-        str(c.get("concept_id")): c for c in metrics.concept_communities
-    }
+    concept_by_id = {str(c.get("concept_id")): c for c in metrics.concept_communities}
     concept_ids = {
         str(concept.get("concept_id"))
         for eid in scope
@@ -2783,29 +2916,34 @@ def expand_scope_with_concepts(
     required = list(scope)
     room = max(0, entity_cap - len(required))
     optional = [
-        eid for eid, _ in sorted(
+        eid
+        for eid, _ in sorted(
             optional_scores.items(), key=lambda item: item[1], reverse=True
         )[:room]
     ]
     expanded = set(required) | set(optional)
     logger.info(
         "concept_scope_expand: seeds=%d concepts=%d expanded=%d cap=%d",
-        len(scope), len(concept_ids), len(expanded), entity_cap,
+        len(scope),
+        len(concept_ids),
+        len(expanded),
+        entity_cap,
     )
     return expanded
 
 
 def _expanded_query_concept_tokens(query: str) -> tuple[set[str], set[str]]:
     normalized_tokens = {
-        t for t in _normalize_anchor_text(query).split()
-        if t and t not in _STOPWORDS
+        t for t in _normalize_anchor_text(query).split() if t and t not in _STOPWORDS
     }
     direct = _anchor_tokens(query) | (normalized_tokens & SHORT_QUERY_CONCEPT_TOKENS)
     expanded = set(direct)
     for token in list(direct):
         expanded.update(QUERY_CONCEPT_EXPANSIONS.get(token, set()))
     query_norm = _normalize_anchor_text(query)
-    if ("gen" in normalized_tokens and "ai" in normalized_tokens) or "generative ai" in query_norm:
+    if (
+        "gen" in normalized_tokens and "ai" in normalized_tokens
+    ) or "generative ai" in query_norm:
         expanded.update(QUERY_CONCEPT_EXPANSIONS["genai"])
     return direct, expanded
 
@@ -2892,7 +3030,9 @@ def expand_scope_with_query_concepts(
     selected: list[str] = []
     seen = set(required)
     cursor = 0
-    while len(selected) < room and any(cursor < len(items) for items in ranked_by_concept):
+    while len(selected) < room and any(
+        cursor < len(items) for items in ranked_by_concept
+    ):
         for items in ranked_by_concept:
             if len(selected) >= room:
                 break
@@ -2933,8 +3073,7 @@ def expand_scope_with_query_facets(
     if not metrics.entity_facet_map:
         return scope
     query_tokens = {
-        t for t in _normalize_anchor_text(query).split()
-        if t and t not in _STOPWORDS
+        t for t in _normalize_anchor_text(query).split() if t and t not in _STOPWORDS
     }
     query_norm = _normalize_anchor_text(query)
     wanted_kinds: set[str] = set()
@@ -2944,7 +3083,9 @@ def expand_scope_with_query_facets(
         wanted_kinds.update(QUERY_OBJECT_KIND_EXPANSIONS.get(token, set()))
         wanted_families.update(QUERY_CANONICAL_FAMILY_EXPANSIONS.get(token, set()))
         wanted_domain_types.update(QUERY_DOMAIN_TYPE_EXPANSIONS.get(token, set()))
-    if "generative ai" in query_norm or ("gen" in query_tokens and "ai" in query_tokens):
+    if "generative ai" in query_norm or (
+        "gen" in query_tokens and "ai" in query_tokens
+    ):
         wanted_families.add("generative_ai")
     if "user information" in query_norm or "user data" in query_norm:
         wanted_families.add("identity_extraction")
@@ -2956,10 +3097,18 @@ def expand_scope_with_query_facets(
     if "me book" in query_norm or "prose book" in query_norm:
         wanted_domain_types.add("OutputArtifact")
         wanted_families.add("book_generation")
-    if "the council" in query_norm or "message limit" in query_norm or "gate c" in query_norm:
+    if (
+        "the council" in query_norm
+        or "message limit" in query_norm
+        or "gate c" in query_norm
+    ):
         wanted_domain_types.update({"Feature", "Constraint"})
         wanted_families.add("council_chat")
-    if "on device" in query_norm or "local model" in query_norm or "local llm" in query_norm:
+    if (
+        "on device" in query_norm
+        or "local model" in query_norm
+        or "local llm" in query_norm
+    ):
         wanted_domain_types.add("AIModel")
         wanted_families.add("mobile_ai")
     if not wanted_kinds and not wanted_families and not wanted_domain_types:
@@ -2991,14 +3140,19 @@ def expand_scope_with_query_facets(
     expanded = set(scope) | set(selected)
     logger.info(
         "query_facet_scope_expand: query=%r kinds=%s families=%s domain_types=%s seeds=%d expanded=%d cap=%d",
-        query[:60], sorted(wanted_kinds), sorted(wanted_families),
+        query[:60],
+        sorted(wanted_kinds),
+        sorted(wanted_families),
         sorted(wanted_domain_types),
-        len(scope), len(expanded), entity_cap,
+        len(scope),
+        len(expanded),
+        entity_cap,
     )
     return expanded
 
 
 # ── Topology fingerprints ──────────────────────────────────────────────────
+
 
 def topology_fingerprint(G, node, node_to_domain: dict[str, str]) -> dict:
     """Lightweight structural signature used to find analogies."""
@@ -3014,7 +3168,9 @@ def topology_fingerprint(G, node, node_to_domain: dict[str, str]) -> dict:
     for n in neighbors:
         two_hop.update(G.neighbors(n))
     two_hop.discard(node)
-    neighbor_domains = {node_to_domain.get(n) for n in neighbors if node_to_domain.get(n)}
+    neighbor_domains = {
+        node_to_domain.get(n) for n in neighbors if node_to_domain.get(n)
+    }
     return {
         "degree": len(neighbors),
         "neighbor_degree_profile": sorted(
@@ -3056,8 +3212,11 @@ def neighbor_jaccard(G, a, b) -> float:
 
 # ── Insight detectors ──────────────────────────────────────────────────────
 
+
 def detect_frontier_nodes(
-    G, node_to_domain: dict[str, str], node_domains_touched: dict[str, list[str]],
+    G,
+    node_to_domain: dict[str, str],
+    node_domains_touched: dict[str, list[str]],
     degree_max: int = FRONTIER_DEGREE_MAX,
 ) -> list[dict[str, Any]]:
     """Low-degree nodes whose neighborhood spans ≥2 domains."""
@@ -3070,27 +3229,28 @@ def detect_frontier_nodes(
         if len(touched) < 2:
             # Check neighborhood diversity too
             neighbor_domains = {
-                node_to_domain.get(n) for n in G.neighbors(node)
+                node_to_domain.get(n)
+                for n in G.neighbors(node)
                 if node_to_domain.get(n)
             }
             if len(neighbor_domains) < 2:
                 continue
             touched = list(neighbor_domains)
-        out.append({
-            "entity_id": node,
-            "canonical_name": G.nodes[node].get("canonical_name", node),
-            "primary_domain": node_to_domain.get(node, "unknown"),
-            "degree": degree,
-            "domains_touched": touched,
-            "cross_domain_potential": len(touched),
-        })
+        out.append(
+            {
+                "entity_id": node,
+                "canonical_name": G.nodes[node].get("canonical_name", node),
+                "primary_domain": node_to_domain.get(node, "unknown"),
+                "degree": degree,
+                "domains_touched": touched,
+                "cross_domain_potential": len(touched),
+            }
+        )
     out.sort(key=lambda x: x["cross_domain_potential"], reverse=True)
-    return out[:INSIGHT_TOP_K * 2]  # keep more for query-time filtering
+    return out[: INSIGHT_TOP_K * 2]  # keep more for query-time filtering
 
 
-def detect_fragile_bridges(
-    G, node_to_domain: dict[str, str]
-) -> list[dict[str, Any]]:
+def detect_fragile_bridges(G, node_to_domain: dict[str, str]) -> list[dict[str, Any]]:
     """Cross-domain articulation edges: removing one disconnects a component.
 
     Uses NetworkX `bridges()` which finds ALL articulation edges in a single
@@ -3114,26 +3274,30 @@ def detect_fragile_bridges(
             continue
         source_name = G.nodes[u].get("canonical_name", u)
         target_name = G.nodes[v].get("canonical_name", v)
-        out.append({
-            "source": u,
-            "source_name": source_name,
-            "source_domain": du,
-            "target": v,
-            "target_name": target_name,
-            "target_domain": dv,
-            "path_count": 1,  # articulation edge → no alternative path
-            "path_entity_ids": [u, v],
-            "path_entities": [source_name, target_name],
-            "evidence": (
-                f"Articulation edge: removing {source_name} ↔ {target_name} "
-                "disconnects this cross-domain route."
-            ),
-        })
+        out.append(
+            {
+                "source": u,
+                "source_name": source_name,
+                "source_domain": du,
+                "target": v,
+                "target_name": target_name,
+                "target_domain": dv,
+                "path_count": 1,  # articulation edge → no alternative path
+                "path_entity_ids": [u, v],
+                "path_entities": [source_name, target_name],
+                "evidence": (
+                    f"Articulation edge: removing {source_name} ↔ {target_name} "
+                    "disconnects this cross-domain route."
+                ),
+            }
+        )
     return out[: INSIGHT_TOP_K * 2]
 
 
 def detect_analogies_and_terminological_gaps(
-    G, node_to_domain: dict[str, str], fingerprints: dict[str, dict],
+    G,
+    node_to_domain: dict[str, str],
+    fingerprints: dict[str, dict],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Cross-domain node pairs with high topology similarity.
     Jaccard(neighbors) > threshold → terminological gap.
@@ -3155,7 +3319,7 @@ def detect_analogies_and_terminological_gaps(
         if not fa:
             continue
         da = node_to_domain.get(a)
-        for b in nodes[i + 1:]:
+        for b in nodes[i + 1 :]:
             db = node_to_domain.get(b)
             if not da or not db or da == db:
                 continue
@@ -3185,7 +3349,9 @@ def detect_analogies_and_terminological_gaps(
             else:
                 analogies.append(entry)
 
-    terminological.sort(key=lambda x: (x["topology_sim"], x["neighbor_jaccard"]), reverse=True)
+    terminological.sort(
+        key=lambda x: (x["topology_sim"], x["neighbor_jaccard"]), reverse=True
+    )
     analogies.sort(key=lambda x: x["topology_sim"], reverse=True)
     return analogies[:INSIGHT_TOP_K], terminological[:INSIGHT_TOP_K]
 
@@ -3206,14 +3372,22 @@ def detect_transfer_opportunities(
     # Build analog index: node → list of (other_node, other_domain, sim)
     analog_by_node: dict[str, list[dict]] = defaultdict(list)
     for a in analogies:
-        analog_by_node[a["source"]].append({
-            "entity": a["target"], "name": a["target_name"],
-            "domain": a["target_domain"], "topology_sim": a["topology_sim"],
-        })
-        analog_by_node[a["target"]].append({
-            "entity": a["source"], "name": a["source_name"],
-            "domain": a["source_domain"], "topology_sim": a["topology_sim"],
-        })
+        analog_by_node[a["source"]].append(
+            {
+                "entity": a["target"],
+                "name": a["target_name"],
+                "domain": a["target_domain"],
+                "topology_sim": a["topology_sim"],
+            }
+        )
+        analog_by_node[a["target"]].append(
+            {
+                "entity": a["source"],
+                "name": a["source_name"],
+                "domain": a["source_domain"],
+                "topology_sim": a["topology_sim"],
+            }
+        )
 
     out: list[dict[str, Any]] = []
     for hub in top_hubs:
@@ -3228,19 +3402,22 @@ def detect_transfer_opportunities(
         target_domains = [d for d in by_domain if d != hub_domain]
         if len(target_domains) < 2:
             continue
-        out.append({
-            "hub": hub,
-            "hub_name": G.nodes[hub].get("canonical_name", hub),
-            "hub_domain": hub_domain,
-            "cd_pagerank": round(cd_pagerank.get(hub, 0.0), 5),
-            "target_domains": target_domains,
-            "analogs": [by_domain[d] for d in target_domains],
-        })
+        out.append(
+            {
+                "hub": hub,
+                "hub_name": G.nodes[hub].get("canonical_name", hub),
+                "hub_domain": hub_domain,
+                "cd_pagerank": round(cd_pagerank.get(hub, 0.0), 5),
+                "target_domains": target_domains,
+                "analogs": [by_domain[d] for d in target_domains],
+            }
+        )
     out.sort(key=lambda x: x["cd_pagerank"], reverse=True)
     return out[:INSIGHT_TOP_K]
 
 
 # ── Orchestrator + cache ───────────────────────────────────────────────────
+
 
 async def compute_all_metrics(
     neo4j_driver,
@@ -3267,7 +3444,9 @@ async def compute_all_metrics(
         if cached:
             logger.info(
                 "Metrics cache STALE corpus=%s sig=%s schema=%s — recomputing",
-                corpus_id, signature[:8], cached.get("schema_version"),
+                corpus_id,
+                signature[:8],
+                cached.get("schema_version"),
             )
 
     logger.info(
@@ -3325,30 +3504,19 @@ async def compute_all_metrics(
     cd_pagerank = compute_cd_pagerank(pagerank, node_touched)
     concept_communities, entity_concept_map = compute_concept_communities(G, pagerank)
     entity_facet_map = build_entity_facet_map(G)
-    entity_name_map = {
-        n: str(G.nodes[n].get("canonical_name") or n)
-        for n in G.nodes
-    }
+    entity_name_map = {n: str(G.nodes[n].get("canonical_name") or n) for n in G.nodes}
     ontology_version = resolve_metrics_ontology_version(G)
     cross_pct = compute_cross_domain_edge_pct(G, node_primary)
     per_domain = compute_per_domain_edge_counts(G, node_primary)
     relation_families = compute_relation_family_counts(G)
     relation_edge_states = compute_relation_edge_state_counts(G)
     dom_density = compute_domain_density(G, node_primary)
-    modularity_proxy = round(
-        1 - (cross_pct / 100.0) if cross_pct else 1.0, 3
-    )
+    modularity_proxy = round(1 - (cross_pct / 100.0) if cross_pct else 1.0, 3)
 
     insight_G = build_insight_graph(G)
-    insight_node_primary = {
-        n: node_primary.get(n, "unknown") for n in insight_G.nodes
-    }
-    insight_node_touched = {
-        n: node_touched.get(n, []) for n in insight_G.nodes
-    }
-    insight_cd_pagerank = {
-        n: cd_pagerank.get(n, 0.0) for n in insight_G.nodes
-    }
+    insight_node_primary = {n: node_primary.get(n, "unknown") for n in insight_G.nodes}
+    insight_node_touched = {n: node_touched.get(n, []) for n in insight_G.nodes}
+    insight_cd_pagerank = {n: cd_pagerank.get(n, 0.0) for n in insight_G.nodes}
     betweenness = compute_betweenness(insight_G)
     for eid, concept in entity_concept_map.items():
         concept["betweenness"] = round(float(betweenness.get(eid, 0.0) or 0.0), 8)
@@ -3432,9 +3600,17 @@ async def compute_all_metrics(
         "Metrics computed: corpus=%s nodes=%d edges=%d cross=%.1f%% "
         "frontier=%d analogies=%d transfers=%d concepts=%d gaps=%d latent=%d "
         "facets=%d ontology=%s",
-        corpus_id, n_nodes, n_edges, cross_pct,
-        len(frontier), len(analogies), len(transfers), len(concept_communities),
-        len(cluster_pair_gaps), len(latent_topics), len(entity_facet_map),
+        corpus_id,
+        n_nodes,
+        n_edges,
+        cross_pct,
+        len(frontier),
+        len(analogies),
+        len(transfers),
+        len(concept_communities),
+        len(cluster_pair_gaps),
+        len(latent_topics),
+        len(entity_facet_map),
         ontology_version or "none",
     )
     return metrics
@@ -3474,7 +3650,9 @@ def _compact_concept_communities(
         row = dict(concept)
         members = _ordered_unique(row.get("member_ids") or [])
         top_ids = _ordered_unique(row.get("top_entity_ids") or [])
-        kept = _ordered_unique([*top_ids, *members])[:METRICS_CACHE_CONCEPT_MEMBER_LIMIT]
+        kept = _ordered_unique([*top_ids, *members])[
+            :METRICS_CACHE_CONCEPT_MEMBER_LIMIT
+        ]
         kept_entities.update(kept)
         domains = Counter(
             m.node_domain_map.get(eid, "unknown")
@@ -3483,9 +3661,8 @@ def _compact_concept_communities(
         )
         row["member_ids"] = kept
         row["top_entity_ids"] = top_ids[:CONCEPT_COMMUNITY_TOP_ENTITIES]
-        row["primary_domain"] = (
-            row.get("primary_domain")
-            or (domains.most_common(1)[0][0] if domains else "unknown")
+        row["primary_domain"] = row.get("primary_domain") or (
+            domains.most_common(1)[0][0] if domains else "unknown"
         )
         compact.append(row)
     return compact, kept_entities
@@ -3506,7 +3683,11 @@ def _metric_edge_entities(m: CorpusMetrics) -> set[str]:
                     out.add(str(item[key]))
             for key in ("entities", "entity_ids", "member_ids"):
                 out.update(str(v) for v in (item.get(key) or []) if v)
-    for item in (m.top_pagerank or []) + (m.top_cross_domain_pagerank or []) + (m.latent_topics or []):
+    for item in (
+        (m.top_pagerank or [])
+        + (m.top_cross_domain_pagerank or [])
+        + (m.latent_topics or [])
+    ):
         if item.get("entity_id"):
             out.add(str(item["entity_id"]))
     return out
@@ -3514,10 +3695,12 @@ def _metric_edge_entities(m: CorpusMetrics) -> set[str]:
 
 def _serialize_metrics(m: CorpusMetrics) -> dict:
     concept_communities, concept_entities = _compact_concept_communities(m)
-    keep_entities = _ordered_unique([
-        *concept_entities,
-        *_metric_edge_entities(m),
-    ])[:METRICS_CACHE_MAP_ENTITY_LIMIT]
+    keep_entities = _ordered_unique(
+        [
+            *concept_entities,
+            *_metric_edge_entities(m),
+        ]
+    )[:METRICS_CACHE_MAP_ENTITY_LIMIT]
     keep_set = set(keep_entities)
     entity_concept_map = {
         eid: m.entity_concept_map[eid]
@@ -3525,9 +3708,7 @@ def _serialize_metrics(m: CorpusMetrics) -> dict:
         if eid in m.entity_concept_map
     }
     node_domain_map = {
-        eid: m.node_domain_map[eid]
-        for eid in keep_entities
-        if eid in m.node_domain_map
+        eid: m.node_domain_map[eid] for eid in keep_entities if eid in m.node_domain_map
     }
     node_domains_touched = {
         eid: m.node_domains_touched[eid]
@@ -3535,9 +3716,7 @@ def _serialize_metrics(m: CorpusMetrics) -> dict:
         if eid in m.node_domains_touched
     }
     entity_name_map = {
-        eid: m.entity_name_map[eid]
-        for eid in keep_entities
-        if eid in m.entity_name_map
+        eid: m.entity_name_map[eid] for eid in keep_entities if eid in m.entity_name_map
     }
     entity_facet_map = {
         eid: m.entity_facet_map[eid]
@@ -3576,18 +3755,32 @@ def _serialize_metrics(m: CorpusMetrics) -> dict:
         "node_domain_map": node_domain_map,
         "node_domains_touched": node_domains_touched,
         "entity_name_map": entity_name_map,
-        "frontier_candidates": _trim_metric_items(m.frontier_candidates, METRICS_CACHE_LARGE_LIST_LIMIT),
-        "fragile_bridges": _trim_metric_items(m.fragile_bridges, METRICS_CACHE_LARGE_LIST_LIMIT),
-        "terminological_gaps": _trim_metric_items(m.terminological_gaps, METRICS_CACHE_LARGE_LIST_LIMIT),
-        "structural_analogies": _trim_metric_items(m.structural_analogies, METRICS_CACHE_LARGE_LIST_LIMIT),
-        "transfer_candidates": _trim_metric_items(m.transfer_candidates, METRICS_CACHE_LARGE_LIST_LIMIT),
+        "frontier_candidates": _trim_metric_items(
+            m.frontier_candidates, METRICS_CACHE_LARGE_LIST_LIMIT
+        ),
+        "fragile_bridges": _trim_metric_items(
+            m.fragile_bridges, METRICS_CACHE_LARGE_LIST_LIMIT
+        ),
+        "terminological_gaps": _trim_metric_items(
+            m.terminological_gaps, METRICS_CACHE_LARGE_LIST_LIMIT
+        ),
+        "structural_analogies": _trim_metric_items(
+            m.structural_analogies, METRICS_CACHE_LARGE_LIST_LIMIT
+        ),
+        "transfer_candidates": _trim_metric_items(
+            m.transfer_candidates, METRICS_CACHE_LARGE_LIST_LIMIT
+        ),
         "concept_communities": concept_communities,
         "entity_concept_map": entity_concept_map,
         "entity_facet_map": entity_facet_map,
         "ontology_version": m.ontology_version,
         "entity_betweenness": entity_betweenness,
-        "cluster_pair_gaps": _trim_metric_items(m.cluster_pair_gaps, METRICS_CACHE_LARGE_LIST_LIMIT),
-        "latent_topics": _trim_metric_items(m.latent_topics, METRICS_CACHE_LARGE_LIST_LIMIT),
+        "cluster_pair_gaps": _trim_metric_items(
+            m.cluster_pair_gaps, METRICS_CACHE_LARGE_LIST_LIMIT
+        ),
+        "latent_topics": _trim_metric_items(
+            m.latent_topics, METRICS_CACHE_LARGE_LIST_LIMIT
+        ),
         "metrics_engine": m.metrics_engine,
         "cache_mode": "compact",
         "cache_entity_count": len(keep_set),

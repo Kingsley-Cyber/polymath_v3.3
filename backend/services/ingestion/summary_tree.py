@@ -37,7 +37,9 @@ TREE_SCHEMA_VERSION = "polymath.summary_tree.v1"
 CONCEPT_SOURCE_FIELDS = ("key_terms", "mechanisms", "concept_tags")
 
 
-def derive_node_concepts(parent_rows: list[dict], cap: int = NODE_CONCEPTS_CAP) -> list[str]:
+def derive_node_concepts(
+    parent_rows: list[dict], cap: int = NODE_CONCEPTS_CAP
+) -> list[str]:
     """Deterministic node concepts — pure Python, zero LLM (owner directive).
 
     Union of each row's ``key_terms`` + ``mechanisms`` + ``concept_tags``,
@@ -70,6 +72,7 @@ def derive_node_concepts(parent_rows: list[dict], cap: int = NODE_CONCEPTS_CAP) 
 def _child_concept_rows(children: Sequence[Any]) -> list[dict]:
     """Adapt derived child concepts into ``derive_node_concepts`` rows."""
     return [{"concept_tags": list(child.concepts or ())} for child in children]
+
 
 LlmFn = Callable[[str], Awaitable[str]]
 TreeEmbedFn = Callable[[list[str], dict[str, Any] | None], Awaitable[list[list[float]]]]
@@ -658,10 +661,14 @@ async def sync_document_profile_from_existing_tree(
             "node_id": root.get("node_id"),
         }
 
-    rows = await db["parent_chunks"].find(
-        {"doc_id": doc_id, "corpus_id": corpus_id},
-        {"_id": 0, "chunk_kind": 1},
-    ).to_list(length=None)
+    rows = (
+        await db["parent_chunks"]
+        .find(
+            {"doc_id": doc_id, "corpus_id": corpus_id},
+            {"_id": 0, "chunk_kind": 1},
+        )
+        .to_list(length=None)
+    )
     now = datetime.utcnow()
     doc_profile = {
         "summary_id": root.get("node_id"),
@@ -908,7 +915,11 @@ async def build_and_store_tree(
     for n in nodes:
         rec = asdict(n)
         rec["updated_at"] = now
-        await db["summary_tree"].replace_one({"node_id": n.node_id}, rec, upsert=True)
+        await db["summary_tree"].replace_one(
+            {"corpus_id": corpus_id, "node_id": n.node_id},
+            rec,
+            upsert=True,
+        )
     tree_index: dict[str, Any] = {"indexed": 0, "eligible": 0}
     if qdrant_client is not None:
         try:

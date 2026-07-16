@@ -173,12 +173,20 @@ async def get_full_corpus_graph(
     WHERE $corpus_id IN coalesce(r.corpus_ids, [])
        OR EXISTS {
            MATCH (ec:Chunk {corpus_id: $corpus_id})
-           WHERE ec.chunk_id IN coalesce(r.evidence_chunk_ids, [])
+           WHERE ec.corpus_id + '|' + ec.chunk_id IN coalesce(r.evidence_chunk_keys, [])
+              OR (
+                  none(key IN coalesce(r.evidence_chunk_keys, []) WHERE key STARTS WITH $corpus_id + '|')
+                  AND ec.chunk_id IN coalesce(r.evidence_chunk_ids, [])
+              )
        }
     WITH DISTINCT a, b, r
     LIMIT $max_edges
     OPTIONAL MATCH (ec:Chunk {corpus_id: $corpus_id})
-    WHERE ec.chunk_id IN coalesce(r.evidence_chunk_ids, [])
+    WHERE ec.corpus_id + '|' + ec.chunk_id IN coalesce(r.evidence_chunk_keys, [])
+       OR (
+           none(key IN coalesce(r.evidence_chunk_keys, []) WHERE key STARTS WITH $corpus_id + '|')
+           AND ec.chunk_id IN coalesce(r.evidence_chunk_ids, [])
+       )
     WITH a, b, r, collect(DISTINCT ec.chunk_id) AS selected_evidence_chunk_ids
     RETURN a.entity_id AS source,
            b.entity_id AS target,
@@ -209,9 +217,7 @@ async def get_full_corpus_graph(
         edges = [dict(r) async for r in edges_res]
     # Filter out edges pointing at nodes we didn't return (when node cap hit).
     node_ids = {n["id"] for n in nodes}
-    edges = [
-        e for e in edges if e["source"] in node_ids and e["target"] in node_ids
-    ]
+    edges = [e for e in edges if e["source"] in node_ids and e["target"] in node_ids]
     truncated = len(nodes) == max_nodes or len(edges) == max_edges
     return {"nodes": nodes, "edges": edges, "truncated": truncated}
 
@@ -264,6 +270,7 @@ async def get_documents_as_clusters(
     max_edges: int = 60000,
     top_entities_per_cluster: int = 200,
     drill_doc_id: str | None = None,
+    drill_corpus_id: str | None = None,
     bridge_neighbor_cap: int = 100,
 ) -> dict:
     """Build a books-as-clusters view: each Document is a cluster, entities
@@ -312,10 +319,10 @@ async def get_documents_as_clusters(
     # PLUS any other doc that mentions one of those entities (the bridge
     # neighbours). This is what powers a click-to-drill cluster expansion
     # without dragging in the whole corpus.
-    if drill_doc_id:
+    if drill_doc_id and drill_corpus_id:
         mention_cypher = """
-        MATCH (c0:Chunk {doc_id: $drill_doc_id})-[:MENTIONS]->(target:Entity)
-        WHERE c0.corpus_id IN $corpus_ids
+        MATCH (c0:Chunk {corpus_id: $drill_corpus_id, doc_id: $drill_doc_id})
+              -[:MENTIONS]->(target:Entity)
         WITH collect(DISTINCT target.entity_id) AS drill_entity_ids
 
         MATCH (c:Chunk)-[:MENTIONS]->(e:Entity)
@@ -367,8 +374,9 @@ async def get_documents_as_clusters(
 
     async with driver.session() as session:
         mention_params: dict[str, object] = {"corpus_ids": corpus_ids}
-        if drill_doc_id:
+        if drill_doc_id and drill_corpus_id:
             mention_params["drill_doc_id"] = drill_doc_id
+            mention_params["drill_corpus_id"] = drill_corpus_id
         mention_res = await session.run(mention_cypher, **mention_params)
         mention_rows = [dict(r) async for r in mention_res]
         edges_res = await session.run(
@@ -379,13 +387,14 @@ async def get_documents_as_clusters(
     # Aggregate per-entity stats: which doc has the most mentions = primary,
     # all other docs = bridges. Track per-doc mention counts for sizing.
     by_entity: dict[str, dict] = {}
-    cluster_entity_lists: dict[str, list[tuple[str, int]]] = {}
-    cluster_meta: dict[str, dict] = {}
+    cluster_entity_lists: dict[tuple[str, str], list[tuple[str, int]]] = {}
+    cluster_meta: dict[tuple[str, str], dict] = {}
 
     for row in mention_rows:
         eid = row["entity_id"]
         did = row["doc_id"]
         cid = row["corpus_id"]
+        document_ref = (str(cid), str(did))
         mc = int(row["mention_count"] or 0)
 
         ent = by_entity.setdefault(
@@ -401,25 +410,41 @@ async def get_documents_as_clusters(
                 "bridge_doc_ids": [],
             },
         )
-        ent["per_doc_mentions"][did] = ent["per_doc_mentions"].get(did, 0) + mc
+        ent["per_doc_mentions"][document_ref] = (
+            ent["per_doc_mentions"].get(document_ref, 0) + mc
+        )
         ent["total_mentions"] += mc
-        if ent["per_doc_mentions"][did] > ent["primary_doc_count"]:
-            ent["primary_doc_count"] = ent["per_doc_mentions"][did]
+        if ent["per_doc_mentions"][document_ref] > ent["primary_doc_count"]:
+            ent["primary_doc_count"] = ent["per_doc_mentions"][document_ref]
             ent["primary_doc_id"] = did
+            ent["primary_corpus_id"] = cid
+            ent["primary_document_ref"] = document_ref
 
         cluster_meta.setdefault(
-            did, {"cluster_id": did, "corpus_id": cid, "entity_count": 0}
+            document_ref,
+            {"cluster_id": did, "corpus_id": cid, "entity_count": 0},
         )
-        cluster_entity_lists.setdefault(did, []).append((eid, mc))
+        cluster_entity_lists.setdefault(document_ref, []).append((eid, mc))
 
     # Compute bridge_doc_ids and apply min_entity_mentions threshold.
     nodes: list[dict] = []
     for ent in by_entity.values():
         if ent["total_mentions"] < min_entity_mentions:
             continue
-        ent["bridge_doc_ids"] = [
-            d for d in ent["per_doc_mentions"].keys() if d != ent["primary_doc_id"]
+        bridge_refs = [
+            ref
+            for ref in ent["per_doc_mentions"].keys()
+            if ref != ent.get("primary_document_ref")
         ]
+        ent["bridge_doc_ids"] = [ref[1] for ref in bridge_refs]
+        ent["bridge_document_refs"] = [
+            {"corpus_id": ref[0], "doc_id": ref[1]} for ref in bridge_refs
+        ]
+        ent["per_doc_mentions"] = {
+            f"{ref[0]}|{ref[1]}": count
+            for ref, count in ent["per_doc_mentions"].items()
+        }
+        ent.pop("primary_document_ref", None)
         ent.pop("primary_doc_count", None)
         nodes.append(ent)
 
@@ -431,11 +456,11 @@ async def get_documents_as_clusters(
     surviving_node_ids = {n["id"] for n in nodes}
 
     # Compute per-cluster top entities + entity counts using only surviving nodes.
-    for did, ents in cluster_entity_lists.items():
+    for document_ref, ents in cluster_entity_lists.items():
         ents_alive = [(eid, mc) for eid, mc in ents if eid in surviving_node_ids]
         ents_alive.sort(key=lambda t: t[1], reverse=True)
-        cluster_meta[did]["entity_count"] = len(ents_alive)
-        cluster_meta[did]["top_entities"] = [
+        cluster_meta[document_ref]["entity_count"] = len(ents_alive)
+        cluster_meta[document_ref]["top_entities"] = [
             eid for eid, _ in ents_alive[:top_entities_per_cluster]
         ]
 
@@ -448,7 +473,9 @@ async def get_documents_as_clusters(
     truncated_edges = len(edges) >= max_edges
 
     # Annotate each edge as cross_cluster vs intra_cluster using primary_doc_id.
-    primary_by_id = {n["id"]: n["primary_doc_id"] for n in nodes}
+    primary_by_id = {
+        n["id"]: (n.get("primary_corpus_id"), n.get("primary_doc_id")) for n in nodes
+    }
     for e in edges:
         sp = primary_by_id.get(e["source"])
         tp = primary_by_id.get(e["target"])
@@ -501,7 +528,11 @@ async def get_entity_relations(
               $corpus_id IN coalesce(r.corpus_ids, [])
               OR EXISTS {{
                   MATCH (ec:Chunk {{corpus_id: $corpus_id}})
-                  WHERE ec.chunk_id IN coalesce(r.evidence_chunk_ids, [])
+                  WHERE ec.corpus_id + '|' + ec.chunk_id IN coalesce(r.evidence_chunk_keys, [])
+                     OR (
+                         none(key IN coalesce(r.evidence_chunk_keys, []) WHERE key STARTS WITH $corpus_id + '|')
+                         AND ec.chunk_id IN coalesce(r.evidence_chunk_ids, [])
+                     )
               }}
           )
     RETURN e.entity_id    AS subject_id,
@@ -521,7 +552,11 @@ async def get_entity_relations(
               $corpus_id IN coalesce(r.corpus_ids, [])
               OR EXISTS {{
                   MATCH (ec:Chunk {{corpus_id: $corpus_id}})
-                  WHERE ec.chunk_id IN coalesce(r.evidence_chunk_ids, [])
+                  WHERE ec.corpus_id + '|' + ec.chunk_id IN coalesce(r.evidence_chunk_keys, [])
+                     OR (
+                         none(key IN coalesce(r.evidence_chunk_keys, []) WHERE key STARTS WITH $corpus_id + '|')
+                         AND ec.chunk_id IN coalesce(r.evidence_chunk_ids, [])
+                     )
               }}
           )
     RETURN e2.entity_id   AS subject_id,
@@ -605,8 +640,14 @@ async def get_full_corpora_graph(
     ORDER BY coalesce(r.confidence, 0.0) DESC
     LIMIT $max_edges
     OPTIONAL MATCH (ec:Chunk)
-    WHERE ec.chunk_id IN coalesce(r.evidence_chunk_ids, [])
-      AND ec.corpus_id IN $corpus_ids
+    WHERE ec.corpus_id IN $corpus_ids
+      AND (
+          ec.corpus_id + '|' + ec.chunk_id IN coalesce(r.evidence_chunk_keys, [])
+          OR (
+              none(key IN coalesce(r.evidence_chunk_keys, []) WHERE key STARTS WITH ec.corpus_id + '|')
+              AND ec.chunk_id IN coalesce(r.evidence_chunk_ids, [])
+          )
+      )
     WITH a, b, r, source_corpora, collect(DISTINCT ec.chunk_id) AS selected_evidence_chunk_ids
     RETURN a.entity_id AS source,
            b.entity_id AS target,
@@ -651,7 +692,9 @@ async def get_full_corpora_graph(
     surviving_edges: list[dict] = []
     requested_corpora = set(corpus_ids)
     for e in edges:
-        sc = sorted(cid for cid in (e.get("source_corpora") or []) if cid in requested_corpora)
+        sc = sorted(
+            cid for cid in (e.get("source_corpora") or []) if cid in requested_corpora
+        )
         if not sc:
             continue
         e["source_corpora"] = sc
@@ -716,8 +759,14 @@ async def get_concept_community_full(
     ORDER BY coalesce(r.confidence, 0.0) DESC
     LIMIT $max_edges
     OPTIONAL MATCH (ec:Chunk)
-    WHERE ec.chunk_id IN coalesce(r.evidence_chunk_ids, [])
-      AND ec.corpus_id IN $corpus_ids
+    WHERE ec.corpus_id IN $corpus_ids
+      AND (
+          ec.corpus_id + '|' + ec.chunk_id IN coalesce(r.evidence_chunk_keys, [])
+          OR (
+              none(key IN coalesce(r.evidence_chunk_keys, []) WHERE key STARTS WITH ec.corpus_id + '|')
+              AND ec.chunk_id IN coalesce(r.evidence_chunk_ids, [])
+          )
+      )
     WITH a, b, r, source_corpora, collect(DISTINCT ec.chunk_id) AS selected_evidence_chunk_ids
     RETURN a.entity_id AS source,
            b.entity_id AS target,
@@ -755,7 +804,9 @@ async def get_concept_community_full(
     surviving: list[dict] = []
     requested_corpora = set(corpus_ids)
     for e in edges:
-        sc = sorted(cid for cid in (e.get("source_corpora") or []) if cid in requested_corpora)
+        sc = sorted(
+            cid for cid in (e.get("source_corpora") or []) if cid in requested_corpora
+        )
         if not sc:
             continue
         e["source_corpora"] = sc

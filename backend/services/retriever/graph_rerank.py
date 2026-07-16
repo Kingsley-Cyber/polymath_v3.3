@@ -69,20 +69,21 @@ async def apply_graph_degree_boost(
     if not chunks or neo4j_driver is None or not corpus_ids:
         return chunks
 
-    chunk_ids: list[str] = [
-        str(c.chunk_id) for c in chunks if getattr(c, "chunk_id", None)
+    chunk_refs: list[dict[str, str]] = [
+        {"corpus_id": str(c.corpus_id), "chunk_id": str(c.chunk_id)}
+        for c in chunks
+        if getattr(c, "chunk_id", None) and getattr(c, "corpus_id", None)
     ]
-    if not chunk_ids:
+    if not chunk_refs:
         return chunks
 
     cypher = """
-    UNWIND $chunk_ids AS cid
-    MATCH (c:Chunk {chunk_id: cid})-[:MENTIONS]->(e:Entity)
-    WHERE c.corpus_id IN $corpus_ids
-    WITH c.chunk_id AS chunk_id, e
+    UNWIND $chunk_refs AS ref
+    MATCH (c:Chunk {corpus_id: ref.corpus_id, chunk_id: ref.chunk_id})-[:MENTIONS]->(e:Entity)
+    WITH c.corpus_id AS corpus_id, c.chunk_id AS chunk_id, e
     OPTIONAL MATCH (e)-[r:RELATES_TO]-()
-    WITH chunk_id, e, count(r) AS degree
-    RETURN chunk_id,
+    WITH corpus_id, chunk_id, e, count(r) AS degree
+    RETURN corpus_id, chunk_id,
            max(
                CASE
                    WHEN coalesce(e.generic_entity, false)
@@ -92,28 +93,29 @@ async def apply_graph_degree_boost(
                END
            ) AS max_degree
     """
-    degree_by_id: dict[str, int] = {}
+    degree_by_ref: dict[tuple[str, str], int] = {}
     try:
         async with neo4j_driver.session() as session:
-            result = await session.run(cypher, chunk_ids=chunk_ids, corpus_ids=corpus_ids)
+            result = await session.run(cypher, chunk_refs=chunk_refs)
             async for record in result:
                 cid = str(record.get("chunk_id") or "")
+                corpus_id = str(record.get("corpus_id") or "")
                 deg = record.get("max_degree")
-                if cid and deg is not None:
+                if corpus_id and cid and deg is not None:
                     try:
-                        degree_by_id[cid] = int(deg)
+                        degree_by_ref[(corpus_id, cid)] = int(deg)
                     except Exception:
                         continue
     except Exception as exc:
         logger.warning(
             "graph_rerank: degree lookup failed (%d chunks, %d corpora): %s",
-            len(chunk_ids),
+            len(chunk_refs),
             len(corpus_ids),
             exc,
         )
         return chunks
 
-    if not degree_by_id:
+    if not degree_by_ref:
         # No chunks have :MENTIONS edges — common for pure-prose corpora
         # without Ghost B (use_neo4j=False). Skip silently.
         return chunks
@@ -124,7 +126,7 @@ async def apply_graph_degree_boost(
         cid = getattr(chunk, "chunk_id", None)
         if not cid:
             continue
-        degree = degree_by_id.get(str(cid), 0)
+        degree = degree_by_ref.get((str(chunk.corpus_id or ""), str(cid)), 0)
         if degree <= 0:
             continue
         capped = min(degree, MAX_DEGREE_CAP)
@@ -212,10 +214,12 @@ async def apply_graph_degree_boost_metrics_aware(
     if not chunks or neo4j_driver is None or not corpus_ids:
         return chunks
 
-    chunk_ids: list[str] = [
-        str(c.chunk_id) for c in chunks if getattr(c, "chunk_id", None)
+    chunk_refs: list[dict[str, str]] = [
+        {"corpus_id": str(c.corpus_id), "chunk_id": str(c.chunk_id)}
+        for c in chunks
+        if getattr(c, "chunk_id", None) and getattr(c, "corpus_id", None)
     ]
-    if not chunk_ids:
+    if not chunk_refs:
         return chunks
 
     # Same Cypher shape as the existing function, but returns the
@@ -224,17 +228,16 @@ async def apply_graph_degree_boost_metrics_aware(
     # PageRank cache; degree is still collected so cold-cache entries
     # contribute via the local signal.
     cypher = """
-    UNWIND $chunk_ids AS cid
-    MATCH (c:Chunk {chunk_id: cid})-[:MENTIONS]->(e:Entity)
-    WHERE c.corpus_id IN $corpus_ids
-    WITH c.chunk_id AS chunk_id, e
+    UNWIND $chunk_refs AS ref
+    MATCH (c:Chunk {corpus_id: ref.corpus_id, chunk_id: ref.chunk_id})-[:MENTIONS]->(e:Entity)
+    WITH c.corpus_id AS corpus_id, c.chunk_id AS chunk_id, e
     OPTIONAL MATCH (e)-[r:RELATES_TO]-()
-    WITH chunk_id,
+    WITH corpus_id, chunk_id,
          e.entity_id AS entity_id,
          coalesce(e.generic_entity, false) AS generic_entity,
          coalesce(e.graph_expansion_allowed, true) AS graph_expansion_allowed,
          count(r) AS degree
-    RETURN chunk_id,
+    RETURN corpus_id, chunk_id,
            collect({
                entity_id: entity_id,
                degree: CASE
@@ -245,19 +248,20 @@ async def apply_graph_degree_boost_metrics_aware(
                END
            }) AS entities
     """
-    chunk_to_entities: dict[str, list[dict]] = {}
+    chunk_to_entities: dict[tuple[str, str], list[dict]] = {}
     try:
         async with neo4j_driver.session() as session:
-            result = await session.run(cypher, chunk_ids=chunk_ids, corpus_ids=corpus_ids)
+            result = await session.run(cypher, chunk_refs=chunk_refs)
             async for record in result:
                 cid = str(record.get("chunk_id") or "")
+                corpus_id = str(record.get("corpus_id") or "")
                 entities = list(record.get("entities") or [])
-                if cid:
-                    chunk_to_entities[cid] = entities
+                if corpus_id and cid:
+                    chunk_to_entities[(corpus_id, cid)] = entities
     except Exception as exc:
         logger.warning(
             "graph_rerank metrics-aware: cypher failed (%d chunks): %s",
-            len(chunk_ids),
+            len(chunk_refs),
             exc,
         )
         return chunks
@@ -318,15 +322,17 @@ async def apply_graph_degree_boost_metrics_aware(
                 exc,
             )
 
-    by_chunk_id: dict[str, SourceChunk] = {
-        str(c.chunk_id): c for c in chunks if getattr(c, "chunk_id", None)
+    by_chunk_ref: dict[tuple[str, str], SourceChunk] = {
+        (str(c.corpus_id), str(c.chunk_id)): c
+        for c in chunks
+        if getattr(c, "chunk_id", None) and getattr(c, "corpus_id", None)
     }
 
     boosted_count = 0
     max_multiplier = 1.0
     pr_hit_count = 0
-    for cid, entities in chunk_to_entities.items():
-        chunk = by_chunk_id.get(cid)
+    for ref, entities in chunk_to_entities.items():
+        chunk = by_chunk_ref.get(ref)
         if chunk is None:
             continue
 

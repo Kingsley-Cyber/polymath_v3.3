@@ -90,7 +90,7 @@ async def baseline_counts(sess) -> dict:
 _SNAPSHOT = """
 MATCH (d:Entity {entity_id:$did})
 OPTIONAL MATCH (c:Chunk)-[m:MENTIONS]->(d)
-WITH d, collect({chunk:c.chunk_id, props:properties(m)}) AS mentions
+WITH d, collect({chunk:c.chunk_id, corpus_id:c.corpus_id, props:properties(m)}) AS mentions
 OPTIONAL MATCH (d)-[ro:RELATES_TO]->(x:Entity) WHERE x.entity_id <> $did
 WITH d, mentions, collect({other:x.entity_id, props:properties(ro)}) AS rel_out
 OPTIONAL MATCH (y:Entity)-[ri:RELATES_TO]->(d) WHERE y.entity_id <> $did
@@ -98,7 +98,7 @@ WITH d, mentions, rel_out, collect({other:y.entity_id, props:properties(ri)}) AS
 OPTIONAL MATCH (d)-[sl:RELATES_TO]->(d)
 WITH d, mentions, rel_out, rel_in, collect({props:properties(sl)}) AS self_loops
 OPTIONAL MATCH (d)-[hf:HAS_FACT]->(f:Fact)
-WITH d, mentions, rel_out, rel_in, self_loops, collect({fact:f.fact_id, props:properties(hf)}) AS facts
+WITH d, mentions, rel_out, rel_in, self_loops, collect({fact:f.fact_id, corpus_id:f.corpus_id, props:properties(hf)}) AS facts
 RETURN properties(d) AS dprops, mentions, rel_out, rel_in, self_loops, facts
 """
 
@@ -215,7 +215,8 @@ _UNDO_DROP_TOMBSTONE = "MATCH (t:Entity {entity_id:'tombstone:'+$did}) DETACH DE
 _UNDO_RECREATE_NODE = "CREATE (d:Entity) SET d = $dprops"
 _UNDO_MENTIONS = """
 UNWIND $rows AS row
-MATCH (c:Chunk {chunk_id:row.chunk}) MATCH (d:Entity {entity_id:$did})
+MATCH (c:Chunk {corpus_id:row.corpus_id, chunk_id:row.chunk})
+MATCH (d:Entity {entity_id:$did})
 CREATE (c)-[r:MENTIONS]->(d) SET r = row.props
 """
 _UNDO_REL_OUT = """
@@ -235,7 +236,8 @@ CREATE (d)-[r:RELATES_TO]->(d) SET r = row.props
 """
 _UNDO_FACTS = """
 UNWIND $rows AS row
-MATCH (d:Entity {entity_id:$did}) MATCH (f:Fact {fact_id:row.fact})
+MATCH (d:Entity {entity_id:$did})
+MATCH (f:Fact {corpus_id:row.corpus_id, fact_id:row.fact})
 CREATE (d)-[r:HAS_FACT]->(f) SET r = row.props
 """
 
@@ -334,7 +336,7 @@ async def run_apply(corpus_id: str, decisions: set[str], limit: int | None) -> s
                 "kind": "run_header",
                 "decisions": sorted(decisions),
                 "planned": len(props),
-            "created_at": datetime.now(timezone.utc),
+                "created_at": datetime.now(timezone.utc),
             }
         )
         applied = 0
@@ -456,7 +458,7 @@ async def run_cleanup(corpus_id: str, run: str = "selftest") -> int:
             tombs = [
                 dict(r)
                 async for r in await sess.run(
-                "MATCH (t:Entity {tombstone:true, merge_run:$run}) "
+                    "MATCH (t:Entity {tombstone:true, merge_run:$run}) "
                     "RETURN t.original_entity_id AS did, t.merged_into AS sid",
                     run=run,
                 )

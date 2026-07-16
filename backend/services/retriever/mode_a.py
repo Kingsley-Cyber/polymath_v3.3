@@ -20,6 +20,14 @@ from services.retriever.graph_payload import (
 logger = logging.getLogger(__name__)
 
 
+def _chunk_ref_key(corpus_id: str, chunk_id: str) -> str:
+    return f"{corpus_id}|{chunk_id}"
+
+
+def _chunk_ref_payload(corpus_id: str, chunk_id: str) -> dict[str, str]:
+    return {"corpus_id": corpus_id, "chunk_id": chunk_id}
+
+
 class ModeAExpansion:
     """Traverses Chunk → Entity ← Chunk to surface structurally related context."""
 
@@ -55,20 +63,24 @@ class ModeAExpansion:
             1,
             int(seed_limit or getattr(st, "GRAPH_SEED_CHUNKS", 8)),
         )
-        ordered_pool_ids = [
-            c.chunk_id
+        ordered_pool_refs = [
+            (str(c.corpus_id or ""), str(c.chunk_id or ""))
             for c in sorted(
                 merged_pool,
                 key=lambda chunk: float(getattr(chunk, "score", 0.0) or 0.0),
                 reverse=True,
             )
-            if c.chunk_id
+            if c.chunk_id and c.corpus_id
         ]
-        if not ordered_pool_ids:
+        if not ordered_pool_refs:
             return []
         # G1 preference may reorder within this window but never reach past it,
         # so a rank-40 relation-bearing chunk cannot displace the true top pool.
-        candidate_ids = ordered_pool_ids[: max(effective_seed_limit * 3, effective_seed_limit)]
+        candidate_refs = ordered_pool_refs[
+            : max(effective_seed_limit * 3, effective_seed_limit)
+        ]
+        candidate_keys = [_chunk_ref_key(*ref) for ref in candidate_refs]
+        candidate_ref_by_key = dict(zip(candidate_keys, candidate_refs))
 
         # G3 — whole-result TTL cache. Everything below is deterministic given
         # (corpora, candidate window, limit, query) + DB state; TTL bounds staleness.
@@ -83,13 +95,15 @@ class ModeAExpansion:
             # TTL serves the previous mode's expansion.
             _cd = str(getattr(st, "CROSS_DOMAIN_EMPHASIS", "balanced"))
             ckey = ExpansionCache.key(
-                corpus_ids, candidate_ids, limit, f"{query or ''}|cd={_cd}"
+                corpus_ids, candidate_keys, limit, f"{query or ''}|cd={_cd}"
             )
             cached = self._cache.get(ckey, _copy)
             if cached is not None:
                 logger.info(
                     "Mode A expansion cache HIT (%d chunks, hits=%d misses=%d)",
-                    len(cached), self._cache.hits, self._cache.misses,
+                    len(cached),
+                    self._cache.hits,
+                    self._cache.misses,
                 )
                 return cached
 
@@ -104,24 +118,38 @@ class ModeAExpansion:
         ):
             try:
                 async for d in db["chunks"].find(
-                    {"chunk_id": {"$in": candidate_ids}},
-                    {"_id": 0, "chunk_id": 1, "has_relations": 1,
-                     "neighbor_chunks": 1, "entity_ids": 1},
+                    {
+                        "$or": [
+                            {"corpus_id": corpus_id, "chunk_id": chunk_id}
+                            for corpus_id, chunk_id in candidate_refs
+                        ]
+                    },
+                    {
+                        "_id": 0,
+                        "corpus_id": 1,
+                        "chunk_id": 1,
+                        "has_relations": 1,
+                        "neighbor_chunks": 1,
+                        "entity_ids": 1,
+                    },
                 ):
-                    payload_map[str(d["chunk_id"])] = d
+                    payload_map[
+                        _chunk_ref_key(str(d["corpus_id"]), str(d["chunk_id"]))
+                    ] = d
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Mode A payload read failed (%s) — legacy path", exc)
                 payload_map = {}
 
         if getattr(st, "GRAPH_SEED_PREFER_RELATIONS", True) and payload_map:
-            seed_ids = prefer_relation_seeds(
-                candidate_ids,
-                {cid: bool(d.get("has_relations")) for cid, d in payload_map.items()},
+            seed_keys = prefer_relation_seeds(
+                candidate_keys,
+                {key: bool(d.get("has_relations")) for key, d in payload_map.items()},
                 effective_seed_limit,
             )
         else:
-            seed_ids = candidate_ids[:effective_seed_limit]
-        if not seed_ids:
+            seed_keys = candidate_keys[:effective_seed_limit]
+        seed_refs = [candidate_ref_by_key[key] for key in seed_keys]
+        if not seed_refs:
             return []
 
         # A1 — query-side entity linking: query n-gram slugs -> indexed
@@ -168,42 +196,53 @@ class ModeAExpansion:
                                 k=int(getattr(st, "GRAPH_ENTITY_LINK_MAX_SEEDS", 4)),
                             )
                             rows = [dict(r) async for r in res]
-                        seen_seeds = set(seed_ids)
+                        seen_seeds = set(seed_refs)
                         for row in rows:
                             cid = row.get("chunk_id") or ""
-                            if not cid:
+                            corpus_id = row.get("corpus_id") or ""
+                            ref = (str(corpus_id), str(cid))
+                            if not cid or not corpus_id:
                                 continue
-                            if cid not in seen_seeds:
-                                seed_ids.append(cid)
-                                seen_seeds.add(cid)
-                            if cid in set(ordered_pool_ids):
+                            if ref not in seen_seeds:
+                                seed_refs.append(ref)
+                                seen_seeds.add(ref)
+                            if ref in set(ordered_pool_refs):
                                 continue  # already evidence — seed only
-                            linked_chunks.append(SourceChunk(
-                                chunk_id=cid,
-                                parent_id="",
-                                doc_id=row.get("doc_id") or "",
-                                corpus_id=row.get("corpus_id") or "",
-                                text="",
-                                summary=None,
-                                score=min(1.0, float(row.get("conf") or 0.5)),
-                                source_tier="graph_mode_a",
-                                provenance=[{
-                                    "entity": str(e).removeprefix("entity:").replace("_", " "),
-                                    "confidence": float(row.get("conf") or 0.5),
-                                    "surface_form": "",
-                                    "evidence_phrase": "",
-                                    "domain_type": "",
-                                    "canonical_family": "",
-                                    "entity_type": "",
-                                    "definitional_phrase": "",
-                                    "predicate": None,
-                                    "relation_family": "query_entity_link",
-                                } for e in (row.get("eids") or [])[:3]],
-                            ))
+                            linked_chunks.append(
+                                SourceChunk(
+                                    chunk_id=cid,
+                                    parent_id="",
+                                    doc_id=row.get("doc_id") or "",
+                                    corpus_id=row.get("corpus_id") or "",
+                                    text="",
+                                    summary=None,
+                                    score=min(1.0, float(row.get("conf") or 0.5)),
+                                    source_tier="graph_mode_a",
+                                    provenance=[
+                                        {
+                                            "entity": str(e)
+                                            .removeprefix("entity:")
+                                            .replace("_", " "),
+                                            "confidence": float(row.get("conf") or 0.5),
+                                            "surface_form": "",
+                                            "evidence_phrase": "",
+                                            "domain_type": "",
+                                            "canonical_family": "",
+                                            "entity_type": "",
+                                            "definitional_phrase": "",
+                                            "predicate": None,
+                                            "relation_family": "query_entity_link",
+                                        }
+                                        for e in (row.get("eids") or [])[:3]
+                                    ],
+                                )
+                            )
                         if linked:
                             logger.info(
                                 "Mode A entity linking: %d linked entities, "
-                                "%d direct chunks", len(linked), len(rows),
+                                "%d direct chunks",
+                                len(linked),
+                                len(rows),
                             )
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Mode A entity linking failed (%s) — skipped", exc)
@@ -215,66 +254,91 @@ class ModeAExpansion:
         run_mentions_cypher = True
         if getattr(st, "GRAPH_PAYLOAD_FIRST", True) and payload_map and db is not None:
             seed_union_eids: set[str] = set()
-            for cid in seed_ids:
-                seed_union_eids.update((payload_map.get(cid) or {}).get("entity_ids") or [])
+            for ref in seed_refs:
+                seed_union_eids.update(
+                    (payload_map.get(_chunk_ref_key(*ref)) or {}).get("entity_ids")
+                    or []
+                )
             ranked = score_payload_neighbors(
-                {cid: (payload_map.get(cid) or {}).get("neighbor_chunks") or []
-                 for cid in seed_ids},
-                exclude=set(ordered_pool_ids),
+                {
+                    _chunk_ref_key(*ref): (
+                        payload_map.get(_chunk_ref_key(*ref)) or {}
+                    ).get("neighbor_chunks")
+                    or []
+                    for ref in seed_refs
+                },
+                exclude={chunk_id for _corpus_id, chunk_id in ordered_pool_refs},
                 cap=max(int(limit) * 2, 16),
             )
             if ranked:
                 try:
                     from services.ingestion.section_classifier import NOISY_KINDS
 
-                    meta = {
-                        str(d["chunk_id"]): d
-                        async for d in db["chunks"].find(
-                            {"chunk_id": {"$in": [cid for cid, _, _ in ranked]}},
-                            {"_id": 0, "chunk_id": 1, "doc_id": 1, "corpus_id": 1,
-                             "chunk_kind": 1, "entity_ids": 1},
-                        )
-                    }
+                    meta: dict[str, list[dict]] = {}
+                    async for d in db["chunks"].find(
+                        {
+                            "chunk_id": {"$in": [cid for cid, _, _ in ranked]},
+                            "corpus_id": {"$in": list(corpus_ids or [])},
+                        },
+                        {
+                            "_id": 0,
+                            "chunk_id": 1,
+                            "doc_id": 1,
+                            "corpus_id": 1,
+                            "chunk_kind": 1,
+                            "entity_ids": 1,
+                        },
+                    ):
+                        meta.setdefault(str(d["chunk_id"]), []).append(d)
                     allowed = set(corpus_ids or [])
                     for cid, votes, score in ranked:
-                        m = meta.get(cid)
-                        if not m:
-                            continue
-                        if allowed and m.get("corpus_id") not in allowed:
-                            continue
-                        if m.get("chunk_kind") in NOISY_KINDS:
-                            continue
-                        shared = sorted(
-                            set(m.get("entity_ids") or []) & seed_union_eids
-                        )[:3]
-                        payload_chunks.append(SourceChunk(
-                            chunk_id=cid,
-                            parent_id="",
-                            doc_id=m.get("doc_id") or "",
-                            corpus_id=m.get("corpus_id") or "",
-                            text="",
-                            summary=None,
-                            score=score,
-                            source_tier="graph_mode_a",
-                            provenance=[{
-                                "entity": str(e).removeprefix("entity:").replace("_", " "),
-                                "confidence": score,
-                                "surface_form": "",
-                                "evidence_phrase": "",
-                                "domain_type": "",
-                                "canonical_family": "",
-                                "entity_type": "",
-                                "definitional_phrase": "",
-                                "predicate": None,
-                                "relation_family": "graph_payload",
-                            } for e in shared] or None,
-                        ))
+                        for m in meta.get(cid) or []:
+                            if allowed and m.get("corpus_id") not in allowed:
+                                continue
+                            if m.get("chunk_kind") in NOISY_KINDS:
+                                continue
+                            shared = sorted(
+                                set(m.get("entity_ids") or []) & seed_union_eids
+                            )[:3]
+                            payload_chunks.append(
+                                SourceChunk(
+                                    chunk_id=cid,
+                                    parent_id="",
+                                    doc_id=m.get("doc_id") or "",
+                                    corpus_id=m.get("corpus_id") or "",
+                                    text="",
+                                    summary=None,
+                                    score=score,
+                                    source_tier="graph_mode_a",
+                                    provenance=[
+                                        {
+                                            "entity": str(e)
+                                            .removeprefix("entity:")
+                                            .replace("_", " "),
+                                            "confidence": score,
+                                            "surface_form": "",
+                                            "evidence_phrase": "",
+                                            "domain_type": "",
+                                            "canonical_family": "",
+                                            "entity_type": "",
+                                            "definitional_phrase": "",
+                                            "predicate": None,
+                                            "relation_family": "graph_payload",
+                                        }
+                                        for e in shared
+                                    ]
+                                    or None,
+                                )
+                            )
                 except Exception as exc:  # noqa: BLE001
                     logger.warning(
-                        "Mode A payload validation failed (%s) — escalating", exc,
+                        "Mode A payload validation failed (%s) — escalating",
+                        exc,
                     )
                     payload_chunks = []
-            if len(payload_chunks) >= int(getattr(st, "GRAPH_PAYLOAD_MIN_CANDIDATES", 4)):
+            if len(payload_chunks) >= int(
+                getattr(st, "GRAPH_PAYLOAD_MIN_CANDIDATES", 4)
+            ):
                 run_mentions_cypher = False
 
         # Phase 16.1 — confidence-weighted expansion via MENTIONS co-reference.
@@ -308,7 +372,7 @@ class ModeAExpansion:
                 if cap <= 0:
                     return []
                 return await self._expand_via_bridges(
-                    seed_ids=seed_ids,
+                    seed_refs=[_chunk_ref_payload(*ref) for ref in seed_refs],
                     corpus_ids=corpus_ids,
                     db=db,
                     limit=cap,
@@ -316,7 +380,8 @@ class ModeAExpansion:
             except Exception as exc:
                 logger.warning(
                     "Mode A bridge expansion failed (%s) — continuing with "
-                    "mentions + calls only", exc,
+                    "mentions + calls only",
+                    exc,
                 )
                 return []
 
@@ -325,22 +390,33 @@ class ModeAExpansion:
             # (historically multi-second) co-mention traversal entirely.
             if not run_mentions_cypher:
                 return []
-            return await self._expand_via_mentions(seed_ids, corpus_ids, limit)
+            return await self._expand_via_mentions(
+                [_chunk_ref_payload(*ref) for ref in seed_refs], corpus_ids, limit
+            )
 
         mention_chunks, calls_chunks, bridge_chunks = await asyncio.gather(
             _mentions(),
-            self._expand_via_calls(seed_ids, corpus_ids, limit),
+            self._expand_via_calls(
+                [_chunk_ref_payload(*ref) for ref in seed_refs], corpus_ids, limit
+            ),
             _bridges(),
         )
 
-        merged: dict[str, SourceChunk] = {}
-        for pool in (payload_chunks, linked_chunks, mention_chunks, calls_chunks, bridge_chunks):
+        merged: dict[tuple[str, str], SourceChunk] = {}
+        for pool in (
+            payload_chunks,
+            linked_chunks,
+            mention_chunks,
+            calls_chunks,
+            bridge_chunks,
+        ):
             for c in pool:
                 if not c.chunk_id:
                     continue
-                existing = merged.get(c.chunk_id)
+                key = (str(c.corpus_id or ""), str(c.chunk_id))
+                existing = merged.get(key)
                 if existing is None:
-                    merged[c.chunk_id] = c
+                    merged[key] = c
                 else:
                     # Same chunk surfaced via two or more patterns — sum
                     # scores, append provenance so the prompt can show
@@ -362,22 +438,25 @@ class ModeAExpansion:
             try:
                 from services.ingestion.section_classifier import NOISY_KINDS
 
-                noisy_ids = {
-                    str(doc["chunk_id"])
+                noisy_refs = {
+                    (str(doc["corpus_id"]), str(doc["chunk_id"]))
                     async for doc in db["chunks"].find(
                         {
-                            "chunk_id": {"$in": list(merged.keys())},
+                            "$or": [
+                                {"corpus_id": corpus_id, "chunk_id": chunk_id}
+                                for corpus_id, chunk_id in merged
+                            ],
                             "chunk_kind": {"$in": list(NOISY_KINDS)},
                         },
-                        {"_id": 0, "chunk_id": 1},
+                        {"_id": 0, "corpus_id": 1, "chunk_id": 1},
                     )
                 }
-                for _nid in noisy_ids:
-                    merged.pop(_nid, None)
-                if noisy_ids:
+                for ref in noisy_refs:
+                    merged.pop(ref, None)
+                if noisy_refs:
                     logger.info(
                         "Mode A NOISY_KINDS filter: dropped %d co-mention chunk(s)",
-                        len(noisy_ids),
+                        len(noisy_refs),
                     )
             except Exception as exc:
                 logger.warning(
@@ -390,10 +469,13 @@ class ModeAExpansion:
             "Mode A expansion: %d unique chunks (payload=%d, linked=%d, "
             "mentions=%d, calls=%d, bridges=%d, seeds=%d, cap=%d, "
             "mentions_cypher=%s, top score %.3f)",
-            len(expanded), len(payload_chunks), len(linked_chunks),
-            len(mention_chunks), len(calls_chunks),
+            len(expanded),
+            len(payload_chunks),
+            len(linked_chunks),
+            len(mention_chunks),
+            len(calls_chunks),
             len(bridge_chunks),
-            len(seed_ids),
+            len(seed_refs),
             int(limit),
             "ran" if run_mentions_cypher else "skipped",
             expanded[0].score if expanded else 0.0,
@@ -405,7 +487,7 @@ class ModeAExpansion:
     async def _expand_via_bridges(
         self,
         *,
-        seed_ids: List[str],
+        seed_refs: List[dict[str, str]],
         corpus_ids: List[str],
         db,
         limit: int,
@@ -432,15 +514,18 @@ class ModeAExpansion:
         """
         # Step 1 — seed entity_ids
         seed_entity_cypher = """
-        MATCH (c:Chunk)-[:MENTIONS]->(e:Entity)
-        WHERE c.chunk_id IN $seed_ids
+        UNWIND $seed_refs AS seed_ref
+        MATCH (c:Chunk {corpus_id: seed_ref.corpus_id, chunk_id: seed_ref.chunk_id})
+              -[:MENTIONS]->(e:Entity)
         RETURN collect(DISTINCT e.entity_id) AS seed_entity_ids
         """
         try:
             async with self._driver.session() as session:
-                result = await session.run(seed_entity_cypher, seed_ids=seed_ids)
+                result = await session.run(seed_entity_cypher, seed_refs=seed_refs)
                 row = await result.single()
-                seed_entity_ids = set(row.get("seed_entity_ids") or []) if row else set()
+                seed_entity_ids = (
+                    set(row.get("seed_entity_ids") or []) if row else set()
+                )
         except Exception as exc:
             logger.debug("Mode A bridges: seed entity Cypher failed: %s", exc)
             return []
@@ -456,7 +541,8 @@ class ModeAExpansion:
         except ImportError as exc:
             logger.warning(
                 "Mode A bridges: analytics module import failed (%s) — "
-                "skipping bonus expansion", exc,
+                "skipping bonus expansion",
+                exc,
             )
             return []
 
@@ -464,7 +550,9 @@ class ModeAExpansion:
         # provenance ("fragile to X via path_count=N", "analog of Y", etc.)
         bonus_scores: dict[str, tuple[float, str, str]] = {}
 
-        def _consider(eid: str, score: float, bridge_type: str, partner_name: str) -> None:
+        def _consider(
+            eid: str, score: float, bridge_type: str, partner_name: str
+        ) -> None:
             if not eid or eid in seed_entity_ids:
                 return
             cur = bonus_scores.get(eid)
@@ -502,11 +590,13 @@ class ModeAExpansion:
                     path_count = int(fb.get("path_count") or 1)
                     base_score = 0.4 + 0.05 * min(path_count, 4)
                     if src in seed_entity_ids and tgt not in seed_entity_ids:
-                        _consider(tgt, base_score, "fragile",
-                                  fb.get("source_name") or src)
+                        _consider(
+                            tgt, base_score, "fragile", fb.get("source_name") or src
+                        )
                     elif tgt in seed_entity_ids and src not in seed_entity_ids:
-                        _consider(src, base_score, "fragile",
-                                  fb.get("target_name") or tgt)
+                        _consider(
+                            src, base_score, "fragile", fb.get("target_name") or tgt
+                        )
                 # terminological_gaps — high topology + high jaccard.
                 # Score blends both signals; ranges naturally 0.0-0.9.
                 for tg in getattr(metrics, "terminological_gaps", None) or []:
@@ -519,11 +609,13 @@ class ModeAExpansion:
                         continue
                     score = min(0.9, sim * jac * 2.0)
                     if src in seed_entity_ids and tgt not in seed_entity_ids:
-                        _consider(tgt, score, "terminological",
-                                  tg.get("source_name") or src)
+                        _consider(
+                            tgt, score, "terminological", tg.get("source_name") or src
+                        )
                     elif tgt in seed_entity_ids and src not in seed_entity_ids:
-                        _consider(src, score, "terminological",
-                                  tg.get("target_name") or tgt)
+                        _consider(
+                            src, score, "terminological", tg.get("target_name") or tgt
+                        )
                 # structural_analogies — high topology, low jaccard.
                 # Slightly capped to keep analogies below
                 # terminological/fragile in calibration.
@@ -536,11 +628,9 @@ class ModeAExpansion:
                         continue
                     score = min(0.7, sim)
                     if src in seed_entity_ids and tgt not in seed_entity_ids:
-                        _consider(tgt, score, "analogy",
-                                  sa.get("source_name") or src)
+                        _consider(tgt, score, "analogy", sa.get("source_name") or src)
                     elif tgt in seed_entity_ids and src not in seed_entity_ids:
-                        _consider(src, score, "analogy",
-                                  sa.get("target_name") or tgt)
+                        _consider(src, score, "analogy", sa.get("target_name") or tgt)
                 # transfer_candidates — flattened to (hub, analog) pairs.
                 # Hub must be a seed entity; each analog becomes a bonus.
                 for tc in getattr(metrics, "transfer_candidates", None) or []:
@@ -557,9 +647,7 @@ class ModeAExpansion:
                         score = min(0.6, sim)
                         _consider(analog_eid, score, "transfer", hub_name)
             except Exception as exc:
-                logger.debug(
-                    "Mode A bridges: cache miss corpus=%s: %s", corpus_id, exc
-                )
+                logger.debug("Mode A bridges: cache miss corpus=%s: %s", corpus_id, exc)
 
         if not bonus_scores or warm_corpora == 0:
             return []
@@ -579,7 +667,8 @@ class ModeAExpansion:
         UNWIND $entity_ids AS eid
         MATCH (e:Entity {entity_id: eid})<-[m:MENTIONS]-(c:Chunk)
         WHERE c.corpus_id IN $corpus_ids
-          AND NOT c.chunk_id IN $seed_ids
+          AND none(seed_ref IN $seed_refs WHERE
+              seed_ref.corpus_id = c.corpus_id AND seed_ref.chunk_id = c.chunk_id)
         WITH eid, c, max(coalesce(m.confidence, 0.5)) AS conf
         WITH eid, c, conf
         ORDER BY conf DESC
@@ -597,7 +686,7 @@ class ModeAExpansion:
                     bonus_cypher,
                     entity_ids=entity_id_list,
                     corpus_ids=corpus_ids,
-                    seed_ids=seed_ids,
+                    seed_refs=seed_refs,
                     hard_cap=hard_cap,
                 )
                 rows = [dict(r) async for r in result]
@@ -607,12 +696,14 @@ class ModeAExpansion:
 
         # Score each row: bonus_score × mention_confidence. Cap at 1.0.
         out: list[SourceChunk] = []
-        seen: set[str] = set()
+        seen: set[tuple[str, str]] = set()
         for row in rows:
             cid = str(row.get("chunk_id") or "")
-            if not cid or cid in seen:
+            corpus_id = str(row.get("corpus_id") or "")
+            ref = (corpus_id, cid)
+            if not cid or not corpus_id or ref in seen:
                 continue
-            seen.add(cid)
+            seen.add(ref)
             via_eid = str(row.get("via_entity_id") or "")
             bonus_tuple = bonus_scores.get(via_eid)
             if bonus_tuple is None:
@@ -627,23 +718,27 @@ class ModeAExpansion:
             # are filled by the downstream Mongo hydrate step, not here.
             # source_tier="graph_mode_a_bridge" so the renderer can tell
             # bridge chunks apart from mention/calls chunks.
-            out.append(SourceChunk(
-                chunk_id=cid,
-                parent_id="",
-                doc_id=str(row.get("doc_id") or ""),
-                corpus_id=str(row.get("corpus_id") or ""),
-                text="",
-                summary=None,
-                score=final_score,
-                source_tier="graph_mode_a_bridge",
-                provenance=[{
-                    "via": "bridge",
-                    "bridge_type": bridge_type,
-                    "via_entity": partner_name,
-                    "bonus_score": round(bonus_score, 3),
-                    "mention_conf": round(mention_conf, 3),
-                }],
-            ))
+            out.append(
+                SourceChunk(
+                    chunk_id=cid,
+                    parent_id="",
+                    doc_id=str(row.get("doc_id") or ""),
+                    corpus_id=str(row.get("corpus_id") or ""),
+                    text="",
+                    summary=None,
+                    score=final_score,
+                    source_tier="graph_mode_a_bridge",
+                    provenance=[
+                        {
+                            "via": "bridge",
+                            "bridge_type": bridge_type,
+                            "via_entity": partner_name,
+                            "bonus_score": round(bonus_score, 3),
+                            "mention_conf": round(mention_conf, 3),
+                        }
+                    ],
+                )
+            )
 
         out.sort(key=lambda c: c.score, reverse=True)
         out = out[:limit]
@@ -660,7 +755,7 @@ class ModeAExpansion:
 
     async def _expand_via_mentions(
         self,
-        seed_ids: List[str],
+        seed_refs: List[dict[str, str]],
         corpus_ids: Optional[List[str]],
         limit: int,
     ) -> List[SourceChunk]:
@@ -672,9 +767,12 @@ class ModeAExpansion:
         them; CALLS-walk (below) fills them with predicate='calls'.
         """
         cypher = """
-        MATCH (seed:Chunk)-[s:MENTIONS]->(e:Entity)<-[x:MENTIONS]-(expanded:Chunk)
-        WHERE seed.chunk_id IN $seed_ids
-          AND NOT expanded.chunk_id IN $seed_ids
+        UNWIND $seed_refs AS seed_ref
+        MATCH (seed:Chunk {corpus_id: seed_ref.corpus_id, chunk_id: seed_ref.chunk_id})
+              -[s:MENTIONS]->(e:Entity)<-[x:MENTIONS]-(expanded:Chunk)
+        WHERE none(other_ref IN $seed_refs WHERE
+              other_ref.corpus_id = expanded.corpus_id
+              AND other_ref.chunk_id = expanded.chunk_id)
         """
         if corpus_ids:
             cypher += "  AND expanded.corpus_id IN $corpus_ids\n"
@@ -705,19 +803,22 @@ class ModeAExpansion:
             async with self._driver.session() as session:
                 result = await session.run(
                     cypher,
-                    seed_ids=seed_ids,
+                    seed_refs=seed_refs,
                     corpus_ids=corpus_ids or [],
                     limit=limit,
                 )
                 rows = [dict(r) async for r in result]
-            return [self._row_to_chunk(row, predicate=None, relation_family=None) for row in rows]
+            return [
+                self._row_to_chunk(row, predicate=None, relation_family=None)
+                for row in rows
+            ]
         except Exception as e:
             logger.error("Mode A MENTIONS expansion failed: %s", e)
             return []
 
     async def _expand_via_calls(
         self,
-        seed_ids: List[str],
+        seed_refs: List[dict[str, str]],
         corpus_ids: Optional[List[str]],
         limit: int,
     ) -> List[SourceChunk]:
@@ -736,11 +837,14 @@ class ModeAExpansion:
         same convention as RELATES_TO).
         """
         cypher = """
-        MATCH (seed:Chunk)-[s:MENTIONS]->(seed_e:Entity)
+        UNWIND $seed_refs AS seed_ref
+        MATCH (seed:Chunk {corpus_id: seed_ref.corpus_id, chunk_id: seed_ref.chunk_id})
+              -[s:MENTIONS]->(seed_e:Entity)
         MATCH (seed_e)-[c:CALLS]-(neighbor_e:Entity)
         MATCH (neighbor_e)<-[x:MENTIONS]-(expanded:Chunk)
-        WHERE seed.chunk_id IN $seed_ids
-          AND NOT expanded.chunk_id IN $seed_ids
+        WHERE none(other_ref IN $seed_refs WHERE
+              other_ref.corpus_id = expanded.corpus_id
+              AND other_ref.chunk_id = expanded.chunk_id)
           AND seed_e <> neighbor_e
         """
         if corpus_ids:
@@ -777,13 +881,15 @@ class ModeAExpansion:
             async with self._driver.session() as session:
                 result = await session.run(
                     cypher,
-                    seed_ids=seed_ids,
+                    seed_refs=seed_refs,
                     corpus_ids=corpus_ids or [],
                     limit=limit,
                 )
                 rows = [dict(r) async for r in result]
             return [
-                self._row_to_chunk(row, predicate="calls", relation_family="code_call_graph")
+                self._row_to_chunk(
+                    row, predicate="calls", relation_family="code_call_graph"
+                )
                 for row in rows
             ]
         except Exception as e:

@@ -153,17 +153,11 @@ def _tree_routing_lane_ids(lanes: list[Any]) -> list[str]:
     """Use full RAPTOR descent for required obligations, not advisory probes."""
 
     required = [
-        lane.lane_id
-        for lane in lanes
-        if lane.role == "core" and bool(lane.required)
+        lane.lane_id for lane in lanes if lane.role == "core" and bool(lane.required)
     ]
     if required:
         return required
-    return [
-        lane.lane_id
-        for lane in lanes
-        if lane.role in {"core", "original"}
-    ][:1]
+    return [lane.lane_id for lane in lanes if lane.role in {"core", "original"}][:1]
 
 
 def _planned_final_result_limit(
@@ -609,13 +603,14 @@ def _fact_seed_chunks(facts: list[SourceFact]) -> list[SourceChunk]:
     compact evidence text with the full parent chunk.
     """
     chunks: list[SourceChunk] = []
-    seen_chunk_ids: set[str] = set()
+    seen_chunk_ids: set[tuple[str, str]] = set()
 
     for fact in facts:
         chunk_id = (fact.chunk_id or "").strip()
-        if not chunk_id or chunk_id in seen_chunk_ids:
+        chunk_key = (str(fact.corpus_id or ""), chunk_id)
+        if not chunk_id or chunk_key in seen_chunk_ids:
             continue
-        seen_chunk_ids.add(chunk_id)
+        seen_chunk_ids.add(chunk_key)
         confidence = max(0.0, min(1.0, float(fact.confidence or 0.0)))
         fact_text = _fact_context_text(fact)
         chunks.append(
@@ -662,12 +657,22 @@ async def _drop_noisy_fact_seed_chunks(chunks: list[SourceChunk]) -> list[Source
         db = getattr(ingestion_service, "db", None)
         if db is None:
             return chunks
-        ids = [c.chunk_id for c in chunks if c.chunk_id]
+        refs = [
+            (str(c.corpus_id or ""), str(c.chunk_id))
+            for c in chunks
+            if c.chunk_id and c.corpus_id
+        ]
         noisy = {
-            doc["chunk_id"]
+            (str(doc["corpus_id"]), str(doc["chunk_id"]))
             async for doc in db["chunks"].find(
-                {"chunk_id": {"$in": ids}, "chunk_kind": {"$in": list(NOISY_KINDS)}},
-                {"_id": 0, "chunk_id": 1},
+                {
+                    "$or": [
+                        {"corpus_id": corpus_id, "chunk_id": chunk_id}
+                        for corpus_id, chunk_id in refs
+                    ],
+                    "chunk_kind": {"$in": list(NOISY_KINDS)},
+                },
+                {"_id": 0, "corpus_id": 1, "chunk_id": 1},
             )
         }
         if not noisy:
@@ -676,7 +681,11 @@ async def _drop_noisy_fact_seed_chunks(chunks: list[SourceChunk]) -> list[Source
             "fact-seed NOISY_KINDS filter: dropped %d citation evidence chunk(s)",
             len(noisy),
         )
-        return [c for c in chunks if c.chunk_id not in noisy]
+        return [
+            c
+            for c in chunks
+            if (str(c.corpus_id or ""), str(c.chunk_id or "")) not in noisy
+        ]
     except Exception as exc:  # noqa: BLE001
         logger.warning("fact-seed NOISY_KINDS filter skipped (%s)", exc)
         return chunks
@@ -1442,9 +1451,7 @@ class RetrieverOrchestrator:
         required_lane_ids = [
             lane.lane_id for lane in lanes if lane.role == "core" and lane.required
         ]
-        protected_lane_ids = [
-            lane.lane_id for lane in lanes if lane.role == "original"
-        ]
+        protected_lane_ids = [lane.lane_id for lane in lanes if lane.role == "original"]
         broad_document_routing = bool(
             len(required_lane_ids) >= 3
             or plan.complexity
@@ -1632,7 +1639,9 @@ class RetrieverOrchestrator:
                             for lane, vector in zip(lanes, vectors)
                             if lane.role == "original" and vector is not None
                         ),
-                        next((vector for vector in vectors if vector is not None), None),
+                        next(
+                            (vector for vector in vectors if vector is not None), None
+                        ),
                     )
                     (
                         planner_extra_lanes,
@@ -1883,9 +1892,9 @@ class RetrieverOrchestrator:
                         reserve=1.0,
                     ),
                 )
-                hierarchy_binding_diagnostics["deadline_s"] = (
-                    hierarchy_vocabulary_deadline_s
-                )
+                hierarchy_binding_diagnostics[
+                    "deadline_s"
+                ] = hierarchy_vocabulary_deadline_s
                 if hierarchy_matches:
                     existing_match_ids = {
                         str(row.get("lexicon_id") or "")
@@ -1935,9 +1944,7 @@ class RetrieverOrchestrator:
                                 novel_matches.append(match)
                                 existing_match_ids.add(lexicon_id)
                         hierarchy_reference_rejections.extend(reference_rejections)
-                    hierarchy_binding_diagnostics[
-                        "definition_reference_matches"
-                    ] = sum(
+                    hierarchy_binding_diagnostics["definition_reference_matches"] = sum(
                         1
                         for match in novel_matches
                         if str(match.get("applicability") or "")
@@ -1955,9 +1962,7 @@ class RetrieverOrchestrator:
                         )
                         or 0
                     ) + int(
-                        hierarchy_binding_diagnostics[
-                            "definition_reference_matches"
-                        ]
+                        hierarchy_binding_diagnostics["definition_reference_matches"]
                     )
                     vocabulary_diagnostics.setdefault("matches", []).extend(
                         novel_matches
@@ -1977,14 +1982,15 @@ class RetrieverOrchestrator:
                             str(match.get("applicability") or "")
                             == "corpus_definition_reference"
                         ):
-                            corpus_diagnostics[
-                                "definition_reference_match_count"
-                            ] = int(
-                                corpus_diagnostics.get(
-                                    "definition_reference_match_count"
+                            corpus_diagnostics["definition_reference_match_count"] = (
+                                int(
+                                    corpus_diagnostics.get(
+                                        "definition_reference_match_count"
+                                    )
+                                    or 0
                                 )
-                                or 0
-                            ) + 1
+                                + 1
+                            )
 
                     # Route hints require document profiles. Reuse the already
                     # selected Tier-0 cards instead of issuing another store read.
@@ -2155,13 +2161,15 @@ class RetrieverOrchestrator:
             chunks: list[SourceChunk], lane_id: str
         ) -> list[SourceChunk]:
             route_scores = {
-                str(route.doc_id): float(route.score)
+                (str(route.corpus_id), str(route.doc_id)): float(route.score)
                 for route in document_routes.get(lane_id, [])
             }
             if not route_scores:
                 return chunks
             for chunk in chunks:
-                route_score = route_scores.get(str(chunk.doc_id or ""))
+                route_score = route_scores.get(
+                    (str(chunk.corpus_id or ""), str(chunk.doc_id or ""))
+                )
                 if route_score is None:
                     continue
                 metadata = dict(chunk.metadata or {})
@@ -2201,15 +2209,19 @@ class RetrieverOrchestrator:
 
         async def _lane_pools(lane, vector) -> list[PlannedPool]:
             lane_started = perf_counter()
-            routed_doc_ids = (
-                [route.doc_id for route in document_routes.get(lane.lane_id, [])]
+            routed_doc_refs = (
+                [
+                    (str(route.corpus_id), str(route.doc_id))
+                    for route in document_routes.get(lane.lane_id, [])
+                ]
                 if lane.role == "core"
-                else None
+                else []
             )
-            is_routed_core = bool(routed_doc_ids)
+            routed_doc_ids = [doc_id for _corpus_id, doc_id in routed_doc_refs]
+            is_routed_core = bool(routed_doc_refs)
             tree_routes_for_lane = list(summary_tree_routes.get(lane.lane_id) or [])
             tree_parent_ids_by_doc = {
-                str(route.doc_id): list(route.parent_ids)
+                (str(route.corpus_id), str(route.doc_id)): list(route.parent_ids)
                 for route in tree_routes_for_lane
             }
             tree_parent_ids = list(
@@ -2234,9 +2246,7 @@ class RetrieverOrchestrator:
                 lane_child_top_k = (
                     child_top_k if lane.role == "core" else min(6, child_top_k)
                 )
-            fair_routed_documents = bool(
-                lane.role == "core" and routed_doc_ids and len(routed_doc_ids) > 1
-            )
+            fair_routed_documents = bool(lane.role == "core" and routed_doc_refs)
 
             async def _summary_candidates() -> list[SourceChunk]:
                 if lane_summary_top_k <= 0 or vector is None:
@@ -2254,22 +2264,25 @@ class RetrieverOrchestrator:
                     )
                 per_document = max(
                     2,
-                    (lane_summary_top_k + len(routed_doc_ids) - 1)
-                    // len(routed_doc_ids),
+                    (lane_summary_top_k + len(routed_doc_refs) - 1)
+                    // len(routed_doc_refs),
                 )
                 rows = await asyncio.gather(
                     *(
                         funnel_a.search(
                             vector,
-                            corpus_ids,
+                            [route_corpus_id],
                             a_cols,
                             top_k=per_document,
                             fair_mode=True,
                             query_text=lane.query,
                             doc_ids=[doc_id],
-                            parent_ids=tree_parent_ids_by_doc.get(str(doc_id)) or None,
+                            parent_ids=(
+                                tree_parent_ids_by_doc.get((route_corpus_id, doc_id))
+                                or None
+                            ),
                         )
-                        for doc_id in routed_doc_ids
+                        for route_corpus_id, doc_id in routed_doc_refs
                     ),
                     return_exceptions=True,
                 )
@@ -2299,18 +2312,18 @@ class RetrieverOrchestrator:
                     )
                 per_document = max(
                     2,
-                    (lane_lexical_top_k + len(routed_doc_ids) - 1)
-                    // len(routed_doc_ids),
+                    (lane_lexical_top_k + len(routed_doc_refs) - 1)
+                    // len(routed_doc_refs),
                 )
                 rows = await asyncio.gather(
                     *(
                         lexical_retriever.search(
                             lane.query,
-                            corpus_ids,
+                            [route_corpus_id],
                             top_k=per_document,
                             doc_ids=[doc_id],
                         )
-                        for doc_id in routed_doc_ids
+                        for route_corpus_id, doc_id in routed_doc_refs
                     ),
                     return_exceptions=True,
                 )
@@ -2404,15 +2417,15 @@ class RetrieverOrchestrator:
                     if fair_routed_documents:
                         per_document = max(
                             4,
-                            (lane_child_top_k + len(routed_doc_ids) - 1)
-                            // len(routed_doc_ids),
+                            (lane_child_top_k + len(routed_doc_refs) - 1)
+                            // len(routed_doc_refs),
                         )
                         child_rows = await asyncio.wait_for(
                             asyncio.gather(
                                 *(
                                     funnel_b.search(
                                         vector,
-                                        corpus_ids,
+                                        [route_corpus_id],
                                         b_cols,
                                         top_k=per_document,
                                         query_text=lane.query,
@@ -2420,13 +2433,17 @@ class RetrieverOrchestrator:
                                         parent_ids=[
                                             str(chunk.parent_id)
                                             for chunk in summary_chunks
-                                            if str(chunk.doc_id or "") == str(doc_id)
+                                            if str(chunk.corpus_id or "")
+                                            == route_corpus_id
+                                            and str(chunk.doc_id or "") == str(doc_id)
                                             and str(chunk.parent_id or "").strip()
                                         ]
-                                        or tree_parent_ids_by_doc.get(str(doc_id))
+                                        or tree_parent_ids_by_doc.get(
+                                            (route_corpus_id, doc_id)
+                                        )
                                         or None,
                                     )
-                                    for doc_id in routed_doc_ids
+                                    for route_corpus_id, doc_id in routed_doc_refs
                                 ),
                                 return_exceptions=True,
                             ),
@@ -2485,14 +2502,22 @@ class RetrieverOrchestrator:
                             ),
                         )
                     if is_routed_core and routed_parent_ids and not child_raw:
-                        child_raw = await funnel_b.search(
-                            vector,
-                            corpus_ids,
-                            b_cols,
-                            top_k=min(8, lane_child_top_k),
-                            query_text=lane.query,
-                            doc_ids=routed_doc_ids,
+                        fallback_rows = await asyncio.gather(
+                            *(
+                                funnel_b.search(
+                                    vector,
+                                    [route_corpus_id],
+                                    b_cols,
+                                    top_k=min(8, lane_child_top_k),
+                                    query_text=lane.query,
+                                    doc_ids=[doc_id],
+                                )
+                                for route_corpus_id, doc_id in routed_doc_refs
+                            )
                         )
+                        child_raw = [
+                            chunk for row in fallback_rows for chunk in (row or [])
+                        ]
                 except Exception as exc:
                     child_raw = exc
 
@@ -2769,48 +2794,94 @@ class RetrieverOrchestrator:
             async def _repair_lane(lane_id: str) -> list[PlannedPool]:
                 lane = lanes_by_id[lane_id]
                 vector = vectors_by_lane_id.get(lane_id)
-                routed_doc_ids = [
-                    route.doc_id for route in document_routes.get(lane_id, [])
-                ] or None
+                routed_doc_refs = [
+                    (str(route.corpus_id), str(route.doc_id))
+                    for route in document_routes.get(lane_id, [])
+                ]
                 retrievers = ("dense", "summary", "lexical")
+
+                async def _repair_dense() -> list[SourceChunk]:
+                    if vector is None:
+                        return []
+                    if not routed_doc_refs:
+                        return await funnel_b.search(
+                            vector,
+                            corpus_ids,
+                            b_cols,
+                            top_k=min(child_top_k, 12),
+                            query_text=lane.query,
+                        )
+                    rows = await asyncio.gather(
+                        *(
+                            funnel_b.search(
+                                vector,
+                                [route_corpus_id],
+                                b_cols,
+                                top_k=min(child_top_k, 12),
+                                query_text=lane.query,
+                                doc_ids=[doc_id],
+                            )
+                            for route_corpus_id, doc_id in routed_doc_refs
+                        )
+                    )
+                    return [chunk for row in rows for chunk in (row or [])]
+
+                async def _repair_summary() -> list[SourceChunk]:
+                    if summary_top_k <= 0 or vector is None:
+                        return []
+                    if not routed_doc_refs:
+                        return await funnel_a.search(
+                            vector,
+                            corpus_ids,
+                            a_cols,
+                            top_k=min(summary_top_k, 8),
+                            fair_mode=True,
+                            query_text=lane.query,
+                        )
+                    rows = await asyncio.gather(
+                        *(
+                            funnel_a.search(
+                                vector,
+                                [route_corpus_id],
+                                a_cols,
+                                top_k=min(summary_top_k, 8),
+                                fair_mode=True,
+                                query_text=lane.query,
+                                doc_ids=[doc_id],
+                            )
+                            for route_corpus_id, doc_id in routed_doc_refs
+                        )
+                    )
+                    return [chunk for row in rows for chunk in (row or [])]
+
+                async def _repair_lexical() -> list[SourceChunk]:
+                    if lexical_top_k <= 0:
+                        return []
+                    if not routed_doc_refs:
+                        return await lexical_retriever.search(
+                            lane.query,
+                            corpus_ids,
+                            top_k=min(16, max(8, lexical_top_k * 2)),
+                        )
+                    rows = await asyncio.gather(
+                        *(
+                            lexical_retriever.search(
+                                lane.query,
+                                [route_corpus_id],
+                                top_k=min(16, max(8, lexical_top_k * 2)),
+                                doc_ids=[doc_id],
+                            )
+                            for route_corpus_id, doc_id in routed_doc_refs
+                        )
+                    )
+                    return [chunk for row in rows for chunk in (row or [])]
+
                 try:
                     raw_results = await asyncio.wait_for(
                         asyncio.gather(
-                            (
-                                funnel_b.search(
-                                    vector,
-                                    corpus_ids,
-                                    b_cols,
-                                    top_k=min(child_top_k, 12),
-                                    query_text=lane.query,
-                                    doc_ids=routed_doc_ids,
-                                )
-                                if vector is not None
-                                else asyncio.sleep(0, result=[])
-                            ),
-                            (
-                                funnel_a.search(
-                                    vector,
-                                    corpus_ids,
-                                    a_cols,
-                                    top_k=min(summary_top_k, 8),
-                                    fair_mode=True,
-                                    query_text=lane.query,
-                                    doc_ids=routed_doc_ids,
-                                )
-                                if summary_top_k > 0 and vector is not None
-                                else asyncio.sleep(0, result=[])
-                            ),
-                            (
-                                lexical_retriever.search(
-                                    lane.query,
-                                    corpus_ids,
-                                    top_k=min(16, max(8, lexical_top_k * 2)),
-                                    doc_ids=routed_doc_ids,
-                                )
-                                if lexical_top_k > 0
-                                else asyncio.sleep(0, result=[])
-                            ),
+                            _repair_dense(),
+                            _repair_summary(),
+                            _repair_lexical(),
                             return_exceptions=True,
                         ),
                         timeout=_stage_timeout(
@@ -2951,11 +3022,7 @@ class RetrieverOrchestrator:
             1 for chunk in fused if is_separator_only_text(chunk.text)
         )
         if separator_only_count:
-            fused = [
-                chunk
-                for chunk in fused
-                if not is_separator_only_text(chunk.text)
-            ]
+            fused = [chunk for chunk in fused if not is_separator_only_text(chunk.text)]
         fusion_diagnostics["structural_noise_filter"] = {
             "separator_only_dropped": separator_only_count,
             "remaining_candidates": len(fused),
@@ -3007,9 +3074,9 @@ class RetrieverOrchestrator:
             vocabulary_diagnostics.get("expansion") or {},
             required_lane_ids=required_lane_ids,
         )
-        vocabulary_diagnostics["required_lane_propagation"] = (
-            propagate_grounded_lane_aliases(ranked, translation_lane_targets)
-        )
+        vocabulary_diagnostics[
+            "required_lane_propagation"
+        ] = propagate_grounded_lane_aliases(ranked, translation_lane_targets)
         ranked, grounding_filter_diagnostics = filter_grounded_planned_candidates(
             ranked,
             required_lane_ids,
@@ -3141,9 +3208,7 @@ class RetrieverOrchestrator:
         if isinstance(scoring_sufficiency, dict):
             selection_diagnostics["scoring_sufficiency"] = scoring_sufficiency
         if refusal_lane_ids:
-            required_lane_atoms = [
-                f"concept:{lane_id}" for lane_id in refusal_lane_ids
-            ]
+            required_lane_atoms = [f"concept:{lane_id}" for lane_id in refusal_lane_ids]
             covered_lane_atoms = [
                 f"concept:{lane_id}"
                 for lane_id in refusal_lane_ids
@@ -3169,9 +3234,7 @@ class RetrieverOrchestrator:
             # already drove sufficiency repair, so negative controls still
             # fail closed while grounded broad questions answer.
             selection_diagnostics["sufficiency"] = {
-                "required_atoms": list(
-                    scoring_sufficiency.get("required_atoms") or []
-                ),
+                "required_atoms": list(scoring_sufficiency.get("required_atoms") or []),
                 "covered_required_atoms": list(
                     scoring_sufficiency.get("covered_required_atoms") or []
                 ),
@@ -3201,7 +3264,11 @@ class RetrieverOrchestrator:
         predicates_used: set[str] = set()
         for chunk in finalists:
             corpus_key = str(chunk.corpus_id or "unknown")
-            document_key = str(chunk.doc_id or "unknown")
+            document_key = (
+                f"{chunk.corpus_id}|{chunk.doc_id}"
+                if chunk.corpus_id and chunk.doc_id
+                else str(chunk.doc_id or "unknown")
+            )
             corpus_distribution[corpus_key] = corpus_distribution.get(corpus_key, 0) + 1
             document_distribution[document_key] = (
                 document_distribution.get(document_key, 0) + 1
@@ -3218,7 +3285,13 @@ class RetrieverOrchestrator:
             final_source_tiers[source_tier] = final_source_tiers.get(source_tier, 0) + 1
 
         def _distinct_docs(chunks: list[SourceChunk]) -> int:
-            return len({str(chunk.doc_id) for chunk in chunks if chunk.doc_id})
+            return len(
+                {
+                    (str(chunk.corpus_id or ""), str(chunk.doc_id))
+                    for chunk in chunks
+                    if chunk.doc_id
+                }
+            )
 
         max_doc_share_final = (
             round(max(document_distribution.values()) / len(finalists), 4)
@@ -3626,12 +3699,12 @@ class RetrieverOrchestrator:
             signal (e.g. 6 of 9 chunks from one book -> 0.6667). Pure read over
             the already-selected final chunks; adds no behavior, only telemetry.
             """
-            doc_counts: dict[str, int] = {}
+            doc_counts: dict[tuple[str, str], int] = {}
             for chunk in chunks or []:
                 doc_id = getattr(chunk, "doc_id", None)
                 if not doc_id:
                     continue
-                key = str(doc_id)
+                key = (str(chunk.corpus_id or ""), str(doc_id))
                 doc_counts[key] = doc_counts.get(key, 0) + 1
             total = sum(doc_counts.values())
             if total <= 0:
@@ -4307,13 +4380,28 @@ class RetrieverOrchestrator:
                 rank_groups = [chunks_in_lane]
             for _group in rank_groups:
                 for _rank, _c in enumerate(_group):
-                    _key = str(_c.chunk_id or _c.parent_id or "")
+                    _content_id = str(_c.chunk_id or _c.parent_id or "")
+                    _key = (
+                        f"{_c.corpus_id}|{_content_id}"
+                        if _c.corpus_id and _content_id
+                        else _content_id
+                    )
                     if _key and (_key not in table or _rank < table[_key]):
                         table[_key] = _rank
 
         def _rrf_fused(chunk: SourceChunk) -> float:
-            _key = str(chunk.chunk_id or chunk.parent_id or "")
-            _pkey = str(chunk.parent_id or "")
+            _content_id = str(chunk.chunk_id or chunk.parent_id or "")
+            _parent_id = str(chunk.parent_id or "")
+            _key = (
+                f"{chunk.corpus_id}|{_content_id}"
+                if chunk.corpus_id and _content_id
+                else _content_id
+            )
+            _pkey = (
+                f"{chunk.corpus_id}|{_parent_id}"
+                if chunk.corpus_id and _parent_id
+                else _parent_id
+            )
             fused = 0.0
             for _lane, _table in _lane_ranks.items():
                 _rank = _table.get(_key)
@@ -4330,6 +4418,7 @@ class RetrieverOrchestrator:
                 chunks_to_sort,
                 key=lambda c: (
                     -_rrf_fused(c),
+                    c.corpus_id or "",
                     c.doc_id or "",
                     c.chunk_id or "",
                 ),
@@ -4358,7 +4447,11 @@ class RetrieverOrchestrator:
         )
         counts["merged_initial"] = len(merged)
         counts["distinct_docs_merged"] = len(
-            {c.doc_id for c in merged if getattr(c, "doc_id", None)}
+            {
+                (str(c.corpus_id or ""), str(c.doc_id))
+                for c in merged
+                if getattr(c, "doc_id", None)
+            }
         )
         _add_timing("merge", phase_started)
         if not merged:
@@ -4688,7 +4781,11 @@ class RetrieverOrchestrator:
         effective_final_k = (
             final_top_k if final_top_k is not None else settings.DEFAULT_RETRIEVAL_K
         )
-        _pool_doc_ids = {c.doc_id for c in ranked if getattr(c, "doc_id", None)}
+        _pool_doc_ids = {
+            (str(c.corpus_id or ""), str(c.doc_id))
+            for c in ranked
+            if getattr(c, "doc_id", None)
+        }
         counts["distinct_docs_in_pool"] = len(_pool_doc_ids)
         diversity = select_with_diversity(
             ranked,

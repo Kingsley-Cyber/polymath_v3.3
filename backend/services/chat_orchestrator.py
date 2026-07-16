@@ -2745,26 +2745,49 @@ async def _drop_noisy_retrieval_chunks(chunks: list[Any]) -> list[Any]:
     if not chunks:
         return chunks
     survivors = [c for c in chunks if not is_noisy(getattr(c, "chunk_kind", None))]
-    ids = [
-        cid for cid in (str(getattr(c, "chunk_id", "") or "") for c in survivors) if cid
+    refs = [
+        (
+            str(getattr(c, "corpus_id", "") or ""),
+            str(getattr(c, "chunk_id", "") or ""),
+        )
+        for c in survivors
+        if getattr(c, "corpus_id", None) and getattr(c, "chunk_id", None)
     ]
     db = getattr(conversation_service, "_db", None)
-    if db is None or not ids:
+    if db is None or not refs:
         return survivors
     try:
         rows = (
             await db["chunks"]
-            .find({"chunk_id": {"$in": ids}}, {"chunk_id": 1, "chunk_kind": 1})
+            .find(
+                {
+                    "$or": [
+                        {"corpus_id": corpus_id, "chunk_id": chunk_id}
+                        for corpus_id, chunk_id in refs
+                    ]
+                },
+                {"corpus_id": 1, "chunk_id": 1, "chunk_kind": 1},
+            )
             .to_list(length=None)
         )
     except Exception as exc:  # noqa: BLE001
         logger.debug("noisy-chunk Mongo confirm failed: %s", exc)
         return survivors
-    noisy_ids = {str(r["chunk_id"]) for r in rows if is_noisy(r.get("chunk_kind"))}
-    if not noisy_ids:
+    noisy_refs = {
+        (str(r.get("corpus_id") or ""), str(r["chunk_id"]))
+        for r in rows
+        if is_noisy(r.get("chunk_kind"))
+    }
+    if not noisy_refs:
         return survivors
     return [
-        c for c in survivors if str(getattr(c, "chunk_id", "") or "") not in noisy_ids
+        c
+        for c in survivors
+        if (
+            str(getattr(c, "corpus_id", "") or ""),
+            str(getattr(c, "chunk_id", "") or ""),
+        )
+        not in noisy_refs
     ]
 
 
@@ -3588,7 +3611,9 @@ def _shelf_reserve_query_concepts(
         seen.add(key)
         concepts.append(text)
 
-    diagnostics = retrieval_diagnostics if isinstance(retrieval_diagnostics, dict) else {}
+    diagnostics = (
+        retrieval_diagnostics if isinstance(retrieval_diagnostics, dict) else {}
+    )
     vocabulary = (
         diagnostics.get("vocabulary_resolution")
         if isinstance(diagnostics.get("vocabulary_resolution"), dict)
@@ -6243,9 +6268,7 @@ def _format_retrieval_diagnostics_trace(
         else {}
     )
     vocabulary_matches = [
-        row
-        for row in (vocabulary.get("matches") or [])
-        if isinstance(row, dict)
+        row for row in (vocabulary.get("matches") or []) if isinstance(row, dict)
     ]
     vocabulary_labels = [
         str(row.get("term") or row.get("canonical_name") or "").strip()
@@ -7341,9 +7364,9 @@ class ChatOrchestrator:
             sources = _cap_chunks_per_doc(sources)
         retrieval_diagnostics = getattr(retrieval, "diagnostics", {}) or {}
         required_planned_lane_ids = list(
-            (
-                retrieval_diagnostics.get("required_concept_coverage") or {}
-            ).get("required_lane_ids")
+            (retrieval_diagnostics.get("required_concept_coverage") or {}).get(
+                "required_lane_ids"
+            )
             or []
         )
         (
@@ -7364,9 +7387,9 @@ class ChatOrchestrator:
         # P1.5 shelf_reserve: surface the final selector's seat-pass
         # diagnostics (the reading-path seed) into the retrieval trace
         # metadata alongside the corpus floor (selection.corpus_floor).
-        _shelf_reserve_meta = (
-            coverage_meta.get("final_selector") or {}
-        ).get("shelf_reserve")
+        _shelf_reserve_meta = (coverage_meta.get("final_selector") or {}).get(
+            "shelf_reserve"
+        )
         if _shelf_reserve_meta:
             retrieval_diagnostics["shelf_reserve"] = _shelf_reserve_meta
         effective_tier_for_trace = getattr(

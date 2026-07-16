@@ -65,13 +65,54 @@ GRAPH_REASONING_MODES: frozenset[str] = frozenset(
 # surfaces catalog noise like 'OpenAI--works_for-->Sam Altman' on an NLP query.
 _GENERIC_QUERY_CONCEPTS: frozenset[str] = frozenset(
     {
-        "model", "models", "modeling", "modelling", "system", "systems",
-        "method", "methods", "approach", "approaches", "technique",
-        "techniques", "data", "dataset", "datasets", "process", "processes",
-        "framework", "frameworks", "tool", "tools", "task", "tasks", "fine",
-        "tuning", "tune", "tuned", "assist", "assists", "use", "used", "using",
-        "uses", "help", "helps", "work", "works", "thing", "things", "way",
-        "ways", "type", "types", "kind", "kinds", "value", "values", "result",
+        "model",
+        "models",
+        "modeling",
+        "modelling",
+        "system",
+        "systems",
+        "method",
+        "methods",
+        "approach",
+        "approaches",
+        "technique",
+        "techniques",
+        "data",
+        "dataset",
+        "datasets",
+        "process",
+        "processes",
+        "framework",
+        "frameworks",
+        "tool",
+        "tools",
+        "task",
+        "tasks",
+        "fine",
+        "tuning",
+        "tune",
+        "tuned",
+        "assist",
+        "assists",
+        "use",
+        "used",
+        "using",
+        "uses",
+        "help",
+        "helps",
+        "work",
+        "works",
+        "thing",
+        "things",
+        "way",
+        "ways",
+        "type",
+        "types",
+        "kind",
+        "kinds",
+        "value",
+        "values",
+        "result",
         "results",
     }
 )
@@ -80,9 +121,19 @@ _GENERIC_QUERY_CONCEPTS: frozenset[str] = frozenset(
 # relations survive even when the partner entity is a generic token.
 _DEFINITIONAL_PREDICATES: frozenset[str] = frozenset(
     {
-        "uses", "used_for", "part_of", "instance_of", "is_a", "type_of",
-        "defines", "implements", "depends_on", "produces", "enables",
-        "applies_to", "performs",
+        "uses",
+        "used_for",
+        "part_of",
+        "instance_of",
+        "is_a",
+        "type_of",
+        "defines",
+        "implements",
+        "depends_on",
+        "produces",
+        "enables",
+        "applies_to",
+        "performs",
     }
 )
 
@@ -137,8 +188,7 @@ def _query_rank_rows(rows: list[dict], query: str, top_k: int) -> list[dict]:
 
     groups = concept_groups(query or "")
     non_generic = [
-        g for g in groups
-        if getattr(g, "key", "") not in _GENERIC_QUERY_CONCEPTS
+        g for g in groups if getattr(g, "key", "") not in _GENERIC_QUERY_CONCEPTS
     ]
     if not non_generic:
         return rows[:top_k]
@@ -219,7 +269,9 @@ class GraphDecorator:
         if not winning_chunks:
             return []
 
-        max_chunks = max(1, int(getattr(self._settings, "GRAPH_DECORATE_MAX_CHUNKS", 8)))
+        max_chunks = max(
+            1, int(getattr(self._settings, "GRAPH_DECORATE_MAX_CHUNKS", 8))
+        )
         max_paths = max(
             0,
             int(getattr(self._settings, "GRAPH_DECORATE_MAX_PATHS_PER_CHUNK", 3)),
@@ -232,12 +284,12 @@ class GraphDecorator:
             1,
             int(getattr(self._settings, "GRAPH_DECORATE_ENTITIES_PER_CHUNK", 3)),
         )
-        winning_chunk_ids = [
-            c.chunk_id
+        winning_chunk_refs = [
+            {"corpus_id": str(c.corpus_id), "chunk_id": str(c.chunk_id)}
             for c in winning_chunks[:max_chunks]
-            if c.chunk_id
+            if c.chunk_id and c.corpus_id
         ]
-        if not winning_chunk_ids:
+        if not winning_chunk_refs:
             return []
         neighbor_limit = min(int(neighbor_limit), max_chunks * max_paths)
         chunks_per_neighbor = min(int(chunks_per_neighbor), max_evidence)
@@ -251,7 +303,7 @@ class GraphDecorator:
         try:
             relates_to_decorations = await asyncio.wait_for(
                 self._decorate_via_relates_to(
-                    winning_chunk_ids=winning_chunk_ids,
+                    winning_chunk_refs=winning_chunk_refs,
                     corpus_ids=corpus_ids,
                     wanted_families=wanted_families,
                     neighbor_limit=neighbor_limit,
@@ -265,13 +317,13 @@ class GraphDecorator:
             logger.warning(
                 "decorate_winners[RELATES_TO] timeout after %.2fs winners=%d",
                 timeout_s,
-                len(winning_chunk_ids),
+                len(winning_chunk_refs),
             )
             relates_to_decorations = []
         try:
             calls_decorations = await asyncio.wait_for(
                 self._decorate_via_calls(
-                    winning_chunk_ids=winning_chunk_ids,
+                    winning_chunk_refs=winning_chunk_refs,
                     corpus_ids=corpus_ids,
                     neighbor_limit=neighbor_limit,
                     chunks_per_neighbor=chunks_per_neighbor,
@@ -282,7 +334,7 @@ class GraphDecorator:
             logger.warning(
                 "decorate_winners[CALLS] timeout after %.2fs winners=%d",
                 timeout_s,
-                len(winning_chunk_ids),
+                len(winning_chunk_refs),
             )
             calls_decorations = []
 
@@ -332,7 +384,8 @@ class GraphDecorator:
         except ImportError as exc:
             logger.warning(
                 "decorate_winners cache annotation: analytics import "
-                "failed (%s) — skipping enrichment", exc,
+                "failed (%s) — skipping enrichment",
+                exc,
             )
             return
 
@@ -392,7 +445,8 @@ class GraphDecorator:
             except Exception as exc:
                 logger.debug(
                     "decorate_winners cache annotation: corpus=%s miss: %s",
-                    corpus_id, exc,
+                    corpus_id,
+                    exc,
                 )
 
         if warm_corpora == 0:
@@ -431,7 +485,7 @@ class GraphDecorator:
     async def _decorate_via_relates_to(
         self,
         *,
-        winning_chunk_ids: List[str],
+        winning_chunk_refs: List[dict[str, str]],
         corpus_ids: Optional[List[str]],
         wanted_families: Optional[List[str]],
         neighbor_limit: int,
@@ -441,8 +495,10 @@ class GraphDecorator:
     ) -> List[GraphDecoration]:
         cypher = """
         // Pt 10d — graph decoration over winners (RELATES_TO walk)
-        MATCH (winner:Chunk)-[m:MENTIONS]->(seed:Entity)
-        WHERE winner.chunk_id IN $winning_chunk_ids
+        UNWIND $winning_chunk_refs AS winner_ref
+        MATCH (winner:Chunk {corpus_id: winner_ref.corpus_id, chunk_id: winner_ref.chunk_id})
+              -[m:MENTIONS]->(seed:Entity)
+        WHERE true
           AND coalesce(seed.generic_entity, false) = false
           AND coalesce(seed.graph_expansion_allowed, true) <> false
         WITH winner, seed, max(coalesce(m.confidence, 0.5)) AS mention_confidence
@@ -466,7 +522,10 @@ class GraphDecorator:
               OR (
                   predicate = 'related_to'
                   AND edge_evidence <> ''
-                  AND size(coalesce(r.evidence_chunk_ids, [])) > 0
+                  AND (
+                      size(coalesce(r.evidence_chunk_keys, [])) > 0
+                      OR size(coalesce(r.evidence_chunk_ids, [])) > 0
+                  )
                   AND max_hops <= 1
               )
           )
@@ -485,17 +544,21 @@ class GraphDecorator:
              END AS edge_weight
         ORDER BY edge_weight DESC
         LIMIT $neighbor_limit
-        WITH winner, seed, neighbor, r, predicate, edge_state, fallback,
-             fallback_family, edge_evidence, edge_weight,
-             coalesce(r.evidence_chunk_ids, [])[..$chunks_per_neighbor] AS evidence_ids
         OPTIONAL MATCH (evidence:Chunk)
-        WHERE evidence.chunk_id IN evidence_ids
-          AND (size($corpus_ids) = 0 OR evidence.corpus_id IN $corpus_ids)
+        WHERE (size($corpus_ids) = 0 OR evidence.corpus_id IN $corpus_ids)
+          AND (
+              evidence.corpus_id + '|' + evidence.chunk_id IN coalesce(r.evidence_chunk_keys, [])
+              OR (
+                  none(key IN coalesce(r.evidence_chunk_keys, []) WHERE key STARTS WITH evidence.corpus_id + '|')
+                  AND evidence.chunk_id IN coalesce(r.evidence_chunk_ids, [])
+              )
+          )
           AND evidence.chunk_id <> winner.chunk_id
         WITH winner, seed, neighbor, r, predicate, edge_state, fallback,
              fallback_family, edge_evidence, edge_weight, evidence,
              CASE WHEN evidence.doc_id = winner.doc_id THEN 2 ELSE 1 END AS parent_boost
-        WITH winner.chunk_id              AS winner_chunk_id,
+        WITH winner.corpus_id             AS winner_corpus_id,
+             winner.chunk_id              AS winner_chunk_id,
              coalesce(seed.display_name, seed.normalized_name, '')     AS seed_entity,
              coalesce(neighbor.display_name, neighbor.normalized_name, '') AS neighbor_entity,
              // Phase 5b — entity_ids surfaced so the cache annotation
@@ -513,11 +576,12 @@ class GraphDecorator:
              edge_weight,
              collect(DISTINCT {
                  chunk_id: evidence.chunk_id,
+                 corpus_id: evidence.corpus_id,
                  doc_id: evidence.doc_id,
                  parent_boost: parent_boost
              })[..$chunks_per_neighbor] AS evidence_chunks
         ORDER BY edge_weight DESC
-        RETURN winner_chunk_id, seed_entity, neighbor_entity,
+        RETURN winner_corpus_id, winner_chunk_id, seed_entity, neighbor_entity,
                seed_entity_id, neighbor_entity_id,
                predicate, relation_family, edge_evidence,
                edge_state, fallback, fallback_family,
@@ -544,7 +608,7 @@ class GraphDecorator:
             async with self._driver.session() as session:
                 result = await session.run(
                     cypher,
-                    winning_chunk_ids=winning_chunk_ids,
+                    winning_chunk_refs=winning_chunk_refs,
                     corpus_ids=corpus_ids or [],
                     wanted_families=wanted_families or [],
                     neighbor_limit=_fetch_limit,
@@ -563,7 +627,7 @@ class GraphDecorator:
                 "decorate_winners[RELATES_TO] ms=%.1f winners=%d arrows=%d "
                 "neighbor_limit=%d chunks_per_neighbor=%d families=%s",
                 elapsed_ms,
-                len(winning_chunk_ids),
+                len(winning_chunk_refs),
                 len(decorations),
                 neighbor_limit,
                 chunks_per_neighbor,
@@ -575,14 +639,16 @@ class GraphDecorator:
             logger.warning(
                 "decorate_winners[RELATES_TO] FAILED ms=%.1f winners=%d "
                 "(chunk-only fallback): %s",
-                elapsed_ms, len(winning_chunk_ids), exc,
+                elapsed_ms,
+                len(winning_chunk_refs),
+                exc,
             )
             return []
 
     async def _decorate_via_calls(
         self,
         *,
-        winning_chunk_ids: List[str],
+        winning_chunk_refs: List[dict[str, str]],
         corpus_ids: Optional[List[str]],
         neighbor_limit: int,
         chunks_per_neighbor: int,
@@ -603,8 +669,10 @@ class GraphDecorator:
 
         cypher = """
         // Phase 4.5 — graph decoration over winners (CALLS walk)
-        MATCH (winner:Chunk)-[:MENTIONS]->(seed:Entity)-[r:CALLS]-(neighbor:Entity)
-        WHERE winner.chunk_id IN $winning_chunk_ids
+        UNWIND $winning_chunk_refs AS winner_ref
+        MATCH (winner:Chunk {corpus_id: winner_ref.corpus_id, chunk_id: winner_ref.chunk_id})
+              -[:MENTIONS]->(seed:Entity)-[r:CALLS]-(neighbor:Entity)
+        WHERE true
           AND seed <> neighbor
           AND coalesce(seed.generic_entity, false) = false
           AND coalesce(seed.graph_expansion_allowed, true) <> false
@@ -622,7 +690,8 @@ class GraphDecorator:
         WITH winner, seed, neighbor, r, edge_weight, evidence,
              CASE WHEN evidence.doc_id = winner.doc_id THEN 2 ELSE 1 END AS parent_boost
         ORDER BY parent_boost DESC, edge_weight DESC
-        WITH winner.chunk_id              AS winner_chunk_id,
+        WITH winner.corpus_id             AS winner_corpus_id,
+             winner.chunk_id              AS winner_chunk_id,
              coalesce(seed.display_name, seed.normalized_name, '')         AS seed_entity,
              coalesce(neighbor.display_name, neighbor.normalized_name, '') AS neighbor_entity,
              // Phase 5b — entity_ids for cache annotation lookup.
@@ -637,11 +706,12 @@ class GraphDecorator:
              edge_weight,
              collect(DISTINCT {
                  chunk_id: evidence.chunk_id,
+                 corpus_id: evidence.corpus_id,
                  doc_id: evidence.doc_id,
                  parent_boost: parent_boost
              })[..$chunks_per_neighbor] AS evidence_chunks
         ORDER BY edge_weight DESC
-        RETURN winner_chunk_id, seed_entity, neighbor_entity,
+        RETURN winner_corpus_id, winner_chunk_id, seed_entity, neighbor_entity,
                seed_entity_id, neighbor_entity_id,
                predicate, relation_family, edge_evidence,
                direction_repaired, predicate_refined,
@@ -654,7 +724,7 @@ class GraphDecorator:
             async with self._driver.session() as session:
                 result = await session.run(
                     cypher,
-                    winning_chunk_ids=winning_chunk_ids,
+                    winning_chunk_refs=winning_chunk_refs,
                     corpus_ids=corpus_ids or [],
                     neighbor_limit=int(neighbor_limit),
                     chunks_per_neighbor=int(chunks_per_neighbor),
@@ -665,14 +735,18 @@ class GraphDecorator:
             elapsed_ms = (time.perf_counter() - t0) * 1000
             logger.info(
                 "decorate_winners[CALLS] ms=%.1f winners=%d arrows=%d",
-                elapsed_ms, len(winning_chunk_ids), len(decorations),
+                elapsed_ms,
+                len(winning_chunk_refs),
+                len(decorations),
             )
             return decorations
         except Exception as exc:
             elapsed_ms = (time.perf_counter() - t0) * 1000
             logger.warning(
                 "decorate_winners[CALLS] FAILED ms=%.1f winners=%d (skipping): %s",
-                elapsed_ms, len(winning_chunk_ids), exc,
+                elapsed_ms,
+                len(winning_chunk_refs),
+                exc,
             )
             return []
 
@@ -692,6 +766,7 @@ class GraphDecorator:
                 evidence_chunks.append(
                     GraphDecorationEvidence(
                         chunk_id=str(cid),
+                        corpus_id=str(ev.get("corpus_id") or "") or None,
                         doc_id=ev.get("doc_id"),
                         parent_boost=int(ev.get("parent_boost") or 1),
                     )
@@ -699,6 +774,7 @@ class GraphDecorator:
             decorations.append(
                 GraphDecoration(
                     winner_chunk_id=str(row.get("winner_chunk_id") or ""),
+                    winner_corpus_id=(str(row.get("winner_corpus_id") or "") or None),
                     seed_entity=str(row.get("seed_entity") or ""),
                     neighbor_entity=str(row.get("neighbor_entity") or ""),
                     # Phase 5b — entity_ids carried alongside display names

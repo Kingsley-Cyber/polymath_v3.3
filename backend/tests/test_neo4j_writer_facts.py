@@ -30,9 +30,9 @@ class FakeSession:
         if "tombstone:" in query:
             return FakeResult(
                 [
-                {"orig": old, "sur": self.tombstone_map[old]}
-                for old in params.get("ids", [])
-                if old in self.tombstone_map
+                    {"orig": old, "sur": self.tombstone_map[old]}
+                    for old in params.get("ids", [])
+                    if old in self.tombstone_map
                 ]
             )
         return FakeResult([])
@@ -63,6 +63,19 @@ class FakeDriver:
 
     def session(self):
         return FakeSession(self.calls, self.tombstone_map)
+
+
+class AmbiguousLegacySession(FakeSession):
+    async def run(self, query, **params):
+        self.calls.append((query, params))
+        if "RETURN count(r) AS ambiguous" in query:
+            return FakeResult([{"ambiguous": 1}])
+        return FakeResult([])
+
+
+class AmbiguousLegacyDriver(FakeDriver):
+    def session(self):
+        return AmbiguousLegacySession(self.calls, self.tombstone_map)
 
 
 class FakeSupportCollection:
@@ -403,6 +416,7 @@ async def test_delete_document_graph_prunes_relation_provenance_before_nodes():
         idx
         for idx, query in enumerate(queries)
         if "MATCH ()-[r:RELATES_TO]->()" in query
+        and "SET r.evidence_chunk_keys" in query
     )
     delete_idx = next(
         idx for idx, query in enumerate(queries) if "DETACH DELETE n" in query
@@ -416,12 +430,34 @@ async def test_delete_document_graph_prunes_relation_provenance_before_nodes():
     assert "r.support_confidence_chunk_ids" in queries[prune_idx]
     assert "r.support_confidence_values" in queries[prune_idx]
     assert "remaining_corpus_support" in queries[prune_idx]
+    assert "remaining.doc_id <> $doc_id" in queries[prune_idx]
+    assert (
+        "none(cid IN coalesce(r.corpus_ids, []) WHERE cid <> $corpus_id)"
+        in queries[prune_idx]
+    )
     assert "LIMIT $batch_size" in queries[prune_idx]
     assert driver.calls[prune_idx][1]["batch_size"] == GRAPH_RELATION_PRUNE_BATCH_SIZE
     assert "MATCH (n {doc_id: $doc_id, corpus_id: $corpus_id})" in queries[delete_idx]
     assert driver.calls[delete_idx][1]["batch_size"] == GRAPH_DELETE_BATCH_SIZE
     assert "NOT EXISTS { MATCH (:Chunk)-[:MENTIONS]->(e) }" in queries[orphan_idx]
     assert "coalesce(e.tombstone, false) = false" in queries[orphan_idx]
+
+
+@pytest.mark.asyncio
+async def test_delete_document_graph_refuses_ambiguous_shared_legacy_provenance():
+    driver = AmbiguousLegacyDriver()
+
+    with pytest.raises(RuntimeError, match="ambiguous_legacy_relation_provenance"):
+        await delete_document_graph(driver, corpus_id="corp1", doc_id="same-doc")
+
+    queries = [query for query, _params in driver.calls]
+    guard_idx = next(
+        idx
+        for idx, query in enumerate(queries)
+        if "RETURN count(r) AS ambiguous" in query
+    )
+    assert "cid <> $corpus_id" in queries[guard_idx]
+    assert not any("DETACH DELETE n" in query for query in queries)
 
 
 @pytest.mark.asyncio
@@ -453,6 +489,7 @@ async def test_write_document_graph_clears_stale_payload_before_rewrite():
         idx
         for idx, query in enumerate(queries)
         if "MATCH ()-[r:RELATES_TO]->()" in query
+        and "SET r.evidence_chunk_keys" in query
     )
     clear_idx = next(
         idx for idx, query in enumerate(queries) if "WHERE NOT n:Document" in query
@@ -538,7 +575,7 @@ async def test_delete_corpus_graph_prunes_array_scoped_relations_before_nodes():
     prune_idx = next(
         idx
         for idx, query in enumerate(queries)
-        if "MATCH ()-[r:RELATES_TO]->()" in query
+        if "MATCH ()-[r:RELATES_TO]->()" in query and "SET r.corpus_ids" in query
     )
     delete_idx = next(
         idx for idx, query in enumerate(queries) if "DETACH DELETE n" in query
@@ -557,6 +594,16 @@ async def test_delete_corpus_graph_prunes_array_scoped_relations_before_nodes():
     assert driver.calls[delete_idx][1]["batch_size"] == GRAPH_DELETE_BATCH_SIZE
     assert "NOT EXISTS { MATCH (:Chunk)-[:MENTIONS]->(e) }" in queries[orphan_idx]
     assert "coalesce(e.tombstone, false) = false" in queries[orphan_idx]
+
+
+@pytest.mark.asyncio
+async def test_delete_corpus_graph_refuses_ambiguous_shared_legacy_provenance():
+    driver = AmbiguousLegacyDriver()
+
+    with pytest.raises(RuntimeError, match="ambiguous_legacy_relation_provenance"):
+        await delete_corpus_graph(driver, corpus_id="corp1")
+
+    assert not any("DETACH DELETE n" in query for query, _params in driver.calls)
 
 
 @pytest.mark.asyncio
@@ -614,7 +661,7 @@ async def test_write_document_graph_bounds_large_unwind_payloads():
     chunk_batches = [
         params["rows"]
         for query, params in driver.calls
-        if "MERGE (c:Chunk {chunk_id: row.chunk_id})" in query
+        if "MERGE (c:Chunk {corpus_id: $corpus_id, chunk_id: row.chunk_id})" in query
     ]
     mention_batches = [
         params["rows"]

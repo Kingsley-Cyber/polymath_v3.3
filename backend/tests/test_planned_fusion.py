@@ -125,7 +125,9 @@ def test_pre_rerank_document_cap_preserves_order_and_unknown_identity():
 
 
 def test_pre_rerank_document_cap_preserves_exact_query_lane():
-    generic = [_chunk(f"generic-{index}", "a", score=1.0 - index / 10) for index in range(4)]
+    generic = [
+        _chunk(f"generic-{index}", "a", score=1.0 - index / 10) for index in range(4)
+    ]
     exact = _chunk("exact-query-hit", "a", score=0.1)
     exact.metadata = {"planned_lanes": ["original"]}
 
@@ -501,7 +503,7 @@ def test_two_word_lane_requires_an_exact_span_or_multiword_alias():
     assert planned_lane_grounding(by_id["exact"], "product_page") > 2.0
 
 
-def test_document_lane_dedupe_merges_membership_and_provenance():
+def test_document_lane_dedupe_keeps_same_content_in_distinct_corpora():
     first = _chunk("first", "a")
     first.doc_id = "same-doc"
     first.metadata = {
@@ -519,13 +521,8 @@ def test_document_lane_dedupe_merges_membership_and_provenance():
 
     result, duplicates = dedupe_document_lane_finalists([first, second])
 
-    assert result == [first]
-    assert duplicates == 1
-    assert first.metadata["corpus_memberships"] == ["a", "b"]
-    assert {item["retriever"] for item in first.provenance} == {
-        "dense",
-        "lexical",
-    }
+    assert result == [first, second]
+    assert duplicates == 0
 
 
 def test_finalist_reservations_survive_reranker_order():
@@ -643,9 +640,7 @@ def test_required_lane_replaces_selected_route_only_tail_with_reranked_candidate
     )
 
     assert [chunk.chunk_id for chunk in result] == ["strong-sticky"]
-    assert diagnostics["lane_reservations"] == {
-        "sticky_message": "strong-sticky"
-    }
+    assert diagnostics["lane_reservations"] == {"sticky_message": "strong-sticky"}
 
 
 def test_finalist_reservations_do_not_refill_a_complete_diversity_pack():
@@ -828,9 +823,7 @@ def test_finalist_reservations_keep_exact_query_lane_without_counting_it_require
 
     assert [chunk.chunk_id for chunk in result] == ["required", "exact-query-hit"]
     assert diagnostics["required_lane_ids"] == ["purple_ocean"]
-    assert diagnostics["protected_lane_reservations"] == {
-        "original": "exact-query-hit"
-    }
+    assert diagnostics["protected_lane_reservations"] == {"original": "exact-query-hit"}
 
 
 def test_finalist_route_reservations_can_be_scoped_to_answer_lane():
@@ -938,7 +931,7 @@ def test_enumeration_output_places_answer_objects_before_support_context():
     assert [chunk.chunk_id for chunk in ordered] == ["answer", "support"]
 
 
-def test_parent_finalist_dedupe_merges_lane_provenance():
+def test_parent_finalist_dedupe_keeps_same_parent_id_in_distinct_corpora():
     first = _chunk("first", "a")
     first.parent_id = "shared-parent"
     first.metadata = {
@@ -955,18 +948,8 @@ def test_parent_finalist_dedupe_merges_lane_provenance():
 
     result, dropped = dedupe_parent_finalists([first, second])
 
-    assert dropped == 1
-    assert len(result) == 1
-    assert result[0].metadata["planned_lanes"] == ["purple_ocean", "sticky_message"]
-    assert result[0].metadata["corpus_memberships"] == ["a", "b"]
-    assert result[0].metadata["planned_lane_grounding"] == {
-        "purple_ocean": 2.5,
-        "sticky_message": 2.0,
-    }
-    assert any(
-        item.get("retriever") == "parent_finalist_dedupe"
-        for item in result[0].provenance
-    )
+    assert dropped == 0
+    assert result == [first, second]
 
 
 def test_parent_dedupe_preserves_route_backed_required_reservation():
@@ -985,9 +968,7 @@ def test_parent_dedupe_preserves_route_backed_required_reservation():
     result, dropped = dedupe_parent_finalists([original, required])
 
     assert dropped == 1
-    assert result[0].metadata["document_route_lanes"] == {
-        "target_audience": 0.5971
-    }
+    assert result[0].metadata["document_route_lanes"] == {"target_audience": 0.5971}
     assert reserved_required_lane_ids(result[0], ["target_audience"]) == [
         "target_audience"
     ]

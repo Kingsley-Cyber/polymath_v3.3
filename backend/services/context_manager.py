@@ -464,52 +464,113 @@ class ContextManager:
                 "`text`, `type`, `start`, and `end`."
             )
 
-        if any(term in q for term in (
-            " table ", " tables ", " grid table ", " grid tables ",
-            " columns ", " rows ", " matrix ",
-        )):
+        if any(
+            term in q
+            for term in (
+                " table ",
+                " tables ",
+                " grid table ",
+                " grid tables ",
+                " columns ",
+                " rows ",
+                " matrix ",
+            )
+        ):
             hints.append(
                 "Use a compact grid-style GFM Markdown table with short column "
                 "labels and concise cells."
             )
 
-        if any(term in q for term in (
-            " bullet ", " bullets ", " bullet list ", " unordered list ",
-        )):
+        if any(
+            term in q
+            for term in (
+                " bullet ",
+                " bullets ",
+                " bullet list ",
+                " unordered list ",
+            )
+        ):
             hints.append("Use compact bullets for unordered grouped points.")
 
-        if any(term in q for term in (
-            " numbered ", " numbered list ", " ordered list ", " steps ",
-            " step by step ", " sequence ", " procedure ", " checklist ",
-        )):
+        if any(
+            term in q
+            for term in (
+                " numbered ",
+                " numbered list ",
+                " ordered list ",
+                " steps ",
+                " step by step ",
+                " sequence ",
+                " procedure ",
+                " checklist ",
+            )
+        ):
             hints.append(
                 "Use a numbered list for ordered steps, sequences, or diagnostics."
             )
 
-        if any(term in q for term in (
-            " compare ", " comparison ", " versus ", " vs ", " vs. ",
-            " difference ", " tradeoff ", " trade off ", " pros ", " cons ",
-            " better ", " best ",
-        )):
+        if any(
+            term in q
+            for term in (
+                " compare ",
+                " comparison ",
+                " versus ",
+                " vs ",
+                " vs. ",
+                " difference ",
+                " tradeoff ",
+                " trade off ",
+                " pros ",
+                " cons ",
+                " better ",
+                " best ",
+            )
+        ):
             hints.append(
                 "Use a compact Markdown table for the main comparison or tradeoff."
             )
 
-        if any(term in q for term in (
-            " how ", " works ", " work ", " pipeline ", " architecture ",
-            " flow ", " process ", " setup ", " retrieval ", " graph ",
-            " ontology ", " system ", " stack ", " route ", " layer ",
-            " ingestion ", " query ",
-        )):
+        if any(
+            term in q
+            for term in (
+                " how ",
+                " works ",
+                " work ",
+                " pipeline ",
+                " architecture ",
+                " flow ",
+                " process ",
+                " setup ",
+                " retrieval ",
+                " graph ",
+                " ontology ",
+                " system ",
+                " stack ",
+                " route ",
+                " layer ",
+                " ingestion ",
+                " query ",
+            )
+        ):
             hints.append(
                 "If the answer has a flow, relationship, or architecture, include "
                 "a fenced `text` ASCII map before the prose explanation."
             )
 
-        if any(term in q for term in (
-            " why ", " explain ", " powerful ", " important ", " benefit ",
-            " benefits ", " risk ", " failure ", " problem ",
-        )):
+        if any(
+            term in q
+            for term in (
+                " why ",
+                " explain ",
+                " powerful ",
+                " important ",
+                " benefit ",
+                " benefits ",
+                " risk ",
+                " failure ",
+                " problem ",
+            )
+        ):
             hints.append(
                 "Open with a bold thesis, then use `**key:** value` lines or "
                 "compact bullets for the reasons."
@@ -562,17 +623,25 @@ class ContextManager:
         # render loop can append graph arrows in O(1). Decoration items can be
         # Pydantic models OR plain dicts (defensive against future callers
         # that build them without the model layer).
-        decoration_by_winner: dict[str, list] = {}
+        decoration_by_winner: dict[tuple[str, str], list] = {}
+        legacy_decoration_by_winner: dict[str, list] = {}
         if decoration:
             for d in decoration:
                 if hasattr(d, "winner_chunk_id"):
                     wid = getattr(d, "winner_chunk_id", None)
+                    wcorpus = getattr(d, "winner_corpus_id", None)
                 elif isinstance(d, dict):
                     wid = d.get("winner_chunk_id")
+                    wcorpus = d.get("winner_corpus_id")
                 else:
                     wid = None
+                    wcorpus = None
                 if wid:
-                    decoration_by_winner.setdefault(str(wid), []).append(d)
+                    decoration_by_winner.setdefault(
+                        (str(wcorpus or ""), str(wid)), []
+                    ).append(d)
+                    if not wcorpus:
+                        legacy_decoration_by_winner.setdefault(str(wid), []).append(d)
 
         # Pt 10d.1 — total decoration arrow budget across the WHOLE response.
         # Per-chunk cap of 3 doesn't bound the total — a broad query that
@@ -592,11 +661,15 @@ class ContextManager:
         # of those is ALSO a winning chunk in this answer, we can tell the LLM
         # "this relationship also appears in that other source" — the only
         # cross-chunk relational signal it otherwise never receives.
-        winning_chunk_labels: dict[str, str] = {}
+        winning_chunk_labels: dict[tuple[str, str], str] = {}
+        winning_chunk_id_counts: dict[str, int] = {}
         for _s in sources:
             _cid = str(getattr(_s, "chunk_id", "") or "")
             if _cid:
-                winning_chunk_labels[_cid] = _s.doc_name or _s.doc_id or "Unknown"
+                winning_chunk_id_counts[_cid] = winning_chunk_id_counts.get(_cid, 0) + 1
+                winning_chunk_labels[
+                    (str(getattr(_s, "corpus_id", "") or ""), _cid)
+                ] = (_s.doc_name or _s.doc_id or "Unknown")
 
         if not sources and not facts:
             base = query
@@ -618,14 +691,17 @@ class ContextManager:
             if packet and packet.get("items"):
                 _doc_names = {
                     str(getattr(s, "doc_id", "") or ""): (
-                        getattr(s, "doc_name", None) or getattr(s, "doc_id", "") or "Unknown"
+                        getattr(s, "doc_name", None)
+                        or getattr(s, "doc_id", "")
+                        or "Unknown"
                     )
                     for s in sources
                 }
                 _doc_notes = {
                     str(_it.get("doc_id") or ""): str(_it.get("text") or "").strip()
                     for _it in packet["items"]
-                    if _it.get("kind") == "doc_note" and str(_it.get("text") or "").strip()
+                    if _it.get("kind") == "doc_note"
+                    and str(_it.get("text") or "").strip()
                 }
                 _seen_doc_notes: set[str] = set()
                 _entity_lines: list[str] = []
@@ -643,7 +719,11 @@ class ContextManager:
                         _it.get("doc_id") or "Unknown"
                     )
                     _doc_id = str(_it.get("doc_id") or "")
-                    if _doc_id and _doc_id in _doc_notes and _doc_id not in _seen_doc_notes:
+                    if (
+                        _doc_id
+                        and _doc_id in _doc_notes
+                        and _doc_id not in _seen_doc_notes
+                    ):
                         passages.append(_doc_notes[_doc_id])
                         _seen_doc_notes.add(_doc_id)
                     if _kind == "full":
@@ -656,7 +736,7 @@ class ContextManager:
                     passages.append(
                         "Related graph signals: " + " | ".join(_entity_lines)
                     )
-            for s in ([] if passages else sources):
+            for s in [] if passages else sources:
                 doc_label = s.doc_name or s.doc_id or "Unknown"
                 source_tier = str(getattr(s, "source_tier", "") or "")
                 metadata = getattr(s, "metadata", None) or {}
@@ -665,7 +745,11 @@ class ContextManager:
                 )
                 has_web_sources = has_web_sources or is_web_source
                 _doc_header_key = s.doc_id or doc_label
-                if _doc_header_key and _doc_header_key not in rendered_doc_headers and not is_web_source:
+                if (
+                    _doc_header_key
+                    and _doc_header_key not in rendered_doc_headers
+                    and not is_web_source
+                ):
                     header = self._source_role_header(s)
                     if header:
                         passages.append(header)
@@ -680,7 +764,9 @@ class ContextManager:
                 if code_lane_skills.is_code_source(s):
                     passages.append(
                         code_lane_skills.format_code_source(
-                            s, corpus_label="", doc_label=doc_label,
+                            s,
+                            corpus_label="",
+                            doc_label=doc_label,
                         )
                     )
                     continue
@@ -694,11 +780,18 @@ class ContextManager:
                         attribution += f" ({url})"
                     if evidence_mode:
                         attribution += f" [{evidence_mode}]"
-                if isinstance(metadata, dict) and metadata.get("support_role") == "chat_semantic_facet_coverage":
-                    support_lane = str(metadata.get("support_lane") or "").replace("facet:", "")
+                if (
+                    isinstance(metadata, dict)
+                    and metadata.get("support_role") == "chat_semantic_facet_coverage"
+                ):
+                    support_lane = str(metadata.get("support_lane") or "").replace(
+                        "facet:", ""
+                    )
                     support_strength = str(metadata.get("support_strength") or "strong")
                     if support_lane:
-                        attribution += f" [coverage:{support_lane}; strength={support_strength}]"
+                        attribution += (
+                            f" [coverage:{support_lane}; strength={support_strength}]"
+                        )
                 if section:
                     attribution += f" §{section}"
                 # Phase 16.1 — graph provenance: bridging entity + confidence.
@@ -718,7 +811,8 @@ class ContextManager:
                         if predicate:
                             family = p.get("relation_family")
                             part += (
-                                f" --{predicate}({family})-->" if family
+                                f" --{predicate}({family})-->"
+                                if family
                                 else f" --{predicate}-->"
                             )
                         domain = p.get("domain_type")
@@ -751,7 +845,16 @@ class ContextManager:
                 # building (chat_orchestrator withholds decoration in that
                 # case — defense in depth here so this block never fires
                 # against a graph-reasoning mode even if upstream changes).
-                chunk_decoration = decoration_by_winner.get(s.chunk_id or "", [])
+                chunk_decoration = decoration_by_winner.get(
+                    (str(s.corpus_id or ""), str(s.chunk_id or "")), []
+                )
+                if (
+                    not chunk_decoration
+                    and winning_chunk_id_counts.get(str(s.chunk_id or ""), 0) == 1
+                ):
+                    chunk_decoration = legacy_decoration_by_winner.get(
+                        str(s.chunk_id or ""), []
+                    )
                 if chunk_decoration and remaining_arrow_budget > 0:
                     arrow_parts: list[str] = []
                     for d in chunk_decoration[:3]:  # cap inline arrows per chunk
@@ -788,8 +891,12 @@ class ContextManager:
                             edge_evidence = str(getattr(d, "edge_evidence", "") or "")
                             fallback = bool(getattr(d, "fallback", False))
                             edge_state = str(getattr(d, "edge_state", "") or "")
-                            fallback_family = str(getattr(d, "fallback_family", "") or "")
-                            evidence_chunks = list(getattr(d, "evidence_chunks", None) or [])
+                            fallback_family = str(
+                                getattr(d, "fallback_family", "") or ""
+                            )
+                            evidence_chunks = list(
+                                getattr(d, "evidence_chunks", None) or []
+                            )
                         elif isinstance(d, dict):
                             pred = str(d.get("predicate") or "")
                             fam = str(d.get("relation_family") or "")
@@ -854,13 +961,32 @@ class ContextManager:
                                 if not isinstance(ec, dict)
                                 else ec.get("chunk_id")
                             )
+                            ec_corpus_id = (
+                                getattr(ec, "corpus_id", None)
+                                if not isinstance(ec, dict)
+                                else ec.get("corpus_id")
+                            )
                             ec_id = str(ec_id or "")
+                            ec_ref = (str(ec_corpus_id or ""), ec_id)
+                            if (
+                                not ec_corpus_id
+                                and winning_chunk_id_counts.get(ec_id, 0) == 1
+                            ):
+                                ec_ref = next(
+                                    (
+                                        ref
+                                        for ref in winning_chunk_labels
+                                        if ref[1] == ec_id
+                                    ),
+                                    ec_ref,
+                                )
                             if (
                                 ec_id
-                                and ec_id != (s.chunk_id or "")
-                                and ec_id in winning_chunk_labels
+                                and ec_ref
+                                != (str(s.corpus_id or ""), str(s.chunk_id or ""))
+                                and ec_ref in winning_chunk_labels
                             ):
-                                lbl = winning_chunk_labels[ec_id]
+                                lbl = winning_chunk_labels[ec_ref]
                                 if lbl not in linked_docs:
                                     linked_docs.append(lbl)
                         if linked_docs:
@@ -878,7 +1004,11 @@ class ContextManager:
                         attribution += f" [graph: {' ; '.join(arrow_parts)}]"
                 passages.append(f"{attribution}: {s.text}")
 
-            context_block = "<context>\n" + "\n\n".join(passages) + "\n</context>" if passages else ""
+            context_block = (
+                "<context>\n" + "\n\n".join(passages) + "\n</context>"
+                if passages
+                else ""
+            )
             if has_web_sources and context_block:
                 web_safety = (
                     "<web_content_policy>\n"
@@ -929,7 +1059,9 @@ class ContextManager:
                     if ev:
                         line += f'\n    Evidence: "{ev}"'
                     fact_lines.append(line)
-                facts_block = "<key_facts>\n" + "\n".join(fact_lines) + "\n</key_facts>\n\n"
+                facts_block = (
+                    "<key_facts>\n" + "\n".join(fact_lines) + "\n</key_facts>\n\n"
+                )
 
             rag_policy = (
                 "<rag_answer_policy>\n"
@@ -1006,10 +1138,10 @@ class ContextManager:
                 if slash:
                     attrs += f' command="{slash}"'
                 instructions = s.get("instructions", "").strip()
-                skill_blocks.append(
-                    f"<skill {attrs}>\n{instructions}\n</skill>"
-                )
-            skills_envelope = "<skills_active>\n" + "\n\n".join(skill_blocks) + "\n</skills_active>"
+                skill_blocks.append(f"<skill {attrs}>\n{instructions}\n</skill>")
+            skills_envelope = (
+                "<skills_active>\n" + "\n\n".join(skill_blocks) + "\n</skills_active>"
+            )
             base = f"{skills_envelope}\n\n{base}"
 
         # Phase 24 — Reasoning cascade output as <analysis> block. Sits between

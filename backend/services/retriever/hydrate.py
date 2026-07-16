@@ -178,8 +178,8 @@ async def attach_document_identities(
             if chunk.parent_id and not chunk.doc_id
         }
     )
-    doc_id_by_chunk: dict[str, str] = {}
-    doc_id_by_parent: dict[str, str] = {}
+    doc_id_by_chunk: dict[tuple[str, str], str] = {}
+    doc_id_by_parent: dict[tuple[str, str], str] = {}
     if chunk_ids or parent_ids:
         identity_terms: list[dict] = []
         if chunk_ids:
@@ -194,17 +194,27 @@ async def attach_document_identities(
                 await db["chunks"]
                 .find(
                     with_active_records(identity_query),
-                    {"_id": 0, "chunk_id": 1, "parent_id": 1, "doc_id": 1},
+                    {
+                        "_id": 0,
+                        "corpus_id": 1,
+                        "chunk_id": 1,
+                        "parent_id": 1,
+                        "doc_id": 1,
+                    },
                 )
                 .to_list(length=None)
             )
             doc_id_by_chunk = {
-                str(row.get("chunk_id")): str(row.get("doc_id"))
+                (str(row.get("corpus_id") or ""), str(row.get("chunk_id"))): str(
+                    row.get("doc_id")
+                )
                 for row in chunk_rows
                 if row.get("chunk_id") and row.get("doc_id")
             }
             doc_id_by_parent = {
-                str(row.get("parent_id")): str(row.get("doc_id"))
+                (str(row.get("corpus_id") or ""), str(row.get("parent_id"))): str(
+                    row.get("doc_id")
+                )
                 for row in chunk_rows
                 if row.get("parent_id") and row.get("doc_id")
             }
@@ -213,8 +223,8 @@ async def attach_document_identities(
 
     resolved_doc_ids = {
         str(chunk.doc_id or "")
-        or doc_id_by_chunk.get(str(chunk.chunk_id), "")
-        or doc_id_by_parent.get(str(chunk.parent_id), "")
+        or doc_id_by_chunk.get((str(chunk.corpus_id or ""), str(chunk.chunk_id)), "")
+        or doc_id_by_parent.get((str(chunk.corpus_id or ""), str(chunk.parent_id)), "")
         for chunk in chunks
     }
     doc_ids = sorted(doc_id for doc_id in resolved_doc_ids if doc_id)
@@ -244,7 +254,7 @@ async def attach_document_identities(
         return chunks
 
     identity_by_doc = {
-        str(row.get("doc_id")): {
+        (str(row.get("corpus_id") or ""), str(row.get("doc_id"))): {
             "source_file_hash": _document_source_hash(row),
             "corpus_id": str(row.get("corpus_id") or ""),
         }
@@ -256,12 +266,18 @@ async def attach_document_identities(
         copied = chunk.model_copy(deep=True)
         resolved_doc_id = (
             str(copied.doc_id or "")
-            or doc_id_by_chunk.get(str(copied.chunk_id), "")
-            or doc_id_by_parent.get(str(copied.parent_id), "")
+            or doc_id_by_chunk.get(
+                (str(copied.corpus_id or ""), str(copied.chunk_id)), ""
+            )
+            or doc_id_by_parent.get(
+                (str(copied.corpus_id or ""), str(copied.parent_id)), ""
+            )
         )
         if resolved_doc_id and not copied.doc_id:
             copied.doc_id = resolved_doc_id
-        identity = identity_by_doc.get(resolved_doc_id) or {}
+        identity = (
+            identity_by_doc.get((str(copied.corpus_id or ""), resolved_doc_id)) or {}
+        )
         source_hash = str(identity.get("source_file_hash") or "")
         if source_hash:
             metadata = dict(copied.metadata or {})
@@ -395,21 +411,36 @@ async def hydrate_chunks(
                 .find(with_active_records(orphan_query))
                 .to_list(length=None)
             )
-            pid_map = {r["chunk_id"]: r.get("parent_id", "") for r in chunk_records}
-            did_map = {r["chunk_id"]: r.get("doc_id", "") for r in chunk_records}
-            kind_map = {r["chunk_id"]: r.get("chunk_kind", "") for r in chunk_records}
-            meta_map = {r["chunk_id"]: r for r in chunk_records}
+            pid_map = {
+                (str(r.get("corpus_id") or ""), str(r["chunk_id"])): r.get(
+                    "parent_id", ""
+                )
+                for r in chunk_records
+            }
+            did_map = {
+                (str(r.get("corpus_id") or ""), str(r["chunk_id"])): r.get("doc_id", "")
+                for r in chunk_records
+            }
+            kind_map = {
+                (str(r.get("corpus_id") or ""), str(r["chunk_id"])): r.get(
+                    "chunk_kind", ""
+                )
+                for r in chunk_records
+            }
+            meta_map = {
+                (str(r.get("corpus_id") or ""), str(r["chunk_id"])): r
+                for r in chunk_records
+            }
             for chunk in orphans:
-                chunk.parent_id = pid_map.get(chunk.chunk_id, "") or ""
+                key = (str(chunk.corpus_id or ""), str(chunk.chunk_id or ""))
+                chunk.parent_id = pid_map.get(key, "") or ""
                 if not chunk.doc_id:
-                    chunk.doc_id = did_map.get(chunk.chunk_id, "") or ""
+                    chunk.doc_id = did_map.get(key, "") or ""
                 if not getattr(chunk, "chunk_kind", "") or chunk.chunk_kind == "body":
-                    chunk.chunk_kind = (
-                        kind_map.get(chunk.chunk_id, "") or chunk.chunk_kind
-                    )
+                    chunk.chunk_kind = kind_map.get(key, "") or chunk.chunk_kind
                 chunk.metadata = metadata_with_facets(
                     chunk.metadata,
-                    meta_map.get(chunk.chunk_id),
+                    meta_map.get(key),
                 )
             logger.debug(
                 "Pass 0: resolved parent_id for %d orphan chunks", len(orphans)
@@ -435,9 +466,9 @@ async def hydrate_chunks(
         logger.error("Hydration documents query failed: %s", exc)
         return chunks
 
-    # (doc_id, parent_id) → parent_chunk dict
-    parent_lookup: dict[tuple[str, str], dict] = {}
-    doc_meta: dict[str, dict] = {}
+    # (corpus_id, doc_id, parent_id) → parent_chunk dict
+    parent_lookup: dict[tuple[str, str, str], dict] = {}
+    doc_meta: dict[tuple[str, str], dict] = {}
     if doc_ids and parent_ids:
         parent_query: dict = {
             "doc_id": {"$in": list(doc_ids)},
@@ -458,13 +489,14 @@ async def hydrate_chunks(
                 did = pc.get("doc_id", "")
                 pid = pc.get("parent_id", "")
                 if did and pid:
-                    parent_lookup[(did, pid)] = pc
+                    parent_lookup[(str(pc.get("corpus_id") or ""), did, pid)] = pc
         except Exception as exc:
             logger.debug("Split parent hydration lookup skipped: %s", exc)
 
     for doc in docs:
         did = doc.get("doc_id", "")
-        doc_meta[did] = {
+        doc_corpus_id = str(doc.get("corpus_id") or "")
+        doc_meta[(doc_corpus_id, did)] = {
             "doc_name": _document_display_name(doc),
             "source_path": doc.get("source_path", ""),
             "corpus_id": doc.get("corpus_id", ""),
@@ -473,7 +505,7 @@ async def hydrate_chunks(
         for pc in doc.get("parent_chunks", []):
             pid = pc.get("parent_id", "")
             if did and pid:
-                parent_lookup[(did, pid)] = pc
+                parent_lookup[(doc_corpus_id, did, pid)] = pc
 
     # ── Pass 2: corpus name lookup ───────────────────────────────────────────
     corpus_id_set = {c.corpus_id for c in chunks if c.corpus_id}
@@ -497,7 +529,9 @@ async def hydrate_chunks(
     hydrated: List[SourceChunk] = []
     for chunk in chunks:
         if chunk.parent_id and chunk.doc_id:
-            pc = parent_lookup.get((chunk.doc_id, chunk.parent_id))
+            pc = parent_lookup.get(
+                (str(chunk.corpus_id or ""), chunk.doc_id, chunk.parent_id)
+            )
             if pc:
                 # Capture the precise child passage BEFORE it is replaced — under
                 # 'child_summary' mode the LLM sees child+summary instead of the
@@ -537,7 +571,7 @@ async def hydrate_chunks(
                     pc,
                 )
 
-            meta = doc_meta.get(chunk.doc_id, {})
+            meta = doc_meta.get((str(chunk.corpus_id or ""), chunk.doc_id), {})
             chunk.doc_name = meta.get("doc_name") or chunk.doc_id
             doc_artifact = meta.get("doc_artifact")
             if doc_artifact:
@@ -657,7 +691,11 @@ async def hydrate_rerank_texts(
         logger.warning("Reranker text hydration failed: %s", exc)
         return chunks
 
-    by_id = {str(r.get("chunk_id")): r for r in records if r.get("chunk_id")}
+    by_id = {
+        (str(r.get("corpus_id") or ""), str(r.get("chunk_id"))): r
+        for r in records
+        if r.get("chunk_id")
+    }
     parent_context_by_key: dict[tuple[str, str, str], str] = {}
     parent_context_by_id: dict[str, str] = {}
     for parent in parent_records:
@@ -682,7 +720,7 @@ async def hydrate_rerank_texts(
     replaced = 0
     for chunk in chunks:
         copied = chunk.model_copy()
-        record = by_id.get(copied.chunk_id)
+        record = by_id.get((str(copied.corpus_id or ""), str(copied.chunk_id or "")))
         if record and record.get("text"):
             original_len = len(copied.text or "")
             copied.text = str(record["text"])
@@ -706,7 +744,9 @@ async def hydrate_rerank_texts(
                 str(copied.doc_id or ""),
                 str(copied.parent_id or ""),
             )
-        ) or parent_context_by_id.get(str(copied.parent_id or ""))
+        )
+        if not parent_context and not copied.corpus_id:
+            parent_context = parent_context_by_id.get(str(copied.parent_id or ""))
         if parent_context:
             metadata = dict(copied.metadata or {})
             metadata["reranker_parent_context"] = parent_context[:1200]
@@ -798,9 +838,9 @@ async def hydrate_summary_rerank_texts(
         logger.warning("Summary reranker text hydration failed: %s", exc)
         return chunks
 
-    by_doc_parent: dict[tuple[str, str], dict] = {}
+    by_doc_parent: dict[tuple[str, str, str], dict] = {}
     by_parent: dict[str, dict] = {}
-    doc_names: dict[str, str] = {}
+    doc_names: dict[tuple[str, str], str] = {}
     if parent_ids:
         parent_query: dict = {"parent_id": {"$in": list(parent_ids)}}
         if doc_ids:
@@ -820,22 +860,24 @@ async def hydrate_summary_rerank_texts(
                 parent_id = str(parent.get("parent_id") or "")
                 summary = str(parent.get("summary") or "")
                 doc_id = str(parent.get("doc_id") or "")
+                corpus_id = str(parent.get("corpus_id") or "")
                 if not parent_id or not summary:
                     continue
-                by_doc_parent[(doc_id, parent_id)] = parent
+                by_doc_parent[(corpus_id, doc_id, parent_id)] = parent
                 by_parent[parent_id] = parent
         except Exception as exc:
             logger.debug("Split summary hydration lookup skipped: %s", exc)
 
     for doc in docs:
         doc_id = str(doc.get("doc_id") or "")
-        doc_names[doc_id] = _document_display_name(doc)
+        corpus_id = str(doc.get("corpus_id") or "")
+        doc_names[(corpus_id, doc_id)] = _document_display_name(doc)
         for parent in doc.get("parent_chunks", []) or []:
             parent_id = str(parent.get("parent_id") or "")
             summary = str(parent.get("summary") or "")
             if not parent_id or not summary:
                 continue
-            by_doc_parent[(doc_id, parent_id)] = parent
+            by_doc_parent[(corpus_id, doc_id, parent_id)] = parent
             by_parent[parent_id] = parent
 
     if not by_doc_parent and not by_parent:
@@ -845,7 +887,12 @@ async def hydrate_summary_rerank_texts(
         for chunk in chunks:
             copied = chunk.model_copy()
             if not copied.doc_name:
-                copied.doc_name = doc_names.get(copied.doc_id or "") or copied.doc_name
+                copied.doc_name = (
+                    doc_names.get(
+                        (str(copied.corpus_id or ""), str(copied.doc_id or ""))
+                    )
+                    or copied.doc_name
+                )
             hydrated_names.append(copied)
         return hydrated_names
 
@@ -854,14 +901,23 @@ async def hydrate_summary_rerank_texts(
     for chunk in chunks:
         copied = chunk.model_copy()
         if not copied.doc_name:
-            copied.doc_name = doc_names.get(copied.doc_id or "") or copied.doc_name
+            copied.doc_name = (
+                doc_names.get((str(copied.corpus_id or ""), str(copied.doc_id or "")))
+                or copied.doc_name
+            )
         chunk_id = copied.chunk_id or ""
         parent_id = copied.parent_id or (
             chunk_id.removesuffix("_summary") if chunk_id.endswith("_summary") else ""
         )
-        record = by_doc_parent.get((copied.doc_id or "", parent_id)) or by_parent.get(
-            parent_id
+        record = by_doc_parent.get(
+            (
+                str(copied.corpus_id or ""),
+                str(copied.doc_id or ""),
+                parent_id,
+            )
         )
+        if record is None and not copied.corpus_id:
+            record = by_parent.get(parent_id)
         if record and record.get("summary"):
             original_len = len(copied.text or "")
             summary = str(record["summary"])

@@ -13,21 +13,47 @@ from neo4j import AsyncDriver
 
 logger = logging.getLogger(__name__)
 
-_CONSTRAINTS = [
-    "CREATE CONSTRAINT IF NOT EXISTS FOR (d:Document) REQUIRE d.doc_id IS UNIQUE",
-    "CREATE CONSTRAINT IF NOT EXISTS FOR (c:Chunk) REQUIRE c.chunk_id IS UNIQUE",
-    "CREATE CONSTRAINT IF NOT EXISTS FOR (e:Entity) REQUIRE e.entity_id IS UNIQUE",
-    "CREATE CONSTRAINT IF NOT EXISTS FOR (f:Fact) REQUIRE f.fact_id IS UNIQUE",
+_DERIVED_IDENTITY_CONSTRAINTS = [
+    (
+        "Document",
+        ("corpus_id", "doc_id"),
+        "CREATE CONSTRAINT document_corpus_doc_id_unique IF NOT EXISTS "
+        "FOR (d:Document) REQUIRE (d.corpus_id, d.doc_id) IS UNIQUE",
+    ),
+    (
+        "Chunk",
+        ("corpus_id", "chunk_id"),
+        "CREATE CONSTRAINT chunk_corpus_chunk_id_unique IF NOT EXISTS "
+        "FOR (c:Chunk) REQUIRE (c.corpus_id, c.chunk_id) IS UNIQUE",
+    ),
+    (
+        "Fact",
+        ("corpus_id", "fact_id"),
+        "CREATE CONSTRAINT fact_corpus_fact_id_unique IF NOT EXISTS "
+        "FOR (f:Fact) REQUIRE (f.corpus_id, f.fact_id) IS UNIQUE",
+    ),
 ]
+
+_ENTITY_CONSTRAINT = (
+    "CREATE CONSTRAINT IF NOT EXISTS FOR (e:Entity) REQUIRE e.entity_id IS UNIQUE"
+)
+
+_LEGACY_SINGLE_PROPERTY_IDENTITIES = {
+    ("Document", ("doc_id",)),
+    ("Chunk", ("chunk_id",)),
+    ("Fact", ("fact_id",)),
+}
 
 _INDEXES = [
     "CREATE INDEX IF NOT EXISTS FOR (d:Document) ON (d.corpus_id)",
+    "CREATE INDEX IF NOT EXISTS FOR (d:Document) ON (d.corpus_id, d.doc_id)",
     # Brain View anchor + composite indexes — drive the books-as-clusters query.
     "CREATE INDEX IF NOT EXISTS FOR (d:Document) ON (d.is_cluster_anchor)",
     "CREATE INDEX IF NOT EXISTS FOR (d:Document) ON (d.filename)",
     "CREATE INDEX IF NOT EXISTS FOR (d:Document) ON (d.corpus_id, d.is_cluster_anchor)",
     "CREATE INDEX IF NOT EXISTS FOR (d:Document) ON (d.corpus_id, d.filename)",
     "CREATE INDEX IF NOT EXISTS FOR (c:Chunk) ON (c.corpus_id)",
+    "CREATE INDEX IF NOT EXISTS FOR (c:Chunk) ON (c.corpus_id, c.chunk_id)",
     "CREATE INDEX IF NOT EXISTS FOR (c:Chunk) ON (c.doc_id)",
     "CREATE INDEX IF NOT EXISTS FOR (c:Chunk) ON (c.doc_id, c.chunk_id)",
     "CREATE INDEX IF NOT EXISTS FOR (e:Entity) ON (e.normalized_name)",
@@ -58,10 +84,12 @@ _INDEXES = [
     # Bridge detection across multi-corpus selections — replaces full-graph scans.
     "CREATE INDEX IF NOT EXISTS FOR ()-[r:RELATES_TO]-() ON (r.corpus_ids)",
     "CREATE INDEX IF NOT EXISTS FOR ()-[r:RELATES_TO]-() ON (r.evidence_doc_ids)",
+    "CREATE INDEX IF NOT EXISTS FOR ()-[r:RELATES_TO]-() ON (r.evidence_doc_keys)",
     # MENTIONS scoping — fast bridge lookup when shared entity spans books.
     "CREATE INDEX IF NOT EXISTS FOR ()-[m:MENTIONS]-() ON (m.corpus_id)",
     "CREATE INDEX IF NOT EXISTS FOR ()-[m:MENTIONS]-() ON (m.doc_id)",
     "CREATE INDEX IF NOT EXISTS FOR (f:Fact) ON (f.corpus_id)",
+    "CREATE INDEX IF NOT EXISTS FOR (f:Fact) ON (f.corpus_id, f.fact_id)",
     "CREATE INDEX IF NOT EXISTS FOR (f:Fact) ON (f.doc_id)",
     "CREATE INDEX IF NOT EXISTS FOR (f:Fact) ON (f.chunk_id)",
     "CREATE INDEX IF NOT EXISTS FOR (f:Fact) ON (f.doc_id, f.chunk_id)",
@@ -88,12 +116,62 @@ _FULLTEXT_INDEXES = [
 async def initialize_schema(driver: AsyncDriver) -> None:
     """Apply constraints and indexes. Safe to call on every startup."""
     async with driver.session() as session:
-        for stmt in _CONSTRAINTS:
-            try:
-                await session.run(stmt)
-                logger.debug("Constraint applied: %.70s", stmt)
-            except Exception as exc:
-                logger.warning("Constraint skipped (likely already exists): %s", exc)
+        # Derived artifacts are corpus instances.  Create the composite
+        # constraints first, then remove the legacy global content-ID
+        # constraints.  These operations are deliberately fail-closed: a
+        # process must not begin graph writes under an ambiguous identity
+        # schema.  Entity remains globally unique by design.
+        for _label, _properties, stmt in _DERIVED_IDENTITY_CONSTRAINTS:
+            await session.run(stmt)
+            logger.debug("Composite constraint applied: %.70s", stmt)
+        await session.run(_ENTITY_CONSTRAINT)
+
+        constraints = await session.run(
+            "SHOW CONSTRAINTS YIELD name, entityType, labelsOrTypes, properties "
+            "RETURN name, entityType, labelsOrTypes, properties"
+        )
+        rows = [dict(row) async for row in constraints]
+        for row in rows:
+            labels = tuple(str(value) for value in (row.get("labelsOrTypes") or []))
+            properties = tuple(str(value) for value in (row.get("properties") or []))
+            identity = (labels[0], properties) if len(labels) == 1 else None
+            if identity not in _LEGACY_SINGLE_PROPERTY_IDENTITIES:
+                continue
+            name = str(row.get("name") or "")
+            if not name:
+                raise RuntimeError(f"legacy identity constraint has no name: {row!r}")
+            escaped_name = name.replace("`", "``")
+            await session.run(f"DROP CONSTRAINT `{escaped_name}` IF EXISTS")
+            logger.info("Dropped legacy global identity constraint: %s", name)
+
+        verified_result = await session.run(
+            "SHOW CONSTRAINTS YIELD labelsOrTypes, properties "
+            "RETURN labelsOrTypes, properties"
+        )
+        verified_rows = [dict(row) async for row in verified_result]
+        observed = {
+            (
+                tuple(str(value) for value in (row.get("labelsOrTypes") or [])),
+                tuple(str(value) for value in (row.get("properties") or [])),
+            )
+            for row in verified_rows
+        }
+        missing = [
+            (label, properties)
+            for label, properties, _stmt in _DERIVED_IDENTITY_CONSTRAINTS
+            if ((label,), properties) not in observed
+        ]
+        legacy_remaining = [
+            (labels, properties)
+            for labels, properties in observed
+            if len(labels) == 1
+            and (labels[0], properties) in _LEGACY_SINGLE_PROPERTY_IDENTITIES
+        ]
+        if missing or legacy_remaining:
+            raise RuntimeError(
+                "Neo4j derived-identity schema seal failed: "
+                f"missing_composites={missing}, legacy_remaining={legacy_remaining}"
+            )
         for stmt in _INDEXES:
             try:
                 await session.run(stmt)
@@ -105,7 +183,9 @@ async def initialize_schema(driver: AsyncDriver) -> None:
                 await session.run(stmt)
                 logger.debug("Full-text index applied: %.70s", stmt)
             except Exception as exc:
-                logger.warning("Full-text index skipped (likely already exists): %s", exc)
+                logger.warning(
+                    "Full-text index skipped (likely already exists): %s", exc
+                )
     logger.info("Neo4j schema initialization complete.")
 
 
@@ -133,7 +213,9 @@ async def wait_for_retrieval_indexes(
                 names=sorted(required),
             )
             states = {str(row["name"]): str(row["state"]) async for row in result}
-        if required <= states.keys() and all(states.get(name) == "ONLINE" for name in required):
+        if required <= states.keys() and all(
+            states.get(name) == "ONLINE" for name in required
+        ):
             return states
         if monotonic() >= deadline:
             missing = sorted(required - states.keys())

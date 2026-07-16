@@ -24,10 +24,23 @@ class _DB:
     def __init__(self):
         self.collections = {
             "chunks": _Collection(
-                [{"chunk_id": "chunk-1", "parent_id": "parent-1", "doc_id": "doc-1"}]
+                [
+                    {
+                        "corpus_id": "corpus-1",
+                        "chunk_id": "chunk-1",
+                        "parent_id": "parent-1",
+                        "doc_id": "doc-1",
+                    }
+                ]
             ),
             "documents": _Collection(
-                [{"doc_id": "doc-1", "corpus_id": "corpus-1", "content_sha256": "hash-1"}]
+                [
+                    {
+                        "doc_id": "doc-1",
+                        "corpus_id": "corpus-1",
+                        "content_sha256": "hash-1",
+                    }
+                ]
             ),
         }
 

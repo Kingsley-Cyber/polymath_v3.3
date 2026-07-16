@@ -36,6 +36,19 @@ async def _ensure_index(collection, *args, **kwargs):
             await asyncio.sleep(delay)
 
 
+async def _drop_legacy_single_field_unique_index(collection, field: str) -> list[str]:
+    """Retire every unique index whose complete key is one content-ID field."""
+
+    dropped: list[str] = []
+    existing = await collection.index_information()
+    for index_name, index_info in existing.items():
+        index_keys = tuple(tuple(value) for value in index_info.get("key", []))
+        if index_info.get("unique") and index_keys == ((field, 1),):
+            await collection.drop_index(index_name)
+            dropped.append(str(index_name))
+    return dropped
+
+
 async def create_all_indexes(db: AsyncIOMotorDatabase) -> None:
     """
     Create all MongoDB indexes across both collections.
@@ -75,13 +88,15 @@ async def create_all_indexes(db: AsyncIOMotorDatabase) -> None:
     # doc_id is content-hashed — not globally unique when the same file lands
     # in two corpora. Unique key is the compound (corpus_id, doc_id). Drop any
     # legacy "doc_id_1" unique index from pre-refactor DBs; safe on fresh DBs.
-    try:
-        await db["documents"].drop_index("doc_id_1")
-    except Exception:
-        pass
+    for index_name in await _drop_legacy_single_field_unique_index(
+        db["documents"], "doc_id"
+    ):
+        logger.info("Dropped legacy global document identity index: %s", index_name)
     await _ensure_index(
         db["documents"],
-        [("corpus_id", 1), ("doc_id", 1)], unique=True, name="corpus_doc_unique"
+        [("corpus_id", 1), ("doc_id", 1)],
+        unique=True,
+        name="corpus_doc_unique",
     )
     await _ensure_index(db["documents"], "doc_id")  # non-unique cross-corpus lookup
     await _ensure_index(db["documents"], "corpus_id")
@@ -91,13 +106,15 @@ async def create_all_indexes(db: AsyncIOMotorDatabase) -> None:
     # --- chunks ---
     # Same rationale as documents: chunk_id is derived from content-hashed
     # doc_id, so uniqueness must include corpus_id.
-    try:
-        await db["chunks"].drop_index("chunk_id_1")
-    except Exception:
-        pass
+    for index_name in await _drop_legacy_single_field_unique_index(
+        db["chunks"], "chunk_id"
+    ):
+        logger.info("Dropped legacy global chunk identity index: %s", index_name)
     await _ensure_index(
         db["chunks"],
-        [("corpus_id", 1), ("chunk_id", 1)], unique=True, name="corpus_chunk_unique"
+        [("corpus_id", 1), ("chunk_id", 1)],
+        unique=True,
+        name="corpus_chunk_unique",
     )
     await _ensure_index(db["chunks"], "chunk_id")  # non-unique cross-corpus lookup
     await _ensure_index(db["chunks"], "parent_id")
@@ -117,7 +134,9 @@ async def create_all_indexes(db: AsyncIOMotorDatabase) -> None:
         info = existing.get("chunks_text_search")
         if info and info.get("language_override", "language") != "_text_language":
             await db["chunks"].drop_index("chunks_text_search")
-            logger.info("Dropped legacy chunks_text_search index (language_override mismatch)")
+            logger.info(
+                "Dropped legacy chunks_text_search index (language_override mismatch)"
+            )
     except Exception as exc:  # pragma: no cover - best-effort cleanup
         logger.warning("Could not check legacy chunks text index: %s", exc)
     try:
@@ -149,6 +168,34 @@ async def create_all_indexes(db: AsyncIOMotorDatabase) -> None:
     )
     await _ensure_index(db["parent_chunks"], "parent_id")
     logger.info("Indexes ensured: parent_chunks")
+
+    # --- summary_tree ---
+    # node_id is content-derived and therefore repeats when the same source is
+    # intentionally ingested into multiple corpora.  The durable tree instance
+    # is identified by (corpus_id, node_id), exactly like documents/chunks.
+    # Retire any legacy single-field UNIQUE index before creating the compound
+    # identity.  Do not assume the legacy index kept Mongo's default name: a
+    # deployment may have named it explicitly.
+    for index_name in await _drop_legacy_single_field_unique_index(
+        db["summary_tree"], "node_id"
+    ):
+        logger.info(
+            "Dropped legacy global summary-tree identity index: %s",
+            index_name,
+        )
+    await _ensure_index(
+        db["summary_tree"],
+        [("corpus_id", 1), ("node_id", 1)],
+        unique=True,
+        name="summary_tree_corpus_node_unique",
+    )
+    await _ensure_index(db["summary_tree"], "node_id")
+    await _ensure_index(
+        db["summary_tree"],
+        [("corpus_id", 1), ("doc_id", 1), ("node_type", 1)],
+        name="summary_tree_corpus_doc_type",
+    )
+    logger.info("Indexes ensured: summary_tree")
 
     # --- ghost_b_extractions ---
     # One durable Ghost B checkpoint per child chunk. Successful rows feed

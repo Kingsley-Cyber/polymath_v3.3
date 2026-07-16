@@ -133,8 +133,9 @@ async def get_graph_overview(
     )
     # Self-heal: a cold corpus rebuilds because someone looked at it.
     if isinstance(result, dict) and result.get("status") == "cache_warming":
-        result.setdefault("_meta", {})["self_heal_kicked"] = (
-            _kick_cache_rebuild_for([corpus_id]))
+        result.setdefault("_meta", {})["self_heal_kicked"] = _kick_cache_rebuild_for(
+            [corpus_id]
+        )
     return result
 
 
@@ -174,7 +175,9 @@ async def list_entities(
     corpus_id: str,
     q: str = Query(default="", description="Substring filter on entity name"),
     limit: int = Query(default=20, ge=1, le=200),
-    doc_id: Optional[str] = Query(default=None, description="Narrow to a single document"),
+    doc_id: Optional[str] = Query(
+        default=None, description="Narrow to a single document"
+    ),
 ):
     driver = _require_neo4j()
     from services.graph.neo4j_reader import get_entities
@@ -263,7 +266,9 @@ async def graph_query(body: GraphQueryRequest = Body(...)) -> GraphQueryResponse
     if not corpus_ids and body.corpus_id:
         corpus_ids = [body.corpus_id]
     if not corpus_ids:
-        raise HTTPException(status_code=400, detail="corpus_ids must be a non-empty list")
+        raise HTTPException(
+            status_code=400, detail="corpus_ids must be a non-empty list"
+        )
 
     # Phase 1 hybrid — pass the qdrant client through so the Agent
     # Search seed-extraction can augment its literal CONTAINS match with
@@ -285,6 +290,7 @@ async def graph_query(body: GraphQueryRequest = Body(...)) -> GraphQueryResponse
                 compute_corpus_change_signature,
                 get_cached_metrics,
             )
+
             for cid in corpus_ids:
                 try:
                     sig = await compute_corpus_change_signature(db, cid)
@@ -292,9 +298,7 @@ async def graph_query(body: GraphQueryRequest = Body(...)) -> GraphQueryResponse
                     if m is not None:
                         corpus_metrics_map[cid] = m
                 except Exception as exc:
-                    logger.debug(
-                        "metrics cache lookup skipped for %s: %s", cid, exc
-                    )
+                    logger.debug("metrics cache lookup skipped for %s: %s", cid, exc)
         except Exception as exc:
             logger.warning(
                 "metrics cache module unavailable — Phase 2 path disabled: %s", exc
@@ -309,7 +313,13 @@ async def graph_query(body: GraphQueryRequest = Body(...)) -> GraphQueryResponse
             qdrant=qdrant,
         )
         if not seeds:
-            return cid, {"nodes": [], "links": [], "bridges": [], "gaps": [], "seeds": []}
+            return cid, {
+                "nodes": [],
+                "links": [],
+                "bridges": [],
+                "gaps": [],
+                "seeds": [],
+            }
         seed_ids = [s["entity_id"] for s in seeds]
         # Phase 3 — entity_scores carries the Phase 1 hybrid extraction
         # scores so select_working_entities can use query_relevance as
@@ -413,11 +423,16 @@ async def graph_query(body: GraphQueryRequest = Body(...)) -> GraphQueryResponse
             except Exception as exc:  # pragma: no cover — defensive
                 logger.warning(
                     "graph_query: corpus=%s failed (%s) — returning empty",
-                    cid, exc,
+                    cid,
+                    exc,
                 )
                 return cid, {
-                    "nodes": [], "links": [], "bridges": [],
-                    "gaps": [], "seeds": [], "trace": {"error": str(exc)},
+                    "nodes": [],
+                    "links": [],
+                    "bridges": [],
+                    "gaps": [],
+                    "seeds": [],
+                    "trace": {"error": str(exc)},
                 }
 
     per_corpus = await asyncio.gather(*[_gated(cid) for cid in corpus_ids])
@@ -464,10 +479,9 @@ async def graph_query(body: GraphQueryRequest = Body(...)) -> GraphQueryResponse
                 _stamp(merged_bridges[bid], cid)
                 # Sum connected_seed_count across corpora.
                 try:
-                    merged_bridges[bid]["connected_seed_count"] = (
-                        int(merged_bridges[bid].get("connected_seed_count") or 0)
-                        + int(b.get("connected_seed_count") or 0)
-                    )
+                    merged_bridges[bid]["connected_seed_count"] = int(
+                        merged_bridges[bid].get("connected_seed_count") or 0
+                    ) + int(b.get("connected_seed_count") or 0)
                 except Exception:
                     pass
             else:
@@ -498,6 +512,7 @@ async def graph_query(body: GraphQueryRequest = Body(...)) -> GraphQueryResponse
     merged_metrics = None
     if corpus_metrics_map:
         from types import SimpleNamespace
+
         merged_top_pr: dict[str, dict] = {}
         for m in corpus_metrics_map.values():
             for entry in getattr(m, "top_pagerank", None) or []:
@@ -689,6 +704,7 @@ async def entity_search(body: EntitySearchRequest = Body(...)) -> EntitySearchRe
             # Hydration failure should not fail the whole request —
             # return the unhydrated chunks so the UI can still render IDs.
             import logging
+
             logging.getLogger(__name__).warning(
                 "Entity search hydration failed, returning unhydrated: %s", exc
             )
@@ -844,7 +860,9 @@ async def graph_node_insight(
         chunks=chunks,
         documents=_node_insight_documents(chunks),
         related_entities=_node_insight_related_entities(chunks, body.label),
-        effective_tier=str(getattr(retrieval.effective_tier, "value", retrieval.effective_tier)),
+        effective_tier=str(
+            getattr(retrieval.effective_tier, "value", retrieval.effective_tier)
+        ),
         downgrade_reason=retrieval.downgrade_reason,
     )
 
@@ -860,7 +878,7 @@ async def graph_node_insight(
 @discovery_router.post(
     "/refine",
     summary="HyDE-style query refinement — returns alternative / opposing / "
-            "related phrasings of a user's draft question. Idempotent.",
+    "related phrasings of a user's draft question. Idempotent.",
 )
 async def graph_refine_query(
     body: dict = Body(...),
@@ -1061,21 +1079,28 @@ async def graph_brain_view(body: dict = Body(...)) -> dict:
     existing = _BRAIN_VIEW_BUILD_TASKS.get(key)
     if existing is None or existing.done():
 
-        def _prune(payload: dict, *, per_doc: int = 12, global_cap: int = 3000,
-                   name_cap: int = 5) -> dict:
+        def _prune(
+            payload: dict,
+            *,
+            per_doc: int = 12,
+            global_cap: int = 3000,
+            name_cap: int = 5,
+        ) -> dict:
             """Keep only the strongest bridges — a 496-book corpus yields
             >16 MB of pairwise bridges (Mongo DocumentTooLarge, observed
             live) and no canvas renders 100k edges meaningfully anyway."""
             strength = lambda b: float(b.get("strength") or 0)  # noqa: E731
-            bridges = sorted(payload.get("bridges") or [], key=strength,
-                             reverse=True)[:global_cap]
+            bridges = sorted(payload.get("bridges") or [], key=strength, reverse=True)[
+                :global_cap
+            ]
             for b in bridges:
                 if isinstance(b.get("top_shared_entities"), list):
                     b["top_shared_entities"] = b["top_shared_entities"][:name_cap]
             payload["bridges"] = bridges
             for d in payload.get("documents") or []:
-                db_list = sorted(d.get("bridges") or [], key=strength,
-                                 reverse=True)[:per_doc]
+                db_list = sorted(d.get("bridges") or [], key=strength, reverse=True)[
+                    :per_doc
+                ]
                 d["bridges"] = db_list
             meta = payload.setdefault("meta", {})
             meta["bridges_pruned_to"] = {"global": global_cap, "per_doc": per_doc}
@@ -1090,29 +1115,48 @@ async def graph_brain_view(body: dict = Body(...)) -> dict:
                     try:
                         await db["graph_brain_view_cache"].update_one(
                             {"key": bkey},
-                            {"$set": {"key": bkey, "signature": bsig,
-                                      "payload": payload}},
+                            {
+                                "$set": {
+                                    "key": bkey,
+                                    "signature": bsig,
+                                    "payload": payload,
+                                }
+                            },
                             upsert=True,
                         )
                     except Exception as store_exc:  # noqa: BLE001
                         # Paranoia tier: halve the caps once if even the
                         # pruned payload trips a storage limit.
-                        logger.warning("brain-view: store failed (%s) — "
-                                       "re-pruning harder", type(store_exc).__name__)
-                        payload = _prune(payload, per_doc=6, global_cap=1200,
-                                         name_cap=3)
+                        logger.warning(
+                            "brain-view: store failed (%s) — " "re-pruning harder",
+                            type(store_exc).__name__,
+                        )
+                        payload = _prune(
+                            payload, per_doc=6, global_cap=1200, name_cap=3
+                        )
                         await db["graph_brain_view_cache"].update_one(
                             {"key": bkey},
-                            {"$set": {"key": bkey, "signature": bsig,
-                                      "payload": payload}},
+                            {
+                                "$set": {
+                                    "key": bkey,
+                                    "signature": bsig,
+                                    "payload": payload,
+                                }
+                            },
                             upsert=True,
                         )
-                    logger.info("brain-view: cache built key=%s docs=%d bridges=%d",
-                                bkey[:60], len(payload.get("documents") or []),
-                                len(payload.get("bridges") or []))
+                    logger.info(
+                        "brain-view: cache built key=%s docs=%d bridges=%d",
+                        bkey[:60],
+                        len(payload.get("documents") or []),
+                        len(payload.get("bridges") or []),
+                    )
                 else:
-                    logger.warning("brain-view: build returned error key=%s: %s",
-                                   bkey[:60], payload.get("meta"))
+                    logger.warning(
+                        "brain-view: build returned error key=%s: %s",
+                        bkey[:60],
+                        payload.get("meta"),
+                    )
             except Exception:  # noqa: BLE001
                 logger.exception("brain-view: cache build failed key=%s", bkey[:60])
             finally:
@@ -1159,6 +1203,9 @@ async def graph_book_drilldown(body: dict = Body(...)) -> dict:
     doc_id = str(body.get("doc_id") or "").strip()
     if not doc_id:
         raise HTTPException(status_code=400, detail="doc_id is required")
+    corpus_id = str(body.get("corpus_id") or "").strip()
+    if not corpus_id:
+        raise HTTPException(status_code=400, detail="corpus_id is required")
     other_corpus_ids = body.get("other_corpus_ids") or []
     if not isinstance(other_corpus_ids, list) or not other_corpus_ids:
         raise HTTPException(
@@ -1171,14 +1218,19 @@ async def graph_book_drilldown(body: dict = Body(...)) -> dict:
     from services.graph.queries import get_book_drilldown
 
     return await get_book_drilldown(
-        driver, doc_id, other_corpus_ids, limit=limit, chunk_limit=chunk_limit
+        driver,
+        corpus_id,
+        doc_id,
+        other_corpus_ids,
+        limit=limit,
+        chunk_limit=chunk_limit,
     )
 
 
 @discovery_router.post(
     "/by-document",
     summary="Books-as-clusters graph: each Document is one cluster, shared "
-            "entities form bridges between clusters",
+    "entities form bridges between clusters",
 )
 async def graph_by_document(body: dict = Body(...)) -> dict:
     """Multi-corpus, books-as-clusters view of the entity graph.
@@ -1218,12 +1270,16 @@ async def graph_by_document(body: dict = Body(...)) -> dict:
 
     corpus_ids = body.get("corpus_ids") or []
     if not isinstance(corpus_ids, list) or not corpus_ids:
-        raise HTTPException(status_code=400, detail="corpus_ids must be a non-empty list")
+        raise HTTPException(
+            status_code=400, detail="corpus_ids must be a non-empty list"
+        )
     corpus_ids = [str(c) for c in corpus_ids]
 
     mode = (body.get("mode") or "full").lower()
     if mode not in ("overview", "drill", "full"):
-        raise HTTPException(status_code=400, detail="mode must be one of: overview, drill, full")
+        raise HTTPException(
+            status_code=400, detail="mode must be one of: overview, drill, full"
+        )
 
     # Always fetch document metadata once — used to enrich cluster labels.
     async def _enrich(clusters: list[dict]) -> None:
@@ -1231,12 +1287,26 @@ async def graph_by_document(body: dict = Body(...)) -> dict:
         if not ids:
             return
         cursor = db["documents"].find(
-            {"doc_id": {"$in": ids}},
-            {"doc_id": 1, "filename": 1, "ghost_b_metrics": 1, "_id": 0},
+            {
+                "doc_id": {"$in": ids},
+                "corpus_id": {"$in": corpus_ids},
+            },
+            {
+                "corpus_id": 1,
+                "doc_id": 1,
+                "filename": 1,
+                "ghost_b_metrics": 1,
+                "_id": 0,
+            },
         )
-        meta_by_doc = {d["doc_id"]: d async for d in cursor}
+        meta_by_doc = {
+            (str(d.get("corpus_id") or ""), str(d["doc_id"])): d async for d in cursor
+        }
         for c in clusters:
-            doc = meta_by_doc.get(c["cluster_id"]) or {}
+            doc = (
+                meta_by_doc.get((str(c.get("corpus_id") or ""), str(c["cluster_id"])))
+                or {}
+            )
             c["label"] = doc.get("filename") or c["cluster_id"]
             metrics = doc.get("ghost_b_metrics") or {}
             c["ghost_b_success_rate"] = metrics.get("success_rate")
@@ -1257,11 +1327,24 @@ async def graph_by_document(body: dict = Body(...)) -> dict:
             for r in rows
         ]
         await _enrich(clusters)
-        return {"mode": "overview", "clusters": clusters, "nodes": [], "edges": [], "truncated": False}
+        return {
+            "mode": "overview",
+            "clusters": clusters,
+            "nodes": [],
+            "edges": [],
+            "truncated": False,
+        }
 
     drill_doc_id = body.get("drill_doc_id")
     if mode == "drill" and not drill_doc_id:
-        raise HTTPException(status_code=400, detail="drill_doc_id is required for mode=drill")
+        raise HTTPException(
+            status_code=400, detail="drill_doc_id is required for mode=drill"
+        )
+    drill_corpus_id = body.get("drill_corpus_id")
+    if mode == "drill" and not drill_corpus_id:
+        raise HTTPException(
+            status_code=400, detail="drill_corpus_id is required for mode=drill"
+        )
 
     result = await get_documents_as_clusters(
         driver,
@@ -1271,6 +1354,7 @@ async def graph_by_document(body: dict = Body(...)) -> dict:
         max_edges=int(body.get("max_edges", 60000) or 60000),
         top_entities_per_cluster=int(body.get("top_entities_per_cluster", 200) or 200),
         drill_doc_id=drill_doc_id,
+        drill_corpus_id=str(drill_corpus_id) if drill_corpus_id else None,
     )
     result["mode"] = mode
     await _enrich(result["clusters"])
@@ -1304,7 +1388,11 @@ async def graph_discover(
             {"session_id": body.session_id},
             {"user_id": 1, "_id": 0},
         )
-        if owner and owner.get("user_id") and owner["user_id"] != current_user["user_id"]:
+        if (
+            owner
+            and owner.get("user_id")
+            and owner["user_id"] != current_user["user_id"]
+        ):
             raise HTTPException(status_code=404, detail="Session not found")
 
     # PR 3 — both fields populated by GraphDiscoverRequest's PR 1 validator.
@@ -1312,7 +1400,9 @@ async def graph_discover(
     if not discover_corpus_ids and body.corpus_id:
         discover_corpus_ids = [body.corpus_id]
     if not discover_corpus_ids:
-        raise HTTPException(status_code=400, detail="corpus_ids must be a non-empty list")
+        raise HTTPException(
+            status_code=400, detail="corpus_ids must be a non-empty list"
+        )
 
     try:
         result = await discover(
@@ -1447,6 +1537,7 @@ async def list_graph_sessions(
     param remains supported.
     """
     from services.graph.orchestrator import list_sessions as _list
+
     db = ingestion_service.db
     if db is None:
         raise HTTPException(status_code=503, detail="Database not connected")
@@ -1498,7 +1589,9 @@ async def graph_resume_candidate(
     )
 
 
-@discovery_router.get("/sessions/{session_id}", response_model=GraphDiscoverSessionDetail)
+@discovery_router.get(
+    "/sessions/{session_id}", response_model=GraphDiscoverSessionDetail
+)
 async def get_graph_session(
     session_id: str,
     current_user: dict = Depends(get_current_user),
@@ -1573,6 +1666,7 @@ async def delete_graph_session(
 ):
     """Delete a Mission Control session. Only the owning user may delete."""
     from services.graph.orchestrator import delete_session as _delete
+
     db = ingestion_service.db
     if db is None:
         raise HTTPException(status_code=503, detail="Database not connected")
@@ -1633,6 +1727,7 @@ async def graph_full_multi_corpus(body: dict = Body(...)) -> dict:
         )
     except Exception as exc:
         import logging
+
         logging.getLogger(__name__).exception("graph_full_multi_corpus failed: %s", exc)
         raise HTTPException(status_code=500, detail="Graph load failed")
 
@@ -1677,7 +1772,9 @@ async def graph_overview_multi_corpus(body: dict = Body(...)) -> dict:
     # "warming" converges to ready without a manual rebuild call.
     warming = list((result.get("_meta") or {}).get("cache_warming_corpora") or [])
     if warming:
-        result.setdefault("_meta", {})["self_heal_kicked"] = _kick_cache_rebuild_for(warming)
+        result.setdefault("_meta", {})["self_heal_kicked"] = _kick_cache_rebuild_for(
+            warming
+        )
     return result
 
 
@@ -1858,7 +1955,9 @@ def _kick_cache_rebuild_for(corpus_ids: list[str]) -> list[str]:
                         target_cid,
                     )
                     return
-                log.info("graph self-heal: rebuilding analytics cache for %s", target_cid)
+                log.info(
+                    "graph self-heal: rebuilding analytics cache for %s", target_cid
+                )
                 await emerge_domains(qdrant, neo4j, db, target_cid, force=True)
                 log.info("graph self-heal: rebuild complete for %s", target_cid)
             except Exception:  # noqa: BLE001 — background task must not raise
@@ -1945,6 +2044,7 @@ async def graph_cache_rebuild(body: dict = Body(...)) -> dict:
                 await emerge_domains(qdrant, neo4j, db, target_cid, force=force)
             except Exception as exc:
                 import logging
+
                 logging.getLogger(__name__).exception(
                     "graph cache rebuild failed for %s: %s", target_cid, exc
                 )

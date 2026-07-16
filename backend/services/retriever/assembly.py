@@ -38,7 +38,7 @@ _MAX_ENTITY_LINES = 12
 
 def group_parent_candidates(
     chunks: Sequence[Any],
-    parent_map: dict[tuple[str, str], dict],
+    parent_map: dict[tuple[str, str, str], dict],
     anchor_doc_ids: Iterable[str] = (),
 ) -> tuple[list[ParentCandidate], list[OrphanChild]]:
     """Final-ranked chunks → rank-ordered parents + orphan children.
@@ -51,34 +51,39 @@ def group_parent_candidates(
     anchors = set(anchor_doc_ids or ())
     parents: list[ParentCandidate] = []
     orphans: list[OrphanChild] = []
-    seen: set[tuple[str, str]] = set()
+    seen: set[tuple[str, str, str]] = set()
     for c in chunks:
         doc_id = str(getattr(c, "doc_id", "") or "")
+        corpus_id = str(getattr(c, "corpus_id", "") or "")
         parent_id = str(getattr(c, "parent_id", "") or "")
-        key = (doc_id, parent_id)
+        key = (corpus_id, doc_id, parent_id)
         row = parent_map.get(key) if parent_id else None
         if row is None:
             text = str(getattr(c, "text", "") or "")
             if text:
-                orphans.append(OrphanChild(
-                    chunk_id=str(getattr(c, "chunk_id", "") or ""),
-                    parent_id=parent_id,
-                    doc_id=doc_id,
-                    score=float(getattr(c, "score", 0.0) or 0.0),
-                    text=text,
-                ))
+                orphans.append(
+                    OrphanChild(
+                        chunk_id=str(getattr(c, "chunk_id", "") or ""),
+                        parent_id=parent_id,
+                        doc_id=doc_id,
+                        score=float(getattr(c, "score", 0.0) or 0.0),
+                        text=text,
+                    )
+                )
             continue
         if key in seen:
             continue
         seen.add(key)
-        parents.append(ParentCandidate(
-            parent_id=parent_id,
-            doc_id=doc_id,
-            score=float(getattr(c, "score", 0.0) or 0.0),
-            full_text=str(row.get("text") or ""),
-            summary=str(row.get("summary") or ""),
-            lane="anchor" if doc_id in anchors else "",
-        ))
+        parents.append(
+            ParentCandidate(
+                parent_id=parent_id,
+                doc_id=doc_id,
+                score=float(getattr(c, "score", 0.0) or 0.0),
+                full_text=str(row.get("text") or ""),
+                summary=str(row.get("summary") or ""),
+                lane="anchor" if doc_id in anchors else "",
+            )
+        )
     return parents, orphans
 
 
@@ -154,34 +159,64 @@ async def build_waterfall_packet(
             return None
 
         keys = {
-            (str(getattr(c, "doc_id", "") or ""), str(getattr(c, "parent_id", "") or ""))
+            (
+                str(getattr(c, "corpus_id", "") or ""),
+                str(getattr(c, "doc_id", "") or ""),
+                str(getattr(c, "parent_id", "") or ""),
+            )
             for c in chunks
             if getattr(c, "parent_id", None)
         }
-        parent_ids = sorted({pid for _, pid in keys})
-        parent_map: dict[tuple[str, str], dict] = {}
+        parent_ids = sorted({pid for _, _, pid in keys})
+        parent_map: dict[tuple[str, str, str], dict] = {}
         if parent_ids:
             q: dict[str, Any] = {"parent_id": {"$in": parent_ids}}
             if corpus_ids:
                 q["corpus_id"] = {"$in": list(corpus_ids)}
             async for row in db["parent_chunks"].find(
                 with_active_records(q),
-                {"_id": 0, "parent_id": 1, "doc_id": 1, "text": 1, "summary": 1},
+                {
+                    "_id": 0,
+                    "corpus_id": 1,
+                    "parent_id": 1,
+                    "doc_id": 1,
+                    "text": 1,
+                    "summary": 1,
+                },
             ):
-                parent_map[(str(row.get("doc_id") or ""), str(row.get("parent_id") or ""))] = row
+                parent_map[
+                    (
+                        str(row.get("corpus_id") or ""),
+                        str(row.get("doc_id") or ""),
+                        str(row.get("parent_id") or ""),
+                    )
+                ] = row
 
         anchor_doc_ids: list[str] = []
         if bool(getattr(settings, "TWO_LANE_ANCHORING", False)):
             try:
                 from services.retriever.anchor_detect import detect_anchor_doc_ids
 
-                doc_ids = sorted({
-                    str(getattr(c, "doc_id", "") or "") for c in chunks
-                } - {""})
-                docs = await db["documents"].find(
-                    with_active_records({"doc_id": {"$in": doc_ids}}),
-                    {"_id": 0, "doc_id": 1, "title": 1, "author": 1},
-                ).to_list(length=None)
+                doc_ids = sorted(
+                    {str(getattr(c, "doc_id", "") or "") for c in chunks} - {""}
+                )
+                document_query: dict[str, Any] = {"doc_id": {"$in": doc_ids}}
+                if corpus_ids:
+                    document_query["corpus_id"] = {"$in": list(corpus_ids)}
+                docs = (
+                    await db["documents"]
+                    .find(
+                        with_active_records(document_query),
+                        {
+                            "_id": 0,
+                            "corpus_id": 1,
+                            "doc_id": 1,
+                            "title": 1,
+                            "author": 1,
+                        },
+                    )
+                    .to_list(length=None)
+                )
                 anchor_doc_ids = detect_anchor_doc_ids(query, docs)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("anchor detection skipped: %s", exc)
