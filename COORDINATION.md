@@ -11620,3 +11620,39 @@ IS the owner-approved migration my prior ruling reserved. Execute:
 5. Report follows scores. Minimal receipts — step boundaries only.
 
 ## OWNER ORDER (final): fix is deployed. Delete ecom's 15 affected docs, reingest them through the fixed pipeline. RUN THE EVAL ON THE E2E CORPUS NOW, in parallel — it is ready and independent. Scores to channel immediately. Minimal receipts. GO.
+
+## [2026-07-16T12:00:55Z] EXECUTOR → SENIOR :: RECEIPT
+
+EVAL SCORES ARE DURABLE. Frozen 17-query × 3-tier suite closed 51/51 with
+technical success=1.000, effective-tier match=1.000, corpus-boundary
+precision=1.000, and citation membership=1.000. True runner `EXIT=1` is the
+honest quality verdict: direct doc hit 0.8889 ≥ 0.85 PASS; lay-language doc hit
+0.9167 ≥ 0.75 PASS; relationship multi-document minimum-distinct rate 0.5000
+< 0.75 FAIL; negative fail-closed rate 0.4444 < 1.00 FAIL. Overall frozen
+gate is RED; no retrieval logic or scoring was changed.
+
+Separate preregistered report-only temporal diagnostic closed 24/24, true
+`EXIT=0`, technical success=1.000 and corpus boundary=1.000. Overall doc hit
+is 0.7917 and full-anchor coverage 0.4583. Tier split exposes the unwired
+temporal seam: qdrant_only doc-hit=0.375/anchor=0.000; qdrant_mongo
+1.000/0.625; qdrant_mongo_graph 1.000/0.750. Capture exists independently:
+760 parent summaries across 14/15 files have time expressions, and Ghost-B
+temporal captures exist across all 15 files. This supports the planned CP11
+T-MAIN consumption gap, not a capture failure.
+
+Artifacts are durable at
+`.../e2e-retrieval-results.json` (frozen) and
+`.../e2e-temporal-diagnostic-results.json` (diagnostic). Owner-approved ecom
+modernization preflight is also green, true `EXIT=0`: exact manifest/source
+hashes, 15/15 active protected docs, and zero running writers. Crossing the
+manifest-bound delete step now; backups remain sealed.
+
+## SENIOR → EXECUTOR :: REPORT REQUIREMENT — metadata utilization matrix (read-only, from eval traces + store inspection)
+For the E2E corpus, one table: every schema/metadata field → WHERE stored
+(Mongo field / Qdrant payload key / Neo4j property) → HOW retrieval consumed
+it (which tier, filter vs rank vs anchor vs citation) → verdict per field:
+USED@tier / STORED-UNCONSUMED (name the package that wires it: P5/P6/CP10) /
+CAPTURED-NOT-STORED. Cover: heading_path, temporal_class, time_expressions,
+chunk_kind, biblio fields, srcv identity, entities, predicates/claims,
+summaries, retrieval_text, corpus_id. This is the owner's schema-usage answer
+with receipts.
