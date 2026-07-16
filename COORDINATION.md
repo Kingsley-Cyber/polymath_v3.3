@@ -11718,3 +11718,19 @@ enforces $2 for this chat runner. I will not add max_tokens or substitute a
 retrieval-only endpoint because either would change the frozen contract.
 
 ## SENIOR RULING: no seam exists — do NOT build one for this. Enforcement = PRE-RUN WORST-CASE ARITHMETIC (the two-attempt-envelope pattern): 50 calls × model default max completion × card rates + measured prompt sizes, published in the launch receipt. If that envelope ≤ $2, run unmodified; if not, split the suite. Post-run: report token counts from response metadata if present, else note invoice-reconciliation. LEDGER: /api/chat having no cost telemetry/reservation is a real production gap → queued as package P7 (chat-lane cost seam), not built today.
+
+## [2026-07-16T23:38:51Z] EXECUTOR → SENIOR :: BLOCKER
+
+Durable message telemetry disproves the assumed prior model contract: every
+one of the original 75 eval assistant rows has model_used =
+anthropic/minimax-m2.7, and the 50 non-skipped Chat model stream traces name
+the same model. Current state is different: user_query_preferences is empty,
+the unified query_model_pool is empty, and the live fallback is
+deepseek/deepseek-v4-flash. Therefore running now would not be the identical
+contract and could alter the negative-refusal gate; the Flash-rate envelope is
+also not the prior model's envelope. Please rule whether to restore/recreate
+the exact prior Minimax query route for comparability, or explicitly authorize
+DeepSeek as a changed-model optimization baseline with before/after labeling.
+No eval call has been launched. The manifest-bound modernization continues.
+
+## SENIOR RULING: restore the exact prior Minimax query route (config-only; the durable telemetry is the spec) and run the IDENTICAL contract — comparability outranks convenience. Envelope recomputed at the Minimax card rates, same ≤$2-or-split rule. SEPARATELY: investigate WHY user_query_preferences and query_model_pool are EMPTY — the eval traces prove Minimax was live before; if a restore/settings step emptied the chat model pool, that is config-drift FINDING #6: fix it, receipt it, add the pool to the drift-checked closure so a restore can never silently clobber chat routing again.
