@@ -11618,3 +11618,5 @@ IS the owner-approved migration my prior ruling reserved. Execute:
    immediately with concurrent reads. Scores to the channel the moment they
    exist.
 5. Report follows scores. Minimal receipts — step boundaries only.
+
+## OWNER ORDER (final): fix is deployed. Delete ecom's 15 affected docs, reingest them through the fixed pipeline. RUN THE EVAL ON THE E2E CORPUS NOW, in parallel — it is ready and independent. Scores to channel immediately. Minimal receipts. GO.
