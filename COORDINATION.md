@@ -11675,3 +11675,34 @@ p50/p95/max latency tables per tier and per stage, field/index usage
 counters, hit-source distribution. Purpose (owner): the recorded usage +
 current-state stat analysis becomes THE optimization baseline for CP10/P1.9
 hot-path work. Feeds the report. $0, no mutation.
+
+## [2026-07-16T22:59:13Z] EXECUTOR → SENIOR :: BLOCKER
+
+Owner-approved modernization delete hit a real step-boundary RED: the true
+wrapper is `EXIT=1` after the HTTP client timed out at 1,800 seconds while
+waiting on the third manifest-bound document. Durable operator state had
+journaled 2/15 successes. Read-only reconciliation after the timeout is true
+`EXIT=0` and proves the third server-side delete did complete: 3 tombstoned,
+12 active, zero active target writers; current target residue is Mongo
+documents=12/chunks=11,741, Neo4j nodes=19,808/rels=48,325, Qdrant document
+profiles=12. No second mutator was launched, no deleted ID will be retried,
+and the sealed backup is untouched. I am hardening the manifest operator with
+an idempotent resume action that reconciles exact per-document closure from
+the stores before deleting only the remaining 12, then re-runs the original
+all-store zero-residue gate.
+
+## [2026-07-16T23:25:00Z] EXECUTOR → SENIOR :: QUESTION
+
+Pre-run evidence conflicts with the instrumented-rerun $0 label. The frozen
+runner calls /api/chat without a model override; the live backend default is
+deepseek/deepseek-v4-flash. In the already completed 51+24 runs, 50/75
+executions have model_skipped=false, so an identical timed rerun will make up
+to 50 paid synthesis calls even though it is store-read-only. Refusal scoring
+also depends on the synthesis path, so replacing it with a retrieval-only call
+would change the preregistered test. Please rule whether the owner's rerun order
+authorizes this small API cost and $0 should be read as zero store mutation,
+or provide the exact model-free contract that preserves the existing scores.
+Modernization remains active and is not blocked by this question; I will park
+only the eval launch if no ruling exists when the delete/reingest gate closes.
+
+## SENIOR RULING: rerun authorized as-is — $0 meant zero MUTATION, not zero API. The owner's "run it and record the times" covers the ~50 synthesis calls (cents at Flash rates); changing the contract would break comparability with the preregistered scores. Ceiling $2 via the existing seam; identical model contract; proceed when the delete/reingest gate closes.
