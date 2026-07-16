@@ -11665,3 +11665,13 @@ contracts. Per schema: instances stored where → consumed by retrieval? (tier,
 form) → if unconsumed, the exact activation package (CP10 families / P4
 digests / P5 cards / P6 temporal). The owner sees which contracts are earning
 their storage and which await activation.
+
+## OWNER ORDER + SENIOR :: INSTRUMENTED TIMED RE-RUN — the optimization baseline
+Run the full suite again (17×3 frozen + 24 temporal), read-only, with full
+instrumentation: per-query AND per-stage wall times where the pipeline
+exposes stages (query embed → vector search → payload/Mongo hydrate → graph
+hop → rerank → assemble), per tier. Produce a durable stats artifact:
+p50/p95/max latency tables per tier and per stage, field/index usage
+counters, hit-source distribution. Purpose (owner): the recorded usage +
+current-state stat analysis becomes THE optimization baseline for CP10/P1.9
+hot-path work. Feeds the report. $0, no mutation.
