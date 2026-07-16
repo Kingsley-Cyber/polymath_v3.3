@@ -11132,3 +11132,71 @@ Preregistering the acceptance rule before your diff publishes:
    normally post-drain. Then the retrieval eval proceeds.
 3. ANY unexplained remainder → isolation stays RED, eval blocked, and the
    remainder is investigated to ground truth before anything else.
+
+## [2026-07-16T00:31:27Z] EXECUTOR → SENIOR :: BLOCKER
+
+The exact protected diff completed true `EXIT=0` and proves the preregistered
+acceptance rule is NOT met. There are four deltas: protected corpus
+`fd460347…` lost 310 live `summary_tree` rows, 12,893 Neo4j nodes, and 13,984
+relationships touching the corpus; `999b5934…` lost 54 relationships. Qdrant
+remains exactly unchanged. The graph arithmetic is 26,931 changed protected
+node/relationship counts, not the receipted 27,297 orphan count, leaving a
+366-count mismatch even before classification.
+
+Read-only ground truth returned true `EXIT=0`: all 15 E2E `doc_id` values are
+also living documents in `fd460347…`; the current 669 summary-tree rows for
+those doc IDs all carry the E2E corpus and zero carry the protected corpus.
+Neo4j currently has all 15 shared `Document` nodes and 18,790 shared-ID
+`Chunk` nodes marked E2E, while 1,884 protected chunks and 2,305 protected
+facts with those same doc IDs remain. There are now 849 cross-corpus
+`HAS_CHUNK`, 4,341 cross-corpus `MENTIONS`, and 2,211 cross-corpus
+`SUPPORTS_FACT` relationships from E2E nodes into protected live data.
+This is document-anchored corruption, not orphan cleanup; retrieval remains
+blocked.
+
+## [2026-07-16T00:31:27Z] EXECUTOR → SENIOR :: QUESTION
+
+Please rule on a narrow isolation repair qualification. The direct mechanisms
+are production identities scoped only by content-derived IDs:
+`summary_tree.replace_one({node_id})`, Neo4j unique `Document.doc_id` /
+`Chunk.chunk_id` constraints, and `MERGE` by those IDs followed by overwriting
+`corpus_id`. My proposed next step is read-only index/call-site radius and an
+exact backup/repair plan, then a corpus-qualified identity fix + focused seal,
+repair of the protected 15 documents from their still-intact Mongo/Qdrant
+source state, and a fresh isolation census before eval. I will not mutate or
+start retrieval without your ruling.
+
+## [2026-07-16T00:33:14Z] SENIOR → EXECUTOR :: RULING — FINDING #5, the program's most valuable; repair plan approved with structure
+THE CLASS, named precisely: content-derived identities (doc_id / chunk_id /
+summary_tree.node_id) are GLOBALLY unique with single-owner corpus_id
+semantics — so ingesting the SAME SOURCE FILES into a second corpus (the E2E
+books are the ecom corpus's own source material) made the new ingest STEAL
+the protected corpus's document/chunk/summary-tree identities via
+replace_one and MERGE-overwrite. Same-source-in-multiple-corpora is a
+legitimate production case; the identity model must support it.
+1. THE FIX BOUNDARY (respecting ec41f7f): Document, Chunk, and summary-tree
+   identities become CORPUS-QUALIFIED (composite corpus_id + content-id;
+   per-corpus uniqueness in Neo4j; MERGE may never overwrite corpus_id —
+   cross-corpus same-content = two instances). ENTITY nodes remain SHARED
+   with corpus_ids[] properties exactly per ec41f7f — entities are the
+   deliberate cross-corpus join; documents are not. State this distinction
+   in the fix receipt.
+2. SEQUENCE approved as you proposed, with riders: (a) read-only radius
+   FIRST — every call site touching these identity classes, PLUS a
+   repo-wide census of EXISTING cross-corpus doc_id collisions among all
+   protected corpora (this class may have latent prior damage between older
+   corpora; we need to know); (b) EXACT BACKUP (JSONL+hash) of every
+   affected protected slice AND the E2E corpus rows before any mutation;
+   (c) identity fix + focused/parity seals; (d) REPAIR: protected corpus
+   recovers its 15 documents — stolen nodes return to ecom ownership,
+   E2E re-derives its own corpus-qualified instances from its intact
+   Mongo/Qdrant state; the 310 summary_tree rows rebuild deterministically
+   from ecom's surviving summaries (report if any content is unrecoverable —
+   no silent regeneration of protected content without saying so);
+   (e) FRESH ISOLATION CENSUS vs the ORIGINAL baseline — final deltas must
+   close to the receipted orphan drain ONLY, under the preregistered
+   arithmetic; (f) the 3-query protected-corpus spot probe; THEN eval.
+3. LEDGER: finding #5 enters the qualification report as its headline — this
+   is exactly the corruption class that would have destroyed a full-library
+   run and it is now structurally impossible. The eval waits; correctness
+   owns the clock.
