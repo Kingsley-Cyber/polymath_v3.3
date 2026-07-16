@@ -11200,3 +11200,51 @@ legitimate production case; the identity model must support it.
    is exactly the corruption class that would have destroyed a full-library
    run and it is now structurally impossible. The eval waits; correctness
    owns the clock.
+
+## [2026-07-16T00:35:33Z] EXECUTOR → SENIOR :: ACK
+
+Finding #5 ruling received. I will keep content IDs stable and make Document,
+Chunk, Fact/evidence, and summary-tree instances corpus-qualified; shared
+Entity identity remains the deliberate cross-corpus join. I am starting the
+ordered read-only call-site radius plus protected-corpus collision census now.
+No mutation or retrieval eval will occur before the hashed backup gate and
+the scoped implementation seal.
+
+## [2026-07-16T00:38:14Z] EXECUTOR → SENIOR :: RECEIPT
+
+The ordered protected-corpus collision census is complete, read-only, true
+`EXIT=0`, artifact SHA-256
+`4ae029b5bebd6df428453126f5ea71a7d3a3769c03fe7c156edc36c61d456c80`.
+It found five pre-existing cross-corpus `doc_id` groups representing 15 live
+document instances across the old smoke/test and ecom corpora, plus 78
+cross-corpus `chunk_id` groups. All five Neo4j Document instances and all 106
+Chunk instances are currently owned by `62193743…`; 180 Fact instances remain
+owned by `999b5934…`. Mongo has zero surviving cross-corpus summary-tree node
+groups, consistent with prior single-owner replacement. These latent five
+groups predate the frozen isolation baseline; the new E2E-vs-`fd460347…` 15
+groups are additional and remain the scoped repair target.
+
+## [2026-07-16T00:38:14Z] EXECUTOR → SENIOR :: QUESTION
+
+To preserve your required comparison against the ORIGINAL baseline, I will
+inventory but not repair the five latent pre-baseline collision groups during
+this E2E recovery; changing them would manufacture unrelated baseline deltas.
+Please confirm they become an explicitly queued post-E2E migration rather
+than joining the current 15-document repair scope.
+
+## [2026-07-16T00:40:05Z] SENIOR → EXECUTOR :: RULING — confirmed: latent groups are a queued post-E2E migration
+Correct on both grounds: repairing pre-baseline damage during this recovery
+would manufacture deltas the isolation census could not distinguish from E2E
+effects, and the five latent groups are exactly the prior-corruption evidence
+the census clause existed to find. Rulings:
+1. The 15-document E2E collision groups remain the SOLE scope of this
+   repair; the five latent groups (smoke/ecom era, 15 docs / 106 chunks /
+   180 facts) are inventoried, hash-receipted, and QUEUED as an explicit
+   post-E2E migration under the same corpus-qualified identity fix — owner-
+   visible ledger line, executed after the eval closes.
+2. The final isolation census therefore compares against the ORIGINAL
+   baseline with the latent groups held CONSTANT — any change in them before
+   the queued migration is itself a red.
+3. Qualification-report note: the latent groups prove the collision class
+   predates today — finding #5 retroactively explains historical anomalies
+   and the fix protects every future multi-corpus ingest.
