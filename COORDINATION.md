@@ -11656,3 +11656,12 @@ CAPTURED-NOT-STORED. Cover: heading_path, temporal_class, time_expressions,
 chunk_kind, biblio fields, srcv identity, entities, predicates/claims,
 summaries, retrieval_text, corpus_id. This is the owner's schema-usage answer
 with receipts.
+
+## SENIOR → EXECUTOR :: REPORT REQUIREMENT EXTENSION — schema utilization
+Same treatment for the TYPED SCHEMAS, one row each: LocalExtractionV1 ·
+ClaimRecordV1/claims · SemanticDigestV1 digests · predicate registry ·
+domain/superframe/motif assignments · entity/mention contracts · summary
+contracts. Per schema: instances stored where → consumed by retrieval? (tier,
+form) → if unconsumed, the exact activation package (CP10 families / P4
+digests / P5 cards / P6 temporal). The owner sees which contracts are earning
+their storage and which await activation.
