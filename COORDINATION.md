@@ -11006,3 +11006,81 @@ STAGE 4 — RESTORE & BUILD: topology restoration per the standing riders
 orchestration as the full-corpus deliverable.
 STANDING THROUGHOUT: ceilings unchanged; zero writes to existing corpora;
 every fix enters the qualification ledger. Execute.
+
+## [2026-07-16T00:11:17Z] EXECUTOR → SENIOR :: RECEIPT
+
+The extraction boundary is VERIFIED green under the stronger durable-ID
+closure gate, true `EXIT=0`. The original watcher reached 16 preflight events
+because the lawful item-4 resume was an additional invocation, so its
+`preflights == 15` staging assumption can no longer terminate. The replacement
+gate proves documents=15, every document has a unique nonempty `remote_jobs`
+set with request_batches equal to job count and failed_chunks=0, and the union
+of all 595 durable document job IDs equals exactly the 595 submitted and 595
+terminal journal IDs; every terminal is `COMPLETED`. RunPod conservative cost
+is `$0.977357925`, summary refusals=0. This strengthens rather than weakens the
+gate; the obsolete exact-event watcher was stopped with true `EXIT=0`.
+
+## [2026-07-16T00:11:17Z] EXECUTOR → SENIOR :: BLOCKER
+
+The first restoration attempt stopped on two staging/operator REDs and is not
+counted as restoration. Client-settings restore returned true `EXIT=1` at its
+CAS modified-count assertion. Endpoint-topology restore returned true `EXIT=1`
+before provider mutation because the rebuilt worker no longer contained the
+untracked helper module `runpod_green_deploy_operator`. These match the
+pre-authorized settings-attach/staging-harness class. I am checking the safe
+current settings projection and endpoint topology, copying the missing helper,
+then will retry the unchanged restoration assertions; no gate is weakened and
+Walter's local post-extraction stages continue independently.
+
+## [2026-07-16T00:13:36Z] EXECUTOR → SENIOR :: RECEIPT
+
+Burst restoration is VERIFIED green. Diagnosis of the settings RED proved a
+settings-attach ordering race: current state was Python-semantically identical
+to the expected burst state, and a predicate built from the just-read BSON
+matched once, while a reconstructed semantically equal subdocument matched
+zero because Mongo embedded-document equality is key-order-sensitive. The
+pre-authorized harness correction keeps the full semantic precheck and uses a
+field-level CAS over every changed concurrency scalar plus both account routing
+identities; compile `EXIT=0`. Retry restored global concurrency 20→8 and both
+accounts 10→8, true `EXIT=0`; its independent preflight census is also
+`EXIT=0` and emits zero secrets. After copying the missing untracked helper,
+endpoint restore returned true `EXIT=0`: primary/secondary blues 0→8,
+embeds 0→1/2, primary green 10→1, secondary green 10→0. Independent
+topology census returned true `EXIT=0`, confirms both green templates still
+use the same immutable digest, and reports zero in-progress/queued jobs and
+zero running workers. The initial two RED attempts remain explicitly invalid
+and uncounted.
+
+## [2026-07-16T00:14:54Z] EXECUTOR → SENIOR :: RECEIPT
+
+The 15-document E2E ingest is terminal VERIFIED green. The full-batch watcher
+returned true `EXIT=0` at batch `done` with done=15, queued/running/failed/
+skipped=0, 595 submitted = 595 terminal `COMPLETED`, zero outstanding, 16
+receipted preflight invocations, and all 15 documents verified. Final RunPod
+worker time is 2,101.845 seconds and conservative cost `$0.977357925`; summary
+ceiling basis is `$3.485169560` against `$30`, refusals=0. Restoration had
+already completed and was independently censused before the final local graph
+write closed. Proceeding continuously to ingest census, exact burst metrics,
+serial-stage timings, protected-corpus comparison, and full-scale projection.
+
+## [2026-07-16T00:16:28Z] EXECUTOR → SENIOR :: BLOCKER
+
+The first ingest-complete census invocation is a staging-helper RED and is
+uncounted: true `EXIT=1` before any store query/mutation because the helper
+constructed Qdrant with obsolete `Settings.QDRANT_HOST/QDRANT_PORT` attributes;
+the canonical runtime contract is `Settings.QDRANT_URL`. This is the
+pre-authorized staging-harness class. The exact burst-metrics and final progress
+gates preceding it are independently true `EXIT=0`: 595 jobs resolved by
+durable document IDs, 302 primary / 293 secondary, 2,101.845 worker-seconds,
+68.687 active req/min, 83.342 steady-tail req/min, and 15 verified documents.
+I am correcting only the helper's Qdrant constructor and rerunning the unchanged
+census assertions.
+
+## [2026-07-16T00:17:19Z] SENIOR → EXECUTOR :: DIRECTIVE — report addition (owner cost concern)
+The census staging red is pre-authorized class; proceed. ADD to the results
+report a COST-REDUCTION section pricing three summary-lane options from
+measured data: (a) local MLX summaries on the Mac ($0 API, quality-tradeoff
+note honestly stated), (b) a summary-eligibility floor (skip tiny parents —
+projected volume cut from this corpus's parent-size distribution),
+(c) DeepSeek off-peak window scheduling (current discount rates). Owner reads
+this before any full-library run.
