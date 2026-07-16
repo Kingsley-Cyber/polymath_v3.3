@@ -11528,3 +11528,47 @@ original topology; the graph plan must now conform. Rulings:
 4. SESSION HYGIENE: your session is 10+ hours old — post durable state to
    this channel at each step boundary so a session death loses nothing.
 Then: isolation census → eval → report.
+
+## [2026-07-16T11:18:53Z] EXECUTOR → SENIOR :: RECEIPT
+
+Recovery step 2(a) is VERIFIED green, true `EXIT=0`. The immutable backup
+contains exactly 2,305 unique protected Fact rows for the 15 manifest-bound
+documents, each with exactly one original `HAS_FACT` and one original
+`SUPPORTS_FACT` edge. Fact-content SHA-256 is
+`c5b2aa8d7730c99c1f1812f9ed7eef01e6543e0f60a4de5aa0509dd9703c85ca`;
+canonical original edge-topology SHA-256 is
+`15c98f7bbf0c31bba926aba9da4ccd913391206fd8c572eca776581a2a621fd7`;
+1,372 distinct support Chunk IDs are referenced. Host compile is also true
+`EXIT=0`.
+
+The remaining original-topology arithmetic is now content-grounded rather
+than count-only. Original target nodes close as Document=15, Chunk=14,762,
+Fact=2,305. The failed replay retained/rebuilt 14,641 graph Chunks; the exact
+backup supplies the 121 legacy Chunks excluded by today's noisy-kind rule.
+Original target edges close as HAS_CHUNK=14,762, HAS_FACT=2,305,
+MENTIONS=4,612, SUPPORTS_FACT=2,305. Of the MENTIONS, 4,541 remain explicit
+as protected edges in the backup; the 71 overwritten by E2E are uniquely
+identified by mixed-case legacy values preserved in their merged
+`extracted_types` arrays (exactly 71). No heuristic selection is required.
+
+Proceeding under your ruling with a manifest-bound direct-restore operator:
+no production writer/deriver call; replace target relation-support rows from
+the exact 12,498-row backup slice; replace protected Facts and their edges
+from backup; restore the 121 exact legacy Chunks; and replace the four target
+edge types from the exact historical topology above. Preflight must prove
+every node/edge endpoint and target count before mutation; postcheck remains
+the original-baseline census, not these component counts alone.
+
+## [OWNER-RELAY 2026-07-16T11:31:13Z] OWNER :: expedite ("finish it and get me the eval scores")
+## [2026-07-16T11:31:13Z] SENIOR → EXECUTOR :: EXPEDITE DIRECTIVE — parallelize the safe half only
+1. RECOVERY STAYS SERIAL — one writer, manifest-bound, no parallel mutators
+   on the graph. Do not accept any speedup that adds a second mutation hand.
+2. EVAL RUNS CONCURRENT: execute the frozen query set (+ temporal
+   diagnostics) with bounded client concurrency (reads are independent);
+   scoring unchanged.
+3. REPORT DRAFTS IN PARALLEL: assemble every report section that does not
+   depend on census/eval numbers (bug ledger, timings, costs, projections,
+   cost-reduction options) NOW, read-only, so only the scores slot in at the
+   end.
+4. No new scope. Target: scores on the channel within ~2 hours absent a
+   novel find.
