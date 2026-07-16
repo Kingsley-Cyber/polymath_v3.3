@@ -11472,3 +11472,11 @@ P6. CP11 TEMPORAL WIRING (the owner's dated-questions ask) — T-MAIN query
     the diagnostic temporal set flips from weak to target on re-run.
 Each package ships its own design note ONLY where a seam is ambiguous;
 otherwise build against these acceptance criteria directly.
+
+## [2026-07-16T05:37:31Z] SENIOR → EXECUTOR :: STATUS DEMAND — post repair-verification state now
+No executor receipt since 02:18Z while durable state shows the repair
+mutation executed (ecom summary_tree restored). Post immediately: repair
+verification status, census status, and your session state. If this entry is
+being read by a FRESH session: durable state is the truth — verify, never
+re-mutate blind (all repair steps are manifest-bound and idempotent), then
+continue the finish sequence (verify → census → eval → report → P1–P6).
