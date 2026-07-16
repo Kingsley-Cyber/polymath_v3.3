@@ -11480,3 +11480,51 @@ verification status, census status, and your session state. If this entry is
 being read by a FRESH session: durable state is the truth — verify, never
 re-mutate blind (all repair steps are manifest-bound and idempotent), then
 continue the finish sequence (verify → census → eval → report → P1–P6).
+
+## [2026-07-16T06:19:02Z] EXECUTOR → SENIOR :: BLOCKER
+
+Exact repair verification is RED; isolation census and retrieval eval have
+NOT started. The single manifest-confirmed apply ran from
+`2026-07-16T02:19:23.650632Z` through true `EXIT=1` at approximately
+06:17Z. Its durable journal proves all 30 graph writes closed (15 protected +
+15 E2E), relation reconciliation updated 11,615 edges, and exactly 310
+protected summary-tree rows were restored. Final verification then refused:
+protected graph observed nodes=81,381 and relationships_touching_corpus=165,024,
+which does not equal the original frozen baseline. Journal status remains
+unset/completed_at absent; no second apply was launched.
+
+Current session is live and parked on the dependent isolation/eval gates. I
+am running read-only label/type and target-vs-ambient arithmetic now to ground
+whether the overage is duplicate derived instances, shared-Entity counting,
+or a faulty closure model. I will not re-run, delete, repair, rebaseline, or
+weaken the assertion without publishing the exact diff and receiving a ruling
+for any novel mutation.
+
+## [2026-07-16T11:06:55Z] SENIOR → EXECUTOR :: RULING — RESTORE, NEVER RE-DERIVE; recovery plan for the semantic-drift overage
+Your arithmetic is conclusive: the graph replay REBUILT the 15 protected
+documents' facts with TODAY'S derivation semantics (25,103 HAS_FACT/
+SUPPORTS_FACT pairs + 118 Mongo relation_support_records) where the original
+corpus had 2,305 protected facts — the replay upgraded protected data instead
+of restoring it. The tree plan caught exactly this class and preserved
+original topology; the graph plan must now conform. Rulings:
+1. ENGRAVED INVARIANT: REPAIRS RESTORE ORIGINAL ROWS — THEY NEVER RE-DERIVE
+   WITH CURRENT CODE. Re-derivation is an upgrade, and upgrades of protected
+   corpora happen only as owner-approved migrations. (Corollary of
+   never-write-less: never-write-DIFFERENT either.)
+2. RECOVERY (backup-first, manifest-bound, idempotent): (a) read-only
+   verify the immutable pre-repair backup contains the original 2,305
+   protected Fact nodes + their edge set (they were protected residue, never
+   stolen); (b) DELETE the replay-created protected surplus — the re-derived
+   fact/support classes (+8,239 nodes / +38,111 relationships) and the +118
+   Mongo support records, by manifest; (c) RESTORE the original 2,305 facts
+   + edges from the backup, original IDs/topology exactly; (d) protected
+   census must then close against the ORIGINAL baseline under the
+   preregistered rule (orphan-drain-only deltas; latent groups untouched).
+3. E2E SIDE (separate, after protected closure): assess E2E's fact state vs
+   a standard ingest's output. E2E is a NEW corpus — current-code derivation
+   is CORRECT for it; if its facts are missing relative to standard ingest
+   output, complete E2E's own derivation under its own corpus_id, receipted.
+   Protected = original semantics; new = current semantics; never blended.
+4. SESSION HYGIENE: your session is 10+ hours old — post durable state to
+   this channel at each step boundary so a session death loses nothing.
+Then: isolation census → eval → report.
