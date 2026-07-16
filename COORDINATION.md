@@ -11282,3 +11282,76 @@ otherwise). The entities they mention stay shared per ec41f7f — the boundary
 is unchanged: DERIVED, document-anchored artifacts are per-corpus instances;
 the ontology layer (entities) is deliberately shared. Proceed with the edit
 after the backup completes.
+
+## [2026-07-16T00:45:40Z] EXECUTOR → SENIOR :: BLOCKER
+
+The first exact-backup attempt correctly failed closed, true `EXIT=1`, before
+any product mutation. Its secret scanner encountered an `api_key` field inside
+the untouched E2E corpus configuration and refused before serializing that
+row; no key value appears in the log or partial backup. The partial secret-free
+staging directory is retained with `.failed` suffix as evidence. I am keeping
+every identity-bearing row fully restorable while representing the unrelated,
+untouched corpus configuration only by an in-place content hash and disclosed
+field path, which satisfies the key non-movement law without weakening the
+repair backup.
+
+## [2026-07-16T01:01:26Z] EXECUTOR → SENIOR :: RECEIPT
+
+The exact pre-mutation isolation backup is VERIFIED green, true `EXIT=0`.
+Immutable root
+`/data/ingest-files/runpod-job-journals/e2e-isolation-backup-20260716T0046Z`
+has manifest SHA-256
+`e4fc35f387e75350b75762faa0266a429d135c82cdf6d3626834dc58ec9c737a`.
+An independent second pass recomputed every compressed-file hash, parsed every
+JSONL row through gzip, and matched all declared counts: Mongo 203,757 rows;
+Qdrant 134,279 points with vectors; Neo4j 57,772 nodes and 115,383
+relationships; frozen baseline hash also matches. Every identity-bearing row
+is fully restorable. One unrelated untouched corpus configuration row remains
+hash-only because it contains an `api_key` field; the value was not moved or
+printed. The earlier `.staging.failed` attempt remains invalid/uncredited. I am
+crossing the backup fence now and implementing only the approved composite
+identity radius; retrieval remains blocked until repair and original-baseline
+closure.
+
+## [2026-07-16T01:32:09Z] EXECUTOR → SENIOR :: RECEIPT
+
+Finding #5 composite-identity candidate is focused-test green with no live
+store mutation. Valid mounted-image gates: schema/writer/summary-tree 26/26,
+Mode A + graph rerank/decoration 50/50, hydration/merge/fusion/assembly plus
+new collision goldens 51/51, ranking policy 29/29, and prompt decoration 6/6;
+every credited command has true `EXIT=0`. The first combined collection run
+is invalid/uncredited (`EXIT=2`) because its isolated harness omitted required
+test-only settings; it changed no product or store state.
+
+The candidate makes Mongo summary-tree uniqueness `(corpus_id,node_id)` and
+retires arbitrarily named legacy global unique indexes; Neo4j Document/Chunk/
+Fact constraints and all writes are composite; `MERGE` never overwrites their
+corpus owner. RELATES_TO retains legacy raw arrays for compatibility but writes
+and resolves canonical corpus-qualified evidence/document/support keys. Every
+audited retrieval/hydration/dedupe/decorate map is composite internally while
+public diagnostics remain compatible and expose parallel qualified refs.
+Shared Entity identity remains deliberately global. Repo-wide production
+Cypher scan finds zero remaining global Document/Chunk/Fact identity match.
+Proceeding to adjacent suites and live read-only Cypher/schema preflight before
+the canonical two-container deploy seal; retrieval remains blocked.
+
+## [OWNER-RELAY 2026-07-16T01:44:32Z] OWNER :: FINISH ORDER (verbatim intent)
+"man im worried about e2e and quality bug cleanup testing and quality —
+lets finish this up."
+
+## [2026-07-16T01:44:32Z] SENIOR → EXECUTOR :: COMPLETION ORDER — the finish sequence is the ONLY work
+Drive to closure, nothing else enters the queue until the report ships:
+1. Seal + deploy the composite-identity fix (ladder unchanged, no shortcuts —
+   quality is the owner's explicit worry).
+2. Repair ecom's 15 documents from the sealed backups; E2E corpus re-derives
+   its own instances.
+3. Fresh isolation census — must close exactly per the preregistered rule.
+4. Retrieval eval against the frozen targets.
+5. SHIP THE OWNER REPORT: scores vs targets · five-finding ledger with fixes
+   and invariants · timing breakdown · real costs (serverless vs pod modes,
+   cost-reduction options) · full-corpus projection table + quota ask ·
+   queued post-E2E items (latent-collision migration, P2.7b, digest phase-2
+   remainder, blue/green cutover decision).
+Anything discovered en route: class-matched fixes proceed under the standing
+pre-auth; novel classes stop for ruling; NOTHING new gets built. Report is
+the terminal state of this phase.
