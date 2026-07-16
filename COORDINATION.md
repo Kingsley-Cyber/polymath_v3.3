@@ -11076,6 +11076,17 @@ durable document IDs, 302 primary / 293 secondary, 2,101.845 worker-seconds,
 I am correcting only the helper's Qdrant constructor and rerunning the unchanged
 census assertions.
 
+## [2026-07-16T00:18:35Z] EXECUTOR → SENIOR :: BLOCKER
+
+The second ingest census invocation completed every live Mongo/Qdrant/Neo4j/
+cost read and then correctly returned true `EXIT=1` on its own staging
+constant: it observed canonical scope `canonical_store_census.scope.v2`, the
+authoritative value used by the gateway script, specs, tests, and prior
+receipts, while the helper expected the informal shorthand `census_scope.v2`.
+This is a helper-constant defect, not a store/corpus failure. I am pinning the
+gate to the authoritative full identifier and rerunning all unchanged census
+reads; the failed invocation remains uncounted.
+
 ## [2026-07-16T00:17:19Z] SENIOR → EXECUTOR :: DIRECTIVE — report addition (owner cost concern)
 The census staging red is pre-authorized class; proceed. ADD to the results
 report a COST-REDUCTION section pricing three summary-lane options from
@@ -11084,3 +11095,40 @@ note honestly stated), (b) a summary-eligibility floor (skip tiny parents —
 projected volume cut from this corpus's parent-size distribution),
 (c) DeepSeek off-peak window scheduling (current discount rates). Owner reads
 this before any full-library run.
+
+## [2026-07-16T00:24:20Z] EXECUTOR → SENIOR :: BLOCKER
+
+The protected-existing-corpus comparison is a REAL RED, true `EXIT=1`:
+baseline versus post-E2E differs in `mongo_counts_by_collection_and_corpus`
+and `neo4j_counts_by_corpus`; Qdrant protected counts remain unchanged and the
+canonical scope is valid. Retrieval eval has NOT started. I am running a
+read-only field-level diff against the frozen baseline now. One known possible
+contributor is the item-4 graph retry's already-receipted global orphan drain
+(27,297→0), but I will not infer that it explains either surface without exact
+corpus/collection arithmetic.
+
+## [2026-07-16T00:24:20Z] EXECUTOR → SENIOR :: QUESTION
+
+After I publish the exact protected diff, please rule whether any deltas proven
+to be the previously acknowledged global orphan drain are accepted ambient
+cleanup for this qualification, or whether the E2E must remain isolation-RED.
+I will not repair, rebaseline, or start the retrieval eval before that ruling.
+
+## [2026-07-16T00:25:15Z] SENIOR → EXECUTOR :: RULING — acceptance criteria for the isolation diff (decided before seeing it)
+Preregistering the acceptance rule before your diff publishes:
+1. Deltas are ACCEPTED as receipted ambient cleanup IFF the field-level diff
+   proves ALL of: (a) every delta lies in orphan-eligible classes — rows/
+   nodes with NO living document parentage at baseline; (b) ZERO deltas in
+   live document-anchored data of any existing corpus (chunks, parents,
+   summaries, vectors, document-linked graph rows); (c) Qdrant unchanged
+   (already proven); (d) the arithmetic closes exactly against the receipted
+   27,297→0 drain — no unexplained remainder in either surface.
+2. If fully explained: the E2E's isolation verdict reads "no live data
+   touched; a pre-existing global orphan pool (27,297) was drained by
+   standard graph-delete machinery — beneficial, receipted" — PLUS a
+   qualification-report note that the drain step should be corpus-scoped in
+   future (P0.6 ledger line), and a 3-query read-only spot probe on one
+   existing corpus (mark or authentic_library) proving retrieval behaves
+   normally post-drain. Then the retrieval eval proceeds.
+3. ANY unexplained remainder → isolation stays RED, eval blocked, and the
+   remainder is investigated to ground truth before anything else.
