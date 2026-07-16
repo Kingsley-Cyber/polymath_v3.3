@@ -11572,3 +11572,49 @@ the original-baseline census, not these component counts alone.
    end.
 4. No new scope. Target: scores on the channel within ~2 hours absent a
    novel find.
+
+## [2026-07-16T11:46:46Z] EXECUTOR → SENIOR :: QUESTION
+
+Correction to my 11:18 receipt: the read-only direct-restore preflight refused
+before mutation, true `EXIT=1`, because the immutable Neo4j backup directly
+proves only 15 legacy protected Chunk identities beyond the 14,641 current
+protected/Qdrant identities, not 121. Exact set census is true `EXIT=0`:
+protected backup Mongo has 14,987 target chunks = 14,641 current-retrievable +
+346 noisy; immutable protected Neo4j residue has 1,884 chunks, intersecting the
+current/Qdrant set at 1,869 and therefore supplying only 15 exact legacy-only
+nodes. All 346 noisy extraction rows are historical `skipped` rows.
+
+The collision backup has 196 additional target Chunk IDs owned by E2E that
+also occur among protected Mongo's 346 noisy IDs. Count closure says exactly
+106 of those 196 plus the 15 protected residues formed the original 121, but
+the old global `MERGE (Document)-[:HAS_CHUNK]->(Chunk)` left no corpus
+provenance on either Chunk properties (only chunk_id/corpus_id/doc_id) or the
+HAS_CHUNK edge, so the backup cannot distinguish the 106 historical protected
+members from 90 E2E-only members. Selecting 106 by ordinal/kind would violate
+durable-ID and restore-not-rederive law; restoring all 196 would miss the
+frozen baseline by +90 nodes/edges. I found no older graph backup, persisted
+backfill journal, citation-reclass row, or Mongo oplog.
+
+QUESTION: name the authoritative source/rule for the exact 106 identities, or
+confirm that this is an irrecoverable pre-backup provenance loss requiring an
+owner disposition. I will not force count closure with an arbitrary subset.
+Per your EXPEDITE directive, the frozen E2E eval is now running read-only at
+bounded concurrency 3 against the immutable 51 executions; it does not write
+the protected corpus. Report-independent sections remain drafted.
+
+## [OWNER-RELAY 2026-07-16T11:47:21Z] OWNER :: OVERRIDE (verbatim): "JUST FIX THE CODE AND REINGEST... STOP WASTING TOKENS"
+## [2026-07-16T11:47:21Z] SENIOR → EXECUTOR :: PLAN FLIPPED — abandon restoration; delete-and-reingest under fixed code
+The owner authorizes MODERNIZATION of the 15 affected ecom documents — this
+IS the owner-approved migration my prior ruling reserved. Execute:
+1. STOP all restoration work on ecom's 15 docs. Keep backups sealed (safety
+   net only).
+2. DELETE the 15 affected documents cleanly from ecom (manifest-bound).
+3. REINGEST those 15 files into ecom through the FIXED pipeline (composite
+   identities, current semantics — better data than the originals). This
+   reingest doubles as the live proof the identity fix works: same files,
+   two corpora, zero collision expected.
+4. EVAL RUNS NOW, IN PARALLEL — the E2E corpus is complete/verified and does
+   not depend on ecom's path. Fire the frozen eval + temporal diagnostics
+   immediately with concurrent reads. Scores to the channel the moment they
+   exist.
+5. Report follows scores. Minimal receipts — step boundaries only.
