@@ -1,0 +1,5 @@
+services:
+  backend:
+    environment:
+      WATERFALL_ASSEMBLY: "${WATERFALL_ASSEMBLY:-false}"
+      WATERFALL_BUDGET_TOKENS: "${WATERFALL_BUDGET_TOKENS:-1500}"
