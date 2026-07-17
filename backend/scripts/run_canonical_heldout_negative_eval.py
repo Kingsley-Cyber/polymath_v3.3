@@ -17,6 +17,7 @@ the receipt to the same baked code and local endpoint used by the requests.
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import hashlib
 import json
 import os
@@ -56,6 +57,20 @@ TOP_K = 8
 TEMPERATURE = 0.0
 EXECUTION_COUNT = 28
 MAX_COST_USD = 1.50
+
+COMPACT_BASELINE_SELECTION_NAME = "canonical-baseline-10.v1"
+COMPACT_BASELINE_QUERY_IDS = (
+    "negv2_f2_oscar_2026",
+    "negv2_f3_deakins",
+    "negv2_f3_visual_story",
+    "negv2_f5_figure_9_4",
+    "negv2_f1_crispr",
+    "negv2_f2_iphone17",
+    "negv2_lay_deakins",
+    "negv2_f4_mark_facebook_ads",
+    "negv2_f5_roi_table",
+    "negv2_f6_llc_guess",
+)
 
 JOURNAL_SCHEMA = "polymath.canonical_heldout_negative_eval.v1"
 EXECUTION_SCHEMA = "polymath.canonical_heldout_negative_execution.v1"
@@ -212,6 +227,27 @@ def _cost_envelope(execution_count: int = EXECUTION_COUNT) -> dict[str, Any]:
             "wrapper_allowance_tokens": PROMPT_WRAPPER_TOKEN_ALLOWANCE,
         },
     }
+
+
+def _select_queries(
+    queries: Sequence[dict[str, Any]],
+    selection_name: str,
+) -> list[dict[str, Any]]:
+    """Select a preregistered compact window without modifying the frozen spec."""
+
+    if selection_name == "full-28":
+        return list(queries)
+    if selection_name != COMPACT_BASELINE_SELECTION_NAME:
+        raise RuntimeError(f"unsupported probe selection: {selection_name!r}")
+    by_id = {str(case.get("id") or ""): case for case in queries}
+    missing = [
+        query_id for query_id in COMPACT_BASELINE_QUERY_IDS if query_id not in by_id
+    ]
+    if missing:
+        raise RuntimeError(
+            f"compact baseline query ids missing from frozen spec: {missing}"
+        )
+    return [by_id[query_id] for query_id in COMPACT_BASELINE_QUERY_IDS]
 
 
 def _value_at_path(value: dict[str, Any], path: str) -> tuple[bool, Any]:
@@ -729,6 +765,7 @@ def _build_execution(
     prompt_receipt: dict[str, Any],
     document_names: dict[str, str],
     selected_filenames: set[str],
+    concurrency: int = 1,
 ) -> dict[str, Any]:
     answer = str(raw["answer"])
     answerability = _extract_answerability(raw["traces"])
@@ -784,8 +821,12 @@ def _build_execution(
             "request_ordinal": ordinal,
             "prior_call_count": ordinal - 1,
             "history_turn_count_sent": 0,
-            "session_mode": "fresh_conversation_per_probe_sequential_process",
-            "concurrency": 1,
+            "session_mode": (
+                "fresh_conversation_per_probe_sequential_process"
+                if concurrency == 1
+                else "fresh_conversation_per_probe_concurrent_process"
+            ),
+            "concurrency": concurrency,
             "returned_conversation_ids": raw["conversation_ids"],
         },
         "transport": {
@@ -828,6 +869,12 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--expected-temporal", choices=("off", "on"), required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--probe-selection",
+        choices=("full-28", COMPACT_BASELINE_SELECTION_NAME),
+        default="full-28",
+    )
+    parser.add_argument("--concurrency", type=int, choices=(1, 2, 3), default=1)
     parser.add_argument("--api", default="http://127.0.0.1:8000")
     parser.add_argument("--request-timeout", type=float, default=600.0)
     parser.add_argument(
@@ -857,17 +904,19 @@ def run(args: argparse.Namespace) -> int:
         SELECTION_SHA256,
         "15-document selection",
     )
-    queries = list(spec.get("queries") or [])
+    frozen_queries = list(spec.get("queries") or [])
     if (
         spec.get("schema_version") != "polymath.e2e_heldout_negative.v2"
         or spec.get("used_for_tuning") is not False
         or spec.get("corpus_id") != CORPUS_ID
         or spec.get("corpus_name") != CORPUS_NAME
         or spec.get("selection_sha256") != SELECTION_SHA256
-        or len(queries) != EXECUTION_COUNT
-        or any(case.get("must_refuse") is not True for case in queries)
+        or len(frozen_queries) != EXECUTION_COUNT
+        or any(case.get("must_refuse") is not True for case in frozen_queries)
     ):
         raise RuntimeError("held-out negative spec contract drifted")
+    queries = _select_queries(frozen_queries, args.probe_selection)
+    execution_count = len(queries)
     selected_filenames = {
         str(row["filename"]) for row in list(selection.get("selected") or [])
     }
@@ -876,7 +925,7 @@ def run(args: argparse.Namespace) -> int:
 
     expected_temporal = args.expected_temporal == "on"
     runtime_flags = _runtime_flags(expected_temporal)
-    cost_envelope = _cost_envelope()
+    cost_envelope = _cost_envelope(execution_count)
     process_run_id = str(uuid.uuid4())
 
     with _eval_lock(
@@ -902,6 +951,14 @@ def run(args: argparse.Namespace) -> int:
             "classifier_version": CLASSIFIER_VERSION,
             "spec_sha256": SPEC_SHA256,
             "selection_sha256": SELECTION_SHA256,
+            "probe_selection": {
+                "schema_version": "polymath.compact_probe_selection.v1",
+                "name": args.probe_selection,
+                "query_ids": [str(case["id"]) for case in queries],
+                "sha256": _sha256_bytes(
+                    _canonical_bytes([str(case["id"]) for case in queries])
+                ),
+            },
             "corpus": corpus_receipt,
             "tier": TIER,
             "top_k": TOP_K,
@@ -914,10 +971,10 @@ def run(args: argparse.Namespace) -> int:
             "cost_envelope": cost_envelope,
             "process_run_id": process_run_id,
             "session_contract": {
-                "concurrency": 1,
+                "concurrency": args.concurrency,
                 "fresh_conversation_per_probe": True,
                 "conversation_id_sent": False,
-                "ordered_as_frozen_spec": True,
+                "result_order": "frozen_selection_order",
             },
             "executions": [],
             "summary": None,
@@ -928,7 +985,7 @@ def run(args: argparse.Namespace) -> int:
             "CANONICAL_REFUSAL_START "
             + json.dumps(
                 {
-                    "executions": EXECUTION_COUNT,
+                    "executions": execution_count,
                     "expected_temporal": args.expected_temporal,
                     "cost_envelope_usd": cost_envelope["total_usd"],
                 },
@@ -937,40 +994,61 @@ def run(args: argparse.Namespace) -> int:
             flush=True,
         )
 
-        for ordinal, case in enumerate(queries, start=1):
+        def execute_one(
+            ordinal: int,
+            case: dict[str, Any],
+        ) -> tuple[int, dict[str, Any]]:
             query_id = str(case["id"])
-            print(f"EXECUTION_START {ordinal}/{EXECUTION_COUNT} {query_id}", flush=True)
+            print(f"EXECUTION_START {ordinal}/{execution_count} {query_id}", flush=True)
             raw = _run_sse(
                 api=args.api,
                 token=token,
                 question=str(case["question"]),
                 timeout=args.request_timeout,
             )
-            row = _build_execution(
-                case=case,
-                ordinal=ordinal,
-                process_run_id=process_run_id,
-                raw=raw,
-                prompt_receipt=prompt_receipt,
-                document_names=document_names,
-                selected_filenames=selected_filenames,
-            )
-            state["executions"].append(row)
-            _atomic_write(args.output, state)
-            print(
-                "EXECUTION_DONE "
-                + json.dumps(
-                    {
-                        "query_id": query_id,
-                        "state": row["classification"]["state"],
-                        "technical_ok": row["technical"]["ok"],
-                        "journal_complete": row["journal_complete"],
-                        "model": row["model_route"].get("model"),
-                    },
-                    sort_keys=True,
+            return (
+                ordinal,
+                _build_execution(
+                    case=case,
+                    ordinal=ordinal,
+                    process_run_id=process_run_id,
+                    raw=raw,
+                    prompt_receipt=prompt_receipt,
+                    document_names=document_names,
+                    selected_filenames=selected_filenames,
+                    concurrency=args.concurrency,
                 ),
-                flush=True,
             )
+
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=args.concurrency,
+        ) as executor:
+            futures = [
+                executor.submit(execute_one, ordinal, case)
+                for ordinal, case in enumerate(queries, start=1)
+            ]
+            for future in concurrent.futures.as_completed(futures):
+                ordinal, row = future.result()
+                state["executions"].append(row)
+                state["executions"].sort(
+                    key=lambda item: item["prior_call_state"]["request_ordinal"]
+                )
+                _atomic_write(args.output, state)
+                print(
+                    "EXECUTION_DONE "
+                    + json.dumps(
+                        {
+                            "ordinal": ordinal,
+                            "query_id": row["query_id"],
+                            "state": row["classification"]["state"],
+                            "technical_ok": row["technical"]["ok"],
+                            "journal_complete": row["journal_complete"],
+                            "model": row["model_route"].get("model"),
+                        },
+                        sort_keys=True,
+                    ),
+                    flush=True,
+                )
 
         final_prompt_receipt, _ = _prompt_template_receipt(prompt_rendered_at)
         prompt_context_stable = final_prompt_receipt == prompt_receipt
@@ -999,7 +1077,7 @@ def run(args: argparse.Namespace) -> int:
             "execution_count": len(state["executions"]),
             "state_counts": dict(sorted(counts.items())),
             "refused_count": refused_count,
-            "refusal_rate": round(refused_count / EXECUTION_COUNT, 6),
+            "refusal_rate": round(refused_count / execution_count, 6),
             "answered_count": counts["answered"],
             "technical_success_count": sum(
                 row["technical"]["ok"] is True for row in state["executions"]
@@ -1013,7 +1091,7 @@ def run(args: argparse.Namespace) -> int:
             "refusal_rate_is_measurement_only": True,
         }
         complete = (
-            len(state["executions"]) == EXECUTION_COUNT
+            len(state["executions"]) == execution_count
             and technical_ok
             and journal_complete
             and prompt_context_stable

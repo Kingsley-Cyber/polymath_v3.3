@@ -11,6 +11,8 @@ import scripts.run_canonical_heldout_negative_eval as harness
 from scripts.run_canonical_heldout_negative_eval import (
     CHAT_ORCHESTRATOR_PATH,
     CLASSIFIER_VERSION,
+    COMPACT_BASELINE_QUERY_IDS,
+    COMPACT_BASELINE_SELECTION_NAME,
     EXPECTED_CHAT_MODEL,
     EXECUTION_SCHEMA,
     PROMPT_HASH_METHOD,
@@ -23,6 +25,7 @@ from scripts.run_canonical_heldout_negative_eval import (
     _eval_lock,
     _parser,
     _runtime_flags,
+    _select_queries,
     _validate_local_api,
     _validate_same_container_runtime,
     classify_refusal,
@@ -237,6 +240,26 @@ def test_two_attempt_cost_envelope_closes_below_authorized_ceiling():
     assert envelope["total_usd"] <= envelope["ceiling_usd"] == 1.5
 
 
+def test_compact_baseline_selection_is_exact_and_preserves_registered_order():
+    frozen = [
+        {"id": query_id, "must_refuse": True}
+        for query_id in reversed(COMPACT_BASELINE_QUERY_IDS)
+    ]
+
+    selected = _select_queries(frozen, COMPACT_BASELINE_SELECTION_NAME)
+
+    assert [row["id"] for row in selected] == list(COMPACT_BASELINE_QUERY_IDS)
+    assert len(selected) == 10
+    assert _cost_envelope(len(selected))["total_usd"] < 0.52
+
+
+def test_compact_baseline_selection_refuses_missing_or_unknown_contract():
+    with pytest.raises(RuntimeError, match="missing from frozen spec"):
+        _select_queries([], COMPACT_BASELINE_SELECTION_NAME)
+    with pytest.raises(RuntimeError, match="unsupported probe selection"):
+        _select_queries([], "ad-hoc")
+
+
 @pytest.mark.parametrize(
     "api",
     [
@@ -338,6 +361,35 @@ def test_parser_rejects_cli_token():
                 "/tmp/journal.json",
                 "--token",
                 "must-not-be-accepted",
+            ]
+        )
+
+
+def test_parser_accepts_only_bounded_compact_concurrency():
+    args = _parser().parse_args(
+        [
+            "--expected-temporal",
+            "off",
+            "--output",
+            "/tmp/journal.json",
+            "--probe-selection",
+            COMPACT_BASELINE_SELECTION_NAME,
+            "--concurrency",
+            "3",
+        ]
+    )
+
+    assert args.probe_selection == COMPACT_BASELINE_SELECTION_NAME
+    assert args.concurrency == 3
+    with pytest.raises(SystemExit):
+        _parser().parse_args(
+            [
+                "--expected-temporal",
+                "off",
+                "--output",
+                "/tmp/journal.json",
+                "--concurrency",
+                "4",
             ]
         )
 
