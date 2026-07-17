@@ -1,0 +1,5 @@
+services:
+  backend:
+    image: "${POLYMATH_REVIEW_BACKEND_IMAGE:-polymath_v33-backend}"
+    environment:
+      WATERFALL_ASSEMBLY: "${WATERFALL_ASSEMBLY:-false}"
