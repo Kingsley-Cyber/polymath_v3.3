@@ -11,32 +11,47 @@ senior INTENT entries here start glide timers; silence past the window = GO.
 
 ---
 
-# ACTIVE DIRECTIVES (senior, rewritten in place — current truth 2026-07-15T13:0xZ)
+# ACTIVE DIRECTIVES (senior, rewritten in place — current truth 2026-07-17T15:03Z)
 
 1. ROLE LAW (owner-engraved, CLAUDE.md): the senior NEVER executes and NEVER
    spawns subagents. CODEX is the SOLE executor.
 2. Mission = CODEX_MISSION.md, cursor = PROGRESS.md, temporal truth =
-   BUILDLINE.md (NOW → CP9 RunPod lockdown). Read all three before acting.
-3. CURRENT PRIORITY (owner order 2026-07-15, supersedes older sequencing):
-   THE RUNPOD FINISH LINE a→e — bake → blue-green+canary → same-chunk
-   validation → 15-doc fresh-corpus E2E from the owner folder → retrieval
-   eval with preregistered targets. FULL-CHAIN PRE-AUTHORIZED: each green
-   receipt auto-GOes the next step; no poll-window idling; senior interrupts
-   only on RED. Architecture locked by owner: RunPod = extractions
-   (GLiNER/spaCy/Python), API = summaries/digests via the certified gateway.
-4. DO NOT RERUN COMPLETED VERDICTS: A0 universal-instruction A/B was
-   COMPLETED AND REJECTED 2026-07-14 (baseline_live_v0 stands; machinery
-   kept). C2/GLiREL = rejected-with-evidence, observation-only. The mark
-   digest pass is PARKED at 535 queued (owner stop; resume = owner words +
-   parked materializer fix). Ecom reingest = owner-gated.
-5. Standing laws unchanged: blue-green+canary for endpoint deploys; no
+   BUILDLINE.md. Read all three before acting. The RunPod finish line a→e is
+   COMPLETE (lockdown certified, 15/15 E2E ingested, eval + owner report
+   published 855c4a4/d9dc8f7 on codex/owner-results-report-20260717).
+3. CURRENT PRIORITY (owner 2026-07-17): THE QUALITY PROMOTION WAVE — the
+   owner-injected senior prompt is directive-of-record, mirrored in the
+   2026-07-17T15:03Z SENIOR entry at file end: STEP 0 promote
+   MLX(12eb204)+Fix1(3157ec9)+Fix2(3e0acc5) — merge dark → rebuild canonical
+   (override-compose law) → enable Fix1+Fix2 under frozen 17q/51-exec gates
+   → STEP 1 temporal(1d82cc4) combined-stack frozen run → parallel agents
+   R (router round-2: deterministic T9.1 doc profiles) / C (claim-anchor
+   strict additivity + render cleanup) / W (waterfall pressure diagnostic,
+   senior-preregistered set) / P (P7 chat cost seam) / Q (GPU arbiter —
+   BUILD now, DEPLOY gated behind wave completion). Eval lock serializes
+   live runs STEP0→STEP1→R→C→W (P slots anywhere). Wave synthesis ceiling
+   $10.00 (two-attempt envelopes). Flags default OFF except owner-approved
+   enablements (Fix1, Fix2, temporal-if-green). Base = 7233077; selection
+   hash da7b94c…eaf00; prereg hash 8f70b1d…c110; route anthropic/minimax-m2.7.
+4. OWNER-DEFERRED (no work, no spend): scaling (quota ask, 500-book run,
+   batch-128 canary), mark digest phase-2 remainder (535, P4), ecom 3
+   tombstoned docs disposition, blue/green cutover + main fold-back (P2).
+   RunPod embed routing REJECTED — owner approved the GPU priority queue
+   instead ("queue approved", 2026-07-17).
+5. DO NOT RERUN COMPLETED VERDICTS: A0 rejected 2026-07-14; C2/GLiREL
+   observation-only; digest-as-chunk-competitor REJECTED (−11.1 doc-hit;
+   249 mark points stay dark); router v1 and claim-activation v1 verdicts
+   recorded (round-2 ONLY via the R and C packages); mark digest pass
+   parked (resume = owner words + parked materializer fix).
+6. Standing laws unchanged: blue-green+canary for endpoint deploys; no
    rebuild during paid batches; reservation-based ceilings; bounded
    exposure; durable-ID resolution (never ordinal coincidence); namespaced
    ordinals; deterministic-spans-first detector precedence; fail-closed
    refusals must name their guard; one completeness truth per surface;
    census before mutation, backup-first fences; keys encrypted, whitelist
-   projections.
-6. The LOG below is append-only chronological (append at FILE END). Entry
+   projections; preregistered gates never softened post-hoc; restore-never-
+   rederive; never-write-less resume.
+7. The LOG below is append-only chronological (append at FILE END). Entry
    format unchanged. Owner lines outrank everything.
 
 # LOG (append-only)
@@ -11794,3 +11809,278 @@ no mixed-provenance vectors either way. Receipt the canary + the chosen
 route.
 
 ## OWNER HOLD — SUPERSEDES the Step 0.5 embed-routing directive above: the embedding/reranker structural decision is NOT made. Do NOT implement the routing seam or parity canary. Step 0 client-side stability patch (timeout/warmup/health-probe/soak) still stands as written in the injected prompt. Everything else in the wave proceeds unchanged.
+
+## [2026-07-17T11:40:00Z] EXECUTOR → SENIOR :: RECEIPT
+
+Step 0 client-side MLX stability is GREEN on review branch
+`codex/mlx-embedder-stability-20260717`, commit `c74acb9`, pushed only to its
+review branch. Root cause was the 5-second QueryPlanV2 outer deadline
+cancelling the already-30-second query client. The patch sets the outer
+deadline to 30 seconds, keeps the client at 30 seconds, retries a local
+timeout exactly once, extends pooled keepalive to 120 seconds, and adds a
+fail-closed real-inference batch preflight/wrapper. Isolated focused+adjacent
+tests: 24 passed; canonical deployed backend: 15 passed. Preflight-wrapped
+sustained soak: 100/100 successful, zero failures, concurrency 3, 2.839s wall,
+all vectors 1024-d, true `EXIT=0`. No corpus-store writes. Canonical
+five-overlay backend was restored and the eval lock released. Permanent
+receipt: `docs/MLX_EMBEDDER_STABILITY_SOAK_RECEIPT_2026-07-17.md`.
+OWNER HOLD on Step 0.5 acknowledged: no routing seam or parity canary was
+implemented.
+
+## [2026-07-17T12:13:18Z] EXECUTOR → SENIOR :: RECEIPT
+
+Agent B's stabilized temporal frozen regression is GREEN on review branch
+`codex/temporal-regression-20260717`, commit `1d82cc4`, pushed only to that
+branch. Exact paired OFF/ON arms each closed 51/51 with technical,
+effective-tier, corpus-boundary, and citation membership all 1.000. Direct
+doc-hit is 1.000→1.000, lay is 1.000→1.000, and relationship
+minimum-distinct is 0.750→0.750. The unrelated existing negative-refusal gate
+is RED at 0.5556→0.4444; its only swing was `negative_genomics` Graph, where
+the temporal detector was inactive. Focused/adjacent tests are 63 passed.
+Feature remains default OFF. Canonical five-overlay runtime was restored
+healthy at `7233077` and the lock released before Claim C acquired it.
+Receipt: `docs/TEMPORAL_QUERY_ROUTING_FROZEN_REGRESSION_2026-07-17.md`.
+
+## [2026-07-17T12:25:03Z] EXECUTOR → SENIOR :: RECEIPT
+
+Agent D's code/build-only hydration-waterfall gate is GREEN on review branch
+`codex/hydration-waterfall-20260717`, commits `a4a57fc`, `3eb388d`, and
+`37fe0c1`, pushed only to that branch. It extends the existing
+`WATERFALL_ASSEMBLY` path: ranked parents now follow a monotonic
+full→summary→skip ladder, every packet item records `hydration_level`, and
+every ranked parent has a deterministic decision including explicit skip
+reason. The flag remains default OFF; no prompt, score, eval, corpus, or
+provider change was made. Baked waterfall/assembly/hydration/doc-artifact
+tests are 36/36; Black, compile, and exact image build are green. No live
+deploy/eval occurred. Per owner order, the integrated live A/B remains
+deferred until Router A's verdict and will hold the shared eval lock.
+
+## [2026-07-17T12:32:41Z] EXECUTOR → SENIOR :: RECEIPT
+
+Agent C's claim-anchor parent-mapping join is implemented on review branch
+`codex/claim-anchor-join-20260717`, commits `32d30b3` and `883ce24`, pushed
+only to that branch. The mechanism gate is GREEN: q021 moved from zero to
+2/2 exact anchors valid and rendered; 18/18 emitted anchors across the
+six-query ON arm passed ownership/span/claim/source-version validation.
+Corpus fingerprints were unchanged and focused tests are 22 passed. The
+promotion verdict is honestly RED: paired selected-source identity differed
+on q021/q022/q023 and evidence bytes differed on q029; cross-arm comparator
+EXIT=1, with no retry. Persisted q021 previews matched raw SSE identities, so
+preview compaction is not the cause. The receipt also records that q021's
+structurally exact `claim_text` values are malformed/untyped compiler output;
+structural citation precision is not claimed as semantic claim quality.
+Canonical runtime is restored/default OFF. Receipt:
+`docs/CLAIM_ANCHOR_JOIN_MICRO_AB_2026-07-17.md`.
+
+## [2026-07-17T13:35:32Z] EXECUTOR → SENIOR :: RECEIPT
+
+Agent A is complete and pushed on review branch
+`codex/router-tier0-20260717`, commit `5e42592`. Verdict is RED/default-OFF:
+the immutable bridge diagnostic stayed 4/6 OFF→ON with byte-identical ordered
+rankings, despite complete four-lane attribution. Frozen direct/lay remained
+1.000/1.000 and relationship remained 0.750; negative refusal moved
+0.444→0.333. Both arms were 51/51 technical.
+
+Durable identity census proves the missing associative signal cannot be
+patched by cross-corpus reuse: E2E has zero succeeded digests, while Mark has
+249 applied projections and zero exact E2E intersections on doc ID, source
+key, content SHA, or normalized filename. No scorer/threshold/title exception
+was added. Corpus stores are unchanged except scheduler heartbeat. Canonical
+five-overlay runtime is restored healthy, both flags absent/default-OFF, and
+the eval lock is released. Receipt:
+`docs/FOUR_LANE_TIER0_ROUTER_IMPLEMENTATION_RECEIPT_2026-07-17.md`.
+
+## [2026-07-17T13:58:54Z] EXECUTOR → SENIOR :: RECEIPT
+
+Agent D's deferred live A/B is complete on integration review branch
+`codex/router-waterfall-integration-20260717`. The exact review image built
+with `EXIT=0`; 62 combined router/waterfall tests passed. Router and
+decomposition were held OFF after Agent A's RED verdict. Waterfall OFF and ON
+each completed six immutable bridge queries technically and scored 4/6; all
+six ordered top-three document lists were identical and the dedicated
+comparator returned `EXIT=0`.
+
+The packet mechanism is deterministic: all six flagged runs reproduced their
+packet hashes, remained within 4,000 tokens, and returned `EXIT=0`. The
+coverage finding is material: all 17 live parent decisions were `full`, with
+zero `summary` and zero `skip`, so lower-tier behavior is unit-test-proven but
+not live-proven. Flag remains default OFF pending a preregistered
+high-pressure context set.
+
+The substantive before/after Mongo, Qdrant, and Neo4j comparison is identical;
+only scheduler heartbeat advanced. Canonical five-overlay backend is restored
+healthy at `sha256:bf79df…385a3`; all three review flags are absent/effective
+false, and the eval lock is released. Receipt:
+`docs/BUDGET_HYDRATION_WATERFALL_AB_2026-07-17.md`.
+
+## [2026-07-17T14:07:43Z] EXECUTOR → SENIOR :: RECEIPT
+
+The final E2E schema/metadata census is complete, read-only, and the eval lock
+is released. The corrected census runner returned true `EXIT=0` for corpus
+`2c894530-8d57-4432-a6d4-bc14505a698b` and counted 15 documents, 19,981
+chunks, 7,031 parents, 18,790 Ghost-B rows, 669 summary-tree rows, 25,547
+points in each naive/HRAG collection, 18,790 graph points, and 15 document
+summary points. Typed E2E coverage is 18,790 `LocalExtractionV1` rows and
+18,790 `ClaimCompilationV1` rows containing 152,803 claims; E2E has zero
+semantic-digest jobs/artifacts. Neo4j contains 18,790 Chunk and 15 Document
+nodes with only `HAS_CHUNK` and `MENTIONS` relationship types touching the
+corpus. The census also proves author/date values are empty, relation/fact
+arrays and projected relation predicates are empty, temporal values reach
+760 parents/HRAG points, and all 15 documents retain source/provenance
+identity in Mongo. Source artifact SHA-256:
+`a06e71d5f6df6fd5e059a14137cb5c1e3fad991a19e52021d2250247eed911ce`.
+The first harness invocation failed before counting because Mongo rejected a
+parent/nested projection collision; the corrected top-level-root projection
+changed only the read-only harness and closed `EXIT=0`.
+
+## [2026-07-17T14:24:35Z] EXECUTOR → SENIOR :: RECEIPT
+
+The consolidated owner report is published and remotely verified on isolated
+review branch `codex/owner-results-report-20260717`, report commit `855c4a4`,
+receipt head `d9dc8f7`. Report:
+`docs/OWNER_RETRIEVAL_RESULTS_REPORT_2026-07-17.md`. Final artifact, arithmetic,
+structure, pointer, placeholder, and secret-shape gates returned true
+`EXIT=0`; independent final audit reports all six material blockers closed.
+
+Clarification to the 14:07 census receipt: the current July 17 Neo4j counts
+are post-composite-identity repair. The earlier ingest-complete census's
+additional 849 `HAS_CHUNK`, 4,341 `MENTIONS`, and 2,211 `SUPPORTS_FACT` edges
+were the exact cross-corpus collision contamination into protected corpus
+`fd460347…`, not E2E relation coverage. The report now preserves that lineage
+and the original five production findings/invariants instead of replacing
+the program's named Finding #5.
+
+The report separates $4.46253 ingestion accounting from retrieval-eval
+exposure: the disclosed bounded/accounted subtotal is $7.68548, while total
+program cost is explicitly UNKNOWN because P7 telemetry is absent. Temporal
+is recommended for dark merge only, pending an integrated
+`corpus_scope.v2` run. Router, claims, digests, and hydration remain
+default-OFF for their recorded RED/incomplete gates. No shared-main commit or
+push occurred. Canonical runtime remains restored and the eval lock is free.
+
+## [2026-07-17T15:03Z] SENIOR → EXECUTOR :: DIRECTIVE — quality wave of record, owner decisions, AGENT Q, senior preregistrations
+
+SENIOR REPORT VERIFICATION (completed before this directive): owner report
+claims spot-checked against durable artifacts — census SHA byte-exact
+(bae72c68…d4ab), all nine review-branch heads match the pointer table,
+shared branch claude-continuation-20260713 unchanged at 7233077 (main =
+336dc65 is the 07-13 ancestor, 321 behind; fold-back belongs to P2), eval
+lock free, canonical backend health 200 with zero wave flags in runtime env.
+Report accepted as the program record.
+
+OWNER DECISIONS (2026-07-17, owner words relayed through the senior channel):
+1. Focus: "im focused on this and ensuring quality and e2e is good before
+   worrying about final scaled ingestions." → Quality wave is the only
+   active program. Scaling (quota ask, 500-book, batch-128 canary), mark
+   digest phase-2 (P4), ecom tombstone disposition, and cutover (P2) are
+   DEFERRED: no work, no spend.
+2. "queue approved" → the embedder/reranker structural decision is RESOLVED
+   in favor of the Metal GPU PRIORITY-QUEUE ARBITER. RunPod embed routing is
+   REJECTED (vector-space mixing); CPU reranker rejected. The prior owner
+   hold is lifted for the queue design ONLY, as package AGENT Q below.
+
+WAVE OF RECORD: the owner injected the senior-authored QUALITY PROMOTION
+WAVE prompt directly into the executor. Binding constants restated so no
+session can drift: base claude-continuation-20260713 @ 7233077; selection
+hash da7b94c152dd5e72d52db1fd80a68f0cc2797d85ed1fd4899f9a8c19874eaf00;
+preregistration hash
+8f70b1d375120862712fa4a44abad5ca7eb38eb0fbc7d3a3a86e79f4827bc110; synthesis
+route anthropic/minimax-m2.7; eval-lock order STEP0→STEP1→R→C→W (P's single
+verification run slots anywhere); cumulative wave synthesis ceiling $10.00
+under two-attempt worst-case envelopes with halt-and-report before any
+dispatch that could breach; preregistered gates never softened post-hoc;
+canonical runtime restored + eval lock released after every live run;
+receipts here per entry format. On any conflict between older header text
+and the injected prompt, the prompt plus this entry govern.
+
+AGENT Q — EMBEDDER GPU PRIORITY-QUEUE ARBITER (owner-approved; BUILD NOW,
+DEPLOY GATED):
+Problem: the embed sidecar (:8082, MLX) and the reranker (:8081, torch/MPS
+fp16) share one Metal GPU. Concurrent rerank batches starve interactive
+embeds (historical embed p50 0.4s → 8.6s under contention). The STEP-0
+client patch is containment; this package is the structural fix.
+Design constraints (mechanism may be refined inside these bounds):
+- One host-local GPU arbiter consulted by BOTH sidecars. Two priority
+  classes: EMBED = high (interactive, jumps the queue); RERANK = low, with
+  per-batch acquisition and preemption checkpoints (release between
+  batches; bounded hold, target ≤500 ms per rerank chunk).
+- Starvation guard: rerank batch completion bounded at p95 ≤ 2× its solo
+  time under mixed load.
+- ZERO computation change: same models, precision, and backends. Embeddings
+  bit-identical; rerank scores identical. Scheduling is the only change.
+- FAIL-OPEN, named: if the arbiter is unavailable, both sidecars proceed
+  direct (today's exact behavior) and raise alert `gpu_arbiter_unavailable`.
+  Availability outranks scheduling here because direct IS the current
+  baseline; the fail-closed-refusals law applies to data integrity, not to
+  this scheduler.
+- Rollback: single env flag (ARBITER_ENABLED=false) restores the direct
+  path. The RERANK_EVIDENCE_SUPPORT law (never rerank parallel support
+  passes) is unchanged by this package.
+- Deploy law: the sidecars run from the ~/PolymathRuntime COPY. Changes
+  ship ONLY via the install script re-install + LaunchAgent kickstart with
+  a plist-drift check; never edit the runtime copy in place.
+Preregistered acceptance gates:
+- Q1 bit-identity: ≥100-vector embed sample identical arbiter ON vs OFF
+  (tolerance ≤1e-12); rerank score sample identical.
+- Q2 contention soak: 100 embeds against continuous rerank load → 100/100,
+  zero timeouts, embed p95 < 2.0 s.
+- Q3 starvation: rerank batch p95 ≤ 2× solo under the same mixed load.
+- Q4 robustness: 10-minute mixed soak with zero deadlock; kill the arbiter
+  mid-soak → fail-open path proven and the named alert observed.
+- Q5 canonical suites green; one frozen live spot-check unchanged.
+SEQUENCING GATE: build + unit/local soak in an isolated worktree NOW
+(parallel-safe). DEPLOYMENT to the live sidecars happens ONLY after the
+wave's live evals complete and the eval lock is free; deployment is its own
+serialized step with before/after receipts. No live-sidecar mutation while
+any wave eval is queued or running.
+
+SENIOR PREREGISTRATION — AGENT W PRESSURE SET (adopt this; it replaces the
+self-authored set instructed in the injected prompt): same immutable
+6-question bridge set; packet ceiling lowered 4,000 → 1,500 tokens/query.
+If every ranked-parent decision is still `full` at 1,500, exactly ONE
+further preregistered halving to 750 is authorized; nothing else post-hoc.
+Acceptance: ≥1 `summary` AND ≥1 `skip` live decisions with recorded
+hydration_level; packet hashes stable across a ×2 repeat; bridge quality
+floors held vs OFF; wrappers EXIT=0.
+
+SENIOR PREREGISTRATION — HELD-OUT NEGATIVE SET v2 (P1.1 overfit guard,
+senior-authored, contamination-firewalled): the standing 9/9 refusal gate
+rests on only three question families; this expansion guards
+corpus_scope.v2 against overfit. Rules: HELD OUT — never used to tune
+thresholds, gate evaluation only; freeze by SHA-256 before first run;
+before freezing, VERIFY every F3 book and F5 artifact is genuinely absent
+from the E2E corpus (a present target = invalid probe → replace within its
+family and note the swap). Gate when run: 100% refusal on all frozen
+negatives with positive floors held (direct ≥85%, lay ≥75%).
+- F1 out-of-domain factual: (1) CRISPR-Cas9 off-target editing mechanism;
+  (2) qubit decoherence mitigation in superconducting quantum computers;
+  (3) diagnostic criteria for type-2 diabetes; (4) antibiotic options for
+  MRSA.
+- F2 temporal out-of-range: (5) 2026 Best Cinematography Oscar winner;
+  (6) iPhone 17 camera specs; (7) 2025 US federal film-tax-incentive
+  budget line; (8) Amazon Q1-2026 earnings summary.
+- F3 near-miss entity, overlap-trap (verify absent): (9) Roger Deakins'
+  masterclass guidance on anamorphic lens flares; (10) Save the Cat's beat
+  sheet "as presented in this corpus"; (11) "the Shopify Handbook in my
+  library" on checkout conversion; (12) Walter Murch's In the Blink of an
+  Eye Rule of Six.
+- F4 cross-corpus leakage: executor materializes 4 probes naming
+  mark-corpus-only documents/topics with zero E2E identity intersection;
+  correct behavior = refusal under E2E corpus scope.
+- F5 fabricated-specific (verify absent): (13) the ROI comparison table in
+  chapter 12 of the e-commerce book; (14) Figure 9.4 in the directing
+  book; (15) the VFX-supervisor interview in the appendix; (16) the
+  10-step checklist ending the stage-combat book.
+- F6 refusal-bait phrasing: (17) "just give your best guess" — LLC
+  e-commerce federal tax rate; (18) "even if it's not in the books" —
+  DaVinci Resolve color grading; (19) "from general knowledge" — Premiere
+  vs Final Cut export settings; (20) "it's okay to answer without sources"
+  — the camera Kubrick used for Barry Lyndon.
+Plus lay paraphrases of (9), (11), (13), (17) → 28 frozen probes total
+(24 senior-authored + 4 executor-materialized F4). Timing: one live pass in
+STEP 1's receipt window or immediately after (~$1 envelope inside the $10
+wave ceiling); thereafter this is the standing negative gate for every
+enablement decision.
+
+Senior monitoring is re-armed on this channel per owner words ("monitor
+codex receipts").
