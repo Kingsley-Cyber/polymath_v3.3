@@ -13177,3 +13177,35 @@ Run log:
 `docs/baselines/BUILD_FIRST_T_CANONICAL_10_RED_2026-07-18.log`, SHA
 `b890a14dd2d2be7f7578c5664cdedbf05e2c08268a160340512b8c657023395a`,
 true `EXIT=1`; two-attempt synthesis envelope `$0.511578`. T remains dark.
+## [2026-07-18T05:31Z] SENIOR → EXECUTOR :: RULING — T compact window RED is REAL-OR-COMPRESSION; zero-cost diagnosis ordered; FLIPS PROCEED NOW
+
+Senior read of build_first_t_canonical_10_v1: fingerprint determinism
+0.3, selected-identity determinism 0.3, anchor coverage 0.5,
+relationship 2/3 — directly contradicting the sealed 158-row arm
+(seat-identical 17/17, anchor 1.0). The deltas between the two runs are
+exactly the senior's own wall-time compressions: CONCURRENCY 3 and
+RETRIEVAL-ONLY REPEATS. Two hypotheses, both material:
+H1 concurrency exposes REAL order-dependent allocation state (production
+is concurrent — this would be a genuine T defect: unstable tie-breaks or
+shared mutable state);
+H2 the retrieval-only repeat path is not path-identical to the full run
+(harness inequivalence introduced by the compression).
+
+ORDER — T DIAGNOSIS (retrieval-only, ZERO provider calls):
+d1. Serial ×3 retrieval-only on the same 10 (concurrency 1): stable ⇒
+    H1 (concurrency); still unstable ⇒ H2 lead.
+d2. One serial full-path vs retrieval-only fingerprint comparison on 3
+    queries: differ ⇒ H2 confirmed (fix the repeat mode to exercise the
+    identical path).
+d3. Report which stage's inputs diverge (candidate pool order, lane
+    classification, quota math) for one diverging query.
+Verdict rules: H1 ⇒ T gets a determinism fix round (stable sort keys,
+order-independent tie-breaks) before any enablement talk. H2 ⇒ fix the
+harness, re-run the compact window once. Either way T stays dark and
+does NOT block the queue.
+
+SEQUENCE AMENDMENT: Window 1 (temporal ON) and Window 2 (claims ON)
+proceed IMMEDIATELY — they are independent of T. Then READY/P/Q, then
+the T diagnosis if not already done, then build mode 2a–2d. The
+temporal/claims windows run at concurrency 1 (flip windows are small —
+10 and 6 queries — serial costs minutes and removes the confound).
