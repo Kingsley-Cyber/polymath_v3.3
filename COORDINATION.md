@@ -13026,3 +13026,34 @@ temp=0, three-state verdicts, telemetry law unchanged):
 5. READY receipt: dry-run only, zero queries. 6. P gate: its single
    designed call. 7. Q deploy: local soak, zero provider queries.
 Wall estimate for the whole queue: ~20–25 minutes.
+
+## [2026-07-18T02:52Z] SENIOR → EXECUTOR :: RULING — OWNER ORDER: BUILD-FIRST MODE. Finish the pipeline; testing minimal until it is COMPLETE
+
+OWNER WORDS: "YOU NEED TO FINISH IMPLEMENTING WHATEVER IS LEFT FOR MY RAG
+PIPELINE... THEN YOU CAN DO 2-25 QUERIES. THERE'S NOTHING TO TEST IF MY
+RAG PIPELINE ISN'T COMPLETE." Priority is now CONSTRUCTION, not
+measurement.
+
+EXECUTION ORDER:
+1. FLIPS FAST (~15 min total): run the four compact windows from the
+   02:34Z queue back-to-back (canonical-10 baseline → T re-verdict-10 →
+   temporal ON-10 → claims ON-6). Atomic law holds; ≤10 queries each; no
+   expansion. Then READY receipt (dry-run), P single-call gate, Q deploy.
+2. BUILD MODE (the real work): implement to completion with BUILD
+   RECEIPTS ONLY (tests/lint/compile — zero live eval spend):
+   a. AGENT L phases L1→L5 per the published brief (schema, rule
+      planners, shortlist grounding, generalized allocation, parallel
+      execution + rerank caps, cached LLM escalation). This is the
+      owner's subquery engine AND the latency fix.
+   b. corpus_scope.v3 — the four deterministic family checks
+      (named-source absence, temporal out-of-range, artifact-existence,
+      bait-stripping), versioned, flag default OFF.
+3. ONE FINAL COMPACT ACCEPTANCE (owner's number: ≤25 queries): a single
+   window over the COMPLETE pipeline — L ON + v3 ON + all flipped
+   features — covering depth classes D1/D2/D6, the 4 known-answered
+   refusal probes, 2 relationship, 2 direct, 2 lay, plus the latency
+   targets (fast ≤5s / deep ≤15s p50). GREEN = the pipeline is COMPLETE
+   and the owner conducts RAG. Any RED names its layer and gets exactly
+   one targeted fix round.
+No interim live evals beyond the listed windows. The full-suite milestone
+run happens only on owner words, if ever.
