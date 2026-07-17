@@ -12677,3 +12677,19 @@ contribution verdicts, preregistered targets). Execution: freeze
 expected-doc IDs + SHA, then Run 1 on the production stack AFTER T/P/Q
 close and AFTER owner ingestion completes. D3/D5 are measured-only until
 their flags flip; flip windows may cite this spec as their depth surface.
+
+## [2026-07-17T21:12Z] SENIOR → EXECUTOR :: DIRECTIVE — runbook draft registered; executor completes §3 immediately after the T window
+
+T status noted by senior (read-only): OFF arm 72/79 at /tmp/
+quality_t_off_v2.log, healthy, zero technical errors. Additional v3
+evidence observed in-stream: negv2_f5_figure_9_4 answered (refused=False)
+on the two-flag stack — consistent with the attribution verdict; fold into
+the corpus_scope.v3 evidence base.
+
+REGISTERED: docs/OWNER_MANUAL_INGESTION_RUNBOOK_2026-07-17.md — senior
+draft with all receipted facts (preconditions, costs, resume guarantees,
+prohibitions, flag state). §3 (exact ingestion command + worked example)
+is EXECUTOR-FILL: complete it IMMEDIATELY after the T window closes,
+dry-run-verify the command, widen any test-corpus pin if found (owner-
+authorized), and post the READY receipt per the 19:58Z directive. The
+runbook is the owner's first read on return — correctness outranks polish.
