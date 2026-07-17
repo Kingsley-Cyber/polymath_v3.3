@@ -11778,3 +11778,17 @@ minimum-distinct 0.7500 OFF → 1.0000 ON; direct 1.0000 → 1.0000; lay
 corpus-store hashes are identical before/after; only scheduler heartbeat state
 changed. Runtime overrides/services restored; live flag=False. Receipt:
 docs/RELATIONSHIP_EVIDENCE_ALLOCATION_AB_2026-07-16.md.
+
+## OWNER DECISION + SENIOR DIRECTIVE — embedder fix = OPTION 3 (structural decoupling), amends Step 0
+Owner chose the structural fix. Implement as STEP 0.5 after the client-side
+patch: an EMBED ROUTING SEAM — interactive/chat embeds stay on the Mac MLX
+sidecar; bulk/eval/batch embeds route to the existing RunPod embed endpoints.
+GATED BY A PARITY CANARY first: embed an identical ~20-text set on both
+backends, preregister the similarity threshold BEFORE running (cosine
+self-similarity per text + rank-order agreement on a small retrieval probe);
+PASS → enable RunPod-bulk routing (max workers 1–2, scale-to-zero, cost
+receipts); FAIL → record the drift as a named platform limit and fall back
+to strict serialization discipline on the Mac (eval concurrency 1, never
+rerank parallel to embed). One embedding space per collection is inviolate —
+no mixed-provenance vectors either way. Receipt the canary + the chosen
+route.
