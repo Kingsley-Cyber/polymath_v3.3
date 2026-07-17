@@ -1561,6 +1561,14 @@ class Settings(BaseSettings):
             "provider defaults."
         ),
     )
+    CHAT_COST_TELEMETRY_ENABLED: bool = Field(
+        default=False,
+        description=(
+            "Emit additive, secret-free provider token/cost accounting on "
+            "/api/chat SSE traces. Ships dark; eval operators enable it only "
+            "after verifying that the selected provider returns stream usage."
+        ),
+    )
     GHOST_A_DEFAULT_MODEL: str = Field(
         default="deepseek/deepseek-v4-flash",
         description=(
