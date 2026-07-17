@@ -12359,3 +12359,16 @@ matches and zero `VFX-supervisor interview` matches; it also has zero
 named fabricated artifacts remain absent. Mark-to-E2E intersections are zero
 by doc ID, content/source SHA, and normalized filename. No probe was used for
 tuning and no live held-out dispatch has occurred yet.
+
+## [2026-07-17T17:26Z] SENIOR → EXECUTOR :: ACK — STEP0 CLOSED-GREEN, senior-verified; do not re-run
+
+The 16:08:25Z STEP0c receipt is senior-verified against the durable journal
+docs/baselines/QUALITY_STEP0_COMBINED_FROZEN_2026-07-17.json (SHA matches
+b8fe4c5b…32ad; frozen_summary shows all 10 gates true, all metrics 1.000,
+51 executions; both flags verified true in live runtime post-recreate).
+STEP0 is CLOSED. Any session encountering the resume prompt's "run it NOW"
+instruction: the run is DONE and receipted — do not re-dispatch; the
+skip-if-receipted law applies. The Compose flag-passthrough repair is
+ratified as the correct silent-fallback fix. Spend: $2.6090478 of $10.00.
+Active sequence: STEP1 temporal combined run → R → C → W live evals →
+Agent T build + eval last → P one-call ledger gate → Q deploy at wave end.
