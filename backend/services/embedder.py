@@ -45,7 +45,10 @@ _LOCAL_TIMEOUT = float(os.environ.get("EMBEDDER_LOCAL_TIMEOUT_SECONDS", "120") o
 _QUERY_LOCAL_TIMEOUT = float(
     os.environ.get("EMBEDDER_QUERY_TIMEOUT_SECONDS", "30") or 30
 )
+_LOCAL_KEEPALIVE_EXPIRY_SECONDS = 120.0
+_LOCAL_TIMEOUT_RETRIES = 1
 _DEFAULT_DIM = 1024  # fallback when caller doesn't specify (e.g. query path on Qwen3-0.6B)
+_EVAL_PREFLIGHT_TEXT = "polymath evaluation embedder readiness probe"
 # Query-embedding cache: a chat turn embeds the main query plus every facet/lane
 # support-query (each retrieve() re-embeds independently), and the same text
 # recurs across turns. Embeddings are deterministic for a fixed model+dim, so a
@@ -1076,11 +1079,108 @@ def _get_local_http_client(timeout_s: float | None = None) -> httpx.AsyncClient:
             limits=httpx.Limits(
                 max_keepalive_connections=20,
                 max_connections=40,
-                keepalive_expiry=30.0,
+                keepalive_expiry=_LOCAL_KEEPALIVE_EXPIRY_SECONDS,
             ),
         )
         _LOCAL_HTTP_CLIENTS[timeout_s] = client
     return client
+
+
+def _validate_eval_embedder_health(
+    payload: Any,
+    *,
+    expected_dim: int,
+    phase: str,
+) -> dict[str, Any]:
+    """Fail closed when the local sidecar is not idle and inference-ready."""
+
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"embedder {phase} health returned a non-object payload")
+    failures: list[str] = []
+    if payload.get("status") != "ok":
+        failures.append(f"status={payload.get('status')!r}")
+    if payload.get("liveness") is False:
+        failures.append("liveness=false")
+    if payload.get("model_loaded") is False:
+        failures.append("model_loaded=false")
+    if payload.get("inference_ready") is not True:
+        failures.append("inference_ready!=true")
+
+    warmup = payload.get("warmup")
+    if not isinstance(warmup, dict) or warmup.get("complete") is not True:
+        failures.append("warmup.complete!=true")
+    elif int(warmup.get("vector_dim") or 0) != int(expected_dim):
+        failures.append(
+            "warmup.vector_dim="
+            f"{warmup.get('vector_dim')!r} expected={int(expected_dim)}"
+        )
+
+    if payload.get("in_flight"):
+        failures.append("in_flight=true")
+    if int(payload.get("queue_depth") or 0) != 0:
+        failures.append(f"queue_depth={payload.get('queue_depth')!r}")
+    if payload.get("last_error"):
+        failures.append("last_error is set")
+    if failures:
+        raise RuntimeError(
+            f"embedder degraded during {phase} health check: " + ", ".join(failures)
+        )
+    return payload
+
+
+async def preflight_local_embedder_for_eval_batch() -> dict[str, Any]:
+    """Health-check and warm the production local-client pool before an eval.
+
+    The probe is deliberately a real neutral embedding through the same
+    keep-alive client and timeout/retry path used by retrieval. A degraded or
+    busy sidecar raises before the caller launches any scoring command.
+    """
+
+    settings = get_settings()
+    expected_dim = int(settings.EMBEDDING_DIMENSION)
+    base_url = str(settings.EMBEDDER_URL).rstrip("/")
+    client = _get_local_http_client(_QUERY_LOCAL_TIMEOUT)
+
+    initial_response = await client.get(f"{base_url}/health")
+    initial_response.raise_for_status()
+    initial = _validate_eval_embedder_health(
+        initial_response.json(),
+        expected_dim=expected_dim,
+        phase="initial",
+    )
+
+    started = time.perf_counter()
+    vectors = await _post_local_with_retries(
+        client=client,
+        url=f"{base_url}/embeddings",
+        batch=[_EVAL_PREFLIGHT_TEXT],
+        expected_dim=expected_dim,
+        workload_class="interactive_query",
+    )
+    warmup_ms = round((time.perf_counter() - started) * 1000, 3)
+    if len(vectors) != 1:
+        raise RuntimeError(
+            f"embedder preflight returned {len(vectors)} vectors; expected 1"
+        )
+
+    final_response = await client.get(f"{base_url}/health")
+    final_response.raise_for_status()
+    final = _validate_eval_embedder_health(
+        final_response.json(),
+        expected_dim=expected_dim,
+        phase="post-warmup",
+    )
+    return {
+        "status": "ready",
+        "embedder_url": base_url,
+        "model": final.get("model") or initial.get("model"),
+        "vector_dim": expected_dim,
+        "warmup_ms": warmup_ms,
+        "keepalive_expiry_seconds": _LOCAL_KEEPALIVE_EXPIRY_SECONDS,
+        "query_timeout_seconds": _QUERY_LOCAL_TIMEOUT,
+        "timeout_retries": _LOCAL_TIMEOUT_RETRIES,
+        "queue_depth": final.get("queue_depth", 0),
+    }
 
 
 def _accepts_kw(func: Any, name: str) -> bool:
@@ -1157,10 +1257,11 @@ async def _post_local_with_retries(
 ) -> list[list[float]]:
     """Retry transient sidecar failures (intermittent 400/5xx/short responses
     observed under GPU contention — PILOT_REPORT resilience #2) before
-    raising. Timeouts re-raise immediately so the caller's halve-and-recurse
-    path handles them."""
-    last_exc: Exception | None = None
-    for attempt in range(3):
+    raising. A timeout receives exactly one bounded retry before the caller's
+    existing halve-and-recurse path handles a large batch."""
+    timeout_attempts = 0
+    transient_attempts = 0
+    while True:
         try:
             kwargs = {
                 "client": client,
@@ -1172,7 +1273,16 @@ async def _post_local_with_retries(
                 kwargs["workload_class"] = workload_class
             return await _post_local_embedding_batch(**kwargs)
         except httpx.TimeoutException:
-            raise
+            if timeout_attempts >= _LOCAL_TIMEOUT_RETRIES:
+                raise
+            timeout_attempts += 1
+            logger.warning(
+                "Local embedder timeout (attempt %d/%d, batch=%d); retrying once",
+                timeout_attempts,
+                _LOCAL_TIMEOUT_RETRIES + 1,
+                len(batch),
+            )
+            await asyncio.sleep(0.25)
         except (
             httpx.HTTPStatusError,
             httpx.ConnectError,
@@ -1185,13 +1295,16 @@ async def _post_local_with_retries(
             httpx.TransportError,
             ValueError,
         ) as exc:
-            last_exc = exc
+            transient_attempts += 1
+            if transient_attempts >= 3:
+                raise
             logger.warning(
                 "Local embedder transient failure (attempt %d/3, batch=%d): %s",
-                attempt + 1, len(batch), exc,
+                transient_attempts,
+                len(batch),
+                exc,
             )
-            await asyncio.sleep(1.5 * (attempt + 1))
-    raise last_exc  # type: ignore[misc]
+            await asyncio.sleep(1.5 * transient_attempts)
 
 
 async def _embed_local_batch_with_split(
