@@ -76,9 +76,13 @@ _ENUMERATIVE_RE = re.compile(
     r"\b(?:list|enumerate|steps?|stages?|sequence|trace\s+how)\b",
     re.IGNORECASE,
 )
-_ENTITY_BRIDGE_HINT_RE = re.compile(
-    r"\b(?:alongside|between|versus|vs|and|with)\b",
-    re.IGNORECASE,
+_ENTITY_BRIDGE_PATTERNS = (
+    re.compile(r"\b(.+?)\s+alongside\s+(.+)$", re.IGNORECASE),
+    re.compile(
+        r"\b(?:relationship|connection)\s+between\s+(.+?)\s+and\s+(.+)$",
+        re.IGNORECASE,
+    ),
+    re.compile(r"\b(.+?)\s+(?:versus|vs)\s+(.+)$", re.IGNORECASE),
 )
 _NAMED_SOURCE_PATTERNS = (
     re.compile(
@@ -103,6 +107,16 @@ _NAMED_SOURCE_GENERIC_TOKENS = frozenset(
         "paper",
         "source",
         "sources",
+    }
+)
+_ENTITY_BRIDGE_SIDE_STOP_WORDS = frozenset(
+    {
+        *BASE_STOP_WORDS,
+        "compare",
+        "describe",
+        "discuss",
+        "explain",
+        "summarize",
     }
 )
 
@@ -186,11 +200,18 @@ def corpus_doc_set_version_from_rows(
             ),
         }
         if not any(revision_identity.values()):
-            revision_identity["fallback"] = str(
-                source_identity.get("source_key")
-                or row.get("source_key")
-                or row.get("updated_at")
-                or "identity_missing"
+            source_key = str(
+                source_identity.get("source_key") or row.get("source_key") or ""
+            )
+            updated_at = str(row.get("updated_at") or "")
+            revision_identity.update(
+                {
+                    "source_key": source_key,
+                    "updated_at": updated_at,
+                    "fallback": (
+                        "identity_missing" if not source_key and not updated_at else ""
+                    ),
+                }
             )
         identities.append(
             {
@@ -316,20 +337,27 @@ def _named_source_matches_shortlist(
     """Require an exact phrase or strong title match; summaries never satisfy."""
 
     normalized_source = normalize_planner_query(source)
-    source_tokens = set(_distinctive_source_tokens(source))
-    if not normalized_source or not source_tokens:
+    all_source_tokens = set(query_tokens(source, stop_words=frozenset()))
+    if not normalized_source or not all_source_tokens:
         return False
+    if all_source_tokens <= _NAMED_SOURCE_GENERIC_TOKENS:
+        return False
+    source_tokens = set(_distinctive_source_tokens(source))
     for item in shortlist:
         normalized_title = normalize_planner_query(item.title)
-        title_tokens = set(_distinctive_source_tokens(item.title))
         exact_phrase = _contains_normalized_phrase(
             normalized_title,
             normalized_source,
         )
+        if exact_phrase:
+            return True
+        if not source_tokens:
+            continue
+        title_tokens = set(_distinctive_source_tokens(item.title))
         strong_tokens = source_tokens <= title_tokens and (
             len(source_tokens) >= 2 or all(len(token) >= 5 for token in source_tokens)
         )
-        if exact_phrase or strong_tokens:
+        if strong_tokens:
             return True
     return False
 
@@ -415,6 +443,31 @@ def _relationship_sides(query: str) -> tuple[tuple[str, str], ...]:
     return tuple((lane.name, lane.query) for lane in lanes[:2])
 
 
+def _has_entity_bridge_evidence(query: str) -> bool:
+    """Require two explicit, non-generic sides; bare conjunctions do not count."""
+
+    planning_query = normalize_planner_query(query)
+    for pattern in _ENTITY_BRIDGE_PATTERNS:
+        match = pattern.search(planning_query)
+        if not match:
+            continue
+        left = set(
+            query_tokens(
+                match.group(1),
+                stop_words=_ENTITY_BRIDGE_SIDE_STOP_WORDS,
+            )
+        )
+        right = set(
+            query_tokens(
+                match.group(2),
+                stop_words=_ENTITY_BRIDGE_SIDE_STOP_WORDS,
+            )
+        )
+        if left and right and left != right:
+            return True
+    return False
+
+
 def planning_requires_shortlist(query: str) -> bool:
     """Decide plan-time grounding from canonical text before any I/O."""
 
@@ -432,7 +485,7 @@ def planning_requires_shortlist(query: str) -> bool:
         return True
     if _named_source_phrases(planning_query):
         return True
-    return bool(_ENTITY_BRIDGE_HINT_RE.search(planning_query))
+    return _has_entity_bridge_evidence(planning_query)
 
 
 def _subquery(
@@ -752,7 +805,7 @@ class LibrarianPlanner:
             planner_prompt_hash=LLM_DECOMPOSER_PROMPT_HASH,
         )
         cached = self.cache.get(cache_key)
-        if cached is not None:
+        if cached is not None and cached.shape != "simple":
             return LibrarianPlanBuildResult(
                 plan=cached.model_copy(
                     update={
@@ -804,6 +857,31 @@ class LibrarianPlanner:
             requested_tier=requested_tier,
             cache_hit=False,
         )
+        if plan.shape == "simple":
+            # A conservative grounded preflight may find no bridge after
+            # seeing the titles. Preserve this request's raw bytes and keep it
+            # out of cache so a prior normalized-equivalent request cannot
+            # leak its display text into the current trace.
+            plan = build_query_plan_v1(
+                query,
+                corpus_id=scope_identity,
+                corpus_doc_version=version_before,
+                shortlist=shortlist,
+                requested_tier=requested_tier,
+                cache_hit=False,
+            )
+            return LibrarianPlanBuildResult(
+                plan=plan,
+                diagnostics={
+                    "status": "grounded_simple_bypass",
+                    "registry_order": list(RULE_REGISTRY_ORDER),
+                    "shortlist": shortlist_diagnostics,
+                    "shortlist_calls": shortlist_calls,
+                    "query_embedding_calls": shortlist_calls,
+                    "llm_escalation": LLM_ESCALATION_STATUS,
+                    "provider_calls": 0,
+                },
+            )
         self.cache.put(plan.cache.key, plan)
         return LibrarianPlanBuildResult(
             plan=plan,

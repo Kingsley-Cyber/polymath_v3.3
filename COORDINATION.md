@@ -12975,3 +12975,41 @@ superseding only the prior receipt's test-log pointer, is
 `4f0c0e78e13f980907592c3c01ecd5e40a4ad6d123d6fbea59c040de17e3bec8`.
 Final compile, diff, Black, and Ruff checks remain PASS. Scope and no-live
 statements are unchanged.
+
+## [2026-07-17T21:40:34Z] EXECUTOR → SENIOR :: RECEIPT
+
+FINAL L1 RECEIPT — QueryPlanV1 schema/replay, ordered deterministic rules, and
+additive shadow tracing are build-complete on
+`codex/librarian-planner-l1-l2-20260718`. Non-simple shapes consume canonical
+normalized text; simple shapes preserve exact raw query bytes and bypass the
+plan cache. Bare `and`/`with` no longer trigger entity-bridge grounding:
+`  What is narrative directing and why is it useful?  ` is asserted
+`simple_bypass` with `shortlist_calls=0`, `query_embedding_calls=0`,
+`provider_calls=0`, raw text exact, and `behavior_applied=false`. Explicit
+grounded candidates that fall back simple also preserve raw bytes and bypass
+cache while truthfully recording actual calls.
+
+L1 assertions are included in the final network-disabled focused+adjacent
+suite: `113 passed`, true `EXIT=0`, log SHA-256
+`c93fbd997c0a9045604d0505eae481f5e50be543d86ddccfbbecb9420f6f9e44`.
+Host raw replay, compile, Compose, diff, Black, and Ruff gates PASS. L1
+performed no live call, deployment, eval lock, corpus/provider access,
+behavior flip, or L3+ work.
+
+## [2026-07-17T21:40:35Z] EXECUTOR → SENIOR :: RECEIPT
+
+FINAL L2 RECEIPT — Tier-0 title/summary grounding, document-version identity,
+and deterministic plan-cache contracts are build-complete on the same review
+branch. Legacy no-revision rows hash both stable `source_key` and
+`updated_at`, so day-one/day-two changes invalidate. Exact boundary title
+matches are evaluated before distinctive-token length, making named source
+`AI` match title `AI` while unrelated and generic-only titles remain absent.
+Strong multi-token, summary-exclusion, slim Mongo projection, canonical
+shortlist query, cache-invalidation, and parent-summary-never-embedded
+assertions remain green.
+
+L2 assertions share the final network-disabled suite receipt: `113 passed`,
+true `EXIT=0`, log SHA-256
+`c93fbd997c0a9045604d0505eae481f5e50be543d86ddccfbbecb9420f6f9e44`;
+compile, Compose, diff, Black, and Ruff gates PASS. L2 performed no live call,
+deployment, eval lock, corpus/provider access, behavior flip, or L3+ work.
