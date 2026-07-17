@@ -11822,3 +11822,57 @@ build EXIT=0. Detailed static receipt:
 Per measurement order, Router A will not contend for the eval lock: Claim C's
 6x2 micro A/B runs first, then Router A's frozen OFF/ON plus bridge
 diagnostic. Promotion verdict remains pending those serialized live gates.
+
+## [2026-07-17T12:35:46Z] EXECUTOR → SENIOR :: RECEIPT
+
+Router A live lock is held by `codex/router-tier0-20260717`. Read-only E2E
+corpus fingerprint before measurement is
+`eb116e096258c5b8e510fbc81b306b7160b1e8b370ec8f773f1cf7aac40861a9`,
+true EXIT=0. OFF bridge baseline completed 6/6 technically under the exact
+MiniMax route and pre-batch embedder readiness receipt, with 4/6 diagnostic
+passes (expected baseline RED), true runner EXIT=1. Failures were camera
+motion/story (forbidden cinematography title rank 1) and character motion
+(no expected directing/animation title in top 3). No corpus writes occurred.
+Proceeding to the preregistered OFF frozen arm; the acceptance verdict remains
+the ON delta and immutable 6/6 target.
+
+## [2026-07-17T12:51:10Z] EXECUTOR → SENIOR :: RECEIPT
+
+Router A frozen OFF arm closed 51/51 with technical success=1.000, direct
+doc-hit=1.000, lay doc-hit=1.000, relationship minimum-distinct=0.750,
+corpus/citation boundary=1.000. Both cost-bounded tranches had green
+pre-batch MLX readiness and zero row errors. True final runner EXIT=1 is the
+honest known suite RED: negative refusal remains 0.4444; it is outside Router
+A's acceptance and unchanged by the OFF baseline. All Router A prerequisite
+metrics are green. Proceeding to deploy the ON bundle (router +
+separately-gated decomposition), then immutable bridge 6/6 and frozen delta.
+
+## [2026-07-17T13:33:31Z] EXECUTOR → SENIOR :: RECEIPT
+
+Router A is settled RED and remains dark. The immutable ON bridge completed
+6/6 technically with complete four-lane attribution, but scored 4/6,
+identical to OFF, true `EXIT=1`. Camera motion/story still ranked Blain Brown
+first; character motion still omitted Directing/animation from the top three.
+No scorer, expected title, threshold, title/query exception, or corpus data
+was changed.
+
+Durable cause is closed: E2E has 15 active docs, 0 succeeded digest jobs, and
+0 authorized digest projections. Mark has 103 docs, 250 succeeded digest jobs,
+and 249 applied/reconciled projections. E2E↔Mark exact intersections are zero
+for doc ID, source key, source-identity content SHA, and normalized filename.
+Cross-corpus reuse would violate the outbox's corpus/doc/parent/source-version
+closure, so associative attribution correctly remained 0.000 in all six
+bridge cases and divergent demotion never fired.
+
+Frozen ON completed 51/51 technically: direct=1.000, lay=1.000,
+relationship=0.750, corpus/citation=1.000; negative refusal=0.333 and the
+honest runner result is `EXIT=1`. OFF was direct=1.000, lay=1.000,
+relationship=0.750, corpus/citation=1.000, negative=0.444. Both ON cost
+tranches had green MLX preflight and zero row errors.
+
+The canonical five-overlay backend is restored healthy from
+`/Users/king/polymath_v3.3`; router flags are absent/default-OFF. Final
+read-only fingerprint differs from before only in the background
+`ingest_scheduler_state` heartbeat; every substantive Mongo, Qdrant, and
+Neo4j count/hash is identical. Detailed receipt:
+`docs/FOUR_LANE_TIER0_ROUTER_IMPLEMENTATION_RECEIPT_2026-07-17.md`.
