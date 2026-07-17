@@ -1,9 +1,11 @@
 """Add exact-sentence atomic-claim anchors to already-selected evidence.
 
 Claims remain candidate-only.  This service performs one bounded aggregation
-for the selected source chunks, revalidates the immutable compilation against
-the current document/chunk, and attaches only query-overlapping exact sentence
-anchors.  Retrieval order, chunk text, and scores are never changed.
+for the selected source chunks, resolves selected parent-summary evidence
+through its durable parent-to-child mapping, revalidates each immutable
+sentence-keyed compilation against the current document/child, and attaches
+only query-overlapping exact sentence anchors. Retrieval order, chunk text,
+and scores are never changed.
 """
 
 from __future__ import annotations
@@ -29,15 +31,43 @@ from services.storage.mongo_contracts import restore_bson_utc_awareness
 ANCHOR_SCHEMA_VERSION = "atomic_claim_anchor.v1"
 MAX_ANCHOR_CLAIM_CHARS = 240
 MAX_ANCHOR_SENTENCE_CHARS = 500
+MAX_MAPPED_COMPILATION_ROWS_PER_SOURCE = 128
 
 
-def _source_key(source: SourceChunk) -> tuple[str, str, str] | None:
+def _selected_source_key(source: SourceChunk) -> tuple[str, str, str] | None:
     key = (
         str(source.corpus_id or ""),
         str(source.doc_id or ""),
         str(source.chunk_id or ""),
     )
-    return key if all(key) and not key[2].endswith("_summary") else None
+    return key if all(key) else None
+
+
+def _summary_parent_key(source: SourceChunk) -> tuple[str, str, str] | None:
+    selected_key = _selected_source_key(source)
+    if selected_key is None or not selected_key[2].endswith("_summary"):
+        return None
+    derived_parent_id = selected_key[2].removesuffix("_summary")
+    parent_id = str(source.parent_id or derived_parent_id)
+    if not parent_id or parent_id != derived_parent_id:
+        return None
+    return selected_key[0], selected_key[1], parent_id
+
+
+def _mapped_child_ids(parent: dict[str, Any]) -> list[str]:
+    child_ids = [str(value) for value in (parent.get("child_ids") or []) if value]
+    source_child_ids = [
+        str(value) for value in (parent.get("source_child_ids") or []) if value
+    ]
+    for values in (child_ids, source_child_ids):
+        if len(values) != len(set(values)):
+            raise ValueError("parent source-child mapping contains duplicates")
+    if child_ids and source_child_ids and set(child_ids) != set(source_child_ids):
+        raise ValueError("parent source-child mappings disagree")
+    mapped = source_child_ids or child_ids
+    if not mapped:
+        raise ValueError("parent source-child mapping is empty")
+    return mapped
 
 
 def _candidate_export(row) -> CompiledChildCandidateExportV1:
@@ -123,15 +153,30 @@ async def attach_atomic_claim_anchors(
     """Return metadata-enriched copies plus count-only diagnostics."""
 
     ordered_sources = list(sources or [])
-    keys = [key for source in ordered_sources if (key := _source_key(source))]
+    keys = [key for source in ordered_sources if (key := _selected_source_key(source))]
     unique_keys = list(dict.fromkeys(keys))
+    direct_keys = {
+        key
+        for source in ordered_sources
+        if (key := _selected_source_key(source)) and _summary_parent_key(source) is None
+    }
+    summary_sources = {
+        parent_key: selected_key
+        for source in ordered_sources
+        if (selected_key := _selected_source_key(source))
+        and (parent_key := _summary_parent_key(source))
+    }
     diagnostics: dict[str, Any] = {
         "enabled": True,
         "selected_source_count": len(unique_keys),
+        "direct_selected_source_count": len(direct_keys),
+        "mapped_summary_source_count": len(summary_sources),
         "aggregate_calls": 0,
         "rows_seen": 0,
         "rows_valid": 0,
         "rows_rejected": 0,
+        "mapped_rows_valid": 0,
+        "ambiguous_mappings": 0,
         "ambiguous_compilations": 0,
         "anchors_attached": 0,
         "sources_anchored": 0,
@@ -141,12 +186,31 @@ async def attach_atomic_claim_anchors(
         diagnostics["reason"] = "missing_selected_chunks_or_query_terms"
         return ordered_sources, diagnostics
 
-    match_terms = [
+    direct_match_terms = [
         {"corpus_id": corpus_id, "document_id": doc_id, "child_id": child_id}
-        for corpus_id, doc_id, child_id in unique_keys
+        for corpus_id, doc_id, child_id in sorted(direct_keys)
+    ]
+    mapped_doc_match_terms = [
+        {"corpus_id": corpus_id, "document_id": doc_id}
+        for corpus_id, doc_id in sorted({(key[0], key[1]) for key in summary_sources})
+    ]
+    parent_match_terms = [
+        {"corpus_id": corpus_id, "doc_id": doc_id, "parent_id": parent_id}
+        for corpus_id, doc_id, parent_id in sorted(summary_sources)
+    ]
+    initial_match_terms = direct_match_terms + mapped_doc_match_terms
+    direct_match_expr = [
+        {
+            "$and": [
+                {"$eq": ["$corpus_id", corpus_id]},
+                {"$eq": ["$document_id", doc_id]},
+                {"$eq": ["$child_id", child_id]},
+            ]
+        }
+        for corpus_id, doc_id, child_id in sorted(direct_keys)
     ]
     pipeline = [
-        {"$match": {"$or": match_terms}},
+        {"$match": {"$or": initial_match_terms}},
         {
             "$lookup": {
                 "from": "chunks",
@@ -221,26 +285,115 @@ async def attach_atomic_claim_anchors(
                 "as": "_current_documents",
             }
         },
-        # At most two rows per selected source are needed: one valid row is
-        # usable and a second proves ambiguous ownership. This bounds the
-        # single aggregation even if a damaged collection contains duplicates.
-        {"$limit": max(1, len(unique_keys) * 2)},
     ]
+    if parent_match_terms:
+        pipeline.append(
+            {
+                "$lookup": {
+                    "from": "parent_chunks",
+                    "let": {
+                        "c": "$corpus_id",
+                        "d": "$document_id",
+                        "ch": "$child_id",
+                    },
+                    "pipeline": [
+                        {"$match": {"$or": parent_match_terms}},
+                        {
+                            "$match": {
+                                "$expr": {
+                                    "$and": [
+                                        {"$eq": ["$corpus_id", "$$c"]},
+                                        {"$eq": ["$doc_id", "$$d"]},
+                                        {
+                                            "$or": [
+                                                {
+                                                    "$in": [
+                                                        "$$ch",
+                                                        {
+                                                            "$ifNull": [
+                                                                "$source_child_ids",
+                                                                [],
+                                                            ]
+                                                        },
+                                                    ]
+                                                },
+                                                {
+                                                    "$in": [
+                                                        "$$ch",
+                                                        {
+                                                            "$ifNull": [
+                                                                "$child_ids",
+                                                                [],
+                                                            ]
+                                                        },
+                                                    ]
+                                                },
+                                            ]
+                                        },
+                                    ]
+                                }
+                            }
+                        },
+                        {
+                            "$match": {
+                                "$or": [
+                                    {"status": {"$exists": False}},
+                                    {"status": "active"},
+                                ]
+                            }
+                        },
+                        {
+                            "$project": {
+                                "_id": 0,
+                                "corpus_id": 1,
+                                "doc_id": 1,
+                                "parent_id": 1,
+                                "child_ids": 1,
+                                "source_child_ids": 1,
+                            }
+                        },
+                        # A second exact mapping is enough to prove ambiguity.
+                        {"$limit": 2},
+                    ],
+                    "as": "_selected_parent_mappings",
+                }
+            }
+        )
+    else:
+        pipeline.append({"$set": {"_selected_parent_mappings": []}})
+
+    admissible_expr = list(direct_match_expr)
+    if parent_match_terms:
+        admissible_expr.append({"$gt": [{"$size": "$_selected_parent_mappings"}, 0]})
+    pipeline.append({"$match": {"$expr": {"$or": admissible_expr}}})
+    max_rows = max(
+        1,
+        (len(direct_keys) * 2)
+        + (len(summary_sources) * MAX_MAPPED_COMPILATION_ROWS_PER_SOURCE),
+    )
+    # Fetch one sentinel row beyond the bound and fail closed if it exists.
+    pipeline.append({"$limit": max_rows + 1})
+
     rows = await db[COMPILATION_COLLECTION].aggregate(pipeline).to_list(length=None)
     diagnostics["aggregate_calls"] = 1
     diagnostics["rows_seen"] = len(rows)
+    diagnostics["row_limit"] = max_rows
+    if len(rows) > max_rows:
+        diagnostics["reason"] = "bounded_mapping_row_limit_exceeded"
+        return ordered_sources, diagnostics
+
     valid_by_source: dict[
-        tuple[str, str, str], list[tuple[Any, list[dict[str, Any]]]]
-    ] = defaultdict(list)
+        tuple[str, str, str],
+        dict[str, list[tuple[Any, list[dict[str, Any]], str | None]]],
+    ] = defaultdict(lambda: defaultdict(list))
     for raw in rows:
         children = list(raw.pop("_current_children", []) or [])
         documents = list(raw.pop("_current_documents", []) or [])
+        parent_mappings = list(raw.pop("_selected_parent_mappings", []) or [])
         try:
             if len(children) != 1 or len(documents) != 1:
                 raise ValueError("current source ownership is missing or ambiguous")
-            row = parse_materialized_row_document(
-                restore_bson_utc_awareness(raw)
-            )
+            row = parse_materialized_row_document(restore_bson_utc_awareness(raw))
             child = children[0]
             document = documents[0]
             if row.source_version_id != document_source_version_id(document):
@@ -257,9 +410,37 @@ async def attach_atomic_claim_anchors(
                 child=child,
             )
             anchors = _anchor_candidates(row, query_terms=query_terms)
-            valid_by_source[(row.corpus_id, row.document_id, row.child_id)].append(
-                (row, anchors)
-            )
+            owner_keys: list[tuple[tuple[str, str, str], str | None]] = []
+            direct_key = (row.corpus_id, row.document_id, row.child_id)
+            if direct_key in direct_keys:
+                owner_keys.append((direct_key, None))
+
+            if len(parent_mappings) > 1:
+                diagnostics["ambiguous_mappings"] += 1
+            elif parent_mappings:
+                parent = parent_mappings[0]
+                parent_key = (
+                    str(parent.get("corpus_id") or ""),
+                    str(parent.get("doc_id") or ""),
+                    str(parent.get("parent_id") or ""),
+                )
+                selected_key = summary_sources.get(parent_key)
+                mapped_children = _mapped_child_ids(parent)
+                if (
+                    selected_key is None
+                    or parent_key[:2] != (row.corpus_id, row.document_id)
+                    or row.child_id not in mapped_children
+                ):
+                    raise ValueError("claim child is outside selected parent mapping")
+                owner_keys.append((selected_key, parent_key[2]))
+                diagnostics["mapped_rows_valid"] += 1
+
+            if not owner_keys:
+                raise ValueError("compilation is not owned by a selected source")
+            for owner_key, mapped_parent_id in owner_keys:
+                valid_by_source[owner_key][row.child_id].append(
+                    (row, anchors, mapped_parent_id)
+                )
             diagnostics["rows_valid"] += 1
         except Exception:
             diagnostics["rows_rejected"] += 1
@@ -267,14 +448,32 @@ async def attach_atomic_claim_anchors(
     remaining = max(0, int(total))
     enriched: list[SourceChunk] = []
     for source in ordered_sources:
-        key = _source_key(source)
-        candidates = valid_by_source.get(key, []) if key else []
-        if len(candidates) > 1:
-            diagnostics["ambiguous_compilations"] += 1
-            candidates = []
+        key = _selected_source_key(source)
+        by_child = valid_by_source.get(key, {}) if key else {}
+        candidate_anchors: list[dict[str, Any]] = []
+        for child_id in sorted(by_child):
+            candidates = by_child[child_id]
+            if len(candidates) != 1:
+                diagnostics["ambiguous_compilations"] += 1
+                continue
+            row, anchors, mapped_parent_id = candidates[0]
+            for anchor in anchors:
+                attached = dict(anchor)
+                attached["selected_chunk_id"] = str(source.chunk_id or "")
+                if mapped_parent_id:
+                    attached["mapped_parent_id"] = mapped_parent_id
+                candidate_anchors.append(attached)
+        candidate_anchors.sort(
+            key=lambda item: (
+                -int(item["lexical_overlap_count"]),
+                -float(item["query_term_coverage"]),
+                str(item["claim_id"]),
+                str(item["child_id"]),
+            )
+        )
         selected = (
-            candidates[0][1][: min(max(1, int(per_source)), remaining)]
-            if candidates and remaining
+            candidate_anchors[: min(max(1, int(per_source)), remaining)]
+            if remaining
             else []
         )
         if not selected:

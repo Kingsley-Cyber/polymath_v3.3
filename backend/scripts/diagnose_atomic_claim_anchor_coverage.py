@@ -23,7 +23,10 @@ from models.semantic_digest_claim_input import (
 )
 from services.conversation import conversation_service
 from services.ingestion.semantic_digest_claim_inputs import document_source_version_id
-from services.retriever.atomic_claim_anchors import attach_atomic_claim_anchors
+from services.retriever.atomic_claim_anchors import (
+    _mapped_child_ids,
+    attach_atomic_claim_anchors,
+)
 from services.storage.mongo_contracts import restore_bson_utc_awareness
 
 DEFAULT_IDS = tuple(f"q{number:03d}" for number in range(21, 30))
@@ -56,31 +59,41 @@ async def _persisted_sources(
     not_before: datetime,
     not_after: datetime,
 ) -> tuple[list[SourceChunk], dict[str, str]]:
-    user_rows = await db["messages"].find(
-        {
-            "role": "user",
-            "content": question,
-            "created_at": {"$gte": not_before, "$lte": not_after},
-        },
-        {"conversation_id": 1, "created_at": 1},
-    ).sort("created_at", -1).to_list(length=None)
+    user_rows = (
+        await db["messages"]
+        .find(
+            {
+                "role": "user",
+                "content": question,
+                "created_at": {"$gte": not_before, "$lte": not_after},
+            },
+            {"conversation_id": 1, "created_at": 1},
+        )
+        .sort("created_at", -1)
+        .to_list(length=None)
+    )
     for user_row in user_rows:
         created_at = _utc(user_row["created_at"])
-        assistants = await db["messages"].find(
-            {
-                "role": "assistant",
-                "conversation_id": user_row["conversation_id"],
-                "created_at": {
-                    "$gte": created_at,
-                    "$lte": not_after + timedelta(seconds=10),
+        assistants = (
+            await db["messages"]
+            .find(
+                {
+                    "role": "assistant",
+                    "conversation_id": user_row["conversation_id"],
+                    "created_at": {
+                        "$gte": created_at,
+                        "$lte": not_after + timedelta(seconds=10),
+                    },
                 },
-            },
-            {
-                "created_at": 1,
-                "sources": 1,
-                "trace_events": 1,
-            },
-        ).sort("created_at", 1).to_list(length=None)
+                {
+                    "created_at": 1,
+                    "sources": 1,
+                    "trace_events": 1,
+                },
+            )
+            .sort("created_at", 1)
+            .to_list(length=None)
+        )
         for assistant in assistants:
             tier = _effective_tier(assistant)
             if tier not in {"qdrant_mongo_graph", "RetrievalTier.qdrant_mongo_graph"}:
@@ -131,20 +144,63 @@ async def _validate_anchor(
             "valid": False,
         }
 
-    row = parse_materialized_row_document(
-        restore_bson_utc_awareness(row_raw)
+    row = parse_materialized_row_document(restore_bson_utc_awareness(row_raw))
+    evidence = {item.evidence_ref_id: item for item in row.evidence_refs}.get(
+        str(anchor.get("evidence_ref_id") or "")
     )
-    evidence = {
-        item.evidence_ref_id: item for item in row.evidence_refs
-    }.get(str(anchor.get("evidence_ref_id") or ""))
-    claim = {
-        item.claim_id: item for item in row.envelope.body.claims
-    }.get(str(anchor.get("claim_id") or ""))
+    claim = {item.claim_id: item for item in row.envelope.body.claims}.get(
+        str(anchor.get("claim_id") or "")
+    )
     start = int(anchor.get("start") or 0)
     end = int(anchor.get("end") or 0)
     exact_sentence = str(anchor.get("exact_sentence") or "")
+    selected_chunk_id = str(source.chunk_id or "")
+    direct_ownership = selected_chunk_id == key["child_id"]
+    mapped_ownership = False
+    if (
+        not direct_ownership
+        and selected_chunk_id.endswith("_summary")
+        and str(anchor.get("selected_chunk_id") or "") == selected_chunk_id
+    ):
+        parent_id = str(
+            anchor.get("mapped_parent_id")
+            or source.parent_id
+            or selected_chunk_id.removesuffix("_summary")
+        )
+        parents = (
+            await db["parent_chunks"]
+            .find(
+                {
+                    "corpus_id": key["corpus_id"],
+                    "doc_id": key["document_id"],
+                    "parent_id": parent_id,
+                    "$or": [
+                        {"status": {"$exists": False}},
+                        {"status": "active"},
+                    ],
+                },
+                {
+                    "_id": 0,
+                    "corpus_id": 1,
+                    "doc_id": 1,
+                    "parent_id": 1,
+                    "child_ids": 1,
+                    "source_child_ids": 1,
+                },
+            )
+            .limit(2)
+            .to_list(length=2)
+        )
+        try:
+            mapped_ownership = bool(
+                len(parents) == 1
+                and parent_id == selected_chunk_id.removesuffix("_summary")
+                and key["child_id"] in _mapped_child_ids(parents[0])
+            )
+        except ValueError:
+            mapped_ownership = False
     selected_source_ownership = bool(
-        str(source.chunk_id or "") == key["child_id"]
+        (direct_ownership or mapped_ownership)
         and row.corpus_id == key["corpus_id"]
         and row.document_id == key["document_id"]
         and row.child_id == key["child_id"]
@@ -168,9 +224,7 @@ async def _validate_anchor(
         "selected_source_ownership": selected_source_ownership,
         "exact_span": exact_span,
         "provenance_closure": provenance_closure,
-        "valid": (
-            selected_source_ownership and exact_span and provenance_closure
-        ),
+        "valid": (selected_source_ownership and exact_span and provenance_closure),
     }
 
 
@@ -248,13 +302,19 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
                     ),
                     "all_selected_source_ownership_valid": all(
                         check["selected_source_ownership"] for check in checks
-                    ) if checks else None,
+                    )
+                    if checks
+                    else None,
                     "all_exact_spans_valid": all(
                         check["exact_span"] for check in checks
-                    ) if checks else None,
+                    )
+                    if checks
+                    else None,
                     "all_provenance_closed": all(
                         check["provenance_closure"] for check in checks
-                    ) if checks else None,
+                    )
+                    if checks
+                    else None,
                     "diagnostics": diagnostics,
                     "sources": per_source,
                 }
@@ -286,9 +346,10 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
             ),
             "q021_isolated_zero": bool(
                 results
-                and next(
-                    row for row in results if row["question_id"] == "q021"
-                )["eligible_anchor_count"] == 0
+                and next(row for row in results if row["question_id"] == "q021")[
+                    "eligible_anchor_count"
+                ]
+                == 0
                 and any(
                     row["eligible_anchor_count"] > 0
                     for row in results

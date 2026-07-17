@@ -208,6 +208,38 @@ def _source() -> SourceChunk:
     )
 
 
+def _summary_source() -> SourceChunk:
+    return _source().model_copy(
+        update={
+            "chunk_id": "parent:test_summary",
+            "parent_id": "parent:test",
+            "text": "A selected parent summary remains the retrieval evidence seat.",
+            "summary": "A selected parent summary remains the retrieval evidence seat.",
+            "source_tier": "tier_a_summary",
+        }
+    )
+
+
+def _parent_mapping(
+    *,
+    corpus_id: str = "corpus:test",
+    doc_id: str = "doc:test",
+    parent_id: str = "parent:test",
+    child_ids: list[str] | None = None,
+    source_child_ids: list[str] | None = None,
+) -> dict:
+    mapped = list(child_ids if child_ids is not None else ["child:test"])
+    return {
+        "corpus_id": corpus_id,
+        "doc_id": doc_id,
+        "parent_id": parent_id,
+        "child_ids": mapped,
+        "source_child_ids": list(
+            source_child_ids if source_child_ids is not None else mapped
+        ),
+    }
+
+
 @pytest.mark.asyncio
 async def test_claim_anchor_uses_one_bounded_aggregate_and_preserves_sources():
     db = _DB([_row()])
@@ -230,6 +262,138 @@ async def test_claim_anchor_uses_one_bounded_aggregate_and_preserves_sources():
     assert anchor["exact_sentence"] == "Feedback changes the operating baseline."
     assert anchor["start"] == 0 and anchor["end"] == 40
     assert anchor["knowledge_status"] == "candidate_exact_sentence_anchor"
+
+
+@pytest.mark.asyncio
+async def test_sentence_keyed_claim_maps_to_selected_parent_summary_additively():
+    row = _row()
+    row["_selected_parent_mappings"] = [_parent_mapping()]
+    db = _DB([row])
+    source = _summary_source()
+
+    enriched, diagnostics = await attach_atomic_claim_anchors(
+        db,
+        [source],
+        query="How does feedback change the baseline?",
+        per_source=2,
+        total=8,
+    )
+
+    assert [item.chunk_id for item in enriched] == [source.chunk_id]
+    assert enriched[0].text == source.text
+    assert enriched[0].summary == source.summary
+    assert enriched[0].score == source.score
+    assert source.metadata == {}
+    assert diagnostics["mapped_summary_source_count"] == 1
+    assert diagnostics["mapped_rows_valid"] == 1
+    assert diagnostics["anchors_attached"] == 1
+    anchor = enriched[0].metadata["atomic_claim_anchors"][0]
+    assert anchor["selected_chunk_id"] == "parent:test_summary"
+    assert anchor["mapped_parent_id"] == "parent:test"
+    assert anchor["child_id"] == "child:test"
+    assert anchor["exact_sentence"] == "Feedback changes the operating baseline."
+
+
+@pytest.mark.asyncio
+async def test_unmapped_parent_summary_cannot_receive_child_claim():
+    row = _row()
+    row["_selected_parent_mappings"] = []
+
+    unchanged, diagnostics = await attach_atomic_claim_anchors(
+        _DB([row]),
+        [_summary_source()],
+        query="feedback baseline",
+        per_source=2,
+        total=8,
+    )
+
+    assert unchanged == [_summary_source()]
+    assert diagnostics["anchors_attached"] == 0
+    assert diagnostics["rows_rejected"] == 1
+
+
+@pytest.mark.asyncio
+async def test_foreign_corpus_parent_mapping_fails_closed():
+    row = _row()
+    row["_selected_parent_mappings"] = [_parent_mapping(corpus_id="corpus:foreign")]
+
+    unchanged, diagnostics = await attach_atomic_claim_anchors(
+        _DB([row]),
+        [_summary_source()],
+        query="feedback baseline",
+        per_source=2,
+        total=8,
+    )
+
+    assert unchanged == [_summary_source()]
+    assert diagnostics["anchors_attached"] == 0
+    assert diagnostics["rows_rejected"] == 1
+
+
+@pytest.mark.asyncio
+async def test_foreign_child_outside_parent_mapping_fails_closed():
+    row = _row()
+    row["_selected_parent_mappings"] = [
+        _parent_mapping(
+            child_ids=["child:foreign"],
+            source_child_ids=["child:foreign"],
+        )
+    ]
+
+    unchanged, diagnostics = await attach_atomic_claim_anchors(
+        _DB([row]),
+        [_summary_source()],
+        query="feedback baseline",
+        per_source=2,
+        total=8,
+    )
+
+    assert unchanged == [_summary_source()]
+    assert diagnostics["anchors_attached"] == 0
+    assert diagnostics["rows_rejected"] == 1
+
+
+@pytest.mark.asyncio
+async def test_duplicate_parent_mapping_fails_closed():
+    row = _row()
+    mapping = _parent_mapping()
+    row["_selected_parent_mappings"] = [mapping, dict(mapping)]
+
+    unchanged, diagnostics = await attach_atomic_claim_anchors(
+        _DB([row]),
+        [_summary_source()],
+        query="feedback baseline",
+        per_source=2,
+        total=8,
+    )
+
+    assert unchanged == [_summary_source()]
+    assert diagnostics["anchors_attached"] == 0
+    assert diagnostics["ambiguous_mappings"] == 1
+    assert diagnostics["rows_rejected"] == 1
+
+
+@pytest.mark.asyncio
+async def test_duplicate_child_identity_inside_mapping_fails_closed():
+    row = _row()
+    row["_selected_parent_mappings"] = [
+        _parent_mapping(
+            child_ids=["child:test", "child:test"],
+            source_child_ids=["child:test", "child:test"],
+        )
+    ]
+
+    unchanged, diagnostics = await attach_atomic_claim_anchors(
+        _DB([row]),
+        [_summary_source()],
+        query="feedback baseline",
+        per_source=2,
+        total=8,
+    )
+
+    assert unchanged == [_summary_source()]
+    assert diagnostics["anchors_attached"] == 0
+    assert diagnostics["rows_rejected"] == 1
 
 
 @pytest.mark.asyncio
@@ -465,6 +629,43 @@ def test_flag_off_ignores_injected_anchor_metadata_byte_identically(monkeypatch)
     assert chat_orchestrator_module._compact_source_previews(
         [injected]
     ) == chat_orchestrator_module._compact_source_previews([clean])
+
+
+def test_compact_source_preview_retains_mapped_sentence_citation_identity(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        chat_orchestrator_module,
+        "settings",
+        SimpleNamespace(
+            ATOMIC_CLAIM_ANCHORS_ENABLED=True,
+            ATOMIC_CLAIM_ANCHORS_PER_SOURCE=2,
+        ),
+    )
+    source = _summary_source().model_copy(
+        update={
+            "metadata": {
+                "atomic_claim_anchors": [
+                    {
+                        "claim_text": "feedback changes operating baseline",
+                        "exact_sentence": "Feedback changes the operating baseline.",
+                        "child_id": "child:test",
+                        "selected_chunk_id": "parent:test_summary",
+                        "mapped_parent_id": "parent:test",
+                        "start": 0,
+                        "end": 40,
+                    }
+                ]
+            }
+        }
+    )
+
+    preview = chat_orchestrator_module._compact_source_previews([source])
+    anchor = preview[0]["metadata"]["atomic_claim_anchors"][0]
+
+    assert anchor["child_id"] == "child:test"
+    assert anchor["selected_chunk_id"] == "parent:test_summary"
+    assert anchor["mapped_parent_id"] == "parent:test"
 
 
 def test_prompt_rendering_obeys_runtime_anchor_caps(monkeypatch):

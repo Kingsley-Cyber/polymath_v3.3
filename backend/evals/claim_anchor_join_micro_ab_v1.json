@@ -1,0 +1,26 @@
+{
+  "schema_version": "claim_anchor_join_micro_ab.v1",
+  "heldout_questions_sha256": "7c000ca43911684c0991c7bc63455e4595f1ffe3d25a2d82aa551cf5d555a42b",
+  "tier": "qdrant_mongo_graph",
+  "corpus_name": "markbuildsbrands_transcripts",
+  "model_contract": "anthropic/minimax-m2.7",
+  "query_ids": [
+    "q021",
+    "q022",
+    "q023",
+    "q024",
+    "q025",
+    "q029"
+  ],
+  "selection_rule": "The known q021 join failure plus the first frozen Mark query for each remaining distinct shape: procedural, naive, list, single_fact, and followup.",
+  "required_positive_anchor_ids_when_on": [
+    "q021"
+  ],
+  "invariants": [
+    "Frozen questions, prompts, scoring, expected documents, and overlap guard remain unchanged.",
+    "OFF and ON use the same tier, model contract, query order, and corpus.",
+    "Selected source identities are byte-equivalent between arms.",
+    "Every emitted anchor has exact sentence, claim, source-version, and selected-source ownership closure.",
+    "No corpus-bearing Mongo collection changes during either arm."
+  ]
+}

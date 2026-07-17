@@ -2635,8 +2635,7 @@ def _build_budgeted_augmented_prompt(
         if start < 0 or end < 0:
             return 0
         return sum(
-            line.startswith('- From "')
-            for line in prompt[start:end].splitlines()
+            line.startswith('- From "') for line in prompt[start:end].splitlines()
         )
 
     def _build(
@@ -5570,6 +5569,8 @@ def _compact_source_previews(sources: list[Any] | None) -> list[dict[str, Any]] 
                                 "evidence_ref_id": anchor.get("evidence_ref_id"),
                                 "source_version_id": anchor.get("source_version_id"),
                                 "child_id": anchor.get("child_id"),
+                                "selected_chunk_id": anchor.get("selected_chunk_id"),
+                                "mapped_parent_id": anchor.get("mapped_parent_id"),
                                 "start": anchor.get("start"),
                                 "end": anchor.get("end"),
                                 "compilation_revision_id": anchor.get(
