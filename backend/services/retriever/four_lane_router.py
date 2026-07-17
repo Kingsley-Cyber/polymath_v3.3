@@ -24,16 +24,24 @@ from typing import Any, Iterable
 
 from qdrant_client import models
 
+from models.document_semantic_profile import (
+    PROFILE_COLLECTION,
+    T91DocumentProfileV1,
+)
 from models.schemas import SourceChunk
 from models.semantic_digest import SemanticDigestV1
 from models.semantic_resolution import DomainSignalV1
 from services.ingestion.corpus_lexicon import normalize_identity
+from services.ingestion.document_semantic_profile import (
+    current_profile_recipe_hash,
+)
 from services.ingestion.semantic_resolution import (
     build_domain_affinity_serve_view,
     resolve_domains,
 )
 from services.ingestion.tier0 import SHARED_DOCSUM
 from services.retriever.tier0_router import DocumentRoute
+from services.retriever.query_semantics import CONCEPT_STOP_WORDS, query_tokens
 from services.storage.record_status import with_active_records
 
 ROUTER_VERSION = "four_lane_tier0_router.v1"
@@ -68,8 +76,11 @@ class DocumentProfile:
     frames: set[str] = field(default_factory=set)
     motif_frames: set[str] = field(default_factory=set)
     motifs: set[str] = field(default_factory=set)
+    concept_terms: set[str] = field(default_factory=set)
     latent_terms: set[str] = field(default_factory=set)
     digest_parent_ids: set[str] = field(default_factory=set)
+    t91_profile_ids: set[str] = field(default_factory=set)
+    t91_profile_hashes: set[str] = field(default_factory=set)
 
     @property
     def lexical_text(self) -> str:
@@ -82,6 +93,7 @@ class DocumentProfile:
             or self.frames
             or self.motif_frames
             or self.motifs
+            or self.concept_terms
             or self.latent_terms
         )
 
@@ -210,11 +222,12 @@ def resolve_query_ontology(
         if value
     ]
     surfaces = {normalize_identity(query), *_normalized_terms(vocabulary_terms)}
-    query_tokens = _tokens(query)
-    for size in range(1, min(5, len(query_tokens)) + 1):
+    raw_query_tokens = _tokens(query)
+    filtered_query_tokens = query_tokens(query, stop_words=CONCEPT_STOP_WORDS)
+    for size in range(1, min(5, len(raw_query_tokens)) + 1):
         surfaces.update(
-            " ".join(query_tokens[index : index + size])
-            for index in range(len(query_tokens) - size + 1)
+            " ".join(raw_query_tokens[index : index + size])
+            for index in range(len(raw_query_tokens) - size + 1)
         )
 
     registry = load_all()["domain"]
@@ -251,7 +264,7 @@ def resolve_query_ontology(
             _normalized_terms(
                 [
                     *vocabulary_terms,
-                    *query_tokens,
+                    *filtered_query_tokens,
                 ]
             )
         ),
@@ -272,27 +285,32 @@ def associative_document_scores(
             continue
         domain_hits = sorted(query.domains & profile.domains)
         frame_hits = sorted(query.frames & (profile.frames | profile.motif_frames))
-        latent_hits = sorted(
-            query.terms
-            & {
-                token
-                for value in profile.latent_terms
-                for token in (
-                    value,
-                    *_tokens(value),
-                )
-            }
-        )
+        latent_vocabulary = {
+            token
+            for value in profile.latent_terms
+            for token in (value, *_tokens(value))
+        }
+        concept_vocabulary = {
+            token
+            for value in profile.concept_terms
+            for token in (value, *_tokens(value))
+        }
+        latent_hits = sorted(query.terms & latent_vocabulary)
+        concept_hits = sorted(query.terms & concept_vocabulary)
         domain_score = len(domain_hits) / max(1, len(query.domains))
         frame_score = len(frame_hits) / max(1, len(query.frames))
-        latent_score = min(1.0, len(latent_hits) / 2.0)
-        score = 0.40 * domain_score + 0.35 * frame_score + 0.25 * latent_score
+        term_score = min(1.0, len(set(latent_hits) | set(concept_hits)) / 2.0)
+        score = 0.40 * domain_score + 0.35 * frame_score + 0.25 * term_score
         key = (profile.corpus_id, profile.doc_id)
         traces[key] = {
             "domains": domain_hits,
             "frames": frame_hits,
             "latent_terms": latent_hits,
+            "concept_terms": concept_hits,
+            "motifs": sorted(profile.motifs),
             "digest_parent_ids": sorted(profile.digest_parent_ids),
+            "t91_profile_ids": sorted(profile.t91_profile_ids),
+            "t91_profile_hashes": sorted(profile.t91_profile_hashes),
             "ontology_present": True,
             "score": round(score, 6),
         }
@@ -503,6 +521,47 @@ def _source_versions_by_document(
     return source_versions
 
 
+def apply_t91_document_profiles(
+    *,
+    profiles: dict[tuple[str, str], DocumentProfile],
+    rows: Iterable[dict[str, Any]],
+    current_source_versions: dict[tuple[str, str], str],
+    expected_profile_recipe_hash: str,
+) -> dict[str, int]:
+    """Attach only valid, current T9.1 rows to associative profile fields."""
+
+    diagnostics = {"seen": 0, "valid": 0, "current": 0, "applied": 0}
+    for row in rows:
+        diagnostics["seen"] += 1
+        try:
+            t91_profile = T91DocumentProfileV1.model_validate(row)
+        except Exception:
+            continue
+        diagnostics["valid"] += 1
+        key = (t91_profile.corpus_id, t91_profile.doc_id)
+        profile = profiles.get(key)
+        if (
+            profile is None
+            or t91_profile.source_version_id != current_source_versions.get(key)
+            or t91_profile.profile_recipe_hash != expected_profile_recipe_hash
+        ):
+            continue
+        diagnostics["current"] += 1
+        profile.domains.update(t91_profile.domain_ids)
+        profile.frames.update(t91_profile.superframe_ids)
+        profile.motifs.update(t91_profile.motif_ids)
+        profile.motif_frames.update(
+            frame_id
+            for motif in t91_profile.motif_evidence
+            for frame_id in motif.frame_ids
+        )
+        profile.concept_terms.update(t91_profile.concept_terms)
+        profile.t91_profile_ids.add(t91_profile.profile_id)
+        profile.t91_profile_hashes.add(t91_profile.profile_hash)
+        diagnostics["applied"] += 1
+    return diagnostics
+
+
 class FourLaneDocumentRouter:
     async def _load_profiles(
         self,
@@ -512,7 +571,7 @@ class FourLaneDocumentRouter:
     ) -> dict[tuple[str, str], DocumentProfile]:
         if db is None or not corpus_ids:
             return {}
-        documents, parent_profiles, jobs = await _gather(
+        documents, parent_profiles, jobs, t91_profile_rows = await _gather(
             db["documents"]
             .find(
                 with_active_records({"corpus_id": {"$in": corpus_ids}}),
@@ -568,6 +627,17 @@ class FourLaneDocumentRouter:
                 },
             )
             .to_list(length=None),
+            db[PROFILE_COLLECTION]
+            .find(
+                {
+                    "schema_version": "t91_document_profile.v1",
+                    "corpus_id": {"$in": corpus_ids},
+                    "assignment_state": "candidate",
+                    "canonical_write": False,
+                },
+                {"_id": 0},
+            )
+            .to_list(length=None),
         )
         profiles: dict[tuple[str, str], DocumentProfile] = {}
         for row in documents:
@@ -616,6 +686,14 @@ class FourLaneDocumentRouter:
             if not profile.summary and summaries.get(key):
                 profile.summary = " ".join(summaries[key][:8])
 
+        current_source_versions = _source_versions_by_document(documents)
+        apply_t91_document_profiles(
+            profiles=profiles,
+            rows=t91_profile_rows,
+            current_source_versions=current_source_versions,
+            expected_profile_recipe_hash=current_profile_recipe_hash(),
+        )
+
         cache_keys = sorted(
             {str(row.get("cache_key") or "") for row in jobs if row.get("cache_key")}
         )
@@ -660,7 +738,6 @@ class FourLaneDocumentRouter:
             else []
         )
         cache_by_key = {str(row["_id"]): row for row in caches}
-        current_source_versions = _source_versions_by_document(documents)
         for job in jobs:
             key = (str(job.get("corpus_id") or ""), str(job.get("doc_id") or ""))
             profile = profiles.get(key)

@@ -391,8 +391,8 @@ def main() -> int:
     )
     require(
         bool(settings.FOUR_LANE_TIER0_SUBQUERY_DECOMPOSITION_ENABLED)
-        is expect_router_enabled,
-        "runtime decomposition flag does not match requested arm",
+        is False,
+        "bridge diagnostic requires decomposition OFF in both arms",
     )
     mongo = MongoClient(settings.MONGODB_URI)
     database = mongo[settings.MONGODB_DATABASE]
