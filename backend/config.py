@@ -508,6 +508,21 @@ class Settings(BaseSettings):
             "This adds no provider call and supports production comparison."
         ),
     )
+    LIBRARIAN_PLANNER_ENABLED: bool = Field(
+        default=False,
+        description=(
+            "Activate QueryPlanV1 downstream retrieval behavior. L1/L2 ship "
+            "the typed plan and Tier-0 grounding only; allocation/execution "
+            "remain dark until later phases."
+        ),
+    )
+    LIBRARIAN_PLANNER_SHADOW: bool = Field(
+        default=False,
+        description=(
+            "Build and trace deterministic QueryPlanV1 using document-summary "
+            "routing without changing retrieval selection or scoring."
+        ),
+    )
     QUERY_PLAN_QUALITY_FIRST: bool = Field(
         default=True,
         description=(
