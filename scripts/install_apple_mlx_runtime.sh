@@ -46,6 +46,15 @@ EMBED_BATCH_SIZE="${EMBED_BATCH_SIZE:-32}"
 START_EMBEDDER="${START_EMBEDDER:-true}"
 START_RERANKER="${START_RERANKER:-true}"
 START_DOCLING="${START_DOCLING:-false}"
+ARBITER_ENABLED="${ARBITER_ENABLED:-false}"
+ARBITER_HOST="${ARBITER_HOST:-127.0.0.1}"
+ARBITER_PORT="${ARBITER_PORT:-8085}"
+ARBITER_ACQUIRE_TIMEOUT_SECONDS="${ARBITER_ACQUIRE_TIMEOUT_SECONDS:-30}"
+ARBITER_EMBED_HOLD_TARGET_MS="${ARBITER_EMBED_HOLD_TARGET_MS:-2000}"
+ARBITER_RERANK_HOLD_TARGET_MS="${ARBITER_RERANK_HOLD_TARGET_MS:-500}"
+ARBITER_MAX_EMBED_BURST="${ARBITER_MAX_EMBED_BURST:-1}"
+ARBITER_RERANK_STARVATION_SECONDS="${ARBITER_RERANK_STARVATION_SECONDS:-0.5}"
+ARBITER_STALE_LEASE_SECONDS="${ARBITER_STALE_LEASE_SECONDS:-75}"
 
 should_start() {
   case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
@@ -60,6 +69,7 @@ echo "[apple-mlx] launch agent : ${LAUNCH_AGENT_PATH}"
 echo "[apple-mlx] embed batch  : ${EMBED_BATCH_SIZE}"
 echo "[apple-mlx] sidecars     : embedder=${START_EMBEDDER} reranker=${START_RERANKER} docling=${START_DOCLING}"
 echo "[apple-mlx] reranker     : backend=${APPLE_RERANKER_BACKEND} model=${APPLE_TORCH_RERANKER_MODEL_ID}"
+echo "[apple-mlx] gpu arbiter   : enabled=${ARBITER_ENABLED} ${ARBITER_HOST}:${ARBITER_PORT}"
 
 mkdir -p "${SERVICES_DIR}" "${LOG_DIR}" "${RUNTIME_ROOT}/models" "${RUNTIME_ROOT}/volumes/hf-cache"
 
@@ -72,6 +82,8 @@ EXCLUDES=(
 SIDECAR_RELS=(
   'embedder_mlx/main.py'
   'reranker_mlx/main.py'
+  'gpu_arbiter/client.py'
+  'gpu_arbiter/main.py'
   'docling_svc/main.py'
 )
 if [[ "${POLYMATH_APPLE_MLX_PRESERVE_HOST:-0}" == "1" ]]; then
@@ -140,65 +152,43 @@ HF_HUB_CACHE="${RUNTIME_ROOT}/volumes/hf-cache/hub" \
 # ── 5. LaunchAgent ───────────────────────────────────────────────────
 mkdir -p "${HOME}/Library/LaunchAgents"
 
-# Stop any prior instance before rewriting the plist.
-launchctl bootout "gui/$(id -u)/${LAUNCH_AGENT_NAME}" 2>/dev/null || true
+expected_plist="$(mktemp "${TMPDIR:-/tmp}/polymath-apple-ml-plist.XXXXXX")"
+trap 'rm -f "${expected_plist}"' EXIT
+"${SERVICES_DIR}/.venv/bin/python" "${REPO_ROOT}/scripts/render_apple_mlx_launch_agent.py" \
+  --output "${expected_plist}" \
+  --label "${LAUNCH_AGENT_NAME}" \
+  --runtime-root "${RUNTIME_ROOT}" \
+  --services-dir "${SERVICES_DIR}" \
+  --log-dir "${LOG_DIR}" \
+  --embed-model "${APPLE_MLX_EMBED_MODEL_ID}" \
+  --reranker-model "${APPLE_MLX_RERANKER_MODEL_ID}" \
+  --reranker-backend "${APPLE_RERANKER_BACKEND}" \
+  --torch-reranker-model "${APPLE_TORCH_RERANKER_MODEL_ID}" \
+  --embed-batch-size "${EMBED_BATCH_SIZE}" \
+  --start-embedder "${START_EMBEDDER}" \
+  --start-reranker "${START_RERANKER}" \
+  --start-docling "${START_DOCLING}" \
+  --reranker-score-scale "${RERANKER_SCORE_SCALE}" \
+  --arbiter-enabled "${ARBITER_ENABLED}" \
+  --arbiter-host "${ARBITER_HOST}" \
+  --arbiter-port "${ARBITER_PORT}" \
+  --arbiter-acquire-timeout-seconds "${ARBITER_ACQUIRE_TIMEOUT_SECONDS}" \
+  --arbiter-embed-hold-target-ms "${ARBITER_EMBED_HOLD_TARGET_MS}" \
+  --arbiter-rerank-hold-target-ms "${ARBITER_RERANK_HOLD_TARGET_MS}" \
+  --arbiter-max-embed-burst "${ARBITER_MAX_EMBED_BURST}" \
+  --arbiter-rerank-starvation-seconds "${ARBITER_RERANK_STARVATION_SECONDS}" \
+  --arbiter-stale-lease-seconds "${ARBITER_STALE_LEASE_SECONDS}"
+plutil -lint "${expected_plist}" >/dev/null
 
-cat > "${LAUNCH_AGENT_PATH}" <<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>${LAUNCH_AGENT_NAME}</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>/bin/bash</string>
-        <string>${SERVICES_DIR}/start.sh</string>
-    </array>
-    <key>WorkingDirectory</key>
-    <string>${SERVICES_DIR}</string>
-    <key>EnvironmentVariables</key>
-    <dict>
-        <key>HF_HOME</key>
-        <string>${RUNTIME_ROOT}/volumes/hf-cache</string>
-        <key>HF_HUB_CACHE</key>
-        <string>${RUNTIME_ROOT}/volumes/hf-cache/hub</string>
-        <key>POLYMATH_DOCKER_DATA_ROOT</key>
-        <string>${RUNTIME_ROOT}</string>
-        <key>APPLE_MLX_EMBED_MODEL_ID</key>
-        <string>${APPLE_MLX_EMBED_MODEL_ID}</string>
-        <key>APPLE_MLX_RERANKER_MODEL_ID</key>
-        <string>${APPLE_MLX_RERANKER_MODEL_ID}</string>
-        <key>APPLE_RERANKER_BACKEND</key>
-        <string>${APPLE_RERANKER_BACKEND}</string>
-        <key>APPLE_TORCH_RERANKER_MODEL_ID</key>
-        <string>${APPLE_TORCH_RERANKER_MODEL_ID}</string>
-        <key>EMBED_BATCH_SIZE</key>
-        <string>${EMBED_BATCH_SIZE}</string>
-        <key>START_EMBEDDER</key>
-        <string>${START_EMBEDDER}</string>
-        <key>START_RERANKER</key>
-        <string>${START_RERANKER}</string>
-        <key>START_DOCLING</key>
-        <string>${START_DOCLING}</string>
-        <key>RERANKER_SCORE_SCALE</key>
-        <string>${RERANKER_SCORE_SCALE}</string>
-        <key>RERANKER_WARM_ON_STARTUP</key>
-        <string>true</string>
-        <key>RERANKER_WARMUP_CANDIDATE_SHAPES</key>
-        <string>16,24</string>
-    </dict>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <true/>
-    <key>StandardOutPath</key>
-    <string>${LOG_DIR}/apple_ml_services.log</string>
-    <key>StandardErrorPath</key>
-    <string>${LOG_DIR}/apple_ml_services.err.log</string>
-</dict>
-</plist>
-PLIST
+# Deploy law: source is staged by this installer, then the LaunchAgent is
+# replaced and kickstarted. Never edit the runtime copy or plist in place.
+launchctl bootout "gui/$(id -u)/${LAUNCH_AGENT_NAME}" 2>/dev/null || true
+install -m 0644 "${expected_plist}" "${LAUNCH_AGENT_PATH}"
+if ! cmp -s "${expected_plist}" "${LAUNCH_AGENT_PATH}"; then
+  echo "ERROR: LaunchAgent plist drift immediately after install" >&2
+  exit 1
+fi
+echo "[apple-mlx] plist drift check: clean"
 
 bootstrap_ok=false
 for attempt in 1 2 3 4 5; do

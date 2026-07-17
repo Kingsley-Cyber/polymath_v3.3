@@ -26,11 +26,21 @@ import logging
 import os
 import time
 import heapq
+from pathlib import Path
+import sys
 from typing import Any
 
 import asyncio
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
+
+try:
+    from gpu_arbiter.client import ALERT_NAME as ARBITER_ALERT_NAME
+    from gpu_arbiter.client import GpuArbiterClient
+except ImportError:  # supports direct importlib loading in canonical tests
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from gpu_arbiter.client import ALERT_NAME as ARBITER_ALERT_NAME
+    from gpu_arbiter.client import GpuArbiterClient
 
 logger = logging.getLogger("embedder_mlx")
 logging.basicConfig(level=logging.INFO)
@@ -43,7 +53,9 @@ MODEL_NAME = os.environ.get("EMBEDDER_MODEL_NAME", "Qwen3-Embedding-0.6B")
 EMBED_DIM = 1024
 MAX_LENGTH = int(os.environ.get("EMBED_MAX_LENGTH", "512"))
 BATCH_SIZE = int(os.environ.get("EMBED_BATCH_SIZE", "32"))
-REQUEST_TIMEOUT_SECONDS = float(os.environ.get("EMBEDDER_REQUEST_TIMEOUT_SECONDS", "60"))
+REQUEST_TIMEOUT_SECONDS = float(
+    os.environ.get("EMBEDDER_REQUEST_TIMEOUT_SECONDS", "60")
+)
 QUEUE_TIMEOUT_SECONDS = float(os.environ.get("EMBEDDER_QUEUE_TIMEOUT_SECONDS", "30"))
 WARMUP_TIMEOUT_SECONDS = float(os.environ.get("EMBEDDER_WARMUP_TIMEOUT_SECONDS", "30"))
 # P1.8: fixed neutral warmup batch — never derived from (or logged as) request
@@ -67,7 +79,9 @@ class EmbeddingsResponse(BaseModel):
     object: str = "list"
     data: list[EmbeddingItem]
     model: str = MODEL_ID
-    usage: dict[str, int] = Field(default_factory=lambda: {"prompt_tokens": 0, "total_tokens": 0})
+    usage: dict[str, int] = Field(
+        default_factory=lambda: {"prompt_tokens": 0, "total_tokens": 0}
+    )
 
 
 app = FastAPI(title="Polymath Apple MLX Embedder", version="0.2.0")
@@ -100,7 +114,9 @@ class PriorityRequestGate:
             await asyncio.wait_for(future, timeout=timeout)
         except BaseException:
             async with self._condition:
-                self._waiting = [item for item in self._waiting if item[2] is not future]
+                self._waiting = [
+                    item for item in self._waiting if item[2] is not future
+                ]
                 heapq.heapify(self._waiting)
                 self._dispatch_locked()
             raise
@@ -127,6 +143,7 @@ class PriorityRequestGate:
 
 
 _request_gate = PriorityRequestGate()
+_gpu_arbiter = GpuArbiterClient("embed", logger=logger)
 _active_request_started_at: float | None = None
 _last_request_seconds: float | None = None
 _last_error: str | None = None
@@ -152,7 +169,7 @@ def _apply_mlx_memory_guardrails() -> None:
     try:
         import mlx.core as mx
 
-        gb = 1024 ** 3
+        gb = 1024**3
         limit = float(os.environ.get("MLX_CACHE_LIMIT_GB", "1.0") or 1.0)
         mx.set_cache_limit(int(limit * gb))
         print(
@@ -258,7 +275,9 @@ def _encode_batch(inputs: list[str]) -> Any:
             output = _generate(_model, _tokenizer, inputs)
             return _normalise_rows(_extract_embeddings(output))
         except Exception as exc:
-            logger.warning("mlx-embeddings.generate failed; falling back to direct call: %s", exc)
+            logger.warning(
+                "mlx-embeddings.generate failed; falling back to direct call: %s", exc
+            )
 
     try:
         toks = _tokenizer(
@@ -269,7 +288,9 @@ def _encode_batch(inputs: list[str]) -> Any:
             return_tensors="np",
         )
         try:
-            result = _model(toks["input_ids"], attention_mask=toks.get("attention_mask"))
+            result = _model(
+                toks["input_ids"], attention_mask=toks.get("attention_mask")
+            )
         except TypeError:
             result = _model(toks["input_ids"])
         return _normalise_rows(_extract_embeddings(result))
@@ -277,12 +298,18 @@ def _encode_batch(inputs: list[str]) -> Any:
         raise RuntimeError(f"embedding failed: {exc}") from exc
 
 
+def _encode_batch_scheduled(inputs: list[str]) -> Any:
+    """Run the unchanged embedding computation inside one high-priority lease."""
+    with _gpu_arbiter.lease():
+        return _encode_batch(inputs)
+
+
 def _encode_texts(inputs: list[str]) -> Any:
     import numpy as np
 
     batches = []
     for start in range(0, len(inputs), max(1, BATCH_SIZE)):
-        batches.append(_encode_batch(inputs[start : start + BATCH_SIZE]))
+        batches.append(_encode_batch_scheduled(inputs[start : start + BATCH_SIZE]))
     embeddings_np = np.vstack(batches)
     if embeddings_np.shape[1] != EMBED_DIM:
         raise RuntimeError(
@@ -309,7 +336,7 @@ async def _run_startup_warmup() -> None:
         acquired = True
         remaining = max(0.1, WARMUP_TIMEOUT_SECONDS - (time.monotonic() - started))
         vectors = await asyncio.wait_for(
-            asyncio.to_thread(_encode_batch, list(WARMUP_TEXTS)),
+            asyncio.to_thread(_encode_batch_scheduled, list(WARMUP_TEXTS)),
             timeout=remaining,
         )
         dim = int(vectors.shape[1])
@@ -341,7 +368,9 @@ async def _startup() -> None:
     global _warmup_task
     try:
         _load_model()
-    except Exception as exc:  # pragma: no cover — surface to logs, allow /health to still answer
+    except (
+        Exception
+    ) as exc:  # pragma: no cover — surface to logs, allow /health to still answer
         logger.exception("startup model load failed: %s", exc)
     # P1.8: schedule (never block startup on) the real-inference warmup. If the
     # model failed to load, the warmup records that failure and
@@ -393,6 +422,11 @@ async def health() -> dict:
         ),
         "last_error": _last_error,
         "queue_depth": _request_gate.queue_depth,
+        "gpu_arbiter": {
+            "enabled": _gpu_arbiter.enabled,
+            "fail_open_alert": ARBITER_ALERT_NAME,
+            "workload_class": "embed",
+        },
         # P1.8 tri-state readiness (additive keys): liveness = the process is
         # answering, model_loaded = weights are resident, inference_ready =
         # the bounded real-inference warmup succeeded through the serving path.
@@ -438,7 +472,7 @@ async def embeddings(req: EmbeddingsRequest) -> EmbeddingsResponse:
                 microbatches.append(
                     await asyncio.wait_for(
                         asyncio.to_thread(
-                            _encode_batch,
+                            _encode_batch_scheduled,
                             inputs[batch_start : batch_start + BATCH_SIZE],
                         ),
                         timeout=REQUEST_TIMEOUT_SECONDS,
@@ -458,7 +492,9 @@ async def embeddings(req: EmbeddingsRequest) -> EmbeddingsResponse:
             )
         _last_error = None
     except TimeoutError:
-        _last_error = f"embedding request timed out after {REQUEST_TIMEOUT_SECONDS:.1f}s"
+        _last_error = (
+            f"embedding request timed out after {REQUEST_TIMEOUT_SECONDS:.1f}s"
+        )
         logger.error("%s; exiting so launchd restarts the MLX sidecar", _last_error)
         os._exit(124)
     except HTTPException:

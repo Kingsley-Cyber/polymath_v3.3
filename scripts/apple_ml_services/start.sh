@@ -11,6 +11,9 @@
 #   START_EMBEDDER                    default true
 #   START_RERANKER                    default false
 #   START_DOCLING                     default false
+#   ARBITER_ENABLED                   default false (single-switch rollback)
+#   ARBITER_HOST / ARBITER_PORT       default 127.0.0.1 / 8085
+#   ARBITER_RERANK_HOLD_TARGET_MS     default 500
 #   EMBED_BATCH_SIZE                  default 32  (M-series Studio friendly; lower if memory pressure appears)
 #   EMBED_MAX_LENGTH                  default 512
 #   RERANKER_BATCH_SIZE               default 16
@@ -39,6 +42,15 @@ export RERANKER_HOST="${RERANKER_HOST:-0.0.0.0}"
 export RERANKER_PORT="${RERANKER_PORT:-8081}"
 export DOCLING_HOST="${DOCLING_HOST:-0.0.0.0}"
 export DOCLING_PORT="${DOCLING_PORT:-8500}"
+export ARBITER_HOST="${ARBITER_HOST:-127.0.0.1}"
+export ARBITER_PORT="${ARBITER_PORT:-8085}"
+export ARBITER_ENABLED="${ARBITER_ENABLED:-false}"
+export ARBITER_ACQUIRE_TIMEOUT_SECONDS="${ARBITER_ACQUIRE_TIMEOUT_SECONDS:-30}"
+export ARBITER_EMBED_HOLD_TARGET_MS="${ARBITER_EMBED_HOLD_TARGET_MS:-2000}"
+export ARBITER_RERANK_HOLD_TARGET_MS="${ARBITER_RERANK_HOLD_TARGET_MS:-500}"
+export ARBITER_MAX_EMBED_BURST="${ARBITER_MAX_EMBED_BURST:-1}"
+export ARBITER_RERANK_STARVATION_SECONDS="${ARBITER_RERANK_STARVATION_SECONDS:-0.5}"
+export ARBITER_STALE_LEASE_SECONDS="${ARBITER_STALE_LEASE_SECONDS:-75}"
 export START_EMBEDDER="${START_EMBEDDER:-true}"
 export START_RERANKER="${START_RERANKER:-false}"
 export START_DOCLING="${START_DOCLING:-false}"
@@ -168,6 +180,12 @@ skip_service() {
 }
 
 cd "${PROJECT_ROOT}"
+
+if should_start "${ARBITER_ENABLED}"; then
+  start_service "gpu-arbiter" "gpu_arbiter.main" ARBITER_HOST ARBITER_PORT
+else
+  skip_service "gpu-arbiter"
+fi
 
 if should_start "${START_EMBEDDER}"; then
   start_service "embedder" "embedder_mlx.main" EMBEDDER_HOST EMBEDDER_PORT
