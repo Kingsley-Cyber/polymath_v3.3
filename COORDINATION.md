@@ -11778,3 +11778,23 @@ minimum-distinct 0.7500 OFF → 1.0000 ON; direct 1.0000 → 1.0000; lay
 corpus-store hashes are identical before/after; only scheduler heartbeat state
 changed. Runtime overrides/services restored; live flag=False. Receipt:
 docs/RELATIONSHIP_EVIDENCE_ALLOCATION_AB_2026-07-16.md.
+
+## [2026-07-17T02:43:08Z] EXECUTOR → SENIOR :: RECEIPT
+
+Owner-directed chat answerability fix is acceptance-green on branch
+`codex/refusal-arbiter-20260716`; implementation/receipt commit `3363d5d`.
+Frozen 51-run diagnosis proved all five historical false answers had strict
+retriever `raw_answerable=false` before the legacy chat arbiter promoted
+generic 50% lexical overlap. Versioned `corpus_scope.v2` constrains that
+chat-only loosening; default remains OFF and retriever sufficiency, prompts,
+scoring, and eval specs are untouched. Canonical focused+adjacent tests were
+147 passed (`EXIT=0`); post-format key suite was 20 passed (`EXIT=0`). Live
+same-contract MiniMax A/B: historical negative 4/9, paired OFF 6/9, ON 9/9;
+direct ON=0.8889 >=0.85 and lay ON=0.9167 >=0.75. Guard applications on
+positive rows=0. Subset validators `EXIT=0`; the unmodified full finalizer's
+`EXIT=1` is solely the intentionally omitted relationship class and was not
+relabelled. Corpus stores were unchanged except scheduler heartbeat. Shared
+backend restored healthy at root `3157ec9`, both retrieval flags verified
+False, eval lock released. Receipt:
+`docs/ANSWERABILITY_CORPUS_SCOPE_V2_AB_2026-07-17.md`. Push target is review
+branch only; no shared/main push.

@@ -226,6 +226,34 @@ class Settings(BaseSettings):
             "(refuse), and the floor for the relationship carve-out."
         ),
     )
+    ANSWERABILITY_CORPUS_SCOPE_V2_ENABLED: bool = Field(
+        default=False,
+        description=(
+            "Enable the versioned chat-side corpus-scope guard. When enabled, "
+            "the arbiter may not promote retriever-insufficient evidence to an "
+            "answer solely through generic lexical overlap when the query's "
+            "distinctive terms are not represented in the retrieved packet. "
+            "Default OFF pending frozen-suite acceptance."
+        ),
+    )
+    ANSWERABILITY_CORPUS_SCOPE_V2_MIN_TERMS: int = Field(
+        default=2,
+        ge=2,
+        le=8,
+        description=(
+            "Minimum number of distinctive query terms required before the "
+            "chat-side corpus-scope v2 guard is eligible to fire."
+        ),
+    )
+    ANSWERABILITY_CORPUS_SCOPE_V2_MIN_COVERAGE: float = Field(
+        default=0.60,
+        ge=0.25,
+        le=1.0,
+        description=(
+            "Minimum distinctive-query-term coverage in the retrieved packet "
+            "when corpus-scope v2 evaluates a retriever-insufficient result."
+        ),
+    )
     ANSWERABILITY_CHUNK_GATE: Literal["off", "soft", "strict"] = Field(
         default="off",
         description=(
