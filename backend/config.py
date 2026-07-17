@@ -454,7 +454,16 @@ class Settings(BaseSettings):
         default=7.5, ge=2.0, le=30.0
     )
     QUERY_PLAN_GRAPH_TOTAL_DEADLINE_SECONDS: float = Field(default=9.5, ge=3.0, le=45.0)
-    QUERY_PLAN_EMBED_DEADLINE_SECONDS: float = Field(default=5.0, ge=0.5, le=30.0)
+    QUERY_PLAN_EMBED_DEADLINE_SECONDS: float = Field(
+        default=30.0,
+        ge=5.0,
+        le=30.0,
+        description=(
+            "Outer query-plan embedding deadline. It matches the local query "
+            "client's 30-second timeout so sustained MLX load cannot be "
+            "cancelled by the former 5-second wrapper."
+        ),
+    )
     QUERY_PLAN_VOCABULARY_DEADLINE_SECONDS: float = Field(
         default=15.0,
         ge=0.25,
