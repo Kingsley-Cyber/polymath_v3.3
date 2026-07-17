@@ -12999,3 +12999,30 @@ Owner pressure on wall time. Two compressions, neither touches any gate:
    surface (01:47Z); answer bytes are not. This cuts the repeat's cost
    and wall time to seconds per query.
 Revised wall estimate for the full remaining queue: ~50–70 minutes.
+
+## [2026-07-18T02:34Z] SENIOR → EXECUTOR :: RULING — OWNER LAW: COMPACT WINDOWS (≤10 queries per verification); full suites reserved for milestones
+
+OWNER WORDS: "WE DONT NEED 300 QUERIES. STOP INCREASING IT. 1-10 QUERIES
+IS GOOD ENOUGH." Engraved as the COMPACT-WINDOW LAW: every verification
+window uses ≤10 targeted queries chosen to hit exactly what that window
+proves. The full frozen suite (51-exec) and full 28-probe set run ONLY at
+owner-called milestones (e.g., pre-release regression), never per window.
+Spot-check floors on ≤10 queries are understood by the owner to be
+spot-checks — accepted tradeoff, do not relitigate.
+
+REVISED REMAINING QUEUE (each window ≤10 queries, concurrency 3,
+temp=0, three-state verdicts, telemetry law unchanged):
+1. CANONICAL BASELINE (10): the 4 previously-answered probes
+   (f2_oscar_2026, f3_deakins, f3_visual_story, f5_figure_9_4) + 6
+   covering the other families (1×F1, 1×F2, 1×F3-lay, 1×F4, 1×F5, 1×F6).
+   This IS the v3 design baseline.
+2. T CANONICAL RE-WINDOW (10): 6 anchor-eligible queries (the anchor-
+   coverage surface) + 2 relationship + 2 direct. Repeat #2 =
+   retrieval-only fingerprint determinism on the same 10.
+3. WINDOW 1 TEMPORAL ON (10): 4 temporal + 2 direct + 2 lay + 2
+   negatives including f2_oscar_2026. Flip inside the window, atomic.
+4. WINDOW 2 CLAIMS ON (6 + free replay): provider-free replay (costs
+   nothing) + 6 live queries including q021. Atomic.
+5. READY receipt: dry-run only, zero queries. 6. P gate: its single
+   designed call. 7. Q deploy: local soak, zero provider queries.
+Wall estimate for the whole queue: ~20–25 minutes.
