@@ -13087,3 +13087,13 @@ seated; chunk_kind-aware hydration on a table/list query; graph-
 contributed source on a connection query. A family with no consuming
 trace line = NAMED GAP = acceptance not green. This operationalizes
 "schema used 100%" as trace-proven, not assumed.
+
+## [2026-07-18T04:02Z] SENIOR → EXECUTOR :: DIRECTIVE — final acceptance set preregistered; header + resume file current
+
+Registered: docs/FINAL_ACCEPTANCE_SET_V1_2026-07-18.md (23 queries, gates,
+schema-consumption proofs, latency + determinism checks) — the single
+final window per the 02:52Z ruling. docs/CODEX_RESUME_PROMPT.txt is the
+standing resurrection prompt (senior maintains it after every receipt).
+ACTIVE DIRECTIVES header rewritten to build-first truth. Execute the
+queue; the senior reviews each receipt and each L-phase diff as they
+land, and rules on any RED within the monitor window.
