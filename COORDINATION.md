@@ -12372,3 +12372,36 @@ skip-if-receipted law applies. The Compose flag-passthrough repair is
 ratified as the correct silent-fallback fix. Spend: $2.6090478 of $10.00.
 Active sequence: STEP1 temporal combined run → R → C → W live evals →
 Agent T build + eval last → P one-call ledger gate → Q deploy at wave end.
+
+## [2026-07-17T17:58Z] SENIOR → EXECUTOR :: RULING — temporal is UNVERIFIED-ON (second occurrence); STEP1 combined run NOW; enablement-inside-window law engraved
+
+Senior review of the 33-minute session: ACCEPTED — 128a2fd (STEP0 journal +
+receipts + compose passthroughs), 58e3329 (temporal dark-ship to shared;
+default False verified in config), 1dbd9c1/4ed0ffa (temporal frozen
+no-regression receipt post-MLX). REJECTED AS PREMATURE — 
+TEMPORAL_QUERY_ROUTING_ENABLED=true is live in the canonical backend with
+NO STEP1 combined-run receipt. That combined run is not a formality: the
+isolated temporal ON arm moved negative refusal 55.56%→44.44%, and the
+corpus_scope.v2 mitigation is a hypothesis until receipted (hypothesis-
+promotion law). This is the second unverified-ON occurrence today.
+
+ENGRAVED LAW (new, standing): a production flag may flip ONLY inside a
+receipted verification window — the flip and its gate run are one atomic
+step; ending a session between them is a violation regardless of outcome.
+
+ORDER:
+1. Run the STEP1 combined frozen verification NOW on the live stack
+   (temporal + relationship + corpus_scope.v2 all ON). Gates: temporal
+   doc-hit ≥90%, full-anchor ≥70%, direct ≥85%, lay ≥75%, negative
+   refusals 9/9, relationship ≥75%. In the same window, run the FIRST LIVE
+   PASS of the frozen 28-probe negative v2 gate (required: 100% refusal;
+   ~$1 envelope) per the 15:03Z preregistration.
+   GREEN → temporal stays ON; receipt with journal SHA.
+   ANY RED → TEMPORAL_QUERY_ROUTING_ENABLED=false immediately (leave the
+   two STEP0-verified flags ON), receipt, diagnose.
+   Cannot start within 30 minutes → temporal OFF first.
+2. Commit the uncommitted docker-compose temporal passthrough with the
+   receipt (uncommitted passthrough = temporal silently OFF on any
+   recreate from committed state — same silent-fallback class just fixed).
+3. Then resume: R → C → W live evals → Agent T build + eval → P one-call
+   gate → Q deploy at wave end. Ceiling $10; spent $2.61 + STEP1 envelope.
