@@ -35,7 +35,11 @@ from services.retriever.four_lane_router import (
     four_lane_document_router,
 )
 from services.retriever.query_plan import build_query_plan_v2
-from services.retriever.query_semantics import split_query_sides
+from services.retriever.query_semantics import (
+    BASE_STOP_WORDS,
+    query_tokens,
+    split_query_sides,
+)
 from services.retriever.temporal import detect_temporal_intent
 from services.retriever.tier0_router import tier0_document_router
 from services.storage.record_status import with_active_records
@@ -72,22 +76,10 @@ _ENUMERATIVE_RE = re.compile(
     r"\b(?:list|enumerate|steps?|stages?|sequence|trace\s+how)\b",
     re.IGNORECASE,
 )
-_PROPER_NOUN_RE = re.compile(
-    r"\b[A-Z][A-Za-z0-9'’\-]+(?:\s+(?:(?:of|the|and)\s+)?"
-    r"[A-Z][A-Za-z0-9'’\-]+){0,4}\b"
+_ENTITY_BRIDGE_HINT_RE = re.compile(
+    r"\b(?:alongside|between|versus|vs|and|with)\b",
+    re.IGNORECASE,
 )
-_PROPER_NOUN_NOISE = {
-    "How",
-    "What",
-    "When",
-    "Where",
-    "Which",
-    "Who",
-    "Why",
-    "List",
-    "Compare",
-    "Trace",
-}
 _NAMED_SOURCE_PATTERNS = (
     re.compile(
         r"\baccording\s+to\s+(.+?)(?:,|\bwhat\b|\bhow\b|\bwhich\b|[?.!]|$)",
@@ -95,10 +87,23 @@ _NAMED_SOURCE_PATTERNS = (
     ),
     re.compile(
         r"\b(?:book|document|source|paper)\s+(?:called|titled|named)\s+"
-        r"[\"“]?(.+?)[\"”]?(?:,|[?.!]|$)",
+        r"[\"“]?(.+?)[\"”]?"
+        r"(?:,|\bwhat\b|\bhow\b|\bwhich\b|\bwho\b|[?.!]|$)",
         re.IGNORECASE,
     ),
-    re.compile(r"[\"“]([^\"”]{3,100})[\"”]"),
+)
+_NAMED_SOURCE_GENERIC_TOKENS = frozenset(
+    {
+        *BASE_STOP_WORDS,
+        "book",
+        "books",
+        "doc",
+        "document",
+        "documents",
+        "paper",
+        "source",
+        "sources",
+    }
 )
 
 
@@ -156,33 +161,49 @@ def corpus_doc_set_version_from_rows(
     scoped = tuple(
         sorted({str(value).strip() for value in corpus_ids or () if str(value).strip()})
     )
-    identities: list[dict[str, str]] = []
+    identities: list[dict[str, Any]] = []
     for row in rows:
         source_identity = (
             row.get("source_identity")
             if isinstance(row.get("source_identity"), dict)
             else {}
         )
-        content_identity = str(
-            source_identity.get("content_sha256")
-            or row.get("content_sha256")
-            or source_identity.get("source_key")
-            or row.get("source_version_id")
-            or row.get("updated_at")
-            or "identity_missing"
-        )
+        revision_identity = {
+            "content_sha256": str(
+                source_identity.get("content_sha256") or row.get("content_sha256") or ""
+            ),
+            "source_version_id": str(
+                source_identity.get("source_version_id")
+                or row.get("source_version_id")
+                or ""
+            ),
+            "revision": str(
+                source_identity.get("revision")
+                or row.get("revision")
+                or row.get("source_revision")
+                or row.get("content_revision")
+                or ""
+            ),
+        }
+        if not any(revision_identity.values()):
+            revision_identity["fallback"] = str(
+                source_identity.get("source_key")
+                or row.get("source_key")
+                or row.get("updated_at")
+                or "identity_missing"
+            )
         identities.append(
             {
                 "corpus_id": str(row.get("corpus_id") or ""),
                 "doc_id": str(row.get("doc_id") or ""),
-                "content_identity": content_identity,
+                "revision_identity": revision_identity,
             }
         )
     identities.sort(
         key=lambda row: (
             row["corpus_id"],
             row["doc_id"],
-            row["content_identity"],
+            canonical_json_bytes(row["revision_identity"]),
         )
     )
     payload = {"corpus_ids": list(scoped), "documents": identities}
@@ -207,6 +228,10 @@ async def corpus_doc_set_version(
                 "source_identity": 1,
                 "content_sha256": 1,
                 "source_version_id": 1,
+                "source_key": 1,
+                "revision": 1,
+                "source_revision": 1,
+                "content_revision": 1,
                 "updated_at": 1,
             },
         )
@@ -272,15 +297,81 @@ def _named_source_phrases(query: str) -> tuple[str, ...]:
     return tuple(output[:4])
 
 
-def _proper_noun_entities(query: str) -> tuple[str, ...]:
-    output: list[str] = []
-    for match in _PROPER_NOUN_RE.finditer(query):
-        phrase = " ".join(match.group(0).split())
-        if phrase in _PROPER_NOUN_NOISE or len(phrase) < 2:
+def _distinctive_source_tokens(text: str) -> tuple[str, ...]:
+    return tuple(
+        token
+        for token in query_tokens(text, stop_words=_NAMED_SOURCE_GENERIC_TOKENS)
+        if len(token) >= 3
+    )
+
+
+def _contains_normalized_phrase(haystack: str, needle: str) -> bool:
+    return bool(needle and f" {needle} " in f" {haystack} ")
+
+
+def _named_source_matches_shortlist(
+    source: str,
+    shortlist: tuple[LibrarianShortlistItemV1, ...],
+) -> bool:
+    """Require an exact phrase or strong title match; summaries never satisfy."""
+
+    normalized_source = normalize_planner_query(source)
+    source_tokens = set(_distinctive_source_tokens(source))
+    if not normalized_source or not source_tokens:
+        return False
+    for item in shortlist:
+        normalized_title = normalize_planner_query(item.title)
+        title_tokens = set(_distinctive_source_tokens(item.title))
+        exact_phrase = _contains_normalized_phrase(
+            normalized_title,
+            normalized_source,
+        )
+        strong_tokens = source_tokens <= title_tokens and (
+            len(source_tokens) >= 2 or all(len(token) >= 5 for token in source_tokens)
+        )
+        if exact_phrase or strong_tokens:
+            return True
+    return False
+
+
+def _title_mapped_entities(
+    query: str,
+    shortlist: tuple[LibrarianShortlistItemV1, ...],
+) -> tuple[tuple[str, tuple[str, ...]], ...]:
+    """Map named document titles without depending on caller capitalization."""
+
+    normalized_query = normalize_planner_query(query)
+    query_token_set = set(
+        query_tokens(normalized_query, stop_words=_NAMED_SOURCE_GENERIC_TOKENS)
+    )
+    mapped: list[tuple[int, str, str, str]] = []
+    for item in shortlist:
+        normalized_title = normalize_planner_query(item.title)
+        title_tokens = set(_distinctive_source_tokens(item.title))
+        if not normalized_title or not title_tokens:
             continue
-        if phrase.casefold() not in {value.casefold() for value in output}:
-            output.append(phrase)
-    return tuple(output[:4])
+        exact_phrase = _contains_normalized_phrase(
+            normalized_query,
+            normalized_title,
+        )
+        strong_tokens = title_tokens <= query_token_set and (
+            len(title_tokens) >= 2 or all(len(token) >= 5 for token in title_tokens)
+        )
+        if not exact_phrase and not strong_tokens:
+            continue
+        position = normalized_query.find(normalized_title)
+        mapped.append(
+            (
+                position if position >= 0 else len(normalized_query),
+                item.corpus_id,
+                item.doc_id,
+                normalized_title,
+            )
+        )
+    mapped.sort()
+    return tuple(
+        (title, (doc_id,)) for _position, _corpus_id, doc_id, title in mapped[:4]
+    )
 
 
 def _relationship_sides(query: str) -> tuple[tuple[str, str], ...]:
@@ -324,6 +415,26 @@ def _relationship_sides(query: str) -> tuple[tuple[str, str], ...]:
     return tuple((lane.name, lane.query) for lane in lanes[:2])
 
 
+def planning_requires_shortlist(query: str) -> bool:
+    """Decide plan-time grounding from canonical text before any I/O."""
+
+    planning_query = normalize_planner_query(query)
+    if not planning_query:
+        return False
+    if len(_relationship_sides(planning_query)) >= 2:
+        return True
+    if detect_temporal_intent(planning_query).active:
+        return True
+    live_plan = build_query_plan_v2(planning_query)
+    if live_plan.answer_shape == "enumeration" or _ENUMERATIVE_RE.search(
+        planning_query
+    ):
+        return True
+    if _named_source_phrases(planning_query):
+        return True
+    return bool(_ENTITY_BRIDGE_HINT_RE.search(planning_query))
+
+
 def _subquery(
     *,
     role: str,
@@ -344,15 +455,16 @@ def _subquery(
 
 
 def _rule_plan(
-    query: str,
+    planning_query: str,
     *,
+    raw_query: str,
     shortlist: tuple[LibrarianShortlistItemV1, ...],
     tier: str,
 ) -> tuple[str, str, tuple[LibrarianSubqueryV1, ...]]:
     """Run the frozen ordered registry; first deterministic match wins."""
 
-    live_plan = build_query_plan_v2(query)
-    relationship_sides = _relationship_sides(query)
+    live_plan = build_query_plan_v2(planning_query)
+    relationship_sides = _relationship_sides(planning_query)
     if len(relationship_sides) >= 2:
         shape = (
             "comparison" if live_plan.answer_shape == "comparison" else "relationship"
@@ -370,7 +482,7 @@ def _rule_plan(
         )
         return f"rule:{shape}", shape, subqueries
 
-    temporal = detect_temporal_intent(query)
+    temporal = detect_temporal_intent(planning_query)
     if temporal.active:
         time_text = " ".join(item.text for item in temporal.expressions)
         return (
@@ -379,14 +491,14 @@ def _rule_plan(
             (
                 _subquery(
                     role="main",
-                    text=query,
+                    text=planning_query,
                     shortlist=shortlist,
                     seat_quota=5,
                     tier=tier,
                 ),
                 _subquery(
                     role="time_slice",
-                    text=f"{query} temporal evidence {time_text}",
+                    text=f"{planning_query} temporal evidence {time_text}",
                     target_text=time_text,
                     shortlist=shortlist,
                     seat_quota=3,
@@ -395,12 +507,14 @@ def _rule_plan(
             ),
         )
 
-    trace = _TRACE_RE.search(query)
-    if live_plan.answer_shape == "enumeration" or _ENUMERATIVE_RE.search(query):
+    trace = _TRACE_RE.search(planning_query)
+    if live_plan.answer_shape == "enumeration" or _ENUMERATIVE_RE.search(
+        planning_query
+    ):
         subqueries: list[LibrarianSubqueryV1] = [
             _subquery(
                 role="main",
-                text=query,
+                text=planning_query,
                 shortlist=shortlist,
                 seat_quota=5 if trace else DEFAULT_SEAT_BUDGET,
                 tier=tier,
@@ -424,11 +538,7 @@ def _rule_plan(
                 )
         return "rule:enumerative_trace", "enumerative_trace", tuple(subqueries)
 
-    mapped_entities = [
-        (entity, _target_doc_ids(entity, shortlist, max_targets=1))
-        for entity in _proper_noun_entities(query)
-    ]
-    mapped_entities = [row for row in mapped_entities if row[1]]
+    mapped_entities = list(_title_mapped_entities(planning_query, shortlist))
     if (
         len(mapped_entities) >= 2
         and mapped_entities[0][1][0] != mapped_entities[1][1][0]
@@ -471,7 +581,7 @@ def _rule_plan(
         (
             _subquery(
                 role="main",
-                text=query,
+                text=raw_query,
                 shortlist=shortlist,
                 seat_quota=DEFAULT_SEAT_BUDGET,
                 tier=tier,
@@ -492,28 +602,34 @@ def build_query_plan_v1(
     normalized = normalize_planner_query(query)
     if not normalized:
         raise ValueError("librarian planner requires a non-blank query")
-    ordered_shortlist = tuple(
-        sorted(
-            (
-                item
-                if isinstance(item, LibrarianShortlistItemV1)
-                else LibrarianShortlistItemV1.model_validate(item)
-                for item in shortlist
-            ),
-            key=lambda item: (-item.score, item.corpus_id, item.doc_id),
-        )[:SHORTLIST_LIMIT]
+    requires_shortlist = planning_requires_shortlist(normalized)
+    ordered_shortlist = (
+        tuple(
+            sorted(
+                (
+                    item
+                    if isinstance(item, LibrarianShortlistItemV1)
+                    else LibrarianShortlistItemV1.model_validate(item)
+                    for item in shortlist
+                ),
+                key=lambda item: (-item.score, item.corpus_id, item.doc_id),
+            )[:SHORTLIST_LIMIT]
+        )
+        if requires_shortlist
+        else ()
     )
     tier = _tier_name(requested_tier)
     planner, shape, subqueries = _rule_plan(
-        query,
+        normalized,
+        raw_query=query,
         shortlist=ordered_shortlist,
         tier=tier,
     )
-    named_sources = _named_source_phrases(query)
+    named_sources = _named_source_phrases(normalized)
     named_source_missing = bool(
         named_sources
         and not any(
-            _target_doc_ids(source, ordered_shortlist, max_targets=1)
+            _named_source_matches_shortlist(source, ordered_shortlist)
             for source in named_sources
         )
     )
@@ -559,10 +675,13 @@ async def build_tier0_shortlist(
             "reason": "missing_database_or_corpus_scope",
             "lanes": ["lexical", "semantic"],
         }
-    vectors = await embed_queries([query], embedding_config)
+    planning_query = normalize_planner_query(query)
+    if not planning_query:
+        raise ValueError("Tier-0 shortlist requires a non-blank query")
+    vectors = await embed_queries([planning_query], embedding_config)
     vector = vectors[0] if vectors else None
     routes, diagnostics = await four_lane_document_router.route_summary_shortlist(
-        query=query,
+        query=planning_query,
         vector=vector,
         corpus_ids=list(corpus_ids),
         db=db,
@@ -597,8 +716,35 @@ class LibrarianPlanner:
     ) -> LibrarianPlanBuildResult:
         scoped = tuple(sorted({str(value) for value in corpus_ids or () if str(value)}))
         scope_identity = corpus_scope_identity(scoped)
-        version_before = await corpus_doc_set_version(db, scoped)
         normalized = normalize_planner_query(query)
+        if not normalized:
+            raise ValueError("librarian planner requires a non-blank query")
+        requires_shortlist = planning_requires_shortlist(normalized)
+        version_before = await corpus_doc_set_version(db, scoped)
+        if not requires_shortlist:
+            # Ordinary lookups preserve today's raw question bytes and do not
+            # enter the plan cache: a normalized-equivalent earlier request
+            # must never replace the current request's exact text.
+            plan = build_query_plan_v1(
+                query,
+                corpus_id=scope_identity,
+                corpus_doc_version=version_before,
+                shortlist=(),
+                requested_tier=requested_tier,
+                cache_hit=False,
+            )
+            return LibrarianPlanBuildResult(
+                plan=plan,
+                diagnostics={
+                    "status": "simple_bypass",
+                    "registry_order": list(RULE_REGISTRY_ORDER),
+                    "shortlist_calls": 0,
+                    "query_embedding_calls": 0,
+                    "llm_escalation": LLM_ESCALATION_STATUS,
+                    "provider_calls": 0,
+                },
+            )
+
         cache_key = plan_cache_key_for(
             normalized_query=normalized,
             corpus_id=scope_identity,
@@ -619,13 +765,16 @@ class LibrarianPlanner:
                 diagnostics={
                     "status": "cache_hit",
                     "registry_order": list(RULE_REGISTRY_ORDER),
+                    "shortlist_calls": 0,
+                    "query_embedding_calls": 0,
                     "llm_escalation": LLM_ESCALATION_STATUS,
                     "provider_calls": 0,
                 },
             )
 
+        shortlist_calls = 1
         shortlist, shortlist_diagnostics = await build_tier0_shortlist(
-            query,
+            normalized,
             corpus_ids=scoped,
             db=db,
             embedding_config=embedding_config,
@@ -633,8 +782,9 @@ class LibrarianPlanner:
         version_after = await corpus_doc_set_version(db, scoped)
         if version_after != version_before:
             # One bounded retry binds the shortlist and plan to one corpus state.
+            shortlist_calls += 1
             shortlist, shortlist_diagnostics = await build_tier0_shortlist(
-                query,
+                normalized,
                 corpus_ids=scoped,
                 db=db,
                 embedding_config=embedding_config,
@@ -647,7 +797,7 @@ class LibrarianPlanner:
             version_before = version_final
 
         plan = build_query_plan_v1(
-            query,
+            normalized,
             corpus_id=scope_identity,
             corpus_doc_version=version_before,
             shortlist=shortlist,
@@ -661,6 +811,8 @@ class LibrarianPlanner:
                 "status": "built",
                 "registry_order": list(RULE_REGISTRY_ORDER),
                 "shortlist": shortlist_diagnostics,
+                "shortlist_calls": shortlist_calls,
+                "query_embedding_calls": shortlist_calls,
                 "llm_escalation": LLM_ESCALATION_STATUS,
                 "provider_calls": 0,
             },

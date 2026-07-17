@@ -27,12 +27,21 @@ class _FakePlanner:
         self.calls += 1
         return SimpleNamespace(
             plan=self.plan,
-            diagnostics={"status": "built", "provider_calls": 0},
+            diagnostics={
+                "status": "simple_bypass",
+                "shortlist_calls": 0,
+                "query_embedding_calls": 0,
+                "provider_calls": 0,
+            },
         )
 
 
 async def _embedding_config(_corpus_ids):
     return {"embedding_model_id": "test"}
+
+
+async def _forbidden_embedding_config(_corpus_ids):
+    raise AssertionError("simple shadow must not load an embedding contract")
 
 
 @pytest.mark.asyncio
@@ -69,13 +78,15 @@ async def test_shadow_records_plan_without_behavior_activation():
         shadow=True,
         planner_service=fake,
         db=object(),
-        embedding_config_loader=_embedding_config,
+        embedding_config_loader=_forbidden_embedding_config,
     )
 
     assert fake.calls == 1
     assert result["mode"] == "shadow"
     assert result["behavior_applied"] is False
     assert result["plan"]["plan_hash"] == plan.plan_hash
+    assert result["diagnostics"]["shortlist_calls"] == 0
+    assert result["diagnostics"]["query_embedding_calls"] == 0
     assert result["diagnostics"]["provider_calls"] == 0
 
 

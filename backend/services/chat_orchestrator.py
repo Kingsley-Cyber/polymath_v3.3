@@ -102,7 +102,10 @@ from services.retriever.query_plan import (
     query_plan_evidence_sides,
     query_plan_to_dict,
 )
-from services.retriever.librarian_planner import librarian_planner
+from services.retriever.librarian_planner import (
+    librarian_planner,
+    planning_requires_shortlist,
+)
 from services.retriever.planned_fusion import reserved_required_lane_ids
 from services.retriever.search_mode import resolve_search_mode
 from services.retriever.temporal import (
@@ -867,7 +870,11 @@ async def _build_librarian_plan_trace(
         embedding_config_loader or retriever_orchestrator._embedding_config_for_query
     )
     try:
-        embedding_config = await embedding_config_loader(corpus_ids)
+        embedding_config = (
+            await embedding_config_loader(corpus_ids)
+            if planning_requires_shortlist(query)
+            else None
+        )
         result = await asyncio.wait_for(
             planner_service.build(
                 query,

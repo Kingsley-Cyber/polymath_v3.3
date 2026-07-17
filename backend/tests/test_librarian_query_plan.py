@@ -19,6 +19,7 @@ from services.retriever.librarian_planner import (
     LibrarianPlanner,
     QueryPlanReplayCache,
     build_query_plan_v1,
+    build_tier0_shortlist,
     corpus_doc_set_version_from_rows,
 )
 from services.retriever.tier0_router import DocumentRoute
@@ -78,6 +79,41 @@ def test_schema_hash_and_durable_replay_are_byte_repeatable():
     assert replayed.canonical_bytes() == first.canonical_bytes()
 
 
+@pytest.mark.parametrize(
+    ("first_query", "second_query", "expected_shape"),
+    [
+        (
+            "  Compare Narrative-Directing with Camera Optics!!! ",
+            "compare narrative directing with camera optics",
+            "comparison",
+        ),
+        (
+            " LIST camera changes published in 2004!!! ",
+            "list camera changes published in 2004",
+            "temporal",
+        ),
+        (
+            " Summarize ALPHA METHOD alongside Beta System. ",
+            "summarize alpha method alongside beta system",
+            "entity_bridge",
+        ),
+    ],
+)
+def test_normalized_variants_have_identical_shape_seats_and_canonical_subqueries(
+    first_query,
+    second_query,
+    expected_shape,
+):
+    first = _plan(first_query)
+    second = _plan(second_query)
+
+    assert first.normalized_query == second.normalized_query
+    assert first.shape == second.shape == expected_shape
+    assert first.plan_hash == second.plan_hash
+    assert first.seat_assignment_bytes() == second.seat_assignment_bytes()
+    assert first.subqueries == second.subqueries
+
+
 def test_replay_rejects_hash_drift():
     payload = _plan("What is narrative directing?").model_dump(mode="json")
     payload["plan_hash"] = _version("tampered")
@@ -128,12 +164,13 @@ def test_rule_registry_is_ordered_and_deterministic(query, shape, roles):
 
 
 def test_simple_plan_preserves_exact_query_and_has_no_behavior_payload():
-    query = "What is Purple Ocean strategy?"
+    query = "  What is Purple Ocean strategy?\n"
     plan = _plan(query)
 
     assert plan.planner == "rule:simple"
     assert len(plan.subqueries) == 1
     assert plan.subqueries[0].text == query
+    assert plan.shortlist == ()
     assert not hasattr(plan, "selected_chunks")
     assert not hasattr(plan, "ranking_scores")
 
@@ -155,6 +192,48 @@ def test_named_source_and_empty_shortlist_signals_are_explicit():
 
     assert plan.refusal_signals.shortlist_empty is True
     assert plan.refusal_signals.named_source_missing is True
+
+
+def test_named_source_requires_strong_title_match_not_generic_overlap():
+    irrelevant = (
+        LibrarianShortlistItemV1(
+            corpus_id="corpus",
+            doc_id="other",
+            title="The Story Handbook",
+            summary="The launch method is discussed in this summary.",
+            score=0.91,
+        ),
+    )
+    matching = (
+        LibrarianShortlistItemV1(
+            corpus_id="corpus",
+            doc_id="manual",
+            title="The Missing Manual",
+            summary="A different summary.",
+            score=0.91,
+        ),
+    )
+    query = "According to The Missing Manual, what is the launch method?"
+    substring_only = (
+        LibrarianShortlistItemV1(
+            corpus_id="corpus",
+            doc_id="earth",
+            title="Earth Methods",
+            summary="Art appears only as a substring of the title.",
+            score=0.91,
+        ),
+    )
+
+    missing = _plan(query, shortlist=irrelevant)
+    present = _plan(query, shortlist=matching)
+    substring_missing = _plan(
+        "According to Art, what is the method?",
+        shortlist=substring_only,
+    )
+
+    assert missing.refusal_signals.named_source_missing is True
+    assert present.refusal_signals.named_source_missing is False
+    assert substring_missing.refusal_signals.named_source_missing is True
 
 
 def test_document_set_version_is_order_independent_and_content_sensitive():
@@ -184,6 +263,30 @@ def test_document_set_version_is_order_independent_and_content_sensitive():
     assert changed != first
 
 
+def test_document_set_version_changes_for_same_source_key_new_revision():
+    first_rows = [
+        {
+            "corpus_id": "c",
+            "doc_id": "a",
+            "source_identity": {"source_key": "stable-source"},
+            "source_version_id": "version-1",
+            "revision": "revision-1",
+        }
+    ]
+    second_rows = [
+        {
+            **first_rows[0],
+            "source_version_id": "version-2",
+            "revision": "revision-2",
+        }
+    ]
+
+    first = corpus_doc_set_version_from_rows(first_rows, corpus_ids=["c"])
+    second = corpus_doc_set_version_from_rows(second_rows, corpus_ids=["c"])
+
+    assert first != second
+
+
 class _Cursor:
     def __init__(self, rows):
         self.rows = rows
@@ -195,8 +298,10 @@ class _Cursor:
 class _Documents:
     def __init__(self, rows):
         self.rows = rows
+        self.find_calls = []
 
-    def find(self, *_args, **_kwargs):
+    def find(self, *args, **kwargs):
+        self.find_calls.append((args, kwargs))
         return _Cursor(self.rows)
 
 
@@ -273,6 +378,51 @@ async def test_shortlist_reuses_four_lane_lexical_and_semantic_mechanisms():
     assert diagnostics["parent_summary_vectors"] == 0
     assert semantic.calls[0]["max_per_lane"] == 8
     assert semantic.calls[0]["lane_vectors"] == {"librarian_shortlist": [0.1, 0.2]}
+    projection = db.documents.find_calls[0][0][1]
+    assert projection == {
+        "_id": 0,
+        "corpus_id": 1,
+        "doc_id": 1,
+        "original_filename": 1,
+        "filename": 1,
+        "title": 1,
+        "doc_profile.title": 1,
+        "doc_profile.summary": 1,
+    }
+
+
+@pytest.mark.asyncio
+async def test_shortlist_embedding_and_routing_use_canonical_query(monkeypatch):
+    calls = {}
+
+    async def fake_embed(texts, _config):
+        calls["embed_texts"] = texts
+        return [[0.1, 0.2]]
+
+    async def fake_route(**kwargs):
+        calls["route_query"] = kwargs["query"]
+        return [], {"status": "fake"}
+
+    monkeypatch.setattr(planner_module, "embed_queries", fake_embed)
+    monkeypatch.setattr(
+        planner_module.four_lane_document_router,
+        "route_summary_shortlist",
+        fake_route,
+    )
+
+    shortlist, diagnostics = await build_tier0_shortlist(
+        "  Compare Narrative-Directing with Camera Optics!!! ",
+        corpus_ids=["c"],
+        db=object(),
+        embedding_config={"test": True},
+    )
+
+    assert shortlist == ()
+    assert diagnostics == {"status": "fake"}
+    assert calls == {
+        "embed_texts": ["compare narrative directing with camera optics"],
+        "route_query": "compare narrative directing with camera optics",
+    }
 
 
 @pytest.mark.asyncio
@@ -292,14 +442,14 @@ async def test_plan_cache_hits_and_invalidates_on_document_version(monkeypatch):
     monkeypatch.setattr(planner_module, "build_tier0_shortlist", fake_shortlist)
 
     first = await planner.build(
-        "What is narrative directing?",
+        "Compare narrative directing with camera optics.",
         corpus_ids=["corpus"],
         requested_tier="qdrant_mongo",
         db=object(),
         embedding_config=None,
     )
     cached = await planner.build(
-        "What is narrative directing?",
+        "Compare narrative directing with camera optics.",
         corpus_ids=["corpus"],
         requested_tier="qdrant_mongo",
         db=object(),
@@ -307,7 +457,7 @@ async def test_plan_cache_hits_and_invalidates_on_document_version(monkeypatch):
     )
     current["version"] = _version("two")
     invalidated = await planner.build(
-        "What is narrative directing?",
+        "Compare narrative directing with camera optics.",
         corpus_ids=["corpus"],
         requested_tier="qdrant_mongo",
         db=object(),
@@ -320,6 +470,107 @@ async def test_plan_cache_hits_and_invalidates_on_document_version(monkeypatch):
     assert first.plan.plan_hash == cached.plan.plan_hash
     assert invalidated.plan.plan_hash != first.plan.plan_hash
     assert invalidated.plan.cache.key != first.plan.cache.key
+
+
+@pytest.mark.asyncio
+async def test_simple_shadow_bypasses_shortlist_embedding_and_cache(monkeypatch):
+    planner = LibrarianPlanner(cache=QueryPlanReplayCache())
+    version_calls = {"count": 0}
+
+    async def fake_version(_db, _corpus_ids):
+        version_calls["count"] += 1
+        return _version("simple")
+
+    async def forbidden_shortlist(*_args, **_kwargs):
+        raise AssertionError("simple shadow must not enter Tier-0")
+
+    monkeypatch.setattr(planner_module, "corpus_doc_set_version", fake_version)
+    monkeypatch.setattr(
+        planner_module,
+        "build_tier0_shortlist",
+        forbidden_shortlist,
+    )
+
+    first_query = "  What IS narrative-directing? "
+    second_query = "what is narrative directing"
+    first = await planner.build(
+        first_query,
+        corpus_ids=["corpus"],
+        requested_tier="qdrant_mongo",
+        db=object(),
+        embedding_config=None,
+    )
+    second = await planner.build(
+        second_query,
+        corpus_ids=["corpus"],
+        requested_tier="qdrant_mongo",
+        db=object(),
+        embedding_config=None,
+    )
+
+    assert version_calls["count"] == 2
+    assert first.diagnostics["shortlist_calls"] == 0
+    assert first.diagnostics["query_embedding_calls"] == 0
+    assert first.diagnostics["provider_calls"] == 0
+    assert second.diagnostics == first.diagnostics
+    assert first.plan.subqueries[0].text == first_query
+    assert second.plan.subqueries[0].text == second_query
+    assert first.plan.plan_hash == second.plan.plan_hash
+    assert first.plan.seat_assignment_bytes() == second.plan.seat_assignment_bytes()
+
+
+@pytest.mark.asyncio
+async def test_cache_first_arrival_does_not_change_normalized_plan(monkeypatch):
+    async def fake_version(_db, _corpus_ids):
+        return _version("stable")
+
+    async def fake_shortlist(*_args, **_kwargs):
+        return _shortlist(), {"status": "fake"}
+
+    monkeypatch.setattr(planner_module, "corpus_doc_set_version", fake_version)
+    monkeypatch.setattr(planner_module, "build_tier0_shortlist", fake_shortlist)
+
+    first_planner = LibrarianPlanner(cache=QueryPlanReplayCache())
+    second_planner = LibrarianPlanner(cache=QueryPlanReplayCache())
+    variants = (
+        " Compare Narrative-Directing with Camera Optics!!! ",
+        "compare narrative directing with camera optics",
+    )
+    first_arrival = await first_planner.build(
+        variants[0],
+        corpus_ids=["corpus"],
+        requested_tier="qdrant_mongo",
+        db=object(),
+        embedding_config=None,
+    )
+    second_arrival = await second_planner.build(
+        variants[1],
+        corpus_ids=["corpus"],
+        requested_tier="qdrant_mongo",
+        db=object(),
+        embedding_config=None,
+    )
+    first_cached = await first_planner.build(
+        variants[1],
+        corpus_ids=["corpus"],
+        requested_tier="qdrant_mongo",
+        db=object(),
+        embedding_config=None,
+    )
+    second_cached = await second_planner.build(
+        variants[0],
+        corpus_ids=["corpus"],
+        requested_tier="qdrant_mongo",
+        db=object(),
+        embedding_config=None,
+    )
+
+    assert first_arrival.plan.canonical_bytes() == second_arrival.plan.canonical_bytes()
+    assert first_cached.plan.subqueries == second_cached.plan.subqueries
+    assert (
+        first_cached.plan.seat_assignment_bytes()
+        == second_cached.plan.seat_assignment_bytes()
+    )
 
 
 def test_l1_l2_planner_has_no_generation_provider_path():

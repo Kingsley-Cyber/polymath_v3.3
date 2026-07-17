@@ -120,11 +120,13 @@ class LibrarianSubqueryV1(BaseModel):
 
     @field_validator("text")
     @classmethod
-    def _normalized_text(cls, value: str) -> str:
-        normalized = " ".join(str(value or "").split())
-        if not normalized:
+    def _non_blank_text(cls, value: str) -> str:
+        if not str(value or "").strip():
             raise ValueError("subquery text must not be blank")
-        return normalized
+        # A simple plan is the byte-parity path: its main subquery preserves
+        # the caller's exact question text. Deterministic non-simple planners
+        # construct canonical display text before model validation.
+        return value
 
     @field_validator("target_doc_ids")
     @classmethod

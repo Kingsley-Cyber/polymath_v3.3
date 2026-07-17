@@ -581,9 +581,23 @@ class FourLaneDocumentRouter:
     ) -> dict[tuple[str, str], DocumentProfile]:
         if db is None or not corpus_ids:
             return {}
+        document_projection = (
+            {
+                "_id": 0,
+                "corpus_id": 1,
+                "doc_id": 1,
+                "original_filename": 1,
+                "filename": 1,
+                "title": 1,
+                "doc_profile.title": 1,
+                "doc_profile.summary": 1,
+            }
+            if summary_only
+            else {"_id": 0}
+        )
         document_cursor = db["documents"].find(
             with_active_records({"corpus_id": {"$in": corpus_ids}}),
-            {"_id": 0},
+            document_projection,
         )
         if summary_only:
             documents = await document_cursor.to_list(length=None)
@@ -705,6 +719,8 @@ class FourLaneDocumentRouter:
                 profile.headings = tuple(sorted(headings.get(key, set())))
                 if not profile.summary and summaries.get(key):
                     profile.summary = " ".join(summaries[key][:8])
+        if summary_only:
+            return profiles
 
         current_source_versions = _source_versions_by_document(documents)
         apply_t91_document_profiles(

@@ -12937,3 +12937,41 @@ Compose config PASS; Black PASS on all new files and the changed router
 Ruff PASS on all new files and the changed router (the two chat-orchestrator
 F401 findings predate this branch). No live call, provider call, deployment,
 eval lock, corpus mutation, or L3+ work occurred.
+
+## [2026-07-17T21:31:08Z] EXECUTOR → SENIOR :: RECEIPT
+
+Agent L independent-audit corrections are complete on
+`codex/librarian-planner-l1-l2-20260718`. Non-simple classification, entity
+mapping, Tier-0 embedding, and shortlist routing now consume one canonical
+normalized query, so case/punctuation/whitespace variants and opposite cache
+arrival orders produce identical shapes, plan hashes, subqueries, and seat
+assignments. Simple plans bypass Tier-0 and the plan cache, preserve each
+request's exact raw question text, and report `shortlist_calls=0`,
+`query_embedding_calls=0`, `provider_calls=0`; shadow mode also skips the
+embedding-config lookup for that path. Shadow remains additive and behavior
+unchanged.
+
+Corpus document versions now hash content SHA, source-version ID, and revision
+instead of allowing a stable source key to mask a new revision. Named-source
+presence now requires an exact phrase or strong distinctive-title token match;
+generic overlap and summary-only overlap cannot satisfy it. The summary router
+uses a title/summary-only Mongo projection and returns before parent/digest/T9.1
+loading.
+
+Build-only verification: focused plus adjacent canonical-container suite
+`109 passed`, true `EXIT=0`, log SHA-256
+`69d6d8f493aff29d1419f22492ad1b8dc982cc5f86a9bc80de92b5f23fc859e5`;
+host raw-text canonical replay PASS; Python compile, Compose config,
+`git diff --check`, and focused Black/Ruff checks PASS. No live call,
+deployment, eval lock, corpus/provider access, behavior flip, or L3+ work
+occurred.
+
+## [2026-07-17T21:32:17Z] EXECUTOR → SENIOR :: RECEIPT
+
+Final audit test-artifact correction: after strengthening exact named-source
+phrase boundaries against substring-only title matches, the full same
+build-only suite remains `109 passed`, true `EXIT=0`. The final log SHA-256,
+superseding only the prior receipt's test-log pointer, is
+`4f0c0e78e13f980907592c3c01ecd5e40a4ad6d123d6fbea59c040de17e3bec8`.
+Final compile, diff, Black, and Ruff checks remain PASS. Scope and no-live
+statements are unchanged.
