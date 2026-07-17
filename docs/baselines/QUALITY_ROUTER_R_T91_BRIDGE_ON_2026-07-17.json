@@ -1,0 +1,3108 @@
+{
+  "arm": "on",
+  "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+  "corpus_name": "runpod_e2e_15doc_20260715",
+  "preregistration_sha256": "6c348cbf852a26e483ee810f6d3776ce1425955acc53ec4aede880f76dedc4b8",
+  "query_route_preflight": {
+    "base_url": "https://opencode.ai/zen/go",
+    "credential_ciphertext_present": true,
+    "model": "anthropic/minimax-m2.7",
+    "pool_safe_sha256": "91bf6ceb54940ac467163624c3a92e2284f28cdbfda3863ccf4acc3671edadfe",
+    "provider": "opencode-go-anthropic"
+  },
+  "results": [
+    {
+      "attribution_complete": true,
+      "done_received": true,
+      "elapsed_seconds": 56.656,
+      "errors": [],
+      "expected_hit_top_three": false,
+      "expected_title_any": [
+        "Mateu-Mestre - Framed Ink 2 (2021).md",
+        "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md"
+      ],
+      "forbidden_rank1": true,
+      "passed": false,
+      "query_id": "bridge_ai_video_camera_motion_story",
+      "question": "How should I prompt an AI video model so camera movement expresses the story instead of feeling like random motion?",
+      "ranked_documents": [
+        {
+          "attribution": {
+            "planner_decomposition_0": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.4,
+                "child_rollup": 0.936773,
+                "lexical": 0.042598,
+                "semantic": 0.377605
+              },
+              "lane_scores": {
+                "associative": 0.4,
+                "child_rollup": 0.936773,
+                "lexical": 0.042598,
+                "semantic": 0.377605
+              },
+              "seat_owner": "child_rollup"
+            },
+            "starting_steps": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.4,
+                "child_rollup": 0.506965,
+                "lexical": 0.042598,
+                "semantic": 0.386024
+              },
+              "lane_scores": {
+                "associative": 0.4,
+                "child_rollup": 0.506965,
+                "lexical": 0.042598,
+                "semantic": 0.386024
+              },
+              "seat_owner": "semantic"
+            },
+            "translation_53d6331f62ec": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.4,
+                "child_rollup": 0.985128,
+                "lexical": 0.0218,
+                "semantic": 0.415496
+              },
+              "lane_scores": {
+                "associative": 0.4,
+                "child_rollup": 0.985128,
+                "lexical": 0.0218,
+                "semantic": 0.415496
+              },
+              "seat_owner": "child_rollup"
+            }
+          },
+          "best_lane_rank": 1,
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "a6e0a87a1a199145aa33cbb3e25a7e0878272c17b0bf650147c57f615efc4b6c",
+          "lane_ids": [
+            "planner_decomposition_0",
+            "planner_stepback_0_75d79f9e",
+            "planner_translation_0_75d79f9e",
+            "starting_steps",
+            "translation_53d6331f62ec"
+          ],
+          "max_score": 0.98,
+          "title": "Blain Brown - Cinematography - Theory and Practice (2016).md"
+        },
+        {
+          "attribution": {
+            "planner_decomposition_0": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.8,
+                "child_rollup": 1.0,
+                "lexical": 1.0,
+                "semantic": 0.0
+              },
+              "lane_scores": {
+                "associative": 0.8,
+                "child_rollup": 1.0,
+                "lexical": 1.0,
+                "semantic": 0.0
+              },
+              "seat_owner": "associative"
+            },
+            "starting_steps": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.8,
+                "child_rollup": 1.0,
+                "lexical": 1.0,
+                "semantic": 0.0
+              },
+              "lane_scores": {
+                "associative": 0.8,
+                "child_rollup": 1.0,
+                "lexical": 1.0,
+                "semantic": 0.0
+              },
+              "seat_owner": "associative"
+            }
+          },
+          "best_lane_rank": 1,
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "f4e5f68b188beb3aad3e9f1d10846c1d9c1747b2d872b701f5e2757e14dd5305",
+          "lane_ids": [
+            "planner_decomposition_0",
+            "planner_stepback_0_75d79f9e",
+            "planner_translation_0_75d79f9e",
+            "starting_steps",
+            "translation_53d6331f62ec"
+          ],
+          "max_score": 0.98,
+          "title": "VES Handbook of Visual Effects.md"
+        },
+        {
+          "attribution": {
+            "planner_decomposition_0": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.4,
+                "child_rollup": 0.0,
+                "lexical": 0.876837,
+                "semantic": 0.0
+              },
+              "lane_scores": {
+                "associative": 0.4,
+                "child_rollup": 0.0,
+                "lexical": 0.876837,
+                "semantic": 0.0
+              },
+              "seat_owner": "lexical"
+            },
+            "starting_steps": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.4,
+                "child_rollup": 0.186024,
+                "lexical": 0.876837,
+                "semantic": 0.0
+              },
+              "lane_scores": {
+                "associative": 0.4,
+                "child_rollup": 0.186024,
+                "lexical": 0.876837,
+                "semantic": 0.0
+              },
+              "seat_owner": "lexical"
+            },
+            "translation_53d6331f62ec": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.4,
+                "child_rollup": 1.0,
+                "lexical": 0.926834,
+                "semantic": 0.339361
+              },
+              "lane_scores": {
+                "associative": 0.4,
+                "child_rollup": 1.0,
+                "lexical": 0.926834,
+                "semantic": 0.339361
+              },
+              "seat_owner": "associative"
+            }
+          },
+          "best_lane_rank": 2,
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "c7b8973260e1b7b26002980c1e0723bfb02778669498b67b4891b464eb6feb91",
+          "lane_ids": [
+            "planner_decomposition_0",
+            "planner_stepback_0_75d79f9e",
+            "planner_translation_0_75d79f9e",
+            "starting_steps",
+            "translation_53d6331f62ec"
+          ],
+          "max_score": 0.95,
+          "title": "Grammar of the Edit.md"
+        },
+        {
+          "attribution": {
+            "planner_decomposition_0": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.4,
+                "child_rollup": 0.628502,
+                "lexical": 0.812359,
+                "semantic": 0.0
+              },
+              "lane_scores": {
+                "associative": 0.4,
+                "child_rollup": 0.628502,
+                "lexical": 0.812359,
+                "semantic": 0.0
+              },
+              "seat_owner": "associative"
+            },
+            "starting_steps": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.4,
+                "child_rollup": 0.510405,
+                "lexical": 0.812359,
+                "semantic": 0.0
+              },
+              "lane_scores": {
+                "associative": 0.4,
+                "child_rollup": 0.510405,
+                "lexical": 0.812359,
+                "semantic": 0.0
+              },
+              "seat_owner": "associative"
+            },
+            "translation_53d6331f62ec": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.4,
+                "child_rollup": 0.397566,
+                "lexical": 0.763844,
+                "semantic": 0.0
+              },
+              "lane_scores": {
+                "associative": 0.4,
+                "child_rollup": 0.397566,
+                "lexical": 0.763844,
+                "semantic": 0.0
+              },
+              "seat_owner": "spillover"
+            }
+          },
+          "best_lane_rank": 2,
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "36cd4f24fc36392138cac6405d59edbb5534f7ff05ead33dc9365a7c5578af28",
+          "lane_ids": [
+            "planner_decomposition_0",
+            "planner_stepback_0_75d79f9e",
+            "planner_translation_0_75d79f9e",
+            "starting_steps",
+            "translation_53d6331f62ec"
+          ],
+          "max_score": 0.905,
+          "title": "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md"
+        },
+        {
+          "attribution": {
+            "planner_decomposition_0": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.4,
+                "child_rollup": 0.0,
+                "lexical": 0.0,
+                "semantic": 0.380728
+              },
+              "lane_scores": {
+                "associative": 0.4,
+                "child_rollup": 0.0,
+                "lexical": 0.0,
+                "semantic": 0.380728
+              },
+              "seat_owner": "semantic"
+            }
+          },
+          "best_lane_rank": 2,
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "644fa066c79d084f3a3a7d6a4c6b7b6962ce20ac5a5da25e45045cf8cb7100eb",
+          "lane_ids": [
+            "planner_decomposition_0",
+            "translation_53d6331f62ec"
+          ],
+          "max_score": 0.8943,
+          "title": "Paul Ekman - Facial Action Coding System Manual (0).md"
+        },
+        {
+          "attribution": {
+            "planner_translation_0_75d79f9e": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.4,
+                "child_rollup": 0.0,
+                "lexical": 0.262595,
+                "semantic": 0.399939
+              },
+              "lane_scores": {
+                "associative": 0.4,
+                "child_rollup": 0.0,
+                "lexical": 0.262595,
+                "semantic": 0.399939
+              },
+              "seat_owner": "spillover"
+            }
+          },
+          "best_lane_rank": 3,
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "f509edd4716ee253760d7ac495851d01f0e2b1aa376e402e9c505152bffbb81a",
+          "lane_ids": [
+            "planner_translation_0_75d79f9e",
+            "translation_53d6331f62ec"
+          ],
+          "max_score": 0.8771,
+          "title": "[International Journal of Reasoning-based Intelligent Systems vol. 2 iss. 1] Bayesian reasoning for Laban Movement Analysis used in human-machine interaction{Rett, Jorg_ Dias, Jorge_ Ahuactzin, Juan Manuel}(2010)[1.md"
+        },
+        {
+          "attribution": {
+            "planner_translation_0_75d79f9e": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.25,
+                "child_rollup": 0.0,
+                "lexical": 0.591828,
+                "semantic": 0.380605
+              },
+              "lane_scores": {
+                "associative": 0.25,
+                "child_rollup": 0.0,
+                "lexical": 0.591828,
+                "semantic": 0.380605
+              },
+              "seat_owner": "lexical"
+            },
+            "translation_53d6331f62ec": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.125,
+                "child_rollup": 0.0,
+                "lexical": 0.851903,
+                "semantic": 0.385548
+              },
+              "lane_scores": {
+                "associative": 0.125,
+                "child_rollup": 0.0,
+                "lexical": 0.851903,
+                "semantic": 0.385548
+              },
+              "seat_owner": "lexical"
+            }
+          },
+          "best_lane_rank": 5,
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "4c900dec46f5937db37bc997a40cb8cb5c4cc2b821dbe2bb7e0b4703cb233bdf",
+          "lane_ids": [
+            "planner_translation_0_75d79f9e",
+            "translation_53d6331f62ec"
+          ],
+          "max_score": 0.3469,
+          "title": "Manga in Theory and Practice.md"
+        },
+        {
+          "attribution": {
+            "planner_stepback_0_75d79f9e": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.125,
+                "child_rollup": 0.0,
+                "lexical": 0.656014,
+                "semantic": 0.506478
+              },
+              "lane_scores": {
+                "associative": 0.125,
+                "child_rollup": 0.0,
+                "lexical": 0.656014,
+                "semantic": 0.506478
+              },
+              "seat_owner": "semantic"
+            }
+          },
+          "best_lane_rank": 5,
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "b98b6bda8d1bb9863be7fc2093ce2881047970d5a08c3e11cc56376e40a0d733",
+          "lane_ids": [
+            "planner_stepback_0_75d79f9e"
+          ],
+          "max_score": 0.3281,
+          "title": "Richard Williams - The Animator's Survival Kit (2002, Faber & Faber).md"
+        },
+        {
+          "attribution": {
+            "planner_stepback_0_75d79f9e": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.4,
+                "child_rollup": 0.0,
+                "lexical": 0.103022,
+                "semantic": 0.480855
+              },
+              "lane_scores": {
+                "associative": 0.4,
+                "child_rollup": 0.0,
+                "lexical": 0.103022,
+                "semantic": 0.480855
+              },
+              "seat_owner": "spillover"
+            },
+            "starting_steps": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.4,
+                "child_rollup": 0.0,
+                "lexical": 0.234498,
+                "semantic": 0.364896
+              },
+              "lane_scores": {
+                "associative": 0.4,
+                "child_rollup": 0.0,
+                "lexical": 0.234498,
+                "semantic": 0.364896
+              },
+              "seat_owner": "spillover"
+            }
+          },
+          "best_lane_rank": 6,
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "17bc966b6768a308d703fa2620cc6d4872f023888ccc44e534e7b38d97e68114",
+          "lane_ids": [
+            "planner_stepback_0_75d79f9e",
+            "starting_steps"
+          ],
+          "max_score": 0.2698,
+          "title": "Walter Murch - In the Blink of an Eye (2001).md"
+        },
+        {
+          "attribution": {
+            "planner_decomposition_0": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.35,
+                "child_rollup": 0.159451,
+                "lexical": 0.143838,
+                "semantic": 0.379096
+              },
+              "lane_scores": {
+                "associative": 0.35,
+                "child_rollup": 0.159451,
+                "lexical": 0.143838,
+                "semantic": 0.379096
+              },
+              "seat_owner": "spillover"
+            },
+            "starting_steps": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.35,
+                "child_rollup": 0.128848,
+                "lexical": 0.143838,
+                "semantic": 0.386006
+              },
+              "lane_scores": {
+                "associative": 0.35,
+                "child_rollup": 0.128848,
+                "lexical": 0.143838,
+                "semantic": 0.386006
+              },
+              "seat_owner": "child_rollup"
+            },
+            "translation_53d6331f62ec": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.35,
+                "child_rollup": 0.0,
+                "lexical": 0.105372,
+                "semantic": 0.449079
+              },
+              "lane_scores": {
+                "associative": 0.35,
+                "child_rollup": 0.0,
+                "lexical": 0.105372,
+                "semantic": 0.449079
+              },
+              "seat_owner": "semantic"
+            }
+          },
+          "best_lane_rank": 5,
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "5d6acea4b31a1324c930a185ae8fd808e201daf25a4eac3a3c545fd6492b0377",
+          "lane_ids": [
+            "planner_decomposition_0",
+            "starting_steps",
+            "translation_53d6331f62ec"
+          ],
+          "max_score": 0.2676,
+          "title": "Force Dynamic Life Drawing.md"
+        }
+      ],
+      "resolved_models": [
+        "anthropic/minimax-m2.7"
+      ],
+      "router_version": "four_lane_tier0_router.v1",
+      "technical_success": true,
+      "top_three_titles": [
+        "Blain Brown - Cinematography - Theory and Practice (2016).md",
+        "VES Handbook of Visual Effects.md",
+        "Grammar of the Edit.md"
+      ]
+    },
+    {
+      "attribution_complete": true,
+      "done_received": true,
+      "elapsed_seconds": 42.716,
+      "errors": [],
+      "expected_hit_top_three": true,
+      "expected_title_any": [
+        "Grammar of the Edit.md",
+        "Walter Murch - In the Blink of an Eye (2001).md"
+      ],
+      "forbidden_rank1": false,
+      "passed": true,
+      "query_id": "bridge_ai_video_sequence_continuity",
+      "question": "What underlying craft should guide prompts that turn separate AI-generated clips into one emotionally coherent sequence?",
+      "ranked_documents": [
+        {
+          "attribution": {
+            "planner_decomposition_0": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.405556,
+                "child_rollup": 1.0,
+                "lexical": 0.868867,
+                "semantic": 0.340082
+              },
+              "lane_scores": {
+                "associative": 0.405556,
+                "child_rollup": 1.0,
+                "lexical": 0.868867,
+                "semantic": 0.340082
+              },
+              "seat_owner": "child_rollup"
+            },
+            "primary": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.405556,
+                "child_rollup": 1.0,
+                "lexical": 0.868867,
+                "semantic": 0.31394
+              },
+              "lane_scores": {
+                "associative": 0.405556,
+                "child_rollup": 1.0,
+                "lexical": 0.868867,
+                "semantic": 0.31394
+              },
+              "seat_owner": "child_rollup"
+            },
+            "translation_53d6331f62ec": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.405556,
+                "child_rollup": 0.302027,
+                "lexical": 0.734457,
+                "semantic": 0.340622
+              },
+              "lane_scores": {
+                "associative": 0.405556,
+                "child_rollup": 0.302027,
+                "lexical": 0.734457,
+                "semantic": 0.340622
+              },
+              "seat_owner": "spillover"
+            }
+          },
+          "best_lane_rank": 1,
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "c7b8973260e1b7b26002980c1e0723bfb02778669498b67b4891b464eb6feb91",
+          "lane_ids": [
+            "planner_decomposition_0",
+            "planner_stepback_0_1833e2ac",
+            "planner_translation_0_1833e2ac",
+            "primary",
+            "translation_53d6331f62ec"
+          ],
+          "max_score": 0.98,
+          "title": "Grammar of the Edit.md"
+        },
+        {
+          "attribution": {
+            "planner_decomposition_0": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.805556,
+                "child_rollup": 0.194825,
+                "lexical": 0.778717,
+                "semantic": 0.0
+              },
+              "lane_scores": {
+                "associative": 0.805556,
+                "child_rollup": 0.194825,
+                "lexical": 0.778717,
+                "semantic": 0.0
+              },
+              "seat_owner": "associative"
+            },
+            "planner_stepback_0_1833e2ac": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.766667,
+                "child_rollup": 0.410808,
+                "lexical": 0.549892,
+                "semantic": 0.314377
+              },
+              "lane_scores": {
+                "associative": 0.766667,
+                "child_rollup": 0.410808,
+                "lexical": 0.549892,
+                "semantic": 0.314377
+              },
+              "seat_owner": "associative"
+            },
+            "planner_translation_0_1833e2ac": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.805556,
+                "child_rollup": 0.595706,
+                "lexical": 0.639612,
+                "semantic": 0.319098
+              },
+              "lane_scores": {
+                "associative": 0.805556,
+                "child_rollup": 0.595706,
+                "lexical": 0.639612,
+                "semantic": 0.319098
+              },
+              "seat_owner": "associative"
+            },
+            "primary": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.805556,
+                "child_rollup": 0.195378,
+                "lexical": 0.778717,
+                "semantic": 0.0
+              },
+              "lane_scores": {
+                "associative": 0.805556,
+                "child_rollup": 0.195378,
+                "lexical": 0.778717,
+                "semantic": 0.0
+              },
+              "seat_owner": "associative"
+            }
+          },
+          "best_lane_rank": 1,
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "f4e5f68b188beb3aad3e9f1d10846c1d9c1747b2d872b701f5e2757e14dd5305",
+          "lane_ids": [
+            "planner_decomposition_0",
+            "planner_stepback_0_1833e2ac",
+            "planner_translation_0_1833e2ac",
+            "primary",
+            "translation_53d6331f62ec"
+          ],
+          "max_score": 0.98,
+          "title": "VES Handbook of Visual Effects.md"
+        },
+        {
+          "attribution": {
+            "planner_decomposition_0": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.605556,
+                "child_rollup": 0.948157,
+                "lexical": 0.0,
+                "semantic": 0.426092
+              },
+              "lane_scores": {
+                "associative": 0.605556,
+                "child_rollup": 0.948157,
+                "lexical": 0.0,
+                "semantic": 0.426092
+              },
+              "seat_owner": "associative"
+            },
+            "planner_translation_0_1833e2ac": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.605556,
+                "child_rollup": 0.0,
+                "lexical": 0.026979,
+                "semantic": 0.403161
+              },
+              "lane_scores": {
+                "associative": 0.605556,
+                "child_rollup": 0.0,
+                "lexical": 0.026979,
+                "semantic": 0.403161
+              },
+              "seat_owner": "spillover"
+            },
+            "primary": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.605556,
+                "child_rollup": 0.948157,
+                "lexical": 0.0,
+                "semantic": 0.397557
+              },
+              "lane_scores": {
+                "associative": 0.605556,
+                "child_rollup": 0.948157,
+                "lexical": 0.0,
+                "semantic": 0.397557
+              },
+              "seat_owner": "associative"
+            }
+          },
+          "best_lane_rank": 2,
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "644fa066c79d084f3a3a7d6a4c6b7b6962ce20ac5a5da25e45045cf8cb7100eb",
+          "lane_ids": [
+            "planner_decomposition_0",
+            "planner_translation_0_1833e2ac",
+            "primary",
+            "translation_53d6331f62ec"
+          ],
+          "max_score": 0.8943,
+          "title": "Paul Ekman - Facial Action Coding System Manual (0).md"
+        },
+        {
+          "attribution": {},
+          "best_lane_rank": 3,
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "f509edd4716ee253760d7ac495851d01f0e2b1aa376e402e9c505152bffbb81a",
+          "lane_ids": [
+            "translation_53d6331f62ec"
+          ],
+          "max_score": 0.8771,
+          "title": "[International Journal of Reasoning-based Intelligent Systems vol. 2 iss. 1] Bayesian reasoning for Laban Movement Analysis used in human-machine interaction{Rett, Jorg_ Dias, Jorge_ Ahuactzin, Juan Manuel}(2010)[1.md"
+        },
+        {
+          "attribution": {
+            "planner_decomposition_0": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.480556,
+                "child_rollup": 0.637851,
+                "lexical": 0.930615,
+                "semantic": 0.0
+              },
+              "lane_scores": {
+                "associative": 0.480556,
+                "child_rollup": 0.637851,
+                "lexical": 0.930615,
+                "semantic": 0.0
+              },
+              "seat_owner": "spillover"
+            },
+            "planner_stepback_0_1833e2ac": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.6625,
+                "child_rollup": 1.0,
+                "lexical": 1.0,
+                "semantic": 0.375305
+              },
+              "lane_scores": {
+                "associative": 0.6625,
+                "child_rollup": 1.0,
+                "lexical": 1.0,
+                "semantic": 0.375305
+              },
+              "seat_owner": "associative"
+            },
+            "planner_translation_0_1833e2ac": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.605556,
+                "child_rollup": 1.0,
+                "lexical": 1.0,
+                "semantic": 0.3242
+              },
+              "lane_scores": {
+                "associative": 0.605556,
+                "child_rollup": 1.0,
+                "lexical": 1.0,
+                "semantic": 0.3242
+              },
+              "seat_owner": "associative"
+            },
+            "primary": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.480556,
+                "child_rollup": 0.692194,
+                "lexical": 0.930615,
+                "semantic": 0.0
+              },
+              "lane_scores": {
+                "associative": 0.480556,
+                "child_rollup": 0.692194,
+                "lexical": 0.930615,
+                "semantic": 0.0
+              },
+              "seat_owner": "spillover"
+            },
+            "translation_53d6331f62ec": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.480556,
+                "child_rollup": 0.448842,
+                "lexical": 0.790826,
+                "semantic": 0.0
+              },
+              "lane_scores": {
+                "associative": 0.480556,
+                "child_rollup": 0.448842,
+                "lexical": 0.790826,
+                "semantic": 0.0
+              },
+              "seat_owner": "child_rollup"
+            }
+          },
+          "best_lane_rank": 2,
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "36cd4f24fc36392138cac6405d59edbb5534f7ff05ead33dc9365a7c5578af28",
+          "lane_ids": [
+            "planner_decomposition_0",
+            "planner_stepback_0_1833e2ac",
+            "planner_translation_0_1833e2ac",
+            "primary",
+            "translation_53d6331f62ec"
+          ],
+          "max_score": 0.7426,
+          "title": "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md"
+        },
+        {
+          "attribution": {
+            "planner_decomposition_0": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.605556,
+                "child_rollup": 0.0,
+                "lexical": 0.140967,
+                "semantic": 0.446607
+              },
+              "lane_scores": {
+                "associative": 0.605556,
+                "child_rollup": 0.0,
+                "lexical": 0.140967,
+                "semantic": 0.446607
+              },
+              "seat_owner": "semantic"
+            },
+            "planner_stepback_0_1833e2ac": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.6625,
+                "child_rollup": 0.57688,
+                "lexical": 0.359046,
+                "semantic": 0.500809
+              },
+              "lane_scores": {
+                "associative": 0.6625,
+                "child_rollup": 0.57688,
+                "lexical": 0.359046,
+                "semantic": 0.500809
+              },
+              "seat_owner": "semantic"
+            },
+            "planner_translation_0_1833e2ac": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.480556,
+                "child_rollup": 0.375024,
+                "lexical": 0.280229,
+                "semantic": 0.513758
+              },
+              "lane_scores": {
+                "associative": 0.480556,
+                "child_rollup": 0.375024,
+                "lexical": 0.280229,
+                "semantic": 0.513758
+              },
+              "seat_owner": "semantic"
+            }
+          },
+          "best_lane_rank": 3,
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "17bc966b6768a308d703fa2620cc6d4872f023888ccc44e534e7b38d97e68114",
+          "lane_ids": [
+            "planner_decomposition_0",
+            "planner_stepback_0_1833e2ac",
+            "planner_translation_0_1833e2ac"
+          ],
+          "max_score": 0.5291,
+          "title": "Walter Murch - In the Blink of an Eye (2001).md"
+        },
+        {
+          "attribution": {
+            "planner_decomposition_0": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.125,
+                "child_rollup": 0.0,
+                "lexical": 1.0,
+                "semantic": 0.324064
+              },
+              "lane_scores": {
+                "associative": 0.125,
+                "child_rollup": 0.0,
+                "lexical": 1.0,
+                "semantic": 0.324064
+              },
+              "seat_owner": "lexical"
+            },
+            "primary": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.125,
+                "child_rollup": 0.0,
+                "lexical": 1.0,
+                "semantic": 0.0
+              },
+              "lane_scores": {
+                "associative": 0.125,
+                "child_rollup": 0.0,
+                "lexical": 1.0,
+                "semantic": 0.0
+              },
+              "seat_owner": "lexical"
+            },
+            "translation_53d6331f62ec": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.125,
+                "child_rollup": 0.0,
+                "lexical": 1.0,
+                "semantic": 0.334212
+              },
+              "lane_scores": {
+                "associative": 0.125,
+                "child_rollup": 0.0,
+                "lexical": 1.0,
+                "semantic": 0.334212
+              },
+              "seat_owner": "lexical"
+            }
+          },
+          "best_lane_rank": 3,
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "4c900dec46f5937db37bc997a40cb8cb5c4cc2b821dbe2bb7e0b4703cb233bdf",
+          "lane_ids": [
+            "planner_decomposition_0",
+            "primary",
+            "translation_53d6331f62ec"
+          ],
+          "max_score": 0.3711,
+          "title": "Manga in Theory and Practice.md"
+        },
+        {
+          "attribution": {
+            "planner_stepback_0_1833e2ac": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.5,
+                "child_rollup": 0.0,
+                "lexical": 0.051426,
+                "semantic": 0.471747
+              },
+              "lane_scores": {
+                "associative": 0.5,
+                "child_rollup": 0.0,
+                "lexical": 0.051426,
+                "semantic": 0.471747
+              },
+              "seat_owner": "spillover"
+            }
+          },
+          "best_lane_rank": 5,
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "a6e0a87a1a199145aa33cbb3e25a7e0878272c17b0bf650147c57f615efc4b6c",
+          "lane_ids": [
+            "planner_stepback_0_1833e2ac"
+          ],
+          "max_score": 0.2808,
+          "title": "Blain Brown - Cinematography - Theory and Practice (2016).md"
+        },
+        {
+          "attribution": {
+            "planner_stepback_0_1833e2ac": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.316667,
+                "child_rollup": 0.286517,
+                "lexical": 0.0,
+                "semantic": 0.333505
+              },
+              "lane_scores": {
+                "associative": 0.316667,
+                "child_rollup": 0.286517,
+                "lexical": 0.0,
+                "semantic": 0.333505
+              },
+              "seat_owner": "child_rollup"
+            },
+            "planner_translation_0_1833e2ac": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.202778,
+                "child_rollup": 0.374077,
+                "lexical": 0.0,
+                "semantic": 0.324398
+              },
+              "lane_scores": {
+                "associative": 0.202778,
+                "child_rollup": 0.374077,
+                "lexical": 0.0,
+                "semantic": 0.324398
+              },
+              "seat_owner": "child_rollup"
+            }
+          },
+          "best_lane_rank": 6,
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "e52a308ba5ab89d1ca181542b81add0ec05361c7f0e89f68041b6cce7dee915a",
+          "lane_ids": [
+            "planner_stepback_0_1833e2ac",
+            "planner_translation_0_1833e2ac"
+          ],
+          "max_score": 0.2357,
+          "title": "Stage Combat Arts.md"
+        },
+        {
+          "attribution": {
+            "primary": {
+              "divergent_profile_demoted": true,
+              "effective_lane_scores": {
+                "associative": 0.0,
+                "child_rollup": 0.0,
+                "lexical": 0.120862,
+                "semantic": 0.403281
+              },
+              "lane_scores": {
+                "associative": 0.0,
+                "child_rollup": 0.0,
+                "lexical": 0.21975,
+                "semantic": 0.403281
+              },
+              "seat_owner": "semantic"
+            },
+            "translation_53d6331f62ec": {
+              "divergent_profile_demoted": true,
+              "effective_lane_scores": {
+                "associative": 0.0,
+                "child_rollup": 0.0,
+                "lexical": 0.075529,
+                "semantic": 0.430769
+              },
+              "lane_scores": {
+                "associative": 0.0,
+                "child_rollup": 0.0,
+                "lexical": 0.137326,
+                "semantic": 0.430769
+              },
+              "seat_owner": "semantic"
+            }
+          },
+          "best_lane_rank": 4,
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "06bbb7ad8f59b1ad6275441f905c9f2a4a9775807d22951da73fc5fa5a394b8e",
+          "lane_ids": [
+            "primary",
+            "translation_53d6331f62ec"
+          ],
+          "max_score": 0.131,
+          "title": "Mateu-Mestre - Framed Ink 2 (2021).md"
+        }
+      ],
+      "resolved_models": [
+        "anthropic/minimax-m2.7"
+      ],
+      "router_version": "four_lane_tier0_router.v1",
+      "technical_success": true,
+      "top_three_titles": [
+        "Grammar of the Edit.md",
+        "VES Handbook of Visual Effects.md",
+        "Paul Ekman - Facial Action Coding System Manual (0).md"
+      ]
+    },
+    {
+      "attribution_complete": true,
+      "done_received": true,
+      "elapsed_seconds": 35.808,
+      "errors": [],
+      "expected_hit_top_three": true,
+      "expected_title_any": [
+        "Mateu-Mestre - Framed Ink 2 (2021).md",
+        "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md"
+      ],
+      "forbidden_rank1": false,
+      "passed": true,
+      "query_id": "bridge_ai_video_blocking",
+      "question": "How can I describe staging and blocking in an AI video prompt so characters reveal intention through the scene?",
+      "ranked_documents": [
+        {
+          "attribution": {
+            "planner_decomposition_0": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.4,
+                "child_rollup": 1.0,
+                "lexical": 0.757347,
+                "semantic": 0.0
+              },
+              "lane_scores": {
+                "associative": 0.4,
+                "child_rollup": 1.0,
+                "lexical": 0.757347,
+                "semantic": 0.0
+              },
+              "seat_owner": "associative"
+            },
+            "starting_steps": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.4,
+                "child_rollup": 1.0,
+                "lexical": 0.757347,
+                "semantic": 0.0
+              },
+              "lane_scores": {
+                "associative": 0.4,
+                "child_rollup": 1.0,
+                "lexical": 0.757347,
+                "semantic": 0.0
+              },
+              "seat_owner": "associative"
+            },
+            "translation_53d6331f62ec": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.4,
+                "child_rollup": 1.0,
+                "lexical": 1.0,
+                "semantic": 0.0
+              },
+              "lane_scores": {
+                "associative": 0.4,
+                "child_rollup": 1.0,
+                "lexical": 1.0,
+                "semantic": 0.0
+              },
+              "seat_owner": "associative"
+            }
+          },
+          "best_lane_rank": 1,
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "36cd4f24fc36392138cac6405d59edbb5534f7ff05ead33dc9365a7c5578af28",
+          "lane_ids": [
+            "planner_decomposition_0",
+            "planner_stepback_0_dfa8eaa3",
+            "planner_translation_0_dfa8eaa3",
+            "starting_steps",
+            "translation_53d6331f62ec"
+          ],
+          "max_score": 0.98,
+          "title": "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md"
+        },
+        {
+          "attribution": {
+            "planner_decomposition_0": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.8,
+                "child_rollup": 0.655224,
+                "lexical": 1.0,
+                "semantic": 0.0
+              },
+              "lane_scores": {
+                "associative": 0.8,
+                "child_rollup": 0.655224,
+                "lexical": 1.0,
+                "semantic": 0.0
+              },
+              "seat_owner": "associative"
+            },
+            "starting_steps": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.8,
+                "child_rollup": 0.389234,
+                "lexical": 1.0,
+                "semantic": 0.0
+              },
+              "lane_scores": {
+                "associative": 0.8,
+                "child_rollup": 0.389234,
+                "lexical": 1.0,
+                "semantic": 0.0
+              },
+              "seat_owner": "associative"
+            }
+          },
+          "best_lane_rank": 1,
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "f4e5f68b188beb3aad3e9f1d10846c1d9c1747b2d872b701f5e2757e14dd5305",
+          "lane_ids": [
+            "planner_decomposition_0",
+            "planner_stepback_0_dfa8eaa3",
+            "planner_translation_0_dfa8eaa3",
+            "starting_steps",
+            "translation_53d6331f62ec"
+          ],
+          "max_score": 0.98,
+          "title": "VES Handbook of Visual Effects.md"
+        },
+        {
+          "attribution": {
+            "planner_decomposition_0": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.35,
+                "child_rollup": 0.93363,
+                "lexical": 0.702112,
+                "semantic": 0.324447
+              },
+              "lane_scores": {
+                "associative": 0.35,
+                "child_rollup": 0.93363,
+                "lexical": 0.702112,
+                "semantic": 0.324447
+              },
+              "seat_owner": "child_rollup"
+            },
+            "starting_steps": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.35,
+                "child_rollup": 0.412834,
+                "lexical": 0.702112,
+                "semantic": 0.321741
+              },
+              "lane_scores": {
+                "associative": 0.35,
+                "child_rollup": 0.412834,
+                "lexical": 0.702112,
+                "semantic": 0.321741
+              },
+              "seat_owner": "child_rollup"
+            },
+            "translation_53d6331f62ec": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.35,
+                "child_rollup": 0.205882,
+                "lexical": 0.296549,
+                "semantic": 0.392914
+              },
+              "lane_scores": {
+                "associative": 0.35,
+                "child_rollup": 0.205882,
+                "lexical": 0.296549,
+                "semantic": 0.392914
+              },
+              "seat_owner": "child_rollup"
+            }
+          },
+          "best_lane_rank": 2,
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "5d6acea4b31a1324c930a185ae8fd808e201daf25a4eac3a3c545fd6492b0377",
+          "lane_ids": [
+            "planner_decomposition_0",
+            "planner_stepback_0_dfa8eaa3",
+            "planner_translation_0_dfa8eaa3",
+            "starting_steps",
+            "translation_53d6331f62ec"
+          ],
+          "max_score": 0.92,
+          "title": "Force Dynamic Life Drawing.md"
+        },
+        {
+          "attribution": {},
+          "best_lane_rank": 2,
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "644fa066c79d084f3a3a7d6a4c6b7b6962ce20ac5a5da25e45045cf8cb7100eb",
+          "lane_ids": [
+            "translation_53d6331f62ec"
+          ],
+          "max_score": 0.8943,
+          "title": "Paul Ekman - Facial Action Coding System Manual (0).md"
+        },
+        {
+          "attribution": {},
+          "best_lane_rank": 3,
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "a6e0a87a1a199145aa33cbb3e25a7e0878272c17b0bf650147c57f615efc4b6c",
+          "lane_ids": [
+            "planner_stepback_0_dfa8eaa3",
+            "planner_translation_0_dfa8eaa3"
+          ],
+          "max_score": 0.89,
+          "title": "Blain Brown - Cinematography - Theory and Practice (2016).md"
+        },
+        {
+          "attribution": {},
+          "best_lane_rank": 3,
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "f509edd4716ee253760d7ac495851d01f0e2b1aa376e402e9c505152bffbb81a",
+          "lane_ids": [
+            "translation_53d6331f62ec"
+          ],
+          "max_score": 0.8771,
+          "title": "[International Journal of Reasoning-based Intelligent Systems vol. 2 iss. 1] Bayesian reasoning for Laban Movement Analysis used in human-machine interaction{Rett, Jorg_ Dias, Jorge_ Ahuactzin, Juan Manuel}(2010)[1.md"
+        },
+        {
+          "attribution": {
+            "planner_decomposition_0": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.4,
+                "child_rollup": 0.149254,
+                "lexical": 0.992168,
+                "semantic": 0.0
+              },
+              "lane_scores": {
+                "associative": 0.4,
+                "child_rollup": 0.149254,
+                "lexical": 0.992168,
+                "semantic": 0.0
+              },
+              "seat_owner": "lexical"
+            },
+            "starting_steps": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.4,
+                "child_rollup": 0.144928,
+                "lexical": 0.992168,
+                "semantic": 0.0
+              },
+              "lane_scores": {
+                "associative": 0.4,
+                "child_rollup": 0.144928,
+                "lexical": 0.992168,
+                "semantic": 0.0
+              },
+              "seat_owner": "lexical"
+            }
+          },
+          "best_lane_rank": 3,
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "c7b8973260e1b7b26002980c1e0723bfb02778669498b67b4891b464eb6feb91",
+          "lane_ids": [
+            "planner_decomposition_0",
+            "starting_steps"
+          ],
+          "max_score": 0.3979,
+          "title": "Grammar of the Edit.md"
+        },
+        {
+          "attribution": {
+            "planner_decomposition_0": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.35,
+                "child_rollup": 0.950959,
+                "lexical": 0.0,
+                "semantic": 0.4058
+              },
+              "lane_scores": {
+                "associative": 0.35,
+                "child_rollup": 0.950959,
+                "lexical": 0.0,
+                "semantic": 0.4058
+              },
+              "seat_owner": "semantic"
+            },
+            "planner_stepback_0_dfa8eaa3": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.35,
+                "child_rollup": 0.64058,
+                "lexical": 0.009173,
+                "semantic": 0.491663
+              },
+              "lane_scores": {
+                "associative": 0.35,
+                "child_rollup": 0.64058,
+                "lexical": 0.009173,
+                "semantic": 0.491663
+              },
+              "seat_owner": "semantic"
+            },
+            "planner_translation_0_dfa8eaa3": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.35,
+                "child_rollup": 0.639247,
+                "lexical": 0.0,
+                "semantic": 0.399923
+              },
+              "lane_scores": {
+                "associative": 0.35,
+                "child_rollup": 0.639247,
+                "lexical": 0.0,
+                "semantic": 0.399923
+              },
+              "seat_owner": "child_rollup"
+            },
+            "starting_steps": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.35,
+                "child_rollup": 0.255694,
+                "lexical": 0.0,
+                "semantic": 0.391917
+              },
+              "lane_scores": {
+                "associative": 0.35,
+                "child_rollup": 0.255694,
+                "lexical": 0.0,
+                "semantic": 0.391917
+              },
+              "seat_owner": "semantic"
+            },
+            "translation_53d6331f62ec": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.35,
+                "child_rollup": 0.213532,
+                "lexical": 0.005281,
+                "semantic": 0.443568
+              },
+              "lane_scores": {
+                "associative": 0.35,
+                "child_rollup": 0.213532,
+                "lexical": 0.005281,
+                "semantic": 0.443568
+              },
+              "seat_owner": "semantic"
+            }
+          },
+          "best_lane_rank": 4,
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "e52a308ba5ab89d1ca181542b81add0ec05361c7f0e89f68041b6cce7dee915a",
+          "lane_ids": [
+            "planner_decomposition_0",
+            "planner_stepback_0_dfa8eaa3",
+            "planner_translation_0_dfa8eaa3",
+            "starting_steps",
+            "translation_53d6331f62ec"
+          ],
+          "max_score": 0.3966,
+          "title": "Stage Combat Arts.md"
+        },
+        {
+          "attribution": {
+            "planner_decomposition_0": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.125,
+                "child_rollup": 0.0,
+                "lexical": 0.927126,
+                "semantic": 0.335054
+              },
+              "lane_scores": {
+                "associative": 0.125,
+                "child_rollup": 0.0,
+                "lexical": 0.927126,
+                "semantic": 0.335054
+              },
+              "seat_owner": "spillover"
+            },
+            "planner_stepback_0_dfa8eaa3": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.125,
+                "child_rollup": 0.0,
+                "lexical": 0.819295,
+                "semantic": 0.300079
+              },
+              "lane_scores": {
+                "associative": 0.125,
+                "child_rollup": 0.0,
+                "lexical": 0.819295,
+                "semantic": 0.300079
+              },
+              "seat_owner": "spillover"
+            },
+            "planner_translation_0_dfa8eaa3": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.125,
+                "child_rollup": 0.0,
+                "lexical": 0.805675,
+                "semantic": 0.0
+              },
+              "lane_scores": {
+                "associative": 0.125,
+                "child_rollup": 0.0,
+                "lexical": 0.805675,
+                "semantic": 0.0
+              },
+              "seat_owner": "lexical"
+            },
+            "starting_steps": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.125,
+                "child_rollup": 0.0,
+                "lexical": 0.927126,
+                "semantic": 0.0
+              },
+              "lane_scores": {
+                "associative": 0.125,
+                "child_rollup": 0.0,
+                "lexical": 0.927126,
+                "semantic": 0.0
+              },
+              "seat_owner": "spillover"
+            },
+            "translation_53d6331f62ec": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.125,
+                "child_rollup": 0.0,
+                "lexical": 0.809493,
+                "semantic": 0.315462
+              },
+              "lane_scores": {
+                "associative": 0.125,
+                "child_rollup": 0.0,
+                "lexical": 0.809493,
+                "semantic": 0.315462
+              },
+              "seat_owner": "lexical"
+            }
+          },
+          "best_lane_rank": 6,
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "4c900dec46f5937db37bc997a40cb8cb5c4cc2b821dbe2bb7e0b4703cb233bdf",
+          "lane_ids": [
+            "planner_decomposition_0",
+            "planner_stepback_0_dfa8eaa3",
+            "planner_translation_0_dfa8eaa3",
+            "starting_steps",
+            "translation_53d6331f62ec"
+          ],
+          "max_score": 0.353,
+          "title": "Manga in Theory and Practice.md"
+        },
+        {
+          "attribution": {
+            "planner_translation_0_dfa8eaa3": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.4,
+                "child_rollup": 0.0,
+                "lexical": 0.075958,
+                "semantic": 0.405602
+              },
+              "lane_scores": {
+                "associative": 0.4,
+                "child_rollup": 0.0,
+                "lexical": 0.075958,
+                "semantic": 0.405602
+              },
+              "seat_owner": "spillover"
+            },
+            "translation_53d6331f62ec": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.4,
+                "child_rollup": 0.0,
+                "lexical": 0.22237,
+                "semantic": 0.338946
+              },
+              "lane_scores": {
+                "associative": 0.4,
+                "child_rollup": 0.0,
+                "lexical": 0.22237,
+                "semantic": 0.338946
+              },
+              "seat_owner": "spillover"
+            }
+          },
+          "best_lane_rank": 6,
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "17bc966b6768a308d703fa2620cc6d4872f023888ccc44e534e7b38d97e68114",
+          "lane_ids": [
+            "planner_translation_0_dfa8eaa3",
+            "translation_53d6331f62ec"
+          ],
+          "max_score": 0.2603,
+          "title": "Walter Murch - In the Blink of an Eye (2001).md"
+        }
+      ],
+      "resolved_models": [
+        "anthropic/minimax-m2.7"
+      ],
+      "router_version": "four_lane_tier0_router.v1",
+      "technical_success": true,
+      "top_three_titles": [
+        "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md",
+        "VES Handbook of Visual Effects.md",
+        "Force Dynamic Life Drawing.md"
+      ]
+    },
+    {
+      "attribution_complete": true,
+      "done_received": true,
+      "elapsed_seconds": 27.656,
+      "errors": [],
+      "expected_hit_top_three": true,
+      "expected_title_any": [
+        "Mateu-Mestre - Framed Ink 2 (2021).md",
+        "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md"
+      ],
+      "forbidden_rank1": false,
+      "passed": true,
+      "query_id": "bridge_ai_video_visual_power",
+      "question": "Which storytelling principles should shape an AI video prompt when I want the frame to communicate power and vulnerability?",
+      "ranked_documents": [
+        {
+          "attribution": {
+            "planner_decomposition_0": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.766667,
+                "child_rollup": 0.243654,
+                "lexical": 0.861867,
+                "semantic": 0.0
+              },
+              "lane_scores": {
+                "associative": 0.766667,
+                "child_rollup": 0.243654,
+                "lexical": 0.861867,
+                "semantic": 0.0
+              },
+              "seat_owner": "associative"
+            },
+            "planner_translation_0_55339c7c": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.8,
+                "child_rollup": 0.310139,
+                "lexical": 1.0,
+                "semantic": 0.0
+              },
+              "lane_scores": {
+                "associative": 0.8,
+                "child_rollup": 0.310139,
+                "lexical": 1.0,
+                "semantic": 0.0
+              },
+              "seat_owner": "associative"
+            },
+            "primary": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.766667,
+                "child_rollup": 0.224474,
+                "lexical": 0.861867,
+                "semantic": 0.0
+              },
+              "lane_scores": {
+                "associative": 0.766667,
+                "child_rollup": 0.224474,
+                "lexical": 0.861867,
+                "semantic": 0.0
+              },
+              "seat_owner": "associative"
+            }
+          },
+          "best_lane_rank": 1,
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "f4e5f68b188beb3aad3e9f1d10846c1d9c1747b2d872b701f5e2757e14dd5305",
+          "lane_ids": [
+            "planner_decomposition_0",
+            "planner_stepback_0_2c42bef4",
+            "planner_translation_0_55339c7c",
+            "primary",
+            "translation_53d6331f62ec"
+          ],
+          "max_score": 0.98,
+          "title": "VES Handbook of Visual Effects.md"
+        },
+        {
+          "attribution": {},
+          "best_lane_rank": 2,
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "644fa066c79d084f3a3a7d6a4c6b7b6962ce20ac5a5da25e45045cf8cb7100eb",
+          "lane_ids": [
+            "translation_53d6331f62ec"
+          ],
+          "max_score": 0.8943,
+          "title": "Paul Ekman - Facial Action Coding System Manual (0).md"
+        },
+        {
+          "attribution": {
+            "planner_decomposition_0": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.595833,
+                "child_rollup": 0.491304,
+                "lexical": 1.0,
+                "semantic": 0.0
+              },
+              "lane_scores": {
+                "associative": 0.595833,
+                "child_rollup": 0.491304,
+                "lexical": 1.0,
+                "semantic": 0.0
+              },
+              "seat_owner": "lexical"
+            },
+            "planner_translation_0_55339c7c": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.4,
+                "child_rollup": 0.085203,
+                "lexical": 0.818863,
+                "semantic": 0.0
+              },
+              "lane_scores": {
+                "associative": 0.4,
+                "child_rollup": 0.085203,
+                "lexical": 0.818863,
+                "semantic": 0.0
+              },
+              "seat_owner": "child_rollup"
+            },
+            "primary": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.595833,
+                "child_rollup": 0.993023,
+                "lexical": 1.0,
+                "semantic": 0.0
+              },
+              "lane_scores": {
+                "associative": 0.595833,
+                "child_rollup": 0.993023,
+                "lexical": 1.0,
+                "semantic": 0.0
+              },
+              "seat_owner": "associative"
+            },
+            "translation_53d6331f62ec": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.595833,
+                "child_rollup": 0.946437,
+                "lexical": 0.846415,
+                "semantic": 0.0
+              },
+              "lane_scores": {
+                "associative": 0.595833,
+                "child_rollup": 0.946437,
+                "lexical": 0.846415,
+                "semantic": 0.0
+              },
+              "seat_owner": "associative"
+            }
+          },
+          "best_lane_rank": 1,
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "36cd4f24fc36392138cac6405d59edbb5534f7ff05ead33dc9365a7c5578af28",
+          "lane_ids": [
+            "planner_decomposition_0",
+            "planner_stepback_0_2c42bef4",
+            "planner_translation_0_55339c7c",
+            "primary",
+            "translation_53d6331f62ec"
+          ],
+          "max_score": 0.8804,
+          "title": "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md"
+        },
+        {
+          "attribution": {},
+          "best_lane_rank": 3,
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "f509edd4716ee253760d7ac495851d01f0e2b1aa376e402e9c505152bffbb81a",
+          "lane_ids": [
+            "translation_53d6331f62ec"
+          ],
+          "max_score": 0.8771,
+          "title": "[International Journal of Reasoning-based Intelligent Systems vol. 2 iss. 1] Bayesian reasoning for Laban Movement Analysis used in human-machine interaction{Rett, Jorg_ Dias, Jorge_ Ahuactzin, Juan Manuel}(2010)[1.md"
+        },
+        {
+          "attribution": {},
+          "best_lane_rank": 1,
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "5d6acea4b31a1324c930a185ae8fd808e201daf25a4eac3a3c545fd6492b0377",
+          "lane_ids": [
+            "planner_translation_0_55339c7c"
+          ],
+          "max_score": 0.8708,
+          "title": "Force Dynamic Life Drawing.md"
+        },
+        {
+          "attribution": {
+            "planner_decomposition_0": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.595833,
+                "child_rollup": 0.643478,
+                "lexical": 0.915784,
+                "semantic": 0.0
+              },
+              "lane_scores": {
+                "associative": 0.595833,
+                "child_rollup": 0.643478,
+                "lexical": 0.915784,
+                "semantic": 0.0
+              },
+              "seat_owner": "associative"
+            },
+            "primary": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.595833,
+                "child_rollup": 0.388316,
+                "lexical": 0.915784,
+                "semantic": 0.0
+              },
+              "lane_scores": {
+                "associative": 0.595833,
+                "child_rollup": 0.388316,
+                "lexical": 0.915784,
+                "semantic": 0.0
+              },
+              "seat_owner": "lexical"
+            },
+            "translation_53d6331f62ec": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.595833,
+                "child_rollup": 0.694543,
+                "lexical": 0.778421,
+                "semantic": 0.0
+              },
+              "lane_scores": {
+                "associative": 0.595833,
+                "child_rollup": 0.694543,
+                "lexical": 0.778421,
+                "semantic": 0.0
+              },
+              "seat_owner": "child_rollup"
+            }
+          },
+          "best_lane_rank": 2,
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "c7b8973260e1b7b26002980c1e0723bfb02778669498b67b4891b464eb6feb91",
+          "lane_ids": [
+            "planner_decomposition_0",
+            "planner_stepback_0_2c42bef4",
+            "primary",
+            "translation_53d6331f62ec"
+          ],
+          "max_score": 0.7948,
+          "title": "Grammar of the Edit.md"
+        },
+        {
+          "attribution": {
+            "planner_decomposition_0": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.566667,
+                "child_rollup": 1.0,
+                "lexical": 0.05922,
+                "semantic": 0.337976
+              },
+              "lane_scores": {
+                "associative": 0.566667,
+                "child_rollup": 1.0,
+                "lexical": 0.05922,
+                "semantic": 0.337976
+              },
+              "seat_owner": "child_rollup"
+            },
+            "planner_translation_0_55339c7c": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.4,
+                "child_rollup": 0.670732,
+                "lexical": 0.144859,
+                "semantic": 0.315737
+              },
+              "lane_scores": {
+                "associative": 0.4,
+                "child_rollup": 0.670732,
+                "lexical": 0.144859,
+                "semantic": 0.315737
+              },
+              "seat_owner": "associative"
+            },
+            "primary": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.566667,
+                "child_rollup": 1.0,
+                "lexical": 0.05922,
+                "semantic": 0.337876
+              },
+              "lane_scores": {
+                "associative": 0.566667,
+                "child_rollup": 1.0,
+                "lexical": 0.05922,
+                "semantic": 0.337876
+              },
+              "seat_owner": "child_rollup"
+            },
+            "translation_53d6331f62ec": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.566667,
+                "child_rollup": 0.65602,
+                "lexical": 0.04336,
+                "semantic": 0.32613
+              },
+              "lane_scores": {
+                "associative": 0.566667,
+                "child_rollup": 0.65602,
+                "lexical": 0.04336,
+                "semantic": 0.32613
+              },
+              "seat_owner": "spillover"
+            }
+          },
+          "best_lane_rank": 3,
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "a6e0a87a1a199145aa33cbb3e25a7e0878272c17b0bf650147c57f615efc4b6c",
+          "lane_ids": [
+            "planner_decomposition_0",
+            "planner_stepback_0_2c42bef4",
+            "planner_translation_0_55339c7c",
+            "primary",
+            "translation_53d6331f62ec"
+          ],
+          "max_score": 0.7667,
+          "title": "Blain Brown - Cinematography - Theory and Practice (2016).md"
+        },
+        {
+          "attribution": {
+            "planner_decomposition_0": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.595833,
+                "child_rollup": 0.0,
+                "lexical": 0.437252,
+                "semantic": 0.360451
+              },
+              "lane_scores": {
+                "associative": 0.595833,
+                "child_rollup": 0.0,
+                "lexical": 0.437252,
+                "semantic": 0.360451
+              },
+              "seat_owner": "spillover"
+            },
+            "planner_translation_0_55339c7c": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.4,
+                "child_rollup": 0.0,
+                "lexical": 0.53222,
+                "semantic": 0.0
+              },
+              "lane_scores": {
+                "associative": 0.4,
+                "child_rollup": 0.0,
+                "lexical": 0.53222,
+                "semantic": 0.0
+              },
+              "seat_owner": "spillover"
+            },
+            "primary": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.595833,
+                "child_rollup": 0.0,
+                "lexical": 0.437252,
+                "semantic": 0.358343
+              },
+              "lane_scores": {
+                "associative": 0.595833,
+                "child_rollup": 0.0,
+                "lexical": 0.437252,
+                "semantic": 0.358343
+              },
+              "seat_owner": "spillover"
+            }
+          },
+          "best_lane_rank": 5,
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "17bc966b6768a308d703fa2620cc6d4872f023888ccc44e534e7b38d97e68114",
+          "lane_ids": [
+            "planner_decomposition_0",
+            "planner_translation_0_55339c7c",
+            "primary"
+          ],
+          "max_score": 0.3782,
+          "title": "Walter Murch - In the Blink of an Eye (2001).md"
+        },
+        {
+          "attribution": {
+            "planner_stepback_0_2c42bef4": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.125,
+                "child_rollup": 0.0,
+                "lexical": 0.886894,
+                "semantic": 0.0
+              },
+              "lane_scores": {
+                "associative": 0.125,
+                "child_rollup": 0.0,
+                "lexical": 0.886894,
+                "semantic": 0.0
+              },
+              "seat_owner": "spillover"
+            },
+            "translation_53d6331f62ec": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.125,
+                "child_rollup": 0.0,
+                "lexical": 0.883375,
+                "semantic": 0.322139
+              },
+              "lane_scores": {
+                "associative": 0.125,
+                "child_rollup": 0.0,
+                "lexical": 0.883375,
+                "semantic": 0.322139
+              },
+              "seat_owner": "lexical"
+            }
+          },
+          "best_lane_rank": 5,
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "4c900dec46f5937db37bc997a40cb8cb5c4cc2b821dbe2bb7e0b4703cb233bdf",
+          "lane_ids": [
+            "planner_stepback_0_2c42bef4",
+            "translation_53d6331f62ec"
+          ],
+          "max_score": 0.3389,
+          "title": "Manga in Theory and Practice.md"
+        },
+        {
+          "attribution": {
+            "planner_decomposition_0": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.125,
+                "child_rollup": 0.0,
+                "lexical": 0.186296,
+                "semantic": 0.440902
+              },
+              "lane_scores": {
+                "associative": 0.125,
+                "child_rollup": 0.0,
+                "lexical": 0.186296,
+                "semantic": 0.440902
+              },
+              "seat_owner": "semantic"
+            },
+            "planner_stepback_0_2c42bef4": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.25,
+                "child_rollup": 0.0,
+                "lexical": 0.142442,
+                "semantic": 0.475694
+              },
+              "lane_scores": {
+                "associative": 0.25,
+                "child_rollup": 0.0,
+                "lexical": 0.142442,
+                "semantic": 0.475694
+              },
+              "seat_owner": "semantic"
+            },
+            "planner_translation_0_55339c7c": {
+              "divergent_profile_demoted": true,
+              "effective_lane_scores": {
+                "associative": 0.0,
+                "child_rollup": 0.0,
+                "lexical": 0.032122,
+                "semantic": 0.44375
+              },
+              "lane_scores": {
+                "associative": 0.0,
+                "child_rollup": 0.0,
+                "lexical": 0.058404,
+                "semantic": 0.44375
+              },
+              "seat_owner": "semantic"
+            },
+            "primary": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.125,
+                "child_rollup": 0.0,
+                "lexical": 0.186296,
+                "semantic": 0.431428
+              },
+              "lane_scores": {
+                "associative": 0.125,
+                "child_rollup": 0.0,
+                "lexical": 0.186296,
+                "semantic": 0.431428
+              },
+              "seat_owner": "semantic"
+            },
+            "translation_53d6331f62ec": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.125,
+                "child_rollup": 0.0,
+                "lexical": 0.136405,
+                "semantic": 0.412085
+              },
+              "lane_scores": {
+                "associative": 0.125,
+                "child_rollup": 0.0,
+                "lexical": 0.136405,
+                "semantic": 0.412085
+              },
+              "seat_owner": "semantic"
+            }
+          },
+          "best_lane_rank": 4,
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "06bbb7ad8f59b1ad6275441f905c9f2a4a9775807d22951da73fc5fa5a394b8e",
+          "lane_ids": [
+            "planner_decomposition_0",
+            "planner_stepback_0_2c42bef4",
+            "planner_translation_0_55339c7c",
+            "primary",
+            "translation_53d6331f62ec"
+          ],
+          "max_score": 0.2295,
+          "title": "Mateu-Mestre - Framed Ink 2 (2021).md"
+        }
+      ],
+      "resolved_models": [
+        "anthropic/minimax-m2.7"
+      ],
+      "router_version": "four_lane_tier0_router.v1",
+      "technical_success": true,
+      "top_three_titles": [
+        "VES Handbook of Visual Effects.md",
+        "Paul Ekman - Facial Action Coding System Manual (0).md",
+        "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md"
+      ]
+    },
+    {
+      "attribution_complete": true,
+      "done_received": true,
+      "elapsed_seconds": 43.31,
+      "errors": [],
+      "expected_hit_top_three": false,
+      "expected_title_any": [
+        "Elemental Magic.md",
+        "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md",
+        "Richard Williams - The Animator's Survival Kit (2002, Faber & Faber).md"
+      ],
+      "forbidden_rank1": false,
+      "passed": false,
+      "query_id": "bridge_ai_video_character_motion",
+      "question": "My AI video character moves correctly but the performance says nothing. What directing craft should I encode in the prompt?",
+      "ranked_documents": [
+        {
+          "attribution": {
+            "planner_decomposition_0": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.766667,
+                "child_rollup": 1.0,
+                "lexical": 0.655567,
+                "semantic": 0.0
+              },
+              "lane_scores": {
+                "associative": 0.766667,
+                "child_rollup": 1.0,
+                "lexical": 0.655567,
+                "semantic": 0.0
+              },
+              "seat_owner": "associative"
+            },
+            "primary": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.766667,
+                "child_rollup": 1.0,
+                "lexical": 0.655567,
+                "semantic": 0.0
+              },
+              "lane_scores": {
+                "associative": 0.766667,
+                "child_rollup": 1.0,
+                "lexical": 0.655567,
+                "semantic": 0.0
+              },
+              "seat_owner": "associative"
+            }
+          },
+          "best_lane_rank": 1,
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "f4e5f68b188beb3aad3e9f1d10846c1d9c1747b2d872b701f5e2757e14dd5305",
+          "lane_ids": [
+            "planner_decomposition_0",
+            "primary",
+            "translation_53d6331f62ec"
+          ],
+          "max_score": 0.98,
+          "title": "VES Handbook of Visual Effects.md"
+        },
+        {
+          "attribution": {
+            "planner_decomposition_0": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.375,
+                "child_rollup": 0.382609,
+                "lexical": 0.007077,
+                "semantic": 0.462613
+              },
+              "lane_scores": {
+                "associative": 0.375,
+                "child_rollup": 0.382609,
+                "lexical": 0.007077,
+                "semantic": 0.462613
+              },
+              "seat_owner": "semantic"
+            },
+            "primary": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.375,
+                "child_rollup": 0.0,
+                "lexical": 0.007077,
+                "semantic": 0.41097
+              },
+              "lane_scores": {
+                "associative": 0.375,
+                "child_rollup": 0.0,
+                "lexical": 0.007077,
+                "semantic": 0.41097
+              },
+              "seat_owner": "semantic"
+            }
+          },
+          "best_lane_rank": 2,
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "644fa066c79d084f3a3a7d6a4c6b7b6962ce20ac5a5da25e45045cf8cb7100eb",
+          "lane_ids": [
+            "planner_decomposition_0",
+            "primary",
+            "translation_53d6331f62ec"
+          ],
+          "max_score": 0.8943,
+          "title": "Paul Ekman - Facial Action Coding System Manual (0).md"
+        },
+        {
+          "attribution": {},
+          "best_lane_rank": 3,
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "f509edd4716ee253760d7ac495851d01f0e2b1aa376e402e9c505152bffbb81a",
+          "lane_ids": [
+            "translation_53d6331f62ec"
+          ],
+          "max_score": 0.8771,
+          "title": "[International Journal of Reasoning-based Intelligent Systems vol. 2 iss. 1] Bayesian reasoning for Laban Movement Analysis used in human-machine interaction{Rett, Jorg_ Dias, Jorge_ Ahuactzin, Juan Manuel}(2010)[1.md"
+        },
+        {
+          "attribution": {
+            "planner_decomposition_0": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.6625,
+                "child_rollup": 0.652174,
+                "lexical": 0.66905,
+                "semantic": 0.0
+              },
+              "lane_scores": {
+                "associative": 0.6625,
+                "child_rollup": 0.652174,
+                "lexical": 0.66905,
+                "semantic": 0.0
+              },
+              "seat_owner": "associative"
+            },
+            "primary": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.6625,
+                "child_rollup": 0.652174,
+                "lexical": 0.66905,
+                "semantic": 0.0
+              },
+              "lane_scores": {
+                "associative": 0.6625,
+                "child_rollup": 0.652174,
+                "lexical": 0.66905,
+                "semantic": 0.0
+              },
+              "seat_owner": "associative"
+            },
+            "translation_53d6331f62ec": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.6625,
+                "child_rollup": 0.60202,
+                "lexical": 0.774657,
+                "semantic": 0.0
+              },
+              "lane_scores": {
+                "associative": 0.6625,
+                "child_rollup": 0.60202,
+                "lexical": 0.774657,
+                "semantic": 0.0
+              },
+              "seat_owner": "associative"
+            }
+          },
+          "best_lane_rank": 2,
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "36cd4f24fc36392138cac6405d59edbb5534f7ff05ead33dc9365a7c5578af28",
+          "lane_ids": [
+            "planner_decomposition_0",
+            "primary",
+            "translation_53d6331f62ec"
+          ],
+          "max_score": 0.5128,
+          "title": "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md"
+        },
+        {
+          "attribution": {
+            "planner_decomposition_0": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.529167,
+                "child_rollup": 0.0,
+                "lexical": 0.507286,
+                "semantic": 0.346323
+              },
+              "lane_scores": {
+                "associative": 0.529167,
+                "child_rollup": 0.0,
+                "lexical": 0.507286,
+                "semantic": 0.346323
+              },
+              "seat_owner": "spillover"
+            },
+            "primary": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.529167,
+                "child_rollup": 0.151617,
+                "lexical": 0.507286,
+                "semantic": 0.0
+              },
+              "lane_scores": {
+                "associative": 0.529167,
+                "child_rollup": 0.151617,
+                "lexical": 0.507286,
+                "semantic": 0.0
+              },
+              "seat_owner": "spillover"
+            },
+            "translation_53d6331f62ec": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.529167,
+                "child_rollup": 0.0,
+                "lexical": 0.611834,
+                "semantic": 0.31242
+              },
+              "lane_scores": {
+                "associative": 0.529167,
+                "child_rollup": 0.0,
+                "lexical": 0.611834,
+                "semantic": 0.31242
+              },
+              "seat_owner": "spillover"
+            }
+          },
+          "best_lane_rank": 5,
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "c7b8973260e1b7b26002980c1e0723bfb02778669498b67b4891b464eb6feb91",
+          "lane_ids": [
+            "planner_decomposition_0",
+            "primary",
+            "translation_53d6331f62ec"
+          ],
+          "max_score": 0.3898,
+          "title": "Grammar of the Edit.md"
+        },
+        {
+          "attribution": {
+            "planner_decomposition_0": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.125,
+                "child_rollup": 0.0,
+                "lexical": 1.0,
+                "semantic": 0.382985
+              },
+              "lane_scores": {
+                "associative": 0.125,
+                "child_rollup": 0.0,
+                "lexical": 1.0,
+                "semantic": 0.382985
+              },
+              "seat_owner": "lexical"
+            },
+            "primary": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.125,
+                "child_rollup": 0.0,
+                "lexical": 1.0,
+                "semantic": 0.324203
+              },
+              "lane_scores": {
+                "associative": 0.125,
+                "child_rollup": 0.0,
+                "lexical": 1.0,
+                "semantic": 0.324203
+              },
+              "seat_owner": "lexical"
+            },
+            "translation_53d6331f62ec": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.125,
+                "child_rollup": 0.0,
+                "lexical": 1.0,
+                "semantic": 0.356204
+              },
+              "lane_scores": {
+                "associative": 0.125,
+                "child_rollup": 0.0,
+                "lexical": 1.0,
+                "semantic": 0.356204
+              },
+              "seat_owner": "lexical"
+            }
+          },
+          "best_lane_rank": 3,
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "4c900dec46f5937db37bc997a40cb8cb5c4cc2b821dbe2bb7e0b4703cb233bdf",
+          "lane_ids": [
+            "planner_decomposition_0",
+            "primary",
+            "translation_53d6331f62ec"
+          ],
+          "max_score": 0.3832,
+          "title": "Manga in Theory and Practice.md"
+        },
+        {
+          "attribution": {
+            "translation_53d6331f62ec": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.6625,
+                "child_rollup": 0.0,
+                "lexical": 0.109827,
+                "semantic": 0.366207
+              },
+              "lane_scores": {
+                "associative": 0.6625,
+                "child_rollup": 0.0,
+                "lexical": 0.109827,
+                "semantic": 0.366207
+              },
+              "seat_owner": "spillover"
+            }
+          },
+          "best_lane_rank": 7,
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "17bc966b6768a308d703fa2620cc6d4872f023888ccc44e534e7b38d97e68114",
+          "lane_ids": [
+            "translation_53d6331f62ec"
+          ],
+          "max_score": 0.3178,
+          "title": "Walter Murch - In the Blink of an Eye (2001).md"
+        },
+        {
+          "attribution": {
+            "planner_decomposition_0": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.5,
+                "child_rollup": 0.304348,
+                "lexical": 0.029049,
+                "semantic": 0.341226
+              },
+              "lane_scores": {
+                "associative": 0.5,
+                "child_rollup": 0.304348,
+                "lexical": 0.029049,
+                "semantic": 0.341226
+              },
+              "seat_owner": "child_rollup"
+            }
+          },
+          "best_lane_rank": 5,
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "a6e0a87a1a199145aa33cbb3e25a7e0878272c17b0bf650147c57f615efc4b6c",
+          "lane_ids": [
+            "planner_decomposition_0"
+          ],
+          "max_score": 0.3034,
+          "title": "Blain Brown - Cinematography - Theory and Practice (2016).md"
+        },
+        {
+          "attribution": {
+            "primary": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.441667,
+                "child_rollup": 0.278882,
+                "lexical": 0.005557,
+                "semantic": 0.404924
+              },
+              "lane_scores": {
+                "associative": 0.441667,
+                "child_rollup": 0.278882,
+                "lexical": 0.005557,
+                "semantic": 0.404924
+              },
+              "seat_owner": "child_rollup"
+            }
+          },
+          "best_lane_rank": 5,
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "e52a308ba5ab89d1ca181542b81add0ec05361c7f0e89f68041b6cce7dee915a",
+          "lane_ids": [
+            "primary"
+          ],
+          "max_score": 0.2909,
+          "title": "Stage Combat Arts.md"
+        }
+      ],
+      "resolved_models": [
+        "anthropic/minimax-m2.7"
+      ],
+      "router_version": "four_lane_tier0_router.v1",
+      "technical_success": true,
+      "top_three_titles": [
+        "VES Handbook of Visual Effects.md",
+        "Paul Ekman - Facial Action Coding System Manual (0).md",
+        "[International Journal of Reasoning-based Intelligent Systems vol. 2 iss. 1] Bayesian reasoning for Laban Movement Analysis used in human-machine interaction{Rett, Jorg_ Dias, Jorge_ Ahuactzin, Juan Manuel}(2010)[1.md"
+      ]
+    },
+    {
+      "attribution_complete": true,
+      "done_received": true,
+      "elapsed_seconds": 38.715,
+      "errors": [],
+      "expected_hit_top_three": true,
+      "expected_title_any": [
+        "Grammar of the Edit.md",
+        "Mateu-Mestre - Framed Ink 2 (2021).md",
+        "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md"
+      ],
+      "forbidden_rank1": false,
+      "passed": true,
+      "query_id": "bridge_ai_video_storyboard",
+      "question": "How do I turn a narrative beat into a sequence of AI video prompts without losing the dramatic through-line?",
+      "ranked_documents": [
+        {
+          "attribution": {
+            "planner_decomposition_0": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.4,
+                "child_rollup": 0.671642,
+                "lexical": 0.606819,
+                "semantic": 0.0
+              },
+              "lane_scores": {
+                "associative": 0.4,
+                "child_rollup": 0.671642,
+                "lexical": 0.606819,
+                "semantic": 0.0
+              },
+              "seat_owner": "associative"
+            },
+            "starting_steps": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.4,
+                "child_rollup": 0.681818,
+                "lexical": 0.606819,
+                "semantic": 0.0
+              },
+              "lane_scores": {
+                "associative": 0.4,
+                "child_rollup": 0.681818,
+                "lexical": 0.606819,
+                "semantic": 0.0
+              },
+              "seat_owner": "spillover"
+            },
+            "translation_53d6331f62ec": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.4,
+                "child_rollup": 1.0,
+                "lexical": 1.0,
+                "semantic": 0.0
+              },
+              "lane_scores": {
+                "associative": 0.4,
+                "child_rollup": 1.0,
+                "lexical": 1.0,
+                "semantic": 0.0
+              },
+              "seat_owner": "associative"
+            }
+          },
+          "best_lane_rank": 1,
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "36cd4f24fc36392138cac6405d59edbb5534f7ff05ead33dc9365a7c5578af28",
+          "lane_ids": [
+            "planner_decomposition_0",
+            "planner_stepback_0_c10335d9",
+            "planner_translation_0_e0297787",
+            "starting_steps",
+            "translation_53d6331f62ec"
+          ],
+          "max_score": 0.98,
+          "title": "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md"
+        },
+        {
+          "attribution": {
+            "planner_decomposition_0": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.8,
+                "child_rollup": 0.40597,
+                "lexical": 0.801243,
+                "semantic": 0.0
+              },
+              "lane_scores": {
+                "associative": 0.8,
+                "child_rollup": 0.40597,
+                "lexical": 0.801243,
+                "semantic": 0.0
+              },
+              "seat_owner": "associative"
+            },
+            "planner_stepback_0_c10335d9": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.8,
+                "child_rollup": 0.946778,
+                "lexical": 0.699319,
+                "semantic": 0.336414
+              },
+              "lane_scores": {
+                "associative": 0.8,
+                "child_rollup": 0.946778,
+                "lexical": 0.699319,
+                "semantic": 0.336414
+              },
+              "seat_owner": "associative"
+            },
+            "planner_translation_0_e0297787": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.766667,
+                "child_rollup": 0.0,
+                "lexical": 0.625118,
+                "semantic": 0.315646
+              },
+              "lane_scores": {
+                "associative": 0.766667,
+                "child_rollup": 0.0,
+                "lexical": 0.625118,
+                "semantic": 0.315646
+              },
+              "seat_owner": "associative"
+            },
+            "starting_steps": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.8,
+                "child_rollup": 0.657828,
+                "lexical": 0.801243,
+                "semantic": 0.0
+              },
+              "lane_scores": {
+                "associative": 0.8,
+                "child_rollup": 0.657828,
+                "lexical": 0.801243,
+                "semantic": 0.0
+              },
+              "seat_owner": "associative"
+            }
+          },
+          "best_lane_rank": 1,
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "f4e5f68b188beb3aad3e9f1d10846c1d9c1747b2d872b701f5e2757e14dd5305",
+          "lane_ids": [
+            "planner_decomposition_0",
+            "planner_stepback_0_c10335d9",
+            "planner_translation_0_e0297787",
+            "starting_steps",
+            "translation_53d6331f62ec"
+          ],
+          "max_score": 0.98,
+          "title": "VES Handbook of Visual Effects.md"
+        },
+        {
+          "attribution": {
+            "planner_decomposition_0": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.4,
+                "child_rollup": 0.0,
+                "lexical": 0.794968,
+                "semantic": 0.0
+              },
+              "lane_scores": {
+                "associative": 0.4,
+                "child_rollup": 0.0,
+                "lexical": 0.794968,
+                "semantic": 0.0
+              },
+              "seat_owner": "spillover"
+            },
+            "starting_steps": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.4,
+                "child_rollup": 1.0,
+                "lexical": 0.794968,
+                "semantic": 0.0
+              },
+              "lane_scores": {
+                "associative": 0.4,
+                "child_rollup": 1.0,
+                "lexical": 0.794968,
+                "semantic": 0.0
+              },
+              "seat_owner": "associative"
+            },
+            "translation_53d6331f62ec": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.4,
+                "child_rollup": 0.681135,
+                "lexical": 0.349532,
+                "semantic": 0.327454
+              },
+              "lane_scores": {
+                "associative": 0.4,
+                "child_rollup": 0.681135,
+                "lexical": 0.349532,
+                "semantic": 0.327454
+              },
+              "seat_owner": "child_rollup"
+            }
+          },
+          "best_lane_rank": 2,
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "c7b8973260e1b7b26002980c1e0723bfb02778669498b67b4891b464eb6feb91",
+          "lane_ids": [
+            "planner_decomposition_0",
+            "planner_stepback_0_c10335d9",
+            "planner_translation_0_e0297787",
+            "starting_steps",
+            "translation_53d6331f62ec"
+          ],
+          "max_score": 0.956,
+          "title": "Grammar of the Edit.md"
+        },
+        {
+          "attribution": {},
+          "best_lane_rank": 3,
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "a6e0a87a1a199145aa33cbb3e25a7e0878272c17b0bf650147c57f615efc4b6c",
+          "lane_ids": [
+            "planner_stepback_0_c10335d9",
+            "planner_translation_0_e0297787"
+          ],
+          "max_score": 0.908,
+          "title": "Blain Brown - Cinematography - Theory and Practice (2016).md"
+        },
+        {
+          "attribution": {
+            "planner_decomposition_0": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.275,
+                "child_rollup": 1.0,
+                "lexical": 0.0,
+                "semantic": 0.0
+              },
+              "lane_scores": {
+                "associative": 0.275,
+                "child_rollup": 1.0,
+                "lexical": 0.0,
+                "semantic": 0.0
+              },
+              "seat_owner": "child_rollup"
+            },
+            "starting_steps": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.275,
+                "child_rollup": 0.990909,
+                "lexical": 0.0,
+                "semantic": 0.0
+              },
+              "lane_scores": {
+                "associative": 0.275,
+                "child_rollup": 0.990909,
+                "lexical": 0.0,
+                "semantic": 0.0
+              },
+              "seat_owner": "child_rollup"
+            }
+          },
+          "best_lane_rank": 2,
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "644fa066c79d084f3a3a7d6a4c6b7b6962ce20ac5a5da25e45045cf8cb7100eb",
+          "lane_ids": [
+            "planner_decomposition_0",
+            "starting_steps",
+            "translation_53d6331f62ec"
+          ],
+          "max_score": 0.8943,
+          "title": "Paul Ekman - Facial Action Coding System Manual (0).md"
+        },
+        {
+          "attribution": {},
+          "best_lane_rank": 3,
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "f509edd4716ee253760d7ac495851d01f0e2b1aa376e402e9c505152bffbb81a",
+          "lane_ids": [
+            "translation_53d6331f62ec"
+          ],
+          "max_score": 0.8771,
+          "title": "[International Journal of Reasoning-based Intelligent Systems vol. 2 iss. 1] Bayesian reasoning for Laban Movement Analysis used in human-machine interaction{Rett, Jorg_ Dias, Jorge_ Ahuactzin, Juan Manuel}(2010)[1.md"
+        },
+        {
+          "attribution": {
+            "planner_stepback_0_c10335d9": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.4,
+                "child_rollup": 0.0,
+                "lexical": 0.287562,
+                "semantic": 0.469822
+              },
+              "lane_scores": {
+                "associative": 0.4,
+                "child_rollup": 0.0,
+                "lexical": 0.287562,
+                "semantic": 0.469822
+              },
+              "seat_owner": "lexical"
+            },
+            "planner_translation_0_e0297787": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.595833,
+                "child_rollup": 0.234586,
+                "lexical": 0.357356,
+                "semantic": 0.482492
+              },
+              "lane_scores": {
+                "associative": 0.595833,
+                "child_rollup": 0.234586,
+                "lexical": 0.357356,
+                "semantic": 0.482492
+              },
+              "seat_owner": "semantic"
+            }
+          },
+          "best_lane_rank": 5,
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "17bc966b6768a308d703fa2620cc6d4872f023888ccc44e534e7b38d97e68114",
+          "lane_ids": [
+            "planner_stepback_0_c10335d9",
+            "planner_translation_0_e0297787"
+          ],
+          "max_score": 0.4356,
+          "title": "Walter Murch - In the Blink of an Eye (2001).md"
+        },
+        {
+          "attribution": {
+            "planner_decomposition_0": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.25,
+                "child_rollup": 0.0,
+                "lexical": 1.0,
+                "semantic": 0.305345
+              },
+              "lane_scores": {
+                "associative": 0.25,
+                "child_rollup": 0.0,
+                "lexical": 1.0,
+                "semantic": 0.305345
+              },
+              "seat_owner": "lexical"
+            },
+            "planner_translation_0_e0297787": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.25,
+                "child_rollup": 0.0,
+                "lexical": 0.462085,
+                "semantic": 0.0
+              },
+              "lane_scores": {
+                "associative": 0.25,
+                "child_rollup": 0.0,
+                "lexical": 0.462085,
+                "semantic": 0.0
+              },
+              "seat_owner": "lexical"
+            },
+            "starting_steps": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.25,
+                "child_rollup": 0.0,
+                "lexical": 1.0,
+                "semantic": 0.0
+              },
+              "lane_scores": {
+                "associative": 0.25,
+                "child_rollup": 0.0,
+                "lexical": 1.0,
+                "semantic": 0.0
+              },
+              "seat_owner": "lexical"
+            },
+            "translation_53d6331f62ec": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.25,
+                "child_rollup": 0.0,
+                "lexical": 0.522779,
+                "semantic": 0.362746
+              },
+              "lane_scores": {
+                "associative": 0.25,
+                "child_rollup": 0.0,
+                "lexical": 0.522779,
+                "semantic": 0.362746
+              },
+              "seat_owner": "lexical"
+            }
+          },
+          "best_lane_rank": 3,
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "4c900dec46f5937db37bc997a40cb8cb5c4cc2b821dbe2bb7e0b4703cb233bdf",
+          "lane_ids": [
+            "planner_decomposition_0",
+            "planner_translation_0_e0297787",
+            "starting_steps",
+            "translation_53d6331f62ec"
+          ],
+          "max_score": 0.4013,
+          "title": "Manga in Theory and Practice.md"
+        },
+        {
+          "attribution": {
+            "planner_decomposition_0": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.35,
+                "child_rollup": 0.0,
+                "lexical": 0.230067,
+                "semantic": 0.309626
+              },
+              "lane_scores": {
+                "associative": 0.35,
+                "child_rollup": 0.0,
+                "lexical": 0.230067,
+                "semantic": 0.309626
+              },
+              "seat_owner": "semantic"
+            },
+            "translation_53d6331f62ec": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.225,
+                "child_rollup": 0.0,
+                "lexical": 0.209871,
+                "semantic": 0.422332
+              },
+              "lane_scores": {
+                "associative": 0.225,
+                "child_rollup": 0.0,
+                "lexical": 0.209871,
+                "semantic": 0.422332
+              },
+              "seat_owner": "semantic"
+            }
+          },
+          "best_lane_rank": 4,
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "5d6acea4b31a1324c930a185ae8fd808e201daf25a4eac3a3c545fd6492b0377",
+          "lane_ids": [
+            "planner_decomposition_0",
+            "translation_53d6331f62ec"
+          ],
+          "max_score": 0.2399,
+          "title": "Force Dynamic Life Drawing.md"
+        },
+        {
+          "attribution": {
+            "planner_stepback_0_c10335d9": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.25,
+                "child_rollup": 0.0,
+                "lexical": 0.125996,
+                "semantic": 0.50168
+              },
+              "lane_scores": {
+                "associative": 0.25,
+                "child_rollup": 0.0,
+                "lexical": 0.125996,
+                "semantic": 0.50168
+              },
+              "seat_owner": "semantic"
+            },
+            "starting_steps": {
+              "divergent_profile_demoted": false,
+              "effective_lane_scores": {
+                "associative": 0.125,
+                "child_rollup": 0.0,
+                "lexical": 0.064453,
+                "semantic": 0.355177
+              },
+              "lane_scores": {
+                "associative": 0.125,
+                "child_rollup": 0.0,
+                "lexical": 0.064453,
+                "semantic": 0.355177
+              },
+              "seat_owner": "semantic"
+            }
+          },
+          "best_lane_rank": 4,
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "06bbb7ad8f59b1ad6275441f905c9f2a4a9775807d22951da73fc5fa5a394b8e",
+          "lane_ids": [
+            "planner_stepback_0_c10335d9",
+            "starting_steps"
+          ],
+          "max_score": 0.2319,
+          "title": "Mateu-Mestre - Framed Ink 2 (2021).md"
+        }
+      ],
+      "resolved_models": [
+        "anthropic/minimax-m2.7"
+      ],
+      "router_version": "four_lane_tier0_router.v1",
+      "technical_success": true,
+      "top_three_titles": [
+        "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md",
+        "VES Handbook of Visual Effects.md",
+        "Grammar of the Edit.md"
+      ]
+    }
+  ],
+  "runtime": {
+    "four_lane_tier0_router_enabled": true,
+    "subquery_decomposition_enabled": false,
+    "tier": "qdrant_mongo_graph",
+    "top_k": 10
+  },
+  "schema_version": "polymath.tier0_bridge_diagnostic_results.v1",
+  "selection_sha256": "da7b94c152dd5e72d52db1fd80a68f0cc2797d85ed1fd4899f9a8c19874eaf00",
+  "started_and_completed_at_utc": "2026-07-17T17:25:07.162666+00:00",
+  "summary": {
+    "execution_count": 6,
+    "pass_rate": 0.6666666666666666,
+    "passed": false,
+    "passed_count": 4,
+    "technical_success_count": 6
+  }
+}

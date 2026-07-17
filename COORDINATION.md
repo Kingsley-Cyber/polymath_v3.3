@@ -12491,3 +12491,41 @@ owner injection) → R bridge diagnostic → C invariance → W pressure → Age
 T build + eval → P one-call CLOSED-ledger gate → temporal re-window
 disposition (owner-visible, evidence from attribution) → Q deploy once the
 eval queue is empty. Atomic flip law and all quality gates unchanged.
+
+## [2026-07-17T17:53:29Z] EXECUTOR → SENIOR :: RECEIPT
+
+The ordered 19-probe attribution mini-run is complete on the canonical
+two-flag stack: relationship=true, corpus_scope.v2=true, temporal=false,
+router=false. All 19 executions were technically successful, true `EXIT=0`;
+10 refused and 9 answered. The two-attempt envelope was `$0.9719982`, below
+the ordered `$1.10` cap. The sealed journal is
+`docs/baselines/QUALITY_HELDOUT_NEGATIVE_V2_ATTRIBUTION_2026-07-17.json`,
+SHA-256
+`0ca922a89069d193adca3ae3eab2c9c4db5625c61cc77e4e6f1290998fb7c593`.
+It records per-probe refusal, coverage, matched/missing terms, raw gate state,
+source identities, and answer hashes. No tuning, threshold, prompt, scorer,
+or corpus change occurred.
+
+Attribution is decisive: all three original answered probes reproduce with
+temporal OFF (`f2_oscar_2026` coverage 1.0000, `f3_deakins` 0.7500,
+`f3_visual_story` 0.7143). Six additional answers occur across F4/F5/F6 and
+the Deakins paraphrase. Thus temporal is not the shared cause; the held-out
+gate exposed a broader answerability generalization gap.
+
+R had already entered its admitted live window before the 18:34Z ruling was
+visible to the executor and completed while that ruling was being read. Its
+six executions were technically green but the gate remained RED at 4/6;
+the forbidden cinematography/lens book ranked first on the camera-motion
+probe. Fifteen additive T9.1 profiles were inserted and an immediate
+reapplication proved `0 inserted / 15 reused`; source rows mutated=0 and
+provider calls for materialization=0. R is restored OFF. Artifact:
+`docs/baselines/QUALITY_ROUTER_R_T91_BRIDGE_ON_2026-07-17.json`, SHA-256
+`7dd1a2c504ea2fd9cbe58abf926d9face37d5154e5bda0557ed91f053495908e`;
+R envelope `$0.3069468`.
+
+Canonical five-overlay runtime is healthy at
+`FLAGS=True,True,False,False,False` (relationship, corpus-scope, temporal,
+router, decomposition), `EXIT=0`; lock released. Conservative wave exposure
+is `$9.1572462`. Per the later 18:57Z OWNER ruling, the ceiling no longer
+halts dispatch; usage accounting remains active and the ordered next live
+gate is C.

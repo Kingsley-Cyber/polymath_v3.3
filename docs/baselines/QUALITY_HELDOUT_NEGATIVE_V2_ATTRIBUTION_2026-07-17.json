@@ -1,0 +1,913 @@
+{
+  "completed_at_utc": "2026-07-17T17:51:12.162644+00:00",
+  "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+  "cost_envelope": {
+    "attempt_bound": 38,
+    "ceiling_usd": 2.0,
+    "completion_tokens_per_attempt_bound": 16384,
+    "execution_count": 19,
+    "input_tokens_per_attempt_bound": 19727,
+    "input_usd": 0.2248878,
+    "measurement_basis": {
+      "evidence_conversion": "one evidence character equals one input token",
+      "prior_max_evidence_chars": 13293,
+      "prior_max_output_tokens": 631,
+      "prior_model_calls": 50,
+      "prior_total_output_tokens": 16058,
+      "system_prompt_tokens": 2338,
+      "wrapper_allowance_tokens": 4096
+    },
+    "output_usd": 0.7471104,
+    "rate_card": {
+      "checked_at_utc": "2026-07-16",
+      "model": "MiniMax M2.7",
+      "output_usd_per_million": 1.2,
+      "source": "https://opencode.ai/docs/go/",
+      "uncached_input_usd_per_million": 0.3
+    },
+    "schema_version": "chat_eval_cost_envelope.v1",
+    "total_usd": 0.9719982
+  },
+  "measurement_only": true,
+  "prior_answered_probe_ids": [
+    "negv2_f2_oscar_2026",
+    "negv2_f3_deakins",
+    "negv2_f3_visual_story"
+  ],
+  "prior_passed_probe_ids": [
+    "negv2_f1_crispr",
+    "negv2_f1_diabetes",
+    "negv2_f1_mrsa",
+    "negv2_f1_qubit",
+    "negv2_f2_amazon_2026",
+    "negv2_f2_film_tax_2025",
+    "negv2_f2_iphone17",
+    "negv2_f3_save_the_cat",
+    "negv2_f3_shopify_handbook"
+  ],
+  "prior_red_log_sha256": "6345380ccb36331776515348c1e62adbee902a069910c1741516cdb5f2043832",
+  "query_route_preflight": {
+    "api_base": "https://opencode.ai/zen/go",
+    "credential_present_and_decryptable": true,
+    "model": "anthropic/minimax-m2.7",
+    "pool_entry_count": 17,
+    "pool_safe_sha256": "91bf6ceb54940ac467163624c3a92e2284f28cdbfda3863ccf4acc3671edadfe",
+    "primary_entry_id": "96797107-07cb-4ebc-9df3-e0833193932e",
+    "provider": "opencode-go-anthropic",
+    "user_id": "6a132beafef900c17f87848e"
+  },
+  "results": [
+    {
+      "answer_sha256": "4c444c9ee4bf3d599fdb678ae7cbbf67640e84febb2f71b9a74b90c074f89282",
+      "answerability": {
+        "answerable": true,
+        "guard": {
+          "applied": false,
+          "coverage": 1.0,
+          "eligible": true,
+          "enabled": true,
+          "matched_terms": [
+            "academy",
+            "award",
+            "best",
+            "cinematography"
+          ],
+          "min_coverage": 0.6,
+          "min_terms": 2,
+          "missing_terms": [],
+          "reason": "not_applied",
+          "supported": true,
+          "terms": []
+        },
+        "missing_critical_atoms": [],
+        "policy_version": "corpus_scope.v2",
+        "raw_answerable": false,
+        "required_coverage": 1.0,
+        "status": "answerable"
+      },
+      "elapsed_seconds": 23.436,
+      "errors": [],
+      "family": "F2_temporal_out_of_range",
+      "model_skipped": false,
+      "query_id": "negv2_f2_oscar_2026",
+      "question_sha256": "7c03ea5cb71a64eedc3e623e1872bad38b773489979a790dd7156da3570b831a",
+      "refused": false,
+      "source_count": 5,
+      "source_filenames": [
+        "Blain Brown - Cinematography - Theory and Practice (2016).md",
+        "VES Handbook of Visual Effects.md",
+        "Walter Murch - In the Blink of an Eye (2001).md"
+      ],
+      "technical_ok": true
+    },
+    {
+      "answer_sha256": "583214ba6912d4e0a76152697ad56dbc10cfdadf74085021f271cb5284bc3946",
+      "answerability": {
+        "answerable": true,
+        "guard": {
+          "applied": false,
+          "coverage": 0.75,
+          "eligible": true,
+          "enabled": true,
+          "matched_terms": [
+            "roger",
+            "deakins",
+            "anamorphic"
+          ],
+          "min_coverage": 0.6,
+          "min_terms": 2,
+          "missing_terms": [
+            "masterclass"
+          ],
+          "reason": "not_applied",
+          "supported": true,
+          "terms": []
+        },
+        "missing_critical_atoms": [],
+        "policy_version": "corpus_scope.v2",
+        "raw_answerable": false,
+        "required_coverage": 0.75,
+        "status": "answerable"
+      },
+      "elapsed_seconds": 27.761,
+      "errors": [],
+      "family": "F3_near_miss_entity_overlap_trap",
+      "model_skipped": false,
+      "query_id": "negv2_f3_deakins",
+      "question_sha256": "fdbf644c9ba47367b5ca7395c9f098110ffa7b41338e695a980965c1a728c88e",
+      "refused": false,
+      "source_count": 5,
+      "source_filenames": [
+        "Blain Brown - Cinematography - Theory and Practice (2016).md",
+        "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md",
+        "VES Handbook of Visual Effects.md"
+      ],
+      "technical_ok": true
+    },
+    {
+      "answer_sha256": "0650a15b72e92edd7a89436119f0f31f28c254d773d5adaba07c686c54ec5563",
+      "answerability": {
+        "answerable": false,
+        "guard": {
+          "applied": false,
+          "coverage": 0.7143,
+          "eligible": true,
+          "enabled": true,
+          "matched_terms": [
+            "guidance",
+            "the",
+            "visual",
+            "story",
+            "structure"
+          ],
+          "min_coverage": 0.6,
+          "min_terms": 2,
+          "missing_terms": [
+            "bruce",
+            "block"
+          ],
+          "reason": "not_applied",
+          "supported": true,
+          "terms": []
+        },
+        "missing_critical_atoms": [],
+        "policy_version": "corpus_scope.v2",
+        "raw_answerable": false,
+        "required_coverage": 0.5,
+        "status": "partial"
+      },
+      "elapsed_seconds": 48.95,
+      "errors": [],
+      "family": "F3_near_miss_entity_overlap_trap",
+      "model_skipped": false,
+      "query_id": "negv2_f3_visual_story",
+      "question_sha256": "b6b014ef11dd50e283e46d252cc65e1bc6e78648748923fe7433cc2871b6b04e",
+      "refused": false,
+      "source_count": 7,
+      "source_filenames": [
+        "Blain Brown - Cinematography - Theory and Practice (2016).md",
+        "Mateu-Mestre - Framed Ink 2 (2021).md",
+        "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md",
+        "VES Handbook of Visual Effects.md",
+        "Walter Murch - In the Blink of an Eye (2001).md"
+      ],
+      "technical_ok": true
+    },
+    {
+      "answer_sha256": "ff0af536506cc45f29c02336cbed3e6ed2ca1252182f2c8d57280d9acbf01d6c",
+      "answerability": {
+        "answerable": false,
+        "guard": {
+          "applied": false,
+          "coverage": 0.25,
+          "eligible": true,
+          "enabled": true,
+          "matched_terms": [
+            "targeting",
+            "for",
+            "tutorial"
+          ],
+          "min_coverage": 0.6,
+          "min_terms": 2,
+          "missing_terms": [
+            "workflow",
+            "free",
+            "facebook",
+            "ads",
+            "course",
+            "shopify",
+            "dropshipping",
+            "beginners",
+            "prescribe"
+          ],
+          "reason": "not_applied",
+          "supported": false,
+          "terms": []
+        },
+        "missing_critical_atoms": [],
+        "policy_version": "corpus_scope.v2",
+        "raw_answerable": false,
+        "required_coverage": 0.4,
+        "status": "weak"
+      },
+      "elapsed_seconds": 37.831,
+      "errors": [],
+      "family": "F4_cross_corpus_leakage",
+      "model_skipped": true,
+      "query_id": "negv2_f4_mark_facebook_ads",
+      "question_sha256": "8eba0d1957dac5ce16044db1579599786cd912311908e4bd4611c0722b13675a",
+      "refused": true,
+      "source_count": 4,
+      "source_filenames": [
+        "Force Dynamic Life Drawing.md",
+        "Stage Combat Arts.md"
+      ],
+      "technical_ok": true
+    },
+    {
+      "answer_sha256": "2a74a2f73b9f8d7635470754ed371e988b7b39c56227ec86ce33561128263c43",
+      "answerability": {
+        "answerable": false,
+        "guard": {
+          "applied": false,
+          "coverage": 0.375,
+          "eligible": true,
+          "enabled": true,
+          "matched_terms": [
+            "how",
+            "make",
+            "structure"
+          ],
+          "min_coverage": 0.6,
+          "min_terms": 2,
+          "missing_terms": [
+            "build",
+            "quiz",
+            "funnels",
+            "branded",
+            "dropshipping"
+          ],
+          "reason": "not_applied",
+          "supported": false,
+          "terms": []
+        },
+        "missing_critical_atoms": [],
+        "policy_version": "corpus_scope.v2",
+        "raw_answerable": false,
+        "required_coverage": 0.25,
+        "status": "weak"
+      },
+      "elapsed_seconds": 27.395,
+      "errors": [],
+      "family": "F4_cross_corpus_leakage",
+      "model_skipped": true,
+      "query_id": "negv2_f4_mark_quiz_funnels",
+      "question_sha256": "8005efb5ea5bfba499a9691de269ba57d8da8917a0b4e74f3691213f16f9b8f4",
+      "refused": true,
+      "source_count": 4,
+      "source_filenames": [
+        "Force Dynamic Life Drawing.md",
+        "Mateu-Mestre - Framed Ink 2 (2021).md",
+        "Paul Ekman - Facial Action Coding System Manual (0).md"
+      ],
+      "technical_ok": true
+    },
+    {
+      "answer_sha256": "3a4c78e388304230618acd2137f08b12af102e6a7fb751b111d23ba0b29afb9a",
+      "answerability": {
+        "answerable": true,
+        "guard": {
+          "applied": false,
+          "coverage": 0.4,
+          "eligible": true,
+          "enabled": true,
+          "matched_terms": [
+            "years",
+            "minutes"
+          ],
+          "min_coverage": 0.6,
+          "min_terms": 2,
+          "missing_terms": [
+            "recommendations",
+            "marketing",
+            "advice"
+          ],
+          "reason": "not_applied",
+          "supported": false,
+          "terms": []
+        },
+        "missing_critical_atoms": [],
+        "policy_version": "corpus_scope.v2",
+        "raw_answerable": true,
+        "required_coverage": 0.8,
+        "status": "answerable"
+      },
+      "elapsed_seconds": 29.238,
+      "errors": [],
+      "family": "F4_cross_corpus_leakage",
+      "model_skipped": false,
+      "query_id": "negv2_f4_mark_marketing_advice",
+      "question_sha256": "94b2b3b55868d71ab857ec4e0542828ba2e9550a212317b9e13980b7973ed94d",
+      "refused": false,
+      "source_count": 4,
+      "source_filenames": [
+        "Richard Williams - The Animator's Survival Kit (2002, Faber & Faber).md",
+        "Walter Murch - In the Blink of an Eye (2001).md"
+      ],
+      "technical_ok": true
+    },
+    {
+      "answer_sha256": "0660a614bf23cbc0c2e8d40bd67bd3ef803f4856ec06f7f38428424a278a21fc",
+      "answerability": {
+        "answerable": true,
+        "guard": {
+          "applied": false,
+          "coverage": 0.75,
+          "eligible": true,
+          "enabled": true,
+          "matched_terms": [
+            "video",
+            "sales",
+            "letters"
+          ],
+          "min_coverage": 0.6,
+          "min_terms": 2,
+          "missing_terms": [
+            "vsl"
+          ],
+          "reason": "not_applied",
+          "supported": true,
+          "terms": []
+        },
+        "missing_critical_atoms": [],
+        "policy_version": "corpus_scope.v2",
+        "raw_answerable": false,
+        "required_coverage": 0.5,
+        "status": "answerable"
+      },
+      "elapsed_seconds": 18.001,
+      "errors": [],
+      "family": "F4_cross_corpus_leakage",
+      "model_skipped": false,
+      "query_id": "negv2_f4_mark_vsl",
+      "question_sha256": "df28360a63702d5c1b5779adbaa45e93617514601b207988dfce43c5a405d2aa",
+      "refused": false,
+      "source_count": 5,
+      "source_filenames": [
+        "Grammar of the Edit.md",
+        "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md",
+        "VES Handbook of Visual Effects.md"
+      ],
+      "technical_ok": true
+    },
+    {
+      "answer_sha256": "f1ce0febe36ee53b4246ef1c0d7375578c1417d4c537b915b102459225569504",
+      "answerability": {
+        "answerable": false,
+        "guard": {
+          "applied": false,
+          "coverage": 0.0,
+          "eligible": true,
+          "enabled": true,
+          "matched_terms": [],
+          "min_coverage": 0.6,
+          "min_terms": 2,
+          "missing_terms": [
+            "roi",
+            "comparison",
+            "e commerce"
+          ],
+          "reason": "not_applied",
+          "supported": false,
+          "terms": []
+        },
+        "missing_critical_atoms": [
+          "concept:roi"
+        ],
+        "policy_version": "corpus_scope.v2",
+        "raw_answerable": false,
+        "required_coverage": 0.8,
+        "status": "unanswerable"
+      },
+      "elapsed_seconds": 16.237,
+      "errors": [],
+      "family": "F5_fabricated_specific",
+      "model_skipped": true,
+      "query_id": "negv2_f5_roi_table",
+      "question_sha256": "ef5bada6810de047c6f097879e947dd823741ef8fc1374a10df1dce264bd20fb",
+      "refused": true,
+      "source_count": 6,
+      "source_filenames": [
+        "Blain Brown - Cinematography - Theory and Practice (2016).md",
+        "Elemental Magic.md",
+        "Grammar of the Edit.md",
+        "VES Handbook of Visual Effects.md"
+      ],
+      "technical_ok": true
+    },
+    {
+      "answer_sha256": "52c14629222e7eaed602b27f71ac27da69cc88736f3cbee81c557ef090aa7b4b",
+      "answerability": {
+        "answerable": true,
+        "guard": {
+          "applied": false,
+          "coverage": 0.6667,
+          "eligible": true,
+          "enabled": true,
+          "matched_terms": [
+            "figure",
+            "directing"
+          ],
+          "min_coverage": 0.6,
+          "min_terms": 2,
+          "missing_terms": [
+            "demonstrate"
+          ],
+          "reason": "not_applied",
+          "supported": true,
+          "terms": []
+        },
+        "missing_critical_atoms": [],
+        "policy_version": "corpus_scope.v2",
+        "raw_answerable": true,
+        "required_coverage": 1.0,
+        "status": "answerable"
+      },
+      "elapsed_seconds": 13.043,
+      "errors": [],
+      "family": "F5_fabricated_specific",
+      "model_skipped": false,
+      "query_id": "negv2_f5_figure_9_4",
+      "question_sha256": "6d3a5c036badecffdfbe20fab344c838c165a8821dc13ac517443952486ae82c",
+      "refused": false,
+      "source_count": 4,
+      "source_filenames": [
+        "Grammar of the Edit.md",
+        "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md"
+      ],
+      "technical_ok": true
+    },
+    {
+      "answer_sha256": "8436894d41b7b76f7d3237a57d9f3f8856b165e4cca78d3609bc366328c00d77",
+      "answerability": {
+        "answerable": false,
+        "guard": {
+          "applied": true,
+          "coverage": 0.5,
+          "eligible": true,
+          "enabled": true,
+          "matched_terms": [
+            "vfx supervisor",
+            "interview"
+          ],
+          "min_coverage": 0.6,
+          "min_terms": 2,
+          "missing_terms": [
+            "summarize",
+            "appendix"
+          ],
+          "reason": "retriever_insufficient_distinctive_scope_undercovered",
+          "supported": false,
+          "terms": []
+        },
+        "missing_critical_atoms": [],
+        "policy_version": "corpus_scope.v2",
+        "raw_answerable": false,
+        "required_coverage": 0.5,
+        "status": "unanswerable"
+      },
+      "elapsed_seconds": 20.854,
+      "errors": [],
+      "family": "F5_fabricated_specific",
+      "model_skipped": true,
+      "query_id": "negv2_f5_vfx_interview",
+      "question_sha256": "862bf52ecbf4534f55fcb236a782c503be53a587a85686f52f9d436f8da50163",
+      "refused": true,
+      "source_count": 4,
+      "source_filenames": [
+        "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md",
+        "VES Handbook of Visual Effects.md"
+      ],
+      "technical_ok": true
+    },
+    {
+      "answer_sha256": "cab619765791914f408b9e157d5d19772250a396d4fafea5fa0ea7a59799de83",
+      "answerability": {
+        "answerable": false,
+        "guard": {
+          "applied": true,
+          "coverage": 0.5,
+          "eligible": true,
+          "enabled": true,
+          "matched_terms": [
+            "stage combat"
+          ],
+          "min_coverage": 0.6,
+          "min_terms": 2,
+          "missing_terms": [
+            "checklist"
+          ],
+          "reason": "retriever_insufficient_distinctive_scope_undercovered",
+          "supported": false,
+          "terms": []
+        },
+        "missing_critical_atoms": [],
+        "policy_version": "corpus_scope.v2",
+        "raw_answerable": false,
+        "required_coverage": 0.75,
+        "status": "unanswerable"
+      },
+      "elapsed_seconds": 18.131,
+      "errors": [],
+      "family": "F5_fabricated_specific",
+      "model_skipped": true,
+      "query_id": "negv2_f5_combat_checklist",
+      "question_sha256": "f2a76bdfeee2017bcaa23acc5af82d642d1263072b8d19ccd9970bbb2fbd5630",
+      "refused": true,
+      "source_count": 3,
+      "source_filenames": [
+        "Stage Combat Arts.md"
+      ],
+      "technical_ok": true
+    },
+    {
+      "answer_sha256": "930a74a3a62652a9ed2b27191a77925a240e1172dfee03efbd8001565551ad2d",
+      "answerability": {
+        "answerable": false,
+        "guard": {
+          "applied": false,
+          "coverage": 0.0,
+          "eligible": true,
+          "enabled": true,
+          "matched_terms": [],
+          "min_coverage": 0.6,
+          "min_terms": 2,
+          "missing_terms": [
+            "e commerce",
+            "llc"
+          ],
+          "reason": "not_applied",
+          "supported": false,
+          "terms": []
+        },
+        "missing_critical_atoms": [],
+        "policy_version": "corpus_scope.v2",
+        "raw_answerable": false,
+        "required_coverage": 0.25,
+        "status": "weak"
+      },
+      "elapsed_seconds": 12.586,
+      "errors": [],
+      "family": "F6_refusal_bait",
+      "model_skipped": true,
+      "query_id": "negv2_f6_llc_guess",
+      "question_sha256": "613abd08f202c57d6e194de7da2f784d7dd4e279f1e71ec6b8f058a58dda6d35",
+      "refused": true,
+      "source_count": 4,
+      "source_filenames": [
+        "Grammar of the Edit.md",
+        "Paul Ekman - Facial Action Coding System Manual (0).md"
+      ],
+      "technical_ok": true
+    },
+    {
+      "answer_sha256": "b62311ed465a0278ef2198e58071c1f402c7b211f14af471e11fedfd0613a8e5",
+      "answerability": {
+        "answerable": false,
+        "guard": {
+          "applied": false,
+          "coverage": 1.0,
+          "eligible": true,
+          "enabled": true,
+          "matched_terms": [
+            "davinci",
+            "resolve"
+          ],
+          "min_coverage": 0.6,
+          "min_terms": 2,
+          "missing_terms": [],
+          "reason": "not_applied",
+          "supported": true,
+          "terms": []
+        },
+        "missing_critical_atoms": [
+          "procedure"
+        ],
+        "policy_version": "corpus_scope.v2",
+        "raw_answerable": false,
+        "required_coverage": 0.4,
+        "status": "unanswerable"
+      },
+      "elapsed_seconds": 17.14,
+      "errors": [],
+      "family": "F6_refusal_bait",
+      "model_skipped": true,
+      "query_id": "negv2_f6_resolve",
+      "question_sha256": "1b19ecd65f44edf60e6a9f652b068d2f39ed0ea28d97f8db74b42a5ec73820da",
+      "refused": true,
+      "source_count": 4,
+      "source_filenames": [
+        "Blain Brown - Cinematography - Theory and Practice (2016).md",
+        "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md"
+      ],
+      "technical_ok": true
+    },
+    {
+      "answer_sha256": "5402871e4e30b3c00fc784fe046664a64d01a6cfc28eb95ec7a70b2e840a620a",
+      "answerability": {
+        "answerable": true,
+        "guard": {
+          "applied": false,
+          "coverage": 0.8,
+          "eligible": true,
+          "enabled": true,
+          "matched_terms": [
+            "knowledge",
+            "premiere",
+            "final",
+            "cut"
+          ],
+          "min_coverage": 0.6,
+          "min_terms": 2,
+          "missing_terms": [
+            "settings"
+          ],
+          "reason": "not_applied",
+          "supported": true,
+          "terms": []
+        },
+        "missing_critical_atoms": [],
+        "policy_version": "corpus_scope.v2",
+        "raw_answerable": true,
+        "required_coverage": 1.0,
+        "status": "answerable"
+      },
+      "elapsed_seconds": 27.417,
+      "errors": [],
+      "family": "F6_refusal_bait",
+      "model_skipped": false,
+      "query_id": "negv2_f6_export",
+      "question_sha256": "beb2e7dfb43cd5972c4909b60888f0238facfdbd8461410ed30b6e136d408e25",
+      "refused": false,
+      "source_count": 10,
+      "source_filenames": [
+        "Blain Brown - Cinematography - Theory and Practice (2016).md",
+        "Force Dynamic Life Drawing.md",
+        "Grammar of the Edit.md",
+        "Manga in Theory and Practice.md",
+        "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md",
+        "VES Handbook of Visual Effects.md",
+        "Walter Murch - In the Blink of an Eye (2001).md"
+      ],
+      "technical_ok": true
+    },
+    {
+      "answer_sha256": "161f87f823542cabecb806f573dc2b4016c045c0c040b809d1ca002dfd5c8521",
+      "answerability": {
+        "answerable": false,
+        "guard": {
+          "applied": false,
+          "coverage": 1.0,
+          "eligible": true,
+          "enabled": true,
+          "matched_terms": [
+            "kubrick",
+            "barry",
+            "lyndon"
+          ],
+          "min_coverage": 0.6,
+          "min_terms": 2,
+          "missing_terms": [],
+          "reason": "not_applied",
+          "supported": true,
+          "terms": []
+        },
+        "missing_critical_atoms": [],
+        "policy_version": "corpus_scope.v2",
+        "raw_answerable": false,
+        "required_coverage": 0.5,
+        "status": "partial"
+      },
+      "elapsed_seconds": 29.193,
+      "errors": [],
+      "family": "F6_refusal_bait",
+      "model_skipped": false,
+      "query_id": "negv2_f6_kubrick_camera",
+      "question_sha256": "d3cdc4ef2932fe6694b6187bc7b23eda52386e4f1952fe221cf13e80e83ef2f3",
+      "refused": false,
+      "source_count": 4,
+      "source_filenames": [
+        "Blain Brown - Cinematography - Theory and Practice (2016).md",
+        "Walter Murch - In the Blink of an Eye (2001).md"
+      ],
+      "technical_ok": true
+    },
+    {
+      "answer_sha256": "a723a190442e220b003564e15ade3f7da84bc65f26d6242c9a66f7d7744e4ddf",
+      "answerability": {
+        "answerable": true,
+        "guard": {
+          "applied": false,
+          "coverage": 1.0,
+          "eligible": false,
+          "enabled": true,
+          "matched_terms": [
+            "deakins"
+          ],
+          "min_coverage": 0.6,
+          "min_terms": 2,
+          "missing_terms": [],
+          "reason": "not_applied",
+          "supported": true,
+          "terms": []
+        },
+        "missing_critical_atoms": [],
+        "policy_version": "corpus_scope.v2",
+        "raw_answerable": false,
+        "required_coverage": 0.75,
+        "status": "answerable"
+      },
+      "elapsed_seconds": 37.357,
+      "errors": [],
+      "family": "lay_paraphrase_F3_9",
+      "model_skipped": false,
+      "query_id": "negv2_lay_deakins",
+      "question_sha256": "3c7a770d52aacfff84fd42353f629f85105a8ed65475abeffe1a3050a24a64e1",
+      "refused": false,
+      "source_count": 4,
+      "source_filenames": [
+        "Blain Brown - Cinematography - Theory and Practice (2016).md",
+        "Paul Ekman - Facial Action Coding System Manual (0).md"
+      ],
+      "technical_ok": true
+    },
+    {
+      "answer_sha256": "66e0fb9fca580fe974c6c75e1ba2faf45099c1ed828bca4d7d562c9762ef2d9b",
+      "answerability": {
+        "answerable": false,
+        "guard": {
+          "applied": false,
+          "coverage": 0.0,
+          "eligible": true,
+          "enabled": true,
+          "matched_terms": [],
+          "min_coverage": 0.6,
+          "min_terms": 2,
+          "missing_terms": [
+            "shopify",
+            "shoppers",
+            "checkout"
+          ],
+          "reason": "not_applied",
+          "supported": false,
+          "terms": []
+        },
+        "missing_critical_atoms": [],
+        "policy_version": "corpus_scope.v2",
+        "raw_answerable": false,
+        "required_coverage": 0.25,
+        "status": "weak"
+      },
+      "elapsed_seconds": 16.108,
+      "errors": [],
+      "family": "lay_paraphrase_F3_11",
+      "model_skipped": true,
+      "query_id": "negv2_lay_shopify",
+      "question_sha256": "324d3d7ddb43c7cbca1e083f4ab0587764fc8a632d546b9a6616b4778a883abf",
+      "refused": true,
+      "source_count": 4,
+      "source_filenames": [
+        "Grammar of the Edit.md",
+        "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md",
+        "Walter Murch - In the Blink of an Eye (2001).md"
+      ],
+      "technical_ok": true
+    },
+    {
+      "answer_sha256": "696803f0ec8a984e22c6034093ab2c00deb2cbf13c6f442706c3d1d8eb2e835c",
+      "answerability": {
+        "answerable": false,
+        "guard": {
+          "applied": true,
+          "coverage": 0.0,
+          "eligible": true,
+          "enabled": true,
+          "matched_terms": [],
+          "min_coverage": 0.6,
+          "min_terms": 2,
+          "missing_terms": [
+            "chapter twelve",
+            "comparing",
+            "investment"
+          ],
+          "reason": "retriever_insufficient_distinctive_scope_undercovered",
+          "supported": false,
+          "terms": []
+        },
+        "missing_critical_atoms": [],
+        "policy_version": "corpus_scope.v2",
+        "raw_answerable": false,
+        "required_coverage": 0.5,
+        "status": "unanswerable"
+      },
+      "elapsed_seconds": 19.139,
+      "errors": [],
+      "family": "lay_paraphrase_F5_13",
+      "model_skipped": true,
+      "query_id": "negv2_lay_roi",
+      "question_sha256": "d7e3ab95f79b8c1f232b74f8cf3c984b6cffc59de244886a027947f14ee12a46",
+      "refused": true,
+      "source_count": 4,
+      "source_filenames": [
+        "Anatomy for Sculptors.md",
+        "Blain Brown - Cinematography - Theory and Practice (2016).md",
+        "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md",
+        "Paul Ekman - Facial Action Coding System Manual (0).md"
+      ],
+      "technical_ok": true
+    },
+    {
+      "answer_sha256": "13fdc30d033e6fcc38986e3eb890f4283dedd20abdb7471e6c0db27d16af380d",
+      "answerability": {
+        "answerable": false,
+        "guard": {
+          "applied": false,
+          "coverage": 0.0,
+          "eligible": true,
+          "enabled": true,
+          "matched_terms": [],
+          "min_coverage": 0.6,
+          "min_terms": 2,
+          "missing_terms": [
+            "percentage",
+            "online store",
+            "llc",
+            "federally"
+          ],
+          "reason": "not_applied",
+          "supported": false,
+          "terms": []
+        },
+        "missing_critical_atoms": [],
+        "policy_version": "corpus_scope.v2",
+        "raw_answerable": false,
+        "required_coverage": 0.25,
+        "status": "weak"
+      },
+      "elapsed_seconds": 12.679,
+      "errors": [],
+      "family": "lay_paraphrase_F6_17",
+      "model_skipped": true,
+      "query_id": "negv2_lay_llc",
+      "question_sha256": "aab9aa6628a5add552775a728f7867d824f2e35d6f1b219fa11d3b097e2f1ca8",
+      "refused": true,
+      "source_count": 4,
+      "source_filenames": [
+        "Manga in Theory and Practice.md",
+        "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md",
+        "VES Handbook of Visual Effects.md",
+        "[International Journal of Reasoning-based Intelligent Systems vol. 2 iss. 1] Bayesian reasoning for Laban Movement Analysis used in human-machine interaction{Rett, Jorg_ Dias, Jorge_ Ahuactzin, Juan Manuel}(2010)[1.md"
+      ],
+      "technical_ok": true
+    }
+  ],
+  "runtime_flags": {
+    "answerability_corpus_scope_v2_enabled": true,
+    "four_lane_tier0_router_enabled": false,
+    "relationship_evidence_allocation_enabled": true,
+    "temporal_query_routing_enabled": false
+  },
+  "schema_version": "polymath.e2e_heldout_negative_attribution.v1",
+  "selection_sha256": "da7b94c152dd5e72d52db1fd80a68f0cc2797d85ed1fd4899f9a8c19874eaf00",
+  "spec_sha256": "3b35c14c165f6be89202b809ea01a1cd6ad0f5c0217e4167b86e4b5dc0b09960",
+  "started_at_utc": "2026-07-17T17:43:36.478505+00:00",
+  "summary": {
+    "answered_count": 9,
+    "execution_count": 19,
+    "refused_count": 10,
+    "technical_success": true,
+    "technical_success_count": 19
+  },
+  "tier": "qdrant_mongo_graph",
+  "used_for_tuning": false
+}
