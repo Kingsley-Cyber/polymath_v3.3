@@ -774,6 +774,13 @@ Acceptance:
 - [ ] Use sibling expansion for structured list/enumeration nodes.
 - [ ] Use dynamic breadth/K based on score cliffs, obligations, and answer
   shape.
+- [ ] `BUDGET-HYDRATION-WATERFALL-V2`: keep the existing deterministic
+  `WATERFALL_ASSEMBLY` path default-OFF, and make every ranked parent seat's
+  hydration decision observable as `full`, `summary`, or `skip` under the
+  fixed token budget. Preserve the owner waterfall order and no-truncation
+  rule, include explicit skipped-seat reasons, and prove the pure policy plus
+  assembly projection with unit tests and an exact-branch image build before
+  any live A/B.
 
 Acceptance:
 
