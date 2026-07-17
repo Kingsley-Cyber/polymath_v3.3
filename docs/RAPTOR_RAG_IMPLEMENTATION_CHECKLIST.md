@@ -246,6 +246,15 @@ cross-impact so no artifact is rebuilt twice:
   corpus writes. Branch: `codex/temporal-query-routing-20260716` (review ready;
   acceptance remains open after repeated MLX embedding outages invalidated the
   frozen paired A/B; receipt: `docs/TEMPORAL_QUERY_ROUTING_AB_2026-07-16.md`).
+  - [ ] T-QUERY-ROUTING-V1-RERUN: on
+    `codex/temporal-regression-20260717`, integrate the independently verified
+    MLX evaluation-stability dependency, then run exactly one preflight-gated
+    paired OFF/ON frozen 17-query × 3-tier regression under the immutable
+    preregistration, runner, corpus, and MiniMax model contract. Require
+    technical/corpus/citation gates plus direct >=0.85, lay >=0.75, and no
+    relationship regression; preserve the existing negative verdict honestly.
+    No corpus writes, no temporal-logic or scorer changes, default OFF, locked
+    serial measurement, and canonical runtime restoration are mandatory.
 - Ordering rationale: field capture rides in-flight generation/backfills for
   free; retrieval-behavior changes are gated by the held-out suite; temporal
   eligibility needs the fields to exist first; re-extracting before the
