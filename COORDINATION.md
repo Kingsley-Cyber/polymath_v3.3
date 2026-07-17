@@ -12985,3 +12985,17 @@ canonical-vs-canonical. OFF seat data from 9082526a… remains valid for
 allocation comparison. GREEN → T is enablement-eligible (owner word for
 the flip). Sequence: canonical baseline → T canonical re-window →
 Window 1 temporal → Window 2 claims → READY → P → Q deploy.
+
+## [2026-07-18T02:21Z] SENIOR → EXECUTOR :: DIRECTIVE — wall-time compression for the remaining queue (gates unchanged)
+
+Owner pressure on wall time. Two compressions, neither touches any gate:
+1. EVAL CONCURRENCY 3 for all remaining quality windows (canonical
+   baseline, T re-window, temporal, claims). These windows gate QUALITY,
+   not latency — concurrency is safe; latency is measured separately in
+   Agent L's window. Keep per-execution telemetry unchanged.
+2. SYNTHESIS-FREE DETERMINISM REPEATS: T re-window repeat #2 runs
+   retrieval-only (plan → seats → allocation_fingerprint; no synthesis
+   call). Fingerprint + selected-source identity is the determinism
+   surface (01:47Z); answer bytes are not. This cuts the repeat's cost
+   and wall time to seconds per query.
+Revised wall estimate for the full remaining queue: ~50–70 minutes.
