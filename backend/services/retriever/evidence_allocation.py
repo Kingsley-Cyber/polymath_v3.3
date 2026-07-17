@@ -21,6 +21,10 @@ Vocabulary:
 
 from __future__ import annotations
 
+import math
+import re
+from dataclasses import dataclass
+from pathlib import PurePath
 from typing import Any, Callable, Iterable, List, Optional, Sequence, Set
 
 from services.retriever.evidence_plan import (
@@ -56,7 +60,468 @@ _LANE_SCORE_WEIGHT = 10.0
 _BASE_SCORE_WEIGHT = 2.0
 _NEW_DOC_BONUS = 5.0
 _SEMANTIC_DOC_BONUS = 7.0
-_SEMANTIC_FLOOR_SCORE = 3  # lane score given to a doc the ingest layer says belongs to the side
+_SEMANTIC_FLOOR_SCORE = (
+    3  # lane score given to a doc the ingest layer says belongs to the side
+)
+
+# Exact, case-normalized metadata anchoring. These values are too generic to
+# prove that the user named a source, section, entity, or bibliographic term.
+_ANCHOR_TOKEN_RE = re.compile(r"[a-z0-9]+")
+_ANCHOR_GENERIC_TERMS = frozenset(
+    {
+        "a",
+        "an",
+        "appendix",
+        "article",
+        "author",
+        "book",
+        "books",
+        "chapter",
+        "conclusion",
+        "document",
+        "introduction",
+        "of",
+        "paper",
+        "references",
+        "section",
+        "the",
+    }
+)
+_ANCHOR_METADATA_KEYS: dict[str, tuple[str, ...]] = {
+    "title": (
+        "title",
+        "source_book",
+        "book_title",
+        "document_title",
+        "doc_title",
+        "source_title",
+    ),
+    "author": (
+        "author",
+        "authors",
+        "author_or_org",
+        "creator",
+        "creators",
+    ),
+    "entity": (
+        "entity",
+        "entities",
+        "matched_entities",
+        "entity_names",
+        "related_entity",
+        "seed_entity",
+        "neighbor_entity",
+    ),
+    "bibliographic": (
+        "bibliographic_terms",
+        "biblio_terms",
+        "citation_terms",
+        "cited_authors",
+        "cited_titles",
+        "references",
+    ),
+}
+
+
+@dataclass(frozen=True)
+class MetadataAnchorMatch:
+    """Deterministic explanation for one candidate's anchor classification."""
+
+    is_anchor: bool
+    matched_fields: tuple[str, ...] = ()
+    matched_terms: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class TwoLaneAllocation:
+    """Selected candidates plus JSON-safe diagnostics for retrieval traces."""
+
+    candidates: tuple[Any, ...]
+    diagnostics: dict[str, Any]
+
+
+def _normalized_anchor_phrase(value: Any) -> str:
+    return " ".join(_ANCHOR_TOKEN_RE.findall(str(value or "").casefold()))
+
+
+def _iter_metadata_values(value: Any) -> Iterable[str]:
+    if value is None:
+        return
+    if isinstance(value, dict):
+        for key in (
+            "canonical_name",
+            "display_name",
+            "name",
+            "surface_form",
+            "title",
+            "author",
+            "value",
+        ):
+            nested = value.get(key)
+            if nested:
+                yield str(nested)
+        return
+    if isinstance(value, (list, tuple, set)):
+        for item in value:
+            yield from _iter_metadata_values(item)
+        return
+    text = str(value).strip()
+    if text:
+        yield text
+
+
+def _candidate_anchor_terms(candidate: Any) -> list[tuple[str, str]]:
+    """Return source metadata terms only; candidate body text is never authority."""
+
+    metadata = getattr(candidate, "metadata", None)
+    metadata = metadata if isinstance(metadata, dict) else {}
+    terms: list[tuple[str, str]] = []
+
+    # Hydrated SourceChunk fields and their pre-hydration payload mirrors.
+    doc_name = str(getattr(candidate, "doc_name", "") or "").strip()
+    if doc_name:
+        stem = PurePath(doc_name).stem.replace("_", " ").replace("-", " ")
+        terms.append(("title", stem))
+    for heading in getattr(candidate, "heading_path", None) or []:
+        terms.append(("heading_path", str(heading)))
+
+    for field, keys in _ANCHOR_METADATA_KEYS.items():
+        for key in keys:
+            for value in _iter_metadata_values(metadata.get(key)):
+                terms.append((field, value))
+
+    # Graph provenance already carries resolved entity/bibliographic names.
+    for item in getattr(candidate, "provenance", None) or []:
+        if not isinstance(item, dict):
+            continue
+        for key in (
+            "entity",
+            "subject",
+            "surface_form",
+            "seed_entity",
+            "neighbor_entity",
+            "related_entity",
+        ):
+            for value in _iter_metadata_values(item.get(key)):
+                terms.append(("entity", value))
+
+    deduped: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for field, raw in terms:
+        normalized = _normalized_anchor_phrase(raw)
+        if not normalized:
+            continue
+        key = (field, normalized)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(key)
+    return deduped
+
+
+def classify_metadata_anchor(query: str, candidate: Any) -> MetadataAnchorMatch:
+    """Classify ANCHOR by exact case-normalized candidate metadata matches.
+
+    The classifier deliberately ignores embeddings, candidate text, and scores.
+    It accepts an exact token-bounded metadata phrase. A leading English article
+    is ignored for titles (``The Art of Seduction`` -> ``art of seduction``),
+    while generic one-word headings such as ``Introduction`` never anchor.
+    """
+
+    normalized_query = _normalized_anchor_phrase(query)
+    if not normalized_query:
+        return MetadataAnchorMatch(False)
+    query_haystack = f" {normalized_query} "
+
+    matches: list[tuple[str, str]] = []
+    for field, normalized in _candidate_anchor_terms(candidate):
+        variants = [normalized]
+        if field == "title":
+            title_tokens = normalized.split()
+            if title_tokens and title_tokens[0] in {"a", "an", "the"}:
+                variants.append(" ".join(title_tokens[1:]))
+        for phrase in variants:
+            tokens = phrase.split()
+            distinctive = [
+                token
+                for token in tokens
+                if token not in _ANCHOR_GENERIC_TERMS and len(token) >= 3
+            ]
+            if not distinctive:
+                continue
+            # Single-token authority is deliberately strict. It is useful for
+            # distinctive surnames/entities but rejects generic short labels.
+            if len(tokens) == 1 and len(tokens[0]) < 5:
+                continue
+            if f" {phrase} " in query_haystack:
+                matches.append((field, phrase))
+                break
+
+    if not matches:
+        return MetadataAnchorMatch(False)
+    fields = tuple(dict.fromkeys(field for field, _term in matches))
+    terms = tuple(dict.fromkeys(term for _field, term in matches))
+    return MetadataAnchorMatch(True, fields, terms)
+
+
+def allocate_two_lane_seats(
+    selected: Sequence[Any],
+    candidate_pool: Sequence[Any],
+    *,
+    query: str,
+    budget: int,
+    anchor_ratio: float = 0.60,
+    anchor_threshold: float = 0.10,
+    expansion_threshold: float = 0.10,
+    candidate_id_fn: Callable[[Any], str],
+    score_fn: Callable[[Any], float],
+    side_fn: Optional[Callable[[Any], str]] = None,
+    protected_ids: Optional[Set[str]] = None,
+) -> TwoLaneAllocation:
+    """Reserve ANCHOR/EXPANSION seats with deterministic bidirectional spillover.
+
+    Relationship composition is expressed through ``side_fn``. The allocator
+    first freezes the already-selected seat count for every side, then applies
+    the anchor/expansion quota *inside* that side. It can therefore replace an
+    expansion with a metadata anchor from the ranked pool without stealing a
+    seat from another relationship side.
+
+    Existing protected seats (sufficiency, corpus floors, graph reserves) are
+    retained. Unselected EXPANSION candidates never replace MMR-selected
+    expansion evidence; only a newly discovered ANCHOR can enter from the pool.
+    """
+
+    budget = max(0, int(budget or 0))
+    ratio = min(max(float(anchor_ratio), 0.0), 1.0)
+    protected_ids = {str(value) for value in (protected_ids or set()) if str(value)}
+    selected_list = list(selected or [])[:budget]
+    if budget <= 0 or not selected_list:
+        return TwoLaneAllocation(
+            tuple(),
+            {
+                "enabled": True,
+                "budget": budget,
+                "anchor_ratio": ratio,
+                "groups": [],
+                "selected": [],
+            },
+        )
+
+    def _cid(item: Any) -> str:
+        return str(candidate_id_fn(item) or "")
+
+    def _side(item: Any) -> str:
+        value = str(side_fn(item) if side_fn is not None else "__all__").strip()
+        return value or "__unassigned__"
+
+    # Existing final seats define the senior per-side allocation. Two-lane
+    # selection is forbidden from changing these counts.
+    group_order: list[str] = []
+    selected_by_group: dict[str, list[Any]] = {}
+    for item in selected_list:
+        group = _side(item)
+        if group not in selected_by_group:
+            group_order.append(group)
+            selected_by_group[group] = []
+        selected_by_group[group].append(item)
+
+    # The pool is rank ordered. De-duplicate by candidate identity while
+    # retaining the first occurrence and classify exactly once.
+    pool: list[Any] = []
+    seen_ids: set[str] = set()
+    matches: dict[str, MetadataAnchorMatch] = {}
+    for item in [*candidate_pool, *selected_list]:
+        key = _cid(item)
+        if not key or key in seen_ids:
+            continue
+        seen_ids.add(key)
+        pool.append(item)
+        matches[key] = classify_metadata_anchor(query, item)
+
+    final_by_group: dict[str, list[Any]] = {}
+    group_reports: list[dict[str, Any]] = []
+    for group in group_order:
+        baseline = selected_by_group[group]
+        group_budget = len(baseline)
+        anchor_quota = min(group_budget, int(math.ceil(ratio * group_budget)))
+        expansion_quota = group_budget - anchor_quota
+
+        baseline_ids = {_cid(item) for item in baseline}
+        protected = [item for item in baseline if _cid(item) in protected_ids]
+        protected_id_set = {_cid(item) for item in protected}
+        baseline_anchor = [
+            item
+            for item in baseline
+            if matches[_cid(item)].is_anchor and _cid(item) not in protected_id_set
+        ]
+        baseline_expansion = [
+            item
+            for item in baseline
+            if not matches[_cid(item)].is_anchor and _cid(item) not in protected_id_set
+        ]
+        extra_anchor = [
+            item
+            for item in pool
+            if _cid(item) not in baseline_ids
+            and _side(item) == group
+            and matches[_cid(item)].is_anchor
+        ]
+
+        # No metadata anchor in this side means single-lane collapse: preserve
+        # the prior selection byte-for-byte and avoid gratuitous reshuffling.
+        if not baseline_anchor and not extra_anchor:
+            final_by_group[group] = list(baseline)
+            group_reports.append(
+                {
+                    "side": group,
+                    "budget": group_budget,
+                    "anchor_quota": anchor_quota,
+                    "expansion_quota": expansion_quota,
+                    "anchors_available": 0,
+                    "anchor_candidate_ids": [],
+                    "anchors_selected": 0,
+                    "expansions_selected": group_budget,
+                    "spill_anchor_to_expansion": anchor_quota,
+                    "spill_expansion_to_anchor": 0,
+                    "collapsed_single_lane": True,
+                }
+            )
+            continue
+
+        chosen: list[Any] = list(protected)
+        chosen_ids = {_cid(item) for item in chosen}
+        protected_anchor_count = sum(
+            1 for item in protected if matches[_cid(item)].is_anchor
+        )
+        protected_expansion_count = len(protected) - protected_anchor_count
+
+        def _admitted(items: Sequence[Any], threshold: float) -> list[Any]:
+            return [
+                item
+                for item in items
+                if _cid(item) not in chosen_ids
+                and float(score_fn(item) or 0.0) >= float(threshold)
+            ]
+
+        anchors = _admitted(
+            [*baseline_anchor, *extra_anchor],
+            anchor_threshold,
+        )
+        expansions = _admitted(baseline_expansion, expansion_threshold)
+
+        def _take(items: Sequence[Any], count: int) -> int:
+            taken = 0
+            for item in items:
+                if taken >= max(0, count) or len(chosen) >= group_budget:
+                    break
+                key = _cid(item)
+                if key in chosen_ids:
+                    continue
+                chosen.append(item)
+                chosen_ids.add(key)
+                taken += 1
+            return taken
+
+        anchor_need = max(0, anchor_quota - protected_anchor_count)
+        expansion_need = max(0, expansion_quota - protected_expansion_count)
+        anchors_primary = _take(anchors, anchor_need)
+        expansions_primary = _take(expansions, expansion_need)
+
+        # Spill unused expansion seats to anchors first, then unused anchor
+        # seats to expansions. Both passes use only above-threshold candidates.
+        before_anchor_spill = len(chosen)
+        _take(anchors, group_budget - len(chosen))
+        spill_expansion_to_anchor = len(chosen) - before_anchor_spill
+        before_expansion_spill = len(chosen)
+        _take(expansions, group_budget - len(chosen))
+        spill_anchor_to_expansion = len(chosen) - before_expansion_spill
+
+        # Preserve cross-encoder authority in presentation order. Membership is
+        # quota-driven; ordering remains the original ranked-pool order, with
+        # protected baseline-only candidates retaining their baseline order.
+        rank = {_cid(item): index for index, item in enumerate(pool)}
+        baseline_rank = {
+            _cid(item): len(pool) + index for index, item in enumerate(baseline)
+        }
+        chosen.sort(
+            key=lambda item: (
+                rank.get(_cid(item), baseline_rank.get(_cid(item), len(pool))),
+                _cid(item),
+            )
+        )
+        final_by_group[group] = chosen
+        group_reports.append(
+            {
+                "side": group,
+                "budget": group_budget,
+                "anchor_quota": anchor_quota,
+                "expansion_quota": expansion_quota,
+                "anchors_available": len(baseline_anchor) + len(extra_anchor),
+                "anchor_candidate_ids": [
+                    _cid(item) for item in [*baseline_anchor, *extra_anchor]
+                ],
+                "anchors_selected": sum(
+                    1 for item in chosen if matches[_cid(item)].is_anchor
+                ),
+                "expansions_selected": sum(
+                    1 for item in chosen if not matches[_cid(item)].is_anchor
+                ),
+                "protected": len(protected),
+                "anchor_primary_filled": anchors_primary,
+                "expansion_primary_filled": expansions_primary,
+                "spill_anchor_to_expansion": spill_anchor_to_expansion,
+                "spill_expansion_to_anchor": spill_expansion_to_anchor,
+                "collapsed_single_lane": False,
+            }
+        )
+
+    # Preserve the selected side interleave: replace each prior side occurrence
+    # with that side's next allocated candidate. This is deterministic and
+    # prevents one side from being visually grouped ahead of another.
+    cursors = {group: 0 for group in group_order}
+    allocated: list[Any] = []
+    for prior in selected_list:
+        group = _side(prior)
+        index = cursors[group]
+        group_items = final_by_group.get(group, [])
+        if index >= len(group_items):
+            continue
+        allocated.append(group_items[index])
+        cursors[group] = index + 1
+
+    selected_trace = []
+    for seat, item in enumerate(allocated, 1):
+        key = _cid(item)
+        match = matches[key]
+        selected_trace.append(
+            {
+                "seat": seat,
+                "candidate_id": key,
+                "side": _side(item),
+                "lane": "anchor" if match.is_anchor else "expansion",
+                "matched_fields": list(match.matched_fields),
+                "matched_terms": list(match.matched_terms),
+                "score": round(float(score_fn(item) or 0.0), 6),
+                "protected": key in protected_ids,
+            }
+        )
+    return TwoLaneAllocation(
+        tuple(allocated),
+        {
+            "enabled": True,
+            "budget": budget,
+            "anchor_ratio": ratio,
+            "anchor_threshold": float(anchor_threshold),
+            "expansion_threshold": float(expansion_threshold),
+            "relationship_precedence": side_fn is not None,
+            "groups": group_reports,
+            "selected": selected_trace,
+            "anchor_seats": sum(1 for row in selected_trace if row["lane"] == "anchor"),
+            "expansion_seats": sum(
+                1 for row in selected_trace if row["lane"] == "expansion"
+            ),
+        },
+    )
 
 
 def relationship_allocation_eligible(plan: EvidencePlan | None) -> bool:
@@ -224,7 +689,9 @@ def lane_coverage(
         "covered_lanes": covered,
         "missing_lanes": missing,
         "lane_doc_ids": lane_docs,
-        "distinct_doc_count": len({d for docs in lane_docs.values() for d in docs if d}),
+        "distinct_doc_count": len(
+            {d for docs in lane_docs.values() for d in docs if d}
+        ),
     }
 
 

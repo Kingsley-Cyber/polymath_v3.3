@@ -1247,6 +1247,18 @@ class RetrieverOrchestrator:
                 multi_corpus=True,
                 selected_corpus_ids=corpus_ids,
                 query=ranking_query,
+                anchor_query=ranking_query,
+                two_lane_anchoring_enabled=settings.TWO_LANE_ANCHORING_ENABLED,
+                anchor_lane_ratio=settings.ANCHOR_LANE_RATIO,
+                anchor_lane_admission_threshold=(
+                    settings.ANCHOR_LANE_ADMISSION_THRESHOLD
+                ),
+                expansion_lane_admission_threshold=(
+                    settings.EXPANSION_LANE_ADMISSION_THRESHOLD
+                ),
+                relationship_allocation_enabled=(
+                    settings.RELATIONSHIP_EVIDENCE_ALLOCATION_ENABLED
+                ),
             )
             after_selection = dict(diversity.diagnostics or {})
             after_sufficiency = after_selection.get("sufficiency") or {}
@@ -3091,6 +3103,18 @@ class RetrieverOrchestrator:
             multi_corpus=bool(corpus_ids and len(corpus_ids) > 1),
             selected_corpus_ids=corpus_ids or [],
             query=plan.standalone_query,
+            anchor_query=plan.standalone_query,
+            two_lane_anchoring_enabled=settings.TWO_LANE_ANCHORING_ENABLED,
+            anchor_lane_ratio=settings.ANCHOR_LANE_RATIO,
+            anchor_lane_admission_threshold=(
+                settings.ANCHOR_LANE_ADMISSION_THRESHOLD
+            ),
+            expansion_lane_admission_threshold=(
+                settings.EXPANSION_LANE_ADMISSION_THRESHOLD
+            ),
+            relationship_allocation_enabled=(
+                settings.RELATIONSHIP_EVIDENCE_ALLOCATION_ENABLED
+            ),
         )
         final_limit = planned_final_top_k
         preferred_candidates = diversity.candidates
@@ -4795,6 +4819,18 @@ class RetrieverOrchestrator:
             multi_corpus=multi,
             selected_corpus_ids=corpus_ids or [],
             query=rank_query,
+            anchor_query=query,
+            two_lane_anchoring_enabled=settings.TWO_LANE_ANCHORING_ENABLED,
+            anchor_lane_ratio=settings.ANCHOR_LANE_RATIO,
+            anchor_lane_admission_threshold=(
+                settings.ANCHOR_LANE_ADMISSION_THRESHOLD
+            ),
+            expansion_lane_admission_threshold=(
+                settings.EXPANSION_LANE_ADMISSION_THRESHOLD
+            ),
+            relationship_allocation_enabled=(
+                settings.RELATIONSHIP_EVIDENCE_ALLOCATION_ENABLED
+            ),
         )
         selection_diagnostics = dict(diversity.diagnostics or {})
         candidates = diversity.candidates
