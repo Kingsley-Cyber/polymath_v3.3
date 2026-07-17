@@ -1,0 +1,157 @@
+{
+  "schema_version": "retrieval_optimization_recorded_baseline.v1",
+  "measurement": "paired relationship allocation OFF/ON; 17 immutable queries x 3 tiers per arm",
+  "quantile": "nearest-rank",
+  "counter_scope": {
+    "payload_nonempty_counts": "nonempty key presence across returned SSE source payload rows; availability, not proof of rank/filter consumption",
+    "final_source_tier_counts": "aggregate instrumentation.final_source_tiers diagnostics; may exceed returned SSE source-row counts",
+    "index_contract_execution_counts": "collections named by each execution trace contract; not database engine index-access deltas"
+  },
+  "sources": {
+    "off": {
+      "sha256": "b306c6420fb186b30791d289d76d534cfcb5f05af637639571d201c7b1f9b06c"
+    },
+    "on": {
+      "sha256": "c4d9b79c94bcd2defd49837e02d8b9f89c5a10da7f2013abc8c7e32053e28930"
+    }
+  },
+  "arms": {
+    "off": {
+      "rows": 51,
+      "tiers": {
+        "qdrant_only": {
+          "client_total_s": {"n": 17, "p50": 6.451, "p95": 26.73, "max": 26.73},
+          "retrieval_internal_total_s": {"n": 17, "p50": 5.055, "p95": 13.576, "max": 13.576},
+          "embed_s": {"n": 17, "p50": 0, "p95": 5.007, "max": 5.007},
+          "vector_candidate_search_s": {"n": 17, "p50": 0.503, "p95": 1.478, "max": 1.478},
+          "hydrate_s": {"n": 17, "p50": 0, "p95": 0.001, "max": 0.001},
+          "graph_s": {"n": 0, "p50": null, "p95": null, "max": null},
+          "rerank_s": {"n": 17, "p50": 3.912, "p95": 8.962, "max": 8.962},
+          "assemble_support_residual_s": {"n": 17, "p50": 0.011841, "p95": 0.098161, "max": 0.098161},
+          "planning_vocabulary_s": {"n": 17, "p50": 0.292, "p95": 6.602, "max": 6.602},
+          "identity_dedupe_s": {"n": 17, "p50": 0, "p95": 0.001, "max": 0.001}
+        },
+        "qdrant_mongo": {
+          "client_total_s": {"n": 17, "p50": 21.763, "p95": 38.165, "max": 38.165},
+          "retrieval_internal_total_s": {"n": 17, "p50": 10.487, "p95": 22.047, "max": 22.047},
+          "embed_s": {"n": 17, "p50": 0, "p95": 0.145, "max": 0.145},
+          "vector_candidate_search_s": {"n": 17, "p50": 0.615, "p95": 1.611, "max": 1.611},
+          "hydrate_s": {"n": 17, "p50": 0.01, "p95": 0.052, "max": 0.052},
+          "graph_s": {"n": 0, "p50": null, "p95": null, "max": null},
+          "rerank_s": {"n": 17, "p50": 8.915, "p95": 20.096, "max": 20.096},
+          "assemble_support_residual_s": {"n": 17, "p50": 0.015463, "p95": 0.050121, "max": 0.050121},
+          "planning_vocabulary_s": {"n": 17, "p50": 0.994, "p95": 2.466, "max": 2.466},
+          "identity_dedupe_s": {"n": 17, "p50": 0.005, "p95": 0.01, "max": 0.01}
+        },
+        "qdrant_mongo_graph": {
+          "client_total_s": {"n": 17, "p50": 32.223, "p95": 41.512, "max": 41.512},
+          "retrieval_internal_total_s": {"n": 17, "p50": 14.652, "p95": 34.37, "max": 34.37},
+          "embed_s": {"n": 17, "p50": 0, "p95": 0.001, "max": 0.001},
+          "vector_candidate_search_s": {"n": 17, "p50": 0.832, "p95": 2.026, "max": 2.026},
+          "hydrate_s": {"n": 17, "p50": 0.014, "p95": 0.056, "max": 0.056},
+          "graph_s": {"n": 17, "p50": 1.226, "p95": 12.001, "max": 12.001},
+          "rerank_s": {"n": 17, "p50": 10.049, "p95": 20.038, "max": 20.038},
+          "assemble_support_residual_s": {"n": 17, "p50": 0.022295, "p95": 0.051916, "max": 0.051916},
+          "planning_vocabulary_s": {"n": 17, "p50": 1.051, "p95": 2.189, "max": 2.189},
+          "identity_dedupe_s": {"n": 17, "p50": 0.006, "p95": 0.01, "max": 0.01}
+        }
+      },
+      "payload_nonempty_counts": {
+        "chunk_id": 204,
+        "chunk_kind": 204,
+        "corpus_id": 204,
+        "doc_id": 204,
+        "doc_name": 204,
+        "heading_path": 204,
+        "metadata": 204,
+        "parent_id": 204,
+        "provenance": 204,
+        "score": 204,
+        "source_tier": 204,
+        "summary": 165,
+        "text": 204,
+        "corpus_name": 140,
+        "domain": 104
+      },
+      "index_contract_execution_counts": {
+        "qdrant::corpus_2c894530_hrag": 51,
+        "qdrant::corpus_2c894530_naive": 51,
+        "qdrant::polymath_doc_summaries": 51,
+        "qdrant::corpus_2c894530_graph": 17
+      },
+      "final_source_tier_counts": {
+        "tier_a": 119,
+        "tier_a+lexical": 95,
+        "graph_mode_a": 2
+      }
+    },
+    "on": {
+      "rows": 51,
+      "tiers": {
+        "qdrant_only": {
+          "client_total_s": {"n": 17, "p50": 17.584, "p95": 29.281, "max": 29.281},
+          "retrieval_internal_total_s": {"n": 17, "p50": 11.82, "p95": 24.051, "max": 24.051},
+          "embed_s": {"n": 17, "p50": 0.558, "p95": 4.098, "max": 4.098},
+          "vector_candidate_search_s": {"n": 17, "p50": 0.594, "p95": 1.649, "max": 1.649},
+          "hydrate_s": {"n": 17, "p50": 0, "p95": 0.001, "max": 0.001},
+          "graph_s": {"n": 0, "p50": null, "p95": null, "max": null},
+          "rerank_s": {"n": 17, "p50": 7.483, "p95": 20.004, "max": 20.004},
+          "assemble_support_residual_s": {"n": 17, "p50": 0.01837, "p95": 1.437392, "max": 1.437392},
+          "planning_vocabulary_s": {"n": 17, "p50": 1.316, "p95": 2.875, "max": 2.875},
+          "identity_dedupe_s": {"n": 17, "p50": 0, "p95": 0.002, "max": 0.002}
+        },
+        "qdrant_mongo": {
+          "client_total_s": {"n": 17, "p50": 20.751, "p95": 40.084, "max": 40.084},
+          "retrieval_internal_total_s": {"n": 17, "p50": 16.227, "p95": 22.407, "max": 22.407},
+          "embed_s": {"n": 17, "p50": 0, "p95": 0, "max": 0},
+          "vector_candidate_search_s": {"n": 17, "p50": 0.695, "p95": 3.756, "max": 3.756},
+          "hydrate_s": {"n": 17, "p50": 0.011, "p95": 0.043, "max": 0.043},
+          "graph_s": {"n": 0, "p50": null, "p95": null, "max": null},
+          "rerank_s": {"n": 17, "p50": 12.556, "p95": 20.035, "max": 20.035},
+          "assemble_support_residual_s": {"n": 17, "p50": 0.02485, "p95": 0.592269, "max": 0.592269},
+          "planning_vocabulary_s": {"n": 17, "p50": 1.124, "p95": 1.903, "max": 1.903},
+          "identity_dedupe_s": {"n": 17, "p50": 0.005, "p95": 0.014, "max": 0.014}
+        },
+        "qdrant_mongo_graph": {
+          "client_total_s": {"n": 17, "p50": 35.063, "p95": 47.437, "max": 47.437},
+          "retrieval_internal_total_s": {"n": 17, "p50": 24.632, "p95": 34.14, "max": 34.14},
+          "embed_s": {"n": 17, "p50": 0, "p95": 0.003, "max": 0.003},
+          "vector_candidate_search_s": {"n": 17, "p50": 0.897, "p95": 2.09, "max": 2.09},
+          "hydrate_s": {"n": 17, "p50": 0.023, "p95": 0.256, "max": 0.256},
+          "graph_s": {"n": 17, "p50": 2.666, "p95": 12.006, "max": 12.006},
+          "rerank_s": {"n": 17, "p50": 17.827, "p95": 20.089, "max": 20.089},
+          "assemble_support_residual_s": {"n": 17, "p50": 0.056, "p95": 1.086962, "max": 1.086962},
+          "planning_vocabulary_s": {"n": 17, "p50": 1.231, "p95": 2.041, "max": 2.041},
+          "identity_dedupe_s": {"n": 17, "p50": 0.005, "p95": 0.015, "max": 0.015}
+        }
+      },
+      "payload_nonempty_counts": {
+        "chunk_id": 233,
+        "chunk_kind": 233,
+        "corpus_id": 233,
+        "doc_id": 233,
+        "doc_name": 233,
+        "heading_path": 233,
+        "metadata": 233,
+        "parent_id": 233,
+        "provenance": 233,
+        "score": 233,
+        "source_tier": 233,
+        "summary": 187,
+        "text": 233,
+        "corpus_name": 159,
+        "domain": 128
+      },
+      "index_contract_execution_counts": {
+        "qdrant::corpus_2c894530_hrag": 51,
+        "qdrant::corpus_2c894530_naive": 51,
+        "qdrant::polymath_doc_summaries": 51,
+        "qdrant::corpus_2c894530_graph": 17
+      },
+      "final_source_tier_counts": {
+        "tier_a": 121,
+        "tier_a+lexical": 100
+      }
+    }
+  }
+}
