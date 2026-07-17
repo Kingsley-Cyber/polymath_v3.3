@@ -189,7 +189,9 @@ def _runtime_flags() -> dict[str, bool]:
         "ATOMIC_CLAIM_ANCHORS_ENABLED": False,
         "PARENT_EXCERPT_ENABLED": False,
         "WATERFALL_ASSEMBLY": False,
-        "TWO_LANE_ANCHORING": True,
+        # Compatibility-only legacy setting; the production selector reads the
+        # explicitly named ENABLED flag and Compose passes only that contract.
+        "TWO_LANE_ANCHORING": False,
         "TWO_LANE_ANCHORING_ENABLED": True,
         "HYDE_ENABLED": False,
         "SHELF_RESERVE_ENABLED": False,
