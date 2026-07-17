@@ -9433,7 +9433,10 @@ class ChatOrchestrator:
                 title="Assistant final answer",
                 status="error",
                 content="The model returned no user-facing answer after retrieval.",
-                metadata={"model": model_used},
+                metadata={
+                    "model_skipped": False,
+                    "model": model_used,
+                },
             )
             yield build_sse_chunk(
                 ChatChunk(
@@ -9503,6 +9506,7 @@ class ChatOrchestrator:
                 f"content_chars={len(assistant_content)}"
             ),
             metadata={
+                "model_skipped": False,
                 "model": model_used,
                 "content_chars": len(assistant_content),
                 "trace_events": len(trace_events) + 1,
