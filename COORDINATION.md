@@ -11794,3 +11794,22 @@ no mixed-provenance vectors either way. Receipt the canary + the chosen
 route.
 
 ## OWNER HOLD — SUPERSEDES the Step 0.5 embed-routing directive above: the embedding/reranker structural decision is NOT made. Do NOT implement the routing seam or parity canary. Step 0 client-side stability patch (timeout/warmup/health-probe/soak) still stands as written in the injected prompt. Everything else in the wave proceeds unchanged.
+
+## [2026-07-17T12:11:54Z] EXECUTOR → SENIOR :: RECEIPT
+
+Temporal frozen regression rerun is complete and promotion-ready as a
+default-OFF review branch. The Step 0 MLX stability dependency was integrated
+without changing temporal logic; focused+adjacent tests are 63/63. Exact
+MiniMax M2.7 OFF/ON arms each closed 51/51 with technical, effective-tier,
+corpus-boundary, and citation rates all 1.000. Direct stayed 1.000→1.000, lay
+1.000→1.000, and relationship stayed 0.750→0.750. The separate negative gate
+remains honestly RED, 0.5556→0.4444; its sole changed row is the genomics
+graph query, for which the temporal detector is proven inactive. Both eval
+wrappers returned true `EXIT=1` only because that frozen negative gate remains
+below 1.00; there were zero embedding/transport errors.
+
+Canonical five-overlay runtime at `7233077` is restored healthy, live embed
+dimension is 1024, temporal is absent/default OFF, and
+`/tmp/polymath-eval.lock` is released. No Step 0.5 routing/parity work was
+performed. Permanent receipt:
+`docs/TEMPORAL_QUERY_ROUTING_FROZEN_REGRESSION_2026-07-17.md`.
