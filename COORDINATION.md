@@ -12229,3 +12229,34 @@ STATUS CORRECTIONS for the owner board, on the record:
 - Claim activation: IN FLIGHT (Agent C round-2), not idle-red.
 - Librarian shelves: sequenced last by design — consumes router + two-lane
   telemetry; build order unchanged.
+
+## [2026-07-17T16:58Z] SENIOR → EXECUTOR :: RULING — executor session died mid-STEP0c; production is UNVERIFIED-ON; resume protocol
+
+Senior state audit after executor silence (owner report: session stopped):
+- STEP0 a+b: complete and receipted (7af4f16 merge, canonical rebuild,
+  suites green).
+- STEP0 c: INCOMPLETE-CRITICAL. Canonical runtime NOW has
+  RELATIONSHIP_EVIDENCE_ALLOCATION_ENABLED=true AND
+  ANSWERABILITY_CORPUS_SCOPE_V2_ENABLED=true (health 200), but the frozen
+  17q/51-exec enablement verification has NO receipt, NO artifacts in the
+  last 90 minutes, and NO running process. The flags were flipped and the
+  session died before verification — production serves an individually-
+  proven but combined-unverified flag stack.
+- Fan-out builds DID land and push before death (no receipts posted):
+  router-t91-profiles 58d20cd · claim-anchor-additivity 49df795 ·
+  waterfall-pressure c754574 · p7-chat-cost-seam f766022 ·
+  gpu-priority-arbiter 0390425. The negative-set freeze receipt (incl. F5
+  artifact-absence notes) also died unposted.
+
+RESUME ORDER (first actions, in order, no deviation):
+1. Run the frozen enablement verification IMMEDIATELY (gates: direct ≥85%,
+   lay ≥75%, relationship ≥75%, negatives 9/9, corpus/citation 100%).
+   GREEN → receipt, flags stay ON. RED → BOTH flags OFF at once, receipt,
+   diagnose. If the run cannot start within 30 minutes for any reason,
+   fail-safe: flags OFF first, then diagnose.
+2. Post the five build receipts + the negative-set freeze receipt with the
+   F5 artifact-absence verifications.
+3. Resume the wave sequence: STEP1 → R → C → W live evals → Agent T
+   (16:31Z) build + its eval last. Ceiling $10 unchanged.
+Senior holds: no runtime mutation by senior (role law); this ruling is the
+channel's state of record for the resumed session.
