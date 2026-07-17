@@ -22,6 +22,9 @@ because those genuinely require grounded source text.
 
 from __future__ import annotations
 
+import re
+from collections.abc import Iterable
+
 from config import get_settings
 
 # The synthetic atom injected when a multi-concept relationship query lacks an
@@ -35,6 +38,37 @@ RELATIONSHIP_FAMILY_ATOMS = frozenset(
 )
 
 _VALID_GATES = ("off", "lenient", "strict")
+
+_DISTINCTIVE_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9]*(?:[-'][A-Za-z0-9]+)*")
+_DISTINCTIVE_MIN_LENGTH = 8
+_DISTINCTIVE_EXCLUSIONS = frozenset(
+    {
+        "about",
+        "answer",
+        "between",
+        "corpus",
+        "could",
+        "document",
+        "documents",
+        "explain",
+        "information",
+        "question",
+        "selected",
+        "should",
+        "source",
+        "sources",
+        "that",
+        "these",
+        "this",
+        "those",
+        "together",
+        "what",
+        "when",
+        "where",
+        "which",
+        "would",
+    }
+)
 
 
 def _clamp(value: object, lo: float, hi: float, default: float) -> float:
@@ -116,6 +150,120 @@ def partial_floor() -> float:
     """Coverage boundary between 'partial' (caveat answer) and 'weak'/refuse,
     and the floor for the relationship carve-out. Default 0.50."""
     return _clamp(getattr(get_settings(), "ANSWERABILITY_PARTIAL_FLOOR", 0.50), 0.20, 0.70, 0.50)
+
+
+def corpus_scope_v2_enabled() -> bool:
+    """Whether the chat-only corpus-scope arbiter policy is active.
+
+    This flag is intentionally not consumed by retriever ranking or repair.
+    ``_evaluate_sufficiency`` stays strict and unchanged; v2 only constrains
+    when the chat arbiter may loosen that upstream result.
+    """
+
+    return bool(getattr(get_settings(), "ANSWERABILITY_CORPUS_SCOPE_V2_ENABLED", False))
+
+
+def answerability_policy_version() -> str:
+    """Stable policy identity for traces and A/B receipts."""
+
+    return "corpus_scope.v2" if corpus_scope_v2_enabled() else "baseline_live_v0"
+
+
+def _scope_term(value: object) -> str:
+    text = str(value or "").casefold().replace("-", " ")
+    text = re.sub(r"(?:'s|’s)\b", "", text)
+    return " ".join(re.findall(r"[a-z0-9]+", text))
+
+
+def distinctive_query_terms(query: str | None) -> tuple[str, ...]:
+    """Return a conservative, domain-neutral query scope signature.
+
+    A term is distinctive when its surface form is acronym/proper-name-like,
+    hyphenated, or long enough to be unlikely question scaffolding. Shared
+    request-shape exclusions remove corpus/query scaffolding. This deliberately
+    requires no corpus vocabulary and contains no eval- or domain-specific
+    terms.
+    """
+
+    tokens = list(_DISTINCTIVE_TOKEN_RE.finditer(str(query or "")))
+    selected: list[str] = []
+    seen: set[str] = set()
+    for index, match in enumerate(tokens):
+        raw = match.group(0)
+        term = _scope_term(raw)
+        compact = term.replace(" ", "")
+        if not term or compact in _DISTINCTIVE_EXCLUSIONS:
+            continue
+        letters = re.sub(r"[^A-Za-z]", "", raw)
+        acronym_like = len(letters) >= 2 and letters.isupper()
+        proper_like = index > 0 and len(compact) >= 3 and raw[0].isupper()
+        compound_like = "-" in raw
+        long_like = len(compact) >= _DISTINCTIVE_MIN_LENGTH
+        if not (acronym_like or proper_like or compound_like or long_like):
+            continue
+        if term not in seen:
+            selected.append(term)
+            seen.add(term)
+    return tuple(selected)
+
+
+def corpus_scope_v2_support(
+    query: str | None,
+    source_texts: Iterable[object],
+) -> dict[str, object]:
+    """Measure distinctive query coverage in the final retrieved packet.
+
+    The guard is eligible only for a real signature of at least two terms.
+    It does not decide answerability by itself; the chat arbiter invokes it
+    only when the strict retriever result was already unanswerable and the
+    legacy chat policy would otherwise loosen that decision.
+    """
+
+    terms = distinctive_query_terms(query)
+    try:
+        min_terms = max(
+            2,
+            min(
+                8,
+                int(
+                    getattr(
+                        get_settings(),
+                        "ANSWERABILITY_CORPUS_SCOPE_V2_MIN_TERMS",
+                        2,
+                    )
+                    or 2
+                ),
+            ),
+        )
+    except (TypeError, ValueError):
+        min_terms = 2
+    min_coverage = _clamp(
+        getattr(
+            get_settings(),
+            "ANSWERABILITY_CORPUS_SCOPE_V2_MIN_COVERAGE",
+            0.60,
+        ),
+        0.25,
+        1.0,
+        0.60,
+    )
+    packet = _scope_term(" ".join(str(value or "") for value in source_texts))
+    padded = f" {packet} "
+    matched = [term for term in terms if f" {term} " in padded]
+    coverage = len(matched) / len(terms) if terms else 1.0
+    eligible = len(terms) >= min_terms
+    return {
+        "policy_version": answerability_policy_version(),
+        "enabled": corpus_scope_v2_enabled(),
+        "eligible": eligible,
+        "distinctive_terms": list(terms),
+        "matched_terms": matched,
+        "missing_terms": [term for term in terms if term not in set(matched)],
+        "coverage": round(coverage, 4),
+        "min_terms": min_terms,
+        "min_coverage": round(min_coverage, 4),
+        "supported": (not eligible) or coverage >= min_coverage,
+    }
 
 
 def inject_cross_doc_atom() -> bool:
