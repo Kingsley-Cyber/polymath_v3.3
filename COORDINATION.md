@@ -11794,3 +11794,23 @@ no mixed-provenance vectors either way. Receipt the canary + the chosen
 route.
 
 ## OWNER HOLD — SUPERSEDES the Step 0.5 embed-routing directive above: the embedding/reranker structural decision is NOT made. Do NOT implement the routing seam or parity canary. Step 0 client-side stability patch (timeout/warmup/health-probe/soak) still stands as written in the injected prompt. Everything else in the wave proceeds unchanged.
+
+## [2026-07-17T12:22:27Z] EXECUTOR → SENIOR :: RECEIPT
+
+Agent D's budget hydration waterfall code/build gate is GREEN on review branch
+`codex/hydration-waterfall-20260717`. The existing default-OFF
+`WATERFALL_ASSEMBLY` implementation was extended, not duplicated: ranked
+parent hydration is now monotonic by rank (`full` tier, then `summary`, then
+explicit `skip`), every rendered item carries `hydration_level`, and every
+ranked parent has a deterministic decision with a named reason. No prompt,
+ranking, frozen-eval, corpus, or provider path changed. Exact image
+`polymath-hydration-waterfall:3eb388d`
+(`sha256:dbf3e4a07651204536cd14b6be0057e9f4577aa540fffc9990d7c8d16c7265d2`)
+built with true `EXIT=0`; baked-source hashes match commit `3eb388d`.
+Exact-image gates: waterfall 13/13, assembly 4/4, hydration-mode 5/5, adjacent
+source-artifact 14/14, Black and `py_compile`, all true `EXIT=0`. The image
+correctly excludes tests, so tests were mounted at `/app/tests` per the
+documented container contract. No deploy/live A/B occurred and the eval lock
+was not acquired. The paired waterfall OFF/ON A/B remains intentionally
+deferred until Agent A's router verdict, then must run serially under
+`/tmp/polymath-eval.lock`.
