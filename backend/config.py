@@ -739,6 +739,29 @@ class Settings(BaseSettings):
             "polymath_doc_summaries before parent/child evidence retrieval."
         ),
     )
+    FOUR_LANE_TIER0_ROUTER_ENABLED: bool = Field(
+        default=False,
+        description=(
+            "Dark-ship the four-lane document router (lexical, semantic, "
+            "child-rollup, associative) ahead of evidence retrieval. The "
+            "legacy Tier-0 router remains the rollback when disabled."
+        ),
+    )
+    FOUR_LANE_TIER0_SUBQUERY_DECOMPOSITION_ENABLED: bool = Field(
+        default=False,
+        description=(
+            "Allow the existing cached, durable-budgeted grounded planner to "
+            "supply optional router subqueries plus one fixed underlying-crafts "
+            "bridge probe. Independent from the router master flag and OFF by "
+            "default."
+        ),
+    )
+    FOUR_LANE_TIER0_MAX_DOCUMENTS: int = Field(
+        default=6,
+        ge=2,
+        le=16,
+        description="Maximum routed documents retained per query-plan lane.",
+    )
     # §12.6 waterfall graph serving — P2 Mode A knobs (each a kill-switch)
     GRAPH_PAYLOAD_FIRST: bool = Field(
         default=True,

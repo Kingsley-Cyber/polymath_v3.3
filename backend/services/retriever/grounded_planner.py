@@ -295,6 +295,8 @@ async def run_grounded_planner(
     resolution: dict[str, Any],
     corpus_ids: list[str],
     route: dict[str, Any] | None = None,
+    enabled_override: bool | None = None,
+    force: bool = False,
 ) -> dict[str, Any]:
     settings = get_settings()
     route = route or {}
@@ -303,7 +305,11 @@ async def run_grounded_planner(
         or getattr(settings, "GROUNDED_QUERY_PLANNER_MODEL", "")
         or ""
     )
-    enabled = bool(getattr(settings, "GROUNDED_QUERY_PLANNER_ENABLED", False))
+    enabled = (
+        bool(getattr(settings, "GROUNDED_QUERY_PLANNER_ENABLED", False))
+        if enabled_override is None
+        else bool(enabled_override)
+    )
     maximum = int(getattr(settings, "GROUNDED_QUERY_PLANNER_MAX_CALLS_TOTAL", 0) or 0)
     base = {
         "version": PLANNER_VERSION,
@@ -316,7 +322,7 @@ async def run_grounded_planner(
     if not enabled or not model or maximum <= 0:
         base["reason"] = "planner_not_fully_configured"
         return base
-    if db is None or not should_run_grounded_planner(plan, resolution):
+    if db is None or (not force and not should_run_grounded_planner(plan, resolution)):
         base["reason"] = "deterministic_plan_sufficient"
         return base
 

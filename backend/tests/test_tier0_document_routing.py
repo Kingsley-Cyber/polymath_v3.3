@@ -162,6 +162,12 @@ async def test_tier0_router_is_fair_per_lane_and_corpus():
         and call["search_params"].quantization.oversampling == 2.0
         for call in router.client.calls
     )
+    assert all(
+        call["query_filter"].must_not
+        and call["query_filter"].must_not[0].key == "chunk_type"
+        and call["query_filter"].must_not[0].match.value == "semantic_digest"
+        for call in router.client.calls
+    )
     assert {route.corpus_id for route in routes["books"]} == {"c1", "c2"}
     assert {route.corpus_id for route in routes["dropshipping"]} == {"c1", "c2"}
     assert diagnostics["routed_doc_count"] == 2
