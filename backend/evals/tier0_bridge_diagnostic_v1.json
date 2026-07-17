@@ -1,0 +1,87 @@
+{
+  "schema_version": "polymath.tier0_bridge_diagnostic.v1",
+  "preregistered_at_utc": "2026-07-17T00:00:00Z",
+  "status": "frozen_before_implementation",
+  "class": "ai_video_model_prompting_to_underlying_film_crafts",
+  "source_title_discovery": {
+    "method": "read_only_filename_manifest",
+    "root": "/Users/king/Desktop/hermes agent/ECOMMERCE/pdf",
+    "appledouble_policy": "exclude filenames beginning ._",
+    "content_read": false
+  },
+  "corpus_scope": {
+    "corpus_name": "ecommerce_AI_FILM_SCHOOL",
+    "corpus_id_policy": "discover_from_read_only_api_or_store_at_run_time",
+    "writes": 0
+  },
+  "scoring": {
+    "winner_window": 3,
+    "pass_per_query": "at least one expected title in the first 3 routed documents and no forbidden title at rank 1",
+    "suite_pass": "6 of 6 queries pass",
+    "attribution_required": [
+      "lexical",
+      "semantic",
+      "child_rollup",
+      "associative"
+    ]
+  },
+  "global_forbidden_winner_titles": [
+    "The Filmmaker&_039_s Eye - The Language of the Lens _ The Power of Lenses and the Expressive Cinematic...{Mercado, Gustavo}(2019, Taylor &amp_ Francis Group){113109546} libgen.li.md"
+  ],
+  "queries": [
+    {
+      "id": "bridge_ai_video_camera_motion_story",
+      "question": "How should I prompt an AI video model so camera movement expresses the story instead of feeling like random motion?",
+      "expected_title_any": [
+        "Film Directing Cinematic Motion.md",
+        "Francis Glebas - Directing the Story (2008).md",
+        "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md"
+      ]
+    },
+    {
+      "id": "bridge_ai_video_sequence_continuity",
+      "question": "What underlying craft should guide prompts that turn separate AI-generated clips into one emotionally coherent sequence?",
+      "expected_title_any": [
+        "Grammar of the Edit.md",
+        "Ken Dancyger - The technique of film & video editing (2019).md",
+        "Walter Murch - In the Blink of an Eye (2001).md"
+      ]
+    },
+    {
+      "id": "bridge_ai_video_blocking",
+      "question": "How can I describe staging and blocking in an AI video prompt so characters reveal intention through the scene?",
+      "expected_title_any": [
+        "Francis Glebas - Directing the Story (2008).md",
+        "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md",
+        "The Anatomy of Story.md"
+      ]
+    },
+    {
+      "id": "bridge_ai_video_visual_power",
+      "question": "Which storytelling principles should shape an AI video prompt when I want the frame to communicate power and vulnerability?",
+      "expected_title_any": [
+        "Bruce Block - The Visual Story (2007).md",
+        "Framed Ink.md",
+        "Kelly Gordon Brine - The Art Of Cinematic Storytelling (2020, Oxford University Press).md"
+      ]
+    },
+    {
+      "id": "bridge_ai_video_character_motion",
+      "question": "My AI video character moves correctly but the performance says nothing. What directing craft should I encode in the prompt?",
+      "expected_title_any": [
+        "Francis Glebas - Directing the Story (2008).md",
+        "Film Directing Cinematic Motion.md",
+        "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md"
+      ]
+    },
+    {
+      "id": "bridge_ai_video_storyboard",
+      "question": "How do I turn a narrative beat into a sequence of AI video prompts without losing the dramatic through-line?",
+      "expected_title_any": [
+        "The Anatomy of Story.md",
+        "Francis Glebas - Directing the Story (2008).md",
+        "Kelly Gordon Brine - The Art Of Cinematic Storytelling (2020, Oxford University Press).md"
+      ]
+    }
+  ]
+}
