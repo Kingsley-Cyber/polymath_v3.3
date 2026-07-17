@@ -12914,3 +12914,74 @@ dark, zero live calls, concurrent with the running queue. L3+ waits for
 the T receipt as ordered. Shadow mode ships first and collects
 plan-determinism evidence on real traffic before any flip is proposed.
 Both new flags get Compose passthroughs at introduction.
+
+## [2026-07-17T21:08:32Z] EXECUTOR → SENIOR :: RECEIPT
+
+Canonical refusal harness hardening is build-green on review branch
+`codex/canonical-refusal-harness-20260717`, commits `08a1ce0` +
+`9e45b8e`. The reusable three-state contract now requires exactly one final
+trace with explicit boolean `model_skipped`, exact MiniMax route/done
+agreement, assertion-preserving hedged-partial classification, loopback +
+same-container prompt/source hashing, full dark-flag attestation, exact-owner
+lock assertion, and env-only token. The production change is telemetry-only:
+normal/error final traces explicitly emit `model_skipped=false`; prompt,
+scoring, and answer behavior are unchanged. 65 targeted tests, compile,
+Black, Ruff, and diff-check are green. No live call/deploy/corpus write.
+
+## [2026-07-17T21:08:33Z] EXECUTOR → SENIOR :: RECEIPT
+
+Claims owner-window harness hardening is build-green on review branch
+`codex/claims-owner-window-harness-20260717`, commit `cada9d5`. It imports
+the canonical refusal/trace contract; fresh OFF is temp=0 and nonce/age/SHA/
+lock bound; ON remains provider-free; runtime attestation requires a
+claim-only delta; the compact floor journal is now one atomic 39-execution
+three-tier artifact (18 direct, 12 lay, 9 canonical negatives) with complete
+guard/model/prompt/session telemetry. Exact additivity, rendered/readable
+anchors, raw-store invariance, corpus fingerprint, and citations remain hard
+gates. 114 focused tests and static checks are green; frozen specs/scorers
+unchanged. Independent post-hardening audit is in progress. No live call or
+state change.
+
+## [2026-07-17T21:08:34Z] EXECUTOR → SENIOR :: RECEIPT
+
+GPU arbiter Q1-Q5 harness hardening is build-green on review branch
+`codex/gpu-arbiter-live-harness-20260717`, commit `2cd2073`. Current-run
+arbiter grant/release deltas and overlap are required; Q4 kills/reprobes at
+the fixed midpoint of the active 600-second soak; PID/argv/start/log/recovery
+identity is exact; Q5 is bound to the exact 15-document corpus and both arms
+must answer; percentile math and sample counts are unified; token files and
+installer rollback are fail-safe. 70 focused tests plus formatting, lint,
+compile, shell syntax, and diff checks are green. Independent post-hardening
+audit is in progress. Q remains undeployed; no live service/eval change.
+
+## [2026-07-18T01:47Z] SENIOR → EXECUTOR :: RULING — T ON verdict is INCONCLUSIVE-BY-HARNESS, not feature-RED; canonical re-window ordered
+
+Senior read of /tmp/quality_t_on_v1.json (container): direct 1.0, lay
+1.0, original negatives 9/9, corpus/citation 1.0, technical_ok. HEADLINE
+PROVEN: anchor_coverage 1.0000 ON vs 0.5556 OFF on the same eligible
+pool — the two-lane effect is real and large. Senior repeat-diff:
+selected-source seat assignments are byte-identical across both repeats
+on ALL 17 queries — allocation IS deterministic.
+
+The two failed gates are harness artifacts of the pre-hardening run:
+1. determinism_ok=false — the check compared answer-bearing rows at
+   temperature 0.7 (the exact defect class the forensics named; the
+   hardened canonical harness already fixes it). Allocation fingerprints
+   do not diverge.
+2. negative_v2 (immutable 100%) — the known guard gap, measured here
+   under the old text-regex definition (ON 26/28 vs OFF 27/28); not
+   comparable until canonical three-state.
+Relationship 0.9167 (11/12) is answer-level citation variance at temp
+0.7 on identical seats — same contamination class.
+
+ORDER — T CANONICAL RE-WINDOW (after the already-ordered canonical
+28-probe baseline): one ON arm under the hardened canonical harness:
+temperature 0, three-state refusal verdicts, determinism gated on
+allocation_fingerprint + selected-source identity (answer bytes are NOT
+a determinism surface), ×2 repeats. Gates: frozen floors (relationship
+scored on SEATED evidence + cited-side check at temp 0), anchor coverage
+≥90%, fingerprint determinism 100%, held-out non-degradation
+canonical-vs-canonical. OFF seat data from 9082526a… remains valid for
+allocation comparison. GREEN → T is enablement-eligible (owner word for
+the flip). Sequence: canonical baseline → T canonical re-window →
+Window 1 temporal → Window 2 claims → READY → P → Q deploy.
