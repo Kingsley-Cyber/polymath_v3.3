@@ -13209,3 +13209,56 @@ proceed IMMEDIATELY — they are independent of T. Then READY/P/Q, then
 the T diagnosis if not already done, then build mode 2a–2d. The
 temporal/claims windows run at concurrency 1 (flip windows are small —
 10 and 6 queries — serial costs minutes and removes the confound).
+
+## [2026-07-17T23:49:46Z] EXECUTOR → SENIOR :: RECEIPT
+
+BUILD-FIRST STEP 1C — TEMPORAL ATOMIC FLIP is SEALED-GREEN under the
+05:31Z serial amendment; temporal remains ON. Review branch
+`codex/build-first-queue-20260718` carries the compact canonical harness and
+typing/serialization hardening in `39906fa`, `3019cdf`, and `80dec75`.
+Focused canonical/temporal tests were 83/83 green before the window; each
+contract correction was additionally 5/5 green. Exact selection
+`temporal-canonical-10.v1` is 4 temporal + 2 direct + 2 lay + 2 canonical
+negatives, query-ID SHA
+`cd0f7d32073db2491c94f3589eda1964351217484b0ba9040d6e7a5ee74ec1ba`.
+
+CREDITED SERIAL RESULT (concurrency=1, temperature=0): 10/10 technical,
+10/10 journal complete, prompt/source hash stable; temporal doc-hit 4/4 =
+100% (target ≥90%); full sentence-anchor coverage 4/4 = 100% (target ≥70%);
+all four traces showed active temporal-routing consumption; direct 2/2 =
+100%; lay 2/2 = 100%; corpus/citation membership 100%. The two canonical
+negative states exactly matched the sealed compact baseline:
+`negv2_f2_oscar_2026=answered`,
+`negv2_f1_crispr=gate_blocked`; answered count 1→1, so non-degradation is
+GREEN. The compact-window amendment does not sample relationship queries in
+this window. Runtime after lock release is attested relationship=true,
+corpus_scope.v2=true, temporal=true, T=false, claims=false,
+planner/router/waterfall=false. No corpus write occurred.
+
+Two uncredited attempts are disclosed and preserved. Attempt 1 ran at the
+then-active concurrency=3 but the held-out source rows lacked `shape`, so its
+summary counted zero negatives; the real row states were visible but its gate
+was invalid. The harness assigned `negative_control`, added an asserting
+fixture, and reran. Attempt 2 had correct typing and all observed metrics
+green, but the senior's 05:31Z concurrency=1 amendment arrived while it was
+running; it is preserved as INVALID-CONCURRENCY and was not cited. The exact
+same 10 then ran serially as the credited result. Conservative combined
+three-attempt/two-provider-attempt envelope is `$1.534734`; usage was recorded
+and did not stop execution.
+
+Credited journal:
+`docs/baselines/BUILD_FIRST_TEMPORAL_CANONICAL_10_GREEN_2026-07-18.json`,
+file SHA
+`01e8682040415c804bc08a43f9bf73a84c992c45e77849908c707a1d854d5f90`,
+canonical seal payload SHA
+`71fc4414de1ec5c4d256893fcc055d4d9fff374c084de505138f6697e30d42cc`;
+run-log SHA
+`ef19fca961da15908036dc3f6c464bd2fba6fab5bc704bb574b12f6d2828f35c`,
+true `EXIT=0`.
+
+Invalid typing-attempt journal/log SHAs:
+`c3d7413cb56776a2d315c2cbd83a4610b9f1e371ad9a74f37baef5a83cfc5e7d` /
+`3f65ab8ad979b8ed9f9784706d3a2b83aaafef50fb3ac201be69c8391c4683f4`.
+Invalid concurrency-attempt journal/log SHAs:
+`551dd889ef44081d91bbfc62e7185d8bad46dfa02912910c7a6440b9db4ed0be` /
+`1e4cd14274a7a7ef2aab0a1792d7dfbbeadf67bb6fd3d4b5bdade0097b83377e`.
