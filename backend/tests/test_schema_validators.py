@@ -65,9 +65,9 @@ def test_optional_type_checks_tolerate_null(collection):
         if field in required:
             continue
         bson_type = spec.get("bsonType")
-        assert isinstance(bson_type, list) and "null" in bson_type, (
-            f"{collection}.{field} optional type-check must union with null"
-        )
+        assert (
+            isinstance(bson_type, list) and "null" in bson_type
+        ), f"{collection}.{field} optional type-check must union with null"
 
 
 def test_summary_tree_node_type_enum():
@@ -78,8 +78,10 @@ def test_summary_tree_node_type_enum():
 @pytest.mark.parametrize("collection", sorted(ENVELOPE_COLLECTIONS))
 def test_new_envelope_collection_contracts_are_closed(collection):
     body = sv.VALIDATORS[collection]["$jsonSchema"]
-    assert body["additionalProperties"] is False
-    assert set(body["required"]) <= set(body["properties"])
+    branches = body.get("oneOf") or [body]
+    for branch in branches:
+        assert branch["additionalProperties"] is False
+        assert set(branch["required"]) <= set(branch["properties"])
 
 
 def test_semantic_artifact_validator_requires_the_literal_envelope():
@@ -95,23 +97,49 @@ def test_semantic_artifact_validator_requires_the_literal_envelope():
         "lifecycle",
         "body",
     } <= set(body["required"])
-    assert body["properties"]["artifact_revision_id"]["pattern"].startswith(
-        "^rev:"
-    )
+    assert body["properties"]["artifact_revision_id"]["pattern"].startswith("^rev:")
 
 
 def test_projection_validator_versions_match_typed_contracts():
-    manifest = sv.PROJECTION_MANIFESTS_SCHEMA["$jsonSchema"]["properties"]
-    outbox = sv.PROJECTION_OUTBOX_SCHEMA["$jsonSchema"]["properties"]
-    assert manifest["schema_version"] == {"enum": ["projection_manifest.v1"]}
-    assert outbox["schema_version"] == {"enum": ["projection_outbox.v1"]}
-    assert set(outbox["state"]["enum"]) == {
+    manifest_v1, manifest_v2 = sv.PROJECTION_MANIFESTS_SCHEMA["$jsonSchema"]["oneOf"]
+    outbox_v1, outbox_v2 = sv.PROJECTION_OUTBOX_SCHEMA["$jsonSchema"]["oneOf"]
+    assert manifest_v1["properties"]["schema_version"] == {
+        "enum": ["projection_manifest.v1"]
+    }
+    assert outbox_v1["properties"]["schema_version"] == {
+        "enum": ["projection_outbox.v1"]
+    }
+    assert set(outbox_v1["properties"]["state"]["enum"]) == {
         "pending",
         "in_flight",
         "applied",
         "failed",
         "dead",
     }
+    assert manifest_v2["properties"]["schema_version"] == {
+        "enum": ["projection_manifest.v2"]
+    }
+    assert manifest_v2["properties"]["rollback_predecessor"]["bsonType"] == [
+        "string",
+        "null",
+    ]
+    assert {
+        "model_revision",
+        "sparse_recipe_version",
+    } <= set(manifest_v2["properties"]["embedding_profile"]["required"])
+    assert outbox_v2["properties"]["schema_version"] == {
+        "enum": ["projection_outbox.v2"]
+    }
+    assert {
+        "projected_payload_hash",
+        "source",
+        "application_receipt",
+    } <= set(outbox_v2["properties"])
+    assert {
+        "parent_text_hash",
+        "source_child_ids_hash",
+        "source_child_count",
+    } <= set(outbox_v2["properties"]["source"]["required"])
 
 
 # ---------------------------------------------------------------------------
@@ -164,7 +192,7 @@ async def test_apply_falls_back_to_create_collection_when_collmod_fails():
     results = await sv.apply_validators(db)
 
     assert results["summary_tree"] == {"status": "created", "action": "warn"}
-    (name, kwargs), = db.created
+    ((name, kwargs),) = db.created
     assert name == "summary_tree"
     assert kwargs["validator"] == sv.SUMMARY_TREE_SCHEMA
     assert kwargs["validationAction"] == "warn"
@@ -184,9 +212,7 @@ async def test_apply_reports_failed_when_both_paths_fail_without_raising():
     assert results["documents"]["action"] == "warn"
     # One failure never aborts the rest.
     assert all(
-        results[c]["status"] == "applied"
-        for c in sv.VALIDATORS
-        if c != "documents"
+        results[c]["status"] == "applied" for c in sv.VALIDATORS if c != "documents"
     )
 
 

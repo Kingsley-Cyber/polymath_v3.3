@@ -1,0 +1,603 @@
+{
+  "baseline": {
+    "captured_at": "2026-07-17T04:57:09Z",
+    "out_suffix": "semantic_activation_off",
+    "path": "/tmp/semantic_activation_off_graph.json"
+  },
+  "mode": "read_only_no_api_no_model",
+  "results": [
+    {
+      "all_exact_spans_valid": null,
+      "all_provenance_closed": null,
+      "all_selected_source_ownership_valid": null,
+      "diagnostics": {
+        "aggregate_calls": 1,
+        "ambiguous_compilations": 0,
+        "anchors_attached": 0,
+        "enabled": true,
+        "rows_rejected": 0,
+        "rows_seen": 5,
+        "rows_valid": 5,
+        "selected_source_count": 5,
+        "sources_anchored": 0
+      },
+      "eligible_anchor_count": 0,
+      "persisted_source_receipt": {
+        "assistant_created_at": "2026-07-17T04:50:41.380000+00:00",
+        "conversation_id": "6a59b46f2821aadb3e79a660",
+        "effective_tier": "qdrant_mongo_graph",
+        "user_created_at": "2026-07-17T04:50:21.933000+00:00"
+      },
+      "question_id": "q021",
+      "selected_source_count": 6,
+      "sources": [
+        {
+          "chunk_id": "778cddbfdc9c628e3efc7dbc1f04b49eeb49469cf7efadcf42d7abd9b0917054_parent_0002_summary",
+          "corpus_id": "5a20bc21-95df-42c2-80c8-f927b4e83904",
+          "doc_id": "778cddbfdc9c628e3efc7dbc1f04b49eeb49469cf7efadcf42d7abd9b0917054",
+          "eligible_anchor_count": 0,
+          "valid_anchor_count": 0
+        },
+        {
+          "chunk_id": "939b3b9bc2ce00c141c2b48c408c809c3453c1772b35ec2581258a682cf5d405_0013",
+          "corpus_id": "5a20bc21-95df-42c2-80c8-f927b4e83904",
+          "doc_id": "939b3b9bc2ce00c141c2b48c408c809c3453c1772b35ec2581258a682cf5d405",
+          "eligible_anchor_count": 0,
+          "valid_anchor_count": 0
+        },
+        {
+          "chunk_id": "333dd5a665b6e48e564cb3a8401e96d98311695cd5949bddbdad7547b73e40e1_0006",
+          "corpus_id": "5a20bc21-95df-42c2-80c8-f927b4e83904",
+          "doc_id": "333dd5a665b6e48e564cb3a8401e96d98311695cd5949bddbdad7547b73e40e1",
+          "eligible_anchor_count": 0,
+          "valid_anchor_count": 0
+        },
+        {
+          "chunk_id": "0c72a3455a3bdaa045cee61aac42505c0b1dd94bd8108e9e9b74cb8750efca7d_0007",
+          "corpus_id": "5a20bc21-95df-42c2-80c8-f927b4e83904",
+          "doc_id": "0c72a3455a3bdaa045cee61aac42505c0b1dd94bd8108e9e9b74cb8750efca7d",
+          "eligible_anchor_count": 0,
+          "valid_anchor_count": 0
+        },
+        {
+          "chunk_id": "a2d5f19a81bdd4209bb3b8dab87e028d21190c47ccc1a95442f0a5475b8cfe9b_0002",
+          "corpus_id": "5a20bc21-95df-42c2-80c8-f927b4e83904",
+          "doc_id": "a2d5f19a81bdd4209bb3b8dab87e028d21190c47ccc1a95442f0a5475b8cfe9b",
+          "eligible_anchor_count": 0,
+          "valid_anchor_count": 0
+        },
+        {
+          "chunk_id": "b488f02718c907cdf0bd6ae506b6a954a7f4f24b8c7c4bcbc79f965da3eaf0e5_0003",
+          "corpus_id": "5a20bc21-95df-42c2-80c8-f927b4e83904",
+          "doc_id": "b488f02718c907cdf0bd6ae506b6a954a7f4f24b8c7c4bcbc79f965da3eaf0e5",
+          "eligible_anchor_count": 0,
+          "valid_anchor_count": 0
+        }
+      ],
+      "structural_sentence_anchor_precision": null,
+      "valid_anchor_count": 0
+    },
+    {
+      "all_exact_spans_valid": true,
+      "all_provenance_closed": true,
+      "all_selected_source_ownership_valid": true,
+      "diagnostics": {
+        "aggregate_calls": 1,
+        "ambiguous_compilations": 0,
+        "anchors_attached": 6,
+        "enabled": true,
+        "rows_rejected": 0,
+        "rows_seen": 4,
+        "rows_valid": 4,
+        "selected_source_count": 4,
+        "sources_anchored": 3
+      },
+      "eligible_anchor_count": 6,
+      "persisted_source_receipt": {
+        "assistant_created_at": "2026-07-17T04:56:09.663000+00:00",
+        "conversation_id": "6a59b5d22821aadb3e79a678",
+        "effective_tier": "qdrant_mongo_graph",
+        "user_created_at": "2026-07-17T04:56:09.330000+00:00"
+      },
+      "question_id": "q022",
+      "selected_source_count": 4,
+      "sources": [
+        {
+          "chunk_id": "a8e18aa9e19bb0adb55d5078a91c382e6bfe50a44a69663c9c1d7c5f35ae6ffb_0002",
+          "corpus_id": "5a20bc21-95df-42c2-80c8-f927b4e83904",
+          "doc_id": "a8e18aa9e19bb0adb55d5078a91c382e6bfe50a44a69663c9c1d7c5f35ae6ffb",
+          "eligible_anchor_count": 2,
+          "valid_anchor_count": 2
+        },
+        {
+          "chunk_id": "a8e18aa9e19bb0adb55d5078a91c382e6bfe50a44a69663c9c1d7c5f35ae6ffb_0019",
+          "corpus_id": "5a20bc21-95df-42c2-80c8-f927b4e83904",
+          "doc_id": "a8e18aa9e19bb0adb55d5078a91c382e6bfe50a44a69663c9c1d7c5f35ae6ffb",
+          "eligible_anchor_count": 2,
+          "valid_anchor_count": 2
+        },
+        {
+          "chunk_id": "a8e18aa9e19bb0adb55d5078a91c382e6bfe50a44a69663c9c1d7c5f35ae6ffb_0022",
+          "corpus_id": "5a20bc21-95df-42c2-80c8-f927b4e83904",
+          "doc_id": "a8e18aa9e19bb0adb55d5078a91c382e6bfe50a44a69663c9c1d7c5f35ae6ffb",
+          "eligible_anchor_count": 0,
+          "valid_anchor_count": 0
+        },
+        {
+          "chunk_id": "f472f9e60004ddcf0cc894194577b267db549802c047073862533250d21eaad3_0047",
+          "corpus_id": "5a20bc21-95df-42c2-80c8-f927b4e83904",
+          "doc_id": "f472f9e60004ddcf0cc894194577b267db549802c047073862533250d21eaad3",
+          "eligible_anchor_count": 2,
+          "valid_anchor_count": 2
+        }
+      ],
+      "structural_sentence_anchor_precision": 1.0,
+      "valid_anchor_count": 6
+    },
+    {
+      "all_exact_spans_valid": null,
+      "all_provenance_closed": null,
+      "all_selected_source_ownership_valid": null,
+      "diagnostics": {
+        "aggregate_calls": 1,
+        "ambiguous_compilations": 0,
+        "anchors_attached": 0,
+        "enabled": true,
+        "rows_rejected": 0,
+        "rows_seen": 1,
+        "rows_valid": 1,
+        "selected_source_count": 2,
+        "sources_anchored": 0
+      },
+      "eligible_anchor_count": 0,
+      "persisted_source_receipt": {
+        "assistant_created_at": "2026-07-17T04:52:29.351000+00:00",
+        "conversation_id": "6a59b4d72821aadb3e79a666",
+        "effective_tier": "qdrant_mongo_graph",
+        "user_created_at": "2026-07-17T04:52:01.902000+00:00"
+      },
+      "question_id": "q023",
+      "selected_source_count": 2,
+      "sources": [
+        {
+          "chunk_id": "7361d70d8f63af849f475a7685ec55417ffb9c60e3fe8d2a7e550e811847f5ab_0002",
+          "corpus_id": "5a20bc21-95df-42c2-80c8-f927b4e83904",
+          "doc_id": "7361d70d8f63af849f475a7685ec55417ffb9c60e3fe8d2a7e550e811847f5ab",
+          "eligible_anchor_count": 0,
+          "valid_anchor_count": 0
+        },
+        {
+          "chunk_id": "fb2531e96198bd5e6246f725570db1d913d51bd7d18fd0329af256e367866648_0003",
+          "corpus_id": "5a20bc21-95df-42c2-80c8-f927b4e83904",
+          "doc_id": "fb2531e96198bd5e6246f725570db1d913d51bd7d18fd0329af256e367866648",
+          "eligible_anchor_count": 0,
+          "valid_anchor_count": 0
+        }
+      ],
+      "structural_sentence_anchor_precision": null,
+      "valid_anchor_count": 0
+    },
+    {
+      "all_exact_spans_valid": true,
+      "all_provenance_closed": true,
+      "all_selected_source_ownership_valid": true,
+      "diagnostics": {
+        "aggregate_calls": 1,
+        "ambiguous_compilations": 0,
+        "anchors_attached": 4,
+        "enabled": true,
+        "rows_rejected": 0,
+        "rows_seen": 8,
+        "rows_valid": 8,
+        "selected_source_count": 8,
+        "sources_anchored": 2
+      },
+      "eligible_anchor_count": 4,
+      "persisted_source_receipt": {
+        "assistant_created_at": "2026-07-17T04:53:19.065000+00:00",
+        "conversation_id": "6a59b50d2821aadb3e79a669",
+        "effective_tier": "qdrant_mongo_graph",
+        "user_created_at": "2026-07-17T04:53:00.999000+00:00"
+      },
+      "question_id": "q024",
+      "selected_source_count": 8,
+      "sources": [
+        {
+          "chunk_id": "8db506dc7abb0ead8fcc14d7bade8139fc2ee5438831ed7439c28cda0710ef94_0012",
+          "corpus_id": "5a20bc21-95df-42c2-80c8-f927b4e83904",
+          "doc_id": "8db506dc7abb0ead8fcc14d7bade8139fc2ee5438831ed7439c28cda0710ef94",
+          "eligible_anchor_count": 2,
+          "valid_anchor_count": 2
+        },
+        {
+          "chunk_id": "55e404ad59a6b63ae3ddf9c7a3298e9345a6414b36b6b93deb9bc10557157a4e_0114",
+          "corpus_id": "5a20bc21-95df-42c2-80c8-f927b4e83904",
+          "doc_id": "55e404ad59a6b63ae3ddf9c7a3298e9345a6414b36b6b93deb9bc10557157a4e",
+          "eligible_anchor_count": 0,
+          "valid_anchor_count": 0
+        },
+        {
+          "chunk_id": "939b3b9bc2ce00c141c2b48c408c809c3453c1772b35ec2581258a682cf5d405_0002",
+          "corpus_id": "5a20bc21-95df-42c2-80c8-f927b4e83904",
+          "doc_id": "939b3b9bc2ce00c141c2b48c408c809c3453c1772b35ec2581258a682cf5d405",
+          "eligible_anchor_count": 0,
+          "valid_anchor_count": 0
+        },
+        {
+          "chunk_id": "2c7ead198b0a4f2a7bec4ee062ff7ac1eec3a85e8e6b8dfcc67aa91f50eb0010_0016",
+          "corpus_id": "5a20bc21-95df-42c2-80c8-f927b4e83904",
+          "doc_id": "2c7ead198b0a4f2a7bec4ee062ff7ac1eec3a85e8e6b8dfcc67aa91f50eb0010",
+          "eligible_anchor_count": 0,
+          "valid_anchor_count": 0
+        },
+        {
+          "chunk_id": "b32a850ae79966f1cdb9dbaf0ee9cc032a27cd04c2c8efda41598e974fcf2bcf_0005",
+          "corpus_id": "5a20bc21-95df-42c2-80c8-f927b4e83904",
+          "doc_id": "b32a850ae79966f1cdb9dbaf0ee9cc032a27cd04c2c8efda41598e974fcf2bcf",
+          "eligible_anchor_count": 2,
+          "valid_anchor_count": 2
+        },
+        {
+          "chunk_id": "87138e85d81b12678b80cf311c6c5ea1cc5f5bdab687aba86c596bba159155c5_0018",
+          "corpus_id": "5a20bc21-95df-42c2-80c8-f927b4e83904",
+          "doc_id": "87138e85d81b12678b80cf311c6c5ea1cc5f5bdab687aba86c596bba159155c5",
+          "eligible_anchor_count": 0,
+          "valid_anchor_count": 0
+        },
+        {
+          "chunk_id": "0c72a3455a3bdaa045cee61aac42505c0b1dd94bd8108e9e9b74cb8750efca7d_0002",
+          "corpus_id": "5a20bc21-95df-42c2-80c8-f927b4e83904",
+          "doc_id": "0c72a3455a3bdaa045cee61aac42505c0b1dd94bd8108e9e9b74cb8750efca7d",
+          "eligible_anchor_count": 0,
+          "valid_anchor_count": 0
+        },
+        {
+          "chunk_id": "0e24bdfb56579a848f7164229d04e36c34916c77ca2afd9d619e345d991d7783_0013",
+          "corpus_id": "5a20bc21-95df-42c2-80c8-f927b4e83904",
+          "doc_id": "0e24bdfb56579a848f7164229d04e36c34916c77ca2afd9d619e345d991d7783",
+          "eligible_anchor_count": 0,
+          "valid_anchor_count": 0
+        }
+      ],
+      "structural_sentence_anchor_precision": 1.0,
+      "valid_anchor_count": 4
+    },
+    {
+      "all_exact_spans_valid": true,
+      "all_provenance_closed": true,
+      "all_selected_source_ownership_valid": true,
+      "diagnostics": {
+        "aggregate_calls": 1,
+        "ambiguous_compilations": 0,
+        "anchors_attached": 6,
+        "enabled": true,
+        "rows_rejected": 0,
+        "rows_seen": 8,
+        "rows_valid": 8,
+        "selected_source_count": 8,
+        "sources_anchored": 3
+      },
+      "eligible_anchor_count": 6,
+      "persisted_source_receipt": {
+        "assistant_created_at": "2026-07-17T04:53:40.930000+00:00",
+        "conversation_id": "6a59b53f2821aadb3e79a66c",
+        "effective_tier": "qdrant_mongo_graph",
+        "user_created_at": "2026-07-17T04:53:40.922000+00:00"
+      },
+      "question_id": "q025",
+      "selected_source_count": 8,
+      "sources": [
+        {
+          "chunk_id": "4ea6af8332a8d59ab6d0559b1becfee99efc74e1b04ad2968d8d9a09d840f086_0015",
+          "corpus_id": "5a20bc21-95df-42c2-80c8-f927b4e83904",
+          "doc_id": "4ea6af8332a8d59ab6d0559b1becfee99efc74e1b04ad2968d8d9a09d840f086",
+          "eligible_anchor_count": 0,
+          "valid_anchor_count": 0
+        },
+        {
+          "chunk_id": "778b8b0452a5b3da55a99cb464004b96e911dab94c3363bbf4208418f8a85d6a_0002",
+          "corpus_id": "5a20bc21-95df-42c2-80c8-f927b4e83904",
+          "doc_id": "778b8b0452a5b3da55a99cb464004b96e911dab94c3363bbf4208418f8a85d6a",
+          "eligible_anchor_count": 2,
+          "valid_anchor_count": 2
+        },
+        {
+          "chunk_id": "52e60832ec3cfad7648f2dd2f95691a87506ae202518a672a350d1799f01bca6_0022",
+          "corpus_id": "5a20bc21-95df-42c2-80c8-f927b4e83904",
+          "doc_id": "52e60832ec3cfad7648f2dd2f95691a87506ae202518a672a350d1799f01bca6",
+          "eligible_anchor_count": 0,
+          "valid_anchor_count": 0
+        },
+        {
+          "chunk_id": "778b8b0452a5b3da55a99cb464004b96e911dab94c3363bbf4208418f8a85d6a_0015",
+          "corpus_id": "5a20bc21-95df-42c2-80c8-f927b4e83904",
+          "doc_id": "778b8b0452a5b3da55a99cb464004b96e911dab94c3363bbf4208418f8a85d6a",
+          "eligible_anchor_count": 0,
+          "valid_anchor_count": 0
+        },
+        {
+          "chunk_id": "e68e3163d1797a24ca3c05acdd0df684dfc27b623115a42b6821c399222743ec_0044",
+          "corpus_id": "5a20bc21-95df-42c2-80c8-f927b4e83904",
+          "doc_id": "e68e3163d1797a24ca3c05acdd0df684dfc27b623115a42b6821c399222743ec",
+          "eligible_anchor_count": 2,
+          "valid_anchor_count": 2
+        },
+        {
+          "chunk_id": "16607b47b1897c2ed2dd165f3d5436b02cd0a1cb90895a24dc4b35db29dbc049_0027",
+          "corpus_id": "5a20bc21-95df-42c2-80c8-f927b4e83904",
+          "doc_id": "16607b47b1897c2ed2dd165f3d5436b02cd0a1cb90895a24dc4b35db29dbc049",
+          "eligible_anchor_count": 2,
+          "valid_anchor_count": 2
+        },
+        {
+          "chunk_id": "f6f827504f3343a0f7517e540868097c604c9caf64dd2a48603dac61a65589eb_0010",
+          "corpus_id": "5a20bc21-95df-42c2-80c8-f927b4e83904",
+          "doc_id": "f6f827504f3343a0f7517e540868097c604c9caf64dd2a48603dac61a65589eb",
+          "eligible_anchor_count": 0,
+          "valid_anchor_count": 0
+        },
+        {
+          "chunk_id": "c0dd70852b2c83e4a2770fc27aec918dc2796c7725cb6849702d35127b629a65_0024",
+          "corpus_id": "5a20bc21-95df-42c2-80c8-f927b4e83904",
+          "doc_id": "c0dd70852b2c83e4a2770fc27aec918dc2796c7725cb6849702d35127b629a65",
+          "eligible_anchor_count": 0,
+          "valid_anchor_count": 0
+        }
+      ],
+      "structural_sentence_anchor_precision": 1.0,
+      "valid_anchor_count": 6
+    },
+    {
+      "all_exact_spans_valid": null,
+      "all_provenance_closed": null,
+      "all_selected_source_ownership_valid": null,
+      "diagnostics": {
+        "aggregate_calls": 1,
+        "ambiguous_compilations": 0,
+        "anchors_attached": 0,
+        "enabled": true,
+        "rows_rejected": 0,
+        "rows_seen": 5,
+        "rows_valid": 5,
+        "selected_source_count": 5,
+        "sources_anchored": 0
+      },
+      "eligible_anchor_count": 0,
+      "persisted_source_receipt": {
+        "assistant_created_at": "2026-07-17T04:54:23.492000+00:00",
+        "conversation_id": "6a59b55a2821aadb3e79a66f",
+        "effective_tier": "qdrant_mongo_graph",
+        "user_created_at": "2026-07-17T04:54:05.420000+00:00"
+      },
+      "question_id": "q026",
+      "selected_source_count": 5,
+      "sources": [
+        {
+          "chunk_id": "334081262d25bc13011d246ac6c361ab377b710fe50568b0c4f7ac091cf92b0e_0017",
+          "corpus_id": "5a20bc21-95df-42c2-80c8-f927b4e83904",
+          "doc_id": "334081262d25bc13011d246ac6c361ab377b710fe50568b0c4f7ac091cf92b0e",
+          "eligible_anchor_count": 0,
+          "valid_anchor_count": 0
+        },
+        {
+          "chunk_id": "de39eabcaa333c120f5ac225c9aff220425feac0d5f671a4edd5ae3a1fc93b50_0010",
+          "corpus_id": "5a20bc21-95df-42c2-80c8-f927b4e83904",
+          "doc_id": "de39eabcaa333c120f5ac225c9aff220425feac0d5f671a4edd5ae3a1fc93b50",
+          "eligible_anchor_count": 0,
+          "valid_anchor_count": 0
+        },
+        {
+          "chunk_id": "5f06eb8f14dd316dc66a1895e811c02efa924ab92316ba69bbfe152d15f98344_0002",
+          "corpus_id": "5a20bc21-95df-42c2-80c8-f927b4e83904",
+          "doc_id": "5f06eb8f14dd316dc66a1895e811c02efa924ab92316ba69bbfe152d15f98344",
+          "eligible_anchor_count": 0,
+          "valid_anchor_count": 0
+        },
+        {
+          "chunk_id": "69b2e5dd3d825aaa84784157e3dc93ec4099bc0b518b2959528a3e1b3afe2867_0008",
+          "corpus_id": "5a20bc21-95df-42c2-80c8-f927b4e83904",
+          "doc_id": "69b2e5dd3d825aaa84784157e3dc93ec4099bc0b518b2959528a3e1b3afe2867",
+          "eligible_anchor_count": 0,
+          "valid_anchor_count": 0
+        },
+        {
+          "chunk_id": "b2f5fad32522ecf3f93e112c1c9686991d8835afd06caeb53ace5ce1168d2a93_0017",
+          "corpus_id": "5a20bc21-95df-42c2-80c8-f927b4e83904",
+          "doc_id": "b2f5fad32522ecf3f93e112c1c9686991d8835afd06caeb53ace5ce1168d2a93",
+          "eligible_anchor_count": 0,
+          "valid_anchor_count": 0
+        }
+      ],
+      "structural_sentence_anchor_precision": null,
+      "valid_anchor_count": 0
+    },
+    {
+      "all_exact_spans_valid": true,
+      "all_provenance_closed": true,
+      "all_selected_source_ownership_valid": true,
+      "diagnostics": {
+        "aggregate_calls": 1,
+        "ambiguous_compilations": 0,
+        "anchors_attached": 7,
+        "enabled": true,
+        "rows_rejected": 0,
+        "rows_seen": 4,
+        "rows_valid": 4,
+        "selected_source_count": 4,
+        "sources_anchored": 4
+      },
+      "eligible_anchor_count": 7,
+      "persisted_source_receipt": {
+        "assistant_created_at": "2026-07-17T04:55:02.544000+00:00",
+        "conversation_id": "6a59b57f2821aadb3e79a672",
+        "effective_tier": "qdrant_mongo_graph",
+        "user_created_at": "2026-07-17T04:54:41.874000+00:00"
+      },
+      "question_id": "q027",
+      "selected_source_count": 4,
+      "sources": [
+        {
+          "chunk_id": "8a3663545eaa05b1c6f922b0c229294f0cea1366b50960ef9ebca146a07ab36c_0002",
+          "corpus_id": "5a20bc21-95df-42c2-80c8-f927b4e83904",
+          "doc_id": "8a3663545eaa05b1c6f922b0c229294f0cea1366b50960ef9ebca146a07ab36c",
+          "eligible_anchor_count": 2,
+          "valid_anchor_count": 2
+        },
+        {
+          "chunk_id": "b9d8b70224d4c2d224cd0d9fd102d240ee25a7d5c92fbb8b4da2c3825b72a6c0_0022",
+          "corpus_id": "5a20bc21-95df-42c2-80c8-f927b4e83904",
+          "doc_id": "b9d8b70224d4c2d224cd0d9fd102d240ee25a7d5c92fbb8b4da2c3825b72a6c0",
+          "eligible_anchor_count": 2,
+          "valid_anchor_count": 2
+        },
+        {
+          "chunk_id": "8bb44108231920415604d948a341e28e8b9c5a16d6adbc38fe955fc1e12ed282_0006",
+          "corpus_id": "5a20bc21-95df-42c2-80c8-f927b4e83904",
+          "doc_id": "8bb44108231920415604d948a341e28e8b9c5a16d6adbc38fe955fc1e12ed282",
+          "eligible_anchor_count": 2,
+          "valid_anchor_count": 2
+        },
+        {
+          "chunk_id": "a7a558085cda121d6411a37c6b511549c22257d8cd1f12661d4ded6dcfc1f758_0024",
+          "corpus_id": "5a20bc21-95df-42c2-80c8-f927b4e83904",
+          "doc_id": "a7a558085cda121d6411a37c6b511549c22257d8cd1f12661d4ded6dcfc1f758",
+          "eligible_anchor_count": 1,
+          "valid_anchor_count": 1
+        }
+      ],
+      "structural_sentence_anchor_precision": 1.0,
+      "valid_anchor_count": 7
+    },
+    {
+      "all_exact_spans_valid": true,
+      "all_provenance_closed": true,
+      "all_selected_source_ownership_valid": true,
+      "diagnostics": {
+        "aggregate_calls": 1,
+        "ambiguous_compilations": 0,
+        "anchors_attached": 2,
+        "enabled": true,
+        "rows_rejected": 0,
+        "rows_seen": 3,
+        "rows_valid": 3,
+        "selected_source_count": 3,
+        "sources_anchored": 1
+      },
+      "eligible_anchor_count": 2,
+      "persisted_source_receipt": {
+        "assistant_created_at": "2026-07-17T04:55:46.027000+00:00",
+        "conversation_id": "6a59b5a62821aadb3e79a675",
+        "effective_tier": "qdrant_mongo_graph",
+        "user_created_at": "2026-07-17T04:55:25.668000+00:00"
+      },
+      "question_id": "q028",
+      "selected_source_count": 3,
+      "sources": [
+        {
+          "chunk_id": "0c4cf7dfb7c7eb6fbb86fab09613bdb9594a4f3b6c3f467ff9254d15dda25766_0015",
+          "corpus_id": "5a20bc21-95df-42c2-80c8-f927b4e83904",
+          "doc_id": "0c4cf7dfb7c7eb6fbb86fab09613bdb9594a4f3b6c3f467ff9254d15dda25766",
+          "eligible_anchor_count": 0,
+          "valid_anchor_count": 0
+        },
+        {
+          "chunk_id": "8db506dc7abb0ead8fcc14d7bade8139fc2ee5438831ed7439c28cda0710ef94_0039",
+          "corpus_id": "5a20bc21-95df-42c2-80c8-f927b4e83904",
+          "doc_id": "8db506dc7abb0ead8fcc14d7bade8139fc2ee5438831ed7439c28cda0710ef94",
+          "eligible_anchor_count": 2,
+          "valid_anchor_count": 2
+        },
+        {
+          "chunk_id": "0658018339e53f90a759fd91c5922cb1650d276ed220a196bb04f5899b30a9fe_0025",
+          "corpus_id": "5a20bc21-95df-42c2-80c8-f927b4e83904",
+          "doc_id": "0658018339e53f90a759fd91c5922cb1650d276ed220a196bb04f5899b30a9fe",
+          "eligible_anchor_count": 0,
+          "valid_anchor_count": 0
+        }
+      ],
+      "structural_sentence_anchor_precision": 1.0,
+      "valid_anchor_count": 2
+    },
+    {
+      "all_exact_spans_valid": true,
+      "all_provenance_closed": true,
+      "all_selected_source_ownership_valid": true,
+      "diagnostics": {
+        "aggregate_calls": 1,
+        "ambiguous_compilations": 0,
+        "anchors_attached": 2,
+        "enabled": true,
+        "rows_rejected": 0,
+        "rows_seen": 3,
+        "rows_valid": 3,
+        "selected_source_count": 3,
+        "sources_anchored": 1
+      },
+      "eligible_anchor_count": 2,
+      "persisted_source_receipt": {
+        "assistant_created_at": "2026-07-17T04:57:09.008000+00:00",
+        "conversation_id": "6a59b5d22821aadb3e79a678",
+        "effective_tier": "qdrant_mongo_graph",
+        "user_created_at": "2026-07-17T04:56:43.107000+00:00"
+      },
+      "question_id": "q029",
+      "selected_source_count": 5,
+      "sources": [
+        {
+          "chunk_id": "a8e18aa9e19bb0adb55d5078a91c382e6bfe50a44a69663c9c1d7c5f35ae6ffb_0006",
+          "corpus_id": "5a20bc21-95df-42c2-80c8-f927b4e83904",
+          "doc_id": "a8e18aa9e19bb0adb55d5078a91c382e6bfe50a44a69663c9c1d7c5f35ae6ffb",
+          "eligible_anchor_count": 2,
+          "valid_anchor_count": 2
+        },
+        {
+          "chunk_id": "a8e18aa9e19bb0adb55d5078a91c382e6bfe50a44a69663c9c1d7c5f35ae6ffb_parent_0002_summary",
+          "corpus_id": "5a20bc21-95df-42c2-80c8-f927b4e83904",
+          "doc_id": "a8e18aa9e19bb0adb55d5078a91c382e6bfe50a44a69663c9c1d7c5f35ae6ffb",
+          "eligible_anchor_count": 0,
+          "valid_anchor_count": 0
+        },
+        {
+          "chunk_id": "e5af14d3f2d2c355fa7c4869fdd9fbf4c66587c0e42a5d7b6213798dcc83d89e_0024",
+          "corpus_id": "5a20bc21-95df-42c2-80c8-f927b4e83904",
+          "doc_id": "e5af14d3f2d2c355fa7c4869fdd9fbf4c66587c0e42a5d7b6213798dcc83d89e",
+          "eligible_anchor_count": 0,
+          "valid_anchor_count": 0
+        },
+        {
+          "chunk_id": "a8e18aa9e19bb0adb55d5078a91c382e6bfe50a44a69663c9c1d7c5f35ae6ffb_parent_0006_summary",
+          "corpus_id": "5a20bc21-95df-42c2-80c8-f927b4e83904",
+          "doc_id": "a8e18aa9e19bb0adb55d5078a91c382e6bfe50a44a69663c9c1d7c5f35ae6ffb",
+          "eligible_anchor_count": 0,
+          "valid_anchor_count": 0
+        },
+        {
+          "chunk_id": "19f5bf45f61248605f1154f66869d3577f2fd687c587220c337cf3e72736c631_0009",
+          "corpus_id": "5a20bc21-95df-42c2-80c8-f927b4e83904",
+          "doc_id": "19f5bf45f61248605f1154f66869d3577f2fd687c587220c337cf3e72736c631",
+          "eligible_anchor_count": 0,
+          "valid_anchor_count": 0
+        }
+      ],
+      "structural_sentence_anchor_precision": 1.0,
+      "valid_anchor_count": 2
+    }
+  ],
+  "schema_version": "atomic_claim_anchor_offline_replay.v1",
+  "summary": {
+    "eligible_anchor_count": 27,
+    "positive_question_ids": [
+      "q022",
+      "q024",
+      "q025",
+      "q027",
+      "q028",
+      "q029"
+    ],
+    "q021_isolated_zero": true,
+    "question_count": 9,
+    "questions_with_eligible_anchors": 6,
+    "structural_sentence_anchor_precision": 1.0,
+    "valid_anchor_count": 27
+  }
+}

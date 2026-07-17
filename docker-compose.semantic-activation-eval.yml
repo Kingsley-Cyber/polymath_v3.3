@@ -1,0 +1,5 @@
+services:
+  backend:
+    environment:
+      SEMANTIC_DIGEST_TIER0_ENABLED: "${SEMANTIC_DIGEST_TIER0_ENABLED:-false}"
+      ATOMIC_CLAIM_ANCHORS_ENABLED: "${ATOMIC_CLAIM_ANCHORS_ENABLED:-false}"

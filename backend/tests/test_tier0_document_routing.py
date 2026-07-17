@@ -1,8 +1,10 @@
 from types import SimpleNamespace
+from datetime import datetime, timezone
 
 import pytest
 
 import services.retriever as retriever_module
+import services.retriever.tier0_router as tier0_router_module
 from models.schemas import RetrievalTier, SourceChunk
 from services.retriever.query_plan import build_query_plan_v2
 from services.retriever.tier0_router import (
@@ -14,6 +16,20 @@ from services.retriever.tier0_router import (
     select_adaptive_routes,
     select_title_aligned_routes,
 )
+from services.storage.mongo_contracts import restore_bson_utc_awareness
+
+
+def test_mongo_utc_aware_restores_nested_bson_datetimes_for_strict_contracts():
+    naive = datetime(2026, 7, 17, 4, 19, 4)
+    aware = datetime(2026, 7, 17, 4, 19, 4, tzinfo=timezone.utc)
+
+    normalized = restore_bson_utc_awareness(
+        {"created_at": naive, "receipt": {"applied_at": naive}, "kept": aware}
+    )
+
+    assert normalized["created_at"].tzinfo == timezone.utc
+    assert normalized["receipt"]["applied_at"].tzinfo == timezone.utc
+    assert normalized["kept"] is aware
 
 
 def test_route_diversity_reorders_but_preserves_relevant_neighborhood():
@@ -162,12 +178,233 @@ async def test_tier0_router_is_fair_per_lane_and_corpus():
         and call["search_params"].quantization.oversampling == 2.0
         for call in router.client.calls
     )
+    assert all(
+        call["query_filter"].must_not
+        and call["query_filter"].must_not[0].key == "chunk_type"
+        and call["query_filter"].must_not[0].match.value == "semantic_digest"
+        for call in router.client.calls
+    )
     assert {route.corpus_id for route in routes["books"]} == {"c1", "c2"}
     assert {route.corpus_id for route in routes["dropshipping"]} == {"c1", "c2"}
     assert diagnostics["routed_doc_count"] == 2
     assert all(
         "noise" not in route.doc_id for values in routes.values() for route in values
     )
+
+
+class _DigestRouteClient:
+    def __init__(self):
+        self.calls = []
+
+    async def query_points(self, **kwargs):
+        self.calls.append(kwargs)
+        digest_only = len(kwargs["query_filter"].must) == 2
+        digest_points = [
+            SimpleNamespace(
+                id="stale-point",
+                score=0.99,
+                payload={
+                    "chunk_type": "semantic_digest",
+                    "projection_role": "semantic_digest",
+                    "corpus_id": "c1",
+                    "doc_id": "doc-1",
+                    "summary": "stale digest",
+                },
+            ),
+            SimpleNamespace(
+                id="current-point",
+                score=0.72,
+                payload={
+                    "chunk_type": "semantic_digest",
+                    "projection_role": "semantic_digest",
+                    "corpus_id": "c1",
+                    "doc_id": "doc-1",
+                    "parent_id": "parent-1",
+                    "projection_manifest_id": "projm:current",
+                    "summary": "current digest",
+                },
+            ),
+        ]
+        legacy_points = [
+            SimpleNamespace(
+                id="legacy-point",
+                score=0.65,
+                payload={
+                    "corpus_id": "c1",
+                    "doc_id": "doc-1",
+                    "title": "Current document title",
+                    "concepts": ["feedback"],
+                    "section_ids": ["parent-1"],
+                },
+            )
+        ]
+        return SimpleNamespace(points=digest_points if digest_only else legacy_points)
+
+
+@pytest.mark.asyncio
+async def test_digest_route_filters_stale_high_score_and_merges_legacy_display_data(
+    monkeypatch,
+):
+    router = Tier0DocumentRouter.__new__(Tier0DocumentRouter)
+    router.client = _DigestRouteClient()
+    monkeypatch.setattr(
+        tier0_router_module,
+        "get_settings",
+        lambda: SimpleNamespace(SEMANTIC_DIGEST_TIER0_ENABLED=True),
+    )
+
+    async def authorize(_raw_results):
+        return {"current-point"}, {
+            "seen": 2,
+            "authorized": 1,
+            "invalid_provenance": 0,
+            "stale_lineage": 1,
+            "profile_mismatch": 0,
+            "missing_application_receipt": 0,
+        }
+
+    monkeypatch.setattr(tier0_router_module, "_authorized_digest_point_ids", authorize)
+
+    routes, diagnostics = await router.route_lanes({"topic": [0.1]}, ["c1"])
+
+    assert len(router.client.calls) == 2
+    legacy_call, digest_call = router.client.calls
+    assert legacy_call["query_filter"].must_not
+    assert digest_call["query_filter"].must_not == []
+    assert len(digest_call["query_filter"].must) == 2
+    assert digest_call["limit"] == 96
+    assert len(routes["topic"]) == 1
+    route = routes["topic"][0]
+    assert route.summary == "current digest"
+    assert route.title == "Current document title"
+    assert route.concepts == ("feedback",)
+    assert route.projection_role == "semantic_digest"
+    assert diagnostics["semantic_digest_authorization"]["stale_lineage"] == 1
+    assert diagnostics["semantic_digest_route_count"] == 1
+
+
+class _CrowdedDigestRouteClient:
+    def __init__(self):
+        self.calls = []
+
+    async def query_points(self, **kwargs):
+        self.calls.append(kwargs)
+        digest_only = len(kwargs["query_filter"].must) == 2
+        if not digest_only:
+            points = [
+                SimpleNamespace(
+                    id="legacy-c",
+                    score=0.84,
+                    payload={
+                        "corpus_id": "c1",
+                        "doc_id": "doc-c",
+                        "title": "Legacy C",
+                    },
+                )
+            ]
+        else:
+            points = [
+                SimpleNamespace(
+                    id=f"invalid-a-{index}",
+                    score=0.99 - index * 0.005,
+                    payload={
+                        "chunk_type": "semantic_digest",
+                        "projection_role": "semantic_digest",
+                        "corpus_id": "c1",
+                        "doc_id": "doc-a",
+                        "summary": f"invalid parent {index}",
+                    },
+                )
+                for index in range(13)
+            ]
+            points.append(
+                SimpleNamespace(
+                    id="authorized-b",
+                    score=0.86,
+                    payload={
+                        "chunk_type": "semantic_digest",
+                        "projection_role": "semantic_digest",
+                        "corpus_id": "c1",
+                        "doc_id": "doc-b",
+                        "parent_id": "parent-b",
+                        "summary": "authorized lower-ranked digest",
+                    },
+                )
+            )
+        return SimpleNamespace(points=points[: kwargs["limit"]])
+
+
+@pytest.mark.asyncio
+async def test_digest_overfetch_and_legacy_split_prevent_raw_topn_monopoly(
+    monkeypatch,
+):
+    router = Tier0DocumentRouter.__new__(Tier0DocumentRouter)
+    router.client = _CrowdedDigestRouteClient()
+    monkeypatch.setattr(
+        tier0_router_module,
+        "get_settings",
+        lambda: SimpleNamespace(SEMANTIC_DIGEST_TIER0_ENABLED=True),
+    )
+
+    async def authorize(_raw_results):
+        return {"authorized-b"}, {
+            "seen": 14,
+            "authorized": 1,
+            "invalid_provenance": 13,
+            "stale_lineage": 0,
+            "profile_mismatch": 0,
+            "missing_application_receipt": 0,
+            "contract_cache_hits": 0,
+            "contract_cache_misses": 1,
+        }
+
+    monkeypatch.setattr(tier0_router_module, "_authorized_digest_point_ids", authorize)
+
+    routes, diagnostics = await router.route_lanes(
+        {"topic": [0.1]},
+        ["c1"],
+        per_lane_per_corpus=2,
+        max_per_lane=2,
+    )
+
+    assert len(router.client.calls) == 2
+    assert router.client.calls[1]["limit"] == 32
+    assert {route.doc_id for route in routes["topic"]} == {"doc-b", "doc-c"}
+    assert diagnostics["selection"]["semantic_digest_overfetch"] == 32
+    assert diagnostics["selection"]["qdrant_query_count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_digest_authorization_timeout_preserves_legacy_routes(monkeypatch):
+    router = Tier0DocumentRouter.__new__(Tier0DocumentRouter)
+    router.client = _CrowdedDigestRouteClient()
+    monkeypatch.setattr(
+        tier0_router_module,
+        "get_settings",
+        lambda: SimpleNamespace(SEMANTIC_DIGEST_TIER0_ENABLED=True),
+    )
+    monkeypatch.setattr(
+        tier0_router_module, "_DIGEST_AUTHORIZATION_TIMEOUT_SECONDS", 0.001
+    )
+
+    async def slow_authorize(_raw_results):
+        import asyncio
+
+        await asyncio.sleep(0.02)
+        return {"authorized-b"}, {}
+
+    monkeypatch.setattr(
+        tier0_router_module, "_authorized_digest_point_ids", slow_authorize
+    )
+
+    routes, diagnostics = await router.route_lanes(
+        {"topic": [0.1]}, ["c1"], per_lane_per_corpus=2
+    )
+
+    assert [route.doc_id for route in routes["topic"]] == ["doc-c"]
+    authorization = diagnostics["semantic_digest_authorization"]
+    assert authorization["timed_out"] == 1
+    assert authorization["elapsed_ms"] >= 0
 
 
 def test_adaptive_routes_cut_background_tail_at_score_cliff():

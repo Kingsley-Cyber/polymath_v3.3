@@ -1,0 +1,12 @@
+{
+  "schema_version": "semantic_activation_qdrant_fingerprint.v1",
+  "collection": "polymath_doc_summaries",
+  "new_projection_point_count": 249,
+  "preexisting_expected_id_intersection_count": 0,
+  "new_id_intersection_count_after": 249,
+  "non_target_point_count_before": 692,
+  "non_target_point_count_after": 692,
+  "non_target_fingerprint_before": "sha256:8bb06198e6dd5f2e20cb6e580aea081f84e113414b33b8d83d3bab256c61daf3",
+  "non_target_fingerprint_after": "sha256:8bb06198e6dd5f2e20cb6e580aea081f84e113414b33b8d83d3bab256c61daf3",
+  "non_target_unchanged": true
+}

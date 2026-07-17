@@ -247,6 +247,15 @@ cross-impact so no artifact is rebuilt twice:
 Decision of record:
 `docs/SEMANTIC_RELATIONAL_ARCHITECTURE_DECISION_2026-07-13.md`.
 
+- [ ] SEMANTIC-ACTIVATION-V1: independently dark-ship (default OFF) the
+  purchased `SemanticDigestV1` summary+central-thesis Tier-0 projection and
+  additive exact-sentence atomic-claim anchors. Each family requires its own
+  flag, provenance-closed/idempotent projection or bounded read path, frozen
+  A/B, and receipt. Digest points must be new and excluded while OFF; claim
+  anchors never replace chunk evidence. Branch:
+  `codex/semantic-activation-20260716` (implemented and evaluated; both
+  activation families rejected, default OFF; receipt below).
+
 - **Who:** extraction/semantic-contract, graph, librarian/retrieval, and
   evaluation owners; users asking cross-domain synthesis questions. The answer
   LLM explains accepted paths but never upgrades their inference status.
@@ -4066,6 +4075,38 @@ A corpus is strict-ready only when:
   acceptance remains open until B7, fresh-corpus E2E, and scale/readiness work.
 
 ## Implementation Log Template
+
+### 2026-07-17 - SEMANTIC-ACTIVATION-V1 dark launch and rejection
+
+- Commit: review-branch commit in this publication.
+- Owner: owner activation order; senior gate sequencing and stop rulings.
+- Corpus/data scope: Mark corpus only for projection/Mark probes; frozen
+  15-document corpus read-only for the shared OFF baseline.
+- Code changes: strict projection manifest/outbox, idempotent digest worker,
+  default-OFF Tier-0 digest route, bounded default-OFF exact-sentence claim
+  anchors, shared BSON UTC read-boundary normalization, count-only prompt
+  render observability, and deterministic offline coverage diagnosis.
+- Durable migration/backfill: 249 new digest vector points, one manifest, and
+  249 applied outbox rows. No existing point mutation; dark/excluded while OFF.
+- Before metrics: Fast OFF doc-hit 0.889, recall 0.796, direct 2/2, lay 1/1.
+- After metrics: digest ON Fast doc-hit 0.778, recall 0.648, direct 1/2,
+  lay 1/1 — RED. Claims q021 valid rows 4/4 but anchors attached/rendered 0 —
+  RED/unverified.
+- Tests by tier: 90 activation-focused tests passed. Valid digest Fast arm
+  completed; further ON tiers stopped on regression. Claims full arms stopped
+  on the preregistered q021 gate. No gate was weakened.
+- Cross-corpus test: shared OFF Frozen51 completed; ON variants not run after
+  earlier family-specific stop gates.
+- Failure/rollback test: invalid no-exposure digest run was excluded; BSON UTC
+  rejection reproduced and fixed; canonical 3157 backend restored, healthy,
+  activation modules/flags absent, both eval locks released.
+- Deployment image/health: final shared image `sha256:1dd3702c…697d5`,
+  canonical `3157ec9`, healthy, exact five overlays.
+- Remaining risks: digest routing regresses q027 and q029; q021 yields zero
+  claim anchors; semantic citation relevance has no gold measurement.
+- Checklist boxes closed: none. Both experimental families remain default OFF.
+  Permanent receipt:
+  `docs/SEMANTIC_ACTIVATION_AB_RECEIPT_2026-07-17.md`.
 
 Copy this section for every completed item:
 
