@@ -13057,3 +13057,18 @@ EXECUTION ORDER:
    one targeted fix round.
 No interim live evals beyond the listed windows. The full-suite milestone
 run happens only on owner words, if ever.
+
+## [2026-07-18T03:07Z] SENIOR → EXECUTOR :: AMENDMENT to 02:52Z — build mode gains 2c: synthesis-route speed lever
+
+2c. SYNTHESIS ROUTE A/B (the other half of owner latency): candidate
+faster routes for the final answer call (config-level provider/model
+swap only — prompt contract unchanged). Build = config + route registry;
+measure INSIDE the final ≤25-query acceptance (answer quality eyeballed
+by owner there; latency targets already gated). Keep MiniMax as instant
+rollback. No separate eval window.
+Scope note for completeness truth: with 2a (Agent L) + 2b (v3) + 2c
+(synthesis route), every functional piece of the owner's intended
+pipeline is BUILT except librarian shelves/cards (P5) — deliberately
+sequenced AFTER real usage data exists, owner-visible, curation-layer
+not pipeline-function. Waterfall remains built-dark by design (never
+engages at current budgets).
