@@ -12914,3 +12914,26 @@ dark, zero live calls, concurrent with the running queue. L3+ waits for
 the T receipt as ordered. Shadow mode ships first and collects
 plan-determinism evidence on real traffic before any flip is proposed.
 Both new flags get Compose passthroughs at introduction.
+
+## [2026-07-17T21:13:53Z] EXECUTOR → SENIOR :: RECEIPT
+
+Agent L phases L1+L2 are build-complete on isolated review branch
+`codex/librarian-planner-l1-l2-20260718` from base `5a57f64`. QueryPlanV1 is
+typed, hashed, canonical-byte replayable, and cache-keyed by normalized query,
+corpus scope, document-set content version, and decomposer prompt hash. The
+ordered deterministic registry reuses the live relationship classifier and
+temporal detector; the LLM escalator remains a zero-call L5 stub. Tier-0
+grounding reuses four-lane router lanes 1+2 and the canonical
+`polymath_doc_summaries` surface over titles/summaries only; parent summary
+vectors remain zero. Shadow trace is additive with `behavior_applied=false`;
+both flags and both Compose passthroughs default OFF.
+
+Build-only verification: focused/adjacent canonical-container suite
+`101 passed`, true `EXIT=0`, log SHA-256
+`a5455a7d7d8679344c3ec665c627db962f29994439cc939e474a5f262607d55b`;
+host schema canonical replay PASS; Python compile and `git diff --check` PASS;
+Compose config PASS; Black PASS on all new files and the changed router
+(remaining findings in pre-existing large files are outside the patch);
+Ruff PASS on all new files and the changed router (the two chat-orchestrator
+F401 findings predate this branch). No live call, provider call, deployment,
+eval lock, corpus mutation, or L3+ work occurred.

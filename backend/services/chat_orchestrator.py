@@ -102,6 +102,7 @@ from services.retriever.query_plan import (
     query_plan_evidence_sides,
     query_plan_to_dict,
 )
+from services.retriever.librarian_planner import librarian_planner
 from services.retriever.planned_fusion import reserved_required_lane_ids
 from services.retriever.search_mode import resolve_search_mode
 from services.retriever.temporal import (
@@ -768,6 +769,7 @@ def _build_chat_query_plan(
     profile_cfg: dict[str, Any],
     search_mode: str,
     hyde_applied: bool,
+    librarian_plan: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Deterministic query plan used for trace and downstream guardrails."""
 
@@ -839,7 +841,60 @@ def _build_chat_query_plan(
             else "general_chat_no_corpus_gate"
         ),
     }
+    if librarian_plan is not None:
+        plan["librarian_query_plan"] = librarian_plan
     return plan
+
+
+async def _build_librarian_plan_trace(
+    *,
+    query: str,
+    corpus_ids: list[str] | None,
+    requested_tier: Any,
+    enabled: bool,
+    shadow: bool,
+    planner_service: Any = None,
+    db: Any = None,
+    embedding_config_loader: Any = None,
+) -> dict[str, Any] | None:
+    """Build L1/L2 trace metadata without feeding it into retrieval."""
+
+    if not enabled and not shadow:
+        return None
+    planner_service = planner_service or librarian_planner
+    db = conversation_service._db if db is None else db
+    embedding_config_loader = (
+        embedding_config_loader or retriever_orchestrator._embedding_config_for_query
+    )
+    try:
+        embedding_config = await embedding_config_loader(corpus_ids)
+        result = await asyncio.wait_for(
+            planner_service.build(
+                query,
+                corpus_ids=corpus_ids,
+                requested_tier=requested_tier,
+                db=db,
+                embedding_config=embedding_config,
+            ),
+            timeout=2.0,
+        )
+        return {
+            "mode": "enabled_pending_l3" if enabled else "shadow",
+            "behavior_applied": False,
+            "plan": result.plan.model_dump(mode="json"),
+            "diagnostics": dict(result.diagnostics),
+        }
+    except Exception as exc:  # noqa: BLE001 - shadow failures are traced, not hidden
+        return {
+            "mode": "enabled_pending_l3" if enabled else "shadow",
+            "behavior_applied": False,
+            "plan": None,
+            "diagnostics": {
+                "status": "degraded",
+                "reason": f"{type(exc).__name__}: {exc}"[:300],
+                "provider_calls": 0,
+            },
+        }
 
 
 def _format_chat_query_plan_trace(plan: dict[str, Any]) -> str:
@@ -890,6 +945,22 @@ def _format_chat_query_plan_trace(plan: dict[str, Any]) -> str:
         ),
         f"answerability: {plan.get('answerability_policy')}",
     ]
+    librarian = (
+        plan.get("librarian_query_plan")
+        if isinstance(plan.get("librarian_query_plan"), dict)
+        else None
+    )
+    if librarian is not None:
+        librarian_artifact = (
+            librarian.get("plan") if isinstance(librarian.get("plan"), dict) else {}
+        )
+        lines.append(
+            "librarian: "
+            f"mode={librarian.get('mode')} "
+            f"shape={librarian_artifact.get('shape') or 'unavailable'} "
+            f"hash={librarian_artifact.get('plan_hash') or 'unavailable'} "
+            "behavior=shadow_only"
+        )
     if plan.get("query_rewritten"):
         lines.append("query_rewrite: retrieval query differs from user query")
     return "\n".join(lines)
@@ -7042,6 +7113,13 @@ class ChatOrchestrator:
             fallback_api_key=profile_creds.get("api_key"),
             fallback_extra=profile_creds.get("extra_params"),
         )
+        librarian_plan_trace = await _build_librarian_plan_trace(
+            query=request.message,
+            corpus_ids=request.corpus_ids,
+            requested_tier=request.retrieval_tier,
+            enabled=bool(getattr(settings, "LIBRARIAN_PLANNER_ENABLED", False)),
+            shadow=bool(getattr(settings, "LIBRARIAN_PLANNER_SHADOW", False)),
+        )
         query_plan = _build_chat_query_plan(
             query=request.message,
             retrieval_query=retrieval_query,
@@ -7051,6 +7129,7 @@ class ChatOrchestrator:
             profile_cfg=profile_cfg,
             search_mode=resolved_mode,
             hyde_applied=hyde_applied,
+            librarian_plan=librarian_plan_trace,
         )
         yield _record_trace_event(
             lane="planning",
