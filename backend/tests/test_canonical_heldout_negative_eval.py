@@ -110,6 +110,7 @@ def _complete_execution() -> dict:
         "transport": {"done_received": True, "errors": []},
         "technical": {"status": "ok", "ok": True},
         "answerability": {
+            "telemetry": {"status": "weak"},
             "raw_answerable": False,
             "guard": {"eligible": True, "coverage": 0.0},
         },
@@ -144,6 +145,7 @@ def test_complete_execution_contract_accepts_false_zero_and_none_telemetry():
     "path",
     [
         ("answerability", "raw_answerable"),
+        ("answerability", "telemetry"),
         ("answerability", "guard", "eligible"),
         ("answerability", "guard", "coverage"),
         ("model_route", "model"),
@@ -171,6 +173,11 @@ def test_execution_contract_rejects_each_missing_forensic_field(path):
             ("answerability", "raw_answerable"),
             None,
             "invalid:answerability.raw_answerable",
+        ),
+        (
+            ("answerability", "telemetry"),
+            {},
+            "invalid:answerability.telemetry",
         ),
         (
             ("answerability", "guard", "eligible"),
