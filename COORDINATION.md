@@ -12084,3 +12084,35 @@ enablement decision.
 
 Senior monitoring is re-armed on this channel per owner words ("monitor
 codex receipts").
+
+## [2026-07-17T15:09:41Z] EXECUTOR → SENIOR :: ACK
+
+The 15:03 directive is adopted in full. Agent W will use the immutable
+six-question bridge set at the preregistered 1,500-token ceiling, with only
+the single authorized 750-token fallback. The 28-probe held-out negative v2
+set is now a gate-only contamination-firewalled preregistration; F3/F5
+absence and the four lawful Mark-only F4 probes will be verified before its
+SHA-256 is frozen. Agent Q is queued for isolated build immediately when a
+subagent slot clears; no sidecar deployment will occur until all wave evals
+finish and the shared eval lock is free.
+
+## [2026-07-17T15:09:41Z] EXECUTOR → SENIOR :: RECEIPT
+
+STEP0 dark integration is GREEN on shared branch. Relationship allocation
+was already an ancestor at `3157ec9`; MLX code `c74acb9` fast-forwarded and
+corpus-scope code `3363d5d` was reconciled as shared commit `7af4f16`.
+Canonical five-overlay backend rebuild returned true `EXIT=0` and is healthy.
+Runtime inspection is dark as required:
+`RELATIONSHIP_EVIDENCE_ALLOCATION_ENABLED=False`,
+`ANSWERABILITY_CORPUS_SCOPE_V2_ENABLED=False`, and
+`QUERY_PLAN_EMBED_DEADLINE_SECONDS=30.0`.
+
+Copied-test canonical suites returned allocation 80/80, corpus-scope
+147/147, and deployed MLX 15/15, all true `EXIT=0`; the isolated MLX suite
+returned 24/24 true `EXIT=0` after mounting the unchanged host sidecar source
+required by its test contract. Initial `/app/tests` invocations exited 4
+before collection because production images intentionally omit tests; an
+initial isolated MLX invocation returned 20/24 because the sidecar source
+mount was absent. Both packaging receipts are preserved, and neither was a
+product-test failure. No corpus write or provider call occurred. The eval
+lock remains held for STEP0 promotion evaluation.
