@@ -12769,3 +12769,53 @@ After both windows: journal forensics (21:41Z order) → runbook READY
 receipt with live dry-run proof → P one-call CLOSED-ledger gate → Q
 arbiter deploy → consolidated wave receipt. Owner ingestion begins only
 after the eval lock is free and READY is posted.
+
+## [2026-07-17T23:12Z] SENIOR → EXECUTOR :: DIRECTIVE — AGENT L: deterministic librarian subquery orchestrator (OWNER DECISION; the next major build)
+
+OWNER WORDS (verbatim intent): "i want a subquery setup … a way to drive
+subqueries like the librarian for retrieval in the polymath way but
+ensuring determinism of my questions. the latency can definitely be
+fixed." This supersedes a standalone speed package and FOLDS IN router
+round-3 (the bridge problem becomes a plan/subquery problem).
+
+DESIGN LAW (build inside these bounds):
+1. DETERMINISTIC-FIRST DECOMPOSITION (the engraved polymath pattern —
+   deterministic routers first, escalation only for pathological cases):
+   typed rule-based planners handle the known shapes — relationship/
+   comparison (live classifier), temporal, enumerative/trace ("list",
+   "compare", "trace how X becomes Y"), entity-bridge, simple-lookup.
+   The LLM decomposer fires ONLY for shapes the rules cannot parse:
+   normalized-query cached, thinking disabled, bounded tokens, output
+   VALIDATED into the typed plan schema; cache makes repeats byte-stable.
+2. TYPED PLAN ARTIFACT (QueryPlanV1): subqueries as typed rows {role,
+   text, lanes, seat_quota, tier}; plan hash recorded in trace; same
+   normalized question ⇒ same plan ⇒ same seats. Plans are durable,
+   replayable artifacts — the librarian's card catalog for questions.
+3. LIBRARIAN ALLOCATION: generalize the PROVEN reservation/spillover
+   machinery — per-SUBQUERY seat quotas with threshold spillover
+   (relationship = the 2-subquery special case, already live at 100%);
+   two-lane anchor/expansion lanes apply WITHIN each subquery's seats
+   when T promotes. Cross-encoder remains sole scoring authority.
+   Assembly stays LLM-free (owner architecture law).
+4. LATENCY CO-DESIGN (owner: latency can definitely be fixed):
+   subquery retrievals execute in PARALLEL (batched embeds, concurrent
+   vector search, ONE batched rerank); per-subquery rerank candidate cap
+   (tuned by A/B, not guessed); synthesis-route speed review as its own
+   measured lever. PREREGISTERED LATENCY TARGETS at quality floors:
+   fast tier p50 ≤5s, +Mongo ≤10s, deep/graph ≤15s.
+
+GATES (preregistered): plan determinism — 3 repeats, byte-identical plan
+hashes and seat assignments per question; frozen floors direct ≥85% /
+lay ≥75% / relationship ≥75% / original negatives 9/9; held-out v2
+non-degradation vs same-harness baseline; depth-probe classes D1/D2/D6
+(docs/DEEP_RETRIEVAL_DEPTH_PROBE_SPEC_2026-07-17.md) as the quality
+surface — bridge 6-question set folds in here (router round-3 verdict
+comes from THIS package); latency targets above measured in the same
+window; flag default OFF; atomic flip law applies to any enablement.
+
+SEQUENCING: design brief + build begins AFTER the T window closes (its
+lane machinery is a direct input); the current queue (T verdict →
+temporal flip → claims flip → forensics → READY → P → Q deploy →
+consolidated receipt) runs to completion first. Agent L's live window is
+the first item of the next wave. Owner ingestion never overlaps its
+evals.
