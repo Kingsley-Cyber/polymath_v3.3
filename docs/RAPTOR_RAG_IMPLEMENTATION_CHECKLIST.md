@@ -246,7 +246,7 @@ cross-impact so no artifact is rebuilt twice:
   corpus writes. Branch: `codex/temporal-query-routing-20260716` (review ready;
   acceptance remains open after repeated MLX embedding outages invalidated the
   frozen paired A/B; receipt: `docs/TEMPORAL_QUERY_ROUTING_AB_2026-07-16.md`).
-  - [ ] T-QUERY-ROUTING-V1-RERUN: on
+  - [x] T-QUERY-ROUTING-V1-RERUN: on
     `codex/temporal-regression-20260717`, integrate the independently verified
     MLX evaluation-stability dependency, then run exactly one preflight-gated
     paired OFF/ON frozen 17-query × 3-tier regression under the immutable
@@ -255,6 +255,11 @@ cross-impact so no artifact is rebuilt twice:
     relationship regression; preserve the existing negative verdict honestly.
     No corpus writes, no temporal-logic or scorer changes, default OFF, locked
     serial measurement, and canonical runtime restoration are mandatory.
+    *(verified 2026-07-17: both arms 51/51 technical; direct 1.00→1.00,
+    lay 1.00→1.00, relationship 0.75→0.75, corpus/citation/effective-tier
+    1.00→1.00; the separate negative gate remained RED at 0.5556→0.4444 and
+    is reported without concealment. Receipt:
+    `docs/TEMPORAL_QUERY_ROUTING_FROZEN_REGRESSION_2026-07-17.md`.)*
 - Ordering rationale: field capture rides in-flight generation/backfills for
   free; retrieval-behavior changes are gated by the held-out suite; temporal
   eligibility needs the fields to exist first; re-extracting before the
@@ -4130,6 +4135,39 @@ A corpus is strict-ready only when:
   provenance. Owner-directed Step 0.5 must pass its preregistered Mac/RunPod
   parity canary or fall back to serialized Mac evaluation.
 - Checklist boxes closed: `MLX-EVAL-STABILITY-V1`.
+
+### 2026-07-17 - T-QUERY-ROUTING-V1 frozen regression rerun
+
+- Commit: this receipt commit on `codex/temporal-regression-20260717`;
+  temporal implementation `1db5e5b`; MLX stability dependency `d29e8ae`.
+- Owner: owner-authorized temporal frozen regression after Step 0 stability;
+  Step 0.5 RunPod routing is explicitly held and was not built.
+- Corpus/data scope: immutable 15-document E2E corpus, read-only retrieval;
+  no corpus mutation.
+- Code changes: no temporal logic change; integrated the independently sealed
+  30-second timeout, retry-once, pooled warmup, and pre-batch health gate.
+- Durable migration/backfill: none.
+- Before metrics: temporal diagnostic already 0.9583 document hit / 0.8750
+  full-anchor; frozen no-regression was unverified after MLX outages.
+- After metrics: OFF→ON direct 1.00→1.00, lay 1.00→1.00, relationship
+  0.75→0.75, technical/corpus/citation/effective-tier all 1.00→1.00.
+  The separate negative gate remained RED at 0.5556→0.4444.
+- Tests by tier: all 51 executions in each arm across Qdrant-only,
+  Qdrant+Mongo, and Qdrant+Mongo+Graph; 63 focused/adjacent tests passed.
+- Cross-corpus test: selected-corpus boundary and citation membership both
+  remained exactly 1.00 in both arms.
+- Failure/rollback test: both evals were preflight-gated and had zero embedding
+  or transport failures; canonical five-overlay backend restore is healthy and
+  the temporal setting is absent/default OFF.
+- Deployment image/health: paired arms used the same immutable image
+  `sha256:c325ed49...`; each preflight returned ready/1024-d/queue-zero;
+  canonical runtime restored at `7233077`.
+- Remaining risks: the frozen negative-refusal gate remains a separate RED;
+  temporal activation is not authorized by this dark-ship promotion receipt.
+  Permanent receipt:
+  `docs/TEMPORAL_QUERY_ROUTING_FROZEN_REGRESSION_2026-07-17.md`.
+- Checklist boxes closed: `T-QUERY-ROUTING-V1-RERUN` only; parent
+  `T-QUERY-ROUTING-V1` remains open until review/merge policy closes it.
 
 ## Implementation Log Template
 
