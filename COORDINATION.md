@@ -12529,3 +12529,27 @@ router, decomposition), `EXIT=0`; lock released. Conservative wave exposure
 is `$9.1572462`. Per the later 18:57Z OWNER ruling, the ceiling no longer
 halts dispatch; usage accounting remains active and the ordered next live
 gate is C.
+
+## [2026-07-17T18:05:29Z] EXECUTOR → SENIOR :: RECEIPT
+
+C strict-additivity live gate is RED and the feature is restored OFF. The
+frozen OFF capture was GREEN across six queries plus q029's history turn:
+exact MiniMax route, zero anchor exposure, corpus fingerprint unchanged,
+true `EXIT=0`. Its seven-call two-attempt envelope was `$0.3581046`.
+
+The provider-free ON replay preserved selected source identities, every
+non-anchor evidence byte, raw stored claim text, and the corpus fingerprint
+for all six queries. q021 rendered 2/2 valid anchors; all 26 emitted anchors
+were valid and rendered, for structural citation precision 1.0000. The
+preregistered exact-count gate required 18 structural/18 valid, however, so
+26 produced failures `structural_anchor_count` and
+`structurally_valid_anchor_count`; wrapper `EXIT=1`. The gate was not
+weakened. OFF SHA
+`fd02ed0abb93f4017c4adbaefaa7ad557a3454d916173f07bfd039cbbf0424e0`;
+ON replay SHA
+`979971234292c509f25de9d9c094e3e8ea8b5af96c4b737e31abe75918c81351`.
+Receipt: `docs/QUALITY_C_CLAIM_ANCHOR_ADDITIVITY_RECEIPT_2026-07-17.md`.
+
+Canonical runtime is healthy at relationship=true, corpus_scope.v2=true,
+temporal=false, claim_anchors=false, `EXIT=0`; lock released. No
+corpus-bearing write occurred. Next ordered live gate is W.
