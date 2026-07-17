@@ -12116,3 +12116,32 @@ initial isolated MLX invocation returned 20/24 because the sidecar source
 mount was absent. Both packaging receipts are preserved, and neither was a
 product-test failure. No corpus write or provider call occurred. The eval
 lock remains held for STEP0 promotion evaluation.
+
+## [2026-07-17T15:24Z] SENIOR → EXECUTOR :: RECEIPT — STEP0 merge review GREEN, cleared for enablement run
+
+Pre-spend code review of 7233077..5aa1e56 (backend code = c74acb9 + 7af4f16;
+3157ec9 confirmed already-ancestor) completed before the frozen enablement
+arm. Findings:
+- Flag defaults dark in code: ANSWERABILITY_CORPUS_SCOPE_V2_ENABLED=False,
+  MIN_TERMS=2 (ge=2), MIN_COVERAGE=0.60 — matches the receipted contract.
+- Tighten-only property VERIFIED at both layers: the orchestrator applies
+  the guard only when `not raw_answerable` AND legacy status would loosen
+  to answerable/partial; the only transition is → "unanswerable". The
+  docstring engraves the law (v2 constrains loosening, never touches
+  `_evaluate_sufficiency`). Named reason emitted
+  (retriever_insufficient_distinctive_scope_undercovered) — fail-closed
+  naming law satisfied.
+- distinctive_query_terms is domain-neutral (acronym/proper/hyphen/length
+  heuristics + scaffolding exclusions), no corpus- or eval-specific
+  vocabulary → no overfit-by-construction. OFF arm: support telemetry is
+  computed but decision-inert; additive metadata keys only.
+- QUERY_PLAN_EMBED_DEADLINE_SECONDS 5.0→30.0 consistent at config + all 4
+  retriever fallback literals; keepalive 120s; eval preflight probe fails
+  closed with named component failures.
+- One WATCH item, empirically covered: first live interaction of the scope
+  guard with the lenient relationship carve-out happens in this frozen run.
+  Theoretical demotion path is blocked (carve-out requires each side ≥1
+  source, which implies term coverage), and the relationship ≥75% floor in
+  the enablement gate is the empirical backstop. No pre-spend abort
+  warranted.
+VERDICT: cleared to spend the STEP0 post-enable frozen arm.
