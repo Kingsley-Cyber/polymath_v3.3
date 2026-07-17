@@ -24,12 +24,22 @@ from __future__ import annotations
 import logging
 import math
 import os
+from pathlib import Path
+import sys
 import time
 from typing import Any
 
 import asyncio
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+
+try:
+    from gpu_arbiter.client import ALERT_NAME as ARBITER_ALERT_NAME
+    from gpu_arbiter.client import GpuArbiterClient
+except ImportError:  # supports direct importlib loading in canonical tests
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from gpu_arbiter.client import ALERT_NAME as ARBITER_ALERT_NAME
+    from gpu_arbiter.client import GpuArbiterClient
 
 logger = logging.getLogger("reranker_mlx")
 logging.basicConfig(level=logging.INFO)
@@ -61,14 +71,20 @@ CAL_VERSION = os.environ.get("RERANKER_CAL_VERSION", "cal.v1-provisional")
 BATCH_SIZE = int(os.environ.get("RERANKER_BATCH_SIZE", "16"))
 MAX_DOC_CHARS = int(os.environ.get("RERANKER_MAX_DOC_CHARS", "6000"))
 MAX_QUERY_CHARS = int(os.environ.get("RERANKER_MAX_QUERY_CHARS", "2000"))
-REQUEST_TIMEOUT_SECONDS = float(os.environ.get("RERANKER_REQUEST_TIMEOUT_SECONDS", "60"))
+REQUEST_TIMEOUT_SECONDS = float(
+    os.environ.get("RERANKER_REQUEST_TIMEOUT_SECONDS", "60")
+)
 QUEUE_TIMEOUT_SECONDS = float(os.environ.get("RERANKER_QUEUE_TIMEOUT_SECONDS", "5"))
-WARM_ON_STARTUP = os.environ.get("RERANKER_WARM_ON_STARTUP", "true").strip().lower() not in {
+WARM_ON_STARTUP = os.environ.get(
+    "RERANKER_WARM_ON_STARTUP", "true"
+).strip().lower() not in {
     "0",
     "false",
     "no",
     "off",
 }
+
+
 def _warmup_candidate_shapes() -> tuple[int, ...]:
     raw = os.environ.get("RERANKER_WARMUP_CANDIDATE_SHAPES", "16,24")
     shapes: list[int] = []
@@ -81,9 +97,7 @@ def _warmup_candidate_shapes() -> tuple[int, ...]:
             shapes.append(candidate_count)
     if shapes:
         return tuple(shapes)
-    return (
-        max(1, int(os.environ.get("RERANKER_WARMUP_CANDIDATES", "16") or 16)),
-    )
+    return (max(1, int(os.environ.get("RERANKER_WARMUP_CANDIDATES", "16") or 16)),)
 
 
 WARMUP_CANDIDATE_SHAPES = _warmup_candidate_shapes()
@@ -112,6 +126,7 @@ _model: Any = None
 _tokenizer: Any = None
 _generate: Any = None
 _request_gate = asyncio.Semaphore(1)
+_gpu_arbiter = GpuArbiterClient("rerank", logger=logger)
 _active_request_started_at: float | None = None
 _last_request_seconds: float | None = None
 _last_error: str | None = None
@@ -175,9 +190,36 @@ def _score_pairs_torch(query: str, documents: list[str]) -> list[float]:
     doc_texts = [(doc or "")[:MAX_DOC_CHARS] for doc in documents]
     results = _torch_model.rerank(query_text, doc_texts)
     by_index = {int(r["index"]): float(r["relevance_score"]) for r in results}
-    return [
-        _calibrate(by_index.get(i, -10.0)) for i in range(len(doc_texts))
-    ]
+    return [_calibrate(by_index.get(i, -10.0)) for i in range(len(doc_texts))]
+
+
+def _score_pairs_torch_scheduled(query: str, documents: list[str]) -> list[float]:
+    """Checkpoint at the model's existing block boundary without changing math.
+
+    Jina v3's ``rerank`` method calls ``_compute_single_batch`` for each
+    internally chosen document block.  Wrapping that private call leaves the
+    original truncation, block construction, embeddings, weighting, sorting,
+    and calibration untouched.  The wrapper only acquires/releases a low
+    priority lease around each already-existing Metal compute block.
+    """
+    if not _gpu_arbiter.enabled:
+        return _score_pairs_torch(query, documents)
+
+    original = _torch_model._compute_single_batch
+    had_instance_override = "_compute_single_batch" in vars(_torch_model)
+
+    def checkpointed_compute(*args: Any, **kwargs: Any) -> Any:
+        with _gpu_arbiter.lease():
+            return original(*args, **kwargs)
+
+    object.__setattr__(_torch_model, "_compute_single_batch", checkpointed_compute)
+    try:
+        return _score_pairs_torch(query, documents)
+    finally:
+        if had_instance_override:
+            object.__setattr__(_torch_model, "_compute_single_batch", original)
+        else:
+            object.__delattr__(_torch_model, "_compute_single_batch")
 
 
 def _load_model() -> None:
@@ -270,12 +312,16 @@ def _encode_batch(texts: list[str]) -> Any:
             output = _generate(_model, _tokenizer, texts)
             return _normalise_rows(_extract_embeddings(output))
         except Exception as exc:
-            logger.warning("mlx-embeddings.generate failed; falling back to direct call: %s", exc)
+            logger.warning(
+                "mlx-embeddings.generate failed; falling back to direct call: %s", exc
+            )
 
     try:
         toks = _tokenizer(texts, padding=True, truncation=True, return_tensors="np")
         try:
-            result = _model(toks["input_ids"], attention_mask=toks.get("attention_mask"))
+            result = _model(
+                toks["input_ids"], attention_mask=toks.get("attention_mask")
+            )
         except TypeError:
             result = _model(toks["input_ids"])
         return _normalise_rows(_extract_embeddings(result))
@@ -288,7 +334,8 @@ def _encode_texts(texts: list[str]) -> Any:
 
     batches = []
     for start in range(0, len(texts), max(1, BATCH_SIZE)):
-        batches.append(_encode_batch(texts[start : start + BATCH_SIZE]))
+        with _gpu_arbiter.lease():
+            batches.append(_encode_batch(texts[start : start + BATCH_SIZE]))
     return np.vstack(batches)
 
 
@@ -311,7 +358,7 @@ def _warm_model() -> None:
             for index in range(candidate_count)
         ]
         if BACKEND == "torch_fp16":
-            scores = _score_pairs_torch(warmup_query, warmup_docs)
+            scores = _score_pairs_torch_scheduled(warmup_query, warmup_docs)
         else:
             scores = _score_pairs(warmup_query, warmup_docs)
         if len(scores) != candidate_count or not all(
@@ -389,6 +436,11 @@ async def health() -> dict:
                 round(_warmup_seconds, 3) if _warmup_seconds is not None else None
             ),
             "warmup_candidate_shapes": list(WARMUP_CANDIDATE_SHAPES),
+            "gpu_arbiter": {
+                "enabled": _gpu_arbiter.enabled,
+                "fail_open_alert": ARBITER_ALERT_NAME,
+                "workload_class": "rerank",
+            },
         }
     if _model is None:
         raise HTTPException(status_code=503, detail="model is not loaded")
@@ -409,6 +461,11 @@ async def health() -> dict:
             round(_warmup_seconds, 3) if _warmup_seconds is not None else None
         ),
         "warmup_candidate_shapes": list(WARMUP_CANDIDATE_SHAPES),
+        "gpu_arbiter": {
+            "enabled": _gpu_arbiter.enabled,
+            "fail_open_alert": ARBITER_ALERT_NAME,
+            "workload_class": "rerank",
+        },
     }
 
 
@@ -426,6 +483,11 @@ async def info() -> dict:
             "warmup_complete": _warmup_complete,
             "warmup_seconds": _warmup_seconds,
             "warmup_candidate_shapes": list(WARMUP_CANDIDATE_SHAPES),
+            "gpu_arbiter": {
+                "enabled": _gpu_arbiter.enabled,
+                "fail_open_alert": ARBITER_ALERT_NAME,
+                "workload_class": "rerank",
+            },
         }
     return {
         "model": MODEL_ID,
@@ -437,6 +499,11 @@ async def info() -> dict:
         "warmup_complete": _warmup_complete,
         "warmup_seconds": _warmup_seconds,
         "warmup_candidate_shapes": list(WARMUP_CANDIDATE_SHAPES),
+        "gpu_arbiter": {
+            "enabled": _gpu_arbiter.enabled,
+            "fail_open_alert": ARBITER_ALERT_NAME,
+            "workload_class": "rerank",
+        },
     }
 
 
@@ -464,10 +531,8 @@ async def rerank(req: RerankRequest) -> RerankResponse:
             try:
                 _load_model_torch()
             except Exception as exc:
-                raise HTTPException(
-                    status_code=503, detail=f"model load failed: {exc}"
-                )
-        scorer = _score_pairs_torch
+                raise HTTPException(status_code=503, detail=f"model load failed: {exc}")
+        scorer = _score_pairs_torch_scheduled
     else:
         if _model is None:
             try:
@@ -480,7 +545,9 @@ async def rerank(req: RerankRequest) -> RerankResponse:
     started = time.monotonic()
     try:
         try:
-            await asyncio.wait_for(_request_gate.acquire(), timeout=QUEUE_TIMEOUT_SECONDS)
+            await asyncio.wait_for(
+                _request_gate.acquire(), timeout=QUEUE_TIMEOUT_SECONDS
+            )
             acquired = True
         except TimeoutError:
             raise HTTPException(
