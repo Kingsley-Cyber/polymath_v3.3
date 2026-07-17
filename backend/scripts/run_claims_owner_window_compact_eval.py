@@ -18,7 +18,6 @@ from contextlib import nullcontext
 from pathlib import Path
 from typing import Any, ContextManager, Sequence
 
-from scripts.run_claim_anchor_micro_ab import _atomic_write
 from scripts.run_two_lane_anchoring_ab import (
     LOCK_PATH,
     PREREG,
@@ -47,6 +46,31 @@ EXPECTED_SHAPE_COUNTS = {
 }
 STANDARD_TIERS = ("qdrant_only", "qdrant_mongo", "qdrant_mongo_graph")
 REFUSAL_STATE_CLASSIFIER = "existing_frozen_refusal_regex.v1"
+
+
+def _atomic_write(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    encoded = (
+        json.dumps(
+            payload,
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+            default=str,
+        ).encode("utf-8")
+        + b"\n"
+    )
+    with temporary.open("wb") as handle:
+        handle.write(encoded)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(temporary, path)
+    directory_fd = os.open(str(path.parent), os.O_DIRECTORY)
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
 
 
 def _load_compact_queries() -> tuple[list[dict[str, Any]], dict[str, str]]:
