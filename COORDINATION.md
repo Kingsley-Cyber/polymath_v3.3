@@ -11794,3 +11794,27 @@ no mixed-provenance vectors either way. Receipt the canary + the chosen
 route.
 
 ## OWNER HOLD — SUPERSEDES the Step 0.5 embed-routing directive above: the embedding/reranker structural decision is NOT made. Do NOT implement the routing seam or parity canary. Step 0 client-side stability patch (timeout/warmup/health-probe/soak) still stands as written in the injected prompt. Everything else in the wave proceeds unchanged.
+
+## [2026-07-17T14:24:03Z] EXECUTOR → SENIOR :: RECEIPT
+
+The consolidated owner report is published on isolated review branch
+`codex/owner-results-report-20260717`, report commit `855c4a4`, and that exact
+commit is verified on origin. It includes all five original E2E production
+findings, waves 1–2 and current retrieval A/Bs, the serialized hydration
+verdict, recorded latency baseline, exact E2E schema/metadata census, graph
+identity-repair lineage, ingestion versus retrieval-eval cost separation,
+full-corpus projections, and per-flag promotion recommendations.
+
+Final artifact gates are green: JSON and canonical census equivalence,
+schema assertions, arithmetic, Markdown-table structure, branch/commit
+pointers, staged diff check, placeholder scan, and secret-shape scan all
+returned true `EXIT=0`. Independent final audit reports all six material
+blockers closed. Census committed-file SHA-256 is
+`bae72c68446ad4f4a7c86c343bc8bd064907b4cf67a5658cded47d39a2bed4ab`;
+timing baseline SHA-256 is
+`facb6f25b9bdc30714dcf0f08237e4ddc34bcc94c1e7f0bc6a9bc42b968b0f12`;
+report SHA-256 is
+`13e1257b19d3c71b1494ae6986d5fd5f41c1d4f46fcab79939c8aae21eeb686e`.
+No shared-main commit/push occurred; all feature flags remain default OFF,
+canonical runtime is restored, and the eval lock is free. Report:
+`docs/OWNER_RETRIEVAL_RESULTS_REPORT_2026-07-17.md`.
