@@ -1,0 +1,88 @@
+{
+  "schema_version": "polymath.tier0_bridge_diagnostic.v1",
+  "preregistered_at_utc": "2026-07-17T00:00:00Z",
+  "status": "frozen_before_implementation",
+  "class": "ai_video_model_prompting_to_underlying_film_crafts",
+  "source_title_discovery": {
+    "method": "immutable_e2e_selection_manifest",
+    "path": "backend/evals/runpod_e2e_15doc_selection_v1.json",
+    "selection_manifest_sha256": "da7b94c152dd5e72d52db1fd80a68f0cc2797d85ed1fd4899f9a8c19874eaf00",
+    "appledouble_policy": "exclude filenames beginning ._",
+    "content_read": false
+  },
+  "corpus_scope": {
+    "corpus_identity": "immutable 15-document E2E corpus used by the frozen retrieval suite",
+    "corpus_id_policy": "discover from frozen-run artifacts and verify exact 15-title selection at run time",
+    "writes": 0
+  },
+  "scoring": {
+    "winner_window": 3,
+    "pass_per_query": "at least one expected title in the first 3 routed documents and no forbidden title at rank 1",
+    "suite_pass": "6 of 6 queries pass",
+    "attribution_required": [
+      "lexical",
+      "semantic",
+      "child_rollup",
+      "associative"
+    ]
+  },
+  "forbidden_winner_selection_audit": {
+    "rule": "enumerate every lens, optics, or camera-language-only title in the immutable 15-document selection",
+    "qualifying_title_count": 1,
+    "titles": [
+      "Blain Brown - Cinematography - Theory and Practice (2016).md"
+    ]
+  },
+  "queries": [
+    {
+      "id": "bridge_ai_video_camera_motion_story",
+      "question": "How should I prompt an AI video model so camera movement expresses the story instead of feeling like random motion?",
+      "expected_title_any": [
+        "Mateu-Mestre - Framed Ink 2 (2021).md",
+        "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md"
+      ]
+    },
+    {
+      "id": "bridge_ai_video_sequence_continuity",
+      "question": "What underlying craft should guide prompts that turn separate AI-generated clips into one emotionally coherent sequence?",
+      "expected_title_any": [
+        "Grammar of the Edit.md",
+        "Walter Murch - In the Blink of an Eye (2001).md"
+      ]
+    },
+    {
+      "id": "bridge_ai_video_blocking",
+      "question": "How can I describe staging and blocking in an AI video prompt so characters reveal intention through the scene?",
+      "expected_title_any": [
+        "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md",
+        "Mateu-Mestre - Framed Ink 2 (2021).md"
+      ]
+    },
+    {
+      "id": "bridge_ai_video_visual_power",
+      "question": "Which storytelling principles should shape an AI video prompt when I want the frame to communicate power and vulnerability?",
+      "expected_title_any": [
+        "Mateu-Mestre - Framed Ink 2 (2021).md",
+        "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md"
+      ]
+    },
+    {
+      "id": "bridge_ai_video_character_motion",
+      "question": "My AI video character moves correctly but the performance says nothing. What directing craft should I encode in the prompt?",
+      "expected_title_any": [
+        "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md",
+        "Richard Williams - The Animator's Survival Kit (2002, Faber & Faber).md",
+        "Elemental Magic.md"
+      ]
+    },
+    {
+      "id": "bridge_ai_video_storyboard",
+      "question": "How do I turn a narrative beat into a sequence of AI video prompts without losing the dramatic through-line?",
+      "expected_title_any": [
+        "Mateu-Mestre - Framed Ink 2 (2021).md",
+        "Grammar of the Edit.md",
+        "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md"
+      ]
+    }
+  ]
+}
