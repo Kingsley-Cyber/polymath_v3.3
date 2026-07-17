@@ -12,6 +12,7 @@ from services.retriever.four_lane_router import (
     resolve_query_ontology,
     _source_versions_by_document,
 )
+from services.retriever.grounded_planner import filter_aligned_planner_lanes
 from services.retriever.query_plan import QueryLane
 
 
@@ -250,6 +251,25 @@ def test_bridge_subquery_is_exactly_once_and_never_required():
     assert len(bridge) == 1
     assert bridge[0].query == BRIDGE_SUBQUERY
     assert bridge[0].required is False
+
+
+def test_fixed_bridge_probe_is_protected_from_generated_lane_alignment_filter():
+    bridge = add_bridge_subquery_lane([])[0]
+
+    lanes, vectors, _lexicon_ids, diagnostics = filter_aligned_planner_lanes(
+        [bridge],
+        [[0.0, 1.0]],
+        {},
+        original_vector=[1.0, 0.0],
+        minimum_alignment=0.45,
+        step_back_minimum_alignment=0.35,
+        protected_lane_ids={bridge.lane_id},
+    )
+
+    assert lanes == [bridge]
+    assert vectors == [[0.0, 1.0]]
+    assert diagnostics["lanes"][0]["alignment"] == 0.0
+    assert diagnostics["lanes"][0]["reason"] == "protected_policy_probe"
 
 
 def test_digest_payload_requires_projection_provenance():

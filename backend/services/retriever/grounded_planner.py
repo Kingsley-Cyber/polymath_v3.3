@@ -590,6 +590,7 @@ def filter_aligned_planner_lanes(
     original_vector: list[float] | None,
     minimum_alignment: float,
     step_back_minimum_alignment: float,
+    protected_lane_ids: set[str] | None = None,
 ) -> tuple[
     list[QueryLane],
     list[list[float] | None],
@@ -605,6 +606,7 @@ def filter_aligned_planner_lanes(
     translation probes must remain close to the original intent.
     """
 
+    protected_lane_ids = set(protected_lane_ids or ())
     accepted_lanes: list[QueryLane] = []
     accepted_vectors: list[list[float] | None] = []
     accepted_lexicon_ids: dict[str, list[str]] = {}
@@ -620,7 +622,11 @@ def filter_aligned_planner_lanes(
             if original_vector is not None and vector is not None
             else 0.0
         )
-        accepted = bool(original_vector is not None and vector is not None and score >= threshold)
+        protected = lane.lane_id in protected_lane_ids
+        accepted = bool(
+            vector is not None
+            and (protected or (original_vector is not None and score >= threshold))
+        )
         rows.append(
             {
                 "lane_id": lane.lane_id,
@@ -633,8 +639,17 @@ def filter_aligned_planner_lanes(
                 ),
                 "alignment": round(score, 4),
                 "threshold": round(threshold, 4),
+                "protected_policy_probe": protected,
                 "accepted": accepted,
-                "reason": "aligned" if accepted else "below_semantic_alignment_floor",
+                "reason": (
+                    "protected_policy_probe"
+                    if protected and accepted
+                    else "aligned"
+                    if accepted
+                    else "missing_vector"
+                    if vector is None
+                    else "below_semantic_alignment_floor"
+                ),
             }
         )
         if not accepted:
