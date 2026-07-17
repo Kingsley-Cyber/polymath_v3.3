@@ -237,6 +237,15 @@ cross-impact so no artifact is rebuilt twice:
   and capability-specific readiness
   (`temporal_unavailable|partial|strict_ready` — same seam as the
   operational-vs-metadata-quality readiness split adopted in Audit Delta 2).
+- [ ] T-QUERY-ROUTING-V1: dark-ship a default-OFF query-side temporal-intent
+  detector that reuses the qualified server extraction families, preserves
+  existing Qdrant/Mongo temporal carriers through both retrieval paths, and
+  deterministically reserves relevant temporal/graph-supported evidence.
+  Validate the immutable 24-query temporal diagnostic at >=0.90 document hit
+  and >=0.70 full-anchor coverage with no frozen-suite regression and no
+  corpus writes. Branch: `codex/temporal-query-routing-20260716` (review ready;
+  acceptance remains open after repeated MLX embedding outages invalidated the
+  frozen paired A/B; receipt: `docs/TEMPORAL_QUERY_ROUTING_AB_2026-07-16.md`).
 - Ordering rationale: field capture rides in-flight generation/backfills for
   free; retrieval-behavior changes are gated by the held-out suite; temporal
   eligibility needs the fields to exist first; re-extracting before the

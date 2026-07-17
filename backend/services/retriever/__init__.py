@@ -29,6 +29,7 @@ Cross-corpus constraints (spec §CROSS-CORPUS QUERY CONSTRAINTS):
 import asyncio
 import logging
 import re
+from dataclasses import replace
 from time import perf_counter
 from typing import Any
 
@@ -46,6 +47,7 @@ from services.retriever.graph_rerank import (
     apply_graph_degree_boost_metrics_aware,
 )
 from services.retriever.hydrate import (
+    attach_parent_temporal_metadata,
     attach_document_identities,
     dedupe_cross_corpus_evidence,
     hydrate_chunks,
@@ -116,6 +118,15 @@ from services.retriever.query_semantics import (
     concept_support_phrases,
     is_curated_concept,
     requires_explicit_graph_evidence,
+)
+from services.retriever.temporal import (
+    TEMPORAL_ROUTING_VERSION,
+    TemporalIntent,
+    candidate_key as temporal_candidate_key,
+    detect_temporal_intent,
+    reserve_temporal_candidates,
+    temporal_protected_keys,
+    temporal_routing_enabled,
 )
 
 logger = logging.getLogger(__name__)
@@ -1346,6 +1357,21 @@ class RetrieverOrchestrator:
                 1 for probe in plan.probes if bool(getattr(probe, "required", False))
             ),
         )
+        temporal_enabled = temporal_routing_enabled(settings)
+        temporal_intent = (
+            detect_temporal_intent(plan.standalone_query)
+            if temporal_enabled
+            else TemporalIntent()
+        )
+        temporal_diagnostics: dict[str, Any] = (
+            temporal_intent.diagnostics()
+            if temporal_enabled
+            else {
+                "enabled": False,
+                "active": False,
+                "version": TEMPORAL_ROUTING_VERSION,
+            }
+        )
 
         if (
             retrieval_tier == RetrievalTier.qdrant_only
@@ -1468,6 +1494,26 @@ class RetrieverOrchestrator:
             "missing_lane_ids_before": [],
             "added_candidates": 0,
         }
+
+        async def _temporalize_pools(
+            candidate_pools: list[PlannedPool],
+        ) -> tuple[list[PlannedPool], list[SourceChunk]]:
+            flat = [chunk for pool in candidate_pools for chunk in pool.chunks]
+            if not temporal_enabled or not temporal_intent.active or not flat:
+                return candidate_pools, flat
+            if effective_tier != RetrievalTier.qdrant_only:
+                started_at = perf_counter()
+                flat = await attach_parent_temporal_metadata(flat, corpus_ids)
+                timings["temporal_metadata"] = timings.get(
+                    "temporal_metadata", 0.0
+                ) + (perf_counter() - started_at)
+            rebuilt: list[PlannedPool] = []
+            offset = 0
+            for pool in candidate_pools:
+                length = len(pool.chunks)
+                rebuilt.append(replace(pool, chunks=tuple(flat[offset : offset + length])))
+                offset += length
+            return rebuilt, flat
 
         embed_started = perf_counter()
         try:
@@ -2596,6 +2642,7 @@ class RetrieverOrchestrator:
             *[_lane_pools(lane, vector) for lane, vector in zip(lanes, vectors)]
         )
         pools = [pool for group in lane_pool_groups for pool in group]
+        pools, temporal_pool_candidates = await _temporalize_pools(pools)
         timings["candidate_generation"] = perf_counter() - candidate_started
 
         routed_document_count = int(
@@ -2637,6 +2684,24 @@ class RetrieverOrchestrator:
             max_candidates=rerank_cap,
             corpus_ids=corpus_ids,
         )
+        if temporal_enabled and temporal_intent.active:
+            fused_keys = {temporal_candidate_key(item) for item in fused}
+            temporal_ranked_pool = [
+                *fused,
+                *(
+                    chunk
+                    for chunk in temporal_pool_candidates
+                    if temporal_candidate_key(chunk) not in fused_keys
+                ),
+            ]
+            fused, temporal_prefusion = reserve_temporal_candidates(
+                fused,
+                temporal_ranked_pool,
+                intent=temporal_intent,
+                max_candidates=rerank_cap,
+                tier=effective_tier,
+            )
+            temporal_diagnostics["pre_fusion_cap"] = temporal_prefusion
         if similarity_threshold is not None and similarity_threshold > 0.0:
             before_threshold = len(fused)
             fused = [
@@ -2752,15 +2817,38 @@ class RetrieverOrchestrator:
                     PlannedPool("graph", "graph", tuple(graph_chunks)),
                     PlannedPool("graph_facts", "graph", tuple(fact_chunks)),
                 ]
+                combined_graph_pools = [
+                    PlannedPool("base", "dense", tuple(fused)),
+                    *required_base_pools,
+                    *graph_pools,
+                ]
+                combined_graph_pools, graph_temporal_candidates = (
+                    await _temporalize_pools(combined_graph_pools)
+                )
                 fused, graph_fusion = fuse_planned_pools(
-                    [
-                        PlannedPool("base", "dense", tuple(fused)),
-                        *required_base_pools,
-                        *graph_pools,
-                    ],
+                    combined_graph_pools,
                     max_candidates=rerank_cap,
                     corpus_ids=corpus_ids,
                 )
+                if temporal_enabled and temporal_intent.active:
+                    fused_keys = {temporal_candidate_key(item) for item in fused}
+                    fused, graph_temporal_reserve = reserve_temporal_candidates(
+                        fused,
+                        [
+                            *fused,
+                            *(
+                                chunk
+                                for chunk in graph_temporal_candidates
+                                if temporal_candidate_key(chunk) not in fused_keys
+                            ),
+                        ],
+                        intent=temporal_intent,
+                        max_candidates=rerank_cap,
+                        tier=effective_tier,
+                    )
+                    temporal_diagnostics[
+                        "post_graph_fusion_cap"
+                    ] = graph_temporal_reserve
                 fusion_diagnostics["graph"] = graph_fusion
             except asyncio.TimeoutError:
                 failures.append(
@@ -2936,6 +3024,9 @@ class RetrieverOrchestrator:
                 *[_repair_lane(lane_id) for lane_id in missing_before_repair]
             )
             repair_pools = [pool for group in repair_pool_groups for pool in group]
+            repair_pools, repair_temporal_candidates = await _temporalize_pools(
+                repair_pools
+            )
             repair_diagnostics["added_candidates"] = sum(
                 len(pool.chunks) for pool in repair_pools
             )
@@ -2945,6 +3036,25 @@ class RetrieverOrchestrator:
                     max_candidates=rerank_cap,
                     corpus_ids=corpus_ids,
                 )
+                if temporal_enabled and temporal_intent.active:
+                    fused_keys = {temporal_candidate_key(item) for item in fused}
+                    fused, repair_temporal_reserve = reserve_temporal_candidates(
+                        fused,
+                        [
+                            *fused,
+                            *(
+                                chunk
+                                for chunk in repair_temporal_candidates
+                                if temporal_candidate_key(chunk) not in fused_keys
+                            ),
+                        ],
+                        intent=temporal_intent,
+                        max_candidates=rerank_cap,
+                        tier=effective_tier,
+                    )
+                    temporal_diagnostics[
+                        "post_repair_fusion_cap"
+                    ] = repair_temporal_reserve
                 fusion_diagnostics["repair"] = repair_fusion
             timings["repair"] = perf_counter() - repair_started
 
@@ -3126,6 +3236,16 @@ class RetrieverOrchestrator:
             preferred_route_lane_ids=answer_lane_ids,
             protected_lane_ids=protected_lane_ids,
         )
+        if temporal_enabled and temporal_intent.active:
+            finalist_candidates, temporal_final_reserve = reserve_temporal_candidates(
+                finalist_candidates,
+                ranked,
+                intent=temporal_intent,
+                max_candidates=final_limit,
+                tier=effective_tier,
+                protected_keys=temporal_protected_keys(reservation_diagnostics),
+            )
+            temporal_diagnostics["final_reserve"] = temporal_final_reserve
         hydrate_started = perf_counter()
         if effective_tier == RetrievalTier.qdrant_only:
             finalists = [
@@ -3409,6 +3529,7 @@ class RetrieverOrchestrator:
             "enumeration_selection": enumeration_diagnostics,
             "grounding_filter": grounding_filter_diagnostics,
             "reservations": reservation_diagnostics,
+            "temporal_routing": temporal_diagnostics,
             "cache": {"hit": False, "key_version": "retrieval_v2"},
             "required_concept_coverage": {
                 # Refusal-relevant lanes only: the synthetic fallback probe is
@@ -3530,6 +3651,10 @@ class RetrieverOrchestrator:
                     kwargs.get("fact_seed_limit"),
                     kwargs.get("search_mode"),
                     bool(kwargs.get("support_profile", False)),
+                    bool(
+                        getattr(settings, "TEMPORAL_QUERY_ROUTING_ENABLED", False)
+                    ),
+                    TEMPORAL_ROUTING_VERSION,
                 )
             except Exception:
                 key = None
@@ -3608,6 +3733,19 @@ class RetrieverOrchestrator:
         single_limit = retrieval_k if retrieval_k is not None else _SINGLE_CORPUS_LIMIT
         rank_query = ranking_query or query
         retrieval_intent = infer_retrieval_intent(rank_query)
+        temporal_enabled = temporal_routing_enabled(settings)
+        temporal_intent = (
+            detect_temporal_intent(rank_query) if temporal_enabled else TemporalIntent()
+        )
+        temporal_diagnostics: dict[str, Any] = (
+            temporal_intent.diagnostics()
+            if temporal_enabled
+            else {
+                "enabled": False,
+                "active": False,
+                "version": TEMPORAL_ROUTING_VERSION,
+            }
+        )
         summary_base = (
             top_k_summary if top_k_summary is not None else _DEFAULT_SUMMARY_LIMIT
         )
@@ -3757,6 +3895,7 @@ class RetrieverOrchestrator:
                 "max_doc_share_final": max_doc_share_final,
                 "selection": selection_diagnostics,
                 "reranker": reranker_diagnostics,
+                "temporal_routing": temporal_diagnostics,
             }
 
         # [0a] Filter stale corpus_ids (frontend may reference deleted corpora)
@@ -4092,6 +4231,17 @@ class RetrieverOrchestrator:
                 score_scale=settings.RERANKER_SCORE_SCALE,
             )
             top = a_results_global[:effective_global_k]
+            if temporal_enabled and temporal_intent.active:
+                top, global_temporal_reserve = reserve_temporal_candidates(
+                    top,
+                    a_results_global,
+                    intent=temporal_intent,
+                    max_candidates=effective_global_k,
+                    tier=effective_tier,
+                )
+                temporal_diagnostics["global_final_reserve"] = (
+                    global_temporal_reserve
+                )
             counts["ranked_query_grounded"] = len(a_results_global)
             counts["candidates"] = len(top)
             _log_timings("global_done", len(top))
@@ -4457,6 +4607,14 @@ class RetrieverOrchestrator:
         if not merged:
             _log_timings("empty_after_merge", 0)
             return _result([], status="empty_after_merge")
+        if (
+            temporal_enabled
+            and temporal_intent.active
+            and effective_tier != RetrievalTier.qdrant_only
+        ):
+            phase_started = perf_counter()
+            merged = await attach_parent_temporal_metadata(merged, corpus_ids)
+            _add_timing("temporal_metadata", phase_started)
 
         # Q2/U2 — semantic_chunk_type <-> query-operator RANK-ONLY bonus
         # (additive, tiny, pre-rerank; the cross-encoder re-scores its pool
@@ -4574,6 +4732,10 @@ class RetrieverOrchestrator:
                 if expanded:
                     _record_lane_ranks("graph", expanded, per_corpus=multi)
                     merged = merge_pools(merged, expanded)
+                    if temporal_enabled and temporal_intent.active:
+                        merged = await attach_parent_temporal_metadata(
+                            merged, corpus_ids
+                        )
                     counts["merged_after_graph"] = len(merged)
             except asyncio.TimeoutError:
                 counts["graph_expansion_timed_out"] = 1
@@ -4649,7 +4811,19 @@ class RetrieverOrchestrator:
                 min(int(getattr(settings, "GRAPH_PREFILTER_POOL", 64)), 300),
             )
             if len(merged) > graph_prefilter_pool:
-                merged = _rank_fused_order(merged)[:graph_prefilter_pool]
+                graph_prefilter_ranked = _rank_fused_order(merged)
+                merged = graph_prefilter_ranked[:graph_prefilter_pool]
+                if temporal_enabled and temporal_intent.active:
+                    merged, graph_prefilter_temporal = reserve_temporal_candidates(
+                        merged,
+                        graph_prefilter_ranked,
+                        intent=temporal_intent,
+                        max_candidates=graph_prefilter_pool,
+                        tier=effective_tier,
+                    )
+                    temporal_diagnostics[
+                        "graph_prefilter_reserve"
+                    ] = graph_prefilter_temporal
                 counts["graph_prefilter_pool"] = len(merged)
 
         effective_rerank_top_n = rerank_top_n
@@ -4670,6 +4844,15 @@ class RetrieverOrchestrator:
             # never score-sorted — lane scores live on incomparable scales.
             pre_sorted = _rank_fused_order(merged)
             merged = pre_sorted[:effective_rerank_top_n]
+            if temporal_enabled and temporal_intent.active:
+                merged, rerank_cap_temporal = reserve_temporal_candidates(
+                    merged,
+                    pre_sorted,
+                    intent=temporal_intent,
+                    max_candidates=effective_rerank_top_n,
+                    tier=effective_tier,
+                )
+                temporal_diagnostics["rerank_cap_reserve"] = rerank_cap_temporal
             counts["merged_after_rerank_cap"] = len(merged)
             counts["pool_rank_fused"] = 1
             logger.info(
@@ -4828,6 +5011,22 @@ class RetrieverOrchestrator:
             if fast_grounding_dropped:
                 counts["fast_ungrounded_dropped"] = fast_grounding_dropped
                 counts["candidates"] = len(candidates)
+        if temporal_enabled and temporal_intent.active and candidates:
+            temporal_ranked_pool = ranked
+            if effective_tier == RetrievalTier.qdrant_only:
+                temporal_ranked_pool, _ = _filter_fast_grounded_candidates(
+                    ranked,
+                    query=rank_query,
+                )
+            candidates, final_temporal_reserve = reserve_temporal_candidates(
+                candidates,
+                temporal_ranked_pool,
+                intent=temporal_intent,
+                max_candidates=effective_final_k,
+                tier=effective_tier,
+            )
+            temporal_diagnostics["final_reserve"] = final_temporal_reserve
+            counts["candidates"] = len(candidates)
         if selection_diagnostics:
             counts["sufficiency_repair_rounds"] = int(
                 selection_diagnostics.get("repair_rounds") or 0
