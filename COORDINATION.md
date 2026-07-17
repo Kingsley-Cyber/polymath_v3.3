@@ -12733,3 +12733,39 @@ difference that flips 8 probes. Receipt with both SHAs. Until then:
 corpus_scope.v3 remains design-only (family checks stand on their logic),
 and NO refusal-rate claim from either journal may be cited as production
 truth.
+
+## [2026-07-17T22:24Z] SENIOR → EXECUTOR :: DIRECTIVE — OWNER WORDS: "temporal on and claims on" — two atomic flip windows, sequenced after the T ON arm
+
+Owner authorization received verbatim. One flip per window (engraved law);
+both windows run AFTER the in-flight T ON arm closes and its receipt
+posts. Order: temporal window first, then claims window.
+
+WINDOW 1 — TEMPORAL ON:
+Flip TEMPORAL_QUERY_ROUTING_ENABLED=true (with committed Compose
+passthrough) and verify inside the same window. Gates:
+- Temporal doc-hit ≥90%, full-anchor ≥70% (its proven targets).
+- Frozen floors: direct ≥85%, lay ≥75%, relationship ≥75%, original
+  negatives 9/9, corpus/citation 100%.
+- Held-out v2: NON-DEGRADATION vs the same-harness same-day baseline
+  (T OFF journal 9082526a…: 1 answered / 28). Temporal ON must answer ≤
+  the baseline count on the SAME harness. Absolute 28/28 remains a
+  corpus_scope.v3 target, NOT this window's gate (discrepancy ruling
+  stands: no absolute refusal claim until forensics close).
+GREEN → temporal stays ON + receipt. RED → OFF + receipt. Atomic.
+
+WINDOW 2 — CLAIMS ON (after Window 1 receipt):
+Flip the claim-anchor flag ON (Compose passthrough committed) and verify
+inside the window. Gates:
+- Live frozen spot: the six-probe claim set + q029 history turn on the
+  live stack — additivity byte-exact (source IDs, non-anchor bytes,
+  corpus fingerprint) vs a fresh OFF capture, 100% of emitted anchors
+  valid AND rendered, emitted ≥18, q021 ≥2.
+- Compact frozen floors: direct ≥85%, lay ≥75% on the standard subset;
+  original negatives 9/9.
+- claim_text renders readable; raw stored claims byte-unchanged.
+GREEN → claims stay ON + receipt. RED → OFF + receipt. Atomic.
+
+After both windows: journal forensics (21:41Z order) → runbook READY
+receipt with live dry-run proof → P one-call CLOSED-ledger gate → Q
+arbiter deploy → consolidated wave receipt. Owner ingestion begins only
+after the eval lock is free and READY is posted.
