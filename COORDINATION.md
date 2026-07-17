@@ -11,48 +11,40 @@ senior INTENT entries here start glide timers; silence past the window = GO.
 
 ---
 
-# ACTIVE DIRECTIVES (senior, rewritten in place — current truth 2026-07-17T15:03Z)
+# ACTIVE DIRECTIVES (senior, rewritten in place — current truth 2026-07-18T03:5xZ)
 
-1. ROLE LAW (owner-engraved, CLAUDE.md): the senior NEVER executes and NEVER
-   spawns subagents. CODEX is the SOLE executor.
-2. Mission = CODEX_MISSION.md, cursor = PROGRESS.md, temporal truth =
-   BUILDLINE.md. Read all three before acting. The RunPod finish line a→e is
-   COMPLETE (lockdown certified, 15/15 E2E ingested, eval + owner report
-   published 855c4a4/d9dc8f7 on codex/owner-results-report-20260717).
-3. CURRENT PRIORITY (owner 2026-07-17): THE QUALITY PROMOTION WAVE — the
-   owner-injected senior prompt is directive-of-record, mirrored in the
-   2026-07-17T15:03Z SENIOR entry at file end: STEP 0 promote
-   MLX(12eb204)+Fix1(3157ec9)+Fix2(3e0acc5) — merge dark → rebuild canonical
-   (override-compose law) → enable Fix1+Fix2 under frozen 17q/51-exec gates
-   → STEP 1 temporal(1d82cc4) combined-stack frozen run → parallel agents
-   R (router round-2: deterministic T9.1 doc profiles) / C (claim-anchor
-   strict additivity + render cleanup) / W (waterfall pressure diagnostic,
-   senior-preregistered set) / P (P7 chat cost seam) / Q (GPU arbiter —
-   BUILD now, DEPLOY gated behind wave completion). Eval lock serializes
-   live runs STEP0→STEP1→R→C→W (P slots anywhere). Wave synthesis ceiling
-   $10.00 (two-attempt envelopes). Flags default OFF except owner-approved
-   enablements (Fix1, Fix2, temporal-if-green). Base = 7233077; selection
-   hash da7b94c…eaf00; prereg hash 8f70b1d…c110; route anthropic/minimax-m2.7.
-4. OWNER-DEFERRED (no work, no spend): scaling (quota ask, 500-book run,
-   batch-128 canary), mark digest phase-2 remainder (535, P4), ecom 3
-   tombstoned docs disposition, blue/green cutover + main fold-back (P2).
-   RunPod embed routing REJECTED — owner approved the GPU priority queue
-   instead ("queue approved", 2026-07-17).
-5. DO NOT RERUN COMPLETED VERDICTS: A0 rejected 2026-07-14; C2/GLiREL
-   observation-only; digest-as-chunk-competitor REJECTED (−11.1 doc-hit;
-   249 mark points stay dark); router v1 and claim-activation v1 verdicts
-   recorded (round-2 ONLY via the R and C packages); mark digest pass
-   parked (resume = owner words + parked materializer fix).
-6. Standing laws unchanged: blue-green+canary for endpoint deploys; no
-   rebuild during paid batches; reservation-based ceilings; bounded
-   exposure; durable-ID resolution (never ordinal coincidence); namespaced
-   ordinals; deterministic-spans-first detector precedence; fail-closed
-   refusals must name their guard; one completeness truth per surface;
-   census before mutation, backup-first fences; keys encrypted, whitelist
-   projections; preregistered gates never softened post-hoc; restore-never-
-   rederive; never-write-less resume.
-7. The LOG below is append-only chronological (append at FILE END). Entry
-   format unchanged. Owner lines outrank everything.
+1. ROLE LAW (owner-engraved): senior never executes, never spawns
+   subagents; CODEX is sole executor. If a session dies, resume from
+   docs/CODEX_RESUME_PROMPT.txt (senior-maintained after every receipt).
+2. CURRENT PRIORITY — OWNER BUILD-FIRST MODE (02:52Z ruling + 03:07Z/
+   03:29Z amendments): (1) four compact flip windows ≤10 queries each
+   (canonical-10 baseline → T re-verdict → temporal ON → claims ON) then
+   READY receipt + P single-call gate + Q arbiter deploy; (2) BUILD MODE,
+   receipts only, zero live evals: 2a Agent L phases L1–L5
+   (docs/AGENT_L_LIBRARIAN_PLANNER_DESIGN_BRIEF_2026-07-18.md), 2b
+   corpus_scope.v3 four checks, 2c synthesis-route speed lever, 2d
+   metadata backfills (biblio author/date 0/15→filled; 669 tree rows);
+   (3) ONE final ≤25-query acceptance
+   (docs/FINAL_ACCEPTANCE_SET_V1_2026-07-18.md) with the
+   schema-consumption checklist and latency gates (fast ≤5s / deep ≤15s
+   p50). GREEN = pipeline COMPLETE.
+3. OWNER LAWS in force: compact windows (≤10 queries; full suites only on
+   owner-called milestones) · atomic flip law (flip+gate = one step) ·
+   canonical three-state refusal + journal completeness (00:04Z) ·
+   eval concurrency 3, temp=0 · usage recorded, no budget stops ·
+   preregistered gates never softened · restore-never-rederive ·
+   never-write-less resume · silent-fallback accounting · fail-closed
+   refusals name their guard · Compose passthrough for every new flag.
+4. LIVE FLAG STATE (verify, never assume): relationship=true,
+   corpus_scope.v2=true; temporal/claims flip in their windows; two_lane,
+   router, decomposition, waterfall, planner flags dark.
+5. DO NOT RERUN: STEP0 (closed-green), digest-as-competitor (falsified),
+   router v1/v2 verdicts, A0, C2/GLiREL, mark digest pass (parked).
+   OWNER-DEFERRED: scaling/quota, mark digests (P4), ecom 3 tombstoned
+   docs, cutover/main fold-back (P2), librarian shelves (P5, after usage
+   data), waterfall enablement.
+6. LOG below is append-only chronological (append at FILE END). Owner
+   lines outrank everything.
 
 # LOG (append-only)
 

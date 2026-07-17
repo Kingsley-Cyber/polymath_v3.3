@@ -1,0 +1,6 @@
+RESUME EXECUTOR (paste this whole line into any fresh Codex session):
+Read ACTIVE DIRECTIVES in COORDINATION.md, then the last EXECUTOR receipt
+in the LOG. Continue the 02:52Z build-first queue from the first
+unreceipted step (flip windows -> READY/P/Q -> build 2a/2b/2c/2d -> final
+acceptance per docs/FINAL_ACCEPTANCE_SET_V1_2026-07-18.md). Receipt every
+step. Skip anything already receipted.
