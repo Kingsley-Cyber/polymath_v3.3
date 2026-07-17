@@ -408,6 +408,39 @@ class Settings(BaseSettings):
             "deterministic lexical detector, waterfall.allocate() the packer."
         ),
     )
+    TWO_LANE_ANCHORING_ENABLED: bool = Field(
+        default=False,
+        description=(
+            "Final evidence-seat ANCHOR/EXPANSION reservation. Metadata "
+            "classification is deterministic and case-normalized; relationship "
+            "side allocations remain senior. Default OFF pending frozen A/B."
+        ),
+    )
+    ANCHOR_LANE_RATIO: float = Field(
+        default=0.60,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Fraction of each final evidence-side budget reserved for exact "
+            "metadata anchors; the remainder is reserved for expansion."
+        ),
+    )
+    ANCHOR_LANE_ADMISSION_THRESHOLD: float = Field(
+        default=0.10,
+        ge=0.0,
+        description=(
+            "Minimum final ranking score for an unprotected ANCHOR candidate "
+            "to occupy or receive a spilled evidence seat."
+        ),
+    )
+    EXPANSION_LANE_ADMISSION_THRESHOLD: float = Field(
+        default=0.10,
+        ge=0.0,
+        description=(
+            "Minimum final ranking score for an unprotected EXPANSION "
+            "candidate to occupy or receive a spilled evidence seat."
+        ),
+    )
     SUMMARY_TREE_ENABLED: bool = Field(
         default=True,
         description=(

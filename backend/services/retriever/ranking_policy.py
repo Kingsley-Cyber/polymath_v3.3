@@ -8,6 +8,12 @@ from typing import Any
 
 from models.schemas import RetrievalTier, SourceChunk
 from services.retriever.intent_policy import QueryNeed, RetrievalIntent
+from services.retriever.evidence_allocation import (
+    allocate_two_lane_seats,
+    lane_alias_score,
+    relationship_allocation_eligible,
+)
+from services.retriever.evidence_plan import build_evidence_plan
 from services.retriever.reservation_policy import (
     corpus_reservation_bound,
     passes_corpus_reservation,
@@ -1295,6 +1301,12 @@ def select_with_diversity(
     multi_corpus: bool = False,
     selected_corpus_ids: list[str] | None = None,
     query: str | None = None,
+    anchor_query: str | None = None,
+    two_lane_anchoring_enabled: bool = False,
+    anchor_lane_ratio: float = 0.60,
+    anchor_lane_admission_threshold: float = 0.10,
+    expansion_lane_admission_threshold: float = 0.10,
+    relationship_allocation_enabled: bool = False,
 ) -> DiversityResult:
     """Select final context with tier-aware MMR/atomic diversity.
 
@@ -1907,6 +1919,137 @@ def select_with_diversity(
             fingerprints=fingerprints,
         )
 
+    two_lane_diagnostics: dict[str, Any] | None = None
+    if two_lane_anchoring_enabled and selected_indices:
+        exact_query = str(anchor_query if anchor_query is not None else query or "")
+        relationship_plan = build_evidence_plan(exact_query)
+        relationship_precedence = bool(
+            relationship_allocation_enabled
+            and relationship_allocation_eligible(relationship_plan)
+        )
+
+        def _two_lane_candidate_id(candidate: SourceChunk) -> str:
+            return _scoped_content_key(candidate, candidate.chunk_id)
+
+        def _relationship_side(candidate: SourceChunk) -> str:
+            if not relationship_precedence:
+                return "__all__"
+            metadata = candidate.metadata or {}
+            side_text = " ".join(
+                [
+                    _chunk_text(candidate),
+                    str(candidate.doc_name or ""),
+                    " ".join(candidate.heading_path or []),
+                    " ".join(
+                        _metadata_list(
+                            metadata,
+                            "title",
+                            "source_book",
+                            "book_title",
+                            "author",
+                            "authors",
+                            "author_or_org",
+                            "entities",
+                            "entity_names",
+                            "matched_entities",
+                        )
+                    ),
+                ]
+            )
+            scored_sides = [
+                (lane_alias_score(side_text, lane), lane.name)
+                for lane in relationship_plan.required_lanes
+            ]
+            scored_sides.sort(key=lambda row: (-row[0], row[1]))
+            if not scored_sides or scored_sides[0][0] <= 0:
+                return "__unassigned__"
+            return scored_sides[0][1]
+
+        protected_reasons = {
+            "corpus_floor",
+            "document_anchor_reserve",
+            "graph_reserve",
+            "sufficiency_repair",
+        }
+        protected_ids = {
+            _two_lane_candidate_id(ranked[idx])
+            for idx in selected_indices
+            if selected_by.get(idx) in protected_reasons
+        }
+        prior_indices = list(selected_indices)
+        prior_sufficiency = sufficiency
+        allocation = allocate_two_lane_seats(
+            [ranked[idx] for idx in prior_indices],
+            ranked,
+            query=exact_query,
+            budget=min(final_top_k, len(prior_indices)),
+            anchor_ratio=anchor_lane_ratio,
+            anchor_threshold=anchor_lane_admission_threshold,
+            expansion_threshold=expansion_lane_admission_threshold,
+            candidate_id_fn=_two_lane_candidate_id,
+            score_fn=lambda candidate: float(candidate.score or 0.0),
+            side_fn=_relationship_side if relationship_precedence else None,
+            protected_ids=protected_ids,
+        )
+        index_by_id = {
+            _two_lane_candidate_id(candidate): index
+            for index, candidate in enumerate(ranked)
+        }
+        allocated_indices = [
+            index_by_id[_two_lane_candidate_id(candidate)]
+            for candidate in allocation.candidates
+            if _two_lane_candidate_id(candidate) in index_by_id
+        ]
+        allocated_sufficiency = _evaluate_sufficiency(
+            query=query,
+            selected_indices=allocated_indices,
+            fingerprints=fingerprints,
+        )
+        rolled_back = bool(
+            prior_sufficiency.get("answerable")
+            and not allocated_sufficiency.get("answerable")
+        )
+        two_lane_diagnostics = dict(allocation.diagnostics)
+        two_lane_diagnostics["rolled_back"] = rolled_back
+        two_lane_diagnostics["rollback_reason"] = (
+            "would_break_answerability" if rolled_back else None
+        )
+        if not rolled_back:
+            prior_set = set(prior_indices)
+            selected_indices = allocated_indices
+            chosen_idx = set(selected_indices)
+            selected_scores = {
+                idx: selected_scores.get(idx, relevance_by_idx.get(idx, 0.0))
+                for idx in selected_indices
+            }
+            selected_by = {
+                idx: (
+                    selected_by.get(idx, "two_lane_retained")
+                    if idx in prior_set
+                    else "two_lane_anchor_reserve"
+                )
+                for idx in selected_indices
+            }
+            sufficiency = allocated_sufficiency
+        else:
+            two_lane_diagnostics["selected"] = [
+                {
+                    "seat": seat,
+                    "candidate_id": _two_lane_candidate_id(ranked[idx]),
+                    "side": "__rollback__",
+                    "lane": "retained",
+                    "matched_fields": [],
+                    "matched_terms": [],
+                    "score": round(float(ranked[idx].score or 0.0), 6),
+                    "protected": _two_lane_candidate_id(ranked[idx]) in protected_ids,
+                }
+                for seat, idx in enumerate(prior_indices, 1)
+            ]
+
+    two_lane_trace_by_id = {
+        str(row.get("candidate_id") or ""): row
+        for row in (two_lane_diagnostics or {}).get("selected", [])
+    }
     annotated = [
         _annotated_copy(
             ranked[idx],
@@ -1920,6 +2063,23 @@ def select_with_diversity(
         )
         for order, idx in enumerate(selected_indices[:final_top_k])
     ]
+    if two_lane_diagnostics is not None:
+        for chunk in annotated:
+            trace = two_lane_trace_by_id.get(
+                _scoped_content_key(chunk, chunk.chunk_id)
+            )
+            if trace is None:
+                continue
+            metadata = dict(chunk.metadata or {})
+            metadata["two_lane_anchoring"] = {
+                "seat": trace.get("seat"),
+                "side": trace.get("side"),
+                "lane": trace.get("lane"),
+                "matched_fields": list(trace.get("matched_fields") or []),
+                "matched_terms": list(trace.get("matched_terms") or []),
+                "protected": bool(trace.get("protected")),
+            }
+            chunk.metadata = metadata
     diagnostics = {
         "final_k": final_top_k,
         "actual_output_count": len(annotated),
@@ -1947,6 +2107,8 @@ def select_with_diversity(
         "sufficiency": sufficiency,
         "corpus_floor": corpus_floor_meta,
     }
+    if two_lane_diagnostics is not None:
+        diagnostics["two_lane_anchoring"] = two_lane_diagnostics
     for chunk in annotated:
         metadata = dict(chunk.metadata or {})
         metadata["answer_sufficiency"] = {
