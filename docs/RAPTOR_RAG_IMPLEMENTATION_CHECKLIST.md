@@ -1142,6 +1142,19 @@ own before/after A/B.
   (separate from embed/fuse/rerank/hydrate), reported in retrieval diagnostics.
 - [ ] Graph expansion budgets (<=2 hops, <=200 nodes, partition-permissioned
   per mode) as recipe params.
+- [ ] `FOUR-LANE-TIER0-ROUTER-V1`: dark-ship one document-level routing stage
+  ahead of evidence retrieval. Fuse independently attributable lexical
+  title/summary/heading, semantic document-summary/digest, child-hit rollup,
+  and T9.1-resolved associative ontology lanes with per-lane seat quotas,
+  threshold spillover, associative seat protection, and divergent-profile
+  surface-match demotion. Purchased `SemanticDigestV1` projections are routing
+  signals only and never chunk competitors; parent summaries are never newly
+  embedded for the child-rollup lane. Optional one-call subquery decomposition
+  is separately gated and defaults OFF. Acceptance is the frozen three-tier
+  OFF/ON suite with no direct/lay regression and relationship remaining green,
+  plus the immutable six-query bridge diagnostic preregistered at
+  `backend/evals/tier0_bridge_diagnostic_v1.json`, including per-lane
+  attribution. All flags remain default OFF until a separate promotion.
 
 Acceptance:
 
