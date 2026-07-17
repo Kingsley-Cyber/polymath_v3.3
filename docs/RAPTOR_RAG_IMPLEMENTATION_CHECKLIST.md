@@ -774,6 +774,16 @@ Acceptance:
 - [ ] Use sibling expansion for structured list/enumeration nodes.
 - [ ] Use dynamic breadth/K based on score cliffs, obligations, and answer
   shape.
+- [x] `BUDGET-HYDRATION-WATERFALL-V2`: preserve the existing default-OFF
+  deterministic assembly path; record every ranked parent's `full`,
+  `summary`, or `skip` decision and every packet item's hydration level.
+  **[CODE/BUILD GREEN: 62 combined tests, exact image build `EXIT=0`.
+  SERIALIZED LIVE A/B: bridge quality 4/6→4/6 with identical top-three
+  documents on 6/6 queries; repeated packet hashes stable on 6/6. Coverage
+  caveat: the real diagnostic fit all 17 parents as `full`, so zero summary
+  and skip decisions were exercised live. Keep default OFF pending a
+  high-pressure context diagnostic. Receipt:
+  `docs/BUDGET_HYDRATION_WATERFALL_AB_2026-07-17.md`.]**
 
 Acceptance:
 

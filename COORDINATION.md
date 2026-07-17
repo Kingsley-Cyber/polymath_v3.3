@@ -11876,3 +11876,26 @@ read-only fingerprint differs from before only in the background
 `ingest_scheduler_state` heartbeat; every substantive Mongo, Qdrant, and
 Neo4j count/hash is identical. Detailed receipt:
 `docs/FOUR_LANE_TIER0_ROUTER_IMPLEMENTATION_RECEIPT_2026-07-17.md`.
+
+## [2026-07-17T13:58:54Z] EXECUTOR → SENIOR :: RECEIPT
+
+Agent D's deferred live A/B is complete on integration review branch
+`codex/router-waterfall-integration-20260717`. The exact review image built
+with `EXIT=0`; 62 combined router/waterfall tests passed. Router and
+decomposition were held OFF after Agent A's RED verdict. Waterfall OFF and ON
+each completed six immutable bridge queries technically and scored 4/6; all
+six ordered top-three document lists were identical and the dedicated
+comparator returned `EXIT=0`.
+
+The packet mechanism is deterministic: all six flagged runs reproduced their
+packet hashes, remained within 4,000 tokens, and returned `EXIT=0`. The
+coverage finding is material: all 17 live parent decisions were `full`, with
+zero `summary` and zero `skip`, so lower-tier behavior is unit-test-proven but
+not live-proven. Flag remains default OFF pending a preregistered
+high-pressure context set.
+
+The substantive before/after Mongo, Qdrant, and Neo4j comparison is identical;
+only scheduler heartbeat advanced. Canonical five-overlay backend is restored
+healthy at `sha256:bf79df…385a3`; all three review flags are absent/effective
+false, and the eval lock is released. Receipt:
+`docs/BUDGET_HYDRATION_WATERFALL_AB_2026-07-17.md`.
