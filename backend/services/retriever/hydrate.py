@@ -22,6 +22,10 @@ from models.schemas import SourceChunk
 from services.conversation import conversation_service
 from services.facets import metadata_with_facets
 from services.retriever.query_semantics import lexical_terms
+from services.retriever.temporal import (
+    metadata_with_temporal_carrier,
+    temporal_routing_enabled,
+)
 from services.storage.record_status import with_active_records
 
 _SENT_SPLIT = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9\"'(])")
@@ -145,6 +149,88 @@ def _assemble_hydrated_text(
 
 
 logger = logging.getLogger(__name__)
+
+
+def _temporal_metadata(
+    metadata: dict | None,
+    source: dict | None,
+) -> dict:
+    output = dict(metadata or {})
+    if temporal_routing_enabled(get_settings()):
+        output = metadata_with_temporal_carrier(output, source)
+    return output
+
+
+async def attach_parent_temporal_metadata(
+    chunks: List[SourceChunk],
+    corpus_ids: Optional[List[str]] = None,
+) -> List[SourceChunk]:
+    """Attach parent temporal carriers using one bounded read by candidate IDs."""
+
+    if not chunks or not temporal_routing_enabled(get_settings()):
+        return chunks
+    db = conversation_service._db
+    if db is None:
+        return chunks
+    parent_ids = sorted(
+        {str(chunk.parent_id) for chunk in chunks if str(chunk.parent_id or "").strip()}
+    )
+    if not parent_ids:
+        return chunks
+    query: dict = {"parent_id": {"$in": parent_ids}}
+    if corpus_ids:
+        query["corpus_id"] = {"$in": corpus_ids}
+    try:
+        rows = (
+            await db["parent_chunks"]
+            .find(
+                with_active_records(query),
+                {
+                    "_id": 0,
+                    "parent_id": 1,
+                    "doc_id": 1,
+                    "corpus_id": 1,
+                    "temporal_class": 1,
+                    "time_expressions": 1,
+                },
+            )
+            .to_list(length=None)
+        )
+    except Exception as exc:
+        logger.warning("Bounded temporal metadata hydration failed: %s", exc)
+        return chunks
+    by_key = {
+        (
+            str(row.get("corpus_id") or ""),
+            str(row.get("doc_id") or ""),
+            str(row.get("parent_id") or ""),
+        ): row
+        for row in rows
+        if row.get("parent_id")
+    }
+    by_parent = {
+        str(row.get("parent_id") or ""): row
+        for row in rows
+        if row.get("parent_id")
+    }
+    output: List[SourceChunk] = []
+    for chunk in chunks:
+        record = by_key.get(
+            (
+                str(chunk.corpus_id or ""),
+                str(chunk.doc_id or ""),
+                str(chunk.parent_id or ""),
+            )
+        )
+        if record is None and not chunk.corpus_id:
+            record = by_parent.get(str(chunk.parent_id or ""))
+        if record is None:
+            output.append(chunk)
+            continue
+        copied = chunk.model_copy(deep=True)
+        copied.metadata = metadata_with_temporal_carrier(copied.metadata, record)
+        output.append(copied)
+    return output
 
 
 def _document_source_hash(doc: dict) -> str:
@@ -570,6 +656,7 @@ async def hydrate_chunks(
                     chunk.metadata or pc.get("metadata") or {},
                     pc,
                 )
+                chunk.metadata = _temporal_metadata(chunk.metadata, pc)
 
             meta = doc_meta.get((str(chunk.corpus_id or ""), chunk.doc_id), {})
             chunk.doc_name = meta.get("doc_name") or chunk.doc_id
@@ -677,6 +764,8 @@ async def hydrate_rerank_texts(
                     "corpus_id": 1,
                     "summary": 1,
                     "retrieval_text": 1,
+                    "temporal_class": 1,
+                    "time_expressions": 1,
                 },
             )
             .to_list(length=None)
@@ -698,6 +787,8 @@ async def hydrate_rerank_texts(
     }
     parent_context_by_key: dict[tuple[str, str, str], str] = {}
     parent_context_by_id: dict[str, str] = {}
+    parent_record_by_key: dict[tuple[str, str, str], dict] = {}
+    parent_record_by_id: dict[str, dict] = {}
     for parent in parent_records:
         parent_id = str(parent.get("parent_id") or "")
         context = str(
@@ -713,6 +804,14 @@ async def hydrate_rerank_texts(
             )
         ] = context
         parent_context_by_id.setdefault(parent_id, context)
+        parent_record_by_key[
+            (
+                str(parent.get("corpus_id") or ""),
+                str(parent.get("doc_id") or ""),
+                parent_id,
+            )
+        ] = parent
+        parent_record_by_id.setdefault(parent_id, parent)
     if not by_id:
         return chunks
 
@@ -751,6 +850,16 @@ async def hydrate_rerank_texts(
             metadata = dict(copied.metadata or {})
             metadata["reranker_parent_context"] = parent_context[:1200]
             copied.metadata = metadata
+        parent_record = parent_record_by_key.get(
+            (
+                str(copied.corpus_id or ""),
+                str(copied.doc_id or ""),
+                str(copied.parent_id or ""),
+            )
+        )
+        if parent_record is None and not copied.corpus_id:
+            parent_record = parent_record_by_id.get(str(copied.parent_id or ""))
+        copied.metadata = _temporal_metadata(copied.metadata, parent_record)
         hydrated.append(copied)
 
     if replaced:
@@ -830,6 +939,8 @@ async def hydrate_summary_rerank_texts(
                     "parent_chunks.content_facet_text": 1,
                     "parent_chunks.content_facet_source": 1,
                     "parent_chunks.content_facet_confidence": 1,
+                    "parent_chunks.temporal_class": 1,
+                    "parent_chunks.time_expressions": 1,
                 },
             )
             .to_list(length=None)
@@ -942,6 +1053,7 @@ async def hydrate_summary_rerank_texts(
                 copied.metadata or record.get("metadata") or {},
                 record,
             )
+            copied.metadata = _temporal_metadata(copied.metadata, record)
         hydrated.append(copied)
 
     if replaced:

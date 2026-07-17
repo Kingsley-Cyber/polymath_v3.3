@@ -117,6 +117,12 @@ def _is_graph_expansion(chunk: SourceChunk) -> bool:
     return (chunk.source_tier or "").lower().startswith("graph_mode")
 
 
+def is_graph_supported(chunk: SourceChunk) -> bool:
+    """Public graph-provenance predicate for adjacent selection policies."""
+
+    return bool(_fingerprint(chunk)["graph_supported"])
+
+
 def _is_vector_child_candidate(chunk: SourceChunk) -> bool:
     source_tier = (chunk.source_tier or "").lower()
     if "document_anchor" in source_tier or "summary" in source_tier:
