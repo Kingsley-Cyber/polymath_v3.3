@@ -1,0 +1,179 @@
+{
+  "schema_version": "polymath.runpod_e2e_temporal_diagnostic.v1",
+  "preregistered_at_utc": "2026-07-16T11:50:00Z",
+  "disposition": "report_only_non_gate",
+  "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+  "tiers": [
+    "qdrant_only",
+    "qdrant_mongo",
+    "qdrant_mongo_graph"
+  ],
+  "top_k": 10,
+  "queries": [
+    {
+      "id": "temporal_1929_dialog",
+      "shape": "temporal_event_comparison",
+      "question": "What production change happened in 1929, and why does Blain Brown compare it with the modern digital shift?",
+      "expected_any": [
+        "Blain Brown - Cinematography - Theory and Practice (2016).md"
+      ],
+      "expected_min_distinct": 1,
+      "evidence_anchors": {
+        "Blain Brown - Cinematography - Theory and Practice (2016).md": [
+          "1929",
+          "dialog recording"
+        ]
+      },
+      "captured_metadata_evidence": [
+        {"text": "1929", "role": "reference_time"},
+        {"text": "the last few years", "role": "reference_time"}
+      ]
+    },
+    {
+      "id": "temporal_nicole_2006",
+      "shape": "temporal_dated_event",
+      "question": "What happened at the University of Coimbra in June 2006, and how did the Nicole robot test use movement analysis?",
+      "expected_any": [
+        "[International Journal of Reasoning-based Intelligent Systems vol. 2 iss. 1] Bayesian reasoning for Laban Movement Analysis used in human-machine interaction{Rett, Jorg_ Dias, Jorge_ Ahuactzin, Juan Manuel}(2010)[1.md"
+      ],
+      "expected_min_distinct": 1,
+      "evidence_anchors": {
+        "[International Journal of Reasoning-based Intelligent Systems vol. 2 iss. 1] Bayesian reasoning for Laban Movement Analysis used in human-machine interaction{Rett, Jorg_ Dias, Jorge_ Ahuactzin, Juan Manuel}(2010)[1.md": [
+          "June 2006",
+          "Nicole"
+        ]
+      },
+      "captured_metadata_evidence": [
+        {"text": "June 2006", "role": "event_time"},
+        {"text": "Summer 2006", "role": "event_time"}
+      ]
+    },
+    {
+      "id": "temporal_editing_1927",
+      "shape": "temporal_before_after",
+      "question": "How did film editing change before and after sound arrived in 1927?",
+      "expected_any": [
+        "Walter Murch - In the Blink of an Eye (2001).md"
+      ],
+      "expected_min_distinct": 1,
+      "evidence_anchors": {
+        "Walter Murch - In the Blink of an Eye (2001).md": [
+          "1927",
+          "sound"
+        ]
+      },
+      "captured_metadata_evidence": [
+        {"text": "roughly 1900-1925", "role": "reference_time"},
+        {"text": "1927", "role": "event_time"}
+      ]
+    },
+    {
+      "id": "temporal_noir_1940s_1950s",
+      "shape": "temporal_period",
+      "question": "How did American film noir of the 1940s and 1950s use lighting as storytelling?",
+      "expected_any": [
+        "Blain Brown - Cinematography - Theory and Practice (2016).md"
+      ],
+      "expected_min_distinct": 1,
+      "evidence_anchors": {
+        "Blain Brown - Cinematography - Theory and Practice (2016).md": [
+          "film noir",
+          "forties and fifties"
+        ]
+      },
+      "captured_metadata_evidence": [
+        {"text": "forties and fifties", "role": "reference_time"},
+        {"text": "World War II", "role": "reference_time"}
+      ]
+    },
+    {
+      "id": "temporal_vfx_2012_2013",
+      "shape": "temporal_dated_examples",
+      "question": "Which 2012 and 2013 films are used to show when visual effects are necessary, and why?",
+      "expected_any": [
+        "VES Handbook of Visual Effects.md"
+      ],
+      "expected_min_distinct": 1,
+      "evidence_anchors": {
+        "VES Handbook of Visual Effects.md": [
+          "Life of Pi",
+          "Gravity"
+        ]
+      },
+      "captured_metadata_evidence": [
+        {"text": "2012", "role": "reference_time"},
+        {"text": "2013", "role": "reference_time"}
+      ]
+    },
+    {
+      "id": "temporal_facs_1980s_2002",
+      "shape": "temporal_version_comparison",
+      "question": "How did the technology used for FACS change from its original 1980s-era production to the 2002 CD-ROM version?",
+      "expected_any": [
+        "Paul Ekman - Facial Action Coding System Manual (0).md"
+      ],
+      "expected_min_distinct": 1,
+      "evidence_anchors": {
+        "Paul Ekman - Facial Action Coding System Manual (0).md": [
+          "1980s",
+          "CD ROM"
+        ]
+      },
+      "captured_metadata_evidence": [
+        {"text": "the 1980s", "role": "reference_time"},
+        {"text": "2002", "role": "publication_time"}
+      ]
+    },
+    {
+      "id": "temporal_editing_century",
+      "shape": "temporal_before_after",
+      "question": "How did editing tools evolve from hand-cranked filming more than 100 years ago to today's digital workflow?",
+      "expected_any": [
+        "Grammar of the Edit.md"
+      ],
+      "expected_min_distinct": 1,
+      "evidence_anchors": {
+        "Grammar of the Edit.md": [
+          "More than 100 years ago",
+          "hand-cranked"
+        ]
+      },
+      "captured_metadata_evidence": [
+        {"text": "More than 100 years ago", "role": "reference_time"},
+        {"text": "Today", "role": "reference_time"}
+      ]
+    },
+    {
+      "id": "temporal_murch_origin_1988_2001",
+      "shape": "temporal_revision_timeline",
+      "question": "What is the publication and revision timeline of In the Blink of an Eye from October 1988 through 2001?",
+      "expected_any": [
+        "Walter Murch - In the Blink of an Eye (2001).md"
+      ],
+      "expected_min_distinct": 1,
+      "evidence_anchors": {
+        "Walter Murch - In the Blink of an Eye (2001).md": [
+          "October 1988",
+          "2001"
+        ]
+      },
+      "captured_metadata_evidence": [
+        {"text": "October 1988", "role": "event_time"},
+        {"text": "February 1990", "role": "event_time"},
+        {"text": "1995", "role": "revision_time"},
+        {"text": "2001", "role": "revision_time"}
+      ]
+    }
+  ],
+  "interpretation": {
+    "gate": false,
+    "purpose": "measure whether captured temporal metadata is consumed by retrieval before T-MAIN activation",
+    "expected_gap": "capture exists; temporal query-mode routing is not wired until CP11"
+  },
+  "anti_gaming": [
+    "The diagnostic remains separate from frozen retrieval gates and cannot change their scores.",
+    "Expected files and metadata evidence are fixed before the first diagnostic query.",
+    "No query text or expected filename may appear in retrieval routing code.",
+    "All sources must belong to the response-discovered 15-document E2E corpus."
+  ]
+}

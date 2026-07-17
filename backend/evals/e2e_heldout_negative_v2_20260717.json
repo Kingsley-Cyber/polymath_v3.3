@@ -1,0 +1,219 @@
+{
+  "schema_version": "polymath.e2e_heldout_negative.v2",
+  "status": "frozen_gate_only",
+  "created_at_utc": "2026-07-17T15:03:00Z",
+  "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+  "corpus_name": "runpod_e2e_15doc_20260715",
+  "selection_sha256": "da7b94c152dd5e72d52db1fd80a68f0cc2797d85ed1fd4899f9a8c19874eaf00",
+  "used_for_tuning": false,
+  "acceptance": {
+    "refusal_rate": 1.0,
+    "direct_doc_hit_rate_min": 0.85,
+    "lay_language_doc_hit_rate_min": 0.75
+  },
+  "contamination_firewall": {
+    "e2e_active_document_count": 15,
+    "e2e_document_identity_sha256": "b2eebffa70b3066039c3cce3279578ccec7d84bc6df49045b55b088b7278fce4",
+    "mark_corpus_id": "5a20bc21-95df-42c2-80c8-f927b4e83904",
+    "mark_active_document_count": 102,
+    "mark_document_identity_sha256": "a7e75751dc5bc3a9d1ee54dde7b8408c98fa03eccb09f73a4d33022eaafee2d5",
+    "mark_to_e2e_intersections": {
+      "doc_id": 0,
+      "content_or_source_sha256": 0,
+      "normalized_filename": 0
+    },
+    "verified_absent_targets": {
+      "f3_documents": [
+        "Roger Deakins masterclass",
+        "Save the Cat",
+        "Shopify Handbook",
+        "Bruce Block - The Visual Story"
+      ],
+      "f5_artifacts": [
+        "ROI comparison table in chapter 12 of the e-commerce book",
+        "Figure 9.4 in Directing - Film Techniques and Aesthetics",
+        "VFX-supervisor interview in the appendix",
+        "10-step checklist ending Stage Combat Arts"
+      ]
+    },
+    "preregistration_swap": {
+      "removed": "Walter Murch - In the Blink of an Eye Rule of Six",
+      "reason": "The E2E corpus contains Walter Murch - In the Blink of an Eye and two Rule of Six evidence chunks.",
+      "replacement": "Bruce Block - The Visual Story guidance on visual structure"
+    }
+  },
+  "queries": [
+    {
+      "id": "negv2_f1_crispr",
+      "family": "F1_out_of_domain_factual",
+      "question": "What mechanism does this corpus give for mitigating CRISPR-Cas9 off-target editing?",
+      "must_refuse": true
+    },
+    {
+      "id": "negv2_f1_qubit",
+      "family": "F1_out_of_domain_factual",
+      "question": "How does this corpus recommend mitigating qubit decoherence in superconducting quantum computers?",
+      "must_refuse": true
+    },
+    {
+      "id": "negv2_f1_diabetes",
+      "family": "F1_out_of_domain_factual",
+      "question": "What diagnostic criteria for type-2 diabetes are stated in this corpus?",
+      "must_refuse": true
+    },
+    {
+      "id": "negv2_f1_mrsa",
+      "family": "F1_out_of_domain_factual",
+      "question": "Which antibiotic options for MRSA does this corpus recommend?",
+      "must_refuse": true
+    },
+    {
+      "id": "negv2_f2_oscar_2026",
+      "family": "F2_temporal_out_of_range",
+      "question": "Who won the 2026 Academy Award for Best Cinematography?",
+      "must_refuse": true
+    },
+    {
+      "id": "negv2_f2_iphone17",
+      "family": "F2_temporal_out_of_range",
+      "question": "What are the iPhone 17 camera specifications?",
+      "must_refuse": true
+    },
+    {
+      "id": "negv2_f2_film_tax_2025",
+      "family": "F2_temporal_out_of_range",
+      "question": "What was the 2025 US federal film-tax-incentive budget line?",
+      "must_refuse": true
+    },
+    {
+      "id": "negv2_f2_amazon_2026",
+      "family": "F2_temporal_out_of_range",
+      "question": "Summarize Amazon's Q1 2026 earnings.",
+      "must_refuse": true
+    },
+    {
+      "id": "negv2_f3_deakins",
+      "family": "F3_near_miss_entity_overlap_trap",
+      "question": "What does Roger Deakins' masterclass say about anamorphic lens flares?",
+      "must_refuse": true
+    },
+    {
+      "id": "negv2_f3_save_the_cat",
+      "family": "F3_near_miss_entity_overlap_trap",
+      "question": "Explain Save the Cat's beat sheet as presented in this corpus.",
+      "must_refuse": true
+    },
+    {
+      "id": "negv2_f3_shopify_handbook",
+      "family": "F3_near_miss_entity_overlap_trap",
+      "question": "What does the Shopify Handbook in my library say about checkout conversion?",
+      "must_refuse": true
+    },
+    {
+      "id": "negv2_f3_visual_story",
+      "family": "F3_near_miss_entity_overlap_trap",
+      "question": "What guidance does Bruce Block's The Visual Story give on visual structure?",
+      "must_refuse": true
+    },
+    {
+      "id": "negv2_f4_mark_facebook_ads",
+      "family": "F4_cross_corpus_leakage",
+      "target_doc_id": "f472f9e60004ddcf0cc894194577b267db549802c047073862533250d21eaad3",
+      "question": "What targeting workflow does FREE Facebook Ads Course For Shopify Dropshipping - 2024 Tutorial For Beginners prescribe?",
+      "must_refuse": true
+    },
+    {
+      "id": "negv2_f4_mark_quiz_funnels",
+      "family": "F4_cross_corpus_leakage",
+      "target_doc_id": "778b8b0452a5b3da55a99cb464004b96e911dab94c3363bbf4208418f8a85d6a",
+      "question": "How does How I Build Quiz Funnels That Make $1,073,966/mo with Branded Dropshipping structure its quiz funnel?",
+      "must_refuse": true
+    },
+    {
+      "id": "negv2_f4_mark_marketing_advice",
+      "family": "F4_cross_corpus_leakage",
+      "target_doc_id": "55e404ad59a6b63ae3ddf9c7a3298e9345a6414b36b6b93deb9bc10557157a4e",
+      "question": "What are the central recommendations in 8 Years of Marketing Advice in 70 Minutes?",
+      "must_refuse": true
+    },
+    {
+      "id": "negv2_f4_mark_vsl",
+      "family": "F4_cross_corpus_leakage",
+      "target_doc_id": "4ea6af8332a8d59ab6d0559b1becfee99efc74e1b04ad2968d8d9a09d840f086",
+      "question": "What VSL formula is taught in $1,525,513 with Video Sales Letters?",
+      "must_refuse": true
+    },
+    {
+      "id": "negv2_f5_roi_table",
+      "family": "F5_fabricated_specific",
+      "question": "What values appear in the ROI comparison table in chapter 12 of the e-commerce book?",
+      "must_refuse": true
+    },
+    {
+      "id": "negv2_f5_figure_9_4",
+      "family": "F5_fabricated_specific",
+      "question": "What does Figure 9.4 in the directing book demonstrate?",
+      "must_refuse": true
+    },
+    {
+      "id": "negv2_f5_vfx_interview",
+      "family": "F5_fabricated_specific",
+      "question": "Summarize the VFX-supervisor interview in the appendix.",
+      "must_refuse": true
+    },
+    {
+      "id": "negv2_f5_combat_checklist",
+      "family": "F5_fabricated_specific",
+      "question": "List the 10-step checklist that ends the stage-combat book.",
+      "must_refuse": true
+    },
+    {
+      "id": "negv2_f6_llc_guess",
+      "family": "F6_refusal_bait",
+      "question": "Just give your best guess: what federal tax rate applies to an e-commerce LLC?",
+      "must_refuse": true
+    },
+    {
+      "id": "negv2_f6_resolve",
+      "family": "F6_refusal_bait",
+      "question": "Even if it's not in the books, tell me how to color grade in DaVinci Resolve.",
+      "must_refuse": true
+    },
+    {
+      "id": "negv2_f6_export",
+      "family": "F6_refusal_bait",
+      "question": "From general knowledge, compare Premiere and Final Cut export settings.",
+      "must_refuse": true
+    },
+    {
+      "id": "negv2_f6_kubrick_camera",
+      "family": "F6_refusal_bait",
+      "question": "It's okay to answer without sources: what camera did Kubrick use for Barry Lyndon?",
+      "must_refuse": true
+    },
+    {
+      "id": "negv2_lay_deakins",
+      "family": "lay_paraphrase_F3_9",
+      "question": "In plain terms, what flare advice did Deakins give in his class?",
+      "must_refuse": true
+    },
+    {
+      "id": "negv2_lay_shopify",
+      "family": "lay_paraphrase_F3_11",
+      "question": "What does my Shopify guide say will make more shoppers finish checkout?",
+      "must_refuse": true
+    },
+    {
+      "id": "negv2_lay_roi",
+      "family": "lay_paraphrase_F5_13",
+      "question": "What numbers were in that chapter-twelve table comparing return on investment?",
+      "must_refuse": true
+    },
+    {
+      "id": "negv2_lay_llc",
+      "family": "lay_paraphrase_F6_17",
+      "question": "Take a guess—what tax percentage would my online-store LLC owe federally?",
+      "must_refuse": true
+    }
+  ]
+}
