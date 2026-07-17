@@ -220,6 +220,7 @@ REQUIRED_EXECUTION_PATHS = (
     "technical.status",
     "technical.ok",
     "answerability.raw_answerable",
+    "answerability.telemetry",
     "answerability.guard.eligible",
     "answerability.guard.coverage",
     "model_skipped",
@@ -424,6 +425,10 @@ def execution_completeness_errors(row: dict[str, Any]) -> list[str]:
         errors.append("empty:answer.sha256")
     answerability = row.get("answerability") or {}
     guard = answerability.get("guard") or {}
+    if not isinstance(answerability.get("telemetry"), dict) or not answerability.get(
+        "telemetry"
+    ):
+        errors.append("invalid:answerability.telemetry")
     if not isinstance(answerability.get("raw_answerable"), bool):
         errors.append("invalid:answerability.raw_answerable")
     if not isinstance(guard.get("eligible"), bool):
@@ -457,6 +462,7 @@ def _extract_answerability(traces: list[dict[str, Any]]) -> dict[str, Any]:
         if not isinstance(guard, dict):
             guard = {}
         return {
+            "telemetry": json.loads(json.dumps(metadata, default=str)),
             "status": metadata.get("status"),
             "answerable": metadata.get("answerable"),
             "raw_answerable": metadata.get("raw_answerable"),
