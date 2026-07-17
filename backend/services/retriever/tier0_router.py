@@ -10,7 +10,7 @@ import asyncio
 import logging
 import math
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from qdrant_client import AsyncQdrantClient, models
@@ -37,6 +37,7 @@ class DocumentRoute:
     summary: str = ""
     concepts: tuple[str, ...] = ()
     section_ids: tuple[str, ...] = ()
+    routing_trace: dict[str, Any] = field(default_factory=dict)
 
 
 def merge_grounded_document_route_hints(
@@ -301,7 +302,18 @@ class Tier0DocumentRouter:
                         key="corpus_id",
                         match=models.MatchValue(value=corpus_id),
                     )
-                ]
+                ],
+                # Purchased semantic-digest vectors are dark routing signals
+                # owned by the four-lane router. Exclude them explicitly from
+                # the legacy document-summary lane so durable dark points
+                # cannot silently become chunk competitors or change routing
+                # while the feature flag is OFF.
+                must_not=[
+                    models.FieldCondition(
+                        key="chunk_type",
+                        match=models.MatchValue(value="semantic_digest"),
+                    )
+                ],
             )
             kwargs = {
                 "collection_name": SHARED_DOCSUM,

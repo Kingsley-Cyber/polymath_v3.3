@@ -81,6 +81,11 @@ from services.retriever.tier0_router import (
     merge_grounded_document_route_hints,
     tier0_document_router,
 )
+from services.retriever.four_lane_router import (
+    BRIDGE_SUBQUERY,
+    add_bridge_subquery_lane,
+    four_lane_document_router,
+)
 from services.retriever.summary_tree_navigator import summary_tree_navigator
 from services.retriever.vocabulary import (
     VOCABULARY_RESOLVER_VERSION,
@@ -1605,17 +1610,36 @@ class RetrieverOrchestrator:
                     )
                     lanes.extend(extra_lanes)
                     vectors.extend(extra_vectors)
+                router_subquery_enabled = bool(
+                    getattr(
+                        settings,
+                        "FOUR_LANE_TIER0_SUBQUERY_DECOMPOSITION_ENABLED",
+                        False,
+                    )
+                )
                 planner_diagnostics = await run_grounded_planner(
                     conversation_service._db,
                     plan=plan,
                     resolution=vocabulary_diagnostics,
                     corpus_ids=list(corpus_ids),
                     route=grounded_planner_route,
+                    enabled_override=True if router_subquery_enabled else None,
+                    force=router_subquery_enabled,
                 )
                 planner_extra_lanes, planner_lane_lexicon_ids = grounded_planner_lanes(
                     planner_diagnostics,
                     vocabulary_diagnostics,
                 )
+                if router_subquery_enabled:
+                    planner_extra_lanes = add_bridge_subquery_lane(planner_extra_lanes)
+                    planner_diagnostics["router_bridge_subquery"] = {
+                        "question": BRIDGE_SUBQUERY,
+                        "provider_calls": int(
+                            planner_diagnostics.get("provider_calls") or 0
+                        ),
+                        "cache_hit": bool(planner_diagnostics.get("cache_hit") is True),
+                        "budgeted_by": "grounded_query_planner_usage",
+                    }
                 if planner_extra_lanes:
                     planner_vectors = await asyncio.wait_for(
                         embed_queries(
@@ -1736,6 +1760,84 @@ class RetrieverOrchestrator:
                     ),
                     timeout=_stage_timeout(1.25, reserve=1.0),
                 )
+                if bool(getattr(settings, "FOUR_LANE_TIER0_ROUTER_ENABLED", False)):
+                    legacy_document_routes = document_routes
+                    legacy_document_diagnostics = document_routing_diagnostics
+                    core_lanes = {
+                        lane.lane_id: lane
+                        for lane in lanes
+                        if lane.lane_id in route_vectors
+                    }
+                    child_rows = await asyncio.gather(
+                        *(
+                            funnel_b.search(
+                                vector,
+                                corpus_ids,
+                                b_cols,
+                                top_k=document_route_fetch * 2,
+                                query_text=core_lanes[lane_id].query,
+                            )
+                            for lane_id, vector in route_vectors.items()
+                            if vector is not None
+                        ),
+                        return_exceptions=True,
+                    )
+                    child_hits_by_lane: dict[str, list[SourceChunk]] = {}
+                    child_index = 0
+                    for lane_id, vector in route_vectors.items():
+                        if vector is None:
+                            child_hits_by_lane[lane_id] = []
+                            continue
+                        row = child_rows[child_index]
+                        child_index += 1
+                        if isinstance(row, BaseException):
+                            child_hits_by_lane[lane_id] = []
+                            failures.append(
+                                {
+                                    "lane_id": lane_id,
+                                    "retriever": "tier0_child_rollup",
+                                    "error": f"{type(row).__name__}: {row}"[:240],
+                                }
+                            )
+                        else:
+                            child_hits_by_lane[lane_id] = list(row or [])
+                    from services.conversation import conversation_service
+
+                    (
+                        document_routes,
+                        document_routing_diagnostics,
+                    ) = await asyncio.wait_for(
+                        four_lane_document_router.route_lanes(
+                            query_by_lane={
+                                lane_id: core_lanes[lane_id].query
+                                for lane_id in route_vectors
+                            },
+                            lane_vectors=route_vectors,
+                            child_hits_by_lane=child_hits_by_lane,
+                            legacy_semantic_routes=legacy_document_routes,
+                            corpus_ids=list(corpus_ids),
+                            vocabulary_matches=list(
+                                vocabulary_diagnostics.get("matches") or []
+                            ),
+                            db=conversation_service._db,
+                            qdrant_client=tier0_document_router.client,
+                            max_documents=int(
+                                getattr(
+                                    settings,
+                                    "FOUR_LANE_TIER0_MAX_DOCUMENTS",
+                                    6,
+                                )
+                            ),
+                        ),
+                        timeout=_stage_timeout(12.0, reserve=1.0),
+                    )
+                    document_routing_diagnostics[
+                        "legacy_semantic_router"
+                    ] = legacy_document_diagnostics
+                    document_routing_diagnostics["child_rollup_prefetch"] = {
+                        lane_id: len(rows)
+                        for lane_id, rows in child_hits_by_lane.items()
+                    }
             except Exception as exc:
                 failures.append(
                     {
@@ -1781,6 +1883,7 @@ class RetrieverOrchestrator:
                             "title": route.title,
                             "concepts": list(route.concepts),
                             "section_ids": list(route.section_ids),
+                            "routing_trace": dict(route.routing_trace or {}),
                             "grounded_hint": (
                                 route.corpus_id,
                                 route.doc_id,
@@ -2160,9 +2263,12 @@ class RetrieverOrchestrator:
         def _annotate_document_routes(
             chunks: list[SourceChunk], lane_id: str
         ) -> list[SourceChunk]:
-            route_scores = {
-                (str(route.corpus_id), str(route.doc_id)): float(route.score)
+            route_by_key = {
+                (str(route.corpus_id), str(route.doc_id)): route
                 for route in document_routes.get(lane_id, [])
+            }
+            route_scores = {
+                key: float(route.score) for key, route in route_by_key.items()
             }
             if not route_scores:
                 return chunks
@@ -2182,7 +2288,13 @@ class RetrieverOrchestrator:
                 metadata["document_routed"] = True
                 chunk.metadata = metadata
                 marker = {
-                    "retriever": "tier0_document_summary",
+                    "retriever": (
+                        "four_lane_tier0_router"
+                        if route_by_key[
+                            (str(chunk.corpus_id or ""), str(chunk.doc_id or ""))
+                        ].routing_trace
+                        else "tier0_document_summary"
+                    ),
                     "lane_id": lane_id,
                     "route_score": round(route_score, 4),
                 }
