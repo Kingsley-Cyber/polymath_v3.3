@@ -25,6 +25,7 @@ def test_compact_selection_is_exact_four_two_two_two():
     assert len(harness.LAY_QUERY_IDS) == 2
     assert len(harness.NEGATIVE_QUERY_IDS) == 2
     assert len(set(harness.QUERY_IDS)) == 10
+    assert harness.CONCURRENCY == 1
     assert [row["shape"] for row in cases[-2:]] == [
         "negative_control",
         "negative_control",

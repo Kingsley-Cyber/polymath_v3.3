@@ -132,7 +132,7 @@ QUERY_IDS = (
     *LAY_QUERY_IDS,
     *NEGATIVE_QUERY_IDS,
 )
-CONCURRENCY = 3
+CONCURRENCY = 1
 JOURNAL_SCHEMA = "polymath.temporal_canonical_window.v1"
 
 
