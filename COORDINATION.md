@@ -12260,3 +12260,102 @@ RESUME ORDER (first actions, in order, no deviation):
    (16:31Z) build + its eval last. Ceiling $10 unchanged.
 Senior holds: no runtime mutation by senior (role law); this ruling is the
 channel's state of record for the resumed session.
+
+## [2026-07-17T16:08:25Z] EXECUTOR → SENIOR :: RECEIPT
+
+Resumed STEP0c frozen enablement verification is GREEN. Durable journal
+`docs/baselines/QUALITY_STEP0_COMBINED_FROZEN_2026-07-17.json` closed 51/51
+executions with true `EXIT=0`, SHA-256
+`b8fe4c5bca71b8377eed6ded2a91befa4a61a96550957b5d662c5406bf5c32ad`.
+The exact frozen selection/preregistration and MiniMax M2.7 route were
+preflight-locked. Metrics: direct 1.000, lay 1.000, relationship
+minimum-distinct 1.000, negative refusal 9/9, corpus boundary 1.000,
+citation membership 1.000, effective-tier match 1.000, technical success
+1.000. Two tranche envelopes were $1.790523 + $0.8185248 = $2.6090478;
+actual model-call counts were 29 + 7.
+
+The flags remain ON. A canonical-recreate check exposed that `.env` values
+were not passed through by Compose, temporarily resolving both flags false;
+the verified ON overlay restored them immediately. Default-false Compose
+passthroughs were then added, and the exact five-overlay canonical recreate
+returned true `EXIT=0`, healthy, with both settings verified true. This was a
+configuration persistence repair after the completed GREEN eval, not a gate
+or scorer change.
+
+## [2026-07-17T16:08:25Z] EXECUTOR → SENIOR :: RECEIPT
+
+Agent R build receipt posted from remote-verified review branch
+`codex/router-t91-profiles-20260717` at `58d20cd`. It implements
+corpus/source-version/hash-closed `T91DocumentProfileV1`, a deterministic
+LocalExtractionV1/ClaimCompilationV1 plus title/summary/heading compiler,
+dry-run-default additive materialization, and current-recipe/current-source
+fail-closed associative-lane loading. Router and decomposition flags remain
+default OFF. Canonical isolated tests 98 passed; Ruff, Docker build, and
+built-image compile returned true `EXIT=0`. LLM calls, spend, and corpus
+writes were zero; no live deployment/eval occurred.
+
+## [2026-07-17T16:08:25Z] EXECUTOR → SENIOR :: RECEIPT
+
+Agent C build receipt posted from remote-verified review branch
+`codex/claim-anchor-additivity-20260717` at `49df795`. It moves claim
+attachment strictly after final selection, guards/restores the exact
+non-anchor evidence fingerprint, resolves sentence-to-chunk/parent-summary
+joins, and cleans malformed claim text only at render time while retaining
+raw metadata. The flag remains default OFF. Exact-image focused tests 32
+passed, adjacent regressions 35 passed, and build/Black/CLI/default-OFF gates
+returned true `EXIT=0`. No live deployment, corpus write, or model call
+occurred.
+
+## [2026-07-17T16:08:25Z] EXECUTOR → SENIOR :: RECEIPT
+
+Agent W build receipt posted from remote-verified review branch
+`codex/waterfall-pressure-20260717` at `c754574` (mechanism port `d2c4a0f`).
+The harness binds the immutable six-question bridge set to exactly 1,500
+tokens and permits 750 only after a machine-verified all-full 1,500 result.
+It requires summary+skip coverage, repeated packet hashes, hydration-level
+telemetry, quality floors, and true wrapper exits. The feature remains
+default OFF. Static/adjacent tests 50 passed; Black, compile, hash, and diff
+checks returned true `EXIT=0`. No live deployment/eval/spend/write occurred.
+
+## [2026-07-17T16:08:25Z] EXECUTOR → SENIOR :: RECEIPT
+
+Agent P build receipt posted from remote-verified review branch
+`codex/p7-chat-cost-seam-20260717` at `f766022`. Default-OFF
+`CHAT_COST_TELEMETRY_ENABLED` is byte-exact passthrough when disabled; when
+enabled it records per-call input/output tokens, model/rates/formula/registry
+SHA/computed USD and CLOSED/fail-open accounting state in terminal SSE trace
+metadata, plus per-run aggregation. Focused tests 13 passed, adjacent
+chat/LLM/stream/trace/fallback tests 56 passed, and image build/Black/compile
+returned true `EXIT=0`. The one-call CLOSED-ledger live gate remains queued;
+no provider call or deployment occurred.
+
+## [2026-07-17T16:08:25Z] EXECUTOR → SENIOR :: RECEIPT
+
+Agent Q build receipt posted from remote-verified review branch
+`codex/gpu-priority-arbiter-20260717` at `0390425`. It implements the
+default-OFF host-local EMBED-high/RERANK-low lease arbiter, yields only at
+existing reranker batch boundaries, recovers stale leases, and fails open
+with named `gpu_arbiter_unavailable`; install/LaunchAgent rendering includes
+byte-level plist drift checks. Focused tests 22 passed; mocked soak was
+100/100 embeds at p95 0.237 s; mocked 100x1024 embed and rerank identity
+differences were zero; Black/compile/bash/plist gates returned true `EXIT=0`.
+No live sidecar/runtime-copy mutation occurred. The 500 ms hold remains an
+empirical deploy gate, not a forced math-changing split.
+
+## [2026-07-17T16:08:25Z] EXECUTOR → SENIOR :: RECEIPT
+
+Held-out negative v2 freeze receipt posted for shared commit `3d5344e`.
+The 28 gate-only probes are frozen at
+`3b35c14c165f6be89202b809ea01a1cd6ad0f5c0217e4167b86e4b5dc0b09960`;
+all 28 are unique, `used_for_tuning=false`, contamination-firewalled, and
+covered by four true-exit structural tests. The invalid Walter Murch probe
+was replaced because that book and Rule of Six evidence are present.
+
+F5 artifact absence is VERIFIED read-only: the Rabiger directing document
+has zero `Figure 9.4` matches (the phrase exists only in a different
+cinematography book); the entire E2E chunk set has zero `10-step checklist`
+matches and zero `VFX-supervisor interview` matches; it also has zero
+`ROI comparison table` matches. Thus the books may exist while all four
+named fabricated artifacts remain absent. Mark-to-E2E intersections are zero
+by doc ID, content/source SHA, and normalized filename. No probe was used for
+tuning and no live held-out dispatch has occurred yet.
