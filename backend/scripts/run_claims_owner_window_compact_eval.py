@@ -29,9 +29,11 @@ from evals.canonical_refusal_contract import (
     build_system_prompt_receipt,
     classify_refusal,
     extract_answerability_contract,
+    model_answer_content_errors,
+    validate_chat_trace_contract,
+    validate_claims_retrieval_runtime,
     validate_local_eval_api,
     validate_same_container_runtime,
-    validate_chat_trace_contract,
 )
 from scripts.run_two_lane_anchoring_ab import (
     LOCK_PATH,
@@ -148,35 +150,10 @@ def _window_from_args(args: argparse.Namespace) -> dict[str, str]:
 
 
 def _require_claim_runtime(runtime: dict[str, Any], *, claims: bool) -> None:
-    required = {
-        "RELATIONSHIP_EVIDENCE_ALLOCATION_ENABLED": True,
-        "ANSWERABILITY_CORPUS_SCOPE_V2_ENABLED": True,
-        "TEMPORAL_QUERY_ROUTING_ENABLED": True,
-        "RERANK_EVIDENCE_SUPPORT": False,
-        "ATOMIC_CLAIM_ANCHORS_ENABLED": claims,
-        "PARENT_EXCERPT_ENABLED": False,
-        "WATERFALL_ASSEMBLY": False,
-        "TWO_LANE_ANCHORING": False,
-        "HYDE_ENABLED": False,
-        "SHELF_RESERVE_ENABLED": False,
-        "GROUNDED_QUERY_PLANNER_ENABLED": False,
-        "FOUR_LANE_TIER0_ROUTER_ENABLED": False,
-        "FOUR_LANE_TIER0_SUBQUERY_DECOMPOSITION_ENABLED": False,
-        "AGENTIC_MODE_ENABLED": False,
-    }
-    mismatched = {
-        key: {"observed": runtime.get(key), "expected": value}
-        for key, value in required.items()
-        if runtime.get(key) != value
-    }
-    if mismatched:
-        raise RuntimeError(
-            "claims compact runtime mismatch: " + json.dumps(mismatched, sort_keys=True)
-        )
-    if not isinstance(runtime.get("TWO_LANE_ANCHORING_ENABLED"), bool):
-        raise RuntimeError("claims compact two-lane runtime flag is absent")
-    if not str(runtime.get("HYDRATION_MODE") or ""):
-        raise RuntimeError("claims compact hydration mode is absent")
+    validate_claims_retrieval_runtime(
+        runtime,
+        claim_anchors_enabled=claims,
+    )
 
 
 def _validate_claims_on_artifact(
@@ -503,6 +480,26 @@ def _chat_temperature_zero(
     }
 
 
+def _journal_contract_errors(
+    result: dict[str, Any],
+    *,
+    prompt_receipt: dict[str, Any],
+) -> list[str]:
+    errors = [
+        *result["trace_contract"]["errors"],
+        *result["answerability"]["errors"],
+        *model_answer_content_errors(
+            result["answer"],
+            model_skipped=result["model_skipped"],
+        ),
+    ]
+    if result["prompt_template_hashes"] and result["prompt_template_hashes"] != [
+        prompt_receipt["sha256"]
+    ]:
+        errors.append("trace/local prompt template hash mismatch")
+    return errors
+
+
 def _finalize(
     rows: list[dict[str, Any]],
     *,
@@ -653,14 +650,10 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
                 result["answer"],
                 model_skipped=result["model_skipped"] is True,
             )
-            journal_errors = [
-                *result["trace_contract"]["errors"],
-                *result["answerability"]["errors"],
-            ]
-            if result["prompt_template_hashes"] and result[
-                "prompt_template_hashes"
-            ] != [prompt_receipt["sha256"]]:
-                journal_errors.append("trace/local prompt template hash mismatch")
+            journal_errors = _journal_contract_errors(
+                result,
+                prompt_receipt=prompt_receipt,
+            )
             row = {
                 "id": query["id"],
                 "shape": query["shape"],

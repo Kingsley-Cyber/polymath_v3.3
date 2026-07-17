@@ -10,30 +10,24 @@ from types import SimpleNamespace
 
 import pytest
 
+from evals.canonical_refusal_contract import CLAIMS_RETRIEVAL_BOOLEAN_FLAGS
 from scripts import run_claim_anchor_owner_window as harness
 from scripts.run_claim_anchor_additivity_replay import V2_SPEC
 from scripts.run_claim_anchor_micro_ab import _source_fingerprint
 
 
 def _runtime(*, claims: bool, temporal: bool = True) -> SimpleNamespace:
-    return SimpleNamespace(
-        ATOMIC_CLAIM_ANCHORS_ENABLED=claims,
-        TEMPORAL_QUERY_ROUTING_ENABLED=temporal,
-        RELATIONSHIP_EVIDENCE_ALLOCATION_ENABLED=True,
-        ANSWERABILITY_CORPUS_SCOPE_V2_ENABLED=True,
-        TWO_LANE_ANCHORING_ENABLED=False,
-        TWO_LANE_ANCHORING=False,
-        FOUR_LANE_TIER0_ROUTER_ENABLED=False,
-        FOUR_LANE_TIER0_SUBQUERY_DECOMPOSITION_ENABLED=False,
-        WATERFALL_ASSEMBLY=False,
-        HYDRATION_MODE="parent",
-        RERANK_EVIDENCE_SUPPORT=False,
-        PARENT_EXCERPT_ENABLED=False,
-        HYDE_ENABLED=False,
-        SHELF_RESERVE_ENABLED=False,
-        GROUNDED_QUERY_PLANNER_ENABLED=False,
-        AGENTIC_MODE_ENABLED=False,
+    values = {name: False for name in CLAIMS_RETRIEVAL_BOOLEAN_FLAGS}
+    values.update(
+        {
+            "ATOMIC_CLAIM_ANCHORS_ENABLED": claims,
+            "TEMPORAL_QUERY_ROUTING_ENABLED": temporal,
+            "RELATIONSHIP_EVIDENCE_ALLOCATION_ENABLED": True,
+            "ANSWERABILITY_CORPUS_SCOPE_V2_ENABLED": True,
+            "HYDRATION_MODE": "parent",
+        }
     )
+    return SimpleNamespace(**values)
 
 
 def _window(now: datetime | None = None) -> dict[str, str]:
@@ -57,7 +51,11 @@ def _source(query_id: str) -> dict:
     }
 
 
-def _off_payload(spec: dict) -> dict:
+def _off_payload(
+    spec: dict,
+    *,
+    captured_at_utc: str = "2026-07-18T00:00:00+00:00",
+) -> dict:
     fingerprint = {
         "collections": {
             "semantic_digest_claim_compilations": {
@@ -108,10 +106,17 @@ def _off_payload(spec: dict) -> dict:
                         "corpus_scope_guard": {
                             "eligible": True,
                             "coverage": 1.0,
+                            "matched_terms": ["term"],
+                            "missing_terms": [],
                         },
                     },
                     "raw_answerable": True,
-                    "guard": {"eligible": True, "coverage": 1.0},
+                    "guard": {
+                        "eligible": True,
+                        "coverage": 1.0,
+                        "matched_terms": ["term"],
+                        "missing_terms": [],
+                    },
                 },
                 "request_temperature": 0,
                 "system_prompt_template": prompt_receipt,
@@ -127,6 +132,7 @@ def _off_payload(spec: dict) -> dict:
         )
     return {
         "schema_version": "claim_anchor_join_micro_ab_arm.v1",
+        "captured_at_utc": captured_at_utc,
         "arm": "off",
         "runtime_flag_enabled": False,
         "spec": spec,
@@ -202,6 +208,25 @@ def test_runtime_transition_allows_only_the_claim_flag():
     on_runtime["TWO_LANE_ANCHORING_ENABLED"] = True
     with pytest.raises(RuntimeError, match="outside the claim flag"):
         harness._require_claim_only_transition(off_runtime, on_runtime)
+
+
+@pytest.mark.parametrize(
+    "missing_name",
+    [
+        "QUERY_PLAN_V2",
+        "QUERY_PLAN_V2_SHADOW",
+        "CORPUS_VOCABULARY_RESOLVER_ENABLED",
+        "TIER0_ROUTING",
+        "NEO4J_ENABLED",
+        "RETRIEVAL_GRAPH_RERANK_ENABLED",
+    ],
+)
+def test_runtime_snapshot_rejects_absent_retrieval_flag(missing_name):
+    settings = _runtime(claims=False)
+    delattr(settings, missing_name)
+
+    with pytest.raises(RuntimeError, match="settings absent"):
+        harness._runtime_snapshot(settings)
 
 
 def test_owner_window_requires_exact_outer_lock_environment(monkeypatch):
@@ -368,6 +393,107 @@ def test_fresh_off_rejects_expired_attestation(tmp_path):
 
 
 @pytest.mark.parametrize(
+    ("captured_at_utc", "message"),
+    [
+        (None, "captured-at must be an ISO-8601 timestamp"),
+        ("2026-07-17T23:59:58+00:00", "payload predates"),
+        ("2026-07-18T00:00:01+00:00", "capture is after attestation"),
+    ],
+)
+def test_off_attestation_rejects_missing_old_or_future_payload_capture(
+    captured_at_utc, message
+):
+    spec, _ = harness._load_v2_contract(V2_SPEC)
+    now = datetime(2026, 7, 18, tzinfo=timezone.utc)
+    payload = _off_payload(
+        spec,
+        captured_at_utc=captured_at_utc or "2026-07-18T00:00:00+00:00",
+    )
+    if captured_at_utc is None:
+        payload.pop("captured_at_utc")
+
+    with pytest.raises(RuntimeError, match=message):
+        harness._attest_off_payload(
+            off=payload,
+            spec=spec,
+            runtime=harness._runtime_snapshot(_runtime(claims=False)),
+            window=_window(now),
+            now=now,
+        )
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        (
+            lambda off: off.pop("captured_at_utc"),
+            "captured-at must be an ISO-8601 timestamp",
+        ),
+        (
+            lambda off: off.__setitem__("captured_at_utc", "2026-07-18T00:00:01+00:00"),
+            "capture is after attestation",
+        ),
+    ],
+)
+def test_fresh_off_replay_rejects_missing_or_future_capture(
+    tmp_path, mutation, message
+):
+    spec, _ = harness._load_v2_contract(V2_SPEC)
+    now = datetime(2026, 7, 18, tzinfo=timezone.utc)
+    window = _window(now)
+    off = harness._attest_off_payload(
+        off=_off_payload(spec),
+        spec=spec,
+        runtime=harness._runtime_snapshot(_runtime(claims=False)),
+        window=window,
+        now=now,
+    )
+    mutation(off)
+    path = tmp_path / "mutated-fresh-off.json"
+    path.write_text(json.dumps(off, sort_keys=True), encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match=message):
+        harness._validate_fresh_off_artifact(
+            off_path=path,
+            expected_sha256=harness._sha256_file(path),
+            spec=spec,
+            expected_window=window,
+            max_age_seconds=1800,
+            now=now,
+        )
+
+
+def test_fresh_off_replay_ages_from_payload_capture_not_only_attestation(tmp_path):
+    spec, _ = harness._load_v2_contract(V2_SPEC)
+    now = datetime(2026, 7, 18, tzinfo=timezone.utc)
+    captured = now - timedelta(seconds=120)
+    window = harness._window_identity(
+        lock_owner="claims-window",
+        window_nonce="claims-window-nonce-0001",
+        window_not_before_utc=(captured - timedelta(seconds=1)).isoformat(),
+    )
+    off = harness._attest_off_payload(
+        off=_off_payload(spec, captured_at_utc=captured.isoformat()),
+        spec=spec,
+        runtime=harness._runtime_snapshot(_runtime(claims=False)),
+        window=window,
+        now=now,
+    )
+    path = tmp_path / "aged-capture.json"
+    path.write_text(json.dumps(off, sort_keys=True), encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="payload exceeded"):
+        harness._validate_fresh_off_artifact(
+            off_path=path,
+            expected_sha256=harness._sha256_file(path),
+            spec=spec,
+            expected_window=window,
+            max_age_seconds=60,
+            now=now,
+        )
+
+
+@pytest.mark.parametrize(
     ("mutation", "message"),
     [
         (
@@ -513,12 +639,14 @@ def test_owner_capture_request_forces_temp_zero_and_strict_telemetry(monkeypatch
         'data: {"type":"trace_event","trace_event":'
         '{"title":"Answerability gate","metadata":'
         '{"raw_answerable":true,"corpus_scope_guard":'
-        '{"eligible":true,"coverage":1.0}}}}\n\n'
+        '{"eligible":true,"coverage":1.0,"matched_terms":[],'
+        '"missing_terms":[]}}}}\n\n'
         'data: {"type":"trace_event","trace_event":'
         '{"title":"Chat model route","metadata":'
         '{"model":"anthropic/minimax-m2.7"}}}\n\n'
         'data: {"type":"trace_event","trace_event":'
-        '{"title":"Assistant final answer","metadata":{"model_skipped":false}}}\n\n'
+        '{"title":"Assistant final answer","metadata":{"model_skipped":false,'
+        '"model":"anthropic/minimax-m2.7"}}}\n\n'
         'data: {"type":"sources","sources":'
         '[{"corpus_id":"c","doc_id":"d","chunk_id":"x"}]}\n\n'
         'data: {"type":"done","model_used":"anthropic/minimax-m2.7"}\n\n'
@@ -556,7 +684,8 @@ def test_owner_capture_missing_final_trace_is_red(monkeypatch):
         'data: {"type":"trace_event","trace_event":'
         '{"title":"Answerability gate","metadata":'
         '{"raw_answerable":true,"corpus_scope_guard":'
-        '{"eligible":true,"coverage":1.0}}}}\n\n'
+        '{"eligible":true,"coverage":1.0,"matched_terms":[],'
+        '"missing_terms":[]}}}}\n\n'
         'data: {"type":"trace_event","trace_event":'
         '{"title":"Chat model route","metadata":'
         '{"model":"anthropic/minimax-m2.7"}}}\n\n'
@@ -582,3 +711,18 @@ def test_owner_capture_missing_final_trace_is_red(monkeypatch):
 
     assert result["model_skipped"] is None
     assert result["trace_contract"]["ok"] is False
+
+
+@pytest.mark.parametrize("answer", ["", " \n\t"])
+def test_owner_capture_journal_rejects_model_called_empty_answer(answer):
+    errors = harness._owner_journal_contract_errors(
+        {
+            "answer": answer,
+            "model_skipped": False,
+            "errors": [],
+            "trace_contract": {"errors": []},
+            "answerability": {"errors": []},
+        }
+    )
+
+    assert "model-called response has empty answer" in errors

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import io
 import hashlib
+import io
 import json
 from argparse import Namespace
 from copy import deepcopy
@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from evals.canonical_refusal_contract import CLAIMS_RETRIEVAL_BOOLEAN_FLAGS
 from scripts import run_claims_owner_window_compact_eval as compact
 from scripts.run_claims_owner_window_compact_eval import (
     STANDARD_TIERS,
@@ -81,24 +82,17 @@ def _green_rows() -> list[dict]:
 
 
 def _runtime(*, claims: bool) -> dict:
-    return {
-        "RELATIONSHIP_EVIDENCE_ALLOCATION_ENABLED": True,
-        "ANSWERABILITY_CORPUS_SCOPE_V2_ENABLED": True,
-        "TEMPORAL_QUERY_ROUTING_ENABLED": True,
-        "RERANK_EVIDENCE_SUPPORT": False,
-        "ATOMIC_CLAIM_ANCHORS_ENABLED": claims,
-        "PARENT_EXCERPT_ENABLED": False,
-        "WATERFALL_ASSEMBLY": False,
-        "TWO_LANE_ANCHORING": False,
-        "TWO_LANE_ANCHORING_ENABLED": False,
-        "HYDE_ENABLED": False,
-        "SHELF_RESERVE_ENABLED": False,
-        "GROUNDED_QUERY_PLANNER_ENABLED": False,
-        "FOUR_LANE_TIER0_ROUTER_ENABLED": False,
-        "FOUR_LANE_TIER0_SUBQUERY_DECOMPOSITION_ENABLED": False,
-        "AGENTIC_MODE_ENABLED": False,
-        "HYDRATION_MODE": "parent",
-    }
+    runtime = {name: False for name in CLAIMS_RETRIEVAL_BOOLEAN_FLAGS}
+    runtime.update(
+        {
+            "RELATIONSHIP_EVIDENCE_ALLOCATION_ENABLED": True,
+            "ANSWERABILITY_CORPUS_SCOPE_V2_ENABLED": True,
+            "TEMPORAL_QUERY_ROUTING_ENABLED": True,
+            "ATOMIC_CLAIM_ANCHORS_ENABLED": claims,
+            "HYDRATION_MODE": "parent",
+        }
+    )
+    return runtime
 
 
 def _claims_on_artifact(tmp_path):
@@ -246,9 +240,11 @@ def test_compact_chat_forces_temperature_zero_and_records_runtime_fields(
         'data: {"type":"trace_event","trace_event":'
         '{"title":"Answerability gate","metadata":'
         '{"raw_answerable":true,"corpus_scope_guard":'
-        '{"eligible":true,"coverage":1.0}}}}\n\n'
+        '{"eligible":true,"coverage":1.0,"matched_terms":[],'
+        '"missing_terms":[]}}}}\n\n'
         'data: {"type":"trace_event","trace_event":'
-        '{"title":"Assistant final answer","metadata":{"model_skipped":false}}}\n\n'
+        '{"title":"Assistant final answer","metadata":{"model_skipped":false,'
+        '"model":"anthropic/minimax-m2.7"}}}\n\n'
         'data: {"type":"trace_event","trace_event":'
         '{"title":"Chat model route","metadata":'
         '{"model":"anthropic/minimax-m2.7"}}}\n\n'
@@ -287,7 +283,8 @@ def test_compact_chat_marks_missing_final_trace_incomplete(monkeypatch):
         'data: {"type":"trace_event","trace_event":'
         '{"title":"Answerability gate","metadata":'
         '{"raw_answerable":true,"corpus_scope_guard":'
-        '{"eligible":true,"coverage":1.0}}}}\n\n'
+        '{"eligible":true,"coverage":1.0,"matched_terms":[],'
+        '"missing_terms":[]}}}}\n\n'
         'data: {"type":"trace_event","trace_event":'
         '{"title":"Chat model route","metadata":'
         '{"model":"anthropic/minimax-m2.7"}}}\n\n'
@@ -315,6 +312,22 @@ def test_compact_chat_marks_missing_final_trace_incomplete(monkeypatch):
         "assistant final trace count" in error
         for error in result["trace_contract"]["errors"]
     )
+
+
+@pytest.mark.parametrize("answer", ["", " \n\t"])
+def test_compact_journal_rejects_model_called_empty_answer(answer):
+    errors = compact._journal_contract_errors(
+        {
+            "answer": answer,
+            "model_skipped": False,
+            "trace_contract": {"errors": []},
+            "answerability": {"errors": []},
+            "prompt_template_hashes": [],
+        },
+        prompt_receipt={"sha256": "a" * 64},
+    )
+
+    assert "model-called response has empty answer" in errors
 
 
 def test_compact_finalizer_accepts_owner_floors():

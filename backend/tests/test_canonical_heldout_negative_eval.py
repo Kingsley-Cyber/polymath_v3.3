@@ -11,15 +11,15 @@ import scripts.run_canonical_heldout_negative_eval as harness
 from scripts.run_canonical_heldout_negative_eval import (
     CHAT_ORCHESTRATOR_PATH,
     CLASSIFIER_VERSION,
-    EXPECTED_CHAT_MODEL,
     EXECUTION_SCHEMA,
+    EXPECTED_CHAT_MODEL,
     PROMPT_HASH_METHOD,
     SELECTION_PATH,
     SELECTION_SHA256,
     SPEC_PATH,
     SPEC_SHA256,
-    _cost_envelope,
     _build_execution,
+    _cost_envelope,
     _eval_lock,
     _parser,
     _runtime_flags,
@@ -123,7 +123,12 @@ def _complete_execution() -> dict:
         "answerability": {
             "telemetry": {"status": "weak"},
             "raw_answerable": False,
-            "guard": {"eligible": True, "coverage": 0.0},
+            "guard": {
+                "eligible": True,
+                "coverage": 0.0,
+                "matched_terms": [],
+                "missing_terms": ["term"],
+            },
         },
         "model_skipped": True,
         "model_route": {"model": EXPECTED_CHAT_MODEL},
@@ -142,6 +147,7 @@ def _complete_execution() -> dict:
         "answer": {
             "sha256": hashlib.sha256(answer.encode()).hexdigest(),
             "excerpt": answer,
+            "non_whitespace_chars": len("".join(answer.split())),
         },
         "sources": {
             "membership_count": 0,
@@ -157,6 +163,20 @@ def test_complete_execution_contract_accepts_false_zero_and_none_telemetry():
     row["answerability"]["guard"]["coverage"] = None
 
     assert execution_completeness_errors(row) == []
+
+
+def test_execution_journal_rejects_model_called_whitespace_answer():
+    row = _complete_execution()
+    row["model_skipped"] = False
+    row["answer"] = {
+        "sha256": hashlib.sha256(b" \n\t").hexdigest(),
+        "excerpt": " \n\t",
+        "non_whitespace_chars": 0,
+    }
+
+    assert "model-called response has empty answer" in execution_completeness_errors(
+        row
+    )
 
 
 @pytest.mark.parametrize(
@@ -387,6 +407,8 @@ def test_missing_final_trace_is_both_technical_and_journal_red():
                     "corpus_scope_guard": {
                         "eligible": True,
                         "coverage": 0.0,
+                        "matched_terms": [],
+                        "missing_terms": ["term"],
                     },
                 },
             },

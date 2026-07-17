@@ -24,18 +24,22 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
+from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import MongoClient
+
 from config import get_settings
 from evals.canonical_refusal_contract import (
     EXPECTED_CHAT_MODEL,
     build_system_prompt_receipt,
     extract_answerability_contract,
+    model_answer_content_errors,
+    snapshot_claims_retrieval_runtime,
+    validate_chat_trace_contract,
+    validate_claims_retrieval_runtime,
     validate_local_eval_api,
     validate_same_container_runtime,
-    validate_chat_trace_contract,
 )
 from models.schemas import SourceChunk
-from motor.motor_asyncio import AsyncIOMotorClient
-from pymongo import MongoClient
 from scripts.run_claim_anchor_additivity_replay import (
     SEALED_V1_OFF_SHA256,
     V2_SCHEMA,
@@ -81,27 +85,7 @@ def _sha256_file(path: Path) -> str:
 
 
 def _runtime_snapshot(settings: Any) -> dict[str, Any]:
-    boolean_names = (
-        "RELATIONSHIP_EVIDENCE_ALLOCATION_ENABLED",
-        "ANSWERABILITY_CORPUS_SCOPE_V2_ENABLED",
-        "TEMPORAL_QUERY_ROUTING_ENABLED",
-        "RERANK_EVIDENCE_SUPPORT",
-        "ATOMIC_CLAIM_ANCHORS_ENABLED",
-        "PARENT_EXCERPT_ENABLED",
-        "WATERFALL_ASSEMBLY",
-        "TWO_LANE_ANCHORING",
-        "TWO_LANE_ANCHORING_ENABLED",
-        "HYDE_ENABLED",
-        "SHELF_RESERVE_ENABLED",
-        "GROUNDED_QUERY_PLANNER_ENABLED",
-        "FOUR_LANE_TIER0_ROUTER_ENABLED",
-        "FOUR_LANE_TIER0_SUBQUERY_DECOMPOSITION_ENABLED",
-        "AGENTIC_MODE_ENABLED",
-    )
-    return {
-        **{name: bool(getattr(settings, name)) for name in boolean_names},
-        "HYDRATION_MODE": str(settings.HYDRATION_MODE),
-    }
+    return snapshot_claims_retrieval_runtime(settings)
 
 
 def _require_runtime(
@@ -109,38 +93,10 @@ def _require_runtime(
     *,
     claim_anchors_enabled: bool,
 ) -> None:
-    required = {
-        "RELATIONSHIP_EVIDENCE_ALLOCATION_ENABLED": True,
-        "ANSWERABILITY_CORPUS_SCOPE_V2_ENABLED": True,
-        "TEMPORAL_QUERY_ROUTING_ENABLED": True,
-        "RERANK_EVIDENCE_SUPPORT": False,
-        "ATOMIC_CLAIM_ANCHORS_ENABLED": claim_anchors_enabled,
-        "PARENT_EXCERPT_ENABLED": False,
-        "WATERFALL_ASSEMBLY": False,
-        "TWO_LANE_ANCHORING": False,
-        "HYDE_ENABLED": False,
-        "SHELF_RESERVE_ENABLED": False,
-        "GROUNDED_QUERY_PLANNER_ENABLED": False,
-        "FOUR_LANE_TIER0_ROUTER_ENABLED": False,
-        "FOUR_LANE_TIER0_SUBQUERY_DECOMPOSITION_ENABLED": False,
-        "AGENTIC_MODE_ENABLED": False,
-    }
-    missing = sorted(set(required) - set(runtime))
-    mismatched = {
-        key: {"observed": runtime.get(key), "expected": value}
-        for key, value in required.items()
-        if runtime.get(key) != value
-    }
-    if missing or mismatched:
-        raise RuntimeError(
-            "claim owner-window runtime mismatch: "
-            f"missing={json.dumps(missing)} "
-            f"mismatched={json.dumps(mismatched, sort_keys=True)}"
-        )
-    if not isinstance(runtime.get("TWO_LANE_ANCHORING_ENABLED"), bool):
-        raise RuntimeError("claim owner-window two-lane runtime flag is absent")
-    if not str(runtime.get("HYDRATION_MODE") or ""):
-        raise RuntimeError("claim owner-window hydration mode is absent")
+    validate_claims_retrieval_runtime(
+        runtime,
+        claim_anchors_enabled=claim_anchors_enabled,
+    )
 
 
 def _require_claim_only_transition(
@@ -361,8 +317,16 @@ def _attest_off_payload(
         window["window_not_before_utc"],
         label="outer eval-lock not-before",
     )
+    captured_at = _parse_utc(
+        str(off.get("captured_at_utc") or ""),
+        label="fresh OFF captured-at",
+    )
     if attested_at < not_before:
         raise RuntimeError("fresh OFF capture predates its outer lock window")
+    if captured_at < not_before:
+        raise RuntimeError("fresh OFF payload predates its outer lock window")
+    if captured_at > attested_at:
+        raise RuntimeError("fresh OFF payload capture is after attestation")
     attested = copy.deepcopy(off)
     attested["owner_window_attestation"] = {
         "schema_version": OWNER_OFF_ATTESTATION_SCHEMA,
@@ -424,14 +388,24 @@ def _validate_fresh_off_artifact(
         label="outer eval-lock not-before",
     )
     current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    captured_at = _parse_utc(
+        str(off.get("captured_at_utc") or ""),
+        label="fresh OFF captured-at",
+    )
     if attested_at < not_before:
         raise RuntimeError("fresh OFF artifact predates the outer lock window")
+    if captured_at < not_before:
+        raise RuntimeError("fresh OFF payload predates the outer lock window")
+    if captured_at > attested_at:
+        raise RuntimeError("fresh OFF payload capture is after attestation")
     if attested_at > current + timedelta(seconds=60):
         raise RuntimeError("fresh OFF artifact attestation is in the future")
     if max_age_seconds <= 0:
         raise RuntimeError("fresh OFF max age must be positive")
     if current - attested_at > timedelta(seconds=max_age_seconds):
         raise RuntimeError("fresh OFF artifact exceeded the owner-window max age")
+    if current - captured_at > timedelta(seconds=max_age_seconds):
+        raise RuntimeError("fresh OFF payload exceeded the owner-window max age")
     capture_runtime = attestation.get("capture_runtime")
     if not isinstance(capture_runtime, dict):
         raise RuntimeError("fresh OFF artifact capture runtime is absent")
@@ -782,6 +756,20 @@ def _run_owner_sse(
     }
 
 
+def _owner_journal_contract_errors(result: dict[str, Any]) -> list[str]:
+    """Return the transport/trace/content errors that make a row journal RED."""
+
+    return [
+        *result["errors"],
+        *result["trace_contract"]["errors"],
+        *result["answerability"]["errors"],
+        *model_answer_content_errors(
+            result["answer"],
+            model_skipped=result["model_skipped"],
+        ),
+    ]
+
+
 def _capture_off_payload(
     *,
     settings: Any,
@@ -820,11 +808,7 @@ def _capture_off_payload(
                     conversation_id=conversation_id,
                     timeout=request_timeout,
                 )
-                history_errors = [
-                    *prior["errors"],
-                    *prior["trace_contract"]["errors"],
-                    *prior["answerability"]["errors"],
-                ]
+                history_errors = _owner_journal_contract_errors(prior)
                 if prior["prompt_template_hashes"] and prior[
                     "prompt_template_hashes"
                 ] != [prompt_receipt["sha256"]]:
@@ -867,11 +851,7 @@ def _capture_off_payload(
                 _source_without_claim_anchors(source) for source in raw["sources"]
             ]
             source_keys = _source_keys(selected_sources)
-            errors = [
-                *raw["errors"],
-                *raw["trace_contract"]["errors"],
-                *raw["answerability"]["errors"],
-            ]
+            errors = _owner_journal_contract_errors(raw)
             if raw["prompt_template_hashes"] and raw["prompt_template_hashes"] != [
                 prompt_receipt["sha256"]
             ]:

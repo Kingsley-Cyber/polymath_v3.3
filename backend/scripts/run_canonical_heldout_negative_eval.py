@@ -37,9 +37,10 @@ from evals.canonical_refusal_contract import (
     EXPECTED_CHAT_MODEL,
     classify_refusal,
     extract_answerability_contract,
+    model_answer_content_errors,
+    validate_chat_trace_contract,
     validate_local_eval_api,
     validate_same_container_runtime,
-    validate_chat_trace_contract,
 )
 
 BACKEND = Path(__file__).resolve().parents[1]
@@ -106,6 +107,7 @@ REQUIRED_EXECUTION_PATHS = (
     "classification.refused",
     "answer.sha256",
     "answer.excerpt",
+    "answer.non_whitespace_chars",
     "sources.membership_count",
     "sources.all_in_selected_corpus",
 )
@@ -242,6 +244,16 @@ def execution_completeness_errors(row: dict[str, Any]) -> list[str]:
         errors.append("invalid:model_route.model")
     if not str(((row.get("answer") or {}).get("sha256")) or ""):
         errors.append("empty:answer.sha256")
+    errors.extend(
+        model_answer_content_errors(
+            (
+                "present"
+                if int((row.get("answer") or {}).get("non_whitespace_chars") or 0)
+                else ""
+            ),
+            model_skipped=row.get("model_skipped"),
+        )
+    )
     answerability = row.get("answerability") or {}
     guard = answerability.get("guard") or {}
     if not isinstance(answerability.get("telemetry"), dict) or not answerability.get(
@@ -679,8 +691,9 @@ def _build_execution(
         )
     if effective_tier != TIER:
         technical_errors.append(f"effective tier mismatch: {effective_tier!r}")
-    if model_skipped is not True and not answer.strip():
-        technical_errors.append("model-called response has empty answer")
+    technical_errors.extend(
+        model_answer_content_errors(answer, model_skipped=model_skipped)
+    )
     if not sources["all_in_selected_corpus"]:
         technical_errors.append("source escaped preregistered corpus selection")
     payload = raw["payload"]
@@ -724,6 +737,7 @@ def _build_execution(
         "classification": classification,
         "answer": {
             "chars": len(answer),
+            "non_whitespace_chars": len("".join(answer.split())),
             "sha256": _sha256_bytes(answer.encode("utf-8")),
             "excerpt": answer[:800],
         },

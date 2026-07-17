@@ -7,6 +7,7 @@ share one frozen rule without importing the production settings or scorers.
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import urllib.parse
 from datetime import datetime
@@ -15,6 +16,53 @@ from typing import Any, Callable, Sequence
 
 CLASSIFIER_VERSION = "canonical_refusal_three_state.v2"
 EXPECTED_CHAT_MODEL = "anthropic/minimax-m2.7"
+
+# Every query-time switch that can change retrieval, evidence selection, or
+# answer routing in the frozen claims comparison.  Harnesses must record every
+# key explicitly and compare the complete vectors across arms; a missing
+# setting is a contract failure, never an implicit default.
+CLAIMS_RETRIEVAL_BOOLEAN_FLAGS: tuple[str, ...] = (
+    "QDRANT_BINARY_QUANTIZATION_ENABLED",
+    "QDRANT_BINARY_QUANTIZATION_ALWAYS_RAM",
+    "QDRANT_BINARY_QUANTIZATION_RESCORE",
+    "ATOMIC_CLAIM_ANCHORS_ENABLED",
+    "PARENT_EXCERPT_ENABLED",
+    "RERANK_EVIDENCE_SUPPORT",
+    "RELATIONSHIP_EVIDENCE_ALLOCATION_ENABLED",
+    "TEMPORAL_QUERY_ROUTING_ENABLED",
+    "ANSWERABILITY_CORPUS_SCOPE_V2_ENABLED",
+    "PAYLOAD_SOFT_PREFILTER",
+    "DOCUMENT_ANCHOR_INDEXED",
+    "WATERFALL_ASSEMBLY",
+    "TWO_LANE_ANCHORING",
+    "TWO_LANE_ANCHORING_ENABLED",
+    "HYDE_ENABLED",
+    "QUERY_PLAN_V2",
+    "QUERY_PLAN_V2_SHADOW",
+    "QUERY_PLAN_QUALITY_FIRST",
+    "SHELF_RESERVE_ENABLED",
+    "CORPUS_VOCABULARY_RESOLVER_ENABLED",
+    "VOCAB_RESOLUTION_CACHE",
+    "GROUNDED_QUERY_PLANNER_ENABLED",
+    "NEO4J_ENABLED",
+    "TIER0_ROUTING",
+    "FOUR_LANE_TIER0_ROUTER_ENABLED",
+    "FOUR_LANE_TIER0_SUBQUERY_DECOMPOSITION_ENABLED",
+    "GRAPH_PAYLOAD_FIRST",
+    "GRAPH_QUERY_ENTITY_LINKING",
+    "GRAPH_SEED_PREFER_RELATIONS",
+    "LOCAL_EMBEDDER_ENABLED",
+    "LOCAL_RERANKER_ENABLED",
+    "RETRIEVAL_GRAPH_RERANK_ENABLED",
+    "RETRIEVAL_CACHE_GRAPH_METRICS",
+    "RETRIEVAL_CACHE_MODE_A_METRICS",
+    "RETRIEVAL_CACHE_DECORATION_METRICS",
+    "LIVE_WEB_SEARCH_ENABLED",
+    "STRACT_SEARCH_ENABLED",
+    "LIVE_WEB_SEARCH_FETCH_FULL_PAGES",
+    "AGENTIC_MODE_ENABLED",
+    "DISABLE_MULTI_CORPUS",
+)
 
 REFUSAL_CUES: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
@@ -317,6 +365,12 @@ def validate_chat_trace_contract(
                 errors.append("assistant final trace model_skipped must be boolean")
             else:
                 model_skipped = value
+            final_model = metadata.get("model")
+            if model_skipped is False and final_model != expected_model:
+                errors.append(
+                    "assistant final trace model mismatch: "
+                    f"{final_model!r} != {expected_model!r}"
+                )
 
     route_traces = [
         trace for trace in traces if trace.get("title") == "Chat model route"
@@ -339,16 +393,14 @@ def validate_chat_trace_contract(
                     f"chat model route mismatch: {route_model!r} != {expected_model!r}"
                 )
 
-    done_models = [
-        str(event.get("model_used"))
-        for event in done_events
-        if event.get("model_used") not in (None, "")
-    ]
-    mismatched_done = sorted({model for model in done_models if model != route_model})
-    if mismatched_done:
+    if len(done_events) != 1:
+        errors.append(f"done event count must be 1, observed {len(done_events)}")
+    done_models = [str(event.get("model_used") or "") for event in done_events]
+    if len(done_events) == 1 and done_models[0] != expected_model:
+        errors.append(f"done model mismatch: {done_models[0]!r} != {expected_model!r}")
+    if len(done_events) == 1 and done_models[0] != route_model:
         errors.append(
-            "done/route model mismatch: "
-            + ", ".join(repr(model) for model in mismatched_done)
+            f"done/route model mismatch: {done_models[0]!r} != {route_model!r}"
         )
 
     return {
@@ -395,16 +447,24 @@ def extract_answerability_contract(
     raw_answerable = metadata.get("raw_answerable")
     eligible = guard.get("eligible")
     coverage = guard.get("coverage")
+    matched_terms = guard.get("matched_terms")
+    missing_terms = guard.get("missing_terms")
     if type(raw_answerable) is not bool:
         errors.append("answerability raw_answerable must be boolean")
     if type(eligible) is not bool:
         errors.append("answerability guard eligible must be boolean")
-    if coverage is not None and (
+    if eligible is True and coverage is None:
+        errors.append("eligible answerability guard coverage must be numeric")
+    elif coverage is not None and (
         isinstance(coverage, bool)
         or not isinstance(coverage, (int, float))
         or not 0.0 <= float(coverage) <= 1.0
     ):
         errors.append("answerability guard coverage must be null or 0..1")
+    if eligible is True and not isinstance(matched_terms, list):
+        errors.append("eligible answerability guard matched_terms must be a list")
+    if eligible is True and not isinstance(missing_terms, list):
+        errors.append("eligible answerability guard missing_terms must be a list")
     return {
         "ok": not errors,
         "errors": errors,
@@ -413,11 +473,97 @@ def extract_answerability_contract(
         "guard": {
             "eligible": eligible,
             "coverage": coverage,
-            "matched_terms": guard.get("matched_terms"),
-            "missing_terms": guard.get("missing_terms"),
+            "matched_terms": matched_terms,
+            "missing_terms": missing_terms,
             "reason": guard.get("reason"),
         },
     }
+
+
+def model_answer_content_errors(
+    answer: Any,
+    *,
+    model_skipped: bool | None,
+) -> list[str]:
+    """Reject a model-called transport that produced no substantive bytes."""
+
+    if model_skipped is False and not str(answer or "").strip():
+        return ["model-called response has empty answer"]
+    return []
+
+
+def snapshot_claims_retrieval_runtime(settings: Any) -> dict[str, Any]:
+    """Capture the exhaustive claims A/B retrieval vector without defaults."""
+
+    missing = [
+        name for name in CLAIMS_RETRIEVAL_BOOLEAN_FLAGS if not hasattr(settings, name)
+    ]
+    if not hasattr(settings, "HYDRATION_MODE"):
+        missing.append("HYDRATION_MODE")
+    if missing:
+        raise RuntimeError(
+            "claims retrieval runtime settings absent: " + ",".join(sorted(missing))
+        )
+    runtime = {name: getattr(settings, name) for name in CLAIMS_RETRIEVAL_BOOLEAN_FLAGS}
+    invalid = [name for name, value in runtime.items() if type(value) is not bool]
+    if invalid:
+        raise RuntimeError(
+            "claims retrieval runtime settings must be boolean: "
+            + ",".join(sorted(invalid))
+        )
+    runtime["HYDRATION_MODE"] = getattr(settings, "HYDRATION_MODE")
+    return runtime
+
+
+def validate_claims_retrieval_runtime(
+    runtime: dict[str, Any],
+    *,
+    claim_anchors_enabled: bool,
+) -> None:
+    """Require the frozen claims profile and complete explicit flag vector."""
+
+    required_keys = set(CLAIMS_RETRIEVAL_BOOLEAN_FLAGS) | {"HYDRATION_MODE"}
+    missing = sorted(required_keys - set(runtime))
+    extra = sorted(set(runtime) - required_keys)
+    invalid = sorted(
+        name
+        for name in CLAIMS_RETRIEVAL_BOOLEAN_FLAGS
+        if name in runtime and type(runtime[name]) is not bool
+    )
+    expected = {
+        "RELATIONSHIP_EVIDENCE_ALLOCATION_ENABLED": True,
+        "ANSWERABILITY_CORPUS_SCOPE_V2_ENABLED": True,
+        "TEMPORAL_QUERY_ROUTING_ENABLED": True,
+        "RERANK_EVIDENCE_SUPPORT": False,
+        "ATOMIC_CLAIM_ANCHORS_ENABLED": claim_anchors_enabled,
+        "PARENT_EXCERPT_ENABLED": False,
+        "WATERFALL_ASSEMBLY": False,
+        "TWO_LANE_ANCHORING": False,
+        "HYDE_ENABLED": False,
+        "SHELF_RESERVE_ENABLED": False,
+        "GROUNDED_QUERY_PLANNER_ENABLED": False,
+        "FOUR_LANE_TIER0_ROUTER_ENABLED": False,
+        "FOUR_LANE_TIER0_SUBQUERY_DECOMPOSITION_ENABLED": False,
+        "AGENTIC_MODE_ENABLED": False,
+    }
+    mismatched = {
+        key: {"observed": runtime.get(key), "expected": value}
+        for key, value in expected.items()
+        if runtime.get(key) != value
+    }
+    if missing or extra or invalid or mismatched:
+        raise RuntimeError(
+            "claims retrieval runtime mismatch: "
+            f"missing={json.dumps(missing)} "
+            f"extra={json.dumps(extra)} "
+            f"invalid={json.dumps(invalid)} "
+            f"mismatched={json.dumps(mismatched, sort_keys=True)}"
+        )
+    if (
+        not isinstance(runtime["HYDRATION_MODE"], str)
+        or not runtime["HYDRATION_MODE"].strip()
+    ):
+        raise RuntimeError("claims retrieval HYDRATION_MODE must be non-empty")
 
 
 def build_system_prompt_receipt(

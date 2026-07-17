@@ -10,6 +10,7 @@ from evals.canonical_refusal_contract import (
     build_system_prompt_receipt,
     classify_refusal,
     extract_answerability_contract,
+    model_answer_content_errors,
     prompt_render_context_is_stable,
     validate_chat_trace_contract,
 )
@@ -75,7 +76,10 @@ def test_trace_contract_requires_exact_final_and_route_with_boolean_skip():
     result = validate_chat_trace_contract(
         [
             _trace("Chat model route", {"model": EXPECTED_CHAT_MODEL}),
-            _trace("Assistant final answer", {"model_skipped": False}),
+            _trace(
+                "Assistant final answer",
+                {"model_skipped": False, "model": EXPECTED_CHAT_MODEL},
+            ),
         ],
         [{"model_used": EXPECTED_CHAT_MODEL}],
     )
@@ -91,8 +95,14 @@ def test_trace_contract_requires_exact_final_and_route_with_boolean_skip():
         ([], [], "assistant final trace count"),
         (
             [
-                _trace("Assistant final answer", {"model_skipped": False}),
-                _trace("Assistant final answer", {"model_skipped": False}),
+                _trace(
+                    "Assistant final answer",
+                    {"model_skipped": False, "model": EXPECTED_CHAT_MODEL},
+                ),
+                _trace(
+                    "Assistant final answer",
+                    {"model_skipped": False, "model": EXPECTED_CHAT_MODEL},
+                ),
             ],
             [],
             "assistant final trace count",
@@ -104,7 +114,10 @@ def test_trace_contract_requires_exact_final_and_route_with_boolean_skip():
         ),
         (
             [
-                _trace("Assistant final answer", {"model_skipped": False}),
+                _trace(
+                    "Assistant final answer",
+                    {"model_skipped": False, "model": EXPECTED_CHAT_MODEL},
+                ),
                 _trace("Chat model route", {"model": "wrong/model"}),
             ],
             [],
@@ -112,7 +125,10 @@ def test_trace_contract_requires_exact_final_and_route_with_boolean_skip():
         ),
         (
             [
-                _trace("Assistant final answer", {"model_skipped": False}),
+                _trace(
+                    "Assistant final answer",
+                    {"model_skipped": False, "model": EXPECTED_CHAT_MODEL},
+                ),
                 _trace("Chat model route", {"model": EXPECTED_CHAT_MODEL}),
             ],
             [{"model_used": "wrong/model"}],
@@ -129,6 +145,46 @@ def test_trace_contract_rejects_missing_duplicate_invalid_and_model_drift(
     assert any(fragment in error for error in result["errors"])
 
 
+@pytest.mark.parametrize(
+    ("final_metadata", "done", "fragment"),
+    [
+        (
+            {"model_skipped": False},
+            [{"model_used": EXPECTED_CHAT_MODEL}],
+            "assistant final trace model mismatch",
+        ),
+        (
+            {"model_skipped": False, "model": EXPECTED_CHAT_MODEL},
+            [],
+            "done event count must be 1",
+        ),
+        (
+            {"model_skipped": False, "model": EXPECTED_CHAT_MODEL},
+            [{}, {"model_used": EXPECTED_CHAT_MODEL}],
+            "done event count must be 1",
+        ),
+        (
+            {"model_skipped": False, "model": EXPECTED_CHAT_MODEL},
+            [{}],
+            "done model mismatch",
+        ),
+    ],
+)
+def test_trace_contract_requires_explicit_single_model_receipts(
+    final_metadata, done, fragment
+):
+    result = validate_chat_trace_contract(
+        [
+            _trace("Chat model route", {"model": EXPECTED_CHAT_MODEL}),
+            _trace("Assistant final answer", final_metadata),
+        ],
+        done,
+    )
+
+    assert result["ok"] is False
+    assert any(fragment in error for error in result["errors"])
+
+
 def test_answerability_contract_requires_exact_trace_and_typed_guard():
     result = extract_answerability_contract(
         [
@@ -139,6 +195,7 @@ def test_answerability_contract_requires_exact_trace_and_typed_guard():
                     "corpus_scope_guard": {
                         "eligible": True,
                         "coverage": 0.25,
+                        "matched_terms": [],
                         "missing_terms": ["missing"],
                     },
                 },
@@ -179,6 +236,57 @@ def test_answerability_contract_requires_exact_trace_and_typed_guard():
 )
 def test_answerability_contract_rejects_missing_or_untyped_state(traces):
     assert extract_answerability_contract(traces)["ok"] is False
+
+
+@pytest.mark.parametrize(
+    "guard",
+    [
+        {"eligible": True, "matched_terms": [], "missing_terms": []},
+        {
+            "eligible": True,
+            "coverage": None,
+            "matched_terms": [],
+            "missing_terms": [],
+        },
+        {
+            "eligible": True,
+            "coverage": 0.5,
+            "missing_terms": [],
+        },
+        {
+            "eligible": True,
+            "coverage": 0.5,
+            "matched_terms": [],
+        },
+        {
+            "eligible": True,
+            "coverage": 0.5,
+            "matched_terms": "term",
+            "missing_terms": [],
+        },
+    ],
+)
+def test_answerability_eligible_guard_requires_complete_typed_term_lists(guard):
+    result = extract_answerability_contract(
+        [
+            _trace(
+                "Answerability gate",
+                {
+                    "raw_answerable": True,
+                    "corpus_scope_guard": guard,
+                },
+            )
+        ]
+    )
+
+    assert result["ok"] is False
+
+
+def test_model_called_empty_or_whitespace_answer_is_red():
+    assert model_answer_content_errors("", model_skipped=False)
+    assert model_answer_content_errors(" \n\t", model_skipped=False)
+    assert model_answer_content_errors("answer", model_skipped=False) == []
+    assert model_answer_content_errors("", model_skipped=True) == []
 
 
 def test_prompt_receipt_hashes_exact_builder_and_context():
