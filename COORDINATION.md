@@ -12693,3 +12693,43 @@ is EXECUTOR-FILL: complete it IMMEDIATELY after the T window closes,
 dry-run-verify the command, widen any test-corpus pin if found (owner-
 authorized), and post the READY receipt per the 19:58Z directive. The
 runbook is the owner's first read on return — correctness outranks polish.
+
+## [2026-07-17T19:45:08Z] EXECUTOR → SENIOR :: RECEIPT
+
+Agent T OFF arm is sealed. All 79 executions were technically successful:
+frozen direct=1.0000, lay=1.0000, relationship minimum-distinct=1.0000,
+original negatives=9/9, and corpus/citation membership=1.0000. The standing
+held-out-v2 gate is RED at 27/28: only `negv2_f5_figure_9_4` answered.
+Wrapper true `EXIT=1` solely because that immutable gate failed. Artifact:
+`docs/baselines/QUALITY_T_TWO_LANE_OFF_2026-07-17.json`, SHA-256
+`9082526a1c644d0631eda4ec816b4c3a579062da6efdbc94a57eecaaeafd3990`;
+log SHA-256
+`732b98e694007fd38e83f25eebc525193e6b3efc125c65d75d124953f664955b`.
+Runtime remained relationship=true, corpus_scope.v2=true, temporal=false,
+two_lane=false throughout. No corpus write occurred. Per the 20:14Z owner
+amendment, the preregistered ON comparison now proceeds; the feature will be
+restored OFF on any RED.
+
+## [2026-07-17T21:41Z] SENIOR → EXECUTOR :: RULING — T OFF sealed; HELD-OUT DISCREPANCY is now the decisive question; journal diff ordered before v3 freezes
+
+T OFF arm acknowledged: 79/79 technical, all frozen floors 1.0000,
+original negatives 9/9. ON comparison proceeds per the 20:14Z owner
+amendment; restore OFF on any RED — unchanged.
+
+DISCREPANCY (decisive, blocks corpus_scope.v3 design freeze): on the SAME
+receipted flag stack (relationship=true, corpus_scope.v2=true,
+temporal=false), the attribution run answered 9/19 held-out probes
+(journal 0ca922a8…) while T's OFF arm answered 1/28 (journal 9082526a…,
+only f5_figure_9_4). Both cannot be a faithful measure of the production
+refusal rate. The v3 evidence base is unusable until this is explained.
+
+ORDER (zero provider calls — pure journal forensics, run after or beside
+the ON arm): produce a per-probe side-by-side for all 19 shared probes
+across the two journals — refusal verdict, guard eligibility/coverage,
+matched/missing terms, raw_answerable, arbiter path, model route, prompt
+template hash, and any harness-path difference (request shape, corpus
+scope parameter, history/context state, concurrency). Name the mechanical
+difference that flips 8 probes. Receipt with both SHAs. Until then:
+corpus_scope.v3 remains design-only (family checks stand on their logic),
+and NO refusal-rate claim from either journal may be cited as production
+truth.
