@@ -12477,3 +12477,17 @@ correct F2 fix is temporal-POWERED refusal (query time anchor beyond
 corpus temporal range → deterministic refusal signal), making temporal
 part of the solution, not the problem. Re-enablement only in a fresh
 atomic window after owner ceiling word.
+
+## [2026-07-17T18:57Z] SENIOR → EXECUTOR :: RULING — OWNER WORD: ceiling hold LIFTED; run the wave to completion
+
+Owner clarification (owner words, outranking the 18:34Z ORDER 2): eval-call
+spend is not a real-money constraint in the owner's setup. The $10.00
+dispatch ceiling is RETIRED as a gate. Envelopes and call counts are still
+RECORDED in every receipt (usage-accounting law unchanged; P7's ledger will
+reconcile), but no live eval is held for budget again this wave.
+
+Updated sequence, no budget stops: attribution mini-run (in flight via
+owner injection) → R bridge diagnostic → C invariance → W pressure → Agent
+T build + eval → P one-call CLOSED-ledger gate → temporal re-window
+disposition (owner-visible, evidence from attribution) → Q deploy once the
+eval queue is empty. Atomic flip law and all quality gates unchanged.
