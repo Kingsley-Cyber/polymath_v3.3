@@ -1,0 +1,55 @@
+{
+  "schema_version": "polymath.chat_provider_prices.v1",
+  "source_checked_at": "2026-07-16T23:57:28Z",
+  "routes": [
+    {
+      "route_id": "opencode-go-anthropic__minimax-m2.7",
+      "provider": "opencode-go-anthropic",
+      "model_id": "anthropic/minimax-m2.7",
+      "api_base_prefix": "https://opencode.ai/zen/go",
+      "currency": "USD",
+      "price_unit_tokens": 1000000,
+      "uncached_input_usd": "0.30",
+      "output_usd": "1.20",
+      "input_basis": "uncached_input_conservative",
+      "price_tier": "published_card",
+      "source_receipt": "COORDINATION.md#2026-07-16T23:57:28Z"
+    },
+    {
+      "route_id": "deepseek-api__deepseek-v4-flash",
+      "provider": "deepseek",
+      "model_id": "deepseek/deepseek-v4-flash",
+      "currency": "USD",
+      "price_unit_tokens": 1000000,
+      "uncached_input_usd": "0.14",
+      "output_usd": "0.28",
+      "input_basis": "uncached_input_conservative",
+      "price_tier": "published_list_price",
+      "source_receipt": "backend/registries/semantic_gateway_provider_prices.v1.json"
+    },
+    {
+      "route_id": "longcat-api__longcat-2.0",
+      "provider": "longcat",
+      "model_id": "openai/LongCat-2.0",
+      "currency": "USD",
+      "price_unit_tokens": 1000000,
+      "uncached_input_usd": "0.75",
+      "output_usd": "2.95",
+      "input_basis": "uncached_input_conservative",
+      "price_tier": "published_list_price",
+      "source_receipt": "backend/registries/semantic_gateway_provider_prices.v1.json"
+    },
+    {
+      "route_id": "local-ollama",
+      "provider": "local",
+      "model_prefix": "ollama",
+      "currency": "USD",
+      "price_unit_tokens": 1000000,
+      "uncached_input_usd": "0",
+      "output_usd": "0",
+      "input_basis": "local_compute",
+      "price_tier": "non_billable",
+      "source_receipt": "local inference contract"
+    }
+  ]
+}

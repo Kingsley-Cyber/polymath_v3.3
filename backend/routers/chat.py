@@ -7,12 +7,15 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
+from config import get_settings
 from models.schemas import ChatRequest
 from routers.auth import get_current_user
+from services.chat_cost_meter import meter_chat_sse_stream
 from services.chat_orchestrator import chat_orchestrator
 
 router = APIRouter(prefix="/api", tags=["chat"])
 logger = logging.getLogger(__name__)
+settings = get_settings()
 
 
 @router.post("/chat")
@@ -50,9 +53,14 @@ async def chat(
     # Call orchestrator service and return streaming response.
     # Phase 19.3 — user_id forwarded so the orchestrator can resolve
     # `profile:<id>` model strings against the Model Profiles collection.
+    source = chat_orchestrator.process_chat_request(
+        request,
+        user_id=current_user["user_id"],
+    )
     return StreamingResponse(
-        chat_orchestrator.process_chat_request(
-            request, user_id=current_user["user_id"]
+        meter_chat_sse_stream(
+            source,
+            enabled=bool(settings.CHAT_COST_TELEMETRY_ENABLED),
         ),
         media_type="text/event-stream",
         headers={

@@ -12,6 +12,10 @@ from typing import Any, AsyncGenerator
 import httpx
 from config import get_settings
 from models.schemas import ModelOverrides
+from services.chat_cost_meter import (
+    current_chat_cost_ledger,
+    record_chat_provider_call,
+)
 from services.provider_payload import provider_payload_extras
 from services.streaming_normalizer import StreamingNormalizer, extract_stream_delta
 
@@ -36,6 +40,16 @@ _TRANSIENT_STREAM_ERROR_MARKERS = (
     "timed out",
     "timeout",
 )
+
+
+def _nonnegative_native_count(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        count = int(value)
+    except (TypeError, ValueError):
+        return None
+    return count if count >= 0 else None
 
 
 def _provider_response_telemetry(
@@ -422,6 +436,7 @@ class LLMService:
                 response.raise_for_status()
 
             normalizer = StreamingNormalizer()
+            native_usage: dict[str, int] = {}
             async for line in response.aiter_lines():
                 if not line:
                     continue
@@ -462,6 +477,18 @@ class LLMService:
                     yield {"content": normalized["content"]}
 
                 if chunk.get("done"):
+                    prompt_tokens = _nonnegative_native_count(
+                        chunk.get("prompt_eval_count")
+                    )
+                    completion_tokens = _nonnegative_native_count(
+                        chunk.get("eval_count")
+                    )
+                    if prompt_tokens is not None:
+                        native_usage["prompt_tokens"] = prompt_tokens
+                    if completion_tokens is not None:
+                        native_usage["completion_tokens"] = completion_tokens
+                    if prompt_tokens is not None and completion_tokens is not None:
+                        native_usage["total_tokens"] = prompt_tokens + completion_tokens
                     break
 
             remaining = normalizer.flush()
@@ -469,6 +496,14 @@ class LLMService:
                 yield {"thinking": remaining["thinking"]}
             if remaining["content"]:
                 yield {"content": remaining["content"]}
+            if bool(getattr(settings, "CHAT_COST_TELEMETRY_ENABLED", False)):
+                yield {
+                    "provider_telemetry": {
+                        "usage": native_usage,
+                        "actual_cost_usd": 0.0,
+                        "cost_source": "local_compute",
+                    }
+                }
 
     async def _request_with_retry(
         self,
@@ -681,14 +716,30 @@ class LLMService:
 
         headers = self._get_headers()
 
-        resp = await client.post(
-            url,
-            json=body,
-            headers=headers,
-            timeout=httpx.Timeout(timeout, connect=min(10.0, timeout)),
+        try:
+            resp = await client.post(
+                url,
+                json=body,
+                headers=headers,
+                timeout=httpx.Timeout(timeout, connect=min(10.0, timeout)),
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as exc:
+            record_chat_provider_call(
+                call_kind="complete_sync",
+                model=str(body.get("model") or model),
+                api_base=api_base,
+                provider_telemetry=None,
+                failure_reason=f"complete_sync_error:{type(exc).__name__}",
+            )
+            raise
+        record_chat_provider_call(
+            call_kind="complete_sync",
+            model=str(body.get("model") or model),
+            api_base=api_base,
+            provider_telemetry=_provider_response_telemetry(resp, data),
         )
-        resp.raise_for_status()
-        data = resp.json()
         choices = data.get("choices") or []
         if not choices:
             return ""
@@ -793,21 +844,38 @@ class LLMService:
                 self._apply_thinking_effort(body, body.get("model") or model, _dflt)
 
         client = await self._get_client()
-        resp = await client.post(
-            url,
-            json=body,
-            headers=self._get_headers(),
-            timeout=httpx.Timeout(timeout, connect=min(10.0, timeout)),
+        try:
+            resp = await client.post(
+                url,
+                json=body,
+                headers=self._get_headers(),
+                timeout=httpx.Timeout(timeout, connect=min(10.0, timeout)),
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as exc:
+            record_chat_provider_call(
+                call_kind="complete_tool_calls",
+                model=str(body.get("model") or model),
+                api_base=api_base,
+                provider_telemetry=None,
+                failure_reason=f"complete_tool_calls_error:{type(exc).__name__}",
+            )
+            raise
+        provider_telemetry = _provider_response_telemetry(resp, data)
+        record_chat_provider_call(
+            call_kind="complete_tool_calls",
+            model=str(body.get("model") or model),
+            api_base=api_base,
+            provider_telemetry=provider_telemetry,
         )
-        resp.raise_for_status()
-        data = resp.json()
         choices = data.get("choices") or []
         if not choices:
             return {
                 "tool_calls": [],
                 "content": "",
                 "reasoning_content": "",
-                "provider_telemetry": _provider_response_telemetry(resp, data),
+                "provider_telemetry": provider_telemetry,
             }
 
         message = choices[0].get("message") or {}
@@ -816,7 +884,7 @@ class LLMService:
             "content": message.get("content") or "",
             "reasoning_content": message.get("reasoning_content") or "",
             "finish_reason": choices[0].get("finish_reason"),
-            "provider_telemetry": _provider_response_telemetry(resp, data),
+            "provider_telemetry": provider_telemetry,
         }
 
     async def stream_chat(
@@ -846,6 +914,7 @@ class LLMService:
         attempt = 0
         while True:
             started = False
+            telemetry_recorded = False
             try:
                 async for item in self._stream_chat_once(
                     messages,
@@ -857,8 +926,28 @@ class LLMService:
                     api_key=api_key,
                     extra_params=extra_params,
                 ):
+                    provider_telemetry = item.get("provider_telemetry")
+                    if isinstance(provider_telemetry, dict):
+                        record_chat_provider_call(
+                            call_kind="stream_chat",
+                            model=str(model or self._default_model),
+                            api_base=api_base,
+                            provider_telemetry=provider_telemetry,
+                            transport_attempts=attempt + 1,
+                        )
+                        telemetry_recorded = True
+                        continue
                     started = True
                     yield item
+                if current_chat_cost_ledger() is not None and not telemetry_recorded:
+                    record_chat_provider_call(
+                        call_kind="stream_chat",
+                        model=str(model or self._default_model),
+                        api_base=api_base,
+                        provider_telemetry=None,
+                        transport_attempts=attempt + 1,
+                        failure_reason="terminal_usage_event_missing",
+                    )
                 return
             except Exception as e:  # noqa: BLE001 — classify then re-raise
                 if (
@@ -875,6 +964,15 @@ class LLMService:
                         e,
                     )
                     continue
+                if current_chat_cost_ledger() is not None and not telemetry_recorded:
+                    record_chat_provider_call(
+                        call_kind="stream_chat",
+                        model=str(model or self._default_model),
+                        api_base=api_base,
+                        provider_telemetry=None,
+                        transport_attempts=attempt + 1,
+                        failure_reason=f"stream_error:{type(e).__name__}",
+                    )
                 raise
 
     async def _stream_chat_once(
@@ -956,6 +1054,10 @@ class LLMService:
             ),
         )
         self._reapply_explicit_thinking_effort(body, model, overrides)
+        if bool(getattr(settings, "CHAT_COST_TELEMETRY_ENABLED", False)):
+            # OpenAI-compatible providers emit one terminal usage-only chunk
+            # before [DONE]. This is additive and stays dark by default.
+            body["stream_options"] = {"include_usage": True}
         # Default thinking posture (2026-07-04): when the per-turn selector is
         # untouched, thinking-default-ON models (deepseek-v4*) burned 91s of a
         # 99s RAG answer on reasoning tokens. RAG chat pre-retrieves the
@@ -1020,6 +1122,7 @@ class LLMService:
 
                 normalizer = StreamingNormalizer()
                 pending_tool_calls: dict[int, dict[str, Any]] = {}
+                stream_usage: dict[str, Any] = {}
 
                 # Stream the response
                 async for line in response.aiter_lines():
@@ -1037,6 +1140,9 @@ class LLMService:
                         # Parse JSON and extract content
                         try:
                             chunk = json.loads(data)
+                            raw_usage = chunk.get("usage")
+                            if isinstance(raw_usage, dict):
+                                stream_usage = raw_usage
 
                             # Extract token from choices
                             choices = chunk.get("choices", [])
@@ -1124,6 +1230,13 @@ class LLMService:
                     yield {"thinking": remaining["thinking"]}
                 if remaining["content"]:
                     yield {"content": remaining["content"]}
+                if bool(getattr(settings, "CHAT_COST_TELEMETRY_ENABLED", False)):
+                    yield {
+                        "provider_telemetry": _provider_response_telemetry(
+                            response,
+                            {"usage": stream_usage},
+                        )
+                    }
 
         except httpx.HTTPStatusError as e:
             logger.error(f"HTTP error during streaming: {e}")
