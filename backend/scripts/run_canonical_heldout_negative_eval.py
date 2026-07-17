@@ -6,12 +6,12 @@ It exits non-zero only when the run is technically incomplete or the durable
 journal is incomplete.  The observed refusal rate is never an exit gate.
 
 Prompt-template hash method (``polymath.chat_system_prompt_render.v1``):
-the runner imports the production ``_build_polymath_system_prompt`` function,
-renders it once with an explicit timezone-aware wall-clock value immediately
-before the batch, and hashes the exact UTF-8 result.  The production builder's
-only dynamic fields are local date and timezone name.  The runner verifies
-those fields did not change before sealing, so the recorded hash is the exact
-prompt produced by the same baked code for every request date in this batch.
+the runner must execute inside the backend container against a loopback API.
+It imports the production ``_build_polymath_system_prompt`` function, renders
+it once with an explicit timezone-aware wall-clock value immediately before
+the batch, and hashes the exact UTF-8 result plus the orchestrator source.
+Before sealing it repeats both hashes at the original render time.  This binds
+the receipt to the same baked code and local endpoint used by the requests.
 """
 
 from __future__ import annotations
@@ -20,7 +20,6 @@ import argparse
 import hashlib
 import json
 import os
-import re
 import sys
 import time
 import urllib.error
@@ -34,11 +33,18 @@ from pathlib import Path
 from typing import Any, Iterator, Sequence
 
 from config import get_settings
+from evals.canonical_refusal_contract import (
+    CLASSIFIER_VERSION,
+    EXPECTED_CHAT_MODEL,
+    classify_refusal,
+    validate_chat_trace_contract,
+)
 
 
 BACKEND = Path(__file__).resolve().parents[1]
 SPEC_PATH = BACKEND / "evals/e2e_heldout_negative_v2_20260717.json"
 SELECTION_PATH = BACKEND / "evals/runpod_e2e_15doc_selection_v1.json"
+CHAT_ORCHESTRATOR_PATH = BACKEND / "services/chat_orchestrator.py"
 LOCK_PATH = Path("/tmp/polymath-eval.lock")
 
 SPEC_SHA256 = "3b35c14c165f6be89202b809ea01a1cd6ad0f5c0217e4167b86e4b5dc0b09960"
@@ -53,7 +59,6 @@ MAX_COST_USD = 1.50
 
 JOURNAL_SCHEMA = "polymath.canonical_heldout_negative_eval.v1"
 EXECUTION_SCHEMA = "polymath.canonical_heldout_negative_execution.v1"
-CLASSIFIER_VERSION = "canonical_refusal_three_state.v1"
 PROMPT_HASH_METHOD = "polymath.chat_system_prompt_render.v1"
 
 MINIMAX_INPUT_USD_PER_MILLION = 0.30
@@ -62,144 +67,6 @@ MODEL_COMPLETION_TOKEN_BOUND = 16_384
 MEASURED_SYSTEM_PROMPT_TOKENS = 2_338
 MEASURED_MAX_EVIDENCE_CHARS = 13_293
 PROMPT_WRAPPER_TOKEN_ALLOWANCE = 4_096
-
-REFUSAL_CUES: tuple[tuple[str, re.Pattern[str]], ...] = (
-    (
-        "speaker_cannot_answer",
-        re.compile(
-            r"\b(?:i|we)\s+(?:can(?:not|'t)|could(?:\s+not|n't)|am\s+unable"
-            r"|are\s+unable)\s+(?:reliably\s+|fully\s+)?"
-            r"(?:answer|provide|confirm|determine|identify|say|verify|infer)\b",
-            re.IGNORECASE,
-        ),
-    ),
-    (
-        "speaker_did_not_find",
-        re.compile(
-            r"\b(?:i|we)\s+(?:did\s+not|didn't|could\s+not|couldn't)\s+"
-            r"(?:find|locate|verify|identify)\b",
-            re.IGNORECASE,
-        ),
-    ),
-    (
-        "corpus_absence",
-        re.compile(
-            r"\b(?:the\s+)?(?:selected|provided|retrieved|available)?\s*"
-            r"(?:corpus|context|sources?|documents?|evidence|material|passages?)\s+"
-            r"(?:do(?:es)?\s+not|doesn't|don't|cannot|can't|fail(?:s)?\s+to)\s+"
-            r"(?:directly\s+)?(?:address|answer|contain|cover|describe|detail|"
-            r"establish|include|mention|name|provide|recommend|specify|state|"
-            r"support|verify)\b",
-            re.IGNORECASE,
-        ),
-    ),
-    (
-        "no_evidence",
-        re.compile(
-            r"\b(?:there\s+is\s+)?(?:no|not\s+enough|insufficient|inadequate)\s+"
-            r"(?:source[- ]backed\s+)?(?:evidence|information|material|support|"
-            r"context|detail|mention)\b",
-            re.IGNORECASE,
-        ),
-    ),
-    (
-        "speaker_lacks_information",
-        re.compile(
-            r"\b(?:i|we)\s+(?:do\s+not|don't)\s+have\s+(?:enough\s+)?"
-            r"(?:source[- ]backed\s+)?(?:evidence|information|context|support)\b",
-            re.IGNORECASE,
-        ),
-    ),
-    (
-        "no_source_mentions",
-        re.compile(
-            r"\bno\s+(?:selected\s+|provided\s+|retrieved\s+|available\s+)?"
-            r"(?:source|document|passage)\s+(?:addresses|answers|contains|covers|"
-            r"describes|establishes|includes|mentions|names|provides|specifies|"
-            r"states|supports)\b",
-            re.IGNORECASE,
-        ),
-    ),
-    (
-        "corpus_provides_no_information",
-        re.compile(
-            r"\b(?:the\s+)?(?:selected|provided|retrieved|available)?\s*"
-            r"(?:corpus|context|sources?|documents?|evidence|material|passages?)\s+"
-            r"(?:provides?|contains?|has)\s+no\s+(?:evidence|information|detail|"
-            r"mention|support)\b",
-            re.IGNORECASE,
-        ),
-    ),
-    (
-        "not_in_scope",
-        re.compile(
-            r"\b(?:this|that|the\s+(?:answer|information|detail|claim|topic))\s+"
-            r"(?:is|was)\s+not\s+(?:available|covered|established|included|"
-            r"mentioned|present|provided|specified|stated|supported)\b",
-            re.IGNORECASE,
-        ),
-    ),
-    (
-        "outside_sources",
-        re.compile(
-            r"\b(?:outside|beyond)\s+(?:the\s+)?(?:selected|provided|retrieved)?\s*"
-            r"(?:corpus|context|sources?|documents?|evidence|material)\b",
-            re.IGNORECASE,
-        ),
-    ),
-    (
-        "absent_from_corpus",
-        re.compile(
-            r"\b(?:(?:this|that|the)\s+"
-            r"(?:answer|information|detail|claim|topic))\s+"
-            r"(?:is|was)\s+not\s+in\s+(?:the\s+)?"
-            r"(?:selected|provided|retrieved|available)?\s*"
-            r"(?:corpus|context|sources?|documents?|evidence|material)\b",
-            re.IGNORECASE,
-        ),
-    ),
-    (
-        "sources_silent",
-        re.compile(
-            r"\b(?:the\s+)?(?:selected|provided|retrieved|available)?\s*"
-            r"(?:corpus|sources?|documents?|evidence|material)\s+"
-            r"(?:is|are|remain(?:s)?)\s+silent\s+(?:about|on|regarding)\b",
-            re.IGNORECASE,
-        ),
-    ),
-)
-
-NON_SUBSTANTIVE_CLAUSES: tuple[re.Pattern[str], ...] = (
-    re.compile(
-        r"^(?:please\s+)?(?:provide|share|add|select|upload)\b.*"
-        r"(?:source|document|context|material|evidence).*$",
-        re.IGNORECASE,
-    ),
-    re.compile(
-        r"^(?:if|once|when)\b.*(?:provide|share|add|select|upload)\b.*$",
-        re.IGNORECASE,
-    ),
-    re.compile(
-        r"^(?:then\s+)?(?:i|we)\s+(?:can|could|would)\s+"
-        r"(?:answer|help|review|summarize|check|analyze)\b.*$",
-        re.IGNORECASE,
-    ),
-    re.compile(
-        r"^(?:answering|confirming|determining)\b.*\b(?:would\s+)?require(?:s)?\b"
-        r".*(?:outside|additional|other|new)\b.*$",
-        re.IGNORECASE,
-    ),
-    re.compile(
-        r"^(?:without|based\s+only\s+on)\b.*(?:source|corpus|context|evidence).*$",
-        re.IGNORECASE,
-    ),
-)
-
-CLAUSE_SPLIT_RE = re.compile(
-    r"(?:[.!?]\s+|\n+|;\s*|,\s*(?:but|however|although|yet|while)\s+|"
-    r"\s+(?:but|however|although|yet|nevertheless)\s+|,\s+and\s+|\s+and\s+)",
-    re.IGNORECASE,
-)
 
 REQUIRED_EXECUTION_PATHS = (
     "schema_version",
@@ -216,6 +83,7 @@ REQUIRED_EXECUTION_PATHS = (
     "prior_call_state.prior_call_count",
     "prior_call_state.session_mode",
     "transport.done_received",
+    "transport.done_event_count",
     "transport.errors",
     "technical.status",
     "technical.ok",
@@ -224,9 +92,14 @@ REQUIRED_EXECUTION_PATHS = (
     "answerability.guard.eligible",
     "answerability.guard.coverage",
     "model_skipped",
+    "trace_contract.ok",
+    "trace_contract.assistant_final_trace_count",
+    "trace_contract.model_route_trace_count",
+    "trace_contract.expected_model",
     "model_route.model",
     "system_prompt_template.method_version",
     "system_prompt_template.sha256",
+    "system_prompt_template.source_sha256",
     "classification.version",
     "classification.state",
     "classification.refused",
@@ -341,61 +214,6 @@ def _cost_envelope(execution_count: int = EXECUTION_COUNT) -> dict[str, Any]:
     }
 
 
-def _clean_clause(value: str) -> str:
-    value = re.sub(r"`{1,3}", "", value)
-    value = re.sub(r"\[[^\]]+\]\([^)]+\)", " ", value)
-    value = re.sub(r"^[\s>*#\-–—\d.)]+", "", value)
-    return re.sub(r"\s+", " ", value).strip(" \t\r\n,.:")
-
-
-def _refusal_cue_ids(value: str) -> list[str]:
-    return [cue_id for cue_id, pattern in REFUSAL_CUES if pattern.search(value)]
-
-
-def _is_non_substantive_clause(value: str) -> bool:
-    if not value:
-        return True
-    return any(pattern.search(value) for pattern in NON_SUBSTANTIVE_CLAUSES)
-
-
-def classify_refusal(answer: str, *, model_skipped: bool) -> dict[str, Any]:
-    """Classify one answer under the frozen deterministic three-state rule."""
-
-    normalized = re.sub(r"\s+", " ", str(answer or "")).strip()
-    cue_ids = _refusal_cue_ids(normalized)
-    if model_skipped:
-        state = "gate_blocked"
-        substantive: list[str] = []
-    else:
-        clauses = [
-            cleaned
-            for cleaned in (
-                _clean_clause(part) for part in CLAUSE_SPLIT_RE.split(answer)
-            )
-            if cleaned
-        ]
-        substantive = [
-            clause
-            for clause in clauses
-            if not _refusal_cue_ids(clause)
-            and not _is_non_substantive_clause(clause)
-            and len(re.findall(r"[A-Za-z0-9]+", clause)) >= 2
-        ]
-        state = (
-            "model_voiced_refusal"
-            if normalized and cue_ids and not substantive
-            else "answered"
-        )
-    return {
-        "version": CLASSIFIER_VERSION,
-        "state": state,
-        "refused": state in {"gate_blocked", "model_voiced_refusal"},
-        "refusal_cue_ids": cue_ids,
-        "substantive_clause_count": len(substantive),
-        "substantive_clause_excerpts": [value[:160] for value in substantive[:4]],
-    }
-
-
 def _value_at_path(value: dict[str, Any], path: str) -> tuple[bool, Any]:
     current: Any = value
     for key in path.split("."):
@@ -419,8 +237,8 @@ def execution_completeness_errors(row: dict[str, Any]) -> list[str]:
         errors.append("invalid:request.top_k")
     if (row.get("request") or {}).get("conversation_id_sent") is not False:
         errors.append("invalid:request.conversation_id_sent")
-    if not str(((row.get("model_route") or {}).get("model")) or ""):
-        errors.append("empty:model_route.model")
+    if (row.get("model_route") or {}).get("model") != EXPECTED_CHAT_MODEL:
+        errors.append("invalid:model_route.model")
     if not str(((row.get("answer") or {}).get("sha256")) or ""):
         errors.append("empty:answer.sha256")
     answerability = row.get("answerability") or {}
@@ -442,6 +260,17 @@ def execution_completeness_errors(row: dict[str, Any]) -> list[str]:
         errors.append("invalid:answerability.guard.coverage")
     if not isinstance(row.get("model_skipped"), bool):
         errors.append("invalid:model_skipped")
+    trace_contract = row.get("trace_contract") or {}
+    if trace_contract.get("ok") is not True:
+        errors.append("invalid:trace_contract.ok")
+    if trace_contract.get("assistant_final_trace_count") != 1:
+        errors.append("invalid:trace_contract.assistant_final_trace_count")
+    if trace_contract.get("model_route_trace_count") != 1:
+        errors.append("invalid:trace_contract.model_route_trace_count")
+    if trace_contract.get("expected_model") != EXPECTED_CHAT_MODEL:
+        errors.append("invalid:trace_contract.expected_model")
+    if (row.get("transport") or {}).get("done_event_count") != 1:
+        errors.append("invalid:transport.done_event_count")
     classification = row.get("classification") or {}
     if (
         row.get("model_skipped") is True
@@ -492,25 +321,6 @@ def _extract_answerability(traces: list[dict[str, Any]]) -> dict[str, Any]:
             },
         }
     return {}
-
-
-def _extract_model_route(traces: list[dict[str, Any]]) -> dict[str, Any]:
-    for trace in traces:
-        if trace.get("title") == "Chat model route":
-            metadata = trace.get("metadata") or {}
-            return {
-                "model": metadata.get("model"),
-                "web_planner_split": metadata.get("web_planner_split"),
-            }
-    return {}
-
-
-def _model_skipped(traces: list[dict[str, Any]]) -> bool:
-    return any(
-        trace.get("title") == "Assistant final answer"
-        and (trace.get("metadata") or {}).get("model_skipped") is True
-        for trace in traces
-    )
 
 
 def _effective_tier(traces: list[dict[str, Any]]) -> str:
@@ -645,7 +455,7 @@ def _run_sse(
     sources: list[dict[str, Any]] = []
     traces: list[dict[str, Any]] = []
     errors: list[str] = []
-    done: dict[str, Any] = {}
+    done_events: list[dict[str, Any]] = []
     event_counts: Counter[str] = Counter()
     conversation_ids: set[str] = set()
     current_event = ""
@@ -690,7 +500,7 @@ def _run_sse(
                         str(event.get("content") or event.get("error") or "")[:500]
                     )
                 elif event_type == "done":
-                    done = event
+                    done_events.append(event)
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")[:500]
         errors.append(f"HTTP {exc.code}: {detail}")
@@ -702,7 +512,8 @@ def _run_sse(
         "sources": sources,
         "traces": traces,
         "errors": errors,
-        "done": done,
+        "done": done_events[-1] if done_events else {},
+        "done_events": done_events,
         "event_counts": dict(sorted(event_counts.items())),
         "conversation_ids": sorted(conversation_ids),
         "elapsed_seconds": round(time.monotonic() - started, 3),
@@ -747,15 +558,61 @@ def _source_receipt(
     }
 
 
-def _prompt_template_receipt() -> tuple[dict[str, Any], datetime]:
+def _validate_local_api(api: str) -> dict[str, Any]:
+    parsed = urllib.parse.urlsplit(api)
+    hostname = (parsed.hostname or "").lower()
+    if (
+        parsed.scheme not in {"http", "https"}
+        or hostname not in {"127.0.0.1", "localhost", "::1"}
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or parsed.path not in {"", "/"}
+    ):
+        raise RuntimeError("--api must be a credential-free loopback HTTP(S) origin")
+    return {
+        "schema_version": "polymath.local_eval_endpoint_binding.v1",
+        "api_origin": api.rstrip("/"),
+        "hostname": hostname,
+        "loopback_required": True,
+    }
+
+
+def _validate_same_container_runtime(
+    endpoint_binding: dict[str, Any],
+    *,
+    container_marker: Path = Path("/.dockerenv"),
+) -> dict[str, Any]:
+    if not container_marker.is_file():
+        raise RuntimeError(
+            "canonical harness must run inside the backend container so the "
+            "loopback API and imported prompt builder are the same runtime"
+        )
+    return {
+        **endpoint_binding,
+        "container_marker": str(container_marker),
+        "same_container_prompt_binding": True,
+        "binding_method": (
+            "container marker + loopback API + imported production builder/source"
+        ),
+    }
+
+
+def _prompt_template_receipt(
+    rendered_at: datetime | None = None,
+) -> tuple[dict[str, Any], datetime]:
     from services.chat_orchestrator import _build_polymath_system_prompt
 
-    rendered_at = datetime.now().astimezone()
+    rendered_at = rendered_at or datetime.now().astimezone()
     rendered = _build_polymath_system_prompt(rendered_at)
+    source_payload = CHAT_ORCHESTRATOR_PATH.read_bytes()
     return (
         {
             "method_version": PROMPT_HASH_METHOD,
             "sha256": _sha256_bytes(rendered.encode("utf-8")),
+            "source_sha256": _sha256_bytes(source_payload),
+            "source_path": "services/chat_orchestrator.py",
             "rendered_for_local_date": rendered_at.strftime("%Y-%m-%d"),
             "rendered_for_timezone_name": rendered_at.tzname() or "local time",
             "utf8_bytes": len(rendered.encode("utf-8")),
@@ -767,30 +624,24 @@ def _prompt_template_receipt() -> tuple[dict[str, Any], datetime]:
 
 def _runtime_flags(expected_temporal: bool) -> dict[str, bool]:
     settings = get_settings()
-    observed = {
-        "relationship_evidence_allocation_enabled": bool(
-            settings.RELATIONSHIP_EVIDENCE_ALLOCATION_ENABLED
-        ),
-        "answerability_corpus_scope_v2_enabled": bool(
-            settings.ANSWERABILITY_CORPUS_SCOPE_V2_ENABLED
-        ),
-        "temporal_query_routing_enabled": bool(settings.TEMPORAL_QUERY_ROUTING_ENABLED),
-        "two_lane_anchoring_enabled": bool(settings.TWO_LANE_ANCHORING_ENABLED),
-        "four_lane_tier0_router_enabled": bool(settings.FOUR_LANE_TIER0_ROUTER_ENABLED),
-        "four_lane_subquery_decomposition_enabled": bool(
-            settings.FOUR_LANE_TIER0_SUBQUERY_DECOMPOSITION_ENABLED
-        ),
-        "atomic_claim_anchors_enabled": bool(settings.ATOMIC_CLAIM_ANCHORS_ENABLED),
-    }
     expected = {
-        "relationship_evidence_allocation_enabled": True,
-        "answerability_corpus_scope_v2_enabled": True,
-        "temporal_query_routing_enabled": expected_temporal,
-        "two_lane_anchoring_enabled": False,
-        "four_lane_tier0_router_enabled": False,
-        "four_lane_subquery_decomposition_enabled": False,
-        "atomic_claim_anchors_enabled": False,
+        "RELATIONSHIP_EVIDENCE_ALLOCATION_ENABLED": True,
+        "ANSWERABILITY_CORPUS_SCOPE_V2_ENABLED": True,
+        "TEMPORAL_QUERY_ROUTING_ENABLED": expected_temporal,
+        "RERANK_EVIDENCE_SUPPORT": False,
+        "ATOMIC_CLAIM_ANCHORS_ENABLED": False,
+        "PARENT_EXCERPT_ENABLED": False,
+        "WATERFALL_ASSEMBLY": False,
+        "TWO_LANE_ANCHORING": False,
+        "TWO_LANE_ANCHORING_ENABLED": False,
+        "HYDE_ENABLED": False,
+        "SHELF_RESERVE_ENABLED": False,
+        "GROUNDED_QUERY_PLANNER_ENABLED": False,
+        "FOUR_LANE_TIER0_ROUTER_ENABLED": False,
+        "FOUR_LANE_TIER0_SUBQUERY_DECOMPOSITION_ENABLED": False,
+        "AGENTIC_MODE_ENABLED": False,
     }
+    observed = {name: bool(getattr(settings, name)) for name in expected}
     if observed != expected:
         raise RuntimeError(
             "runtime flags do not match canonical harness contract: "
@@ -800,32 +651,63 @@ def _runtime_flags(expected_temporal: bool) -> dict[str, bool]:
 
 
 @contextmanager
-def _eval_lock(owner: str, wait_seconds: int) -> Iterator[None]:
+def _eval_lock(
+    owner: str,
+    wait_seconds: int,
+    *,
+    mode: str = "acquire",
+    lock_path: Path = LOCK_PATH,
+) -> Iterator[None]:
+    expected_payload = f"{owner}\n"
+    if mode == "assert-held":
+        try:
+            observed = lock_path.read_text(encoding="utf-8", errors="strict")
+        except FileNotFoundError as exc:
+            raise RuntimeError("eval lock is not held") from exc
+        if observed != expected_payload:
+            raise RuntimeError(
+                f"eval lock owner mismatch: {observed!r} != {expected_payload!r}"
+            )
+        try:
+            yield
+        finally:
+            try:
+                final_owner = lock_path.read_text(encoding="utf-8", errors="strict")
+            except FileNotFoundError as exc:
+                raise RuntimeError("assert-held eval lock disappeared") from exc
+            if final_owner != expected_payload:
+                raise RuntimeError("assert-held eval lock owner changed")
+        return
+    if mode != "acquire":
+        raise RuntimeError(f"unsupported eval lock mode: {mode!r}")
+
     deadline = time.monotonic() + max(0, wait_seconds)
     while True:
         try:
             descriptor = os.open(
-                LOCK_PATH,
+                lock_path,
                 os.O_WRONLY | os.O_CREAT | os.O_EXCL,
                 0o644,
             )
         except FileExistsError:
             if time.monotonic() >= deadline:
-                holder = LOCK_PATH.read_text(encoding="utf-8", errors="replace").strip()
-                raise RuntimeError(f"eval lock held by {holder or 'unknown'}")
+                holder = lock_path.read_text(encoding="utf-8", errors="replace")
+                raise RuntimeError(f"eval lock held by {holder!r}")
             time.sleep(60)
             continue
         with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            handle.write(owner + "\n")
+            handle.write(expected_payload)
         break
     try:
         yield
     finally:
         try:
-            if LOCK_PATH.read_text(encoding="utf-8", errors="replace").strip() == owner:
-                LOCK_PATH.unlink()
+            observed = lock_path.read_text(encoding="utf-8", errors="strict")
         except FileNotFoundError:
-            pass
+            raise RuntimeError("acquired eval lock disappeared before release")
+        if observed != expected_payload:
+            raise RuntimeError("acquired eval lock owner changed before release")
+        lock_path.unlink()
 
 
 def _seal_journal(state: dict[str, Any]) -> dict[str, Any]:
@@ -850,9 +732,17 @@ def _build_execution(
 ) -> dict[str, Any]:
     answer = str(raw["answer"])
     answerability = _extract_answerability(raw["traces"])
-    model_route = _extract_model_route(raw["traces"])
-    model_skipped = _model_skipped(raw["traces"])
-    classification = classify_refusal(answer, model_skipped=model_skipped)
+    trace_contract = validate_chat_trace_contract(
+        raw["traces"],
+        raw["done_events"],
+        expected_model=EXPECTED_CHAT_MODEL,
+    )
+    model_route = trace_contract["model_route"]
+    model_skipped = trace_contract["model_skipped"]
+    classification = classify_refusal(
+        answer,
+        model_skipped=model_skipped is True,
+    )
     sources = _source_receipt(
         raw["sources"],
         document_names,
@@ -860,15 +750,16 @@ def _build_execution(
     )
     effective_tier = _effective_tier(raw["traces"])
     technical_errors = list(raw["errors"])
-    if not raw["done"]:
-        technical_errors.append("missing SSE done event")
+    technical_errors.extend(trace_contract["errors"])
+    if len(raw["done_events"]) != 1:
+        technical_errors.append(
+            f"SSE done event count must be 1, observed {len(raw['done_events'])}"
+        )
     if effective_tier != TIER:
         technical_errors.append(f"effective tier mismatch: {effective_tier!r}")
     if not answerability:
         technical_errors.append("missing Answerability gate trace")
-    if not model_route.get("model"):
-        technical_errors.append("missing Chat model route trace/model")
-    if not model_skipped and not answer.strip():
+    if model_skipped is not True and not answer.strip():
         technical_errors.append("model-called response has empty answer")
     if not sources["all_in_selected_corpus"]:
         technical_errors.append("source escaped preregistered corpus selection")
@@ -898,7 +789,8 @@ def _build_execution(
             "returned_conversation_ids": raw["conversation_ids"],
         },
         "transport": {
-            "done_received": bool(raw["done"]),
+            "done_received": bool(raw["done_events"]),
+            "done_event_count": len(raw["done_events"]),
             "errors": list(raw["errors"]),
             "event_counts": raw["event_counts"],
             "elapsed_seconds": raw["elapsed_seconds"],
@@ -907,6 +799,7 @@ def _build_execution(
         "answerability": answerability,
         "model_skipped": model_skipped,
         "model_route": model_route,
+        "trace_contract": trace_contract,
         "system_prompt_template": dict(prompt_receipt),
         "classification": classification,
         "answer": {
@@ -936,21 +829,27 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--expected-temporal", choices=("off", "on"), required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--api", default="http://127.0.0.1:8000")
-    parser.add_argument("--token", default=os.getenv("POLYMATH_EVAL_TOKEN"))
     parser.add_argument("--request-timeout", type=float, default=600.0)
     parser.add_argument(
         "--lock-owner",
         default="codex/canonical-refusal-harness-20260717",
     )
     parser.add_argument("--lock-wait-seconds", type=int, default=0)
+    parser.add_argument(
+        "--lock-mode",
+        choices=("acquire", "assert-held"),
+        default="acquire",
+    )
     return parser
 
 
 def run(args: argparse.Namespace) -> int:
-    if not args.token:
-        raise RuntimeError("--token or POLYMATH_EVAL_TOKEN is required")
+    token = os.getenv("POLYMATH_EVAL_TOKEN")
+    if not token:
+        raise RuntimeError("POLYMATH_EVAL_TOKEN is required")
     if args.output.exists():
         raise RuntimeError("output already exists; choose a fresh journal path")
+    endpoint_binding = _validate_same_container_runtime(_validate_local_api(args.api))
 
     spec = _load_hashed_json(SPEC_PATH, SPEC_SHA256, "held-out negative spec")
     selection = _load_hashed_json(
@@ -980,11 +879,15 @@ def run(args: argparse.Namespace) -> int:
     cost_envelope = _cost_envelope()
     process_run_id = str(uuid.uuid4())
 
-    with _eval_lock(args.lock_owner, args.lock_wait_seconds):
+    with _eval_lock(
+        args.lock_owner,
+        args.lock_wait_seconds,
+        mode=args.lock_mode,
+    ):
         preflight = _embedder_preflight(args.api)
         document_names, corpus_receipt = _verify_corpus(
             args.api,
-            args.token,
+            token,
             selected_filenames,
         )
         prompt_receipt, prompt_rendered_at = _prompt_template_receipt()
@@ -1004,6 +907,8 @@ def run(args: argparse.Namespace) -> int:
             "top_k": TOP_K,
             "temperature": TEMPERATURE,
             "runtime_flags": runtime_flags,
+            "endpoint_binding": endpoint_binding,
+            "authentication": {"token_source": "POLYMATH_EVAL_TOKEN"},
             "embedder_preflight": preflight,
             "system_prompt_template": prompt_receipt,
             "cost_envelope": cost_envelope,
@@ -1037,7 +942,7 @@ def run(args: argparse.Namespace) -> int:
             print(f"EXECUTION_START {ordinal}/{EXECUTION_COUNT} {query_id}", flush=True)
             raw = _run_sse(
                 api=args.api,
-                token=args.token,
+                token=token,
                 question=str(case["question"]),
                 timeout=args.request_timeout,
             )
@@ -1067,20 +972,18 @@ def run(args: argparse.Namespace) -> int:
                 flush=True,
             )
 
-        current_prompt_time = datetime.now().astimezone()
-        prompt_context_stable = current_prompt_time.strftime(
-            "%Y-%m-%d"
-        ) == prompt_rendered_at.strftime("%Y-%m-%d") and (
-            current_prompt_time.tzname() or "local time"
-        ) == (
-            prompt_rendered_at.tzname() or "local time"
-        )
+        final_prompt_receipt, _ = _prompt_template_receipt(prompt_rendered_at)
+        prompt_context_stable = final_prompt_receipt == prompt_receipt
         if not prompt_context_stable:
             for row in state["executions"]:
                 row["technical"]["ok"] = False
                 row["technical"]["status"] = "failed"
                 row["technical"]["errors"].append(
-                    "system-prompt date/timezone changed during batch"
+                    "system-prompt rendered hash or source SHA changed during batch"
+                )
+                row["journal_complete"] = False
+                row["journal_completeness_errors"].append(
+                    "invalid:system_prompt_template.stability"
                 )
 
         counts = Counter(row["classification"]["state"] for row in state["executions"])
