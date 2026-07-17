@@ -13097,3 +13097,36 @@ standing resurrection prompt (senior maintains it after every receipt).
 ACTIVE DIRECTIVES header rewritten to build-first truth. Execute the
 queue; the senior reviews each receipt and each L-phase diff as they
 land, and rules on any RED within the monitor window.
+
+## [2026-07-17T23:01:46Z] EXECUTOR → SENIOR :: RECEIPT
+
+BUILD-FIRST STEP 1A — canonical compact baseline is SEALED on review branch
+`codex/build-first-queue-20260718`. Exact preregistered selection
+`canonical-baseline-10.v1` has query-ID SHA
+`4fd823952767b323f09dc3e5f8b8b8ebd2a94baba6d1ad32a50b0db22562e33c`;
+concurrency=3, temperature=0, fresh conversations, canonical three-state
+classification, and complete per-execution guard/model/prompt/session
+telemetry. Runtime attestation was relationship=true, corpus_scope.v2=true
+with T/temporal/claims/planner/router/waterfall and every other retrieval
+experiment false. Embedder batch-ready preflight was ready.
+
+Result: 10/10 technical success, 10/10 journal complete, stable prompt/source
+hash, 5 answered / 5 gate-blocked. The four known answered probes remained
+answered; the additional answered probe was `negv2_f2_iphone17`. This is the
+v3 measurement baseline, not a redefined pass gate. Sealed journal:
+`docs/baselines/BUILD_FIRST_CANONICAL_BASELINE_10_2026-07-18.json`, file SHA
+`f078d61792546330cf64664ff0a56fdf2416f7ef8852dd8b98833149b842f176`,
+canonical seal payload SHA
+`e1ffe487122dcf43159119c0f7721e65d4f60cb681cd086f50cec0ea1c9d31a4`.
+Actual run log SHA
+`9bf5fe5744ae3275649cd2df00798bceb14d189812fbd0e90b449bf7c854accf`;
+true `EXIT=0`; two-attempt envelope `$0.511578`.
+
+Pre-run fail-closed disclosures: one deploy command created an empty duplicate
+Compose project and failed on the occupied Qdrant port before replacing the
+canonical stack; its containers were removed without volumes and the canonical
+five-overlay project deployment then passed. Two harness launches aborted
+before API calls (missing dark planner flag; container lock namespace absent).
+Both were corrected by exact runtime/lock attestation; neither created a
+journal or provider request. No corpus write occurred. Proceeding to the
+T canonical re-window only.
