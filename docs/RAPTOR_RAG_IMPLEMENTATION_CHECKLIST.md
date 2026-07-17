@@ -4118,6 +4118,43 @@ A corpus is strict-ready only when:
   parity canary or fall back to serialized Mac evaluation.
 - Checklist boxes closed: `MLX-EVAL-STABILITY-V1`.
 
+### 2026-07-17 - FOUR-LANE-TIER0-ROUTER-V1 rejected live gate
+
+- Commit: review-branch implementation `b920876`; final receipt commit on
+  `codex/router-tier0-20260717`.
+- Owner: 2026-07-17 four-lane Tier-0 router mission.
+- Corpus/data scope: read-only retrieval over the immutable
+  `runpod_e2e_15doc_20260715` corpus; no corpus mutation.
+- Code changes: four independently attributable document-routing lanes,
+  quota/spillover fusion, optional cached decomposition plus fixed bridge
+  probe, and default-OFF settings.
+- Durable migration/backfill: none.
+- Before metrics: frozen direct=1.000, lay=1.000, relationship=0.750;
+  immutable bridge=4/6.
+- After metrics: frozen direct=1.000, lay=1.000, relationship=0.750;
+  immutable bridge=4/6. Negative refusal was 0.444 OFF and 0.333 ON; both
+  complete frozen arms remained honestly RED on that existing gate.
+- Tests by tier: 57 focused, 138 adjacent, compile/Black/build/baked-image
+  gates green; frozen OFF/ON each 51/51 technically complete; bridge ON 6/6
+  technically complete with four-lane attribution.
+- Cross-corpus test: Mark has 249 authorized digest projections, but exact
+  E2E↔Mark intersections are zero for document ID, source key, content hash,
+  and normalized filename. Cross-corpus reuse was rejected as a provenance
+  boundary violation.
+- Failure/rollback test: immutable bridge stayed RED at 4/6; no scorer,
+  threshold, title exception, or query exception changed. Canonical five-
+  overlay backend restored healthy with both flags absent/default-OFF.
+- Deployment image/health: temporary ON review image
+  `sha256:1628bda19bc595e8f023cd59934e1a93cca2196d9c0342d63df0ec5e54b1097a`;
+  canonical restored image
+  `sha256:bf79df8914b73fe50c3c52d2d8cccbbf9870167c42502009262b355218c385a3`.
+- Remaining risks: the associative lane has no lawful digest ontology for the
+  target E2E corpus, so existing grounded hints dominate the two failed
+  bridge cases.
+- Checklist boxes closed: none. `FOUR-LANE-TIER0-ROUTER-V1` remains open and
+  default-OFF; detailed receipt:
+  `docs/FOUR_LANE_TIER0_ROUTER_IMPLEMENTATION_RECEIPT_2026-07-17.md`.
+
 ## Implementation Log Template
 
 Copy this section for every completed item:
