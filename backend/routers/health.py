@@ -4,7 +4,7 @@
 
 import logging
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from models.schemas import HealthResponse
 from services.health_service import health_service
 
@@ -30,3 +30,19 @@ async def liveness():
     restarting dependency (Mongo/Qdrant/Neo4j/LiteLLM) cannot mark the backend
     container unhealthy when the app itself is fine."""
     return {"status": "alive"}
+
+
+@router.post("/health/embedder/batch-ready")
+async def embedder_batch_ready():
+    """Fail-closed local-embedder preflight for an evaluation batch."""
+
+    from services.embedder import preflight_local_embedder_for_eval_batch
+
+    try:
+        return await preflight_local_embedder_for_eval_batch()
+    except Exception as exc:
+        logger.error("Evaluation embedder preflight failed: %s", exc)
+        raise HTTPException(
+            status_code=503,
+            detail=f"evaluation embedder preflight failed: {exc}",
+        ) from exc

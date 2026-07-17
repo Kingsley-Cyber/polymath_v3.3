@@ -1492,7 +1492,7 @@ class RetrieverOrchestrator:
             embedded_vectors = await asyncio.wait_for(
                 embed_queries(embedding_texts, embedding_config),
                 timeout=_stage_timeout(
-                    float(getattr(settings, "QUERY_PLAN_EMBED_DEADLINE_SECONDS", 5.0)),
+                    float(getattr(settings, "QUERY_PLAN_EMBED_DEADLINE_SECONDS", 30.0)),
                     reserve=2.0,
                 ),
             )
@@ -1597,7 +1597,7 @@ class RetrieverOrchestrator:
                                 getattr(
                                     settings,
                                     "QUERY_PLAN_EMBED_DEADLINE_SECONDS",
-                                    5.0,
+                                    30.0,
                                 )
                             ),
                             reserve=1.0,
@@ -1627,7 +1627,7 @@ class RetrieverOrchestrator:
                                 getattr(
                                     settings,
                                     "QUERY_PLAN_EMBED_DEADLINE_SECONDS",
-                                    5.0,
+                                    30.0,
                                 )
                             ),
                             reserve=1.0,
@@ -2049,7 +2049,7 @@ class RetrieverOrchestrator:
                                     getattr(
                                         settings,
                                         "QUERY_PLAN_EMBED_DEADLINE_SECONDS",
-                                        5.0,
+                                        30.0,
                                     )
                                 ),
                                 reserve=1.0,

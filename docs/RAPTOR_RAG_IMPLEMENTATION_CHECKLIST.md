@@ -886,6 +886,18 @@ Acceptance:
 - [ ] Verify ingestion/backfill calls consistently use lower-priority classes.
 - [ ] Add or verify reranker-side priority admission.
 - [ ] Measure whether keepalive provides value after startup warmup.
+- [x] `MLX-EVAL-STABILITY-V1`: make sustained frozen-eval embedding fail
+  closed before scoring rather than timing out mid-run. The backend query
+  deadline must permit the 30-second local-client contract, local timeouts
+  receive one bounded retry, and an eval-batch preflight must health-check and
+  warm the production pooled connection. Acceptance is focused/adjacent tests
+  plus a true-exit 100-call sustained soak with zero failures.
+  *(GREEN on review branch `codex/mlx-embedder-stability-20260717`: isolated
+  focused/adjacent tests 24 passed; canonical container tests 15 passed;
+  100/100 sustained calls succeeded at concurrency 3 with zero failures,
+  2.839-second wall time, and true `EXIT=0`. Frozen eval specs/scorers remained
+  read-only. Receipt:
+  `docs/MLX_EMBEDDER_STABILITY_SOAK_RECEIPT_2026-07-17.md`.)*
 - [ ] Evaluate separate ingestion embedder capacity only if contention persists.
   *(merged + deployed both accounts (k695blmk52oscm/hlp9h3o4zd0v4d) + live-verified 2026-07-13: dim 1024, dual-account routing works; PROMOTION GATE: local-mxfp8 vs remote-fp cosine = 0.98, so runpod embed mode is approved for whole-corpus/bulk experiments only until a held-out recall A/B clears mixed-source use — never mix embedding sources within one collection)*
 
@@ -4064,6 +4076,34 @@ A corpus is strict-ready only when:
 - Checklist boxes closed: pinned endpoint artifact and retry-safety evidence
   are satisfied for the locked small gate; the parent P2.7 production-ready
   acceptance remains open until B7, fresh-corpus E2E, and scale/readiness work.
+
+### 2026-07-17 - MLX-EVAL-STABILITY-V1
+
+- Commit: this review-branch receipt commit on
+  `codex/mlx-embedder-stability-20260717`.
+- Owner: Step 0 of the 2026-07-17 owner mission; Step 0.5 routing remains a
+  separate parity-gated directive.
+- Corpus/data scope: read-only embedder probes and fixed synthetic soak text;
+  zero corpus-store mutation.
+- Code changes: 30-second query-plan embed deadline, one timeout retry,
+  120-second pooled keepalive, fail-closed health/warmup endpoint, preflight
+  command wrapper, and sustained-soak harness.
+- Durable migration/backfill: none.
+- Before metrics: two frozen regression runs had died at the outer 5-second
+  embedding timeout under sustained load.
+- After metrics: 100/100 calls, zero failures, 2.839-second wall time,
+  2,113.748 requests/minute, 1024 dimensions.
+- Tests by tier: isolated focused/adjacent 24 passed; canonical deployed
+  backend 15 passed; runtime contract and soak true `EXIT=0`.
+- Cross-corpus test: not applicable; no retrieval or corpus data changed.
+- Failure/rollback test: unit test proves a refused preflight never launches
+  the eval command; canonical five-overlay recreate is the runtime rollback.
+- Deployment image/health: temporary review image `fddb3eae...` healthy
+  against host MLX `:8082`; post-soak health ready, idle, queue 0, no error.
+- Remaining risks: client stability does not authorize mixed embedding
+  provenance. Owner-directed Step 0.5 must pass its preregistered Mac/RunPod
+  parity canary or fall back to serialized Mac evaluation.
+- Checklist boxes closed: `MLX-EVAL-STABILITY-V1`.
 
 ## Implementation Log Template
 
