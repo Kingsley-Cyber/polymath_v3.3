@@ -12433,3 +12433,47 @@ held-out RED log SHA-256 is
 `6345380ccb36331776515348c1e62adbee902a069910c1741516cdb5f2043832`.
 Conservative cumulative wave envelope is `$7.8783012 / $10.00`. No corpus
 write occurred.
+
+## [2026-07-17T18:34Z] SENIOR → EXECUTOR :: RULING — STEP1 window ACCEPTED (atomic law honored); attribution mini-run ordered; live evals HELD at ceiling after it
+
+Senior verification: STEP1 receipt artifacts match on disk (journal
+112c090b…, RED log 6345380c…). The window was executed correctly: frozen +
+temporal gates all GREEN on the three-flag stack (direct 94.44, lay 100,
+relationship 100, negatives 9/9, temporal 100/75), held-out v2 gate RED at
+3 answered (f2_oscar_2026, f3_deakins, f3_visual_story), early-stop on
+irrecoverable gate, temporal OFF, fail-safe verified. Process: CORRECT.
+
+SENIOR ATTRIBUTION ANALYSIS (unresolved, decisive for what happens next):
+- f2_oscar_2026 is a temporal query — plausibly temporal-caused (temporal
+  routing promotes time-matched evidence toward answerability).
+- f3_deakins / f3_visual_story are near-miss traps in a corpus saturated
+  with their vocabulary (cinematography/lens/visual/story). The
+  corpus_scope.v2 distinctive-term coverage heuristic plausibly clears 60%
+  on corpus text alone — meaning the CURRENT two-flag production stack may
+  fail these too, temporal or not. If so, the held-out gate has exposed a
+  real generalization gap in corpus_scope.v2 that the 9-negative gate
+  could not see — which is precisely why it exists.
+
+ORDER 1 — ATTRIBUTION MINI-RUN (measurement only, fits ceiling): run all
+19 not-yet-passed probes (3 answered + 16 unexecuted) against the CURRENT
+two-flag stack (temporal stays OFF). Envelope ≤$1.10 two-attempt. Record
+per-probe refuse/answer plus guard telemetry (coverage, matched/missing
+terms) in a sealed journal. NO fixes, NO threshold changes, NO tuning —
+the held-out set remains gate-only. Any future fix is designed from the
+FAMILY definitions in the 15:03Z preregistration, never fitted to
+individual probe text; touched families receive fresh probes at next
+freeze.
+
+ORDER 2 — CEILING HOLD: cumulative envelope is $7.8783 of $10.00. After
+the attribution run (→ ≈$8.99), ALL further live evals are HELD — R
+bridge, C, W, T, P one-call, and any temporal re-window do not fit. The
+ceiling raise is an OWNER decision (senior estimate to complete the wave:
+≈$10 more; recommendation to owner: raise to $20.00). Build-only work
+continues freely: Agent T build, dark ports, receipts — zero spend.
+
+Temporal disposition: OFF pending attribution. If F3 fails identically
+without temporal, temporal's only proven-specific failure is F2 — and the
+correct F2 fix is temporal-POWERED refusal (query time anchor beyond
+corpus temporal range → deterministic refusal signal), making temporal
+part of the solution, not the problem. Re-enablement only in a fresh
+atomic window after owner ceiling word.
