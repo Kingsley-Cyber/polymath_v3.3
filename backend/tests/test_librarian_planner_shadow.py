@@ -62,8 +62,9 @@ async def test_both_flags_off_do_not_enter_planner_path():
 
 @pytest.mark.asyncio
 async def test_shadow_records_plan_without_behavior_activation():
+    raw_query = "  What is narrative directing and why is it useful?  "
     plan = build_query_plan_v1(
-        "What is narrative directing?",
+        raw_query,
         corpus_id="c",
         corpus_doc_version="sha256:" + "a" * 64,
         requested_tier=RetrievalTier.qdrant_mongo,
@@ -71,7 +72,7 @@ async def test_shadow_records_plan_without_behavior_activation():
     fake = _FakePlanner(plan)
 
     result = await _build_librarian_plan_trace(
-        query="What is narrative directing?",
+        query=raw_query,
         corpus_ids=["c"],
         requested_tier=RetrievalTier.qdrant_mongo,
         enabled=False,
@@ -85,6 +86,7 @@ async def test_shadow_records_plan_without_behavior_activation():
     assert result["mode"] == "shadow"
     assert result["behavior_applied"] is False
     assert result["plan"]["plan_hash"] == plan.plan_hash
+    assert result["plan"]["subqueries"][0]["text"] == raw_query
     assert result["diagnostics"]["shortlist_calls"] == 0
     assert result["diagnostics"]["query_embedding_calls"] == 0
     assert result["diagnostics"]["provider_calls"] == 0

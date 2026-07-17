@@ -236,6 +236,47 @@ def test_named_source_requires_strong_title_match_not_generic_overlap():
     assert substring_missing.refusal_signals.named_source_missing is True
 
 
+def test_named_source_exact_short_title_precedes_length_threshold():
+    ai_title = (
+        LibrarianShortlistItemV1(
+            corpus_id="corpus",
+            doc_id="ai",
+            title="AI",
+            summary="Artificial intelligence.",
+            score=0.91,
+        ),
+    )
+    unrelated = (
+        LibrarianShortlistItemV1(
+            corpus_id="corpus",
+            doc_id="ml",
+            title="ML",
+            summary="Machine learning.",
+            score=0.91,
+        ),
+    )
+    generic = (
+        LibrarianShortlistItemV1(
+            corpus_id="corpus",
+            doc_id="the",
+            title="The",
+            summary="Generic token fixture.",
+            score=0.91,
+        ),
+    )
+
+    present = _plan("According to AI, what is the method?", shortlist=ai_title)
+    missing = _plan("According to AI, what is the method?", shortlist=unrelated)
+    generic_missing = _plan(
+        "According to The, what is the method?",
+        shortlist=generic,
+    )
+
+    assert present.refusal_signals.named_source_missing is False
+    assert missing.refusal_signals.named_source_missing is True
+    assert generic_missing.refusal_signals.named_source_missing is True
+
+
 def test_document_set_version_is_order_independent_and_content_sensitive():
     rows = [
         {
@@ -283,6 +324,28 @@ def test_document_set_version_changes_for_same_source_key_new_revision():
 
     first = corpus_doc_set_version_from_rows(first_rows, corpus_ids=["c"])
     second = corpus_doc_set_version_from_rows(second_rows, corpus_ids=["c"])
+
+    assert first != second
+
+
+def test_legacy_document_version_includes_updated_at_with_stable_source_key():
+    day_one = [
+        {
+            "corpus_id": "c",
+            "doc_id": "legacy",
+            "source_identity": {"source_key": "stable-source"},
+            "updated_at": "2026-07-17T00:00:00Z",
+        }
+    ]
+    day_two = [
+        {
+            **day_one[0],
+            "updated_at": "2026-07-18T00:00:00Z",
+        }
+    ]
+
+    first = corpus_doc_set_version_from_rows(day_one, corpus_ids=["c"])
+    second = corpus_doc_set_version_from_rows(day_two, corpus_ids=["c"])
 
     assert first != second
 
@@ -517,6 +580,88 @@ async def test_simple_shadow_bypasses_shortlist_embedding_and_cache(monkeypatch)
     assert second.plan.subqueries[0].text == second_query
     assert first.plan.plan_hash == second.plan.plan_hash
     assert first.plan.seat_assignment_bytes() == second.plan.seat_assignment_bytes()
+
+
+@pytest.mark.asyncio
+async def test_bare_conjunction_simple_query_is_zero_tier0_and_raw_exact(monkeypatch):
+    planner = LibrarianPlanner(cache=QueryPlanReplayCache())
+
+    async def fake_version(_db, _corpus_ids):
+        return _version("simple-conjunction")
+
+    async def forbidden_shortlist(*_args, **_kwargs):
+        raise AssertionError("bare 'and' must not trigger entity-bridge grounding")
+
+    monkeypatch.setattr(planner_module, "corpus_doc_set_version", fake_version)
+    monkeypatch.setattr(
+        planner_module,
+        "build_tier0_shortlist",
+        forbidden_shortlist,
+    )
+
+    raw_query = "  What is narrative directing and why is it useful?  "
+    result = await planner.build(
+        raw_query,
+        corpus_ids=["corpus"],
+        requested_tier="qdrant_mongo",
+        db=object(),
+        embedding_config=None,
+    )
+
+    assert result.plan.shape == "simple"
+    assert result.plan.subqueries[0].text == raw_query
+    assert result.plan.cache.hit is False
+    assert result.diagnostics["status"] == "simple_bypass"
+    assert result.diagnostics["shortlist_calls"] == 0
+    assert result.diagnostics["query_embedding_calls"] == 0
+    assert result.diagnostics["provider_calls"] == 0
+
+
+@pytest.mark.asyncio
+async def test_grounded_simple_fallback_preserves_raw_and_bypasses_cache(monkeypatch):
+    planner = LibrarianPlanner(cache=QueryPlanReplayCache())
+    shortlist_calls = {"count": 0}
+
+    async def fake_version(_db, _corpus_ids):
+        return _version("grounded-simple")
+
+    async def unrelated_shortlist(*_args, **_kwargs):
+        shortlist_calls["count"] += 1
+        return _shortlist(), {"status": "fake"}
+
+    monkeypatch.setattr(planner_module, "corpus_doc_set_version", fake_version)
+    monkeypatch.setattr(
+        planner_module,
+        "build_tier0_shortlist",
+        unrelated_shortlist,
+    )
+
+    first_query = "  Summarize Unknown Craft alongside Missing Practice.  "
+    second_query = "summarize unknown craft alongside missing practice"
+    first = await planner.build(
+        first_query,
+        corpus_ids=["corpus"],
+        requested_tier="qdrant_mongo",
+        db=object(),
+        embedding_config=None,
+    )
+    second = await planner.build(
+        second_query,
+        corpus_ids=["corpus"],
+        requested_tier="qdrant_mongo",
+        db=object(),
+        embedding_config=None,
+    )
+
+    assert shortlist_calls["count"] == 2
+    assert first.plan.shape == second.plan.shape == "simple"
+    assert first.plan.subqueries[0].text == first_query
+    assert second.plan.subqueries[0].text == second_query
+    assert first.plan.cache.hit is second.plan.cache.hit is False
+    assert first.diagnostics["status"] == "grounded_simple_bypass"
+    assert first.diagnostics["shortlist_calls"] == 1
+    assert first.diagnostics["query_embedding_calls"] == 1
+    assert first.diagnostics["provider_calls"] == 0
 
 
 @pytest.mark.asyncio
