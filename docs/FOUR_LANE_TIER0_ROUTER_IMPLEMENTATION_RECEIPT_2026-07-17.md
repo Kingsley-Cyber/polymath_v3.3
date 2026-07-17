@@ -1,7 +1,9 @@
 # Four-Lane Tier-0 Router — Implementation Receipt
 
-Date: 2026-07-17  
-Review branch: `codex/router-tier0-20260717`  
+Date: 2026-07-17
+
+Review branch: `codex/router-tier0-20260717`
+
 Implementation commit: `b920876`
 
 ## Scope
