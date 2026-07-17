@@ -1,0 +1,257 @@
+{
+  "n": 2872,
+  "tiers": {
+    "tier3_related": 2008,
+    "tier1_exact": 541,
+    "drop": 149,
+    "tier2_family": 174
+  },
+  "exact_precision": 0.73006993006993,
+  "exact_coverage": 0.24895543175487464,
+  "related_fallback_rate": 0.6991643454038997,
+  "drop_rate": 0.05188022284122563,
+  "useful_correct": 621,
+  "per_gold_predicate": {
+    "related_to": {
+      "gold_n": 120,
+      "exact_fired": 6,
+      "exact_correct": 0
+    },
+    "defines": {
+      "gold_n": 120,
+      "exact_fired": 7,
+      "exact_correct": 0
+    },
+    "affiliated_with": {
+      "gold_n": 120,
+      "exact_fired": 33,
+      "exact_correct": 0
+    },
+    "maps_to": {
+      "gold_n": 107,
+      "exact_fired": 7,
+      "exact_correct": 3
+    },
+    "detects": {
+      "gold_n": 120,
+      "exact_fired": 64,
+      "exact_correct": 59
+    },
+    "depends_on": {
+      "gold_n": 120,
+      "exact_fired": 43,
+      "exact_correct": 40
+    },
+    "part_of": {
+      "gold_n": 120,
+      "exact_fired": 30,
+      "exact_correct": 22
+    },
+    "excepts": {
+      "gold_n": 49,
+      "exact_fired": 4,
+      "exact_correct": 1
+    },
+    "synonym_of": {
+      "gold_n": 120,
+      "exact_fired": 36,
+      "exact_correct": 30
+    },
+    "represents": {
+      "gold_n": 120,
+      "exact_fired": 14,
+      "exact_correct": 10
+    },
+    "owns": {
+      "gold_n": 55,
+      "exact_fired": 9,
+      "exact_correct": 7
+    },
+    "causes": {
+      "gold_n": 120,
+      "exact_fired": 27,
+      "exact_correct": 22
+    },
+    "member_of": {
+      "gold_n": 120,
+      "exact_fired": 72,
+      "exact_correct": 62
+    },
+    "references": {
+      "gold_n": 120,
+      "exact_fired": 15,
+      "exact_correct": 0
+    },
+    "located_in": {
+      "gold_n": 120,
+      "exact_fired": 45,
+      "exact_correct": 35
+    },
+    "supports": {
+      "gold_n": 120,
+      "exact_fired": 40,
+      "exact_correct": 38
+    },
+    "created_by": {
+      "gold_n": 120,
+      "exact_fired": 35,
+      "exact_correct": 33
+    },
+    "derived_from": {
+      "gold_n": 120,
+      "exact_fired": 4,
+      "exact_correct": 1
+    },
+    "implements": {
+      "gold_n": 120,
+      "exact_fired": 57,
+      "exact_correct": 51
+    },
+    "instance_of": {
+      "gold_n": 120,
+      "exact_fired": 17,
+      "exact_correct": 3
+    },
+    "overrides": {
+      "gold_n": 120,
+      "exact_fired": 14,
+      "exact_correct": 5
+    },
+    "contradicts": {
+      "gold_n": 120,
+      "exact_fired": 6,
+      "exact_correct": 0
+    },
+    "produces": {
+      "gold_n": 120,
+      "exact_fired": 32,
+      "exact_correct": 25
+    },
+    "uses": {
+      "gold_n": 120,
+      "exact_fired": 23,
+      "exact_correct": 20
+    },
+    "works_for": {
+      "gold_n": 120,
+      "exact_fired": 71,
+      "exact_correct": 51
+    },
+    "preceded_by": {
+      "gold_n": 15,
+      "exact_fired": 1,
+      "exact_correct": 1
+    },
+    "during": {
+      "gold_n": 6,
+      "exact_fired": 3,
+      "exact_correct": 3
+    }
+  },
+  "predicted_precision": {
+    "depends_on": {
+      "fired": 46,
+      "correct": 40
+    },
+    "causes": {
+      "fired": 24,
+      "correct": 22
+    },
+    "member_of": {
+      "fired": 109,
+      "correct": 62
+    },
+    "works_for": {
+      "fired": 68,
+      "correct": 51
+    },
+    "detects": {
+      "fired": 66,
+      "correct": 59
+    },
+    "implements": {
+      "fired": 58,
+      "correct": 51
+    },
+    "produces": {
+      "fired": 31,
+      "correct": 25
+    },
+    "uses": {
+      "fired": 29,
+      "correct": 20
+    },
+    "created_by": {
+      "fired": 55,
+      "correct": 33
+    },
+    "stores": {
+      "fired": 12,
+      "correct": 0
+    },
+    "part_of": {
+      "fired": 32,
+      "correct": 22
+    },
+    "supports": {
+      "fired": 47,
+      "correct": 38
+    },
+    "located_in": {
+      "fired": 45,
+      "correct": 35
+    },
+    "defines": {
+      "fired": 1,
+      "correct": 0
+    },
+    "synonym_of": {
+      "fired": 30,
+      "correct": 30
+    },
+    "derived_from": {
+      "fired": 2,
+      "correct": 1
+    },
+    "affiliated_with": {
+      "fired": 3,
+      "correct": 0
+    },
+    "represents": {
+      "fired": 11,
+      "correct": 10
+    },
+    "example_of": {
+      "fired": 9,
+      "correct": 0
+    },
+    "during": {
+      "fired": 6,
+      "correct": 3
+    },
+    "maps_to": {
+      "fired": 7,
+      "correct": 3
+    },
+    "owns": {
+      "fired": 7,
+      "correct": 7
+    },
+    "preceded_by": {
+      "fired": 3,
+      "correct": 1
+    },
+    "overrides": {
+      "fired": 5,
+      "correct": 5
+    },
+    "instance_of": {
+      "fired": 8,
+      "correct": 3
+    },
+    "excepts": {
+      "fired": 1,
+      "correct": 1
+    }
+  }
+}
