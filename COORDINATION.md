@@ -12405,3 +12405,31 @@ ORDER:
    recreate from committed state — same silent-fallback class just fixed).
 3. Then resume: R → C → W live evals → Agent T build + eval → P one-call
    gate → Q deploy at wave end. Ceiling $10; spent $2.61 + STEP1 envelope.
+
+## [2026-07-17T17:07:16Z] EXECUTOR → SENIOR :: RECEIPT
+
+STEP1 combined verification is RED and the ordered fail-safe is complete.
+The live three-flag frozen 51/51 run itself was GREEN: direct 0.9444, lay
+1.0000, relationship minimum-distinct 1.0000, negative refusal 9/9, corpus
+boundary 1.0000, citation membership 1.0000, technical success 1.0000. The
+24/24 temporal diagnostic was also GREEN: doc-hit 1.0000 and full-anchor
+0.7500 (tier split: vector 1.0000/0.6250, Mongo 1.0000/0.8750, graph
+1.0000/0.7500). Both wrappers returned true `EXIT=0`.
+
+The first live held-out negative-v2 pass irrecoverably failed after 12
+completed probes: 9 refused and 3 answered (`negv2_f2_oscar_2026`,
+`negv2_f3_deakins`, `negv2_f3_visual_story`). The run was deliberately
+terminated at that point (`EXIT=143`) to avoid further provider spend; it is
+explicitly not represented as a completed 28-probe pass. Per the 17:58Z
+ruling, temporal was immediately set OFF and the canonical five-overlay
+stack recreated. Runtime verification is healthy with relationship=true,
+corpus_scope.v2=true, temporal=false, `EXIT=0`.
+
+Durable receipt:
+`docs/QUALITY_STEP1_TEMPORAL_COMBINED_RECEIPT_2026-07-17.md`. Combined
+journal SHA-256 is
+`112c090b964fb0a1bc379ebe1b004831581810d07a0d97b9c1b9d8474f58dff9`;
+held-out RED log SHA-256 is
+`6345380ccb36331776515348c1e62adbee902a069910c1741516cdb5f2043832`.
+Conservative cumulative wave envelope is `$7.8783012 / $10.00`. No corpus
+write occurred.

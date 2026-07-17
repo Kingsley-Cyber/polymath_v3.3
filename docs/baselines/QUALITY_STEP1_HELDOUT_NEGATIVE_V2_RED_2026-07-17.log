@@ -1,0 +1,57 @@
+EMBEDDER_PREFLIGHT={"embedder_url":"http://host.docker.internal:8082","keepalive_expiry_seconds":120.0,"model":"mlx-community/Qwen3-Embedding-0.6B-mxfp8","query_timeout_seconds":30.0,"queue_depth":0,"status":"ready","timeout_retries":1,"vector_dim":1024,"warmup_ms":57.423}
+/usr/local/lib/python3.11/site-packages/pydantic/_internal/_fields.py:149: UserWarning: Field "model_used" has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+/usr/local/lib/python3.11/site-packages/pydantic/_internal/_fields.py:149: UserWarning: Field "model_config_conversation" has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+/usr/local/lib/python3.11/site-packages/pydantic/_internal/_fields.py:149: UserWarning: Field "model_id" has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+/usr/local/lib/python3.11/site-packages/pydantic/_internal/_fields.py:149: UserWarning: Field "model_name" has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+/usr/local/lib/python3.11/site-packages/pydantic/_internal/_fields.py:149: UserWarning: Field "model_names" has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+/usr/local/lib/python3.11/site-packages/pydantic/_internal/_fields.py:149: UserWarning: Field "model_revision" has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+/usr/local/lib/python3.11/site-packages/pydantic/_internal/_fields.py:149: UserWarning: Field "model_batch_size" has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+QUERY_ROUTE_PREFLIGHT={"api_base": "https://opencode.ai/zen/go", "credential_present_and_decryptable": true, "model": "anthropic/minimax-m2.7", "pool_entry_count": 17, "pool_safe_sha256": "91bf6ceb54940ac467163624c3a92e2284f28cdbfda3863ccf4acc3671edadfe", "primary_entry_id": "96797107-07cb-4ebc-9df3-e0833193932e", "provider": "opencode-go-anthropic", "user_id": "6a132beafef900c17f87848e"}
+COST_ENVELOPE={"attempt_bound": 56, "ceiling_usd": 2.0, "completion_tokens_per_attempt_bound": 16384, "execution_count": 28, "input_tokens_per_attempt_bound": 19727, "input_usd": 0.3314136, "measurement_basis": {"evidence_conversion": "one evidence character equals one input token", "prior_max_evidence_chars": 13293, "prior_max_output_tokens": 631, "prior_model_calls": 50, "prior_total_output_tokens": 16058, "system_prompt_tokens": 2338, "wrapper_allowance_tokens": 4096}, "output_usd": 1.1010048, "rate_card": {"checked_at_utc": "2026-07-16", "model": "MiniMax M2.7", "output_usd_per_million": 1.2, "source": "https://opencode.ai/docs/go/", "uncached_input_usd_per_million": 0.3}, "schema_version": "chat_eval_cost_envelope.v1", "total_usd": 1.4324184}
+EXECUTION_START negv2_f1_crispr::qdrant_mongo_graph
+EXECUTION_START negv2_f1_qubit::qdrant_mongo_graph
+EXECUTION_DONE {"elapsed_seconds": 11.136, "execution_id": "negv2_f1_crispr::qdrant_mongo_graph", "fail_closed": true, "matched_expected_filenames": [], "min_distinct_met": true, "source_count": 7, "technical_ok": true}
+EXECUTION_START negv2_f1_diabetes::qdrant_mongo_graph
+EXECUTION_DONE {"elapsed_seconds": 12.81, "execution_id": "negv2_f1_qubit::qdrant_mongo_graph", "fail_closed": true, "matched_expected_filenames": [], "min_distinct_met": true, "source_count": 4, "technical_ok": true}
+EXECUTION_START negv2_f1_mrsa::qdrant_mongo_graph
+EXECUTION_DONE {"elapsed_seconds": 16.452, "execution_id": "negv2_f1_diabetes::qdrant_mongo_graph", "fail_closed": true, "matched_expected_filenames": [], "min_distinct_met": true, "source_count": 4, "technical_ok": true}
+EXECUTION_START negv2_f2_oscar_2026::qdrant_mongo_graph
+EXECUTION_DONE {"elapsed_seconds": 16.812, "execution_id": "negv2_f1_mrsa::qdrant_mongo_graph", "fail_closed": true, "matched_expected_filenames": [], "min_distinct_met": true, "source_count": 4, "technical_ok": true}
+EXECUTION_START negv2_f2_iphone17::qdrant_mongo_graph
+EXECUTION_DONE {"elapsed_seconds": 24.971, "execution_id": "negv2_f2_oscar_2026::qdrant_mongo_graph", "fail_closed": false, "matched_expected_filenames": [], "min_distinct_met": true, "source_count": 6, "technical_ok": true}
+EXECUTION_START negv2_f2_film_tax_2025::qdrant_mongo_graph
+EXECUTION_DONE {"elapsed_seconds": 15.992, "execution_id": "negv2_f2_iphone17::qdrant_mongo_graph", "fail_closed": true, "matched_expected_filenames": [], "min_distinct_met": true, "source_count": 4, "technical_ok": true}
+EXECUTION_START negv2_f2_amazon_2026::qdrant_mongo_graph
+EXECUTION_DONE {"elapsed_seconds": 14.994, "execution_id": "negv2_f2_film_tax_2025::qdrant_mongo_graph", "fail_closed": true, "matched_expected_filenames": [], "min_distinct_met": true, "source_count": 4, "technical_ok": true}
+EXECUTION_START negv2_f3_deakins::qdrant_mongo_graph
+EXECUTION_DONE {"elapsed_seconds": 8.588, "execution_id": "negv2_f2_amazon_2026::qdrant_mongo_graph", "fail_closed": true, "matched_expected_filenames": [], "min_distinct_met": true, "source_count": 4, "technical_ok": true}
+EXECUTION_START negv2_f3_save_the_cat::qdrant_mongo_graph
+EXECUTION_DONE {"elapsed_seconds": 24.844, "execution_id": "negv2_f3_deakins::qdrant_mongo_graph", "fail_closed": false, "matched_expected_filenames": [], "min_distinct_met": true, "source_count": 4, "technical_ok": true}
+EXECUTION_START negv2_f3_shopify_handbook::qdrant_mongo_graph
+EXECUTION_DONE {"elapsed_seconds": 15.666, "execution_id": "negv2_f3_save_the_cat::qdrant_mongo_graph", "fail_closed": true, "matched_expected_filenames": [], "min_distinct_met": true, "source_count": 5, "technical_ok": true}
+EXECUTION_START negv2_f3_visual_story::qdrant_mongo_graph
+EXECUTION_DONE {"elapsed_seconds": 13.101, "execution_id": "negv2_f3_shopify_handbook::qdrant_mongo_graph", "fail_closed": true, "matched_expected_filenames": [], "min_distinct_met": true, "source_count": 4, "technical_ok": true}
+EXECUTION_START negv2_f4_mark_facebook_ads::qdrant_mongo_graph
+EXECUTION_DONE {"elapsed_seconds": 27.147, "execution_id": "negv2_f3_visual_story::qdrant_mongo_graph", "fail_closed": false, "matched_expected_filenames": [], "min_distinct_met": true, "source_count": 4, "technical_ok": true}
+EXIT=143
