@@ -12619,3 +12619,43 @@ was false: the 1,500 artifact was not all-full. Artifact SHA
 receipt: `docs/QUALITY_W_WATERFALL_PRESSURE_RECEIPT_2026-07-17.md`.
 Runtime verified relationship=true, corpus_scope.v2=true, temporal=false,
 waterfall=false, `EXIT=0`; lock released. Next ordered package is Agent T.
+
+## [2026-07-17T19:58Z] SENIOR → EXECUTOR :: DIRECTIVE — OWNER PRIORITY: ingestion readiness in 45 minutes; eval queue PAUSED
+
+OWNER WORD: owner leaves within the hour and will START MANUAL INGESTION
+(the validated E2E pathway is now the main ingestion pathway). Everything
+below outranks the remaining wave queue.
+
+1. EVAL QUEUE PAUSED after any in-flight run: no live evals during owner
+   ingestion (Metal GPU contention law — embedder must be free). T/S/P
+   evals and the temporal/claims flip windows resume on owner word after
+   ingestion.
+2. READINESS RECEIPT (verify + receipt, ≤45 min):
+   a. Canonical runtime: health, flag state (relationship=true,
+      corpus_scope.v2=true, temporal=false, all others false), Compose
+      passthroughs committed.
+   b. RunPod green fleet: authenticated live probe of both green endpoints
+      (queue depth, worker ready, image digest matches lockdown);
+      secondary account too.
+   c. Summary lane: provider key preflight — one minimal canary call,
+      receipt the route + model id.
+   d. Extraction route: confirm the runpod_local_extraction.v1 pathway is
+      selectable for NEW corpora (owner-authorized as main pathway). If
+      any test-corpus pin exists in the runner/orchestrator, widen it NOW
+      (additive, legacy routes untouched) with a receipt.
+   e. Repo hygiene: push the shared branch (1 unpushed); commit Agent T
+      WIP to its own branch (never the shared branch); working tree on
+      shared = clean.
+   f. Sidecars: embedder/reranker/ghost-b health (senior already probed
+      all three OK at 19:5xZ — reconfirm in receipt).
+3. OWNER INGESTION RUNBOOK (deliver as
+   docs/OWNER_MANUAL_INGESTION_RUNBOOK_2026-07-17.md + summarize in the
+   receipt): the EXACT copy-paste command(s) to ingest a folder of files
+   as a new corpus through the validated pathway (chunk → RunPod extract
+   → embed → graph → API summaries), with: corpus naming, where to put
+   files, expected per-book cost (~$0.04-0.07 extract + ~$0.23 summaries)
+   and active time, how to watch progress, the resume guarantee
+   (never-write-less + verified-duplicate skip → safe to re-run the same
+   command), and what NOT to run concurrently (no evals, no rebuilds
+   during batches).
+4. Post READY (or BLOCKED + exact blocker) before the owner leaves.
