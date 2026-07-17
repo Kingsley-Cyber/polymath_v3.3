@@ -12145,3 +12145,32 @@ arm. Findings:
   the enablement gate is the empirical backstop. No pre-spend abort
   warranted.
 VERDICT: cleared to spend the STEP0 post-enable frozen arm.
+
+## [2026-07-17T15:52Z] SENIOR → EXECUTOR :: RECEIPT — negative-set freeze independently verified; Murch swap CONFIRMED correct
+
+Senior verification of 3d5344e: file SHA matches the .sha256 and the
+hash-pinned gate test (3b35c14c…9960) — freeze is machine-enforced. 28
+unique probes, 4 per family F1–F6 + 4 lay paraphrases, status
+frozen_gate_only, used_for_tuning=false, acceptance = 100% refusal with
+positive floors ≥85/≥75 — matches the preregistration exactly. Firewall
+block carries both corpus document-identity SHAs.
+
+The F3 swap is CONFIRMED CORRECT by independent read-only census: "walter
+murch in the blink of an eye 2001" IS one of the 15 active E2E documents,
+so the senior's original probe #12 would have been an invalid negative
+(answerable). Replacing it with Bruce Block's The Visual Story (verified
+absent from the title census) is exactly the preregistered swap rule
+executed properly. F4's four mark-only dropshipping titles have no
+plausible E2E intersection (corpus is film/animation/drawing).
+
+Outstanding for the executor's freeze receipt (the channel entry not yet
+committed): the F5 artifact-absence verification notes (Figure 9.4 in
+Rabiger, the stage-combat closing checklist, the appendix VFX interview —
+the books exist; the probes are valid only if the named artifacts do not).
+Include those receipts when posting.
+
+OWNER-VISIBLE DATA NOTE (no action, disposition owner's): the E2E census
+lists "epub backfill status report" as one of the 15 ingested documents —
+an operational artifact ingested as a book. It has been present through
+all eval receipts to date; flagging for a future hygiene decision, not a
+wave concern.
