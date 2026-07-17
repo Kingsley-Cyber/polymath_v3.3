@@ -1,0 +1,293 @@
+{
+  "captured_at": "2026-07-17T06:02:43Z",
+  "api": "http://127.0.0.1:8000",
+  "run": {
+    "out_suffix": "semantic_digest_on_authorized_rerun"
+  },
+  "summary": {
+    "tier": "qdrant_only",
+    "n": 9,
+    "doc_hit_rate": 0.778,
+    "doc_recall_mean": 0.648,
+    "concept_recall_mean": 0.648,
+    "answerability_ok_rate": 0.889,
+    "latency_mean_s": 16.571,
+    "errors": 0,
+    "by_shape": {
+      "direct": {
+        "n": 2,
+        "ans_ok": 2,
+        "hits": 1,
+        "with_docs": 2
+      },
+      "procedural": {
+        "n": 2,
+        "ans_ok": 2,
+        "hits": 2,
+        "with_docs": 2
+      },
+      "naive": {
+        "n": 1,
+        "ans_ok": 1,
+        "hits": 1,
+        "with_docs": 1
+      },
+      "list": {
+        "n": 1,
+        "ans_ok": 1,
+        "hits": 1,
+        "with_docs": 1
+      },
+      "single_fact": {
+        "n": 1,
+        "ans_ok": 0,
+        "hits": 1,
+        "with_docs": 1
+      },
+      "broad": {
+        "n": 1,
+        "ans_ok": 1,
+        "hits": 0,
+        "with_docs": 1
+      },
+      "followup": {
+        "n": 1,
+        "ans_ok": 1,
+        "hits": 1,
+        "with_docs": 1
+      }
+    }
+  },
+  "results": [
+    {
+      "id": "q021",
+      "shape": "direct",
+      "tier": "qdrant_only",
+      "question": "What is 'dry testing' and how is it used to validate products?",
+      "doc_hit": true,
+      "doc_recall": 1.0,
+      "concept_recall": 1.0,
+      "refused": false,
+      "answerability_ok": true,
+      "returned_doc_count": 6,
+      "returned_corpora": [
+        "5a20bc21-95df-42c2-80c8-f927b4e83904"
+      ],
+      "total_s": 14.118,
+      "first_token_s": 14.114,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 4.793499793999217,
+        "chunks": 6,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "**Dry testing** is a rapid validation method for e-commerce products that skips the traditional upfront investment of building a full store. Instead, you deploy a \"vibecoded lander\" (VCL) \u2014 a landing page \u2014 in under 30 m"
+    },
+    {
+      "id": "q022",
+      "shape": "procedural",
+      "tier": "qdrant_only",
+      "question": "How should I structure Facebook ad testing after the Andromeda update?",
+      "doc_hit": true,
+      "doc_recall": 1.0,
+      "concept_recall": 1.0,
+      "refused": false,
+      "answerability_ok": true,
+      "returned_doc_count": 2,
+      "returned_corpora": [
+        "5a20bc21-95df-42c2-80c8-f927b4e83904"
+      ],
+      "total_s": 19.953,
+      "first_token_s": 19.949,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 5.764875878001476,
+        "chunks": 3,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "The core shift post-Andromeda is moving from testing many small variations of winning ads toward prioritizing **creative diversity** with entirely new concepts. Facebook's AI now groups ads rather than evaluating them in"
+    },
+    {
+      "id": "q023",
+      "shape": "naive",
+      "tier": "qdrant_only",
+      "question": "I can't sit still and focus for more than five minutes. What should I do?",
+      "doc_hit": true,
+      "doc_recall": 1.0,
+      "concept_recall": 0.333,
+      "refused": false,
+      "answerability_ok": true,
+      "returned_doc_count": 3,
+      "returned_corpora": [
+        "5a20bc21-95df-42c2-80c8-f927b4e83904"
+      ],
+      "total_s": 5.76,
+      "first_token_s": 5.755,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 4.3354544609974255,
+        "chunks": 3,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "## Why This Happens (and What the Evidence Shows)\n\nYour five-minute ceiling is a *loop problem*, not a motivation problem. The retrieved corpus frames this around two interlocking ideas: **deep work** and **exit protocol"
+    },
+    {
+      "id": "q024",
+      "shape": "list",
+      "tier": "qdrant_only",
+      "question": "Which AI tools does the author rank highest for dropshipping work?",
+      "doc_hit": true,
+      "doc_recall": 0.5,
+      "concept_recall": 1.0,
+      "refused": false,
+      "answerability_ok": true,
+      "returned_doc_count": 2,
+      "returned_corpora": [
+        "5a20bc21-95df-42c2-80c8-f927b4e83904"
+      ],
+      "total_s": 14.851,
+      "first_token_s": 14.847,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 4.796125336000841,
+        "chunks": 2,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "The retrieved transcripts don't show the full tier list, but **Claude (specifically Sonnet 4)** emerges as the tool the author highlights most strongly for dropshipping work \u2014 describing it as \"a copywriter in your pocke"
+    },
+    {
+      "id": "q025",
+      "shape": "single_fact",
+      "tier": "qdrant_only",
+      "question": "What does the author claim is the core psychological mechanism behind quiz funnels?",
+      "doc_hit": true,
+      "doc_recall": 1.0,
+      "concept_recall": 0.0,
+      "refused": true,
+      "answerability_ok": false,
+      "returned_doc_count": 3,
+      "returned_corpora": [
+        "5a20bc21-95df-42c2-80c8-f927b4e83904"
+      ],
+      "total_s": 24.976,
+      "first_token_s": 24.975,
+      "answerability": {
+        "status": "weak",
+        "required_coverage": 0.0,
+        "answer_shape": "synthesis",
+        "diagnostic_source": "retriever_sufficiency+evidence_plan"
+      },
+      "retrieval_metadata": {
+        "duration_s": 9.54766267100058,
+        "chunks": 3,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "I cannot answer that as a source-backed result from the selected corpus. The retrieval found some related material, but it did not establish author, claim, core, psychological strongly enough to support the question. The"
+    },
+    {
+      "id": "q026",
+      "shape": "broad",
+      "tier": "qdrant_only",
+      "question": "Summarize the recurring mindset advice across these videos.",
+      "doc_hit": false,
+      "doc_recall": 0.0,
+      "concept_recall": 0.0,
+      "refused": false,
+      "answerability_ok": true,
+      "returned_doc_count": 4,
+      "returned_corpora": [
+        "5a20bc21-95df-42c2-80c8-f927b4e83904"
+      ],
+      "total_s": 14.605,
+      "first_token_s": 14.601,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 4.745504086000437,
+        "chunks": 4,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "## Recurring Mindset Advice\n\nThe videos converge on a few core ideas:\n\n**Process over outcomes.** Success comes from obsessing over reps and inputs, not the end result. One speaker explicitly frames this as a spectrum \u2014 "
+    },
+    {
+      "id": "q027",
+      "shape": "direct",
+      "tier": "qdrant_only",
+      "question": "What is the 'chad funnel' strategy?",
+      "doc_hit": false,
+      "doc_recall": 0.0,
+      "concept_recall": 1.0,
+      "refused": false,
+      "answerability_ok": true,
+      "returned_doc_count": 4,
+      "returned_corpora": [
+        "5a20bc21-95df-42c2-80c8-f927b4e83904"
+      ],
+      "total_s": 20.638,
+      "first_token_s": 20.634,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 5.64956508600153,
+        "chunks": 4,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "**The Chad funnel** is a multi-step ecommerce strategy that routes cold traffic through a pre-sales page before reaching the actual product sales page, in contrast to the standard ad-to-product-page approach.\n\nThe struct"
+    },
+    {
+      "id": "q028",
+      "shape": "procedural",
+      "tier": "qdrant_only",
+      "question": "How do I create AI video ads with Sora 2 according to these transcripts?",
+      "doc_hit": true,
+      "doc_recall": 1.0,
+      "concept_recall": 1.0,
+      "refused": false,
+      "answerability_ok": true,
+      "returned_doc_count": 2,
+      "returned_corpora": [
+        "5a20bc21-95df-42c2-80c8-f927b4e83904"
+      ],
+      "total_s": 19.002,
+      "first_token_s": 18.997,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 5.832702961000905,
+        "chunks": 4,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "## The 5-Step Sora 2 Video Ad Workflow\n\nCreating Sora 2 video ads that perform follows a straightforward pipeline: **find a swipe \u2192 rewrite it \u2192 storyboard \u2192 generate prompts \u2192 produce the clips**.\n\n| Step | What to Do |"
+    },
+    {
+      "id": "q029",
+      "shape": "followup",
+      "tier": "qdrant_only",
+      "question": "And how much budget should each ad set get?",
+      "doc_hit": true,
+      "doc_recall": 0.333,
+      "concept_recall": 0.5,
+      "refused": false,
+      "answerability_ok": true,
+      "returned_doc_count": 3,
+      "returned_corpora": [
+        "5a20bc21-95df-42c2-80c8-f927b4e83904"
+      ],
+      "total_s": 15.235,
+      "first_token_s": 15.227,
+      "answerability": null,
+      "retrieval_metadata": {
+        "duration_s": 3.0109882930009917,
+        "chunks": 3,
+        "corpus_floor": null
+      },
+      "error": null,
+      "answer_head": "From the retrieved context, the testing structure uses **$90/day total with CBO** split across 3 ad sets, 3 concepts, and 3 ads per concept (9 total ads). That works out to roughly **$30/day per ad set**.\n\nThe actual mec"
+    }
+  ]
+}

@@ -73,7 +73,7 @@ PARENT_CHUNKS_SCHEMA: dict = {
                     "ephemeral",
                     "unknown",
                     None,
-                ]
+                ],
             },
             "time_expressions": {
                 "bsonType": ["array", "null"],
@@ -422,9 +422,7 @@ PROJECTION_MANIFESTS_SCHEMA: dict = {
                 "properties": {
                     "model_id": {"bsonType": "string"},
                     "dims": {"bsonType": ["int", "long"]},
-                    "quantization": {
-                        "enum": ["float32", "float16", "mxfp8", "binary"]
-                    },
+                    "quantization": {"enum": ["float32", "float16", "mxfp8", "binary"]},
                     "instruction_version": {"bsonType": "string"},
                     "document_side_instruction": {"enum": ["raw"]},
                 },
@@ -479,9 +477,7 @@ PROJECTION_OUTBOX_SCHEMA: dict = {
                 "pattern": r"^projm:[0-9a-f]{64}$",
             },
             "op": {"enum": ["upsert", "delete"]},
-            "state": {
-                "enum": ["pending", "in_flight", "applied", "failed", "dead"]
-            },
+            "state": {"enum": ["pending", "in_flight", "applied", "failed", "dead"]},
             "attempt_count": {
                 "bsonType": ["int", "long"],
                 "minimum": 0,
@@ -492,6 +488,199 @@ PROJECTION_OUTBOX_SCHEMA: dict = {
             },
             "last_error": {"bsonType": ["string", "null"]},
         },
+    }
+}
+
+# Activation adds explicit physical targets, source locators, and recoverable
+# leases.  v1 documents remain valid and unchanged; v2 is an additive branch
+# of each collection validator rather than a silent reinterpretation of v1.
+_PROJECTION_MANIFEST_V1_JSON_SCHEMA = PROJECTION_MANIFESTS_SCHEMA["$jsonSchema"]
+_PROJECTION_OUTBOX_V1_JSON_SCHEMA = PROJECTION_OUTBOX_SCHEMA["$jsonSchema"]
+
+_PROJECTION_MANIFEST_V2_JSON_SCHEMA: dict = {
+    "bsonType": "object",
+    "required": [
+        "schema_version",
+        "manifest_id",
+        "store",
+        "family",
+        "representation_role",
+        "source_schema_hashes",
+        "payload_schema_hash",
+        "embedding_profile",
+        "search_compat",
+        "target",
+        "recipe_version",
+    ],
+    "additionalProperties": False,
+    "properties": {
+        "schema_version": {"enum": ["projection_manifest.v2"]},
+        "manifest_id": {"bsonType": "string", "pattern": r"^projm:[0-9a-f]{64}$"},
+        "store": {"enum": ["qdrant"]},
+        "family": {"bsonType": "string", "minLength": 1},
+        "representation_role": {"bsonType": "string", "minLength": 1},
+        "source_schema_hashes": {
+            "bsonType": "object",
+            "additionalProperties": {"bsonType": "string", "pattern": _SHA256_PATTERN},
+        },
+        "payload_schema_hash": {"bsonType": "string", "pattern": _SHA256_PATTERN},
+        "embedding_profile": {
+            **_PROJECTION_MANIFEST_V1_JSON_SCHEMA["properties"]["embedding_profile"],
+            "bsonType": "object",
+            "required": [
+                "model_id",
+                "model_revision",
+                "dims",
+                "quantization",
+                "instruction_version",
+                "document_side_instruction",
+                "sparse_recipe_version",
+            ],
+            "properties": {
+                **_PROJECTION_MANIFEST_V1_JSON_SCHEMA["properties"][
+                    "embedding_profile"
+                ]["properties"],
+                "model_revision": {"bsonType": "string", "minLength": 1},
+                "sparse_recipe_version": {"enum": ["none"]},
+            },
+        },
+        "search_compat": {
+            **_PROJECTION_MANIFEST_V1_JSON_SCHEMA["properties"]["search_compat"],
+            "bsonType": "object",
+        },
+        "target": {
+            "bsonType": "object",
+            "required": ["collection_name", "vector_name"],
+            "additionalProperties": False,
+            "properties": {
+                "collection_name": {"bsonType": "string", "minLength": 1},
+                "vector_name": {"bsonType": "string", "minLength": 1},
+            },
+        },
+        "recipe_version": {"bsonType": "string", "minLength": 1},
+        "rollback_predecessor": {
+            "bsonType": ["string", "null"],
+            "pattern": r"^projm:[0-9a-f]{64}$",
+        },
+    },
+}
+
+_PROJECTION_OUTBOX_V2_JSON_SCHEMA: dict = {
+    "bsonType": "object",
+    "required": [
+        "schema_version",
+        "outbox_id",
+        "artifact_revision_id",
+        "manifest_id",
+        "point_id",
+        "projected_payload_hash",
+        "op",
+        "source",
+        "state",
+        "attempt_count",
+        "max_attempts",
+        "created_at",
+        "updated_at",
+    ],
+    "additionalProperties": False,
+    "properties": {
+        "schema_version": {"enum": ["projection_outbox.v2"]},
+        "outbox_id": {"bsonType": "string", "pattern": r"^outbox:[0-9a-f]{64}$"},
+        "artifact_revision_id": {
+            "bsonType": "string",
+            "pattern": r"^rev:[0-9a-f]{64}$",
+        },
+        "manifest_id": {"bsonType": "string", "pattern": r"^projm:[0-9a-f]{64}$"},
+        "point_id": {"bsonType": "string", "minLength": 1},
+        "projected_payload_hash": {"bsonType": "string", "pattern": _SHA256_PATTERN},
+        "op": {"enum": ["upsert", "delete"]},
+        "source": {
+            "bsonType": "object",
+            "required": [
+                "source_kind",
+                "source_collection",
+                "source_id",
+                "ownership_collection",
+                "ownership_id",
+                "artifact_id",
+                "corpus_id",
+                "doc_id",
+                "source_version_id",
+                "parent_id",
+                "parent_text_hash",
+                "source_child_ids_hash",
+                "source_child_count",
+            ],
+            "additionalProperties": False,
+            "properties": {
+                "source_kind": {"enum": ["semantic_digest_cache"]},
+                "source_collection": {"enum": ["semantic_digest_cache"]},
+                "source_id": {"bsonType": "string", "minLength": 1},
+                "ownership_collection": {"enum": ["semantic_digest_jobs"]},
+                "ownership_id": {"bsonType": "string", "minLength": 1},
+                "artifact_id": {"bsonType": "string", "minLength": 1},
+                "corpus_id": {"bsonType": "string", "minLength": 1},
+                "doc_id": {"bsonType": "string", "minLength": 1},
+                "source_version_id": {"bsonType": "string", "minLength": 1},
+                "parent_id": {"bsonType": "string", "minLength": 1},
+                "parent_text_hash": {"bsonType": "string", "pattern": _SHA256_PATTERN},
+                "source_child_ids_hash": {
+                    "bsonType": "string",
+                    "pattern": _SHA256_PATTERN,
+                },
+                "source_child_count": {"bsonType": ["int", "long"], "minimum": 1},
+            },
+        },
+        "state": {"enum": ["pending", "in_flight", "applied", "failed", "dead"]},
+        "attempt_count": {"bsonType": ["int", "long"], "minimum": 0},
+        "max_attempts": {"bsonType": ["int", "long"], "minimum": 1},
+        "created_at": {"bsonType": "date"},
+        "updated_at": {"bsonType": "date"},
+        "lease_owner": {"bsonType": ["string", "null"]},
+        "lease_expires_at": {"bsonType": ["date", "null"]},
+        "applied_at": {"bsonType": ["date", "null"]},
+        "application_receipt": {
+            "bsonType": ["object", "null"],
+            "required": [
+                "schema_version",
+                "target_collection",
+                "vector_name",
+                "point_id",
+                "projected_payload_hash",
+                "operation_id",
+                "applied_at",
+                "reconciled",
+            ],
+            "additionalProperties": False,
+            "properties": {
+                "schema_version": {"enum": ["projection_application_receipt.v1"]},
+                "target_collection": {"bsonType": "string", "minLength": 1},
+                "vector_name": {"bsonType": "string", "minLength": 1},
+                "point_id": {"bsonType": "string", "minLength": 1},
+                "projected_payload_hash": {
+                    "bsonType": "string",
+                    "pattern": _SHA256_PATTERN,
+                },
+                "operation_id": {"bsonType": ["string", "null"]},
+                "applied_at": {"bsonType": "date"},
+                "reconciled": {"enum": [True]},
+            },
+        },
+        "last_error": {"bsonType": ["string", "null"]},
+    },
+}
+
+PROJECTION_MANIFESTS_SCHEMA = {
+    "$jsonSchema": {
+        "oneOf": [
+            _PROJECTION_MANIFEST_V1_JSON_SCHEMA,
+            _PROJECTION_MANIFEST_V2_JSON_SCHEMA,
+        ]
+    }
+}
+PROJECTION_OUTBOX_SCHEMA = {
+    "$jsonSchema": {
+        "oneOf": [_PROJECTION_OUTBOX_V1_JSON_SCHEMA, _PROJECTION_OUTBOX_V2_JSON_SCHEMA]
     }
 }
 
@@ -524,9 +713,7 @@ async def apply_validators(db, *, action: str = "warn") -> dict:
     Never raises for a single collection failure.
     """
     if action not in _VALID_ACTIONS:
-        raise ValueError(
-            f"action must be one of {_VALID_ACTIONS!r}, got {action!r}"
-        )
+        raise ValueError(f"action must be one of {_VALID_ACTIONS!r}, got {action!r}")
 
     results: dict = {}
     for collection, schema in VALIDATORS.items():

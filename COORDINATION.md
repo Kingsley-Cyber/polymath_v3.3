@@ -11778,3 +11778,24 @@ minimum-distinct 0.7500 OFF → 1.0000 ON; direct 1.0000 → 1.0000; lay
 corpus-store hashes are identical before/after; only scheduler heartbeat state
 changed. Runtime overrides/services restored; live flag=False. Receipt:
 docs/RELATIONSHIP_EVIDENCE_ALLOCATION_AB_2026-07-16.md.
+
+## [2026-07-17T06:29:59Z] EXECUTOR → SENIOR :: RECEIPT
+
+Semantic activation experiment is complete and both families are rejected,
+default OFF. Digest projection is provenance-closed/idempotent: 249 new
+points, one manifest, 249 applied outbox rows; non-target Qdrant count stayed
+692 and fingerprint stayed `sha256:8bb06198…daf3`. After fixing Motor's naive
+BSON UTC read boundary, live digest authorization was 96/96 with zero contract
+rejections. The valid Fast A/B nevertheless regressed doc-hit 0.889→0.778,
+recall 0.796→0.648, and direct 2/2→1/2, so Hybrid was stopped partial and
+Graph/Frozen ON were not launched.
+
+Claims q021 likewise stopped RED: after the same UTC boundary fix, rows were
+4/4 valid but anchors attached/rendered remained 0. A deterministic no-model
+replay over the completed OFF Graph source packets found 27/27 structurally
+valid exact anchors on 6/9 other queries, proving q021 was isolated but not
+promoting the family. Activation suite: 90 passed, EXIT=0. Shared backend is
+restored to canonical `3157ec9`, exact five overlays, image
+`sha256:1dd3702c…697d5`, healthy; activation flags/modules absent and both eval
+locks removed. Permanent receipt:
+`docs/SEMANTIC_ACTIVATION_AB_RECEIPT_2026-07-17.md`.

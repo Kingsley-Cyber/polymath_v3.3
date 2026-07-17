@@ -1,0 +1,2442 @@
+{
+  "completed_at_utc": "2026-07-17T05:24:36.414307+00:00",
+  "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+  "preregistration_sha256": "8f70b1d375120862712fa4a44abad5ca7eb38eb0fbc7d3a3a86e79f4827bc110",
+  "results": [
+    {
+      "all_sources_in_selected_corpus": true,
+      "answer_chars": 413,
+      "answer_excerpt": "I cannot answer that as a source-backed result from the selected corpus. The retrieval found some related material, but it did not establish definition strongly enough to support the question. The nearest retrieved material comes from: paul-ekman-facial-action-coding-system-manual-0.md; force-dynamic-life-drawing.md. Try a broader corpus/search scope or ask for the narrower part the retrieved sources do cover.",
+      "answer_sha256": "563e6c886e54dd72988175aa0a7f0ef6cc8a14d69b4ca09d16bf4d1ba396f74d",
+      "distinct_target_count": 1,
+      "doc_hit": true,
+      "done_received": true,
+      "effective_tier": "qdrant_only",
+      "elapsed_seconds": 28.185,
+      "errors": [],
+      "evidence_anchor_diagnostics": {
+        "Paul Ekman - Facial Action Coding System Manual (0).md": {
+          "all_anchors_hit": true,
+          "anchor_count": 1,
+          "anchor_hits": [
+            "Facial Action Coding System"
+          ]
+        }
+      },
+      "execution_id": "direct_facs::qdrant_only",
+      "expected_filenames": [
+        "Paul Ekman - Facial Action Coding System Manual (0).md"
+      ],
+      "expected_min_distinct": 1,
+      "fail_closed": null,
+      "matched_expected_filenames": [
+        "Paul Ekman - Facial Action Coding System Manual (0).md"
+      ],
+      "min_distinct_met": true,
+      "model_skipped": true,
+      "must_refuse": false,
+      "query_id": "direct_facs",
+      "question": "What is the Facial Action Coding System used to code?",
+      "refusal_marker_hits": [
+        "cannot answer",
+        "did not establish"
+      ],
+      "shape": "direct_expert",
+      "source_count": 3,
+      "source_filenames": [
+        "Force Dynamic Life Drawing.md",
+        "Paul Ekman - Facial Action Coding System Manual (0).md"
+      ],
+      "source_membership_count": 3,
+      "tier": "qdrant_only"
+    },
+    {
+      "all_sources_in_selected_corpus": true,
+      "answer_chars": 210,
+      "answer_excerpt": "FACS is used to **code facial expressions** by breaking them down into discrete muscle motions called Action Units (AUs), which deconstruct and taxonomize the appearances and changes produced on the human face.",
+      "answer_sha256": "eba3c01734fd68760bc2b6452a7f4d22d3666c012713c0c745fb50ec287aa358",
+      "distinct_target_count": 1,
+      "doc_hit": true,
+      "done_received": true,
+      "effective_tier": "qdrant_mongo",
+      "elapsed_seconds": 30.445,
+      "errors": [],
+      "evidence_anchor_diagnostics": {
+        "Paul Ekman - Facial Action Coding System Manual (0).md": {
+          "all_anchors_hit": true,
+          "anchor_count": 1,
+          "anchor_hits": [
+            "Facial Action Coding System"
+          ]
+        }
+      },
+      "execution_id": "direct_facs::qdrant_mongo",
+      "expected_filenames": [
+        "Paul Ekman - Facial Action Coding System Manual (0).md"
+      ],
+      "expected_min_distinct": 1,
+      "fail_closed": null,
+      "matched_expected_filenames": [
+        "Paul Ekman - Facial Action Coding System Manual (0).md"
+      ],
+      "min_distinct_met": true,
+      "model_skipped": false,
+      "must_refuse": false,
+      "query_id": "direct_facs",
+      "question": "What is the Facial Action Coding System used to code?",
+      "refusal_marker_hits": [],
+      "shape": "direct_expert",
+      "source_count": 4,
+      "source_filenames": [
+        "Force Dynamic Life Drawing.md",
+        "Paul Ekman - Facial Action Coding System Manual (0).md",
+        "VES Handbook of Visual Effects.md",
+        "Walter Murch - In the Blink of an Eye (2001).md"
+      ],
+      "source_membership_count": 4,
+      "tier": "qdrant_mongo"
+    },
+    {
+      "all_sources_in_selected_corpus": true,
+      "answer_chars": 1220,
+      "answer_excerpt": "**Facial Action Coding System (FACS)** codes the individual muscle motions of the human face — the discrete actions that, when combined, produce any facial expression.\n\nThe system taxonomizes these movements into **Action Units** (AU) and **Action Descriptors** (AD), each mapped to a specific muscle or muscle group. The evidence covers motions across the full face: jaw actions (thrust, sideways shift, clench, bite), lip actions (puff, suck, wipe), nasal actions (nostril dilator, nostril compress",
+      "answer_sha256": "8177662e7be55a2336d377418ce13956c252ec1526a3e9cf110478f2ae90b83a",
+      "distinct_target_count": 1,
+      "doc_hit": true,
+      "done_received": true,
+      "effective_tier": "qdrant_mongo_graph",
+      "elapsed_seconds": 41.409,
+      "errors": [],
+      "evidence_anchor_diagnostics": {
+        "Paul Ekman - Facial Action Coding System Manual (0).md": {
+          "all_anchors_hit": true,
+          "anchor_count": 1,
+          "anchor_hits": [
+            "Facial Action Coding System"
+          ]
+        }
+      },
+      "execution_id": "direct_facs::qdrant_mongo_graph",
+      "expected_filenames": [
+        "Paul Ekman - Facial Action Coding System Manual (0).md"
+      ],
+      "expected_min_distinct": 1,
+      "fail_closed": null,
+      "matched_expected_filenames": [
+        "Paul Ekman - Facial Action Coding System Manual (0).md"
+      ],
+      "min_distinct_met": true,
+      "model_skipped": false,
+      "must_refuse": false,
+      "query_id": "direct_facs",
+      "question": "What is the Facial Action Coding System used to code?",
+      "refusal_marker_hits": [],
+      "shape": "direct_expert",
+      "source_count": 3,
+      "source_filenames": [
+        "Paul Ekman - Facial Action Coding System Manual (0).md",
+        "VES Handbook of Visual Effects.md"
+      ],
+      "source_membership_count": 3,
+      "tier": "qdrant_mongo_graph"
+    },
+    {
+      "all_sources_in_selected_corpus": true,
+      "answer_chars": 730,
+      "answer_excerpt": "**Murch's Rule of Six** defines an ideal cut as one satisfying all six criteria simultaneously:\n\n1. **Emotion** — true to the feeling of the moment\n2. **Story** — advances the narrative\n3. **Rhythm** — occurs at a moment that is rhythmically \"right\"\n4. **Eye-trace** — guides the audience's focus of interest within the frame\n5. **Planarity** — respects the grammar of three dimensions transposed to two (stage-line, etc.)\n6. **Three-dimensional continuity** — maintains the actual spatial relationsh",
+      "answer_sha256": "40825dd8a11273d51dc11b698fa2b93ca7a854a00aa2753cc761d07992775d13",
+      "distinct_target_count": 1,
+      "doc_hit": true,
+      "done_received": true,
+      "effective_tier": "qdrant_only",
+      "elapsed_seconds": 16.043,
+      "errors": [],
+      "evidence_anchor_diagnostics": {
+        "Walter Murch - In the Blink of an Eye (2001).md": {
+          "all_anchors_hit": false,
+          "anchor_count": 1,
+          "anchor_hits": []
+        }
+      },
+      "execution_id": "direct_rule_of_six::qdrant_only",
+      "expected_filenames": [
+        "Walter Murch - In the Blink of an Eye (2001).md"
+      ],
+      "expected_min_distinct": 1,
+      "fail_closed": null,
+      "matched_expected_filenames": [
+        "Walter Murch - In the Blink of an Eye (2001).md"
+      ],
+      "min_distinct_met": true,
+      "model_skipped": false,
+      "must_refuse": false,
+      "query_id": "direct_rule_of_six",
+      "question": "What factors make up Walter Murch's Rule of Six for deciding a cut?",
+      "refusal_marker_hits": [],
+      "shape": "direct_expert",
+      "source_count": 3,
+      "source_filenames": [
+        "Grammar of the Edit.md",
+        "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md",
+        "Walter Murch - In the Blink of an Eye (2001).md"
+      ],
+      "source_membership_count": 3,
+      "tier": "qdrant_only"
+    },
+    {
+      "all_sources_in_selected_corpus": true,
+      "answer_chars": 1165,
+      "answer_excerpt": "## Walter Murch's Rule of Six\n\nMurch frames the ideal cut as one that satisfies six criteria simultaneously, listed here in his hierarchy from most to least important:\n\n| Priority | Criterion | What it means |\n|----------|-----------|---------------|\n| 1 | **Emotion** | The cut is true to the feeling of the moment |\n| 2 | **Story** | The cut advances the narrative |\n| 3 | **Rhythm** | The cut lands at a moment that feels rhythmically \"right\" |\n| 4 | **Eye-trace** | The cut respects where the aud",
+      "answer_sha256": "09aeef67b75dc66f80e8fd1278a23f595855f1e7c956c447f60918d3c401615a",
+      "distinct_target_count": 1,
+      "doc_hit": true,
+      "done_received": true,
+      "effective_tier": "qdrant_mongo",
+      "elapsed_seconds": 35.816,
+      "errors": [],
+      "evidence_anchor_diagnostics": {
+        "Walter Murch - In the Blink of an Eye (2001).md": {
+          "all_anchors_hit": false,
+          "anchor_count": 1,
+          "anchor_hits": []
+        }
+      },
+      "execution_id": "direct_rule_of_six::qdrant_mongo",
+      "expected_filenames": [
+        "Walter Murch - In the Blink of an Eye (2001).md"
+      ],
+      "expected_min_distinct": 1,
+      "fail_closed": null,
+      "matched_expected_filenames": [
+        "Walter Murch - In the Blink of an Eye (2001).md"
+      ],
+      "min_distinct_met": true,
+      "model_skipped": false,
+      "must_refuse": false,
+      "query_id": "direct_rule_of_six",
+      "question": "What factors make up Walter Murch's Rule of Six for deciding a cut?",
+      "refusal_marker_hits": [],
+      "shape": "direct_expert",
+      "source_count": 5,
+      "source_filenames": [
+        "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md",
+        "Walter Murch - In the Blink of an Eye (2001).md"
+      ],
+      "source_membership_count": 5,
+      "tier": "qdrant_mongo"
+    },
+    {
+      "all_sources_in_selected_corpus": true,
+      "answer_chars": 1099,
+      "answer_excerpt": "**Walter Murch's Rule of Six** is a hierarchy of six criteria for evaluating film cuts, ranked from most to least important.\n\n| Rank | Criterion | Role |\n|------|-----------|------|\n| 1 | **Emotion** | Most critical — audiences remember how they felt |\n| 2 | **Story** | Narrative progression |\n| 3 | **Rhythm** | Pacing and temporal feel of the cut |\n| 4 | **Eye-trace** | Movement of the viewer's gaze across the frame |\n| 5 | **Planarity** | Continuity of screen direction and 2D geometry |\n| 6 | ",
+      "answer_sha256": "bf9bc0c3ae7a4289aafe2ab81de7c881a5226dd97328f4ca02781fe45eb13b74",
+      "distinct_target_count": 1,
+      "doc_hit": true,
+      "done_received": true,
+      "effective_tier": "qdrant_mongo_graph",
+      "elapsed_seconds": 31.573,
+      "errors": [],
+      "evidence_anchor_diagnostics": {
+        "Walter Murch - In the Blink of an Eye (2001).md": {
+          "all_anchors_hit": false,
+          "anchor_count": 1,
+          "anchor_hits": []
+        }
+      },
+      "execution_id": "direct_rule_of_six::qdrant_mongo_graph",
+      "expected_filenames": [
+        "Walter Murch - In the Blink of an Eye (2001).md"
+      ],
+      "expected_min_distinct": 1,
+      "fail_closed": null,
+      "matched_expected_filenames": [
+        "Walter Murch - In the Blink of an Eye (2001).md"
+      ],
+      "min_distinct_met": true,
+      "model_skipped": false,
+      "must_refuse": false,
+      "query_id": "direct_rule_of_six",
+      "question": "What factors make up Walter Murch's Rule of Six for deciding a cut?",
+      "refusal_marker_hits": [],
+      "shape": "direct_expert",
+      "source_count": 3,
+      "source_filenames": [
+        "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md",
+        "Walter Murch - In the Blink of an Eye (2001).md"
+      ],
+      "source_membership_count": 3,
+      "tier": "qdrant_mongo_graph"
+    },
+    {
+      "all_sources_in_selected_corpus": true,
+      "answer_chars": 1236,
+      "answer_excerpt": "**Bayesian reasoning bridges the gap between raw movement features and symbolic LMA labels** by treating the mapping as a probabilistic process rather than a deterministic one. The core problem the paper addresses is that computational human movement analysis lacks a general modelling language to map features into symbols — LMA provides the observational and notational framework, while Bayesian reasoning provides the computational mechanism.\n\nThe Bayesian framework operates in two key ways: it *",
+      "answer_sha256": "31d17c2242c543880ef1db9345310debaa787667a86417ff1d843470a904e1d9",
+      "distinct_target_count": 1,
+      "doc_hit": true,
+      "done_received": true,
+      "effective_tier": "qdrant_only",
+      "elapsed_seconds": 21.986,
+      "errors": [],
+      "evidence_anchor_diagnostics": {
+        "[International Journal of Reasoning-based Intelligent Systems vol. 2 iss. 1] Bayesian reasoning for Laban Movement Analysis used in human-machine interaction{Rett, Jorg_ Dias, Jorge_ Ahuactzin, Juan Manuel}(2010)[1.md": {
+          "all_anchors_hit": true,
+          "anchor_count": 2,
+          "anchor_hits": [
+            "Laban Movement Analysis",
+            "human-machine interaction"
+          ]
+        }
+      },
+      "execution_id": "direct_laban_machine::qdrant_only",
+      "expected_filenames": [
+        "[International Journal of Reasoning-based Intelligent Systems vol. 2 iss. 1] Bayesian reasoning for Laban Movement Analysis used in human-machine interaction{Rett, Jorg_ Dias, Jorge_ Ahuactzin, Juan Manuel}(2010)[1.md"
+      ],
+      "expected_min_distinct": 1,
+      "fail_closed": null,
+      "matched_expected_filenames": [
+        "[International Journal of Reasoning-based Intelligent Systems vol. 2 iss. 1] Bayesian reasoning for Laban Movement Analysis used in human-machine interaction{Rett, Jorg_ Dias, Jorge_ Ahuactzin, Juan Manuel}(2010)[1.md"
+      ],
+      "min_distinct_met": true,
+      "model_skipped": false,
+      "must_refuse": false,
+      "query_id": "direct_laban_machine",
+      "question": "How is Bayesian reasoning applied to Laban Movement Analysis in human-machine interaction?",
+      "refusal_marker_hits": [],
+      "shape": "direct_expert",
+      "source_count": 2,
+      "source_filenames": [
+        "Richard Williams - The Animator's Survival Kit (2002, Faber & Faber).md",
+        "[International Journal of Reasoning-based Intelligent Systems vol. 2 iss. 1] Bayesian reasoning for Laban Movement Analysis used in human-machine interaction{Rett, Jorg_ Dias, Jorge_ Ahuactzin, Juan Manuel}(2010)[1.md"
+      ],
+      "source_membership_count": 2,
+      "tier": "qdrant_only"
+    },
+    {
+      "all_sources_in_selected_corpus": true,
+      "answer_chars": 1805,
+      "answer_excerpt": "**Bayesian reasoning maps physical movement features to LMA symbols through learned probabilistic dependencies, enabling real-time classification on social robots.** The 2010 Rett, Dias, and Ahuactzin paper identifies a core gap: computational movement analysis lacks a general language for translating raw features into meaningful symbols. LMA fills this by providing both an observational model and a notational system (Labanotation), while Bayesian reasoning supplies the inference machinery to li",
+      "answer_sha256": "0ae7e81bd74e650f7b5694a3886a94d533513da876f4b85e1c943b3dce79e187",
+      "distinct_target_count": 1,
+      "doc_hit": true,
+      "done_received": true,
+      "effective_tier": "qdrant_mongo",
+      "elapsed_seconds": 32.731,
+      "errors": [],
+      "evidence_anchor_diagnostics": {
+        "[International Journal of Reasoning-based Intelligent Systems vol. 2 iss. 1] Bayesian reasoning for Laban Movement Analysis used in human-machine interaction{Rett, Jorg_ Dias, Jorge_ Ahuactzin, Juan Manuel}(2010)[1.md": {
+          "all_anchors_hit": true,
+          "anchor_count": 2,
+          "anchor_hits": [
+            "Laban Movement Analysis",
+            "human-machine interaction"
+          ]
+        }
+      },
+      "execution_id": "direct_laban_machine::qdrant_mongo",
+      "expected_filenames": [
+        "[International Journal of Reasoning-based Intelligent Systems vol. 2 iss. 1] Bayesian reasoning for Laban Movement Analysis used in human-machine interaction{Rett, Jorg_ Dias, Jorge_ Ahuactzin, Juan Manuel}(2010)[1.md"
+      ],
+      "expected_min_distinct": 1,
+      "fail_closed": null,
+      "matched_expected_filenames": [
+        "[International Journal of Reasoning-based Intelligent Systems vol. 2 iss. 1] Bayesian reasoning for Laban Movement Analysis used in human-machine interaction{Rett, Jorg_ Dias, Jorge_ Ahuactzin, Juan Manuel}(2010)[1.md"
+      ],
+      "min_distinct_met": true,
+      "model_skipped": false,
+      "must_refuse": false,
+      "query_id": "direct_laban_machine",
+      "question": "How is Bayesian reasoning applied to Laban Movement Analysis in human-machine interaction?",
+      "refusal_marker_hits": [],
+      "shape": "direct_expert",
+      "source_count": 5,
+      "source_filenames": [
+        "Richard Williams - The Animator's Survival Kit (2002, Faber & Faber).md",
+        "[International Journal of Reasoning-based Intelligent Systems vol. 2 iss. 1] Bayesian reasoning for Laban Movement Analysis used in human-machine interaction{Rett, Jorg_ Dias, Jorge_ Ahuactzin, Juan Manuel}(2010)[1.md"
+      ],
+      "source_membership_count": 5,
+      "tier": "qdrant_mongo"
+    },
+    {
+      "all_sources_in_selected_corpus": true,
+      "answer_chars": 3027,
+      "answer_excerpt": "# Bayesian Reasoning for Laban Movement Analysis in Human-Machine Interaction\n\nThe computational pairing of Bayesian reasoning with Laban Movement Analysis solves a core problem in human-machine interaction: bridging raw sensor data to semantic meaning. LMA provides the vocabulary—motion-entities that map to Effort qualities like Space, Time, Weight, and Flow—while Bayesian reasoning provides the probabilistic machinery to infer which LMA labels best explain observed movement, handle uncertainty",
+      "answer_sha256": "0e44ad398a7bb55e9d67dfc042fe4778f4601ce4c07a7f5a6a33aec66ebb299e",
+      "distinct_target_count": 1,
+      "doc_hit": true,
+      "done_received": true,
+      "effective_tier": "qdrant_mongo_graph",
+      "elapsed_seconds": 49.812,
+      "errors": [],
+      "evidence_anchor_diagnostics": {
+        "[International Journal of Reasoning-based Intelligent Systems vol. 2 iss. 1] Bayesian reasoning for Laban Movement Analysis used in human-machine interaction{Rett, Jorg_ Dias, Jorge_ Ahuactzin, Juan Manuel}(2010)[1.md": {
+          "all_anchors_hit": true,
+          "anchor_count": 2,
+          "anchor_hits": [
+            "Laban Movement Analysis",
+            "human-machine interaction"
+          ]
+        }
+      },
+      "execution_id": "direct_laban_machine::qdrant_mongo_graph",
+      "expected_filenames": [
+        "[International Journal of Reasoning-based Intelligent Systems vol. 2 iss. 1] Bayesian reasoning for Laban Movement Analysis used in human-machine interaction{Rett, Jorg_ Dias, Jorge_ Ahuactzin, Juan Manuel}(2010)[1.md"
+      ],
+      "expected_min_distinct": 1,
+      "fail_closed": null,
+      "matched_expected_filenames": [
+        "[International Journal of Reasoning-based Intelligent Systems vol. 2 iss. 1] Bayesian reasoning for Laban Movement Analysis used in human-machine interaction{Rett, Jorg_ Dias, Jorge_ Ahuactzin, Juan Manuel}(2010)[1.md"
+      ],
+      "min_distinct_met": true,
+      "model_skipped": false,
+      "must_refuse": false,
+      "query_id": "direct_laban_machine",
+      "question": "How is Bayesian reasoning applied to Laban Movement Analysis in human-machine interaction?",
+      "refusal_marker_hits": [],
+      "shape": "direct_expert",
+      "source_count": 5,
+      "source_filenames": [
+        "Paul Ekman - Facial Action Coding System Manual (0).md",
+        "[International Journal of Reasoning-based Intelligent Systems vol. 2 iss. 1] Bayesian reasoning for Laban Movement Analysis used in human-machine interaction{Rett, Jorg_ Dias, Jorge_ Ahuactzin, Juan Manuel}(2010)[1.md"
+      ],
+      "source_membership_count": 5,
+      "tier": "qdrant_mongo_graph"
+    },
+    {
+      "all_sources_in_selected_corpus": true,
+      "answer_chars": 1392,
+      "answer_excerpt": "**Grammar of the Edit** teaches that cutting decisions should be driven by storytelling rather than formula. The editor forms the story using the grammar of the edit—the underlying language for splicing together picture and sound elements—and this grammar governs *when* to cut and *where* to place cuts. Shots, rhythm, pacing, and transitions must serve the story to keep the audience engaged, informed, and entertained.\n\nThe \"when\" of cutting is guided by principles of continuity, emotional impact",
+      "answer_sha256": "62753db722bb66964114e7ce3b054735f4a886f246ac1f45338cfe2ba283bce5",
+      "distinct_target_count": 1,
+      "doc_hit": true,
+      "done_received": true,
+      "effective_tier": "qdrant_only",
+      "elapsed_seconds": 32.239,
+      "errors": [],
+      "evidence_anchor_diagnostics": {
+        "Grammar of the Edit.md": {
+          "all_anchors_hit": true,
+          "anchor_count": 2,
+          "anchor_hits": [
+            "Grammar of the Edit",
+            "when"
+          ]
+        }
+      },
+      "execution_id": "direct_edit_grammar::qdrant_only",
+      "expected_filenames": [
+        "Grammar of the Edit.md"
+      ],
+      "expected_min_distinct": 1,
+      "fail_closed": null,
+      "matched_expected_filenames": [
+        "Grammar of the Edit.md"
+      ],
+      "min_distinct_met": true,
+      "model_skipped": false,
+      "must_refuse": false,
+      "query_id": "direct_edit_grammar",
+      "question": "What does Grammar of the Edit teach about when and where to cut a visual story?",
+      "refusal_marker_hits": [],
+      "shape": "direct_expert",
+      "source_count": 5,
+      "source_filenames": [
+        "Force Dynamic Life Drawing.md",
+        "Grammar of the Edit.md",
+        "Mateu-Mestre - Framed Ink 2 (2021).md",
+        "Walter Murch - In the Blink of an Eye (2001).md"
+      ],
+      "source_membership_count": 5,
+      "tier": "qdrant_only"
+    },
+    {
+      "all_sources_in_selected_corpus": true,
+      "answer_chars": 2337,
+      "answer_excerpt": "**Grammar of the Edit** teaches that cutting decisions should serve the story first—each cut answers *when* to move the viewer forward and *where* in the frame that movement lands. The book frames editing as a grammar: shot selection, continuity, pacing, sound, and color correction are the vocabulary, while the cut itself is the punctuation that makes meaning legible.\n\n## When to Cut: The Decision Logic\n\nThe book emphasizes two complementary questions: **Is the cut necessary?** and **Does it car",
+      "answer_sha256": "ec6e958a5eb8e0aa55f3658ee42afaf2497a63cd6ee46357c334e8189d036b00",
+      "distinct_target_count": 1,
+      "doc_hit": true,
+      "done_received": true,
+      "effective_tier": "qdrant_mongo",
+      "elapsed_seconds": 35.854,
+      "errors": [],
+      "evidence_anchor_diagnostics": {
+        "Grammar of the Edit.md": {
+          "all_anchors_hit": true,
+          "anchor_count": 2,
+          "anchor_hits": [
+            "Grammar of the Edit",
+            "when"
+          ]
+        }
+      },
+      "execution_id": "direct_edit_grammar::qdrant_mongo",
+      "expected_filenames": [
+        "Grammar of the Edit.md"
+      ],
+      "expected_min_distinct": 1,
+      "fail_closed": null,
+      "matched_expected_filenames": [
+        "Grammar of the Edit.md"
+      ],
+      "min_distinct_met": true,
+      "model_skipped": false,
+      "must_refuse": false,
+      "query_id": "direct_edit_grammar",
+      "question": "What does Grammar of the Edit teach about when and where to cut a visual story?",
+      "refusal_marker_hits": [],
+      "shape": "direct_expert",
+      "source_count": 2,
+      "source_filenames": [
+        "Blain Brown - Cinematography - Theory and Practice (2016).md",
+        "Grammar of the Edit.md"
+      ],
+      "source_membership_count": 2,
+      "tier": "qdrant_mongo"
+    },
+    {
+      "all_sources_in_selected_corpus": true,
+      "answer_chars": 1328,
+      "answer_excerpt": "**When and where to cut** a visual story, according to *Grammar of the Edit*, follows a visual grammar analogous to written language.\n\nAn edit is a **cut point**—the place where one shot ends and another begins. The editor determines where to place that cut based on traditional guidelines that function like grammar in writing: selecting shots (visual \"words\") and assembling them into sequences (\"sentences\") that inform, entertain, or evoke emotion. Audiences have learned to \"read\" this visual la",
+      "answer_sha256": "1da3b52d4fe666d285e2e2cb5ccee398d583a6086605d10ede55a8c7957e47fe",
+      "distinct_target_count": 1,
+      "doc_hit": true,
+      "done_received": true,
+      "effective_tier": "qdrant_mongo_graph",
+      "elapsed_seconds": 32.237,
+      "errors": [],
+      "evidence_anchor_diagnostics": {
+        "Grammar of the Edit.md": {
+          "all_anchors_hit": true,
+          "anchor_count": 2,
+          "anchor_hits": [
+            "Grammar of the Edit",
+            "when"
+          ]
+        }
+      },
+      "execution_id": "direct_edit_grammar::qdrant_mongo_graph",
+      "expected_filenames": [
+        "Grammar of the Edit.md"
+      ],
+      "expected_min_distinct": 1,
+      "fail_closed": null,
+      "matched_expected_filenames": [
+        "Grammar of the Edit.md"
+      ],
+      "min_distinct_met": true,
+      "model_skipped": false,
+      "must_refuse": false,
+      "query_id": "direct_edit_grammar",
+      "question": "What does Grammar of the Edit teach about when and where to cut a visual story?",
+      "refusal_marker_hits": [],
+      "shape": "direct_expert",
+      "source_count": 5,
+      "source_filenames": [
+        "Blain Brown - Cinematography - Theory and Practice (2016).md",
+        "Force Dynamic Life Drawing.md",
+        "Grammar of the Edit.md",
+        "Mateu-Mestre - Framed Ink 2 (2021).md"
+      ],
+      "source_membership_count": 5,
+      "tier": "qdrant_mongo_graph"
+    },
+    {
+      "all_sources_in_selected_corpus": true,
+      "answer_chars": 1205,
+      "answer_excerpt": "Movable body masses combine in figure sculpture through **position combinations** and **angular relationships**, enabling sculptors to construct and simplify the torso systematically.\n\n**Key combination methods:**\n- **Position combinations** — masses arrange as erect, tipped back, rotated, or tilted\n- **Angular relationships** — the iliac crest line relates to the abdomen to establish spatial alignment\n- **Proportion measurement** — masses are proportioned using head units as a consistent scale ",
+      "answer_sha256": "f9639cfa9f7a9166e8804cd06428481c1a57b06560a331709b5997c1846fd35d",
+      "distinct_target_count": 1,
+      "doc_hit": true,
+      "done_received": true,
+      "effective_tier": "qdrant_only",
+      "elapsed_seconds": 23.366,
+      "errors": [],
+      "evidence_anchor_diagnostics": {
+        "Anatomy for Sculptors.md": {
+          "all_anchors_hit": true,
+          "anchor_count": 1,
+          "anchor_hits": [
+            "POSITION COMBINATIONS OF MOVABLE MASSES"
+          ]
+        }
+      },
+      "execution_id": "direct_anatomy_masses::qdrant_only",
+      "expected_filenames": [
+        "Anatomy for Sculptors.md"
+      ],
+      "expected_min_distinct": 1,
+      "fail_closed": null,
+      "matched_expected_filenames": [
+        "Anatomy for Sculptors.md"
+      ],
+      "min_distinct_met": true,
+      "model_skipped": false,
+      "must_refuse": false,
+      "query_id": "direct_anatomy_masses",
+      "question": "How do movable body masses combine in figure anatomy for sculptors?",
+      "refusal_marker_hits": [],
+      "shape": "direct_expert",
+      "source_count": 2,
+      "source_filenames": [
+        "Anatomy for Sculptors.md"
+      ],
+      "source_membership_count": 2,
+      "tier": "qdrant_only"
+    },
+    {
+      "all_sources_in_selected_corpus": true,
+      "answer_chars": 1405,
+      "answer_excerpt": "In figure anatomy for sculptors, movable body masses combine through a system of **position combinations** that express how the torso and its parts relate spatially — the main categories being **erect, tipped back, rotated, and tilted** arrangements. These combinations define the proportional relationships between major body segments, with proportions typically measured in **head units** as a standardized scale. The source identifies several movable masses as distinct blocks that can shift relat",
+      "answer_sha256": "991f9042de7a6602207d365147c9358df15369a78ab903a01be774a17dcf320c",
+      "distinct_target_count": 1,
+      "doc_hit": true,
+      "done_received": true,
+      "effective_tier": "qdrant_mongo",
+      "elapsed_seconds": 23.798,
+      "errors": [],
+      "evidence_anchor_diagnostics": {
+        "Anatomy for Sculptors.md": {
+          "all_anchors_hit": true,
+          "anchor_count": 1,
+          "anchor_hits": [
+            "POSITION COMBINATIONS OF MOVABLE MASSES"
+          ]
+        }
+      },
+      "execution_id": "direct_anatomy_masses::qdrant_mongo",
+      "expected_filenames": [
+        "Anatomy for Sculptors.md"
+      ],
+      "expected_min_distinct": 1,
+      "fail_closed": null,
+      "matched_expected_filenames": [
+        "Anatomy for Sculptors.md"
+      ],
+      "min_distinct_met": true,
+      "model_skipped": false,
+      "must_refuse": false,
+      "query_id": "direct_anatomy_masses",
+      "question": "How do movable body masses combine in figure anatomy for sculptors?",
+      "refusal_marker_hits": [],
+      "shape": "direct_expert",
+      "source_count": 2,
+      "source_filenames": [
+        "Anatomy for Sculptors.md"
+      ],
+      "source_membership_count": 2,
+      "tier": "qdrant_mongo"
+    },
+    {
+      "all_sources_in_selected_corpus": true,
+      "answer_chars": 1980,
+      "answer_excerpt": "In figure sculpture, **movable body masses** are anatomical regions that can shift position independently while maintaining their internal structure, and they combine through specific position combinations that sculptors use to build the torso from block-out to realistic form.\n\n## Position Combinations of Movable Masses\n\nThe retrieved evidence identifies four primary position combinations for movable masses in figure anatomy:\n\n| Position | Application in Figure Sculpture |\n|----------|----------",
+      "answer_sha256": "4555cc0f983e9f732d10c2187b5ea637892d4b7d28de698f281262f88e3622b5",
+      "distinct_target_count": 1,
+      "doc_hit": true,
+      "done_received": true,
+      "effective_tier": "qdrant_mongo_graph",
+      "elapsed_seconds": 39.288,
+      "errors": [],
+      "evidence_anchor_diagnostics": {
+        "Anatomy for Sculptors.md": {
+          "all_anchors_hit": true,
+          "anchor_count": 1,
+          "anchor_hits": [
+            "POSITION COMBINATIONS OF MOVABLE MASSES"
+          ]
+        }
+      },
+      "execution_id": "direct_anatomy_masses::qdrant_mongo_graph",
+      "expected_filenames": [
+        "Anatomy for Sculptors.md"
+      ],
+      "expected_min_distinct": 1,
+      "fail_closed": null,
+      "matched_expected_filenames": [
+        "Anatomy for Sculptors.md"
+      ],
+      "min_distinct_met": true,
+      "model_skipped": false,
+      "must_refuse": false,
+      "query_id": "direct_anatomy_masses",
+      "question": "How do movable body masses combine in figure anatomy for sculptors?",
+      "refusal_marker_hits": [],
+      "shape": "direct_expert",
+      "source_count": 2,
+      "source_filenames": [
+        "Anatomy for Sculptors.md"
+      ],
+      "source_membership_count": 2,
+      "tier": "qdrant_mongo_graph"
+    },
+    {
+      "all_sources_in_selected_corpus": true,
+      "answer_chars": 397,
+      "answer_excerpt": "**Born of Water** itself is the opening title. It is the first book in the epic fantasy series *The Rise of the Fifth Order*, written by Autumn M. Birt (Smashwords Edition, 2012). The corpus shows its sequel, *Rule of Fire* (book 2), contains a promotional note that \"the story doesn't end there,\" followed by its first three chapters — framing *Born of Water* as the starting point of the series.",
+      "answer_sha256": "e3f8cb1d9de57000c85d079495a091dfa0203730d686a6d7e6f7af6ea869160d",
+      "distinct_target_count": 1,
+      "doc_hit": true,
+      "done_received": true,
+      "effective_tier": "qdrant_only",
+      "elapsed_seconds": 16.088,
+      "errors": [],
+      "evidence_anchor_diagnostics": {
+        "Elemental Magic.md": {
+          "all_anchors_hit": true,
+          "anchor_count": 1,
+          "anchor_hits": [
+            "Born of Water"
+          ]
+        }
+      },
+      "execution_id": "direct_elemental_novel::qdrant_only",
+      "expected_filenames": [
+        "Elemental Magic.md"
+      ],
+      "expected_min_distinct": 1,
+      "fail_closed": null,
+      "matched_expected_filenames": [
+        "Elemental Magic.md"
+      ],
+      "min_distinct_met": true,
+      "model_skipped": false,
+      "must_refuse": false,
+      "query_id": "direct_elemental_novel",
+      "question": "Which fantasy story in this corpus opens with Born of Water?",
+      "refusal_marker_hits": [],
+      "shape": "direct_fact",
+      "source_count": 4,
+      "source_filenames": [
+        "Elemental Magic.md",
+        "Force Dynamic Life Drawing.md"
+      ],
+      "source_membership_count": 4,
+      "tier": "qdrant_only"
+    },
+    {
+      "all_sources_in_selected_corpus": true,
+      "answer_chars": 331,
+      "answer_excerpt": "**Born of Water** by Autumn M. Birt is the fantasy story in this corpus that opens with that title. It is part of the *Rise of the Fifth Order* series, published as a Smashwords Edition in 2012, with cover art and maps also by Autumn M. Birt. The series includes three novels: *Born of Water*, *Rule of Fire*, and *Spirit of Life*.",
+      "answer_sha256": "a5046973fe268f65621b536037939d20fc98e74f11a069d50cf763ec0d15aefb",
+      "distinct_target_count": 1,
+      "doc_hit": true,
+      "done_received": true,
+      "effective_tier": "qdrant_mongo",
+      "elapsed_seconds": 21.036,
+      "errors": [],
+      "evidence_anchor_diagnostics": {
+        "Elemental Magic.md": {
+          "all_anchors_hit": true,
+          "anchor_count": 1,
+          "anchor_hits": [
+            "Born of Water"
+          ]
+        }
+      },
+      "execution_id": "direct_elemental_novel::qdrant_mongo",
+      "expected_filenames": [
+        "Elemental Magic.md"
+      ],
+      "expected_min_distinct": 1,
+      "fail_closed": null,
+      "matched_expected_filenames": [
+        "Elemental Magic.md"
+      ],
+      "min_distinct_met": true,
+      "model_skipped": false,
+      "must_refuse": false,
+      "query_id": "direct_elemental_novel",
+      "question": "Which fantasy story in this corpus opens with Born of Water?",
+      "refusal_marker_hits": [],
+      "shape": "direct_fact",
+      "source_count": 4,
+      "source_filenames": [
+        "Elemental Magic.md",
+        "Force Dynamic Life Drawing.md"
+      ],
+      "source_membership_count": 4,
+      "tier": "qdrant_mongo"
+    },
+    {
+      "all_sources_in_selected_corpus": true,
+      "answer_chars": 204,
+      "answer_excerpt": "**Born of Water** is the opening title in the *Rise of the Fifth Order* fantasy series, as listed in the corpus alongside *Rule of Fire* and *Spirit of Life*, with a companion novel bearing the same name.",
+      "answer_sha256": "6744ce55ac52674375f8b1ef3acb6fdbb2f8895334ddaf2d0684eb7462cc28e4",
+      "distinct_target_count": 1,
+      "doc_hit": true,
+      "done_received": true,
+      "effective_tier": "qdrant_mongo_graph",
+      "elapsed_seconds": 34.415,
+      "errors": [],
+      "evidence_anchor_diagnostics": {
+        "Elemental Magic.md": {
+          "all_anchors_hit": true,
+          "anchor_count": 1,
+          "anchor_hits": [
+            "Born of Water"
+          ]
+        }
+      },
+      "execution_id": "direct_elemental_novel::qdrant_mongo_graph",
+      "expected_filenames": [
+        "Elemental Magic.md"
+      ],
+      "expected_min_distinct": 1,
+      "fail_closed": null,
+      "matched_expected_filenames": [
+        "Elemental Magic.md"
+      ],
+      "min_distinct_met": true,
+      "model_skipped": false,
+      "must_refuse": false,
+      "query_id": "direct_elemental_novel",
+      "question": "Which fantasy story in this corpus opens with Born of Water?",
+      "refusal_marker_hits": [],
+      "shape": "direct_fact",
+      "source_count": 4,
+      "source_filenames": [
+        "Elemental Magic.md",
+        "Force Dynamic Life Drawing.md"
+      ],
+      "source_membership_count": 4,
+      "tier": "qdrant_mongo_graph"
+    },
+    {
+      "all_sources_in_selected_corpus": true,
+      "answer_chars": 1551,
+      "answer_excerpt": "**Key principles for lively figures**\n\nThe retrieved sources converge on avoiding mechanical rigidity and embracing organic asymmetry. The strongest guidelines from the evidence:\n\n- **Break right angles and straight lines.** Arms and hands should never be straight without deliberate reason — even mild curves convey life.\n- **Never pose arms in parallel.** Parallel arms are the fastest way to make a figure read as static or unnatural.\n- **Use contrapposto — the S-curve twist.** A figure twisting ",
+      "answer_sha256": "f33bd3f95acd7390f7eeede40dee1575ac4ed4080dca4f56f8c1f341b9fc07de",
+      "distinct_target_count": 2,
+      "doc_hit": true,
+      "done_received": true,
+      "effective_tier": "qdrant_only",
+      "elapsed_seconds": 33.825,
+      "errors": [],
+      "evidence_anchor_diagnostics": {
+        "Anatomy for Sculptors.md": {
+          "all_anchors_hit": false,
+          "anchor_count": 1,
+          "anchor_hits": []
+        },
+        "Force Dynamic Life Drawing.md": {
+          "all_anchors_hit": false,
+          "anchor_count": 1,
+          "anchor_hits": []
+        }
+      },
+      "execution_id": "lay_dynamic_figure::qdrant_only",
+      "expected_filenames": [
+        "Force Dynamic Life Drawing.md",
+        "Anatomy for Sculptors.md"
+      ],
+      "expected_min_distinct": 1,
+      "fail_closed": null,
+      "matched_expected_filenames": [
+        "Anatomy for Sculptors.md",
+        "Force Dynamic Life Drawing.md"
+      ],
+      "min_distinct_met": true,
+      "model_skipped": false,
+      "must_refuse": false,
+      "query_id": "lay_dynamic_figure",
+      "question": "How can I make a drawn or sculpted person feel less stiff and more alive?",
+      "refusal_marker_hits": [],
+      "shape": "lay_language",
+      "source_count": 3,
+      "source_filenames": [
+        "Anatomy for Sculptors.md",
+        "Force Dynamic Life Drawing.md"
+      ],
+      "source_membership_count": 3,
+      "tier": "qdrant_only"
+    },
+    {
+      "all_sources_in_selected_corpus": true,
+      "answer_chars": 1733,
+      "answer_excerpt": "The core principle is to draw the **forces** animating the body rather than just its static outline. According to the Force Dynamic Life Drawing approach, the human figure is always full of force even when appearing still—gravity alone keeps it charged with tension. The key is to develop awareness of those underlying forces and render them.\n\nTwo concrete techniques emerge from the retrieved sources. First, use **contrapposto**—a figure twisting on its vertical axis into an S-shape—which the anat",
+      "answer_sha256": "b38cd5adee35e0f52d72a3b9ec85f3073afd94f669921b4cb6056a238d61c848",
+      "distinct_target_count": 2,
+      "doc_hit": true,
+      "done_received": true,
+      "effective_tier": "qdrant_mongo",
+      "elapsed_seconds": 50.839,
+      "errors": [],
+      "evidence_anchor_diagnostics": {
+        "Anatomy for Sculptors.md": {
+          "all_anchors_hit": false,
+          "anchor_count": 1,
+          "anchor_hits": []
+        },
+        "Force Dynamic Life Drawing.md": {
+          "all_anchors_hit": false,
+          "anchor_count": 1,
+          "anchor_hits": []
+        }
+      },
+      "execution_id": "lay_dynamic_figure::qdrant_mongo",
+      "expected_filenames": [
+        "Force Dynamic Life Drawing.md",
+        "Anatomy for Sculptors.md"
+      ],
+      "expected_min_distinct": 1,
+      "fail_closed": null,
+      "matched_expected_filenames": [
+        "Anatomy for Sculptors.md",
+        "Force Dynamic Life Drawing.md"
+      ],
+      "min_distinct_met": true,
+      "model_skipped": false,
+      "must_refuse": false,
+      "query_id": "lay_dynamic_figure",
+      "question": "How can I make a drawn or sculpted person feel less stiff and more alive?",
+      "refusal_marker_hits": [],
+      "shape": "lay_language",
+      "source_count": 3,
+      "source_filenames": [
+        "Anatomy for Sculptors.md",
+        "Force Dynamic Life Drawing.md",
+        "Stage Combat Arts.md"
+      ],
+      "source_membership_count": 3,
+      "tier": "qdrant_mongo"
+    },
+    {
+      "all_sources_in_selected_corpus": true,
+      "answer_chars": 2406,
+      "answer_excerpt": "**Core principle: inject force into every mark and surface**\n\nThe single most effective shift is treating every line, shadow, and form as a recording of *directed energy* rather than geometry. The human body is never truly static — gravity alone creates constant compressive and tensile forces even in a resting pose. Drawing with this awareness means your eye moves through the figure as if following the paths of push and pull, not tracing a diagram.\n\n---\n\n**Anatomy rules that defeat stiffness**\n\n",
+      "answer_sha256": "ba9d7479d31192d9005ed0af24da6ceeca7ad5a9d4fe8d818000d104d1f54cb0",
+      "distinct_target_count": 2,
+      "doc_hit": true,
+      "done_received": true,
+      "effective_tier": "qdrant_mongo_graph",
+      "elapsed_seconds": 51.731,
+      "errors": [],
+      "evidence_anchor_diagnostics": {
+        "Anatomy for Sculptors.md": {
+          "all_anchors_hit": false,
+          "anchor_count": 1,
+          "anchor_hits": []
+        },
+        "Force Dynamic Life Drawing.md": {
+          "all_anchors_hit": false,
+          "anchor_count": 1,
+          "anchor_hits": []
+        }
+      },
+      "execution_id": "lay_dynamic_figure::qdrant_mongo_graph",
+      "expected_filenames": [
+        "Force Dynamic Life Drawing.md",
+        "Anatomy for Sculptors.md"
+      ],
+      "expected_min_distinct": 1,
+      "fail_closed": null,
+      "matched_expected_filenames": [
+        "Anatomy for Sculptors.md",
+        "Force Dynamic Life Drawing.md"
+      ],
+      "min_distinct_met": true,
+      "model_skipped": false,
+      "must_refuse": false,
+      "query_id": "lay_dynamic_figure",
+      "question": "How can I make a drawn or sculpted person feel less stiff and more alive?",
+      "refusal_marker_hits": [],
+      "shape": "lay_language",
+      "source_count": 3,
+      "source_filenames": [
+        "Anatomy for Sculptors.md",
+        "Force Dynamic Life Drawing.md",
+        "Paul Ekman - Facial Action Coding System Manual (0).md"
+      ],
+      "source_membership_count": 3,
+      "tier": "qdrant_mongo_graph"
+    },
+    {
+      "all_sources_in_selected_corpus": true,
+      "answer_chars": 1117,
+      "answer_excerpt": "A movie cut can feel natural because it mirrors a fundamental feature of human perception: the **blink**.\n\nThe abrupt, instantaneous displacement of a film cut doesn't exist in ordinary waking life, yet it feels familiar because we regularly interrupt our own visual intake through blinking. John Huston observed that people blink during conversation precisely at moments that function as \"natural cuts\" — separating visual information into meaningful bits of thought. Walter Murch later noticed this",
+      "answer_sha256": "e83bb974e635b528213388004daf670fe5f95aca3015f257eef61161470beabe",
+      "distinct_target_count": 2,
+      "doc_hit": true,
+      "done_received": true,
+      "effective_tier": "qdrant_only",
+      "elapsed_seconds": 23.172,
+      "errors": [],
+      "evidence_anchor_diagnostics": {
+        "Grammar of the Edit.md": {
+          "all_anchors_hit": false,
+          "anchor_count": 1,
+          "anchor_hits": []
+        },
+        "Walter Murch - In the Blink of an Eye (2001).md": {
+          "all_anchors_hit": false,
+          "anchor_count": 1,
+          "anchor_hits": []
+        }
+      },
+      "execution_id": "lay_natural_cut::qdrant_only",
+      "expected_filenames": [
+        "Walter Murch - In the Blink of an Eye (2001).md",
+        "Grammar of the Edit.md"
+      ],
+      "expected_min_distinct": 1,
+      "fail_closed": null,
+      "matched_expected_filenames": [
+        "Grammar of the Edit.md",
+        "Walter Murch - In the Blink of an Eye (2001).md"
+      ],
+      "min_distinct_met": true,
+      "model_skipped": false,
+      "must_refuse": false,
+      "query_id": "lay_natural_cut",
+      "question": "Why can a movie cut feel natural instead of jolting the viewer?",
+      "refusal_marker_hits": [],
+      "shape": "lay_language",
+      "source_count": 3,
+      "source_filenames": [
+        "Grammar of the Edit.md",
+        "Walter Murch - In the Blink of an Eye (2001).md"
+      ],
+      "source_membership_count": 3,
+      "tier": "qdrant_only"
+    },
+    {
+      "all_sources_in_selected_corpus": true,
+      "answer_chars": 1551,
+      "answer_excerpt": "A cut feels natural when it mirrors the brain's own punctuating rhythm — specifically, the blink.\n\nMurch argues that people don't blink randomly; we blink at the precise moment we grasp or complete an idea, separating one thought from the next. A film cut works the same way: it terminates one visual idea and launches another at a moment that corresponds to where a blink would organically occur. The source calls these **cut points** or **branches** — organic junctions in the footage where the rhy",
+      "answer_sha256": "ddae24afc3d495e59ea4e344fb6015683c549f08b0f536cb0676da244b2a55ea",
+      "distinct_target_count": 2,
+      "doc_hit": true,
+      "done_received": true,
+      "effective_tier": "qdrant_mongo",
+      "elapsed_seconds": 37.22,
+      "errors": [],
+      "evidence_anchor_diagnostics": {
+        "Grammar of the Edit.md": {
+          "all_anchors_hit": false,
+          "anchor_count": 1,
+          "anchor_hits": []
+        },
+        "Walter Murch - In the Blink of an Eye (2001).md": {
+          "all_anchors_hit": false,
+          "anchor_count": 1,
+          "anchor_hits": []
+        }
+      },
+      "execution_id": "lay_natural_cut::qdrant_mongo",
+      "expected_filenames": [
+        "Walter Murch - In the Blink of an Eye (2001).md",
+        "Grammar of the Edit.md"
+      ],
+      "expected_min_distinct": 1,
+      "fail_closed": null,
+      "matched_expected_filenames": [
+        "Grammar of the Edit.md",
+        "Walter Murch - In the Blink of an Eye (2001).md"
+      ],
+      "min_distinct_met": true,
+      "model_skipped": false,
+      "must_refuse": false,
+      "query_id": "lay_natural_cut",
+      "question": "Why can a movie cut feel natural instead of jolting the viewer?",
+      "refusal_marker_hits": [],
+      "shape": "lay_language",
+      "source_count": 4,
+      "source_filenames": [
+        "Grammar of the Edit.md",
+        "Walter Murch - In the Blink of an Eye (2001).md"
+      ],
+      "source_membership_count": 4,
+      "tier": "qdrant_mongo"
+    },
+    {
+      "all_sources_in_selected_corpus": true,
+      "answer_chars": 2181,
+      "answer_excerpt": "## The Neurological Bridge: How Cuts Become Invisible\n\nMovie cuts feel natural because they **mimic a physiological mechanism already operating in human perception** — the blink. Walter Murch argues that the instantaneous displacement of a cut has no parallel in ordinary waking life, yet audiences accept it instantly because the same fragmentation happens in dreams and in the micro-pauses of conversation.\n\n### Why the Brain Doesn't Resist Cuts\n\n**Blinking as an innate editor.** John Huston obser",
+      "answer_sha256": "9fe573a652ba7f8b2b5e5a85005d31f439572d81ff11a368d9e5c81ed97f0b7e",
+      "distinct_target_count": 2,
+      "doc_hit": true,
+      "done_received": true,
+      "effective_tier": "qdrant_mongo_graph",
+      "elapsed_seconds": 42.321,
+      "errors": [],
+      "evidence_anchor_diagnostics": {
+        "Grammar of the Edit.md": {
+          "all_anchors_hit": false,
+          "anchor_count": 1,
+          "anchor_hits": []
+        },
+        "Walter Murch - In the Blink of an Eye (2001).md": {
+          "all_anchors_hit": false,
+          "anchor_count": 1,
+          "anchor_hits": []
+        }
+      },
+      "execution_id": "lay_natural_cut::qdrant_mongo_graph",
+      "expected_filenames": [
+        "Walter Murch - In the Blink of an Eye (2001).md",
+        "Grammar of the Edit.md"
+      ],
+      "expected_min_distinct": 1,
+      "fail_closed": null,
+      "matched_expected_filenames": [
+        "Grammar of the Edit.md",
+        "Walter Murch - In the Blink of an Eye (2001).md"
+      ],
+      "min_distinct_met": true,
+      "model_skipped": false,
+      "must_refuse": false,
+      "query_id": "lay_natural_cut",
+      "question": "Why can a movie cut feel natural instead of jolting the viewer?",
+      "refusal_marker_hits": [],
+      "shape": "lay_language",
+      "source_count": 4,
+      "source_filenames": [
+        "Grammar of the Edit.md",
+        "Walter Murch - In the Blink of an Eye (2001).md"
+      ],
+      "source_membership_count": 4,
+      "tier": "qdrant_mongo_graph"
+    },
+    {
+      "all_sources_in_selected_corpus": true,
+      "answer_chars": 2425,
+      "answer_excerpt": "\n## The Core Principle: Lethality and Stakes\n\nThe foundation of convincing staged combat lies in treating weapons as *potentially lethal*, even though they're safe. When performers genuinely imagine harm, their bodies produce authentic fight-or-flight responses—tension, breath changes, heightened awareness—that read as truthful on stage. This is what separates a choreographed dance that looks like a dance from a visceral confrontation that feels like it could go either way.\n\n### Distance as Dram",
+      "answer_sha256": "59fceb1cdca2176d870005d284ff8f631d5ae82dcafd412c991afbf008847cb3",
+      "distinct_target_count": 1,
+      "doc_hit": true,
+      "done_received": true,
+      "effective_tier": "qdrant_only",
+      "elapsed_seconds": 37.278,
+      "errors": [],
+      "evidence_anchor_diagnostics": {
+        "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md": {
+          "all_anchors_hit": false,
+          "anchor_count": 1,
+          "anchor_hits": []
+        },
+        "Stage Combat Arts.md": {
+          "all_anchors_hit": false,
+          "anchor_count": 1,
+          "anchor_hits": []
+        }
+      },
+      "execution_id": "lay_safe_fight::qdrant_only",
+      "expected_filenames": [
+        "Stage Combat Arts.md",
+        "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md"
+      ],
+      "expected_min_distinct": 1,
+      "fail_closed": null,
+      "matched_expected_filenames": [
+        "Stage Combat Arts.md"
+      ],
+      "min_distinct_met": true,
+      "model_skipped": false,
+      "must_refuse": false,
+      "query_id": "lay_safe_fight",
+      "question": "How do I make a staged fight look convincing while keeping performers safe and in character?",
+      "refusal_marker_hits": [],
+      "shape": "lay_language",
+      "source_count": 2,
+      "source_filenames": [
+        "Stage Combat Arts.md"
+      ],
+      "source_membership_count": 2,
+      "tier": "qdrant_only"
+    },
+    {
+      "all_sources_in_selected_corpus": true,
+      "answer_chars": 2386,
+      "answer_excerpt": "**Core principle:** Stage combat succeeds when it becomes a *physical conversation* driven by character intention, not a performance of athletic skill. Every technique exists to serve story while maintaining safety.\n\n## Building Conviction Through Character Work\n\n**Expectations drive realism.** A character in a fight has positive expectations — a head swipe meant to make contact is played as though contact *should* happen. When the partner ducks and the blade passes overhead, that miss is played",
+      "answer_sha256": "4645445ec2799d7965a15ab4f1926070db786652c6f93444cc889a4354896256",
+      "distinct_target_count": 1,
+      "doc_hit": true,
+      "done_received": true,
+      "effective_tier": "qdrant_mongo",
+      "elapsed_seconds": 39.203,
+      "errors": [],
+      "evidence_anchor_diagnostics": {
+        "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md": {
+          "all_anchors_hit": false,
+          "anchor_count": 1,
+          "anchor_hits": []
+        },
+        "Stage Combat Arts.md": {
+          "all_anchors_hit": false,
+          "anchor_count": 1,
+          "anchor_hits": []
+        }
+      },
+      "execution_id": "lay_safe_fight::qdrant_mongo",
+      "expected_filenames": [
+        "Stage Combat Arts.md",
+        "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md"
+      ],
+      "expected_min_distinct": 1,
+      "fail_closed": null,
+      "matched_expected_filenames": [
+        "Stage Combat Arts.md"
+      ],
+      "min_distinct_met": true,
+      "model_skipped": false,
+      "must_refuse": false,
+      "query_id": "lay_safe_fight",
+      "question": "How do I make a staged fight look convincing while keeping performers safe and in character?",
+      "refusal_marker_hits": [],
+      "shape": "lay_language",
+      "source_count": 4,
+      "source_filenames": [
+        "Stage Combat Arts.md"
+      ],
+      "source_membership_count": 4,
+      "tier": "qdrant_mongo"
+    },
+    {
+      "all_sources_in_selected_corpus": true,
+      "answer_chars": 2988,
+      "answer_excerpt": "**Convincing staged fighting requires intertwining safety discipline, character work, and physical technique into a single layered practice.**\n\n---\n\n## The Core Relationship\n\nConvincing stage combat isn't about pretending to fight — it's about **fully committing to imagined conflict** while maintaining precise physical control. The retrieved evidence frames this as a triangle where three forces must stay balanced:\n\n```\n         CHARACTER\n           WORK\n              ▲\n             /|\\\n         ",
+      "answer_sha256": "ca7bd7139bdea43f8ec5b7506132d0e91ef0d0e4ec4cf939720761be256678d5",
+      "distinct_target_count": 1,
+      "doc_hit": true,
+      "done_received": true,
+      "effective_tier": "qdrant_mongo_graph",
+      "elapsed_seconds": 51.684,
+      "errors": [],
+      "evidence_anchor_diagnostics": {
+        "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md": {
+          "all_anchors_hit": false,
+          "anchor_count": 1,
+          "anchor_hits": []
+        },
+        "Stage Combat Arts.md": {
+          "all_anchors_hit": false,
+          "anchor_count": 1,
+          "anchor_hits": []
+        }
+      },
+      "execution_id": "lay_safe_fight::qdrant_mongo_graph",
+      "expected_filenames": [
+        "Stage Combat Arts.md",
+        "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md"
+      ],
+      "expected_min_distinct": 1,
+      "fail_closed": null,
+      "matched_expected_filenames": [
+        "Stage Combat Arts.md"
+      ],
+      "min_distinct_met": true,
+      "model_skipped": false,
+      "must_refuse": false,
+      "query_id": "lay_safe_fight",
+      "question": "How do I make a staged fight look convincing while keeping performers safe and in character?",
+      "refusal_marker_hits": [],
+      "shape": "lay_language",
+      "source_count": 4,
+      "source_filenames": [
+        "Stage Combat Arts.md"
+      ],
+      "source_membership_count": 4,
+      "tier": "qdrant_mongo_graph"
+    },
+    {
+      "all_sources_in_selected_corpus": true,
+      "answer_chars": 540,
+      "answer_excerpt": "I cannot answer that as a source-backed result from the selected corpus. The retrieval found some related material, but it did not establish creator, guide, reader's strongly enough to support the question. The nearest retrieved material comes from: manga-in-theory-and-practice-the-craft-of-creating-manga-by.md; michael-rabiger-mick-hurbis-cherrier-directing-film-techniques-and-aesthetics-2020.md; walter-murch-in-the-blink-of-an-eye-2001.md. Try a broader corpus/search scope or ask for the narro",
+      "answer_sha256": "1c015b860bbe64b24f285a232fcac777c4abfa210328ee5997516491e96608a9",
+      "distinct_target_count": 1,
+      "doc_hit": true,
+      "done_received": true,
+      "effective_tier": "qdrant_only",
+      "elapsed_seconds": 5.148,
+      "errors": [],
+      "evidence_anchor_diagnostics": {
+        "Manga in Theory and Practice.md": {
+          "all_anchors_hit": false,
+          "anchor_count": 2,
+          "anchor_hits": []
+        }
+      },
+      "execution_id": "lay_manga_attention::qdrant_only",
+      "expected_filenames": [
+        "Manga in Theory and Practice.md"
+      ],
+      "expected_min_distinct": 1,
+      "fail_closed": null,
+      "matched_expected_filenames": [
+        "Manga in Theory and Practice.md"
+      ],
+      "min_distinct_met": true,
+      "model_skipped": true,
+      "must_refuse": false,
+      "query_id": "lay_manga_attention",
+      "question": "How can a manga creator guide the reader's attention without losing the story's main path?",
+      "refusal_marker_hits": [
+        "cannot answer",
+        "did not establish"
+      ],
+      "shape": "lay_language",
+      "source_count": 3,
+      "source_filenames": [
+        "Manga in Theory and Practice.md",
+        "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md",
+        "Walter Murch - In the Blink of an Eye (2001).md"
+      ],
+      "source_membership_count": 3,
+      "tier": "qdrant_only"
+    },
+    {
+      "all_sources_in_selected_corpus": true,
+      "answer_chars": 453,
+      "answer_excerpt": "I cannot answer that as a source-backed result from the selected corpus. The retrieval found some related material, but it did not establish creator, guide, reader's strongly enough to support the question. The nearest retrieved material comes from: manga-in-theory-and-practice-the-craft-of-creating-manga-by.md; walter-murch-in-the-blink-of-an-eye-2001.md. Try a broader corpus/search scope or ask for the narrower part the retrieved sources do cover.",
+      "answer_sha256": "34346a5b23fb071f94f955f5958971978d6cec7c03e1bcd6f6d78ae1738d7045",
+      "distinct_target_count": 1,
+      "doc_hit": true,
+      "done_received": true,
+      "effective_tier": "qdrant_mongo",
+      "elapsed_seconds": 12.742,
+      "errors": [],
+      "evidence_anchor_diagnostics": {
+        "Manga in Theory and Practice.md": {
+          "all_anchors_hit": false,
+          "anchor_count": 2,
+          "anchor_hits": []
+        }
+      },
+      "execution_id": "lay_manga_attention::qdrant_mongo",
+      "expected_filenames": [
+        "Manga in Theory and Practice.md"
+      ],
+      "expected_min_distinct": 1,
+      "fail_closed": null,
+      "matched_expected_filenames": [
+        "Manga in Theory and Practice.md"
+      ],
+      "min_distinct_met": true,
+      "model_skipped": true,
+      "must_refuse": false,
+      "query_id": "lay_manga_attention",
+      "question": "How can a manga creator guide the reader's attention without losing the story's main path?",
+      "refusal_marker_hits": [
+        "cannot answer",
+        "did not establish"
+      ],
+      "shape": "lay_language",
+      "source_count": 4,
+      "source_filenames": [
+        "Manga in Theory and Practice.md",
+        "Walter Murch - In the Blink of an Eye (2001).md"
+      ],
+      "source_membership_count": 4,
+      "tier": "qdrant_mongo"
+    },
+    {
+      "all_sources_in_selected_corpus": true,
+      "answer_chars": 453,
+      "answer_excerpt": "I cannot answer that as a source-backed result from the selected corpus. The retrieval found some related material, but it did not establish creator, guide, reader's strongly enough to support the question. The nearest retrieved material comes from: manga-in-theory-and-practice-the-craft-of-creating-manga-by.md; walter-murch-in-the-blink-of-an-eye-2001.md. Try a broader corpus/search scope or ask for the narrower part the retrieved sources do cover.",
+      "answer_sha256": "34346a5b23fb071f94f955f5958971978d6cec7c03e1bcd6f6d78ae1738d7045",
+      "distinct_target_count": 1,
+      "doc_hit": true,
+      "done_received": true,
+      "effective_tier": "qdrant_mongo_graph",
+      "elapsed_seconds": 15.845,
+      "errors": [],
+      "evidence_anchor_diagnostics": {
+        "Manga in Theory and Practice.md": {
+          "all_anchors_hit": false,
+          "anchor_count": 2,
+          "anchor_hits": []
+        }
+      },
+      "execution_id": "lay_manga_attention::qdrant_mongo_graph",
+      "expected_filenames": [
+        "Manga in Theory and Practice.md"
+      ],
+      "expected_min_distinct": 1,
+      "fail_closed": null,
+      "matched_expected_filenames": [
+        "Manga in Theory and Practice.md"
+      ],
+      "min_distinct_met": true,
+      "model_skipped": true,
+      "must_refuse": false,
+      "query_id": "lay_manga_attention",
+      "question": "How can a manga creator guide the reader's attention without losing the story's main path?",
+      "refusal_marker_hits": [
+        "cannot answer",
+        "did not establish"
+      ],
+      "shape": "lay_language",
+      "source_count": 4,
+      "source_filenames": [
+        "Manga in Theory and Practice.md",
+        "Walter Murch - In the Blink of an Eye (2001).md"
+      ],
+      "source_membership_count": 4,
+      "tier": "qdrant_mongo_graph"
+    },
+    {
+      "all_sources_in_selected_corpus": true,
+      "answer_chars": 1764,
+      "answer_excerpt": "Cinematography and editing function as a tight feedback loop: the camera captures emotionally charged imagery, and the edit determines precisely when and how long the audience absorbs it.\n\n**Where they intersect.** Cinematography—via framing, lighting, and camera angle—isolates what matters emotionally. The edit then controls the *timing* of that emotional payload. Rabiger and Hurbis-Cherrier call these \"narrative and emotional emphasis edits\": cutting from a two-shot to an ECU of an engagement ",
+      "answer_sha256": "be8bb5eb545d5cda438c3efffb79f076cb586ee33d91e3c2b35c3112c4748d35",
+      "distinct_target_count": 3,
+      "doc_hit": true,
+      "done_received": true,
+      "effective_tier": "qdrant_only",
+      "elapsed_seconds": 29.641,
+      "errors": [],
+      "evidence_anchor_diagnostics": {
+        "Blain Brown - Cinematography - Theory and Practice (2016).md": {
+          "all_anchors_hit": true,
+          "anchor_count": 1,
+          "anchor_hits": [
+            "cinematography"
+          ]
+        },
+        "Grammar of the Edit.md": {
+          "all_anchors_hit": false,
+          "anchor_count": 1,
+          "anchor_hits": []
+        },
+        "Walter Murch - In the Blink of an Eye (2001).md": {
+          "all_anchors_hit": true,
+          "anchor_count": 1,
+          "anchor_hits": [
+            "Emotion"
+          ]
+        }
+      },
+      "execution_id": "relationship_shoot_edit_emotion::qdrant_only",
+      "expected_filenames": [
+        "Blain Brown - Cinematography - Theory and Practice (2016).md",
+        "Grammar of the Edit.md",
+        "Walter Murch - In the Blink of an Eye (2001).md"
+      ],
+      "expected_min_distinct": 2,
+      "fail_closed": null,
+      "matched_expected_filenames": [
+        "Blain Brown - Cinematography - Theory and Practice (2016).md",
+        "Grammar of the Edit.md",
+        "Walter Murch - In the Blink of an Eye (2001).md"
+      ],
+      "min_distinct_met": true,
+      "model_skipped": false,
+      "must_refuse": false,
+      "query_id": "relationship_shoot_edit_emotion",
+      "question": "How do cinematography choices and edit timing work together to preserve emotion and direct attention?",
+      "refusal_marker_hits": [],
+      "shape": "relationship_multi_document",
+      "source_count": 7,
+      "source_filenames": [
+        "Blain Brown - Cinematography - Theory and Practice (2016).md",
+        "Grammar of the Edit.md",
+        "Mateu-Mestre - Framed Ink 2 (2021).md",
+        "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md",
+        "Richard Williams - The Animator's Survival Kit (2002, Faber & Faber).md",
+        "Walter Murch - In the Blink of an Eye (2001).md"
+      ],
+      "source_membership_count": 7,
+      "tier": "qdrant_only"
+    },
+    {
+      "all_sources_in_selected_corpus": true,
+      "answer_chars": 2616,
+      "answer_excerpt": "\n# How Cinematography and Edit Timing Preserve Emotion and Direct Attention\n\nCinematography choices and edit timing function as a unified emotional instrument — each decisions in one domain must be answered by the other. Cinematographer Rodrigo Prieto articulates the core principle: \"every decision about a movie, about cinematography, about light, about camera placement, is emotionally important,\" and since \"movies are represented emotions,\" the visual grammar you build with your camera must be ",
+      "answer_sha256": "2f9b1252a652f4a442bb2e2cb6d24a1316b3b3359ce4703dc199885ea3ae20a3",
+      "distinct_target_count": 3,
+      "doc_hit": true,
+      "done_received": true,
+      "effective_tier": "qdrant_mongo",
+      "elapsed_seconds": 48.996,
+      "errors": [],
+      "evidence_anchor_diagnostics": {
+        "Blain Brown - Cinematography - Theory and Practice (2016).md": {
+          "all_anchors_hit": true,
+          "anchor_count": 1,
+          "anchor_hits": [
+            "cinematography"
+          ]
+        },
+        "Grammar of the Edit.md": {
+          "all_anchors_hit": false,
+          "anchor_count": 1,
+          "anchor_hits": []
+        },
+        "Walter Murch - In the Blink of an Eye (2001).md": {
+          "all_anchors_hit": true,
+          "anchor_count": 1,
+          "anchor_hits": [
+            "Emotion"
+          ]
+        }
+      },
+      "execution_id": "relationship_shoot_edit_emotion::qdrant_mongo",
+      "expected_filenames": [
+        "Blain Brown - Cinematography - Theory and Practice (2016).md",
+        "Grammar of the Edit.md",
+        "Walter Murch - In the Blink of an Eye (2001).md"
+      ],
+      "expected_min_distinct": 2,
+      "fail_closed": null,
+      "matched_expected_filenames": [
+        "Blain Brown - Cinematography - Theory and Practice (2016).md",
+        "Grammar of the Edit.md",
+        "Walter Murch - In the Blink of an Eye (2001).md"
+      ],
+      "min_distinct_met": true,
+      "model_skipped": false,
+      "must_refuse": false,
+      "query_id": "relationship_shoot_edit_emotion",
+      "question": "How do cinematography choices and edit timing work together to preserve emotion and direct attention?",
+      "refusal_marker_hits": [],
+      "shape": "relationship_multi_document",
+      "source_count": 7,
+      "source_filenames": [
+        "Blain Brown - Cinematography - Theory and Practice (2016).md",
+        "Grammar of the Edit.md",
+        "Mateu-Mestre - Framed Ink 2 (2021).md",
+        "Richard Williams - The Animator's Survival Kit (2002, Faber & Faber).md",
+        "Walter Murch - In the Blink of an Eye (2001).md"
+      ],
+      "source_membership_count": 7,
+      "tier": "qdrant_mongo"
+    },
+    {
+      "all_sources_in_selected_corpus": true,
+      "answer_chars": 2225,
+      "answer_excerpt": "Cinematography and edit timing are not separate crafts — they form a single emotional delivery system where visual composition creates the raw material of feeling and the cut determines when and how that feeling lands for the audience.\n\n**Framing and lighting build emotional charge.** Mateu-Mestre emphasizes that framing, lighting, and camera angles are tools for conveying emotion and story, creating the visual grammar that the edit then orchestrates. Cinematography decides what the viewer sees ",
+      "answer_sha256": "2cbadaa8e81126e2e677372ac16519d36427c9d88a66608c396719692c98195a",
+      "distinct_target_count": 3,
+      "doc_hit": true,
+      "done_received": true,
+      "effective_tier": "qdrant_mongo_graph",
+      "elapsed_seconds": 49.399,
+      "errors": [],
+      "evidence_anchor_diagnostics": {
+        "Blain Brown - Cinematography - Theory and Practice (2016).md": {
+          "all_anchors_hit": true,
+          "anchor_count": 1,
+          "anchor_hits": [
+            "cinematography"
+          ]
+        },
+        "Grammar of the Edit.md": {
+          "all_anchors_hit": false,
+          "anchor_count": 1,
+          "anchor_hits": []
+        },
+        "Walter Murch - In the Blink of an Eye (2001).md": {
+          "all_anchors_hit": true,
+          "anchor_count": 1,
+          "anchor_hits": [
+            "Emotion"
+          ]
+        }
+      },
+      "execution_id": "relationship_shoot_edit_emotion::qdrant_mongo_graph",
+      "expected_filenames": [
+        "Blain Brown - Cinematography - Theory and Practice (2016).md",
+        "Grammar of the Edit.md",
+        "Walter Murch - In the Blink of an Eye (2001).md"
+      ],
+      "expected_min_distinct": 2,
+      "fail_closed": null,
+      "matched_expected_filenames": [
+        "Blain Brown - Cinematography - Theory and Practice (2016).md",
+        "Grammar of the Edit.md",
+        "Walter Murch - In the Blink of an Eye (2001).md"
+      ],
+      "min_distinct_met": true,
+      "model_skipped": false,
+      "must_refuse": false,
+      "query_id": "relationship_shoot_edit_emotion",
+      "question": "How do cinematography choices and edit timing work together to preserve emotion and direct attention?",
+      "refusal_marker_hits": [],
+      "shape": "relationship_multi_document",
+      "source_count": 7,
+      "source_filenames": [
+        "Blain Brown - Cinematography - Theory and Practice (2016).md",
+        "Grammar of the Edit.md",
+        "Mateu-Mestre - Framed Ink 2 (2021).md",
+        "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md",
+        "Richard Williams - The Animator's Survival Kit (2002, Faber & Faber).md",
+        "Walter Murch - In the Blink of an Eye (2001).md"
+      ],
+      "source_membership_count": 7,
+      "tier": "qdrant_mongo_graph"
+    },
+    {
+      "all_sources_in_selected_corpus": true,
+      "answer_chars": 1520,
+      "answer_excerpt": "**Stage-combat craft, directing, and camera planning cooperate by making the fight serve the story first.** The corpus frames stage combat as an extension of thought and language — a physical conversation — rather than athletic display. From that foundation, textual analysis must guide every layer: the \"given circumstances\" (who, what, when, where, why) determine what story the violence tells, and the three key questions — why emotional conflict erupts, how violence furthers the action, and what",
+      "answer_sha256": "c4e6a4d8dd35152711affb8d89024960fc5077b6e8c66a7208a22b18ca2337a2",
+      "distinct_target_count": 1,
+      "doc_hit": true,
+      "done_received": true,
+      "effective_tier": "qdrant_only",
+      "elapsed_seconds": 28.28,
+      "errors": [],
+      "evidence_anchor_diagnostics": {
+        "Blain Brown - Cinematography - Theory and Practice (2016).md": {
+          "all_anchors_hit": false,
+          "anchor_count": 1,
+          "anchor_hits": []
+        },
+        "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md": {
+          "all_anchors_hit": false,
+          "anchor_count": 1,
+          "anchor_hits": []
+        },
+        "Stage Combat Arts.md": {
+          "all_anchors_hit": true,
+          "anchor_count": 1,
+          "anchor_hits": [
+            "STAGE COMBAT ARTS"
+          ]
+        }
+      },
+      "execution_id": "relationship_fight_camera_direction::qdrant_only",
+      "expected_filenames": [
+        "Stage Combat Arts.md",
+        "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md",
+        "Blain Brown - Cinematography - Theory and Practice (2016).md"
+      ],
+      "expected_min_distinct": 2,
+      "fail_closed": null,
+      "matched_expected_filenames": [
+        "Stage Combat Arts.md"
+      ],
+      "min_distinct_met": false,
+      "model_skipped": false,
+      "must_refuse": false,
+      "query_id": "relationship_fight_camera_direction",
+      "question": "How should stage-combat craft, directing, and camera planning cooperate in a filmed fight sequence?",
+      "refusal_marker_hits": [],
+      "shape": "relationship_multi_document",
+      "source_count": 4,
+      "source_filenames": [
+        "Stage Combat Arts.md"
+      ],
+      "source_membership_count": 4,
+      "tier": "qdrant_only"
+    },
+    {
+      "all_sources_in_selected_corpus": true,
+      "answer_chars": 2571,
+      "answer_excerpt": "# How Stage-Combat Craft, Directing, and Camera Planning Should Cooperate\n\nThe retrieved sources do not contain direct evidence about filmed fight sequences, camera planning, or the specific mechanics of cooperation between stage-combat craft and film directing. However, the retrieved material does establish a foundational principle that would govern such cooperation: stage combat is a specific discipline with its own integrity, and any integration with other theatrical methods must respect that",
+      "answer_sha256": "7da860fe57329f5061bc9420352cd5fe753ace91e175f658ae831b540ec22f63",
+      "distinct_target_count": 1,
+      "doc_hit": true,
+      "done_received": true,
+      "effective_tier": "qdrant_mongo",
+      "elapsed_seconds": 35.033,
+      "errors": [],
+      "evidence_anchor_diagnostics": {
+        "Blain Brown - Cinematography - Theory and Practice (2016).md": {
+          "all_anchors_hit": false,
+          "anchor_count": 1,
+          "anchor_hits": []
+        },
+        "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md": {
+          "all_anchors_hit": false,
+          "anchor_count": 1,
+          "anchor_hits": []
+        },
+        "Stage Combat Arts.md": {
+          "all_anchors_hit": true,
+          "anchor_count": 1,
+          "anchor_hits": [
+            "STAGE COMBAT ARTS"
+          ]
+        }
+      },
+      "execution_id": "relationship_fight_camera_direction::qdrant_mongo",
+      "expected_filenames": [
+        "Stage Combat Arts.md",
+        "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md",
+        "Blain Brown - Cinematography - Theory and Practice (2016).md"
+      ],
+      "expected_min_distinct": 2,
+      "fail_closed": null,
+      "matched_expected_filenames": [
+        "Stage Combat Arts.md"
+      ],
+      "min_distinct_met": false,
+      "model_skipped": false,
+      "must_refuse": false,
+      "query_id": "relationship_fight_camera_direction",
+      "question": "How should stage-combat craft, directing, and camera planning cooperate in a filmed fight sequence?",
+      "refusal_marker_hits": [],
+      "shape": "relationship_multi_document",
+      "source_count": 2,
+      "source_filenames": [
+        "Stage Combat Arts.md"
+      ],
+      "source_membership_count": 2,
+      "tier": "qdrant_mongo"
+    },
+    {
+      "all_sources_in_selected_corpus": true,
+      "answer_chars": 1705,
+      "answer_excerpt": "Stage-combat craft, directing, and camera planning should cooperate through the same integration principle that defines effective fight work: no single element operates independently.\n\n**The core relationship** from the sources is that stage combat is not merely mechanical choreography but an advanced acting discipline requiring the integration of movement, voice, breath, and text work. The book describes its approach as teaching combat arts \"like an athlete in training\" — developing curiosity a",
+      "answer_sha256": "860eddd8ba2e01e50166bd114c685a96b2833ab93c8faf3901479b257e81883c",
+      "distinct_target_count": 1,
+      "doc_hit": true,
+      "done_received": true,
+      "effective_tier": "qdrant_mongo_graph",
+      "elapsed_seconds": 38.897,
+      "errors": [],
+      "evidence_anchor_diagnostics": {
+        "Blain Brown - Cinematography - Theory and Practice (2016).md": {
+          "all_anchors_hit": false,
+          "anchor_count": 1,
+          "anchor_hits": []
+        },
+        "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md": {
+          "all_anchors_hit": false,
+          "anchor_count": 1,
+          "anchor_hits": []
+        },
+        "Stage Combat Arts.md": {
+          "all_anchors_hit": true,
+          "anchor_count": 1,
+          "anchor_hits": [
+            "STAGE COMBAT ARTS"
+          ]
+        }
+      },
+      "execution_id": "relationship_fight_camera_direction::qdrant_mongo_graph",
+      "expected_filenames": [
+        "Stage Combat Arts.md",
+        "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md",
+        "Blain Brown - Cinematography - Theory and Practice (2016).md"
+      ],
+      "expected_min_distinct": 2,
+      "fail_closed": null,
+      "matched_expected_filenames": [
+        "Stage Combat Arts.md"
+      ],
+      "min_distinct_met": false,
+      "model_skipped": false,
+      "must_refuse": false,
+      "query_id": "relationship_fight_camera_direction",
+      "question": "How should stage-combat craft, directing, and camera planning cooperate in a filmed fight sequence?",
+      "refusal_marker_hits": [],
+      "shape": "relationship_multi_document",
+      "source_count": 3,
+      "source_filenames": [
+        "Stage Combat Arts.md"
+      ],
+      "source_membership_count": 3,
+      "tier": "qdrant_mongo_graph"
+    },
+    {
+      "all_sources_in_selected_corpus": true,
+      "answer_chars": 1876,
+      "answer_excerpt": "**Visual-effects planning should integrate early with directing and cinematography during preproduction, not as an afterthought, so that every effect reinforces the story's visual grammar rather than competing with it.**\n\nThe corpus establishes that directing, production design, and cinematography collaborate to translate script analysis into a coherent visual design—a process that begins in preproduction and refines through rehearsal. The director shapes the overall vision, the production desig",
+      "answer_sha256": "3772370527657b0ce44478b28780fe4a3b5a7db5a4fcda23efd0b1f743419747",
+      "distinct_target_count": 3,
+      "doc_hit": true,
+      "done_received": true,
+      "effective_tier": "qdrant_only",
+      "elapsed_seconds": 35.925,
+      "errors": [],
+      "evidence_anchor_diagnostics": {
+        "Blain Brown - Cinematography - Theory and Practice (2016).md": {
+          "all_anchors_hit": false,
+          "anchor_count": 1,
+          "anchor_hits": []
+        },
+        "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md": {
+          "all_anchors_hit": false,
+          "anchor_count": 1,
+          "anchor_hits": []
+        },
+        "VES Handbook of Visual Effects.md": {
+          "all_anchors_hit": false,
+          "anchor_count": 1,
+          "anchor_hits": []
+        }
+      },
+      "execution_id": "relationship_vfx_story_pipeline::qdrant_only",
+      "expected_filenames": [
+        "VES Handbook of Visual Effects.md",
+        "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md",
+        "Blain Brown - Cinematography - Theory and Practice (2016).md"
+      ],
+      "expected_min_distinct": 2,
+      "fail_closed": null,
+      "matched_expected_filenames": [
+        "Blain Brown - Cinematography - Theory and Practice (2016).md",
+        "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md",
+        "VES Handbook of Visual Effects.md"
+      ],
+      "min_distinct_met": true,
+      "model_skipped": false,
+      "must_refuse": false,
+      "query_id": "relationship_vfx_story_pipeline",
+      "question": "How should visual-effects planning connect with directing and cinematography so the effect serves the filmed story?",
+      "refusal_marker_hits": [],
+      "shape": "relationship_multi_document",
+      "source_count": 5,
+      "source_filenames": [
+        "Blain Brown - Cinematography - Theory and Practice (2016).md",
+        "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md",
+        "VES Handbook of Visual Effects.md",
+        "Walter Murch - In the Blink of an Eye (2001).md"
+      ],
+      "source_membership_count": 5,
+      "tier": "qdrant_only"
+    },
+    {
+      "all_sources_in_selected_corpus": true,
+      "answer_chars": 3492,
+      "answer_excerpt": "Visual-effects planning must be woven into directing and cinematography from the earliest pre-production stages, treating VFX not as a post-production fix but as a deliberate component of visual storytelling.\n\n## The Central Principle: Planning Around the Director's Vision\n\nThe VES Handbook establishes that seamless, realistic, and cost-effective visual effects are the result of careful planning involving VFX, special effects, stunts, miniatures, and the art department to ultimately realize the ",
+      "answer_sha256": "d37db9d229cb8f0e1d86d960d4100bfed99f12c512d57880415ab8bac8415314",
+      "distinct_target_count": 3,
+      "doc_hit": true,
+      "done_received": true,
+      "effective_tier": "qdrant_mongo",
+      "elapsed_seconds": 52.637,
+      "errors": [],
+      "evidence_anchor_diagnostics": {
+        "Blain Brown - Cinematography - Theory and Practice (2016).md": {
+          "all_anchors_hit": true,
+          "anchor_count": 1,
+          "anchor_hits": [
+            "cinematography"
+          ]
+        },
+        "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md": {
+          "all_anchors_hit": false,
+          "anchor_count": 1,
+          "anchor_hits": []
+        },
+        "VES Handbook of Visual Effects.md": {
+          "all_anchors_hit": false,
+          "anchor_count": 1,
+          "anchor_hits": []
+        }
+      },
+      "execution_id": "relationship_vfx_story_pipeline::qdrant_mongo",
+      "expected_filenames": [
+        "VES Handbook of Visual Effects.md",
+        "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md",
+        "Blain Brown - Cinematography - Theory and Practice (2016).md"
+      ],
+      "expected_min_distinct": 2,
+      "fail_closed": null,
+      "matched_expected_filenames": [
+        "Blain Brown - Cinematography - Theory and Practice (2016).md",
+        "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md",
+        "VES Handbook of Visual Effects.md"
+      ],
+      "min_distinct_met": true,
+      "model_skipped": false,
+      "must_refuse": false,
+      "query_id": "relationship_vfx_story_pipeline",
+      "question": "How should visual-effects planning connect with directing and cinematography so the effect serves the filmed story?",
+      "refusal_marker_hits": [],
+      "shape": "relationship_multi_document",
+      "source_count": 6,
+      "source_filenames": [
+        "Blain Brown - Cinematography - Theory and Practice (2016).md",
+        "Mateu-Mestre - Framed Ink 2 (2021).md",
+        "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md",
+        "VES Handbook of Visual Effects.md",
+        "Walter Murch - In the Blink of an Eye (2001).md"
+      ],
+      "source_membership_count": 6,
+      "tier": "qdrant_mongo"
+    },
+    {
+      "all_sources_in_selected_corpus": true,
+      "answer_chars": 2225,
+      "answer_excerpt": "Visual effects planning must be embedded in the same collaborative triangle that governs all visual design—the director, production designer, and cinematographer—so that every effect reinforces emotional intent rather than standing apart from it.\n\n**The core relationship** runs through preproduction: the director establishes the emotional and narrative purpose of each shot, the cinematographer shapes the photographic language (lighting, lens choice, camera angle), and the production designer con",
+      "answer_sha256": "02c84da07a7da6414cf2f805dd08b525ce8558b71e7ab1045eec4ed45d7e38ed",
+      "distinct_target_count": 3,
+      "doc_hit": true,
+      "done_received": true,
+      "effective_tier": "qdrant_mongo_graph",
+      "elapsed_seconds": 41.574,
+      "errors": [],
+      "evidence_anchor_diagnostics": {
+        "Blain Brown - Cinematography - Theory and Practice (2016).md": {
+          "all_anchors_hit": true,
+          "anchor_count": 1,
+          "anchor_hits": [
+            "cinematography"
+          ]
+        },
+        "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md": {
+          "all_anchors_hit": false,
+          "anchor_count": 1,
+          "anchor_hits": []
+        },
+        "VES Handbook of Visual Effects.md": {
+          "all_anchors_hit": false,
+          "anchor_count": 1,
+          "anchor_hits": []
+        }
+      },
+      "execution_id": "relationship_vfx_story_pipeline::qdrant_mongo_graph",
+      "expected_filenames": [
+        "VES Handbook of Visual Effects.md",
+        "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md",
+        "Blain Brown - Cinematography - Theory and Practice (2016).md"
+      ],
+      "expected_min_distinct": 2,
+      "fail_closed": null,
+      "matched_expected_filenames": [
+        "Blain Brown - Cinematography - Theory and Practice (2016).md",
+        "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md",
+        "VES Handbook of Visual Effects.md"
+      ],
+      "min_distinct_met": true,
+      "model_skipped": false,
+      "must_refuse": false,
+      "query_id": "relationship_vfx_story_pipeline",
+      "question": "How should visual-effects planning connect with directing and cinematography so the effect serves the filmed story?",
+      "refusal_marker_hits": [],
+      "shape": "relationship_multi_document",
+      "source_count": 6,
+      "source_filenames": [
+        "Blain Brown - Cinematography - Theory and Practice (2016).md",
+        "Force Dynamic Life Drawing.md",
+        "Mateu-Mestre - Framed Ink 2 (2021).md",
+        "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md",
+        "VES Handbook of Visual Effects.md"
+      ],
+      "source_membership_count": 6,
+      "tier": "qdrant_mongo_graph"
+    },
+    {
+      "all_sources_in_selected_corpus": true,
+      "answer_chars": 1835,
+      "answer_excerpt": "**Formal movement analysis** — particularly Laban Movement Analysis (LMA) — provides a systematic vocabulary for describing *how* movement feels and expresses itself, independent of the specific body parts moving or the spatial path taken.\n\n**The bridge between HMI and drawing lies in LMA's Effort component.** Effort describes the expressive qualities of movement across four factors: Space (indirect vs. direct), Weight (light vs. strong), Time (sustained vs. sudden), and Flow (free vs. bound). T",
+      "answer_sha256": "b66fa03593e34aec86eee2fe303285be07cc3969417b0872312a8b8a8ac02fc0",
+      "distinct_target_count": 2,
+      "doc_hit": true,
+      "done_received": true,
+      "effective_tier": "qdrant_only",
+      "elapsed_seconds": 32.058,
+      "errors": [],
+      "evidence_anchor_diagnostics": {
+        "Force Dynamic Life Drawing.md": {
+          "all_anchors_hit": true,
+          "anchor_count": 1,
+          "anchor_hits": [
+            "force"
+          ]
+        },
+        "[International Journal of Reasoning-based Intelligent Systems vol. 2 iss. 1] Bayesian reasoning for Laban Movement Analysis used in human-machine interaction{Rett, Jorg_ Dias, Jorge_ Ahuactzin, Juan Manuel}(2010)[1.md": {
+          "all_anchors_hit": true,
+          "anchor_count": 1,
+          "anchor_hits": [
+            "Laban Movement Analysis"
+          ]
+        }
+      },
+      "execution_id": "relationship_movement_machine_figure::qdrant_only",
+      "expected_filenames": [
+        "[International Journal of Reasoning-based Intelligent Systems vol. 2 iss. 1] Bayesian reasoning for Laban Movement Analysis used in human-machine interaction{Rett, Jorg_ Dias, Jorge_ Ahuactzin, Juan Manuel}(2010)[1.md",
+        "Force Dynamic Life Drawing.md"
+      ],
+      "expected_min_distinct": 2,
+      "fail_closed": null,
+      "matched_expected_filenames": [
+        "Force Dynamic Life Drawing.md",
+        "[International Journal of Reasoning-based Intelligent Systems vol. 2 iss. 1] Bayesian reasoning for Laban Movement Analysis used in human-machine interaction{Rett, Jorg_ Dias, Jorge_ Ahuactzin, Juan Manuel}(2010)[1.md"
+      ],
+      "min_distinct_met": true,
+      "model_skipped": false,
+      "must_refuse": false,
+      "query_id": "relationship_movement_machine_figure",
+      "question": "How could formal movement analysis inform both human-machine interaction and more dynamic figure drawing?",
+      "refusal_marker_hits": [],
+      "shape": "relationship_multi_document",
+      "source_count": 9,
+      "source_filenames": [
+        "Blain Brown - Cinematography - Theory and Practice (2016).md",
+        "Force Dynamic Life Drawing.md",
+        "Grammar of the Edit.md",
+        "Mateu-Mestre - Framed Ink 2 (2021).md",
+        "Richard Williams - The Animator's Survival Kit (2002, Faber & Faber).md",
+        "Stage Combat Arts.md",
+        "[International Journal of Reasoning-based Intelligent Systems vol. 2 iss. 1] Bayesian reasoning for Laban Movement Analysis used in human-machine interaction{Rett, Jorg_ Dias, Jorge_ Ahuactzin, Juan Manuel}(2010)[1.md"
+      ],
+      "source_membership_count": 9,
+      "tier": "qdrant_only"
+    },
+    {
+      "all_sources_in_selected_corpus": true,
+      "answer_chars": 2829,
+      "answer_excerpt": "# Formal Movement Analysis: Bridging Human-Machine Interaction and Dynamic Figure Drawing\n\n**Formal movement analysis** — particularly Laban Movement Analysis (LMA) — examines human motion through structured components that translate remarkably well across both robotic perception and artistic rendering. The core bridge is **expressive force**: where robotics extracts meaning from how humans move, figure drawing translates that same force into visual rhythm and energy on the page.\n\n## The Effort ",
+      "answer_sha256": "f8fe7b8610aef9119068ed69d0aa95dfbf3f5291b152c56db74ea881efc896a8",
+      "distinct_target_count": 2,
+      "doc_hit": true,
+      "done_received": true,
+      "effective_tier": "qdrant_mongo",
+      "elapsed_seconds": 49.325,
+      "errors": [],
+      "evidence_anchor_diagnostics": {
+        "Force Dynamic Life Drawing.md": {
+          "all_anchors_hit": true,
+          "anchor_count": 1,
+          "anchor_hits": [
+            "force"
+          ]
+        },
+        "[International Journal of Reasoning-based Intelligent Systems vol. 2 iss. 1] Bayesian reasoning for Laban Movement Analysis used in human-machine interaction{Rett, Jorg_ Dias, Jorge_ Ahuactzin, Juan Manuel}(2010)[1.md": {
+          "all_anchors_hit": true,
+          "anchor_count": 1,
+          "anchor_hits": [
+            "Laban Movement Analysis"
+          ]
+        }
+      },
+      "execution_id": "relationship_movement_machine_figure::qdrant_mongo",
+      "expected_filenames": [
+        "[International Journal of Reasoning-based Intelligent Systems vol. 2 iss. 1] Bayesian reasoning for Laban Movement Analysis used in human-machine interaction{Rett, Jorg_ Dias, Jorge_ Ahuactzin, Juan Manuel}(2010)[1.md",
+        "Force Dynamic Life Drawing.md"
+      ],
+      "expected_min_distinct": 2,
+      "fail_closed": null,
+      "matched_expected_filenames": [
+        "Force Dynamic Life Drawing.md",
+        "[International Journal of Reasoning-based Intelligent Systems vol. 2 iss. 1] Bayesian reasoning for Laban Movement Analysis used in human-machine interaction{Rett, Jorg_ Dias, Jorge_ Ahuactzin, Juan Manuel}(2010)[1.md"
+      ],
+      "min_distinct_met": true,
+      "model_skipped": false,
+      "must_refuse": false,
+      "query_id": "relationship_movement_machine_figure",
+      "question": "How could formal movement analysis inform both human-machine interaction and more dynamic figure drawing?",
+      "refusal_marker_hits": [],
+      "shape": "relationship_multi_document",
+      "source_count": 9,
+      "source_filenames": [
+        "Blain Brown - Cinematography - Theory and Practice (2016).md",
+        "Force Dynamic Life Drawing.md",
+        "Grammar of the Edit.md",
+        "Manga in Theory and Practice.md",
+        "Mateu-Mestre - Framed Ink 2 (2021).md",
+        "Paul Ekman - Facial Action Coding System Manual (0).md",
+        "Richard Williams - The Animator's Survival Kit (2002, Faber & Faber).md",
+        "[International Journal of Reasoning-based Intelligent Systems vol. 2 iss. 1] Bayesian reasoning for Laban Movement Analysis used in human-machine interaction{Rett, Jorg_ Dias, Jorge_ Ahuactzin, Juan Manuel}(2010)[1.md"
+      ],
+      "source_membership_count": 9,
+      "tier": "qdrant_mongo"
+    },
+    {
+      "all_sources_in_selected_corpus": true,
+      "answer_chars": 2588,
+      "answer_excerpt": "**Formal movement analysis** — as described in the retrieved sources — operates by decoding the *qualitative how* of motion: the forces, angles, and expressive qualities that give movement its meaning, rather than treating the body as a static anatomical diagram.\n\n## The Two Frames the Evidence Establishes\n\n**Human-Machine Interaction** draws on Laban Movement Analysis, which the retrieved sources identify as distinct from older notational systems precisely because its **Effort component** captu",
+      "answer_sha256": "08a111c404a71e07dec0719f59965262fdc848aeaad6bde38fb97156d3f94c03",
+      "distinct_target_count": 2,
+      "doc_hit": true,
+      "done_received": true,
+      "effective_tier": "qdrant_mongo_graph",
+      "elapsed_seconds": 44.85,
+      "errors": [],
+      "evidence_anchor_diagnostics": {
+        "Force Dynamic Life Drawing.md": {
+          "all_anchors_hit": true,
+          "anchor_count": 1,
+          "anchor_hits": [
+            "force"
+          ]
+        },
+        "[International Journal of Reasoning-based Intelligent Systems vol. 2 iss. 1] Bayesian reasoning for Laban Movement Analysis used in human-machine interaction{Rett, Jorg_ Dias, Jorge_ Ahuactzin, Juan Manuel}(2010)[1.md": {
+          "all_anchors_hit": true,
+          "anchor_count": 1,
+          "anchor_hits": [
+            "Laban Movement Analysis"
+          ]
+        }
+      },
+      "execution_id": "relationship_movement_machine_figure::qdrant_mongo_graph",
+      "expected_filenames": [
+        "[International Journal of Reasoning-based Intelligent Systems vol. 2 iss. 1] Bayesian reasoning for Laban Movement Analysis used in human-machine interaction{Rett, Jorg_ Dias, Jorge_ Ahuactzin, Juan Manuel}(2010)[1.md",
+        "Force Dynamic Life Drawing.md"
+      ],
+      "expected_min_distinct": 2,
+      "fail_closed": null,
+      "matched_expected_filenames": [
+        "Force Dynamic Life Drawing.md",
+        "[International Journal of Reasoning-based Intelligent Systems vol. 2 iss. 1] Bayesian reasoning for Laban Movement Analysis used in human-machine interaction{Rett, Jorg_ Dias, Jorge_ Ahuactzin, Juan Manuel}(2010)[1.md"
+      ],
+      "min_distinct_met": true,
+      "model_skipped": false,
+      "must_refuse": false,
+      "query_id": "relationship_movement_machine_figure",
+      "question": "How could formal movement analysis inform both human-machine interaction and more dynamic figure drawing?",
+      "refusal_marker_hits": [],
+      "shape": "relationship_multi_document",
+      "source_count": 9,
+      "source_filenames": [
+        "Anatomy for Sculptors.md",
+        "Blain Brown - Cinematography - Theory and Practice (2016).md",
+        "Force Dynamic Life Drawing.md",
+        "Mateu-Mestre - Framed Ink 2 (2021).md",
+        "Paul Ekman - Facial Action Coding System Manual (0).md",
+        "Richard Williams - The Animator's Survival Kit (2002, Faber & Faber).md",
+        "Stage Combat Arts.md",
+        "[International Journal of Reasoning-based Intelligent Systems vol. 2 iss. 1] Bayesian reasoning for Laban Movement Analysis used in human-machine interaction{Rett, Jorg_ Dias, Jorge_ Ahuactzin, Juan Manuel}(2010)[1.md"
+      ],
+      "source_membership_count": 9,
+      "tier": "qdrant_mongo_graph"
+    },
+    {
+      "all_sources_in_selected_corpus": true,
+      "answer_chars": 563,
+      "answer_excerpt": "I cannot answer that as a source-backed result from the selected corpus. The retrieval found some related material, but it did not establish code, error-correcting, quantum strongly enough to support the question. The nearest retrieved material comes from: ves-handbook-of-visual-effects.md; paul-ekman-facial-action-coding-system-manual-0.md; international-journal-of-reasoning-based-intelligent-systems-vol.-2-iss.-1-bayesian-reasoning-for-laban-movement-analysi.md. Try a broader corpus/search sco",
+      "answer_sha256": "c82bc2d46f1c155fdfc4d57a14d54c391572c5debb0e8f34494d8a9a902468c6",
+      "distinct_target_count": 0,
+      "doc_hit": null,
+      "done_received": true,
+      "effective_tier": "qdrant_only",
+      "elapsed_seconds": 5.559,
+      "errors": [],
+      "evidence_anchor_diagnostics": {},
+      "execution_id": "negative_quantum::qdrant_only",
+      "expected_filenames": [],
+      "expected_min_distinct": 0,
+      "fail_closed": true,
+      "matched_expected_filenames": [],
+      "min_distinct_met": true,
+      "model_skipped": true,
+      "must_refuse": true,
+      "query_id": "negative_quantum",
+      "question": "Which quantum error-correcting code in these documents gives the best logical qubit threshold?",
+      "refusal_marker_hits": [
+        "cannot answer",
+        "did not establish"
+      ],
+      "shape": "negative_control",
+      "source_count": 3,
+      "source_filenames": [
+        "Paul Ekman - Facial Action Coding System Manual (0).md",
+        "VES Handbook of Visual Effects.md",
+        "[International Journal of Reasoning-based Intelligent Systems vol. 2 iss. 1] Bayesian reasoning for Laban Movement Analysis used in human-machine interaction{Rett, Jorg_ Dias, Jorge_ Ahuactzin, Juan Manuel}(2010)[1.md"
+      ],
+      "source_membership_count": 3,
+      "tier": "qdrant_only"
+    },
+    {
+      "all_sources_in_selected_corpus": true,
+      "answer_chars": 332,
+      "answer_excerpt": "The retrieved corpus does not contain information about quantum error-correcting codes or logical qubit thresholds. The three sources address film editing theory (using a DNA/sequencing analogy), facial action coding procedures, and Bayesian reasoning applied to Laban Movement Analysis — none of which touch on quantum computation.",
+      "answer_sha256": "3009c7785ea8748342fd14c8d93064848968551573ad9c5db2070025e7f12314",
+      "distinct_target_count": 0,
+      "doc_hit": null,
+      "done_received": true,
+      "effective_tier": "qdrant_mongo",
+      "elapsed_seconds": 27.515,
+      "errors": [],
+      "evidence_anchor_diagnostics": {},
+      "execution_id": "negative_quantum::qdrant_mongo",
+      "expected_filenames": [],
+      "expected_min_distinct": 0,
+      "fail_closed": false,
+      "matched_expected_filenames": [],
+      "min_distinct_met": true,
+      "model_skipped": false,
+      "must_refuse": true,
+      "query_id": "negative_quantum",
+      "question": "Which quantum error-correcting code in these documents gives the best logical qubit threshold?",
+      "refusal_marker_hits": [],
+      "shape": "negative_control",
+      "source_count": 3,
+      "source_filenames": [
+        "Paul Ekman - Facial Action Coding System Manual (0).md",
+        "Walter Murch - In the Blink of an Eye (2001).md",
+        "[International Journal of Reasoning-based Intelligent Systems vol. 2 iss. 1] Bayesian reasoning for Laban Movement Analysis used in human-machine interaction{Rett, Jorg_ Dias, Jorge_ Ahuactzin, Juan Manuel}(2010)[1.md"
+      ],
+      "source_membership_count": 3,
+      "tier": "qdrant_mongo"
+    },
+    {
+      "all_sources_in_selected_corpus": true,
+      "answer_chars": 180,
+      "answer_excerpt": "The retrieved documents — covering film editing, facial action coding, stage combat, and cinematography — do not address quantum error-correcting codes or logical qubit thresholds.",
+      "answer_sha256": "807c0a0efac50a068dba78925f1072eb8bf78de0556337a06c2abd71cd0821a3",
+      "distinct_target_count": 0,
+      "doc_hit": null,
+      "done_received": true,
+      "effective_tier": "qdrant_mongo_graph",
+      "elapsed_seconds": 27.898,
+      "errors": [],
+      "evidence_anchor_diagnostics": {},
+      "execution_id": "negative_quantum::qdrant_mongo_graph",
+      "expected_filenames": [],
+      "expected_min_distinct": 0,
+      "fail_closed": false,
+      "matched_expected_filenames": [],
+      "min_distinct_met": true,
+      "model_skipped": false,
+      "must_refuse": true,
+      "query_id": "negative_quantum",
+      "question": "Which quantum error-correcting code in these documents gives the best logical qubit threshold?",
+      "refusal_marker_hits": [],
+      "shape": "negative_control",
+      "source_count": 4,
+      "source_filenames": [
+        "Blain Brown - Cinematography - Theory and Practice (2016).md",
+        "Paul Ekman - Facial Action Coding System Manual (0).md",
+        "Stage Combat Arts.md",
+        "Walter Murch - In the Blink of an Eye (2001).md"
+      ],
+      "source_membership_count": 4,
+      "tier": "qdrant_mongo_graph"
+    },
+    {
+      "all_sources_in_selected_corpus": true,
+      "answer_chars": 208,
+      "answer_excerpt": "The retrieved corpus — which focuses on film editing theory, visual effects workflows, and post-production decision-making — does not contain information about CRISPR guide RNA sequences or CFTR gene editing.",
+      "answer_sha256": "104fd13165b104132d2a5b933862150b65ed48ead0c583974a93e04046b3951f",
+      "distinct_target_count": 0,
+      "doc_hit": null,
+      "done_received": true,
+      "effective_tier": "qdrant_only",
+      "elapsed_seconds": 21.894,
+      "errors": [],
+      "evidence_anchor_diagnostics": {},
+      "execution_id": "negative_genomics::qdrant_only",
+      "expected_filenames": [],
+      "expected_min_distinct": 0,
+      "fail_closed": false,
+      "matched_expected_filenames": [],
+      "min_distinct_met": true,
+      "model_skipped": false,
+      "must_refuse": true,
+      "query_id": "negative_genomics",
+      "question": "What CRISPR guide RNA sequence should be used to edit the CFTR gene?",
+      "refusal_marker_hits": [],
+      "shape": "negative_control",
+      "source_count": 3,
+      "source_filenames": [
+        "Grammar of the Edit.md",
+        "VES Handbook of Visual Effects.md",
+        "Walter Murch - In the Blink of an Eye (2001).md"
+      ],
+      "source_membership_count": 3,
+      "tier": "qdrant_only"
+    },
+    {
+      "all_sources_in_selected_corpus": true,
+      "answer_chars": 104,
+      "answer_excerpt": "The retrieved corpus does not contain information about CRISPR guide RNA sequences or CFTR gene editing.",
+      "answer_sha256": "e0adc3e9415189823b9a4789405a033d05f80e484f452d87e9aaba6c17baf0a7",
+      "distinct_target_count": 0,
+      "doc_hit": null,
+      "done_received": true,
+      "effective_tier": "qdrant_mongo",
+      "elapsed_seconds": 20.881,
+      "errors": [],
+      "evidence_anchor_diagnostics": {},
+      "execution_id": "negative_genomics::qdrant_mongo",
+      "expected_filenames": [],
+      "expected_min_distinct": 0,
+      "fail_closed": false,
+      "matched_expected_filenames": [],
+      "min_distinct_met": true,
+      "model_skipped": false,
+      "must_refuse": true,
+      "query_id": "negative_genomics",
+      "question": "What CRISPR guide RNA sequence should be used to edit the CFTR gene?",
+      "refusal_marker_hits": [],
+      "shape": "negative_control",
+      "source_count": 4,
+      "source_filenames": [
+        "Grammar of the Edit.md",
+        "Paul Ekman - Facial Action Coding System Manual (0).md",
+        "VES Handbook of Visual Effects.md"
+      ],
+      "source_membership_count": 4,
+      "tier": "qdrant_mongo"
+    },
+    {
+      "all_sources_in_selected_corpus": true,
+      "answer_chars": 435,
+      "answer_excerpt": "I cannot answer that as a source-backed result from the selected corpus. The retrieval found some related material, but it did not establish crispr, guide, rna strongly enough to support the question. The nearest retrieved material comes from: grammar-of-the-edit-christopher-j.-bowen.md; paul-ekman-facial-action-coding-system-manual-0.md. Try a broader corpus/search scope or ask for the narrower part the retrieved sources do cover.",
+      "answer_sha256": "96d785707d4ade3124ee83f137f8b6f95c3c3f317105f731fb30a6aa986ecb90",
+      "distinct_target_count": 0,
+      "doc_hit": null,
+      "done_received": true,
+      "effective_tier": "qdrant_mongo_graph",
+      "elapsed_seconds": 24.782,
+      "errors": [],
+      "evidence_anchor_diagnostics": {},
+      "execution_id": "negative_genomics::qdrant_mongo_graph",
+      "expected_filenames": [],
+      "expected_min_distinct": 0,
+      "fail_closed": true,
+      "matched_expected_filenames": [],
+      "min_distinct_met": true,
+      "model_skipped": true,
+      "must_refuse": true,
+      "query_id": "negative_genomics",
+      "question": "What CRISPR guide RNA sequence should be used to edit the CFTR gene?",
+      "refusal_marker_hits": [
+        "cannot answer",
+        "did not establish"
+      ],
+      "shape": "negative_control",
+      "source_count": 3,
+      "source_filenames": [
+        "Grammar of the Edit.md",
+        "Paul Ekman - Facial Action Coding System Manual (0).md"
+      ],
+      "source_membership_count": 3,
+      "tier": "qdrant_mongo_graph"
+    },
+    {
+      "all_sources_in_selected_corpus": true,
+      "answer_chars": 215,
+      "answer_excerpt": "I cannot answer that from the selected corpus because retrieval did not find source evidence for rate, statutory, tax, wool. Try selecting the repo or corpus that contains that material, or broaden the search scope.",
+      "answer_sha256": "6398e8f3b7c97e1774a6edf40cd981cad5fac130e789b84fc3e5e55b4a547881",
+      "distinct_target_count": 0,
+      "doc_hit": null,
+      "done_received": true,
+      "effective_tier": "qdrant_only",
+      "elapsed_seconds": 5.051,
+      "errors": [],
+      "evidence_anchor_diagnostics": {},
+      "execution_id": "negative_tax_law::qdrant_only",
+      "expected_filenames": [],
+      "expected_min_distinct": 0,
+      "fail_closed": true,
+      "matched_expected_filenames": [],
+      "min_distinct_met": true,
+      "model_skipped": true,
+      "must_refuse": true,
+      "query_id": "negative_tax_law",
+      "question": "What was the statutory wool tax rate in fourteenth-century Burgundy?",
+      "refusal_marker_hits": [
+        "cannot answer",
+        "did not find source evidence"
+      ],
+      "shape": "negative_control",
+      "source_count": 0,
+      "source_filenames": [],
+      "source_membership_count": 0,
+      "tier": "qdrant_only"
+    },
+    {
+      "all_sources_in_selected_corpus": true,
+      "answer_chars": 566,
+      "answer_excerpt": "I cannot answer that as a source-backed result from the selected corpus. The retrieval found some related material, but it did not establish statutory, tax, wool strongly enough to support the question. The nearest retrieved material comes from: grammar-of-the-edit-christopher-j.-bowen.md; blain-brown-cinematography-theory-and-practice-2016.md; international-journal-of-reasoning-based-intelligent-systems-vol.-2-iss.-1-bayesian-reasoning-for-laban-movement-analysi.md. Try a broader corpus/search ",
+      "answer_sha256": "a76822c389ca012308a1ce454f44f09f280c1814b68db5da6f6450467618e6c4",
+      "distinct_target_count": 0,
+      "doc_hit": null,
+      "done_received": true,
+      "effective_tier": "qdrant_mongo",
+      "elapsed_seconds": 27.866,
+      "errors": [],
+      "evidence_anchor_diagnostics": {},
+      "execution_id": "negative_tax_law::qdrant_mongo",
+      "expected_filenames": [],
+      "expected_min_distinct": 0,
+      "fail_closed": true,
+      "matched_expected_filenames": [],
+      "min_distinct_met": true,
+      "model_skipped": true,
+      "must_refuse": true,
+      "query_id": "negative_tax_law",
+      "question": "What was the statutory wool tax rate in fourteenth-century Burgundy?",
+      "refusal_marker_hits": [
+        "cannot answer",
+        "did not establish"
+      ],
+      "shape": "negative_control",
+      "source_count": 4,
+      "source_filenames": [
+        "Blain Brown - Cinematography - Theory and Practice (2016).md",
+        "Grammar of the Edit.md",
+        "VES Handbook of Visual Effects.md",
+        "[International Journal of Reasoning-based Intelligent Systems vol. 2 iss. 1] Bayesian reasoning for Laban Movement Analysis used in human-machine interaction{Rett, Jorg_ Dias, Jorge_ Ahuactzin, Juan Manuel}(2010)[1.md"
+      ],
+      "source_membership_count": 4,
+      "tier": "qdrant_mongo"
+    },
+    {
+      "all_sources_in_selected_corpus": true,
+      "answer_chars": 555,
+      "answer_excerpt": "I cannot answer that as a source-backed result from the selected corpus. The retrieval found some related material, but it did not establish statutory, tax, wool strongly enough to support the question. The nearest retrieved material comes from: grammar-of-the-edit-christopher-j.-bowen.md; international-journal-of-reasoning-based-intelligent-systems-vol.-2-iss.-1-bayesian-reasoning-for-laban-movement-analysi.md; walter-murch-in-the-blink-of-an-eye-2001.md. Try a broader corpus/search scope or as",
+      "answer_sha256": "0499b2e61e9faecc2195410103a5875d206e9f2d7036213a66e3b657e5bcc29d",
+      "distinct_target_count": 0,
+      "doc_hit": null,
+      "done_received": true,
+      "effective_tier": "qdrant_mongo_graph",
+      "elapsed_seconds": 16.95,
+      "errors": [],
+      "evidence_anchor_diagnostics": {},
+      "execution_id": "negative_tax_law::qdrant_mongo_graph",
+      "expected_filenames": [],
+      "expected_min_distinct": 0,
+      "fail_closed": true,
+      "matched_expected_filenames": [],
+      "min_distinct_met": true,
+      "model_skipped": true,
+      "must_refuse": true,
+      "query_id": "negative_tax_law",
+      "question": "What was the statutory wool tax rate in fourteenth-century Burgundy?",
+      "refusal_marker_hits": [
+        "cannot answer",
+        "did not establish"
+      ],
+      "shape": "negative_control",
+      "source_count": 4,
+      "source_filenames": [
+        "Grammar of the Edit.md",
+        "VES Handbook of Visual Effects.md",
+        "Walter Murch - In the Blink of an Eye (2001).md",
+        "[International Journal of Reasoning-based Intelligent Systems vol. 2 iss. 1] Bayesian reasoning for Laban Movement Analysis used in human-machine interaction{Rett, Jorg_ Dias, Jorge_ Ahuactzin, Juan Manuel}(2010)[1.md"
+      ],
+      "source_membership_count": 4,
+      "tier": "qdrant_mongo_graph"
+    }
+  ],
+  "schema_version": "runpod_e2e_retrieval_results.v1",
+  "started_at_utc": "2026-07-17T04:57:43.899778+00:00",
+  "summary": {
+    "gates": {
+      "all_tiers_required": true,
+      "citation_source_membership_rate": true,
+      "corpus_boundary_precision": true,
+      "direct_doc_hit_rate": true,
+      "effective_tier_match": true,
+      "execution_closure": true,
+      "lay_language_doc_hit_rate": true,
+      "negative_refusal_rate": false,
+      "relationship_query_min_distinct_target_rate": true,
+      "technical_success": true
+    },
+    "metrics": {
+      "all_tiers_present": true,
+      "citation_source_membership_rate": 1.0,
+      "corpus_boundary_precision": 1.0,
+      "direct_doc_hit_rate": 1.0,
+      "effective_tier_match_rate": 1.0,
+      "execution_count": 51,
+      "lay_language_doc_hit_rate": 1.0,
+      "negative_refusal_rate": 0.5555555555555556,
+      "relationship_query_min_distinct_target_rate": 0.75,
+      "technical_success_rate": 1.0,
+      "total_citation_sources": 206
+    },
+    "passed": false
+  },
+  "targets": {
+    "all_tiers_required": true,
+    "citation_source_membership_rate_min": 1.0,
+    "corpus_boundary_precision": 1.0,
+    "direct_doc_hit_rate_min": 0.85,
+    "lay_language_doc_hit_rate_min": 0.75,
+    "negative_refusal_rate_min": 1.0,
+    "no_existing_corpus_write_required": true,
+    "relationship_query_min_distinct_target_rate_min": 0.75
+  },
+  "top_k": 10
+}
