@@ -1737,6 +1737,11 @@ class RetrieverOrchestrator:
                                 0.35,
                             )
                         ),
+                        protected_lane_ids=(
+                            {"router_bridge_underlying_crafts"}
+                            if router_subquery_enabled
+                            else set()
+                        ),
                     )
                     planner_diagnostics["semantic_alignment"] = planner_alignment
                     lanes.extend(planner_extra_lanes)
