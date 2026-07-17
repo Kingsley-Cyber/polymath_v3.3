@@ -13072,3 +13072,26 @@ pipeline is BUILT except librarian shelves/cards (P5) — deliberately
 sequenced AFTER real usage data exists, owner-visible, curation-layer
 not pipeline-function. Waterfall remains built-dark by design (never
 engages at current budgets).
+
+## [2026-07-18T03:29Z] SENIOR → EXECUTOR :: AMENDMENT to 02:52Z — build mode gains 2d + final acceptance gains the schema-consumption checklist
+
+OWNER ASK: "ensuring the schema is used 100%... when query test ensure it
+works."
+
+2d. METADATA BACKFILLS (deterministic, zero provider calls, build-mode):
+- Biblio author/date: E2E documents carry the fields 15/15 but ALL EMPTY
+  (census-verified). Run the existing deterministic backfill
+  (backfill_doc_anchors.py lineage / S2 T-HOOK-3 capture) for the E2E
+  corpus so the two-lane author-anchor classifier and Agent L's
+  named-source check have real values. Receipt with before/after counts.
+- Summary-tree rows (669): backfill retrieval_text/heading/temporal
+  fields per the known tree-projection gap. Same receipt.
+
+FINAL ACCEPTANCE AMENDMENT — SCHEMA-CONSUMPTION CHECKLIST: the ≤25-query
+acceptance must include, per schema family, one proof query whose TRACE
+shows consumption (not storage): temporal match flag; ≥1 rendered claim
+anchor; associative/profile hit on the shortlist; author/title anchor
+seated; chunk_kind-aware hydration on a table/list query; graph-
+contributed source on a connection query. A family with no consuming
+trace line = NAMED GAP = acceptance not green. This operationalizes
+"schema used 100%" as trace-proven, not assumed.
