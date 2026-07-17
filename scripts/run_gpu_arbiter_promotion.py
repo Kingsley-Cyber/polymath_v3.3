@@ -15,6 +15,7 @@ from typing import Callable
 import urllib.request
 
 from apple_mlx_env_manifest import REQUIRED_KEYS, load_manifest
+from apple_mlx_launchctl import service_absence_proven
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 INSTALLER = REPO_ROOT / "scripts/install_apple_mlx_runtime.sh"
@@ -82,8 +83,15 @@ class PromotionRunner:
             raise PromotionError(
                 f"emergency launchctl bootout did not unload the service: {detail}"
             )
+        service = f"gui/{self.uid}/{LAUNCH_AGENT}"
+        if not service_absence_proven(verification, service):
+            detail = (verification.stderr or verification.stdout or "")[-1000:]
+            raise PromotionError(
+                "emergency launchctl inspection did not prove service absence: "
+                f"exit={verification.returncode} detail={detail}"
+            )
         # A non-zero bootout means "already absent" only after the independent
-        # launchctl print check above returned non-zero.
+        # launchctl print check returned the canonical not-found diagnostic.
         port_absent = self._arbiter_port_absent()
         if not port_absent:
             raise PromotionError(

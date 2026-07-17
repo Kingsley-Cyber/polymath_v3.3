@@ -26,6 +26,7 @@ from apple_mlx_launch_agent_transaction import (  # noqa: E402
     LaunchAgentTransaction,
     TransactionError,
 )
+from apple_mlx_launchctl import service_absence_proven  # noqa: E402
 from run_gpu_arbiter_promotion import PromotionError, PromotionRunner  # noqa: E402
 
 
@@ -89,6 +90,33 @@ def _manifest(tmp_path: Path, enabled: bool) -> Path:
 
 def _completed(command, returncode=0, stdout="", stderr=""):
     return subprocess.CompletedProcess(command, returncode, stdout, stderr)
+
+
+def _not_found(command):
+    label = command[-1].rsplit("/", 1)[-1]
+    return _completed(
+        command,
+        113,
+        stderr=(f'Could not find service "{label}" in domain for user gui: 501'),
+    )
+
+
+def test_launchctl_absence_requires_canonical_status_and_diagnostic():
+    command = ["launchctl", "print", "gui/501/com.test"]
+    service = command[-1]
+    assert service_absence_proven(_not_found(command), service)
+    assert not service_absence_proven(
+        _completed(
+            command,
+            1,
+            stderr='Could not find service "com.test" in domain for user gui: 501',
+        ),
+        service,
+    )
+    assert not service_absence_proven(
+        _completed(command, 113, stderr="Operation not permitted"),
+        service,
+    )
 
 
 def test_manifest_requires_every_explicit_value_and_exact_process_match(tmp_path):
@@ -182,7 +210,7 @@ def test_transaction_restores_exact_prior_plist_after_bootstrap_failure(tmp_path
         nonlocal bootstrap_calls
         del kwargs
         if command[1:2] == ["print"]:
-            return _completed(command, 1)
+            return _not_found(command)
         if command[1:2] == ["bootstrap"]:
             bootstrap_calls += 1
             if bootstrap_calls <= 5:
@@ -212,7 +240,7 @@ def test_transaction_restores_prior_plist_after_smoke_failure(tmp_path):
     def runner(command, **kwargs):
         del kwargs
         if command[1:2] == ["print"]:
-            return _completed(command, 1)
+            return _not_found(command)
         if command == ["smoke"]:
             return _completed(command, 9, stderr="smoke red")
         return _completed(command)
@@ -253,6 +281,23 @@ def test_transaction_fails_loudly_when_bootout_does_not_unload_service(tmp_path)
     with pytest.raises(TransactionError, match="service state is UNKNOWN"):
         transaction.deploy(expected, ["smoke"])
     assert target.read_bytes() == b"prior"
+
+
+def test_transaction_permission_failure_is_unknown_not_absent(tmp_path):
+    target = tmp_path / "agent.plist"
+
+    def permission_denied(command, **kwargs):
+        del kwargs
+        return _completed(command, 1, stderr="Operation not permitted")
+
+    transaction = LaunchAgentTransaction(
+        target_plist=target,
+        label="com.test",
+        uid=501,
+        runner=permission_denied,
+    )
+    with pytest.raises(TransactionError, match="did not prove service absence"):
+        transaction._bootout()
 
 
 class FakeResponse:
@@ -321,7 +366,9 @@ def test_emergency_bootout_checks_command_and_loaded_state():
 
     def already_absent(command, **kwargs):
         del kwargs
-        return _completed(command, 1)
+        if command[1] == "print":
+            return _not_found(command)
+        return _completed(command, 1, stderr="service was already absent")
 
     PromotionRunner(
         runner=already_absent,
@@ -340,6 +387,25 @@ def test_emergency_bootout_checks_command_and_loaded_state():
     )
     with pytest.raises(PromotionError, match="still listening"):
         runner._bootout()
+
+
+def test_emergency_permission_failure_is_unknown_even_when_8085_is_closed():
+    def permission_denied(command, **kwargs):
+        del kwargs
+        return _completed(command, 1, stderr="Operation not permitted")
+
+    def absent(address, timeout):
+        del address, timeout
+        raise ConnectionRefusedError
+
+    runner = PromotionRunner(
+        runner=permission_denied,
+        create_connection=absent,
+        uid=501,
+    )
+    with pytest.raises(PromotionError, match="did not prove service absence") as exc:
+        runner._bootout()
+    assert "absence was verified" not in str(exc.value)
 
 
 class FakePromotion(PromotionRunner):

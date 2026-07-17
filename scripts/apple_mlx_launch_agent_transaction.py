@@ -13,6 +13,8 @@ import tempfile
 import time
 from typing import Callable, Sequence
 
+from apple_mlx_launchctl import service_absence_proven
+
 
 class TransactionError(RuntimeError):
     """The new deployment or its mandatory rollback failed."""
@@ -97,8 +99,14 @@ class LaunchAgentTransaction:
             raise TransactionError(
                 f"launchctl bootout did not unload {self.service}: {detail}"
             )
+        if not service_absence_proven(verification, self.service):
+            detail = (verification.stderr or verification.stdout or "")[-500:]
+            raise TransactionError(
+                "launchctl inspection did not prove service absence: "
+                f"exit={verification.returncode} detail={detail}"
+            )
         # A non-zero bootout is acceptable only because the independent print
-        # verification above proves the service was already absent.
+        # verification above returned launchctl's canonical not-found result.
         if result.returncode != 0:
             return
 
