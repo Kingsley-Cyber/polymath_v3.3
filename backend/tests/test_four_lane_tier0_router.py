@@ -175,6 +175,12 @@ def test_fusion_reserves_associative_seat_and_demotes_divergent_surface_match():
 
     assert [route.doc_id for route in routes] == ["story", "lens"]
     assert routes[0].routing_trace["seat_owner"] == "associative"
+    assert set(routes[0].routing_trace["lane_scores"]) == {
+        "associative",
+        "lexical",
+        "semantic",
+        "child_rollup",
+    }
     assert routes[1].routing_trace["divergent_profile_demoted"] is True
     assert diagnostics["lane_seats"]["associative"] == ["c:story"]
 
