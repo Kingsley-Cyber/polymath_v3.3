@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import io
 import json
+from argparse import Namespace
 from copy import deepcopy
+
+import pytest
 
 from scripts import run_claims_owner_window_compact_eval as compact
 from scripts.run_claims_owner_window_compact_eval import (
@@ -57,6 +60,30 @@ def test_compact_selector_uses_exact_frozen_13_query_subset():
     assert sum(query["shape"] == "negative_control" for query in queries) == 3
     assert not any(query["shape"] == "relationship_multi_document" for query in queries)
     assert len(hashes) == 2
+
+
+def test_compact_runner_can_assert_a_surrounding_atomic_window_lock(
+    monkeypatch,
+    tmp_path,
+):
+    lock_path = tmp_path / "polymath-eval.lock"
+    monkeypatch.setattr(compact, "LOCK_PATH", lock_path)
+    args = Namespace(
+        lock_mode="assert-held",
+        lock_owner="claims-window",
+        lock_wait_seconds=0,
+    )
+
+    with pytest.raises(RuntimeError, match="requires the eval lock"):
+        compact._lock_context(args)
+
+    lock_path.write_text("other-window\n", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="owner mismatch"):
+        compact._lock_context(args)
+
+    lock_path.write_text("claims-window\n", encoding="utf-8")
+    with compact._lock_context(args):
+        assert lock_path.exists()
 
 
 def test_compact_runner_reuses_existing_frozen_scorer():

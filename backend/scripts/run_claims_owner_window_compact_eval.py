@@ -14,11 +14,13 @@ import json
 import os
 import time
 import urllib.request
+from contextlib import nullcontext
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, ContextManager, Sequence
 
 from scripts.run_claim_anchor_micro_ab import _atomic_write
 from scripts.run_two_lane_anchoring_ab import (
+    LOCK_PATH,
     PREREG,
     SELECTION,
     _eval_lock,
@@ -72,6 +74,24 @@ def _load_compact_queries() -> tuple[list[dict[str, Any]], dict[str, str]]:
             f"observed={observed_counts} expected={EXPECTED_SHAPE_COUNTS}"
         )
     return queries, hashes
+
+
+def _lock_context(args: argparse.Namespace) -> ContextManager[None]:
+    if args.lock_mode == "acquire":
+        return _eval_lock(args.lock_owner, args.lock_wait_seconds)
+    try:
+        observed_owner = LOCK_PATH.read_text(
+            encoding="utf-8",
+            errors="replace",
+        ).strip()
+    except FileNotFoundError as exc:
+        raise RuntimeError("assert-held lock mode requires the eval lock") from exc
+    if observed_owner != args.lock_owner:
+        raise RuntimeError(
+            f"eval lock owner mismatch: {observed_owner or 'unknown'} "
+            f"!= {args.lock_owner}"
+        )
+    return nullcontext()
 
 
 def _chat_temperature_zero(
@@ -348,6 +368,12 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--expected-model", default="anthropic/minimax-m2.7")
     parser.add_argument("--lock-wait-seconds", type=int, default=3600)
     parser.add_argument(
+        "--lock-mode",
+        choices=("acquire", "assert-held"),
+        default="acquire",
+        help="acquire the eval lock or assert a surrounding atomic window owns it",
+    )
+    parser.add_argument(
         "--lock-owner",
         default="codex/claims-owner-window-harness-20260717",
     )
@@ -359,7 +385,7 @@ def _parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
-    with _eval_lock(args.lock_owner, args.lock_wait_seconds):
+    with _lock_context(args):
         output = _run(args)
         _atomic_write(args.output, output)
     print(
