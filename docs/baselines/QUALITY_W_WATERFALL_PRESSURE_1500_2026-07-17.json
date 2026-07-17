@@ -1,0 +1,587 @@
+{
+  "completed_at_utc": "2026-07-17T18:17:23.690520+00:00",
+  "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+  "corpus_name": "runpod_e2e_15doc_20260715",
+  "preregistration_sha256": "6c348cbf852a26e483ee810f6d3776ce1425955acc53ec4aede880f76dedc4b8",
+  "results": [
+    {
+      "budget_tokens": 1500,
+      "evidence_selection_identical": true,
+      "evidence_signature_sha256": {
+        "off": "af38ab965863cb242b53af5442856ed99bd32086984a36a08d5430942442202e",
+        "on_first": "af38ab965863cb242b53af5442856ed99bd32086984a36a08d5430942442202e",
+        "on_repeat": "af38ab965863cb242b53af5442856ed99bd32086984a36a08d5430942442202e"
+      },
+      "hydration_counts": {
+        "full": 2,
+        "skip": 0,
+        "summary": 1
+      },
+      "hydration_decisions": [
+        {
+          "doc_id": "a6e0a87a1a199145aa33cbb3e25a7e0878272c17b0bf650147c57f615efc4b6c",
+          "hydration_level": "full",
+          "lane": "expansion",
+          "parent_id": "a6e0a87a1a199145aa33cbb3e25a7e0878272c17b0bf650147c57f615efc4b6c_parent_0548",
+          "rank": 0,
+          "reason": "full_fits_budget",
+          "score": 0.8693174040990854,
+          "tokens": 505
+        },
+        {
+          "doc_id": "f4e5f68b188beb3aad3e9f1d10846c1d9c1747b2d872b701f5e2757e14dd5305",
+          "hydration_level": "full",
+          "lane": "expansion",
+          "parent_id": "f4e5f68b188beb3aad3e9f1d10846c1d9c1747b2d872b701f5e2757e14dd5305_parent_0094",
+          "rank": 1,
+          "reason": "full_fits_budget",
+          "score": 0.8227591236661987,
+          "tokens": 123
+        },
+        {
+          "doc_id": "5d6acea4b31a1324c930a185ae8fd808e201daf25a4eac3a3c545fd6492b0377",
+          "hydration_level": "summary",
+          "lane": "expansion",
+          "parent_id": "5d6acea4b31a1324c930a185ae8fd808e201daf25a4eac3a3c545fd6492b0377_parent_0035",
+          "rank": 2,
+          "reason": "full_overflow_summary_fits",
+          "score": 0.37856403944895056,
+          "tokens": 108
+        }
+      ],
+      "hydration_levels_recorded": true,
+      "off": {
+        "expected_hit_top_three": false,
+        "forbidden_rank1": true,
+        "passed": false,
+        "top_three_titles": [
+          "Blain Brown - Cinematography - Theory and Practice (2016).md",
+          "VES Handbook of Visual Effects.md",
+          "Force Dynamic Life Drawing.md"
+        ]
+      },
+      "on": {
+        "expected_hit_top_three": false,
+        "forbidden_rank1": true,
+        "passed": false,
+        "top_three_titles": [
+          "Blain Brown - Cinematography - Theory and Practice (2016).md",
+          "VES Handbook of Visual Effects.md",
+          "Force Dynamic Life Drawing.md"
+        ]
+      },
+      "packet_hash": "2ee0ef56267d9d035686b7429c471c04d293b983bb903a4223532474127c1631",
+      "packet_hash_stable": true,
+      "quality_preserved": true,
+      "query_id": "bridge_ai_video_camera_motion_story",
+      "question": "How should I prompt an AI video model so camera movement expresses the story instead of feeling like random motion?",
+      "repeat_packet_hash": "2ee0ef56267d9d035686b7429c471c04d293b983bb903a4223532474127c1631",
+      "selected_source_ids": [
+        {
+          "chunk_id": "a6e0a87a1a199145aa33cbb3e25a7e0878272c17b0bf650147c57f615efc4b6c_1490",
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "a6e0a87a1a199145aa33cbb3e25a7e0878272c17b0bf650147c57f615efc4b6c",
+          "parent_id": "a6e0a87a1a199145aa33cbb3e25a7e0878272c17b0bf650147c57f615efc4b6c_parent_0548"
+        },
+        {
+          "chunk_id": "f4e5f68b188beb3aad3e9f1d10846c1d9c1747b2d872b701f5e2757e14dd5305_0225",
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "f4e5f68b188beb3aad3e9f1d10846c1d9c1747b2d872b701f5e2757e14dd5305",
+          "parent_id": "f4e5f68b188beb3aad3e9f1d10846c1d9c1747b2d872b701f5e2757e14dd5305_parent_0094"
+        },
+        {
+          "chunk_id": "5d6acea4b31a1324c930a185ae8fd808e201daf25a4eac3a3c545fd6492b0377_0201",
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "5d6acea4b31a1324c930a185ae8fd808e201daf25a4eac3a3c545fd6492b0377",
+          "parent_id": "5d6acea4b31a1324c930a185ae8fd808e201daf25a4eac3a3c545fd6492b0377_parent_0035"
+        }
+      ],
+      "used_tokens": 1035
+    },
+    {
+      "budget_tokens": 1500,
+      "evidence_selection_identical": true,
+      "evidence_signature_sha256": {
+        "off": "4452e5e34d864ff4942e304a914c9a70b57878f19fb280e854e89fed710c05ce",
+        "on_first": "4452e5e34d864ff4942e304a914c9a70b57878f19fb280e854e89fed710c05ce",
+        "on_repeat": "4452e5e34d864ff4942e304a914c9a70b57878f19fb280e854e89fed710c05ce"
+      },
+      "hydration_counts": {
+        "full": 2,
+        "skip": 0,
+        "summary": 1
+      },
+      "hydration_decisions": [
+        {
+          "doc_id": "c7b8973260e1b7b26002980c1e0723bfb02778669498b67b4891b464eb6feb91",
+          "hydration_level": "full",
+          "lane": "expansion",
+          "parent_id": "c7b8973260e1b7b26002980c1e0723bfb02778669498b67b4891b464eb6feb91_parent_0024",
+          "rank": 0,
+          "reason": "full_fits_budget",
+          "score": 0.5688654182929441,
+          "tokens": 746
+        },
+        {
+          "doc_id": "c7b8973260e1b7b26002980c1e0723bfb02778669498b67b4891b464eb6feb91",
+          "hydration_level": "full",
+          "lane": "expansion",
+          "parent_id": "c7b8973260e1b7b26002980c1e0723bfb02778669498b67b4891b464eb6feb91_parent_0032",
+          "rank": 1,
+          "reason": "full_fits_budget",
+          "score": 0.5841727125036483,
+          "tokens": 400
+        },
+        {
+          "doc_id": "17bc966b6768a308d703fa2620cc6d4872f023888ccc44e534e7b38d97e68114",
+          "hydration_level": "summary",
+          "lane": "expansion",
+          "parent_id": "17bc966b6768a308d703fa2620cc6d4872f023888ccc44e534e7b38d97e68114_parent_0010",
+          "rank": 2,
+          "reason": "full_overflow_summary_fits",
+          "score": 0.2952629606030817,
+          "tokens": 125
+        }
+      ],
+      "hydration_levels_recorded": true,
+      "off": {
+        "expected_hit_top_three": true,
+        "forbidden_rank1": false,
+        "passed": true,
+        "top_three_titles": [
+          "Grammar of the Edit.md",
+          "Walter Murch - In the Blink of an Eye (2001).md"
+        ]
+      },
+      "on": {
+        "expected_hit_top_three": true,
+        "forbidden_rank1": false,
+        "passed": true,
+        "top_three_titles": [
+          "Grammar of the Edit.md",
+          "Walter Murch - In the Blink of an Eye (2001).md"
+        ]
+      },
+      "packet_hash": "93b270d257ce10bb4575271e5c0bdc23275a32b20899bebeae8a4c13a559b55c",
+      "packet_hash_stable": true,
+      "quality_preserved": true,
+      "query_id": "bridge_ai_video_sequence_continuity",
+      "question": "What underlying craft should guide prompts that turn separate AI-generated clips into one emotionally coherent sequence?",
+      "repeat_packet_hash": "93b270d257ce10bb4575271e5c0bdc23275a32b20899bebeae8a4c13a559b55c",
+      "selected_source_ids": [
+        {
+          "chunk_id": "c7b8973260e1b7b26002980c1e0723bfb02778669498b67b4891b464eb6feb91_0135",
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "c7b8973260e1b7b26002980c1e0723bfb02778669498b67b4891b464eb6feb91",
+          "parent_id": "c7b8973260e1b7b26002980c1e0723bfb02778669498b67b4891b464eb6feb91_parent_0024"
+        },
+        {
+          "chunk_id": "c7b8973260e1b7b26002980c1e0723bfb02778669498b67b4891b464eb6feb91_0157",
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "c7b8973260e1b7b26002980c1e0723bfb02778669498b67b4891b464eb6feb91",
+          "parent_id": "c7b8973260e1b7b26002980c1e0723bfb02778669498b67b4891b464eb6feb91_parent_0032"
+        },
+        {
+          "chunk_id": "17bc966b6768a308d703fa2620cc6d4872f023888ccc44e534e7b38d97e68114_0061",
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "17bc966b6768a308d703fa2620cc6d4872f023888ccc44e534e7b38d97e68114",
+          "parent_id": "17bc966b6768a308d703fa2620cc6d4872f023888ccc44e534e7b38d97e68114_parent_0010"
+        }
+      ],
+      "used_tokens": 1486
+    },
+    {
+      "budget_tokens": 1500,
+      "evidence_selection_identical": true,
+      "evidence_signature_sha256": {
+        "off": "be549d5ae7dc488bcde01a740505318dcba7aa0af245b6e07c17f277b0683823",
+        "on_first": "be549d5ae7dc488bcde01a740505318dcba7aa0af245b6e07c17f277b0683823",
+        "on_repeat": "be549d5ae7dc488bcde01a740505318dcba7aa0af245b6e07c17f277b0683823"
+      },
+      "hydration_counts": {
+        "full": 1,
+        "skip": 0,
+        "summary": 0
+      },
+      "hydration_decisions": [
+        {
+          "doc_id": "36cd4f24fc36392138cac6405d59edbb5534f7ff05ead33dc9365a7c5578af28",
+          "hydration_level": "full",
+          "lane": "expansion",
+          "parent_id": "36cd4f24fc36392138cac6405d59edbb5534f7ff05ead33dc9365a7c5578af28_parent_0527",
+          "rank": 0,
+          "reason": "full_fits_budget",
+          "score": 0.7406549951751851,
+          "tokens": 798
+        }
+      ],
+      "hydration_levels_recorded": true,
+      "off": {
+        "expected_hit_top_three": true,
+        "forbidden_rank1": false,
+        "passed": true,
+        "top_three_titles": [
+          "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md"
+        ]
+      },
+      "on": {
+        "expected_hit_top_three": true,
+        "forbidden_rank1": false,
+        "passed": true,
+        "top_three_titles": [
+          "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md"
+        ]
+      },
+      "packet_hash": "4cf47a105deb3ff56c04efd52c4f4b822a037915ba97a8180f2ea70b6a9d3303",
+      "packet_hash_stable": true,
+      "quality_preserved": true,
+      "query_id": "bridge_ai_video_blocking",
+      "question": "How can I describe staging and blocking in an AI video prompt so characters reveal intention through the scene?",
+      "repeat_packet_hash": "4cf47a105deb3ff56c04efd52c4f4b822a037915ba97a8180f2ea70b6a9d3303",
+      "selected_source_ids": [
+        {
+          "chunk_id": "36cd4f24fc36392138cac6405d59edbb5534f7ff05ead33dc9365a7c5578af28_1589",
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "36cd4f24fc36392138cac6405d59edbb5534f7ff05ead33dc9365a7c5578af28",
+          "parent_id": "36cd4f24fc36392138cac6405d59edbb5534f7ff05ead33dc9365a7c5578af28_parent_0527"
+        }
+      ],
+      "used_tokens": 913
+    },
+    {
+      "budget_tokens": 1500,
+      "evidence_selection_identical": true,
+      "evidence_signature_sha256": {
+        "off": "fd4b0f07d6159d7a18f946bbe47a10934cf0b6f2796f415bb8864dfedb4e037f",
+        "on_first": "fd4b0f07d6159d7a18f946bbe47a10934cf0b6f2796f415bb8864dfedb4e037f",
+        "on_repeat": "fd4b0f07d6159d7a18f946bbe47a10934cf0b6f2796f415bb8864dfedb4e037f"
+      },
+      "hydration_counts": {
+        "full": 2,
+        "skip": 0,
+        "summary": 0
+      },
+      "hydration_decisions": [
+        {
+          "doc_id": "a6e0a87a1a199145aa33cbb3e25a7e0878272c17b0bf650147c57f615efc4b6c",
+          "hydration_level": "full",
+          "lane": "expansion",
+          "parent_id": "a6e0a87a1a199145aa33cbb3e25a7e0878272c17b0bf650147c57f615efc4b6c_parent_0037",
+          "rank": 0,
+          "reason": "full_fits_budget",
+          "score": 0.4647658161847843,
+          "tokens": 365
+        },
+        {
+          "doc_id": "a6e0a87a1a199145aa33cbb3e25a7e0878272c17b0bf650147c57f615efc4b6c",
+          "hydration_level": "full",
+          "lane": "expansion",
+          "parent_id": "a6e0a87a1a199145aa33cbb3e25a7e0878272c17b0bf650147c57f615efc4b6c_parent_0060",
+          "rank": 1,
+          "reason": "full_fits_budget",
+          "score": 0.445098088814399,
+          "tokens": 256
+        }
+      ],
+      "hydration_levels_recorded": true,
+      "off": {
+        "expected_hit_top_three": false,
+        "forbidden_rank1": true,
+        "passed": false,
+        "top_three_titles": [
+          "Blain Brown - Cinematography - Theory and Practice (2016).md"
+        ]
+      },
+      "on": {
+        "expected_hit_top_three": false,
+        "forbidden_rank1": true,
+        "passed": false,
+        "top_three_titles": [
+          "Blain Brown - Cinematography - Theory and Practice (2016).md"
+        ]
+      },
+      "packet_hash": "783af3c5ae7b84784cabb86f7e932b6138121ccdd27c3dd1e10371c03a4f71b8",
+      "packet_hash_stable": true,
+      "quality_preserved": true,
+      "query_id": "bridge_ai_video_visual_power",
+      "question": "Which storytelling principles should shape an AI video prompt when I want the frame to communicate power and vulnerability?",
+      "repeat_packet_hash": "783af3c5ae7b84784cabb86f7e932b6138121ccdd27c3dd1e10371c03a4f71b8",
+      "selected_source_ids": [
+        {
+          "chunk_id": "a6e0a87a1a199145aa33cbb3e25a7e0878272c17b0bf650147c57f615efc4b6c_0056",
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "a6e0a87a1a199145aa33cbb3e25a7e0878272c17b0bf650147c57f615efc4b6c",
+          "parent_id": "a6e0a87a1a199145aa33cbb3e25a7e0878272c17b0bf650147c57f615efc4b6c_parent_0037"
+        },
+        {
+          "chunk_id": "a6e0a87a1a199145aa33cbb3e25a7e0878272c17b0bf650147c57f615efc4b6c_0111",
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "a6e0a87a1a199145aa33cbb3e25a7e0878272c17b0bf650147c57f615efc4b6c",
+          "parent_id": "a6e0a87a1a199145aa33cbb3e25a7e0878272c17b0bf650147c57f615efc4b6c_parent_0060"
+        },
+        {
+          "chunk_id": "a6e0a87a1a199145aa33cbb3e25a7e0878272c17b0bf650147c57f615efc4b6c_0054",
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "a6e0a87a1a199145aa33cbb3e25a7e0878272c17b0bf650147c57f615efc4b6c",
+          "parent_id": "a6e0a87a1a199145aa33cbb3e25a7e0878272c17b0bf650147c57f615efc4b6c_parent_0037"
+        }
+      ],
+      "used_tokens": 737
+    },
+    {
+      "budget_tokens": 1500,
+      "evidence_selection_identical": true,
+      "evidence_signature_sha256": {
+        "off": "ca364c8149d2bc9d61b23866742a512b3d0f1c4f4d1792b95284f34f81a1c443",
+        "on_first": "ca364c8149d2bc9d61b23866742a512b3d0f1c4f4d1792b95284f34f81a1c443",
+        "on_repeat": "ca364c8149d2bc9d61b23866742a512b3d0f1c4f4d1792b95284f34f81a1c443"
+      },
+      "hydration_counts": {
+        "full": 4,
+        "skip": 0,
+        "summary": 2
+      },
+      "hydration_decisions": [
+        {
+          "doc_id": "f4e5f68b188beb3aad3e9f1d10846c1d9c1747b2d872b701f5e2757e14dd5305",
+          "hydration_level": "full",
+          "lane": "expansion",
+          "parent_id": "f4e5f68b188beb3aad3e9f1d10846c1d9c1747b2d872b701f5e2757e14dd5305_parent_1443",
+          "rank": 0,
+          "reason": "full_fits_budget",
+          "score": 0.409970279272786,
+          "tokens": 702
+        },
+        {
+          "doc_id": "f4e5f68b188beb3aad3e9f1d10846c1d9c1747b2d872b701f5e2757e14dd5305",
+          "hydration_level": "full",
+          "lane": "expansion",
+          "parent_id": "f4e5f68b188beb3aad3e9f1d10846c1d9c1747b2d872b701f5e2757e14dd5305_parent_0579",
+          "rank": 1,
+          "reason": "full_fits_budget",
+          "score": 0.469864209124147,
+          "tokens": 7
+        },
+        {
+          "doc_id": "36cd4f24fc36392138cac6405d59edbb5534f7ff05ead33dc9365a7c5578af28",
+          "hydration_level": "full",
+          "lane": "expansion",
+          "parent_id": "36cd4f24fc36392138cac6405d59edbb5534f7ff05ead33dc9365a7c5578af28_parent_0699",
+          "rank": 2,
+          "reason": "full_fits_budget",
+          "score": 0.19882930729973583,
+          "tokens": 242
+        },
+        {
+          "doc_id": "f4e5f68b188beb3aad3e9f1d10846c1d9c1747b2d872b701f5e2757e14dd5305",
+          "hydration_level": "full",
+          "lane": "expansion",
+          "parent_id": "f4e5f68b188beb3aad3e9f1d10846c1d9c1747b2d872b701f5e2757e14dd5305_parent_1295",
+          "rank": 3,
+          "reason": "full_fits_budget",
+          "score": 0.3957750505281493,
+          "tokens": 156
+        },
+        {
+          "doc_id": "36cd4f24fc36392138cac6405d59edbb5534f7ff05ead33dc9365a7c5578af28",
+          "hydration_level": "summary",
+          "lane": "expansion",
+          "parent_id": "36cd4f24fc36392138cac6405d59edbb5534f7ff05ead33dc9365a7c5578af28_parent_0079",
+          "rank": 4,
+          "reason": "full_overflow_summary_fits",
+          "score": 0.2200258666533458,
+          "tokens": 121
+        },
+        {
+          "doc_id": "f4e5f68b188beb3aad3e9f1d10846c1d9c1747b2d872b701f5e2757e14dd5305",
+          "hydration_level": "summary",
+          "lane": "expansion",
+          "parent_id": "f4e5f68b188beb3aad3e9f1d10846c1d9c1747b2d872b701f5e2757e14dd5305_parent_1209",
+          "rank": 5,
+          "reason": "full_overflow_summary_fits",
+          "score": 0.36216643217436645,
+          "tokens": 101
+        }
+      ],
+      "hydration_levels_recorded": true,
+      "off": {
+        "expected_hit_top_three": true,
+        "forbidden_rank1": false,
+        "passed": true,
+        "top_three_titles": [
+          "VES Handbook of Visual Effects.md",
+          "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md"
+        ]
+      },
+      "on": {
+        "expected_hit_top_three": true,
+        "forbidden_rank1": false,
+        "passed": true,
+        "top_three_titles": [
+          "VES Handbook of Visual Effects.md",
+          "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md"
+        ]
+      },
+      "packet_hash": "8f12f40ca4910acb6aa3eb7a2f24ae43dcf5ecd3a65ee7001d5f770d83dd259b",
+      "packet_hash_stable": true,
+      "quality_preserved": true,
+      "query_id": "bridge_ai_video_character_motion",
+      "question": "My AI video character moves correctly but the performance says nothing. What directing craft should I encode in the prompt?",
+      "repeat_packet_hash": "8f12f40ca4910acb6aa3eb7a2f24ae43dcf5ecd3a65ee7001d5f770d83dd259b",
+      "selected_source_ids": [
+        {
+          "chunk_id": "f4e5f68b188beb3aad3e9f1d10846c1d9c1747b2d872b701f5e2757e14dd5305_3530",
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "f4e5f68b188beb3aad3e9f1d10846c1d9c1747b2d872b701f5e2757e14dd5305",
+          "parent_id": "f4e5f68b188beb3aad3e9f1d10846c1d9c1747b2d872b701f5e2757e14dd5305_parent_1443"
+        },
+        {
+          "chunk_id": "f4e5f68b188beb3aad3e9f1d10846c1d9c1747b2d872b701f5e2757e14dd5305_1526",
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "f4e5f68b188beb3aad3e9f1d10846c1d9c1747b2d872b701f5e2757e14dd5305",
+          "parent_id": "f4e5f68b188beb3aad3e9f1d10846c1d9c1747b2d872b701f5e2757e14dd5305_parent_0579"
+        },
+        {
+          "chunk_id": "36cd4f24fc36392138cac6405d59edbb5534f7ff05ead33dc9365a7c5578af28_2049",
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "36cd4f24fc36392138cac6405d59edbb5534f7ff05ead33dc9365a7c5578af28",
+          "parent_id": "36cd4f24fc36392138cac6405d59edbb5534f7ff05ead33dc9365a7c5578af28_parent_0699"
+        },
+        {
+          "chunk_id": "f4e5f68b188beb3aad3e9f1d10846c1d9c1747b2d872b701f5e2757e14dd5305_3169",
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "f4e5f68b188beb3aad3e9f1d10846c1d9c1747b2d872b701f5e2757e14dd5305",
+          "parent_id": "f4e5f68b188beb3aad3e9f1d10846c1d9c1747b2d872b701f5e2757e14dd5305_parent_1295"
+        },
+        {
+          "chunk_id": "36cd4f24fc36392138cac6405d59edbb5534f7ff05ead33dc9365a7c5578af28_0313",
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "36cd4f24fc36392138cac6405d59edbb5534f7ff05ead33dc9365a7c5578af28",
+          "parent_id": "36cd4f24fc36392138cac6405d59edbb5534f7ff05ead33dc9365a7c5578af28_parent_0079"
+        },
+        {
+          "chunk_id": "f4e5f68b188beb3aad3e9f1d10846c1d9c1747b2d872b701f5e2757e14dd5305_2898",
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "f4e5f68b188beb3aad3e9f1d10846c1d9c1747b2d872b701f5e2757e14dd5305",
+          "parent_id": "f4e5f68b188beb3aad3e9f1d10846c1d9c1747b2d872b701f5e2757e14dd5305_parent_1209"
+        }
+      ],
+      "used_tokens": 1431
+    },
+    {
+      "budget_tokens": 1500,
+      "evidence_selection_identical": true,
+      "evidence_signature_sha256": {
+        "off": "38346d88b99481858e1c39d2ac91337add03a5c8f700152f2d4419bc49cf3080",
+        "on_first": "38346d88b99481858e1c39d2ac91337add03a5c8f700152f2d4419bc49cf3080",
+        "on_repeat": "38346d88b99481858e1c39d2ac91337add03a5c8f700152f2d4419bc49cf3080"
+      },
+      "hydration_counts": {
+        "full": 2,
+        "skip": 0,
+        "summary": 1
+      },
+      "hydration_decisions": [
+        {
+          "doc_id": "36cd4f24fc36392138cac6405d59edbb5534f7ff05ead33dc9365a7c5578af28",
+          "hydration_level": "full",
+          "lane": "expansion",
+          "parent_id": "36cd4f24fc36392138cac6405d59edbb5534f7ff05ead33dc9365a7c5578af28_parent_0422",
+          "rank": 0,
+          "reason": "full_fits_budget",
+          "score": 0.5293108144822669,
+          "tokens": 982
+        },
+        {
+          "doc_id": "36cd4f24fc36392138cac6405d59edbb5534f7ff05ead33dc9365a7c5578af28",
+          "hydration_level": "full",
+          "lane": "expansion",
+          "parent_id": "36cd4f24fc36392138cac6405d59edbb5534f7ff05ead33dc9365a7c5578af28_parent_0075",
+          "rank": 1,
+          "reason": "full_fits_budget",
+          "score": 0.31243365523781647,
+          "tokens": 208
+        },
+        {
+          "doc_id": "36cd4f24fc36392138cac6405d59edbb5534f7ff05ead33dc9365a7c5578af28",
+          "hydration_level": "summary",
+          "lane": "expansion",
+          "parent_id": "36cd4f24fc36392138cac6405d59edbb5534f7ff05ead33dc9365a7c5578af28_parent_0105",
+          "rank": 2,
+          "reason": "full_overflow_summary_fits",
+          "score": 0.255306955940313,
+          "tokens": 102
+        }
+      ],
+      "hydration_levels_recorded": true,
+      "off": {
+        "expected_hit_top_three": true,
+        "forbidden_rank1": false,
+        "passed": true,
+        "top_three_titles": [
+          "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md"
+        ]
+      },
+      "on": {
+        "expected_hit_top_three": true,
+        "forbidden_rank1": false,
+        "passed": true,
+        "top_three_titles": [
+          "Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md"
+        ]
+      },
+      "packet_hash": "e5102601fd8b1801b02f6abebecbcc49bebed067885dc92d91f83abf5d5dbe91",
+      "packet_hash_stable": true,
+      "quality_preserved": true,
+      "query_id": "bridge_ai_video_storyboard",
+      "question": "How do I turn a narrative beat into a sequence of AI video prompts without losing the dramatic through-line?",
+      "repeat_packet_hash": "e5102601fd8b1801b02f6abebecbcc49bebed067885dc92d91f83abf5d5dbe91",
+      "selected_source_ids": [
+        {
+          "chunk_id": "36cd4f24fc36392138cac6405d59edbb5534f7ff05ead33dc9365a7c5578af28_1338",
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "36cd4f24fc36392138cac6405d59edbb5534f7ff05ead33dc9365a7c5578af28",
+          "parent_id": "36cd4f24fc36392138cac6405d59edbb5534f7ff05ead33dc9365a7c5578af28_parent_0422"
+        },
+        {
+          "chunk_id": "36cd4f24fc36392138cac6405d59edbb5534f7ff05ead33dc9365a7c5578af28_0296",
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "36cd4f24fc36392138cac6405d59edbb5534f7ff05ead33dc9365a7c5578af28",
+          "parent_id": "36cd4f24fc36392138cac6405d59edbb5534f7ff05ead33dc9365a7c5578af28_parent_0075"
+        },
+        {
+          "chunk_id": "36cd4f24fc36392138cac6405d59edbb5534f7ff05ead33dc9365a7c5578af28_0415",
+          "corpus_id": "2c894530-8d57-4432-a6d4-bc14505a698b",
+          "doc_id": "36cd4f24fc36392138cac6405d59edbb5534f7ff05ead33dc9365a7c5578af28",
+          "parent_id": "36cd4f24fc36392138cac6405d59edbb5534f7ff05ead33dc9365a7c5578af28_parent_0105"
+        }
+      ],
+      "used_tokens": 1438
+    }
+  ],
+  "runtime": {
+    "budget_tokens": 1500,
+    "corpus_writes": 0,
+    "fallback_from": null,
+    "final_top_k": 10,
+    "four_lane_tier0_router_enabled": false,
+    "retrieval_tier": "qdrant_mongo_graph",
+    "synthesis_calls": 0,
+    "waterfall_assembly": true
+  },
+  "schema_version": "polymath.waterfall_pressure_results.v1",
+  "selection_sha256": "da7b94c152dd5e72d52db1fd80a68f0cc2797d85ed1fd4899f9a8c19874eaf00",
+  "summary": {
+    "acceptance_passed": false,
+    "all_ranked_parent_decisions_full": false,
+    "execution_count": 6,
+    "fallback_authorized": false,
+    "full_decisions": 13,
+    "hydration_levels_recorded": true,
+    "packet_hashes_stable": true,
+    "quality_preserved": true,
+    "skip_decisions": 0,
+    "stage_valid": false,
+    "summary_decisions": 5
+  }
+}

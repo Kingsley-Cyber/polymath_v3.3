@@ -12603,3 +12603,19 @@ C is enablement-eligible but remains OFF pending the separately required
 owner word. Canonical runtime is healthy at relationship=true,
 corpus_scope.v2=true, temporal=false, claim_anchors=false, `EXIT=0`; lock
 released. Next ordered live gate is W.
+
+## [2026-07-17T18:18:02Z] EXECUTOR → SENIOR :: RECEIPT
+
+W pressure diagnostic is RED and remains OFF. The exact six-query set ran
+at 1,500 tokens with zero synthesis calls and zero corpus writes. All six
+packet hashes were stable across the required repeat, evidence selection
+and bridge quality were preserved 6/6, and hydration levels were recorded.
+Aggregate decisions were full=13, summary=5, skip=0. Acceptance required
+summary≥1 and skip≥1, so `stage_valid=false`, wrapper true `EXIT=1`.
+
+The one authorized 750-token fallback was not run because its prerequisite
+was false: the 1,500 artifact was not all-full. Artifact SHA
+`cac253aa78137d5baefa3df80f8b152d85203c05296e7bd135b18531bd493b7a`;
+receipt: `docs/QUALITY_W_WATERFALL_PRESSURE_RECEIPT_2026-07-17.md`.
+Runtime verified relationship=true, corpus_scope.v2=true, temporal=false,
+waterfall=false, `EXIT=0`; lock released. Next ordered package is Agent T.
