@@ -11794,3 +11794,31 @@ no mixed-provenance vectors either way. Receipt the canary + the chosen
 route.
 
 ## OWNER HOLD — SUPERSEDES the Step 0.5 embed-routing directive above: the embedding/reranker structural decision is NOT made. Do NOT implement the routing seam or parity canary. Step 0 client-side stability patch (timeout/warmup/health-probe/soak) still stands as written in the injected prompt. Everything else in the wave proceeds unchanged.
+
+## [2026-07-17T12:09:33Z] EXECUTOR → SENIOR :: RECEIPT
+
+FOUR-LANE-TIER0-ROUTER-V1 implementation/static checkpoint is green on the
+isolated review branch `codex/router-tier0-20260717`, implementation commit
+`b920876`. The corrected immutable six-query bridge preregistration is commit
+`d2c9f77`, SHA-256 `6c348cbf...c4b8`, bound to the immutable 15-document
+selection manifest SHA-256 `da7b94c1...af00`. Both router and optional
+decomposition flags remain default-OFF; no live deploy/eval and no corpus
+write occurred.
+
+Mechanism: lexical BM25 over document title/summary/headings; existing
+document-summary plus outbox-authorized dark digest vectors; existing
+child-hit rollup with no parent embedding; T9.1-resolved associative matching
+against accepted digest domains/superframes/motifs/latent concepts. Fusion
+uses thresholded lane quotas/spillover, associative reserved seats,
+divergent-profile surface demotion, and full per-route attribution. Digest
+signals fail closed on exact current-source/outbox/application-receipt
+closure; one invalid legacy source identity cannot abort corpus routing.
+
+Receipts: focused baked-image suite 57 passed, adjacent invariant suite 138
+passed, compile and `git diff --check` true EXIT=0; exact backend build image
+digest `sha256:f6a3bd815b158eb5e0371c37709ddd7f9ed647f1fb0b9d947963aaaf0f3b82d8`,
+build EXIT=0. Detailed static receipt:
+`docs/FOUR_LANE_TIER0_ROUTER_IMPLEMENTATION_RECEIPT_2026-07-17.md`.
+Per measurement order, Router A will not contend for the eval lock: Claim C's
+6x2 micro A/B runs first, then Router A's frozen OFF/ON plus bridge
+diagnostic. Promotion verdict remains pending those serialized live gates.
