@@ -23,8 +23,13 @@ def _load(name, rel):
 waterfall = _load("services.retriever.waterfall", "services/retriever/waterfall.py")
 # assembly imports `services.retriever.waterfall` — satisfied via sys.modules above;
 # stub the package chain so its absolute import resolves without the real package.
-for pkg in ("services", "services.retriever"):
-    sys.modules.setdefault(pkg, types.ModuleType(pkg))
+_SERVICES = os.path.join(os.path.dirname(__file__), "..", "services")
+for pkg, path in (
+    ("services", _SERVICES),
+    ("services.retriever", os.path.join(_SERVICES, "retriever")),
+):
+    module = sys.modules.setdefault(pkg, types.ModuleType(pkg))
+    module.__path__ = [path]
 sys.modules["services.retriever"].waterfall = waterfall
 assembly = _load("assembly", "services/retriever/assembly.py")
 
@@ -127,7 +132,26 @@ def test_end_to_end_packet_determinism():
     d = assembly.packet_to_dict(p1)
     assert d["packet_hash"] == p1.packet_hash
     assert len(d["items"]) == len(p1.items)
-    assert {"kind", "ref_id", "doc_id", "lane", "tokens", "text"} <= set(d["items"][0])
+    assert {
+        "kind",
+        "ref_id",
+        "doc_id",
+        "lane",
+        "tokens",
+        "text",
+        "hydration_level",
+    } <= set(d["items"][0])
+    assert len(d["hydration_decisions"]) == len(parents)
+    assert {
+        "rank",
+        "parent_id",
+        "doc_id",
+        "lane",
+        "score",
+        "hydration_level",
+        "reason",
+        "tokens",
+    } == set(d["hydration_decisions"][0])
 
 
 def _run_all():

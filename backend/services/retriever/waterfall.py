@@ -28,7 +28,7 @@ tiktoken is unavailable (the fallback is still deterministic).
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Callable, Sequence
 
 __all__ = [
@@ -37,6 +37,7 @@ __all__ = [
     "SharedEntity",
     "DocNote",
     "PacketItem",
+    "HydrationDecision",
     "Packet",
     "allocate",
 ]
@@ -106,11 +107,32 @@ class PacketItem:
     lane: str
     tokens: int
     text: str
+    hydration_level: str = ""
+
+
+@dataclass(frozen=True)
+class HydrationDecision:
+    """Observable decision for one ranked parent seat.
+
+    Skipped parents are deliberately absent from ``Packet.items`` because
+    they contribute no model context, but remain present here so budget
+    behavior can be audited without changing the rendered packet.
+    """
+
+    rank: int
+    parent_id: str
+    doc_id: str
+    lane: str
+    score: float
+    hydration_level: str  # "full" | "summary" | "skip"
+    reason: str
+    tokens: int
 
 
 @dataclass
 class Packet:
     items: list[PacketItem] = field(default_factory=list)
+    hydration_decisions: list[HydrationDecision] = field(default_factory=list)
     packet_hash: str = ""
     budget_tokens: int = 0
     used_tokens: int = 0
@@ -131,22 +153,107 @@ def _ladder(
     budget: int,
     count: Callable[[str], int],
     lane: str,
-) -> tuple[list[PacketItem], int]:
-    """Rule 1+4: rank walk, full → summary → skip; never truncate."""
+    rank_by_object: dict[int, int],
+) -> tuple[list[PacketItem], int, list[HydrationDecision]]:
+    """Rule 1+4: rank walk, full tier → summary tier → skip.
+
+    Once a full parent overflows the lane budget, lower-ranked seats stay in
+    the summary tier. This preserves the global rank contract: a smaller
+    lower-ranked parent cannot jump back to full hydration after a
+    higher-ranked parent has already downgraded.
+    """
     items: list[PacketItem] = []
+    decisions: list[HydrationDecision] = []
     used = 0
+    summary_tier = False
     for p in parents:
+        rank = rank_by_object[id(p)]
         full_t = count(p.full_text) if p.full_text else 0
-        if p.full_text and used + full_t <= budget:
-            items.append(PacketItem("full", p.parent_id, p.doc_id, lane, full_t, p.full_text))
+        summary_t = count(p.summary) if p.summary else 0
+        if not summary_tier and p.full_text and used + full_t <= budget:
+            items.append(
+                PacketItem(
+                    "full",
+                    p.parent_id,
+                    p.doc_id,
+                    lane,
+                    full_t,
+                    p.full_text,
+                    "full",
+                )
+            )
             used += full_t
+            decisions.append(
+                HydrationDecision(
+                    rank,
+                    p.parent_id,
+                    p.doc_id,
+                    lane,
+                    p.score,
+                    "full",
+                    "full_fits_budget",
+                    full_t,
+                )
+            )
             continue
-        sum_t = count(p.summary) if p.summary else 0
-        if p.summary and used + sum_t <= budget:
-            items.append(PacketItem("summary", p.parent_id, p.doc_id, lane, sum_t, p.summary))
-            used += sum_t
-        # else: skip — degrade gracefully, keep walking ranks
-    return items, used
+
+        if p.full_text or p.summary:
+            summary_tier = True
+
+        if p.summary and used + summary_t <= budget:
+            items.append(
+                PacketItem(
+                    "summary",
+                    p.parent_id,
+                    p.doc_id,
+                    lane,
+                    summary_t,
+                    p.summary,
+                    "summary",
+                )
+            )
+            used += summary_t
+            if p.full_text:
+                reason = (
+                    "summary_tier"
+                    if used - summary_t + full_t <= budget
+                    else "full_overflow_summary_fits"
+                )
+            else:
+                reason = "full_missing_summary_fallback"
+            decisions.append(
+                HydrationDecision(
+                    rank,
+                    p.parent_id,
+                    p.doc_id,
+                    lane,
+                    p.score,
+                    "summary",
+                    reason,
+                    summary_t,
+                )
+            )
+            continue
+
+        if not p.full_text and not p.summary:
+            reason = "no_hydratable_text"
+        elif not p.summary:
+            reason = "summary_missing_after_full_tier"
+        else:
+            reason = "summary_exceeds_remaining_budget"
+        decisions.append(
+            HydrationDecision(
+                rank,
+                p.parent_id,
+                p.doc_id,
+                lane,
+                p.score,
+                "skip",
+                reason,
+                0,
+            )
+        )
+    return items, used, decisions
 
 
 def allocate(
@@ -174,29 +281,54 @@ def allocate(
 
     anchors = [p for p in ranked_parents if p.lane == "anchor"]
     expansion = [p for p in ranked_parents if p.lane != "anchor"]
+    rank_by_object = {id(parent): rank for rank, parent in enumerate(ranked_parents)}
 
     items: list[PacketItem] = []
+    decisions: list[HydrationDecision] = []
     used = 0
 
     if anchors:
         diag["mode"] = "two_lane"
         # Rule 2 — spillover: anchor slots fill only while candidates clear
         # the fixed rerank threshold; the rest of the anchor budget spills.
-        eligible = (
-            [p for p in anchors if spillover_threshold is None or p.score >= spillover_threshold]
-        )
+        eligible = [
+            p
+            for p in anchors
+            if spillover_threshold is None or p.score >= spillover_threshold
+        ]
         diag["anchor_candidates"] = len(anchors)
         diag["anchor_eligible"] = len(eligible)
         anchor_budget = int(budget * anchor_quota)
-        a_items, a_used = _ladder(eligible, anchor_budget, count, "anchor")
+        a_items, a_used, a_decisions = _ladder(
+            eligible, anchor_budget, count, "anchor", rank_by_object
+        )
+        ineligible_decisions = [
+            HydrationDecision(
+                rank_by_object[id(parent)],
+                parent.parent_id,
+                parent.doc_id,
+                "anchor",
+                parent.score,
+                "skip",
+                "below_spillover_threshold",
+                0,
+            )
+            for parent in anchors
+            if parent not in eligible
+        ]
         spilled = anchor_budget - a_used
         diag["spilled_tokens"] = spilled
         e_budget = budget - anchor_budget + spilled
-        e_items, e_used = _ladder(expansion, e_budget, count, "expansion")
+        e_items, e_used, e_decisions = _ladder(
+            expansion, e_budget, count, "expansion", rank_by_object
+        )
         items = a_items + e_items
+        decisions = a_decisions + ineligible_decisions + e_decisions
         used = a_used + e_used
     else:
-        items, used = _ladder(expansion, budget, count, "expansion")
+        items, used, decisions = _ladder(
+            expansion, budget, count, "expansion", rank_by_object
+        )
 
     # Rule 6 — dedupe sets from the ladder result.
     included_parents = {it.ref_id for it in items}
@@ -210,7 +342,17 @@ def allocate(
             continue
         t = count(o.text)
         if o.text and used + t <= budget:
-            items.append(PacketItem("child", o.chunk_id, o.doc_id, "expansion", t, o.text))
+            items.append(
+                PacketItem(
+                    "child",
+                    o.chunk_id,
+                    o.doc_id,
+                    "expansion",
+                    t,
+                    o.text,
+                    "child",
+                )
+            )
             used += t
             included_parents.add(o.parent_id)  # its parent is now represented
     diag["orphans_dropped_parent_included"] = dropped_orphans
@@ -219,12 +361,26 @@ def allocate(
     for e in entities:
         t = count(e.text)
         if e.text and used + t <= budget:
-            items.append(PacketItem("entity", e.entity_id, "", "graph", t, e.text))
+            items.append(
+                PacketItem(
+                    "entity",
+                    e.entity_id,
+                    "",
+                    "graph",
+                    t,
+                    e.text,
+                    "entity",
+                )
+            )
             used += t
 
     # Rule 5 — surplus promotes summaries → full, in packet (rank) order.
     promoted = 0
     by_id = {p.parent_id: p for p in ranked_parents}
+    decision_index = {
+        (decision.parent_id, decision.doc_id, decision.lane): idx
+        for idx, decision in enumerate(decisions)
+    }
     for idx, it in enumerate(items):
         if it.kind != "summary":
             continue
@@ -232,11 +388,30 @@ def allocate(
         if p is None or not p.full_text:
             continue
         full_t = count(p.full_text)
-        if used - it.tokens + full_t <= budget:
-            items[idx] = PacketItem("full", p.parent_id, p.doc_id, it.lane, full_t, p.full_text)
-            used = used - it.tokens + full_t
-            full_parents.add(p.parent_id)
-            promoted += 1
+        if used - it.tokens + full_t > budget:
+            # Promotion is rank-prefix-only: a smaller lower-ranked full parent
+            # cannot leapfrog the first summary that cannot be promoted.
+            break
+        items[idx] = PacketItem(
+            "full",
+            p.parent_id,
+            p.doc_id,
+            it.lane,
+            full_t,
+            p.full_text,
+            "full",
+        )
+        used = used - it.tokens + full_t
+        full_parents.add(p.parent_id)
+        promoted += 1
+        d_idx = decision_index.get((p.parent_id, p.doc_id, it.lane))
+        if d_idx is not None:
+            decisions[d_idx] = replace(
+                decisions[d_idx],
+                hydration_level="full",
+                reason="summary_promoted_with_surplus",
+                tokens=full_t,
+            )
     diag["summaries_promoted"] = promoted
 
     # Rule 7 — passive source-role notes consume only true leftover budget after
@@ -245,11 +420,23 @@ def allocate(
     for note in doc_notes:
         t = count(note.text)
         if note.text and used + t <= budget:
-            items.append(PacketItem("doc_note", note.doc_id, note.doc_id, "note", t, note.text))
+            items.append(
+                PacketItem(
+                    "doc_note",
+                    note.doc_id,
+                    note.doc_id,
+                    "note",
+                    t,
+                    note.text,
+                    "doc_note",
+                )
+            )
             used += t
 
+    decisions.sort(key=lambda decision: decision.rank)
     pkt = Packet(
         items=items,
+        hydration_decisions=decisions,
         packet_hash=_hash(items),
         budget_tokens=budget,
         used_tokens=used,
@@ -259,4 +446,9 @@ def allocate(
         k: sum(1 for it in items if it.kind == k)
         for k in ("full", "summary", "child", "entity", "doc_note")
     }
+    diag["hydration_counts"] = {
+        level: sum(1 for decision in decisions if decision.hydration_level == level)
+        for level in ("full", "summary", "skip")
+    }
+    diag["skipped_parents"] = diag["hydration_counts"]["skip"]
     return pkt
