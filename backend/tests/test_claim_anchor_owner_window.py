@@ -130,21 +130,6 @@ def test_runtime_contract_requires_temporal_on_in_both_arms():
         )
 
 
-def test_owner_window_requires_exact_existing_eval_lock(monkeypatch, tmp_path):
-    lock_path = tmp_path / "polymath-eval.lock"
-    monkeypatch.setattr(harness, "EVAL_LOCK_PATH", lock_path)
-
-    with pytest.raises(RuntimeError, match="requires the eval lock"):
-        harness._require_eval_lock("claims-window")
-
-    lock_path.write_text("other-window\n", encoding="utf-8")
-    with pytest.raises(RuntimeError, match="owner mismatch"):
-        harness._require_eval_lock("claims-window")
-
-    lock_path.write_text("claims-window\n", encoding="utf-8")
-    harness._require_eval_lock("claims-window")
-
-
 def test_attested_fresh_off_artifact_round_trips_with_explicit_sha(tmp_path):
     spec, _ = harness._load_v2_contract(V2_SPEC)
     runtime = harness._runtime_snapshot(_runtime(claims=False))

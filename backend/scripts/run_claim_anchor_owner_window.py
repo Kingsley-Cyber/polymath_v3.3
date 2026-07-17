@@ -54,7 +54,6 @@ OWNER_WINDOW_SCHEMA = "claim_anchor_owner_window.v1"
 OWNER_OFF_ATTESTATION_SCHEMA = "claim_anchor_owner_window_off_attestation.v1"
 V2_SPEC_SHA256 = "42eb718dfee0ffd47e1310d1605f02514308bfc9941e8115644ab7434be91783"
 MICRO_HARNESS = Path(__file__).resolve().with_name("run_claim_anchor_micro_ab.py")
-EVAL_LOCK_PATH = Path("/tmp/polymath-eval.lock")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _UNREADABLE_MACHINE_TOKEN_RE = re.compile(
     r"\b(?:POSITIVE|NEGATIVE|ASSERTED|POSSIBLE|PROBABLE|NECESSARY|"
@@ -64,24 +63,6 @@ _UNREADABLE_MACHINE_TOKEN_RE = re.compile(
 
 def _sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
-def _require_eval_lock(owner: str) -> None:
-    expected_owner = owner.strip()
-    if not expected_owner:
-        raise RuntimeError("eval lock owner must be non-empty")
-    try:
-        observed_owner = EVAL_LOCK_PATH.read_text(
-            encoding="utf-8",
-            errors="replace",
-        ).strip()
-    except FileNotFoundError as exc:
-        raise RuntimeError("claim owner window requires the eval lock") from exc
-    if observed_owner != expected_owner:
-        raise RuntimeError(
-            f"eval lock owner mismatch: {observed_owner or 'unknown'} "
-            f"!= {expected_owner}"
-        )
 
 
 def _runtime_snapshot(settings: Any) -> dict[str, bool]:
@@ -451,7 +432,6 @@ def _replay_failures(
 
 
 def _capture_off(args: argparse.Namespace) -> int:
-    _require_eval_lock(args.lock_owner)
     spec, _ = _load_v2_contract(args.spec)
     settings = get_settings()
     runtime = _runtime_snapshot(settings)
@@ -490,7 +470,6 @@ def _capture_off(args: argparse.Namespace) -> int:
 
 
 def _replay_on(args: argparse.Namespace) -> int:
-    _require_eval_lock(args.lock_owner)
     spec, questions = _load_v2_contract(args.spec)
     settings = get_settings()
     runtime = _runtime_snapshot(settings)
@@ -607,7 +586,6 @@ def _parser() -> argparse.ArgumentParser:
     capture.add_argument("--spec", type=Path, default=V2_SPEC)
     capture.add_argument("--output", type=Path, required=True)
     capture.add_argument("--base", default="http://127.0.0.1:8000")
-    capture.add_argument("--lock-owner", required=True)
     capture.set_defaults(handler=_capture_off)
 
     replay = subparsers.add_parser(
@@ -618,7 +596,6 @@ def _parser() -> argparse.ArgumentParser:
     replay.add_argument("--off-artifact", type=Path, required=True)
     replay.add_argument("--off-artifact-sha256", required=True)
     replay.add_argument("--output", type=Path, required=True)
-    replay.add_argument("--lock-owner", required=True)
     replay.set_defaults(handler=_replay_on)
     return parser
 
