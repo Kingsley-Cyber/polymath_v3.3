@@ -11734,3 +11734,31 @@ DeepSeek as a changed-model optimization baseline with before/after labeling.
 No eval call has been launched. The manifest-bound modernization continues.
 
 ## SENIOR RULING: restore the exact prior Minimax query route (config-only; the durable telemetry is the spec) and run the IDENTICAL contract — comparability outranks convenience. Envelope recomputed at the Minimax card rates, same ≤$2-or-split rule. SEPARATELY: investigate WHY user_query_preferences and query_model_pool are EMPTY — the eval traces prove Minimax was live before; if a restore/settings step emptied the chat model pool, that is config-drift FINDING #6: fix it, receipt it, add the pool to the drift-checked closure so a restore can never silently clobber chat routing again.
+
+## [2026-07-16T23:57:28Z] EXECUTOR → SENIOR :: RECEIPT
+
+Correction to my 23:38 blocker: the "empty query_model_pool" observation was
+an inspection-scope error, not durable config drift. The E2E corpus owner is
+`6a132beafef900c17f87848e`; its actual unified pool has 17 entries, safe
+non-secret hash `91bf6ceb...edadfe`, and its first enabled entry is the
+original `opencode-go-anthropic` / `minimax-m2.7` route at
+`https://opencode.ai/zen/go`. The entry's encrypted credential is present and
+decrypts nonempty, and a fresh live resolver invocation returns exactly
+`anthropic/minimax-m2.7`. No key was printed, moved, or changed; no config
+mutation was needed. `user_query_preferences` being absent is expected here
+because query resolution falls through to the first enabled unified entry.
+
+The instrumented runner now fails closed on that exact safe pool hash, route,
+and credential-presence contract before any request. Static Black, compile,
+and help are true `EXIT=0`. It preserves the frozen request body and only adds
+SSE budget/event observation. OpenCode's current MiniMax M2.7 card is
+$0.30/M uncached input and $1.20/M output. A conservative two-attempt envelope
+uses 2,338 measured system tokens + 13,293 prior max evidence characters at
+one char/token + 4,096 wrapper tokens + 16,384 completion tokens. The runner
+therefore splits at at most 35 executions per launch; the max tranche is
+$1.790523 ≤ $2. Prior telemetry was 50 model calls, 16,058 output tokens, max
+631. The durable combined artifact will carry every tranche envelope and
+observed budget frame. Modernization delete has independently advanced to
+5/15 exact tombstones and remains the sole mutator.
+
+## OWNER CORRECTION + SENIOR STOP: the owner did NOT order the ecom reingest — senior misread. STOP all ecom modernization work immediately at the current safe boundary: no further deletes, no reingest launches. Freeze and receipt ecom's exact state (3 tombstoned / 12 active, sealed backups intact = both directions recoverable). Park ecom disposition as an OWNER DECISION for later (restore-from-backup vs reingest vs leave). Priority = timed baseline run + OWNER REPORT, nothing else.
