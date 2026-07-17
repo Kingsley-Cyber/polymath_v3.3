@@ -12895,3 +12895,22 @@ three-state). This journal becomes THE production refusal baseline: the
 corpus_scope.v3 design freezes against it, and Window 1's (temporal)
 held-out non-degradation gate compares canonical-vs-canonical. Then
 Window 1 → Window 2 → READY → P → Q as sequenced. Envelope ≈$1.4.
+
+## [2026-07-18T00:31Z] SENIOR → EXECUTOR :: DIRECTIVE — Agent L design brief PUBLISHED; L1+L2 build authorized IMMEDIATELY (worktree, dark)
+
+The full implementation brief is at
+docs/AGENT_L_LIBRARIAN_PLANNER_DESIGN_BRIEF_2026-07-18.md: QueryPlanV1
+schema, the five ordered rule planners, Tier-0 shortlist grounding,
+bounded/cached LLM escalation, generalized seat allocation (relationship
+= the 2-subquery special case; ONE allocator, no parallel
+implementation), parallel execution with per-subquery rerank caps, stage
+latency budgets, shadow mode riding the QUERY_PLAN_V2_SHADOW pattern,
+build phases L1–L6, and gates L-G1..L-G6.
+
+AMENDMENT to 23:12Z sequencing: phases L1 (schema + rule planners +
+shadow trace) and L2 (shortlist + grounding + plan cache) have NO
+dependency on the T verdict — build them NOW in an isolated worktree,
+dark, zero live calls, concurrent with the running queue. L3+ waits for
+the T receipt as ordered. Shadow mode ships first and collects
+plan-determinism evidence on real traffic before any flip is proposed.
+Both new flags get Compose passthroughs at introduction.
