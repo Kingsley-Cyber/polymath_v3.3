@@ -1,0 +1,30 @@
+{
+  "schema_version": "claim_anchor_join_micro_ab.v1",
+  "heldout_questions_sha256": "7c000ca43911684c0991c7bc63455e4595f1ffe3d25a2d82aa551cf5d555a42b",
+  "tier": "qdrant_mongo_graph",
+  "corpus_name": "markbuildsbrands_transcripts",
+  "model_contract": "anthropic/minimax-m2.7",
+  "query_ids": [
+    "q021",
+    "q022",
+    "q023",
+    "q024",
+    "q025",
+    "q029"
+  ],
+  "selection_rule": "The known q021 join failure plus the first frozen Mark query for each remaining distinct shape: procedural, naive, list, single_fact, and followup.",
+  "required_positive_anchor_ids_when_on": [
+    "q021"
+  ],
+  "expected_structural_anchor_count_when_on": 18,
+  "expected_structurally_valid_anchor_count_when_on": 18,
+  "q021_min_rendered_anchors_when_on": 2,
+  "invariants": [
+    "Frozen questions, prompts, scoring, expected documents, and overlap guard remain unchanged.",
+    "OFF retrieval and ON post-selection replay use the same selected source packet, tier, model contract, query order, and corpus.",
+    "Selected source identities and every non-anchor evidence byte are byte-equivalent between OFF selection and ON enrichment.",
+    "Every emitted anchor has exact sentence, claim, source-version, and selected-source ownership closure.",
+    "Readable claim cleanup occurs only in prompt rendering; raw anchor and stored compiler claim_text remain unchanged.",
+    "No corpus-bearing Mongo collection changes during either arm."
+  ]
+}

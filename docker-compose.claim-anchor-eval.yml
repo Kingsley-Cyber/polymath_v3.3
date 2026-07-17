@@ -1,0 +1,4 @@
+services:
+  backend:
+    environment:
+      ATOMIC_CLAIM_ANCHORS_ENABLED: "${ATOMIC_CLAIM_ANCHORS_ENABLED:-false}"
