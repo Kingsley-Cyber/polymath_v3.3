@@ -258,8 +258,22 @@ def packet_to_dict(packet: Packet) -> dict[str, Any]:
                 "lane": it.lane,
                 "tokens": it.tokens,
                 "text": it.text,
+                "hydration_level": it.hydration_level,
             }
             for it in packet.items
+        ],
+        "hydration_decisions": [
+            {
+                "rank": decision.rank,
+                "parent_id": decision.parent_id,
+                "doc_id": decision.doc_id,
+                "lane": decision.lane,
+                "score": decision.score,
+                "hydration_level": decision.hydration_level,
+                "reason": decision.reason,
+                "tokens": decision.tokens,
+            }
+            for decision in packet.hydration_decisions
         ],
         "diagnostics": dict(packet.diagnostics),
     }
