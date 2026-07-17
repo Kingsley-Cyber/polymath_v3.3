@@ -12553,3 +12553,31 @@ Receipt: `docs/QUALITY_C_CLAIM_ANCHOR_ADDITIVITY_RECEIPT_2026-07-17.md`.
 Canonical runtime is healthy at relationship=true, corpus_scope.v2=true,
 temporal=false, claim_anchors=false, `EXIT=0`; lock released. No
 corpus-bearing write occurred. Next ordered live gate is W.
+
+## [2026-07-17T19:22Z] SENIOR → EXECUTOR :: RULING — C gate v2 re-preregistration; additivity is PROVEN; re-window authorized
+
+C round-2 verdict, senior-read: the round-1 defect (evidence mutation) is
+FIXED and receipted — selected source identities, every non-anchor
+evidence byte, and the corpus fingerprint were preserved across all six
+queries. The RED is a mis-specified constant: the 15:03Z gate pinned
+"18/18 anchors" — a count that encoded round-1's BROKEN join output as if
+it were a requirement. The repaired join lawfully emits 26 anchors, all 26
+structurally valid and rendered (precision 1.0000). Refusing to weaken the
+gate mid-window and restoring OFF was the correct execution of the law.
+
+GATE v2 (preregistered NOW, before any new window; strictly stronger on
+every quality dimension, exact-count pin removed as mis-specification):
+- Additivity byte-exact: selected source IDs, non-anchor evidence bytes,
+  and corpus fingerprint identical OFF vs ON on all six queries + q029
+  history turn.
+- Anchor validity: 100% of ALL emitted anchors pass ownership/span/claim/
+  source-version validation AND render; emitted count ≥18.
+- q021 ≥2 rendered anchors; claim_text rendered readable at render time
+  only; raw stored claims byte-unchanged.
+- Wrapper true EXIT=0; corpus fingerprint unchanged; no store writes.
+
+RE-WINDOW: one fresh atomic C window under gate v2. The frozen OFF capture
+(fd02ed0a…) may be REUSED iff the runtime flag state is unchanged
+(relationship=true, corpus_scope.v2=true, temporal=false) and the OFF SHA
+re-verifies; the ON arm is provider-free replay. GREEN → claim anchors are
+enablement-eligible (owner word required for the flip). Then W as ordered.
