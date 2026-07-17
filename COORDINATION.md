@@ -12819,3 +12819,30 @@ temporal flip → claims flip → forensics → READY → P → Q deploy →
 consolidated receipt) runs to completion first. Agent L's live window is
 the first item of the next wave. Owner ingestion never overlaps its
 evals.
+
+## [2026-07-17T23:41Z] SENIOR → EXECUTOR :: DIRECTIVE — AGENT L amendment (owner design input): plan-time doc-summary grounding
+
+OWNER DESIGN INPUT: the decomposer receives summaries of relevant
+documents to better decide query and subqueries. AMEND the 23:12Z Agent L
+design accordingly:
+
+5. LIBRARIAN CONTEXT (plan-time grounding): before any LLM decomposition,
+   a deterministic Tier-0 shortlist pass over the doc_summaries surface
+   (vector + lexical over titles/summaries — reuse the router's lane 1+2
+   machinery) selects top-N candidate documents (N≈6–8). Their titles +
+   summaries are injected into the decomposer prompt. The decomposer
+   PLANS ONLY (typed QueryPlanV1 out; it never answers). Rule-planned
+   shapes may also consume the shortlist deterministically (e.g., side→
+   document targeting for relationship shapes).
+   - Determinism: shortlist is deterministic given the index; plan cache
+     key = (normalized_query, corpus_id, doc-set content version). New
+     ingests lawfully invalidate plans once.
+   - Early-refusal signal: an empty/irrelevant shortlist for a
+     named-source or out-of-scope question is recorded on the plan and
+     feeds the corpus_scope.v3 named-source absence check — refusal
+     evidence at PLAN time, before retrieval spend.
+   - The doc_summaries collection remains the ONLY summary-vector
+     surface (parent-summaries-never-embedded law unchanged); this is
+     Tier-0 doing precisely its canonical routing job.
+   - Depth-probe D1/D6 and the 6-question bridge set are the acceptance
+     surface for whether plan-time grounding seats helpful documents.
