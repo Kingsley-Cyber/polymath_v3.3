@@ -12174,3 +12174,58 @@ lists "epub backfill status report" as one of the 15 ingested documents —
 an operational artifact ingested as a book. It has been present through
 all eval receipts to date; flagging for a future hygiene decision, not a
 wave concern.
+
+## [2026-07-17T16:31Z] SENIOR → EXECUTOR :: DIRECTIVE — AGENT T: two-lane anchoring (owner pull-forward; build NOW, eval queued last)
+
+Owner direction: reds move or get reported. Two-lane anchoring is the
+largest unbuilt piece of the canonical owner architecture
+(CONTINUITY/POLYMATH_ARCHITECTURE.md) and is hereby pulled forward from
+Phase B into the current wave as AGENT T. Build is worktree-parallel-safe
+NOW; its live frozen A/B queues on the eval lock AFTER Agent W's run.
+
+MECHANISM (owner canon; refine only inside these bounds):
+- At final evidence-seat selection, classify ranked candidates into two
+  lanes: ANCHOR = deterministic metadata match between query and candidate
+  (title, author, heading_path terms, entity/biblio hits — exact,
+  case-normalized, no embeddings in the classifier); EXPANSION = all other
+  semantically ranked candidates.
+- Seat quotas: anchors ceil(0.6·K), expansion floor(0.4·K),
+  ANCHOR_LANE_RATIO configurable (default 0.60). Threshold spillover BOTH
+  directions: a lane that cannot fill its quota above its admission
+  threshold releases unused seats to the other lane. Reuse the PROVEN
+  reservation/spillover machinery from evidence_allocation.py rather than
+  writing a parallel implementation.
+- PRECEDENCE RULE (engraved): relationship per-side reservation is live and
+  senior in the stack — per-side allocation applies FIRST; lane quotas
+  apply WITHIN each side's allocation. The two mechanisms must not fight;
+  any conflict resolves in favor of per-side coverage.
+- Parent summaries remain never-embedded; this package touches seat
+  allocation only — no new vectors, no store mutations.
+- Flag TWO_LANE_ANCHORING_ENABLED default OFF; single-flag rollback.
+
+PREREGISTERED ACCEPTANCE (before any live arm):
+- T1 frozen floors held, ON arm: direct ≥85%, lay ≥75%, relationship
+  minimum-distinct ≥75%, corpus/citation 100%, negative refusals not below
+  the OFF arm (both the 9 originals and the frozen 28-probe v2 gate).
+- T2 anchor-coverage diagnostic (new, recorded in trace): on queries where
+  ≥1 metadata-matched candidate exists in the ranked pool, a metadata-
+  matched candidate occupies ≥1 final seat in ≥90% of cases ON (report the
+  measured OFF baseline for the same statistic; no post-hoc target edit).
+- T3 OFF arm byte-identical to pre-branch behavior (allocation
+  fingerprints unchanged).
+- T4 determinism: repeated ON run reproduces identical seat assignments.
+- T5 canonical suites green; unit tests for lane classify / quota /
+  spillover / per-side precedence, including the relationship+lanes
+  composition case.
+- Base config for the A/B = production flag state at run start (whatever
+  STEP0/STEP1 promoted). Receipt + enablement recommendation; flag stays
+  OFF pending owner words. Spend rides the existing $10 wave ceiling.
+
+STATUS CORRECTIONS for the owner board, on the record:
+- Digest-as-chunk-competitor: PERMANENTLY RED BY DESIGN — falsified
+  hypothesis, never revived. Its living descendants are the router
+  associative lane (doc-level nomination) and claim anchors (chunk-level
+  attachment), both in flight.
+- Claim activation: IN FLIGHT (Agent C round-2), not idle-red.
+- Librarian shelves: sequenced last by design — consumes router + two-lane
+  telemetry; build order unchanged.
