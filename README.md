@@ -200,7 +200,7 @@ open http://localhost:3000
 Manual Apple mode is also available:
 
 ```bash
-START_RERANKER=true bash scripts/install_apple_mlx_runtime.sh
+START_RERANKER=true bash scripts/setup_apple_mlx.sh --skip-docker-up
 docker compose -f docker-compose.yml -f docker-compose.apple-mlx.yml up -d --build
 bash scripts/smoke_apple_mlx.sh
 ```
@@ -433,7 +433,7 @@ override, and runs a real embedding/reranking smoke. **One command:**
 bash scripts/setup_apple_mlx.sh
 ```
 
-Manual mode is still available: run `START_RERANKER=true bash scripts/install_apple_mlx_runtime.sh`,
+Manual mode is still available: run `START_RERANKER=true bash scripts/setup_apple_mlx.sh --skip-docker-up`,
 then `docker compose -f docker-compose.yml -f docker-compose.apple-mlx.yml up -d --build`,
 then `bash scripts/smoke_apple_mlx.sh`.
 

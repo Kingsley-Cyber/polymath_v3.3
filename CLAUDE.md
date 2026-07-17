@@ -129,7 +129,7 @@ REQUIRED before claiming it works — and verify, don't assume:
 | `backend/**` | `docker compose up -d --build backend` (NEVER `-f docker-compose.yml` alone — drops the override → dead sidecars, silent vector=0) | health green + the embedder self-check line in logs |
 | `frontend/src/**` | `docker compose up -d --build frontend` (container serves BUILD-TIME dist) | `docker exec polymath_v33-frontend-1 grep <marker> /usr/share/nginx/html/assets/*.js` — then HARD-refresh the browser (`Cmd+Shift+R`); the public origin is `rag.kingsleylab.xyz` and can also cache at the Cloudflare edge |
 | `docling_svc/**` | rebuild the docling container (it's on-demand/profile-gated) | — |
-| `scripts/apple_ml_services/**` | `bash scripts/install_apple_mlx_runtime.sh` (rsyncs to `~/PolymathRuntime` — the LaunchAgent runs the COPY, not the repo) then `launchctl kickstart -k gui/501/com.polymath.apple-ml` | ports 8082/8081 up |
+| `scripts/apple_ml_services/**` | `bash scripts/setup_apple_mlx.sh --skip-docker-up` (writes the explicit env manifest, then rsyncs to `~/PolymathRuntime`; the LaunchAgent runs the COPY, not the repo) | ports 8082/8081 up |
 | Ghost B extraction sidecar | runs from `local_ghost_b/.venv` (glirel-compatible pins — the shared apple_ml_services venv CANNOT run it); ad-hoc launch: `PYTHONPATH=<repo>/backend local_ghost_b/.venv/bin/python -m uvicorn ghost_b_extract_svc.main:app --port 8084` from `~/PolymathRuntime/apple_ml_services` | `curl :8084/health` |
 
 Fast iteration WITHOUT a rebuild: `docker cp` the edited file into the

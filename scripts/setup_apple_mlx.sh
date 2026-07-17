@@ -111,8 +111,38 @@ if [[ "${preserve_host_sidecars}" == "1" ]]; then
   export POLYMATH_APPLE_MLX_PRESERVE_HOST=1
 fi
 
+export APPLE_MLX_EMBED_MODEL_ID="${APPLE_MLX_EMBED_MODEL_ID:-mlx-community/Qwen3-Embedding-0.6B-mxfp8}"
+export APPLE_MLX_RERANKER_MODEL_ID="${APPLE_MLX_RERANKER_MODEL_ID:-mlx-community/jina-reranker-v3-4bit-mxfp4}"
+export APPLE_RERANKER_BACKEND="${APPLE_RERANKER_BACKEND:-torch_fp16}"
+export APPLE_TORCH_RERANKER_MODEL_ID="${APPLE_TORCH_RERANKER_MODEL_ID:-jinaai/jina-reranker-v3}"
+if [[ "${APPLE_RERANKER_BACKEND}" == "torch_fp16" ]]; then
+  export RERANKER_SCORE_SCALE="${RERANKER_SCORE_SCALE:-probability}"
+else
+  export RERANKER_SCORE_SCALE="${RERANKER_SCORE_SCALE:-cosine}"
+fi
+export EMBED_BATCH_SIZE="${EMBED_BATCH_SIZE:-32}"
+export START_EMBEDDER="${START_EMBEDDER:-true}"
+export START_RERANKER="${START_RERANKER:-true}"
+export START_DOCLING="${START_DOCLING:-false}"
+export ARBITER_ENABLED="${ARBITER_ENABLED:-false}"
+export ARBITER_HOST="${ARBITER_HOST:-127.0.0.1}"
+export ARBITER_PORT="${ARBITER_PORT:-8085}"
+export ARBITER_ACQUIRE_TIMEOUT_SECONDS="${ARBITER_ACQUIRE_TIMEOUT_SECONDS:-30}"
+export ARBITER_EMBED_HOLD_TARGET_MS="${ARBITER_EMBED_HOLD_TARGET_MS:-2000}"
+export ARBITER_RERANK_HOLD_TARGET_MS="${ARBITER_RERANK_HOLD_TARGET_MS:-500}"
+export ARBITER_MAX_EMBED_BURST="${ARBITER_MAX_EMBED_BURST:-1}"
+export ARBITER_RERANK_STARVATION_SECONDS="${ARBITER_RERANK_STARVATION_SECONDS:-0.5}"
+export ARBITER_STALE_LEASE_SECONDS="${ARBITER_STALE_LEASE_SECONDS:-75}"
+mlx_env_manifest="${runtime_root%/}/logs/apple-mlx-environment.json"
+setup_arbiter_expected="$(printf '%s' "${ARBITER_ENABLED}" | tr '[:upper:]' '[:lower:]')"
+"${PYTHON:-python3}" "${repo_root}/scripts/apple_mlx_env_manifest.py" \
+  --write-manifest "${mlx_env_manifest}" \
+  --expect-arbiter-enabled "${setup_arbiter_expected}" \
+  --check-process-environment
+
 echo "[apple-mlx] installing host-native MLX sidecars and models"
-bash "${repo_root}/scripts/install_apple_mlx_runtime.sh"
+bash "${repo_root}/scripts/install_apple_mlx_runtime.sh" \
+  --env-manifest "${mlx_env_manifest}"
 
 if [[ "${skip_docker_up}" == "1" ]]; then
   echo "[apple-mlx] Docker startup skipped."

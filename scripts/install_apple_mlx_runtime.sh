@@ -9,12 +9,18 @@
 #   5. Writes a LaunchAgent (com.polymath.apple-ml) and bootstraps it
 #   6. Smoke-tests enabled sidecars
 #
-# Usage (run from repo root on macOS):
-#   bash scripts/install_apple_mlx_runtime.sh
+# Usage (run from repo root on macOS with every manifest value exported):
+#   bash scripts/install_apple_mlx_runtime.sh --env-manifest /secure/off.json
 #
 # Re-run any time. Safe to interrupt; rerun resumes.
 
 set -euo pipefail
+
+if [[ "$#" -ne 2 || "$1" != "--env-manifest" ]]; then
+  echo "ERROR: --env-manifest PATH is mandatory; implicit deployment defaults are forbidden." >&2
+  exit 2
+fi
+ENV_MANIFEST="$2"
 
 # ── 1. Platform gate ─────────────────────────────────────────────────
 if [[ "$(uname -s)" != "Darwin" ]]; then
@@ -28,33 +34,35 @@ if [[ "$(uname -m)" != "arm64" ]]; then
 fi
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-RUNTIME_ROOT="${POLYMATH_DOCKER_DATA_ROOT:-${HOME}/PolymathRuntime}"
+arbiter_expected="$(printf '%s' "${ARBITER_ENABLED:?ARBITER_ENABLED must be exported}" | tr '[:upper:]' '[:lower:]')"
+"${PYTHON:-python3}" "${REPO_ROOT}/scripts/apple_mlx_env_manifest.py" \
+  --manifest "${ENV_MANIFEST}" \
+  --expect-arbiter-enabled "${arbiter_expected}" \
+  --check-process-environment
+
+RUNTIME_ROOT="${POLYMATH_DOCKER_DATA_ROOT:?POLYMATH_DOCKER_DATA_ROOT must be exported}"
 SERVICES_DIR="${RUNTIME_ROOT}/apple_ml_services"
 LOG_DIR="${RUNTIME_ROOT}/logs"
 LAUNCH_AGENT_NAME="com.polymath.apple-ml"
 LAUNCH_AGENT_PATH="${HOME}/Library/LaunchAgents/${LAUNCH_AGENT_NAME}.plist"
-APPLE_MLX_EMBED_MODEL_ID="${APPLE_MLX_EMBED_MODEL_ID:-mlx-community/Qwen3-Embedding-0.6B-mxfp8}"
-APPLE_MLX_RERANKER_MODEL_ID="${APPLE_MLX_RERANKER_MODEL_ID:-mlx-community/jina-reranker-v3-4bit-mxfp4}"
-APPLE_RERANKER_BACKEND="${APPLE_RERANKER_BACKEND:-torch_fp16}"
-APPLE_TORCH_RERANKER_MODEL_ID="${APPLE_TORCH_RERANKER_MODEL_ID:-jinaai/jina-reranker-v3}"
-if [[ "${APPLE_RERANKER_BACKEND}" == "torch_fp16" ]]; then
-  RERANKER_SCORE_SCALE="probability"
-else
-  RERANKER_SCORE_SCALE="cosine"
-fi
-EMBED_BATCH_SIZE="${EMBED_BATCH_SIZE:-32}"
-START_EMBEDDER="${START_EMBEDDER:-true}"
-START_RERANKER="${START_RERANKER:-true}"
-START_DOCLING="${START_DOCLING:-false}"
-ARBITER_ENABLED="${ARBITER_ENABLED:-false}"
-ARBITER_HOST="${ARBITER_HOST:-127.0.0.1}"
-ARBITER_PORT="${ARBITER_PORT:-8085}"
-ARBITER_ACQUIRE_TIMEOUT_SECONDS="${ARBITER_ACQUIRE_TIMEOUT_SECONDS:-30}"
-ARBITER_EMBED_HOLD_TARGET_MS="${ARBITER_EMBED_HOLD_TARGET_MS:-2000}"
-ARBITER_RERANK_HOLD_TARGET_MS="${ARBITER_RERANK_HOLD_TARGET_MS:-500}"
-ARBITER_MAX_EMBED_BURST="${ARBITER_MAX_EMBED_BURST:-1}"
-ARBITER_RERANK_STARVATION_SECONDS="${ARBITER_RERANK_STARVATION_SECONDS:-0.5}"
-ARBITER_STALE_LEASE_SECONDS="${ARBITER_STALE_LEASE_SECONDS:-75}"
+APPLE_MLX_EMBED_MODEL_ID="${APPLE_MLX_EMBED_MODEL_ID:?}"
+APPLE_MLX_RERANKER_MODEL_ID="${APPLE_MLX_RERANKER_MODEL_ID:?}"
+APPLE_RERANKER_BACKEND="${APPLE_RERANKER_BACKEND:?}"
+APPLE_TORCH_RERANKER_MODEL_ID="${APPLE_TORCH_RERANKER_MODEL_ID:?}"
+RERANKER_SCORE_SCALE="${RERANKER_SCORE_SCALE:?}"
+EMBED_BATCH_SIZE="${EMBED_BATCH_SIZE:?}"
+START_EMBEDDER="${START_EMBEDDER:?}"
+START_RERANKER="${START_RERANKER:?}"
+START_DOCLING="${START_DOCLING:?}"
+ARBITER_ENABLED="${ARBITER_ENABLED:?}"
+ARBITER_HOST="${ARBITER_HOST:?}"
+ARBITER_PORT="${ARBITER_PORT:?}"
+ARBITER_ACQUIRE_TIMEOUT_SECONDS="${ARBITER_ACQUIRE_TIMEOUT_SECONDS:?}"
+ARBITER_EMBED_HOLD_TARGET_MS="${ARBITER_EMBED_HOLD_TARGET_MS:?}"
+ARBITER_RERANK_HOLD_TARGET_MS="${ARBITER_RERANK_HOLD_TARGET_MS:?}"
+ARBITER_MAX_EMBED_BURST="${ARBITER_MAX_EMBED_BURST:?}"
+ARBITER_RERANK_STARVATION_SECONDS="${ARBITER_RERANK_STARVATION_SECONDS:?}"
+ARBITER_STALE_LEASE_SECONDS="${ARBITER_STALE_LEASE_SECONDS:?}"
 
 should_start() {
   case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
@@ -180,38 +188,22 @@ trap 'rm -f "${expected_plist}"' EXIT
   --arbiter-stale-lease-seconds "${ARBITER_STALE_LEASE_SECONDS}"
 plutil -lint "${expected_plist}" >/dev/null
 
-# Deploy law: source is staged by this installer, then the LaunchAgent is
-# replaced and kickstarted. Never edit the runtime copy or plist in place.
-launchctl bootout "gui/$(id -u)/${LAUNCH_AGENT_NAME}" 2>/dev/null || true
-install -m 0644 "${expected_plist}" "${LAUNCH_AGENT_PATH}"
-if ! cmp -s "${expected_plist}" "${LAUNCH_AGENT_PATH}"; then
-  echo "ERROR: LaunchAgent plist drift immediately after install" >&2
-  exit 1
-fi
-echo "[apple-mlx] plist drift check: clean"
-
-bootstrap_ok=false
-for attempt in 1 2 3 4 5; do
-  if launchctl bootstrap "gui/$(id -u)" "${LAUNCH_AGENT_PATH}"; then
-    bootstrap_ok=true
-    break
-  fi
-  echo "[apple-mlx] launchd bootstrap raced prior shutdown; retrying (${attempt}/5)"
-  sleep 1
-done
-if [[ "${bootstrap_ok}" != "true" ]]; then
-  echo "ERROR: unable to bootstrap ${LAUNCH_AGENT_NAME}" >&2
-  exit 1
-fi
-launchctl kickstart -k "gui/$(id -u)/${LAUNCH_AGENT_NAME}"
-
-# ── 6. Smoke ─────────────────────────────────────────────────────────
+# ── 6. Transactional deploy + smoke ──────────────────────────────────
 echo "[apple-mlx] waiting up to 90s for sidecars to come up"
 VERIFY_ARGS=(--wait 90)
 should_start "${START_EMBEDDER}" || VERIFY_ARGS+=(--skip-embedder)
 should_start "${START_RERANKER}" || VERIFY_ARGS+=(--skip-reranker)
 should_start "${START_DOCLING}" || VERIFY_ARGS+=(--skip-docling)
-"${SERVICES_DIR}/.venv/bin/python" "${REPO_ROOT}/scripts/verify_apple_mlx_runtime.py" "${VERIFY_ARGS[@]}"
+"${SERVICES_DIR}/.venv/bin/python" \
+  "${REPO_ROOT}/scripts/apple_mlx_launch_agent_transaction.py" \
+  --expected-plist "${expected_plist}" \
+  --target-plist "${LAUNCH_AGENT_PATH}" \
+  --label "${LAUNCH_AGENT_NAME}" \
+  -- \
+  "${SERVICES_DIR}/.venv/bin/python" \
+  "${REPO_ROOT}/scripts/verify_apple_mlx_runtime.py" \
+  "${VERIFY_ARGS[@]}"
+echo "[apple-mlx] transactional plist deploy + smoke: clean"
 
 echo
 echo "[apple-mlx] installed. Now bring up Docker with the override:"

@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import argparse
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -27,7 +27,9 @@ import math
 import os
 from pathlib import Path
 import re
+import shlex
 import signal
+import stat
 import statistics
 import subprocess
 import sys
@@ -37,7 +39,7 @@ from typing import Any, Callable
 import urllib.error
 import urllib.request
 
-SCHEMA_VERSION = "polymath.gpu_arbiter_live_gates.v1"
+SCHEMA_VERSION = "polymath.gpu_arbiter_live_gates.v2"
 FIXTURE_VERSION = "gpu-arbiter-q1-q4-fixture.v1"
 REFUSAL_CLASSIFIER_VERSION = "gpu-arbiter-q5-refusal.v1"
 FROZEN_PREREG_SHA256 = (
@@ -46,17 +48,40 @@ FROZEN_PREREG_SHA256 = (
 FROZEN_QUERY_ID = "direct_facs"
 FROZEN_TIER = "qdrant_only"
 PRODUCTION_SOAK_SECONDS = 600.0
+PRODUCTION_KILL_AT_SECONDS = 300.0
 EMBED_SAMPLE_COUNT = 100
 EMBED_DIMENSION = 1024
 RERANK_SAMPLE_COUNT = 24
 SOLO_RERANK_CALLS = 20
 Q2_EMBED_CALLS = 100
 Q2_EMBED_CONCURRENCY = 3
+Q2_MIN_MIXED_RERANK_CALLS = 20
+Q2_MIN_OVERLAPPED_RERANK_CALLS = 5
 Q1_TOLERANCE = 1e-12
 Q2_EMBED_P95_SECONDS = 2.0
 Q3_RERANK_RATIO_MAX = 2.0
 Q3_RERANK_HOLD_P95_MS_MAX = 500.0
 FAIL_OPEN_ALERT = "gpu_arbiter_unavailable"
+FAIL_OPEN_ALERTS = {
+    "embed": f"{FAIL_OPEN_ALERT} workload=embed operation=acquire",
+    "rerank": f"{FAIL_OPEN_ALERT} workload=rerank operation=acquire",
+}
+EXPECTED_ARBITER_ARGV_SUFFIX = (
+    "-m",
+    "uvicorn",
+    "gpu_arbiter.main:app",
+    "--host",
+    "127.0.0.1",
+    "--port",
+    "8085",
+    "--log-level",
+    "info",
+)
+FROZEN_CORPUS_ID = "2c894530-8d57-4432-a6d4-bc14505a698b"
+FROZEN_CORPUS_NAME = "runpod_e2e_15doc_20260715"
+FROZEN_SELECTION_SHA256 = (
+    "da7b94c152dd5e72d52db1fd80a68f0cc2797d85ed1fd4899f9a8c19874eaf00"
+)
 CANONICAL_SUITE_TIMEOUT_SECONDS = 600.0
 CANONICAL_SUITE_TESTS = (
     "tests/test_gpu_priority_arbiter.py",
@@ -67,10 +92,12 @@ CANONICAL_SUITE_TESTS = (
         "test_rerank_evidence_support_defaults_off_and_flips_on"
     ),
     "tests/test_gpu_arbiter_live_harness.py",
+    "tests/test_gpu_arbiter_promotion_safety.py",
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_PREREG = REPO_ROOT / "backend/evals/runpod_e2e_retrieval_preregister_v1.json"
+DEFAULT_SELECTION = REPO_ROOT / "backend/evals/runpod_e2e_15doc_selection_v1.json"
 DEFAULT_PID_FILE = Path.home() / "PolymathRuntime/logs/gpu-arbiter.pid"
 DEFAULT_ERROR_LOG = Path.home() / "PolymathRuntime/logs/apple_ml_services.err.log"
 
@@ -96,8 +123,9 @@ class HarnessConfig:
     arbiter_url: str
     backend_url: str
     corpus_id: str
-    auth_token: str
+    auth_token: str = field(repr=False)
     prereg_path: Path
+    selection_path: Path
     pid_file: Path
     error_log: Path
     http_timeout_seconds: float = 120.0
@@ -405,7 +433,14 @@ class LiveClient:
             },
         )
         rows = response.get("data") or []
-        ordered = sorted(rows, key=lambda row: int(row.get("index", -1)))
+        indices = [int(row.get("index", -1)) for row in rows]
+        expected_indices = list(range(len(texts)))
+        if indices != expected_indices:
+            raise HarnessError(
+                f"embedding response indices drifted: {indices!r} "
+                f"!= {expected_indices!r}"
+            )
+        ordered = rows
         return [
             [float(value) for value in row.get("embedding") or []] for row in ordered
         ]
@@ -443,7 +478,58 @@ class LiveClient:
             raise HarnessError("document listing returned no resolvable documents")
         return mapping
 
+    def corpus_binding(self) -> dict[str, Any]:
+        if self.config.corpus_id != FROZEN_CORPUS_ID:
+            raise HarnessError(
+                f"Q5 requires frozen corpus id {FROZEN_CORPUS_ID}, "
+                f"got {self.config.corpus_id}"
+            )
+        selection_bytes = self.config.selection_path.read_bytes()
+        selection_sha = _sha256(selection_bytes)
+        if selection_sha != FROZEN_SELECTION_SHA256:
+            raise HarnessError(
+                f"frozen selection drifted: {selection_sha} "
+                f"!= {FROZEN_SELECTION_SHA256}"
+            )
+        selection = json.loads(selection_bytes)
+        expected_names = sorted(
+            str(row["filename"]) for row in selection.get("selected") or []
+        )
+        if (
+            len(expected_names) != 15
+            or int(selection.get("selection_count") or 0) != 15
+        ):
+            raise HarnessError("frozen selection must contain exactly 15 documents")
+        corpus = self.json(
+            "GET",
+            f"{self.config.backend_url}/api/corpora/{self.config.corpus_id}",
+            headers=_auth_headers(self.config.auth_token),
+        )
+        actual_id = str(corpus.get("corpus_id") or corpus.get("id") or "")
+        actual_name = str(corpus.get("name") or "")
+        documents = self.list_documents()
+        actual_names = sorted(documents.values())
+        return {
+            "corpus_id": actual_id,
+            "corpus_name": actual_name,
+            "selection_sha256": selection_sha,
+            "selection_count": len(expected_names),
+            "expected_filenames": expected_names,
+            "actual_document_count": len(actual_names),
+            "actual_filenames": actual_names,
+            "matches_frozen_corpus": (
+                actual_id == FROZEN_CORPUS_ID
+                and actual_name == FROZEN_CORPUS_NAME
+                and actual_names == expected_names
+            ),
+        }
+
     def frozen_spot(self) -> dict[str, Any]:
+        corpus_binding = self.corpus_binding()
+        if corpus_binding["matches_frozen_corpus"] is not True:
+            raise HarnessError(
+                "Q5 corpus binding differs from the frozen 15-doc corpus"
+            )
         prereg_bytes = self.config.prereg_path.read_bytes()
         prereg_sha = _sha256(prereg_bytes)
         if prereg_sha != FROZEN_PREREG_SHA256:
@@ -522,6 +608,7 @@ class LiveClient:
             "verdict": verdict,
             "refusal_classifier_version": REFUSAL_CLASSIFIER_VERSION,
             "answer_sha256": _sha256(raw["answer"].encode("utf-8")),
+            "corpus_binding": corpus_binding,
         }
 
     def _run_chat_sse(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -609,6 +696,60 @@ def _public_health(payload: dict[str, Any]) -> dict[str, Any]:
     return {key: payload.get(key) for key in keys if key in payload}
 
 
+def runtime_identity(health: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Return the immutable compute identity used by the OFF/ON comparison."""
+    embedder = health.get("embedder") or {}
+    reranker = health.get("reranker") or {}
+    identity = {
+        "embedder": {
+            key: embedder.get(key)
+            for key in ("model", "device", "dimension", "batch_size")
+        },
+        "reranker": {
+            key: reranker.get(key)
+            for key in ("model", "backend", "device", "cross_encoder")
+        },
+    }
+    missing = [
+        f"{service}.{key}"
+        for service, values in identity.items()
+        for key, value in values.items()
+        if value in (None, "")
+    ]
+    if missing:
+        raise HarnessError(f"runtime identity fields are missing: {missing}")
+    return identity
+
+
+def scheduler_snapshot(client: LiveClient) -> dict[str, Any]:
+    payload = client.json("GET", f"{client.config.arbiter_url}/health")
+    if payload.get("status") != "ok" or not isinstance(payload.get("scheduler"), dict):
+        raise HarnessError("arbiter scheduler snapshot is unavailable")
+    return payload
+
+
+def scheduler_delta(
+    before: dict[str, Any], after: dict[str, Any]
+) -> dict[str, dict[str, int]]:
+    before_scheduler = before.get("scheduler") or {}
+    after_scheduler = after.get("scheduler") or {}
+    delta: dict[str, dict[str, int]] = {}
+    for counter in ("grants", "releases", "wait_sample_count", "hold_sample_count"):
+        before_values = before_scheduler.get(counter) or {}
+        after_values = after_scheduler.get(counter) or {}
+        delta[counter] = {}
+        for workload in ("embed", "rerank"):
+            value = int(after_values.get(workload, 0)) - int(
+                before_values.get(workload, 0)
+            )
+            if value < 0:
+                raise HarnessError(
+                    f"arbiter counter regressed: {counter}.{workload}={value}"
+                )
+            delta[counter][workload] = value
+    return delta
+
+
 def timed_embed(client: LiveClient, text: str) -> tuple[float, list[list[float]]]:
     started = time.perf_counter()
     value = client.embed([text])
@@ -646,24 +787,52 @@ def run_q2_mixed(
     *,
     embed_calls: int = Q2_EMBED_CALLS,
     embed_concurrency: int = Q2_EMBED_CONCURRENCY,
+    min_rerank_calls: int = Q2_MIN_MIXED_RERANK_CALLS,
 ) -> dict[str, Any]:
-    """Run 100 interactive embeds while one rerank worker remains continuous."""
-    stop = threading.Event()
-    rerank_started = threading.Event()
+    """Run a fixed rerank sample concurrently with interactive embeddings.
+
+    Twenty reranks is preregistered because it is the smallest sample where a
+    nearest-rank p95 represents the nineteenth ordered observation rather than
+    degenerating into an arbitrary handful of calls. At least five calls must
+    overlap an embedding interval, which prevents a serial false pass.
+    """
+    if min_rerank_calls < Q2_MIN_MIXED_RERANK_CALLS:
+        raise HarnessError(
+            f"mixed rerank sample may not be below {Q2_MIN_MIXED_RERANK_CALLS}"
+        )
+    launch_barrier = threading.Barrier(2)
+    workloads_released = threading.Event()
+    embeddings_done = threading.Event()
+    rerank_ready = threading.Event()
     lock = threading.Lock()
     rerank_latencies: list[float] = []
     rerank_errors: list[str] = []
+    rerank_intervals: list[dict[str, float]] = []
+    embed_intervals: list[dict[str, float]] = []
 
     def rerank_worker() -> None:
-        while not stop.is_set():
-            rerank_started.set()
+        rerank_ready.set()
+        try:
+            launch_barrier.wait(timeout=5.0)
+        except threading.BrokenBarrierError:
+            with lock:
+                rerank_errors.append("mixed workload launch barrier broke")
+            return
+        while True:
+            with lock:
+                completed = len(rerank_latencies) + len(rerank_errors)
+            if embeddings_done.is_set() and completed >= min_rerank_calls:
+                break
+            started = time.perf_counter()
             try:
                 latency, scores = timed_rerank(
                     client, fixture["rerank_query"], fixture["rerank_documents"]
                 )
                 validate_rerank_scores(scores)
+                finished = time.perf_counter()
                 with lock:
                     rerank_latencies.append(latency)
+                    rerank_intervals.append({"start": started, "end": finished})
             except Exception as exc:
                 with lock:
                     rerank_errors.append(f"{type(exc).__name__}: {exc}"[:500])
@@ -672,14 +841,28 @@ def run_q2_mixed(
         target=rerank_worker, name="q2-continuous-rerank", daemon=True
     )
     rerank_thread.start()
-    if not rerank_started.wait(timeout=5.0):
-        stop.set()
+    if not rerank_ready.wait(timeout=5.0):
         raise HarnessError("continuous rerank worker did not start")
 
     embed_latencies: list[float] = []
     embed_errors: list[str] = []
 
     def one_embed(index: int) -> None:
+        if index == 0:
+            try:
+                launch_barrier.wait(timeout=5.0)
+                workloads_released.set()
+            except threading.BrokenBarrierError:
+                with lock:
+                    embed_errors.append("mixed workload launch barrier broke")
+                return
+        elif not workloads_released.wait(timeout=5.0):
+            with lock:
+                embed_errors.append(
+                    f"call={index} mixed workload launch was not released"
+                )
+            return
+        started = time.perf_counter()
         try:
             latency, vectors = timed_embed(
                 client,
@@ -692,8 +875,10 @@ def run_q2_mixed(
                 raise HarnessError("Q2 embedding shape is invalid")
             if not all(math.isfinite(float(value)) for value in vectors[0]):
                 raise HarnessError("Q2 embedding contains non-finite values")
+            finished = time.perf_counter()
             with lock:
                 embed_latencies.append(latency)
+                embed_intervals.append({"start": started, "end": finished})
         except Exception as exc:
             with lock:
                 embed_errors.append(f"call={index} {type(exc).__name__}: {exc}"[:500])
@@ -702,10 +887,18 @@ def run_q2_mixed(
         with ThreadPoolExecutor(max_workers=embed_concurrency) as executor:
             list(executor.map(one_embed, range(embed_calls)))
     finally:
-        stop.set()
+        embeddings_done.set()
         rerank_thread.join(timeout=client.config.http_timeout_seconds + 5.0)
     if rerank_thread.is_alive():
         rerank_errors.append("continuous rerank worker did not stop before deadline")
+    overlapped_reranks = sum(
+        1
+        for rerank in rerank_intervals
+        if any(
+            rerank["start"] < embed["end"] and embed["start"] < rerank["end"]
+            for embed in embed_intervals
+        )
+    )
     return {
         "embed": _latency_summary(embed_latencies, embed_errors, requested=embed_calls),
         "rerank": _latency_summary(
@@ -714,6 +907,12 @@ def run_q2_mixed(
             requested=None,
         ),
         "rerank_thread_stopped": not rerank_thread.is_alive(),
+        "launch_barrier_passed": workloads_released.is_set(),
+        "rerank_minimum_sample": min_rerank_calls,
+        "overlapped_rerank_calls": overlapped_reranks,
+        "required_overlapped_rerank_calls": Q2_MIN_OVERLAPPED_RERANK_CALLS,
+        "embed_intervals": embed_intervals,
+        "rerank_intervals": rerank_intervals,
     }
 
 
@@ -722,18 +921,34 @@ def run_q4_soak(
     fixture: dict[str, Any],
     *,
     soak_seconds: float = PRODUCTION_SOAK_SECONDS,
+    kill_at_seconds: float | None = None,
+    failure_probe: Callable[..., dict[str, Any]] | None = None,
     monotonic: Callable[[], float] = time.monotonic,
+    sleep_fn: Callable[[float], None] = time.sleep,
 ) -> dict[str, Any]:
-    """Saturate three embed workers plus one rerank worker for a fixed duration."""
+    """Run the failure/recovery probe at a fixed point inside the mixed soak."""
     if soak_seconds <= 0:
         raise HarnessError("soak duration must be positive")
-    deadline = monotonic() + soak_seconds
+    if kill_at_seconds is None:
+        kill_at_seconds = (
+            PRODUCTION_KILL_AT_SECONDS
+            if soak_seconds == PRODUCTION_SOAK_SECONDS
+            else soak_seconds / 2.0
+        )
+    if not 0 < kill_at_seconds < soak_seconds:
+        raise HarnessError("Q4 kill point must be strictly inside the soak")
+    probe = failure_probe or run_fail_open_probe
+    started_at = monotonic()
+    deadline = started_at + soak_seconds
+    kill_deadline = started_at + kill_at_seconds
     lock = threading.Lock()
     results: dict[str, list[Any]] = {
         "embed_latencies": [],
         "embed_errors": [],
         "rerank_latencies": [],
         "rerank_errors": [],
+        "embed_success_times": [],
+        "rerank_success_times": [],
     }
 
     def embed_worker(worker_index: int) -> None:
@@ -751,6 +966,7 @@ def run_q4_soak(
                     raise HarnessError("Q4 embedding shape is invalid")
                 with lock:
                     results["embed_latencies"].append(latency)
+                    results["embed_success_times"].append(monotonic())
             except Exception as exc:
                 with lock:
                     results["embed_errors"].append(
@@ -769,6 +985,7 @@ def run_q4_soak(
                 validate_rerank_scores(scores)
                 with lock:
                     results["rerank_latencies"].append(latency)
+                    results["rerank_success_times"].append(monotonic())
             except Exception as exc:
                 with lock:
                     results["rerank_errors"].append(
@@ -788,13 +1005,30 @@ def run_q4_soak(
     )
     for thread in threads:
         thread.start()
+    while monotonic() < kill_deadline:
+        sleep_fn(min(0.25, max(0.0, kill_deadline - monotonic())))
+    workers_active_at_kill = [thread.name for thread in threads if thread.is_alive()]
+    failure_started_at = monotonic()
+    fail_open = probe(client, fixture)
+    failure_completed_at = monotonic()
     join_timeout = soak_seconds + client.config.http_timeout_seconds + 10.0
     join_deadline = time.monotonic() + join_timeout
     for thread in threads:
         thread.join(timeout=max(0.0, join_deadline - time.monotonic()))
     alive = [thread.name for thread in threads if thread.is_alive()]
+    embed_after_recovery = sum(
+        value >= failure_completed_at for value in results["embed_success_times"]
+    )
+    rerank_after_recovery = sum(
+        value >= failure_completed_at for value in results["rerank_success_times"]
+    )
     return {
         "requested_soak_seconds": soak_seconds,
+        "kill_at_seconds": kill_at_seconds,
+        "failure_started_elapsed_seconds": failure_started_at - started_at,
+        "failure_completed_elapsed_seconds": failure_completed_at - started_at,
+        "workers_active_at_kill": workers_active_at_kill,
+        "fail_open": fail_open,
         "embed": _latency_summary(
             results["embed_latencies"],
             results["embed_errors"],
@@ -807,6 +1041,8 @@ def run_q4_soak(
         ),
         "threads_alive_after_deadline": alive,
         "zero_deadlock": not alive,
+        "embed_successes_after_recovery": embed_after_recovery,
+        "rerank_successes_after_recovery": rerank_after_recovery,
     }
 
 
@@ -838,12 +1074,17 @@ def _read_new_log_bytes(path: Path, offset: int) -> str:
         return handle.read().decode("utf-8", "replace")
 
 
+def _count_fail_open_alerts(value: str) -> int:
+    return value.count(FAIL_OPEN_ALERT)
+
+
 def run_fail_open_probe(
     client: LiveClient,
     fixture: dict[str, Any],
     *,
     kill_fn: Callable[[int, int], None] = os.kill,
-    process_command: Callable[[int], str] | None = None,
+    process_identity: Callable[[int], dict[str, Any] | None] | None = None,
+    arbiter_down: Callable[[], bool] | None = None,
     sleep_fn: Callable[[float], None] = time.sleep,
     monotonic: Callable[[], float] = time.monotonic,
 ) -> dict[str, Any]:
@@ -852,11 +1093,12 @@ def run_fail_open_probe(
     if not pid_text.isdigit() or int(pid_text) <= 1:
         raise HarnessError(f"invalid arbiter pid file: {pid_text!r}")
     pid = int(pid_text)
-    command_reader = process_command or _process_command
-    command = command_reader(pid)
-    if "gpu_arbiter.main" not in command:
+    identity_reader = process_identity or _process_identity
+    old_identity = identity_reader(pid)
+    if not _is_exact_arbiter_identity(old_identity, pid):
         raise HarnessError(
-            f"refusing to kill pid {pid}; command is not gpu_arbiter.main: {command!r}"
+            f"refusing to kill pid {pid}; process identity is not the exact "
+            f"arbiter contract: {old_identity!r}"
         )
     log_offset = (
         client.config.error_log.stat().st_size
@@ -864,6 +1106,31 @@ def run_fail_open_probe(
         else 0
     )
     kill_fn(pid, signal.SIGKILL)
+
+    def default_arbiter_down() -> bool:
+        try:
+            client.json("GET", f"{client.config.arbiter_url}/health", timeout=0.25)
+        except Exception:
+            return True
+        return False
+
+    down_reader = arbiter_down or default_arbiter_down
+    down_deadline = monotonic() + client.config.alert_timeout_seconds
+    old_process_gone = False
+    arbiter_endpoint_down = False
+    while monotonic() < down_deadline:
+        try:
+            old_process_gone = identity_reader(pid) is None
+        except Exception:
+            old_process_gone = True
+        arbiter_endpoint_down = bool(down_reader())
+        if old_process_gone and arbiter_endpoint_down:
+            break
+        sleep_fn(0.1)
+    if not old_process_gone or not arbiter_endpoint_down:
+        raise HarnessError(
+            "arbiter down-state was not proven before fail-open workload probes"
+        )
 
     probe_errors: list[str] = []
     probe_shapes: dict[str, Any] = {}
@@ -897,45 +1164,99 @@ def run_fail_open_probe(
     new_log = ""
     while monotonic() < alert_deadline:
         new_log = _read_new_log_bytes(client.config.error_log, log_offset)
-        if FAIL_OPEN_ALERT in new_log:
+        if all(value in new_log for value in FAIL_OPEN_ALERTS.values()):
             break
         sleep_fn(0.25)
-    alert_seen = FAIL_OPEN_ALERT in new_log
+    alerts_seen = {
+        workload: expected in new_log for workload, expected in FAIL_OPEN_ALERTS.items()
+    }
 
     recovery_deadline = monotonic() + client.config.recovery_timeout_seconds
     recovery_errors: list[str] = []
     recovered_health: dict[str, Any] | None = None
+    replacement_identity: dict[str, Any] | None = None
+    replacement_pid: int | None = None
     while monotonic() < recovery_deadline:
         try:
-            recovered_health = client.health_snapshot(expected_enabled=True)
+            candidate_health = client.health_snapshot(expected_enabled=True)
+            replacement_text = client.config.pid_file.read_text(
+                encoding="utf-8"
+            ).strip()
+            if not replacement_text.isdigit():
+                raise HarnessError("replacement pid file is invalid")
+            candidate_pid = int(replacement_text)
+            candidate_identity = identity_reader(candidate_pid)
+            if not _is_exact_arbiter_identity(candidate_identity, candidate_pid):
+                raise HarnessError("replacement arbiter identity is invalid")
+            if candidate_pid == pid:
+                raise HarnessError("replacement arbiter reused the killed pid")
+            if candidate_identity.get("start_identity") == old_identity.get(
+                "start_identity"
+            ):
+                raise HarnessError("replacement arbiter start identity did not change")
+            recovered_health = candidate_health
+            replacement_pid = candidate_pid
+            replacement_identity = candidate_identity
             break
         except Exception as exc:
             recovery_errors = [f"{type(exc).__name__}: {exc}"[:500]]
             sleep_fn(2.0)
     return {
         "pid": pid,
-        "process_command": command,
+        "process_identity": old_identity,
+        "old_process_gone_before_probes": old_process_gone,
+        "arbiter_endpoint_down_before_probes": arbiter_endpoint_down,
         "log_offset": log_offset,
         "probe_shapes": probe_shapes,
         "probe_errors": probe_errors,
-        "alert_name": FAIL_OPEN_ALERT,
-        "alert_seen_in_new_log_bytes": alert_seen,
+        "required_alerts": dict(FAIL_OPEN_ALERTS),
+        "alerts_seen_in_new_log_bytes": alerts_seen,
+        "new_log_sha256": _sha256(new_log.encode("utf-8")),
         "recovered": recovered_health is not None,
         "recovery_errors": recovery_errors,
         "recovered_health": recovered_health,
+        "replacement_pid": replacement_pid,
+        "replacement_identity": replacement_identity,
     }
 
 
-def _process_command(pid: int) -> str:
+def _is_exact_arbiter_identity(
+    identity: dict[str, Any] | None, expected_pid: int
+) -> bool:
+    if not identity or int(identity.get("pid") or 0) != expected_pid:
+        return False
+    if not str(identity.get("start_identity") or "").strip():
+        return False
+    command = str(identity.get("command") or "")
+    try:
+        argv = shlex.split(command)
+    except ValueError:
+        return False
+    suffix = list(EXPECTED_ARBITER_ARGV_SUFFIX)
+    return len(argv) > len(suffix) and argv[-len(suffix) :] == suffix
+
+
+def _process_identity(pid: int) -> dict[str, Any] | None:
     result = subprocess.run(
-        ["ps", "-p", str(pid), "-o", "command="],
+        ["ps", "-p", str(pid), "-o", "pid=", "-o", "lstart=", "-o", "command="],
         check=False,
         capture_output=True,
         text=True,
     )
     if result.returncode != 0:
-        raise HarnessError(f"unable to inspect arbiter pid {pid}")
-    return result.stdout.strip()
+        return None
+    parts = result.stdout.strip().split()
+    if len(parts) < 8:
+        return None
+    try:
+        actual_pid = int(parts[0])
+    except ValueError:
+        return None
+    return {
+        "pid": actual_pid,
+        "start_identity": " ".join(parts[1:6]),
+        "command": " ".join(parts[6:]),
+    }
 
 
 def run_canonical_suite(
@@ -1012,6 +1333,11 @@ def evaluate_off_baseline(
             and frozen_spot.get("all_citations_in_corpus") is True
         ),
         "frozen_spot_tier": frozen_spot.get("effective_tier") == FROZEN_TIER,
+        "frozen_spot_answered": frozen_spot.get("verdict") == "answered",
+        "exact_frozen_corpus": (frozen_spot.get("corpus_binding") or {}).get(
+            "matches_frozen_corpus"
+        )
+        is True,
     }
     return {"checks": checks, "passed": all(checks.values())}
 
@@ -1020,6 +1346,7 @@ def evaluate_q1(
     off: dict[str, Any],
     on_vectors: list[list[float]],
     on_scores: list[float],
+    on_health: dict[str, Any],
 ) -> dict[str, Any]:
     embed_diff = max_abs_matrix_difference(off["identity"]["embed_vectors"], on_vectors)
     rerank_diff = max_abs_vector_difference(off["identity"]["rerank_scores"], on_scores)
@@ -1028,32 +1355,57 @@ def evaluate_q1(
         "embed_max_abs_diff_le_1e_12": embed_diff <= Q1_TOLERANCE,
         "rerank_sample_shape": len(on_scores) == RERANK_SAMPLE_COUNT,
         "rerank_max_abs_diff_le_1e_12": rerank_diff <= Q1_TOLERANCE,
+        "runtime_identity_unchanged": runtime_identity(on_health)
+        == off["runtime_identity"],
     }
     return {
         "checks": checks,
         "passed": all(checks.values()),
         "embed_max_abs_diff": embed_diff,
         "rerank_max_abs_diff": rerank_diff,
+        "off_runtime_identity": off["runtime_identity"],
+        "on_runtime_identity": runtime_identity(on_health),
     }
 
 
 def evaluate_q2(
     mixed: dict[str, Any],
+    telemetry: dict[str, Any],
 ) -> dict[str, Any]:
     embed_p95 = mixed["embed"]["latency_seconds"]["p95"]
     checks = {
         "embed_100_of_100": mixed["embed"]["successful"] == Q2_EMBED_CALLS,
         "embed_zero_failures": mixed["embed"]["failed"] == 0,
-        "continuous_rerank_present": mixed["rerank"]["successful"] > 0,
+        "mixed_rerank_sample_at_least_20": mixed["rerank"]["successful"]
+        >= Q2_MIN_MIXED_RERANK_CALLS,
         "continuous_rerank_zero_failures": mixed["rerank"]["failed"] == 0,
         "embed_p95_lt_2_seconds": embed_p95 is not None
         and embed_p95 < Q2_EMBED_P95_SECONDS,
         "rerank_worker_stopped": mixed["rerank_thread_stopped"] is True,
+        "launch_barrier_passed": mixed["launch_barrier_passed"] is True,
+        "at_least_5_reranks_overlapped_embeds": mixed["overlapped_rerank_calls"]
+        >= Q2_MIN_OVERLAPPED_RERANK_CALLS,
+        "current_run_embed_grants": telemetry["delta"]["grants"]["embed"]
+        >= Q2_EMBED_CALLS,
+        "current_run_embed_releases": telemetry["delta"]["releases"]["embed"]
+        >= Q2_EMBED_CALLS,
+        "current_run_embed_wait_samples": telemetry["delta"]["wait_sample_count"][
+            "embed"
+        ]
+        >= Q2_EMBED_CALLS,
+        "current_run_embed_hold_samples": telemetry["delta"]["hold_sample_count"][
+            "embed"
+        ]
+        >= Q2_EMBED_CALLS,
+        "zero_fail_open_alerts_before_q4": telemetry["pre_q4_fail_open_alert_count"]
+        == 0,
     }
     return {
         "checks": checks,
         "passed": all(checks.values()),
         "embed_p95_seconds": embed_p95,
+        "overlapped_rerank_calls": mixed["overlapped_rerank_calls"],
+        "scheduler_delta": telemetry["delta"],
     }
 
 
@@ -1061,6 +1413,7 @@ def evaluate_q3(
     on_solo: dict[str, Any],
     mixed: dict[str, Any],
     arbiter_health: dict[str, Any],
+    telemetry: dict[str, Any],
 ) -> dict[str, Any]:
     solo_p95 = on_solo["latency_seconds"]["p95"]
     mixed_rerank_p95 = mixed["rerank"]["latency_seconds"]["p95"]
@@ -1074,11 +1427,30 @@ def evaluate_q3(
     checks = {
         "solo_sample_complete": on_solo["successful"] == SOLO_RERANK_CALLS
         and on_solo["failed"] == 0,
-        "mixed_rerank_present": mixed["rerank"]["successful"] > 0,
+        "mixed_rerank_sample_at_least_20": mixed["rerank"]["successful"]
+        >= Q2_MIN_MIXED_RERANK_CALLS,
         "rerank_p95_ratio_le_2": ratio <= Q3_RERANK_RATIO_MAX,
         "rerank_hold_p95_present": hold_p95 is not None,
         "rerank_hold_p95_le_500_ms": hold_p95 is not None
         and float(hold_p95) <= Q3_RERANK_HOLD_P95_MS_MAX,
+        "rerank_hold_sample_count_present": int(
+            (scheduler.get("hold_sample_count") or {}).get("rerank", 0)
+        )
+        > 0,
+        "current_run_rerank_grants": telemetry["delta"]["grants"]["rerank"]
+        >= SOLO_RERANK_CALLS + Q2_MIN_MIXED_RERANK_CALLS,
+        "current_run_rerank_releases": telemetry["delta"]["releases"]["rerank"]
+        >= SOLO_RERANK_CALLS + Q2_MIN_MIXED_RERANK_CALLS,
+        "current_run_rerank_wait_samples": telemetry["delta"]["wait_sample_count"][
+            "rerank"
+        ]
+        >= SOLO_RERANK_CALLS + Q2_MIN_MIXED_RERANK_CALLS,
+        "current_run_rerank_hold_samples": telemetry["delta"]["hold_sample_count"][
+            "rerank"
+        ]
+        >= SOLO_RERANK_CALLS + Q2_MIN_MIXED_RERANK_CALLS,
+        "zero_fail_open_alerts_before_q4": telemetry["pre_q4_fail_open_alert_count"]
+        == 0,
     }
     return {
         "checks": checks,
@@ -1087,24 +1459,51 @@ def evaluate_q3(
         "mixed_rerank_p95_seconds": mixed_rerank_p95,
         "mixed_to_solo_p95_ratio": ratio,
         "arbiter_rerank_hold_p95_ms": hold_p95,
+        "arbiter_rerank_hold_sample_count": (
+            scheduler.get("hold_sample_count") or {}
+        ).get("rerank"),
+        "scheduler_delta": telemetry["delta"],
     }
 
 
 def evaluate_q4(
     soak: dict[str, Any],
-    fail_open: dict[str, Any],
 ) -> dict[str, Any]:
+    fail_open = soak["fail_open"]
     checks = {
         "soak_duration_600_seconds": soak["requested_soak_seconds"]
         == PRODUCTION_SOAK_SECONDS,
+        "kill_at_fixed_300_second_point": soak["kill_at_seconds"]
+        == PRODUCTION_KILL_AT_SECONDS,
+        "kill_started_during_soak": 0
+        < soak["failure_started_elapsed_seconds"]
+        < soak["requested_soak_seconds"],
+        "all_workers_active_at_kill": len(soak["workers_active_at_kill"])
+        == Q2_EMBED_CONCURRENCY + 1,
         "soak_embed_present": soak["embed"]["successful"] > 0,
         "soak_rerank_present": soak["rerank"]["successful"] > 0,
         "soak_zero_errors": soak["embed"]["failed"] == 0
         and soak["rerank"]["failed"] == 0,
         "soak_zero_deadlock": soak["zero_deadlock"] is True,
         "fail_open_embed_and_rerank_succeeded": not fail_open["probe_errors"],
-        "named_alert_seen": fail_open["alert_seen_in_new_log_bytes"] is True,
+        "old_process_gone_before_probes": fail_open["old_process_gone_before_probes"]
+        is True,
+        "arbiter_endpoint_down_before_probes": fail_open[
+            "arbiter_endpoint_down_before_probes"
+        ]
+        is True,
+        "both_workload_alerts_seen": all(
+            fail_open["alerts_seen_in_new_log_bytes"].get(workload) is True
+            for workload in ("embed", "rerank")
+        ),
         "runtime_recovered": fail_open["recovered"] is True,
+        "replacement_pid_changed": fail_open["replacement_pid"] != fail_open["pid"],
+        "replacement_start_identity_changed": (
+            (fail_open["replacement_identity"] or {}).get("start_identity")
+            != (fail_open["process_identity"] or {}).get("start_identity")
+        ),
+        "embed_continued_after_recovery": soak["embed_successes_after_recovery"] > 0,
+        "rerank_continued_after_recovery": soak["rerank_successes_after_recovery"] > 0,
     }
     return {"checks": checks, "passed": all(checks.values())}
 
@@ -1122,8 +1521,23 @@ def evaluate_q5(
         "spot_citations": frozen_spot.get("citation_membership_rate") == 1.0
         and frozen_spot.get("all_citations_in_corpus") is True,
         "spot_tier": frozen_spot.get("effective_tier") == FROZEN_TIER,
+        "off_spot_answered": off["frozen_spot"].get("verdict") == "answered",
+        "on_spot_answered": frozen_spot.get("verdict") == "answered",
         "spot_verdict_unchanged": frozen_spot.get("verdict")
         == off["frozen_spot"].get("verdict"),
+        "off_exact_frozen_corpus": (off["frozen_spot"].get("corpus_binding") or {}).get(
+            "matches_frozen_corpus"
+        )
+        is True,
+        "on_exact_frozen_corpus": (frozen_spot.get("corpus_binding") or {}).get(
+            "matches_frozen_corpus"
+        )
+        is True,
+        "selection_sha_unchanged": (off["frozen_spot"].get("corpus_binding") or {}).get(
+            "selection_sha256"
+        )
+        == FROZEN_SELECTION_SHA256
+        == (frozen_spot.get("corpus_binding") or {}).get("selection_sha256"),
     }
     return {"checks": checks, "passed": all(checks.values())}
 
@@ -1133,19 +1547,20 @@ def evaluate_on_gates(
     off: dict[str, Any],
     on_vectors: list[list[float]],
     on_scores: list[float],
+    on_health: dict[str, Any],
     on_solo: dict[str, Any],
     mixed: dict[str, Any],
     arbiter_health: dict[str, Any],
+    telemetry: dict[str, Any],
     soak: dict[str, Any],
-    fail_open: dict[str, Any],
     frozen_spot: dict[str, Any],
     canonical_suite: dict[str, Any],
 ) -> dict[str, Any]:
     gates = {
-        "q1": evaluate_q1(off, on_vectors, on_scores),
-        "q2": evaluate_q2(mixed),
-        "q3": evaluate_q3(on_solo, mixed, arbiter_health),
-        "q4": evaluate_q4(soak, fail_open),
+        "q1": evaluate_q1(off, on_vectors, on_scores, on_health),
+        "q2": evaluate_q2(mixed, telemetry),
+        "q3": evaluate_q3(on_solo, mixed, arbiter_health, telemetry),
+        "q4": evaluate_q4(soak),
         "q5": evaluate_q5(off, frozen_spot, canonical_suite),
     }
     gates["passed"] = all(
@@ -1178,6 +1593,7 @@ def capture_off(client: LiveClient) -> dict[str, Any]:
         "corpus_id": client.config.corpus_id,
         "fixture": fixture,
         "health": health,
+        "runtime_identity": runtime_identity(health),
         "identity": {
             "embed_vectors": vectors,
             "rerank_scores": scores,
@@ -1237,6 +1653,11 @@ def run_on(
 
     health = client.health_snapshot(expected_enabled=True)
     payload["health"] = health
+    pre_q4_log_offset = (
+        client.config.error_log.stat().st_size
+        if client.config.error_log.exists()
+        else 0
+    )
     vectors = validate_embedding_matrix(client.embed(fixture["embed_texts"]))
     scores = validate_rerank_scores(
         client.rerank(fixture["rerank_query"], fixture["rerank_documents"])
@@ -1245,26 +1666,43 @@ def run_on(
         "embed_vectors": vectors,
         "rerank_scores": scores,
     }
-    gates["q1"] = evaluate_q1(off, vectors, scores)
+    gates["q1"] = evaluate_q1(off, vectors, scores, health)
     if gates["q1"]["passed"] is not True:
         return finish(stopped_after="q1_red")
 
+    telemetry_before = scheduler_snapshot(client)
     solo = measure_solo_rerank(client, fixture)
     mixed = run_q2_mixed(client, fixture)
-    arbiter_health = client.json("GET", f"{client.config.arbiter_url}/health")
+    arbiter_health = scheduler_snapshot(client)
+    pre_q4_new_log = _read_new_log_bytes(client.config.error_log, pre_q4_log_offset)
+    telemetry = {
+        "before": telemetry_before,
+        "after": arbiter_health,
+        "delta": scheduler_delta(telemetry_before, arbiter_health),
+        "pre_q4_log_offset": pre_q4_log_offset,
+        "pre_q4_new_log_sha256": _sha256(pre_q4_new_log.encode("utf-8")),
+        "pre_q4_fail_open_alert_count": _count_fail_open_alerts(pre_q4_new_log),
+    }
     payload["solo_rerank"] = solo
     payload["mixed_q2_q3"] = mixed
     payload["arbiter_health_after_mixed"] = arbiter_health
-    gates["q2"] = evaluate_q2(mixed)
-    gates["q3"] = evaluate_q3(solo, mixed, arbiter_health)
+    payload["q2_q3_scheduler_telemetry"] = telemetry
+    gates["q2"] = evaluate_q2(mixed, telemetry)
+    gates["q3"] = evaluate_q3(solo, mixed, arbiter_health, telemetry)
     if gates["q2"]["passed"] is not True or gates["q3"]["passed"] is not True:
         return finish(stopped_after="q2_q3_red")
 
-    soak = run_soak(client, fixture, soak_seconds=soak_seconds)
-    fail_open = run_failure_probe(client, fixture)
+    soak = run_soak(
+        client,
+        fixture,
+        soak_seconds=soak_seconds,
+        kill_at_seconds=PRODUCTION_KILL_AT_SECONDS,
+        failure_probe=run_failure_probe,
+    )
+    fail_open = soak["fail_open"]
     payload["soak_q4"] = soak
     payload["fail_open_q4"] = fail_open
-    gates["q4"] = evaluate_q4(soak, fail_open)
+    gates["q4"] = evaluate_q4(soak)
     if gates["q4"]["passed"] is not True:
         return finish(stopped_after="q4_red")
 
@@ -1275,6 +1713,18 @@ def run_on(
 
 
 def _load_auth_token(path: Path) -> str:
+    metadata = path.lstat()
+    mode = stat.S_IMODE(metadata.st_mode)
+    if stat.S_ISLNK(metadata.st_mode):
+        raise HarnessError("auth token file may not be a symlink")
+    if not stat.S_ISREG(metadata.st_mode):
+        raise HarnessError("auth token path must be a regular file")
+    if metadata.st_uid != os.getuid():
+        raise HarnessError("auth token file must be owned by the current user")
+    if mode & 0o077:
+        raise HarnessError("auth token file must be mode 0600 or stricter")
+    if not mode & stat.S_IRUSR:
+        raise HarnessError("auth token file must be owner-readable")
     token = path.read_text(encoding="utf-8").strip()
     if not token:
         raise HarnessError("auth token file is empty")
@@ -1293,6 +1743,11 @@ def _parser() -> argparse.ArgumentParser:
             "--prereg",
             type=Path,
             default=DEFAULT_PREREG,
+        )
+        subparser.add_argument(
+            "--selection",
+            type=Path,
+            default=DEFAULT_SELECTION,
         )
         subparser.add_argument("--embedder-url", default="http://127.0.0.1:8082")
         subparser.add_argument("--reranker-url", default="http://127.0.0.1:8081")
@@ -1318,6 +1773,7 @@ def _config(args: argparse.Namespace) -> HarnessConfig:
         corpus_id=str(args.corpus_id),
         auth_token=_load_auth_token(args.auth_token_file),
         prereg_path=args.prereg,
+        selection_path=args.selection,
         pid_file=args.pid_file,
         error_log=args.error_log,
     )

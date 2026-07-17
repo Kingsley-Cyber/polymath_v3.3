@@ -12,7 +12,7 @@
 #   docker compose -f docker-compose.yml -f docker-compose.apple-mlx.yml up -d --build
 #
 # Prerequisite — host services running:
-#   bash scripts/install_apple_mlx_runtime.sh
+#   bash scripts/setup_apple_mlx.sh --skip-docker-up
 #   bash scripts/smoke_apple_mlx.sh
 #
 # This override:

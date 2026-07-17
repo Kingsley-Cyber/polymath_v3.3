@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+import math
 import os
 import time
 from typing import Literal
@@ -71,11 +72,13 @@ class PriorityLeaseScheduler:
         self._active: _Lease | None = None
         self._embed_burst = 0
         self._grants = {"embed": 0, "rerank": 0}
-        self._release_count = 0
+        self._releases = {"embed": 0, "rerank": 0}
         self._over_target_count = 0
         self._stale_recovery_count = 0
         self._wait_ms = {"embed": [], "rerank": []}
         self._hold_ms = {"embed": [], "rerank": []}
+        self._wait_sample_count = {"embed": 0, "rerank": 0}
+        self._hold_sample_count = {"embed": 0, "rerank": 0}
 
     async def acquire(
         self,
@@ -134,7 +137,8 @@ class PriorityLeaseScheduler:
             self._hold_ms[active.workload_class] = self._hold_ms[active.workload_class][
                 -512:
             ]
-            self._release_count += 1
+            self._hold_sample_count[active.workload_class] += 1
+            self._releases[active.workload_class] += 1
             if over_target:
                 self._over_target_count += 1
             self._active = None
@@ -196,6 +200,7 @@ class PriorityLeaseScheduler:
         self._wait_ms[selected.workload_class] = self._wait_ms[selected.workload_class][
             -512:
         ]
+        self._wait_sample_count[selected.workload_class] += 1
         if selected.workload_class == "embed":
             self._embed_burst += 1
         else:
@@ -207,7 +212,10 @@ class PriorityLeaseScheduler:
         if not values:
             return None
         ordered = sorted(values)
-        index = min(len(ordered) - 1, max(0, int((len(ordered) - 1) * fraction)))
+        index = min(
+            len(ordered) - 1,
+            max(0, math.ceil(fraction * len(ordered)) - 1),
+        )
         return ordered[index]
 
     async def snapshot(self) -> dict:
@@ -236,9 +244,12 @@ class PriorityLeaseScheduler:
                     ),
                 },
                 "grants": dict(self._grants),
-                "releases": self._release_count,
+                "releases": dict(self._releases),
+                "release_count": sum(self._releases.values()),
                 "over_target": self._over_target_count,
                 "stale_recoveries": self._stale_recovery_count,
+                "wait_sample_count": dict(self._wait_sample_count),
+                "hold_sample_count": dict(self._hold_sample_count),
                 "wait_p95_ms": {
                     key: self._percentile(values, 0.95)
                     for key, values in self._wait_ms.items()

@@ -86,16 +86,16 @@ class GpuArbiterClient:
             )
         )
         self._client_id = f"{workload_class}:{os.getpid()}"
-        self._last_alert_at = 0.0
+        self._last_alert_at = {"acquire": 0.0, "release": 0.0}
         self._alert_lock = threading.Lock()
 
     def _alert_unavailable(self, operation: str, exc: BaseException) -> None:
         """Rate-limit the required named alert without hiding first failure."""
         now = time.monotonic()
         with self._alert_lock:
-            if now - self._last_alert_at < 5.0:
+            if now - self._last_alert_at.get(operation, 0.0) < 5.0:
                 return
-            self._last_alert_at = now
+            self._last_alert_at[operation] = now
         self._logger.warning(
             "%s workload=%s operation=%s error=%s",
             ALERT_NAME,

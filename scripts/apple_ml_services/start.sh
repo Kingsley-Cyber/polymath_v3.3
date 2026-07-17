@@ -160,6 +160,7 @@ wait_for_health() {
 
 start_service() {
   local name="$1" module="$2" host_var="$3" port_var="$4"
+  local register_pid_file="${5:-true}"
   local host="${!host_var}" port="${!port_var}"
   kill_stale_service "${name}" "${module}" "${port}"
   echo "[apple-ml] starting ${name} on ${host}:${port}"
@@ -169,7 +170,9 @@ start_service() {
     >> "${LOG_DIR}/apple_ml_services.log" 2>> "${LOG_DIR}/apple_ml_services.err.log" &
   local pid=$!
   echo "${pid}" > "${LOG_DIR}/${name}.pid"
-  PID_FILES+=("${LOG_DIR}/${name}.pid")
+  if [[ "${register_pid_file}" == "true" ]]; then
+    PID_FILES+=("${LOG_DIR}/${name}.pid")
+  fi
   wait_for_health "${name}" "${port}" "${pid}"
 }
 
@@ -235,6 +238,14 @@ while true; do
       continue
     fi
     if ! kill -0 "${pid}" 2>/dev/null; then
+      if [[ "${pid_file##*/}" == "gpu-arbiter.pid" ]] && should_start "${ARBITER_ENABLED}"; then
+        echo "[apple-ml] gpu arbiter pid=${pid} exited; restarting it without interrupting model sidecars"
+        # Preserve a bounded, observable fail-open window for in-flight model
+        # requests before the scheduler returns.
+        sleep 2
+        start_service "gpu-arbiter" "gpu_arbiter.main" ARBITER_HOST ARBITER_PORT false
+        continue
+      fi
       echo "[apple-ml] sidecar pid=${pid} (${pid_file##*/}) exited; bubbling up to launchd"
       stop_children
       exit 1

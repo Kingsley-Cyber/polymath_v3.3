@@ -20,7 +20,6 @@ import time
 import numpy as np
 import pytest
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SIDECAR_ROOT = Path(
     os.environ.get("SIDECAR_PATH", str(REPO_ROOT / "scripts" / "apple_ml_services"))
@@ -83,6 +82,21 @@ def test_unavailable_is_named_fail_open(caplog):
     assert ALERT_NAME in caplog.text
 
 
+def test_release_alert_does_not_suppress_required_acquire_alert(caplog):
+    logger = logging.getLogger("test.gpu-arbiter.operations")
+    client = GpuArbiterClient(
+        "embed",
+        enabled=True,
+        http_client=_ExplodingHttp(),
+        logger=logger,
+    )
+    with caplog.at_level(logging.WARNING, logger=logger.name):
+        client.release("synthetic-lease")
+        client.acquire()
+    assert "operation=release" in caplog.text
+    assert "operation=acquire" in caplog.text
+
+
 @pytest.mark.asyncio
 async def test_embed_jumps_waiting_rerank_queue():
     scheduler = PriorityLeaseScheduler(
@@ -140,6 +154,38 @@ async def test_stale_lease_recovery_is_bounded():
     recovered = await scheduler.acquire("rerank", "next-client", 1000, 500)
     await scheduler.release(recovered.lease_id, "next-client")
     assert (await scheduler.snapshot())["stale_recoveries"] == 1
+
+
+@pytest.mark.asyncio
+async def test_health_uses_nearest_rank_and_records_per_workload_sample_counts():
+    scheduler = PriorityLeaseScheduler()
+    scheduler._wait_ms["embed"] = [float(value) for value in range(1, 21)]
+    scheduler._hold_ms["embed"] = [float(value) for value in range(1, 21)]
+    scheduler._wait_ms["rerank"] = [1.0, 2.0]
+    scheduler._hold_ms["rerank"] = [3.0, 4.0]
+    scheduler._wait_sample_count = {"embed": 20, "rerank": 2}
+    scheduler._hold_sample_count = {"embed": 20, "rerank": 2}
+    scheduler._grants = {"embed": 20, "rerank": 2}
+    scheduler._releases = {"embed": 20, "rerank": 2}
+    snapshot = await scheduler.snapshot()
+    assert snapshot["wait_p95_ms"]["embed"] == 19.0
+    assert snapshot["hold_p95_ms"]["embed"] == 19.0
+    assert snapshot["wait_sample_count"] == {"embed": 20, "rerank": 2}
+    assert snapshot["hold_sample_count"] == {"embed": 20, "rerank": 2}
+    assert snapshot["releases"] == {"embed": 20, "rerank": 2}
+    assert snapshot["release_count"] == 22
+
+
+@pytest.mark.asyncio
+async def test_health_sample_counters_remain_cumulative_past_rolling_window():
+    scheduler = PriorityLeaseScheduler()
+    scheduler._wait_ms["embed"] = [1.0] * 512
+    scheduler._hold_ms["embed"] = [2.0] * 512
+    scheduler._wait_sample_count["embed"] = 900
+    scheduler._hold_sample_count["embed"] = 899
+    snapshot = await scheduler.snapshot()
+    assert snapshot["wait_sample_count"]["embed"] == 900
+    assert snapshot["hold_sample_count"]["embed"] == 899
 
 
 @pytest.mark.asyncio
@@ -327,11 +373,21 @@ def test_launch_agent_renderer_defaults_dark_and_records_arbiter(tmp_path):
 def test_installer_engraves_reinstall_kickstart_and_plist_drift_gate():
     installer = (REPO_ROOT / "scripts" / "install_apple_mlx_runtime.sh").read_text()
     checker = (REPO_ROOT / "scripts" / "check_apple_mlx_plist_drift.sh").read_text()
-    assert 'ARBITER_ENABLED="${ARBITER_ENABLED:-false}"' in installer
+    assert 'ARBITER_ENABLED="${ARBITER_ENABLED:?}"' in installer
     assert "render_apple_mlx_launch_agent.py" in installer
-    assert 'cmp -s "${expected_plist}" "${LAUNCH_AGENT_PATH}"' in installer
-    assert "launchctl kickstart -k" in installer
+    assert "apple_mlx_env_manifest.py" in installer
+    assert "apple_mlx_launch_agent_transaction.py" in installer
     assert "plist drift detected" in checker
+
+
+def test_supervisor_restarts_arbiter_without_interrupting_model_sidecars():
+    start = (REPO_ROOT / "scripts" / "apple_ml_services" / "start.sh").read_text()
+    assert '"${pid_file##*/}" == "gpu-arbiter.pid"' in start
+    assert "restarting it without interrupting model sidecars" in start
+    assert (
+        'start_service "gpu-arbiter" "gpu_arbiter.main" '
+        "ARBITER_HOST ARBITER_PORT false"
+    ) in start
 
 
 def test_rerank_evidence_support_law_remains_default_off():
