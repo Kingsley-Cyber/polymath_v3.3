@@ -10,6 +10,7 @@ from config import get_settings
 from models.schemas import ChatMessage, SourceChunk
 from services import code_lane_skills
 from services.ingestion.doc_artifact import format_source_role_header
+from services.retriever.claim_anchor_rendering import render_claim_proposition
 from utils.tokens import count_tokens, count_tokens_messages, get_model_context_limit
 
 logger = logging.getLogger(__name__)
@@ -671,6 +672,81 @@ class ContextManager:
                     (str(getattr(_s, "corpus_id", "") or ""), _cid)
                 ] = (_s.doc_name or _s.doc_id or "Unknown")
 
+        # Atomic claims remain additive annotations on source evidence. Build
+        # this block independently of the legacy-vs-waterfall passage branch so
+        # both prompt paths receive the same bounded exact-sentence anchors.
+        atomic_anchor_lines: list[str] = []
+        _runtime_settings = get_settings()
+        _anchor_enabled = bool(
+            getattr(_runtime_settings, "ATOMIC_CLAIM_ANCHORS_ENABLED", False)
+        )
+        _anchor_per_source = int(
+            getattr(_runtime_settings, "ATOMIC_CLAIM_ANCHORS_PER_SOURCE", 2)
+        )
+        _anchor_total = int(getattr(_runtime_settings, "ATOMIC_CLAIM_ANCHORS_TOTAL", 8))
+        _packet_evidence_refs: set[tuple[str, str, str]] | None = None
+        if packet and packet.get("items"):
+            _packet_evidence_refs = {
+                (
+                    str(_item.get("kind") or ""),
+                    str(_item.get("doc_id") or ""),
+                    str(_item.get("ref_id") or ""),
+                )
+                for _item in packet["items"]
+                if isinstance(_item, dict)
+                and _item.get("kind") in {"child", "full"}
+                and _item.get("ref_id")
+            }
+        for _source in sources if _anchor_enabled else []:
+            if _packet_evidence_refs is not None:
+                _source_doc = str(_source.doc_id or "")
+                _source_rendered = (
+                    "child",
+                    _source_doc,
+                    str(_source.chunk_id or ""),
+                ) in _packet_evidence_refs or (
+                    "full",
+                    _source_doc,
+                    str(_source.parent_id or ""),
+                ) in _packet_evidence_refs
+                if not _source_rendered:
+                    continue
+            _metadata = getattr(_source, "metadata", None) or {}
+            _anchors = (
+                _metadata.get("atomic_claim_anchors")
+                if isinstance(_metadata, dict)
+                else None
+            )
+            if not isinstance(_anchors, list):
+                continue
+            _label = _source.doc_name or _source.doc_id or "Unknown"
+            _section = " / ".join(_source.heading_path or [])
+            for _anchor in _anchors[:_anchor_per_source]:
+                if not isinstance(_anchor, dict):
+                    continue
+                _raw_claim = str(_anchor.get("claim_text") or "").strip()
+                _sentence = str(_anchor.get("exact_sentence") or "").strip()
+                if not _raw_claim or not _sentence:
+                    continue
+                _claim = render_claim_proposition(
+                    _raw_claim,
+                    exact_sentence=_sentence,
+                )
+                _where = f'From "{_label}"'
+                if _section:
+                    _where += f" §{_section}"
+                _start = _anchor.get("start")
+                _end = _anchor.get("end")
+                if isinstance(_start, int) and isinstance(_end, int):
+                    _where += f" chars {_start}-{_end}"
+                atomic_anchor_lines.append(
+                    f'- {_where}: candidate claim "{_claim}"; exact sentence "{_sentence}"'
+                )
+                if len(atomic_anchor_lines) >= _anchor_total:
+                    break
+            if len(atomic_anchor_lines) >= _anchor_total:
+                break
+
         if not sources and not facts:
             base = query
         else:
@@ -1063,6 +1139,17 @@ class ContextManager:
                     "<key_facts>\n" + "\n".join(fact_lines) + "\n</key_facts>\n\n"
                 )
 
+            atomic_anchor_block = ""
+            if atomic_anchor_lines:
+                atomic_anchor_block = (
+                    "<atomic_claim_anchors>\n"
+                    "These are candidate-only precision pointers to exact sentences "
+                    "inside the retrieved source passages. They may sharpen a citation "
+                    "but never replace or outrank the source passage.\n"
+                    + "\n".join(atomic_anchor_lines)
+                    + "\n</atomic_claim_anchors>\n\n"
+                )
+
             rag_policy = (
                 "<rag_answer_policy>\n"
                 "The retrieved context/key_facts are the answer substrate. "
@@ -1119,12 +1206,28 @@ class ContextManager:
                 "</answer_render_policy>\n\n"
             )
 
-            if facts_block and context_block:
-                base = f"{rag_policy}{generative_policy}{render_policy}{facts_block}{context_block}\n\nQuestion: {query}"
-            elif facts_block:
-                base = f"{rag_policy}{generative_policy}{render_policy}{facts_block}Question: {query}"
+            if not atomic_anchor_block:
+                # Preserve the established prompt byte-for-byte while the
+                # activation flag is off (or no valid positive-overlap anchor
+                # exists).
+                if facts_block and context_block:
+                    base = f"{rag_policy}{generative_policy}{render_policy}{facts_block}{context_block}\n\nQuestion: {query}"
+                elif facts_block:
+                    base = f"{rag_policy}{generative_policy}{render_policy}{facts_block}Question: {query}"
+                else:
+                    base = f"{rag_policy}{generative_policy}{render_policy}{context_block}\n\nQuestion: {query}"
             else:
-                base = f"{rag_policy}{generative_policy}{render_policy}{context_block}\n\nQuestion: {query}"
+                evidence_blocks = f"{facts_block}{context_block}"
+                if evidence_blocks:
+                    evidence_blocks = (
+                        f"{evidence_blocks}\n{atomic_anchor_block.rstrip()}"
+                    )
+                else:
+                    evidence_blocks = atomic_anchor_block.rstrip()
+                base = (
+                    f"{rag_policy}{generative_policy}{render_policy}{evidence_blocks}"
+                    f"\n\nQuestion: {query}"
+                )
 
         # Phase 24 — Skills as context. Each active skill's `instructions`
         # is wrapped in a <skill> block and prepended above <context>. Skills

@@ -2660,6 +2660,17 @@ def _build_budgeted_augmented_prompt(
     )
     budget_tokens = max(512, raw_budget)
 
+    def _atomic_claim_anchor_render_count(prompt: str) -> int:
+        """Count only anchor rows that survived final prompt construction."""
+
+        start = prompt.find("<atomic_claim_anchors>")
+        end = prompt.find("</atomic_claim_anchors>", start + 1)
+        if start < 0 or end < 0:
+            return 0
+        return sum(
+            line.startswith('- From "') for line in prompt[start:end].splitlines()
+        )
+
     def _build(
         *,
         source_chars: int | None,
@@ -2715,6 +2726,9 @@ def _build_budgeted_augmented_prompt(
             "before_tokens": full_tokens,
             "after_tokens": full_tokens,
             "shape": full_shape,
+            "atomic_claim_anchor_render_count": (
+                _atomic_claim_anchor_render_count(full_prompt)
+            ),
         }
 
     best_prompt = full_prompt
@@ -2767,6 +2781,9 @@ def _build_budgeted_augmented_prompt(
         "decorations_before": len(decoration or []),
         "hard_clipped": hard_clipped,
         "over_budget_after_compaction": best_tokens > budget_tokens,
+        "atomic_claim_anchor_render_count": (
+            _atomic_claim_anchor_render_count(best_prompt)
+        ),
     }
 
 
@@ -5565,6 +5582,51 @@ def _compact_source_previews(sources: list[Any] | None) -> list[dict[str, Any]] 
             )
         if isinstance(data.get("provenance"), list):
             data["provenance"] = data["provenance"][:5]
+        metadata = data.get("metadata")
+        if isinstance(metadata, dict) and isinstance(
+            metadata.get("atomic_claim_anchors"), list
+        ):
+            if not bool(getattr(settings, "ATOMIC_CLAIM_ANCHORS_ENABLED", False)):
+                metadata = dict(metadata)
+                metadata.pop("atomic_claim_anchors", None)
+                data["metadata"] = metadata
+            else:
+                anchor_preview_cap = max(
+                    1, int(getattr(settings, "ATOMIC_CLAIM_ANCHORS_PER_SOURCE", 2))
+                )
+                compact_anchors: list[dict[str, Any]] = []
+                for anchor in metadata["atomic_claim_anchors"][:anchor_preview_cap]:
+                    if not isinstance(anchor, dict):
+                        continue
+                    compact_anchors.append(
+                        {
+                            key: value
+                            for key, value in {
+                                "schema_version": anchor.get("schema_version"),
+                                "claim_id": anchor.get("claim_id"),
+                                "claim_text": _clip_source_text(
+                                    anchor.get("claim_text"), 240
+                                ),
+                                "exact_sentence": _clip_source_text(
+                                    anchor.get("exact_sentence"), 500
+                                ),
+                                "evidence_ref_id": anchor.get("evidence_ref_id"),
+                                "source_version_id": anchor.get("source_version_id"),
+                                "child_id": anchor.get("child_id"),
+                                "selected_chunk_id": anchor.get("selected_chunk_id"),
+                                "mapped_parent_id": anchor.get("mapped_parent_id"),
+                                "start": anchor.get("start"),
+                                "end": anchor.get("end"),
+                                "compilation_revision_id": anchor.get(
+                                    "compilation_revision_id"
+                                ),
+                            }.items()
+                            if value is not None
+                        }
+                    )
+                metadata = dict(metadata)
+                metadata["atomic_claim_anchors"] = compact_anchors
+                data["metadata"] = metadata
 
         if _is_web_source_data(data):
             key = _web_source_key(data)
@@ -7483,6 +7545,68 @@ class ChatOrchestrator:
             search_mode=resolved_mode,
         )
         sources = _filter_sources_to_selected_corpora(sources, request.corpus_ids)
+        # Exact-sentence candidate anchors are attached strictly after final
+        # answerability/corpus selection. Keep the sealed evidence packet so
+        # any non-anchor mutation fails closed.
+        atomic_claim_anchor_meta: dict[str, Any] = {
+            "enabled": False,
+            "aggregate_calls": 0,
+        }
+        if settings.ATOMIC_CLAIM_ANCHORS_ENABLED and sources:
+            final_selected_sources = list(sources)
+            try:
+                from services.ingestion_service import ingestion_service
+                from services.retriever.atomic_claim_anchors import (
+                    maybe_attach_atomic_claim_anchors,
+                    source_additivity_receipt,
+                )
+
+                selected_receipt = source_additivity_receipt(final_selected_sources)
+                claim_db = getattr(ingestion_service, "db", None)
+                if claim_db is not None:
+                    (
+                        sources,
+                        atomic_claim_anchor_meta,
+                    ) = await maybe_attach_atomic_claim_anchors(
+                        claim_db,
+                        sources,
+                        query=request.message,
+                    )
+                    enriched_receipt = source_additivity_receipt(sources)
+                    if (
+                        selected_receipt["source_ids"] != enriched_receipt["source_ids"]
+                        or selected_receipt["non_anchor_evidence_sha256"]
+                        != enriched_receipt["non_anchor_evidence_sha256"]
+                        or selected_receipt["non_anchor_evidence_bytes"]
+                        != enriched_receipt["non_anchor_evidence_bytes"]
+                    ):
+                        sources = final_selected_sources
+                        atomic_claim_anchor_meta.update(
+                            {
+                                "reason": (
+                                    "orchestrator_final_selection_additivity_failed"
+                                ),
+                                "source_identity_additive": False,
+                                "non_anchor_evidence_additive": False,
+                                "additivity_verified": False,
+                                "anchors_attached": 0,
+                                "sources_anchored": 0,
+                            }
+                        )
+                else:
+                    atomic_claim_anchor_meta = {
+                        "enabled": True,
+                        "aggregate_calls": 0,
+                        "reason": "database_unavailable",
+                    }
+            except Exception as exc:
+                sources = final_selected_sources
+                logger.warning("Atomic claim anchors skipped: %s", exc)
+                atomic_claim_anchor_meta = {
+                    "enabled": True,
+                    "aggregate_calls": 0,
+                    "reason": f"{type(exc).__name__}: {exc}"[:240],
+                }
         if answerability_chunk_gate_meta.get("enabled"):
             retrieval_diagnostics[
                 "answerability_chunk_gate"
@@ -7495,6 +7619,7 @@ class ChatOrchestrator:
         )
         if _shelf_reserve_meta:
             retrieval_diagnostics["shelf_reserve"] = _shelf_reserve_meta
+        retrieval_diagnostics["atomic_claim_anchors"] = atomic_claim_anchor_meta
         effective_tier_for_trace = getattr(
             retrieval.effective_tier,
             "value",
@@ -7516,6 +7641,7 @@ class ChatOrchestrator:
                 "chunks": len(sources or []),
                 "retrieval_diagnostics": retrieval_diagnostics,
                 "answerability_chunk_gate": answerability_chunk_gate_meta,
+                "atomic_claim_anchors": atomic_claim_anchor_meta,
                 "coverage_detected_facets": coverage_meta.get("detected_facets", []),
                 "coverage_query_facet_breakdown": coverage_meta.get(
                     "query_facet_breakdown", []
@@ -8261,6 +8387,24 @@ class ChatOrchestrator:
                 packet=_wf_packet,
             )
             user_message.token_count = count_tokens(user_message.content, model_used)
+            if settings.ATOMIC_CLAIM_ANCHORS_ENABLED:
+                atomic_claim_anchor_meta["prompt_render_count"] = int(
+                    prompt_budget_meta.get("atomic_claim_anchor_render_count") or 0
+                )
+                yield _record_trace_event(
+                    lane="planning",
+                    title="Atomic claim anchors",
+                    status=(
+                        "done"
+                        if atomic_claim_anchor_meta["prompt_render_count"] > 0
+                        else "warning"
+                    ),
+                    content=(
+                        "Exact-sentence candidate anchors were evaluated after "
+                        "final prompt compaction."
+                    ),
+                    metadata=atomic_claim_anchor_meta,
+                )
             if prompt_budget_meta.get("compacted"):
                 warning = (
                     "SYSTEM_WARN: Current RAG context compacted before model call "

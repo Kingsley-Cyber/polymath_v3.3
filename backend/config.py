@@ -98,6 +98,25 @@ class Settings(BaseSettings):
             "before full-precision rescoring."
         ),
     )
+    ATOMIC_CLAIM_ANCHORS_ENABLED: bool = Field(
+        default=False,
+        description=(
+            "Attach exact-sentence candidate claim anchors to already-selected "
+            "source chunks. Additive only and default OFF."
+        ),
+    )
+    ATOMIC_CLAIM_ANCHORS_PER_SOURCE: int = Field(
+        default=2,
+        ge=1,
+        le=4,
+        description="Maximum exact-sentence claim anchors attached per source chunk.",
+    )
+    ATOMIC_CLAIM_ANCHORS_TOTAL: int = Field(
+        default=8,
+        ge=1,
+        le=16,
+        description="Maximum exact-sentence claim anchors attached to one answer context.",
+    )
     HYDRATION_MODE: str = Field(
         default="child_summary",
         description=(

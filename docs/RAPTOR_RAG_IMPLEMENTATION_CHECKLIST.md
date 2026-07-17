@@ -270,6 +270,14 @@ cross-impact so no artifact is rebuilt twice:
 Decision of record:
 `docs/SEMANTIC_RELATIONAL_ARCHITECTURE_DECISION_2026-07-13.md`.
 
+- [ ] CLAIM-ANCHOR-ADDITIVITY-V2: rebase the sentence-to-chunk claim join onto
+  the current retrieval path, attach anchors only after final source
+  selection, and prove byte-exact source identity plus non-anchor evidence
+  with the six-query replay. Clean malformed compiler claim text only while
+  rendering answer context; preserve stored compiler output unchanged. Keep
+  the feature default-OFF pending the serialized live validation gate
+  (18/18 structural anchors and at least two rendered anchors for q021).
+
 - **Who:** extraction/semantic-contract, graph, librarian/retrieval, and
   evaluation owners; users asking cross-domain synthesis questions. The answer
   LLM explains accepted paths but never upgrades their inference status.
