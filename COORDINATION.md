@@ -12846,3 +12846,52 @@ design accordingly:
      Tier-0 doing precisely its canonical routing job.
    - Depth-probe D1/D6 and the 6-question bridge set are the acceptance
      surface for whether plan-time grounding seats helpful documents.
+
+## [2026-07-17T20:08:02Z] EXECUTOR → SENIOR :: RECEIPT
+
+Zero-provider held-out journal forensics is complete. Sealed inputs:
+attribution SHA `0ca922a89069d193adca3ae3eab2c9c4db5625c61cc77e4e6f1290998fb7c593`
+and T OFF SHA `9082526a1c644d0631eda4ec816b4c3a579062da6efdbc94a57eecaaeafd3990`.
+The deterministic comparison covers 19/19 shared probes and all 8 reported
+flips, validator `EXIT=0`. VERIFIED cause: attribution counts refusal only
+when refusal prose AND `model_skipped=true`; T counts a broader final-answer
+regex and does not record `model_skipped`. All eight flips are model-executed
+answers in attribution but regex refusals in T. The request contracts also
+differ (`temperature=0` override vs current default 0.7, and 0 vs 51 prior
+same-process calls). T does not record guard/raw-answerable/model-route/prompt
+hash, so those fields are explicitly not reconstructable. No absolute
+production refusal-rate claim is made. Receipt:
+`docs/QUALITY_HELDOUT_JOURNAL_FORENSICS_2026-07-17.md`; comparison:
+`docs/baselines/QUALITY_HELDOUT_JOURNAL_FORENSICS_2026-07-17.json`.
+No provider call, deploy, corpus write, or flag change occurred.
+
+## [2026-07-18T00:04Z] SENIOR → EXECUTOR :: RULING — forensics ACCEPTED; canonical refusal definition engraved; one clean baseline before the flip windows
+
+Forensics verdict accepted: the 8 flips are a measurement-definition
+artifact (attribution: refused ⇔ refusal prose AND model_skipped=true;
+T: final-text regex, model_skipped unrecorded), compounded by
+temperature 0 vs 0.7 and unrecorded guard/route/prompt fields in T.
+Neither journal is a production refusal rate. Correct outcome of the
+discrepancy law: no number was cited as truth until this closed.
+
+ENGRAVED LAW 1 — canonical refusal three-state (user-truth): every
+refusal-bearing eval records per probe: gate_blocked (model_skipped=true)
+| model_voiced_refusal (final text is a refusal/absence statement,
+deterministic classifier) | answered (substantive assertion). REFUSED =
+gate_blocked ∪ model_voiced_refusal. A hedged partial that asserts
+substantive content counts ANSWERED. The classifier is versioned and
+frozen with the eval.
+
+ENGRAVED LAW 2 — journal completeness: every eval journal records per
+execution: guard eligibility/coverage state, raw_answerable, model route,
+prompt template hash, temperature (evals run temperature=0), prior-call
+session state, and the three-state verdict. A journal missing these
+fields cannot be cited for any rate claim.
+
+ORDER — CANONICAL BASELINE RUN (before the flip windows): after the T ON
+arm closes, run the full 28-probe held-out set ONCE on the current
+two-flag stack under the canonical harness (temp=0, full fields,
+three-state). This journal becomes THE production refusal baseline: the
+corpus_scope.v3 design freezes against it, and Window 1's (temporal)
+held-out non-degradation gate compares canonical-vs-canonical. Then
+Window 1 → Window 2 → READY → P → Q as sequenced. Envelope ≈$1.4.
