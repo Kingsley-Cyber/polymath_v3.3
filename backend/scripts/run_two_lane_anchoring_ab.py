@@ -27,10 +27,11 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
-REPO = Path(__file__).resolve().parents[2]
-PREREG = REPO / "backend/evals/runpod_e2e_retrieval_preregister_v1.json"
-SELECTION = REPO / "backend/evals/runpod_e2e_15doc_selection_v1.json"
-NEGATIVE_V2 = REPO / "backend/evals/e2e_heldout_negative_v2_20260717.json"
+BACKEND = Path(__file__).resolve().parents[1]
+REPO = BACKEND.parent
+PREREG = BACKEND / "evals/runpod_e2e_retrieval_preregister_v1.json"
+SELECTION = BACKEND / "evals/runpod_e2e_15doc_selection_v1.json"
+NEGATIVE_V2 = BACKEND / "evals/e2e_heldout_negative_v2_20260717.json"
 LOCK_PATH = Path("/tmp/polymath-eval.lock")
 
 EXPECTED_SHA256 = {
@@ -111,8 +112,37 @@ def _preflight(api: str) -> dict[str, Any]:
     return payload
 
 
+def _document_names(
+    *,
+    api: str,
+    token: str,
+    corpus_id: str,
+    selected_filenames: set[str],
+) -> dict[str, str]:
+    request = urllib.request.Request(
+        f"{api}/api/corpora/{corpus_id}/documents?limit=100",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    with urllib.request.urlopen(request, timeout=40.0) as response:
+        rows = json.loads(response.read().decode())
+    if not isinstance(rows, list) or len(rows) != 15:
+        raise RuntimeError("E2E document identity catalog did not close at 15")
+    names = {
+        str(row.get("doc_id") or ""): str(
+            row.get("original_filename") or row.get("filename") or ""
+        )
+        for row in rows
+        if isinstance(row, dict) and row.get("doc_id")
+    }
+    if len(names) != 15 or set(names.values()) != selected_filenames:
+        raise RuntimeError("E2E document identity catalog drifted from selection")
+    return names
+
+
 def _normalized_doc_name(value: Any) -> str:
-    return " ".join(str(value or "").strip().casefold().split())
+    return re.sub(
+        r"\s+", " ", re.sub(r"[^a-z0-9]+", " ", str(value or "").casefold())
+    ).strip()
 
 
 def _chat(
@@ -200,14 +230,20 @@ def _chat(
     }
 
 
-def _score_frozen(query: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
+def _score_frozen(
+    query: dict[str, Any],
+    result: dict[str, Any],
+    document_names: dict[str, str],
+) -> dict[str, Any]:
     expected = {
         _normalized_doc_name(value) for value in query.get("expected_any") or []
     }
     returned = {
-        _normalized_doc_name(item.get("doc_name"))
+        _normalized_doc_name(
+            document_names.get(str(item.get("doc_id") or "")) or item.get("doc_name")
+        )
         for item in result.get("sources") or []
-        if item.get("doc_name")
+        if item.get("doc_id") or item.get("doc_name")
     }
     expected_hits = sorted(expected & returned)
     minimum = int(query.get("expected_min_distinct") or 1)
@@ -255,9 +291,18 @@ def _mean(values: list[bool]) -> float:
 def _run_arm(args: argparse.Namespace) -> dict[str, Any]:
     frozen_hashes = _verify_frozen_inputs()
     prereg = json.loads(PREREG.read_text())
+    selection = json.loads(SELECTION.read_text())
     negative = json.loads(NEGATIVE_V2.read_text())
     corpus_id = str(negative["corpus_id"])
     preflight = _preflight(args.api)
+    document_names = _document_names(
+        api=args.api,
+        token=args.token,
+        corpus_id=corpus_id,
+        selected_filenames={
+            str(row["filename"]) for row in selection.get("selected") or []
+        },
+    )
 
     frozen_results: list[dict[str, Any]] = []
     for repeat in range(1, args.repeat + 1):
@@ -276,7 +321,7 @@ def _run_arm(args: argparse.Namespace) -> dict[str, Any]:
                     "id": query["id"],
                     "shape": query["shape"],
                     "tier": tier,
-                    **_score_frozen(query, result),
+                    **_score_frozen(query, result, document_names),
                     **result,
                 }
                 frozen_results.append(row)

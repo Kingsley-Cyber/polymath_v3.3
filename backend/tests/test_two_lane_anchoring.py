@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 
 from config import Settings
 from models.schemas import RetrievalTier, SourceChunk
+from scripts.run_two_lane_anchoring_ab import _normalized_doc_name
 from services.retriever.evidence_allocation import (
     allocate_two_lane_seats,
     classify_metadata_anchor,
@@ -71,6 +72,13 @@ def _anchor(candidate_id: str, *, score: float = 0.8, side: str = "__all__"):
 
 def _expansion(candidate_id: str, *, score: float = 0.8, side: str = "__all__"):
     return Candidate(candidate_id, score=score, side=side)
+
+
+def test_eval_harness_normalizes_original_and_slug_document_names_identically():
+    original = "Paul Ekman - Facial Action Coding System Manual (0).md"
+    slug = "paul-ekman-facial-action-coding-system-manual-0.md"
+
+    assert _normalized_doc_name(original) == _normalized_doc_name(slug)
 
 
 def test_metadata_classifier_matches_exact_case_normalized_title():
