@@ -165,7 +165,13 @@ def select_cases(
     cases.extend(
         dict(frozen_by_id[query_id]) for query_id in (*DIRECT_QUERY_IDS, *LAY_QUERY_IDS)
     )
-    cases.extend(dict(negative_by_id[query_id]) for query_id in NEGATIVE_QUERY_IDS)
+    cases.extend(
+        {
+            **dict(negative_by_id[query_id]),
+            "shape": "negative_control",
+        }
+        for query_id in NEGATIVE_QUERY_IDS
+    )
     require([str(row["id"]) for row in cases] == list(QUERY_IDS), "selection drift")
     require(len(cases) == len(set(QUERY_IDS)) == 10, "selection must be 10 unique ids")
     return cases

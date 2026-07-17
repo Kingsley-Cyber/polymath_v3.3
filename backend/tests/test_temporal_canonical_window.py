@@ -12,7 +12,7 @@ def test_compact_selection_is_exact_four_two_two_two():
     }
     negative = {
         "queries": [
-            {"id": query_id, "shape": "negative_control", "question": query_id}
+            {"id": query_id, "family": "F1", "question": query_id}
             for query_id in harness.NEGATIVE_QUERY_IDS
         ]
     }
@@ -25,6 +25,10 @@ def test_compact_selection_is_exact_four_two_two_two():
     assert len(harness.LAY_QUERY_IDS) == 2
     assert len(harness.NEGATIVE_QUERY_IDS) == 2
     assert len(set(harness.QUERY_IDS)) == 10
+    assert [row["shape"] for row in cases[-2:]] == [
+        "negative_control",
+        "negative_control",
+    ]
 
 
 def test_temporal_anchor_score_requires_expected_document_and_all_anchors():
