@@ -11792,3 +11792,5 @@ to strict serialization discipline on the Mac (eval concurrency 1, never
 rerank parallel to embed). One embedding space per collection is inviolate —
 no mixed-provenance vectors either way. Receipt the canary + the chosen
 route.
+
+## OWNER HOLD — SUPERSEDES the Step 0.5 embed-routing directive above: the embedding/reranker structural decision is NOT made. Do NOT implement the routing seam or parity canary. Step 0 client-side stability patch (timeout/warmup/health-probe/soak) still stands as written in the injected prompt. Everything else in the wave proceeds unchanged.
