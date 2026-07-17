@@ -502,6 +502,14 @@ Acceptance:
 
 ### P0.4 Make Answerability Honest
 
+- [x] Recalibrate the chat-side answerability arbiter against the frozen
+  9-execution negative subset without changing retriever sufficiency. Keep the
+  tuning versioned/default-OFF; refuse when decisive query entities are wholly
+  absent from the selected corpus, while preserving direct document-hit >=85%
+  and lay-language document-hit >=75%. Require per-query OFF/ON receipts and
+  a read-only corpus census. **[OWNER-DIRECTED 2026-07-16; branch
+  `codex/refusal-arbiter-20260716`; acceptance green; receipt:
+  `docs/ANSWERABILITY_CORPUS_SCOPE_V2_AB_2026-07-17.md`]**
 - [x] Chat-facing negative control currently fails closed for the tungsten
   query.
 - [x] Rename or clearly separate lane coverage from answerability in every

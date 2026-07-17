@@ -71,6 +71,9 @@ from services.retriever.evidence_allocation import (
 from services.retriever.query_plan import FALLBACK_PROBE_ID as _FALLBACK_PROBE_ID
 from services.answerability_tuning import (
     CROSS_DOCUMENT_RELATIONSHIP_ATOM as _CROSS_DOC_ATOM,
+    answerability_policy_version as _answerability_policy_version,
+    corpus_scope_v2_enabled as _answerability_corpus_scope_v2_enabled,
+    corpus_scope_v2_support as _answerability_corpus_scope_v2_support,
     coverage_threshold as _answerability_coverage_threshold,
     cross_doc_atom_is_critical as _cross_doc_atom_is_critical,
     inject_cross_doc_atom as _inject_cross_doc_atom,
@@ -1140,6 +1143,22 @@ def _build_retrieval_answerability_gate(
     else:
         status = "weak"
 
+    scope_support = _answerability_corpus_scope_v2_support(
+        query,
+        [_answerability_chunk_text(source) for source in (sources or [])],
+    )
+    scope_guard_applied = bool(
+        _answerability_corpus_scope_v2_enabled()
+        and corpus_scoped
+        and evidence_count > 0
+        and not raw_answerable
+        and status in {"answerable", "partial"}
+        and scope_support.get("eligible")
+        and not scope_support.get("supported")
+    )
+    if scope_guard_applied:
+        status = "unanswerable"
+
     return {
         "status": status,
         "answerable": status == "answerable",
@@ -1154,6 +1173,16 @@ def _build_retrieval_answerability_gate(
         "missing_atoms": missing_atoms,
         "missing_critical_atoms": missing_critical,
         "required_coverage": round(required_coverage, 4),
+        "answerability_policy_version": _answerability_policy_version(),
+        "corpus_scope_guard": {
+            **scope_support,
+            "applied": scope_guard_applied,
+            "reason": (
+                "retriever_insufficient_distinctive_scope_undercovered"
+                if scope_guard_applied
+                else "not_applied"
+            ),
+        },
         # P0.4 — lane coverage is telemetry, answerability is the decision;
         # surface them separately so UI/MCP can render both without conflation.
         "lane_coverage": (
