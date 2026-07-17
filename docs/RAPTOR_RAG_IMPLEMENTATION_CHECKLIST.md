@@ -4156,6 +4156,36 @@ A corpus is strict-ready only when:
   Permanent receipt:
   `docs/SEMANTIC_ACTIVATION_AB_RECEIPT_2026-07-17.md`.
 
+### 2026-07-17 - CLAIM-ANCHOR-JOIN-V1 sentence-to-parent repair
+
+- Commit: `32d30b3378d677e23fc5c485883a0a434dcaef03`.
+- Owner: owner claim-join order; executor implementation and micro A/B.
+- Corpus/data scope: Mark corpus, read-only six-query diagnostic
+  q021/q022/q023/q024/q025/q029; no corpus mutation.
+- Code changes: bounded exact parent-summary to child mapping, current
+  ownership/source-version revalidation, duplicate/foreign/unmapped
+  fail-closed behavior, additive anchor metadata, and default-OFF flag.
+- Durable migration/backfill: none.
+- Before metrics: q021 attached/rendered anchors 0/0.
+- After metrics: q021 attached/structurally valid/rendered 2/2/2; ON total
+  structurally valid anchors 18/18. This does not measure semantic claim
+  quality.
+- Tests by tier: 22 canonical-container focused tests passed, `EXIT=0`.
+  Each OFF/ON micro arm independently passed, `EXIT=0`.
+- Cross-corpus test: not applicable to this Mark-only join diagnostic.
+- Failure/rollback test: preregistered cross-arm selected-source identity
+  failed q021/q022/q023, comparator `EXIT=1`; no retry. Canonical runtime
+  image/config restored and flag default OFF before lock release.
+- Deployment image/health: temporary review deployment used Step-0 MLX
+  preflight; canonical image `sha256:a2b8aeb5…b365a` restored healthy with
+  exact five compose files and live embed dimension 1024.
+- Remaining risks: selected-source nondeterminism prevents promotion;
+  q025's two attached anchors were not rendered; q021 claim propositions are
+  malformed/untyped compiler output despite exact citation closure.
+- Checklist boxes closed: none. `CLAIM-ANCHOR-JOIN-V1` remains open because
+  identical selected chunks did not pass. Permanent receipt:
+  `docs/CLAIM_ANCHOR_JOIN_MICRO_AB_2026-07-17.md`.
+
 Copy this section for every completed item:
 
 ```markdown

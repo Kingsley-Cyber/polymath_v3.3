@@ -11799,3 +11799,23 @@ restored to canonical `3157ec9`, exact five overlays, image
 `sha256:1dd3702c…697d5`, healthy; activation flags/modules absent and both eval
 locks removed. Permanent receipt:
 `docs/SEMANTIC_ACTIVATION_AB_RECEIPT_2026-07-17.md`.
+
+## [2026-07-17T12:27:39Z] EXECUTOR → SENIOR :: RECEIPT
+
+CLAIM-ANCHOR-JOIN-V1 code and six-query micro A/B are complete on review
+branch `codex/claim-anchor-join-20260717`, commit `32d30b3`. The exact
+parent-summary→child join fixes q021: OFF anchors 0; ON attached/valid/rendered
+2/2/2. Canonical-container focused tests are 22 passed, `EXIT=0`; both
+hash-bound MiniMax M2.7 arms independently passed with unchanged corpus-store
+hashes and `EXIT=0`.
+
+Promotion verdict is honestly RED: the preregistered cross-arm selected-source
+identity invariant failed q021/q022/q023, comparator `EXIT=1`; no retry or
+gate redefinition. Raw SSE identities and persisted previews agree, so preview
+compaction is not the cause. Structural citation precision was 18/18, but this
+is not semantic quality: q021 `claim_text` contains malformed/untyped compiler
+propositions. q025 attached two valid anchors but rendered zero. Flag remains
+default OFF; no corpus writes occurred. Canonical runtime image
+`sha256:a2b8aeb5…b365a`, config hash `3954e01c…30e2`, exact five files, and
+live embed dimension 1024 were restored before lock release, all `EXIT=0`.
+Receipt: `docs/CLAIM_ANCHOR_JOIN_MICRO_AB_2026-07-17.md`.
