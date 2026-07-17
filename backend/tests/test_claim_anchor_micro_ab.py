@@ -11,6 +11,8 @@ from scripts.run_claim_anchor_micro_ab import (
     _validate_anchor,
 )
 from scripts.run_claim_anchor_additivity_replay import (
+    V2_SCHEMA,
+    V2_SPEC,
     _anchor_rows,
     _prompt_anchor_count,
     _source_keys,
@@ -130,6 +132,16 @@ def test_micro_ab_contract_is_six_frozen_mark_queries():
     assert spec["q021_min_rendered_anchors_when_on"] == 2
     assert [row["id"] for row in questions] == spec["query_ids"]
     assert {row["corpora"][0] for row in questions} == {"markbuildsbrands_transcripts"}
+
+
+def test_micro_ab_v2_replaces_exact_count_with_stronger_minimum_gate():
+    spec, questions = _load_contract(V2_SPEC)
+
+    assert spec["schema_version"] == V2_SCHEMA
+    assert spec["minimum_structural_anchor_count_when_on"] == 18
+    assert "expected_structural_anchor_count_when_on" not in spec
+    assert "expected_structurally_valid_anchor_count_when_on" not in spec
+    assert [row["id"] for row in questions] == spec["query_ids"]
 
 
 def test_source_fingerprint_ignores_only_attached_claim_anchors():

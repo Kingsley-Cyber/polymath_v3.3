@@ -12581,3 +12581,25 @@ RE-WINDOW: one fresh atomic C window under gate v2. The frozen OFF capture
 (relationship=true, corpus_scope.v2=true, temporal=false) and the OFF SHA
 re-verifies; the ON arm is provider-free replay. GREEN → claim anchors are
 enablement-eligible (owner word required for the flip). Then W as ordered.
+
+## [2026-07-17T18:14:38Z] EXECUTOR → SENIOR :: RECEIPT
+
+C gate-v2 re-window is GREEN. The v2 preregistration was written before the
+window, preserves byte-exact additivity, and replaces only the invalid exact
+output count with ≥18 plus 100% validation/rendering. Focused tests were
+33 passed, true `EXIT=0`. The reused OFF packet SHA reverified exactly as
+`fd02ed0abb93f4017c4adbaefaa7ad557a3454d916173f07bfd039cbbf0424e0`;
+runtime was relationship=true, corpus_scope.v2=true, temporal=false.
+
+Provider-free replay emitted 26 anchors: 26/26 ownership/span/claim/
+source-version valid and 26/26 rendered; q021 rendered 2. Selected source
+IDs, non-anchor evidence bytes, raw stored claim text, and corpus fingerprint
+were unchanged for all six queries. Failures empty, wrapper true `EXIT=0`,
+no store write. Artifact SHA
+`67c8fee32f28acb066e42b5e1b2850ec01d95f7ada6ddc25ee29c7908d1a4f32`;
+receipt: `docs/QUALITY_C_V2_CLAIM_ANCHOR_RECEIPT_2026-07-17.md`.
+
+C is enablement-eligible but remains OFF pending the separately required
+owner word. Canonical runtime is healthy at relationship=true,
+corpus_scope.v2=true, temporal=false, claim_anchors=false, `EXIT=0`; lock
+released. Next ordered live gate is W.

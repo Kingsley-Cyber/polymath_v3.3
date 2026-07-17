@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import copy
+import hashlib
 import json
 import time
 from datetime import datetime, timezone
@@ -36,6 +37,40 @@ from services.retriever.atomic_claim_anchors import (
     source_additivity_receipt,
 )
 from services.retriever.claim_anchor_rendering import render_claim_proposition
+
+
+V2_SPEC = (
+    Path(__file__).resolve().parents[1] / "evals" / "claim_anchor_join_micro_ab_v2.json"
+)
+SEALED_V1_OFF_SHA256 = (
+    "fd02ed0abb93f4017c4adbaefaa7ad557a3454d916173f07bfd039cbbf0424e0"
+)
+V2_SCHEMA = "claim_anchor_join_micro_ab.v2"
+V2_COMPATIBILITY_KEYS = (
+    "heldout_questions_sha256",
+    "tier",
+    "corpus_name",
+    "model_contract",
+    "query_ids",
+)
+
+
+def _validate_off_contract(
+    *,
+    spec: dict[str, Any],
+    off: dict[str, Any],
+    off_path: Path,
+) -> None:
+    if spec.get("schema_version") != V2_SCHEMA:
+        if off.get("spec") != spec:
+            raise RuntimeError("OFF artifact preregistration does not match")
+        return
+    actual_sha = hashlib.sha256(off_path.read_bytes()).hexdigest()
+    if actual_sha != SEALED_V1_OFF_SHA256:
+        raise RuntimeError("v2 re-window OFF artifact SHA drifted")
+    off_spec = off.get("spec") or {}
+    if any(off_spec.get(key) != spec.get(key) for key in V2_COMPATIBILITY_KEYS):
+        raise RuntimeError("v2 re-window OFF selection contract drifted")
 
 
 def _source_keys(sources: list[dict[str, Any]]) -> list[dict[str, str]]:
@@ -191,7 +226,7 @@ async def _replay(
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--spec", type=Path, default=DEFAULT_SPEC)
+    parser.add_argument("--spec", type=Path, default=V2_SPEC)
     parser.add_argument("--off-artifact", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
@@ -203,8 +238,7 @@ def main() -> int:
     off = json.loads(args.off_artifact.read_text(encoding="utf-8"))
     if off.get("arm") != "off" or not off.get("passed"):
         raise RuntimeError("OFF artifact is absent or did not pass")
-    if off.get("spec") != spec:
-        raise RuntimeError("OFF artifact preregistration does not match")
+    _validate_off_contract(spec=spec, off=off, off_path=args.off_artifact)
     off_rows = list(off.get("results") or [])
     if [row.get("query_id") for row in off_rows] != spec["query_ids"]:
         raise RuntimeError("OFF artifact query order drifted")
@@ -212,6 +246,13 @@ def main() -> int:
     mongo = MongoClient(settings.MONGODB_URI)
     db = mongo[settings.MONGODB_DATABASE]
     try:
+        if spec.get("schema_version") == V2_SCHEMA:
+            if not settings.RELATIONSHIP_EVIDENCE_ALLOCATION_ENABLED:
+                raise RuntimeError("v2 re-window requires relationship allocation ON")
+            if not settings.ANSWERABILITY_CORPUS_SCOPE_V2_ENABLED:
+                raise RuntimeError("v2 re-window requires corpus-scope v2 ON")
+            if settings.TEMPORAL_QUERY_ROUTING_ENABLED:
+                raise RuntimeError("v2 re-window requires temporal routing OFF")
         before = _fingerprint(db, str(off["corpus_id"]))
         results = asyncio.run(
             _replay(
@@ -234,23 +275,40 @@ def main() -> int:
                 failures.append(f"{row['query_id']}:citation_invalid")
             if not row["raw_claim_text_preserved"]:
                 failures.append(f"{row['query_id']}:raw_claim_mutated")
+            if (
+                spec.get("schema_version") == V2_SCHEMA
+                and row["prompt_render_count"] != row["anchor_count"]
+            ):
+                failures.append(f"{row['query_id']}:not_all_anchors_rendered")
             if row["model_contract"] != spec["model_contract"]:
                 failures.append(f"{row['query_id']}:model_contract")
 
         total_anchors = sum(int(row["anchor_count"]) for row in results)
         total_valid = sum(int(row["valid_anchor_count"]) for row in results)
         q021 = next(row for row in results if row["query_id"] == "q021")
-        if total_anchors != int(spec["expected_structural_anchor_count_when_on"]):
-            failures.append("structural_anchor_count")
-        if total_valid != int(spec["expected_structurally_valid_anchor_count_when_on"]):
-            failures.append("structurally_valid_anchor_count")
+        if spec.get("schema_version") == V2_SCHEMA:
+            if total_anchors < int(spec["minimum_structural_anchor_count_when_on"]):
+                failures.append("structural_anchor_count_below_minimum")
+            if total_valid != total_anchors:
+                failures.append("not_all_emitted_anchors_valid")
+        else:
+            if total_anchors != int(spec["expected_structural_anchor_count_when_on"]):
+                failures.append("structural_anchor_count")
+            if total_valid != int(
+                spec["expected_structurally_valid_anchor_count_when_on"]
+            ):
+                failures.append("structurally_valid_anchor_count")
         if q021["prompt_render_count"] < int(spec["q021_min_rendered_anchors_when_on"]):
             failures.append("q021:rendered_anchor_floor")
         if before != after:
             failures.append("corpus_fingerprint_changed")
 
         output = {
-            "schema_version": "claim_anchor_additivity_replay.v1",
+            "schema_version": (
+                "claim_anchor_additivity_replay.v2"
+                if spec.get("schema_version") == V2_SCHEMA
+                else "claim_anchor_additivity_replay.v1"
+            ),
             "captured_at_utc": datetime.now(timezone.utc).isoformat(),
             "arm": "on_post_final_selection_replay",
             "runtime_flag_enabled": True,
