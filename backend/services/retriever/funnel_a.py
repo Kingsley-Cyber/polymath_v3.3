@@ -5,6 +5,10 @@ from typing import List, Optional
 from config import get_settings
 from models.schemas import SourceChunk
 from services.facets import metadata_with_facets
+from services.retriever.temporal import (
+    metadata_with_temporal_carrier,
+    temporal_routing_enabled,
+)
 from qdrant_client import AsyncQdrantClient, models
 
 logger = logging.getLogger(__name__)
@@ -284,12 +288,16 @@ class FunnelA:
             hits = resp.points
 
             chunks = []
+            temporal_enabled = temporal_routing_enabled(get_settings())
             for hit in hits:
                 payload = hit.payload or {}
 
                 # For summary chunks, the text stored is usually the summary itself
                 chunk_text = payload.get("chunk_text", payload.get("text", ""))
 
+                metadata = metadata_with_facets(payload.get("metadata"), payload)
+                if temporal_enabled:
+                    metadata = metadata_with_temporal_carrier(metadata, payload)
                 chunks.append(
                     SourceChunk(
                         chunk_id=payload.get("chunk_id", str(hit.id)),
@@ -304,7 +312,7 @@ class FunnelA:
                         doc_name=payload.get("doc_name") or payload.get("filename"),
                         heading_path=payload.get("heading_path") or None,
                         language=payload.get("language"),
-                        metadata=metadata_with_facets(payload.get("metadata"), payload),
+                        metadata=metadata,
                         provenance=list(retriever_provenance),
                     )
                 )

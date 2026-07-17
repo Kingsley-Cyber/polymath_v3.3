@@ -180,6 +180,14 @@ class Settings(BaseSettings):
             "retrieval evaluation meets its quality gates."
         ),
     )
+    TEMPORAL_QUERY_ROUTING_ENABLED: bool = Field(
+        default=False,
+        description=(
+            "Use captured time_expressions/temporal_class metadata as a "
+            "query-side retrieval prior for dated questions. Dark-shipped "
+            "OFF until the frozen temporal and retrieval suites pass."
+        ),
+    )
     RELATIONSHIP_LANE_MIN_SOURCES: int = Field(
         default=1,
         ge=1,

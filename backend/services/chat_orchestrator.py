@@ -101,6 +101,10 @@ from services.retriever.query_plan import (
 )
 from services.retriever.planned_fusion import reserved_required_lane_ids
 from services.retriever.search_mode import resolve_search_mode
+from services.retriever.temporal import (
+    detect_temporal_intent,
+    temporal_routing_enabled,
+)
 from services.settings import settings_service
 from utils.streaming import build_sse_chunk
 from utils.tokens import count_tokens, get_model_context_limit
@@ -4556,11 +4560,12 @@ def _evidence_support_query_variants(
         for term in ((semantic_hints or {}).get("terms") or [])
         if str(term).strip()
     ]
+    original_preserving_variant = " ".join([lane.query, original_query])
     variants = [
         " ".join([*hint_terms[:8], *lane.search_terms[:8]]),
         lane.query,
         " ".join([lane.label, *lane.search_terms[:10]]),
-        " ".join([lane.query, original_query]),
+        original_preserving_variant,
     ]
     queries: list[str] = []
     seen: set[str] = set()
@@ -4570,6 +4575,16 @@ def _evidence_support_query_variants(
         if text and key not in seen:
             queries.append(text)
             seen.add(key)
+    if (
+        temporal_routing_enabled(settings)
+        and detect_temporal_intent(original_query).active
+    ):
+        combined = " ".join(str(original_preserving_variant or "").split())
+        if combined:
+            first_two = [query for query in queries if query.lower() != combined.lower()][
+                :2
+            ]
+            return [*first_two, combined]
     return queries[:3]
 
 
