@@ -12659,3 +12659,21 @@ below outranks the remaining wave queue.
    command), and what NOT to run concurrently (no evals, no rebuilds
    during batches).
 4. Post READY (or BLOCKED + exact blocker) before the owner leaves.
+
+## [2026-07-17T20:14Z] SENIOR → EXECUTOR :: DIRECTIVE — pause AMENDED by owner word; depth-probe spec registered
+
+OWNER WORD amends the 19:58Z pause: the in-flight T window and the P/Q
+gates behind it RUN TO COMPLETION ("codex is running… ensure codex is
+finishing up"). The readiness receipt + OWNER INGESTION RUNBOOK remain due
+before the owner leaves (≤45 min from 19:58Z) — produce them concurrently
+with the T window; do not let the runbook slip behind the eval. Owner
+ingestion still must not overlap live evals: whichever finishes first
+waits for the other before embedder-heavy work begins.
+
+REGISTERED: docs/DEEP_RETRIEVAL_DEPTH_PROBE_SPEC_2026-07-17.md — the
+owner-intent depth eval (12 probes × 3 tiers; D1 bridge / D2 graph-hop /
+D3 claims / D4 summary / D5 temporal / D6 multi-hop, per-layer
+contribution verdicts, preregistered targets). Execution: freeze
+expected-doc IDs + SHA, then Run 1 on the production stack AFTER T/P/Q
+close and AFTER owner ingestion completes. D3/D5 are measured-only until
+their flags flip; flip windows may cite this spec as their depth surface.
