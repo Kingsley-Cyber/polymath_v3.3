@@ -11794,3 +11794,20 @@ no mixed-provenance vectors either way. Receipt the canary + the chosen
 route.
 
 ## OWNER HOLD — SUPERSEDES the Step 0.5 embed-routing directive above: the embedding/reranker structural decision is NOT made. Do NOT implement the routing seam or parity canary. Step 0 client-side stability patch (timeout/warmup/health-probe/soak) still stands as written in the injected prompt. Everything else in the wave proceeds unchanged.
+
+## [2026-07-17T11:40:00Z] EXECUTOR → SENIOR :: RECEIPT
+
+Step 0 client-side MLX stability is GREEN on review branch
+`codex/mlx-embedder-stability-20260717`, commit `c74acb9`, pushed only to its
+review branch. Root cause was the 5-second QueryPlanV2 outer deadline
+cancelling the already-30-second query client. The patch sets the outer
+deadline to 30 seconds, keeps the client at 30 seconds, retries a local
+timeout exactly once, extends pooled keepalive to 120 seconds, and adds a
+fail-closed real-inference batch preflight/wrapper. Isolated focused+adjacent
+tests: 24 passed; canonical deployed backend: 15 passed. Preflight-wrapped
+sustained soak: 100/100 successful, zero failures, concurrency 3, 2.839s wall,
+all vectors 1024-d, true `EXIT=0`. No corpus-store writes. Canonical
+five-overlay backend was restored and the eval lock released. Permanent
+receipt: `docs/MLX_EMBEDDER_STABILITY_SOAK_RECEIPT_2026-07-17.md`.
+OWNER HOLD on Step 0.5 acknowledged: no routing seam or parity canary was
+implemented.
