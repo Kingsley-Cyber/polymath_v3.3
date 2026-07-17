@@ -169,6 +169,28 @@ async def create_all_indexes(db: AsyncIOMotorDatabase) -> None:
     await _ensure_index(db["parent_chunks"], "parent_id")
     logger.info("Indexes ensured: parent_chunks")
 
+    # --- deterministic T9.1 document routing profiles ---
+    # Additive candidate-only serving rows. Source documents/chunks/extractions
+    # are never updated by the materializer.
+    await _ensure_index(
+        db["t91_document_profiles"],
+        [("corpus_id", 1), ("doc_id", 1), ("source_version_id", 1)],
+        unique=True,
+        name="t91_profile_source_unique",
+    )
+    await _ensure_index(
+        db["t91_document_profiles"],
+        [("corpus_id", 1), ("assignment_state", 1), ("canonical_write", 1)],
+        name="t91_profile_router_scope",
+    )
+    await _ensure_index(
+        db["t91_document_profiles"],
+        "profile_id",
+        unique=True,
+        name="t91_profile_id_unique",
+    )
+    logger.info("Indexes ensured: t91_document_profiles")
+
     # --- summary_tree ---
     # node_id is content-derived and therefore repeats when the same source is
     # intentionally ingested into multiple corpora.  The durable tree instance

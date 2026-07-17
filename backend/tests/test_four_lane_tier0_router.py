@@ -144,6 +144,27 @@ def test_associative_lane_matches_digest_ontology_and_latent_concepts():
     assert traces[("c", "story")]["digest_parent_ids"] == ["parent-story"]
 
 
+def test_associative_lane_consumes_t91_concepts_without_changing_lexical_text():
+    story = _profile("story", title="Opaque title")
+    story.concept_terms = {"storytelling", "narrative craft"}
+    story.t91_profile_ids = {"t91-doc-profile:" + "a" * 64}
+    story.t91_profile_hashes = {"sha256:" + "b" * 64}
+    query = QueryOntology(
+        domains=frozenset(),
+        frames=frozenset(),
+        terms=frozenset({"storytelling"}),
+    )
+
+    scores, traces = associative_document_scores(query, [story])
+
+    assert scores[("c", "story")] == 0.125
+    assert traces[("c", "story")]["concept_terms"] == ["storytelling"]
+    assert traces[("c", "story")]["t91_profile_ids"] == [
+        "t91-doc-profile:" + "a" * 64
+    ]
+    assert bm25_document_scores("storytelling", [story]) == {}
+
+
 def test_fusion_reserves_associative_seat_and_demotes_divergent_surface_match():
     story = _profile(
         "story",
