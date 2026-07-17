@@ -13130,3 +13130,50 @@ before API calls (missing dark planner flag; container lock namespace absent).
 Both were corrected by exact runtime/lock attestation; neither created a
 journal or provider request. No corpus write occurred. Proceeding to the
 T canonical re-window only.
+
+## [2026-07-17T23:27:04Z] EXECUTOR → SENIOR :: RECEIPT
+
+BUILD-FIRST STEP 1B — T CANONICAL RE-WINDOW is SEALED-RED and the atomic
+rollback is complete. Review branch `codex/build-first-queue-20260718`
+contains the hardened compact harness in `ac1e301` + `bbe9394`; 69 focused
+canonical/T tests were green before the window. Exact selection
+`two-lane-canonical-10.v1` contains 6 anchor-surface + 2 relationship-spot +
+2 direct-spot IDs, query-ID SHA
+`2e22e3c9dd528aa8953b21b025b9b78685195bcab8505e4b755ddc5e80fbc99f`.
+The synthesis pass was concurrency=3, temperature=0, fresh conversations,
+canonical three-state telemetry; repeat #2 was retrieval-only with zero
+synthesis calls.
+
+VERIFIED results: technical 10/10; journal complete 10/10; all 10 positives
+answered; direct doc-hit 6/6 = 100%; lay doc-hit 1/1 = 100%;
+corpus/citation membership 100%. RED gates: relationship minimum-distinct
+2/3 = 66.67% (<75%; `relationship_movement_machine_figure` seated only its
+Laban expected document); metadata-anchor eligibility was observed on 6/10
+but only 3/6 eligible queries seated an anchor = 50% (<90%); exact allocation
+fingerprint and selected-seat identity replay were each 3/10 = 30% (<100%).
+The retrieval-only repeat used the first-pass traced contract
+(`retrieval_k=8`, `final_top_k=8`, rerank=true/top_n=32, local mode) plus the
+same saved fact-seed value (40); the divergent replay is therefore recorded as
+an observed cross-process retrieval/allocation nondeterminism, not silently
+waived. The preregistered six named anchor-surface IDs were not all eligible
+under the current planned-retrieval candidate pool, so that gate is also RED.
+
+Per atomic-flip law, `TWO_LANE_ANCHORING_ENABLED` was restored false
+immediately after the sealed result. Canonical runtime is re-attested:
+relationship=true, corpus_scope.v2=true, T=false, temporal=false,
+claims=false, planner/router/waterfall=false; host lock released. One
+pre-window attestation correctly aborted before queries because the harness
+initially expected the legacy compatibility setting `TWO_LANE_ANCHORING`
+true; the production selector/Compose contract uses only
+`TWO_LANE_ANCHORING_ENABLED`. The harness was corrected, retested, rebuilt,
+and then the single authorized window ran. No corpus write occurred.
+
+Durable journal:
+`docs/baselines/BUILD_FIRST_T_CANONICAL_10_RED_2026-07-18.json`, file SHA
+`9ad78c13ed4233e97f23bd4f2ae302ddcf3b4fb9c81b8b88c0813e1b7c60b501`,
+canonical seal payload SHA
+`2daa361aa24364e69b0cc6a207e10bab5ac55bd2d4ea987b70275fd5336e1aee`.
+Run log:
+`docs/baselines/BUILD_FIRST_T_CANONICAL_10_RED_2026-07-18.log`, SHA
+`b890a14dd2d2be7f7578c5664cdedbf05e2c08268a160340512b8c657023395a`,
+true `EXIT=1`; two-attempt synthesis envelope `$0.511578`. T remains dark.
