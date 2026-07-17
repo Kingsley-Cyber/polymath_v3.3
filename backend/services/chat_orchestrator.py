@@ -65,6 +65,7 @@ from services.retriever.evidence_allocation import (
     STRONG_LANE_SCORE as _EVIDENCE_LANE_STRONG_SCORE,
     cap_chunks_per_doc as _ea_cap_chunks_per_doc,
     per_doc_cap_for_plan as _evidence_per_doc_cap_for_plan,
+    relationship_allocation_eligible as _relationship_allocation_eligible,
     select_lane_support as _ea_select_lane_support,
 )
 from services.retriever.query_plan import FALLBACK_PROBE_ID as _FALLBACK_PROBE_ID
@@ -4622,10 +4623,13 @@ async def _enforce_evidence_plan_lanes(
     final_top_k: int | None,
     source_cap: int | None = None,
     support_semaphore: "asyncio.Semaphore | None" = None,
+    enabled: bool = True,
 ) -> tuple[list[SourceChunk], dict[str, Any]]:
     base_sources = list(sources or [])
     meta: dict[str, Any] = {
-        "active": evidence_plan.active,
+        "active": bool(enabled and evidence_plan.active),
+        "feature_enabled": bool(enabled),
+        "plan_active": evidence_plan.active,
         "plan": evidence_plan_to_dict(evidence_plan),
         "mode": evidence_plan.mode,
         "reason": evidence_plan.reason,
@@ -4640,6 +4644,9 @@ async def _enforce_evidence_plan_lanes(
         "lane_reports": [],
         "support_search_mode": None,
     }
+    if not enabled:
+        meta["skipped"] = "relationship_evidence_allocation_disabled_or_ineligible"
+        return base_sources, meta
     if not evidence_plan.active:
         return base_sources, meta
 
@@ -6920,7 +6927,10 @@ class ChatOrchestrator:
             request,
             user_id=user_id,
             retrieval_query=retrieval_query,
-            llm_decompose=bool(profile_cfg.get("evidence_plan_llm_decompose")),
+            llm_decompose=bool(
+                settings.RELATIONSHIP_EVIDENCE_ALLOCATION_ENABLED
+                and profile_cfg.get("evidence_plan_llm_decompose")
+            ),
             fallback_model=model_used,
             fallback_api_base=profile_creds.get("api_base"),
             fallback_api_key=profile_creds.get("api_key"),
@@ -7128,19 +7138,57 @@ class ChatOrchestrator:
                 "coverage_uncovered_lanes": missing_lane_ids,
                 "skipped": "legacy_facet_support_pass",
             }
-            evidence_sources = coverage_sources
-            evidence_plan_meta = {
-                "active": True,
-                "mode": "query_plan_v2_integrated",
-                "plan": evidence_plan_to_dict(evidence_plan),
-                "required_lanes": required_lane_ids,
-                "covered_lanes": covered_lane_ids,
-                "missing_lanes": missing_lane_ids,
-                "lane_reports": _plan_diagnostics.get("lanes") or [],
-                "added": 0,
-                "duration_s": 0.0,
-                "skipped": "legacy_evidence_support_pass",
-            }
+            relationship_evidence_allocation = bool(
+                settings.RELATIONSHIP_EVIDENCE_ALLOCATION_ENABLED
+                and _relationship_allocation_eligible(evidence_plan)
+            )
+            if relationship_evidence_allocation:
+                evidence_plan_start = perf_counter()
+                (
+                    evidence_sources,
+                    evidence_plan_meta,
+                ) = await _enforce_evidence_plan_lanes(
+                    original_query=request.message,
+                    sources=retrieval_sources,
+                    evidence_plan=evidence_plan,
+                    corpus_ids=request.corpus_ids,
+                    retrieval_tier=getattr(
+                        retrieval, "effective_tier", request.retrieval_tier
+                    ),
+                    collections=request.collections,
+                    retrieval_k=profile_k,
+                    top_k_summary=profile_cfg["top_k_summary"],
+                    rerank_top_n=profile_cfg["rerank_top_n"],
+                    similarity_threshold=profile_cfg["similarity_threshold"],
+                    neo4j_expansion_cap=profile_cfg["neo4j_expansion_cap"],
+                    max_corpora_per_query=profile_cfg["max_corpora_per_query"],
+                    fact_seed_limit=profile_cfg["fact_seed_limit"],
+                    final_top_k=profile_cfg["final_top_k"],
+                    source_cap=profile_cfg.get("source_cap"),
+                    enabled=True,
+                )
+                evidence_plan_meta["duration_s"] = perf_counter() - evidence_plan_start
+                evidence_plan_meta["query_plan_v2"] = True
+                evidence_plan_meta["integrated_required_lanes"] = required_lane_ids
+                evidence_plan_meta["integrated_covered_lanes"] = covered_lane_ids
+            else:
+                evidence_sources = coverage_sources
+                evidence_plan_meta = {
+                    "active": True,
+                    "feature_enabled": bool(
+                        settings.RELATIONSHIP_EVIDENCE_ALLOCATION_ENABLED
+                    ),
+                    "eligible": _relationship_allocation_eligible(evidence_plan),
+                    "mode": "query_plan_v2_integrated",
+                    "plan": evidence_plan_to_dict(evidence_plan),
+                    "required_lanes": required_lane_ids,
+                    "covered_lanes": covered_lane_ids,
+                    "missing_lanes": missing_lane_ids,
+                    "lane_reports": _plan_diagnostics.get("lanes") or [],
+                    "added": 0,
+                    "duration_s": 0.0,
+                    "skipped": "relationship_evidence_allocation_disabled_or_ineligible",
+                }
         elif _retrieval_fast_path:
             if evidence_plan_llm_task is not None:
                 evidence_plan_llm_task.cancel()
@@ -7197,6 +7245,10 @@ class ChatOrchestrator:
                     refined_plan = None
                 if refined_plan is not None:
                     evidence_plan = refined_plan
+            relationship_evidence_allocation = bool(
+                settings.RELATIONSHIP_EVIDENCE_ALLOCATION_ENABLED
+                and _relationship_allocation_eligible(evidence_plan)
+            )
             shared_support_semaphore = asyncio.Semaphore(_CHAT_COVERAGE_MAX_CONCURRENCY)
             # P1.5 shelf_reserve (dark behind SHELF_RESERVE_ENABLED): resolve
             # deterministic query concept ids ONLY for corpus-scoped requests.
@@ -7256,6 +7308,7 @@ class ChatOrchestrator:
                     final_top_k=profile_cfg["final_top_k"],
                     source_cap=profile_cfg.get("source_cap"),
                     support_semaphore=shared_support_semaphore,
+                    enabled=relationship_evidence_allocation,
                 ),
             )
             coverage_meta["duration_s"] = perf_counter() - coverage_start
@@ -7350,8 +7403,14 @@ class ChatOrchestrator:
         # non-plan queries fall back to the legacy universal guard (a no-op
         # unless _CHAT_PER_DOC_CAP is configured), so ordinary answers are
         # unchanged.
-        _evidence_doc_cap = _evidence_per_doc_cap_for_plan(
-            evidence_plan, budget=len(sources)
+        relationship_evidence_allocation = bool(
+            settings.RELATIONSHIP_EVIDENCE_ALLOCATION_ENABLED
+            and _relationship_allocation_eligible(evidence_plan)
+        )
+        _evidence_doc_cap = (
+            _evidence_per_doc_cap_for_plan(evidence_plan, budget=len(sources))
+            if relationship_evidence_allocation
+            else 0
         )
         if _evidence_doc_cap > 0:
             sources = _ea_cap_chunks_per_doc(

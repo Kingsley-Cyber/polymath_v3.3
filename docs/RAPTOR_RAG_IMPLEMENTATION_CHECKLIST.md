@@ -761,6 +761,13 @@ Acceptance:
 
 - [ ] Formalize definition, procedure, enumeration, comparison, relationship,
   broad synthesis, recommendation, and decision-support policies.
+- [x] Dark-ship the existing per-side, distinct-document evidence allocator
+  behind a settings flag that defaults OFF and is eligible only for the shared
+  relationship/comparison detector. Require the original allocator assertions,
+  adjacent detector regressions, and a frozen three-tier OFF/ON evaluation with
+  relationship minimum-distinct >=75% and no direct/lay-language regression
+  before any production activation. **[COMPLETE 2026-07-16; receipt:
+  `docs/RELATIONSHIP_EVIDENCE_ALLOCATION_AB_2026-07-16.md`; default remains OFF]**
 - [ ] Allow validated summaries/themes as synthesis scaffolds for broad queries.
 - [ ] Hydrate child/parent evidence before treating a generated summary as a
   citation.

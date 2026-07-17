@@ -171,6 +171,15 @@ class Settings(BaseSettings):
             "query-guided excerpts (roadmap B2), which costs CPU not GPU."
         ),
     )
+    RELATIONSHIP_EVIDENCE_ALLOCATION_ENABLED: bool = Field(
+        default=False,
+        description=(
+            "Reserve distinct-document evidence seats per side for queries "
+            "classified by the shared query-semantics layer as relationship "
+            "or comparison. Dark-shipped OFF until the frozen three-tier "
+            "retrieval evaluation meets its quality gates."
+        ),
+    )
     RELATIONSHIP_LANE_MIN_SOURCES: int = Field(
         default=1,
         ge=1,

@@ -34,6 +34,7 @@ from services.retriever.evidence_allocation import (  # noqa: E402
     lane_alias_score,
     lane_coverage,
     per_doc_cap_for_plan,
+    relationship_allocation_eligible,
     select_lane_support,
 )
 
@@ -481,6 +482,28 @@ def test_is_curated_concept():
     assert not is_curated_concept("metacognition")
     assert not is_curated_concept("")
     assert not is_curated_concept(None)
+
+
+def test_relationship_allocation_eligibility_reuses_shared_operator_detection():
+    for query in (
+        "How should lighting and editing coordinate to preserve tension?",
+        "How do staging and camera movement work together?",
+        "How should sound, performance, and framing cooperate in a scene?",
+        "How could movement analysis inform robotics and drawing?",
+        "Compare stoicism versus buddhism.",
+    ):
+        plan = build_evidence_plan(query)
+        assert relationship_allocation_eligible(plan), (query, plan)
+
+
+def test_relationship_allocation_rejects_ordinary_multi_token_queries():
+    for query in (
+        "What does a facial action coding system measure?",
+        "How can a drawing feel less stiff?",
+        "What is natural language processing?",
+    ):
+        plan = build_evidence_plan(query)
+        assert not relationship_allocation_eligible(plan), (query, plan)
 
 
 def _run_all():

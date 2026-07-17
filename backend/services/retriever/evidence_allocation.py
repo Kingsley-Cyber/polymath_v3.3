@@ -59,6 +59,22 @@ _SEMANTIC_DOC_BONUS = 7.0
 _SEMANTIC_FLOOR_SCORE = 3  # lane score given to a doc the ingest layer says belongs to the side
 
 
+def relationship_allocation_eligible(plan: EvidencePlan | None) -> bool:
+    """Whether the shared query plan classifies this as a multi-side relation.
+
+    Eligibility deliberately reuses :mod:`query_semantics` through the
+    operators already captured on ``EvidencePlan``. It does not inspect raw
+    query wording or maintain a second detector. Both explicit relationships
+    and comparisons need independently represented sides; ordinary multi-token
+    direct/lay queries do not.
+    """
+
+    if not plan or not plan.active or len(plan.required_lanes) < 2:
+        return False
+    operators = {str(operator or "").strip().casefold() for operator in plan.operators}
+    return bool(operators & {"relationship", "comparison"})
+
+
 def lane_alias_score(text: str, lane: EvidenceLane) -> int:
     """Lightweight, metadata-free lane score from alias/term overlap.
 
