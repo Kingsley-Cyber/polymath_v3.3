@@ -403,12 +403,15 @@ def fuse_document_lanes(
             "router_version": ROUTER_VERSION,
             "seat_owner": seat_owner[key],
             "lane_scores": {
-                lane: round(score, 6)
-                for lane, score in sorted(candidate["contributions"].items())
+                lane: round(float(candidate["contributions"].get(lane, 0.0)), 6)
+                for lane in LANE_ORDER
             },
             "effective_lane_scores": {
-                lane: round(score, 6)
-                for lane, score in sorted(candidate["effective_contributions"].items())
+                lane: round(
+                    float(candidate["effective_contributions"].get(lane, 0.0)),
+                    6,
+                )
+                for lane in LANE_ORDER
             },
             "associative": associative_traces.get(key, {}),
             "divergent_profile_demoted": candidate["divergent_profile"],
@@ -577,8 +580,8 @@ class FourLaneDocumentRouter:
                 corpus_id=corpus_id,
                 doc_id=doc_id,
                 title=str(
-                    row.get("filename")
-                    or row.get("original_filename")
+                    row.get("original_filename")
+                    or row.get("filename")
                     or row.get("title")
                     or doc_profile.get("title")
                     or ""
