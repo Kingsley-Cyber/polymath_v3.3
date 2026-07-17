@@ -255,6 +255,14 @@ Decision of record:
   anchors never replace chunk evidence. Branch:
   `codex/semantic-activation-20260716` (implemented and evaluated; both
   activation families rejected, default OFF; receipt below).
+- [ ] CLAIM-ANCHOR-JOIN-V1: correct only the default-OFF atomic-claim
+  attachment join by resolving sentence-keyed claims through the durable
+  sentence-to-chunk mapping before validating selected chunk ownership.
+  Require mapped/unmapped, foreign-corpus, foreign-chunk, duplicate-mapping,
+  and additive-only tests; then a read-only six-query micro A/B with identical
+  selected chunks, exact sentence citations, and no corpus writes. This repair
+  does not authorize claim-family promotion or any retrieval/ranking change.
+  Branch: `codex/claim-anchor-join-20260717`.
 
 - **Who:** extraction/semantic-contract, graph, librarian/retrieval, and
   evaluation owners; users asking cross-domain synthesis questions. The answer
