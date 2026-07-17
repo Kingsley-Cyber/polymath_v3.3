@@ -170,6 +170,9 @@ async def test_health_uses_nearest_rank_and_records_per_workload_sample_counts()
     snapshot = await scheduler.snapshot()
     assert snapshot["wait_p95_ms"]["embed"] == 19.0
     assert snapshot["hold_p95_ms"]["embed"] == 19.0
+    assert snapshot["wait_p50_ms"]["embed"] == 10.0
+    assert snapshot["hold_p50_ms"]["embed"] == 10.0
+    assert snapshot["percentile_method"] == "nearest_rank.v1"
     assert snapshot["wait_sample_count"] == {"embed": 20, "rerank": 2}
     assert snapshot["hold_sample_count"] == {"embed": 20, "rerank": 2}
     assert snapshot["releases"] == {"embed": 20, "rerank": 2}
@@ -330,8 +333,44 @@ def test_launch_agent_renderer_defaults_dark_and_records_arbiter(tmp_path):
         "torch_fp16",
         "--torch-reranker-model",
         "torch-rerank",
+        "--embedder-model-name",
+        "Qwen3-Embedding-0.6B",
         "--embed-batch-size",
         "32",
+        "--embed-max-length",
+        "512",
+        "--embedder-request-timeout-seconds",
+        "60",
+        "--embedder-queue-timeout-seconds",
+        "30",
+        "--embedder-warmup-timeout-seconds",
+        "30",
+        "--mlx-cache-limit-gb",
+        "1.0",
+        "--reranker-cal-mu",
+        "0.2",
+        "--reranker-cal-t",
+        "0.12",
+        "--reranker-cal-version",
+        "cal.v1-provisional",
+        "--reranker-batch-size",
+        "16",
+        "--reranker-max-doc-chars",
+        "6000",
+        "--reranker-max-query-chars",
+        "2000",
+        "--reranker-request-timeout-seconds",
+        "60",
+        "--reranker-queue-timeout-seconds",
+        "5",
+        "--reranker-warm-on-startup",
+        "true",
+        "--reranker-warmup-candidate-shapes",
+        "16,24",
+        "--reranker-warmup-candidates",
+        "16",
+        "--reranker-warmup-doc-chars",
+        "768",
         "--start-embedder",
         "true",
         "--start-reranker",
@@ -367,6 +406,9 @@ def test_launch_agent_renderer_defaults_dark_and_records_arbiter(tmp_path):
     assert environment["ARBITER_HOST"] == "127.0.0.1"
     assert environment["ARBITER_MAX_EMBED_BURST"] == "1"
     assert environment["ARBITER_RERANK_HOLD_TARGET_MS"] == "500"
+    assert environment["EMBED_MAX_LENGTH"] == "512"
+    assert environment["RERANKER_CAL_VERSION"] == "cal.v1-provisional"
+    assert environment["RERANKER_MAX_DOC_CHARS"] == "6000"
     assert payload["ProgramArguments"][-1].endswith("apple_ml_services/start.sh")
 
 

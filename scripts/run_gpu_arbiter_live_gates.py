@@ -30,7 +30,6 @@ import re
 import shlex
 import signal
 import stat
-import statistics
 import subprocess
 import sys
 import threading
@@ -39,9 +38,10 @@ from typing import Any, Callable
 import urllib.error
 import urllib.request
 
-SCHEMA_VERSION = "polymath.gpu_arbiter_live_gates.v2"
+SCHEMA_VERSION = "polymath.gpu_arbiter_live_gates.v3"
 FIXTURE_VERSION = "gpu-arbiter-q1-q4-fixture.v1"
-REFUSAL_CLASSIFIER_VERSION = "gpu-arbiter-q5-refusal.v1"
+REFUSAL_CLASSIFIER_VERSION = "gpu-arbiter-q5-refusal.v2"
+PERCENTILE_METHOD_VERSION = "nearest_rank.v1"
 FROZEN_PREREG_SHA256 = (
     "8f70b1d375120862712fa4a44abad5ca7eb38eb0fbc7d3a3a86e79f4827bc110"
 )
@@ -302,6 +302,8 @@ def classify_answer(answer: str, traces: list[dict[str, Any]]) -> str:
     if _model_skipped(traces):
         return "gate_blocked"
     normalized = re.sub(r"\s+", " ", answer).strip()
+    if not normalized:
+        return "empty_answer"
     if any(pattern.search(normalized) for pattern in REFUSAL_PATTERNS):
         return "model_voiced_refusal"
     return "answered"
@@ -584,7 +586,10 @@ class LiveClient:
         effective_tier = _effective_tier(raw["traces"])
         verdict = classify_answer(raw["answer"], raw["traces"])
         technical_success = (
-            not raw["errors"] and raw["done_received"] and effective_tier == FROZEN_TIER
+            not raw["errors"]
+            and raw["done_received"]
+            and effective_tier == FROZEN_TIER
+            and bool(raw["answer"].strip())
         )
         return {
             "query_id": FROZEN_QUERY_ID,
@@ -1058,10 +1063,12 @@ def _latency_summary(
         "failed": len(errors),
         "latency_seconds": {
             "min": min(latencies) if latencies else None,
-            "p50": statistics.median(latencies) if latencies else None,
+            "p50": percentile(latencies, 0.50) if latencies else None,
             "p95": percentile(latencies, 0.95) if latencies else None,
             "max": max(latencies) if latencies else None,
         },
+        "percentile_method": PERCENTILE_METHOD_VERSION,
+        "percentile_sample_count": len(latencies),
         "errors": errors,
     }
 
@@ -1713,19 +1720,34 @@ def run_on(
 
 
 def _load_auth_token(path: Path) -> str:
-    metadata = path.lstat()
-    mode = stat.S_IMODE(metadata.st_mode)
-    if stat.S_ISLNK(metadata.st_mode):
-        raise HarnessError("auth token file may not be a symlink")
-    if not stat.S_ISREG(metadata.st_mode):
-        raise HarnessError("auth token path must be a regular file")
-    if metadata.st_uid != os.getuid():
-        raise HarnessError("auth token file must be owned by the current user")
-    if mode & 0o077:
-        raise HarnessError("auth token file must be mode 0600 or stricter")
-    if not mode & stat.S_IRUSR:
-        raise HarnessError("auth token file must be owner-readable")
-    token = path.read_text(encoding="utf-8").strip()
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+    nofollow = getattr(os, "O_NOFOLLOW", None)
+    if nofollow is None:
+        raise HarnessError("this platform cannot enforce no-follow token loading")
+    flags |= nofollow
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        raise HarnessError(
+            f"unable to securely open auth token file: {type(exc).__name__}"
+        ) from exc
+    try:
+        metadata = os.fstat(descriptor)
+        mode = stat.S_IMODE(metadata.st_mode)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise HarnessError("auth token path must be a regular file")
+        if metadata.st_uid != os.getuid():
+            raise HarnessError("auth token file must be owned by the current user")
+        if mode & 0o077:
+            raise HarnessError("auth token file must be mode 0600 or stricter")
+        if not mode & stat.S_IRUSR:
+            raise HarnessError("auth token file must be owner-readable")
+        with os.fdopen(descriptor, "r", encoding="utf-8") as handle:
+            descriptor = -1
+            token = handle.read().strip()
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
     if not token:
         raise HarnessError("auth token file is empty")
     return token

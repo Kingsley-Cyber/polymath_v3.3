@@ -271,6 +271,23 @@ def test_percentile_is_nearest_rank_and_rejects_empty_input():
         harness.percentile([], 0.95)
 
 
+def test_latency_summary_uses_one_versioned_nearest_rank_function():
+    summary = harness._latency_summary(
+        [1.0, 2.0, 100.0, 101.0],
+        [],
+        requested=4,
+    )
+    assert summary["latency_seconds"]["p50"] == 2.0
+    assert summary["latency_seconds"]["p95"] == 101.0
+    assert summary["percentile_method"] == harness.PERCENTILE_METHOD_VERSION
+    assert summary["percentile_sample_count"] == 4
+
+
+@pytest.mark.parametrize("answer", ["", " ", "\n\t"])
+def test_empty_or_whitespace_answer_cannot_classify_as_answered(answer):
+    assert harness.classify_answer(answer, []) == "empty_answer"
+
+
 def test_all_q_gates_are_green_only_for_complete_evidence():
     gates = harness.evaluate_on_gates(**_green_gate_inputs())
     assert gates["passed"] is True
@@ -340,6 +357,10 @@ def test_all_q_gates_are_green_only_for_complete_evidence():
             lambda value: value["frozen_spot"].__setitem__(
                 "verdict", "model_voiced_refusal"
             ),
+            "q5",
+        ),
+        (
+            lambda value: value["frozen_spot"].__setitem__("technical_success", False),
             "q5",
         ),
         (
@@ -578,6 +599,41 @@ def test_corpus_binding_requires_exact_id_name_selection_sha_and_15_documents():
     assert client.corpus_binding()["matches_frozen_corpus"] is False
 
 
+def test_whitespace_frozen_spot_is_technical_red_even_with_done_and_sources():
+    prereg = json.loads(harness.DEFAULT_PREREG.read_text())
+    case = next(
+        row for row in prereg["queries"] if row["id"] == harness.FROZEN_QUERY_ID
+    )
+    expected_name = case["expected_any"][0]
+    client = object.__new__(harness.LiveClient)
+    client.config = SimpleNamespace(
+        corpus_id=harness.FROZEN_CORPUS_ID,
+        prereg_path=harness.DEFAULT_PREREG,
+    )
+    client.corpus_binding = lambda: _binding()
+    client.list_documents = lambda: {"doc-1": expected_name}
+    client._run_chat_sse = lambda payload: {
+        "answer": " \n\t",
+        "sources": [
+            {
+                "doc_id": "doc-1",
+                "corpus_id": harness.FROZEN_CORPUS_ID,
+            }
+        ],
+        "traces": [
+            {
+                "title": "Local RAG retrieval",
+                "metadata": {"effective_tier": harness.FROZEN_TIER},
+            }
+        ],
+        "errors": [],
+        "done_received": True,
+    }
+    result = client.frozen_spot()
+    assert result["technical_success"] is False
+    assert result["verdict"] == "empty_answer"
+
+
 def test_exact_process_identity_rejects_substring_and_wrong_argv():
     assert harness._is_exact_arbiter_identity(
         {
@@ -715,12 +771,34 @@ def test_auth_token_file_requires_regular_owned_private_nonsymlink(
     token.chmod(0o600)
     link = tmp_path / "link"
     link.symlink_to(token)
-    with pytest.raises(harness.HarnessError, match="symlink"):
+    with pytest.raises(harness.HarnessError, match="securely open"):
         harness._load_auth_token(link)
     current_uid = os.getuid()
     monkeypatch.setattr(harness.os, "getuid", lambda: current_uid + 1)
     with pytest.raises(harness.HarnessError, match="owned"):
         harness._load_auth_token(token)
+
+
+def test_auth_token_validation_and_read_use_same_nofollow_descriptor(
+    tmp_path, monkeypatch
+):
+    token = tmp_path / "token"
+    token.write_text("safe-token\n", encoding="utf-8")
+    token.chmod(0o600)
+    real_open = os.open
+    observed = {}
+
+    def swapping_open(path, flags):
+        observed["flags"] = flags
+        descriptor = real_open(path, flags)
+        token.unlink()
+        token.write_text("replacement-token\n", encoding="utf-8")
+        token.chmod(0o600)
+        return descriptor
+
+    monkeypatch.setattr(harness.os, "open", swapping_open)
+    assert harness._load_auth_token(token) == "safe-token"
+    assert observed["flags"] & os.O_NOFOLLOW
 
 
 def test_harness_config_repr_never_contains_token(tmp_path):

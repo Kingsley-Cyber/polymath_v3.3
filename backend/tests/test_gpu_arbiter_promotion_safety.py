@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import re
 import subprocess
 import sys
 
@@ -36,7 +37,25 @@ def _environment(enabled: bool) -> dict[str, str]:
         "APPLE_RERANKER_BACKEND": "torch_fp16",
         "APPLE_TORCH_RERANKER_MODEL_ID": "jinaai/jina-reranker-v3",
         "RERANKER_SCORE_SCALE": "probability",
+        "EMBEDDER_MODEL_NAME": "Qwen3-Embedding-0.6B",
         "EMBED_BATCH_SIZE": "256",
+        "EMBED_MAX_LENGTH": "512",
+        "EMBEDDER_REQUEST_TIMEOUT_SECONDS": "60",
+        "EMBEDDER_QUEUE_TIMEOUT_SECONDS": "30",
+        "EMBEDDER_WARMUP_TIMEOUT_SECONDS": "30",
+        "MLX_CACHE_LIMIT_GB": "1.0",
+        "RERANKER_CAL_MU": "0.2",
+        "RERANKER_CAL_T": "0.12",
+        "RERANKER_CAL_VERSION": "cal.v1-provisional",
+        "RERANKER_BATCH_SIZE": "16",
+        "RERANKER_MAX_DOC_CHARS": "6000",
+        "RERANKER_MAX_QUERY_CHARS": "2000",
+        "RERANKER_REQUEST_TIMEOUT_SECONDS": "60",
+        "RERANKER_QUEUE_TIMEOUT_SECONDS": "5",
+        "RERANKER_WARM_ON_STARTUP": "true",
+        "RERANKER_WARMUP_CANDIDATE_SHAPES": "16,24",
+        "RERANKER_WARMUP_CANDIDATES": "16",
+        "RERANKER_WARMUP_DOC_CHARS": "768",
         "START_EMBEDDER": "true",
         "START_RERANKER": "true",
         "START_DOCLING": "false",
@@ -93,6 +112,34 @@ def test_manifest_requires_every_explicit_value_and_exact_process_match(tmp_path
         load_manifest(path, process_environment=mismatched)
 
 
+def test_manifest_covers_every_sidecar_computation_environment_read():
+    reads = set()
+    pattern = re.compile(r'os\.environ\.get\(\s*"([A-Z0-9_]+)"')
+    for relative in (
+        "apple_ml_services/embedder_mlx/main.py",
+        "apple_ml_services/reranker_mlx/main.py",
+    ):
+        reads.update(pattern.findall((SCRIPTS / relative).read_text()))
+    # These aliases are fallback expressions only. Their primary model-ID
+    # variables are mandatory and nonblank, so the aliases cannot affect the
+    # deployed computation.
+    inert_aliases = {"EMBED_MODEL_ID", "RERANKER_MODEL_ID"}
+    assert reads - inert_aliases <= set(REQUIRED_KEYS)
+    assert {
+        "EMBED_MAX_LENGTH",
+        "EMBEDDER_MODEL_NAME",
+        "RERANKER_BATCH_SIZE",
+        "RERANKER_MAX_DOC_CHARS",
+        "RERANKER_MAX_QUERY_CHARS",
+        "RERANKER_CAL_MU",
+        "RERANKER_CAL_T",
+        "RERANKER_CAL_VERSION",
+    } <= set(REQUIRED_KEYS)
+    renderer = (SCRIPTS / "render_apple_mlx_launch_agent.py").read_text()
+    missing_from_plist = [key for key in REQUIRED_KEYS if f'"{key}"' not in renderer]
+    assert missing_from_plist == []
+
+
 def test_setup_can_write_a_complete_private_manifest_without_implicit_installer_defaults(
     tmp_path,
 ):
@@ -134,6 +181,8 @@ def test_transaction_restores_exact_prior_plist_after_bootstrap_failure(tmp_path
     def runner(command, **kwargs):
         nonlocal bootstrap_calls
         del kwargs
+        if command[1:2] == ["print"]:
+            return _completed(command, 1)
         if command[1:2] == ["bootstrap"]:
             bootstrap_calls += 1
             if bootstrap_calls <= 5:
@@ -162,6 +211,8 @@ def test_transaction_restores_prior_plist_after_smoke_failure(tmp_path):
 
     def runner(command, **kwargs):
         del kwargs
+        if command[1:2] == ["print"]:
+            return _completed(command, 1)
         if command == ["smoke"]:
             return _completed(command, 9, stderr="smoke red")
         return _completed(command)
@@ -178,13 +229,134 @@ def test_transaction_restores_prior_plist_after_smoke_failure(tmp_path):
     assert target.read_bytes() == b"prior"
 
 
+def test_transaction_fails_loudly_when_bootout_does_not_unload_service(tmp_path):
+    target = tmp_path / "agent.plist"
+    target.write_bytes(b"prior")
+    expected = tmp_path / "expected.plist"
+    expected.write_bytes(b"new")
+
+    def runner(command, **kwargs):
+        del kwargs
+        if command[1:2] == ["bootout"]:
+            return _completed(command, 1, stderr="bootout denied")
+        if command[1:2] == ["print"]:
+            return _completed(command, 0, stdout="service remains loaded")
+        return _completed(command)
+
+    transaction = LaunchAgentTransaction(
+        target_plist=target,
+        label="com.test",
+        uid=501,
+        runner=runner,
+        sleep_fn=lambda seconds: None,
+    )
+    with pytest.raises(TransactionError, match="service state is UNKNOWN"):
+        transaction.deploy(expected, ["smoke"])
+    assert target.read_bytes() == b"prior"
+
+
+class FakeResponse:
+    def __init__(self, payload: dict):
+        self.status = 200
+        self.payload = payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def read(self):
+        return json.dumps(self.payload).encode()
+
+
+def test_off_postcondition_requires_both_disabled_health_and_closed_8085():
+    health = {
+        "http://127.0.0.1:8082/health": {"gpu_arbiter": {"enabled": False}},
+        "http://127.0.0.1:8081/health": {"gpu_arbiter": {"enabled": False}},
+    }
+
+    def urlopen(url, timeout):
+        del timeout
+        return FakeResponse(health[url])
+
+    def absent(address, timeout):
+        del address, timeout
+        raise ConnectionRefusedError
+
+    runner = PromotionRunner(
+        runner=lambda command, **kwargs: _completed(command),
+        urlopen=urlopen,
+        create_connection=absent,
+        uid=501,
+    )
+    assert runner._verify_off_postcondition() == {
+        "embed_arbiter_disabled": True,
+        "rerank_arbiter_disabled": True,
+        "arbiter_8085_absent": True,
+    }
+    health["http://127.0.0.1:8081/health"]["gpu_arbiter"]["enabled"] = True
+    with pytest.raises(PromotionError, match="OFF postcondition failed"):
+        runner._verify_off_postcondition()
+
+
+def test_emergency_bootout_checks_command_and_loaded_state():
+    def absent(address, timeout):
+        del address, timeout
+        raise ConnectionRefusedError
+
+    def still_loaded(command, **kwargs):
+        del kwargs
+        if command[1] == "bootout":
+            return _completed(command, 1, stderr="denied")
+        return _completed(command, 0, stdout="still loaded")
+
+    runner = PromotionRunner(
+        runner=still_loaded,
+        create_connection=absent,
+        uid=501,
+    )
+    with pytest.raises(PromotionError, match="did not unload"):
+        runner._bootout()
+
+    def already_absent(command, **kwargs):
+        del kwargs
+        return _completed(command, 1)
+
+    PromotionRunner(
+        runner=already_absent,
+        create_connection=absent,
+        uid=501,
+    )._bootout()
+
+    class OpenConnection:
+        def close(self):
+            pass
+
+    runner = PromotionRunner(
+        runner=already_absent,
+        create_connection=lambda *args, **kwargs: OpenConnection(),
+        uid=501,
+    )
+    with pytest.raises(PromotionError, match="still listening"):
+        runner._bootout()
+
+
 class FakePromotion(PromotionRunner):
-    def __init__(self, *, verdict: str, rollback_fails: bool = False):
+    def __init__(
+        self,
+        *,
+        verdict: str,
+        rollback_fails: bool = False,
+        off_proof_fails: bool = False,
+    ):
         super().__init__(runner=lambda *args, **kwargs: _completed(args[0]), uid=501)
         self.verdict = verdict
         self.rollback_fails = rollback_fails
+        self.off_proof_fails = off_proof_fails
         self.installs: list[str] = []
         self.bootouts = 0
+        self.off_proofs = 0
 
     def _install(self, manifest_path, values):
         del values
@@ -195,6 +367,16 @@ class FakePromotion(PromotionRunner):
 
     def _bootout(self):
         self.bootouts += 1
+
+    def _verify_off_postcondition(self):
+        self.off_proofs += 1
+        if self.off_proof_fails and self.off_proofs > 1:
+            raise PromotionError("synthetic OFF proof failure")
+        return {
+            "embed_arbiter_disabled": True,
+            "rerank_arbiter_disabled": True,
+            "arbiter_8085_absent": True,
+        }
 
     def _run(self, command, *, environment=None):
         del environment
@@ -215,8 +397,7 @@ class FakePromotion(PromotionRunner):
 @pytest.mark.parametrize("verdict", ["red", "interrupt"])
 def test_promotion_red_or_interrupt_automatically_reinstalls_off(tmp_path, verdict):
     runner = FakePromotion(verdict=verdict)
-    exception = KeyboardInterrupt if verdict == "interrupt" else PromotionError
-    with pytest.raises(exception):
+    with pytest.raises(PromotionError, match="postcondition VERIFIED"):
         runner.execute(
             off_manifest_path=_manifest(tmp_path, False),
             on_manifest_path=_manifest(tmp_path, True),
@@ -226,11 +407,12 @@ def test_promotion_red_or_interrupt_automatically_reinstalls_off(tmp_path, verdi
         )
     assert runner.installs == ["off", "on", "off"]
     assert runner.bootouts == 0
+    assert runner.off_proofs == 2
 
 
 def test_promotion_boots_out_service_if_off_rollback_itself_fails(tmp_path):
     runner = FakePromotion(verdict="red", rollback_fails=True)
-    with pytest.raises(PromotionError):
+    with pytest.raises(PromotionError, match="was NOT proven"):
         runner.execute(
             off_manifest_path=_manifest(tmp_path, False),
             on_manifest_path=_manifest(tmp_path, True),
@@ -239,6 +421,20 @@ def test_promotion_boots_out_service_if_off_rollback_itself_fails(tmp_path):
             output_dir=tmp_path / "outputs",
         )
     assert runner.installs == ["off", "on", "off"]
+    assert runner.bootouts == 1
+
+
+def test_promotion_never_claims_restored_when_off_postcondition_is_red(tmp_path):
+    runner = FakePromotion(verdict="red", off_proof_fails=True)
+    with pytest.raises(PromotionError, match="OFF restoration was NOT proven") as exc:
+        runner.execute(
+            off_manifest_path=_manifest(tmp_path, False),
+            on_manifest_path=_manifest(tmp_path, True),
+            corpus_id="corpus",
+            auth_token_file=tmp_path / "token",
+            output_dir=tmp_path / "outputs",
+        )
+    assert "postcondition VERIFIED" not in str(exc.value)
     assert runner.bootouts == 1
 
 
@@ -254,6 +450,7 @@ def test_promotion_green_is_only_path_that_leaves_on(tmp_path):
     assert payload["gates"]["passed"] is True
     assert runner.installs == ["off", "on"]
     assert runner.bootouts == 0
+    assert runner.off_proofs == 1
 
 
 def test_installer_requires_manifest_and_transactional_deploy():
@@ -263,3 +460,6 @@ def test_installer_requires_manifest_and_transactional_deploy():
     assert "--check-process-environment" in installer
     assert "apple_mlx_launch_agent_transaction.py" in installer
     assert "launchctl bootstrap" not in installer
+    setup = (SCRIPTS / "setup_apple_mlx.sh").read_text()
+    assert 'test "$RERANKER_SCORE_SCALE" = "probability"' in setup
+    assert 'test "$RERANKER_SCORE_SCALE" = "cosine"' not in setup

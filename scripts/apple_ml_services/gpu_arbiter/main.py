@@ -19,6 +19,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 WorkloadClass = Literal["embed", "rerank"]
+PERCENTILE_METHOD_VERSION = "nearest_rank.v1"
 
 
 class AcquireRequest(BaseModel):
@@ -254,10 +255,19 @@ class PriorityLeaseScheduler:
                     key: self._percentile(values, 0.95)
                     for key, values in self._wait_ms.items()
                 },
+                "wait_p50_ms": {
+                    key: self._percentile(values, 0.50)
+                    for key, values in self._wait_ms.items()
+                },
                 "hold_p95_ms": {
                     key: self._percentile(values, 0.95)
                     for key, values in self._hold_ms.items()
                 },
+                "hold_p50_ms": {
+                    key: self._percentile(values, 0.50)
+                    for key, values in self._hold_ms.items()
+                },
+                "percentile_method": PERCENTILE_METHOD_VERSION,
                 "policy": {
                     "max_embed_burst": self.max_embed_burst,
                     "rerank_starvation_seconds": self.rerank_starvation_seconds,

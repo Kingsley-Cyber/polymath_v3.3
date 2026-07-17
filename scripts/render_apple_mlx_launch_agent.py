@@ -29,13 +29,29 @@ def build_plist(args: argparse.Namespace) -> dict:
             args.arbiter_rerank_starvation_seconds
         ),
         "ARBITER_STALE_LEASE_SECONDS": str(args.arbiter_stale_lease_seconds),
+        "EMBEDDER_MODEL_NAME": args.embedder_model_name,
         "EMBED_BATCH_SIZE": str(args.embed_batch_size),
+        "EMBED_MAX_LENGTH": str(args.embed_max_length),
+        "EMBEDDER_REQUEST_TIMEOUT_SECONDS": str(args.embedder_request_timeout_seconds),
+        "EMBEDDER_QUEUE_TIMEOUT_SECONDS": str(args.embedder_queue_timeout_seconds),
+        "EMBEDDER_WARMUP_TIMEOUT_SECONDS": str(args.embedder_warmup_timeout_seconds),
         "HF_HOME": str(Path(args.runtime_root) / "volumes" / "hf-cache"),
         "HF_HUB_CACHE": str(Path(args.runtime_root) / "volumes" / "hf-cache" / "hub"),
         "POLYMATH_DOCKER_DATA_ROOT": args.runtime_root,
+        "MLX_CACHE_LIMIT_GB": str(args.mlx_cache_limit_gb),
+        "RERANKER_CAL_MU": str(args.reranker_cal_mu),
+        "RERANKER_CAL_T": str(args.reranker_cal_t),
+        "RERANKER_CAL_VERSION": args.reranker_cal_version,
+        "RERANKER_BATCH_SIZE": str(args.reranker_batch_size),
+        "RERANKER_MAX_DOC_CHARS": str(args.reranker_max_doc_chars),
+        "RERANKER_MAX_QUERY_CHARS": str(args.reranker_max_query_chars),
+        "RERANKER_REQUEST_TIMEOUT_SECONDS": str(args.reranker_request_timeout_seconds),
+        "RERANKER_QUEUE_TIMEOUT_SECONDS": str(args.reranker_queue_timeout_seconds),
         "RERANKER_SCORE_SCALE": args.reranker_score_scale,
-        "RERANKER_WARM_ON_STARTUP": "true",
-        "RERANKER_WARMUP_CANDIDATE_SHAPES": "16,24",
+        "RERANKER_WARM_ON_STARTUP": args.reranker_warm_on_startup,
+        "RERANKER_WARMUP_CANDIDATE_SHAPES": args.reranker_warmup_candidate_shapes,
+        "RERANKER_WARMUP_CANDIDATES": str(args.reranker_warmup_candidates),
+        "RERANKER_WARMUP_DOC_CHARS": str(args.reranker_warmup_doc_chars),
         "START_DOCLING": args.start_docling,
         "START_EMBEDDER": args.start_embedder,
         "START_RERANKER": args.start_reranker,
@@ -63,7 +79,25 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--reranker-model", required=True)
     parser.add_argument("--reranker-backend", required=True)
     parser.add_argument("--torch-reranker-model", required=True)
+    parser.add_argument("--embedder-model-name", required=True)
     parser.add_argument("--embed-batch-size", required=True, type=int)
+    parser.add_argument("--embed-max-length", required=True, type=int)
+    parser.add_argument("--embedder-request-timeout-seconds", required=True, type=float)
+    parser.add_argument("--embedder-queue-timeout-seconds", required=True, type=float)
+    parser.add_argument("--embedder-warmup-timeout-seconds", required=True, type=float)
+    parser.add_argument("--mlx-cache-limit-gb", required=True, type=float)
+    parser.add_argument("--reranker-cal-mu", required=True, type=float)
+    parser.add_argument("--reranker-cal-t", required=True, type=float)
+    parser.add_argument("--reranker-cal-version", required=True)
+    parser.add_argument("--reranker-batch-size", required=True, type=int)
+    parser.add_argument("--reranker-max-doc-chars", required=True, type=int)
+    parser.add_argument("--reranker-max-query-chars", required=True, type=int)
+    parser.add_argument("--reranker-request-timeout-seconds", required=True, type=float)
+    parser.add_argument("--reranker-queue-timeout-seconds", required=True, type=float)
+    parser.add_argument("--reranker-warm-on-startup", required=True)
+    parser.add_argument("--reranker-warmup-candidate-shapes", required=True)
+    parser.add_argument("--reranker-warmup-candidates", required=True, type=int)
+    parser.add_argument("--reranker-warmup-doc-chars", required=True, type=int)
     parser.add_argument("--start-embedder", required=True)
     parser.add_argument("--start-reranker", required=True)
     parser.add_argument("--start-docling", required=True)

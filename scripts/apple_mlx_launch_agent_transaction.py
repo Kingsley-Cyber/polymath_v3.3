@@ -90,7 +90,17 @@ class LaunchAgentTransaction:
             temporary.unlink(missing_ok=True)
 
     def _bootout(self) -> None:
-        self._run(["launchctl", "bootout", self.service])
+        result = self._run(["launchctl", "bootout", self.service])
+        verification = self._run(["launchctl", "print", self.service])
+        if verification.returncode == 0:
+            detail = (result.stderr or result.stdout or "")[-500:]
+            raise TransactionError(
+                f"launchctl bootout did not unload {self.service}: {detail}"
+            )
+        # A non-zero bootout is acceptable only because the independent print
+        # verification above proves the service was already absent.
+        if result.returncode != 0:
+            return
 
     def _bootstrap(self) -> None:
         last_error = ""
@@ -141,10 +151,18 @@ class LaunchAgentTransaction:
             try:
                 self._restore(backup)
             except BaseException as rollback_error:
-                self._bootout()
+                try:
+                    self._bootout()
+                except BaseException as emergency_error:
+                    raise TransactionError(
+                        f"deployment failed ({deploy_error}); rollback failed "
+                        f"({rollback_error}); emergency bootout failed "
+                        f"({emergency_error}); service state is UNKNOWN"
+                    ) from emergency_error
                 raise TransactionError(
                     f"deployment failed ({deploy_error}); rollback failed "
-                    f"({rollback_error}); service was booted out"
+                    f"({rollback_error}); prior plist was NOT restored; "
+                    "service absence was verified"
                 ) from rollback_error
             raise TransactionError(
                 f"deployment failed and prior plist was restored: {deploy_error}"

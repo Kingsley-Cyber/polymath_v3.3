@@ -8,9 +8,11 @@ import json
 import os
 from pathlib import Path
 import signal
+import socket
 import subprocess
 import sys
 from typing import Callable
+import urllib.request
 
 from apple_mlx_env_manifest import REQUIRED_KEYS, load_manifest
 
@@ -29,9 +31,13 @@ class PromotionRunner:
         self,
         *,
         runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+        urlopen: Callable = urllib.request.urlopen,
+        create_connection: Callable = socket.create_connection,
         uid: int | None = None,
     ) -> None:
         self.runner = runner
+        self.urlopen = urlopen
+        self.create_connection = create_connection
         self.uid = os.getuid() if uid is None else uid
 
     def _run(
@@ -57,13 +63,71 @@ class PromotionRunner:
             raise PromotionError(f"Apple ML install failed: {detail}")
 
     def _bootout(self) -> None:
-        self._run(
+        result = self._run(
             [
                 "launchctl",
                 "bootout",
                 f"gui/{self.uid}/{LAUNCH_AGENT}",
             ]
         )
+        verification = self._run(
+            [
+                "launchctl",
+                "print",
+                f"gui/{self.uid}/{LAUNCH_AGENT}",
+            ]
+        )
+        if verification.returncode == 0:
+            detail = (result.stderr or result.stdout or "")[-1000:]
+            raise PromotionError(
+                f"emergency launchctl bootout did not unload the service: {detail}"
+            )
+        # A non-zero bootout means "already absent" only after the independent
+        # launchctl print check above returned non-zero.
+        port_absent = self._arbiter_port_absent()
+        if not port_absent:
+            raise PromotionError(
+                "emergency launchctl bootout completed but :8085 is still listening"
+            )
+        if result.returncode != 0:
+            return
+
+    def _arbiter_port_absent(self) -> bool:
+        try:
+            connection = self.create_connection(("127.0.0.1", 8085), timeout=2.0)
+        except ConnectionRefusedError:
+            return True
+        except OSError as exc:
+            raise PromotionError(
+                f"could not prove :8085 absence: {type(exc).__name__}"
+            ) from exc
+        connection.close()
+        return False
+
+    def _health_json(self, url: str) -> dict:
+        with self.urlopen(url, timeout=5.0) as response:
+            if response.status != 200:
+                raise PromotionError(f"OFF postcondition health HTTP {response.status}")
+            return json.loads(response.read().decode("utf-8"))
+
+    def _verify_off_postcondition(self) -> dict:
+        embed = self._health_json("http://127.0.0.1:8082/health")
+        rerank = self._health_json("http://127.0.0.1:8081/health")
+        embed_disabled = (embed.get("gpu_arbiter") or {}).get("enabled") is False
+        rerank_disabled = (rerank.get("gpu_arbiter") or {}).get("enabled") is False
+        arbiter_absent = self._arbiter_port_absent()
+        if not embed_disabled or not rerank_disabled or not arbiter_absent:
+            raise PromotionError(
+                "OFF postcondition failed: "
+                f"embed_disabled={embed_disabled} "
+                f"rerank_disabled={rerank_disabled} "
+                f"arbiter_absent={arbiter_absent}"
+            )
+        return {
+            "embed_arbiter_disabled": True,
+            "rerank_arbiter_disabled": True,
+            "arbiter_8085_absent": True,
+        }
 
     def execute(
         self,
@@ -88,9 +152,12 @@ class PromotionRunner:
         output_dir.mkdir(parents=True, exist_ok=True)
         off_artifact = output_dir / "gpu_arbiter_off.json"
         on_artifact = output_dir / "gpu_arbiter_on.json"
-        on_may_be_active = False
+        off_artifact.unlink(missing_ok=True)
+        on_artifact.unlink(missing_ok=True)
+        runtime_requires_off_proof = True
         try:
             self._install(off_manifest_path, off)
+            self._verify_off_postcondition()
             capture = self._run(
                 [
                     sys.executable,
@@ -108,7 +175,6 @@ class PromotionRunner:
                 raise PromotionError(
                     f"OFF capture was RED: {(capture.stderr or capture.stdout)[-1000:]}"
                 )
-            on_may_be_active = True
             self._install(on_manifest_path, on)
             run = self._run(
                 [
@@ -138,14 +204,29 @@ class PromotionRunner:
                     f"ON gates were RED: {(run.stderr or run.stdout)[-1000:]}"
                 )
             return payload
-        except BaseException:
-            if on_may_be_active:
+        except BaseException as promotion_error:
+            if runtime_requires_off_proof:
                 try:
                     self._install(off_manifest_path, off)
-                except BaseException:
-                    # The wrapper's final invariant is stronger than availability:
-                    # it cannot exit a RED path with the ON LaunchAgent running.
-                    self._bootout()
+                    rollback_proof = self._verify_off_postcondition()
+                except BaseException as rollback_error:
+                    try:
+                        self._bootout()
+                    except BaseException as emergency_error:
+                        raise PromotionError(
+                            f"promotion failed ({promotion_error}); OFF restoration "
+                            f"was NOT proven ({rollback_error}); emergency bootout "
+                            f"also failed ({emergency_error}); runtime state is UNKNOWN"
+                        ) from emergency_error
+                    raise PromotionError(
+                        f"promotion failed ({promotion_error}); OFF restoration "
+                        f"was NOT proven ({rollback_error}); emergency service "
+                        "absence was verified"
+                    ) from rollback_error
+                raise PromotionError(
+                    f"promotion failed ({promotion_error}); OFF rollback "
+                    f"postcondition VERIFIED {rollback_proof}"
+                ) from promotion_error
             raise
 
 
