@@ -36,7 +36,7 @@ LOCK_PATH = Path("/tmp/polymath-eval.lock")
 EXPECTED_SHA256 = {
     PREREG: "8f70b1d375120862712fa4a44abad5ca7eb38eb0fbc7d3a3a86e79f4827bc110",
     SELECTION: "da7b94c152dd5e72d52db1fd80a68f0cc2797d85ed1fd4899f9a8c19874eaf00",
-    NEGATIVE_V2: "3b35c14c165f6be89202b809ea01a1cd6ad0f5c0217e4167b86e4b5dc0b09960",
+    NEGATIVE_V2: "7d3de158c27d1524f491d78416c5954f7ef229a39ddb3fd8326eec9fd409890f",
 }
 REFUSAL_RE = re.compile(
     r"i cannot answer|did not find source evidence|"

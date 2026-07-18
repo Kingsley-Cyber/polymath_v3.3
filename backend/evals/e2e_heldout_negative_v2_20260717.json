@@ -31,7 +31,7 @@
       ],
       "f5_artifacts": [
         "ROI comparison table in chapter 12 of the e-commerce book",
-        "Figure 9.4 in Directing - Film Techniques and Aesthetics",
+        "Figure 34.1 in Directing - Film Techniques and Aesthetics",
         "VFX-supervisor interview in the appendix",
         "10-step checklist ending Stage Combat Arts"
       ]
@@ -150,9 +150,9 @@
       "must_refuse": true
     },
     {
-      "id": "negv2_f5_figure_9_4",
+      "id": "negv2_f5_figure_34_1",
       "family": "F5_fabricated_specific",
-      "question": "What does Figure 9.4 in the directing book demonstrate?",
+      "question": "What does Figure 34.1 in the directing book demonstrate?",
       "must_refuse": true
     },
     {

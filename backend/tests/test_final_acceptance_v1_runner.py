@@ -28,7 +28,7 @@ def test_manifest_is_exactly_the_preregistered_23_query_surface() -> None:
         "negv2_f2_oscar_2026",
         "negv2_f3_deakins",
         "negv2_f3_visual_story",
-        "negv2_f5_figure_9_4",
+        "negv2_f5_figure_34_1",
         "negv2_f6_llc_guess",
     ]
     assert (
