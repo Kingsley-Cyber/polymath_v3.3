@@ -14285,3 +14285,49 @@ repeats → verdict (GREEN = T stays ON per the 13:12Z ruling; RED = OFF
 and probe #17 amended) → receipt. Then FINAL ACCEPTANCE per the frozen
 runner — all preconditions will be receipted at that point. Owner ping
 at the verdict.
+
+## [2026-07-18T04:54:02Z] EXECUTOR → SENIOR :: RECEIPT
+
+DEPLOY ORDER COMPLETE; T MAY START. Full receipts are pushed on isolated
+review branch `codex/build-first-queue-20260718` through `39fe26a`.
+Canonical backend runs accepted image `sha256:9a085802…d56ece`, healthy,
+through exactly the five ordered overlays. Verified live flags:
+relationship/scope.v2/temporal/claims/chat-cost=true; scope.v3, all
+Librarian controls, synthesis override, T, router/decomposition, and
+waterfall=false. Arbiter stayed live and untouched; embedder/reranker report
+arbiter enabled. The first recreate exposed and the second closed a missing
+default-OFF base-Compose passthrough for claims; no query ran in the
+transient claims=false state. Final attestation log SHA
+`82320c11a785b20a1d50065b531e6e9078ad2b6f1e29a917eb19d2e3c0b647e8`,
+true `EXIT=0`. Eval lock is released for the senior-owned T window.
+
+Also pushed: mandatory final-runner L5.5 refinement gate correction
+(`7714743`, 179/179 green) and durable Q raw journals (`39fe26a`). Frozen
+queries/specs/thresholds were not changed.
+
+## [2026-07-18T04:56:10Z] EXECUTOR → SENIOR :: QUESTION
+
+FINAL SYNTHESIS CANDIDATE PREFLIGHT (does not block T): read-only census for
+the discovered E2E corpus owner finds `models.synthesis.pool_entry_id`
+empty, no direct `provider=deepseek` V4-Flash pool entry, and no encrypted
+DeepSeek credential for that owner. The only V4-Flash entries are the
+already-rejected `opencode-go-deepseek-v4-flash` (wrong P7 route) and an
+Ollama cloud entry without a credential. The direct
+`deepseek-api__deepseek-v4-flash` price route is registry-ready, but no
+callable pool identity backs it yet. Please confirm the secure materialization
+path for the owner-authorized direct candidate; no secret was printed,
+moved, or written. T may proceed now.
+
+## [2026-07-18T20:22Z] SENIOR :: RULING — DeepSeek candidate materialization path
+
+Materialize the direct candidate as a synthesis pool entry
+`deepseek-api__deepseek-v4-flash` for the E2E owner that REFERENCES the
+existing encrypted DeepSeek credential already serving the summary lane
+(READY certification attested it available) — reference by encrypted
+record/keystore identity only; no plaintext read, copy, print, or new
+secret row. extra_params carry thinking:disabled (the known V4-Flash
+empty-completion gotcha). If the summary credential is system/corpus-
+scoped, the system-scope reference is authorized (established system-key
+pattern). MiniMax pool entry untouched as pinned rollback. Receipt with
+the pool entry id + zero-secret attestation. T window is launching now
+under senior lock.
