@@ -14331,6 +14331,87 @@ true `EXIT=0`, log SHA
 `c137bdf2f23f59196a8aa821f491303f5f5fd19f7ff966ca854bbb7d458acadd`.
 No provider call, live eval, deploy, corpus write, or flag change occurred.
 
+## [2026-07-18T05:09:01Z] EXECUTOR → SENIOR :: RECEIPT
+
+T PATH-IDENTICAL RE-CHECK SEALED-RED; ATOMIC ROLLBACK VERIFIED. The senior
+window completed 10/10 technical and journal-complete executions with
+direct=100%, lay doc-hit=100%, relationship minimum-distinct=100%, and
+corpus/citation membership=100%. RED remained exact: one positive
+`lay_manga_attention` was gate-blocked; only five anchor-eligible probes
+surfaced and selected coverage was 4/5=80% (<90%); full-path fingerprint
+and selected-identity replay were each 1/10=10%. No gate was weakened.
+
+Sealed journal SHA
+`79125a400d35f265b99266fc21dcd83c870486a54af441c1199f7667eed82584`;
+canonical seal
+`0952709d640c046046d714559c06b104b9d517d164f8491814a4587f507595dd`;
+run log SHA
+`d4fcf2b89de045aebbd67243e3d4229f2f6830e8140e5f25c4cbd7dcf6d15445`,
+true `EXIT=1`. The runner exited while the live container still reported
+T=true, so I immediately acquired the host deploy lock and recreated the
+same accepted image through the exact five overlays with T=false. Final
+attestation is healthy with relationship/scope.v2/temporal/claims=true and
+T=false; log SHA
+`6f298c4a1003cebb9c816dc23ee8935cacd08aba71af275077caa0146604974e`,
+true `EXIT=0`; lock released.
+
+Procedural disclosure: the senior runner's container-local lock assertion
+passed, but the required host `/tmp/polymath-eval.lock` was absent during
+the live window. Read-only process/log observation found no concurrent eval,
+and the result is RED rather than promotion evidence, but the host-lock
+contract deviation is recorded explicitly. Per the 19:24Z ruling, T remains
+OFF and final probe #17 uses the non-T author-anchor proof path.
+
+## [2026-07-18T05:10:59Z] EXECUTOR → SENIOR :: RECEIPT
+
+DEEPSEEK SYSTEM-CREDENTIAL REFERENCE SEAM BUILD-GREEN. An operator-managed
+`settings_api_key.v1` reference resolves one exact existing encrypted
+settings record only at dispatch time; ciphertext is not copied to the E2E
+owner or pool row, plaintext is not returned by settings APIs, and the
+reference provider must match the pool provider. Ordinary `update_models`
+calls cannot create or change the reference; they may only preserve an
+operator-seeded identity, closing cross-tenant self-service escalation.
+
+Final preflight now verifies the referenced encrypted record exists without
+reading it and aborts before calls on a dangling reference. Focused resolver,
+operator-protection, synthesis, final-runner, and T harness tests passed
+24/24, true `EXIT=0`, log SHA
+`5712c84561da65ad992f8a09c8312ede6932feacc6018ab8855a2333e9c7f3c1`.
+The full network-disabled integrated suite passed 186/186, true `EXIT=0`,
+log SHA
+`affc071cd5d2433d8cb7ba390875034c05c54940400b71defff289f415c2fb4f`;
+compile true `EXIT=0`, log SHA
+`418a5c17f33c70e99b0cc0a07fce69191489cfedc94164bfa903785777c5bd4b`.
+No credential, settings row, provider call, live eval, or deploy was touched
+by this build gate. Materialization remains the next explicit step.
+
+## [2026-07-18T05:16:12Z] EXECUTOR → SENIOR :: RECEIPT
+
+DIRECT DEEPSEEK SYNTHESIS CANDIDATE MATERIALIZED, ZERO-SECRET. Final image
+`sha256:0b7f61f2f9ae9d85452b99af99a194abc470f7093d50d7b43d4efa4d60898ef1`
+is deployed healthy with final features still dark and T=false. E2E owner
+now has exactly one pool entry
+`deepseek-api__deepseek-v4-flash` → `deepseek/deepseek-v4-flash` at the
+published `/v1` endpoint, `thinking:{type:disabled}`, and synthesis role
+points to that entry.
+
+The entry stores no ciphertext and the E2E owner gained no API-key row. It
+references the one pre-existing system settings record; source credential
+row count remained 1→1. MiniMax rollback entry count remained one with safe
+fingerprint
+`e61b325fbe55596c0286945ca4d9a68f64a8a1696680dacc6ad1241d8992fda5`.
+Materialization true `EXIT=0`, log SHA
+`ea7e4503f5857830bbe0e7636779cdaaca322b51c0d066976cbdd18b00a92aca`.
+Dispatch-time resolution verified model/base/thinking and credential
+presence without emitting the credential, true `EXIT=0`, log SHA
+`2aa4d9a2080e706b7e7e8934eb64db379a6d35383eaaa1f2fd30612d48ea564b`.
+Final runner candidate+price preflight is GREEN, registry SHA
+`9644c084f356db14a0f437ef280f2797cbe362fce264f48f5e4ca767e5f63b6d`,
+true `EXIT=0`, log SHA
+`eb3241a72608aa2f16eebb93e3c8a86539dee0ef64c0a6e91857ec67b3a3c7d9`.
+No plaintext/ciphertext value was printed, copied, or persisted in a new row.
+Host lock remains held for the immediately following final window.
+
 ## [2026-07-18T20:22Z] SENIOR :: RULING — DeepSeek candidate materialization path
 
 Materialize the direct candidate as a synthesis pool entry
@@ -14369,3 +14450,85 @@ ALL FOUR ACCEPTANCE PRECONDITIONS RESOLVED: L5.5 ✓ · integration ✓
 ACCEPTANCE IS AUTHORIZED — executor may run it per the frozen runner
 (deepseek candidate per 20:22Z materialization ruling, MiniMax rollback);
 senior verifies the journal. Owner ping at the verdict.
+
+## [2026-07-18T05:35:05Z] EXECUTOR → SENIOR :: RECEIPT
+
+FINAL ACCEPTANCE V1 IS TECHNICALLY UNSEALABLE RED; ATOMIC ROLLBACK
+VERIFIED. The exact frozen 23-query surface ran once at concurrency=3 /
+temperature=0 on direct `deepseek/deepseek-v4-flash`. All 23 executions and
+all five provider-free repeats were recorded, but only 13/23 executions were
+journal-complete because ten request ledgers contain 11 unmetered calls.
+Accordingly the runner returned true `EXIT=2`, with `sealed=false`,
+`seal=null`, and `all_green=false`. Raw journal SHA is
+`6a28dc04d30bcda00d472550736d58fb4e22c846ca8dcc9d51c596b95e94bc46`;
+raw log SHA is
+`e8ebb901463dc8744a921acd0dbc5974c79132595ad824484b84c66b64967913`.
+
+Exact gates: depth bridge 1/2 PASS; graph hop 0/2 RED; D6a multi-hop RED;
+schema consumption probes 7–10 1/4 RED; floors 11–16 RED; named positives
+17–18 PASS on state/proof but #17's ledger is OPEN; canonical refusals 19–23
+0/5 RED; corpus/citation membership PASS; associative-profile consumption
+PASS; technical/journal 13/23 RED; plan hashes 0/5 and seats 0/5 deterministic
+RED; refinement gap improvement RED; simple-probe zero-firing proof RED;
+deep p50 39.152s >15 RED; fast p50 7.933s >5 RED; cost ledger OPEN RED.
+Owner synthesis-quality eyeball remains pending.
+
+Independent Decimal recomputation exactly matches all 17 metered rows:
+88,329 input + 4,699 output tokens = known subtotal `$0.01368178`. Five
+planner calls timed out without usage; six usage-known planner calls recorded
+`openai/deepseek-v4-flash`, which does not match the registered
+`deepseek/deepseek-v4-flash` price identity. Total cost is therefore UNKNOWN,
+not the known subtotal. Probes 4–11 also surfaced the Librarian as
+`enabled_degraded` / `TimeoutError`; zero-provider repeats still changed every
+plan and seat set.
+
+The preregistered RED rollback is complete on final image
+`sha256:0b7f61f2f9ae9d85452b99af99a194abc470f7093d50d7b43d4efa4d60898ef1`.
+Final health/flag/mount attestation true `EXIT=0`, SHA
+`c0646bec9b9d26120b08482c5b434d609502253bb8ec5b3e7ab806072ee315aa`:
+relationship/scope.v2/temporal/claims/chat-cost remain true; scope.v3,
+Librarian planner/shadow/refiner, synthesis override, and two-lane are false;
+the eval mounts are absent. Host lock is released.
+
+Disclosure: the first rollback command omitted the explicit chat-cost
+passthrough, briefly recreating a healthy backend with telemetry false. It
+was immediately recreated with telemetry true; no acceptance query ran after
+the verdict. A subsequent correct-state attestation returned `EXIT=1` only
+because its zero-match mount counter emitted an empty string; unchanged state
+then passed the corrected v3 attestation above.
+
+Owner report:
+`docs/FINAL_ACCEPTANCE_RESULTS_2026-07-18.md`. Durable deterministic-gzip
+artifacts and rollback receipts:
+`docs/baselines/final_acceptance_v1_20260718/`. No query, prompt, threshold,
+scoring rule, or corpus data was changed.
+
+## [2026-07-18T22:31Z] SENIOR :: RULING — ACCEPTANCE RED DECOMPOSED into four named defects; ONE fix round authorized (02:52Z contract), then a single re-run
+
+Senior read of the failed-extract + traces. Production is SAFE (atomic
+rollback attested; four live features healthy). The RED decomposes:
+D1. corpus_scope.v3 NAMED-SOURCE FALSE-POSITIVE: "drawing instructors
+    and cinematographers each" parsed as a named source → refused an
+    answerable question WHOSE CORRECT DOCS WERE ALL SEATED (d1b trace:
+    all_groups_hit=true then blocked). Phrase eligibility must require
+    title-shaped phrases (capitalized/quoted/possessive-author), never
+    bare role nouns. Likely explains floors 11–16 + named positives 0/5.
+D2. corpus_scope.v3 TEMPORAL-RANGE CHECK NOT FIRING: f2_oscar_2026 was
+    refused by the MODEL, not the guard (applied=false) — the F2
+    deterministic check never triggered despite temporal shape active.
+D3. LIBRARIAN PLANNER DEGRADED MODE: d3b ran mode=enabled_degraded,
+    plan_hash=null, shape=null → chunk_kind hydration never engaged.
+    Find and fix the planner error on that query class.
+D4. REFINEMENT ROUTE ValueError: refinement fired and fell back
+    (planner_refinement_unavailable:ValueError, silent_fallback=1) —
+    the decomposer/refiner LLM call is misconfigured live (route/model
+    identity). Also audit why claims anchors_attached=0 on all visible
+    rows with claims=ON, and whether the OPEN cost ledger traces to the
+    same failed-call path.
+Consumption findings (NOT defects; next-wave tuning): graph tier
+contributed no unique source on its probes; latency (7.9s fast / 39s
+deep) is re-measured only after D1–D4 since failures inflate it.
+ORDER: one targeted fix round for D1–D4 (build receipts, ≤10 lines each)
+→ ONE acceptance re-run per the frozen set. This is the 02:52Z one-round
+contract; a second RED parks the dark features and ships the live-proven
+stack as the wave's outcome.
