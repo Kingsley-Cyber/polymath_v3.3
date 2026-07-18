@@ -27,7 +27,11 @@ from apple_mlx_launch_agent_transaction import (  # noqa: E402
     TransactionError,
 )
 from apple_mlx_launchctl import service_absence_proven  # noqa: E402
-from run_gpu_arbiter_promotion import PromotionError, PromotionRunner  # noqa: E402
+from run_gpu_arbiter_promotion import (  # noqa: E402
+    LAUNCH_AGENT,
+    PromotionError,
+    PromotionRunner,
+)
 
 
 def _environment(enabled: bool) -> dict[str, str]:
@@ -115,6 +119,44 @@ def test_launchctl_absence_requires_canonical_status_and_diagnostic():
     )
     assert not service_absence_proven(
         _completed(command, 113, stderr="Operation not permitted"),
+        service,
+    )
+    assert not service_absence_proven(
+        _completed(
+            command,
+            113,
+            stderr='Could not find service "com.test" in domain for user gui: 999',
+        ),
+        service,
+    )
+    assert not service_absence_proven(
+        _completed(
+            command,
+            113,
+            stderr=(
+                "Operation not permitted\n"
+                'Could not find service "com.test" in domain for user gui: 501'
+            ),
+        ),
+        service,
+    )
+    assert not service_absence_proven(
+        _completed(
+            command,
+            113,
+            stderr=(
+                'Could not find service "com.test" in domain for user gui: 501 '
+                "(fabricated)"
+            ),
+        ),
+        service,
+    )
+    assert not service_absence_proven(
+        _completed(
+            ["launchctl", "print", "gui/999/com.test"],
+            113,
+            stderr='Could not find service "com.test" in domain for user gui: 501',
+        ),
         service,
     )
 
@@ -300,6 +342,32 @@ def test_transaction_permission_failure_is_unknown_not_absent(tmp_path):
         transaction._bootout()
 
 
+def test_transaction_wrong_domain_not_found_is_unknown_not_absent(tmp_path):
+    target = tmp_path / "agent.plist"
+
+    def wrong_domain(command, **kwargs):
+        del kwargs
+        if command[1:2] == ["print"]:
+            return _completed(
+                command,
+                113,
+                stderr=(
+                    'Could not find service "com.test" '
+                    "in domain for user gui: 999"
+                ),
+            )
+        return _completed(command, 1, stderr="bootout denied")
+
+    transaction = LaunchAgentTransaction(
+        target_plist=target,
+        label="com.test",
+        uid=501,
+        runner=wrong_domain,
+    )
+    with pytest.raises(TransactionError, match="did not prove service absence"):
+        transaction._bootout()
+
+
 class FakeResponse:
     def __init__(self, payload: dict):
         self.status = 200
@@ -400,6 +468,34 @@ def test_emergency_permission_failure_is_unknown_even_when_8085_is_closed():
 
     runner = PromotionRunner(
         runner=permission_denied,
+        create_connection=absent,
+        uid=501,
+    )
+    with pytest.raises(PromotionError, match="did not prove service absence") as exc:
+        runner._bootout()
+    assert "absence was verified" not in str(exc.value)
+
+
+def test_emergency_wrong_domain_is_unknown_even_when_8085_is_closed():
+    def wrong_domain(command, **kwargs):
+        del kwargs
+        if command[1] == "print":
+            return _completed(
+                command,
+                113,
+                stderr=(
+                    f'Could not find service "{LAUNCH_AGENT}" '
+                    "in domain for user gui: 999"
+                ),
+            )
+        return _completed(command, 1, stderr="bootout denied")
+
+    def absent(address, timeout):
+        del address, timeout
+        raise ConnectionRefusedError
+
+    runner = PromotionRunner(
+        runner=wrong_domain,
         create_connection=absent,
         uid=501,
     )
