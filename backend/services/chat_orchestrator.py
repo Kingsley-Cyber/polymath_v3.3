@@ -859,8 +859,10 @@ async def _build_librarian_plan_trace(
     planner_service: Any = None,
     db: Any = None,
     embedding_config_loader: Any = None,
+    user_id: str | None = None,
+    llm_decomposer_enabled: bool = False,
 ) -> dict[str, Any] | None:
-    """Build L1/L2 trace metadata without feeding it into retrieval."""
+    """Build a Librarian trace and apply it only when the master flag is on."""
 
     if not enabled and not shadow:
         return None
@@ -872,7 +874,10 @@ async def _build_librarian_plan_trace(
     try:
         embedding_config = (
             await embedding_config_loader(corpus_ids)
-            if planning_requires_shortlist(query)
+            if planning_requires_shortlist(
+                query,
+                allow_llm_escalation=llm_decomposer_enabled,
+            )
             else None
         )
         result = await asyncio.wait_for(
@@ -882,8 +887,10 @@ async def _build_librarian_plan_trace(
                 requested_tier=requested_tier,
                 db=db,
                 embedding_config=embedding_config,
+                user_id=user_id,
+                llm_decomposer_enabled=llm_decomposer_enabled,
             ),
-            timeout=2.0,
+            timeout=4.0 if llm_decomposer_enabled else 2.0,
         )
         return {
             "mode": "enabled" if enabled else "shadow",
@@ -892,14 +899,17 @@ async def _build_librarian_plan_trace(
             "diagnostics": dict(result.diagnostics),
         }
     except Exception as exc:  # noqa: BLE001 - shadow failures are traced, not hidden
+        provider_attempts = int(getattr(exc, "provider_attempts", 0) or 0)
         return {
-            "mode": "enabled_pending_l3" if enabled else "shadow",
+            "mode": "enabled_degraded" if enabled else "shadow",
             "behavior_applied": False,
             "plan": None,
             "diagnostics": {
                 "status": "degraded",
                 "reason": f"{type(exc).__name__}: {exc}"[:300],
-                "provider_calls": 0,
+                "provider_calls": provider_attempts,
+                "provider_attempts": provider_attempts,
+                "silent_fallback_count": 1,
             },
         }
 
@@ -966,11 +976,34 @@ def _format_chat_query_plan_trace(plan: dict[str, Any]) -> str:
             f"mode={librarian.get('mode')} "
             f"shape={librarian_artifact.get('shape') or 'unavailable'} "
             f"hash={librarian_artifact.get('plan_hash') or 'unavailable'} "
-            "behavior=shadow_only"
+            "behavior="
+            + (
+                "applied"
+                if librarian.get("behavior_applied") is True
+                else ("shadow_only" if librarian.get("mode") == "shadow" else "bypass")
+            )
         )
     if plan.get("query_rewritten"):
         lines.append("query_rewrite: retrieval query differs from user query")
     return "\n".join(lines)
+
+
+def _librarian_refusal_signals_for_answerability(
+    trace: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Expose enabled plan signals without letting shadow mode affect behavior."""
+
+    if not isinstance(trace, dict) or not str(trace.get("mode") or "").startswith(
+        "enabled"
+    ):
+        return {}
+    plan = trace.get("plan") if isinstance(trace.get("plan"), dict) else {}
+    signals = (
+        plan.get("refusal_signals")
+        if isinstance(plan.get("refusal_signals"), dict)
+        else {}
+    )
+    return dict(signals)
 
 
 def _as_answerability_float(value: Any, default: float = 0.0) -> float:
@@ -1042,6 +1075,7 @@ def _build_retrieval_answerability_gate(
     corpus_ids: list[str] | None,
     web_search_enabled: bool,
     evidence_plan_meta: dict[str, Any] | None = None,
+    librarian_refusal_signals: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Convert retriever sufficiency diagnostics into a chat-time contract."""
 
@@ -1265,6 +1299,9 @@ def _build_retrieval_answerability_gate(
                 else "not_applied"
             ),
         },
+        # Additive plan-time signals. corpus_scope.v2 does not consume these;
+        # the versioned v3 policy owns any refusal behavior.
+        "librarian_refusal_signals": dict(librarian_refusal_signals or {}),
         # P0.4 — lane coverage is telemetry, answerability is the decision;
         # surface them separately so UI/MCP can render both without conflation.
         "lane_coverage": (
@@ -7127,6 +7164,10 @@ class ChatOrchestrator:
             requested_tier=request.retrieval_tier,
             enabled=bool(getattr(settings, "LIBRARIAN_PLANNER_ENABLED", False)),
             shadow=bool(getattr(settings, "LIBRARIAN_PLANNER_SHADOW", False)),
+            user_id=user_id,
+            llm_decomposer_enabled=bool(
+                getattr(settings, "LIBRARIAN_LLM_DECOMPOSER_ENABLED", False)
+            ),
         )
         if (
             resolved_mode == "global"
@@ -7858,6 +7899,9 @@ class ChatOrchestrator:
             corpus_ids=request.corpus_ids,
             web_search_enabled=web_search_enabled,
             evidence_plan_meta=evidence_plan_meta,
+            librarian_refusal_signals=(
+                _librarian_refusal_signals_for_answerability(librarian_plan_trace)
+            ),
         )
         yield _record_trace_event(
             lane="planning",

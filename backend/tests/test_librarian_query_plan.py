@@ -63,6 +63,7 @@ def test_librarian_flags_ship_default_off():
 
     assert settings.LIBRARIAN_PLANNER_ENABLED is False
     assert settings.LIBRARIAN_PLANNER_SHADOW is False
+    assert settings.LIBRARIAN_LLM_DECOMPOSER_ENABLED is False
 
 
 def test_schema_hash_and_durable_replay_are_byte_repeatable():

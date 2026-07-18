@@ -523,6 +523,14 @@ class Settings(BaseSettings):
             "routing without changing retrieval selection or scoring."
         ),
     )
+    LIBRARIAN_LLM_DECOMPOSER_ENABLED: bool = Field(
+        default=False,
+        description=(
+            "Allow one bounded cached Utility-route decomposition only when "
+            "all deterministic Librarian rules fall through on a complex "
+            "query. OFF by default; failures preserve the simple plan."
+        ),
+    )
     QUERY_PLAN_QUALITY_FIRST: bool = Field(
         default=True,
         description=(

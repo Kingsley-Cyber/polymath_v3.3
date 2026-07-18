@@ -13610,3 +13610,75 @@ test files. None contacted a provider/service, deployed a container, or
 wrote corpus state. Provider calls=0, live evals=0, corpus writes=0. Librarian
 flags remain default-OFF and live runtime state is unchanged. Proceeding to
 L5 build-only.
+
+## [2026-07-18T02:28:07Z] EXECUTOR → SENIOR :: RECEIPT
+
+BUILD-FIRST 2a / AGENT L5 — CACHED BOUNDED LLM ESCALATION + NAMED SIGNAL
+WIRING is BUILD-VERIFIED GREEN. The five ordered deterministic planners remain
+the first and provider-free authority. The new decomposer is separately
+flagged by `LIBRARIAN_LLM_DECOMPOSER_ENABLED`, default-OFF with byte-exact
+Compose passthrough in both runtime services, and is eligible only after those
+rules produce `simple` while QueryPlanV2 independently reports compositional/
+dependent-multi-hop complexity or multiple required probes.
+
+An eligible miss resolves only the configured per-user Utility route and
+makes exactly one non-streaming call: temperature 0, max_tokens 600, timeout
+2.0s, JSON-object response, no retry. Input is bounded to the normalized
+question plus at most eight `{doc_id,title,summary}` rows; no evidence,
+credentials, answer prompt, or synthesis route is admitted. Saved native
+thinking controls are stripped and the existing `disable_thinking` wire seam
+is forced. Real `LLMService` fake-client tests prove
+`enable_thinking=false` for Hy3 and `thinking.type=disabled` for DeepSeek V4.
+
+Output is whole-string JSON parsed through an extra-forbid schema: one to four
+role-constrained retrieval questions, shortlist document IDs only, no answer
+or prose fields. The server—not the model—canonicalizes order, assigns exactly
+eight total seats, chooses the requested retrieval tier, and caps the summed
+subquery rerank input at 32. Equivalent model subquery order produces identical
+canonical plan and seat bytes. Only validated `llm:v1` plans enter the cache;
+the cache identity includes normalized query, corpus document-set version,
+scope, and prompt hash. Invalid/prose/fenced/unknown-document output, missing
+route, resolver/provider failure, timeout, or cancellation returns a validated
+`fallback:simple` plan with `planner_llm_unavailable=true`, exact provider
+attempts, and one counted silent fallback. Previously cached LLM plans are
+ignored immediately when the decomposer flag is OFF.
+
+Named-source and planner-unavailable signals are carried additively into the
+chat answerability trace for the future versioned v3 policy. corpus_scope.v2
+does not consume them, and shadow-mode signals are explicitly filtered so
+shadow remains zero-behavior. The trace formatter now truthfully distinguishes
+applied, bypass, and shadow behavior.
+
+The final network-disabled broad retrieval/answerability suite passed 173/173;
+log SHA
+`8a8325906d0d884726da821c10521a41635406706deb2565449444ce3f1e9dea`,
+true `EXIT=0`. The final focused L1–L5 suite passed 67/67; log SHA
+`c6fae294a044b27da27a1a6089c45dc8a7033d4f52eeda70515803d993af26a1`,
+true `EXIT=0`. Seven files compiled cleanly; log SHA
+`6f22e4f1f51ebd87e0383a88a75f1419cd2830a306a15752587b840c3a5ff1c9`,
+true `EXIT=0`. Black left all seven checked Python files unchanged; log SHA
+`7261ff8419bcdbe28374b471f4218b25a39d4238fc002d569014b4e3851a961c`,
+true `EXIT=0`; diff-check SHA
+`418a5c17f33c70e99b0cc0a07fce69191489cfedc94164bfa903785777c5bd4b`,
+true `EXIT=0`. The sealed isolated image is
+`sha256:3c4893d19063896c11692019423c2e420908db543fe25e718fd1674ae7c90833`;
+build log SHA
+`70ae760680bb630b0cd8f564c8e0220a94e1961397cc7791af503dee0dff28eb`,
+true `EXIT=0`; baked default-OFF import smoke SHA
+`f49a22ddeecba95e200bedc09a66d788f3031681a289610114e243b78e2a76fa`,
+true `EXIT=0`.
+
+The final independent read-only audit is GREEN with no remaining §4/§7
+blocker. Its prior findings—cached-ON rollback leakage, cancellation
+undercount/fallback loss, provider-native thinking enables, and one formatting
+gap—were each fixed and regression-covered. Disclosed uncredited attempts:
+one broad network-none selection included 25 Mongo integration tests that
+cannot resolve the Mongo service under `--network none`; the authoritative
+pure suite was rerun without them. One adjacent Pt10 collection tried to fetch
+a missing tokenizer asset and was excluded; dedicated answerability tests
+passed 15/15. One rollback fixture was not independently LLM-eligible and was
+replaced with a qualifying general query, and one static wrapper mounted from
+the wrong working directory. None made a provider call, live eval, deployment,
+or corpus write. Provider calls=0, live evals=0, corpus writes=0. All three
+Librarian flags remain default-OFF; live runtime state is unchanged.
+Proceeding to build-only item 2b, corpus_scope.v3.

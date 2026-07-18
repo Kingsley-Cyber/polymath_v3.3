@@ -1,7 +1,7 @@
-"""L1/L2 deterministic librarian planning and Tier-0 grounding.
+"""Deterministic Librarian planning, grounding, and execution compilation.
 
-The output is shadow-only in this phase.  L3+ will decide how plans affect
-allocation and execution; this module never calls a generation provider.
+The rule planner stays provider-free. L5 delegates its single bounded
+escalation to ``librarian_decomposer`` only after every rule falls through.
 """
 
 from __future__ import annotations
@@ -52,7 +52,7 @@ from services.storage.record_status import with_active_records
 
 SHORTLIST_LIMIT = 8
 DEFAULT_SEAT_BUDGET = 8
-LLM_ESCALATION_STATUS = "stub_dark_until_l5"
+LLM_ESCALATION_STATUS = "bounded_utility_route_default_off"
 RULE_REGISTRY_ORDER = (
     "relationship_comparison",
     "temporal",
@@ -625,7 +625,22 @@ def _has_entity_bridge_evidence(query: str) -> bool:
     return False
 
 
-def planning_requires_shortlist(query: str) -> bool:
+def llm_escalation_eligible(query: str) -> bool:
+    """Use QueryPlanV2 only as an independent complexity eligibility signal."""
+
+    live_plan = build_query_plan_v2(normalize_planner_query(query))
+    required_probe_count = len([probe for probe in live_plan.probes if probe.required])
+    return bool(
+        live_plan.complexity in {"compositional", "dependent_multi_hop"}
+        or required_probe_count > 1
+    )
+
+
+def planning_requires_shortlist(
+    query: str,
+    *,
+    allow_llm_escalation: bool = False,
+) -> bool:
     """Decide plan-time grounding from canonical text before any I/O."""
 
     planning_query = normalize_planner_query(query)
@@ -641,6 +656,8 @@ def planning_requires_shortlist(query: str) -> bool:
     ):
         return True
     if _named_source_phrases(planning_query):
+        return True
+    if allow_llm_escalation and llm_escalation_eligible(planning_query):
         return True
     return _has_entity_bridge_evidence(planning_query)
 
@@ -808,11 +825,15 @@ def build_query_plan_v1(
     shortlist: Iterable[LibrarianShortlistItemV1 | dict[str, Any]] = (),
     requested_tier: Any = "qdrant_mongo",
     cache_hit: bool = False,
+    allow_llm_escalation: bool = False,
 ) -> QueryPlanV1:
     normalized = normalize_planner_query(query)
     if not normalized:
         raise ValueError("librarian planner requires a non-blank query")
-    requires_shortlist = planning_requires_shortlist(normalized)
+    requires_shortlist = planning_requires_shortlist(
+        normalized,
+        allow_llm_escalation=allow_llm_escalation,
+    )
     ordered_shortlist = (
         tuple(
             sorted(
@@ -912,8 +933,14 @@ async def build_tier0_shortlist(
 
 
 class LibrarianPlanner:
-    def __init__(self, *, cache: QueryPlanReplayCache | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        cache: QueryPlanReplayCache | None = None,
+        decomposer: Any = None,
+    ) -> None:
         self.cache = cache or QueryPlanReplayCache()
+        self.decomposer = decomposer
 
     async def build(
         self,
@@ -923,13 +950,18 @@ class LibrarianPlanner:
         requested_tier: Any,
         db: Any,
         embedding_config: dict[str, Any] | None,
+        user_id: str | None = None,
+        llm_decomposer_enabled: bool = False,
     ) -> LibrarianPlanBuildResult:
         scoped = tuple(sorted({str(value) for value in corpus_ids or () if str(value)}))
         scope_identity = corpus_scope_identity(scoped)
         normalized = normalize_planner_query(query)
         if not normalized:
             raise ValueError("librarian planner requires a non-blank query")
-        requires_shortlist = planning_requires_shortlist(normalized)
+        requires_shortlist = planning_requires_shortlist(
+            normalized,
+            allow_llm_escalation=llm_decomposer_enabled,
+        )
         version_before = await corpus_doc_set_version(db, scoped)
         if not requires_shortlist:
             # Ordinary lookups preserve today's raw question bytes and do not
@@ -942,6 +974,7 @@ class LibrarianPlanner:
                 shortlist=(),
                 requested_tier=requested_tier,
                 cache_hit=False,
+                allow_llm_escalation=False,
             )
             return LibrarianPlanBuildResult(
                 plan=plan,
@@ -951,7 +984,10 @@ class LibrarianPlanner:
                     "shortlist_calls": 0,
                     "query_embedding_calls": 0,
                     "llm_escalation": LLM_ESCALATION_STATUS,
+                    "llm_escalation_eligible": False,
                     "provider_calls": 0,
+                    "provider_attempts": 0,
+                    "silent_fallback_count": 0,
                 },
             )
 
@@ -962,7 +998,11 @@ class LibrarianPlanner:
             planner_prompt_hash=LLM_DECOMPOSER_PROMPT_HASH,
         )
         cached = self.cache.get(cache_key)
-        if cached is not None and cached.shape != "simple":
+        if (
+            cached is not None
+            and cached.shape != "simple"
+            and (cached.planner != "llm:v1" or llm_decomposer_enabled)
+        ):
             return LibrarianPlanBuildResult(
                 plan=cached.model_copy(
                     update={
@@ -978,7 +1018,10 @@ class LibrarianPlanner:
                     "shortlist_calls": 0,
                     "query_embedding_calls": 0,
                     "llm_escalation": LLM_ESCALATION_STATUS,
+                    "llm_escalation_eligible": cached.planner == "llm:v1",
                     "provider_calls": 0,
+                    "provider_attempts": 0,
+                    "silent_fallback_count": 0,
                 },
             )
 
@@ -1013,6 +1056,7 @@ class LibrarianPlanner:
             shortlist=shortlist,
             requested_tier=requested_tier,
             cache_hit=False,
+            allow_llm_escalation=llm_decomposer_enabled,
         )
         if plan.shape == "simple":
             # A conservative grounded preflight may find no bridge after
@@ -1026,7 +1070,41 @@ class LibrarianPlanner:
                 shortlist=shortlist,
                 requested_tier=requested_tier,
                 cache_hit=False,
+                allow_llm_escalation=llm_decomposer_enabled,
             )
+            if llm_decomposer_enabled and llm_escalation_eligible(normalized):
+                decomposer = self.decomposer
+                if decomposer is None:
+                    from services.retriever.librarian_decomposer import (
+                        librarian_decomposer,
+                    )
+
+                    decomposer = librarian_decomposer
+                decomposition = await decomposer.decompose(
+                    base_plan=plan,
+                    user_id=user_id,
+                )
+                if decomposition.plan.planner == "llm:v1":
+                    self.cache.put(decomposition.plan.cache.key, decomposition.plan)
+                return LibrarianPlanBuildResult(
+                    plan=decomposition.plan,
+                    diagnostics={
+                        "status": (
+                            "llm_built"
+                            if decomposition.plan.planner == "llm:v1"
+                            else "llm_fallback_simple"
+                        ),
+                        "registry_order": list(RULE_REGISTRY_ORDER),
+                        "shortlist": shortlist_diagnostics,
+                        "shortlist_calls": shortlist_calls,
+                        "query_embedding_calls": shortlist_calls,
+                        "llm_escalation": decomposition.diagnostics(),
+                        "llm_escalation_eligible": True,
+                        "provider_calls": decomposition.provider_attempts,
+                        "provider_attempts": decomposition.provider_attempts,
+                        "silent_fallback_count": (decomposition.silent_fallback_count),
+                    },
+                )
             return LibrarianPlanBuildResult(
                 plan=plan,
                 diagnostics={
@@ -1036,7 +1114,10 @@ class LibrarianPlanner:
                     "shortlist_calls": shortlist_calls,
                     "query_embedding_calls": shortlist_calls,
                     "llm_escalation": LLM_ESCALATION_STATUS,
+                    "llm_escalation_eligible": False,
                     "provider_calls": 0,
+                    "provider_attempts": 0,
+                    "silent_fallback_count": 0,
                 },
             )
         self.cache.put(plan.cache.key, plan)
@@ -1049,7 +1130,10 @@ class LibrarianPlanner:
                 "shortlist_calls": shortlist_calls,
                 "query_embedding_calls": shortlist_calls,
                 "llm_escalation": LLM_ESCALATION_STATUS,
+                "llm_escalation_eligible": False,
                 "provider_calls": 0,
+                "provider_attempts": 0,
+                "silent_fallback_count": 0,
             },
         )
 
