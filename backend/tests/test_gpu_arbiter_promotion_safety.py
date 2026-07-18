@@ -112,6 +112,17 @@ def test_launchctl_absence_requires_canonical_status_and_diagnostic():
     command = ["launchctl", "print", "gui/501/com.test"]
     service = command[-1]
     assert service_absence_proven(_not_found(command), service)
+    assert service_absence_proven(
+        _completed(
+            command,
+            113,
+            stderr=(
+                "Bad request.\n"
+                'Could not find service "com.test" in domain for user gui: 501'
+            ),
+        ),
+        service,
+    )
     assert not service_absence_proven(
         _completed(
             command,

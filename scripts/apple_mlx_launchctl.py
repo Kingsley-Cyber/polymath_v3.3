@@ -31,7 +31,12 @@ def service_absence_proven(
     expected = (
         f'Could not find service "{parts[2]}" ' f"in domain for user gui: {parts[1]}"
     )
-    return (result.stderr or "").strip().casefold() == expected.casefold()
+    observed = (result.stderr or "").strip().casefold()
+    canonical = {
+        expected.casefold(),
+        f"Bad request.\n{expected}".casefold(),
+    }
+    return observed in canonical
 
 
 def wait_for_service_absence(
