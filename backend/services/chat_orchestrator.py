@@ -893,7 +893,7 @@ async def _build_librarian_plan_trace(
                 user_id=user_id,
                 llm_decomposer_enabled=llm_decomposer_enabled,
             ),
-            timeout=4.0 if llm_decomposer_enabled else 2.0,
+            timeout=15.0 if llm_decomposer_enabled else 2.0,
         )
         return {
             "mode": "enabled" if enabled else "shadow",
@@ -919,14 +919,21 @@ async def _build_librarian_plan_trace(
                 fallback_result = None
         fallback_plan = getattr(fallback_result, "plan", None)
         if fallback_plan is not None and fallback_plan.shape != "simple":
+            # W1-D2 (2026-07-19 senior fix): a degraded plan may inform the
+            # trace but NEVER take behavior — the final-acceptance re-run
+            # proved degraded planned retrieval seats nothing and replaces
+            # baseline evidence with less (floors 0/6, sources=0). Fail-open
+            # law: planner failure => baseline retrieval untouched.
             return {
                 "mode": "enabled_degraded" if enabled else "shadow",
-                "behavior_applied": bool(enabled),
+                "behavior_applied": False,
                 "plan": fallback_plan.model_dump(mode="json"),
                 "diagnostics": {
                     **dict(getattr(fallback_result, "diagnostics", {}) or {}),
                     "status": "degraded_deterministic_fallback",
                     "reason": f"{type(exc).__name__}: {exc}"[:300],
+                    "silent_fallback_count": 1,
+                    "fallback_signal": "librarian_degraded_fallback",
                 },
             }
         return {
@@ -7046,6 +7053,10 @@ class ChatOrchestrator:
         # Step 2: Get model to use
         model_used = self._get_model_to_use(request, model_config)
         primary_entry_id: str | None = None
+        # Captured BEFORE pool/profile resolution rewrites overrides.model to
+        # the concrete model string — this is the only moment the "user
+        # explicitly picked a model in the dropdown" signal exists.
+        explicit_pool_selection = model_used.startswith(("pool:", "profile:"))
 
         # Step 3: Create user message
         user_message = self._create_user_message(request.message, model_used)
@@ -7166,8 +7177,13 @@ class ChatOrchestrator:
                     model_used,
                 )
 
+        # An explicit dropdown selection (pool:/profile:) always outranks the
+        # synthesis-route override — the override swaps the DEFAULT route
+        # only. The flag was captured before resolve_by_entry_id rewrote
+        # overrides.model, which is why it can't be recomputed here.
         synthesis_route = await _resolve_synthesis_route_override(
-            enabled=settings.SYNTHESIS_ROUTE_OVERRIDE_ENABLED,
+            enabled=settings.SYNTHESIS_ROUTE_OVERRIDE_ENABLED
+            and not explicit_pool_selection,
             user_id=user_id,
             tool_route_active=tool_route_active,
             model_used=model_used,
@@ -7431,7 +7447,16 @@ class ChatOrchestrator:
             if request.corpus_ids and bool(
                 getattr(settings, "GROUNDED_QUERY_PLANNER_ENABLED", False)
             ):
+                # D4 law extended (W1-D5, 2026-07-19): every retrieval helper
+                # shares the configured synthesis route identity. Utility-first
+                # resolution dispatched the grounded planner as the unpriced
+                # openai/-prefixed entry, which HTTP-errored on every deep
+                # query and held the chat cost ledger OPEN.
                 grounded_planner_route = (
+                    await resolve_query_model_kind(user_id, "synthesis")
+                    if user_id
+                    else None
+                ) or (
                     await resolve_query_model_kind(user_id, "utility")
                     if user_id
                     else None
