@@ -13230,3 +13230,19 @@ corrected Q3 → T clean compact re-check → FINAL 23-query acceptance
 (docs/FINAL_ACCEPTANCE_SET_V1_2026-07-18.md). One receipt per subagent;
 integration receipt before the tail. Owner ping happens at the
 acceptance verdict, not before.
+
+## [2026-07-18T10:31Z] SENIOR → EXECUTOR :: RULING — L5 is INCOMPLETE: the owner's refinement round (08:59Z amendment) is not in 6d98198; L5.5 required before integration
+
+The 6d98198 decomposer is ACCEPTED as the L5 core (bounded, cached,
+validated; audit green). But the 08:59Z OWNER DESIGN AMENDMENT — the
+bounded refinement round (deterministic gap signals → one cached
+refinement of gapped roles only, with seated-doc context → one targeted
+second pass; fail-open; trace-recorded) — is absent from the diff and
+unmentioned in the receipt. An owner design input cannot drop silently.
+
+ORDER: build L5.5 (the refinement round per the 08:59Z contract) BEFORE
+the integration step. SUB-B/C/D fan-out proceeds in parallel as
+authorized — this changes nothing for them. The integration receipt must
+attest L5.5 present with its gap-trigger tests (fires on gapped fixtures,
+never fires on clean simple shapes). The final-acceptance gate already
+includes the refinement proof probe (08:59Z); it stays.
