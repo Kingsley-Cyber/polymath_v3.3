@@ -28,6 +28,9 @@ import {
   ChevronDown,
   ChevronRight,
   KeyRound,
+  LogIn,
+  RefreshCw,
+  SquareTerminal,
 } from "lucide-react";
 import { useQueryModelPoolStore } from "../../stores/queryModelPoolStore";
 import * as api from "../../lib/api";
@@ -47,6 +50,194 @@ function newEntryId(): string {
   return "fe-" + Math.random().toString(36).slice(2, 10);
 }
 
+
+// ── CLI Subscriptions section (T4) ───────────────────────────────────────
+// Status + login + one-click model sync for the host CLI shim lanes
+// (ChatGPT/codex, Cursor, Antigravity/gemini). Synced entries land in the
+// query_model_pool as $0 subscription_flat routes.
+
+function CliProvidersSection() {
+  const { load } = useQueryModelPoolStore();
+  const [status, setStatus] = useState<Record<
+    string,
+    import("../../lib/api").CliProviderStatus
+  > | null>(null);
+  const [statusErr, setStatusErr] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState<string | null>(null);
+  const [loginMsg, setLoginMsg] = useState<string | null>(null);
+
+  const refresh = async () => {
+    setStatusErr(null);
+    try {
+      const res = await api.getCliProvidersStatus();
+      setStatus(res.providers);
+    } catch (e) {
+      setStatus(null);
+      setStatusErr(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  useEffect(() => {
+    void refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleLogin = async (name: string) => {
+    setLoginMsg(null);
+    try {
+      const res = await api.cliProviderLogin(name);
+      setLoginMsg(
+        res.spawned
+          ? "Login window opened — approve it in your browser, then Sync."
+          : (res.hint ?? "Follow the CLI's login instructions in Terminal."),
+      );
+    } catch (e) {
+      setLoginMsg(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const handleSync = async () => {
+    setSyncing(true);
+    setSyncMsg(null);
+    try {
+      const res = await api.syncCliProviderModels();
+      setSyncMsg(
+        `Discovered ${res.discovered} models · added ${res.added} new entr${
+          res.added === 1 ? "y" : "ies"
+        }.`,
+      );
+      await load(); // refresh the pool list + chat dropdown data
+      await refresh();
+    } catch (e) {
+      setSyncMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const authBadge = (s: import("../../lib/api").CliProviderStatus) => {
+    if (!s.installed)
+      return (
+        <span className="rounded border border-white/10 px-1.5 py-0.5 text-[9px] uppercase tracking-widest text-gray-500">
+          Not installed
+        </span>
+      );
+    if (s.auth === "login_required")
+      return (
+        <span className="rounded border border-amber-400/40 bg-amber-400/10 px-1.5 py-0.5 text-[9px] uppercase tracking-widest text-amber-300">
+          Login required
+        </span>
+      );
+    return (
+      <span className="rounded border border-emerald-400/40 bg-emerald-400/10 px-1.5 py-0.5 text-[9px] uppercase tracking-widest text-emerald-300">
+        Connected
+      </span>
+    );
+  };
+
+  return (
+    <section
+      className="rounded-lg border border-white/10 bg-[#141519] p-4 space-y-3"
+      data-testid="cli-providers-section"
+    >
+      <div className="flex items-center gap-2">
+        <SquareTerminal className="w-4 h-4 text-amber-300" />
+        <h3 className="text-[14px] font-semibold text-white">
+          CLI Subscriptions
+        </h3>
+        <span className="rounded border border-amber-300/30 bg-amber-300/10 px-1.5 text-[9px] uppercase tracking-widest text-amber-200">
+          $0 flat
+        </span>
+        <span className="flex-1" />
+        <button
+          onClick={handleSync}
+          disabled={syncing || !status}
+          data-testid="cli-providers-sync"
+          className="flex items-center gap-1.5 rounded border border-accent-main/60 bg-accent-main/15 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-widest text-accent-main hover:bg-accent-main/25 disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          {syncing ? (
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          ) : (
+            <RefreshCw className="w-3.5 h-3.5" />
+          )}
+          Sync models
+        </button>
+      </div>
+      <p className="text-[12px] leading-relaxed text-gray-500">
+        Chat through the coding-agent subscriptions installed on this Mac —
+        no API keys, billed flat by each plan. Sync pulls every model each
+        connected CLI offers into the pool (and the chat dropdown) in one
+        click.
+      </p>
+
+      {statusErr && (
+        <div className="flex items-start gap-2 rounded border border-red-500/40 bg-red-950/40 px-3 py-2 text-[12px] text-red-300">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>
+            CLI shim unreachable ({statusErr}). Is the host service on :8090
+            running?
+          </span>
+        </div>
+      )}
+
+      {status && (
+        <div className="grid gap-2 sm:grid-cols-3">
+          {Object.entries(status).map(([name, s]) => (
+            <div
+              key={name}
+              className="flex flex-col gap-2 rounded border border-white/10 bg-[#0b0c10] p-3"
+              data-testid={`cli-provider-${name}`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="truncate text-[12px] font-semibold text-white">
+                  {s.display}
+                </span>
+                <span
+                  className={`h-2 w-2 shrink-0 rounded-full ${
+                    !s.installed
+                      ? "bg-gray-600"
+                      : s.auth === "ok"
+                        ? "bg-emerald-400"
+                        : "bg-amber-400"
+                  }`}
+                />
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                {authBadge(s)}
+                {s.installed &&
+                  s.auth === "login_required" &&
+                  s.can_spawn_login && (
+                    <button
+                      onClick={() => handleLogin(name)}
+                      className="flex items-center gap-1 rounded border border-white/15 px-2 py-1 text-[10px] uppercase tracking-widest text-gray-300 hover:border-accent-main hover:text-accent-main"
+                      data-testid={`cli-provider-login-${name}`}
+                    >
+                      <LogIn className="h-3 w-3" />
+                      Login
+                    </button>
+                  )}
+              </div>
+              <div className="truncate text-[10px] text-gray-600">
+                binary: {s.binary}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {loginMsg && (
+        <div className="text-[12px] text-amber-200">{loginMsg}</div>
+      )}
+      {syncMsg && (
+        <div className="flex items-center gap-2 text-[12px] text-emerald-300">
+          <CheckCircle className="h-3.5 w-3.5" />
+          {syncMsg}
+        </div>
+      )}
+    </section>
+  );
+}
 
 // ── Query Model Pool section ─────────────────────────────────────────────
 
@@ -766,6 +957,7 @@ export function ModelsTab() {
         </div>
       )}
 
+      <CliProvidersSection />
       <PoolSection />
       <HydeSection />
       <AgenticSection />

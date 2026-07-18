@@ -2625,3 +2625,36 @@ export async function resolveDuplicates(
     { method: "POST", body: JSON.stringify(body) },
   );
 }
+
+// ── T4: CLI subscription providers (host shim via backend proxy) ─────────
+
+export interface CliProviderStatus {
+  display: string;
+  binary: string;
+  installed: boolean;
+  auth: "ok" | "login_required" | "missing";
+  can_spawn_login: boolean;
+}
+
+export async function getCliProvidersStatus(): Promise<{
+  providers: Record<string, CliProviderStatus>;
+}> {
+  return fetchJSON("/cli-providers/status");
+}
+
+export async function cliProviderLogin(
+  name: string,
+): Promise<{ spawned: boolean; hint?: string }> {
+  return fetchJSON(`/cli-providers/${encodeURIComponent(name)}/login`, {
+    method: "POST",
+  });
+}
+
+export async function syncCliProviderModels(): Promise<{
+  discovered: number;
+  added: number;
+  added_entry_ids: string[];
+  providers: Record<string, unknown>;
+}> {
+  return fetchJSON("/cli-providers/sync", { method: "POST" });
+}

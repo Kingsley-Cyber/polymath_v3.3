@@ -31,6 +31,7 @@ from routers.settings import router as settings_router
 from routers.tools import router as tools_router
 from routers.skills import router as skills_router
 from routers.mcp_info import router as mcp_info_router
+from routers.cli_providers import router as cli_providers_router
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from services.auth import auth_service
@@ -601,6 +602,7 @@ app.include_router(modal_ops_router)        # Phase 22 — programmatic Modal de
 app.include_router(model_profiles_router)  # Phase 19.3 — custom model profiles
 app.include_router(model_pool_router)      # Phase E — unified model pool
 app.include_router(query_prefs_router)     # Phase F — per-user query prefs + ollama exclusions
+app.include_router(cli_providers_router)   # T4 — CLI subscription lanes (status/login/sync)
 
 
 @app.get("/", tags=["root"])
