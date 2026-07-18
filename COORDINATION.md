@@ -14781,6 +14781,13 @@ Atomic rollback verified healthy on `a82cf85c…`: five safe features ON, dark
 stack OFF, eval mounts absent, lock released (`EXIT=0`, SHA `bbe3ba74…`).
 Owner report and durable artifacts updated under `docs/`; verification green.
 
+## [2026-07-18T07:36:22Z] EXECUTOR → SENIOR :: RECEIPT
+
+REVIEW PUBLICATION PUSHED. Owner report, sole-rerun journal, rollback
+attestation, and deterministic claim materialization/rollback artifacts are
+committed as `0dcd02ac31726266b75f572a3ac79b3384a3a468` and confirmed equal to
+`origin/codex/build-first-queue-20260718`. Shared main was not touched.
+
 ## [2026-07-19T01:52Z] SENIOR :: CLOSING RULING — dark stack PARKED per the one-round contract; the wave SHIPS the live-proven system
 
 The sole re-run is RED (floors 0/6 under the full dark ensemble, helper
@@ -14802,3 +14809,27 @@ combined-stack determinism bisect (zero-provider); W3 graph-contribution
 tuning (depth D2 findings); W4 v3 activation behind W1. The wave is
 CLOSED. Owner report updated under docs/; senior final report goes to
 the owner directly.
+
+## [2026-07-19T03:10Z] SENIOR :: WAVE OPEN — OWNER: "take it home." W1 staircase plan; senior drives
+
+OWNER WORDS open the next wave on the W1–W4 queue. LAW CARRIED FORWARD:
+compact windows (≤10), atomic flips, one flip one measurement, canonical
+three-state, sprint receipts. LESSON ENGRAVED: the acceptance failed as
+ALL-AT-ONCE FIRST CONTACT twice — W1 is a STAIRCASE, never a bundle:
+W1a. DIAGNOSIS from the sealed re-run journal (135d7b05…): per-execution
+     cause for floors 0/6 — technical/timeout-poisoned vs ranking; and
+     the two timed-out unmetered helper calls (route identity, stage).
+W1b. HELPER-ROUTE STANDALONE CANARY (10 calls, no eval): the
+     planner/refiner route must prove fast+metered before it re-enters
+     any retrieval path; fix config or fall back helpers to MiniMax.
+W1c. LIBRARIAN-ONLY COMPACT WINDOW (≤10: floors-6 + 2 depth + simple
+     parity ×2): librarian ON, v3/route/two-lane OFF, helpers per W1b.
+     Simple shapes MUST bypass the planner (L-G6); if floors hold and
+     latency ≤ baseline+10%, librarian is enablement-eligible alone.
+W1d. +v3 WINDOW (≤10 incl. corrected negatives + in-corpus controls).
+W1e. +ROUTE WINDOW (latency-focused ≤10; deep ≤15s target re-tested).
+Each step: atomic, sealed, GREEN advances / RED stops with a named
+defect and the staircase holds at the last green step. W2 (determinism
+bisect, zero-provider) may run beside any step. W3/W4 follow W1.
+Senior executes per the standing role amendment; executor receipts and
+committed orders remain the channel of record.
