@@ -1,0 +1,5 @@
+services:
+  backend:
+    volumes:
+      - "/Users/king/polymath_v3.3/docs:/docs:ro"
+      - "/tmp/polymath-eval.lock:/tmp/polymath-eval.lock:ro"
