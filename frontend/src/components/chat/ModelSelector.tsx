@@ -1,9 +1,11 @@
-// ModelSelector.tsx — Sprint 4C.
-// One flat grouped list sourced from the unified query_model_pool. No more
-// Pool / Profiles / Discovered three-section split. Selecting any entry
-// writes `pool:<entry_id>` into settingsStore. Legacy selected values
+// ModelSelector.tsx — Sprint 4C + T4 redesign.
+// One grouped list sourced from the unified query_model_pool. Selecting any
+// entry writes `pool:<entry_id>` into settingsStore. Legacy selected values
 // (`profile:<id>`, raw LiteLLM ids) keep rendering — the backend resolver
 // handles them on the chat-send path.
+// T4: cli-shim__* entries surface as their own "CLI Subscriptions" group
+// ($0 flat lanes through the host CLI shim), search filters across every
+// group, and the active model is pinned in a summary card.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -13,7 +15,10 @@ import {
   CloudOff,
   Cpu,
   KeyRound,
+  Search,
   Settings2,
+  SquareTerminal,
+  X,
 } from "lucide-react";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useQueryModelPoolStore } from "../../stores/queryModelPoolStore";
@@ -21,6 +26,8 @@ import type { PoolProvider, QueryModelPoolEntry } from "../../types";
 import { POOL_PROVIDER_PRESETS, findPreset } from "../../types";
 
 const STALE_MS = 30_000;
+const CLI_GROUP = "cli";
+const CLI_PREFIX = "cli-shim__";
 
 /** Index map for registry-declaration-order tiebreak. Keeps Ollama first,
  * Custom last, and cloud providers clustered in the order the registry
@@ -29,13 +36,14 @@ const REGISTRY_ORDER: Record<string, number> = Object.fromEntries(
   POOL_PROVIDER_PRESETS.map((p, i) => [p.id, i]),
 );
 
-/** Sort providers using the registry's declaration order: ollama first,
- * cloud providers next (registry order), custom last, unknowns alpha
- * after custom. */
-function providerOrder(a: string, b: string): number {
+/** Sort group keys: ollama first, CLI subscriptions second, cloud providers
+ * in registry order, custom last, unknowns alpha after custom. */
+function groupOrder(a: string, b: string): number {
   if (a === b) return 0;
   if (a === "ollama") return -1;
   if (b === "ollama") return 1;
+  if (a === CLI_GROUP) return -1;
+  if (b === CLI_GROUP) return 1;
   if (a === "custom") return 1;
   if (b === "custom") return -1;
   const ra = REGISTRY_ORDER[a];
@@ -46,14 +54,30 @@ function providerOrder(a: string, b: string): number {
   return a.localeCompare(b);
 }
 
-function providerIcon(provider: PoolProvider) {
-  if (provider === "ollama") {
-    return <Cpu className="w-2.5 h-2.5 text-cyan-300" />;
+function isCliEntry(entry: QueryModelPoolEntry): boolean {
+  return entry.entry_id.startsWith(CLI_PREFIX);
+}
+
+function groupKeyFor(entry: QueryModelPoolEntry): string {
+  return isCliEntry(entry) ? CLI_GROUP : entry.provider;
+}
+
+function groupDisplayName(key: string): string {
+  if (key === CLI_GROUP) return "CLI Subscriptions";
+  return findPreset(key as PoolProvider)?.name ?? key;
+}
+
+function groupIcon(key: string) {
+  if (key === "ollama") {
+    return <Cpu className="w-3 h-3 text-cyan-300" />;
   }
-  if (provider === "custom") {
-    return <CloudOff className="w-2.5 h-2.5 text-content-secondary" />;
+  if (key === CLI_GROUP) {
+    return <SquareTerminal className="w-3 h-3 text-amber-300" />;
   }
-  return <Cloud className="w-2.5 h-2.5 text-emerald-400/80" />;
+  if (key === "custom") {
+    return <CloudOff className="w-3 h-3 text-content-secondary" />;
+  }
+  return <Cloud className="w-3 h-3 text-emerald-400/80" />;
 }
 
 function entryAccessIcon(entry: QueryModelPoolEntry) {
@@ -76,25 +100,31 @@ function loadOpenGroups(): Record<string, boolean> {
   }
 }
 
+function saveOpenGroups(next: Record<string, boolean>) {
+  try {
+    localStorage.setItem(OPEN_GROUPS_KEY, JSON.stringify(next));
+  } catch {
+    /* persistence is best-effort */
+  }
+}
+
 export function ModelSelector() {
   const [isOpen, setIsOpen] = useState(false);
-  // Collapsed by default; persisted per provider so the list stays the way
-  // the owner left it. The active model's group is always forced open.
+  const [query, setQuery] = useState("");
+  // Collapsed by default; persisted per group so the list stays the way the
+  // owner left it. The active model's group is always forced open.
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(
     loadOpenGroups,
   );
-  const toggleGroup = (provider: string) => {
+  const toggleGroup = (key: string) => {
     setOpenGroups((prev) => {
-      const next = { ...prev, [provider]: !prev[provider] };
-      try {
-        localStorage.setItem(OPEN_GROUPS_KEY, JSON.stringify(next));
-      } catch {
-        /* persistence is best-effort */
-      }
+      const next = { ...prev, [key]: !prev[key] };
+      saveOpenGroups(next);
       return next;
     });
   };
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
   const lastLoadedAt = useRef<number>(0);
 
   const { selectedModel, setSelectedModel } = useSettingsStore();
@@ -112,8 +142,20 @@ export function ModelSelector() {
       void load();
       lastLoadedAt.current = now;
     }
+    setQuery("");
     setIsOpen(true);
   };
+
+  // Focus search and reveal the active entry on open.
+  useEffect(() => {
+    if (!isOpen) return;
+    requestAnimationFrame(() => {
+      searchRef.current?.focus();
+      dropdownRef.current
+        ?.querySelector('[data-active="true"]')
+        ?.scrollIntoView({ block: "nearest" });
+    });
+  }, [isOpen]);
 
   // Click-outside dismisses.
   useEffect(() => {
@@ -129,23 +171,35 @@ export function ModelSelector() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Group enabled entries by provider, ollama first then alphabetical.
+  // Group enabled entries; CLI shim entries get their own group.
   const grouped = useMemo(() => {
+    const q = query.trim().toLowerCase();
     const enabled = config.query_model_pool.filter((e) => e.enabled);
-    const byProvider = new Map<PoolProvider, QueryModelPoolEntry[]>();
+    const byGroup = new Map<string, QueryModelPoolEntry[]>();
     for (const e of enabled) {
-      const list = byProvider.get(e.provider) ?? [];
+      const key = groupKeyFor(e);
+      if (
+        q &&
+        ![e.label, e.model_name, e.provider, groupDisplayName(key)].some((s) =>
+          s.toLowerCase().includes(q),
+        )
+      ) {
+        continue;
+      }
+      const list = byGroup.get(key) ?? [];
       list.push(e);
-      byProvider.set(e.provider, list);
+      byGroup.set(key, list);
     }
-    const providers = Array.from(byProvider.keys()).sort(providerOrder);
-    return providers.map((p) => ({
-      provider: p,
-      entries: (byProvider.get(p) ?? []).sort((a, b) =>
+    const keys = Array.from(byGroup.keys()).sort(groupOrder);
+    return keys.map((key) => ({
+      key,
+      entries: (byGroup.get(key) ?? []).sort((a, b) =>
         a.model_name.localeCompare(b.model_name),
       ),
     }));
-  }, [config.query_model_pool]);
+  }, [config.query_model_pool, query]);
+
+  const searching = query.trim().length > 0;
 
   // Active-pill label. Four cases, all graceful:
   //   1. pool:<id> and id resolves → show pool entry label
@@ -166,10 +220,20 @@ export function ModelSelector() {
       setSelectedModel(`pool:${firstEnabledEntry.entry_id}`);
       return;
     }
-    if (selectedModel.startsWith("pool:") && !activePoolEntry) {
+    if (
+      !searching &&
+      selectedModel.startsWith("pool:") &&
+      !activePoolEntry
+    ) {
       setSelectedModel(`pool:${firstEnabledEntry.entry_id}`);
     }
-  }, [activePoolEntry, firstEnabledEntry, selectedModel, setSelectedModel]);
+  }, [
+    activePoolEntry,
+    firstEnabledEntry,
+    searching,
+    selectedModel,
+    setSelectedModel,
+  ]);
 
   const displayLabel = activePoolEntry
     ? activePoolEntry.label
@@ -182,6 +246,7 @@ export function ModelSelector() {
   const getModelColor = () => {
     if (!selectedModel) return "bg-content-tertiary";
     if (activePoolEntry) {
+      if (isCliEntry(activePoolEntry)) return "bg-amber-300";
       if (activePoolEntry.provider === "ollama") return "bg-cyan-400";
       if (activePoolEntry.provider === "anthropic") return "bg-accent-main";
       if (activePoolEntry.provider === "openai") return "bg-success";
@@ -198,7 +263,17 @@ export function ModelSelector() {
     return "bg-content-primary";
   };
 
-  const totalEnabled = grouped.reduce((n, g) => n + g.entries.length, 0);
+  const totalEnabled = config.query_model_pool.filter((e) => e.enabled).length;
+  const totalShown = grouped.reduce((n, g) => n + g.entries.length, 0);
+  const allOpen = grouped.every(
+    (g) => openGroups[g.key] === true,
+  );
+  const setAllGroups = (open: boolean) => {
+    const next: Record<string, boolean> = { ...openGroups };
+    for (const g of grouped) next[g.key] = open;
+    setOpenGroups(next);
+    saveOpenGroups(next);
+  };
 
   return (
     <div className="relative flex items-center gap-2" ref={dropdownRef}>
@@ -224,14 +299,75 @@ export function ModelSelector() {
 
       {isOpen && (
         <div
-          className="fixed left-2 right-2 bottom-36 z-[110] w-auto max-h-[calc(100dvh-11rem)] overflow-hidden border border-white/10 bg-[#2a2a2a] p-1 font-mono shadow-xl rounded origin-bottom sm:absolute sm:left-0 sm:right-auto sm:bottom-full sm:mb-2 sm:w-80 sm:max-w-[calc(100vw-1rem)] sm:max-h-[calc(100dvh-7rem)] sm:origin-bottom-left"
+          className="fixed left-2 right-2 bottom-36 z-[110] w-auto max-h-[calc(100dvh-11rem)] overflow-hidden border border-white/10 bg-[#232323] font-mono shadow-2xl rounded-md origin-bottom sm:absolute sm:left-0 sm:right-auto sm:bottom-full sm:mb-2 sm:w-[22rem] sm:max-w-[calc(100vw-1rem)] sm:max-h-[calc(100dvh-7rem)] sm:origin-bottom-left"
           data-testid="model-selector-dropdown"
         >
-          <div className="text-[9px] font-bold tracking-widest uppercase text-content-secondary px-2 py-1.5 border-b border-border-minimal mb-1">
-            Select Engine
+          {/* Header: title + counts + expand/collapse all */}
+          <div className="flex items-center gap-2 px-3 py-2 border-b border-white/10">
+            <span className="text-[9px] font-bold tracking-widest uppercase text-content-secondary">
+              Select Model
+            </span>
+            <span className="rounded border border-white/10 px-1 text-[8px] text-content-tertiary">
+              {searching ? `${totalShown}/${totalEnabled}` : totalEnabled}
+            </span>
+            <span className="flex-1" />
+            <button
+              onClick={() => setAllGroups(!allOpen)}
+              className="text-[8px] font-bold uppercase tracking-widest text-content-tertiary hover:text-content-primary cursor-pointer"
+              data-testid="model-selector-toggle-all"
+            >
+              {allOpen ? "Collapse all" : "Expand all"}
+            </button>
           </div>
 
-          <div className="max-h-[calc(100dvh-14rem)] sm:max-h-[calc(100dvh-11rem)] overflow-y-auto custom-scrollbar flex flex-col gap-1 pr-0.5">
+          {/* Search */}
+          <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-white/10 bg-[#1d1d1d]">
+            <Search className="w-3 h-3 shrink-0 text-content-tertiary" />
+            <input
+              ref={searchRef}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") {
+                  if (query) setQuery("");
+                  else setIsOpen(false);
+                }
+              }}
+              placeholder="Search models or providers…"
+              className="min-w-0 flex-1 bg-transparent text-[10px] tracking-wide text-content-primary placeholder:text-content-tertiary/70 focus:outline-none"
+              data-testid="model-selector-search"
+            />
+            {query && (
+              <button
+                onClick={() => setQuery("")}
+                className="shrink-0 text-content-tertiary hover:text-content-primary cursor-pointer"
+                aria-label="Clear search"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            )}
+          </div>
+
+          {/* Active model summary */}
+          {activePoolEntry && (
+            <div
+              className="flex items-center gap-2 px-3 py-1.5 border-b border-white/10 bg-emerald-500/[0.07]"
+              data-testid="model-selector-active-summary"
+            >
+              <div className="w-1.5 h-1.5 shrink-0 rounded-full bg-emerald-400 animate-pulse" />
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-[9px] font-bold tracking-wider text-emerald-200">
+                  {activePoolEntry.label}
+                </div>
+                <div className="truncate text-[8px] tracking-wide text-content-secondary">
+                  {groupDisplayName(groupKeyFor(activePoolEntry))} ·{" "}
+                  {activePoolEntry.model_name}
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="max-h-[calc(100dvh-19rem)] sm:max-h-[calc(100dvh-16rem)] overflow-y-auto custom-scrollbar flex flex-col gap-1 p-1 pr-1.5">
             {totalEnabled === 0 ? (
               <div
                 className="flex flex-col items-center gap-2 px-2 py-4 text-center"
@@ -255,83 +391,117 @@ export function ModelSelector() {
                   installed Ollama models.
                 </div>
               </div>
+            ) : totalShown === 0 ? (
+              <div
+                className="px-2 py-4 text-center text-[10px] uppercase tracking-widest text-content-secondary"
+                data-testid="model-selector-no-matches"
+              >
+                [ No models match “{query}” ]
+              </div>
             ) : (
               grouped.map((group) => {
+                const containsActive = group.entries.some(
+                  (e) => `pool:${e.entry_id}` === selectedModel,
+                );
                 const isGroupOpen =
-                  openGroups[group.provider] === true ||
-                  group.entries.some(
-                    (e) => `pool:${e.entry_id}` === selectedModel,
-                  );
+                  searching || openGroups[group.key] === true || containsActive;
                 return (
-                <div
-                  key={group.provider}
-                  data-testid={`model-group-${group.provider}`}
-                >
-                  <button
-                    onClick={() => toggleGroup(group.provider)}
-                    className="flex w-full items-center gap-1 px-2 pt-1.5 pb-0.5 text-[8px] font-bold tracking-widest uppercase text-content-secondary hover:text-content-primary cursor-pointer"
-                    data-testid={`model-group-toggle-${group.provider}`}
+                  <div
+                    key={group.key}
+                    className="rounded border border-white/[0.06] bg-[#1b1c21]"
+                    data-testid={`model-group-${group.key}`}
                   >
-                    <ChevronDown
-                      className={`w-2.5 h-2.5 transition-transform duration-100 ${
-                        isGroupOpen ? "" : "-rotate-90"
-                      }`}
-                    />
-                    {providerIcon(group.provider)}
-                    <span className="flex-1 text-left">
-                      {findPreset(group.provider)?.name ?? group.provider}
-                    </span>
-                    <span className="shrink-0 rounded border border-white/10 px-1 text-[7px] text-content-tertiary">
-                      {group.entries.length}
-                    </span>
-                  </button>
-                  {isGroupOpen && group.entries.map((e) => {
-                    const pid = `pool:${e.entry_id}`;
-                    const isActive = selectedModel === pid;
-                    return (
-                      <button
-                        key={pid}
-                        onClick={() => {
-                          setSelectedModel(pid);
-                          setIsOpen(false);
-                        }}
-                        className={`group flex w-full flex-col items-stretch gap-1 rounded border px-2 py-2 text-left transition-none ${
-                          isActive
-                            ? "border-emerald-400 bg-emerald-500/15 text-emerald-200"
-                            : "border-white/5 bg-[#0b0c10] text-content-primary hover:border-white/15 hover:bg-bg-base"
+                    <button
+                      onClick={() => toggleGroup(group.key)}
+                      className="flex w-full items-center gap-2 px-2 py-1.5 text-[9px] font-bold tracking-widest uppercase text-content-secondary hover:text-content-primary cursor-pointer"
+                      data-testid={`model-group-toggle-${group.key}`}
+                    >
+                      {groupIcon(group.key)}
+                      <span className="flex-1 truncate text-left">
+                        {groupDisplayName(group.key)}
+                      </span>
+                      {containsActive && !isGroupOpen && (
+                        <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400" />
+                      )}
+                      {group.key === CLI_GROUP && (
+                        <span className="shrink-0 rounded border border-amber-300/30 bg-amber-300/10 px-1 text-[7px] text-amber-200">
+                          $0 FLAT
+                        </span>
+                      )}
+                      <span className="shrink-0 rounded border border-white/10 px-1 text-[7px] text-content-tertiary">
+                        {group.entries.length}
+                      </span>
+                      <ChevronDown
+                        className={`w-3 h-3 shrink-0 transition-transform duration-100 ${
+                          isGroupOpen ? "" : "-rotate-90"
                         }`}
-                        data-testid={`model-entry-${e.entry_id}`}
-                        title={`${e.provider} · ${e.model_name}`}
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="min-w-0 flex-1 truncate text-[10px] font-bold tracking-wider text-white">
-                            {e.label}
-                          </span>
-                          {isActive && (
-                            <span className="shrink-0 rounded border border-emerald-400/40 bg-emerald-400/10 px-1.5 py-0.5 text-[7px] font-bold uppercase tracking-widest text-emerald-300">
-                              Active
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex min-w-0 items-center gap-1.5">
-                          <span className="shrink-0 rounded border border-white/10 bg-[#16171d] px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-widest text-content-secondary">
-                            {e.provider}
-                          </span>
-                          <span className="min-w-0 flex-1 truncate text-[9px] tracking-wide text-content-secondary normal-case">
-                            {e.model_name}
-                          </span>
-                          <span className="shrink-0 opacity-80 group-hover:opacity-100">
-                            {entryAccessIcon(e)}
-                          </span>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
+                      />
+                    </button>
+                    {isGroupOpen && (
+                      <div className="flex flex-col gap-1 p-1 pt-0">
+                        {group.entries.map((e) => {
+                          const pid = `pool:${e.entry_id}`;
+                          const isActive = selectedModel === pid;
+                          return (
+                            <button
+                              key={pid}
+                              onClick={() => {
+                                setSelectedModel(pid);
+                                setIsOpen(false);
+                              }}
+                              data-active={isActive ? "true" : undefined}
+                              className={`group flex w-full flex-col items-stretch gap-1 rounded border px-2 py-1.5 text-left transition-none ${
+                                isActive
+                                  ? "border-emerald-400 bg-emerald-500/15 text-emerald-200"
+                                  : "border-white/5 bg-[#0b0c10] text-content-primary hover:border-white/20 hover:bg-bg-base"
+                              }`}
+                              data-testid={`model-entry-${e.entry_id}`}
+                              title={`${e.provider} · ${e.model_name}`}
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="min-w-0 flex-1 truncate text-[10px] font-bold tracking-wider text-white">
+                                  {e.label}
+                                </span>
+                                {isActive && (
+                                  <span className="shrink-0 rounded border border-emerald-400/40 bg-emerald-400/10 px-1.5 py-0.5 text-[7px] font-bold uppercase tracking-widest text-emerald-300">
+                                    Active
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex min-w-0 items-center gap-1.5">
+                                <span className="shrink-0 rounded border border-white/10 bg-[#16171d] px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-widest text-content-secondary">
+                                  {isCliEntry(e) ? "SUB" : e.provider}
+                                </span>
+                                <span className="min-w-0 flex-1 truncate text-[9px] tracking-wide text-content-secondary normal-case">
+                                  {e.model_name}
+                                </span>
+                                <span className="shrink-0 opacity-80 group-hover:opacity-100">
+                                  {entryAccessIcon(e)}
+                                </span>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
                 );
               })
             )}
           </div>
+
+          {/* Footer */}
+          <button
+            onClick={() => {
+              setIsOpen(false);
+              window.dispatchEvent(new CustomEvent("open-settings"));
+            }}
+            className="flex w-full items-center gap-1.5 px-3 py-1.5 border-t border-white/10 text-[8px] font-bold uppercase tracking-widest text-content-tertiary hover:text-content-primary cursor-pointer"
+            data-testid="model-selector-manage"
+          >
+            <Settings2 className="w-3 h-3" />
+            Manage models
+          </button>
         </div>
       )}
     </div>
