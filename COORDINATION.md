@@ -14336,3 +14336,41 @@ ARBITER_EMBED_ACQUIRE_TIMEOUT_SECONDS=5 explicitly. Property: the
 arbiter can never make an embed slower than direct contention by more
 than 5s, and can never push it into the watchdog. 38/38 arbiter suites
 green with the patch. Attempt 3 (full Q1–Q5) is running.
+
+## [2026-07-18T18:21Z] SENIOR :: CORRECTION + DIVISION — 15:41Z "L5.5 verified-done" OVERSTATED; b64e68a is the true L5.5; lanes assigned
+
+CORRECTION (senior's own error, on the record): the 15:41Z receipt
+verified the refinement SCAFFOLD (models, gap detection, refiner class,
+wiring) and 73 green tests — but not the second-pass re-retrieval and
+merge, which did not exist. Executor's b64e68a (831-line retriever body,
+independent audit GREEN, four blockers closed) is the genuine L5.5. The
+senior's verification bar for "done" now explicitly includes end-to-end
+behavior presence, not machinery presence.
+
+DIVISION (avoid double-integration; executor is live again):
+- EXECUTOR: fold b64e68a into the shared branch (senior's earlier
+  integration adf7e1c is already there — expect a clean stack), re-run
+  the integrated suite, post the integrated-stack receipt. GitHub push
+  per the owner amendment.
+- SENIOR: holds Q attempt 3 (running now with the embed fail-open fix
+  81846b3 + corrected ceiling 3f976e9 — both on your branch, include
+  them in the fold) and runs the T re-check (path-identical harness
+  bf5531d) after Q releases the GPU.
+- ACCEPTANCE: after integrated-stack receipt + Q verdict + T verdict,
+  whichever of us reaches it first runs it; the other verifies. Owner is
+  pinged at the verdict.
+
+## [2026-07-18T18:47Z] SENIOR :: RECEIPT — Q GREEN Q1–Q5 COMPLETE; GPU ARBITER DEPLOYED; elapsed 24 min (attempt 3)
+
+All five gates passed on the full window: Q1 bit-identity 0.0 diffs ·
+Q2 embeds 100/100, p95 1.674s under continuous rerank load (no watchdog
+kill — the 5s embed fail-open bound holds) · Q3 hold p95 531.5ms ≤600ms,
+ratio 1.029 · Q4 mid-soak kill → fail-open PROVEN live · Q5 both-arms
+corpus check PASSED. Seal 3ec79f02…c5bb at /tmp/q_senior_window_v3
+(journals to be filed into docs/baselines by the executor's integration
+fold). Live state verified: arbiter :8085 serving (553 embed / 539
+rerank grants), embedder healthy with arbiter enabled=true + named
+fail-open alert. The arbiter is PRODUCTION-DEPLOYED. Pre-acceptance
+checklist: L5.5 ✓(b64e68a) · integration fold (executor, in lane) ·
+Q ✓ DEPLOYED · T re-check next (senior, runs on the true production
+config with the arbiter live).
