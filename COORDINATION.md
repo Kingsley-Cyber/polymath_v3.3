@@ -15262,3 +15262,30 @@ build program is CLOSED-OPERATING. The owner conducts RAG.
    system (typography/color, inline-SVG charts, tables, copy-everything)
    and the chat-UI copy rider. Build begins alongside the running
    ingestion.
+
+## [2026-07-20T00:15Z] SENIOR :: THREE-TRACK WAVE OPEN (owner order; PRIORITY = INGESTION)
+
+TRACK 1 — INGESTION (PRIORITY): the 498-file batch is CANCELLED (owner:
+"we are not doing the 498 files anymore"; worker stopped at $0). NEW
+plan: FOUR corpora, ~500 docs total, one corpus each, multi-select at
+query time. BLOCKED ON OWNER INPUTS: (a) RunPod accounts/workers funded
++ the API key(s) to install, (b) DeepSeek + SiliconFlow Hy3 balances,
+(c) the four source folders named. BUILD NOW (unblocked): SYSTEM-DEFAULT
+KEY STORE — RunPod + provider keys installed once as encrypted
+system-scope defaults (keys law: encrypted in Mongo, never printed) so
+the app NEVER prompts for a key in any UI flow. On owner's keys: install
+→ preflight canary each account → ingest the four corpora sequentially
+via the proven contract (dry-run first, $0.50/file ceiling each).
+TRACK 2 — UI/OUTPUT DESIGN: keep the librarian's nuanced long-form text;
+ADD: occasional inline charts where outputs are quantitative/comparative
+(inline SVG, same as Scholar's), dedicated ChatGPT-style code blocks
+(syntax box + quick-copy) for html/code outputs, typographic hierarchy
+(headers/subheaders) in rendered answers, per-message copy buttons
+(inputs AND outputs). One frontend build; container rebuild to see it.
+TRACK 3 — SCHOLAR/DEEP RESEARCH: build per
+docs/SCHOLAR_DEEP_RESEARCH_PACKAGE_SPEC_2026-07-19.md + its reuse plan
+(open_deep_research state machine, STORM citations, gpt-researcher PDF,
+depth contract engraved). Backend orchestrator + custom artifact layer.
+EXECUTION: tracks 2+3 start immediately (parallel executor sessions);
+track 1 executes the moment owner delivers keys/folders. All laws stand
+(receipts, dry-runs, atomic flips, ledger, ≤10-query windows).
