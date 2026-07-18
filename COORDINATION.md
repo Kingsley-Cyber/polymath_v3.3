@@ -15309,3 +15309,20 @@ selector groups models BY PROVIDER with collapse/expand sections
 Caveats on record: CLI-as-backend may sit outside some providers' ToS
 (owner's subscriptions, owner's call); answers arrive as one block, not
 token-stream.
+
+## [2026-07-20T03:30Z] SENIOR :: RECEIPT — TRACK 4 EXECUTED E2E (senior)
+
+T4a SHIM LIVE: com.polymath.cli-shim LaunchAgent on :8090
+(OpenAI-compatible /v1/chat/completions → codex exec / cursor-agent -p /
+antigravity; 120s timeouts; one-chunk responses; health reports per-CLI
+availability). Live probe: shim plumbing proven end-to-end; the npm
+codex install itself is broken on this Mac (ENOENT vendored binary) —
+owner fix: npm i -g @openai/codex; cursor/antigravity register
+unavailable until installed. Three pool entries registered
+(cli-shim__chatgpt-cli/cursor-cli/antigravity-cli via
+host.docker.internal:8090/v1) + subscription_flat $0 price routes
+deployed (ledger stays CLOSED).
+T4b DROPDOWN SHIPPED: ModelSelector provider groups now collapse/expand
+(chevron + entry-count badge), collapsed by default, persisted in
+localStorage, the active model's group always forced open. Frontend
+rebuilt + redeployed, :3000 healthy.
