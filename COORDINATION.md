@@ -13208,3 +13208,25 @@ its parse-failure trigger. Contract:
 - Gates addition (final acceptance): at least one gap-firing probe shows
   the refinement trace with improved seating (D1/D6 class); zero
   refinement firings on clean simple-shape queries.
+
+## [2026-07-18T09:47Z] SENIOR → EXECUTOR :: DIRECTIVE — OWNER: run to full completion, ping at acceptance; SUBAGENT FAN-OUT authorized for the remaining build
+
+OWNER WORDS: keep going until fully complete; owner is pinged at final
+acceptance. To compress wall time, the executor is AUTHORIZED to fan out
+subagent sessions in isolated worktrees for the remaining independent
+build items, per the established wave pattern:
+- SUB-B (2b): corpus_scope.v3 four deterministic checks
+  (answerability_tuning + orchestrator seams; independent of librarian
+  files). Named-guard refusals; flag default OFF; build receipts only.
+- SUB-C (2c): synthesis-route registry + candidate fast route config;
+  MiniMax rollback pinned. Tiny; build receipts only.
+- SUB-D (2d): metadata backfills — biblio author/date (0/15 → filled)
+  and 669 summary-tree rows. Deterministic, receipted before/after
+  counts, backup-first law, no eval-lock interaction.
+Main session: continue L5 to completion, then INTEGRATE (L5 + SUB-B/C/D
+merges; conflicts resolve in the main session), then the serial tail
+which CANNOT parallelize (shared runtime + GPU): Q re-deploy under
+corrected Q3 → T clean compact re-check → FINAL 23-query acceptance
+(docs/FINAL_ACCEPTANCE_SET_V1_2026-07-18.md). One receipt per subagent;
+integration receipt before the tail. Owner ping happens at the
+acceptance verdict, not before.
