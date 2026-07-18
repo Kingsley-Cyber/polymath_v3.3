@@ -26,7 +26,10 @@ from apple_mlx_launch_agent_transaction import (  # noqa: E402
     LaunchAgentTransaction,
     TransactionError,
 )
-from apple_mlx_launchctl import service_absence_proven  # noqa: E402
+from apple_mlx_launchctl import (  # noqa: E402
+    service_absence_proven,
+    wait_for_service_absence,
+)
 from run_gpu_arbiter_promotion import (  # noqa: E402
     LAUNCH_AGENT,
     PromotionError,
@@ -159,6 +162,40 @@ def test_launchctl_absence_requires_canonical_status_and_diagnostic():
         ),
         service,
     )
+
+
+def test_launchctl_absence_poll_accepts_only_later_exact_state():
+    command = ["launchctl", "print", "gui/501/com.test"]
+    responses = [
+        _completed(command, 0, stdout="service is unloading"),
+        _not_found(command),
+    ]
+    sleeps: list[float] = []
+    result = wait_for_service_absence(
+        lambda: responses.pop(0),
+        command[-1],
+        sleep_fn=sleeps.append,
+    )
+    assert service_absence_proven(result, command[-1])
+    assert sleeps == [0.1]
+
+
+def test_launchctl_absence_poll_does_not_retry_unknown_error():
+    command = ["launchctl", "print", "gui/501/com.test"]
+    calls = 0
+
+    def unknown():
+        nonlocal calls
+        calls += 1
+        return _completed(command, 1, stderr="Operation not permitted")
+
+    result = wait_for_service_absence(
+        unknown,
+        command[-1],
+        sleep_fn=lambda seconds: None,
+    )
+    assert service_absence_proven(result, command[-1]) is False
+    assert calls == 1
 
 
 def test_manifest_requires_every_explicit_value_and_exact_process_match(tmp_path):

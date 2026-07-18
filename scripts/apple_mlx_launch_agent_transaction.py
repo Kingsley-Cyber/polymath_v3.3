@@ -13,7 +13,7 @@ import tempfile
 import time
 from typing import Callable, Sequence
 
-from apple_mlx_launchctl import service_absence_proven
+from apple_mlx_launchctl import service_absence_proven, wait_for_service_absence
 
 
 class TransactionError(RuntimeError):
@@ -93,7 +93,11 @@ class LaunchAgentTransaction:
 
     def _bootout(self) -> None:
         result = self._run(["launchctl", "bootout", self.service])
-        verification = self._run(["launchctl", "print", self.service])
+        verification = wait_for_service_absence(
+            lambda: self._run(["launchctl", "print", self.service]),
+            self.service,
+            sleep_fn=self.sleep_fn,
+        )
         if verification.returncode == 0:
             detail = (result.stderr or result.stdout or "")[-500:]
             raise TransactionError(

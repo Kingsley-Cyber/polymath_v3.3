@@ -11,11 +11,12 @@ import signal
 import socket
 import subprocess
 import sys
+import time
 from typing import Callable
 import urllib.request
 
 from apple_mlx_env_manifest import REQUIRED_KEYS, load_manifest
-from apple_mlx_launchctl import service_absence_proven
+from apple_mlx_launchctl import service_absence_proven, wait_for_service_absence
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 INSTALLER = REPO_ROOT / "scripts/install_apple_mlx_runtime.sh"
@@ -35,11 +36,13 @@ class PromotionRunner:
         urlopen: Callable = urllib.request.urlopen,
         create_connection: Callable = socket.create_connection,
         uid: int | None = None,
+        sleep_fn: Callable[[float], None] = time.sleep,
     ) -> None:
         self.runner = runner
         self.urlopen = urlopen
         self.create_connection = create_connection
         self.uid = os.getuid() if uid is None else uid
+        self.sleep_fn = sleep_fn
 
     def _run(
         self, command: list[str], *, environment: dict[str, str] | None = None
@@ -71,19 +74,23 @@ class PromotionRunner:
                 f"gui/{self.uid}/{LAUNCH_AGENT}",
             ]
         )
-        verification = self._run(
-            [
-                "launchctl",
-                "print",
-                f"gui/{self.uid}/{LAUNCH_AGENT}",
-            ]
+        service = f"gui/{self.uid}/{LAUNCH_AGENT}"
+        verification = wait_for_service_absence(
+            lambda: self._run(
+                [
+                    "launchctl",
+                    "print",
+                    service,
+                ]
+            ),
+            service,
+            sleep_fn=self.sleep_fn,
         )
         if verification.returncode == 0:
             detail = (result.stderr or result.stdout or "")[-1000:]
             raise PromotionError(
                 f"emergency launchctl bootout did not unload the service: {detail}"
             )
-        service = f"gui/{self.uid}/{LAUNCH_AGENT}"
         if not service_absence_proven(verification, service):
             detail = (verification.stderr or verification.stdout or "")[-1000:]
             raise PromotionError(
