@@ -13262,3 +13262,53 @@ Invalid typing-attempt journal/log SHAs:
 Invalid concurrency-attempt journal/log SHAs:
 `551dd889ef44081d91bbfc62e7185d8bad46dfa02912910c7a6440b9db4ed0be` /
 `1e4cd14274a7a7ef2aab0a1792d7dfbbeadf67bb6fd3d4b5bdade0097b83377e`.
+
+## [2026-07-18T00:06:35Z] EXECUTOR → SENIOR :: RECEIPT
+
+BUILD-FIRST STEP 1D — CLAIMS ATOMIC FLIP is SEALED-GREEN; claim anchors
+remain ON. I reused the already-receipted hardened owner-window harness at
+`codex/claims-owner-window-harness-20260717` / `2c21492` rather than rebuilding
+it. Its final source hashes were
+`5cf057ffb63bec4f71c9e497a988e0ed41bb2db6857fcc805d9d4baada0422d5`
+(owner-window harness) and
+`a008dd2d8b1175361e8373cc28d1d2f310a7e76c1484936fd9e1cd1b4d56307f`
+(host-lock wrapper). The final harness plus current production code passed
+43/43 focused claims-window/lock tests in the canonical image before the
+window.
+
+The exact six-probe v2 set (`q021`–`q025`, `q029`) ran serially at
+temperature=0 on one fresh claims-OFF capture; q029 included its one sealed
+history turn. All 6/6 probe rows were journal-complete with no transport
+errors, the expected `anthropic/minimax-m2.7` route, stable prompt context,
+and corpus fingerprint equality. The embedder batch-ready preflight was
+GREEN before the first scoring call (30-second client timeout, retry-once
+contract, warmup 483.487 ms). Fresh OFF artifact SHA:
+`7c53465e9fc5856779fa807aa6e05569f83aa05d325d158be9934d1df1e348a9`;
+OFF log SHA
+`056119ff948fc3d3a076ecc55344d332845e21ee6bff3281a48c9bc40cb67990`;
+true `EXIT=0`.
+
+The claims-ON arm was provider-free and SHA-bound to that exact OFF packet.
+It emitted 20 anchors (gate ≥18): 20/20 ownership/span/claim/source-version
+valid, 20/20 rendered, and 20/20 readable; q021 rendered 2. For every probe,
+selected source identities and every non-anchor evidence byte were exact;
+fresh-OFF, pre/post replay, and raw claim-store fingerprints were unchanged.
+Failures are empty, structural citation precision=1.0, provider calls=0.
+ON artifact:
+`docs/baselines/BUILD_FIRST_CLAIMS_ON_REPLAY_6_GREEN_2026-07-18.json`, SHA
+`524bd62d8f43903045708cad0d808f8ab76aeb538a13019a6119d7789064bae3`;
+ON log SHA
+`95448bb7e0b0ea4d7bbd70caa1a1ac8015baec7c17697d03506d2c7aafc36030`;
+true `EXIT=0`. Complete atomic-window log SHA
+`f7627d7b4c727a4b7f6aa9c20b14bf5e5d59f3c368c6585080827d6b059eb858`,
+true `EXIT=0`.
+
+The host lock and nonce were held continuously across fresh OFF, Compose
+flip, and ON replay, then released. Final live runtime is healthy and
+attested relationship=true, corpus_scope.v2=true, temporal=true,
+claim_anchors=true; T/planner/router/decomposition/waterfall remain false.
+No corpus write occurred. The 02:34Z owner compact-law amendment defined this
+window as six live probes plus free replay, so no superseded 39-execution
+compact-floor suite was run. Per-call provider usage/cost remains absent from
+the current chat journal and is not inferred; build item 2c/P7 is the ordered
+seam that closes that known accounting gap. Proceeding to READY dry-run.

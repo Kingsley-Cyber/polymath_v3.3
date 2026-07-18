@@ -1,0 +1,36 @@
+/usr/local/lib/python3.11/site-packages/pydantic/_internal/_fields.py:149: UserWarning: Field "model_used" has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+/usr/local/lib/python3.11/site-packages/pydantic/_internal/_fields.py:149: UserWarning: Field "model_config_conversation" has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+/usr/local/lib/python3.11/site-packages/pydantic/_internal/_fields.py:149: UserWarning: Field "model_id" has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+/usr/local/lib/python3.11/site-packages/pydantic/_internal/_fields.py:149: UserWarning: Field "model_name" has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+/usr/local/lib/python3.11/site-packages/pydantic/_internal/_fields.py:149: UserWarning: Field "model_names" has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+/usr/local/lib/python3.11/site-packages/pydantic/_internal/_fields.py:149: UserWarning: Field "model_revision" has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+/usr/local/lib/python3.11/site-packages/pydantic/_internal/_fields.py:149: UserWarning: Field "model_batch_size" has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+{"anchors": 2, "evidence_equal": true, "query_id": "q021", "raw_preserved": true, "readable": 2, "rendered": 2, "sources_equal": true, "valid": 2}
+{"anchors": 6, "evidence_equal": true, "query_id": "q022", "raw_preserved": true, "readable": 6, "rendered": 6, "sources_equal": true, "valid": 6}
+{"anchors": 0, "evidence_equal": true, "query_id": "q023", "raw_preserved": true, "readable": 0, "rendered": 0, "sources_equal": true, "valid": 0}
+{"anchors": 2, "evidence_equal": true, "query_id": "q024", "raw_preserved": true, "readable": 2, "rendered": 2, "sources_equal": true, "valid": 2}
+{"anchors": 2, "evidence_equal": true, "query_id": "q025", "raw_preserved": true, "readable": 2, "rendered": 2, "sources_equal": true, "valid": 2}
+{"anchors": 8, "evidence_equal": true, "query_id": "q029", "raw_preserved": true, "readable": 8, "rendered": 8, "sources_equal": true, "valid": 8}
+{"anchors": 20, "corpus_fingerprint_equal": true, "failures": [], "passed": true, "raw_claim_store_byte_unchanged": true, "readable": 20, "rendered": 20, "valid": 20}
+EXIT=0
