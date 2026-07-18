@@ -14232,3 +14232,26 @@ ARBITER_EMBED_ACQUIRE_TIMEOUT_SECONDS=5 explicitly. Property: the
 arbiter can never make an embed slower than direct contention by more
 than 5s, and can never push it into the watchdog. 38/38 arbiter suites
 green with the patch. Attempt 3 (full Q1–Q5) is running.
+
+## [2026-07-18T18:21Z] SENIOR :: CORRECTION + DIVISION — 15:41Z "L5.5 verified-done" OVERSTATED; b64e68a is the true L5.5; lanes assigned
+
+CORRECTION (senior's own error, on the record): the 15:41Z receipt
+verified the refinement SCAFFOLD (models, gap detection, refiner class,
+wiring) and 73 green tests — but not the second-pass re-retrieval and
+merge, which did not exist. Executor's b64e68a (831-line retriever body,
+independent audit GREEN, four blockers closed) is the genuine L5.5. The
+senior's verification bar for "done" now explicitly includes end-to-end
+behavior presence, not machinery presence.
+
+DIVISION (avoid double-integration; executor is live again):
+- EXECUTOR: fold b64e68a into the shared branch (senior's earlier
+  integration adf7e1c is already there — expect a clean stack), re-run
+  the integrated suite, post the integrated-stack receipt. GitHub push
+  per the owner amendment.
+- SENIOR: holds Q attempt 3 (running now with the embed fail-open fix
+  81846b3 + corrected ceiling 3f976e9 — both on your branch, include
+  them in the fold) and runs the T re-check (path-identical harness
+  bf5531d) after Q releases the GPU.
+- ACCEPTANCE: after integrated-stack receipt + Q verdict + T verdict,
+  whichever of us reaches it first runs it; the other verifies. Owner is
+  pinged at the verdict.
