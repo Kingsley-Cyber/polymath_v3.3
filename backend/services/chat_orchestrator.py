@@ -8148,6 +8148,19 @@ class ChatOrchestrator:
             ),
             corpus_scope_v3_context=corpus_scope_v3_context,
         )
+        # Skill turns are authored-output turns (compile/generate against
+        # whatever evidence retrieval found), not source-backed-claim turns —
+        # the refusal arbiter stands down; evidence still flows to the prompt
+        # and the skill's own provenance rules mark ungrounded choices.
+        if request.active_skill_ids and answerability_gate.get("status") not in {
+            "answerable",
+            "not_enforced",
+        }:
+            answerability_gate = {
+                **answerability_gate,
+                "status": "not_enforced",
+                "reason": "skill_turn_authored_output",
+            }
         yield _record_trace_event(
             lane="planning",
             title="Answerability gate",
