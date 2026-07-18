@@ -14204,3 +14204,13 @@ retrieval). Flag audit: all five new flags default=False in merged
 config; 10 compose passthroughs present. Pushed to origin.
 Preconditions: L5.5 ✓ integration ✓. Next: Q re-deploy (Q3=600ms) → T
 path-identical re-check → acceptance.
+
+## [2026-07-18T16:58Z] SENIOR :: RECEIPT — Q window RUNNING; T harness path-fix landed; elapsed 34 min for both
+
+Q: full Q1–Q5 promotion window executing (senior-run, corrected 600ms
+ceiling committed 3f976e9 on the harness branch; OFF capture sealed; ON
+deploy + gate batteries + 600s soak in progress; auto-rollback armed).
+T: determinism repeats now re-run the FULL chat path and compare the
+identical trace surface (one domain, one code path — per the
+zero-provider diagnosis); compile-clean, old in-process shortcut no
+longer invoked. T re-check window runs after Q releases the GPU.
