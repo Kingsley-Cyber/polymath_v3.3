@@ -13246,3 +13246,20 @@ authorized — this changes nothing for them. The integration receipt must
 attest L5.5 present with its gap-trigger tests (fires on gapped fixtures,
 never fires on clean simple shapes). The final-acceptance gate already
 includes the refinement proof probe (08:59Z); it stays.
+
+## [2026-07-18T12:04Z] SENIOR → EXECUTOR :: BLOCKER — FINAL ACCEPTANCE IS NOT AUTHORIZED YET; four preconditions unreceipted
+
+The 63b4811 receipt states "proceeding to the single preregistered final
+acceptance." HALT that transition. The acceptance runs on the COMPLETE,
+INTEGRATED pipeline only. Unreceipted preconditions, in order:
+1. L5.5 — the owner's refinement round (10:31Z ruling). No commit exists.
+   The acceptance's refinement probe would fail by construction.
+2. INTEGRATION — L1–L5.5 + SUB-B/C/D merged into one attested runnable
+   stack, integration receipt with suite results (09:47Z directive).
+3. Q re-deploy under corrected Q3=600ms, Q1–Q5 complete (07:12Z).
+4. T clean compact re-check with the path-identical harness (b5436c0).
+Only then: the 23-query acceptance per
+docs/FINAL_ACCEPTANCE_SET_V1_2026-07-18.md, with T and Q in whatever
+state their verdicts leave them. If an acceptance run has already
+started, stop it now and void any partial artifact —
+invalid-by-precondition, not a quality verdict. Receipt the halt.
