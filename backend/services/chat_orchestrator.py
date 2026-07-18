@@ -7438,7 +7438,16 @@ class ChatOrchestrator:
             if request.corpus_ids and bool(
                 getattr(settings, "GROUNDED_QUERY_PLANNER_ENABLED", False)
             ):
+                # D4 law extended (W1-D5, 2026-07-19): every retrieval helper
+                # shares the configured synthesis route identity. Utility-first
+                # resolution dispatched the grounded planner as the unpriced
+                # openai/-prefixed entry, which HTTP-errored on every deep
+                # query and held the chat cost ledger OPEN.
                 grounded_planner_route = (
+                    await resolve_query_model_kind(user_id, "synthesis")
+                    if user_id
+                    else None
+                ) or (
                     await resolve_query_model_kind(user_id, "utility")
                     if user_id
                     else None
