@@ -182,6 +182,20 @@ class _FailingArtifactDB(_DB):
         return collection_type(name, self.rows.get(name, []), self.operations)
 
 
+class _PoisonedTemporalEnvelopeDB(_DB):
+    def __init__(self) -> None:
+        super().__init__()
+        self.rows["documents"].append(
+            {
+                "corpus_id": "e2e",
+                "doc_id": "future-fiction",
+                "title": "A Fictional Production Timeline",
+                "document_date": "2099-01-01",
+                "updated_at": "2026-07-18T00:00:00Z",
+            }
+        )
+
+
 def test_artifact_classifier_covers_numbered_and_locator_qualified_forms() -> None:
     cases = {
         "What does Figure 9.4 demonstrate?": "figure",
@@ -242,6 +256,51 @@ async def test_context_generic_source_reference_is_not_named_absence() -> None:
 
 
 @pytest.mark.asyncio
+async def test_context_generic_roles_are_not_named_sources() -> None:
+    clear_corpus_scope_context_cache()
+    db = _DB()
+    for query in (
+        "What do drawing instructors and cinematographers each say about "
+        "guiding the viewer's eye through a frame?",
+        "What do Drawing Instructors and Cinematographers each say about framing?",
+    ):
+        context = await build_corpus_scope_v3_context(
+            db,
+            query=query,
+            corpus_ids=["e2e"],
+        )
+        assert context["named_source"]["eligible"] is False
+        assert context["named_source"]["phrases"] == []
+        assert context["named_source"]["missing"] is False
+
+
+@pytest.mark.asyncio
+async def test_context_preserves_quoted_capitalized_and_possessive_sources() -> None:
+    clear_corpus_scope_context_cache()
+    db = _DB()
+    quoted = await build_corpus_scope_v3_context(
+        db,
+        query='What does "the visual story" say about contrast?',
+        corpus_ids=["e2e"],
+    )
+    capitalized = await build_corpus_scope_v3_context(
+        db,
+        query="What does Walter Murch say about cutting?",
+        corpus_ids=["e2e"],
+    )
+    possessive = await build_corpus_scope_v3_context(
+        db,
+        query="What does roger deakins' masterclass say about lens flares?",
+        corpus_ids=["e2e"],
+    )
+    assert quoted["named_source"]["eligible"] is True
+    assert quoted["named_source"]["missing"] is True
+    assert capitalized["named_source"]["matched_doc_ids"] == ["murch"]
+    assert possessive["named_source"]["eligible"] is True
+    assert possessive["named_source"]["missing"] is True
+
+
+@pytest.mark.asyncio
 async def test_context_temporal_envelope_and_cache_are_deterministic() -> None:
     clear_corpus_scope_context_cache()
     db = _DB()
@@ -266,6 +325,37 @@ async def test_context_temporal_envelope_and_cache_are_deterministic() -> None:
     assert first["temporal"]["corpus_max_year"] == 2018
     assert first["temporal"]["out_of_range"] is True
     assert temporal_reads_after_second == temporal_reads_after_first
+
+
+@pytest.mark.asyncio
+async def test_context_temporal_absence_uses_exact_support_not_range_envelope() -> None:
+    clear_corpus_scope_context_cache()
+    db = _PoisonedTemporalEnvelopeDB()
+    unsupported = await build_corpus_scope_v3_context(
+        db,
+        query="Who won the 2026 Academy Award for Best Cinematography?",
+        corpus_ids=["e2e"],
+    )
+    supported_document_year = await build_corpus_scope_v3_context(
+        db,
+        query="What was published in 2004?",
+        corpus_ids=["e2e"],
+    )
+    unsupported_inside_envelope = await build_corpus_scope_v3_context(
+        db,
+        query="What happened in 2017?",
+        corpus_ids=["e2e"],
+    )
+    assert unsupported["temporal"]["corpus_max_year"] == 2099
+    assert unsupported["temporal"]["exact_support"] == []
+    assert unsupported["temporal"]["out_of_range"] is True
+    assert (
+        unsupported["temporal"]["support_basis"]
+        == "exact_time_expressions_or_document_dates"
+    )
+    assert supported_document_year["temporal"]["exact_support"] == ["2004"]
+    assert supported_document_year["temporal"]["out_of_range"] is False
+    assert unsupported_inside_envelope["temporal"]["out_of_range"] is True
 
 
 @pytest.mark.asyncio
