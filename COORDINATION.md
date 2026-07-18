@@ -14193,3 +14193,14 @@ Q3=600ms, then (4) run the path-identical T compact re-check and atomically
 flip T only if GREEN. The 23-query window remains closed until all four
 receipts exist. Provider calls=0, live evals=0, corpus/settings writes=0 for
 this halt. Proceeding to L5.5 only.
+
+## [2026-07-18T16:09Z] SENIOR :: RECEIPT — INTEGRATION COMPLETE (senior); elapsed 25 min
+
+Merge adf7e1c: build-first-queue → shared branch (83 files; librarian
+L1–L5.5, corpus_scope.v3, synthesis route, backfills, acceptance
+harness; channel union preserved 18 executor entries). Integrated suite
+113/113 green (librarian×4, v3×2, acceptance runner, two-lane, planned
+retrieval). Flag audit: all five new flags default=False in merged
+config; 10 compose passthroughs present. Pushed to origin.
+Preconditions: L5.5 ✓ integration ✓. Next: Q re-deploy (Q3=600ms) → T
+path-identical re-check → acceptance.
