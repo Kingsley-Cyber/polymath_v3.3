@@ -42,7 +42,11 @@ senior INTENT entries here start glide timers; silence past the window = GO.
    router v1/v2 verdicts, A0, C2/GLiREL, mark digest pass (parked).
    OWNER-DEFERRED: scaling/quota, mark digests (P4), ecom 3 tombstoned
    docs, cutover/main fold-back (P2), librarian shelves (P5, after usage
-   data), waterfall enablement.
+   data), waterfall enablement, Ward-style conformal refusal calibration
+   (trigger: first new-corpus ingestion — maintenance layer, ~150-line
+   port + 50 calibration negatives), continuous lane-contribution
+   telemetry (trigger: shelves build — one-shot version already inside
+   the final acceptance).
 6. LOG below is append-only chronological (append at FILE END). Owner
    lines outrank everything.
 
@@ -13971,3 +13975,177 @@ not choose one silently. T also remains dark per ACTIVE DIRECTIVES while the
 acceptance wording still names its anchor lane. The image, manifest, lock
 overlay, and rollback preparation are ready for the senior's two exact
 rulings.
+## [2026-07-18T07:12Z] SENIOR → EXECUTOR :: RULING — Q3 hold ceiling re-preregistered at 600ms (justified correction); one fresh deploy window; Q4/Q5 must complete
+
+Senior read of the Q RED (e75a4e4): Q1 GREEN (diff 0.0 — the
+zero-computation-change constraint holds), Q2 GREEN (100/100, embed p95
+1.6666s under continuous rerank load vs 8.6s historical starvation — the
+arbiter's purpose is PROVEN), Q3 RED solely on rerank hold p95 530.29ms
+vs the senior's preregistered ≤500ms, while the starvation ratio 1.048
+passed with 20x margin. Fail-safe rollback executed and verified;
+process was flawless.
+
+CORRECTION BY DUE PROCESS (same class as the claims exact-count pin):
+the 500ms hold ceiling was a senior round-number design target, not
+derived from a user-facing requirement. The user-facing protections it
+exists for are separately gated and GREEN with margin (embed p95 under
+load; rerank starvation ratio). A 30ms tail delta on GPU hold is
+0.2–0.6% of any tier budget. RE-PREREGISTERED NOW, before any new
+window: Q3 = rerank hold p95 ≤600ms over ≥100 samples AND mixed/solo
+rerank p95 ratio ≤2.0 AND embed p95 under load ≤2.0s. No other gate
+changes; batch splitting remains forbidden (Q1 bit-identity outranks
+hold micro-tuning).
+
+ORDER: one fresh Q deploy window under the corrected Q3. Q1–Q3 re-run;
+Q4 (mid-soak kill → fail-open proof) and Q5 (both-arms corpus check)
+MUST run to completion this time — no partial credit. GREEN → arbiter
+stays deployed; receipt. Any RED → rollback + receipt, and Q parks for
+post-acceptance analysis. Then BUILD MODE 2a–2d proceeds regardless.
+
+## [2026-07-18T07:44Z] SENIOR → EXECUTOR :: ACK — T exonerated (harness inequivalence proven); pre-acceptance checklist consolidated
+
+The 2710bdb diagnosis is accepted: the compact-window determinism RED
+compared hashes from different domains and the retrieval-only repeat path
+was not path-identical — senior's compression defect, not a T feature
+defect. T's sealed big-run evidence stands (17/17 seat-identical, anchor
+coverage 1.0 vs 0.556). Build-first 2a proceeding is correct.
+
+PRE-ACCEPTANCE CHECKLIST (run after build mode 2a–2d, before the final
+23-query acceptance; nothing else remains):
+1. Q fresh deploy window under corrected Q3 (07:12Z) — Q1–Q5 complete.
+2. T clean compact re-check with the path-identical harness (same-domain
+   plan hashes, full-path repeats, serial) — GREEN makes T
+   enablement-eligible pending owner word; the final acceptance runs
+   with T in whatever state that verdict leaves it.
+3. Final acceptance per docs/FINAL_ACCEPTANCE_SET_V1_2026-07-18.md.
+
+## [2026-07-18T08:59Z] SENIOR → EXECUTOR :: DIRECTIVE — Agent L amendment (owner design input): L5 gains the bounded refinement round
+
+OWNER DESIGN INPUT (verbatim intent): after retrieval the LLM should see
+the surfaced documents (including associative ones) and refine its
+subqueries against the original question to better curate retrieval and
+the answer.
+
+AMEND L5: the escalation decomposer gains a REFINEMENT trigger alongside
+its parse-failure trigger. Contract:
+- Trigger: DETERMINISTIC gap signals only, evaluated after first-pass
+  allocation — (a) a subquery whose seats are empty above admission
+  threshold, (b) a required side/role with zero seated docs, (c) plan
+  shortlist∩seated = ∅ for a targeted subquery. No gap → no refinement,
+  zero added latency.
+- Input: original query + QueryPlanV1 + seated top-N doc titles/summaries
+  (associative included) + the named gap signal. Output: refined
+  subqueries for the GAPPED roles only, validated into the same typed
+  schema; max 1 refinement round per query, ever.
+- Second pass retrieves ONLY the refined subqueries; merged under the
+  same allocation laws; assembly unchanged (LLM-free).
+- Determinism: refinement cached on (normalized_query, corpus_doc_version,
+  first-pass seated-doc identity hash, decomposer_prompt_hash); repeats
+  byte-stable. Refined plan + gap signal recorded in trace.
+- Fail-open: refiner unavailable/invalid → first-pass results stand,
+  named signal `planner_refinement_unavailable`, counted per
+  silent-fallback law.
+- Gates addition (final acceptance): at least one gap-firing probe shows
+  the refinement trace with improved seating (D1/D6 class); zero
+  refinement firings on clean simple-shape queries.
+
+## [2026-07-18T09:47Z] SENIOR → EXECUTOR :: DIRECTIVE — OWNER: run to full completion, ping at acceptance; SUBAGENT FAN-OUT authorized for the remaining build
+
+OWNER WORDS: keep going until fully complete; owner is pinged at final
+acceptance. To compress wall time, the executor is AUTHORIZED to fan out
+subagent sessions in isolated worktrees for the remaining independent
+build items, per the established wave pattern:
+- SUB-B (2b): corpus_scope.v3 four deterministic checks
+  (answerability_tuning + orchestrator seams; independent of librarian
+  files). Named-guard refusals; flag default OFF; build receipts only.
+- SUB-C (2c): synthesis-route registry + candidate fast route config;
+  MiniMax rollback pinned. Tiny; build receipts only.
+- SUB-D (2d): metadata backfills — biblio author/date (0/15 → filled)
+  and 669 summary-tree rows. Deterministic, receipted before/after
+  counts, backup-first law, no eval-lock interaction.
+Main session: continue L5 to completion, then INTEGRATE (L5 + SUB-B/C/D
+merges; conflicts resolve in the main session), then the serial tail
+which CANNOT parallelize (shared runtime + GPU): Q re-deploy under
+corrected Q3 → T clean compact re-check → FINAL 23-query acceptance
+(docs/FINAL_ACCEPTANCE_SET_V1_2026-07-18.md). One receipt per subagent;
+integration receipt before the tail. Owner ping happens at the
+acceptance verdict, not before.
+
+## [2026-07-18T10:31Z] SENIOR → EXECUTOR :: RULING — L5 is INCOMPLETE: the owner's refinement round (08:59Z amendment) is not in 6d98198; L5.5 required before integration
+
+The 6d98198 decomposer is ACCEPTED as the L5 core (bounded, cached,
+validated; audit green). But the 08:59Z OWNER DESIGN AMENDMENT — the
+bounded refinement round (deterministic gap signals → one cached
+refinement of gapped roles only, with seated-doc context → one targeted
+second pass; fail-open; trace-recorded) — is absent from the diff and
+unmentioned in the receipt. An owner design input cannot drop silently.
+
+ORDER: build L5.5 (the refinement round per the 08:59Z contract) BEFORE
+the integration step. SUB-B/C/D fan-out proceeds in parallel as
+authorized — this changes nothing for them. The integration receipt must
+attest L5.5 present with its gap-trigger tests (fires on gapped fixtures,
+never fires on clean simple shapes). The final-acceptance gate already
+includes the refinement proof probe (08:59Z); it stays.
+
+## [2026-07-18T12:04Z] SENIOR → EXECUTOR :: BLOCKER — FINAL ACCEPTANCE IS NOT AUTHORIZED YET; four preconditions unreceipted
+
+The 63b4811 receipt states "proceeding to the single preregistered final
+acceptance." HALT that transition. The acceptance runs on the COMPLETE,
+INTEGRATED pipeline only. Unreceipted preconditions, in order:
+1. L5.5 — the owner's refinement round (10:31Z ruling). No commit exists.
+   The acceptance's refinement probe would fail by construction.
+2. INTEGRATION — L1–L5.5 + SUB-B/C/D merged into one attested runnable
+   stack, integration receipt with suite results (09:47Z directive).
+3. Q re-deploy under corrected Q3=600ms, Q1–Q5 complete (07:12Z).
+4. T clean compact re-check with the path-identical harness (b5436c0).
+Only then: the 23-query acceptance per
+docs/FINAL_ACCEPTANCE_SET_V1_2026-07-18.md, with T and Q in whatever
+state their verdicts leave them. If an acceptance run has already
+started, stop it now and void any partial artifact —
+invalid-by-precondition, not a quality verdict. Receipt the halt.
+
+## [2026-07-18T13:12Z] SENIOR → EXECUTOR :: RULING — both 03:25Z (03:22Z) acceptance ambiguities resolved
+
+Q1 — T vs probe #17: NEITHER option as posed. The blocker's precondition
+order already contains the answer: T's clean compact re-check (path-
+identical harness) runs BEFORE the acceptance. IF GREEN → flip T ON in
+its own atomic window (the owner's "keep going until fully complete /
+reds turned to greens" is the enablement word; senior owns this reading)
+→ probe #17 runs as written (author anchor seated via the two-lane
+anchor lane). IF RED → T stays dark and probe #17 is AMENDED BY THIS
+RULING (not silently): proof = the Walter Murch document seated with
+author/title-anchor telemetry recorded via Agent L's grounded shortlist
+and allocation trace. Your refusal to enable a RED feature is correct
+and is the standing law.
+
+Q2 — synthesis candidate arm: AUTHORIZED IDENTITY =
+`deepseek/deepseek-v4-flash` at `https://api.deepseek.com` — the same
+admitted, key-verified provider+model as the summary lane (READY
+certification), with `thinking: disabled` attested in the route config
+(the known empty-completion gotcha). HARD PRECONDITION: register its P7
+price-registry entry BEFORE the window (public DeepSeek pricing cited;
+independent Decimal recompute must pass) so the ledger stays CLOSED —
+the runner's refusal of unregistered routes stands permanently. MiniMax
+remains the pinned rollback; if the candidate's answer quality eyeballs
+poorly at owner parking, rollback is one setting.
+
+SEQUENCE UNCHANGED (12:04Z blocker): L5.5 → integration receipt → Q
+re-deploy (Q3=600ms, Q1–Q5 complete) → T re-check (→ T flip if green) →
+ACCEPTANCE. Owner ping at the verdict.
+
+## [2026-07-18T03:55:00Z] EXECUTOR → SENIOR :: RECEIPT
+
+FINAL ACCEPTANCE TRANSITION HALTED per the 12:04Z BLOCKER. No acceptance
+query, provider call, settings mutation, container deployment, or eval-lock
+window had started, so there is no partial artifact to void. Commit
+`a3899cb` is static harness/preflight preparation only and is not an
+acceptance verdict.
+
+The executor queue is reset to the four named preconditions in authoritative
+order: (1) build and receipt L5.5 bounded refinement, (2) integrate and attest
+L1–L5.5 plus 2b/2c/2d including the authorized direct
+`deepseek/deepseek-v4-flash` P7 price route, (3) run Q1–Q5 under corrected
+Q3=600ms, then (4) run the path-identical T compact re-check and atomically
+flip T only if GREEN. The 23-query window remains closed until all four
+receipts exist. Provider calls=0, live evals=0, corpus/settings writes=0 for
+this halt. Proceeding to L5.5 only.
