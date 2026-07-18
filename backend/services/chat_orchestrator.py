@@ -7178,7 +7178,8 @@ class ChatOrchestrator:
         # only. Without this gate, selecting a CLI/pool model in the chat UI
         # was silently replaced by the configured synthesis entry.
         explicit_pool_selection = bool(
-            str(getattr(request, "model", "") or "").startswith("pool:")
+            request.overrides
+            and str(request.overrides.model or "").startswith("pool:")
         )
         synthesis_route = await _resolve_synthesis_route_override(
             enabled=settings.SYNTHESIS_ROUTE_OVERRIDE_ENABLED
