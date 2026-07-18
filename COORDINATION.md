@@ -15326,3 +15326,10 @@ T4b DROPDOWN SHIPPED: ModelSelector provider groups now collapse/expand
 (chevron + entry-count badge), collapsed by default, persisted in
 localStorage, the active model's group always forced open. Frontend
 rebuilt + redeployed, :3000 healthy.
+
+## 2026-07-18 13:55Z — SENIOR — Track 4 TRUE E2E: chat query answered through the CLI (receipted)
+Owner rejected the prior receipt ("its not e2e... my query uses the cli") — correctly. Three real bugs found and fixed:
+1) **Two-copies trap (frontend)**: ModelSelector collapse edit sat in polymath_v3.3 but the image builds from the WORKTREE context → owner saw the old UI. Synced + rebuilt from the right context; served bundle now greps `polymath.modelSelector.openGroups` (asset index-DgGXQ7Iu.js).
+2) **Gate ordering (backend)**: resolve_by_entry_id rewrites overrides.model to the concrete model BEFORE the synthesis-override gate read it → explicit_pool_selection was always False → override stomped every dropdown pick (prior "E2E" answer was actually deepseek; the third shim POST was a stray). Flag now captured at _get_model_to_use time (73ebb1c; synced to worktree f2541af).
+3) **Shim not stream-capable**: backend calls synthesis with stream=true; shim returned plain JSON → LiteLLM `usage_missing` → ledger OPEN → fallback (which also died: kept shim base_url with deepseek model → 404). Shim now speaks OpenAI SSE chunks with usage in the final chunk + [DONE].
+RECEIPTS (query "what does FACS measure and how", corpus authentic_library, overrides.model=pool:cli-shim__chatgpt-cli): shim POST delta = EXACTLY 1 for the chat call; route trace `model: openai/chatgpt-cli, synthesis_route: {applied: false, reason: disabled}`; answer streamed grounded; done event `model_used: openai/chatgpt-cli` (label now truthful — owner no longer blind); 7.9s wall. Pool entries confirmed on the ONLY user (Sambenja). cursor-agent/antigravity report unavailable in /health until installed — entries listed, fail fast with cli_unavailable if picked.
