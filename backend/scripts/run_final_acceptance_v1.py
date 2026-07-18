@@ -82,6 +82,8 @@ CONCURRENCY = 3
 TOP_K = 8
 TEMPERATURE = 0.0
 EXPECTED_EXECUTIONS = 23
+REFINEMENT_DEPTH_ORDINALS = (1, 2, 5, 6)
+REFINEMENT_SIMPLE_ORDINALS = (13, 14, 15, 16)
 DETERMINISM_IDS = (
     "d1a_anticipation_editing_tension",
     "d1b_guiding_eye_drawing_cinematography",
@@ -256,7 +258,7 @@ def _runtime_flags(*, expected_two_lane: bool) -> dict[str, bool]:
         "ATOMIC_CLAIM_ANCHORS_ENABLED": True,
         "LIBRARIAN_PLANNER_ENABLED": True,
         "LIBRARIAN_PLANNER_SHADOW": False,
-        "LIBRARIAN_LLM_DECOMPOSER_ENABLED": False,
+        "LIBRARIAN_LLM_DECOMPOSER_ENABLED": True,
         "SYNTHESIS_ROUTE_OVERRIDE_ENABLED": True,
         "TWO_LANE_ANCHORING_ENABLED": expected_two_lane,
         "FOUR_LANE_TIER0_ROUTER_ENABLED": False,
@@ -594,6 +596,10 @@ def _schema_proofs(
     librarian_diagnostics = dict(librarian_trace.get("diagnostics") or {})
     shortlist_diagnostics = dict(librarian_diagnostics.get("shortlist") or {})
     librarian_execution = dict(retrieval_diagnostics.get("librarian_execution") or {})
+    librarian_refinement = dict(librarian_execution.get("refinement") or {})
+    librarian_refinement_second_pass = dict(
+        librarian_refinement.get("second_pass") or {}
+    )
     temporal = dict(retrieval_diagnostics.get("temporal_routing") or {})
     claim = _trace(traces, "Atomic claim anchors")
     if not claim:
@@ -734,6 +740,27 @@ def _schema_proofs(
             "execution_active": librarian_execution.get("active"),
             "filled_lane_count": filled_lanes,
             "seat_surface": _seat_surface(retrieval_diagnostics),
+        },
+        "refinement": {
+            "enabled": librarian_refinement.get("enabled"),
+            "fired": librarian_refinement.get("fired"),
+            "status": librarian_refinement.get("status"),
+            "reason": librarian_refinement.get("reason"),
+            "round": librarian_refinement.get("round"),
+            "gap_count": len(librarian_refinement.get("gaps") or []),
+            "second_pass_attempted": librarian_refinement_second_pass.get("attempted"),
+            "improved_seating": librarian_refinement_second_pass.get(
+                "improved_seating"
+            ),
+            "remaining_gap_count": len(
+                librarian_refinement_second_pass.get("remaining_gaps") or []
+            ),
+            "planner_refinement_unavailable": librarian_refinement.get(
+                "planner_refinement_unavailable"
+            ),
+            "silent_fallback_count": int(
+                librarian_refinement.get("silent_fallback_count") or 0
+            ),
         },
         "associative_profile": {
             "associative_hit_count": len(associative_hits),
@@ -1078,6 +1105,39 @@ def _median(values: Sequence[float]) -> float | None:
     return round(float(statistics.median(values)), 3) if values else None
 
 
+def _refinement_acceptance_surface(
+    by_ordinal: dict[int, dict[str, Any]],
+) -> dict[str, Any]:
+    def row(ordinal: int) -> dict[str, Any]:
+        refinement = dict(by_ordinal[ordinal]["schema_proofs"].get("refinement") or {})
+        return {
+            "ordinal": ordinal,
+            "query_id": by_ordinal[ordinal]["query_id"],
+            "enabled": refinement.get("enabled"),
+            "fired": refinement.get("fired"),
+            "status": refinement.get("status"),
+            "second_pass_attempted": refinement.get("second_pass_attempted"),
+            "improved_seating": refinement.get("improved_seating"),
+        }
+
+    depth = [row(ordinal) for ordinal in REFINEMENT_DEPTH_ORDINALS]
+    simple = [row(ordinal) for ordinal in REFINEMENT_SIMPLE_ORDINALS]
+    return {
+        "depth_probes": depth,
+        "simple_probes": simple,
+        "gap_firing_improved": any(
+            item["enabled"] is True
+            and item["fired"] is True
+            and item["second_pass_attempted"] is True
+            and item["improved_seating"] is True
+            for item in depth
+        ),
+        "simple_zero_firings": all(
+            item["enabled"] is True and item["fired"] is False for item in simple
+        ),
+    }
+
+
 def summarize(
     executions: Sequence[dict[str, Any]],
     repeats: Sequence[dict[str, Any]],
@@ -1111,6 +1171,7 @@ def summarize(
     )
     fast_p50 = _median(fast)
     deep_p50 = _median(deep)
+    refinement = _refinement_acceptance_surface(by_ordinal)
     gates = {
         "technical_23_of_23": (
             len(executions) == EXPECTED_EXECUTIONS
@@ -1130,6 +1191,8 @@ def summarize(
             for i in range(19, 24)
         ),
         "associative_profile_consumed": associative_consumed,
+        "refinement_gap_improves_d1_d6": refinement["gap_firing_improved"],
+        "refinement_not_fired_clean_13_to_16": refinement["simple_zero_firings"],
         "corpus_citation_membership": membership,
         "fast_p50_le_5s": fast_p50 is not None and fast_p50 <= 5.0,
         "deep_p50_le_15s": deep_p50 is not None and deep_p50 <= 15.0,
@@ -1158,6 +1221,7 @@ def summarize(
             round(sorted(deep)[max(0, int(len(deep) * 0.95) - 1)], 3) if deep else None
         ),
         "cost_ledger": cost,
+        "refinement": refinement,
         "gates": gates,
         "all_green": all(gates.values()),
         "owner_quality_eyeball_pending": True,

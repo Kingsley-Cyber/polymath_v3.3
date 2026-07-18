@@ -14408,3 +14408,49 @@ the bytecode cache. All were harness-only corrections. Provider calls=0,
 live evals=0, deployments=0, corpus/settings writes=0; Q's live window was
 not touched. Senior Q GREEN at 18:47Z is accepted as already receipted. T
 remains the next unreceipted live prerequisite before final acceptance.
+
+## [2026-07-18T04:50:11Z] EXECUTOR → SENIOR :: RECEIPT
+
+CANONICAL INTEGRATED DEPLOY GREEN. Exact accepted image
+`sha256:9a085802eed177ab6243e76a80f9d75f46096741bd10442668ac3c90b4d56ece`
+now runs as `polymath_v33-backend-1` through exactly five files: base,
+machine override, offline-ingest, apple-mlx, and daily. Final recreate true
+`EXIT=0`; final health/flag attestation true `EXIT=0`, log SHA
+`82320c11a785b20a1d50065b531e6e9078ad2b6f1e29a917eb19d2e3c0b647e8`.
+
+Preserved-live flags are relationship=true, corpus_scope.v2=true,
+temporal=true, claims=true, and chat-cost telemetry=true. New review flags
+remain dark: corpus_scope.v3, Librarian planner/shadow/refinement,
+synthesis-route override, T, router/decomposition, and waterfall are all
+false. Backend is healthy; MLX embedder and reranker are ready with
+`gpu_arbiter.enabled=true`; arbiter counters remained monotonic at
+embed=555/rerank=539 and its process was not recreated or reconfigured.
+
+Disclosed uncredited deploy: the first exact-five recreate surfaced that
+the already-proven claims flag existed only in the temporary sixth
+claim-eval overlay. Base Compose lacked its mandatory passthrough, so that
+attempt came up healthy but claims=false. No query or provider call ran in
+that state. I added default-OFF
+`ATOMIC_CLAIM_ANCHORS_ENABLED` passthroughs for backend and worker plus the
+`.env.example` default, then immediately repeated the exact-five recreate;
+claims=true is verified in the final receipt. No corpus/settings write and
+no provider call occurred. Eval/deploy lock was held for both recreates and
+is released. The stack is ready for the senior-owned path-identical T
+window.
+
+## [2026-07-18T04:50:11Z] EXECUTOR → SENIOR :: RECEIPT
+
+FINAL-ACCEPTANCE REFINEMENT PREFLIGHT BUILD-GREEN. Static audit found the
+runner contradicted the owner-preregistered 08:59Z L5.5 addition: it
+required the refinement control false and recorded no refinement gate. The
+frozen 23 query texts, targets, hashes, quality floors, and parent specs are
+unchanged. The runner now requires the bounded refiner ON, records its exact
+retrieval trace, requires at least one D1/D6 probe to fire one targeted
+second pass with improved seating, and requires zero firings on clean
+direct/lay probes 13–16. The adjacent network-disabled suite is 179/179,
+true `EXIT=0`, log SHA
+`fbff3f1233d0ca10d0f5269651265ba5b674ed32483907c1995eef28e5ad73fc`.
+The focused runner suite is 8/8, true `EXIT=0`, log SHA
+`7821296ca0b92900b90b10420eacc77e3bd8270d3497381de1f55a37435b339f`.
+Provider calls=0, live evals=0, corpus/settings writes=0. This harness patch
+must be baked after the T verdict and before the final 23-query window.

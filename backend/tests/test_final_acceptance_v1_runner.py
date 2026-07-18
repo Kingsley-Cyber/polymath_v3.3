@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 from scripts import run_final_acceptance_v1 as runner
 
@@ -149,3 +150,137 @@ def test_profile_consumption_requires_shortlist_target_to_reach_final_sources() 
         "story"
     ]
     assert missed["associative_profile"]["consumed"] is False
+
+
+def test_runtime_contract_enables_bounded_refinement(monkeypatch) -> None:
+    enabled = {
+        "QUERY_PLAN_V2",
+        "NEO4J_ENABLED",
+        "RELATIONSHIP_EVIDENCE_ALLOCATION_ENABLED",
+        "ANSWERABILITY_CORPUS_SCOPE_V2_ENABLED",
+        "ANSWERABILITY_CORPUS_SCOPE_V3_ENABLED",
+        "TEMPORAL_QUERY_ROUTING_ENABLED",
+        "ATOMIC_CLAIM_ANCHORS_ENABLED",
+        "LIBRARIAN_PLANNER_ENABLED",
+        "LIBRARIAN_LLM_DECOMPOSER_ENABLED",
+        "SYNTHESIS_ROUTE_OVERRIDE_ENABLED",
+        "CHAT_COST_TELEMETRY_ENABLED",
+    }
+    names = enabled | {
+        "LIBRARIAN_PLANNER_SHADOW",
+        "TWO_LANE_ANCHORING_ENABLED",
+        "FOUR_LANE_TIER0_ROUTER_ENABLED",
+        "FOUR_LANE_TIER0_SUBQUERY_DECOMPOSITION_ENABLED",
+        "WATERFALL_ASSEMBLY",
+        "RERANK_EVIDENCE_SUPPORT",
+        "PARENT_EXCERPT_ENABLED",
+        "HYDE_ENABLED",
+        "SHELF_RESERVE_ENABLED",
+        "GROUNDED_QUERY_PLANNER_ENABLED",
+        "AGENTIC_MODE_ENABLED",
+    }
+    settings = SimpleNamespace(**{name: name in enabled for name in names})
+    monkeypatch.setattr(runner, "get_settings", lambda: settings)
+
+    observed = runner._runtime_flags(expected_two_lane=False)
+
+    assert observed["LIBRARIAN_LLM_DECOMPOSER_ENABLED"] is True
+    assert observed["TWO_LANE_ANCHORING_ENABLED"] is False
+
+
+def test_refinement_trace_is_recorded_from_retrieval_diagnostics() -> None:
+    traces = [
+        {
+            "title": "Local RAG retrieval",
+            "status": "done",
+            "metadata": {
+                "retrieval_diagnostics": {
+                    "librarian_execution": {
+                        "refinement": {
+                            "enabled": True,
+                            "fired": True,
+                            "status": "built",
+                            "round": 1,
+                            "gaps": [{"lane_id": "subquery:0"}],
+                            "second_pass": {
+                                "attempted": True,
+                                "improved_seating": True,
+                                "remaining_gaps": [],
+                            },
+                        }
+                    }
+                }
+            },
+        }
+    ]
+
+    proof = runner._schema_proofs(
+        {"schema_proof": "doc_hit"},
+        traces=traces,
+        sources={"items": []},
+        expected={"all_groups_hit": True},
+    )
+
+    assert proof["refinement"] == {
+        "enabled": True,
+        "fired": True,
+        "status": "built",
+        "reason": None,
+        "round": 1,
+        "gap_count": 1,
+        "second_pass_attempted": True,
+        "improved_seating": True,
+        "remaining_gap_count": 0,
+        "planner_refinement_unavailable": None,
+        "silent_fallback_count": 0,
+    }
+
+
+def test_refinement_acceptance_requires_depth_improvement_and_clean_nonfiring() -> None:
+    def execution(ordinal: int, *, fired: bool, improved: bool) -> dict:
+        return {
+            "query_id": f"q{ordinal}",
+            "schema_proofs": {
+                "refinement": {
+                    "enabled": True,
+                    "fired": fired,
+                    "status": "built" if fired else "not_needed",
+                    "second_pass_attempted": fired,
+                    "improved_seating": improved,
+                }
+            },
+        }
+
+    rows = {
+        ordinal: execution(
+            ordinal,
+            fired=ordinal == runner.REFINEMENT_DEPTH_ORDINALS[0],
+            improved=ordinal == runner.REFINEMENT_DEPTH_ORDINALS[0],
+        )
+        for ordinal in (
+            *runner.REFINEMENT_DEPTH_ORDINALS,
+            *runner.REFINEMENT_SIMPLE_ORDINALS,
+        )
+    }
+    surface = runner._refinement_acceptance_surface(rows)
+    assert surface["gap_firing_improved"] is True
+    assert surface["simple_zero_firings"] is True
+
+    rows[runner.REFINEMENT_SIMPLE_ORDINALS[0]] = execution(
+        runner.REFINEMENT_SIMPLE_ORDINALS[0],
+        fired=True,
+        improved=True,
+    )
+    assert runner._refinement_acceptance_surface(rows)["simple_zero_firings"] is False
+
+    rows[runner.REFINEMENT_SIMPLE_ORDINALS[0]] = execution(
+        runner.REFINEMENT_SIMPLE_ORDINALS[0],
+        fired=False,
+        improved=False,
+    )
+    rows[runner.REFINEMENT_DEPTH_ORDINALS[0]] = execution(
+        runner.REFINEMENT_DEPTH_ORDINALS[0],
+        fired=True,
+        improved=False,
+    )
+    assert runner._refinement_acceptance_surface(rows)["gap_firing_improved"] is False
