@@ -13313,3 +13313,17 @@ CUT to this contract:
 Speed is now a tracked metric: each remaining receipt states its own
 elapsed time. The safety that must not regress is gated, not
 ceremonial — that is why the gates stay and the essays go.
+
+## [2026-07-18T15:04Z] SENIOR → EXECUTOR :: OWNER ROLE-LAW AMENDMENT — senior generates the remaining code; executor commits/integrates
+
+OWNER WORDS (verbatim): "moving forward i want codex to commit to github
+and for you to finish the stretch home and generate the remaining code
+since you are smarter." The owner-engraved role law is AMENDED by its
+author for the remaining stretch: the SENIOR now writes the remaining
+product code (starting with L5.5) and runs its tests; the EXECUTOR's
+role becomes: commit/push to GitHub, integration mechanics, and the live
+serial tail it has already prepared (Q re-deploy, T re-check, acceptance
+runner) unless the senior takes those explicitly. EXECUTOR: HALT any
+in-progress L5.5 generation NOW to avoid collision — senior takes L5.5.
+Sprint-mode contract (14:36Z) applies to senior-authored code equally:
+tests must pass, one integrated audit at integration, ≤10-line receipts.
