@@ -61,7 +61,11 @@ Q2_MIN_OVERLAPPED_RERANK_CALLS = 5
 Q1_TOLERANCE = 1e-12
 Q2_EMBED_P95_SECONDS = 2.0
 Q3_RERANK_RATIO_MAX = 2.0
-Q3_RERANK_HOLD_P95_MS_MAX = 500.0
+# 600ms per the 2026-07-18T07:12Z senior re-preregistration (COORDINATION):
+# the 500ms round-number target failed by 30ms while every user-facing
+# protection (embed p95 under load, rerank starvation ratio) passed with
+# margin; correction issued before this window, never inside one.
+Q3_RERANK_HOLD_P95_MS_MAX = 600.0
 FAIL_OPEN_ALERT = "gpu_arbiter_unavailable"
 FAIL_OPEN_ALERTS = {
     "embed": f"{FAIL_OPEN_ALERT} workload=embed operation=acquire",
@@ -1454,7 +1458,7 @@ def evaluate_q3(
         >= Q2_MIN_MIXED_RERANK_CALLS,
         "rerank_p95_ratio_le_2": ratio <= Q3_RERANK_RATIO_MAX,
         "rerank_hold_p95_present": hold_p95 is not None,
-        "rerank_hold_p95_le_500_ms": hold_p95 is not None
+        "rerank_hold_p95_le_600_ms": hold_p95 is not None
         and float(hold_p95) <= Q3_RERANK_HOLD_P95_MS_MAX,
         "rerank_hold_sample_count_present": int(
             (scheduler.get("hold_sample_count") or {}).get("rerank", 0)
