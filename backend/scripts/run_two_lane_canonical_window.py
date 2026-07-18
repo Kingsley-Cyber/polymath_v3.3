@@ -190,9 +190,12 @@ def _runtime_flags() -> dict[str, bool]:
     expected = {
         "RELATIONSHIP_EVIDENCE_ALLOCATION_ENABLED": True,
         "ANSWERABILITY_CORPUS_SCOPE_V2_ENABLED": True,
-        "TEMPORAL_QUERY_ROUTING_ENABLED": False,
+        # True since the owner-ordered atomic flip windows of 2026-07-18;
+        # the T window measures against the LIVE production stack, not the
+        # pre-flip baseline this contract was first written from.
+        "TEMPORAL_QUERY_ROUTING_ENABLED": True,
         "RERANK_EVIDENCE_SUPPORT": False,
-        "ATOMIC_CLAIM_ANCHORS_ENABLED": False,
+        "ATOMIC_CLAIM_ANCHORS_ENABLED": True,
         "PARENT_EXCERPT_ENABLED": False,
         "WATERFALL_ASSEMBLY": False,
         # Compatibility-only legacy setting; the production selector reads the
@@ -201,7 +204,9 @@ def _runtime_flags() -> dict[str, bool]:
         "TWO_LANE_ANCHORING_ENABLED": True,
         "HYDE_ENABLED": False,
         "SHELF_RESERVE_ENABLED": False,
-        "GROUNDED_QUERY_PLANNER_ENABLED": False,
+        # Pre-existing live production feature (corpus-grounded era .env),
+        # not part of today's review families.
+        "GROUNDED_QUERY_PLANNER_ENABLED": True,
         "FOUR_LANE_TIER0_ROUTER_ENABLED": False,
         "FOUR_LANE_TIER0_SUBQUERY_DECOMPOSITION_ENABLED": False,
         "AGENTIC_MODE_ENABLED": False,
