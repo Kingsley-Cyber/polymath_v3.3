@@ -15071,3 +15071,16 @@ NEXT (staircase): W1b helper-route standalone canary (10 calls) → W1c
 librarian-only compact window (≤10 queries: floors-6 + 2 depth + simple
 parity ×2) on a rebuilt image. Executor may take W1b/W1c from this
 receipt; otherwise senior continues next turn.
+
+## [2026-07-19T05:24Z] SENIOR :: RECEIPT — W1b HELPER-ROUTE CANARY GREEN; elapsed 22 min
+
+Standalone canary through the exact helper path (resolve synthesis →
+llm_service.complete_sync, settings service attached): route resolves to
+deepseek/deepseek-v4-flash at api.deepseek.com/v1; 10/10 successes, 0
+empty completions (thinking-disabled holding), 0 errors, p50 0.82s, max
+1.18s. The re-run's timed-out helper calls are attributed to the
+pre-D4 wrong-route dispatch, now fixed. W1c NEXT: rebuild image from
+shared HEAD (includes W1-D2 a6568aa), deploy, atomic
+LIBRARIAN_PLANNER_ENABLED window — ≤10 queries: floors-6 + depth d1a/d2a
++ simple-parity ×2; gates: floors 6/6, simple parity byte-identical,
+latency ≤ baseline+10%, all librarian traces present.
