@@ -15055,3 +15055,19 @@ A credential-pattern scan found only the journal's literal test-only auth
 values and no live API key, bearer token, encrypted setting, or password.
 No provider call, live eval, deploy, or corpus/settings write occurred.
 
+
+## [2026-07-19T04:41Z] SENIOR :: RECEIPT — W1-D2 FIXED (a6568aa); elapsed 50 min incl. fold
+
+Shared branch folded to the repair line (1c5d4b7), then the root fix:
+degraded librarian plans return behavior_applied=False ALWAYS — the
+deterministic fallback plan stays in the trace for continuity, baseline
+retrieval runs untouched, named signal librarian_degraded_fallback +
+silent_fallback_count per the accounting law. D3's test updated to the
+fail-open contract. Suites 65/65 green (planner shadow, execution,
+decomposer, planned retrieval). W1-D1 note: with D2 fixed, a degraded
+simple query = baseline + trace note (harmless); pre-classification
+bypass is deferred as optimization, not correctness.
+NEXT (staircase): W1b helper-route standalone canary (10 calls) → W1c
+librarian-only compact window (≤10 queries: floors-6 + 2 depth + simple
+parity ×2) on a rebuilt image. Executor may take W1b/W1c from this
+receipt; otherwise senior continues next turn.
