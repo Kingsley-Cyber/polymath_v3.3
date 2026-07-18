@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 from models.schemas import SourceChunk
 from services.retriever.evidence_allocation import allocate_two_lane_seats
+from services.retriever.planned_attribution import merge_planned_attribution
 from services.retriever.query_plan import FALLBACK_PROBE_ID
 from services.retriever.reservation_policy import (
     CORPUS_RESERVATION_MIN_SCORE,
@@ -654,6 +655,87 @@ def _bounded_lane_seat_quotas(
     return requested, effective
 
 
+def cap_planned_candidates_by_affinity(
+    chunks: list[SourceChunk],
+    *,
+    lane_rerank_caps: dict[str, int],
+    global_rerank_cap: int,
+) -> tuple[list[SourceChunk], dict[str, object]]:
+    """Cap the deduplicated union by each candidate's max-affinity lane."""
+
+    lane_ids = list(dict.fromkeys(lane_rerank_caps))
+    requested, effective = _bounded_lane_seat_quotas(
+        lane_ids,
+        lane_rerank_caps,
+        limit=max(1, int(global_rerank_cap)),
+    )
+    union_limit = max(
+        1,
+        min(
+            max(1, int(global_rerank_cap)),
+            max(1, sum(effective.values())),
+        ),
+    )
+    counts = {lane_id: 0 for lane_id in lane_ids}
+    dropped = {lane_id: 0 for lane_id in lane_ids}
+    selected_keys: set[str] = set()
+
+    def select(chunk: SourceChunk) -> bool:
+        key = _candidate_key(chunk)
+        if not key or key in selected_keys or len(selected_keys) >= union_limit:
+            return False
+        lane_id = str((chunk.metadata or {}).get("planned_max_affinity_lane") or "")
+        if lane_id in effective and counts[lane_id] >= effective[lane_id]:
+            dropped[lane_id] += 1
+            return False
+        selected_keys.add(key)
+        if lane_id in effective:
+            counts[lane_id] += 1
+        return True
+
+    original = next(
+        (
+            chunk
+            for chunk in chunks
+            if "original" in set((chunk.metadata or {}).get("planned_lanes") or [])
+        ),
+        None,
+    )
+    if original is not None:
+        select(original)
+    for lane_id in lane_ids:
+        candidate = next(
+            (
+                chunk
+                for chunk in chunks
+                if str((chunk.metadata or {}).get("planned_max_affinity_lane") or "")
+                == lane_id
+            ),
+            None,
+        )
+        if candidate is not None:
+            select(candidate)
+    for chunk in chunks:
+        select(chunk)
+        if len(selected_keys) >= union_limit:
+            break
+    output = [chunk for chunk in chunks if _candidate_key(chunk) in selected_keys]
+    return output, {
+        "active": bool(lane_ids),
+        "requested": requested,
+        "effective": effective,
+        "requested_sum": sum(requested.values()),
+        "effective_sum": sum(effective.values()),
+        "global_rerank_cap": max(1, int(global_rerank_cap)),
+        "union_limit": union_limit,
+        "input_candidates": len(chunks),
+        "output_candidates": len(output),
+        "assigned_counts": counts,
+        "dropped_by_lane_cap": dropped,
+        "affinity_authority": ("literal_grounding_or_document_route_no_score_mutation"),
+    }
+
+
 def _reconcile_lane_quota_receipt(
     output: list[SourceChunk],
     receipt: dict[str, object],
@@ -881,24 +963,48 @@ def fuse_planned_pools(
                 lane_bucket.append(key)
             scores[key] = scores.get(key, 0.0) + weight / (rrf_k + rank + 1.0)
             existing = representatives.get(key)
+            previous_metadata = dict(existing.metadata or {}) if existing else {}
+            previous_provenance = list(existing.provenance or []) if existing else []
             if existing is None or float(chunk.score or 0.0) > float(
                 existing.score or 0.0
             ):
                 representatives[key] = chunk.model_copy(deep=True)
             representative = representatives[key]
-            metadata = dict(representative.metadata or {})
+            metadata = merge_planned_attribution(
+                previous_metadata,
+                dict(chunk.metadata or {}),
+            )
+            metadata = merge_planned_attribution(
+                metadata,
+                dict(representative.metadata or {}),
+            )
             planned_lanes = set(metadata.get("planned_lanes") or [])
             planned_lanes.add(pool.lane_id)
             metadata["planned_lanes"] = sorted(planned_lanes)
             lane_grounding = dict(metadata.get("planned_lane_grounding") or {})
-            lane_grounding[pool.lane_id] = max(
+            grounding_score = max(
                 float(lane_grounding.get(pool.lane_id) or 0.0),
+                planned_lane_grounding(chunk, pool.lane_id),
                 _lane_grounding_score(chunk, pool),
             )
+            lane_grounding[pool.lane_id] = grounding_score
             metadata["planned_lane_grounding"] = lane_grounding
+            lane_affinity = dict(metadata.get("planned_lane_affinity") or {})
+            lane_affinity[pool.lane_id] = max(
+                float(lane_affinity.get(pool.lane_id) or 0.0),
+                grounding_score,
+                planned_document_route_score(chunk, pool.lane_id),
+            )
+            metadata["planned_lane_affinity"] = lane_affinity
+            metadata = merge_planned_attribution(metadata, {})
             metadata["planned_rrf_score"] = scores[key]
             representative.metadata = metadata
-            provenance = list(representative.provenance or [])
+            provenance = list(previous_provenance)
+            provenance.extend(
+                item
+                for item in (representative.provenance or [])
+                if item not in provenance
+            )
             marker = {
                 "retriever": f"planned_{pool.retriever}",
                 "lane_id": pool.lane_id,

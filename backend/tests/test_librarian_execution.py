@@ -10,8 +10,13 @@ from services.retriever.librarian_planner import (
     apply_librarian_execution_plan,
     build_query_plan_v1,
 )
-from services.retriever.planned_fusion import apply_librarian_two_lane_allocation
-from services.retriever.planned_fusion import reserve_planned_finalists
+from services.retriever.planned_fusion import (
+    PlannedPool,
+    apply_librarian_two_lane_allocation,
+    cap_planned_candidates_by_affinity,
+    fuse_planned_pools,
+    reserve_planned_finalists,
+)
 from services.retriever.query_plan import build_query_plan_v2
 
 
@@ -445,3 +450,134 @@ def test_exact_query_overlap_counts_inside_equal_side_quota():
     assert receipt["lane_quota_fulfilled"] == {lane_a: 4, lane_b: 4}
     assert len(receipt["lane_quota_reservations"][lane_a]) == 4
     assert len(receipt["lane_quota_reservations"][lane_b]) == 4
+
+
+def test_fusion_keeps_all_lanes_and_deterministic_max_affinity_tag():
+    lane_a = "librarian_1_side_a"
+    lane_b = "librarian_2_side_b"
+    first = _chunk("shared", "shared-doc", 0.7, (lane_a,))
+    first.metadata["planned_lane_grounding"] = {lane_a: 0.7}
+    first.metadata["document_route_lanes"] = {lane_a: 0.8}
+    second = _chunk("shared", "shared-doc", 0.9, (lane_b,))
+    second.metadata["planned_lane_grounding"] = {lane_b: 0.7}
+    second.metadata["document_route_lanes"] = {lane_b: 0.9}
+
+    fused, _diagnostics = fuse_planned_pools(
+        [
+            PlannedPool(lane_a, "dense", (first,)),
+            PlannedPool(lane_b, "summary", (second,)),
+        ],
+        max_candidates=4,
+    )
+
+    assert len(fused) == 1
+    assert fused[0].metadata["planned_lanes"] == [lane_a, lane_b]
+    assert set(fused[0].metadata["planned_lane_affinity"]) == {lane_a, lane_b}
+    assert fused[0].metadata["planned_max_affinity_lane"] == lane_b
+    assert fused[0].metadata["planned_max_affinity"] == 0.9
+
+
+def test_fusion_equal_affinity_tie_is_stable_under_reversed_pool_order():
+    lane_a = "librarian_1_side_a"
+    lane_b = "librarian_2_side_b"
+    first = _chunk("shared", "shared-doc", 0.7, (lane_a,))
+    first.metadata["planned_lane_grounding"] = {lane_a: 0.8}
+    second = _chunk("shared", "shared-doc", 0.9, (lane_b,))
+    second.metadata["planned_lane_grounding"] = {lane_b: 0.8}
+    pools = [
+        PlannedPool(lane_a, "dense", (first,)),
+        PlannedPool(lane_b, "summary", (second,)),
+    ]
+
+    forward, _ = fuse_planned_pools(pools, max_candidates=4)
+    reverse, _ = fuse_planned_pools(list(reversed(pools)), max_candidates=4)
+
+    assert forward[0].metadata["planned_lane_affinity"] == (
+        reverse[0].metadata["planned_lane_affinity"]
+    )
+    assert forward[0].metadata["planned_max_affinity_lane"] == lane_a
+    assert reverse[0].metadata["planned_max_affinity_lane"] == lane_a
+
+
+def test_graph_pool_keeps_strongest_librarian_subquery_attribution():
+    lane_a = "librarian_1_side_a"
+    lane_b = "librarian_2_side_b"
+    graph = _chunk("graph-shared", "bridge-doc", 0.95, (lane_a, lane_b))
+    graph.metadata["planned_lane_grounding"] = {lane_a: 0.8, lane_b: 0.9}
+
+    fused, _ = fuse_planned_pools(
+        [PlannedPool("graph", "graph", (graph,))],
+        max_candidates=4,
+    )
+
+    assert fused[0].metadata["planned_lanes"] == sorted([lane_a, lane_b, "graph"])
+    assert fused[0].metadata["planned_max_affinity_lane"] == lane_b
+    assert fused[0].metadata["planned_max_affinity"] == 0.9
+
+
+def test_per_subquery_rerank_caps_bound_union_deterministically():
+    lane_a = "librarian_1_side_a"
+    lane_b = "librarian_2_side_b"
+    chunks = [
+        _chunk(f"a{index}", f"a-doc-{index}", 1.0, (lane_a,)) for index in range(1, 4)
+    ] + [_chunk(f"b{index}", f"b-doc-{index}", 0.9, (lane_b,)) for index in range(1, 4)]
+    for chunk in chunks:
+        lane_id = (chunk.metadata or {})["planned_lanes"][0]
+        chunk.metadata["planned_max_affinity_lane"] = lane_id
+        chunk.metadata["planned_max_affinity"] = 1.0
+
+    capped, diagnostics = cap_planned_candidates_by_affinity(
+        chunks,
+        lane_rerank_caps={lane_a: 4, lane_b: 4},
+        global_rerank_cap=4,
+    )
+    replay, replay_diagnostics = cap_planned_candidates_by_affinity(
+        chunks,
+        lane_rerank_caps={lane_a: 4, lane_b: 4},
+        global_rerank_cap=4,
+    )
+
+    assert [chunk.chunk_id for chunk in capped] == ["a1", "a2", "b1", "b2"]
+    assert [chunk.chunk_id for chunk in replay] == [chunk.chunk_id for chunk in capped]
+    assert diagnostics["effective"] == {lane_a: 2, lane_b: 2}
+    assert diagnostics["effective_sum"] <= diagnostics["global_rerank_cap"]
+    assert diagnostics["assigned_counts"] == {lane_a: 2, lane_b: 2}
+    assert replay_diagnostics == diagnostics
+
+
+def test_per_subquery_caps_bound_original_graph_and_unassigned_union():
+    lane_a = "librarian_1_side_a"
+    lane_b = "librarian_2_side_b"
+    original = _chunk("original", "original-doc", 1.0, ("original",))
+    original.metadata["planned_max_affinity_lane"] = "original"
+    graph = _chunk("graph", "graph-doc", 0.99, ("graph",))
+    graph.metadata["planned_max_affinity_lane"] = "graph"
+    unassigned = _chunk("unassigned", "unknown-doc", 0.98, ())
+    chunks = [original, graph, unassigned]
+    for lane_id, prefix in ((lane_a, "a"), (lane_b, "b")):
+        for index in range(20):
+            chunk = _chunk(
+                f"{prefix}{index}",
+                f"{prefix}-doc-{index}",
+                0.9 - index / 100,
+                (lane_id,),
+            )
+            chunk.metadata["planned_max_affinity_lane"] = lane_id
+            chunk.metadata["planned_max_affinity"] = 1.0
+            chunks.append(chunk)
+
+    capped, diagnostics = cap_planned_candidates_by_affinity(
+        chunks,
+        lane_rerank_caps={lane_a: 16, lane_b: 16},
+        global_rerank_cap=38,
+    )
+
+    selected_ids = {chunk.chunk_id for chunk in capped}
+    assert "original" in selected_ids
+    assert any(chunk_id.startswith("a") for chunk_id in selected_ids)
+    assert any(chunk_id.startswith("b") for chunk_id in selected_ids)
+    assert len(capped) <= 32
+    assert len(capped) == diagnostics["output_candidates"]
+    assert diagnostics["union_limit"] == diagnostics["effective_sum"] == 32
+    assert diagnostics["assigned_counts"][lane_a] <= 16
+    assert diagnostics["assigned_counts"][lane_b] <= 16

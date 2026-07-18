@@ -19,6 +19,7 @@ from typing import List, Optional
 
 from config import get_settings
 from models.schemas import SourceChunk
+from services.retriever.planned_attribution import merge_planned_attribution
 from services.conversation import conversation_service
 from services.facets import metadata_with_facets
 from services.retriever.query_semantics import lexical_terms
@@ -209,9 +210,7 @@ async def attach_parent_temporal_metadata(
         if row.get("parent_id")
     }
     by_parent = {
-        str(row.get("parent_id") or ""): row
-        for row in rows
-        if row.get("parent_id")
+        str(row.get("parent_id") or ""): row for row in rows if row.get("parent_id")
     }
     output: List[SourceChunk] = []
     for chunk in chunks:
@@ -419,6 +418,7 @@ def dedupe_cross_corpus_evidence(
         if chunk.corpus_id:
             memberships.add(str(chunk.corpus_id))
         existing_meta["corpus_memberships"] = sorted(memberships)
+        existing_meta = merge_planned_attribution(existing_meta, metadata)
         existing.metadata = existing_meta
         existing.score = max(float(existing.score or 0.0), float(chunk.score or 0.0))
         provenance = list(existing.provenance or [])

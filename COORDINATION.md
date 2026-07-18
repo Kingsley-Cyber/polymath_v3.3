@@ -13559,3 +13559,54 @@ attempt lacked `PYTHONPATH`. None reached a provider/service, deployed a
 container, or wrote corpus state. Provider calls=0, live evals=0, corpus
 writes=0. Librarian flags remain default-OFF; no runtime flag or stack state
 changed. Proceeding to L4 build-only.
+
+## [2026-07-18T02:03:24Z] EXECUTOR → SENIOR :: RECEIPT
+
+BUILD-FIRST 2a / AGENT L4 — PARALLEL SUBQUERY EXECUTION + ONE-RERANK
+BOUND is BUILD-VERIFIED GREEN. The active `QueryPlanV1` execution lanes are
+embedded in one initial batch, their candidate searches execute concurrently,
+and the deduplicated union enters one logical cross-encoder rerank. Duplicate
+chunk identities preserve every contributing lane and are deterministically
+tagged to the maximum-affinity subquery using literal grounding or Tier-0
+document-route affinity; equal-affinity ties resolve lexicographically. The
+same attribution survives hydration and cross-corpus evidence deduplication.
+
+Before reranking, the union is now bounded by
+`min(current_global_cap, Σ effective_subquery_rerank_caps)`. Original-query
+safety evidence is protected inside that bound; original, graph, fact, and
+unassigned candidates cannot bypass it. The adversarial 38-global/32-summed
+case includes all three bypass classes and returns at most 32 while retaining
+the original safety lane and both Librarian subqueries. Trace fields are
+truthfully scoped to the initial V1 execution lanes and report input/output
+counts, requested/effective caps, assigned counts, and dropped counts.
+Synthesis prompts and scoring authority are unchanged.
+
+The final network-disabled broad retrieval suite passed 131/131; log SHA
+`8fb82fd46e50637a6fc247c93895cc5baa08b7ad7f04623e03c2c049d4ce402b`,
+true `EXIT=0`. The final focused pre-format suite passed 68/68; log SHA
+`268103532697939bf3ae3e8c43f1ad980607ee4377700299db694a2fbc0d22ed`,
+true `EXIT=0`. Black left all seven touched Python files unchanged; log SHA
+`7261ff8419bcdbe28374b471f4218b25a39d4238fc002d569014b4e3851a961c`,
+true `EXIT=0`; diff-check log SHA
+`418a5c17f33c70e99b0cc0a07fce69191489cfedc94164bfa903785777c5bd4b`,
+true `EXIT=0`. The isolated production image is
+`sha256:889a59afa49bb63b6dd07f9cea09bbe4b37c8e1276fcce44ef73855e431ba80d`;
+build log SHA
+`6a42598ef08c042bd186245fc217954ae21ac7c9998ccea9e78b10ec51171c26`,
+true `EXIT=0`.
+
+The final independent read-only blocker audit is GREEN: it verified the
+summed-cap bound including original/graph/unassigned candidates, strongest
+core-subquery attribution for graph evidence, truthful embed scope,
+order-independent ties, retained non-Librarian parity coverage, and a
+lane-keyed barrier test that requires two distinct Librarian subqueries to be
+simultaneously active. Disclosed uncredited attempts: the first two new
+assertions exposed a real reversed-pool attribution loss plus a fixture-only
+sorted-order expectation; both were corrected without weakening a gate. One
+initial static-check wrapper had invalid shell quoting, the first Black check
+required formatting, one Docker build used the wrong context, and a
+post-build test command confirmed production images intentionally exclude
+test files. None contacted a provider/service, deployed a container, or
+wrote corpus state. Provider calls=0, live evals=0, corpus writes=0. Librarian
+flags remain default-OFF and live runtime state is unchanged. Proceeding to
+L5 build-only.

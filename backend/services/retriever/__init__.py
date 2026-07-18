@@ -58,6 +58,7 @@ from services.retriever.planned_fusion import (
     PlannedPool,
     annotate_planned_lane_grounding,
     apply_librarian_two_lane_allocation,
+    cap_planned_candidates_by_affinity,
     dedupe_enumeration_finalists,
     dedupe_document_lane_finalists,
     dedupe_parent_finalists,
@@ -3315,11 +3316,24 @@ class RetrieverOrchestrator:
                     }
                 )
         fused, hydrated_duplicate_count = dedupe_cross_corpus_evidence(fused)
+        librarian_rerank_cap_diagnostics: dict[str, object] = {
+            "active": False,
+            "reason": "librarian_execution_inactive",
+        }
         separator_only_count = sum(
             1 for chunk in fused if is_separator_only_text(chunk.text)
         )
         if separator_only_count:
             fused = [chunk for chunk in fused if not is_separator_only_text(chunk.text)]
+        if librarian_execution_policy is not None and librarian_execution_policy.active:
+            (
+                fused,
+                librarian_rerank_cap_diagnostics,
+            ) = cap_planned_candidates_by_affinity(
+                fused,
+                lane_rerank_caps=librarian_execution_policy.lane_rerank_caps,
+                global_rerank_cap=rerank_cap,
+            )
         fusion_diagnostics["structural_noise_filter"] = {
             "separator_only_dropped": separator_only_count,
             "remaining_candidates": len(fused),
@@ -3777,6 +3791,17 @@ class RetrieverOrchestrator:
                 {
                     **librarian_execution_policy.diagnostics(),
                     "two_lane": librarian_two_lane_diagnostics,
+                    "execution": {
+                        "v1_subquery_embed_batches": 1,
+                        "v1_subquery_embed_scope": (
+                            "initial_query_plan_execution_lanes"
+                        ),
+                        "candidate_generation_parallel": True,
+                        "logical_rerank_batches": (
+                            1 if rerank_enabled and bool(fused) else 0
+                        ),
+                        "rerank_caps": librarian_rerank_cap_diagnostics,
+                    },
                 }
                 if librarian_execution_policy is not None
                 else librarian_execution_fallback or {"active": False}
