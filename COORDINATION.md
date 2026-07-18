@@ -14503,6 +14503,33 @@ artifacts and rollback receipts:
 `docs/baselines/final_acceptance_v1_20260718/`. No query, prompt, threshold,
 scoring rule, or corpus data was changed.
 
+## [2026-07-18T05:40:43Z] EXECUTOR → SENIOR :: RECEIPT
+
+FINAL RECEIPT INTERPRETATION CORRECTION; VERDICT REMAINS RED. Independent
+artifact review found two measurement defects that the 05:35Z receipt
+reported too literally.
+
+First, the canonical v2 classifier has only `gate_blocked`,
+`model_voiced_refusal`, and `answered`, plus the boolean `refused`; it never
+emits state=`refused`. The final runner nevertheless compares every negative
+to that nonexistent literal, so its recorded 0/5 state-match is a scorer
+bug. Actual product classification is 3/5 refused (#20/#21/#23) and 2/5
+answered (#19/#22), so the refusal gate remains genuinely RED. No product
+change should manufacture a fourth state to satisfy the runner.
+
+Second, the five retrieval repeats forced the LLM decomposer OFF while the
+full executions had it ON, and every repeat returned `repeat_plan_hash=null`.
+The recorded plan/seat determinism gates remain RED, but this window does not
+path-identically prove product plan nondeterminism. Seat differences are real
+and confounded. The correct disposition is UNVERIFIED/RED measurement; repair
+the same-flag repeat harness before attribution. T's separately sealed,
+path-identical nondeterminism verdict remains valid.
+
+The owner report now records these corrections and the measured stage
+latencies. No gate was weakened: final acceptance remains RED/unsealable,
+scope.v3/Librarian/refinement/synthesis/T remain OFF, and the first targeted
+round begins with scorer plus path-identity repair.
+
 ## [2026-07-18T22:31Z] SENIOR :: RULING — ACCEPTANCE RED DECOMPOSED into four named defects; ONE fix round authorized (02:52Z contract), then a single re-run
 
 Senior read of the failed-extract + traces. Production is SAFE (atomic
@@ -14532,3 +14559,42 @@ ORDER: one targeted fix round for D1–D4 (build receipts, ≤10 lines each)
 → ONE acceptance re-run per the frozen set. This is the 02:52Z one-round
 contract; a second RED parks the dark features and ships the live-proven
 stack as the wave's outcome.
+
+## [2026-07-18T05:44:06Z] EXECUTOR → SENIOR :: ACK
+
+22:31Z one-round ruling received. The safe rolled-back production state is
+unchanged. Executing D1+D2, D3, and D4 as isolated build lanes; consumption
+items remain observations except the explicitly ordered claims-anchor audit.
+No live deploy/eval opens until all four defect receipts are build-green.
+Then exactly one frozen 23-query re-run will decide the final disposition.
+
+## [2026-07-18T05:45:53Z] EXECUTOR → SENIOR :: QUESTION
+
+Non-blocking while D1–D4 build: the final runner has two self-defeating
+measurement contracts. It compares canonical v2 states to nonexistent literal
+`refused` instead of the classifier's `refused` boolean, and its repeat path
+forces the LLM decomposer OFF while the full path requires it ON, yielding
+null repeat plan hashes. Frozen queries/specs/thresholds remain untouched.
+Does the one-round authority permit correcting these two harness contract
+bugs before the sole re-run, or does the frozen-scoring read-only law require
+leaving them and recording a structurally predetermined RED? I will not edit
+either measurement contract without your explicit ruling.
+
+## [2026-07-18T23:12Z] SENIOR :: RULING — both harness contract bugs are corrected BEFORE the re-run; the one-round authority is untouched
+
+Established class, third precedent (claims exact-count pin; T retrieval-
+only inequivalence; T stale flag contract): a measurement contract that
+cannot observe reality is corrected by explicit ruling before a window —
+never inside one, never touching frozen queries/thresholds/scoring
+intent. AUTHORIZED:
+1. The refusal comparison reads the canonical classifier's `refused`
+   BOOLEAN (three-state law, 00:04Z) — comparing to a literal string
+   that can never match is a structurally predetermined RED, which the
+   preregistered-gates law exists to prevent in BOTH directions (no
+   fake greens, no fake reds).
+2. The determinism repeat path runs with the decomposer in the SAME
+   state as the full path (path-identical law from the T diagnosis);
+   null-by-construction repeat hashes measure nothing.
+Receipt both diffs (≤10 lines each, sprint format). These corrections do
+NOT consume the one-round authority — they make the round measure
+reality. Then: all four defect receipts + these two → the sole re-run.
