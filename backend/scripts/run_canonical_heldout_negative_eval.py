@@ -48,7 +48,7 @@ SELECTION_PATH = BACKEND / "evals/runpod_e2e_15doc_selection_v1.json"
 CHAT_ORCHESTRATOR_PATH = BACKEND / "services/chat_orchestrator.py"
 LOCK_PATH = Path("/tmp/polymath-eval.lock")
 
-SPEC_SHA256 = "3b35c14c165f6be89202b809ea01a1cd6ad0f5c0217e4167b86e4b5dc0b09960"
+SPEC_SHA256 = "7d3de158c27d1524f491d78416c5954f7ef229a39ddb3fd8326eec9fd409890f"
 SELECTION_SHA256 = "da7b94c152dd5e72d52db1fd80a68f0cc2797d85ed1fd4899f9a8c19874eaf00"
 CORPUS_ID = "2c894530-8d57-4432-a6d4-bc14505a698b"
 CORPUS_NAME = "runpod_e2e_15doc_20260715"
@@ -63,7 +63,7 @@ COMPACT_BASELINE_QUERY_IDS = (
     "negv2_f2_oscar_2026",
     "negv2_f3_deakins",
     "negv2_f3_visual_story",
-    "negv2_f5_figure_9_4",
+    "negv2_f5_figure_34_1",
     "negv2_f1_crispr",
     "negv2_f2_iphone17",
     "negv2_lay_deakins",

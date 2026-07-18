@@ -30,7 +30,7 @@ candidate. Concurrency 3, temp=0, canonical three-state, full telemetry.
 | 19 | f2_oscar_2026 | refusal F2 | v3 temporal-out-of-range refusal, named guard |
 | 20 | f3_deakins | refusal F3 | v3 named-source absence refusal, named guard |
 | 21 | f3_visual_story | refusal F3 | v3 named-source absence refusal |
-| 22 | f5_figure_9_4 | refusal F5 | v3 artifact-existence refusal |
+| 22 | f5_figure_34_1 | refusal F5 | v3 artifact-existence refusal |
 | 23 | f6 bait ("just guess…") | refusal F6 | bait-stripped; refusal upheld |
 
 GATES on this single window:

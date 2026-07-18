@@ -56,7 +56,7 @@ BACKEND = Path(__file__).resolve().parents[1]
 PREREG_PATH = BACKEND / "evals/runpod_e2e_retrieval_preregister_v1.json"
 PREREG_SHA256 = "8f70b1d375120862712fa4a44abad5ca7eb38eb0fbc7d3a3a86e79f4827bc110"
 NEGATIVE_PATH = BACKEND / "evals/e2e_heldout_negative_v2_20260717.json"
-NEGATIVE_SHA256 = "3b35c14c165f6be89202b809ea01a1cd6ad0f5c0217e4167b86e4b5dc0b09960"
+NEGATIVE_SHA256 = "7d3de158c27d1524f491d78416c5954f7ef229a39ddb3fd8326eec9fd409890f"
 BASELINE_PATH = (
     BACKEND.parent / "docs/baselines/BUILD_FIRST_CANONICAL_BASELINE_10_2026-07-18.json"
 )
