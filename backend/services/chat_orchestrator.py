@@ -7053,6 +7053,10 @@ class ChatOrchestrator:
         # Step 2: Get model to use
         model_used = self._get_model_to_use(request, model_config)
         primary_entry_id: str | None = None
+        # Captured BEFORE pool/profile resolution rewrites overrides.model to
+        # the concrete model string — this is the only moment the "user
+        # explicitly picked a model in the dropdown" signal exists.
+        explicit_pool_selection = model_used.startswith(("pool:", "profile:"))
 
         # Step 3: Create user message
         user_message = self._create_user_message(request.message, model_used)
@@ -7173,14 +7177,10 @@ class ChatOrchestrator:
                     model_used,
                 )
 
-        # An explicit dropdown selection (pool:<entry>) always outranks the
+        # An explicit dropdown selection (pool:/profile:) always outranks the
         # synthesis-route override — the override swaps the DEFAULT route
-        # only. Without this gate, selecting a CLI/pool model in the chat UI
-        # was silently replaced by the configured synthesis entry.
-        explicit_pool_selection = bool(
-            request.overrides
-            and str(request.overrides.model or "").startswith("pool:")
-        )
+        # only. The flag was captured before resolve_by_entry_id rewrote
+        # overrides.model, which is why it can't be recomputed here.
         synthesis_route = await _resolve_synthesis_route_override(
             enabled=settings.SYNTHESIS_ROUTE_OVERRIDE_ENABLED
             and not explicit_pool_selection,
