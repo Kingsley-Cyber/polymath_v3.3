@@ -12,6 +12,7 @@ from models.librarian_query_plan import (
     librarian_execution_lane_id,
     plan_cache_key_for,
 )
+from services.chat_cost_meter import chat_cost_scope
 from services.chat_orchestrator import _build_retrieval_answerability_gate
 from services.llm import LLMService
 from services.retriever.librarian_decomposer import (
@@ -112,8 +113,8 @@ class _Completion:
         return self.response
 
 
-async def _utility_route(_user_id, kind):
-    assert kind == "utility"
+async def _configured_route(_user_id, kind):
+    assert kind == "synthesis"
     return {
         "model": "test/utility",
         "api_base": "https://utility.invalid",
@@ -156,10 +157,10 @@ def test_llm_eligibility_is_independent_and_opt_in_for_shortlist_work():
 
 
 @pytest.mark.asyncio
-async def test_success_uses_exact_bounded_utility_contract_and_server_budgets():
+async def test_success_uses_configured_synthesis_route_and_server_budgets():
     completion = _Completion(_success_response())
     decomposer = LibrarianDecomposer(
-        resolver=_utility_route,
+        resolver=_configured_route,
         completion_service=completion,
     )
 
@@ -254,6 +255,144 @@ async def test_thinking_is_disabled_on_the_real_llm_wire(
 
 
 @pytest.mark.asyncio
+async def test_refiner_value_error_still_closes_registered_route_accounting(
+    monkeypatch,
+):
+    plan = _relationship_plan()
+    side_a = librarian_execution_lane_id(0, "side_a")
+    side_b = librarian_execution_lane_id(1, "side_b")
+    gaps = detect_librarian_refinement_gaps(
+        plan=plan,
+        reservation_receipt={
+            "lane_candidates": {
+                side_a: {"score_eligible_candidates": 4},
+                side_b: {"score_eligible_candidates": 0},
+            }
+        },
+        seated_doc_ids_by_lane={side_a: {"story"}, side_b: set()},
+    )
+    # A transport-successful but unchanged refinement raises the same strict
+    # local ValueError class observed in final acceptance.
+    provider_content = json.dumps(
+        {
+            "subqueries": [
+                {
+                    "subquery_index": 1,
+                    "role": "side_b",
+                    "text": plan.subqueries[1].text,
+                    "target_doc_ids": list(plan.subqueries[1].target_doc_ids),
+                }
+            ]
+        }
+    )
+    captured = {}
+
+    class _Response:
+        headers = {}
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "choices": [{"message": {"content": provider_content}}],
+                "usage": {
+                    "prompt_tokens": 100,
+                    "completion_tokens": 20,
+                    "total_tokens": 120,
+                },
+            }
+
+    class _Client:
+        async def post(self, _url, json, **_kwargs):
+            captured.update(json)
+            return _Response()
+
+    service = LLMService()
+
+    async def fake_get_client():
+        return _Client()
+
+    async def explicit_key_must_win(_model):
+        raise AssertionError("configured credential must be forwarded")
+
+    resolver_kinds = []
+
+    async def configured_synthesis_route(_user_id, kind):
+        resolver_kinds.append(kind)
+        if kind != "synthesis":
+            raise AssertionError("Utility fallback must not replace synthesis")
+        return {
+            "entry_id": "deepseek-api__deepseek-v4-flash",
+            "model": "deepseek/deepseek-v4-flash",
+            "api_base": "https://api.deepseek.com",
+            "api_key": "dispatch-only-test-key",
+            "extra_params": {"thinking": {"type": "enabled"}},
+        }
+
+    monkeypatch.setattr(service, "_get_client", fake_get_client)
+    monkeypatch.setattr(service, "_resolve_api_key", explicit_key_must_win)
+
+    with chat_cost_scope() as ledger:
+        result = await LibrarianRefiner(
+            resolver=configured_synthesis_route,
+            completion_service=service,
+        ).refine(
+            base_plan=plan,
+            original_query="Compare Story Craft with Camera Craft.",
+            gaps=gaps,
+            seated_documents=_seated_documents(),
+            user_id="user",
+        )
+        receipt = ledger.snapshot()
+
+    assert resolver_kinds == ["synthesis"]
+    assert captured["model"] == "deepseek/deepseek-v4-flash"
+    assert captured["api_base"] == "https://api.deepseek.com"
+    assert captured["api_key"] == "dispatch-only-test-key"
+    assert captured["thinking"] == {"type": "disabled"}
+    assert result.status == "fallback"
+    assert result.reason == "planner_refinement_unavailable:ValueError"
+    assert result.provider_attempts == 1
+    assert receipt["accounting_state"] == "CLOSED"
+    assert receipt["unmetered_synthesis_call_count"] == 0
+    assert receipt["computed_cost_usd"] == "0.0000196"
+    assert receipt["calls"][0]["model"] == "deepseek/deepseek-v4-flash"
+    assert receipt["calls"][0]["price"]["route_id"] == (
+        "deepseek-api__deepseek-v4-flash"
+    )
+    assert receipt["calls"][0]["failure_reason"] is None
+    assert "dispatch-only-test-key" not in json.dumps(receipt)
+
+
+@pytest.mark.asyncio
+async def test_utility_route_is_only_a_legacy_fallback():
+    kinds = []
+
+    async def legacy_route(_user_id, kind):
+        kinds.append(kind)
+        if kind == "synthesis":
+            return None
+        assert kind == "utility"
+        return {
+            "model": "test/legacy-utility",
+            "api_base": "https://utility.invalid",
+            "api_key": "test-secret-never-traced",
+            "extra_params": {},
+        }
+
+    completion = _Completion(_success_response())
+    result = await LibrarianDecomposer(
+        resolver=legacy_route,
+        completion_service=completion,
+    ).decompose(base_plan=_base_plan(), user_id="user")
+
+    assert result.status == "built"
+    assert kinds == ["synthesis", "utility"]
+    assert completion.calls[0]["model"] == "test/legacy-utility"
+
+
+@pytest.mark.asyncio
 async def test_model_subquery_order_cannot_change_compiled_plan_bytes():
     forward = json.loads(_success_response())
     reverse = {
@@ -261,11 +400,11 @@ async def test_model_subquery_order_cannot_change_compiled_plan_bytes():
         "subqueries": list(reversed(forward["subqueries"])),
     }
     first = await LibrarianDecomposer(
-        resolver=_utility_route,
+        resolver=_configured_route,
         completion_service=_Completion(json.dumps(forward)),
     ).decompose(base_plan=_base_plan(), user_id="user")
     second = await LibrarianDecomposer(
-        resolver=_utility_route,
+        resolver=_configured_route,
         completion_service=_Completion(json.dumps(reverse)),
     ).decompose(base_plan=_base_plan(), user_id="user")
 
@@ -309,7 +448,7 @@ async def test_model_subquery_order_cannot_change_compiled_plan_bytes():
 async def test_invalid_or_prose_output_fails_open_without_cacheable_plan(response):
     completion = _Completion(response)
     decomposer = LibrarianDecomposer(
-        resolver=_utility_route,
+        resolver=_configured_route,
         completion_service=completion,
     )
 
@@ -324,7 +463,7 @@ async def test_invalid_or_prose_output_fails_open_without_cacheable_plan(respons
 
 
 @pytest.mark.asyncio
-async def test_missing_utility_route_fails_open_without_provider_attempt():
+async def test_missing_planner_routes_fail_open_without_provider_attempt():
     resolver_calls = 0
 
     async def missing_route(_user_id, _kind):
@@ -340,7 +479,7 @@ async def test_missing_utility_route_fails_open_without_provider_attempt():
 
     result = await decomposer.decompose(base_plan=_base_plan(), user_id="user")
 
-    assert resolver_calls == 1
+    assert resolver_calls == 2
     assert completion.calls == []
     assert result.plan.planner == "fallback:simple"
     assert result.plan.refusal_signals.planner_llm_unavailable is True
@@ -358,7 +497,7 @@ async def test_provider_cancellation_returns_counted_validated_fallback():
             await asyncio.sleep(60)
 
     decomposer = LibrarianDecomposer(
-        resolver=_utility_route,
+        resolver=_configured_route,
         completion_service=_CancelledCompletion(),
     )
     task = asyncio.create_task(
@@ -394,7 +533,7 @@ async def test_success_is_cached_but_failure_is_retried(monkeypatch):
     success_planner = LibrarianPlanner(
         cache=QueryPlanReplayCache(),
         decomposer=LibrarianDecomposer(
-            resolver=_utility_route,
+            resolver=_configured_route,
             completion_service=completion,
         ),
     )
@@ -450,7 +589,7 @@ async def test_success_is_cached_but_failure_is_retried(monkeypatch):
         )
         assert failed.plan.planner == "fallback:simple"
         assert failed.diagnostics["silent_fallback_count"] == 1
-    assert missing_calls == 2
+    assert missing_calls == 4
     assert shortlist_calls == 3
 
 
@@ -473,7 +612,7 @@ async def test_disabling_decomposer_ignores_previously_cached_llm_plan(monkeypat
     planner = LibrarianPlanner(
         cache=QueryPlanReplayCache(),
         decomposer=LibrarianDecomposer(
-            resolver=_utility_route,
+            resolver=_configured_route,
             completion_service=completion,
         ),
     )
@@ -709,7 +848,7 @@ async def test_refiner_changes_only_gapped_role_and_replays_byte_stably():
         )
     )
     refiner = LibrarianRefiner(
-        resolver=_utility_route,
+        resolver=_configured_route,
         completion_service=completion,
     )
 
@@ -808,7 +947,7 @@ async def test_unchanged_refinement_is_a_counted_uncached_failure():
         )
     )
     refiner = LibrarianRefiner(
-        resolver=_utility_route,
+        resolver=_configured_route,
         completion_service=completion,
     )
 
@@ -857,7 +996,7 @@ async def test_refiner_fail_open_is_counted_and_not_cached():
         )
     )
     refiner = LibrarianRefiner(
-        resolver=_utility_route,
+        resolver=_configured_route,
         completion_service=completion,
     )
 
@@ -931,7 +1070,7 @@ async def test_refined_associative_target_compiles_to_corpus_qualified_route():
         lane_ids=(side_b,),
     )
     result = await LibrarianRefiner(
-        resolver=_utility_route,
+        resolver=_configured_route,
         completion_service=_Completion(
             json.dumps(
                 {
