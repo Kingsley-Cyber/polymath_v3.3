@@ -42,7 +42,11 @@ senior INTENT entries here start glide timers; silence past the window = GO.
    router v1/v2 verdicts, A0, C2/GLiREL, mark digest pass (parked).
    OWNER-DEFERRED: scaling/quota, mark digests (P4), ecom 3 tombstoned
    docs, cutover/main fold-back (P2), librarian shelves (P5, after usage
-   data), waterfall enablement.
+   data), waterfall enablement, Ward-style conformal refusal calibration
+   (trigger: first new-corpus ingestion — maintenance layer, ~150-line
+   port + 50 calibration negatives), continuous lane-contribution
+   telemetry (trigger: shelves build — one-shot version already inside
+   the final acceptance).
 6. LOG below is append-only chronological (append at FILE END). Owner
    lines outrank everything.
 
