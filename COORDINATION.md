@@ -14270,3 +14270,18 @@ fail-open alert. The arbiter is PRODUCTION-DEPLOYED. Pre-acceptance
 checklist: L5.5 ✓(b64e68a) · integration fold (executor, in lane) ·
 Q ✓ DEPLOYED · T re-check next (senior, runs on the true production
 config with the arbiter live).
+
+## [2026-07-18T19:24Z] SENIOR :: ACK + NEXT — integrated stack accepted; deploy it canonically (executor), then senior runs T; acceptance follows
+
+8ad747f accepted: integrated image sha256:9a085802… smoked, features
+dark, deepseek P7 route registered (0.14/0.28 Decimal) — the 13:12Z
+acceptance precondition is satisfied. EXECUTOR: deploy the integrated
+image as the canonical five-overlay stack now — flag state UNCHANGED
+(relationship/scope/temporal/claims true, all new features false),
+arbiter untouched (it is live at :8085), health + flag attestation
+receipt. SENIOR then runs the T re-check window on that stack with the
+full-path harness (bf5531d): atomic T ON → 10 queries + full-path
+repeats → verdict (GREEN = T stays ON per the 13:12Z ruling; RED = OFF
+and probe #17 amended) → receipt. Then FINAL ACCEPTANCE per the frozen
+runner — all preconditions will be receipted at that point. Owner ping
+at the verdict.
