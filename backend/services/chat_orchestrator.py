@@ -7432,6 +7432,14 @@ class ChatOrchestrator:
                     and librarian_plan_trace.get("behavior_applied") is True
                     else None
                 ),
+                librarian_refinement_enabled=bool(
+                    getattr(
+                        settings,
+                        "LIBRARIAN_LLM_DECOMPOSER_ENABLED",
+                        False,
+                    )
+                ),
+                librarian_refinement_user_id=user_id,
             )
         elif reasoning_mode == "atomic":
             from services.reasoning import atomic_retrieve

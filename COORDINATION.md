@@ -14149,3 +14149,107 @@ Q3=600ms, then (4) run the path-identical T compact re-check and atomically
 flip T only if GREEN. The 23-query window remains closed until all four
 receipts exist. Provider calls=0, live evals=0, corpus/settings writes=0 for
 this halt. Proceeding to L5.5 only.
+
+## [2026-07-18T04:21:06Z] EXECUTOR → SENIOR :: RECEIPT
+
+L5.5 — BOUNDED POST-ALLOCATION LIBRARIAN REFINEMENT is BUILD-GREEN. Gap
+signals are computed only after the real allocator (including two-lane and
+temporal reconciliation): zero score-eligible candidates, a required role
+without an explicit reserved document, and targeted-shortlist miss remain
+independent named signals. Broad `planned_lanes` attribution cannot fake a
+seat; only `planned_required_lane_reservations` counts.
+
+With no gap, no resolver/provider/embed/search work is added. With a gap and
+the existing decomposer setting ON, exactly one 2s/600-token utility-route
+call sees the original query, typed QueryPlanV1, named gaps, and the top
+lane-qualified seated document titles/summaries (including associative
+routes). Thinking is forced OFF. Output must contain every-and-only gapped
+index, preserve roles/quotas/tiers/rerank caps, change the retrieval query,
+and target only surfaced documents. Associative targets absent from the
+first shortlist compile through corpus-qualified supplementary route hints.
+
+The successful refinement is cached on normalized query + corpus document
+version + lane-qualified seated-document identity hash + refiner prompt hash;
+only validated successful plans cache, and repeats are byte-stable. The
+second pass embeds/searches only gapped lanes, includes graph expansion on
+graph tier, merges with the saved first-pass pool, reranks under the original
+curation query, and invokes the same allocator. Hydration and assembly still
+execute once. There is no loop/recursion: remaining gaps are traced with
+`max_rounds=1`. Invalid/unavailable refinement preserves the first-pass
+packet and emits `planner_refinement_unavailable` plus one silent fallback.
+
+The asserted network-disabled seam proves A seated / B gapped → only B
+embedded/searched → B fulfilled 0→≥1, two logical reranks, one final
+hydration. The focused/adjacent suite passed 161/161; log SHA
+`0161dadeeba7012aed0387ba871f9a8780dfa5b8c5f17a6efd5985b8f931ad9c`,
+true `EXIT=0`. Compile, Black, and diff-check are clean. The final immutable
+image is
+`sha256:64803bcfbbf0b9b7d9c60f45b6206a7b5d9808eca2454e2bcdb91b5bc687d1b9`;
+build log SHA
+`dd37375d99dc4025544431f1a83d3f19025592f2407c74d6f5834c42f9b5a448`,
+true `EXIT=0`. Its baked default-OFF/import smoke log SHA is
+`18a7e6332d534f37b48e5b12b074152c47aa05348a69ffbaffa525642594fd8d`,
+true `EXIT=0`.
+
+Disclosed uncredited attempts: the first container collection omitted two
+mandatory test-only Settings; one broad mount omitted the Compose path; one
+intermediate assertion caught a diagnostic field attached to the wrong
+result type. All were corrected before the authoritative green run. Black
+mechanically formatted five touched files. Provider calls=0, live evals=0,
+deployments=0, corpus/settings writes=0. `LIBRARIAN_LLM_DECOMPOSER_ENABLED`
+and the explicit retrieval refinement argument remain default-OFF.
+
+## [2026-07-18T04:23:44Z] EXECUTOR → SENIOR :: ACK
+
+CORRECTION: the immediately preceding L5.5 GREEN receipt is superseded and
+must not be used as an integration gate. The independent final audit arrived
+after that entry and found four blockers: stale first-pass document/tree
+scope in the refined lane, missing protection for clean required lanes during
+re-fusion, original-query/multi-lane attribution in the graph refinement
+pass, and raw chunk text mislabeled as a document summary. No commit,
+integration, deploy, live eval, provider call, or corpus/settings write
+followed the premature receipt. Fixing and re-auditing all four now; a later
+receipt will explicitly close this correction.
+
+## [2026-07-18T04:31:12Z] EXECUTOR → SENIOR :: RECEIPT
+
+L5.5 CORRECTION CLOSED — FINAL BUILD + INDEPENDENT RE-AUDIT GREEN. This is
+the authoritative L5.5 receipt and supersedes the premature 04:21Z entry.
+For gapped lanes, the second pass now removes stale document routes and
+summary-tree routes before installing only refined scope; an empty refined
+target is genuinely global. Re-fusion protects every clean required lane and
+the exact-query safety lane before the rerank cap. Graph expansion runs once
+per refined lane from that lane's seeds, uses only its refined query, executes
+in parallel under the bounded graph deadline, and retains lane-specific
+attribution. Seated context resolves route → QueryPlan shortlist →
+`chunk.summary` → metadata summary and never labels body text as a document
+summary.
+
+The network-disabled integration test now has three asserted arms. GREEN:
+empty refined targets produce global doc scopes, only the gapped B query is
+embedded/searched, clean A survives, B seating improves 0→≥1, graph receives
+the refined B query with camera-only seeds, and final hydration runs once.
+PERSISTENT GAP: the second pass executes once, the remaining gap is traced,
+and refiner calls stay exactly 1 with `max_rounds=1`. FALLBACK: first-pass
+chunk IDs/order are preserved, there is no second embed/search/rerank, final
+hydration still runs once, and the named unavailable signal/fallback count
+are present. The four cache inputs are independently asserted.
+
+The final focused/adjacent suite passed 164/164; log SHA
+`6ed6e3217143118a33d60b4220358024b874304c134c624fbe94fff42d8b2217`,
+true `EXIT=0`. The three-arm targeted log SHA is
+`d93ce570a98de310478a2c875c52ad4f2b095783b8d2a813d7d80ec4460ed0ef`,
+true `EXIT=0`. Compile, Black, and diff-check are clean. Final image:
+`sha256:dd94a6fc06739086df308933d5cb8d1939f5f621c877010c8080baf0f8734267`;
+build log SHA
+`668a31c451d217ca78358a41cc7bc7eb279af2a0c5f0ed35d3bb02bdb48fde2c`,
+true `EXIT=0`; baked default-OFF smoke SHA
+`18a7e6332d534f37b48e5b12b074152c47aa05348a69ffbaffa525642594fd8d`,
+true `EXIT=0`.
+
+Independent read-only re-audit verdict: GREEN, diff SHA
+`059ce58c3ae8229ed0c505f808d4305f2b425f10baa014ba714d0d1400673731`;
+all four prior blockers are closed. Auditor made no edits or service calls.
+Provider calls=0, live evals=0, deployments=0, corpus/settings writes=0.
+Both controlling flags remain default-OFF. L5.5 is ready for the integrated
+stack receipt; final acceptance remains halted behind integration, Q, and T.

@@ -21,6 +21,7 @@ from models.librarian_query_plan import (
     LibrarianSubqueryV1,
     QueryPlanV1,
     canonical_json_bytes,
+    librarian_execution_lane_id,
     normalize_planner_query,
     plan_cache_key_for,
     plan_hash_for,
@@ -170,14 +171,10 @@ class LibrarianExecutionPolicy:
         }
 
 
-def _execution_lane_id(index: int, role: str) -> str:
-    normalized_role = re.sub(r"[^a-z0-9]+", "_", str(role).casefold()).strip("_")
-    return f"librarian_{index + 1}_{normalized_role or 'main'}"
-
-
 def apply_librarian_execution_plan(
     base_plan: QueryPlanV2,
     librarian_plan: QueryPlanV1,
+    supplementary_shortlist: Iterable[LibrarianShortlistItemV1] = (),
 ) -> tuple[QueryPlanV2, LibrarianExecutionPolicy]:
     """Compile QueryPlanV1 into the one existing planned-fusion executor.
 
@@ -200,7 +197,7 @@ def apply_librarian_execution_plan(
         )
 
     shortlist_by_doc_id: dict[str, list[LibrarianShortlistItemV1]] = {}
-    for item in librarian_plan.shortlist:
+    for item in (*librarian_plan.shortlist, *tuple(supplementary_shortlist)):
         shortlist_by_doc_id.setdefault(item.doc_id, []).append(item)
     original_lane = next(
         (lane for lane in base_plan.lanes if lane.role == "original"),
@@ -211,7 +208,7 @@ def apply_librarian_execution_plan(
     lane_rerank_caps: dict[str, int] = {}
     document_route_hints: dict[str, list[dict[str, Any]]] = {}
     for index, subquery in enumerate(librarian_plan.subqueries):
-        lane_id = _execution_lane_id(index, subquery.role)
+        lane_id = librarian_execution_lane_id(index, subquery.role)
         target_items = sorted(
             (
                 item
