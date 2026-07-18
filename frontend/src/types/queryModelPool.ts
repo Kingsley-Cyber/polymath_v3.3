@@ -49,6 +49,10 @@ export interface GraphQueryConfig {
   pool_entry_id: string | null;
 }
 
+export interface SynthesisConfig {
+  pool_entry_id: string | null;
+}
+
 export interface ModelsConfig {
   query_model_pool: QueryModelPoolEntry[];
   hyde: HydeConfig;
@@ -56,6 +60,7 @@ export interface ModelsConfig {
   reasoning: ReasoningConfig;
   utility: UtilityConfig;
   graph_query: GraphQueryConfig;
+  synthesis: SynthesisConfig;
 }
 
 export interface UtilityModelTestResult {

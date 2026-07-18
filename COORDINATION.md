@@ -13751,3 +13751,60 @@ service, deployed a container, ran a live eval, or wrote corpus state.
 Provider calls=0, live evals=0, corpus writes=0. v3 remains default-OFF and
 live runtime state is unchanged. Proceeding to build-only item 2c, the
 synthesis-route speed lever.
+
+## [2026-07-18T03:03:31Z] EXECUTOR → SENIOR :: RECEIPT
+
+BUILD-FIRST 2c — SYNTHESIS-ROUTE SPEED LEVER is BUILD-VERIFIED GREEN. A new
+`settings.models.synthesis.pool_entry_id` role selects an existing encrypted
+query-model-pool entry; the Settings API validates, preserves, masks, deletes,
+and migrates that reference with the other roles, and the Models UI exposes
+the same registry selection. No provider/model name or credential is
+hardcoded or copied.
+
+`SYNTHESIS_ROUTE_OVERRIDE_ENABLED` is default-OFF in Settings,
+`.env.example`, and both Compose runtime services. OFF does not invoke the
+synthesis resolver and preserves the already-resolved query route object as
+the exact rollback authority. ON is eligible only for ordinary, non-tool
+final-answer synthesis. A valid role swaps only model, pool-entry identity,
+and that entry's credentials; selected tools and agentic turns never swap.
+Missing-user, missing/dangling route, or resolver-error paths preserve the
+rollback route and emit a named reason in the `Chat model route` trace.
+Trace metadata records enabled/eligible/applied, candidate model/entry, and
+rollback model/entry without credentials. MiniMax therefore remains the
+instant config rollback by flipping the flag OFF. Prompt/history, retrieval,
+evidence allocation, scoring, frozen eval specs, and corpus state are
+unchanged.
+
+The focused network-disabled route/fallback suite passed 12/12; log SHA
+`a31aa96ef2fc01bc595b15ad69164f40b04ef5a086974304a07cbd58e90a8f86`,
+true `EXIT=0`. The adjacent network-disabled chat coverage/web-limit suite
+passed 65/65; log SHA
+`5deacd43b21bd9f9d0cd858e36db998872a6eb40c73e6b99399fc2797deaea76`,
+true `EXIT=0`. Six Python files compiled cleanly; log SHA
+`418a5c17f33c70e99b0cc0a07fce69191489cfedc94164bfa903785777c5bd4b`,
+true `EXIT=0`. Black left the final six-file state unchanged; log SHA
+`109ef8bd93e37dd9695f593e202ad3b17565a104ab828ed867e8b8403cf9cb7f`,
+true `EXIT=0`; diff-check SHA
+`418a5c17f33c70e99b0cc0a07fce69191489cfedc94164bfa903785777c5bd4b`,
+true `EXIT=0`.
+
+The production frontend TypeScript/Vite build passed; image
+`sha256:10ad8f9c2f45a7444d426780aa8f6c2ad9b67f3ba9b42418d9c3362dfca056a7`,
+build log SHA
+`2bad01146bac5ae8a919add8b708b072c9418476a8b65006ae1f8846e26b6f6e`,
+true `EXIT=0`. The isolated backend image is
+`sha256:e1a420ca6c026387785e4b2d2ce0d52fa0f4980d5cc2dfa445a9d720a9f74ed8`;
+build log SHA
+`09f4846224c20d1d965361970f0603b6b02916e450f5412b4d2bf30d9c2d3f54`,
+true `EXIT=0`. Its baked default-OFF role/import smoke passed; log SHA
+`495819cb1a20e7a4f96a359a55453c2f6d356567ca5e42f524a981af8b6b6b06`,
+true `EXIT=0`.
+
+Disclosed uncredited attempt: the first focused container collection omitted
+the mandatory test-only `LITELLM_MASTER_KEY`; it failed before test
+collection and was rerun with a non-secret test sentinel. Black mechanically
+formatted two touched Python files before the authoritative checks. No live
+container was deployed, no provider or service was contacted, no eval ran,
+and no settings/corpus data was written. Provider calls=0, live evals=0,
+corpus writes=0. The flag remains default-OFF and live runtime state is
+unchanged. Proceeding to build-only item 2d, deterministic metadata backfills.

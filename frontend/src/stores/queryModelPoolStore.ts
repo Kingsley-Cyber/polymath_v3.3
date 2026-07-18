@@ -20,6 +20,7 @@ import type {
   ModelsConfig,
   QueryModelPoolEntry,
   ReasoningConfig,
+  SynthesisConfig,
   UtilityConfig,
 } from "../types";
 
@@ -31,6 +32,7 @@ const EMPTY_CONFIG: ModelsConfig = {
   reasoning: { default_enabled: false, pool_entry_id: null },
   utility: { default_enabled: false, pool_entry_id: null },
   graph_query: { pool_entry_id: null },
+  synthesis: { pool_entry_id: null },
 };
 
 interface QueryModelPoolState {
@@ -48,6 +50,7 @@ interface QueryModelPoolState {
   patchReasoning: (patch: Partial<ReasoningConfig>) => void;
   patchUtility: (patch: Partial<UtilityConfig>) => void;
   patchGraphQuery: (patch: Partial<GraphQueryConfig>) => void;
+  patchSynthesis: (patch: Partial<SynthesisConfig>) => void;
   /** Append an entry locally. Dirty until save(). */
   addEntry: (entry: QueryModelPoolEntry) => void;
   /** Toggle an entry's `enabled` flag. */
@@ -119,6 +122,18 @@ export const useQueryModelPoolStore = create<QueryModelPoolState>()(
           config: {
             ...s.config,
             graph_query: { ...(s.config.graph_query || { pool_entry_id: null }), ...patch },
+          },
+          dirty: true,
+        })),
+
+      patchSynthesis: (patch) =>
+        set((s) => ({
+          config: {
+            ...s.config,
+            synthesis: {
+              ...(s.config.synthesis || { pool_entry_id: null }),
+              ...patch,
+            },
           },
           dirty: true,
         })),

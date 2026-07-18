@@ -129,7 +129,9 @@ class SettingsService:
             redis_url=c.REDIS_URL,
             embedder_url=c.EMBEDDER_URL,
             reranker_url=c.RERANKER_URL,
-            extraction_url=(os.environ.get("LOCAL_GHOST_B_EXTRACT_URL", "") or "").split(",")[0].strip(),
+            extraction_url=(os.environ.get("LOCAL_GHOST_B_EXTRACT_URL", "") or "")
+            .split(",")[0]
+            .strip(),
             modal_enabled=c.MODAL_ENABLED,
             modal_embedder_url=masked_modal_url,
             auth=AuthConfig(
@@ -312,7 +314,11 @@ class SettingsService:
             entry["profile_id"] = str(entry.get("profile_id") or uuid4())
             entry.setdefault(
                 "profile_label",
-                str(entry.get("model") or entry.get("provider_preset") or "Ingestion route"),
+                str(
+                    entry.get("model")
+                    or entry.get("provider_preset")
+                    or "Ingestion route"
+                ),
             )
             existing_entry = existing_by_id.get(entry["profile_id"], {})
             same_target = all(
@@ -377,7 +383,9 @@ class SettingsService:
         doc = await self._db["settings"].find_one(
             {"user_id": user_id}, {"_id": 0, "ingestion.provider_models": 1}
         )
-        return copy.deepcopy(((doc or {}).get("ingestion") or {}).get("provider_models") or [])
+        return copy.deepcopy(
+            ((doc or {}).get("ingestion") or {}).get("provider_models") or []
+        )
 
     async def _sync_ingestion_provider_snapshots(
         self, user_id: str, registry: list[dict[str, Any]]
@@ -421,7 +429,12 @@ class SettingsService:
             if changed:
                 await self._db["corpora"].update_one(
                     {"_id": corpus["_id"]},
-                    {"$set": {"default_ingestion_config": config, "updated_at": datetime.utcnow()}},
+                    {
+                        "$set": {
+                            "default_ingestion_config": config,
+                            "updated_at": datetime.utcnow(),
+                        }
+                    },
                 )
 
     async def get_runtime_ingestion_settings(
@@ -439,7 +452,9 @@ class SettingsService:
             return defaults
 
         try:
-            query = {"user_id": user_id} if user_id else {"ingestion": {"$exists": True}}
+            query = (
+                {"user_id": user_id} if user_id else {"ingestion": {"$exists": True}}
+            )
             doc = await self._db["settings"].find_one(query)
             raw = copy.deepcopy((doc or {}).get("ingestion") or {})
             if not raw:
@@ -447,7 +462,9 @@ class SettingsService:
             self._decrypt_ingestion_keys_in_place(raw)
             return GlobalIngestionSettings(**raw)
         except Exception as exc:  # noqa: BLE001
-            logger.warning("get_runtime_ingestion_settings fell back to defaults: %s", exc)
+            logger.warning(
+                "get_runtime_ingestion_settings fell back to defaults: %s", exc
+            )
             return defaults
 
     async def get_system_runpod_flash(
@@ -517,9 +534,7 @@ class SettingsService:
                         }
                     )
                     doc = await self._db["settings"].find_one(query)
-                    stored = ((doc or {}).get("api_keys") or {}).get(
-                        "runpod_accounts"
-                    )
+                    stored = ((doc or {}).get("api_keys") or {}).get("runpod_accounts")
                     if isinstance(stored, dict):
                         ciphertexts = stored
                 except Exception as exc:  # noqa: BLE001
@@ -715,7 +730,9 @@ class SettingsService:
         if pool:
             return models_raw
 
-        model = (chat.default_chat_model or self._config.DEFAULT_COMPLETION_MODEL or "").strip()
+        model = (
+            chat.default_chat_model or self._config.DEFAULT_COMPLETION_MODEL or ""
+        ).strip()
         if not model:
             return models_raw
 
@@ -737,6 +754,8 @@ class SettingsService:
             "agentic": dict(models_raw.get("agentic") or {}),
             "reasoning": dict(models_raw.get("reasoning") or {}),
             "utility": dict(models_raw.get("utility") or {}),
+            "graph_query": dict(models_raw.get("graph_query") or {}),
+            "synthesis": dict(models_raw.get("synthesis") or {}),
         }
         await self._db["settings"].update_one(
             {"user_id": user_id},
@@ -834,7 +853,7 @@ class SettingsService:
         # Fetch existing unmasked pool so we can preserve ciphertext on "[set]"
         existing_raw = await self.get_models_raw(user_id)
         existing_pool_by_id: dict[str, dict] = {}
-        for e in (existing_raw.get("query_model_pool") or []):
+        for e in existing_raw.get("query_model_pool") or []:
             if isinstance(e, dict) and e.get("entry_id"):
                 existing_pool_by_id[e["entry_id"]] = e
 
@@ -842,10 +861,8 @@ class SettingsService:
         for entry in incoming.query_model_pool:
             entry_dict = entry.model_dump()
             new_val = entry_dict.get("api_key_ciphertext")
-            existing_ct = (
-                existing_pool_by_id.get(entry.entry_id, {}).get(
-                    "api_key_ciphertext"
-                )
+            existing_ct = existing_pool_by_id.get(entry.entry_id, {}).get(
+                "api_key_ciphertext"
             )
             # Preserve existing ciphertext when caller signals "no change"
             if not new_val or new_val == _MASK_SENTINEL:
@@ -870,6 +887,7 @@ class SettingsService:
             ("reasoning", incoming.reasoning),
             ("utility", incoming.utility),
             ("graph_query", incoming.graph_query),
+            ("synthesis", incoming.synthesis),
         ):
             pid = section_val.pool_entry_id
             if pid and pid not in valid_ids:
@@ -886,6 +904,7 @@ class SettingsService:
             "reasoning": incoming.reasoning.model_dump(),
             "utility": incoming.utility.model_dump(),
             "graph_query": incoming.graph_query.model_dump(),
+            "synthesis": incoming.synthesis.model_dump(),
         }
         await self._db["settings"].update_one(
             {"user_id": user_id},
@@ -895,7 +914,7 @@ class SettingsService:
         # Phase 24 perf — invalidate cache so next get_settings sees the write.
         self._invalidate_cache(user_id)
         logger.info(
-            "models updated user=%s pool=%d hyde=%s agentic=%s reasoning=%s utility=%s graph_query=%s",
+            "models updated user=%s pool=%d hyde=%s agentic=%s reasoning=%s utility=%s graph_query=%s synthesis=%s",
             user_id,
             len(resolved_pool),
             incoming.hyde.pool_entry_id or "-",
@@ -903,11 +922,12 @@ class SettingsService:
             incoming.reasoning.pool_entry_id or "-",
             incoming.utility.pool_entry_id or "-",
             incoming.graph_query.pool_entry_id or "-",
+            incoming.synthesis.pool_entry_id or "-",
         )
 
         # Return the masked view (same shape as GET) for router response
         stored_raw = await self.get_models_raw(user_id)
-        for entry in (stored_raw.get("query_model_pool") or []):
+        for entry in stored_raw.get("query_model_pool") or []:
             if isinstance(entry, dict) and entry.get("api_key_ciphertext"):
                 entry["api_key_ciphertext"] = _MASK_SENTINEL
         return ModelsConfig(**stored_raw)
@@ -950,25 +970,34 @@ class SettingsService:
             for entry in pool:
                 if isinstance(entry, dict) and entry.get("api_key_ciphertext"):
                     entry["api_key_ciphertext"] = _MASK_SENTINEL
-            return ModelsConfig(**{
-                "query_model_pool": pool,
-                "hyde": current.get("hyde") or {},
-                "agentic": current.get("agentic") or {},
-                "reasoning": current.get("reasoning") or {},
-                "utility": current.get("utility") or {},
-                "graph_query": current.get("graph_query") or {},
-            })
+            return ModelsConfig(
+                **{
+                    "query_model_pool": pool,
+                    "hyde": current.get("hyde") or {},
+                    "agentic": current.get("agentic") or {},
+                    "reasoning": current.get("reasoning") or {},
+                    "utility": current.get("utility") or {},
+                    "graph_query": current.get("graph_query") or {},
+                    "synthesis": current.get("synthesis") or {},
+                }
+            )
         # Write back (no re-encryption; we only appended ollama entries)
         await self._db["settings"].update_one(
             {"user_id": user_id},
-            {"$set": {
-                "models.query_model_pool": pool,
-                "models_migrated": True,
-            }},
+            {
+                "$set": {
+                    "models.query_model_pool": pool,
+                    "models_migrated": True,
+                }
+            },
             upsert=True,
         )
-        logger.info("ollama bulk-add user=%s added=%d skipped=%d",
-                    user_id, added, len(model_names) - added)
+        logger.info(
+            "ollama bulk-add user=%s added=%d skipped=%d",
+            user_id,
+            added,
+            len(model_names) - added,
+        )
         return await self._masked_models(user_id)
 
     async def delete_pool_entry(self, user_id: str, entry_id: str) -> ModelsConfig:
@@ -977,7 +1006,8 @@ class SettingsService:
         fall through to the legacy chain)."""
         current = await self.get_models_raw(user_id)
         pool = [
-            e for e in (current.get("query_model_pool") or [])
+            e
+            for e in (current.get("query_model_pool") or [])
             if not (isinstance(e, dict) and e.get("entry_id") == entry_id)
         ]
         hyde = dict(current.get("hyde") or {})
@@ -985,6 +1015,7 @@ class SettingsService:
         reasoning = dict(current.get("reasoning") or {})
         utility = dict(current.get("utility") or {})
         graph_query = dict(current.get("graph_query") or {})
+        synthesis = dict(current.get("synthesis") or {})
         if hyde.get("pool_entry_id") == entry_id:
             hyde["pool_entry_id"] = None
         if agentic.get("pool_entry_id") == entry_id:
@@ -995,16 +1026,21 @@ class SettingsService:
             utility["pool_entry_id"] = None
         if graph_query.get("pool_entry_id") == entry_id:
             graph_query["pool_entry_id"] = None
+        if synthesis.get("pool_entry_id") == entry_id:
+            synthesis["pool_entry_id"] = None
         await self._db["settings"].update_one(
             {"user_id": user_id},
-            {"$set": {
-                "models.query_model_pool": pool,
-                "models.hyde": hyde,
-                "models.agentic": agentic,
-                "models.reasoning": reasoning,
-                "models.utility": utility,
-                "models.graph_query": graph_query,
-            }},
+            {
+                "$set": {
+                    "models.query_model_pool": pool,
+                    "models.hyde": hyde,
+                    "models.agentic": agentic,
+                    "models.reasoning": reasoning,
+                    "models.utility": utility,
+                    "models.graph_query": graph_query,
+                    "models.synthesis": synthesis,
+                }
+            },
             upsert=True,
         )
         return await self._masked_models(user_id)
@@ -1012,7 +1048,7 @@ class SettingsService:
     async def _masked_models(self, user_id: str) -> ModelsConfig:
         """Reload the stored models subdoc and return with masked keys."""
         raw = await self.get_models_raw(user_id)
-        for entry in (raw.get("query_model_pool") or []):
+        for entry in raw.get("query_model_pool") or []:
             if isinstance(entry, dict) and entry.get("api_key_ciphertext"):
                 entry["api_key_ciphertext"] = _MASK_SENTINEL
         return ModelsConfig(**raw)
@@ -1059,17 +1095,19 @@ class SettingsService:
             seen_ids.add(eid)
             # Migration never deals with raw plaintext — leave ciphertext verbatim.
             ct = row.get("api_key") or None
-            new_pool.append({
-                "entry_id": eid,
-                "label": row.get("label") or row.get("model_name") or "pool-entry",
-                "provider": row.get("provider") or "custom",
-                "base_url": row.get("base_url") or None,
-                "api_key_ciphertext": ct,
-                "model_name": row.get("model_name") or "",
-                "source": "ollama" if row.get("provider") == "ollama" else "cloud",
-                "enabled": bool(row.get("enabled", True)),
-                "created_at": row.get("created_at") or now,
-            })
+            new_pool.append(
+                {
+                    "entry_id": eid,
+                    "label": row.get("label") or row.get("model_name") or "pool-entry",
+                    "provider": row.get("provider") or "custom",
+                    "base_url": row.get("base_url") or None,
+                    "api_key_ciphertext": ct,
+                    "model_name": row.get("model_name") or "",
+                    "source": "ollama" if row.get("provider") == "ollama" else "cloud",
+                    "enabled": bool(row.get("enabled", True)),
+                    "created_at": row.get("created_at") or now,
+                }
+            )
 
         # 2. Phase 19.3 `model_profiles` → new pool with provider="custom"
         async for row in self._db["model_profiles"].find({"user_id": user_id}):
@@ -1078,17 +1116,19 @@ class SettingsService:
                 continue
             seen_ids.add(pid)
             ct = row.get("api_key") or None
-            new_pool.append({
-                "entry_id": pid,
-                "label": row.get("label") or "profile",
-                "provider": "custom",
-                "base_url": row.get("base_url") or None,
-                "api_key_ciphertext": ct,
-                "model_name": row.get("model_name") or "",
-                "source": "cloud",
-                "enabled": True,
-                "created_at": row.get("created_at") or now,
-            })
+            new_pool.append(
+                {
+                    "entry_id": pid,
+                    "label": row.get("label") or "profile",
+                    "provider": "custom",
+                    "base_url": row.get("base_url") or None,
+                    "api_key_ciphertext": ct,
+                    "model_name": row.get("model_name") or "",
+                    "source": "cloud",
+                    "enabled": True,
+                    "created_at": row.get("created_at") or now,
+                }
+            )
 
         # 3. Phase F `user_query_preferences` → hyde/agentic pool_entry_ids
         valid_ids = {e["entry_id"] for e in new_pool}
@@ -1105,7 +1145,8 @@ class SettingsService:
                 orphans.append(f"hyde={old_hyde}")
                 logger.warning(
                     "migrate: orphan hyde_pool_id=%s for user=%s — nulled",
-                    old_hyde, user_id,
+                    old_hyde,
+                    user_id,
                 )
             if old_agentic and old_agentic in valid_ids:
                 agentic_pid = old_agentic
@@ -1113,7 +1154,8 @@ class SettingsService:
                 orphans.append(f"agentic={old_agentic}")
                 logger.warning(
                     "migrate: orphan agentic_pool_id=%s for user=%s — nulled",
-                    old_agentic, user_id,
+                    old_agentic,
+                    user_id,
                 )
 
         doc_to_write = {
@@ -1125,6 +1167,7 @@ class SettingsService:
             "reasoning": {"default_enabled": False, "pool_entry_id": None},
             "utility": {"default_enabled": False, "pool_entry_id": None},
             "graph_query": {"pool_entry_id": None},
+            "synthesis": {"pool_entry_id": None},
         }
         await self._db["settings"].update_one(
             {"user_id": user_id},
@@ -1133,7 +1176,9 @@ class SettingsService:
         )
         logger.info(
             "migrated user_id=%s pool_entries=%d orphans=%s",
-            user_id, len(new_pool), orphans or [],
+            user_id,
+            len(new_pool),
+            orphans or [],
         )
         return {
             "migrated": True,
@@ -1329,10 +1374,14 @@ class SettingsService:
             return None
         if self._db is None:
             return None
-        cursor = self._db["settings"].find(
-            {f"api_keys.{provider}": {"$exists": True, "$ne": ""}},
-            {f"api_keys.{provider}": 1, "_id": 0},
-        ).limit(1)
+        cursor = (
+            self._db["settings"]
+            .find(
+                {f"api_keys.{provider}": {"$exists": True, "$ne": ""}},
+                {f"api_keys.{provider}": 1, "_id": 0},
+            )
+            .limit(1)
+        )
         async for doc in cursor:
             ciphertext = (doc.get("api_keys") or {}).get(provider)
             if ciphertext:

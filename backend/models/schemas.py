@@ -564,6 +564,10 @@ class GraphQueryConfig(BaseModel):
     pool_entry_id: str | None = None
 
 
+class SynthesisConfig(BaseModel):
+    pool_entry_id: str | None = None
+
+
 class ModelsConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -573,6 +577,7 @@ class ModelsConfig(BaseModel):
     reasoning: ReasoningConfig = Field(default_factory=ReasoningConfig)
     utility: UtilityConfig = Field(default_factory=UtilityConfig)
     graph_query: GraphQueryConfig = Field(default_factory=GraphQueryConfig)
+    synthesis: SynthesisConfig = Field(default_factory=SynthesisConfig)
 
 
 class UtilityModelTestResult(BaseModel):

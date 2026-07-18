@@ -6852,6 +6852,87 @@ def _build_polymath_system_prompt(now: datetime | None = None) -> str:
     )
 
 
+async def _resolve_synthesis_route_override(
+    *,
+    enabled: bool,
+    user_id: str | None,
+    tool_route_active: bool,
+    model_used: str,
+    profile_creds: dict[str, Any],
+    primary_entry_id: str | None,
+) -> dict[str, Any]:
+    """Resolve an optional final-answer model without changing the prompt.
+
+    The already-resolved query route is the rollback authority. A disabled,
+    ineligible, missing, or broken synthesis route returns it unchanged; only
+    a valid configured pool entry may replace the model and credentials.
+    """
+
+    result: dict[str, Any] = {
+        "model": model_used,
+        "profile_creds": profile_creds,
+        "primary_entry_id": primary_entry_id,
+        "trace": {
+            "enabled": bool(enabled),
+            "eligible": False,
+            "applied": False,
+            "reason": "disabled",
+            "rollback_model": model_used,
+            "rollback_entry_id": primary_entry_id,
+            "candidate_model": None,
+            "candidate_entry_id": None,
+        },
+    }
+    trace = result["trace"]
+    if not enabled:
+        return result
+    if not user_id:
+        trace["reason"] = "user_unavailable"
+        return result
+    if tool_route_active:
+        trace["reason"] = "tool_route_active"
+        return result
+
+    trace["eligible"] = True
+    try:
+        resolved = await resolve_query_model_kind(user_id, "synthesis")
+    except Exception as exc:
+        logger.warning(
+            "Synthesis route resolution failed; preserving rollback route: %s",
+            type(exc).__name__,
+        )
+        trace["reason"] = "resolver_error"
+        trace["error_type"] = type(exc).__name__
+        return result
+
+    if not resolved or not resolved.get("model"):
+        trace["reason"] = "configured_route_unavailable"
+        return result
+
+    candidate_entry_id = str(resolved.get("entry_id") or "") or None
+    candidate_model = str(resolved["model"])
+    result.update(
+        {
+            "model": candidate_model,
+            "profile_creds": {
+                "api_base": resolved.get("api_base"),
+                "api_key": resolved.get("api_key"),
+                "extra_params": resolved.get("extra_params") or None,
+            },
+            "primary_entry_id": candidate_entry_id,
+        }
+    )
+    trace.update(
+        {
+            "applied": True,
+            "reason": "configured_route_applied",
+            "candidate_model": candidate_model,
+            "candidate_entry_id": candidate_entry_id,
+        }
+    )
+    return result
+
+
 class ChatOrchestrator:
     """Orchestrates the complete chat pipeline."""
 
@@ -7045,6 +7126,18 @@ class ChatOrchestrator:
                     model_used,
                 )
 
+        synthesis_route = await _resolve_synthesis_route_override(
+            enabled=settings.SYNTHESIS_ROUTE_OVERRIDE_ENABLED,
+            user_id=user_id,
+            tool_route_active=tool_route_active,
+            model_used=model_used,
+            profile_creds=profile_creds,
+            primary_entry_id=primary_entry_id,
+        )
+        model_used = synthesis_route["model"]
+        profile_creds = synthesis_route["profile_creds"]
+        primary_entry_id = synthesis_route["primary_entry_id"]
+
         if request.overrides is not None:
             request.overrides.model = model_used
 
@@ -7055,7 +7148,11 @@ class ChatOrchestrator:
             content=(
                 "Resolved the final chat model before retrieval and tool " "execution."
             ),
-            metadata={"model": model_used, "web_planner_split": web_only_tool_route},
+            metadata={
+                "model": model_used,
+                "web_planner_split": web_only_tool_route,
+                "synthesis_route": synthesis_route["trace"],
+            },
         )
 
         # Phase 29 — vision-capability pre-flight. If the user attached

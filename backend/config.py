@@ -272,6 +272,15 @@ class Settings(BaseSettings):
             "until the final complete-pipeline acceptance."
         ),
     )
+    SYNTHESIS_ROUTE_OVERRIDE_ENABLED: bool = Field(
+        default=False,
+        description=(
+            "Use settings.models.synthesis.pool_entry_id for the ordinary final "
+            "answer call. Tool/agentic turns are excluded. When disabled or "
+            "unavailable, the already-resolved query route remains the instant "
+            "rollback path."
+        ),
+    )
     ANSWERABILITY_CORPUS_SCOPE_V2_MIN_TERMS: int = Field(
         default=2,
         ge=2,
@@ -629,12 +638,8 @@ class Settings(BaseSettings):
         le=100000,
         description="Durable lifetime call ceiling; zero disables provider calls.",
     )
-    GROUNDED_QUERY_PLANNER_TIMEOUT_SECONDS: float = Field(
-        default=8.0, ge=1.0, le=30.0
-    )
-    GROUNDED_QUERY_PLANNER_CACHE_TTL_HOURS: int = Field(
-        default=24, ge=1, le=720
-    )
+    GROUNDED_QUERY_PLANNER_TIMEOUT_SECONDS: float = Field(default=8.0, ge=1.0, le=30.0)
+    GROUNDED_QUERY_PLANNER_CACHE_TTL_HOURS: int = Field(default=24, ge=1, le=720)
     GROUNDED_QUERY_PLANNER_MIN_ALIGNMENT: float = Field(
         default=0.45,
         ge=-1.0,
@@ -1025,9 +1030,7 @@ class Settings(BaseSettings):
         default="Qwen3-Embedding-0.6B",
         description="Display name of the loaded embedding model — must match MODEL_NAME env var in embedder container",
     )
-    QWEN3_QUERY_INSTRUCTION_PROFILE: Literal[
-        "baseline_live_v0", "universal"
-    ] = Field(
+    QWEN3_QUERY_INSTRUCTION_PROFILE: Literal["baseline_live_v0", "universal"] = Field(
         default="baseline_live_v0",
         description=(
             "Versioned query-only instruction profile resolved from "

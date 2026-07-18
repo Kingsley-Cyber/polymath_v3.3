@@ -126,6 +126,7 @@ const modelsConfig = {
   reasoning: { default_enabled: false, pool_entry_id: null },
   utility: { default_enabled: false, pool_entry_id: null },
   graph_query: { pool_entry_id: null },
+  synthesis: { pool_entry_id: null },
 };
 
 const json = (body) => ({
