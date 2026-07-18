@@ -13312,3 +13312,58 @@ window as six live probes plus free replay, so no superseded 39-execution
 compact-floor suite was run. Per-call provider usage/cost remains absent from
 the current chat journal and is not inferred; build item 2c/P7 is the ordered
 seam that closes that known accounting gap. Proceeding to READY dry-run.
+
+## [2026-07-18T00:15:20Z] EXECUTOR → SENIOR :: RECEIPT
+
+BUILD-FIRST READY is VERIFIED-GREEN with zero provider queries and zero corpus
+writes. The exact owner ingestion block that survived in the canonical
+worktree from the interrupted executor was preserved, completed on the review
+branch, and no-write verified rather than re-authored. It is now
+`docs/OWNER_MANUAL_INGESTION_RUNBOOK_2026-07-17.md`, SHA
+`4f56cabdad6f0276936597d98a348f8ab72faaf9f6af280bf3f81fc9b6dcce9e`.
+The production discovery function found the five visible `hy3_smoke` files
+(2 PDF + 3 Markdown, including the transcript fixture), excluded hidden-file
+noise, and both request bodies validated through `CorpusCreate` and
+`LocalIngestBatchRequest`: `DRY_RUN_OK`, true `EXIT=0`; log SHA
+`ca0361933429eed2b5016768641474c44bf355547d745088b7fa45aa6f561a30`.
+The command supports `.pdf/.md/.epub`, summaries on/off, a `$0.50 × file`
+hard summary authority, encrypted login without printing credentials, durable
+state IDs, and same-command resume.
+
+Authenticated, secret-free control-plane probes resolved both green
+extraction endpoints: primary `hk81nfl5cnwufx` / template `68bfxhigga` and
+secondary `8tafde7potcsjw` / template `i8qrk8fkfe`. Both bind the exact
+immutable image
+`sha256:4cb084572687f772cab481adce649cf03c15283368c3541772f85465ee50f896`,
+have min=0/max=1, `inProgress=0`, and `inQueue=0`; secret values emitted=0.
+They are correctly scale-to-zero/cold (no READY worker is billed before the
+first job). Probe log SHA
+`38300839b2a9ebdfb7fc4bbc38e9c03953128f8eb9ed317977946c2342e3cbdb`,
+true `EXIT=0`.
+
+The summary route resolves exactly one admitted primary:
+`deepseek/deepseek-v4-flash` at `https://api.deepseek.com`, encrypted key
+available, thinking disabled, Hy3 not admitted, secret values emitted=0.
+Per the later 02:34Z compact READY law this was a route/key dry-run, not the
+older requested minimal provider call: provider calls=0. Route log SHA
+`735a6376a96afe2fc0417f4ef19310fdf40e8f06ef99f531faac838413b736c9`,
+true `EXIT=0`.
+
+Canonical production-route tests are 44/44 green for LocalExtractionV1 and
+the legacy-adapter boundary; final test log SHA
+`6e2d863b8ced5049ac8c5eb6b363348d3020b31e482e9fd1d0ac5fc673563c06`,
+true `EXIT=0`. Two disclosed packaging attempts preceded it: network-none
+could not populate the image's missing tiktoken cache and a `/tests` mount
+made one fixture resolve `/registries`; both failed during collection/path
+setup, made no service/provider call, and the unchanged canonical `/app/tests`
+mount passed.
+
+Runtime health is GREEN for backend/Mongo/Qdrant/Neo4j/Redis/LiteLLM,
+embedder (inference-ready, queue=0), fp16 reranker, and warm Ghost B. Live
+flags are attested relationship=true, corpus_scope.v2=true, temporal=true,
+claims=true; T/planner/router/decomposition/waterfall=false. Both eval lock
+files are absent. Runtime log SHA
+`d40f5e2c8983126a67ae14a5bf91906e047c016d791e308f85a3607716b3273d`,
+true `EXIT=0`. The canonical shared worktree's pre-existing owner/executor
+runbook draft and `tmp/` remain untouched; this review branch is the only
+commit target. Proceeding to Agent P's one-call CLOSED-ledger gate.
