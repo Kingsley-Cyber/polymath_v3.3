@@ -60,8 +60,23 @@ class GpuArbiterClient:
         host = os.environ.get("ARBITER_HOST", "127.0.0.1")
         port = os.environ.get("ARBITER_PORT", "8085")
         self.base_url = (base_url or f"http://{host}:{port}").rstrip("/")
+        # Embed is the high-priority class: if it has not been granted the
+        # GPU within a few seconds (holds are sub-second), something is wrong
+        # and it must proceed fail-open rather than stack lease wait onto the
+        # sidecar's 60s process watchdog (the 2026-07-18 Q2 crash: wait +
+        # compute crossed the watchdog and the embedder self-terminated
+        # mid-battery). Rerank keeps the long acquire budget.
+        if workload_class == "embed":
+            # The legacy shared env deliberately does NOT apply to embed:
+            # the safety bound must hold unless overridden per-class.
+            resolved = os.environ.get("ARBITER_EMBED_ACQUIRE_TIMEOUT_SECONDS", "5")
+        else:
+            resolved = os.environ.get(
+                "ARBITER_RERANK_ACQUIRE_TIMEOUT_SECONDS",
+                os.environ.get("ARBITER_ACQUIRE_TIMEOUT_SECONDS", "30"),
+            )
         self.acquire_timeout_seconds = (
-            float(os.environ.get("ARBITER_ACQUIRE_TIMEOUT_SECONDS", "30"))
+            float(resolved)
             if acquire_timeout_seconds is None
             else acquire_timeout_seconds
         )
