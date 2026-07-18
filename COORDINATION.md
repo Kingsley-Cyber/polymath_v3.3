@@ -13174,3 +13174,33 @@ PRE-ACCEPTANCE CHECKLIST (run after build mode 2a–2d, before the final
    enablement-eligible pending owner word; the final acceptance runs
    with T in whatever state that verdict leaves it.
 3. Final acceptance per docs/FINAL_ACCEPTANCE_SET_V1_2026-07-18.md.
+
+## [2026-07-18T08:59Z] SENIOR → EXECUTOR :: DIRECTIVE — Agent L amendment (owner design input): L5 gains the bounded refinement round
+
+OWNER DESIGN INPUT (verbatim intent): after retrieval the LLM should see
+the surfaced documents (including associative ones) and refine its
+subqueries against the original question to better curate retrieval and
+the answer.
+
+AMEND L5: the escalation decomposer gains a REFINEMENT trigger alongside
+its parse-failure trigger. Contract:
+- Trigger: DETERMINISTIC gap signals only, evaluated after first-pass
+  allocation — (a) a subquery whose seats are empty above admission
+  threshold, (b) a required side/role with zero seated docs, (c) plan
+  shortlist∩seated = ∅ for a targeted subquery. No gap → no refinement,
+  zero added latency.
+- Input: original query + QueryPlanV1 + seated top-N doc titles/summaries
+  (associative included) + the named gap signal. Output: refined
+  subqueries for the GAPPED roles only, validated into the same typed
+  schema; max 1 refinement round per query, ever.
+- Second pass retrieves ONLY the refined subqueries; merged under the
+  same allocation laws; assembly unchanged (LLM-free).
+- Determinism: refinement cached on (normalized_query, corpus_doc_version,
+  first-pass seated-doc identity hash, decomposer_prompt_hash); repeats
+  byte-stable. Refined plan + gap signal recorded in trace.
+- Fail-open: refiner unavailable/invalid → first-pass results stand,
+  named signal `planner_refinement_unavailable`, counted per
+  silent-fallback law.
+- Gates addition (final acceptance): at least one gap-firing probe shows
+  the refinement trace with improved seating (D1/D6 class); zero
+  refinement firings on clean simple-shape queries.
