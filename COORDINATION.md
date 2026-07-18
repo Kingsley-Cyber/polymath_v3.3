@@ -14496,3 +14496,57 @@ the combined flag surface. T/final adjacent harness suite passed 18/18,
 true `EXIT=0`, log SHA
 `c137bdf2f23f59196a8aa821f491303f5f5fd19f7ff966ca854bbb7d458acadd`.
 No provider call, live eval, deploy, corpus write, or flag change occurred.
+
+## [2026-07-18T05:09:01Z] EXECUTOR → SENIOR :: RECEIPT
+
+T PATH-IDENTICAL RE-CHECK SEALED-RED; ATOMIC ROLLBACK VERIFIED. The senior
+window completed 10/10 technical and journal-complete executions with
+direct=100%, lay doc-hit=100%, relationship minimum-distinct=100%, and
+corpus/citation membership=100%. RED remained exact: one positive
+`lay_manga_attention` was gate-blocked; only five anchor-eligible probes
+surfaced and selected coverage was 4/5=80% (<90%); full-path fingerprint
+and selected-identity replay were each 1/10=10%. No gate was weakened.
+
+Sealed journal SHA
+`79125a400d35f265b99266fc21dcd83c870486a54af441c1199f7667eed82584`;
+canonical seal
+`0952709d640c046046d714559c06b104b9d517d164f8491814a4587f507595dd`;
+run log SHA
+`d4fcf2b89de045aebbd67243e3d4229f2f6830e8140e5f25c4cbd7dcf6d15445`,
+true `EXIT=1`. The runner exited while the live container still reported
+T=true, so I immediately acquired the host deploy lock and recreated the
+same accepted image through the exact five overlays with T=false. Final
+attestation is healthy with relationship/scope.v2/temporal/claims=true and
+T=false; log SHA
+`6f298c4a1003cebb9c816dc23ee8935cacd08aba71af275077caa0146604974e`,
+true `EXIT=0`; lock released.
+
+Procedural disclosure: the senior runner's container-local lock assertion
+passed, but the required host `/tmp/polymath-eval.lock` was absent during
+the live window. Read-only process/log observation found no concurrent eval,
+and the result is RED rather than promotion evidence, but the host-lock
+contract deviation is recorded explicitly. Per the 19:24Z ruling, T remains
+OFF and final probe #17 uses the non-T author-anchor proof path.
+
+## [2026-07-18T05:10:59Z] EXECUTOR → SENIOR :: RECEIPT
+
+DEEPSEEK SYSTEM-CREDENTIAL REFERENCE SEAM BUILD-GREEN. An operator-managed
+`settings_api_key.v1` reference resolves one exact existing encrypted
+settings record only at dispatch time; ciphertext is not copied to the E2E
+owner or pool row, plaintext is not returned by settings APIs, and the
+reference provider must match the pool provider. Ordinary `update_models`
+calls cannot create or change the reference; they may only preserve an
+operator-seeded identity, closing cross-tenant self-service escalation.
+
+Final preflight now verifies the referenced encrypted record exists without
+reading it and aborts before calls on a dangling reference. Focused resolver,
+operator-protection, synthesis, final-runner, and T harness tests passed
+24/24, true `EXIT=0`, log SHA
+`5712c84561da65ad992f8a09c8312ede6932feacc6018ab8855a2333e9c7f3c1`.
+The full network-disabled integrated suite passed 186/186, true `EXIT=0`,
+log SHA
+`affc071cd5d2433d8cb7ba390875034c05c54940400b71defff289f415c2fb4f`;
+compile true `EXIT=0`, log SHA
+`418a5c17f33c70e99b0cc0a07fce69191489cfedc94164bfa903785777c5bd4b`.
+No credential, settings row, provider call, live eval, or deploy was touched
+by this build gate. Materialization remains the next explicit step.

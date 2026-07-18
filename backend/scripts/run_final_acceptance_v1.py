@@ -221,16 +221,31 @@ def _discover_runtime(
         price_route is not None,
         "synthesis candidate has no registered cost route; refusing UNKNOWN cost",
     )
-    safe_entry = {
-        "entry_id": role_entry_id,
-        "provider": provider,
-        "model_name": model_name,
-        "route_model": expected_model,
-        "base_url": safe_base_url,
-        "enabled": entry.get("enabled", True),
-        "credential_present": bool(
-            entry.get("api_key_ciphertext")
-            or (
+    credential_present = bool(entry.get("api_key_ciphertext"))
+    credential_reference = entry.get("credential_ref")
+    if isinstance(credential_reference, dict):
+        reference_provider = str(credential_reference.get("provider") or "").strip()
+        reference_user_id = str(
+            credential_reference.get("settings_user_id") or ""
+        ).strip()
+        if (
+            credential_reference.get("kind") == "settings_api_key.v1"
+            and credential_reference.get("scope") == "system"
+            and reference_provider == provider
+            and reference_user_id
+        ):
+            credential_present = bool(
+                database.settings.find_one(
+                    {
+                        "user_id": reference_user_id,
+                        f"api_keys.{provider}": {"$exists": True, "$ne": ""},
+                    },
+                    {"_id": 1},
+                )
+            )
+    if not credential_present:
+        credential_present = bool(
+            (
                 database.settings.find_one(
                     {"user_id": user_id},
                     {f"api_keys.{provider}": 1, "_id": 0},
@@ -239,7 +254,19 @@ def _discover_runtime(
             )
             .get("api_keys", {})
             .get(provider)
-        ),
+        )
+    require(
+        credential_present,
+        "synthesis candidate credential reference is absent or dangling",
+    )
+    safe_entry = {
+        "entry_id": role_entry_id,
+        "provider": provider,
+        "model_name": model_name,
+        "route_model": expected_model,
+        "base_url": safe_base_url,
+        "enabled": entry.get("enabled", True),
+        "credential_present": credential_present,
         "price_route_id": price_route.get("route_id"),
         "price_registry_sha256": price_registry_sha256,
     }
