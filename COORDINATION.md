@@ -15289,3 +15289,23 @@ depth contract engraved). Backend orchestrator + custom artifact layer.
 EXECUTION: tracks 2+3 start immediately (parallel executor sessions);
 track 1 executes the moment owner delivers keys/folders. All laws stand
 (receipts, dry-runs, atomic flips, ledger, ≤10-query windows).
+
+## [2026-07-20T00:52Z] SENIOR :: TRACK 4 — CLI-PROVIDER CHAT MODELS + GROUPED MODEL DROPDOWN (owner order)
+
+T4a CLI SHIM (host service, LaunchAgent like the sidecars, :8090): an
+OpenAI-compatible /v1/chat/completions FastAPI shim that shells out to
+the owner's logged-in CLI subscriptions — codex exec (ChatGPT), cursor-
+agent -p (Cursor), antigravity CLI (probe its non-interactive mode;
+mark entry unavailable if absent). Full-text pseudo-streaming (one
+chunk); per-CLI timeout ~120s; no keys stored (the CLIs carry their own
+auth). Registered as model-pool entries via base_url
+http://host.docker.internal:8090/v1 with provider labels cursor-cli /
+chatgpt-cli / antigravity-cli → they appear in the chat model dropdown
+like any model. P7 note: CLI calls are subscription-priced → ledger rows
+carry price_tier=subscription_flat, computed_usd=0, metered (not OPEN).
+T4b DROPDOWN UI (fold into the Track 2 frontend build): the model
+selector groups models BY PROVIDER with collapse/expand sections
+(collapsed by default, persisted open-state), CLI providers included.
+Caveats on record: CLI-as-backend may sit outside some providers' ToS
+(owner's subscriptions, owner's call); answers arrive as one block, not
+token-stream.
