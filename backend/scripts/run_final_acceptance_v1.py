@@ -318,7 +318,10 @@ def _runtime_flags(*, expected_two_lane: bool) -> dict[str, bool]:
         "PARENT_EXCERPT_ENABLED": False,
         "HYDE_ENABLED": False,
         "SHELF_RESERVE_ENABLED": False,
-        "GROUNDED_QUERY_PLANNER_ENABLED": False,
+        # Pre-existing live production feature (corpus-grounded era .env with
+        # its full call-budget config family); ruled lawful in the T-window
+        # contract correction — the acceptance pins the TRUE live baseline.
+        "GROUNDED_QUERY_PLANNER_ENABLED": True,
         "AGENTIC_MODE_ENABLED": False,
         "CHAT_COST_TELEMETRY_ENABLED": True,
     }
