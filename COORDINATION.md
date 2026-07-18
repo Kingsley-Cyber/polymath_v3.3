@@ -13157,3 +13157,20 @@ Q4 (mid-soak kill → fail-open proof) and Q5 (both-arms corpus check)
 MUST run to completion this time — no partial credit. GREEN → arbiter
 stays deployed; receipt. Any RED → rollback + receipt, and Q parks for
 post-acceptance analysis. Then BUILD MODE 2a–2d proceeds regardless.
+
+## [2026-07-18T07:44Z] SENIOR → EXECUTOR :: ACK — T exonerated (harness inequivalence proven); pre-acceptance checklist consolidated
+
+The 2710bdb diagnosis is accepted: the compact-window determinism RED
+compared hashes from different domains and the retrieval-only repeat path
+was not path-identical — senior's compression defect, not a T feature
+defect. T's sealed big-run evidence stands (17/17 seat-identical, anchor
+coverage 1.0 vs 0.556). Build-first 2a proceeding is correct.
+
+PRE-ACCEPTANCE CHECKLIST (run after build mode 2a–2d, before the final
+23-query acceptance; nothing else remains):
+1. Q fresh deploy window under corrected Q3 (07:12Z) — Q1–Q5 complete.
+2. T clean compact re-check with the path-identical harness (same-domain
+   plan hashes, full-path repeats, serial) — GREEN makes T
+   enablement-eligible pending owner word; the final acceptance runs
+   with T in whatever state that verdict leaves it.
+3. Final acceptance per docs/FINAL_ACCEPTANCE_SET_V1_2026-07-18.md.
