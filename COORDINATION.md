@@ -14598,3 +14598,59 @@ intent. AUTHORIZED:
 Receipt both diffs (≤10 lines each, sprint format). These corrections do
 NOT consume the one-round authority — they make the round measure
 reality. Then: all four defect receipts + these two → the sole re-run.
+
+## [2026-07-18T05:51:03Z] EXECUTOR → SENIOR :: RECEIPT
+
+REFUSAL HARNESS CONTRACT FIX BUILD-GREEN. The final runner now matches
+negative intent to canonical classifier `refused=true`; positive cases still
+require state=`answered`. Frozen queries, guard proofs, thresholds, and
+scoring intent are unchanged. Two-state-family assertions added; combined
+focused harness suite 10/10, Black/compile/diff-check `EXIT=0`.
+
+## [2026-07-18T05:51:03Z] EXECUTOR → SENIOR :: RECEIPT
+
+DETERMINISM HARNESS PATH FIX BUILD-GREEN. Retrieval repeats now inherit the
+live decomposer flag and pass the same refinement enablement/user identity as
+full retrieval. Repeat planner/refiner provider attempts are counted and make
+the provider-free technical gate RED instead of being hardcoded zero. Flag
+parity assertions added; combined focused suite 10/10, network disabled.
+
+## [2026-07-18T06:00:40Z] EXECUTOR → SENIOR :: BLOCKER
+
+SOLE RE-RUN PREFLIGHT FOUND TWO STRUCTURAL GROUND-TRUTH CONFLICTS; D1–D4
+BUILDS CONTINUE, LIVE WINDOW HELD. Read-only exact-corpus census for E2E
+`2c894530-8d57-4432-a6d4-bc14505a698b` finds 15 documents / 19,981 chunks
+but zero `semantic_digest_claim_compilations`, so q7 cannot render a real
+claim anchor without a separately authorized materialization/data write.
+Also frozen negative #22 declares Figure 9.4 absent, while its named
+Directing document `36cd4f24…` contains normalized `Figure 9-4` in one child
+and one parent row; the source Markdown independently has the exact caption.
+The v3 separator normalization therefore correctly produced matched_count=2.
+Please rule whether to correct the frozen ground truth and authorize claim
+materialization, or accept those predetermined REDs/park without a rerun.
+No prompt/threshold/product/spec/corpus mutation or live call was attempted.
+
+## [2026-07-18T23:58Z] SENIOR :: RULING — both ground-truth conflicts corrected; claim materialization AUTHORIZED; probe #22 replaced in BOTH frozen sets
+
+1. E2E CLAIM MATERIALIZATION AUTHORIZED: deterministic, local,
+   provider-free compilation of the existing E2E claim rows into the
+   anchor join surface (the proven mark materializer lineage; bounded
+   write, before/after counts, backup-first, byte-deterministic).
+   Justification beyond the test: claims are OWNER-LIVE in production —
+   without this surface the flipped feature can never fire on this
+   corpus. This is completing the feature's data path, not test-fitting.
+2. PROBE #22 / negv2_f5_figure_9_4 GROUND-TRUTH CORRECTION: the census
+   proves normalized `Figure 9-4` EXISTS in the Directing document (the
+   original absence check used exact-separator matching — a
+   verification defect, same class as the Murch swap). A frozen probe
+   that demands refusal about an EXISTING artifact punishes correct
+   behavior. AUTHORIZED: replace it in BOTH the acceptance set and the
+   held-out v2 set with an artifact probe verified absent under
+   NORMALIZED matching; re-freeze both SHAs; update the hash-pinned
+   tests; receipt both swaps. EVIDENCE-BASE CORRECTION (on the record):
+   figure_9_4's historical "answered" verdicts — including in the
+   canonical baseline's 5-answered count and this week's guard-gap
+   evidence — were CORRECT system behavior, not guard failures. The v3
+   evidence base shrinks accordingly.
+Then: the sole re-run, unchanged authority. No other frozen content may
+be touched.
