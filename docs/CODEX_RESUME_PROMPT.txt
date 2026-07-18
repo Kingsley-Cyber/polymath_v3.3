@@ -1,6 +1,10 @@
-RESUME EXECUTOR (paste this whole line into any fresh Codex session):
-Read ACTIVE DIRECTIVES in COORDINATION.md, then the last EXECUTOR receipt
-in the LOG. Continue the 02:52Z build-first queue from the first
-unreceipted step (flip windows -> READY/P/Q -> build 2a/2b/2c/2d -> final
-acceptance per docs/FINAL_ACCEPTANCE_SET_V1_2026-07-18.md). Receipt every
-step. Skip anything already receipted.
+RESUME EXECUTOR: Read the 98e5ea1 SENIOR receipt (T RED, acceptance
+AUTHORIZED) in COORDINATION.md. Exactly two steps remain:
+(1) materialize the deepseek synthesis pool entry per the 20:22Z ruling
+(reference the existing encrypted summary-lane credential, zero secret
+exposure, thinking:disabled);
+(2) run the final acceptance per backend/scripts/run_final_acceptance_v1.py
+on the live stack (image 9a085802, four features true, T/librarian dark,
+probe #17 under the 13:12Z amendment), seal the journal, receipt the
+verdict. The owner is pinged at the verdict. Skip anything already
+receipted.
