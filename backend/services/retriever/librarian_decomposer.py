@@ -1,4 +1,4 @@
-"""Bounded Utility-route escalation for otherwise-unparsed Librarian plans."""
+"""Bounded configured-route escalation for Librarian planning and refinement."""
 
 from __future__ import annotations
 
@@ -41,6 +41,26 @@ _ROLE_ORDER = {
     "hop": 4,
     "time_slice": 5,
 }
+
+
+async def _resolve_librarian_call_route(
+    resolver: Any,
+    user_id: str,
+) -> dict[str, Any] | None:
+    """Use the configured synthesis route for every Librarian model call.
+
+    Decomposition, refinement, and answer synthesis must share one concrete
+    provider/model identity.  Falling back to the independently configured
+    Utility role caused DeepSeek V4 Flash helper calls to dispatch as
+    ``openai/deepseek-v4-flash`` while synthesis used the registered
+    ``deepseek/deepseek-v4-flash`` route.  Keep a Utility fallback only for
+    installations that have not configured a synthesis role yet.
+    """
+
+    route = await resolver(user_id, "synthesis")
+    if isinstance(route, dict) and str(route.get("model") or "").strip():
+        return route
+    return await resolver(user_id, "utility")
 
 
 class _ProposedSubquery(BaseModel):
@@ -498,7 +518,7 @@ class LibrarianRefiner:
                 provider_attempts=0,
             )
         try:
-            route = await self._resolver(user_id, "utility")
+            route = await _resolve_librarian_call_route(self._resolver, user_id)
         except asyncio.CancelledError:
             return self._fallback(
                 plan=base_plan,
@@ -752,7 +772,7 @@ class LibrarianDecomposer:
                 silent_fallback_count=1,
             )
         try:
-            route = await self._resolver(user_id, "utility")
+            route = await _resolve_librarian_call_route(self._resolver, user_id)
         except asyncio.CancelledError:
             return LibrarianDecompositionResult(
                 plan=fallback,
