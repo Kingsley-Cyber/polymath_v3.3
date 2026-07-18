@@ -15195,3 +15195,19 @@ flags + route override + cost telemetry). Fast route STAYS ON; MiniMax
 rollback = one setting; answer-quality eyeball reserved for the owner.
 NEXT: librarian re-window (10-query W1c gates with REAL latency on this
 stack) → if green, librarian ON → v3 window → re-acceptance.
+
+## [2026-07-19T18:47Z] SENIOR :: RECEIPT — LIBRARIAN RE-WINDOW: QUALITY 8/8 (third straight green); latency gate exceeded (~25s flat vs 10–22s dark); dark per law; OWNER DECISION queued
+
+Full-librarian window on the fast healthy stack (warmup + 8 credited):
+floors 6/6 (both relationship 2/2), depth d1a 2/2 + d2a 2/2 — quality
+evidence is now overwhelming across three independent windows. Latency:
+p50 25.5s / max 26.9s, roughly FLAT across tiers (a fixed ON-path
+overhead: decomposer + multi-lane retrieval + uncapped rerank union).
+The W1c +10% latency gate fails → librarian restored dark, runtime
+attested, health 200. W1-D4 NAMED: ON-path overhead tuning (activate
+per-subquery rerank caps at fusion; skip the decomposer call on
+rule-planned shapes; both surfaces already exist in the plan schema).
+OWNER DECISION (his gate-waiver right): (a) waive latency and run the
+librarian ON now at ~25s uniform with perfect quality, (b) one W1-D4
+tuning round first, then ON. v3 window + re-acceptance proceed either
+way.
