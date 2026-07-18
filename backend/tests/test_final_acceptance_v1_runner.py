@@ -37,6 +37,46 @@ def test_manifest_is_exactly_the_preregistered_23_query_surface() -> None:
     )
 
 
+def test_refusal_state_uses_canonical_classifier_boolean() -> None:
+    case = {"class": "refusal_f3"}
+
+    assert runner._expected_state_receipt(
+        case,
+        {"state": "gate_blocked", "refused": True},
+    ) == ("refused", True)
+    assert runner._expected_state_receipt(
+        case,
+        {"state": "model_voiced_refusal", "refused": True},
+    ) == ("refused", True)
+    assert runner._expected_state_receipt(
+        case,
+        {"state": "answered", "refused": False},
+    ) == ("refused", False)
+    assert runner._expected_state_receipt(
+        {"class": "direct_floor"},
+        {"state": "answered", "refused": False},
+    ) == ("answered", True)
+
+
+def test_repeat_uses_same_librarian_and_refinement_flag() -> None:
+    enabled = runner._repeat_librarian_controls(
+        SimpleNamespace(LIBRARIAN_LLM_DECOMPOSER_ENABLED=True),
+        user_id="owner-1",
+    )
+    disabled = runner._repeat_librarian_controls(
+        SimpleNamespace(LIBRARIAN_LLM_DECOMPOSER_ENABLED=False),
+        user_id="owner-1",
+    )
+
+    assert enabled == {
+        "llm_decomposer_enabled": True,
+        "librarian_refinement_enabled": True,
+        "librarian_refinement_user_id": "owner-1",
+    }
+    assert disabled["llm_decomposer_enabled"] is False
+    assert disabled["librarian_refinement_enabled"] is False
+
+
 def test_expected_group_score_requires_one_document_from_each_side() -> None:
     case = {
         "expected_groups": [

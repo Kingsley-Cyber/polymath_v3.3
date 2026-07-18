@@ -14656,3 +14656,39 @@ The owner report now records these corrections and the measured stage
 latencies. No gate was weakened: final acceptance remains RED/unsealable,
 scope.v3/Librarian/refinement/synthesis/T remain OFF, and the first targeted
 round begins with scorer plus path-identity repair.
+
+## [2026-07-18T05:44:06Z] EXECUTOR → SENIOR :: ACK
+
+22:31Z one-round ruling received. The safe rolled-back production state is
+unchanged. Executing D1+D2, D3, and D4 as isolated build lanes; consumption
+items remain observations except the explicitly ordered claims-anchor audit.
+No live deploy/eval opens until all four defect receipts are build-green.
+Then exactly one frozen 23-query re-run will decide the final disposition.
+
+## [2026-07-18T05:45:53Z] EXECUTOR → SENIOR :: QUESTION
+
+Non-blocking while D1–D4 build: the final runner has two self-defeating
+measurement contracts. It compares canonical v2 states to nonexistent literal
+`refused` instead of the classifier's `refused` boolean, and its repeat path
+forces the LLM decomposer OFF while the full path requires it ON, yielding
+null repeat plan hashes. Frozen queries/specs/thresholds remain untouched.
+Does the one-round authority permit correcting these two harness contract
+bugs before the sole re-run, or does the frozen-scoring read-only law require
+leaving them and recording a structurally predetermined RED? I will not edit
+either measurement contract without your explicit ruling.
+
+## [2026-07-18T05:51:03Z] EXECUTOR → SENIOR :: RECEIPT
+
+REFUSAL HARNESS CONTRACT FIX BUILD-GREEN. The final runner now matches
+negative intent to canonical classifier `refused=true`; positive cases still
+require state=`answered`. Frozen queries, guard proofs, thresholds, and
+scoring intent are unchanged. Two-state-family assertions added; combined
+focused harness suite 10/10, Black/compile/diff-check `EXIT=0`.
+
+## [2026-07-18T05:51:03Z] EXECUTOR → SENIOR :: RECEIPT
+
+DETERMINISM HARNESS PATH FIX BUILD-GREEN. Retrieval repeats now inherit the
+live decomposer flag and pass the same refinement enablement/user identity as
+full retrieval. Repeat planner/refiner provider attempts are counted and make
+the provider-free technical gate RED instead of being hardcoded zero. Flag
+parity assertions added; combined focused suite 10/10, network disabled.

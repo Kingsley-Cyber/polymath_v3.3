@@ -95,6 +95,29 @@ JOURNAL_SCHEMA = "polymath.complete_pipeline_final_acceptance.v1"
 EXECUTION_SCHEMA = "polymath.complete_pipeline_final_execution.v1"
 
 
+def _expected_state_receipt(
+    case: dict[str, Any],
+    classification: dict[str, Any],
+) -> tuple[str, bool]:
+    """Match the frozen refusal intent to the canonical three-state contract."""
+
+    is_refusal = str(case.get("class") or "").startswith("refusal_")
+    if is_refusal:
+        return "refused", classification.get("refused") is True
+    return "answered", classification.get("state") == "answered"
+
+
+def _repeat_librarian_controls(settings: Any, *, user_id: str) -> dict[str, Any]:
+    """Keep the repeat on the exact Librarian/refinement feature path."""
+
+    enabled = bool(getattr(settings, "LIBRARIAN_LLM_DECOMPOSER_ENABLED", False))
+    return {
+        "llm_decomposer_enabled": enabled,
+        "librarian_refinement_enabled": enabled,
+        "librarian_refinement_user_id": user_id,
+    }
+
+
 def require(condition: bool, message: str) -> None:
     if not condition:
         raise RuntimeError(message)
@@ -910,9 +933,7 @@ def _build_execution(
     if trace_contract.get("model_skipped") is not True and not answer.strip():
         technical_errors.append("model-called response has empty answer")
 
-    expected_state = (
-        "refused" if str(case.get("class") or "").startswith("refusal_") else "answered"
-    )
+    expected_state, state_ok = _expected_state_receipt(case, classification)
     row = {
         "schema_version": EXECUTION_SCHEMA,
         "execution_id": f"{case['id']}::{case['retrieval_tier']}",
@@ -951,7 +972,7 @@ def _build_execution(
         "answerability": answerability,
         "classification": classification,
         "expected_state": expected_state,
-        "state_ok": classification.get("state") == expected_state,
+        "state_ok": state_ok,
         "model_skipped": trace_contract.get("model_skipped"),
         "model_route": model_route,
         "trace_contract": trace_contract,
@@ -1019,6 +1040,7 @@ async def _retrieval_only_repeat(
     conversation_service._db = database
     by_id = {row["query_id"]: row for row in executions}
     semaphore = asyncio.Semaphore(CONCURRENCY)
+    librarian_controls = _repeat_librarian_controls(settings, user_id=user_id)
 
     async def repeat_one(case: dict[str, Any]) -> dict[str, Any]:
         full = by_id[str(case["id"])]
@@ -1057,7 +1079,7 @@ async def _retrieval_only_repeat(
                     shadow=False,
                     db=database,
                     user_id=user_id,
-                    llm_decomposer_enabled=False,
+                    llm_decomposer_enabled=librarian_controls["llm_decomposer_enabled"],
                 )
                 base_plan = build_query_plan_v2(
                     str(case["question"]),
@@ -1090,16 +1112,35 @@ async def _retrieval_only_repeat(
                         and plan_trace.get("behavior_applied") is True
                         else None
                     ),
+                    librarian_refinement_enabled=librarian_controls[
+                        "librarian_refinement_enabled"
+                    ],
+                    librarian_refinement_user_id=librarian_controls[
+                        "librarian_refinement_user_id"
+                    ],
                 )
         except Exception as exc:  # noqa: BLE001 - durable receipt
             error = f"{type(exc).__name__}: {exc}"[:500]
         repeat_plan = dict((plan_trace or {}).get("plan") or {})
         diagnostics = dict(getattr(result, "diagnostics", None) or {}) if result else {}
+        plan_provider_calls = int(
+            ((plan_trace or {}).get("diagnostics") or {}).get("provider_calls") or 0
+        )
+        refinement_provider_calls = int(
+            (
+                (
+                    (diagnostics.get("librarian_execution") or {}).get("refinement")
+                    or {}
+                ).get("provider_calls")
+                or 0
+            )
+        )
+        provider_calls = plan_provider_calls + refinement_provider_calls
         expected_seats = _seat_surface(dict(expected_retrieval))
         repeat_seats = _seat_surface(diagnostics)
         return {
             "query_id": str(case["id"]),
-            "provider_calls": 0,
+            "provider_calls": provider_calls,
             "elapsed_seconds": round(time.monotonic() - started, 3),
             "error": error,
             "expected_plan_hash": expected_plan.get("plan_hash"),
@@ -1112,7 +1153,9 @@ async def _retrieval_only_repeat(
             "repeat_seats": repeat_seats,
             "seats_identical": _canonical_bytes(expected_seats)
             == _canonical_bytes(repeat_seats),
-            "technical_ok": bool(result is not None and not error),
+            "technical_ok": bool(
+                result is not None and not error and provider_calls == 0
+            ),
         }
 
     try:
@@ -1212,9 +1255,7 @@ def summarize(
         "floors_11_to_16": all(proof(i) and state(i) for i in range(11, 17)),
         "named_positive_17_to_18": all(proof(i) and state(i) for i in range(17, 19)),
         "refusals_19_to_23": all(
-            proof(i)
-            and state(i)
-            and by_ordinal[i]["classification"]["state"] == "refused"
+            proof(i) and state(i) and by_ordinal[i]["classification"]["refused"] is True
             for i in range(19, 24)
         ),
         "associative_profile_consumed": associative_consumed,
