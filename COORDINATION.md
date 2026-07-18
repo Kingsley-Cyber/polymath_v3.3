@@ -15178,3 +15178,20 @@ paging, not code. RULINGS:
    (fast route already proven 0.8s standalone) → re-acceptance.
 The staircase's quality half is COMPLETE (floors 6/6, depth 2/2+2/2,
 helper route 10/10). The speed half awaits a healthy machine.
+
+## [2026-07-19T17:58Z] SENIOR :: RECEIPT — HOST RELIEVED (reboot, swap 0) + W1e FAST ROUTE LIVE AND VERIFIED; elapsed 55 min
+
+Post-reboot: full stack healthy (12 containers), all sidecars self-
+relaunched incl. arbiter :8085, flags attested. Fresh dark baseline:
+retrieval 10.5–17.7s (host exhaustion CONFIRMED as yesterday's cause).
+W1e atomic window: SYNTHESIS_ROUTE_OVERRIDE_ENABLED=true → warm triplet
+walls 10.2s / 21.9s / 25.5s (vs 18.0/43.8/49.4 baseline; synthesis
+32s→4–11s). Ledger accounting_state=CLOSED on all three (P7 metering the
+DeepSeek route). One cold-start refusal artifact post-recreate resolved
+on warm rerun (not a regression). CHAT_COST_TELEMETRY_ENABLED restored
+durably to .env (it had dropped in a senior recreate — stale-env class,
+third occurrence; .env is now the single source for all five live
+flags + route override + cost telemetry). Fast route STAYS ON; MiniMax
+rollback = one setting; answer-quality eyeball reserved for the owner.
+NEXT: librarian re-window (10-query W1c gates with REAL latency on this
+stack) → if green, librarian ON → v3 window → re-acceptance.
