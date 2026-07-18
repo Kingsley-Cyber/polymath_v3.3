@@ -1,9 +1,60 @@
 # Final Acceptance v1 — durable run artifacts
 
-This directory preserves the single owner-authorized 23-query final
-acceptance window executed on 2026-07-18.
+This directory preserves the initial 23-query acceptance attempt and the
+sole senior-authorized repaired rerun executed on 2026-07-18.
 
-## Verdict
+## State of record — repaired rerun
+
+- Result: **RED / technically unsealable**
+- Runner exit: `EXIT=2`
+- Executions / retrieval repeats: `23/23`, `5/5`
+- Journal-complete / technical executions: `21/23`
+- Negative refusal states: `5/5`; named-guard proofs: `4/5`
+- Deep / fast p50: `49.066s / 13.386s`
+- Known cost subtotal: `$0.00623476`; total **UNKNOWN** because two timed-out
+  helper calls have no usage receipts
+- `sealed=false`, `seal=null`
+- Raw journal SHA-256:
+  `135d7b0586a978d27aaea574622cc9f1ca751bc61a063cb9c01e99148c67d79d`
+- Raw run-log SHA-256:
+  `d37df7ecacd52f125b73d3dd31907d164e125d9aa3586306826816ff2f446ee5`
+
+The complete-stack RED was rolled back atomically. The safe live-proven flags
+remain ON; all final-review flags are OFF; health is green; eval mounts are
+absent; the host lock is released.
+
+### Rerun and materialization artifacts
+
+All gzip files were created deterministically with `gzip -n -9`.
+
+| Artifact | SHA-256 | Purpose |
+|---|---|---|
+| `final_acceptance_v1_rerun.json.gz` | `b9562c9cb1b6727709475305cd2fbee7443c9d4a09f40b75d1a92fbcdb0a421d` | Complete repaired-rerun journal |
+| `final_acceptance_v1_rerun.log.gz` | `cd5522e6e6e6078b370f83e8a9d73c15c3697e0e8bc286fb6252c424ad024e02` | Rerun stdout/stderr and true exit |
+| `final_acceptance_rerun_preflight.log.gz` | `ebe8fff135e985043d558f8954ab4229f9d987a7b0965a8248fcfa135c5daf31` | Exact runtime/lock/spec preflight |
+| `final_acceptance_rerun_deploy.log.gz` | `c15803edab3b1f8a892cc3a27891c76f08a348c903582c2e0578e52e03eab706` | Complete-stack deployment |
+| `final_acceptance_rerun_rollback.log.gz` | `0daee5623cf746bbee35b9ee953a479498734fab8e31528357adee59d5c4c9f0` | Atomic RED rollback |
+| `final_acceptance_rerun_rollback_attestation.log.gz` | `9864cda413014f8332289c53198677ef2b507e460b4f4c7e2cbd109a504541b9` | Final health/flag/mount attestation |
+| `final_acceptance_rerun_report_verification.log.gz` | `9f232f149a5e676e519895f0f43c41388a331d24efc9232bb1ba4b9846a8c81a` | Independent report-fact and secret-prefix checks |
+| `claim_materialization_import.log.gz` | `6c26a23e1e017e457c9383a019da12481b3af4008c79dba5b101632163fef8f9` | Zero-before import and protected-census receipt |
+| `claim_materialization_double_export_compare.log.gz` | `9ee88a0acdeb3f1f4284b2c56eae2d99d09c6e65603af20cd25b17a314ea828f` | Byte-equality proof |
+| `claim_materialization_q7_microproof.log.gz` | `3bb15e608d04c9c5a9653e1b32d3de6729fb8414151dc94fe14da0cba13dfab5` | Provider-free additive anchor proof |
+| `claim_materialization_post_census.log.gz` | `95421864262b87f6dba5a8fedc45120047e47ebc4e8e09accf2ccec234d2b39a` | Global/E2E/Mark count closure |
+| `claim_materialization_before_census.json.gz` | `e6ec4e648b6a584a01fd51a059addbec606833e4d72bbd8c81a9dfdeaa5cfe52` | Pre-write protected census |
+| `claim_materialization_write_manifest.jsonl.gz` | `5397f6841c43ab9cf759b158593092a589d0dcdbeea35dd6246d13af280f977d` | Exact planned-ID rollback set |
+| `claim_materialization_source_lineage.jsonl.gz` | `3524be0429150cd0bbea6f47671a2e5f045a5085848853bfa1a462b1de326d83` | Pinned source-lineage manifest |
+| `claim_materialization_empty_backup.jsonl.gz` | `f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec` | Zero-row target backup |
+
+Rerun selection identity:
+
+- query manifest:
+  `a130175f341596baeca8b53a288fde4890f1e1e31c5f83e43f8c4d20a3d6807b`;
+- exact query surface:
+  `2a746275f9a224a7b916dbee34dfd44d424c23fb2e69230f82870d1c3861debc`;
+- parent acceptance spec:
+  `99f2c37bbc22ded15135afa0f113f41e1faa0dc4346f77f74c752cb4d6905c4e`.
+
+## Historical first-attempt verdict
 
 - Result: **RED / technically unsealable**
 - Runner exit: `EXIT=2`

@@ -14812,3 +14812,49 @@ sealed planned-ID write manifest. Source `6fb9841`, review integration
 `471931f`. Focused gate 36/36 PASS, `EXIT=0`, log SHA `f1a2cfd5…`; combined
 D1–D4/frozen/claim/materializer gate 201/201 PASS, network disabled,
 `EXIT=0`, log SHA `ab65e7f5…`. Black, compile, and diff-check are green.
+
+## [2026-07-18T06:49:41Z] EXECUTOR → SENIOR :: RECEIPT
+
+CLAIM MATERIALIZER IMMUTABLE DEPLOY GREEN; NO CORPUS WRITE YET. Review HEAD
+`8c46e8d` baked as image `sha256:a82cf85c…`; exact-image test gate 201/201
+PASS, `EXIT=0`, SHA `d15f4988…`. Backend and ingest-worker now share that
+digest, are healthy, and their two materializer code hashes match. Live
+proven flags remain relationship/scope.v2/temporal/claims/chat-cost=true;
+scope.v3/Librarian/decomposer/synthesis/two-lane=false; eval mounts absent.
+Initial wrong-project Compose attempt failed pre-live on port bind and its
+stopped containers/network were fully removed before canonical deployment.
+
+## [2026-07-18T07:04:28Z] EXECUTOR → SENIOR :: RECEIPT
+
+CLAIM MATERIALIZATION DOUBLE-EXPORT GREEN; TARGET STILL ZERO. Baked-image
+scope closed 15 docs / 6,756 parents / 18,790 children. Independent exports
+A+B each closed 18,790 rows / 152,803 claims / 2,653 typed / 147 links /
+79,247 evidence sentences, provider calls=0, writes=0. Both exports compare
+byte-identical at 381,243,197 bytes, SHA `c3be59bc…`; lineage manifests
+compare byte-identical at 12,833,836 bytes, SHA `a6106ccc…`; compare
+`EXIT=0`, log SHA `f2b9b26f…`. Opening the authorized single import next.
+
+## [2026-07-18T07:17:26Z] EXECUTOR → SENIOR :: RECEIPT
+
+AUTHORIZED E2E CLAIM MATERIALIZATION GREEN. Single import changed E2E
+`0→18,790`; inserted=18,790, reused=0, readback-valid=18,790, duplicate
+children=0, provider calls=0, true `EXIT=0`, log SHA `55622139…`. Global
+count is 22,283; Mark remains 3,493; all 18,790 E2E rows carry pinned
+migration provenance; unsafe canonical/missing rows=0. Protected Mongo,
+Qdrant, and Neo4j census is exactly unchanged. Empty backup SHA `e3b0c442…`;
+planned-ID manifest SHA `be8847e5…`, lineage SHA `a6106ccc…`, all copied to
+host `/tmp`. Provider-free q7 proof attached/rendered 1 anchor additively
+over 490 Murch rows / 4,486 claims, `EXIT=0`, SHA `1b7b38b4…`.
+
+## [2026-07-18T07:33:45Z] EXECUTOR → SENIOR :: RECEIPT
+
+SOLE FINAL ACCEPTANCE RERUN RED / UNSEALABLE; NO RETRY. All 23 executions
+and five path-identical repeats completed; journal-complete=21/23,
+`sealed=false`, runner `EXIT=2`. Gates: depth 1/2 PASS, graph 0/2,
+consumption 1/4, floors 0/6, named positives 0/2, negatives state 5/5 but
+named proof 4/5; plan determinism 4/5, seats 3/5; deep/fast p50
+49.066s/13.386s; cost OPEN from two timed-out unmetered helper calls, known
+subtotal `$0.00623476`. Journal SHA `135d7b05…`, log SHA `d37df7ec…`.
+Atomic rollback verified healthy on `a82cf85c…`: five safe features ON, dark
+stack OFF, eval mounts absent, lock released (`EXIT=0`, SHA `bbe3ba74…`).
+Owner report and durable artifacts updated under `docs/`; verification green.
