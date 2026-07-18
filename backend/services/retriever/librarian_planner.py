@@ -100,6 +100,20 @@ _NAMED_SOURCE_PATTERNS = (
         r"(?:,|\bwhat\b|\bhow\b|\bwhich\b|\bwho\b|[?.!]|$)",
         re.IGNORECASE,
     ),
+    re.compile(
+        r"\bwhat\s+(?:does|do)\s+(.+?)\s+"
+        r"(?:say|teach|present|recommend|describe|explain)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\bwhat\s+(?:guidance|advice|recommendations?)\s+(?:does|do)\s+"
+        r"(.+?)\s+(?:give|offer|provide|present)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\bwhat\s+.+?\s+did\s+(.+?)\s+" r"(?:give|say|teach|recommend|describe)\b",
+        re.IGNORECASE,
+    ),
 )
 _NAMED_SOURCE_GENERIC_TOKENS = frozenset(
     {
@@ -463,7 +477,9 @@ def _target_doc_ids(
     return tuple(sorted(key[1] for key, _score in admitted[:max_targets]))
 
 
-def _named_source_phrases(query: str) -> tuple[str, ...]:
+def named_source_phrases(query: str) -> tuple[str, ...]:
+    """Extract explicit source/author phrases without corpus-specific terms."""
+
     output: list[str] = []
     for pattern in _NAMED_SOURCE_PATTERNS:
         for match in pattern.finditer(query):
@@ -473,6 +489,9 @@ def _named_source_phrases(query: str) -> tuple[str, ...]:
             }:
                 output.append(phrase)
     return tuple(output[:4])
+
+
+_named_source_phrases = named_source_phrases
 
 
 def _distinctive_source_tokens(text: str) -> tuple[str, ...]:

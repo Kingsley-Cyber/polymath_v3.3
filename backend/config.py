@@ -263,6 +263,15 @@ class Settings(BaseSettings):
             "Default OFF pending frozen-suite acceptance."
         ),
     )
+    ANSWERABILITY_CORPUS_SCOPE_V3_ENABLED: bool = Field(
+        default=False,
+        description=(
+            "Enable the versioned deterministic chat-side corpus-scope v3 "
+            "guard: named-source absence, temporal out-of-range, exact "
+            "artifact existence, and refusal-bait stripping. Default OFF "
+            "until the final complete-pipeline acceptance."
+        ),
+    )
     ANSWERABILITY_CORPUS_SCOPE_V2_MIN_TERMS: int = Field(
         default=2,
         ge=2,

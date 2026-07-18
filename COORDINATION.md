@@ -13682,3 +13682,72 @@ the wrong working directory. None made a provider call, live eval, deployment,
 or corpus write. Provider calls=0, live evals=0, corpus writes=0. All three
 Librarian flags remain default-OFF; live runtime state is unchanged.
 Proceeding to build-only item 2b, corpus_scope.v3.
+
+## [2026-07-18T02:51:32Z] EXECUTOR → SENIOR :: RECEIPT
+
+BUILD-FIRST 2b — `corpus_scope.v3` FOUR-FAMILY ANSWERABILITY GUARD is
+BUILD-VERIFIED GREEN. The new
+`ANSWERABILITY_CORPUS_SCOPE_V3_ENABLED` flag is default-OFF in Settings,
+`.env.example`, and both Compose runtime services; v3 has explicit policy
+identity/precedence while v2 and baseline behavior remain available below it.
+The strict retriever sufficiency gate, retrieval query, evidence selection,
+scoring, synthesis prompt, and frozen eval specs are unchanged.
+
+The guard is split into a pure decision policy and a bounded read-only selected-
+corpus context builder. Named-source absence reads the complete ACTIVE
+document author/title catalog for the selected corpus, reuses
+`detect_anchor_doc_ids` plus the document-anchor label/scoring functions, and
+filters only generic references locally. It proves the Walter Murch and
+Animator's Survival Kit positive controls while treating active rows in other
+corpora and deleted same-corpus rows as absent. Planner named-source signals
+remain additive; full-corpus authority owns the refusal decision.
+
+Temporal out-of-range reuses the locked qualified temporal detector and
+`temporal_match_details`, normalizes document publication dates through the
+existing bibliographic normalizer, and joins active parent/summary-tree
+`time_expressions`. It refuses only when a captured query year lies outside a
+complete selected-corpus envelope and exact support is absent. Incomplete
+document, temporal, or artifact reads fail open with named telemetry.
+
+Artifact authority covers numbered figures/tables and locator-qualified
+tables, checklists, and appendix interviews through bounded exact Mongo
+existence reads over chunks, parents, and summary-tree rows. Multipart IDs
+require a real normalized separator: `Figure 9.4`, `Figure 9 4`, and
+`Figure 9-4` match; `Figure 94` does not. The fixture contains an unrelated
+`Figure 94` and still proves `Figure 9.4` absent. Refusal bait is removed only
+from a hashed guard-analysis copy; it never mutates retrieval or the user
+message. Bait blocks only when the cleaned underlying query is independently
+scope-undercovered, so a grounded Walter Murch positive remains answerable.
+Deterministic named/temporal/artifact REDs override even a false-positive
+`raw_answerable`; web and selected-tool repair paths remain open.
+
+The final network-disabled answerability/Librarian/temporal suite passed
+132/132; log SHA
+`9c6711a0cae106b0a2fe897f7cb3f1eed96e156a9ef77f2e0e8b27354137abf2`,
+true `EXIT=0`. Five production files compiled cleanly; log SHA
+`418a5c17f33c70e99b0cc0a07fce69191489cfedc94164bfa903785777c5bd4b`,
+true `EXIT=0`. Black left all six checked Python files unchanged; log SHA
+`109ef8bd93e37dd9695f593e202ad3b17565a104ab828ed867e8b8403cf9cb7f`,
+true `EXIT=0`; diff-check SHA
+`418a5c17f33c70e99b0cc0a07fce69191489cfedc94164bfa903785777c5bd4b`,
+true `EXIT=0`.
+
+The isolated production image is
+`sha256:b1a0254287d08a471c522eb003f3d426f3cc9088f2d40d0426f31983f40ef9c5`;
+build log SHA
+`2f3afb51f8c301f2953c341666bdaa03ca74209e13e7983afd44027df82a8e27`,
+true `EXIT=0`. Its baked default-OFF import smoke passed with log SHA
+`0a8852de0932e8d03d57ca845c4d435abd333127c593d49e3a2ea28a590b0907`,
+true `EXIT=0`.
+
+The final independent read-only audit is GREEN. Its initial RED found the
+zero-separator multipart artifact defect and missing selected-tool assertion;
+both were fixed and re-audited. Disclosed uncredited attempts: the host lacks
+pytest; the first container collection lacked mandatory test-only Settings;
+one broad mount omitted the Compose path; generic-reference filtering briefly
+regressed the existing short-title planner contract and was moved to the v3
+context boundary; Black formatted new files. None contacted a provider/live
+service, deployed a container, ran a live eval, or wrote corpus state.
+Provider calls=0, live evals=0, corpus writes=0. v3 remains default-OFF and
+live runtime state is unchanged. Proceeding to build-only item 2c, the
+synthesis-route speed lever.

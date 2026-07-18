@@ -22,8 +22,10 @@ because those genuinely require grounded source text.
 
 from __future__ import annotations
 
+import hashlib
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
+from typing import Any
 
 from config import get_settings
 
@@ -38,6 +40,61 @@ RELATIONSHIP_FAMILY_ATOMS = frozenset(
 )
 
 _VALID_GATES = ("off", "lenient", "strict")
+
+CORPUS_SCOPE_V3_POLICY_VERSION = "corpus_scope.v3"
+
+_REFUSAL_BAIT_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    (
+        "best_guess",
+        re.compile(
+            r"(?:^|(?<=[.!?]))\s*(?:just\s+)?(?:give|take|make)\s+"
+            r"(?:me\s+|your\s+)?(?:the\s+)?best\s+guess\s*[:,;-]?\s*",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "just_guess",
+        re.compile(
+            r"(?:^|(?<=[.!?]))\s*(?:please\s+)?"
+            r"(?:just\s+guess|take\s+a\s+guess)\s*[:,;—–-]?\s*",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "outside_corpus",
+        re.compile(
+            r"(?:^|(?<=[.!?]))\s*(?:even\s+)?if\s+(?:it(?:'s|\s+is)\s+)?"
+            r"not\s+in\s+(?:the|my|these)\s+(?:books?|corpus|documents?|"
+            r"library|sources?)\s*[:,;-]?\s*",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "general_knowledge",
+        re.compile(
+            r"(?:^|(?<=[.!?]))\s*(?:from|using|based\s+on)\s+"
+            r"(?:your\s+)?general\s+knowledge\s*[:,;-]?\s*",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "without_sources",
+        re.compile(
+            r"(?:^|(?<=[.!?]))\s*(?:it(?:'s|\s+is)\s+okay\s+to\s+|"
+            r"you\s+can\s+|please\s+)?answer\s+without\s+"
+            r"(?:the\s+)?(?:sources?|citations?|corpus)\s*[:,;-]?\s*",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "ignore_corpus",
+        re.compile(
+            r"(?:^|(?<=[.!?]))\s*(?:please\s+)?ignore\s+(?:the|my|these)\s+"
+            r"(?:books?|corpus|documents?|library|sources?)\s*[:,;-]?\s*",
+            re.IGNORECASE,
+        ),
+    ),
+)
 
 _DISTINCTIVE_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9]*(?:[-'][A-Za-z0-9]+)*")
 _DISTINCTIVE_MIN_LENGTH = 8
@@ -81,7 +138,9 @@ def _clamp(value: object, lo: float, hi: float, default: float) -> float:
 
 def relationship_gate() -> str:
     """off | lenient | strict. Default 'lenient' (LLM bridges retrieved sides)."""
-    val = str(getattr(get_settings(), "RELATIONSHIP_GATE", "lenient") or "lenient").lower()
+    val = str(
+        getattr(get_settings(), "RELATIONSHIP_GATE", "lenient") or "lenient"
+    ).lower()
     return val if val in _VALID_GATES else "lenient"
 
 
@@ -100,7 +159,9 @@ def rerank_evidence_support() -> bool:
 def relationship_min_distinct_docs() -> int:
     """Distinct docs across relationship lanes before the cross-doc atom counts
     as covered. Default 1 (a single distinct doc satisfies the bridge)."""
-    return max(1, int(getattr(get_settings(), "RELATIONSHIP_MIN_DISTINCT_DOCS", 1) or 1))
+    return max(
+        1, int(getattr(get_settings(), "RELATIONSHIP_MIN_DISTINCT_DOCS", 1) or 1)
+    )
 
 
 def relationship_lane_min_sources() -> int:
@@ -143,13 +204,20 @@ def coverage_threshold(answer_shape: str | None = None) -> float:
 
 def text_help_threshold() -> float:
     """Coverage floor for the lexical text-help answer branch. Default 0.50."""
-    return _clamp(getattr(get_settings(), "ANSWERABILITY_TEXT_HELP_THRESHOLD", 0.50), 0.30, 0.80, 0.50)
+    return _clamp(
+        getattr(get_settings(), "ANSWERABILITY_TEXT_HELP_THRESHOLD", 0.50),
+        0.30,
+        0.80,
+        0.50,
+    )
 
 
 def partial_floor() -> float:
     """Coverage boundary between 'partial' (caveat answer) and 'weak'/refuse,
     and the floor for the relationship carve-out. Default 0.50."""
-    return _clamp(getattr(get_settings(), "ANSWERABILITY_PARTIAL_FLOOR", 0.50), 0.20, 0.70, 0.50)
+    return _clamp(
+        getattr(get_settings(), "ANSWERABILITY_PARTIAL_FLOOR", 0.50), 0.20, 0.70, 0.50
+    )
 
 
 def corpus_scope_v2_enabled() -> bool:
@@ -163,10 +231,41 @@ def corpus_scope_v2_enabled() -> bool:
     return bool(getattr(get_settings(), "ANSWERABILITY_CORPUS_SCOPE_V2_ENABLED", False))
 
 
+def corpus_scope_v3_enabled() -> bool:
+    """Whether the deterministic four-family corpus-scope policy is active."""
+
+    return bool(getattr(get_settings(), "ANSWERABILITY_CORPUS_SCOPE_V3_ENABLED", False))
+
+
 def answerability_policy_version() -> str:
     """Stable policy identity for traces and A/B receipts."""
 
+    if corpus_scope_v3_enabled():
+        return CORPUS_SCOPE_V3_POLICY_VERSION
     return "corpus_scope.v2" if corpus_scope_v2_enabled() else "baseline_live_v0"
+
+
+def strip_refusal_bait(query: str | None) -> dict[str, object]:
+    """Remove only explicit instructions to bypass corpus grounding.
+
+    The cleaned string is a guard-analysis copy. Retrieval, scoring, prompts,
+    and the user's original message remain byte-for-byte unchanged.
+    """
+
+    original = str(query or "")
+    cleaned = original
+    family_ids: list[str] = []
+    for family_id, pattern in _REFUSAL_BAIT_PATTERNS:
+        updated, count = pattern.subn("", cleaned)
+        if count:
+            family_ids.append(family_id)
+            cleaned = updated
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" ,:;-")
+    return {
+        "stripped": cleaned != original.strip(),
+        "family_ids": family_ids,
+        "cleaned_query": cleaned,
+    }
 
 
 def _scope_term(value: object) -> str:
@@ -263,6 +362,106 @@ def corpus_scope_v2_support(
         "min_terms": min_terms,
         "min_coverage": round(min_coverage, 4),
         "supported": (not eligible) or coverage >= min_coverage,
+    }
+
+
+def evaluate_corpus_scope_v3(
+    query: str | None,
+    source_texts: Iterable[object],
+    *,
+    context: Mapping[str, Any] | None,
+    librarian_refusal_signals: Mapping[str, Any] | None = None,
+) -> dict[str, object]:
+    """Evaluate the four deterministic v3 checks without performing I/O.
+
+    The context is assembled by ``services.corpus_scope_context`` from the
+    selected corpus only. Missing or incomplete context always fails open.
+    """
+
+    bait = strip_refusal_bait(query)
+    cleaned_query = str(bait["cleaned_query"] or query or "")
+    scope_support = corpus_scope_v2_support(cleaned_query, source_texts)
+    payload = dict(context or {})
+    named = dict(payload.get("named_source") or {})
+    temporal = dict(payload.get("temporal") or {})
+    artifact = dict(payload.get("artifact") or {})
+    librarian = dict(librarian_refusal_signals or {})
+
+    reason_codes: list[str] = []
+    fail_open_reasons: list[str] = [
+        str(reason)
+        for reason in (payload.get("fail_open_reasons") or [])
+        if str(reason)
+    ]
+
+    named_eligible = bool(named.get("eligible"))
+    named_complete = bool(named.get("complete"))
+    named_missing = bool(named.get("missing"))
+    if named_eligible and not named_complete:
+        fail_open_reasons.append("named_source_context_incomplete")
+    elif named_eligible and named_missing:
+        reason_codes.append("named_source_absent")
+
+    temporal_eligible = bool(temporal.get("eligible"))
+    temporal_complete = bool(temporal.get("complete"))
+    temporal_out_of_range = bool(temporal.get("out_of_range"))
+    if temporal_eligible and not temporal_complete:
+        fail_open_reasons.append("temporal_context_incomplete")
+    elif temporal_eligible and temporal_out_of_range:
+        reason_codes.append("temporal_out_of_range")
+
+    artifact_eligible = bool(artifact.get("eligible"))
+    artifact_complete = bool(artifact.get("complete"))
+    artifact_absent = int(artifact.get("matched_count") or 0) == 0
+    if artifact_eligible and not artifact_complete:
+        fail_open_reasons.append("artifact_context_incomplete")
+    elif artifact_eligible and artifact_absent:
+        reason_codes.append("artifact_absent")
+
+    if bool(bait["stripped"]):
+        reason_codes.append("bait_stripped")
+
+    blocking_reasons = [
+        reason
+        for reason in reason_codes
+        if reason in {"named_source_absent", "temporal_out_of_range", "artifact_absent"}
+    ]
+    enabled = corpus_scope_v3_enabled()
+    applied = bool(enabled and blocking_reasons)
+    return {
+        "policy_version": CORPUS_SCOPE_V3_POLICY_VERSION,
+        "enabled": enabled,
+        "eligible": bool(
+            named_eligible
+            or temporal_eligible
+            or artifact_eligible
+            or bait["stripped"]
+            or scope_support.get("eligible")
+        ),
+        "applied": applied,
+        "decision": "refuse" if applied else "no_block",
+        "reason_codes": reason_codes,
+        "blocking_reason_codes": blocking_reasons,
+        "fail_open_reasons": fail_open_reasons,
+        "bait": {
+            "stripped": bool(bait["stripped"]),
+            "family_ids": list(bait["family_ids"]),
+            "cleaned_query_sha256": hashlib.sha256(
+                cleaned_query.encode("utf-8")
+            ).hexdigest(),
+        },
+        "named_source": {
+            **named,
+            "planner_named_source_missing": bool(
+                corpus_scope_v3_enabled() and librarian.get("named_source_missing")
+            ),
+        },
+        "temporal": temporal,
+        "artifact": artifact,
+        "scope_support": {
+            **scope_support,
+            "guard_query_was_bait_cleaned": bool(bait["stripped"]),
+        },
     }
 
 

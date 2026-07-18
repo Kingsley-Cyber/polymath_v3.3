@@ -74,6 +74,7 @@ from services.answerability_tuning import (
     answerability_policy_version as _answerability_policy_version,
     corpus_scope_v2_enabled as _answerability_corpus_scope_v2_enabled,
     corpus_scope_v2_support as _answerability_corpus_scope_v2_support,
+    corpus_scope_v3_enabled as _answerability_corpus_scope_v3_enabled,
     coverage_threshold as _answerability_coverage_threshold,
     cross_doc_atom_is_critical as _cross_doc_atom_is_critical,
     inject_cross_doc_atom as _inject_cross_doc_atom,
@@ -85,7 +86,9 @@ from services.answerability_tuning import (
     relationship_min_distinct_docs as _relationship_min_distinct_docs,
     rerank_evidence_support as _rerank_evidence_support,
     text_help_threshold as _answerability_text_help_threshold,
+    evaluate_corpus_scope_v3 as _evaluate_answerability_corpus_scope_v3,
 )
+from services.corpus_scope_context import build_corpus_scope_v3_context
 from services.retriever.excerpt import query_guided_excerpt as _query_guided_excerpt
 from services.retriever.query_semantics import (
     GENERIC_CONCEPT_TOKENS,
@@ -1076,6 +1079,7 @@ def _build_retrieval_answerability_gate(
     web_search_enabled: bool,
     evidence_plan_meta: dict[str, Any] | None = None,
     librarian_refusal_signals: dict[str, Any] | None = None,
+    corpus_scope_v3_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Convert retriever sufficiency diagnostics into a chat-time contract."""
 
@@ -1275,6 +1279,43 @@ def _build_retrieval_answerability_gate(
     if scope_guard_applied:
         status = "unanswerable"
 
+    v3_guard = dict(
+        _evaluate_answerability_corpus_scope_v3(
+            query,
+            [_answerability_chunk_text(source) for source in (sources or [])],
+            context=corpus_scope_v3_context,
+            librarian_refusal_signals=librarian_refusal_signals,
+        )
+    )
+    v3_guard["status_before_v3"] = status
+    v3_scope_support = dict(v3_guard.get("scope_support") or {})
+    v3_bait = dict(v3_guard.get("bait") or {})
+    bait_scope_guard_applied = bool(
+        _answerability_corpus_scope_v3_enabled()
+        and corpus_scoped
+        and evidence_count > 0
+        and not raw_answerable
+        and status in {"answerable", "partial"}
+        and v3_bait.get("stripped")
+        and v3_scope_support.get("eligible")
+        and not v3_scope_support.get("supported")
+    )
+    v3_bait["scope_undercoverage_applied"] = bait_scope_guard_applied
+    v3_guard["bait"] = v3_bait
+    if bait_scope_guard_applied:
+        blocking_reasons = list(v3_guard.get("blocking_reason_codes") or [])
+        if "bait_stripped" not in blocking_reasons:
+            blocking_reasons.append("bait_stripped")
+        v3_guard["blocking_reason_codes"] = blocking_reasons
+        v3_guard["applied"] = True
+        v3_guard["decision"] = "refuse"
+    if (
+        _answerability_corpus_scope_v3_enabled()
+        and corpus_scoped
+        and bool(v3_guard.get("applied"))
+    ):
+        status = "unanswerable"
+
     return {
         "status": status,
         "answerable": status == "answerable",
@@ -1299,6 +1340,7 @@ def _build_retrieval_answerability_gate(
                 else "not_applied"
             ),
         },
+        "corpus_scope_v3_guard": v3_guard,
         # Additive plan-time signals. corpus_scope.v2 does not consume these;
         # the versioned v3 policy owns any refusal behavior.
         "librarian_refusal_signals": dict(librarian_refusal_signals or {}),
@@ -7891,6 +7933,38 @@ class ChatOrchestrator:
         # the retrieval result. Never an LLM-authored value, so it cannot lie.
         facts_seeded = len(facts)
 
+        corpus_scope_v3_context: dict[str, Any] | None = None
+        if _answerability_corpus_scope_v3_enabled():
+            try:
+                corpus_scope_v3_context = await build_corpus_scope_v3_context(
+                    conversation_service._db,
+                    query=request.message,
+                    corpus_ids=request.corpus_ids,
+                )
+            except Exception as exc:  # fail open; the guard records incompleteness
+                logger.warning("corpus_scope.v3 context unavailable: %s", exc)
+                corpus_scope_v3_context = {
+                    "context_version": "corpus_scope_context.v1",
+                    "named_source": {
+                        "eligible": False,
+                        "complete": False,
+                        "missing": False,
+                    },
+                    "temporal": {
+                        "eligible": False,
+                        "complete": False,
+                        "out_of_range": False,
+                    },
+                    "artifact": {
+                        "eligible": False,
+                        "complete": False,
+                        "matched_count": 0,
+                    },
+                    "fail_open_reasons": [
+                        f"context_builder_unavailable:{type(exc).__name__}"
+                    ],
+                }
+
         answerability_gate = _build_retrieval_answerability_gate(
             query=request.message,
             diagnostics=retrieval_diagnostics,
@@ -7902,6 +7976,7 @@ class ChatOrchestrator:
             librarian_refusal_signals=(
                 _librarian_refusal_signals_for_answerability(librarian_plan_trace)
             ),
+            corpus_scope_v3_context=corpus_scope_v3_context,
         )
         yield _record_trace_event(
             lane="planning",
