@@ -145,6 +145,7 @@ class PromotionRunner:
         corpus_id: str,
         auth_token_file: Path,
         output_dir: Path,
+        local_only: bool = False,
     ) -> dict:
         off = load_manifest(off_manifest_path, expected_arbiter_enabled=False)
         on = load_manifest(on_manifest_path, expected_arbiter_enabled=True)
@@ -166,39 +167,41 @@ class PromotionRunner:
         try:
             self._install(off_manifest_path, off)
             self._verify_off_postcondition()
-            capture = self._run(
-                [
-                    sys.executable,
-                    str(HARNESS),
-                    "capture-off",
-                    "--output",
-                    str(off_artifact),
-                    "--corpus-id",
-                    corpus_id,
-                    "--auth-token-file",
-                    str(auth_token_file),
-                ]
-            )
+            capture_command = [
+                sys.executable,
+                str(HARNESS),
+                "capture-off",
+                "--output",
+                str(off_artifact),
+                "--corpus-id",
+                corpus_id,
+                "--auth-token-file",
+                str(auth_token_file),
+            ]
+            if local_only:
+                capture_command.append("--local-only")
+            capture = self._run(capture_command)
             if capture.returncode != 0:
                 raise PromotionError(
                     f"OFF capture was RED: {(capture.stderr or capture.stdout)[-1000:]}"
                 )
             self._install(on_manifest_path, on)
-            run = self._run(
-                [
-                    sys.executable,
-                    str(HARNESS),
-                    "run-on",
-                    "--output",
-                    str(on_artifact),
-                    "--corpus-id",
-                    corpus_id,
-                    "--auth-token-file",
-                    str(auth_token_file),
-                    "--off-artifact",
-                    str(off_artifact),
-                ]
-            )
+            run_command = [
+                sys.executable,
+                str(HARNESS),
+                "run-on",
+                "--output",
+                str(on_artifact),
+                "--corpus-id",
+                corpus_id,
+                "--auth-token-file",
+                str(auth_token_file),
+                "--off-artifact",
+                str(off_artifact),
+            ]
+            if local_only:
+                run_command.append("--local-only")
+            run = self._run(run_command)
             payload = (
                 json.loads(on_artifact.read_text(encoding="utf-8"))
                 if on_artifact.exists()
@@ -245,6 +248,14 @@ def main() -> int:
     parser.add_argument("--corpus-id", required=True)
     parser.add_argument("--auth-token-file", required=True, type=Path)
     parser.add_argument("--output-dir", required=True, type=Path)
+    parser.add_argument(
+        "--local-only",
+        action="store_true",
+        help=(
+            "Run the owner-ordered provider-free Q1-Q4 deployment window; "
+            "Q5 is explicitly recorded as not run."
+        ),
+    )
     args = parser.parse_args()
 
     def terminate(signum, frame):
@@ -259,6 +270,7 @@ def main() -> int:
             corpus_id=args.corpus_id,
             auth_token_file=args.auth_token_file,
             output_dir=args.output_dir,
+            local_only=args.local_only,
         )
         print(
             json.dumps(

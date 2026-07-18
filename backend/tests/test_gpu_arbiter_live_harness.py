@@ -468,6 +468,28 @@ def test_capture_off_records_runtime_identity_and_answered_corpus(monkeypatch):
     assert artifact["baseline_gate"]["passed"] is True
 
 
+def test_local_only_capture_makes_zero_provider_calls(monkeypatch):
+    client = FakeClient()
+    client.frozen_spot = lambda: (_ for _ in ()).throw(
+        AssertionError("local-only capture must not call chat")
+    )
+    monkeypatch.setattr(
+        harness,
+        "measure_solo_rerank",
+        lambda *args, **kwargs: _latency(
+            harness.SOLO_RERANK_CALLS,
+            requested=harness.SOLO_RERANK_CALLS,
+        ),
+    )
+    artifact = harness.capture_off(client, local_only=True)
+    harness._verify_seal(artifact)
+    assert artifact["mode"] == "local_only"
+    assert artifact["provider_call_count"] == 0
+    assert artifact["policy"] == harness.LOCAL_ONLY_POLICY
+    assert "frozen_spot" not in artifact
+    assert artifact["baseline_gate"]["passed"] is True
+
+
 def test_run_on_integrates_run_scoped_telemetry_and_in_soak_failure(
     monkeypatch, tmp_path
 ):
@@ -504,6 +526,46 @@ def test_run_on_integrates_run_scoped_telemetry_and_in_soak_failure(
         == harness.Q2_EMBED_CALLS
     )
     assert artifact["fail_open_q4"] == artifact["soak_q4"]["fail_open"]
+
+
+def test_local_only_run_requires_q1_q4_and_never_calls_frozen_spot(
+    monkeypatch, tmp_path
+):
+    client = FakeClient(tmp_path)
+    client.config.error_log.write_text("", encoding="utf-8")
+    client.frozen_spot = lambda: (_ for _ in ()).throw(
+        AssertionError("local-only run must not call chat")
+    )
+    monkeypatch.setattr(
+        harness,
+        "measure_solo_rerank",
+        lambda *args, **kwargs: _latency(
+            harness.SOLO_RERANK_CALLS,
+            p95=0.5,
+            requested=harness.SOLO_RERANK_CALLS,
+        ),
+    )
+    monkeypatch.setattr(harness, "run_q2_mixed", lambda *args, **kwargs: _mixed())
+    off = _off_artifact()
+    off["mode"] = "local_only"
+    off["provider_call_count"] = 0
+    off["policy"] = harness.LOCAL_ONLY_POLICY
+    off.pop("frozen_spot")
+    off = harness._seal(off)
+    artifact = harness.run_on(
+        client,
+        off,
+        run_soak=lambda *args, **kwargs: _soak(),
+        run_failure_probe=lambda *args, **kwargs: _fail_open(),
+        run_suite=lambda **kwargs: {"exit_code": 0, "passed": True},
+        local_only=True,
+    )
+    harness._verify_seal(artifact)
+    assert artifact["gates"]["passed"] is True
+    assert artifact["gates"]["canonical_suite"]["passed"] is True
+    assert artifact["gates"]["q5"]["passed"] is None
+    assert artifact["provider_call_count"] == 0
+    assert "frozen_spot" not in artifact
 
 
 def test_q2_has_fixed_sample_barrier_timestamps_and_real_overlap():
@@ -849,7 +911,7 @@ def test_cli_returns_nonzero_for_red_artifact(monkeypatch, tmp_path):
             "baseline_gate": {"passed": False},
         }
     )
-    monkeypatch.setattr(harness, "capture_off", lambda client: red)
+    monkeypatch.setattr(harness, "capture_off", lambda client, **kwargs: red)
     monkeypatch.setattr(
         sys,
         "argv",

@@ -15,12 +15,7 @@ def service_absence_proven(
     if result.returncode != LAUNCHCTL_SERVICE_NOT_FOUND_EXIT:
         return False
     parts = service.split("/", 2)
-    if (
-        len(parts) != 3
-        or parts[0] != "gui"
-        or not parts[1].isdigit()
-        or not parts[2]
-    ):
+    if len(parts) != 3 or parts[0] != "gui" or not parts[1].isdigit() or not parts[2]:
         return False
     expected_command = ["launchctl", "print", service]
     if not isinstance(result.args, (list, tuple)):
@@ -30,7 +25,6 @@ def service_absence_proven(
     if (result.stdout or "").strip():
         return False
     expected = (
-        f'Could not find service "{parts[2]}" '
-        f"in domain for user gui: {parts[1]}"
+        f'Could not find service "{parts[2]}" ' f"in domain for user gui: {parts[1]}"
     )
     return (result.stderr or "").strip().casefold() == expected.casefold()

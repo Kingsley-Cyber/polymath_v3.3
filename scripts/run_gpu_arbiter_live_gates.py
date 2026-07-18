@@ -49,6 +49,7 @@ FROZEN_QUERY_ID = "direct_facs"
 FROZEN_TIER = "qdrant_only"
 PRODUCTION_SOAK_SECONDS = 600.0
 PRODUCTION_KILL_AT_SECONDS = 300.0
+LOCAL_ONLY_POLICY = "owner_compact_window_2026-07-18T02:34Z"
 EMBED_SAMPLE_COUNT = 100
 EMBED_DIMENSION = 1024
 RERANK_SAMPLE_COUNT = 24
@@ -1321,7 +1322,7 @@ def evaluate_off_baseline(
     vectors: list[list[float]],
     scores: list[float],
     solo: dict[str, Any],
-    frozen_spot: dict[str, Any],
+    frozen_spot: dict[str, Any] | None,
 ) -> dict[str, Any]:
     checks = {
         "runtime_dark": bool(health.get("arbiter_absent")),
@@ -1333,19 +1334,24 @@ def evaluate_off_baseline(
         "solo_rerank_valid": (
             solo.get("successful") == SOLO_RERANK_CALLS and solo.get("failed") == 0
         ),
-        "frozen_spot_technical": frozen_spot.get("technical_success") is True,
-        "frozen_spot_doc_hit": frozen_spot.get("doc_hit") is True,
-        "frozen_spot_citations": (
-            frozen_spot.get("citation_membership_rate") == 1.0
-            and frozen_spot.get("all_citations_in_corpus") is True
-        ),
-        "frozen_spot_tier": frozen_spot.get("effective_tier") == FROZEN_TIER,
-        "frozen_spot_answered": frozen_spot.get("verdict") == "answered",
-        "exact_frozen_corpus": (frozen_spot.get("corpus_binding") or {}).get(
-            "matches_frozen_corpus"
-        )
-        is True,
     }
+    if frozen_spot is not None:
+        checks.update(
+            {
+                "frozen_spot_technical": frozen_spot.get("technical_success") is True,
+                "frozen_spot_doc_hit": frozen_spot.get("doc_hit") is True,
+                "frozen_spot_citations": (
+                    frozen_spot.get("citation_membership_rate") == 1.0
+                    and frozen_spot.get("all_citations_in_corpus") is True
+                ),
+                "frozen_spot_tier": frozen_spot.get("effective_tier") == FROZEN_TIER,
+                "frozen_spot_answered": frozen_spot.get("verdict") == "answered",
+                "exact_frozen_corpus": (frozen_spot.get("corpus_binding") or {}).get(
+                    "matches_frozen_corpus"
+                )
+                is True,
+            }
+        )
     return {"checks": checks, "passed": all(checks.values())}
 
 
@@ -1576,7 +1582,11 @@ def evaluate_on_gates(
     return gates
 
 
-def capture_off(client: LiveClient) -> dict[str, Any]:
+def capture_off(
+    client: LiveClient,
+    *,
+    local_only: bool = False,
+) -> dict[str, Any]:
     fixture = build_fixture()
     verify_fixture(fixture)
     health = client.health_snapshot(expected_enabled=False)
@@ -1585,7 +1595,7 @@ def capture_off(client: LiveClient) -> dict[str, Any]:
         client.rerank(fixture["rerank_query"], fixture["rerank_documents"])
     )
     solo = measure_solo_rerank(client, fixture)
-    frozen_spot = client.frozen_spot()
+    frozen_spot = None if local_only else client.frozen_spot()
     baseline = evaluate_off_baseline(
         health=health,
         vectors=vectors,
@@ -1596,6 +1606,9 @@ def capture_off(client: LiveClient) -> dict[str, Any]:
     payload = {
         "schema_version": SCHEMA_VERSION,
         "phase": "off",
+        "mode": "local_only" if local_only else "full_q1_q5",
+        "policy": LOCAL_ONLY_POLICY if local_only else None,
+        "provider_call_count": 0 if local_only else 1,
         "captured_at_utc": _utc_now(),
         "corpus_id": client.config.corpus_id,
         "fixture": fixture,
@@ -1606,9 +1619,10 @@ def capture_off(client: LiveClient) -> dict[str, Any]:
             "rerank_scores": scores,
         },
         "solo_rerank": solo,
-        "frozen_spot": frozen_spot,
         "baseline_gate": baseline,
     }
+    if frozen_spot is not None:
+        payload["frozen_spot"] = frozen_spot
     return _seal(payload)
 
 
@@ -1620,6 +1634,7 @@ def run_on(
     run_soak: Callable[..., dict[str, Any]] = run_q4_soak,
     run_failure_probe: Callable[..., dict[str, Any]] = run_fail_open_probe,
     run_suite: Callable[..., dict[str, Any]] = run_canonical_suite,
+    local_only: bool = False,
 ) -> dict[str, Any]:
     _verify_seal(off)
     if off.get("schema_version") != SCHEMA_VERSION or off.get("phase") != "off":
@@ -1628,22 +1643,33 @@ def run_on(
         raise HarnessError("OFF artifact corpus_id differs from the ON request")
     if off.get("baseline_gate", {}).get("passed") is not True:
         raise HarnessError("OFF baseline was not green")
+    expected_mode = "local_only" if local_only else "full_q1_q5"
+    if off.get("mode", "full_q1_q5") != expected_mode:
+        raise HarnessError("OFF artifact mode differs from the ON request")
     fixture = off["fixture"]
     verify_fixture(fixture)
     payload: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "phase": "on",
+        "mode": expected_mode,
+        "policy": LOCAL_ONLY_POLICY if local_only else None,
+        "provider_call_count": 0 if local_only else 1,
         "captured_at_utc": _utc_now(),
         "corpus_id": client.config.corpus_id,
         "off_artifact_seal_sha256": off["seal_sha256"],
         "fixture_sha256": fixture["fixture_sha256"],
     }
     gates: dict[str, Any] = {}
+    required_gates = (
+        ("canonical_suite", "q1", "q2", "q3", "q4")
+        if local_only
+        else ("q1", "q2", "q3", "q4", "q5")
+    )
 
     def finish(*, stopped_after: str) -> dict[str, Any]:
-        complete = all(name in gates for name in ("q1", "q2", "q3", "q4", "q5"))
+        complete = all(name in gates for name in required_gates)
         gates["passed"] = complete and all(
-            gates[name]["passed"] for name in ("q1", "q2", "q3", "q4", "q5")
+            gates[name]["passed"] for name in required_gates
         )
         gates["stopped_after"] = stopped_after
         payload["gates"] = gates
@@ -1652,11 +1678,17 @@ def run_on(
     canonical_suite = run_suite(repo_root=REPO_ROOT)
     payload["canonical_suite_q5"] = canonical_suite
     if canonical_suite.get("passed") is not True:
-        gates["q5"] = {
+        failed_gate = "canonical_suite" if local_only else "q5"
+        gates[failed_gate] = {
             "checks": {"canonical_build_suite_exit_zero": False},
             "passed": False,
         }
-        return finish(stopped_after="canonical_suite_q5_red")
+        return finish(stopped_after=f"{failed_gate}_red")
+    if local_only:
+        gates["canonical_suite"] = {
+            "checks": {"canonical_build_suite_exit_zero": True},
+            "passed": True,
+        }
 
     health = client.health_snapshot(expected_enabled=True)
     payload["health"] = health
@@ -1712,6 +1744,15 @@ def run_on(
     gates["q4"] = evaluate_q4(soak)
     if gates["q4"]["passed"] is not True:
         return finish(stopped_after="q4_red")
+
+    if local_only:
+        gates["q5"] = {
+            "passed": None,
+            "status": "not_run_owner_zero_provider_law",
+            "policy": LOCAL_ONLY_POLICY,
+            "provider_call_count": 0,
+        }
+        return finish(stopped_after="q4_local_only_complete")
 
     frozen_spot = client.frozen_spot()
     payload["frozen_spot"] = frozen_spot
@@ -1777,6 +1818,14 @@ def _parser() -> argparse.ArgumentParser:
         subparser.add_argument("--backend-url", default="http://127.0.0.1:8000")
         subparser.add_argument("--pid-file", type=Path, default=DEFAULT_PID_FILE)
         subparser.add_argument("--error-log", type=Path, default=DEFAULT_ERROR_LOG)
+        subparser.add_argument(
+            "--local-only",
+            action="store_true",
+            help=(
+                "Run provider-free Q1-Q4 plus canonical local tests under "
+                f"{LOCAL_ONLY_POLICY}; Q5 remains explicitly not run."
+            ),
+        )
 
     capture = subparsers.add_parser("capture-off")
     common(capture)
@@ -1807,7 +1856,7 @@ def main() -> int:
         config = _config(args)
         client = LiveClient(config)
         if args.phase == "capture-off":
-            artifact = capture_off(client)
+            artifact = capture_off(client, local_only=args.local_only)
             _atomic_write_json(args.output, artifact)
             print(
                 json.dumps(
@@ -1822,7 +1871,12 @@ def main() -> int:
             )
             return 0 if artifact["baseline_gate"]["passed"] else 1
         off = json.loads(args.off_artifact.read_text(encoding="utf-8"))
-        artifact = run_on(client, off, soak_seconds=PRODUCTION_SOAK_SECONDS)
+        artifact = run_on(
+            client,
+            off,
+            soak_seconds=PRODUCTION_SOAK_SECONDS,
+            local_only=args.local_only,
+        )
         _atomic_write_json(args.output, artifact)
         print(
             json.dumps(

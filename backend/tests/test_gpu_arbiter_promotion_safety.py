@@ -352,8 +352,7 @@ def test_transaction_wrong_domain_not_found_is_unknown_not_absent(tmp_path):
                 command,
                 113,
                 stderr=(
-                    'Could not find service "com.test" '
-                    "in domain for user gui: 999"
+                    'Could not find service "com.test" ' "in domain for user gui: 999"
                 ),
             )
         return _completed(command, 1, stderr="bootout denied")
@@ -519,6 +518,7 @@ class FakePromotion(PromotionRunner):
         self.installs: list[str] = []
         self.bootouts = 0
         self.off_proofs = 0
+        self.local_only_commands: list[bool] = []
 
     def _install(self, manifest_path, values):
         del values
@@ -542,6 +542,7 @@ class FakePromotion(PromotionRunner):
 
     def _run(self, command, *, environment=None):
         del environment
+        self.local_only_commands.append("--local-only" in command)
         if "capture-off" in command:
             output = Path(command[command.index("--output") + 1])
             output.write_text(json.dumps({"baseline_gate": {"passed": True}}))
@@ -613,6 +614,21 @@ def test_promotion_green_is_only_path_that_leaves_on(tmp_path):
     assert runner.installs == ["off", "on"]
     assert runner.bootouts == 0
     assert runner.off_proofs == 1
+
+
+def test_local_only_promotion_marks_both_harness_phases(tmp_path):
+    runner = FakePromotion(verdict="green")
+    payload = runner.execute(
+        off_manifest_path=_manifest(tmp_path, False),
+        on_manifest_path=_manifest(tmp_path, True),
+        corpus_id="corpus",
+        auth_token_file=tmp_path / "token",
+        output_dir=tmp_path / "outputs",
+        local_only=True,
+    )
+    assert payload["gates"]["passed"] is True
+    assert runner.local_only_commands == [True, True]
+    assert runner.installs == ["off", "on"]
 
 
 def test_installer_requires_manifest_and_transactional_deploy():
