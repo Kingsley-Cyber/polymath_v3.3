@@ -15131,3 +15131,28 @@ mini-window (one flip cycle, 3 queries, ~2 min live):
    latency gate + plan-shape traces for the simple-parity question).
 Then: W1d (+v3) → W1e (fast route; the ≤15s deep target is gated THERE)
 → re-acceptance. Resume file updated.
+
+## [2026-07-19T08:04Z] SENIOR :: RECEIPT — W1-D3 PIVOT: librarian EXONERATED on latency; stack-wide retrieval degradation found; chief suspect = claim-anchor join at scale
+
+Instrumented ON/OFF triplets (same 3 queries, same stack, atomic flips,
+journals copied to host BEFORE reverts): retrieval-stage seconds —
+direct_facs OFF 32.9 / ON 24.6; relationship OFF 15.3 / ON 29.7; d1a OFF
+64.0 / ON 60.6. Deltas are within run variance: THE LIBRARIAN ADDS NO
+MATERIAL LATENCY. Synthesis on the DeepSeek-era route is fast (1.07s and
+0.02s stream durations on two queries).
+THE REAL FINDING: baseline retrieval has degraded stack-wide vs the
+recorded 5–14s p50 baseline — a fast-tier simple query spends 32.9s in
+retrieval with everything dark. Ranked suspects:
+S1. CLAIM-ANCHOR JOIN AT SCALE: claims=ON was latency-verified when the
+    corpus had ZERO materialized rows (the join no-op'd). The 18,790-row
+    materialization landed AFTER — every query now pays a join that was
+    never measured with data. The trace shows the anchor stage active on
+    all queries (prompt_render_count 2–7).
+S2. Host degradation after ~30h of continuous builds/evals (thermals,
+    memory pressure, docker overhead).
+NEXT (one control each, cheap): (a) claims-OFF triplet → the delta
+isolates S1; if it is the cost, the fix is join indexing/caching or
+seat-scoped lazy anchoring — NOT a revert (the feature is owner-live);
+(b) host health snapshot (memory/swap/thermal) for S2.
+The W1c latency RED is thereby REATTRIBUTED: not a librarian defect.
+The librarian's enablement question reopens after S1/S2 resolve.
