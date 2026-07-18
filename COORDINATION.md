@@ -14550,3 +14550,109 @@ compile true `EXIT=0`, log SHA
 `418a5c17f33c70e99b0cc0a07fce69191489cfedc94164bfa903785777c5bd4b`.
 No credential, settings row, provider call, live eval, or deploy was touched
 by this build gate. Materialization remains the next explicit step.
+
+## [2026-07-18T05:16:12Z] EXECUTOR → SENIOR :: RECEIPT
+
+DIRECT DEEPSEEK SYNTHESIS CANDIDATE MATERIALIZED, ZERO-SECRET. Final image
+`sha256:0b7f61f2f9ae9d85452b99af99a194abc470f7093d50d7b43d4efa4d60898ef1`
+is deployed healthy with final features still dark and T=false. E2E owner
+now has exactly one pool entry
+`deepseek-api__deepseek-v4-flash` → `deepseek/deepseek-v4-flash` at the
+published `/v1` endpoint, `thinking:{type:disabled}`, and synthesis role
+points to that entry.
+
+The entry stores no ciphertext and the E2E owner gained no API-key row. It
+references the one pre-existing system settings record; source credential
+row count remained 1→1. MiniMax rollback entry count remained one with safe
+fingerprint
+`e61b325fbe55596c0286945ca4d9a68f64a8a1696680dacc6ad1241d8992fda5`.
+Materialization true `EXIT=0`, log SHA
+`ea7e4503f5857830bbe0e7636779cdaaca322b51c0d066976cbdd18b00a92aca`.
+Dispatch-time resolution verified model/base/thinking and credential
+presence without emitting the credential, true `EXIT=0`, log SHA
+`2aa4d9a2080e706b7e7e8934eb64db379a6d35383eaaa1f2fd30612d48ea564b`.
+Final runner candidate+price preflight is GREEN, registry SHA
+`9644c084f356db14a0f437ef280f2797cbe362fce264f48f5e4ca767e5f63b6d`,
+true `EXIT=0`, log SHA
+`eb3241a72608aa2f16eebb93e3c8a86539dee0ef64c0a6e91857ec67b3a3c7d9`.
+No plaintext/ciphertext value was printed, copied, or persisted in a new row.
+Host lock remains held for the immediately following final window.
+
+## [2026-07-18T05:35:05Z] EXECUTOR → SENIOR :: RECEIPT
+
+FINAL ACCEPTANCE V1 IS TECHNICALLY UNSEALABLE RED; ATOMIC ROLLBACK
+VERIFIED. The exact frozen 23-query surface ran once at concurrency=3 /
+temperature=0 on direct `deepseek/deepseek-v4-flash`. All 23 executions and
+all five provider-free repeats were recorded, but only 13/23 executions were
+journal-complete because ten request ledgers contain 11 unmetered calls.
+Accordingly the runner returned true `EXIT=2`, with `sealed=false`,
+`seal=null`, and `all_green=false`. Raw journal SHA is
+`6a28dc04d30bcda00d472550736d58fb4e22c846ca8dcc9d51c596b95e94bc46`;
+raw log SHA is
+`e8ebb901463dc8744a921acd0dbc5974c79132595ad824484b84c66b64967913`.
+
+Exact gates: depth bridge 1/2 PASS; graph hop 0/2 RED; D6a multi-hop RED;
+schema consumption probes 7–10 1/4 RED; floors 11–16 RED; named positives
+17–18 PASS on state/proof but #17's ledger is OPEN; canonical refusals 19–23
+0/5 RED; corpus/citation membership PASS; associative-profile consumption
+PASS; technical/journal 13/23 RED; plan hashes 0/5 and seats 0/5 deterministic
+RED; refinement gap improvement RED; simple-probe zero-firing proof RED;
+deep p50 39.152s >15 RED; fast p50 7.933s >5 RED; cost ledger OPEN RED.
+Owner synthesis-quality eyeball remains pending.
+
+Independent Decimal recomputation exactly matches all 17 metered rows:
+88,329 input + 4,699 output tokens = known subtotal `$0.01368178`. Five
+planner calls timed out without usage; six usage-known planner calls recorded
+`openai/deepseek-v4-flash`, which does not match the registered
+`deepseek/deepseek-v4-flash` price identity. Total cost is therefore UNKNOWN,
+not the known subtotal. Probes 4–11 also surfaced the Librarian as
+`enabled_degraded` / `TimeoutError`; zero-provider repeats still changed every
+plan and seat set.
+
+The preregistered RED rollback is complete on final image
+`sha256:0b7f61f2f9ae9d85452b99af99a194abc470f7093d50d7b43d4efa4d60898ef1`.
+Final health/flag/mount attestation true `EXIT=0`, SHA
+`c0646bec9b9d26120b08482c5b434d609502253bb8ec5b3e7ab806072ee315aa`:
+relationship/scope.v2/temporal/claims/chat-cost remain true; scope.v3,
+Librarian planner/shadow/refiner, synthesis override, and two-lane are false;
+the eval mounts are absent. Host lock is released.
+
+Disclosure: the first rollback command omitted the explicit chat-cost
+passthrough, briefly recreating a healthy backend with telemetry false. It
+was immediately recreated with telemetry true; no acceptance query ran after
+the verdict. A subsequent correct-state attestation returned `EXIT=1` only
+because its zero-match mount counter emitted an empty string; unchanged state
+then passed the corrected v3 attestation above.
+
+Owner report:
+`docs/FINAL_ACCEPTANCE_RESULTS_2026-07-18.md`. Durable deterministic-gzip
+artifacts and rollback receipts:
+`docs/baselines/final_acceptance_v1_20260718/`. No query, prompt, threshold,
+scoring rule, or corpus data was changed.
+
+## [2026-07-18T05:40:43Z] EXECUTOR → SENIOR :: RECEIPT
+
+FINAL RECEIPT INTERPRETATION CORRECTION; VERDICT REMAINS RED. Independent
+artifact review found two measurement defects that the 05:35Z receipt
+reported too literally.
+
+First, the canonical v2 classifier has only `gate_blocked`,
+`model_voiced_refusal`, and `answered`, plus the boolean `refused`; it never
+emits state=`refused`. The final runner nevertheless compares every negative
+to that nonexistent literal, so its recorded 0/5 state-match is a scorer
+bug. Actual product classification is 3/5 refused (#20/#21/#23) and 2/5
+answered (#19/#22), so the refusal gate remains genuinely RED. No product
+change should manufacture a fourth state to satisfy the runner.
+
+Second, the five retrieval repeats forced the LLM decomposer OFF while the
+full executions had it ON, and every repeat returned `repeat_plan_hash=null`.
+The recorded plan/seat determinism gates remain RED, but this window does not
+path-identically prove product plan nondeterminism. Seat differences are real
+and confounded. The correct disposition is UNVERIFIED/RED measurement; repair
+the same-flag repeat harness before attribution. T's separately sealed,
+path-identical nondeterminism verdict remains valid.
+
+The owner report now records these corrections and the measured stage
+latencies. No gate was weakened: final acceptance remains RED/unsealable,
+scope.v3/Librarian/refinement/synthesis/T remain OFF, and the first targeted
+round begins with scorer plus path-identity repair.
