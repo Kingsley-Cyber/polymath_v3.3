@@ -13337,3 +13337,859 @@ failure was a senior mount artifact; full-repo mount → 7/7 compose
 passthrough tests pass; all three LIBRARIAN flags default-false on both
 services). L5.5 precondition (12:04Z #1) is SATISFIED. Proceeding to
 integration.
+## [2026-07-17T23:01:46Z] EXECUTOR → SENIOR :: RECEIPT
+
+BUILD-FIRST STEP 1A — canonical compact baseline is SEALED on review branch
+`codex/build-first-queue-20260718`. Exact preregistered selection
+`canonical-baseline-10.v1` has query-ID SHA
+`4fd823952767b323f09dc3e5f8b8b8ebd2a94baba6d1ad32a50b0db22562e33c`;
+concurrency=3, temperature=0, fresh conversations, canonical three-state
+classification, and complete per-execution guard/model/prompt/session
+telemetry. Runtime attestation was relationship=true, corpus_scope.v2=true
+with T/temporal/claims/planner/router/waterfall and every other retrieval
+experiment false. Embedder batch-ready preflight was ready.
+
+Result: 10/10 technical success, 10/10 journal complete, stable prompt/source
+hash, 5 answered / 5 gate-blocked. The four known answered probes remained
+answered; the additional answered probe was `negv2_f2_iphone17`. This is the
+v3 measurement baseline, not a redefined pass gate. Sealed journal:
+`docs/baselines/BUILD_FIRST_CANONICAL_BASELINE_10_2026-07-18.json`, file SHA
+`f078d61792546330cf64664ff0a56fdf2416f7ef8852dd8b98833149b842f176`,
+canonical seal payload SHA
+`e1ffe487122dcf43159119c0f7721e65d4f60cb681cd086f50cec0ea1c9d31a4`.
+Actual run log SHA
+`9bf5fe5744ae3275649cd2df00798bceb14d189812fbd0e90b449bf7c854accf`;
+true `EXIT=0`; two-attempt envelope `$0.511578`.
+
+Pre-run fail-closed disclosures: one deploy command created an empty duplicate
+Compose project and failed on the occupied Qdrant port before replacing the
+canonical stack; its containers were removed without volumes and the canonical
+five-overlay project deployment then passed. Two harness launches aborted
+before API calls (missing dark planner flag; container lock namespace absent).
+Both were corrected by exact runtime/lock attestation; neither created a
+journal or provider request. No corpus write occurred. Proceeding to the
+T canonical re-window only.
+
+## [2026-07-17T23:27:04Z] EXECUTOR → SENIOR :: RECEIPT
+
+BUILD-FIRST STEP 1B — T CANONICAL RE-WINDOW is SEALED-RED and the atomic
+rollback is complete. Review branch `codex/build-first-queue-20260718`
+contains the hardened compact harness in `ac1e301` + `bbe9394`; 69 focused
+canonical/T tests were green before the window. Exact selection
+`two-lane-canonical-10.v1` contains 6 anchor-surface + 2 relationship-spot +
+2 direct-spot IDs, query-ID SHA
+`2e22e3c9dd528aa8953b21b025b9b78685195bcab8505e4b755ddc5e80fbc99f`.
+The synthesis pass was concurrency=3, temperature=0, fresh conversations,
+canonical three-state telemetry; repeat #2 was retrieval-only with zero
+synthesis calls.
+
+VERIFIED results: technical 10/10; journal complete 10/10; all 10 positives
+answered; direct doc-hit 6/6 = 100%; lay doc-hit 1/1 = 100%;
+corpus/citation membership 100%. RED gates: relationship minimum-distinct
+2/3 = 66.67% (<75%; `relationship_movement_machine_figure` seated only its
+Laban expected document); metadata-anchor eligibility was observed on 6/10
+but only 3/6 eligible queries seated an anchor = 50% (<90%); exact allocation
+fingerprint and selected-seat identity replay were each 3/10 = 30% (<100%).
+The retrieval-only repeat used the first-pass traced contract
+(`retrieval_k=8`, `final_top_k=8`, rerank=true/top_n=32, local mode) plus the
+same saved fact-seed value (40); the divergent replay is therefore recorded as
+an observed cross-process retrieval/allocation nondeterminism, not silently
+waived. The preregistered six named anchor-surface IDs were not all eligible
+under the current planned-retrieval candidate pool, so that gate is also RED.
+
+Per atomic-flip law, `TWO_LANE_ANCHORING_ENABLED` was restored false
+immediately after the sealed result. Canonical runtime is re-attested:
+relationship=true, corpus_scope.v2=true, T=false, temporal=false,
+claims=false, planner/router/waterfall=false; host lock released. One
+pre-window attestation correctly aborted before queries because the harness
+initially expected the legacy compatibility setting `TWO_LANE_ANCHORING`
+true; the production selector/Compose contract uses only
+`TWO_LANE_ANCHORING_ENABLED`. The harness was corrected, retested, rebuilt,
+and then the single authorized window ran. No corpus write occurred.
+
+Durable journal:
+`docs/baselines/BUILD_FIRST_T_CANONICAL_10_RED_2026-07-18.json`, file SHA
+`9ad78c13ed4233e97f23bd4f2ae302ddcf3b4fb9c81b8b88c0813e1b7c60b501`,
+canonical seal payload SHA
+`2daa361aa24364e69b0cc6a207e10bab5ac55bd2d4ea987b70275fd5336e1aee`.
+Run log:
+`docs/baselines/BUILD_FIRST_T_CANONICAL_10_RED_2026-07-18.log`, SHA
+`b890a14dd2d2be7f7578c5664cdedbf05e2c08268a160340512b8c657023395a`,
+true `EXIT=1`; two-attempt synthesis envelope `$0.511578`. T remains dark.
+## [2026-07-17T23:49:46Z] EXECUTOR → SENIOR :: RECEIPT
+
+BUILD-FIRST STEP 1C — TEMPORAL ATOMIC FLIP is SEALED-GREEN under the
+05:31Z serial amendment; temporal remains ON. Review branch
+`codex/build-first-queue-20260718` carries the compact canonical harness and
+typing/serialization hardening in `39906fa`, `3019cdf`, and `80dec75`.
+Focused canonical/temporal tests were 83/83 green before the window; each
+contract correction was additionally 5/5 green. Exact selection
+`temporal-canonical-10.v1` is 4 temporal + 2 direct + 2 lay + 2 canonical
+negatives, query-ID SHA
+`cd0f7d32073db2491c94f3589eda1964351217484b0ba9040d6e7a5ee74ec1ba`.
+
+CREDITED SERIAL RESULT (concurrency=1, temperature=0): 10/10 technical,
+10/10 journal complete, prompt/source hash stable; temporal doc-hit 4/4 =
+100% (target ≥90%); full sentence-anchor coverage 4/4 = 100% (target ≥70%);
+all four traces showed active temporal-routing consumption; direct 2/2 =
+100%; lay 2/2 = 100%; corpus/citation membership 100%. The two canonical
+negative states exactly matched the sealed compact baseline:
+`negv2_f2_oscar_2026=answered`,
+`negv2_f1_crispr=gate_blocked`; answered count 1→1, so non-degradation is
+GREEN. The compact-window amendment does not sample relationship queries in
+this window. Runtime after lock release is attested relationship=true,
+corpus_scope.v2=true, temporal=true, T=false, claims=false,
+planner/router/waterfall=false. No corpus write occurred.
+
+Two uncredited attempts are disclosed and preserved. Attempt 1 ran at the
+then-active concurrency=3 but the held-out source rows lacked `shape`, so its
+summary counted zero negatives; the real row states were visible but its gate
+was invalid. The harness assigned `negative_control`, added an asserting
+fixture, and reran. Attempt 2 had correct typing and all observed metrics
+green, but the senior's 05:31Z concurrency=1 amendment arrived while it was
+running; it is preserved as INVALID-CONCURRENCY and was not cited. The exact
+same 10 then ran serially as the credited result. Conservative combined
+three-attempt/two-provider-attempt envelope is `$1.534734`; usage was recorded
+and did not stop execution.
+
+Credited journal:
+`docs/baselines/BUILD_FIRST_TEMPORAL_CANONICAL_10_GREEN_2026-07-18.json`,
+file SHA
+`01e8682040415c804bc08a43f9bf73a84c992c45e77849908c707a1d854d5f90`,
+canonical seal payload SHA
+`71fc4414de1ec5c4d256893fcc055d4d9fff374c084de505138f6697e30d42cc`;
+run-log SHA
+`ef19fca961da15908036dc3f6c464bd2fba6fab5bc704bb574b12f6d2828f35c`,
+true `EXIT=0`.
+
+Invalid typing-attempt journal/log SHAs:
+`c3d7413cb56776a2d315c2cbd83a4610b9f1e371ad9a74f37baef5a83cfc5e7d` /
+`3f65ab8ad979b8ed9f9784706d3a2b83aaafef50fb3ac201be69c8391c4683f4`.
+Invalid concurrency-attempt journal/log SHAs:
+`551dd889ef44081d91bbfc62e7185d8bad46dfa02912910c7a6440b9db4ed0be` /
+`1e4cd14274a7a7ef2aab0a1792d7dfbbeadf67bb6fd3d4b5bdade0097b83377e`.
+
+## [2026-07-18T00:06:35Z] EXECUTOR → SENIOR :: RECEIPT
+
+BUILD-FIRST STEP 1D — CLAIMS ATOMIC FLIP is SEALED-GREEN; claim anchors
+remain ON. I reused the already-receipted hardened owner-window harness at
+`codex/claims-owner-window-harness-20260717` / `2c21492` rather than rebuilding
+it. Its final source hashes were
+`5cf057ffb63bec4f71c9e497a988e0ed41bb2db6857fcc805d9d4baada0422d5`
+(owner-window harness) and
+`a008dd2d8b1175361e8373cc28d1d2f310a7e76c1484936fd9e1cd1b4d56307f`
+(host-lock wrapper). The final harness plus current production code passed
+43/43 focused claims-window/lock tests in the canonical image before the
+window.
+
+The exact six-probe v2 set (`q021`–`q025`, `q029`) ran serially at
+temperature=0 on one fresh claims-OFF capture; q029 included its one sealed
+history turn. All 6/6 probe rows were journal-complete with no transport
+errors, the expected `anthropic/minimax-m2.7` route, stable prompt context,
+and corpus fingerprint equality. The embedder batch-ready preflight was
+GREEN before the first scoring call (30-second client timeout, retry-once
+contract, warmup 483.487 ms). Fresh OFF artifact SHA:
+`7c53465e9fc5856779fa807aa6e05569f83aa05d325d158be9934d1df1e348a9`;
+OFF log SHA
+`056119ff948fc3d3a076ecc55344d332845e21ee6bff3281a48c9bc40cb67990`;
+true `EXIT=0`.
+
+The claims-ON arm was provider-free and SHA-bound to that exact OFF packet.
+It emitted 20 anchors (gate ≥18): 20/20 ownership/span/claim/source-version
+valid, 20/20 rendered, and 20/20 readable; q021 rendered 2. For every probe,
+selected source identities and every non-anchor evidence byte were exact;
+fresh-OFF, pre/post replay, and raw claim-store fingerprints were unchanged.
+Failures are empty, structural citation precision=1.0, provider calls=0.
+ON artifact:
+`docs/baselines/BUILD_FIRST_CLAIMS_ON_REPLAY_6_GREEN_2026-07-18.json`, SHA
+`524bd62d8f43903045708cad0d808f8ab76aeb538a13019a6119d7789064bae3`;
+ON log SHA
+`95448bb7e0b0ea4d7bbd70caa1a1ac8015baec7c17697d03506d2c7aafc36030`;
+true `EXIT=0`. Complete atomic-window log SHA
+`f7627d7b4c727a4b7f6aa9c20b14bf5e5d59f3c368c6585080827d6b059eb858`,
+true `EXIT=0`.
+
+The host lock and nonce were held continuously across fresh OFF, Compose
+flip, and ON replay, then released. Final live runtime is healthy and
+attested relationship=true, corpus_scope.v2=true, temporal=true,
+claim_anchors=true; T/planner/router/decomposition/waterfall remain false.
+No corpus write occurred. The 02:34Z owner compact-law amendment defined this
+window as six live probes plus free replay, so no superseded 39-execution
+compact-floor suite was run. Per-call provider usage/cost remains absent from
+the current chat journal and is not inferred; build item 2c/P7 is the ordered
+seam that closes that known accounting gap. Proceeding to READY dry-run.
+
+## [2026-07-18T00:15:20Z] EXECUTOR → SENIOR :: RECEIPT
+
+BUILD-FIRST READY is VERIFIED-GREEN with zero provider queries and zero corpus
+writes. The exact owner ingestion block that survived in the canonical
+worktree from the interrupted executor was preserved, completed on the review
+branch, and no-write verified rather than re-authored. It is now
+`docs/OWNER_MANUAL_INGESTION_RUNBOOK_2026-07-17.md`, SHA
+`4f56cabdad6f0276936597d98a348f8ab72faaf9f6af280bf3f81fc9b6dcce9e`.
+The production discovery function found the five visible `hy3_smoke` files
+(2 PDF + 3 Markdown, including the transcript fixture), excluded hidden-file
+noise, and both request bodies validated through `CorpusCreate` and
+`LocalIngestBatchRequest`: `DRY_RUN_OK`, true `EXIT=0`; log SHA
+`ca0361933429eed2b5016768641474c44bf355547d745088b7fa45aa6f561a30`.
+The command supports `.pdf/.md/.epub`, summaries on/off, a `$0.50 × file`
+hard summary authority, encrypted login without printing credentials, durable
+state IDs, and same-command resume.
+
+Authenticated, secret-free control-plane probes resolved both green
+extraction endpoints: primary `hk81nfl5cnwufx` / template `68bfxhigga` and
+secondary `8tafde7potcsjw` / template `i8qrk8fkfe`. Both bind the exact
+immutable image
+`sha256:4cb084572687f772cab481adce649cf03c15283368c3541772f85465ee50f896`,
+have min=0/max=1, `inProgress=0`, and `inQueue=0`; secret values emitted=0.
+They are correctly scale-to-zero/cold (no READY worker is billed before the
+first job). Probe log SHA
+`38300839b2a9ebdfb7fc4bbc38e9c03953128f8eb9ed317977946c2342e3cbdb`,
+true `EXIT=0`.
+
+The summary route resolves exactly one admitted primary:
+`deepseek/deepseek-v4-flash` at `https://api.deepseek.com`, encrypted key
+available, thinking disabled, Hy3 not admitted, secret values emitted=0.
+Per the later 02:34Z compact READY law this was a route/key dry-run, not the
+older requested minimal provider call: provider calls=0. Route log SHA
+`735a6376a96afe2fc0417f4ef19310fdf40e8f06ef99f531faac838413b736c9`,
+true `EXIT=0`.
+
+Canonical production-route tests are 44/44 green for LocalExtractionV1 and
+the legacy-adapter boundary; final test log SHA
+`6e2d863b8ced5049ac8c5eb6b363348d3020b31e482e9fd1d0ac5fc673563c06`,
+true `EXIT=0`. Two disclosed packaging attempts preceded it: network-none
+could not populate the image's missing tiktoken cache and a `/tests` mount
+made one fixture resolve `/registries`; both failed during collection/path
+setup, made no service/provider call, and the unchanged canonical `/app/tests`
+mount passed.
+
+Runtime health is GREEN for backend/Mongo/Qdrant/Neo4j/Redis/LiteLLM,
+embedder (inference-ready, queue=0), fp16 reranker, and warm Ghost B. Live
+flags are attested relationship=true, corpus_scope.v2=true, temporal=true,
+claims=true; T/planner/router/decomposition/waterfall=false. Both eval lock
+files are absent. Runtime log SHA
+`d40f5e2c8983126a67ae14a5bf91906e047c016d791e308f85a3607716b3273d`,
+true `EXIT=0`. The canonical shared worktree's pre-existing owner/executor
+runbook draft and `tmp/` remain untouched; this review branch is the only
+commit target. Proceeding to Agent P's one-call CLOSED-ledger gate.
+
+## [2026-07-18T00:26:52Z] EXECUTOR → SENIOR :: RECEIPT
+
+BUILD-FIRST PACKAGE P is LIVE-VERIFIED GREEN. The already-reviewed P7
+implementation was ported without conflict as commits `18c0619` and
+`546d8d8`; `CHAT_COST_TELEMETRY_ENABLED` remains default-OFF in source and
+has byte-exact Compose passthrough. Integrated image
+`sha256:161162f84b9978a2e3f4a47df9fcec1305f741f15ddd34c22fc4f4f28345a37b`
+built with true `EXIT=0` (log SHA
+`4fb6ba433f88a4ce088a34ef1a22df407997f6f08b53f8b1ffcdc3e077313e55`);
+the focused suite passed 13/13 after supplying the canonical test-only
+mandatory settings (log SHA
+`dc46129e8a3a377e042eb5bf67fd2e21a018fc1d43f4824bbcbdb1db9820b0d4`,
+true `EXIT=0`). The immediately preceding clean-container attempt stopped
+during settings collection because those three test variables were absent;
+it made no network/provider call and changed no runtime state.
+
+Under `/tmp/polymath-eval.lock`, the canonical backend was rebuilt from the
+review worktree and deployed healthy with relationship=true,
+corpus_scope.v2=true, temporal=true, claims=true, P7 telemetry=true, and
+T/planner/router/waterfall=false. Canonical deploy log SHA
+`5114aba4e4cd45dfdd3e5ad1c8628d248b426d1e0de9e837b3bbdae3565e6f23`,
+true `EXIT=0`. A first packaging command omitted `-p polymath_v33`; it built
+successfully but stopped before replacement on the occupied port, made no
+provider call, did not disturb the healthy canonical service, and its
+created-only project was removed before the credited deploy (failed-attempt
+log SHA
+`ebb4eecdea7e8dbaa89fac025a7c458196e7940f86c4064351335cab77f6e5af`).
+
+The single preregistered q021 call ran at temperature 0 only after the MLX
+batch preflight returned READY (Qwen3 1024 dimensions, 30-second timeout,
+retry-once, queue 0). Its terminal ledger is CLOSED: exactly 1 synthesis
+call, 1 metered, 0 unmetered, 1 transport attempt; model
+`anthropic/minimax-m2.7`; 8,244 input and 990 output tokens; computed cost
+`$0.0036612`. The independent Decimal recomputation is byte-equal, and the
+price-registry SHA is
+`9644c084f356db14a0f437ef280f2797cbe362fce264f48f5e4ca767e5f63b6d`.
+Elapsed wall time was 58.046 seconds; the response produced 6 sources, one
+done event, and no error event. Sealed artifact
+`docs/baselines/BUILD_FIRST_P7_SINGLE_CALL_GREEN_2026-07-18.json`, SHA
+`9b650d5e068caa1739fe6896bf50d5f74fc64d1fcc0c885b56949ac58ae56729`;
+command log SHA
+`814f2983ccc4cf833474bc335086ad0d7f772d27ced04edf6389a37ba0935ae9`,
+true `EXIT=0`. Token/credentials and answer text are absent from both.
+The lock was released. No corpus write occurred. Proceeding to provider-free
+Agent Q deployment/soak.
+
+## [2026-07-18T00:52:11Z] EXECUTOR → SENIOR :: RECEIPT
+
+BUILD-FIRST PACKAGE Q — GPU ARBITER PROMOTION is SEALED-RED and remains OFF.
+The implementation/harness branch is
+`codex/gpu-arbiter-live-harness-20260717` at pushed head `e315800`; its
+reviewed commit chain is `fd103d4`, `fb20135`, `2cd2073`, `916d051`,
+`870d8b4`, `471d80e`, `7f97086`, `fe45732`, `8b8dcf0`, and `e315800`.
+The final focused unit suite passed 82/82; log SHA
+`062571c08d876e454f4204994432486b3ca385245c426a6e7a1906eece0bffe5`,
+true `EXIT=0`. The hardening closes exact-domain launchd absence proof,
+bounded asynchronous bootout, rollback postconditions, provider-free compact
+mode, and `/health` + `/info` runtime-identity joining.
+
+The credited local-only promotion command used the exact sealed OFF/ON
+manifests and corpus `2c894530-8d57-4432-a6d4-bc14505a698b`. Q1 was GREEN:
+embed/rerank max absolute diff `0.0`, runtime identity unchanged. Q2 was
+GREEN: 100/100 embeds, zero failures, embed p95 `1.666629541s`, and 100
+overlapped reranks. Q3 was RED: mixed/solo rerank p95 ratio
+`1.0481381482` passed, but arbiter rerank hold p95 was
+`530.293958ms` over 124 samples against the preregistered `≤500ms` ceiling.
+The harness stopped at `q2_q3_red`; Q4 and Q5 were not run and were not
+credited. Provider calls=`0`; cost=`$0`.
+
+Sealed artifacts:
+`docs/baselines/BUILD_FIRST_Q_GPU_ARBITER_20260718/gpu_arbiter_off.json`,
+file SHA
+`be8c7970fc86ae574a805e00e28c720b1157a89633bc763fccf6ab55cac27b35`;
+`docs/baselines/BUILD_FIRST_Q_GPU_ARBITER_20260718/gpu_arbiter_on.json`,
+file SHA
+`9f50c397dfc3796fe03e95ea0bb95f91c7a0c39661e1f080621c1848baf42928`,
+canonical seal SHA
+`164b2b0b4ea7dcee24e3c0f297c91fcee15ca70ede4ac90281f05d533d6d230c`;
+promotion log SHA
+`c8da07a9f69e65c02396a9e8b375098e3eee6ff14c7fd7ef7db4809f6a0bb6a9`,
+true `EXIT=2`.
+
+Per fail-safe law the wrapper automatically restored OFF and verified
+embed/rerank arbiter-disabled plus port 8085 absent. A separate canonical
+health check then verified the restored Qwen3 embedder on 8082 and fp16 Jina
+reranker on 8081 healthy, with arbiter 8085 absent; true `EXIT=0`, health
+artifact SHAs `916e1cd7...`, `825057c8...`, and absence SHA `7ac319f8...`.
+The host eval lock was released only after that verification. Three earlier
+uncredited deployment attempts exposed and fixed transaction timing,
+canonical macOS absence-text, and split `/health`/`/info` identity handling;
+each automatically or manually restored the unchanged OFF configuration and
+made zero provider calls. No gate was weakened, no corpus write occurred,
+and Q does not advance to promotion.
+
+## [2026-07-18T01:06:22Z] EXECUTOR → SENIOR :: RECEIPT
+
+BUILD-FIRST T ZERO-PROVIDER DIAGNOSIS — H2 PATH INEQUIVALENCE is CONFIRMED;
+T remains dark and does not block build mode. A dedicated runner
+`backend/scripts/run_two_lane_zero_provider_diagnosis.py` executes Agent T
+only inside its diagnostic process, replaces both LLM entry points with
+fail-closed sentinels, and closes the real chat generator at the completed
+retrieval trace before synthesis or message persistence. Its focused suite
+plus the compact-window contract passed 9/9; log SHA
+`2be85fd8280fdc19fa5a9fdd87adeb5fed401e659aa500988d2194d54a61ce7d`,
+true `EXIT=0`; Black was clean with log SHA
+`8f0cf283b209c3e0446a80d6ee0e57c3fa56c96ef1ccf6e647e47ada8f5a828a`.
+
+d1 ran the exact ten queries retrieval-only, serially, three times each.
+Query plans were stable 10/10, but allocation fingerprints and selected-seat
+identity were stable only 4/10; 6/10 remained unstable without query
+concurrency. This rejects concurrency as the sole cause and establishes the
+H2 lead.
+
+d2 ran three serial real-chat paths stopped at retrieval-done and compared
+each to an immediate direct retrieval-only pass. Comparable `QueryPlanV2`
+objects were identical 3/3, but allocation fingerprint/stage identity matched
+only 1/3. `direct_elemental_novel` and
+`relationship_shoot_edit_emotion` diverged first at lane classification,
+with quota budget also changing (2→3 and 5→6 respectively) despite identical
+plans. The full-path anchor candidate order itself remained identical in
+those two comparisons, localizing the mismatch after pool construction.
+
+d3 compared the prior sealed RED full/repeat inputs for
+`direct_anatomy_masses`: anchor candidate-pool order, lane classification,
+quota math, and selected identity all diverged; the first observable stage
+was anchor-candidate order, and quota budget changed 2→3. It also proves the
+old harness plan hashes were from different domains: the full arm hashed the
+chat trace wrapper, while the repeat arm hashed `QueryPlanV2`; they were never
+valid equality operands. No gate was waived and no T fix was attempted.
+
+Sealed artifact:
+`docs/baselines/BUILD_FIRST_T_ZERO_PROVIDER_DIAGNOSIS_2026-07-18.json`, file
+SHA `74bc95aadb7733486cb0345cdc4788f15feb910dbfbc5cc5032265cbdd319fdd`,
+canonical seal SHA
+`40b198b20353c52fefa7a00efb0662a5dcd6b288aa57146f22e3c1e6c0995da2`;
+run-log SHA
+`1d6bcef68e6333be4432fca7ff13ad367c876b1834f6bfa864c8016c10170207`,
+true `EXIT=0`. Provider calls=0, provider sentinels reached=0, corpus writes=0.
+The host lock was released; live runtime is re-attested
+TWO_LANE=false, temporal=true, claims=true, with both MLX services healthy.
+Proceeding to build-only item 2a.
+
+## [2026-07-18T01:41:14Z] EXECUTOR → SENIOR :: RECEIPT
+
+BUILD-FIRST 2a / AGENT L3 — GENERALIZED LIBRARIAN ALLOCATION is
+BUILD-VERIFIED GREEN. L1/L2 were already separately receipted and were not
+rerun as new phases. Non-simple `QueryPlanV1` plans now compile into the
+single existing planned-retrieval executor with deterministic subquery lanes,
+Tier-0 document-route hints, total-seat quotas, strong-match admission,
+threshold spillover, protected exact-query seats, and the proven per-document
+cap of 2. Relationship 4/4 is the two-subquery case of this allocator: while
+Librarian execution is active, the legacy retrieval-side and chat-side
+relationship allocators are explicitly suppressed. If two-lane anchoring is
+enabled, it runs afterward within the frozen subquery seat groups; ordinary
+spill seats remain unassigned.
+
+The final adversarial cases cover relationship 4/4, three-lane 3/3/2,
+underfilled spillover, shared-candidate exclusion, original+side overlap,
+protected exact-only seats, multi-corpus protected overflow, post-T receipt
+reconciliation, and simple-plan object parity. Receipts are recomputed from
+the actual returned packet after trim/allocation, so displaced lane/corpus
+reservations cannot be reported as fulfilled. The original query lane and
+the base plan's obligation-derived final/rerank budgets remain preserved:
+the isolated budget probe measured base/overlay final K `16/16` and rerank
+cap `38/38`, exact lane present, quota sum 8; log SHA
+`ac1374d13258f16fadb650b551a09f03581c57cb14f9ca644ae11ba5b79c62c2`,
+true `EXIT=0`.
+
+The network-disabled broad suite passed 121/121; log SHA
+`a0e9bf2c7a2a02df00bb79a98ca795411d02afb24eeaddbc09245de1eb51e055`,
+true `EXIT=0`. Final focused adversarial suite passed 76/76; log SHA
+`e0a6690d2ac4543e35b384506125d415c3af98f088535e2f`,
+true `EXIT=0`. Black check left all 7 touched Python files unchanged; log SHA
+`7261ff8419bcdbe28374b471f4218b25a39d4238fc002d569014b4e3851a961c`,
+true `EXIT=0`; py_compile and diff-check were green. Final isolated backend
+image is
+`sha256:b429bf81bd0e85e0a3e98c0c9ec2ace1bb9493a9904d855a68ef8c3c92c1d215`;
+build log SHA
+`ad492f75fce79fbde3797afc6c4f4370e53d0346c2c8cca135c5854e579c21d6`,
+true `EXIT=0`.
+
+An independent read-only blocker audit initially found double allocation,
+global T placement, false pre-trim quota receipts, original/budget loss, and
+an original+side overlap edge; every finding was fixed and the final audit
+reported no blockers. Disclosed uncredited attempts: two early test
+collections lacked mandatory test-only settings; one focused assertion
+exposed a protected corpus anchor in its fixture; one budget-probe packaging
+attempt lacked `PYTHONPATH`. None reached a provider/service, deployed a
+container, or wrote corpus state. Provider calls=0, live evals=0, corpus
+writes=0. Librarian flags remain default-OFF; no runtime flag or stack state
+changed. Proceeding to L4 build-only.
+
+## [2026-07-18T02:03:24Z] EXECUTOR → SENIOR :: RECEIPT
+
+BUILD-FIRST 2a / AGENT L4 — PARALLEL SUBQUERY EXECUTION + ONE-RERANK
+BOUND is BUILD-VERIFIED GREEN. The active `QueryPlanV1` execution lanes are
+embedded in one initial batch, their candidate searches execute concurrently,
+and the deduplicated union enters one logical cross-encoder rerank. Duplicate
+chunk identities preserve every contributing lane and are deterministically
+tagged to the maximum-affinity subquery using literal grounding or Tier-0
+document-route affinity; equal-affinity ties resolve lexicographically. The
+same attribution survives hydration and cross-corpus evidence deduplication.
+
+Before reranking, the union is now bounded by
+`min(current_global_cap, Σ effective_subquery_rerank_caps)`. Original-query
+safety evidence is protected inside that bound; original, graph, fact, and
+unassigned candidates cannot bypass it. The adversarial 38-global/32-summed
+case includes all three bypass classes and returns at most 32 while retaining
+the original safety lane and both Librarian subqueries. Trace fields are
+truthfully scoped to the initial V1 execution lanes and report input/output
+counts, requested/effective caps, assigned counts, and dropped counts.
+Synthesis prompts and scoring authority are unchanged.
+
+The final network-disabled broad retrieval suite passed 131/131; log SHA
+`8fb82fd46e50637a6fc247c93895cc5baa08b7ad7f04623e03c2c049d4ce402b`,
+true `EXIT=0`. The final focused pre-format suite passed 68/68; log SHA
+`268103532697939bf3ae3e8c43f1ad980607ee4377700299db694a2fbc0d22ed`,
+true `EXIT=0`. Black left all seven touched Python files unchanged; log SHA
+`7261ff8419bcdbe28374b471f4218b25a39d4238fc002d569014b4e3851a961c`,
+true `EXIT=0`; diff-check log SHA
+`418a5c17f33c70e99b0cc0a07fce69191489cfedc94164bfa903785777c5bd4b`,
+true `EXIT=0`. The isolated production image is
+`sha256:889a59afa49bb63b6dd07f9cea09bbe4b37c8e1276fcce44ef73855e431ba80d`;
+build log SHA
+`6a42598ef08c042bd186245fc217954ae21ac7c9998ccea9e78b10ec51171c26`,
+true `EXIT=0`.
+
+The final independent read-only blocker audit is GREEN: it verified the
+summed-cap bound including original/graph/unassigned candidates, strongest
+core-subquery attribution for graph evidence, truthful embed scope,
+order-independent ties, retained non-Librarian parity coverage, and a
+lane-keyed barrier test that requires two distinct Librarian subqueries to be
+simultaneously active. Disclosed uncredited attempts: the first two new
+assertions exposed a real reversed-pool attribution loss plus a fixture-only
+sorted-order expectation; both were corrected without weakening a gate. One
+initial static-check wrapper had invalid shell quoting, the first Black check
+required formatting, one Docker build used the wrong context, and a
+post-build test command confirmed production images intentionally exclude
+test files. None contacted a provider/service, deployed a container, or
+wrote corpus state. Provider calls=0, live evals=0, corpus writes=0. Librarian
+flags remain default-OFF and live runtime state is unchanged. Proceeding to
+L5 build-only.
+
+## [2026-07-18T02:28:07Z] EXECUTOR → SENIOR :: RECEIPT
+
+BUILD-FIRST 2a / AGENT L5 — CACHED BOUNDED LLM ESCALATION + NAMED SIGNAL
+WIRING is BUILD-VERIFIED GREEN. The five ordered deterministic planners remain
+the first and provider-free authority. The new decomposer is separately
+flagged by `LIBRARIAN_LLM_DECOMPOSER_ENABLED`, default-OFF with byte-exact
+Compose passthrough in both runtime services, and is eligible only after those
+rules produce `simple` while QueryPlanV2 independently reports compositional/
+dependent-multi-hop complexity or multiple required probes.
+
+An eligible miss resolves only the configured per-user Utility route and
+makes exactly one non-streaming call: temperature 0, max_tokens 600, timeout
+2.0s, JSON-object response, no retry. Input is bounded to the normalized
+question plus at most eight `{doc_id,title,summary}` rows; no evidence,
+credentials, answer prompt, or synthesis route is admitted. Saved native
+thinking controls are stripped and the existing `disable_thinking` wire seam
+is forced. Real `LLMService` fake-client tests prove
+`enable_thinking=false` for Hy3 and `thinking.type=disabled` for DeepSeek V4.
+
+Output is whole-string JSON parsed through an extra-forbid schema: one to four
+role-constrained retrieval questions, shortlist document IDs only, no answer
+or prose fields. The server—not the model—canonicalizes order, assigns exactly
+eight total seats, chooses the requested retrieval tier, and caps the summed
+subquery rerank input at 32. Equivalent model subquery order produces identical
+canonical plan and seat bytes. Only validated `llm:v1` plans enter the cache;
+the cache identity includes normalized query, corpus document-set version,
+scope, and prompt hash. Invalid/prose/fenced/unknown-document output, missing
+route, resolver/provider failure, timeout, or cancellation returns a validated
+`fallback:simple` plan with `planner_llm_unavailable=true`, exact provider
+attempts, and one counted silent fallback. Previously cached LLM plans are
+ignored immediately when the decomposer flag is OFF.
+
+Named-source and planner-unavailable signals are carried additively into the
+chat answerability trace for the future versioned v3 policy. corpus_scope.v2
+does not consume them, and shadow-mode signals are explicitly filtered so
+shadow remains zero-behavior. The trace formatter now truthfully distinguishes
+applied, bypass, and shadow behavior.
+
+The final network-disabled broad retrieval/answerability suite passed 173/173;
+log SHA
+`8a8325906d0d884726da821c10521a41635406706deb2565449444ce3f1e9dea`,
+true `EXIT=0`. The final focused L1–L5 suite passed 67/67; log SHA
+`c6fae294a044b27da27a1a6089c45dc8a7033d4f52eeda70515803d993af26a1`,
+true `EXIT=0`. Seven files compiled cleanly; log SHA
+`6f22e4f1f51ebd87e0383a88a75f1419cd2830a306a15752587b840c3a5ff1c9`,
+true `EXIT=0`. Black left all seven checked Python files unchanged; log SHA
+`7261ff8419bcdbe28374b471f4218b25a39d4238fc002d569014b4e3851a961c`,
+true `EXIT=0`; diff-check SHA
+`418a5c17f33c70e99b0cc0a07fce69191489cfedc94164bfa903785777c5bd4b`,
+true `EXIT=0`. The sealed isolated image is
+`sha256:3c4893d19063896c11692019423c2e420908db543fe25e718fd1674ae7c90833`;
+build log SHA
+`70ae760680bb630b0cd8f564c8e0220a94e1961397cc7791af503dee0dff28eb`,
+true `EXIT=0`; baked default-OFF import smoke SHA
+`f49a22ddeecba95e200bedc09a66d788f3031681a289610114e243b78e2a76fa`,
+true `EXIT=0`.
+
+The final independent read-only audit is GREEN with no remaining §4/§7
+blocker. Its prior findings—cached-ON rollback leakage, cancellation
+undercount/fallback loss, provider-native thinking enables, and one formatting
+gap—were each fixed and regression-covered. Disclosed uncredited attempts:
+one broad network-none selection included 25 Mongo integration tests that
+cannot resolve the Mongo service under `--network none`; the authoritative
+pure suite was rerun without them. One adjacent Pt10 collection tried to fetch
+a missing tokenizer asset and was excluded; dedicated answerability tests
+passed 15/15. One rollback fixture was not independently LLM-eligible and was
+replaced with a qualifying general query, and one static wrapper mounted from
+the wrong working directory. None made a provider call, live eval, deployment,
+or corpus write. Provider calls=0, live evals=0, corpus writes=0. All three
+Librarian flags remain default-OFF; live runtime state is unchanged.
+Proceeding to build-only item 2b, corpus_scope.v3.
+
+## [2026-07-18T02:51:32Z] EXECUTOR → SENIOR :: RECEIPT
+
+BUILD-FIRST 2b — `corpus_scope.v3` FOUR-FAMILY ANSWERABILITY GUARD is
+BUILD-VERIFIED GREEN. The new
+`ANSWERABILITY_CORPUS_SCOPE_V3_ENABLED` flag is default-OFF in Settings,
+`.env.example`, and both Compose runtime services; v3 has explicit policy
+identity/precedence while v2 and baseline behavior remain available below it.
+The strict retriever sufficiency gate, retrieval query, evidence selection,
+scoring, synthesis prompt, and frozen eval specs are unchanged.
+
+The guard is split into a pure decision policy and a bounded read-only selected-
+corpus context builder. Named-source absence reads the complete ACTIVE
+document author/title catalog for the selected corpus, reuses
+`detect_anchor_doc_ids` plus the document-anchor label/scoring functions, and
+filters only generic references locally. It proves the Walter Murch and
+Animator's Survival Kit positive controls while treating active rows in other
+corpora and deleted same-corpus rows as absent. Planner named-source signals
+remain additive; full-corpus authority owns the refusal decision.
+
+Temporal out-of-range reuses the locked qualified temporal detector and
+`temporal_match_details`, normalizes document publication dates through the
+existing bibliographic normalizer, and joins active parent/summary-tree
+`time_expressions`. It refuses only when a captured query year lies outside a
+complete selected-corpus envelope and exact support is absent. Incomplete
+document, temporal, or artifact reads fail open with named telemetry.
+
+Artifact authority covers numbered figures/tables and locator-qualified
+tables, checklists, and appendix interviews through bounded exact Mongo
+existence reads over chunks, parents, and summary-tree rows. Multipart IDs
+require a real normalized separator: `Figure 9.4`, `Figure 9 4`, and
+`Figure 9-4` match; `Figure 94` does not. The fixture contains an unrelated
+`Figure 94` and still proves `Figure 9.4` absent. Refusal bait is removed only
+from a hashed guard-analysis copy; it never mutates retrieval or the user
+message. Bait blocks only when the cleaned underlying query is independently
+scope-undercovered, so a grounded Walter Murch positive remains answerable.
+Deterministic named/temporal/artifact REDs override even a false-positive
+`raw_answerable`; web and selected-tool repair paths remain open.
+
+The final network-disabled answerability/Librarian/temporal suite passed
+132/132; log SHA
+`9c6711a0cae106b0a2fe897f7cb3f1eed96e156a9ef77f2e0e8b27354137abf2`,
+true `EXIT=0`. Five production files compiled cleanly; log SHA
+`418a5c17f33c70e99b0cc0a07fce69191489cfedc94164bfa903785777c5bd4b`,
+true `EXIT=0`. Black left all six checked Python files unchanged; log SHA
+`109ef8bd93e37dd9695f593e202ad3b17565a104ab828ed867e8b8403cf9cb7f`,
+true `EXIT=0`; diff-check SHA
+`418a5c17f33c70e99b0cc0a07fce69191489cfedc94164bfa903785777c5bd4b`,
+true `EXIT=0`.
+
+The isolated production image is
+`sha256:b1a0254287d08a471c522eb003f3d426f3cc9088f2d40d0426f31983f40ef9c5`;
+build log SHA
+`2f3afb51f8c301f2953c341666bdaa03ca74209e13e7983afd44027df82a8e27`,
+true `EXIT=0`. Its baked default-OFF import smoke passed with log SHA
+`0a8852de0932e8d03d57ca845c4d435abd333127c593d49e3a2ea28a590b0907`,
+true `EXIT=0`.
+
+The final independent read-only audit is GREEN. Its initial RED found the
+zero-separator multipart artifact defect and missing selected-tool assertion;
+both were fixed and re-audited. Disclosed uncredited attempts: the host lacks
+pytest; the first container collection lacked mandatory test-only Settings;
+one broad mount omitted the Compose path; generic-reference filtering briefly
+regressed the existing short-title planner contract and was moved to the v3
+context boundary; Black formatted new files. None contacted a provider/live
+service, deployed a container, ran a live eval, or wrote corpus state.
+Provider calls=0, live evals=0, corpus writes=0. v3 remains default-OFF and
+live runtime state is unchanged. Proceeding to build-only item 2c, the
+synthesis-route speed lever.
+
+## [2026-07-18T03:03:31Z] EXECUTOR → SENIOR :: RECEIPT
+
+BUILD-FIRST 2c — SYNTHESIS-ROUTE SPEED LEVER is BUILD-VERIFIED GREEN. A new
+`settings.models.synthesis.pool_entry_id` role selects an existing encrypted
+query-model-pool entry; the Settings API validates, preserves, masks, deletes,
+and migrates that reference with the other roles, and the Models UI exposes
+the same registry selection. No provider/model name or credential is
+hardcoded or copied.
+
+`SYNTHESIS_ROUTE_OVERRIDE_ENABLED` is default-OFF in Settings,
+`.env.example`, and both Compose runtime services. OFF does not invoke the
+synthesis resolver and preserves the already-resolved query route object as
+the exact rollback authority. ON is eligible only for ordinary, non-tool
+final-answer synthesis. A valid role swaps only model, pool-entry identity,
+and that entry's credentials; selected tools and agentic turns never swap.
+Missing-user, missing/dangling route, or resolver-error paths preserve the
+rollback route and emit a named reason in the `Chat model route` trace.
+Trace metadata records enabled/eligible/applied, candidate model/entry, and
+rollback model/entry without credentials. MiniMax therefore remains the
+instant config rollback by flipping the flag OFF. Prompt/history, retrieval,
+evidence allocation, scoring, frozen eval specs, and corpus state are
+unchanged.
+
+The focused network-disabled route/fallback suite passed 12/12; log SHA
+`a31aa96ef2fc01bc595b15ad69164f40b04ef5a086974304a07cbd58e90a8f86`,
+true `EXIT=0`. The adjacent network-disabled chat coverage/web-limit suite
+passed 65/65; log SHA
+`5deacd43b21bd9f9d0cd858e36db998872a6eb40c73e6b99399fc2797deaea76`,
+true `EXIT=0`. Six Python files compiled cleanly; log SHA
+`418a5c17f33c70e99b0cc0a07fce69191489cfedc94164bfa903785777c5bd4b`,
+true `EXIT=0`. Black left the final six-file state unchanged; log SHA
+`109ef8bd93e37dd9695f593e202ad3b17565a104ab828ed867e8b8403cf9cb7f`,
+true `EXIT=0`; diff-check SHA
+`418a5c17f33c70e99b0cc0a07fce69191489cfedc94164bfa903785777c5bd4b`,
+true `EXIT=0`.
+
+The production frontend TypeScript/Vite build passed; image
+`sha256:10ad8f9c2f45a7444d426780aa8f6c2ad9b67f3ba9b42418d9c3362dfca056a7`,
+build log SHA
+`2bad01146bac5ae8a919add8b708b072c9418476a8b65006ae1f8846e26b6f6e`,
+true `EXIT=0`. The isolated backend image is
+`sha256:e1a420ca6c026387785e4b2d2ce0d52fa0f4980d5cc2dfa445a9d720a9f74ed8`;
+build log SHA
+`09f4846224c20d1d965361970f0603b6b02916e450f5412b4d2bf30d9c2d3f54`,
+true `EXIT=0`. Its baked default-OFF role/import smoke passed; log SHA
+`495819cb1a20e7a4f96a359a55453c2f6d356567ca5e42f524a981af8b6b6b06`,
+true `EXIT=0`.
+
+Disclosed uncredited attempt: the first focused container collection omitted
+the mandatory test-only `LITELLM_MASTER_KEY`; it failed before test
+collection and was rerun with a non-secret test sentinel. Black mechanically
+formatted two touched Python files before the authoritative checks. No live
+container was deployed, no provider or service was contacted, no eval ran,
+and no settings/corpus data was written. Provider calls=0, live evals=0,
+corpus writes=0. The flag remains default-OFF and live runtime state is
+unchanged. Proceeding to build-only item 2d, deterministic metadata backfills.
+
+## [2026-07-18T03:17:03Z] EXECUTOR → SENIOR :: RECEIPT
+
+BUILD-FIRST 2d — DETERMINISTIC E2E METADATA BACKFILLS is GREEN. The exact
+active target was API/store-discovered as corpus
+`2c894530-8d57-4432-a6d4-bc14505a698b`
+(`runpod_e2e_15doc_20260715`), with 15 active documents, 669 summary-tree
+rows, and zero active durable ingest/extraction/summary/graph work. No corpus
+ID was embedded in production code.
+
+The existing T-HOOK-3 bibliographic backfill planned and CAS-applied exactly
+6/6 rows with zero conflicts/noops. Coverage moved author 0→4,
+document_date/source_published_at/date_confidence 0→6, while title remained
+15/15 and bibliographic provenance remained 15/15. Positive controls now
+resolve `Walter Murch` / *In the Blink of an Eye* / `2001-01-01` and
+`Richard Williams` / *The Animator's Survival Kit* / `2002-01-01`; Blain
+Brown and the three-author Laban paper are also populated. Unsupported
+author/date fields remain null by the no-guess T-HOOK-3 contract—no catalog
+fact was fabricated to make coverage look complete. The apply log SHA is
+`02ad9c4604f83431298d3139b429acbfd3b28d991f4fb76f8ed52c3ca396f441`,
+true `EXIT=0`; final verify SHA
+`7470f11067dcc197f2fa082bc40dd7163a8590090a0fbdda881f11ea04f3d2da`,
+true `EXIT=0`; idempotent re-plan selected 0 rows, log SHA
+`430e72f9dcfe56f274c5fd78c894933ba4482167b77127e7367a1f349e9e9a75`,
+true `EXIT=0`.
+
+The new reversible `summary_tree_metadata_backfill.v1` migration derives only
+from the frozen tree topology plus existing parent-summary carriers. It writes
+the exact tree embedding text as `retrieval_text`, longest-common
+`heading_path` with node-heading fallback, stable dominant
+`temporal_class`, and de-duplicated verbatim `{text,role}` time expressions.
+It is dry-run by default, requires an idle corpus + explicit durable backup,
+asserts the exact row count, uses presence-aware core+metadata CAS guards, and
+has a presence-aware restore path. Future tree construction and Qdrant
+projection now write the same fields, preventing recurrence; no re-summary or
+re-embedding occurred in this backfill.
+
+Exact apply result: 669 planned/applied/modified, zero conflicts/noops, all
+669 now have retrieval_text, heading_path, temporal_class, an explicit
+time_expressions array, and provenance; 336 rows have nonempty temporal
+expressions; every node resolved at least one source parent. The frozen
+non-metadata tree hash stayed byte-identical
+`daf84dd872d1516b03c533cbf248b8b12f807872eb1aa5839c85cd6b904b3247`
+before/after. Apply log SHA
+`9404691afebde8da5bc756459b43af2749d93f2cd5c87277dda9b3f84ed61757`,
+true `EXIT=0`; idempotent re-plan selected 0 rows with the same core hash,
+log SHA
+`658780714cc69d7206167e2a098069752845a555092cf2e8a2b9c2194f753718`,
+true `EXIT=0`. The combined named-author/temporal positive-control assertion
+passed; log SHA
+`64e8cc79b8c6e1c41a41578eb07316e92084174f02a0c7a180d2f4efc80157a8`,
+true `EXIT=0`.
+
+Both backups are sealed and force-added under
+`docs/baselines/container_backups/build-first-2d-20260718/`: the 6-row
+bibliographic pre-image SHA is
+`356144396015ff05b2ab216b817001a7f2df84f2c0a90bc988dbf14a6bb681ca`;
+the 669-row tree pre-image SHA is
+`9f317c61249bbd1daaeb353ab0560d40c6e101c6c7ac48de85bbf074494da71f`.
+Dry restore validation passed for both: biblio log SHA
+`2f8862fb0b0b9ab2077979ce293f152ac3f3fa052ddec193675a5fa380c3bf7b`,
+tree log SHA
+`1edbc0418716e6589be823960163d2893082f863560e66fd1a72a5c5bf0e2050`,
+both true `EXIT=0`.
+
+The network-disabled adjacent biblio/tree/temporal suite passed 104/104; log
+SHA
+`7aa07989c2c20c0dffc0aa3f828423206ce79f0a6f37415fc8f9d16cd7f3baad`,
+true `EXIT=0`. Four production/test files compiled cleanly and diff-check
+passed, each log SHA
+`418a5c17f33c70e99b0cc0a07fce69191489cfedc94164bfa903785777c5bd4b`,
+true `EXIT=0`; Black left the final four-file state unchanged, log SHA
+`898983778ba85c59fa9397181f9936ad9438b20ba477f933622a930d8250411b`,
+true `EXIT=0`. The immutable apply image is
+`sha256:f094314fee312432b04b129b8e38a23869df826bfc9a7c350186bd9d69cc80a5`;
+build log SHA
+`cb89eba1abd4361db4bcca3e900ca1351b06c822492a5160f3adf73e39bf9e36`,
+true `EXIT=0`.
+
+Disclosed uncredited attempts: two initial focused pytest commands named
+nonexistent tree test files and exited before collection; the authoritative
+selection then passed. Black formatted the four touched files before the
+authoritative check. The first standard biblio dry-run correctly demonstrated
+only source-supported rows would fill; it wrote nothing. Provider calls=0,
+live evals=0, Qdrant writes=0, Neo4j writes=0. Authorized Mongo writes were
+6 document rows + 669 summary-tree rows only. Proceeding to the single
+preregistered final acceptance; no other eval window was opened.
+
+## [2026-07-18T03:25:00Z] EXECUTOR → SENIOR :: QUESTION
+
+FINAL ACCEPTANCE static preflight found two blocking ambiguities before the
+single live window. First, ACTIVE DIRECTIVES #4 and the sealed T diagnosis
+require `TWO_LANE_ANCHORING_ENABLED=false`, but
+`docs/FINAL_ACCEPTANCE_SET_V1_2026-07-18.md` probe #17 requires the author
+anchor to be seated “via two-lane anchor lane.” Should the complete-stack
+window (a) keep T dark and prove the Walter Murch author/title anchor through
+Agent L's grounded shortlist/allocation trace, treating that wording as stale,
+or (b) enable the known-RED T flag only for this gate? I will not silently
+enable a RED feature.
+
+Second, build item 2c deliberately made the synthesis candidate
+settings-driven, but neither the acceptance spec nor ACTIVE DIRECTIVES names
+the pool entry to select. Please name the existing pool entry/provider+model
+identity authorized for the candidate arm (credentials remain encrypted and
+will not be printed). I am continuing zero-call runner/query/rollback
+preparation and will not deploy or open the acceptance window until these two
+contracts are resolved.
+
+## [2026-07-18T03:22:01Z] EXECUTOR → SENIOR :: ACK
+
+Timestamp correction for the immediately preceding QUESTION: the host UTC
+clock was `03:22:01Z`; its manually entered `03:25:00Z` header is three
+minutes ahead. The question text and requested rulings are unchanged. This
+append-only correction preserves the original LOG entry.
+
+## [2026-07-18T03:50:31Z] EXECUTOR → SENIOR :: RECEIPT
+
+FINAL ACCEPTANCE HARNESS PREFLIGHT is BUILD-GREEN and the one live window has
+not opened. The exact 23-query selection is frozen at
+`backend/evals/final_acceptance_set_v1_20260718.json`, SHA
+`abdc68bb937c2c47c88eeafe918e19cbb462cf44ca9c2ec56e5ae351a6d8eac5`;
+all five parent spec/selection hashes match their preregistered bytes. The
+runner discovers the active named E2E corpus/owner and exact 15 documents,
+mints a non-emitted short-lived token, requires the host lock to be mounted
+in-container, attests the complete flag contract, aborts before scoring on a
+degraded embedder or missing price route, executes exactly 23 at concurrency
+3 / temperature 0, records full three-state/source/trace/cost receipts, and
+runs the required provider-free retrieval repeat for probes 1–5. The
+schema-consumption scorer distinguishes actual final-seat consumption,
+including Tier-0 shortlist summary-profile targets, from merely stored
+metadata. The eval-only Compose overlay adds only read-only docs and lock
+mounts; it changes no feature default.
+
+Network-disabled adjacent coverage is 164/164 green, true `EXIT=0`, log SHA
+`a70c7d2fae997e7c3af8377fd3fa4d638b3fc40caa52a6af8d989589e7e76b19`.
+Compile, Black, and Compose config each have true `EXIT=0`, log SHAs
+`418a5c17f33c70e99b0cc0a07fce69191489cfedc94164bfa903785777c5bd4b`,
+`8f0cf283b209c3e0446a80d6ee0e57c3fa56c96ef1ccf6e647e47ada8f5a828a`,
+and `d47943ed8e5590275ec35ba0332fb5c2647c960a73b7a68cdb61d8036925a125`.
+The exact review image is
+`sha256:986d49fb8ce49efaca1d1e6f10c423f155eaa835e548eb825a2d3a2bd8ef108b`;
+build true `EXIT=0`, log SHA
+`bdb489f731de5f03a165aa1cf7f1dbf02be50f2bce58b085b49c1e6e08ceecdc`.
+Its docker-cp-style focused test is 5/5 green, true `EXIT=0`, log SHA
+`78e6cae531749f4e0365af0ce499e7669e1241ed1df2599666ffd0ba00b51a4e`.
+
+Disclosed uncredited attempts: the first broad test collection omitted two
+mandatory test-only Settings; the next two broad attempts exposed the
+Compose and `.env.example` files one at a time before the final exact mount
+passed. One baked-image test invocation confirmed tests are intentionally not
+baked (no collection) before the test was mounted per the standing ops law.
+No attempt contacted a provider, ran an eval, deployed a container, or wrote
+corpus/settings state. Provider calls=0, live evals=0, corpus writes=0.
+
+The final window remains BLOCKED on the unanswered 03:25Z QUESTION. Read-only
+pool census proves the obvious OpenCode DeepSeek candidate
+`opencode-go-deepseek-v4-flash` has no registered P7 cost route, so selecting
+it would make total cost UNKNOWN; the runner correctly refuses before calls.
+Several materially different zero/card-priced alternatives exist, so I will
+not choose one silently. T also remains dark per ACTIVE DIRECTIVES while the
+acceptance wording still names its anchor lane. The image, manifest, lock
+overlay, and rollback preparation are ready for the senior's two exact
+rulings.
+## [2026-07-18T03:55:00Z] EXECUTOR → SENIOR :: RECEIPT
+
+FINAL ACCEPTANCE TRANSITION HALTED per the 12:04Z BLOCKER. No acceptance
+query, provider call, settings mutation, container deployment, or eval-lock
+window had started, so there is no partial artifact to void. Commit
+`a3899cb` is static harness/preflight preparation only and is not an
+acceptance verdict.
+
+The executor queue is reset to the four named preconditions in authoritative
+order: (1) build and receipt L5.5 bounded refinement, (2) integrate and attest
+L1–L5.5 plus 2b/2c/2d including the authorized direct
+`deepseek/deepseek-v4-flash` P7 price route, (3) run Q1–Q5 under corrected
+Q3=600ms, then (4) run the path-identical T compact re-check and atomically
+flip T only if GREEN. The 23-query window remains closed until all four
+receipts exist. Provider calls=0, live evals=0, corpus/settings writes=0 for
+this halt. Proceeding to L5.5 only.

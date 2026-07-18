@@ -263,6 +263,24 @@ class Settings(BaseSettings):
             "Default OFF pending frozen-suite acceptance."
         ),
     )
+    ANSWERABILITY_CORPUS_SCOPE_V3_ENABLED: bool = Field(
+        default=False,
+        description=(
+            "Enable the versioned deterministic chat-side corpus-scope v3 "
+            "guard: named-source absence, temporal out-of-range, exact "
+            "artifact existence, and refusal-bait stripping. Default OFF "
+            "until the final complete-pipeline acceptance."
+        ),
+    )
+    SYNTHESIS_ROUTE_OVERRIDE_ENABLED: bool = Field(
+        default=False,
+        description=(
+            "Use settings.models.synthesis.pool_entry_id for the ordinary final "
+            "answer call. Tool/agentic turns are excluded. When disabled or "
+            "unavailable, the already-resolved query route remains the instant "
+            "rollback path."
+        ),
+    )
     ANSWERABILITY_CORPUS_SCOPE_V2_MIN_TERMS: int = Field(
         default=2,
         ge=2,
@@ -508,6 +526,29 @@ class Settings(BaseSettings):
             "This adds no provider call and supports production comparison."
         ),
     )
+    LIBRARIAN_PLANNER_ENABLED: bool = Field(
+        default=False,
+        description=(
+            "Activate QueryPlanV1 downstream retrieval behavior. L1/L2 ship "
+            "the typed plan and Tier-0 grounding only; allocation/execution "
+            "remain dark until later phases."
+        ),
+    )
+    LIBRARIAN_PLANNER_SHADOW: bool = Field(
+        default=False,
+        description=(
+            "Build and trace deterministic QueryPlanV1 using document-summary "
+            "routing without changing retrieval selection or scoring."
+        ),
+    )
+    LIBRARIAN_LLM_DECOMPOSER_ENABLED: bool = Field(
+        default=False,
+        description=(
+            "Allow one bounded cached Utility-route decomposition only when "
+            "all deterministic Librarian rules fall through on a complex "
+            "query. OFF by default; failures preserve the simple plan."
+        ),
+    )
     QUERY_PLAN_QUALITY_FIRST: bool = Field(
         default=True,
         description=(
@@ -597,12 +638,8 @@ class Settings(BaseSettings):
         le=100000,
         description="Durable lifetime call ceiling; zero disables provider calls.",
     )
-    GROUNDED_QUERY_PLANNER_TIMEOUT_SECONDS: float = Field(
-        default=8.0, ge=1.0, le=30.0
-    )
-    GROUNDED_QUERY_PLANNER_CACHE_TTL_HOURS: int = Field(
-        default=24, ge=1, le=720
-    )
+    GROUNDED_QUERY_PLANNER_TIMEOUT_SECONDS: float = Field(default=8.0, ge=1.0, le=30.0)
+    GROUNDED_QUERY_PLANNER_CACHE_TTL_HOURS: int = Field(default=24, ge=1, le=720)
     GROUNDED_QUERY_PLANNER_MIN_ALIGNMENT: float = Field(
         default=0.45,
         ge=-1.0,
@@ -993,9 +1030,7 @@ class Settings(BaseSettings):
         default="Qwen3-Embedding-0.6B",
         description="Display name of the loaded embedding model — must match MODEL_NAME env var in embedder container",
     )
-    QWEN3_QUERY_INSTRUCTION_PROFILE: Literal[
-        "baseline_live_v0", "universal"
-    ] = Field(
+    QWEN3_QUERY_INSTRUCTION_PROFILE: Literal["baseline_live_v0", "universal"] = Field(
         default="baseline_live_v0",
         description=(
             "Versioned query-only instruction profile resolved from "
@@ -1559,6 +1594,14 @@ class Settings(BaseSettings):
             "by default; the UI selector still wins per turn; models without a "
             "thinking dial (minimax etc.) are unaffected. 'auto' restores "
             "provider defaults."
+        ),
+    )
+    CHAT_COST_TELEMETRY_ENABLED: bool = Field(
+        default=False,
+        description=(
+            "Emit additive, secret-free provider token/cost accounting on "
+            "/api/chat SSE traces. Ships dark; eval operators enable it only "
+            "after verifying that the selected provider returns stream usage."
         ),
     )
     GHOST_A_DEFAULT_MODEL: str = Field(

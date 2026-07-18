@@ -1,0 +1,98 @@
+CLAIMS_RUNTIME_OFF={"AGENTIC_MODE_ENABLED": false, "ANSWERABILITY_CORPUS_SCOPE_V2_ENABLED": true, "ATOMIC_CLAIM_ANCHORS_ENABLED": false, "CORPUS_VOCABULARY_RESOLVER_ENABLED": true, "DISABLE_MULTI_CORPUS": false, "DOCUMENT_ANCHOR_INDEXED": true, "FOUR_LANE_TIER0_ROUTER_ENABLED": false, "FOUR_LANE_TIER0_SUBQUERY_DECOMPOSITION_ENABLED": false, "GRAPH_PAYLOAD_FIRST": true, "GRAPH_QUERY_ENTITY_LINKING": true, "GRAPH_SEED_PREFER_RELATIONS": true, "GROUNDED_QUERY_PLANNER_ENABLED": false, "HYDE_ENABLED": false, "HYDRATION_MODE": "child_summary", "LIVE_WEB_SEARCH_ENABLED": true, "LIVE_WEB_SEARCH_FETCH_FULL_PAGES": true, "LOCAL_EMBEDDER_ENABLED": true, "LOCAL_RERANKER_ENABLED": true, "NEO4J_ENABLED": true, "PARENT_EXCERPT_ENABLED": false, "PAYLOAD_SOFT_PREFILTER": true, "QDRANT_BINARY_QUANTIZATION_ALWAYS_RAM": true, "QDRANT_BINARY_QUANTIZATION_ENABLED": true, "QDRANT_BINARY_QUANTIZATION_RESCORE": true, "QUERY_PLAN_QUALITY_FIRST": true, "QUERY_PLAN_V2": true, "QUERY_PLAN_V2_SHADOW": true, "RELATIONSHIP_EVIDENCE_ALLOCATION_ENABLED": true, "RERANK_EVIDENCE_SUPPORT": false, "RETRIEVAL_CACHE_DECORATION_METRICS": true, "RETRIEVAL_CACHE_GRAPH_METRICS": true, "RETRIEVAL_CACHE_MODE_A_METRICS": true, "RETRIEVAL_GRAPH_RERANK_ENABLED": true, "SHELF_RESERVE_ENABLED": false, "STRACT_SEARCH_ENABLED": true, "TEMPORAL_QUERY_ROUTING_ENABLED": true, "TIER0_ROUTING": true, "TWO_LANE_ANCHORING": false, "TWO_LANE_ANCHORING_ENABLED": false, "VOCAB_RESOLUTION_CACHE": true, "WATERFALL_ASSEMBLY": false}
+EMBEDDER_PREFLIGHT={"embedder_url":"http://host.docker.internal:8082","keepalive_expiry_seconds":120.0,"model":"mlx-community/Qwen3-Embedding-0.6B-mxfp8","query_timeout_seconds":30.0,"queue_depth":0,"status":"ready","timeout_retries":1,"vector_dim":1024,"warmup_ms":483.487}
+CLAIMS_EMBEDDER_PREFLIGHT=ready
+CLAIMS_OFF_TRUE_EXIT=EXIT=0
+CLAIMS_OFF_SHA256=7c53465e9fc5856779fa807aa6e05569f83aa05d325d158be9934d1df1e348a9
+ Image polymath_v33-backend Building 
+#1 [internal] load local bake definitions
+#1 reading from stdin 564B done
+#1 DONE 0.0s
+
+#2 [internal] load build definition from Dockerfile
+#2 transferring dockerfile:
+#2 transferring dockerfile: 3.37kB done
+#2 DONE 0.2s
+
+#3 [internal] load metadata for docker.io/library/python:3.11-slim
+#3 ...
+
+#4 [auth] library/python:pull token for registry-1.docker.io
+#4 DONE 0.0s
+
+#3 [internal] load metadata for docker.io/library/python:3.11-slim
+#3 DONE 1.0s
+
+#5 [internal] load .dockerignore
+#5 transferring context: 425B done
+#5 DONE 0.0s
+
+#6 [1/8] FROM docker.io/library/python:3.11-slim@sha256:db3ff2e1800a8581e2c48a27c3995339d47bdf046da21c7627accd3d51053a93
+#6 resolve docker.io/library/python:3.11-slim@sha256:db3ff2e1800a8581e2c48a27c3995339d47bdf046da21c7627accd3d51053a93 done
+#6 DONE 0.0s
+
+#7 [internal] load build context
+#7 transferring context: 28.11kB 0.0s done
+#7 DONE 0.0s
+
+#8 [3/8] WORKDIR /app
+#8 CACHED
+
+#9 [4/8] COPY requirements.txt .
+#9 CACHED
+
+#10 [5/8] RUN pip install --no-cache-dir --upgrade pip &&     pip install --no-cache-dir -r requirements.txt
+#10 CACHED
+
+#11 [2/8] RUN apt-get update && apt-get install -y --no-install-recommends     curl     && rm -rf /var/lib/apt/lists/*
+#11 CACHED
+
+#12 [6/8] RUN python -c "import tree_sitter_language_pack as p; langs = ['python','javascript','typescript','tsx','lua','luau','go','rust',         'java','kotlin','c','cpp','cuda','swift','objc','dart','csharp',         'ruby','php','scala','bash','sql','r','haskell','nix',         'glsl','hlsl','vue','svelte','html','css','xml',         'json','yaml','toml','ini','hcl','dockerfile','make','cmake',         'proto','graphql']; [p.process('x', p.ProcessConfig(language=l)) for l in langs]; print(f'tree-sitter pack: pre-warmed {len(langs)} grammars')"     || echo "tree-sitter pack pre-warm skipped (code lane will download on first use)"
+#12 CACHED
+
+#13 [7/8] COPY . .
+#13 DONE 0.3s
+
+#14 [8/8] RUN groupadd --gid 1000 appuser &&     useradd --uid 1000 --gid appuser --shell /bin/bash --create-home appuser &&     mkdir -p /home/appuser/.cache /app/.cache &&     chown -R appuser:appuser /app /home/appuser
+#14 DONE 2.5s
+
+#15 exporting to image
+#15 exporting layers
+#15 exporting layers 1.6s done
+#15 exporting manifest sha256:ee47b83d8399b01c3bd9a88d3b6ae2ba050935fe3021df4b23988acf3b351daf
+#15 exporting manifest sha256:ee47b83d8399b01c3bd9a88d3b6ae2ba050935fe3021df4b23988acf3b351daf done
+#15 exporting config sha256:374a825cc609ffe1ad66b5bb7b8b5b4619f8a4ba6153896816d718281b65d95c done
+#15 exporting attestation manifest sha256:ac2c3af3bf8cb76918f9bb921369c9461fbd1663962966869a864e60516f040a 0.0s done
+#15 exporting manifest list sha256:b903442d2dcea0286e8c8a47cb989306c29f1cd4528938bb5d4f40561e6afb5a done
+#15 naming to docker.io/library/polymath_v33-backend:latest done
+#15 unpacking to docker.io/library/polymath_v33-backend:latest
+#15 unpacking to docker.io/library/polymath_v33-backend:latest 0.7s done
+#15 DONE 2.4s
+
+#16 resolving provenance for metadata file
+#16 DONE 0.0s
+ Image polymath_v33-backend Built 
+ Container polymath_v33-redis-1 Running 
+ Container polymath_v33-searxng-1 Running 
+ Container polymath_v33-mongodb-1 Running 
+ Container polymath_v33-qdrant-1 Running 
+ Container polymath_v33-litellm-1 Running 
+ Container polymath_v33-backend-1 Recreate 
+ Container polymath_v33-backend-1 Recreated 
+ Container polymath_v33-redis-1 Waiting 
+ Container polymath_v33-redis-1 Healthy 
+ Container polymath_v33-litellm-1 Waiting 
+ Container polymath_v33-mongodb-1 Waiting 
+ Container polymath_v33-qdrant-1 Waiting 
+ Container polymath_v33-redis-1 Waiting 
+ Container polymath_v33-qdrant-1 Healthy 
+ Container polymath_v33-litellm-1 Healthy 
+ Container polymath_v33-mongodb-1 Healthy 
+ Container polymath_v33-redis-1 Healthy 
+ Container polymath_v33-backend-1 Starting 
+ Container polymath_v33-backend-1 Started 
+CLAIMS_RUNTIME_ON={"AGENTIC_MODE_ENABLED": false, "ANSWERABILITY_CORPUS_SCOPE_V2_ENABLED": true, "ATOMIC_CLAIM_ANCHORS_ENABLED": true, "CORPUS_VOCABULARY_RESOLVER_ENABLED": true, "DISABLE_MULTI_CORPUS": false, "DOCUMENT_ANCHOR_INDEXED": true, "FOUR_LANE_TIER0_ROUTER_ENABLED": false, "FOUR_LANE_TIER0_SUBQUERY_DECOMPOSITION_ENABLED": false, "GRAPH_PAYLOAD_FIRST": true, "GRAPH_QUERY_ENTITY_LINKING": true, "GRAPH_SEED_PREFER_RELATIONS": true, "GROUNDED_QUERY_PLANNER_ENABLED": false, "HYDE_ENABLED": false, "HYDRATION_MODE": "child_summary", "LIVE_WEB_SEARCH_ENABLED": true, "LIVE_WEB_SEARCH_FETCH_FULL_PAGES": true, "LOCAL_EMBEDDER_ENABLED": true, "LOCAL_RERANKER_ENABLED": true, "NEO4J_ENABLED": true, "PARENT_EXCERPT_ENABLED": false, "PAYLOAD_SOFT_PREFILTER": true, "QDRANT_BINARY_QUANTIZATION_ALWAYS_RAM": true, "QDRANT_BINARY_QUANTIZATION_ENABLED": true, "QDRANT_BINARY_QUANTIZATION_RESCORE": true, "QUERY_PLAN_QUALITY_FIRST": true, "QUERY_PLAN_V2": true, "QUERY_PLAN_V2_SHADOW": true, "RELATIONSHIP_EVIDENCE_ALLOCATION_ENABLED": true, "RERANK_EVIDENCE_SUPPORT": false, "RETRIEVAL_CACHE_DECORATION_METRICS": true, "RETRIEVAL_CACHE_GRAPH_METRICS": true, "RETRIEVAL_CACHE_MODE_A_METRICS": true, "RETRIEVAL_GRAPH_RERANK_ENABLED": true, "SHELF_RESERVE_ENABLED": false, "STRACT_SEARCH_ENABLED": true, "TEMPORAL_QUERY_ROUTING_ENABLED": true, "TIER0_ROUTING": true, "TWO_LANE_ANCHORING": false, "TWO_LANE_ANCHORING_ENABLED": false, "VOCAB_RESOLUTION_CACHE": true, "WATERFALL_ASSEMBLY": false}
+CLAIMS_ON_TRUE_EXIT=EXIT=0
+CLAIMS_ON_SHA256=524bd62d8f43903045708cad0d808f8ab76aeb538a13019a6119d7789064bae3
+CLAIMS_RUNTIME_FINAL={"AGENTIC_MODE_ENABLED": false, "ANSWERABILITY_CORPUS_SCOPE_V2_ENABLED": true, "ATOMIC_CLAIM_ANCHORS_ENABLED": true, "CORPUS_VOCABULARY_RESOLVER_ENABLED": true, "DISABLE_MULTI_CORPUS": false, "DOCUMENT_ANCHOR_INDEXED": true, "FOUR_LANE_TIER0_ROUTER_ENABLED": false, "FOUR_LANE_TIER0_SUBQUERY_DECOMPOSITION_ENABLED": false, "GRAPH_PAYLOAD_FIRST": true, "GRAPH_QUERY_ENTITY_LINKING": true, "GRAPH_SEED_PREFER_RELATIONS": true, "GROUNDED_QUERY_PLANNER_ENABLED": false, "HYDE_ENABLED": false, "HYDRATION_MODE": "child_summary", "LIVE_WEB_SEARCH_ENABLED": true, "LIVE_WEB_SEARCH_FETCH_FULL_PAGES": true, "LOCAL_EMBEDDER_ENABLED": true, "LOCAL_RERANKER_ENABLED": true, "NEO4J_ENABLED": true, "PARENT_EXCERPT_ENABLED": false, "PAYLOAD_SOFT_PREFILTER": true, "QDRANT_BINARY_QUANTIZATION_ALWAYS_RAM": true, "QDRANT_BINARY_QUANTIZATION_ENABLED": true, "QDRANT_BINARY_QUANTIZATION_RESCORE": true, "QUERY_PLAN_QUALITY_FIRST": true, "QUERY_PLAN_V2": true, "QUERY_PLAN_V2_SHADOW": true, "RELATIONSHIP_EVIDENCE_ALLOCATION_ENABLED": true, "RERANK_EVIDENCE_SUPPORT": false, "RETRIEVAL_CACHE_DECORATION_METRICS": true, "RETRIEVAL_CACHE_GRAPH_METRICS": true, "RETRIEVAL_CACHE_MODE_A_METRICS": true, "RETRIEVAL_GRAPH_RERANK_ENABLED": true, "SHELF_RESERVE_ENABLED": false, "STRACT_SEARCH_ENABLED": true, "TEMPORAL_QUERY_ROUTING_ENABLED": true, "TIER0_ROUTING": true, "TWO_LANE_ANCHORING": false, "TWO_LANE_ANCHORING_ENABLED": false, "VOCAB_RESOLUTION_CACHE": true, "WATERFALL_ASSEMBLY": false}
+CLAIMS_ATOMIC_WINDOW=GREEN
+EXIT=0

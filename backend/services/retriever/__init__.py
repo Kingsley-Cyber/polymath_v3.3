@@ -57,6 +57,8 @@ from services.retriever.hydrate import (
 from services.retriever.planned_fusion import (
     PlannedPool,
     annotate_planned_lane_grounding,
+    apply_librarian_two_lane_allocation,
+    cap_planned_candidates_by_affinity,
     dedupe_enumeration_finalists,
     dedupe_document_lane_finalists,
     dedupe_parent_finalists,
@@ -69,6 +71,8 @@ from services.retriever.planned_fusion import (
     propagate_grounded_lane_aliases,
     reserve_planned_finalists,
 )
+from models.librarian_query_plan import QueryPlanV1
+from services.retriever.librarian_planner import apply_librarian_execution_plan
 from services.retriever.query_plan import (
     FALLBACK_PROBE_ID,
     QueryPlanV2,
@@ -138,6 +142,13 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 
+def _planned_obligation_count(plan: QueryPlanV2) -> int:
+    preserved = getattr(plan, "budget_obligation_count", None)
+    if preserved is not None:
+        return max(1, int(preserved))
+    return max(1, len([probe for probe in plan.probes if probe.required]))
+
+
 def _planned_rerank_candidate_limit(
     *,
     plan: QueryPlanV2,
@@ -150,7 +161,7 @@ def _planned_rerank_candidate_limit(
 
     configured = max(1, int(configured_limit))
     final_k = max(1, int(final_top_k))
-    obligation_count = max(1, len([probe for probe in plan.probes if probe.required]))
+    obligation_count = _planned_obligation_count(plan)
     if tier == RetrievalTier.qdrant_mongo_graph:
         desired = 34 + min(16, obligation_count * 4)
         ceiling = 52
@@ -187,7 +198,7 @@ def _planned_final_result_limit(
     """Size final context from answer obligations and routed breadth."""
 
     requested = max(1, int(requested_limit))
-    required_probes = max(1, len([probe for probe in plan.probes if probe.required]))
+    required_probes = _planned_obligation_count(plan)
     if plan.complexity == "simple" and intent.need == QueryNeed.SPECIFIC:
         floor = 8
     else:
@@ -1362,17 +1373,36 @@ class RetrieverOrchestrator:
         search_mode: str = "local",
         disabled_lexicon_ids: list[str] | None = None,
         grounded_planner_route: dict[str, Any] | None = None,
+        librarian_plan: QueryPlanV1 | dict[str, Any] | None = None,
     ) -> RetrievalResult:
         """Execute QueryPlanV2 as one candidate-generation and rerank pass."""
 
+        librarian_execution_policy = None
+        librarian_execution_fallback: dict[str, Any] | None = None
+        if librarian_plan is not None:
+            try:
+                validated_librarian_plan = (
+                    librarian_plan
+                    if isinstance(librarian_plan, QueryPlanV1)
+                    else QueryPlanV1.model_validate(librarian_plan)
+                )
+                plan, librarian_execution_policy = apply_librarian_execution_plan(
+                    plan,
+                    validated_librarian_plan,
+                )
+            except Exception as exc:
+                librarian_execution_fallback = {
+                    "active": False,
+                    "status": "validation_fallback",
+                    "reason": f"{type(exc).__name__}: {exc}"[:300],
+                    "silent_fallback_count": 1,
+                }
         curation_query = query_plan_curation_query(plan)
         intent = infer_retrieval_intent(plan.standalone_query)
         intent = promote_compositional_intent(
             intent,
             complexity=plan.complexity,
-            required_lane_count=sum(
-                1 for probe in plan.probes if bool(getattr(probe, "required", False))
-            ),
+            required_lane_count=_planned_obligation_count(plan),
         )
         temporal_enabled = temporal_routing_enabled(settings)
         temporal_intent = (
@@ -1521,14 +1551,16 @@ class RetrieverOrchestrator:
             if effective_tier != RetrievalTier.qdrant_only:
                 started_at = perf_counter()
                 flat = await attach_parent_temporal_metadata(flat, corpus_ids)
-                timings["temporal_metadata"] = timings.get(
-                    "temporal_metadata", 0.0
-                ) + (perf_counter() - started_at)
+                timings["temporal_metadata"] = timings.get("temporal_metadata", 0.0) + (
+                    perf_counter() - started_at
+                )
             rebuilt: list[PlannedPool] = []
             offset = 0
             for pool in candidate_pools:
                 length = len(pool.chunks)
-                rebuilt.append(replace(pool, chunks=tuple(flat[offset : offset + length])))
+                rebuilt.append(
+                    replace(pool, chunks=tuple(flat[offset : offset + length]))
+                )
                 offset += length
             return rebuilt, flat
 
@@ -1964,6 +1996,32 @@ class RetrieverOrchestrator:
                     for lane_id, values in document_routes.items()
                 }
         timings["document_routing"] = perf_counter() - routing_started
+        if (
+            librarian_execution_policy is not None
+            and librarian_execution_policy.document_route_hints
+        ):
+            (
+                document_routes,
+                librarian_grounding_rows,
+            ) = merge_grounded_document_route_hints(
+                document_routes,
+                librarian_execution_policy.document_route_hints,
+                max_per_lane=document_route_limit,
+            )
+            document_routing_diagnostics["librarian_grounding"] = {
+                "applied": librarian_grounding_rows,
+                "hint_count": sum(
+                    len(values) for values in librarian_grounding_rows.values()
+                ),
+            }
+            document_routing_diagnostics["enabled"] = True
+            document_routing_diagnostics["routed_doc_count"] = len(
+                {
+                    (route.corpus_id, route.doc_id)
+                    for values in document_routes.values()
+                    for route in values
+                }
+            )
 
         tree_routing_started = perf_counter()
         summary_tree_routes: dict[str, list[Any]] = {}
@@ -2951,9 +3009,10 @@ class RetrieverOrchestrator:
                     *required_base_pools,
                     *graph_pools,
                 ]
-                combined_graph_pools, graph_temporal_candidates = (
-                    await _temporalize_pools(combined_graph_pools)
-                )
+                (
+                    combined_graph_pools,
+                    graph_temporal_candidates,
+                ) = await _temporalize_pools(combined_graph_pools)
                 fused, graph_fusion = fuse_planned_pools(
                     combined_graph_pools,
                     max_candidates=rerank_cap,
@@ -3257,11 +3316,24 @@ class RetrieverOrchestrator:
                     }
                 )
         fused, hydrated_duplicate_count = dedupe_cross_corpus_evidence(fused)
+        librarian_rerank_cap_diagnostics: dict[str, object] = {
+            "active": False,
+            "reason": "librarian_execution_inactive",
+        }
         separator_only_count = sum(
             1 for chunk in fused if is_separator_only_text(chunk.text)
         )
         if separator_only_count:
             fused = [chunk for chunk in fused if not is_separator_only_text(chunk.text)]
+        if librarian_execution_policy is not None and librarian_execution_policy.active:
+            (
+                fused,
+                librarian_rerank_cap_diagnostics,
+            ) = cap_planned_candidates_by_affinity(
+                fused,
+                lane_rerank_caps=librarian_execution_policy.lane_rerank_caps,
+                global_rerank_cap=rerank_cap,
+            )
         fusion_diagnostics["structural_noise_filter"] = {
             "separator_only_dropped": separator_only_count,
             "remaining_candidates": len(fused),
@@ -3331,16 +3403,24 @@ class RetrieverOrchestrator:
             selected_corpus_ids=corpus_ids or [],
             query=plan.standalone_query,
             anchor_query=plan.standalone_query,
-            two_lane_anchoring_enabled=settings.TWO_LANE_ANCHORING_ENABLED,
-            anchor_lane_ratio=settings.ANCHOR_LANE_RATIO,
-            anchor_lane_admission_threshold=(
-                settings.ANCHOR_LANE_ADMISSION_THRESHOLD
+            two_lane_anchoring_enabled=(
+                settings.TWO_LANE_ANCHORING_ENABLED
+                and not (
+                    librarian_execution_policy is not None
+                    and librarian_execution_policy.active
+                )
             ),
+            anchor_lane_ratio=settings.ANCHOR_LANE_RATIO,
+            anchor_lane_admission_threshold=(settings.ANCHOR_LANE_ADMISSION_THRESHOLD),
             expansion_lane_admission_threshold=(
                 settings.EXPANSION_LANE_ADMISSION_THRESHOLD
             ),
             relationship_allocation_enabled=(
                 settings.RELATIONSHIP_EVIDENCE_ALLOCATION_ENABLED
+                and not (
+                    librarian_execution_policy is not None
+                    and librarian_execution_policy.active
+                )
             ),
         )
         final_limit = planned_final_top_k
@@ -3371,12 +3451,49 @@ class RetrieverOrchestrator:
             corpus_ids=corpus_ids,
             max_candidates=final_limit,
             max_per_document=(
-                1 if intent.need == QueryNeed.BROAD and not answer_lane_ids else None
+                2
+                if librarian_execution_policy is not None
+                and librarian_execution_policy.active
+                else (
+                    1
+                    if intent.need == QueryNeed.BROAD and not answer_lane_ids
+                    else None
+                )
             ),
             routed_document_budget=routed_document_budget,
             preferred_route_lane_ids=answer_lane_ids,
             protected_lane_ids=protected_lane_ids,
+            lane_seat_quotas=(
+                librarian_execution_policy.lane_seat_quotas
+                if librarian_execution_policy is not None
+                and librarian_execution_policy.active
+                else None
+            ),
         )
+        librarian_two_lane_diagnostics: dict[str, object] = {
+            "enabled": False,
+            "reason": "librarian_inactive_or_two_lane_disabled",
+        }
+        if (
+            librarian_execution_policy is not None
+            and librarian_execution_policy.active
+            and settings.TWO_LANE_ANCHORING_ENABLED
+        ):
+            (
+                finalist_candidates,
+                librarian_two_lane_diagnostics,
+                reservation_diagnostics,
+            ) = apply_librarian_two_lane_allocation(
+                finalist_candidates,
+                ranked,
+                query=plan.standalone_query,
+                required_lane_ids=required_lane_ids,
+                lane_seat_quotas=librarian_execution_policy.lane_seat_quotas,
+                reservation_receipt=reservation_diagnostics,
+                anchor_ratio=settings.ANCHOR_LANE_RATIO,
+                anchor_threshold=settings.ANCHOR_LANE_ADMISSION_THRESHOLD,
+                expansion_threshold=settings.EXPANSION_LANE_ADMISSION_THRESHOLD,
+            )
         if temporal_enabled and temporal_intent.active:
             finalist_candidates, temporal_final_reserve = reserve_temporal_candidates(
                 finalist_candidates,
@@ -3670,6 +3787,25 @@ class RetrieverOrchestrator:
             "enumeration_selection": enumeration_diagnostics,
             "grounding_filter": grounding_filter_diagnostics,
             "reservations": reservation_diagnostics,
+            "librarian_execution": (
+                {
+                    **librarian_execution_policy.diagnostics(),
+                    "two_lane": librarian_two_lane_diagnostics,
+                    "execution": {
+                        "v1_subquery_embed_batches": 1,
+                        "v1_subquery_embed_scope": (
+                            "initial_query_plan_execution_lanes"
+                        ),
+                        "candidate_generation_parallel": True,
+                        "logical_rerank_batches": (
+                            1 if rerank_enabled and bool(fused) else 0
+                        ),
+                        "rerank_caps": librarian_rerank_cap_diagnostics,
+                    },
+                }
+                if librarian_execution_policy is not None
+                else librarian_execution_fallback or {"active": False}
+            ),
             "temporal_routing": temporal_diagnostics,
             "cache": {"hit": False, "key_version": "retrieval_v2"},
             "required_concept_coverage": {
@@ -3792,9 +3928,7 @@ class RetrieverOrchestrator:
                     kwargs.get("fact_seed_limit"),
                     kwargs.get("search_mode"),
                     bool(kwargs.get("support_profile", False)),
-                    bool(
-                        getattr(settings, "TEMPORAL_QUERY_ROUTING_ENABLED", False)
-                    ),
+                    bool(getattr(settings, "TEMPORAL_QUERY_ROUTING_ENABLED", False)),
                     TEMPORAL_ROUTING_VERSION,
                 )
             except Exception:
@@ -4380,9 +4514,7 @@ class RetrieverOrchestrator:
                     max_candidates=effective_global_k,
                     tier=effective_tier,
                 )
-                temporal_diagnostics["global_final_reserve"] = (
-                    global_temporal_reserve
-                )
+                temporal_diagnostics["global_final_reserve"] = global_temporal_reserve
             counts["ranked_query_grounded"] = len(a_results_global)
             counts["candidates"] = len(top)
             _log_timings("global_done", len(top))
@@ -5122,9 +5254,7 @@ class RetrieverOrchestrator:
             anchor_query=query,
             two_lane_anchoring_enabled=settings.TWO_LANE_ANCHORING_ENABLED,
             anchor_lane_ratio=settings.ANCHOR_LANE_RATIO,
-            anchor_lane_admission_threshold=(
-                settings.ANCHOR_LANE_ADMISSION_THRESHOLD
-            ),
+            anchor_lane_admission_threshold=(settings.ANCHOR_LANE_ADMISSION_THRESHOLD),
             expansion_lane_admission_threshold=(
                 settings.EXPANSION_LANE_ADMISSION_THRESHOLD
             ),

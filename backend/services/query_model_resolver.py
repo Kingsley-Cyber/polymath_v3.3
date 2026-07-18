@@ -25,7 +25,15 @@ from typing import Literal
 
 logger = logging.getLogger(__name__)
 
-Kind = Literal["hyde", "agentic", "query", "reasoning", "utility", "graph_query"]
+Kind = Literal[
+    "hyde",
+    "agentic",
+    "query",
+    "reasoning",
+    "utility",
+    "graph_query",
+    "synthesis",
+]
 
 _KIND_TO_POOL_FIELD = {
     "hyde": "hyde",
@@ -34,6 +42,7 @@ _KIND_TO_POOL_FIELD = {
     "reasoning": "reasoning",
     "utility": "utility",
     "graph_query": "graph_query",
+    "synthesis": "synthesis",
 }
 
 

@@ -6,6 +6,8 @@ import re
 from dataclasses import dataclass
 
 from models.schemas import SourceChunk
+from services.retriever.evidence_allocation import allocate_two_lane_seats
+from services.retriever.planned_attribution import merge_planned_attribution
 from services.retriever.query_plan import FALLBACK_PROBE_ID
 from services.retriever.reservation_policy import (
     CORPUS_RESERVATION_MIN_SCORE,
@@ -618,6 +620,315 @@ def _has_lane_retriever(chunk: SourceChunk, lane_id: str, retriever: str) -> boo
     )
 
 
+def _bounded_lane_seat_quotas(
+    required_lane_ids: list[str],
+    lane_seat_quotas: dict[str, int] | None,
+    *,
+    limit: int,
+) -> tuple[dict[str, int], dict[str, int]]:
+    """Fit requested quotas into the packet without starving later lanes."""
+
+    lanes = list(dict.fromkeys(required_lane_ids))
+    requested = {
+        lane_id: max(1, int((lane_seat_quotas or {}).get(lane_id, 1)))
+        for lane_id in lanes
+    }
+    remaining = max(0, int(limit))
+    effective = {lane_id: 0 for lane_id in lanes}
+    for lane_id in lanes:
+        if remaining <= 0:
+            break
+        effective[lane_id] = 1
+        remaining -= 1
+    while remaining > 0:
+        progressed = False
+        for lane_id in lanes:
+            if remaining <= 0:
+                break
+            if effective[lane_id] >= requested[lane_id]:
+                continue
+            effective[lane_id] += 1
+            remaining -= 1
+            progressed = True
+        if not progressed:
+            break
+    return requested, effective
+
+
+def cap_planned_candidates_by_affinity(
+    chunks: list[SourceChunk],
+    *,
+    lane_rerank_caps: dict[str, int],
+    global_rerank_cap: int,
+) -> tuple[list[SourceChunk], dict[str, object]]:
+    """Cap the deduplicated union by each candidate's max-affinity lane."""
+
+    lane_ids = list(dict.fromkeys(lane_rerank_caps))
+    requested, effective = _bounded_lane_seat_quotas(
+        lane_ids,
+        lane_rerank_caps,
+        limit=max(1, int(global_rerank_cap)),
+    )
+    union_limit = max(
+        1,
+        min(
+            max(1, int(global_rerank_cap)),
+            max(1, sum(effective.values())),
+        ),
+    )
+    counts = {lane_id: 0 for lane_id in lane_ids}
+    dropped = {lane_id: 0 for lane_id in lane_ids}
+    selected_keys: set[str] = set()
+
+    def select(chunk: SourceChunk) -> bool:
+        key = _candidate_key(chunk)
+        if not key or key in selected_keys or len(selected_keys) >= union_limit:
+            return False
+        lane_id = str((chunk.metadata or {}).get("planned_max_affinity_lane") or "")
+        if lane_id in effective and counts[lane_id] >= effective[lane_id]:
+            dropped[lane_id] += 1
+            return False
+        selected_keys.add(key)
+        if lane_id in effective:
+            counts[lane_id] += 1
+        return True
+
+    original = next(
+        (
+            chunk
+            for chunk in chunks
+            if "original" in set((chunk.metadata or {}).get("planned_lanes") or [])
+        ),
+        None,
+    )
+    if original is not None:
+        select(original)
+    for lane_id in lane_ids:
+        candidate = next(
+            (
+                chunk
+                for chunk in chunks
+                if str((chunk.metadata or {}).get("planned_max_affinity_lane") or "")
+                == lane_id
+            ),
+            None,
+        )
+        if candidate is not None:
+            select(candidate)
+    for chunk in chunks:
+        select(chunk)
+        if len(selected_keys) >= union_limit:
+            break
+    output = [chunk for chunk in chunks if _candidate_key(chunk) in selected_keys]
+    return output, {
+        "active": bool(lane_ids),
+        "requested": requested,
+        "effective": effective,
+        "requested_sum": sum(requested.values()),
+        "effective_sum": sum(effective.values()),
+        "global_rerank_cap": max(1, int(global_rerank_cap)),
+        "union_limit": union_limit,
+        "input_candidates": len(chunks),
+        "output_candidates": len(output),
+        "assigned_counts": counts,
+        "dropped_by_lane_cap": dropped,
+        "affinity_authority": ("literal_grounding_or_document_route_no_score_mutation"),
+    }
+
+
+def _reconcile_lane_quota_receipt(
+    output: list[SourceChunk],
+    receipt: dict[str, object],
+    *,
+    requested_quotas: dict[str, int],
+    effective_quotas: dict[str, int],
+) -> dict[str, object]:
+    """Make quota telemetry describe the returned packet, never pre-trim state."""
+
+    reservations: dict[str, list[str]] = {lane_id: [] for lane_id in requested_quotas}
+    reservation_refs: dict[str, list[str]] = {
+        lane_id: [] for lane_id in requested_quotas
+    }
+    corpus_reservations: dict[str, str] = {}
+    corpus_reservation_refs: dict[str, str] = {}
+    protected_lane_reservations: dict[str, str] = {}
+    protected_lane_reservation_refs: dict[str, str] = {}
+    for chunk in output:
+        key = _candidate_key(chunk)
+        public_id = str(chunk.chunk_id or chunk.parent_id or "")
+        for lane_id in dict.fromkeys(
+            (chunk.metadata or {}).get("planned_required_lane_reservations") or []
+        ):
+            if lane_id not in reservations:
+                continue
+            reservations[lane_id].append(public_id)
+            reservation_refs[lane_id].append(key)
+        for corpus_id in dict.fromkeys(
+            (chunk.metadata or {}).get("planned_corpus_reservations") or []
+        ):
+            corpus_reservations[str(corpus_id)] = public_id
+            corpus_reservation_refs[str(corpus_id)] = key
+        for lane_id in dict.fromkeys(
+            (chunk.metadata or {}).get("planned_protected_lane_reservations") or []
+        ):
+            protected_lane_reservations[str(lane_id)] = public_id
+            protected_lane_reservation_refs[str(lane_id)] = key
+    previously_reserved_corpora = {
+        str(corpus_id) for corpus_id in (receipt.get("corpus_reservations") or {})
+    }
+    displaced_corpora = sorted(previously_reserved_corpora - set(corpus_reservations))
+    skipped_corpora = list(receipt.get("skipped_corpus_reservations") or [])
+    skipped_corpora.extend(
+        corpus_id for corpus_id in displaced_corpora if corpus_id not in skipped_corpora
+    )
+    corpus_details = {
+        str(corpus_id): dict(value)
+        for corpus_id, value in (
+            receipt.get("corpus_reservation_details") or {}
+        ).items()
+        if isinstance(value, dict)
+    }
+    for corpus_id in displaced_corpora:
+        corpus_details.setdefault(corpus_id, {})[
+            "outcome"
+        ] = "displaced_by_librarian_seat_budget"
+    previously_protected_lanes = {
+        str(lane_id) for lane_id in (receipt.get("protected_lane_reservations") or {})
+    }
+    displaced_protected_lanes = sorted(
+        previously_protected_lanes - set(protected_lane_reservations)
+    )
+    reconciled = dict(receipt)
+    reconciled.update(
+        {
+            "lane_seat_quotas_requested": dict(requested_quotas),
+            "lane_seat_quotas": dict(effective_quotas),
+            "lane_quota_reservations": reservations,
+            "lane_quota_reservation_refs": reservation_refs,
+            "lane_reservations": {
+                lane_id: values[0] for lane_id, values in reservations.items() if values
+            },
+            "lane_reservation_refs": {
+                lane_id: values[0]
+                for lane_id, values in reservation_refs.items()
+                if values
+            },
+            "lane_quota_fulfilled": {
+                lane_id: len(reservations[lane_id]) for lane_id in requested_quotas
+            },
+            "lane_quota_spillover": {
+                lane_id: max(
+                    0,
+                    requested_quotas[lane_id] - len(reservations[lane_id]),
+                )
+                for lane_id in requested_quotas
+            },
+            "corpus_reservations": corpus_reservations,
+            "corpus_reservation_refs": corpus_reservation_refs,
+            "skipped_corpus_reservations": skipped_corpora,
+            "corpus_reservation_details": corpus_details,
+            "protected_lane_reservations": protected_lane_reservations,
+            "protected_lane_reservation_refs": protected_lane_reservation_refs,
+            "displaced_protected_lane_ids": displaced_protected_lanes,
+            "selected_candidates": len(output),
+        }
+    )
+    return reconciled
+
+
+def apply_librarian_two_lane_allocation(
+    selected: list[SourceChunk],
+    ranked: list[SourceChunk],
+    *,
+    query: str,
+    required_lane_ids: list[str],
+    lane_seat_quotas: dict[str, int],
+    reservation_receipt: dict[str, object],
+    anchor_ratio: float,
+    anchor_threshold: float,
+    expansion_threshold: float,
+) -> tuple[list[SourceChunk], dict[str, object], dict[str, object]]:
+    """Apply anchor/expansion allocation inside each librarian subquery."""
+
+    required = list(dict.fromkeys(required_lane_ids))
+    lane_order = {lane_id: index for index, lane_id in enumerate(required)}
+    selected_keys = {_candidate_key(candidate) for candidate in selected}
+
+    def candidate_lane(candidate: SourceChunk) -> str:
+        reserved = [
+            lane_id
+            for lane_id in (
+                (candidate.metadata or {}).get("planned_required_lane_reservations")
+                or []
+            )
+            if lane_id in lane_order
+        ]
+        if reserved:
+            return min(reserved, key=lane_order.__getitem__)
+        if _candidate_key(candidate) in selected_keys:
+            return "__unassigned__"
+        supported = [
+            lane_id
+            for lane_id in required
+            if planned_lane_supported(candidate, lane_id)
+        ]
+        if not supported:
+            return "__unassigned__"
+        return max(
+            supported,
+            key=lambda lane_id: (
+                planned_lane_grounding(candidate, lane_id),
+                planned_document_route_score(candidate, lane_id),
+                -lane_order[lane_id],
+            ),
+        )
+
+    protected_ids = {
+        _candidate_key(candidate)
+        for candidate in selected
+        if (candidate.metadata or {}).get("planned_corpus_reservations")
+        or (candidate.metadata or {}).get("planned_protected_lane_reservations")
+    }
+    allocation = allocate_two_lane_seats(
+        selected,
+        ranked,
+        query=query,
+        budget=len(selected),
+        anchor_ratio=anchor_ratio,
+        anchor_threshold=anchor_threshold,
+        expansion_threshold=expansion_threshold,
+        candidate_id_fn=_candidate_key,
+        score_fn=lambda candidate: float(candidate.score or 0.0),
+        side_fn=candidate_lane,
+        protected_ids=protected_ids,
+    )
+    output: list[SourceChunk] = []
+    for candidate in allocation.candidates:
+        copied = candidate.model_copy(deep=True)
+        lane_id = candidate_lane(copied)
+        metadata = dict(copied.metadata or {})
+        if lane_id in lane_order:
+            metadata["planned_required_lane_reservations"] = [lane_id]
+        else:
+            metadata.pop("planned_required_lane_reservations", None)
+        copied.metadata = metadata
+        output.append(copied)
+    requested = dict(
+        reservation_receipt.get("lane_seat_quotas_requested") or lane_seat_quotas
+    )
+    effective = dict(reservation_receipt.get("lane_seat_quotas") or lane_seat_quotas)
+    reconciled = _reconcile_lane_quota_receipt(
+        output,
+        reservation_receipt,
+        requested_quotas=requested,
+        effective_quotas=effective,
+    )
+    diagnostics = dict(allocation.diagnostics)
+    diagnostics["scope"] = "within_librarian_subquery_seats"
+    diagnostics["required_lane_ids"] = required
+    return output, diagnostics, reconciled
+
+
 def fuse_planned_pools(
     pools: list[PlannedPool],
     *,
@@ -652,24 +963,48 @@ def fuse_planned_pools(
                 lane_bucket.append(key)
             scores[key] = scores.get(key, 0.0) + weight / (rrf_k + rank + 1.0)
             existing = representatives.get(key)
+            previous_metadata = dict(existing.metadata or {}) if existing else {}
+            previous_provenance = list(existing.provenance or []) if existing else []
             if existing is None or float(chunk.score or 0.0) > float(
                 existing.score or 0.0
             ):
                 representatives[key] = chunk.model_copy(deep=True)
             representative = representatives[key]
-            metadata = dict(representative.metadata or {})
+            metadata = merge_planned_attribution(
+                previous_metadata,
+                dict(chunk.metadata or {}),
+            )
+            metadata = merge_planned_attribution(
+                metadata,
+                dict(representative.metadata or {}),
+            )
             planned_lanes = set(metadata.get("planned_lanes") or [])
             planned_lanes.add(pool.lane_id)
             metadata["planned_lanes"] = sorted(planned_lanes)
             lane_grounding = dict(metadata.get("planned_lane_grounding") or {})
-            lane_grounding[pool.lane_id] = max(
+            grounding_score = max(
                 float(lane_grounding.get(pool.lane_id) or 0.0),
+                planned_lane_grounding(chunk, pool.lane_id),
                 _lane_grounding_score(chunk, pool),
             )
+            lane_grounding[pool.lane_id] = grounding_score
             metadata["planned_lane_grounding"] = lane_grounding
+            lane_affinity = dict(metadata.get("planned_lane_affinity") or {})
+            lane_affinity[pool.lane_id] = max(
+                float(lane_affinity.get(pool.lane_id) or 0.0),
+                grounding_score,
+                planned_document_route_score(chunk, pool.lane_id),
+            )
+            metadata["planned_lane_affinity"] = lane_affinity
+            metadata = merge_planned_attribution(metadata, {})
             metadata["planned_rrf_score"] = scores[key]
             representative.metadata = metadata
-            provenance = list(representative.provenance or [])
+            provenance = list(previous_provenance)
+            provenance.extend(
+                item
+                for item in (representative.provenance or [])
+                if item not in provenance
+            )
             marker = {
                 "retriever": f"planned_{pool.retriever}",
                 "lane_id": pool.lane_id,
@@ -763,6 +1098,7 @@ def reserve_planned_finalists(
     routed_document_budget: int = 0,
     preferred_route_lane_ids: list[str] | None = None,
     protected_lane_ids: list[str] | None = None,
+    lane_seat_quotas: dict[str, int] | None = None,
 ) -> tuple[list[SourceChunk], dict[str, object]]:
     """Keep required semantic sides and corpora through the final rank cut.
 
@@ -801,6 +1137,8 @@ def reserve_planned_finalists(
     selected_set: set[str] = set()
     protected_keys: set[str] = set()
     lane_reservations: dict[str, str] = {}
+    lane_quota_reservations: dict[str, list[str]] = {}
+    lane_ordered_candidates: dict[str, list[str]] = {}
     protected_lane_reservations: dict[str, str] = {}
     lane_candidate_diagnostics: dict[str, dict[str, object]] = {}
     corpus_reservations: dict[str, str] = {}
@@ -979,6 +1317,7 @@ def reserve_planned_finalists(
             ),
             reverse=True,
         )
+        lane_ordered_candidates[lane_id] = ordered_candidates
         # A previously selected route-only candidate may technically support
         # the lane while the reranker has scored it near zero. Do not let that
         # first-selected candidate short-circuit a much stronger grounded
@@ -1010,12 +1349,57 @@ def reserve_planned_finalists(
             protected_keys.add(key)
             lane_reservations[lane_id] = key
 
-    for lane_id, key in lane_reservations.items():
-        metadata = dict(by_key[key].metadata or {})
-        reservations = set(metadata.get("planned_required_lane_reservations") or [])
-        reservations.add(lane_id)
-        metadata["planned_required_lane_reservations"] = sorted(reservations)
-        by_key[key].metadata = metadata
+    allocated_quota_keys: set[str] = set()
+    protected_outside_required_lanes = {
+        key
+        for key in set(protected_lane_reservations.values())
+        if not any(
+            planned_lane_supported(by_key[key], lane_id)
+            for lane_id in dict.fromkeys(required_lane_ids)
+        )
+    }
+    requested_quotas, effective_quotas = _bounded_lane_seat_quotas(
+        required_lane_ids,
+        lane_seat_quotas,
+        limit=max(
+            0,
+            limit - len(protected_outside_required_lanes),
+        ),
+    )
+    for lane_id in dict.fromkeys(required_lane_ids):
+        quota = effective_quotas[lane_id]
+        ordered_candidates = lane_ordered_candidates.get(lane_id, [])
+        reserved: list[str] = []
+        first = lane_reservations.get(lane_id)
+        if first and first not in allocated_quota_keys:
+            reserved.append(first)
+            allocated_quota_keys.add(first)
+        if quota > len(reserved):
+            for candidate_key in ordered_candidates:
+                if len(reserved) >= quota:
+                    break
+                if candidate_key in allocated_quota_keys or candidate_key in reserved:
+                    continue
+                if candidate_key in selected_set or reserve(
+                    candidate_key,
+                    allow_overflow=True,
+                ):
+                    reserved.append(candidate_key)
+                    allocated_quota_keys.add(candidate_key)
+                    protected_keys.add(candidate_key)
+        if reserved:
+            lane_quota_reservations[lane_id] = reserved
+            lane_reservations[lane_id] = reserved[0]
+        else:
+            lane_reservations.pop(lane_id, None)
+
+    for lane_id, keys in lane_quota_reservations.items():
+        for key in keys:
+            metadata = dict(by_key[key].metadata or {})
+            reservations = set(metadata.get("planned_required_lane_reservations") or [])
+            reservations.add(lane_id)
+            metadata["planned_required_lane_reservations"] = sorted(reservations)
+            by_key[key].metadata = metadata
 
     # Routing is a scope prior, not a score bonus. Preserve the strongest
     # independently relevant candidate from a bounded number of routed
@@ -1143,11 +1527,23 @@ def reserve_planned_finalists(
     # If adding required evidence exceeded the limit, remove the weakest
     # unprotected diversity winner. Required semantic/corpus evidence survives.
     ordered_selected = [key for key in ranked_keys if key in selected_set]
+    quota_protected_keys = {
+        key for keys in lane_quota_reservations.values() for key in keys
+    }
     while len(ordered_selected) > limit:
         removable = next(
             (key for key in reversed(ordered_selected) if key not in protected_keys),
             None,
         )
+        if removable is None and lane_seat_quotas:
+            removable = next(
+                (
+                    key
+                    for key in reversed(ordered_selected)
+                    if key not in quota_protected_keys
+                ),
+                None,
+            )
         if removable is None:
             break
         ordered_selected.remove(removable)
@@ -1183,7 +1579,7 @@ def reserve_planned_finalists(
             for label, key in values.items()
         }
 
-    return output, {
+    receipt = {
         "required_lane_ids": list(dict.fromkeys(required_lane_ids)),
         "protected_lane_ids": list(dict.fromkeys(protected_lane_ids or [])),
         "protected_lane_reservations": public_candidate_ids(
@@ -1192,6 +1588,27 @@ def reserve_planned_finalists(
         "protected_lane_reservation_refs": protected_lane_reservations,
         "lane_reservations": public_candidate_ids(lane_reservations),
         "lane_reservation_refs": lane_reservations,
+        "lane_seat_quotas_requested": requested_quotas,
+        "lane_seat_quotas": effective_quotas,
+        "lane_quota_reservations": {
+            lane_id: [
+                str(by_key[key].chunk_id or by_key[key].parent_id or "") for key in keys
+            ]
+            for lane_id, keys in lane_quota_reservations.items()
+        },
+        "lane_quota_reservation_refs": lane_quota_reservations,
+        "lane_quota_fulfilled": {
+            lane_id: len(lane_quota_reservations.get(lane_id, []))
+            for lane_id in requested_quotas
+        },
+        "lane_quota_spillover": {
+            lane_id: max(
+                0,
+                requested_quotas[lane_id]
+                - len(lane_quota_reservations.get(lane_id, [])),
+            )
+            for lane_id in requested_quotas
+        },
         "lane_candidates": lane_candidate_diagnostics,
         "corpus_reservations": public_candidate_ids(corpus_reservations),
         "corpus_reservation_refs": corpus_reservations,
@@ -1211,6 +1628,12 @@ def reserve_planned_finalists(
         "selected_candidates": len(output),
         "max_per_document": max_per_document,
     }
+    return output, _reconcile_lane_quota_receipt(
+        output,
+        receipt,
+        requested_quotas=requested_quotas,
+        effective_quotas=effective_quotas,
+    )
 
 
 def prioritize_enumeration_candidates(

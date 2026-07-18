@@ -1,0 +1,51 @@
+/usr/local/lib/python3.11/site-packages/pydantic/_internal/_fields.py:149: UserWarning: Field "model_used" has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+/usr/local/lib/python3.11/site-packages/pydantic/_internal/_fields.py:149: UserWarning: Field "model_config_conversation" has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+/usr/local/lib/python3.11/site-packages/pydantic/_internal/_fields.py:149: UserWarning: Field "model_id" has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+/usr/local/lib/python3.11/site-packages/pydantic/_internal/_fields.py:149: UserWarning: Field "model_name" has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+/usr/local/lib/python3.11/site-packages/pydantic/_internal/_fields.py:149: UserWarning: Field "model_names" has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+/usr/local/lib/python3.11/site-packages/pydantic/_internal/_fields.py:149: UserWarning: Field "model_revision" has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+/usr/local/lib/python3.11/site-packages/pydantic/_internal/_fields.py:149: UserWarning: Field "model_batch_size" has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+TEMPORAL_CANONICAL_START {"concurrency": 3, "cost_envelope_usd": 0.511578, "queries": 10, "temperature": 0.0}
+TEMPORAL_EXECUTION_START 1/10 temporal_1929_dialog
+TEMPORAL_EXECUTION_START 2/10 temporal_nicole_2006
+TEMPORAL_EXECUTION_START 3/10 temporal_editing_1927
+TEMPORAL_EXECUTION_START 4/10 temporal_noir_1940s_1950s
+TEMPORAL_EXECUTION_DONE {"doc_hit": true, "full_anchor": true, "ordinal": 3, "query_id": "temporal_editing_1927", "state": "answered", "technical_ok": true, "temporal_active": true}
+TEMPORAL_EXECUTION_START 5/10 direct_facs
+TEMPORAL_EXECUTION_DONE {"doc_hit": true, "full_anchor": true, "ordinal": 1, "query_id": "temporal_1929_dialog", "state": "answered", "technical_ok": true, "temporal_active": true}
+TEMPORAL_EXECUTION_START 6/10 direct_rule_of_six
+TEMPORAL_EXECUTION_DONE {"doc_hit": true, "full_anchor": true, "ordinal": 2, "query_id": "temporal_nicole_2006", "state": "answered", "technical_ok": true, "temporal_active": true}
+TEMPORAL_EXECUTION_START 7/10 lay_dynamic_figure
+TEMPORAL_EXECUTION_DONE {"doc_hit": true, "full_anchor": true, "ordinal": 4, "query_id": "temporal_noir_1940s_1950s", "state": "answered", "technical_ok": true, "temporal_active": true}
+TEMPORAL_EXECUTION_START 8/10 lay_natural_cut
+TEMPORAL_EXECUTION_DONE {"doc_hit": true, "full_anchor": null, "ordinal": 6, "query_id": "direct_rule_of_six", "state": "answered", "technical_ok": true, "temporal_active": false}
+TEMPORAL_EXECUTION_START 9/10 negv2_f2_oscar_2026
+TEMPORAL_EXECUTION_DONE {"doc_hit": true, "full_anchor": null, "ordinal": 5, "query_id": "direct_facs", "state": "answered", "technical_ok": true, "temporal_active": false}
+TEMPORAL_EXECUTION_START 10/10 negv2_f1_crispr
+TEMPORAL_EXECUTION_DONE {"doc_hit": false, "full_anchor": null, "ordinal": 9, "query_id": "negv2_f2_oscar_2026", "state": "answered", "technical_ok": true, "temporal_active": true}
+TEMPORAL_EXECUTION_DONE {"doc_hit": false, "full_anchor": null, "ordinal": 10, "query_id": "negv2_f1_crispr", "state": "gate_blocked", "technical_ok": true, "temporal_active": false}
+TEMPORAL_EXECUTION_DONE {"doc_hit": true, "full_anchor": null, "ordinal": 7, "query_id": "lay_dynamic_figure", "state": "answered", "technical_ok": true, "temporal_active": false}
+TEMPORAL_EXECUTION_DONE {"doc_hit": true, "full_anchor": null, "ordinal": 8, "query_id": "lay_natural_cut", "state": "answered", "technical_ok": true, "temporal_active": false}
+TEMPORAL_CANONICAL_SUMMARY {"all_green": true, "baseline_negative_answered_count": 1, "classification_counts": {"answered": 9, "gate_blocked": 1}, "direct_count": 2, "direct_doc_hit_rate": 1.0, "execution_count": 10, "gates": {"corpus_citation_membership": true, "direct_floor": true, "journal_complete": true, "lay_floor": true, "negative_non_degradation": true, "positive_answerability": true, "technical": true, "temporal_doc_hit": true, "temporal_full_anchor": true, "temporal_trace_consumed": true}, "lay_count": 2, "lay_doc_hit_rate": 1.0, "negative_count": 0, "observed_negative_answered_count": 0, "temporal_count": 4, "temporal_doc_hit_rate": 1.0, "temporal_full_anchor_rate": 1.0}
+EXIT=0

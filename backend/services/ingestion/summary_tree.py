@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Sequence
 
 from services.ingestion.section_classifier import should_summarize_parent
-from services.ingestion.summary_semantics import _snake
+from services.ingestion.summary_semantics import TEMPORAL_CLASSES, _snake
 
 ROLLUP_WINDOW_MIN = 12
 ROLLUP_WINDOW_MAX = 20
@@ -74,6 +74,87 @@ def _child_concept_rows(children: Sequence[Any]) -> list[dict]:
     return [{"concept_tags": list(child.concepts or ())} for child in children]
 
 
+def _row_value(row: Any, key: str, default: Any = None) -> Any:
+    if isinstance(row, dict):
+        return row.get(key, default)
+    return getattr(row, key, default)
+
+
+def summary_tree_retrieval_text(section_range: str, summary: str) -> str:
+    """Return the exact text embedded for a summary-tree routing node."""
+
+    return " ".join(
+        part
+        for part in (
+            str(section_range or "").strip(),
+            str(summary or "").strip(),
+        )
+        if part
+    )[:3000]
+
+
+def common_heading_path(rows: Sequence[Any], fallback: str = "") -> list[str]:
+    """Longest common parent heading path, with the node heading as fallback."""
+
+    paths = [
+        [str(value).strip() for value in (_row_value(row, "heading_path", []) or [])]
+        for row in rows
+    ]
+    paths = [[value for value in path if value] for path in paths if path]
+    if paths:
+        prefix = list(paths[0])
+        for path in paths[1:]:
+            common: list[str] = []
+            for left, right in zip(prefix, path):
+                if left != right:
+                    break
+                common.append(left)
+            prefix = common
+            if not prefix:
+                break
+        if prefix:
+            return prefix
+    fallback = str(fallback or "").strip()
+    return [fallback] if fallback else []
+
+
+def aggregate_tree_temporal(rows: Sequence[Any]) -> tuple[str, list[dict[str, Any]]]:
+    """Roll parent temporal carriers up without parsing or inventing dates."""
+
+    class_counts: dict[str, int] = {}
+    expressions: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for row in rows:
+        temporal_class = str(
+            _row_value(row, "temporal_class", "unknown") or "unknown"
+        ).lower()
+        if temporal_class in TEMPORAL_CLASSES:
+            class_counts[temporal_class] = class_counts.get(temporal_class, 0) + 1
+        for raw in _row_value(row, "time_expressions", []) or []:
+            if not isinstance(raw, dict):
+                continue
+            text = str(raw.get("text") or "").strip()
+            role = str(raw.get("role") or "unknown").strip() or "unknown"
+            key = (text.casefold(), role.casefold())
+            if not text or key in seen:
+                continue
+            seen.add(key)
+            expressions.append({"text": text[:60], "role": role})
+
+    ranked_classes = {
+        key: count for key, count in class_counts.items() if key != "unknown"
+    }
+    if not ranked_classes:
+        temporal_class = "unknown"
+    else:
+        class_order = {value: index for index, value in enumerate(TEMPORAL_CLASSES)}
+        temporal_class = min(
+            ranked_classes,
+            key=lambda key: (-ranked_classes[key], class_order[key]),
+        )
+    return temporal_class, expressions[:12]
+
+
 LlmFn = Callable[[str], Awaitable[str]]
 TreeEmbedFn = Callable[[list[str], dict[str, Any] | None], Awaitable[list[list[float]]]]
 
@@ -87,6 +168,8 @@ class ParentSummaryIn:
     heading_path: tuple[str, ...] = ()
     domain: str = ""
     concepts: tuple[str, ...] = ()  # optional (promoted metadata when present)
+    temporal_class: str = "unknown"
+    time_expressions: tuple[dict[str, Any], ...] = ()
 
 
 @dataclass
@@ -101,6 +184,10 @@ class TreeNode:
     summary: str = ""
     concepts: list[str] = field(default_factory=list)
     domains: dict[str, int] = field(default_factory=dict)
+    retrieval_text: str = ""
+    heading_path: list[str] = field(default_factory=list)
+    temporal_class: str = "unknown"
+    time_expressions: list[dict[str, Any]] = field(default_factory=list)
     schema_version: str = TREE_SCHEMA_VERSION
 
 
@@ -252,14 +339,11 @@ async def index_summary_tree_nodes(
     for start in range(0, len(entries), batch_size):
         batch = entries[start : start + batch_size]
         texts = [
-            " ".join(
-                part
-                for part in (
-                    str(row.get("section_range") or "").strip(),
-                    str(row.get("summary") or "").strip(),
-                )
-                if part
-            )[:3000]
+            str(row.get("retrieval_text") or "").strip()
+            or summary_tree_retrieval_text(
+                str(row.get("section_range") or ""),
+                str(row.get("summary") or ""),
+            )
             for row in batch
         ]
         vectors = await embedding_call(texts, config)
@@ -476,6 +560,7 @@ async def build_tree(
     for s_idx, (heading, members) in enumerate(group_by_section(usable)):
         rollups: list[TreeNode] = []
         for win in windows(members):
+            temporal_class, time_expressions = aggregate_tree_temporal(win)
             node = TreeNode(
                 node_id=f"rollup_{doc_id[:12]}_{r_idx:04d}",
                 node_type="rollup",
@@ -484,6 +569,9 @@ async def build_tree(
                 parent_ids=[p.parent_id for p in win],
                 section_range=heading,
                 concepts=derive_node_concepts(_child_concept_rows(win)),
+                heading_path=common_heading_path(win, heading),
+                temporal_class=temporal_class,
+                time_expressions=time_expressions,
             )
             r_idx += 1
             body = "\n".join(f"- {p.summary}" for p in win)
@@ -494,6 +582,9 @@ async def build_tree(
                 )
             )
             rollups.append(node)
+        section_temporal_class, section_time_expressions = aggregate_tree_temporal(
+            rollups
+        )
         sec = TreeNode(
             node_id=f"section_{doc_id[:12]}_{s_idx:04d}",
             node_type="section",
@@ -502,6 +593,9 @@ async def build_tree(
             child_node_ids=[r.node_id for r in rollups],
             section_range=heading,
             concepts=derive_node_concepts(_child_concept_rows(rollups)),
+            heading_path=common_heading_path(rollups, heading),
+            temporal_class=section_temporal_class,
+            time_expressions=section_time_expressions,
         )
         nodes.extend(rollups)
         sections.append(sec)
@@ -514,6 +608,9 @@ async def build_tree(
         strict=True,
     ):
         node.summary = summary
+        node.retrieval_text = summary_tree_retrieval_text(
+            node.section_range, node.summary
+        )
 
     section_generators: list[Awaitable[str]] = []
     generated_section_indexes: list[int] = []
@@ -522,6 +619,9 @@ async def build_tree(
     ):
         if len(rollups) == 1:
             section.summary = rollups[0].summary
+            section.retrieval_text = summary_tree_retrieval_text(
+                section.section_range, section.summary
+            )
             continue
         body = "\n".join(f"- {rollup.summary}" for rollup in rollups)
         generated_section_indexes.append(section_index)
@@ -538,8 +638,13 @@ async def build_tree(
         strict=True,
     ):
         sections[section_index].summary = summary
+        sections[section_index].retrieval_text = summary_tree_retrieval_text(
+            sections[section_index].section_range,
+            sections[section_index].summary,
+        )
     nodes.extend(sections)
 
+    profile_temporal_class, profile_time_expressions = aggregate_tree_temporal(sections)
     profile = TreeNode(
         node_id=f"docsum_{doc_id[:12]}",
         node_type="document",
@@ -549,6 +654,9 @@ async def build_tree(
         section_range=title,
         domains=domains,
         concepts=derive_node_concepts(_child_concept_rows(sections)),
+        heading_path=common_heading_path(sections, title),
+        temporal_class=profile_temporal_class,
+        time_expressions=profile_time_expressions,
     )
     profile.summary = await _gen(
         llm_fn,
@@ -556,6 +664,9 @@ async def build_tree(
             body=build_profile_input(title, source_type, sections, domains, concepts)
         ),
         [s.summary for s in sections],
+    )
+    profile.retrieval_text = summary_tree_retrieval_text(
+        profile.section_range, profile.summary
     )
     nodes.append(profile)
     return nodes
@@ -748,6 +859,8 @@ async def build_and_store_tree(
                 "key_terms": 1,
                 "mechanisms": 1,
                 "concept_tags": 1,
+                "temporal_class": 1,
+                "time_expressions": 1,
             },
         )
         .sort("parent_id", 1)
@@ -893,6 +1006,12 @@ async def build_and_store_tree(
             heading_path=tuple(r.get("heading_path") or ()),
             domain=str(r.get("domain") or ""),
             concepts=tuple(derive_node_concepts([r])),
+            temporal_class=str(r.get("temporal_class") or "unknown"),
+            time_expressions=tuple(
+                value
+                for value in (r.get("time_expressions") or [])
+                if isinstance(value, dict)
+            ),
         )
         for r in summary_rows
     ]

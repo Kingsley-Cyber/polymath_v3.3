@@ -1,0 +1,36 @@
+/usr/local/lib/python3.11/site-packages/pydantic/_internal/_fields.py:149: UserWarning: Field "model_used" has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+/usr/local/lib/python3.11/site-packages/pydantic/_internal/_fields.py:149: UserWarning: Field "model_config_conversation" has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+/usr/local/lib/python3.11/site-packages/pydantic/_internal/_fields.py:149: UserWarning: Field "model_id" has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+/usr/local/lib/python3.11/site-packages/pydantic/_internal/_fields.py:149: UserWarning: Field "model_name" has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+/usr/local/lib/python3.11/site-packages/pydantic/_internal/_fields.py:149: UserWarning: Field "model_names" has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+/usr/local/lib/python3.11/site-packages/pydantic/_internal/_fields.py:149: UserWarning: Field "model_revision" has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+/usr/local/lib/python3.11/site-packages/pydantic/_internal/_fields.py:149: UserWarning: Field "model_batch_size" has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+{"journal_complete": true, "model": "anthropic/minimax-m2.7", "query_id": "q021", "sources": 6, "temperature": 0}
+{"journal_complete": true, "model": "anthropic/minimax-m2.7", "query_id": "q022", "sources": 5, "temperature": 0}
+{"journal_complete": true, "model": "anthropic/minimax-m2.7", "query_id": "q023", "sources": 5, "temperature": 0}
+{"journal_complete": true, "model": "anthropic/minimax-m2.7", "query_id": "q024", "sources": 4, "temperature": 0}
+{"journal_complete": true, "model": "anthropic/minimax-m2.7", "query_id": "q025", "sources": 3, "temperature": 0}
+{"journal_complete": true, "model": "anthropic/minimax-m2.7", "query_id": "q029", "sources": 5, "temperature": 0}
+FRESH_OFF_ARTIFACT={"outer_host_lock": {"lock_owner": "codex/build-first-queue-20260718", "window_nonce": "claims-82819268-b682-4440-81a2-e8a745acc605", "window_not_before_utc": "2026-07-17T23:58:31.625674+00:00"}, "path": "/tmp/build_first_claims_fresh_off_6.json", "runtime": {"AGENTIC_MODE_ENABLED": false, "ANSWERABILITY_CORPUS_SCOPE_V2_ENABLED": true, "ATOMIC_CLAIM_ANCHORS_ENABLED": false, "CORPUS_VOCABULARY_RESOLVER_ENABLED": true, "DISABLE_MULTI_CORPUS": false, "DOCUMENT_ANCHOR_INDEXED": true, "FOUR_LANE_TIER0_ROUTER_ENABLED": false, "FOUR_LANE_TIER0_SUBQUERY_DECOMPOSITION_ENABLED": false, "GRAPH_PAYLOAD_FIRST": true, "GRAPH_QUERY_ENTITY_LINKING": true, "GRAPH_SEED_PREFER_RELATIONS": true, "GROUNDED_QUERY_PLANNER_ENABLED": false, "HYDE_ENABLED": false, "HYDRATION_MODE": "child_summary", "LIVE_WEB_SEARCH_ENABLED": true, "LIVE_WEB_SEARCH_FETCH_FULL_PAGES": true, "LOCAL_EMBEDDER_ENABLED": true, "LOCAL_RERANKER_ENABLED": true, "NEO4J_ENABLED": true, "PARENT_EXCERPT_ENABLED": false, "PAYLOAD_SOFT_PREFILTER": true, "QDRANT_BINARY_QUANTIZATION_ALWAYS_RAM": true, "QDRANT_BINARY_QUANTIZATION_ENABLED": true, "QDRANT_BINARY_QUANTIZATION_RESCORE": true, "QUERY_PLAN_QUALITY_FIRST": true, "QUERY_PLAN_V2": true, "QUERY_PLAN_V2_SHADOW": true, "RELATIONSHIP_EVIDENCE_ALLOCATION_ENABLED": true, "RERANK_EVIDENCE_SUPPORT": false, "RETRIEVAL_CACHE_DECORATION_METRICS": true, "RETRIEVAL_CACHE_GRAPH_METRICS": true, "RETRIEVAL_CACHE_MODE_A_METRICS": true, "RETRIEVAL_GRAPH_RERANK_ENABLED": true, "SHELF_RESERVE_ENABLED": false, "STRACT_SEARCH_ENABLED": true, "TEMPORAL_QUERY_ROUTING_ENABLED": true, "TIER0_ROUTING": true, "TWO_LANE_ANCHORING": false, "TWO_LANE_ANCHORING_ENABLED": false, "VOCAB_RESOLUTION_CACHE": true, "WATERFALL_ASSEMBLY": false}, "sha256": "7c53465e9fc5856779fa807aa6e05569f83aa05d325d158be9934d1df1e348a9"}
+EXIT=0

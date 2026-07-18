@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 from time import perf_counter
 from types import SimpleNamespace
 
@@ -6,6 +7,10 @@ import pytest
 
 import services.retriever as retriever_module
 from models.schemas import RetrievalTier, SourceChunk
+from services.retriever.librarian_planner import (
+    apply_librarian_execution_plan,
+    build_query_plan_v1,
+)
 from services.retriever.query_plan import (
     build_query_plan_v2,
     query_plan_execution_lanes,
@@ -122,15 +127,44 @@ def test_final_context_budget_expands_for_multiple_answer_obligations():
 
 
 @pytest.mark.asyncio
-async def test_planned_hybrid_batches_embeddings_and_reranks_once(monkeypatch):
+@pytest.mark.parametrize("librarian_enabled", [False, True])
+async def test_planned_hybrid_batches_embeddings_and_reranks_once(
+    monkeypatch,
+    librarian_enabled,
+):
     orchestrator = retriever_module.RetrieverOrchestrator()
     plan = build_query_plan_v2(
         "Compare Purple Ocean strategy with sticky messaging.",
         corpus_ids=["c1", "c2"],
     )
+    librarian_plan = (
+        build_query_plan_v1(
+            plan.original_query,
+            corpus_id="c1,c2",
+            corpus_doc_version="sha256:" + hashlib.sha256(b"l4-state").hexdigest(),
+            shortlist=(),
+        )
+        if librarian_enabled
+        else None
+    )
+    execution_plan, _policy = (
+        apply_librarian_execution_plan(plan, librarian_plan)
+        if librarian_plan is not None
+        else (plan, None)
+    )
+    librarian_core_queries = {
+        lane.query
+        for lane in query_plan_execution_lanes(execution_plan)
+        if lane.role == "core"
+    }
+    if librarian_enabled:
+        assert len(librarian_core_queries) >= 2
     embedded: list[list[str]] = []
     reranks: list[tuple[str, int]] = []
     sequence = 0
+    active_core_queries: dict[str, int] = {}
+    cross_subquery_overlap = False
+    cross_subquery_barrier = asyncio.Event()
 
     async def fake_filter(corpus_ids):
         return corpus_ids, []
@@ -146,10 +180,32 @@ async def test_planned_hybrid_batches_embeddings_and_reranks_once(monkeypatch):
         return [[float(index)] for index, _ in enumerate(texts)]
 
     async def fake_search(*args, **kwargs):
-        nonlocal sequence
-        sequence += 1
-        corpus_id = "c2" if sequence % 2 == 0 else "c1"
-        return [_chunk(f"chunk-{sequence}", corpus_id)]
+        nonlocal cross_subquery_overlap, sequence
+        query_text = str(
+            kwargs.get("query_text")
+            or (args[0] if args and isinstance(args[0], str) else "")
+        )
+        is_librarian_core = librarian_enabled and query_text in librarian_core_queries
+        if is_librarian_core:
+            active_core_queries[query_text] = active_core_queries.get(query_text, 0) + 1
+            if len(active_core_queries) >= 2:
+                cross_subquery_overlap = True
+                cross_subquery_barrier.set()
+        try:
+            if is_librarian_core:
+                await asyncio.wait_for(cross_subquery_barrier.wait(), timeout=0.25)
+            else:
+                await asyncio.sleep(0.001)
+            sequence += 1
+            corpus_id = "c2" if sequence % 2 == 0 else "c1"
+            return [_chunk(f"chunk-{sequence}", corpus_id)]
+        finally:
+            if is_librarian_core:
+                remaining = active_core_queries[query_text] - 1
+                if remaining:
+                    active_core_queries[query_text] = remaining
+                else:
+                    del active_core_queries[query_text]
 
     async def identity(chunks, corpus_ids):
         return chunks
@@ -191,14 +247,17 @@ async def test_planned_hybrid_batches_embeddings_and_reranks_once(monkeypatch):
         rerank_enabled=True,
         rerank_top_n=32,
         final_top_k=6,
+        librarian_plan=librarian_plan,
     )
 
     assert len(embedded) == 1
     assert embedded[0] == [
-        *[lane.dense_text for lane in query_plan_execution_lanes(plan)],
-        *[lane.dense_text for lane in query_plan_vocabulary_lanes(plan)],
+        *[lane.dense_text for lane in query_plan_execution_lanes(execution_plan)],
+        *[lane.dense_text for lane in query_plan_vocabulary_lanes(execution_plan)],
     ]
     assert len(reranks) == 1
+    if librarian_enabled:
+        assert cross_subquery_overlap is True
     assert reranks[0][0] == plan.original_query
     assert 1 <= reranks[0][1] <= 64
     assert result.diagnostics["query_plan_version"] == "query_plan.v2"
@@ -218,6 +277,23 @@ async def test_planned_hybrid_batches_embeddings_and_reranks_once(monkeypatch):
         "lexical",
     }
     assert result.diagnostics["cache"]["key_version"] == "retrieval_v2"
+    librarian_execution = result.diagnostics["librarian_execution"]
+    assert librarian_execution["active"] is librarian_enabled
+    if librarian_enabled:
+        execution = librarian_execution["execution"]
+        assert execution["v1_subquery_embed_batches"] == 1
+        assert execution["v1_subquery_embed_scope"] == (
+            "initial_query_plan_execution_lanes"
+        )
+        assert execution["candidate_generation_parallel"] is True
+        assert execution["logical_rerank_batches"] == 1
+        cap_diagnostics = execution["rerank_caps"]
+        assert cap_diagnostics["active"] is True
+        assert cap_diagnostics["effective_sum"] <= (
+            cap_diagnostics["global_rerank_cap"]
+        )
+        assert reranks[0][1] <= cap_diagnostics["effective_sum"]
+        assert reranks[0][1] == cap_diagnostics["output_candidates"]
     assert result.effective_tier == RetrievalTier.qdrant_mongo
 
 

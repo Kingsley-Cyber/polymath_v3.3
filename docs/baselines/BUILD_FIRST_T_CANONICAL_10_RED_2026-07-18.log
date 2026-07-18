@@ -1,0 +1,61 @@
+/usr/local/lib/python3.11/site-packages/pydantic/_internal/_fields.py:149: UserWarning: Field "model_used" has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+/usr/local/lib/python3.11/site-packages/pydantic/_internal/_fields.py:149: UserWarning: Field "model_config_conversation" has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+/usr/local/lib/python3.11/site-packages/pydantic/_internal/_fields.py:149: UserWarning: Field "model_id" has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+/usr/local/lib/python3.11/site-packages/pydantic/_internal/_fields.py:149: UserWarning: Field "model_name" has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+/usr/local/lib/python3.11/site-packages/pydantic/_internal/_fields.py:149: UserWarning: Field "model_names" has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+/usr/local/lib/python3.11/site-packages/pydantic/_internal/_fields.py:149: UserWarning: Field "model_revision" has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+/usr/local/lib/python3.11/site-packages/pydantic/_internal/_fields.py:149: UserWarning: Field "model_batch_size" has conflict with protected namespace "model_".
+
+You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+  warnings.warn(
+T_CANONICAL_START {"concurrency": 3, "cost_envelope_usd": 0.511578, "queries": 10, "temperature": 0.0}
+T_SYNTHESIS_START 1/10 direct_rule_of_six
+T_SYNTHESIS_START 2/10 direct_laban_machine
+T_SYNTHESIS_START 3/10 direct_edit_grammar
+T_SYNTHESIS_START 4/10 direct_elemental_novel
+T_SYNTHESIS_DONE {"doc_hit": true, "minimum_distinct": true, "ordinal": 1, "pool_anchor": true, "query_id": "direct_rule_of_six", "selected_anchor": true, "state": "answered", "technical_ok": true}
+T_SYNTHESIS_START 5/10 lay_manga_attention
+T_SYNTHESIS_DONE {"doc_hit": true, "minimum_distinct": true, "ordinal": 3, "pool_anchor": false, "query_id": "direct_edit_grammar", "selected_anchor": false, "state": "answered", "technical_ok": true}
+T_SYNTHESIS_START 6/10 relationship_movement_machine_figure
+T_SYNTHESIS_DONE {"doc_hit": true, "minimum_distinct": true, "ordinal": 2, "pool_anchor": true, "query_id": "direct_laban_machine", "selected_anchor": false, "state": "answered", "technical_ok": true}
+T_SYNTHESIS_START 7/10 relationship_shoot_edit_emotion
+T_SYNTHESIS_DONE {"doc_hit": true, "minimum_distinct": true, "ordinal": 4, "pool_anchor": true, "query_id": "direct_elemental_novel", "selected_anchor": false, "state": "answered", "technical_ok": true}
+T_SYNTHESIS_START 8/10 relationship_fight_camera_direction
+T_SYNTHESIS_DONE {"doc_hit": true, "minimum_distinct": true, "ordinal": 5, "pool_anchor": true, "query_id": "lay_manga_attention", "selected_anchor": true, "state": "answered", "technical_ok": true}
+T_SYNTHESIS_START 9/10 direct_facs
+T_SYNTHESIS_DONE {"doc_hit": true, "minimum_distinct": true, "ordinal": 7, "pool_anchor": true, "query_id": "relationship_shoot_edit_emotion", "selected_anchor": false, "state": "answered", "technical_ok": true}
+T_SYNTHESIS_START 10/10 direct_anatomy_masses
+T_SYNTHESIS_DONE {"doc_hit": true, "minimum_distinct": false, "ordinal": 6, "pool_anchor": false, "query_id": "relationship_movement_machine_figure", "selected_anchor": false, "state": "answered", "technical_ok": true}
+T_SYNTHESIS_DONE {"doc_hit": true, "minimum_distinct": true, "ordinal": 9, "pool_anchor": false, "query_id": "direct_facs", "selected_anchor": false, "state": "answered", "technical_ok": true}
+T_SYNTHESIS_DONE {"doc_hit": true, "minimum_distinct": true, "ordinal": 8, "pool_anchor": false, "query_id": "relationship_fight_camera_direction", "selected_anchor": false, "state": "answered", "technical_ok": true}
+T_SYNTHESIS_DONE {"doc_hit": true, "minimum_distinct": true, "ordinal": 10, "pool_anchor": true, "query_id": "direct_anatomy_masses", "selected_anchor": true, "state": "answered", "technical_ok": true}
+T_RETRIEVAL_REPEAT_DONE {"fingerprint_identical": false, "query_id": "direct_rule_of_six", "selected_identity_identical": false, "technical_ok": true}
+T_RETRIEVAL_REPEAT_DONE {"fingerprint_identical": false, "query_id": "direct_laban_machine", "selected_identity_identical": false, "technical_ok": true}
+T_RETRIEVAL_REPEAT_DONE {"fingerprint_identical": false, "query_id": "direct_edit_grammar", "selected_identity_identical": false, "technical_ok": true}
+T_RETRIEVAL_REPEAT_DONE {"fingerprint_identical": true, "query_id": "direct_elemental_novel", "selected_identity_identical": true, "technical_ok": true}
+T_RETRIEVAL_REPEAT_DONE {"fingerprint_identical": false, "query_id": "lay_manga_attention", "selected_identity_identical": false, "technical_ok": true}
+T_RETRIEVAL_REPEAT_DONE {"fingerprint_identical": false, "query_id": "relationship_movement_machine_figure", "selected_identity_identical": false, "technical_ok": true}
+T_RETRIEVAL_REPEAT_DONE {"fingerprint_identical": true, "query_id": "relationship_shoot_edit_emotion", "selected_identity_identical": true, "technical_ok": true}
+T_RETRIEVAL_REPEAT_DONE {"fingerprint_identical": true, "query_id": "relationship_fight_camera_direction", "selected_identity_identical": true, "technical_ok": true}
+T_RETRIEVAL_REPEAT_DONE {"fingerprint_identical": false, "query_id": "direct_facs", "selected_identity_identical": false, "technical_ok": true}
+T_RETRIEVAL_REPEAT_DONE {"fingerprint_identical": false, "query_id": "direct_anatomy_masses", "selected_identity_identical": false, "technical_ok": true}
+T_CANONICAL_SUMMARY {"all_green": false, "anchor_coverage_rate": 0.5, "anchor_eligible_count": 6, "classification_counts": {"answered": 10}, "direct_count": 6, "direct_doc_hit_rate": 1.0, "execution_count": 10, "fingerprint_determinism_rate": 0.3, "gates": {"anchor_coverage": false, "anchor_surface_eligible": false, "corpus_citation_membership": true, "direct_floor": true, "fingerprint_determinism": false, "journal_complete": true, "lay_floor": true, "positive_answerability": true, "relationship_cited_side": false, "relationship_floor": false, "selected_identity_determinism": false, "technical": true}, "lay_count": 1, "lay_doc_hit_rate": 1.0, "relationship_count": 3, "relationship_minimum_distinct_rate": 0.666667, "retrieval_only_repeat_count": 10, "selected_identity_determinism_rate": 0.3}
+EXIT=1

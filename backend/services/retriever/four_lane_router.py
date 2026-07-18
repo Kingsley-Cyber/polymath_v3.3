@@ -151,6 +151,8 @@ def add_bridge_subquery_lane(lanes: Iterable[Any]) -> list[Any]:
 def bm25_document_scores(
     query: str,
     profiles: Iterable[DocumentProfile],
+    *,
+    include_headings: bool = True,
 ) -> dict[tuple[str, str], float]:
     """Small-corpus BM25 used only at the document routing tier."""
 
@@ -158,7 +160,14 @@ def bm25_document_scores(
     query_terms = _tokens(query)
     if not rows or not query_terms:
         return {}
-    documents = [_tokens(profile.lexical_text) for profile in rows]
+    documents = [
+        _tokens(
+            profile.lexical_text
+            if include_headings
+            else " ".join((profile.title, profile.summary))
+        )
+        for profile in rows
+    ]
     avg_len = sum(len(tokens) for tokens in documents) / max(1, len(documents))
     document_frequency = Counter(
         term for tokens in documents for term in set(tokens) if term in set(query_terms)
@@ -568,77 +577,101 @@ class FourLaneDocumentRouter:
         *,
         db: Any,
         corpus_ids: list[str],
+        summary_only: bool = False,
     ) -> dict[tuple[str, str], DocumentProfile]:
         if db is None or not corpus_ids:
             return {}
-        documents, parent_profiles, jobs, t91_profile_rows = await _gather(
-            db["documents"]
-            .find(
-                with_active_records({"corpus_id": {"$in": corpus_ids}}),
-                {"_id": 0},
-            )
-            .to_list(length=None),
-            db["parent_chunks"]
-            .aggregate(
-                [
-                    {"$match": with_active_records({"corpus_id": {"$in": corpus_ids}})},
-                    {
-                        "$project": {
-                            "_id": 0,
-                            "corpus_id": 1,
-                            "doc_id": 1,
-                            "heading_path": 1,
-                            "summary": 1,
-                        }
-                    },
-                    {
-                        "$unwind": {
-                            "path": "$heading_path",
-                            "preserveNullAndEmptyArrays": True,
-                        }
-                    },
-                    {
-                        "$group": {
-                            "_id": {
-                                "corpus_id": "$corpus_id",
-                                "doc_id": "$doc_id",
-                            },
-                            "headings": {"$addToSet": "$heading_path"},
-                            "summary": {"$first": "$summary"},
-                        }
-                    },
-                ],
-                allowDiskUse=True,
-            )
-            .to_list(length=None),
-            db["semantic_digest_jobs"]
-            .find(
-                {
-                    "corpus_id": {"$in": corpus_ids},
-                    "status": "succeeded",
-                },
-                {
-                    "_id": 0,
-                    "corpus_id": 1,
-                    "doc_id": 1,
-                    "parent_id": 1,
-                    "cache_key": 1,
-                    "job_id": 1,
-                },
-            )
-            .to_list(length=None),
-            db[PROFILE_COLLECTION]
-            .find(
-                {
-                    "schema_version": "t91_document_profile.v1",
-                    "corpus_id": {"$in": corpus_ids},
-                    "assignment_state": "candidate",
-                    "canonical_write": False,
-                },
-                {"_id": 0},
-            )
-            .to_list(length=None),
+        document_projection = (
+            {
+                "_id": 0,
+                "corpus_id": 1,
+                "doc_id": 1,
+                "original_filename": 1,
+                "filename": 1,
+                "title": 1,
+                "doc_profile.title": 1,
+                "doc_profile.summary": 1,
+            }
+            if summary_only
+            else {"_id": 0}
         )
+        document_cursor = db["documents"].find(
+            with_active_records({"corpus_id": {"$in": corpus_ids}}),
+            document_projection,
+        )
+        if summary_only:
+            documents = await document_cursor.to_list(length=None)
+            parent_profiles: list[dict[str, Any]] = []
+            jobs: list[dict[str, Any]] = []
+            t91_profile_rows: list[dict[str, Any]] = []
+        else:
+            documents, parent_profiles, jobs, t91_profile_rows = await _gather(
+                document_cursor.to_list(length=None),
+                db["parent_chunks"]
+                .aggregate(
+                    [
+                        {
+                            "$match": with_active_records(
+                                {"corpus_id": {"$in": corpus_ids}}
+                            )
+                        },
+                        {
+                            "$project": {
+                                "_id": 0,
+                                "corpus_id": 1,
+                                "doc_id": 1,
+                                "heading_path": 1,
+                                "summary": 1,
+                            }
+                        },
+                        {
+                            "$unwind": {
+                                "path": "$heading_path",
+                                "preserveNullAndEmptyArrays": True,
+                            }
+                        },
+                        {
+                            "$group": {
+                                "_id": {
+                                    "corpus_id": "$corpus_id",
+                                    "doc_id": "$doc_id",
+                                },
+                                "headings": {"$addToSet": "$heading_path"},
+                                "summary": {"$first": "$summary"},
+                            }
+                        },
+                    ],
+                    allowDiskUse=True,
+                )
+                .to_list(length=None),
+                db["semantic_digest_jobs"]
+                .find(
+                    {
+                        "corpus_id": {"$in": corpus_ids},
+                        "status": "succeeded",
+                    },
+                    {
+                        "_id": 0,
+                        "corpus_id": 1,
+                        "doc_id": 1,
+                        "parent_id": 1,
+                        "cache_key": 1,
+                        "job_id": 1,
+                    },
+                )
+                .to_list(length=None),
+                db[PROFILE_COLLECTION]
+                .find(
+                    {
+                        "schema_version": "t91_document_profile.v1",
+                        "corpus_id": {"$in": corpus_ids},
+                        "assignment_state": "candidate",
+                        "canonical_write": False,
+                    },
+                    {"_id": 0},
+                )
+                .to_list(length=None),
+            )
         profiles: dict[tuple[str, str], DocumentProfile] = {}
         for row in documents:
             corpus_id = str(row.get("corpus_id") or "")
@@ -682,9 +715,12 @@ class FourLaneDocumentRouter:
             if row.get("summary"):
                 summaries[key].append(str(row["summary"]))
         for key, profile in profiles.items():
-            profile.headings = tuple(sorted(headings.get(key, set())))
-            if not profile.summary and summaries.get(key):
-                profile.summary = " ".join(summaries[key][:8])
+            if not summary_only:
+                profile.headings = tuple(sorted(headings.get(key, set())))
+                if not profile.summary and summaries.get(key):
+                    profile.summary = " ".join(summaries[key][:8])
+        if summary_only:
+            return profiles
 
         current_source_versions = _source_versions_by_document(documents)
         apply_t91_document_profiles(
@@ -915,6 +951,74 @@ class FourLaneDocumentRouter:
             key = (str(payload["corpus_id"]), str(payload["doc_id"]))
             scores[key] = max(scores.get(key, 0.0), float(hit.score or 0.0))
         return scores, diagnostics
+
+    async def route_summary_shortlist(
+        self,
+        *,
+        query: str,
+        vector: list[float] | None,
+        corpus_ids: list[str],
+        db: Any,
+        semantic_router: Any,
+        max_documents: int = 8,
+    ) -> tuple[list[DocumentRoute], dict[str, Any]]:
+        """Reuse four-lane lanes 1+2 for plan-time document grounding.
+
+        Only document title/summary text and existing ``polymath_doc_summaries``
+        vectors participate. Parent summaries are neither loaded nor embedded.
+        """
+
+        lane_id = "librarian_shortlist"
+        profiles, semantic_result = await _gather(
+            self._load_profiles(
+                db=db,
+                corpus_ids=corpus_ids,
+                summary_only=True,
+            ),
+            semantic_router.route_lanes(
+                {lane_id: vector},
+                corpus_ids,
+                per_lane_per_corpus=max(16, max_documents * 2),
+                min_score=0.0,
+                relative_margin=1.0,
+                max_per_lane=max_documents,
+                cliff_min_gap=1.0,
+            ),
+        )
+        semantic_routes, semantic_diagnostics = semantic_result
+        semantic_scores = {
+            (route.corpus_id, route.doc_id): float(route.score)
+            for route in semantic_routes.get(lane_id, [])
+        }
+        lane_scores = {
+            "lexical": bm25_document_scores(
+                query,
+                profiles.values(),
+                include_headings=False,
+            ),
+            "semantic": semantic_scores,
+            "child_rollup": {},
+            "associative": {},
+        }
+        routes, diagnostics = fuse_document_lanes(
+            profiles=profiles,
+            lane_scores=lane_scores,
+            associative_traces={},
+            query_ontology_active=False,
+            max_documents=max(1, min(8, int(max_documents))),
+        )
+        return routes, {
+            **diagnostics,
+            "version": ROUTER_VERSION,
+            "mode": "librarian_plan_grounding_lanes_1_2",
+            "lanes": ["lexical", "semantic"],
+            "parent_summary_vectors": 0,
+            "profile_count": len(profiles),
+            "candidate_counts": {
+                lane: len(scores) for lane, scores in lane_scores.items()
+            },
+            "semantic_router": semantic_diagnostics,
+        }
 
     async def route_lanes(
         self,

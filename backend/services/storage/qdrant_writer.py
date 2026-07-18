@@ -1194,13 +1194,9 @@ async def delete_summary_points_by_doc(
                 continue
             selector = Filter(
                 must=[
-                    FieldCondition(
-                        key="corpus_id", match=MatchValue(value=corpus_id)
-                    ),
+                    FieldCondition(key="corpus_id", match=MatchValue(value=corpus_id)),
                     FieldCondition(key="doc_id", match=MatchValue(value=doc_id)),
-                    FieldCondition(
-                        key="chunk_type", match=MatchValue(value="summary")
-                    ),
+                    FieldCondition(key="chunk_type", match=MatchValue(value="summary")),
                 ]
             )
             op = await client.delete(
@@ -1332,6 +1328,16 @@ def _summary_tree_payload(entry: dict) -> dict:
     """Bounded payload for a pre-embedded RAPTOR section or rollup node."""
 
     summary = str(entry.get("summary") or "").strip()
+    retrieval_text = str(entry.get("retrieval_text") or "").strip()
+    if not retrieval_text:
+        retrieval_text = " ".join(
+            part
+            for part in (
+                str(entry.get("section_range") or "").strip(),
+                summary,
+            )
+            if part
+        )[:3000]
     return {
         "corpus_id": str(entry.get("corpus_id") or ""),
         "kind": SUMMARY_TREE_SCHEMA_KIND,
@@ -1341,21 +1347,32 @@ def _summary_tree_payload(entry: dict) -> dict:
         "doc_id": str(entry.get("doc_id") or ""),
         "section_range": str(entry.get("section_range") or "")[:500],
         "summary": summary[:2400],
+        "retrieval_text": retrieval_text[:3000],
+        "heading_path": [
+            str(value)[:300] for value in (entry.get("heading_path") or [])[:16]
+        ],
+        "temporal_class": str(entry.get("temporal_class") or "unknown"),
+        "time_expressions": [
+            {
+                "text": str(value.get("text") or "")[:60],
+                "role": str(value.get("role") or "unknown"),
+            }
+            for value in (entry.get("time_expressions") or [])[:12]
+            if isinstance(value, dict) and str(value.get("text") or "").strip()
+        ],
         "parent_ids": [str(value) for value in (entry.get("parent_ids") or [])[:64]],
         "child_node_ids": [
             str(value) for value in (entry.get("child_node_ids") or [])[:64]
         ],
         "passthrough_rollup_id": str(entry.get("passthrough_rollup_id") or ""),
         "passthrough_parent_ids": [
-            str(value)
-            for value in (entry.get("passthrough_parent_ids") or [])[:64]
+            str(value) for value in (entry.get("passthrough_parent_ids") or [])[:64]
         ],
         "passthrough_lexicon_ids": [
-            str(value)
-            for value in (entry.get("passthrough_lexicon_ids") or [])[:96]
+            str(value) for value in (entry.get("passthrough_lexicon_ids") or [])[:96]
         ],
         "lexicon_ids": [str(value) for value in (entry.get("lexicon_ids") or [])[:96]],
-        "token_estimate": max(1, len(summary.split())),
+        "token_estimate": max(1, len(retrieval_text.split())),
         "schema_version": str(entry.get("schema_version") or ""),
     }
 

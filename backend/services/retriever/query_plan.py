@@ -267,6 +267,9 @@ class QueryLane:
     depends_on: tuple[str, ...] = ()
     phrase: str | None = None
     support_phrases: tuple[str, ...] = ()
+    target_doc_refs: tuple[tuple[str, str], ...] = ()
+    seat_quota: int = 1
+    rerank_cap: int | None = None
 
 
 @dataclass(frozen=True)
@@ -313,6 +316,7 @@ class QueryPlanV2:
     answer_shape: AnswerShape = "single_fact"
     corpus_ids: tuple[str, ...] = ()
     max_repair_rounds: int = 1
+    budget_obligation_count: int | None = None
 
 
 def _normalize_phrase(value: str) -> str:
@@ -1037,10 +1041,9 @@ def _build_retrieval_probes(
 
     if not probes:
         primary_question = _normalize_phrase(query)
-        if (
-            len(re.findall(r"[A-Za-z0-9]+", primary_question)) < 4
-            or not _QUESTION_OBLIGATION_START_RE.match(primary_question)
-        ):
+        if len(
+            re.findall(r"[A-Za-z0-9]+", primary_question)
+        ) < 4 or not _QUESTION_OBLIGATION_START_RE.match(primary_question):
             primary_question = (
                 f"What does the corpus establish about {primary_question}"
             )
@@ -1303,9 +1306,7 @@ def build_query_plan_v2(
     ):
         target_key = clean_text(_strip_phrase_leaders(target_match.group(1))).strip()
         without_target = [
-            concept
-            for concept in concepts
-            if clean_text(concept).strip() != target_key
+            concept for concept in concepts if clean_text(concept).strip() != target_key
         ]
         if target_key and len(without_target) >= 2:
             concepts = without_target
@@ -1460,6 +1461,7 @@ def query_plan_to_dict(plan: QueryPlanV2) -> dict[str, object]:
         ],
         "corpus_ids": list(plan.corpus_ids),
         "max_repair_rounds": plan.max_repair_rounds,
+        "budget_obligation_count": plan.budget_obligation_count,
         "execution_batches": [
             list(batch) for batch in query_plan_execution_batches(plan)
         ],
@@ -1487,6 +1489,9 @@ def query_plan_to_dict(plan: QueryPlanV2) -> dict[str, object]:
                 "depends_on": list(lane.depends_on),
                 "phrase": lane.phrase,
                 "support_phrases": list(lane.support_phrases),
+                "target_doc_refs": [list(value) for value in lane.target_doc_refs],
+                "seat_quota": lane.seat_quota,
+                "rerank_cap": lane.rerank_cap,
             }
             for lane in plan.lanes
         ],

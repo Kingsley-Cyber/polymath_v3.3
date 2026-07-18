@@ -39,6 +39,15 @@ from pathlib import Path
 from urllib.parse import quote_plus
 
 REPO = Path(__file__).resolve().parents[2]
+BACKEND = REPO / "backend"
+if str(BACKEND) not in sys.path:
+    sys.path.insert(0, str(BACKEND))
+
+from services.chat_cost_meter import (  # noqa: E402
+    CHAT_COST_TRACE_TITLE,
+    aggregate_chat_cost_ledgers,
+)
+
 API = os.environ.get("POLYMATH_API", "http://127.0.0.1:8000")
 QUESTIONS = REPO / "backend" / "evals" / "heldout_questions.jsonl"
 REFUSAL_RE = re.compile(
@@ -104,6 +113,7 @@ def _chat(token: str, message: str, corpus_ids: list[str], tier: str,
         "total_s": None,
         "retrieval_metadata": None,
         "answerability": None,
+        "chat_cost_ledger": None,
         "error": None,
     }
     parts: list[str] = []
@@ -148,6 +158,10 @@ def _chat(token: str, message: str, corpus_ids: list[str], tier: str,
                             )
                     trace = event.get("trace_event") or {}
                     metadata = trace.get("metadata") or {}
+                    if trace.get("title") == CHAT_COST_TRACE_TITLE:
+                        ledger = metadata.get("chat_cost_ledger")
+                        if isinstance(ledger, dict):
+                            result["chat_cost_ledger"] = ledger
                     if (
                         trace.get("title") == "Local RAG retrieval"
                         and trace.get("status") == "done"
@@ -237,13 +251,20 @@ def main() -> int:
     if args.limit:
         rows = rows[: args.limit]
     results = []
+    request_cost_ledgers: list[dict] = []
     for row in rows:
         cids = [by_name[name] for name in row["corpora"] if name in by_name]
         conversation_id = None
+        question_cost_ledgers: list[dict] = []
         for turn in row.get("history") or []:
             prior = _chat(token, turn, cids, args.tier)
             conversation_id = prior.get("conversation_id") or conversation_id
+            if isinstance(prior.get("chat_cost_ledger"), dict):
+                question_cost_ledgers.append(prior["chat_cost_ledger"])
         run = _chat(token, row["question"], cids, args.tier, conversation_id)
+        if isinstance(run.get("chat_cost_ledger"), dict):
+            question_cost_ledgers.append(run["chat_cost_ledger"])
+        request_cost_ledgers.extend(question_cost_ledgers)
         scored = score(row, run)
         results.append(
             {
@@ -256,6 +277,7 @@ def main() -> int:
                 "first_token_s": run["first_token_s"],
                 "answerability": run["answerability"],
                 "retrieval_metadata": run["retrieval_metadata"],
+                "chat_cost_ledgers": question_cost_ledgers,
                 "error": run["error"],
                 "answer_head": (run["answer"] or "")[:220],
             }
@@ -291,6 +313,7 @@ def main() -> int:
         "api": API,
         "run": {"out_suffix": args.out_suffix or None},
         "summary": summary,
+        "cost_ledger": aggregate_chat_cost_ledgers(request_cost_ledgers),
         "results": results,
     }
     out_dir = REPO / "docs" / "baselines"

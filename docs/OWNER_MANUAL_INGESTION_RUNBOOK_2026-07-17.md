@@ -1,8 +1,8 @@
 # Owner Manual Ingestion Runbook — 2026-07-17
 
-Status: SENIOR DRAFT — section 3's exact command is EXECUTOR-FILL; Codex
-completes and live-verifies it in the READY receipt before first owner use.
-Everything else below is receipted fact from the certified E2E program.
+Status: READY-CERTIFIED — the exact command completed its no-write production
+discovery and schema-validation proof on 2026-07-18. Everything below is
+receipted fact from the certified E2E program.
 
 ## 1. What this pathway is
 
@@ -293,5 +293,5 @@ AGAIN. It resumes exactly where it left off.
 ## 8. Current retrieval flag state you're ingesting into
 
 relationship allocation ON (verified) · corpus_scope.v2 refusal ON
-(verified) · temporal OFF (exonerated; flips on owner word) · claims OFF
-(proven; flips on owner word) · router/waterfall/two-lane dark.
+(verified) · temporal ON (verified) · claims ON (verified) ·
+router/waterfall/two-lane dark.

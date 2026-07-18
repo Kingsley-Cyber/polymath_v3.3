@@ -5,7 +5,8 @@
 //   2. HyDE              — enable toggle + pool-entry dropdown
 //   3. Agentic           — tool-capable fallback dropdown
 //   4. Graph Query       — graph synthesis + question-builder dropdown
-//   5. API Keys (Shared) — collapsible, mounts existing ApiKeysTab as-is
+//   5. Synthesis         — optional low-latency final-answer route
+//   6. API Keys (Shared) — collapsible, mounts existing ApiKeysTab as-is
 //
 // "Save Models Settings" POSTs pool + model-role settings to
 // /api/settings/models. API Keys has its OWN save flow inside ApiKeysTab —
@@ -608,6 +609,33 @@ function GraphQuerySection() {
   );
 }
 
+function SynthesisSection() {
+  const { config, patchSynthesis } = useQueryModelPoolStore();
+  const synthesis = config.synthesis || { pool_entry_id: null };
+  return (
+    <div className="bg-[#2a2a2a] border border-white/5 rounded-lg p-5 space-y-3">
+      <h3 className="text-[15px] font-semibold text-white flex items-center gap-2">
+        <Wand2 size={16} className="text-cyan-300" />
+        Final Answer Synthesis Route
+      </h3>
+      <p className="text-[12px] text-gray-500 leading-relaxed">
+        Optional low-latency model for the final answer call. The server-wide
+        synthesis-route flag controls activation; disabling it immediately
+        restores the normal chat model. Tool-enabled turns are never swapped.
+      </p>
+      <div className="flex items-center gap-3">
+        <div className="text-[11px] uppercase tracking-widest text-gray-500 w-24">
+          Model
+        </div>
+        <PoolDropdown
+          value={synthesis.pool_entry_id}
+          onChange={(v) => patchSynthesis({ pool_entry_id: v })}
+        />
+      </div>
+    </div>
+  );
+}
+
 // Phase 24 — Reasoning Cascade analyst model.
 // Used by the Reason toggle in the chat header. Digests retrieved chunks
 // before the chat model writes the user-facing answer.
@@ -718,9 +746,9 @@ export function ModelsTab() {
         <h2 className="text-xl font-semibold text-white mb-2">Models</h2>
         <p className="text-[13px] text-gray-500">
           Every chat model lives here. The chat dropdown, HyDE, Agentic,
-          Graph Query, and Reasoning roles all read from the pool. One save
-          covers the pool and model roles — API Keys has its own save inside
-          its collapsible section.
+          Graph Query, Synthesis, and Reasoning roles all read from the pool.
+          One save covers the pool and model roles — API Keys has its own save
+          inside its collapsible section.
         </p>
       </div>
 
@@ -742,6 +770,7 @@ export function ModelsTab() {
       <HydeSection />
       <AgenticSection />
       <GraphQuerySection />
+      <SynthesisSection />
       <ReasoningSection />
       <SharedApiKeysSection />
 

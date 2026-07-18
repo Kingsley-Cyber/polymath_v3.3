@@ -74,6 +74,7 @@ from services.answerability_tuning import (
     answerability_policy_version as _answerability_policy_version,
     corpus_scope_v2_enabled as _answerability_corpus_scope_v2_enabled,
     corpus_scope_v2_support as _answerability_corpus_scope_v2_support,
+    corpus_scope_v3_enabled as _answerability_corpus_scope_v3_enabled,
     coverage_threshold as _answerability_coverage_threshold,
     cross_doc_atom_is_critical as _cross_doc_atom_is_critical,
     inject_cross_doc_atom as _inject_cross_doc_atom,
@@ -85,7 +86,9 @@ from services.answerability_tuning import (
     relationship_min_distinct_docs as _relationship_min_distinct_docs,
     rerank_evidence_support as _rerank_evidence_support,
     text_help_threshold as _answerability_text_help_threshold,
+    evaluate_corpus_scope_v3 as _evaluate_answerability_corpus_scope_v3,
 )
+from services.corpus_scope_context import build_corpus_scope_v3_context
 from services.retriever.excerpt import query_guided_excerpt as _query_guided_excerpt
 from services.retriever.query_semantics import (
     GENERIC_CONCEPT_TOKENS,
@@ -101,6 +104,10 @@ from services.retriever.query_plan import (
     contextualize_followup_query,
     query_plan_evidence_sides,
     query_plan_to_dict,
+)
+from services.retriever.librarian_planner import (
+    librarian_planner,
+    planning_requires_shortlist,
 )
 from services.retriever.planned_fusion import reserved_required_lane_ids
 from services.retriever.search_mode import resolve_search_mode
@@ -768,6 +775,7 @@ def _build_chat_query_plan(
     profile_cfg: dict[str, Any],
     search_mode: str,
     hyde_applied: bool,
+    librarian_plan: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Deterministic query plan used for trace and downstream guardrails."""
 
@@ -839,7 +847,74 @@ def _build_chat_query_plan(
             else "general_chat_no_corpus_gate"
         ),
     }
+    if librarian_plan is not None:
+        plan["librarian_query_plan"] = librarian_plan
     return plan
+
+
+async def _build_librarian_plan_trace(
+    *,
+    query: str,
+    corpus_ids: list[str] | None,
+    requested_tier: Any,
+    enabled: bool,
+    shadow: bool,
+    planner_service: Any = None,
+    db: Any = None,
+    embedding_config_loader: Any = None,
+    user_id: str | None = None,
+    llm_decomposer_enabled: bool = False,
+) -> dict[str, Any] | None:
+    """Build a Librarian trace and apply it only when the master flag is on."""
+
+    if not enabled and not shadow:
+        return None
+    planner_service = planner_service or librarian_planner
+    db = conversation_service._db if db is None else db
+    embedding_config_loader = (
+        embedding_config_loader or retriever_orchestrator._embedding_config_for_query
+    )
+    try:
+        embedding_config = (
+            await embedding_config_loader(corpus_ids)
+            if planning_requires_shortlist(
+                query,
+                allow_llm_escalation=llm_decomposer_enabled,
+            )
+            else None
+        )
+        result = await asyncio.wait_for(
+            planner_service.build(
+                query,
+                corpus_ids=corpus_ids,
+                requested_tier=requested_tier,
+                db=db,
+                embedding_config=embedding_config,
+                user_id=user_id,
+                llm_decomposer_enabled=llm_decomposer_enabled,
+            ),
+            timeout=4.0 if llm_decomposer_enabled else 2.0,
+        )
+        return {
+            "mode": "enabled" if enabled else "shadow",
+            "behavior_applied": bool(enabled and result.plan.shape != "simple"),
+            "plan": result.plan.model_dump(mode="json"),
+            "diagnostics": dict(result.diagnostics),
+        }
+    except Exception as exc:  # noqa: BLE001 - shadow failures are traced, not hidden
+        provider_attempts = int(getattr(exc, "provider_attempts", 0) or 0)
+        return {
+            "mode": "enabled_degraded" if enabled else "shadow",
+            "behavior_applied": False,
+            "plan": None,
+            "diagnostics": {
+                "status": "degraded",
+                "reason": f"{type(exc).__name__}: {exc}"[:300],
+                "provider_calls": provider_attempts,
+                "provider_attempts": provider_attempts,
+                "silent_fallback_count": 1,
+            },
+        }
 
 
 def _format_chat_query_plan_trace(plan: dict[str, Any]) -> str:
@@ -890,9 +965,48 @@ def _format_chat_query_plan_trace(plan: dict[str, Any]) -> str:
         ),
         f"answerability: {plan.get('answerability_policy')}",
     ]
+    librarian = (
+        plan.get("librarian_query_plan")
+        if isinstance(plan.get("librarian_query_plan"), dict)
+        else None
+    )
+    if librarian is not None:
+        librarian_artifact = (
+            librarian.get("plan") if isinstance(librarian.get("plan"), dict) else {}
+        )
+        lines.append(
+            "librarian: "
+            f"mode={librarian.get('mode')} "
+            f"shape={librarian_artifact.get('shape') or 'unavailable'} "
+            f"hash={librarian_artifact.get('plan_hash') or 'unavailable'} "
+            "behavior="
+            + (
+                "applied"
+                if librarian.get("behavior_applied") is True
+                else ("shadow_only" if librarian.get("mode") == "shadow" else "bypass")
+            )
+        )
     if plan.get("query_rewritten"):
         lines.append("query_rewrite: retrieval query differs from user query")
     return "\n".join(lines)
+
+
+def _librarian_refusal_signals_for_answerability(
+    trace: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Expose enabled plan signals without letting shadow mode affect behavior."""
+
+    if not isinstance(trace, dict) or not str(trace.get("mode") or "").startswith(
+        "enabled"
+    ):
+        return {}
+    plan = trace.get("plan") if isinstance(trace.get("plan"), dict) else {}
+    signals = (
+        plan.get("refusal_signals")
+        if isinstance(plan.get("refusal_signals"), dict)
+        else {}
+    )
+    return dict(signals)
 
 
 def _as_answerability_float(value: Any, default: float = 0.0) -> float:
@@ -964,6 +1078,8 @@ def _build_retrieval_answerability_gate(
     corpus_ids: list[str] | None,
     web_search_enabled: bool,
     evidence_plan_meta: dict[str, Any] | None = None,
+    librarian_refusal_signals: dict[str, Any] | None = None,
+    corpus_scope_v3_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Convert retriever sufficiency diagnostics into a chat-time contract."""
 
@@ -1163,6 +1279,43 @@ def _build_retrieval_answerability_gate(
     if scope_guard_applied:
         status = "unanswerable"
 
+    v3_guard = dict(
+        _evaluate_answerability_corpus_scope_v3(
+            query,
+            [_answerability_chunk_text(source) for source in (sources or [])],
+            context=corpus_scope_v3_context,
+            librarian_refusal_signals=librarian_refusal_signals,
+        )
+    )
+    v3_guard["status_before_v3"] = status
+    v3_scope_support = dict(v3_guard.get("scope_support") or {})
+    v3_bait = dict(v3_guard.get("bait") or {})
+    bait_scope_guard_applied = bool(
+        _answerability_corpus_scope_v3_enabled()
+        and corpus_scoped
+        and evidence_count > 0
+        and not raw_answerable
+        and status in {"answerable", "partial"}
+        and v3_bait.get("stripped")
+        and v3_scope_support.get("eligible")
+        and not v3_scope_support.get("supported")
+    )
+    v3_bait["scope_undercoverage_applied"] = bait_scope_guard_applied
+    v3_guard["bait"] = v3_bait
+    if bait_scope_guard_applied:
+        blocking_reasons = list(v3_guard.get("blocking_reason_codes") or [])
+        if "bait_stripped" not in blocking_reasons:
+            blocking_reasons.append("bait_stripped")
+        v3_guard["blocking_reason_codes"] = blocking_reasons
+        v3_guard["applied"] = True
+        v3_guard["decision"] = "refuse"
+    if (
+        _answerability_corpus_scope_v3_enabled()
+        and corpus_scoped
+        and bool(v3_guard.get("applied"))
+    ):
+        status = "unanswerable"
+
     return {
         "status": status,
         "answerable": status == "answerable",
@@ -1187,6 +1340,10 @@ def _build_retrieval_answerability_gate(
                 else "not_applied"
             ),
         },
+        "corpus_scope_v3_guard": v3_guard,
+        # Additive plan-time signals. corpus_scope.v2 does not consume these;
+        # the versioned v3 policy owns any refusal behavior.
+        "librarian_refusal_signals": dict(librarian_refusal_signals or {}),
         # P0.4 — lane coverage is telemetry, answerability is the decision;
         # surface them separately so UI/MCP can render both without conflation.
         "lane_coverage": (
@@ -4627,9 +4784,9 @@ def _evidence_support_query_variants(
     ):
         combined = " ".join(str(original_preserving_variant or "").split())
         if combined:
-            first_two = [query for query in queries if query.lower() != combined.lower()][
-                :2
-            ]
+            first_two = [
+                query for query in queries if query.lower() != combined.lower()
+            ][:2]
             return [*first_two, combined]
     return queries[:3]
 
@@ -6695,6 +6852,87 @@ def _build_polymath_system_prompt(now: datetime | None = None) -> str:
     )
 
 
+async def _resolve_synthesis_route_override(
+    *,
+    enabled: bool,
+    user_id: str | None,
+    tool_route_active: bool,
+    model_used: str,
+    profile_creds: dict[str, Any],
+    primary_entry_id: str | None,
+) -> dict[str, Any]:
+    """Resolve an optional final-answer model without changing the prompt.
+
+    The already-resolved query route is the rollback authority. A disabled,
+    ineligible, missing, or broken synthesis route returns it unchanged; only
+    a valid configured pool entry may replace the model and credentials.
+    """
+
+    result: dict[str, Any] = {
+        "model": model_used,
+        "profile_creds": profile_creds,
+        "primary_entry_id": primary_entry_id,
+        "trace": {
+            "enabled": bool(enabled),
+            "eligible": False,
+            "applied": False,
+            "reason": "disabled",
+            "rollback_model": model_used,
+            "rollback_entry_id": primary_entry_id,
+            "candidate_model": None,
+            "candidate_entry_id": None,
+        },
+    }
+    trace = result["trace"]
+    if not enabled:
+        return result
+    if not user_id:
+        trace["reason"] = "user_unavailable"
+        return result
+    if tool_route_active:
+        trace["reason"] = "tool_route_active"
+        return result
+
+    trace["eligible"] = True
+    try:
+        resolved = await resolve_query_model_kind(user_id, "synthesis")
+    except Exception as exc:
+        logger.warning(
+            "Synthesis route resolution failed; preserving rollback route: %s",
+            type(exc).__name__,
+        )
+        trace["reason"] = "resolver_error"
+        trace["error_type"] = type(exc).__name__
+        return result
+
+    if not resolved or not resolved.get("model"):
+        trace["reason"] = "configured_route_unavailable"
+        return result
+
+    candidate_entry_id = str(resolved.get("entry_id") or "") or None
+    candidate_model = str(resolved["model"])
+    result.update(
+        {
+            "model": candidate_model,
+            "profile_creds": {
+                "api_base": resolved.get("api_base"),
+                "api_key": resolved.get("api_key"),
+                "extra_params": resolved.get("extra_params") or None,
+            },
+            "primary_entry_id": candidate_entry_id,
+        }
+    )
+    trace.update(
+        {
+            "applied": True,
+            "reason": "configured_route_applied",
+            "candidate_model": candidate_model,
+            "candidate_entry_id": candidate_entry_id,
+        }
+    )
+    return result
+
+
 class ChatOrchestrator:
     """Orchestrates the complete chat pipeline."""
 
@@ -6888,6 +7126,18 @@ class ChatOrchestrator:
                     model_used,
                 )
 
+        synthesis_route = await _resolve_synthesis_route_override(
+            enabled=settings.SYNTHESIS_ROUTE_OVERRIDE_ENABLED,
+            user_id=user_id,
+            tool_route_active=tool_route_active,
+            model_used=model_used,
+            profile_creds=profile_creds,
+            primary_entry_id=primary_entry_id,
+        )
+        model_used = synthesis_route["model"]
+        profile_creds = synthesis_route["profile_creds"]
+        primary_entry_id = synthesis_route["primary_entry_id"]
+
         if request.overrides is not None:
             request.overrides.model = model_used
 
@@ -6898,7 +7148,11 @@ class ChatOrchestrator:
             content=(
                 "Resolved the final chat model before retrieval and tool " "execution."
             ),
-            metadata={"model": model_used, "web_planner_split": web_only_tool_route},
+            metadata={
+                "model": model_used,
+                "web_planner_split": web_only_tool_route,
+                "synthesis_route": synthesis_route["trace"],
+            },
         )
 
         # Phase 29 — vision-capability pre-flight. If the user attached
@@ -7036,12 +7290,39 @@ class ChatOrchestrator:
             llm_decompose=bool(
                 settings.RELATIONSHIP_EVIDENCE_ALLOCATION_ENABLED
                 and profile_cfg.get("evidence_plan_llm_decompose")
+                and not getattr(settings, "LIBRARIAN_PLANNER_ENABLED", False)
             ),
             fallback_model=model_used,
             fallback_api_base=profile_creds.get("api_base"),
             fallback_api_key=profile_creds.get("api_key"),
             fallback_extra=profile_creds.get("extra_params"),
         )
+        librarian_plan_trace = await _build_librarian_plan_trace(
+            query=request.message,
+            corpus_ids=request.corpus_ids,
+            requested_tier=request.retrieval_tier,
+            enabled=bool(getattr(settings, "LIBRARIAN_PLANNER_ENABLED", False)),
+            shadow=bool(getattr(settings, "LIBRARIAN_PLANNER_SHADOW", False)),
+            user_id=user_id,
+            llm_decomposer_enabled=bool(
+                getattr(settings, "LIBRARIAN_LLM_DECOMPOSER_ENABLED", False)
+            ),
+        )
+        if (
+            resolved_mode == "global"
+            and isinstance(librarian_plan_trace, dict)
+            and librarian_plan_trace.get("behavior_applied") is True
+        ):
+            librarian_plan_trace = {
+                **librarian_plan_trace,
+                "mode": "enabled_global_fallback",
+                "behavior_applied": False,
+                "diagnostics": {
+                    **dict(librarian_plan_trace.get("diagnostics") or {}),
+                    "status": "global_search_unsupported",
+                    "silent_fallback_count": 1,
+                },
+            }
         query_plan = _build_chat_query_plan(
             query=request.message,
             retrieval_query=retrieval_query,
@@ -7051,6 +7332,7 @@ class ChatOrchestrator:
             profile_cfg=profile_cfg,
             search_mode=resolved_mode,
             hyde_applied=hyde_applied,
+            librarian_plan=librarian_plan_trace,
         )
         yield _record_trace_event(
             lane="planning",
@@ -7144,6 +7426,12 @@ class ChatOrchestrator:
                     else None
                 ),
                 grounded_planner_route=grounded_planner_route,
+                librarian_plan=(
+                    librarian_plan_trace.get("plan")
+                    if isinstance(librarian_plan_trace, dict)
+                    and librarian_plan_trace.get("behavior_applied") is True
+                    else None
+                ),
             )
         elif reasoning_mode == "atomic":
             from services.reasoning import atomic_retrieve
@@ -7201,6 +7489,9 @@ class ChatOrchestrator:
         _plan_diagnostics = getattr(retrieval, "diagnostics", {}) or {}
         _plan_selection = _plan_diagnostics.get("selection") or {}
         _plan_sufficiency = _plan_selection.get("sufficiency") or {}
+        _librarian_allocation_active = bool(
+            (_plan_diagnostics.get("librarian_execution") or {}).get("active")
+        )
         _query_plan_fast_path = bool(
             settings.QUERY_PLAN_V2
             and str(_plan_diagnostics.get("complexity") or "") == "simple"
@@ -7247,6 +7538,7 @@ class ChatOrchestrator:
             relationship_evidence_allocation = bool(
                 settings.RELATIONSHIP_EVIDENCE_ALLOCATION_ENABLED
                 and _relationship_allocation_eligible(evidence_plan)
+                and not _librarian_allocation_active
             )
             if relationship_evidence_allocation:
                 evidence_plan_start = perf_counter()
@@ -7294,6 +7586,9 @@ class ChatOrchestrator:
                     "added": 0,
                     "duration_s": 0.0,
                     "skipped": "relationship_evidence_allocation_disabled_or_ineligible",
+                    "librarian_generalized_allocation_active": (
+                        _librarian_allocation_active
+                    ),
                 }
         elif _retrieval_fast_path:
             if evidence_plan_llm_task is not None:
@@ -7512,6 +7807,7 @@ class ChatOrchestrator:
         relationship_evidence_allocation = bool(
             settings.RELATIONSHIP_EVIDENCE_ALLOCATION_ENABLED
             and _relationship_allocation_eligible(evidence_plan)
+            and not _librarian_allocation_active
         )
         _evidence_doc_cap = (
             _evidence_per_doc_cap_for_plan(evidence_plan, budget=len(sources))
@@ -7734,6 +8030,38 @@ class ChatOrchestrator:
         # the retrieval result. Never an LLM-authored value, so it cannot lie.
         facts_seeded = len(facts)
 
+        corpus_scope_v3_context: dict[str, Any] | None = None
+        if _answerability_corpus_scope_v3_enabled():
+            try:
+                corpus_scope_v3_context = await build_corpus_scope_v3_context(
+                    conversation_service._db,
+                    query=request.message,
+                    corpus_ids=request.corpus_ids,
+                )
+            except Exception as exc:  # fail open; the guard records incompleteness
+                logger.warning("corpus_scope.v3 context unavailable: %s", exc)
+                corpus_scope_v3_context = {
+                    "context_version": "corpus_scope_context.v1",
+                    "named_source": {
+                        "eligible": False,
+                        "complete": False,
+                        "missing": False,
+                    },
+                    "temporal": {
+                        "eligible": False,
+                        "complete": False,
+                        "out_of_range": False,
+                    },
+                    "artifact": {
+                        "eligible": False,
+                        "complete": False,
+                        "matched_count": 0,
+                    },
+                    "fail_open_reasons": [
+                        f"context_builder_unavailable:{type(exc).__name__}"
+                    ],
+                }
+
         answerability_gate = _build_retrieval_answerability_gate(
             query=request.message,
             diagnostics=retrieval_diagnostics,
@@ -7742,6 +8070,10 @@ class ChatOrchestrator:
             corpus_ids=request.corpus_ids,
             web_search_enabled=web_search_enabled,
             evidence_plan_meta=evidence_plan_meta,
+            librarian_refusal_signals=(
+                _librarian_refusal_signals_for_answerability(librarian_plan_trace)
+            ),
+            corpus_scope_v3_context=corpus_scope_v3_context,
         )
         yield _record_trace_event(
             lane="planning",
@@ -9433,7 +9765,10 @@ class ChatOrchestrator:
                 title="Assistant final answer",
                 status="error",
                 content="The model returned no user-facing answer after retrieval.",
-                metadata={"model": model_used},
+                metadata={
+                    "model_skipped": False,
+                    "model": model_used,
+                },
             )
             yield build_sse_chunk(
                 ChatChunk(
@@ -9503,6 +9838,7 @@ class ChatOrchestrator:
                 f"content_chars={len(assistant_content)}"
             ),
             metadata={
+                "model_skipped": False,
                 "model": model_used,
                 "content_chars": len(assistant_content),
                 "trace_events": len(trace_events) + 1,
