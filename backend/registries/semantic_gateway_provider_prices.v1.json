@@ -127,6 +127,62 @@
    "fallback_input_basis": "uncached_input_conservative",
    "price_tier": "subscription_flat",
    "source_url": "owner CLI subscriptions via local shim"
+  },
+  {
+   "route_id": "cli-shim__chatgpt-cli-gpt-5.5",
+   "provider": "cli-shim",
+   "model_id": "chatgpt-cli:gpt-5.5",
+   "api_base": "http://host.docker.internal:8090/v1",
+   "currency": "USD",
+   "price_unit_tokens": 1000000,
+   "uncached_input_usd": 0.0,
+   "cached_input_usd": 0.0,
+   "output_usd": 0.0,
+   "fallback_input_basis": "uncached_input_conservative",
+   "price_tier": "subscription_flat",
+   "source_url": "owner CLI subscriptions via local shim"
+  },
+  {
+   "route_id": "cli-shim__chatgpt-cli-gpt-5.5-openai",
+   "provider": "cli-shim",
+   "model_id": "openai/chatgpt-cli:gpt-5.5",
+   "api_base": "http://host.docker.internal:8090/v1",
+   "currency": "USD",
+   "price_unit_tokens": 1000000,
+   "uncached_input_usd": 0.0,
+   "cached_input_usd": 0.0,
+   "output_usd": 0.0,
+   "fallback_input_basis": "uncached_input_conservative",
+   "price_tier": "subscription_flat",
+   "source_url": "owner CLI subscriptions via local shim"
+  },
+  {
+   "route_id": "cli-shim__chatgpt-cli-gpt-5.4",
+   "provider": "cli-shim",
+   "model_id": "chatgpt-cli:gpt-5.4",
+   "api_base": "http://host.docker.internal:8090/v1",
+   "currency": "USD",
+   "price_unit_tokens": 1000000,
+   "uncached_input_usd": 0.0,
+   "cached_input_usd": 0.0,
+   "output_usd": 0.0,
+   "fallback_input_basis": "uncached_input_conservative",
+   "price_tier": "subscription_flat",
+   "source_url": "owner CLI subscriptions via local shim"
+  },
+  {
+   "route_id": "cli-shim__chatgpt-cli-gpt-5.4-openai",
+   "provider": "cli-shim",
+   "model_id": "openai/chatgpt-cli:gpt-5.4",
+   "api_base": "http://host.docker.internal:8090/v1",
+   "currency": "USD",
+   "price_unit_tokens": 1000000,
+   "uncached_input_usd": 0.0,
+   "cached_input_usd": 0.0,
+   "output_usd": 0.0,
+   "fallback_input_basis": "uncached_input_conservative",
+   "price_tier": "subscription_flat",
+   "source_url": "owner CLI subscriptions via local shim"
   }
  ]
 }
