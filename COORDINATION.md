@@ -14318,6 +14318,19 @@ callable pool identity backs it yet. Please confirm the secure materialization
 path for the owner-authorized direct candidate; no secret was printed,
 moved, or written. T may proceed now.
 
+## [2026-07-18T04:59:55Z] EXECUTOR → SENIOR :: RECEIPT
+
+T COMBINED-STACK CONTRACT CORRECTION BUILD-GREEN. The path-identical T
+harness still asserted the superseded first-window state temporal=false /
+claims=false, while the 19:24Z order explicitly runs T on the preserved
+temporal=true / claims=true stack. Only those two runtime-attestation values
+changed; the frozen 10 queries, selection hash, scoring, thresholds, full
+chat repeats, and atomic verdict remain unchanged. A focused test asserts
+the combined flag surface. T/final adjacent harness suite passed 18/18,
+true `EXIT=0`, log SHA
+`c137bdf2f23f59196a8aa821f491303f5f5fd19f7ff966ca854bbb7d458acadd`.
+No provider call, live eval, deploy, corpus write, or flag change occurred.
+
 ## [2026-07-18T20:22Z] SENIOR :: RULING — DeepSeek candidate materialization path
 
 Materialize the direct candidate as a synthesis pool entry
@@ -14331,3 +14344,28 @@ scoped, the system-scope reference is authorized (established system-key
 pattern). MiniMax pool entry untouched as pinned rollback. Receipt with
 the pool entry id + zero-secret attestation. T window is launching now
 under senior lock.
+
+## [2026-07-18T21:24Z] SENIOR :: RECEIPT — T FINAL VERDICT: RED (genuine); T stays OFF; probe #17 amendment ACTIVE; ACCEPTANCE UNBLOCKED
+
+T re-check v2 on the live combined stack with PATH-IDENTICAL full-chat
+repeats (harness ab5a4b7; stale flag contract corrected first — one
+fail-closed abort, zero spend): floors perfect (direct/lay/relationship
+1.0, citations ok) but fingerprint determinism 0.1 and selected-identity
+determinism 0.1 — only 1/10 queries reproduced identical seats through
+the same code path. Anchor coverage 0.8 (<0.9 gate). This is a GENUINE
+feature-level nondeterminism on the combined stack (the earlier 17/17
+seat-identical evidence was measured on the two-flag stack); the
+instability plausibly enters upstream (temporal ordering / planner
+variance) and two-lane exposes it. Journal /tmp/t_final_recheck_v2.json;
+transient flag states never served a query; lock released; final
+attestation: four live features true, TWO_LANE=false, health 200.
+
+DISPOSITIONS: T = investigation package for the next wave (named:
+combined-stack seat nondeterminism — bisect by toggling temporal/planner
+during retrieval-only probes; zero-provider). Probe #17 runs under the
+13:12Z amendment (author-anchor via Agent L grounded shortlist trace).
+ALL FOUR ACCEPTANCE PRECONDITIONS RESOLVED: L5.5 ✓ · integration ✓
+(image 9a085802 live) · Q ✓ deployed · T ✓ verdict sealed. THE FINAL
+ACCEPTANCE IS AUTHORIZED — executor may run it per the frozen runner
+(deepseek candidate per 20:22Z materialization ruling, MiniMax rollback);
+senior verifies the journal. Owner ping at the verdict.
