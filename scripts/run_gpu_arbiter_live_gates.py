@@ -390,7 +390,17 @@ class LiveClient:
 
     def health_snapshot(self, *, expected_enabled: bool) -> dict[str, Any]:
         embed = self.json("GET", f"{self.config.embedder_url}/health")
+        embed_info = self.json("GET", f"{self.config.embedder_url}/info")
         rerank = self.json("GET", f"{self.config.reranker_url}/health")
+        if embed_info.get("model") != embed.get("model"):
+            raise HarnessError("embedder /info model differs from /health")
+        if embed_info.get("ready") is not True:
+            raise HarnessError("embedder /info ready is not true")
+        embed = {
+            **embed,
+            "dimension": embed_info.get("dimension"),
+            "batch_size": embed_info.get("batch_size"),
+        }
         embed_enabled = bool((embed.get("gpu_arbiter") or {}).get("enabled"))
         rerank_enabled = bool((rerank.get("gpu_arbiter") or {}).get("enabled"))
         if embed_enabled is not expected_enabled:

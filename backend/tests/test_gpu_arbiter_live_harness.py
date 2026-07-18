@@ -630,6 +630,51 @@ def test_live_client_rejects_reordered_or_duplicate_embedding_indices():
         client.embed(["a", "b"])
 
 
+def test_live_health_snapshot_joins_embedder_info_identity():
+    client = object.__new__(harness.LiveClient)
+    client.config = SimpleNamespace(
+        embedder_url="http://embed",
+        reranker_url="http://rerank",
+        arbiter_url="http://arbiter",
+        http_timeout_seconds=1,
+    )
+
+    def json_response(method, url, **kwargs):
+        del method, kwargs
+        if url == "http://embed/health":
+            return {
+                "status": "ok",
+                "model": "embed-model",
+                "device": "mps",
+                "inference_ready": True,
+                "gpu_arbiter": {"enabled": False},
+            }
+        if url == "http://embed/info":
+            return {
+                "model": "embed-model",
+                "dimension": harness.EMBED_DIMENSION,
+                "batch_size": 256,
+                "ready": True,
+            }
+        if url == "http://rerank/health":
+            return {
+                "status": "ok",
+                "model": "rerank-model",
+                "backend": "torch_fp16",
+                "device": "mps",
+                "cross_encoder": True,
+                "warmup_complete": True,
+                "gpu_arbiter": {"enabled": False},
+            }
+        raise OSError("arbiter is dark")
+
+    client.json = json_response
+    health = client.health_snapshot(expected_enabled=False)
+    identity = harness.runtime_identity(health)
+    assert identity["embedder"]["dimension"] == harness.EMBED_DIMENSION
+    assert identity["embedder"]["batch_size"] == 256
+
+
 def test_corpus_binding_requires_exact_id_name_selection_sha_and_15_documents():
     selection = json.loads(harness.DEFAULT_SELECTION.read_text())
     names = [row["filename"] for row in selection["selected"]]
