@@ -14214,3 +14214,21 @@ T: determinism repeats now re-run the FULL chat path and compare the
 identical trace surface (one domain, one code path — per the
 zero-provider diagnosis); compile-clean, old in-process shortcut no
 longer invoked. T re-check window runs after Q releases the GPU.
+
+## [2026-07-18T17:42Z] SENIOR :: RECEIPT — Q attempt-2 RED root-caused and FIXED; attempt 3 running; elapsed 41 min
+
+Attempt 2: Q1 perfect (0.0 diffs), Q3 GREEN under the corrected 600ms
+(hold p95 559.3ms, ratio 1.021 — the due-process correction was right),
+Q2 RED: 35/100 embeds failed — the embedder's own 60s watchdog killed
+the process mid-battery (ERROR:embedder_mlx "timed out after 60.0s;
+exiting so launchd restarts"). Root cause: embed lease acquire inherited
+the shared 30s timeout (manifest ARBITER_ACQUIRE_TIMEOUT_SECONDS=30);
+wait + compute stacked toward the watchdog. Auto-rollback verified all
+three postconditions again.
+FIX (81846b3): embed acquires are bounded at 5s then FAIL OPEN (proceed
+without lease + named alert); the legacy shared env deliberately no
+longer applies to embed; manifest now sets
+ARBITER_EMBED_ACQUIRE_TIMEOUT_SECONDS=5 explicitly. Property: the
+arbiter can never make an embed slower than direct contention by more
+than 5s, and can never push it into the watchdog. 38/38 arbiter suites
+green with the patch. Attempt 3 (full Q1–Q5) is running.
