@@ -140,6 +140,18 @@ INGEST_PROFILES: dict[str, dict] = {
         "extraction_endpoint_urls": None,
         "defer_summaries": False,
     },
+    # Extraction-first: pass 1 sweeps every item through parse→chunk→extract
+    # so the serverless fleet runs one continuous saturated burst (durable
+    # staged artifacts at stage "extracted", zero local embed pressure), then
+    # pass 2 finishes embed/index/graph locally with no pod time at all.
+    # Summaries defer to the backfill lane exactly like rtx_assisted so a
+    # slow provider can never keep paid extraction workers idle.
+    "runpod_extract_first": {
+        "concurrency": None,
+        "pass_plan": ["extracted", None],
+        "extraction_endpoint_urls": None,
+        "defer_summaries": True,
+    },
 }
 
 
