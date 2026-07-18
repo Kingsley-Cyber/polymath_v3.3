@@ -14833,3 +14833,25 @@ defect and the staircase holds at the last green step. W2 (determinism
 bisect, zero-provider) may run beside any step. W3/W4 follow W1.
 Senior executes per the standing role amendment; executor receipts and
 committed orders remain the channel of record.
+
+## [2026-07-19T03:47Z] SENIOR :: RECEIPT — W1a DIAGNOSIS COMPLETE; floors 0/6 root-caused to TWO surgical librarian defects
+
+From the sealed re-run journal (135d7b05…), per-row: all six floor rows
+were model_skipped=true with guard decision=no_block — the v3 guard is
+EXONERATED for the re-run floors. Four rows show sources=0 under
+lib_mode=enabled_degraded, lib_active=false: "retrieval did not find
+sources." The refusals were CORRECT given empty evidence.
+W1-D1 (SHAPE GATE MISSING): simple floor questions entered the planner
+at all — they hit the shortlist deadline and degraded. L-G6 requires
+simple shapes to BYPASS the planner byte-identically; activation must be
+gated on non-simple rule classification BEFORE any shortlist work.
+W1-D2 (DEGRADED PATH NOT FAIL-OPEN): the degraded branch executes an
+empty/starved planned retrieval instead of falling back to the proven
+baseline pipeline. The fail-open law applies: ANY planner failure →
+librarian inactive → baseline retrieval untouched + named signal
+`librarian_degraded_fallback`; a degraded plan may never replace
+baseline evidence with less.
+(Relationship rows: degraded-active with partial seats — same D2 class.)
+FIX ORDER: implement W1-D1 + W1-D2 (build receipts), then W1b helper-
+route canary, then the W1c librarian-only compact window per the
+staircase. The two timed-out unmetered helper calls remain W1b's target.
