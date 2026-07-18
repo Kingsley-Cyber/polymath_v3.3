@@ -82,6 +82,12 @@ QUERY_IDS = (
 
 JOURNAL_SCHEMA = "polymath.two_lane_canonical_window.v1"
 RETRIEVAL_REPEAT_SCHEMA = "polymath.two_lane_retrieval_repeat.v1"
+# Full-path repeats replace the retrieval-only shortcut: the 2026-07-18
+# zero-provider diagnosis proved the in-process reconstruction was not
+# path-identical (candidate order and quota diverged after pool
+# construction), so determinism is now measured by re-running the exact
+# chat execution and comparing the same trace surface.
+FULL_PATH_REPEAT_SCHEMA = "polymath.two_lane_full_path_repeat.v1"
 CONCURRENCY = 3
 
 
@@ -262,6 +268,79 @@ def _nested_int(value: dict[str, Any] | None, *keys: str) -> int | None:
     if current is None:
         return None
     return int(current)
+
+
+def _full_path_repeat(
+    *,
+    api: str,
+    token: str,
+    executions: Sequence[dict[str, Any]],
+    request_timeout: float,
+) -> list[dict[str, Any]]:
+    """Serial full-path determinism repeats.
+
+    Each repeat re-runs the identical chat execution and extracts the
+    two-lane surface from the identical trace location as pass one, so the
+    fingerprint comparison has one domain and one code path by construction.
+    """
+
+    rows: list[dict[str, Any]] = []
+    for execution in executions:
+        evaluation = execution["evaluation"]
+        trace_plan = evaluation.get("query_plan") or {}
+        question = str(trace_plan.get("query") or "")
+        expected_surface = evaluation["two_lane"]
+        started = datetime.now(timezone.utc)
+        error = None
+        surface = _selection_surface(None)
+        if not question:
+            error = "pass-one execution carries no question text"
+        else:
+            try:
+                raw = _run_sse(
+                    api=api,
+                    token=token,
+                    question=question,
+                    timeout=request_timeout,
+                )
+                retrieval_meta = _trace_metadata(
+                    raw["traces"], "Local RAG retrieval"
+                )
+                retrieval_diagnostics = retrieval_meta.get(
+                    "retrieval_diagnostics"
+                )
+                if not isinstance(retrieval_diagnostics, dict):
+                    retrieval_diagnostics = {}
+                selection = retrieval_diagnostics.get("selection")
+                if not isinstance(selection, dict):
+                    selection = {}
+                t_diagnostics = selection.get("two_lane_anchoring")
+                surface = _selection_surface(
+                    t_diagnostics if isinstance(t_diagnostics, dict) else None
+                )
+            except Exception as exc:  # noqa: BLE001 - durable technical receipt
+                error = f"{type(exc).__name__}: {exc}"[:500]
+        rows.append(
+            {
+                "schema_version": FULL_PATH_REPEAT_SCHEMA,
+                "query_id": execution["query_id"],
+                "started_at_utc": started.isoformat(),
+                "completed_at_utc": _utc_now(),
+                "synthesis_calls": 0 if error else 1,
+                "error": error,
+                "two_lane": surface,
+                "fingerprint_identical": (
+                    surface["allocation_fingerprint"]
+                    == expected_surface["allocation_fingerprint"]
+                ),
+                "selected_identity_identical": (
+                    surface["selected_identity"]
+                    == expected_surface["selected_identity"]
+                ),
+                "technical_ok": bool(not error and surface["present"]),
+            }
+        )
+    return rows
 
 
 async def _retrieval_only_repeat(
@@ -680,11 +759,11 @@ def run(args: argparse.Namespace) -> int:
                     "system-prompt rendered hash or source SHA changed during batch"
                 )
 
-        repeats = asyncio.run(
-            _retrieval_only_repeat(
-                token=str(token),
-                executions=state["executions"],
-            )
+        repeats = _full_path_repeat(
+            api=args.api,
+            token=str(token),
+            executions=state["executions"],
+            request_timeout=args.request_timeout,
         )
         for repeat in repeats:
             state["retrieval_only_repeats"].append(repeat)
