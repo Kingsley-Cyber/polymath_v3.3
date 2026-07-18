@@ -67,3 +67,24 @@ outputs); code/table blocks get their own copy affordance.
   fetches; ledger CLOSED with the run's exact cost in the appendix.
 - One standard run under 5 minutes wall.
 - Copy buttons verified in both artifact and chat.
+
+## Reuse plan (GitHub survey, 2026-07-19 — all lift-grade licenses)
+
+1. open_deep_research legacy `graph.py` + `prompts.py` (MIT): the
+   outline-planner + per-section query→write→GRADE loop with follow-up
+   queries — Scholar's exact state machine; retrieval is one swappable
+   function → pointed at Polymath's deep profile.
+2. STORM `VectorRM` + outline/article/polish modules (MIT): Qdrant-backed
+   retrieval contract (same store as ours), draft→refine outline, forced
+   inline [n] citations against numbered snippets, polish pass.
+3. gpt-researcher `write_md_to_pdf` + prompt family (Apache-2.0): the
+   md→WeasyPrint PDF twin and battle-tested report prompts;
+   `skills/deep_research.py` depth/breadth recursion.
+4. local-deep-research retriever-as-search-engine seam (MIT): the adapter
+   pattern for plugging Polymath retrieval into any loop.
+5. deer-flow `main-1.x` Plan schema with `has_enough_context` +
+   reporter prompt (MIT): structured early-exit planning.
+CUSTOM-ONLY layer (no prior art ships it): the designed self-contained
+HTML artifact — typography/color system, inline-SVG charts, copy-
+everything UX. Revised estimate: ~1 day orchestrator assembly + the
+custom artifact layer.
