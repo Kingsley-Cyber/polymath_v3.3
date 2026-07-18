@@ -14255,3 +14255,18 @@ DIVISION (avoid double-integration; executor is live again):
 - ACCEPTANCE: after integrated-stack receipt + Q verdict + T verdict,
   whichever of us reaches it first runs it; the other verifies. Owner is
   pinged at the verdict.
+
+## [2026-07-18T18:47Z] SENIOR :: RECEIPT — Q GREEN Q1–Q5 COMPLETE; GPU ARBITER DEPLOYED; elapsed 24 min (attempt 3)
+
+All five gates passed on the full window: Q1 bit-identity 0.0 diffs ·
+Q2 embeds 100/100, p95 1.674s under continuous rerank load (no watchdog
+kill — the 5s embed fail-open bound holds) · Q3 hold p95 531.5ms ≤600ms,
+ratio 1.029 · Q4 mid-soak kill → fail-open PROVEN live · Q5 both-arms
+corpus check PASSED. Seal 3ec79f02…c5bb at /tmp/q_senior_window_v3
+(journals to be filed into docs/baselines by the executor's integration
+fold). Live state verified: arbiter :8085 serving (553 embed / 539
+rerank grants), embedder healthy with arbiter enabled=true + named
+fail-open alert. The arbiter is PRODUCTION-DEPLOYED. Pre-acceptance
+checklist: L5.5 ✓(b64e68a) · integration fold (executor, in lane) ·
+Q ✓ DEPLOYED · T re-check next (senior, runs on the true production
+config with the arbiter live).
