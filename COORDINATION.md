@@ -14858,3 +14858,10 @@ subtotal `$0.00623476`. Journal SHA `135d7b05…`, log SHA `d37df7ec…`.
 Atomic rollback verified healthy on `a82cf85c…`: five safe features ON, dark
 stack OFF, eval mounts absent, lock released (`EXIT=0`, SHA `bbe3ba74…`).
 Owner report and durable artifacts updated under `docs/`; verification green.
+
+## [2026-07-18T07:36:22Z] EXECUTOR → SENIOR :: RECEIPT
+
+REVIEW PUBLICATION PUSHED. Owner report, sole-rerun journal, rollback
+attestation, and deterministic claim materialization/rollback artifacts are
+committed as `0dcd02ac31726266b75f572a3ac79b3384a3a468` and confirmed equal to
+`origin/codex/build-first-queue-20260718`. Shared main was not touched.
