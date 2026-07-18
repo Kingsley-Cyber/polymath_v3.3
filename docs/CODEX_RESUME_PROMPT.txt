@@ -1,10 +1,5 @@
-RESUME EXECUTOR: Read the 98e5ea1 SENIOR receipt (T RED, acceptance
-AUTHORIZED) in COORDINATION.md. Exactly two steps remain:
-(1) materialize the deepseek synthesis pool entry per the 20:22Z ruling
-(reference the existing encrypted summary-lane credential, zero secret
-exposure, thinking:disabled);
-(2) run the final acceptance per backend/scripts/run_final_acceptance_v1.py
-on the live stack (image 9a085802, four features true, T/librarian dark,
-probe #17 under the 13:12Z amendment), seal the journal, receipt the
-verdict. The owner is pinged at the verdict. Skip anything already
-receipted.
+RESUME: Read the 07:12Z SENIOR plan in COORDINATION.md (W1-D3 latency
+decomposition protocol) and execute it: instrumented 3-query mini-window
+with live SSE trace capture, decompose, fix the top contributor,
+re-window under W1c gates. Then W1d (+v3), W1e (fast route), and the
+re-acceptance. Skip anything already receipted.

@@ -15107,3 +15107,27 @@ trace-level latency decomposition on one slow query (zero/cheap), then
 targeted fix, then a re-window that also re-checks simple parity via
 plan-shape traces. Staircase holds at: D2 proven, quality proven,
 latency owed.
+
+## [2026-07-19T07:12Z] SENIOR :: PLAN — W1-D3 latency decomposition protocol (next stretch starts here)
+
+Finding: persisted trace_events strip stage-timing metadata — the W1c
+latencies cannot be decomposed from Mongo. Protocol for the instrumented
+mini-window (one flip cycle, 3 queries, ~2 min live):
+1. Flip librarian ON (atomic, W1c pattern; canonical image already
+   carries all fixes — no rebuild).
+2. Run 3 queries (direct_facs fast-tier; relationship_fight_camera;
+   d1a) capturing the LIVE SSE trace stream (not Mongo) — the on-wire
+   trace metadata carries per-stage seconds (embed/vector/hydrate/
+   graph/rerank/plan) plus librarian diagnostics (plan cache hit,
+   refinement fired, decomposer calls, second-pass retrieval).
+3. Decompose each query's wall time into: plan build · shortlist ·
+   per-subquery retrieval (count the passes!) · rerank (pairs count) ·
+   refinement round · synthesis. The prime suspects, ranked: (a)
+   multi-subquery serial retrieval passes that should be parallel or
+   fewer, (b) refinement firing on floor-class queries (gap detector
+   too eager), (c) rerank pair-count inflation from multi-lane unions,
+   (d) synthesis on the slow MiniMax route (fixed separately by W1e).
+4. Fix the top contributor only; re-window (W1c gates incl. the
+   latency gate + plan-shape traces for the simple-parity question).
+Then: W1d (+v3) → W1e (fast route; the ≤15s deep target is gated THERE)
+→ re-acceptance. Resume file updated.
