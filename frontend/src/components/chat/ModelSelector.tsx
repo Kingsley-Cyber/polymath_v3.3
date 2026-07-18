@@ -66,8 +66,34 @@ function entryAccessIcon(entry: QueryModelPoolEntry) {
   return <KeyRound className="w-2.5 h-2.5 text-red-400" />;
 }
 
+const OPEN_GROUPS_KEY = "polymath.modelSelector.openGroups";
+
+function loadOpenGroups(): Record<string, boolean> {
+  try {
+    return JSON.parse(localStorage.getItem(OPEN_GROUPS_KEY) ?? "{}");
+  } catch {
+    return {};
+  }
+}
+
 export function ModelSelector() {
   const [isOpen, setIsOpen] = useState(false);
+  // Collapsed by default; persisted per provider so the list stays the way
+  // the owner left it. The active model's group is always forced open.
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(
+    loadOpenGroups,
+  );
+  const toggleGroup = (provider: string) => {
+    setOpenGroups((prev) => {
+      const next = { ...prev, [provider]: !prev[provider] };
+      try {
+        localStorage.setItem(OPEN_GROUPS_KEY, JSON.stringify(next));
+      } catch {
+        /* persistence is best-effort */
+      }
+      return next;
+    });
+  };
   const dropdownRef = useRef<HTMLDivElement>(null);
   const lastLoadedAt = useRef<number>(0);
 
@@ -230,18 +256,36 @@ export function ModelSelector() {
                 </div>
               </div>
             ) : (
-              grouped.map((group) => (
+              grouped.map((group) => {
+                const isGroupOpen =
+                  openGroups[group.provider] === true ||
+                  group.entries.some(
+                    (e) => `pool:${e.entry_id}` === selectedModel,
+                  );
+                return (
                 <div
                   key={group.provider}
                   data-testid={`model-group-${group.provider}`}
                 >
-                  <div
-                    className="flex items-center gap-1 px-2 pt-1.5 pb-0.5 text-[8px] font-bold tracking-widest uppercase text-content-secondary"
+                  <button
+                    onClick={() => toggleGroup(group.provider)}
+                    className="flex w-full items-center gap-1 px-2 pt-1.5 pb-0.5 text-[8px] font-bold tracking-widest uppercase text-content-secondary hover:text-content-primary cursor-pointer"
+                    data-testid={`model-group-toggle-${group.provider}`}
                   >
+                    <ChevronDown
+                      className={`w-2.5 h-2.5 transition-transform duration-100 ${
+                        isGroupOpen ? "" : "-rotate-90"
+                      }`}
+                    />
                     {providerIcon(group.provider)}
-                    {findPreset(group.provider)?.name ?? group.provider}
-                  </div>
-                  {group.entries.map((e) => {
+                    <span className="flex-1 text-left">
+                      {findPreset(group.provider)?.name ?? group.provider}
+                    </span>
+                    <span className="shrink-0 rounded border border-white/10 px-1 text-[7px] text-content-tertiary">
+                      {group.entries.length}
+                    </span>
+                  </button>
+                  {isGroupOpen && group.entries.map((e) => {
                     const pid = `pool:${e.entry_id}`;
                     const isActive = selectedModel === pid;
                     return (
@@ -284,7 +328,8 @@ export function ModelSelector() {
                     );
                   })}
                 </div>
-              ))
+                );
+              })
             )}
           </div>
         </div>
