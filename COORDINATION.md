@@ -13413,3 +13413,51 @@ command log SHA
 true `EXIT=0`. Token/credentials and answer text are absent from both.
 The lock was released. No corpus write occurred. Proceeding to provider-free
 Agent Q deployment/soak.
+
+## [2026-07-18T00:52:11Z] EXECUTOR → SENIOR :: RECEIPT
+
+BUILD-FIRST PACKAGE Q — GPU ARBITER PROMOTION is SEALED-RED and remains OFF.
+The implementation/harness branch is
+`codex/gpu-arbiter-live-harness-20260717` at pushed head `e315800`; its
+reviewed commit chain is `fd103d4`, `fb20135`, `2cd2073`, `916d051`,
+`870d8b4`, `471d80e`, `7f97086`, `fe45732`, `8b8dcf0`, and `e315800`.
+The final focused unit suite passed 82/82; log SHA
+`062571c08d876e454f4204994432486b3ca385245c426a6e7a1906eece0bffe5`,
+true `EXIT=0`. The hardening closes exact-domain launchd absence proof,
+bounded asynchronous bootout, rollback postconditions, provider-free compact
+mode, and `/health` + `/info` runtime-identity joining.
+
+The credited local-only promotion command used the exact sealed OFF/ON
+manifests and corpus `2c894530-8d57-4432-a6d4-bc14505a698b`. Q1 was GREEN:
+embed/rerank max absolute diff `0.0`, runtime identity unchanged. Q2 was
+GREEN: 100/100 embeds, zero failures, embed p95 `1.666629541s`, and 100
+overlapped reranks. Q3 was RED: mixed/solo rerank p95 ratio
+`1.0481381482` passed, but arbiter rerank hold p95 was
+`530.293958ms` over 124 samples against the preregistered `≤500ms` ceiling.
+The harness stopped at `q2_q3_red`; Q4 and Q5 were not run and were not
+credited. Provider calls=`0`; cost=`$0`.
+
+Sealed artifacts:
+`docs/baselines/BUILD_FIRST_Q_GPU_ARBITER_20260718/gpu_arbiter_off.json`,
+file SHA
+`be8c7970fc86ae574a805e00e28c720b1157a89633bc763fccf6ab55cac27b35`;
+`docs/baselines/BUILD_FIRST_Q_GPU_ARBITER_20260718/gpu_arbiter_on.json`,
+file SHA
+`9f50c397dfc3796fe03e95ea0bb95f91c7a0c39661e1f080621c1848baf42928`,
+canonical seal SHA
+`164b2b0b4ea7dcee24e3c0f297c91fcee15ca70ede4ac90281f05d533d6d230c`;
+promotion log SHA
+`c8da07a9f69e65c02396a9e8b375098e3eee6ff14c7fd7ef7db4809f6a0bb6a9`,
+true `EXIT=2`.
+
+Per fail-safe law the wrapper automatically restored OFF and verified
+embed/rerank arbiter-disabled plus port 8085 absent. A separate canonical
+health check then verified the restored Qwen3 embedder on 8082 and fp16 Jina
+reranker on 8081 healthy, with arbiter 8085 absent; true `EXIT=0`, health
+artifact SHAs `916e1cd7...`, `825057c8...`, and absence SHA `7ac319f8...`.
+The host eval lock was released only after that verification. Three earlier
+uncredited deployment attempts exposed and fixed transaction timing,
+canonical macOS absence-text, and split `/health`/`/info` identity handling;
+each automatically or manually restored the unchanged OFF configuration and
+made zero provider calls. No gate was weakened, no corpus write occurred,
+and Q does not advance to promotion.
