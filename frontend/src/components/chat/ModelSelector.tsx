@@ -80,6 +80,67 @@ function groupIcon(key: string) {
   return <Cloud className="w-3 h-3 text-emerald-400/80" />;
 }
 
+/** CLI lane (which agent binary) an entry rides, from model_name
+ * "cursor-cli:gpt-5.3-codex" → "cursor-cli"; bare "cursor-cli" (account
+ * default) maps to the same lane. */
+const CLI_LANE_NAMES: Record<string, string> = {
+  "chatgpt-cli": "ChatGPT (codex)",
+  "cursor-cli": "Cursor",
+  "antigravity-cli": "Antigravity (gemini)",
+};
+const CLI_LANE_ORDER = ["chatgpt-cli", "cursor-cli", "antigravity-cli"];
+
+function cliLaneOf(entry: QueryModelPoolEntry): string {
+  const lane = entry.model_name.split(":")[0];
+  return CLI_LANE_NAMES[lane] ? lane : "other";
+}
+
+/** Family/variant split for CLI model labels: trailing effort/speed words
+ * ("Low", "Extra High Fast", "Thinking", …) become the variant pill, the
+ * rest is the family row. "Codex 5.3 Extra High Fast" → family "Codex 5.3",
+ * variant "Extra High Fast". Account-default entries get their own family. */
+const VARIANT_WORDS = new Set([
+  "low",
+  "medium",
+  "high",
+  "extra",
+  "fast",
+  "none",
+  "thinking",
+]);
+
+function cliFamilySplit(entry: QueryModelPoolEntry): {
+  family: string;
+  variant: string;
+} {
+  if (!entry.model_name.includes(":")) {
+    return { family: "Account default", variant: "Auto" };
+  }
+  const label = entry.label.includes(" — ")
+    ? entry.label.slice(entry.label.indexOf(" — ") + 3)
+    : entry.label;
+  const clean = label.replace(/\s*\(.*?\)\s*/g, " ").trim();
+  const words = clean.split(/\s+/);
+  let i = words.length;
+  while (i > 1 && VARIANT_WORDS.has(words[i - 1].toLowerCase())) i--;
+  const family = words.slice(0, i).join(" ") || clean;
+  const variant = words.slice(i).join(" ") || "Std";
+  return { family, variant };
+}
+
+/** Order pills by effort then speed: None < Low < Std < High < XHigh;
+ * Fast variants sort right after their base. */
+function variantRank(variant: string): number {
+  const v = variant.toLowerCase();
+  let rank = 2;
+  if (v.startsWith("none")) rank = 0;
+  else if (v.startsWith("low")) rank = 1;
+  else if (v.startsWith("high")) rank = 3;
+  else if (v.startsWith("extra")) rank = 4;
+  else if (v.startsWith("thinking")) rank = 5;
+  return rank * 2 + (v.includes("fast") ? 1 : 0);
+}
+
 function entryAccessIcon(entry: QueryModelPoolEntry) {
   if (entry.source === "ollama") {
     return <Cpu className="w-2.5 h-2.5 text-cyan-300" />;
@@ -437,7 +498,7 @@ export function ModelSelector() {
                         }`}
                       />
                     </button>
-                    {isGroupOpen && (
+                    {isGroupOpen && group.key !== CLI_GROUP && (
                       <div className="flex flex-col gap-1 p-1 pt-0">
                         {group.entries.map((e) => {
                           const pid = `pool:${e.entry_id}`;
@@ -470,7 +531,7 @@ export function ModelSelector() {
                               </div>
                               <div className="flex min-w-0 items-center gap-1.5">
                                 <span className="shrink-0 rounded border border-white/10 bg-[#16171d] px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-widest text-content-secondary">
-                                  {isCliEntry(e) ? "SUB" : e.provider}
+                                  {e.provider}
                                 </span>
                                 <span className="min-w-0 flex-1 truncate text-[9px] tracking-wide text-content-secondary normal-case">
                                   {e.model_name}
@@ -482,6 +543,203 @@ export function ModelSelector() {
                             </button>
                           );
                         })}
+                      </div>
+                    )}
+                    {isGroupOpen && group.key === CLI_GROUP && (
+                      <div className="flex flex-col gap-1 p-1 pt-0">
+                        {(() => {
+                          const lanes = new Map<
+                            string,
+                            QueryModelPoolEntry[]
+                          >();
+                          for (const e of group.entries) {
+                            const lane = cliLaneOf(e);
+                            lanes.set(lane, [
+                              ...(lanes.get(lane) ?? []),
+                              e,
+                            ]);
+                          }
+                          const laneKeys = Array.from(lanes.keys()).sort(
+                            (a, b) =>
+                              (CLI_LANE_ORDER.indexOf(a) + 99) -
+                              (CLI_LANE_ORDER.indexOf(b) + 99),
+                          );
+                          return laneKeys.map((lane) => {
+                            const laneEntries = lanes.get(lane) ?? [];
+                            const laneKey = `cli:${lane}`;
+                            const laneActive = laneEntries.some(
+                              (e) => `pool:${e.entry_id}` === selectedModel,
+                            );
+                            const laneOpen =
+                              searching ||
+                              openGroups[laneKey] === true ||
+                              laneActive;
+                            // family → entries, families alphabetical
+                            const families = new Map<
+                              string,
+                              { e: QueryModelPoolEntry; variant: string }[]
+                            >();
+                            for (const e of laneEntries) {
+                              const { family, variant } = cliFamilySplit(e);
+                              families.set(family, [
+                                ...(families.get(family) ?? []),
+                                { e, variant },
+                              ]);
+                            }
+                            const familyKeys = Array.from(
+                              families.keys(),
+                            ).sort((a, b) => a.localeCompare(b));
+                            return (
+                              <div
+                                key={laneKey}
+                                className="rounded border border-white/[0.06] bg-[#17181d]"
+                                data-testid={`cli-lane-${lane}`}
+                              >
+                                <button
+                                  onClick={() => toggleGroup(laneKey)}
+                                  className="flex w-full items-center gap-2 px-2 py-1.5 text-[9px] font-bold tracking-widest uppercase text-content-secondary hover:text-content-primary cursor-pointer"
+                                  data-testid={`cli-lane-toggle-${lane}`}
+                                >
+                                  <SquareTerminal className="w-3 h-3 text-amber-300/80" />
+                                  <span className="flex-1 truncate text-left">
+                                    {CLI_LANE_NAMES[lane] ?? lane}
+                                  </span>
+                                  {laneActive && !laneOpen && (
+                                    <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400" />
+                                  )}
+                                  <span className="shrink-0 rounded border border-white/10 px-1 text-[7px] text-content-tertiary">
+                                    {laneEntries.length}
+                                  </span>
+                                  <ChevronDown
+                                    className={`w-3 h-3 shrink-0 transition-transform duration-100 ${
+                                      laneOpen ? "" : "-rotate-90"
+                                    }`}
+                                  />
+                                </button>
+                                {laneOpen && (
+                                  <div className="flex flex-col gap-0.5 p-1 pt-0">
+                                    {familyKeys.map((family) => {
+                                      const variants = (
+                                        families.get(family) ?? []
+                                      ).sort(
+                                        (a, b) =>
+                                          variantRank(a.variant) -
+                                          variantRank(b.variant),
+                                      );
+                                      const famKey = `cli:${lane}:${family}`;
+                                      const famActive = variants.some(
+                                        ({ e }) =>
+                                          `pool:${e.entry_id}` ===
+                                          selectedModel,
+                                      );
+                                      const famOpen =
+                                        searching ||
+                                        openGroups[famKey] === true ||
+                                        famActive;
+                                      const single = variants.length === 1;
+                                      return (
+                                        <div
+                                          key={famKey}
+                                          className="rounded border border-white/5 bg-[#0b0c10]"
+                                        >
+                                          <button
+                                            onClick={() => {
+                                              if (single) {
+                                                setSelectedModel(
+                                                  `pool:${variants[0].e.entry_id}`,
+                                                );
+                                                setIsOpen(false);
+                                              } else {
+                                                toggleGroup(famKey);
+                                              }
+                                            }}
+                                            data-active={
+                                              single && famActive
+                                                ? "true"
+                                                : undefined
+                                            }
+                                            className={`flex w-full items-center gap-1.5 px-2 py-1 text-left cursor-pointer ${
+                                              single && famActive
+                                                ? "text-emerald-200"
+                                                : "text-content-primary hover:text-white"
+                                            }`}
+                                            data-testid={
+                                              single
+                                                ? `model-entry-${variants[0].e.entry_id}`
+                                                : `cli-family-toggle-${lane}-${family}`
+                                            }
+                                            title={
+                                              single
+                                                ? variants[0].e.model_name
+                                                : `${family} — ${variants.length} variants`
+                                            }
+                                          >
+                                            <span className="min-w-0 flex-1 truncate text-[9.5px] font-bold tracking-wider">
+                                              {family}
+                                            </span>
+                                            {famActive && (
+                                              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400" />
+                                            )}
+                                            {!single && (
+                                              <>
+                                                <span className="shrink-0 rounded border border-white/10 px-1 text-[7px] text-content-tertiary">
+                                                  {variants.length}
+                                                </span>
+                                                <ChevronDown
+                                                  className={`w-2.5 h-2.5 shrink-0 text-content-tertiary transition-transform duration-100 ${
+                                                    famOpen
+                                                      ? ""
+                                                      : "-rotate-90"
+                                                  }`}
+                                                />
+                                              </>
+                                            )}
+                                          </button>
+                                          {!single && famOpen && (
+                                            <div className="flex flex-wrap gap-1 px-2 pb-1.5">
+                                              {variants.map(
+                                                ({ e, variant }) => {
+                                                  const pid = `pool:${e.entry_id}`;
+                                                  const isActive =
+                                                    selectedModel === pid;
+                                                  return (
+                                                    <button
+                                                      key={pid}
+                                                      onClick={() => {
+                                                        setSelectedModel(
+                                                          pid,
+                                                        );
+                                                        setIsOpen(false);
+                                                      }}
+                                                      data-active={
+                                                        isActive
+                                                          ? "true"
+                                                          : undefined
+                                                      }
+                                                      className={`rounded border px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wider cursor-pointer ${
+                                                        isActive
+                                                          ? "border-emerald-400 bg-emerald-500/15 text-emerald-200"
+                                                          : "border-white/10 bg-[#16171d] text-content-secondary hover:border-white/25 hover:text-white"
+                                                      }`}
+                                                      data-testid={`model-entry-${e.entry_id}`}
+                                                      title={e.model_name}
+                                                    >
+                                                      {variant}
+                                                    </button>
+                                                  );
+                                                },
+                                              )}
+                                            </div>
+                                          )}
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          });
+                        })()}
                       </div>
                     )}
                   </div>
