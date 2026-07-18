@@ -18,10 +18,12 @@ from services.retriever.four_lane_router import FourLaneDocumentRouter
 from services.retriever.librarian_planner import (
     LibrarianPlanner,
     QueryPlanReplayCache,
+    apply_librarian_execution_plan,
     build_query_plan_v1,
     build_tier0_shortlist,
     corpus_doc_set_version_from_rows,
 )
+from services.retriever.query_plan import build_query_plan_v2
 from services.retriever.tier0_router import DocumentRoute
 
 
@@ -162,6 +164,27 @@ def test_rule_registry_is_ordered_and_deterministic(query, shape, roles):
     assert first.plan_hash == second.plan_hash
     assert first.seat_assignment_bytes() == second.seat_assignment_bytes()
     assert sum(item.seat_quota for item in first.subqueries) == 8
+
+
+def test_d3b_ves_stages_is_a_deterministic_enumerative_plan_without_shortlist():
+    query = "What exact stages does the VES handbook define for a VFX shot's pipeline?"
+
+    first = _plan(query, shortlist=())
+    second = _plan(query, shortlist=())
+
+    assert first.planner == "rule:enumerative_trace"
+    assert first.shape == "enumerative_trace"
+    assert first.subqueries[0].role == "main"
+    assert first.subqueries[0].seat_quota == 8
+    assert first.subqueries[0].target_doc_ids == ()
+    assert first.plan_hash == second.plan_hash
+    assert first.seat_assignment_bytes() == second.seat_assignment_bytes()
+    execution_plan, policy = apply_librarian_execution_plan(
+        build_query_plan_v2(query, corpus_ids=["corpus"]),
+        first,
+    )
+    assert policy.active is True
+    assert execution_plan.answer_shape == "enumeration"
 
 
 def test_simple_plan_preserves_exact_query_and_has_no_behavior_payload():
@@ -534,6 +557,70 @@ async def test_plan_cache_hits_and_invalidates_on_document_version(monkeypatch):
     assert first.plan.plan_hash == cached.plan.plan_hash
     assert invalidated.plan.plan_hash != first.plan.plan_hash
     assert invalidated.plan.cache.key != first.plan.cache.key
+
+
+@pytest.mark.asyncio
+async def test_timeout_fallback_uses_real_version_and_preserves_d3b_shape(monkeypatch):
+    planner = LibrarianPlanner(cache=QueryPlanReplayCache())
+    version = _version("d3b-timeout")
+
+    async def fake_version(_db, _corpus_ids):
+        return version
+
+    async def timed_out_shortlist(*_args, **_kwargs):
+        raise TimeoutError
+
+    monkeypatch.setattr(planner_module, "corpus_doc_set_version", fake_version)
+    monkeypatch.setattr(
+        planner_module,
+        "build_tier0_shortlist",
+        timed_out_shortlist,
+    )
+
+    query = "What exact stages does the VES handbook define for a VFX shot's pipeline?"
+    with pytest.raises(TimeoutError):
+        await planner.build(
+            query,
+            corpus_ids=["corpus"],
+            requested_tier="qdrant_mongo_graph",
+            db=object(),
+            embedding_config=None,
+            llm_decomposer_enabled=True,
+        )
+
+    fallback = planner.build_deterministic_timeout_fallback(
+        query,
+        corpus_ids=["corpus"],
+        requested_tier="qdrant_mongo_graph",
+    )
+
+    assert fallback is not None
+    assert fallback.plan.corpus_doc_version == version
+    assert fallback.plan.shape == "enumerative_trace"
+    assert fallback.plan.planner == "rule:enumerative_trace"
+    assert fallback.plan.shortlist == ()
+    assert fallback.diagnostics["provider_calls"] == 0
+    assert fallback.diagnostics["corpus_doc_version_source"] == (
+        "pre_shortlist_snapshot"
+    )
+
+
+def test_timeout_fallback_never_promotes_a_simple_query():
+    planner = LibrarianPlanner(cache=QueryPlanReplayCache())
+    query = "What is narrative directing?"
+    planner._remember_corpus_version(
+        "corpus",
+        query,
+        _version("simple-timeout"),
+    )
+
+    fallback = planner.build_deterministic_timeout_fallback(
+        query,
+        corpus_ids=["corpus"],
+        requested_tier="qdrant_mongo",
+    )
+
+    assert fallback is None
 
 
 @pytest.mark.asyncio
