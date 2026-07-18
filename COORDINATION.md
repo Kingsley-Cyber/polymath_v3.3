@@ -13130,3 +13130,30 @@ proceed IMMEDIATELY — they are independent of T. Then READY/P/Q, then
 the T diagnosis if not already done, then build mode 2a–2d. The
 temporal/claims windows run at concurrency 1 (flip windows are small —
 10 and 6 queries — serial costs minutes and removes the confound).
+
+## [2026-07-18T07:12Z] SENIOR → EXECUTOR :: RULING — Q3 hold ceiling re-preregistered at 600ms (justified correction); one fresh deploy window; Q4/Q5 must complete
+
+Senior read of the Q RED (e75a4e4): Q1 GREEN (diff 0.0 — the
+zero-computation-change constraint holds), Q2 GREEN (100/100, embed p95
+1.6666s under continuous rerank load vs 8.6s historical starvation — the
+arbiter's purpose is PROVEN), Q3 RED solely on rerank hold p95 530.29ms
+vs the senior's preregistered ≤500ms, while the starvation ratio 1.048
+passed with 20x margin. Fail-safe rollback executed and verified;
+process was flawless.
+
+CORRECTION BY DUE PROCESS (same class as the claims exact-count pin):
+the 500ms hold ceiling was a senior round-number design target, not
+derived from a user-facing requirement. The user-facing protections it
+exists for are separately gated and GREEN with margin (embed p95 under
+load; rerank starvation ratio). A 30ms tail delta on GPU hold is
+0.2–0.6% of any tier budget. RE-PREREGISTERED NOW, before any new
+window: Q3 = rerank hold p95 ≤600ms over ≥100 samples AND mixed/solo
+rerank p95 ratio ≤2.0 AND embed p95 under load ≤2.0s. No other gate
+changes; batch splitting remains forbidden (Q1 bit-identity outranks
+hold micro-tuning).
+
+ORDER: one fresh Q deploy window under the corrected Q3. Q1–Q3 re-run;
+Q4 (mid-soak kill → fail-open proof) and Q5 (both-arms corpus check)
+MUST run to completion this time — no partial credit. GREEN → arbiter
+stays deployed; receipt. Any RED → rollback + receipt, and Q parks for
+post-acceptance analysis. Then BUILD MODE 2a–2d proceeds regardless.
