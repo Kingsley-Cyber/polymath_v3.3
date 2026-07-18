@@ -886,8 +886,8 @@ async def _build_librarian_plan_trace(
             timeout=2.0,
         )
         return {
-            "mode": "enabled_pending_l3" if enabled else "shadow",
-            "behavior_applied": False,
+            "mode": "enabled" if enabled else "shadow",
+            "behavior_applied": bool(enabled and result.plan.shape != "simple"),
             "plan": result.plan.model_dump(mode="json"),
             "diagnostics": dict(result.diagnostics),
         }
@@ -4705,9 +4705,9 @@ def _evidence_support_query_variants(
     ):
         combined = " ".join(str(original_preserving_variant or "").split())
         if combined:
-            first_two = [query for query in queries if query.lower() != combined.lower()][
-                :2
-            ]
+            first_two = [
+                query for query in queries if query.lower() != combined.lower()
+            ][:2]
             return [*first_two, combined]
     return queries[:3]
 
@@ -7114,6 +7114,7 @@ class ChatOrchestrator:
             llm_decompose=bool(
                 settings.RELATIONSHIP_EVIDENCE_ALLOCATION_ENABLED
                 and profile_cfg.get("evidence_plan_llm_decompose")
+                and not getattr(settings, "LIBRARIAN_PLANNER_ENABLED", False)
             ),
             fallback_model=model_used,
             fallback_api_base=profile_creds.get("api_base"),
@@ -7127,6 +7128,21 @@ class ChatOrchestrator:
             enabled=bool(getattr(settings, "LIBRARIAN_PLANNER_ENABLED", False)),
             shadow=bool(getattr(settings, "LIBRARIAN_PLANNER_SHADOW", False)),
         )
+        if (
+            resolved_mode == "global"
+            and isinstance(librarian_plan_trace, dict)
+            and librarian_plan_trace.get("behavior_applied") is True
+        ):
+            librarian_plan_trace = {
+                **librarian_plan_trace,
+                "mode": "enabled_global_fallback",
+                "behavior_applied": False,
+                "diagnostics": {
+                    **dict(librarian_plan_trace.get("diagnostics") or {}),
+                    "status": "global_search_unsupported",
+                    "silent_fallback_count": 1,
+                },
+            }
         query_plan = _build_chat_query_plan(
             query=request.message,
             retrieval_query=retrieval_query,
@@ -7230,6 +7246,12 @@ class ChatOrchestrator:
                     else None
                 ),
                 grounded_planner_route=grounded_planner_route,
+                librarian_plan=(
+                    librarian_plan_trace.get("plan")
+                    if isinstance(librarian_plan_trace, dict)
+                    and librarian_plan_trace.get("behavior_applied") is True
+                    else None
+                ),
             )
         elif reasoning_mode == "atomic":
             from services.reasoning import atomic_retrieve
@@ -7287,6 +7309,9 @@ class ChatOrchestrator:
         _plan_diagnostics = getattr(retrieval, "diagnostics", {}) or {}
         _plan_selection = _plan_diagnostics.get("selection") or {}
         _plan_sufficiency = _plan_selection.get("sufficiency") or {}
+        _librarian_allocation_active = bool(
+            (_plan_diagnostics.get("librarian_execution") or {}).get("active")
+        )
         _query_plan_fast_path = bool(
             settings.QUERY_PLAN_V2
             and str(_plan_diagnostics.get("complexity") or "") == "simple"
@@ -7333,6 +7358,7 @@ class ChatOrchestrator:
             relationship_evidence_allocation = bool(
                 settings.RELATIONSHIP_EVIDENCE_ALLOCATION_ENABLED
                 and _relationship_allocation_eligible(evidence_plan)
+                and not _librarian_allocation_active
             )
             if relationship_evidence_allocation:
                 evidence_plan_start = perf_counter()
@@ -7380,6 +7406,9 @@ class ChatOrchestrator:
                     "added": 0,
                     "duration_s": 0.0,
                     "skipped": "relationship_evidence_allocation_disabled_or_ineligible",
+                    "librarian_generalized_allocation_active": (
+                        _librarian_allocation_active
+                    ),
                 }
         elif _retrieval_fast_path:
             if evidence_plan_llm_task is not None:
@@ -7598,6 +7627,7 @@ class ChatOrchestrator:
         relationship_evidence_allocation = bool(
             settings.RELATIONSHIP_EVIDENCE_ALLOCATION_ENABLED
             and _relationship_allocation_eligible(evidence_plan)
+            and not _librarian_allocation_active
         )
         _evidence_doc_cap = (
             _evidence_per_doc_cap_for_plan(evidence_plan, budget=len(sources))

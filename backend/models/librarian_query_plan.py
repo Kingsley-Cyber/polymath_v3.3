@@ -18,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 PLAN_VERSION = "query_plan.v1"
 PLANNER_VERSION = "librarian_rule_planner.v1"
+TOTAL_SEAT_BUDGET = 8
 LLM_DECOMPOSER_PROMPT_HASH = (
     "sha256:7d87d502245ed2fb98c61a50bc26553f4d538c307137c66dbcc04267caa0ea1b"
 )
@@ -250,6 +251,8 @@ class QueryPlanV1(BaseModel):
         )
         if self.cache.key != expected_cache_key:
             raise ValueError("cache key does not match its durable identity inputs")
+        if sum(item.seat_quota for item in self.subqueries) != TOTAL_SEAT_BUDGET:
+            raise ValueError("subquery seat quotas must preserve the total budget")
         return self
 
     def canonical_bytes(self) -> bytes:

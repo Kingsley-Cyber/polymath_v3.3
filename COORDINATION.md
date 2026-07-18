@@ -13509,3 +13509,53 @@ true `EXIT=0`. Provider calls=0, provider sentinels reached=0, corpus writes=0.
 The host lock was released; live runtime is re-attested
 TWO_LANE=false, temporal=true, claims=true, with both MLX services healthy.
 Proceeding to build-only item 2a.
+
+## [2026-07-18T01:41:14Z] EXECUTOR → SENIOR :: RECEIPT
+
+BUILD-FIRST 2a / AGENT L3 — GENERALIZED LIBRARIAN ALLOCATION is
+BUILD-VERIFIED GREEN. L1/L2 were already separately receipted and were not
+rerun as new phases. Non-simple `QueryPlanV1` plans now compile into the
+single existing planned-retrieval executor with deterministic subquery lanes,
+Tier-0 document-route hints, total-seat quotas, strong-match admission,
+threshold spillover, protected exact-query seats, and the proven per-document
+cap of 2. Relationship 4/4 is the two-subquery case of this allocator: while
+Librarian execution is active, the legacy retrieval-side and chat-side
+relationship allocators are explicitly suppressed. If two-lane anchoring is
+enabled, it runs afterward within the frozen subquery seat groups; ordinary
+spill seats remain unassigned.
+
+The final adversarial cases cover relationship 4/4, three-lane 3/3/2,
+underfilled spillover, shared-candidate exclusion, original+side overlap,
+protected exact-only seats, multi-corpus protected overflow, post-T receipt
+reconciliation, and simple-plan object parity. Receipts are recomputed from
+the actual returned packet after trim/allocation, so displaced lane/corpus
+reservations cannot be reported as fulfilled. The original query lane and
+the base plan's obligation-derived final/rerank budgets remain preserved:
+the isolated budget probe measured base/overlay final K `16/16` and rerank
+cap `38/38`, exact lane present, quota sum 8; log SHA
+`ac1374d13258f16fadb650b551a09f03581c57cb14f9ca644ae11ba5b79c62c2`,
+true `EXIT=0`.
+
+The network-disabled broad suite passed 121/121; log SHA
+`a0e9bf2c7a2a02df00bb79a98ca795411d02afb24eeaddbc09245de1eb51e055`,
+true `EXIT=0`. Final focused adversarial suite passed 76/76; log SHA
+`e0a6690d2ac4543e35b384506125d415c3af98f088535e2f`,
+true `EXIT=0`. Black check left all 7 touched Python files unchanged; log SHA
+`7261ff8419bcdbe28374b471f4218b25a39d4238fc002d569014b4e3851a961c`,
+true `EXIT=0`; py_compile and diff-check were green. Final isolated backend
+image is
+`sha256:b429bf81bd0e85e0a3e98c0c9ec2ace1bb9493a9904d855a68ef8c3c92c1d215`;
+build log SHA
+`ad492f75fce79fbde3797afc6c4f4370e53d0346c2c8cca135c5854e579c21d6`,
+true `EXIT=0`.
+
+An independent read-only blocker audit initially found double allocation,
+global T placement, false pre-trim quota receipts, original/budget loss, and
+an original+side overlap edge; every finding was fixed and the final audit
+reported no blockers. Disclosed uncredited attempts: two early test
+collections lacked mandatory test-only settings; one focused assertion
+exposed a protected corpus anchor in its fixture; one budget-probe packaging
+attempt lacked `PYTHONPATH`. None reached a provider/service, deployed a
+container, or wrote corpus state. Provider calls=0, live evals=0, corpus
+writes=0. Librarian flags remain default-OFF; no runtime flag or stack state
+changed. Proceeding to L4 build-only.

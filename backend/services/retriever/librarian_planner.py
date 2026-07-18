@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 import re
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Iterable
 
 from models.librarian_query_plan import (
@@ -35,6 +35,11 @@ from services.retriever.four_lane_router import (
     four_lane_document_router,
 )
 from services.retriever.query_plan import build_query_plan_v2
+from services.retriever.query_plan import (
+    QueryLane,
+    QueryPlanV2,
+    lexical_terms,
+)
 from services.retriever.query_semantics import (
     BASE_STOP_WORDS,
     query_tokens,
@@ -125,6 +130,158 @@ _ENTITY_BRIDGE_SIDE_STOP_WORDS = frozenset(
 class LibrarianPlanBuildResult:
     plan: QueryPlanV1
     diagnostics: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class LibrarianExecutionPolicy:
+    """Validated L3 instructions consumed by the existing planned executor."""
+
+    active: bool
+    plan_hash: str | None
+    shape: str | None
+    lane_seat_quotas: dict[str, int]
+    lane_rerank_caps: dict[str, int]
+    document_route_hints: dict[str, list[dict[str, Any]]]
+
+    def diagnostics(self) -> dict[str, Any]:
+        return {
+            "active": self.active,
+            "plan_hash": self.plan_hash,
+            "shape": self.shape,
+            "lane_seat_quotas": dict(self.lane_seat_quotas),
+            "lane_rerank_caps": dict(self.lane_rerank_caps),
+            "document_route_hint_count": sum(
+                len(values) for values in self.document_route_hints.values()
+            ),
+        }
+
+
+def _execution_lane_id(index: int, role: str) -> str:
+    normalized_role = re.sub(r"[^a-z0-9]+", "_", str(role).casefold()).strip("_")
+    return f"librarian_{index + 1}_{normalized_role or 'main'}"
+
+
+def apply_librarian_execution_plan(
+    base_plan: QueryPlanV2,
+    librarian_plan: QueryPlanV1,
+) -> tuple[QueryPlanV2, LibrarianExecutionPolicy]:
+    """Compile QueryPlanV1 into the one existing planned-fusion executor.
+
+    Simple plans return the exact base object. Non-simple plans replace its
+    candidate lanes with required librarian subqueries; they do not introduce
+    a second allocator, embedding pass, or reranker.
+    """
+
+    if librarian_plan.shape == "simple":
+        return (
+            base_plan,
+            LibrarianExecutionPolicy(
+                active=False,
+                plan_hash=librarian_plan.plan_hash,
+                shape=librarian_plan.shape,
+                lane_seat_quotas={},
+                lane_rerank_caps={},
+                document_route_hints={},
+            ),
+        )
+
+    shortlist_by_doc_id: dict[str, list[LibrarianShortlistItemV1]] = {}
+    for item in librarian_plan.shortlist:
+        shortlist_by_doc_id.setdefault(item.doc_id, []).append(item)
+    original_lane = next(
+        (lane for lane in base_plan.lanes if lane.role == "original"),
+        base_plan.lanes[0],
+    )
+    lanes: list[QueryLane] = [original_lane]
+    lane_seat_quotas: dict[str, int] = {}
+    lane_rerank_caps: dict[str, int] = {}
+    document_route_hints: dict[str, list[dict[str, Any]]] = {}
+    for index, subquery in enumerate(librarian_plan.subqueries):
+        lane_id = _execution_lane_id(index, subquery.role)
+        target_items = sorted(
+            (
+                item
+                for doc_id in subquery.target_doc_ids
+                for item in shortlist_by_doc_id.get(doc_id, [])
+            ),
+            key=lambda item: (item.corpus_id, item.doc_id),
+        )
+        target_doc_refs = tuple(
+            sorted((item.corpus_id, item.doc_id) for item in target_items)
+        )
+        lanes.append(
+            QueryLane(
+                lane_id=lane_id,
+                role="core",
+                query=subquery.text,
+                dense_text=subquery.text,
+                lexical_terms=tuple(lexical_terms(subquery.text)[:16]),
+                required=True,
+                phrase=subquery.text,
+                support_phrases=(subquery.text,),
+                target_doc_refs=target_doc_refs,
+                seat_quota=subquery.seat_quota,
+                rerank_cap=subquery.rerank_cap,
+            )
+        )
+        lane_seat_quotas[lane_id] = subquery.seat_quota
+        lane_rerank_caps[lane_id] = subquery.rerank_cap
+        if target_items:
+            document_route_hints[lane_id] = [
+                {
+                    "corpus_id": item.corpus_id,
+                    "doc_id": item.doc_id,
+                    "score": item.score,
+                    "title": item.title,
+                    "summary": item.summary,
+                    "concepts": [],
+                    "section_ids": [],
+                    "source": "librarian_query_plan_v1",
+                }
+                for item in target_items
+            ]
+
+    complexity = (
+        "comparative"
+        if librarian_plan.shape in {"relationship", "comparison"}
+        else (
+            "dependent_multi_hop"
+            if librarian_plan.shape in {"entity_bridge", "enumerative_trace"}
+            and len(lanes) > 1
+            else "compositional"
+        )
+    )
+    answer_shape = {
+        "relationship": "relationship",
+        "comparison": "comparison",
+        "enumerative_trace": "enumeration",
+        "temporal": "synthesis",
+        "entity_bridge": "synthesis",
+        "complex": "synthesis",
+    }.get(librarian_plan.shape, base_plan.answer_shape)
+    overlaid = replace(
+        base_plan,
+        complexity=complexity,
+        answer_shape=answer_shape,
+        concepts=tuple(subquery.text for subquery in librarian_plan.subqueries),
+        lanes=tuple(lanes),
+        probes=(),
+        budget_obligation_count=max(
+            1,
+            len([probe for probe in base_plan.probes if probe.required]),
+        ),
+    )
+    return (
+        overlaid,
+        LibrarianExecutionPolicy(
+            active=True,
+            plan_hash=librarian_plan.plan_hash,
+            shape=librarian_plan.shape,
+            lane_seat_quotas=lane_seat_quotas,
+            lane_rerank_caps=lane_rerank_caps,
+            document_route_hints=document_route_hints,
+        ),
+    )
 
 
 class QueryPlanReplayCache:
