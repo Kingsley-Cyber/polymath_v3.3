@@ -16,13 +16,16 @@ from datetime import datetime, timezone
 import hashlib
 import json
 import math
+import os
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
+from bson import json_util
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo import UpdateOne
 
 from config import get_settings
+from models.claim_record import ClaimCompilationV1
 from models.hash_taxonomy import canonical_json_v1, namespace_hash
 from models.semantic_digest_claim_input import (
     COMPILATION_COLLECTION,
@@ -38,6 +41,7 @@ from services.ingestion.semantic_digest_claim_inputs import (
     PacketNotReadyError,
     build_bounded_atomic_parent_packet,
     compile_child_candidate,
+    compile_existing_child_candidate,
     document_source_version_id,
     materialize_candidate_row,
     validate_materialized_row_against_source,
@@ -67,6 +71,9 @@ ROUTE_CARD_PATH = (
 )
 ROUTE_ID = "longcat-api__longcat-2.0"
 HISTORICAL_JOB_COLLECTION = "semantic_digest_jobs"
+EXISTING_SOURCE_MANIFEST_VERSION = "polymath.existing_claim_source_lineage_manifest.v1"
+EXISTING_MATERIALIZER_ENGINE = "existing_ghost_claim_materializer.v1"
+EXISTING_IMPORT_MEMORY_LIMIT_BYTES = 6 * 1024**3
 
 
 class MaterializationError(RuntimeError):
@@ -76,6 +83,7 @@ class MaterializationError(RuntimeError):
 @dataclass(frozen=True)
 class Scope:
     corpus_id: str
+    includes_all_parent_children: bool
     parents: list[dict[str, Any]]
     child_ids: list[str]
     children: dict[str, dict[str, Any]]
@@ -95,6 +103,21 @@ def _require_tmp_path(path: Path) -> Path:
     if not resolved.is_relative_to(Path("/tmp").resolve()):
         raise MaterializationError("raw claim compilation files must stay under /tmp")
     return resolved
+
+
+def _require_distinct_paths(**values: str | None) -> None:
+    occupied: dict[Path, str] = {}
+    for label, raw in values.items():
+        if raw is None:
+            continue
+        path = _require_tmp_path(Path(raw))
+        for candidate in (path, path.with_suffix(path.suffix + ".partial")):
+            previous = occupied.get(candidate)
+            if previous is not None:
+                raise MaterializationError(
+                    f"materializer paths collide: {previous} and {label}"
+                )
+            occupied[candidate] = label
 
 
 def _persist_before_census(path: Path, receipt: dict[str, Any]) -> dict[str, Any]:
@@ -129,6 +152,8 @@ async def _load_scope(
     corpus_name: str,
     expected_parent_count: int,
     expected_child_count: int | None,
+    include_all_parent_children: bool = False,
+    expected_corpus_id: str | None = None,
 ) -> Scope:
     corpora = (
         await db["corpora"]
@@ -143,6 +168,10 @@ async def _load_scope(
             f"expected one active corpus named {corpus_name!r}; found {len(corpora)}"
         )
     corpus_id = str(corpora[0].get("corpus_id") or "")
+    if expected_corpus_id is not None and corpus_id != expected_corpus_id:
+        raise MaterializationError(
+            f"corpus ID drifted: expected {expected_corpus_id!r}; found {corpus_id!r}"
+        )
     structural = (
         await db["parent_chunks"]
         .find(
@@ -164,9 +193,13 @@ async def _load_scope(
         .sort("parent_id", 1)
         .to_list(length=None)
     )
-    parents = [
-        row for row in structural if classify_parent_text_v2(row["text"]).eligible
-    ]
+    parents = (
+        structural
+        if include_all_parent_children
+        else [
+            row for row in structural if classify_parent_text_v2(row["text"]).eligible
+        ]
+    )
     if len(parents) != expected_parent_count:
         raise MaterializationError(
             f"eligible parent census drifted: expected {expected_parent_count}, "
@@ -217,11 +250,299 @@ async def _load_scope(
         document_source_version_id(documents[document_id])
     return Scope(
         corpus_id=corpus_id,
+        includes_all_parent_children=include_all_parent_children,
         parents=parents,
         child_ids=child_ids,
         children=children,
         documents=documents,
     )
+
+
+async def _load_existing_claim_rows(
+    db: Any,
+    scope: Scope,
+) -> dict[str, dict[str, Any]]:
+    rows = (
+        await db["ghost_b_extractions"]
+        .find(
+            {
+                "corpus_id": scope.corpus_id,
+                "chunk_id": {"$in": scope.child_ids},
+                "status": "ok",
+                "schema_version": "polymath.extract.local_extraction.v1",
+                "local_extraction": {"$type": "object"},
+                "claim_compilation": {"$type": "object"},
+            },
+            {
+                "_id": 0,
+                "corpus_id": 1,
+                "doc_id": 1,
+                "chunk_id": 1,
+                "status": 1,
+                "schema_version": 1,
+                "source_version_id": 1,
+                "raw_output_artifact_id": 1,
+                "raw_output_fingerprint": 1,
+                "provider": 1,
+                "model": 1,
+                "provider_card": 1,
+                "local_extraction": 1,
+                "claim_compilation": 1,
+            },
+        )
+        .sort("chunk_id", 1)
+        .to_list(length=None)
+    )
+    by_child = {str(row.get("chunk_id") or ""): row for row in rows}
+    if (
+        len(rows) != len(by_child)
+        or set(by_child) != set(scope.child_ids)
+        or len(rows) != len(scope.child_ids)
+    ):
+        raise MaterializationError(
+            "existing extraction claim rows do not close over the selected children"
+        )
+    raw_artifact_ids = [
+        str(row.get("raw_output_artifact_id") or "").strip() for row in rows
+    ]
+    if any(not value for value in raw_artifact_ids) or len(raw_artifact_ids) != len(
+        set(raw_artifact_ids)
+    ):
+        raise MaterializationError(
+            "existing extraction raw artifact lineage is missing or duplicated"
+        )
+    for child_id, row in by_child.items():
+        child = scope.children[child_id]
+        document = scope.documents[str(child.get("doc_id") or "")]
+        try:
+            compilation = ClaimCompilationV1.model_validate(
+                row.get("claim_compilation")
+            )
+        except Exception as exc:
+            raise MaterializationError(
+                f"existing claim compilation is invalid for child {child_id}"
+            ) from exc
+        if (
+            compilation.child_id != child_id
+            or compilation.document_id != str(child.get("doc_id") or "")
+            or str(row.get("source_version_id") or "")
+            != document_source_version_id(document)
+        ):
+            raise MaterializationError(
+                f"existing extraction ownership drifted for child {child_id}"
+            )
+    return by_child
+
+
+def _existing_provenance(row: Mapping[str, Any]) -> dict[str, Any]:
+    provider_card = (
+        row.get("provider_card")
+        if isinstance(row.get("provider_card"), Mapping)
+        else {}
+    )
+    model_id = str(provider_card.get("model") or row.get("model") or "").strip()
+    model_revision = str(provider_card.get("model_revision") or "").strip()
+    return {
+        "provenance_producer_kind": "migration",
+        "provenance_engine": EXISTING_MATERIALIZER_ENGINE,
+        "provenance_model_id": model_id or None,
+        "provenance_model_revision": model_revision or None,
+    }
+
+
+def _source_lineage_rows(
+    scope: Scope,
+    rows_by_child: Mapping[str, Mapping[str, Any]],
+) -> Iterable[dict[str, Any]]:
+    yield {
+        "record_type": "manifest_header",
+        "schema_version": EXISTING_SOURCE_MANIFEST_VERSION,
+        "corpus_id": scope.corpus_id,
+        "row_count": len(scope.child_ids),
+        "child_scope_hash": namespace_hash("input-set", scope.child_ids),
+    }
+    for child_id in scope.child_ids:
+        row = rows_by_child[child_id]
+        compilation = ClaimCompilationV1.model_validate(row["claim_compilation"])
+        provider_card = (
+            row.get("provider_card")
+            if isinstance(row.get("provider_card"), Mapping)
+            else {}
+        )
+        stage_identity = {
+            "source_schema_version": str(row.get("schema_version") or ""),
+            "provider": str(row.get("provider") or ""),
+            "model": str(row.get("model") or ""),
+            "provider_card_hash": namespace_hash("raw-output", provider_card),
+            "raw_output_fingerprint_hash": namespace_hash(
+                "raw-output",
+                row.get("raw_output_fingerprint") or {},
+            ),
+        }
+        yield {
+            "record_type": "source_row",
+            "child_id": child_id,
+            "document_id": str(row.get("doc_id") or ""),
+            "source_version_id": str(row.get("source_version_id") or ""),
+            "raw_output_artifact_id": str(row.get("raw_output_artifact_id") or ""),
+            "local_extraction_hash": namespace_hash("body", row["local_extraction"]),
+            "claim_compilation_body_hash": namespace_hash(
+                "body", compilation.model_dump(mode="python")
+            ),
+            "stage_identity_hash": namespace_hash("input-set", stage_identity),
+        }
+
+
+def _source_lineage_sha256(
+    scope: Scope,
+    rows_by_child: Mapping[str, Mapping[str, Any]],
+) -> str:
+    digest = hashlib.sha256()
+    for row in _source_lineage_rows(scope, rows_by_child):
+        digest.update((canonical_json_v1(row) + "\n").encode("utf-8"))
+    return digest.hexdigest()
+
+
+def _persist_source_lineage_manifest(
+    path: Path,
+    *,
+    scope: Scope,
+    rows_by_child: Mapping[str, Mapping[str, Any]],
+) -> dict[str, Any]:
+    output_path = _require_tmp_path(path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = output_path.with_suffix(output_path.suffix + ".partial")
+    row_count = 0
+    with temp_path.open("w", encoding="utf-8", newline="\n") as handle:
+        for row in _source_lineage_rows(scope, rows_by_child):
+            handle.write(canonical_json_v1(row) + "\n")
+            if row["record_type"] == "source_row":
+                row_count += 1
+        handle.flush()
+        os.fsync(handle.fileno())
+    temp_path.replace(output_path)
+    return {
+        "schema_version": EXISTING_SOURCE_MANIFEST_VERSION,
+        "row_count": row_count,
+        "file_bytes": output_path.stat().st_size,
+        "file_sha256": _file_sha256(output_path),
+        "location": "/tmp only; not committed",
+    }
+
+
+def _memory_preflight(
+    scope: Scope,
+    rows_by_child: Mapping[str, Mapping[str, Any]],
+) -> dict[str, int]:
+    child_text_bytes = sum(
+        len(str(row.get("text") or "").encode("utf-8"))
+        for row in scope.children.values()
+    )
+    parent_text_bytes = sum(
+        len(str(row.get("text") or "").encode("utf-8")) for row in scope.parents
+    )
+    source_json_bytes = sum(
+        len(canonical_json_v1(row).encode("utf-8")) for row in rows_by_child.values()
+    )
+    serialized_input_bytes = child_text_bytes + parent_text_bytes + source_json_bytes
+    conservative_resident_upper_bound = serialized_input_bytes * 4
+    if conservative_resident_upper_bound > EXISTING_IMPORT_MEMORY_LIMIT_BYTES:
+        raise MaterializationError(
+            "existing-claim materializer exceeds the 6 GiB memory preflight"
+        )
+    return {
+        "child_text_bytes": child_text_bytes,
+        "parent_text_bytes": parent_text_bytes,
+        "source_json_bytes": source_json_bytes,
+        "serialized_input_bytes": serialized_input_bytes,
+        "conservative_resident_upper_bound_bytes": (conservative_resident_upper_bound),
+        "limit_bytes": EXISTING_IMPORT_MEMORY_LIMIT_BYTES,
+    }
+
+
+async def _persist_target_backup(
+    db: Any,
+    *,
+    corpus_id: str,
+    path: Path,
+) -> dict[str, Any]:
+    """Persist a deterministic Extended-JSON backup before target mutation."""
+
+    output_path = _require_tmp_path(path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = output_path.with_suffix(output_path.suffix + ".partial")
+    count = 0
+    with temp_path.open("w", encoding="utf-8", newline="\n") as handle:
+        cursor = (
+            db[COMPILATION_COLLECTION].find({"corpus_id": corpus_id}).sort("_id", 1)
+        )
+        async for row in cursor:
+            handle.write(
+                json_util.dumps(
+                    row,
+                    json_options=json_util.CANONICAL_JSON_OPTIONS,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                + "\n"
+            )
+            count += 1
+        handle.flush()
+        os.fsync(handle.fileno())
+    temp_path.replace(output_path)
+    return {
+        "row_count": count,
+        "file_bytes": output_path.stat().st_size,
+        "file_sha256": _file_sha256(output_path),
+        "location": "/tmp only; not committed",
+    }
+
+
+def _persist_write_manifest(
+    path: Path,
+    *,
+    corpus_id: str,
+    input_file_sha256: str,
+    source_lineage_sha256: str | None,
+    expected_before_count: int,
+    rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Seal exact prospective row identities before the first Mongo write."""
+
+    output_path = _require_tmp_path(path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = output_path.with_suffix(output_path.suffix + ".partial")
+    ordered = sorted(rows, key=lambda row: str(row["_id"]))
+    with temp_path.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(
+            canonical_json_v1(
+                {
+                    "record_type": "manifest_header",
+                    "schema_version": SCHEMA_VERSION,
+                    "corpus_id": corpus_id,
+                    "input_file_sha256": input_file_sha256,
+                    "source_lineage_sha256": source_lineage_sha256,
+                    "row_count": len(ordered),
+                    "expected_before_count": expected_before_count,
+                    "set_on_insert_only": True,
+                    "rollback_contract": (
+                        "zero-before: delete only this planned _id set"
+                    ),
+                }
+            )
+            + "\n"
+        )
+        for row in ordered:
+            handle.write(canonical_json_v1(row) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    temp_path.replace(output_path)
+    return {
+        "row_count": len(ordered),
+        "file_bytes": output_path.stat().st_size,
+        "file_sha256": _file_sha256(output_path),
+        "location": "/tmp only; not committed",
+    }
 
 
 async def _collection_disclosure(db: Any, corpus_id: str) -> dict[str, int]:
@@ -246,6 +567,27 @@ async def _collection_disclosure(db: Any, corpus_id: str) -> dict[str, int]:
     }
 
 
+async def _target_child_disclosure(db: Any, corpus_id: str) -> dict[str, int]:
+    collection = db[COMPILATION_COLLECTION]
+    rows = await collection.aggregate(
+        [
+            {"$match": {"corpus_id": corpus_id}},
+            {"$group": {"_id": "$child_id", "count": {"$sum": 1}}},
+        ],
+        allowDiskUse=True,
+    ).to_list(length=None)
+    return {
+        "row_count": sum(int(row.get("count") or 0) for row in rows),
+        "unique_child_count": sum(bool(row.get("_id")) for row in rows),
+        "duplicate_child_group_count": sum(
+            int(row.get("count") or 0) > 1 for row in rows
+        ),
+        "missing_child_id_row_count": sum(
+            int(row.get("count") or 0) for row in rows if not row.get("_id")
+        ),
+    }
+
+
 def _receipt_base(
     command: str,
     scope: Scope,
@@ -258,7 +600,18 @@ def _receipt_base(
         "corpus": {
             "name": corpus_name,
             "corpus_id": scope.corpus_id,
-            "eligible_parent_count": len(scope.parents),
+            "parent_scope": (
+                "all_structural_parent_children"
+                if scope.includes_all_parent_children
+                else "eligible_parent_children"
+            ),
+            "selected_parent_count": len(scope.parents),
+            "eligible_parent_count": (
+                None if scope.includes_all_parent_children else len(scope.parents)
+            ),
+            "structural_parent_count": (
+                len(scope.parents) if scope.includes_all_parent_children else None
+            ),
             "unique_child_count": len(scope.child_ids),
             "document_count": len(scope.documents),
         },
@@ -276,6 +629,8 @@ async def _scope_receipt(args: argparse.Namespace) -> dict[str, Any]:
             corpus_name=args.corpus_name,
             expected_parent_count=args.expected_parent_count,
             expected_child_count=args.expected_child_count,
+            include_all_parent_children=args.all_parent_children,
+            expected_corpus_id=args.expected_corpus_id,
         )
         receipt = _receipt_base("scope", scope, corpus_name=args.corpus_name)
         receipt["disclosed_noncanonical_stores"] = {
@@ -295,6 +650,8 @@ async def _ledger_census(args: argparse.Namespace) -> dict[str, Any]:
             corpus_name=args.corpus_name,
             expected_parent_count=args.expected_parent_count,
             expected_child_count=args.expected_child_count,
+            include_all_parent_children=args.all_parent_children,
+            expected_corpus_id=args.expected_corpus_id,
         )
         job_rows = (
             await db[HISTORICAL_JOB_COLLECTION]
@@ -390,6 +747,10 @@ async def _ledger_census(args: argparse.Namespace) -> dict[str, Any]:
 
 
 async def _export(args: argparse.Namespace) -> dict[str, Any]:
+    _require_distinct_paths(
+        output=args.output,
+        source_lineage_output=args.source_lineage_output,
+    )
     output_path = _require_tmp_path(Path(args.output))
     client, db = await _database()
     try:
@@ -398,6 +759,8 @@ async def _export(args: argparse.Namespace) -> dict[str, Any]:
             corpus_name=args.corpus_name,
             expected_parent_count=args.expected_parent_count,
             expected_child_count=args.expected_child_count,
+            include_all_parent_children=args.all_parent_children,
+            expected_corpus_id=args.expected_corpus_id,
         )
         import spacy
 
@@ -406,6 +769,25 @@ async def _export(args: argparse.Namespace) -> dict[str, Any]:
         nlp = spacy.load(SPACY_MODEL)
         if str(nlp.meta.get("version") or "") != SPACY_MODEL_VERSION:
             raise MaterializationError("export spaCy model version is not pinned")
+        existing_claim_rows = (
+            await _load_existing_claim_rows(db, scope)
+            if args.existing_claim_rows
+            else {}
+        )
+        source_lineage_manifest = (
+            _persist_source_lineage_manifest(
+                Path(args.source_lineage_output),
+                scope=scope,
+                rows_by_child=existing_claim_rows,
+            )
+            if args.existing_claim_rows
+            else None
+        )
+        memory_preflight = (
+            _memory_preflight(scope, existing_claim_rows)
+            if args.existing_claim_rows
+            else None
+        )
 
         temp_path = output_path.with_suffix(output_path.suffix + ".partial")
         claim_count = 0
@@ -418,12 +800,23 @@ async def _export(args: argparse.Namespace) -> dict[str, Any]:
             for index, child_id in enumerate(scope.child_ids, 1):
                 child = scope.children[child_id]
                 document = scope.documents[str(child.get("doc_id") or "")]
-                candidate = compile_child_candidate(
-                    corpus_id=scope.corpus_id,
-                    document=document,
-                    child=child,
-                    nlp=nlp,
-                    spacy_library_version=str(spacy.__version__),
+                candidate = (
+                    compile_existing_child_candidate(
+                        corpus_id=scope.corpus_id,
+                        document=document,
+                        child=child,
+                        extraction_row=existing_claim_rows[child_id],
+                        nlp=nlp,
+                        spacy_library_version=str(spacy.__version__),
+                    )
+                    if args.existing_claim_rows
+                    else compile_child_candidate(
+                        corpus_id=scope.corpus_id,
+                        document=document,
+                        child=child,
+                        nlp=nlp,
+                        spacy_library_version=str(spacy.__version__),
+                    )
                 )
                 handle.write(
                     canonical_json_v1(candidate.model_dump(mode="python")) + "\n"
@@ -444,6 +837,17 @@ async def _export(args: argparse.Namespace) -> dict[str, Any]:
                     print(f"progress_children={index}", flush=True)
         if len(compiler_hashes) != 1:
             raise MaterializationError("compiler recipe hash drifted during export")
+        expected_metrics = {
+            "claim": (args.expected_claim_count, claim_count),
+            "typed claim": (args.expected_typed_claim_count, typed_count),
+            "claim link": (args.expected_claim_link_count, link_count),
+            "evidence sentence": (args.expected_evidence_count, evidence_count),
+        }
+        for label, (expected, actual) in expected_metrics.items():
+            if expected is not None and actual != expected:
+                raise MaterializationError(
+                    f"{label} census drifted: expected {expected}, found {actual}"
+                )
         temp_path.replace(output_path)
         receipt = _receipt_base("export", scope, corpus_name=args.corpus_name)
         receipt.update(
@@ -453,6 +857,11 @@ async def _export(args: argparse.Namespace) -> dict[str, Any]:
                     "spacy_model": SPACY_MODEL,
                     "spacy_model_version": str(nlp.meta.get("version") or ""),
                     "parser_version": PARSER_VERSION,
+                    "claim_body_source": (
+                        "ghost_b_extractions.claim_compilation"
+                        if args.existing_claim_rows
+                        else "deterministic_raw_child_recompile"
+                    ),
                 },
                 "export": {
                     "row_count": len(scope.child_ids),
@@ -466,6 +875,8 @@ async def _export(args: argparse.Namespace) -> dict[str, Any]:
                     "file_bytes": output_path.stat().st_size,
                     "raw_output_location": "/tmp only; not committed",
                 },
+                "source_lineage_manifest": source_lineage_manifest,
+                "memory_preflight": memory_preflight,
                 "writes": 0,
                 "disclosed_noncanonical_stores": {
                     COMPILATION_COLLECTION: await _collection_disclosure(
@@ -496,7 +907,25 @@ def _candidate_lines(
                 ) from exc
 
 
+def _materialization_time(value: str | None) -> datetime:
+    if value is None:
+        return datetime.now(timezone.utc)
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise MaterializationError("materialization time is not ISO-8601") from exc
+    if parsed.tzinfo is None:
+        raise MaterializationError("materialization time must be timezone-aware")
+    return parsed.astimezone(timezone.utc)
+
+
 async def _import(args: argparse.Namespace) -> dict[str, Any]:
+    _require_distinct_paths(
+        input=args.input,
+        before_census_output=args.before_census_output,
+        before_backup_output=args.before_backup_output,
+        write_manifest_output=args.write_manifest_output,
+    )
     input_path = _require_tmp_path(Path(args.input))
     actual_sha = _file_sha256(input_path)
     if actual_sha != args.expected_file_sha256:
@@ -508,10 +937,35 @@ async def _import(args: argparse.Namespace) -> dict[str, Any]:
             corpus_name=args.corpus_name,
             expected_parent_count=args.expected_parent_count,
             expected_child_count=args.expected_child_count,
+            include_all_parent_children=args.all_parent_children,
+            expected_corpus_id=args.expected_corpus_id,
         )
-        materialization_time = datetime.now(timezone.utc)
+        materialization_time = _materialization_time(args.materialization_time_utc)
+        existing_claim_rows = (
+            await _load_existing_claim_rows(db, scope)
+            if args.existing_claim_rows
+            else {}
+        )
+        source_lineage_sha256 = (
+            _source_lineage_sha256(scope, existing_claim_rows)
+            if args.existing_claim_rows
+            else None
+        )
+        if (
+            args.existing_claim_rows
+            and source_lineage_sha256 != args.expected_source_lineage_sha256
+        ):
+            raise MaterializationError(
+                "current existing-claim source lineage SHA-256 drifted"
+            )
+        memory_preflight = (
+            _memory_preflight(scope, existing_claim_rows)
+            if args.existing_claim_rows
+            else None
+        )
         seen: set[str] = set()
         validation_rows = 0
+        planned_rows: list[dict[str, Any]] = []
         for _line_number, candidate in _candidate_lines(input_path):
             if candidate.child_id in seen:
                 raise MaterializationError(
@@ -522,6 +976,26 @@ async def _import(args: argparse.Namespace) -> dict[str, Any]:
             if child is None:
                 raise MaterializationError("candidate export contains an unknown child")
             document = scope.documents[str(child.get("doc_id") or "")]
+            raw_artifact_ids: tuple[str, ...] = ()
+            provenance: dict[str, Any] = {}
+            if args.existing_claim_rows:
+                persisted = ClaimCompilationV1.model_validate(
+                    existing_claim_rows[candidate.child_id]["claim_compilation"]
+                )
+                raw_artifact_id = str(
+                    existing_claim_rows[candidate.child_id].get(
+                        "raw_output_artifact_id"
+                    )
+                    or ""
+                ).strip()
+                if persisted != candidate.compilation:
+                    raise MaterializationError(
+                        "candidate claim body drifted from durable extraction source"
+                    )
+                raw_artifact_ids = (raw_artifact_id,)
+                provenance = _existing_provenance(
+                    existing_claim_rows[candidate.child_id]
+                )
             validated_row = materialize_candidate_row(
                 candidate,
                 corpus_id=scope.corpus_id,
@@ -529,9 +1003,28 @@ async def _import(args: argparse.Namespace) -> dict[str, Any]:
                 child=child,
                 run_id=args.run_id,
                 now=materialization_time,
+                raw_artifact_ids=raw_artifact_ids,
+                **provenance,
             )
             parse_materialized_row_document(
                 validated_row.model_dump(mode="python", by_alias=True)
+            )
+            planned_rows.append(
+                {
+                    "record_type": "planned_row",
+                    "_id": validated_row.row_id,
+                    "document_id": validated_row.document_id,
+                    "child_id": validated_row.child_id,
+                    "body_hash": validated_row.envelope.integrity.body_hash,
+                    "raw_artifact_ids": list(
+                        validated_row.envelope.provenance.raw_artifact_ids
+                    ),
+                    "provenance_producer_kind": (
+                        validated_row.envelope.provenance.producer_kind
+                    ),
+                    "provenance_engine": (validated_row.envelope.provenance.engine),
+                    "expected_disposition": "insert_if_absent",
+                }
             )
             validation_rows += 1
         if seen != set(scope.child_ids) or validation_rows != len(scope.child_ids):
@@ -540,6 +1033,36 @@ async def _import(args: argparse.Namespace) -> dict[str, Any]:
         settings = get_settings()
         canonical_before = await _canonical_store_census(db=db, settings=settings)
         collection_before = await _collection_disclosure(db, scope.corpus_id)
+        child_disclosure_before = await _target_child_disclosure(db, scope.corpus_id)
+        if args.existing_claim_rows and (
+            args.expected_before_count != 0
+            or collection_before["row_count"] != args.expected_before_count
+            or child_disclosure_before["row_count"] != 0
+        ):
+            raise MaterializationError(
+                "existing-claim import is a zero-before first-fill operation"
+            )
+        target_backup = (
+            await _persist_target_backup(
+                db,
+                corpus_id=scope.corpus_id,
+                path=Path(args.before_backup_output),
+            )
+            if args.before_backup_output
+            else None
+        )
+        write_manifest = (
+            _persist_write_manifest(
+                Path(args.write_manifest_output),
+                corpus_id=scope.corpus_id,
+                input_file_sha256=actual_sha,
+                source_lineage_sha256=source_lineage_sha256,
+                expected_before_count=int(args.expected_before_count or 0),
+                rows=planned_rows,
+            )
+            if args.write_manifest_output
+            else None
+        )
         before_census_file = _persist_before_census(
             Path(args.before_census_output),
             {
@@ -549,15 +1072,25 @@ async def _import(args: argparse.Namespace) -> dict[str, Any]:
                 "corpus": {
                     "name": args.corpus_name,
                     "corpus_id": scope.corpus_id,
-                    "eligible_parent_count": len(scope.parents),
+                    "parent_scope": (
+                        "all_structural_parent_children"
+                        if scope.includes_all_parent_children
+                        else "eligible_parent_children"
+                    ),
+                    "selected_parent_count": len(scope.parents),
                     "unique_child_count": len(scope.child_ids),
                     "document_count": len(scope.documents),
                 },
                 "input_file_sha256": actual_sha,
+                "source_lineage_sha256": source_lineage_sha256,
                 "disclosed_noncanonical_stores": {
                     COMPILATION_COLLECTION: collection_before
                 },
+                "target_child_disclosure": child_disclosure_before,
                 "protected_canonical_store_census": canonical_before,
+                "target_collection_backup": target_backup,
+                "prospective_write_manifest": write_manifest,
+                "memory_preflight": memory_preflight,
                 "provider_calls": 0,
                 "canonical_writes": 0,
                 "writes_before_receipt_persisted": 0,
@@ -570,6 +1103,23 @@ async def _import(args: argparse.Namespace) -> dict[str, Any]:
         for _line_number, candidate in _candidate_lines(input_path):
             child = scope.children[candidate.child_id]
             document = scope.documents[str(child.get("doc_id") or "")]
+            raw_artifact_ids = (
+                (
+                    str(
+                        existing_claim_rows[candidate.child_id].get(
+                            "raw_output_artifact_id"
+                        )
+                        or ""
+                    ).strip(),
+                )
+                if args.existing_claim_rows
+                else ()
+            )
+            provenance = (
+                _existing_provenance(existing_claim_rows[candidate.child_id])
+                if args.existing_claim_rows
+                else {}
+            )
             row = materialize_candidate_row(
                 candidate,
                 corpus_id=scope.corpus_id,
@@ -577,6 +1127,8 @@ async def _import(args: argparse.Namespace) -> dict[str, Any]:
                 child=child,
                 run_id=args.run_id,
                 now=materialization_time,
+                raw_artifact_ids=raw_artifact_ids,
+                **provenance,
             )
             rows_for_readback.append(row.row_id)
             batch.append(
@@ -597,6 +1149,12 @@ async def _import(args: argparse.Namespace) -> dict[str, Any]:
             result = await db[COMPILATION_COLLECTION].bulk_write(batch, ordered=True)
             inserted += int(getattr(result, "upserted_count", 0) or 0)
             reused += len(batch) - int(getattr(result, "upserted_count", 0) or 0)
+        if args.existing_claim_rows and (
+            inserted != len(scope.child_ids) or reused != 0
+        ):
+            raise MaterializationError(
+                "zero-before first fill did not insert the exact planned row set"
+            )
 
         readback_children: set[str] = set()
         readback_cursor = (
@@ -616,12 +1174,49 @@ async def _import(args: argparse.Namespace) -> dict[str, Any]:
                 document=document,
                 child=child,
             )
+            if args.existing_claim_rows:
+                expected_raw_artifact_id = str(
+                    existing_claim_rows[row.child_id].get("raw_output_artifact_id")
+                    or ""
+                ).strip()
+                if row.envelope.provenance.raw_artifact_ids != (
+                    expected_raw_artifact_id,
+                ):
+                    raise MaterializationError(
+                        "post-insert raw artifact lineage drifted"
+                    )
+                expected_provenance = _existing_provenance(
+                    existing_claim_rows[row.child_id]
+                )
+                if (
+                    row.envelope.provenance.producer_kind
+                    != expected_provenance["provenance_producer_kind"]
+                    or row.envelope.provenance.engine
+                    != expected_provenance["provenance_engine"]
+                    or row.envelope.provenance.model_id
+                    != expected_provenance["provenance_model_id"]
+                    or row.envelope.provenance.model_revision
+                    != expected_provenance["provenance_model_revision"]
+                ):
+                    raise MaterializationError(
+                        "post-insert materialization provenance drifted"
+                    )
             readback_children.add(row.child_id)
         if readback_children != set(scope.child_ids):
             raise MaterializationError("post-insert child set does not close")
         collection_after = await _collection_disclosure(db, scope.corpus_id)
+        child_disclosure_after = await _target_child_disclosure(db, scope.corpus_id)
         if collection_after["canonical_or_missing_flag_count"] != 0:
             raise MaterializationError("noncanonical collection contains unsafe flags")
+        if args.existing_claim_rows and child_disclosure_after != {
+            "row_count": len(scope.child_ids),
+            "unique_child_count": len(scope.child_ids),
+            "duplicate_child_group_count": 0,
+            "missing_child_id_row_count": 0,
+        }:
+            raise MaterializationError(
+                "post-insert target child uniqueness/closure drifted"
+            )
         canonical_after = await _canonical_store_census(db=db, settings=settings)
         canonical_census = _canonical_store_census_receipt(
             canonical_before,
@@ -650,8 +1245,16 @@ async def _import(args: argparse.Namespace) -> dict[str, Any]:
                         "after": collection_after,
                     }
                 },
+                "target_child_disclosure": {
+                    "before": child_disclosure_before,
+                    "after": child_disclosure_after,
+                },
                 "protected_canonical_store_census": canonical_census,
                 "persisted_before_census_receipt": before_census_file,
+                "persisted_target_backup": target_backup,
+                "persisted_write_manifest": write_manifest,
+                "source_lineage_sha256": source_lineage_sha256,
+                "memory_preflight": memory_preflight,
                 "writes": inserted,
             }
         )
@@ -722,6 +1325,8 @@ async def _packet_census(args: argparse.Namespace) -> dict[str, Any]:
             corpus_name=args.corpus_name,
             expected_parent_count=args.expected_parent_count,
             expected_child_count=args.expected_child_count,
+            include_all_parent_children=args.all_parent_children,
+            expected_corpus_id=args.expected_corpus_id,
         )
         rows_by_child: dict[str, ClaimCompilationMaterializationRowV1] = {}
         row_cursor = (
@@ -1021,13 +1626,26 @@ def _parser() -> argparse.ArgumentParser:
         choices=("scope", "ledger-census", "export", "import", "packet-census"),
     )
     parser.add_argument("--corpus-name", default=DEFAULT_CORPUS_NAME)
+    parser.add_argument("--expected-corpus-id")
     parser.add_argument("--expected-parent-count", type=int, default=795)
     parser.add_argument("--expected-child-count", type=int)
+    parser.add_argument("--expected-claim-count", type=int)
+    parser.add_argument("--expected-typed-claim-count", type=int)
+    parser.add_argument("--expected-claim-link-count", type=int)
+    parser.add_argument("--expected-evidence-count", type=int)
+    parser.add_argument("--all-parent-children", action="store_true")
+    parser.add_argument("--existing-claim-rows", action="store_true")
     parser.add_argument("--output")
+    parser.add_argument("--source-lineage-output")
     parser.add_argument("--input")
     parser.add_argument("--expected-file-sha256")
+    parser.add_argument("--expected-source-lineage-sha256")
+    parser.add_argument("--expected-before-count", type=int)
     parser.add_argument("--run-id")
     parser.add_argument("--before-census-output")
+    parser.add_argument("--before-backup-output")
+    parser.add_argument("--write-manifest-output")
+    parser.add_argument("--materialization-time-utc")
     parser.add_argument("--max-entities", type=int, default=40)
     parser.add_argument("--expected-accepted-count", type=int, default=66)
     parser.add_argument("--expected-dead-letter-count", type=int, default=6)
@@ -1040,6 +1658,16 @@ def _parser() -> argparse.ArgumentParser:
 
 
 async def _run(args: argparse.Namespace) -> dict[str, Any]:
+    if args.existing_claim_rows and not args.all_parent_children:
+        raise MaterializationError(
+            "existing-claim materialization requires all parent children"
+        )
+    if args.command not in {"scope", "export", "import"} and (
+        args.all_parent_children or args.existing_claim_rows
+    ):
+        raise MaterializationError(
+            "all-parent/existing-claim modes are limited to scope, export, and import"
+        )
     if args.command == "scope":
         return await _scope_receipt(args)
     if args.command == "ledger-census":
@@ -1050,6 +1678,10 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
         if not args.output or args.expected_child_count is None:
             raise MaterializationError(
                 "export requires output and expected child count"
+            )
+        if args.existing_claim_rows and not args.source_lineage_output:
+            raise MaterializationError(
+                "existing-claim export requires source lineage output"
             )
         return await _export(args)
     if args.command == "import":
@@ -1065,6 +1697,19 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
             raise MaterializationError(
                 "import requires input, expected SHA, run ID, BEFORE-census output, "
                 "and expected child count"
+            )
+        if args.existing_claim_rows and not all(
+            (
+                args.before_backup_output,
+                args.write_manifest_output,
+                args.materialization_time_utc,
+                args.expected_source_lineage_sha256,
+                args.expected_before_count is not None,
+            )
+        ):
+            raise MaterializationError(
+                "existing-claim import requires target backup, write manifest, "
+                "and fixed materialization time"
             )
         return await _import(args)
     if args.command == "packet-census":

@@ -68,6 +68,50 @@ _GENERIC_SOURCE_REFERENCE_TOKENS = frozenset(
         "this",
     }
 )
+_NAMED_SOURCE_SHAPE_GENERIC_TOKENS = frozenset(
+    {
+        *_GENERIC_SOURCE_REFERENCE_TOKENS,
+        "actor",
+        "actors",
+        "and",
+        "animator",
+        "animators",
+        "artist",
+        "artists",
+        "both",
+        "camera",
+        "cinematographer",
+        "cinematographers",
+        "director",
+        "directors",
+        "drawing",
+        "each",
+        "editor",
+        "editors",
+        "expert",
+        "experts",
+        "film",
+        "instructor",
+        "instructors",
+        "or",
+        "researcher",
+        "researchers",
+        "scholar",
+        "scholars",
+        "teacher",
+        "teachers",
+        "visual",
+        "writer",
+        "writers",
+    }
+)
+_NAMED_SOURCE_WORD_RE = re.compile(r"[A-Za-z][A-Za-z'’\-]*")
+_POSSESSIVE_AUTHOR_RE = re.compile(
+    r"\b(?P<author>[A-Za-z][A-Za-z\-]*"
+    r"(?:\s+[A-Za-z][A-Za-z\-]*){0,3})"
+    r"(?:['’]s\b|['’](?=\s|$))"
+)
+_QUOTE_PAIRS = (('"', '"'), ("'", "'"), ("“", "”"), ("‘", "’"))
 
 
 def _stable_json(value: object) -> bytes:
@@ -166,16 +210,57 @@ def _normalized_anchor_docs(rows: Sequence[Mapping[str, Any]]) -> list[dict[str,
     return output
 
 
+def _phrase_is_quoted(query: str, phrase: str) -> bool:
+    normalized_query = " ".join(str(query or "").split()).casefold()
+    normalized_phrase = " ".join(str(phrase or "").split()).casefold()
+    return any(
+        f"{left}{normalized_phrase}{right}" in normalized_query
+        for left, right in _QUOTE_PAIRS
+    )
+
+
+def _phrase_has_possessive_author(phrase: str) -> bool:
+    for match in _POSSESSIVE_AUTHOR_RE.finditer(phrase):
+        author_tokens = [
+            token.casefold()
+            for token in _NAMED_SOURCE_WORD_RE.findall(match.group("author"))
+        ]
+        if (
+            author_tokens
+            and author_tokens[-1] not in _NAMED_SOURCE_SHAPE_GENERIC_TOKENS
+        ):
+            return True
+    return False
+
+
+def _title_shaped_named_source(query: str, phrase: str) -> bool:
+    """Reject bare roles while preserving explicit title/author surfaces."""
+
+    if _phrase_is_quoted(query, phrase) or _phrase_has_possessive_author(phrase):
+        return True
+    return any(
+        token[0].isupper()
+        and token.casefold() not in _NAMED_SOURCE_SHAPE_GENERIC_TOKENS
+        for token in _NAMED_SOURCE_WORD_RE.findall(phrase)
+    )
+
+
+def _eligible_named_source_phrases(query: str) -> tuple[str, ...]:
+    output: list[str] = []
+    for phrase in named_source_phrases(query):
+        distinctive_tokens = {
+            token for token in re.findall(r"[a-z0-9]+", phrase.casefold()) if token
+        } - _GENERIC_SOURCE_REFERENCE_TOKENS
+        if distinctive_tokens and _title_shaped_named_source(query, phrase):
+            output.append(phrase)
+    return tuple(output)
+
+
 def _matched_named_documents(
     query: str,
     rows: Sequence[Mapping[str, Any]],
 ) -> tuple[tuple[str, ...], tuple[str, ...]]:
-    phrases = tuple(
-        phrase
-        for phrase in named_source_phrases(query)
-        if {token for token in re.findall(r"[a-z0-9]+", phrase.casefold()) if token}
-        - _GENERIC_SOURCE_REFERENCE_TOKENS
-    )
+    phrases = _eligible_named_source_phrases(query)
     if not phrases:
         return (), ()
     normalized_rows = _normalized_anchor_docs(rows)
@@ -348,21 +433,27 @@ def _temporal_catalog(
     temporal_rows: Sequence[Mapping[str, Any]],
 ) -> dict[str, Any]:
     years: set[int] = set()
+    document_years: set[int] = set()
     for row in documents:
         for field in ("document_date", "source_published_at"):
             year = _date_year(row.get(field))
             if year is not None:
                 years.add(year)
+                document_years.add(year)
     expression_rows = _time_expression_rows(temporal_rows)
+    expression_years: set[int] = set()
     for row in expression_rows:
         for expression in row["time_expressions"]:
             year = _date_year(expression.get("text"))
             if year is not None:
                 years.add(year)
+                expression_years.add(year)
     return {
         "min_year": min(years) if years else None,
         "max_year": max(years) if years else None,
         "year_count": len(years),
+        "document_years": sorted(document_years),
+        "expression_years": sorted(expression_years),
         "expression_rows": expression_rows,
     }
 
@@ -521,15 +612,17 @@ async def build_corpus_scope_v3_context(
             intent,
         )
         exact_surfaces.update(details.get("exact_surfaces") or [])
+    catalog_exact_years = {
+        int(year)
+        for key in ("document_years", "expression_years")
+        for year in (catalog.get(key) or [])
+    }
+    exact_surfaces.update(
+        str(year) for year in query_years if year in catalog_exact_years
+    )
     min_year = catalog.get("min_year")
     max_year = catalog.get("max_year")
-    out_of_range = bool(
-        query_years
-        and min_year is not None
-        and max_year is not None
-        and all(year < int(min_year) or year > int(max_year) for year in query_years)
-        and not exact_surfaces
-    )
+    out_of_range = bool(query_years and temporal_complete and not exact_surfaces)
     base["temporal"] = {
         "eligible": bool(intent.active and query_years),
         "complete": temporal_complete,
@@ -541,6 +634,7 @@ async def build_corpus_scope_v3_context(
         "corpus_min_year": min_year,
         "corpus_max_year": max_year,
         "exact_support": sorted(exact_surfaces),
+        "support_basis": "exact_time_expressions_or_document_dates",
         "out_of_range": out_of_range,
         "detector_error": intent.detector_error,
     }

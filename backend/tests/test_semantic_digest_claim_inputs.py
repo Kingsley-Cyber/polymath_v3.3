@@ -12,6 +12,7 @@ from pydantic import ValidationError
 
 from models.claim_record import ClaimArgumentV1, ClaimCompilationV1, ClaimRecordV1
 from models.hash_taxonomy import canonical_json_v1, namespace_hash
+from models.local_extraction import EntityMention
 from models.semantic_artifacts import domain_hash, make_evidence_ref
 from models.semantic_digest_claim_input import (
     CompiledChildCandidateExportV1,
@@ -32,7 +33,10 @@ from models.semantic_parent_packet import (
 )
 from models.semantic_digest import SemanticDigestV1
 from models.semantic_validator import semantic_validate
-from services.ingestion.claim_compiler import claim_compiler_recipe_hash
+from services.ingestion.claim_compiler import (
+    claim_compiler_recipe_hash,
+    compile_claim_records_v1,
+)
 from services.ingestion.semantic_digest_claim_inputs import (
     PARSER_VERSION,
     SPACY_MODEL,
@@ -43,6 +47,7 @@ from services.ingestion.semantic_digest_claim_inputs import (
     build_bounded_atomic_parent_packet,
     build_sentence_hybrid_parent_packet,
     compile_child_candidate,
+    compile_existing_child_candidate,
     document_source_version_id,
     expand_sentence_claim_ids,
     materialize_candidate_row,
@@ -51,6 +56,8 @@ from services.ingestion.semantic_digest_claim_inputs import (
     validate_materialized_row_against_source,
 )
 from services.ingestion.semantic_observations import (
+    build_spacy_observation_bundle,
+    compile_local_extraction_v1,
     load_normalization_identity,
     local_extraction_recipe_hash,
     semantic_observation_recipe_hash,
@@ -353,6 +360,10 @@ def test_materialized_row_is_typed_immutable_and_noncanonical() -> None:
     assert row.status == "candidate"
     assert row.envelope.artifact_state == "candidate"
     assert row.envelope.knowledge_status is None
+    assert row.envelope.provenance.producer_kind == "spacy"
+    assert row.envelope.provenance.engine == "spacy"
+    assert row.envelope.provenance.model_id == "en_core_web_sm"
+    assert row.envelope.provenance.raw_artifact_ids == ()
     assert row.envelope.body.schema_version == "claim_compilation.v1"
     validate_materialized_row_against_source(
         row,
@@ -360,6 +371,30 @@ def test_materialized_row_is_typed_immutable_and_noncanonical() -> None:
         document=_document(),
         child=_child(),
     )
+
+
+def test_materialized_revision_identity_is_run_and_time_independent() -> None:
+    candidate = _candidate()
+    first = materialize_candidate_row(
+        candidate,
+        corpus_id="corpus:test",
+        document=_document(),
+        child=_child(),
+        run_id="run:first",
+        now=dt.datetime(2026, 7, 18, 20, 0, tzinfo=dt.timezone.utc),
+    )
+    second = materialize_candidate_row(
+        candidate,
+        corpus_id="corpus:test",
+        document=_document(),
+        child=_child(),
+        run_id="run:second",
+        now=dt.datetime(2026, 7, 19, 20, 0, tzinfo=dt.timezone.utc),
+    )
+
+    assert first.row_id == second.row_id
+    assert first.envelope.integrity == second.envelope.integrity
+    assert first.envelope.body == second.envelope.body
 
 
 def test_materialized_row_survives_strict_bson_json_round_trip() -> None:
@@ -834,3 +869,93 @@ def test_trained_spacy_compiles_a_real_atomic_candidate() -> None:
     assert all(
         item.knowledge_status == "candidate" for item in candidate.compilation.claims
     )
+
+
+def test_existing_claim_candidate_revalidates_durable_claim_body() -> None:
+    spacy = pytest.importorskip("spacy")
+    try:
+        nlp = spacy.load("en_core_web_sm")
+    except OSError:
+        pytest.skip("trained spaCy model is not installed")
+    document = _document()
+    child = _child("Discounts decrease reference prices.")
+    source_version = document_source_version_id(document)
+    bundle = build_spacy_observation_bundle(
+        text=child["text"],
+        nlp=nlp,
+        source_version_id=source_version,
+        hierarchy_node_id=child["chunk_id"],
+        parser_id=SPACY_MODEL,
+        parser_version=PARSER_VERSION,
+    )
+    local = compile_local_extraction_v1(
+        bundle,
+        document_id=document["doc_id"],
+        child_id=child["chunk_id"],
+    ).extraction
+    local = local.model_copy(
+        update={
+            "entities": [
+                EntityMention(
+                    mention_id="mention:discounts",
+                    text="Discounts",
+                    entity_type="CONCEPT",
+                    start_char=0,
+                    end_char=9,
+                    canonical_label="discounts",
+                    confidence=0.99,
+                )
+            ]
+        }
+    )
+    compilation = compile_claim_records_v1(bundle=bundle, extraction=local)
+    source = {
+        "corpus_id": "corpus:test",
+        "doc_id": document["doc_id"],
+        "chunk_id": child["chunk_id"],
+        "status": "ok",
+        "schema_version": "polymath.extract.local_extraction.v1",
+        "source_version_id": source_version,
+        "raw_output_artifact_id": "raw-artifact:test",
+        "local_extraction": local.model_dump(mode="python"),
+        "claim_compilation": compilation.model_dump(mode="python"),
+    }
+
+    candidate = compile_existing_child_candidate(
+        corpus_id="corpus:test",
+        document=document,
+        child=child,
+        extraction_row=source,
+        nlp=nlp,
+        spacy_library_version=str(spacy.__version__),
+    )
+
+    assert candidate.compilation == compilation
+    assert candidate.evidence_refs == bundle.evidence_refs
+    row = materialize_candidate_row(
+        candidate,
+        corpus_id="corpus:test",
+        document=document,
+        child=child,
+        run_id="run:existing",
+        now=dt.datetime(2026, 7, 18, 23, 58, tzinfo=dt.timezone.utc),
+        raw_artifact_ids=("raw-artifact:test",),
+        provenance_producer_kind="migration",
+        provenance_engine="existing_ghost_claim_materializer.v1",
+        provenance_model_id="urchade/gliner_medium-v2.1",
+        provenance_model_revision="revision:test",
+    )
+    assert row.envelope.provenance.raw_artifact_ids == ("raw-artifact:test",)
+    assert row.envelope.provenance.producer_kind == "migration"
+    assert row.envelope.provenance.engine == "existing_ghost_claim_materializer.v1"
+    assert row.envelope.provenance.model_id == "urchade/gliner_medium-v2.1"
+    assert candidate.compilation.claims
+    with pytest.raises(ClaimInputError, match="status drifted"):
+        compile_existing_child_candidate(
+            corpus_id="corpus:test",
+            document=document,
+            child=child,
+            extraction_row={**source, "status": "failed"},
+            nlp=nlp,
+            spacy_library_version=str(spacy.__version__),
+        )

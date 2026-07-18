@@ -901,6 +901,46 @@ async def _build_librarian_plan_trace(
             "plan": result.plan.model_dump(mode="json"),
             "diagnostics": dict(result.diagnostics),
         }
+    except TimeoutError as exc:
+        fallback_builder = getattr(
+            planner_service,
+            "build_deterministic_timeout_fallback",
+            None,
+        )
+        fallback_result = None
+        if callable(fallback_builder):
+            try:
+                fallback_result = fallback_builder(
+                    query,
+                    corpus_ids=corpus_ids,
+                    requested_tier=requested_tier,
+                )
+            except Exception:  # noqa: BLE001 - retain the ordinary degraded trace
+                fallback_result = None
+        fallback_plan = getattr(fallback_result, "plan", None)
+        if fallback_plan is not None and fallback_plan.shape != "simple":
+            return {
+                "mode": "enabled_degraded" if enabled else "shadow",
+                "behavior_applied": bool(enabled),
+                "plan": fallback_plan.model_dump(mode="json"),
+                "diagnostics": {
+                    **dict(getattr(fallback_result, "diagnostics", {}) or {}),
+                    "status": "degraded_deterministic_fallback",
+                    "reason": f"{type(exc).__name__}: {exc}"[:300],
+                },
+            }
+        return {
+            "mode": "enabled_degraded" if enabled else "shadow",
+            "behavior_applied": False,
+            "plan": None,
+            "diagnostics": {
+                "status": "degraded",
+                "reason": f"{type(exc).__name__}: {exc}"[:300],
+                "provider_calls": 0,
+                "provider_attempts": 0,
+                "silent_fallback_count": 1,
+            },
+        }
     except Exception as exc:  # noqa: BLE001 - shadow failures are traced, not hidden
         provider_attempts = int(getattr(exc, "provider_attempts", 0) or 0)
         return {
@@ -7432,6 +7472,14 @@ class ChatOrchestrator:
                     and librarian_plan_trace.get("behavior_applied") is True
                     else None
                 ),
+                librarian_refinement_enabled=bool(
+                    getattr(
+                        settings,
+                        "LIBRARIAN_LLM_DECOMPOSER_ENABLED",
+                        False,
+                    )
+                ),
+                librarian_refinement_user_id=user_id,
             )
         elif reasoning_mode == "atomic":
             from services.reasoning import atomic_retrieve

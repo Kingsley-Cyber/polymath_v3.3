@@ -45,6 +45,38 @@ _KIND_TO_POOL_FIELD = {
     "synthesis": "synthesis",
 }
 
+_SETTINGS_API_KEY_REF_KIND = "settings_api_key.v1"
+
+
+async def _referenced_api_key_for_entry(entry: dict) -> str | None:
+    """Resolve an operator-managed system credential reference.
+
+    The pool row stores only an exact settings-record identity. Ciphertext is
+    neither copied into the row nor exposed to callers; the settings service
+    decrypts the referenced value only at dispatch time.
+    """
+
+    reference = entry.get("credential_ref")
+    if not isinstance(reference, dict):
+        return None
+    if (
+        reference.get("kind") != _SETTINGS_API_KEY_REF_KIND
+        or reference.get("scope") != "system"
+    ):
+        return None
+    provider = str(reference.get("provider") or "").strip().lower()
+    entry_provider = str(entry.get("provider") or "").strip().lower()
+    settings_user_id = str(reference.get("settings_user_id") or "").strip()
+    if not provider or provider != entry_provider or not settings_user_id:
+        return None
+
+    from services.settings import settings_service
+
+    return await settings_service.get_plaintext_key_by_reference(
+        settings_user_id=settings_user_id,
+        provider=provider,
+    )
+
 
 async def _shared_api_key_for_entry(
     user_id: str,
@@ -100,6 +132,8 @@ async def resolve_by_entry_id(user_id: str | None, entry_id: str) -> dict | None
         model_name = str(entry.get("model_name") or "").strip()
         ct = entry.get("api_key_ciphertext")
         plaintext = decrypt(ct) if ct else None
+        if not plaintext:
+            plaintext = await _referenced_api_key_for_entry(entry)
         if not plaintext:
             plaintext = await _shared_api_key_for_entry(user_id, entry, model_name)
         base_url = entry.get("base_url")

@@ -1,0 +1,129 @@
+{
+  "schema_version": "runpod_e2e_corpus_identity_radius.v1",
+  "finding": "content-derived instance identities must be unique by (corpus_id, content_id); Entity remains intentionally global",
+  "stores": {
+    "mongo_documents": {
+      "current_contract": "compound unique (corpus_id, doc_id)",
+      "verdict": "already safe"
+    },
+    "mongo_chunks": {
+      "current_contract": "compound unique (chunk_id, corpus_id)",
+      "verdict": "writes safe; several retrieval hydration maps incorrectly key only by chunk_id"
+    },
+    "mongo_summary_tree": {
+      "current_contract": "non-unique node_id index; writer replaces by node_id only",
+      "verdict": "unsafe writer; existing reads/deletes are corpus-scoped",
+      "files": [
+        "backend/services/ingestion/summary_tree.py",
+        "backend/services/ingestion/summary_jobs.py",
+        "backend/services/ingestion/batches.py",
+        "backend/services/ingestion/readiness.py",
+        "backend/services/retriever/summary_tree_navigator.py",
+        "backend/services/retriever/vocabulary.py",
+        "backend/services/storage/mongo_writer.py"
+      ]
+    },
+    "neo4j_document_chunk_fact": {
+      "current_contract": "global single-property uniqueness and MERGE, followed by corpus_id overwrite",
+      "verdict": "unsafe",
+      "files": [
+        "backend/services/graph/schema.py",
+        "backend/services/graph/neo4j_writer.py",
+        "backend/services/portability.py",
+        "backend/services/graph/entity_dedup/apply.py",
+        "backend/scripts/backfill_doc_anchors.py"
+      ]
+    },
+    "neo4j_entity": {
+      "current_contract": "global entity_id with corpus support accumulated through mentions/relations",
+      "verdict": "intentionally shared; must not be corpus-qualified"
+    }
+  },
+  "writer_and_admin_actions": [
+    {
+      "symbol": "summary_tree.build_and_store_tree",
+      "action": "replace by corpus_id + node_id and establish compound index"
+    },
+    {
+      "symbol": "graph.schema.initialize_schema",
+      "action": "migrate Document, Chunk, and Fact uniqueness from single-property to corpus-qualified constraints"
+    },
+    {
+      "symbol": "graph.neo4j_writer._upsert_document",
+      "action": "MERGE by corpus_id + doc_id; never SET corpus_id"
+    },
+    {
+      "symbol": "graph.neo4j_writer.update_document_anchor_metrics",
+      "action": "require corpus_id for point update"
+    },
+    {
+      "symbol": "graph.neo4j_writer._upsert_chunk and batched chunk writer",
+      "action": "MERGE by corpus_id + chunk_id; never SET corpus_id"
+    },
+    {
+      "symbol": "graph.neo4j_writer fact writer",
+      "action": "MERGE by corpus_id + fact_id; fact identity derives from doc/chunk and otherwise collides"
+    },
+    {
+      "symbol": "graph.neo4j_writer relation provenance and prune",
+      "action": "use corpus-qualified evidence references so same raw chunk_id in two corpora cannot be removed as one support"
+    },
+    {
+      "symbol": "portability.restore_portability_archive",
+      "action": "MERGE/MATCH Document, Chunk, Fact and their relationships by corpus-qualified properties"
+    },
+    {
+      "symbol": "entity_dedup snapshot/undo",
+      "action": "snapshot corpus_id with Chunk/Fact references and use it during undo; Entity merge remains global"
+    }
+  ],
+  "retrieval_and_api_actions": [
+    {
+      "symbol": "retriever.graph_rerank",
+      "action": "query and score by (corpus_id, chunk_id), not chunk_id"
+    },
+    {
+      "symbol": "retriever.mode_a",
+      "action": "carry seed instance pairs through Neo4j and Mongo; key payload, noise, merge, and cache maps by corpus + chunk"
+    },
+    {
+      "symbol": "retriever.graph_decoration",
+      "action": "carry winner/evidence instance pairs through both graph walks"
+    },
+    {
+      "symbol": "retriever.hydrate",
+      "action": "hydrate and map chunk/parent/document instances with corpus in the key"
+    },
+    {
+      "symbol": "retriever._drop_noisy_fact_seed_chunks and chat_orchestrator._drop_noisy_retrieval_chunks",
+      "action": "noise decisions use corpus + chunk pairs"
+    },
+    {
+      "symbol": "graph.queries.get_book_drilldown and routers.graph.graph_book_drilldown",
+      "action": "require the anchor corpus_id with doc_id"
+    },
+    {
+      "symbol": "graph.neo4j_reader.get_documents_as_clusters and routers.graph graph_by_document enrichment",
+      "action": "internal aggregation/metadata keys use corpus + doc; drill carries drill_corpus_id"
+    }
+  ],
+  "already_scoped_or_intentionally_global": [
+    "services.storage.mongo_writer document/chunk upserts",
+    "services.storage.mongo_reader point reads",
+    "services.graph.neo4j_reader Document/Chunk point reads",
+    "services.graph.neo4j_writer document/corpus deletion and payload clearing",
+    "services.ingestion graph backfill callers that delegate to neo4j_writer",
+    "corpus-filtered graph analytics and graph query scans",
+    "global Entity lookup, entity deduplication, and cross-corpus bridge traversal"
+  ],
+  "live_radius_receipts": {
+    "protected_document_collision_groups": 5,
+    "protected_document_collision_instances": 15,
+    "protected_chunk_collision_groups": 78,
+    "protected_summary_tree_collision_groups_surviving": 0,
+    "e2e_shared_documents_with_fd460347": 15,
+    "e2e_cross_corpus_has_chunk": 849,
+    "e2e_cross_corpus_mentions": 4341,
+    "e2e_cross_corpus_supports_fact": 2211
+  }
+}

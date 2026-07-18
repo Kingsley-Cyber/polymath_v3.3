@@ -64,14 +64,14 @@ RETRIEVAL_SPEC_PATH = BACKEND / "evals/runpod_e2e_retrieval_preregister_v1.json"
 NEGATIVE_SPEC_PATH = BACKEND / "evals/e2e_heldout_negative_v2_20260717.json"
 CORPUS_SELECTION_PATH = BACKEND / "evals/runpod_e2e_15doc_selection_v1.json"
 
-MANIFEST_SHA256 = "abdc68bb937c2c47c88eeafe918e19cbb462cf44ca9c2ec56e5ae351a6d8eac5"
-FINAL_SPEC_SHA256 = "3ffec2b1b4de8cd2432ff3a52d3baa42935fa828d0f91564d2f6476d91a3d737"
+MANIFEST_SHA256 = "a130175f341596baeca8b53a288fde4890f1e1e31c5f83e43f8c4d20a3d6807b"
+FINAL_SPEC_SHA256 = "99f2c37bbc22ded15135afa0f113f41e1faa0dc4346f77f74c752cb4d6905c4e"
 DEPTH_SPEC_SHA256 = "2c147676a4fa5dded07f813b64376997e640945e8b06990e5dc892a972cecf7e"
 RETRIEVAL_SPEC_SHA256 = (
     "8f70b1d375120862712fa4a44abad5ca7eb38eb0fbc7d3a3a86e79f4827bc110"
 )
 NEGATIVE_SPEC_SHA256 = (
-    "3b35c14c165f6be89202b809ea01a1cd6ad0f5c0217e4167b86e4b5dc0b09960"
+    "7d3de158c27d1524f491d78416c5954f7ef229a39ddb3fd8326eec9fd409890f"
 )
 CORPUS_SELECTION_SHA256 = (
     "da7b94c152dd5e72d52db1fd80a68f0cc2797d85ed1fd4899f9a8c19874eaf00"
@@ -82,6 +82,8 @@ CONCURRENCY = 3
 TOP_K = 8
 TEMPERATURE = 0.0
 EXPECTED_EXECUTIONS = 23
+REFINEMENT_DEPTH_ORDINALS = (1, 2, 5, 6)
+REFINEMENT_SIMPLE_ORDINALS = (13, 14, 15, 16)
 DETERMINISM_IDS = (
     "d1a_anticipation_editing_tension",
     "d1b_guiding_eye_drawing_cinematography",
@@ -91,6 +93,29 @@ DETERMINISM_IDS = (
 )
 JOURNAL_SCHEMA = "polymath.complete_pipeline_final_acceptance.v1"
 EXECUTION_SCHEMA = "polymath.complete_pipeline_final_execution.v1"
+
+
+def _expected_state_receipt(
+    case: dict[str, Any],
+    classification: dict[str, Any],
+) -> tuple[str, bool]:
+    """Match the frozen refusal intent to the canonical three-state contract."""
+
+    is_refusal = str(case.get("class") or "").startswith("refusal_")
+    if is_refusal:
+        return "refused", classification.get("refused") is True
+    return "answered", classification.get("state") == "answered"
+
+
+def _repeat_librarian_controls(settings: Any, *, user_id: str) -> dict[str, Any]:
+    """Keep the repeat on the exact Librarian/refinement feature path."""
+
+    enabled = bool(getattr(settings, "LIBRARIAN_LLM_DECOMPOSER_ENABLED", False))
+    return {
+        "llm_decomposer_enabled": enabled,
+        "librarian_refinement_enabled": enabled,
+        "librarian_refinement_user_id": user_id,
+    }
 
 
 def require(condition: bool, message: str) -> None:
@@ -219,16 +244,31 @@ def _discover_runtime(
         price_route is not None,
         "synthesis candidate has no registered cost route; refusing UNKNOWN cost",
     )
-    safe_entry = {
-        "entry_id": role_entry_id,
-        "provider": provider,
-        "model_name": model_name,
-        "route_model": expected_model,
-        "base_url": safe_base_url,
-        "enabled": entry.get("enabled", True),
-        "credential_present": bool(
-            entry.get("api_key_ciphertext")
-            or (
+    credential_present = bool(entry.get("api_key_ciphertext"))
+    credential_reference = entry.get("credential_ref")
+    if isinstance(credential_reference, dict):
+        reference_provider = str(credential_reference.get("provider") or "").strip()
+        reference_user_id = str(
+            credential_reference.get("settings_user_id") or ""
+        ).strip()
+        if (
+            credential_reference.get("kind") == "settings_api_key.v1"
+            and credential_reference.get("scope") == "system"
+            and reference_provider == provider
+            and reference_user_id
+        ):
+            credential_present = bool(
+                database.settings.find_one(
+                    {
+                        "user_id": reference_user_id,
+                        f"api_keys.{provider}": {"$exists": True, "$ne": ""},
+                    },
+                    {"_id": 1},
+                )
+            )
+    if not credential_present:
+        credential_present = bool(
+            (
                 database.settings.find_one(
                     {"user_id": user_id},
                     {f"api_keys.{provider}": 1, "_id": 0},
@@ -237,7 +277,19 @@ def _discover_runtime(
             )
             .get("api_keys", {})
             .get(provider)
-        ),
+        )
+    require(
+        credential_present,
+        "synthesis candidate credential reference is absent or dangling",
+    )
+    safe_entry = {
+        "entry_id": role_entry_id,
+        "provider": provider,
+        "model_name": model_name,
+        "route_model": expected_model,
+        "base_url": safe_base_url,
+        "enabled": entry.get("enabled", True),
+        "credential_present": credential_present,
         "price_route_id": price_route.get("route_id"),
         "price_registry_sha256": price_registry_sha256,
     }
@@ -256,7 +308,7 @@ def _runtime_flags(*, expected_two_lane: bool) -> dict[str, bool]:
         "ATOMIC_CLAIM_ANCHORS_ENABLED": True,
         "LIBRARIAN_PLANNER_ENABLED": True,
         "LIBRARIAN_PLANNER_SHADOW": False,
-        "LIBRARIAN_LLM_DECOMPOSER_ENABLED": False,
+        "LIBRARIAN_LLM_DECOMPOSER_ENABLED": True,
         "SYNTHESIS_ROUTE_OVERRIDE_ENABLED": True,
         "TWO_LANE_ANCHORING_ENABLED": expected_two_lane,
         "FOUR_LANE_TIER0_ROUTER_ENABLED": False,
@@ -594,6 +646,10 @@ def _schema_proofs(
     librarian_diagnostics = dict(librarian_trace.get("diagnostics") or {})
     shortlist_diagnostics = dict(librarian_diagnostics.get("shortlist") or {})
     librarian_execution = dict(retrieval_diagnostics.get("librarian_execution") or {})
+    librarian_refinement = dict(librarian_execution.get("refinement") or {})
+    librarian_refinement_second_pass = dict(
+        librarian_refinement.get("second_pass") or {}
+    )
     temporal = dict(retrieval_diagnostics.get("temporal_routing") or {})
     claim = _trace(traces, "Atomic claim anchors")
     if not claim:
@@ -735,6 +791,27 @@ def _schema_proofs(
             "filled_lane_count": filled_lanes,
             "seat_surface": _seat_surface(retrieval_diagnostics),
         },
+        "refinement": {
+            "enabled": librarian_refinement.get("enabled"),
+            "fired": librarian_refinement.get("fired"),
+            "status": librarian_refinement.get("status"),
+            "reason": librarian_refinement.get("reason"),
+            "round": librarian_refinement.get("round"),
+            "gap_count": len(librarian_refinement.get("gaps") or []),
+            "second_pass_attempted": librarian_refinement_second_pass.get("attempted"),
+            "improved_seating": librarian_refinement_second_pass.get(
+                "improved_seating"
+            ),
+            "remaining_gap_count": len(
+                librarian_refinement_second_pass.get("remaining_gaps") or []
+            ),
+            "planner_refinement_unavailable": librarian_refinement.get(
+                "planner_refinement_unavailable"
+            ),
+            "silent_fallback_count": int(
+                librarian_refinement.get("silent_fallback_count") or 0
+            ),
+        },
         "associative_profile": {
             "associative_hit_count": len(associative_hits),
             "t91_profile_ids": sorted(set(t91_profile_ids)),
@@ -856,9 +933,7 @@ def _build_execution(
     if trace_contract.get("model_skipped") is not True and not answer.strip():
         technical_errors.append("model-called response has empty answer")
 
-    expected_state = (
-        "refused" if str(case.get("class") or "").startswith("refusal_") else "answered"
-    )
+    expected_state, state_ok = _expected_state_receipt(case, classification)
     row = {
         "schema_version": EXECUTION_SCHEMA,
         "execution_id": f"{case['id']}::{case['retrieval_tier']}",
@@ -897,7 +972,7 @@ def _build_execution(
         "answerability": answerability,
         "classification": classification,
         "expected_state": expected_state,
-        "state_ok": classification.get("state") == expected_state,
+        "state_ok": state_ok,
         "model_skipped": trace_contract.get("model_skipped"),
         "model_route": model_route,
         "trace_contract": trace_contract,
@@ -965,6 +1040,7 @@ async def _retrieval_only_repeat(
     conversation_service._db = database
     by_id = {row["query_id"]: row for row in executions}
     semaphore = asyncio.Semaphore(CONCURRENCY)
+    librarian_controls = _repeat_librarian_controls(settings, user_id=user_id)
 
     async def repeat_one(case: dict[str, Any]) -> dict[str, Any]:
         full = by_id[str(case["id"])]
@@ -1003,7 +1079,7 @@ async def _retrieval_only_repeat(
                     shadow=False,
                     db=database,
                     user_id=user_id,
-                    llm_decomposer_enabled=False,
+                    llm_decomposer_enabled=librarian_controls["llm_decomposer_enabled"],
                 )
                 base_plan = build_query_plan_v2(
                     str(case["question"]),
@@ -1036,16 +1112,35 @@ async def _retrieval_only_repeat(
                         and plan_trace.get("behavior_applied") is True
                         else None
                     ),
+                    librarian_refinement_enabled=librarian_controls[
+                        "librarian_refinement_enabled"
+                    ],
+                    librarian_refinement_user_id=librarian_controls[
+                        "librarian_refinement_user_id"
+                    ],
                 )
         except Exception as exc:  # noqa: BLE001 - durable receipt
             error = f"{type(exc).__name__}: {exc}"[:500]
         repeat_plan = dict((plan_trace or {}).get("plan") or {})
         diagnostics = dict(getattr(result, "diagnostics", None) or {}) if result else {}
+        plan_provider_calls = int(
+            ((plan_trace or {}).get("diagnostics") or {}).get("provider_calls") or 0
+        )
+        refinement_provider_calls = int(
+            (
+                (
+                    (diagnostics.get("librarian_execution") or {}).get("refinement")
+                    or {}
+                ).get("provider_calls")
+                or 0
+            )
+        )
+        provider_calls = plan_provider_calls + refinement_provider_calls
         expected_seats = _seat_surface(dict(expected_retrieval))
         repeat_seats = _seat_surface(diagnostics)
         return {
             "query_id": str(case["id"]),
-            "provider_calls": 0,
+            "provider_calls": provider_calls,
             "elapsed_seconds": round(time.monotonic() - started, 3),
             "error": error,
             "expected_plan_hash": expected_plan.get("plan_hash"),
@@ -1058,7 +1153,9 @@ async def _retrieval_only_repeat(
             "repeat_seats": repeat_seats,
             "seats_identical": _canonical_bytes(expected_seats)
             == _canonical_bytes(repeat_seats),
-            "technical_ok": bool(result is not None and not error),
+            "technical_ok": bool(
+                result is not None and not error and provider_calls == 0
+            ),
         }
 
     try:
@@ -1076,6 +1173,39 @@ async def _retrieval_only_repeat(
 
 def _median(values: Sequence[float]) -> float | None:
     return round(float(statistics.median(values)), 3) if values else None
+
+
+def _refinement_acceptance_surface(
+    by_ordinal: dict[int, dict[str, Any]],
+) -> dict[str, Any]:
+    def row(ordinal: int) -> dict[str, Any]:
+        refinement = dict(by_ordinal[ordinal]["schema_proofs"].get("refinement") or {})
+        return {
+            "ordinal": ordinal,
+            "query_id": by_ordinal[ordinal]["query_id"],
+            "enabled": refinement.get("enabled"),
+            "fired": refinement.get("fired"),
+            "status": refinement.get("status"),
+            "second_pass_attempted": refinement.get("second_pass_attempted"),
+            "improved_seating": refinement.get("improved_seating"),
+        }
+
+    depth = [row(ordinal) for ordinal in REFINEMENT_DEPTH_ORDINALS]
+    simple = [row(ordinal) for ordinal in REFINEMENT_SIMPLE_ORDINALS]
+    return {
+        "depth_probes": depth,
+        "simple_probes": simple,
+        "gap_firing_improved": any(
+            item["enabled"] is True
+            and item["fired"] is True
+            and item["second_pass_attempted"] is True
+            and item["improved_seating"] is True
+            for item in depth
+        ),
+        "simple_zero_firings": all(
+            item["enabled"] is True and item["fired"] is False for item in simple
+        ),
+    }
 
 
 def summarize(
@@ -1111,6 +1241,7 @@ def summarize(
     )
     fast_p50 = _median(fast)
     deep_p50 = _median(deep)
+    refinement = _refinement_acceptance_surface(by_ordinal)
     gates = {
         "technical_23_of_23": (
             len(executions) == EXPECTED_EXECUTIONS
@@ -1124,12 +1255,12 @@ def summarize(
         "floors_11_to_16": all(proof(i) and state(i) for i in range(11, 17)),
         "named_positive_17_to_18": all(proof(i) and state(i) for i in range(17, 19)),
         "refusals_19_to_23": all(
-            proof(i)
-            and state(i)
-            and by_ordinal[i]["classification"]["state"] == "refused"
+            proof(i) and state(i) and by_ordinal[i]["classification"]["refused"] is True
             for i in range(19, 24)
         ),
         "associative_profile_consumed": associative_consumed,
+        "refinement_gap_improves_d1_d6": refinement["gap_firing_improved"],
+        "refinement_not_fired_clean_13_to_16": refinement["simple_zero_firings"],
         "corpus_citation_membership": membership,
         "fast_p50_le_5s": fast_p50 is not None and fast_p50 <= 5.0,
         "deep_p50_le_15s": deep_p50 is not None and deep_p50 <= 15.0,
@@ -1158,6 +1289,7 @@ def summarize(
             round(sorted(deep)[max(0, int(len(deep) * 0.95) - 1)], 3) if deep else None
         ),
         "cost_ledger": cost,
+        "refinement": refinement,
         "gates": gates,
         "all_green": all(gates.values()),
         "owner_quality_eyeball_pending": True,

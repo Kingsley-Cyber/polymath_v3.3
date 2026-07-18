@@ -861,9 +861,20 @@ class SettingsService:
         for entry in incoming.query_model_pool:
             entry_dict = entry.model_dump()
             new_val = entry_dict.get("api_key_ciphertext")
-            existing_ct = existing_pool_by_id.get(entry.entry_id, {}).get(
-                "api_key_ciphertext"
-            )
+            existing_entry = existing_pool_by_id.get(entry.entry_id, {})
+            existing_ct = existing_entry.get("api_key_ciphertext")
+            existing_credential_ref = existing_entry.get("credential_ref")
+            incoming_credential_ref = entry_dict.get("credential_ref")
+            if existing_credential_ref:
+                if incoming_credential_ref not in (None, existing_credential_ref):
+                    raise ValueError(
+                        "credential_ref is operator-managed and cannot be changed"
+                    )
+                entry_dict["credential_ref"] = existing_credential_ref
+            elif incoming_credential_ref:
+                raise ValueError(
+                    "credential_ref is operator-managed and cannot be created"
+                )
             # Preserve existing ciphertext when caller signals "no change"
             if not new_val or new_val == _MASK_SENTINEL:
                 entry_dict["api_key_ciphertext"] = existing_ct
@@ -1389,6 +1400,38 @@ class SettingsService:
                 if plaintext:
                     return plaintext
         return None
+
+    async def get_plaintext_key_by_reference(
+        self,
+        *,
+        settings_user_id: str,
+        provider: str,
+    ) -> str | None:
+        """Resolve one operator-managed settings credential at dispatch time.
+
+        Model-pool entries may reference a system-scoped encrypted credential
+        without copying its ciphertext into another user's settings row.
+        The reference is persisted; plaintext exists only in the dispatch
+        process and is never returned by a settings API.
+        """
+
+        from services.secrets import decrypt, validate_provider
+
+        try:
+            validate_provider(provider)
+        except ValueError:
+            return None
+        if self._db is None or not str(settings_user_id or "").strip():
+            return None
+        doc = await self._db["settings"].find_one(
+            {
+                "user_id": str(settings_user_id),
+                f"api_keys.{provider}": {"$exists": True, "$ne": ""},
+            },
+            {f"api_keys.{provider}": 1, "_id": 0},
+        )
+        ciphertext = ((doc or {}).get("api_keys") or {}).get(provider)
+        return decrypt(ciphertext) if ciphertext else None
 
     async def test_infrastructure(self) -> dict[str, Any]:
         """

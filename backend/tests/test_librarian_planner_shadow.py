@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
+import services.retriever.librarian_planner as planner_module
 from models.schemas import RetrievalTier
 from services.chat_orchestrator import (
     _build_chat_query_plan,
@@ -12,7 +13,11 @@ from services.chat_orchestrator import (
     _format_chat_query_plan_trace,
     _librarian_refusal_signals_for_answerability,
 )
-from services.retriever.librarian_planner import build_query_plan_v1
+from services.retriever.librarian_planner import (
+    LibrarianPlanner,
+    QueryPlanReplayCache,
+    build_query_plan_v1,
+)
 
 
 class _ExplosivePlanner:
@@ -132,6 +137,89 @@ async def test_trace_passes_user_and_decomposer_authority_to_planner():
     assert result["mode"] == "enabled"
     assert fake.kwargs["user_id"] == "user-1"
     assert fake.kwargs["llm_decomposer_enabled"] is True
+
+
+@pytest.mark.asyncio
+async def test_enabled_timeout_applies_deterministic_d3b_shape_without_provider(
+    monkeypatch,
+):
+    planner = LibrarianPlanner(cache=QueryPlanReplayCache())
+    version = "sha256:" + "c" * 64
+
+    async def fake_version(_db, _corpus_ids):
+        return version
+
+    async def timed_out_shortlist(*_args, **_kwargs):
+        raise TimeoutError
+
+    monkeypatch.setattr(planner_module, "corpus_doc_set_version", fake_version)
+    monkeypatch.setattr(
+        planner_module,
+        "build_tier0_shortlist",
+        timed_out_shortlist,
+    )
+
+    query = "What exact stages does the VES handbook define for a VFX shot's pipeline?"
+    result = await _build_librarian_plan_trace(
+        query=query,
+        corpus_ids=["corpus"],
+        requested_tier=RetrievalTier.qdrant_mongo_graph,
+        enabled=True,
+        shadow=False,
+        planner_service=planner,
+        db=object(),
+        embedding_config_loader=_embedding_config,
+        user_id="user-1",
+        llm_decomposer_enabled=True,
+    )
+
+    assert result["mode"] == "enabled_degraded"
+    assert result["behavior_applied"] is True
+    assert result["plan"]["shape"] == "enumerative_trace"
+    assert result["plan"]["planner"] == "rule:enumerative_trace"
+    assert result["plan"]["corpus_doc_version"] == version
+    assert result["diagnostics"]["status"] == "degraded_deterministic_fallback"
+    assert result["diagnostics"]["reason"] == "TimeoutError: "
+    assert result["diagnostics"]["provider_calls"] == 0
+
+
+@pytest.mark.asyncio
+async def test_enabled_timeout_keeps_simple_llm_eligible_query_bypassed(
+    monkeypatch,
+):
+    planner = LibrarianPlanner(cache=QueryPlanReplayCache())
+    version = "sha256:" + "d" * 64
+
+    async def fake_version(_db, _corpus_ids):
+        return version
+
+    async def timed_out_shortlist(*_args, **_kwargs):
+        raise TimeoutError
+
+    monkeypatch.setattr(planner_module, "corpus_doc_set_version", fake_version)
+    monkeypatch.setattr(
+        planner_module,
+        "build_tier0_shortlist",
+        timed_out_shortlist,
+    )
+
+    result = await _build_librarian_plan_trace(
+        query="What is narrative directing and why is it useful?",
+        corpus_ids=["corpus"],
+        requested_tier=RetrievalTier.qdrant_mongo,
+        enabled=True,
+        shadow=False,
+        planner_service=planner,
+        db=object(),
+        embedding_config_loader=_embedding_config,
+        user_id="user-1",
+        llm_decomposer_enabled=True,
+    )
+
+    assert result["mode"] == "enabled_degraded"
+    assert result["behavior_applied"] is False
+    assert result["plan"] is None
+    assert result["diagnostics"]["provider_calls"] == 0
 
 
 def _legacy_trace_plan(**kwargs):

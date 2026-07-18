@@ -8,7 +8,7 @@ from services.eval_firewall import heldout_query_hash, is_heldout_query
 EVALS = Path(__file__).resolve().parents[1] / "evals"
 SPEC = EVALS / "e2e_heldout_negative_v2_20260717.json"
 SHA_FILE = EVALS / "e2e_heldout_negative_v2_20260717.sha256"
-FROZEN_SHA256 = "3b35c14c165f6be89202b809ea01a1cd6ad0f5c0217e4167b86e4b5dc0b09960"
+FROZEN_SHA256 = "7d3de158c27d1524f491d78416c5954f7ef229a39ddb3fd8326eec9fd409890f"
 
 
 def _spec() -> dict:
@@ -49,3 +49,12 @@ def test_negative_v2_records_required_absence_swap_and_cross_corpus_proof():
     }
     assert len(firewall["verified_absent_targets"]["f3_documents"]) == 4
     assert len(firewall["verified_absent_targets"]["f5_artifacts"]) == 4
+    assert firewall["verified_absent_targets"]["f5_artifacts"][1] == (
+        "Figure 34.1 in Directing - Film Techniques and Aesthetics"
+    )
+    figure_probe = next(
+        row for row in _spec()["queries"] if row["id"] == "negv2_f5_figure_34_1"
+    )
+    assert figure_probe["question"] == (
+        "What does Figure 34.1 in the directing book demonstrate?"
+    )

@@ -19,11 +19,13 @@ from models.artifact_envelope import (
     ArtifactOwnership,
     ArtifactProvenance,
     ArtifactValidation,
+    ProducerKind,
     make_artifact_envelope,
 )
 from models.claim_record import ClaimCompilationV1, ClaimRecordV1
 from models.hash_taxonomy import canonical_json_v1, namespace_hash
 from models.identifier_recipes import source_version_id, work_id
+from models.local_extraction import LocalExtractionV1
 from models.semantic_artifacts import EvidenceRef, domain_hash, make_evidence_ref
 from models.semantic_digest_claim_input import (
     COMPILATION_ARTIFACT_TYPE,
@@ -288,6 +290,118 @@ def compile_child_candidate(
     )
 
 
+def compile_existing_child_candidate(
+    *,
+    corpus_id: str,
+    document: Mapping[str, Any],
+    child: Mapping[str, Any],
+    extraction_row: Mapping[str, Any],
+    nlp: Any,
+    spacy_library_version: str,
+) -> CompiledChildCandidateExportV1:
+    """Revalidate one durable local-extraction claim body for materialization.
+
+    The extraction worker already compiled the typed claim body. Recompiling
+    from raw text alone would silently discard its zero-shot entity lane. This
+    boundary rebuilds only the deterministic spaCy observation/evidence layer,
+    recompiles the persisted provider-neutral ``LocalExtractionV1``, and
+    requires exact equality with the persisted ``ClaimCompilationV1`` before
+    producing the same candidate envelope used by the Mark materializer.
+    """
+
+    if spacy_library_version != SPACY_LIBRARY_VERSION:
+        raise ClaimInputError("spaCy library version is not pinned")
+    if str(nlp.meta.get("version") or "") != SPACY_MODEL_VERSION:
+        raise ClaimInputError("spaCy model version is not pinned")
+    document_id = str(document.get("doc_id") or "").strip()
+    child_id = str(child.get("chunk_id") or "").strip()
+    text = child.get("text")
+    if (
+        not document_id
+        or str(child.get("doc_id") or "").strip() != document_id
+        or not child_id
+        or not isinstance(text, str)
+        or not text.strip()
+    ):
+        raise ClaimInputError("existing-claim source ownership does not close")
+    if (
+        str(extraction_row.get("corpus_id") or "").strip() != corpus_id
+        or str(extraction_row.get("doc_id") or "").strip() != document_id
+        or str(extraction_row.get("chunk_id") or "").strip() != child_id
+        or extraction_row.get("status") != "ok"
+        or extraction_row.get("schema_version")
+        != "polymath.extract.local_extraction.v1"
+    ):
+        raise ClaimInputError("existing extraction identity or status drifted")
+
+    source_version = document_source_version_id(document)
+    if str(extraction_row.get("source_version_id") or "") != source_version:
+        raise ClaimInputError("existing extraction source version drifted")
+    bundle = build_spacy_observation_bundle(
+        text=text,
+        nlp=nlp,
+        source_version_id=source_version,
+        hierarchy_node_id=child_id,
+        parser_id=SPACY_MODEL,
+        parser_version=PARSER_VERSION,
+    )
+    if validate_evidence_round_trip(bundle, text):
+        raise ClaimInputError("existing-claim evidence failed exact source round trip")
+
+    try:
+        local = LocalExtractionV1.model_validate(extraction_row.get("local_extraction"))
+        persisted = ClaimCompilationV1.model_validate(
+            extraction_row.get("claim_compilation")
+        )
+    except Exception as exc:
+        raise ClaimInputError("existing claim contracts are invalid") from exc
+    if local.document_id != document_id or local.child_id != child_id:
+        raise ClaimInputError("existing local extraction ownership drifted")
+    evidence_ids = [item.evidence_ref_id for item in bundle.evidence_refs]
+    if local.sentence_ids != evidence_ids:
+        raise ClaimInputError("existing sentence evidence identity drifted")
+    for entity in local.entities:
+        if (
+            entity.end_char > len(text)
+            or text[entity.start_char : entity.end_char] != entity.text
+        ):
+            raise ClaimInputError("existing entity span failed source round trip")
+    for predicate in local.predicates:
+        if (
+            predicate.end_char > len(text)
+            or text[predicate.start_char : predicate.end_char] != predicate.surface_text
+        ):
+            raise ClaimInputError("existing predicate span failed source round trip")
+
+    recompiled = compile_claim_records_v1(bundle=bundle, extraction=local)
+    if recompiled != persisted:
+        raise ClaimInputError("existing claim compilation is not byte-deterministic")
+    normalization = load_normalization_identity()
+    raw_artifact_id = str(extraction_row.get("raw_output_artifact_id") or "").strip()
+    if not raw_artifact_id:
+        raise ClaimInputError("existing extraction raw artifact lineage is missing")
+    return CompiledChildCandidateExportV1(
+        schema_version="semantic_digest_claim_compilation_export.v1",
+        corpus_id=corpus_id,
+        document_id=document_id,
+        source_version_id=source_version,
+        child_id=child_id,
+        source_text_hash=bundle.text_hash,
+        observation_bundle_id=bundle.bundle_id,
+        observation_recipe_hash=bundle.recipe_hash,
+        local_extraction_recipe_hash=local_extraction_recipe_hash(),
+        normalization_registry_hash=normalization["hash"],
+        compiler_version=COMPILER_VERSION,
+        compiler_recipe_hash=persisted.compiler_recipe_hash,
+        spacy_library_version=SPACY_LIBRARY_VERSION,
+        spacy_model=SPACY_MODEL,
+        spacy_model_version=SPACY_MODEL_VERSION,
+        parser_version=PARSER_VERSION,
+        evidence_refs=bundle.evidence_refs,
+        compilation=persisted,
+    )
+
+
 def validate_candidate_against_source(
     candidate: CompiledChildCandidateExportV1,
     *,
@@ -357,6 +471,11 @@ def materialize_candidate_row(
     child: Mapping[str, Any],
     run_id: str,
     now: datetime | None = None,
+    raw_artifact_ids: Sequence[str] = (),
+    provenance_producer_kind: ProducerKind = "spacy",
+    provenance_engine: str = "spacy",
+    provenance_model_id: str | None = SPACY_MODEL,
+    provenance_model_revision: str | None = SPACY_MODEL_VERSION,
 ) -> ClaimCompilationMaterializationRowV1:
     """Build one canonical-image-validated, noncanonical durable row."""
 
@@ -368,6 +487,15 @@ def materialize_candidate_row(
     )
     if not run_id.strip():
         raise ClaimInputError("materialization run ID must be nonempty")
+    if not provenance_engine.strip():
+        raise ClaimInputError("materialization provenance engine must be nonempty")
+    normalized_raw_artifact_ids = tuple(
+        str(value).strip() for value in raw_artifact_ids
+    )
+    if any(not value for value in normalized_raw_artifact_ids) or len(
+        normalized_raw_artifact_ids
+    ) != len(set(normalized_raw_artifact_ids)):
+        raise ClaimInputError("raw artifact lineage must be nonempty and unique")
     created_at = now or datetime.now(timezone.utc)
     if created_at.tzinfo is None:
         raise ClaimInputError("materialization timestamp must be timezone-aware")
@@ -421,11 +549,11 @@ def materialize_candidate_row(
                 candidate.compiler_recipe_hash,
             ),
             attempt_id=None,
-            raw_artifact_ids=(),
-            producer_kind="spacy",
-            engine="spacy",
-            model_id=SPACY_MODEL,
-            model_revision=SPACY_MODEL_VERSION,
+            raw_artifact_ids=normalized_raw_artifact_ids,
+            producer_kind=provenance_producer_kind,
+            engine=provenance_engine,
+            model_id=provenance_model_id,
+            model_revision=provenance_model_revision,
             prompt_id=None,
             prompt_hash=None,
             compiler_version=candidate.compiler_version,

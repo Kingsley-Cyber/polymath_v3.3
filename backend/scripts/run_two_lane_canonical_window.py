@@ -308,12 +308,8 @@ def _full_path_repeat(
                     question=question,
                     timeout=request_timeout,
                 )
-                retrieval_meta = _trace_metadata(
-                    raw["traces"], "Local RAG retrieval"
-                )
-                retrieval_diagnostics = retrieval_meta.get(
-                    "retrieval_diagnostics"
-                )
+                retrieval_meta = _trace_metadata(raw["traces"], "Local RAG retrieval")
+                retrieval_diagnostics = retrieval_meta.get("retrieval_diagnostics")
                 if not isinstance(retrieval_diagnostics, dict):
                     retrieval_diagnostics = {}
                 selection = retrieval_diagnostics.get("selection")

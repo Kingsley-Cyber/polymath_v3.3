@@ -21,6 +21,7 @@ from models.librarian_query_plan import (
     LibrarianSubqueryV1,
     QueryPlanV1,
     canonical_json_bytes,
+    librarian_execution_lane_id,
     normalize_planner_query,
     plan_cache_key_for,
     plan_hash_for,
@@ -170,14 +171,10 @@ class LibrarianExecutionPolicy:
         }
 
 
-def _execution_lane_id(index: int, role: str) -> str:
-    normalized_role = re.sub(r"[^a-z0-9]+", "_", str(role).casefold()).strip("_")
-    return f"librarian_{index + 1}_{normalized_role or 'main'}"
-
-
 def apply_librarian_execution_plan(
     base_plan: QueryPlanV2,
     librarian_plan: QueryPlanV1,
+    supplementary_shortlist: Iterable[LibrarianShortlistItemV1] = (),
 ) -> tuple[QueryPlanV2, LibrarianExecutionPolicy]:
     """Compile QueryPlanV1 into the one existing planned-fusion executor.
 
@@ -200,7 +197,7 @@ def apply_librarian_execution_plan(
         )
 
     shortlist_by_doc_id: dict[str, list[LibrarianShortlistItemV1]] = {}
-    for item in librarian_plan.shortlist:
+    for item in (*librarian_plan.shortlist, *tuple(supplementary_shortlist)):
         shortlist_by_doc_id.setdefault(item.doc_id, []).append(item)
     original_lane = next(
         (lane for lane in base_plan.lanes if lane.role == "original"),
@@ -211,7 +208,7 @@ def apply_librarian_execution_plan(
     lane_rerank_caps: dict[str, int] = {}
     document_route_hints: dict[str, list[dict[str, Any]]] = {}
     for index, subquery in enumerate(librarian_plan.subqueries):
-        lane_id = _execution_lane_id(index, subquery.role)
+        lane_id = librarian_execution_lane_id(index, subquery.role)
         target_items = sorted(
             (
                 item
@@ -960,6 +957,77 @@ class LibrarianPlanner:
     ) -> None:
         self.cache = cache or QueryPlanReplayCache()
         self.decomposer = decomposer
+        self._corpus_version_snapshots: OrderedDict[str, str] = OrderedDict()
+
+    @staticmethod
+    def _corpus_version_snapshot_key(scope_identity: str, query: str) -> str:
+        return f"{scope_identity}\0{normalize_planner_query(query)}"
+
+    def _remember_corpus_version(
+        self,
+        scope_identity: str,
+        query: str,
+        version: str,
+    ) -> None:
+        """Keep a bounded, real pre-shortlist version for deadline fallback."""
+
+        key = self._corpus_version_snapshot_key(scope_identity, query)
+        self._corpus_version_snapshots[key] = version
+        self._corpus_version_snapshots.move_to_end(key)
+        while len(self._corpus_version_snapshots) > 512:
+            self._corpus_version_snapshots.popitem(last=False)
+
+    def build_deterministic_timeout_fallback(
+        self,
+        query: str,
+        *,
+        corpus_ids: list[str] | tuple[str, ...] | None,
+        requested_tier: Any,
+    ) -> LibrarianPlanBuildResult | None:
+        """Preserve a rule-recognized shape when Tier-0 enrichment times out.
+
+        The fallback is intentionally narrower than ``build``: it uses no
+        shortlist, cache, embedding, or provider call, and it never promotes a
+        simple/LLM-eligible query. The plan remains bound to the real corpus
+        document version captured immediately before shortlist enrichment.
+        """
+
+        scoped = tuple(sorted({str(value) for value in corpus_ids or () if str(value)}))
+        scope_identity = corpus_scope_identity(scoped)
+        snapshot_key = self._corpus_version_snapshot_key(scope_identity, query)
+        corpus_doc_version = self._corpus_version_snapshots.get(snapshot_key)
+        if corpus_doc_version is None:
+            return None
+        plan = build_query_plan_v1(
+            query,
+            corpus_id=scope_identity,
+            corpus_doc_version=corpus_doc_version,
+            shortlist=(),
+            requested_tier=requested_tier,
+            cache_hit=False,
+            allow_llm_escalation=False,
+        )
+        if plan.shape == "simple":
+            return None
+        return LibrarianPlanBuildResult(
+            plan=plan,
+            diagnostics={
+                "status": "deterministic_timeout_fallback",
+                "registry_order": list(RULE_REGISTRY_ORDER),
+                "shortlist": {
+                    "status": "degraded",
+                    "reason": "planner_deadline_exceeded",
+                },
+                "shortlist_calls": 1,
+                "query_embedding_calls": 1,
+                "llm_escalation": LLM_ESCALATION_STATUS,
+                "llm_escalation_eligible": False,
+                "provider_calls": 0,
+                "provider_attempts": 0,
+                "silent_fallback_count": 1,
+                "corpus_doc_version_source": "pre_shortlist_snapshot",
+            },
+        )
 
     async def build(
         self,
@@ -981,7 +1049,10 @@ class LibrarianPlanner:
             normalized,
             allow_llm_escalation=llm_decomposer_enabled,
         )
+        snapshot_key = self._corpus_version_snapshot_key(scope_identity, normalized)
+        self._corpus_version_snapshots.pop(snapshot_key, None)
         version_before = await corpus_doc_set_version(db, scoped)
+        self._remember_corpus_version(scope_identity, normalized, version_before)
         if not requires_shortlist:
             # Ordinary lookups preserve today's raw question bytes and do not
             # enter the plan cache: a normalized-equivalent earlier request
@@ -1054,6 +1125,7 @@ class LibrarianPlanner:
         version_after = await corpus_doc_set_version(db, scoped)
         if version_after != version_before:
             # One bounded retry binds the shortlist and plan to one corpus state.
+            self._remember_corpus_version(scope_identity, normalized, version_after)
             shortlist_calls += 1
             shortlist, shortlist_diagnostics = await build_tier0_shortlist(
                 normalized,
@@ -1067,6 +1139,7 @@ class LibrarianPlanner:
                     "corpus document set changed twice during librarian planning"
                 )
             version_before = version_final
+            self._remember_corpus_version(scope_identity, normalized, version_before)
 
         plan = build_query_plan_v1(
             normalized,

@@ -70,8 +70,14 @@ from services.retriever.planned_fusion import (
     prioritize_enumeration_candidates,
     propagate_grounded_lane_aliases,
     reserve_planned_finalists,
+    seated_document_refs_by_lane,
 )
-from models.librarian_query_plan import QueryPlanV1
+from models.librarian_query_plan import LibrarianShortlistItemV1, QueryPlanV1
+from services.retriever.librarian_decomposer import (
+    LibrarianSeatedDocument,
+    detect_librarian_refinement_gaps,
+    librarian_refiner,
+)
 from services.retriever.librarian_planner import apply_librarian_execution_plan
 from services.retriever.query_plan import (
     FALLBACK_PROBE_ID,
@@ -1374,9 +1380,13 @@ class RetrieverOrchestrator:
         disabled_lexicon_ids: list[str] | None = None,
         grounded_planner_route: dict[str, Any] | None = None,
         librarian_plan: QueryPlanV1 | dict[str, Any] | None = None,
+        librarian_refinement_enabled: bool = False,
+        librarian_refinement_user_id: str | None = None,
     ) -> RetrievalResult:
         """Execute QueryPlanV2 as one candidate-generation and rerank pass."""
 
+        base_query_plan = plan
+        validated_librarian_plan: QueryPlanV1 | None = None
         librarian_execution_policy = None
         librarian_execution_fallback: dict[str, Any] | None = None
         if librarian_plan is not None:
@@ -3374,136 +3384,720 @@ class RetrieverOrchestrator:
             }
         timings["rerank"] = perf_counter() - rerank_started
 
-        ranked = apply_query_grounding(
-            ranked,
-            query=curation_query,
-            tier=effective_tier,
-            score_scale=settings.RERANKER_SCORE_SCALE,
-        )
-        translation_lane_targets = grounded_translation_lane_targets(
-            vocabulary_diagnostics,
-            vocabulary_diagnostics.get("expansion") or {},
-            required_lane_ids=required_lane_ids,
-        )
-        vocabulary_diagnostics[
-            "required_lane_propagation"
-        ] = propagate_grounded_lane_aliases(ranked, translation_lane_targets)
-        ranked, grounding_filter_diagnostics = filter_grounded_planned_candidates(
-            ranked,
-            required_lane_ids,
-            selected_corpus_ids=corpus_ids,
-            protected_lane_ids=protected_lane_ids,
-        )
-        diversity = select_with_diversity(
-            ranked,
-            final_top_k=planned_final_top_k,
-            intent=intent,
-            tier=effective_tier,
-            multi_corpus=bool(corpus_ids and len(corpus_ids) > 1),
-            selected_corpus_ids=corpus_ids or [],
-            query=plan.standalone_query,
-            anchor_query=plan.standalone_query,
-            two_lane_anchoring_enabled=(
-                settings.TWO_LANE_ANCHORING_ENABLED
-                and not (
-                    librarian_execution_policy is not None
-                    and librarian_execution_policy.active
-                )
-            ),
-            anchor_lane_ratio=settings.ANCHOR_LANE_RATIO,
-            anchor_lane_admission_threshold=(settings.ANCHOR_LANE_ADMISSION_THRESHOLD),
-            expansion_lane_admission_threshold=(
-                settings.EXPANSION_LANE_ADMISSION_THRESHOLD
-            ),
-            relationship_allocation_enabled=(
-                settings.RELATIONSHIP_EVIDENCE_ALLOCATION_ENABLED
-                and not (
-                    librarian_execution_policy is not None
-                    and librarian_execution_policy.active
-                )
-            ),
-        )
-        final_limit = planned_final_top_k
-        preferred_candidates = diversity.candidates
-        enumeration_diagnostics: dict[str, object] = {"applied": False}
-        if answer_lane_ids:
-            (
-                preferred_candidates,
-                enumeration_diagnostics,
-            ) = prioritize_enumeration_candidates(
-                ranked,
-                diversity.candidates,
-                answer_lane_ids=answer_lane_ids,
-                required_lane_ids=required_lane_ids,
-                max_candidates=final_limit,
-            )
-        route_count = routed_document_count
-        if answer_lane_ids or intent.need == QueryNeed.BROAD:
-            routed_document_budget = min(route_count, max(2, final_limit // 2))
-        elif intent.need == QueryNeed.SPECIFIC:
-            routed_document_budget = min(route_count, 2)
-        else:
-            routed_document_budget = min(route_count, max(2, final_limit // 3))
-        finalist_candidates, reservation_diagnostics = reserve_planned_finalists(
-            ranked,
-            preferred_candidates,
-            required_lane_ids=required_lane_ids,
-            corpus_ids=corpus_ids,
-            max_candidates=final_limit,
-            max_per_document=(
-                2
-                if librarian_execution_policy is not None
-                and librarian_execution_policy.active
-                else (
-                    1
-                    if intent.need == QueryNeed.BROAD and not answer_lane_ids
-                    else None
-                )
-            ),
-            routed_document_budget=routed_document_budget,
-            preferred_route_lane_ids=answer_lane_ids,
-            protected_lane_ids=protected_lane_ids,
-            lane_seat_quotas=(
-                librarian_execution_policy.lane_seat_quotas
-                if librarian_execution_policy is not None
-                and librarian_execution_policy.active
-                else None
-            ),
-        )
-        librarian_two_lane_diagnostics: dict[str, object] = {
-            "enabled": False,
-            "reason": "librarian_inactive_or_two_lane_disabled",
-        }
-        if (
-            librarian_execution_policy is not None
-            and librarian_execution_policy.active
-            and settings.TWO_LANE_ANCHORING_ENABLED
-        ):
-            (
-                finalist_candidates,
-                librarian_two_lane_diagnostics,
-                reservation_diagnostics,
-            ) = apply_librarian_two_lane_allocation(
-                finalist_candidates,
-                ranked,
-                query=plan.standalone_query,
-                required_lane_ids=required_lane_ids,
-                lane_seat_quotas=librarian_execution_policy.lane_seat_quotas,
-                reservation_receipt=reservation_diagnostics,
-                anchor_ratio=settings.ANCHOR_LANE_RATIO,
-                anchor_threshold=settings.ANCHOR_LANE_ADMISSION_THRESHOLD,
-                expansion_threshold=settings.EXPANSION_LANE_ADMISSION_THRESHOLD,
-            )
-        if temporal_enabled and temporal_intent.active:
-            finalist_candidates, temporal_final_reserve = reserve_temporal_candidates(
-                finalist_candidates,
-                ranked,
-                intent=temporal_intent,
-                max_candidates=final_limit,
+        def _allocate_ranked_candidates(candidate_ranked):
+            candidate_ranked = apply_query_grounding(
+                candidate_ranked,
+                query=curation_query,
                 tier=effective_tier,
-                protected_keys=temporal_protected_keys(reservation_diagnostics),
+                score_scale=settings.RERANKER_SCORE_SCALE,
             )
-            temporal_diagnostics["final_reserve"] = temporal_final_reserve
+            translation_lane_targets = grounded_translation_lane_targets(
+                vocabulary_diagnostics,
+                vocabulary_diagnostics.get("expansion") or {},
+                required_lane_ids=required_lane_ids,
+            )
+            vocabulary_diagnostics[
+                "required_lane_propagation"
+            ] = propagate_grounded_lane_aliases(
+                candidate_ranked,
+                translation_lane_targets,
+            )
+            (
+                candidate_ranked,
+                grounding_filter_receipt,
+            ) = filter_grounded_planned_candidates(
+                candidate_ranked,
+                required_lane_ids,
+                selected_corpus_ids=corpus_ids,
+                protected_lane_ids=protected_lane_ids,
+            )
+            diversity_receipt = select_with_diversity(
+                candidate_ranked,
+                final_top_k=planned_final_top_k,
+                intent=intent,
+                tier=effective_tier,
+                multi_corpus=bool(corpus_ids and len(corpus_ids) > 1),
+                selected_corpus_ids=corpus_ids or [],
+                query=plan.standalone_query,
+                anchor_query=plan.standalone_query,
+                two_lane_anchoring_enabled=(
+                    settings.TWO_LANE_ANCHORING_ENABLED
+                    and not (
+                        librarian_execution_policy is not None
+                        and librarian_execution_policy.active
+                    )
+                ),
+                anchor_lane_ratio=settings.ANCHOR_LANE_RATIO,
+                anchor_lane_admission_threshold=(
+                    settings.ANCHOR_LANE_ADMISSION_THRESHOLD
+                ),
+                expansion_lane_admission_threshold=(
+                    settings.EXPANSION_LANE_ADMISSION_THRESHOLD
+                ),
+                relationship_allocation_enabled=(
+                    settings.RELATIONSHIP_EVIDENCE_ALLOCATION_ENABLED
+                    and not (
+                        librarian_execution_policy is not None
+                        and librarian_execution_policy.active
+                    )
+                ),
+            )
+            final_limit = planned_final_top_k
+            preferred_candidates = diversity_receipt.candidates
+            enumeration_receipt: dict[str, object] = {"applied": False}
+            if answer_lane_ids:
+                (
+                    preferred_candidates,
+                    enumeration_receipt,
+                ) = prioritize_enumeration_candidates(
+                    candidate_ranked,
+                    diversity_receipt.candidates,
+                    answer_lane_ids=answer_lane_ids,
+                    required_lane_ids=required_lane_ids,
+                    max_candidates=final_limit,
+                )
+            route_count = routed_document_count
+            if answer_lane_ids or intent.need == QueryNeed.BROAD:
+                routed_document_budget = min(
+                    route_count,
+                    max(2, final_limit // 2),
+                )
+            elif intent.need == QueryNeed.SPECIFIC:
+                routed_document_budget = min(route_count, 2)
+            else:
+                routed_document_budget = min(
+                    route_count,
+                    max(2, final_limit // 3),
+                )
+            finalist_rows, reservation_receipt = reserve_planned_finalists(
+                candidate_ranked,
+                preferred_candidates,
+                required_lane_ids=required_lane_ids,
+                corpus_ids=corpus_ids,
+                max_candidates=final_limit,
+                max_per_document=(
+                    2
+                    if librarian_execution_policy is not None
+                    and librarian_execution_policy.active
+                    else (
+                        1
+                        if intent.need == QueryNeed.BROAD and not answer_lane_ids
+                        else None
+                    )
+                ),
+                routed_document_budget=routed_document_budget,
+                preferred_route_lane_ids=answer_lane_ids,
+                protected_lane_ids=protected_lane_ids,
+                lane_seat_quotas=(
+                    librarian_execution_policy.lane_seat_quotas
+                    if librarian_execution_policy is not None
+                    and librarian_execution_policy.active
+                    else None
+                ),
+            )
+            two_lane_receipt: dict[str, object] = {
+                "enabled": False,
+                "reason": "librarian_inactive_or_two_lane_disabled",
+            }
+            if (
+                librarian_execution_policy is not None
+                and librarian_execution_policy.active
+                and settings.TWO_LANE_ANCHORING_ENABLED
+            ):
+                (
+                    finalist_rows,
+                    two_lane_receipt,
+                    reservation_receipt,
+                ) = apply_librarian_two_lane_allocation(
+                    finalist_rows,
+                    candidate_ranked,
+                    query=plan.standalone_query,
+                    required_lane_ids=required_lane_ids,
+                    lane_seat_quotas=librarian_execution_policy.lane_seat_quotas,
+                    reservation_receipt=reservation_receipt,
+                    anchor_ratio=settings.ANCHOR_LANE_RATIO,
+                    anchor_threshold=settings.ANCHOR_LANE_ADMISSION_THRESHOLD,
+                    expansion_threshold=(settings.EXPANSION_LANE_ADMISSION_THRESHOLD),
+                )
+            if temporal_enabled and temporal_intent.active:
+                finalist_rows, temporal_final_reserve = reserve_temporal_candidates(
+                    finalist_rows,
+                    candidate_ranked,
+                    intent=temporal_intent,
+                    max_candidates=final_limit,
+                    tier=effective_tier,
+                    protected_keys=temporal_protected_keys(reservation_receipt),
+                )
+                temporal_diagnostics["final_reserve"] = temporal_final_reserve
+            return (
+                candidate_ranked,
+                diversity_receipt,
+                enumeration_receipt,
+                grounding_filter_receipt,
+                finalist_rows,
+                reservation_receipt,
+                two_lane_receipt,
+            )
+
+        (
+            ranked,
+            diversity,
+            enumeration_diagnostics,
+            grounding_filter_diagnostics,
+            finalist_candidates,
+            reservation_diagnostics,
+            librarian_two_lane_diagnostics,
+        ) = _allocate_ranked_candidates(ranked)
+
+        librarian_refinement_diagnostics: dict[str, Any] = {
+            "enabled": bool(librarian_refinement_enabled),
+            "fired": False,
+            "status": "inactive",
+            "reason": "librarian_execution_inactive",
+            "round": 0,
+            "provider_calls": 0,
+            "silent_fallback_count": 0,
+            "planner_refinement_unavailable": False,
+            "second_pass": {
+                "attempted": False,
+                "retrieval_scope": "gapped_subqueries_only",
+                "improved_seating": False,
+            },
+        }
+        logical_rerank_batches = 1 if rerank_enabled and bool(fused) else 0
+        if (
+            validated_librarian_plan is not None
+            and librarian_execution_policy is not None
+            and librarian_execution_policy.active
+        ):
+            seated_refs_by_lane = seated_document_refs_by_lane(
+                finalist_candidates,
+                list(librarian_execution_policy.lane_seat_quotas),
+            )
+            seated_doc_ids_by_lane = {
+                lane_id: {doc_id for _corpus_id, doc_id in refs}
+                for lane_id, refs in seated_refs_by_lane.items()
+            }
+            refinement_gaps = detect_librarian_refinement_gaps(
+                plan=validated_librarian_plan,
+                reservation_receipt=reservation_diagnostics,
+                seated_doc_ids_by_lane=seated_doc_ids_by_lane,
+            )
+            refinement_enabled = bool(librarian_refinement_enabled)
+            if not refinement_gaps:
+                librarian_refinement_diagnostics.update(
+                    {
+                        "status": "not_needed",
+                        "reason": "no_deterministic_gap",
+                    }
+                )
+            elif not refinement_enabled:
+                librarian_refinement_diagnostics.update(
+                    {
+                        "status": "disabled",
+                        "reason": "llm_decomposer_disabled",
+                        "gaps": [
+                            item.model_dump(mode="json") for item in refinement_gaps
+                        ],
+                    }
+                )
+            else:
+                route_context = {}
+                for values in document_routes.values():
+                    for route in values:
+                        identity = (
+                            str(route.corpus_id),
+                            str(route.doc_id),
+                        )
+                        current_route = route_context.get(identity)
+                        if current_route is None or (
+                            float(route.score),
+                            str(route.title),
+                            str(route.summary),
+                        ) > (
+                            float(current_route.score),
+                            str(current_route.title),
+                            str(current_route.summary),
+                        ):
+                            route_context[identity] = route
+                shortlist_context = {
+                    (str(item.corpus_id), str(item.doc_id)): item
+                    for item in validated_librarian_plan.shortlist
+                }
+                seated_by_identity: dict[
+                    tuple[str, str],
+                    LibrarianSeatedDocument,
+                ] = {}
+                for chunk in finalist_candidates:
+                    corpus_id = str(chunk.corpus_id or "")
+                    doc_id = str(chunk.doc_id or "")
+                    if not corpus_id or not doc_id:
+                        continue
+                    route = route_context.get((corpus_id, doc_id))
+                    shortlist_item = shortlist_context.get((corpus_id, doc_id))
+                    metadata = dict(chunk.metadata or {})
+                    candidate = LibrarianSeatedDocument(
+                        corpus_id=corpus_id,
+                        doc_id=doc_id,
+                        title=str(
+                            getattr(route, "title", "")
+                            or getattr(shortlist_item, "title", "")
+                            or chunk.doc_name
+                            or ""
+                        ),
+                        summary=str(
+                            getattr(route, "summary", "")
+                            or getattr(shortlist_item, "summary", "")
+                            or getattr(chunk, "summary", "")
+                            or metadata.get("summary")
+                            or ""
+                        )[:1000],
+                        score=max(
+                            0.0,
+                            float(getattr(route, "score", None) or chunk.score or 0.0),
+                        ),
+                        lane_ids=tuple(
+                            sorted(
+                                lane_id
+                                for lane_id, refs in seated_refs_by_lane.items()
+                                if (corpus_id, doc_id) in refs
+                            )
+                        ),
+                    )
+                    current = seated_by_identity.get((corpus_id, doc_id))
+                    if current is not None:
+                        candidate = candidate.model_copy(
+                            update={
+                                "lane_ids": tuple(
+                                    sorted(
+                                        set(current.lane_ids) | set(candidate.lane_ids)
+                                    )
+                                )
+                            }
+                        )
+                    if current is None or candidate.score > current.score:
+                        seated_by_identity[(corpus_id, doc_id)] = candidate
+                    elif candidate.lane_ids != current.lane_ids:
+                        seated_by_identity[(corpus_id, doc_id)] = current.model_copy(
+                            update={"lane_ids": candidate.lane_ids}
+                        )
+                refinement_started = perf_counter()
+                try:
+                    refinement_result = await librarian_refiner.refine(
+                        base_plan=validated_librarian_plan,
+                        original_query=base_query_plan.original_query,
+                        gaps=refinement_gaps,
+                        seated_documents=tuple(seated_by_identity.values()),
+                        user_id=librarian_refinement_user_id,
+                    )
+                    librarian_refinement_diagnostics = {
+                        "enabled": True,
+                        **refinement_result.diagnostics(),
+                        "second_pass": {
+                            "attempted": False,
+                            "retrieval_scope": "gapped_subqueries_only",
+                            "improved_seating": False,
+                        },
+                    }
+                    if refinement_result.status == "built":
+                        (
+                            refined_execution_plan,
+                            refined_execution_policy,
+                        ) = apply_librarian_execution_plan(
+                            base_query_plan,
+                            refinement_result.plan,
+                            supplementary_shortlist=tuple(
+                                LibrarianShortlistItemV1(
+                                    corpus_id=item.corpus_id,
+                                    doc_id=item.doc_id,
+                                    title=item.title,
+                                    summary=item.summary,
+                                    score=item.score,
+                                )
+                                for item in seated_by_identity.values()
+                            ),
+                        )
+                        gapped_lane_ids = {item.lane_id for item in refinement_gaps}
+                        refined_lanes = [
+                            lane
+                            for lane in query_plan_execution_lanes(
+                                refined_execution_plan
+                            )
+                            if lane.lane_id in gapped_lane_ids
+                        ]
+                        if not refined_lanes:
+                            raise ValueError("refined execution has no gapped lanes")
+                        for lane_id in gapped_lane_ids:
+                            document_routes.pop(lane_id, None)
+                            summary_tree_routes.pop(lane_id, None)
+                        (
+                            document_routes,
+                            refined_grounding_rows,
+                        ) = merge_grounded_document_route_hints(
+                            document_routes,
+                            {
+                                lane_id: hints
+                                for lane_id, hints in (
+                                    refined_execution_policy.document_route_hints.items()
+                                )
+                                if lane_id in gapped_lane_ids
+                            },
+                            max_per_lane=document_route_limit,
+                        )
+                        refined_vectors = await asyncio.wait_for(
+                            embed_queries(
+                                [lane.dense_text for lane in refined_lanes],
+                                embedding_config,
+                            ),
+                            timeout=_stage_timeout(
+                                float(
+                                    getattr(
+                                        settings,
+                                        "QUERY_PLAN_EMBED_DEADLINE_SECONDS",
+                                        30.0,
+                                    )
+                                ),
+                                reserve=1.0,
+                            ),
+                        )
+                        refinement_pool_groups = await asyncio.gather(
+                            *[
+                                _lane_pools(lane, vector)
+                                for lane, vector in zip(
+                                    refined_lanes,
+                                    refined_vectors,
+                                )
+                            ]
+                        )
+                        refinement_pools = [
+                            pool for group in refinement_pool_groups for pool in group
+                        ]
+                        if effective_tier == RetrievalTier.qdrant_mongo_graph and any(
+                            pool.chunks for pool in refinement_pools
+                        ):
+                            try:
+                                from services.conversation import (
+                                    conversation_service,
+                                )
+
+                                async def _refined_graph_pool(lane):
+                                    (
+                                        lane_seed_chunks,
+                                        _,
+                                    ) = dedupe_cross_corpus_evidence(
+                                        [
+                                            chunk
+                                            for pool in refinement_pools
+                                            if pool.lane_id == lane.lane_id
+                                            for chunk in pool.chunks
+                                        ]
+                                    )
+                                    if not lane_seed_chunks:
+                                        return PlannedPool(
+                                            lane_id=lane.lane_id,
+                                            retriever="graph_refinement",
+                                            chunks=(),
+                                            required=True,
+                                        )
+                                    lane_graph_chunks = await mode_a_expansion.expand(
+                                        lane_seed_chunks,
+                                        corpus_ids,
+                                        limit=min(
+                                            (
+                                                max(
+                                                    0,
+                                                    int(neo4j_expansion_cap),
+                                                )
+                                                if neo4j_expansion_cap is not None
+                                                else 12
+                                            ),
+                                            rerank_cap,
+                                        ),
+                                        db=conversation_service._db,
+                                        query=lane.query,
+                                    )
+                                    annotate_planned_lane_grounding(
+                                        lane_graph_chunks,
+                                        lane_id=lane.lane_id,
+                                        anchor_phrase=lane.phrase,
+                                        anchor_phrases=tuple(lane.support_phrases),
+                                        anchor_terms=tuple(lane.lexical_terms),
+                                    )
+                                    return PlannedPool(
+                                        lane_id=lane.lane_id,
+                                        retriever="graph_refinement",
+                                        chunks=tuple(lane_graph_chunks),
+                                        required=True,
+                                        anchor_phrase=lane.phrase,
+                                        anchor_phrases=tuple(lane.support_phrases),
+                                        anchor_terms=tuple(lane.lexical_terms),
+                                    )
+
+                                graph_pool_rows = await asyncio.wait_for(
+                                    asyncio.gather(
+                                        *[
+                                            _refined_graph_pool(lane)
+                                            for lane in refined_lanes
+                                        ],
+                                        return_exceptions=True,
+                                    ),
+                                    timeout=_stage_timeout(
+                                        float(
+                                            getattr(
+                                                settings,
+                                                "QUERY_PLAN_GRAPH_DEADLINE_SECONDS",
+                                                4.0,
+                                            )
+                                        ),
+                                        reserve=0.5,
+                                    ),
+                                )
+                                for lane, row in zip(
+                                    refined_lanes,
+                                    graph_pool_rows,
+                                ):
+                                    if isinstance(row, BaseException):
+                                        failures.append(
+                                            {
+                                                "lane_id": lane.lane_id,
+                                                "retriever": (
+                                                    "planner_refinement_graph"
+                                                ),
+                                                "error": (
+                                                    f"{type(row).__name__}: {row}"
+                                                )[:240],
+                                            }
+                                        )
+                                    else:
+                                        refinement_pools.append(row)
+                            except Exception as exc:
+                                failures.append(
+                                    {
+                                        "lane_id": ("librarian_refinement_graph"),
+                                        "retriever": ("planner_refinement_graph"),
+                                        "error": (f"{type(exc).__name__}: {exc}")[:240],
+                                    }
+                                )
+                        (
+                            refinement_pools,
+                            refinement_temporal_candidates,
+                        ) = await _temporalize_pools(refinement_pools)
+                        protected_refusion_lane_ids = list(
+                            dict.fromkeys([*required_lane_ids, *protected_lane_ids])
+                        )
+                        required_base_pools = [
+                            PlannedPool(
+                                lane_id=lane_id,
+                                retriever="refinement_base_protected",
+                                chunks=tuple(
+                                    chunk
+                                    for chunk in fused
+                                    if lane_id
+                                    in set(
+                                        (chunk.metadata or {}).get("planned_lanes")
+                                        or []
+                                    )
+                                ),
+                                required=True,
+                            )
+                            for lane_id in protected_refusion_lane_ids
+                        ]
+                        refined_fused, refinement_fusion = fuse_planned_pools(
+                            [
+                                PlannedPool(
+                                    "refinement_base",
+                                    "dense",
+                                    tuple(fused),
+                                ),
+                                *required_base_pools,
+                                *refinement_pools,
+                            ],
+                            max_candidates=rerank_cap,
+                            corpus_ids=corpus_ids,
+                        )
+                        if temporal_enabled and temporal_intent.active:
+                            refined_keys = {
+                                temporal_candidate_key(item) for item in refined_fused
+                            }
+                            (
+                                refined_fused,
+                                refinement_temporal_reserve,
+                            ) = reserve_temporal_candidates(
+                                refined_fused,
+                                [
+                                    *refined_fused,
+                                    *(
+                                        chunk
+                                        for chunk in refinement_temporal_candidates
+                                        if temporal_candidate_key(chunk)
+                                        not in refined_keys
+                                    ),
+                                ],
+                                intent=temporal_intent,
+                                max_candidates=rerank_cap,
+                                tier=effective_tier,
+                            )
+                            temporal_diagnostics[
+                                "refinement_fusion_cap"
+                            ] = refinement_temporal_reserve
+                        if effective_tier != RetrievalTier.qdrant_only:
+                            refined_fused = await asyncio.wait_for(
+                                attach_document_identities(
+                                    refined_fused,
+                                    corpus_ids,
+                                ),
+                                timeout=_stage_timeout(
+                                    float(
+                                        getattr(
+                                            settings,
+                                            "QUERY_PLAN_IDENTITY_DEADLINE_SECONDS",
+                                            2.0,
+                                        )
+                                    ),
+                                    reserve=0.5,
+                                ),
+                            )
+                            refined_fused = await asyncio.wait_for(
+                                hydrate_rerank_texts(
+                                    refined_fused,
+                                    corpus_ids,
+                                ),
+                                timeout=_stage_timeout(
+                                    float(
+                                        getattr(
+                                            settings,
+                                            "QUERY_PLAN_HYDRATE_DEADLINE_SECONDS",
+                                            2.0,
+                                        )
+                                    ),
+                                    reserve=0.4,
+                                ),
+                            )
+                        refined_fused, _ = dedupe_cross_corpus_evidence(refined_fused)
+                        refined_fused = [
+                            chunk
+                            for chunk in refined_fused
+                            if not is_separator_only_text(chunk.text)
+                        ]
+                        (
+                            refined_fused,
+                            refinement_cap_diagnostics,
+                        ) = cap_planned_candidates_by_affinity(
+                            refined_fused,
+                            lane_rerank_caps=(
+                                librarian_execution_policy.lane_rerank_caps
+                            ),
+                            global_rerank_cap=rerank_cap,
+                        )
+                        if rerank_enabled and refined_fused:
+                            refined_ranked = await asyncio.wait_for(
+                                reranker_service.rerank(
+                                    curation_query,
+                                    refined_fused,
+                                ),
+                                timeout=_stage_timeout(
+                                    float(
+                                        getattr(
+                                            settings,
+                                            "QUERY_PLAN_RERANK_DEADLINE_SECONDS",
+                                            6.0,
+                                        )
+                                    ),
+                                    reserve=0.25,
+                                ),
+                            )
+                            logical_rerank_batches += 1
+                        else:
+                            refined_ranked = refined_fused
+                        before_fulfilled = dict(
+                            reservation_diagnostics.get("lane_quota_fulfilled") or {}
+                        )
+                        (
+                            ranked,
+                            diversity,
+                            enumeration_diagnostics,
+                            grounding_filter_diagnostics,
+                            finalist_candidates,
+                            reservation_diagnostics,
+                            librarian_two_lane_diagnostics,
+                        ) = _allocate_ranked_candidates(refined_ranked)
+                        after_fulfilled = dict(
+                            reservation_diagnostics.get("lane_quota_fulfilled") or {}
+                        )
+                        improved_seating = any(
+                            int(after_fulfilled.get(lane_id) or 0)
+                            > int(before_fulfilled.get(lane_id) or 0)
+                            for lane_id in gapped_lane_ids
+                        )
+                        remaining_seated_refs = seated_document_refs_by_lane(
+                            finalist_candidates,
+                            list(librarian_execution_policy.lane_seat_quotas),
+                        )
+                        remaining_gaps = detect_librarian_refinement_gaps(
+                            plan=refinement_result.plan,
+                            reservation_receipt=reservation_diagnostics,
+                            seated_doc_ids_by_lane={
+                                lane_id: {doc_id for _corpus_id, doc_id in refs}
+                                for lane_id, refs in (remaining_seated_refs.items())
+                            },
+                        )
+                        fused = refined_fused
+                        pools.extend(refinement_pools)
+                        fusion_diagnostics["refinement"] = refinement_fusion
+                        librarian_refinement_diagnostics["second_pass"] = {
+                            "attempted": True,
+                            "retrieval_scope": "gapped_subqueries_only",
+                            "lane_ids": sorted(gapped_lane_ids),
+                            "embed_batches": 1,
+                            "candidate_generation_parallel": True,
+                            "candidate_count": sum(
+                                len(pool.chunks) for pool in refinement_pools
+                            ),
+                            "grounded_route_hints": refined_grounding_rows,
+                            "rerank_caps": refinement_cap_diagnostics,
+                            "before_lane_quota_fulfilled": before_fulfilled,
+                            "after_lane_quota_fulfilled": after_fulfilled,
+                            "improved_seating": improved_seating,
+                            "remaining_gaps": [
+                                item.model_dump(mode="json") for item in remaining_gaps
+                            ],
+                            "max_rounds": 1,
+                        }
+                except Exception as exc:
+                    librarian_refinement_diagnostics.update(
+                        {
+                            "status": "fallback",
+                            "fired": True,
+                            "reason": (
+                                "planner_refinement_unavailable:"
+                                f"{type(exc).__name__}"
+                            ),
+                            "silent_fallback_count": max(
+                                1,
+                                int(
+                                    librarian_refinement_diagnostics.get(
+                                        "silent_fallback_count"
+                                    )
+                                    or 0
+                                ),
+                            ),
+                            "planner_refinement_unavailable": True,
+                            "round": 0,
+                            "second_pass": {
+                                "attempted": False,
+                                "retrieval_scope": "gapped_subqueries_only",
+                                "improved_seating": False,
+                            },
+                        }
+                    )
+                    failures.append(
+                        {
+                            "lane_id": "librarian_refinement",
+                            "retriever": "planner_refinement",
+                            "error": f"{type(exc).__name__}: {exc}"[:240],
+                        }
+                    )
+                timings["librarian_refinement"] = perf_counter() - refinement_started
         hydrate_started = perf_counter()
         if effective_tier == RetrievalTier.qdrant_only:
             finalists = [
@@ -3791,15 +4385,14 @@ class RetrieverOrchestrator:
                 {
                     **librarian_execution_policy.diagnostics(),
                     "two_lane": librarian_two_lane_diagnostics,
+                    "refinement": librarian_refinement_diagnostics,
                     "execution": {
                         "v1_subquery_embed_batches": 1,
                         "v1_subquery_embed_scope": (
                             "initial_query_plan_execution_lanes"
                         ),
                         "candidate_generation_parallel": True,
-                        "logical_rerank_batches": (
-                            1 if rerank_enabled and bool(fused) else 0
-                        ),
+                        "logical_rerank_batches": (logical_rerank_batches),
                         "rerank_caps": librarian_rerank_cap_diagnostics,
                     },
                 }

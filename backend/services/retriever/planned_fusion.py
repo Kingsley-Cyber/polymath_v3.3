@@ -1636,6 +1636,29 @@ def reserve_planned_finalists(
     )
 
 
+def seated_document_refs_by_lane(
+    finalists: list[SourceChunk],
+    required_lane_ids: list[str],
+) -> dict[str, set[tuple[str, str]]]:
+    """Return actual lane reservations, never broad candidate attribution."""
+
+    required = set(required_lane_ids)
+    output: dict[str, set[tuple[str, str]]] = {
+        lane_id: set() for lane_id in required_lane_ids
+    }
+    for chunk in finalists:
+        corpus_id = str(chunk.corpus_id or "")
+        doc_id = str(chunk.doc_id or "")
+        if not corpus_id or not doc_id:
+            continue
+        reservations = set(
+            (chunk.metadata or {}).get("planned_required_lane_reservations") or []
+        )
+        for lane_id in reservations & required:
+            output[lane_id].add((corpus_id, doc_id))
+    return output
+
+
 def prioritize_enumeration_candidates(
     ranked: list[SourceChunk],
     preferred: list[SourceChunk],

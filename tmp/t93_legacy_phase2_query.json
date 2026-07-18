@@ -1,0 +1,16 @@
+{
+  "corpus_id": "5a20bc21-95df-42c2-80c8-f927b4e83904",
+  "status": "queued",
+  "attempt_count": 0,
+  "route_id": "longcat-api__longcat-2.0",
+  "model_id": "openai/LongCat-2.0",
+  "runtime_version": "longcat-api.openai-compatible.2026-07-14.cp9-recanary-mt8192-v1",
+  "prompt_hash": "sha256:173807cd6d07a50cbb43fe709ba49fc27da645903faad7bef7f989dadcac73f9",
+  "repair_prompt_hash": "sha256:d9b71bb2b80d91b6513ffcd2cf44b756deca5c17b5337902cca11d52a2d8cb87",
+  "canonical_write": false,
+  "lease_until": null,
+  "phase": {"$exists": false},
+  "phase_selection": {"$exists": false},
+  "prompt_version": {"$exists": false},
+  "repair_prompt_version": {"$exists": false}
+}

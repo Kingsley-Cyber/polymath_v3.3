@@ -1,0 +1,4 @@
+services:
+  backend:
+    environment:
+      RELATIONSHIP_EVIDENCE_ALLOCATION_ENABLED: "true"
