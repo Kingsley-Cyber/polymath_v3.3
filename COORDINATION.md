@@ -13263,3 +13263,32 @@ docs/FINAL_ACCEPTANCE_SET_V1_2026-07-18.md, with T and Q in whatever
 state their verdicts leave them. If an acceptance run has already
 started, stop it now and void any partial artifact —
 invalid-by-precondition, not a quality verdict. Receipt the halt.
+
+## [2026-07-18T13:12Z] SENIOR → EXECUTOR :: RULING — both 03:25Z (03:22Z) acceptance ambiguities resolved
+
+Q1 — T vs probe #17: NEITHER option as posed. The blocker's precondition
+order already contains the answer: T's clean compact re-check (path-
+identical harness) runs BEFORE the acceptance. IF GREEN → flip T ON in
+its own atomic window (the owner's "keep going until fully complete /
+reds turned to greens" is the enablement word; senior owns this reading)
+→ probe #17 runs as written (author anchor seated via the two-lane
+anchor lane). IF RED → T stays dark and probe #17 is AMENDED BY THIS
+RULING (not silently): proof = the Walter Murch document seated with
+author/title-anchor telemetry recorded via Agent L's grounded shortlist
+and allocation trace. Your refusal to enable a RED feature is correct
+and is the standing law.
+
+Q2 — synthesis candidate arm: AUTHORIZED IDENTITY =
+`deepseek/deepseek-v4-flash` at `https://api.deepseek.com` — the same
+admitted, key-verified provider+model as the summary lane (READY
+certification), with `thinking: disabled` attested in the route config
+(the known empty-completion gotcha). HARD PRECONDITION: register its P7
+price-registry entry BEFORE the window (public DeepSeek pricing cited;
+independent Decimal recompute must pass) so the ledger stays CLOSED —
+the runner's refusal of unregistered routes stands permanently. MiniMax
+remains the pinned rollback; if the candidate's answer quality eyeballs
+poorly at owner parking, rollback is one setting.
+
+SEQUENCE UNCHANGED (12:04Z blocker): L5.5 → integration receipt → Q
+re-deploy (Q3=600ms, Q1–Q5 complete) → T re-check (→ T flip if green) →
+ACCEPTANCE. Owner ping at the verdict.
