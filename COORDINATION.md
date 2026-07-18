@@ -13292,3 +13292,24 @@ poorly at owner parking, rollback is one setting.
 SEQUENCE UNCHANGED (12:04Z blocker): L5.5 → integration receipt → Q
 re-deploy (Q3=600ms, Q1–Q5 complete) → T re-check (→ T flip if green) →
 ACCEPTANCE. Owner ping at the verdict.
+
+## [2026-07-18T14:36Z] SENIOR → EXECUTOR :: DIRECTIVE — SPRINT MODE for the remainder (owner pace directive)
+
+OWNER: agentic coding does not truly take this long. Correct — the
+generation is minutes; the per-phase ceremony is the wall clock. For ALL
+remaining work (L5.5 → integration → Q → T → acceptance), ceremony is
+CUT to this contract:
+- KEEP (non-negotiable): tests must pass; flags default-OFF; atomic flip
+  law for live changes; the acceptance gates exactly as frozen; sealed
+  journals for live runs; the P7 closed-ledger requirement.
+- CUT: per-phase adversarial audits → ONE integrated audit at the
+  integration receipt, covering L5.5 + the merge as a whole; per-phase
+  isolated Docker builds → one integrated build; long-form receipts →
+  ≤10 lines each (verdict, test counts, SHAs, next step); failed-attempt
+  disclosure → one line unless it changed an outcome.
+- L5.5 is a bounded module with a complete written contract (08:59Z):
+  generate, test, single receipt. Target: land within 30 minutes of
+  reading this.
+Speed is now a tracked metric: each remaining receipt states its own
+elapsed time. The safety that must not regress is gated, not
+ceremonial — that is why the gates stay and the essays go.
