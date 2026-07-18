@@ -893,7 +893,7 @@ async def _build_librarian_plan_trace(
                 user_id=user_id,
                 llm_decomposer_enabled=llm_decomposer_enabled,
             ),
-            timeout=4.0 if llm_decomposer_enabled else 2.0,
+            timeout=15.0 if llm_decomposer_enabled else 2.0,
         )
         return {
             "mode": "enabled" if enabled else "shadow",

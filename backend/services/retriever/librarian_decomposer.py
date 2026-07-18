@@ -25,12 +25,16 @@ from services.llm import llm_service
 from services.query_model_resolver import resolve as resolve_query_model_kind
 
 
-DECOMPOSER_TIMEOUT_SECONDS = 2.0
+# 12s: the 2.0s wall guaranteed ReadTimeout on real ~6k-token planning
+# payloads (the 2026-07-19 acceptance ledger showed every helper call dying
+# at transport then cascading to an unpriced fallback). The owner waived
+# helper latency for quality; the outer orchestrator budget caps the turn.
+DECOMPOSER_TIMEOUT_SECONDS = 12.0
 DECOMPOSER_MAX_TOKENS = 600
 DECOMPOSER_MAX_QUESTION_CHARS = 1200
 DECOMPOSER_MAX_TITLE_CHARS = 240
 DECOMPOSER_MAX_SUMMARY_CHARS = 1000
-REFINER_TIMEOUT_SECONDS = 2.0
+REFINER_TIMEOUT_SECONDS = 12.0
 REFINER_MAX_TOKENS = 600
 REFINER_CACHE_LIMIT = 256
 _ROLE_ORDER = {

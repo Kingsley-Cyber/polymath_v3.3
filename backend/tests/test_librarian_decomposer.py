@@ -180,7 +180,7 @@ async def test_success_uses_configured_synthesis_route_and_server_budgets():
     assert call["model"] == "test/utility"
     assert call["temperature"] == 0
     assert call["max_tokens"] == 600
-    assert call["timeout"] == 2.0
+    assert call["timeout"] == 12.0
     assert call["response_format"] == {"type": "json_object"}
     assert call["extra_params"] == {
         "top_p": 0.8,
@@ -900,7 +900,7 @@ async def test_refiner_changes_only_gapped_role_and_replays_byte_stably():
     call = completion.calls[0]
     assert call["temperature"] == 0
     assert call["max_tokens"] == 600
-    assert call["timeout"] == 2.0
+    assert call["timeout"] == 12.0
     assert call["extra_params"] == {
         "top_p": 0.8,
         "disable_thinking": True,
