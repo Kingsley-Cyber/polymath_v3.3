@@ -190,9 +190,9 @@ def _runtime_flags() -> dict[str, bool]:
     expected = {
         "RELATIONSHIP_EVIDENCE_ALLOCATION_ENABLED": True,
         "ANSWERABILITY_CORPUS_SCOPE_V2_ENABLED": True,
-        "TEMPORAL_QUERY_ROUTING_ENABLED": False,
+        "TEMPORAL_QUERY_ROUTING_ENABLED": True,
         "RERANK_EVIDENCE_SUPPORT": False,
-        "ATOMIC_CLAIM_ANCHORS_ENABLED": False,
+        "ATOMIC_CLAIM_ANCHORS_ENABLED": True,
         "PARENT_EXCERPT_ENABLED": False,
         "WATERFALL_ASSEMBLY": False,
         # Compatibility-only legacy setting; the production selector reads the
@@ -303,12 +303,8 @@ def _full_path_repeat(
                     question=question,
                     timeout=request_timeout,
                 )
-                retrieval_meta = _trace_metadata(
-                    raw["traces"], "Local RAG retrieval"
-                )
-                retrieval_diagnostics = retrieval_meta.get(
-                    "retrieval_diagnostics"
-                )
+                retrieval_meta = _trace_metadata(raw["traces"], "Local RAG retrieval")
+                retrieval_diagnostics = retrieval_meta.get("retrieval_diagnostics")
                 if not isinstance(retrieval_diagnostics, dict):
                     retrieval_diagnostics = {}
                 selection = retrieval_diagnostics.get("selection")

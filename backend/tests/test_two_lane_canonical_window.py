@@ -1,8 +1,38 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 import scripts.run_two_lane_canonical_window as harness
+
+
+def test_runtime_contract_matches_the_combined_pre_acceptance_stack(monkeypatch):
+    enabled = {
+        "RELATIONSHIP_EVIDENCE_ALLOCATION_ENABLED",
+        "ANSWERABILITY_CORPUS_SCOPE_V2_ENABLED",
+        "TEMPORAL_QUERY_ROUTING_ENABLED",
+        "ATOMIC_CLAIM_ANCHORS_ENABLED",
+        "TWO_LANE_ANCHORING_ENABLED",
+    }
+    names = enabled | {
+        "RERANK_EVIDENCE_SUPPORT",
+        "PARENT_EXCERPT_ENABLED",
+        "WATERFALL_ASSEMBLY",
+        "TWO_LANE_ANCHORING",
+        "HYDE_ENABLED",
+        "SHELF_RESERVE_ENABLED",
+        "GROUNDED_QUERY_PLANNER_ENABLED",
+        "FOUR_LANE_TIER0_ROUTER_ENABLED",
+        "FOUR_LANE_TIER0_SUBQUERY_DECOMPOSITION_ENABLED",
+        "AGENTIC_MODE_ENABLED",
+    }
+    settings = SimpleNamespace(**{name: name in enabled for name in names})
+    monkeypatch.setattr(harness, "get_settings", lambda: settings)
+
+    observed = harness._runtime_flags()
+
+    assert observed["TEMPORAL_QUERY_ROUTING_ENABLED"] is True
+    assert observed["ATOMIC_CLAIM_ANCHORS_ENABLED"] is True
 
 
 def test_compact_selection_is_exact_and_role_partition_is_ten():

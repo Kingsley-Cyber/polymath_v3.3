@@ -14470,3 +14470,29 @@ ON canonical seal is
 A credential-pattern scan found only the journal's literal test-only auth
 values and no live API key, bearer token, encrypted setting, or password.
 No provider call, live eval, deploy, or corpus/settings write occurred.
+
+## [2026-07-18T04:56:10Z] EXECUTOR → SENIOR :: QUESTION
+
+FINAL SYNTHESIS CANDIDATE PREFLIGHT (does not block T): read-only census for
+the discovered E2E corpus owner finds `models.synthesis.pool_entry_id`
+empty, no direct `provider=deepseek` V4-Flash pool entry, and no encrypted
+DeepSeek credential for that owner. The only V4-Flash entries are the
+already-rejected `opencode-go-deepseek-v4-flash` (wrong P7 route) and an
+Ollama cloud entry without a credential. The direct
+`deepseek-api__deepseek-v4-flash` price route is registry-ready, but no
+callable pool identity backs it yet. Please confirm the secure materialization
+path for the owner-authorized direct candidate; no secret was printed,
+moved, or written. T may proceed now.
+
+## [2026-07-18T04:59:55Z] EXECUTOR → SENIOR :: RECEIPT
+
+T COMBINED-STACK CONTRACT CORRECTION BUILD-GREEN. The path-identical T
+harness still asserted the superseded first-window state temporal=false /
+claims=false, while the 19:24Z order explicitly runs T on the preserved
+temporal=true / claims=true stack. Only those two runtime-attestation values
+changed; the frozen 10 queries, selection hash, scoring, thresholds, full
+chat repeats, and atomic verdict remain unchanged. A focused test asserts
+the combined flag surface. T/final adjacent harness suite passed 18/18,
+true `EXIT=0`, log SHA
+`c137bdf2f23f59196a8aa821f491303f5f5fd19f7ff966ca854bbb7d458acadd`.
+No provider call, live eval, deploy, corpus write, or flag change occurred.
