@@ -14654,3 +14654,73 @@ No prompt/threshold/product/spec/corpus mutation or live call was attempted.
    evidence base shrinks accordingly.
 Then: the sole re-run, unchanged authority. No other frozen content may
 be touched.
+
+## [2026-07-18T06:03:02Z] EXECUTOR → SENIOR :: RECEIPT
+
+D1 NAMED-SOURCE FIX BUILD-GREEN. Corpus-scope v3 now requires a quoted,
+non-generic capitalized, or possessive-author surface; bare role nouns,
+including the frozen drawing-instructors/cinematographers phrase, are not
+eligible. Quoted, Walter Murch, and possessive-author cases remain guarded.
+
+## [2026-07-18T06:03:03Z] EXECUTOR → SENIOR :: RECEIPT
+
+D2 TEMPORAL ABSENCE FIX BUILD-GREEN. The guard now uses exact query-year
+support from document dates or captured time expressions, not a min/max
+envelope that a stray 2099 value can poison. Incomplete metadata remains
+fail-open; the Oscar 2026 shape is asserted absent.
+
+## [2026-07-18T06:03:04Z] EXECUTOR → SENIOR :: RECEIPT
+
+D3 PLANNER TIMEOUT FIX BUILD-GREEN. A shortlist deadline now preserves the
+real pre-shortlist corpus-version snapshot and compiles only a deterministic,
+non-simple rule plan, with zero provider calls and explicit degraded status.
+The d3b VES list query yields enumerative_trace; simple/LLM-only queries stay
+bypassed.
+
+## [2026-07-18T06:03:05Z] EXECUTOR → SENIOR :: RECEIPT
+
+D4 ROUTE/COST FIX BUILD-GREEN. Decomposer and refiner now share the configured
+synthesis route/model/credential identity; Utility is fallback only when no
+synthesis route exists. Strict ValueError fallback stays fail-open and its
+successful transport closes the registered DeepSeek cost ledger. Integrated
+network-disabled gate: 223/223 PASS, true EXIT=0, SHA
+`3318dd7c36fae0fc4e00ec8ae179c4c3661c20b26669ef89dbedba0993a62bc1`.
+Harness-only first attempt had 220 PASS + three repo-root mount errors; no
+code changed before the correct-root rerun.
+
+## [2026-07-18T06:17:41Z] EXECUTOR → SENIOR :: RECEIPT
+
+FROZEN F5 GROUND-TRUTH SWAP BUILD-GREEN. The invalid Figure 9.4 probe was
+replaced in both frozen sets by `negv2_f5_figure_34_1`. Production-normalized
+matching against the exact Directing document resolves old 9.4 as
+child=1/parent=1/tree=0 and new 34.1 as 0/0/0; all 15 selected source hashes
+close. Held-out SHA is `7d3de158…`, acceptance manifest `a130175f…`, parent
+spec `99f2c37b…`; every runner/firewall pin was rotated. Combined repair/hash
+gate: 258/258 PASS, network disabled, true EXIT=0, SHA
+`801a7a4396f4a91d0e97f9eef71d0d090f7f755a916c33057a935016ebbc5211`.
+No other frozen content changed; historical Figure 9.4 answers are correct.
+
+## [2026-07-18T06:21:08Z] EXECUTOR → SENIOR :: QUESTION
+
+CLAIM MATERIALIZATION SCOPE PIN NEEDED; BUILD CONTINUES, WRITE HELD. Exact
+E2E closure has 18,790 stored local-extraction claim rows / 152,803 claims,
+all mapped by 6,756 structural parents. The Mark digest-eligibility subset is
+15,933 children / 152,059 claims under 3,903 eligible parents; it omits 2,857
+valid stored rows. Fresh Mark recompilation is rejected: 97/128 sampled bodies
+differ because it drops the GLiNER-enriched lineage. The strict existing-row
+wrapper can preserve all bodies and add only pinned sentence evidence.
+Does 23:58Z authorize all 18,790 existing rows (executor recommendation,
+because direct retrieval can select children outside digest-eligible parents)
+or only the 15,933 Mark subset? No data write starts until this count is pinned.
+
+## [2026-07-19T00:41Z] SENIOR :: RULING — claim materialization scope = ALL 18,790 existing rows
+
+Executor recommendation ACCEPTED with its own reasoning: live retrieval
+may seat any child, so an eligibility-subset join surface would create
+silent anchor gaps on lawful evidence — the exact silent-fallback class
+we outlaw. Materialize ALL 18,790 stored rows via the strict
+existing-row wrapper: stored claim bodies byte-preserved (fresh
+recompilation stays REJECTED — dropping GLiNER lineage would violate
+restore-never-rederive), only pinned sentence evidence added.
+Backup-first, before/after counts, byte-determinism spot-check in the
+receipt. Then the sole re-run.
