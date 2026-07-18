@@ -174,13 +174,17 @@ async def test_enabled_timeout_applies_deterministic_d3b_shape_without_provider(
     )
 
     assert result["mode"] == "enabled_degraded"
-    assert result["behavior_applied"] is True
+    # W1-D2 (2026-07-19): a degraded plan informs the trace but never takes
+    # behavior — the acceptance re-run proved degraded planned retrieval can
+    # seat nothing and replace baseline evidence with less. Fail-open.
+    assert result["behavior_applied"] is False
     assert result["plan"]["shape"] == "enumerative_trace"
     assert result["plan"]["planner"] == "rule:enumerative_trace"
     assert result["plan"]["corpus_doc_version"] == version
     assert result["diagnostics"]["status"] == "degraded_deterministic_fallback"
     assert result["diagnostics"]["reason"] == "TimeoutError: "
-    assert result["diagnostics"]["provider_calls"] == 0
+    assert result["diagnostics"]["silent_fallback_count"] == 1
+    assert result["diagnostics"]["fallback_signal"] == "librarian_degraded_fallback"
 
 
 @pytest.mark.asyncio

@@ -919,14 +919,21 @@ async def _build_librarian_plan_trace(
                 fallback_result = None
         fallback_plan = getattr(fallback_result, "plan", None)
         if fallback_plan is not None and fallback_plan.shape != "simple":
+            # W1-D2 (2026-07-19 senior fix): a degraded plan may inform the
+            # trace but NEVER take behavior — the final-acceptance re-run
+            # proved degraded planned retrieval seats nothing and replaces
+            # baseline evidence with less (floors 0/6, sources=0). Fail-open
+            # law: planner failure => baseline retrieval untouched.
             return {
                 "mode": "enabled_degraded" if enabled else "shadow",
-                "behavior_applied": bool(enabled),
+                "behavior_applied": False,
                 "plan": fallback_plan.model_dump(mode="json"),
                 "diagnostics": {
                     **dict(getattr(fallback_result, "diagnostics", {}) or {}),
                     "status": "degraded_deterministic_fallback",
                     "reason": f"{type(exc).__name__}: {exc}"[:300],
+                    "silent_fallback_count": 1,
+                    "fallback_signal": "librarian_degraded_fallback",
                 },
             }
         return {
