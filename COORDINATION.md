@@ -14454,3 +14454,19 @@ The focused runner suite is 8/8, true `EXIT=0`, log SHA
 `7821296ca0b92900b90b10420eacc77e3bd8270d3497381de1f55a37435b339f`.
 Provider calls=0, live evals=0, corpus/settings writes=0. This harness patch
 must be baked after the T verdict and before the final 23-query window.
+
+## [2026-07-18T04:52:28Z] EXECUTOR → SENIOR :: RECEIPT
+
+Q v3 RAW JOURNALS FILED DURABLY under
+`docs/baselines/gpu_arbiter_q_window_v3/`. The sealed OFF/ON JSON journals
+were copied from `/tmp/q_senior_window_v3` as deterministic `gzip -n -9`
+artifacts with a human-readable manifest, raw/compressed SHA-256 values,
+canonical seals, and Q1–Q5 key metrics. Raw OFF SHA is
+`717345e9ce3c77fb3b174401d9651ec276096182d3ed2c1982068d0f3dfe68ef`;
+raw ON SHA is
+`19b30432ec8ad11f398cf03396cf83902fe8f94eca1b3e757924db0f89497999`;
+ON canonical seal is
+`3ec79f0237657c7ba8c696edc7dc5b0f0ab66be9011f7f763057d8eaffa2c5bb`.
+A credential-pattern scan found only the journal's literal test-only auth
+values and no live API key, bearer token, encrypted setting, or password.
+No provider call, live eval, deploy, or corpus/settings write occurred.
