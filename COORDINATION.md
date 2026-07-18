@@ -13808,3 +13808,90 @@ container was deployed, no provider or service was contacted, no eval ran,
 and no settings/corpus data was written. Provider calls=0, live evals=0,
 corpus writes=0. The flag remains default-OFF and live runtime state is
 unchanged. Proceeding to build-only item 2d, deterministic metadata backfills.
+
+## [2026-07-18T03:17:03Z] EXECUTOR → SENIOR :: RECEIPT
+
+BUILD-FIRST 2d — DETERMINISTIC E2E METADATA BACKFILLS is GREEN. The exact
+active target was API/store-discovered as corpus
+`2c894530-8d57-4432-a6d4-bc14505a698b`
+(`runpod_e2e_15doc_20260715`), with 15 active documents, 669 summary-tree
+rows, and zero active durable ingest/extraction/summary/graph work. No corpus
+ID was embedded in production code.
+
+The existing T-HOOK-3 bibliographic backfill planned and CAS-applied exactly
+6/6 rows with zero conflicts/noops. Coverage moved author 0→4,
+document_date/source_published_at/date_confidence 0→6, while title remained
+15/15 and bibliographic provenance remained 15/15. Positive controls now
+resolve `Walter Murch` / *In the Blink of an Eye* / `2001-01-01` and
+`Richard Williams` / *The Animator's Survival Kit* / `2002-01-01`; Blain
+Brown and the three-author Laban paper are also populated. Unsupported
+author/date fields remain null by the no-guess T-HOOK-3 contract—no catalog
+fact was fabricated to make coverage look complete. The apply log SHA is
+`02ad9c4604f83431298d3139b429acbfd3b28d991f4fb76f8ed52c3ca396f441`,
+true `EXIT=0`; final verify SHA
+`7470f11067dcc197f2fa082bc40dd7163a8590090a0fbdda881f11ea04f3d2da`,
+true `EXIT=0`; idempotent re-plan selected 0 rows, log SHA
+`430e72f9dcfe56f274c5fd78c894933ba4482167b77127e7367a1f349e9e9a75`,
+true `EXIT=0`.
+
+The new reversible `summary_tree_metadata_backfill.v1` migration derives only
+from the frozen tree topology plus existing parent-summary carriers. It writes
+the exact tree embedding text as `retrieval_text`, longest-common
+`heading_path` with node-heading fallback, stable dominant
+`temporal_class`, and de-duplicated verbatim `{text,role}` time expressions.
+It is dry-run by default, requires an idle corpus + explicit durable backup,
+asserts the exact row count, uses presence-aware core+metadata CAS guards, and
+has a presence-aware restore path. Future tree construction and Qdrant
+projection now write the same fields, preventing recurrence; no re-summary or
+re-embedding occurred in this backfill.
+
+Exact apply result: 669 planned/applied/modified, zero conflicts/noops, all
+669 now have retrieval_text, heading_path, temporal_class, an explicit
+time_expressions array, and provenance; 336 rows have nonempty temporal
+expressions; every node resolved at least one source parent. The frozen
+non-metadata tree hash stayed byte-identical
+`daf84dd872d1516b03c533cbf248b8b12f807872eb1aa5839c85cd6b904b3247`
+before/after. Apply log SHA
+`9404691afebde8da5bc756459b43af2749d93f2cd5c87277dda9b3f84ed61757`,
+true `EXIT=0`; idempotent re-plan selected 0 rows with the same core hash,
+log SHA
+`658780714cc69d7206167e2a098069752845a555092cf2e8a2b9c2194f753718`,
+true `EXIT=0`. The combined named-author/temporal positive-control assertion
+passed; log SHA
+`64e8cc79b8c6e1c41a41578eb07316e92084174f02a0c7a180d2f4efc80157a8`,
+true `EXIT=0`.
+
+Both backups are sealed and force-added under
+`docs/baselines/container_backups/build-first-2d-20260718/`: the 6-row
+bibliographic pre-image SHA is
+`356144396015ff05b2ab216b817001a7f2df84f2c0a90bc988dbf14a6bb681ca`;
+the 669-row tree pre-image SHA is
+`9f317c61249bbd1daaeb353ab0560d40c6e101c6c7ac48de85bbf074494da71f`.
+Dry restore validation passed for both: biblio log SHA
+`2f8862fb0b0b9ab2077979ce293f152ac3f3fa052ddec193675a5fa380c3bf7b`,
+tree log SHA
+`1edbc0418716e6589be823960163d2893082f863560e66fd1a72a5c5bf0e2050`,
+both true `EXIT=0`.
+
+The network-disabled adjacent biblio/tree/temporal suite passed 104/104; log
+SHA
+`7aa07989c2c20c0dffc0aa3f828423206ce79f0a6f37415fc8f9d16cd7f3baad`,
+true `EXIT=0`. Four production/test files compiled cleanly and diff-check
+passed, each log SHA
+`418a5c17f33c70e99b0cc0a07fce69191489cfedc94164bfa903785777c5bd4b`,
+true `EXIT=0`; Black left the final four-file state unchanged, log SHA
+`898983778ba85c59fa9397181f9936ad9438b20ba477f933622a930d8250411b`,
+true `EXIT=0`. The immutable apply image is
+`sha256:f094314fee312432b04b129b8e38a23869df826bfc9a7c350186bd9d69cc80a5`;
+build log SHA
+`cb89eba1abd4361db4bcca3e900ca1351b06c822492a5160f3adf73e39bf9e36`,
+true `EXIT=0`.
+
+Disclosed uncredited attempts: two initial focused pytest commands named
+nonexistent tree test files and exited before collection; the authoritative
+selection then passed. Black formatted the four touched files before the
+authoritative check. The first standard biblio dry-run correctly demonstrated
+only source-supported rows would fill; it wrote nothing. Provider calls=0,
+live evals=0, Qdrant writes=0, Neo4j writes=0. Authorized Mongo writes were
+6 document rows + 669 summary-tree rows only. Proceeding to the single
+preregistered final acceptance; no other eval window was opened.
