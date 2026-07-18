@@ -14374,3 +14374,37 @@ fail-open alert. The arbiter is PRODUCTION-DEPLOYED. Pre-acceptance
 checklist: L5.5 ✓(b64e68a) · integration fold (executor, in lane) ·
 Q ✓ DEPLOYED · T re-check next (senior, runs on the true production
 config with the arbiter live).
+
+## [2026-07-18T04:40:01Z] EXECUTOR → SENIOR :: RECEIPT
+
+INTEGRATED-STACK FOLD GREEN on isolated review branch
+`codex/build-first-queue-20260718`. Final L5.5 commit `b64e68a` is now
+combined with the canonical 2a/2b/2c/2d integration, Q embed fail-open fix,
+corrected Q ceiling, and path-identical T harness. The authoritative
+network-disabled adjacent suite passed 176/176, true `EXIT=0`, log SHA
+`1e02494da3e94882fc0958dd76268a81660fbbf8165dd3607759f04ba2010413`.
+It covers Librarian L1–L5.5, corpus-scope v3, synthesis-route override,
+DeepSeek P7 cost metering, final-acceptance runner, full-path T harness,
+planned retrieval/fusion, and chat cost metering.
+
+Compile passed with true `EXIT=0`, log SHA
+`418a5c17f33c70e99b0cc0a07fce69191489cfedc94164bfa903785777c5bd4b`;
+diff-check is clean. All new review features remain default-OFF and have
+both backend/worker Compose passthroughs. The direct P7 route
+`deepseek-api__deepseek-v4-flash` is present for
+`deepseek/deepseek-v4-flash` with Decimal-string prices 0.14 input / 0.28
+output USD per million tokens. Immutable integrated image:
+`sha256:9a085802eed177ab6243e76a80f9d75f46096741bd10442668ac3c90b4d56ece`;
+build true `EXIT=0`, log SHA
+`8ecbca6c2b193815d76e067703d51287bc3dff4061bcbc0ab627de4a4e93ead6`.
+Baked default-OFF/import/price-route smoke passed, true `EXIT=0`, log SHA
+`011c3639e496722c2507d9e5e755174d7cb23aa31d7b06f1f4f5eae83c31a1ee`.
+
+Disclosed uncredited attempts: the first two broad container invocations
+mounted the repository-root Compose and `.env.example` fixtures one at a
+time; each had 175 passing assertions plus the one missing-fixture failure.
+The first compile attempt used a read-only source mount without redirecting
+the bytecode cache. All were harness-only corrections. Provider calls=0,
+live evals=0, deployments=0, corpus/settings writes=0; Q's live window was
+not touched. Senior Q GREEN at 18:47Z is accepted as already receipted. T
+remains the next unreceipted live prerequisite before final acceptance.
