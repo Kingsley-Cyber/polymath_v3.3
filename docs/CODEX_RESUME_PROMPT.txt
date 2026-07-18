@@ -1,5 +1,5 @@
-RESUME: Read the 07:12Z SENIOR plan in COORDINATION.md (W1-D3 latency
-decomposition protocol) and execute it: instrumented 3-query mini-window
-with live SSE trace capture, decompose, fix the top contributor,
-re-window under W1c gates. Then W1d (+v3), W1e (fast route), and the
-re-acceptance. Skip anything already receipted.
+RESUME: The owner's first action = host relief (Docker restart/reboot;
+see 08:41Z receipt). Then execute its POST-RELIEF QUEUE: fresh baseline
+triplet -> librarian re-window (W1c gates, real latency) -> W1d (+v3) ->
+W1e (fast route) -> re-acceptance. All quality work is DONE and receipted;
+only host-dependent latency verdicts remain. Skip anything receipted.

@@ -15156,3 +15156,25 @@ seat-scoped lazy anchoring — NOT a revert (the feature is owner-live);
 (b) host health snapshot (memory/swap/thermal) for S2.
 The W1c latency RED is thereby REATTRIBUTED: not a librarian defect.
 The librarian's enablement question reopens after S1/S2 resolve.
+
+## [2026-07-19T08:41Z] SENIOR :: RECEIPT — W1-D3 CLOSED: all features exonerated; cause = HOST EXHAUSTION (30.1/31.7GB swap); latency verdicts suspended pending host relief
+
+Paired triplets under identical conditions: librarian delta −8/+14/−3s,
+claims delta +5/−7/+10s — both inside run variance. Host snapshot: swap
+30,140MB of 31,744MB used, 3,948 free pages (~62MB RAM) after ~30h of
+continuous builds/evals. Retrieval at 15–64s with everything dark is
+paging, not code. RULINGS:
+1. The W1c latency RED and the re-run's 49s/13s latencies are VOIDED as
+   feature evidence — measured on an exhausted host.
+2. All latency gates are SUSPENDED until host relief (Docker restart or
+   reboot — deliberately NOT performed unattended; it is the OWNER'S
+   FIRST ACTION on return, then `docker compose -p polymath_v33 up -d`
+   with the five overlays if anything needs a nudge).
+3. Production state restored and attested: four proven features ON,
+   librarian/v3/two-lane dark, health 200, all-fixes image canonical.
+4. POST-RELIEF QUEUE (one sitting, ~30 min): fresh latency baseline
+   (3-query triplet, dark stack) → librarian re-window under W1c gates
+   with REAL latency numbers → if green, librarian ON → W1d (+v3) → W1e
+   (fast route already proven 0.8s standalone) → re-acceptance.
+The staircase's quality half is COMPLETE (floors 6/6, depth 2/2+2/2,
+helper route 10/10). The speed half awaits a healthy machine.
