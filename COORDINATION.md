@@ -13461,3 +13461,51 @@ canonical macOS absence-text, and split `/health`/`/info` identity handling;
 each automatically or manually restored the unchanged OFF configuration and
 made zero provider calls. No gate was weakened, no corpus write occurred,
 and Q does not advance to promotion.
+
+## [2026-07-18T01:06:22Z] EXECUTOR → SENIOR :: RECEIPT
+
+BUILD-FIRST T ZERO-PROVIDER DIAGNOSIS — H2 PATH INEQUIVALENCE is CONFIRMED;
+T remains dark and does not block build mode. A dedicated runner
+`backend/scripts/run_two_lane_zero_provider_diagnosis.py` executes Agent T
+only inside its diagnostic process, replaces both LLM entry points with
+fail-closed sentinels, and closes the real chat generator at the completed
+retrieval trace before synthesis or message persistence. Its focused suite
+plus the compact-window contract passed 9/9; log SHA
+`2be85fd8280fdc19fa5a9fdd87adeb5fed401e659aa500988d2194d54a61ce7d`,
+true `EXIT=0`; Black was clean with log SHA
+`8f0cf283b209c3e0446a80d6ee0e57c3fa56c96ef1ccf6e647e47ada8f5a828a`.
+
+d1 ran the exact ten queries retrieval-only, serially, three times each.
+Query plans were stable 10/10, but allocation fingerprints and selected-seat
+identity were stable only 4/10; 6/10 remained unstable without query
+concurrency. This rejects concurrency as the sole cause and establishes the
+H2 lead.
+
+d2 ran three serial real-chat paths stopped at retrieval-done and compared
+each to an immediate direct retrieval-only pass. Comparable `QueryPlanV2`
+objects were identical 3/3, but allocation fingerprint/stage identity matched
+only 1/3. `direct_elemental_novel` and
+`relationship_shoot_edit_emotion` diverged first at lane classification,
+with quota budget also changing (2→3 and 5→6 respectively) despite identical
+plans. The full-path anchor candidate order itself remained identical in
+those two comparisons, localizing the mismatch after pool construction.
+
+d3 compared the prior sealed RED full/repeat inputs for
+`direct_anatomy_masses`: anchor candidate-pool order, lane classification,
+quota math, and selected identity all diverged; the first observable stage
+was anchor-candidate order, and quota budget changed 2→3. It also proves the
+old harness plan hashes were from different domains: the full arm hashed the
+chat trace wrapper, while the repeat arm hashed `QueryPlanV2`; they were never
+valid equality operands. No gate was waived and no T fix was attempted.
+
+Sealed artifact:
+`docs/baselines/BUILD_FIRST_T_ZERO_PROVIDER_DIAGNOSIS_2026-07-18.json`, file
+SHA `74bc95aadb7733486cb0345cdc4788f15feb910dbfbc5cc5032265cbdd319fdd`,
+canonical seal SHA
+`40b198b20353c52fefa7a00efb0662a5dcd6b288aa57146f22e3c1e6c0995da2`;
+run-log SHA
+`1d6bcef68e6333be4432fca7ff13ad367c876b1834f6bfa864c8016c10170207`,
+true `EXIT=0`. Provider calls=0, provider sentinels reached=0, corpus writes=0.
+The host lock was released; live runtime is re-attested
+TWO_LANE=false, temporal=true, claims=true, with both MLX services healthy.
+Proceeding to build-only item 2a.
