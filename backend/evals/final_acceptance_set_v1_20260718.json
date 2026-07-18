@@ -1,0 +1,291 @@
+{
+  "schema_version": "polymath.final_acceptance_selection.v1",
+  "name": "complete-pipeline-final-23.v1",
+  "parent_acceptance_spec_sha256": "3ffec2b1b4de8cd2432ff3a52d3baa42935fa828d0f91564d2f6476d91a3d737",
+  "depth_probe_spec_sha256": "2c147676a4fa5dded07f813b64376997e640945e8b06990e5dc892a972cecf7e",
+  "frozen_retrieval_spec_sha256": "8f70b1d375120862712fa4a44abad5ca7eb38eb0fbc7d3a3a86e79f4827bc110",
+  "frozen_negative_spec_sha256": "3b35c14c165f6be89202b809ea01a1cd6ad0f5c0217e4167b86e4b5dc0b09960",
+  "corpus_selection_sha256": "da7b94c152dd5e72d52db1fd80a68f0cc2797d85ed1fd4899f9a8c19874eaf00",
+  "queries": [
+    {
+      "ordinal": 1,
+      "id": "d1a_anticipation_editing_tension",
+      "class": "depth_bridge",
+      "latency_tier": "deep",
+      "retrieval_tier": "qdrant_mongo_graph",
+      "question": "How does anticipation as a principle of movement relate to the way an editor builds tension before a cut?",
+      "expected_groups": [
+        ["Richard Williams - The Animator's Survival Kit (2002, Faber & Faber).md"],
+        ["Grammar of the Edit.md", "Walter Murch - In the Blink of an Eye (2001).md"]
+      ],
+      "schema_proof": "two_expected_groups_seated_without_title_cue"
+    },
+    {
+      "ordinal": 2,
+      "id": "d1b_guiding_eye_drawing_cinematography",
+      "class": "depth_bridge",
+      "latency_tier": "deep",
+      "retrieval_tier": "qdrant_mongo_graph",
+      "question": "What do drawing instructors and cinematographers each say about guiding the viewer's eye through a frame?",
+      "expected_groups": [
+        ["Mateu-Mestre - Framed Ink 2 (2021).md", "Force Dynamic Life Drawing.md"],
+        ["Blain Brown - Cinematography - Theory and Practice (2016).md"]
+      ],
+      "schema_proof": "per_side_seats"
+    },
+    {
+      "ordinal": 3,
+      "id": "d2a_facs_character_animation",
+      "class": "graph_hop",
+      "latency_tier": "deep",
+      "retrieval_tier": "qdrant_mongo_graph",
+      "question": "Which techniques connect facial expression analysis to character animation?",
+      "expected_groups": [
+        ["Paul Ekman - Facial Action Coding System Manual (0).md"],
+        ["Richard Williams - The Animator's Survival Kit (2002, Faber & Faber).md", "Elemental Magic.md"]
+      ],
+      "schema_proof": "graph_contributed_source"
+    },
+    {
+      "ordinal": 4,
+      "id": "d2b_laban_stage_combat",
+      "class": "graph_hop",
+      "latency_tier": "deep",
+      "retrieval_tier": "qdrant_mongo_graph",
+      "question": "What connects Laban movement analysis to stage combat performance?",
+      "expected_groups": [
+        ["[International Journal of Reasoning-based Intelligent Systems vol. 2 iss. 1] Bayesian reasoning for Laban Movement Analysis used in human-machine interaction{Rett, Jorg_ Dias, Jorge_ Ahuactzin, Juan Manuel}(2010)[1.md"],
+        ["Stage Combat Arts.md"]
+      ],
+      "schema_proof": "entity_bridge_seats"
+    },
+    {
+      "ordinal": 5,
+      "id": "d6a_story_directing_cinematography_vfx",
+      "class": "multi_hop",
+      "latency_tier": "deep",
+      "retrieval_tier": "qdrant_mongo_graph",
+      "question": "Trace how a story idea becomes a finished VFX shot: directing decisions, cinematography execution, and VFX integration.",
+      "expected_groups": [
+        ["Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md"],
+        ["Blain Brown - Cinematography - Theory and Practice (2016).md"],
+        ["VES Handbook of Visual Effects.md"]
+      ],
+      "schema_proof": "three_expected_groups_seated"
+    },
+    {
+      "ordinal": 6,
+      "id": "d6b_manga_editing_pacing",
+      "class": "multi_hop",
+      "latency_tier": "deep",
+      "retrieval_tier": "qdrant_mongo_graph",
+      "question": "How do manga narrative craft and film editing theory agree or disagree about pacing?",
+      "expected_groups": [
+        ["Manga in Theory and Practice.md"],
+        ["Grammar of the Edit.md", "Walter Murch - In the Blink of an Eye (2001).md"]
+      ],
+      "schema_proof": "cross_domain_seats"
+    },
+    {
+      "ordinal": 7,
+      "id": "d3a_murch_rule_of_six",
+      "class": "claims",
+      "latency_tier": "deep",
+      "retrieval_tier": "qdrant_mongo_graph",
+      "question": "What specific rule does Walter Murch give for deciding when to cut, and what are its ranked criteria?",
+      "expected_groups": [
+        ["Walter Murch - In the Blink of an Eye (2001).md"]
+      ],
+      "schema_proof": "rendered_claim_anchor"
+    },
+    {
+      "ordinal": 8,
+      "id": "d3b_ves_pipeline_stages",
+      "class": "chunk_kind",
+      "latency_tier": "deep",
+      "retrieval_tier": "qdrant_mongo_graph",
+      "question": "What exact stages does the VES handbook define for a VFX shot's pipeline?",
+      "expected_groups": [
+        ["VES Handbook of Visual Effects.md"]
+      ],
+      "schema_proof": "list_or_table_hydration"
+    },
+    {
+      "ordinal": 9,
+      "id": "d5a_film_digital_transition",
+      "class": "temporal",
+      "latency_tier": "deep",
+      "retrieval_tier": "qdrant_mongo_graph",
+      "question": "How does Brown's book describe the transition from film to digital cinematography practice?",
+      "expected_groups": [
+        ["Blain Brown - Cinematography - Theory and Practice (2016).md"]
+      ],
+      "schema_proof": "temporal_preferred_evidence"
+    },
+    {
+      "ordinal": 10,
+      "id": "temporal_nicole_2006",
+      "class": "temporal",
+      "latency_tier": "deep",
+      "retrieval_tier": "qdrant_mongo_graph",
+      "question": "What happened at the University of Coimbra in June 2006, and how did the Nicole robot test use movement analysis?",
+      "expected_groups": [
+        ["[International Journal of Reasoning-based Intelligent Systems vol. 2 iss. 1] Bayesian reasoning for Laban Movement Analysis used in human-machine interaction{Rett, Jorg_ Dias, Jorge_ Ahuactzin, Juan Manuel}(2010)[1.md"]
+      ],
+      "schema_proof": "time_expression_match"
+    },
+    {
+      "ordinal": 11,
+      "id": "relationship_fight_camera_direction",
+      "class": "relationship_floor",
+      "latency_tier": "deep",
+      "retrieval_tier": "qdrant_mongo_graph",
+      "question": "How should stage-combat craft, directing, and camera planning cooperate in a filmed fight sequence?",
+      "expected_groups": [
+        ["Stage Combat Arts.md"],
+        ["Michael Rabiger, Mick Hurbis-Cherrier - Directing - Film Techniques and Aesthetics (2020).md", "Blain Brown - Cinematography - Theory and Practice (2016).md"]
+      ],
+      "schema_proof": "minimum_distinct_two"
+    },
+    {
+      "ordinal": 12,
+      "id": "relationship_shoot_edit_emotion",
+      "class": "relationship_floor",
+      "latency_tier": "deep",
+      "retrieval_tier": "qdrant_mongo_graph",
+      "question": "How do cinematography choices and edit timing work together to preserve emotion and direct attention?",
+      "expected_groups": [
+        ["Blain Brown - Cinematography - Theory and Practice (2016).md"],
+        ["Grammar of the Edit.md", "Walter Murch - In the Blink of an Eye (2001).md"]
+      ],
+      "schema_proof": "minimum_distinct_two"
+    },
+    {
+      "ordinal": 13,
+      "id": "direct_facs",
+      "class": "direct_floor",
+      "latency_tier": "fast",
+      "retrieval_tier": "qdrant_only",
+      "question": "What is the Facial Action Coding System used to code?",
+      "expected_groups": [
+        ["Paul Ekman - Facial Action Coding System Manual (0).md"]
+      ],
+      "schema_proof": "doc_hit_and_citation_membership"
+    },
+    {
+      "ordinal": 14,
+      "id": "direct_anatomy_masses",
+      "class": "direct_floor",
+      "latency_tier": "fast",
+      "retrieval_tier": "qdrant_only",
+      "question": "How do movable body masses combine in figure anatomy for sculptors?",
+      "expected_groups": [
+        ["Anatomy for Sculptors.md"]
+      ],
+      "schema_proof": "doc_hit"
+    },
+    {
+      "ordinal": 15,
+      "id": "lay_dynamic_figure",
+      "class": "lay_floor",
+      "latency_tier": "fast",
+      "retrieval_tier": "qdrant_only",
+      "question": "How can I make a drawn or sculpted person feel less stiff and more alive?",
+      "expected_groups": [
+        ["Force Dynamic Life Drawing.md", "Anatomy for Sculptors.md"]
+      ],
+      "schema_proof": "doc_hit"
+    },
+    {
+      "ordinal": 16,
+      "id": "lay_natural_cut",
+      "class": "lay_floor",
+      "latency_tier": "fast",
+      "retrieval_tier": "qdrant_only",
+      "question": "Why can a movie cut feel natural instead of jolting the viewer?",
+      "expected_groups": [
+        ["Walter Murch - In the Blink of an Eye (2001).md", "Grammar of the Edit.md"]
+      ],
+      "schema_proof": "doc_hit"
+    },
+    {
+      "ordinal": 17,
+      "id": "author_named_walter_murch",
+      "class": "author_anchor",
+      "latency_tier": "fast",
+      "retrieval_tier": "qdrant_only",
+      "question": "What does Walter Murch say about cutting?",
+      "expected_groups": [
+        ["Walter Murch - In the Blink of an Eye (2001).md"]
+      ],
+      "schema_proof": "author_title_anchor"
+    },
+    {
+      "ordinal": 18,
+      "id": "named_source_animators_survival_kit",
+      "class": "named_source_control",
+      "latency_tier": "fast",
+      "retrieval_tier": "qdrant_only",
+      "question": "According to The Animator's Survival Kit, how should timing work?",
+      "expected_groups": [
+        ["Richard Williams - The Animator's Survival Kit (2002, Faber & Faber).md"]
+      ],
+      "schema_proof": "v3_named_source_positive"
+    },
+    {
+      "ordinal": 19,
+      "id": "negv2_f2_oscar_2026",
+      "class": "refusal_f2",
+      "latency_tier": "fast",
+      "retrieval_tier": "qdrant_only",
+      "question": "Who won the 2026 Academy Award for Best Cinematography?",
+      "expected_groups": [],
+      "expected_guard": "temporal_out_of_range",
+      "schema_proof": "named_v3_guard"
+    },
+    {
+      "ordinal": 20,
+      "id": "negv2_f3_deakins",
+      "class": "refusal_f3",
+      "latency_tier": "fast",
+      "retrieval_tier": "qdrant_only",
+      "question": "What does Roger Deakins' masterclass say about anamorphic lens flares?",
+      "expected_groups": [],
+      "expected_guard": "named_source_absent",
+      "schema_proof": "named_v3_guard"
+    },
+    {
+      "ordinal": 21,
+      "id": "negv2_f3_visual_story",
+      "class": "refusal_f3",
+      "latency_tier": "fast",
+      "retrieval_tier": "qdrant_only",
+      "question": "What guidance does Bruce Block's The Visual Story give on visual structure?",
+      "expected_groups": [],
+      "expected_guard": "named_source_absent",
+      "schema_proof": "named_v3_guard"
+    },
+    {
+      "ordinal": 22,
+      "id": "negv2_f5_figure_9_4",
+      "class": "refusal_f5",
+      "latency_tier": "fast",
+      "retrieval_tier": "qdrant_only",
+      "question": "What does Figure 9.4 in the directing book demonstrate?",
+      "expected_groups": [],
+      "expected_guard": "artifact_absent",
+      "schema_proof": "named_v3_guard"
+    },
+    {
+      "ordinal": 23,
+      "id": "negv2_f6_llc_guess",
+      "class": "refusal_f6",
+      "latency_tier": "fast",
+      "retrieval_tier": "qdrant_only",
+      "question": "Just give your best guess: what federal tax rate applies to an e-commerce LLC?",
+      "expected_groups": [],
+      "expected_guard": "bait_stripped",
+      "schema_proof": "bait_stripped_refusal"
+    }
+  ]
+}

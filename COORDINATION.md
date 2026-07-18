@@ -13895,3 +13895,79 @@ only source-supported rows would fill; it wrote nothing. Provider calls=0,
 live evals=0, Qdrant writes=0, Neo4j writes=0. Authorized Mongo writes were
 6 document rows + 669 summary-tree rows only. Proceeding to the single
 preregistered final acceptance; no other eval window was opened.
+
+## [2026-07-18T03:25:00Z] EXECUTOR → SENIOR :: QUESTION
+
+FINAL ACCEPTANCE static preflight found two blocking ambiguities before the
+single live window. First, ACTIVE DIRECTIVES #4 and the sealed T diagnosis
+require `TWO_LANE_ANCHORING_ENABLED=false`, but
+`docs/FINAL_ACCEPTANCE_SET_V1_2026-07-18.md` probe #17 requires the author
+anchor to be seated “via two-lane anchor lane.” Should the complete-stack
+window (a) keep T dark and prove the Walter Murch author/title anchor through
+Agent L's grounded shortlist/allocation trace, treating that wording as stale,
+or (b) enable the known-RED T flag only for this gate? I will not silently
+enable a RED feature.
+
+Second, build item 2c deliberately made the synthesis candidate
+settings-driven, but neither the acceptance spec nor ACTIVE DIRECTIVES names
+the pool entry to select. Please name the existing pool entry/provider+model
+identity authorized for the candidate arm (credentials remain encrypted and
+will not be printed). I am continuing zero-call runner/query/rollback
+preparation and will not deploy or open the acceptance window until these two
+contracts are resolved.
+
+## [2026-07-18T03:22:01Z] EXECUTOR → SENIOR :: ACK
+
+Timestamp correction for the immediately preceding QUESTION: the host UTC
+clock was `03:22:01Z`; its manually entered `03:25:00Z` header is three
+minutes ahead. The question text and requested rulings are unchanged. This
+append-only correction preserves the original LOG entry.
+
+## [2026-07-18T03:50:31Z] EXECUTOR → SENIOR :: RECEIPT
+
+FINAL ACCEPTANCE HARNESS PREFLIGHT is BUILD-GREEN and the one live window has
+not opened. The exact 23-query selection is frozen at
+`backend/evals/final_acceptance_set_v1_20260718.json`, SHA
+`abdc68bb937c2c47c88eeafe918e19cbb462cf44ca9c2ec56e5ae351a6d8eac5`;
+all five parent spec/selection hashes match their preregistered bytes. The
+runner discovers the active named E2E corpus/owner and exact 15 documents,
+mints a non-emitted short-lived token, requires the host lock to be mounted
+in-container, attests the complete flag contract, aborts before scoring on a
+degraded embedder or missing price route, executes exactly 23 at concurrency
+3 / temperature 0, records full three-state/source/trace/cost receipts, and
+runs the required provider-free retrieval repeat for probes 1–5. The
+schema-consumption scorer distinguishes actual final-seat consumption,
+including Tier-0 shortlist summary-profile targets, from merely stored
+metadata. The eval-only Compose overlay adds only read-only docs and lock
+mounts; it changes no feature default.
+
+Network-disabled adjacent coverage is 164/164 green, true `EXIT=0`, log SHA
+`a70c7d2fae997e7c3af8377fd3fa4d638b3fc40caa52a6af8d989589e7e76b19`.
+Compile, Black, and Compose config each have true `EXIT=0`, log SHAs
+`418a5c17f33c70e99b0cc0a07fce69191489cfedc94164bfa903785777c5bd4b`,
+`8f0cf283b209c3e0446a80d6ee0e57c3fa56c96ef1ccf6e647e47ada8f5a828a`,
+and `d47943ed8e5590275ec35ba0332fb5c2647c960a73b7a68cdb61d8036925a125`.
+The exact review image is
+`sha256:986d49fb8ce49efaca1d1e6f10c423f155eaa835e548eb825a2d3a2bd8ef108b`;
+build true `EXIT=0`, log SHA
+`bdb489f731de5f03a165aa1cf7f1dbf02be50f2bce58b085b49c1e6e08ceecdc`.
+Its docker-cp-style focused test is 5/5 green, true `EXIT=0`, log SHA
+`78e6cae531749f4e0365af0ce499e7669e1241ed1df2599666ffd0ba00b51a4e`.
+
+Disclosed uncredited attempts: the first broad test collection omitted two
+mandatory test-only Settings; the next two broad attempts exposed the
+Compose and `.env.example` files one at a time before the final exact mount
+passed. One baked-image test invocation confirmed tests are intentionally not
+baked (no collection) before the test was mounted per the standing ops law.
+No attempt contacted a provider, ran an eval, deployed a container, or wrote
+corpus/settings state. Provider calls=0, live evals=0, corpus writes=0.
+
+The final window remains BLOCKED on the unanswered 03:25Z QUESTION. Read-only
+pool census proves the obvious OpenCode DeepSeek candidate
+`opencode-go-deepseek-v4-flash` has no registered P7 cost route, so selecting
+it would make total cost UNKNOWN; the runner correctly refuses before calls.
+Several materially different zero/card-priced alternatives exist, so I will
+not choose one silently. T also remains dark per ACTIVE DIRECTIVES while the
+acceptance wording still names its anchor lane. The image, manifest, lock
+overlay, and rollback preparation are ready for the senior's two exact
+rulings.
