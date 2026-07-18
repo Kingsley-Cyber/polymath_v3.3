@@ -1,0 +1,76 @@
+{
+  "answer_characters": 1992,
+  "answer_sha256": "f53d2a9e7e4af5e0b3a75c67b49e737666a68bdb3c10f959a4b41b1d614f3f6d",
+  "captured_at": "2026-07-18T00:26:22+00:00",
+  "chat_cost_ledger": {
+    "accounting_state": "CLOSED",
+    "calls": [
+      {
+        "accounting_state": "CLOSED",
+        "arithmetic": {
+          "computed_cost_usd": "0.0036612",
+          "formula": "(input_tokens * input_usd_per_unit + output_tokens * output_usd_per_unit) / price_unit_tokens",
+          "input_cost_usd": "0.0024732",
+          "output_cost_usd": "0.001188"
+        },
+        "call_id": "call-1",
+        "call_kind": "stream_chat",
+        "computed_cost_usd": "0.0036612",
+        "failure_reason": null,
+        "input_tokens": 8244,
+        "metered_synthesis_calls": 1,
+        "model": "anthropic/minimax-m2.7",
+        "output_tokens": 990,
+        "price": {
+          "currency": "USD",
+          "input_basis": "uncached_input_conservative",
+          "input_usd_per_unit": "0.3",
+          "output_usd_per_unit": "1.2",
+          "price_tier": "published_card",
+          "price_unit_tokens": 1000000,
+          "registry_sha256": "9644c084f356db14a0f437ef280f2797cbe362fce264f48f5e4ca767e5f63b6d",
+          "route_id": "opencode-go-anthropic__minimax-m2.7",
+          "source_receipt": "COORDINATION.md#2026-07-16T23:57:28Z"
+        },
+        "provider_reported_cost_source": null,
+        "provider_reported_cost_usd": null,
+        "total_tokens": 9234,
+        "transport_attempts": 1,
+        "unmetered_synthesis_calls": 0
+      }
+    ],
+    "computed_cost_usd": "0.0036612",
+    "input_tokens": 8244,
+    "known_cost_subtotal_usd": "0.0036612",
+    "ledger_id": "chat-cost-bfcab3091405430ab3cfc5728d4433a8",
+    "metered_synthesis_call_count": 1,
+    "output_tokens": 990,
+    "schema_version": "polymath.chat_cost_ledger.v1",
+    "synthesis_call_count": 1,
+    "trace_reproduces_arithmetic": true,
+    "trace_row_count": 1,
+    "unmetered_synthesis_call_count": 0,
+    "zero_unmetered_synthesis_calls": true
+  },
+  "corpus_id": "5a20bc21-95df-42c2-80c8-f927b4e83904",
+  "elapsed_seconds": 58.046,
+  "event_counts": {
+    "budget": 1,
+    "done": 1,
+    "sources": 1,
+    "token": 19,
+    "trace_event": 13
+  },
+  "independently_computed_cost_usd": "0.0036612",
+  "question_id": "q021",
+  "question_sha256": "e66ee5a40198d31b94faeba33ac98abc713486fbfb6adac09615f016e31b4b86",
+  "request_contract": {
+    "model": "anthropic/minimax-m2.7",
+    "retrieval_tier": "qdrant_mongo",
+    "temperature": 0
+  },
+  "schema_version": "polymath.p7_live_gate.v1",
+  "source_count": 6,
+  "source_identity_sha256": "74ab4b5a86cc147aa112fcbc9eefaebf4d6d43d1720ae52d9476535de86409ee",
+  "status": "GREEN"
+}

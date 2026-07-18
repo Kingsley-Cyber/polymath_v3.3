@@ -13367,3 +13367,49 @@ files are absent. Runtime log SHA
 true `EXIT=0`. The canonical shared worktree's pre-existing owner/executor
 runbook draft and `tmp/` remain untouched; this review branch is the only
 commit target. Proceeding to Agent P's one-call CLOSED-ledger gate.
+
+## [2026-07-18T00:26:52Z] EXECUTOR → SENIOR :: RECEIPT
+
+BUILD-FIRST PACKAGE P is LIVE-VERIFIED GREEN. The already-reviewed P7
+implementation was ported without conflict as commits `18c0619` and
+`546d8d8`; `CHAT_COST_TELEMETRY_ENABLED` remains default-OFF in source and
+has byte-exact Compose passthrough. Integrated image
+`sha256:161162f84b9978a2e3f4a47df9fcec1305f741f15ddd34c22fc4f4f28345a37b`
+built with true `EXIT=0` (log SHA
+`4fb6ba433f88a4ce088a34ef1a22df407997f6f08b53f8b1ffcdc3e077313e55`);
+the focused suite passed 13/13 after supplying the canonical test-only
+mandatory settings (log SHA
+`dc46129e8a3a377e042eb5bf67fd2e21a018fc1d43f4824bbcbdb1db9820b0d4`,
+true `EXIT=0`). The immediately preceding clean-container attempt stopped
+during settings collection because those three test variables were absent;
+it made no network/provider call and changed no runtime state.
+
+Under `/tmp/polymath-eval.lock`, the canonical backend was rebuilt from the
+review worktree and deployed healthy with relationship=true,
+corpus_scope.v2=true, temporal=true, claims=true, P7 telemetry=true, and
+T/planner/router/waterfall=false. Canonical deploy log SHA
+`5114aba4e4cd45dfdd3e5ad1c8628d248b426d1e0de9e837b3bbdae3565e6f23`,
+true `EXIT=0`. A first packaging command omitted `-p polymath_v33`; it built
+successfully but stopped before replacement on the occupied port, made no
+provider call, did not disturb the healthy canonical service, and its
+created-only project was removed before the credited deploy (failed-attempt
+log SHA
+`ebb4eecdea7e8dbaa89fac025a7c458196e7940f86c4064351335cab77f6e5af`).
+
+The single preregistered q021 call ran at temperature 0 only after the MLX
+batch preflight returned READY (Qwen3 1024 dimensions, 30-second timeout,
+retry-once, queue 0). Its terminal ledger is CLOSED: exactly 1 synthesis
+call, 1 metered, 0 unmetered, 1 transport attempt; model
+`anthropic/minimax-m2.7`; 8,244 input and 990 output tokens; computed cost
+`$0.0036612`. The independent Decimal recomputation is byte-equal, and the
+price-registry SHA is
+`9644c084f356db14a0f437ef280f2797cbe362fce264f48f5e4ca767e5f63b6d`.
+Elapsed wall time was 58.046 seconds; the response produced 6 sources, one
+done event, and no error event. Sealed artifact
+`docs/baselines/BUILD_FIRST_P7_SINGLE_CALL_GREEN_2026-07-18.json`, SHA
+`9b650d5e068caa1739fe6896bf50d5f74fc64d1fcc0c885b56949ac58ae56729`;
+command log SHA
+`814f2983ccc4cf833474bc335086ad0d7f772d27ced04edf6389a37ba0935ae9`,
+true `EXIT=0`. Token/credentials and answer text are absent from both.
+The lock was released. No corpus write occurred. Proceeding to provider-free
+Agent Q deployment/soak.
