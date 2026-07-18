@@ -7173,8 +7173,16 @@ class ChatOrchestrator:
                     model_used,
                 )
 
+        # An explicit dropdown selection (pool:<entry>) always outranks the
+        # synthesis-route override — the override swaps the DEFAULT route
+        # only. Without this gate, selecting a CLI/pool model in the chat UI
+        # was silently replaced by the configured synthesis entry.
+        explicit_pool_selection = bool(
+            str(getattr(request, "model", "") or "").startswith("pool:")
+        )
         synthesis_route = await _resolve_synthesis_route_override(
-            enabled=settings.SYNTHESIS_ROUTE_OVERRIDE_ENABLED,
+            enabled=settings.SYNTHESIS_ROUTE_OVERRIDE_ENABLED
+            and not explicit_pool_selection,
             user_id=user_id,
             tool_route_active=tool_route_active,
             model_used=model_used,
