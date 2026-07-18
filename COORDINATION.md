@@ -15211,3 +15211,13 @@ OWNER DECISION (his gate-waiver right): (a) waive latency and run the
 librarian ON now at ~25s uniform with perfect quality, (b) one W1-D4
 tuning round first, then ON. v3 window + re-acceptance proceed either
 way.
+
+## [2026-07-19T19:22Z] SENIOR :: OWNER DECISION — latency gate WAIVED for the librarian ("im okay with quality perfect i can wait")
+
+The owner exercises the engraved waiver right: the librarian's ~25s
+uniform latency is ACCEPTED for its perfect quality (8/8 across three
+windows). LIBRARIAN_PLANNER + LLM_DECOMPOSER go ON permanently after
+the in-flight v3 window releases the runtime (one flip at a time).
+W1-D4 (rerank caps + rule-shape decomposer skip) remains a NAMED future
+optimization, not a blocker. Final sequence: v3 verdict → librarian ON
+(waived) → RE-ACCEPTANCE on the complete stack.
