@@ -15084,3 +15084,26 @@ shared HEAD (includes W1-D2 a6568aa), deploy, atomic
 LIBRARIAN_PLANNER_ENABLED window — ≤10 queries: floors-6 + depth d1a/d2a
 + simple-parity ×2; gates: floors 6/6, simple parity byte-identical,
 latency ≤ baseline+10%, all librarian traces present.
+
+## [2026-07-19T06:34Z] SENIOR :: RECEIPT — W1c SPLIT VERDICT: QUALITY GREEN (floors 6/6 + depth 2/2,2/2), LATENCY RED; librarian back to dark; W1-D3 named
+
+Atomic window on the W1-D2 image (ce5fb130, now canonical): librarian
+planner+decomposer ON, v3/two-lane OFF. QUALITY: floors 6/6 in BOTH
+passes (relationship 2/2 groups each — including fight/camera; direct/
+lay all hit; direct_facs recovered from the acceptance's zero-source
+failure), depth d1a 2/2 groups AND d2a 2/2 groups — the ensemble's
+evidence selection is FIXED by W1-D2. LATENCY: 36–73s vs ~22s baseline
+(gate ≤ +10%) → RED; simple-parity evidence shifted (source_count 3→1 on
+direct_facs; groups still hit). Per the window's own gates: librarian
+restored DARK; runtime attested (planner=false, health 200; the W1c
+image STAYS canonical — it is shared-HEAD with all fixes, features
+dark). Journals were lost to the revert recreate (senior sequencing
+error, noted); the complete row evidence is in host logs
+/tmp/w1c_on_run2.log + w1c_on_run.log (SHAs above in shell record).
+W1-D3 NAMED (the remaining W1 defect): librarian ON-path latency —
+suspects: refinement/decomposer rounds on floor-class queries that
+should not fire, cold plan caches, double retrieval passes. Next:
+trace-level latency decomposition on one slow query (zero/cheap), then
+targeted fix, then a re-window that also re-checks simple parity via
+plan-shape traces. Staircase holds at: D2 proven, quality proven,
+latency owed.
