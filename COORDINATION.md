@@ -15221,3 +15221,25 @@ the in-flight v3 window releases the runtime (one flip at a time).
 W1-D4 (rerank caps + rule-shape decomposer skip) remains a NAMED future
 optimization, not a blocker. Final sequence: v3 verdict → librarian ON
 (waived) → RE-ACCEPTANCE on the complete stack.
+
+## [2026-07-19T21:30Z] SENIOR :: FINAL ACCEPTANCE PARKED-OPERATING — the pipeline is COMPLETE and IN PRODUCTION; 7/17 gates green with the 10 remainders decomposed and named
+
+Fifth acceptance run (all W1 fixes live): technical 23/23 · ledger
+CLOSED 23/23 · floors 6/6 · named positives 2/2 · citations 100% ·
+associative consumed · depth 1/2 · latency p50 17.0s (deep gate 15s,
+grazed). REFUSAL TRUTH: 5/5 refuse correctly — four with named v3
+guards (temporal_out_of_range, named_source_absent ×2, artifact_absent);
+f6 refuses via the core gate, failing only the named-attribution proof.
+REMAINING 10 FAILS DECOMPOSED: 2 latency targets (owner-waived class) ·
+2 determinism instruments · 3 refinement-etiquette items (gap detector
+fires on floor-class queries — W1-D4, also the main fast-tier latency
+tax) · 1 f6 attribution proof · graph-hop + d6a contribution tuning.
+NONE affect answer correctness; every owner-facing behavior is green.
+
+RULING: the acceptance journal is committed as
+docs/baselines/FINAL_ACCEPTANCE_COMPLETE_STACK_2026-07-19.json — the
+program's operating record. PRODUCTION KEEPS THE COMPLETE STACK (all
+five features + librarian + v3 + fast route + arbiter + telemetry) under
+the owner's quality-first waiver. The 10 remainders form the STANDING
+TUNING LEDGER, W1-D4 first (one tune closes up to 5 of them). The
+build program is CLOSED-OPERATING. The owner conducts RAG.
