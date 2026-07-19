@@ -135,3 +135,50 @@ REQUIRED before claiming it works — and verify, don't assume:
 Fast iteration WITHOUT a rebuild: `docker cp` the edited file into the
 container (+ `docker restart` for import-time code) — but a container
 RECREATE reverts to the image, so always finish with the real rebuild.
+
+## RunPod extraction architecture (read before ANY runpod-lane ingestion work)
+
+- **Wire contract**: `runpod_wire_contract: local_extraction_v1` in the corpus
+  config routes chunk-extraction to serverless endpoints named in
+  `runpod_local_extraction_routes[]` `{account_name, endpoint_id}`. The
+  deterministic image is digest-pinned
+  (`king2eze/polymath-local-extraction@sha256:4cb08457…`, GLiNER medium) —
+  never retag; deploy new endpoints from the same digest.
+- **Accounts & keys**: multi-account rows live in Mongo
+  `settings.ingestion.runpod_flash.accounts[]`; the matching keys are
+  ENCRYPTED under `settings.api_keys.runpod_accounts.<name>`
+  (settings-service `get_system_runpod_flash_accounts()` resolves both —
+  env vars are NOT the truth). Fleet enable/disable truth =
+  `accounts[].enabled` / endpoint rows, not env. Keys can be
+  restricted-scope: a key that 401s other endpoints' `/health` or 403s the
+  GraphQL management API is invoke-only — do not assume it can deploy.
+- **Worker quota**: RunPod caps ~10 serverless workers per account across
+  ALL endpoints. `workersMax` is reallocatable live via GraphQL
+  `updateEndpointWorkersMax` — check that the endpoints your contract
+  actually routes to hold the quota (2026-07-19: the deterministic
+  endpoints ran at workersMax=1 while unused default endpoints hogged 15
+  slots; reallocated to 5+4).
+- **Economics**: serverless bills active seconds only (idleTimeout 60s,
+  scale-to-zero verified: `currentSpendPerHr: 0` when idle). Sequential
+  batches waste no money — only cold-start latency. Measured: 117 books'
+  extraction ≈ $0.10–0.15 total; transcripts are ~10× cheaper per file.
+  The cost center of ingestion is the SUMMARY provider, not RunPod.
+- **Extract-first profile** (`runpod_extract_first`): pass 1 sweeps
+  parse→chunk→extract for the whole batch (saturated pod burst, durable
+  staged artifacts at stage `extracted`, `defer_summaries: true`), pass 2
+  finishes embed/index/graph locally at zero pod cost. Use it for large
+  corpora; `runpod_burst` (single pass, in-batch summaries) for small ones.
+- **Job journal**: completed runpod jobs are journaled per-corpus at
+  `/data/ingest-files/runpod-job-journals/corpus-<sha256(corpus_id)>.jsonl`
+  for reuse. "reusable completed-job closure is partial" = the journal has
+  some-but-not-all slices for an item (interrupted run); archive the
+  journal file to force clean re-extraction of retrying items.
+- **File-concurrency governors**: runner concurrency =
+  min(batch.options.concurrency, INGEST_GLOBAL_MAX_DOCS,
+  INGEST_MAX_ACTIVE_JOBS) — the offline overlay maps `OFFLINE_INGEST_*`
+  env values into the worker; all three default to 1. Local pass-2
+  pressure points: qdrant `mem_limit` (daily overlay honors
+  `QDRANT_MEM_LIMIT`, ≥8g for book-scale) and the Metal embedder.
+- **Law**: 1-file canary with full receipts (extraction provider =
+  runpod_local_extraction, summary calls settled, vectors verified,
+  balance delta measured) before ANY multi-hundred-file batch.
