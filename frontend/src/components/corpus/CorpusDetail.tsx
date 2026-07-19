@@ -837,6 +837,25 @@ export function CorpusDetail({
     setIsQuickUploading(true);
     setError(null);
     try {
+      if (selected.length > 10) {
+        // Mass path: stream to local-disk staging, finalize as ONE batch.
+        const mass = await api.massUploadFiles(
+          corpus.corpus_id,
+          selected,
+          {
+            chunk_summarization: overrides.chunk_summarization,
+            concurrency: 6,
+            profile: localBatchProfile ?? "runpod_extract_first",
+          },
+          (done, total, name) =>
+            setRetryHint(`Uploading ${done}/${total}: ${name}`),
+        );
+        setRetryHint(
+          `Mass upload complete: batch ${mass.batch_id.slice(0, 8)} started for ${mass.total} file(s).`,
+        );
+        await loadDocuments();
+        return;
+      }
       const batch = await api.createUploadIngestBatch(corpus.corpus_id, selected, {
         use_neo4j: overrides.use_neo4j,
         chunk_summarization: overrides.chunk_summarization,
