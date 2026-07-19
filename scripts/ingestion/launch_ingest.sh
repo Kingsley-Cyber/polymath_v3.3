@@ -42,8 +42,7 @@ CORPUS_BODY="$(
       runpod_wire_contract: "local_extraction_v1",
       runpod_local_extraction_routes: [
         {account_name: "primary", endpoint_id: "hk81nfl5cnwufx"},
-        {account_name: "secondary", endpoint_id: "8tafde7potcsjw"},
-        {account_name: "tertiary", endpoint_id: "g7tvfpjlfgp9aa"}
+        {account_name: "secondary", endpoint_id: "8tafde7potcsjw"}
       ],
       models_linked: false,
       extraction_models: [],
