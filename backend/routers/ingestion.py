@@ -210,7 +210,8 @@ class LocalIngestBatchRequest(BaseModel):
 
     root_path: str = Field(..., min_length=1)
     profile: Literal[
-        "mac_safe", "mac_queryable_first", "rtx_assisted", "runpod_burst"
+        "mac_safe", "mac_queryable_first", "rtx_assisted", "runpod_burst",
+        "runpod_extract_first"
     ] | None = None
     recursive: bool = True
     extensions: list[str] | None = None
@@ -2658,7 +2659,8 @@ async def create_upload_ingest_batch(
     model: str = Form(default=""),
     concurrency: int | None = Form(default=1),
     profile: Literal[
-        "mac_safe", "mac_queryable_first", "rtx_assisted", "runpod_burst"
+        "mac_safe", "mac_queryable_first", "rtx_assisted", "runpod_burst",
+        "runpod_extract_first"
     ] | None = Form(default=None),
     start: bool = Form(default=True),
     summary_cost_authority_usd: Decimal | None = Form(default=None, gt=0, le=10000),
