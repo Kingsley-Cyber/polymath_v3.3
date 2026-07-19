@@ -149,9 +149,14 @@ RECREATE reverts to the image, so always finish with the real rebuild.
   ENCRYPTED under `settings.api_keys.runpod_accounts.<name>`
   (settings-service `get_system_runpod_flash_accounts()` resolves both —
   env vars are NOT the truth). Fleet enable/disable truth =
-  `accounts[].enabled` / endpoint rows, not env. Keys can be
-  restricted-scope: a key that 401s other endpoints' `/health` or 403s the
-  GraphQL management API is invoke-only — do not assume it can deploy.
+  `accounts[].enabled` / endpoint rows, not env. Account rows validate as
+  a WHOLE list: one bad row (e.g. `embed_endpoint_id: null` — the field is
+  `str`, use `""`) silently collapses resolution to the legacy default.
+  GOTCHA: RunPod's API edge 403s default Python user-agents (urllib/
+  requests) — a "permission" error that vanishes under curl. Diagnose
+  scope with curl before concluding a key is restricted (2026-07-19: a
+  full-scope key was misdiagnosed twice this way). Cross-account REST
+  `/health` 401s are normal, not a scope signal.
 - **Worker quota**: RunPod caps ~10 serverless workers per account across
   ALL endpoints. `workersMax` is reallocatable live via GraphQL
   `updateEndpointWorkersMax` — check that the endpoints your contract
