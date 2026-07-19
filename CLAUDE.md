@@ -135,3 +135,98 @@ REQUIRED before claiming it works — and verify, don't assume:
 Fast iteration WITHOUT a rebuild: `docker cp` the edited file into the
 container (+ `docker restart` for import-time code) — but a container
 RECREATE reverts to the image, so always finish with the real rebuild.
+
+## RunPod extraction architecture (read before ANY runpod-lane ingestion work)
+
+- **Wire contract**: `runpod_wire_contract: local_extraction_v1` in the corpus
+  config routes chunk-extraction to serverless endpoints named in
+  `runpod_local_extraction_routes[]` `{account_name, endpoint_id}`. The
+  deterministic image is digest-pinned
+  (`king2eze/polymath-local-extraction@sha256:4cb08457…`, GLiNER medium) —
+  never retag; deploy new endpoints from the same digest.
+- **Accounts & keys**: multi-account rows live in Mongo
+  `settings.ingestion.runpod_flash.accounts[]`; the matching keys are
+  ENCRYPTED under `settings.api_keys.runpod_accounts.<name>`
+  (settings-service `get_system_runpod_flash_accounts()` resolves both —
+  env vars are NOT the truth). Fleet enable/disable truth =
+  `accounts[].enabled` / endpoint rows, not env. Account rows validate as
+  a WHOLE list: one bad row (e.g. `embed_endpoint_id: null` — the field is
+  `str`, use `""`) silently collapses resolution to the legacy default.
+  GOTCHA: RunPod's API edge 403s default Python user-agents (urllib/
+  requests) — a "permission" error that vanishes under curl. Diagnose
+  scope with curl before concluding a key is restricted (2026-07-19: a
+  full-scope key was misdiagnosed twice this way). Cross-account REST
+  `/health` 401s are normal, not a scope signal.
+- **Worker quota**: RunPod caps ~10 serverless workers per account across
+  ALL endpoints. `workersMax` is reallocatable live via GraphQL
+  `updateEndpointWorkersMax` — check that the endpoints your contract
+  actually routes to hold the quota (2026-07-19: the deterministic
+  endpoints ran at workersMax=1 while unused default endpoints hogged 15
+  slots; reallocated to 5+4).
+- **Economics**: serverless bills active seconds only (idleTimeout 60s,
+  scale-to-zero verified: `currentSpendPerHr: 0` when idle). Sequential
+  batches waste no money — only cold-start latency. Measured: 117 books'
+  extraction ≈ $0.10–0.15 total; transcripts are ~10× cheaper per file.
+  The cost center of ingestion is the SUMMARY provider, not RunPod.
+- **Extract-first profile** (`runpod_extract_first`): pass 1 sweeps
+  parse→chunk→extract for the whole batch (saturated pod burst, durable
+  staged artifacts at stage `extracted`, `defer_summaries: true`), pass 2
+  finishes embed/index/graph locally at zero pod cost. Use it for large
+  corpora; `runpod_burst` (single pass, in-batch summaries) for small ones.
+- **Job journal**: completed runpod jobs are journaled per-corpus at
+  `/data/ingest-files/runpod-job-journals/corpus-<sha256(corpus_id)>.jsonl`
+  for reuse. "reusable completed-job closure is partial" = the journal has
+  some-but-not-all slices for an item (interrupted run); archive the
+  journal file to force clean re-extraction of retrying items.
+- **File-concurrency governors**: runner concurrency =
+  min(batch.options.concurrency, INGEST_GLOBAL_MAX_DOCS,
+  INGEST_MAX_ACTIVE_JOBS) — the offline overlay maps `OFFLINE_INGEST_*`
+  env values into the worker; all three default to 1. Local pass-2
+  pressure points: qdrant `mem_limit` (daily overlay honors
+  `QDRANT_MEM_LIMIT`, ≥8g for book-scale) and the Metal embedder.
+- **Law**: 1-file canary with full receipts (extraction provider =
+  runpod_local_extraction, summary calls settled, vectors verified,
+  balance delta measured) before ANY multi-hundred-file batch.
+
+## INGESTION DOCTRINE — owner-ratified 2026-07-19 (execute this for ANY future ingestion)
+
+The living launchers are `scripts/ingestion/launch_ingest.sh` (one corpus,
+resumable state) and `scripts/ingestion/fleet_run.sh` (sequential fleet w/
+deepseek key rotation). Use them; do not hand-roll batch bodies. Keys load
+from `~/PolymathRuntime/manual-ingest-state/rotation_keys.env` — never
+inline secrets in scripts or corpus configs.
+
+1. **Division of labor (fixed)**: ALL RunPod accounts run extraction ONLY
+   (deterministic digest-pinned image; currently 3 accounts × 10 workers).
+   Embedding is LOCAL MLX ONLY (`embed_mode: local` in every corpus config;
+   the pod embed endpoints were deleted — mixing embed runtimes inside one
+   collection corrupts similarity consistency).
+2. **Profile**: `runpod_extract_first` for every multi-hundred-chunk corpus
+   (pass 1 = saturated extraction burst, durable staged artifacts,
+   `defer_summaries` for book-scale; pass 2 = local embed/index/graph at $0
+   pod cost). It must exist in BOTH the API Literal (routers/ingestion.py)
+   and INGEST_PROFILES (services/ingestion/batches.py) — and remember both
+   backend AND worker containers need the same batches.py.
+3. **Overlap rule**: batch N's extraction pass may run concurrently with
+   batch N-1's local pass (different resource classes). Local passes stay
+   serialized on the one Metal GPU. File-concurrency: books 4 (pass 2
+   effectively 2-wide), transcripts 6 — governed by
+   min(batch.options.concurrency, OFFLINE_INGEST_GLOBAL_MAX_DOCS,
+   OFFLINE_INGEST_MAX_ACTIVE_JOBS).
+4. **Summaries**: dual-lane `summary_models` — deepseek/deepseek-v4-flash
+   @40 (primary) + longcat/LongCat-2.0 @40 (assist) — BOTH with
+   `extra_params: {disable_thinking: true}` (both are thinking models; the
+   knob is translated to the wire by llm.py). The pool resolves ANY
+   provider_preset's key from the encrypted store — adding a future
+   provider is a corpus-config change only.
+5. **Local pressure limits**: qdrant needs `QDRANT_MEM_LIMIT=8g`+ for
+   book-scale vector writes (the daily overlay honors the env var now);
+   watch the verify gate — it is the authority on write integrity.
+6. **Laws**: 1-file canary with receipts before any multi-hundred-file
+   batch; never recreate containers mid-batch (docker cp + restart only);
+   failed items reset via status=failed_recoverable + attempts=0 then
+   /resume; "reusable completed-job closure is partial" → archive the
+   corpus journal under /data/ingest-files/runpod-job-journals/.
+7. **Corpus deletion** frees Docker space (vectors, rows, stored copies)
+   and can never touch `/ingest-source` — the source drive is read-only
+   and the purge guard refuses that path.
