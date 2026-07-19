@@ -15415,3 +15415,15 @@ ecommerce_meta books batch DRAINED: 116/117 done — sole holdout Lean_Analytics
 ## 2026-07-19 21:35Z — SENIOR — owner caught the REAL fleet-waster: extraction doc-fanout was PINNED TO 1
 Owner: "7hrs... 30 workers... should have finished hours ago" — CORRECT. Root cause: resource_planner cloud_api lane reads EXTRACTION_MAX_ACTIVE_DOCS (default 1) → ONE document in ghosts at a time. Books masked it (300+ chunks = many parallel slices per doc); transcripts exposed it (1 slice each → literally 1 runpod job in flight; 30 workers idle). The "30 workers" only ever parallelized WITHIN a big doc, never ACROSS docs.
 FIX: overlay's native knob OFFLINE_EXTRACTION_MAX_ACTIVE_DOCS=6 + INGEST_MAX_MODEL_PHASE_DOCS=6 (overlay line now interpolates; my first two attempts hit a hardcoded literal + a duplicate-key trap — the overlay defines EXTRACTION_MAX_ACTIVE_DOCS at line ~131 via OFFLINE_ prefix). Both workers verified env=6/6. Video resumed; watcher arming on jobs-in-flight ≥3. Expected: transcripts now extract 6-wide × 2 workers → mark(248) in ~20-30min instead of hours. Doctrine + memory update to follow with the receipt.
+
+## 2026-07-19 21:55Z — SENIOR — owner-demanded FULL-CHAIN audit (every governor, one pass) + tertiary restored
+Owner: "recheck your work... you always found out the same thing" — correct critique of my one-knob-at-a-time pattern. COMPLETE dispatch-chain audit, every level verified live:
+1. batch.options.concurrency: video 4→6 (books done at 2); mark/andromeda/cybersec launch at 6 ✓
+2. env caps: INGEST_GLOBAL_MAX_DOCS=6 ✓ INGEST_MAX_ACTIVE_JOBS=6 ✓ (per worker container)
+3. worker containers: 2 (GIL fix) ✓
+4. ghosts-phase fanout: EXTRACTION_MAX_ACTIVE_DOCS=6 + INGEST_MAX_MODEL_PHASE_DOCS=6 ✓ (today's crawl bug)
+5. slice→route dispatch: 3 routes RESTORED (tertiary re-enabled: canary = 4 ready + 4 idle workers post-GPU-widening; account + video corpus routes + all launcher copies) ✓
+6. per-route request semaphore: 8 × 3 accounts = 24 ✓ ≥ max in-flight docs (12)
+7. chunk-level global semaphore: EXTRACTION_GLOBAL_MAX_CONCURRENT=180 ✓ (never binding)
+8. runpod workers: 10+10+10 configured; effective tonight ≈ 20-26 (platform throttle) ✓
+Ceiling now = 12 docs in flight (2 workers × 6) across 3 accounts. Both workers restarted (re-read batch options), video resumed; live watcher asserts ≥5 jobs in flight across accounts. This closes the serialization ladder: file→env→GIL→phase→routes all opened.
