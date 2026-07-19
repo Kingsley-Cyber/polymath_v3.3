@@ -7,7 +7,7 @@ services:
     command: ["mongod", "--wiredTigerCacheSizeGB", "1.5"]
 
   qdrant:
-    mem_limit: 4g
+    mem_limit: ${QDRANT_MEM_LIMIT:-4g}
 
   neo4j:
     mem_limit: 3g
