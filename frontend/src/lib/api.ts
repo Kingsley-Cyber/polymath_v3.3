@@ -2658,3 +2658,57 @@ export async function syncCliProviderModels(): Promise<{
 }> {
   return fetchJSON("/cli-providers/sync", { method: "POST" });
 }
+
+// ── Mass upload (T-upload 2026-07-19): session → per-file stream → finalize.
+// No file-count cap; files land on local-disk staging and finalize as ONE
+// durable local batch (identical machinery to Backend Folder ingestion).
+
+export async function massUploadFiles(
+  corpusId: string,
+  files: File[],
+  options: {
+    chunk_summarization?: boolean;
+    concurrency?: number;
+    profile?: string;
+  } = {},
+  onProgress?: (uploaded: number, total: number, filename: string) => void,
+): Promise<{ batch_id: string; total: number; staged_files: number }> {
+  const token = getPersistedToken();
+  const headers: Record<string, string> = {};
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  const base = `${API_BASE}/corpora/${encodeURIComponent(corpusId)}`;
+
+  const sess = await fetch(`${base}/upload-sessions`, { method: "POST", headers });
+  if (!sess.ok) throw new Error(`Failed to open upload session: HTTP ${sess.status}`);
+  const { session_id } = await sess.json();
+
+  let uploaded = 0;
+  for (const file of files) {
+    const form = new FormData();
+    form.append("file", file);
+    const r = await fetch(
+      `${base}/upload-sessions/${encodeURIComponent(session_id)}/files`,
+      { method: "POST", headers, body: form },
+    );
+    if (!r.ok) {
+      throw new Error(
+        `Upload failed on "${file.name}" (${uploaded}/${files.length} done): HTTP ${r.status}: ${await r.text()}`,
+      );
+    }
+    uploaded += 1;
+    onProgress?.(uploaded, files.length, file.name);
+  }
+
+  const fin = new FormData();
+  if (options.concurrency !== undefined) fin.append("concurrency", String(options.concurrency));
+  if (options.profile) fin.append("profile", options.profile);
+  if (options.chunk_summarization !== undefined) {
+    fin.append("chunk_summarization", String(options.chunk_summarization));
+  }
+  const done = await fetch(
+    `${base}/upload-sessions/${encodeURIComponent(session_id)}/finalize`,
+    { method: "POST", headers, body: fin },
+  );
+  if (!done.ok) throw new Error(`Finalize failed: HTTP ${done.status}: ${await done.text()}`);
+  return done.json();
+}
