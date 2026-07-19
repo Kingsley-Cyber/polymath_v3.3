@@ -61,9 +61,9 @@ print(AuthService().create_access_token('6a132beafef900c17f87848e', 'Sambenja'))
     snap=$(curl -fsS --max-time 30 -H "Authorization: Bearer $token" "http://localhost:8000/api/ingest-batches/$batch_id?include_items=false" 2>/dev/null) || { sleep 60; continue; }
     st=$(echo "$snap" | python3 -c "import json,sys; print(json.load(sys.stdin)['status'])" 2>/dev/null || echo "?")
     cnt=$(echo "$snap" | python3 -c "import json,sys; print(json.load(sys.stdin).get('counts'))" 2>/dev/null || echo "?")
-    done_n=$(echo "$snap" | python3 -c "import json,sys; print(json.load(sys.stdin)['counts'].get('done',0))" 2>/dev/null || echo 0)
+    done_n=$(echo "$snap" | python3 -c "import json,sys; c=json.load(sys.stdin)['counts']; print(c.get('done',0)+c.get('staged',0))" 2>/dev/null || echo 0)
     case "$st" in
-      done) echo "DONE $name $cnt"; return 0 ;;
+      done|partial) echo "DONE $name ($st) $cnt"; return 0 ;;
       failed|cancelled)
         if [[ "$resumed" == 0 ]]; then
           resumed=1
@@ -89,7 +89,7 @@ from services.auth import AuthService
 print(AuthService().create_access_token('6a132beafef900c17f87848e', 'Sambenja'))" 2>/dev/null | tail -1)
 while true; do
   BST=$(curl -fsS --max-time 30 -H "Authorization: Bearer $TOK" "http://localhost:8000/api/ingest-batches/$BOOKS_BATCH?include_items=false" 2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin)['status'])" 2>/dev/null || echo "?")
-  case "$BST" in done|failed|cancelled) echo "BOOKS-CLOSED ($BST)"; break ;; esac
+  case "$BST" in done|partial|failed|cancelled) echo "BOOKS-CLOSED ($BST)"; break ;; esac
   sleep 120
 done
 run_corpus video_generations_schools /ingest-source/Rag/Video_generations_school "" 6
