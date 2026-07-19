@@ -187,3 +187,46 @@ RECREATE reverts to the image, so always finish with the real rebuild.
 - **Law**: 1-file canary with full receipts (extraction provider =
   runpod_local_extraction, summary calls settled, vectors verified,
   balance delta measured) before ANY multi-hundred-file batch.
+
+## INGESTION DOCTRINE — owner-ratified 2026-07-19 (execute this for ANY future ingestion)
+
+The living launchers are `scripts/ingestion/launch_ingest.sh` (one corpus,
+resumable state) and `scripts/ingestion/fleet_run.sh` (sequential fleet w/
+deepseek key rotation). Use them; do not hand-roll batch bodies. Keys load
+from `~/PolymathRuntime/manual-ingest-state/rotation_keys.env` — never
+inline secrets in scripts or corpus configs.
+
+1. **Division of labor (fixed)**: ALL RunPod accounts run extraction ONLY
+   (deterministic digest-pinned image; currently 3 accounts × 10 workers).
+   Embedding is LOCAL MLX ONLY (`embed_mode: local` in every corpus config;
+   the pod embed endpoints were deleted — mixing embed runtimes inside one
+   collection corrupts similarity consistency).
+2. **Profile**: `runpod_extract_first` for every multi-hundred-chunk corpus
+   (pass 1 = saturated extraction burst, durable staged artifacts,
+   `defer_summaries` for book-scale; pass 2 = local embed/index/graph at $0
+   pod cost). It must exist in BOTH the API Literal (routers/ingestion.py)
+   and INGEST_PROFILES (services/ingestion/batches.py) — and remember both
+   backend AND worker containers need the same batches.py.
+3. **Overlap rule**: batch N's extraction pass may run concurrently with
+   batch N-1's local pass (different resource classes). Local passes stay
+   serialized on the one Metal GPU. File-concurrency: books 4 (pass 2
+   effectively 2-wide), transcripts 6 — governed by
+   min(batch.options.concurrency, OFFLINE_INGEST_GLOBAL_MAX_DOCS,
+   OFFLINE_INGEST_MAX_ACTIVE_JOBS).
+4. **Summaries**: dual-lane `summary_models` — deepseek/deepseek-v4-flash
+   @40 (primary) + longcat/LongCat-2.0 @40 (assist) — BOTH with
+   `extra_params: {disable_thinking: true}` (both are thinking models; the
+   knob is translated to the wire by llm.py). The pool resolves ANY
+   provider_preset's key from the encrypted store — adding a future
+   provider is a corpus-config change only.
+5. **Local pressure limits**: qdrant needs `QDRANT_MEM_LIMIT=8g`+ for
+   book-scale vector writes (the daily overlay honors the env var now);
+   watch the verify gate — it is the authority on write integrity.
+6. **Laws**: 1-file canary with receipts before any multi-hundred-file
+   batch; never recreate containers mid-batch (docker cp + restart only);
+   failed items reset via status=failed_recoverable + attempts=0 then
+   /resume; "reusable completed-job closure is partial" → archive the
+   corpus journal under /data/ingest-files/runpod-job-journals/.
+7. **Corpus deletion** frees Docker space (vectors, rows, stored copies)
+   and can never touch `/ingest-source` — the source drive is read-only
+   and the purge guard refuses that path.
