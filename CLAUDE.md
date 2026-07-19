@@ -223,7 +223,11 @@ inline secrets in scripts or corpus configs.
    book-scale vector writes (the daily overlay honors the env var now);
    watch the verify gate — it is the authority on write integrity.
 6. **Laws**: 1-file canary with receipts before any multi-hundred-file
-   batch; never recreate containers mid-batch (docker cp + restart only);
+   batch; a NEWLY DEPLOYED endpoint/account needs its own 1-slice canary
+   fire (workers ready>0 observed) BEFORE joining contract routes — fresh
+   accounts can sit throttled/unhealthy and jobs queue silently
+   (2026-07-19 tertiary incident: disable the account in settings +
+   purge-queue to free trapped slices); never recreate containers mid-batch (docker cp + restart only);
    failed items reset via status=failed_recoverable + attempts=0 then
    /resume; "reusable completed-job closure is partial" → archive the
    corpus journal under /data/ingest-files/runpod-job-journals/.
