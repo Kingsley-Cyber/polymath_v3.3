@@ -2013,10 +2013,81 @@ class IngestionService:
             with suppress(asyncio.CancelledError):
                 await heartbeat
 
+    async def _purge_corpus_stored_files(
+        self, corpus_id: str, cleanup_warnings: list[dict[str, str]]
+    ) -> None:
+        """Remove per-batch stored file copies for a deleted corpus.
+
+        `store_files: true` duplicates every source into
+        `<ingest-files-root>/<batch_id>/`; without this stage a corpus delete
+        stranded those copies forever (2.4 GB of orphans found 2026-07-19).
+        Only container-volume copies are touched — original sources live on
+        the read-only /ingest-source mount and are never written to.
+        """
+        import shutil
+        from pathlib import Path
+
+        if self._db is None:
+            return
+        try:
+            batch_ids = [
+                b["batch_id"]
+                async for b in self._db["ingest_batches"].find(
+                    {"corpus_id": corpus_id}, {"batch_id": 1}
+                )
+            ]
+            roots: set[Path] = set()
+            async for item in self._db["ingest_batch_items"].find(
+                {"batch_id": {"$in": batch_ids}, "stored_path": {"$ne": None}},
+                {"stored_path": 1},
+            ).limit(1):
+                sp = Path(str(item["stored_path"]))
+                if sp.parent.name in set(batch_ids):
+                    roots.add(sp.parent.parent)
+            if not roots:
+                roots = {Path("/data/ingest-files")}
+            removed = 0
+            for root in roots:
+                for bid in batch_ids:
+                    target = root / bid
+                    if target.is_dir() and not str(target).startswith(
+                        "/ingest-source"
+                    ):
+                        await asyncio.to_thread(
+                            shutil.rmtree, target, ignore_errors=True
+                        )
+                        removed += 1
+            await self._db["ingest_batch_items"].delete_many(
+                {"batch_id": {"$in": batch_ids}}
+            )
+            await self._db["ingest_batches"].delete_many(
+                {"batch_id": {"$in": batch_ids}}
+            )
+            logger.info(
+                "Corpus %s stored-file purge: %d batch dir(s) removed, "
+                "%d batch row(s) dropped",
+                corpus_id,
+                removed,
+                len(batch_ids),
+            )
+        except Exception as exc:  # noqa: BLE001 — purge is best-effort
+            logger.warning(
+                "Stored-file purge failed for corpus %s", corpus_id, exc_info=True
+            )
+            cleanup_warnings.append(
+                {
+                    "stage": "stored_files",
+                    "error": str(exc),
+                    "at": datetime.utcnow().isoformat(),
+                }
+            )
+
     async def _purge_corpus_bulk_stages(
         self, corpus_id: str, cleanup_warnings: list[dict[str, str]]
     ) -> None:
         from services.storage.mongo_writer import delete_chunks_by_corpus, delete_corpus
+
+        await self._purge_corpus_stored_files(corpus_id, cleanup_warnings)
 
         try:
             from services.ingestion.corpus_lexicon import delete_corpus_lexicon
