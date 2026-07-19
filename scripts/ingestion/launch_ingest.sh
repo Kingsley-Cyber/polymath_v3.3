@@ -31,6 +31,58 @@ case "$SUMMARIES" in
   *) echo "SUMMARIES must be on or off" >&2; exit 2 ;;
 esac
 
+
+# ── THROUGHPUT PREFLIGHT (owner order 2026-07-19) ────────────────────────────
+# A batch may NEVER launch throttled. Assert the full dispatch chain at
+# launch time; build routes DYNAMICALLY from enabled+healthy accounts.
+throughput_preflight() {
+  local want="$CONCURRENCY"
+  # 1. worker env governors must be >= requested file-concurrency
+  for VAR in EXTRACTION_MAX_ACTIVE_DOCS INGEST_GLOBAL_MAX_DOCS INGEST_MAX_ACTIVE_JOBS INGEST_MAX_MODEL_PHASE_DOCS; do
+    local val
+    val="$(docker exec polymath_v33-ingest-worker-1 sh -c "printenv $VAR" 2>/dev/null || echo 0)"
+    if [[ "${val:-0}" -lt "$want" ]]; then
+      echo "PREFLIGHT FAIL: $VAR=$val < requested concurrency $want." >&2
+      echo "Fix: set it in /Users/king/polymath_v3.3/.env (OFFLINE_ prefix where applicable) and recreate workers." >&2
+      exit 3
+    fi
+  done
+  # 2. routes = enabled accounts whose endpoint answers /health with a live worker
+  ROUTES_JSON="$(docker exec -i polymath_v33-backend-1 python - 2>/dev/null <<'PYEOF'
+import asyncio, os, json, httpx
+import motor.motor_asyncio
+async def main():
+    from services.settings import settings_service
+    cli = motor.motor_asyncio.AsyncIOMotorClient(os.environ["MONGODB_URI"])
+    settings_service.attach(cli.get_default_database())
+    routes = []
+    for acct, key in await settings_service.get_system_runpod_flash_accounts():
+        try:
+            async with httpx.AsyncClient(timeout=12) as c:
+                r = await c.get(f"https://api.runpod.ai/v2/{acct.endpoint_id}/health",
+                                headers={"Authorization": f"Bearer {key}"})
+            w = r.json().get("workers", {})
+            alive = sum(int(w.get(k, 0)) for k in ("ready", "idle", "running", "initializing"))
+        except Exception:
+            alive = 0
+        if alive >= 1:
+            routes.append({"account_name": acct.name, "endpoint_id": acct.endpoint_id})
+        else:
+            print(f"# preflight: dropping DEAD lane {acct.name}/{acct.endpoint_id}", flush=True)
+    print(json.dumps(routes))
+asyncio.run(main())
+PYEOF
+)"
+  ROUTES_JSON="$(echo "$ROUTES_JSON" | grep -v '^#' | tail -1)"
+  local n
+  n="$(echo "$ROUTES_JSON" | python3 -c "import json,sys; print(len(json.load(sys.stdin)))" 2>/dev/null || echo 0)"
+  if [[ "${n:-0}" -lt 1 ]]; then
+    echo "PREFLIGHT FAIL: no healthy extraction lanes." >&2; exit 3
+  fi
+  echo "preflight OK: governors>=$want, healthy lanes=$n"
+}
+throughput_preflight
+
 FILE_COUNT="$(
   docker exec -e PYTHONPATH=/app -w /app "$BACKEND" \
     python -c 'import sys; from services.ingestion.batches import discover_local_files; _, rows = discover_local_files(sys.argv[1], recursive=True, extensions=[".pdf", ".md", ".epub"]); print(len(rows))' \
@@ -41,7 +93,7 @@ SUMMARY_AUTHORITY_USD="$(awk -v n="$FILE_COUNT" 'BEGIN {printf "%.2f", n * 0.50}
 echo "files=$FILE_COUNT authority=\$$SUMMARY_AUTHORITY_USD"
 
 CORPUS_BODY="$(
-  jq -nc --arg name "$CORPUS_NAME" --argjson summaries "$SUMMARIES_JSON" '{
+  jq -nc --arg name "$CORPUS_NAME" --argjson summaries "$SUMMARIES_JSON" --argjson routes "$ROUTES_JSON" '{
     name: $name,
     description: "Owner manual ingest through certified RunPod LocalExtractionV1",
     default_ingestion_config: {
@@ -52,10 +104,7 @@ CORPUS_BODY="$(
       embed_mode: "local",
       extraction_engine: "runpod_flash",
       runpod_wire_contract: "local_extraction_v1",
-      runpod_local_extraction_routes: [
-        {account_name: "primary", endpoint_id: "hk81nfl5cnwufx"},
-        {account_name: "secondary", endpoint_id: "8tafde7potcsjw"}
-      ],
+      runpod_local_extraction_routes: $routes,
       models_linked: false,
       extraction_models: [],
       summary_models: [{

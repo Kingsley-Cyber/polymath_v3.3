@@ -190,6 +190,15 @@ RECREATE reverts to the image, so always finish with the real rebuild.
 
 ## INGESTION DOCTRINE — owner-ratified 2026-07-19 (execute this for ANY future ingestion)
 
+LAUNCH CONTRACT: `launch_ingest.sh` runs a THROUGHPUT PREFLIGHT before
+any batch — it hard-fails (exit 3) if any dispatch governor
+(EXTRACTION_MAX_ACTIVE_DOCS, INGEST_GLOBAL_MAX_DOCS,
+INGEST_MAX_ACTIVE_JOBS, INGEST_MAX_MODEL_PHASE_DOCS) is below the
+requested concurrency, and it builds `runpod_local_extraction_routes`
+DYNAMICALLY from settings-enabled accounts whose endpoints answer
+/health with ≥1 live worker (dead lanes are dropped LOUDLY, never
+routed). A batch can no longer launch throttled or aimed at a dead lane.
+
 The living launchers are `scripts/ingestion/launch_ingest.sh` (one corpus,
 resumable state) and `scripts/ingestion/fleet_run.sh` (sequential fleet w/
 deepseek key rotation). Use them; do not hand-roll batch bodies. Keys load
