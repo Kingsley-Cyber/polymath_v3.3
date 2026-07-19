@@ -173,6 +173,42 @@ async def resolve_summary_provider_pool(
             if not entry.get("api_key"):
                 entry["api_key"] = shared_key
 
+    # Provider-agnostic key attachment (owner order 2026-07-19): any entry
+    # still missing a key resolves its provider_preset against the shared
+    # encrypted key store, so future summary providers (longcat, siliconflow,
+    # moonshot, …) wire in from corpus config alone — no code change, no
+    # plaintext keys in corpus documents.
+    presets_missing = {
+        str(entry.get("provider_preset") or "").strip().lower()
+        for entry in entries
+        if not entry.get("api_key")
+    }
+    presets_missing.discard("")
+    if presets_missing:
+        provider_keys: dict[str, str] = {}
+        if user_id:
+            try:
+                provider_keys = dict(
+                    await settings_service.get_plaintext_keys_for_llm(user_id) or {}
+                )
+            except Exception:
+                provider_keys = {}
+        for preset in sorted(presets_missing):
+            if not provider_keys.get(preset):
+                try:
+                    any_key = await settings_service.get_plaintext_key_any_user(
+                        preset
+                    )
+                except Exception:
+                    any_key = None
+                if any_key:
+                    provider_keys[preset] = any_key
+        for entry in entries:
+            if not entry.get("api_key"):
+                preset = str(entry.get("provider_preset") or "").strip().lower()
+                if provider_keys.get(preset):
+                    entry["api_key"] = provider_keys[preset]
+
     pool, report = prepare_summary_provider_pool(entries)
     report["flash_primary"] = bool(pool and _is_flash(pool[0]))
     report["flash_key_available"] = bool(
