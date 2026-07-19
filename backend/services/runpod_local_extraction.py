@@ -670,6 +670,7 @@ async def extract_entities(
         },
     )
     resolved_routes: list[dict[str, Any]] = []
+    dropped_routes: list[str] = []
     for route in selected_routes:
         matches = [
             (account, key)
@@ -677,9 +678,12 @@ async def extract_entities(
             if account.enabled and account.name == route.account_name and key
         ]
         if len(matches) != 1:
-            raise RuntimeError(
-                "LocalExtractionV1 named account did not resolve exactly once"
-            )
+            # Graceful degradation (2026-07-19): corpus configs persist named
+            # routes; an account disabled AFTER corpus creation must narrow
+            # the lane set, not fail every item (owner "just works" contract
+            # for UI uploads). Fail only when NO route survives.
+            dropped_routes.append(route.account_name)
+            continue
         account, api_key = matches[0]
         request_limit = min(
             int(runpod_config.request_concurrency),
@@ -693,6 +697,19 @@ async def extract_entities(
                 "semaphore": asyncio.Semaphore(max(1, request_limit)),
                 "request_limit": max(1, request_limit),
             }
+        )
+    if dropped_routes:
+        logger.warning(
+            "LocalExtractionV1 dropped %d unresolvable route(s) %s; "
+            "continuing on %d live route(s)",
+            len(dropped_routes),
+            dropped_routes,
+            len(resolved_routes),
+        )
+    if not resolved_routes:
+        raise RuntimeError(
+            "LocalExtractionV1 has no resolvable extraction routes "
+            f"(dropped: {dropped_routes})"
         )
     batch_size = min(64, int(runpod_config.request_batch_size))
     slices = [
