@@ -207,22 +207,32 @@ inline secrets in scripts or corpus configs.
    pod cost). It must exist in BOTH the API Literal (routers/ingestion.py)
    and INGEST_PROFILES (services/ingestion/batches.py) — and remember both
    backend AND worker containers need the same batches.py.
-3. **Overlap rule**: batch N's extraction pass may run concurrently with
+3. **Worker replicas**: ALWAYS run ≥2 ingest-worker containers — one
+   python worker is GIL-bound to a single core and silently serializes
+   every batch's parse/chunk/orchestration ("barely increased" incident,
+   2026-07-19). The offline overlay defaults `deploy.replicas: 2`
+   (`INGEST_WORKER_REPLICAS`), the launcher auto-scales if it finds <2,
+   and scaling is lease-safe (`--scale ingest-worker=N --no-recreate`).
+   Momentum rule: judge progress by done+staged movement, not `done`
+   alone (staged is the pass-1 signal); if momentum is flat with work
+   queued, check (a) worker CPU cores actually used, (b) runpod worker
+   states (throttled = platform GPU weather, not config).
+4. **Overlap rule**: batch N's extraction pass may run concurrently with
    batch N-1's local pass (different resource classes). Local passes stay
    serialized on the one Metal GPU. File-concurrency: books 4 (pass 2
    effectively 2-wide), transcripts 6 — governed by
    min(batch.options.concurrency, OFFLINE_INGEST_GLOBAL_MAX_DOCS,
    OFFLINE_INGEST_MAX_ACTIVE_JOBS).
-4. **Summaries**: dual-lane `summary_models` — deepseek/deepseek-v4-flash
+5. **Summaries**: dual-lane `summary_models` — deepseek/deepseek-v4-flash
    @40 (primary) + longcat/LongCat-2.0 @40 (assist) — BOTH with
    `extra_params: {disable_thinking: true}` (both are thinking models; the
    knob is translated to the wire by llm.py). The pool resolves ANY
    provider_preset's key from the encrypted store — adding a future
    provider is a corpus-config change only.
-5. **Local pressure limits**: qdrant needs `QDRANT_MEM_LIMIT=8g`+ for
+6. **Local pressure limits**: qdrant needs `QDRANT_MEM_LIMIT=8g`+ for
    book-scale vector writes (the daily overlay honors the env var now);
    watch the verify gate — it is the authority on write integrity.
-6. **Laws**: 1-file canary with receipts before any multi-hundred-file
+7. **Laws**: 1-file canary with receipts before any multi-hundred-file
    batch; a NEWLY DEPLOYED endpoint/account needs its own 1-slice canary
    fire (workers ready>0 observed) BEFORE joining contract routes — fresh
    accounts can sit throttled/unhealthy and jobs queue silently
@@ -231,6 +241,6 @@ inline secrets in scripts or corpus configs.
    failed items reset via status=failed_recoverable + attempts=0 then
    /resume; "reusable completed-job closure is partial" → archive the
    corpus journal under /data/ingest-files/runpod-job-journals/.
-7. **Corpus deletion** frees Docker space (vectors, rows, stored copies)
+8. **Corpus deletion** frees Docker space (vectors, rows, stored copies)
    and can never touch `/ingest-source` — the source drive is read-only
    and the purge guard refuses that path.
