@@ -3351,3 +3351,126 @@ async def list_all_documents(
             }
         )
     return result
+
+
+# ── Mass upload sessions (owner order 2026-07-19): stream files to LOCAL
+# DISK staging, then finalize as ONE normal durable local batch. No file-
+# count cap — the browser sends one file per request, bytes go chunk-wise
+# straight to disk (RAM-bounded), and the finalize path reuses the exact
+# machinery of backend-folder ingestion (governors, routes, verify gates).
+import re as _re
+from pathlib import Path
+from fastapi import Request as _Request
+
+
+def _upload_session_dir(session_id: str) -> Path:
+    root = Path(get_settings().INGEST_DROP_OFF_DIR) / "mass-upload"
+    safe = _re.sub(r"[^A-Za-z0-9_-]", "", session_id)
+    if not safe:
+        raise HTTPException(status_code=400, detail="Invalid session id")
+    return root / safe
+
+
+@router.post("/corpora/{corpus_id}/upload-sessions")
+async def create_upload_session(
+    corpus_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    corpus = await ingestion_service.get_corpus(corpus_id)
+    if not corpus:
+        raise HTTPException(status_code=404, detail="Corpus not found")
+    session_id = f"{corpus_id[:8]}-{uuid4().hex[:12]}"
+    target = _upload_session_dir(session_id)
+    target.mkdir(parents=True, exist_ok=True)
+    return {"session_id": session_id, "staged_files": 0}
+
+
+@router.post("/corpora/{corpus_id}/upload-sessions/{session_id}/files")
+async def stage_upload_file(
+    corpus_id: str,
+    session_id: str,
+    file: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user),
+):
+    target_dir = _upload_session_dir(session_id)
+    if not target_dir.is_dir():
+        raise HTTPException(status_code=404, detail="Upload session not found")
+    filename = Path(str(file.filename or "upload")).name
+    ext = Path(filename).suffix.lower()
+    if ext not in {".pdf", ".md", ".epub", ".txt"}:
+        raise HTTPException(status_code=400, detail=f"Unsupported extension: {ext or '(none)'}")
+    dest = target_dir / filename
+    written = 0
+    try:
+        with dest.open("wb") as out:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                out.write(chunk)
+                written += len(chunk)
+    finally:
+        await file.close()
+    if written == 0:
+        dest.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail=f"Empty file: {filename}")
+    staged = sum(1 for p in target_dir.iterdir() if p.is_file())
+    return {"filename": filename, "bytes": written, "staged_files": staged}
+
+
+@router.post("/corpora/{corpus_id}/upload-sessions/{session_id}/finalize")
+async def finalize_upload_session(
+    corpus_id: str,
+    session_id: str,
+    concurrency: int = Form(default=6),
+    profile: Literal[
+        "mac_safe", "mac_queryable_first", "rtx_assisted", "runpod_burst",
+        "runpod_extract_first"
+    ] = Form(default="runpod_extract_first"),
+    chunk_summarization: bool | None = Form(default=None),
+    summary_cost_authority_usd: Decimal | None = Form(default=None, gt=0, le=10000),
+    current_user: dict = Depends(get_current_user),
+):
+    """Turn a staged session folder into ONE durable local batch."""
+    corpus = await ingestion_service.get_corpus(corpus_id)
+    if not corpus:
+        raise HTTPException(status_code=404, detail="Corpus not found")
+    target_dir = _upload_session_dir(session_id)
+    if not target_dir.is_dir():
+        raise HTTPException(status_code=404, detail="Upload session not found")
+    n_files = sum(1 for p in target_dir.iterdir() if p.is_file())
+    if n_files == 0:
+        raise HTTPException(status_code=400, detail="Session has no staged files")
+    corpus_summary_enabled = bool(
+        (corpus.get("default_ingestion_config") or {}).get("chunk_summarization")
+    )
+    summary_enabled = (
+        chunk_summarization if chunk_summarization is not None else corpus_summary_enabled
+    )
+    if summary_enabled and summary_cost_authority_usd is None:
+        summary_cost_authority_usd = Decimal(n_files) * Decimal("0.50")
+    batch = await ingest_batches.create_local_batch(
+        db=ingestion_service.db,
+        corpus_id=corpus_id,
+        user_id=str(current_user["user_id"]),
+        root_path=str(target_dir),
+        profile=profile,
+        recursive=True,
+        extensions=[".pdf", ".md", ".epub", ".txt"],
+        store_files=True,
+        use_neo4j=True,
+        chunk_summarization=summary_enabled,
+        model="",
+        concurrency=max(1, min(8, int(concurrency))),
+        summary_cost_authority_usd=summary_cost_authority_usd if summary_enabled else None,
+    )
+    started = await _start_batch_runner_if_enabled(
+        batch_id=batch["batch_id"],
+        user_id=str(current_user["user_id"]),
+    )
+    return {
+        "batch_id": batch.get("batch_id"),
+        "total": batch.get("total"),
+        "staged_files": n_files,
+        "runner_started": started,
+    }
