@@ -13,6 +13,18 @@ PROFILE="${PROFILE:-runpod_burst}"
 EXTEND_CORPUS_ID="${EXTEND_CORPUS_ID:-}"
 BACKEND="polymath_v33-backend-1"
 
+# GUARD (2026-07-19): ≥2 ingest workers or throughput is GIL-bound to 1 core.
+WORKERS_UP="$(docker ps --format '{{.Names}}' | grep -c 'polymath_v33-ingest-worker' || true)"
+if [[ "${WORKERS_UP:-0}" -lt 2 ]]; then
+  echo "only $WORKERS_UP ingest worker(s) up — scaling to 2 (lease-safe)" >&2
+  (cd /Users/king/polymath-wt/build-first-queue && docker compose -p polymath_v33 \
+    -f docker-compose.yml -f /Users/king/polymath_v3.3/docker-compose.override.yml \
+    -f docker-compose.offline-ingest.yml -f docker-compose.apple-mlx.yml -f docker-compose.daily.yml \
+    --env-file /Users/king/polymath_v3.3/.env --profile offline-ingest \
+    up -d --scale ingest-worker=2 --no-recreate ingest-worker >/dev/null 2>&1) || true
+fi
+
+
 case "$SUMMARIES" in
   on)  SUMMARIES_JSON=true ;;
   off) SUMMARIES_JSON=false ;;

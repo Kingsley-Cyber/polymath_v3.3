@@ -32,6 +32,11 @@ services:
       INGEST_MAX_PARSE_JOBS: "2"
 
   ingest-worker:
+    # ≥2 replicas ALWAYS: one python process is GIL-bound to a single core
+    # and silently serializes parse/chunk/orchestration for every batch
+    # (2026-07-19 "barely increased" incident). Leases make N workers safe.
+    deploy:
+      replicas: ${INGEST_WORKER_REPLICAS:-2}
     logging:
       driver: "json-file"
       options:
