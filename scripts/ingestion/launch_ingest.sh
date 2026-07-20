@@ -166,10 +166,10 @@ elif [[ -n "$EXTEND_CORPUS_ID" ]]; then
   CORPUS_ID="$EXTEND_CORPUS_ID"
   write_state
 else
-  EXISTING="$(curl -fsS --max-time 15 -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/corpora |
+  EXISTING="$(curl -fsS --max-time 60 --retry 4 --retry-delay 5 --retry-all-errors -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/corpora |
     jq --arg name "$CORPUS_NAME" '[.[] | select(.name == $name)] | length')"
   [[ "$EXISTING" == 0 ]] || { echo "corpus name exists w/o state; aborting" >&2; exit 1; }
-  CORPUS_ID="$(curl -fsS --max-time 60 -X POST -H "Authorization: Bearer $TOKEN" \
+  CORPUS_ID="$(curl -fsS --max-time 120 --retry 3 --retry-delay 8 --retry-all-errors -X POST -H "Authorization: Bearer $TOKEN" \
     -H 'Content-Type: application/json' --data-binary "$CORPUS_BODY" \
     http://localhost:8000/api/corpora | jq -er '.corpus_id | select(length > 0)')"
   write_state
@@ -183,7 +183,7 @@ if [[ -z "$BATCH_ID" ]]; then
   BATCH_ID="$(jq -er '.batch_id | select(length > 0)' <<<"$BATCH_RESPONSE")"
   write_state
 else
-  curl -fsS --max-time 60 -X POST -H "Authorization: Bearer $TOKEN" \
+  curl -fsS --max-time 120 --retry 3 --retry-delay 8 --retry-all-errors -X POST -H "Authorization: Bearer $TOKEN" \
     "http://localhost:8000/api/ingest-batches/$BATCH_ID/resume" >/dev/null || true
 fi
 
