@@ -15,6 +15,7 @@ Tier routing for Qdrant writes (enforced by caller):
 """
 
 import asyncio
+import hashlib
 import json
 import logging
 import re
@@ -533,9 +534,27 @@ async def summarize_parents(
     if ready_pool is not None:  # Compatibility with injected legacy test doubles.
         pool = ready_pool
 
+    def _lane_credential_fingerprint(entry: dict[str, Any]) -> str:
+        api_key = str(entry.get("api_key") or "").strip()
+        if api_key:
+            return "key:" + hashlib.sha256(api_key.encode("utf-8")).hexdigest()[:12]
+        provider_ref = "|".join(
+            [
+                str(entry.get("provider_preset") or entry.get("provider") or "")
+                .strip()
+                .lower(),
+                str(entry.get("base_url") or entry.get("api_base") or "")
+                .strip()
+                .rstrip("/")
+                .lower(),
+            ]
+        )
+        return "ref:" + hashlib.sha256(provider_ref.encode("utf-8")).hexdigest()[:12]
+
     def _model_signature(entry: dict[str, Any]) -> str:
         card = resolve_extraction_provider_card(entry)
-        return f"{card.provider}:{entry.get('model') or 'unknown'}"
+        model_id = str(entry.get("model") or "unknown").strip().lower()
+        return f"{card.provider}:{model_id}:{_lane_credential_fingerprint(entry)}"
 
     pool_status = pool_status if pool_status is not None else {}
     try:

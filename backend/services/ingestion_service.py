@@ -3688,7 +3688,7 @@ class IngestionService:
                 user_id=effective_user_id,
                 authority_usd=summary_cost_authority_usd,
             )
-        batch = max(1, min(int(batch or 32), 128))
+        batch = max(1, min(int(batch or 32), 720))
         if limit is not None:
             limit = max(0, int(limit))
         doc_id_filter = (

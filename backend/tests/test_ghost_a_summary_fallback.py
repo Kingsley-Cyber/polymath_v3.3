@@ -13,7 +13,11 @@ from services.ghost_a import (
     summarize_parents,
 )
 from services.ingestion import model_lifecycle
-from services.ingestion.summary_provider_pool import prepare_summary_provider_pool
+from services.ingestion import summary_provider_pool
+from services.ingestion.summary_provider_pool import (
+    prepare_summary_provider_pool,
+    resolve_summary_provider_pool,
+)
 
 
 class _BlankSummaryResponse:
@@ -41,6 +45,33 @@ class _BlankSummaryClient:
 class _ExhaustedSummaryClient(_BlankSummaryClient):
     async def post(self, *args, **kwargs) -> _BlankSummaryResponse:
         raise RuntimeError("Insufficient Balance")
+
+
+class _KeyAwareSummaryClient(_BlankSummaryClient):
+    payloads: list[dict] = []
+
+    async def post(self, *args, **kwargs) -> _EnvelopeIgnoringResponse:
+        payload = dict(kwargs.get("json") or {})
+        self.payloads.append(payload)
+        if payload.get("api_key") == "dead-key":
+            request = ghost_a.httpx.Request("POST", "https://provider.test/chat")
+            response = ghost_a.httpx.Response(
+                402,
+                request=request,
+                json={"error": {"message": "Insufficient Balance"}},
+            )
+            raise ghost_a.httpx.HTTPStatusError(
+                "402 Payment Required",
+                request=request,
+                response=response,
+            )
+        return _EnvelopeIgnoringResponse(
+            '{"summary":"A funded sibling lane compiles a durable semantic summary after one key fails.",'
+            '"central_claim":"A failed key does not disable funded siblings.",'
+            '"key_points":[{"point":"The healthy key keeps serving the queued source.",'
+            '"supporting_child_ids":["child-1"]}],'
+            '"concept_tags":["summary lanes","circuit breaker"]}'
+        )
 
 
 class _CapturingBlankSummaryClient(_BlankSummaryClient):
@@ -168,6 +199,20 @@ class _CrossProviderComplianceClient(_BlankSummaryClient):
             for target_id in target_ids
         ]
         return _EnvelopeIgnoringResponse(__import__("json").dumps({"items": items}))
+
+
+class _InvalidSharedKeyProbeClient:
+    def __init__(self, *args, **kwargs) -> None:
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb) -> None:
+        return None
+
+    async def get(self, *args, **kwargs):
+        return ghost_a.httpx.Response(401, request=ghost_a.httpx.Request("GET", args[0]))
 
 
 @pytest.mark.asyncio
@@ -487,6 +532,52 @@ def test_summary_pool_pins_flash_and_demotes_uncanaried_hy3() -> None:
     assert report["demoted_provider_count"] == 1
 
 
+def test_summary_pool_honors_disabled_lanes() -> None:
+    pool, report = prepare_summary_provider_pool(
+        [
+            {
+                "enabled": False,
+                "model": "deepseek/deepseek-v4-flash",
+                "provider_preset": "deepseek",
+            },
+            {
+                "model": "deepseek/deepseek-v4-flash",
+                "provider_preset": "deepseek-2",
+            },
+        ]
+    )
+
+    assert [entry["provider_preset"] for entry in pool] == ["deepseek-2"]
+    assert report["disabled_provider_count"] == 1
+    assert report["disabled_models"] == ["deepseek/deepseek-v4-flash"]
+
+
+@pytest.mark.asyncio
+async def test_invalid_shared_flash_key_is_not_auto_inserted(monkeypatch) -> None:
+    async def fake_any_user(name: str):
+        return "invalid-shared-key" if name == "deepseek" else None
+
+    monkeypatch.setattr(
+        "services.settings.settings_service.get_plaintext_key_any_user",
+        fake_any_user,
+    )
+    monkeypatch.setattr(
+        summary_provider_pool.httpx,
+        "AsyncClient",
+        _InvalidSharedKeyProbeClient,
+    )
+
+    pool, report = await resolve_summary_provider_pool(
+        configured_refs=[],
+        runtime_refs=[],
+    )
+
+    assert pool == []
+    assert report["flash_key_available"] is False
+    assert report["shared_flash_key_probe_ok"] is False
+    assert report["shared_flash_key_error"] == "http_401"
+
+
 @pytest.mark.asyncio
 async def test_fatal_provider_exhaustion_defers_instead_of_using_fallback(monkeypatch) -> None:
     monkeypatch.setattr(ghost_a.httpx, "AsyncClient", _ExhaustedSummaryClient)
@@ -517,6 +608,59 @@ async def test_fatal_provider_exhaustion_defers_instead_of_using_fallback(monkey
     )
 
     assert results == []
+
+
+@pytest.mark.asyncio
+async def test_fatal_deepseek_key_does_not_disable_funded_sibling(monkeypatch) -> None:
+    _KeyAwareSummaryClient.payloads.clear()
+    monkeypatch.setattr(ghost_a.httpx, "AsyncClient", _KeyAwareSummaryClient)
+    monkeypatch.setattr(ghost_a, "_SUMMARY_RETRY_ATTEMPTS", 1)
+    monkeypatch.setattr(ghost_a, "_SUMMARY_RETRY_BACKOFF_SECONDS", 0)
+    pool_status = {"drop_threshold": 1}
+
+    results = await summarize_parents(
+        [
+            SummaryTask(
+                parent_id="parent-1",
+                doc_id="doc-1",
+                corpus_id="corpus-1",
+                source_tier="parent",
+                text="Funded sibling summary lanes must keep serving when one key returns 402.",
+                source_child_ids=["child-1"],
+            )
+        ],
+        max_summary_tokens=80,
+        pool=[
+            {
+                "provider_preset": "deepseek",
+                "model": "deepseek/deepseek-v4-flash",
+                "base_url": "https://api.deepseek.com/v1",
+                "api_key": "dead-key",
+                "max_concurrent": 1,
+                "extra_params": {},
+            },
+            {
+                "provider_preset": "deepseek-2",
+                "model": "deepseek/deepseek-v4-flash",
+                "base_url": "https://api.deepseek.com/v1",
+                "api_key": "funded-key",
+                "max_concurrent": 1,
+                "extra_params": {},
+            },
+        ],
+        global_max_concurrent=2,
+        pool_status=pool_status,
+    )
+
+    assert [result.parent_id for result in results] == ["parent-1"]
+    assert pool_status["active_provider_count"] == 1
+    assert pool_status["dropped_provider_count"] == 1
+    assert len(pool_status["dropped_signatures"]) == 1
+    assert _KeyAwareSummaryClient.payloads[0]["api_key"] == "dead-key"
+    assert any(
+        payload.get("api_key") == "funded-key"
+        for payload in _KeyAwareSummaryClient.payloads
+    )
 
 
 @pytest.mark.asyncio

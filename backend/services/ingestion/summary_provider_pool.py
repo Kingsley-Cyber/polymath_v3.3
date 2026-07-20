@@ -8,7 +8,10 @@ be persisted in batch/job receipts.
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any, Iterable
+
+import httpx
 
 from config import get_settings
 
@@ -56,6 +59,28 @@ def _signature(entry: dict[str, Any]) -> tuple[str, str, str]:
     )
 
 
+async def _probe_openai_compatible_key(
+    *,
+    api_base: str,
+    api_key: str,
+) -> tuple[bool, str | None]:
+    base = str(api_base or "").strip().rstrip("/")
+    if not base:
+        return False, "missing_api_base"
+    url = f"{base}/models" if base.endswith("/v1") else f"{base}/v1/models"
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                url,
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+    except Exception as exc:  # noqa: BLE001 - surfaced as secret-free status
+        return False, type(exc).__name__
+    if 200 <= int(resp.status_code) < 300:
+        return True, None
+    return False, f"http_{int(resp.status_code)}"
+
+
 def prepare_summary_provider_pool(
     refs: Iterable[Any],
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -63,9 +88,13 @@ def prepare_summary_provider_pool(
 
     admitted: list[dict[str, Any]] = []
     demoted: list[dict[str, Any]] = []
+    disabled: list[dict[str, Any]] = []
     seen: set[tuple[str, str, str]] = set()
     for ref in refs:
         entry = _entry_dict(ref)
+        if entry.get("enabled") is False:
+            disabled.append(entry)
+            continue
         if not _model(entry):
             continue
         if _is_hy3(entry) and _hy3_canary_rows(entry) < HY3_CANARY_REQUIRED_ROWS:
@@ -84,6 +113,8 @@ def prepare_summary_provider_pool(
         "admitted_models": [_model(entry) for entry in admitted],
         "demoted_provider_count": len(demoted),
         "demoted_models": [_model(entry) for entry in demoted],
+        "disabled_provider_count": len(disabled),
+        "disabled_models": [_model(entry) for entry in disabled],
         "hy3_canary_required_rows": HY3_CANARY_REQUIRED_ROWS,
     }
     return admitted, report
@@ -148,6 +179,19 @@ async def resolve_summary_provider_pool(
             shared_key = None
 
     flash_entries = [entry for entry in entries if _is_flash(entry)]
+    shared_flash_key_probe_ok = None
+    shared_flash_key_error = None
+    needs_shared_flash_key = bool(shared_key) and (
+        not flash_entries or any(not entry.get("api_key") for entry in flash_entries)
+    )
+    if needs_shared_flash_key:
+        shared_flash_key_probe_ok, shared_flash_key_error = (
+            await _probe_openai_compatible_key(
+                api_base="https://api.deepseek.com/v1",
+                api_key=shared_key,
+            )
+        )
+
     if not flash_entries:
         default_model = str(
             getattr(get_settings(), "GHOST_A_DEFAULT_MODEL", "")
@@ -155,20 +199,22 @@ async def resolve_summary_provider_pool(
         )
         if FLASH_MODEL_MARKER not in default_model.lower():
             default_model = "deepseek/deepseek-v4-flash"
-        entries.insert(
-            0,
-            {
-                "provider_preset": "deepseek",
-                "model": default_model,
-                "base_url": "https://api.deepseek.com",
-                "api_key": shared_key,
-                "max_concurrent": max(
-                    1, int(getattr(get_settings(), "SUMMARY_MAX_CONCURRENT", 1) or 1)
-                ),
-                "extra_params": {"disable_thinking": True},
-            },
-        )
-    elif shared_key:
+        if shared_key and shared_flash_key_probe_ok:
+            entries.insert(
+                0,
+                {
+                    "provider_preset": "deepseek",
+                    "model": default_model,
+                    "base_url": "https://api.deepseek.com",
+                    "api_key": shared_key,
+                    "max_concurrent": max(
+                        1,
+                        int(getattr(get_settings(), "SUMMARY_MAX_CONCURRENT", 1) or 1),
+                    ),
+                    "extra_params": {"disable_thinking": True},
+                },
+            )
+    elif shared_key and shared_flash_key_probe_ok:
         for entry in flash_entries:
             if not entry.get("api_key"):
                 entry["api_key"] = shared_key
@@ -214,6 +260,12 @@ async def resolve_summary_provider_pool(
     report["flash_key_available"] = bool(
         pool and _is_flash(pool[0]) and pool[0].get("api_key")
     )
+    if needs_shared_flash_key:
+        report["shared_flash_key_probe_ok"] = bool(shared_flash_key_probe_ok)
+        report["shared_flash_key_error"] = shared_flash_key_error
+        report["shared_flash_key_fingerprint"] = hashlib.sha256(
+            shared_key.encode("utf-8")
+        ).hexdigest()[:12]
     report["configured_provider_count"] = len(configured_list)
     report["runtime_provider_count"] = len(runtime_list)
     return pool, report
