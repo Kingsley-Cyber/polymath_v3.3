@@ -31,6 +31,20 @@
    "source_url": "https://longcat.chat/platform/docs/Pricing/LongCat-2.0.html"
   },
   {
+   "route_id": "longcat-api__longcat-2.0-provider-alias",
+   "provider": "longcat",
+   "model_id": "longcat/LongCat-2.0",
+   "api_base": "https://api.longcat.chat/openai/v1",
+   "currency": "USD",
+   "price_unit_tokens": 1000000,
+   "uncached_input_usd": 0.75,
+   "cached_input_usd": 0.015,
+   "output_usd": 2.95,
+   "fallback_input_basis": "uncached_input_conservative",
+   "price_tier": "published_list_price",
+   "source_url": "https://longcat.chat/platform/docs/Pricing/LongCat-2.0.html"
+  },
+  {
    "route_id": "deepseek-api__deepseek-v4-flash-openai-alias",
    "provider": "deepseek",
    "model_id": "openai/deepseek-v4-flash",
