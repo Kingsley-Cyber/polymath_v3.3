@@ -62,10 +62,13 @@ async def main():
                 r = await c.get(f"https://api.runpod.ai/v2/{acct.endpoint_id}/health",
                                 headers={"Authorization": f"Bearer {key}"})
             w = r.json().get("workers", {})
+            jobs = r.json().get("jobs", {})
             alive = sum(int(w.get(k, 0)) for k in ("ready", "idle", "running", "initializing"))
+            proven = int(jobs.get("completed", 0)) > 0
+            zombie = int(w.get("unhealthy", 0)) > 0 and not proven
         except Exception:
-            alive = 0
-        if alive >= 1:
+            alive = 0; proven = False; zombie = True
+        if alive >= 1 and (proven or not zombie):
             routes.append({"account_name": acct.name, "endpoint_id": acct.endpoint_id})
         else:
             print(f"# preflight: dropping DEAD lane {acct.name}/{acct.endpoint_id}", flush=True)
