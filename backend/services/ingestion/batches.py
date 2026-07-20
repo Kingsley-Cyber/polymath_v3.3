@@ -1851,13 +1851,29 @@ async def _lease_next_item(
     max_attempts = max(
         1, int(getattr(get_settings(), "INGEST_MAX_ITEM_ATTEMPTS", 5))
     )
+    # Transient-failure retries wait out a cooldown before re-claiming.
+    # Without it a dead store turns the claim loop into a machine gun:
+    # the 2026-07-20 Neo4j OOM (~3 min) cycled claim→instant-fail→reclaim
+    # every ~6s and burned 25 infra + 5 real attempts per touched item.
+    retry_cooldown = max(
+        0,
+        int(getattr(
+            get_settings(), "INGEST_RECOVERABLE_RETRY_COOLDOWN_SECONDS", 90
+        )),
+    )
+    retryable_after = now - timedelta(seconds=retry_cooldown)
     return await db[ITEMS].find_one_and_update(
         {
             "batch_id": batch_id,
             "source": {"$in": RUNNABLE_SOURCES},
             "$and": [
                 {"$or": [
-                    {"status": {"$in": [ITEM_QUEUED, ITEM_FAILED_RECOVERABLE]}},
+                    {"status": ITEM_QUEUED},
+                    {"status": ITEM_FAILED_RECOVERABLE,
+                     "$or": [
+                         {"updated_at": {"$lte": retryable_after}},
+                         {"updated_at": {"$exists": False}},
+                     ]},
                     # §13-S: staged items re-lease when the batch target moved
                     # past their persisted rung (next pass).
                     {"status": ITEM_STAGED,
