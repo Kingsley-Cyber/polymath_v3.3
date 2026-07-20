@@ -2826,6 +2826,41 @@ async def get_ingest_batch(
     return batch
 
 
+@router.post("/ingest-batches/{batch_id}/pause")
+async def pause_ingest_batch(
+    batch_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Operator quiesce: runners stop claiming new items, in-flight docs
+    finish, and poll recovery will NOT restart the batch until Resume."""
+    batch = await ingest_batches.get_batch(
+        ingestion_service.db,
+        batch_id,
+        user_id=current_user["user_id"],
+        include_items=False,
+    )
+    if not batch:
+        raise HTTPException(status_code=404, detail="Batch not found")
+    now = datetime.utcnow()
+    await ingestion_service.db[ingest_batches.BATCHES].update_one(
+        {"batch_id": batch_id, "user_id": current_user["user_id"]},
+        {
+            "$set": {
+                "status": ingest_batches.BATCH_PAUSED,
+                "pause_requested_at": now,
+                "updated_at": now,
+            }
+        },
+    )
+    refreshed = await ingest_batches.get_batch(
+        ingestion_service.db,
+        batch_id,
+        user_id=current_user["user_id"],
+        include_items=False,
+    )
+    return refreshed or batch
+
+
 @router.post("/ingest-batches/{batch_id}/resume")
 async def resume_ingest_batch(
     batch_id: str,
@@ -2839,6 +2874,20 @@ async def resume_ingest_batch(
     )
     if not batch:
         raise HTTPException(status_code=404, detail="Batch not found")
+    if batch.get("status") == ingest_batches.BATCH_PAUSED:
+        # Clear the paused latch FIRST: refresh_batch_counts preserves
+        # paused, and the poller skips paused batches — without this flip
+        # neither the runner start below nor poll recovery would act.
+        await ingestion_service.db[ingest_batches.BATCHES].update_one(
+            {"batch_id": batch_id, "user_id": current_user["user_id"]},
+            {
+                "$set": {
+                    "status": ingest_batches.BATCH_QUEUED,
+                    "updated_at": datetime.utcnow(),
+                },
+                "$unset": {"pause_requested_at": ""},
+            },
+        )
     await ingest_batches.reconcile_stale_items(
         ingestion_service.db,
         batch_id=batch_id,
