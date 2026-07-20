@@ -8,6 +8,7 @@ a batch worker) from driving the same corpus/lane concurrently.
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timedelta
@@ -17,12 +18,26 @@ from uuid import uuid4
 from pymongo import ReturnDocument, UpdateMany
 from pymongo.errors import DuplicateKeyError
 
+logger = logging.getLogger(__name__)
+
 DEFAULT_JOB_LEASE_SECONDS = 15 * 60
 DEFAULT_JOB_MAX_ATTEMPTS = 5
 DEFAULT_LANE_LEASE_SECONDS = 30 * 60
 SUPERSEDED_JOB_STATUS = "superseded"
 DEAD_LETTER_JOB_STATUS = "dead_letter"
 LANE_LEASE_COLLECTION = "ingest_lane_leases"
+
+# Corpora whose lane-lease heartbeat failed to renew IN THIS PROCESS. A runner
+# that keeps executing after losing its lane lease is invisible to every other
+# controller — the exact double-writer topology the leases exist to prevent.
+# Workers consult lanes_lost() before claiming new items and stand down.
+_LOST_LANES: set[str] = set()
+
+
+def lanes_lost(corpus_id: str) -> bool:
+    """True when this process lost a lane lease for ``corpus_id``."""
+
+    return str(corpus_id) in _LOST_LANES
 
 
 def normalize_failure_class(value: Any) -> str:
@@ -173,6 +188,10 @@ async def corpus_lane_lease(
     )
     heartbeat_task: asyncio.Task | None = None
     if lease:
+        # A fresh acquire means this process legitimately owns the lane
+        # again — clear any stale loss marker from a previous run.
+        _LOST_LANES.discard(str(corpus_id))
+
         async def _heartbeat() -> None:
             interval = max(20.0, float(lease_seconds) / 3.0)
             while True:
@@ -185,6 +204,17 @@ async def corpus_lane_lease(
                     lease_seconds=lease_seconds,
                 )
                 if not renewed:
+                    # The lease is gone (expired + reclaimed, or deleted).
+                    # Returning silently here used to leave the runner
+                    # executing with no lease at all — flag the corpus so
+                    # batch workers stop claiming new items.
+                    _LOST_LANES.add(str(corpus_id))
+                    logger.critical(
+                        "lane lease renewal FAILED corpus=%s lane=%s — "
+                        "runner is now leaseless; workers will stand down",
+                        corpus_id,
+                        lane,
+                    )
                     return
 
         heartbeat_task = asyncio.create_task(_heartbeat())

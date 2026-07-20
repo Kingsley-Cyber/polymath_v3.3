@@ -209,6 +209,9 @@ BATCH_RUNNING = "running"
 BATCH_DONE = "done"
 BATCH_PARTIAL = "partial"
 BATCH_FAILED = "failed"
+# Operator quiesce: runner lanes stop claiming, in-flight docs finish, and
+# poll recovery must NOT restart the batch until an explicit Resume.
+BATCH_PAUSED = "paused"
 
 
 def _batch_requires_summary_completion(batch: dict[str, Any]) -> bool:
@@ -1399,6 +1402,16 @@ async def refresh_batch_counts(
     else:
         item_status = BATCH_DONE
     status = _batch_status_with_summary_completion(batch, item_status)
+    # Operator pause is sticky across count refreshes: workers draining
+    # their in-flight items call this, and a recomputed queued/running
+    # status would hand the batch straight back to poll recovery. Only an
+    # explicit Resume clears the paused state. A fully terminal file set
+    # still closes the batch normally (nothing left to pause).
+    if batch.get("status") == BATCH_PAUSED and status in {
+        BATCH_QUEUED,
+        BATCH_RUNNING,
+    }:
+        status = BATCH_PAUSED
 
     # Owner metric (2026-07-05): progress in FILES and MB, with an explicit
     # "extracted" milestone — the extraction lane's own deliverable — distinct
@@ -1643,8 +1656,9 @@ async def requeue_failed_items_for_resume(
     configuration.
     """
 
-    now = _now()
     max_attempts = max(1, int(get_settings().INGEST_MAX_ITEM_ATTEMPTS))
+    # Pipeline update: the old $unset destroyed the failure evidence on every
+    # operator Resume; push it into error_history before clearing.
     result = await db[ITEMS].update_many(
         {
             "batch_id": batch_id,
@@ -1653,17 +1667,40 @@ async def requeue_failed_items_for_resume(
             "failure_stage": {"$in": ["worker_exception", "worker_result_failed"]},
             "attempts": {"$lt": max_attempts},
         },
-        {
-            "$set": {
-                "status": ITEM_FAILED_RECOVERABLE,
-                "phase": "retry_requested",
-                "lease_owner": None,
-                "lease_until": None,
-                "completed_at": None,
-                "updated_at": now,
-            },
-            "$unset": {"error": ""},
-        },
+        [
+            {
+                "$set": {
+                    "error_history": {
+                        "$slice": [
+                            {
+                                "$concatArrays": [
+                                    {"$ifNull": ["$error_history", []]},
+                                    [
+                                        {
+                                            "error": {"$ifNull": ["$error", None]},
+                                            "failure_stage": {
+                                                "$ifNull": ["$failure_stage", None]
+                                            },
+                                            "attempts": {"$ifNull": ["$attempts", None]},
+                                            "event": "operator_resume_requeue",
+                                            "at": "$$NOW",
+                                        }
+                                    ],
+                                ]
+                            },
+                            -25,
+                        ]
+                    },
+                    "status": ITEM_FAILED_RECOVERABLE,
+                    "phase": "retry_requested",
+                    "lease_owner": None,
+                    "lease_until": None,
+                    "completed_at": None,
+                    "updated_at": "$$NOW",
+                    "error": None,
+                },
+            }
+        ],
     )
     await refresh_batch_counts(db, batch_id, user_id=user_id)
     return {"requeued_items": int(result.modified_count)}
@@ -1767,6 +1804,11 @@ async def recover_local_batch_runners(
 
     started = 0
     for batch in rows:
+        # Operator pause is sticky: without this skip, poll recovery would
+        # undo any pause within 10 seconds. Only an explicit Resume (which
+        # flips status back to queued/running) makes the batch a candidate.
+        if batch.get("status") == BATCH_PAUSED:
+            continue
         if (
             batch.get("status") == BATCH_QUEUED
             and not batch.get("started_at")
@@ -1893,25 +1935,60 @@ async def _reap_over_attempt_items(db: AsyncIOMotorDatabase, batch_id: str) -> i
     killers retried forever (270+ attempts observed). Loud, named, manual
     re-queue only."""
     max_attempts = max(1, int(getattr(get_settings(), "INGEST_MAX_ITEM_ATTEMPTS", 5)))
+    # Pipeline update so the ORIGINAL error survives the reap: the old $set
+    # overwrote it with the generic cap message, destroying the only evidence
+    # of why the item actually died (observed post-incident 2026-07-19).
     res = await db[ITEMS].update_many(
         {
             "batch_id": batch_id,
             "status": {"$in": [ITEM_QUEUED, ITEM_FAILED_RECOVERABLE]},
             "attempts": {"$gte": max_attempts},
         },
-        {
-            "$set": {
-                "status": ITEM_FAILED,
-                "phase": "failed",
-                "failure_stage": "max_attempts",
-                "error": (
-                    f"exceeded INGEST_MAX_ITEM_ATTEMPTS={max_attempts} — "
-                    "deterministic failure loop; inspect the doc, then "
-                    "re-queue manually if appropriate"
-                ),
-                "updated_at": _now(),
-            },
-        },
+        [
+            {
+                "$set": {
+                    "error_history": {
+                        "$slice": [
+                            {
+                                "$concatArrays": [
+                                    {"$ifNull": ["$error_history", []]},
+                                    [
+                                        {
+                                            "error": {"$ifNull": ["$error", None]},
+                                            "failure_stage": {
+                                                "$ifNull": ["$failure_stage", None]
+                                            },
+                                            "attempts": {"$ifNull": ["$attempts", None]},
+                                            "event": "reaped_at_attempt_cap",
+                                            "at": "$$NOW",
+                                        }
+                                    ],
+                                ]
+                            },
+                            -25,
+                        ]
+                    },
+                    "status": ITEM_FAILED,
+                    "phase": "failed",
+                    "failure_stage": "max_attempts",
+                    "error": {
+                        "$concat": [
+                            f"exceeded INGEST_MAX_ITEM_ATTEMPTS={max_attempts} — "
+                            "deterministic failure loop; inspect the doc, then "
+                            "re-queue manually if appropriate; last_error=",
+                            {
+                                "$substrCP": [
+                                    {"$ifNull": ["$error", "none-recorded"]},
+                                    0,
+                                    600,
+                                ]
+                            },
+                        ]
+                    },
+                    "updated_at": "$$NOW",
+                },
+            }
+        ],
     )
     if res.modified_count:
         logger.warning(
@@ -1920,28 +1997,46 @@ async def _reap_over_attempt_items(db: AsyncIOMotorDatabase, batch_id: str) -> i
     return res.modified_count
 
 
+async def _renew_item_lease(
+    db: AsyncIOMotorDatabase, item_id: str, owner: str, lease_seconds: int
+) -> bool:
+    """One owner-scoped lease renewal. Matching on ``lease_owner`` means a
+    worker that lost the item (reclaim/theft) cannot re-extend a lease it no
+    longer holds — the other concurrent-writer half of the 2026-07-19
+    chimera incident."""
+    now = _now()
+    res = await db[ITEMS].update_one(
+        {"item_id": item_id, "status": ITEM_RUNNING, "lease_owner": owner},
+        {
+            "$set": {
+                "lease_until": now + timedelta(seconds=lease_seconds),
+                "last_heartbeat_at": now,
+                "updated_at": now,
+            }
+        },
+    )
+    return bool(getattr(res, "matched_count", 0))
+
+
 async def _lease_heartbeat(
-    db: AsyncIOMotorDatabase, item_id: str, lease_seconds: int
+    db: AsyncIOMotorDatabase, item_id: str, owner: str, lease_seconds: int
 ) -> None:
     """Renew the lease while the item is actively processing (audit
     2026-07-06, critical): leases were NEVER renewed, so any doc that
     legitimately ran longer than the stale threshold was reclaimed WHILE
     STILL RUNNING — double processing and phantom casualties. Renews both
-    fields the stale sweep checks."""
+    fields the stale sweep checks. Stops renewing (loudly) the moment the
+    lease is no longer ours."""
     interval = max(15, int(lease_seconds / 2))
     while True:
         await asyncio.sleep(interval)
-        now = _now()
-        await db[ITEMS].update_one(
-            {"item_id": item_id, "status": ITEM_RUNNING},
-            {
-                "$set": {
-                    "lease_until": now + timedelta(seconds=lease_seconds),
-                    "last_heartbeat_at": now,
-                    "updated_at": now,
-                }
-            },
-        )
+        if not await _renew_item_lease(db, item_id, owner, lease_seconds):
+            logger.warning(
+                "item %s lease heartbeat stopped: lease no longer owned by %s",
+                item_id,
+                owner,
+            )
+            return
 
 
 async def _build_item_config(
@@ -2015,7 +2110,13 @@ async def _set_item_phase(
     failure_stage: str | None = None,
     completed: bool = False,
     release_lease: bool = False,
-) -> None:
+    require_owner: str | None = None,
+) -> bool:
+    """Write item state. With ``require_owner`` the write only lands while
+    this process still holds the item lease — a worker that lost its lease
+    (expiry reclaim, theft) must not stomp the new owner's state (the
+    concurrent-writer half of the 2026-07-19 chimera incident). Returns
+    False when the guarded write matched nothing."""
     now = _now()
     set_doc: dict[str, Any] = {
         "phase": phase,
@@ -2036,7 +2137,52 @@ async def _set_item_phase(
     if completed or release_lease:
         set_doc["lease_owner"] = None
         set_doc["lease_until"] = None
-    await db[ITEMS].update_one({"item_id": item_id}, {"$set": set_doc})
+    update: dict[str, Any] = {"$set": set_doc}
+    if error is not None and status in {ITEM_FAILED, ITEM_FAILED_RECOVERABLE}:
+        # Terminal-failure evidence survives later claim-wipes/heals.
+        update["$push"] = {
+            "error_history": {
+                "$each": [
+                    {
+                        "error": error[:1000],
+                        "failure_stage": failure_stage,
+                        "phase": phase,
+                        "at": now,
+                    }
+                ],
+                "$slice": -25,
+            }
+        }
+    filter_q: dict[str, Any] = {"item_id": item_id}
+    if require_owner is not None:
+        filter_q["lease_owner"] = require_owner
+    res = await db[ITEMS].update_one(filter_q, update)
+    matched = bool(getattr(res, "matched_count", 0))
+    if require_owner is not None and not matched:
+        logger.warning(
+            "item %s phase=%s write suppressed: lease no longer owned by %s",
+            item_id,
+            phase,
+            require_owner,
+        )
+    return matched
+
+
+class _LeaseLostError(RuntimeError):
+    """This worker no longer owns the item lease; abort without writing."""
+
+
+async def _assert_item_lease(
+    db: AsyncIOMotorDatabase, item_id: str, owner: str
+) -> None:
+    row = await db[ITEMS].find_one(
+        {"item_id": item_id}, {"lease_owner": 1, "status": 1, "_id": 0}
+    )
+    if not row or row.get("lease_owner") != owner or row.get("status") != ITEM_RUNNING:
+        raise _LeaseLostError(
+            f"item {item_id}: lease owner is now "
+            f"{(row or {}).get('lease_owner')!r} (expected {owner!r})"
+        )
 
 
 async def _process_local_item(
@@ -2045,6 +2191,7 @@ async def _process_local_item(
     ingestion_service: Any,
     batch: dict[str, Any],
     item: dict[str, Any],
+    owner: str | None = None,
 ) -> None:
     item_id = item["item_id"]
     stored_path_raw = item.get("stored_path")
@@ -2060,6 +2207,7 @@ async def _process_local_item(
             error=f"{label} is missing: {path}",
             failure_stage="source_missing",
             completed=True,
+            require_owner=owner,
         )
         return
 
@@ -2077,15 +2225,23 @@ async def _process_local_item(
         )
 
         async def _on_doc_id(doc_id: str) -> None:
+            if owner is not None:
+                await _assert_item_lease(db, item_id, owner)
             await _set_item_phase(
                 db,
                 item_id,
                 "chunking",
                 status=ITEM_RUNNING,
                 doc_id=doc_id,
+                require_owner=owner,
             )
 
         async def _on_phase(phase: str, details: dict[str, Any]) -> None:
+            # Lease tripwire at every phase boundary: a worker that lost its
+            # item lease (expiry reclaim while wedged) must abort BEFORE the
+            # next store write, not race the new owner to a chimera surface.
+            if owner is not None:
+                await _assert_item_lease(db, item_id, owner)
             phase_doc_id = details.get("doc_id")
             phase_error = details.get("error")
             failure_stage = phase if phase.endswith("failed") else None
@@ -2100,6 +2256,7 @@ async def _process_local_item(
                 doc_id=str(phase_doc_id) if phase_doc_id else None,
                 error=str(phase_error) if phase_error else None,
                 failure_stage=failure_stage,
+                require_owner=owner,
             )
 
         result = await ingestion_service.ingest(
@@ -2138,7 +2295,7 @@ async def _process_local_item(
             status, item_phase, failure_stage = ITEM_SKIPPED, "skipped", None
         else:
             status, item_phase, failure_stage = ITEM_FAILED, "failed", "worker_result_failed"
-        await _set_item_phase(
+        landed = await _set_item_phase(
             db,
             item_id,
             item_phase,
@@ -2147,6 +2304,19 @@ async def _process_local_item(
             error=result.error,
             failure_stage=failure_stage,
             completed=True,
+            require_owner=owner,
+        )
+        if not landed:
+            logger.critical(
+                "item %s completed as %s but the write was suppressed — "
+                "lease was lost mid-run; another attempt owns the item now",
+                item_id,
+                status,
+            )
+    except _LeaseLostError as exc:
+        # Do NOT write item state: the new lease owner drives the record now.
+        logger.critical(
+            "item %s aborted mid-run without state writes: %s", item_id, exc
         )
     except Exception as exc:
         logger.exception("Batch item ingest failed item=%s path=%s", item_id, path)
@@ -2162,7 +2332,28 @@ async def _process_local_item(
             ),
             completed=not recoverable,
             release_lease=recoverable,
+            require_owner=owner,
         )
+        if recoverable:
+            # Infra blips must not burn the attempt budget: 7 Neo4j OOM
+            # deaths exhausted 215 items' attempts on 2026-07-19 with zero
+            # document-side cause. Refund the claim's $inc, count the blip
+            # separately, and cap infra retries so a permanently dead store
+            # still terminates.
+            infra_cap = max(
+                1, int(getattr(get_settings(), "INGEST_MAX_INFRA_ATTEMPTS", 25))
+            )
+            await db[ITEMS].update_one(
+                {
+                    "item_id": item_id,
+                    "attempts": {"$gte": 1},
+                    "$or": [
+                        {"infra_attempts": {"$exists": False}},
+                        {"infra_attempts": {"$lt": infra_cap}},
+                    ],
+                },
+                {"$inc": {"attempts": -1, "infra_attempts": 1}},
+            )
     finally:
         if slot_acquired:
             await admission.release_ingest_slot()
@@ -2895,8 +3086,33 @@ async def run_local_batch(
         concurrency = min(concurrency, int(_profile["concurrency"])) or 1
 
     async def _worker(worker_idx: int, target_rank: int | None) -> None:
+        from services.ingestion.job_leases import lanes_lost
+
         owner = f"{owner_prefix}:{worker_idx}"
         while True:
+            # Operator pause: stop claiming NEW items immediately; whatever is
+            # already in flight on other workers drains to completion.
+            batch_now = await db[BATCHES].find_one(
+                {"batch_id": batch_id}, {"status": 1, "_id": 0}
+            )
+            if not batch_now or batch_now.get("status") == BATCH_PAUSED:
+                logger.info(
+                    "worker %s stops claiming: batch %s is %s",
+                    owner,
+                    batch_id[:8],
+                    (batch_now or {}).get("status", "missing"),
+                )
+                return
+            # Lane-lease integrity: if this process lost any lane lease for
+            # the corpus (renewal failed), another runner may own the lanes
+            # now — claiming more items here risks duplicate writers.
+            if lanes_lost(batch["corpus_id"]):
+                logger.critical(
+                    "worker %s stops claiming: corpus %s lane lease lost",
+                    owner,
+                    batch["corpus_id"][:8],
+                )
+                return
             item = await _lease_next_item(
                 db,
                 batch_id=batch_id,
@@ -2912,7 +3128,7 @@ async def run_local_batch(
                 # admission wait inside _process_local_item — so a live doc
                 # can never be reclaimed as stale mid-run.
                 _hb = asyncio.create_task(
-                    _lease_heartbeat(db, item["item_id"], lease_seconds)
+                    _lease_heartbeat(db, item["item_id"], owner, lease_seconds)
                 )
                 try:
                     await _process_local_item(
@@ -2920,6 +3136,7 @@ async def run_local_batch(
                         ingestion_service=ingestion_service,
                         batch=batch,
                         item=item,
+                        owner=owner,
                     )
                 finally:
                     _hb.cancel()
