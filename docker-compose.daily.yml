@@ -10,11 +10,11 @@ services:
     mem_limit: ${QDRANT_MEM_LIMIT:-4g}
 
   neo4j:
-    mem_limit: 3g
+    mem_limit: ${NEO4J_MEM_LIMIT:-3g}
     environment:
-      NEO4J_server_memory_heap_initial__size: 512m
-      NEO4J_server_memory_heap_max__size: 1g
-      NEO4J_server_memory_pagecache_size: 1g
+      NEO4J_server_memory_heap_initial__size: ${NEO4J_HEAP_INITIAL:-512m}
+      NEO4J_server_memory_heap_max__size: ${NEO4J_HEAP_MAX:-1g}
+      NEO4J_server_memory_pagecache_size: ${NEO4J_PAGECACHE:-1g}
 
   redis:
     mem_limit: 512m
