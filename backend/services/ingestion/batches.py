@@ -3138,7 +3138,9 @@ def start_local_batch_runner(
                 return
             from services.ingestion.job_leases import corpus_lane_lease
 
-            owner = f"batch:{batch_id}"
+            # Owner must be process-unique: a bare batch id makes the lane
+            # lease owner-reentrant across worker containers (two runners).
+            owner = f"batch:{batch_id}:{os.uname().nodename}:{os.getpid()}"
             async with AsyncExitStack() as stack:
                 for lane in (
                     "source_parse",
