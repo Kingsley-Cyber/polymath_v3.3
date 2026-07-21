@@ -71,3 +71,30 @@ Per-doc claim batching/checkpointing so `claims_in=20,374` docs cannot die at a 
 - No loosening of read filters (`r.corpus_ids`, `f.corpus_id`) — citation-integrity law.
 - No new queue tech — `summary_jobs`/`graph_promotion_jobs` + leases already satisfy durable-queue requirements.
 - Rebuild freeze respected: F1–F4 are Codex; config/ops are Claude; King signs the order.
+
+## Executor addendum — 2026-07-21 — ID-join reconcile invariant
+
+Tonight's parent-summary vector repair is now the F1 reconcile acceptance test, not a one-off operator trick.
+
+**Required invariant per commander cycle:** for each retrieval summary lane and target vector collection, compute the ID-level set difference:
+
+`required_mongo_parent_ids - qdrant_indexed_parent_ids == empty`
+
+This is not a count check. Counts are only a final sanity check after the ID join passes.
+
+Implementation contract:
+
+1. Build `required_mongo_parent_ids` from `parent_chunks` using `parent_summary_required_clause()` plus non-empty validated `summary` text.
+2. Build `qdrant_indexed_parent_ids` by scrolling Qdrant summary payloads and reading `parent_id` for the same corpus and collection.
+3. Requeue or directly repair only the missing parent IDs, idempotently, through the queue-owned summary indexing path.
+4. Mark readiness only after the set difference is empty for every required target collection.
+5. Emit a receipt with required IDs, indexed IDs before, missing IDs repaired, collections written, and final sanity counts.
+
+Manual repair receipt promoted to invariant:
+
+| Corpus | Required Mongo parent IDs | Qdrant indexed IDs before | Missing IDs repaired | Final HRAG | Final naive |
+|---|---:|---:|---:|---:|---:|
+| `ecom` | `22,800` | `20,995` | `1,805` | `22,800` | `22,800` |
+| `video` | `20,343` | `18,807` | `1,536` | `20,343` | `20,343` |
+
+Document-rollup warning: `document_summary` vectors are not currently in the main retrieval path, but Tier-0/doc-summary routing will inherit the same dual-write stranding risk. When document-rollup summary vectors become query-visible, F1/F4 must apply the same ID-join invariant to the rollup lane: required Mongo document-summary IDs minus indexed Qdrant document-summary IDs must be empty before doc-summary readiness is true. Stale queued rollup rows are a janitor/reconcile item, not proof of missing parent-summary retrieval readiness.
