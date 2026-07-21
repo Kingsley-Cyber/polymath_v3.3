@@ -1132,6 +1132,7 @@ class SourceFact(BaseModel):
     chunk_id: str | None = None
     doc_id: str | None = None
     corpus_id: str | None = None
+    knowledge_status: str | None = None
 
 
 class GraphDecorationEvidence(BaseModel):

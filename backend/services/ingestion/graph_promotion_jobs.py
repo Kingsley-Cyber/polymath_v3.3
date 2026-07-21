@@ -21,6 +21,8 @@ from services.ingestion.job_leases import lease_deadline, reclaim_expired_runnin
 from services.ingestion.stage_identity import graph_promotion_stage_identity, stable_stage_hash
 
 GRAPH_VERIFY_PATTERN = r"(neo4j|has_chunk)"
+CLAIM_PROMOTION_REASON = "claims_unpromoted"
+LOCAL_CLAIM_SCHEMA_VERSION = "polymath.extract.local_extraction.v1"
 TERMINAL_STATUSES = {
     "done",
     "partial",
@@ -61,10 +63,15 @@ def graph_promotion_contract_hash(row: dict[str, Any]) -> str:
     cfg = row.get("ingestion_config") or {}
     return stable_stage_hash(
         {
-            "contract": "graph_promotion.v1",
+            "contract": (
+                "graph_promotion.v2.claims"
+                if row.get("reason") == CLAIM_PROMOTION_REASON
+                else "graph_promotion.v1"
+            ),
             "graph_store": "neo4j",
             "use_neo4j": cfg.get("use_neo4j", True),
             "reason": graph_gap_reason(row),
+            "claim_promotion_required": bool(row.get("claim_promotion_required")),
         }
     )
 
@@ -138,7 +145,126 @@ def classify_graph_promotion_candidate(row: dict[str, Any]) -> dict[str, Any] | 
         ),
         "failure_rows": failure_rows,
         "failed_chunks": failure_count,
+        "claim_promotion_required": False,
     }
+
+
+async def _claim_promotion_candidate_rows(
+    db: Any,
+    *,
+    corpus_id: str,
+    user_id: str | None = None,
+    limit: int = 100,
+    max_chunks: int | None = None,
+) -> list[dict[str, Any]]:
+    if not await _corpus_graph_required(db, corpus_id=corpus_id):
+        return []
+    pipeline: list[dict[str, Any]] = [
+        {
+            "$match": {
+                "corpus_id": corpus_id,
+                "status": "ok",
+                "schema_version": LOCAL_CLAIM_SCHEMA_VERSION,
+                "claim_compilation.claims.0": {"$exists": True},
+                "$or": [
+                    {"claim_graph_promoted_at": {"$exists": False}},
+                    {"claim_graph_promoted_at": None},
+                    {"claim_graph_promote_version": {"$ne": "polymath.promote.v2-claims"}},
+                ],
+            }
+        },
+        {
+            "$group": {
+                "_id": "$doc_id",
+                "staged_extractions": {"$sum": 1},
+                "claims_in": {
+                    "$sum": {
+                        "$size": {
+                            "$ifNull": ["$claim_compilation.claims", []]
+                        }
+                    }
+                },
+            }
+        },
+        {"$sort": {"_id": 1}},
+        {"$limit": max(1, int(limit or 100))},
+    ]
+    rows = await db["ghost_b_extractions"].aggregate(pipeline).to_list(
+        length=max(1, int(limit or 100))
+    )
+    candidates: list[dict[str, Any]] = []
+    for row in rows:
+        doc_id = str(row.get("_id") or "")
+        if not doc_id:
+            continue
+        doc_query: dict[str, Any] = {"corpus_id": corpus_id, "doc_id": doc_id}
+        if user_id:
+            doc_query["user_id"] = user_id
+        doc = await db["documents"].find_one(
+            doc_query,
+            {
+                "_id": 0,
+                "doc_id": 1,
+                "corpus_id": 1,
+                "user_id": 1,
+                "filename": 1,
+                "ingestion_config": 1,
+            },
+        )
+        if not doc:
+            continue
+        child_chunks = await _count(
+            db,
+            "chunks",
+            {"corpus_id": corpus_id, "doc_id": doc_id},
+        )
+        if max_chunks is not None and child_chunks > max_chunks:
+            continue
+        cfg = dict(doc.get("ingestion_config") or {})
+        cfg["use_neo4j"] = True
+        candidate = {
+            "job_id": graph_job_id(
+                corpus_id=corpus_id,
+                doc_id=doc_id,
+                reason=CLAIM_PROMOTION_REASON,
+            ),
+            "corpus_id": corpus_id,
+            "doc_id": doc_id,
+            "user_id": str(doc.get("user_id") or ""),
+            "filename": doc.get("filename"),
+            "status": "queued",
+            "reason": CLAIM_PROMOTION_REASON,
+            "child_chunks": child_chunks,
+            "parent_chunks": await _count(
+                db,
+                "parent_chunks",
+                {"corpus_id": corpus_id, "doc_id": doc_id},
+            ),
+            "staged_extractions": _int(row.get("staged_extractions")),
+            "claim_promotion_required": True,
+            "claim_unpromoted_extractions": _int(row.get("staged_extractions")),
+            "claims_in": _int(row.get("claims_in")),
+            "extraction_artifact_ids": [],
+            "extraction_artifact_count": 0,
+            "graph_contract_hash": stable_stage_hash(
+                {
+                    "contract": "graph_promotion.v2.claims",
+                    "graph_store": "neo4j",
+                    "use_neo4j": True,
+                    "reason": CLAIM_PROMOTION_REASON,
+                }
+            ),
+            "failure_rows": 0,
+            "failed_chunks": 0,
+            "ingestion_config": cfg,
+        }
+        candidate["stage_identity"] = graph_promotion_stage_identity(
+            doc={**doc, "ingestion_config": cfg},
+            extraction_artifact_ids=[],
+            graph_contract_hash=str(candidate["graph_contract_hash"]),
+        )
+        candidates.append(candidate)
+    return candidates
 
 
 async def _count(db: Any, collection: str, query: dict[str, Any]) -> int:
@@ -411,6 +537,7 @@ async def _candidate_rows(
         projection,
     ).to_list(length=None)
     enriched: list[dict[str, Any]] = []
+    by_doc_id: dict[str, dict[str, Any]] = {}
     for row in rows:
         doc_id = str(row.get("doc_id") or "")
         if not doc_id:
@@ -471,6 +598,23 @@ async def _candidate_rows(
         candidate = classify_graph_promotion_candidate(row)
         if candidate:
             enriched.append(candidate)
+            by_doc_id[str(candidate.get("doc_id") or "")] = candidate
+    for claim_candidate in await _claim_promotion_candidate_rows(
+        db,
+        corpus_id=corpus_id,
+        user_id=user_id,
+        limit=limit,
+        max_chunks=max_chunks,
+    ):
+        existing = by_doc_id.get(str(claim_candidate.get("doc_id") or ""))
+        if existing:
+            existing["claim_promotion_required"] = True
+            existing["claim_unpromoted_extractions"] = _int(
+                claim_candidate.get("claim_unpromoted_extractions")
+            )
+            existing["claims_in"] = _int(claim_candidate.get("claims_in"))
+            continue
+        enriched.append(claim_candidate)
     enriched.sort(
         key=lambda item: (
             0 if item["status"] == "queued" else 1,
@@ -566,6 +710,7 @@ async def run_graph_promotion_jobs(
     limit: int = 5,
 ) -> dict[str, Any]:
     from services.ingestion.graph_backfill import backfill_failed_graph_chunks
+    from services.ingestion.promote import promote_claims_to_graph
 
     limit = max(1, min(int(limit or 5), 100))
     now = datetime.utcnow()
@@ -610,22 +755,53 @@ async def run_graph_promotion_jobs(
             continue
         started_perf = time.perf_counter()
         try:
-            result = await backfill_failed_graph_chunks(
-                db=db,
-                qdrant_client=qdrant_client,
-                neo4j_driver=neo4j_driver,
-                corpus_id=corpus_id,
-                doc_id=str(job["doc_id"]),
-                user_id=user_id or str(job.get("user_id") or ""),
-                allow_extraction=False,
-            )
-            result = dict(result or {})
+            claim_only = job.get("reason") == CLAIM_PROMOTION_REASON
+            if claim_only:
+                claim_result = await promote_claims_to_graph(
+                    db,
+                    neo4j_driver,
+                    corpus_id=corpus_id,
+                    doc_id=str(job["doc_id"]),
+                )
+                result = {
+                    "status": claim_result.get("status") or "noop",
+                    "neo4j_flushed": claim_result.get("status")
+                    in {"done", "partial"},
+                    "remaining_failed_chunks": 0,
+                    "recovered_chunks": 0,
+                    "staged_results_written": 0,
+                    "full_replay": False,
+                    "claim_promotion": claim_result,
+                }
+            else:
+                result = await backfill_failed_graph_chunks(
+                    db=db,
+                    qdrant_client=qdrant_client,
+                    neo4j_driver=neo4j_driver,
+                    corpus_id=corpus_id,
+                    doc_id=str(job["doc_id"]),
+                    user_id=user_id or str(job.get("user_id") or ""),
+                    allow_extraction=False,
+                )
+                result = dict(result or {})
+                claim_result: dict[str, Any] = {}
+                if job.get("claim_promotion_required"):
+                    claim_result = await promote_claims_to_graph(
+                        db,
+                        neo4j_driver,
+                        corpus_id=corpus_id,
+                        doc_id=str(job["doc_id"]),
+                    )
+                    result["claim_promotion"] = claim_result
             neo4j_write_latency_ms = _elapsed_ms(started_perf)
             result["neo4j_write_latency_ms"] = neo4j_write_latency_ms
             result["neo4j_write_latency_source"] = "graph_promotion_job"
             remaining_failed = _int(result.get("remaining_failed_chunks"))
             neo4j_flushed = bool(result.get("neo4j_flushed"))
-            if result.get("status") == "noop":
+            claim_status = str(claim_result.get("status") or "")
+            if claim_status in {"done", "partial"}:
+                final_status = "done" if remaining_failed <= 0 else "partial"
+            elif result.get("status") == "noop":
                 final_status = "noop"
             elif result.get("status") in {
                 "blocked_extraction_required",
@@ -656,6 +832,7 @@ async def run_graph_promotion_jobs(
                     "$set": {
                         "status": final_status,
                         "result": result,
+                        "claim_promotion_result": claim_result,
                         "neo4j_write_latency_ms": neo4j_write_latency_ms,
                         "neo4j_write_latency_source": "graph_promotion_job",
                         "promoted_counts": promoted_counts,
@@ -673,6 +850,7 @@ async def run_graph_promotion_jobs(
                     "status": final_status,
                     "neo4j_write_latency_ms": neo4j_write_latency_ms,
                     "promoted_counts": promoted_counts,
+                    "claim_promotion_result": claim_result,
                 }
             )
         except Exception as exc:  # noqa: BLE001

@@ -95,6 +95,8 @@ _INDEXES = [
     "CREATE INDEX IF NOT EXISTS FOR (f:Fact) ON (f.doc_id, f.chunk_id)",
     "CREATE INDEX IF NOT EXISTS FOR (f:Fact) ON (f.fact_type)",
     "CREATE INDEX IF NOT EXISTS FOR (f:Fact) ON (f.property_name)",
+    "CREATE INDEX IF NOT EXISTS FOR (f:Fact) ON (f.knowledge_status)",
+    "CREATE INDEX IF NOT EXISTS FOR (f:Fact) ON (f.promote_version)",
 ]
 
 _FULLTEXT_INDEXES = [
@@ -108,7 +110,7 @@ _FULLTEXT_INDEXES = [
         "fact_text_ft",
         "CREATE FULLTEXT INDEX fact_text_ft IF NOT EXISTS "
         "FOR (f:Fact) "
-        "ON EACH [f.subject, f.property_name, f.value, f.fact_type, f.evidence_phrase]",
+        "ON EACH [f.subject, f.property_name, f.value, f.fact_type, f.evidence_phrase, f.text]",
     ),
 ]
 

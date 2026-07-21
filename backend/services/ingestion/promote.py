@@ -1,388 +1,623 @@
-"""B2 — promote(): the single P2→P3 crossing (POLYMATH_ARCHITECTURE §3.S5).
+"""Deterministic claim-to-graph promotion.
 
-Turns a stored extraction row (ghost_b_extractions shape / ChunkExtraction)
-into the ADDITIVE RetrievalPayload delta that makes extraction filterable at
-the vector layer: concepts[] (names+aliases → recall), entity_ids[] (the
-Qdrant↔Neo4j join), families/domains, relation + fact aggregates, and the
-version stamps. Pure, deterministic, idempotent — same row ⇒ same delta.
-Applied as an idempotent POST-ghost write (ghosts run parallel; children are
-written before ghosts finish), and re-runnable as a backfill over existing
-corpora with NO re-extraction.
+This module is the claims leg of S5 promote(): it reads already-minted local
+claim records from Mongo and writes candidate graph artifacts to Neo4j.  It
+does not call an LLM, re-extract text, mint entities, or accept knowledge.
 """
 
 from __future__ import annotations
 
-import logging
-import re
-import unicodedata
-from typing import Any, Callable, Optional
+from collections import defaultdict
+from datetime import datetime
+from typing import Any
 
-logger = logging.getLogger(__name__)
-
-PROMOTE_VERSION = "polymath.promote.v1"
-_PROMOTED_LIST_FIELDS = (
-    "mechanisms",
-    "key_terms",
-    "concepts",
-    "entity_ids",
-    "entity_families",
-    "entity_domains",
-    "relation_predicates",
-    "relation_families",
-    "fact_types",
-    "related_entities",
-    "graph_neighbors",
+from models.claim_record import ClaimArgumentV1, ClaimRecordV1
+from pydantic import ValidationError
+from services.graph.neo4j_writer import (
+    GRAPH_WRITE_ROW_BATCH_SIZE,
+    RELATION_FAMILY_MAP,
+    _resolve_entity_id_redirects,
+    corpus_content_key,
+    entity_id_from_name,
 )
 
-
-def _default_entity_id(canonical_name: str) -> str:
-    """Fallback slug — a faithful replica of neo4j_writer.entity_id_from_name
-    (lowercase -> NFKD -> strip punctuation -> collapse spaces -> hyphens),
-    minus the alias map. Callers in-app get the REAL fn via _eid; this exists
-    for dependency-free tests. Convention is HYPHENS: the graph writes
-    entity:layered-indexing, and an underscore slug silently breaks the
-    vector<->graph join for every multi-word entity."""
-    name = unicodedata.normalize("NFKD", (canonical_name or "").lower().strip())
-    name = re.sub(r"[^\w\s]", "", name)
-    slug = re.sub(r"\s+", " ", name).strip().replace(" ", "-")
-    return f"entity:{slug}" if slug else ""
+LOCAL_EXTRACTION_SCHEMA_VERSION = "polymath.extract.local_extraction.v1"
+CLAIMS_PROMOTE_VERSION = "polymath.promote.v2-claims"
 
 
-def _norm_term(value: str) -> str:
-    return " ".join(str(value or "").lower().split())
-
-
-def promote(
-    extraction: dict[str, Any],
-    *,
-    entity_id_fn: Optional[Callable[[str], str]] = None,
-) -> dict[str, Any]:
-    """Extraction row → additive RetrievalPayload delta (plain dict, ready for
-    Qdrant set_payload / Mongo $set). Only promoted keys — never identity keys,
-    so it cannot clobber corpus/doc/chunk/parent ids."""
-    eid = entity_id_fn or _default_entity_id
-    entities = extraction.get("entities") or []
-    relations = extraction.get("relations") or []
-    facts = extraction.get("facts") or []
-
-    concepts: set[str] = set()
-    entity_ids: set[str] = set()
-    families: set[str] = set()
-    domains: set[str] = set()
-    for e in entities:
-        name = _norm_term(e.get("canonical_name"))
-        if not name:
-            continue
-        concepts.add(name)
-        for alias in e.get("query_aliases") or []:
-            a = _norm_term(alias)
-            if a:
-                concepts.add(a)
-        ident = e.get("entity_id") or eid(name)
-        if ident:
-            entity_ids.add(ident)
-        if e.get("canonical_family"):
-            families.add(_norm_term(e["canonical_family"]))
-        if e.get("domain_type"):
-            domains.add(_norm_term(e["domain_type"]))
-
-    # P1 — doc-local graph precompute: relation ENDPOINTS as entity ids.
-    # A chunk's related_entities are the entities it asserts relations about —
-    # the zero-Cypher first hop (POLYMATH_ARCHITECTURE §12.3/§12.5 P1).
-    related: set[str] = set()
-    for r in relations:
-        s_name = _norm_term(r.get("subject"))
-        if s_name:
-            related.add(eid(s_name))
-        if (r.get("object_kind") or "entity") == "entity":
-            o_name = _norm_term(r.get("object"))
-            if o_name:
-                related.add(eid(o_name))
-    related.discard("")
-
-    predicates = {_norm_term(r.get("predicate")) for r in relations if r.get("predicate")}
-    rel_families = {
-        _norm_term(r.get("relation_family")) for r in relations if r.get("relation_family")
-    }
-    fact_types = {_norm_term(f.get("fact_type")) for f in facts if f.get("fact_type")}
-
+def _empty_receipt(*, corpus_id: str, doc_id: str | None) -> dict[str, Any]:
     return {
-        "concepts": sorted(concepts),
-        "entity_ids": sorted(entity_ids),
-        "entity_families": sorted(families),
-        "entity_domains": sorted(domains),
-        "relation_predicates": sorted(predicates),
-        "relation_families": sorted(rel_families),
-        "fact_types": sorted(fact_types),
-        "related_entities": sorted(related),
-        "has_relations": bool(relations),
-        "extract_schema_version": str(
-            extraction.get("schema_version") or "polymath.extract.v1"
-        ),
-        "promote_version": PROMOTE_VERSION,
+        "corpus_id": corpus_id,
+        "doc_id": doc_id,
+        "promote_version": CLAIMS_PROMOTE_VERSION,
+        "extract_schema_version": LOCAL_EXTRACTION_SCHEMA_VERSION,
+        "claims_in": 0,
+        "valid_claims": 0,
+        "facts_written": 0,
+        "supports_fact_edges": 0,
+        "has_fact_edges": 0,
+        "typed_edges": 0,
+        "skipped": {
+            "invalid_record": 0,
+            "missing_chunk": 0,
+            "unresolved_argument": 0,
+            "unresolved_subject": 0,
+            "unresolved_object": 0,
+            "untyped": 0,
+        },
     }
 
 
-def promoted_index_fields() -> list[tuple[str, str]]:
-    """(field, qdrant schema type) — the index ships in the SAME migration as
-    the field (Stage-Contract rule)."""
-    return [(f, "keyword") for f in _PROMOTED_LIST_FIELDS] + [
-        ("has_relations", "bool"),
-        ("semantic_chunk_type", "keyword"),
-        ("topic_key", "keyword"),
-        ("neighbor_chunks", "keyword"),
-        ("graph_degree", "integer"),
-    ]
+def _inc(receipt: dict[str, Any], key: str, amount: int = 1) -> None:
+    receipt[key] = int(receipt.get(key) or 0) + int(amount or 0)
 
 
-def doc_local_neighbor_chunks(
-    chunk_eids: dict[str, list[str]], cap: int = 8
-) -> dict[str, list[str]]:
-    """§12.6 offline graph: chunks in the SAME doc sharing entities are
-    graph-adjacent — computable in pure python from extraction rows, zero
-    Cypher, deterministic (ranked by shared-entity count, then chunk_id)."""
-    by_entity: dict[str, list[str]] = {}
-    for cid, eids in chunk_eids.items():
-        for e in eids:
-            by_entity.setdefault(e, []).append(cid)
-    out: dict[str, list[str]] = {}
-    for cid, eids in chunk_eids.items():
-        shared: dict[str, int] = {}
-        for e in eids:
-            for other in by_entity.get(e, []):
-                if other != cid:
-                    shared[other] = shared.get(other, 0) + 1
-        ranked = sorted(shared.items(), key=lambda kv: (-kv[1], kv[0]))
-        out[cid] = [c for c, _ in ranked[:cap]]
-    return out
+def _skip(receipt: dict[str, Any], reason: str, amount: int = 1) -> None:
+    skipped = receipt.setdefault("skipped", {})
+    skipped[reason] = int(skipped.get(reason) or 0) + int(amount or 0)
 
 
-async def promote_doc(db, corpus_id: str, doc_id: str) -> dict[str, Any]:
-    """Ingest-time promotion for ONE document (idempotent post-ghost write —
-    POLYMATH_ARCHITECTURE §3.S5). Reads the doc's ok extraction rows, projects
-    with promote(), ensures payload indexes, and additively set_payload's the
-    child points across the per-corpus collections + mirrors onto Mongo
-    children. Best-effort by contract: callers wrap it — it never raises past
-    a logged failure count."""
-    from config import get_settings
-    from qdrant_client import AsyncQdrantClient
-    from qdrant_client import models as qm
-    from services.storage import qdrant_writer as qw
+def _first_argument(claim: ClaimRecordV1, role: str) -> ClaimArgumentV1 | None:
+    return next((arg for arg in claim.arguments if arg.role == role), None)
 
-    def _eid(name: str) -> str:
-        try:
-            from services.graph import neo4j_writer as nw
 
-            for cand in ("entity_id_from_name", "entity_id_for", "make_entity_id"):
-                fn = getattr(nw, cand, None)
-                if callable(fn):
-                    try:
-                        return fn(name)
-                    except TypeError:
-                        return fn(name, "")
-        except Exception:
-            pass
-        return _default_entity_id(name)
+def _claim_entity_candidate_ids(claim: ClaimRecordV1) -> dict[tuple[str, str], str]:
+    ids: dict[tuple[str, str], str] = {}
+    for arg in claim.arguments:
+        if arg.filler_kind != "entity_mention":
+            continue
+        surface = str(arg.surface or "").strip()
+        if not surface:
+            continue
+        ids[(arg.role, arg.span_observation_id)] = entity_id_from_name(surface)
+    return ids
 
-    s = get_settings()
-    client = AsyncQdrantClient(url=s.QDRANT_URL, timeout=30)
-    try:
-        cols = []
-        for kind in ("naive", "hrag", "graph"):
-            name = qw._col_for_corpus(corpus_id, kind)
-            if await client.collection_exists(name):
-                cols.append(name)
-        for col in cols:
-            for field_name, ftype in promoted_index_fields():
-                try:
-                    await client.create_payload_index(
-                        collection_name=col,
-                        field_name=field_name,
-                        field_schema={
-                            "keyword": qm.PayloadSchemaType.KEYWORD,
-                            "bool": qm.PayloadSchemaType.BOOL,
-                            "integer": qm.PayloadSchemaType.INTEGER,
-                        }[ftype],
-                    )
-                except Exception:
-                    pass  # exists — idempotent
-        rows = await db["ghost_b_extractions"].find(
-            {"corpus_id": corpus_id, "doc_id": doc_id, "status": "ok"}
-        ).to_list(length=None)
-        # §10.1 — parent semantics lift: child inherits its parent's
-        # semantic_chunk_type / mechanisms / key_terms / topic_key.
-        parent_sem: dict[str, dict] = {}
-        async for pr in db["parent_chunks"].find(
-            {"corpus_id": corpus_id, "doc_id": doc_id},
-            {"parent_id": 1, "semantic_chunk_type": 1, "key_terms": 1,
-             "mechanisms": 1, "topic_key": 1},
-        ):
-            parent_sem[str(pr["parent_id"])] = pr
-        child_parent: dict[str, str] = {}
-        async for cr in db["chunks"].find(
-            {"corpus_id": corpus_id, "doc_id": doc_id},
-            {"chunk_id": 1, "parent_id": 1},
-        ):
-            child_parent[str(cr["chunk_id"])] = str(cr.get("parent_id") or "")
-        # P1 — cross-doc 1-hop neighborhood, ONE Cypher for the whole doc,
-        # capped + sorted (deterministic), best-effort (Neo4j down → field
-        # simply absent; Mode A falls back to live expansion).
-        neighbor_map: dict[str, list[str]] = {}
-        degree_map: dict[str, int] = {}
-        foreign_chunks_map: dict[str, list[str]] = {}
-        chunk_eids_local: dict[str, list[str]] = {
-            str(row.get("chunk_id")): promote(row, entity_id_fn=_eid).get("entity_ids", [])
-            for row in rows
-            if row.get("chunk_id")
+
+async def _existing_entity_ids(session: Any, candidate_ids: list[str]) -> set[str]:
+    if not candidate_ids:
+        return set()
+    redirects = await _resolve_entity_id_redirects(session, candidate_ids)
+    resolved_ids = sorted(
+        {
+            str(redirects.get(entity_id, entity_id) or "")
+            for entity_id in candidate_ids
+            if str(redirects.get(entity_id, entity_id) or "")
         }
-        local_adjacency = doc_local_neighbor_chunks(chunk_eids_local)
-        transient_driver = None
-        try:
-            from services.ingestion_service import ingestion_service as _ing
+    )
+    if not resolved_ids:
+        return set()
+    result = await session.run(
+        """
+        MATCH (e:Entity)
+        WHERE e.entity_id IN $entity_ids
+        RETURN e.entity_id AS entity_id
+        """,
+        entity_ids=resolved_ids,
+    )
+    return {str(row["entity_id"]) async for row in result}
 
-            driver = getattr(_ing, "neo4j_driver", None)
-            if driver is None:
-                # script/backfill process — app lifespan never connected the
-                # service; build a transient driver from settings instead of
-                # silently skipping every graph field.
-                try:
-                    from config import get_settings as _gs
 
-                    _st = _gs()
-                    if _st.NEO4J_ENABLED:
-                        from neo4j import AsyncGraphDatabase
+def _resolved_arguments(
+    claim: ClaimRecordV1,
+    *,
+    existing_ids: set[str],
+    redirects: dict[str, str],
+) -> dict[tuple[str, str], str]:
+    resolved: dict[tuple[str, str], str] = {}
+    for key, candidate_id in _claim_entity_candidate_ids(claim).items():
+        entity_id = str(redirects.get(candidate_id, candidate_id) or "")
+        if entity_id and entity_id in existing_ids:
+            resolved[key] = entity_id
+    return resolved
 
-                        transient_driver = AsyncGraphDatabase.driver(
-                            _st.NEO4J_URI,
-                            auth=(_st.NEO4J_USER, _st.NEO4J_PASSWORD),
-                        )
-                        driver = transient_driver
-                except Exception:
-                    driver = None
-            all_eids = sorted({
-                e for row in rows
-                for e in promote(row, entity_id_fn=_eid).get("entity_ids", [])
-            })
-            if driver is not None and all_eids:
-                async with driver.session() as sess:
-                    res = await sess.run(
-                        "MATCH (e:Entity)-[r:RELATES_TO]-(n:Entity) "
-                        "WHERE e.entity_id IN $ids "
-                        "WITH e, n, r ORDER BY r.confidence DESC "
-                        "RETURN e.entity_id AS eid, "
-                        "collect(DISTINCT n.entity_id)[..12] AS nbrs, "
-                        "count(DISTINCT n) AS deg",
-                        ids=all_eids,
-                    )
-                    async for rec in res:
-                        neighbor_map[rec["eid"]] = list(rec["nbrs"] or [])
-                        degree_map[rec["eid"]] = int(rec["deg"] or 0)
-                    res2 = await sess.run(
-                        "MATCH (e:Entity)<-[:MENTIONS]-(n:Chunk) "
-                        "WHERE e.entity_id IN $ids "
-                        "AND NOT n.chunk_id STARTS WITH $doc_prefix "
-                        "RETURN e.entity_id AS eid, "
-                        "collect(DISTINCT n.chunk_id)[..8] AS chunks",
-                        ids=all_eids,
-                        doc_prefix=doc_id,
-                    )
-                    async for rec in res2:
-                        foreign_chunks_map[rec["eid"]] = list(rec["chunks"] or [])
-        except Exception as exc:  # noqa: BLE001 — hops fall back to live Cypher
-            logger.warning("promote_doc graph pass failed (fields skipped): %s", exc)
-            neighbor_map = {}
-        finally:
-            if transient_driver is not None:
-                try:
-                    await transient_driver.close()
-                except Exception:  # noqa: BLE001
-                    pass
 
-        done = warn = 0
-        for row in rows:
-            chunk_id = str(row.get("chunk_id") or "")
-            if not chunk_id:
+def _argument_entity_id(
+    claim: ClaimRecordV1,
+    *,
+    role: str,
+    resolved: dict[tuple[str, str], str],
+) -> str | None:
+    for arg in claim.arguments:
+        if arg.role != role:
+            continue
+        entity_id = resolved.get((arg.role, arg.span_observation_id))
+        if entity_id:
+            return entity_id
+    return None
+
+
+def _fact_subject(claim: ClaimRecordV1) -> str:
+    subject = _first_argument(claim, "subject")
+    return str((subject.surface if subject else "") or "Claim").strip()
+
+
+def _fact_row(
+    *,
+    corpus_id: str,
+    doc_id: str,
+    chunk_id: str,
+    claim: ClaimRecordV1,
+    entity_ids: list[str],
+) -> dict[str, Any]:
+    predicate = str(claim.normalized_predicate or claim.predicate_lemma or "").strip()
+    return {
+        "corpus_id": corpus_id,
+        "doc_id": doc_id,
+        "chunk_id": chunk_id,
+        "fact_id": claim.claim_id,
+        "text": claim.canonical_proposition,
+        "subject": _fact_subject(claim),
+        "fact_type": claim.claim_type,
+        "claim_type": claim.claim_type,
+        "property_name": predicate,
+        "value": claim.canonical_proposition,
+        "polarity": claim.polarity,
+        "modality": claim.modality,
+        "assertion_mode": claim.assertion_mode,
+        "typing_status": claim.typing_status,
+        "scope_hash": claim.scope_hash,
+        "knowledge_status": "candidate",
+        "validation_status": "candidate",
+        "extract_schema_version": LOCAL_EXTRACTION_SCHEMA_VERSION,
+        "promote_version": CLAIMS_PROMOTE_VERSION,
+        "entity_ids": entity_ids,
+    }
+
+
+def _edge_row(
+    *,
+    corpus_id: str,
+    doc_id: str,
+    chunk_id: str,
+    claim: ClaimRecordV1,
+    subject_id: str,
+    object_id: str,
+) -> dict[str, Any]:
+    predicate = str(claim.normalized_predicate or "").strip()
+    chunk_key = corpus_content_key(corpus_id, chunk_id)
+    doc_key = corpus_content_key(corpus_id, doc_id)
+    return {
+        "subject_id": subject_id,
+        "object_id": object_id,
+        "predicate": predicate,
+        "source_predicate": claim.predicate_surface,
+        "relation_family": RELATION_FAMILY_MAP.get(predicate, "Claim"),
+        "confidence": 1.0,
+        "chunk_id": chunk_id,
+        "chunk_key": chunk_key,
+        "doc_id": doc_id,
+        "doc_key": doc_key,
+        "claim_id": claim.claim_id,
+        "schema_version": LOCAL_EXTRACTION_SCHEMA_VERSION,
+        "promote_version": CLAIMS_PROMOTE_VERSION,
+        "validation_status": "candidate",
+    }
+
+
+async def _write_fact_rows(
+    session: Any,
+    *,
+    rows: list[dict[str, Any]],
+) -> dict[str, int]:
+    totals = {"facts_written": 0, "supports_fact_edges": 0}
+    for start in range(0, len(rows), GRAPH_WRITE_ROW_BATCH_SIZE):
+        batch = rows[start : start + GRAPH_WRITE_ROW_BATCH_SIZE]
+        result = await session.run(
+            """
+            UNWIND $rows AS row
+            MATCH (c:Chunk {corpus_id: row.corpus_id, chunk_id: row.chunk_id})
+            MERGE (f:Fact {corpus_id: row.corpus_id, fact_id: row.fact_id})
+            SET f.doc_id = row.doc_id,
+                f.chunk_id = row.chunk_id,
+                f.text = row.text,
+                f.subject = row.subject,
+                f.fact_type = row.fact_type,
+                f.claim_type = row.claim_type,
+                f.property_name = row.property_name,
+                f.value = row.value,
+                f.evidence_phrase = row.text,
+                f.confidence = 1.0,
+                f.polarity = row.polarity,
+                f.modality = row.modality,
+                f.assertion_mode = row.assertion_mode,
+                f.typing_status = row.typing_status,
+                f.scope_hash = row.scope_hash,
+                f.knowledge_status = row.knowledge_status,
+                f.validation_status = row.validation_status,
+                f.extract_schema_version = row.extract_schema_version,
+                f.promote_version = row.promote_version
+            MERGE (c)-[sf:SUPPORTS_FACT]->(f)
+            SET sf.promote_version = row.promote_version,
+                sf.extract_schema_version = row.extract_schema_version
+            """,
+            rows=batch,
+        )
+        summary = await result.consume()
+        totals["facts_written"] += int(summary.counters.nodes_created or 0)
+        totals["supports_fact_edges"] += int(
+            summary.counters.relationships_created or 0
+        )
+    return totals
+
+
+async def _write_has_fact_rows(
+    session: Any,
+    *,
+    rows: list[dict[str, Any]],
+) -> int:
+    total = 0
+    for start in range(0, len(rows), GRAPH_WRITE_ROW_BATCH_SIZE):
+        batch = rows[start : start + GRAPH_WRITE_ROW_BATCH_SIZE]
+        result = await session.run(
+            """
+            UNWIND $rows AS row
+            MATCH (f:Fact {corpus_id: row.corpus_id, fact_id: row.fact_id})
+            UNWIND row.entity_ids AS entity_id
+            MATCH (e:Entity {entity_id: entity_id})
+            MERGE (e)-[hf:HAS_FACT]->(f)
+            SET hf.promote_version = row.promote_version,
+                hf.extract_schema_version = row.extract_schema_version
+            """,
+            rows=batch,
+        )
+        summary = await result.consume()
+        total += int(summary.counters.relationships_created or 0)
+    return total
+
+
+async def _write_edge_rows(
+    session: Any,
+    *,
+    corpus_id: str,
+    rows: list[dict[str, Any]],
+) -> int:
+    total = 0
+    for start in range(0, len(rows), GRAPH_WRITE_ROW_BATCH_SIZE):
+        batch = rows[start : start + GRAPH_WRITE_ROW_BATCH_SIZE]
+        result = await session.run(
+            """
+            UNWIND $rows AS row
+            MATCH (s:Entity {entity_id: row.subject_id})
+            MATCH (o:Entity {entity_id: row.object_id})
+            MERGE (s)-[r:RELATES_TO {predicate: row.predicate}]->(o)
+            WITH row, r,
+                 row.chunk_key IN coalesce(r.evidence_chunk_keys, []) AS chunk_seen,
+                 row.doc_key IN coalesce(r.evidence_doc_keys, []) AS doc_seen,
+                 $corpus_id IN coalesce(r.corpus_ids, []) AS corpus_seen
+            SET r.source_predicate = coalesce(r.source_predicate, row.source_predicate),
+                r.relation_family = coalesce(r.relation_family, row.relation_family),
+                r.confidence = CASE
+                    WHEN r.confidence IS NULL THEN toFloat(row.confidence)
+                    ELSE r.confidence
+                END,
+                r.edge_strength = coalesce(r.edge_strength, 'candidate'),
+                r.edge_state = coalesce(r.edge_state, 'candidate'),
+                r.eligible_for_synthesis = coalesce(r.eligible_for_synthesis, true),
+                r.promoted_by = 'claim_record.v1',
+                r.promote_version = row.promote_version,
+                r.extract_schema_version = coalesce(
+                    r.extract_schema_version,
+                    row.schema_version
+                ),
+                r.latest_doc_id = row.doc_id,
+                r.latest_doc_key = row.doc_key,
+                r.latest_chunk_id = row.chunk_id,
+                r.latest_chunk_key = row.chunk_key,
+                r.last_seen_at = timestamp()
+            SET r.corpus_ids = CASE
+                    WHEN corpus_seen THEN coalesce(r.corpus_ids, [])
+                    WHEN r.corpus_ids IS NULL THEN [$corpus_id]
+                    ELSE r.corpus_ids + [$corpus_id]
+                END,
+                r.evidence_chunk_ids = CASE
+                    WHEN row.chunk_id IN coalesce(r.evidence_chunk_ids, []) THEN coalesce(r.evidence_chunk_ids, [])
+                    WHEN r.evidence_chunk_ids IS NULL THEN [row.chunk_id]
+                    ELSE r.evidence_chunk_ids + [row.chunk_id]
+                END,
+                r.evidence_chunk_keys = CASE
+                    WHEN chunk_seen THEN coalesce(r.evidence_chunk_keys, [])
+                    WHEN r.evidence_chunk_keys IS NULL THEN [row.chunk_key]
+                    ELSE r.evidence_chunk_keys + [row.chunk_key]
+                END,
+                r.evidence_doc_ids = CASE
+                    WHEN row.doc_id IN coalesce(r.evidence_doc_ids, []) THEN coalesce(r.evidence_doc_ids, [])
+                    WHEN r.evidence_doc_ids IS NULL THEN [row.doc_id]
+                    ELSE r.evidence_doc_ids + [row.doc_id]
+                END,
+                r.evidence_doc_keys = CASE
+                    WHEN doc_seen THEN coalesce(r.evidence_doc_keys, [])
+                    WHEN r.evidence_doc_keys IS NULL THEN [row.doc_key]
+                    ELSE r.evidence_doc_keys + [row.doc_key]
+                END,
+                r.claim_ids = CASE
+                    WHEN row.claim_id IN coalesce(r.claim_ids, []) THEN coalesce(r.claim_ids, [])
+                    WHEN r.claim_ids IS NULL THEN [row.claim_id]
+                    ELSE r.claim_ids + [row.claim_id]
+                END,
+                r.validation_statuses = CASE
+                    WHEN row.validation_status IN coalesce(r.validation_statuses, []) THEN coalesce(r.validation_statuses, [])
+                    WHEN r.validation_statuses IS NULL THEN [row.validation_status]
+                    ELSE r.validation_statuses + [row.validation_status]
+                END,
+                r.extract_schema_versions = CASE
+                    WHEN row.schema_version IN coalesce(r.extract_schema_versions, []) THEN coalesce(r.extract_schema_versions, [])
+                    WHEN r.extract_schema_versions IS NULL THEN [row.schema_version]
+                    ELSE r.extract_schema_versions + [row.schema_version]
+                END,
+                r.support_confidence_chunk_ids = CASE
+                    WHEN chunk_seen THEN coalesce(r.support_confidence_chunk_ids, [])
+                    WHEN r.support_confidence_chunk_ids IS NULL THEN [row.chunk_id]
+                    ELSE r.support_confidence_chunk_ids + [row.chunk_id]
+                END,
+                r.support_confidence_chunk_keys = CASE
+                    WHEN chunk_seen THEN coalesce(r.support_confidence_chunk_keys, [])
+                    WHEN r.support_confidence_chunk_keys IS NULL THEN [row.chunk_key]
+                    ELSE r.support_confidence_chunk_keys + [row.chunk_key]
+                END,
+                r.support_confidence_values_v2 = CASE
+                    WHEN chunk_seen THEN coalesce(r.support_confidence_values_v2, [])
+                    WHEN r.support_confidence_values_v2 IS NULL THEN [toFloat(row.confidence)]
+                    ELSE r.support_confidence_values_v2 + [toFloat(row.confidence)]
+                END
+            SET r.support_count = CASE
+                    WHEN size(coalesce(r.evidence_chunk_keys, [])) > size(coalesce(r.evidence_chunk_ids, []))
+                    THEN size(coalesce(r.evidence_chunk_keys, []))
+                    ELSE size(coalesce(r.evidence_chunk_ids, []))
+                END,
+                r.avg_confidence = CASE
+                    WHEN size(coalesce(r.support_confidence_values_v2, [])) > 0
+                    THEN reduce(total = 0.0, conf IN coalesce(r.support_confidence_values_v2, []) | total + toFloat(conf))
+                         / size(coalesce(r.support_confidence_values_v2, []))
+                    ELSE toFloat(coalesce(r.confidence, row.confidence, 0.0))
+                END
+            """,
+            rows=batch,
+            corpus_id=corpus_id,
+        )
+        summary = await result.consume()
+        total += int(summary.counters.relationships_created or 0)
+    return total
+
+
+async def _existing_chunk_ids(
+    session: Any,
+    *,
+    corpus_id: str,
+    chunk_ids: list[str],
+) -> set[str]:
+    if not chunk_ids:
+        return set()
+    result = await session.run(
+        """
+        MATCH (c:Chunk)
+        WHERE c.corpus_id = $corpus_id AND c.chunk_id IN $chunk_ids
+        RETURN c.chunk_id AS chunk_id
+        """,
+        corpus_id=corpus_id,
+        chunk_ids=sorted(set(chunk_ids)),
+    )
+    return {str(row["chunk_id"]) async for row in result}
+
+
+async def _promote_doc_claims(
+    db: Any,
+    neo4j_driver: Any,
+    *,
+    corpus_id: str,
+    doc_id: str,
+) -> dict[str, Any]:
+    receipt = _empty_receipt(corpus_id=corpus_id, doc_id=doc_id)
+    query = {
+        "corpus_id": corpus_id,
+        "doc_id": doc_id,
+        "status": "ok",
+        "schema_version": LOCAL_EXTRACTION_SCHEMA_VERSION,
+        "claim_compilation.claims.0": {"$exists": True},
+    }
+    rows = await db["ghost_b_extractions"].find(
+        query,
+        {
+            "_id": 0,
+            "corpus_id": 1,
+            "doc_id": 1,
+            "chunk_id": 1,
+            "schema_version": 1,
+            "claim_compilation.claims": 1,
+        },
+    ).sort("chunk_id", 1).to_list(length=None)
+    if not rows:
+        receipt["status"] = "noop"
+        return receipt
+
+    raw_claims_by_chunk: list[tuple[str, dict[str, Any]]] = []
+    candidate_entity_ids: set[str] = set()
+    chunk_ids: set[str] = set()
+    for row in rows:
+        chunk_id = str(row.get("chunk_id") or "")
+        if not chunk_id:
+            continue
+        chunk_ids.add(chunk_id)
+        for raw_claim in ((row.get("claim_compilation") or {}).get("claims") or []):
+            _inc(receipt, "claims_in")
+            if not isinstance(raw_claim, dict):
+                _skip(receipt, "invalid_record")
                 continue
-            delta = promote(row, entity_id_fn=_eid)
-            ps = parent_sem.get(child_parent.get(chunk_id, ""), {})
-            if ps.get("semantic_chunk_type"):
-                delta["semantic_chunk_type"] = ps["semantic_chunk_type"]
-            if ps.get("topic_key"):
-                delta["topic_key"] = ps["topic_key"]
-            if ps.get("mechanisms"):
-                delta["mechanisms"] = ps["mechanisms"]
-            if ps.get("key_terms"):
-                delta["key_terms"] = ps["key_terms"]
-            own = set(delta.get("entity_ids") or [])
-            if neighbor_map:
-                nbrs: set[str] = set()
-                for e in own:
-                    nbrs.update(neighbor_map.get(e, []))
-                nbrs -= own
-                if nbrs:
-                    delta["graph_neighbors"] = sorted(nbrs)[:12]
-            # §12.6 — chunk-level adjacency: doc-local (python) first, then
-            # cross-doc mention neighbors (Neo4j), deduped, capped 8.
-            ncs: list[str] = list(local_adjacency.get(chunk_id, []))
-            seen_nc = set(ncs)
-            for e in sorted(own):
-                for fc in foreign_chunks_map.get(e, []):
-                    if fc not in seen_nc and fc != chunk_id:
-                        ncs.append(fc)
-                        seen_nc.add(fc)
-            if ncs:
-                delta["neighbor_chunks"] = ncs[:8]
-            if degree_map and own:
-                delta["graph_degree"] = max(degree_map.get(e, 0) for e in own)
-            pid = qw._uuid_from_str(chunk_id)
-            for col in cols:
-                try:
-                    await client.set_payload(collection_name=col, payload=delta, points=[pid])
-                except Exception:
-                    warn += 1
-            await db["chunks"].update_one(
-                {"corpus_id": corpus_id, "chunk_id": chunk_id}, {"$set": delta}
+            raw_claims_by_chunk.append((chunk_id, raw_claim))
+            for arg in raw_claim.get("arguments") or []:
+                if not isinstance(arg, dict):
+                    continue
+                if arg.get("filler_kind") != "entity_mention":
+                    continue
+                surface = str(arg.get("surface") or "").strip()
+                if surface:
+                    candidate_entity_ids.add(entity_id_from_name(surface))
+
+    async with neo4j_driver.session() as session:
+        redirects = await _resolve_entity_id_redirects(
+            session,
+            sorted(candidate_entity_ids),
+        )
+        existing_entities = await _existing_entity_ids(
+            session,
+            sorted(candidate_entity_ids),
+        )
+        existing_chunks = await _existing_chunk_ids(
+            session,
+            corpus_id=corpus_id,
+            chunk_ids=sorted(chunk_ids),
+        )
+
+        fact_rows: list[dict[str, Any]] = []
+        has_fact_rows: list[dict[str, Any]] = []
+        edge_rows: list[dict[str, Any]] = []
+        for chunk_id, raw_claim in raw_claims_by_chunk:
+            try:
+                claim = ClaimRecordV1.model_validate(raw_claim)
+            except (ValidationError, ValueError, TypeError):
+                _skip(receipt, "invalid_record")
+                continue
+            _inc(receipt, "valid_claims")
+            if chunk_id not in existing_chunks:
+                _skip(receipt, "missing_chunk")
+                continue
+
+            resolved = _resolved_arguments(
+                claim,
+                existing_ids=existing_entities,
+                redirects=redirects,
             )
-            done += 1
-        lexicon_result: dict[str, Any] = {}
-        try:
-            from services.ingestion.corpus_lexicon import (
-                refresh_and_index_document_lexicon,
+            entity_ids = sorted(set(resolved.values()))
+            unresolved_arguments = sum(
+                1
+                for arg in claim.arguments
+                if arg.filler_kind == "entity_mention"
+                and (arg.role, arg.span_observation_id) not in resolved
+            )
+            if unresolved_arguments:
+                _skip(receipt, "unresolved_argument", unresolved_arguments)
+
+            fact_rows.append(
+                _fact_row(
+                    corpus_id=corpus_id,
+                    doc_id=doc_id,
+                    chunk_id=chunk_id,
+                    claim=claim,
+                    entity_ids=entity_ids,
+                )
+            )
+            if entity_ids:
+                has_fact_rows.append(fact_rows[-1])
+
+            if claim.typing_status != "typed":
+                _skip(receipt, "untyped")
+                continue
+            subject_id = _argument_entity_id(claim, role="subject", resolved=resolved)
+            object_id = _argument_entity_id(claim, role="object", resolved=resolved)
+            if not subject_id:
+                _skip(receipt, "unresolved_subject")
+                continue
+            if not object_id:
+                _skip(receipt, "unresolved_object")
+                continue
+            edge_rows.append(
+                _edge_row(
+                    corpus_id=corpus_id,
+                    doc_id=doc_id,
+                    chunk_id=chunk_id,
+                    claim=claim,
+                    subject_id=subject_id,
+                    object_id=object_id,
+                )
             )
 
-            lexicon_result = await refresh_and_index_document_lexicon(
-                db,
-                client,
-                corpus_id=corpus_id,
-                doc_id=doc_id,
-            )
-        except Exception as exc:  # lexicon is enrichment, never queryability
-            logger.warning(
-                "promote_doc lexicon refresh failed doc=%s corpus=%s: %s",
-                doc_id[:12],
-                corpus_id[:8],
-                exc,
-            )
-            try:
-                await db["documents"].update_one(
-                    {"corpus_id": corpus_id, "doc_id": doc_id},
-                    {
-                        "$set": {
-                            "lexicon_state": "lexicon_pending",
-                            "lexicon_last_error": f"{type(exc).__name__}: {exc}"[:500],
-                        }
-                    },
-                )
-            except Exception:
-                pass
+        fact_counts = await _write_fact_rows(session, rows=fact_rows)
+        receipt.update(fact_counts)
+        receipt["has_fact_edges"] = await _write_has_fact_rows(
+            session,
+            rows=has_fact_rows,
+        )
+        receipt["typed_edges"] = await _write_edge_rows(
+            session,
+            corpus_id=corpus_id,
+            rows=edge_rows,
+        )
+
+    status = "done" if receipt["valid_claims"] else "noop"
+    if receipt["valid_claims"] and receipt["facts_written"] < len(fact_rows):
+        status = "partial" if receipt["facts_written"] else "done"
+    receipt["status"] = status
+    await db["ghost_b_extractions"].update_many(
+        query,
+        {
+            "$set": {
+                "claim_graph_promoted_at": datetime.utcnow(),
+                "claim_graph_promote_version": CLAIMS_PROMOTE_VERSION,
+                "claim_graph_promotion_receipt": receipt,
+            }
+        },
+    )
+    return receipt
+
+
+async def promote_claims_to_graph(
+    db: Any,
+    neo4j_driver: Any,
+    *,
+    corpus_id: str,
+    doc_id: str | None = None,
+) -> dict[str, Any]:
+    """Promote local claim records to candidate graph facts and typed edges."""
+
+    if neo4j_driver is None:
         return {
-            "promoted": done,
-            "rows": len(rows),
-            "payload_warns": warn,
-            "lexicon": lexicon_result,
+            **_empty_receipt(corpus_id=corpus_id, doc_id=doc_id),
+            "status": "blocked_no_neo4j",
         }
-    finally:
-        try:
-            await client.close()
-        except Exception:
-            pass
+    if doc_id:
+        return await _promote_doc_claims(
+            db,
+            neo4j_driver,
+            corpus_id=corpus_id,
+            doc_id=doc_id,
+        )
+
+    pipeline = [
+        {
+            "$match": {
+                "corpus_id": corpus_id,
+                "status": "ok",
+                "schema_version": LOCAL_EXTRACTION_SCHEMA_VERSION,
+                "claim_compilation.claims.0": {"$exists": True},
+            }
+        },
+        {"$group": {"_id": "$doc_id"}},
+        {"$sort": {"_id": 1}},
+    ]
+    doc_rows = await db["ghost_b_extractions"].aggregate(pipeline).to_list(length=None)
+    total = _empty_receipt(corpus_id=corpus_id, doc_id=None)
+    total["docs"] = []
+    for row in doc_rows:
+        current_doc_id = str(row.get("_id") or "")
+        if not current_doc_id:
+            continue
+        receipt = await _promote_doc_claims(
+            db,
+            neo4j_driver,
+            corpus_id=corpus_id,
+            doc_id=current_doc_id,
+        )
+        total["docs"].append(receipt)
+        for key in (
+            "claims_in",
+            "valid_claims",
+            "facts_written",
+            "supports_fact_edges",
+            "has_fact_edges",
+            "typed_edges",
+        ):
+            _inc(total, key, int(receipt.get(key) or 0))
+        for reason, count in (receipt.get("skipped") or {}).items():
+            _skip(total, reason, int(count or 0))
+    total["status"] = "done" if total["docs"] else "noop"
+    return total
+

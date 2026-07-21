@@ -26,6 +26,7 @@ from typing import Any, Awaitable, Callable
 import httpx
 
 from config import get_settings
+from models.contracts import ParentSummaryRecord
 from services.extraction_provider_cards import (
     provider_payload_defaults,
     resolve_extraction_provider_card,
@@ -40,6 +41,12 @@ from services.llm_lane_pool import (
     provider_error_summary,
     rate_limit_retry_after_seconds,
     shared_provider_semaphore,
+)
+from services.schema_control import (
+    extract_provider_json_payload,
+    provider_native_response_format,
+    validate_pydantic_projection,
+    xml_json_contract_prompt,
 )
 
 logger = logging.getLogger(__name__)
@@ -663,14 +670,59 @@ async def summarize_parents(
                 max_output_tokens=int(payload.get("max_tokens") or 0),
                 item_count=item_count,
             )
+        def _direct_longcat_url() -> str | None:
+            if card.provider != "longcat" or not entry.get("api_key"):
+                return None
+            base = str(entry.get("base_url") or entry.get("api_base") or "").strip()
+            if not base:
+                return None
+            base = base.rstrip("/")
+            if base.endswith("/chat/completions"):
+                return base
+            return f"{base}/chat/completions"
+
+        def _direct_payload(*, bare_model: bool = False) -> dict[str, Any]:
+            direct = {
+                key: value
+                for key, value in payload.items()
+                if key not in {"api_base", "api_key", "cache"}
+            }
+            if bare_model and "/" in str(direct.get("model") or ""):
+                direct["model"] = str(direct["model"]).rsplit("/", 1)[-1]
+            return direct
+
+        direct_url = _direct_longcat_url()
         try:
             async with provider_sems[pool_idx]:
                 async with httpx.AsyncClient(timeout=120.0) as client:
-                    resp = await client.post(
-                        f"{settings.LITELLM_URL}/chat/completions",
-                        json=payload,
-                        headers=headers,
-                    )
+                    if direct_url:
+                        direct_headers = {
+                            "Authorization": f"Bearer {entry['api_key']}",
+                            "Content-Type": "application/json",
+                        }
+                        resp = await client.post(
+                            direct_url,
+                            json=_direct_payload(),
+                            headers=direct_headers,
+                        )
+                        status_code = int(getattr(resp, "status_code", 200) or 200)
+                        if (
+                            status_code in {400, 404}
+                            and "/" in str(payload.get("model") or "")
+                        ):
+                            text = resp.text[:500].lower()
+                            if "model" in text or "not found" in text:
+                                resp = await client.post(
+                                    direct_url,
+                                    json=_direct_payload(bare_model=True),
+                                    headers=direct_headers,
+                                )
+                    else:
+                        resp = await client.post(
+                            f"{settings.LITELLM_URL}/chat/completions",
+                            json=payload,
+                            headers=headers,
+                        )
                 resp.raise_for_status()
                 body = resp.json()
         except Exception as exc:
@@ -809,15 +861,20 @@ async def summarize_parents(
         entry: dict,
         tagged_rescue: bool = False,
     ) -> SummaryResult | None:
+        controlled_raw = (
+            raw
+            if tagged_rescue
+            else (extract_provider_json_payload(raw) or raw)
+        )
         semantic = (
             parse_tagged_summary_response(
-                raw,
+                controlled_raw,
                 source_child_ids=task.source_child_ids or [],
                 source_text=task.text,
             )
             if tagged_rescue
             else parse_semantic_summary(
-                raw,
+                controlled_raw,
                 source_child_ids=task.source_child_ids or [],
                 source_text=task.text,
             )
@@ -850,6 +907,23 @@ async def summarize_parents(
                 task.parent_id,
                 entry.get("model"),
                 ",".join(flags[:8]) or "unknown",
+            )
+            return None
+        validation = validate_pydantic_projection(artifact, ParentSummaryRecord)
+        if not validation.valid:
+            flags = [
+                "pydantic_contract_rejected",
+                str(validation.error or "unknown"),
+            ]
+            validation_flags_by_parent[task.parent_id] = flags[:8]
+            rejected_models_by_parent.setdefault(task.parent_id, set()).add(
+                _model_signature(entry)
+            )
+            logger.warning(
+                "GHOST A rejected parent_id=%s model=%s pydantic=%s",
+                task.parent_id,
+                entry.get("model"),
+                validation.error or "unknown",
             )
             return None
         return SummaryResult(
@@ -894,6 +968,23 @@ async def summarize_parents(
         tagged_rescue: bool = False,
     ) -> SummaryResult | None:
         entry = pool[pool_idx]
+        card = resolve_extraction_provider_card(entry)
+        user_content = (
+            _TAGGED_RESCUE_USER.format(text=task.text)
+            if tagged_rescue
+            else _USER.format(
+                max_tokens=cap,
+                text=task.text,
+                source_child_ids=json.dumps(task.source_child_ids or []),
+                child_boundaries=task.child_boundaries or "",
+            )
+        )
+        if not tagged_rescue:
+            user_content = xml_json_contract_prompt(
+                card,
+                contract_name="parent_summary.v1",
+                prompt=user_content,
+            )
         payload: dict = {
             "model": entry["model"],
             "messages": [
@@ -903,16 +994,7 @@ async def summarize_parents(
                 },
                 {
                     "role": "user",
-                    "content": (
-                        _TAGGED_RESCUE_USER.format(text=task.text)
-                        if tagged_rescue
-                        else _USER.format(
-                            max_tokens=cap,
-                            text=task.text,
-                            source_child_ids=json.dumps(task.source_child_ids or []),
-                            child_boundaries=task.child_boundaries or "",
-                        )
-                    ),
+                    "content": user_content,
                 },
             ],
             "temperature": 0,
@@ -935,9 +1017,11 @@ async def summarize_parents(
         # Apply the same provider-card defaults as Ghost B. Summary lanes must
         # honor explicit disable_thinking flags too; otherwise reasoning models
         # can return HTTP 200 with empty content at the bounded output limit.
-        card = resolve_extraction_provider_card(entry)
         for key, value in provider_payload_defaults(card).items():
             payload.setdefault(key, value)
+        native_response_format = provider_native_response_format(card)
+        if native_response_format is not None:
+            payload.setdefault("response_format", native_response_format)
         started = time.perf_counter()
         try:
             body, cost_fields = await _provider_post(

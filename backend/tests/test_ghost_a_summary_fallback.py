@@ -107,6 +107,130 @@ def test_hy3_summary_budget_reserves_reasoning_overhead() -> None:
     assert provider_summary_microbatch_size(longcat, 4) == 4
 
 
+@pytest.mark.asyncio
+async def test_longcat_summary_uses_xml_schema_control_wrapper(monkeypatch) -> None:
+    _EnvelopeIgnoringClient.payloads.clear()
+    monkeypatch.setattr(ghost_a.httpx, "AsyncClient", _EnvelopeIgnoringClient)
+    monkeypatch.setattr(ghost_a, "_SUMMARY_RETRY_ATTEMPTS", 0)
+
+    results = await summarize_parents(
+        [
+            SummaryTask(
+                parent_id="parent-1",
+                doc_id="doc-1",
+                corpus_id="corpus-1",
+                source_tier="parent",
+                text="The source child supports a durable semantic claim.",
+                source_child_ids=["child-1"],
+            )
+        ],
+        pool=[
+            {
+                "provider_preset": "longcat",
+                "model": "openai/LongCat-2.0",
+                "base_url": "https://api.longcat.chat/openai/v1",
+                "api_key": "longcat-test-key",
+                "max_concurrent": 1,
+                "extra_params": {},
+            }
+        ],
+        global_max_concurrent=1,
+    )
+
+    assert [result.parent_id for result in results] == ["parent-1"]
+    payload = _EnvelopeIgnoringClient.payloads[0]
+    user_prompt = payload["messages"][1]["content"]
+    assert '<schema_control contract="parent_summary.v1"' in user_prompt
+    assert "<json_payload>" in user_prompt
+    assert "response_format" not in payload
+    assert payload["thinking"] == {"type": "disabled"}
+
+
+@pytest.mark.asyncio
+async def test_explicit_longcat_summary_bypasses_litellm_route_collapse(
+    monkeypatch,
+) -> None:
+    _DirectLongCatClient.urls.clear()
+    _DirectLongCatClient.headers.clear()
+    _DirectLongCatClient.payloads.clear()
+    monkeypatch.setattr(ghost_a.httpx, "AsyncClient", _DirectLongCatClient)
+    monkeypatch.setattr(ghost_a, "_SUMMARY_RETRY_ATTEMPTS", 0)
+
+    results = await summarize_parents(
+        [
+            SummaryTask(
+                parent_id="parent-1",
+                doc_id="doc-1",
+                corpus_id="corpus-1",
+                source_tier="parent",
+                text="The source child supports direct LongCat schema-control dispatch.",
+                source_child_ids=["child-1"],
+            )
+        ],
+        pool=[
+            {
+                "provider_preset": "longcat",
+                "model": "openai/LongCat-2.0",
+                "base_url": "https://api.longcat.chat/openai/v1",
+                "api_key": "longcat-direct-key",
+                "max_concurrent": 1,
+                "extra_params": {},
+            }
+        ],
+        global_max_concurrent=1,
+    )
+
+    assert [result.parent_id for result in results] == ["parent-1"]
+    assert _DirectLongCatClient.urls == [
+        "https://api.longcat.chat/openai/v1/chat/completions"
+    ]
+    payload = _DirectLongCatClient.payloads[0]
+    assert "api_base" not in payload
+    assert "api_key" not in payload
+    assert "cache" not in payload
+    assert "response_format" not in payload
+    assert payload["thinking"] == {"type": "disabled"}
+    assert _DirectLongCatClient.headers[0]["Authorization"] == (
+        "Bearer longcat-direct-key"
+    )
+
+
+@pytest.mark.asyncio
+async def test_deepseek_summary_uses_native_json_object_response_format(monkeypatch) -> None:
+    _EnvelopeIgnoringClient.payloads.clear()
+    monkeypatch.setattr(ghost_a.httpx, "AsyncClient", _EnvelopeIgnoringClient)
+    monkeypatch.setattr(ghost_a, "_SUMMARY_RETRY_ATTEMPTS", 0)
+
+    results = await summarize_parents(
+        [
+            SummaryTask(
+                parent_id="parent-1",
+                doc_id="doc-1",
+                corpus_id="corpus-1",
+                source_tier="parent",
+                text="The source child supports a durable semantic claim.",
+                source_child_ids=["child-1"],
+            )
+        ],
+        pool=[
+            {
+                "provider_preset": "deepseek",
+                "model": "deepseek/deepseek-v4-flash",
+                "base_url": "https://api.deepseek.com",
+                "api_key": "deepseek-test-key",
+                "max_concurrent": 1,
+                "extra_params": {},
+            }
+        ],
+        global_max_concurrent=1,
+    )
+
+    assert [result.parent_id for result in results] == ["parent-1"]
+    payload = _EnvelopeIgnoringClient.payloads[0]
+    assert payload["response_format"] == {"type": "json_object"}
+    assert "<schema_control" not in payload["messages"][1]["content"]
+
+
 class _EnvelopeIgnoringResponse:
     def __init__(self, content: str) -> None:
         self.content = content
@@ -137,6 +261,24 @@ class _EnvelopeIgnoringClient(_BlankSummaryClient):
             '"central_claim":"The passage explains a durable semantic claim.",'
             '"key_points":[{"point":"The claim is supported by the source child.",'
             '"supporting_child_ids":["child-1"]}]}'
+        )
+
+
+class _DirectLongCatClient(_BlankSummaryClient):
+    urls: list[str] = []
+    headers: list[dict] = []
+    payloads: list[dict] = []
+
+    async def post(self, *args, **kwargs) -> _EnvelopeIgnoringResponse:
+        self.urls.append(str(args[0]))
+        self.headers.append(dict(kwargs.get("headers") or {}))
+        self.payloads.append(dict(kwargs.get("json") or {}))
+        return _EnvelopeIgnoringResponse(
+            '{"summary":"A direct LongCat provider call compiles a durable semantic summary without passing through LiteLLM routing.",'
+            '"central_claim":"Direct provider dispatch preserves account-lane identity.",'
+            '"key_points":[{"point":"The summary is grounded in the supplied source child.",'
+            '"supporting_child_ids":["child-1"]}],'
+            '"concept_tags":["direct dispatch","schema control"]}'
         )
 
 
@@ -576,6 +718,45 @@ async def test_invalid_shared_flash_key_is_not_auto_inserted(monkeypatch) -> Non
     assert report["flash_key_available"] is False
     assert report["shared_flash_key_probe_ok"] is False
     assert report["shared_flash_key_error"] == "http_401"
+
+
+@pytest.mark.asyncio
+async def test_explicit_longcat_pool_does_not_auto_insert_shared_deepseek(
+    monkeypatch,
+) -> None:
+    async def fake_any_user(name: str):
+        return "valid-looking-shared-key" if name == "deepseek" else None
+
+    class _ProbeShouldNotRun:
+        def __init__(self, *args, **kwargs) -> None:
+            raise AssertionError("explicit non-empty pool must not probe DeepSeek")
+
+    monkeypatch.setattr(
+        "services.settings.settings_service.get_plaintext_key_any_user",
+        fake_any_user,
+    )
+    monkeypatch.setattr(
+        summary_provider_pool.httpx,
+        "AsyncClient",
+        _ProbeShouldNotRun,
+    )
+
+    pool, report = await resolve_summary_provider_pool(
+        configured_refs=[
+            {
+                "provider_preset": "longcat",
+                "model": "openai/LongCat-2.0",
+                "base_url": "https://api.longcat.chat/openai/v1",
+                "api_key": "longcat-key",
+                "max_concurrent": 45,
+            }
+        ],
+        runtime_refs=[],
+    )
+
+    assert [entry["provider_preset"] for entry in pool] == ["longcat"]
+    assert report["flash_primary"] is False
+    assert report["admitted_models"] == ["openai/LongCat-2.0"]
 
 
 @pytest.mark.asyncio

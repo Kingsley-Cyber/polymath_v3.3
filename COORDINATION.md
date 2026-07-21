@@ -15436,3 +15436,286 @@ Tail-drag root cause: tertiary g7tvfpjlfgp9aa accumulated 99 IN_QUEUE / 0 EVER c
 
 ## 2026-07-20 02:45Z — SENIOR — night state: mark+andromeda running on fixed stack; launcher hardened; fleet-wide medic
 Cascade chain closed: (1) neo4j 1g-heap GC thrash = the day's true graph bottleneck → 6g/3g-heap/1.5g-pagecache (committed); (2) my 246-item requeue landed during the neo4j recreate → mark mass-failed at attempts-cap in minutes → all 242 requeued clean on the healthy stack; (3) fleet v5's remaining launches died on backend-busy curl timeouts (15s) → launcher API calls now retry-hardened 60-120s (committed); (4) fleet exited (false COMPLETE) → andromeda's orphan corpus recovered (35fc1f52) + batch fd4d84dc launched manually 6-wide; cybersec HELD for its turn (owner one-lane rule; its orphan corpus likely exists — recover on launch). VIDEO FINAL: terminal partial = 69 done + 5 skipped + 5 parked (all five are BOOKS misfiled in the transcript folder — owner disposition later). Medic v2 = fleet-wide (heals every running batch, parks 8-strike poison). Balances: deepseek k3 $1.82 active; longcat assist armed in contract.
+
+## 2026-07-20 15:00Z — SENIOR — OWNER: 3 fresh DeepSeek keys wired @45 (summary pool now 4 lanes); control-plane hardening spec APPROVED
+OWNER input (relayed): three new deepseek accounts for the summary drain, concurrency 45 each. WIRED (config+keys only, rebuild freeze respected): cybersecurity_study default_ingestion_config.summary_models = 3× deepseek/deepseek-v4-flash @ max_concurrent 45 (per-entry Fernet keys, tails ••d1de/••9637/••8602) + longcat openai/LongCat-2.0 @40 (unchanged). settings api_keys.deepseek REPLACED with fresh key #1 (old key = 402 drained). Multi-key trick: pool `_signature` = (provider_preset, base_url, model) and EXCLUDES api_key → identical lanes dedup-collapse; distinct presets `deepseek`/`deepseek-2`/`deepseek-3` survive, while extraction_provider_cards._provider_key still resolves all three to provider "deepseek" via base_url/model-prefix matchers → price card + wire contract intact. Resolution receipt: 4 admitted lanes, flash_primary, all 3 flash keys attached. Canary-gated drain relaunching (flash-evidence gate before batch spend).
+
+### CODEX SPEC — control-plane hardening (owner-approved 2026-07-20, from the graphify audit; queue AFTER current CP work, Track B unless owner elevates)
+C1 **Retry spend needs error classification.** Objective: classify deterministic vs transient before burning attempts; deterministic (schema reject, journal partial-closure precheck, 4xx non-429) = park immediately, transient (timeouts, 429, 5xx) = retry. Files: services/runpod_local_extraction.py (raise sites), services/ingestion/batches.py (attempt accounting). Proof: forced partial-closure fixture parks on attempt 1 with a named error_class, no attempts burned.
+C2 **Batch close = reconcile from DB, not in-memory ledger.** Objective: runner's terminal sweep re-reads item statuses from Mongo (incl. medic-requeued items it no longer tracks) before writing batch status; `partial` only if DB says so. Files: services/ingestion/batches.py (close path). Proof: requeue an item mid-close in a fixture → batch closes `done` after it drains, never stale-`partial`.
+C3 **RunPod lane breaker + non-empty errors.** Objective: per-endpoint circuit breaker (N consecutive connect-class failures → lane out for cooldown, jobs re-dispatch to healthy routes) + every exception persisted as non-empty string (repr fallback — today's ConnectTimeout stringifies to ""). Files: services/runpod_local_extraction.py. Proof: kill one endpooint in a 2-route fixture → items complete via the other, error_history rows all non-empty.
+C4 **Batch-start stagger.** Objective: jitter doc-launch (e.g. 0-5s per doc) so N docs × slices don't TLS-handshake simultaneously. Files: services/ingestion/batches.py dispatch loop. Proof: launch-timestamp spread >3s across 8 docs in fixture.
+C5 **Stale-`running` batch reaper.** Objective: scheduled sweep marks batches with no lease activity for >TTL as `stale` (terminal, non-wakeable) with audit fields; workers never pull from `stale`. Protects against the medic-v5 foreign-requeue class. Files: services/ingestion/batches.py + wherever periodic maintenance lives. Proof: fixture batch idle past TTL → `stale`, requeue attempt refused.
+C6 **Summary backfill concurrency ceiling.** Objective: `batch` is hardcoded 32 (ingestion_service.py:3642 default; :2855 wrapper `min(limit,32)`) → only ~8 provider calls in flight regardless of lane caps (now 3×45+40). Make it config/request-driven (cap = f(sum of lane max_concurrent × items_per_call)) so the lane semaphores can actually load. Proof: with 4 lanes live, telemetry shows >20 concurrent calls and round wall-time drops proportionally.
+Senior stays ops-only on these; no pipeline code was touched today.
+
+## 2026-07-20 16:45Z — SENIOR — extraction backfill UNBLOCKED: wire-contract + task-identity chain root-caused, hot-patched, canary GREEN
+Owner directive: backfill extraction gaps with the CURRENT extractor (RunPod LocalExtractionV1 fleet). Two stacked defects made `run_extraction_jobs` (graph backfill path) 100%-fail against the deployed green-3b66f55 workers while the INGEST path worked fine:
+**P0-A (graph_backfill wire-contract hardcode):** services/ingestion/graph_backfill.py `_run_ghost_b_backfill` engine=="runpod_flash" branch imports the LEGACY v2 client (services/runpod_flash_extraction.py, contract polymath.runpod_gliner_relex.v2) unconditionally — it never honors `config.runpod_wire_contract` the way worker.py `_runpod_extractor_for_config` does. Deployed endpoints validate an exact v1 payload set → every job dies "request fields do not match the locked wire contract". Backfill/extraction-jobs NEVER worked against the v1 fleet.
+**P0-B (backfill tasks missing identity spine):** the v1 client `_task_dict` (services/runpod_local_extraction.py:332) REQUIRES metadata.source_version_id per task; `_extract_tasks` builds ExtractionTask with empty metadata → "LocalExtractionV1 task identity is incomplete" (all tasks fail client-side pre-dispatch). Documents do NOT store source_version_id — it's derived at ingest only (worker.py:3651: make_source_version_id(doc_id, "sha256:"+source_identity.content_sha256), recipe models/identifier_recipes.py:51).
+**OPS HOT-PATCH (container-only, docker cp + restart 10:34; durable fix = Codex):** graph_backfill.py now (1) dispatches on runpod_wire_contract exactly like the ingest path, passing endpoint/account/routes kwargs; (2) `_extract_tasks` recomputes source_version_id per doc with the ingest recipe and stamps task metadata. Determinism receipt BEFORE deploy: recomputed srcv for doc 0301e696… == stored ghost_b row byte-for-byte (srcv:6f3e8ba5…).
+**Also required:** settings accounts RENAMED rp1→primary, rp2→secondary (api_keys.runpod_accounts keys re-keyed to match) — frozen doc snapshots + corpus routes name primary/secondary and v1 named-route resolution fails closed on name mismatch. rp3 stays enabled=false (zombie rule: no real completed job yet).
+**CANARY (ecom, 32 jobs, 10:35):** 32/32 succeeded, 0 failed, 59s wall (27s GPU, 1.17 chunks/s, round-robin primary/secondary), metrics = engine runpod_local_extraction / wire polymath.runpod_local_extraction.v1 / gliner_medium-v2.1 @40ec419. 32 fresh ghost_b rows all status=ok, 338 entities, FULL v1 envelope (claim_compilation, local_extraction, facts, temporal_captures, srcv identity). Note: ghost_b COUNT delta = 0 because these were re-extractions of prior error-stub rows (upsert) — count-delta is the wrong receipt for repair runs; fresh-updated_at + status=ok + entities>0 is the correct one.
+**DRAINS LIVE:** ecom extraction drain (claimable 10,343 / missing 28,730) + video (52 claimable; wall at 6,162 pending graph promotion of 4 gating docs — will handle via pinned run_graph_jobs when it stalls). 3 summary drains relaunched post-restart (63 orphaned leases cleared with pinned medic query).
+### CODEX P0s (queue after current CP work; ops hot-patch is in the CONTAINER only — image rebuild loses it)
+P0-A **graph_backfill honors runpod_wire_contract** — mirror worker.py `_runpod_extractor_for_config` dispatch (or better: extract ONE shared resolver both paths import). Proof: extraction_jobs run against a v1-routes corpus succeeds without the hot-patch.
+P0-B **ExtractionTask carries source_version_id** — either persist document_source_version_id on the documents collection at ingest (preferred: it's the identity spine, deriving it in N places is drift risk) or stamp task metadata in `_extract_tasks` via the recipe. Proof: canary passes from a clean image.
+P0-C **psutil in the backend image** — resource_planner falls back to ru_maxrss PEAK when psutil is missing → paused_pressure ratchets ALL lanes shut until restart (found 07-20 morning; pip-in-container survives restarts but not recreates). Proof: fresh image imports psutil; planner logs live RSS not peak.
+C7 (spec suggestion) **Extraction completeness reconciler** — nightly: for each corpus, chunks missing ghost_b ok-rows vs extraction_jobs terminal states; auto-plan the diff (idempotent, priority-doc aware). Today's 28k/6k gaps were only visible via ad-hoc probes.
+
+## 2026-07-20 17:25Z — SENIOR — video wall LIFTED ($0 flush), video extraction drain COMPLETE, 2nd OOM survived by design
+**Wall remedy receipt:** the 4 video gating docs (davinci/what-the-face/francis-glebas/sound-design) were repaired with in-image `scripts/polymath_graph_replay_backlog.py` — KEY DISCOVERY: all 4 had staged==chunks (full ghost_b rows, 0 failure rows) → `backfill_failed_graph_chunks` took the **Neo4j flush fast path**: run graph_replay_scoped_20260720_165038_c5620769 complete 4/4, 5,618 staged rows flushed, 0 failures, ~11 min, **$0 — no re-extraction**. All 4 now write_state.neo4j_written=True + verified=True; wall count 0; next video plan planned=6171. LAW: probe staged_extractions per doc BEFORE assuming re-extraction; wall field = write_state.neo4j_written (top-level field is a decoy).
+**Second backend OOM 17:05Z (survived):** trigger mix = flush-only replay exec (in-container Neo4j writes) + ecom 10k plan scan + 3 summary drains + video drain start, all concurrent. Backend restarted healthy ~36s; summary drains SELF-HEALED via health-gated retries (no operator action) — the auto-continue design held under kill. Casualty: flush-only run 49b883d6 died 1/9 done → marked status=failed (pinned update), re-run as cf109f4d. NEW OPS LAW: replay/flush execs must hold the drains' plan-lock (`mkdir $SP/.plan_lock`) so a flush exec and a 10k plan scan can never overlap again.
+**VIDEO EXTRACTION DRAIN COMPLETE 17:16Z:** 14 rounds, missing 6,214→0 (claimable=0; final missing=-9 = benign rows>chunks offset). Real-work region receipts: succeeded 18/386/500/500/342/7/3 per round, **failed=0 the whole drain (0% fail-rate)** — LocalExtractionV1 fleet (primary/secondary round-robin) proven at scale on the graph-backfill path. Ecom drain mid-flight: missing 28,730→~9,573, one real region so far (round 19: 64 ok / 0 fail), currently long skip-kind region; next top-up plan waits on the plan-lock until the flush re-run finishes (by design).
+**Standing:** ingest-worker-1 still UNPATCHED (two-container drift live) — P0-A/P0-B durable fixes remain Codex queue; rp3 stays disabled (zombie rule); summary drains (4-lane pool) running: cyb ~10.8k / ecom ~16.3k / video ~16.1k missing at last checkpoint.
+
+## 2026-07-20 17:55Z — SENIOR — CORRECTION to 17:25Z + summary-drain fleet relaunched (gap: 3 run-loops died at the OOM)
+**CORRECTION (silent-fallback-accounting):** 17:25Z said summary drains "SELF-HEALED via health-gated retries" — WRONG. Only extraction_drain.sh had the health-gate; summary_drain*.sh treated EMPTY RESPONSE as terminal `break`. At the 17:05Z OOM all 3 summary RUN loops died; the two parent PIDs then HUNG forever in a final missing_count `docker exec` against the restarting container (dead stdin fifo), while the orchestrator's [topup] planner kept planning into a void every 3 min. Net: summary generation was DOWN 17:05→17:50Z (~45 min, ~zero spend); missing frozen at cyb 10,797 / ecom 16,246 / video 16,139. What looked like self-healing in the log was the planners, not the consumers.
+**Fix (drivers, scratchpad — not repo code):** summary_drain.sh + summary_drain2.sh patched: (1) EMPTY RESPONSE → health-gate (wait /health/live up to 20 min) + retry, stop only at streak 5; (2) missing_count() hang guard (health probe before exec — a mid-restart exec can block forever). Hung PIDs killed identity-checked; 2 dead-owner summary leases deleted by pinned _id+lease_id (video 60d960f3…, cyb 8017ad58… — both lease_until already past). All 3 drains relaunched on the patched scripts.
+**Ecom extraction endgame:** post-lock top-up planned=9,106 = the ENTIRE remaining backlog (claimable 9,138 > missing 9,073) → no further plan calls needed; drains to 0 like video did. The transient `planned=?` at 17:41Z was the plan call racing the flush finish — resolved on the drain's own retry.
+
+## 2026-07-20 18:00Z — SENIOR — EXTRACTION BACKFILL COMPLETE (both corpora), RunPod receipt $0.25 total
+**ecom DRAIN COMPLETE 17:56:49Z** (57 rounds): missing 28,730 → 0 (claimable=0; final missing=-33 benign rows>chunks offset). **video completed 17:16Z** (14 rounds): 6,214 → 0. **Zero failed jobs across both drains.** Replay/verify backlog = 0 docs for BOTH corpora (dry-run receipts planned_docs=0). Composition honesty: most of the 35k gap was skip-kind chunks getting their coverage rows persisted (by contract, no GPU); ~2k chunks got real LocalExtractionV1 extractions (v1 envelopes, gliner_medium-v2.1, primary/secondary round-robin).
+**RunPod spend receipt (balances, final — summary/DOCSUM run on DeepSeek):** rp1 $0.1209 ($5.9257→$5.8048), rp2 $0.1062 ($0.7883→$0.6821), rp3 $0.0255 ($12.2071→$12.1816) = **TOTAL $0.2526** vs $10.50 projected (wall docs flushed $0 + skip-dominated gap). NOTE rp3 charge is NON-JOB (account disabled in routes, zombie rule intact) — endpoint g7tvfpjlfgp9aa still deployed on RunPod's side accrues idle overhead; owner may want to scale it to 0 workers / delete in console.
+**Still running:** 3 summary drains on patched scripts (post-relaunch ROUND 1 receipts all green: cyb $0.165 / ecom $0.249 / video $0.275, 500 gen+indexed each; ~$0.69/round for 1,500 summaries); orchestrator waits on summary missing=0 → DOCSUM → lexicon per corpus.
+
+---
+## 2026-07-20 ~18:45Z — CONFIRMED root cause of the 9x summary cost failover (Claude, ops)
+
+**Proven (not hypothesis):** All 3 DeepSeek summary lanes collapse to ONE circuit-breaker
+signature. `_model_signature(entry)` (ghost_a.py:537) = `f"{card.provider}:{model}"`, and
+`resolve_extraction_provider_card` maps presets deepseek / deepseek-2 / deepseek-3 all to
+`card.provider="deepseek"`. Live probe: all three lanes emit the identical string
+`deepseek:deepseek/deepseek-v4-flash` (DISTINCT=1). 402 is HARD-fatal
+(llm_lane_pool.py:16 `HARD_FATAL_STATUS_CODES={401,402}`) → disabled immediately, no strike grace.
+Chain: lane0 ••d1de overdrew (−$0.22) → 402 → shared signature dropped → `disabled_lanes`
+matches ALL 3 deepseek lanes → only LongCat (lane3) served → rounds jumped $0.16→$1.59-2.45.
+
+**Not sticky:** zero Mongo read/write of `dropped_signatures` (only ghost_a.py:561 reads the
+in-memory pool_status, rebuilt fresh each round). The disable is RE-TRIGGERED live every round by
+the overdrawn lane's 402, not persisted. ⇒ refilling the dead key alone fixes it — NO state-clear,
+NO restart needed.
+
+**Operational consequence (drives the refill):** because the breaker is shared, ANY single lane
+hitting $0 re-collapses all 3. Funding only ••d1de is insufficient — the smallest lane (••9637
+$2.94) would zero first mid-run and re-trigger. Must fund so no lane zeroes before the remaining
+~36,954 summaries (~$13-17) complete. Balances now: ••d1de −$0.22 (dead), ••9637 $2.94, ••8602
+$4.82 (usable $7.76). Awaiting owner refill (chose "refill then resume").
+
+**P0 for Codex (directive #2 — deterministic engineering hole):** make the lane circuit-breaker
+per-lane, not per-provider. `_model_signature` should incorporate the api_key hash (or
+provider_preset) so one dead key disables only ITS lane, leaving the other funded lanes serving.
+Today the "3 keys for resilience" buys 3x rate/balance headroom but ZERO fault isolation — one
+overdraft kills the whole provider group and silently fails over to the 9x LongCat lane.
+
+**Latent bug for Codex:** top-level `api_keys.deepseek` key ••f52a returns HTTP 401 invalid
+(distinct from the 3 working lane keys). Stale/rotated — clean up or it will bite any code path
+that reads the top-level key instead of the per-lane keys.
+
+**State:** all drains + orchestrator killed, clean-paused, 0 summary spend confirmed. Drain scripts
+patched (health-gate + hang-guard) and verified pinned: summary_drain.sh→cyb d18713f7;
+summary_drain2.sh takes CID as $1 → ecommerce_meta 8dfb070a + video_generations_schools 149a2dcb.
+authentic_library_v2 (f3849304, 11,983 pending) stays HANDS-OFF.
+
+
+---
+
+## FULL BUG-CLASS SCAN — "shared-identity-collapses-isolation" (directive #2, 2026-07-20 ~13:52Z)
+
+Triggered by the summary lane-collapse King hit. Swept every provider-pool / breaker / fallback
+path for the same class: **a shared identity collapsing per-lane isolation, a silent fallback, or
+an ignored enabled-flag.** Result: 3 confirmed holes (ALL on the summary path), 5 paths cleared,
+1 hygiene item. The collapse bug does NOT exist anywhere on the extraction path — every extraction
+sibling already isolates per-lane. Fix the 3 below and the "3 keys = resilience" promise becomes real.
+
+### CONFIRMED — fix these (Codex)
+
+**BUG-1 [HIGH — King hit this] Summary breaker collapses all 3 DeepSeek lanes into one**
+`backend/services/ghost_a.py:536-538`
+```
+def _model_signature(entry):
+    card = resolve_extraction_provider_card(entry)
+    return f"{card.provider}:{entry.get('model') or 'unknown'}"
+```
+All 3 lanes (provider_preset deepseek / deepseek-2 / deepseek-3, distinct keys) resolve to
+`card.provider="deepseek"` + identical model `deepseek/deepseek-v4-flash` → ONE signature shared by
+3 distinct keys. Collapse points:
+- `:707` `_disable_lane` → `dropped_signatures.add(signature)` — one lane's disable drops all 3.
+- `:566-570` next round re-derives `disabled_lanes` from the shared signature → cross-round collapse.
+- `:744-745` `consecutive_rejections[signature]` — shared empty-strike counter hits drop_threshold 3x faster.
+- 402 (balance) is HARD_FATAL → one overdrawn key kills the whole DeepSeek group → silent 9x LongCat failover.
+`lane_fatal_strikes` (`:680`, keyed by pool_idx) is ALREADY correct — only the signature paths collapse.
+**FIX:** make the signature per-key-unique — `f"{card.provider}:{model}:{sha256(decrypted_api_key)[:8]}"`
+(or key on `provider_preset`, already unique per lane). Distinct keys → independent breakers; lanes
+sharing a key → collapse together (correct). Mirror ghost_b.py:4270 (disables by pool_idx, no collapse).
+
+**BUG-2 [MED-HIGH] `enabled:false` is a silent no-op for summary lanes**
+`backend/services/ingestion/summary_provider_pool.py:59-89` (`prepare_summary_provider_pool`)
+Admit filter checks empty-model, HY3 canary, and signature-dedup — but never `entry.get("enabled")`.
+A summary lane flagged `enabled:false` is still admitted and used. (This is why my balance-guard
+driver must physically DELETE lanes from the corpus config instead of flagging them off — flagging
+does nothing.) Contrast runpod_local_extraction.py:676 which correctly gates on `account.enabled`.
+**FIX:** add `if entry.get("enabled") is False: continue` at the top of the admit loop.
+
+**BUG-3 [MED — latent] Shared dead top-level key auto-inserted as a lane**
+`backend/services/ingestion/summary_provider_pool.py:150-174` (`resolve_summary_provider_pool`)
+When no flash lane is configured it auto-inserts a deepseek-flash lane built from the shared
+top-level `api_keys.deepseek` (tail ••f52a, currently HTTP 401 invalid), and backfills that shared
+key onto any keyless flash lane. Combined with BUG-1, that dead lane's 401 (HARD_FATAL) collapses
+the pool. Silent — no surfaced error.
+**FIX:** auth-probe the shared key before auto-insert; on failure skip the insert and surface
+`flash_key_available=false` as a hard error instead of birthing a dead lane.
+
+### CLEARED — correct isolation, do NOT touch (these are the reference patterns to copy)
+- **ghost_b.py (entity extraction)** — `_disable_lane` (:4270-4274) keys `disabled_lanes` by **pool_idx**,
+  per-lane, no collapse. `_provider_family` (:4283) uses card.provider only for cross-provider rescue routing.
+- **runpod_local_extraction.py** — explicit pinned account→endpoint routes, no failover (:629),
+  unique-account assertion (:307), honors `account.enabled` (:676). The gold pattern.
+- **provider_lane_health.py:112-134** — cools per-lane (`lane:` keys → cooldown); a provider-level key
+  with tracked lanes is only "degraded", never cooled (`aggregate_to_lane_keys` is the anti-collapse guard).
+  A rate-limit on one lane never cools its siblings.
+- **reranker.py:316-485** — time-based breaker (120s), logs `circuit_open`, falls back to score-sort.
+  Self-healing + accounted.
+- Extraction routing / reasoning_cascade — model fallback is explicit + accounted (`resolution_source`), never silent.
+
+### HYGIENE — LOW
+- `ingest_lane_leases` has NO TTL index → expired lease rows (lease_until in the past) linger as
+  orphans; reclaimable/harmless but never auto-evicted. Killed drain rounds also don't release their
+  lease → ≤30-min reclaim latency on relaunch (self-heals). FIX: TTL index on `lease_until`, or a sweep.
+
+**MEMORY CORRECTION (my prior carried note was wrong):** summary lane leases use a `lease_until`
+deadline and DO self-heal in ≤30 min. There is no `expires=None` permanent-wedge field — that note
+was incorrect; the "wedge" I hit was a not-yet-expired lease (correct lease_busy), not a permanent one.
+
+
+---
+
+## OPS YIELD TO CODEX (2026-07-20 ~14:05Z) — Claude paused, surfaces clear
+
+Claude (ops role) has PAUSED the good-keys summary drain and released all locks so Codex can fix
+the lane-breaker bugs (BUG-1/2/3 above) without contention. Current state:
+
+- **Drain: STOPPED** (was spending ••9637 + ••8602 on cyb; no driver process running).
+- **Leases: CLEARED** — all 3 corpora (cyb / ecom / video) have NO rows in `ingest_lane_leases`.
+  Backend, corpus config, and lease are yours uncontended. Deleted `d18713f7…:summary` (pinned _id).
+- **Live missing summaries:** cyb 4,690 · ecom 14,330 · video 14,159 = **33,179**.
+- **Current `default_ingestion_config.summary_models`** on all 3 corpora = 2 DeepSeek lanes
+  [deepseek-2 ••9637 $1.78 · deepseek-3 ••8602 $4.82] + longcat. The balance-guard REMOVED the
+  ••d1de lane (−$0.22, avail=False) and the top `deepseek` lane. **Full original 4-lane config is
+  backed up** at `scratchpad/summary_models_backup_20260720.json` — restore it for the real repro.
+- **Live dead-lane fixture for testing BUG-1:** ••d1de is at −$0.22 / avail=False right now — a real
+  402-returning key. Use it to prove the per-lane breaker fix: its 402 must NOT disable ••9637/••8602.
+- **Funding note (independent of the code fix):** completing all 33,179 needs ~$13.10 DeepSeek;
+  funded usable balance = $6.03 → a real $7.18 money gap. Owner refill pending; did not land on ••d1de.
+- Claude will NOT touch backend code, the corpus config, or run summary jobs until Codex signals the
+  fix is deployed — then relaunches with the full 4-lane config (the per-lane breaker makes the
+  balance-guard lane-deletion hack obsolete, which is the native "good keys finish the work" behavior).
+
+## [2026-07-20T22:48Z] EXECUTOR → SENIOR :: RECEIPT
+Codex implemented and hot-patched the summary lane breaker fix: Ghost A provider signatures are now credential-aware, summary provider pool honors `enabled:false`, stale shared DeepSeek auto-insert is auth-probed, and parent-summary backfill batch cap was raised so live lane concurrency can be fed. Focused container proof passed: 18/18 `test_ghost_a_summary_fallback.py`; real fixture proof passed: lane `••d1de` returned 402, only that lane dropped, and sibling `••9637` produced a valid summary. Restored target corpora to four independent DeepSeek Flash lanes at max_concurrent=45 (`••d1de`, `••da2b`, `••8602`, `••9637`) and runtime summary cap=64 (schema max). Relaunched summary drains. Result: cyb parent summaries completed and indexed 18,067/18,067; ecom indexed 19,450/19,450 existing summaries but remains 3,350 parent summaries short; video indexed 18,464/18,464 existing summaries but remains 1,879 parent summaries short. All four DeepSeek lanes eventually returned 402 independently, proving the isolation fix and leaving a real funding/capacity blocker for the remaining 5,229 summaries. LongCat was not used after Codex restored DeepSeek-only pools. No Codex summary/index processes remain active.
+
+## [2026-07-20T22:58Z] EXECUTOR → SENIOR :: BLOCKER
+Continuation balance audit after Codex fix/deploy: all four DeepSeek summary lanes are independently unavailable via `/user/balance`: `••d1de` total=-0.22, `••da2b` total=-0.64, `••8602` total=-0.65, `••9637` total=-0.65. This confirms the remaining ingestion gap is not a shared-breaker/code/lease failure. Final current state: cyb retrieval-parent summaries complete and indexed 18,067/18,067; ecom existing summaries indexed 19,450/19,450 with 3,350 retrieval-parent summaries still missing; video existing summaries indexed 18,464/18,464 with 1,879 retrieval-parent summaries still missing. No Codex summary/index processes are active and target summary leases are clear. Relaunch condition: fund at least one DeepSeek lane enough to cover the remaining 5,229 summaries, then rerun summary generation/index for ecom+video through the committed per-key breaker path.
+
+
+---
+
+## RERANK LATENCY INCIDENT — live query 2026-07-21 01:54 (Claude ops diagnosis, → Codex/task P1.8+P1.9)
+
+King's query: 45s total, 3 chunks returned. Receipts:
+
+- `QueryPlanV2 total=23.661s budget=20.000s stages={embed .199, vocab 2.256, routing .07, candidates .974, rerank 20.046, hydrate .024} failures=['reranker:TimeoutError']` → then ~20s LLM gen (grok-4.5 cursor shim) = the 45s.
+- Sidecar (:8081, jina-reranker-v3 fp16/mps) shows `last_request_seconds=22.539` — **the pass FINISHED at 22.5s and was thrown away** (budget 20s). Post-timeout the plan hydrated only **3 finalists**.
+- Cold-start context: reranker had just crash-restarted — GPU arbiter :8085 503'd → `embedder_mlx: embedding request timed out after 180.0s; exiting so launchd restarts` → cascade; one relaunch "did not become healthy within 180s"; warmup 56.6s covers shapes **(16,24) only**.
+- Steady-state measured NOW (warm, idle GPU): 48 docs ×~200tok = **9.3s first pass (new shape), 4.9–5.8s repeat** ≈ 0.1s/doc → a 150–200-candidate pass = 15–25s. Arbiter telemetry agrees: rerank hold **p50 5.5s / p95 25.9s** (n=9). The 20s budget is routinely blown at production candidate counts — structural, not incident-only.
+
+4 fixes (all yours, maps to in-flight P1.8+P1.9 sidecar warmup + adaptive reranking):
+1. **Timeout fallback must rank-fuse the full candidate pool** — 3-chunk degraded output after TimeoutError is the worst-case UX; fused candidates already exist pre-rerank.
+2. **Warmup must include production shapes** (whatever rerank_cap actually sends, not 16/24) — first real pass pays multi-second MPS kernel compile.
+3. **Candidate-count vs budget arithmetic**: cap what goes to the CE (or split budget) so cap×0.1s/doc fits inside the rerank budget with headroom; 22.5s of completed work discarded at 20.0s is the current behavior.
+4. **Arbiter-503 breaker**: embedder suicide-exit after 180s on arbiter 503s took the whole sidecar family down (failed relaunch + 56s warmup window of degraded queries). Fail-open on arbiter-unavailable instead of exit, or bound the cascade.
+
+Separate finding, same session: graph fact-seeding returns facts=0 for cyb/ecom/video — fact promotion never ran for them (entities promoted, Facts not; only 999b5934 has :Fact nodes, 283,748). `fact_retrieval.py` corpus filter is CORRECT — do not loosen it (cross-corpus facts would leak citations). Costs ~0.4s/query + empty [Key Facts]. Disposition pending King: run fact promotion for the 3 corpora vs short-circuit seeding when corpus has 0 facts.
+
+---
+
+## SCHEMA/RETRIEVAL FINDING — graph-augmentation layer inert for cyb/ecom/video (2026-07-20, Claude graphify hunt → Codex + King disposition)
+
+**Proven live.** Root cause of BOTH the fact-seeding-dead finding AND a newly-found edges-dead finding is ONE schema divergence:
+
+`ghost_b_extractions.schema_version` (avg over 3,000-doc samples):
+- orig999 = `polymath.extract.v1` → **2.59 relations/doc, 1.63 facts/doc**.
+- cyb / ecom / video = `polymath.extract.local_extraction.v1` → **0.00 relations/doc, 0.00 facts/doc** (entities only; `relations`/`facts` keys present but empty `[]` in every doc).
+
+**Consequences (live Neo4j + Mongo):**
+- RELATES_TO edges: 884,261 total, **0** carry cyb/ecom/video in `r.corpus_ids` (only orig999=290,266 + other pre-pivot corpora). `graph_promotion_jobs`=0 and `relation_support_records`=0 for all three. The 75,765 edges between two cyb-entities all belong to OTHER corpora via shared global entities → scoping them into cyb would be a citation-integrity leak, so `neo4j_reader.py` edge filter `any(cid IN $corpus_ids WHERE cid IN coalesce(r.corpus_ids,[]))` is CORRECT — DO NOT loosen.
+- Fact nodes: 0 native for cyb/ecom/video (facts_len=0 at source). `fact_retrieval.py` filter also CORRECT.
+- Claim-spine replacement NOT populated for these corpora (`semantic_digest_claim_compilations`=22,283 total, 0 for cyb/ecom/video; no `claim_records` collection).
+
+**Retrieval/latency impact (3 of 4 live corpora):**
+- `retriever/mode_a.py:576` — Mode A bridge expansion self-skips at `edge_count==0` (cheap, but zero relationship signal).
+- Mode C RELATES_TO walk → empty.
+- Fact-seeding is NOT gated → runs every query, returns 0, **~380ms tax/query**.
+- Brain View / `/api/graph` edges → edgeless nodes (mechanism behind "all Concept" flatten).
+- Vector naive/hrag lanes UNAFFECTED (chunk-derived) — severity bounded to graph-augmentation layer.
+
+**Codex actions (code = yours; King disposes direction first):**
+1. If entities-only is intentional (post-pivot GLiREL observation-only): add a per-corpus gate so fact-seeding + graph-expansion stages short-circuit when the corpus has 0 facts/0 edges — kill the 380ms tax and the empty `[Key Facts]` section. Cache the 0-edge/0-fact verdict per corpus_signature.
+2. If it's a gap: relation/fact re-extraction pass (entities already done → relation-only) OR populate the claim spine as the RELATES_TO substitute, then a promotion run that corpus-stamps `r.corpus_ids`.
+3. Either way: surface `graph_layer_available=false` per corpus in retrieval readiness so it's not silently empty.
+
+Memory: reference_polymath_local_extraction_entities_only. Do NOT re-open the `r.corpus_ids`/`f.corpus_id` filters — they are correct; the fix is upstream (extraction/promotion) or a gate, never the read filter.
+
+### CORRECTION to the finding above (same session, deeper probe after owner challenge)
+
+Two statements above are WRONG; corrected here — read this before acting:
+
+1. ~~"relation extraction produced empty relations"~~ → `runpod_local_extraction.py:574-575` **hardcodes `relations=[], facts=[]`** by design (GLiREL retirement, F1 .174 → observation-only). All relation drop/remap counters = 0 for cyb/ecom/video (nothing extracted-then-dropped); orig999 shows a real pipeline (417,277 relations, 4,368 dropped).
+2. ~~"Claim-spine replacement NOT populated"~~ → **IT IS POPULATED, inline.** ~99% of cyb/ecom/video `ghost_b_extractions` docs carry `local_extraction` (span-validated spaCy spine) + `claim_compilation.claims` at ~8.9–10.4 claims/doc ≈ **~2.6M claim records** (cyb ~356k, ecom ~1.43M, video ~819k) — extracted, paid for, sitting in Mongo, never promoted to Neo4j.
+
+**Revised Codex direction (replaces the 3 options above):**
+- The fix is the already-scoped **promote() mapper** (5 schemas; claims → Fact nodes + corpus-stamped edges) — the owner-priority schema→metadata→retrieval-core work. No re-extraction needed; the source data exists inline.
+- Interim gate stays valid: short-circuit fact-seed + graph-expansion for corpora with 0 facts/0 edges (kills the ~380ms/query tax) until promote() lands, plus `graph_layer_available=false` in readiness.
+- Read filters (`r.corpus_ids`, `f.corpus_id`) remain CORRECT — untouched.
+
+---
+
+## CLAUDE OPS FLAG (2026-07-21 ~04:20Z) — "DeepSeek summary rejections" ROOT-CAUSED: length truncation, NOT schema/prompt failure
+
+Evidence (`ingest_provider_call_metrics`, last 12h, phase=summary, provider_family=deepseek):
+- ACCEPTED: 16,910 calls / 42,297 items (all-time acceptance 29,062/33,490 calls ≈ 87%). DeepSeek's summary adapter is NOT broken.
+- `length_truncated`: 2,157 calls / **8,614 items rejected** — the dominant failure, 80x the "schema" one.
+  Arithmetic proof: item_count=4 calls die at exactly 4096–4098 output tok; item_count=1 at exactly 1024.
+  = hard per-item clamp `max(128, min(1024, …))` at `services/ingestion/summary_tree_llm.py:63` × microbatch 4.
+  Verbose parents need >1024 tok → JSON truncated mid-body → parse loses fields → semantics gate flags
+  missing_summary/missing_central_claim/missing_key_points/missing_concept_tags (summary_semantics.py:585-649).
+  Those 4 flags are the DOWNSTREAM FACE of truncation — the model returned real output (out_tok 565–4096, never empty).
+- True validation_rejected:missing_summary (non-truncated): only 104 calls/12h (~0.6%) — minor, not the driver.
+- Self-heal already works: truncated 4-batches split-retry as singles (8,446 accepted 1-item calls, avg 393 tok) — cost/latency tax, not data loss.
+- disable_thinking IS present in the live deepseek-assist lane configs and IS translated to thinking:{type:disabled} (llm.py:187-196) — the v4-flash empty-content gotcha is NOT in play here.
+- LongCat lanes dodge this via extra_params.microbatch_size=1 (their 1-item calls avg 810 out-tok); deepseek-assist-1/-2 lanes LACK microbatch_size → default 4.
+
+CODEX ITEMS (code territory):
+1. **Raise/configize the per-item summary output clamp** (`summary_tree_llm.py:63`): min(1024,…) → ~2048, or make it lane-configurable (`extra_params.max_tokens_per_item`). Keeps 4-batch economics without the truncation tax. Acceptance: deepseek `length_truncated` items/12h drops ≥95% at microbatch 4.
+2. **graph_promotion_jobs per-doc timeout/batching**: video job for doc 4bc34dfa894ad4c3ea3831073acb3419e9858e9af9b2198001ba8eb6cbdbba64 (claims_in=20,374) failed reason=claims_unpromoted at exactly 300s (03:54:59→03:59:59) — monster doc hits a 5-min budget. Needs claim-batch checkpointing or per-doc budget scaled to claims_in; otherwise this doc can never promote. Acceptance: that job re-run completes with receipts.
+3. **Control-plane note**: the "config split-brain" is smaller than reported — `summary_provider_pool` mongo collection is EMPTY (0 docs); live truth = `default_ingestion_config.summary_models`, which already carries correct extra_params (disable_thinking, schema_mode). One-registry consolidation still worth doing, but nothing is currently reading stale config.
+
+CLAUDE OPS (config territory, pending King GO): add `"microbatch_size": 1` to deepseek-assist-1 (ecom) + deepseek-assist-2 (video) — the same knob LongCat lanes already use; instant, reversible, no code. Predicted: truncation rejects → near-zero at the cost of ~4x call count / slightly higher input spend.
+
+## CLAUDE OPS FLAG (2026-07-21 ~04:20Z) — remaining missing summaries = 9 pinned docs at keyspace tail; drains silent since 04:01
+
+Facts (live-probed 04:14Z):
+- ALL remaining required-missing parent summaries live in **9 docs** (ecom 790 parents/6 docs, video 343/3 docs), every doc_id in the f8–ff tail of the keyspace, every doc `status=active, ingest_stage=queryable_with_pending_summary`.
+- **Zero `retrieval_parent_summary` jobs were ever planned for any of them** — each doc has exactly one `document_summary` job stuck `blocked_no_parent_summaries` (expected cascade; will clear when parents land). Meanwhile the summary_jobs queue holds 500 queued/corpus untouched since last_planned_at 2026-07-20 20:44 — the live drains (run_ids codex_deepseek_summary_*/codex_deepseek_assist_*) work OUTSIDE the queue. This is the two-drains-no-commander split, live.
+- The runner DOES eventually reach the tail: f83b479e (Kahneman) got a parent summary at 04:01:47Z. But these are the fat books (DDIA, Cambridge Handbook of Consumer Psychology, Kahneman) = prime `length_truncated` victims (see prior flag), so they burn split-retries.
+- **Both drains' last provider call = 04:01:47–49Z (ecom+video), assist runs stopped 03:46** — 13+ min silence as of 04:14. Wave pause or dead runner: please confirm liveness; if dead, relaunch.
+
+PINNED IDS (medic scoping law — target EXACTLY these, no status sweeps):
+- ecom 8dfb070a: f83b479e4edd… (kahneman, 146 missing), f92d59e2f7bb… (thaler mental accounting, 1), fca3710fdc74… (DDIA, 195), fd1ec9fe5be3… (dont-make-me-think, 45), fdb2da1cfac9… (cambridge handbook consumer psych, 281), ff2a2f540696… (play-bigger, 122)
+- video 149a2dcb: fb0876bf15d6… (cinematic storytelling, 199), fef8a8b7d875… (claude UGC yt, 19), ff89f3bb7f22… (elemental magic v2, 125)
+
+ASK: one targeted pass over these 9 doc_ids (parent summaries), then their 9 document_summary jobs unblock on their own. Planner tail-coverage fix folds into control-plane work.
+
+## CLAUDE → CODEX (2026-07-21 ~04:45Z) — CONTROL PLANE BUILD SPEC READY
+Full audit + ordered fixture list (F1 commander loop, F2 reasoned status, F3 provider registry, F4 promote batching, F5 interim unblocks) with acceptance probes:
+**CONTINUITY/CORPUS_CONTROL_PLANE_AUDIT.md** (graphify-guided: planners/runner/readiness/leases/cost-control all EXIST as request-scoped endpoints — the build is the resident loop + single-universe rule + reason-surfacing, ~3–5 days). Awaiting King's ordering sign-off; F5 ops items already actionable.

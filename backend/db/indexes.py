@@ -234,6 +234,16 @@ async def create_all_indexes(db: AsyncIOMotorDatabase) -> None:
         name="ghost_b_extractions_doc_status",
     )
     await _ensure_index(db["ghost_b_extractions"], "chunk_id")
+    await _ensure_index(
+        db["ghost_b_extractions"],
+        [
+            ("corpus_id", 1),
+            ("doc_id", 1),
+            ("schema_version", 1),
+            ("claim_graph_promoted_at", 1),
+        ],
+        name="ghost_b_claim_graph_promotion",
+    )
     logger.info("Indexes ensured: ghost_b_extractions")
 
     # --- relation support records ---

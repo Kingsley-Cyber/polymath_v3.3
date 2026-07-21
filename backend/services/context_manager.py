@@ -1123,7 +1123,9 @@ class ContextManager:
                     cond = getattr(f, "condition", None) or ""
                     ev = getattr(f, "evidence_phrase", None) or ""
                     conf = float(getattr(f, "confidence", 0.0) or 0.0)
-                    parts = [f"- {subject} ({fact_type})"]
+                    status = str(getattr(f, "knowledge_status", "") or "").strip()
+                    status_label = f"[{status}] " if status else ""
+                    parts = [f"- {status_label}{subject} ({fact_type})"]
                     if prop and val:
                         parts.append(f": {prop} = {val}{(' ' + unit) if unit else ''}")
                     elif val:

@@ -178,11 +178,19 @@ async def resolve_summary_provider_pool(
             # lightweight tests/adapters may not expose a settings collection.
             shared_key = None
 
-    flash_entries = [entry for entry in entries if _is_flash(entry)]
+    configured_enabled_entries = [
+        entry for entry in entries if entry.get("enabled") is not False and _model(entry)
+    ]
+    flash_entries = [
+        entry
+        for entry in entries
+        if entry.get("enabled") is not False and _is_flash(entry)
+    ]
     shared_flash_key_probe_ok = None
     shared_flash_key_error = None
     needs_shared_flash_key = bool(shared_key) and (
-        not flash_entries or any(not entry.get("api_key") for entry in flash_entries)
+        (not configured_enabled_entries and not flash_entries)
+        or any(not entry.get("api_key") for entry in flash_entries)
     )
     if needs_shared_flash_key:
         shared_flash_key_probe_ok, shared_flash_key_error = (
@@ -192,7 +200,7 @@ async def resolve_summary_provider_pool(
             )
         )
 
-    if not flash_entries:
+    if not flash_entries and not configured_enabled_entries:
         default_model = str(
             getattr(get_settings(), "GHOST_A_DEFAULT_MODEL", "")
             or "deepseek/deepseek-v4-flash"

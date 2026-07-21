@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 import math
+import os
 from typing import List, Optional
 
 from config import get_settings
@@ -27,6 +28,12 @@ from models.schemas import SourceFact
 from neo4j import AsyncGraphDatabase
 
 logger = logging.getLogger(__name__)
+
+
+def _knowledge_status_min() -> str:
+    value = os.getenv("FACT_KNOWLEDGE_STATUS_MIN", "candidate")
+    value = str(value or "candidate").strip().lower()
+    return value if value in {"candidate", "accepted"} else "candidate"
 
 
 class FactRetrieval:
@@ -105,6 +112,10 @@ class FactRetrieval:
             UNWIND $entity_ids AS entity_id
             MATCH (e:Entity {{entity_id: entity_id}})-[:HAS_FACT]->(f:Fact)
             WHERE ($corpus_ids = [] OR f.corpus_id IN $corpus_ids)
+              AND (
+                    $knowledge_status_min = 'candidate'
+                    OR coalesce(f.knowledge_status, 'accepted') = 'accepted'
+                  )
             """
             if fact_types:
                 cypher += "  AND f.fact_type IN $fact_types\n"
@@ -132,6 +143,7 @@ class FactRetrieval:
                 c.chunk_id        AS chunk_id,
                 f.doc_id          AS doc_id,
                 f.corpus_id       AS corpus_id,
+                coalesce(f.knowledge_status, 'accepted') AS knowledge_status,
                 semantic_rank     AS semantic_rank
             ORDER BY semantic_rank DESC, coalesce(f.confidence, 0.0) DESC, f.fact_id ASC
             LIMIT $limit
@@ -147,6 +159,10 @@ class FactRetrieval:
             cypher = f"""
             MATCH (e:Entity)-[:HAS_FACT]->(f:Fact)
             {where_clause}
+              AND (
+                    $knowledge_status_min = 'candidate'
+                    OR coalesce(f.knowledge_status, 'accepted') = 'accepted'
+                  )
             """
             if corpus_ids:
                 cypher += "  AND f.corpus_id IN $corpus_ids\n"
@@ -168,6 +184,7 @@ class FactRetrieval:
                 c.chunk_id        AS chunk_id,
                 f.doc_id          AS doc_id,
                 f.corpus_id       AS corpus_id,
+                coalesce(f.knowledge_status, 'accepted') AS knowledge_status,
                 semantic_rank     AS semantic_rank
             ORDER BY semantic_rank DESC, coalesce(f.confidence, 0.0) DESC, f.fact_id ASC
             LIMIT $limit
@@ -181,6 +198,7 @@ class FactRetrieval:
                     entity_names_lc=entity_names_lc,
                     corpus_ids=corpus_ids or [],
                     fact_types=fact_types or [],
+                    knowledge_status_min=_knowledge_status_min(),
                     limit=limit,
                     per_entity_limit=per_entity_limit,
                 )
@@ -202,6 +220,7 @@ class FactRetrieval:
                         chunk_id=row.get("chunk_id"),
                         doc_id=row.get("doc_id"),
                         corpus_id=row.get("corpus_id"),
+                        knowledge_status=row.get("knowledge_status"),
                     )
                 )
             logger.info(
