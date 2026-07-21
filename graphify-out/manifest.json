@@ -1345,9 +1345,9 @@
     "semantic_hash": "24c29ca01cd3ef0e28a8e3e534e4f5d5"
   },
   "services/ingestion/graph_promotion_jobs.py": {
-    "mtime": 1784612021.7117274,
-    "ast_hash": "d4df9cc3c38c067e9afd6c68a0ba1217",
-    "semantic_hash": "d4df9cc3c38c067e9afd6c68a0ba1217"
+    "mtime": 1784633643.0676162,
+    "ast_hash": "6496d72e6383022f5e6c7fb57a2b68a4",
+    "semantic_hash": "6496d72e6383022f5e6c7fb57a2b68a4"
   },
   "services/ingestion/idempotency_audit.py": {
     "mtime": 1783603552.1951993,
@@ -2565,9 +2565,9 @@
     "semantic_hash": "cfcb4c2c11329754f0f88e3906efb3c6"
   },
   "tests/test_graph_promotion_jobs.py": {
-    "mtime": 1783605352.6391795,
-    "ast_hash": "17be8538d4837854c15ee0acf296b8ef",
-    "semantic_hash": "17be8538d4837854c15ee0acf296b8ef"
+    "mtime": 1784633660.4094968,
+    "ast_hash": "aa28d102f9eee3f59531071cb4cdbda2",
+    "semantic_hash": "aa28d102f9eee3f59531071cb4cdbda2"
   },
   "tests/test_graph_query_hybrid.py": {
     "mtime": 1782017888.0438342,

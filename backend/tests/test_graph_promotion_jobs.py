@@ -416,6 +416,64 @@ async def test_run_graph_promotion_jobs_marks_partial_flush_promoted(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_run_graph_promotion_jobs_completion_is_guarded_by_claimed_owner(
+    monkeypatch,
+):
+    jobs = _FakeQueuedJobsCollection(
+        [
+            {
+                "job_id": "graph-job-1",
+                "corpus_id": "corpus-1",
+                "doc_id": "doc-1",
+                "user_id": "user-1",
+                "status": "queued",
+            }
+        ]
+    )
+    db = _FakeDb(
+        {
+            "graph_promotion_jobs": jobs,
+            "ghost_b_extractions": _FakeUpdateCollection(modified_count=0),
+            "extraction_jobs": _FakeUpdateCollection(modified_count=0),
+        }
+    )
+
+    async def fake_backfill_failed_graph_chunks(**_kwargs):
+        assert jobs.jobs[0]["status"] == "running"
+        original_started = jobs.jobs[0]["started_at"]
+        jobs.jobs[0]["started_at"] = original_started.replace(microsecond=1)
+        jobs.jobs[0]["last_run_at"] = jobs.jobs[0]["started_at"]
+        jobs.jobs[0]["lease_until"] = jobs.jobs[0]["lease_until"].replace(microsecond=1)
+        return {
+            "status": "done",
+            "doc_id": "doc-1",
+            "corpus_id": "corpus-1",
+            "remaining_failed_chunks": 0,
+            "neo4j_flushed": True,
+            "staged_results_written": 3,
+        }
+
+    monkeypatch.setattr(
+        "services.ingestion.graph_backfill.backfill_failed_graph_chunks",
+        fake_backfill_failed_graph_chunks,
+    )
+
+    result = await run_graph_promotion_jobs(
+        db,
+        qdrant_client=None,
+        neo4j_driver=object(),
+        corpus_id="corpus-1",
+        user_id="user-1",
+    )
+
+    assert result["counts"]["done"] == 0
+    assert result["counts"]["lost_ownership"] == 1
+    assert result["results"][0]["status"] == "lost_ownership"
+    assert result["results"][0]["attempted_status"] == "done"
+    assert jobs.jobs[0]["status"] == "running"
+
+
+@pytest.mark.asyncio
 async def test_run_graph_promotion_jobs_blocks_extraction_required_without_model_calls(monkeypatch):
     jobs = _FakeQueuedJobsCollection(
         [

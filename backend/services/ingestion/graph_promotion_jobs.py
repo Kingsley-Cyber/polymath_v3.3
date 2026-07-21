@@ -732,6 +732,7 @@ async def run_graph_promotion_jobs(
         "noop": 0,
         "blocked_no_extractions": 0,
         "failed": 0,
+        "lost_ownership": 0,
     }
     if reclaimed:
         counts["reclaimed"] = reclaimed
@@ -739,13 +740,18 @@ async def run_graph_promotion_jobs(
 
     for job in jobs:
         job_id = str(job["job_id"])
+        runner = "graph_promotion_jobs.run"
+        started_at = now
+        lease_until = lease_deadline(now)
         lease = await db["graph_promotion_jobs"].update_one(
             {"job_id": job_id, "status": "queued"},
             {
                 "$set": {
                     "status": "running",
-                    "started_at": now,
-                    "lease_until": lease_deadline(now),
+                    "runner": runner,
+                    "started_at": started_at,
+                    "last_run_at": started_at,
+                    "lease_until": lease_until,
                     "updated_at": datetime.utcnow(),
                 },
                 "$inc": {"neo4j_write_attempts": 1},
@@ -825,9 +831,15 @@ async def run_graph_promotion_jobs(
                 if final_status in {"done", "partial"}
                 else {"ghost_b_rows_promoted": 0, "extraction_jobs_promoted": 0}
             )
-            counts[final_status] += 1
-            await db["graph_promotion_jobs"].update_one(
-                {"job_id": job_id},
+            completion = await db["graph_promotion_jobs"].update_one(
+                {
+                    "job_id": job_id,
+                    "status": "running",
+                    "runner": runner,
+                    "started_at": started_at,
+                    "last_run_at": started_at,
+                    "lease_until": lease_until,
+                },
                 {
                     "$set": {
                         "status": final_status,
@@ -840,14 +852,20 @@ async def run_graph_promotion_jobs(
                         "completed_at": datetime.utcnow(),
                         "updated_at": datetime.utcnow(),
                     },
-                    "$unset": {"failure_reason": ""},
+                    "$unset": {"failure_reason": "", "runner": "", "started_at": ""},
                 },
             )
+            completed_owned = int(getattr(completion, "modified_count", 0) or 0) > 0
+            if completed_owned:
+                counts[final_status] += 1
+            else:
+                counts["lost_ownership"] += 1
             results.append(
                 {
                     "job_id": job_id,
                     "doc_id": job.get("doc_id"),
-                    "status": final_status,
+                    "status": final_status if completed_owned else "lost_ownership",
+                    "attempted_status": final_status,
                     "neo4j_write_latency_ms": neo4j_write_latency_ms,
                     "promoted_counts": promoted_counts,
                     "claim_promotion_result": claim_result,
@@ -855,9 +873,15 @@ async def run_graph_promotion_jobs(
             )
         except Exception as exc:  # noqa: BLE001
             neo4j_write_latency_ms = _elapsed_ms(started_perf)
-            counts["failed"] += 1
-            await db["graph_promotion_jobs"].update_one(
-                {"job_id": job_id},
+            completion = await db["graph_promotion_jobs"].update_one(
+                {
+                    "job_id": job_id,
+                    "status": "running",
+                    "runner": runner,
+                    "started_at": started_at,
+                    "last_run_at": started_at,
+                    "lease_until": lease_until,
+                },
                 {
                     "$set": {
                         "status": "failed",
@@ -867,14 +891,21 @@ async def run_graph_promotion_jobs(
                         "lease_until": None,
                         "completed_at": datetime.utcnow(),
                         "updated_at": datetime.utcnow(),
-                    }
+                    },
+                    "$unset": {"runner": "", "started_at": ""},
                 },
             )
+            completed_owned = int(getattr(completion, "modified_count", 0) or 0) > 0
+            if completed_owned:
+                counts["failed"] += 1
+            else:
+                counts["lost_ownership"] += 1
             results.append(
                 {
                     "job_id": job_id,
                     "doc_id": job.get("doc_id"),
-                    "status": "failed",
+                    "status": "failed" if completed_owned else "lost_ownership",
+                    "attempted_status": "failed",
                     "neo4j_write_latency_ms": neo4j_write_latency_ms,
                     "failure_reason": str(exc)[:300],
                 }
