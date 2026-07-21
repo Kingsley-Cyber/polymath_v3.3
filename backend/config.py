@@ -1193,6 +1193,15 @@ class Settings(BaseSettings):
             "provider semaphores, and pressure gates remain authoritative."
         ),
     )
+    INGEST_AUTO_REPAIR_RUN_SOURCE_PARSE: bool = Field(
+        default=True,
+        description=(
+            "Allow the automatic repair tick to request queued source/parse "
+            "work through the durable batch runner bridge. Runner start still "
+            "requires INGEST_RUNNERS_ENABLED=true, so query-only API processes "
+            "defer instead of parsing files locally."
+        ),
+    )
     INGEST_AUTO_REPAIR_RUN_DOCUMENT_PIPELINE: bool = Field(
         default=False,
         description=(
@@ -1216,6 +1225,12 @@ class Settings(BaseSettings):
             "provider-backed extraction/summary spend, and still respects "
             "graph_promotion_allowed backpressure."
         ),
+    )
+    INGEST_AUTO_REPAIR_SOURCE_PARSE_RUN_LIMIT: int = Field(
+        default=25,
+        ge=1,
+        le=500,
+        description="Maximum source/parse queue rows requested in one automatic repair tick.",
     )
     INGEST_AUTO_REPAIR_DOCUMENT_RUN_LIMIT: int = Field(
         default=25,

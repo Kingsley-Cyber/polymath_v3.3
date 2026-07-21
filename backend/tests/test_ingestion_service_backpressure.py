@@ -427,6 +427,7 @@ async def test_auto_corpus_repair_tick_plans_without_running_provider_lanes(monk
     class _Settings:
         INGEST_AUTO_REPAIR_ENABLED = True
         INGEST_AUTO_REPAIR_CORPUS_LIMIT = 5
+        INGEST_AUTO_REPAIR_RUN_SOURCE_PARSE = False
         INGEST_AUTO_REPAIR_RUN_DOCUMENT_PIPELINE = False
         INGEST_AUTO_REPAIR_RUN_EXTRACTION = False
         INGEST_AUTO_REPAIR_RUN_SUMMARIES = False
@@ -476,6 +477,7 @@ async def test_auto_corpus_repair_tick_can_run_bounded_graph_lane(monkeypatch):
     class _Settings:
         INGEST_AUTO_REPAIR_ENABLED = True
         INGEST_AUTO_REPAIR_CORPUS_LIMIT = 5
+        INGEST_AUTO_REPAIR_RUN_SOURCE_PARSE = False
         INGEST_AUTO_REPAIR_RUN_DOCUMENT_PIPELINE = False
         INGEST_AUTO_REPAIR_RUN_EXTRACTION = False
         INGEST_AUTO_REPAIR_RUN_SUMMARIES = False
@@ -526,6 +528,67 @@ async def test_auto_corpus_repair_tick_can_run_bounded_graph_lane(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_auto_corpus_repair_tick_runs_source_parse_lane(monkeypatch):
+    service = IngestionService()
+    service._db = _AutoRepairDb()
+    calls = []
+
+    class _Settings:
+        INGEST_AUTO_REPAIR_ENABLED = True
+        INGEST_AUTO_REPAIR_CORPUS_LIMIT = 5
+        INGEST_AUTO_REPAIR_RUN_SOURCE_PARSE = True
+        INGEST_AUTO_REPAIR_SOURCE_PARSE_RUN_LIMIT = 11
+        INGEST_AUTO_REPAIR_RUN_DOCUMENT_PIPELINE = False
+        INGEST_AUTO_REPAIR_RUN_EXTRACTION = False
+        INGEST_AUTO_REPAIR_RUN_SUMMARIES = False
+        INGEST_AUTO_REPAIR_RUN_GRAPH = False
+
+    async def fake_cycle(**kwargs):
+        calls.append(("cycle", kwargs))
+        return {
+            "status": "complete",
+            "summary": {
+                "readiness_status": "needs_source_parse",
+                "queryable_docs": 0,
+                "total_docs": 1,
+                "failed_chunks": 0,
+                "graph_jobs_queued": 0,
+                "extraction_jobs_queued": 0,
+                "summary_jobs_queued": 0,
+                "document_pipeline_jobs_queued": 0,
+            },
+        }
+
+    async def fake_run_source_parse_jobs(**kwargs):
+        calls.append(("run_source", kwargs))
+        return {
+            "status": "started",
+            "claimed": 1,
+            "requested": 1,
+            "eligible_items": 1,
+            "counts": {"running": 1},
+        }
+
+    monkeypatch.setattr("services.ingestion_service.get_settings", lambda: _Settings())
+    monkeypatch.setattr(service, "run_bounded_corpus_repair_cycle", fake_cycle)
+    monkeypatch.setattr(service, "run_source_parse_jobs", fake_run_source_parse_jobs)
+
+    result = await service.run_auto_corpus_repair_tick()
+
+    assert calls[0][0] == "cycle"
+    assert calls[0][1]["run_source_parse_jobs"] is False
+    assert calls[1] == (
+        "run_source",
+        {"corpus_id": "corpus-1", "user_id": "user-1", "limit": 11},
+    )
+    assert result["corpora"][0]["provider_lanes"]["source_parse"] == {
+        "status": "started",
+        "claimed": 1,
+        "counts": {"running": 1},
+    }
+
+
+@pytest.mark.asyncio
 async def test_auto_corpus_repair_tick_runs_provider_lanes_concurrently(monkeypatch):
     service = IngestionService()
     service._db = _AutoRepairDb()
@@ -536,6 +599,7 @@ async def test_auto_corpus_repair_tick_runs_provider_lanes_concurrently(monkeypa
     class _Settings:
         INGEST_AUTO_REPAIR_ENABLED = True
         INGEST_AUTO_REPAIR_CORPUS_LIMIT = 5
+        INGEST_AUTO_REPAIR_RUN_SOURCE_PARSE = False
         INGEST_AUTO_REPAIR_RUN_DOCUMENT_PIPELINE = False
         INGEST_AUTO_REPAIR_RUN_EXTRACTION = True
         INGEST_AUTO_REPAIR_EXTRACTION_RUN_LIMIT = 41
@@ -609,6 +673,7 @@ async def test_auto_corpus_repair_tick_does_not_serialize_corpora(monkeypatch):
         INGEST_AUTO_REPAIR_ENABLED = True
         INGEST_AUTO_REPAIR_CORPUS_LIMIT = 2
         INGEST_AUTO_REPAIR_CORPUS_CONCURRENCY = 2
+        INGEST_AUTO_REPAIR_RUN_SOURCE_PARSE = False
         INGEST_AUTO_REPAIR_RUN_DOCUMENT_PIPELINE = True
         INGEST_AUTO_REPAIR_DOCUMENT_RUN_LIMIT = 1
         INGEST_AUTO_REPAIR_RUN_EXTRACTION = False

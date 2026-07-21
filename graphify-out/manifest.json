@@ -1,8 +1,8 @@
 {
   "config.py": {
-    "mtime": 1784348096.1208062,
-    "ast_hash": "079615ba5094bb5737999df4193654f5",
-    "semantic_hash": "079615ba5094bb5737999df4193654f5"
+    "mtime": 1784634226.7393637,
+    "ast_hash": "fc2a6a4ced3e4f4046592654b8c19ce2",
+    "semantic_hash": "fc2a6a4ced3e4f4046592654b8c19ce2"
   },
   "db/__init__.py": {
     "mtime": 1779629203.8214962,
@@ -1535,9 +1535,9 @@
     "semantic_hash": "ea1d6b8aa7bec5d056e27786b348df1a"
   },
   "services/ingestion_service.py": {
-    "mtime": 1784634053.4829423,
-    "ast_hash": "e3c60abf4cc0a157898896c2116e3578",
-    "semantic_hash": "e3c60abf4cc0a157898896c2116e3578"
+    "mtime": 1784634239.301377,
+    "ast_hash": "a2318474e1170b7a404f7c0280c12700",
+    "semantic_hash": "a2318474e1170b7a404f7c0280c12700"
   },
   "services/librarian/__init__.py": {
     "mtime": 1783922382.3872674,
@@ -2680,9 +2680,9 @@
     "semantic_hash": "f1d37068929cdc5174701b6ffd735876"
   },
   "tests/test_ingestion_service_backpressure.py": {
-    "mtime": 1784136417.434658,
-    "ast_hash": "b837d62a2005ec897411ba08d5a37cf3",
-    "semantic_hash": "b837d62a2005ec897411ba08d5a37cf3"
+    "mtime": 1784634286.0993283,
+    "ast_hash": "4fcd03384d63090ffd7e5dee2cdfd353",
+    "semantic_hash": "4fcd03384d63090ffd7e5dee2cdfd353"
   },
   "tests/test_ingestion_service_corpus_readiness_response.py": {
     "mtime": 1783644674.025916,

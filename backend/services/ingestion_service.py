@@ -3210,6 +3210,9 @@ class IngestionService:
             run_extraction_lane = bool(
                 getattr(settings, "INGEST_AUTO_REPAIR_RUN_EXTRACTION", False)
             )
+            run_source_parse_lane = bool(
+                getattr(settings, "INGEST_AUTO_REPAIR_RUN_SOURCE_PARSE", True)
+            )
             run_summary_lane = bool(
                 getattr(settings, "INGEST_AUTO_REPAIR_RUN_SUMMARIES", False)
             )
@@ -3218,6 +3221,9 @@ class IngestionService:
             )
             run_graph_lane = bool(
                 getattr(settings, "INGEST_AUTO_REPAIR_RUN_GRAPH", True)
+            )
+            source_parse_run_limit = int(
+                getattr(settings, "INGEST_AUTO_REPAIR_SOURCE_PARSE_RUN_LIMIT", 25) or 25
             )
             document_run_limit = int(
                 getattr(settings, "INGEST_AUTO_REPAIR_DOCUMENT_RUN_LIMIT", 25) or 25
@@ -3367,6 +3373,15 @@ class IngestionService:
 
                 lane_names: list[str] = []
                 lane_coroutines: list[Any] = []
+                if run_source_parse_lane:
+                    lane_names.append("source_parse")
+                    lane_coroutines.append(
+                        self.run_source_parse_jobs(
+                            corpus_id=corpus_id,
+                            user_id=user_id,
+                            limit=source_parse_run_limit,
+                        )
+                    )
                 if run_document_lane:
                     lane_names.append("document_pipeline")
                     lane_coroutines.append(
@@ -3424,8 +3439,12 @@ class IngestionService:
                         else:
                             provider_lanes[lane_name] = lane_result
                     logger.info(
-                        "Auto repair lanes corpus=%s document=%s summary=%s extraction=%s graph=%s",
+                        "Auto repair lanes corpus=%s source=%s document=%s summary=%s extraction=%s graph=%s",
                         corpus_id[:8],
+                        {
+                            key: provider_lanes.get("source_parse", {}).get(key)
+                            for key in ("status", "claimed", "requested")
+                        },
                         {
                             key: provider_lanes.get("document_pipeline", {}).get(key)
                             for key in ("status", "claimed")
