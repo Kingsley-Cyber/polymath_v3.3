@@ -2899,6 +2899,69 @@ class IngestionService:
         result["summary_cost_receipt"] = await summary_cost_controller.snapshot()
         return result
 
+    async def run_corpus_commander_cycle(
+        self,
+        *,
+        corpus_id: str,
+        user_id: str | None = None,
+        apply: bool = True,
+        summary_plan_limit: int = 500,
+        graph_plan_limit: int = 500,
+        max_plan_pages: int = 100,
+        summary_run_slices: int = 0,
+        summary_run_limit: int = 25,
+        graph_run_slices: int = 0,
+        graph_run_limit: int = 5,
+        summary_cost_authority_usd: Any | None = None,
+    ) -> dict:
+        """Run one owned ingestion commander cycle for a corpus.
+
+        The commander owns planning/reconcile/readiness. Paid summary execution
+        only runs when the caller provides ``summary_cost_authority_usd`` and
+        requests summary slices; vector repair uses existing summary text only.
+        """
+
+        from services.ingestion.corpus_commander import run_corpus_commander_cycle
+
+        async def _summary_runner(*, limit: int) -> dict:
+            if summary_cost_authority_usd is None:
+                return {
+                    "status": "skipped",
+                    "claimed": 0,
+                    "reason": "summary_cost_authority_usd_required",
+                }
+            return await self.run_summary_jobs(
+                corpus_id=corpus_id,
+                user_id=user_id,
+                limit=limit,
+                summary_cost_run_id=f"commander_summary_{corpus_id[:8]}",
+                summary_cost_authority_usd=summary_cost_authority_usd,
+            )
+
+        async def _graph_runner(*, limit: int) -> dict:
+            return await self.run_graph_promotion_jobs(
+                corpus_id=corpus_id,
+                user_id=str(user_id or ""),
+                limit=limit,
+            )
+
+        return await run_corpus_commander_cycle(
+            self._db,
+            corpus_id=corpus_id,
+            user_id=user_id,
+            qdrant_client=self._qdrant,
+            apply=apply,
+            summary_plan_limit=summary_plan_limit,
+            graph_plan_limit=graph_plan_limit,
+            max_plan_pages=max_plan_pages,
+            summary_runner=_summary_runner if summary_run_slices else None,
+            summary_run_slices=summary_run_slices,
+            summary_run_limit=summary_run_limit,
+            graph_runner=_graph_runner if graph_run_slices else None,
+            graph_run_slices=graph_run_slices,
+            graph_run_limit=graph_run_limit,
+        )
+
     async def run_bounded_corpus_repair_cycle(
         self,
         *,

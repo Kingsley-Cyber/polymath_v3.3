@@ -2142,6 +2142,44 @@ async def run_summary_jobs(
     )
 
 
+@router.post("/corpora/{corpus_id}/ingestion/commander/cycle")
+async def run_corpus_commander_cycle(
+    corpus_id: str,
+    apply: bool = Query(default=True),
+    summary_plan_limit: int = Query(default=500, ge=1, le=5000),
+    graph_plan_limit: int = Query(default=500, ge=1, le=5000),
+    max_plan_pages: int = Query(default=100, ge=1, le=500),
+    summary_run_slices: int = Query(default=0, ge=0, le=100),
+    summary_run_limit: int = Query(default=25, ge=1, le=500),
+    graph_run_slices: int = Query(default=0, ge=0, le=100),
+    graph_run_limit: int = Query(default=5, ge=1, le=100),
+    summary_cost_authority_usd: float | None = Query(default=None, ge=0),
+    current_user: dict = Depends(get_current_user),
+):
+    """Run one owned control-plane reconcile cycle for a corpus."""
+    existing = await ingestion_service.get_corpus(corpus_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Corpus not found")
+    result = await ingestion_service.run_corpus_commander_cycle(
+        corpus_id=corpus_id,
+        user_id=current_user["user_id"],
+        apply=apply,
+        summary_plan_limit=summary_plan_limit,
+        graph_plan_limit=graph_plan_limit,
+        max_plan_pages=max_plan_pages,
+        summary_run_slices=summary_run_slices,
+        summary_run_limit=summary_run_limit,
+        graph_run_slices=graph_run_slices,
+        graph_run_limit=graph_run_limit,
+        summary_cost_authority_usd=summary_cost_authority_usd,
+    )
+    return await _attach_corpus_readiness(
+        result,
+        corpus_id=corpus_id,
+        context="corpus commander cycle",
+    )
+
+
 @router.get("/corpora/{corpus_id}/ingestion/document-pipeline-jobs")
 async def list_document_pipeline_jobs(
     corpus_id: str,

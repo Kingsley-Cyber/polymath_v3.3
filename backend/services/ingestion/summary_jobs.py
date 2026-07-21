@@ -36,6 +36,12 @@ FAILED_STATUSES = {
 }
 TERMINAL_STATUSES = {"succeeded", "skipped"}
 SUPERSEDABLE_STATUSES = ACTIVE_STATUSES | FAILED_STATUSES
+MATERIALIZED_JOB_STATUSES = (
+    ACTIVE_STATUSES
+    | FAILED_STATUSES
+    | TERMINAL_STATUSES
+    | {DEAD_LETTER_JOB_STATUS}
+) - {"skipped"}
 SUMMARY_TEXT_CLAUSE: dict[str, Any] = {
     "summary": {"$exists": True, "$nin": [None, ""]}
 }
@@ -426,9 +432,11 @@ async def _document_summary_candidate_docs(
     user_id: str | None,
     limit: int,
     doc_ids: list[str] | None = None,
+    exclude_doc_ids: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Return docs whose document-summary artifact pair is incomplete."""
 
+    excluded = {str(doc_id) for doc_id in (exclude_doc_ids or set()) if str(doc_id)}
     doc_match = with_active_records(
         {
             "corpus_id": corpus_id,
@@ -441,6 +449,18 @@ async def _document_summary_candidate_docs(
         doc_match["doc_id"] = {
             "$in": sorted({str(doc_id) for doc_id in doc_ids if str(doc_id)})
         }
+    if excluded:
+        doc_id_clause = doc_match.get("doc_id")
+        if isinstance(doc_id_clause, dict) and "$in" in doc_id_clause:
+            doc_match["doc_id"] = {
+                "$in": [
+                    doc_id
+                    for doc_id in doc_id_clause["$in"]
+                    if str(doc_id) not in excluded
+                ]
+            }
+        else:
+            doc_match["doc_id"] = {"$nin": sorted(excluded)}
     projection = {
         "_id": 0,
         "doc_id": 1,
@@ -521,10 +541,60 @@ async def _document_summary_candidate_docs(
         fallback_query["doc_id"] = {
             "$in": sorted({str(doc_id) for doc_id in doc_ids if str(doc_id)})
         }
+    if excluded:
+        doc_id_clause = fallback_query.get("doc_id")
+        if isinstance(doc_id_clause, dict) and "$in" in doc_id_clause:
+            fallback_query["doc_id"] = {
+                "$in": [
+                    doc_id
+                    for doc_id in doc_id_clause["$in"]
+                    if str(doc_id) not in excluded
+                ]
+            }
+        else:
+            fallback_query["doc_id"] = {"$nin": sorted(excluded)}
     return await db["documents"].find(
         fallback_query,
         projection,
     ).limit(limit).to_list(length=limit)
+
+
+async def _materialized_summary_target_ids(
+    db: Any,
+    *,
+    corpus_id: str,
+    kind: str,
+    target_field: str,
+    user_id: str | None = None,
+    doc_ids: list[str] | None = None,
+    limit: int = 200000,
+) -> set[str]:
+    """Return targets already owned by a durable summary queue row.
+
+    Planning must page the full missing-artifact universe. Without excluding
+    already materialized queue rows, repeated bounded planner calls keep seeing
+    the same first page of missing artifacts and can orphan the keyspace tail.
+    """
+
+    query: dict[str, Any] = {
+        "corpus_id": corpus_id,
+        "kind": kind,
+        "status": {"$in": sorted(MATERIALIZED_JOB_STATUSES)},
+        target_field: {"$exists": True, "$nin": [None, ""]},
+    }
+    if doc_ids is not None:
+        query["doc_id"] = {
+            "$in": sorted({str(doc_id) for doc_id in doc_ids if str(doc_id)})
+        }
+    rows = await db["summary_jobs"].find(
+        query,
+        {"_id": 0, target_field: 1},
+    ).limit(max(1, int(limit or 200000))).to_list(length=None)
+    return {
+        str(row.get(target_field) or "")
+        for row in rows
+        if str(row.get(target_field) or "")
+    }
 
 
 async def _parent_job_status_after_run(
@@ -706,6 +776,14 @@ async def plan_summary_jobs(
     remaining = limit
 
     if "retrieval_parent_summary" in kinds_set and remaining > 0:
+        materialized_parent_ids = await _materialized_summary_target_ids(
+            db,
+            corpus_id=corpus_id,
+            kind="retrieval_parent_summary",
+            target_field="parent_id",
+            user_id=user_id,
+            doc_ids=doc_ids,
+        )
         parent_query = with_active_records(
             {
                 "corpus_id": corpus_id,
@@ -716,6 +794,8 @@ async def plan_summary_jobs(
             parent_query["doc_id"] = {
                 "$in": sorted({str(doc_id) for doc_id in doc_ids if str(doc_id)})
             }
+        if materialized_parent_ids:
+            parent_query["parent_id"] = {"$nin": sorted(materialized_parent_ids)}
         parent_rows = await db["parent_chunks"].find(
             parent_query,
             {
@@ -754,12 +834,21 @@ async def plan_summary_jobs(
         remaining = max(limit - len(jobs), 0)
 
     if "document_summary" in kinds_set and remaining > 0:
+        materialized_doc_ids = await _materialized_summary_target_ids(
+            db,
+            corpus_id=corpus_id,
+            kind="document_summary",
+            target_field="doc_id",
+            user_id=user_id,
+            doc_ids=doc_ids,
+        )
         doc_rows = await _document_summary_candidate_docs(
             db,
             corpus_id=corpus_id,
             user_id=user_id,
             limit=remaining,
             doc_ids=doc_ids,
+            exclude_doc_ids=materialized_doc_ids,
         )
         parent_clause = parent_summary_required_clause()
         for doc in doc_rows:
