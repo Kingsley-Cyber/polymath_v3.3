@@ -1168,14 +1168,57 @@ async def _mark_jobs(
     db: Any,
     *,
     updates: dict[str, dict[str, Any]],
-) -> None:
+    claimed_jobs: list[dict[str, Any]] | None = None,
+) -> int:
     if not updates:
-        return
-    ops = [
-        UpdateOne({"job_id": job_id}, {"$set": update})
-        for job_id, update in updates.items()
-    ]
-    await db["extraction_jobs"].bulk_write(ops, ordered=False)
+        return 0
+    claimed_by_id = {
+        str(job.get("job_id") or ""): job
+        for job in (claimed_jobs or [])
+        if str(job.get("job_id") or "")
+    }
+    ops = []
+    for job_id, update in updates.items():
+        query: dict[str, Any] = {"job_id": job_id}
+        claimed = claimed_by_id.get(str(job_id))
+        if claimed:
+            query["status"] = "running"
+            runner = claimed.get("runner")
+            if runner is not None:
+                query["runner"] = runner
+            last_run_at = claimed.get("last_run_at")
+            if last_run_at is not None:
+                query["last_run_at"] = last_run_at
+            lease_until = claimed.get("lease_until")
+            if lease_until is not None:
+                query["lease_until"] = lease_until
+        ops.append(
+            UpdateOne(
+                query,
+                {
+                    "$set": update,
+                    "$unset": {"runner": "", "started_at": ""},
+                },
+            )
+        )
+    result = await db["extraction_jobs"].bulk_write(ops, ordered=False)
+    return int(getattr(result, "modified_count", 0) or 0)
+
+
+def _status_counts_from_updates(
+    updates: dict[str, dict[str, Any]],
+    *,
+    modified_count: int | None = None,
+) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for update in updates.values():
+        status = str(update.get("status") or "unknown")
+        counts[status] = counts.get(status, 0) + 1
+    if modified_count is not None:
+        lost_ownership = max(0, len(updates) - int(modified_count or 0))
+        if lost_ownership:
+            counts["lost_ownership"] = lost_ownership
+    return counts
 
 
 async def run_extraction_jobs(
@@ -1289,26 +1332,32 @@ async def run_extraction_jobs(
                 corpus_id=corpus_id,
             ):
                 deferred_at = datetime.utcnow()
-                await _mark_jobs(
+                defer_updates = {
+                    job["job_id"]: {
+                        "status": "queued",
+                        "reason": "active_ingest_owned",
+                        "lease_until": None,
+                        "updated_at": deferred_at,
+                    }
+                    for job in doc_jobs
+                }
+                modified = await _mark_jobs(
                     db,
-                    updates={
-                        job["job_id"]: {
-                            "status": "queued",
-                            "reason": "active_ingest_owned",
-                            "runner": None,
-                            "lease_until": None,
-                            "updated_at": deferred_at,
-                        }
-                        for job in doc_jobs
-                    },
+                    updates=defer_updates,
+                    claimed_jobs=doc_jobs,
+                )
+                status_counts = _status_counts_from_updates(
+                    defer_updates,
+                    modified_count=modified,
                 )
                 return (
                     {
                         "doc_id": doc_id,
                         "status": "deferred",
                         "reason": "active_ingest_owned",
+                        "lost_ownership": status_counts.get("lost_ownership", 0),
                     },
-                    {"deferred": len(doc_jobs)},
+                    status_counts,
                 )
             chunk_ids = [
                 str(job.get("chunk_id") or "")
@@ -1327,10 +1376,14 @@ async def run_extraction_jobs(
                         skipped_reason="document_missing",
                         now=now,
                     )
-                await _mark_jobs(db, updates=updates)
+                modified = await _mark_jobs(
+                    db,
+                    updates=updates,
+                    claimed_jobs=doc_jobs,
+                )
                 return (
                     {"doc_id": doc_id, "status": "skipped", "reason": "document_missing"},
-                    {"skipped": len(updates)},
+                    _status_counts_from_updates(updates, modified_count=modified),
                 )
 
             try:
@@ -1429,15 +1482,15 @@ async def run_extraction_jobs(
                     doc_id=doc_id,
                     corpus_id=corpus_id,
                 )
-                await _mark_jobs(db, updates=updates)
-                status_counts = {
-                    status: sum(
-                        1 for update in updates.values() if update["status"] == status
-                    )
-                    for status in sorted(
-                        {update["status"] for update in updates.values()}
-                    )
-                }
+                modified = await _mark_jobs(
+                    db,
+                    updates=updates,
+                    claimed_jobs=doc_jobs,
+                )
+                status_counts = _status_counts_from_updates(
+                    updates,
+                    modified_count=modified,
+                )
                 return (
                     {
                         "doc_id": doc_id,
@@ -1445,6 +1498,7 @@ async def run_extraction_jobs(
                         "requested_chunks": len(chunk_ids),
                         "ran_chunks": len(tasks),
                         "job_counts": status_counts,
+                        "lost_ownership": status_counts.get("lost_ownership", 0),
                         "document_counts": doc_counts,
                         "metrics": metrics,
                     },
@@ -1457,18 +1511,22 @@ async def run_extraction_jobs(
                         error=exc,
                         now=now,
                     )
-                await _mark_jobs(db, updates=updates)
-                status_counts: dict[str, int] = {}
-                for update in updates.values():
-                    status_counts[update["status"]] = (
-                        status_counts.get(update["status"], 0) + 1
-                    )
+                modified = await _mark_jobs(
+                    db,
+                    updates=updates,
+                    claimed_jobs=doc_jobs,
+                )
+                status_counts = _status_counts_from_updates(
+                    updates,
+                    modified_count=modified,
+                )
                 return (
                     {
                         "doc_id": doc_id,
                         "status": "failed",
                         "error_type": type(exc).__name__,
                         "error_message": str(exc)[:1000],
+                        "lost_ownership": status_counts.get("lost_ownership", 0),
                     },
                     status_counts,
                 )

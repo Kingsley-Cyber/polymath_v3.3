@@ -2,6 +2,7 @@ import asyncio
 from datetime import datetime, timedelta
 
 from services.ingestion.extraction_jobs import (
+    _mark_jobs,
     _persist_extraction_rows,
     _persist_skipped_extraction_rows,
     build_extraction_job,
@@ -533,6 +534,68 @@ def test_extraction_provider_contract_records_independent_mixed_lane_policy():
             "local_private": False,
         },
     ]
+
+
+def test_mark_jobs_is_guarded_by_claimed_owner_lease() -> None:
+    async def run() -> None:
+        first_claim_at = datetime.utcnow()
+        first_lease = first_claim_at + timedelta(minutes=10)
+        second_claim_at = first_claim_at + timedelta(seconds=30)
+        second_lease = second_claim_at + timedelta(minutes=10)
+        db = _FakeDB(
+            extraction_jobs=[
+                {
+                    "job_id": "still-owned",
+                    "status": "running",
+                    "runner": "extraction_jobs.run",
+                    "last_run_at": first_claim_at,
+                    "lease_until": first_lease,
+                },
+                {
+                    "job_id": "reclaimed",
+                    "status": "running",
+                    "runner": "extraction_jobs.run",
+                    "last_run_at": second_claim_at,
+                    "lease_until": second_lease,
+                },
+            ]
+        )
+
+        modified = await _mark_jobs(
+            db,
+            updates={
+                "still-owned": {"status": "succeeded", "lease_until": None},
+                "reclaimed": {"status": "succeeded", "lease_until": None},
+            },
+            claimed_jobs=[
+                {
+                    "job_id": "still-owned",
+                    "status": "running",
+                    "runner": "extraction_jobs.run",
+                    "last_run_at": first_claim_at,
+                    "lease_until": first_lease,
+                },
+                {
+                    "job_id": "reclaimed",
+                    "status": "running",
+                    "runner": "extraction_jobs.run",
+                    "last_run_at": first_claim_at,
+                    "lease_until": first_lease,
+                },
+            ],
+        )
+
+        rows = {
+            row["job_id"]: row
+            for row in db["extraction_jobs"].rows
+        }
+        assert modified == 1
+        assert rows["still-owned"]["status"] == "succeeded"
+        assert rows["reclaimed"]["status"] == "running"
+        assert rows["reclaimed"]["last_run_at"] == second_claim_at
+        assert rows["reclaimed"]["lease_until"] == second_lease
+
+    asyncio.run(run())
 
 
 def test_plan_extraction_jobs_advances_past_terminal_head_window():

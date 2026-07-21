@@ -1305,9 +1305,9 @@
     "semantic_hash": "0c343b646a30d5d9fec8942561b8a772"
   },
   "services/ingestion/extraction_jobs.py": {
-    "mtime": 1784070500.9259114,
-    "ast_hash": "130e4fba66cbbd1ac488a89daf8f15b0",
-    "semantic_hash": "130e4fba66cbbd1ac488a89daf8f15b0"
+    "mtime": 1784633463.3350747,
+    "ast_hash": "e877475bb1235160e5dd4042fee84ebf",
+    "semantic_hash": "e877475bb1235160e5dd4042fee84ebf"
   },
   "services/ingestion/extraction_parity.py": {
     "mtime": 1784070318.6301334,
@@ -2395,9 +2395,9 @@
     "semantic_hash": "f713af1c89ba2b04c8d3eb60278193b8"
   },
   "tests/test_extraction_jobs.py": {
-    "mtime": 1783682755.396011,
-    "ast_hash": "78097c9b0e8e65d6f2a0ca3de708524d",
-    "semantic_hash": "78097c9b0e8e65d6f2a0ca3de708524d"
+    "mtime": 1784633476.9710894,
+    "ast_hash": "d97f245ad13ee26950459597101608c3",
+    "semantic_hash": "d97f245ad13ee26950459597101608c3"
   },
   "tests/test_extraction_microbatch.py": {
     "mtime": 1783742867.2265627,
