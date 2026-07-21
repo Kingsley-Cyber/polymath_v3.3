@@ -1495,9 +1495,9 @@
     "semantic_hash": "78851e4dc444dd67033bf1c8d0b4c6df"
   },
   "services/ingestion/summary_provider_pool.py": {
-    "mtime": 1784599693.318968,
-    "ast_hash": "6ec57cacdfd6976243968aea75c7a864",
-    "semantic_hash": "6ec57cacdfd6976243968aea75c7a864"
+    "mtime": 1784633192.6840606,
+    "ast_hash": "2f39f87a6a7984ed86daa671937767ee",
+    "semantic_hash": "2f39f87a6a7984ed86daa671937767ee"
   },
   "services/ingestion/summary_semantics.py": {
     "mtime": 1783945992.3074176,
@@ -2480,9 +2480,9 @@
     "semantic_hash": "ff5908c925f1cdc37e50f7e98b1974e1"
   },
   "tests/test_ghost_a_summary_fallback.py": {
-    "mtime": 1784600109.808976,
-    "ast_hash": "8f820a5c47303d3c6ccec2503fad9936",
-    "semantic_hash": "8f820a5c47303d3c6ccec2503fad9936"
+    "mtime": 1784633211.2598,
+    "ast_hash": "f8f368fcd65641c3cd73d68ec62938d6",
+    "semantic_hash": "f8f368fcd65641c3cd73d68ec62938d6"
   },
   "tests/test_ghost_b_local_runtime_guard.py": {
     "mtime": 1782112012.1351678,

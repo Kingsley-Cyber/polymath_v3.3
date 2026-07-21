@@ -51,11 +51,42 @@ def _hy3_canary_rows(entry: dict[str, Any]) -> int:
         return 0
 
 
-def _signature(entry: dict[str, Any]) -> tuple[str, str, str]:
+def _credential_identity(entry: dict[str, Any]) -> str:
+    """Return a stable lane identity without exposing the plaintext key.
+
+    Multiple paid accounts for the same provider/model/base URL are intentional
+    capacity lanes. Dedupe must collapse only the same credential, not every
+    lane from the same provider. When no credential/ref is known yet, callers
+    are still using one shared provider key, so those entries remain collapsed.
+    """
+
+    extra = entry.get("extra_params") if isinstance(entry.get("extra_params"), dict) else {}
+    for field in (
+        "api_key_ref",
+        "credential_ref",
+        "key_ref",
+        "account_id",
+        "lane_id",
+    ):
+        value = entry.get(field)
+        if value is None:
+            value = extra.get(field)
+        text = str(value or "").strip()
+        if text:
+            return f"{field}:{text.lower()}"
+
+    api_key = str(entry.get("api_key") or "").strip()
+    if api_key:
+        return "api_key_sha256:" + hashlib.sha256(api_key.encode("utf-8")).hexdigest()[:16]
+    return ""
+
+
+def _signature(entry: dict[str, Any]) -> tuple[str, str, str, str]:
     return (
         str(entry.get("provider_preset") or "").strip().lower(),
         str(entry.get("base_url") or "").strip().rstrip("/").lower(),
         _model(entry).lower(),
+        _credential_identity(entry),
     )
 
 
@@ -110,6 +141,9 @@ def prepare_summary_provider_pool(
     report = {
         "primary_model": _model(admitted[0]) if admitted else None,
         "admitted_provider_count": len(admitted),
+        "admitted_provider_capacity": sum(
+            max(1, int(entry.get("max_concurrent") or 1)) for entry in admitted
+        ),
         "admitted_models": [_model(entry) for entry in admitted],
         "demoted_provider_count": len(demoted),
         "demoted_models": [_model(entry) for entry in demoted],

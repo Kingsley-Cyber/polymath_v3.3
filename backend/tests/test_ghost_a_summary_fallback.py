@@ -694,6 +694,86 @@ def test_summary_pool_honors_disabled_lanes() -> None:
     assert report["disabled_models"] == ["deepseek/deepseek-v4-flash"]
 
 
+def test_summary_pool_preserves_distinct_same_provider_credentials() -> None:
+    pool, report = prepare_summary_provider_pool(
+        [
+            {
+                "provider_preset": "deepseek",
+                "model": "deepseek/deepseek-v4-flash",
+                "base_url": "https://api.deepseek.com/v1",
+                "api_key": "deepseek-account-a",
+                "max_concurrent": 45,
+            },
+            {
+                "provider_preset": "deepseek",
+                "model": "deepseek/deepseek-v4-flash",
+                "base_url": "https://api.deepseek.com/v1",
+                "api_key": "deepseek-account-b",
+                "max_concurrent": 45,
+            },
+            {
+                "provider_preset": "longcat",
+                "model": "openai/LongCat-2.0",
+                "base_url": "https://api.longcat.chat/openai/v1",
+                "api_key": "longcat-account-a",
+                "max_concurrent": 3,
+            },
+            {
+                "provider_preset": "longcat",
+                "model": "openai/LongCat-2.0",
+                "base_url": "https://api.longcat.chat/openai/v1",
+                "api_key": "longcat-account-b",
+                "max_concurrent": 3,
+            },
+            {
+                "provider_preset": "longcat",
+                "model": "openai/LongCat-2.0",
+                "base_url": "https://api.longcat.chat/openai/v1",
+                "api_key": "longcat-account-c",
+                "max_concurrent": 3,
+            },
+        ]
+    )
+
+    assert [entry["provider_preset"] for entry in pool] == [
+        "deepseek",
+        "deepseek",
+        "longcat",
+        "longcat",
+        "longcat",
+    ]
+    assert [entry["max_concurrent"] for entry in pool] == [45, 45, 3, 3, 3]
+    assert report["admitted_provider_count"] == 5
+    assert report["admitted_provider_capacity"] == 99
+    assert "deepseek-account-a" not in str(report)
+    assert "longcat-account-c" not in str(report)
+
+
+def test_summary_pool_collapses_same_credential_duplicate() -> None:
+    pool, report = prepare_summary_provider_pool(
+        [
+            {
+                "provider_preset": "deepseek",
+                "model": "deepseek/deepseek-v4-flash",
+                "base_url": "https://api.deepseek.com/v1",
+                "api_key": "same-deepseek-account",
+                "max_concurrent": 45,
+            },
+            {
+                "provider_preset": "deepseek",
+                "model": "deepseek/deepseek-v4-flash",
+                "base_url": "https://api.deepseek.com/v1",
+                "api_key": "same-deepseek-account",
+                "max_concurrent": 45,
+            },
+        ]
+    )
+
+    assert len(pool) == 1
+    assert report["admitted_provider_count"] == 1
+    assert report["admitted_provider_capacity"] == 45
+
+
 @pytest.mark.asyncio
 async def test_invalid_shared_flash_key_is_not_auto_inserted(monkeypatch) -> None:
     async def fake_any_user(name: str):
