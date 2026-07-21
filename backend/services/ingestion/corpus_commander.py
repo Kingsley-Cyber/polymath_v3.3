@@ -12,12 +12,15 @@ from datetime import datetime
 from typing import Any, Awaitable, Callable
 from uuid import uuid4
 
+from services.ingestion.document_pipeline_jobs import plan_document_pipeline_jobs
+from services.ingestion.extraction_jobs import plan_extraction_jobs
 from services.ingestion.graph_promotion_jobs import plan_graph_promotion_jobs
 from services.ingestion.job_leases import (
     corpus_lane_lease,
     reclaim_expired_running_jobs,
 )
 from services.ingestion.readiness import materialize_corpus_readiness
+from services.ingestion.source_parse_jobs import plan_source_parse_jobs
 from services.ingestion.summary_jobs import (
     plan_summary_jobs,
     reconcile_satisfied_summary_jobs,
@@ -48,6 +51,9 @@ def _changed(result: dict[str, Any] | None) -> bool:
         "docs_updated",
         "artifact_reconciled",
         "superseded",
+        "eligible_items",
+        "requested",
+        "runners_started",
     ):
         if _int(result.get(key)):
             return True
@@ -142,6 +148,10 @@ async def _run_slices(
         if _int(result.get("claimed")) <= 0 and result.get("status") in {
             "empty",
             "paused_pressure",
+            "deferred",
+            "requested",
+            "executor_unavailable",
+            "blocked",
         }:
             break
     return {
@@ -160,9 +170,21 @@ async def run_corpus_commander_cycle(
     qdrant_client: Any = None,
     apply: bool = True,
     owner: str | None = None,
+    source_parse_plan_limit: int = 500,
+    document_pipeline_plan_limit: int = 500,
+    extraction_plan_limit: int = 500,
     summary_plan_limit: int = 500,
     graph_plan_limit: int = 500,
     max_plan_pages: int = 100,
+    source_parse_runner: Runner | None = None,
+    source_parse_run_slices: int = 0,
+    source_parse_run_limit: int = 25,
+    document_pipeline_runner: Runner | None = None,
+    document_pipeline_run_slices: int = 0,
+    document_pipeline_run_limit: int = 25,
+    extraction_runner: Runner | None = None,
+    extraction_run_slices: int = 0,
+    extraction_run_limit: int = 100,
     summary_runner: Runner | None = None,
     summary_run_slices: int = 0,
     summary_run_limit: int = 25,
@@ -190,6 +212,24 @@ async def run_corpus_commander_cycle(
             }
 
         steps: list[dict[str, Any]] = []
+        reclaimed_source = await reclaim_expired_running_jobs(
+            db,
+            collection_name="source_parse_jobs",
+            corpus_id=corpus_id,
+            user_id=user_id,
+        )
+        reclaimed_document = await reclaim_expired_running_jobs(
+            db,
+            collection_name="document_pipeline_jobs",
+            corpus_id=corpus_id,
+            user_id=user_id,
+        )
+        reclaimed_extraction = await reclaim_expired_running_jobs(
+            db,
+            collection_name="extraction_jobs",
+            corpus_id=corpus_id,
+            user_id=user_id,
+        )
         reclaimed_summary = await reclaim_expired_running_jobs(
             db,
             collection_name="summary_jobs",
@@ -206,8 +246,17 @@ async def run_corpus_commander_cycle(
             {
                 "name": "lease_reclaim",
                 "status": "complete",
-                "changed": bool(reclaimed_summary or reclaimed_graph),
+                "changed": bool(
+                    reclaimed_source
+                    or reclaimed_document
+                    or reclaimed_extraction
+                    or reclaimed_summary
+                    or reclaimed_graph
+                ),
                 "result": {
+                    "source_parse_jobs_reclaimed": reclaimed_source,
+                    "document_pipeline_jobs_reclaimed": reclaimed_document,
+                    "extraction_jobs_reclaimed": reclaimed_extraction,
                     "summary_jobs_reclaimed": reclaimed_summary,
                     "graph_jobs_reclaimed": reclaimed_graph,
                 },
@@ -224,6 +273,54 @@ async def run_corpus_commander_cycle(
                 "status": "complete",
                 "changed": bool(artifact_reconciled),
                 "result": {"artifact_reconciled": artifact_reconciled},
+            }
+        )
+
+        source_parse_plan = await plan_source_parse_jobs(
+            db,
+            corpus_id=corpus_id,
+            user_id=user_id,
+            apply=apply,
+            limit=source_parse_plan_limit,
+        )
+        steps.append(
+            {
+                "name": "source_parse_plan",
+                "status": source_parse_plan.get("status"),
+                "changed": _changed(source_parse_plan),
+                "result": source_parse_plan,
+            }
+        )
+
+        document_pipeline_plan = await plan_document_pipeline_jobs(
+            db,
+            corpus_id=corpus_id,
+            user_id=user_id,
+            apply=apply,
+            limit=document_pipeline_plan_limit,
+        )
+        steps.append(
+            {
+                "name": "document_pipeline_plan",
+                "status": document_pipeline_plan.get("status"),
+                "changed": _changed(document_pipeline_plan),
+                "result": document_pipeline_plan,
+            }
+        )
+
+        extraction_plan = await plan_extraction_jobs(
+            db,
+            corpus_id=corpus_id,
+            user_id=user_id,
+            apply=apply,
+            limit=extraction_plan_limit,
+        )
+        steps.append(
+            {
+                "name": "extraction_plan",
+                "status": extraction_plan.get("status"),
+                "changed": _changed(extraction_plan),
+                "result": extraction_plan,
             }
         )
 
@@ -258,6 +355,48 @@ async def run_corpus_commander_cycle(
                 "status": graph_plan.get("status"),
                 "changed": _changed(graph_plan),
                 "result": graph_plan,
+            }
+        )
+
+        source_parse_run = await _run_slices(
+            source_parse_runner,
+            slices=source_parse_run_slices,
+            limit=source_parse_run_limit,
+        )
+        steps.append(
+            {
+                "name": "source_parse_run_slices",
+                "status": source_parse_run.get("status"),
+                "changed": _changed(source_parse_run),
+                "result": source_parse_run,
+            }
+        )
+
+        document_pipeline_run = await _run_slices(
+            document_pipeline_runner,
+            slices=document_pipeline_run_slices,
+            limit=document_pipeline_run_limit,
+        )
+        steps.append(
+            {
+                "name": "document_pipeline_run_slices",
+                "status": document_pipeline_run.get("status"),
+                "changed": _changed(document_pipeline_run),
+                "result": document_pipeline_run,
+            }
+        )
+
+        extraction_run = await _run_slices(
+            extraction_runner,
+            slices=extraction_run_slices,
+            limit=extraction_run_limit,
+        )
+        steps.append(
+            {
+                "name": "extraction_run_slices",
+                "status": extraction_run.get("status"),
+                "changed": _changed(extraction_run),
+                "result": extraction_run,
             }
         )
 

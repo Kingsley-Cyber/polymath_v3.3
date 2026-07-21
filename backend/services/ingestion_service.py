@@ -2905,9 +2905,18 @@ class IngestionService:
         corpus_id: str,
         user_id: str | None = None,
         apply: bool = True,
+        source_parse_plan_limit: int = 500,
+        document_pipeline_plan_limit: int = 500,
+        extraction_plan_limit: int = 500,
         summary_plan_limit: int = 500,
         graph_plan_limit: int = 500,
         max_plan_pages: int = 100,
+        source_parse_run_slices: int = 0,
+        source_parse_run_limit: int = 25,
+        document_pipeline_run_slices: int = 0,
+        document_pipeline_run_limit: int = 25,
+        extraction_run_slices: int = 0,
+        extraction_run_limit: int = 100,
         summary_run_slices: int = 0,
         summary_run_limit: int = 25,
         graph_run_slices: int = 0,
@@ -2922,6 +2931,27 @@ class IngestionService:
         """
 
         from services.ingestion.corpus_commander import run_corpus_commander_cycle
+
+        async def _source_parse_runner(*, limit: int) -> dict:
+            return await self.run_source_parse_jobs(
+                corpus_id=corpus_id,
+                user_id=str(user_id or ""),
+                limit=limit,
+            )
+
+        async def _document_pipeline_runner(*, limit: int) -> dict:
+            return await self.run_document_pipeline_jobs(
+                corpus_id=corpus_id,
+                user_id=user_id,
+                limit=limit,
+            )
+
+        async def _extraction_runner(*, limit: int) -> dict:
+            return await self.run_extraction_jobs(
+                corpus_id=corpus_id,
+                user_id=user_id,
+                limit=limit,
+            )
 
         async def _summary_runner(*, limit: int) -> dict:
             if summary_cost_authority_usd is None:
@@ -2951,9 +2981,25 @@ class IngestionService:
             user_id=user_id,
             qdrant_client=self._qdrant,
             apply=apply,
+            source_parse_plan_limit=source_parse_plan_limit,
+            document_pipeline_plan_limit=document_pipeline_plan_limit,
+            extraction_plan_limit=extraction_plan_limit,
             summary_plan_limit=summary_plan_limit,
             graph_plan_limit=graph_plan_limit,
             max_plan_pages=max_plan_pages,
+            source_parse_runner=(
+                _source_parse_runner if source_parse_run_slices else None
+            ),
+            source_parse_run_slices=source_parse_run_slices,
+            source_parse_run_limit=source_parse_run_limit,
+            document_pipeline_runner=(
+                _document_pipeline_runner if document_pipeline_run_slices else None
+            ),
+            document_pipeline_run_slices=document_pipeline_run_slices,
+            document_pipeline_run_limit=document_pipeline_run_limit,
+            extraction_runner=_extraction_runner if extraction_run_slices else None,
+            extraction_run_slices=extraction_run_slices,
+            extraction_run_limit=extraction_run_limit,
             summary_runner=_summary_runner if summary_run_slices else None,
             summary_run_slices=summary_run_slices,
             summary_run_limit=summary_run_limit,

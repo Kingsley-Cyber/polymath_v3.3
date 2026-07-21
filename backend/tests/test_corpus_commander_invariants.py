@@ -1,5 +1,6 @@
 import pytest
 
+from services.ingestion import corpus_commander
 from services.ingestion.summary_jobs import plan_summary_jobs
 from services.ingestion.summary_vector_reconcile import (
     audit_parent_summary_vector_integrity,
@@ -47,6 +48,14 @@ class _Collection:
 class _Db(dict):
     def __getitem__(self, item):
         return dict.__getitem__(self, item)
+
+
+class _Lease:
+    async def __aenter__(self):
+        return {"lease_id": "lease-1"}
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return None
 
 
 def _get(row, dotted):
@@ -230,3 +239,73 @@ async def test_summary_vector_audit_is_parent_id_join_not_count_match():
     assert result["collections"]["hrag"]["qdrant_indexed_ids"] == 2
     assert result["collections"]["hrag"]["missing_ids"] == 1
     assert result["collections"]["hrag"]["missing_sample"] == ["p2"]
+
+
+@pytest.mark.asyncio
+async def test_commander_cycle_plans_all_ingestion_lanes(monkeypatch):
+    calls: list[str] = []
+
+    async def fake_reclaim(*_args, **kwargs):
+        calls.append(f"reclaim:{kwargs['collection_name']}")
+        return 0
+
+    async def fake_summary_reconcile(*_args, **_kwargs):
+        calls.append("summary_reconcile")
+        return 0
+
+    def planner(name: str):
+        async def _inner(*_args, **_kwargs):
+            calls.append(name)
+            return {
+                "status": "complete",
+                "planned": 1,
+                "counts": {"queued": 1},
+            }
+
+        return _inner
+
+    async def fake_summary_keyspace(*_args, **_kwargs):
+        calls.append("summary_plan")
+        return {"status": "complete", "planned": 1}
+
+    async def fake_graph_keyspace(*_args, **_kwargs):
+        calls.append("graph_plan")
+        return {"status": "complete", "planned": 1}
+
+    async def fake_materialize(*_args, **_kwargs):
+        calls.append("readiness")
+        return {"status": "not_ready"}
+
+    monkeypatch.setattr(corpus_commander, "corpus_lane_lease", lambda *_a, **_k: _Lease())
+    monkeypatch.setattr(corpus_commander, "reclaim_expired_running_jobs", fake_reclaim)
+    monkeypatch.setattr(corpus_commander, "reconcile_satisfied_summary_jobs", fake_summary_reconcile)
+    monkeypatch.setattr(corpus_commander, "plan_source_parse_jobs", planner("source_parse_plan"))
+    monkeypatch.setattr(corpus_commander, "plan_document_pipeline_jobs", planner("document_pipeline_plan"))
+    monkeypatch.setattr(corpus_commander, "plan_extraction_jobs", planner("extraction_plan"))
+    monkeypatch.setattr(corpus_commander, "_plan_full_summary_keyspace", fake_summary_keyspace)
+    monkeypatch.setattr(corpus_commander, "_plan_full_graph_keyspace", fake_graph_keyspace)
+    monkeypatch.setattr(corpus_commander, "materialize_corpus_readiness", fake_materialize)
+
+    result = await corpus_commander.run_corpus_commander_cycle(
+        {},
+        corpus_id="c1",
+        user_id="u1",
+        qdrant_client=None,
+        apply=True,
+    )
+
+    step_names = [step["name"] for step in result["steps"]]
+    assert result["status"] == "complete"
+    assert "source_parse_plan" in step_names
+    assert "document_pipeline_plan" in step_names
+    assert "extraction_plan" in step_names
+    assert "summary_plan_full_keyspace" in step_names
+    assert "graph_plan_full_keyspace" in step_names
+    assert "parent_summary_vector_id_join" in step_names
+    assert calls[:5] == [
+        "reclaim:source_parse_jobs",
+        "reclaim:document_pipeline_jobs",
+        "reclaim:extraction_jobs",
+        "reclaim:summary_jobs",
+        "reclaim:graph_promotion_jobs",
+    ]

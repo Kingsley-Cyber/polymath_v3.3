@@ -450,9 +450,9 @@
     "semantic_hash": "3e4acf0686a8a635808627c717196b14"
   },
   "routers/ingestion.py": {
-    "mtime": 1784632499.6556256,
-    "ast_hash": "abb471b6c39fae3fb1c537b5c8938ebd",
-    "semantic_hash": "abb471b6c39fae3fb1c537b5c8938ebd"
+    "mtime": 1784634066.9512918,
+    "ast_hash": "1e4ed2c6d0667da139845a8daf6dc2d4",
+    "semantic_hash": "1e4ed2c6d0667da139845a8daf6dc2d4"
   },
   "routers/mcp_info.py": {
     "mtime": 1783479815.3341708,
@@ -1535,9 +1535,9 @@
     "semantic_hash": "ea1d6b8aa7bec5d056e27786b348df1a"
   },
   "services/ingestion_service.py": {
-    "mtime": 1784632483.5049803,
-    "ast_hash": "77126b986f4da114ddd50dec0c982a74",
-    "semantic_hash": "77126b986f4da114ddd50dec0c982a74"
+    "mtime": 1784634053.4829423,
+    "ast_hash": "e3c60abf4cc0a157898896c2116e3578",
+    "semantic_hash": "e3c60abf4cc0a157898896c2116e3578"
   },
   "services/librarian/__init__.py": {
     "mtime": 1783922382.3872674,
@@ -3550,9 +3550,9 @@
     "semantic_hash": "43d287513057f7196e854d2aea287329"
   },
   "services/ingestion/corpus_commander.py": {
-    "mtime": 1784632465.7033205,
-    "ast_hash": "bd9452bae35a8ac5ccfb8ce0679ff7fb",
-    "semantic_hash": "bd9452bae35a8ac5ccfb8ce0679ff7fb"
+    "mtime": 1784634036.1810365,
+    "ast_hash": "b5e8e0e12086f10f5c8b55080d173b96",
+    "semantic_hash": "b5e8e0e12086f10f5c8b55080d173b96"
   },
   "services/ingestion/summary_vector_reconcile.py": {
     "mtime": 1784632414.5300493,
@@ -3560,8 +3560,8 @@
     "semantic_hash": "1d4f8ec6e07bf9659a99a52f1d033b5d"
   },
   "tests/test_corpus_commander_invariants.py": {
-    "mtime": 1784632548.2140336,
-    "ast_hash": "7383161b930ee76cf7f118ef16e57fcb",
-    "semantic_hash": "7383161b930ee76cf7f118ef16e57fcb"
+    "mtime": 1784634088.1572978,
+    "ast_hash": "c29386f8de49198137891e3cba12e59c",
+    "semantic_hash": "c29386f8de49198137891e3cba12e59c"
   }
 }
