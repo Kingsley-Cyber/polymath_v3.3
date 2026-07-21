@@ -1265,9 +1265,9 @@
     "semantic_hash": "32312b9f84c1aedb9c624b8486e10967"
   },
   "services/ingestion/document_pipeline_jobs.py": {
-    "mtime": 1783861519.221552,
-    "ast_hash": "d2121e3e2f4ac5ac583c79e2163b394d",
-    "semantic_hash": "d2121e3e2f4ac5ac583c79e2163b394d"
+    "mtime": 1784633820.279962,
+    "ast_hash": "97239472a9205071276139c74de0af69",
+    "semantic_hash": "97239472a9205071276139c74de0af69"
   },
   "services/ingestion/document_semantic_profile.py": {
     "mtime": 1784308413.003703,
@@ -2305,9 +2305,9 @@
     "semantic_hash": "4d97f720e2b6f8a94e1a5bbe094a2995"
   },
   "tests/test_document_pipeline_jobs.py": {
-    "mtime": 1783861163.8821697,
-    "ast_hash": "29dac66b3652025a156393864b686978",
-    "semantic_hash": "29dac66b3652025a156393864b686978"
+    "mtime": 1784633834.0205376,
+    "ast_hash": "1e0dadcc109b9f1834e6a0a43035e018",
+    "semantic_hash": "1e0dadcc109b9f1834e6a0a43035e018"
   },
   "tests/test_document_semantic_profile.py": {
     "mtime": 1784308413.0046654,

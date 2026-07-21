@@ -1,3 +1,4 @@
+from datetime import timedelta
 from unittest.mock import AsyncMock
 
 import pytest
@@ -594,6 +595,47 @@ async def test_run_document_pipeline_jobs_executes_embed_runner_and_reconciles_s
     assert result["executor_missing_kinds"] == []
     assert result["counts"] == {"succeeded": 1}
     assert result["jobs"][0]["reason"] == "qdrant_write_complete"
+
+
+@pytest.mark.asyncio
+async def test_run_document_pipeline_jobs_reconcile_is_guarded_by_claimed_owner():
+    doc = {
+        "corpus_id": "corpus-1",
+        "doc_id": "doc-1",
+        "user_id": "user-1",
+        "filename": "book.pdf",
+        "write_state": {"mongo_written": True, "qdrant_written": False},
+    }
+    db = _Db(docs=[doc], child_count=4, parent_count=1)
+    job = build_document_pipeline_job(
+        doc=doc,
+        kind="embed_document",
+        child_chunks=4,
+        parent_chunks=1,
+    )
+    db["document_pipeline_jobs"].rows = [{**job, "status": "queued", "updated_at": 1}]
+
+    async def embed_runner(*, doc_ids, limit):
+        assert doc_ids == ["doc-1"]
+        assert limit == 1
+        doc["write_state"]["qdrant_written"] = True
+        row = db["document_pipeline_jobs"].rows[0]
+        row["last_run_at"] = row["last_run_at"] + timedelta(seconds=1)
+        row["lease_until"] = row["lease_until"] + timedelta(seconds=1)
+        return {"status": "complete", "counts": {"succeeded": 1}}
+
+    result = await run_document_pipeline_jobs(
+        db,
+        corpus_id="corpus-1",
+        user_id="user-1",
+        embed_runner=embed_runner,
+    )
+
+    assert result["status"] == "partial"
+    assert result["counts"] == {"lost_ownership": 1}
+    assert result["jobs"][0]["status"] == "lost_ownership"
+    assert result["jobs"][0]["reason"] == "lease_owner_changed_before_reconcile"
+    assert db["document_pipeline_jobs"].rows[0]["status"] == "running"
 
 
 @pytest.mark.asyncio

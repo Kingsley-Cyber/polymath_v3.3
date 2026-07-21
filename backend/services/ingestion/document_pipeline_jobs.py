@@ -546,7 +546,6 @@ async def _reconcile_document_pipeline_jobs(
     now = datetime.utcnow()
     counts: dict[str, int] = {}
     previews: list[dict[str, Any]] = []
-    ops = []
     for job in jobs:
         status, reason, metadata = await _job_status_from_artifacts(
             db,
@@ -569,7 +568,30 @@ async def _reconcile_document_pipeline_jobs(
             update["completed_at"] = now
         elif status == "queued":
             update["completed_at"] = None
-        ops.append(UpdateOne({"job_id": job.get("job_id")}, {"$set": update}, upsert=False))
+        query: dict[str, Any] = {"job_id": job.get("job_id")}
+        if job.get("status") == "running":
+            query["status"] = "running"
+            if job.get("runner") is not None:
+                query["runner"] = job.get("runner")
+            if job.get("last_run_at") is not None:
+                query["last_run_at"] = job.get("last_run_at")
+            if job.get("lease_until") is not None:
+                query["lease_until"] = job.get("lease_until")
+        applied = await db["document_pipeline_jobs"].update_one(
+            query,
+            {
+                "$set": update,
+                "$unset": {"runner": "", "started_at": ""},
+            },
+            upsert=False,
+        )
+        if int(getattr(applied, "modified_count", 0) or 0) <= 0:
+            counts[status] = max(0, counts.get(status, 0) - 1)
+            if counts.get(status) == 0:
+                counts.pop(status, None)
+            counts["lost_ownership"] = counts.get("lost_ownership", 0) + 1
+            status = "lost_ownership"
+            reason = "lease_owner_changed_before_reconcile"
         previews.append(
             {
                 "job_id": job.get("job_id"),
@@ -579,8 +601,6 @@ async def _reconcile_document_pipeline_jobs(
                 "reason": reason,
             }
         )
-    if ops:
-        await db["document_pipeline_jobs"].bulk_write(ops, ordered=False)
     return {"counts": counts, "jobs": previews[:50]}
 
 
@@ -893,7 +913,9 @@ async def run_document_pipeline_jobs(
     executor_missing_kinds = sorted(missing_executor_kinds)
     executor_missing = bool(counts.get("queued") and executor_missing_kinds)
     status = "complete"
-    if source_error:
+    if counts.get("lost_ownership"):
+        status = "partial"
+    elif source_error:
         status = "partial"
     elif executor_errors_by_kind:
         status = "partial"
