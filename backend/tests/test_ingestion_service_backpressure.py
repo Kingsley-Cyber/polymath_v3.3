@@ -589,6 +589,99 @@ async def test_auto_corpus_repair_tick_runs_source_parse_lane(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_auto_corpus_repair_tick_can_run_all_ingest_lanes(monkeypatch):
+    service = IngestionService()
+    service._db = _AutoRepairDb()
+    active = 0
+    peak = 0
+    ran: list[str] = []
+
+    class _Settings:
+        INGEST_AUTO_REPAIR_ENABLED = True
+        INGEST_AUTO_REPAIR_CORPUS_LIMIT = 5
+        INGEST_AUTO_REPAIR_RUN_SOURCE_PARSE = True
+        INGEST_AUTO_REPAIR_SOURCE_PARSE_RUN_LIMIT = 11
+        INGEST_AUTO_REPAIR_RUN_DOCUMENT_PIPELINE = True
+        INGEST_AUTO_REPAIR_DOCUMENT_RUN_LIMIT = 13
+        INGEST_AUTO_REPAIR_RUN_EXTRACTION = True
+        INGEST_AUTO_REPAIR_EXTRACTION_RUN_LIMIT = 17
+        INGEST_AUTO_REPAIR_RUN_SUMMARIES = True
+        INGEST_AUTO_REPAIR_SUMMARY_RUN_LIMIT = 19
+        INGEST_AUTO_REPAIR_RUN_GRAPH = True
+        INGEST_AUTO_REPAIR_GRAPH_RUN_LIMIT = 23
+
+    async def fake_cycle(**kwargs):
+        assert kwargs["run_source_parse_jobs"] is False
+        assert kwargs["run_document_pipeline_jobs"] is False
+        assert kwargs["run_extraction_jobs"] is False
+        assert kwargs["run_summary_jobs"] is False
+        assert kwargs["run_graph_jobs"] is False
+        return {
+            "status": "complete",
+            "summary": {
+                "readiness_status": "needs_repair",
+                "queryable_docs": 0,
+                "total_docs": 1,
+                "failed_chunks": 0,
+                "graph_jobs_queued": 1,
+                "extraction_jobs_queued": 1,
+                "summary_jobs_queued": 1,
+                "document_pipeline_jobs_queued": 1,
+            },
+        }
+
+    async def _lane(name: str, *, expected_limit: int, **kwargs):
+        nonlocal active, peak
+        assert kwargs["limit"] == expected_limit
+        ran.append(name)
+        active += 1
+        peak = max(peak, active)
+        await asyncio.sleep(0.01)
+        active -= 1
+        return {"status": "complete", "claimed": 1, "counts": {"succeeded": 1}}
+
+    monkeypatch.setattr("services.ingestion_service.get_settings", lambda: _Settings())
+    monkeypatch.setattr(service, "run_bounded_corpus_repair_cycle", fake_cycle)
+    monkeypatch.setattr(
+        service,
+        "run_source_parse_jobs",
+        lambda **kwargs: _lane("source_parse", expected_limit=11, **kwargs),
+    )
+    monkeypatch.setattr(
+        service,
+        "run_document_pipeline_jobs",
+        lambda **kwargs: _lane("document_pipeline", expected_limit=13, **kwargs),
+    )
+    monkeypatch.setattr(
+        service,
+        "run_extraction_jobs",
+        lambda **kwargs: _lane("extraction", expected_limit=17, **kwargs),
+    )
+    monkeypatch.setattr(
+        service,
+        "run_summary_jobs",
+        lambda **kwargs: _lane("summary", expected_limit=19, **kwargs),
+    )
+    monkeypatch.setattr(
+        service,
+        "run_graph_promotion_jobs",
+        lambda **kwargs: _lane("graph_promotion", expected_limit=23, **kwargs),
+    )
+
+    result = await service.run_auto_corpus_repair_tick()
+
+    assert peak == 5
+    assert ran == [
+        "source_parse",
+        "document_pipeline",
+        "summary",
+        "extraction",
+        "graph_promotion",
+    ]
+    assert set(result["corpora"][0]["provider_lanes"]) == set(ran)
+
+
+@pytest.mark.asyncio
 async def test_auto_corpus_repair_tick_runs_provider_lanes_concurrently(monkeypatch):
     service = IngestionService()
     service._db = _AutoRepairDb()
