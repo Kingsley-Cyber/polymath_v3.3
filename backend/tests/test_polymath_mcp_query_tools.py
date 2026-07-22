@@ -337,3 +337,52 @@ def test_query_tools_in_registry():
     assert "polymath_app_guide" in names
     assert "polymath_graph_map_query" in names
     assert "polymath_graph_question_suggestions" in names
+    assert "search" in names
+    assert "fetch" in names
+
+
+@pytest.mark.asyncio
+async def test_deep_research_search_and_fetch_are_read_only_compat_tools(
+    monkeypatch,
+    system_user,
+):
+    async def fake_cross_corpus_search(**kwargs):
+        return {
+            "corpus_ids": ["c1"],
+            "retrieval": {"result_cap": kwargs["final_top_k"]},
+            "chunks": [
+                {
+                    "corpus_id": "c1",
+                    "doc_id": "d1",
+                    "chunk_id": "ch1",
+                    "parent_id": "p1",
+                    "text": "Alpha evidence explains graph traversal.",
+                    "filename": "alpha.md",
+                    "score": 0.91,
+                }
+            ],
+        }
+
+    class FakeChunks:
+        async def find_one(self, query, projection):
+            assert query["corpus_id"] == "c1"
+            return {
+                "corpus_id": "c1",
+                "doc_id": "d1",
+                "chunk_id": "ch1",
+                "parent_id": "p1",
+                "text": "Alpha evidence explains graph traversal in full.",
+                "filename": "alpha.md",
+            }
+
+    monkeypatch.setattr(mcp_tools, "polymath_cross_corpus_search", fake_cross_corpus_search)
+    monkeypatch.setattr(mcp_tools, "_scope_corpus_ids", AsyncMock(return_value=["c1"]))
+    monkeypatch.setattr(mcp_tools.ingestion_service, "_db", {"chunks": FakeChunks()})
+
+    result = await mcp_tools.search("graph traversal", corpus_ids=["c1"], top_k=3)
+    fetched = await mcp_tools.fetch(result["results"][0]["id"])
+
+    assert result["results"][0]["title"] == "alpha.md"
+    assert result["results"][0]["metadata"]["chunk_id"] == "ch1"
+    assert fetched["status"] == "ok"
+    assert fetched["text"] == "Alpha evidence explains graph traversal in full."

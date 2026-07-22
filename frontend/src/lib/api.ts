@@ -1996,6 +1996,139 @@ export async function revokeMcpApiKey(keyId: string): Promise<{ key_id: string; 
   });
 }
 
+export type ResearchMode = "quick" | "standard" | "deep";
+export type ResearchJobStatus =
+  | "queued"
+  | "running"
+  | "waiting_for_input"
+  | "rendering"
+  | "done"
+  | "failed"
+  | "cancelled";
+export type ResearchArtifactFormat = "markdown" | "html" | "pdf" | "json";
+
+export interface ResearchBudgets {
+  max_subquestions: number;
+  max_tool_calls: number;
+  max_graph_hops: number;
+  max_evidence_items: number;
+  max_output_tokens: number;
+}
+
+export interface ResearchJob {
+  job_id: string;
+  user_id: string;
+  status: ResearchJobStatus;
+  question: string;
+  corpus_ids: string[];
+  mode: ResearchMode;
+  budgets: ResearchBudgets;
+  artifact_ids: string[];
+  error?: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ResearchArtifact {
+  artifact_id: string;
+  job_id: string;
+  user_id: string;
+  format: ResearchArtifactFormat;
+  filename: string;
+  mime_type: string;
+  sha256: string;
+  size_bytes: number;
+  created_at: string;
+}
+
+export interface ResearchTraceEvent {
+  event_id: string;
+  job_id: string;
+  user_id: string;
+  stage: string;
+  status: string;
+  message: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+
+export async function createResearchJob(payload: {
+  question: string;
+  corpus_ids?: string[];
+  mode?: ResearchMode;
+  budgets?: Partial<ResearchBudgets> | null;
+  metadata?: Record<string, unknown>;
+  run?: boolean;
+}): Promise<ResearchJob> {
+  const run = payload.run;
+  const { run: _run, ...body } = payload;
+  const suffix = run === undefined ? "" : `?run=${run ? "true" : "false"}`;
+  return fetchJSON(`/research/jobs${suffix}`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function listResearchJobs(params: {
+  limit?: number;
+  status?: ResearchJobStatus;
+} = {}): Promise<{ items: ResearchJob[]; count: number }> {
+  const search = new URLSearchParams();
+  if (params.limit) search.set("limit", String(params.limit));
+  if (params.status) search.set("status", params.status);
+  const suffix = search.toString() ? `?${search.toString()}` : "";
+  return fetchJSON(`/research/jobs${suffix}`);
+}
+
+export async function getResearchJob(jobId: string): Promise<ResearchJob> {
+  return fetchJSON(`/research/jobs/${encodeURIComponent(jobId)}`);
+}
+
+export async function cancelResearchJob(jobId: string): Promise<ResearchJob> {
+  return fetchJSON(`/research/jobs/${encodeURIComponent(jobId)}/cancel`, {
+    method: "POST",
+  });
+}
+
+export async function runResearchJob(
+  jobId: string,
+  background = true,
+): Promise<ResearchJob> {
+  return fetchJSON(
+    `/research/jobs/${encodeURIComponent(jobId)}/run?background=${background ? "true" : "false"}`,
+    { method: "POST" },
+  );
+}
+
+export async function getResearchJobEvents(
+  jobId: string,
+  limit = 200,
+): Promise<{ items: ResearchTraceEvent[]; count: number }> {
+  return fetchJSON(
+    `/research/jobs/${encodeURIComponent(jobId)}/events?limit=${limit}`,
+  );
+}
+
+export async function listResearchArtifacts(
+  jobId: string,
+): Promise<{ items: ResearchArtifact[]; count: number }> {
+  return fetchJSON(`/research/jobs/${encodeURIComponent(jobId)}/artifacts`);
+}
+
+export async function downloadResearchArtifact(artifactId: string): Promise<Blob> {
+  const token = getPersistedToken();
+  const response = await fetch(
+    `${API_BASE}/research/artifacts/${encodeURIComponent(artifactId)}/download`,
+    { headers: token ? { Authorization: `Bearer ${token}` } : {} },
+  );
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`HTTP ${response.status}: ${error}`);
+  }
+  return response.blob();
+}
+
 export interface PortabilityImportResponse {
   status: "ok";
   stats: {

@@ -13,6 +13,7 @@ Each tool:
 """
 from __future__ import annotations
 
+import base64
 import dataclasses
 import json
 import logging
@@ -85,6 +86,43 @@ def _field(result: Any, name: str, default: Any = None) -> Any:
     if isinstance(result, dict):
         return result.get(name, default)
     return getattr(result, name, default)
+
+
+def _encode_fetch_id(payload: dict[str, Any]) -> str:
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return "chunk:" + base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def _decode_fetch_id(fetch_id: str) -> dict[str, Any]:
+    if not fetch_id.startswith("chunk:"):
+        raise ValueError("fetch id must start with chunk:")
+    raw = fetch_id.split(":", 1)[1]
+    padded = raw + ("=" * (-len(raw) % 4))
+    data = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError("fetch id payload is not an object")
+    return data
+
+
+def _chunk_value(chunk: dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        value = chunk.get(key)
+        if value is not None:
+            return value
+    metadata = chunk.get("metadata")
+    if isinstance(metadata, dict):
+        for key in keys:
+            value = metadata.get(key)
+            if value is not None:
+                return value
+    return None
+
+
+def _chunk_snippet(text: Any, limit: int = 700) -> str:
+    compact = " ".join(str(text or "").split())
+    if len(compact) <= limit:
+        return compact
+    return compact[: limit - 1].rstrip() + "…"
 
 
 async def _scope_corpus_ids(
@@ -544,6 +582,135 @@ async def polymath_cross_corpus_search(
         search_mode=search_mode,
         disabled_lexicon_ids=disabled_lexicon_ids,
     )
+
+
+async def search(
+    query: str,
+    corpus_ids: list[str] | None = None,
+    top_k: int = 10,
+    filters: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Deep-research-compatible read-only MCP search.
+
+    This alias intentionally exposes the simple `search` shape expected by
+    native deep-research clients while delegating to the same retriever path as
+    polymath_cross_corpus_search. Use `fetch(id)` to retrieve full chunk text.
+    """
+    requested_ids = corpus_ids
+    if requested_ids is None and isinstance(filters, dict):
+        raw = filters.get("corpus_ids")
+        if isinstance(raw, list):
+            requested_ids = [str(cid) for cid in raw]
+    result = await polymath_cross_corpus_search(
+        query=query,
+        corpus_ids=requested_ids,
+        retrieval_tier="qdrant_mongo_graph",
+        final_top_k=max(1, min(int(top_k or 10), 50)),
+        search_mode="auto",
+    )
+    items: list[dict[str, Any]] = []
+    for chunk in result.get("chunks") or []:
+        if not isinstance(chunk, dict):
+            continue
+        corpus_id = str(_chunk_value(chunk, "corpus_id") or "")
+        doc_id = str(_chunk_value(chunk, "doc_id", "document_id") or "")
+        chunk_id = str(_chunk_value(chunk, "chunk_id", "id") or "")
+        if not corpus_id or not chunk_id:
+            continue
+        text = _chunk_value(chunk, "text", "content", "page_content") or ""
+        title = (
+            _chunk_value(chunk, "filename", "title", "source_title")
+            or doc_id
+            or chunk_id
+        )
+        items.append(
+            {
+                "id": _encode_fetch_id(
+                    {
+                        "corpus_id": corpus_id,
+                        "doc_id": doc_id,
+                        "chunk_id": chunk_id,
+                    }
+                ),
+                "title": str(title),
+                "text": _chunk_snippet(text),
+                "metadata": {
+                    "corpus_id": corpus_id,
+                    "doc_id": doc_id,
+                    "chunk_id": chunk_id,
+                    "parent_id": _chunk_value(chunk, "parent_id"),
+                    "score": _chunk_value(chunk, "score", "similarity"),
+                },
+            }
+        )
+    return {
+        "results": items,
+        "query": query,
+        "corpus_ids": result.get("corpus_ids") or [],
+        "retrieval": result.get("retrieval") or {},
+    }
+
+
+async def fetch(id: str) -> dict[str, Any]:
+    """Deep-research-compatible read-only MCP fetch by search result id."""
+    payload = _decode_fetch_id(id)
+    corpus_id = str(payload.get("corpus_id") or "")
+    doc_id = str(payload.get("doc_id") or "")
+    chunk_id = str(payload.get("chunk_id") or "")
+    if not corpus_id or not chunk_id:
+        raise ValueError("fetch id must include corpus_id and chunk_id")
+    scoped = await _scope_corpus_ids([corpus_id], default_to_all=False)
+    if corpus_id not in scoped:
+        raise AuthError("fetch id is outside the caller's accessible corpus scope")
+    db = ingestion_service.db
+    if db is None:
+        raise RuntimeError("MongoDB is not connected")
+    query = {
+        "corpus_id": corpus_id,
+        "$or": [{"chunk_id": chunk_id}, {"id": chunk_id}],
+    }
+    if doc_id:
+        query["doc_id"] = doc_id
+    row = await db["chunks"].find_one(
+        query,
+        {
+            "_id": 0,
+            "corpus_id": 1,
+            "doc_id": 1,
+            "chunk_id": 1,
+            "parent_id": 1,
+            "text": 1,
+            "content": 1,
+            "filename": 1,
+            "source_url": 1,
+            "metadata": 1,
+        },
+    )
+    if not row:
+        return {
+            "id": id,
+            "status": "not_found",
+            "error": "No chunk matched this fetch id in the accessible corpus.",
+        }
+    text = row.get("text") or row.get("content") or ""
+    return {
+        "id": id,
+        "status": "ok",
+        "title": row.get("filename") or row.get("doc_id") or row.get("chunk_id"),
+        "text": text,
+        "metadata": {
+            "corpus_id": row.get("corpus_id"),
+            "doc_id": row.get("doc_id"),
+            "chunk_id": row.get("chunk_id"),
+            "parent_id": row.get("parent_id"),
+            "source_url": row.get("source_url"),
+            **(
+                {"source_metadata": row.get("metadata")}
+                if isinstance(row.get("metadata"), dict)
+                else {}
+            ),
+        },
+    }
 
 
 async def polymath_chat_query(
@@ -2573,6 +2740,8 @@ ALL_TOOLS = (
     polymath_check_source,
     polymath_app_guide,
     polymath_search,
+    search,
+    fetch,
     polymath_cross_corpus_search,
     polymath_chat_query,
     polymath_graph_query,
@@ -2603,6 +2772,8 @@ __all__ = [
     "polymath_check_source",
     "polymath_app_guide",
     "polymath_search",
+    "search",
+    "fetch",
     "polymath_cross_corpus_search",
     "polymath_chat_query",
     "polymath_graph_query",

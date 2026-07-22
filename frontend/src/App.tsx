@@ -1,11 +1,12 @@
 // App.tsx - Main application component (3-Pane Deterministic Graph Architecture)
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Menu, Network, Share2, X } from "lucide-react";
+import { FileSearch, Menu, Network, Share2, X } from "lucide-react";
 import { Sidebar } from "./components/chat/Sidebar";
 import { ChatWindow } from "./components/chat/ChatWindow";
 import { ChatInput } from "./components/chat/ChatInput";
 import { ChatContextMenu } from "./components/chat/ChatContextMenu";
 import { GraphViewer } from "./components/graph/GraphViewer";
+import { ResearchPanel } from "./components/research/ResearchPanel";
 import { SettingsModal } from "./components/settings/SettingsModal";
 import { LoginView } from "./components/auth/LoginView";
 import { IngestionDashboard } from "./components/ingestion/IngestionDashboard";
@@ -106,6 +107,7 @@ function App() {
       : false,
   );
   const [isGraphViewOpen, setIsGraphViewOpen] = useState(false);
+  const [isResearchOpen, setIsResearchOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [collections, setCollections] = useState<Collection[]>([]);
   const [corpora, setCorpora] = useState<CorpusResponse[]>([]);
@@ -790,6 +792,14 @@ function App() {
             </label>
             <ChatContextMenu collections={collections} />
             <button
+              onClick={() => setIsResearchOpen(true)}
+              className="pm-soft-control flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border-minimal bg-[var(--bg-surface)] text-content-secondary hover:text-accent-main"
+              title="Research workspace"
+              aria-label="Open research workspace"
+            >
+              <FileSearch className="w-4 h-4" />
+            </button>
+            <button
               onClick={() => setIsGraphViewOpen(true)}
               className="pm-soft-control flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border-minimal bg-[var(--bg-surface)] text-content-secondary hover:text-accent-main"
               title="Global Graph"
@@ -856,6 +866,12 @@ function App() {
       <SettingsModal
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
+      />
+
+      <ResearchPanel
+        isOpen={isResearchOpen}
+        onClose={() => setIsResearchOpen(false)}
+        defaultCorpusIds={effectiveGraphCorpusIds}
       />
 
       {/* Phase G — live ingestion progress, floats bottom-right. Self-hides when empty. */}
