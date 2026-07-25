@@ -9,7 +9,9 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime
-from typing import Any
+import re
+from typing import Any, Callable
+import unicodedata
 
 from models.claim_record import ClaimArgumentV1, ClaimRecordV1
 from pydantic import ValidationError
@@ -23,6 +25,144 @@ from services.graph.neo4j_writer import (
 
 LOCAL_EXTRACTION_SCHEMA_VERSION = "polymath.extract.local_extraction.v1"
 CLAIMS_PROMOTE_VERSION = "polymath.promote.v2-claims"
+PROMOTE_VERSION = "polymath.promote.v1"
+_PROMOTED_LIST_FIELDS = (
+    "mechanisms",
+    "key_terms",
+    "concepts",
+    "entity_ids",
+    "entity_families",
+    "entity_domains",
+    "relation_predicates",
+    "relation_families",
+    "fact_types",
+    "related_entities",
+    "graph_neighbors",
+)
+
+
+def _default_entity_id(canonical_name: str) -> str:
+    name = unicodedata.normalize("NFKD", (canonical_name or "").lower().strip())
+    name = re.sub(r"[^\w\s]", "", name)
+    slug = re.sub(r"\s+", " ", name).strip().replace(" ", "-")
+    return f"entity:{slug}" if slug else ""
+
+
+def _norm_term(value: str) -> str:
+    return " ".join(str(value or "").lower().split())
+
+
+def promote(
+    extraction: dict[str, Any],
+    *,
+    entity_id_fn: Callable[[str], str] | None = None,
+) -> dict[str, Any]:
+    """Project extraction output into an additive retrieval-payload delta."""
+
+    eid = entity_id_fn or _default_entity_id
+    entities = extraction.get("entities") or []
+    relations = extraction.get("relations") or []
+    facts = extraction.get("facts") or []
+
+    concepts: set[str] = set()
+    entity_ids: set[str] = set()
+    families: set[str] = set()
+    domains: set[str] = set()
+    for entity in entities:
+        name = _norm_term(entity.get("canonical_name"))
+        if not name:
+            continue
+        concepts.add(name)
+        concepts.update(
+            alias
+            for alias in (
+                _norm_term(value) for value in entity.get("query_aliases") or []
+            )
+            if alias
+        )
+        identifier = entity.get("entity_id") or eid(name)
+        if identifier:
+            entity_ids.add(identifier)
+        if entity.get("canonical_family"):
+            families.add(_norm_term(entity["canonical_family"]))
+        if entity.get("domain_type"):
+            domains.add(_norm_term(entity["domain_type"]))
+
+    related: set[str] = set()
+    for relation in relations:
+        subject = _norm_term(relation.get("subject"))
+        if subject:
+            related.add(eid(subject))
+        if (relation.get("object_kind") or "entity") == "entity":
+            object_name = _norm_term(relation.get("object"))
+            if object_name:
+                related.add(eid(object_name))
+    related.discard("")
+
+    return {
+        "concepts": sorted(concepts),
+        "entity_ids": sorted(entity_ids),
+        "entity_families": sorted(families),
+        "entity_domains": sorted(domains),
+        "relation_predicates": sorted(
+            {
+                _norm_term(relation.get("predicate"))
+                for relation in relations
+                if relation.get("predicate")
+            }
+        ),
+        "relation_families": sorted(
+            {
+                _norm_term(relation.get("relation_family"))
+                for relation in relations
+                if relation.get("relation_family")
+            }
+        ),
+        "fact_types": sorted(
+            {
+                _norm_term(fact.get("fact_type"))
+                for fact in facts
+                if fact.get("fact_type")
+            }
+        ),
+        "related_entities": sorted(related),
+        "has_relations": bool(relations),
+        "extract_schema_version": str(
+            extraction.get("schema_version") or "polymath.extract.v1"
+        ),
+        "promote_version": PROMOTE_VERSION,
+    }
+
+
+def promoted_index_fields() -> list[tuple[str, str]]:
+    return [(field, "keyword") for field in _PROMOTED_LIST_FIELDS] + [
+        ("has_relations", "bool"),
+        ("semantic_chunk_type", "keyword"),
+        ("topic_key", "keyword"),
+        ("neighbor_chunks", "keyword"),
+        ("graph_degree", "integer"),
+    ]
+
+
+def doc_local_neighbor_chunks(
+    chunk_eids: dict[str, list[str]],
+    cap: int = 8,
+) -> dict[str, list[str]]:
+    by_entity: dict[str, list[str]] = {}
+    for chunk_id, entity_ids_for_chunk in chunk_eids.items():
+        for entity_id in entity_ids_for_chunk:
+            by_entity.setdefault(entity_id, []).append(chunk_id)
+
+    output: dict[str, list[str]] = {}
+    for chunk_id, entity_ids_for_chunk in chunk_eids.items():
+        shared: dict[str, int] = {}
+        for entity_id in entity_ids_for_chunk:
+            for other_chunk_id in by_entity.get(entity_id, []):
+                if other_chunk_id != chunk_id:
+                    shared[other_chunk_id] = shared.get(other_chunk_id, 0) + 1
+        ranked = sorted(shared.items(), key=lambda item: (-item[1], item[0]))
+        output[chunk_id] = [other for other, _ in ranked[:cap]]
+    return output
 
 
 def _empty_receipt(*, corpus_id: str, doc_id: str | None) -> dict[str, Any]:
@@ -620,4 +760,3 @@ async def promote_claims_to_graph(
             _skip(total, reason, int(count or 0))
     total["status"] = "done" if total["docs"] else "noop"
     return total
-
