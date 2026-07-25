@@ -68,6 +68,7 @@ PLACEHOLDER_RE = re.compile(
     ^$|CHANGE_ME|changeme|dummy|example|placeholder|your[_-]?|
     test|ci-dummy|localhost|host\.docker\.internal|null|none|false|true|
     local-dev-change-me|sk-corpus-secret|^http://n8n|^\$|
+    ^(?:settings_api_key\.v[0-9]+|secret-never-(?:persisted|stored)|not-read-at-this-boundary)$|
     os\.environ|process\.env|getenv|settings\.|body\.|request\.|resolved\.|
     current_|new_|plaintext|token_count|max_tokens|seed_limit_per_token|
     <.*>|\$\{.*\}
