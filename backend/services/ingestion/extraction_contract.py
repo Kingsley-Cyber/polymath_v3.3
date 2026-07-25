@@ -26,7 +26,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from services.provider_payload import INTERNAL_MODEL_FLAGS, provider_payload_extras
+from services.provider_payload import (
+    INTERNAL_MODEL_FLAGS,
+    ingestion_provider_payload_extras,
+    provider_payload_extras,
+)
 
 ENGINES = (
     "off",

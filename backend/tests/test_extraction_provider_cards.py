@@ -62,6 +62,24 @@ def test_deepseek_v4_flash_uses_live_verified_json_object_contract():
     assert "deepseek_v4_flash_json_object_only_live_verified" in card.notes
 
 
+def test_groq_llama_instant_uses_json_object_contract():
+    card = resolve_extraction_provider_card(
+        {
+            "provider_preset": "groq",
+            "model": "llama-3.1-8b-instant",
+            "base_url": "https://api.groq.com/openai/v1",
+        }
+    )
+
+    assert card.provider == "groq"
+    assert card.schema_mode == "json_object"
+    assert card.supports_json_schema is False
+    assert card.supports_json_object is True
+    assert card.json_repair_mode == "balanced_object_repair"
+    assert provider_payload_defaults(card) == {}
+    assert "groq_json_object_live_verified" in card.notes
+
+
 def test_longcat_is_compiler_gated_and_disables_thinking():
     card = resolve_extraction_provider_card(
         {
@@ -97,6 +115,7 @@ def test_siliconflow_hy3_is_prompt_json_not_native_schema():
     assert "pydantic_extraction_response" in card.promotion_gate
     assert "required_evidence_phrase" in card.promotion_gate
     assert "allowed_predicate" in card.promotion_gate
+    assert provider_payload_defaults(card) == {"enable_thinking": False}
 
 
 def test_explicit_schema_flag_can_promote_unknown_provider():

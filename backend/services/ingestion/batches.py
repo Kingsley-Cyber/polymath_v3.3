@@ -2382,7 +2382,11 @@ async def _preflight_summary_canary(db, batch: dict) -> str | None:
     responses; prose-only fallback swallowing structure)."""
     import httpx as _hx
 
-    from services.ingestion.extraction_contract import provider_payload_extras
+    from services.extraction_provider_cards import (
+        provider_payload_defaults,
+        resolve_extraction_provider_card,
+    )
+    from services.ingestion.extraction_contract import ingestion_provider_payload_extras
     from services.ingestion.summary_semantics import (
         SEMANTIC_SUMMARY_INSTRUCTION,
         parse_semantic_summary,
@@ -2441,10 +2445,10 @@ async def _preflight_summary_canary(db, batch: dict) -> str | None:
         payload["api_base"] = entry["base_url"]
     if entry.get("api_key"):
         payload["api_key"] = entry["api_key"]
-    payload.update(provider_payload_extras(entry.get("extra_params")))
-    _m = model.lower()
-    if "v4-flash" in _m or "v4-pro" in _m or "deepseek-v4" in _m:
-        payload.setdefault("thinking", {"type": "disabled"})
+    payload.update(ingestion_provider_payload_extras(entry.get("extra_params")))
+    card = resolve_extraction_provider_card(entry)
+    for key, value in provider_payload_defaults(card).items():
+        payload.setdefault(key, value)
     try:
         async with _hx.AsyncClient(timeout=45.0) as client:
             resp = await client.post(

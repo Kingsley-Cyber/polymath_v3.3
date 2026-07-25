@@ -821,6 +821,8 @@ async def test_json_schema_rejection_degrades_retry_to_prompt_object(monkeypatch
     assert len(calls) == 2
     assert calls[0]["response_format"]["type"] == "json_schema"
     assert "response_format" not in calls[1]
+    assert '<schema_control contract="ghost_b_extraction.v1"' in calls[1]["messages"][1]["content"]
+    assert "<json_payload>" in calls[1]["messages"][1]["content"]
     assert "Return exactly one valid JSON object" in calls[1]["messages"][1]["content"]
     assert "Output JSONL only" not in calls[1]["messages"][1]["content"]
     assert report.results and report.results[0].entities[0].canonical_name == "alpha"
@@ -932,6 +934,8 @@ async def test_json_schema_rejection_downgrades_lane_for_following_chunks(monkey
     assert calls[0]["response_format"]["type"] == "json_schema"
     assert "response_format" not in calls[1]
     assert "response_format" not in calls[2]
+    assert '<schema_control contract="ghost_b_extraction.v1"' in calls[1]["messages"][1]["content"]
+    assert '<schema_control contract="ghost_b_extraction.v1"' in calls[2]["messages"][1]["content"]
     assert "Return exactly one valid JSON object" in calls[2]["messages"][1]["content"]
     assert len(report.results) == 2
 
@@ -1032,7 +1036,7 @@ async def test_mimo_auto_disables_thinking_for_extraction(monkeypatch):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("pool_entry", "expected_provider", "expects_thinking_disabled"),
+    ("pool_entry", "expected_provider", "expected_thinking_wire"),
     [
         (
             {
@@ -1044,7 +1048,7 @@ async def test_mimo_auto_disables_thinking_for_extraction(monkeypatch):
                 "extra_params": {},
             },
             "siliconflow",
-            False,
+            {"enable_thinking": False},
         ),
         (
             {
@@ -1056,7 +1060,7 @@ async def test_mimo_auto_disables_thinking_for_extraction(monkeypatch):
                 "extra_params": {},
             },
             "longcat",
-            True,
+            {"thinking": {"type": "disabled"}},
         ),
     ],
 )
@@ -1064,7 +1068,7 @@ async def test_compiler_gated_providers_do_not_send_native_response_format(
     monkeypatch,
     pool_entry,
     expected_provider,
-    expects_thinking_disabled,
+    expected_thinking_wire,
 ):
     calls: list[dict] = []
     content = json.dumps(
@@ -1131,15 +1135,169 @@ async def test_compiler_gated_providers_do_not_send_native_response_format(
 
     assert len(calls) == 1
     assert "response_format" not in calls[0]
+    assert '<schema_control contract="ghost_b_extraction.v1"' in calls[0]["messages"][1]["content"]
+    assert "<json_payload>" in calls[0]["messages"][1]["content"]
     assert "Return exactly one valid JSON object" in calls[0]["messages"][1]["content"]
     assert "Output JSONL only" not in calls[0]["messages"][1]["content"]
-    if expects_thinking_disabled:
-        assert calls[0]["thinking"] == {"type": "disabled"}
-    else:
-        assert "thinking" not in calls[0]
+    for key, value in expected_thinking_wire.items():
+        assert calls[0][key] == value
+    assert calls[0].get("thinking") != {"type": "enabled"}
+    assert calls[0].get("enable_thinking") is not True
     assert report.results and report.results[0].provider == expected_provider
     assert report.results[0].schema_mode == "json_object_prompt"
     assert report.results[0].output_mode == "json_object_prompt"
+
+
+@pytest.mark.asyncio
+async def test_compiler_gated_provider_accepts_xml_wrapped_json_payload(monkeypatch):
+    calls: list[dict] = []
+    content = (
+        "Reasoning omitted.\n"
+        '<json_payload>{"entities":[{"canonical_name":"alpha",'
+        '"surface_form":"Alpha","entity_type":"Concept","confidence":0.95}],'
+        '"relations":[],"facts":[]}</json_payload>'
+    )
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {
+                "usage": {"total_tokens": 120, "prompt_tokens": 90, "completion_tokens": 30},
+                "choices": [
+                    {"finish_reason": "stop", "message": {"content": content}}
+                ],
+            }
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, json, headers):
+            calls.append(copy.deepcopy(json))
+            return FakeResponse()
+
+    monkeypatch.setattr(
+        ghost_b,
+        "get_settings",
+        lambda: _fake_extraction_settings(output_mode="json_schema"),
+    )
+    monkeypatch.setattr(ghost_b.httpx, "AsyncClient", FakeClient)
+
+    report = await ghost_b.extract_entities(
+        [
+            ExtractionTask(
+                chunk_id="c1",
+                doc_id="d1",
+                corpus_id="corp1",
+                text="Alpha is a compact test concept.",
+            )
+        ],
+        pool=[{
+            "provider_preset": "longcat",
+            "model": "openai/LongCat-2.0",
+            "base_url": "https://api.longcat.chat/openai/v1",
+            "api_key": "test-key",
+            "max_concurrent": 1,
+            "extra_params": {},
+        }],
+        return_report=True,
+        enable_facts=False,
+    )
+
+    assert len(calls) == 1
+    assert "response_format" not in calls[0]
+    assert '<schema_control contract="ghost_b_extraction.v1"' in calls[0]["messages"][1]["content"]
+    assert report.results
+    assert report.results[0].provider == "longcat"
+    assert report.results[0].entities[0].canonical_name == "alpha"
+
+
+@pytest.mark.asyncio
+async def test_compiler_gated_provider_retries_bad_json_before_accepting_xml(
+    monkeypatch,
+):
+    calls: list[dict] = []
+    good_content = (
+        '<json_payload>{"entities":[{"canonical_name":"alpha",'
+        '"surface_form":"Alpha","entity_type":"Concept","confidence":0.95}],'
+        '"relations":[],"facts":[]}</json_payload>'
+    )
+
+    class FakeResponse:
+        def __init__(self, content: str) -> None:
+            self.content = content
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {
+                "usage": {"total_tokens": 120, "prompt_tokens": 90, "completion_tokens": 30},
+                "choices": [
+                    {"finish_reason": "stop", "message": {"content": self.content}}
+                ],
+            }
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, json, headers):
+            calls.append(copy.deepcopy(json))
+            if len(calls) == 1:
+                return FakeResponse("not json, not xml, not acceptable")
+            return FakeResponse(good_content)
+
+    monkeypatch.setattr(
+        ghost_b,
+        "get_settings",
+        lambda: _fake_extraction_settings(output_mode="json_schema"),
+    )
+    monkeypatch.setattr(ghost_b.httpx, "AsyncClient", FakeClient)
+
+    report = await ghost_b.extract_entities(
+        [
+            ExtractionTask(
+                chunk_id="c1",
+                doc_id="d1",
+                corpus_id="corp1",
+                text="Alpha is a compact test concept.",
+            )
+        ],
+        pool=[{
+            "provider_preset": "longcat",
+            "model": "LongCat-2.0",
+            "base_url": "https://api.longcat.chat/openai/v1",
+            "api_key": "test-key",
+            "max_concurrent": 1,
+            "extra_params": {},
+        }],
+        return_report=True,
+        enable_facts=False,
+    )
+
+    assert len(calls) == 2
+    assert "response_format" not in calls[0]
+    assert "response_format" not in calls[1]
+    assert '<schema_control contract="ghost_b_extraction.v1"' in calls[0]["messages"][1]["content"]
+    assert '<schema_control contract="ghost_b_extraction.v1"' in calls[1]["messages"][1]["content"]
+    assert report.results
+    assert report.results[0].entities[0].canonical_name == "alpha"
+    assert report.metrics["attempt_count"] == 2
 
 
 @pytest.mark.asyncio

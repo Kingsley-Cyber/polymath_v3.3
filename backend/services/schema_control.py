@@ -34,6 +34,18 @@ class SchemaControlValidation:
     normalized: dict[str, Any] | None = None
 
 
+@dataclass(frozen=True)
+class SchemaControlArtifactReceipt:
+    """Secret-free compile/validation receipt for one structured artifact."""
+
+    accepted: bool
+    contract_name: str
+    failure_class: str | None = None
+    error: str | None = None
+    parsed: dict[str, Any] | None = None
+    normalized: dict[str, Any] | None = None
+
+
 def _escape_cdata(text: str) -> str:
     return str(text or "").replace("]]>", "]]]]><![CDATA[>")
 
@@ -44,6 +56,7 @@ def xml_json_contract_prompt(
     contract_name: str,
     prompt: str,
     schema_hint: str | None = None,
+    force: bool = False,
 ) -> str:
     """Wrap prompt-only JSON providers in an XML-delimited contract.
 
@@ -52,7 +65,7 @@ def xml_json_contract_prompt(
     we do not perturb already-token-masked lanes.
     """
 
-    if getattr(card, "schema_mode", None) != "json_object_prompt":
+    if not force and getattr(card, "schema_mode", None) != "json_object_prompt":
         return prompt
     hint = f"\n<schema_hint><![CDATA[{_escape_cdata(schema_hint)}]]></schema_hint>" if schema_hint else ""
     return (
@@ -229,4 +242,58 @@ def validate_pydantic_projection(
         valid=True,
         model_name=model_cls.__name__,
         normalized=model.model_dump(mode="python", exclude_none=True),
+    )
+
+
+def compile_structured_artifact(
+    raw: str,
+    *,
+    contract_name: str,
+    model_cls: type[BaseModel],
+) -> SchemaControlArtifactReceipt:
+    """Compile provider output into one locally validated artifact.
+
+    Providers are allowed to produce prose, XML-wrapped JSON, or fenced JSON.
+    They are not allowed to decide whether an artifact is valid. This function
+    is the shared fail-closed boundary before durable writes.
+    """
+
+    candidate = extract_provider_json_payload(raw)
+    if candidate is None:
+        return SchemaControlArtifactReceipt(
+            accepted=False,
+            contract_name=contract_name,
+            failure_class="json_parse_failed",
+            error="no_single_json_payload",
+        )
+    try:
+        parsed = json.loads(candidate)
+    except json.JSONDecodeError as exc:
+        return SchemaControlArtifactReceipt(
+            accepted=False,
+            contract_name=contract_name,
+            failure_class="json_parse_failed",
+            error=f"{exc.__class__.__name__}:{str(exc)[:160]}",
+        )
+    if not isinstance(parsed, dict):
+        return SchemaControlArtifactReceipt(
+            accepted=False,
+            contract_name=contract_name,
+            failure_class="json_parse_failed",
+            error="payload_not_object",
+        )
+    validation = validate_pydantic_projection(parsed, model_cls)
+    if not validation.valid:
+        return SchemaControlArtifactReceipt(
+            accepted=False,
+            contract_name=contract_name,
+            failure_class="pydantic_validation_failed",
+            error=validation.error,
+            parsed=parsed,
+        )
+    return SchemaControlArtifactReceipt(
+        accepted=True,
+        contract_name=contract_name,
+        parsed=parsed,
+        normalized=validation.normalized,
     )

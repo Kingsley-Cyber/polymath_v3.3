@@ -43,6 +43,8 @@ from services.llm_lane_pool import (
     rate_limit_retry_after_seconds,
     shared_provider_semaphore,
 )
+from services.schema_control import extract_provider_json_payload
+from services.structured_provider_lane import prepare_structured_provider_attempt
 
 # Phase 14.2 — pluggable schema retriever. Worker injects a closure over qdrant_client +
 # corpus_id so this module stays independent of the Qdrant SDK.
@@ -127,6 +129,14 @@ _JSON_OBJECT_SYSTEM = (
     "Do NOT output JSONL, code fences, explanations, preambles, or postambles. "
     "Extract only what is explicitly stated in the text. "
     "Do not hallucinate entities, relations, or facts."
+)
+_GHOST_B_SCHEMA_CONTROL_HINT = (
+    "Return one JSON object with keys entities, relations, and facts. "
+    "entities[].entity_type must use the allowed vocabulary. "
+    "relations[].predicate must use the allowed vocabulary and every relation "
+    "must include evidence_phrase copied exactly from TEXT. "
+    "facts[] must include subject, fact_type, property_name, value, confidence, "
+    "and evidence_phrase when facts are enabled."
 )
 
 # Default open-vocabulary enums when no schema is provided.
@@ -2239,8 +2249,9 @@ def _result_has_items(result: ExtractionResult | None) -> bool:
 
 def _json_object_claims_items(raw: str) -> bool:
     """Return True when a JSON-object response claimed graph items pre-validation."""
+    candidate = extract_provider_json_payload(raw) or raw
     try:
-        data = json.loads(raw)
+        data = json.loads(candidate)
     except (TypeError, json.JSONDecodeError):
         return False
     if not isinstance(data, dict):
@@ -3705,6 +3716,15 @@ def _extract_balanced_json_object(raw: str) -> str | None:
     schema, evidence, endpoint, and semantic promotion gate.
     """
 
+    candidate = extract_provider_json_payload(raw)
+    if candidate is not None:
+        try:
+            parsed = json.loads(candidate)
+        except json.JSONDecodeError:
+            parsed = None
+        if isinstance(parsed, dict):
+            return candidate
+
     text = str(raw or "").lstrip("\ufeff").strip()
     payload_match = re.search(
         r"<json_payload\b[^>]*>(.*?)</json_payload>",
@@ -4399,29 +4419,16 @@ async def extract_entities(
             payload_base["api_key"] = entry["api_key"]
         # Internal flags (supports_json_schema, managed_vllm, …) stay OUT of
         # provider bodies — Groq 400s on unknown keys (2026-07-05).
-        from services.ingestion.extraction_contract import provider_payload_extras
+        from services.ingestion.extraction_contract import (
+            ingestion_provider_payload_extras,
+        )
 
-        payload_base.update(provider_payload_extras(entry.get("extra_params")))
+        payload_base.update(
+            ingestion_provider_payload_extras(entry.get("extra_params"))
+        )
         provider_card = resolve_extraction_provider_card(entry)
         for key, value in provider_payload_defaults(provider_card).items():
             payload_base.setdefault(key, value)
-        model_name = str(entry["model"])
-        base_url = str(entry.get("base_url") or "")
-        model_key = model_name.lower()
-        base_url_key = base_url.lower()
-        # DeepSeek v4-flash/v4-pro and MiMo reasoning variants can default
-        # thinking-mode ON: reasoning tokens consume the output budget before
-        # JSONL content emits. Force thinking off for extraction; explicit
-        # operator overrides via corpus extra_params take precedence.
-        if (
-            (
-                model_key.startswith("deepseek/")
-                or "mimo" in model_key
-                or "xiaomimimo" in base_url_key
-            )
-            and "thinking" not in payload_base
-        ):
-            payload_base["thinking"] = {"type": "disabled"}
 
         # Bounded foreground state machine:
         #   attempt 1 = normal compact graph extraction
@@ -4584,6 +4591,30 @@ async def extract_entities(
                 if profile_output_mode in ("json_object", "json_schema", "json_object_prompt")
                 else _SYSTEM
             )
+            response_model = None
+            if profile_output_mode == "json_schema":
+                from services.ghost_b_schemas import ExtractionResponse
+
+                response_model = ExtractionResponse
+            if profile_output_mode in ("json_object", "json_schema", "json_object_prompt"):
+                prompt, response_format, structured_attempt = prepare_structured_provider_attempt(
+                    provider_card,
+                    output_mode=profile_output_mode,
+                    contract_name="ghost_b_extraction.v1",
+                    prompt=prompt,
+                    schema_hint=_GHOST_B_SCHEMA_CONTROL_HINT,
+                    model_cls=response_model,
+                    schema_name="ghost_b_extraction",
+                )
+            else:
+                response_format = None
+                structured_attempt = None
+            prompt_chars = len(prompt)
+            prompt_hash = hashlib.sha256(
+                prompt.encode("utf-8", errors="replace")
+            ).hexdigest()
+            last_prompt_hash = prompt_hash
+            last_prompt_chars = prompt_chars
             attempt_payload["messages"] = [
                 {
                     "role": "system",
@@ -4591,13 +4622,8 @@ async def extract_entities(
                 },
                 {"role": "user", "content": prompt},
             ]
-            # Pt9c — branch on exact mode for response_format because the
-            # payload differs: json_schema sends a full schema spec, while
-            # json_object just sends {"type": "json_object"}.
-            if profile_output_mode == "json_schema":
-                attempt_payload["response_format"] = _json_schema_response_format()
-            elif profile_output_mode == "json_object":
-                attempt_payload["response_format"] = _json_object_response_format()
+            if response_format is not None:
+                attempt_payload["response_format"] = response_format
             attempt_max_tokens, token_budget_meta = _context_bounded_completion_tokens(
                 entry,
                 system_prompt=system_prompt,
@@ -5348,9 +5374,11 @@ async def extract_entities(
             payload["api_base"] = entry["base_url"]
         if entry.get("api_key"):
             payload["api_key"] = entry["api_key"]
-        from services.ingestion.extraction_contract import provider_payload_extras
+        from services.ingestion.extraction_contract import (
+            ingestion_provider_payload_extras,
+        )
 
-        payload.update(provider_payload_extras(entry.get("extra_params")))
+        payload.update(ingestion_provider_payload_extras(entry.get("extra_params")))
         for key, value in provider_payload_defaults(provider_card).items():
             payload.setdefault(key, value)
         requested_tokens = min(32768, max_completion_tokens * len(batch_tasks))

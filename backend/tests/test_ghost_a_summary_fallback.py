@@ -749,6 +749,28 @@ def test_summary_pool_preserves_distinct_same_provider_credentials() -> None:
     assert "longcat-account-c" not in str(report)
 
 
+def test_summary_pool_auto_max_concurrency_starts_as_probe_cap() -> None:
+    pool, report = prepare_summary_provider_pool(
+        [
+            {
+                "provider_preset": "groq",
+                "model": "llama-3.1-8b-instant",
+                "base_url": "https://api.groq.com/openai/v1",
+                "api_key": "groq-account-a",
+                "max_concurrent": 45,
+                "extra_params": {"auto_max_concurrent": True},
+            }
+        ]
+    )
+
+    assert pool[0]["max_concurrent"] == 2
+    assert report["admitted_provider_capacity"] == 2
+    assert report["concurrency_adjustments"][0]["provider"] == "groq"
+    assert report["concurrency_adjustments"][0]["configured"] == 45
+    assert report["concurrency_adjustments"][0]["effective"] == 2
+    assert "groq-account-a" not in str(report)
+
+
 def test_summary_pool_collapses_same_credential_duplicate() -> None:
     pool, report = prepare_summary_provider_pool(
         [

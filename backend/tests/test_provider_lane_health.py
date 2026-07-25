@@ -181,6 +181,54 @@ def test_longcat_concurrency_starts_as_canary_and_earns_bounded_ramp():
     assert adjustments == []
 
 
+def test_auto_max_concurrency_probes_then_earns_groq_capacity():
+    pool = [
+        {
+            "provider_preset": "groq",
+            "model": "llama-3.1-8b-instant",
+            "base_url": "https://api.groq.com/openai/v1",
+            "max_concurrent": 45,
+            "extra_params": {"auto_max_concurrent": True},
+        }
+    ]
+
+    cold, cold_adjustments = adapt_extraction_pool_concurrency(pool, {"lanes": []})
+    assert cold[0]["max_concurrent"] == 2
+    assert cold_adjustments[0]["auto_max_concurrent"] is True
+    assert cold_adjustments[0]["reasons"] == ["auto_max_concurrency_probe"]
+
+    warm, _ = adapt_extraction_pool_concurrency(
+        pool,
+        {
+            "lanes": [
+                {
+                    "key": "groq|llama-3.1-8b-instant",
+                    "succeeded": 120,
+                    "rate_limited": 0,
+                    "rate_limit_ratio": 0.0,
+                }
+            ]
+        },
+    )
+    assert warm[0]["max_concurrent"] == 8
+
+    throttled, throttled_adjustments = adapt_extraction_pool_concurrency(
+        pool,
+        {
+            "lanes": [
+                {
+                    "key": "groq|llama-3.1-8b-instant",
+                    "succeeded": 500,
+                    "rate_limited": 60,
+                    "rate_limit_ratio": 0.12,
+                }
+            ]
+        },
+    )
+    assert throttled[0]["max_concurrent"] == 16
+    assert "auto_max_concurrency_backoff" in throttled_adjustments[0]["reasons"]
+
+
 @pytest.mark.asyncio
 async def test_ghost_b_audit_sink_persists_rate_limit_events():
     coll = _InsertCollection()

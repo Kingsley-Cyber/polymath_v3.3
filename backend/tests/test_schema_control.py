@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 
 from services.extraction_provider_cards import resolve_extraction_provider_card
 from services.schema_control import (
+    compile_structured_artifact,
     extract_provider_json_payload,
     provider_native_response_format,
     validate_pydantic_projection,
@@ -90,6 +91,26 @@ def test_xml_json_contract_prompt_leaves_native_schema_providers_alone() -> None
     )
 
 
+def test_xml_json_contract_prompt_can_force_degraded_native_retry() -> None:
+    card = resolve_extraction_provider_card(
+        {
+            "provider_preset": "openai",
+            "model": "gpt-4.1-mini",
+            "base_url": "https://api.openai.com/v1",
+        }
+    )
+
+    prompt = xml_json_contract_prompt(
+        card,
+        contract_name="retry_contract.v1",
+        prompt="Return JSON.",
+        force=True,
+    )
+
+    assert '<schema_control contract="retry_contract.v1"' in prompt
+    assert "<json_payload>" in prompt
+
+
 def test_provider_native_response_format_uses_json_object_without_task_schema() -> None:
     card = resolve_extraction_provider_card(
         {
@@ -112,3 +133,26 @@ def test_provider_native_response_format_skips_prompt_only_longcat() -> None:
     )
 
     assert provider_native_response_format(card) is None
+
+
+def test_compile_structured_artifact_accepts_xml_wrapped_payload() -> None:
+    receipt = compile_structured_artifact(
+        '<json_payload>{"summary":"valid","count":2}</json_payload>',
+        contract_name="tiny.v1",
+        model_cls=_TinyContract,
+    )
+
+    assert receipt.accepted is True
+    assert receipt.normalized == {"summary": "valid", "count": 2}
+
+
+def test_compile_structured_artifact_quarantines_bad_pydantic_payload() -> None:
+    receipt = compile_structured_artifact(
+        '<json_payload>{"summary":"","count":-1}</json_payload>',
+        contract_name="tiny.v1",
+        model_cls=_TinyContract,
+    )
+
+    assert receipt.accepted is False
+    assert receipt.failure_class == "pydantic_validation_failed"
+    assert receipt.error

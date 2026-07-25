@@ -19,6 +19,7 @@ sys.modules[_spec.name] = _mod  # dataclasses resolve ClassVar via sys.modules
 _spec.loader.exec_module(_mod)
 resolve = _mod.resolve_extraction_contract
 provider_payload_extras = _mod.provider_payload_extras
+ingestion_provider_payload_extras = _mod.ingestion_provider_payload_extras
 
 
 def _rtx_entry():
@@ -96,6 +97,22 @@ def test_payload_extras_reserved_keys_never_overridden():
 def test_payload_extras_passes_legit_provider_params():
     extras = {"thinking": {"type": "disabled"}, "temperature": 0.1, "seed": 7}
     assert provider_payload_extras(extras) == extras
+
+
+def test_ingestion_payload_extras_strip_thinking_controls():
+    out = ingestion_provider_payload_extras(
+        {
+            "thinking": {"type": "enabled"},
+            "enable_thinking": True,
+            "reasoning_effort": "high",
+            "thinking_effort": "high",
+            "auto_max_concurrent": True,
+            "temperature": 0,
+            "seed": 7,
+        }
+    )
+
+    assert out == {"temperature": 0, "seed": 7}
 
 
 def test_payload_extras_none_safe():

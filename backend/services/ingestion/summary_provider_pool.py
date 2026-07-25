@@ -14,6 +14,7 @@ from typing import Any, Iterable
 import httpx
 
 from config import get_settings
+from services.ingestion.provider_lane_health import adapt_provider_pool_concurrency
 
 
 FLASH_MODEL_MARKER = "deepseek-v4-flash"
@@ -138,6 +139,11 @@ def prepare_summary_provider_pool(
         admitted.append(entry)
 
     admitted.sort(key=lambda entry: (0 if _is_flash(entry) else 1))
+    admitted, concurrency_adjustments = adapt_provider_pool_concurrency(
+        admitted,
+        None,
+        legacy_prompt_provider_canary=False,
+    )
     report = {
         "primary_model": _model(admitted[0]) if admitted else None,
         "admitted_provider_count": len(admitted),
@@ -145,6 +151,7 @@ def prepare_summary_provider_pool(
             max(1, int(entry.get("max_concurrent") or 1)) for entry in admitted
         ),
         "admitted_models": [_model(entry) for entry in admitted],
+        "concurrency_adjustments": concurrency_adjustments,
         "demoted_provider_count": len(demoted),
         "demoted_models": [_model(entry) for entry in demoted],
         "disabled_provider_count": len(disabled),
