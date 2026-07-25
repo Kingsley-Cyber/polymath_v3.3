@@ -13,6 +13,7 @@ import logging
 import os
 from pathlib import Path
 import resource
+import sys
 from typing import Any, Literal
 
 logger = logging.getLogger(__name__)
@@ -110,6 +111,13 @@ def _cgroup_memory_limit_mb() -> int | None:
     return int(min(values) / (1024 * 1024)) if values else None
 
 
+def _ru_maxrss_to_mb(usage: int | float, *, platform: str | None = None) -> int:
+    """Normalize getrusage max RSS units for the current operating system."""
+
+    divisor = 1024 * 1024 if (platform or sys.platform) == "darwin" else 1024
+    return int(max(0, usage) / divisor)
+
+
 def _process_rss_mb() -> int | None:
     try:
         import psutil  # type: ignore
@@ -120,9 +128,7 @@ def _process_rss_mb() -> int | None:
     try:
         usage = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
         # macOS reports bytes, Linux reports KiB.
-        if usage > 10_000_000_000:
-            return int(usage / (1024 * 1024))
-        return int(usage / 1024)
+        return _ru_maxrss_to_mb(usage)
     except Exception:
         return None
 

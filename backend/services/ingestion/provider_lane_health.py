@@ -19,6 +19,15 @@ SUCCESS_EVENTS = {
     "ghost_b_attempt_succeeded_with_validation_rejections",
 }
 FAILED_EVENTS = {"ghost_b_attempt_failed"}
+AUTO_CONCURRENCY_INITIAL = 2
+AUTO_CONCURRENCY_STEPS: tuple[tuple[int, int], ...] = (
+    (0, AUTO_CONCURRENCY_INITIAL),
+    (20, 4),
+    (100, 8),
+    (250, 16),
+    (500, 32),
+    (1000, 64),
+)
 
 
 def _int(value: Any) -> int:
@@ -26,6 +35,63 @@ def _int(value: Any) -> int:
         return int(value or 0)
     except (TypeError, ValueError):
         return 0
+
+
+def _bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on", "auto"}
+    return bool(value)
+
+
+def _extra(entry: dict[str, Any]) -> dict[str, Any]:
+    extra = entry.get("extra_params") or {}
+    return extra if isinstance(extra, dict) else {}
+
+
+def _configured_lane_ceiling(entry: dict[str, Any], *, default: int = 16) -> int:
+    extra = _extra(entry)
+    raw_ceiling = (
+        extra.get("auto_max_concurrent_ceiling")
+        or extra.get("max_concurrent_ceiling")
+        or extra.get("provider_max_concurrent_ceiling")
+    )
+    raw = entry.get("max_concurrent")
+    if raw_ceiling is not None:
+        return max(1, _int(raw_ceiling) or default)
+    if isinstance(raw, str) and raw.strip().lower() == "auto":
+        return default
+    return max(1, _int(raw) or 1)
+
+
+def _auto_max_concurrency_enabled(entry: dict[str, Any]) -> bool:
+    extra = _extra(entry)
+    raw = entry.get("max_concurrent")
+    mode = str(extra.get("max_concurrent_mode") or "").strip().lower()
+    return (
+        _bool(extra.get("auto_max_concurrent"))
+        or mode == "auto"
+        or (isinstance(raw, str) and raw.strip().lower() == "auto")
+    )
+
+
+def _auto_initial_cap(entry: dict[str, Any]) -> int:
+    extra = _extra(entry)
+    return max(1, _int(extra.get("auto_initial_concurrent")) or AUTO_CONCURRENCY_INITIAL)
+
+
+def _earned_auto_concurrency(
+    *,
+    successes: int,
+    ceiling: int,
+    initial_cap: int,
+) -> int:
+    earned = max(1, initial_cap)
+    for threshold, cap in AUTO_CONCURRENCY_STEPS:
+        if successes >= threshold:
+            earned = max(earned, cap)
+    return min(max(1, ceiling), earned)
 
 
 def _lane_key(*, provider: str, model: str, lane: int | None = None) -> str:
@@ -179,16 +245,18 @@ def filter_extraction_pool_by_provider_health(
     return pool, []
 
 
-def adapt_extraction_pool_concurrency(
+def adapt_provider_pool_concurrency(
     pool: list[dict[str, Any]],
     health: dict[str, Any] | None,
+    *,
+    legacy_prompt_provider_canary: bool = True,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Apply conservative provider canary/rate-limit caps to lane budgets.
+    """Apply auto-discovered provider canary/rate-limit caps to lane budgets.
 
-    Configured concurrency remains the operator ceiling. Prompt-only LongCat
-    lanes must earn their way from a two-request canary to wider concurrency
-    using recently accepted outputs; an explicit ``provider_canary_passed``
-    flag is required before using the full configured ceiling.
+    Configured numeric concurrency is treated as the operator ceiling when
+    ``extra_params.auto_max_concurrent`` or ``max_concurrent_mode=auto`` is
+    enabled. Cold auto lanes start low, earn wider caps with recent successful
+    attempts, and back off when recent events show provider throttling.
     """
 
     if not pool:
@@ -202,11 +270,9 @@ def adapt_extraction_pool_concurrency(
     adjustments: list[dict[str, Any]] = []
     for lane, original in enumerate(pool):
         entry = dict(original)
-        extra = entry.get("extra_params") or {}
-        if not isinstance(extra, dict):
-            extra = {}
+        extra = _extra(entry)
         card = resolve_extraction_provider_card(entry)
-        configured = max(1, int(entry.get("max_concurrent") or 1))
+        configured = _configured_lane_ceiling(entry)
         effective = configured
         aggregate_key, _ = _pool_lane_key(entry, lane)
         row = rows.get(aggregate_key) or {}
@@ -214,8 +280,22 @@ def adapt_extraction_pool_concurrency(
         rate_limited = _int(row.get("rate_limited"))
         rate_limit_ratio = float(row.get("rate_limit_ratio") or 0.0)
         reasons: list[str] = []
+        auto_enabled = _auto_max_concurrency_enabled(entry)
 
-        if card.provider == "longcat" and not bool(extra.get("provider_canary_passed")):
+        if auto_enabled and not bool(extra.get("provider_canary_passed")):
+            earned_cap = _earned_auto_concurrency(
+                successes=successes,
+                ceiling=configured,
+                initial_cap=_auto_initial_cap(entry),
+            )
+            effective = min(effective, earned_cap)
+            if effective < configured:
+                reasons.append("auto_max_concurrency_probe")
+        elif (
+            legacy_prompt_provider_canary
+            and card.provider == "longcat"
+            and not bool(extra.get("provider_canary_passed"))
+        ):
             initial_cap = max(1, int(extra.get("canary_max_concurrent") or 2))
             if successes < 20:
                 earned_cap = initial_cap
@@ -233,7 +313,11 @@ def adapt_extraction_pool_concurrency(
             reduced = max(1, effective // 2)
             if reduced < effective:
                 effective = reduced
-                reasons.append("recent_rate_limit_backoff")
+                reasons.append(
+                    "auto_max_concurrency_backoff"
+                    if auto_enabled
+                    else "recent_rate_limit_backoff"
+                )
 
         if effective != configured:
             entry["max_concurrent"] = effective
@@ -246,11 +330,26 @@ def adapt_extraction_pool_concurrency(
                     "effective": effective,
                     "recent_successes": successes,
                     "recent_rate_limited": rate_limited,
+                    "rate_limit_ratio": rate_limit_ratio,
+                    "auto_max_concurrent": auto_enabled,
                     "reasons": reasons,
                 }
             )
         adapted.append(entry)
     return adapted, adjustments
+
+
+def adapt_extraction_pool_concurrency(
+    pool: list[dict[str, Any]],
+    health: dict[str, Any] | None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Apply extraction-lane auto concurrency plus legacy LongCat canary caps."""
+
+    return adapt_provider_pool_concurrency(
+        pool,
+        health,
+        legacy_prompt_provider_canary=True,
+    )
 
 
 async def load_recent_provider_lane_health(

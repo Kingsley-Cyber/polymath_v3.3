@@ -144,6 +144,8 @@ def _provider_key(entry: dict[str, Any]) -> str:
         return "siliconflow"
     if provider == "openrouter" or "openrouter.ai" in base_url:
         return "openrouter"
+    if provider == "groq" or "api.groq.com" in base_url:
+        return "groq"
     if provider == "deepseek" or "api.deepseek.com" in base_url or model.startswith("deepseek/"):
         return "deepseek"
     if provider in {"mimo", "xiaomi"} or "xiaomimimo" in base_url or "mimo" in model:
@@ -227,6 +229,12 @@ def resolve_extraction_provider_card(entry: Any) -> ExtractionProviderCard:
         json_repair_mode = "provider_native" if supports_json_schema else "balanced_object_repair"
         if supports_json_schema:
             notes.append("openrouter_mistral_nemo_native_json_schema")
+    elif provider == "groq":
+        supports_json_object = True
+        supports_json_schema = False
+        schema_mode = "json_object"
+        json_repair_mode = "balanced_object_repair"
+        notes.append("groq_json_object_live_verified")
     elif provider == "local_private_vllm":
         supports_json_schema = True
         supports_json_object = True
@@ -276,9 +284,15 @@ def resolve_extraction_provider_card(entry: Any) -> ExtractionProviderCard:
         else:
             json_repair_mode = "jsonl_repair_resume"
 
-    disable_thinking = provider in {"longcat", "deepseek", "mimo"} or "mimo" in model.lower()
-    if explicit_disable_thinking is not None:
-        disable_thinking = explicit_disable_thinking
+    default_disable_thinking = (
+        provider in {"longcat", "deepseek", "mimo", "siliconflow"}
+        or "mimo" in model.lower()
+    )
+    disable_thinking = default_disable_thinking
+    if explicit_disable_thinking is True:
+        disable_thinking = True
+    elif explicit_disable_thinking is False and not default_disable_thinking:
+        disable_thinking = False
 
     if context_window_tokens is None:
         if provider == "local_private_vllm":
@@ -391,8 +405,9 @@ def safe_extraction_pool_contract(*, pool_source: str, pool: list[Any]) -> dict[
 def provider_payload_defaults(card: ExtractionProviderCard) -> dict[str, Any]:
     """Provider-body defaults derived from the card.
 
-    These are safe defaults only. Callers should merge user extra_params first
-    and then setdefault these values so explicit operator choices still win.
+    These are safe defaults only. Ingestion callers should merge
+    ingestion_provider_payload_extras() first, then setdefault these values so
+    provider-card thinking controls own the ingestion artifact contract.
     """
 
     if card.disable_thinking:

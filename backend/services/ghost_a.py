@@ -1011,9 +1011,11 @@ async def summarize_parents(
         # Same filter as ghost_b: internal chip flags (supports_json_schema,
         # managed_vllm, …) never reach providers, and response_format joins
         # model/messages as caller-owned (Groq 400s on unknown keys).
-        from services.ingestion.extraction_contract import provider_payload_extras
+        from services.ingestion.extraction_contract import (
+            ingestion_provider_payload_extras,
+        )
 
-        payload.update(provider_payload_extras(entry.get("extra_params")))
+        payload.update(ingestion_provider_payload_extras(entry.get("extra_params")))
         # Apply the same provider-card defaults as Ghost B. Summary lanes must
         # honor explicit disable_thinking flags too; otherwise reasoning models
         # can return HTTP 200 with empty content at the bounded output limit.
@@ -1146,9 +1148,11 @@ async def summarize_parents(
             payload["api_base"] = entry["base_url"]
         if entry.get("api_key"):
             payload["api_key"] = entry["api_key"]
-        from services.ingestion.extraction_contract import provider_payload_extras
+        from services.ingestion.extraction_contract import (
+            ingestion_provider_payload_extras,
+        )
 
-        payload.update(provider_payload_extras(entry.get("extra_params")))
+        payload.update(ingestion_provider_payload_extras(entry.get("extra_params")))
         card = resolve_extraction_provider_card(entry)
         for key, value in provider_payload_defaults(card).items():
             payload.setdefault(key, value)

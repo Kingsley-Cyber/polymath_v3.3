@@ -6,8 +6,20 @@ import asyncio
 from typing import Any, Awaitable, Callable
 
 from config import get_settings
+from services.extraction_provider_cards import (
+    provider_payload_defaults,
+    resolve_extraction_provider_card,
+)
+from services.structured_provider_lane import prepare_structured_provider_attempt
 
 LlmFn = Callable[[str], Awaitable[str]]
+
+_SUMMARY_TREE_SCHEMA_HINT = (
+    "Return one JSON object that parse_semantic_summary can compile: summary, "
+    "domain, semantic_chunk_type, key_terms, mechanisms, central_claim, "
+    "key_points, main_mechanism, concept_tags, entity_hints, retrieval_uses, "
+    "abstraction_level, latent_concepts, temporal_class, and time_expressions."
+)
 
 
 def summary_tree_llm_from_pool(
@@ -51,36 +63,48 @@ def summary_tree_llm_from_pool(
         nonlocal lane_idx
         import httpx
 
-        from services.ingestion.extraction_contract import provider_payload_extras
+        from services.ingestion.extraction_contract import (
+            ingestion_provider_payload_extras,
+        )
 
         selected_lane = lane_slots[lane_idx % len(lane_slots)]
         lane_idx += 1
         entry = pool[selected_lane]
+        card = resolve_extraction_provider_card(entry)
+        output_mode = (
+            card.schema_mode
+            if card.schema_mode in {"json_schema", "json_object", "json_object_prompt"}
+            else "json_object_prompt"
+        )
+        user_prompt, response_format, _structured_attempt = prepare_structured_provider_attempt(
+            card,
+            output_mode=output_mode,
+            contract_name="summary_tree_semantic_heal.v1",
+            prompt=prompt,
+            schema_hint=_SUMMARY_TREE_SCHEMA_HINT,
+            schema_name="summary_tree_semantic_heal",
+        )
         payload: dict[str, Any] = {
             "model": entry["model"],
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": [{"role": "user", "content": user_prompt}],
             "temperature": 0,
             "max_tokens": max(128, min(1024, int(max_tokens or 300))),
         }
+        if response_format is not None:
+            payload["response_format"] = response_format
         if entry.get("base_url"):
             payload["api_base"] = entry["base_url"]
         if entry.get("api_key"):
             payload["api_key"] = entry["api_key"]
-        payload.update(provider_payload_extras(entry.get("extra_params")))
-        model_name = str(entry.get("model") or "").lower()
-        if "v4-flash" in model_name or "v4-pro" in model_name or "deepseek-v4" in model_name:
-            payload.setdefault("thinking", {"type": "disabled"})
+        payload.update(ingestion_provider_payload_extras(entry.get("extra_params")))
+        for key, value in provider_payload_defaults(card).items():
+            payload.setdefault(key, value)
         headers = {
             "Authorization": f"Bearer {settings.LITELLM_MASTER_KEY}",
             "Content-Type": "application/json",
         }
         reservation = None
         if cost_controller is not None:
-            from services.extraction_provider_cards import (
-                resolve_extraction_provider_card,
-            )
-
-            card = resolve_extraction_provider_card(entry)
             reservation = await cost_controller.reserve(
                 provider=card.provider,
                 model=entry.get("model"),

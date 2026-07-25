@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from models.schemas import IngestionConfig, ModelProfileRef
 from services.ingestion.resource_planner import (
     SystemResources,
+    _ru_maxrss_to_mb,
     classify_storage_mode,
     plan_ingestion_resources,
 )
@@ -38,6 +39,11 @@ def _rtx_pool(concurrency: int = 60) -> list[ModelProfileRef]:
             max_concurrent=concurrency,
         )
     ]
+
+
+def test_ru_maxrss_normalizes_macos_bytes_and_linux_kib():
+    assert _ru_maxrss_to_mb(300 * 1024 * 1024, platform="darwin") == 300
+    assert _ru_maxrss_to_mb(300 * 1024, platform="linux") == 300
 
 
 def test_remote_vllm_profile_uses_one_doc_under_tight_backend_cap():
