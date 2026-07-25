@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+/.tmp_pkgs/
 frontend/dist/
 frontend/playwright-report/
 frontend/test-results/
