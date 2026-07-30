@@ -616,13 +616,23 @@ def _extract_raw(task_dicts: list[dict], do_facts: bool, lens_id: str | None) ->
 
     with _INFER_LOCK:
         gliner = get_gliner()
-        glirel = _get_glirel()
+        # GLiREL is RETIRED (owner 2026-07-29/30) and Stage C never calls it.
+        # It was still being eagerly loaded here — 1.87 GB of weights resident on
+        # every extraction call, on a 32 GB machine where local extraction is the
+        # default road. Load removed (Step 0b). The _get_glirel* loaders are KEPT
+        # for OFFLINE use only (R0 candidate suggestion); nothing in the
+        # production path may call them.
         t0 = _time.time()
 
         n = len(task_dicts)
         is_table_flags = [t.get("chunk_kind") == "table" for t in task_dicts]
         counters_per = [
-            {"entity_drop": 0, "relation_drop": 0, "evidence_drop": 0, "fact_drop": 0}
+            {"entity_drop": 0, "relation_drop": 0, "evidence_drop": 0, "fact_drop": 0,
+             "qualified_negated": 0, "qualified_modal": 0, "qualified_attributed": 0,
+             "qualified_conditional": 0, "suppressed_contrast": 0,
+             "skipped_verbless": 0, "suppressed_expletive": 0,
+             "suppressed_agentless_passive": 0, "suppressed_light_verb": 0,
+             "skipped_low_parse_confidence": 0}
             for _ in range(n)
         ]
 
@@ -676,6 +686,23 @@ def _extract_raw(task_dicts: list[dict], do_facts: bool, lens_id: str | None) ->
         ents_per_task: list[list[dict]] = []
         entities_per_task: list[list[dict]] = []
         defs_by_chunk: list[tuple[str, dict[str, str]]] = []
+        _use_spacy_appos = os.environ.get("GHOST_B_RELATION_ENGINE", "spacy").strip().lower() == "spacy"
+
+        # ONE PARSE PER CHUNK: when spaCy engine is active, batch-parse all
+        # texts once and share the Docs between Stage B (appos) and Stage C.
+        _shared_docs: list | None = None
+        if _use_spacy_appos:
+            try:
+                from services.extraction.appos_enrichment import get_shared_nlp
+                _shared_nlp = get_shared_nlp()
+                _shared_docs = list(_shared_nlp.pipe(
+                    [t["text"] for t in task_dicts],
+                    batch_size=max(16, n),
+                ))
+            except Exception as exc:
+                logger.debug("spaCy batch parse failed, falling back to per-chunk: %s", exc)
+                _shared_docs = None
+
         for i, task in enumerate(task_dicts):
             counters = counters_per[i]
             ent_dicts = _noise_gate(
@@ -683,17 +710,45 @@ def _extract_raw(task_dicts: list[dict], do_facts: bool, lens_id: str | None) ->
             if ent_dicts and not is_table_flags[i]:
                 _merge_aliases(ent_dicts, extract_aliases(task["text"], ent_dicts))
                 defs = extract_definitional_phrases(task["text"], ent_dicts)
+                # spaCy APPOS enrichment: structurally-validated appositional
+                # aliases + definitional phrases (augments regex heuristics)
+                if _use_spacy_appos:
+                    try:
+                        from services.extraction.appos_enrichment import spacy_appos_enrichment
+                        _doc_i = _shared_docs[i] if _shared_docs else None
+                        appos_aliases, appos_defs = spacy_appos_enrichment(
+                            task["text"], ent_dicts, doc=_doc_i)
+                        if appos_aliases:
+                            _merge_aliases(ent_dicts, appos_aliases)
+                        if appos_defs:
+                            defs = {**defs, **appos_defs}  # spaCy wins on conflict
+                    except Exception as exc:
+                        logger.debug("spacy_appos_enrichment failed chunk=%s: %s", task.get("chunk_id"), exc)
                 if defs:
                     defs_by_chunk.append((task["chunk_id"], defs))
             ents_per_task.append(ent_dicts)
             entities_per_task.append(_validated_entities(ent_dicts, counters))
         t_cpu = _time.time()
 
-        # ---- Stage C: GLiREL, sentence units batched across chunks ---------
-        # Dual-lane: 2 of every 3 relation-bearing chunks go to the GPU
-        # classifier, the rest to a CPU instance running in a parallel thread
-        # (torch releases the GIL during forwards). Assignment is positional,
-        # so lane placement is deterministic per doc.
+        # ---- Stage C: Relations — spaCy dep-path (GLiREL retired) ------------
+        # spaCy dependency-path extraction: 27x faster than GLiREL
+        #   (MEASURED: 4.5ms vs 121ms/chunk), gate P=1.000 F1=0.636.
+        # GLiREL is RETIRED from production (owner, 2026-07-29/30). The engine is
+        # NOT switchable at runtime — there is no rollback to GLiREL.
+        # GHOST_B_RELATION_ENGINE was silently ignored here, so anyone setting it
+        # got a no-op with no signal (and the roadmap documented a rollback that
+        # could never fire). It now fails LOUD instead of lying. Step 0b of the
+        # deterministic recall ladder; see CONTINUITY/DETERMINISTIC_RELATION_RECALL_SPEC.md §7.
+        _rel_engine = "spacy"
+        _requested_engine = os.environ.get("GHOST_B_RELATION_ENGINE", "").strip().lower()
+        if _requested_engine and _requested_engine != "spacy":
+            raise RuntimeError(
+                f"FATAL: GHOST_B_RELATION_ENGINE={_requested_engine!r} is not honored. "
+                "GLiREL is RETIRED from production (owner decision 2026-07-29/30) and "
+                "the relation engine is not switchable at runtime. Unset the variable "
+                "or set it to 'spacy'. There is NO rollback to GLiREL — reverting the "
+                "deterministic lane means reverting the commit, not flipping an env var."
+            )
         rel_idx = [i for i in range(n)
                    if not is_table_flags[i] and len(ents_per_task[i]) >= 2]
         relations_per_task: list[list[dict]] = [[] for _ in range(n)]
@@ -706,30 +761,27 @@ def _extract_raw(task_dicts: list[dict], do_facts: bool, lens_id: str | None) ->
                     "entities": ents_per_task[i],
                 }
 
-            glirel_cpu = _get_glirel_cpu()
-            if glirel_cpu is not None and len(rel_idx) >= 12:
-                gpu_idx = [i for k, i in enumerate(rel_idx) if k % 3 != 2]
-                cpu_idx = [i for k, i in enumerate(rel_idx) if k % 3 == 2]
-                from concurrent.futures import ThreadPoolExecutor
-                with ThreadPoolExecutor(max_workers=2) as pool:
-                    f_gpu = pool.submit(
-                        glirel.extract_chunks, [chunk_of(i) for i in gpu_idx],
-                        max_related, glirel_ub)
-                    f_cpu = pool.submit(
-                        glirel_cpu.extract_chunks, [chunk_of(i) for i in cpu_idx],
-                        max_related, glirel_ub)
-                    for idx_list, edge_lists in ((gpu_idx, f_gpu.result()),
-                                                 (cpu_idx, f_cpu.result())):
-                        for i, edges in zip(idx_list, edge_lists):
-                            relations_per_task[i] = _validated_relations(
-                                edges, counters_per[i])
-            else:
-                edge_lists = glirel.extract_chunks(
-                    [chunk_of(i) for i in rel_idx],
-                    max_related=max_related, unit_batch=glirel_ub)
-                for i, edges in zip(rel_idx, edge_lists):
-                    relations_per_task[i] = _validated_relations(edges, counters_per[i])
-        t_glirel = _time.time()
+            # --- spaCy dependency-path extraction (fast, CPU-only) ---
+            # Sole relation engine. The GLiREL branch that used to live here was
+            # unreachable dead code once _rel_engine was pinned to "spacy" —
+            # deleted in Step 0b rather than left as a hazard. Reverting the
+            # deterministic lane means reverting the commit, not flipping a flag.
+            from services.extraction.spacy_relation_adapter import get_spacy_extractor
+            _spacy_ext = get_spacy_extractor()
+            # Pass pre-parsed Docs if available (single-parse-per-chunk)
+            _stage_c_docs = None
+            if _shared_docs is not None:
+                _stage_c_docs = [_shared_docs[i] for i in rel_idx]
+            # Per-chunk suppression counters (wired into extract())
+            _supp_list = [counters_per[i] for i in rel_idx]
+            edge_lists = _spacy_ext.extract_chunks(
+                [chunk_of(i) for i in rel_idx],
+                max_related=max_related, unit_batch=glirel_ub,
+                docs=_stage_c_docs,
+                suppression_counters_list=_supp_list)
+            for i, edges in zip(rel_idx, edge_lists):
+                relations_per_task[i] = _validated_relations(edges, counters_per[i])
+        t_relations = _time.time()
 
         # ---- Stage D: facts (pure Python) -----------------------------------
         results: list[dict] = []
@@ -802,9 +854,9 @@ def _extract_raw(task_dicts: list[dict], do_facts: bool, lens_id: str | None) ->
 
         logger.info(
             "ghost_b_local: %d chunks in %.1fs (gliner %.1fs, cpu %.1fs, "
-            "glirel %.1fs, facts+facets %.1fs) = %.0f ms/chunk",
+            "relations %.1fs, facts+facets %.1fs) = %.0f ms/chunk",
             n, t_facet - t0, t_gliner - t0, t_cpu - t_gliner,
-            t_glirel - t_cpu, t_facet - t_glirel,
+            t_relations - t_cpu, t_facet - t_relations,
             (t_facet - t0) * 1000 / max(1, n),
         )
         # Exposed in the sidecar's /extract response so remote callers can
@@ -816,8 +868,8 @@ def _extract_raw(task_dicts: list[dict], do_facts: bool, lens_id: str | None) ->
             "total_s": round(t_facet - t0, 2),
             "gliner_s": round(t_gliner - t0, 2),
             "cpu_s": round(t_cpu - t_gliner, 2),
-            "glirel_s": round(t_glirel - t_cpu, 2),
-            "facts_facets_s": round(t_facet - t_glirel, 2),
+            "relations_s": round(t_relations - t_cpu, 2),
+            "facts_facets_s": round(t_facet - t_relations, 2),
             "ms_per_chunk": round((t_facet - t0) * 1000 / max(1, n)),
         })
 

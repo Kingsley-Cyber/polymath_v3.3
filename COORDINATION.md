@@ -15722,3 +15722,145 @@ Full audit + ordered fixture list (F1 commander loop, F2 reasoned status, F3 pro
 
 ## [2026-07-21T10:48Z] EXECUTOR → SENIOR :: RECEIPT
 Owner accepted the parent-summary vector repair receipt and promoted the method to a control-plane invariant. Locked into `CONTINUITY/CORPUS_CONTROL_PLANE_AUDIT.md`: F1 commander reconcile must perform an ID-level join each cycle, `required_mongo_parent_ids - qdrant_indexed_parent_ids == empty`, with counts demoted to sanity-check only. The invariant must also cover document-rollup summary vectors when Tier-0/doc-summary routing makes that lane query-visible; stale queued rollup rows remain a janitor/reconcile surface, not a parent-summary retrieval blocker.
+
+## CLAUDE EXECUTION LOG (2026-07-30) — DETERMINISTIC RELATION RECALL LADDER: SPEC READY, R0 BLOCKS EXECUTION
+
+> ROLE LAW re-engraved by owner 2026-07-30: **Codex retired, Claude is the
+> executor.** This entry was authored under the old two-seat law and read as a
+> directive to Codex; it is now Claude's own mission brief. Receipts discipline
+> is unchanged and still binding.
+
+Owner directive (2026-07-30): deterministic spaCy + GLiNER + Python pipeline must
+reach GLiREL-level extraction yield. LLM stays in its current role (cloud
+summaries) — never in extraction. GLiREL stays retired.
+
+**Full spec: `CONTINUITY/DETERMINISTIC_RELATION_RECALL_SPEC.md`** (8 named causes
+read from live source with line cites, 8-rung gate-guarded ladder R1–R8,
+acceptance per rung, projected yield labeled PROJECTED).
+
+Target: **>= 1.0 rel/chunk at P >= 0.80** (today: 0.04 rel/chunk at P 1.000;
+GLiREL: 1.10 at P 0.273). Match GLiREL's quantity, keep our precision and the
+27x speed win.
+
+### DO NOT START THE LADDER YET — R0 is the gate
+
+`spacy_relation_gate_v1` holds 15 asserted relations across 11 samples, at the
+declared thin-evidence floor: one TP moves recall 6.7 points, and it contains
+zero ASR samples. It cannot resolve seven rungs. The gate spec is
+`immutable_after_first_decisive_inference` — so this is a NEW VERSION, and
+fixture scope is an owner decision.
+
+**R0 (awaiting King's GO):** build + preregister `spacy_relation_gate_v2` —
+>= 120 asserted relations, >= 40 samples, >= 12 predicate types, spanning
+books + papers + >= 8 real ASR transcript chunks from the video corpus, random
+sample with recorded seed, hashes committed BEFORE the first scoring run. v1 is
+retained and rerun every rung as a regression canary (P must stay 1.000).
+
+### Ladder order once R0 lands (one rung per commit, gate v2 + v1 canary each)
+
+1. **R1** T4 lemma telemetry -> mined YAML expansion (config only; likely biggest
+   yield per unit of risk — T4 drops are currently counted in aggregate only, the
+   lemma is never recorded, so nobody knows what is being thrown away).
+   `mine_dependency_patterns.py` needs a `--t4-drops` mode.
+2. **R2** AttributeRuler POS-override lexicon (backlog PF-2; 4 known gate FNs
+   ≈ 27% of gate recall come from `stores`/`references` tagged NOUN).
+3. **R3** Coordination distribution — largest structural win. Do NOT remove the
+   conjunct guard; distribute an ALREADY-VALIDATED head edge across conj
+   siblings. Non-distributive guards (between/among, symmetric predicates,
+   negated/contrastive conjuncts, list-length cap) are mandatory — that is where
+   the FPs live.
+4. **R4** Nominal predicate lane — `_is_light_verb_construction` becomes a router,
+   not a suppressor; eventive noun resolves through the same T1–T4 cascade.
+5. **R5** Rank-then-cap (total order preserved, no silent truncation). Fold in.
+6. **R6** Adjacent-sentence subject carry-over — **claims path only**, graph
+   promotion needs its own GO after isolated precision scoring. This is the
+   `coreference_heuristic` wire-or-delete decision, finally forced.
+7. **R7** ASR re-segmentation lane — scored on the ASR subset IN ISOLATION,
+   >= 0.80 or it ships disabled behind a flag. Do not average ASR into the
+   overall number to hide a weak subset.
+8. **R8** RunPod lane parity — `runpod_local_extraction.py:574` hardcodes
+   `relations=[], facts=[]`, so ~79k chunks (cyb/ecom/video) get zero relations
+   no matter how good the Mac lane gets. Needs a new wire contract
+   (`local_extraction_v2`), a NEW image digest (never retag), a cross-runtime
+   byte-identity proof Mac vs pod, and a 1-slice canary before joining routes.
+
+### Blocking constraints
+- No LLM/SLM in extraction (locked). No GLiREL revival. No new Predicate Literal
+  values without owner ratification — R1 step 4 produces the candidate list, it
+  does not act on it. No spaCy model switch without the A/B + owner decision #1.
+- A rung that drops P below 0.80 on v2, or below 1.000 on the v1 canary, is
+  REVERTED in the same session, not tuned in place.
+
+### MEASUREMENT BLOCKER — read before quoting any stored number
+Stored local extractions are mixed-provenance: on the probed corpus only **27 of
+680** relations carry dep-path sentinels (cf 0.9/1.0); **653 carry GLiREL-era
+scores** (cf 0.4–0.97) from a stale sidecar during ingestion. No recall claim may
+be measured against stored data until the §6 relations-only re-extraction runs —
+which happens AFTER the ladder, one corpus at a time, batched with any R8 wire
+contract change (rebuild-freeze law: one contract change, one pass).
+
+### LEDGER DEBT (Claude's territory, flagged for owner ruling)
+1. `Extraction_Elite_Roadmap.md` cites checklist anchor **P2.10** — it does not
+   exist in `docs/RAPTOR_RAG_IMPLEMENTATION_CHECKLIST.md`. Extraction work has
+   been running without its item-level anchor. Needs P2.10 reconstructed or
+   formally retired, and **P2.11** created for this ladder before R1 executes
+   (adopt-then-execute law).
+2. **`GHOST_B_RELATION_ENGINE` is a dead switch** — `ghost_b_local.py:732`
+   hardcodes `_rel_engine = "spacy"`. Roadmap P4's documented rollback ("set
+   `=glirel`, recreate") **does not work as written**. Restore the env read or
+   delete the rollback claim; a rollback that silently no-ops is worse than none.
+3. Roadmap marks P4 (atomic flip) `queued` but the flip is live in code — the
+   status table is stale versus the tree.
+
+### AMENDMENT (2026-07-30, same day) — three corrections to the ladder above
+
+Owner pressed on the enumeration claim. Auditing it produced one real finding and
+one correction to my own numbers. Spec updated
+(`CONTINUITY/DETERMINISTIC_RELATION_RECALL_SPEC.md` §0, §2-pre, §2, §3-R3, §3-R8,
+§5, §8, §9).
+
+**1. NEW RUNG R-pre — the suppression counters are thrown away. Do this FIRST.**
+`dep_path_extractor.py:1154` increments `suppressed_conjunct_crossing`, but
+`ghost_b_local.py:624` never initializes it (nor `suppressed_multi_clause` /
+`suppressed_exception_boundary`), and `:818-821` emits only 4 counters of the 14+
+that exist. Every suppression and `qualified_*` counter is computed and
+garbage-collected at the emit boundary. **The "never drop silently" law is
+honored in the extractor and defeated on the way out** — nobody could have known
+what the P2 structural guards cost, even in principle. R-pre plumbs them through
+to Mongo and measures over >= 5k chunks. It sets §0's yield target and R3's true
+ceiling. No owner GO needed; it only adds instrumentation and reads it.
+
+**2. CORRECTION — the yield target was inherited from GLiREL's noise.**
+I set the finish line at `>= 1.00 rel/chunk` by copying GLiREL's raw 1.10. That
+is wrong: GLiREL runs at P 0.273, so its raw count is a ceiling plus unknown
+garbage. Hand-judging the 4 sampled chunk_0099 enumeration edges — 2 genuine
+(`animation systems uses IK` / `uses retargeting`), 2 manufactured predicates
+(`biomechanics supports …`) ≈ 50%. R3's projection halved to **+0.20–0.35**;
+ladder total revised **1.0–1.5 -> 0.55–1.05 rel/chunk**. The "6.5x GLiREL
+advantage" also rests on ONE chunk (n=1) and is retired as a planning figure the
+moment R-pre lands. Target is now MEASURED, never inherited.
+
+**3. GLiREL is retained OFFLINE as an R0 labeling suggester — never a labeler.**
+It fires on exactly the constructions dep-path misses. Agreement set =
+near-certain rows; GLiREL-only set = the rows that decide R3's ceiling. A human
+rules on every row; unreviewed suggestions never enter the fixture; provenance
+recorded so gate independence stays auditable. This cuts the most expensive task
+in the mission without letting a 0.273-precision engine near production.
+
+### OWNER CONTEXT CORRECTION (2026-07-30) — RunPod is NOT retired
+Local on-device extraction becomes the **default and easy road**, explicitly
+allowed to be slower. Pods stay available for bursts under existing ingestion
+doctrine. Consequences recorded in spec §0: (a) the local path must need no
+special flags — one documented command, verified by
+`scripts/verify_backend_runtime.sh`; (b) **R7 (ASR/transcripts) is promoted above
+R6** — if local is the default road, the transcript corpus cannot stay a dead
+zone; (c) **R8 is reframed from rescue to parity** — a pod chunk yielding 0 while
+the same chunk yields the lane rate locally is not a speed difference, it is a
+correctness divergence that silently biases any mixed-provenance graph.
+
+### REPORTING CONTRACT (owner-set 2026-07-30) — spec §9
+Final report opens with EXACTLY ONE verdict: **A) FAILED** (only when there is no
+reasonable path — "hard" is not this verdict) or **B) WORKED AT N%**
+(`achieved ÷ target rel/chunk`, valid only if P >= 0.80 on v2 and 1.000 on v1).
+**Precision broken is never a percentage — it is VERDICT A.** Then one rung
+table, then open owner decisions. No journey narration.

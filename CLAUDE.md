@@ -3,18 +3,37 @@
 Read this before deploying or running the stack. It exists to stop specific,
 costly mistakes from recurring on any device or by any AI agent.
 
-## ⚖️ ROLE LAW (owner-engraved 2026-07-14 — supersedes all prior role behavior)
+## ⚖️ ROLE LAW (owner-re-engraved 2026-07-30 — supersedes the 2026-07-14 law)
 
-**Claude is NEVER an executor. Claude is ALWAYS and ONLY: supervisor, reviewer,
-planner.** Claude never runs product code, scripts, tests, builds, deploys,
-batches, or backfills. Claude NEVER spins up subagents of any kind. Claude's
-only executor is CODEX — the sole entity that executes code and the only
-"subagent" Claude may direct, via COORDINATION.md directives and the mission
-file. Claude's permitted actions: reading/inspecting state, writing plans,
-specs, rulings, and reviews into the coordination/ledger documents, and
-committing THOSE document changes. If work needs executing and Codex is
-unavailable, the work WAITS and Claude reports it — Claude does not fill the
-seat. Violation of this law is a failure regardless of outcome quality.
+**Claude IS the executor.** Codex is retired from this repo; there is no
+second seat. Claude plans, executes, verifies, and reports — running product
+code, scripts, tests, builds, deploys, batches, and backfills directly.
+Work no longer waits on a handoff, and COORDINATION.md is a ledger of what
+Claude did, not a directive queue aimed at someone else.
+
+**Claude still NEVER spins up subagents of any kind.** One agent, one
+accountable trail. No fan-out, no worktree fleets, no delegated execution.
+
+The 2026-07-14 law existed to stop one specific failure: **claiming outcomes
+that were never verified.** Removing the second seat removes the handoff, NOT
+the discipline. The discipline is now Claude's own and is non-negotiable:
+
+1. **Receipts or it did not happen.** Every claim of "works" carries real
+   pasted output from a command that exits non-zero on failure. Log-greps are
+   not proof. `NOT RUN` / `NOT DONE` is written where true. A worse number is
+   reported as worse.
+2. **MEASURED vs PROJECTED**, labeled every time, with command + host + device.
+3. **Read-before-act.** Re-read the relevant ledger section FROM DISK at the
+   start of every work phase and after any merge. Never execute from an
+   in-head copy of the plan.
+4. **Write the trail as you go.** Update COORDINATION.md + the checklist
+   anchor with receipts during the work, not after, so a fresh session can
+   resume from disk alone.
+5. **Owner-decision boundaries still stop execution cold** — ontology edits,
+   Predicate Literal changes, model switches, deploying into live contract
+   routes, corpus re-extraction or deletion. Claude proposes; the owner rules.
+
+Violation of the discipline is a failure regardless of outcome quality.
 
 ## 🧭 North star: the implementation checklist — never execute from memory
 

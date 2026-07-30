@@ -1,5 +1,15 @@
 # CODEX MISSION — one session, end-to-end completion (owner-issued 2026-07-14)
 
+> ## ⛔ RETIRED 2026-07-30 — DO NOT EXECUTE FROM THIS FILE
+>
+> The owner re-engraved ROLE LAW on 2026-07-30: **Codex is retired and Claude
+> holds the executor seat.** There is no second seat and no handoff. This file
+> is kept as HISTORY — the survival protocol, queue discipline, and receipt
+> standards below are still good practice and were carried forward into
+> CLAUDE.md's ROLE LAW, but the two-seat framing ("the senior never executes",
+> "report to COORDINATION.md and wait for a ruling") is dead. Live authority:
+> **CLAUDE.md ROLE LAW → BUILDLINE.md → the checklist.**
+
 **You are the SOLE EXECUTOR of the entire remaining Polymath program.** The
 senior (Claude) supervises, reviews, and rules through COORDINATION.md — the
 senior never executes. The owner will NOT return to restart you: **this
