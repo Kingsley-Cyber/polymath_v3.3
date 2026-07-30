@@ -15864,3 +15864,56 @@ reasonable path — "hard" is not this verdict) or **B) WORKED AT N%**
 (`achieved ÷ target rel/chunk`, valid only if P >= 0.80 on v2 and 1.000 on v1).
 **Precision broken is never a percentage — it is VERDICT A.** Then one rung
 table, then open owner decisions. No journey narration.
+
+## R-pre RESULT (2026-07-30) — MEASURED. THE LADDER'S PREMISE WAS FALSE.
+
+Run: 5,500 chunks, deterministic stratified sample (book 2,700 / paper 1,000 /
+ASR 1,800) over 5 live corpora. Host venv local_ghost_b/.venv, spaCy 3.8.14,
+en_core_web_sm, darwin arm64. Scripts: backend/scripts/rpre_export_sample.py +
+rpre_measure.py. MEASURED, not projected.
+
+1. **The 0.04 rel/chunk baseline was WRONG. Measured: 0.5476** (rel-bearing
+   share 19.3%, 13.5 ms/chunk). The 0.04 came from dividing one corpus's
+   dep-path-sentinel STORED subset by its chunk count — it measured storage,
+   not the extractor. The extractor is 13.7x more productive than the figure
+   this whole plan was built on.
+
+2. **GLiREL parity is already exceeded with zero rungs built.** GLiREL raw 1.10
+   at P 0.273 => genuine ~0.30/chunk. Dep-path today: 0.5476 at gate P 1.000
+   = ~1.8x GLiREL's genuine yield. The spec's own target band (floor 0.55) is
+   MET before R1 is written.
+
+3. **The real problem is G8 and it is 98.6% of the corpus.** Stored relations:
+   ecommerce_meta 161,108 chunks -> 0 relations. video_gen_schools 78,891 -> 0.
+   authentic_library_v2 60,137 -> 0. cybersecurity_study 39,885 -> 0.
+   markbuilds_transcripts 17,825 -> 0. ALL of them provider=runpod_local_extraction
+   (the relations=[] hardcode). The ONLY corpus with relations is cpcs_local
+   (617 chunks, 1.1021/chunk) — the one extracted locally.
+   357,846 of 362,759 chunks hold zero relations. The graph is empty because the
+   output was never WRITTEN, not because the extractor is quiet.
+
+4. **Suppression ranking was wrong.** suppressed_multi_clause 3.94/chunk is the
+   largest lever — 2.6x suppressed_conjunct_crossing (1.49/chunk), which §1 had
+   called "the LARGEST single cause". R3's measured ceiling is ~0.75/chunk at
+   the 0.5 genuine rate; the "6.5x GLiREL" figure is retired.
+
+5. **ASR is not a dead zone**: 0.4928 rel/chunk (75% of book rate, 18.3%
+   bearing); skipped_low_parse_confidence fires only 0.17/chunk. R7's premise is
+   wrong at the extractor — transcripts are dead in STORAGE, same G8 cause.
+
+6. **entity_type casing hazard**: ontology is Title Case, RunPod corpora store
+   UPPERCASE, allowed_pairs is an exact tuple match. Normalizing recovers 84
+   relations (+2.9%). Minor now; load-bearing the moment R8 lands.
+
+RE-ORDER FORCED BY EVIDENCE:
+- R8 promoted to FIRST (98.6% of the missing graph).
+- NEW R9: revisit suppressed_multi_clause (3.94/chunk, largest lever).
+- R3 keeps its slot, sized at ~0.75/chunk.
+- R7 demoted (ASR extracts fine).
+- R0 remains, but as a PRECISION acceptance gate — not to diagnose a recall
+  emergency the measurement did not find.
+- Success metric must move from "raise rel/chunk" to "relations reaching
+  DURABLE STORAGE per chunk, corpus-wide" — today 0.0000 on 98.6% of chunks.
+
+AWAITING OWNER: R8's route-join is a STOP-list item; code + image bake is
+pre-authorized and is where the value is.

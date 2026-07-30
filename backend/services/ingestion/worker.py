@@ -1089,6 +1089,8 @@ def _rehydrate_ghost_b_staging(staged: list[dict]) -> list[ExtractionResult]:
                 strict_relation_drop_count=r.get("strict_relation_drop_count", 0),
                 evidence_drop_count=r.get("evidence_drop_count", 0),
                 fact_drop_count=r.get("fact_drop_count", 0),
+                # R-pre: carry the full counter map through to durable storage.
+                extraction_counters=r.get("extraction_counters", {}) or {},
                 schema_lens_id=r.get("schema_lens_id"),
                 # T-HOOK-1 — resume paths may re-stash rehydrated staging via
                 # ReplaceOne; the additive capture fields must round-trip so

@@ -174,6 +174,111 @@ prerequisite for honest sizing, and it makes every later rung auditable.
 
 ---
 
+## 2-PRE-RESULTS. R-pre MEASURED 2026-07-30 — THE PREMISE WAS WRONG
+
+**Run:** 5,500 chunks, deterministic stratified sample (books 2,700 / papers
+1,000 / ASR 1,800) across 5 live corpora. Host venv `local_ghost_b/.venv`,
+spaCy 3.8.14, en_core_web_sm, darwin arm64. Two passes (types as-stored and
+normalized). Receipts: `backend/scripts/rpre_{export_sample,measure}.py`,
+report JSON in the R-pre commit. **MEASURED, not projected.**
+
+### Finding 1 — the 0.04 rel/chunk baseline was FALSE. The real rate is 0.5476.
+
+| | claimed in §0 | MEASURED |
+|---|---|---|
+| relations / chunk | 0.04 | **0.5476** |
+| rel-bearing chunk share | ~4% | **19.3%** |
+| ms / chunk (Stage C) | 4.5 | **13.5** |
+
+The 0.04 came from dividing the *dep-path-sentinel subset* of one corpus's
+STORED relations by its chunk count. It measured storage, not the extractor.
+Run live, the extractor is **13.7x more productive than the number this entire
+plan was built on.**
+
+### Finding 2 — GLiREL parity is ALREADY EXCEEDED, today, with no rungs built
+
+GLiREL raw 1.10 rel/chunk at P 0.273 → genuine ≈ **0.30/chunk**.
+Dep-path today: **0.5476/chunk at gate P 1.000.**
+
+**The deterministic lane already produces ~1.8x GLiREL's genuine yield.** §0's
+"floor 0.55 / stretch 1.0" target is met at 0.5476 before R1 is written. The
+recall emergency this spec was written to solve does not exist in the extractor.
+
+### Finding 3 — the real problem is G8, and it is 98.6% of the corpus
+
+Stored relations per corpus, live count:
+
+| corpus | chunks | chunks w/ relations | relations | rel/chunk | provider |
+|---|---|---|---|---|---|
+| ecommerce_meta | 161,108 | **0** | **0** | 0.0000 | runpod_local_extraction |
+| video_gen_schools | 78,891 | **0** | **0** | 0.0000 | runpod_local_extraction |
+| authentic_library_v2 | 60,137 | **0** | **0** | 0.0000 | runpod_local_extraction |
+| cybersecurity_study | 39,885 | **0** | **0** | 0.0000 | runpod_local_extraction |
+| markbuilds_transcripts | 17,825 | **0** | **0** | 0.0000 | runpod_flash / runpod_local_extraction |
+| cpcs_local | 617 | 216 | 680 | 1.1021 | *(local lane)* |
+
+**357,846 of 362,759 chunks — 98.6% — hold zero relations, and every one of
+them was extracted by the RunPod lane** whose `relations=[]` hardcode is G8.
+The single locally-extracted corpus is the only one with relations at all.
+
+The graph is empty because the output was never written, **not** because the
+extractor is quiet. R8 was ranked last in §3 and sized as "parity". It is
+neither last nor parity — **it is essentially the whole mission.**
+
+### Finding 4 — the suppression ranking was wrong: multi-clause dominates
+
+| guard | total | per chunk |
+|---|---|---|
+| `suppressed_multi_clause` | 21,658 | **3.94** |
+| `suppressed_conjunct_crossing` | 8,196 | **1.49** |
+| `suppressed_expletive` | 2,830 | 0.51 |
+| `skipped_verbless` | 1,885 | 0.34 |
+| `suppressed_contrast` | 1,549 | 0.28 |
+| `suppressed_agentless_passive` | 1,179 | 0.21 |
+| `skipped_low_parse_confidence` | 918 | 0.17 |
+| `suppressed_light_verb` | 636 | 0.12 |
+| `suppressed_exception_boundary` | 102 | 0.02 |
+
+§1 named G1 (coordination) "the LARGEST single cause". It is second.
+**`suppressed_multi_clause` discards 2.6x more** — 3.94 candidates per chunk.
+That guard was added in P2 to kill 12 of 16 FPs and has never been revisited.
+It is now the largest single recall lever and deserves its own rung.
+
+**R3's ceiling, MEASURED:** 1.49 conjunct-crossings/chunk → ~0.75/chunk at the
+0.5 genuine rate. The "6.5x GLiREL" figure is retired.
+
+### Finding 5 — ASR is not a dead zone in extraction
+
+ASR: **0.4928 rel/chunk, 18.3% bearing** — 75% of the book rate, not zero.
+`skipped_low_parse_confidence` fires only 0.17/chunk. R7's premise ("the
+transcript corpus is a dead zone") is wrong at the extractor; transcripts are
+dead in *storage*, for the same G8 reason as everything else.
+
+Per genre: book **0.6537** · asr **0.4928** · paper **0.3600**.
+
+### Finding 6 — the entity_type casing hazard is real but minor
+
+`ontology.yaml` is Title Case; RunPod corpora store UPPERCASE (`CONCEPT` vs
+`Concept`), and `allowed_pairs` is an exact tuple match. Normalizing recovers
+**84 relations (2,928 → 3,012, +2.9%)**. Real, cheap to fix, not a headline —
+and it becomes load-bearing the moment R8 makes pod-extracted relations real.
+
+### Consequence — the ladder is re-ordered by evidence
+
+1. **R8 is promoted to FIRST.** It is 98.6% of the missing graph. Every other
+   rung optimizes an extractor whose output is already discarded.
+2. **New rung R9: revisit `suppressed_multi_clause`** (3.94/chunk, the largest
+   lever) — same discipline as R3: no blanket removal, gate-guarded.
+3. R3 keeps its place but sized at ~0.75/chunk, not the retired 6.5x.
+4. R7 demoted — ASR extracts fine; its problem is G8.
+5. R0 still required, but as an **acceptance gate for precision**, not to
+   diagnose a recall emergency that the measurement did not find.
+6. §0's yield target is **met today**. The mission's success metric must move
+   from "raise rel/chunk" to **"relations reaching durable storage per chunk,
+   corpus-wide"** — currently 0.0000 on 98.6% of the corpus.
+
+---
+
 ## 2. R0 — THE FIXTURE BLOCKS EVERYTHING (owner decision required)
 
 `spacy_relation_gate_v1` holds **15 asserted relations across 11 samples** — at

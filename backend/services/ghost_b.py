@@ -2075,6 +2075,17 @@ class ExtractionResult:
     # relation.
     evidence_drop_count: int = 0
     fact_drop_count: int = 0
+
+    # R-pre (2026-07-30) — FULL per-chunk suppression/qualifier counter map.
+    # The four *_drop_count fields above are the only counters that ever
+    # reached durable storage; every suppression rule in the deterministic
+    # relation lane (including all three P2 structural guards) incremented a
+    # named counter that was then garbage-collected at the emit boundary.
+    # Keys come from dep_path_extractor.ALL_COUNTER_KEYS — zero-initialized, so
+    # "guard never fired" stays distinguishable from "guard not wired".
+    # Empty dict = extraction predates R-pre, NOT "nothing was suppressed".
+    extraction_counters: dict[str, int] = field(default_factory=dict)
+
     schema_lens_id: str | None = None
     model: str = ""
     provider: str = ""

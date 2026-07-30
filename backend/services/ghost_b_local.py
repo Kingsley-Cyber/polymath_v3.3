@@ -626,15 +626,13 @@ def _extract_raw(task_dicts: list[dict], do_facts: bool, lens_id: str | None) ->
 
         n = len(task_dicts)
         is_table_flags = [t.get("chunk_kind") == "table" for t in task_dicts]
-        counters_per = [
-            {"entity_drop": 0, "relation_drop": 0, "evidence_drop": 0, "fact_drop": 0,
-             "qualified_negated": 0, "qualified_modal": 0, "qualified_attributed": 0,
-             "qualified_conditional": 0, "suppressed_contrast": 0,
-             "skipped_verbless": 0, "suppressed_expletive": 0,
-             "suppressed_agentless_passive": 0, "suppressed_light_verb": 0,
-             "skipped_low_parse_confidence": 0}
-            for _ in range(n)
-        ]
+        # R-pre: build from the extractor's canonical key list, never by hand.
+        # The previous hand-maintained literal omitted all three P2 structural
+        # guards (suppressed_multi_clause / _conjunct_crossing /
+        # _exception_boundary), so they were incremented into a dict that never
+        # declared them and then dropped at the emit boundary below.
+        from services.extraction.dep_path_extractor import new_counters
+        counters_per = [new_counters() for _ in range(n)]
 
         # ---- Stage A: GLiNER pass-1, batched across chunks -----------------
         # Prose chunks see noise-stripped text (facts/evidence/GLiREL stay on
@@ -816,6 +814,12 @@ def _extract_raw(task_dicts: list[dict], do_facts: bool, lens_id: str | None) ->
                 "relation_drop_count": counters["relation_drop"],
                 "evidence_drop_count": counters["evidence_drop"],
                 "fact_drop_count": counters["fact_drop"],
+                # R-pre: publish the FULL counter map, not just the 4 legacy
+                # drop counts. Every suppression/qualifier the extractor
+                # recorded now survives to Mongo and is queryable per corpus.
+                # The 4 keys above are retained for backward compatibility with
+                # existing consumers; they are duplicates of entries in here.
+                "extraction_counters": dict(counters),
                 "schema_lens_id": lens_id,
             })
 
@@ -930,6 +934,11 @@ def _to_results(raw: list[dict]) -> list:
             relation_drop_count=int(r.get("relation_drop_count") or 0),
             evidence_drop_count=int(r.get("evidence_drop_count") or 0),
             fact_drop_count=int(r.get("fact_drop_count") or 0),
+            # R-pre: full counter map survives the in-process path too.
+            extraction_counters={
+                str(k): int(v)
+                for k, v in (r.get("extraction_counters") or {}).items()
+            },
             schema_lens_id=r.get("schema_lens_id"),
             # T-HOOK-1 additive capture fields (wire contract v3); rows that
             # pre-date the field fall back to the dataclass defaults.
@@ -940,17 +949,36 @@ def _to_results(raw: list[dict]) -> list:
 
 
 def _metrics(raw: list[dict]) -> dict:
+    # R-pre: roll the full per-chunk counter maps into a batch total so a run
+    # reports its own suppression profile without a Mongo round-trip. Keys come
+    # from the extractor's canonical list, so every guard appears (as 0 if it
+    # never fired) rather than silently missing.
+    from services.extraction.dep_path_extractor import ALL_COUNTER_KEYS
+    counter_totals = dict.fromkeys(ALL_COUNTER_KEYS, 0)
+    for r in raw:
+        for k, v in (r.get("extraction_counters") or {}).items():
+            counter_totals[k] = counter_totals.get(k, 0) + int(v or 0)
+
+    n_chunks = len(raw)
+    n_relations = sum(len(r.get("relations") or []) for r in raw)
     return {
         "model": "ghost_b_local",
         "schema_version": SCHEMA_VERSION,
-        "n_chunks": len(raw),
+        "n_chunks": n_chunks,
         "n_entities": sum(len(r.get("entities") or []) for r in raw),
-        "n_relations": sum(len(r.get("relations") or []) for r in raw),
+        "n_relations": n_relations,
         "n_facts": sum(len(r.get("facts") or []) for r in raw),
         "entity_drop_count": sum(int(r.get("entity_drop_count") or 0) for r in raw),
         "relation_drop_count": sum(int(r.get("relation_drop_count") or 0) for r in raw),
         "evidence_drop_count": sum(int(r.get("evidence_drop_count") or 0) for r in raw),
         "fact_drop_count": sum(int(r.get("fact_drop_count") or 0) for r in raw),
+        # The headline the recall ladder is measured against.
+        "relations_per_chunk": round(n_relations / n_chunks, 4) if n_chunks else 0.0,
+        "rel_bearing_chunk_share": (
+            round(sum(1 for r in raw if r.get("relations")) / n_chunks, 4)
+            if n_chunks else 0.0
+        ),
+        "extraction_counters": counter_totals,
     }
 
 
