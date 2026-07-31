@@ -16174,3 +16174,30 @@ than tuned, because tuning for it would cost precision everywhere else.
 STILL NOT DONE, DELIBERATELY: nothing has been promoted to Neo4j. The relations
 sit in ghost_b_extractions. Graph promotion is a separate step and a separate
 owner decision.
+
+## FORWARD PATH FIXED (2026-07-30) — the RunPod lane no longer emits relations=[]
+
+The backfill repaired history; this stops the hole regenerating. Every future
+ingest through runpod_local_extraction now carries relations.
+
+MY EARLIER R8 SPEC WAS WRONG ABOUT THE COST. It called for a new wire contract
+(local_extraction_v2), a NEW pinned image digest, a cross-runtime byte-identity
+proof, and a 1-slice pod canary. NONE of that is needed:
+  - relations are a pure function of chunk text + the span-validated entities
+    the pod ALREADY returns;
+  - _compile_result already runs BACKEND-side with a version-locked
+    en_core_web_sm (_load_nlp enforces spacy 3.8.14 / model 3.8.0);
+  - so the pod payload is untouched and no pod ever computes a relation.
+Computing here also guarantees the forward path and the backfill execute the
+SAME code through the SAME adapter boundary, so a chunk cannot receive different
+relations depending on when it was ingested.
+
+FAIL-SOFT BUT LOUD: a relation fault returns [] rather than failing an otherwise
+good ingest, but logs at ERROR with the chunk id. Silent fallback would quietly
+reinstate the exact bug being removed. Tested.
+
+Tests: 98 passed. Rebuilt; verify_backend_runtime.sh green; confirmed live
+in-container: ('Microsoft','owns','GitHub').
+
+REMAINING KNOWN GAP: facts=[] is still hardcoded on this lane (Stage D never
+ran for pod-extracted chunks). Same shape of bug, not yet addressed.

@@ -20,6 +20,7 @@ from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+import logging
 
 import httpx
 
@@ -34,6 +35,7 @@ from services.ghost_b import (
     EntityItem,
     ExtractionBatchReport,
     ExtractionResult,
+    RelationItem,
 )
 from services.ingestion.claim_compiler import compile_claim_records_v1
 from services.ingestion.semantic_observations import (
@@ -46,6 +48,8 @@ from services.runpod_flash_extraction import (
     _retry_delay,
     _submit_and_wait,
 )
+
+logger = logging.getLogger(__name__)
 
 
 CONTRACT_VERSION = "polymath.runpod_local_extraction.v1"
@@ -454,6 +458,62 @@ def _validate_temporal(rows: Any, text: str) -> list[dict[str, Any]]:
     return validated
 
 
+def _compile_relations(
+    text: str, entity_items: Any, chunk_id: str
+) -> list[RelationItem]:
+    """Derive graph relations from text + span-validated entities.
+
+    Runs the SAME frame-licensed lane the backfill used, through the same
+    adapter boundary, so a chunk gets identical relations whether it was
+    ingested today or repaired by the backfill.
+
+    Fail-soft by design: a relation-extraction fault must not fail an otherwise
+    good ingest. But it is NOT silent — it logs at ERROR with the chunk id, so
+    a systematic breakage is visible instead of quietly reinstating the empty
+    `relations=[]` this replaced.
+    """
+    if not text or not text.strip() or len(entity_items or []) < 2:
+        return []
+    try:
+        from services.extraction.spacy_relation_adapter import get_spacy_extractor
+
+        payload = [{
+            "chunk_id": chunk_id,
+            "doc_id": "",
+            "text": text,
+            "entities": [
+                {
+                    "surface": item.text,
+                    "start_char": int(item.start_char),
+                    "end_char": int(item.end_char),
+                    "entity_type": item.entity_type or "",
+                    "canonical_name": item.canonical_label or "",
+                }
+                for item in entity_items
+            ],
+        }]
+        edges = get_spacy_extractor().extract_chunks(payload, max_related=10)[0]
+    except Exception as exc:  # noqa: BLE001 - never fail an ingest on relations
+        logger.error(
+            "relation compilation FAILED for chunk=%s: %s. Emitting no "
+            "relations for this chunk; this is a real gap, not a no-op.",
+            chunk_id, exc, exc_info=True,
+        )
+        return []
+
+    return [
+        RelationItem(
+            subject=e["sub"],
+            predicate=e["pred"],
+            object=e["obj"],
+            object_kind="entity",
+            confidence=float(e["score"]),
+            evidence_phrase=e["ev"],
+        )
+        for e in edges
+    ]
+
+
 def _compile_result(
     raw: Any,
     *,
@@ -565,13 +625,30 @@ def _compile_result(
         )
         for item in extraction.entities
     ]
+
+    # ---- Relations (2026-07-30) --------------------------------------------
+    # This lane hardcoded `relations=[]`, which is why 357,846 of 362,759 chunks
+    # (98.6% of the corpus) held ZERO relations. The backfill repaired history;
+    # this repairs the FORWARD path so new ingests are not empty again.
+    #
+    # No wire-contract change, no new image digest, no pod canary: relations are
+    # a pure function of `task["text"]` plus the span-validated entities the pod
+    # already returned, and this function ALREADY runs backend-side with a
+    # version-locked en_core_web_sm (see _load_nlp). The pod payload is
+    # untouched. Computing here also guarantees the forward path and the
+    # backfill use the identical code, so a chunk cannot get different relations
+    # depending on when it was ingested.
+    #
+    # Gated by spacy_relation_gate_v2 PASS (p=0.8015, Wilson95 [0.725, 0.861]).
+    relations = _compile_relations(task["text"], extraction.entities, task["child_id"])
+
     return ExtractionResult(
         schema_version="polymath.extract.local_extraction.v1",
         chunk_id=task["child_id"],
         doc_id=task["document_id"],
         corpus_id=task["corpus_id"],
         entities=entities,
-        relations=[],
+        relations=relations,
         facts=[],
         text=task["text"],
         temporal_captures=temporal,
@@ -593,6 +670,9 @@ def _compile_result(
             "endpoint": endpoint_id,
             "account": account_name,
             "wire_contract": CONTRACT_VERSION,
+            "transport_mode": "queue_based",
+            "execution_location": "remote_runpod_serverless",
+            "submission_contract": "/run + /status/{job_id}",
             "concurrency_policy": concurrency_policy,
             "mention_selection_counts": dict(sorted(mention_counts.items())),
             "mention_exclusion_counts": {
