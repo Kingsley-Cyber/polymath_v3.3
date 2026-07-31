@@ -122,3 +122,55 @@ def test_no_hardcoded_empty_relations_remains():
         "runpod_local_extraction is hardcoding relations=[] again"
     )
     assert "relations=relations," in code
+
+
+# ---------------------------------------------------------------------------
+# facts=[] was the SAME bug as relations=[] — Stage D never ran on this lane.
+# MEASURED 2026-07-31: all six RunPod corpora held 0 facts across 362,142
+# chunks, while the one locally-extracted corpus held 1.0065 facts/chunk.
+# ---------------------------------------------------------------------------
+
+
+def test_forward_path_emits_facts_not_an_empty_list():
+    from services.ghost_b import EntityItem
+    from services.runpod_local_extraction import _compile_facts
+
+    text = "The server has 64 GB of RAM and costs $1,200 per month."
+    ents = [EntityItem(canonical_name="server", surface_form="server",
+                       entity_type="Software", confidence=0.9)]
+    out = _compile_facts(text, ents, "chunk-f1")
+    assert out, "Stage D emitted nothing — the facts=[] hardcode is back"
+    assert all(f.subject for f in out)
+    assert all(f.evidence_phrase for f in out)
+
+
+def test_fact_confidence_sentinels_match_ghost_b_local():
+    """1.0 deterministic, 0.9 qualitative — must not drift between lanes."""
+    from services.ghost_b import EntityItem
+    from services.runpod_local_extraction import _compile_facts
+
+    text = "The server has 64 GB of RAM. Operators must restart the server nightly."
+    ents = [EntityItem(canonical_name="server", surface_form="server",
+                       entity_type="Software", confidence=0.9)]
+    out = _compile_facts(text, ents, "chunk-f2")
+    assert out
+    assert all(f.confidence in (1.0, 0.9) for f in out), (
+        f"unexpected confidence values: {sorted({f.confidence for f in out})}"
+    )
+
+
+def test_fact_degenerate_inputs_do_not_raise():
+    from services.runpod_local_extraction import _compile_facts
+    assert _compile_facts("", [], "c") == []
+    assert _compile_facts("   ", [], "c") == []
+
+
+def test_no_hardcoded_empty_facts_remains():
+    from pathlib import Path
+    src = (
+        Path(__file__).resolve().parents[1]
+        / "services" / "runpod_local_extraction.py"
+    ).read_text()
+    code = "\n".join(line.split("#")[0] for line in src.splitlines())
+    assert "facts=[]," not in code, "runpod lane is hardcoding facts=[] again"
+    assert "facts=facts," in code

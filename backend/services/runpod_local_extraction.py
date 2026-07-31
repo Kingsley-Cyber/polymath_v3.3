@@ -35,6 +35,7 @@ from services.ghost_b import (
     EntityItem,
     ExtractionBatchReport,
     ExtractionResult,
+    FactItem,
     RelationItem,
 )
 from services.ingestion.claim_compiler import compile_claim_records_v1
@@ -458,6 +459,65 @@ def _validate_temporal(rows: Any, text: str) -> list[dict[str, Any]]:
     return validated
 
 
+def _compile_facts(
+    text: str, entities: list[EntityItem], chunk_id: str
+) -> list[FactItem]:
+    """Run Stage D (deterministic + qualitative fact rules) on a pod-extracted chunk.
+
+    This lane hardcoded `facts=[]`, exactly as it hardcoded `relations=[]`, so
+    Stage D never ran for ANY pod-extracted chunk. MEASURED 2026-07-31: all six
+    RunPod corpora hold 0 facts across 362,142 chunks, while the one locally
+    extracted corpus holds 1.0065 facts/chunk.
+
+    Pure Python rules over text + entities (no model, no provider call), so this
+    costs nothing beyond CPU. Confidence sentinels match ghost_b_local exactly:
+    1.0 for the deterministic numeric rules, 0.9 for the qualitative ones.
+
+    Table facts are deliberately NOT run here: they need `chunk_kind == "table"`
+    and the column list, which this lane does not carry. That remains a gap.
+    """
+    if not text or not text.strip() or not entities:
+        return []
+    try:
+        from services.ingestion.enrich import (
+            extract_facts,
+            extract_qualitative_facts,
+        )
+
+        ent_dicts = [
+            {"canonical_name": e.canonical_name, "surface_form": e.surface_form,
+             "entity_type": e.entity_type}
+            for e in entities
+        ]
+        rows: list[tuple[dict, float]] = []
+        rows += [(f, 1.0) for f in (extract_facts(text, ent_dicts) or [])]
+        rows += [(f, 0.9) for f in (extract_qualitative_facts(text, ent_dicts) or [])]
+    except Exception as exc:  # noqa: BLE001 - never fail an ingest on facts
+        logger.error(
+            "fact compilation FAILED for chunk=%s: %s. Emitting no facts for "
+            "this chunk; this is a real gap, not a no-op.",
+            chunk_id, exc, exc_info=True,
+        )
+        return []
+
+    out: list[FactItem] = []
+    for f, conf in rows:
+        try:
+            out.append(FactItem(
+                subject=f.get("subject", ""),
+                fact_type=f.get("fact_type", "property"),
+                property_name=f.get("property_name", "") or "",
+                value=f.get("value", "") or "",
+                unit=(f.get("unit") or None),
+                condition=(f.get("condition") or None),
+                confidence=conf,
+                evidence_phrase=f.get("evidence_phrase", "") or "",
+            ))
+        except Exception:  # noqa: BLE001 - a malformed row must not kill the rest
+            continue
+    return out
+
+
 def _compile_relations(
     text: str, entity_items: Any, chunk_id: str
 ) -> list[RelationItem]:
@@ -641,6 +701,8 @@ def _compile_result(
     #
     # Gated by spacy_relation_gate_v2 PASS (p=0.8015, Wilson95 [0.725, 0.861]).
     relations = _compile_relations(task["text"], extraction.entities, task["child_id"])
+    # Stage D was likewise never run on this lane (facts=[] hardcoded).
+    facts = _compile_facts(task["text"], entities, task["child_id"])
 
     return ExtractionResult(
         schema_version="polymath.extract.local_extraction.v1",
@@ -649,7 +711,7 @@ def _compile_result(
         corpus_id=task["corpus_id"],
         entities=entities,
         relations=relations,
-        facts=[],
+        facts=facts,
         text=task["text"],
         temporal_captures=temporal,
         temporal_capture_version=CONTRACT_VERSION,
