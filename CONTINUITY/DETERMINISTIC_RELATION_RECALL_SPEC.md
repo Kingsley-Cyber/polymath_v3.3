@@ -279,6 +279,83 @@ and it becomes load-bearing the moment R8 makes pod-extracted relations real.
 
 ---
 
+## 2-PRE-RESULTS-B. THE GATE'S P=1.000 IS A FICTION AT CORPUS SCALE
+
+**Measured 2026-07-30, hand-judged 20-edge spot-checks (repo law) against
+source evidence, on live corpus text.** This supersedes Finding 2 above.
+
+| genre | rel/chunk | hand-judged precision | correct |
+|---|---|---|---|
+| book | 0.8517 | **~0.15** | 3 of 20 |
+| ASR | 0.3540 | **~0.10** | 2 of 20 |
+
+Gate v1 reports **P = 1.000**. Real-corpus precision is **0.10–0.15**. The gate
+is 15 hand-picked asserted relations of clean prose; it does not generalize, and
+**every plan built on it — including this spec's §0 — was reasoning from a
+number that does not survive contact with the corpus.**
+
+### Consequence: the recall ladder is the WRONG PROJECT
+
+Recomputed on genuine (precision-weighted) yield:
+
+- GLiREL: 1.10 raw x 0.273 = **~0.30 genuine/chunk**
+- dep-path (books): 0.85 raw x ~0.15 = **~0.13 genuine/chunk**
+
+The deterministic lane is not 1.8x GLiREL. On genuine signal it is currently
+**behind** it. (Caveat, stated honestly: GLiREL's 0.273 is itself a gate number
+and its real-corpus precision is likely lower too. The defensible claim is not
+"GLiREL is better" — it is **"neither engine's gate precision generalizes, and
+this lane's real precision is ~0.10–0.15."**)
+
+**Adding recall to a 15%-precision extractor makes the graph worse, not better.**
+R1–R5 and R9 all increase yield. Every one of them would multiply noise.
+
+### The four dominant failure modes (from the hand judgements)
+
+1. **Possessive binding is the top defect.** `_resolve_possessive` fires on any
+   dep path containing `poss` and binds whichever two entities are nearby:
+   *"Grainger's unique strengths ... customers' disposition"* → `(Grainger, owns,
+   customers)`. *"women's camouflage clothing"* + *"SHE Safari sells"* →
+   `(women, owns, SHE Safari)`. `owns` was the single most common predicate in
+   both samples and is wrong most of the time.
+2. **Pronouns are treated as entities.** `(I, instance_of, shredded)`,
+   `(we, created_by, we)` — a self-loop — `(her, owns, he)`, `(your, owns,
+   business)`, `(Australia, part_of, You)`. The upstream tagger emits pronoun
+   spans and the relation lane builds edges on them unchallenged.
+3. **Copular + adjective yields bogus `instance_of`.** `(creatives, instance_of,
+   high quality)`, `(I, instance_of, six-pack)`. `_resolve_copular` is supposed
+   to drop `acomp`/ADJ complements; it is not catching these, because the span
+   arrives typed as a nominal entity.
+4. **Direction is frequently reversed.** `(product category, part_of, brand)`,
+   `(Facebook, created_by, hook rate)`, `(seasonality, instance_of, United
+   States)`.
+
+None of these need more recall. All are precision defects in rules that already
+exist.
+
+### Re-scope: this becomes a PRECISION ladder
+
+| was | becomes |
+|---|---|
+| R1 T4 lemma expansion | **DEFERRED** — adds yield to a noisy lane |
+| R2 POS overrides | DEFERRED |
+| R3 coordination distribution | **DEFERRED** — would multiply every bad head edge across conjuncts |
+| R4/R5 nominal lane, cap | DEFERRED |
+| R9 multi-clause guard | **DEFERRED** — that guard is currently protecting precision |
+| R6/R7 | DEFERRED |
+| R8a backfill | **BUILT AND GATED** — machinery verified, canary reverted; must not run until precision >= 0.80 |
+| — | **P1 (NEW): entity hygiene** — reject pronoun/determiner/adjectival spans as relation arguments |
+| — | **P2 (NEW): possessive rule repair** — the largest single defect |
+| — | **P3 (NEW): copular/adjective drop repair** |
+| — | **P4 (NEW): direction audit** on the reversal cases |
+| — | **R0 PROMOTED TO URGENT** — not an acceptance gate but the instrument; the current gate actively misleads |
+
+**Nothing may be backfilled or promoted to Neo4j until a spot-check on the
+target genre clears 0.80.** The 500-chunk ASR canary was fully reverted
+(500 modified, 0 stamped, 0 leftover) the moment it was judged.
+
+---
+
 ## 2. R0 — THE FIXTURE BLOCKS EVERYTHING (owner decision required)
 
 `spacy_relation_gate_v1` holds **15 asserted relations across 11 samples** — at

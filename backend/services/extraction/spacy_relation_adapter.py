@@ -261,6 +261,57 @@ class SpacyRelationExtractor:
         return results
 
 
+# ---------------------------------------------------------------------------
+# Entity-type casing normalization (R-pre Finding 6, fixed in R8)
+#
+# ontology.yaml declares entity_types in Title Case (Concept, Software, ...)
+# and allowed_pairs does an EXACT tuple match. The RunPod lane stores UPPERCASE
+# types (CONCEPT, PERSON, ORGANIZATION), so every uppercase-typed entity failed
+# every constrained predicate silently. MEASURED on a 5,500-chunk sample:
+# normalizing recovers 84 relations (+2.9%). Minor at the time it was measured
+# ONLY because pod relations were never stored at all; it becomes load-bearing
+# the moment the pod lane starts emitting.
+#
+# Normalizing here — at the single boundary every lane passes through — keeps
+# local, pod, and backfill from disagreeing about what a type is.
+# ---------------------------------------------------------------------------
+
+_ONTOLOGY_ENTITY_TYPES = (
+    "Person", "Organization", "Location", "Event", "Concept", "Method",
+    "Product", "Software", "Document", "Standard", "Rule", "Law",
+    "Artifact", "TimeReference", "other",
+)
+_UPPER_TO_ONTOLOGY = {t.upper(): t for t in _ONTOLOGY_ENTITY_TYPES}
+
+# Types emitted by upstream taggers that have no ontology equivalent. Mapped to
+# the "other" wildcard so they are not silently gated out by allowed_pairs —
+# "other" is an explicit pass in pair_allowed(), so these stay eligible while
+# remaining honestly untyped. Extending the ontology is an OWNER decision.
+_UNMAPPED_TO_WILDCARD = frozenset({
+    "PLACE", "BEHAVIOR", "PROCESS", "QUALITY", "AGENT",
+})
+
+
+def normalize_entity_type(raw: str) -> str:
+    """Map an upstream entity type onto ontology.yaml casing.
+
+    Exact ontology values pass through. Case variants are folded. Known
+    out-of-ontology types become the "other" wildcard. Anything else is
+    returned unchanged so it stays visible rather than being quietly coerced.
+    """
+    if not raw:
+        return ""
+    if raw in _ONTOLOGY_ENTITY_TYPES:
+        return raw
+    upper = raw.strip().upper()
+    mapped = _UPPER_TO_ONTOLOGY.get(upper)
+    if mapped:
+        return mapped
+    if upper in _UNMAPPED_TO_WILDCARD:
+        return "other"
+    return raw
+
+
 def _to_entity_spans(raw_entities: list[dict], text: str = "") -> list:
     """Convert GLiNER entity dicts to EntitySpan objects.
 
@@ -276,7 +327,9 @@ def _to_entity_spans(raw_entities: list[dict], text: str = "") -> list:
         surface = (
             ent.get("surface") or ent.get("surface_form") or ent.get("text") or ""
         ).strip()
-        etype = ent.get("entity_type") or ent.get("type") or ""
+        etype = normalize_entity_type(
+            ent.get("entity_type") or ent.get("type") or ""
+        )
         canonical = ent.get("canonical_name") or surface
 
         if not surface:

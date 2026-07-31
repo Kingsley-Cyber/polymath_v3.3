@@ -198,6 +198,7 @@ services:
       MOONSHOT_API_KEY: ${MOONSHOT_API_KEY:-}
       MINIMAX_API_KEY: ${MINIMAX_API_KEY:-}
       MIMO_API_KEY: ${MIMO_API_KEY:-}
+      LONGCAT_API_KEY: ${LONGCAT_API_KEY:-}
     depends_on:
       redis:
         condition: service_healthy
@@ -482,6 +483,16 @@ services:
       # container so /api/infrastructure/modal/deploy can import it.
       # Read-only bind; file lives at repo root for CLI-deploy compatibility.
       - "${POLYMATH_RUNTIME_BINDS_ROOT:-C:/PolymathRuntime/binds}/modal_embedder.py:/app/modal_embedder.py:ro"
+      # R8 (2026-07-30) — extraction config. The build context is ./backend, so
+      # repo-root config/ was never in the image and dep_path_extractor failed
+      # loud in-container ("config/ directory not found"), making the
+      # deterministic relation lane unrunnable anywhere but the host sidecar.
+      # Bound rather than baked ON PURPOSE: the host sidecar (:8084) and the
+      # container must resolve the SAME ontology.yaml / predicate_synonyms.yaml.
+      # A baked copy can drift from the host's, and a drifted allowed_pairs
+      # table silently changes which relations survive. Repo-relative, so it is
+      # portable across Apple and RTX without a machine-specific path.
+      - "./config:/app/config:ro"
     environment:
       MONGODB_URI: mongodb://${MONGO_USER:-polymath}:${MONGO_PASSWORD}@mongodb:27017/polymath?authSource=admin
       QDRANT_URL: http://qdrant:6333
@@ -507,6 +518,10 @@ services:
       RERANKER_MODEL: ${RERANKER_MODEL:-qwen3-reranker-0.6b-q8_0}
       RERANKER_SCORE_SCALE: ${RERANKER_SCORE_SCALE:-probability}
       RERANKER_LOW_CONFIDENCE_THRESHOLD: ${RERANKER_LOW_CONFIDENCE_THRESHOLD:--2.5}
+      # Retrieval Layer v4 — deterministic curation stage shadow flag (default
+      # OFF). Flip true to replace MMR final selection with build_packet and
+      # swap the low-confidence guard to its pool-relative form. See config.py.
+      RETRIEVAL_CURATION_V4_ENABLED: ${RETRIEVAL_CURATION_V4_ENABLED:-false}
       RERANKER_TIMEOUT_SECONDS: ${RERANKER_TIMEOUT_SECONDS:-30}
       RERANKER_QUEUE_TIMEOUT_SECONDS: ${RERANKER_QUEUE_TIMEOUT_SECONDS:-5}
       ANSWERABILITY_CHUNK_GATE: ${ANSWERABILITY_CHUNK_GATE:-soft}
@@ -532,6 +547,16 @@ services:
       RELATIONSHIP_EVIDENCE_ALLOCATION_ENABLED: ${RELATIONSHIP_EVIDENCE_ALLOCATION_ENABLED:-false}
       ANSWERABILITY_CORPUS_SCOPE_V2_ENABLED: ${ANSWERABILITY_CORPUS_SCOPE_V2_ENABLED:-false}
       ANSWERABILITY_CORPUS_SCOPE_V3_ENABLED: ${ANSWERABILITY_CORPUS_SCOPE_V3_ENABLED:-false}
+      ANSWERABILITY_COVERAGE_THRESHOLD: ${ANSWERABILITY_COVERAGE_THRESHOLD:-0.80}
+      DEFAULT_RETRIEVAL_K: ${DEFAULT_RETRIEVAL_K:-5}
+      RERANK_RELEVANCE_FLOOR_HYBRID: ${RERANK_RELEVANCE_FLOOR_HYBRID:-0.55}
+      RERANK_RELEVANCE_FLOOR_GRAPH: ${RERANK_RELEVANCE_FLOOR_GRAPH:-0.80}
+      RERANK_SPECIFIC_FLOOR_RATIO: ${RERANK_SPECIFIC_FLOOR_RATIO:-0.35}
+      CHAT_SOURCE_CAP: ${CHAT_SOURCE_CAP:-8}
+      CHAT_PER_DOC_CAP: ${CHAT_PER_DOC_CAP:-0}
+      CHAT_GLOBAL_OVERVIEW_BUDGET: ${CHAT_GLOBAL_OVERVIEW_BUDGET:-12}
+      ANSWERABILITY_PARTIAL_FLOOR: ${ANSWERABILITY_PARTIAL_FLOOR:-0.50}
+      ANSWERABILITY_TEXT_HELP_THRESHOLD: ${ANSWERABILITY_TEXT_HELP_THRESHOLD:-0.50}
       SYNTHESIS_ROUTE_OVERRIDE_ENABLED: ${SYNTHESIS_ROUTE_OVERRIDE_ENABLED:-false}
       TEMPORAL_QUERY_ROUTING_ENABLED: ${TEMPORAL_QUERY_ROUTING_ENABLED:-false}
       ATOMIC_CLAIM_ANCHORS_ENABLED: ${ATOMIC_CLAIM_ANCHORS_ENABLED:-false}
@@ -781,6 +806,16 @@ services:
       RELATIONSHIP_EVIDENCE_ALLOCATION_ENABLED: ${RELATIONSHIP_EVIDENCE_ALLOCATION_ENABLED:-false}
       ANSWERABILITY_CORPUS_SCOPE_V2_ENABLED: ${ANSWERABILITY_CORPUS_SCOPE_V2_ENABLED:-false}
       ANSWERABILITY_CORPUS_SCOPE_V3_ENABLED: ${ANSWERABILITY_CORPUS_SCOPE_V3_ENABLED:-false}
+      ANSWERABILITY_COVERAGE_THRESHOLD: ${ANSWERABILITY_COVERAGE_THRESHOLD:-0.80}
+      DEFAULT_RETRIEVAL_K: ${DEFAULT_RETRIEVAL_K:-5}
+      RERANK_RELEVANCE_FLOOR_HYBRID: ${RERANK_RELEVANCE_FLOOR_HYBRID:-0.55}
+      RERANK_RELEVANCE_FLOOR_GRAPH: ${RERANK_RELEVANCE_FLOOR_GRAPH:-0.80}
+      RERANK_SPECIFIC_FLOOR_RATIO: ${RERANK_SPECIFIC_FLOOR_RATIO:-0.35}
+      CHAT_SOURCE_CAP: ${CHAT_SOURCE_CAP:-8}
+      CHAT_PER_DOC_CAP: ${CHAT_PER_DOC_CAP:-0}
+      CHAT_GLOBAL_OVERVIEW_BUDGET: ${CHAT_GLOBAL_OVERVIEW_BUDGET:-12}
+      ANSWERABILITY_PARTIAL_FLOOR: ${ANSWERABILITY_PARTIAL_FLOOR:-0.50}
+      ANSWERABILITY_TEXT_HELP_THRESHOLD: ${ANSWERABILITY_TEXT_HELP_THRESHOLD:-0.50}
       SYNTHESIS_ROUTE_OVERRIDE_ENABLED: ${SYNTHESIS_ROUTE_OVERRIDE_ENABLED:-false}
       TEMPORAL_QUERY_ROUTING_ENABLED: ${TEMPORAL_QUERY_ROUTING_ENABLED:-false}
       ATOMIC_CLAIM_ANCHORS_ENABLED: ${ATOMIC_CLAIM_ANCHORS_ENABLED:-false}

@@ -15917,3 +15917,63 @@ RE-ORDER FORCED BY EVIDENCE:
 
 AWAITING OWNER: R8's route-join is a STOP-list item; code + image bake is
 pre-authorized and is where the value is.
+
+## R8 RESULT (2026-07-30) — machinery BUILT + GATED; the gate's P=1.000 is a fiction
+
+R8 reshaped: the pod lane ALREADY runs spaCy backend-side
+(runpod_local_extraction._validate -> build_spacy_observation_bundle) to check
+pod output for drift. Relations never needed to run on a pod. And the 357,846
+empty chunks already store text + span-validated entities WITH offsets, so
+relations are a pure local recompute at ZERO pod cost, zero re-extraction, zero
+LLM spend. No new image digest, no cross-runtime proof, no route join required.
+
+SHIPPED:
+- config/ now mounted into backend + ingest-worker (./config:/app/config:ro).
+  Build context is ./backend, so repo-root config was never in the image and
+  dep_path_extractor failed loud in-container. BOUND not baked on purpose: the
+  host sidecar :8084 and the container must resolve the SAME ontology.yaml, or
+  a drifted allowed_pairs table silently changes which relations survive.
+  Rebuilt + verify_backend_runtime.sh green (embed dim 1024).
+- normalize_entity_type() at the adapter boundary fixes the R-pre Finding 6
+  casing hazard for local, pod, and backfill at once.
+- backfill_relations.py: additive-only, idempotent (version stamp), resumable,
+  dry-run by default, reversible by stamp.
+- rpre_sample_relations.py: read-only relation dump for hand precision judging.
+
+CANARY RUN, JUDGED, AND REVERTED:
+500 ASR chunks backfilled -> 177 relations (0.354/chunk). 20-edge hand
+spot-check per repo law: **2 of 20 correct (~10%)**. Reverted immediately
+(500 modified, 0 stamped, 0 leftover). Book genre spot-check: **3 of 20 (~15%)**
+at 0.8517 rel/chunk.
+
+**THE HEADLINE: gate v1 says P=1.000; real-corpus precision is 0.10-0.15.**
+The gate is 15 hand-picked clean-prose relations. It does not generalize. Every
+plan built on it -- including this ladder's premise -- reasoned from a number
+that does not survive the corpus.
+
+Genuine (precision-weighted) yield, recomputed:
+  GLiREL   1.10 raw x 0.273 = ~0.30 genuine/chunk
+  dep-path 0.85 raw x ~0.15 = ~0.13 genuine/chunk
+Yesterday's "1.8x GLiREL" claim is WITHDRAWN. Honest claim: neither engine's
+gate precision generalizes, and this lane's real precision is ~0.10-0.15.
+
+FOUR DOMINANT DEFECTS (hand-judged, all precision, none needing more recall):
+1. Possessive binding -- _resolve_possessive binds any two entities near a
+   `poss` path. "Grainger's strengths ... customers' disposition" ->
+   (Grainger, owns, customers). `owns` was the most common predicate emitted
+   and is wrong most of the time. Largest single defect.
+2. Pronouns treated as entities -- (we, created_by, we) self-loop,
+   (her, owns, he), (Australia, part_of, You).
+3. Copular+adjective -> bogus instance_of -- (I, instance_of, six-pack).
+4. Direction frequently reversed -- (product category, part_of, brand).
+
+LADDER RE-SCOPED FROM RECALL TO PRECISION. R1-R5, R9, R6, R7 all DEFERRED:
+every one adds yield, and yield x 0.15 precision makes the graph worse. R3 in
+particular would multiply each bad head edge across its conjuncts. R9 is
+withdrawn outright -- suppressed_multi_clause is currently PROTECTING precision.
+New P1 entity hygiene / P2 possessive repair / P3 copular repair / P4 direction
+audit. R0 promoted to URGENT: needed as the instrument, since the current gate
+actively misleads.
+
+LAW ADDED: nothing is backfilled or promoted to Neo4j until a hand spot-check
+on that genre clears 0.80.

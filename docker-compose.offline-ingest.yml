@@ -47,6 +47,9 @@ services:
       - "${POLYMATH_DOCKER_DATA_ROOT:-C:/PolymathRuntime}/volumes/ingest-drop-off:/data/ingest-drop-off"
       - "${POLYMATH_INGEST_SOURCE_ROOT:-C:/PolymathRuntime/ingest-source}:/ingest-source:ro"
       - "${POLYMATH_RUNTIME_BINDS_ROOT:-C:/PolymathRuntime/binds}/modal_embedder.py:/app/modal_embedder.py:ro"
+      # R8 — same shared extraction config as backend. The worker runs the
+      # RunPod validation path, which is where relations are now compiled.
+      - "./config:/app/config:ro"
     environment:
       APP_ENV: offline-ingest-worker
       MONGODB_URI: mongodb://${MONGO_USER:-polymath}:${MONGO_PASSWORD}@mongodb:27017/polymath?authSource=admin
