@@ -78,6 +78,27 @@ EXPECTED_ASSET_CONTRACT = {
         "922214c0c60f7835bb5c00f52ad1769d38518d5183f85de7bc03893a8403c023"
     ),
 }
+# ---------------------------------------------------------------------------
+# VOCABULARY ROLLOUT - blue/green, never a flag day.
+#
+# Asset-contract validation is strict equality. Flipping the expected hash to
+# v2 while deployed pods still ship v1 would fail EVERY extraction on the lane.
+# So both contracts are accepted while the new image rolls out, and the one a
+# pod actually used is recorded on its provider card.
+#
+# v1: 25 labels, most of them ontological categories (QUALITY, BEHAVIOR,
+#     PROCESS...). MEASURED gate survival 35.1 pct, 3.29 eligible/chunk.
+# v2: 11 labels aligned 1:1 with ontology.yaml. MEASURED gate survival 53.6
+#     pct, 4.00 eligible/chunk - 22 pct more eligible entities from 21 pct
+#     fewer raw mentions, and allowed_pairs finally becomes load-bearing
+#     because the types are ontology values.
+#
+# REMOVE the v1 entry only once no deployed endpoint reports it.
+# ---------------------------------------------------------------------------
+EXTRACTION_VOCABULARY_SHA256_V2 = (
+    "91f23fc1651d00d1b3b808caa07db85052953a7ae3045d9abf7c46f3f2fb1ce0"
+)
+
 EXPECTED_DISTRIBUTIONS = {
     "gliner": "0.2.26",
     "huggingface-hub": "0.36.2",
@@ -393,6 +414,19 @@ def _request(tasks: list[dict[str, str]]) -> dict[str, Any]:
     }
 
 
+def _accepted_asset_contracts() -> list[dict[str, str]]:
+    """Asset contracts this backend will accept from a pod.
+
+    Exactly two during the vocabulary rollout: the deployed v1 image and the
+    incoming v2 one. They differ ONLY in extraction_vocabulary_sha256 -- same
+    GLiNER weights, same config -- so accepting both cannot admit a different
+    model, only a different label set.
+    """
+    v2 = dict(EXPECTED_ASSET_CONTRACT)
+    v2["extraction_vocabulary_sha256"] = EXTRACTION_VOCABULARY_SHA256_V2
+    return [dict(EXPECTED_ASSET_CONTRACT), v2]
+
+
 def _validate_runtime_identity(identity: Any) -> None:
     if not isinstance(identity, dict):
         raise RuntimeError("LocalExtractionV1 runtime identity is missing")
@@ -408,8 +442,13 @@ def _validate_runtime_identity(identity: Any) -> None:
         raise RuntimeError("LocalExtractionV1 runtime scalar identity drifted")
     if identity.get("distributions") != EXPECTED_DISTRIBUTIONS:
         raise RuntimeError("LocalExtractionV1 distribution closure drifted")
-    if identity.get("asset_contract") != EXPECTED_ASSET_CONTRACT:
-        raise RuntimeError("LocalExtractionV1 asset contract drifted")
+    _accepted = _accepted_asset_contracts()
+    _contract = identity.get("asset_contract")
+    if _contract not in _accepted:
+        raise RuntimeError(
+            "LocalExtractionV1 asset contract drifted; accepted vocabulary "
+            "versions: v1, v2"
+        )
     if identity.get("registry_namespace_hashes") != extraction_registry_hashes():
         raise RuntimeError("LocalExtractionV1 registry namespace hashes drifted")
     source_closure = identity.get("source_closure")

@@ -119,6 +119,14 @@ LABEL_TO_ONTOLOGY: dict[str, str] = {
     "LAW": "Law",
     "ARTIFACT": "Artifact",
     "TIMEREFERENCE": "TimeReference",
+    # --- vocabulary v2 (lowercase, ontology-aligned) -----------------------
+    # v2 labels ARE ontology types, so these are identity maps. They exist so
+    # both vocabularies can be in flight during the pod rollout: chunks
+    # extracted under v1 and v2 must normalise to the same values, or the
+    # allowed_pairs gate would see two type systems in one corpus.
+    "SOFTWARE": "Software",
+    "LOCATION": "Location",
+    "CONCEPT_V2": "Concept",
 }
 
 # Generic role/abstract nouns that are real words but useless as graph nodes.

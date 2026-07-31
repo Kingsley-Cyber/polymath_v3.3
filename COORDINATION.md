@@ -16347,3 +16347,50 @@ This may be INTENDED — cross-corpus bridges are an explicit feature elsewhere
 left as-is and flagged for an owner ruling rather than silently changed.
 The clearer defect is graph_rerank counting DEGREE across corpora, which inflates
 a chunk's rerank score using unrelated corpora. Recommend scoping that one.
+
+## VOCABULARY v2 (2026-07-31) — the root-cause fix for entity quality
+
+WHY v1 WAS THE PROBLEM
+runpod_flash_extractor asked GLiNER for 25 labels, most of which are
+ONTOLOGICAL CATEGORIES rather than entity types: QUALITY, BEHAVIOR, STATE,
+PROCESS, GOAL, OUTCOME, CONDITION, METRIC, SIGNAL, BASELINE, POPULATION,
+INTERVENTION, GROUP, AGENT. Ask a zero-shot NER model for QUALITY and it
+correctly returns "good" and "painful". The model was answering the question it
+was asked. Every downstream filter I wrote was fighting the label set.
+
+MEASURED A/B (80 real chunks, GLiNER medium-v2.1, judged by survival through
+the deterministic entity quality gate):
+  v1 25 labels @0.45 : 9.36 raw/chunk -> 3.29 eligible/chunk (35.1%)
+  v2 11 labels @0.45 : 7.46 raw/chunk -> 4.00 eligible/chunk (53.6%)
+  v2 11 labels @0.55 : 5.94 raw/chunk -> 3.81 eligible/chunk (64.2%)
+v2 yields 22% MORE graph-eligible entities from 21% FEWER raw mentions --
+strictly better on precision AND useful yield, and cheaper downstream.
+
+REJECTED ALTERNATIVE, RECORDED SO IT IS NOT RE-PROPOSED: natural-language
+descriptive labels ("named person", "company or institution") are WORSE. They
+raised the pronoun rate from 13.4% to 21.4% by concentrating output into a
+"named person" bucket that attracts pronouns. Simple lowercase type nouns won.
+
+v2 labels map 1:1 onto ontology.yaml, so the allowed_pairs gate stops being
+decorative: v1 labels were 100% outside the ontology, meaning that gate could
+only ever pass relations whose types it could not check.
+
+PERSON SURVIVED THE CULL despite measuring 0.11 graph-worthiness. It scored low
+because it catches pronouns and role nouns -- a FILTERING problem, already
+handled by entity_quality.py. It is the right label for a real name.
+
+ROLLOUT IS BLUE/GREEN, NOT A FLAG DAY
+Asset-contract validation is strict equality, so flipping the expected hash
+while deployed pods still ship v1 would fail EVERY extraction on the lane. Both
+contracts are accepted during rollout; a test asserts they differ ONLY in
+extraction_vocabulary_sha256, so accepting two cannot admit a different MODEL.
+Remove the v1 entry once no deployed endpoint reports it.
+
+REMAINING DEPLOY STEP (NOT DONE - needs owner):
+  1. Bake a new pod image from the SAME GLiNER digest with
+     registries/extraction_vocabularies.v2.json, runtime.py pointing at v2.
+  2. NEW digest, never retag (pinned-image law).
+  3. 1-slice canary with receipts before joining contract routes.
+  4. After rollout, re-run gliner_entity_gate_v1 -- the entity number should
+     move without touching the gate.
+Local extraction can adopt v2 immediately; the pod lane needs the image.

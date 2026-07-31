@@ -1,0 +1,72 @@
+{
+  "registry": "extraction_vocabularies",
+  "version": "v2",
+  "source": "measured redesign 2026-07-31, superseding v1 (owner-delivered 2026-07-14)",
+  "policy_note": "Controlled vocabularies for the local extraction stage. Additions are new registry versions, never ad-hoc strings. v1 is retained verbatim for replay of anything extracted under it.",
+
+  "why_v2": {
+    "defect": "v1 asked GLiNER for 25 labels, most of which are ONTOLOGICAL CATEGORIES rather than entity types: QUALITY, BEHAVIOR, STATE, PROCESS, GOAL, OUTCOME, CONDITION, METRIC, SIGNAL, BASELINE, POPULATION, INTERVENTION, GROUP, AGENT. A zero-shot NER model asked for QUALITY correctly returns 'good' and 'painful'; asked for BEHAVIOR it returns 'habits', 'desires', 'addicted'. That is the model answering the question it was asked. GLiNER's documented weakness is common-noun misclassification, and an abstract label set maximises it.",
+    "measured_graph_worthiness_per_v1_label": {
+      "ORGANIZATION": 0.71, "PRODUCT": 0.62, "SYSTEM": 0.60,
+      "DOCUMENT": 0.50, "METHOD": 0.50, "CONCEPT": 0.40, "RESOURCE": 0.33,
+      "PLACE": 0.12, "PERSON": 0.11, "BEHAVIOR": 0.11,
+      "QUALITY": 0.0, "GROUP": 0.0, "PROCESS": 0.0, "METRIC": 0.0,
+      "CONDITION": 0.0, "INTERVENTION": 0.0, "TIME_PATTERN": 0.0
+    },
+    "note_on_person": "PERSON measured 0.11 but is NOT dropped. It scored low only because it catches pronouns and role nouns, and it is the right label for a real name. That is a filtering problem, handled by entity_quality.py, not a vocabulary problem.",
+    "ontology_alignment": "v1 labels were 100% outside config/ontology.yaml, so the allowed_pairs gate could only ever pass relations whose types it could not check. v2 labels map 1:1 onto ontology entity_types, making that gate load-bearing instead of decorative."
+  },
+
+  "measured_ab": {
+    "harness": "80 real corpus chunks, GLiNER medium-v2.1, judged by survival through the deterministic entity quality gate",
+    "v1_25_labels_thr_0.45": {"raw_per_chunk": 9.36, "eligible_per_chunk": 3.29, "survival": 0.351},
+    "v2_11_labels_thr_0.45": {"raw_per_chunk": 7.46, "eligible_per_chunk": 4.00, "survival": 0.536},
+    "v2_11_labels_thr_0.55": {"raw_per_chunk": 5.94, "eligible_per_chunk": 3.81, "survival": 0.642},
+    "verdict": "v2 yields 22% MORE graph-eligible entities from 21% FEWER raw mentions. Strictly better on both precision and useful yield, and cheaper downstream.",
+    "rejected_alternative": "Natural-language descriptive labels ('named person', 'company or institution') were tested and are WORSE: they raised the pronoun rate from 13.4% to 21.4% by concentrating output into a 'named person' bucket that attracts pronouns. Simple lowercase type nouns won."
+  },
+
+  "entity_types": [
+    "person",
+    "organization",
+    "location",
+    "product",
+    "software",
+    "document",
+    "method",
+    "concept",
+    "event",
+    "standard",
+    "artifact"
+  ],
+
+  "entity_type_to_ontology": {
+    "person": "Person",
+    "organization": "Organization",
+    "location": "Location",
+    "product": "Product",
+    "software": "Software",
+    "document": "Document",
+    "method": "Method",
+    "concept": "Concept",
+    "event": "Event",
+    "standard": "Standard",
+    "artifact": "Artifact"
+  },
+
+  "recommended_threshold": 0.45,
+  "threshold_note": "0.45 maximises graph-eligible yield (4.00/chunk). 0.55 raises gate survival to 64.2% at 3.81/chunk and cuts downstream work ~20%; choose it if extraction cost dominates. Below 0.35 the common-noun failure mode returns.",
+
+  "dropped_from_v1": [
+    "AGENT", "GROUP", "PROCESS", "BEHAVIOR", "STATE", "QUALITY", "SIGNAL",
+    "BASELINE", "METRIC", "RESOURCE", "CONSTRAINT", "GOAL", "INTERVENTION",
+    "OUTCOME", "CONDITION", "POPULATION", "TIME_PATTERN"
+  ],
+  "dropped_rationale": "Every one is an ontological category rather than an entity type, has no ontology.yaml equivalent, and measured at or near zero graph-worthiness. RESOURCE (0.33) is folded into 'artifact'; TIME_PATTERN is dropped because dates are weak graph nodes and temporal capture already has its own contract (temporal_captures).",
+
+  "predicate_types": ["CAUSES", "INFLUENCES", "INCREASES", "DECREASES", "UPDATES", "SIGNALS", "MEASURES", "COMPARES_AGAINST", "ENABLES", "INHIBITS", "REQUIRES", "CONSTRAINS", "RESULTS_IN", "APPLIES_UNDER", "PART_OF", "USED_FOR", "ASSOCIATED_WITH"],
+  "predicate_types_note": "Retained verbatim from v1 for contract compatibility. UNUSED by the current lane: GLiREL is retired and relations are produced by the frame-licensed spaCy extractor against config/predicate_synonyms.yaml. Kept so v1-era artifacts remain replayable.",
+
+  "modalities": ["asserted", "possible", "probable", "necessary", "recommended", "hypothetical"],
+  "polarities": ["positive", "negative"]
+}
