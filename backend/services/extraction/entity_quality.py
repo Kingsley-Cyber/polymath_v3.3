@@ -431,3 +431,148 @@ def filter_entities(
         row["entity_quality_version"] = QUALITY_GATE_VERSION
         out.append(row)
     return out
+
+
+def annotate_entities(
+    entities: list[dict],
+    *,
+    doc_frequency: dict[str, float] | None = None,
+    min_confidence: float = 0.60,
+    max_doc_frequency: float = 0.002,
+    counters: dict[str, int] | None = None,
+) -> list[dict]:
+    """Mark entities with a graph-eligibility verdict instead of removing them.
+
+    NON-DESTRUCTIVE by design. Deleting 2.8M stored mentions would be
+    irreversible and would silently orphan the relations, facts and claims that
+    reference them. Marking lets every consumer opt in, keeps the tagger's raw
+    output auditable, and makes the whole gate revertible by version stamp.
+
+    Adds to each entity, without removing anything:
+      graph_eligible          bool   — may this become a graph node?
+      graph_eligible_reason   str    — why not, when False
+      ontology_entity_type    str    — type remapped onto ontology.yaml
+      entity_quality_version  str    — which gate version ruled
+    """
+    out: list[dict] = []
+    for e in entities or []:
+        surface = e.get("surface_form") or e.get("text") or e.get("surface") or ""
+        canon = (e.get("canonical_name") or e.get("canonical_label")
+                 or surface).strip().lower()
+        v = judge_entity(
+            surface,
+            e.get("entity_type") or "",
+            confidence=float(e.get("confidence") or 0.0),
+            min_confidence=min_confidence,
+            corpus_doc_frequency=(doc_frequency or {}).get(canon),
+            max_doc_frequency=max_doc_frequency,
+            counters=counters,
+        )
+        row = dict(e)
+        row["graph_eligible"] = v.keep
+        row["graph_eligible_reason"] = "" if v.keep else v.reason
+        row["ontology_entity_type"] = v.ontology_type or "other"
+        row["entity_quality_version"] = QUALITY_GATE_VERSION
+        out.append(row)
+    return out
+
+
+def eligible_only(entities: list[dict]) -> list[dict]:
+    """Entities cleared for the graph. Un-annotated rows pass through.
+
+    Pass-through is deliberate: a corpus that predates the gate must not
+    silently lose every entity just because it was never annotated. Absence of
+    a verdict is not a negative verdict.
+    """
+    return [
+        e for e in (entities or [])
+        if e.get("graph_eligible", True) is not False
+    ]
+
+
+# ---------------------------------------------------------------------------
+# TWO TIERS — measured necessity, not theory.
+#
+# Applying the strict node gate as a PRECONDITION for relation extraction
+# collapsed yield 34x (308 relations -> 9 over 1,200 chunks) because a relation
+# needs BOTH endpoints: at 24% entity survival, pair survival is ~0.24^2 ~= 6%.
+# Precision went to 1.000 and the lane went silent, which is the same failure
+# as before wearing the opposite mask.
+#
+# HARD rules describe things that are not referents at all — pronouns,
+# document furniture, machine ids, ontological-category labels. Those must
+# never anchor anything.
+#
+# STRICT rules describe things that are real referents but poor NODES — bare
+# generic nouns, high corpus frequency, unnamed places. A relation whose object
+# is "strategy" is still informative when its subject is "Kotler"; a NODE
+# called "strategy" is not.
+# ---------------------------------------------------------------------------
+
+_HARD_REJECT_KEYS = frozenset({
+    "entity_rejected_pronoun",
+    "entity_rejected_function_word",
+    "entity_rejected_locator",
+    "entity_rejected_machine_id",
+    "entity_rejected_non_word",
+    "entity_rejected_too_short",
+    "entity_rejected_noise_label",
+    "entity_rejected_deictic",
+})
+
+
+def judge_relation_anchor(
+    surface: str,
+    entity_type: str,
+    *,
+    confidence: float = 1.0,
+    counters: dict[str, int] | None = None,
+) -> EntityVerdict:
+    """Relaxed tier: may this span ANCHOR a relation?
+
+    Applies only the HARD rules. No genericness test, no corpus-frequency test,
+    no confidence floor — those decide node-worthiness, not whether a span can
+    participate in an asserted relation.
+    """
+    probe: dict[str, int] = {}
+    verdict = judge_entity(
+        surface, entity_type, confidence=1.0, min_confidence=0.0,
+        corpus_doc_frequency=None, counters=probe,
+    )
+    hard_hit = next((k for k in probe if probe[k] and k in _HARD_REJECT_KEYS), None)
+    if hard_hit:
+        _inc(counters, hard_hit)
+        return EntityVerdict(False, verdict.reason)
+    mapped = LABEL_TO_ONTOLOGY.get((entity_type or "").upper(), "other")
+    return EntityVerdict(True, "", ontology_type=mapped,
+                         original_type=entity_type or "")
+
+
+def annotate_entities_two_tier(
+    entities: list[dict],
+    *,
+    doc_frequency: dict[str, float] | None = None,
+    min_confidence: float = 0.60,
+    max_doc_frequency: float = 0.002,
+    counters: dict[str, int] | None = None,
+) -> list[dict]:
+    """Stamp BOTH verdicts: relation_eligible (relaxed) and graph_eligible."""
+    out = annotate_entities(
+        entities, doc_frequency=doc_frequency, min_confidence=min_confidence,
+        max_doc_frequency=max_doc_frequency, counters=counters,
+    )
+    for row in out:
+        surface = (row.get("surface_form") or row.get("text")
+                   or row.get("surface") or "")
+        v = judge_relation_anchor(surface, row.get("entity_type") or "",
+                                  confidence=float(row.get("confidence") or 0.0))
+        row["relation_eligible"] = v.keep
+    return out
+
+
+def relation_anchors(entities: list[dict]) -> list[dict]:
+    """Entities cleared to anchor a relation. Un-annotated rows pass through."""
+    return [
+        e for e in (entities or [])
+        if e.get("relation_eligible", True) is not False
+    ]

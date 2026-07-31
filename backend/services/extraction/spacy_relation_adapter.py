@@ -185,6 +185,19 @@ class SpacyRelationExtractor:
                 results.append([])
                 continue
 
+            # ENTITY QUALITY: only graph-eligible entities may anchor a
+            # relation. Un-annotated rows pass through, so corpora predating
+            # the gate are unaffected. MEASURED: of relations judged CORRECT,
+            # 28.6% still had a generic endpoint -- that is what this removes.
+            # RELAXED tier: hard rules only (pronouns, artifacts, noise
+            # labels). The strict node gate collapsed relation yield 34x, so
+            # genericness is judged at the NODE boundary, not here.
+            from services.extraction.entity_quality import relation_anchors
+            raw_entities = relation_anchors(raw_entities)
+            if len(raw_entities) < 2:
+                results.append([])
+                continue
+
             # Convert GLiNER entity dicts → EntitySpan
             spans = _to_entity_spans(raw_entities, text)
             if len(spans) < 2:

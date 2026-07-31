@@ -459,6 +459,39 @@ def _validate_temporal(rows: Any, text: str) -> list[dict[str, Any]]:
     return validated
 
 
+def _annotate_entity_quality(entity_items: Any, chunk_id: str) -> list[Any]:
+    """Return only graph-eligible entity items for the relation lane.
+
+    MEASURED (gliner_entity_gate_v1, n=135): the tagger emits pronouns, bare
+    generic nouns, adjectives and document artifacts at scale -- graph-worthy
+    was 0.296. Relations built on those endpoints are technically correct and
+    practically useless ("company owns strategy").
+
+    Fail-soft: if the gate errors, pass the entities through unfiltered rather
+    than silently emptying an ingest. Logged at ERROR so it cannot hide.
+    """
+    try:
+        from services.extraction.entity_quality import judge_entity
+
+        kept = []
+        for item in entity_items or []:
+            v = judge_entity(
+                getattr(item, "text", "") or "",
+                getattr(item, "entity_type", "") or "",
+                confidence=float(getattr(item, "confidence", 0.0) or 0.0),
+            )
+            if v.keep:
+                kept.append(item)
+        return kept
+    except Exception as exc:  # noqa: BLE001
+        logger.error(
+            "entity quality gate FAILED for chunk=%s: %s. Passing entities "
+            "through UNFILTERED; relation precision will be degraded for this "
+            "chunk.", chunk_id, exc, exc_info=True,
+        )
+        return list(entity_items or [])
+
+
 def _compile_facts(
     text: str, entities: list[EntityItem], chunk_id: str
 ) -> list[FactItem]:
@@ -676,6 +709,12 @@ def _compile_result(
         bundle=bundle,
         extraction=extraction,
     )
+    # ENTITY QUALITY GATE. MEASURED held-out: graph-worthiness 0.300 -> 0.625.
+    # Annotates rather than filters, so the tagger's raw output stays auditable
+    # and the verdict is revertible by version stamp. Relations below consume
+    # only the eligible subset.
+    _q_ents = _annotate_entity_quality(extraction.entities, task["child_id"])
+
     entities = [
         EntityItem(
             canonical_name=item.canonical_label,
@@ -700,7 +739,7 @@ def _compile_result(
     # depending on when it was ingested.
     #
     # Gated by spacy_relation_gate_v2 PASS (p=0.8015, Wilson95 [0.725, 0.861]).
-    relations = _compile_relations(task["text"], extraction.entities, task["child_id"])
+    relations = _compile_relations(task["text"], _q_ents, task["child_id"])
     # Stage D was likewise never run on this lane (facts=[] hardcoded).
     facts = _compile_facts(task["text"], entities, task["child_id"])
 
