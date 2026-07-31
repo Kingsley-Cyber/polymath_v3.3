@@ -16241,3 +16241,60 @@ Existing machinery to use (do NOT hand-roll a writer): promote.py:55 `promote()`
 already reads `extraction["relations"]` — exactly the field the backfill wrote —
 and graph_promotion_jobs.py orchestrates it with per-doc receipts and contract
 hashing.
+
+## FULL CORPUS CENSUS (2026-07-30) — the Neo4j graph is ~99% STALE
+
+Asked "what about all the corpuses?" — so I censused Mongo and Neo4j together
+rather than the six I had been working with.
+
+MONGO (ghost_b_extractions) — all corpora with content, after backfill:
+
+| corpus | chunks | has entities | backfilled | relations |
+|---|---|---|---|---|
+| ecommerce_meta | 161,108 | 130,007 | 128,315 | 8,666 |
+| video_generations_schools | 78,891 | 68,660 | 65,555 | 3,382 |
+| authentic_library_v2 | 60,137 | 57,514 | 55,667 | 2,690 |
+| cybersecurity_study | 39,885 | 36,674 | 35,908 | 1,578 |
+| markbuildsbrands_transcripts | 17,825 | 17,381 | 16,853 | 148 |
+| meta-andromeda-rag | 4,284 | 4,213 | 4,013 | 35 |
+| cpcs_local_extraction | 617 | 0 | 0 | 680 (pre-existing) |
+| **TOTAL** | **362,759** | | | **17,194** |
+
+The has-entities vs backfilled gap (~8,100 chunks) is chunks holding exactly ONE
+entity. A relation needs two. Correct behavior, not a miss. Coverage of
+eligible chunks is complete: 0 remain.
+
+NOTE: meta-andromeda-rag (4,013 chunks) WAS backfilled by the --all run but was
+missing from my earlier per-corpus report, which only listed six named corpora.
+Corrected here.
+
+NEO4J — 885,746 RELATES_TO edges (998,188 corpus-tagged slots; some edges carry
+multiple corpus_ids). By corpus:
+
+| corpus | edges | live content in Mongo? |
+|---|---|---|
+| 0a231647-…  | 368,177 | **NO — absent from corpora, documents, chunks, extractions** |
+| f8a0aa85-…  | 314,330 | **NO — absent from every Mongo collection** |
+| polymath_v2 | 290,266 | corpus record exists, **0 documents, 0 extractions** |
+| ecommerce_AI_FILM_SCHOOL | 22,323 | 0 extractions |
+| markbuildsbrands_transcripts (5a20bc21) | 1,443 | 0 extractions — a DIFFERENT corpus_id from the live 91e2fd28 of the same name |
+| live corpora (all six combined) | **~1,585** | yes |
+
+**Only ~1,585 of 998,188 corpus-tagged edges (0.16%) belong to a corpus that
+currently has content.** The graph is overwhelmingly the residue of deleted or
+replaced corpora — 682,507 edges point at two corpus_ids with ZERO presence
+anywhere in Mongo.
+
+WHAT THIS MEANS
+- Retrieval filters on `r.corpus_ids` (confirmed correct in the 2026-07-21
+  entry), so the stale edges are invisible to corpus-scoped queries: dead
+  weight and traversal cost, not a correctness bug — PROVIDED every graph path
+  filters. Any unfiltered path would surface content from deleted corpora.
+- It also means the graph has never meaningfully served the six live corpora.
+  Promoting the 17,144 backfilled relations would take their live edge count
+  from ~1,585 to ~18,700 (a 12x increase in what is actually queryable).
+- Corpus deletion evidently does not clean up Neo4j edges. That is the upstream
+  defect; a purge/janitor for orphaned corpus_ids is a separate task and should
+  be owner-approved (it deletes ~682k edges).
+
+NOT DONE: no promotion run yet, no orphan purge. Both are owner decisions.
