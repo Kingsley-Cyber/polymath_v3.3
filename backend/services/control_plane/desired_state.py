@@ -52,6 +52,10 @@ STAGE_DOCUMENT_PIPELINE = "document_pipeline"
 STAGE_SUMMARY = "summary"
 STAGE_EXTRACTION = "extraction"
 STAGE_GRAPH_PROMOTION = "graph_promotion"
+# Extraction SUB-STAGE repair. Distinct from STAGE_EXTRACTION: an organ gap
+# means the chunks exist but one organ inside them produced nothing, which is
+# fixed by recomputing that organ, not by re-extracting the document.
+STAGE_ORGAN_REPAIR = "organ_repair"
 
 GAP_STAGE_BY_KEY = {
     "chunk_source": STAGE_SOURCE_PARSE,
