@@ -414,6 +414,36 @@ def _request(tasks: list[dict[str, str]]) -> dict[str, Any]:
     }
 
 
+def _accepted_registry_hashes() -> list[dict[str, str]]:
+    """Registry namespace hashes this backend accepts from a pod.
+
+    Same blue/green reason as the asset contract: the hash is computed over the
+    vocabulary FILE, so a pod shipping v2 reports a different value than a
+    backend loading v1. Strict equality would fail every extraction the moment
+    the new image lands. Computed live from the registry files rather than
+    hardcoded, so it cannot go stale against them.
+    """
+    import importlib
+    import os as _os
+
+    out: list[dict[str, str]] = []
+    prior = _os.environ.get("POLYMATH_EXTRACTION_VOCAB")
+    try:
+        for version in ("v1", "v2"):
+            _os.environ["POLYMATH_EXTRACTION_VOCAB"] = version
+            import models.extraction_registry as reg
+            importlib.reload(reg)
+            out.append(reg.extraction_registry_hashes())
+    finally:
+        if prior is None:
+            _os.environ.pop("POLYMATH_EXTRACTION_VOCAB", None)
+        else:
+            _os.environ["POLYMATH_EXTRACTION_VOCAB"] = prior
+        import models.extraction_registry as reg
+        importlib.reload(reg)
+    return out
+
+
 def _accepted_asset_contracts() -> list[dict[str, str]]:
     """Asset contracts this backend will accept from a pod.
 
@@ -449,8 +479,11 @@ def _validate_runtime_identity(identity: Any) -> None:
             "LocalExtractionV1 asset contract drifted; accepted vocabulary "
             "versions: v1, v2"
         )
-    if identity.get("registry_namespace_hashes") != extraction_registry_hashes():
-        raise RuntimeError("LocalExtractionV1 registry namespace hashes drifted")
+    if identity.get("registry_namespace_hashes") not in _accepted_registry_hashes():
+        raise RuntimeError(
+            "LocalExtractionV1 registry namespace hashes drifted; accepted "
+            "vocabulary versions: v1, v2"
+        )
     source_closure = identity.get("source_closure")
     if (
         not isinstance(source_closure, dict)

@@ -22,9 +22,26 @@ from pathlib import Path
 
 import pytest
 
-_ROOT = Path(__file__).resolve().parents[2]
-V1 = _ROOT / "runpod_flash_extractor/registries/extraction_vocabularies.v1.json"
-V2 = _ROOT / "runpod_flash_extractor/registries/extraction_vocabularies.v2.json"
+def _registry(name: str) -> Path:
+    """Resolve a registry file in BOTH venues.
+
+    Host: the repo tree (backend/registries and the pod mirror).
+    Container: /app/registries, where only the backend copy is baked.
+    A test that only runs in one venue silently stops guarding the other.
+    """
+    here = Path(__file__).resolve()
+    for candidate in (
+        here.parents[1] / "registries" / name,                       # backend/
+        here.parents[2] / "runpod_flash_extractor/registries" / name,  # pod mirror
+        Path("/app/registries") / name,                               # container
+    ):
+        if candidate.is_file():
+            return candidate
+    raise FileNotFoundError(name)
+
+
+V1 = _registry("extraction_vocabularies.v1.json")
+V2 = _registry("extraction_vocabularies.v2.json")
 
 ONTOLOGY_TYPES = {
     "Person", "Organization", "Location", "Event", "Concept", "Method",
@@ -140,9 +157,7 @@ class TestBlueGreenRollout:
         from services.runpod_local_extraction import (
             EXTRACTION_VOCABULARY_SHA256_V2,
         )
-        path = (Path(__file__).resolve().parents[2]
-                / "runpod_flash_extractor/registries/extraction_vocabularies.v2.json")
-        assert hashlib.sha256(path.read_bytes()).hexdigest() == \
+        assert hashlib.sha256(V2.read_bytes()).hexdigest() == \
             EXTRACTION_VOCABULARY_SHA256_V2
 
     def test_an_unknown_contract_is_still_rejected(self):
@@ -150,3 +165,79 @@ class TestBlueGreenRollout:
         rogue = dict(_accepted_asset_contracts()[0])
         rogue["gliner_weights_sha256"] = "0" * 64
         assert rogue not in _accepted_asset_contracts()
+
+
+class TestSchemaMigration:
+    """EntityType is the WIRE SCHEMA for 2.8M stored mentions. Swapping it
+    would invalidate every one of them on the next validation pass."""
+
+    def test_entity_type_is_a_superset_not_a_replacement(self):
+        from models.local_extraction import EntityType
+        values = set(EntityType.__args__)
+        # v1 values must survive -- stored data depends on them
+        for v1 in ("PERSON", "ORGANIZATION", "QUALITY", "BEHAVIOR", "TIME_PATTERN"):
+            assert v1 in values, f"{v1} removed; 2.8M stored mentions would break"
+        # v2 values must be representable
+        for v2 in ("person", "organization", "software", "artifact"):
+            assert v2 in values, f"{v2} missing; v2 extraction cannot validate"
+
+    def test_both_registries_load_against_the_shared_literal(self, monkeypatch):
+        import importlib
+        import models.extraction_registry as reg
+        for version, expected in (("v1", 25), ("v2", 11)):
+            monkeypatch.setenv("POLYMATH_EXTRACTION_VOCAB", version)
+            importlib.reload(reg)
+            vocab = reg.load_extraction_registries()["vocab"]
+            assert vocab["version"] == version
+            assert len(vocab["entity_types"]) == expected
+        monkeypatch.delenv("POLYMATH_EXTRACTION_VOCAB", raising=False)
+        importlib.reload(reg)
+
+    def test_registries_have_distinct_namespace_hashes(self, monkeypatch):
+        """If they hashed the same, the pod/backend blue-green check would be
+        meaningless."""
+        import importlib
+        import models.extraction_registry as reg
+        hashes = {}
+        for version in ("v1", "v2"):
+            monkeypatch.setenv("POLYMATH_EXTRACTION_VOCAB", version)
+            importlib.reload(reg)
+            hashes[version] = reg.extraction_registry_hashes()["vocab"]
+        assert hashes["v1"] != hashes["v2"]
+        monkeypatch.delenv("POLYMATH_EXTRACTION_VOCAB", raising=False)
+        importlib.reload(reg)
+
+    def test_default_is_v1_so_code_alone_cannot_change_a_pod(self, monkeypatch):
+        """The vocabulary switch must be an explicit deployment decision, not a
+        side effect of deploying code."""
+        import importlib
+        import models.extraction_registry as reg
+        monkeypatch.delenv("POLYMATH_EXTRACTION_VOCAB", raising=False)
+        importlib.reload(reg)
+        assert reg.ACTIVE_VOCABULARY_VERSION == "v1"
+
+    def test_unknown_label_still_fails_closed(self):
+        """Subset validation must not become permissive."""
+        from models.extraction_registry import ExtractionRegistryError
+        from models.local_extraction import EntityType
+        assert "NOT_A_REAL_TYPE" not in set(EntityType.__args__)
+        assert ExtractionRegistryError is not None
+
+
+class TestRuntimeIdentityBlueGreen:
+    def test_backend_accepts_both_registry_hash_sets(self):
+        from services.runpod_local_extraction import _accepted_registry_hashes
+        accepted = _accepted_registry_hashes()
+        assert len(accepted) == 2
+        assert accepted[0]["vocab"] != accepted[1]["vocab"], (
+            "the two vocabulary versions must hash differently or the "
+            "blue-green check proves nothing"
+        )
+
+    def test_hashes_are_computed_live_not_hardcoded(self):
+        """A hardcoded hash goes stale against the file it claims to describe."""
+        from pathlib import Path
+        src = (Path(__file__).resolve().parents[1]
+               / "services" / "runpod_local_extraction.py").read_text()
+        fn = src.split("def _accepted_registry_hashes")[1].split("def ")[0]
+        assert "extraction_registry_hashes()" in fn

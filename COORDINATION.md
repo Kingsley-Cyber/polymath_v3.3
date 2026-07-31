@@ -16394,3 +16394,41 @@ REMAINING DEPLOY STEP (NOT DONE - needs owner):
   4. After rollout, re-run gliner_entity_gate_v1 -- the entity number should
      move without touching the gate.
 Local extraction can adopt v2 immediately; the pod lane needs the image.
+
+### v2 SCHEMA MIGRATION (2026-07-31) — non-breaking, verified against live data
+
+Adopting v2 was blocked by two fail-closed contracts, both now handled without
+a flag day:
+
+1. **EntityType is the WIRE SCHEMA**, a Pydantic Literal of the 25 v1 labels
+   used for every stored `local_extraction.entities[].entity_type`. Swapping it
+   would invalidate 2.8M stored mentions on the next validation pass. It is now
+   a SUPERSET (36 values = 25 v1 + 11 v2). Both vocabularies are legal
+   simultaneously, and entity_quality.LABEL_TO_ONTOLOGY normalises them to the
+   SAME ontology.yaml values, so a corpus never carries two type systems.
+   Removing the v1 block is a DATA MIGRATION (re-extract everything), not a
+   schema edit.
+
+2. **extraction_registry asserted exact equality** between the registry's
+   entity_types and the Literal, plus `version != "v1" -> raise`. With a
+   superset Literal, exact equality would reject BOTH files. Now: version-aware
+   loading via POLYMATH_EXTRACTION_VOCAB (default **v1**, so deploying code
+   alone cannot change a pod's behaviour — the switch is an explicit
+   deployment decision), and SUBSET validation, which still fails closed on any
+   label the wire schema cannot represent.
+
+3. **registry_namespace_hashes** was also strict-equality. Backend now accepts
+   either version's hash set, computed LIVE from the registry files rather than
+   hardcoded so it cannot go stale.
+
+VERIFIED AGAINST LIVE DATA: 4,000/4,000 stored v1 `local_extraction` rows still
+validate under the widened schema; a v2-shaped row (lowercase types) also
+validates. Rebuilt; verify_backend_runtime.sh green; live default confirmed v1.
+
+Both copies of models/local_extraction.py and models/extraction_registry.py
+(backend + runpod_flash_extractor) were byte-identical and were edited
+identically — they must stay that way or the pod and backend disagree about the
+schema.
+
+REMAINING (owner): bake the pod image with POLYMATH_EXTRACTION_VOCAB=v2, NEW
+digest, 1-slice canary, then re-run gliner_entity_gate_v1.

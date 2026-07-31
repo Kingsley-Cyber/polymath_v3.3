@@ -39,6 +39,27 @@ EntityType = Literal[
     "CONDITION",
     "POPULATION",
     "TIME_PATTERN",
+    # --- vocabulary v2 (lowercase, ontology-aligned) -----------------------
+    # SUPERSET, not a replacement. This Literal is the wire schema for every
+    # stored local_extraction.entities[].entity_type -- 2.8M mentions carry a
+    # v1 value. Swapping the Literal would invalidate all of them on the next
+    # validation pass. Both vocabularies are therefore legal simultaneously,
+    # and entity_quality.LABEL_TO_ONTOLOGY normalises them to the SAME
+    # ontology.yaml values so a corpus never carries two type systems.
+    #
+    # Remove the v1 block only after every stored mention has been re-extracted
+    # under v2 -- that is a data migration, not a schema edit.
+    "person",
+    "organization",
+    "location",
+    "product",
+    "software",
+    "document",
+    "method",
+    "concept",
+    "event",
+    "standard",
+    "artifact",
 ]
 PredicateType = Literal[
     "CAUSES",

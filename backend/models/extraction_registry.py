@@ -9,6 +9,7 @@ credential-free worker.
 from __future__ import annotations
 
 import json
+import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -23,9 +24,33 @@ from models.local_extraction import (
 
 
 REGISTRY_DIR = Path(__file__).resolve().parents[1] / "registries"
+# Vocabulary version this process loads. v1 = 25 labels, most of them
+# ontological categories (QUALITY, BEHAVIOR, PROCESS...). v2 = 11 labels
+# aligned 1:1 with ontology.yaml. MEASURED on 80 real chunks: v2 yields 22%
+# MORE graph-eligible entities from 21% FEWER raw mentions.
+#
+# Set POLYMATH_EXTRACTION_VOCAB=v2 to load v2. Defaults to v1 so a deployed
+# pod's behaviour cannot change from a code update alone -- the switch is an
+# explicit deployment decision.
+ACTIVE_VOCABULARY_VERSION = os.environ.get(
+    "POLYMATH_EXTRACTION_VOCAB", "v1"
+).strip().lower()
+if ACTIVE_VOCABULARY_VERSION not in ("v1", "v2"):
+    raise ValueError(
+        f"POLYMATH_EXTRACTION_VOCAB={ACTIVE_VOCABULARY_VERSION!r} is not a "
+        "known vocabulary version (v1 | v2)"
+    )
+
 FILES = {
-    "vocab": "extraction_vocabularies.v1.json",
+    "vocab": f"extraction_vocabularies.{ACTIVE_VOCABULARY_VERSION}.json",
     "predicate_normalization": "predicate_normalization.v1.json",
+}
+
+# Fields v2 adds for provenance. v1 files must NOT carry them; v2 files must.
+_V2_ONLY_FIELDS = {
+    "why_v2", "measured_ab", "entity_type_to_ontology",
+    "recommended_threshold", "threshold_note",
+    "dropped_from_v1", "dropped_rationale", "predicate_types_note",
 }
 
 
@@ -57,19 +82,37 @@ def load_extraction_registries() -> dict[str, dict[str, Any]]:
         "modalities",
         "polarities",
     }
-    if set(vocab) != expected_vocab_fields:
+    allowed_fields = expected_vocab_fields | _V2_ONLY_FIELDS
+    if not expected_vocab_fields <= set(vocab) <= allowed_fields:
         raise ExtractionRegistryError("extraction vocabulary fields are not exact")
-    if vocab["registry"] != "extraction_vocabularies" or vocab["version"] != "v1":
+    if vocab["registry"] != "extraction_vocabularies":
         raise ExtractionRegistryError("extraction vocabulary identity drifted")
+    if vocab["version"] != ACTIVE_VOCABULARY_VERSION:
+        raise ExtractionRegistryError(
+            f"loaded vocabulary is {vocab['version']!r} but this process is "
+            f"configured for {ACTIVE_VOCABULARY_VERSION!r}"
+        )
     model_literals = {
         "entity_types": list(EntityType.__args__),
         "predicate_types": list(PredicateType.__args__),
         "modalities": list(Modality.__args__),
         "polarities": list(Polarity.__args__),
     }
+    # SUBSET, not equality. EntityType is now a SUPERSET carrying both
+    # vocabularies, because 2.8M stored mentions hold v1 values and swapping
+    # the Literal would invalidate them. Exact equality would therefore reject
+    # BOTH registry files. Subset still fails closed on any label the wire
+    # schema cannot represent, which is the property that matters.
     for key, expected in model_literals.items():
-        if vocab[key] != expected or len(expected) != len(set(expected)):
-            raise ExtractionRegistryError(f"{key} drifted from LocalExtractionV1")
+        values = vocab[key]
+        if not values or len(values) != len(set(values)):
+            raise ExtractionRegistryError(f"{key} is empty or has duplicates")
+        unknown = set(values) - set(expected)
+        if unknown:
+            raise ExtractionRegistryError(
+                f"{key} contains values absent from LocalExtractionV1: "
+                f"{sorted(unknown)}"
+            )
 
     normalization = _read("predicate_normalization")
     expected_normalization_fields = {
