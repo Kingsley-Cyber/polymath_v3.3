@@ -168,6 +168,13 @@ SUPPRESSION_KEYS: tuple[str, ...] = (
     "suppressed_pronoun_argument",    # P1: (we, created_by, we), (her, owns, he)
     "suppressed_adjectival_argument",  # P3: (I, instance_of, six-pack)
     "suppressed_poss_not_adjacent",   # P2: (Grainger, owns, customers)
+    # Frame-licensed model (frame_extractor.py). A frame that cannot fill both
+    # argument slots emits nothing — this is where co-present-but-unrelated
+    # entity pairs now die, instead of becoming edges.
+    "frame_slot_unfilled",
+    "frame_self_loop",
+    "frame_predicate_unnamed",
+    "frame_bibliographic_appositive",
 )
 
 # Qualified = candidate IS emitted, but carries a qualifier that keeps it off

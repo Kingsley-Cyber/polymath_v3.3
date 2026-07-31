@@ -1,0 +1,523 @@
+"""Frame-licensed relation extraction — the rebuilt pairing model.
+
+WHY THIS REPLACES SHORTEST-PATH PAIRING
+---------------------------------------
+`dep_path_extractor.DepPathExtractor.extract` iterates over EVERY entity pair in
+a chunk (O(n^2)), finds the shortest dependency path between their head tokens,
+and tries to name a predicate for it. Inside a single sentence the dependency
+tree is connected, so a path ALWAYS exists — which means the resolver is handed
+an opportunity to name a relation for pairs that have no relation at all.
+
+Hand-judged on live corpus text (2026-07-30), that model produced ~0.25
+precision even after four rounds of guard repair. The residual errors had no
+dominant rule left; they were the model itself:
+
+    (INSIDE, instance_of, Earth)              — co-present in a chapter heading
+    (Figure 16-6, uses, Death Valley)         — co-present in a caption
+    (November-December, derived_from, Lowell Steele) — co-present in a citation
+    (place, causes, this time)                — co-present in a long sentence
+
+None of those pairs stand in an argument relation to a shared predicate. They
+were merely nearby.
+
+THE REBUILT MODEL
+-----------------
+Invert the control flow. The FRAME is the primary object; entities are matched
+into its slots:
+
+    pass 1  find predicate-bearing constructions (frames) in the dep tree
+    pass 2  fill each frame's subject/object slots with entity spans
+    pass 3  name the predicate (reusing the existing T1-T4 resolver + ontology)
+
+A frame emits nothing unless BOTH slots are filled by distinct entities. Pairs
+that are merely co-present never form a candidate, because co-presence is not a
+frame. This is a structural guarantee, not another guard stacked on top.
+
+Consequences that fall out for free:
+  - Direction errors largely vanish: the subject slot IS the grammatical
+    subject, rather than "whichever entity came first in character offset".
+  - The multi-clause and conjunct-crossing guards become unnecessary: a frame is
+    one clause by construction. Those two were suppressing 5.43 candidates per
+    chunk in the old model — candidates that now never form.
+  - Cost drops from O(n^2) path searches to O(frames), and frames are sparse.
+
+The predicate resolver, ontology gate, qualifier extraction, and suppression
+counters are REUSED unchanged from dep_path_extractor. This module changes which
+pairs get proposed, not how a proposed pair is named or validated.
+"""
+
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass
+
+from spacy.tokens import Doc, Token
+
+from services.extraction.dep_path_extractor import (
+    EntitySpan,
+    ExtractedTriple,
+    _extract_qualifiers_inline,
+    _inc,
+    _is_adjectival_argument,
+    _is_contrast_subject,
+    _is_expletive_subject,
+    _is_in_attribution_context,
+    _is_in_conditional_clause,
+    _is_light_verb_construction,
+    _is_low_parse_confidence,
+    _is_pronoun_argument,
+    _is_verbless_sentence,
+    pair_allowed,
+    rejection_counters,
+    resolve_predicate,
+)
+
+logger = logging.getLogger(__name__)
+
+# Dependency labels that can hold a direct object slot.
+_OBJECT_DEPS = frozenset({"dobj", "obj", "oprd"})
+# Nominal predicate complements ("X is a Y").
+_ATTR_DEPS = frozenset({"attr"})
+# Subject slots.
+_SUBJ_DEPS = frozenset({"nsubj"})
+_PASSIVE_SUBJ_DEPS = frozenset({"nsubjpass", "nsubj:pass"})
+
+# Predicates NAMED FROM THE OBJECT'S PERSPECTIVE. `created_by` asserts "the
+# subject was created by the object", so an ACTIVE sentence must be inverted:
+#   "The team built the framework"  -> (framework, created_by, team)
+# not (team, created_by, framework). The T3 synonym table maps build/create/
+# develop -> created_by and always reports swap=False, because in the old
+# character-order model direction was decided elsewhere. In a frame model the
+# grammatical roles are known exactly, so the inversion belongs here.
+# Passive frames already carry the correct direction and are excluded.
+_OBJECT_PERSPECTIVE_PREDICATES = frozenset({
+    "created_by", "preceded_by", "derived_from", "trained_on",
+})
+
+
+@dataclass(slots=True)
+class Frame:
+    """One predicate-bearing construction with two argument slots."""
+
+    subj_tok: Token
+    pred_tok: Token
+    obj_tok: Token
+    frame_type: str
+    signature: str
+    # True when the grammatical subject is the SEMANTIC object (passive+agent).
+    swap: bool = False
+    # Structural tier, not a calibrated probability. 1.0 = the predicate token
+    # directly governs both slots; 0.9 = one hop further (prepositional object).
+    confidence: float = 1.0
+
+
+def _find_frames(doc: Doc) -> list[Frame]:
+    """Enumerate predicate frames in a parsed doc.
+
+    Each frame is anchored on a specific construction. A token that heads no
+    recognized construction yields nothing — silence is the default.
+    """
+    frames: list[Frame] = []
+
+    for tok in doc:
+        # ---- Verbal frames -------------------------------------------------
+        if tok.pos_ in ("VERB", "AUX"):
+            subjects = [c for c in tok.children if c.dep_ in _SUBJ_DEPS]
+            passive_subjects = [c for c in tok.children if c.dep_ in _PASSIVE_SUBJ_DEPS]
+            objects = [c for c in tok.children if c.dep_ in _OBJECT_DEPS]
+            attrs = [c for c in tok.children if c.dep_ in _ATTR_DEPS]
+
+            # 1. Active transitive: "Microsoft acquired GitHub"
+            for s in subjects:
+                for o in objects:
+                    frames.append(Frame(
+                        subj_tok=s, pred_tok=tok, obj_tok=o,
+                        frame_type="active_transitive",
+                        signature=f"{s.dep_}-VERB-{o.dep_}",
+                        confidence=1.0,
+                    ))
+
+            # 2. Copular nominal: "Qdrant is a vector database"
+            for s in subjects:
+                for a in attrs:
+                    # Adjectival complements are properties, not relations.
+                    if a.pos_ in ("ADJ", "ADV"):
+                        continue
+                    frames.append(Frame(
+                        subj_tok=s, pred_tok=tok, obj_tok=a,
+                        frame_type="copular",
+                        signature=f"{s.dep_}-VERB-attr",
+                        confidence=1.0,
+                    ))
+
+            # 3. Passive with explicit agent: "GitHub was acquired by Microsoft"
+            #    Agentless passives form NO frame — an unstated agent is not an
+            #    argument, so the construction simply does not license an edge.
+            for s in passive_subjects:
+                for agent in (c for c in tok.children if c.dep_ == "agent"):
+                    for pobj in (g for g in agent.children if g.dep_ == "pobj"):
+                        frames.append(Frame(
+                            subj_tok=s, pred_tok=tok, obj_tok=pobj,
+                            frame_type="passive_agent",
+                            signature=f"{s.dep_}-VERB-agent-pobj",
+                            swap=True,
+                            confidence=1.0,
+                        ))
+
+            # 4. Prepositional object: "Qdrant runs on Kubernetes"
+            for s in subjects:
+                for prep in (c for c in tok.children if c.dep_ == "prep"):
+                    for pobj in (g for g in prep.children if g.dep_ == "pobj"):
+                        frames.append(Frame(
+                            subj_tok=s, pred_tok=tok, obj_tok=pobj,
+                            frame_type="prep_object",
+                            signature=(
+                                f"{s.dep_}-VERB-prep:{prep.lemma_.lower()}-pobj"
+                            ),
+                            confidence=0.9,
+                        ))
+
+        # ---- Nominal frames ------------------------------------------------
+        # 5. Possessive: "Google's TensorFlow" -> (Google, owns, TensorFlow).
+        #    Strict and local: the possessor is a `poss` CHILD of the possessed.
+        for poss in (c for c in tok.children if c.dep_ == "poss"):
+            if poss.pos_ in ("PRON", "DET"):
+                continue  # "its API" — possessor is unresolvable here
+            frames.append(Frame(
+                subj_tok=poss, pred_tok=tok, obj_tok=tok,
+                frame_type="possessive",
+                signature="poss",
+                confidence=1.0,
+            ))
+
+        # 6. Appositive: "Qdrant, a vector database, ..."
+        for appos in (c for c in tok.children if c.dep_ == "appos"):
+            frames.append(Frame(
+                subj_tok=tok, pred_tok=tok, obj_tok=appos,
+                frame_type="appositive",
+                signature="appos",
+                confidence=1.0,
+            ))
+
+    return frames
+
+
+def _build_slot_index(
+    doc: Doc, entities: list[EntitySpan]
+) -> dict[int, EntitySpan]:
+    """Map token index -> the entity span covering it.
+
+    A slot token "is filled by" an entity when the token falls inside that
+    entity's character span. Where spans overlap, the SHORTER span wins: it is
+    the more specific mention, and preferring it avoids letting a long noisy
+    span swallow a precise one.
+    """
+    index: dict[int, EntitySpan] = {}
+    ordered = sorted(
+        entities, key=lambda e: (e.end_char - e.start_char), reverse=True
+    )
+    for ent in ordered:
+        for tok in doc:
+            tok_start = tok.idx
+            tok_end = tok.idx + len(tok.text)
+            if tok_start >= ent.start_char and tok_end <= ent.end_char:
+                index[tok.i] = ent  # shorter spans applied later, so they win
+    return index
+
+
+def _resolve_slot(
+    tok: Token, slot_index: dict[int, EntitySpan], *, strict: bool = False
+) -> EntitySpan | None:
+    """Find the entity filling a slot.
+
+    A slot token may be a determiner or modifier inside a longer entity mention
+    ("the recommendation engine"), so a miss on the exact token is retried
+    against its head — bounded to two hops to avoid drifting into a different
+    constituent.
+
+    strict=True disables the head walk entirely. Required for NOMINAL frames
+    (possessive, appositive), where the slot token IS the possessed/apposed noun
+    exactly. Walking up from it lands on an unrelated entity elsewhere in the
+    sentence and fabricates a relation:
+        "it has a halo effect on your prospects' perception"
+            poss=prospects, possessed=perception (not an entity)
+            -> head walk reached `halo effect` -> (prospects, owns, halo effect)
+    If the possessed noun is not itself an entity, the construction simply does
+    not license an edge between two entities. Silence is correct.
+    """
+    direct = slot_index.get(tok.i)
+    if direct is not None:
+        return direct
+    if strict:
+        return None
+    current = tok
+    for _ in range(2):
+        if current.head.i == current.i:
+            break
+        current = current.head
+        found = slot_index.get(current.i)
+        if found is not None:
+            return found
+    return None
+
+
+# Bibliography/citation context. Appositives are a normal prose construction
+# ("Qdrant, a vector database") but in reference lists the same shape is pure
+# formatting, and produced a steady stream of false edges:
+#     "Newbury Park, CA: Sage (1990)"  -> (Newbury Park, instance_of, Sage)
+#     "Siegrist, M., Cvetkovich, G.T.: Shared values, social trust, ..."
+#         -> (Siegrist M., instance_of, Shared values)
+# These pass allowed_pairs legitimately, so the ontology cannot catch them —
+# the sentence itself has to be recognized as a citation.
+_CITATION_MARKERS = (
+    "et al.", " ed.", " eds.", " pp.", " vol.", " no.", "doi:", "isbn",
+    "press,", "press:", "journal", "reprinted", "trans.",
+)
+_INITIALS_RE = None  # compiled lazily to keep import cost off the hot path
+
+
+def _is_bibliographic_context(sent) -> bool:
+    """True when the sentence reads as a reference-list entry, not prose."""
+    global _INITIALS_RE
+    if _INITIALS_RE is None:
+        import re
+        # A personal-name initial ending a name field. Both separators occur:
+        #   "Siegrist, M., Cvetkovich, G.T.: ..."   -> comma
+        #   "Gandy, O.: The Panoptic Sort"          -> colon
+        _INITIALS_RE = re.compile(r"\b[A-Z]\.(?:\s*[A-Z]\.)*\s*[,:]")
+    text = sent.text
+    low = text.lower()
+    if any(m in low for m in _CITATION_MARKERS):
+        return True
+    if _INITIALS_RE.search(text):
+        return True
+    # Page locators: "p 125", "p. 125", "pp. 12-34" — reference formatting.
+    import re as _re0
+    if _re0.search(r"\bpp?\.?\s+\d+", low):
+        return True
+    # "(Chicago: University of Chicago Press, 1984)" / "(1990)" plus a colon —
+    # a year in parentheses alongside a publisher colon is citation formatting.
+    import re as _re
+    if _re.search(r"\(\d{4}\)", text) and ":" in text:
+        return True
+    return False
+
+
+class FrameExtractor:
+    """Frame-licensed relation extractor.
+
+    Drop-in for DepPathExtractor.extract(): same signature, same
+    ExtractedTriple output, same counters.
+    """
+
+    def __init__(self, model_name: str = "en_core_web_sm"):
+        try:
+            from services.extraction.appos_enrichment import get_shared_nlp
+            self._nlp = get_shared_nlp()
+        except Exception:  # noqa: BLE001 - fall back to a direct load
+            import spacy
+            self._nlp = spacy.load(model_name, disable=["ner", "textcat"])
+
+    def extract(
+        self,
+        text: str,
+        entities: list[EntitySpan],
+        *,
+        section_path: str = "",
+        chunk_id: str = "",
+        doc_id: str = "",
+        doc: Doc | None = None,
+        suppression_counters: dict[str, int] | None = None,
+    ) -> list[ExtractedTriple]:
+        if not text.strip() or len(entities) < 2:
+            return []
+
+        if doc is None:
+            doc = self._nlp(text)
+
+        # ---- Sentence-level suppression (unchanged from the old model) -----
+        if _is_low_parse_confidence(doc):
+            _inc(suppression_counters, "skipped_low_parse_confidence")
+            return []
+
+        # NOTE: no chunk-level verbless bail here. The old model returned early
+        # when every sentence looked verbless, which silently discarded valid
+        # NOMINAL frames — and "verbless" is unreliable precisely because sm
+        # mistags domain verbs as nouns ("Google's TensorFlow powers many
+        # systems" reads as verbless because `powers` tags NOUN). Verbal frames
+        # are still checked individually below; nominal frames no longer need a
+        # verb to exist.
+        frames = _find_frames(doc)
+        if not frames:
+            _inc(suppression_counters, "skipped_verbless")
+            return []
+
+        slot_index = _build_slot_index(doc, entities)
+        sent_idx_by_start = {s.start: i for i, s in enumerate(doc.sents)}
+
+        triples: list[ExtractedTriple] = []
+        seen: set[tuple[str, str, str, int]] = set()
+
+        for frame in frames:
+            # ---- pass 2: slot filling. Both slots or nothing. --------------
+            is_nominal_frame = frame.frame_type in ("possessive", "appositive")
+
+            # Bibliography entries reuse the appositive shape as pure
+            # formatting. allowed_pairs cannot catch them (the type pairs are
+            # legitimate), so the citation context is recognized directly.
+            if frame.frame_type == "appositive" and _is_bibliographic_context(
+                frame.pred_tok.sent
+            ):
+                _inc(suppression_counters, "frame_bibliographic_appositive")
+                continue
+
+            # Nominal frames resolve strictly: the slot token IS the possessed
+            # or apposed noun, so a head walk would land on an unrelated entity.
+            subj_ent = _resolve_slot(
+                frame.subj_tok, slot_index, strict=is_nominal_frame)
+            obj_ent = _resolve_slot(
+                frame.obj_tok, slot_index, strict=is_nominal_frame)
+            if subj_ent is None or obj_ent is None:
+                _inc(suppression_counters, "frame_slot_unfilled")
+                continue
+            if (subj_ent.start_char == obj_ent.start_char
+                    and subj_ent.end_char == obj_ent.end_char):
+                _inc(suppression_counters, "frame_self_loop")
+                continue
+
+            # ---- argument hygiene (P1, reused) -----------------------------
+            if (_is_pronoun_argument(frame.subj_tok, subj_ent)
+                    or _is_pronoun_argument(frame.obj_tok, obj_ent)):
+                _inc(suppression_counters, "suppressed_pronoun_argument")
+                continue
+            if (_is_adjectival_argument(doc, subj_ent, frame.subj_tok)
+                    or _is_adjectival_argument(doc, obj_ent, frame.obj_tok)):
+                _inc(suppression_counters, "suppressed_adjectival_argument")
+                continue
+            if _is_expletive_subject(frame.subj_tok):
+                _inc(suppression_counters, "suppressed_expletive")
+                continue
+            if _is_contrast_subject(frame.subj_tok, doc):
+                _inc(suppression_counters, "suppressed_contrast")
+                continue
+
+            pred_tok = frame.pred_tok
+            # Nominal frames (possessive, appositive) carry no verb by nature —
+            # "Google's TensorFlow", "Qdrant, a vector database". Requiring a
+            # verbal sentence would discard them wholesale, and does: sm tags
+            # "powers" in "Google's TensorFlow powers many systems" as NOUN,
+            # making the whole sentence read as verbless (backlog PF-2).
+            if not is_nominal_frame and _is_verbless_sentence(pred_tok.sent):
+                _inc(suppression_counters, "skipped_verbless")
+                continue
+            if _is_light_verb_construction(pred_tok):
+                _inc(suppression_counters, "suppressed_light_verb")
+                continue
+            if "except" in frame.signature or "pcomp" in frame.signature:
+                _inc(suppression_counters, "suppressed_exception_boundary")
+                continue
+
+            is_attributed = _is_in_attribution_context(pred_tok)
+            is_conditional = _is_in_conditional_clause(pred_tok)
+            if is_attributed:
+                _inc(suppression_counters, "qualified_attributed")
+            if is_conditional:
+                _inc(suppression_counters, "qualified_conditional")
+
+            # ---- pass 3: name the predicate (resolver reused unchanged) ----
+            if frame.frame_type == "possessive":
+                resolved: tuple[str, bool] | None = ("owns", False)
+                lemma = "own"
+            elif frame.frame_type == "appositive":
+                resolved = ("instance_of", False)
+                lemma = "be"
+            else:
+                lemma = pred_tok.lemma_.lower()
+                resolved = resolve_predicate(
+                    signature=frame.signature,
+                    lemma=lemma,
+                    subject_type=subj_ent.entity_type,
+                    object_type=obj_ent.entity_type,
+                    pred_tok=pred_tok,
+                    object_tok=frame.obj_tok,
+                )
+            if resolved is None:
+                _inc(suppression_counters, "frame_predicate_unnamed")
+                continue
+
+            predicate, resolver_swap = resolved
+            # Direction has exactly ONE owner per frame type, never two.
+            # For passive_agent the frame already knows the grammatical subject
+            # is the semantic object. The resolver, handed the same passive
+            # signature, independently reports the same swap — XOR-ing them
+            # cancelled the correction and emitted
+            # (GitHub, owns, Microsoft) for "GitHub was acquired by Microsoft".
+            # The frame is structural and always right here, so it wins.
+            if frame.frame_type == "passive_agent":
+                swap = frame.swap
+            else:
+                swap = bool(resolver_swap)
+                # Object-perspective predicate reached from an active frame:
+                # "The team built the framework" -> (framework, created_by, team)
+                if (frame.frame_type in ("active_transitive", "prep_object")
+                        and predicate in _OBJECT_PERSPECTIVE_PREDICATES):
+                    swap = not swap
+            if swap:
+                s_ent, o_ent = obj_ent, subj_ent
+            else:
+                s_ent, o_ent = subj_ent, obj_ent
+
+            if not pair_allowed(predicate, s_ent.entity_type, o_ent.entity_type):
+                reason = (
+                    f"disallowed_pair:{predicate}:"
+                    f"{s_ent.entity_type}:{o_ent.entity_type}"
+                )
+                rejection_counters[reason] = rejection_counters.get(reason, 0) + 1
+                _inc(suppression_counters, "adapter_allowed_pairs_rejected")
+                continue
+
+            polarity, modality, temporal = _extract_qualifiers_inline(pred_tok)
+            if polarity == "NEGATIVE":
+                _inc(suppression_counters, "qualified_negated")
+            if modality != "ASSERTED":
+                _inc(suppression_counters, "qualified_modal")
+
+            if is_attributed:
+                assertion_mode = "attributed"
+            elif is_conditional:
+                assertion_mode = "conditional"
+            else:
+                assertion_mode = "direct"
+
+            sent = pred_tok.sent
+            sent_idx = sent_idx_by_start.get(sent.start, 0)
+
+            key = (s_ent.surface, predicate, o_ent.surface, sent_idx)
+            if key in seen:
+                continue
+            seen.add(key)
+
+            triples.append(ExtractedTriple(
+                subject_surface=s_ent.surface,
+                subject_start=s_ent.start_char,
+                subject_end=s_ent.end_char,
+                predicate=predicate,
+                predicate_lemma=lemma,
+                predicate_surface=pred_tok.text,
+                object_surface=o_ent.surface,
+                object_start=o_ent.start_char,
+                object_end=o_ent.end_char,
+                confidence=frame.confidence,
+                dep_signature=f"{frame.frame_type}:{frame.signature}",
+                polarity=polarity,
+                modality=modality,
+                assertion_mode=assertion_mode,
+                temporal_cue=temporal,
+                sentence_text=sent.text.strip(),
+                sentence_idx=sent_idx,
+                chunk_id=chunk_id,
+                doc_id=doc_id,
+                section_path=section_path,
+            ))
+
+        return triples

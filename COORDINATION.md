@@ -15977,3 +15977,67 @@ actively misleads.
 
 LAW ADDED: nothing is backfilled or promoted to Neo4j until a hand spot-check
 on that genre clears 0.80.
+
+## PAIRING MODEL REBUILT (2026-07-30) — frame-licensed. Precision 0.15 -> 0.70/0.75
+
+Owner directive: rebuild the pairing model. Done.
+
+THE DEFECT
+dep_path_extractor.extract iterated EVERY entity pair in a chunk (O(n^2)),
+found the shortest dep path, and asked the resolver to name it. Inside one
+sentence the dep tree is connected, so a path ALWAYS exists — the resolver was
+handed a chance to name a relation for pairs that had none. Four rounds of
+guard repair only reached ~0.25; the residual errors had no dominant rule left
+because they WERE the model:
+  (INSIDE, instance_of, Earth)          co-present in a chapter heading
+  (Figure 16-6, uses, Death Valley)     co-present in a caption
+  (place, causes, this time)            co-present in a long sentence
+
+THE REBUILD — services/extraction/frame_extractor.py
+Control flow inverted. The FRAME is primary; entities are matched into slots:
+  pass 1  find predicate-bearing constructions (6 frame types)
+  pass 2  fill subject/object slots — BOTH or nothing
+  pass 3  name the predicate (T1-T4 resolver + ontology gate, REUSED unchanged)
+Co-presence is not a frame, so those pairs never form a candidate. Structural
+guarantee, not another stacked guard. Falls out for free: direction errors
+mostly vanish (the subject slot IS the grammatical subject), and the
+multi-clause + conjunct-crossing guards become unnecessary (a frame is one
+clause by construction) — they were suppressing 5.43 candidates/chunk.
+
+FIVE BUGS FOUND AND FIXED DURING THE REBUILD (each has a test)
+1. Passive direction double-swap: frame swap XOR resolver swap cancelled, giving
+   (GitHub, owns, Microsoft). Frame is structural and now owns direction.
+2. created_by inverted from active voice: T3 maps build/create/develop ->
+   created_by with swap=False, so "the team built the framework" gave
+   (team, created_by, framework). Object-perspective predicates now invert.
+3. Chunk-level verbless bail discarded valid NOMINAL frames — sm tags "powers"
+   NOUN, so "Google's TensorFlow powers many systems" read as verbless.
+4. Nominal slots resolved too loosely: head-walking from a non-entity possessed
+   noun landed on an unrelated entity — "your prospects' perception" bound
+   `halo effect`. Nominal frames now resolve STRICTLY.
+5. **entity_type wildcard hole (mine, from R8).** I mapped unknown types
+   (PLACE, BEHAVIOR, PROCESS, QUALITY, AGENT) to "other" — which pair_allowed
+   treats as an explicit PASS. The live vocabulary is far wider than
+   ontology.yaml (GROUP, SYSTEM, RESOURCE, TIME_PATTERN all in the thousands),
+   so that one line bypassed the ontology gate on most entities and produced
+   (Newbury Park, instance_of, Sage). Unknown types now fail CLOSED.
+   This also corrects R-pre Finding 6: the UPPERCASE casing mismatch had been
+   ACCIDENTALLY acting as a precision gate, which is why normalizing it
+   appeared to recover "only" 84 relations.
+6. Bibliography entries reuse the appositive shape as formatting and pass
+   allowed_pairs legitimately, so the ontology cannot catch them. Citation
+   context is now recognized directly (initials, et al., page locators, year+
+   publisher colon). Ordinary definitional appositives are unaffected (tested).
+
+MEASURED — hand-judged 20-edge samples per repo law, same corpus sample
+  book: 0.15 -> 0.35 -> 0.55 -> **0.70**    (0.85 -> 0.069 rel/chunk)
+  ASR : 0.10 ------------------> **0.75**    (0.35 -> 0.067 rel/chunk)
+  paper: 0.054 rel/chunk (not hand-judged this round)
+Yield is deliberately ~8x lower. The graph is empty, so foregone recall costs
+nothing real while a wrong edge is permanent damage.
+
+STATUS: 0.70/0.75 vs the 0.80 floor. NOT YET AT GATE. Backfill stays GATED;
+nothing promoted to Neo4j. Legacy model retained behind
+GHOST_B_PAIRING_MODEL=deppath for A/B only; frame is default.
+Rebuilt + verify_backend_runtime.sh green; container confirmed running
+FrameExtractor. Tests: 89 passed.

@@ -108,11 +108,27 @@ class SpacyRelationExtractor:
     def _ensure_loaded(self) -> None:
         if self._extractor is not None:
             return
-        from services.extraction.dep_path_extractor import DepPathExtractor
         model = os.environ.get("SPACY_MODEL", "en_core_web_sm")
-        self._extractor = DepPathExtractor(model_name=model)
+        # PAIRING MODEL (2026-07-30). "frame" is the rebuilt, frame-licensed
+        # model: find predicate constructions, then fill their argument slots.
+        # "deppath" is the legacy O(n^2) shortest-path pairing it replaces —
+        # kept only so the two can be A/B'd on the same corpus. Legacy hand-
+        # judged at ~0.25 precision; see frame_extractor.py for why.
+        mode = os.environ.get("GHOST_B_PAIRING_MODEL", "frame").strip().lower()
+        if mode == "deppath":
+            from services.extraction.dep_path_extractor import DepPathExtractor
+            self._extractor = DepPathExtractor(model_name=model)
+        elif mode == "frame":
+            from services.extraction.frame_extractor import FrameExtractor
+            self._extractor = FrameExtractor(model_name=model)
+        else:
+            raise RuntimeError(
+                f"FATAL: GHOST_B_PAIRING_MODEL={mode!r} is not a known pairing "
+                "model. Use 'frame' (default) or 'deppath' (legacy A/B only)."
+            )
+        self._pairing_model = mode
         logger.info(
-            "SpacyRelationExtractor loaded model=%s", model
+            "SpacyRelationExtractor loaded model=%s pairing=%s", model, mode
         )
 
     def extract_chunks(
@@ -283,13 +299,33 @@ _ONTOLOGY_ENTITY_TYPES = (
 )
 _UPPER_TO_ONTOLOGY = {t.upper(): t for t in _ONTOLOGY_ENTITY_TYPES}
 
-# Types emitted by upstream taggers that have no ontology equivalent. Mapped to
-# the "other" wildcard so they are not silently gated out by allowed_pairs —
-# "other" is an explicit pass in pair_allowed(), so these stay eligible while
-# remaining honestly untyped. Extending the ontology is an OWNER decision.
-_UNMAPPED_TO_WILDCARD = frozenset({
-    "PLACE", "BEHAVIOR", "PROCESS", "QUALITY", "AGENT",
-})
+# Exact synonyms for ontology types under a different upstream name. ONLY
+# unambiguous renames belong here.
+_SYNONYM_TO_ONTOLOGY = {
+    "PLACE": "Location",
+}
+
+# DELIBERATELY NOT MAPPED — and specifically NOT mapped to "other".
+#
+# An earlier revision sent unknown types (PLACE, BEHAVIOR, PROCESS, QUALITY,
+# AGENT, ...) to the "other" wildcard. That was wrong: pair_allowed() treats
+# "other" as an explicit PASS, so wildcarding them bypassed the ontology gate
+# entirely for a large share of the corpus. The live type vocabulary is much
+# wider than ontology.yaml — GROUP, BEHAVIOR, SYSTEM, PROCESS, RESOURCE,
+# QUALITY, TIME_PATTERN all appear in the thousands — so that one line opened
+# the gate on most entities and produced edges like
+#     (Newbury Park, instance_of, Sage)      [bibliography]
+#     (Ann Arbor, instance_of, University of Michigan Press)
+# which allowed_pairs would otherwise have rejected: instance_of requires a
+# Concept object.
+#
+# It also explains why R-pre measured the casing fix as recovering "only" 84
+# relations: the UPPERCASE mismatch had been ACCIDENTALLY acting as a precision
+# gate. Normalizing casing without this correction removes that accident.
+#
+# An entity whose type is not in the ontology cannot satisfy a typed constraint,
+# so it now fails CLOSED at allowed_pairs. Extending ontology.yaml to cover
+# these types is an OWNER decision, not something to paper over here.
 
 
 def normalize_entity_type(raw: str) -> str:
@@ -304,11 +340,11 @@ def normalize_entity_type(raw: str) -> str:
     if raw in _ONTOLOGY_ENTITY_TYPES:
         return raw
     upper = raw.strip().upper()
-    mapped = _UPPER_TO_ONTOLOGY.get(upper)
+    mapped = _UPPER_TO_ONTOLOGY.get(upper) or _SYNONYM_TO_ONTOLOGY.get(upper)
     if mapped:
         return mapped
-    if upper in _UNMAPPED_TO_WILDCARD:
-        return "other"
+    # Unknown type: returned unchanged so it stays visible AND fails closed at
+    # the allowed_pairs gate. Never coerce to "other" — that is a wildcard pass.
     return raw
 
 
