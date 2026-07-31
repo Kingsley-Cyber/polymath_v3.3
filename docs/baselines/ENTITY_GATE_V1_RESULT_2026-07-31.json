@@ -1,0 +1,111 @@
+{
+  "schema": "polymath.gliner_entity_gate.v1.result",
+  "n": 135,
+  "dimensions": {
+    "is_entity": {
+      "n": 135,
+      "pass": 49,
+      "rate": 0.363,
+      "wilson_95": [
+        0.2867,
+        0.4468
+      ]
+    },
+    "span_correct": {
+      "n": 135,
+      "pass": 129,
+      "rate": 0.9556,
+      "wilson_95": [
+        0.9064,
+        0.9795
+      ]
+    },
+    "type_correct": {
+      "n": 135,
+      "pass": 118,
+      "rate": 0.8741,
+      "wilson_95": [
+        0.8076,
+        0.9199
+      ]
+    },
+    "graph_worthy": {
+      "n": 135,
+      "pass": 40,
+      "rate": 0.2963,
+      "wilson_95": [
+        0.2258,
+        0.3781
+      ]
+    }
+  },
+  "primary_metric": "graph_worthy",
+  "per_stratum": {
+    "asr": {
+      "n": 45,
+      "graph_worthy": 0.3111,
+      "wilson_95": [
+        0.1953,
+        0.4567
+      ],
+      "meets_floor": false
+    },
+    "book": {
+      "n": 45,
+      "graph_worthy": 0.2667,
+      "wilson_95": [
+        0.1596,
+        0.4104
+      ],
+      "meets_floor": false
+    },
+    "paper": {
+      "n": 45,
+      "graph_worthy": 0.3111,
+      "wilson_95": [
+        0.1953,
+        0.4567
+      ],
+      "meets_floor": false
+    }
+  },
+  "thresholds_PROPOSED_owner_must_rule": {
+    "OWNER_MUST_RULE": true,
+    "graph_worthy_floor": 0.7,
+    "is_entity_floor": 0.85,
+    "type_correct_floor": 0.8,
+    "wilson_lower_bound_required": 0.6,
+    "rationale": "Deliberately proposed BELOW the relation gate's 0.80, because entity quality is a distribution not a binary and a 0.80 entity bar may be unreachable with a zero-shot tagger at 14+ labels. These are a starting position for the owner to move, not a standard being asserted.",
+    "per_stratum_floor": 0.55
+  },
+  "type_instability": {
+    "surfaces_with_multiple_types": 1,
+    "share": 0.0093,
+    "examples": {
+      "we": [
+        "GROUP",
+        "PERSON"
+      ]
+    }
+  },
+  "outside_ontology": {
+    "count": 135,
+    "share": 1.0,
+    "types": {
+      "PERSON": 35,
+      "CONCEPT": 20,
+      "ORGANIZATION": 14,
+      "SYSTEM": 10,
+      "BEHAVIOR": 9,
+      "PLACE": 8,
+      "PRODUCT": 8,
+      "QUALITY": 5,
+      "GROUP": 5,
+      "DOCUMENT": 4,
+      "PROCESS": 4,
+      "METHOD": 4
+    },
+    "note": "these fail the allowed_pairs gate regardless of quality"
+  },
+  "VERDICT": "FAIL"
+}
