@@ -16059,3 +16059,47 @@ RESIDUAL ERROR CLASSES (4 of 20 on book, no longer a single dominant rule):
 - long-range possessive across a subordinate clause (Mercer).
 - created_by attaching to the wrong created thing (Priam built the capability,
   not the market).
+
+## GATE V2 RUN (2026-07-30) — VERDICT: FAIL at 0.726. My n=20 spot-checks were optimistic.
+
+Preregistered BEFORE sampling (commit d2357e9). n=135, stratified 45/45/45 across
+book/paper/ASR, deterministic stride, BORDERLINE counted as WRONG.
+
+ROUND 1 (as-committed frame model): **0.637**, Wilson 95% [0.553, 0.713].
+  paper 0.511 -> below the 0.65 stratum floor, EXCLUDED from backfill.
+  My earlier n=20 spot-checks reported book 0.80 / ASR 0.75. At n=135 the same
+  model measures 0.64. **The gate caught my own optimism — that is why it exists.**
+
+TWO DOMINANT DEFECTS FOUND, BOTH FIXED:
+1. Container verbs emitted part_of BACKWARDS. predicate_synonyms maps
+   include/contain/comprise/consist -> part_of with no swap, so
+   "Network security controls include NAC systems" gave
+   (controls, part_of, NAC systems). Inversion is LEMMA-specific, not
+   predicate-specific: part_of must not invert in general, because
+   "Shannon and Weaver belong to the arrogance tradition" is already correct.
+2. Possessive over a PERSON/ORGANIZATION asserted ownership of people:
+   (Jeff, owns, team), (Selena, owns, father), (Virgin, owns, Branson).
+   Now routes to affiliated_with, which carries no allowed_pairs constraint.
+
+ROUND 2 (after both fixes): **0.7259**, Wilson 95% [0.645, 0.794]
+  asr   0.778 [0.637, 0.875]
+  book  0.733 [0.590, 0.840]
+  paper 0.667 [0.521, 0.786]   (was 0.511 — recovered above the floor)
+  No stratum excluded. 19 of the 22 changed items judged CORRECT.
+
+STILL FAIL: point 0.726 < 0.80 floor; Wilson lower 0.645 < 0.70 required.
+BACKFILL REMAINS GATED. Nothing promoted to Neo4j.
+
+RESIDUAL: 37/135 errors, no single rule dominant any more.
+  instance_of 9 · created_by 8 · owns 6 · part_of 3 · long tail 11
+  6 of the 37 are DOCUMENT-STRUCTURE ARTIFACTS treated as entities:
+  "Page 135", "Page 300", "Figure 5.1", "Figure 16-3", bare "text", "page".
+  That is an UPSTREAM entity-tagger problem, not a pairing problem — the
+  relation lane is faithfully relating garbage it was handed. Filtering
+  structural artifacts at the entity boundary is the next highest-value fix
+  and is cheap; the instance_of and created_by classes need separate work.
+
+Artifacts: docs/baselines/GATE_V2_{JUDGEMENTS,RESULT}_2026-07-30.{jsonl,json}
+Per-item judgements are persisted with reasons so the owner can re-judge any call.
+KNOWN LIMITATION, recorded in the gate spec: the judge is the same agent that
+wrote the extractor.

@@ -94,6 +94,26 @@ _OBJECT_PERSPECTIVE_PREDICATES = frozenset({
     "created_by", "preceded_by", "derived_from", "trained_on",
 })
 
+# CONTAINER verbs. predicate_synonyms maps include/contain/comprise/consist ->
+# part_of with no swap, so an active sentence emitted the containment backwards:
+#   "Network security controls include NAC systems"
+#       -> (Network security controls, part_of, NAC systems)   WRONG
+#       -> (NAC systems, part_of, Network security controls)   correct
+# This is lemma-specific, NOT predicate-specific: part_of must NOT invert in
+# general, because "Shannon and Weaver belong to the arrogance tradition"
+# already yields the right direction. Gate v2 found four of these in the paper
+# stratum alone.
+_CONTAINER_LEMMAS = frozenset({
+    "include", "contain", "comprise", "consist", "encompass",
+})
+
+# Possessive over a PERSON / GROUP / ORGANIZATION is affiliation or kinship,
+# not ownership. "Jeff's team", "Jacinda's organization", "Selena's father",
+# "Virgin's Branson" all emitted `owns`, which asserts something false about
+# people. affiliated_with carries no allowed_pairs constraint in ontology.yaml,
+# so it is a safe landing predicate. Gate v2 found nine of these across strata.
+_PERSONAL_OBJECT_TYPES = frozenset({"Person", "Organization"})
+
 
 @dataclass(slots=True)
 class Frame:
@@ -426,7 +446,12 @@ class FrameExtractor:
 
             # ---- pass 3: name the predicate (resolver reused unchanged) ----
             if frame.frame_type == "possessive":
-                resolved: tuple[str, bool] | None = ("owns", False)
+                # "Jeff's team" / "Selena's father" is affiliation or kinship,
+                # never ownership. Asserting `owns` over a person is false.
+                if obj_ent.entity_type in _PERSONAL_OBJECT_TYPES:
+                    resolved: tuple[str, bool] | None = ("affiliated_with", False)
+                else:
+                    resolved = ("owns", False)
                 lemma = "own"
             elif frame.frame_type == "appositive":
                 resolved = ("instance_of", False)
@@ -461,6 +486,11 @@ class FrameExtractor:
                 # "The team built the framework" -> (framework, created_by, team)
                 if (frame.frame_type in ("active_transitive", "prep_object")
                         and predicate in _OBJECT_PERSPECTIVE_PREDICATES):
+                    swap = not swap
+                # Container verb: "X includes Y" asserts Y is part_of X.
+                elif (frame.frame_type == "active_transitive"
+                        and predicate == "part_of"
+                        and lemma in _CONTAINER_LEMMAS):
                     swap = not swap
             if swap:
                 s_ent, o_ent = obj_ent, subj_ent

@@ -1,0 +1,74 @@
+{
+  "schema": "polymath.spacy_relation_gate.v2.result",
+  "gate_spec_sha_source": "/Users/king/polymath_v3.3/backend/evals/spacy_relation_gate_v2.json",
+  "n": 135,
+  "correct": 98,
+  "borderline_counted_as_wrong": 5,
+  "precision": 0.7259,
+  "wilson_95": [
+    0.6452,
+    0.7941
+  ],
+  "thresholds": {
+    "precision_floor": 0.8,
+    "wilson_lower_bound_required": 0.7,
+    "per_stratum_floor": 0.65
+  },
+  "passes_point_estimate": false,
+  "passes_ci_lower_bound": false,
+  "strata_below_floor_excluded_from_backfill": [],
+  "per_stratum": {
+    "asr": {
+      "n": 45,
+      "correct": 35,
+      "precision": 0.7778,
+      "wilson_95": [
+        0.6373,
+        0.8746
+      ],
+      "meets_stratum_floor": true
+    },
+    "book": {
+      "n": 45,
+      "correct": 33,
+      "precision": 0.7333,
+      "wilson_95": [
+        0.5896,
+        0.8404
+      ],
+      "meets_stratum_floor": true
+    },
+    "paper": {
+      "n": 45,
+      "correct": 30,
+      "precision": 0.6667,
+      "wilson_95": [
+        0.5207,
+        0.7864
+      ],
+      "meets_stratum_floor": true
+    }
+  },
+  "distinct_predicates": 18,
+  "predicate_distribution": {
+    "owns": 61,
+    "created_by": 14,
+    "affiliated_with": 14,
+    "instance_of": 9,
+    "part_of": 8,
+    "references": 4,
+    "defines": 4,
+    "uses": 3,
+    "detects": 3,
+    "runs_on": 3,
+    "preceded_by": 2,
+    "trained_on": 2,
+    "represents": 2,
+    "maps_to": 2,
+    "located_in": 1,
+    "produces": 1,
+    "stores": 1,
+    "overlaps": 1
+  },
+  "VERDICT": "FAIL"
+}
