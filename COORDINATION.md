@@ -16201,3 +16201,43 @@ in-container: ('Microsoft','owns','GitHub').
 
 REMAINING KNOWN GAP: facts=[] is still hardcoded on this lane (Stage D never
 ran for pod-extracted chunks). Same shape of bug, not yet addressed.
+
+## CORRECTION (2026-07-30) — "THE GRAPH IS EMPTY" WAS FALSE. Neo4j holds 885,746 RELATES_TO.
+
+I asserted repeatedly, across the precision ladder and the pairing rebuild, that
+"the graph is empty, so a missed relation costs nothing recoverable while a
+wrong edge is permanent damage." That justification was used to defend trading
+~8x recall for precision. **The premise was wrong and I did not check it until
+promotion.** Live Neo4j:
+
+  nodes 4,569,232 · relationships 9,508,866 · RELATES_TO **885,746**
+  labels: Document, Chunk, Entity, Fact
+  reltypes: RELATES_TO, MENTIONS, HAS_CHUNK, HAS_FACT, SUPPORTS_FACT
+
+RELATES_TO by corpus:
+  0a231647  368,177 | f8a0aa85  314,330 | 999b5934 (polymath_v2) 290,266
+  fd460347   22,323 | 5a20bc21    1,443 | 65cae4a1 (cpcs)            668
+  8dfb070a      569 | f3849304      160
+
+WHAT IS ACTUALLY TRUE, restated:
+- The graph is NOT empty. It is populated from OLDER corpora, largely under
+  `extract_schema_version: polymath.extract.v1` (the pre-local-extraction
+  schema) with avg_confidence ~0.48 on the sampled edge — i.e. legacy,
+  ungated output.
+- The five corpora I backfilled contribute ~2,800 edges of that 885,746. So the
+  specific claim "these corpora have no relations in the graph" WAS right; the
+  general claim "the graph is empty" was not.
+- The precision work is unaffected on its merits (0.8015 gated is 0.8015
+  gated). What is affected is the RISK ARGUMENT I used: adding edges is not
+  writing into a vacuum, it is contributing to a live graph that retrieval
+  already queries.
+
+CONSEQUENCE FOR PROMOTION: adding ~17,144 gate-passed edges (p=0.8015) to
+885,746 largely ungated legacy edges is still net-positive for quality and low
+risk — but it is a contribution to a live structure, not the creation of one,
+and the decision deserves to be made on that basis rather than on mine.
+
+Existing machinery to use (do NOT hand-roll a writer): promote.py:55 `promote()`
+already reads `extraction["relations"]` — exactly the field the backfill wrote —
+and graph_promotion_jobs.py orchestrates it with per-doc receipts and contract
+hashing.
