@@ -16041,3 +16041,21 @@ nothing promoted to Neo4j. Legacy model retained behind
 GHOST_B_PAIRING_MODEL=deppath for A/B only; frame is default.
 Rebuilt + verify_backend_runtime.sh green; container confirmed running
 FrameExtractor. Tests: 89 passed.
+
+### FINAL SPOT-CHECK AFTER CITATION FIX (2026-07-30)
+book 16/20 = **0.80** (AT the floor) · ASR 15/20 = **0.75** · combined ~0.775.
+CAVEAT ON THESE NUMBERS: each is ONE hand-judged 20-edge sample, judged by me,
+including 2-3 genuinely borderline calls per sample. At n=20 the 95% CI on 0.80
+is roughly [0.56, 0.94]. **These samples cannot certify the 0.80 floor** — they
+can only say the model is now plausibly at it. R0 (gate v2, >=120 relations)
+exists precisely to replace this with a real measurement, and is now the
+critical path. Backfill stays GATED until it runs.
+
+RESIDUAL ERROR CLASSES (4 of 20 on book, no longer a single dominant rule):
+- prep_object predicate mismatch: (Participants, stores, actions),
+  (Merrill Lynch, located_in, America) from "bullish on America" — YAML
+  prep->predicate mappings are too permissive.
+- trained_on direction on reduced relatives: "college women taught X".
+- long-range possessive across a subordinate clause (Mercer).
+- created_by attaching to the wrong created thing (Priam built the capability,
+  not the market).
