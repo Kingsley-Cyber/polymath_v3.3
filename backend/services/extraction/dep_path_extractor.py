@@ -162,6 +162,12 @@ SUPPRESSION_KEYS: tuple[str, ...] = (
     "suppressed_multi_clause",        # P2 structural guard — was unpublished
     "suppressed_conjunct_crossing",   # P2 structural guard — was unpublished
     "suppressed_exception_boundary",  # P2 structural guard — was unpublished
+    # Precision ladder (2026-07-30). Hand-judged spot-checks put real-corpus
+    # precision at 0.10–0.15 against a gate reporting 1.000; these guards
+    # target the dominant defects found in those judgements.
+    "suppressed_pronoun_argument",    # P1: (we, created_by, we), (her, owns, he)
+    "suppressed_adjectival_argument",  # P3: (I, instance_of, six-pack)
+    "suppressed_poss_not_adjacent",   # P2: (Grainger, owns, customers)
 )
 
 # Qualified = candidate IS emitted, but carries a qualifier that keeps it off
@@ -473,6 +479,74 @@ def _has_quantity_object(object_tok: Token) -> bool:
     return False
 
 
+# ---------------------------------------------------------------------------
+# P1 — entity hygiene (precision ladder, 2026-07-30)
+#
+# The upstream tagger emits pronoun and adjectival spans, and the relation lane
+# built edges on them unchallenged. Hand-judged samples produced
+# (we, created_by, we) — a self-loop — (her, owns, he), (your, owns, business),
+# (Australia, part_of, You), (I, instance_of, six-pack).
+#
+# A relation argument must denote a THING. A pronoun denotes whatever the
+# discourse last referred to, which this extractor cannot resolve (that is R6's
+# job, and R6 emits to the claims path only). An adjectival span denotes a
+# property, which belongs on the fact path, not as a graph node.
+# ---------------------------------------------------------------------------
+
+_PRONOUN_SURFACES = frozenset({
+    "i", "me", "my", "mine", "myself",
+    "you", "your", "yours", "yourself", "yourselves",
+    "he", "him", "his", "himself", "she", "her", "hers", "herself",
+    "it", "its", "itself", "we", "us", "our", "ours", "ourselves",
+    "they", "them", "their", "theirs", "themselves",
+    "this", "that", "these", "those",
+    "who", "whom", "whose", "which", "what",
+    "someone", "somebody", "something", "anyone", "anybody", "anything",
+    "everyone", "everybody", "everything", "no one", "nobody", "nothing",
+    "one", "ones", "other", "others", "another", "each", "either", "neither",
+    "there", "here",
+})
+
+
+def _is_pronoun_argument(tok: Token, ent: "EntitySpan") -> bool:
+    """True when the span is a pronoun and cannot anchor a graph edge."""
+    surface = (ent.surface or "").strip().lower()
+    if surface in _PRONOUN_SURFACES:
+        return True
+    # Possessive-pronoun determiners ("my", "your") often head the span.
+    if tok.pos_ in ("PRON",):
+        return True
+    if tok.pos_ == "DET" and tok.lemma_.lower() in _PRONOUN_SURFACES:
+        return True
+    # Multi-token spans whose head is a pronoun ("most people's" -> people is
+    # fine; "each of them" -> them is not).
+    if tok.lemma_.lower() in _PRONOUN_SURFACES and tok.pos_ not in ("NOUN", "PROPN"):
+        return True
+    return False
+
+
+def _is_adjectival_argument(doc: Doc, ent: "EntitySpan", tok: Token) -> bool:
+    """True when the span is a property phrase, not a thing.
+
+    "high quality", "six-pack", "shredded" arrive typed as entities and become
+    bogus instance_of objects. Facts, not graph nodes.
+    """
+    span_tokens = [
+        t for t in doc
+        if t.idx >= ent.start_char and t.idx + len(t.text) <= ent.end_char
+    ]
+    if not span_tokens:
+        span_tokens = [tok]
+    # Every content token adjectival/adverbial -> a property.
+    content = [t for t in span_tokens if t.pos_ not in ("DET", "PUNCT", "ADP")]
+    if content and all(t.pos_ in ("ADJ", "ADV") for t in content):
+        return True
+    # Head sits in an adjectival complement slot.
+    if tok.dep_ in ("acomp", "amod") and tok.pos_ in ("ADJ", "ADV"):
+        return True
+    return False
+
+
 def _resolve_possessive(
     path: list[tuple[str, str, int]],
     doc: Doc,
@@ -480,6 +554,7 @@ def _resolve_possessive(
     tok_b: Token,
     ent_a: "EntitySpan",
     ent_b: "EntitySpan",
+    counters: dict[str, int] | None = None,
 ) -> "ExtractedTriple | None":
     """Noun-anchored possessive: "Google's TensorFlow" → (Google, owns, TensorFlow).
 
@@ -490,30 +565,31 @@ def _resolve_possessive(
     if not has_poss:
         return None
 
-    # Determine possessor: the token with dep_=="poss" is the possessor
-    if tok_a.dep_ == "poss":
+    # ---- P2 possessive repair (precision ladder, 2026-07-30) ----------------
+    # The old rule fired whenever ANY `poss` appeared on the path and then bound
+    # whichever two entities were at its ends. In real prose that is routinely
+    # the wrong pair:
+    #   "By placing Grainger's unique strengths ... changes customers'
+    #    disposition"      -> (Grainger, owns, customers)      WRONG
+    #   "sell women's camouflage clothing" + "SHE Safari"
+    #                      -> (women, owns, SHE Safari)        WRONG
+    # In both, the possessor IS a `poss` token — but the entity it actually
+    # possesses (strengths / clothing) is a DIFFERENT noun that happens not to
+    # be an entity, so the rule reached past it to an unrelated span.
+    #
+    # Correct structure for "X's Y" is strict and local: the possessor token is
+    # a `poss` child OF the possessed token. Anything else is not a possessive
+    # relation between these two entities.
+    if tok_a.dep_ == "poss" and tok_a.head.i == tok_b.i:
         possessor_ent, possessed_ent = ent_a, ent_b
         possessor_tok, possessed_tok = tok_a, tok_b
-    elif tok_b.dep_ == "poss":
+    elif tok_b.dep_ == "poss" and tok_b.head.i == tok_a.i:
         possessor_ent, possessed_ent = ent_b, ent_a
         possessor_tok, possessed_tok = tok_b, tok_a
     else:
-        # poss is on an intermediate token — check subtree ownership
-        # e.g. "Google's" modifies an intermediate noun that IS tok_b
-        for dep, direction, tidx in path:
-            if dep == "poss":
-                poss_tok = doc[tidx]
-                # The poss token's head is the possessed noun
-                if poss_tok.head.i == tok_b.i or poss_tok.head.i == tok_a.i:
-                    if tok_a.i == poss_tok.head.i:
-                        possessor_ent, possessed_ent = ent_b, ent_a
-                        possessor_tok, possessed_tok = tok_b, tok_a
-                    else:
-                        possessor_ent, possessed_ent = ent_a, ent_b
-                        possessor_tok, possessed_tok = tok_a, tok_b
-                    break
-        else:
-            return None
+        # A `poss` exists on the path but does not bind THESE two entities.
+        _inc(counters, "suppressed_poss_not_adjacent")
+        return None
 
     # Gate: check allowed_pairs for "owns"
     _load_config()
@@ -633,11 +709,20 @@ def resolve_predicate(
         return _resolve_copular(pred_tok, object_tok)
 
     # --- T2 special: "have" hazard (6.2% of corpus) ---
+    # P4 (precision ladder, 2026-07-30): this used to return part_of for ANY
+    # "X has Y". In real prose English "have" overwhelmingly means abstract
+    # possession or predication, not meronymy, and the rule was a top source of
+    # false edges in the hand-judged samples:
+    #   "companies have the clean-slate luxury"  -> (clean-slate luxury, part_of, companies)
+    #   "Customers have these metrics in their minds" -> (metrics, part_of, Customers)
+    #   "the J has only its wretched veto"       -> (veto, part_of, J)
+    # part_of is a structural claim about composition and must not be inferred
+    # from a verb this ambiguous. Meronymy needs an explicit signature rule in
+    # predicate_synonyms.yaml (where the type context can constrain it), so bare
+    # "have" now DROPS. The graph is empty today, so foregone recall costs
+    # nothing real; a wrong part_of edge is permanent damage.
     if lemma == "have" and object_tok is not None:
-        if _has_quantity_object(object_tok):
-            return None  # "X has 4 GB of RAM" → fact, not edge
-        # "X has Y" → Y is part_of X. Swap so Y becomes subject.
-        return ("part_of", True)
+        return None
 
     # --- T3: flat synonym dict ---
     synonyms = _load_synonyms()
@@ -1143,6 +1228,20 @@ class DepPathExtractor:
 
                 # --- PAIR-LEVEL SUPPRESSION (before path extraction) ---
 
+                # P1 entity hygiene: a relation argument must denote a THING.
+                # Pronouns denote whatever the discourse last referred to —
+                # unresolvable here (that is R6's job, claims path only) — and
+                # adjectival spans denote properties, which belong on the fact
+                # path. Both were producing graph edges: (we, created_by, we),
+                # (her, owns, he), (I, instance_of, six-pack).
+                if _is_pronoun_argument(tok_a, ent_a) or _is_pronoun_argument(tok_b, ent_b):
+                    _inc(suppression_counters, "suppressed_pronoun_argument")
+                    continue
+                if (_is_adjectival_argument(doc, ent_a, tok_a)
+                        or _is_adjectival_argument(doc, ent_b, tok_b)):
+                    _inc(suppression_counters, "suppressed_adjectival_argument")
+                    continue
+
                 # Expletive subject: "There is a tradeoff between X and Y"
                 if _is_expletive_subject(tok_a):
                     _inc(suppression_counters, "suppressed_expletive")
@@ -1165,7 +1264,10 @@ class DepPathExtractor:
 
                 # Noun-anchored possessive: "Google's TensorFlow" → owns
                 # Check BEFORE verb extraction — poss paths have no verb.
-                poss_result = _resolve_possessive(path, doc, tok_a, tok_b, ent_a, ent_b)
+                poss_result = _resolve_possessive(
+                    path, doc, tok_a, tok_b, ent_a, ent_b,
+                    counters=suppression_counters,
+                )
                 if poss_result is not None:
                     triples.append(poss_result)
                     continue
