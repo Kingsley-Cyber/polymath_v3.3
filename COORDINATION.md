@@ -16298,3 +16298,52 @@ WHAT THIS MEANS
   be owner-approved (it deletes ~682k edges).
 
 NOT DONE: no promotion run yet, no orphan purge. Both are owner decisions.
+
+## GRAPH AUDIT + PURGE + E2E VERIFICATION (2026-07-31)
+
+### AUDIT — two hot retrieval paths do NOT filter edges by corpus
+Entity nodes are GLOBAL, so an entity mentioned in a live-corpus chunk drags in
+edges from any corpus:
+  services/retriever/graph_decoration.py:508  MATCH (seed)-[r:RELATES_TO]-(neighbor)
+  services/retriever/graph_rerank.py:84       OPTIONAL MATCH (e)-[r:RELATES_TO]-()
+Neither constrains r.corpus_ids. graph_query.py:552 DOES scope correctly, so the
+gap is specific, not systemic.
+
+MEASURED before purge (ecommerce_meta, 3,000 seed entities):
+  111,180 reachable RELATES_TO edges — **105,461 (94.9%) from DEAD corpora**.
+This made the purge a CORRECTNESS fix, not housekeeping: dead-corpus edges were
+decorating live winners and inflating the degree used to rerank them.
+
+### PURGE — 884,023 edges deleted
+Liveness definition: registered in `corpora` AND has content. Verified every
+purged corpus had **0 extractions, 0 documents, 0 chunks** in every collection —
+including registered-but-empty ones (polymath_v2, ecommerce_AI_FILM_SCHOOL,
+markbuildsbrands_transcripts 5a20bc21, both rebatch_smoke corpora).
+
+  RELATES_TO 898,096 -> 14,058   (884,023 deleted, 14,073 retained)
+  22 edges with null/empty corpus_ids were REPORTED, NOT deleted — orphan status
+  cannot be proven for them, and one of our own promotion passes briefly
+  produced unstamped edges.
+  Receipt: /data/ingest-files/graph-purge-receipts/orphan_edges_2026-07-31.jsonl.gz
+  (86 MB gz, 884,023 rows, full properties) — Neo4j deletes are irreversible
+  without re-ingest, so the export is the only undo material.
+
+AFTER purge, same measurement: 5,714 reachable, **4 from dead corpora (0.1%)**.
+
+### E2E VERIFICATION — the production query returns the promoted edges
+Ran the ACTUAL graph_decoration Cypher (chunk -> MENTIONS -> seed entity ->
+RELATES_TO walk) over 25 real winner chunks:
+  decorations returned: 25
+  of which from this promotion: **25/25**
+  e.g. (manufacturer)-owns->(landing page), (manufacturer)-affiliated_with->(advertising agency)
+The graph lane is wired and live for the backfilled corpora.
+
+### REMAINING FINDING — 35.1% cross-corpus leak (design question, NOT fixed)
+Post-purge, of 5,714 edges reachable from ecommerce_meta entities, 3,710 (64.9%)
+are same-corpus and **2,004 (35.1%) come from OTHER LIVE corpora**, because
+neither hot path filters on r.corpus_ids.
+This may be INTENDED — cross-corpus bridges are an explicit feature elsewhere
+(graph/queries.py "local entities + cross-book bridges", checklist P3). It is
+left as-is and flagged for an owner ruling rather than silently changed.
+The clearer defect is graph_rerank counting DEGREE across corpora, which inflates
+a chunk's rerank score using unrelated corpora. Recommend scoping that one.
