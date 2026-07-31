@@ -16139,3 +16139,38 @@ STANDING: the law "nothing backfilled until a hand spot-check on that genre
 clears 0.80" is now SATISFIED for all three strata. Backfill is authorized.
 Judge-is-author limitation still stands; all 131 judgements are persisted with
 reasons in docs/baselines/GATE_V2_JUDGEMENTS_2026-07-30.jsonl for re-judging.
+
+## BACKFILL COMPLETE (2026-07-30) — 306,311 chunks, 17,144 relations, 0 pod cost
+
+Authorized by spacy_relation_gate_v2 PASS (p=0.8015, Wilson95 [0.7251, 0.8608]).
+Every written row carries engine=spacy_frame_licensed + the gate receipt.
+
+| corpus | chunks | chunks w/ rel | relations | rel/chunk |
+|---|---|---|---|---|
+| ecommerce_meta | 161,108 | 7,732 | 8,666 | 0.0538 |
+| authentic_library_v2 | 60,137 | 2,398 | 2,690 | 0.0447 |
+| cybersecurity_study | 39,885 | 1,432 | 1,578 | 0.0396 |
+| video_gen_schools | 78,891 | 3,001 | 3,382 | 0.0429 |
+| markbuilds_transcripts | 17,825 | 138 | 148 | 0.0083 |
+| cpcs_local (pre-existing) | 617 | 216 | 680 | 1.1021 |
+| **TOTAL** | **358,463** | | **17,144** | **0.0478** |
+
+BEFORE: 357,846 of 362,759 chunks (98.6%) held ZERO relations.
+AFTER : 0 eligible chunks remain. 16,464 relations newly written.
+Cost  : zero pod spend, zero re-extraction, zero LLM calls, zero re-embed.
+        Pure local recompute from text + already-stored span-validated entities.
+
+OPERATIONAL NOTE: the harness killed the long background job twice (at 164k and
+197k chunks). Both kills left a CLEAN state — 0 stamped-but-broken rows each
+time — because the version stamp makes the job idempotent and resumable. Work
+was finished in bounded foreground batches instead. The resumability design paid
+for itself; a non-idempotent backfill would have needed a full purge and restart.
+
+markbuilds_transcripts yields 0.0083/chunk — 5x below the other corpora. That is
+raw timestamped speech with heavy disfluency, not a defect: frame-licensed
+extraction genuinely finds little assertable structure there. Flagged rather
+than tuned, because tuning for it would cost precision everywhere else.
+
+STILL NOT DONE, DELIBERATELY: nothing has been promoted to Neo4j. The relations
+sit in ghost_b_extractions. Graph promotion is a separate step and a separate
+owner decision.
