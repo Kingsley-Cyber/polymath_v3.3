@@ -56,7 +56,13 @@ from services.extraction.spacy_relation_adapter import (  # noqa: E402
 # Bump ONLY when the relation output for identical input would change
 # (extractor logic, ontology, or predicate_synonyms). Chunks stamped with an
 # older version are re-eligible, which is how a ladder rung gets rolled out.
-BACKFILL_VERSION = "r8a.v1.deppath"
+# Bumped 2026-07-30 when the pairing model was rebuilt: the engine is no longer
+# shortest-path dep-path but the frame-licensed extractor, gated at
+# spacy_relation_gate_v2 = 0.8015 [0.725, 0.861]. A stamp naming the wrong
+# engine would misattribute every row written under it.
+BACKFILL_VERSION = "r8a.v2.frame"
+BACKFILL_ENGINE = "spacy_frame_licensed"
+GATE_RECEIPT = "spacy_relation_gate_v2 PASS p=0.8015 wilson95=[0.7251,0.8608]"
 MAX_RELATED = 10
 
 
@@ -166,7 +172,8 @@ def backfill(
                     "relation_backfill": {
                         "version": BACKFILL_VERSION,
                         "at": _now(),
-                        "engine": "spacy_dep_path",
+                        "engine": BACKFILL_ENGINE,
+                        "gate_receipt": GATE_RECEIPT,
                         "n_relations": len(relations),
                         "source": "local_extraction.entities",
                         "pod_cost": 0,
