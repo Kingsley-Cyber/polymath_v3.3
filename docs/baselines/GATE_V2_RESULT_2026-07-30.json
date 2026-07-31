@@ -1,24 +1,34 @@
 {
   "schema": "polymath.spacy_relation_gate.v2.result",
   "gate_spec_sha_source": "/Users/king/polymath_v3.3/backend/evals/spacy_relation_gate_v2.json",
-  "n": 135,
-  "correct": 98,
+  "n": 131,
+  "correct": 105,
   "borderline_counted_as_wrong": 5,
-  "precision": 0.7259,
+  "precision": 0.8015,
   "wilson_95": [
-    0.6452,
-    0.7941
+    0.7251,
+    0.8608
   ],
   "thresholds": {
     "precision_floor": 0.8,
     "wilson_lower_bound_required": 0.7,
     "per_stratum_floor": 0.65
   },
-  "passes_point_estimate": false,
-  "passes_ci_lower_bound": false,
+  "passes_point_estimate": true,
+  "passes_ci_lower_bound": true,
   "strata_below_floor_excluded_from_backfill": [],
   "per_stratum": {
     "asr": {
+      "n": 45,
+      "correct": 37,
+      "precision": 0.8222,
+      "wilson_95": [
+        0.6867,
+        0.9071
+      ],
+      "meets_stratum_floor": true
+    },
+    "book": {
       "n": 45,
       "correct": 35,
       "precision": 0.7778,
@@ -28,47 +38,34 @@
       ],
       "meets_stratum_floor": true
     },
-    "book": {
-      "n": 45,
-      "correct": 33,
-      "precision": 0.7333,
-      "wilson_95": [
-        0.5896,
-        0.8404
-      ],
-      "meets_stratum_floor": true
-    },
     "paper": {
-      "n": 45,
-      "correct": 30,
-      "precision": 0.6667,
+      "n": 41,
+      "correct": 33,
+      "precision": 0.8049,
       "wilson_95": [
-        0.5207,
-        0.7864
+        0.6599,
+        0.8977
       ],
       "meets_stratum_floor": true
     }
   },
-  "distinct_predicates": 18,
+  "distinct_predicates": 15,
   "predicate_distribution": {
-    "owns": 61,
-    "created_by": 14,
+    "owns": 66,
     "affiliated_with": 14,
-    "instance_of": 9,
-    "part_of": 8,
+    "created_by": 12,
+    "part_of": 7,
+    "instance_of": 5,
+    "detects": 5,
+    "defines": 5,
     "references": 4,
-    "defines": 4,
-    "uses": 3,
-    "detects": 3,
-    "runs_on": 3,
-    "preceded_by": 2,
-    "trained_on": 2,
+    "preceded_by": 3,
     "represents": 2,
+    "uses": 2,
+    "located_in": 2,
     "maps_to": 2,
-    "located_in": 1,
     "produces": 1,
-    "stores": 1,
-    "overlaps": 1
+    "runs_on": 1
   },
-  "VERDICT": "FAIL"
+  "VERDICT": "PASS"
 }

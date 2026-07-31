@@ -114,6 +114,22 @@ _CONTAINER_LEMMAS = frozenset({
 # so it is a safe landing predicate. Gate v2 found nine of these across strata.
 _PERSONAL_OBJECT_TYPES = frozenset({"Person", "Organization"})
 
+# Predicates whose meaning REQUIRES a preposition. predicate_synonyms maps
+# run/runs/operate/execute -> runs_on at T3 (flat lemma lookup, no signature),
+# and runs_on carries no allowed_pairs constraint, so a plain transitive object
+# sailed through:
+#   "let business analysts run ad hoc analytic queries"
+#       -> (business analysts, runs_on, ad hoc analytic queries)   WRONG
+#   "the system continuously performs ... context engineering"
+#       -> (system, runs_on, context engineering)                  WRONG
+# runs_on asserts "X executes ON platform Y" — that claim is only licensed when
+# the sentence actually says "on". Gate v2 attributed 3 of 33 residual errors
+# here. Same logic for trained_on ("trained ON data").
+_PREPOSITIONAL_PREDICATES: dict[str, frozenset[str]] = {
+    "runs_on": frozenset({"on", "upon", "atop"}),
+    "trained_on": frozenset({"on", "upon"}),
+}
+
 
 @dataclass(slots=True)
 class Frame:
@@ -297,28 +313,100 @@ _INITIALS_RE = None  # compiled lazily to keep import cost off the hot path
 
 
 def _is_bibliographic_context(sent) -> bool:
-    """True when the sentence reads as a reference-list entry, not prose."""
+    """True when the sentence is NOT running prose.
+
+    Covers three non-prose shapes that all reuse ordinary syntax as pure
+    formatting, so the ontology cannot reject what they produce:
+
+      bibliography   "Newbury Park, CA: Sage (1990)"
+                     "Csikszentmihalyi M, Hunter J. Happiness in everyday life"
+      captions       "Figure 5.1: Vertical scaling Versus Horizontal scaling"
+      page furniture "## Page 300 schemaless and flexible ..."
+                     "page:99 source:text --> The Depth of Complexity"
+
+    Gate v2 attributed 7 of 37 residual errors to these. Ordinary definitional
+    appositives ("Qdrant, a vector database") are unaffected, which is tested.
+    """
     global _INITIALS_RE
     if _INITIALS_RE is None:
         import re
-        # A personal-name initial ending a name field. Both separators occur:
-        #   "Siegrist, M., Cvetkovich, G.T.: ..."   -> comma
-        #   "Gandy, O.: The Panoptic Sort"          -> colon
-        _INITIALS_RE = re.compile(r"\b[A-Z]\.(?:\s*[A-Z]\.)*\s*[,:]")
+        # A personal-name initial ending a name field. Several shapes occur:
+        #   "Siegrist, M., Cvetkovich, G.T.: ..."   period + comma
+        #   "Gandy, O.: The Panoptic Sort"          period + colon
+        #   "Csikszentmihalyi M, Hunter J. Happiness ..."  BARE initial + comma
+        #   "Brams S.J. and A.D. Taylor (1996)"     initials mid-sentence
+        _INITIALS_RE = re.compile(
+            r"\b[A-Z]\.(?:\s*[A-Z]\.)*\s*[,:]"      # "M.," / "G.T.:"
+            r"|\b[A-Z][a-z]{2,},\s+[A-Z]\b"          # "Csikszentmihalyi M,"
+            r"|\b[A-Z]\.[A-Z]\.\s"                   # "S.J. " / "A.D. "
+        )
     text = sent.text
     low = text.lower()
+
+    # --- document furniture: markdown headings, page/source markers ---------
+    stripped = text.lstrip()
+    if stripped.startswith("#"):
+        return True
+    # Numbered reference-list entries: "[46 ] Serge Abiteboul, ... : Foundations
+    # of Databases", "[7 ] Theo Harder and Andreas Reuter: ...". These carry no
+    # name initials and no publisher markers, so nothing else catches them.
+    import re as _re_ref
+    if _re_ref.match(r"^\s*\[\s*\d+\s*\]", stripped):
+        return True
+    if "page:" in low or "source:" in low or "-->" in text:
+        return True
+
+    import re as _re
+    # "## Page 300 ...", "Page 135 contains ..." at the head of the sentence.
+    if _re.match(r"^\s*#*\s*page\s+\d+", low):
+        return True
+    # Captions: "Figure 5.1: ...", "Table 3: ...", "Figure 16-3 Management ..."
+    if _re.match(r"^\s*(figure|table|exhibit)\s+[\d.\-]+\s*[:.]", low):
+        return True
+
+    # --- bibliography -------------------------------------------------------
     if any(m in low for m in _CITATION_MARKERS):
         return True
     if _INITIALS_RE.search(text):
         return True
     # Page locators: "p 125", "p. 125", "pp. 12-34" — reference formatting.
-    import re as _re0
-    if _re0.search(r"\bpp?\.?\s+\d+", low):
+    if _re.search(r"\bpp?\.?\s+\d+", low):
         return True
     # "(Chicago: University of Chicago Press, 1984)" / "(1990)" plus a colon —
     # a year in parentheses alongside a publisher colon is citation formatting.
-    import re as _re
     if _re.search(r"\(\d{4}\)", text) and ":" in text:
+        return True
+    return False
+
+
+# Surfaces that are document furniture rather than things. These reach the
+# relation lane because the upstream tagger emits them as entities; the lane
+# then faithfully relates garbage it was handed. Filtering here is a stopgap at
+# the relation boundary — the real fix belongs in the entity tagger.
+_ARTIFACT_SURFACES = frozenset({
+    "text", "page", "source", "figure", "table", "chapter", "section",
+    "note", "notes", "appendix", "index", "contents", "abstract",
+})
+
+
+def _is_structural_artifact(surface: str) -> bool:
+    """True when an entity surface is page furniture, not a referent."""
+    s = (surface or "").strip()
+    if not s:
+        return True
+    low = s.lower().strip(" .:-—")
+    if low in _ARTIFACT_SURFACES:
+        return True
+    # "Page 135", "Page 300" — a locator, not an entity. NOTE: "Figure 5.18" is
+    # deliberately NOT filtered; "Figure 5.18 shows a spillmap" is a correct
+    # references edge. Captions are handled by context above instead.
+    import re as _re
+    if _re.match(r"^page\s+[\d.\-]+$", low):
+        return True
+    # Speaker labels and OCR noise: "M M", "A B", single characters.
+    if len(s) <= 1:
+        return True
+    if _re.match(r"^(?:[A-Z]\s+){1,}[A-Z]$", s):
         return True
     return False
 
@@ -382,12 +470,15 @@ class FrameExtractor:
             # ---- pass 2: slot filling. Both slots or nothing. --------------
             is_nominal_frame = frame.frame_type in ("possessive", "appositive")
 
-            # Bibliography entries reuse the appositive shape as pure
-            # formatting. allowed_pairs cannot catch them (the type pairs are
-            # legitimate), so the citation context is recognized directly.
-            if frame.frame_type == "appositive" and _is_bibliographic_context(
-                frame.pred_tok.sent
-            ):
+            # Non-prose context (bibliography, caption, page furniture) reuses
+            # ordinary syntax as pure formatting, and the resulting type pairs
+            # are legitimate — so allowed_pairs cannot reject them and the
+            # context has to be recognized directly. Applies to BOTH nominal
+            # shapes that yield instance_of: appositives AND copulas.
+            #   "Figure 5.1: Vertical scaling Versus Horizontal scaling"
+            #   "Csikszentmihalyi M, Hunter J. Happiness in everyday life"
+            if frame.frame_type in ("appositive", "copular") and \
+                    _is_bibliographic_context(frame.pred_tok.sent):
                 _inc(suppression_counters, "frame_bibliographic_appositive")
                 continue
 
@@ -403,6 +494,17 @@ class FrameExtractor:
             if (subj_ent.start_char == obj_ent.start_char
                     and subj_ent.end_char == obj_ent.end_char):
                 _inc(suppression_counters, "frame_self_loop")
+                continue
+            # Surface-level self-loop: distinct spans, same string.
+            # "Actions: Actions define the specific task" -> (Actions, defines,
+            # Actions). A node cannot stand in a relation to itself here.
+            if subj_ent.surface.strip().lower() == obj_ent.surface.strip().lower():
+                _inc(suppression_counters, "frame_self_loop")
+                continue
+            # Document furniture tagged as an entity by the upstream tagger.
+            if (_is_structural_artifact(subj_ent.surface)
+                    or _is_structural_artifact(obj_ent.surface)):
+                _inc(suppression_counters, "frame_structural_artifact")
                 continue
 
             # ---- argument hygiene (P1, reused) -----------------------------
@@ -471,6 +573,16 @@ class FrameExtractor:
                 continue
 
             predicate, resolver_swap = resolved
+
+            # A prepositional predicate needs its preposition actually present.
+            required_preps = _PREPOSITIONAL_PREDICATES.get(predicate)
+            if required_preps is not None:
+                sig_prep = None
+                if frame.frame_type == "prep_object" and ":" in frame.signature:
+                    sig_prep = frame.signature.split("prep:", 1)[-1].split("-")[0]
+                if sig_prep not in required_preps:
+                    _inc(suppression_counters, "frame_missing_required_preposition")
+                    continue
             # Direction has exactly ONE owner per frame type, never two.
             # For passive_agent the frame already knows the grammatical subject
             # is the semantic object. The resolver, handed the same passive

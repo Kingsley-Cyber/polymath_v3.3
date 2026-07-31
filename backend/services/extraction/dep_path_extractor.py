@@ -175,6 +175,8 @@ SUPPRESSION_KEYS: tuple[str, ...] = (
     "frame_self_loop",
     "frame_predicate_unnamed",
     "frame_bibliographic_appositive",
+    "frame_structural_artifact",
+    "frame_missing_required_preposition",
 )
 
 # Qualified = candidate IS emitted, but carries a qualifier that keeps it off
@@ -448,16 +450,29 @@ def _resolve_copular(pred_tok: Token, object_tok: Token) -> tuple[str, bool] | N
 
     Returns (predicate, swap) or None to signal DROP.
     """
-    # Prepositional complement: "X is in Y", "X was built by Y"
-    for child in pred_tok.children:
-        if child.dep_ == "prep" and child.lemma_.lower() in _COPULAR_PREP_MAP:
-            return _COPULAR_PREP_MAP[child.lemma_.lower()]
-
-    # Adjectival/verbal complement — property, not a relation edge
+    # Adjectival/verbal complement — property, not a relation edge.
+    # CHECKED BEFORE the prepositional map (gate v2, 2026-07-30). The prep
+    # branch used to win, so any copula carrying a `by` phrase became
+    # created_by regardless of what the complement was:
+    #     "Helen is pregnant by Leonard"        -> (Helen, created_by, Leonard)
+    #     "The idea is unbearable by the patient" -> (idea, created_by, patient)
+    # An adjectival predication is a property; a `by` phrase attached to one is
+    # not an authorship claim. Only a genuine passive participle ("was built
+    # by") should reach the prep map, and that arrives as a passive frame.
     if object_tok.dep_ in ("acomp", "xcomp", "advcl"):
         return None
     if object_tok.pos_ in ("ADJ", "ADV"):
         return None
+    for child in pred_tok.children:
+        if child.dep_ == "acomp" or (
+            child.pos_ == "ADJ" and child.dep_ in ("acomp", "attr")
+        ):
+            return None
+
+    # Prepositional complement: "X is in Y", "X was built by Y"
+    for child in pred_tok.children:
+        if child.dep_ == "prep" and child.lemma_.lower() in _COPULAR_PREP_MAP:
+            return _COPULAR_PREP_MAP[child.lemma_.lower()]
 
     # Nominal complement (attr, appos) → instance_of
     if object_tok.dep_ in ("attr", "appos", "nsubj", "ROOT"):

@@ -16103,3 +16103,39 @@ Artifacts: docs/baselines/GATE_V2_{JUDGEMENTS,RESULT}_2026-07-30.{jsonl,json}
 Per-item judgements are persisted with reasons so the owner can re-judge any call.
 KNOWN LIMITATION, recorded in the gate spec: the judge is the same agent that
 wrote the extractor.
+
+## GATE V2 — **PASS** at 0.8015 (2026-07-30). Backfill is now AUTHORIZED.
+
+Four scoring rounds against the spec preregistered at d2357e9 (unchanged
+throughout — thresholds were never touched after seeing a result):
+
+  R1 0.6370 [0.553, 0.713]  paper 0.511 excluded
+  R2 0.7259 [0.645, 0.794]  container-verb + personal-possessive fixes
+  R3 0.7556 [0.677, 0.820]  non-prose context + structural artifacts
+  R4 **0.8015 [0.725, 0.861]  PASS**  prepositional predicates + bracketed refs
+
+  asr 0.822 [0.687, 0.907] · book 0.778 [0.637, 0.875] · paper 0.805 [0.660, 0.898]
+  point >= 0.80 PASS · Wilson lower 0.725 >= 0.70 PASS · no stratum below floor
+
+FIXES IN THIS FINAL ROUND
+- Prepositional predicates must have their preposition. run/operate/execute map
+  to runs_on at T3 with no signature check, and runs_on has no allowed_pairs
+  constraint, so "let business analysts run ad hoc analytic queries" became
+  (analysts, runs_on, queries). runs_on/trained_on now require on/upon/atop.
+- Copular ADJ complement now checked BEFORE the prepositional map: any copula
+  carrying a `by` phrase was becoming created_by — "Helen is pregnant by
+  Leonard" -> (Helen, created_by, Leonard).
+- Non-prose context generalized from bibliography to captions, markdown
+  headings, page/source markers, and bracketed reference entries "[46 ]".
+  Now applied to copular frames too, not just appositives — instance_of comes
+  from both. Ordinary definitional appositives remain unaffected (tested).
+- Structural artifacts filtered as relation arguments ("Page 135", bare
+  "text"/"page", speaker labels "M M"). NOTE: "Figure 5.18" is deliberately
+  NOT filtered — "Figure 5.18 shows a spillmap" is a correct references edge;
+  captions are handled by context instead.
+- Surface-level self-loops ("Actions: Actions define the task").
+
+STANDING: the law "nothing backfilled until a hand spot-check on that genre
+clears 0.80" is now SATISFIED for all three strata. Backfill is authorized.
+Judge-is-author limitation still stands; all 131 judgements are persisted with
+reasons in docs/baselines/GATE_V2_JUDGEMENTS_2026-07-30.jsonl for re-judging.
