@@ -410,7 +410,22 @@ _CITATION_MARKERS = (
 _INITIALS_RE = None  # compiled lazily to keep import cost off the hot path
 
 
-def _is_bibliographic_context(sent) -> bool:
+class _LineProxy:
+    """Minimal stand-in for a spaCy Span exposing only .text/.start_char.
+
+    `_is_bibliographic_context` reads nothing else, and constructing a real
+    Span for a sub-line slice would require char->token alignment that buys
+    nothing here.
+    """
+
+    __slots__ = ("text", "start_char")
+
+    def __init__(self, text: str, start_char: int) -> None:
+        self.text = text
+        self.start_char = start_char
+
+
+def _is_bibliographic_context(sent, *, at_char: int | None = None) -> bool:
     """True when the sentence is NOT running prose.
 
     Covers three non-prose shapes that all reuse ordinary syntax as pure
@@ -424,7 +439,33 @@ def _is_bibliographic_context(sent) -> bool:
 
     Gate v2 attributed 7 of 37 residual errors to these. Ordinary definitional
     appositives ("Qdrant, a vector database") are unaffected, which is tested.
+
+    Pass `at_char` (an absolute character offset into the doc) to judge only the
+    LINE containing that offset instead of the whole sentence. This matters:
+    spaCy does not end a sentence at a markdown heading, because a heading has
+    no terminal punctuation. So
+
+        "# Retrieval Architecture Overview\n\nThe retrieval service depends on
+         Qdrant for vector search and uses MongoDB for lexical recall."
+
+    arrives as ONE sentence, and the `startswith("#")` rule below condemned the
+    perfectly ordinary prose that followed the heading. MEASURED 2026-07-31 on
+    GLiNER-Relex output: 159 of 757 relations (21%) were killed this way,
+    including (retrieval service, depends_on, Qdrant) and (Space, includes,
+    direction) — both correct. The frame extractor had the same bug; it simply
+    emitted too little for anyone to notice.
     """
+    if at_char is not None:
+        base = sent.start_char
+        rel = at_char - base
+        body = sent.text
+        if 0 <= rel <= len(body):
+            start = body.rfind("\n", 0, rel) + 1
+            end = body.find("\n", rel)
+            line = body[start:end if end != -1 else len(body)].strip()
+            if line:
+                sent = _LineProxy(line, base + start)
+
     global _INITIALS_RE
     if _INITIALS_RE is None:
         import re
@@ -620,7 +661,8 @@ class FrameExtractor:
             #   "Figure 5.1: Vertical scaling Versus Horizontal scaling"
             #   "Csikszentmihalyi M, Hunter J. Happiness in everyday life"
             if frame.frame_type in ("appositive", "copular") and \
-                    _is_bibliographic_context(frame.pred_tok.sent):
+                    _is_bibliographic_context(frame.pred_tok.sent,
+                                              at_char=frame.pred_tok.idx):
                 _die("frame_bibliographic_appositive")
                 continue
 
