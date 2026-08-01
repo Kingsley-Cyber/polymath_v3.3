@@ -16432,3 +16432,45 @@ schema.
 
 REMAINING (owner): bake the pod image with POLYMATH_EXTRACTION_VOCAB=v2, NEW
 digest, 1-slice canary, then re-run gliner_entity_gate_v1.
+
+## RECALL MEASURED (2026-07-31) — the blind spot, closed. RELATION RECALL 0.067.
+
+Gold authored BLIND on 10 random chunks (seed recall_gold_v1_2026_07_31),
+committed at 82343fa BEFORE any extraction ran. 37 gold entities, 15 gold
+relations.
+
+  ENTITY RECALL   (after quality gate) : 19/37 = 0.514
+  ENTITY RECALL   (raw, pre-gate)      : 25/37 = 0.676
+  RELATION RECALL                      :  1/15 = 0.067
+
+RELATION RECALL IS 0.067. That is the headline and it reframes the whole
+program. Every relation number reported this session was PRECISION. The lane
+finds roughly one in fifteen relations a careful reader would record.
+
+Precision-only reporting made a silent lane look healthy: 0.75-0.80 precision on
+0.0724 relations/chunk is not a working extractor, it is a very careful one
+that almost never speaks. I measured the wrong axis all session.
+
+A HARNESS BUG NEARLY PUBLISHED A FAKE 0.000. The first run scored 0/37 and
+0/15. The tell was ent_raw = 0, impossible for chunks selected BECAUSE they had
+entities. Cause: gold stored truncated 20-char chunk_ids, and the scorer prefix-
+matched, hitting a DIFFERENT chunk of the same document (_0000 vs _0702). Fixed
+to exact index-based mapping. Worth recording: a shockingly clean number is
+usually a bug.
+
+WHERE THE ENTITY LOSS COMES FROM (18 of 37 missed)
+- The quality gate costs 6 (25 raw -> 19 gated). That is the precision/recall
+  trade, now quantified rather than assumed.
+- 12 were never emitted by GLiNER at all: multi-word names and domain terms.
+
+WHERE THE RELATION LOSS COMES FROM (14 of 15 missed)
+- Chunk 6 (bibliography, 4 gold relations): suppressed by design. The
+  bibliographic guard added for precision costs exactly this. Now visible.
+- Chunk 9 (4 gold relations): the Predicate Literal has no reduces/mitigates
+  value, so "a Barney REDUCES camera noise" cannot be expressed at all.
+- Chunks 2,3,7,10: single asserted relations the frame model did not license.
+- The deferred rungs R1-R7 were all RECALL work. Parking them was defensible at
+  0.10-0.15 precision. At 0.067 recall it is now the binding constraint.
+
+Artifacts: docs/baselines/RECALL_GOLD_V1_2026-07-31.json,
+backend/scripts/recall_score.py
