@@ -1,0 +1,363 @@
+==========================================================================
+GOLD RELATION STAGE TRACE — 36 gold relations, 30 chunks
+matcher: FUZZY (+ratio>0.85)
+==========================================================================
+
+HARNESS INTEGRITY (stage 0) — checked BEFORE anything is blamed on code
+  1/36 gold relations name a surface not present in the chunk.
+  These are GOLD/HARNESS defects, EXCLUDED from the attribution below.
+  Scoreable gold: 35.
+    ch16: lack of awareness -causes-> reduced trial rate — absent: ['reduced trial rate']
+
+CANDIDATE GENERATION — like-for-like, all at the generator stage (n=35)
+  mine          8/35 = 0.229   ###########
+  textacy       2/35 = 0.057   ##
+  native_svo    3/35 = 0.086   ####
+  any           8/35 = 0.229   ###########
+  `any` is the CEILING a perfect filter could reach with today's
+  generators. Nothing downstream can exceed it.
+  NOTE: a generator 'hit' means the raw TOKEN pair was proposed. It
+  does NOT mean a usable candidate existed — the slots still have to
+  be filled by entities. Treating the two as the same is exactly the
+  conflation that produced the earlier '87% filter loss' claim.
+
+WHERE THE GOLD DIES — last stage reached
+   27   77.1%  text_present   (no generator proposed the pair)
+    4   11.4%  generated   (proposed, but the ENTITY layer missed an endpoint)
+    2    5.7%  frame_bibliographic_appositive
+    1    2.9%  adapter_allowed_pairs_rejected
+    1    2.9%  frame_predicate_unnamed
+    0    0.0%  emitted  <-- END-TO-END RECALL
+
+ATTRIBUTION — which layer owns the loss
+   27/35  GENERATOR never proposed the pair
+    4/35  ENTITY layer missed an endpoint (pair proposed, slots unfillable)
+    4/35  FILTER killed a real candidate
+    0/35  survived
+
+  Only 4 of 35 gold relations ever REACHED
+  the filter. A filter cannot be blamed for what never arrives.
+
+==========================================================================
+SIDE BY SIDE — 31 relations the pipeline never got a candidate for
+==========================================================================
+
+ch01  GOLD: CAPTCHA -detects-> spam
+      SENTENCE: Companies often use CAPTCHA fields to reduce spam by detecting whether the form filler is a real person.
+      GLiNER entities here: ['form', 'CAPTCHA fields', 'form', 'Companies', 'CAPTCHA fields', 'form', 'real person', 'fields']
+      MY frames (2): ['Companies -use(active_transitive)-> fields', 'filler -is(copular)-> person']
+      textacy SVO (1): ['Companies -use-> fields']
+      -> died at: text_present
+
+ch02  GOLD: Michael Boyd -affiliated_with-> Royal Shakespeare Company
+      SENTENCE: ## OEBPS/ritc_9781119685401_epub3_022_r1.xhtml
+
+Michael Boyd
+
+Stage Left,
+
+Stage Right –
+
+The Heavens  & Hell
+
+Embodied Meaning  &
+
+Memory in Performance
+
+Former Artistic Director of the Royal Shakespeare
+
+Company  Micha
+      GLiNER entities here: ['Michael Boyd', 'Stage Left', 'Stage Right', 'Royal Shakespeare\n\nCompany', 'Michael Boyd', 'stage']
+      MY frames (4): ['Right -Right(appositive)-> Heavens', 'Performance -Performance(appositive)-> Director', 'Left -proposes(active_transitive)-> analogy', 'Right -proposes(active_transitive)-> analogy']
+      textacy SVO (2): ['Left -proposes-> analogy', 'Right -proposes-> analogy']
+      -> died at: text_present
+
+ch03  GOLD: organizations -owns-> security red team
+      SENTENCE: Many organizations have a security red team that comes up with new
+attacks so that they can make their systems safe against them.
+      GLiNER entities here: ['Many organizations', 'systems', 'system', 'system']
+      MY frames (2): ['organizations -have(active_transitive)-> team', 'that -comes(prep_object)-> attacks']
+      textacy SVO (1): ['organizations -have-> team']
+      -> died at: generated
+
+ch06  GOLD: Gone Home -created_by-> S. Gaynor
+      SENTENCE: Gaynor, S. (2013) Gone Home [video game].
+      GLiNER entities here: ['Gaynor, S.', 'Gone Home']
+      MY frames (1): ['S. -S.(appositive)-> 2013']
+      textacy SVO (0): (none)
+      -> died at: text_present
+
+ch06  GOLD: Gone Home -created_by-> The Fullbright Company
+      SENTENCE: (spans sentences)
+      GLiNER entities here: (none)
+      MY frames (10): ['Ithaca -Ithaca(appositive)-> Press', 'G. -G.(appositive)-> 1999', 'Narratology -Narratology(appositive)-> Similitudes', 'Between -Between(appositive)-> Video)Games']
+      textacy SVO (0): (none)
+      -> died at: text_present
+
+ch06  GOLD: Narrative Discourse -created_by-> G. Genette
+      SENTENCE: Frasca, G. (1999) Ludology Meets Narratology: Similitudes and Differences Between (Video)Games and Narrative.
+      GLiNER entities here: ['Frasca, G.', 'Narratology']
+      MY frames (3): ['G. -G.(appositive)-> 1999', 'Narratology -Narratology(appositive)-> Similitudes', 'Between -Between(appositive)-> Video)Games']
+      textacy SVO (0): (none)
+      -> died at: generated
+
+ch06  GOLD: Ludology Meets Narratology -created_by-> G. Frasca
+      SENTENCE: Frasca, G. (1999) Ludology Meets Narratology: Similitudes and Differences Between (Video)Games and Narrative.
+      GLiNER entities here: ['Frasca, G.', 'Narratology']
+      MY frames (3): ['G. -G.(appositive)-> 1999', 'Narratology -Narratology(appositive)-> Similitudes', 'Between -Between(appositive)-> Video)Games']
+      textacy SVO (0): (none)
+      -> died at: text_present
+
+ch07  GOLD: general manager -located_in-> Quebec
+      SENTENCE: **Example**
+
+The general manager of a hotel in Quebec institutes a new system of customer satisfaction monitoring (see Figure 2.5).
+      GLiNER entities here: ['general manager', 'hotel', 'Quebec', 'new system of customer satisfaction monitoring', 'Figure 2.5']
+      MY frames (1): ['manager -institutes(active_transitive)-> system']
+      textacy SVO (1): ['manager -institutes-> system']
+      -> died at: text_present
+
+ch09  GOLD: Barney -detects-> camera noise
+      SENTENCE: In addition, the camera cover (the Barney) we use to reduce camera noise has to be taken off; the camera has to be opened; and then the film has to be threaded through all those little gears.
+      GLiNER entities here: ['I', 'Al', 'Al', 'I', 'We', 'I', 'we']
+      MY frames (2): ['cover -cover(appositive)-> Barney', 'we -use(prep_object)-> addition']
+      textacy SVO (4): ['we -use-> reduce', 'we -has-> taken', 'camera -has-> opened', 'film -has-> threaded']
+      -> died at: text_present
+
+ch09  GOLD: camera crew -part_of-> operator
+      SENTENCE: And I had the second assistant cameraman (there are three men on a camera crew: operator, focus puller, and second assistant) hold an extra film magazine in his lap, in case we needed it.
+      GLiNER entities here: ['I', 'I', 'We', 'I', 'second assistant cameraman', 'operator', 'focus puller', 'second assistant', 'we']
+      MY frames (5): ['men -men(appositive)-> operator', 'cameraman -hold(active_transitive)-> magazine', 'cameraman -hold(prep_object)-> lap', 'cameraman -hold(prep_object)-> case']
+      textacy SVO (2): ['cameraman -hold-> magazine', 'we -needed-> it']
+      -> died at: text_present
+
+ch09  GOLD: camera crew -part_of-> focus puller
+      SENTENCE: And I had the second assistant cameraman (there are three men on a camera crew: operator, focus puller, and second assistant) hold an extra film magazine in his lap, in case we needed it.
+      GLiNER entities here: ['I', 'I', 'We', 'I', 'second assistant cameraman', 'operator', 'focus puller', 'second assistant', 'we']
+      MY frames (5): ['men -men(appositive)-> operator', 'cameraman -hold(active_transitive)-> magazine', 'cameraman -hold(prep_object)-> lap', 'cameraman -hold(prep_object)-> case']
+      textacy SVO (2): ['cameraman -hold-> magazine', 'we -needed-> it']
+      -> died at: text_present
+
+ch09  GOLD: camera crew -part_of-> second assistant
+      SENTENCE: And I had the second assistant cameraman (there are three men on a camera crew: operator, focus puller, and second assistant) hold an extra film magazine in his lap, in case we needed it.
+      GLiNER entities here: ['I', 'I', 'We', 'I', 'second assistant cameraman', 'operator', 'focus puller', 'second assistant', 'we']
+      MY frames (5): ['men -men(appositive)-> operator', 'cameraman -hold(active_transitive)-> magazine', 'cameraman -hold(prep_object)-> lap', 'cameraman -hold(prep_object)-> case']
+      textacy SVO (2): ['cameraman -hold-> magazine', 'we -needed-> it']
+      -> died at: text_present
+
+ch10  GOLD: prediction-based lead -instance_of-> Proclamation Lead
+      SENTENCE: As we said about Proclamation Leads in general, in a prediction-based lead, once an emotionally-compelling statement (in the form of a prediction) has hooked the reader, the copy can then start using some of the techniqu
+      GLiNER entities here: ['prediction-based lead', 'emotionally-compelling statement', 'reader', 'copy', 'techniques', 'reader']
+      MY frames (5): ['we -said(prep_object)-> Leads', 'statement -hooked(active_transitive)-> reader', 'statement -hooked(prep_object)-> lead', 'statement -hooked(prep_object)-> form']
+      textacy SVO (2): ['statement -hooked-> reader', 'copy -start-> using']
+      -> died at: text_present
+
+ch12  GOLD: Shadow Cities -uses-> soft movement mechanic
+      SENTENCE: Like in *Parallel Kingdom*, these functions enable the soft movement mechanic, but the strong social aspects of *Shadow Cities* are also in good accord with the territorial game mechanics.
+      GLiNER entities here: ['Shadow Cities', 'soft movement mechanic', 'Shadow Cities', 'cities']
+      MY frames (2): ['functions -enable(active_transitive)-> mechanic', 'aspects -are(prep_object)-> accord']
+      textacy SVO (1): ['functions -enable-> mechanic']
+      -> died at: text_present
+
+ch12  GOLD: Parallel Kingdom -uses-> soft movement mechanic
+      SENTENCE: Like in *Parallel Kingdom*, these functions enable the soft movement mechanic, but the strong social aspects of *Shadow Cities* are also in good accord with the territorial game mechanics.
+      GLiNER entities here: ['Shadow Cities', 'soft movement mechanic', 'Shadow Cities', 'cities']
+      MY frames (2): ['functions -enable(active_transitive)-> mechanic', 'aspects -are(prep_object)-> accord']
+      textacy SVO (1): ['functions -enable-> mechanic']
+      -> died at: text_present
+
+ch15  GOLD: A Twentieth Century Memorial -created_by-> Michael Sandle
+      SENTENCE: ## OEBPS/ritc_9781119685401_epub3_130_r1.xhtml
+
+130
+
+Michael Sandle,  ATwentieth Century Memorial,  1978
+
+The 20th century was characterised by two World Wars and something
+
+like 200 conflicts.
+      GLiNER entities here: ['OEBPS', 'Michael Sandle', '20th century', 'Michael Sandle']
+      MY frames (3): ['Sandle -Sandle(appositive)-> Memorial', 'Sandle -characterised(passive_agent)-> Wars', 'century -characterised(passive_agent)-> Wars']
+      textacy SVO (4): ['Sandle -characterised-> Wars', 'Sandle -characterised-> something', 'century -characterised-> Wars', 'century -characterised-> something']
+      -> died at: generated
+
+ch15  GOLD: Ludlow Castle -located_in-> Shropshire
+      SENTENCE: Here photographed in the Norman chapel of Ludlow Castle
+
+in Shropshire.
+      GLiNER entities here: ['Norman chapel', 'Ludlow Castle', 'Shropshire']
+      MY frames (0): (none)
+      textacy SVO (0): (none)
+      -> died at: text_present
+
+ch18  GOLD: cold lead -instance_of-> lead
+      SENTENCE: Two main classifications of leads include cold leads and warm leads.
+      GLiNER entities here: ['leads', 'leads']
+      MY frames (2): ['classifications -include(active_transitive)-> leads', 'classifications -include(active_transitive)-> leads']
+      textacy SVO (2): ['classifications -include-> leads', 'classifications -include-> leads']
+      -> died at: text_present
+
+ch18  GOLD: warm lead -instance_of-> lead
+      SENTENCE: Two main classifications of leads include cold leads and warm leads.
+      GLiNER entities here: ['leads', 'leads']
+      MY frames (2): ['classifications -include(active_transitive)-> leads', 'classifications -include(active_transitive)-> leads']
+      textacy SVO (2): ['classifications -include-> leads', 'classifications -include-> leads']
+      -> died at: text_present
+
+ch19  GOLD: Heller -works_for-> Israeli army
+      SENTENCE: Before entering the field of psychology, Heller worked as a tour guide
+for American, British, Australian, and South African volunteers in the
+Israeli army as part of her compulsory army service.
+      GLiNER entities here: ['Heller', 'Australian', 'South African', 'volunteers', 'Israeli army']
+      MY frames (2): ['Heller -worked(prep_object)-> guide', 'Heller -worked(prep_object)-> part']
+      textacy SVO (0): (none)
+      -> died at: text_present
+
+ch19  GOLD: Heller -works_for-> Israeli Knesset
+      SENTENCE: Before entering the field of psychology, Heller worked as a tour guide
+for American, British, Australian, and South African volunteers in the
+Israeli army as part of her compulsory army service.
+      GLiNER entities here: ['Heller', 'Australian', 'South African', 'volunteers', 'Israeli army']
+      MY frames (2): ['Heller -worked(prep_object)-> guide', 'Heller -worked(prep_object)-> part']
+      textacy SVO (0): (none)
+      -> died at: text_present
+
+ch20  GOLD: DevOps -derived_from-> Agile
+      SENTENCE: DevOps: DevOps is a continuation of the Agile framework
+that features full collaboration among the development and
+operations teams.
+      GLiNER entities here: ['Agile', 'Agile', 'develop', 'DevOps', 'DevOps', 'Agile']
+      MY frames (3): ['DevOps -is(copular)-> continuation', 'that -features(active_transitive)-> collaboration', 'that -features(prep_object)-> teams']
+      textacy SVO (1): ['that -features-> collaboration']
+      -> died at: text_present
+
+ch21  GOLD: percent good value -synonym_of-> reservation prices
+      SENTENCE: When it is not possible or convenient to ask customers about their reservation prices, percent good value can provide a substitute for that metric.
+      GLiNER entities here: ['Reservation prices', 'customers', 'reservation prices', 'percent good value']
+      MY frames (1): ['value -provide(active_transitive)-> substitute']
+      textacy SVO (2): ['it -is-> ask', 'value -provide-> substitute']
+      -> died at: text_present
+
+ch22  GOLD: Viking -part_of-> Penguin Random House LLC
+      SENTENCE: <!-- section:9780399563744_EPUB-1.xhtml -->
+
+VIKING
+
+An imprint of Penguin Random House LLC
+
+375 Hudson Street
+
+New York, New York 10014
+
+penguin.com
+
+Copyright © 2017 by Mitchell Prinstein
+
+Penguin supports copyright.
+      GLiNER entities here: ['VIKING', 'Penguin Random House LLC', '375 Hudson Street', 'New York', 'New York', 'penguin', 'Copyright', 'Mitchell Prinstein', 'Penguin', 'copyright', 'Copyright', 'Penguin']
+      MY frames (3): ['LLC -LLC(appositive)-> York', 'penguin.com -penguin.com(appositive)-> ©', 'section:9780399563744_EPUB-1.xhtml -supports(active_transitive)-> copyright']
+      textacy SVO (2): ['section:9780399563744_EPUB-1.xhtml -supports-> copyright', 'penguin.com -supports-> copyright']
+      -> died at: text_present
+
+ch23  GOLD: executive dysfunction -part_of-> ADHD
+      SENTENCE: Again, these are the sorts of endeavors that executive dysfunction makes more difficult for persons with ADHD.
+      GLiNER entities here: ['ADHD']
+      MY frames (2): ['these -are(copular)-> sorts', 'dysfunction -makes(prep_object)-> persons']
+      textacy SVO (0): (none)
+      -> died at: text_present
+
+ch25  GOLD: LAMA -created_by-> Meta
+      SENTENCE: Introduced by Meta's AI lab in 2019, the LAMA
+(Language Model Analysis) benchmark ([Petroni et al.,
+2019]( probes for the relational
+knowledge present in the training data.
+      GLiNER entities here: ['Meta', 'AI lab', '2019', '2019', 'relational\nknowledge', 'Y', 'Y']
+      MY frames (5): ['Meta -lab(possessive)-> lab', 'LAMA -LAMA(appositive)-> Analysis', 'benchmark -benchmark(appositive)-> al', '. -.(appositive)-> 2019']
+      textacy SVO (0): (none)
+      -> died at: text_present
+
+ch25  GOLD: LAMA -detects-> relational knowledge
+      SENTENCE: Introduced by Meta's AI lab in 2019, the LAMA
+(Language Model Analysis) benchmark ([Petroni et al.,
+2019]( probes for the relational
+knowledge present in the training data.
+      GLiNER entities here: ['Meta', 'AI lab', '2019', '2019', 'relational\nknowledge', 'Y', 'Y']
+      MY frames (5): ['Meta -lab(possessive)-> lab', 'LAMA -LAMA(appositive)-> Analysis', 'benchmark -benchmark(appositive)-> al', '. -.(appositive)-> 2019']
+      textacy SVO (0): (none)
+      -> died at: text_present
+
+ch27  GOLD: A Christmas Story -created_by-> Jean Shepherd
+      SENTENCE: A CHRISTMAS STORY
+
+(screenplay by Jean Shepherd & Leigh Brown & Bob Clark, 1983)
+      GLiNER entities here: ['A CHRISTMAS STORY', 'Jean Shepherd', 'Leigh Brown', 'Jean Shepherd', 'Jean Shepherd']
+      MY frames (2): ['STORY -STORY(appositive)-> screenplay', 'Shepherd -Shepherd(appositive)-> 1983']
+      textacy SVO (0): (none)
+      -> died at: text_present
+
+ch27  GOLD: A Christmas Story -created_by-> Leigh Brown
+      SENTENCE: A CHRISTMAS STORY
+
+(screenplay by Jean Shepherd & Leigh Brown & Bob Clark, 1983)
+      GLiNER entities here: ['A CHRISTMAS STORY', 'Jean Shepherd', 'Leigh Brown', 'Jean Shepherd', 'Jean Shepherd']
+      MY frames (2): ['STORY -STORY(appositive)-> screenplay', 'Shepherd -Shepherd(appositive)-> 1983']
+      textacy SVO (0): (none)
+      -> died at: text_present
+
+ch27  GOLD: A Christmas Story -created_by-> Bob Clark
+      SENTENCE: A CHRISTMAS STORY
+
+(screenplay by Jean Shepherd & Leigh Brown & Bob Clark, 1983)
+      GLiNER entities here: ['A CHRISTMAS STORY', 'Jean Shepherd', 'Leigh Brown', 'Jean Shepherd', 'Jean Shepherd']
+      MY frames (2): ['STORY -STORY(appositive)-> screenplay', 'Shepherd -Shepherd(appositive)-> 1983']
+      textacy SVO (0): (none)
+      -> died at: text_present
+
+ch27  GOLD: In God We Trust, All Others Pay Cash -created_by-> Jean Shepherd
+      SENTENCE: THE GREAT AMERICAN FOURTH OF JULY AND OTHER DISASTERS
+
+(novel In God We Trust, All Others Pay Cash by Jean Shepherd, screenplay by Jean Shepherd, 1982)
+      GLiNER entities here: ['Jean Shepherd', 'Jean Shepherd', 'Jean Shepherd']
+      MY frames (7): ['AMERICAN -AMERICAN(appositive)-> FOURTH', 'AMERICAN -AMERICAN(appositive)-> novel', 'AMERICAN -AMERICAN(appositive)-> Trust', 'Others -Pay(active_transitive)-> Cash']
+      textacy SVO (2): ['Others -Pay-> Cash', 'Others -Pay-> screenplay']
+      -> died at: generated
+
+ ch  gold relation                                     stage                              M S T
+  1  CAPTCHA -detects-> spam                           text_present                       - - -
+  1  companies -uses-> CAPTCHA                         adapter_allowed_pairs_rejected     M S T
+  2  Michael Boyd -affiliated_with-> Royal Shakespear  text_present                       - - -
+  3  Microsoft -produces-> write-up on red teaming     frame_predicate_unnamed            M S -
+  3  organizations -owns-> security red team           generated                          M S T
+  6  Gone Home -created_by-> S. Gaynor                 text_present                       - - -
+  6  Gone Home -created_by-> The Fullbright Company    text_present                       - - -
+  6  Narrative Discourse -created_by-> G. Genette      generated                          M - -
+  6  Ludology Meets Narratology -created_by-> G. Fras  text_present                       - - -
+  7  general manager -located_in-> Quebec              text_present                       - - -
+  9  Barney -detects-> camera noise                    text_present                       - - -
+  9  camera crew -part_of-> operator                   text_present                       - - -
+  9  camera crew -part_of-> focus puller               text_present                       - - -
+  9  camera crew -part_of-> second assistant           text_present                       - - -
+ 10  prediction-based lead -instance_of-> Proclamatio  text_present                       - - -
+ 12  Shadow Cities -uses-> soft movement mechanic      text_present                       - - -
+ 12  Parallel Kingdom -uses-> soft movement mechanic   text_present                       - - -
+ 15  A Twentieth Century Memorial -created_by-> Micha  generated                          M - -
+ 15  A Mighty Blow for Freedom -created_by-> Michael   frame_bibliographic_appositive     M - -
+ 15  Ludlow Castle -located_in-> Shropshire            text_present                       - - -
+ 16  lack of awareness -causes-> reduced trial rate    ABSENT_FROM_TEXT                   - - -
+ 18  cold lead -instance_of-> lead                     text_present                       - - -
+ 18  warm lead -instance_of-> lead                     text_present                       - - -
+ 19  Heller -works_for-> Israeli army                  text_present                       - - -
+ 19  Heller -works_for-> Israeli Knesset               text_present                       - - -
+ 20  DevOps -derived_from-> Agile                      text_present                       - - -
+ 21  percent good value -synonym_of-> reservation pri  text_present                       - - -
+ 22  Viking -part_of-> Penguin Random House LLC        text_present                       - - -
+ 22  Penguin Random House LLC -located_in-> New York   frame_bibliographic_appositive     M - -
+ 23  executive dysfunction -part_of-> ADHD             text_present                       - - -
+ 25  LAMA -created_by-> Meta                           text_present                       - - -
+ 25  LAMA -detects-> relational knowledge              text_present                       - - -
+ 27  A Christmas Story -created_by-> Jean Shepherd     text_present                       - - -
+ 27  A Christmas Story -created_by-> Leigh Brown       text_present                       - - -
+ 27  A Christmas Story -created_by-> Bob Clark         text_present                       - - -
+ 27  In God We Trust, All Others Pay Cash -created_by  generated                          M - -
+
+wrote /tmp/stage_trace.json

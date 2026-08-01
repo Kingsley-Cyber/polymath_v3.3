@@ -147,6 +147,69 @@ class Frame:
     confidence: float = 1.0
 
 
+def _conjuncts(tok: Token, *, max_depth: int = 6) -> list[Token]:
+    """Coordination siblings of a slot token: A in "A, B and C" -> [B, C].
+
+    R3. MEASURED: relation recall is 0.028, and coordination is the single
+    largest identifiable cause. The frame model binds only the FIRST conjunct
+    because only it carries the dobj/pobj/agent label -- the rest hang off it
+    as `conj`. So "Shadow Cities uses chat, friending, and mechanics" yields one
+    relation of three, and "written by Shepherd, Brown and Clark" yields one
+    author of three.
+
+    This is NOT the old dep-path conjunct guard being removed. That guard
+    existed because shortest-path pairing crossed coordination into unrelated
+    clauses. Here the head edge is already frame-licensed; distribution only
+    copies a predicate the resolver has ALREADY named onto siblings of the same
+    grammatical slot. It cannot invent a predicate.
+    """
+    out: list[Token] = []
+    frontier = [tok]
+    seen = {tok.i}
+    while frontier and len(out) < max_depth:
+        current = frontier.pop()
+        for child in current.children:
+            if child.dep_ == "conj" and child.i not in seen:
+                seen.add(child.i)
+                out.append(child)
+                frontier.append(child)
+    return out
+
+
+# Coordination that does NOT distribute. "the tradeoff between A and B" asserts
+# one relation about a pair, not two relations. Symmetric predicates behave the
+# same way, and distributing over them manufactures a false clique.
+_NON_DISTRIBUTIVE_PREPS = frozenset({"between", "among", "amongst", "across"})
+_SYMMETRIC_PREDICATES = frozenset({
+    "overlaps", "synonym_of", "contradicts", "related_to", "affiliated_with",
+})
+
+
+def _distributes(slot: Token, sibling: Token) -> bool:
+    """Whether a predicate may be copied from `slot` onto `sibling`."""
+    if sibling.pos_ not in ("NOUN", "PROPN"):
+        return False
+    # Negation lives anywhere in the sibling's SUBTREE, not just on its head.
+    # In "uses HNSW but not brute force", spaCy attaches `not` to `brute`
+    # (amod), so a direct-children check misses it entirely.
+    if any(t.dep_ == "neg" for t in sibling.subtree):
+        return False
+    # Contrastive conjunctions attach to the HEAD of the coordination, not to
+    # the sibling: `but` hangs off HNSW, not off force. Checking only the
+    # sibling's children silently distributed across a contrast.
+    contrastive = {"but", "yet", "rather", "nor"}
+    for source in (sibling, slot):
+        for child in source.children:
+            if child.dep_ == "cc" and child.lemma_.lower() in contrastive:
+                return False
+    # Governed by a reciprocal preposition -> one relation about a pair.
+    head = slot.head
+    if head is not None and head.dep_ == "prep" and \
+            head.lemma_.lower() in _NON_DISTRIBUTIVE_PREPS:
+        return False
+    return True
+
+
 def _find_frames(doc: Doc) -> list[Frame]:
     """Enumerate predicate frames in a parsed doc.
 
@@ -172,6 +235,25 @@ def _find_frames(doc: Doc) -> list[Frame]:
                         signature=f"{s.dep_}-VERB-{o.dep_}",
                         confidence=1.0,
                     ))
+                    # R3: distribute across object conjuncts.
+                    for sib in _conjuncts(o):
+                        if _distributes(o, sib):
+                            frames.append(Frame(
+                                subj_tok=s, pred_tok=tok, obj_tok=sib,
+                                frame_type="active_transitive",
+                                signature=f"{s.dep_}-VERB-{o.dep_}",
+                                confidence=0.85,
+                            ))
+                # R3: distribute across SUBJECT conjuncts ("A and B use X").
+                for ssib in _conjuncts(s):
+                    if _distributes(s, ssib):
+                        for o in objects:
+                            frames.append(Frame(
+                                subj_tok=ssib, pred_tok=tok, obj_tok=o,
+                                frame_type="active_transitive",
+                                signature=f"{s.dep_}-VERB-{o.dep_}",
+                                confidence=0.85,
+                            ))
 
             # 2. Copular nominal: "Qdrant is a vector database"
             for s in subjects:
@@ -199,19 +281,35 @@ def _find_frames(doc: Doc) -> list[Frame]:
                             swap=True,
                             confidence=1.0,
                         ))
+                        # R3: "written by Shepherd, Brown and Clark" -- three
+                        # authors, not one.
+                        for sib in _conjuncts(pobj):
+                            if _distributes(pobj, sib):
+                                frames.append(Frame(
+                                    subj_tok=s, pred_tok=tok, obj_tok=sib,
+                                    frame_type="passive_agent",
+                                    signature=f"{s.dep_}-VERB-agent-pobj",
+                                    swap=True, confidence=0.85,
+                                ))
 
             # 4. Prepositional object: "Qdrant runs on Kubernetes"
             for s in subjects:
                 for prep in (c for c in tok.children if c.dep_ == "prep"):
                     for pobj in (g for g in prep.children if g.dep_ == "pobj"):
+                        sig = f"{s.dep_}-VERB-prep:{prep.lemma_.lower()}-pobj"
                         frames.append(Frame(
                             subj_tok=s, pred_tok=tok, obj_tok=pobj,
-                            frame_type="prep_object",
-                            signature=(
-                                f"{s.dep_}-VERB-prep:{prep.lemma_.lower()}-pobj"
-                            ),
+                            frame_type="prep_object", signature=sig,
                             confidence=0.9,
                         ))
+                        if prep.lemma_.lower() not in _NON_DISTRIBUTIVE_PREPS:
+                            for sib in _conjuncts(pobj):
+                                if _distributes(pobj, sib):
+                                    frames.append(Frame(
+                                        subj_tok=s, pred_tok=tok, obj_tok=sib,
+                                        frame_type="prep_object",
+                                        signature=sig, confidence=0.8,
+                                    ))
 
         # ---- Nominal frames ------------------------------------------------
         # 5. Possessive: "Google's TensorFlow" -> (Google, owns, TensorFlow).
@@ -436,7 +534,19 @@ class FrameExtractor:
         doc_id: str = "",
         doc: Doc | None = None,
         suppression_counters: dict[str, int] | None = None,
+        trace: list[dict] | None = None,
     ) -> list[ExtractedTriple]:
+        """Extract frame-licensed relations.
+
+        `trace`, when given, receives one record PER CANDIDATE FRAME describing
+        exactly where it died (or that it survived). The aggregate counters say
+        HOW MANY died at each guard; they cannot say WHICH candidate died where,
+        so they cannot answer "did my correct answer get filtered out, and by
+        what?". Recall debugging needs the per-candidate view, and reconstructing
+        it outside this method means reimplementing the guard order — which is
+        how you end up measuring a copy of the pipeline instead of the pipeline.
+        Off by default; costs one list append per frame when on.
+        """
         if not text.strip() or len(entities) < 2:
             return []
 
@@ -446,6 +556,19 @@ class FrameExtractor:
         # ---- Sentence-level suppression (unchanged from the old model) -----
         if _is_low_parse_confidence(doc):
             _inc(suppression_counters, "skipped_low_parse_confidence")
+            if trace is not None:
+                # Chunk-level bail. Without a record here the candidates this
+                # discards vanish with no trace row at all, and an audit that
+                # sums trace rows silently under-counts the loss.
+                for f in _find_frames(doc):
+                    trace.append({
+                        "subject_token": f.subj_tok.text,
+                        "predicate_token": f.pred_tok.text,
+                        "object_token": f.obj_tok.text,
+                        "subject_entity": None, "object_entity": None,
+                        "frame_type": f.frame_type, "signature": f.signature,
+                        "died_at": "skipped_low_parse_confidence",
+                    })
             return []
 
         # NOTE: no chunk-level verbless bail here. The old model returned early
@@ -467,6 +590,25 @@ class FrameExtractor:
         seen: set[tuple[str, str, str, int]] = set()
 
         for frame in frames:
+            # Filled in once the slots resolve, so a death record can name the
+            # ENTITY that died and not just the head token. Fresh per frame.
+            slots: list[str | None] = [None, None]
+
+            def _die(reason: str, _f: Frame = frame, _s: list = slots) -> None:
+                """Record a suppression AND which candidate it killed."""
+                _inc(suppression_counters, reason)
+                if trace is not None:
+                    trace.append({
+                        "subject_token": _f.subj_tok.text,
+                        "predicate_token": _f.pred_tok.text,
+                        "object_token": _f.obj_tok.text,
+                        "subject_entity": _s[0],
+                        "object_entity": _s[1],
+                        "frame_type": _f.frame_type,
+                        "signature": _f.signature,
+                        "died_at": reason,
+                    })
+
             # ---- pass 2: slot filling. Both slots or nothing. --------------
             is_nominal_frame = frame.frame_type in ("possessive", "appositive")
 
@@ -479,7 +621,7 @@ class FrameExtractor:
             #   "Csikszentmihalyi M, Hunter J. Happiness in everyday life"
             if frame.frame_type in ("appositive", "copular") and \
                     _is_bibliographic_context(frame.pred_tok.sent):
-                _inc(suppression_counters, "frame_bibliographic_appositive")
+                _die("frame_bibliographic_appositive")
                 continue
 
             # Nominal frames resolve strictly: the slot token IS the possessed
@@ -489,38 +631,41 @@ class FrameExtractor:
             obj_ent = _resolve_slot(
                 frame.obj_tok, slot_index, strict=is_nominal_frame)
             if subj_ent is None or obj_ent is None:
-                _inc(suppression_counters, "frame_slot_unfilled")
+                slots[:] = [subj_ent.surface if subj_ent else None,
+                            obj_ent.surface if obj_ent else None]
+                _die("frame_slot_unfilled")
                 continue
+            slots[:] = [subj_ent.surface, obj_ent.surface]
             if (subj_ent.start_char == obj_ent.start_char
                     and subj_ent.end_char == obj_ent.end_char):
-                _inc(suppression_counters, "frame_self_loop")
+                _die("frame_self_loop")
                 continue
             # Surface-level self-loop: distinct spans, same string.
             # "Actions: Actions define the specific task" -> (Actions, defines,
             # Actions). A node cannot stand in a relation to itself here.
             if subj_ent.surface.strip().lower() == obj_ent.surface.strip().lower():
-                _inc(suppression_counters, "frame_self_loop")
+                _die("frame_self_loop")
                 continue
             # Document furniture tagged as an entity by the upstream tagger.
             if (_is_structural_artifact(subj_ent.surface)
                     or _is_structural_artifact(obj_ent.surface)):
-                _inc(suppression_counters, "frame_structural_artifact")
+                _die("frame_structural_artifact")
                 continue
 
             # ---- argument hygiene (P1, reused) -----------------------------
             if (_is_pronoun_argument(frame.subj_tok, subj_ent)
                     or _is_pronoun_argument(frame.obj_tok, obj_ent)):
-                _inc(suppression_counters, "suppressed_pronoun_argument")
+                _die("suppressed_pronoun_argument")
                 continue
             if (_is_adjectival_argument(doc, subj_ent, frame.subj_tok)
                     or _is_adjectival_argument(doc, obj_ent, frame.obj_tok)):
-                _inc(suppression_counters, "suppressed_adjectival_argument")
+                _die("suppressed_adjectival_argument")
                 continue
             if _is_expletive_subject(frame.subj_tok):
-                _inc(suppression_counters, "suppressed_expletive")
+                _die("suppressed_expletive")
                 continue
             if _is_contrast_subject(frame.subj_tok, doc):
-                _inc(suppression_counters, "suppressed_contrast")
+                _die("suppressed_contrast")
                 continue
 
             pred_tok = frame.pred_tok
@@ -530,13 +675,13 @@ class FrameExtractor:
             # "powers" in "Google's TensorFlow powers many systems" as NOUN,
             # making the whole sentence read as verbless (backlog PF-2).
             if not is_nominal_frame and _is_verbless_sentence(pred_tok.sent):
-                _inc(suppression_counters, "skipped_verbless")
+                _die("skipped_verbless")
                 continue
             if _is_light_verb_construction(pred_tok):
-                _inc(suppression_counters, "suppressed_light_verb")
+                _die("suppressed_light_verb")
                 continue
             if "except" in frame.signature or "pcomp" in frame.signature:
-                _inc(suppression_counters, "suppressed_exception_boundary")
+                _die("suppressed_exception_boundary")
                 continue
 
             is_attributed = _is_in_attribution_context(pred_tok)
@@ -569,10 +714,16 @@ class FrameExtractor:
                     object_tok=frame.obj_tok,
                 )
             if resolved is None:
-                _inc(suppression_counters, "frame_predicate_unnamed")
+                _die("frame_predicate_unnamed")
                 continue
 
             predicate, resolver_swap = resolved
+
+            # R3 guard: never distribute a SYMMETRIC predicate. Copying
+            # "overlaps" across conjuncts manufactures a false clique.
+            if frame.confidence < 1.0 and predicate in _SYMMETRIC_PREDICATES:
+                _die("frame_symmetric_no_distribute")
+                continue
 
             # A prepositional predicate needs its preposition actually present.
             required_preps = _PREPOSITIONAL_PREDICATES.get(predicate)
@@ -581,7 +732,7 @@ class FrameExtractor:
                 if frame.frame_type == "prep_object" and ":" in frame.signature:
                     sig_prep = frame.signature.split("prep:", 1)[-1].split("-")[0]
                 if sig_prep not in required_preps:
-                    _inc(suppression_counters, "frame_missing_required_preposition")
+                    _die("frame_missing_required_preposition")
                     continue
             # Direction has exactly ONE owner per frame type, never two.
             # For passive_agent the frame already knows the grammatical subject
@@ -615,7 +766,7 @@ class FrameExtractor:
                     f"{s_ent.entity_type}:{o_ent.entity_type}"
                 )
                 rejection_counters[reason] = rejection_counters.get(reason, 0) + 1
-                _inc(suppression_counters, "adapter_allowed_pairs_rejected")
+                _die("adapter_allowed_pairs_rejected")
                 continue
 
             polarity, modality, temporal = _extract_qualifiers_inline(pred_tok)
@@ -636,8 +787,35 @@ class FrameExtractor:
 
             key = (s_ent.surface, predicate, o_ent.surface, sent_idx)
             if key in seen:
+                # Not a suppression — the same relation reached here twice (e.g.
+                # via conjunct distribution). Traced anyway so a recall audit
+                # never mistakes a dedupe for a filter kill.
+                if trace is not None:
+                    trace.append({
+                        "subject_token": frame.subj_tok.text,
+                        "predicate_token": frame.pred_tok.text,
+                        "object_token": frame.obj_tok.text,
+                        "frame_type": frame.frame_type,
+                        "subject_entity": s_ent.surface,
+                        "object_entity": o_ent.surface,
+                        "signature": frame.signature,
+                        "died_at": "duplicate_of_earlier_frame",
+                    })
                 continue
             seen.add(key)
+
+            if trace is not None:
+                trace.append({
+                    "subject_token": frame.subj_tok.text,
+                    "predicate_token": frame.pred_tok.text,
+                    "object_token": frame.obj_tok.text,
+                    "frame_type": frame.frame_type,
+                    "subject_entity": s_ent.surface,
+                    "object_entity": o_ent.surface,
+                    "signature": frame.signature,
+                    "died_at": None,
+                    "emitted": f"({s_ent.surface}) -{predicate}-> ({o_ent.surface})",
+                })
 
             triples.append(ExtractedTriple(
                 subject_surface=s_ent.surface,

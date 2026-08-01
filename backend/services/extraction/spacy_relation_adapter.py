@@ -138,6 +138,7 @@ class SpacyRelationExtractor:
         unit_batch: int = 64,  # kept for interface compat, unused
         docs: list | None = None,
         suppression_counters_list: list[dict[str, int]] | None = None,
+        trace_list: list[list[dict]] | None = None,
     ) -> list[list[dict]]:
         """Extract relations from a batch of chunks.
 
@@ -152,6 +153,14 @@ class SpacyRelationExtractor:
                   the pipeline shares Docs between Stage B and Stage C.
             suppression_counters_list: one dict per chunk for named suppression
                   counters. Every suppression rule increments a key here.
+            trace_list: one list per chunk receiving a PER-CANDIDATE record of
+                  where each candidate died. Counters say how many died at each
+                  guard; only this says WHICH one died where — the difference
+                  between "recall is 0.028" and "recall is 0.028 BECAUSE".
+                  Covers the extractor's internal guards AND the four
+                  adapter-boundary drops below (is_graph_edge, schema
+                  normalization, the second allowed_pairs gate, and the cap),
+                  which are invisible to the extractor's own trace.
 
         Returns:
             List of edge lists, one per chunk. Each edge is a dict:
@@ -210,6 +219,11 @@ class SpacyRelationExtractor:
                 if suppression_counters_list is not None and idx < len(suppression_counters_list)
                 else None
             )
+            _trace = (
+                trace_list[idx]
+                if trace_list is not None and idx < len(trace_list)
+                else None
+            )
             triples = self._extractor.extract(
                 text=text,
                 entities=spans,
@@ -217,7 +231,22 @@ class SpacyRelationExtractor:
                 doc_id=doc_id,
                 doc=parsed_docs[idx],
                 suppression_counters=_supp_ctr,
+                trace=_trace,
             )
+
+            def _adapter_die(t, reason: str) -> None:
+                """Record an adapter-boundary drop against its candidate."""
+                if _trace is None:
+                    return
+                _trace.append({
+                    "subject_entity": t.subject_surface,
+                    "object_entity": t.object_surface,
+                    "predicate_token": t.predicate_surface,
+                    "frame_type": t.dep_signature.split(":", 1)[0],
+                    "signature": t.dep_signature,
+                    "predicate": t.predicate,
+                    "died_at": reason,
+                })
 
             # Convert to edge dicts, filter noise, enforce allowed_pairs, cap
             edges: list[dict] = []
@@ -237,6 +266,7 @@ class SpacyRelationExtractor:
                     if _supp_ctr is not None:
                         _supp_ctr["adapter_non_graph_edge"] = (
                             _supp_ctr.get("adapter_non_graph_edge", 0) + 1)
+                    _adapter_die(t, "adapter_non_graph_edge")
                     continue
                 pred = _normalize_to_schema(t.predicate)
                 if pred is None:
@@ -244,6 +274,7 @@ class SpacyRelationExtractor:
                     if _supp_ctr is not None:
                         _supp_ctr["adapter_noise_or_t4_dropped"] = (
                             _supp_ctr.get("adapter_noise_or_t4_dropped", 0) + 1)
+                    _adapter_die(t, "adapter_noise_or_t4_dropped")
                     continue  # noise verb or T4 drop
                 # allowed_pairs gate: reject invalid type combinations
                 subj_type = type_by_surface.get(t.subject_surface.lower(), "")
@@ -253,6 +284,11 @@ class SpacyRelationExtractor:
                     if _supp_ctr is not None:
                         _supp_ctr["adapter_allowed_pairs_rejected"] = (
                             _supp_ctr.get("adapter_allowed_pairs_rejected", 0) + 1)
+                    _adapter_die(
+                        t,
+                        f"adapter_allowed_pairs_rejected[{pred}:"
+                        f"{subj_type or '?'}->{obj_type or '?'}]",
+                    )
                     continue
                 if len(edges) >= max_related:
                     # NO SILENT CAPS (repo law): count what the cap discarded.
@@ -260,6 +296,7 @@ class SpacyRelationExtractor:
                     # entity-offset order, not the most confident — R5 fixes the
                     # ordering; R-pre first measures how often it even matters.
                     _capped += 1
+                    _adapter_die(t, "adapter_cap_truncated")
                     continue
                 ev = t.sentence_text or text[:200]
                 edges.append({
@@ -269,6 +306,17 @@ class SpacyRelationExtractor:
                     "ev": ev[:500],
                     "score": t.confidence,
                 })
+                if _trace is not None:
+                    _trace.append({
+                        "subject_entity": t.subject_surface,
+                        "object_entity": t.object_surface,
+                        "predicate_token": t.predicate_surface,
+                        "frame_type": t.dep_signature.split(":", 1)[0],
+                        "signature": t.dep_signature,
+                        "predicate": pred,
+                        "died_at": None,
+                        "survived": True,
+                    })
 
             if _capped and _supp_ctr is not None:
                 _supp_ctr["adapter_cap_truncated"] = (
