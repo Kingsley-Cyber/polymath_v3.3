@@ -16,7 +16,7 @@ from collections import Counter
 
 sys.path.insert(0, "/app")
 from services.extraction.entity_quality import (  # noqa: E402
-    QUALITY_GATE_VERSION, annotate_entities, new_reject_counters,
+    QUALITY_GATE_VERSION, annotate_entities_two_tier, new_reject_counters,
 )
 
 
@@ -42,7 +42,7 @@ def main() -> int:
     total = db.ghost_b_extractions.count_documents(q)
     print(f"chunks to annotate: {total:,}", file=sys.stderr)
     ctr = new_reject_counters()
-    seen = kept = 0
+    seen = kept = anchors = 0
     chunks = 0
     ops = []
     t0 = time.time()
@@ -50,10 +50,19 @@ def main() -> int:
     if args.limit:
         cur = cur.limit(args.limit)
     for d in cur:
-        ann = annotate_entities(d.get("entities") or [], doc_frequency=df,
-                                max_doc_frequency=args.max_df, counters=ctr)
+        # TWO TIER, not one. This called annotate_entities() until 2026-07-31,
+        # which stamps only `graph_eligible`. relation_anchors() reads
+        # `relation_eligible` and defaults a MISSING key to True, so the relaxed
+        # tier was a silent no-op across every annotated chunk: pronouns ("I",
+        # "She", "we"), locators ("Figure 2.5") and deictics all reached the
+        # relation extractor. MEASURED on a 30-chunk sample: the gate should
+        # have dropped 120 of 331 mentions (36%); it dropped 0.
+        ann = annotate_entities_two_tier(
+            d.get("entities") or [], doc_frequency=df,
+            max_doc_frequency=args.max_df, counters=ctr)
         seen += len(ann)
         kept += sum(1 for e in ann if e["graph_eligible"])
+        anchors += sum(1 for e in ann if e["relation_eligible"])
         chunks += 1
         ops.append(pymongo.UpdateOne(
             {"chunk_id": d["chunk_id"]},
@@ -70,6 +79,8 @@ def main() -> int:
         "mode": "APPLIED" if args.apply else "DRY_RUN",
         "chunks": chunks, "mentions": seen, "graph_eligible": kept,
         "eligible_share": round(kept / seen, 4) if seen else 0.0,
+        "relation_eligible": anchors,
+        "relation_anchor_share": round(anchors / seen, 4) if seen else 0.0,
         "rejections": {k: v for k, v in ctr.items() if v},
         "elapsed_s": round(time.time() - t0, 1),
     }, indent=2))

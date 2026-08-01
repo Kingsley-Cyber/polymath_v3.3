@@ -42,7 +42,14 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-QUALITY_GATE_VERSION = "polymath.entity_quality.v1"
+# v2 (2026-07-31): the stamp is what makes a chunk "already annotated", so the
+# annotator skips anything carrying the current version. v1 rows were written by
+# the SINGLE-tier annotator and have no `relation_eligible` key at all — and
+# relation_anchors() reads that key defaulting a miss to True, so the relaxed
+# tier never actually ran on any of them. Bumping the version is what makes
+# those 315,044 rows re-annotate; leaving it at v1 would ship the fix as a
+# no-op for every chunk already in the database.
+QUALITY_GATE_VERSION = "polymath.entity_quality.v2"
 
 # ---------------------------------------------------------------------------
 # R1 — closed-class surfaces. Never an entity, in any domain.
