@@ -15,7 +15,13 @@ SURVEY_RELEASE = "graphify-survey-v1"
 
 _WORD_RE = re.compile(r"[A-Za-z][A-Za-z0-9_+.#/-]*")
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
-_ALIAS_RE = re.compile(r"\b([A-Z][A-Za-z0-9-]*(?:[ \t]+[A-Z][A-Za-z0-9-]*){1,8})[ \t]*\(([A-Z][A-Z0-9-]{1,12})\)")
+# The name span may cross lowercase connector words ("Berth Allocation and
+# Utilization Engine (BAUE)") — truncating at the connector produces a wrong
+# partial alias (the "Calibration Unit" failure class).
+_ALIAS_RE = re.compile(
+    r"\b([A-Z][A-Za-z0-9-]*(?:[ \t]*\n?[ \t]*(?:(?:and|of|for|the|in|on|to)[ \t]*\n?[ \t]*)?[A-Z][A-Za-z0-9-]*){1,8})"
+    r"[ \t]*\n?[ \t]*\(([A-Z][A-Z0-9-]{1,12})\)"
+)
 _ALSO_WRITTEN_RE = re.compile(r"\b([A-Z][A-Za-z0-9 ]{1,40}?),[ \t]+also written[ \t]+([A-Z][A-Za-z0-9_.+-]{1,40}),")
 _DEFINITION_RE = re.compile(r"\b([A-Z][A-Za-z0-9_.-]*(?:[ \t]+[A-Z][A-Za-z0-9_.-]*){0,6})[ \t]+(?:is|means|refers to|denotes)[ \t]+([^.!?\n]{3,160})")
 _TERM_SENTENCE_BREAK_RE = re.compile(r"[.!?]+[\"')\]]*\s+")

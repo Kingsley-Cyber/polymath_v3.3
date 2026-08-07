@@ -2705,6 +2705,15 @@ def _repair_relation_from_evidence(
 ) -> RelationItem:
     if relation.object_kind != "entity":
         return relation
+    if (
+        relation.validation_status
+        and "accepted" in relation.validation_status
+        and relation.source_predicate == relation.predicate
+    ):
+        # Compiler-authoritative relation (Graphify deterministic compiler):
+        # the compiled canonical predicate is never re-guessed from evidence.
+        # The model proposes, the compiler interprets — promotion projects.
+        return relation
     evidence = f"{relation.evidence_phrase} {relation.relation_cue}".lower()
     if not evidence.strip():
         return relation

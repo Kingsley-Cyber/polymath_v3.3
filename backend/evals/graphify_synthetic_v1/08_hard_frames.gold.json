@@ -1,0 +1,29 @@
+{
+  "fixture": "08_hard_frames.md",
+  "purpose": "Hard grammatical frames from the sealed-run misses: 'and so is X' ellipsis, appositive membership ('K-7, the newest berth in Y'), participle apposition ('the platform operated by Z'), and occurred at/during variants.",
+  "items": [
+    {"id": "HF01", "check": "control", "evidence": "The Gate Controller is part of the Yard Stack, and so is the Crane Scheduler.",
+     "expect": {"type": "canonical", "subject": "Gate Controller", "predicate": "part_of", "object": "Yard Stack", "status": "ASSERTED_TRUE"}},
+    {"id": "HF02", "check": "positive", "evidence": "The Gate Controller is part of the Yard Stack, and so is the Crane Scheduler.",
+     "expect": {"type": "canonical", "subject": "Crane Scheduler", "predicate": "part_of", "object": "Yard Stack", "status": "ASSERTED_TRUE"},
+     "must_not": {"notes": "gapping: 'and so is X' inherits the elided predicate from the first conjunct"}},
+    {"id": "HF03", "check": "positive", "evidence": "Berth K-7, the newest berth in the Halveron South Basin, opened last spring.",
+     "expect": {"type": "canonical", "subject": "Berth K-7", "predicate": "part_of", "object": "Halveron South Basin", "any_of": ["part_of", "related_to"], "status": "ASSERTED_TRUE", "optional": true},
+     "must_not": {"notes": "appositive membership; graded optional — capture as open acceptable, silent drop is the failure"}},
+    {"id": "HF04", "check": "positive", "evidence": "Wavemark, the routing platform operated by the Norvale Group, publishes sailing plans.",
+     "expect": {"type": "open", "subject": "Norvale Group", "surface_predicate": "operated by", "object": "Wavemark", "any_of": ["owns", "supports", "related_to"], "status": "ASSERTED_TRUE"},
+     "must_not": {"notes": "participle apposition: the VBN inside the appositive descriptor predicates on the anchor (Wavemark), with the by-agent as subject; capture required, promotion graded leniently"}},
+    {"id": "HF05", "check": "positive", "evidence": "The February Grounding Event occurred at Pier Nine.",
+     "expect": {"type": "canonical", "subject": "February Grounding Event", "predicate": "related_to", "object": "Pier Nine", "status": "ASSERTED_TRUE"},
+     "must_not": {"notes": "'occurred at' — the occurred-preposition rule must cover at/on/near/during, not only 'in'"}},
+    {"id": "HF06", "check": "paraphrase", "evidence": "The Draft Survey occurred during the Spring Audit Window.",
+     "expect": {"type": "canonical", "subject": "Draft Survey", "predicate": "related_to", "object": "Spring Audit Window", "status": "ASSERTED_TRUE"}},
+    {"id": "HF07", "check": "control", "evidence": "The Yard Stack depends on the Gate Controller.",
+     "expect": {"type": "canonical", "subject": "Yard Stack", "predicate": "depends_on", "object": "Gate Controller", "status": "ASSERTED_TRUE"}}
+  ],
+  "negative_entities": ["last spring", "sailing plans"],
+  "invariants": [
+    "HF01 and HF02 are two distinct part_of edges sharing the object",
+    "no reversed duplicate of HF07"
+  ]
+}

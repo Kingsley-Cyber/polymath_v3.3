@@ -71,7 +71,7 @@ def _canonical_hint(
         return "related_to", "relate", "explicit_related_surface"
     if re.search(r"\b(?:part|component)\s+of\b", normalized):
         return "part_of", "part", "explicit_part_of_surface"
-    if re.fullmatch(r"occur(?:s|red)?\s+in", normalized):
+    if re.fullmatch(r"occur(?:s|red|ring)?\s+(?:in|at|on|near|during)", normalized):
         return "related_to", "relate", "explicit_occurred_in_closed_ontology"
     if re.search(r"\b(?:acquire|acquires|acquired)\b", normalized):
         return "owns", "acquire", "explicit_acquisition_surface"

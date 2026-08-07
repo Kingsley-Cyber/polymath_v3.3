@@ -62,6 +62,10 @@ _META_PREDICATE_RE = re.compile(
     re.I,
 )
 _OPEN_ONLY_LEMMAS = frozenset({"serve", "publish", "author", "curate", "interoperate", "occur"})
+# "X occurred in/at/on/near/during Y" is an explicit event-association surface;
+# the closed ontology represents it as related_to (generalizes the former
+# 'occurred in'-only rule).
+_OCCURRED_PREP_RE = re.compile(r"occur(?:s|red|ring)?\s+(?:in|at|on|near|during)")
 _CANONICAL_BY_LEMMA = {
     "use": "uses", "apply": "uses", "depend": "depends_on", "support": "supports",
     "produce": "produces", "consume": "consumes", "own": "owns",
@@ -254,8 +258,15 @@ class PredicateCompiler:
         source: str,
     ) -> tuple[str | None, str]:
         normalized_lemma = lemma.casefold().strip()
-        if normalized_lemma in _OPEN_ONLY_LEMMAS:
+        occurred_prep = bool(_OCCURRED_PREP_RE.fullmatch(surface.casefold().strip()))
+        if normalized_lemma in _OPEN_ONLY_LEMMAS and not occurred_prep:
             return None, f"open:{normalized_lemma}:frozen_policy_abstain"
+        if occurred_prep:
+            # Explicit event-association surface; declared closed-ontology
+            # normalization, never a forced fallback.
+            if source.startswith("openie"):
+                return "related_to", "mapped:openie:declared_closed_ontology:occurred_prep:related_to"
+            return "related_to", f"mapped:{source}:declared_closed_ontology:occurred_prep:related_to"
         candidate = canonical_hint
         if candidate is None:
             candidates = {
@@ -271,7 +282,7 @@ class PredicateCompiler:
             if len(candidates) != 1:
                 return None, "review:ambiguous_predicate"
             candidate = next(iter(candidates))
-        if candidate == "related_to" and "related" not in surface.casefold():
+        if candidate == "related_to" and "related" not in surface.casefold() and not occurred_prep:
             return None, "review:forced_related_to_prohibited"
         if candidate not in self.allowed_predicates and candidate != "related_to":
             return None, "review:predicate_outside_frozen_ontology"
@@ -770,6 +781,14 @@ def _argument_tokens(token) -> tuple[list[Any], list[Any]]:
     if lemma in {"part", "component", "relate"}:
         copula = token.head if token.head.lemma_.casefold() == "be" else token
         subjects = _children(copula, {"nsubj", "nsubjpass", "nsubj:pass"})
+        # Gapping: "A is part of S, and so is B" — mirror of the proposal-side
+        # rule so endpoint completion also mints B when the census missed it.
+        for conjunct in copula.conjuncts:
+            if conjunct.lemma_.casefold() == "be" and any(
+                child.dep_ == "advmod" and child.lemma_.casefold() == "so"
+                for child in conjunct.children
+            ):
+                subjects = [*subjects, *_children(conjunct, {"nsubj", "nsubjpass", "nsubj:pass"})]
         return subjects, _prep_objects(token, "of" if lemma in {"part", "component"} else "to")
     subject_dependencies = {"nsubj"}
     if lemma in {"build", "derive"}:
@@ -783,7 +802,7 @@ def _argument_tokens(token) -> tuple[list[Any], list[Any]]:
         if required_prep is not None
         else _children(token, {"dobj", "obj", "attr", "oprd"})
     )
-    if _open_verb_candidate(
+    if lemma in _OPEN_ONLY_LEMMAS or _open_verb_candidate(
         token, lemma, _CANONICAL_BY_LEMMA.get(lemma), lemma in _OPEN_ONLY_LEMMAS,
     ):
         # Open verbs may relate through prepositional or dative complements;
@@ -968,17 +987,26 @@ def _complete_relation_arguments(
                     and not re.search(r"\d", identity_surface)
                     and not identity_surface.isupper()
                     and not unit.text[: (start + (core_span[0] if core_span else 0)) - unit.start].strip()
-                    and identity_surface.casefold() not in entities_by_surface
                     and not re.search(
-                        r"[a-z0-9,;:]\s+" + re.escape(identity_surface) + r"\b",
+                        r"[a-z0-9,;:][ \t]+" + re.escape(identity_surface) + r"\b",
                         document.normalized_text,
                     )
                 ):
-                    # Sentence-initial capitalized singleton with no other name
-                    # evidence anywhere in the document (mid-sentence
-                    # capitalization would be evidence): the casing is forced
-                    # by position — leave the endpoint unresolved.
-                    continue
+                    # Sentence-initial capital with no other name evidence
+                    # anywhere in the document: the casing is positional. A
+                    # multi-word phrase keeps its full identity ("Voltage sag",
+                    # "Rejected manifests"); a bare singleton stays unresolved.
+                    remaining_words = [
+                        word for word in surface.split()
+                        if word.casefold() not in {"a", "an", "the"}
+                    ]
+                    if len(remaining_words) >= 2:
+                        # Positional capital on a phrase: the full phrase is the
+                        # identity even when the bare first word is a known
+                        # entity name ("Voltage sag" must not bind to "Voltage").
+                        identity_surface = " ".join(remaining_words)
+                    elif identity_surface.casefold() not in entities_by_surface:
+                        continue
                 if len(re.findall(r"[A-Za-z0-9]+", surface)) == 1 and not (
                     surface[:1].isupper()
                     or re.search(r"(?:ability|tion|ment|ness|ity)$", surface, re.I)
@@ -1103,6 +1131,14 @@ def _direct_dependency_proposals(doc, unit: _Unit) -> list[_Proposal]:
         elif lemma in {"part", "component"}:
             copula = token.head if token.head.lemma_.casefold() == "be" else token
             subjects = _children(copula, {"nsubj", "nsubjpass", "nsubj:pass"})
+            # Gapping: "A is part of S, and so is B" — the so-copula conjunct
+            # shares the elided complement, so its subject joins the frame.
+            for conjunct in copula.conjuncts:
+                if conjunct.lemma_.casefold() == "be" and any(
+                    child.dep_ == "advmod" and child.lemma_.casefold() == "so"
+                    for child in conjunct.children
+                ):
+                    subjects = [*subjects, *_children(conjunct, {"nsubj", "nsubjpass", "nsubj:pass"})]
             objects = _prep_objects(token, "of")
             canonical = "part_of"
             voice = "copular"
@@ -1138,9 +1174,10 @@ def _direct_dependency_proposals(doc, unit: _Unit) -> list[_Proposal]:
                             if dative_objects:
                                 objects = [*objects, *dative_objects]
                                 preposition = preposition or child.text.casefold()
-                if not objects and open_verb:
+                if not objects and (open_verb or open_relation):
                     # Open verbs without a direct object may relate through a
-                    # prepositional complement ("works from X", "migrated to Y").
+                    # prepositional complement ("works from X", "migrated to Y",
+                    # "occurred at Z").
                     for child in token.children:
                         if child.dep_ == "prep" and child.lemma_.casefold() != "by":
                             prep_objects = _children(child, {"pobj"})
@@ -1196,7 +1233,7 @@ def _direct_dependency_proposals(doc, unit: _Unit) -> list[_Proposal]:
             )
         subject_mentions = list({item.mention_id: item for item in subject_mentions}.values())
         object_mentions = list({item.mention_id: item for item in object_mentions}.values())
-        if open_verb and subject_mentions and not object_mentions:
+        if (open_verb or open_relation) and subject_mentions and not object_mentions:
             # The direct object carried no name evidence ("migrated its
             # archives to the Vaultstone store"): relate through the
             # prepositional or dative complement that does.
@@ -1212,7 +1249,11 @@ def _direct_dependency_proposals(doc, unit: _Unit) -> list[_Proposal]:
                         break
         if not subject_mentions or not object_mentions:
             continue
-        cue = f"{token.text} {preposition}" if (open_verb and preposition) else token.text
+        cue = (
+            f"{token.text} {preposition}"
+            if ((open_verb or open_relation) and preposition)
+            else token.text
+        )
         for subject in subject_mentions:
             for object_mention in object_mentions:
                 if subject.entity_id == object_mention.entity_id:
@@ -1233,6 +1274,34 @@ def _direct_dependency_proposals(doc, unit: _Unit) -> list[_Proposal]:
                     attribution=local_attribution, canonical_hint=canonical,
                     confidence=1.0, source="strict_dependency_cue",
                 ))
+    # Appositive membership: "X, the <descriptor> in Y, ..." — the appositive
+    # descriptor's in-complement associates the anchor with Y. Captured as an
+    # open surface relation; the compiler and gate decide anything further.
+    for token in doc:
+        if token.dep_ != "appos":
+            continue
+        anchor_mentions = _mentions_for_token(token.head, unit)
+        if not anchor_mentions:
+            continue
+        for prep in token.children:
+            if prep.dep_ != "prep" or prep.lemma_.casefold() != "in":
+                continue
+            for pobj in _children(prep, {"pobj"}):
+                for object_mention in _mentions_for_token(pobj, unit):
+                    for subject in anchor_mentions:
+                        if subject.entity_id == object_mention.entity_id:
+                            continue
+                        proposals.append(_Proposal(
+                            subject=subject, object=object_mention,
+                            surface_predicate=f"{token.lemma_.casefold()} in",
+                            lemma="in", particle="", preposition="in",
+                            dependency_frame="direct:appositive:in_membership",
+                            dependency_path="appos>prep>pobj",
+                            voice="appositive", polarity="positive",
+                            modality="asserted", attribution="",
+                            canonical_hint=None, confidence=0.9,
+                            source="strict_dependency_cue",
+                        ))
     return proposals
 
 

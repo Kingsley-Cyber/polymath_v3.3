@@ -16,7 +16,7 @@ from models.graphify_contracts import (
     stable_digest,
     stable_id,
 )
-from services.extraction.canonical import name_core_span
+from services.extraction.canonical import name_core_span, singularize_token
 from services.extraction.graphify_survey import DocumentSurveyV1, GazetteerCandidateV1
 
 REDUCER_RELEASE = "graphify-document-entity-reducer-v2"
@@ -387,7 +387,110 @@ def _cluster_decision(
     return EntityTerminalState.REVIEW, tuple(reasons + ["weak_survey_candidate_only"])
 
 
-def _merge_descriptor_clusters(clusters: dict[str, _Cluster]) -> None:
+_TITLE_TOKENS = frozenset({"dr", "mr", "mrs", "ms", "prof"})
+
+
+def _genuine_first_capital(document: NormalizedDocumentV1, cluster: _Cluster) -> bool:
+    """True when at least one mention shows the name's first capital in a
+    non-sentence-initial position (preceded by a lowercase word or comma) —
+    positional capitals ("Voltage sag causes ...") are not name evidence."""
+    text = document.normalized_text
+    for mention in cluster.mentions:
+        start = mention.normalized_start
+        if start is None or start < 2:
+            continue
+        preceding = text[:start]
+        whitespace_run = preceding[len(preceding.rstrip()):]
+        if "\n" in whitespace_run:
+            continue  # line-initial: capitalization is positional
+        before = preceding.rstrip()
+        if before and (before[-1].islower() or before[-1] == ","):
+            return True
+    return False
+
+
+def _merge_pair(target: _Cluster, source: _Cluster) -> None:
+    target.mentions.extend(source.mentions)
+    target.aliases.add(source.canonical_name)
+    target.aliases.update(source.aliases)
+    target.survey_sources.update(source.survey_sources)
+    target.survey_count = max(target.survey_count, source.survey_count)
+    target.definitions.extend(
+        value for value in source.definitions if value not in target.definitions
+    )
+
+
+def _extend_names_to_core_mentions(clusters: dict[str, _Cluster]) -> None:
+    """A truncated census name extends to its own mention's capitalized
+    continuation ("Pier" with mention "Pier Nine" → "Pier Nine"). Extension
+    only — never invents tokens; lowercase continuations never extend."""
+    for cluster in clusters.values():
+        name_words = [w.casefold() for w in cluster.canonical_name.split()]
+        if not name_words:
+            continue
+        best: str | None = None
+        for mention in cluster.mentions:
+            surface = _canonical_surface(_trim_cross_sentence_surface(mention.surface))
+            words = surface.split()
+            if len(words) <= len(name_words):
+                continue
+            if [w.casefold() for w in words[: len(name_words)]] != name_words:
+                continue
+            extra = words[len(name_words):]
+            if all(
+                any(ch.isupper() for ch in w) or any(ch.isdigit() for ch in w)
+                for w in extra
+            ):
+                if best is None or len(words) > len(best.split()):
+                    best = surface
+        if best is not None:
+            cluster.aliases.add(cluster.canonical_name)
+            cluster.canonical_name = best
+
+
+def _merge_number_and_title_variants(clusters: dict[str, _Cluster]) -> None:
+    """Fold plural cluster names onto an existing singular cluster
+    ("Load Manifests" → "Load Manifest") and titled short forms onto the full
+    person name ("Dr. Osei" → "Dr. Nadia Osei"). Merge-on-existence only —
+    never invent a form the document does not contain."""
+    by_normalized = {
+        _normalized_surface(cluster.canonical_name): key
+        for key, cluster in clusters.items()
+    }
+    for key in sorted(clusters):
+        cluster = clusters.get(key)
+        if cluster is None:
+            continue
+        words = cluster.canonical_name.split()
+        if not words:
+            continue
+        singular_last = singularize_token(words[-1])
+        if singular_last != words[-1]:
+            singular_name = " ".join([*words[:-1], singular_last])
+            target_key = by_normalized.get(_normalized_surface(singular_name))
+            if target_key and target_key != key and target_key in clusters:
+                _merge_pair(clusters[target_key], cluster)
+                del clusters[key]
+                continue
+        first = words[0].rstrip(".").casefold()
+        if first in _TITLE_TOKENS and len(words) == 2:
+            surname = _normalized_surface(words[-1])
+            for other_key in sorted(clusters):
+                if other_key == key:
+                    continue
+                other = clusters[other_key]
+                other_words = other.canonical_name.split()
+                if (
+                    len(other_words) >= 3
+                    and other_words[0].rstrip(".").casefold() == first
+                    and _normalized_surface(other_words[-1]) == surname
+                ):
+                    _merge_pair(other, cluster)
+                    del clusters[key]
+                    break
+
+
+def _merge_descriptor_clusters(clusters: dict[str, _Cluster], document: NormalizedDocumentV1) -> None:
     """Fold descriptor-suffixed cluster names onto their capitalized name core.
 
     In-text casing is the signal: in "the Redlark database" only "Redlark" is
@@ -411,6 +514,18 @@ def _merge_descriptor_clusters(clusters: dict[str, _Cluster]) -> None:
             continue
         core = cluster.canonical_name[span[0]:span[1]].strip()
         if not core or _normalized_surface(core) == _normalized_surface(cluster.canonical_name):
+            continue
+        name_words = cluster.canonical_name.split()
+        if (
+            name_words
+            and core == name_words[0]
+            and len(name_words) > 1
+            and not core.isupper()
+            and not any(char.isdigit() for char in core)
+            and not _genuine_first_capital(document, cluster)
+        ):
+            # Positional capital on a generic phrase ("Voltage sag causes ...")
+            # is not name evidence; the full phrase stays the identity.
             continue
         target_key = by_normalized.get(_normalized_surface(core))
         if target_key is not None and target_key != key and target_key in clusters:
@@ -439,7 +554,9 @@ def reduce_document_entities(
     if any(mention.document_id != document.document_id for mention in aligned):
         raise ValueError("raw mention document identity mismatch")
     clusters = _build_clusters(document, aligned, survey)
-    _merge_descriptor_clusters(clusters)
+    _merge_descriptor_clusters(clusters, document)
+    _extend_names_to_core_mentions(clusters)
+    _merge_number_and_title_variants(clusters)
     entities: list[DocumentEntityV1] = []
     assignments: list[MentionReductionAssignment] = []
     for key, cluster in sorted(clusters.items()):

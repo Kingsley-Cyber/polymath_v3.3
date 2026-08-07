@@ -179,7 +179,25 @@ _NAME_STOP_TOKENS = frozenset({
     "any", "no", "another", "other", "various", "numerous", "most", "more",
     "less", "least", "this", "that", "these", "those",
     "its", "his", "her", "their", "our", "your", "my",
+    # approximators and indefinite pronouns carry no name evidence
+    "nearly", "almost", "roughly", "approximately", "about",
+    "everything", "anything", "nothing", "something",
+    "everyone", "anyone", "someone", "nobody", "none",
 })
+
+
+def singularize_token(word: str) -> str:
+    """Conservative English singular of a final noun token, for identity
+    folding only ("manifests"→"manifest", "batches"→"batch", "entries"→"entry").
+    Returns the input unchanged when no safe rule applies."""
+    lower = word.lower()
+    if len(lower) > 3 and lower.endswith("ies"):
+        return word[:-3] + ("Y" if word[-3].isupper() else "y")
+    if len(lower) > 4 and lower.endswith(("ches", "shes", "xes", "sses", "zes")):
+        return word[:-2]
+    if len(lower) > 3 and lower.endswith("s") and not lower.endswith(("ss", "us", "is")):
+        return word[:-1]
+    return word
 _NEUTRAL_DETERMINERS = frozenset({"a", "an", "the"})
 _TOKEN_EDGE_PUNCT = "\"'“”‘’().,;:!?"
 _NUMERIC_TAIL_RE = re.compile(r"^\d[\w.\-]*$")

@@ -2866,14 +2866,25 @@ async def _write_document_graph_once(
             if not subject_identity or not object_identity:
                 skipped_relations_missing_endpoint += 1
                 continue
-            refined_predicate = refine_related_to_predicate(
-                relation.predicate,
-                subject_identity,
-                object_identity,
-                source_predicate=normalized_source_predicate,
-                evidence_phrase=relation.evidence_phrase,
-                relation_cue=relation.relation_cue,
+            compiler_authoritative = bool(
+                relation.validation_status
+                and "accepted" in relation.validation_status
+                and (relation.source_predicate or relation.predicate) == relation.predicate
             )
+            if compiler_authoritative:
+                # The deterministic compiler's canonical predicate is final —
+                # including a deliberate related_to. Refinement exists only for
+                # legacy sentinel edges lacking compiled provenance.
+                refined_predicate = relation.predicate
+            else:
+                refined_predicate = refine_related_to_predicate(
+                    relation.predicate,
+                    subject_identity,
+                    object_identity,
+                    source_predicate=normalized_source_predicate,
+                    evidence_phrase=relation.evidence_phrase,
+                    relation_cue=relation.relation_cue,
+                )
             if refined_predicate != relation.predicate:
                 related_to_refinement_count += 1
             predicate_refined = refined_predicate != relation.predicate

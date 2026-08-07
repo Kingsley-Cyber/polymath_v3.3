@@ -338,7 +338,7 @@ class OpenIEPredicateCandidateV1(StrictFrozenModel):
         if self.mapping_status == "MAPPED" and not self.canonical_predicate:
             raise ValueError("mapped OpenIE candidates require a canonical predicate")
         declared_related_normalization = self.mapping_rule.startswith(
-            "mapped:openie:declared_closed_ontology:occurred_in:related_to"
+            "mapped:openie:declared_closed_ontology:occurred_"
         )
         if (
             self.canonical_predicate == "related_to"

@@ -1,0 +1,124 @@
+{
+  "family": "09_core_plural_normalization",
+  "status": "PASS",
+  "runtime": {
+    "pipeline_release": "graphify-cpu-pipeline-v15",
+    "mongo_database": "graphify_eval_syn_09_cfbf6ddd0c",
+    "corpus_id": "0d58d5e2-32ff-5152-9fbd-8ba1b06c0947",
+    "elapsed_seconds": 1.61,
+    "interpreter": "/Users/king/polymath_v3.3/local_ghost_b/.venv/bin/python"
+  },
+  "items": {
+    "passed": 8,
+    "failed": 0,
+    "optional_failed": 0,
+    "total": 8
+  },
+  "negative_entities_in_graph": [],
+  "unexpected_promoted_triples": [
+    "norvale group | owns | south quay"
+  ],
+  "duplicate_promoted_edges": {},
+  "graph": {
+    "nodes": [
+      "berth fairness",
+      "berth fairness charter",
+      "booking ledger",
+      "breaker trips",
+      "correction queue",
+      "exception desk",
+      "load manifest",
+      "norvale group",
+      "rejected manifests",
+      "south quay",
+      "stowage planner",
+      "voltage sag"
+    ],
+    "promoted_edge_count": 8
+  },
+  "extracted_entities": [
+    "Berth Fairness",
+    "Berth Fairness Charter",
+    "Booking\nLedger",
+    "Booking Ledger",
+    "Correction Queue",
+    "Exception Desk",
+    "Load",
+    "Load Manifest",
+    "Norvale Group",
+    "Rejected manifests",
+    "Stowage Planner",
+    "Voltage sag",
+    "breaker trips",
+    "eastern quay",
+    "south quay",
+    "the",
+    "tide cycle"
+  ],
+  "item_results": [
+    {
+      "id": "CN01",
+      "check": "positive",
+      "verdict": "PASS",
+      "optional": true,
+      "detail": "",
+      "evidence": "Voltage sag causes breaker trips on the eastern quay."
+    },
+    {
+      "id": "CN02",
+      "check": "positive",
+      "verdict": "PASS",
+      "optional": true,
+      "detail": "",
+      "evidence": "Rejected manifests are consumed by the Exception Desk."
+    },
+    {
+      "id": "CN03",
+      "check": "control",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "The Exception Desk produces the Correction Queue."
+    },
+    {
+      "id": "CN04",
+      "check": "positive",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "The Stowage Planner consumes Load Manifests."
+    },
+    {
+      "id": "CN05",
+      "check": "positive",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "Each Load Manifest is derived from the Booking Ledger."
+    },
+    {
+      "id": "CN06",
+      "check": "positive",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "The Berth Fairness Charter defines berth fairness as the guarantee that no carrier waits more than o"
+    },
+    {
+      "id": "CN07",
+      "check": "junk_negative",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "Norvale Group owns nearly everything on the south quay, according to a dockside joke."
+    },
+    {
+      "id": "CN08",
+      "check": "control",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "The Stowage Planner depends on the Booking Ledger."
+    }
+  ]
+}

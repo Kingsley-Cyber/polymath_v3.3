@@ -1,0 +1,37 @@
+[
+  {
+    "subject": "berth allocation and utilization engine",
+    "predicate": "consumes",
+    "object": "tide forecast feed"
+  },
+  {
+    "subject": "berth allocation and utilization engine",
+    "predicate": "produces",
+    "object": "daily berth ledger"
+  },
+  {
+    "subject": "cargo manifest reconciliation service",
+    "predicate": "depends_on",
+    "object": "registry of vessel identities"
+  },
+  {
+    "subject": "dr osei",
+    "predicate": "owns",
+    "object": "berth fairness charter"
+  },
+  {
+    "subject": "quay analytics group",
+    "predicate": "supports",
+    "object": "dr nadia osei"
+  },
+  {
+    "subject": "tidewatch systems",
+    "predicate": "owns",
+    "object": "cargo manifest reconciliation service"
+  },
+  {
+    "subject": "tidewatch systems",
+    "predicate": "runs_on",
+    "object": "berth scheduling stack"
+  }
+]
