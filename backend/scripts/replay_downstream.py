@@ -160,12 +160,17 @@ def replay(frozen: dict) -> dict:
                 (m.subject_mention_id, m.object_mention_id, m.canonical_candidate), [],
             ).append((m.evidence_start, m.evidence_end))
     merge_fate: dict[str, str] = {}
+    closed_class_ids = set(fast_path.report.get("closed_class_mention_ids") or ())
     for assertion in assertions:
         if assertion.lane != "FACT":
             continue
         if not (assertion.subject_mention_id and assertion.object_mention_id
                 and assertion.canonical_predicate):
             merge_fate[assertion.assertion_id] = "fact_without_promotable_endpoints"
+            continue
+        if (assertion.subject_mention_id in closed_class_ids
+                or assertion.object_mention_id in closed_class_ids):
+            merge_fate[assertion.assertion_id] = "blocked_closed_class_endpoint"
             continue
         key = (assertion.subject_mention_id, assertion.object_mention_id,
                assertion.canonical_predicate)

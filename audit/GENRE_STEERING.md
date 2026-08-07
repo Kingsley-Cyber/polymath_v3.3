@@ -280,3 +280,17 @@ Logged regressions (mechanism-class, queued for #2): family 02 junk-negative
 pre-existing metadiscourse-sentence FP class shifting under new window seams
 (matched 60/66 and zero leakage unchanged); family battery matched 94/102
 (-1: the appositive case) + 10 PASS.
+
+### Factory station 2: structural endpoint eligibility (#2, 2026-08-07)
+Narrow owner-ratified invariant, promotion veto only: a relation endpoint whose span
+root — or every token — is closed-class (AUX/DET/ADP/CCONJ/SCONJ/PART/PUNCT) never
+promotes; observation survives as REVIEW (`review:endpoint_head_closed_class`).
+Self-referential syntax endpoints REJECT (mirrors OpenIE assembler). Enforced in the
+fast path (POS from the shared parse), the OpenIE FACT merge, and the replay harness
+(one exported flag set). POS decides, never vocabulary — polysemy test in
+test_graphify_endpoint_eligibility.py: 'Deployment CAN cause…' (AUX) vetoed,
+'A CAN of paint fell…' (NOUN) eligible; parser-ambiguous contexts fall to REVIEW
+(abstention-safe). Verified: v7 monograph replay blocks 4 closed-class FACTs and the
+'can -[causes]-> action' class is gone; families matched 94/102 identical (appositive
+and metadiscourse residuals untouched, per scoping order); book/sealed replay traces
+and conservation unchanged; 571 tests green.

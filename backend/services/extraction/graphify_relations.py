@@ -65,6 +65,7 @@ _META_PREDICATE_RE = re.compile(
     r"\b(?:predicate|unmapped\s+surface\s+relation|depends[_ ]on|related[_ ]to)\b",
     re.I,
 )
+_CLOSED_CLASS_POS = frozenset({"AUX", "DET", "ADP", "CCONJ", "SCONJ", "PART", "PUNCT"})
 _OPEN_ONLY_LEMMAS = frozenset({"serve", "publish", "author", "curate", "interoperate", "occur"})
 # "X occurred in/at/on/near/during Y" is an explicit event-association surface;
 # the closed ontology represents it as related_to (generalizes the former
@@ -1767,6 +1768,7 @@ def run_relation_fast_path(
     mention_counts: list[int] = []
     conjunction_counts: list[int] = []
     dense_structure_units: list[str] = []
+    closed_class_mentions: set[str] = set()
     for unit, doc in zip(all_units, docs):
         # Strictly aligned entity mentions attached to the shared Doc so every
         # Doc consumer sees the same accepted spans (contract: one Doc).
@@ -1779,6 +1781,15 @@ def run_relation_fast_path(
             )
             if span is not None:
                 entity_spans.append(span)
+                # Structural endpoint eligibility (#2, owner-ratified): a span
+                # whose syntactic head — or every token — is closed-class can
+                # never anchor a relation endpoint. POS decides, not words:
+                # "Deployment CAN cause…" (AUX) is vetoed while "the CAN
+                # stores paint" (NOUN) stays eligible.
+                if span.root.pos_ in _CLOSED_CLASS_POS or all(
+                    token.pos_ in _CLOSED_CLASS_POS for token in span
+                ):
+                    closed_class_mentions.add(mention.mention_id)
         doc.spans["polymath_entities"] = entity_spans
         syntax, raw_syntax, local_gate_counts = _syntax_proposals(unit, doc, extractor, entity_by_id)
         direct = _direct_dependency_proposals(doc, unit)
@@ -1846,6 +1857,12 @@ def run_relation_fast_path(
             )
         if invalid_endpoint:
             pass
+        elif proposal.subject.entity_id == proposal.object.entity_id:
+            # Self-referential endpoints assert nothing (#2 invariant —
+            # mirrors the OpenIE assembler rule).
+            candidate = None
+            rule = "reject:self_referential_endpoints"
+            state = RelationTerminalState.REJECTED
         elif rule.startswith("open:"):
             state = RelationTerminalState.OPEN
         elif candidate is not None and (
@@ -1859,6 +1876,14 @@ def run_relation_fast_path(
         elif _crosses_competing_relation_cue(_unit, proposal, candidate):
             state = RelationTerminalState.REVIEW
             rule = "review:competing_coordinated_relation_cue"
+        elif (
+            proposal.subject.mention_id in closed_class_mentions
+            or proposal.object.mention_id in closed_class_mentions
+        ):
+            # Structural endpoint eligibility veto (#2): the observation
+            # survives with full provenance; it just never promotes.
+            state = RelationTerminalState.REVIEW
+            rule = "review:endpoint_head_closed_class"
         elif not all(
             entity_by_id[item.entity_id].state
             in {EntityTerminalState.PROMOTED, EntityTerminalState.DOCUMENT_LOCAL}
@@ -1901,6 +1926,8 @@ def run_relation_fast_path(
         "eligible_units": eligible_count,
         "relation_eligible_rate": eligible_count / len(all_decisions) if all_decisions else 0.0,
         "unit_kind_counts": dict(Counter(item.unit_kind for item in all_decisions)),
+        "closed_class_mention_ids": sorted(closed_class_mentions),
+        "closed_class_mentions": len(closed_class_mentions),
         "spacy_parses": len(docs),
         "parse_once": len(docs) == eligible_count,
         "statistical_ner_enabled": False,

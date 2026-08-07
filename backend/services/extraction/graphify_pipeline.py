@@ -663,11 +663,23 @@ async def run_graphify_pipeline(
                     [],
                 ).append((item.evidence_start, item.evidence_end))
         blocked_by_qualified_syntax = 0
+        blocked_closed_class_endpoint = 0
+        closed_class_endpoint_ids = set(
+            output.report.get("closed_class_mention_ids") or ()
+        )
         for assertion in openie_assertions:
             if (
                 assertion.lane != "FACT" or not assertion.subject_mention_id
                 or not assertion.object_mention_id or not assertion.canonical_predicate
             ):
+                continue
+            if (
+                assertion.subject_mention_id in closed_class_endpoint_ids
+                or assertion.object_mention_id in closed_class_endpoint_ids
+            ):
+                # #2 structural endpoint eligibility: closed-class-headed
+                # endpoint spans never promote; the assertion stays recorded.
+                blocked_closed_class_endpoint += 1
                 continue
             key = (
                 assertion.subject_mention_id, assertion.object_mention_id,
@@ -723,6 +735,7 @@ async def run_graphify_pipeline(
             "terminal_state_counts": terminal_counts,
             "openie_entity_facts_added": len(mapped) - len(output.mapped_relations),
             "openie_fact_blocked_by_qualified_syntax": blocked_by_qualified_syntax,
+            "openie_fact_blocked_closed_class_endpoint": blocked_closed_class_endpoint,
             "openie_lane_counts": openie_assertion_payload["report"].get("lane_counts", {}),
         })
         return {

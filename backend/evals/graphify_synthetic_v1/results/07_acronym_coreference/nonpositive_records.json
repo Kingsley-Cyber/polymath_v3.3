@@ -352,7 +352,7 @@
     "canonical_predicate": "owns",
     "score": 1.0,
     "reasons": [
-      "mapped:existing_syntax_stack:own",
+      "review:endpoint_head_closed_class",
       "source:existing_syntax_stack"
     ],
     "policy_release": "graphify-relation-fast-path-v13",
@@ -376,11 +376,11 @@
       "modality": "asserted",
       "attribution": "direct",
       "canonical_candidate": "owns",
-      "mapping_rule": "mapped:existing_syntax_stack:own",
+      "mapping_rule": "review:endpoint_head_closed_class",
       "mapping_release": "graphify-predicate-compiler-v2",
       "terminal_state": "review",
       "reasons": [
-        "mapped:existing_syntax_stack:own",
+        "review:endpoint_head_closed_class",
         "source:existing_syntax_stack"
       ]
     },
@@ -524,7 +524,7 @@
     "canonical_predicate": "owns",
     "score": 1.0,
     "reasons": [
-      "mapped:existing_syntax_stack:own",
+      "review:endpoint_head_closed_class",
       "source:existing_syntax_stack"
     ],
     "policy_release": "graphify-relation-fast-path-v13",
@@ -548,11 +548,11 @@
       "modality": "asserted",
       "attribution": "direct",
       "canonical_candidate": "owns",
-      "mapping_rule": "mapped:existing_syntax_stack:own",
+      "mapping_rule": "review:endpoint_head_closed_class",
       "mapping_release": "graphify-predicate-compiler-v2",
       "terminal_state": "review",
       "reasons": [
-        "mapped:existing_syntax_stack:own",
+        "review:endpoint_head_closed_class",
         "source:existing_syntax_stack"
       ]
     },
