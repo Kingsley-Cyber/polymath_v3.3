@@ -85,7 +85,7 @@
   "backend/services/extraction/graphify_argument_adapter.py": "92a829aa25a1d6e5210159cf84d2ab5ccffc3c85f08a85b5265bd2e2faa936e5",
   "backend/services/extraction/graphify_assertion_assembler.py": "9a608948578d2e9cb56f237967c0d8061dc24585e246efc6cb631d6aea56f533",
   "backend/services/extraction/graphify_assertion_semantics.py": "67f9e5602dd583e290e8017e73009e578f592080a669b9b9ec18f1994961a8c8",
-  "backend/services/extraction/graphify_census.py": "e3c80ebc50d33b8060bd7948d1460f456b1c5662c4d4a3fb668009fb6915e311",
+  "backend/services/extraction/graphify_census.py": "f8c2968b002a70e3f70db8f51e7431b93112f27b001a7d1a54e2a19787bc4669",
   "backend/services/extraction/graphify_completion.py": "faac6cb22e3831ada1a4574f825b4080fe6ce7477e4053bcc9e59588bb569064",
   "backend/services/extraction/graphify_normalization.py": "ca137159ad89925050930eb9963e4a719bbcb9ed42ddce89cf0b37551b4d29d6",
   "backend/services/extraction/graphify_openie.py": "38a8dddf7a67494e4e8acc889d7354ee82f0f02a1aa0c1d8ffd9b3bd343c4262",
@@ -129,7 +129,7 @@
   "spacy_model": "en_core_web_sm"
  },
  "freeze_id": "graphify-qualification-freeze-v6",
- "frozen_at_commit": "2d23eb6a68a6c8ab4cfb2cc3767e2e8e39faac00",
+ "frozen_at_commit": "878c53482ee21d4e24bfd0cbb60820644fd9f90d",
  "known_residuals_at_freeze": [
   "lowercase concept-phrase entities ('atomic deconstruction', 'text-to-video') intentionally suppressed by genericity gates \u2014 sealed-v2-class gold needs an owner contract decision before such relations can promote",
   "spec-metadata key mapping policy beyond self-naming keys (primary_system, has_type ...) undecided",
@@ -137,6 +137,6 @@
   "DENSE_STRUCTURE routing (labeling live, handler pending); per-proposer promotion telemetry pending",
   "agentless participles (E10), D04-class typing, cross-sentence relations"
  ],
- "purpose": "Round-1 downstream remediation freeze: adapter-v2 deterministic linking ladder, evidence-scoped FACT merge, self-loop + function-word guards. Precedes sealed_qualification_v7/v8 (research-monograph scale tests). Revised post-census-fold fix (scale crash on v7 first attempt; no key existed, seal unaffected). Re-pinned after promotable-endpoint acceptance rule (v7 scale crash #2). Re-pinned after artifact shard codec (v8 DocumentTooLarge). Re-pinned after legacy GLiNER/GLiREL purge (behavior-neutral, A/B-proven). Re-pinned after ratified #5+#6 (according-to attribution, frame-scoped operate). Re-pinned after factory station 1 (unit.kind + structure propagation). Re-pinned after factory station 2 (structural endpoint eligibility).",
+ "purpose": "Round-1 downstream remediation freeze: adapter-v2 deterministic linking ladder, evidence-scoped FACT merge, self-loop + function-word guards. Precedes sealed_qualification_v7/v8 (research-monograph scale tests). Revised post-census-fold fix (scale crash on v7 first attempt; no key existed, seal unaffected). Re-pinned after promotable-endpoint acceptance rule (v7 scale crash #2). Re-pinned after artifact shard codec (v8 DocumentTooLarge). Re-pinned after legacy GLiNER/GLiREL purge (behavior-neutral, A/B-proven). Re-pinned after ratified #5+#6 (according-to attribution, frame-scoped operate). Re-pinned after factory station 1 (unit.kind + structure propagation). Re-pinned after factory station 2 (structural endpoint eligibility). Re-pinned after factory station 3 (identifier minting).",
  "supersedes": "freeze_v5 (closed; sealed_v6 graded under it: traps 11/11, FACT .462)"
 }
