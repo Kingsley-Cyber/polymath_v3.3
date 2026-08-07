@@ -1,4 +1,20 @@
 {
+  "benchmarks": {
+    "sealed_qualification_v3": {
+      "package": "/Users/king/Downloads/sealed_qualification_v3",
+      "protocol": [
+        "1. verify_freeze INTACT (done)",
+        "2. extract-only with placeholder key; lock artifact + graph digests",
+        "3. owner supplies key; isolated grader converts it (implementation agent never reads it)",
+        "4. ONE scored run; graph digest must reproduce the locked digest",
+        "5. verify_freeze INTACT; the score stands as-is"
+      ],
+      "provenance": "owner-provided 03_transcript_test.md; answer key retained by owner off-flow \u2014 strongest seal: extraction completes before the key exists on this side",
+      "source_bytes": 2170,
+      "source_sha256": "c118a2dd096ca6a91045e6d87d8e2a832b4babe7aeb2ba6507e36633c2b8b477",
+      "status": "SOURCE_SEALED_OWNER_HOLDS_KEY"
+    }
+  },
   "code": {
     "backend/evals/graphify_synthetic_v1/score_synthetic_family.py": "f6a7d3158678ab4159b77ac97007ee1875fb1f2909125c9dc2b9b3d0ec969336",
     "backend/models/graphify_contracts.py": "46799a80b9c74cbe42b93e1b1aaa47a69a69dd33d8d391dc201b5fbf11ca0820",
