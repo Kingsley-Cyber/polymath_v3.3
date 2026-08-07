@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import re
 import time
@@ -16,7 +17,6 @@ from run_graphify_fixture_e2e import (
     _graph_snapshot,
     _ingest_fixture,
     _project_document,
-    _reset_namespace,
     _stage_payloads,
 )
 from models.graphify_contracts import PipelineStage, stable_digest
@@ -187,10 +187,17 @@ async def _run(args: argparse.Namespace) -> int:
     output_dir = Path(args.output_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     gold = json.loads(answer_key_path.read_text(encoding="utf-8"))
-    stores = _Stores(args.namespace)
+    # Immutable per-run namespace (owner-ratified 2026-08-07): a qualification
+    # run NEVER drop-resets a shared name — it derives a fresh identity from
+    # the source bytes and wall-clock run id, writes once, and leaves cleanup
+    # to a separate, ownership-aware GC. Two processes can no longer race a
+    # drop_database against live cursors.
+    source_hash = hashlib.sha256(source.read_bytes()).hexdigest()[:8]
+    run_id = time.strftime("%Y%m%dT%H%M%S")
+    run_namespace = f"{args.namespace}_{source_hash}_{run_id}"
+    stores = _Stores(run_namespace)
     started = time.perf_counter()
     try:
-        await _reset_namespace(stores)
         ingest = await _ingest_fixture(stores, source)
         await _project_document(stores, str(ingest["doc_id"]))
         initial = await _graph_snapshot(stores)
@@ -237,7 +244,8 @@ async def _run(args: argparse.Namespace) -> int:
         score["gates"]["projection_idempotent"] = idempotent
         score["source"] = str(source)
         score["answer_key"] = str(answer_key_path)
-        score["namespace"] = args.namespace
+        score["namespace"] = run_namespace
+        score["requested_namespace"] = args.namespace
         score["mongo_database"] = stores.db_name
         score["corpus_id"] = stores.corpus_id
         score["document_id"] = ingest["doc_id"]

@@ -211,3 +211,31 @@ representation classifier (prose/definition/heading/list_item/navigation/citatio
 boilerplate/code/structured_data) gating semantic extraction — navigation/boilerplate OFF,
 definitions get TERM:definition adapter; queued behind the two-file test round.
 STATUS: remediation stopped per owner; awaiting owner's 2 test files.
+
+### Owner-ratified next phase: CORPUS FACTORY EXECUTION ENGINE (2026-08-07)
+Diagnosis confirmed in code: correctness is parallelizable but execution is serialized —
+`TripletExtractCPUProvider.extract()` behind one global inference lock, called per unit in a
+loop; resource planner defaults to one active extraction doc. This regressed from the original
+corpus-first, throughput-maximized vision. Ratified target: stop scheduling documents,
+schedule WORK — CorpusCoordinator + bounded queues; corpus-wide GLiNER2 length/schema-bucketed
+batches through one warm owner; N-process warm triplet-extract farm (per-process instances,
+deterministic re-sort by document_id/evidence_start/unit_id/rendering_sequence); batched spaCy
+nlp.pipe; parallel deterministic compiler workers; dedicated bulk Mongo/Qdrant/Neo4j writers;
+saturation controller (backpressure only against OOM/swap/disk/writer explosion — never to
+reserve query capacity); stage throughput telemetry; empirical worker-count benchmarks.
+CORPUS = scheduling unit · DOCUMENT = semantic correctness unit · WINDOW = batching unit ·
+MODEL = warm residency owner. Every earned invariant carries unchanged (no bypass, no
+observation loss, deterministic_only=0, assertion safety, deterministic ordering, pinned models).
+Cheap deterministic wins audited in audit/DETERMINISTIC_CONTEXT_DOCTRINE.md (16 items:
+3 done, 10 partial, 3 missing) with the enforcement plan (stage-report invariants,
+source-scanning tests, freeze-manifest pinning).
+
+### Mongo failure diagnosis (owner-tightened, 2026-08-07)
+Immediate cause: WiredTiger index table referenced a missing .wt file → fassert abort.
+Likely contributors: historical disk-pressure failures + hard process terminations.
+Harness risk confirmed independently: destructive drop_database() on deterministic
+namespace reuse had no cross-process ownership coordination — removed regardless of
+whether it caused this crash. Remediation DONE: volume recreated clean after artifact
+export; stress runner now derives an IMMUTABLE per-run namespace
+(<ns>_<sourcehash8>_<runid>), never drop-resets at start; cleanup deferred to a
+separate ownership-aware GC.
