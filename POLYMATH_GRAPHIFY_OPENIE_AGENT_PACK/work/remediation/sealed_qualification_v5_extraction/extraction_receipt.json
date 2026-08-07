@@ -1,0 +1,32 @@
+{
+  "answer_key": "/Users/king/Downloads/sealed_qualification_v5/answer_key/PLACEHOLDER_EMPTY_KEY.json",
+  "artifact_digest": "834874270677ffa4c99b78ca3cba68d5ca9eb56739096225ca785a759745c99f",
+  "corpus_id": "fb7d29b2-407a-5c09-bba0-d8513f304c4d",
+  "counts": {
+    "gold_positive": 0,
+    "neo4j_promoted_positive": 0,
+    "qualified_gold": 0,
+    "qualified_retained": 70
+  },
+  "document_id": "71b2e2de25ef902ebdb87cfeb78d1363ca7ed6592741d1901dfe7233671e0a10",
+  "elapsed_seconds": 167.4902594589803,
+  "gates": {
+    "projection_idempotent": true
+  },
+  "graph": {
+    "counts": {
+      "assertion_edges": 0,
+      "assertion_support": 0,
+      "mentions": 15,
+      "nodes": 6,
+      "relations": 0
+    },
+    "digest": "ed24e818b656b8e4890cd1072973eb94b3b332e279c89cb7bd08989ef3bd71a6",
+    "repeat_digest": "ed24e818b656b8e4890cd1072973eb94b3b332e279c89cb7bd08989ef3bd71a6"
+  },
+  "metrics": {},
+  "mongo_database": "graphify_e2e_sealed_qualification_v5_fef0964e",
+  "namespace": "sealed_qualification_v5",
+  "source": "/Users/king/Downloads/sealed_qualification_v5/source/document.md",
+  "status": "unscored"
+}

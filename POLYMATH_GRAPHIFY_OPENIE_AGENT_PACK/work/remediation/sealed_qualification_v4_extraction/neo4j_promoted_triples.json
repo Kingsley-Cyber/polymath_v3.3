@@ -1,0 +1,10 @@
+[
+  {
+    "evidence_count": 0,
+    "object": "follow up action",
+    "object_entity_id": "entity:follow-up-action",
+    "predicate": "owns",
+    "subject": "bf 882",
+    "subject_entity_id": "entity:bf-882"
+  }
+]

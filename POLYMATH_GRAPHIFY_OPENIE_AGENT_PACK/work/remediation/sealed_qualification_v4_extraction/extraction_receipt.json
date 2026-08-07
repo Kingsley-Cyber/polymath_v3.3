@@ -1,0 +1,32 @@
+{
+  "answer_key": "/Users/king/Downloads/sealed_qualification_v4/answer_key/PLACEHOLDER_EMPTY_KEY.json",
+  "artifact_digest": "d319d8b9126b8f861fbaf71aaa0a4a091c271ee646c627ddb9d97fab6c4030a8",
+  "corpus_id": "088c4e59-fd66-5d81-9dc7-540c16c7fe0b",
+  "counts": {
+    "gold_positive": 0,
+    "neo4j_promoted_positive": 1,
+    "qualified_gold": 0,
+    "qualified_retained": 5
+  },
+  "document_id": "616b479e399a709c5f0d4c6d4a85b0574a00ff5ccbabfac7d206a2aea4987c45",
+  "elapsed_seconds": 162.09572670797934,
+  "gates": {
+    "projection_idempotent": true
+  },
+  "graph": {
+    "counts": {
+      "assertion_edges": 2,
+      "assertion_support": 2,
+      "mentions": 22,
+      "nodes": 8,
+      "relations": 1
+    },
+    "digest": "c33c79f11dceecb0d995527fd24a07343c9b201c0d2d71f52be81eb326dbdfd3",
+    "repeat_digest": "c33c79f11dceecb0d995527fd24a07343c9b201c0d2d71f52be81eb326dbdfd3"
+  },
+  "metrics": {},
+  "mongo_database": "graphify_e2e_sealed_qualification_v4_25ce5473",
+  "namespace": "sealed_qualification_v4",
+  "source": "/Users/king/Downloads/sealed_qualification_v4/source/document.md",
+  "status": "unscored"
+}
