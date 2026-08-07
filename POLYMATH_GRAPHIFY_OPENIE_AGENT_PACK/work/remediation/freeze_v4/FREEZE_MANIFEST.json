@@ -13,6 +13,22 @@
       "source_bytes": 2170,
       "source_sha256": "c118a2dd096ca6a91045e6d87d8e2a832b4babe7aeb2ba6507e36633c2b8b477",
       "status": "SOURCE_SEALED_OWNER_HOLDS_KEY"
+    },
+    "sealed_qualification_v4": {
+      "genre": "technical (control)",
+      "package": "/Users/king/Downloads/sealed_qualification_v4",
+      "provenance": "owner 01_technical_test.md; key off-flow; standstill in force (no code/mapping changes since freeze_v4)",
+      "source_bytes": 2427,
+      "source_sha256": "6f3880045b831d3549f57cb408ce2886cfc65252b08fc2d1b94859702d5026e4",
+      "status": "SOURCE_SEALED_OWNER_HOLDS_KEY"
+    },
+    "sealed_qualification_v5": {
+      "genre": "philosophical (new)",
+      "package": "/Users/king/Downloads/sealed_qualification_v5",
+      "provenance": "owner 02_philosophical_test.md; key off-flow; standstill in force",
+      "source_bytes": 2476,
+      "source_sha256": "e8beba9741d6318514ea8f1466a73b2df47d972e3a8af405372593e73ee3e21e",
+      "status": "SOURCE_SEALED_OWNER_HOLDS_KEY"
     }
   },
   "code": {
