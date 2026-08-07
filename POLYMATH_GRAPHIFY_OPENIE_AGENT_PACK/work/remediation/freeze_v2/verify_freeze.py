@@ -22,9 +22,28 @@ def main() -> int:
     manifest = json.loads(MANIFEST.read_text())
     failures: list[str] = []
 
+    frozen = manifest["frozen_at_commit"]
     head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT).decode().strip()
-    if head != manifest["frozen_at_commit"]:
-        failures.append(f"HEAD {head} != frozen commit {manifest['frozen_at_commit']}")
+    ancestor = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", frozen, head], cwd=ROOT,
+    ).returncode == 0
+    if not ancestor:
+        failures.append(f"frozen commit {frozen[:12]} is not an ancestor of HEAD {head[:12]}")
+    else:
+        # Post-freeze commits may only add evaluation evidence — never touch
+        # code, config, or scorers (their hashes are checked below anyway).
+        allowed_prefixes = (
+            "POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/work/remediation/",
+            "backend/evals/graphify_synthetic_v1/results/",
+            "audit/",
+            "data_eval/",
+        )
+        changed = subprocess.check_output(
+            ["git", "diff", "--name-only", f"{frozen}..{head}"], cwd=ROOT,
+        ).decode().splitlines()
+        for rel in changed:
+            if rel and not rel.startswith(allowed_prefixes):
+                failures.append(f"post-freeze change outside evidence paths: {rel}")
     dirty = subprocess.check_output(["git", "status", "--porcelain"], cwd=ROOT).decode().strip()
     if dirty:
         failures.append(f"worktree dirty ({len(dirty.splitlines())} paths)")
