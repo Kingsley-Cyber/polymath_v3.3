@@ -607,13 +607,13 @@ async def _runpod_flash_submit(
 ) -> dict[str, Any]:
     """Submit one Runpod Flash job and poll it to completion.
 
-    Thin seam over ``services.runpod_flash_extraction._submit_and_wait`` —
+    Thin seam over ``services.runpod_dispatch._submit_and_wait`` —
     the proven submit/retry/poll/cancel implementation of the extraction
     lane is reused, not copied. Imported lazily so this module never drags
     the Ghost B stack in at import time; the seam is also the monkeypatch
     point for the offline test suite.
     """
-    from services.runpod_flash_extraction import _submit_and_wait
+    from services.runpod_dispatch import _submit_and_wait
 
     return await _submit_and_wait(
         client,
@@ -677,7 +677,7 @@ async def _embed_batch_runpod(
     """Runpod Flash burst embedding across the multi-account registry (P1.8).
 
     Routing mirrors the extraction lane and REUSES its dispatcher
-    (``services.runpod_flash_extraction._AccountDispatcher``): the enabled
+    (``services.runpod_dispatch._AccountDispatcher``): the enabled
     account with the least in-flight batches wins (tie: weight, then name),
     per-account concurrency is gated by each account's own semaphore, and a
     failed batch fails over ONCE to a different account before raising.
@@ -689,7 +689,7 @@ async def _embed_batch_runpod(
     Any incomplete result raises — a short vector set must never reach the
     caller (COUNT IS A CONTRACT, same rule as the local path).
     """
-    from services.runpod_flash_extraction import _AccountDispatcher, _safe_error
+    from services.runpod_dispatch import _AccountDispatcher, _safe_error
     from services.settings import settings_service
 
     accounts = await settings_service.get_system_runpod_flash_accounts()

@@ -354,11 +354,14 @@ async def run_phase1_fixture_pipeline(
             )
         )
 
-    # Historical fixture-only dependency. Production ingestion never imports
-    # or calls Relex; the frozen baseline runner is its sole supported entry.
-    from services.ingestion.relex_local import extract_entities
+    # Relex was retired entirely on 2026-08-07 (owner order): GLiNER2 +
+    # triplet-extract via graphify_cpu is the only extraction stack.
+    raise NotImplementedError(
+        "The Relex fixture lane is retired; ingest fixtures through the "
+        "graphify_cpu engine instead."
+    )
 
-    report = await extract_entities(tasks, return_report=True)
+    report = await extract_entities(tasks, return_report=True)  # noqa: F821 — unreachable, kept for shape
     results = list(report.results or [])
     if len(results) != len(tasks):
         raise RuntimeError(

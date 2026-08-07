@@ -1,0 +1,32 @@
+{
+  "answer_key": "/Users/king/polymath_v3.3/POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/work/remediation/sealed_v6_placeholder_key.json",
+  "artifact_digest": "c54742bc1026924de5af143a1f3b03c577bc1fb5d17b9cd4c9c57beccedf2f78",
+  "corpus_id": "7ed036bd-8550-5ca2-ac2e-5d6666c4995a",
+  "counts": {
+    "gold_positive": 0,
+    "neo4j_promoted_positive": 572,
+    "qualified_gold": 0,
+    "qualified_retained": 3721
+  },
+  "document_id": "5b20ae593aa34b63b100b0a890e7141b8f5305687fd306ef2c9c4dc84f53347c",
+  "elapsed_seconds": 1331.3902767499967,
+  "gates": {
+    "projection_idempotent": true
+  },
+  "graph": {
+    "counts": {
+      "assertion_edges": 624,
+      "assertion_support": 624,
+      "mentions": 3774,
+      "nodes": 1723,
+      "relations": 572
+    },
+    "digest": "eb0e7d379df6de293ffcd946193f2eaa2f939d16f24511221f2dac25b8aa0a45",
+    "repeat_digest": "eb0e7d379df6de293ffcd946193f2eaa2f939d16f24511221f2dac25b8aa0a45"
+  },
+  "metrics": {},
+  "mongo_database": "graphify_e2e_sealed_qualification_v8_3f644f3f",
+  "namespace": "sealed_qualification_v8",
+  "source": "/Users/king/Downloads/s/CPCS_FACS_Laban_AI_Video_Directorial_Control_Research_Paper.md",
+  "status": "unscored"
+}
