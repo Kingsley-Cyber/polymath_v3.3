@@ -52,7 +52,7 @@
     "spacy_model": "en_core_web_sm"
   },
   "freeze_id": "graphify-qualification-freeze-v4",
-  "frozen_at_commit": "PENDING_COMMIT",
+  "frozen_at_commit": "de410a56a3bb6a5b3d029753727512b9b37db5d0",
   "known_residuals_at_freeze": [
     "lowercase concept-phrase entities ('atomic deconstruction', 'text-to-video') intentionally suppressed by genericity gates \u2014 sealed-v2-class gold needs an owner contract decision before such relations can promote",
     "spec-metadata key mapping policy beyond self-naming keys (primary_system, has_type ...) undecided",
