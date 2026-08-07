@@ -1,6 +1,11 @@
 [
   {
     "subject": "glowline metrics",
+    "predicate": "defines",
+    "object": "redlark"
+  },
+  {
+    "subject": "glowline metrics",
     "predicate": "derived_from",
     "object": "redlark"
   },

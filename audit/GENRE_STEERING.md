@@ -193,3 +193,21 @@ v6 traps still 0 leaked, 554 tests green):
 Alignment residuals: book R15/R18/R58, sealed R2/R15/R20/R42/R43, v6 R11 — next
 inspection targets. Adapter release bumped to v2; extraction-time regressions (families,
 book, sealed re-runs) still required before any new sealed one-shot.
+
+### Full extraction-time regression under adapter-v2 ladder (2026-08-07, owner-ordered STOP+regress)
+- **Families 01-10**: matched IDENTICAL (95/102 + 10 PASS 9/9; same three pre-existing
+  misses E10/I06/D04). 11 new unexpected promotions — ~4 true-but-unlisted facts
+  (e.g. Tobias Venn member_of Telemetry Group) + FPs from TWO PRE-EXISTING LATENT DEFECTS
+  the ladder exposed: (a) `config/predicate_synonyms.yaml:506` `operate: runs_on` is
+  agency-inverting (drove 3 wrong runs_on edges); (b) "according (to)" appears in NO
+  qualifier inventory — "…according to a dockside joke" promoted as direct FACT.
+  Both are general-mechanism fixes, queued for owner decision (remediation stopped).
+- **book-66**: 60/66 matched (59→60), R .894→.909, P .831→.779, F1 .861→.839, 0 leaks.
+- **sealed-v1-as-dev**: 45/51 matched (40→45), R .784→.882, P .833→.776, F1 .808→.826, 0 leaks.
+Net: the OpenIE stream now contributes real extraction-time recall (+1 book, +5 sealed);
+precision paid ~.05 via upstream-attachment FPs + the two latent defects. Assertion safety
+unbroken: zero leakage in every run. Ratified next architecture item (owner): unit.kind
+representation classifier (prose/definition/heading/list_item/navigation/citation/
+boilerplate/code/structured_data) gating semantic extraction — navigation/boilerplate OFF,
+definitions get TERM:definition adapter; queued behind the two-file test round.
+STATUS: remediation stopped per owner; awaiting owner's 2 test files.

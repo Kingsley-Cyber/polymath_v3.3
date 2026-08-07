@@ -3,9 +3,9 @@
   "status": "FAIL",
   "runtime": {
     "pipeline_release": "graphify-cpu-pipeline-v15",
-    "mongo_database": "graphify_eval_syn_06_0f2e852733",
-    "corpus_id": "aba5a2e1-80fc-5cef-b582-b5219d4202a3",
-    "elapsed_seconds": 1.13,
+    "mongo_database": "graphify_eval_syn_06_8ee34da81c",
+    "corpus_id": "410a5b31-1974-5cac-baed-080322107afb",
+    "elapsed_seconds": 1.09,
     "interpreter": "/Users/king/polymath_v3.3/local_ghost_b/.venv/bin/python"
   },
   "items": {
@@ -16,6 +16,7 @@
   },
   "negative_entities_in_graph": [],
   "unexpected_promoted_triples": [
+    "glowline metrics | defines | redlark",
     "quartzline analytics | runs on | sable index"
   ],
   "duplicate_promoted_edges": {},
@@ -28,7 +29,7 @@
       "redlark",
       "sable index"
     ],
-    "promoted_edge_count": 4
+    "promoted_edge_count": 5
   },
   "extracted_entities": [
     "2029",

@@ -1,5 +1,10 @@
 [
   {
+    "subject": "gullwing",
+    "predicate": "supports",
+    "object": "tis sky 2027 04"
+  },
+  {
     "subject": "gullwing runtime",
     "predicate": "supports",
     "object": "moorline dispatch"
