@@ -43,7 +43,7 @@
     "backend/services/extraction/graphify_completion.py": "faac6cb22e3831ada1a4574f825b4080fe6ce7477e4053bcc9e59588bb569064",
     "backend/services/extraction/graphify_openie.py": "c43fdf3f0f871cc947bff9df9b664d107053016a4d113f3ff8fe12994cddd47f",
     "backend/services/extraction/graphify_pipeline.py": "0692b1fc59995105626b98e3bb3fd12f3b06ba014d3e1e9eea3853568cd36e68",
-    "backend/services/extraction/graphify_predicate_compiler.py": "c3dccf6e504fcd8078093824ef448048a283d98172f38f86aa97aad04c7c2f08",
+    "backend/services/extraction/graphify_predicate_compiler.py": "2a7524468e728d7c513c4f4246d4947535f450e85eed51c5df7ef1048d2c3bb0",
     "backend/services/extraction/graphify_proposition_reducer.py": "5542b21b4dd14c0dc2c023188c61687aedbe5c8414cdadc676b4b843ada65d2b",
     "backend/services/extraction/graphify_reducer.py": "0b7ef7860985bf0a9aef7430111184dc20744701ed0c4417a30f4334836771da",
     "backend/services/extraction/graphify_relations.py": "f41b4deb4295ac4681bd0572bcec4969aee12a8ac6eb09e14dbd8af69c026b40",
@@ -71,7 +71,7 @@
     "spacy_model": "en_core_web_sm"
   },
   "freeze_id": "graphify-qualification-freeze-v3",
-  "frozen_at_commit": "085e09fa4f86110a6f3a81338704c618e252f42f",
+  "frozen_at_commit": "710511a44b6916a5dfd1c0528471d69766c461bb",
   "known_residuals_at_freeze": [
     "typing residuals: bare/context-poor names can type as Concept and fail endpoint signatures (I06/I10/D04 class)",
     "agentless participle frames ('written in Rust') not extracted (E10)",
@@ -85,6 +85,7 @@
     "transfer_verbs": "destination->uses, source->consumes (phrase-keyed; bare verbs stay open); precedent: frozen Meridian lexicon writes-to->uses / reads-from->consumes"
   },
   "purpose": "Code+config+scorer+environment freeze preceding the SECOND sealed one-shot qualification run. Any hash mismatch after this point invalidates that qualification claim.",
+  "revision_note": "Re-pinned 2026-08-07 after fixing an empty-lemma-candidates crash the sealed_v2 document exposed; no scoring had occurred and no answer key existed at re-pin time.",
   "supersedes": "graphify-qualification-freeze-v2 (closed after the completed 2026-08-07 one-shot: F1 .742 FAILED)",
   "worktree_clean": true
 }
