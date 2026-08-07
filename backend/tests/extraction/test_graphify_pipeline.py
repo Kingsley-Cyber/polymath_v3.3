@@ -220,6 +220,14 @@ async def test_provider_failure_records_failure_and_no_downstream_artifact() -> 
             (("Orion Module", "software"), ("current production architecture", "concept")),
             "part_of",
         ),
+        (
+            # Peripheral reported-attribution adjunct: the content is a
+            # reported claim, never a direct graph fact (owner-ratified
+            # discourse construction, 2026-08-07).
+            "According to a dockside joke, Norvale Group owns the south quay.",
+            (("Norvale Group", "organization"), ("south quay", "location")),
+            "owns",
+        ),
     ],
 )
 async def test_pipeline_never_promotes_negated_or_negated_attributed_fact(

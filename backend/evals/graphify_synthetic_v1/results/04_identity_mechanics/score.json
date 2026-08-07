@@ -3,9 +3,9 @@
   "status": "FAIL",
   "runtime": {
     "pipeline_release": "graphify-cpu-pipeline-v15",
-    "mongo_database": "graphify_eval_syn_04_5ae12de7ad",
-    "corpus_id": "784e6c31-0f93-5374-964f-2fadc7433d05",
-    "elapsed_seconds": 1.46,
+    "mongo_database": "graphify_eval_syn_04_916eb4f9d8",
+    "corpus_id": "f2515c88-eb05-5ea4-adbf-0f250efc09c8",
+    "elapsed_seconds": 1.35,
     "interpreter": "/Users/king/polymath_v3.3/local_ghost_b/.venv/bin/python"
   },
   "items": {

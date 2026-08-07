@@ -15,7 +15,10 @@ from models.graphify_contracts import (
     stable_digest,
     stable_id,
 )
-from services.extraction.graphify_assertion_semantics import nominal_assertion_qualification
+from services.extraction.graphify_assertion_semantics import (
+    nominal_assertion_qualification,
+    reported_attribution_source,
+)
 
 PROPOSITION_REDUCER_RELEASE = "graphify-openie-proposition-reducer-v2"
 _WORD_RE = re.compile(r"[\w]+", re.UNICODE)
@@ -102,6 +105,12 @@ def _qualification(proposition: OpenIERawPropositionV1) -> tuple[str, str, str]:
             modality = nominal_modality
         if attribution == "direct":
             attribution = nominal_attribution
+    if attribution == "direct":
+        # Peripheral "According to X, P" adjunct: the proposition is reported,
+        # not directly asserted — the assertion gate decides its lane.
+        reported = reported_attribution_source(proposition.evidence_text)
+        if reported is not None:
+            attribution = f"reported:according_to:{reported}"
     return polarity, modality, attribution
 
 

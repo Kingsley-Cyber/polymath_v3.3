@@ -28,10 +28,5 @@
     "subject": "tidewatch systems",
     "predicate": "owns",
     "object": "cargo manifest reconciliation service"
-  },
-  {
-    "subject": "tidewatch systems",
-    "predicate": "runs_on",
-    "object": "berth scheduling stack"
   }
 ]

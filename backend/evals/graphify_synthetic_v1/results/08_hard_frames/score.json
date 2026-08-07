@@ -3,9 +3,9 @@
   "status": "PASS",
   "runtime": {
     "pipeline_release": "graphify-cpu-pipeline-v15",
-    "mongo_database": "graphify_eval_syn_08_22f45cbc01",
-    "corpus_id": "5538336a-0f0d-50fe-bd00-1016ad18350b",
-    "elapsed_seconds": 1.1,
+    "mongo_database": "graphify_eval_syn_08_0e1ab4bd4f",
+    "corpus_id": "e3c95453-cf6d-55b4-b0e3-fd227bba10ad",
+    "elapsed_seconds": 1.24,
     "interpreter": "/Users/king/polymath_v3.3/local_ghost_b/.venv/bin/python"
   },
   "items": {
@@ -15,9 +15,7 @@
     "total": 7
   },
   "negative_entities_in_graph": [],
-  "unexpected_promoted_triples": [
-    "norvale group | runs on | wavemark"
-  ],
+  "unexpected_promoted_triples": [],
   "duplicate_promoted_edges": {},
   "graph": {
     "nodes": [
@@ -25,13 +23,11 @@
       "draft survey",
       "february grounding event",
       "gate controller",
-      "norvale group",
       "pier nine",
       "spring audit window",
-      "wavemark",
       "yard stack"
     ],
-    "promoted_edge_count": 6
+    "promoted_edge_count": 5
   },
   "extracted_entities": [
     "Berth K-7",

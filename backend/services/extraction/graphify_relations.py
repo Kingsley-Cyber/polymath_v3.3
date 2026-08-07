@@ -731,6 +731,37 @@ def _claim_noun_rejected(noun) -> bool:
     return False
 
 
+def _reported_adjunct_source(predicate) -> str | None:
+    """Source of a sentence-PERIPHERAL 'according to X' adjunct, else None.
+
+    Construction-level rule (owner-ratified): only a fronted adjunct
+    ("According to X, P") or a comma-detached trailing one ("P, according
+    to X") marks the clause as reported. A mid-clause manner/compliance use
+    ("operates according to plan") never fires — it sits after the subject
+    with no comma boundary.
+    """
+    sent = predicate.sent
+    subject_index = min(
+        (child.i for child in predicate.children if child.dep_ in {"nsubj", "nsubjpass"}),
+        default=predicate.i,
+    )
+    for item in sent:
+        if item.text.casefold() != "according":
+            continue
+        pobj = next((c for c in item.children if c.dep_ == "pobj"), None)
+        if pobj is None:
+            to_child = next((c for c in item.children if c.lemma_.casefold() == "to"), None)
+            if to_child is not None:
+                pobj = next((c for c in to_child.children if c.dep_ == "pobj"), None)
+        if pobj is None:
+            continue
+        fronted = item.i < subject_index
+        comma_detached = item.i > sent.start and item.doc[item.i - 1].text == ","
+        if fronted or comma_detached:
+            return " ".join(t.text for t in pobj.subtree).strip()
+    return None
+
+
 def _qualifiers(token, _text: str) -> tuple[str, str, str]:
     predicate = (
         token.head
@@ -739,6 +770,10 @@ def _qualifiers(token, _text: str) -> tuple[str, str, str]:
     )
     governors = _attribution_governors(token)
     attribution = " > ".join(item.lemma_.casefold() for item in reversed(governors))
+    reported_source = _reported_adjunct_source(predicate)
+    if reported_source is not None:
+        marker = f"according_to:{reported_source.casefold()}"
+        attribution = f"{attribution} > {marker}" if attribution else marker
     claim_noun = _claim_noun_governor(token)
     claim_noun_rejected = claim_noun is not None and _claim_noun_rejected(claim_noun)
     if claim_noun is not None:

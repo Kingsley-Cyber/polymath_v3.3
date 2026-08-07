@@ -44,6 +44,49 @@
   },
   {
     "schema_version": "polymath.assertion_decision.v1",
+    "decision_id": "assertion-decision:160967e26a720a49e424a545",
+    "relation_id": "surface-relation:35103f3868b174607ec71455",
+    "document_id": "7ead4bd5cb08714670a72e47219ae20e62f3c0b70f568e169cb2716b6144d68b",
+    "status": "open",
+    "canonical_predicate": null,
+    "score": 1.0,
+    "reasons": [
+      "open:operate:unmapped_surface_relation",
+      "source:strict_dependency_cue"
+    ],
+    "policy_release": "graphify-relation-fast-path-v13",
+    "_mapped": {
+      "schema_version": "polymath.surface_relation.v1",
+      "relation_id": "surface-relation:35103f3868b174607ec71455",
+      "document_id": "7ead4bd5cb08714670a72e47219ae20e62f3c0b70f568e169cb2716b6144d68b",
+      "evidence_text": "Wavemark, the routing platform operated by the Norvale Group, publishes sailing plans.",
+      "evidence_start": 179,
+      "evidence_end": 265,
+      "subject_mention_id": "completed-mention:3a89148f13cd935fb66ad3ff",
+      "object_mention_id": "completed-mention:3faed8c41e087ac135919d80",
+      "surface_predicate": "operated by",
+      "lemma": "operate",
+      "particle": "",
+      "preposition": "by",
+      "dependency_frame": "direct:passive:acl",
+      "dependency_path": "pobj>acl>nsubj",
+      "voice": "passive",
+      "polarity": "positive",
+      "modality": "asserted",
+      "attribution": "",
+      "canonical_candidate": null,
+      "mapping_rule": "open:operate:unmapped_surface_relation",
+      "mapping_release": "graphify-predicate-compiler-v2",
+      "terminal_state": "open",
+      "reasons": [
+        "open:operate:unmapped_surface_relation",
+        "source:strict_dependency_cue"
+      ]
+    },
+    "_lane": "fast_path:open"
+  },
+  {
+    "schema_version": "polymath.assertion_decision.v1",
     "decision_id": "assertion-decision:1fca0fccd8658a6f84294912",
     "relation_id": "surface-relation:8b009931eae97da05de477ba",
     "document_id": "7ead4bd5cb08714670a72e47219ae20e62f3c0b70f568e169cb2716b6144d68b",

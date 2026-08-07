@@ -216,46 +216,46 @@
   },
   {
     "schema_version": "polymath.assertion_decision.v1",
-    "decision_id": "assertion-decision:e4681751287f8cafc0d218b7",
-    "relation_id": "surface-relation:8f5aed391a32ffb771e25c66",
+    "decision_id": "assertion-decision:db29c8934598662dbccc8a85",
+    "relation_id": "surface-relation:010c82b1fe6c9a7d88dc4646",
     "document_id": "5be4a7405d676d148b3181da5ac22fb806cce586b7b718e56357e52338083aa2",
-    "status": "review",
-    "canonical_predicate": "runs_on",
+    "status": "open",
+    "canonical_predicate": null,
     "score": 1.0,
     "reasons": [
-      "mapped:existing_syntax_stack:operate",
-      "source:existing_syntax_stack"
+      "open:operate:unmapped_surface_relation",
+      "source:strict_dependency_cue"
     ],
     "policy_release": "graphify-relation-fast-path-v13",
     "_mapped": {
       "schema_version": "polymath.surface_relation.v1",
-      "relation_id": "surface-relation:8f5aed391a32ffb771e25c66",
+      "relation_id": "surface-relation:010c82b1fe6c9a7d88dc4646",
       "document_id": "5be4a7405d676d148b3181da5ac22fb806cce586b7b718e56357e52338083aa2",
       "evidence_text": "The Sable Index is owned and operated by Quartzline Analytics.",
       "evidence_start": 447,
       "evidence_end": 509,
-      "subject_mention_id": "completed-mention:20f2512192bbf11d01af50ea",
-      "object_mention_id": "completed-mention:2e46ea4e6570dbb0d5872b04",
-      "surface_predicate": "operate",
+      "subject_mention_id": "completed-mention:2e46ea4e6570dbb0d5872b04",
+      "object_mention_id": "completed-mention:a9cf8615e128eb1ca03621c4",
+      "surface_predicate": "operated by",
       "lemma": "operate",
       "particle": "",
-      "preposition": "",
-      "dependency_frame": "syntax:NATIVE_SVO",
-      "dependency_path": "nsubj-VERB-dobj",
-      "voice": "",
+      "preposition": "by",
+      "dependency_frame": "direct:passive:conj",
+      "dependency_path": "pobj>conj>nsubjpass",
+      "voice": "passive",
       "polarity": "positive",
       "modality": "asserted",
-      "attribution": "direct",
-      "canonical_candidate": "runs_on",
-      "mapping_rule": "mapped:existing_syntax_stack:operate",
+      "attribution": "",
+      "canonical_candidate": null,
+      "mapping_rule": "open:operate:unmapped_surface_relation",
       "mapping_release": "graphify-predicate-compiler-v2",
-      "terminal_state": "review",
+      "terminal_state": "open",
       "reasons": [
-        "mapped:existing_syntax_stack:operate",
-        "source:existing_syntax_stack"
+        "open:operate:unmapped_surface_relation",
+        "source:strict_dependency_cue"
       ]
     },
-    "_lane": "fast_path:review"
+    "_lane": "fast_path:open"
   },
   {
     "schema_version": "polymath.assertion_decision.v1",

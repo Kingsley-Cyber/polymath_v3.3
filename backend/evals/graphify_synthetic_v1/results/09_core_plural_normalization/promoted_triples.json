@@ -20,11 +20,6 @@
     "object": "booking ledger"
   },
   {
-    "subject": "norvale group",
-    "predicate": "owns",
-    "object": "south quay"
-  },
-  {
     "subject": "stowage planner",
     "predicate": "consumes",
     "object": "load manifest"

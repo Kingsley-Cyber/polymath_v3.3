@@ -20,11 +20,6 @@
     "object": "yard stack"
   },
   {
-    "subject": "norvale group",
-    "predicate": "runs_on",
-    "object": "wavemark"
-  },
-  {
     "subject": "yard stack",
     "predicate": "depends_on",
     "object": "gate controller"

@@ -75,3 +75,27 @@ def nominal_assertion_qualification(
             f"nominal:{noun}",
         )
     return None
+
+
+# "According to X, P" — a generic reported-attribution discourse construction
+# (owner-ratified 2026-08-07). Only sentence-PERIPHERAL adjunct positions
+# qualify: fronted ("According to X, ...") or comma-detached trailing
+# ("..., according to X"). A mid-clause manner/compliance use ("operates
+# according to plan") is NOT reported speech and must never fire.
+_ACCORDING_FRONTED_RE = re.compile(
+    r"(?:^|[.!?]\s+)according to\s+(?P<source>[^,]{1,120}?),", re.I,
+)
+_ACCORDING_TRAILING_RE = re.compile(
+    r",\s*according to\s+(?P<source>[^,.;]{1,120})\s*[.;]?\s*$", re.I,
+)
+
+
+def reported_attribution_source(evidence_text: str) -> str | None:
+    """Return the attribution source of a peripheral 'according to' adjunct."""
+    for pattern in (_ACCORDING_FRONTED_RE, _ACCORDING_TRAILING_RE):
+        match = pattern.search(evidence_text)
+        if match:
+            source = " ".join(_WORD_RE.findall(match.group("source")))
+            if source:
+                return source
+    return None

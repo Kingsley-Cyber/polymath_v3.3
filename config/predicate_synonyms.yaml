@@ -503,7 +503,12 @@ synonyms:
   runs on: runs_on
   executes: runs_on
   execute: runs_on
-  operate: runs_on
+  # 'operate' is polysemous (operate a refinery / operate on Linux /
+  # operate in Europe / operate at 3000 RPM) — the bare verb carries no
+  # single canonical frame, so it stays OPEN (owner-ratified 2026-08-07:
+  # abstention beats a deterministic wrong answer). Only the
+  # preposition-inclusive platform frame maps; endpoint type signatures
+  # gate it further downstream.
   operates on: runs_on
   performs: runs_on
   perform: runs_on

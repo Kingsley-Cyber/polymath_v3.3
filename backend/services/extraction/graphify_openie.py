@@ -54,7 +54,9 @@ _QUALIFIED_UNIT_RE = re.compile(
     r"refutes?|rejects?)\s+that\b"
     # Claim-noun complements are attributed content, never direct assertions:
     # "the (incorrect) statement/assertion/allegation/rumor that X ..."
-    r"|\b(?:statements?|assertions?|allegations?|rumou?rs?|hypothes[ei]s)\s+that\b",
+    r"|\b(?:statements?|assertions?|allegations?|rumou?rs?|hypothes[ei]s)\s+that\b"
+    # Peripheral reported-attribution adjunct (owner-ratified construction):
+    r"|(?:^|[.!?]\s)\s*according\s+to\b|,\s*according\s+to\b",
     re.I,
 )
 _TITLE_PHRASE_RE = re.compile(

@@ -3,9 +3,9 @@
   "status": "PASS",
   "runtime": {
     "pipeline_release": "graphify-cpu-pipeline-v15",
-    "mongo_database": "graphify_eval_syn_09_7812bb9a96",
-    "corpus_id": "37eca450-d447-5d6e-878a-eb380d9a3135",
-    "elapsed_seconds": 1.25,
+    "mongo_database": "graphify_eval_syn_09_a710f844c1",
+    "corpus_id": "a4a4fdbc-f950-5b65-9588-7dda57f0339b",
+    "elapsed_seconds": 1.18,
     "interpreter": "/Users/king/polymath_v3.3/local_ghost_b/.venv/bin/python"
   },
   "items": {
@@ -15,9 +15,7 @@
     "total": 8
   },
   "negative_entities_in_graph": [],
-  "unexpected_promoted_triples": [
-    "norvale group | owns | south quay"
-  ],
+  "unexpected_promoted_triples": [],
   "duplicate_promoted_edges": {},
   "graph": {
     "nodes": [
@@ -28,13 +26,11 @@
       "correction queue",
       "exception desk",
       "load manifest",
-      "norvale group",
       "rejected manifests",
-      "south quay",
       "stowage planner",
       "voltage sag"
     ],
-    "promoted_edge_count": 8
+    "promoted_edge_count": 7
   },
   "extracted_entities": [
     "Berth Fairness",

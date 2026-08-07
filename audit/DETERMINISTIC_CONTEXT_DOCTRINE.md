@@ -63,3 +63,32 @@ same phase since they gate what work enters the queues. Correctness invariants
 carried unchanged: OpenIE bypass impossible, observation loss impossible,
 deterministic_only = 0, assertion safety untouched, document semantics isolated,
 deterministic output ordering, pinned model releases.
+
+## Rule-admission contract (owner-ratified 2026-08-07 — governs every future deterministic extraction change)
+
+1. **Document-blind** — the rule is describable without naming a benchmark document, entity, or expected answer.
+2. **Class-based** — POS, dependency structure, document structure, shapes, types, grammatical constructions; never literal vocabulary lists.
+3. **Upstream-first** — if GLiNER2, OpenIE, spaCy, or the structured parser already exposes the information, consume it; never recreate it.
+4. **Counterexample-tested** — every positive example ships with adversarial negatives ("operate" is the textbook case).
+5. **Abstention-safe** — when semantics cannot be established deterministically, preserve OPEN; never coerce.
+6. **Stage-measured** — census → reducer → propositions → mapping → assertion gate measured separately; never fix a downstream symptom upstream.
+7. **Burned regression vs sealed qualification** — any document that inspired a change becomes development data; it can prove non-regression, never generalization.
+
+Acid test: *would this exact rule have been written before seeing the failing document?*
+Standing principle: fix representation and linguistic invariants aggressively; expand
+semantic mappings conservatively; abstention beats a deterministic wrong answer.
+
+## Ratified decision matrix (2026-08-07)
+1 unit.kind → YES as ROUTING (prose→GLiNER+OpenIE · definition→+context · navigation→no
+semantic extraction · metadata→kv parser · table/code→structural parsers; nothing thrown
+away). 2 endpoint eligibility → YES, structural (entity span / identifier / typed value /
+resolved reference, head never purely AUX·DET·ADP·CCONJ·SCONJ·PART·punct — no stopword
+lists). 3 identifier minting → YES. 4 structure propagation → YES. 5 operate → frame-scoped:
+bare verb OPEN, only "operates on"→runs_on survives (type signatures gate further); DONE.
+6 according-to → YES as discourse semantics (peripheral-adjunct construction → attribution
+{reported, source, cue}; gate decides lane); DONE both lanes with counterexample
+("operates according to plan" never fires). 7 temporal/numeric → YES as QUALIFIERS/typed
+values on assertions (temporal{relation,operator,value}, value{value,unit,dimension}) —
+never a LAUNCHES_ON/COSTS predicate explosion. 8 research verbs → NO core expansion;
+OPEN stands; corpus-adapter proposal flow (observed OPEN predicates → frequency/signatures
+→ adapter proposal → review + regression → compiled corpus ontology).

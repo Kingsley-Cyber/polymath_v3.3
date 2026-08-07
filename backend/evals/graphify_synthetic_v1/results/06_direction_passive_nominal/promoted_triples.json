@@ -18,10 +18,5 @@
     "subject": "quartzline analytics",
     "predicate": "owns",
     "object": "sable index"
-  },
-  {
-    "subject": "quartzline analytics",
-    "predicate": "runs_on",
-    "object": "sable index"
   }
 ]
