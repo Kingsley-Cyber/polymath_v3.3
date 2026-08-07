@@ -151,3 +151,25 @@ regressions for this cycle. Qualification bar stays at P/R/F1 ≥ .80, zero leak
 | Grammar-first pairs, no all-pairs generation | COMPLIES | proposals are construction-anchored; pair co-occurrence licenses parsing only, never generates pairs |
 | Tail telemetry (p50/p95/p99/max) | **MISSING** | add counters to the fast-path report |
 | DENSE_STRUCTURE classification/routing | **MISSING** | add; today pathological units are handled implicitly or dropped by frame coverage |
+
+---
+
+# Open-discovery cycle: ratified architecture changes (owner + review, 2026-08-07)
+
+## Change #1 — census schema: core inventory + compiled corpus adapter
+`ENTITY_DESCRIPTIONS` stops being one global dict. Schema = core entity descriptions (+ optional corpus adapter descriptions) → deterministic serialization → schema_hash → cached per corpus generation; hash stamped on every raw mention. Adapter labels (e.g. DOCUMENT_ID, SCHEMA_FIELD, FORMAT) normalize to core types + facets (Artifact/facet=document_identifier; Concept/facet=schema_field). No decoy labels in v1 (retained as controlled ablation only if the genericity gate misses target).
+Governors:
+1. Adapter selection is deterministic and declared: survey-derived rule (key-value density, identifier-shape density), adapter id + hash in the run receipt.
+2. Adapters are versioned config under the no-fixture-literals law; every adapter ships with its own synthetic family before trust.
+3. Facets never widen pair_allowed; core types keep gating, facets are interpretation metadata only.
+
+## Change #2 — relation discovery: parallel proposers, none authoritative
+grammar-first → PARALLEL: OpenIE + generic spaCy syntax + deterministic structured-data parser, all emitting into the OPEN OBSERVATION IR; grammar supplies structural evidence; ontology/compiler interprets (canonical core / domain / unmapped surface); assertion semantics; gate decides FACT/QUALIFIED/OPEN/REVIEW/REJECT.
+Evidence basis: historical gold-entity syntax recall ≈ .229; audited lane monopoly (union of extractors fictional at promotion time); sealed-v2 structured content invisible to prose lanes. Counter-evidence to govern: ungoverned OpenIE lane on book-66 emitted 48 FACTs incl. 6 wildcard endpoints.
+Governors:
+1. Corroboration policy as versioned config: single-proposer promotion needs strong endpoint + structural evidence; multi-proposer agreement upgrades; disagreement → review. Calibrated on synthetic + burned sets BEFORE enabling.
+2. Assertion semantics become proposer-independent: every proposition with exact offsets is re-anchored to the shared Doc and receives clause-local polarity/modality/attribution/claim-noun scope there (retires the OpenIE bag-of-words qualifier).
+3. Proposition-family reduction unifies ACROSS lanes; per-proposer promotion telemetry added to structure_telemetry.
+
+Pipeline shape: DOCUMENT → normalization/structure → GLiNER2 census (core+adapter schema) → raw mentions → reducer → completion → {OpenIE, generic syntax, structured parser} → OPEN OBSERVATION IR → ontology profile (core + corpus adapter) → predicate/type interpretation → assertion semantics → evidence gate → Mongo → {Qdrant, Neo4j}.
+Sections 7–11 of the owner's spec (schema descriptions, census execution policy, conservation, reducer states/signals, mention completion) are confirmed as existing implemented law; deltas are the two changes above + doc.spans["polymath_entities"] + DENSE_STRUCTURE routing.
