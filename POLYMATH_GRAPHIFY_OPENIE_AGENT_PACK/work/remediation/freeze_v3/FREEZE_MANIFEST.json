@@ -1,0 +1,67 @@
+{
+  "benchmarks": {
+    "meridian_44": "burned development set \u2014 do not score",
+    "sealed_qualification_v1": "burned development regression \u2014 40/51 F1 .816 at freeze (one-shot result stands at F1 .742 FAILED)",
+    "sealed_qualification_v2": "AWAITING OWNER-PROVIDED SET \u2014 key must remain unopened by implementation agents; one-shot via the frozen harness; verify_freeze before and after",
+    "synthetic_families_v1 (01-09)": "development regressions \u2014 85/93 at freeze; 02/03/05/07/08/09 PASS",
+    "technical_book_66": "development regression \u2014 59/66 at freeze, zero leakage"
+  },
+  "code": {
+    "backend/evals/graphify_synthetic_v1/score_synthetic_family.py": "062bdc5f84766f18c7178d4979e415eebebec6cd9b697b75fa1d011dd15e0e25",
+    "backend/models/graphify_contracts.py": "93c7905d98d47c8301800c02bf5a4be7101276a806f987ec9a9c02eed484a3cb",
+    "backend/scripts/audit_graphify_stress_frozen.py": "976f87b913f6334910daac54153a93c487949da00a7fdee462a029e1e8652c85",
+    "backend/scripts/run_graphify_stress_answer_key.py": "3b36fae42f393aada48e039b77428805c9541f815f54f78a4bb4845fc24a2604",
+    "backend/services/extraction/canonical.py": "e3908e1d3800b4bb65aff821400162b58f0cce9af7c92853543578d33f7c1293",
+    "backend/services/extraction/gliner2_cpu_provider.py": "384375929f3192d7b1acd7d1380e76961f941dc7e53e11900c62d503da1617a1",
+    "backend/services/extraction/graphify_argument_adapter.py": "2b1eedf0a463f06efe005809dcf95119d6a86fa851c0ca65372e234637cba2e8",
+    "backend/services/extraction/graphify_assertion_assembler.py": "1d07beee675f6b30afb2953996c18bea0a1e71fce63cbeff0913abba6e6544d2",
+    "backend/services/extraction/graphify_assertion_semantics.py": "1e27cf0ad97dfe02fa6aa7412317097b89b29dfe0d0f56a2a646c3d63e6711f8",
+    "backend/services/extraction/graphify_census.py": "d500341bd6497ca024c6a4649b29a08e713a5af78509b83a64ca12bdc08bab81",
+    "backend/services/extraction/graphify_completion.py": "faac6cb22e3831ada1a4574f825b4080fe6ce7477e4053bcc9e59588bb569064",
+    "backend/services/extraction/graphify_openie.py": "c43fdf3f0f871cc947bff9df9b664d107053016a4d113f3ff8fe12994cddd47f",
+    "backend/services/extraction/graphify_pipeline.py": "0692b1fc59995105626b98e3bb3fd12f3b06ba014d3e1e9eea3853568cd36e68",
+    "backend/services/extraction/graphify_predicate_compiler.py": "c3dccf6e504fcd8078093824ef448048a283d98172f38f86aa97aad04c7c2f08",
+    "backend/services/extraction/graphify_proposition_reducer.py": "5542b21b4dd14c0dc2c023188c61687aedbe5c8414cdadc676b4b843ada65d2b",
+    "backend/services/extraction/graphify_reducer.py": "0b7ef7860985bf0a9aef7430111184dc20744701ed0c4417a30f4334836771da",
+    "backend/services/extraction/graphify_relations.py": "f41b4deb4295ac4681bd0572bcec4969aee12a8ac6eb09e14dbd8af69c026b40",
+    "backend/services/extraction/graphify_survey.py": "c06828c6e8e62b778ecbccc5d17b523569e1adbc666d790d61bd3bbe0b4b13f2",
+    "backend/services/ghost_b.py": "497dd4c678b72a544ec306937f8e6e74a7ebb0e818929790e0fca7fca7c69792",
+    "backend/services/graph/neo4j_writer.py": "a90c06cd00c05c9bd0f3d22db0942c353ece411141ffdc85cb77ed1a9af60e5d",
+    "config/ontology.yaml": "04caa3324848c1fa9d8d02d5ab2dae54e9d7d51959ac83b0c5e60bd7cd5ecead",
+    "config/predicate_synonyms.yaml": "84ac33d793b2154d5a4bbc05e0fb8a13740cc4057120122493709f936704bd3b"
+  },
+  "environment": {
+    "entity_model": "fastino/gliner2-base-v1",
+    "interpreter": "local_ghost_b/.venv/bin/python",
+    "packages": {
+      "en_core_web_sm": "3.8.0",
+      "gliner2": "1.3.2",
+      "motor": "3.3.2",
+      "neo4j": "5.17.0",
+      "pydantic": "2.5.0",
+      "pymongo": "4.6.0",
+      "spacy": "3.8.14",
+      "torch": "2.12.0",
+      "triplet-extract": "0.5.0"
+    },
+    "python": "3.11.15",
+    "spacy_model": "en_core_web_sm"
+  },
+  "freeze_id": "graphify-qualification-freeze-v3",
+  "frozen_at_commit": "085e09fa4f86110a6f3a81338704c618e252f42f",
+  "known_residuals_at_freeze": [
+    "typing residuals: bare/context-poor names can type as Concept and fail endpoint signatures (I06/I10/D04 class)",
+    "agentless participle frames ('written in Rust') not extracted (E10)",
+    "cross-sentence relations not discoverable (sentence-scoped eligibility)",
+    "appositive-membership captured as open, not promoted (HF03)",
+    "infrastructure: Mongo WiredTiger checkpoint panics + Neo4j critical error under disk pressure (host mount 91% full) \u2014 verify datastore health before the sealed run"
+  ],
+  "policy_decisions": {
+    "compiler_authority": "promotion projects compiler-authoritative predicates verbatim; no evidence-cue re-guessing, no related_to refinement over compiled provenance",
+    "occurred_prep": "occur+in/at/on/near/during -> declared related_to (both lanes)",
+    "transfer_verbs": "destination->uses, source->consumes (phrase-keyed; bare verbs stay open); precedent: frozen Meridian lexicon writes-to->uses / reads-from->consumes"
+  },
+  "purpose": "Code+config+scorer+environment freeze preceding the SECOND sealed one-shot qualification run. Any hash mismatch after this point invalidates that qualification claim.",
+  "supersedes": "graphify-qualification-freeze-v2 (closed after the completed 2026-08-07 one-shot: F1 .742 FAILED)",
+  "worktree_clean": true
+}
