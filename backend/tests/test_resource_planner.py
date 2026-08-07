@@ -1,44 +1,30 @@
-from __future__ import annotations
-
 from types import SimpleNamespace
 
-from models.schemas import IngestionConfig, ModelProfileRef
+import pytest
+
+from models.schemas import IngestionConfig
 from services.ingestion.resource_planner import (
     SystemResources,
     _ru_maxrss_to_mb,
+    classify_extraction_backend,
     classify_storage_mode,
     plan_ingestion_resources,
 )
 
 
 def _settings(**overrides):
-    base = {
+    values = {
         "EXTRACTION_MAX_CONCURRENT": 8,
-        "EXTRACTION_GLOBAL_MAX_CONCURRENT": 180,
         "EXTRACTION_MAX_ACTIVE_DOCS": 1,
-        "EXTRACTION_MANAGED_VLLM_MAX_ACTIVE_DOCS": 2,
         "INGEST_MAX_MODEL_PHASE_DOCS": 1,
-        "INGEST_MANAGED_VLLM_MODEL_PHASE_DOCS": 2,
         "INGEST_BACKEND_RAM_TARGET_MB": 16_384,
         "INGEST_RSS_SOFT_LIMIT_RATIO": 0.85,
-        "INGEST_REMOTE_VLLM_TWO_DOC_RSS_RATIO": 0.75,
         "EMBED_BATCH_SIZE": 32,
         "QDRANT_INGEST_WRITE_CONCURRENCY": 2,
         "NEO4J_INGEST_WRITE_CONCURRENCY": 1,
     }
-    base.update(overrides)
-    return SimpleNamespace(**base)
-
-
-def _rtx_pool(concurrency: int = 60) -> list[ModelProfileRef]:
-    return [
-        ModelProfileRef(
-            provider_preset="vllm-rtx",
-            model="openai/polymath-extract",
-            base_url="http://192.168.1.83:8000/v1",
-            max_concurrent=concurrency,
-        )
-    ]
+    values.update(overrides)
+    return SimpleNamespace(**values)
 
 
 def test_ru_maxrss_normalizes_macos_bytes_and_linux_kib():
@@ -46,217 +32,57 @@ def test_ru_maxrss_normalizes_macos_bytes_and_linux_kib():
     assert _ru_maxrss_to_mb(300 * 1024, platform="linux") == 300
 
 
-def test_remote_vllm_profile_uses_one_doc_under_tight_backend_cap():
-    cfg = IngestionConfig(
-        extraction_engine="cloud",
-        models_linked=False,
-        extraction_models=_rtx_pool(),
-        embed_mode="local",
-    )
+def test_graphify_cpu_is_the_only_active_extraction_backend():
+    assert classify_extraction_backend(
+        extraction_engine="graphify_cpu", extraction_pool=[]
+    ) == ("local_cpu", ("local_cpu",))
+    assert classify_extraction_backend(
+        extraction_engine="off", extraction_pool=[]
+    ) == ("off", ("off",))
+    for retired in ("local", "cloud", "relex_local", "runpod_flash"):
+        with pytest.raises(ValueError, match="unsupported extraction engine"):
+            classify_extraction_backend(
+                extraction_engine=retired, extraction_pool=[object()]
+            )
+
+
+def test_graphify_profile_ignores_provider_pool_and_uses_cpu_lane():
+    cfg = IngestionConfig(extraction_engine="graphify_cpu", embed_mode="local")
     profile = plan_ingestion_resources(
         config=cfg,
-        extraction_engine="cloud",
-        extraction_pool=cfg.extraction_models,
-        settings=_settings(),
+        extraction_engine=cfg.extraction_engine,
+        extraction_pool=[object()],
+        settings=_settings(EXTRACTION_MAX_ACTIVE_DOCS=2),
         resources=SystemResources(
             cpu_cores=12,
-            ram_total_mb=65_536,
-            cgroup_limit_mb=4_096,
-            process_rss_mb=3_600,
-            metal_available=True,
-        ),
-    )
-
-    assert "remote_vllm" in profile.extraction_lanes
-    assert profile.extraction_max_concurrent == 60
-    assert profile.extraction_active_docs == 1
-    assert profile.model_phase_docs == 1
-    assert profile.recommended_ingest_profile == "rtx_assisted"
-    assert profile.ram_cap_mb == 4_096
-    assert profile.embedding_backend == "local_metal"
-    assert profile.warnings
-
-
-def test_remote_vllm_profile_can_admit_two_docs_when_roomy():
-    cfg = IngestionConfig(
-        extraction_engine="cloud",
-        models_linked=False,
-        extraction_models=_rtx_pool(),
-        embed_mode="local",
-    )
-    profile = plan_ingestion_resources(
-        config=cfg,
-        extraction_engine="cloud",
-        extraction_pool=cfg.extraction_models,
-        settings=_settings(),
-        resources=SystemResources(
-            cpu_cores=12,
-            ram_total_mb=65_536,
-            cgroup_limit_mb=32_768,
+            ram_total_mb=32_768,
             process_rss_mb=1_024,
             metal_available=True,
         ),
     )
-
+    assert profile.extraction_backend == "local_cpu"
+    assert profile.extraction_lanes == ("local_cpu",)
     assert profile.extraction_active_docs == 2
-    assert profile.model_phase_docs == 2
-    assert profile.embedding_batch_size >= 64
-    assert "does not reserve Mac Metal" in " ".join(profile.notes)
+    assert profile.embedding_backend == "local_metal"
+    assert profile.recommended_ingest_profile == "mac_queryable_first"
 
 
-def test_remote_vllm_profile_admits_two_docs_under_low_4gb_pressure():
-    cfg = IngestionConfig(
-        extraction_engine="cloud",
-        models_linked=False,
-        extraction_models=_rtx_pool(),
-        embed_mode="local",
-    )
+def test_high_rss_warns_and_caps_embedding_batch():
+    cfg = IngestionConfig()
     profile = plan_ingestion_resources(
         config=cfg,
-        extraction_engine="cloud",
-        extraction_pool=cfg.extraction_models,
-        settings=_settings(),
+        extraction_engine="graphify_cpu",
+        extraction_pool=[],
+        settings=_settings(EMBED_BATCH_SIZE=64, INGEST_BACKEND_RAM_TARGET_MB=4_096),
         resources=SystemResources(
-            cpu_cores=10,
-            ram_total_mb=12_288,
-            cgroup_limit_mb=4_096,
-            process_rss_mb=1_024,
+            cpu_cores=8,
+            ram_total_mb=8_192,
+            process_rss_mb=3_900,
             metal_available=False,
         ),
     )
-
-    assert profile.extraction_active_docs == 2
-    assert profile.model_phase_docs == 2
-    assert profile.extraction_max_concurrent == 60
-
-
-def test_remote_vllm_profile_keeps_two_docs_under_moderate_5gb_pressure():
-    cfg = IngestionConfig(
-        extraction_engine="cloud",
-        models_linked=False,
-        extraction_models=_rtx_pool(),
-        embed_mode="local",
-    )
-    profile = plan_ingestion_resources(
-        config=cfg,
-        extraction_engine="cloud",
-        extraction_pool=cfg.extraction_models,
-        settings=_settings(),
-        resources=SystemResources(
-            cpu_cores=12,
-            ram_total_mb=65_536,
-            cgroup_limit_mb=5_120,
-            process_rss_mb=2_747,
-            metal_available=True,
-        ),
-    )
-
-    assert profile.rss_soft_limit_mb == 4_352
-    assert profile.extraction_active_docs == 2
-    assert profile.model_phase_docs == 2
-
-
-def test_openai_cloud_pool_is_not_classified_as_remote_vllm():
-    cfg = IngestionConfig(
-        extraction_engine="cloud",
-        models_linked=False,
-        extraction_models=[
-            ModelProfileRef(
-                provider_preset="openai",
-                model="openai/gpt-4o",
-                base_url="https://api.openai.com/v1",
-                max_concurrent=8,
-            )
-        ],
-        embed_mode="api",
-    )
-    profile = plan_ingestion_resources(
-        config=cfg,
-        extraction_engine="cloud",
-        extraction_pool=cfg.extraction_models,
-        settings=_settings(),
-        resources=SystemResources(cpu_cores=8, ram_total_mb=16_384),
-    )
-
-    assert profile.extraction_backend == "cloud_api"
-    assert profile.embedding_backend == "remote"
-    assert profile.extraction_max_concurrent == 8
-
-
-def test_runpod_flash_is_remote_compute_without_provider_pool_or_metal_claims():
-    cfg = IngestionConfig(extraction_engine="runpod_flash", embed_mode="local")
-    profile = plan_ingestion_resources(
-        config=cfg,
-        extraction_engine="runpod_flash",
-        extraction_pool=[],
-        settings=_settings(),
-        resources=SystemResources(
-            cpu_cores=12,
-            ram_total_mb=32_768,
-            process_rss_mb=1_024,
-            metal_available=True,
-        ),
-    )
-
-    assert profile.extraction_backend == "cloud_api"
-    assert profile.extraction_lanes == ("cloud_api",)
-    assert profile.embedding_backend == "local_metal"
-    assert profile.recommended_ingest_profile == "runpod_burst"
-
-
-def test_local_private_provider_profile_uses_remote_vllm():
-    cfg = IngestionConfig(
-        extraction_engine="local",
-        models_linked=False,
-        extraction_models=_rtx_pool(),
-        embed_mode="local",
-    )
-    profile = plan_ingestion_resources(
-        config=cfg,
-        extraction_engine="local",
-        extraction_pool=cfg.extraction_models,
-        settings=_settings(),
-        resources=SystemResources(
-            cpu_cores=12,
-            ram_total_mb=65_536,
-            cgroup_limit_mb=32_768,
-            process_rss_mb=1_024,
-            metal_available=True,
-        ),
-    )
-
-    assert profile.extraction_backend == "remote_vllm"
-    assert "remote_vllm" in profile.extraction_lanes
-    assert profile.recommended_ingest_profile == "rtx_assisted"
-
-
-def test_local_mac_llm_with_local_metal_embeddings_pins_doc_fanout():
-    cfg = IngestionConfig(
-        extraction_engine="legacy_local",
-        embed_mode="local",
-    )
-    profile = plan_ingestion_resources(
-        config=cfg,
-        extraction_engine="legacy_local",
-        extraction_pool=[],
-        settings=_settings(
-            EXTRACTION_MAX_ACTIVE_DOCS=4,
-            INGEST_MAX_MODEL_PHASE_DOCS=4,
-            EMBED_BATCH_SIZE=64,
-        ),
-        resources=SystemResources(
-            cpu_cores=12,
-            ram_total_mb=32_768,
-            process_rss_mb=1_024,
-            metal_available=True,
-        ),
-    )
-
-    assert profile.extraction_backend == "local_mac_llm"
-    assert profile.extraction_active_docs == 1
-    assert profile.model_phase_docs == 1
+    assert profile.warnings
     assert profile.embedding_batch_size == 16
-    assert profile.recommended_ingest_profile == "mac_queryable_first"
 
 
 def test_storage_mode_classification():

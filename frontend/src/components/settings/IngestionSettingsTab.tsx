@@ -2,24 +2,13 @@
 // Extraction Engines and Summary Defaults are mutable. The remaining cards are
 // read-only structural defaults that pre-fill corpus creation.
 
-import { Layers, Info, Copy, Check, Cpu, Plus, Trash2, Cloud, Zap, Loader2 } from "lucide-react";
+import { Layers, Info, Copy, Check, Cpu, Cloud } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Button } from "../ui/Button";
 import type { IngestionConfig, ModelProfileRef, TokenBudget } from "../../types";
 import { DEFAULT_INGESTION_CONFIG } from "../../types";
-import type {
-  ExtractionEndpoint,
-  GlobalIngestionSettings,
-  ExtractionValidationReport,
-  RunpodFlashExtractionSettings,
-  RunpodFlashTestResult,
-} from "../../types/settings";
-import {
-  getGlobalSettings,
-  updateGlobalSettings,
-  validateExtraction,
-  testRunpodFlashExtraction,
-} from "../../lib/api";
+import type { GlobalIngestionSettings } from "../../types/settings";
+import { getGlobalSettings, updateGlobalSettings } from "../../lib/api";
 import { IngestionModelPool } from "./IngestionModelPool";
 import { IngestionProviderSelector } from "./IngestionProviderSelector";
 
@@ -114,52 +103,32 @@ function SectionCard({
   );
 }
 
-// ── Extraction Engines (mutable) ─────────────────────────────────────────
-// Toggleable sidecar endpoints. The ingestion worker health-probes ENABLED
-// endpoints per document (top-to-bottom preference) and dispatches to the
-// live ones — turn a GPU box off and work flows to the next enabled engine.
+// ── Extraction Engine (mutable) ──────────────────────────────────────────
+// Graphify CPU is the only production provider. Off is the explicit
+// vectors-only opt-out.
 
 function ExtractionEnginesCard() {
-  const [endpoints, setEndpoints] = useState<ExtractionEndpoint[] | null>(null);
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [engine, setEngine] = useState<
-    | "local"
-    | "cloud"
-    | "runpod_flash"
-    | "legacy_local"
-    | "local_then_cloud"
-    | "local_then_enrich"
-    | "dual"
-    | "off"
-  >("local");
-  const [validating, setValidating] = useState(false);
-  const [report, setReport] = useState<ExtractionValidationReport | null>(null);
+  const [engine, setEngine] = useState<"graphify_cpu" | "off">("graphify_cpu");
 
   useEffect(() => {
     getGlobalSettings()
       .then((r) => {
-        setEndpoints(r.settings.extraction?.endpoints ?? []);
-        setEngine(r.settings.extraction?.engine ?? "local");
+        setEngine(r.settings.extraction?.engine ?? "graphify_cpu");
       })
-      .catch((e) => setError(String(e)));
+      .catch((e) => setError(String(e)))
+      .finally(() => setLoading(false));
   }, []);
 
-  const mutate = (next: ExtractionEndpoint[]) => {
-    setEndpoints(next);
-    setDirty(true);
-    setReport(null); // edits invalidate the last validation
-  };
-
   const save = async () => {
-    if (!endpoints) return;
     setSaving(true);
     setError(null);
     try {
-      await updateGlobalSettings({ extraction: { endpoints, engine } });
+      await updateGlobalSettings({ extraction: { engine } });
       setDirty(false);
-      setReport(null);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -167,61 +136,25 @@ function ExtractionEnginesCard() {
     }
   };
 
-  // Probes run from the BACKEND's network position (what the worker actually
-  // uses) against the SAVED config — hence disabled while there are unsaved
-  // edits.
-  const validate = async () => {
-    setValidating(true);
-    setError(null);
-    try {
-      setReport(await validateExtraction());
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setValidating(false);
-    }
-  };
-
   return (
     <div className="bg-[#2a2a2a] border border-white/5 rounded-lg p-5 space-y-3">
       <div className="flex items-center justify-between">
         <h3 className="text-[15px] font-semibold text-white flex items-center gap-2">
-          <Cpu size={16} className="text-emerald-400" /> Extraction Engines
+          <Cpu size={16} className="text-emerald-400" /> Extraction Engine
         </h3>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={validate}
-            disabled={dirty || validating || endpoints === null}
-            title={
-              dirty
-                ? "Save changes first — validation probes the saved config"
-                : "Probe every engine from the backend (reachable, healthy, GPU active)"
-            }
-          >
-            {validating ? "Validating…" : "Validate"}
-          </Button>
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={save}
-            disabled={!dirty || saving}
-          >
-            {saving ? "Saving…" : dirty ? "Save" : "Saved"}
-          </Button>
-        </div>
+        <Button
+          variant="primary"
+          size="sm"
+          onClick={save}
+          disabled={!dirty || saving || loading}
+        >
+          {saving ? "Saving…" : dirty ? "Save" : "Saved"}
+        </Button>
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 flex-wrap">
         <span className="text-[10px] tracking-widest text-gray-500 uppercase">Engine</span>
         {([
-          ["local", "LOCAL PRIVATE LLM"],
-          ["cloud", "CLOUD/API LLM"],
-          ["runpod_flash", "RUNPOD FLASH"],
-          ["legacy_local", "LEGACY SIDECAR"],
-          ["local_then_cloud", "LEGACY → PROVIDER"],
-          ["local_then_enrich", "LEGACY + ENRICH"],
-          ["dual", "DUAL (LEGACY + PROVIDER)"],
+          ["graphify_cpu", "GRAPHIFY CPU"],
           ["off", "OFF"],
         ] as const).map(([val, label]) => (
           <button
@@ -240,138 +173,12 @@ function ExtractionEnginesCard() {
         ))}
       </div>
       <p className="text-[12px] text-gray-500">
-        Machines that run entity/relation extraction during ingestion. The
-        worker checks which enabled engines are online for each document and
-        uses them in this order — a powered-off GPU box is skipped
-        automatically, so the local engine quietly handles small batches.
+        Graphify CPU is the canonical entity and relation path. It runs a pinned
+        GLiNER2 census and deterministic document stages with no provider pool,
+        runtime alias, or fallback. Off is the explicit vectors-only mode.
       </p>
       {error && <p className="text-[12px] text-red-400">{error}</p>}
-      {report && (
-        <p
-          className={`text-[12px] rounded px-2 py-1.5 ${
-            report.deploy_ready
-              ? "text-emerald-400 bg-emerald-500/10"
-              : "text-red-400 bg-red-500/10"
-          }`}
-        >
-          {report.deploy_ready
-            ? `Deploy ready — ${report.enabled_ready}/${report.enabled_total} enabled engine${
-                report.enabled_total === 1 ? "" : "s"
-              } fully validated from the backend.`
-            : "Not deploy ready — no enabled engine passed validation. Enable a healthy engine or fix the flagged ones before ingesting."}
-        </p>
-      )}
-      {endpoints === null ? (
-        <p className="text-[12px] text-gray-600">Loading…</p>
-      ) : (
-        <div className="space-y-2">
-          {endpoints.map((ep, i) => (
-            <div
-              key={i}
-              className="flex items-center gap-2 bg-black/20 rounded px-3 py-2"
-            >
-              <button
-                onClick={() =>
-                  mutate(
-                    endpoints.map((e, j) =>
-                      j === i ? { ...e, enabled: !e.enabled } : e,
-                    ),
-                  )
-                }
-                title={ep.enabled ? "Enabled — click to disable" : "Disabled — click to enable"}
-                className={`w-9 h-5 rounded-full relative transition-colors shrink-0 ${
-                  ep.enabled ? "bg-emerald-600" : "bg-white/10"
-                }`}
-              >
-                <span
-                  className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${
-                    ep.enabled ? "left-[18px]" : "left-0.5"
-                  }`}
-                />
-              </button>
-              <input
-                value={ep.label}
-                placeholder="Label"
-                onChange={(ev) =>
-                  mutate(
-                    endpoints.map((e, j) =>
-                      j === i ? { ...e, label: ev.target.value } : e,
-                    ),
-                  )
-                }
-                className="w-36 bg-transparent border border-white/10 rounded px-2 py-1 text-[12px] text-white"
-              />
-              <input
-                value={ep.url}
-                placeholder="http://192.168.x.x:8084"
-                onChange={(ev) =>
-                  mutate(
-                    endpoints.map((e, j) =>
-                      j === i ? { ...e, url: ev.target.value } : e,
-                    ),
-                  )
-                }
-                className="flex-1 bg-transparent border border-white/10 rounded px-2 py-1 text-[12px] text-white font-mono"
-              />
-              {(() => {
-                const r = report?.endpoints.find((x) => x.url === ep.url);
-                if (!r) return null;
-                const cls =
-                  r.state === "ready"
-                    ? "text-emerald-400 border-emerald-500/30"
-                    : r.state === "warning"
-                      ? "text-amber-400 border-amber-500/30"
-                      : "text-red-400 border-red-500/30";
-                const text =
-                  r.state === "ready"
-                    ? `✓ ${r.info.backend ?? "?"} · ${r.info.device ?? "?"}`
-                    : r.state === "warning"
-                      ? "⚠ degraded"
-                      : "✗ offline";
-                const fmt = (v: boolean | null | undefined) =>
-                  v === null || v === undefined ? "n/a" : v ? "yes" : "NO";
-                const tip = [
-                  `reachable: ${fmt(r.checks.reachable)}`,
-                  `healthy: ${fmt(r.checks.healthy)}`,
-                  `warm: ${fmt(r.checks.warm)}`,
-                  `model loaded: ${fmt(r.checks.model_loaded)}`,
-                  `gpu active: ${fmt(r.checks.gpu_active)}`,
-                  `version match: ${fmt(r.checks.version_match)}`,
-                  r.detail,
-                ]
-                  .filter(Boolean)
-                  .join("\n");
-                return (
-                  <span
-                    title={tip}
-                    className={`shrink-0 text-[11px] border rounded px-1.5 py-0.5 font-mono ${cls}`}
-                  >
-                    {text}
-                  </span>
-                );
-              })()}
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => mutate(endpoints.filter((_, j) => j !== i))}
-                title="Remove engine"
-                className="hover:text-red-400 hover:bg-red-500/10"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-              </Button>
-            </div>
-          ))}
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() =>
-              mutate([...endpoints, { label: "", url: "", enabled: true }])
-            }
-          >
-            <Plus className="w-3.5 h-3.5" /> Add engine
-          </Button>
-        </div>
-      )}
+      {loading && <p className="text-[12px] text-gray-600">Loading…</p>}
     </div>
   );
 }
@@ -387,9 +194,9 @@ const DEFAULT_GLOBAL_INGESTION: GlobalIngestionSettings = {
   runpod_flash: {
     enabled: false,
     endpoint_id: "",
-    endpoint_name: "polymath-gliner-relex",
-    model_id: "knowledgator/gliner-relex-large-v0.5",
-    model_revision: "9c4171ae1e690fc29b87f33579e50bcd65faf2cc",
+    endpoint_name: "polymath-runpod",
+    model_id: "",
+    model_revision: "",
     spacy_pipeline: "blank:en",
     min_workers: 0,
     max_workers: 8,
@@ -518,8 +325,8 @@ function SummaryDefaultsCard() {
             <Cloud size={16} className="text-amber-400" /> Ingestion Provider Registry
           </h3>
           <p className="text-[11px] text-content-tertiary mt-1 leading-relaxed">
-            Configure extraction, summary, RTX, and cloud model credentials once.
-            Corpus Manager selects saved routes by reference and never asks for a key.
+            Configure optional summary model credentials once.
+            Corpus Manager selects saved summary routes by reference and never asks for a key.
             Chat model APIs remain separate under Settings → Models.
           </p>
         </div>
@@ -644,220 +451,6 @@ function SummaryDefaultsCard() {
   );
 }
 
-function RunpodNumberField({
-  label,
-  value,
-  min,
-  max,
-  step = 1,
-  onChange,
-}: {
-  label: string;
-  value: number;
-  min: number;
-  max: number;
-  step?: number;
-  onChange: (value: number) => void;
-}) {
-  return (
-    <label className="border border-white/5 bg-[#121418] rounded px-3 py-2">
-      <span className="block text-[9px] font-bold tracking-widest uppercase text-content-secondary">
-        {label}
-      </span>
-      <input
-        type="number"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        onChange={(event) =>
-          onChange(Math.max(min, Math.min(max, Number(event.target.value) || min)))
-        }
-        className="mt-1 w-full bg-[#0b0c10] text-white border border-white/10 rounded px-2 py-1 text-[11px] font-mono"
-      />
-    </label>
-  );
-}
-
-function RunpodFlashCard() {
-  const [ingestion, setIngestion] = useState<GlobalIngestionSettings | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [testing, setTesting] = useState(false);
-  const [dirty, setDirty] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [testResult, setTestResult] = useState<RunpodFlashTestResult | null>(null);
-
-  useEffect(() => {
-    getGlobalSettings()
-      .then((response) =>
-        setIngestion(cloneGlobalIngestion(response.settings.ingestion)),
-      )
-      .catch((reason) => setError(String(reason)));
-  }, []);
-
-  const mutate = (patch: Partial<RunpodFlashExtractionSettings>) => {
-    setIngestion((previous) => {
-      const next = cloneGlobalIngestion(previous);
-      next.runpod_flash = { ...next.runpod_flash, ...patch };
-      return next;
-    });
-    setDirty(true);
-    setTestResult(null);
-  };
-
-  const save = async () => {
-    if (!ingestion) return;
-    setSaving(true);
-    setError(null);
-    try {
-      const latest = cloneGlobalIngestion(
-        (await getGlobalSettings()).settings.ingestion,
-      );
-      latest.runpod_flash = ingestion.runpod_flash;
-      const response = await updateGlobalSettings({ ingestion: latest });
-      setIngestion(cloneGlobalIngestion(response.settings.ingestion));
-      setDirty(false);
-    } catch (reason) {
-      setError(String(reason));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const test = async () => {
-    setTesting(true);
-    setError(null);
-    setTestResult(null);
-    try {
-      setTestResult(await testRunpodFlashExtraction());
-    } catch (reason) {
-      setError(String(reason));
-    } finally {
-      setTesting(false);
-    }
-  };
-
-  if (!ingestion) {
-    return (
-      <div className="bg-[#2a2a2a] border border-white/5 rounded-lg p-5 text-[12px] text-content-tertiary">
-        Loading Runpod Flash settings...
-      </div>
-    );
-  }
-  const value = ingestion.runpod_flash;
-  return (
-    <div className="bg-[#2a2a2a] border border-white/5 rounded-lg p-5 space-y-3">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h3 className="text-[15px] font-semibold text-white flex items-center gap-2">
-            <Zap size={16} className="text-amber-400" /> Runpod Flash Burst Extraction
-          </h3>
-          <p className="text-[11px] text-content-tertiary mt-1 leading-relaxed">
-            Joint GLiNER-Relex entity/relation inference on autoscaling GPUs. spaCy
-            performs deterministic sentence windows; validation and storage stay local.
-          </p>
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={test}
-            disabled={dirty || testing || !value.enabled || !value.endpoint_id}
-            title={dirty ? "Save settings before testing" : "Run one real extraction canary"}
-          >
-            {testing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />}
-            {testing ? "Testing..." : "Test"}
-          </Button>
-          <Button variant="primary" size="sm" onClick={save} disabled={!dirty || saving}>
-            <Check className="w-3 h-3" /> {saving ? "Saving..." : "Save"}
-          </Button>
-        </div>
-      </div>
-
-      {error && (
-        <div className="text-[11px] text-red-300 bg-red-950/30 border border-red-500/20 px-2 py-1 rounded">
-          {error}
-        </div>
-      )}
-      {testResult && (
-        <div className={`text-[11px] border px-2 py-1 rounded ${testResult.ok ? "text-emerald-300 border-emerald-500/30" : "text-red-300 border-red-500/30"}`}>
-          {testResult.ok ? "Canary passed" : "Canary failed"} · {testResult.entity_count} entities · {testResult.relation_count} relations
-        </div>
-      )}
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-        <label className="flex items-center justify-between gap-3 border border-white/5 bg-[#121418] rounded px-3 py-2">
-          <span>
-            <span className="block text-[10px] font-bold tracking-widest uppercase text-content-secondary">Enabled</span>
-            <span className="block text-[9px] text-content-tertiary">Available to corpus extraction profiles</span>
-          </span>
-          <input type="checkbox" checked={value.enabled} onChange={(event) => mutate({ enabled: event.target.checked })} className="accent-accent-main" />
-        </label>
-        <label className="border border-white/5 bg-[#121418] rounded px-3 py-2">
-          <span className="block text-[9px] font-bold tracking-widest uppercase text-content-secondary">Endpoint ID</span>
-          <input value={value.endpoint_id} onChange={(event) => mutate({ endpoint_id: event.target.value.trim() })} placeholder="Runpod endpoint ID" className="mt-1 w-full bg-[#0b0c10] text-white border border-white/10 rounded px-2 py-1 text-[11px] font-mono" />
-        </label>
-        <label className="border border-white/5 bg-[#121418] rounded px-3 py-2">
-          <span className="block text-[9px] font-bold tracking-widest uppercase text-content-secondary">Endpoint name</span>
-          <input value={value.endpoint_name} onChange={(event) => mutate({ endpoint_name: event.target.value })} className="mt-1 w-full bg-[#0b0c10] text-white border border-white/10 rounded px-2 py-1 text-[11px] font-mono" />
-        </label>
-        <label className="border border-white/5 bg-[#121418] rounded px-3 py-2">
-          <span className="block text-[9px] font-bold tracking-widest uppercase text-content-secondary">Model</span>
-          <input value={value.model_id} onChange={(event) => mutate({ model_id: event.target.value })} className="mt-1 w-full bg-[#0b0c10] text-white border border-white/10 rounded px-2 py-1 text-[11px] font-mono" />
-        </label>
-        <label className="border border-white/5 bg-[#121418] rounded px-3 py-2">
-          <span className="block text-[9px] font-bold tracking-widest uppercase text-content-secondary">Model revision</span>
-          <input value={value.model_revision} onChange={(event) => mutate({ model_revision: event.target.value.trim() })} placeholder="Optional Hugging Face commit" className="mt-1 w-full bg-[#0b0c10] text-white border border-white/10 rounded px-2 py-1 text-[11px] font-mono" />
-        </label>
-        <label className="border border-white/5 bg-[#121418] rounded px-3 py-2">
-          <span className="block text-[9px] font-bold tracking-widest uppercase text-content-secondary">spaCy pipeline</span>
-          <input value={value.spacy_pipeline} onChange={(event) => mutate({ spacy_pipeline: event.target.value })} className="mt-1 w-full bg-[#0b0c10] text-white border border-white/10 rounded px-2 py-1 text-[11px] font-mono" />
-        </label>
-      </div>
-
-      <p className="text-[9px] font-bold tracking-widest uppercase text-content-tertiary">Deploy-time endpoint controls</p>
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-        <RunpodNumberField label="Min workers" value={value.min_workers} min={0} max={64} onChange={(next) => mutate({ min_workers: next })} />
-        <RunpodNumberField label="Max workers" value={value.max_workers} min={1} max={64} onChange={(next) => mutate({ max_workers: next })} />
-        <RunpodNumberField label="Worker concurrency" value={value.worker_max_concurrency} min={1} max={8} onChange={(next) => mutate({ worker_max_concurrency: next })} />
-        <RunpodNumberField label="Idle timeout (s)" value={value.idle_timeout_seconds} min={5} max={3600} onChange={(next) => mutate({ idle_timeout_seconds: next })} />
-        <RunpodNumberField label="Jobs / worker target" value={value.scaler_value} min={1} max={100} onChange={(next) => mutate({ scaler_value: next })} />
-      </div>
-
-      <p className="text-[9px] font-bold tracking-widest uppercase text-content-tertiary">Runtime dispatch controls</p>
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-        <RunpodNumberField label="Chunks / request" value={value.request_batch_size} min={1} max={128} onChange={(next) => mutate({ request_batch_size: next })} />
-        <RunpodNumberField label="In-flight requests" value={value.request_concurrency} min={1} max={64} onChange={(next) => mutate({ request_concurrency: next })} />
-        <RunpodNumberField label="GPU batch" value={value.model_batch_size} min={1} max={256} onChange={(next) => mutate({ model_batch_size: next })} />
-        <RunpodNumberField label="Window words" value={value.max_window_words} min={80} max={800} onChange={(next) => mutate({ max_window_words: next })} />
-      </div>
-
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-        <RunpodNumberField label="Entity threshold" value={value.entity_threshold} min={0} max={1} step={0.05} onChange={(next) => mutate({ entity_threshold: next })} />
-        <RunpodNumberField label="Adjacency threshold" value={value.adjacency_threshold} min={0} max={1} step={0.05} onChange={(next) => mutate({ adjacency_threshold: next })} />
-        <RunpodNumberField label="Relation threshold" value={value.relation_threshold} min={0} max={1} step={0.05} onChange={(next) => mutate({ relation_threshold: next })} />
-        <RunpodNumberField label="Entity lens labels" value={value.entity_lens_max_labels} min={2} max={14} onChange={(next) => mutate({ entity_lens_max_labels: next })} />
-        <RunpodNumberField label="Job timeout (s)" value={value.timeout_seconds} min={30} max={7200} onChange={(next) => mutate({ timeout_seconds: next })} />
-        <RunpodNumberField label="Benchmark chunks" value={value.benchmark_chunks} min={100} max={50000} onChange={(next) => mutate({ benchmark_chunks: next })} />
-        <RunpodNumberField label="Target speedup" value={value.target_speedup} min={1} max={1000} onChange={(next) => mutate({ target_speedup: next })} />
-        <RunpodNumberField label="Budget cap ($)" value={value.budget_cap_usd} min={0} max={10000} step={1} onChange={(next) => mutate({ budget_cap_usd: next })} />
-        <RunpodNumberField label="GPU rate ($/s)" value={value.estimated_gpu_rate_per_second_usd} min={0} max={1} step={0.00001} onChange={(next) => mutate({ estimated_gpu_rate_per_second_usd: next })} />
-        <RunpodNumberField label="Cost overhead" value={value.cost_overhead_multiplier} min={1} max={10} step={0.1} onChange={(next) => mutate({ cost_overhead_multiplier: next })} />
-      </div>
-      <label className="flex items-center justify-between gap-3 border border-white/5 bg-[#121418] rounded px-3 py-2">
-        <span>
-          <span className="block text-[9px] font-bold tracking-widest uppercase text-content-secondary">Model-driven entity lens</span>
-          <span className="block text-[9px] text-content-tertiary">Broad entity pass, then compact ontology batches for relation recall</span>
-        </span>
-        <input type="checkbox" checked={value.entity_lens_enabled} onChange={(event) => mutate({ entity_lens_enabled: event.target.checked })} className="accent-accent-main" />
-      </label>
-      <p className="text-[10px] text-content-tertiary">
-        Store the Runpod credential in API Keys. Worker, scaler, and idle controls are a deployment contract; redeploy Flash after changing them. Cost is a conservative estimate from job execution telemetry and the configured rate; Runpod billing remains authoritative.
-      </p>
-    </div>
-  );
-}
-
 // ── Main component ───────────────────────────────────────────────────────
 
 export function IngestionSettingsTab() {
@@ -880,8 +473,6 @@ export function IngestionSettingsTab() {
 
       {/* Summary Defaults — mutable, applies to new corpora + runtime cap */}
       <SummaryDefaultsCard />
-
-      <RunpodFlashCard />
 
       {/* Info banner */}
       <div className="flex items-start gap-3 bg-blue-950/20 border border-blue-700/30 rounded-lg px-4 py-3">

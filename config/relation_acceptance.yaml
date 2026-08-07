@@ -1,0 +1,180 @@
+# Relation Acceptance Policy for the corroboration gate.
+#
+# This file configures the thresholds the gate applies when deciding whether
+# to accept a relation from Relex raw scores, optionally corroborated by
+# deterministic syntax evidence (DependencyMatcher / SVO).
+#
+# Decision states:
+#   accept_high           — Relex score + margin clear the standard bar
+#   accept_corroborated   — Relex score below standard but above corroborated,
+#                           AND syntax evidence agrees on the predicate
+#   review_conflict       — Relex top-1 disagrees with deterministic syntax
+#   review_type_compatibility — endpoint types in AMBIGUOUS zone
+#   reject_endpoint_signature — endpoint types in INVALID zone
+#   reject_negated        — syntax evidence contains a negation marker
+#   reject_low_evidence   — insufficient combined evidence
+#
+# Endpoint signature compatibility levels:
+#   VALID     → continue through scoring gate
+#   AMBIGUOUS → REVIEW_TYPE_COMPATIBILITY (not hard-rejected)
+#   INVALID   → REJECT_ENDPOINT_SIGNATURE
+#   UNKNOWN   → REVIEW_UNKNOWN_TYPE
+#   CONFLICT  → REVIEW_TYPE_CONFLICT
+#
+# Do NOT set thresholds below 0.10 without a calibration set of 30+ positives
+# per predicate. The defaults below are derived from the 18-relation gold
+# diagnostic and are intentionally conservative.
+
+version: 2
+
+defaults:
+  standard_threshold: 0.30
+  standard_margin: 0.05
+  corroborated_threshold: 0.25
+  corroborated_margin: 0.10
+  direction_margin: 0.00
+
+predicates:
+  created_by:
+    standard_threshold: 0.30
+    standard_margin: 0.05
+    corroborated_threshold: 0.25
+    corroborated_margin: 0.10
+    valid:
+      subject: [work, document, product, technology, software, artifact, standard]
+      object: [person, organization]
+    ambiguous:
+      subject: [concept, event, method, other]
+      object: [concept, other]
+
+  uses:
+    standard_threshold: 0.30
+    standard_margin: 0.05
+    corroborated_threshold: 0.20
+    corroborated_margin: 0.10
+    valid:
+      subject: [person, organization, system, method, product, software, concept]
+      object: [technology, tool, method, resource, system, software, concept, standard]
+    ambiguous:
+      subject: [artifact, document, event, other]
+      object: [artifact, document, event, product, other]
+
+  part_of:
+    standard_threshold: 0.30
+    standard_margin: 0.05
+    corroborated_threshold: 0.15
+    corroborated_margin: 0.10
+    valid:
+      subject: [concept, software, artifact, organization, document, method, product]
+      object: [concept, software, artifact, organization, document, method, product]
+    ambiguous:
+      subject: [person, event, standard, other]
+      object: [person, event, standard, other]
+
+  located_in:
+    standard_threshold: 0.30
+    standard_margin: 0.05
+    corroborated_threshold: 0.20
+    corroborated_margin: 0.10
+    valid:
+      subject: [person, organization, structure, event, product, work, artifact, software, concept]
+      object: [location]
+    ambiguous:
+      subject: [method, standard, other]
+      object: [concept, other]
+
+  works_for:
+    standard_threshold: 0.30
+    standard_margin: 0.05
+    corroborated_threshold: 0.20
+    corroborated_margin: 0.10
+    valid:
+      subject: [person]
+      object: [organization, institution, employer]
+    ambiguous:
+      subject: [concept, other]
+      object: [concept, other]
+
+  instance_of:
+    standard_threshold: 0.30
+    standard_margin: 0.05
+    corroborated_threshold: 0.25
+    corroborated_margin: 0.10
+    valid:
+      subject: [entity, work, product, organization, person, method, software, artifact, concept]
+      object: [class, category, type, genre, concept]
+    ambiguous:
+      subject: [event, standard, other]
+      object: [event, standard, other]
+
+  synonym_of:
+    standard_threshold: 0.30
+    standard_margin: 0.05
+    corroborated_threshold: 0.25
+    corroborated_margin: 0.10
+    valid:
+      subject: [term, phrase, lexical_form, concept, software, artifact, method, product, standard]
+      object: [term, phrase, lexical_form, concept, software, artifact, method, product, standard]
+    ambiguous:
+      subject: [person, organization, location, event, other]
+      object: [person, organization, location, event, other]
+
+  implements:
+    standard_threshold: 0.30
+    standard_margin: 0.05
+    corroborated_threshold: 0.20
+    corroborated_margin: 0.10
+    valid:
+      subject: [organization, software, system, product]
+      object: [standard, protocol, interface, specification, method]
+    ambiguous:
+      subject: [concept, artifact, other]
+      object: [concept, technology, other]
+
+  detects:
+    standard_threshold: 0.30
+    standard_margin: 0.05
+    corroborated_threshold: 0.20
+    corroborated_margin: 0.10
+    valid:
+      subject: [software, method, artifact, technology, concept]
+      object: [concept, event]
+    ambiguous:
+      subject: [product, system, other]
+      object: [product, other]
+
+  depends_on:
+    standard_threshold: 0.30
+    standard_margin: 0.05
+    corroborated_threshold: 0.20
+    corroborated_margin: 0.10
+    valid:
+      subject: [software, method, concept]
+      object: [software, artifact, concept]
+    ambiguous:
+      subject: [product, system, other]
+      object: [product, system, other]
+
+  produces:
+    standard_threshold: 0.30
+    standard_margin: 0.05
+    corroborated_threshold: 0.25
+    corroborated_margin: 0.10
+    valid:
+      subject: [organization, software, person]
+      object: [product, document, artifact]
+    ambiguous:
+      subject: [concept, method, other]
+      object: [concept, other]
+
+  causes:
+    standard_threshold: 0.30
+    standard_margin: 0.05
+    corroborated_threshold: 0.20
+    corroborated_margin: 0.10
+    valid:
+      subject: [concept, event, method]
+      object: [concept, event]
+    ambiguous:
+      subject: [product, software, other]
+      object: [product, other]

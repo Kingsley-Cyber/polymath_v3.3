@@ -353,6 +353,38 @@ async def test_mark_doc_extractions_promoted_stamps_rows_and_jobs():
 
 
 @pytest.mark.asyncio
+async def test_mark_doc_extractions_promoted_stamps_ghost_commit_last():
+    """The census derives promotion state from ghost rows' promoted_at, so the
+    ghost stamp is the commit point and must land after the extraction_jobs
+    update. A crash between the writes then still replans promotion and the
+    rerun converges; the reverse order strands jobs at "succeeded" forever."""
+    order: list[str] = []
+
+    class _OrderedCollection(_FakeUpdateCollection):
+        def __init__(self, name, modified_count=0):
+            super().__init__(modified_count=modified_count)
+            self.name = name
+
+        async def update_many(self, query, update):
+            order.append(self.name)
+            return await super().update_many(query, update)
+
+    db = _FakeDb(
+        {
+            "ghost_b_extractions": _OrderedCollection("ghost_b_extractions", 3),
+            "extraction_jobs": _OrderedCollection("extraction_jobs", 2),
+        }
+    )
+
+    result = await mark_doc_extractions_promoted(
+        db, corpus_id="corpus-1", doc_id="doc-1"
+    )
+
+    assert result == {"ghost_b_rows_promoted": 3, "extraction_jobs_promoted": 2}
+    assert order == ["extraction_jobs", "ghost_b_extractions"]
+
+
+@pytest.mark.asyncio
 async def test_run_graph_promotion_jobs_marks_partial_flush_promoted(monkeypatch):
     jobs = _FakeQueuedJobsCollection(
         [

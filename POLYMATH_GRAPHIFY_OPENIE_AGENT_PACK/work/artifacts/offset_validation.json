@@ -1,0 +1,11 @@
+{
+  "aligned_mentions": 728,
+  "alignment_failures": 0,
+  "emitted_predictions": 728,
+  "local_offsets_checked": 728,
+  "normalized_document_offsets_checked": 728,
+  "original_source_offsets_checked": 728,
+  "schema_version": "polymath.census_offset_report.v1",
+  "status": "passed",
+  "strict_alignment_rate": 1.0
+}

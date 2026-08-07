@@ -1,0 +1,118 @@
+flowchart TD
+    %% ================= ENTRYPOINTS =================
+    HTTP["POST /api/chat<br/>routers/chat.py"]
+    MCPS["MCP sidecar<br/>polymath_mcp/server.py (FastMCP)"]
+    MCPT["polymath_mcp/tools.py<br/>polymath_search / polymath_cross_corpus_search<br/>polymath_chat_query / polymath_graph_query<br/>polymath_search_entities / polymath_get_entity_relations"]
+    CPR["GET/POST /api/control-plane endpoints<br/>routers/control_plane.py<br/>(ingestion ledger/certificates — NOT query path)"]
+
+    %% ================= CHAT ORCHESTRATOR =================
+    CO["chat_orchestrator.process_chat_request<br/>services/chat_orchestrator.py"]
+    CONVO["conversation_service<br/>history load/trim"]
+    QMR["query_model_resolver.resolve<br/>pool:/profile: model refs"]
+    BQP["_build_chat_query_plan<br/>build_query_plan_v2 → QueryPlanV2"]
+    BLP["_build_librarian_plan_trace<br/>librarian_planner (rule + LLM decomposer)<br/>models/librarian_query_plan.py QueryPlanV1"]
+    EMBQ["embedder.embed_queries"]
+
+    %% ================= RETRIEVER ORCHESTRATOR =================
+    RO["RetrieverOrchestrator.retrieve_planned<br/>services/retriever/__init__.py:1401"]
+
+    subgraph PRE ["Pre-retrieval compilation"]
+        TI["temporal.detect_temporal_intent<br/>retriever/temporal.py (pure, fail-open)"]
+        IP["intent_policy — deterministic intent mix"]
+        VOC["CorpusVocabularyResolver.resolve<br/>retriever/vocabulary.py<br/>per-corpus Qdrant entity_lexicon fanout<br/>+ Mongo alias (hybrid) + Neo4j neighbors (graph)<br/>global merge w/ corpus_id + global/corpus rank"]
+        VOCACHE["vocabulary_cache<br/>sha256 key + per-corpus epoch"]
+        GVL["grounded_vocabulary_lanes<br/>translation/step-back lanes (optional)"]
+    end
+
+    subgraph ROUTING ["Document routing (scope priors, never evidence)"]
+        T0["tier0_router.route_lanes<br/>durable document-summary cards"]
+        FLR["four_lane_router.route_lanes<br/>lexical/semantic/child_rollup/associative<br/>(associative = digest ontology frames)"]
+        STN["summary_tree_navigator.navigate<br/>L2-L4 hierarchy descent"]
+        GRH["grounded_document_route_hints<br/>librarian route hints"]
+    end
+
+    subgraph EXEC ["Evidence retrieval lanes"]
+        FA["funnel_a — summary retrieval"]
+        FB["funnel_b — child chunks"]
+        LEX["lexical.py — Mongo BM25 recall"]
+        DA["document_anchor — title anchor recall"]
+        GF["_retrieve_graph_seed_facts → Neo4j<br/>graph_payload / mode_a / mode_b"]
+        EVID["evidence_plan.EvidenceLane +<br/>evidence_allocation two-lane seats"]
+    end
+
+    subgraph POST ["Fusion / ranking / curation"]
+        PF["planned_fusion.fuse_planned_pools<br/>reservation_policy corpus reservations"]
+        RR["reranker.reranker_service<br/>cross-encoder = sole scoring authority"]
+        CUR["curation.py (Retrieval Layer v4)<br/>shadow-gated RETRIEVAL_CURATION_V4_ENABLED"]
+        RP["ranking_policy.select_with_diversity<br/>(legacy default path)"]
+        CD["cross_domain.py budget/rank levers<br/>CROSS_DOMAIN_EMPHASIS"]
+        QG["query_grounding — concept coverage guard"]
+        HYD["hydrate.py — Mongo parent text +<br/>temporal metadata attach"]
+        ASM["assembly.py + excerpt.py →<br/>RetrievalResult{sources, facts, diagnostics}"]
+    end
+
+    %% ================= SYNTHESIS =================
+    AAG["_build_retrieval_answerability_gate<br/>atoms/obligations, refusal signals"]
+    WE["web evidence lanes<br/>web_query_builder / web_cache (optional)"]
+    SYN["grounded synthesis prompt contract<br/>tier-specific instructions + citation rules"]
+    LLM["services/llm.llm_service<br/>streaming completion"]
+    ACA["atomic_claim_anchors +<br/>claim_anchor_rendering in context"]
+    SSE["SSE stream → client"]
+
+    %% ================= INGESTION-SIDE (context only) =================
+    subgraph CP ["Control Plane V2 (ingestion readiness)"]
+        LED["control_plane/ledger.py<br/>ingestion_runs + stage_attempts"]
+        DS["control_plane/desired_state.py<br/>artifact census (ID joins)"]
+        REC["control_plane/reconciler.py"]
+        CERT["control_plane/certificate.py<br/>query-ready certificates"]
+    end
+    RR2["services/retrieval_readiness.py<br/>Qdrant+Neo4j readiness guards"]
+
+    %% ================= EDGES =================
+    HTTP --> CO
+    MCPS --> MCPT
+    MCPT -->|"polymath_chat_query"| CO
+    MCPT -->|"polymath_search /<br/>cross_corpus_search"| RO
+    MCPT -->|"graph_query"| GF
+    CO --> CONVO
+    CO --> QMR
+    CO --> BQP
+    CO --> BLP
+    CO --> EMBQ
+    CO --> RO
+
+    RO --> TI
+    RO --> IP
+    RO --> VOC
+    VOC <--> VOCACHE
+    VOC --> GVL
+    RO --> T0 --> FLR
+    T0 --> STN
+    BLP -.route hints.-> GRH --> RO
+    GVL -.optional lanes.-> RO
+
+    RO --> FA & FB & LEX & DA & GF
+    FA & FB & LEX & DA & GF --> EVID --> PF
+    PF --> RR --> CUR
+    CUR -.shadow off→.-> RP
+    RR --> CD
+    RR --> QG
+    PF --> HYD --> ASM
+    ASM --> CO
+
+    CO --> AAG
+    CO --> WE --> CO
+    CO --> SYN --> LLM
+    LLM --> ACA --> SSE
+
+    %% control plane feeds readiness, not the query path
+    LED --> REC --> DS
+    DS --> CERT
+    CERT -.query_ready gates ingest UI.-> CPR
+    RR2 -.startup/ingest guards.-> RO
+
+    classDef frozen fill:#fdd,stroke:#c33;
+    classDef shadow fill:#ffd,stroke:#aa0,stroke-dasharray: 4 3;
+    class CUR shadow;
+    classDef notquery fill:#eee,stroke:#999,stroke-dasharray: 2 2;
+    class CPR,LED,DS,REC,CERT,RR2 notquery;

@@ -114,7 +114,7 @@ class FactRetrieval:
             WHERE ($corpus_ids = [] OR f.corpus_id IN $corpus_ids)
               AND (
                     $knowledge_status_min = 'candidate'
-                    OR coalesce(f.knowledge_status, 'accepted') = 'accepted'
+                    OR coalesce(f.knowledge_status, 'candidate') = 'accepted'
                   )
             """
             if fact_types:
@@ -143,7 +143,7 @@ class FactRetrieval:
                 c.chunk_id        AS chunk_id,
                 f.doc_id          AS doc_id,
                 f.corpus_id       AS corpus_id,
-                coalesce(f.knowledge_status, 'accepted') AS knowledge_status,
+                coalesce(f.knowledge_status, 'candidate') AS knowledge_status,
                 semantic_rank     AS semantic_rank
             ORDER BY semantic_rank DESC, coalesce(f.confidence, 0.0) DESC, f.fact_id ASC
             LIMIT $limit
@@ -161,7 +161,7 @@ class FactRetrieval:
             {where_clause}
               AND (
                     $knowledge_status_min = 'candidate'
-                    OR coalesce(f.knowledge_status, 'accepted') = 'accepted'
+                    OR coalesce(f.knowledge_status, 'candidate') = 'accepted'
                   )
             """
             if corpus_ids:
@@ -184,7 +184,7 @@ class FactRetrieval:
                 c.chunk_id        AS chunk_id,
                 f.doc_id          AS doc_id,
                 f.corpus_id       AS corpus_id,
-                coalesce(f.knowledge_status, 'accepted') AS knowledge_status,
+                coalesce(f.knowledge_status, 'candidate') AS knowledge_status,
                 semantic_rank     AS semantic_rank
             ORDER BY semantic_rank DESC, coalesce(f.confidence, 0.0) DESC, f.fact_id ASC
             LIMIT $limit

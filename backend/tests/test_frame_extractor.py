@@ -218,3 +218,72 @@ def test_every_frame_counter_is_canonical():
         "frame_bibliographic_appositive",
     ):
         assert key in ALL_COUNTER_KEYS, f"{key} not published"
+
+
+# ---------------------------------------------------------------------------
+# P2A: Open-relation lane (unmapped predicates preserved, not dropped).
+# ---------------------------------------------------------------------------
+
+
+class TestOpenRelationLane:
+    """Frames whose predicate the resolver cannot map are emitted with
+    predicate=None, mapping_status='UNMAPPED', graph_eligible=False
+    rather than being silently discarded."""
+
+    def test_unmapped_verb_emits_open_relation(self, extractor):
+        """A verb with no ontology mapping produces predicate=None."""
+        text = "Acme pioneered the technology."
+        spans = [
+            EntitySpan("Acme", 0, 4, "Organization"),
+            EntitySpan("technology", 19, 29, "Concept"),
+        ]
+        counters = new_counters()
+        trace: list[dict] = []
+        triples = extractor.extract(
+            text=text, entities=spans,
+            suppression_counters=counters, trace=trace,
+        )
+        # The frame should survive (not be dropped)
+        assert len(triples) == 1
+        t = triples[0]
+        assert t.predicate is None  # no canonical mapping
+        assert t.predicate_lemma == "pioneer"  # bare verb lemma preserved
+        assert t.predicate_surface == "pioneered"  # surface form preserved
+        assert t.mapping_status == "UNMAPPED"
+        assert t.graph_eligible is False
+        assert t.is_graph_edge is False  # must never become a graph edge
+        assert t.subject_surface == "Acme"
+        assert t.object_surface == "technology"
+        # Counter still incremented (tracks volume of unmapped frames)
+        assert counters["frame_predicate_unnamed"] >= 1
+
+    def test_unmapped_trace_shows_survived(self, extractor):
+        """Trace entry for an unmapped frame has died_at=None."""
+        text = "The institute championed the method."
+        spans = [
+            EntitySpan("institute", 4, 13, "Organization"),
+            EntitySpan("method", 29, 35, "Method"),
+        ]
+        trace: list[dict] = []
+        triples = extractor.extract(
+            text=text, entities=spans, trace=trace,
+        )
+        # Find the trace entry for our surviving frame
+        survived = [e for e in trace if e.get("died_at") is None]
+        assert len(survived) >= 1
+        entry = survived[0]
+        assert "UNMAPPED" in entry.get("emitted", "")
+
+    def test_mapped_verb_still_resolves(self, extractor):
+        """Verbs WITH ontology mappings still produce canonical predicates."""
+        text = "Microsoft acquired GitHub."
+        spans = [
+            EntitySpan("Microsoft", 0, 9, "Organization"),
+            EntitySpan("GitHub", 19, 25, "Software"),
+        ]
+        triples = extractor.extract(text=text, entities=spans)
+        assert len(triples) == 1
+        assert triples[0].predicate == "owns"  # acquire -> owns
+        assert triples[0].predicate is not None  # NOT unmapped
+        assert triples[0].mapping_status == "MAPPED"
+        assert triples[0].graph_eligible is True

@@ -23,6 +23,7 @@ def _chunk(
     source_tier: str = "tier_a",
     provenance: list[dict] | None = None,
     metadata: dict | None = None,
+    chunk_kind: str = "body",
 ) -> SourceChunk:
     return SourceChunk(
         chunk_id=chunk_id,
@@ -35,6 +36,7 @@ def _chunk(
         source_tier=source_tier,
         provenance=provenance,
         metadata=metadata or {},
+        chunk_kind=chunk_kind,
     )
 
 
@@ -795,3 +797,94 @@ def test_specific_intent_trims_weak_diversity_fillers():
     final_docs = {c.doc_id for c in result.candidates}
     assert final_docs == {"berne"}, f"weak fillers must be trimmed, got {final_docs}"
     assert result.diagnostics.get("specific_floor_trimmed", 0) >= 1
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Mixed-content book lane (Slice 1) — mixed-evidence reservation: never
+# return code without its explanation (or vice versa).
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def test_mixed_evidence_reserves_code_sibling_under_shared_parent():
+    intent = infer_retrieval_intent("explain how the cache eviction example works")
+    ranked = [
+        _chunk("prose1", score=0.90, parent_id="shared", doc_id="book-doc",
+               text="The LRU cache evicts the least recently used entry first."),
+        _chunk("prose2", score=0.85, parent_id="p2", doc_id="other-doc",
+               text="Unrelated prose about network topologies and routing."),
+        _chunk("prose3", score=0.80, parent_id="p3", doc_id="third-doc",
+               text="More unrelated prose about database replication."),
+        _chunk("code1", score=0.26, parent_id="shared", doc_id="book-doc",
+               chunk_kind="code",
+               text="def evict(cache):\n    return cache.pop_lru()"),
+    ]
+
+    result = select_with_diversity(
+        ranked,
+        final_top_k=4,
+        intent=intent,
+        tier=RetrievalTier.qdrant_mongo,
+    )
+
+    kinds = {c.chunk_kind for c in result.candidates}
+    assert "body" in kinds and "code" in kinds
+    assert result.diagnostics.get("mixed_evidence_repairs") == 1
+    code_chunk = next(c for c in result.candidates if c.chunk_id == "code1")
+    assert code_chunk.metadata["diversity_rerank"]["selected_by"] == "mixed_evidence"
+
+
+def test_mixed_evidence_reserves_across_code_own_parents_via_doc():
+    # Real pipeline shape: code blocks get their own heading-bound parents,
+    # so the reservation must fall back to the document group.
+    intent = infer_retrieval_intent("explain how the cache eviction example works")
+    ranked = [
+        _chunk("prose1", score=0.90, parent_id="p1", doc_id="book-doc",
+               text="The LRU cache evicts the least recently used entry first."),
+        _chunk("prose2", score=0.85, parent_id="p2", doc_id="other-doc",
+               text="Unrelated prose about network topologies and routing."),
+        _chunk("prose3", score=0.80, parent_id="p3", doc_id="third-doc",
+               text="More unrelated prose about database replication."),
+        _chunk("prose4", score=0.75, parent_id="p4", doc_id="fourth-doc",
+               text="Yet another unrelated prose passage on typography."),
+        _chunk("code1", score=0.26, parent_id="code-parent", doc_id="book-doc",
+               chunk_kind="code",
+               text="def evict(cache):\n    return cache.pop_lru()"),
+    ]
+
+    result = select_with_diversity(
+        ranked,
+        final_top_k=5,
+        intent=intent,
+        tier=RetrievalTier.qdrant_mongo,
+    )
+
+    ids = {c.chunk_id for c in result.candidates}
+    assert "code1" in ids and "prose1" in ids
+    assert result.diagnostics.get("mixed_evidence_repairs") == 1
+    code_chunk = next(c for c in result.candidates if c.chunk_id == "code1")
+    assert code_chunk.metadata["diversity_rerank"]["selected_by"] == "mixed_evidence"
+
+
+def test_mixed_evidence_noop_for_prose_only_pool():
+    intent = infer_retrieval_intent("summarize the main themes of the book")
+    ranked = [
+        _chunk("a", score=0.90, parent_id="p1", doc_id="d1",
+               text="Prose about emotional contrast in messaging."),
+        _chunk("b", score=0.85, parent_id="p2", doc_id="d2",
+               text="Prose about concrete credible storytelling."),
+        _chunk("c", score=0.80, parent_id="p3", doc_id="d3",
+               text="Prose about sticky idea frameworks."),
+    ]
+
+    result = select_with_diversity(
+        ranked,
+        final_top_k=3,
+        intent=intent,
+        tier=RetrievalTier.qdrant_mongo,
+    )
+
+    assert result.diagnostics.get("mixed_evidence_repairs") == 0
+    assert all(
+        c.metadata["diversity_rerank"]["selected_by"] != "mixed_evidence"
+        for c in result.candidates
+    )

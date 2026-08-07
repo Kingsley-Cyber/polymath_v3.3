@@ -1,0 +1,53 @@
+# Canonical predicate labels — the single source of truth for the mapping
+# between natural-language relation labels (handed to the model) and the
+# snake_case ontology predicates stored in the graph.
+#
+# Wording matters to a zero-shot model: prompt labels stay in plain English
+# while storage is snake_case. Every observed model-output variant is mapped
+# here so the gate never silently drops a relation because of wording drift.
+#
+# Schema:
+#   labels:
+#     "<natural-language label>": "<snake_case ontology predicate>"
+#
+# ALIASES: the model does not always echo the exact prompt label back. For
+# example, the prompt label "is an instance of" is frequently emitted as
+# "instance of" — both map to the same predicate.
+#
+# Verified against the actual prediction dump
+# (data/deterministic_gold_score/data/relex_large_v1.predictions.jsonl).
+
+version: 1
+
+labels:
+  affiliated with: affiliated_with
+  works for: works_for
+  created by: created_by
+  owns: owns
+  part of: part_of
+  located in: located_in
+  causes: causes
+  detects: detects
+  uses: uses
+  produces: produces
+  derived from: derived_from
+
+  # Model emits "instance of" — drops the leading "is an" from the prompt.
+  is an instance of: instance_of
+  instance of: instance_of
+
+  synonym of: synonym_of
+  includes: includes
+  supports: supports
+  implements: implements
+  has part: has_part
+  references: references
+  depends on: depends_on
+  member of: member_of
+  example of: example_of
+  evaluates: evaluates
+  deploys: deploys
+  creates: creates
+  trains: trains
+  runs on: runs
+  quantizes: quantizes

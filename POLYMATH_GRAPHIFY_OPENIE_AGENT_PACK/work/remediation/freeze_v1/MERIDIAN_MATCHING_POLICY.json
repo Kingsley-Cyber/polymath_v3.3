@@ -1,0 +1,49 @@
+{
+  "version": "meridian-adversarial-matching-v1",
+  "normalization": [
+    "Unicode case folding",
+    "ASCII letter and digit tokenization",
+    "whitespace joining"
+  ],
+  "declared_alias_groups": [
+    {
+      "canonical": "Project Meridian",
+      "aliases": ["Meridian"]
+    },
+    {
+      "canonical": "Dr. Elena Park",
+      "aliases": ["Dr. Park"]
+    }
+  ],
+  "declared_subsumptions": [],
+  "identity_exclusions": [
+    ["Beacon", "Beacon Search"]
+  ],
+  "surface_predicate_lexicon": {
+    "uses": ["use", "uses", "used", "write to", "writes to", "written to"],
+    "depends_on": ["depend on", "depends on", "depended on", "rely on", "relies on"],
+    "supports": ["support", "supports", "supported", "maintain", "maintains"],
+    "part_of": ["part of", "component of", "module of"],
+    "produces": ["produce", "produces", "produced", "emit", "emits", "create", "creates"],
+    "consumes": ["consume", "consumes", "consumed", "accept", "accepts", "read", "reads"],
+    "owns": ["own", "owns", "owned", "operated by"],
+    "causes": ["cause", "causes", "caused", "trigger", "triggers", "triggered"],
+    "derived_from": ["derived from", "based on"],
+    "defines": ["define", "defines", "defined"],
+    "implements": ["implement", "implements", "implemented"],
+    "related_to": ["related to", "associated with", "connected to", "led by", "based in"]
+  },
+  "prohibited": [
+    "embedding_similarity",
+    "unconstrained_fuzzy_semantic_matching",
+    "undeclared_aliases",
+    "undeclared_subsumption"
+  ],
+  "match_classes": [
+    "EXACT",
+    "DECLARED_ALIAS",
+    "NORMALIZED_VARIANT",
+    "DECLARED_SUBSUMPTION",
+    "NO_MATCH"
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "decision_conservation": true,
+  "documents": 2,
+  "eligible_units": 193,
+  "identity_digest": "db001ba2e50182aa28de1286cebe043a0ba9b877ddaf71dbe244c7a05ef699c2",
+  "ineligible_units": 1086,
+  "reason_counts": {
+    "no_relation_cue": 830,
+    "one_document_mention": 10,
+    "relation_cue": 183,
+    "strict_relation_bearing_cue": 10,
+    "structural_furniture": 256,
+    "two_document_mentions": 183
+  },
+  "schema_version": "polymath.relation_eligibility_report.v1",
+  "source_blocks": 1279,
+  "source_text_preserved": true,
+  "status": "passed"
+}

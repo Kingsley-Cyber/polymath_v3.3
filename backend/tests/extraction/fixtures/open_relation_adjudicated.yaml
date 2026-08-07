@@ -1,0 +1,270 @@
+# Open-relation argument-assignment regression fixtures.
+#
+# Source: 12 adjudicated open relations from ADJUDICATION_20260727.md
+# Target: 4/4 valid preserved, 0/8 invalid stored as trusted, all 8 in review/audit.
+#
+# Each fixture specifies:
+#   sentence: the exact source sentence
+#   entities: (surface, start, end, type) relative to sentence
+#   expected_subject / expected_object: the correct argument assignment
+#   expected_surface_predicate: the verb lemma
+#   verdict: VALID | INVALID_DIRECTION | INVALID_SUBJECT
+#   expected_route: STORE_UNMAPPED_SURFACE_RELATION | REVIEW_UNMAPPED_RELATION | REJECT_MALFORMED_SYNTAX
+#   reason: adjudication rationale
+#
+# The direction metadata contract:
+#   subject_dependency_role: agent | patient | theme | possessor | anchor
+#   object_dependency_role: agent | patient | theme | possessed | appositive
+#   voice: active | passive | nominal
+#   direction_source: DEPENDENCY_FRAME | RESOLVER_SWAP | NOMINAL
+#   direction_confidence: high | medium | low
+
+fixtures:
+  # =====================================================================
+  # VALID RECORDS (4) — must be preserved as STORE_UNMAPPED_SURFACE_RELATION
+  # =====================================================================
+
+  - id: openrel_valid_001
+    sid: relex_v1_006
+    sentence: "A large action picture will easily double that crew size."
+    entities:
+      - ["large action picture", 2, 22, "event"]
+      - ["crew size", 47, 56, "concept"]
+    expected_subject: "large action picture"
+    expected_object: "crew size"
+    expected_surface_predicate: "double"
+    verdict: VALID
+    expected_route: STORE_UNMAPPED_SURFACE_RELATION
+    reason: "Active transitive, correct agent→patient direction"
+    expected_metadata:
+      subject_dependency_role: agent
+      object_dependency_role: patient
+      voice: active
+      direction_source: DEPENDENCY_FRAME
+      direction_confidence: high
+
+  - id: openrel_valid_002
+    sid: relex_v1_006
+    sentence: "A large action picture will easily double that crew size."
+    entities:
+      - ["action picture", 8, 22, "artifact"]
+      - ["crew size", 47, 56, "concept"]
+    expected_subject: "action picture"
+    expected_object: "crew size"
+    expected_surface_predicate: "double"
+    verdict: VALID
+    expected_route: STORE_UNMAPPED_SURFACE_RELATION
+    reason: "Active transitive, correct agent→patient direction (shorter span)"
+    expected_metadata:
+      subject_dependency_role: agent
+      object_dependency_role: patient
+      voice: active
+      direction_source: DEPENDENCY_FRAME
+      direction_confidence: high
+
+  - id: openrel_valid_003
+    sid: relex_v1_009
+    sentence: "Rick tells Laszlo to get on the plane."
+    entities:
+      - ["Rick", 0, 4, "person"]
+      - ["Laszlo", 11, 17, "person"]
+    expected_subject: "Rick"
+    expected_object: "Laszlo"
+    expected_surface_predicate: "tell"
+    verdict: VALID
+    expected_route: STORE_UNMAPPED_SURFACE_RELATION
+    reason: "Active transitive, correct agent→patient direction (low KG value but structurally valid)"
+    expected_metadata:
+      subject_dependency_role: agent
+      object_dependency_role: patient
+      voice: active
+      direction_source: DEPENDENCY_FRAME
+      direction_confidence: high
+
+  - id: openrel_valid_004
+    sid: relex_v1_019
+    sentence: "This latter constraint should also benefit to the system designers because it will guide the design process."
+    entities:
+      - ["This latter constraint", 0, 22, "concept"]
+      - ["system designers", 50, 66, "artifact"]
+    expected_subject: "This latter constraint"
+    expected_object: "system designers"
+    expected_surface_predicate: "benefit"
+    verdict: VALID
+    expected_route: STORE_UNMAPPED_SURFACE_RELATION
+    reason: "Prepositional object, correct direction: constraint benefits designers"
+    expected_metadata:
+      subject_dependency_role: agent
+      object_dependency_role: patient
+      voice: active
+      direction_source: DEPENDENCY_FRAME
+      direction_confidence: high
+
+  # =====================================================================
+  # INVALID_DIRECTION (6) — must NOT be stored as trusted open relations
+  # =====================================================================
+
+  - id: openrel_inval_dir_001
+    sid: relex_v1_001
+    sentence: "As much as the Web now seems second nature, an at-hand information landscape crowded with social networks, streaming video, and online commerce can still feel like the Wild West."
+    entities:
+      - ["at-hand information landscape", 47, 76, "concept"]
+      - ["streaming video", 106, 121, "concept"]
+    expected_subject: "streaming video"
+    expected_object: "at-hand information landscape"
+    expected_surface_predicate: "crowd"
+    verdict: INVALID_DIRECTION
+    expected_route: REVIEW_UNMAPPED_RELATION
+    reason: "Passive-like prep:with construction. Landscape is crowded WITH video; video crowds the landscape. Direction inverted."
+    expected_metadata:
+      subject_dependency_role: patient
+      object_dependency_role: agent
+      voice: active
+      direction_source: DEPENDENCY_FRAME
+      direction_confidence: medium
+
+  - id: openrel_inval_dir_002
+    sid: relex_v1_001
+    sentence: "As much as the Web now seems second nature, an at-hand information landscape crowded with social networks, streaming video, and online commerce can still feel like the Wild West."
+    entities:
+      - ["at-hand information landscape", 47, 76, "concept"]
+      - ["video", 116, 121, "artifact"]
+    expected_subject: "video"
+    expected_object: "at-hand information landscape"
+    expected_surface_predicate: "crowd"
+    verdict: INVALID_DIRECTION
+    expected_route: REVIEW_UNMAPPED_RELATION
+    reason: "Same as above, shorter object span"
+    expected_metadata:
+      subject_dependency_role: patient
+      object_dependency_role: agent
+      voice: active
+      direction_source: DEPENDENCY_FRAME
+      direction_confidence: medium
+
+  - id: openrel_inval_dir_003
+    sid: relex_v1_001
+    sentence: "As much as the Web now seems second nature, an at-hand information landscape crowded with social networks, streaming video, and online commerce can still feel like the Wild West."
+    entities:
+      - ["at-hand information landscape", 47, 76, "concept"]
+      - ["online commerce", 126, 141, "concept"]
+    expected_subject: "online commerce"
+    expected_object: "at-hand information landscape"
+    expected_surface_predicate: "crowd"
+    verdict: INVALID_DIRECTION
+    expected_route: REVIEW_UNMAPPED_RELATION
+    reason: "Same as above, different conjunct"
+    expected_metadata:
+      subject_dependency_role: patient
+      object_dependency_role: agent
+      voice: active
+      direction_source: DEPENDENCY_FRAME
+      direction_confidence: medium
+
+  - id: openrel_inval_dir_004
+    sid: relex_v1_001
+    sentence: "As much as the Web now seems second nature, an at-hand information landscape crowded with social networks, streaming video, and online commerce can still feel like the Wild West."
+    entities:
+      - ["information landscape", 55, 76, "concept"]
+      - ["streaming video", 106, 121, "concept"]
+    expected_subject: "streaming video"
+    expected_object: "information landscape"
+    expected_surface_predicate: "crowd"
+    verdict: INVALID_DIRECTION
+    expected_route: REVIEW_UNMAPPED_RELATION
+    reason: "Same as above, shorter subject span"
+    expected_metadata:
+      subject_dependency_role: patient
+      object_dependency_role: agent
+      voice: active
+      direction_source: DEPENDENCY_FRAME
+      direction_confidence: medium
+
+  - id: openrel_inval_dir_005
+    sid: relex_v1_001
+    sentence: "As much as the Web now seems second nature, an at-hand information landscape crowded with social networks, streaming video, and online commerce can still feel like the Wild West."
+    entities:
+      - ["information landscape", 55, 76, "concept"]
+      - ["video", 116, 121, "artifact"]
+    expected_subject: "video"
+    expected_object: "information landscape"
+    expected_surface_predicate: "crowd"
+    verdict: INVALID_DIRECTION
+    expected_route: REVIEW_UNMAPPED_RELATION
+    reason: "Same as above, shorter both spans"
+    expected_metadata:
+      subject_dependency_role: patient
+      object_dependency_role: agent
+      voice: active
+      direction_source: DEPENDENCY_FRAME
+      direction_confidence: medium
+
+  - id: openrel_inval_dir_006
+    sid: relex_v1_001
+    sentence: "As much as the Web now seems second nature, an at-hand information landscape crowded with social networks, streaming video, and online commerce can still feel like the Wild West."
+    entities:
+      - ["information landscape", 55, 76, "concept"]
+      - ["online commerce", 126, 141, "concept"]
+    expected_subject: "online commerce"
+    expected_object: "information landscape"
+    expected_surface_predicate: "crowd"
+    verdict: INVALID_DIRECTION
+    expected_route: REVIEW_UNMAPPED_RELATION
+    reason: "Same as above, different conjunct with shorter subject"
+    expected_metadata:
+      subject_dependency_role: patient
+      object_dependency_role: agent
+      voice: active
+      direction_source: DEPENDENCY_FRAME
+      direction_confidence: medium
+
+  # =====================================================================
+  # INVALID_SUBJECT (2) — must NOT be stored as trusted open relations
+  # =====================================================================
+
+  - id: openrel_inval_subj_001
+    sid: relex_v1_007
+    sentence: "Ville Vesterinen observes, \"cities and neighbourhoods evoke strong emotions\" (Vesterinen, 2012), meaning that the emotional investment that players have in their home locality helps amplify the emotional investment in the territorial mechanic."
+    entities:
+      - ["emotional investment", 110, 130, "concept"]
+      - ["home locality", 158, 171, "location"]
+    expected_subject: "players"
+    expected_object: "home locality"
+    expected_surface_predicate: "have"
+    verdict: INVALID_SUBJECT
+    expected_route: REVIEW_UNMAPPED_RELATION
+    reason: "Players have investment IN locality; 'emotional investment' is not the agent of 'have'. Wrong subject extracted."
+    expected_metadata:
+      subject_dependency_role: agent
+      object_dependency_role: patient
+      voice: active
+      direction_source: DEPENDENCY_FRAME
+      direction_confidence: low
+
+  - id: openrel_inval_subj_002
+    sid: relex_v1_014
+    sentence: "Copyright fuels creativity, encourages diverse voices, promotes free speech, and creates a vibrant culture."
+    entities:
+      - ["creativity", 16, 26, "concept"]
+      - ["diverse voices", 39, 53, "concept"]
+    expected_subject: "Copyright"
+    expected_object: "diverse voices"
+    expected_surface_predicate: "encourage"
+    verdict: INVALID_SUBJECT
+    expected_route: REVIEW_UNMAPPED_RELATION
+    reason: "Copyright encourages diverse voices, not creativity. The conjunction structure makes 'creativity' the object of 'fuels', not the subject of 'encourages'."
+    expected_metadata:
+      subject_dependency_role: agent
+      object_dependency_role: patient
+      voice: active
+      direction_source: DEPENDENCY_FRAME
+      direction_confidence: low
+
+# =====================================================================
+# Regression targets
+# =====================================================================
+# 1. 4/4 VALID records must route to STORE_UNMAPPED_SURFACE_RELATION
+# 2. 0/8 INVALID records may route to STORE_UNMAPPED_SURFACE_RELATION
+# 3. All 8 INVALID records must be retained in REVIEW or audit (not silently dropped)
+# 4. Exact evidence offsets must be preserved in all output records
+# 5. Direction metadata must be populated for all 12 records

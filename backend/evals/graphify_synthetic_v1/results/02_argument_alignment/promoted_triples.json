@@ -1,0 +1,42 @@
+[
+  {
+    "subject": "falcon cache",
+    "predicate": "depends_on",
+    "object": "sable index"
+  },
+  {
+    "subject": "glowline metrics",
+    "predicate": "depends_on",
+    "object": "redlark"
+  },
+  {
+    "subject": "pinion api",
+    "predicate": "produces",
+    "object": "audit summary report"
+  },
+  {
+    "subject": "pinion api",
+    "predicate": "uses",
+    "object": "falcon cache"
+  },
+  {
+    "subject": "quartzline",
+    "predicate": "owns",
+    "object": "vaultstone"
+  },
+  {
+    "subject": "redlark",
+    "predicate": "supports",
+    "object": "glowline metrics"
+  },
+  {
+    "subject": "trellis",
+    "predicate": "part_of",
+    "object": "pinion api"
+  },
+  {
+    "subject": "vaultstone",
+    "predicate": "consumes",
+    "object": "nightly snapshot feed"
+  }
+]

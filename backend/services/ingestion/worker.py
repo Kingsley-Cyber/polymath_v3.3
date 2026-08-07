@@ -4,12 +4,17 @@ Ingestion pipeline worker — locked pipeline order:
   1. Parse     → docling_adapter.parse_document
   2. Chunk     → tier_chunker.chunk (parents + children)
   3. Mongo     → compact progress doc + parent/chunk checkpoints
-  4. Ghosts    → summary then extraction under the model-phase semaphore
-                 Ghost A runs iff chunk_summarization=True.
-                 Ghost B runs iff use_neo4j=True.
-                 Either branch is a no-op (returns None) when its flag is off.
+  4. Ghosts    → summary + extraction under the model-phase semaphore
+                 Summary lane (chunk_summarization=True):
+                   * REQUIRED baseline = deterministic_summary.v1
+                     (no provider, no cost authority)
+                   * DEPRECATED enrichment = cloud/LLM Ghost A, only when an
+                     explicit summary_cost_controller / cost authority is open
+                     (llm_summary_enrichment.v1). Not removed; not default.
+                 Extraction lane = graphify_cpu (canonical). Ghost B / Neo4j
+                 graph materialization runs iff use_neo4j=True.
   5. Mongo     → compact document metadata + parent summaries +
-                 Ghost B extraction rows. Flip mongo_written.
+                 extraction rows. Flip mongo_written.
   6. Embed     → one embed_batch call over children+summary texts.
                  mode / dim / model-id come from ingestion_config.
   7. Qdrant    → children → naive / hrag (tier-filtered) / graph,
@@ -17,13 +22,13 @@ Ingestion pipeline worker — locked pipeline order:
   8. Neo4j     → write_document_graph. Flip neo4j_written.
                  Skipped entirely when use_neo4j=False.
 
-Ghost A total failure is a hard abort because parent summaries feed retrieval;
-partial summary coverage continues as a warning so later storage/graph phases
-still commit.
-Ghost B partial extraction is a soft warning: Mongo/Qdrant still commit, Neo4j
-keeps full chunk coverage, and only entity/relation extraction is partial.
-Resume logic reuses split Mongo checkpoints for parent summaries and Ghost B
-extractions so large books never need one giant document write.
+Missing required summaries (deterministic or enrichment) hard-abort because
+parent summaries feed retrieval; partial coverage continues as a warning so
+later storage/graph phases still commit.
+Extraction partial is a soft warning: Mongo/Qdrant still commit, Neo4j keeps
+full chunk coverage, and only entity/relation extraction is partial.
+Resume logic reuses split Mongo checkpoints for parent summaries and
+extraction staging so large books never need one giant document write.
 """
 
 import asyncio
@@ -98,17 +103,10 @@ from services.ghost_b import (
     ExtractionTask,
     FactItem,
     RelationItem,
-    SchemaContext,
 )
 
-# Phase A — fully-local, deterministic Ghost B. The data-layer dataclasses
-# (above) stay sourced from services.ghost_b; only the extractor is rerouted to
-# the local GLiNER×2 + GLiREL + Python-rules implementation. Same signature,
-# same ExtractionResult shape, so this branch and everything downstream are
-# unchanged. Ghost A (summaries) remains the cloud path.
-from services.ghost_b_local import extract_entities
 from services.facets import build_ingest_facet_profile
-from services.ingestion import dedup, docling_adapter, tier_chunker
+from services.ingestion import dedup, docling_adapter, parse_policy, tier_chunker
 from services.ingestion.summary_semantics import (
     repair_parent_summary_row,
     topic_key_for as _topic_key_for,
@@ -130,7 +128,6 @@ from services.ingestion.resource_planner import (
 )
 from services.ingestion.provider_lane_health import (
     adapt_extraction_pool_concurrency,
-    filter_extraction_pool_by_provider_health,
     load_recent_provider_lane_health,
 )
 from services.ingestion.source_identity import source_identity_doc_fields
@@ -355,8 +352,6 @@ def _pathological_chunk_reason(parse_result, settings_obj) -> str | None:
 
 _MODEL_PHASE_SEMAPHORES: dict[str, asyncio.Semaphore] = {}
 _MODEL_PHASE_SEMAPHORE_STATE: dict[str, tuple[int, asyncio.AbstractEventLoop]] = {}
-_GHOST_B_FILE_SEMAPHORES: dict[str, asyncio.Semaphore] = {}
-_GHOST_B_FILE_SEMAPHORE_STATE: dict[str, tuple[int, asyncio.AbstractEventLoop]] = {}
 _QDRANT_WRITE_SEMAPHORES: dict[str, asyncio.Semaphore] = {}
 _QDRANT_WRITE_SEMAPHORE_STATE: dict[str, tuple[int, asyncio.AbstractEventLoop]] = {}
 _NEO4J_WRITE_SEMAPHORES: dict[str, asyncio.Semaphore] = {}
@@ -373,54 +368,9 @@ def _pool_entry_uses_managed_vllm(entry: dict[str, Any] | Any) -> bool:
     return extraction_lane_uses_private_vllm(entry)
 
 
-def _cloud_pool_refs_for_config(config: IngestionConfig) -> list[Any]:
-    if getattr(config, "models_linked", True):
-        return list(getattr(config, "summary_models", []) or [])
-    return list(getattr(config, "extraction_models", []) or [])
-
-
-def _pool_lane_signature(ref: Any) -> tuple[str, str, str, str]:
-    data = _plain_model_ref(ref)
-    return (
-        str(data.get("provider_preset") or "").strip().lower(),
-        str(data.get("base_url") or "").strip().rstrip("/").lower(),
-        str(data.get("lifecycle_base_url") or "").strip().rstrip("/").lower(),
-        str(data.get("model") or "").strip().lower(),
-    )
-
-
 def _ghost_branches_can_overlap(config: IngestionConfig) -> bool:
-    """Return true when Ghost A and Ghost B use disjoint heavy resources.
-
-    This keeps the conservative old behavior for linked cloud pools, while
-    allowing RTX/private-vLLM extraction to stay busy when summaries are routed
-    to a separate provider.
-    """
-    engine = str(getattr(config, "extraction_engine", "") or "").strip().lower()
-    if engine in {"legacy_local", "local_then_enrich", "runpod_flash", "off"}:
-        return True
-    if getattr(config, "models_linked", True):
-        return False
-
-    extraction_refs = list(getattr(config, "extraction_models", []) or [])
-    if any(
-        _pool_entry_uses_managed_vllm(_plain_model_ref(ref)) for ref in extraction_refs
-    ):
-        return True
-
-    summary_sigs = {
-        _pool_lane_signature(ref)
-        for ref in (getattr(config, "summary_models", []) or [])
-        if _pool_lane_signature(ref) != ("", "", "", "")
-    }
-    extraction_sigs = {
-        _pool_lane_signature(ref)
-        for ref in extraction_refs
-        if _pool_lane_signature(ref) != ("", "", "", "")
-    }
-    return bool(
-        summary_sigs and extraction_sigs and summary_sigs.isdisjoint(extraction_sigs)
-    )
+    """Graphify CPU and the optional summary lane use disjoint resources."""
+    return True
 
 
 def _resource_profile_for_config(
@@ -437,9 +387,7 @@ def _resource_profile_for_config(
             if extraction_engine is not None
             else getattr(config, "extraction_engine", None)
         ),
-        extraction_pool=(
-            pool if pool is not None else _cloud_pool_refs_for_config(config)
-        ),
+        extraction_pool=(pool if pool is not None else []),
         source_location=source_location,
         settings=get_settings(),
     )
@@ -542,94 +490,6 @@ def _model_phase_semaphore(config: IngestionConfig) -> asyncio.Semaphore:
         _MODEL_PHASE_SEMAPHORE_STATE,
         key=_model_phase_gate_key(config),
         limit=_model_phase_doc_limit(config),
-    )
-
-
-def _ghost_b_active_doc_limit(
-    *,
-    pool: list[dict[str, Any]],
-    extraction_engine: str,
-    config: IngestionConfig | None = None,
-) -> int:
-    if str(extraction_engine or "").lower() == "legacy_local":
-        return 1
-    if str(extraction_engine or "").lower() == "runpod_flash":
-        return 1
-    if config is not None:
-        profile = _resource_profile_for_config(
-            config,
-            extraction_engine=extraction_engine,
-            pool=pool,
-        )
-        return max(1, int(profile.extraction_active_docs))
-    current = get_settings()
-    provider_lane_active = extraction_engine in {
-        "local",
-        "cloud",
-        "dual",
-        "local_then_cloud",
-        "local_then_enrich",
-    }
-    if provider_lane_active and any(
-        _pool_entry_uses_managed_vllm(entry) for entry in pool
-    ):
-        return max(
-            1, int(getattr(current, "EXTRACTION_MANAGED_VLLM_MAX_ACTIVE_DOCS", 2))
-        )
-    return max(1, int(getattr(current, "EXTRACTION_MAX_ACTIVE_DOCS", 1)))
-
-
-def _ghost_b_file_gate_key(
-    *,
-    pool: list[dict[str, Any]],
-    extraction_engine: str,
-    config: IngestionConfig | None = None,
-) -> str:
-    if str(extraction_engine or "").lower() == "legacy_local":
-        return "legacy_local"
-    if str(extraction_engine or "").lower() == "runpod_flash":
-        return "runpod_flash"
-    if config is not None:
-        profile = _resource_profile_for_config(
-            config,
-            extraction_engine=extraction_engine,
-            pool=pool,
-        )
-        if "remote_vllm" in profile.extraction_lanes:
-            return "remote_vllm"
-    provider_lane_active = extraction_engine in {
-        "local",
-        "cloud",
-        "dual",
-        "local_then_cloud",
-        "local_then_enrich",
-    }
-    if provider_lane_active and any(
-        _pool_entry_uses_managed_vllm(entry) for entry in pool
-    ):
-        return "remote_vllm"
-    return "default"
-
-
-def _ghost_b_file_semaphore(
-    *,
-    pool: list[dict[str, Any]],
-    extraction_engine: str,
-    config: IngestionConfig | None = None,
-) -> asyncio.Semaphore:
-    return _shared_semaphore(
-        _GHOST_B_FILE_SEMAPHORES,
-        _GHOST_B_FILE_SEMAPHORE_STATE,
-        key=_ghost_b_file_gate_key(
-            pool=pool,
-            extraction_engine=extraction_engine,
-            config=config,
-        ),
-        limit=_ghost_b_active_doc_limit(
-            pool=pool,
-            extraction_engine=extraction_engine,
-            config=config,
-        ),
     )
 
 
@@ -1294,18 +1154,6 @@ async def _find_near_duplicate_documents(
     return candidates[:limit]
 
 
-def _runpod_extractor_for_config(config: IngestionConfig):
-    """Select the additive RunPod adapter without changing the legacy default."""
-
-    if config.runpod_wire_contract == "local_extraction_v1":
-        from services.runpod_local_extraction import extract_entities
-
-        return extract_entities
-    from services.runpod_flash_extraction import extract_entities
-
-    return extract_entities
-
-
 async def _run_ghosts_parallel(
     *,
     config: IngestionConfig,
@@ -1317,12 +1165,12 @@ async def _run_ghosts_parallel(
     source_version_id: str | None = None,
     model: str,
     filename: str | None = None,
+    document_text: str | None = None,
     db: AsyncIOMotorDatabase,
     qdrant_client: AsyncQdrantClient,
     neo4j_driver,
     existing_doc: dict | None,
     ws: WriteState,
-    extraction_endpoint_urls: list[str] | None = None,
     defer_summaries: bool = False,
     defer_ghost_b: bool = False,
     summary_cost_controller: Any | None = None,
@@ -1347,15 +1195,24 @@ async def _run_ghosts_parallel(
     if not existing_parent_chunks and existing_doc:
         existing_parent_chunks = (existing_doc or {}).get("parent_chunks") or []
     summaries_from_mongo: list[SummaryResult] | None = None
-    need_ghost_a = config.chunk_summarization and not defer_summaries
+    # Owner control (2026-08-05): deterministic_summary.v1 is the ONLY default
+    # summary pathway. Cloud/LLM Ghost A is deprecated enrichment and runs
+    # solely when an explicit summary cost authority is open.
+    need_summaries = config.chunk_summarization and not defer_summaries
+    need_llm_summary_enrichment = (
+        need_summaries and summary_cost_controller is not None
+    )
+    need_deterministic_summary = (
+        need_summaries and summary_cost_controller is None
+    )
+    need_ghost_a = need_llm_summary_enrichment  # legacy name = enrichment only
     summary_targets = _summary_target_kinds(config)
     summarizable_parents = _summarizable_parents(parents)
     expected_summary_count = len(summarizable_parents)
 
-    # Queryable-first and repair passes may intentionally defer provider
-    # summarization, but they still replace Mongo/Qdrant document surfaces.
-    # Carry forward any validated durable summaries so that a retry cannot
-    # erase them and force a paid regeneration pass.
+    # Queryable-first and repair passes may intentionally defer summarization,
+    # but they still replace Mongo/Qdrant document surfaces. Carry forward any
+    # validated durable summaries so a retry cannot erase them.
     if defer_summaries and config.chunk_summarization and existing_parent_chunks:
         summaries_from_mongo = _reconstruct_summaries_from_mongo(
             parents,
@@ -1370,7 +1227,7 @@ async def _run_ghosts_parallel(
                 expected_summary_count,
             )
 
-    if need_ghost_a and ws.summaries_indexed:
+    if need_summaries and ws.summaries_indexed:
         existing_by_parent_id = {p.get("parent_id"): p for p in existing_parent_chunks}
         mongo_summaries_complete = all(
             (existing_by_parent_id.get(p.parent_id, {}).get("summary") or "").strip()
@@ -1379,7 +1236,7 @@ async def _run_ghosts_parallel(
         if not mongo_summaries_complete:
             ws.summaries_indexed = False
             logger.warning(
-                "phase=ghost_a_resume reason=mongo_summary_text_missing "
+                "phase=summary_resume reason=mongo_summary_text_missing "
                 "doc=%s corpus=%s expected=%d",
                 doc_id[:12],
                 corpus_id[:8],
@@ -1388,9 +1245,9 @@ async def _run_ghosts_parallel(
         else:
             # A resume path may never ReplaceOne a parent row with less
             # information than its durable predecessor. Reconstruct the full
-            # validated typed artifact before declaring the provider lane
-            # skippable, because the Ghost B resume path can still upsert the
-            # parent rows later in this run.
+            # validated typed artifact before declaring the summary lane
+            # skippable, because the extraction resume path can still upsert
+            # the parent rows later in this run.
             reconstructed = _reconstruct_summaries_from_mongo(
                 parents,
                 existing_parent_chunks,
@@ -1400,7 +1257,7 @@ async def _run_ghosts_parallel(
             else:
                 ws.summaries_indexed = False
                 logger.warning(
-                    "phase=ghost_a_resume reason=mongo_summary_contract_invalid "
+                    "phase=summary_resume reason=mongo_summary_contract_invalid "
                     "doc=%s corpus=%s expected=%d reconstructed=%d",
                     doc_id[:12],
                     corpus_id[:8],
@@ -1409,7 +1266,7 @@ async def _run_ghosts_parallel(
                 )
         # This is the only safe fast-skip: the canonical Mongo parent summary
         # text and the Qdrant summary points must both exist.
-    if need_ghost_a and ws.summaries_indexed:
+    if need_summaries and ws.summaries_indexed:
         # This is the only safe fast-skip: children may already be in Qdrant
         # while summaries are absent, so qdrant_written is not enough.
         try:
@@ -1420,9 +1277,9 @@ async def _run_ghosts_parallel(
                 expected_count=expected_summary_count,
                 target_kinds=summary_targets,
             ):
-                need_ghost_a = False
+                need_summaries = False
                 logger.info(
-                    "Ghost A skipped (summaries indexed) doc=%s corpus=%s parents=%d",
+                    "summary lane skipped (summaries indexed) doc=%s corpus=%s parents=%d",
                     doc_id[:12],
                     corpus_id[:8],
                     expected_summary_count,
@@ -1430,7 +1287,7 @@ async def _run_ghosts_parallel(
             else:
                 ws.summaries_indexed = False
                 logger.warning(
-                    "phase=ghost_a_resume reason=summary_points_missing doc=%s corpus=%s expected=%d",
+                    "phase=summary_resume reason=summary_points_missing doc=%s corpus=%s expected=%d",
                     doc_id[:12],
                     corpus_id[:8],
                     expected_summary_count,
@@ -1438,13 +1295,13 @@ async def _run_ghosts_parallel(
         except Exception as exc:  # noqa: BLE001 - resume probe is best-effort
             ws.summaries_indexed = False
             logger.warning(
-                "phase=ghost_a_summary_check_failed doc=%s corpus=%s: %s",
+                "phase=summary_check_failed doc=%s corpus=%s: %s",
                 doc_id[:12],
                 corpus_id[:8],
                 exc,
             )
 
-    if need_ghost_a and existing_parent_chunks:
+    if need_summaries and existing_parent_chunks:
         existing_by_parent_id = {p.get("parent_id"): p for p in existing_parent_chunks}
         all_filled = all(
             (existing_by_parent_id.get(p.parent_id, {}).get("summary") or "").strip()
@@ -1455,7 +1312,7 @@ async def _run_ghosts_parallel(
                 parents, existing_parent_chunks
             )
             if len(summaries_from_mongo) == len(summarizable_parents):
-                need_ghost_a = False
+                need_summaries = False
                 try:
                     ws.summaries_indexed = await _qdrant_has_summary_points(
                         qdrant_client,
@@ -1467,13 +1324,13 @@ async def _run_ghosts_parallel(
                 except Exception as exc:  # noqa: BLE001 - reindex path is safe
                     ws.summaries_indexed = False
                     logger.warning(
-                        "phase=ghost_a_reconstruct_summary_check_failed doc=%s corpus=%s: %s",
+                        "phase=summary_reconstruct_check_failed doc=%s corpus=%s: %s",
                         doc_id[:12],
                         corpus_id[:8],
                         exc,
                     )
                 logger.info(
-                    "Ghost A skipped (resume) doc=%s corpus=%s parents=%d summaries_indexed=%s",
+                    "summary lane skipped (resume) doc=%s corpus=%s parents=%d summaries_indexed=%s",
                     doc_id[:12],
                     corpus_id[:8],
                     len(summaries_from_mongo),
@@ -1481,6 +1338,15 @@ async def _run_ghosts_parallel(
                 )
             else:
                 summaries_from_mongo = None  # partial reconstruct → rerun
+
+    # Recompute lanes after resume gates (owner control 2026-08-05).
+    need_llm_summary_enrichment = (
+        need_summaries and summary_cost_controller is not None
+    )
+    need_deterministic_summary = (
+        need_summaries and summary_cost_controller is None
+    )
+    need_ghost_a = need_llm_summary_enrichment
 
     # ── GHOST B path decisions ────────────────────────────────────────────
     need_ghost_b = (
@@ -1568,11 +1434,110 @@ async def _run_ghosts_parallel(
 
     # ── Branch coroutines ────────────────────────────────────────────────
     async def _a_branch() -> list[SummaryResult] | None:
-        if not need_ghost_a:
+        if not need_summaries:
             return summaries_from_mongo  # None unless resume-reconstructed
+
+        # Canonical pathway: deterministic_summary.v1 (no provider calls).
+        if need_deterministic_summary:
+            from datetime import datetime, timezone
+
+            from services.ingestion.deterministic_summary import (
+                DETERMINISTIC_SUMMARY_MODEL_STAMP,
+                DETERMINISTIC_SUMMARY_SCHEMA_VERSION,
+                build_deterministic_parent_summary,
+            )
+
+            skipped_kinds_det: dict[str, int] = {}
+            summary_parents = []
+            for p in parents:
+                kind = getattr(p, "chunk_kind", None) or ChunkKind.BODY
+                if should_summarize_parent(kind):
+                    summary_parents.append(p)
+                else:
+                    skipped_kinds_det[kind] = skipped_kinds_det.get(kind, 0) + 1
+            if skipped_kinds_det:
+                logger.info(
+                    "phase=deterministic_summary_skip_kinds doc=%s corpus=%s "
+                    "skipped=%s summarized=%d/%d",
+                    doc_id[:12],
+                    corpus_id[:8],
+                    skipped_kinds_det,
+                    len(summary_parents),
+                    len(parents),
+                )
+            results: list[SummaryResult] = []
+            created_at = datetime.now(timezone.utc).isoformat()
+            for p in summary_parents:
+                child_rows = [
+                    {"chunk_id": c.chunk_id, "chunk_kind": getattr(c, "chunk_kind", None)}
+                    for c in getattr(p, "children", []) or []
+                ]
+                built = build_deterministic_parent_summary(
+                    parent_row={
+                        "parent_id": p.parent_id,
+                        "doc_id": p.doc_id,
+                        "corpus_id": p.corpus_id,
+                        "text": p.text,
+                        "heading_path": getattr(p, "heading_path", None),
+                        "chunk_kind": getattr(p, "chunk_kind", None),
+                        "source_hash": getattr(p, "source_hash", None),
+                    },
+                    child_rows=child_rows,
+                    extraction_rows=[],
+                )
+                key_points = [
+                    {
+                        "source_child_ids": built.get("evidence_child_ids") or [],
+                        "text": point,
+                    }
+                    for point in (built.get("key_points") or [])
+                ]
+                results.append(
+                    SummaryResult(
+                        parent_id=p.parent_id,
+                        doc_id=p.doc_id,
+                        corpus_id=p.corpus_id,
+                        source_tier=p.source_tier,
+                        summary=built["summary"],
+                        schema_version=DETERMINISTIC_SUMMARY_SCHEMA_VERSION,
+                        summary_type="deterministic_parent",
+                        key_points=key_points or None,
+                        entity_hints=built.get("key_entities") or None,
+                        key_terms=(built.get("key_entities") or [])[:8] or None,
+                        abstraction_level="evidence_bound",
+                        temporal_class="unknown",
+                        time_expressions=[],
+                        source_child_ids=built.get("evidence_child_ids") or [
+                            c.chunk_id for c in getattr(p, "children", []) or []
+                        ],
+                        summary_id=built["summary_id"],
+                        source_hash=built["source_hash"],
+                        summary_model=DETERMINISTIC_SUMMARY_MODEL_STAMP,
+                        summary_created_at=created_at,
+                        validation_status="deterministic",
+                        quality_flags=built.get("quality_flags") or [],
+                        retrieval_text=built["summary"],
+                    )
+                )
+            logger.info(
+                "phase=deterministic_summary.v1 doc=%s corpus=%s parents=%d",
+                doc_id[:12],
+                corpus_id[:8],
+                len(results),
+            )
+            if not results and summary_parents:
+                raise RuntimeError(
+                    f"deterministic_summary.v1 produced 0/{len(summary_parents)} "
+                    "summaries; treating as control-plane failure"
+                )
+            return results
+
+        # Deprecated enrichment pathway: cloud/LLM Ghost A (requires cost authority).
+        if not need_ghost_a:
+            return summaries_from_mongo
         # Skip parent rows outside the retrieval-summary contract. Each
-        # summary call is an LLM round-trip and the resulting summary also gets
-        # embedded, so structural rows are not a summary gap.
+        # enrichment call is an LLM round-trip and the resulting summary also
+        # gets embedded, so structural rows are not a summary gap.
         skipped_kinds_a: dict[str, int] = {}
         summary_parents = []
         for p in parents:
@@ -1701,6 +1666,7 @@ async def _run_ghosts_parallel(
         return results
 
     async def _b_branch() -> list[ExtractionResult] | None:
+        nonlocal ghost_b_metrics
         # TWO-PHASE INGEST (§12.6-aligned, gated OFF): defer extraction so
         # the doc is QUERYABLE right after embed; the post-qdrant hook fires
         # the existing graph-backfill machinery as background enrichment.
@@ -1762,490 +1728,41 @@ async def _run_ghosts_parallel(
             )
             for c in body_children
         ]
-        schema_ctx = SchemaContext(
-            entity_schema=config.entity_schema,
-            relation_schema=config.relation_schema,
-            strict=config.schema_strict,
-        )
-        # Deterministic per-corpus extraction contract (§13 ground-truth
-        # correction): the corpus engine wins, 'inherit' falls back to the
-        # global Settings engine, and contract violations fail the doc with one
-        # clear error instead of thousands of silent chunk failures. Resolve it
-        # before pool/schema-lens setup so every downstream decision shares one
-        # source of truth.
-        from services.ingestion.extraction_contract import (
-            resolve_extraction_contract,
-        )
+        from services.ingestion.extraction_contract import resolve_extraction_contract
 
-        _global_engine = "local"
-        _endpoint_urls: list[str] = list(extraction_endpoint_urls or [])
-        try:
-            from services import ghost_b_local as _gbl
-            from services.settings import settings_service as _ss
-
-            ext = await _ss.get_system_extraction()
-            _global_engine = str(getattr(ext, "engine", "local") or "local")
-            if not _endpoint_urls:
-                _endpoint_urls = [
-                    e.url.strip().rstrip("/")
-                    for e in (ext.endpoints or [])
-                    if e.enabled and e.url and e.url.strip()
-                ]
-            _gbl.RUNTIME_ENDPOINT_URLS = _endpoint_urls or None
-        except Exception as exc:  # noqa: BLE001 — env fallback is fine
-            logger.warning("extraction endpoint settings unavailable: %s", exc)
-
-        cloud_pool_refs = (
-            config.summary_models
-            if getattr(config, "models_linked", True)
-            else config.extraction_models
-        )
         contract = resolve_extraction_contract(
             corpus_engine=getattr(config, "extraction_engine", None),
-            global_engine=_global_engine,
-            models_linked=getattr(config, "models_linked", True),
-            summary_model_count=len(config.summary_models or []),
-            extraction_model_count=len(config.extraction_models or []),
-            enabled_endpoint_urls=_endpoint_urls,
-            provider_pool_entries=cloud_pool_refs,
+            global_engine="graphify_cpu",
+            models_linked=False,
+            summary_model_count=0,
+            extraction_model_count=0,
         )
-        extraction_engine = contract.engine
-        pool = _build_ghost_pool(cloud_pool_refs)
-        if pool and contract.uses_provider_llm:
-            try:
-                provider_health = await load_recent_provider_lane_health(
-                    db,
-                    corpus_id=corpus_id,
-                )
-                (
-                    filtered_pool,
-                    skipped_lanes,
-                ) = filter_extraction_pool_by_provider_health(
-                    pool,
-                    provider_health,
-                )
-                if skipped_lanes:
-                    logger.warning(
-                        "phase=ghost_b_provider_health doc=%s corpus=%s skipped_lanes=%s",
-                        doc_id[:12],
-                        corpus_id[:8],
-                        skipped_lanes,
-                    )
-                    pool = filtered_pool
-                pool, concurrency_adjustments = adapt_extraction_pool_concurrency(
-                    pool,
-                    provider_health,
-                )
-                if concurrency_adjustments:
-                    logger.info(
-                        "phase=ghost_b_provider_concurrency doc=%s corpus=%s adjustments=%s",
-                        doc_id[:12],
-                        corpus_id[:8],
-                        concurrency_adjustments,
-                    )
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("ghost_b provider health check failed: %s", exc)
-        resource_profile = _resource_profile_for_config(
-            config,
-            extraction_engine=extraction_engine,
-            pool=pool,
-        )
-        provider_lane_active = contract.uses_provider_llm and bool(pool)
-        if provider_lane_active:
-            from services.ingestion.model_lifecycle import ensure_model_lifecycle_ready
+        if contract.errors:
+            raise RuntimeError(
+                "extraction contract violation: " + "; ".join(contract.errors)
+            )
+        if contract.engine == "off":
+            ghost_b_metrics = {
+                "engine": "off",
+                "requested_chunks": len(tasks),
+                "extracted_chunks": 0,
+                "failed_chunks": 0,
+                "skipped": True,
+            }
+            return []
 
-            try:
-                ready_pool = await ensure_model_lifecycle_ready(
-                    pool,
-                    purpose="schema_lens",
-                )
-            except RuntimeError as exc:
-                warning = (
-                    "Ghost B extraction deferred: no configured provider lane is "
-                    f"currently available ({exc}). Local chunks remain eligible "
-                    "for Mongo/Qdrant persistence and durable graph retry."
-                )
-                warnings.append(warning)
-                logger.warning(
-                    "phase=ghost_b_deferred reason=provider_unavailable "
-                    "doc=%s corpus=%s error=%s",
-                    doc_id[:12],
-                    corpus_id[:8],
-                    exc,
-                )
-                return ghost_b_from_staging
-            if ready_pool is not None:
-                pool = ready_pool
-            provider_lane_active = bool(pool)
-        # Exclude noisy parents/children from the schema lens — letting
-        # bibliography page entries (publishers, ISBNs, citation bric-a-brac)
-        # influence which schema terms get retrieved would erode entity
-        # extraction quality on body content.
-        body_parents_for_lens = [
-            p
-            for p in parents
-            if not should_skip_ghost_b(getattr(p, "chunk_kind", None) or ChunkKind.BODY)
-        ]
-        body_children_for_lens = [
-            c
-            for c in children
-            if not should_skip_ghost_b(getattr(c, "chunk_kind", None) or ChunkKind.BODY)
-        ]
-        schema_lens = await get_or_create_schema_lens(
+        from services.extraction.graphify_pipeline import run_graphify_pipeline
+
+        graphify_output = await run_graphify_pipeline(
             db=db,
             corpus_id=corpus_id,
-            filename=filename or (existing_doc or {}).get("filename") or doc_id,
-            parents=body_parents_for_lens or parents,  # fall back if all noisy
-            children=body_children_for_lens or children,
-            entity_schema=config.entity_schema,
-            relation_schema=config.relation_schema,
-            pool=pool if provider_lane_active else [],
-            model=model,
-            allow_llm=provider_lane_active,
+            doc_id=doc_id,
+            text=document_text or "\n\n".join(task.text for task in tasks),
+            children=body_children,
+            source_uri=filename or "",
         )
-
-        async def _schema_resolver(
-            kind: str, query_vec: list[float], top_k: int
-        ) -> list[str]:
-            return await retrieve_schema_for_chunk(
-                qdrant_client, corpus_id, kind, query_vec, top_k
-            )
-
-        # Locked pipeline: embeddings don't exist yet when Ghost B runs. For
-        # schemas with vocab ≤ SCHEMA_INLINE_LIMIT the full vocab is inlined
-        # (no resolver call). For larger vocabs the resolver cannot use real
-        # chunk vectors and resolve_chunk_vocab falls back to the first N
-        # terms — this is the documented degraded mode (GOTCHA #42).
-        reason = (
-            "staging_partial_resume"
-            if ghost_b_missing_ids is not None
-            else (
-                "fresh_ingest" if not ws.mongo_written else "staging_missing_legacy_doc"
-            )
-        )
-        logger.info(
-            "phase=ghost_b_run reason=%s doc=%s corpus=%s children=%d pool=%d strict=%s",
-            reason,
-            doc_id[:12],
-            corpus_id[:8],
-            len(tasks),
-            len(pool) or 1,
-            schema_ctx.strict,
-        )
-        active_doc_limit = _ghost_b_active_doc_limit(
-            pool=pool,
-            extraction_engine=extraction_engine,
-            config=config,
-        )
-        async with _ghost_b_file_semaphore(
-            pool=pool,
-            extraction_engine=extraction_engine,
-            config=config,
-        ):
-            logger.info(
-                "phase=ghost_b_file_gate doc=%s corpus=%s active_doc_limit=%d children=%d",
-                doc_id[:12],
-                corpus_id[:8],
-                active_doc_limit,
-                len(tasks),
-            )
-            log_resource_profile(
-                resource_profile,
-                extra={
-                    "doc": doc_id[:12],
-                    "corpus": corpus_id[:8],
-                    "phase": "ghost_b",
-                    "contract_engine": extraction_engine,
-                    "pool_size": len(pool),
-                },
-            )
-            logger.info(
-                "phase=ghost_b_contract doc=%s corpus=%s engine=%s source=%s "
-                "pool=%s/%d endpoints=%d errors=%d warnings=%d",
-                doc_id[:12],
-                corpus_id[:8],
-                contract.engine,
-                contract.source,
-                contract.pool_source,
-                contract.pool_size,
-                len(contract.endpoint_urls),
-                len(contract.errors),
-                len(contract.warnings),
-            )
-            for _w in contract.warnings:
-                logger.warning("ghost_b_contract doc=%s: %s", doc_id[:12], _w)
-            if contract.errors:
-                raise RuntimeError(
-                    "extraction contract violation — " + "; ".join(contract.errors)
-                )
-            ghost_b_run_id = str(uuid.uuid4())
-            _extract_kwargs = dict(
-                schema=schema_ctx,
-                schema_lens=schema_lens,
-                chunk_vectors=None,
-                schema_resolver=_schema_resolver,
-                pool=pool,
-                model=model,
-                return_report=True,
-                enable_facts=settings.EXTRACTION_ENABLE_FACTS,
-                audit_event_sink=_build_ghost_b_error_event_sink(
-                    db,
-                    run_id=ghost_b_run_id,
-                ),
-                audit_run_id=ghost_b_run_id,
-            )
-            # Owner-selectable engine (per-corpus contract):
-            # off = vectors-only; local = private/provider LLM pool
-            # (for example LAN RTX/vLLM); cloud = provider LLM pool;
-            # runpod_flash = burst joint GLiNER-Relex workers; legacy_local =
-            # deprecated GLiNER/GLiREL sidecars; dual and
-            # local_then_* are transitional legacy-local mixed modes.
-            if extraction_engine == "off":
-                report = ExtractionBatchReport(
-                    results=[],
-                    failures=[],
-                    metrics={
-                        "engine": "off",
-                        "requested_chunks": len(tasks),
-                        "extracted_chunks": 0,
-                        "failed_chunks": 0,
-                        "skipped": True,
-                    },
-                )
-            elif extraction_engine in {"local", "cloud"}:
-                from services.ghost_b import extract_entities as _cloud_extract
-
-                report = await _cloud_extract(tasks, **_extract_kwargs)
-            elif extraction_engine == "runpod_flash":
-                _runpod_extract = _runpod_extractor_for_config(config)
-                _runpod_kwargs: dict[str, Any] = {}
-                if config.runpod_wire_contract == "local_extraction_v1":
-                    _runpod_kwargs = {
-                        "endpoint_id": config.runpod_endpoint_id_override,
-                        "account_name": config.runpod_account_name_override,
-                        "routes": [
-                            route.model_dump(mode="json")
-                            for route in config.runpod_local_extraction_routes
-                        ],
-                        "user_id": user_id,
-                    }
-                report = await _runpod_extract(
-                    tasks,
-                    **_extract_kwargs,
-                    **_runpod_kwargs,
-                )
-            elif extraction_engine == "legacy_local":
-                report = await extract_entities(
-                    tasks,
-                    **_extract_kwargs,
-                    endpoint_urls=_endpoint_urls or None,
-                )
-            elif extraction_engine == "dual":
-                # DUAL (owner: throughput) — split the doc across BOTH engines
-                # concurrently: even-index chunks → local GLiNER/GLiREL, odd →
-                # cloud pool. Deterministic split; downstream maps results by
-                # chunk_id so interleaved order is irrelevant. Dual is a SPEED
-                # mode, not a fallback: either engine failing fails the doc
-                # loudly (use local_then_cloud for resilience instead).
-                from services.ghost_b import extract_entities as _cloud_extract
-
-                _local_part = tasks[0::2]
-                _cloud_part = tasks[1::2]
-                _rep_local, _rep_cloud = await asyncio.gather(
-                    extract_entities(
-                        _local_part,
-                        **_extract_kwargs,
-                        endpoint_urls=_endpoint_urls or None,
-                    ),
-                    _cloud_extract(_cloud_part, **_extract_kwargs),
-                )
-                if isinstance(_rep_local, ExtractionBatchReport) and isinstance(
-                    _rep_cloud, ExtractionBatchReport
-                ):
-                    report = ExtractionBatchReport(
-                        results=list(_rep_local.results) + list(_rep_cloud.results),
-                        failures=list(_rep_local.failures) + list(_rep_cloud.failures),
-                        metrics={
-                            "engine": "dual",
-                            "local": _rep_local.metrics,
-                            "cloud": _rep_cloud.metrics,
-                        },
-                    )
-                else:  # return_report=False shape (raw result lists)
-                    report = list(_rep_local) + list(_rep_cloud)
-            elif extraction_engine == "local_then_cloud":
-                try:
-                    report = await extract_entities(
-                        tasks, **_extract_kwargs, endpoint_urls=_endpoint_urls or None
-                    )
-                except Exception as _local_exc:  # noqa: BLE001
-                    if contract.pool_size == 0:
-                        raise
-                    logger.warning(
-                        "phase=ghost_b local engine failed (%s) — cloud fallback",
-                        _local_exc,
-                    )
-                    from services.ghost_b import extract_entities as _cloud_extract
-
-                    report = await _cloud_extract(tasks, **_extract_kwargs)
-            elif extraction_engine == "local_then_enrich":
-                # §13-H E1 — Fast Local Graph + RTX Enrichment. Local
-                # GLiNER/GLiREL always builds the skeleton; the enrichment
-                # gate scores the pass and the cloud/RTX lane re-extracts
-                # ONLY the selected gap chunks (bounded by
-                # EXTRACTION_ENRICH_MAX_CHUNK_RATIO). Cloud results REPLACE
-                # local results for enriched chunk_ids — no double writes.
-                # Enrichment rate is surfaced in metrics per the
-                # silent-fallback accounting law.
-                from services.ingestion.enrichment_gate import (
-                    enrichment_verdict,
-                    select_enrichment_tasks,
-                )
-
-                report = await extract_entities(
-                    tasks, **_extract_kwargs, endpoint_urls=_endpoint_urls or None
-                )
-                if isinstance(report, ExtractionBatchReport):
-                    _verdict = enrichment_verdict(
-                        report.metrics,
-                        min_coverage=settings.EXTRACTION_ENRICH_MIN_COVERAGE,
-                        min_facts_per_chunk=settings.EXTRACTION_ENRICH_MIN_FACTS_PER_CHUNK,
-                        max_related_to_ratio=settings.EXTRACTION_ENRICH_MAX_RELATED_TO_RATIO,
-                    )
-                    _base_metrics = {
-                        **dict(report.metrics or {}),
-                        "engine": "local_then_enrich",
-                        "enrich_reasons": list(_verdict.reasons),
-                        "enriched_chunks": 0,
-                    }
-                    if _verdict.enrich and contract.pool_size == 0:
-                        _base_metrics["enrich_skipped"] = "no_cloud_pool"
-                        report = ExtractionBatchReport(
-                            results=report.results,
-                            failures=report.failures,
-                            metrics=_base_metrics,
-                        )
-                    elif _verdict.enrich:
-                        _picks = select_enrichment_tasks(
-                            tasks,
-                            report.results,
-                            report.failures,
-                            _verdict,
-                            max_chunk_ratio=settings.EXTRACTION_ENRICH_MAX_CHUNK_RATIO,
-                        )
-                        if _picks:
-                            logger.info(
-                                "phase=ghost_b_enrich doc=%s corpus=%s chunks=%d/%d "
-                                "reasons=%s",
-                                doc_id[:12],
-                                corpus_id[:8],
-                                len(_picks),
-                                len(tasks),
-                                "; ".join(_verdict.reasons),
-                            )
-                            from services.ghost_b import (
-                                extract_entities as _cloud_extract,
-                            )
-
-                            _rep_cloud = await _cloud_extract(_picks, **_extract_kwargs)
-                            _enriched_ids = {r.chunk_id for r in _rep_cloud.results}
-                            _kept = [
-                                r
-                                for r in report.results
-                                if r.chunk_id not in _enriched_ids
-                            ]
-                            _kept_failures = [
-                                f
-                                for f in report.failures
-                                if str(getattr(f, "chunk_id", "")) not in _enriched_ids
-                            ]
-                            _base_metrics["enriched_chunks"] = len(_picks)
-                            _base_metrics["enrich_succeeded"] = len(_rep_cloud.results)
-                            _base_metrics["enrich_cloud"] = {
-                                k: v
-                                for k, v in dict(_rep_cloud.metrics or {}).items()
-                                if not isinstance(v, (list, dict))
-                            }
-                            report = ExtractionBatchReport(
-                                results=_kept + list(_rep_cloud.results),
-                                failures=_kept_failures + list(_rep_cloud.failures),
-                                metrics=_base_metrics,
-                            )
-                        else:
-                            report = ExtractionBatchReport(
-                                results=report.results,
-                                failures=report.failures,
-                                metrics=_base_metrics,
-                            )
-                    else:
-                        report = ExtractionBatchReport(
-                            results=report.results,
-                            failures=report.failures,
-                            metrics=_base_metrics,
-                        )
-            else:
-                raise RuntimeError(f"unknown extraction engine {extraction_engine!r}")
-        if not isinstance(report, ExtractionBatchReport):
-            fresh_results = report
-            failures: list[ExtractionFailureItem] = []
-            metrics = _ghost_b_metrics_for_skipped(fresh_results)
-        else:
-            fresh_results = report.results
-            failures = report.failures
-            metrics = report.metrics
-        metrics = dict(metrics or {})
-        metrics["schema_lens"] = schema_lens.to_dict()
-        ghost_b_failures.extend(failures)
-        nonlocal ghost_b_metrics
-        ghost_b_metrics = metrics
-        if len(fresh_results) < len(tasks):
-            if not fresh_results and tasks:
-                warning = _ghost_b_total_failure_warning(total=len(tasks))
-                warnings.append(warning)
-                logger.error(
-                    "phase=ghost_b_total_failure doc=%s corpus=%s total=%d failures=%d error_counts=%s",
-                    doc_id[:12],
-                    corpus_id[:8],
-                    len(tasks),
-                    len(failures),
-                    metrics.get("error_counts") if isinstance(metrics, dict) else None,
-                )
-                if ghost_b_from_staging:
-                    logger.warning(
-                        "phase=ghost_b_resume_using_staging_after_missing_retry_failure "
-                        "doc=%s corpus=%s staged=%d failed_missing=%d",
-                        doc_id[:12],
-                        corpus_id[:8],
-                        len(ghost_b_from_staging),
-                        len(tasks),
-                    )
-                    return ghost_b_from_staging
-                return None
-            missing_ids = sorted(
-                {t.chunk_id for t in tasks} - {r.chunk_id for r in fresh_results}
-            )
-            warning = _ghost_b_partial_warning(
-                extracted=len(fresh_results),
-                total=len(tasks),
-            )
-            warnings.append(warning)
-            logger.warning(
-                "phase=ghost_b_partial doc=%s corpus=%s extracted=%d total=%d missing_sample=%s",
-                doc_id[:12],
-                corpus_id[:8],
-                len(fresh_results),
-                len(tasks),
-                missing_ids[:5],
-            )
-        results = list(fresh_results)
-        if ghost_b_from_staging:
-            merged_by_chunk = {
-                result.chunk_id: result for result in ghost_b_from_staging
-            }
-            for result in fresh_results:
-                merged_by_chunk[result.chunk_id] = result
-            results = list(merged_by_chunk.values())
-        return results
+        ghost_b_metrics = dict(graphify_output.report.metrics)
+        return graphify_output.report.results
 
     # Keep these branches sequential inside a document. User-configured
     # summary/extraction pool concurrency already fans out within each branch;
@@ -2286,11 +1803,11 @@ async def _run_ghosts_parallel(
         raise
     ghost_b_out = await (_b_task if _b_task is not None else _b_branch())
     # Phase A: deterministic enrichment (numeric + qualitative facts, in-text
-    # aliases) now runs INSIDE services.ghost_b_local per chunk, so the former
-    # external Pass-1/Pass-2 (services.ingestion.slm_enrich) call is removed —
-    # keeping it would double the deterministic facts and re-introduce the
-    # retired SLM sidecar. The slm_enrich module stays in the tree for
-    # reference but is no longer wired into ingestion.
+    # aliases) runs inside the extraction lane itself where supported, so the
+    # former external Pass-1/Pass-2 (services.ingestion.slm_enrich) call is
+    # removed — keeping it would double the deterministic facts and
+    # re-introduce the retired SLM sidecar. The slm_enrich module stays in the
+    # tree for reference but is no longer wired into ingestion.
     if ghost_b_metrics is None:
         ghost_b_metrics = _ghost_b_metrics_for_skipped(ghost_b_out)
     ghost_b_metrics = _ghost_b_metrics_with_failures(
@@ -2824,6 +2341,45 @@ async def _mark_ingest_skipped_nonsemantic(
                 "ingest_stage": "skipped_nonsemantic",
                 "queryable": False,
                 "skipped_reason": reason,
+                "excluded_from_readiness": True,
+                "enrichment_pending_reason": None,
+                "enrichment_status": {"summary": "excluded", "graph": "excluded"},
+                "updated_at": datetime.utcnow(),
+            },
+            "$unset": {"error": ""},
+            "$addToSet": {"write_state.warnings": reason},
+        },
+    )
+    return reason
+
+
+async def _mark_ingest_unsupported_by_policy(
+    *,
+    db: AsyncIOMotorDatabase,
+    doc_id: str,
+    corpus_id: str,
+) -> str:
+    """Terminate an OCR-dependent document (q9 deterministic parsing contract).
+
+    Scanned, image-only, and mixed PDFs whose required content cannot be
+    extracted without OCR are rejected in full — never partially ingested.
+    Terminal and non-retryable: OCR stays disabled by policy, so re-running
+    the pipeline cannot change the outcome.
+    """
+
+    contract = parse_policy.unsupported_by_policy_result()
+    reason = (
+        "Document requires OCR to extract its content, which is disabled by "
+        "policy (scanned, image-only, or partially readable mixed PDF)."
+    )
+    await db["documents"].update_one(
+        {"doc_id": doc_id, "corpus_id": corpus_id},
+        {
+            "$set": {
+                "ingest_stage": parse_policy.STATUS_UNSUPPORTED_BY_POLICY,
+                "queryable": False,
+                "skipped_reason": reason,
+                "unsupported_policy": contract,
                 "excluded_from_readiness": True,
                 "enrichment_pending_reason": None,
                 "enrichment_status": {"summary": "excluded", "graph": "excluded"},
@@ -3462,27 +3018,76 @@ async def _write_neo4j_for_doc(
 
     all_extraction_results = list(ghost_b_out or []) + code_extraction_results
 
+    # Mixed-content book lane: forward per-chunk chunk_kind/language so the
+    # Neo4j Chunk nodes expose the same kind filters Qdrant payloads index,
+    # and collect the deterministic EXPLAINS adjacency rows that
+    # tier_chunker attached to code parents' metadata.
+    chunk_attributes = {
+        c.chunk_id: {
+            "chunk_kind": getattr(c, "chunk_kind", None),
+            "language": getattr(c, "language", None),
+        }
+        for c in graph_children
+    }
+    explains_rows: list[dict] = []
+    for parent in parents or []:
+        parent_meta = getattr(parent, "metadata", None)
+        if parent_meta is None and isinstance(parent, dict):
+            parent_meta = parent.get("metadata")
+        for row in (parent_meta or {}).get("explains_links") or []:
+            if isinstance(row, dict):
+                explains_rows.append(row)
+
     # Neo4j MERGE is idempotent for existing chunk ids, but it cannot remove
     # chunk ids that disappeared on retry. Replace this doc before rewriting.
-    await delete_document_graph(neo4j_driver, corpus_id=corpus_id, doc_id=doc_id)
+    import time as _time
 
-    await write_document_graph(
-        driver=neo4j_driver,
-        doc_id=doc_id,
-        corpus_id=corpus_id,
-        extraction_results=all_extraction_results,
-        user_id=user_id,
-        file_id=file_id,
-        all_chunk_ids=[c.chunk_id for c in graph_children],
-        filename=filename,
-        parent_count=len(parents) if parents is not None else 0,
-        schema_lens_id=schema_lens_id,
-        source_tier=source_tier,
-        ghost_b_success_rate=float(success_rate) if success_rate is not None else None,
-        ghost_b_extracted=int(extracted) if extracted is not None else None,
-        ghost_b_total=int(total) if total is not None else None,
+    _t_delete0 = _time.monotonic()
+    await delete_document_graph(neo4j_driver, corpus_id=corpus_id, doc_id=doc_id)
+    _neo4j_timing = {"delete_document_graph_s": round(_time.monotonic() - _t_delete0, 3)}
+
+    # Sole authorized write entry: plan projection jobs, materialize via
+    # write_document_graph under the control-plane adapter, then certify.
+    from services.graph.projection_runner import project_document_via_control_plane
+
+    _t_project0 = _time.monotonic()
+    await project_document_via_control_plane(
         db=db,
-        chunk_parent_ids={c.chunk_id: c.parent_id for c in graph_children},
+        neo4j_driver=neo4j_driver,
+        corpus_id=corpus_id,
+        doc_id=doc_id,
+        write_fn=write_document_graph,
+        write_kwargs={
+            "driver": neo4j_driver,
+            "doc_id": doc_id,
+            "corpus_id": corpus_id,
+            "extraction_results": all_extraction_results,
+            "user_id": user_id,
+            "file_id": file_id,
+            "all_chunk_ids": [c.chunk_id for c in graph_children],
+            "filename": filename,
+            "parent_count": len(parents) if parents is not None else 0,
+            "schema_lens_id": schema_lens_id,
+            "source_tier": source_tier,
+            "ghost_b_success_rate": (
+                float(success_rate) if success_rate is not None else None
+            ),
+            "ghost_b_extracted": int(extracted) if extracted is not None else None,
+            "ghost_b_total": int(total) if total is not None else None,
+            "db": db,
+            "chunk_parent_ids": {c.chunk_id: c.parent_id for c in graph_children},
+            "chunk_attributes": chunk_attributes,
+            "explains_rows": explains_rows,
+            # Worker already ran delete_document_graph above; skip the
+            # redundant second clear inside write_document_graph.
+            "skip_preclear": True,
+        },
+    )
+    _neo4j_timing["project_via_control_plane_s"] = round(_time.monotonic() - _t_project0, 3)
+    logger.info(
+        "phase=neo4j_timing doc=%s corpus=%s %s",
+        doc_id[:12], corpus_id[:8],
+        " ".join(f"{k}={v}" for k, v in _neo4j_timing.items()),
     )
 
     # Phase 4.5 — opt-in graphify augmentation. Runs only when the setting
@@ -3550,9 +3155,6 @@ async def run_ingest_job(
     # status="staged" — durable artifacts persisted, memory released, the
     # next pass resumes from checkpoints. None = run to completion.
     target_stage: str | None = None,
-    # §13-S per-call extraction endpoint scoping (profile override) — kills
-    # the RUNTIME_ENDPOINT_URLS last-writer-wins race across corpora.
-    extraction_endpoint_urls: list[str] | None = None,
     # Run-level summary safe mode: preserve chunk/extraction/graph progress when
     # the summary pool is known dead/exhausted for this batch.
     defer_summaries: bool = False,
@@ -3611,7 +3213,13 @@ async def run_ingest_job(
         and not defer_summaries
         and str(target_stage or "").lower() not in {"indexed", "queryable"}
     )
-    if summary_provider_work_enabled and summary_cost_run_id:
+    # Deprecated enrichment lane only: both run id AND authority required.
+    # Missing authority → deterministic_summary.v1 (never open cost control).
+    if (
+        summary_provider_work_enabled
+        and summary_cost_run_id
+        and summary_cost_authority_usd is not None
+    ):
         from services.ingestion.summary_cost_control import SummaryCostController
 
         summary_cost_controller = await SummaryCostController.open(
@@ -3720,6 +3328,43 @@ async def run_ingest_job(
             source_identity=source_identity,
         )
 
+    # q9 deterministic parsing contract — OCR-dependent PDFs (scanned,
+    # image-only, or mixed with unreadable pages) terminate here with a
+    # non-retryable policy rejection. Checked BEFORE the nonsemantic gate so
+    # a sparse-text scan reports document_requires_ocr, not a generic skip.
+    if parse_policy.pdf_requires_ocr_rejection(parse_result, filename, source_mime):
+        reason = await _mark_ingest_unsupported_by_policy(
+            db=db,
+            doc_id=doc_id,
+            corpus_id=corpus_id,
+        )
+        ws.warnings.append(reason)
+        logger.info(
+            "phase=unsupported_by_policy doc=%s corpus=%s reason=document_requires_ocr",
+            doc_id[:12],
+            cid8,
+        )
+        await _call_optional_callback(on_doc_id, doc_id)
+        await _emit_ingest_phase(
+            on_phase,
+            parse_policy.STATUS_UNSUPPORTED_BY_POLICY,
+            doc_id=doc_id,
+            corpus_id=corpus_id,
+            reason=reason,
+        )
+        return IngestJobResponse(
+            job_id=job_id,
+            doc_id=doc_id,
+            corpus_id=corpus_id,
+            filename=filename,
+            source_tier=source_tier.value,
+            status=parse_policy.STATUS_UNSUPPORTED_BY_POLICY,
+            write_state=ws,
+            chunk_count=0,
+            parent_count=0,
+            error=reason,
+        )
+
     # Cover/navigation-only exports are valid source artifacts but have no
     # retrieval payload. Terminate them before setup, chunking, embedding,
     # summaries, or graph work so they cannot create permanent repair loops.
@@ -3756,77 +3401,85 @@ async def run_ingest_job(
             error=reason,
         )
 
-    # Preventive retrieval setup gate. Startup tries to repair all corpora, but
-    # an ingest can start immediately after corpus creation or after a partial
-    # restore on a new machine. Enforce the same Qdrant/Neo4j readiness contract
-    # here while we have a durable doc row to mark if setup is broken.
-    try:
-        from services.retrieval_readiness import ensure_corpus_retrieval_ready
-
-        # Retry-class errors (2026-07-06): Qdrant answers 408 under another
-        # batch's write saturation — transient store pressure must never fail
-        # a doc. Bounded exponential backoff before giving up for real.
-        readiness = None
-        for _attempt in range(4):
-            try:
-                readiness = await ensure_corpus_retrieval_ready(
-                    db=db,
-                    qdrant_client=qdrant_client,
-                    neo4j_driver=neo4j_driver,
-                    corpus_id=corpus_id,
-                    corpus_doc=corpus_doc,
-                    corpus_name=corpus_doc.get("name"),
-                    ingestion_config=ingestion_config,
-                    neo4j_enabled=settings.NEO4J_ENABLED,
-                    default_dim=settings.EMBEDDING_DIMENSION,
-                )
-                break
-            except Exception as _setup_exc:  # noqa: BLE001
-                _msg = str(_setup_exc)
-                _transient = any(
-                    s in _msg
-                    for s in ("408", "Timeout", "timed out", "Connection", "503")
-                )
-                if not _transient or _attempt == 3:
-                    raise
-                _wait = 5 * (2**_attempt)
-                logger.warning(
-                    "phase=retrieval_setup transient (%s) doc=%s — retry %d/3 in %ds",
-                    _msg[:80],
-                    doc_id[:12],
-                    _attempt + 1,
-                    _wait,
-                )
-                await asyncio.sleep(_wait)
-        if readiness is None:
-            raise RuntimeError("retrieval setup exhausted retries")
-        if not readiness.ok:
-            raise RuntimeError("; ".join(readiness.errors))
+    # An extraction-only pass persists Mongo checkpoints and intentionally
+    # exits before embedding or graph projection. Retrieval storage is neither
+    # read nor written on that path, so defer its readiness gate until a later
+    # indexed/queryable pass. Full ingests retain the preventive gate below.
+    extraction_only = str(target_stage or "").lower() == "extracted"
+    if extraction_only:
         logger.info(
-            "phase=retrieval_setup ok=true doc=%s corpus=%s qdrant=%s neo4j=%s dim=%s",
+            "phase=retrieval_setup deferred=true doc=%s corpus=%s target=extracted",
             doc_id[:12],
             cid8,
-            readiness.qdrant_ready,
-            readiness.neo4j_ready,
-            readiness.embedding_dimension,
         )
-    except Exception as exc:
-        message = f"retrieval setup failed: {exc}"
-        await _mark_ingest_failed(
-            db=db,
-            doc_id=doc_id,
-            corpus_id=corpus_id,
-            message=message,
-            stage="setup_failed",
-        )
-        await _emit_ingest_phase(
-            on_phase,
-            "setup_failed",
-            doc_id=doc_id,
-            corpus_id=corpus_id,
-            error=message,
-        )
-        raise RuntimeError(message) from exc
+    else:
+        try:
+            from services.retrieval_readiness import ensure_corpus_retrieval_ready
+
+            # Retry-class errors (2026-07-06): Qdrant answers 408 under another
+            # batch's write saturation — transient store pressure must never fail
+            # a doc. Bounded exponential backoff before giving up for real.
+            readiness = None
+            for _attempt in range(4):
+                try:
+                    readiness = await ensure_corpus_retrieval_ready(
+                        db=db,
+                        qdrant_client=qdrant_client,
+                        neo4j_driver=neo4j_driver,
+                        corpus_id=corpus_id,
+                        corpus_doc=corpus_doc,
+                        corpus_name=corpus_doc.get("name"),
+                        ingestion_config=ingestion_config,
+                        neo4j_enabled=settings.NEO4J_ENABLED,
+                        default_dim=settings.EMBEDDING_DIMENSION,
+                    )
+                    break
+                except Exception as _setup_exc:  # noqa: BLE001
+                    _msg = str(_setup_exc)
+                    _transient = any(
+                        s in _msg
+                        for s in ("408", "Timeout", "timed out", "Connection", "503")
+                    )
+                    if not _transient or _attempt == 3:
+                        raise
+                    _wait = 5 * (2**_attempt)
+                    logger.warning(
+                        "phase=retrieval_setup transient (%s) doc=%s — retry %d/3 in %ds",
+                        _msg[:80],
+                        doc_id[:12],
+                        _attempt + 1,
+                        _wait,
+                    )
+                    await asyncio.sleep(_wait)
+            if readiness is None:
+                raise RuntimeError("retrieval setup exhausted retries")
+            if not readiness.ok:
+                raise RuntimeError("; ".join(readiness.errors))
+            logger.info(
+                "phase=retrieval_setup ok=true doc=%s corpus=%s qdrant=%s neo4j=%s dim=%s",
+                doc_id[:12],
+                cid8,
+                readiness.qdrant_ready,
+                readiness.neo4j_ready,
+                readiness.embedding_dimension,
+            )
+        except Exception as exc:
+            message = f"retrieval setup failed: {exc}"
+            await _mark_ingest_failed(
+                db=db,
+                doc_id=doc_id,
+                corpus_id=corpus_id,
+                message=message,
+                stage="setup_failed",
+            )
+            await _emit_ingest_phase(
+                on_phase,
+                "setup_failed",
+                doc_id=doc_id,
+                corpus_id=corpus_id,
+                error=message,
+            )
+            raise RuntimeError(message) from exc
 
     # ── Near-duplicate block ─────────────────────────────────────────────
     # Before any chunk/embed/extract work, skip a document that near-duplicates
@@ -4144,13 +3797,13 @@ async def run_ingest_job(
             user_id=user_id,
             source_version_id=document_source_version_id,
             filename=filename,
+            document_text=parse_result.markdown or parse_result.text or "",
             model=model,
             db=db,
             qdrant_client=qdrant_client,
             neo4j_driver=neo4j_driver,
             existing_doc=existing_doc,
             ws=ws,
-            extraction_endpoint_urls=extraction_endpoint_urls,
             defer_summaries=summary_deferred_by_run,
             defer_ghost_b=queryable_first_pass,
             summary_cost_controller=summary_cost_controller,
@@ -4663,7 +4316,10 @@ async def run_ingest_job(
                     summary_sparse_map=summary_sparse_map,
                     facet_profile=facet_profile,
                 )
-            write_updates: dict[str, Any] = {"qdrant_written": True}
+            write_updates: dict[str, Any] = {
+                "qdrant_written": True,
+                "qdrant_written_at": datetime.utcnow(),
+            }
             if summary_write_required:
                 write_updates["summaries_indexed"] = summary_write_complete
                 write_updates["summary_points"] = expected_summary_points
@@ -4921,7 +4577,11 @@ async def run_ingest_job(
                     graphify_enrichment=graphify_enrichment,
                 )
             await mongo_writer.update_write_state(
-                db, doc_id, corpus_id=corpus_id, neo4j_written=True
+                db,
+                doc_id,
+                corpus_id=corpus_id,
+                neo4j_written=True,
+                neo4j_written_at=datetime.utcnow(),
             )
             ws.neo4j_written = True
             try:
@@ -4996,6 +4656,7 @@ async def run_ingest_job(
             corpus_id=corpus_id,
             verified=ok,
             verify_errors=verify_errors,
+            verified_at=datetime.utcnow(),
         )
         ws.verified = ok
         ws.verify_errors = verify_errors

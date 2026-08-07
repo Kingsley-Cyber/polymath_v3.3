@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "benchmark_result.schema.json",
+  "title": "Graphify GLiNER2 Benchmark Result",
+  "type": "object",
+  "required": ["status", "metrics", "checks", "counts", "identity_digest", "release_pins"],
+  "properties": {
+    "status": {"enum": ["passed", "failed", "partial"]},
+    "fixture": {"type": "string"},
+    "provider": {"type": "string"},
+    "run_id": {"type": "string"},
+    "metrics": {
+      "type": "object",
+      "required": ["entity", "relation", "throughput"],
+      "properties": {
+        "entity": {"type": "object"},
+        "relation": {"type": "object"},
+        "throughput": {"type": "object"},
+        "comparison": {"type": "object"}
+      },
+      "additionalProperties": true
+    },
+    "checks": {"type": "object"},
+    "counts": {"type": "object"},
+    "identity_digest": {"type": "string", "minLength": 1},
+    "release_pins": {"type": "object"},
+    "stage_timings": {"type": "object"},
+    "artifacts": {"type": "array"},
+    "errors": {"type": "array"},
+    "warnings": {"type": "array"}
+  },
+  "additionalProperties": true
+}

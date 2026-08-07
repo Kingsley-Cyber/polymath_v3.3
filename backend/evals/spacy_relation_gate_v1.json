@@ -1,0 +1,89 @@
+{
+  "schema_version": "polymath.spacy_relation_gate.v1",
+  "preregistered_at_utc": "2026-07-27T12:00:00Z",
+  "authority": {
+    "owner_decision": "PENDING — preregistered before first decisive scoring run",
+    "change_policy": "immutable_after_first_decisive_inference; changes require a new version and a new pre-run hash"
+  },
+  "purpose": "Decide whether the spaCy dependency-path relation extractor produces asserted-only graph edges at sufficient precision and recall to own the deterministic relation lane. Evaluated against a hand-labeled asserted-only gold fixture derived from semantic_extraction_gold_v1.json and extended to the thin-evidence floor. GLiREL fine-tuned classifier is the comparison baseline on identical fixture and identical entity inputs.",
+  "inputs": {
+    "gold_fixture": {
+      "path": "backend/evals/spacy_relation_asserted_gold_v1.json",
+      "sha256": "8d2912e28a738109076e8c64685db569d30e4f7e9c61179b1a9bc9cb033f3127"
+    },
+    "parent_gold": {
+      "path": "backend/evals/semantic_extraction_gold_v1.json",
+      "sha256": "866d1b2104c7bc7d3a5696462058053a6bb041c8bd6784eae59a1f390d5e7816",
+      "note": "Original full gold (9 samples). Asserted subset derived per derivation_rule in fixture. Claim path scored against this full gold; edge path scored against the asserted subset."
+    },
+    "extractor_config": {
+      "predicate_synonyms": "config/predicate_synonyms.yaml",
+      "ontology": "config/ontology.yaml",
+      "note": "Ontology provides allowed_pairs only. Emittable predicates = ghost_b_schemas.py Predicate Literal (30 values)."
+    }
+  },
+  "model_contract": {
+    "spacy_dep_path": {
+      "model": "en_core_web_sm",
+      "parser_ab_note": "A/B vs en_core_web_md run 2026-07-27: identical output on 9-sample fixture. sm retained for speed.",
+      "resolver": "4-tier composite: T1(sig+lemma+types), T2(sig+lemma), T3(flat synonym), T4(DROP)",
+      "emittable_predicates": "ghost_b_schemas.py Predicate Literal (30 values, exact set match with _VALID_PREDICATES)"
+    },
+    "glirel_baseline": {
+      "checkpoint": "models/glirel_ghost_b_v1/best",
+      "weights_sha256": "05849c34aa6910b6cdcc37ceaab023272c5c9dcccb5a9eb9e94e3ad447200c31",
+      "config_sha256": "92f9814daf40c6157306886f5dc4711ca6ad29d63dd1fff90d7078c1d07042a1",
+      "trained_labels_file_sha256": "f8fd558faf3f51d819a29e2fc95b4cdfc8e1d7d450ef79e086b851647066f548",
+      "threshold": 0.40,
+      "labels_count": 30,
+      "device": "mps (HOST sidecar :8084, torch not in container)",
+      "type_gate": true,
+      "entity_inputs": "identical gold entity spans from fixture (not GLiNER predictions)",
+      "note": "GLiREL receives the SAME gold entities as the dep-path extractor for fair A/B. Runs on HOST MPS via ghost_b_extract_svc."
+    }
+  },
+  "decision_base": {
+    "unit": "one gold asserted relation matched by (subject_surface, predicate, object_surface) triple, normalized lowercase",
+    "scoring": "exact string match on normalized (subject, predicate, object) after lowercasing and stripping",
+    "prediction_filter": "only ExtractedTriple with is_graph_edge=True (polarity=POSITIVE, modality=ASSERTED, assertion_mode=direct)",
+    "dual_denominator": {
+      "edge_path": "is_graph_edge predictions scored against asserted-only subset (this fixture)",
+      "claim_path": "all predictions (including suppressed) scored against full parent gold"
+    },
+    "thin_evidence_minimums": {
+      "asserted_gold_relations": 15,
+      "distinct_samples": 8,
+      "distinct_predicate_types": 5
+    },
+    "thin_evidence_rationale": "The fixture is a small adversarial canary extended to floor. A legitimate reading requires spanning multiple samples and predicate families. Falling below any minimum yields insufficient_evidence, never pass."
+  },
+  "pass_gate": {
+    "all_required": true,
+    "thin_evidence_minimums_met": true,
+    "relation_precision_minimum": 0.80,
+    "relation_recall_minimum": 0.40,
+    "f1_strictly_greater_than_glirel": true,
+    "invalid_predicates_emitted_maximum": 0,
+    "disallowed_pairs_emitted_maximum": 0,
+    "determinism_byte_identical_two_runs": true
+  },
+  "verdict_precedence": [
+    "If any thin-evidence minimum is missed: insufficient_evidence.",
+    "Else if every pass gate criterion is true: extractor_passes and dep-path lane may proceed.",
+    "Else: extractor_below_gate and remediation required before next scoring run."
+  ],
+  "anti_gaming": [
+    "No sample-ID, text, or gold-answer branching in extraction or scoring.",
+    "No post-run threshold, label, denominator, or gate edits.",
+    "The same extractor config (predicate_synonyms.yaml, ontology.yaml) is used for all samples.",
+    "Gold fixture is sha256-pinned before scoring. Any edit requires a new version.",
+    "No ontology edits pending owner ratification are applied before gate scoring.",
+    "GLiREL baseline uses identical entity inputs (gold spans), not its own NER predictions.",
+    "Determinism check: two full runs must produce byte-identical JSON output."
+  ],
+  "pending_owner_ratification": [
+    "(Concept, Concept) for instance_of — needed for copular definitions",
+    "(Method, Method) for uses — needed for pattern-to-pattern relations",
+    "(Person, Concept) for uses — needed for analyst-tool relations"
+  ]
+}

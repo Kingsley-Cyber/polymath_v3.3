@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from services.control_plane.extraction_organs import LANE_LOCAL, LANE_POD
+from services.control_plane.extraction_organs import LANE_GRAPHIFY
 from services.ingestion.organ_repair_jobs import (
     ORGAN_REPAIR_COLLECTION, STATUS_BLOCKED, STATUS_QUEUED,
     organ_repair_job_id, plan_organ_repair_jobs,
@@ -91,8 +91,8 @@ class TestPlanning:
         assert len(db[ORGAN_REPAIR_COLLECTION].docs) == 1
 
     @pytest.mark.asyncio
-    async def test_model_pass_repairs_are_flagged_for_the_scheduler(self):
-        """Facets cost GPU time; relations/facts do not. That must be visible."""
+    async def test_retired_facet_model_is_not_scheduled(self):
+        """No ordinary GLiNER model pass survives in the repair scheduler."""
         db = _FakeDB()
         out = await plan_organ_repair_jobs(
             db, corpus_id="c1",
@@ -100,7 +100,7 @@ class TestPlanning:
                         "relations": {"status": "DEAD_ORGAN"}},
             apply=True,
         )
-        assert out["needs_model_pass"] == ["facets"]
+        assert out["needs_model_pass"] == []
 
     @pytest.mark.asyncio
     async def test_organ_without_executor_is_blocked_with_a_manual_route(self):
@@ -127,17 +127,17 @@ class TestJobIdentity:
 class TestLaneAwareness:
     """A gap the lane cannot close must never become a repair job."""
 
-    def test_pod_lane_facet_gap_is_not_actionable(self):
+    def test_graphify_lane_facet_gap_is_not_actionable(self):
         from services.control_plane.extraction_organs import (
             organs_expected_for_lane,
         )
-        assert "facets" not in organs_expected_for_lane(LANE_POD)
+        assert "facets" not in organs_expected_for_lane(LANE_GRAPHIFY)
 
-    def test_local_lane_claim_gap_is_not_actionable(self):
+    def test_graphify_lane_claim_gap_is_not_actionable(self):
         from services.control_plane.extraction_organs import (
             organs_expected_for_lane,
         )
-        assert "claims" not in organs_expected_for_lane(LANE_LOCAL)
+        assert "claims" not in organs_expected_for_lane(LANE_GRAPHIFY)
 
 
 def test_reconciler_plans_organ_repair_before_extraction():

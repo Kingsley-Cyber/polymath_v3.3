@@ -1,0 +1,16 @@
+{
+  "decision_conservation": true,
+  "direction_swaps": 0,
+  "forced_related_to_fallbacks": 0,
+  "identity_digest": "69236b3e35c351a494d2e77cdfc88f84e73c1a93dc850e48da9b9d9b64e8554b",
+  "mapping_status_counts": {
+    "MAPPED": 32,
+    "REVIEW": 206,
+    "STORE_UNMAPPED_SURFACE_RELATION": 72
+  },
+  "predicate_candidates": 310,
+  "predicate_compiler_hash": "882cc8dde7badfeaa17d6f7a5404c2c1a7991079859775fa804bc9e7d616e2b8",
+  "proposition_families": 310,
+  "schema_version": "polymath.openie_predicate_compiler_report.v1",
+  "status": "passed"
+}

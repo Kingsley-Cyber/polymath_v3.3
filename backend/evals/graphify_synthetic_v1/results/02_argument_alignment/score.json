@@ -1,0 +1,149 @@
+{
+  "family": "02_argument_alignment",
+  "status": "FAIL",
+  "runtime": {
+    "pipeline_release": "graphify-cpu-pipeline-v15",
+    "mongo_database": "graphify_eval_syn_02_f607df4737",
+    "corpus_id": "ae455337-7940-548f-9ace-6b02f089f701",
+    "elapsed_seconds": 1.61,
+    "interpreter": "/Users/king/polymath_v3.3/local_ghost_b/.venv/bin/python"
+  },
+  "items": {
+    "passed": 11,
+    "failed": 1,
+    "optional_failed": 0,
+    "total": 12
+  },
+  "negative_entities_in_graph": [],
+  "unexpected_promoted_triples": [],
+  "duplicate_promoted_edges": {},
+  "graph": {
+    "nodes": [
+      "audit summary report",
+      "falcon cache",
+      "glowline metrics",
+      "nightly snapshot feed",
+      "pinion api",
+      "quartzline",
+      "redlark",
+      "sable index",
+      "trellis",
+      "vaultstone"
+    ],
+    "promoted_edge_count": 8
+  },
+  "extracted_entities": [
+    "Audit Summary Report",
+    "Falcon Cache",
+    "Glowline Metrics",
+    "Nightly Snapshot Feed",
+    "Pinion API",
+    "Quartzline",
+    "Redlark",
+    "Sable Index",
+    "Trellis",
+    "Vaultstone",
+    "onboarding document",
+    "seven years",
+    "the",
+    "warm starts"
+  ],
+  "item_results": [
+    {
+      "id": "A01",
+      "check": "positive",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "Quartzline's archival store, Vaultstone, consumes the Nightly Snapshot Feed."
+    },
+    {
+      "id": "A02",
+      "check": "positive",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "One service, the Pinion API, uses the Falcon Cache."
+    },
+    {
+      "id": "A03",
+      "check": "positive",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "The Redlark database supports the Glowline Metrics dashboard."
+    },
+    {
+      "id": "A04",
+      "check": "paraphrase",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "The Falcon Cache layer depends on the Sable Index."
+    },
+    {
+      "id": "A05",
+      "check": "positive",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "Vaultstone, which Quartzline owns, exposes a retrieval endpoint."
+    },
+    {
+      "id": "A06",
+      "check": "positive",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "A component called Trellis is part of the Pinion API."
+    },
+    {
+      "id": "A07",
+      "check": "paraphrase",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "The Glowline Metrics dashboard, a Quartzline product, depends on the Redlark database."
+    },
+    {
+      "id": "A08",
+      "check": "positive",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "The Pinion API produces the Audit Summary Report and sends rollups to Redlark."
+    },
+    {
+      "id": "A09",
+      "check": "paraphrase",
+      "verdict": "FAIL",
+      "optional": false,
+      "detail": "no positive edge for pair",
+      "evidence": "The Pinion API produces the Audit Summary Report and sends rollups to Redlark."
+    },
+    {
+      "id": "A10",
+      "check": "junk_negative",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "The archival store retains snapshots for seven years."
+    },
+    {
+      "id": "A11",
+      "check": "false_claim_trap",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "contained in non-positive lane",
+      "evidence": "An onboarding document claimed that Trellis is part of Redlark; the diagram was fixed in review."
+    },
+    {
+      "id": "A12",
+      "check": "direction_trap",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "The Sable Index is depended on by the Falcon Cache layer during warm starts."
+    }
+  ]
+}

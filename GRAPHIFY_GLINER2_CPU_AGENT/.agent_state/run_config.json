@@ -1,0 +1,42 @@
+{
+  "repo_root": "..",
+  "environment": {
+    "PYTHONPATH": "backend",
+    "CHUNK_REMOTE_URLS": "",
+    "GRAPHIFY_E2E_NEO4J_URI": "bolt://127.0.0.1:17688",
+    "GRAPHIFY_E2E_NEO4J_USER": "neo4j",
+    "GRAPHIFY_E2E_NEO4J_PASSWORD": "graphify-e2e-password"
+  },
+  "commands": {
+    "candidate": {
+      "quality": "python3 backend/scripts/graphify_e2e_client.py --input {quality_fixture} --fixture-name quality --namespace graphify_s12_candidate --report-json {report_json} --proof {output_dir}/qualification_rebuild.json --socket {output_dir}/graphify_e2e.sock",
+      "throughput": "python3 backend/scripts/graphify_e2e_client.py --input {throughput_fixture} --fixture-name throughput --namespace graphify_s12_candidate --report-json {report_json} --proof {output_dir}/qualification_rebuild.json --socket {output_dir}/graphify_e2e.sock"
+    },
+    "baseline": {
+      "quality": "local_ghost_b/.venv/bin/python backend/scripts/run_relex_fixture_baseline.py --input {quality_fixture} --report-json {report_json} --isolated-namespace {namespace}",
+      "throughput": "local_ghost_b/.venv/bin/python backend/scripts/run_relex_fixture_baseline.py --input {throughput_fixture} --report-json {report_json} --isolated-namespace {namespace}"
+    },
+    "preflight": [
+      "local_ghost_b/.venv/bin/python backend/scripts/run_graphify_fixture_e2e.py cleanup --namespace graphify_s12_candidate",
+      "local_ghost_b/.venv/bin/python backend/scripts/run_graphify_fixture_e2e.py prepare --namespace graphify_s12_candidate",
+      "local_ghost_b/.venv/bin/python backend/scripts/run_graphify_fixture_e2e.py qualify --quality {quality_fixture} --throughput {throughput_fixture} --namespace graphify_s12_qualification --proof {output_dir}/qualification_rebuild.json",
+      "local_ghost_b/.venv/bin/python backend/scripts/run_graphify_fixture_e2e.py start-daemon --socket {output_dir}/graphify_e2e.sock --pid-file {output_dir}/graphify_e2e.pid --log {output_dir}/logs/graphify_e2e_daemon.log"
+    ],
+    "postflight": [
+      "local_ghost_b/.venv/bin/python backend/scripts/run_graphify_fixture_e2e.py stop-daemon --socket {output_dir}/graphify_e2e.sock"
+    ],
+    "projection_rebuild": "local_ghost_b/.venv/bin/python backend/scripts/run_graphify_fixture_e2e.py rebuild --namespace graphify_s12_qualification --proof {output_dir}/repeat_rebuild.json",
+    "projection_verify": "local_ghost_b/.venv/bin/python backend/scripts/run_graphify_fixture_e2e.py verify --first {output_dir}/qualification_rebuild.json --second {output_dir}/repeat_rebuild.json --output {output_dir}/rebuild_verification.json"
+  },
+  "required_report_keys": [
+    "status",
+    "metrics",
+    "checks",
+    "counts",
+    "identity_digest",
+    "release_pins"
+  ],
+  "run_baseline": true,
+  "candidate_repetitions": 2,
+  "timeout_seconds": 7200
+}

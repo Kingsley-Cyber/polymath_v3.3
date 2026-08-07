@@ -1,0 +1,51 @@
+{
+  "counts": {
+    "gold_positive": 66,
+    "matched_positive": 44,
+    "neo4j_promoted_positive": 67,
+    "unmatched_gold": 22,
+    "unmatched_promoted": 23
+  },
+  "failure_taxonomy_counts": {
+    "ARGUMENT_ALIGNMENT": 0,
+    "ATTRIBUTION": 0,
+    "CONDITIONAL_SCOPE": 0,
+    "DIRECTION": 0,
+    "ENTITY_TYPE": 3,
+    "GATE_POLICY": 10,
+    "MISSING_PAIR": 6,
+    "MODALITY": 0,
+    "POLARITY": 0,
+    "PREDICATE_MAPPING": 3
+  },
+  "freeze_id": "technical-book-66-v1",
+  "match_class_counts": {
+    "DECLARED_ALIAS": 0,
+    "DECLARED_SUBSUMPTION": 0,
+    "EXACT": 0,
+    "NORMALIZED_VARIANT": 44,
+    "NO_MATCH": 22
+  },
+  "matching_policy_sha256": "9de099dbec4053be29fd0113b55759c4d186b68783b9cc68098b4ea04298b393",
+  "matching_policy_version": "technical-book-66-matching-v2",
+  "metrics": {
+    "f1": 0.6616541353383459,
+    "precision": 0.6567164179104478,
+    "recall": 0.6666666666666666
+  },
+  "namespace": "technical_book_stress_v1",
+  "prohibited_matchers_used": [],
+  "recall_checkpoints": {
+    "correct_canonical_assertion_promoted": 44,
+    "correct_surface_proposition_generated": 54,
+    "endpoint_pair_generated": 57,
+    "gold_total": 66,
+    "recall": {
+      "correct_canonical_assertion_promoted": 0.6666666666666666,
+      "correct_surface_proposition_generated": 0.8181818181818182,
+      "endpoint_pair_generated": 0.8636363636363636
+    }
+  },
+  "scorer_version": "stress-answer-key-scorer-v2-taxonomy",
+  "status": "failed"
+}

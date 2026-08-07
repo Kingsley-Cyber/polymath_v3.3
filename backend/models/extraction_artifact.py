@@ -1,10 +1,7 @@
-"""Provider-neutral candidate extraction artifact contract (P2.6).
+"""Candidate extraction artifact contract with historical read compatibility.
 
-This is an additive, observation-only boundary.  Cloud, private/local,
-legacy-local, and RunPod engines adapt into the same strict shape before
-parity measurement.  The contract never promotes candidates or decides which
-engine is correct; that authority remains with the existing validation and
-graph-promotion gates.
+Graphify is the only production writer. Retired identities remain accepted
+only so stored artifacts can be inspected and quarantined.
 
 Authority status is explicit because this schema is executor-proposed and
 owner-ratifiable.  A later owner edit publishes a new version rather than
@@ -24,11 +21,18 @@ CANDIDATE_EXTRACTION_ARTIFACT_VERSION = "candidate_extraction_artifact.v1"
 CANDIDATE_EXTRACTION_AUTHORITY = "executor_proposed_owner_ratifiable"
 
 ExtractionEngine = Literal[
+    "graphify_cpu",
     "cloud",
     "local",
+    "relex_local",
     "legacy_local",
     "runpod_flash",
 ]
+
+# Retired identities validate historical records only; no production lane may
+# emit them.
+QUARANTINE_ONLY_ENGINE = "legacy_local"
+
 ArtifactStatus = Literal["candidate", "failed", "skipped"]
 OffsetStatus = Literal["exact", "unavailable"]
 FieldMethodKind = Literal[

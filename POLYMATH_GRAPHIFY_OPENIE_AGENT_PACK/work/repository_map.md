@@ -1,0 +1,161 @@
+# Repository discovery map
+
+Generated: 2026-08-06T23:19:29.329432+00:00
+
+## Discovered capabilities
+
+### graphify_entrypoint
+- `GRAPHIFY_GLINER2_CPU_AGENT/artifacts/stress_tests/technical_book_graphrag_stress_test/stage_payloads.json` (2001 matches)
+- `GRAPHIFY_GLINER2_CPU_AGENT/artifacts/discovery/repo_probe.json` (1703 matches)
+- `POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/fixtures/graphify_throughput_fixture.md` (515 matches)
+- `GRAPHIFY_GLINER2_CPU_AGENT/artifacts/e2e/s12_final_run2/e2e_summary.json` (89 matches)
+- `GRAPHIFY_GLINER2_CPU_AGENT/artifacts/e2e/s12_final_run3/e2e_summary.json` (89 matches)
+- `GRAPHIFY_GLINER2_CPU_AGENT/artifacts/e2e/s12_final_run4/e2e_summary.json` (89 matches)
+- `GRAPHIFY_GLINER2_CPU_AGENT/artifacts/e2e/s12_final_run5/e2e_summary.json` (89 matches)
+- `GRAPHIFY_GLINER2_CPU_AGENT/artifacts/e2e/s14_final_run/e2e_summary.json` (89 matches)
+- `GRAPHIFY_GLINER2_CPU_AGENT/artifacts/e2e/s12_final_run1/e2e_summary.json` (69 matches)
+- `GRAPHIFY_GLINER2_CPU_AGENT/fixtures/graphify_quality_gold.json` (66 matches)
+
+### ingestion_orchestrator
+- `docs/baselines/FINAL_ACCEPTANCE_COMPLETE_STACK_2026-07-19.json` (32226 matches)
+- `docs/baselines/LATENCY_2026-07-13.json` (6144 matches)
+- `GRAPHIFY_GLINER2_CPU_AGENT/artifacts/discovery/repo_probe.json` (1905 matches)
+- `docs/audits/execution_plan_2026-07-13/source_artifacts.json` (1248 matches)
+- `backend/services/chat_orchestrator.py` (709 matches)
+- `COORDINATION.md` (623 matches)
+- `docs/EXECUTION_PLAN_2026-07-13.md` (616 matches)
+- `backend/services/ingestion/worker.py` (601 matches)
+- `backend/routers/ingestion.py` (515 matches)
+- `backend/services/retriever/__init__.py` (506 matches)
+
+### svo
+- `GRAPHIFY_GLINER2_CPU_AGENT/artifacts/stress_tests/technical_book_graphrag_stress_test/stage_payloads.json` (1345 matches)
+- `GRAPHIFY_GLINER2_CPU_AGENT/artifacts/discovery/repo_probe.json` (254 matches)
+- `docs/baselines/DEPENDENCY_PATTERN_MINING_REPORT.json` (117 matches)
+- `backend/services/extraction/graphify_relations.py` (54 matches)
+- `backend/services/extraction/dep_path_extractor.py` (39 matches)
+- `docs/baselines/RELATION_STAGE_TRACE_2026-07-31.json` (36 matches)
+- `backend/tests/extraction/test_corroboration_gate.py` (33 matches)
+- `docs/baselines/RELATION_STAGE_TRACE_2026-07-31.txt` (31 matches)
+- `config/predicate_synonyms.yaml` (30 matches)
+- `scripts/autoresearch_polymath_local_extraction.py` (29 matches)
+
+### predicate_mapping
+- `GRAPHIFY_GLINER2_CPU_AGENT/artifacts/stress_tests/technical_book_graphrag_stress_test/stage_payloads.json` (2723 matches)
+- `docs/baselines/LATENCY_2026-07-13.json` (1369 matches)
+- `GRAPHIFY_GLINER2_CPU_AGENT/artifacts/stress_tests/technical_book_graphrag_stress_test/all_relation_decisions.json` (646 matches)
+- `GRAPHIFY_GLINER2_CPU_AGENT/artifacts/discovery/repo_probe.json` (505 matches)
+- `backend/services/graph/neo4j_writer.py` (316 matches)
+- `docs/baselines/FINAL_ACCEPTANCE_COMPLETE_STACK_2026-07-19.json` (294 matches)
+- `GRAPHIFY_GLINER2_CPU_AGENT/artifacts/stress_tests/technical_book_graphrag_stress_test/accepted_relation_decisions.json` (281 matches)
+- `docs/baselines/RUNPOD_SAME_CHUNK_LOCAL_REFERENCE_2026-07-15.json` (241 matches)
+- `POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/fixtures/graphify_throughput_fixture.md` (184 matches)
+- `scripts/build_modernbert_predicate_dataset.py` (171 matches)
+
+### mongo_writer
+- `docs/baselines/FINAL_ACCEPTANCE_COMPLETE_STACK_2026-07-19.json` (1439 matches)
+- `docs/audits/execution_plan_2026-07-13/source_artifacts.json` (543 matches)
+- `docs/baselines/QUALITY_STEP1_TEMPORAL_COMBINED_2026-07-17.json` (478 matches)
+- `docs/EXECUTION_PLAN_2026-07-13.md` (312 matches)
+- `GRAPHIFY_GLINER2_CPU_AGENT/artifacts/discovery/repo_probe.json` (308 matches)
+- `docs/baselines/LATENCY_2026-07-13.json` (274 matches)
+- `docs/baselines/QUALITY_STEP0_COMBINED_FROZEN_2026-07-17.json` (273 matches)
+- `POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/fixtures/graphify_throughput_fixture.md` (204 matches)
+- `GRAPHIFY_GLINER2_CPU_AGENT/fixtures/graphify_throughput_fixture.md` (176 matches)
+- `COORDINATION.md` (156 matches)
+
+### neo4j_writer
+- `docs/baselines/FINAL_ACCEPTANCE_COMPLETE_STACK_2026-07-19.json` (545 matches)
+- `GRAPHIFY_GLINER2_CPU_AGENT/artifacts/discovery/repo_probe.json` (484 matches)
+- `docs/audits/execution_plan_2026-07-13/source_artifacts.json` (415 matches)
+- `docs/baselines/QUALITY_STEP1_TEMPORAL_COMBINED_2026-07-17.json` (392 matches)
+- `GRAPHIFY_GLINER2_CPU_AGENT/artifacts/stress_tests/technical_book_graphrag_stress_test/stage_payloads.json` (318 matches)
+- `docs/baselines/QUALITY_STEP0_COMBINED_FROZEN_2026-07-17.json` (258 matches)
+- `backend/services/graph/orchestrator.py` (209 matches)
+- `POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/fixtures/graphify_throughput_fixture.md` (204 matches)
+- `GRAPHIFY_GLINER2_CPU_AGENT/fixtures/graphify_throughput_fixture.md` (176 matches)
+- `backend/services/retriever/__init__.py` (162 matches)
+
+### provider_aliases
+- `GRAPHIFY_GLINER2_CPU_AGENT/artifacts/discovery/repo_probe.json` (1765 matches)
+- `COORDINATION.md` (784 matches)
+- `docs/audits/execution_plan_2026-07-13/source_artifacts.json` (600 matches)
+- `docs/baselines/FINAL_ACCEPTANCE_COMPLETE_STACK_2026-07-19.json` (490 matches)
+- `backend/registries/semantic_gateway_provider_prices.v1.json` (394 matches)
+- `docs/baselines/LATENCY_2026-07-13.json` (364 matches)
+- `docs/EXECUTION_PLAN_2026-07-13.md` (267 matches)
+- `docs/RAPTOR_RAG_IMPLEMENTATION_CHECKLIST.md` (215 matches)
+- `GRAPHIFY_GLINER2_CPU_AGENT/artifacts/stress_tests/technical_book_graphrag_stress_test/stage_payloads.json` (201 matches)
+- `backend/services/ghost_b.py` (197 matches)
+
+### tests
+- `backend/scripts/unified_shadow_pipeline.py` (260 matches)
+- `COORDINATION.md` (245 matches)
+- `GRAPHIFY_GLINER2_CPU_AGENT/artifacts/gold_ceiling/gold_entity_syntax_ceiling.json` (220 matches)
+- `GRAPHIFY_GLINER2_CPU_AGENT/artifacts/gold_ceiling/gold_entity_syntax_ceiling_repeat.json` (220 matches)
+- `docs/audits/execution_plan_2026-07-13/source_artifacts.json` (214 matches)
+- `GRAPHIFY_GLINER2_CPU_AGENT/artifacts/discovery/repo_probe.json` (202 matches)
+- `docs/EXECUTION_PLAN_2026-07-13.md` (109 matches)
+- `backend/tests/extraction/test_verb_prep_fixtures.py` (95 matches)
+- `backend/scripts/run_graphify_fixture_e2e.py` (88 matches)
+- `scripts/autoresearch_polymath_local_extraction.py` (84 matches)
+
+### claim_assertion
+- `GRAPHIFY_GLINER2_CPU_AGENT/artifacts/stress_tests/technical_book_graphrag_stress_test/stage_payloads.json` (4107 matches)
+- `docs/baselines/FINAL_ACCEPTANCE_COMPLETE_STACK_2026-07-19.json` (2234 matches)
+- `COORDINATION.md` (756 matches)
+- `GRAPHIFY_GLINER2_CPU_AGENT/artifacts/stress_tests/technical_book_graphrag_stress_test/all_relation_decisions.json` (737 matches)
+- `docs/audits/execution_plan_2026-07-13/source_artifacts.json` (538 matches)
+- `GRAPHIFY_GLINER2_CPU_AGENT/artifacts/stress_tests/technical_book_graphrag_stress_test/graph_snapshot.json` (524 matches)
+- `POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/fixtures/graphify_throughput_fixture.md` (480 matches)
+- `docs/baselines/LATENCY_2026-07-13.json` (462 matches)
+- `backend/services/ingestion/semantic_digest_claim_inputs.py` (379 matches)
+- `GRAPHIFY_GLINER2_CPU_AGENT/artifacts/stress_tests/technical_book_graphrag_stress_test/accepted_relation_decisions.json` (359 matches)
+
+### model_loader
+- `GRAPHIFY_GLINER2_CPU_AGENT/artifacts/discovery/repo_probe.json` (1692 matches)
+- `POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/fixtures/graphify_throughput_fixture.md` (538 matches)
+- `docs/audits/execution_plan_2026-07-13/source_artifacts.json` (187 matches)
+- `COORDINATION.md` (158 matches)
+- `CONTINUITY/OWNER_INGESTION_THROUGHPUT_AND_QUALITY_ANALYSIS_20260806.md` (98 matches)
+- `GRAPHIFY_GLINER2_CPU_AGENT/artifacts/stress_tests/technical_book_graphrag_stress_test/stage_payloads.json` (97 matches)
+- `docs/execution_plan_audit/raw/registry_extraction.json` (86 matches)
+- `docs/EXECUTION_PLAN_2026-07-13.md` (84 matches)
+- `local_ghost_b/pipeline_config.py` (78 matches)
+- `scripts/bootstrap_models.py` (75 matches)
+
+### dependency_matcher
+- `GRAPHIFY_GLINER2_CPU_AGENT/artifacts/discovery/repo_probe.json` (154 matches)
+- `CONTINUITY/OWNER_INGESTION_THROUGHPUT_AND_QUALITY_ANALYSIS_20260806.md` (23 matches)
+- `CONTINUITY/SPEED_BENCH_CLOSEOUT_AND_PERFORMANCE_PLAN_20260805.md` (11 matches)
+- `backend/services/extraction/dep_path_extractor.py` (10 matches)
+- `POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/stages/discover_repo.py` (6 matches)
+- `backend/services/extraction/graphify_completion.py` (5 matches)
+- `backend/services/extraction/relation_evidence.py` (5 matches)
+- `GRAPHIFY_GLINER2_CPU_AGENT/RUNBOOK.md` (4 matches)
+- `backend/scripts/bench_gliner_relex.py` (4 matches)
+- `COORDINATION.md` (3 matches)
+
+### frame_extractor
+- `GRAPHIFY_GLINER2_CPU_AGENT/artifacts/discovery/repo_probe.json` (259 matches)
+- `backend/scripts/unified_shadow_pipeline.py` (19 matches)
+- `backend/services/extraction/syntax_lane.py` (13 matches)
+- `CONTINUITY/OWNER_INGESTION_THROUGHPUT_AND_QUALITY_ANALYSIS_20260806.md` (7 matches)
+- `backend/scripts/adjudicate_d_e_candidates.py` (6 matches)
+- `backend/services/ingestion/relex_local.py` (6 matches)
+- `backend/tests/extraction/test_conjunction_adversarial.py` (6 matches)
+- `backend/tests/extraction/test_verb_prep_fixtures.py` (6 matches)
+- `POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/stages/discover_repo.py` (5 matches)
+- `backend/tests/extraction/test_open_relation_fixtures.py` (5 matches)
+
+### spacy_construction
+- `backend/tests/test_temporal_query_routing.py` (8 matches)
+- `backend/tests/test_bibliographic_capture.py` (7 matches)
+- `backend/services/extraction/appos_enrichment.py` (6 matches)
+- `backend/services/extraction/mention_normalizer.py` (5 matches)
+- `backend/tests/test_code_lane_skills.py` (5 matches)
+- `backend/services/ingestion/docling_adapter.py` (4 matches)
+- `runpod_flash_extractor/runtime.py` (4 matches)
+- `backend/services/extraction/dep_path_extractor.py` (3 matches)
+- `backend/services/extraction/frame_extractor.py` (3 matches)
+- `backend/services/retriever/temporal.py` (3 matches)

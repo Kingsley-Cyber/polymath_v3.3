@@ -1278,7 +1278,7 @@ def main() -> None:
                 "minimum_precision": gate["minimum_accepted_precision"],
                 "raw_relation_proposals": decisive["raw_relation_proposals"],
                 "accepted_relations": decisive["with"]["compiler_receipt"][
-                    "glirel_agree_count"
+                    "relation_agree_count"
                 ],
                 "untyped_endpoint_agreeing_proposals": decisive[
                     "future_hypothesis_observation_only"

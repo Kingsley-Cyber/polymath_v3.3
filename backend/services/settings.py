@@ -27,7 +27,6 @@ from config import get_settings
 from models.schemas import (
     AuthConfig,
     ChatLLMSettings,
-    ExtractionEndpoint,
     ExtractionSettings,
     GlobalSettings,
     GlobalIngestionSettings,
@@ -129,9 +128,13 @@ class SettingsService:
             redis_url=c.REDIS_URL,
             embedder_url=c.EMBEDDER_URL,
             reranker_url=c.RERANKER_URL,
-            extraction_url=(os.environ.get("LOCAL_GHOST_B_EXTRACT_URL", "") or "")
-            .split(",")[0]
-            .strip(),
+            extraction_url=(
+                os.environ.get(
+                    "RELEX_LOCAL_URL", "http://host.docker.internal:8086"
+                )
+                .split(",")[0]
+                .strip()
+            ),
             modal_enabled=c.MODAL_ENABLED,
             modal_embedder_url=masked_modal_url,
             auth=AuthConfig(
@@ -202,32 +205,14 @@ class SettingsService:
         )
 
     def _extraction_defaults_from_env(self) -> ExtractionSettings:
-        """Seed extraction endpoints from LOCAL_GHOST_B_EXTRACT_URL so
-        existing env-wired deployments see their current setup in the UI."""
-        import os
-
-        raw = os.environ.get(
-            "LOCAL_GHOST_B_EXTRACT_URL", "http://host.docker.internal:8084"
-        )
-        endpoints: list[ExtractionEndpoint] = []
-        for i, u in enumerate(x.strip().rstrip("/") for x in raw.split(",")):
-            if not u:
-                continue
-            local = "host.docker.internal" in u or "localhost" in u or "127.0.0.1" in u
-            endpoints.append(
-                ExtractionEndpoint(
-                    label="Local sidecar" if local else f"GPU box {i + 1}",
-                    url=u,
-                    enabled=True,
-                )
-            )
-        return ExtractionSettings(endpoints=endpoints)
+        """Return the canonical Graphify CPU extraction default."""
+        return ExtractionSettings()
 
     async def get_system_extraction(self) -> ExtractionSettings:
-        """Extraction endpoints for the ingestion worker. Reads the first
-        settings doc (single-admin deployments) and falls back to env-seeded
-        defaults — same pattern as get_system_modal, so UI toggles apply on
-        the next ingest without a backend restart."""
+        """Global extraction engine for the ingestion worker. Reads the first
+        settings doc (single-admin deployments) and falls back to defaults —
+        same pattern as get_system_modal, so UI edits apply on the next ingest
+        without a backend restart."""
         if self._db is not None:
             try:
                 doc = await self._db["settings"].find_one(

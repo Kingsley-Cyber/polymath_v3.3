@@ -1,0 +1,18 @@
+{
+  "accepted_pronoun_entities": 0,
+  "classification_conservation": true,
+  "classified_arguments": 978,
+  "entity_arguments": 742,
+  "identity_digest": "85fda005f8cc45cd460a4bc049b26ac91d6ede89e32279d5a24068c91ffddc14",
+  "input_arguments": 978,
+  "kind_counts": {
+    "DESCRIPTION": 201,
+    "EMBEDDED_CLAUSE": 9,
+    "ENTITY": 742,
+    "UNRESOLVED": 26
+  },
+  "raw_propositions": 489,
+  "schema_version": "polymath.openie_argument_adapter_report.v1",
+  "status": "passed",
+  "strict_entity_alignment_rate": 1.0
+}

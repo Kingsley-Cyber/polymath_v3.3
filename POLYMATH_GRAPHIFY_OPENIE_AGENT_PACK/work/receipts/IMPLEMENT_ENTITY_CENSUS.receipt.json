@@ -1,0 +1,26 @@
+{
+  "errors": [],
+  "files_changed": [
+    "/Users/king/polymath_v3.3/POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/work/artifacts/raw_mentions.jsonl",
+    "/Users/king/polymath_v3.3/POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/work/artifacts/windows.jsonl",
+    "/Users/king/polymath_v3.3/POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/work/artifacts/census_report.json",
+    "/Users/king/polymath_v3.3/POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/work/artifacts/offset_validation.json"
+  ],
+  "finished_at": "2026-08-06T23:41:20.428771+00:00",
+  "inputs_hash": "",
+  "metrics": {
+    "documents": 2,
+    "inference_seconds": 18.833441125010722,
+    "raw_mentions": 728,
+    "strict_alignment_rate": 1.0,
+    "windows": 23
+  },
+  "outputs_hash": "",
+  "stage": "IMPLEMENT_ENTITY_CENSUS",
+  "started_at": "2026-08-06T23:41:20.427756+00:00",
+  "status": "PASSED",
+  "tests": [
+    "backend/tests/extraction/test_graphify_census.py"
+  ],
+  "warnings": []
+}

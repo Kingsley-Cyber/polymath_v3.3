@@ -16,9 +16,9 @@
 #   bash scripts/smoke_apple_mlx.sh
 #
 # This override:
-#   * Disables the in-cluster embedder, reranker, and docling services
+#   * Disables the in-cluster embedder and reranker services
 #     (they're replaced by host-native MLX equivalents).
-#   * Points the backend at host.docker.internal:{8082,8081,8500}.
+#   * Points the backend at host.docker.internal:{8082,8081}.
 #   * Sets RERANKER_SCORE_SCALE=probability because the default Apple path is
 #     the Torch/Jina cross-encoder with calibrated [0,1] probabilities. The
 #     rollback MLX bi-encoder path returns cosine; both are bounded scales.
@@ -29,8 +29,6 @@ services:
     profiles: ["disabled"]
   reranker:
     profiles: ["disabled"]
-  docling:
-    profiles: ["disabled"]
 
   # ── retarget backend at host services ───────────────────────────────
   backend:
@@ -39,7 +37,6 @@ services:
     environment:
       EMBEDDER_URL: http://host.docker.internal:8082
       RERANKER_URL: http://host.docker.internal:8081
-      DOCLING_URL: http://host.docker.internal:8500
       RERANKER_SCORE_SCALE: probability
       RERANKER_MODEL: mlx-community/jina-reranker-v3-4bit-mxfp4
       # QueryPlanV2 sends at most 16 Hybrid or 24 Graph candidates. Keep the
@@ -56,7 +53,6 @@ services:
       LOCAL_PASS1_ENRICH_ENABLED: ${LOCAL_PASS1_ENRICH_ENABLED:-false}
       LOCAL_SLM_ENRICH_ENABLED: ${LOCAL_SLM_ENRICH_ENABLED:-false}
       LOCAL_SLM_ENRICH_URL: ${LOCAL_SLM_ENRICH_URL:-http://host.docker.internal:8083}
-      DOCLING_SIDECAR_POLICY: ${DOCLING_SIDECAR_POLICY:-off}
       GRAPH_CACHE_WARMUP_SKIP_DURING_ACTIVE_INGEST: ${GRAPH_CACHE_WARMUP_SKIP_DURING_ACTIVE_INGEST:-true}
       GRAPH_CACHE_WARMUP_ACTIVE_INGEST_DEFER_SECONDS: ${GRAPH_CACHE_WARMUP_ACTIVE_INGEST_DEFER_SECONDS:-120}
       EMBED_DEVICE: mps
@@ -68,7 +64,6 @@ services:
     environment:
       EMBEDDER_URL: http://host.docker.internal:8082
       RERANKER_URL: http://host.docker.internal:8081
-      DOCLING_URL: http://host.docker.internal:8500
       RERANKER_SCORE_SCALE: probability
       RERANKER_MODEL: mlx-community/jina-reranker-v3-4bit-mxfp4
       RERANKER_HTTP_BATCH_SIZE: ${RERANKER_HTTP_BATCH_SIZE:-24}

@@ -37,7 +37,11 @@ logger = logging.getLogger(__name__)
 
 # Excluded document stages: these documents are intentionally not part of the
 # retrieval contract, so they have no desired artifacts.
-EXCLUDED_DOCUMENT_STAGES = {"skipped_duplicate", "skipped_nonsemantic"}
+EXCLUDED_DOCUMENT_STAGES = {
+    "skipped_duplicate",
+    "skipped_nonsemantic",
+    "unsupported_by_policy",
+}
 _HRAG_CHILD_TIERS = ("tier_a", "tier_b", "tier_b_plus")
 _SUMMARY_QDRANT_KINDS = ("naive", "hrag")
 # Extraction artifact states that satisfy the extraction desired state.
@@ -97,14 +101,8 @@ def compile_document_contract(
     # extracted while three of four organs produced nothing for 362,142 chunks;
     # the organ contract makes each sub-stage separately checkable.
     from services.control_plane.extraction_organs import (
-        LANE_LOCAL, LANE_POD, compile_organ_contract,
+        LANE_GRAPHIFY, compile_organ_contract,
     )
-
-    wire_contract = str(
-        (effective_doc.get("ingestion_config") or {}).get(
-            "runpod_wire_contract") or ""
-    ).strip()
-    lane = LANE_POD if wire_contract == "local_extraction_v1" else LANE_LOCAL
 
     return {
         "target_qdrant_collections": _target_collection_kinds(cfg),
@@ -113,7 +111,7 @@ def compile_document_contract(
         "graph_required": bool(cfg.use_neo4j),
         "extraction_contract_hash": extraction_contract_hash(effective_doc),
         "summary_contract_hash": summary_contract_hash(corpus),
-        "organ_contract": compile_organ_contract(lane),
+        "organ_contract": compile_organ_contract(LANE_GRAPHIFY),
     }
 
 

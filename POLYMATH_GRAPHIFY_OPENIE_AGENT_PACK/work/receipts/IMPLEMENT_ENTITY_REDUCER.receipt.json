@@ -1,0 +1,29 @@
+{
+  "errors": [],
+  "files_changed": [
+    "/Users/king/polymath_v3.3/POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/work/artifacts/document_entities.jsonl",
+    "/Users/king/polymath_v3.3/POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/work/artifacts/mention_assignments.jsonl",
+    "/Users/king/polymath_v3.3/POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/work/artifacts/reducer_report.json"
+  ],
+  "finished_at": "2026-08-06T23:42:14.485070+00:00",
+  "inputs_hash": "",
+  "metrics": {
+    "aligned_raw_mentions": 728,
+    "clusters": 133,
+    "state_counts": {
+      "document_local": 51,
+      "promoted": 42,
+      "review": 34,
+      "suppressed": 6
+    },
+    "terminal_assignments": 728
+  },
+  "outputs_hash": "",
+  "stage": "IMPLEMENT_ENTITY_REDUCER",
+  "started_at": "2026-08-06T23:42:14.479326+00:00",
+  "status": "PASSED",
+  "tests": [
+    "backend/tests/extraction/test_graphify_reducer.py"
+  ],
+  "warnings": []
+}

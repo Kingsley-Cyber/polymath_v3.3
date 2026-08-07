@@ -1,0 +1,30 @@
+# Supported Dependency Patterns Registry
+# Declares which dependency-path signatures the current extractor handles.
+# The mining script reads this to mark `already_supported` in its report.
+# Updated as new rules are validated through precision/recall testing.
+#
+# Format: list of signature strings matching the output of _build_signature()
+# in dep_path_extractor.py.
+
+supported:
+  # Active transitive: "Microsoft acquired GitHub"
+  - "ENTITY_A <-nsubj- VERB -dobj-> ENTITY_B"
+  - "ENTITY_A <-nsubj- VERB -obj-> ENTITY_B"
+
+  # Passive with agent: "GitHub was acquired by Microsoft"
+  - "ENTITY_A <-nsubjpass- VERB -agent-> ENTITY_B"
+  - "ENTITY_A <-nsubjpass- VERB -pobj-> ENTITY_B"
+
+  # Active with attr (copular): "Qdrant is a vector database"
+  - "ENTITY_A <-nsubj- VERB -attr-> ENTITY_B"
+
+  # Appositive: "Qdrant, a vector database, supports filtering"
+  - "ENTITY_A -appos-> ENTITY_B"
+
+  # Possessive: "Microsoft's GitHub"
+  - "ENTITY_A -poss-> ENTITY_B"
+
+# Patterns discovered but NOT yet supported (candidates for next sprint):
+# - "ENTITY_A <-conj- ENTITY_B <-nsubj- VERB"   (coordinated arguments)
+# - "ENTITY_A <-prep-in- NOUN"                   (noun-preposition)
+# - "ENTITY_A <-nmod- VERB -dobj-> ENTITY_B"     (oblique nominal modifier)

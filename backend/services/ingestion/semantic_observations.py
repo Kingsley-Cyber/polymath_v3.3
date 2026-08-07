@@ -552,8 +552,8 @@ def compile_local_extraction_v1(
 ) -> LocalExtractionCompileResult:
     """Normalize spaCy predicate observations into the owner child contract.
 
-    GLiNER entities and GLiREL/Relex relations are deliberately not fabricated
-    here.  T8.2 merges those observation lanes after their own candidate
+    Relex entities and relations are deliberately not fabricated here.
+    T8.2 merges those observation lanes after their own candidate
     boundaries exist. Unknown lemmas remain explicit unresolved spans.
     """
 

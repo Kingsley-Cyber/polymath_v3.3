@@ -71,3 +71,18 @@ data/
 data_eval/
 scripts/local_extraction_fixtures/
 STATUS.md
+
+# Heavy generated evidence/output snapshots — tree digests recorded in
+# audit/freeze manifests instead of content-tracking (2026-08-07 freeze).
+graphify-out.stale-20260725/
+graphify-out.pre-book-pipeline-repair/
+graphify-out/20*/
+.qoder/
+tmp/
+.pytest_cache/
+.flash/
+POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/work/vendor_probe/
+GRAPHIFY_GLINER2_CPU_AGENT/artifacts/
+.venv-gliner2/
+.venv-relex/
+local_ghost_b/.venv/

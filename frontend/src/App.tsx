@@ -176,7 +176,11 @@ function App() {
   }, [corpora]);
 
   const handleSend = useCallback(
-    async (message: string, attachedFiles?: File[]) => {
+    async (
+      message: string,
+      attachedFiles?: File[],
+      opts?: { research?: boolean },
+    ) => {
       console.log("handleSend triggered");
       const chat = useChatStore.getState();
       const settings = useSettingsStore.getState();
@@ -266,6 +270,47 @@ function App() {
           : undefined,
       };
       chat.addMessage(cid, userMessage);
+
+      // Deep Research — one-shot composer mode. Instead of the normal SSE
+      // chat stream, spin up a durable research job and drop a progress
+      // card into the message stream. The card (ResearchCard) polls the
+      // job + events endpoints itself and resolves to artifact downloads
+      // when the pipeline finishes. We deliberately do NOT start streaming.
+      if (opts?.research) {
+        // The stream scaffolding above (controller + startStreaming) was
+        // set up before we knew this was a research turn; tear it down so
+        // the UI doesn't sit in a perpetual "processing" state.
+        activeChatRequestRef.current = null;
+        chat.stopStreaming();
+        try {
+          const job = await api.createResearchJob({
+            question: message,
+            corpus_ids: requestCorpusIds,
+            mode: "standard",
+            metadata: { conversation_id: cid },
+          });
+          const researchMessage: ChatMessage = {
+            id: crypto.randomUUID(),
+            role: "assistant",
+            content: "",
+            created_at: new Date().toISOString(),
+            metadata: {
+              message_kind: "research_job",
+              research_job_id: job.job_id,
+              research_status: job.status,
+              corpus_ids: requestCorpusIds,
+            },
+          };
+          chat.addMessage(cid, researchMessage);
+        } catch (err) {
+          chat.setError(
+            `Failed to start Deep Research: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+        }
+        return;
+      }
 
       const retrievalConfig =
         settings.retrievalTier === "qdrant_only"

@@ -699,6 +699,9 @@ class RerankerService:
         if _RERANKER_INPUT_CONTEXT:
             from models.contracts import RerankerInput
 
+            _aspect_enabled = bool(
+                getattr(self._settings, "RERANKER_QUERY_ASPECT_ENABLED", True)
+            )
             prefixed = []
             for c, doc, parent_context in zip(pool, documents, parent_contexts):
                 name = str(getattr(c, "doc_name", "") or "").strip()[:80]
@@ -707,11 +710,20 @@ class RerankerService:
                     for h in (getattr(c, "heading_path", None) or [])
                     if str(h).strip()
                 ]
+                # Lane-aspect: when a candidate was discovered by a vocabulary
+                # lane, score it against that lane's sub-query (the aspect it
+                # is relevant to) rather than the full compound user query.
+                _aspect = ""
+                if _aspect_enabled:
+                    _aspect = str(
+                        (getattr(c, "metadata", None) or {}).get("lane_query") or ""
+                    ).strip()[:120]
                 prefixed.append(
                     RerankerInput(
                         source_book=name,
                         section=" › ".join(heads[:2])[:80],
                         parent_context=parent_context[:context_cap],
+                        query_aspect=_aspect,
                         excerpt=doc,
                     ).render()
                 )

@@ -5,13 +5,13 @@
 # DataFolder. Default uses C:\PolymathRuntime because Docker Desktop can map C:
 # reliably on Windows. If Docker Desktop maps your E: drive correctly, override
 # with POLYMATH_DOCKER_DATA_ROOT=E:/PolymathRuntime.
-#   C:\PolymathRuntime\volumes\{mongodb,qdrant,neo4j,redis,n8n,docling,hf-cache,llama.cpp}
+#   C:\PolymathRuntime\volumes\{mongodb,qdrant,neo4j,redis,n8n,hf-cache,llama.cpp}
 #   C:\PolymathRuntime\models\{Qwen3-Embedding-0.6B,Qwen3-Reranker-0.6B-Q8_0-GGUF}
 # Override with POLYMATH_DOCKER_DATA_ROOT / POLYMATH_MODELS_ROOT if needed.
 
 # Cap container logs at 30 MB total (3 files × 10 MB) to prevent the WSL2 vhdx
 # from ballooning overnight. Default JSON driver has NO rotation — without this,
-# 15 chatty containers (LiteLLM, embedder, docling, backend) will fill the
+# 15 chatty containers (LiteLLM, embedder, backend) will fill the
 # Docker virtual disk in days. Reference from every service via `<<: *default-logging`.
 x-default-logging: &default-logging
   logging:
@@ -252,7 +252,7 @@ services:
       # error" inside model.to('cuda') under torch 2.11+cu128. The default
       # allocator works fine on this card; only re-enable if you've validated
       # the flags against the installed cuda runtime.
-      # GPU pinning — see docling service for the rationale. CUDA_VISIBLE_DEVICES
+      # GPU pinning — CUDA_VISIBLE_DEVICES
       # is the load-bearing filter at the torch layer; PCI_BUS_ID ordering
       # makes "0" deterministically mean GPU 0.
       CUDA_DEVICE_ORDER: PCI_BUS_ID
@@ -393,46 +393,10 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
 
   # ============================================================
-  # DOCLING SIDECAR — IBM Docling parser with GPU layout, OCR disabled
-  # API: POST http://docling:8500/parse
-  # First boot downloads Docling/HF weights to host bind mounts under
-  # C:/PolymathRuntime by default, so rebuilds do not bake weights into image layers.
+  # DOCLING SIDECAR — removed in q9 (deterministic parsing contract).
+  # PDFs parse via the pinned firecrawl/pdf-inspector inside the backend;
+  # scanned/OCR-dependent documents are rejected as unsupported_by_policy.
   # ============================================================
-  docling:
-    <<: *default-logging
-    build: ./docling_svc
-    profiles: ["local-parser"]
-    # Internal-only — backend reaches it on the docker network via
-    # http://docling:8500. No host port; mirrors embedder/reranker pattern
-    # so the parse endpoint + model weights aren't on the host network.
-    expose:
-      - "8500"
-    volumes:
-      - "${POLYMATH_DOCKER_DATA_ROOT:-C:/PolymathRuntime}/volumes/docling/models:/app/docling_models"
-      - "${POLYMATH_DOCKER_DATA_ROOT:-C:/PolymathRuntime}/volumes/hf-cache:/app/hf_cache"
-    environment:
-      DOCLING_ARTIFACTS_PATH: /app/docling_models
-      HF_HOME: /app/hf_cache
-      DOCLING_OCR_ENABLED: "false"
-      DOCLING_IDLE_UNLOAD_SECONDS: ${DOCLING_IDLE_UNLOAD_SECONDS:-300}
-      CUDA_DEVICE_ORDER: PCI_BUS_ID
-      CUDA_VISIBLE_DEVICES: "0" # RTX 3090
-      NVIDIA_VISIBLE_DEVICES: "0"
-      PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True,max_split_size_mb:128
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              device_ids: ["0"]
-              capabilities: [gpu]
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8500/health"]
-      interval: 15s
-      timeout: 10s
-      retries: 5
-      start_period: 60s
-    restart: unless-stopped
 
   # ============================================================
   # AUTOMATION
@@ -483,15 +447,7 @@ services:
       # container so /api/infrastructure/modal/deploy can import it.
       # Read-only bind; file lives at repo root for CLI-deploy compatibility.
       - "${POLYMATH_RUNTIME_BINDS_ROOT:-C:/PolymathRuntime/binds}/modal_embedder.py:/app/modal_embedder.py:ro"
-      # R8 (2026-07-30) — extraction config. The build context is ./backend, so
-      # repo-root config/ was never in the image and dep_path_extractor failed
-      # loud in-container ("config/ directory not found"), making the
-      # deterministic relation lane unrunnable anywhere but the host sidecar.
-      # Bound rather than baked ON PURPOSE: the host sidecar (:8084) and the
-      # container must resolve the SAME ontology.yaml / predicate_synonyms.yaml.
-      # A baked copy can drift from the host's, and a drifted allowed_pairs
-      # table silently changes which relations survive. Repo-relative, so it is
-      # portable across Apple and RTX without a machine-specific path.
+      # Shared declarative graph and query configuration.
       - "./config:/app/config:ro"
     environment:
       MONGODB_URI: mongodb://${MONGO_USER:-polymath}:${MONGO_PASSWORD}@mongodb:27017/polymath?authSource=admin
@@ -641,14 +597,8 @@ services:
       DEFAULT_ADMIN_PASSWORD: ${DEFAULT_ADMIN_PASSWORD}
       # Public MCP URL is surfaced by /api/mcp/info for Settings -> MCP snippets.
       MCP_PUBLIC_URL: ${MCP_PUBLIC_URL:-}
-      # Phase 7.6 — Docling sidecar (parser replacement for unstructured/regex)
-      DOCLING_URL: http://docling:8500
-      # auto: use Docling only for formats that need layout parsing.
-      # off/local: never call Docling; MD/TXT/HTML/code/PDF-fast-text still work.
-      DOCLING_SIDECAR_POLICY: ${DOCLING_SIDECAR_POLICY:-auto}
-      # Default false: keep converter warm during a batch, then rely on
-      # DOCLING_IDLE_UNLOAD_SECONDS. Set true for one-off memory-sensitive parses.
-      DOCLING_AUTO_UNLOAD_AFTER_PARSE: ${DOCLING_AUTO_UNLOAD_AFTER_PARSE:-false}
+      # q9 deterministic parsing contract: no Docling sidecar and no OCR.
+      # PDFs parse via firecrawl/pdf-inspector inside the backend image.
       # GHOST B — 0.0 disables self-reported-confidence filter (glosses + schema
       # are the real quality levers). Raise per-model after eyeballing its distribution.
       ENTITY_CONFIDENCE_THRESHOLD: ${ENTITY_CONFIDENCE_THRESHOLD:-0.0}
@@ -681,15 +631,6 @@ services:
       EXTRACTION_RESCUE_MAX_RELATIONS_PER_CHUNK: ${EXTRACTION_RESCUE_MAX_RELATIONS_PER_CHUNK:-8}
       EXTRACTION_ENABLE_FACTS: ${EXTRACTION_ENABLE_FACTS:-true}
       EXTRACTION_MAX_FACTS_PER_CHUNK: ${EXTRACTION_MAX_FACTS_PER_CHUNK:-5}
-      # Local Ghost B sidecar routing. ONNX CPU fallback is rejected by default
-      # because it looks healthy but can make ingestion appear hung. Set
-      # LOCAL_GHOST_B_ALLOW_ONNX_CPU_FALLBACK=true only when CPU fallback is
-      # intentional for small/test batches.
-      LOCAL_GHOST_B_EXTRACT_MODE: ${LOCAL_GHOST_B_EXTRACT_MODE:-auto}
-      LOCAL_GHOST_B_EXTRACT_URL: ${LOCAL_GHOST_B_EXTRACT_URL:-http://host.docker.internal:8084}
-      LOCAL_GHOST_B_EXTRACT_TIMEOUT_S: ${LOCAL_GHOST_B_EXTRACT_TIMEOUT_S:-5400}
-      LOCAL_GHOST_B_EXTRACT_SLICE: ${LOCAL_GHOST_B_EXTRACT_SLICE:-2048}
-      LOCAL_GHOST_B_ALLOW_ONNX_CPU_FALLBACK: ${LOCAL_GHOST_B_ALLOW_ONNX_CPU_FALLBACK:-false}
       # Phase 20 ingest concurrency caps. Without these the worker falls back
       # to Pydantic defaults (1 doc through the model phase) and serializes
       # 5+ uploads even when cloud Ghost pools have headroom for parallel

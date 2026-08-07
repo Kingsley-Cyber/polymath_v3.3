@@ -1,0 +1,9 @@
+{
+  "runtime_provider_files": [],
+  "provider_registry_files": [],
+  "spacy_owner_files": [],
+  "relation_consumer_files": [],
+  "offline_baseline_files": [],
+  "canonical_graphify_entrypoint": "",
+  "notes": "Populate with repository-relative paths after discovery. Runtime policy scripts scan only the explicit candidate scope, not unrelated MPS/MLX services elsewhere in the repository."
+}

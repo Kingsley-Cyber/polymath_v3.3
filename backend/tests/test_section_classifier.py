@@ -125,23 +125,32 @@ def test_all_kinds_includes_body():
     assert ChunkKind.BODY in ALL_KINDS
 
 
-def test_noisy_kinds_excludes_body_code_and_table():
-    # Code and table chunks are retrievable first-class content, not noise.
+def test_noisy_kinds_excludes_retrievable_content():
+    # Code, table, output and caption chunks are retrievable first-class
+    # content, not noise (mixed-content book lane).
     assert ChunkKind.BODY not in NOISY_KINDS
     assert ChunkKind.CODE not in NOISY_KINDS
     assert ChunkKind.TABLE not in NOISY_KINDS
+    assert ChunkKind.OUTPUT not in NOISY_KINDS
+    assert ChunkKind.CAPTION not in NOISY_KINDS
     assert set(NOISY_KINDS) == set(ALL_KINDS) - {
         ChunkKind.BODY,
         ChunkKind.CODE,
         ChunkKind.TABLE,
+        ChunkKind.OUTPUT,
+        ChunkKind.CAPTION,
     }
 
 
 def test_ghost_b_skip_kinds_includes_code():
-    # CODE is retrievable but Ghost B is skipped on it (hallucinates Method
-    # /Artifact entities from raw code). Skip set = noisy + code.
-    assert GHOST_B_SKIP_KINDS == frozenset(list(NOISY_KINDS) + [ChunkKind.CODE])
+    # CODE and OUTPUT are retrievable but Ghost B is skipped on them
+    # (hallucinates Method/Artifact entities from raw code and console
+    # transcripts). Skip set = noisy + code + output.
+    assert GHOST_B_SKIP_KINDS == frozenset(
+        list(NOISY_KINDS) + [ChunkKind.CODE, ChunkKind.OUTPUT]
+    )
     assert ChunkKind.CODE in GHOST_B_SKIP_KINDS
+    assert ChunkKind.OUTPUT in GHOST_B_SKIP_KINDS
     assert ChunkKind.TABLE not in GHOST_B_SKIP_KINDS
 
 

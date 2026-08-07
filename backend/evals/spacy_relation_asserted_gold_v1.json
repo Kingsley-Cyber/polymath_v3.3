@@ -1,0 +1,628 @@
+{
+  "schema_version": "polymath.spacy_relation_asserted_gold.v1",
+  "purpose": "Asserted-only relation gold for the spaCy dep-path extractor gate. Extended to thin-evidence floor.",
+  "derived_from": {
+    "path": "backend/evals/semantic_extraction_gold_v1.json",
+    "sha256": "866d1b2104c7bc7d3a5696462058053a6bb041c8bd6784eae59a1f390d5e7816"
+  },
+  "derivation_rule": "A gold relation is included iff its sample contains at least one claim with polarity=affirmed AND modal_force=asserted AND assertion_mode=reported AND no conditions_contain. Samples where ALL claims are qualified (negated, modal, attributed, hypothetical, conditional) are excluded. The original gold file is untouched and sha256-pinned.",
+  "extended_at_utc": "2026-07-30T03:00:07Z",
+  "extension_note": "6 new hand-labeled samples added to meet thin-evidence floor (>=15 asserted relations, >=8 samples, >=5 predicate types). Sources: Design Patterns (GoF) book corpus, technical architecture prose, simulated ASR transcript. Each sample has provenance, entity spans, gold relations, and qualifier fields.",
+  "entity_vocabulary": [
+    "Person",
+    "Organization",
+    "Location",
+    "Event",
+    "Concept",
+    "Method",
+    "Product",
+    "Software",
+    "Document",
+    "Standard",
+    "Rule",
+    "Law",
+    "Artifact",
+    "TimeReference"
+  ],
+  "relation_vocabulary": [
+    "part_of",
+    "member_of",
+    "located_in",
+    "works_for",
+    "created_by",
+    "owns",
+    "affiliated_with",
+    "synonym_of",
+    "instance_of",
+    "example_of",
+    "uses",
+    "references",
+    "implements",
+    "depends_on",
+    "produces",
+    "stores",
+    "detects",
+    "supports",
+    "defines",
+    "represents",
+    "maps_to",
+    "preceded_by",
+    "causes",
+    "overlaps",
+    "during",
+    "derived_from",
+    "contradicts",
+    "excepts",
+    "overrides",
+    "related_to"
+  ],
+  "samples": [
+    {
+      "id": "explicit_causal",
+      "text": "Repeated discounting lowers the consumer's internal reference price.",
+      "gold": {
+        "entities": [
+          {
+            "canonical_name": "repeated discounting",
+            "surface_form": "Repeated discounting",
+            "entity_type": "Method"
+          },
+          {
+            "canonical_name": "internal reference price",
+            "surface_form": "internal reference price",
+            "entity_type": "Concept"
+          }
+        ],
+        "relations": [
+          {
+            "subject": "repeated discounting",
+            "predicate": "causes",
+            "object": "internal reference price"
+          }
+        ],
+        "claims": [
+          {
+            "predicate_lemma": "lower",
+            "polarity": "affirmed",
+            "modal_force": "asserted",
+            "assertion_mode": "reported",
+            "claim_type": "causal",
+            "qualifiers": [
+              {
+                "kind": "causal",
+                "cue_contains": "lowers"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "exception_scope",
+      "text": "Discounting usually lowers reference price, except when the discount is clearly temporary.",
+      "gold": {
+        "entities": [
+          {
+            "canonical_name": "discounting",
+            "surface_form": "Discounting",
+            "entity_type": "Method"
+          },
+          {
+            "canonical_name": "reference price",
+            "surface_form": "reference price",
+            "entity_type": "Concept"
+          },
+          {
+            "canonical_name": "temporary discount",
+            "surface_form": "the discount is clearly temporary",
+            "entity_type": "Concept"
+          }
+        ],
+        "relations": [
+          {
+            "subject": "discounting",
+            "predicate": "causes",
+            "object": "reference price"
+          }
+        ],
+        "claims": [
+          {
+            "predicate_lemma": "lower",
+            "polarity": "affirmed",
+            "modal_force": "asserted",
+            "assertion_mode": "reported",
+            "claim_type": "causal",
+            "exceptions_contain": [
+              "except when the discount is clearly temporary"
+            ],
+            "qualifiers": [
+              {
+                "kind": "causal",
+                "cue_contains": "lowers"
+              },
+              {
+                "kind": "exception",
+                "cue_contains": "except when the discount is clearly temporary"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "temporal_revision",
+      "text": "The policy became effective on 2025-01-01 and was revised in March 2026.",
+      "gold": {
+        "entities": [
+          {
+            "canonical_name": "policy",
+            "surface_form": "policy",
+            "entity_type": "Rule"
+          },
+          {
+            "canonical_name": "2025-01-01",
+            "surface_form": "2025-01-01",
+            "entity_type": "TimeReference"
+          },
+          {
+            "canonical_name": "march 2026",
+            "surface_form": "March 2026",
+            "entity_type": "TimeReference"
+          }
+        ],
+        "relations": [
+          {
+            "subject": "2025-01-01",
+            "predicate": "preceded_by",
+            "object": "march 2026"
+          }
+        ],
+        "claims": [
+          {
+            "predicate_lemma": "become",
+            "polarity": "affirmed",
+            "modal_force": "asserted",
+            "assertion_mode": "reported",
+            "claim_type": "description_or_observation",
+            "qualifiers": [
+              {
+                "kind": "temporal",
+                "cue_contains": "2025-01-01"
+              }
+            ]
+          },
+          {
+            "predicate_lemma": "revise",
+            "polarity": "affirmed",
+            "modal_force": "asserted",
+            "assertion_mode": "reported",
+            "claim_type": "description_or_observation",
+            "qualifiers": [
+              {
+                "kind": "temporal",
+                "cue_contains": "March 2026"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "mechanism_definition",
+      "text": "A mechanism motif is an ordered abstraction over validated frame instances and state transitions.",
+      "gold": {
+        "entities": [
+          {
+            "canonical_name": "mechanism motif",
+            "surface_form": "mechanism motif",
+            "entity_type": "Concept"
+          },
+          {
+            "canonical_name": "ordered abstraction",
+            "surface_form": "ordered abstraction",
+            "entity_type": "Concept"
+          },
+          {
+            "canonical_name": "validated frame instances",
+            "surface_form": "validated frame instances",
+            "entity_type": "Concept"
+          },
+          {
+            "canonical_name": "state transitions",
+            "surface_form": "state transitions",
+            "entity_type": "Concept"
+          }
+        ],
+        "relations": [
+          {
+            "subject": "mechanism motif",
+            "predicate": "defines",
+            "object": "ordered abstraction"
+          }
+        ],
+        "claims": [
+          {
+            "predicate_lemma": "be",
+            "polarity": "affirmed",
+            "modal_force": "asserted",
+            "assertion_mode": "reported",
+            "claim_type": "definition",
+            "qualifiers": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "analogy_limitation",
+      "text": "Human worth is not equivalent to market price; the shared structure concerns reference updating only.",
+      "gold": {
+        "entities": [
+          {
+            "canonical_name": "human worth",
+            "surface_form": "Human worth",
+            "entity_type": "Concept"
+          },
+          {
+            "canonical_name": "market price",
+            "surface_form": "market price",
+            "entity_type": "Concept"
+          },
+          {
+            "canonical_name": "shared structure",
+            "surface_form": "shared structure",
+            "entity_type": "Concept"
+          },
+          {
+            "canonical_name": "reference updating",
+            "surface_form": "reference updating",
+            "entity_type": "Concept"
+          }
+        ],
+        "relations": [
+          {
+            "subject": "shared structure",
+            "predicate": "related_to",
+            "object": "reference updating"
+          }
+        ],
+        "claims": [
+          {
+            "predicate_lemma": "be",
+            "polarity": "negated",
+            "modal_force": "asserted",
+            "assertion_mode": "reported",
+            "claim_type": "comparison_or_contrast",
+            "qualifiers": [
+              {
+                "kind": "negation",
+                "cue_contains": "not"
+              },
+              {
+                "kind": "comparison",
+                "cue_contains": "equivalent"
+              }
+            ]
+          },
+          {
+            "predicate_lemma": "concern",
+            "polarity": "affirmed",
+            "modal_force": "asserted",
+            "assertion_mode": "reported",
+            "claim_type": "description_or_observation",
+            "qualifiers": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "tech_stack_dependencies",
+      "provenance": "Hand-labeled. Simulates technical architecture prose (book corpus).",
+      "text": "The retrieval service depends on Qdrant for vector search and uses MongoDB for lexical recall.",
+      "gold": {
+        "entities": [
+          {
+            "canonical_name": "retrieval service",
+            "surface_form": "retrieval service",
+            "entity_type": "Software"
+          },
+          {
+            "canonical_name": "qdrant",
+            "surface_form": "Qdrant",
+            "entity_type": "Software"
+          },
+          {
+            "canonical_name": "vector search",
+            "surface_form": "vector search",
+            "entity_type": "Method"
+          },
+          {
+            "canonical_name": "mongodb",
+            "surface_form": "MongoDB",
+            "entity_type": "Software"
+          },
+          {
+            "canonical_name": "lexical recall",
+            "surface_form": "lexical recall",
+            "entity_type": "Method"
+          }
+        ],
+        "relations": [
+          {
+            "subject": "retrieval service",
+            "predicate": "depends_on",
+            "object": "qdrant"
+          },
+          {
+            "subject": "retrieval service",
+            "predicate": "uses",
+            "object": "mongodb"
+          }
+        ],
+        "claims": [
+          {
+            "predicate_lemma": "depend",
+            "polarity": "affirmed",
+            "modal_force": "asserted",
+            "assertion_mode": "reported",
+            "claim_type": "description_or_observation",
+            "qualifiers": []
+          },
+          {
+            "predicate_lemma": "use",
+            "polarity": "affirmed",
+            "modal_force": "asserted",
+            "assertion_mode": "reported",
+            "claim_type": "description_or_observation",
+            "qualifiers": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "book_composite_represent",
+      "provenance": "Hand-labeled. Design Patterns (GoF) book corpus, Structural Patterns chapter.",
+      "text": "The Composite pattern composes objects into tree structures that represent part-whole hierarchies.",
+      "gold": {
+        "entities": [
+          {
+            "canonical_name": "composite pattern",
+            "surface_form": "Composite pattern",
+            "entity_type": "Method"
+          },
+          {
+            "canonical_name": "tree structures",
+            "surface_form": "tree structures",
+            "entity_type": "Concept"
+          },
+          {
+            "canonical_name": "part-whole hierarchies",
+            "surface_form": "part-whole hierarchies",
+            "entity_type": "Concept"
+          }
+        ],
+        "relations": [
+          {
+            "subject": "tree structures",
+            "predicate": "represents",
+            "object": "part-whole hierarchies"
+          }
+        ],
+        "claims": [
+          {
+            "predicate_lemma": "represent",
+            "polarity": "affirmed",
+            "modal_force": "asserted",
+            "assertion_mode": "reported",
+            "claim_type": "definition",
+            "qualifiers": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "transcript_ml_pipeline",
+      "provenance": "Hand-labeled. Simulates ASR transcript chunk (technical podcast).",
+      "text": "So the embedding model runs on the GPU cluster and the reranker depends on the embedding model for scoring.",
+      "gold": {
+        "entities": [
+          {
+            "canonical_name": "embedding model",
+            "surface_form": "embedding model",
+            "entity_type": "Software"
+          },
+          {
+            "canonical_name": "gpu cluster",
+            "surface_form": "GPU cluster",
+            "entity_type": "Software"
+          },
+          {
+            "canonical_name": "reranker",
+            "surface_form": "reranker",
+            "entity_type": "Software"
+          }
+        ],
+        "relations": [
+          {
+            "subject": "embedding model",
+            "predicate": "runs_on",
+            "object": "gpu cluster"
+          },
+          {
+            "subject": "reranker",
+            "predicate": "depends_on",
+            "object": "embedding model"
+          }
+        ],
+        "claims": [
+          {
+            "predicate_lemma": "run",
+            "polarity": "affirmed",
+            "modal_force": "asserted",
+            "assertion_mode": "reported",
+            "claim_type": "description_or_observation",
+            "qualifiers": []
+          },
+          {
+            "predicate_lemma": "depend",
+            "polarity": "affirmed",
+            "modal_force": "asserted",
+            "assertion_mode": "reported",
+            "claim_type": "description_or_observation",
+            "qualifiers": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "book_factory_defines",
+      "provenance": "Hand-labeled. Design Patterns (GoF) book corpus, Creational Patterns chapter.",
+      "text": "Factory Method defines an interface for creating an object but lets subclasses decide which class to instantiate.",
+      "gold": {
+        "entities": [
+          {
+            "canonical_name": "factory method",
+            "surface_form": "Factory Method",
+            "entity_type": "Method"
+          },
+          {
+            "canonical_name": "interface",
+            "surface_form": "interface",
+            "entity_type": "Concept"
+          },
+          {
+            "canonical_name": "subclasses",
+            "surface_form": "subclasses",
+            "entity_type": "Concept"
+          }
+        ],
+        "relations": [
+          {
+            "subject": "factory method",
+            "predicate": "defines",
+            "object": "interface"
+          }
+        ],
+        "claims": [
+          {
+            "predicate_lemma": "define",
+            "polarity": "affirmed",
+            "modal_force": "asserted",
+            "assertion_mode": "reported",
+            "claim_type": "definition",
+            "qualifiers": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "org_created_product",
+      "provenance": "Hand-labeled. Simulates technology news prose (book corpus).",
+      "text": "Google DeepMind developed Gemini and the research division employs over two thousand engineers.",
+      "gold": {
+        "entities": [
+          {
+            "canonical_name": "google deepmind",
+            "surface_form": "Google DeepMind",
+            "entity_type": "Organization"
+          },
+          {
+            "canonical_name": "gemini",
+            "surface_form": "Gemini",
+            "entity_type": "Product"
+          },
+          {
+            "canonical_name": "research division",
+            "surface_form": "research division",
+            "entity_type": "Organization"
+          },
+          {
+            "canonical_name": "engineers",
+            "surface_form": "engineers",
+            "entity_type": "Person"
+          }
+        ],
+        "relations": [
+          {
+            "subject": "google deepmind",
+            "predicate": "created_by",
+            "object": "gemini"
+          }
+        ],
+        "claims": [
+          {
+            "predicate_lemma": "develop",
+            "polarity": "affirmed",
+            "modal_force": "asserted",
+            "assertion_mode": "reported",
+            "claim_type": "description_or_observation",
+            "qualifiers": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "vector_store_references",
+      "provenance": "Hand-labeled. Simulates system architecture documentation (book corpus).",
+      "text": "Qdrant stores the vector embeddings and the search API references the Qdrant collection for retrieval.",
+      "gold": {
+        "entities": [
+          {
+            "canonical_name": "qdrant",
+            "surface_form": "Qdrant",
+            "entity_type": "Software"
+          },
+          {
+            "canonical_name": "vector embeddings",
+            "surface_form": "vector embeddings",
+            "entity_type": "Concept"
+          },
+          {
+            "canonical_name": "search api",
+            "surface_form": "search API",
+            "entity_type": "Software"
+          },
+          {
+            "canonical_name": "qdrant collection",
+            "surface_form": "Qdrant collection",
+            "entity_type": "Concept"
+          }
+        ],
+        "relations": [
+          {
+            "subject": "qdrant",
+            "predicate": "stores",
+            "object": "vector embeddings"
+          },
+          {
+            "subject": "search api",
+            "predicate": "references",
+            "object": "qdrant collection"
+          },
+          {
+            "subject": "qdrant collection",
+            "predicate": "part_of",
+            "object": "qdrant"
+          }
+        ],
+        "claims": [
+          {
+            "predicate_lemma": "store",
+            "polarity": "affirmed",
+            "modal_force": "asserted",
+            "assertion_mode": "reported",
+            "claim_type": "description_or_observation",
+            "qualifiers": []
+          },
+          {
+            "predicate_lemma": "reference",
+            "polarity": "affirmed",
+            "modal_force": "asserted",
+            "assertion_mode": "reported",
+            "claim_type": "description_or_observation",
+            "qualifiers": []
+          }
+        ]
+      }
+    }
+  ]
+}

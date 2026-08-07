@@ -329,6 +329,8 @@ async def test_named_account_pinned_endpoint_and_local_compilation(
     assert result.relations == []
     assert result.provider_card["endpoint"] == "greenendpoint"
     assert result.provider_card["account"] == "primary"
+    assert result.provider_card["transport_mode"] == "queue_based"
+    assert result.provider_card["execution_location"] == "remote_runpod_serverless"
 
 
 @pytest.mark.asyncio

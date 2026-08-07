@@ -32,7 +32,7 @@ from evals.semantic_extraction_scoring import (  # noqa: E402
     score_claim_candidates,
     score_extraction_lane,
 )
-from services import ghost_b, ghost_b_local, runpod_flash_extraction  # noqa: E402
+from services import ghost_b, runpod_flash_extraction  # noqa: E402
 from services.ghost_b import (  # noqa: E402
     UNIVERSAL_ENTITY_SCHEMA,
     UNIVERSAL_RELATION_SCHEMA,
@@ -161,15 +161,7 @@ async def _run_lane(
     runpod_relation_threshold: float | None = None,
 ) -> tuple[Any, float]:
     started = time.perf_counter()
-    if lane == "gliner_glirel":
-        report = await ghost_b_local.extract_entities(
-            tasks,
-            schema=schema,
-            return_report=True,
-            enable_facts=False,
-            endpoint_urls=["http://host.docker.internal:8084"],
-        )
-    elif lane == "runpod":
+    if lane == "runpod":
         config, _legacy_key = await settings_service.get_system_runpod_flash()
         if runpod_relation_threshold is not None:
             config = config.model_copy(
@@ -465,8 +457,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--lanes",
-        default="gliner_glirel,runpod,deepseek,longcat",
-        help="Comma-separated: gliner_glirel,runpod,deepseek,longcat",
+        default="runpod,deepseek,longcat",
+        help="Comma-separated: runpod,deepseek,longcat",
     )
     parser.add_argument(
         "--refiners",

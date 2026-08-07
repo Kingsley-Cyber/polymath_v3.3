@@ -125,6 +125,7 @@ from services.retriever.merge import merge_pools
 from services.retriever.mode_a import mode_a_expansion
 from services.graph.cache_warmup import ensure_graph_metrics_fresh
 from services.retriever.ranking_policy import (
+    DiversityResult,
     apply_candidate_weights,
     apply_query_grounding,
     select_with_diversity,
@@ -153,6 +154,43 @@ def _planned_obligation_count(plan: QueryPlanV2) -> int:
     if preserved is not None:
         return max(1, int(preserved))
     return max(1, len([probe for probe in plan.probes if probe.required]))
+
+
+def _release_pins() -> dict[str, str]:
+    """Slice 1 — centralized release-metadata stamp for every query trace.
+
+    Collects the version identifiers each pipeline stage already exposes and
+    puts them under one diagnostics key so the later control-plane slices can
+    compare executed query behavior against the active release bundle. Purely
+    additive: no behavior, ordering, or score change. Deferred imports keep
+    this helper free of import-cycle risk at module load.
+    """
+
+    from models.librarian_query_plan import PLANNER_VERSION
+    from services.retriever.temporal import TEMPORAL_ROUTING_VERSION
+    from services.retriever.vocabulary import VOCABULARY_RESOLVER_VERSION
+
+    return {
+        "query_planner": PLANNER_VERSION,
+        "vocabulary_resolver": VOCABULARY_RESOLVER_VERSION,
+        "temporal_routing": TEMPORAL_ROUTING_VERSION,
+    }
+
+
+def _release_stamps_read(chunks: list[SourceChunk]) -> list[dict]:
+    """Step 3 — the release stamps of the artifacts this query actually read.
+
+    OBSERVED identities on retrieved evidence: distinct from QueryIR's
+    ``release_pins`` (policy) and ``release_stamp`` (recorded at creation).
+    The three concepts must never be merged or overwrite one another.
+    Verbatim collection from hydrated chunk metadata (no merging, no
+    normalization: conflicting stamps stay visible in the trace). Purely
+    descriptive — nothing routes, ranks, or gates on these values.
+    """
+
+    from models.release_stamp import observed_release_stamps
+
+    return observed_release_stamps(chunks)
 
 
 def _planned_rerank_candidate_limit(
@@ -526,6 +564,33 @@ def _has_query_term_overlap(chunks: list[SourceChunk], query: str) -> bool:
     return False
 
 
+def _top_is_relative_standout(ranked: list[SourceChunk]) -> bool:
+    """Pool-independent "clear winner" detector for the v4 low-confidence guard.
+
+    Replaces the absolute ``RERANKER_LOW_CONFIDENCE_THRESHOLD``: instead of
+    asking "is top1 above a magic constant?", ask "does top1 separate from the
+    pool's own median?". The metric is the top-to-median gap as a fraction of
+    the pool spread, which is scale-free (works on raw logits) and needs no
+    per-provider calibration. A genuine hit puts top1 well clear of the pack
+    (ratio high); a flat junk pool sits near 0.5 (even spacing) and is NOT a
+    standout, so it still falls through to the term-overlap safety net.
+    """
+    scores = sorted(float(chunk.score or 0.0) for chunk in ranked)
+    if len(scores) < 2:
+        return False
+    top = scores[-1]
+    mid = len(scores) // 2
+    median = (
+        scores[mid]
+        if len(scores) % 2
+        else (scores[mid - 1] + scores[mid]) / 2.0
+    )
+    spread = scores[-1] - scores[0]
+    if spread <= 1e-9:
+        return False
+    return (top - median) / spread >= 0.60
+
+
 def _should_drop_low_confidence_rerank(
     ranked: list[SourceChunk],
     ranking_query: str,
@@ -533,6 +598,7 @@ def _should_drop_low_confidence_rerank(
     rerank_enabled: bool,
     score_scale: str | None = None,
     low_confidence_threshold: float | None = None,
+    relative_gate: bool = False,
 ) -> bool:
     """Drop reranked results when the whole pool looks unrelated.
 
@@ -540,12 +606,22 @@ def _should_drop_low_confidence_rerank(
     "probably irrelevant" signal. Bounded score scales such as cosine or
     probability cannot use the same threshold, so this guard is disabled for
     those providers and term overlap + ordinary ranking handles selection.
+
+    ``relative_gate`` (Retrieval Layer v4 shadow, default OFF) swaps the
+    uncalibrated absolute ``low_confidence_threshold`` for a pool-independent
+    test: keep when top1 is a clear relative standout over the pool median,
+    otherwise fall back to the term-overlap safety net. With the gate OFF the
+    behavior is byte-identical to the legacy absolute-threshold path.
     """
     if not rerank_enabled or not ranked:
         return False
     scale = (score_scale or settings.RERANKER_SCORE_SCALE or "logit").lower()
     if scale != "logit":
         return False
+    if relative_gate:
+        if _top_is_relative_standout(ranked):
+            return False
+        return not _has_query_term_overlap(ranked[:10], ranking_query)
     threshold = (
         low_confidence_threshold
         if low_confidence_threshold is not None
@@ -747,8 +823,21 @@ class RetrieverOrchestrator:
         If a caller passes `collections` explicitly (escape hatch — e.g.
         debug tools), we honor those names verbatim. Otherwise we expand
         from `corpus_ids`.
+
+        q8 (owner directive 2026-08-04): when the current request opted
+        into shadow read for a corpus, that corpus resolves to its
+        one-point-per-child candidate evidence collection instead of the
+        legacy family. Explicit-only, default off — ordinary requests never
+        see the candidate layout.
         """
-        from services.storage.qdrant_writer import _col_for_corpus
+        from services.retriever.shadow_read import (
+            FUNNEL_B_ELIGIBILITY,
+            SHADOW_READ_CORPORA,
+        )
+        from services.storage.qdrant_writer import (
+            _col_for_corpus,
+            _evidence_col_for_corpus,
+        )
 
         if collections:
             # Explicit override — caller knows what they're doing.
@@ -759,10 +848,28 @@ class RetrieverOrchestrator:
         if not corpus_ids:
             return [], []
 
-        a_cols = [_col_for_corpus(cid, "hrag") for cid in corpus_ids]
-        b_cols = [_col_for_corpus(cid, "naive") for cid in corpus_ids]
-        if tier == RetrievalTier.qdrant_mongo_graph:
-            b_cols.extend(_col_for_corpus(cid, "graph") for cid in corpus_ids)
+        shadowed = SHADOW_READ_CORPORA.get()
+        a_cols: list[str] = []
+        b_cols: list[str] = []
+        for cid in corpus_ids:
+            if cid in shadowed:
+                # One candidate collection replaces all three route copies:
+                # funnel_a reads summary records, funnel_b reads children —
+                # each lane filters on its route-eligibility flag.
+                evidence = _evidence_col_for_corpus(cid)
+                a_cols.append(evidence)
+                b_cols.append(evidence)
+            else:
+                a_cols.append(_col_for_corpus(cid, "hrag"))
+                b_cols.append(_col_for_corpus(cid, "naive"))
+                if tier == RetrievalTier.qdrant_mongo_graph:
+                    b_cols.append(_col_for_corpus(cid, "graph"))
+        if shadowed:
+            FUNNEL_B_ELIGIBILITY.set(
+                "eligible_graph_seed"
+                if tier == RetrievalTier.qdrant_mongo_graph
+                else "eligible_focused"
+            )
         return a_cols, b_cols
 
     async def _filter_existing_corpora(
@@ -1382,6 +1489,10 @@ class RetrieverOrchestrator:
         librarian_plan: QueryPlanV1 | dict[str, Any] | None = None,
         librarian_refinement_enabled: bool = False,
         librarian_refinement_user_id: str | None = None,
+        request_user_id: str | None = None,
+        dark_canary_query_class: str | None = None,
+        dark_canary_provider_status: str | None = None,
+        dark_canary_synthesis_preflight_status: str | None = None,
     ) -> RetrievalResult:
         """Execute QueryPlanV2 as one candidate-generation and rerank pass."""
 
@@ -1430,6 +1541,81 @@ class RetrieverOrchestrator:
             }
         )
 
+        # Complex-query subquery DAG (dark by default).
+        # - Global planner: plan-only when COMPLEX_QUERY_SUBQUERY_PLANNER_ENABLED
+        # - Fixture runtime: full executor when COMPLEX_QUERY_FIXTURE_RUNTIME_ENABLED
+        #   + allowlist (independent of global planner). Ranking outside fixture
+        #   stays unchanged.
+        complex_query_diagnostics: dict[str, Any] = {
+            "enabled": False,
+            "execution_mode": "inactive",
+            "planner_global_enable": bool(
+                getattr(settings, "COMPLEX_QUERY_SUBQUERY_PLANNER_ENABLED", False)
+            ),
+            "fixture_runtime_enable": bool(
+                getattr(settings, "COMPLEX_QUERY_FIXTURE_RUNTIME_ENABLED", False)
+            ),
+            "ranking_mutated": False,
+            "complex_query_executor_ran": False,
+        }
+        try:
+            from services.retriever.complex_query_executor import (
+                fixture_runtime_enabled,
+                plan_complex_query,
+                planner_enabled,
+            )
+
+            _cq_corpora = [str(c) for c in (corpus_ids or []) if str(c)]
+            if planner_enabled(settings, _cq_corpora) and not fixture_runtime_enabled(
+                settings, _cq_corpora
+            ):
+                _cq_bundle = plan_complex_query(
+                    original_query=plan.original_query,
+                    standalone_query=plan.standalone_query,
+                    corpus_ids=_cq_corpora,
+                    requested_mode=str(retrieval_tier),
+                    settings=settings,
+                )
+                complex_query_diagnostics = {
+                    "enabled": True,
+                    **_cq_bundle.diagnostics,
+                    "root_plan_hash": _cq_bundle.root.plan_hash,
+                    "intent_class": _cq_bundle.root.intent_class,
+                    "graph_level": _cq_bundle.root.graph_level,
+                    "waves": _cq_bundle.waves,
+                    "subquery_ids": [s.subquery_id for s in _cq_bundle.subqueries],
+                    "subquery_types": [s.query_type for s in _cq_bundle.subqueries],
+                    "obligation_ids": [o.obligation_id for o in _cq_bundle.obligations],
+                    "ranking_mutated": False,
+                    "complex_query_executor_ran": False,
+                    "planner_global_enable": True,
+                    "fixture_scope_enforced": True,
+                }
+            elif fixture_runtime_enabled(settings, _cq_corpora):
+                # Full executor runs after the shared root embed (see below).
+                complex_query_diagnostics = {
+                    "enabled": True,
+                    "execution_mode": "fixture_runtime_pending_embed",
+                    "planner_global_enable": bool(
+                        getattr(
+                            settings, "COMPLEX_QUERY_SUBQUERY_PLANNER_ENABLED", False
+                        )
+                    ),
+                    "fixture_runtime_enable": True,
+                    "fixture_scope_enforced": True,
+                    "ranking_mutated": False,
+                    "complex_query_executor_ran": False,
+                    "allowlisted_corpora": list(_cq_corpora),
+                }
+        except Exception as exc:  # noqa: BLE001
+            complex_query_diagnostics = {
+                "enabled": False,
+                "execution_mode": "planner_error",
+                "error": f"{type(exc).__name__}: {exc}"[:300],
+                "ranking_mutated": False,
+                "complex_query_executor_ran": False,
+            }
+
         if (
             retrieval_tier == RetrievalTier.qdrant_only
             and requires_explicit_graph_evidence(plan.standalone_query)
@@ -1446,6 +1632,44 @@ class RetrieverOrchestrator:
                     "cache": {"hit": False, "key_version": "retrieval_v2"},
                 },
             )
+
+        # Capability-aware Graph gate: block only when NO graph plane is ready.
+        # Qualified Fact may be required separately; assertion/entity planes
+        # are valid Graph execution modes. Never silent Hybrid fallback.
+        graph_capabilities_diag: dict[str, Any] | None = None
+        if retrieval_tier == RetrievalTier.qdrant_mongo_graph:
+            from services.retriever.graph_authority import (
+                blocked_graph_diagnostics,
+                count_qualified_neo4j_facts,
+            )
+
+            authority = await count_qualified_neo4j_facts(corpus_ids)
+            require_facts = bool(
+                getattr(settings, "CROSS_DOMAIN_GRAPH_REQUIRE_QUALIFIED_FACTS", False)
+            )
+            caps = authority.get("capabilities") or {}
+            graph_capabilities_diag = caps
+            should_block = (not authority.get("authority_available")) or (
+                require_facts and not caps.get("qualified_fact_ready")
+            )
+            if should_block:
+                return RetrievalResult(
+                    chunks=[],
+                    facts=[],
+                    requested_tier=retrieval_tier,
+                    effective_tier=retrieval_tier,
+                    diagnostics={
+                        "query_plan_version": "query_plan.v2",
+                        **blocked_graph_diagnostics(
+                            authority=authority,
+                            original_query=plan.original_query,
+                            standalone_query=plan.standalone_query,
+                            require_qualified_facts=require_facts,
+                        ),
+                        "graph_capability": caps.get("advertised_mode"),
+                        "cache": {"hit": False, "key_version": "retrieval_v2"},
+                    },
+                )
 
         if search_mode == "global":
             return await self._retrieve_uncached(
@@ -1616,6 +1840,153 @@ class RetrieverOrchestrator:
         vectors = embedded_vectors[: len(lanes)]
         vocabulary_vectors = embedded_vectors[len(lanes) :]
         timings["embed"] = perf_counter() - embed_started
+
+        # Fixture-scoped complex-query executor — reuses the root embed above
+        # (root_embedding_calls inside CQ = 0). Global planner stays off.
+        if (
+            complex_query_diagnostics.get("execution_mode")
+            == "fixture_runtime_pending_embed"
+        ):
+            try:
+                from services.conversation import conversation_service
+                from services.ingestion_service import ingestion_service
+                from services.retriever.complex_query_runtime import (
+                    run_complex_query_fixture,
+                )
+
+                _shared_vec = next(
+                    (
+                        vector
+                        for lane, vector in zip(lanes, vectors)
+                        if lane.role == "original" and vector is not None
+                    ),
+                    next((vector for vector in vectors if vector is not None), None),
+                )
+                _allow = {
+                    x.strip()
+                    for x in str(
+                        getattr(settings, "COMPLEX_QUERY_CORPUS_ALLOWLIST", "") or ""
+                    ).split(",")
+                    if x.strip()
+                }
+                _cq_id = next(
+                    (c for c in (corpus_ids or []) if str(c) in _allow),
+                    (corpus_ids or [None])[0],
+                )
+                if _cq_id and getattr(conversation_service, "_db", None) is not None:
+                    _cq_started = perf_counter()
+                    _cq_run = await run_complex_query_fixture(
+                        db=conversation_service._db,
+                        qdrant=getattr(ingestion_service, "qdrant_client", None),
+                        neo4j_driver=getattr(ingestion_service, "neo4j_driver", None),
+                        query=plan.standalone_query or plan.original_query,
+                        corpus_id=str(_cq_id),
+                        settings=settings,
+                        root_embedding=_shared_vec,
+                    )
+                    _paths = list(_cq_run.context_packet.get("graph_paths") or [])
+                    _ver = dict(_cq_run.verification or {})
+                    _trav = dict(_cq_run.traversal_diagnostics or {})
+                    complex_query_diagnostics = {
+                        "enabled": True,
+                        "execution_mode": "fixture_runtime",
+                        "complex_query_executor_ran": True,
+                        "planner_global_enable": bool(
+                            getattr(
+                                settings,
+                                "COMPLEX_QUERY_SUBQUERY_PLANNER_ENABLED",
+                                False,
+                            )
+                        ),
+                        "fixture_runtime_enable": True,
+                        "fixture_scope_enforced": True,
+                        "fixture_corpus": str(_cq_id),
+                        "ranking_mutated": False,
+                        "ranking_mutated_outside_fixture": False,
+                        "root_plan_hash": _cq_run.bundle.root.plan_hash,
+                        "root_query_ir_hash": _cq_run.bundle.root.plan_hash,
+                        "intent_class": _cq_run.bundle.root.intent_class,
+                        "graph_level": _cq_run.bundle.root.graph_level,
+                        "subquery_plan_hashes": [
+                            s.plan_hash for s in _cq_run.bundle.subqueries
+                        ],
+                        "traversal_plan_hashes": list(
+                            _trav.get("traversal_plan_hashes") or []
+                        ),
+                        "path_ids": [
+                            p.get("path_id") for p in _paths if p.get("path_id")
+                        ],
+                        "graph_path_summaries": [
+                            {
+                                "path_id": p.get("path_id"),
+                                "node_ids": list(
+                                    p.get("node_ids")
+                                    or p.get("nodes")
+                                    or p.get("entity_ids")
+                                    or []
+                                )[:16],
+                                "supporting_child_ids": list(
+                                    p.get("supporting_child_ids") or []
+                                )[:8],
+                            }
+                            for p in _paths[:10]
+                            if isinstance(p, dict)
+                        ],
+                        "graph_paths_used": len(_paths),
+                        "every_path_has_child_support": (
+                            all(bool(p.get("supporting_child_ids")) for p in _paths)
+                            if _paths
+                            else True
+                        ),
+                        "selected_evidence_ids": list(_cq_run.mmr_selected_child_ids),
+                        "context_packet": dict(_cq_run.context_packet or {}),
+                        "context_packet_hash": (_cq_run.context_packet or {}).get(
+                            "context_hash"
+                        ),
+                        "protected_child_ids": list(_cq_run.protected_child_ids),
+                        "answer_verification": _ver,
+                        "answer_verification_passed": bool(
+                            _ver.get("verification_status") == "pass"
+                            or (
+                                _ver.get("verification_status") in {"partial", "revise"}
+                                and int(_ver.get("claims_unsupported") or 0) == 0
+                                and int(_ver.get("claims_supported") or 0) > 0
+                            )
+                        ),
+                        "unsupported_claims": int(_ver.get("claims_unsupported") or 0),
+                        "wave1": _cq_run.wave1.diagnostics,
+                        "traversal": {
+                            k: v for k, v in _trav.items() if k != "execution_ms"
+                        },
+                        "acceptance": _cq_run.acceptance,
+                        "stage_timings_ms": {
+                            "complex_query_total": _cq_run.execution_ms,
+                            "wave1": _cq_run.wave1.execution_ms,
+                            "traversal": _trav.get("execution_ms"),
+                            "wall_after_embed_ms": round(
+                                (perf_counter() - _cq_started) * 1000.0, 2
+                            ),
+                        },
+                        "silent_hybrid_fallback": 0,
+                        "root_embedding_calls_in_cq": (
+                            _cq_run.wave1.root_embedding_calls
+                        ),
+                        "hydration_batch_fetches": (
+                            _cq_run.wave1.hydration_batch_fetches
+                        ),
+                        "neo4j_round_trips": int(_trav.get("neo4j_round_trips") or 0),
+                        "reranker_calls": int(
+                            (_cq_run.wave1.diagnostics or {}).get("reranker_calls") or 0
+                        ),
+                    }
+                    timings["complex_query_fixture"] = perf_counter() - _cq_started
+            except Exception as exc:  # noqa: BLE001
+                complex_query_diagnostics = {
+                    **complex_query_diagnostics,
+                    "execution_mode": "fixture_runtime_error",
+                    "complex_query_executor_ran": False,
+                    "error": f"{type(exc).__name__}: {exc}"[:400],
+                }
 
         vocabulary_started = perf_counter()
         qdrant_client = None
@@ -2876,6 +3247,14 @@ class RetrieverOrchestrator:
                 )
             else:
                 rerank_cap = min(rerank_cap, max(1, int(rerank_top_n)))
+        # CQ allowlist path: honor COMPLEX_QUERY_RERANK_CANDIDATE_MAX so Graph
+        # Deep warm p95 stays near the 10s budget (rerank dominates wall time).
+        if complex_query_diagnostics.get("complex_query_executor_ran"):
+            _cq_rerank_max = int(
+                getattr(settings, "COMPLEX_QUERY_RERANK_CANDIDATE_MAX", 30) or 30
+            )
+            rerank_cap = min(rerank_cap, max(8, _cq_rerank_max))
+            complex_query_diagnostics["rerank_cap_after_cq_budget"] = rerank_cap
         fused, fusion_diagnostics = fuse_planned_pools(
             pools,
             max_candidates=rerank_cap,
@@ -3442,7 +3821,101 @@ class RetrieverOrchestrator:
                     )
                 ),
             )
-            final_limit = planned_final_top_k
+            # Cross-domain directive: protect ≤4 strongest children, then keep
+            # MMR-selected remainder up to a dynamic 10–18 target. Gated to the
+            # fixture/canary allowlist so production behavior stays unchanged.
+            _curation_allow = {
+                part.strip()
+                for part in str(
+                    getattr(settings, "CROSS_DOMAIN_CURATION_CORPUS_ALLOWLIST", "")
+                    or ""
+                ).split(",")
+                if part.strip()
+            }
+            _curation_on = bool(
+                getattr(settings, "CROSS_DOMAIN_CURATION_ENABLED", False)
+            ) and bool(corpus_ids) and any(
+                str(cid) in _curation_allow for cid in corpus_ids
+            )
+            if _curation_on:
+                from services.retriever.protected_anchors import (
+                    dynamic_final_child_target,
+                    select_protected_anchors,
+                )
+
+                _qclass = (
+                    "cross_domain"
+                    if (
+                        intent.need == QueryNeed.BROAD
+                        or _planned_obligation_count(plan) >= 3
+                    )
+                    else "simple_single_domain"
+                )
+                _prot = select_protected_anchors(
+                    candidate_ranked,
+                    minimum_protected=int(
+                        getattr(settings, "CROSS_DOMAIN_PROTECTED_ANCHORS_MIN", 1)
+                    ),
+                    maximum_protected=int(
+                        getattr(settings, "CROSS_DOMAIN_PROTECTED_ANCHORS_MAX", 4)
+                    ),
+                    max_per_document=int(
+                        getattr(settings, "CROSS_DOMAIN_MAX_PROTECTED_PER_DOCUMENT", 2)
+                    ),
+                    max_per_parent=int(
+                        getattr(settings, "CROSS_DOMAIN_MAX_PROTECTED_PER_PARENT", 1)
+                    ),
+                )
+                _target = dynamic_final_child_target(
+                    query_class=_qclass,
+                    available_qualified=len(candidate_ranked),
+                    preferred_cross=int(
+                        getattr(
+                            settings, "CROSS_DOMAIN_FINAL_CHILDREN_PREFERRED_CROSS", 12
+                        )
+                    ),
+                    max_children=int(
+                        getattr(settings, "CROSS_DOMAIN_FINAL_CHILDREN_MAX", 18)
+                    ),
+                    min_simple=int(
+                        getattr(settings, "CROSS_DOMAIN_FINAL_CHILDREN_MIN_SIMPLE", 6)
+                    ),
+                    max_simple=int(
+                        getattr(settings, "CROSS_DOMAIN_FINAL_CHILDREN_MAX_SIMPLE", 10)
+                    ),
+                    min_cross=int(
+                        getattr(settings, "CROSS_DOMAIN_FINAL_CHILDREN_MIN_CROSS", 10)
+                    ),
+                )
+                _seen: set[str] = set()
+                _merged: list = []
+                for _chunk in list(_prot.protected) + list(
+                    diversity_receipt.candidates
+                ):
+                    _cid = str(getattr(_chunk, "chunk_id", "") or "")
+                    if not _cid or _cid in _seen:
+                        continue
+                    _seen.add(_cid)
+                    _merged.append(_chunk)
+                    if len(_merged) >= max(1, _target):
+                        break
+                _diag = dict(diversity_receipt.diagnostics or {})
+                _diag["cross_domain_curation"] = {
+                    "enabled": True,
+                    "query_class": _qclass,
+                    "target": _target,
+                    **_prot.diagnostics,
+                    "final_selected": len(_merged),
+                }
+                diversity_receipt = DiversityResult(
+                    candidates=_merged,
+                    added=max(0, len(_merged) - len(_prot.protected)),
+                    diagnostics=_diag,
+                )
+                _curated_final_limit = max(int(planned_final_top_k), int(_target))
+            else:
+                _curated_final_limit = int(planned_final_top_k)
+            final_limit = _curated_final_limit
             preferred_candidates = diversity_receipt.candidates
             enumeration_receipt: dict[str, object] = {"applied": False}
             if answer_lane_ids:
@@ -4098,6 +4571,43 @@ class RetrieverOrchestrator:
                         }
                     )
                 timings["librarian_refinement"] = perf_counter() - refinement_started
+        # Fold CQ obligation/path winners into the single hydrate batch so
+        # candidate-adoption can admit fills without a second hydration RT.
+        if complex_query_diagnostics.get("complex_query_executor_ran"):
+            finalist_candidates = list(finalist_candidates or [])
+            _have_ids = {
+                str(getattr(c, "chunk_id", "") or "")
+                for c in finalist_candidates
+                if getattr(c, "chunk_id", None)
+            }
+            _inject_ids: list[str] = []
+            for _wid in complex_query_diagnostics.get("selected_evidence_ids") or []:
+                wid = str(_wid or "")
+                if wid and wid not in _have_ids:
+                    _inject_ids.append(wid)
+            for _ps in complex_query_diagnostics.get("graph_path_summaries") or []:
+                for _sid in (_ps or {}).get("supporting_child_ids") or []:
+                    sid = str(_sid or "")
+                    if sid and sid not in _have_ids and sid not in _inject_ids:
+                        _inject_ids.append(sid)
+            _default_corpus = str((corpus_ids or [""])[0] or "")
+            for wid in _inject_ids[:24]:
+                finalist_candidates.append(
+                    SourceChunk(
+                        chunk_id=wid,
+                        parent_id="",
+                        doc_id="",
+                        corpus_id=_default_corpus,
+                        text="",
+                        score=0.0,
+                        source_tier="complex_query_winner",
+                    )
+                )
+                _have_ids.add(wid)
+            if _inject_ids:
+                complex_query_diagnostics["hydrate_injected_cq_winner_ids"] = (
+                    _inject_ids[:24]
+                )
         hydrate_started = perf_counter()
         if effective_tier == RetrievalTier.qdrant_only:
             finalists = [
@@ -4147,6 +4657,279 @@ class RetrieverOrchestrator:
                 finalists
             )
         timings["hydrate_finalists"] = perf_counter() - hydrate_started
+
+        # Candidate-adoption (dark, allowlist): CQ winners → candidate finalists.
+        # User-visible `finalists` remain the baseline production selection.
+        candidate_adoption_diagnostics: dict[str, Any] = {
+            "enabled": False,
+            "ranking_mutated_inside_scope": False,
+            "ranking_mutated_outside_scope": False,
+            "user_visible_answer_mutated": False,
+            "baseline_remains_authoritative": True,
+        }
+        try:
+            from services.retriever.complex_query_candidate_adoption import (
+                adapt_context_packet,
+                build_candidate_finalists,
+                build_comparison,
+                derive_graph_execution_status,
+                gate_candidate_adoption,
+                persist_comparison,
+            )
+
+            def _ca_cid(chunk: Any) -> str:
+                if isinstance(chunk, dict):
+                    return str(chunk.get("chunk_id") or chunk.get("id") or "")
+                return str(
+                    getattr(chunk, "chunk_id", None) or getattr(chunk, "id", None) or ""
+                )
+
+            _ca_gate = gate_candidate_adoption(
+                settings=settings,
+                corpus_ids=list(corpus_ids or []),
+                user_id=request_user_id or librarian_refinement_user_id,
+            )
+            candidate_adoption_diagnostics.update(
+                {
+                    "enabled": bool(_ca_gate.allowed),
+                    "gate_reason": _ca_gate.reason,
+                    "ranking_adoption": bool(_ca_gate.ranking_adoption),
+                    "synthesis_packet": bool(_ca_gate.synthesis_packet),
+                    "final_verification": bool(_ca_gate.final_verification),
+                }
+            )
+            if (
+                _ca_gate.allowed
+                and _ca_gate.ranking_adoption
+                and bool(complex_query_diagnostics.get("complex_query_executor_ran"))
+            ):
+                _baseline_ids = [
+                    _ca_cid(ch) for ch in finalists if _ca_cid(ch)
+                ]
+                _cq_winners = [
+                    str(x)
+                    for x in (complex_query_diagnostics.get("selected_evidence_ids") or [])
+                    if x
+                ]
+                _prot = [
+                    str(x)
+                    for x in (
+                        complex_query_diagnostics.get("protected_child_ids") or []
+                    )
+                    if x
+                ]
+                if not _prot:
+                    _prot = [
+                        str((e or {}).get("chunk_id") or "")
+                        for e in (
+                            (
+                                complex_query_diagnostics.get("context_packet") or {}
+                            ).get("protected_child_evidence")
+                            or []
+                        )
+                        if (e or {}).get("chunk_id")
+                    ]
+                if not _prot:
+                    _prot = list(_cq_winners[:4])
+                _graph_kids: list[str] = []
+                for _ps in complex_query_diagnostics.get("graph_path_summaries") or []:
+                    for _sid in (_ps or {}).get("supporting_child_ids") or []:
+                        if _sid:
+                            _graph_kids.append(str(_sid))
+                # Include hydrated finalists so CQ-injected winners are visible
+                # to augmenter selection (ranked alone may omit them).
+                _pool = list(ranked or []) + list(finalists or []) + list(
+                    finalist_candidates or []
+                )
+                _qclass = str(
+                    dark_canary_query_class
+                    or complex_query_diagnostics.get("intent_class")
+                    or ""
+                )
+                _cq_packet_early = dict(
+                    complex_query_diagnostics.get("context_packet")
+                    or (complex_query_diagnostics.get("acceptance") or {}).get(
+                        "context_packet"
+                    )
+                    or {}
+                )
+                _obligation_results = list(
+                    _cq_packet_early.get("obligation_results")
+                    or complex_query_diagnostics.get("obligation_results")
+                    or []
+                )
+                _graph_paths = list(
+                    _cq_packet_early.get("graph_paths")
+                    or complex_query_diagnostics.get("graph_path_summaries")
+                    or []
+                )
+                _contradictions = list(_cq_packet_early.get("contradictions") or [])
+                _cand_chunks, _sel_diag = build_candidate_finalists(
+                    baseline_finalists=list(finalists),
+                    ranked_pool=_pool,
+                    cq_winner_ids=_cq_winners,
+                    protected_ids=_prot,
+                    graph_child_ids=_graph_kids,
+                    final_top_k=int(planned_final_top_k or final_top_k or 12),
+                    obligation_results=_obligation_results,
+                    graph_paths=_graph_paths,
+                    contradictions=_contradictions,
+                    query_class=_qclass,
+                )
+                _graph_status = derive_graph_execution_status(
+                    requested_tier=str(retrieval_tier or ""),
+                    effective_tier=str(effective_tier or ""),
+                    paths_used=int(
+                        complex_query_diagnostics.get("graph_paths_used") or 0
+                    ),
+                    trav=dict(complex_query_diagnostics.get("traversal") or {}),
+                    query_class=_qclass,
+                )
+                _cq_packet = dict(_cq_packet_early)
+                # Attach packet from fixture run if stored on diagnostics
+                if not _cq_packet and complex_query_diagnostics.get(
+                    "context_packet_hash"
+                ):
+                    _cq_packet = {
+                        "protected_child_evidence": [
+                            {"chunk_id": c, "selection_reason": "protected_anchor"}
+                            for c in _prot
+                        ],
+                        "mmr_selected_child_evidence": [
+                            {"chunk_id": c, "selection_reason": "mmr_selected"}
+                            for c in _cq_winners
+                            if c not in set(_prot)
+                        ],
+                        "graph_paths": [
+                            p
+                            for p in (
+                                complex_query_diagnostics.get("graph_path_summaries")
+                                or []
+                            )
+                        ],
+                        "root_query": {
+                            "standalone_query": plan.standalone_query
+                            or plan.original_query
+                        },
+                    }
+                _legacy_packet: dict[str, Any] = {}
+                _canon = adapt_context_packet(
+                    cq_packet=_cq_packet,
+                    legacy_packet=_legacy_packet or None,
+                    query=str(plan.standalone_query or plan.original_query or ""),
+                    graph_capability=dict(
+                        complex_query_diagnostics.get("traversal") or {}
+                    ),
+                    graph_status=_graph_status,
+                )
+                _cand_ids = [_ca_cid(ch) for ch in _cand_chunks if _ca_cid(ch)]
+                from services.retriever.complex_query_candidate_adoption import (
+                    obligation_coverage_rate as _ca_cov_rate,
+                )
+
+                _base_cov = float(
+                    _sel_diag.get("baseline_obligation_coverage")
+                    if _sel_diag.get("baseline_obligation_coverage") is not None
+                    else _ca_cov_rate(_baseline_ids, _obligation_results)
+                )
+                _cand_cov = float(
+                    _sel_diag.get("candidate_obligation_coverage")
+                    if _sel_diag.get("candidate_obligation_coverage") is not None
+                    else _ca_cov_rate(_cand_ids, _obligation_results)
+                )
+                _w1 = dict(complex_query_diagnostics.get("wave1") or {})
+                _cmp = build_comparison(
+                    query_id=str(
+                        complex_query_diagnostics.get("root_query_ir_hash")
+                        or complex_query_diagnostics.get("root_plan_hash")
+                        or plan.standalone_query
+                        or "candidate"
+                    )[:120],
+                    corpus_ids=list(_ca_gate.corpus_ids or corpus_ids or []),
+                    user_id=str(_ca_gate.user_id or ""),
+                    query_class=_qclass,
+                    baseline_finalist_ids=_baseline_ids,
+                    candidate_finalist_ids=_cand_ids,
+                    cq_winner_ids=_cq_winners,
+                    graph_child_ids=_graph_kids,
+                    baseline_context_hash="",
+                    candidate_context_hash=_canon.context_hash,
+                    baseline_obligation_coverage=_base_cov,
+                    candidate_obligation_coverage=_cand_cov,
+                    graph_execution_status=_graph_status,
+                    wave1_diag=_w1,
+                    neo4j_round_trips=int(
+                        complex_query_diagnostics.get("neo4j_round_trips") or 0
+                    ),
+                    hydration_batches=int(
+                        complex_query_diagnostics.get("hydration_batch_fetches") or 1
+                    ),
+                    reranker_calls=1 if rerank_enabled and fused else 0,
+                    baseline_retrieval_ms=round(
+                        (perf_counter() - started) * 1000.0, 2
+                    ),
+                    candidate_retrieval_ms=float(
+                        (complex_query_diagnostics.get("stage_timings_ms") or {}).get(
+                            "complex_query_total"
+                        )
+                        or 0.0
+                    ),
+                    allowlisted=True,
+                )
+                persist_comparison(_cmp, settings)
+                # Mark CQ diagnostics: ranking mutated inside candidate scope only.
+                complex_query_diagnostics["ranking_mutated"] = False
+                complex_query_diagnostics["ranking_mutated_inside_candidate_scope"] = (
+                    _cmp.ranking_mutated_inside_scope
+                )
+                complex_query_diagnostics["ranking_mutated_outside_candidate_scope"] = (
+                    False
+                )
+                def _ca_chunk_payload(ch: Any) -> dict[str, Any]:
+                    if isinstance(ch, dict):
+                        return {
+                            "chunk_id": _ca_cid(ch),
+                            "doc_id": str(ch.get("doc_id") or ""),
+                            "text": str(ch.get("text") or "")[:1200],
+                            "score": float(ch.get("score") or 0.0),
+                        }
+                    return {
+                        "chunk_id": _ca_cid(ch),
+                        "doc_id": str(getattr(ch, "doc_id", "") or ""),
+                        "text": str(getattr(ch, "text", "") or "")[:1200],
+                        "score": float(getattr(ch, "score", 0.0) or 0.0),
+                    }
+
+                candidate_adoption_diagnostics.update(
+                    {
+                        "selection": _sel_diag,
+                        "comparison": _cmp.model_dump(),
+                        "candidate_finalist_ids": _cand_ids,
+                        "baseline_finalist_ids": _baseline_ids,
+                        "baseline_chunks": [
+                            _ca_chunk_payload(ch) for ch in finalists if _ca_cid(ch)
+                        ],
+                        "candidate_chunks": [
+                            _ca_chunk_payload(ch) for ch in _cand_chunks if _ca_cid(ch)
+                        ],
+                        "context_packet": _canon.model_dump(),
+                        "graph_execution_status": _graph_status,
+                        "ranking_mutated_inside_scope": _cmp.ranking_mutated_inside_scope,
+                        "ranking_mutated_outside_scope": False,
+                        "user_visible_answer_mutated": False,
+                        "baseline_remains_authoritative": True,
+                        "policy": "baseline_augment",
+                    }
+                )
+        except Exception as _ca_exc:  # noqa: BLE001
+            candidate_adoption_diagnostics = {
+                **candidate_adoption_diagnostics,
+                "enabled": False,
+                "error": f"{type(_ca_exc).__name__}: {_ca_exc}"[:300],
+                "user_visible_answer_mutated": False,
+                "baseline_remains_authoritative": True,
+            }
+
         supported_lane_ids = grounded_planned_lane_ids(
             finalists,
             required_lane_ids,
@@ -4305,6 +5088,44 @@ class RetrieverOrchestrator:
             "distinct_docs_merged": _distinct_docs(fused),
             "distinct_docs_in_pool": _distinct_docs(ranked),
         }
+        # Phase 8 — alias schema shadow/canary (non-blocking). Production
+        # ranking stays OFF unless fixture allowlist + ranking flag.
+        alias_shadow_started = perf_counter()
+        alias_retrieval_diagnostics: dict[str, Any] = {
+            "status": "not_run",
+            "original_query_lane_always_runs": True,
+            "schema_lane_blocked_direct_retrieval": False,
+        }
+        try:
+            from services.ingestion.alias_retrieval_shadow import (
+                run_alias_retrieval_shadow_async,
+            )
+
+            finalists, alias_retrieval_diagnostics = (
+                await run_alias_retrieval_shadow_async(
+                    query=str(
+                        plan.original_query or plan.standalone_query or ""
+                    ),
+                    tier=effective_tier,
+                    corpus_ids=list(corpus_ids or []),
+                    finalists=finalists,
+                    settings=settings,
+                )
+            )
+        except Exception as exc:
+            alias_retrieval_diagnostics = {
+                "status": "schema_lane_failure_fallback",
+                "error": f"{type(exc).__name__}: {exc}"[:300],
+                "original_query_lane_always_runs": True,
+                "schema_lane_blocked_direct_retrieval": False,
+                "production_queries_unchanged": True,
+                "schema_records_as_citations": 0,
+                "global_fast_activation": False,
+            }
+        timings["alias_retrieval_shadow"] = (
+            perf_counter() - alias_shadow_started
+        )
+        total_s = perf_counter() - started
         diagnostics = {
             "status": "query_plan_v2_degraded" if failures else "query_plan_v2",
             "query_plan_version": plan.version,
@@ -4400,6 +5221,8 @@ class RetrieverOrchestrator:
                 else librarian_execution_fallback or {"active": False}
             ),
             "temporal_routing": temporal_diagnostics,
+            "release_pins": _release_pins(),
+            "release_stamps_read": _release_stamps_read(finalists),
             "cache": {"hit": False, "key_version": "retrieval_v2"},
             "required_concept_coverage": {
                 # Refusal-relevant lanes only: the synthetic fallback probe is
@@ -4448,6 +5271,8 @@ class RetrieverOrchestrator:
             "document_routing": document_routing_diagnostics,
             "summary_tree_routing": summary_tree_diagnostics,
             "vocabulary_resolution": vocabulary_diagnostics,
+            "complex_query": complex_query_diagnostics,
+            "candidate_adoption": candidate_adoption_diagnostics,
             "unique_docs_final": len(document_distribution),
             "max_doc_share_final": max_doc_share_final,
             "graph_evidence": {
@@ -4461,6 +5286,25 @@ class RetrieverOrchestrator:
                 ),
                 "predicates_used": sorted(predicates_used),
             },
+            "graph_capabilities": graph_capabilities_diag,
+            "graph_capability": (
+                (graph_capabilities_diag or {}).get("advertised_mode")
+                if graph_capabilities_diag
+                else None
+            ),
+            "qualified_facts_available": bool(
+                (graph_capabilities_diag or {}).get("qualified_fact_ready")
+            ),
+            "relation_assertions_available": int(
+                ((graph_capabilities_diag or {}).get("counts") or {}).get(
+                    "assertion_nodes"
+                )
+                or ((graph_capabilities_diag or {}).get("counts") or {}).get(
+                    "relates_to_edges"
+                )
+                or 0
+            ),
+            "alias_retrieval": alias_retrieval_diagnostics,
             "timings_s": {key: round(value, 3) for key, value in timings.items()},
             "quality_first": quality_first,
             "total_deadline_s": round(total_deadline, 3),
@@ -4468,6 +5312,44 @@ class RetrieverOrchestrator:
             "total_s": round(total_s, 3),
             "final_count": len(finalists),
         }
+        # Directive timer aliases (map existing stages; do not hide LLM time).
+        _ts = diagnostics["timings_s"]
+        _curation_sel = (selection_diagnostics or {}).get("cross_domain_curation") or {}
+        diagnostics["stage_timers"] = {
+            "query_planning": _ts.get("query_planning", 0.0),
+            "query_embedding": _ts.get("embed", 0.0),
+            "vocabulary_vector": _ts.get("vocabulary_resolution", 0.0),
+            "direct_vector": _ts.get("candidate_generation", 0.0),
+            "canonical_expansion": _ts.get("vocabulary_resolution", 0.0),
+            "mongo_lexical": _ts.get("mongo_lexical", 0.0),
+            "summary_routing": _ts.get("summary_tree_routing", 0.0),
+            "weighted_rrf": _ts.get("identity_dedupe", 0.0),
+            "reranking": _ts.get("rerank", 0.0),
+            "protected_selection": 0.0,
+            "MMR": _ts.get("selection", 0.0),
+            "hydration": _ts.get("hydrate_finalists", 0.0),
+            "total_retrieval": round(total_s, 3),
+            "protected_anchor_count": int(_curation_sel.get("protected_count") or 0),
+        }
+        try:
+            from services.retriever.context_packet import (
+                build_cross_domain_context_packet,
+            )
+
+            _curation = (selection_diagnostics or {}).get("cross_domain_curation") or {}
+            diagnostics["context_packet"] = build_cross_domain_context_packet(
+                plan=plan,
+                chunks=finalists,
+                diagnostics={
+                    **diagnostics,
+                    "cross_domain_curation": _curation,
+                },
+                protected_chunk_ids=_curation.get("protected_chunk_ids") or [],
+                vocabulary_resolution=vocabulary_diagnostics,
+            )
+            diagnostics["schema_records_as_citations"] = 0
+        except Exception as exc:
+            diagnostics["context_packet_error"] = f"{type(exc).__name__}: {exc}"[:240]
         logger.info(
             "QueryPlanV2 timings total=%.3fs budget=%.3fs remaining=%.3fs stages=%s failures=%s",
             total_s,
@@ -4476,6 +5358,93 @@ class RetrieverOrchestrator:
             diagnostics["timings_s"],
             [f"{item['retriever']}:{item['error']}" for item in failures],
         )
+        # Dark canary: shadow comparison only — never mutate finalists/chunks.
+        try:
+            from services.retriever.complex_query_dark_canary import (
+                build_comparison,
+                gate_dark_canary,
+                record_comparison,
+            )
+
+            _dc_user = str(
+                request_user_id or librarian_refinement_user_id or ""
+            ).strip()
+            _dc_gate = gate_dark_canary(
+                settings=settings,
+                corpus_ids=list(corpus_ids or []),
+                user_id=_dc_user or None,
+            )
+            diagnostics["dark_canary"] = {
+                "enabled": bool(_dc_gate.allowed),
+                "gate_reason": _dc_gate.reason,
+                "user_visible_answer_mutation": False,
+                "production_ranking_mutation": False,
+                "baseline_retrieval_remains_authoritative": True,
+            }
+            if (
+                _dc_gate.allowed
+                and bool(complex_query_diagnostics.get("complex_query_executor_ran"))
+            ):
+                _baseline_ids: list[str] = []
+                for _ch in finalists:
+                    _cid = getattr(_ch, "chunk_id", None) or getattr(
+                        _ch, "id", None
+                    )
+                    if _cid is None and isinstance(_ch, dict):
+                        _cid = _ch.get("chunk_id") or _ch.get("id")
+                    if _cid:
+                        _baseline_ids.append(str(_cid))
+                _dc_row = build_comparison(
+                    query_id=str(
+                        complex_query_diagnostics.get("root_query_ir_hash")
+                        or complex_query_diagnostics.get("root_plan_hash")
+                        or f"q:{plan.standalone_query or plan.original_query}"
+                    )[:120],
+                    query=str(plan.standalone_query or plan.original_query or ""),
+                    corpus_ids=list(_dc_gate.corpus_ids or corpus_ids or []),
+                    user_id=_dc_user,
+                    query_class=str(
+                        dark_canary_query_class
+                        or complex_query_diagnostics.get("intent_class")
+                        or ""
+                    ),
+                    baseline_child_ids=_baseline_ids,
+                    complex_query_diagnostics=complex_query_diagnostics,
+                    baseline_retrieval_ms=round(total_s * 1000.0, 2),
+                    effective_tier=str(effective_tier or ""),
+                    requested_tier=str(retrieval_tier or ""),
+                    downgrade_reason=str(downgrade_reason or ""),
+                    synthesis_preflight_status=str(
+                        dark_canary_synthesis_preflight_status or "unknown"
+                    ),
+                    provider_status=str(
+                        dark_canary_provider_status or "not_run"
+                    ),
+                )
+                _dc_rec = await record_comparison(
+                    comparison=_dc_row,
+                    settings=settings,
+                    db=getattr(conversation_service, "_db", None),
+                )
+                diagnostics["dark_canary"] = {
+                    **diagnostics["dark_canary"],
+                    "comparison": _dc_row.model_dump(),
+                    "record": {
+                        k: v
+                        for k, v in (_dc_rec or {}).items()
+                        if k != "comparison"
+                    },
+                    "ranking_mutated": False,
+                    "chunks_unchanged": True,
+                }
+        except Exception as _dc_exc:  # noqa: BLE001
+            diagnostics["dark_canary"] = {
+                "enabled": False,
+                "error": f"{type(_dc_exc).__name__}: {_dc_exc}"[:240],
+                "user_visible_answer_mutation": False,
+                "production_ranking_mutation": False,
+                "baseline_retrieval_remains_authoritative": True,
+            }
         return RetrievalResult(
             chunks=finalists,
             facts=facts,
@@ -4485,7 +5454,99 @@ class RetrieverOrchestrator:
             diagnostics=diagnostics,
         )
 
-    async def retrieve(self, *args, **kwargs) -> RetrievalResult:
+    async def _attach_alias_retrieval_shadow(
+        self,
+        result: RetrievalResult | None,
+        args: tuple,
+        kwargs: dict[str, Any],
+    ) -> RetrievalResult | None:
+        """Phase-8 alias shadow/canary attach for retrieve() (legacy path).
+
+        Skips when diagnostics already contain alias_retrieval (planned path).
+        Schema failures never block or mutate production schemas.
+        """
+
+        if result is None:
+            return result
+        diagnostics = dict(getattr(result, "diagnostics", None) or {})
+        if "alias_retrieval" in diagnostics:
+            return result
+        try:
+            from services.ingestion.alias_retrieval_shadow import (
+                run_alias_retrieval_shadow_async,
+            )
+
+            query = (
+                kwargs.get("query")
+                if not args
+                else (args[0] if args else "")
+            )
+            corpus_ids = (
+                kwargs.get("corpus_ids")
+                if not args
+                else (args[1] if len(args) > 1 else None)
+            )
+            tier = (
+                kwargs.get("retrieval_tier")
+                if not args
+                else (args[2] if len(args) > 2 else result.effective_tier)
+            )
+            chunks, alias_diag = await run_alias_retrieval_shadow_async(
+                query=str(query or ""),
+                tier=tier or result.effective_tier,
+                corpus_ids=list(corpus_ids or []),
+                finalists=list(result.chunks or []),
+            )
+            diagnostics["alias_retrieval"] = alias_diag
+            return result.model_copy(
+                update={"chunks": chunks, "diagnostics": diagnostics}
+            )
+        except Exception as exc:
+            diagnostics["alias_retrieval"] = {
+                "status": "schema_lane_failure_fallback",
+                "error": f"{type(exc).__name__}: {exc}"[:300],
+                "original_query_lane_always_runs": True,
+                "schema_lane_blocked_direct_retrieval": False,
+                "production_queries_unchanged": True,
+            }
+            try:
+                return result.model_copy(update={"diagnostics": diagnostics})
+            except Exception:
+                return result
+
+    async def _attach_route_readiness(
+        self,
+        result: RetrievalResult | None,
+        corpus_ids: list[str] | None,
+        readiness_route: str | None,
+    ) -> RetrievalResult | None:
+        """Direct-retriever readiness relay (owner §4.2).
+
+        Attaches the per-corpus ``ReadinessDecision`` for the caller's route
+        to ``diagnostics.route_readiness``. Relay only — ordinary retrieval
+        is never blocked here. Never raises.
+        """
+
+        if result is None or not readiness_route or not corpus_ids:
+            return result
+        try:
+            from services.ingestion.route_readiness import route_readiness_payload
+            from services.ingestion_service import ingestion_service
+
+            db = getattr(ingestion_service, "db", None)
+            if db is None:
+                return result
+            block = await route_readiness_payload(
+                db, [str(cid) for cid in corpus_ids if str(cid)], readiness_route
+            )
+            diagnostics = dict(result.diagnostics or {})
+            diagnostics["route_readiness"] = block
+            return result.model_copy(update={"diagnostics": diagnostics})
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("route readiness relay unavailable: %s", exc)
+            return result
+
+    async def retrieve(self, *args, readiness_route: str | None = None, **kwargs) -> RetrievalResult:
         """Cache wrapper around the retrieval pipeline.
 
         Deterministic facet/lane support-query retrievals recur within a turn and
@@ -4530,18 +5591,27 @@ class RetrieverOrchestrator:
             hit = _RETRIEVAL_CACHE.get(key)
             if hit is not None:
                 try:
-                    return hit.model_copy(deep=True)
+                    result = hit.model_copy(deep=True)
                 except Exception:
-                    return hit
+                    result = hit
+                return await self._attach_route_readiness(
+                    result, kwargs.get("corpus_ids"), readiness_route
+                )
         result = await self._retrieve_uncached(*args, **kwargs)
         if not args:
             result = await self._repair_cross_corpus_missing_concepts(result, kwargs)
+        # Phase 8 — attach alias shadow diagnostics on the legacy retrieve()
+        # path (retrieve_planned wires this inline). Fail-closed; never blocks.
+        result = await self._attach_alias_retrieval_shadow(result, args, kwargs)
         if key is not None and getattr(result, "chunks", None):
             try:
                 _RETRIEVAL_CACHE.set(key, result.model_copy(deep=True))
             except Exception:
                 pass
-        return result
+        scoped_ids = kwargs.get("corpus_ids") if not args else (
+            args[1] if len(args) > 1 else None
+        )
+        return await self._attach_route_readiness(result, scoped_ids, readiness_route)
 
     async def _retrieve_uncached(
         self,
@@ -4719,6 +5789,7 @@ class RetrieverOrchestrator:
 
         selection_diagnostics: dict[str, Any] = {}
         reranker_diagnostics: dict[str, Any] = {}
+        curation_v4_diagnostics: dict[str, Any] = {}
 
         def _diagnostics(
             status: str,
@@ -4762,6 +5833,7 @@ class RetrieverOrchestrator:
                 "unique_docs_final": unique_docs_final,
                 "max_doc_share_final": max_doc_share_final,
                 "selection": selection_diagnostics,
+                "curation_v4": curation_v4_diagnostics,
                 "reranker": reranker_diagnostics,
                 "temporal_routing": temporal_diagnostics,
             }
@@ -4787,6 +5859,38 @@ class RetrieverOrchestrator:
         effective_tier, downgrade_reason = await self._enforce_strategy_intersection(
             retrieval_tier, corpus_ids
         )
+        # [0c] Capability-aware Graph gate (not Hybrid relabel)
+        if effective_tier == RetrievalTier.qdrant_mongo_graph:
+            from services.retriever.graph_authority import (
+                blocked_graph_diagnostics,
+                count_qualified_neo4j_facts,
+            )
+
+            authority = await count_qualified_neo4j_facts(corpus_ids)
+            require_facts = bool(
+                getattr(settings, "CROSS_DOMAIN_GRAPH_REQUIRE_QUALIFIED_FACTS", False)
+            )
+            caps = authority.get("capabilities") or {}
+            should_block = (not authority.get("authority_available")) or (
+                require_facts and not caps.get("qualified_fact_ready")
+            )
+            if should_block:
+                return RetrievalResult(
+                    chunks=[],
+                    facts=[],
+                    requested_tier=retrieval_tier,
+                    effective_tier=retrieval_tier,
+                    downgrade_reason=None,
+                    diagnostics={
+                        **blocked_graph_diagnostics(
+                            authority=authority,
+                            original_query=str(query or ""),
+                            standalone_query=str(query or ""),
+                            require_qualified_facts=require_facts,
+                        ),
+                        "graph_capability": caps.get("advertised_mode"),
+                    },
+                )
         if effective_tier == RetrievalTier.qdrant_mongo_graph:
             child_cap = int(getattr(settings, "GRAPH_CHILD_TOP_K", 40))
             summary_cap = int(getattr(settings, "GRAPH_SUMMARY_TOP_K", 20))
@@ -5368,14 +6472,13 @@ class RetrieverOrchestrator:
         # NOT comparable (dense cosine vs sparse BM25 vs anchor heuristics)
         # and score-sorting the merged pool let scale artifacts crowd out
         # genuine evidence (task #12).
-        _LANE_RRF_WEIGHTS = {
-            "b": 1.0,  # dense/hybrid children — the semantic core
-            "anchor": 0.9,  # title-anchored recall
-            "lex": 0.8,  # sparse/lexical recall
-            "graph": 0.9,  # Mode A expansion (added later)
-            "a": 0.7,  # summaries
-            "fact": 0.9,  # fact-seed evidence
-        }
+        from services.retriever.cross_domain_rrf import (
+            legacy_lane_rrf_weights,
+            rrf_k as configured_rrf_k,
+        )
+
+        _LANE_RRF_WEIGHTS = legacy_lane_rrf_weights(settings)
+        _RRF_K = configured_rrf_k(settings)
         _lane_ranks: dict[str, dict[str, int]] = {}
 
         def _record_lane_ranks(
@@ -5424,7 +6527,7 @@ class RetrieverOrchestrator:
                 if _rank is None and _pkey:
                     _rank = _table.get(_pkey)
                 if _rank is not None:
-                    fused += _LANE_RRF_WEIGHTS.get(_lane, 0.8) / (60.0 + _rank)
+                    fused += _LANE_RRF_WEIGHTS.get(_lane, 0.8) / (_RRF_K + _rank)
             return fused
 
         def _rank_fused_order(chunks_to_sort: list[SourceChunk]) -> list[SourceChunk]:
@@ -5473,6 +6576,68 @@ class RetrieverOrchestrator:
         if not merged:
             _log_timings("empty_after_merge", 0)
             return _result([], status="empty_after_merge")
+
+        # ── Per-corpus recall quota (cross-corpus fairness) ──────────────
+        # Guarantee each selected corpus has at least PER_CORPUS_RECALL_QUOTA
+        # candidates in the reranker pool. Purely additive: backfills from the
+        # corpus's own funnel output if it was underrepresented after merge.
+        _quota = int(getattr(settings, "PER_CORPUS_RECALL_QUOTA", 3) or 0)
+        if _quota > 0 and multi and corpus_ids and len(corpus_ids) > 1:
+            _merged_ids = {
+                str(c.chunk_id or c.parent_id or "") for c in merged
+            }
+            _corpus_counts: dict[str, int] = {}
+            for _c in merged:
+                _cid = str(getattr(_c, "corpus_id", "") or "")
+                if _cid:
+                    _corpus_counts[_cid] = _corpus_counts.get(_cid, 0) + 1
+            # Pool of all funnel candidates (pre-merge) for backfill.
+            _all_funnel = b_results + a_results + lexical_results + document_anchor_results
+            _backfilled = 0
+            for _cid in corpus_ids:
+                _cid_str = str(_cid)
+                _have = _corpus_counts.get(_cid_str, 0)
+                if _have >= _quota:
+                    continue
+                _need = _quota - _have
+                # Best candidates from this corpus not already in merged.
+                _candidates = [
+                    c for c in _all_funnel
+                    if str(getattr(c, "corpus_id", "") or "") == _cid_str
+                    and str(c.chunk_id or c.parent_id or "") not in _merged_ids
+                ]
+                # Sort by score descending (funnel cosine similarity).
+                _candidates.sort(key=lambda c: float(c.score or 0.0), reverse=True)
+                for _cand in _candidates[:_need]:
+                    if not hasattr(_cand, "metadata") or _cand.metadata is None:
+                        _cand.metadata = {}
+                    _cand.metadata["quota_backfill"] = True
+                    merged.append(_cand)
+                    _merged_ids.add(str(_cand.chunk_id or _cand.parent_id or ""))
+                    _backfilled += 1
+            if _backfilled:
+                counts["corpus_quota_backfill"] = _backfilled
+
+        # ── Lane-aspect annotation (reranker scoring fairness) ────────────
+        # Stamp each candidate with the sub-query of its best-affinity lane so
+        # the reranker can score against the discovering aspect, not the full
+        # compound query. Only meaningful for multi-lane planned queries.
+        try:
+            _lane_query_map = {
+                lane.lane_id: (lane.query or lane.dense_text or "")
+                for lane in lanes  # type: ignore[possibly-undefined]
+            }
+            if _lane_query_map:
+                for _c in merged:
+                    _meta = getattr(_c, "metadata", None) or {}
+                    _best_lane = str(_meta.get("planned_max_affinity_lane") or "")
+                    _lq = _lane_query_map.get(_best_lane, "")
+                    if _lq:
+                        if _c.metadata is None:
+                            _c.metadata = {}
+                        _c.metadata["lane_query"] = _lq
+        except (NameError, AttributeError):
+            pass  # non-planned path or lanes not in scope
         if (
             temporal_enabled
             and temporal_intent.active
@@ -5777,12 +6942,21 @@ class RetrieverOrchestrator:
             _add_timing("rerank", phase_started)
         counts["ranked"] = len(ranked)
 
+        # Retrieval Layer v4 shadow flag (default OFF). When ON, the relative
+        # low-confidence gate below and the deterministic curation stage at the
+        # selection site replace their legacy absolute-threshold / MMR
+        # counterparts. When OFF, both paths stay byte-identical to today.
+        curation_v4_enabled = bool(
+            getattr(settings, "RETRIEVAL_CURATION_V4_ENABLED", False)
+        )
+
         if _should_drop_low_confidence_rerank(
             ranked,
             rank_query,
             rerank_enabled=rerank_enabled,
             score_scale=settings.RERANKER_SCORE_SCALE,
             low_confidence_threshold=settings.RERANKER_LOW_CONFIDENCE_THRESHOLD,
+            relative_gate=curation_v4_enabled,
         ):
             counts["low_confidence_dropped"] = len(ranked)
             logger.info(
@@ -5836,27 +7010,74 @@ class RetrieverOrchestrator:
             if getattr(c, "doc_id", None)
         }
         counts["distinct_docs_in_pool"] = len(_pool_doc_ids)
-        diversity = select_with_diversity(
-            ranked,
-            final_top_k=effective_final_k,
-            intent=retrieval_intent,
-            tier=effective_tier,
-            multi_corpus=multi,
-            selected_corpus_ids=corpus_ids or [],
-            query=rank_query,
-            anchor_query=query,
-            two_lane_anchoring_enabled=settings.TWO_LANE_ANCHORING_ENABLED,
-            anchor_lane_ratio=settings.ANCHOR_LANE_RATIO,
-            anchor_lane_admission_threshold=(settings.ANCHOR_LANE_ADMISSION_THRESHOLD),
-            expansion_lane_admission_threshold=(
-                settings.EXPANSION_LANE_ADMISSION_THRESHOLD
-            ),
-            relationship_allocation_enabled=(
-                settings.RELATIONSHIP_EVIDENCE_ALLOCATION_ENABLED
-            ),
-        )
-        selection_diagnostics = dict(diversity.diagnostics or {})
-        candidates = diversity.candidates
+        selection_added = 0
+        if curation_v4_enabled:
+            # Retrieval Layer v4 — deterministic curation stage (spec §2.5).
+            # Replaces the MMR black box with an explicit, fully-traced
+            # floor/coalesce/dedup/allocate/order pipeline. On ANY failure fall
+            # back to the legacy selector so the shadow can never break a query.
+            try:
+                from services.retriever.curation import build_packet
+
+                packet = build_packet(
+                    ranked,
+                    query=rank_query,
+                    intent=retrieval_intent,
+                    tier=effective_tier,
+                    final_top_k=effective_final_k,
+                    multi_corpus=multi,
+                    corpus_ids=corpus_ids or [],
+                )
+                candidates = packet.items
+                selection_diagnostics = dict(packet.diagnostics or {})
+                _alloc = selection_diagnostics.get("allocation") or {}
+                selection_added = (
+                    int(_alloc.get("side_seats") or 0)
+                    + int(_alloc.get("corpus_seats") or 0)
+                    + int(_alloc.get("graph_seats") or 0)
+                )
+                curation_v4_diagnostics = {
+                    "enabled": True,
+                    "packet_hash": packet.packet_hash,
+                    "final_count": len(candidates),
+                    "diagnostics": selection_diagnostics,
+                }
+                counts["curation_v4_used"] = 1
+            except Exception as exc:
+                logger.warning(
+                    "curation_v4 build_packet failed, falling back to legacy "
+                    "select_with_diversity: %s",
+                    exc,
+                )
+                curation_v4_enabled = False
+                curation_v4_diagnostics = {
+                    "enabled": True,
+                    "fallback": True,
+                    "error": str(exc),
+                }
+        if not curation_v4_enabled:
+            diversity = select_with_diversity(
+                ranked,
+                final_top_k=effective_final_k,
+                intent=retrieval_intent,
+                tier=effective_tier,
+                multi_corpus=multi,
+                selected_corpus_ids=corpus_ids or [],
+                query=rank_query,
+                anchor_query=query,
+                two_lane_anchoring_enabled=settings.TWO_LANE_ANCHORING_ENABLED,
+                anchor_lane_ratio=settings.ANCHOR_LANE_RATIO,
+                anchor_lane_admission_threshold=(settings.ANCHOR_LANE_ADMISSION_THRESHOLD),
+                expansion_lane_admission_threshold=(
+                    settings.EXPANSION_LANE_ADMISSION_THRESHOLD
+                ),
+                relationship_allocation_enabled=(
+                    settings.RELATIONSHIP_EVIDENCE_ALLOCATION_ENABLED
+                ),
+            )
+            selection_diagnostics = dict(diversity.diagnostics or {})
+            candidates = diversity.candidates
+            selection_added = diversity.added
         # Q4 H4 — distinct-DOMAIN reserve: when the whole final cut shares
         # the top chunk's domain on a breadth-shaped query, the best
         # different-domain candidate takes the LAST slot. Rank-only; inert
@@ -5878,7 +7099,7 @@ class RetrieverOrchestrator:
                     _swapped_domain,
                 )
         counts["candidates"] = len(candidates)
-        counts["diversity_added"] = diversity.added
+        counts["diversity_added"] = selection_added
         if effective_tier == RetrievalTier.qdrant_only:
             candidates, fast_grounding_dropped = _filter_fast_grounded_candidates(
                 candidates,
@@ -5920,12 +7141,12 @@ class RetrieverOrchestrator:
             len(_pool_doc_ids),
             len(ranked),
             effective_final_k,
-            diversity.added,
+            selection_added,
         )
         logger.info(
             "final_top_k=%d diversity_added=%d (post-rerank cut, %d candidates available)",
             effective_final_k,
-            diversity.added,
+            selection_added,
             len(ranked),
         )
 

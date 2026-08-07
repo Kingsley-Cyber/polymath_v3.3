@@ -348,6 +348,26 @@ class Settings(BaseSettings):
             "additively (sources untouched, reversible)."
         ),
     )
+    QDRANT_EVIDENCE_DUAL_WRITE: bool = Field(
+        default=False,
+        description=(
+            "q8 (owner directive 2026-08-04) — shadow dual-write of child "
+            "and summary records into the per-corpus one-point-per-child "
+            "candidate collection corpus_{cid8}_evidence alongside the "
+            "legacy naive/hrag/graph family. Shadow-only: production reads "
+            "are unchanged unless a request explicitly opts into shadow "
+            "read; legacy collections are never deleted by this flag."
+        ),
+    )
+    QDRANT_EVIDENCE_DUAL_WRITE_CORPUS_IDS: str = Field(
+        default="",
+        description=(
+            "q8 — comma-separated allowlist restricting the shadow dual-write "
+            "to named corpora (owner directive: ONE dedicated canary corpus). "
+            "Empty string means every corpus when QDRANT_EVIDENCE_DUAL_WRITE "
+            "is on; keep the canary UUID here while q8 is in flight."
+        ),
+    )
     CROSS_DOMAIN_EMPHASIS: str = Field(
         default="balanced",
         pattern="^(off|balanced|strong)$",
@@ -737,6 +757,31 @@ class Settings(BaseSettings):
             "Process-local cap for concurrent ingest-time Neo4j graph writes. "
             "Keep low for large extraction runs so graph promotion cannot build "
             "unbounded in-memory write pressure."
+        ),
+    )
+    GRAPH_PROMOTION_RELEASE_GATE: Literal["off", "shadow", "enforce"] = Field(
+        default="off",
+        description=(
+            "Deny-by-default release gate for canonical graph-promotion writes "
+            "(CONTINUITY/TEMPORAL_CONTRACT_V1.md sequencing decision). "
+            "off: current behavior, gate not consulted. shadow: compute and "
+            "record the categorical release decision without changing "
+            "execution. enforce: block the Neo4j write as blocked_no_release "
+            "unless the active ReleasePin proves every mandatory state and "
+            "artifact-hash match. Authority comes exclusively from the "
+            "categorical release registry — never from ReleaseStamp or "
+            "TemporalEnvelope completeness."
+        ),
+    )
+    RELEASE_REGISTRY_PATH: str = Field(
+        default="",
+        description=(
+            "Optional absolute path override for the active release registry "
+            "(release_pins.v1.json). Empty resolves the repository default "
+            "backend/registries/release_pins.v1.json. The loader is "
+            "fail-closed: any missing, ambiguous, or tampered registry "
+            "yields no active release, which denies every canonical graph "
+            "write under enforcement."
         ),
     )
     GRAPH_FACT_SEED_TIMEOUT_SECONDS: float = Field(
@@ -1148,6 +1193,42 @@ class Settings(BaseSettings):
             "work unless the explicit auto-run flags below are enabled."
         ),
     )
+    CONTROL_PLANE_V2_ENABLED: bool = Field(
+        default=True,
+        description=(
+            "Route the resident maintenance loop through the Control Plane V2 "
+            "artifact reconciler (ledger + census + certificates) instead of "
+            "the legacy queue-count-gated repair tick. Set false to revert to "
+            "the legacy scheduler path unchanged."
+        ),
+    )
+    CONTROL_PLANE_V2_RUN_ALL_LANES: bool = Field(
+        default=True,
+        description=(
+            "When the V2 reconciler finds missing artifacts it executes every "
+            "stage lane (parse, pipeline, extraction, summary, graph) through "
+            "the existing bounded executors. Set false to fall back to the "
+            "per-lane INGEST_AUTO_REPAIR_RUN_* flags."
+        ),
+    )
+    CONTROL_PLANE_V2_DOC_CENSUS_LIMIT: int = Field(
+        default=100,
+        ge=1,
+        le=5000,
+        description=(
+            "Maximum documents whose artifact census (exact ID joins across "
+            "Mongo/Qdrant) is recomputed per corpus per reconcile cycle."
+        ),
+    )
+    CONTROL_PLANE_V2_RECHECK_SECONDS: float = Field(
+        default=21_600.0,
+        ge=300.0,
+        le=604_800.0,
+        description=(
+            "Interval for re-verifying certified documents against live "
+            "artifacts so post-completion artifact loss is re-detected."
+        ),
+    )
     INGEST_AUTO_REPAIR_POLL_SECONDS: float = Field(
         default=300.0,
         ge=30.0,
@@ -1389,48 +1470,6 @@ class Settings(BaseSettings):
         ge=1,
         le=128,
         description="Parent batch size for automatic deferred-summary backfill.",
-    )
-    # §13-H E1 — local_then_enrich quality gate. Thresholds calibrated against
-    # the 2026-07-05 measured baselines: local GLiNER/GLiREL 62% coverage /
-    # 0.4 facts-per-chunk / 57% typed; RTX vLLM 91% / 2.35 / 75-100% typed.
-    EXTRACTION_ENRICH_MIN_COVERAGE: float = Field(
-        default=0.80,
-        ge=0.0,
-        le=1.0,
-        description=(
-            "local_then_enrich: below this extracted/requested chunk coverage "
-            "the doc's gap chunks are queued for cloud/RTX enrichment."
-        ),
-    )
-    EXTRACTION_ENRICH_MIN_FACTS_PER_CHUNK: float = Field(
-        default=1.0,
-        ge=0.0,
-        le=20.0,
-        description=(
-            "local_then_enrich: below this facts/extracted-chunk ratio the "
-            "doc's fact-thin chunks are queued for cloud/RTX enrichment "
-            "(GLiNER/GLiREL measured 0.4 facts/chunk vs RTX 2.35)."
-        ),
-    )
-    EXTRACTION_ENRICH_MAX_RELATED_TO_RATIO: float = Field(
-        default=0.40,
-        ge=0.0,
-        le=1.0,
-        description=(
-            "local_then_enrich: above this generic related_to fraction the "
-            "doc's predicate-ambiguous chunks are queued for cloud/RTX "
-            "enrichment."
-        ),
-    )
-    EXTRACTION_ENRICH_MAX_CHUNK_RATIO: float = Field(
-        default=0.50,
-        ge=0.05,
-        le=1.0,
-        description=(
-            "local_then_enrich: hard cap on the fraction of a doc's chunks "
-            "the enrichment pass may re-extract — RTX stays the precision "
-            "booster, never the bulk engine."
-        ),
     )
     INGEST_MANAGED_VLLM_MODEL_PHASE_DOCS: int = Field(
         default=2,
@@ -1702,6 +1741,41 @@ class Settings(BaseSettings):
     SIMILARITY_THRESHOLD: float = Field(
         default=0.0,
         description="Minimum similarity score for retrieval; 0 disables the hard score gate",
+    )
+
+    # --- Retrieval Tuning (ranking policy + final selection) ---
+    # These control how many chunks survive reranking and reach the LLM.
+    # Adjust via .env without a rebuild.
+    RERANK_RELEVANCE_FLOOR_HYBRID: float = Field(
+        default=0.55,
+        description=(
+            "Relative relevance floor for qdrant_mongo tier (non-BROAD). "
+            "Chunks scoring below this fraction of the top score are dropped. "
+            "0.55 keeps genuinely relevant evidence; 0.85 starves to 2-3 chunks."
+        ),
+    )
+    RERANK_RELEVANCE_FLOOR_GRAPH: float = Field(
+        default=0.80,
+        description="Relative relevance floor for qdrant_mongo_graph tier (non-BROAD).",
+    )
+    RERANK_SPECIFIC_FLOOR_RATIO: float = Field(
+        default=0.35,
+        description=(
+            "Post-MMR trim floor for SPECIFIC-intent queries (ratio of top score). "
+            "Stricter than the main floor to cut tangential clusters."
+        ),
+    )
+    CHAT_SOURCE_CAP: int = Field(
+        default=8,
+        description="Hard distinct-document cap in the facet-based final context selector.",
+    )
+    CHAT_PER_DOC_CAP: int = Field(
+        default=0,
+        description="Max chunks per document in final context. 0 = disabled.",
+    )
+    CHAT_GLOBAL_OVERVIEW_BUDGET: int = Field(
+        default=12,
+        description="Chunk budget for global/overview search mode queries.",
     )
 
     # === QDRANT COLLECTION NAMES ===
@@ -2109,6 +2183,313 @@ class Settings(BaseSettings):
             "structural boost. Only fires when the request uses the "
             "qdrant_mongo_graph tier AND Neo4j is enabled. Flip False "
             "to A/B test boost-vs-no-boost on the same query."
+        ),
+    )
+    RETRIEVAL_CURATION_V4_ENABLED: bool = Field(
+        default=False,
+        description=(
+            "Retrieval Layer v4 — deterministic curation stage (shadow flag, "
+            "default OFF). When True, the final selection site calls "
+            "services.retriever.curation.build_packet (explicit "
+            "floor/coalesce/near-dedup/quota-allocation/order pipeline) instead "
+            "of the MMR-based select_with_diversity, and the low-confidence "
+            "rerank guard switches from an absolute threshold to a "
+            "pool-relative gate. When False, both paths are byte-identical to "
+            "the legacy behavior. Promote to True only after the heldout / "
+            "final-acceptance eval shows the shadow wins on doc_recall and "
+            "answerability with no latency regression; any build_packet "
+            "exception falls back to the legacy selector automatically."
+        ),
+    )
+    # Phase 8 — alias schema retrieval (shadow/canary). Production ranking OFF.
+    ALIAS_RETRIEVAL_ENABLED_GLOBALLY: bool = Field(
+        default=False,
+        description=(
+            "Alias Pipeline Phase 8 — NEVER enable in production without owner "
+            "authorization. When True, schema expansion would apply globally; "
+            "default False. Shadow/canary uses ALIAS_RETRIEVAL_SHADOW_ENABLED."
+        ),
+    )
+    ALIAS_RETRIEVAL_SHADOW_ENABLED: bool = Field(
+        default=True,
+        description=(
+            "Phase 8 — run the Phase-7 dual-lane planner in shadow mode on "
+            "live Fast/Hybrid/Graph paths. Records matches/trust-class/"
+            "expansions/anchors in diagnostics.alias_retrieval. Does not "
+            "mutate production schemas. Schema failures never block retrieval."
+        ),
+    )
+    ALIAS_RETRIEVAL_RANKING_ENABLED: bool = Field(
+        default=False,
+        description=(
+            "Phase 8 — allow fixture-only ranking effects from trusted/"
+            "bounded schema expansions. Requires corpus id in "
+            "ALIAS_RETRIEVAL_FIXTURE_CORPUS_ALLOWLIST. Production stays false."
+        ),
+    )
+    ALIAS_RETRIEVAL_FIXTURE_CORPUS_ALLOWLIST: str = Field(
+        default=(
+            "isolated_alias_fixture,"
+            "8bf57c76-7e2d-49eb-9a11-6e260406903f,"
+            "6a766597-29f3-4a3e-8918-5de10f0053b3"
+        ),
+        description=(
+            "Comma-separated corpus ids/names permitted for fixture ranking "
+            "effects and shadow-record registry lookups. Empty = no fixture ranking."
+        ),
+    )
+    ALIAS_RETRIEVAL_PRODUCTION_SCHEMA_WRITES: bool = Field(
+        default=False,
+        description="Hard lock — Phase 8 must not write production schemas.",
+    )
+    ALIAS_RETRIEVAL_PRODUCTION_BACKFILL: bool = Field(
+        default=False,
+        description="Hard lock — Phase 8 must not backfill historical aliases.",
+    )
+    ALIAS_RETRIEVAL_SHADOW_DEADLINE_SECONDS: float = Field(
+        default=0.35,
+        ge=0.05,
+        le=5.0,
+        description=(
+            "Hard deadline for the non-blocking alias shadow lane. On timeout "
+            "or error, diagnostics record failure and direct retrieval continues."
+        ),
+    )
+    # --- Cross-domain retrieval (directive 2026-08-04) — fixture/canary only ---
+    # Production ranking remains gated by ALIAS_RETRIEVAL_* flags. These knobs
+    # configure lane budgets, RRF weights, protected anchors, and dynamic
+    # child evidence targets. Do not enable global ranking via these fields.
+    CROSS_DOMAIN_RRF_K: float = Field(
+        default=60.0,
+        ge=1.0,
+        le=200.0,
+        description="Rank constant for weighted Reciprocal Rank Fusion.",
+    )
+    CROSS_DOMAIN_RRF_WEIGHT_DIRECT: float = Field(default=1.00, ge=0.0, le=2.0)
+    CROSS_DOMAIN_RRF_WEIGHT_TRUSTED_CANONICAL: float = Field(
+        default=0.80, ge=0.0, le=2.0
+    )
+    CROSS_DOMAIN_RRF_WEIGHT_LINKED_CHILD: float = Field(default=0.65, ge=0.0, le=2.0)
+    CROSS_DOMAIN_RRF_WEIGHT_MONGO_LEXICAL: float = Field(default=0.80, ge=0.0, le=2.0)
+    CROSS_DOMAIN_RRF_WEIGHT_SUMMARY_GUIDED: float = Field(default=0.65, ge=0.0, le=2.0)
+    CROSS_DOMAIN_RRF_WEIGHT_GRAPH_CHILD: float = Field(default=0.85, ge=0.0, le=2.0)
+    CROSS_DOMAIN_PROTECTED_ANCHORS_MIN: int = Field(default=1, ge=0, le=4)
+    CROSS_DOMAIN_PROTECTED_ANCHORS_MAX: int = Field(default=4, ge=1, le=4)
+    CROSS_DOMAIN_MAX_PROTECTED_PER_DOCUMENT: int = Field(default=2, ge=1, le=4)
+    CROSS_DOMAIN_MAX_PROTECTED_PER_PARENT: int = Field(default=1, ge=1, le=2)
+    CROSS_DOMAIN_MMR_RELEVANCE_WEIGHT: float = Field(default=0.68, ge=0.0, le=1.0)
+    CROSS_DOMAIN_MMR_DIVERSITY_WEIGHT: float = Field(default=0.32, ge=0.0, le=1.0)
+    CROSS_DOMAIN_MAX_PER_DOCUMENT: int = Field(default=3, ge=1, le=10)
+    CROSS_DOMAIN_MAX_PER_PARENT: int = Field(default=1, ge=1, le=5)
+    CROSS_DOMAIN_FINAL_CHILDREN_MIN_SIMPLE: int = Field(default=6, ge=1, le=18)
+    CROSS_DOMAIN_FINAL_CHILDREN_MAX_SIMPLE: int = Field(default=10, ge=1, le=18)
+    CROSS_DOMAIN_FINAL_CHILDREN_MIN_CROSS: int = Field(default=10, ge=1, le=18)
+    CROSS_DOMAIN_FINAL_CHILDREN_PREFERRED_CROSS: int = Field(default=12, ge=1, le=18)
+    CROSS_DOMAIN_FINAL_CHILDREN_MAX: int = Field(default=18, ge=1, le=32)
+    CROSS_DOMAIN_CHILD_EVIDENCE_TOKEN_BUDGET: int = Field(
+        default=7000, ge=500, le=32000
+    )
+    CROSS_DOMAIN_SUMMARY_TOKEN_BUDGET: int = Field(default=1200, ge=0, le=8000)
+    CROSS_DOMAIN_MAX_TRUSTED_EXPANSION_QUERIES: int = Field(default=3, ge=0, le=8)
+    CROSS_DOMAIN_DIRECT_GLOBAL_MAX: int = Field(default=48, ge=1, le=200)
+    CROSS_DOMAIN_TRUSTED_EXPANSION_GLOBAL_MAX: int = Field(default=24, ge=0, le=100)
+    CROSS_DOMAIN_LINKED_CHILD_GLOBAL_MAX: int = Field(default=16, ge=0, le=100)
+    CROSS_DOMAIN_POST_DEDUP_FUSED_MIN: int = Field(default=40, ge=1, le=200)
+    CROSS_DOMAIN_POST_DEDUP_FUSED_MAX: int = Field(default=60, ge=1, le=200)
+    CROSS_DOMAIN_GRAPH_REQUIRE_QUALIFIED_FACTS: bool = Field(
+        default=False,
+        description=(
+            "When True, Graph requires qualified Fact nodes. When False "
+            "(default), Graph may run on the extracted-assertion / entity "
+            "planes (MENTIONS + RELATES_TO / RelationAssertion). If no graph "
+            "capability exists at all, Graph still returns an explicit block "
+            "instead of silent Hybrid."
+        ),
+    )
+    CROSS_DOMAIN_CURATION_ENABLED: bool = Field(
+        default=False,
+        description=(
+            "When True and the query corpus is in "
+            "CROSS_DOMAIN_CURATION_CORPUS_ALLOWLIST, apply protected-anchor "
+            "selection then cross-domain MMR sizing (dynamic 10–18). "
+            "Default False — production retrieval unchanged until canary."
+        ),
+    )
+    CROSS_DOMAIN_CURATION_CORPUS_ALLOWLIST: str = Field(
+        default="6a766597-29f3-4a3e-8918-5de10f0053b3,isolated_alias_fixture",
+        description=(
+            "Comma-separated corpus ids/names permitted for cross-domain "
+            "protected-anchor + MMR curation. Empty disables curation."
+        ),
+    )
+    # === COMPLEX QUERY / MULTI-HOP (dark by default; fixture-gated) ===
+    COMPLEX_QUERY_SUBQUERY_PLANNER_ENABLED: bool = Field(
+        default=False,
+        description=(
+            "Master switch for the bounded subquery DAG planner. Default False "
+            "— production retrieve_planned unchanged until allowlisted canary."
+        ),
+    )
+    COMPLEX_QUERY_FIXTURE_RUNTIME_ENABLED: bool = Field(
+        default=False,
+        description=(
+            "When True, run the full complex-query executor on allowlisted "
+            "fixture corpora only (Wave-1 → traversal → fusion → verification). "
+            "Does NOT enable COMPLEX_QUERY_SUBQUERY_PLANNER_ENABLED. Default "
+            "False — dark until an isolated validation deploy sets it."
+        ),
+    )
+    COMPLEX_QUERY_CORPUS_ALLOWLIST: str = Field(
+        default="gsem-e2e-20260804a",
+        description=(
+            "Comma-separated corpus ids permitted for subquery DAG execution. "
+            "Empty disables even when COMPLEX_QUERY_SUBQUERY_PLANNER_ENABLED."
+        ),
+    )
+    COMPLEX_QUERY_ABSOLUTE_MAX_SUBQUERIES: int = Field(default=12, ge=1, le=20)
+    COMPLEX_QUERY_GRAPH_SUBQUERY_PREFERRED_MAX: int = Field(default=2, ge=1, le=3)
+    COMPLEX_QUERY_GRAPH_SUBQUERY_ABSOLUTE_MAX: int = Field(default=3, ge=1, le=3)
+    COMPLEX_QUERY_DEFAULT_MAX_HOPS: int = Field(default=2, ge=1, le=3)
+    COMPLEX_QUERY_ABSOLUTE_MAX_HOPS: int = Field(default=3, ge=1, le=3)
+    COMPLEX_QUERY_BEAM_WIDTH: int = Field(default=8, ge=1, le=32)
+    COMPLEX_QUERY_GLOBAL_EXPANSION_CAP: int = Field(default=100, ge=10, le=500)
+    COMPLEX_QUERY_PATH_RESULT_CAP: int = Field(default=10, ge=1, le=50)
+    COMPLEX_QUERY_SEED_ENTITY_CAP: int = Field(default=8, ge=1, le=32)
+    COMPLEX_QUERY_RERANK_CALLS_PER_ROOT: int = Field(default=1, ge=1, le=1)
+    COMPLEX_QUERY_RERANK_CANDIDATE_MAX: int = Field(default=30, ge=8, le=64)
+    COMPLEX_QUERY_NEO4J_ROUND_TRIPS_MAX: int = Field(default=2, ge=1, le=4)
+    COMPLEX_QUERY_REQUIRE_CHILD_SUPPORT: bool = Field(
+        default=True,
+        description="Reject graph paths missing supporting child evidence.",
+    )
+    COMPLEX_QUERY_LLM_DECOMPOSITION_ENABLED: bool = Field(
+        default=False,
+        description=(
+            "When True, allow bounded LLM decomposition proposals that must "
+            "still normalize into SubQueryPlanV1 contracts. Default False — "
+            "deterministic templates only."
+        ),
+    )
+    COMPLEX_QUERY_DARK_CANARY_ENABLED: bool = Field(
+        default=False,
+        description=(
+            "Shadow-only dark canary: compare baseline finalists vs complex-query "
+            "selection and persist DarkCanaryComparisonV1. Never mutates ranking "
+            "or user-visible answers. Default False."
+        ),
+    )
+    COMPLEX_QUERY_DARK_CANARY_CORPUS_ALLOWLIST: str = Field(
+        default="gsem-e2e-20260804a",
+        description="Comma-separated corpora allowed for dark canary (max 3).",
+    )
+    COMPLEX_QUERY_DARK_CANARY_USER_ALLOWLIST: str = Field(
+        default="",
+        description=(
+            "Comma-separated user ids allowed for dark canary (max 2). "
+            "Empty disables user gate when unset is undesirable — require "
+            "explicit ids for canary traffic."
+        ),
+    )
+    COMPLEX_QUERY_DARK_CANARY_CORPORA_MAX: int = Field(default=3, ge=1, le=3)
+    COMPLEX_QUERY_DARK_CANARY_USERS_MAX: int = Field(default=3, ge=1, le=3)
+    COMPLEX_QUERY_DARK_CANARY_QUERIES_MAX: int = Field(default=100, ge=1, le=100)
+    COMPLEX_QUERY_DARK_CANARY_CONCURRENCY_MAX: int = Field(default=1, ge=1, le=1)
+    COMPLEX_QUERY_DARK_CANARY_RETRIEVAL_P95_MAX_MS: float = Field(
+        default=10000.0,
+        ge=1000.0,
+        le=60000.0,
+    )
+    COMPLEX_QUERY_DARK_CANARY_LEDGER_DIR: str = Field(
+        default="/data/ingest-files/complex-query-dark-canary",
+        description="Directory for comparisons.jsonl + state.json ledger.",
+    )
+    # Candidate-adoption integration (dark): independently gated from planner.
+    # Runtime may run without ranking adoption; ranking adoption never implies
+    # user-visible answer replacement.
+    COMPLEX_QUERY_RUNTIME_ENABLED: bool = Field(
+        default=False,
+        description=(
+            "Allowlist-scoped complex-query runtime (alias/companion to "
+            "FIXTURE_RUNTIME). Default False."
+        ),
+    )
+    COMPLEX_QUERY_RANKING_ADOPTION_ENABLED: bool = Field(
+        default=False,
+        description=(
+            "When True on allowlist, build candidate finalists from CQ winners "
+            "merged into the unified pool before protect/MMR. User-visible "
+            "chunks remain baseline unless a later visible canary is authorized."
+        ),
+    )
+    COMPLEX_QUERY_SYNTHESIS_PACKET_ENABLED: bool = Field(
+        default=False,
+        description=(
+            "When True on allowlist, feed canonical ContextPacketV1 into dark "
+            "candidate synthesis (not returned to the user)."
+        ),
+    )
+    COMPLEX_QUERY_FINAL_VERIFICATION_ENABLED: bool = Field(
+        default=False,
+        description=(
+            "When True on allowlist, verify the generated candidate answer "
+            "(post-synthesis), not pre-synthesis fixture verification alone."
+        ),
+    )
+    COMPLEX_QUERY_CANDIDATE_CORPUS_ALLOWLIST: str = Field(
+        default="gsem-e2e-20260804a,6a766597-29f3-4a3e-8918-5de10f0053b3",
+        description="Corpora permitted for candidate-adoption integration.",
+    )
+    COMPLEX_QUERY_CANDIDATE_USER_ALLOWLIST: str = Field(
+        default="",
+        description="User ids permitted for candidate-adoption integration.",
+    )
+    COMPLEX_QUERY_CANDIDATE_LEDGER_DIR: str = Field(
+        default="/data/ingest-files/complex-query-candidate-adoption",
+        description="Ledger directory for candidate-adoption comparisons.",
+    )
+    COMPLEX_QUERY_VISIBLE_ANSWER_ENABLED: bool = Field(
+        default=False,
+        description=(
+            "When True on visible allowlists, allow terminal-pass candidate "
+            "answers to replace baseline for that user/corpus only. Default "
+            "False — dark quality qualification must pass first."
+        ),
+    )
+    COMPLEX_QUERY_VISIBLE_CORPUS_ALLOWLIST: str = Field(
+        default="",
+        description=(
+            "Corpora permitted for user-visible CQ answers "
+            "(intended: q9_10_file_inspection id only)."
+        ),
+    )
+    COMPLEX_QUERY_VISIBLE_USER_ALLOWLIST: str = Field(
+        default="",
+        description=(
+            "Users permitted for user-visible CQ answers "
+            "(intended: Sambenja only)."
+        ),
+    )
+    PER_CORPUS_RECALL_QUOTA: int = Field(
+        default=3,
+        ge=0,
+        le=20,
+        description=(
+            "Cross-corpus recall fairness: after the funnel merge, guarantee "
+            "at least this many candidates per selected corpus enter the "
+            "reranker pool. Purely additive — backfills from the corpus's own "
+            "funnel output if it was underrepresented. Only fires for "
+            "multi-corpus queries. Set 0 to disable."
+        ),
+    )
+    RERANKER_QUERY_ASPECT_ENABLED: bool = Field(
+        default=True,
+        description=(
+            "When True and a candidate carries a lane_query in its metadata "
+            "(the vocabulary-lane sub-query that discovered it), the reranker "
+            "input prepends 'aspect: <lane_query>' so the cross-encoder scores "
+            "against the discovering aspect rather than the full compound "
+            "query. Only fires when lane_query is present; byte-identical to "
+            "legacy behavior otherwise."
         ),
     )
     RETRIEVAL_CACHE_GRAPH_METRICS: bool = Field(

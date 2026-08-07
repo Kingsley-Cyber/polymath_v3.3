@@ -1,0 +1,46 @@
+{
+  "freeze_id": "technical-book-66-v1",
+  "frozen_at": "2026-08-06T18:56:19-06:00",
+  "repository_commit": "86149227db703c097aad586e4a18018185e9f742",
+  "fixture": {
+    "original_path": "/Users/king/Downloads/technical_book_graphrag_stress_test/source/reliable_event_processing_chapter.md",
+    "snapshot": "fixture.md",
+    "sha256": "2c0499505455b782cd6a4a2a9bf888141a820e89919eb0866bf9ba4270bd2391",
+    "bytes": 10366,
+    "lines": 73
+  },
+  "answer_key": {
+    "original_path": "/Users/king/Downloads/technical_book_graphrag_stress_test/answer_key/gold_triples.json",
+    "snapshot": "gold_triples.json",
+    "sha256": "8e402f5e2f16ca8011bd23facf3f70a52c846b7618a58a8659105d1801d7d7a2",
+    "positive_assertions": 66,
+    "qualified_assertions": 5
+  },
+  "expected_policy": {
+    "snapshot": "EXPECTED.md",
+    "sha256": "39049cfe70dd5142dee0a377d82b5a02873de73068b89cc6417de965f1372490"
+  },
+  "namespace": {
+    "name": "technical_book_stress_v1",
+    "mongo_database": "graphify_e2e_technical_book_stress_v1_bc4ad2c7",
+    "corpus_id": "0a858214-cc58-5615-9b4b-ba177ffd3ca3",
+    "document_id": "9e3e45389e2e73da5cc6838d98f99f7d59b3dccbf1cb08035f8ad496628365c7",
+    "production_writes_authorized": false
+  },
+  "legacy_scorer": {
+    "version": "stress-answer-key-scorer-v1-legacy",
+    "snapshot": "scorer_v1_legacy.py",
+    "sha256": "9848a2eed720ef89996e7dbaef07e234e6b437745bd6ec381f8d53adc2a5997e",
+    "matching_policy": "casefolded token normalization with leading-article removal, followed by unconstrained two-or-more-token prefix or suffix containment",
+    "warning": "Legacy scoring conflated normalized variants with undeclared subsumption. It is frozen for reproducibility and must not be used for future acceptance scores."
+  },
+  "baseline_projection": {
+    "score_snapshot": "baseline_score_v1_legacy.json",
+    "score_sha256": "4d19838549cc0f4bea0a0f5c8e858919ae501ce479df1a50220152b9681457a6",
+    "promoted_snapshot": "baseline_promoted_v1.json",
+    "promoted_sha256": "ed645c8549a7677ca3d3cc38499488e146b10e314b548d9808a4ffe5c2cd7157",
+    "neo4j_graph_digest": "a7954f629d02e4c840fa9d7806d643020b94eff56c177a7b63d94155f0fb1b7a",
+    "neo4j_relations": 61,
+    "legacy_matched_positive": 35
+  }
+}

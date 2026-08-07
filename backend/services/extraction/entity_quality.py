@@ -108,33 +108,13 @@ NOISE_LABELS = frozenset({
 # allowed_pairs can actually constrain something. MEASURED: 100% of sampled
 # mentions carried a type outside the ontology, which made the typed gate
 # decorative.
+#
+# The mapping is now owned by services.extraction.canonical as the single
+# source of truth, shared with spacy_relation_adapter, relex_gate, and
+# neo4j_writer. Import the PUBLIC alias — the private `_UPPER_TO_ONTOLOGY`
+# name is kept only for backwards compatibility and may be removed.
 # ---------------------------------------------------------------------------
-LABEL_TO_ONTOLOGY: dict[str, str] = {
-    "PERSON": "Person",
-    "AGENT": "Person",
-    "ORGANIZATION": "Organization",
-    "PLACE": "Location",
-    "PRODUCT": "Product",
-    "DOCUMENT": "Document",
-    "SYSTEM": "Software",
-    "METHOD": "Method",
-    "CONCEPT": "Concept",
-    "RESOURCE": "Artifact",
-    "CONSTRAINT": "Rule",
-    "EVENT": "Event",
-    "STANDARD": "Standard",
-    "LAW": "Law",
-    "ARTIFACT": "Artifact",
-    "TIMEREFERENCE": "TimeReference",
-    # --- vocabulary v2 (lowercase, ontology-aligned) -----------------------
-    # v2 labels ARE ontology types, so these are identity maps. They exist so
-    # both vocabularies can be in flight during the pod rollout: chunks
-    # extracted under v1 and v2 must normalise to the same values, or the
-    # allowed_pairs gate would see two type systems in one corpus.
-    "SOFTWARE": "Software",
-    "LOCATION": "Location",
-    "CONCEPT_V2": "Concept",
-}
+from services.extraction.canonical import ENTITY_TYPE_ALIASES as LABEL_TO_ONTOLOGY
 
 # Generic role/abstract nouns that are real words but useless as graph nodes.
 # Deliberately SHORT and hand-curated: the corpus-frequency rule (R5) is the

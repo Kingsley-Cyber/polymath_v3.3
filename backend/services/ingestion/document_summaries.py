@@ -101,6 +101,37 @@ async def _summary_tree_pool_for_corpus(
     )
 
 
+async def _deterministic_summary_contract(
+    db: Any, *, corpus_id: str
+) -> tuple[dict[str, Any], IngestionConfig | None]:
+    """Resolve the corpus config without touching any provider pool.
+
+    Owner decision: the required summary lane is ``deterministic_summary.v1``
+    and must never call summary_provider_pool / LiteLLM / cloud providers or
+    require summary cost authority.
+    """
+
+    corpus = await db["corpora"].find_one(
+        {"corpus_id": corpus_id},
+        {"_id": 0, "default_ingestion_config": 1},
+    )
+    if not corpus:
+        return (
+            {"source": "missing_corpus", "models": [], "lanes": 0},
+            None,
+        )
+    cfg = IngestionConfig(**(corpus.get("default_ingestion_config") or {}))
+    contract = {
+        "source": "deterministic_summary.v1",
+        "models": [],
+        "lanes": 0,
+        "provider_capacity": 0,
+        "max_concurrent": 4,
+        "resolution": {"mode": "deterministic_only"},
+    }
+    return contract, cfg
+
+
 async def backfill_document_summaries(
     db: Any,
     *,
@@ -112,19 +143,26 @@ async def backfill_document_summaries(
     parent_heal_limit: int = 2000,
     summary_cost_controller: Any | None = None,
     require_cost_control: bool = False,
+    deterministic_only: bool = False,
 ) -> dict[str, Any]:
     """Build missing document-level summary profiles from parent summaries."""
 
     limit = max(0, int(limit or 0))
     parent_heal_limit = max(0, int(parent_heal_limit or 0))
     started = datetime.utcnow()
-    llm_fn, contract, cfg = await _summary_tree_pool_for_corpus(
-        db,
-        corpus_id=corpus_id,
-        user_id=user_id,
-        summary_cost_controller=summary_cost_controller,
-        require_cost_control=require_cost_control,
-    )
+    if deterministic_only:
+        llm_fn = None
+        contract, cfg = await _deterministic_summary_contract(
+            db, corpus_id=corpus_id
+        )
+    else:
+        llm_fn, contract, cfg = await _summary_tree_pool_for_corpus(
+            db,
+            corpus_id=corpus_id,
+            user_id=user_id,
+            summary_cost_controller=summary_cost_controller,
+            require_cost_control=require_cost_control,
+        )
     if cfg is None:
         return {
             "status": "not_found",
@@ -228,7 +266,10 @@ async def backfill_document_summaries(
                     "required_parent_count": required_parent_count,
                     "summarized_parent_count": summarized_parent_count,
                 }
-            if missing_parent_count and (
+            # The deterministic lane builds the tree extractively from the
+            # parent summaries that exist; partial coverage is tolerated and
+            # reported so the parent lane can complete it on later cycles.
+            if missing_parent_count and not deterministic_only and (
                 llm_fn is None or missing_parent_count > parent_heal_limit
             ):
                 return {

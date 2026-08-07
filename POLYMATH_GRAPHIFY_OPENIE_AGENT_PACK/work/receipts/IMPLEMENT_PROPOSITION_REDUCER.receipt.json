@@ -1,0 +1,23 @@
+{
+  "errors": [],
+  "files_changed": [
+    "/Users/king/polymath_v3.3/POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/work/artifacts/proposition_families.jsonl",
+    "/Users/king/polymath_v3.3/POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/work/artifacts/proposition_reducer_report.json"
+  ],
+  "finished_at": "2026-08-06T23:54:39.617698+00:00",
+  "inputs_hash": "",
+  "metrics": {
+    "collapsed_renderings": 179,
+    "proposition_families": 310,
+    "qualified_families": 18,
+    "raw_renderings": 489
+  },
+  "outputs_hash": "",
+  "stage": "IMPLEMENT_PROPOSITION_REDUCER",
+  "started_at": "2026-08-06T23:54:39.612893+00:00",
+  "status": "PASSED",
+  "tests": [
+    "backend/tests/extraction/test_graphify_proposition_reducer.py"
+  ],
+  "warnings": []
+}

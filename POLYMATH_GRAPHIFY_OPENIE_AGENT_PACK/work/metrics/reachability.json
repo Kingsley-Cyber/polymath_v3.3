@@ -1,0 +1,23 @@
+{
+  "checks": {
+    "canonical_worker_awaits_pipeline": true,
+    "canonical_worker_imports_pipeline": true,
+    "canonical_worker_projects_neo4j": true,
+    "neo4j_writer_present": true,
+    "pipeline_emits_assertion_decisions": true,
+    "pipeline_emits_raw_mentions": true,
+    "pipeline_emits_surface_relations": true,
+    "pipeline_entrypoint_exists": true,
+    "raw_artifacts_persisted": true
+  },
+  "created_at": "2026-08-07T03:05:33.111154+00:00",
+  "entrypoint": "backend/services/ingestion/worker.py -> run_graphify_pipeline -> ghost_b_extractions -> _write_neo4j_for_doc",
+  "files": [
+    "backend/services/ingestion/worker.py",
+    "backend/services/extraction/graphify_pipeline.py",
+    "backend/models/graphify_contracts.py",
+    "backend/services/extraction/graphify_predicate_compiler.py",
+    "backend/services/graph/neo4j_writer.py"
+  ],
+  "status": "PASSED"
+}

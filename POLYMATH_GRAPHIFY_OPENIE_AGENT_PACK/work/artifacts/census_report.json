@@ -1,0 +1,23 @@
+{
+  "aligned_mentions": 728,
+  "alignment_failures": 0,
+  "batch_size": 4,
+  "conservation": true,
+  "deterministic_output_order": true,
+  "documents": 2,
+  "emitted_predictions": 728,
+  "identity_digest": "dc3dd0e4962d3f404a39595a69b884e4fe4b40187cb5ffebb1a905fbcf222f5a",
+  "inference_seconds": 18.833441125010722,
+  "persisted_records": 728,
+  "persistence_batches": 6,
+  "release": "graphify-entity-census-v1",
+  "schema_version": "polymath.entity_census_report.v1",
+  "stage_dependencies": [
+    "normalization",
+    "survey",
+    "entity_provider"
+  ],
+  "status": "passed",
+  "strict_alignment_rate": 1.0,
+  "windows": 23
+}

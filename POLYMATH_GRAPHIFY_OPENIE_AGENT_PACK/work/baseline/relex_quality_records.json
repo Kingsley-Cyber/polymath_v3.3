@@ -1,0 +1,2135 @@
+{
+  "failures": [],
+  "fixture": "/Users/king/polymath_v3.3/POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/fixtures/graphify_quality_fixture.md",
+  "fixture_sha256": "adebcd4dfd58b64d7c6f192b210efe7cbf42b6153091a9e97d91911054d062c3",
+  "results": [
+    {
+      "attempts": 1,
+      "chunk_id": "graphify_quality_fixture:0000:d44ef5ae91757c9dfc9f",
+      "citation_drop_count": 0,
+      "claim_compilation": null,
+      "corpus_id": "openie_pack_baseline_quality_20260806",
+      "doc_id": "graphify_quality_fixture",
+      "domain_range_remap_count": 0,
+      "domain_range_warn_count": 0,
+      "endpoint_completion_count": 0,
+      "entities": [
+        {
+          "canonical_name": "graphify",
+          "confidence": 0.96425,
+          "definitional_phrase": "",
+          "entity_type": "software",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "Graphify"
+        },
+        {
+          "canonical_name": "mongodb",
+          "confidence": 0.996691,
+          "definitional_phrase": "",
+          "entity_type": "software",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "MongoDB"
+        },
+        {
+          "canonical_name": "canonical documents",
+          "confidence": 0.862317,
+          "definitional_phrase": "",
+          "entity_type": "artifact",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "canonical documents"
+        },
+        {
+          "canonical_name": "qdrant",
+          "confidence": 0.994863,
+          "definitional_phrase": "",
+          "entity_type": "software",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "Qdrant"
+        },
+        {
+          "canonical_name": "embeddings",
+          "confidence": 0.916967,
+          "definitional_phrase": "",
+          "entity_type": "artifact",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "embeddings"
+        },
+        {
+          "canonical_name": "neo4j",
+          "confidence": 0.987181,
+          "definitional_phrase": "",
+          "entity_type": "software",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "Neo4j"
+        },
+        {
+          "canonical_name": "accepted assertions",
+          "confidence": 0.605587,
+          "definitional_phrase": "",
+          "entity_type": "artifact",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "accepted assertions"
+        },
+        {
+          "canonical_name": "assertions",
+          "confidence": 0.506519,
+          "definitional_phrase": "",
+          "entity_type": "artifact",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "assertions"
+        },
+        {
+          "canonical_name": "rebuildable graph",
+          "confidence": 0.913817,
+          "definitional_phrase": "",
+          "entity_type": "artifact",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "rebuildable graph"
+        },
+        {
+          "canonical_name": "gliner2",
+          "confidence": 0.990864,
+          "definitional_phrase": "",
+          "entity_type": "software",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "GLiNER2"
+        },
+        {
+          "canonical_name": "spanbased entity extractor",
+          "confidence": 0.808175,
+          "definitional_phrase": "",
+          "entity_type": "method",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "span-based entity extractor"
+        },
+        {
+          "canonical_name": "tripletextract",
+          "confidence": 0.993232,
+          "definitional_phrase": "",
+          "entity_type": "software",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "triplet-extract"
+        },
+        {
+          "canonical_name": "technical prose",
+          "confidence": 0.601314,
+          "definitional_phrase": "",
+          "entity_type": "artifact",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "technical prose"
+        },
+        {
+          "canonical_name": "openie",
+          "confidence": 0.84488,
+          "definitional_phrase": "",
+          "entity_type": "standard",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "OpenIE"
+        },
+        {
+          "canonical_name": "openie subject relation object propositions",
+          "confidence": 0.511275,
+          "definitional_phrase": "",
+          "entity_type": "artifact",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "OpenIE subject relation object propositions"
+        },
+        {
+          "canonical_name": "subject relation object propositions",
+          "confidence": 0.838118,
+          "definitional_phrase": "",
+          "entity_type": "artifact",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "subject relation object propositions"
+        },
+        {
+          "canonical_name": "polymath",
+          "confidence": 0.897828,
+          "definitional_phrase": "",
+          "entity_type": "organization",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "Polymath"
+        },
+        {
+          "canonical_name": "ingestion workflow",
+          "confidence": 0.67533,
+          "definitional_phrase": "",
+          "entity_type": "method",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "ingestion workflow"
+        },
+        {
+          "canonical_name": "evidencelinked knowledge",
+          "confidence": 0.982734,
+          "definitional_phrase": "",
+          "entity_type": "artifact",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "evidence-linked knowledge"
+        },
+        {
+          "canonical_name": "rag",
+          "confidence": 0.948141,
+          "definitional_phrase": "",
+          "entity_type": "software",
+          "object_kind": "",
+          "query_aliases": [
+            "RAG"
+          ],
+          "surface_form": "Retrieval-Augmented Generation"
+        },
+        {
+          "canonical_name": "generation grounded by retrieved evidence rag uses a retriever",
+          "confidence": 0.380551,
+          "definitional_phrase": "",
+          "entity_type": "method",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "generation grounded by retrieved evidence.\nRAG uses a retriever"
+        },
+        {
+          "canonical_name": "retrieved evidence",
+          "confidence": 0.731627,
+          "definitional_phrase": "",
+          "entity_type": "artifact",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "retrieved evidence"
+        },
+        {
+          "canonical_name": "retriever",
+          "confidence": 0.906834,
+          "definitional_phrase": "",
+          "entity_type": "software",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "retriever"
+        }
+      ],
+      "entity_drop_count": 0,
+      "entity_evidence_drop_count": 0,
+      "entity_remap_count": 0,
+      "evidence_cue_repair_count": 0,
+      "evidence_drop_count": 0,
+      "extraction_counters": {},
+      "fact_drop_count": 0,
+      "facts": [],
+      "json_repair_mode": "",
+      "lane": -1,
+      "local_extraction": {
+        "acceptance_policy_hash": "ebe3a82d13515d5017f7b3a8e86d5da313e925420fdc02b9de2b8cca6b7b3e8b",
+        "contract": "polymath.relex_local.v1",
+        "entity_schema_hash": "0f475c744d9e3595",
+        "extractor_engine": "relex_local",
+        "extractor_release": "relex_local.v1",
+        "gate_decision_counts": {
+          "accept_high": 1,
+          "reject_endpoint_signature": 117,
+          "reject_low_evidence": 56,
+          "reject_scope": 330,
+          "reject_self_loop": 2,
+          "review_conflict": 3,
+          "review_cross_sentence": 15,
+          "review_type_compatibility": 15,
+          "shadow_relex_high": 12,
+          "store_unmapped_surface_relation": 1
+        },
+        "model_hash": "7c5bd751e1b24e4254d70fe4355a986cd65400676ce3735f7752429fcc26960a",
+        "model_hash_verified": true,
+        "model_id": "knowledgator/gliner-relex-large-v1.0",
+        "ontology_hash": "f484cb6acf4062fe08d2f473a80e659cb3d3239db8567d25d63efaf9d45ee956",
+        "relation_schema_hash": "3241e858f409546c",
+        "relex_encodes_per_chunk": 1,
+        "schema_version": "polymath.extract.relex_local.v1",
+        "spacy_parses_per_chunk": 1
+      },
+      "model": "knowledgator/gliner-relex-large-v1.0",
+      "output_mode": "deterministic_gate",
+      "prompt_chars": null,
+      "prompt_hash": null,
+      "provider": "relex_local",
+      "provider_card": {},
+      "raw_output_artifact_id": null,
+      "raw_output_fingerprint": {
+        "entities": 24,
+        "raw_pairs": 552,
+        "raw_scores_complete": true,
+        "sha256": "0e1a31e3d8ac955f4c258e6b41434d14bec71d505d7dc13764bd9eecb285ab20",
+        "thresholded_relations": 21
+      },
+      "relation_drop_count": 0,
+      "relation_remap_count": 0,
+      "relations": [
+        {
+          "confidence": 0.680312,
+          "evidence_phrase": "Retrieval-Augmented Generation (RAG) refers to generation grounded by retrieved evidence.\nRAG uses a retriever",
+          "object": "retriever",
+          "object_kind": "entity",
+          "predicate": "uses",
+          "relation_cue": "use",
+          "source_predicate": "uses",
+          "subject": "rag",
+          "validation_status": "accept_high"
+        }
+      ],
+      "schema_lens_id": null,
+      "schema_mode": "none",
+      "schema_version": "polymath.extract.relex_local.v1",
+      "semantic_direction_drop_count": 0,
+      "semantic_direction_repair_count": 0,
+      "semantic_verifier_mode": "",
+      "source_version_id": null,
+      "strict_entity_drop_count": 0,
+      "strict_relation_drop_count": 0,
+      "temporal_capture_version": null,
+      "temporal_captures": [],
+      "text": "# Graphify Quality Fixture\n\nMongoDB stores canonical documents while Qdrant stores embeddings for retrieval.\nNeo4j projects accepted assertions from MongoDB into a rebuildable graph.\nGLiNER2 is a span-based entity extractor for named software and concepts.\ntriplet-extract converts technical prose into OpenIE subject relation object propositions.\nPolymath defines Graphify as the ingestion workflow that creates evidence-linked knowledge.\nRetrieval-Augmented Generation (RAG) refers to generation grounded by retrieved evidence.\nRAG uses a retriever to "
+    },
+    {
+      "attempts": 1,
+      "chunk_id": "graphify_quality_fixture:0001:01cc9c886c5dcbcf94a9",
+      "citation_drop_count": 0,
+      "claim_compilation": null,
+      "corpus_id": "openie_pack_baseline_quality_20260806",
+      "doc_id": "graphify_quality_fixture",
+      "domain_range_remap_count": 0,
+      "domain_range_warn_count": 0,
+      "endpoint_completion_count": 0,
+      "entities": [
+        {
+          "canonical_name": "source passages",
+          "confidence": 0.346009,
+          "definitional_phrase": "",
+          "entity_type": "concept",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "source passages"
+        },
+        {
+          "canonical_name": "qdrant",
+          "confidence": 0.996612,
+          "definitional_phrase": "",
+          "entity_type": "software",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "Qdrant"
+        },
+        {
+          "canonical_name": "hnsw indexing",
+          "confidence": 0.797802,
+          "definitional_phrase": "",
+          "entity_type": "standard",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "HNSW indexing"
+        },
+        {
+          "canonical_name": "hnsw",
+          "confidence": 0.37761,
+          "definitional_phrase": "",
+          "entity_type": "standard",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "HNSW"
+        },
+        {
+          "canonical_name": "approximate nearestneighbor search",
+          "confidence": 0.968926,
+          "definitional_phrase": "",
+          "entity_type": "method",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "approximate nearest-neighbor search"
+        },
+        {
+          "canonical_name": "mongodb",
+          "confidence": 0.998154,
+          "definitional_phrase": "",
+          "entity_type": "software",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "MongoDB"
+        },
+        {
+          "canonical_name": "neo4j",
+          "confidence": 0.993009,
+          "definitional_phrase": "",
+          "entity_type": "software",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "Neo4j"
+        },
+        {
+          "canonical_name": "rebuildable projections",
+          "confidence": 0.892024,
+          "definitional_phrase": "",
+          "entity_type": "method",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "rebuildable projections"
+        },
+        {
+          "canonical_name": "entity reducer",
+          "confidence": 0.895807,
+          "definitional_phrase": "",
+          "entity_type": "software",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "entity reducer"
+        },
+        {
+          "canonical_name": "successor",
+          "confidence": 0.880112,
+          "definitional_phrase": "",
+          "entity_type": "concept",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "successor"
+        },
+        {
+          "canonical_name": "directive",
+          "confidence": 0.895769,
+          "definitional_phrase": "",
+          "entity_type": "concept",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "directive"
+        },
+        {
+          "canonical_name": "this approach",
+          "confidence": 0.783567,
+          "definitional_phrase": "",
+          "entity_type": "concept",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "this approach"
+        },
+        {
+          "canonical_name": "approach",
+          "confidence": 0.336745,
+          "definitional_phrase": "",
+          "entity_type": "concept",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "approach"
+        },
+        {
+          "canonical_name": "generic nouns",
+          "confidence": 0.573347,
+          "definitional_phrase": "",
+          "entity_type": "concept",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "generic nouns"
+        },
+        {
+          "canonical_name": "software entity",
+          "confidence": 0.602328,
+          "definitional_phrase": "",
+          "entity_type": "concept",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "Software entity"
+        },
+        {
+          "canonical_name": "software",
+          "confidence": 0.335694,
+          "definitional_phrase": "",
+          "entity_type": "concept",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "Software"
+        },
+        {
+          "canonical_name": "filtering",
+          "confidence": 0.600033,
+          "definitional_phrase": "",
+          "entity_type": "method",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "filtering"
+        },
+        {
+          "canonical_name": "antecedent",
+          "confidence": 0.31421,
+          "definitional_phrase": "",
+          "entity_type": "concept",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "antecedent"
+        },
+        {
+          "canonical_name": "resolver",
+          "confidence": 0.683252,
+          "definitional_phrase": "",
+          "entity_type": "method",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "resolver"
+        },
+        {
+          "canonical_name": "gliner2",
+          "confidence": 0.96251,
+          "definitional_phrase": "",
+          "entity_type": "software",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "GLiNER2"
+        },
+        {
+          "canonical_name": "lowercase pandas",
+          "confidence": 0.778583,
+          "definitional_phrase": "",
+          "entity_type": "concept",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "lowercase pandas"
+        },
+        {
+          "canonical_name": "library",
+          "confidence": 0.799631,
+          "definitional_phrase": "",
+          "entity_type": "concept",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "Library"
+        }
+      ],
+      "entity_drop_count": 0,
+      "entity_evidence_drop_count": 0,
+      "entity_remap_count": 0,
+      "evidence_cue_repair_count": 0,
+      "evidence_drop_count": 0,
+      "extraction_counters": {},
+      "fact_drop_count": 0,
+      "facts": [],
+      "json_repair_mode": "",
+      "lane": -1,
+      "local_extraction": {
+        "acceptance_policy_hash": "ebe3a82d13515d5017f7b3a8e86d5da313e925420fdc02b9de2b8cca6b7b3e8b",
+        "contract": "polymath.relex_local.v1",
+        "entity_schema_hash": "0f475c744d9e3595",
+        "extractor_engine": "relex_local",
+        "extractor_release": "relex_local.v1",
+        "gate_decision_counts": {
+          "reject_endpoint_signature": 37,
+          "reject_low_evidence": 46,
+          "reject_negated": 1,
+          "reject_scope": 298,
+          "review_cross_sentence": 20,
+          "review_type_compatibility": 51,
+          "shadow_relex_high": 8,
+          "store_unmapped_surface_relation": 1
+        },
+        "model_hash": "7c5bd751e1b24e4254d70fe4355a986cd65400676ce3735f7752429fcc26960a",
+        "model_hash_verified": true,
+        "model_id": "knowledgator/gliner-relex-large-v1.0",
+        "ontology_hash": "f484cb6acf4062fe08d2f473a80e659cb3d3239db8567d25d63efaf9d45ee956",
+        "relation_schema_hash": "3241e858f409546c",
+        "relex_encodes_per_chunk": 1,
+        "schema_version": "polymath.extract.relex_local.v1",
+        "spacy_parses_per_chunk": 1
+      },
+      "model": "knowledgator/gliner-relex-large-v1.0",
+      "output_mode": "deterministic_gate",
+      "prompt_chars": null,
+      "prompt_hash": null,
+      "provider": "relex_local",
+      "provider_card": {},
+      "raw_output_artifact_id": null,
+      "raw_output_fingerprint": {
+        "entities": 22,
+        "raw_pairs": 462,
+        "raw_scores_complete": true,
+        "sha256": "cc3f1dc21df1b09b1c45eee69d98f33efaa92b4e46d47a677426dcc26451ddc1",
+        "thresholded_relations": 13
+      },
+      "relation_drop_count": 0,
+      "relation_remap_count": 0,
+      "relations": [],
+      "schema_lens_id": null,
+      "schema_mode": "none",
+      "schema_version": "polymath.extract.relex_local.v1",
+      "semantic_direction_drop_count": 0,
+      "semantic_direction_repair_count": 0,
+      "semantic_verifier_mode": "",
+      "source_version_id": null,
+      "strict_entity_drop_count": 0,
+      "strict_relation_drop_count": 0,
+      "temporal_capture_version": null,
+      "temporal_captures": [],
+      "text": "collect source passages before synthesis.\nQdrant depends on HNSW indexing for approximate nearest-neighbor search.\nMongoDB and Neo4j support rebuildable projections when MongoDB remains authoritative.\nThe entity reducer suppresses successor, directive, and this approach when they are generic nouns.\nThis approach should not become a Software entity.\nIt supports filtering when the antecedent is uniquely Qdrant.\nQdrant works with MongoDB, and it supports filtering only when the resolver is unambiguous.\nGLiNER2 may classify lowercase pandas as a Library "
+    },
+    {
+      "attempts": 1,
+      "chunk_id": "graphify_quality_fixture:0002:3911645ee9a8080d7961",
+      "citation_drop_count": 0,
+      "claim_compilation": null,
+      "corpus_id": "openie_pack_baseline_quality_20260806",
+      "doc_id": "graphify_quality_fixture",
+      "domain_range_remap_count": 0,
+      "domain_range_warn_count": 0,
+      "endpoint_completion_count": 0,
+      "entities": [
+        {
+          "canonical_name": "context",
+          "confidence": 0.59362,
+          "definitional_phrase": "",
+          "entity_type": "concept",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "context"
+        },
+        {
+          "canonical_name": "pandas",
+          "confidence": 0.968448,
+          "definitional_phrase": "",
+          "entity_type": "software",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "pandas"
+        },
+        {
+          "canonical_name": "tables",
+          "confidence": 0.524545,
+          "definitional_phrase": "",
+          "entity_type": "artifact",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "tables"
+        },
+        {
+          "canonical_name": "the report",
+          "confidence": 0.318689,
+          "definitional_phrase": "",
+          "entity_type": "document",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "The report"
+        },
+        {
+          "canonical_name": "report",
+          "confidence": 0.671534,
+          "definitional_phrase": "",
+          "entity_type": "document",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "report"
+        },
+        {
+          "canonical_name": "oracle",
+          "confidence": 0.995261,
+          "definitional_phrase": "",
+          "entity_type": "organization",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "Oracle"
+        },
+        {
+          "canonical_name": "java",
+          "confidence": 0.985043,
+          "definitional_phrase": "",
+          "entity_type": "software",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "Java"
+        },
+        {
+          "canonical_name": "apple",
+          "confidence": 0.983046,
+          "definitional_phrase": "",
+          "entity_type": "organization",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "Apple"
+        },
+        {
+          "canonical_name": "python",
+          "confidence": 0.997014,
+          "definitional_phrase": "",
+          "entity_type": "software",
+          "object_kind": "",
+          "query_aliases": [
+            "python"
+          ],
+          "surface_form": "Python"
+        },
+        {
+          "canonical_name": "extraction controller",
+          "confidence": 0.903489,
+          "definitional_phrase": "",
+          "entity_type": "software",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "extraction controller"
+        },
+        {
+          "canonical_name": "control plane",
+          "confidence": 0.825261,
+          "definitional_phrase": "",
+          "entity_type": "software",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "control plane"
+        },
+        {
+          "canonical_name": "stage",
+          "confidence": 0.419132,
+          "definitional_phrase": "",
+          "entity_type": "concept",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "stage"
+        },
+        {
+          "canonical_name": "graph projection",
+          "confidence": 0.707552,
+          "definitional_phrase": "",
+          "entity_type": "method",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "graph projection"
+        },
+        {
+          "canonical_name": "openie",
+          "confidence": 0.978403,
+          "definitional_phrase": "",
+          "entity_type": "software",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "OpenIE"
+        },
+        {
+          "canonical_name": "eight surface renderings",
+          "confidence": 0.629852,
+          "definitional_phrase": "",
+          "entity_type": "artifact",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "eight surface renderings"
+        },
+        {
+          "canonical_name": "surface renderings",
+          "confidence": 0.964967,
+          "definitional_phrase": "",
+          "entity_type": "artifact",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "surface renderings"
+        },
+        {
+          "canonical_name": "proposition reducer",
+          "confidence": 0.810879,
+          "definitional_phrase": "",
+          "entity_type": "method",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "proposition reducer"
+        },
+        {
+          "canonical_name": "model",
+          "confidence": 0.914401,
+          "definitional_phrase": "",
+          "entity_type": "software",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "model"
+        },
+        {
+          "canonical_name": "92 precision",
+          "confidence": 0.365471,
+          "definitional_phrase": "",
+          "entity_type": "artifact",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "92% precision"
+        },
+        {
+          "canonical_name": "precision",
+          "confidence": 0.519121,
+          "definitional_phrase": "",
+          "entity_type": "artifact",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "precision"
+        },
+        {
+          "canonical_name": "quality fixture",
+          "confidence": 0.958001,
+          "definitional_phrase": "",
+          "entity_type": "location",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "quality fixture"
+        },
+        {
+          "canonical_name": "throughput test",
+          "confidence": 0.840812,
+          "definitional_phrase": "",
+          "entity_type": "artifact",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "throughput test"
+        },
+        {
+          "canonical_name": "simulated report",
+          "confidence": 0.90696,
+          "definitional_phrase": "",
+          "entity_type": "document",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "simulated report"
+        },
+        {
+          "canonical_name": "the authors",
+          "confidence": 0.443584,
+          "definitional_phrase": "",
+          "entity_type": "person",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "The authors"
+        },
+        {
+          "canonical_name": "authors",
+          "confidence": 0.480725,
+          "definitional_phrase": "",
+          "entity_type": "person",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "authors"
+        }
+      ],
+      "entity_drop_count": 0,
+      "entity_evidence_drop_count": 0,
+      "entity_remap_count": 0,
+      "evidence_cue_repair_count": 0,
+      "evidence_drop_count": 0,
+      "extraction_counters": {},
+      "fact_drop_count": 0,
+      "facts": [],
+      "json_repair_mode": "",
+      "lane": -1,
+      "local_extraction": {
+        "acceptance_policy_hash": "ebe3a82d13515d5017f7b3a8e86d5da313e925420fdc02b9de2b8cca6b7b3e8b",
+        "contract": "polymath.relex_local.v1",
+        "entity_schema_hash": "0f475c744d9e3595",
+        "extractor_engine": "relex_local",
+        "extractor_release": "relex_local.v1",
+        "gate_decision_counts": {
+          "accept_high": 2,
+          "reject_endpoint_signature": 50,
+          "reject_low_evidence": 66,
+          "reject_negated": 2,
+          "reject_scope": 474,
+          "reject_self_loop": 2,
+          "review_cross_sentence": 13,
+          "review_type_compatibility": 32,
+          "shadow_relex_high": 7,
+          "store_unmapped_surface_relation": 2
+        },
+        "model_hash": "7c5bd751e1b24e4254d70fe4355a986cd65400676ce3735f7752429fcc26960a",
+        "model_hash_verified": true,
+        "model_id": "knowledgator/gliner-relex-large-v1.0",
+        "ontology_hash": "f484cb6acf4062fe08d2f473a80e659cb3d3239db8567d25d63efaf9d45ee956",
+        "relation_schema_hash": "3241e858f409546c",
+        "relex_encodes_per_chunk": 1,
+        "schema_version": "polymath.extract.relex_local.v1",
+        "spacy_parses_per_chunk": 1
+      },
+      "model": "knowledgator/gliner-relex-large-v1.0",
+      "output_mode": "deterministic_gate",
+      "prompt_chars": null,
+      "prompt_hash": null,
+      "provider": "relex_local",
+      "provider_card": {},
+      "raw_output_artifact_id": null,
+      "raw_output_fingerprint": {
+        "entities": 26,
+        "raw_pairs": 650,
+        "raw_scores_complete": true,
+        "sha256": "160390ecab7146003bc846d0cbd3251771a77147f3b92f115c91179dcbc29f74",
+        "thresholded_relations": 18
+      },
+      "relation_drop_count": 0,
+      "relation_remap_count": 0,
+      "relations": [
+        {
+          "confidence": 0.865784,
+          "evidence_phrase": "OpenIE produced eight surface renderings",
+          "object": "eight surface renderings",
+          "object_kind": "entity",
+          "predicate": "produces",
+          "relation_cue": "produce",
+          "source_predicate": "produces",
+          "subject": "openie",
+          "validation_status": "accept_high"
+        },
+        {
+          "confidence": 0.931037,
+          "evidence_phrase": "OpenIE produced eight surface renderings",
+          "object": "surface renderings",
+          "object_kind": "entity",
+          "predicate": "produces",
+          "relation_cue": "produce",
+          "source_predicate": "produces",
+          "subject": "openie",
+          "validation_status": "accept_high"
+        }
+      ],
+      "schema_lens_id": null,
+      "schema_mode": "none",
+      "schema_version": "polymath.extract.relex_local.v1",
+      "semantic_direction_drop_count": 0,
+      "semantic_direction_repair_count": 0,
+      "semantic_verifier_mode": "",
+      "source_version_id": null,
+      "strict_entity_drop_count": 0,
+      "strict_relation_drop_count": 0,
+      "temporal_capture_version": null,
+      "temporal_captures": [],
+      "text": "when the context says pandas processes tables.\nThe report says Oracle owns Java, but Apple appears only as a company name in a comparison.\nPython implements the extraction controller, but python as a common word must not be guessed from context.\nThe control plane validates every stage before the graph projection is rebuilt.\nOpenIE produced eight surface renderings, and the proposition reducer collapsed them into one family.\nThe model achieved 92% precision on the quality fixture.\nThe throughput test lasted 12 weeks in the simulated report.\nThe authors "
+    },
+    {
+      "attempts": 1,
+      "chunk_id": "graphify_quality_fixture:0003:8e6c5676ea73fbf5290c",
+      "citation_drop_count": 0,
+      "claim_compilation": null,
+      "corpus_id": "openie_pack_baseline_quality_20260806",
+      "doc_id": "graphify_quality_fixture",
+      "domain_range_remap_count": 0,
+      "domain_range_warn_count": 0,
+      "endpoint_completion_count": 0,
+      "entities": [
+        {
+          "canonical_name": "graphify",
+          "confidence": 0.99428,
+          "definitional_phrase": "",
+          "entity_type": "software",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "Graphify"
+        },
+        {
+          "canonical_name": "recall",
+          "confidence": 0.970194,
+          "definitional_phrase": "",
+          "entity_type": "concept",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "recall"
+        },
+        {
+          "canonical_name": "relex",
+          "confidence": 0.975367,
+          "definitional_phrase": "",
+          "entity_type": "software",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "Relex"
+        },
+        {
+          "canonical_name": "neo4j",
+          "confidence": 0.928292,
+          "definitional_phrase": "",
+          "entity_type": "software",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "Neo4j"
+        },
+        {
+          "canonical_name": "syntax ceiling",
+          "confidence": 0.711244,
+          "definitional_phrase": "",
+          "entity_type": "concept",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "syntax ceiling"
+        },
+        {
+          "canonical_name": "workflow",
+          "confidence": 0.771095,
+          "definitional_phrase": "",
+          "entity_type": "software",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "workflow"
+        },
+        {
+          "canonical_name": "failure taxonomy",
+          "confidence": 0.80965,
+          "definitional_phrase": "",
+          "entity_type": "artifact",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "failure taxonomy"
+        },
+        {
+          "canonical_name": "spacy",
+          "confidence": 0.981036,
+          "definitional_phrase": "",
+          "entity_type": "software",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "spaCy"
+        },
+        {
+          "canonical_name": "python",
+          "confidence": 0.919007,
+          "definitional_phrase": "",
+          "entity_type": "software",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "Python"
+        },
+        {
+          "canonical_name": "python rules",
+          "confidence": 0.818799,
+          "definitional_phrase": "",
+          "entity_type": "software",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "Python rules"
+        },
+        {
+          "canonical_name": "predicate compiler",
+          "confidence": 0.979211,
+          "definitional_phrase": "",
+          "entity_type": "software",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "Predicate Compiler"
+        },
+        {
+          "canonical_name": "depends_on",
+          "confidence": 0.917119,
+          "definitional_phrase": "",
+          "entity_type": "method",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "depends_on"
+        },
+        {
+          "canonical_name": "endpoint signatures",
+          "confidence": 0.769317,
+          "definitional_phrase": "",
+          "entity_type": "concept",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "endpoint signatures"
+        },
+        {
+          "canonical_name": "powers",
+          "confidence": 0.478389,
+          "definitional_phrase": "",
+          "entity_type": "concept",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "powers"
+        },
+        {
+          "canonical_name": "unmapped surface relation",
+          "confidence": 0.611764,
+          "definitional_phrase": "",
+          "entity_type": "concept",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "unmapped surface relation"
+        },
+        {
+          "canonical_name": "surface relation",
+          "confidence": 0.50935,
+          "definitional_phrase": "",
+          "entity_type": "concept",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "surface relation"
+        },
+        {
+          "canonical_name": "qdrant",
+          "confidence": 0.981801,
+          "definitional_phrase": "",
+          "entity_type": "software",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "Qdrant"
+        },
+        {
+          "canonical_name": "semantic retrieval",
+          "confidence": 0.838107,
+          "definitional_phrase": "",
+          "entity_type": "concept",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "semantic retrieval"
+        },
+        {
+          "canonical_name": "product description",
+          "confidence": 0.807574,
+          "definitional_phrase": "",
+          "entity_type": "document",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "product description"
+        },
+        {
+          "canonical_name": "dependencymatcher",
+          "confidence": 0.992054,
+          "definitional_phrase": "",
+          "entity_type": "software",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "DependencyMatcher"
+        },
+        {
+          "canonical_name": "active",
+          "confidence": 0.812922,
+          "definitional_phrase": "",
+          "entity_type": "concept",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "active"
+        }
+      ],
+      "entity_drop_count": 0,
+      "entity_evidence_drop_count": 0,
+      "entity_remap_count": 0,
+      "evidence_cue_repair_count": 0,
+      "evidence_drop_count": 0,
+      "extraction_counters": {},
+      "fact_drop_count": 0,
+      "facts": [],
+      "json_repair_mode": "",
+      "lane": -1,
+      "local_extraction": {
+        "acceptance_policy_hash": "ebe3a82d13515d5017f7b3a8e86d5da313e925420fdc02b9de2b8cca6b7b3e8b",
+        "contract": "polymath.relex_local.v1",
+        "entity_schema_hash": "0f475c744d9e3595",
+        "extractor_engine": "relex_local",
+        "extractor_release": "relex_local.v1",
+        "gate_decision_counts": {
+          "reject_endpoint_signature": 42,
+          "reject_low_evidence": 33,
+          "reject_scope": 280,
+          "review_conflict": 1,
+          "review_cross_sentence": 24,
+          "review_type_compatibility": 36,
+          "shadow_relex_high": 3,
+          "store_unmapped_surface_relation": 1
+        },
+        "model_hash": "7c5bd751e1b24e4254d70fe4355a986cd65400676ce3735f7752429fcc26960a",
+        "model_hash_verified": true,
+        "model_id": "knowledgator/gliner-relex-large-v1.0",
+        "ontology_hash": "f484cb6acf4062fe08d2f473a80e659cb3d3239db8567d25d63efaf9d45ee956",
+        "relation_schema_hash": "3241e858f409546c",
+        "relex_encodes_per_chunk": 1,
+        "schema_version": "polymath.extract.relex_local.v1",
+        "spacy_parses_per_chunk": 1
+      },
+      "model": "knowledgator/gliner-relex-large-v1.0",
+      "output_mode": "deterministic_gate",
+      "prompt_chars": null,
+      "prompt_hash": null,
+      "provider": "relex_local",
+      "provider_card": {},
+      "raw_output_artifact_id": null,
+      "raw_output_fingerprint": {
+        "entities": 21,
+        "raw_pairs": 420,
+        "raw_scores_complete": true,
+        "sha256": "1a500efe5f03b6ece13894498a39f0430c6c1aa161cd68d93967d730002332f5",
+        "thresholded_relations": 7
+      },
+      "relation_drop_count": 0,
+      "relation_remap_count": 0,
+      "relations": [],
+      "schema_lens_id": null,
+      "schema_mode": "none",
+      "schema_version": "polymath.extract.relex_local.v1",
+      "semantic_direction_drop_count": 0,
+      "semantic_direction_repair_count": 0,
+      "semantic_verifier_mode": "",
+      "source_version_id": null,
+      "strict_entity_drop_count": 0,
+      "strict_relation_drop_count": 0,
+      "temporal_capture_version": null,
+      "temporal_captures": [],
+      "text": "claim that Graphify improves recall, so the claim is attributed rather than unconditional.\nThe authors denied that Relex writes directly to Neo4j.\nIf the syntax ceiling is too low, the workflow records a failure taxonomy.\nGraphify was built on top of spaCy and Python rules.\nThe Predicate Compiler maps depends on to depends_on when endpoint signatures are valid.\nThe Predicate Compiler stores powers as an unmapped surface relation when the mapping is ambiguous.\nQdrant powers semantic retrieval in the product description.\nDependencyMatcher detects active "
+    },
+    {
+      "attempts": 1,
+      "chunk_id": "graphify_quality_fixture:0004:84e303012abf9ade5d98",
+      "citation_drop_count": 0,
+      "claim_compilation": null,
+      "corpus_id": "openie_pack_baseline_quality_20260806",
+      "doc_id": "graphify_quality_fixture",
+      "domain_range_remap_count": 0,
+      "domain_range_warn_count": 0,
+      "endpoint_completion_count": 0,
+      "entities": [
+        {
+          "canonical_name": "transitive constructions",
+          "confidence": 0.569611,
+          "definitional_phrase": "",
+          "entity_type": "method",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "transitive constructions"
+        },
+        {
+          "canonical_name": "uses",
+          "confidence": 0.329402,
+          "definitional_phrase": "",
+          "entity_type": "concept",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "uses"
+        },
+        {
+          "canonical_name": "frameextractor",
+          "confidence": 0.917882,
+          "definitional_phrase": "",
+          "entity_type": "software",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "FrameExtractor"
+        },
+        {
+          "canonical_name": "passive relations",
+          "confidence": 0.898073,
+          "definitional_phrase": "",
+          "entity_type": "concept",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "passive relations"
+        },
+        {
+          "canonical_name": "github",
+          "confidence": 0.934635,
+          "definitional_phrase": "",
+          "entity_type": "software",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "GitHub"
+        },
+        {
+          "canonical_name": "acquired by microsoft",
+          "confidence": 0.4225,
+          "definitional_phrase": "",
+          "entity_type": "event",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "acquired by Microsoft"
+        },
+        {
+          "canonical_name": "microsoft",
+          "confidence": 0.981142,
+          "definitional_phrase": "",
+          "entity_type": "organization",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "Microsoft"
+        },
+        {
+          "canonical_name": "acquired github in 2018",
+          "confidence": 0.327086,
+          "definitional_phrase": "",
+          "entity_type": "event",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "acquired GitHub in 2018"
+        },
+        {
+          "canonical_name": "benchmark",
+          "confidence": 0.768466,
+          "definitional_phrase": "",
+          "entity_type": "software",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "benchmark"
+        },
+        {
+          "canonical_name": "relex",
+          "confidence": 0.986089,
+          "definitional_phrase": "",
+          "entity_type": "software",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "Relex"
+        },
+        {
+          "canonical_name": "gliner2",
+          "confidence": 0.979034,
+          "definitional_phrase": "",
+          "entity_type": "software",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "GLiNER2"
+        },
+        {
+          "canonical_name": "tripletextract",
+          "confidence": 0.944213,
+          "definitional_phrase": "",
+          "entity_type": "software",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "triplet-extract"
+        },
+        {
+          "canonical_name": "graphify",
+          "confidence": 0.995767,
+          "definitional_phrase": "",
+          "entity_type": "software",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "Graphify"
+        },
+        {
+          "canonical_name": "markdown files",
+          "confidence": 0.735862,
+          "definitional_phrase": "",
+          "entity_type": "document",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "Markdown files"
+        },
+        {
+          "canonical_name": "markdown",
+          "confidence": 0.544238,
+          "definitional_phrase": "",
+          "entity_type": "software",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "Markdown"
+        },
+        {
+          "canonical_name": "raw mentions",
+          "confidence": 0.923401,
+          "definitional_phrase": "",
+          "entity_type": "artifact",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "raw mentions"
+        },
+        {
+          "canonical_name": "the openie argument adapter",
+          "confidence": 0.405004,
+          "definitional_phrase": "",
+          "entity_type": "software",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "The OpenIE Argument Adapter"
+        },
+        {
+          "canonical_name": "openie argument adapter",
+          "confidence": 0.972909,
+          "definitional_phrase": "",
+          "entity_type": "software",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "OpenIE Argument Adapter"
+        },
+        {
+          "canonical_name": "92",
+          "confidence": 0.309358,
+          "definitional_phrase": "",
+          "entity_type": "concept",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "92%"
+        },
+        {
+          "canonical_name": "literal value",
+          "confidence": 0.850612,
+          "definitional_phrase": "",
+          "entity_type": "concept",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "literal value"
+        },
+        {
+          "canonical_name": "vector database",
+          "confidence": 0.788429,
+          "definitional_phrase": "",
+          "entity_type": "concept",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "vector database"
+        },
+        {
+          "canonical_name": "description",
+          "confidence": 0.558037,
+          "definitional_phrase": "",
+          "entity_type": "concept",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "description"
+        },
+        {
+          "canonical_name": "the claim assembler",
+          "confidence": 0.338183,
+          "definitional_phrase": "",
+          "entity_type": "software",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "The Claim Assembler"
+        },
+        {
+          "canonical_name": "claim assembler",
+          "confidence": 0.984447,
+          "definitional_phrase": "",
+          "entity_type": "software",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "Claim Assembler"
+        },
+        {
+          "canonical_name": "negation",
+          "confidence": 0.909414,
+          "definitional_phrase": "",
+          "entity_type": "concept",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "negation"
+        },
+        {
+          "canonical_name": "modality",
+          "confidence": 0.912228,
+          "definitional_phrase": "",
+          "entity_type": "concept",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "modality"
+        },
+        {
+          "canonical_name": "attribution",
+          "confidence": 0.882529,
+          "definitional_phrase": "",
+          "entity_type": "concept",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "attribution"
+        },
+        {
+          "canonical_name": "temporal qualifiers",
+          "confidence": 0.876691,
+          "definitional_phrase": "",
+          "entity_type": "concept",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "temporal qualifiers"
+        }
+      ],
+      "entity_drop_count": 0,
+      "entity_evidence_drop_count": 0,
+      "entity_remap_count": 0,
+      "evidence_cue_repair_count": 0,
+      "evidence_drop_count": 0,
+      "extraction_counters": {},
+      "fact_drop_count": 0,
+      "facts": [],
+      "json_repair_mode": "",
+      "lane": -1,
+      "local_extraction": {
+        "acceptance_policy_hash": "ebe3a82d13515d5017f7b3a8e86d5da313e925420fdc02b9de2b8cca6b7b3e8b",
+        "contract": "polymath.relex_local.v1",
+        "entity_schema_hash": "0f475c744d9e3595",
+        "extractor_engine": "relex_local",
+        "extractor_release": "relex_local.v1",
+        "gate_decision_counts": {
+          "accept_high": 2,
+          "reject_endpoint_signature": 106,
+          "reject_low_evidence": 63,
+          "reject_scope": 478,
+          "review_conflict": 6,
+          "review_cross_sentence": 33,
+          "review_type_compatibility": 50,
+          "shadow_relex_high": 18
+        },
+        "model_hash": "7c5bd751e1b24e4254d70fe4355a986cd65400676ce3735f7752429fcc26960a",
+        "model_hash_verified": true,
+        "model_id": "knowledgator/gliner-relex-large-v1.0",
+        "ontology_hash": "f484cb6acf4062fe08d2f473a80e659cb3d3239db8567d25d63efaf9d45ee956",
+        "relation_schema_hash": "3241e858f409546c",
+        "relex_encodes_per_chunk": 1,
+        "schema_version": "polymath.extract.relex_local.v1",
+        "spacy_parses_per_chunk": 1
+      },
+      "model": "knowledgator/gliner-relex-large-v1.0",
+      "output_mode": "deterministic_gate",
+      "prompt_chars": null,
+      "prompt_hash": null,
+      "provider": "relex_local",
+      "provider_card": {},
+      "raw_output_artifact_id": null,
+      "raw_output_fingerprint": {
+        "entities": 28,
+        "raw_pairs": 756,
+        "raw_scores_complete": true,
+        "sha256": "b715b99e26b3c2ee8dbd9d9a55187af55a15e53b6a5150290237aaa1abc1416a",
+        "thresholded_relations": 40
+      },
+      "relation_drop_count": 0,
+      "relation_remap_count": 0,
+      "relations": [
+        {
+          "confidence": 0.908721,
+          "evidence_phrase": "GitHub was acquired by Microsoft",
+          "object": "github",
+          "object_kind": "entity",
+          "predicate": "owns",
+          "relation_cue": "acquire",
+          "source_predicate": "owns",
+          "subject": "microsoft",
+          "validation_status": "accept_high"
+        },
+        {
+          "confidence": 0.87343,
+          "evidence_phrase": "Graphify consumes Markdown files and produces raw mentions",
+          "object": "raw mentions",
+          "object_kind": "entity",
+          "predicate": "produces",
+          "relation_cue": "produce",
+          "source_predicate": "produces",
+          "subject": "graphify",
+          "validation_status": "accept_high"
+        }
+      ],
+      "schema_lens_id": null,
+      "schema_mode": "none",
+      "schema_version": "polymath.extract.relex_local.v1",
+      "semantic_direction_drop_count": 0,
+      "semantic_direction_repair_count": 0,
+      "semantic_verifier_mode": "",
+      "source_version_id": null,
+      "strict_entity_drop_count": 0,
+      "strict_relation_drop_count": 0,
+      "temporal_capture_version": null,
+      "temporal_captures": [],
+      "text": "transitive constructions for uses and supports.\nFrameExtractor extracts passive relations when GitHub was acquired by Microsoft.\nMicrosoft acquired GitHub in 2018.\nGitHub was acquired by Microsoft in 2018.\nThe benchmark compares Relex with GLiNER2 plus triplet-extract.\nGraphify consumes Markdown files and produces raw mentions.\nThe OpenIE Argument Adapter classifies 92% as a literal value.\nThe OpenIE Argument Adapter classifies a vector database as a description.\nThe Claim Assembler preserves negation, modality, attribution, and temporal qualifiers.\nThe "
+    },
+    {
+      "attempts": 1,
+      "chunk_id": "graphify_quality_fixture:0005:b6c6f69c4247c550d9e9",
+      "citation_drop_count": 0,
+      "claim_compilation": null,
+      "corpus_id": "openie_pack_baseline_quality_20260806",
+      "doc_id": "graphify_quality_fixture",
+      "domain_range_remap_count": 0,
+      "domain_range_warn_count": 0,
+      "endpoint_completion_count": 0,
+      "entities": [
+        {
+          "canonical_name": "phrase matcher",
+          "confidence": 0.909716,
+          "definitional_phrase": "",
+          "entity_type": "software",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "phrase matcher"
+        },
+        {
+          "canonical_name": "mongodb",
+          "confidence": 0.969149,
+          "definitional_phrase": "",
+          "entity_type": "software",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "MongoDB"
+        },
+        {
+          "canonical_name": "promoted document entity",
+          "confidence": 0.521659,
+          "definitional_phrase": "",
+          "entity_type": "artifact",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "promoted document entity"
+        },
+        {
+          "canonical_name": "survey pass",
+          "confidence": 0.692276,
+          "definitional_phrase": "",
+          "entity_type": "software",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "survey pass"
+        },
+        {
+          "canonical_name": "rag",
+          "confidence": 0.982497,
+          "definitional_phrase": "",
+          "entity_type": "method",
+          "object_kind": "",
+          "query_aliases": [
+            "RAG"
+          ],
+          "surface_form": "Retrieval-Augmented Generation"
+        },
+        {
+          "canonical_name": "retrieval",
+          "confidence": 0.354887,
+          "definitional_phrase": "",
+          "entity_type": "method",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "retrieval"
+        },
+        {
+          "canonical_name": "software component",
+          "confidence": 0.988586,
+          "definitional_phrase": "",
+          "entity_type": "software",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "software component"
+        },
+        {
+          "canonical_name": "cache",
+          "confidence": 0.960731,
+          "definitional_phrase": "",
+          "entity_type": "software",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "cache"
+        },
+        {
+          "canonical_name": "owner",
+          "confidence": 0.303005,
+          "definitional_phrase": "",
+          "entity_type": "software",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "owner"
+        },
+        {
+          "canonical_name": "taylor francis",
+          "confidence": 0.984995,
+          "definitional_phrase": "",
+          "entity_type": "organization",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "Taylor & Francis"
+        },
+        {
+          "canonical_name": "information",
+          "confidence": 0.721078,
+          "definitional_phrase": "",
+          "entity_type": "artifact",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "information"
+        },
+        {
+          "canonical_name": "information in the sentence",
+          "confidence": 0.301244,
+          "definitional_phrase": "",
+          "entity_type": "artifact",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "information in the sentence"
+        },
+        {
+          "canonical_name": "database service",
+          "confidence": 0.988567,
+          "definitional_phrase": "",
+          "entity_type": "software",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "database service"
+        },
+        {
+          "canonical_name": "linux",
+          "confidence": 0.940226,
+          "definitional_phrase": "",
+          "entity_type": "software",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "Linux"
+        },
+        {
+          "canonical_name": "containers",
+          "confidence": 0.835202,
+          "definitional_phrase": "",
+          "entity_type": "artifact",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "containers"
+        },
+        {
+          "canonical_name": "the api",
+          "confidence": 0.596399,
+          "definitional_phrase": "",
+          "entity_type": "software",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "The API"
+        },
+        {
+          "canonical_name": "api",
+          "confidence": 0.989186,
+          "definitional_phrase": "",
+          "entity_type": "software",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "API"
+        },
+        {
+          "canonical_name": "json documents",
+          "confidence": 0.809543,
+          "definitional_phrase": "",
+          "entity_type": "standard",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "JSON documents"
+        },
+        {
+          "canonical_name": "json",
+          "confidence": 0.313439,
+          "definitional_phrase": "",
+          "entity_type": "standard",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "JSON"
+        },
+        {
+          "canonical_name": "normalized records",
+          "confidence": 0.981379,
+          "definitional_phrase": "",
+          "entity_type": "artifact",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "normalized records"
+        }
+      ],
+      "entity_drop_count": 0,
+      "entity_evidence_drop_count": 0,
+      "entity_remap_count": 0,
+      "evidence_cue_repair_count": 0,
+      "evidence_drop_count": 0,
+      "extraction_counters": {},
+      "fact_drop_count": 0,
+      "facts": [],
+      "json_repair_mode": "",
+      "lane": -1,
+      "local_extraction": {
+        "acceptance_policy_hash": "ebe3a82d13515d5017f7b3a8e86d5da313e925420fdc02b9de2b8cca6b7b3e8b",
+        "contract": "polymath.relex_local.v1",
+        "entity_schema_hash": "0f475c744d9e3595",
+        "extractor_engine": "relex_local",
+        "extractor_release": "relex_local.v1",
+        "gate_decision_counts": {
+          "accept_high": 5,
+          "reject_endpoint_signature": 61,
+          "reject_low_evidence": 32,
+          "reject_scope": 277,
+          "reject_self_loop": 2,
+          "review_conflict": 2,
+          "review_cross_sentence": 20,
+          "review_type_compatibility": 15,
+          "shadow_relex_high": 6
+        },
+        "model_hash": "7c5bd751e1b24e4254d70fe4355a986cd65400676ce3735f7752429fcc26960a",
+        "model_hash_verified": true,
+        "model_id": "knowledgator/gliner-relex-large-v1.0",
+        "ontology_hash": "f484cb6acf4062fe08d2f473a80e659cb3d3239db8567d25d63efaf9d45ee956",
+        "relation_schema_hash": "3241e858f409546c",
+        "relex_encodes_per_chunk": 1,
+        "schema_version": "polymath.extract.relex_local.v1",
+        "spacy_parses_per_chunk": 1
+      },
+      "model": "knowledgator/gliner-relex-large-v1.0",
+      "output_mode": "deterministic_gate",
+      "prompt_chars": null,
+      "prompt_hash": null,
+      "provider": "relex_local",
+      "provider_card": {},
+      "raw_output_artifact_id": null,
+      "raw_output_fingerprint": {
+        "entities": 21,
+        "raw_pairs": 420,
+        "raw_scores_complete": true,
+        "sha256": "b2e1479b5d02b4d997f3cf81e6f94a671e0d8365b5e62e8177a19d9ae85d9f75",
+        "thresholded_relations": 21
+      },
+      "relation_drop_count": 0,
+      "relation_remap_count": 0,
+      "relations": [
+        {
+          "confidence": 0.979117,
+          "evidence_phrase": "software component owns a cache",
+          "object": "cache",
+          "object_kind": "entity",
+          "predicate": "owns",
+          "relation_cue": "own",
+          "source_predicate": "owns",
+          "subject": "software component",
+          "validation_status": "accept_high"
+        },
+        {
+          "confidence": 0.87102,
+          "evidence_phrase": "Taylor & Francis produces information",
+          "object": "information",
+          "object_kind": "entity",
+          "predicate": "produces",
+          "relation_cue": "produce",
+          "source_predicate": "produces",
+          "subject": "taylor francis",
+          "validation_status": "accept_high"
+        },
+        {
+          "confidence": 0.872169,
+          "evidence_phrase": "Taylor & Francis produces information in the sentence",
+          "object": "information in the sentence",
+          "object_kind": "entity",
+          "predicate": "produces",
+          "relation_cue": "produce",
+          "source_predicate": "produces",
+          "subject": "taylor francis",
+          "validation_status": "accept_high"
+        },
+        {
+          "confidence": 0.823737,
+          "evidence_phrase": "The API consumes JSON documents",
+          "object": "json documents",
+          "object_kind": "entity",
+          "predicate": "uses",
+          "relation_cue": "consume",
+          "source_predicate": "uses",
+          "subject": "the api",
+          "validation_status": "accept_high"
+        },
+        {
+          "confidence": 0.852472,
+          "evidence_phrase": "API consumes JSON documents",
+          "object": "json documents",
+          "object_kind": "entity",
+          "predicate": "uses",
+          "relation_cue": "consume",
+          "source_predicate": "uses",
+          "subject": "api",
+          "validation_status": "accept_high"
+        }
+      ],
+      "schema_lens_id": null,
+      "schema_mode": "none",
+      "schema_version": "polymath.extract.relex_local.v1",
+      "semantic_direction_drop_count": 0,
+      "semantic_direction_repair_count": 0,
+      "semantic_verifier_mode": "",
+      "source_version_id": null,
+      "strict_entity_drop_count": 0,
+      "strict_relation_drop_count": 0,
+      "temporal_capture_version": null,
+      "temporal_captures": [],
+      "text": "phrase matcher links every MongoDB mention to the promoted document entity.\nThe survey pass finds Retrieval-Augmented Generation (RAG) as an acronym definition.\nRAG is defined as a method that combines retrieval with generation.\nThe software component owns a cache, but owner should not own end goal as a graph fact.\nTaylor & Francis produces information in the sentence, but information is too generic for a canonical edge.\nThe database service runs on Linux.\nLinux supports containers.\nThe API consumes JSON documents and produces normalized records.\nThe "
+    },
+    {
+      "attempts": 1,
+      "chunk_id": "graphify_quality_fixture:0006:68ea3ee05d3becc35edc",
+      "citation_drop_count": 0,
+      "claim_compilation": null,
+      "corpus_id": "openie_pack_baseline_quality_20260806",
+      "doc_id": "graphify_quality_fixture",
+      "domain_range_remap_count": 0,
+      "domain_range_warn_count": 0,
+      "endpoint_completion_count": 0,
+      "entities": [
+        {
+          "canonical_name": "dataset",
+          "confidence": 0.844978,
+          "definitional_phrase": "",
+          "entity_type": "software",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "dataset"
+        },
+        {
+          "canonical_name": "public incident reports",
+          "confidence": 0.917996,
+          "definitional_phrase": "",
+          "entity_type": "document",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "public incident reports"
+        },
+        {
+          "canonical_name": "incident reports",
+          "confidence": 0.397402,
+          "definitional_phrase": "",
+          "entity_type": "document",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "incident reports"
+        },
+        {
+          "canonical_name": "metric",
+          "confidence": 0.762858,
+          "definitional_phrase": "",
+          "entity_type": "artifact",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "metric"
+        },
+        {
+          "canonical_name": "latency",
+          "confidence": 0.975109,
+          "definitional_phrase": "",
+          "entity_type": "concept",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "latency"
+        },
+        {
+          "canonical_name": "milliseconds",
+          "confidence": 0.415067,
+          "definitional_phrase": "",
+          "entity_type": "concept",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "milliseconds"
+        },
+        {
+          "canonical_name": "el paso",
+          "confidence": 0.994352,
+          "definitional_phrase": "",
+          "entity_type": "location",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "El Paso"
+        },
+        {
+          "canonical_name": "location",
+          "confidence": 0.904402,
+          "definitional_phrase": "",
+          "entity_type": "location",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "Location"
+        },
+        {
+          "canonical_name": "graphify",
+          "confidence": 0.991144,
+          "definitional_phrase": "",
+          "entity_type": "software",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "Graphify"
+        },
+        {
+          "canonical_name": "evidence",
+          "confidence": 0.715375,
+          "definitional_phrase": "",
+          "entity_type": "artifact",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "evidence"
+        },
+        {
+          "canonical_name": "event",
+          "confidence": 0.762379,
+          "definitional_phrase": "",
+          "entity_type": "event",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "event"
+        },
+        {
+          "canonical_name": "july 13 2026",
+          "confidence": 0.469096,
+          "definitional_phrase": "",
+          "entity_type": "event",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "July 13, 2026"
+        },
+        {
+          "canonical_name": "document",
+          "confidence": 0.508421,
+          "definitional_phrase": "",
+          "entity_type": "document",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "document"
+        },
+        {
+          "canonical_name": "assertion status",
+          "confidence": 0.962898,
+          "definitional_phrase": "",
+          "entity_type": "concept",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "assertion status"
+        },
+        {
+          "canonical_name": "assertion",
+          "confidence": 0.352945,
+          "definitional_phrase": "",
+          "entity_type": "concept",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "assertion"
+        },
+        {
+          "canonical_name": "state",
+          "confidence": 0.769847,
+          "definitional_phrase": "",
+          "entity_type": "concept",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "state"
+        },
+        {
+          "canonical_name": "state of a claim",
+          "confidence": 0.719108,
+          "definitional_phrase": "",
+          "entity_type": "concept",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "state of a claim"
+        },
+        {
+          "canonical_name": "claim",
+          "confidence": 0.846577,
+          "definitional_phrase": "",
+          "entity_type": "concept",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "claim"
+        },
+        {
+          "canonical_name": "polymath",
+          "confidence": 0.986448,
+          "definitional_phrase": "",
+          "entity_type": "software",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "Polymath"
+        },
+        {
+          "canonical_name": "source",
+          "confidence": 0.656475,
+          "definitional_phrase": "",
+          "entity_type": "document",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "source"
+        },
+        {
+          "canonical_name": "fixture",
+          "confidence": 0.422993,
+          "definitional_phrase": "",
+          "entity_type": "artifact",
+          "object_kind": "",
+          "query_aliases": [],
+          "surface_form": "fixture"
+        }
+      ],
+      "entity_drop_count": 0,
+      "entity_evidence_drop_count": 0,
+      "entity_remap_count": 0,
+      "evidence_cue_repair_count": 0,
+      "evidence_drop_count": 0,
+      "extraction_counters": {},
+      "fact_drop_count": 0,
+      "facts": [],
+      "json_repair_mode": "",
+      "lane": -1,
+      "local_extraction": {
+        "acceptance_policy_hash": "ebe3a82d13515d5017f7b3a8e86d5da313e925420fdc02b9de2b8cca6b7b3e8b",
+        "contract": "polymath.relex_local.v1",
+        "entity_schema_hash": "0f475c744d9e3595",
+        "extractor_engine": "relex_local",
+        "extractor_release": "relex_local.v1",
+        "gate_decision_counts": {
+          "accept_high": 2,
+          "reject_endpoint_signature": 80,
+          "reject_low_evidence": 42,
+          "reject_scope": 244,
+          "review_conflict": 4,
+          "review_cross_sentence": 21,
+          "review_type_compatibility": 17,
+          "shadow_relex_high": 10
+        },
+        "model_hash": "7c5bd751e1b24e4254d70fe4355a986cd65400676ce3735f7752429fcc26960a",
+        "model_hash_verified": true,
+        "model_id": "knowledgator/gliner-relex-large-v1.0",
+        "ontology_hash": "f484cb6acf4062fe08d2f473a80e659cb3d3239db8567d25d63efaf9d45ee956",
+        "relation_schema_hash": "3241e858f409546c",
+        "relex_encodes_per_chunk": 1,
+        "schema_version": "polymath.extract.relex_local.v1",
+        "spacy_parses_per_chunk": 1
+      },
+      "model": "knowledgator/gliner-relex-large-v1.0",
+      "output_mode": "deterministic_gate",
+      "prompt_chars": null,
+      "prompt_hash": null,
+      "provider": "relex_local",
+      "provider_card": {},
+      "raw_output_artifact_id": null,
+      "raw_output_fingerprint": {
+        "entities": 21,
+        "raw_pairs": 420,
+        "raw_scores_complete": true,
+        "sha256": "b06679af6847e0cee0c70129f65f27e66d8873eb6cd9a97b2ddde2cba0d211d2",
+        "thresholded_relations": 18
+      },
+      "relation_drop_count": 0,
+      "relation_remap_count": 0,
+      "relations": [
+        {
+          "confidence": 0.988794,
+          "evidence_phrase": "dataset derives from public incident reports",
+          "object": "public incident reports",
+          "object_kind": "entity",
+          "predicate": "derived_from",
+          "relation_cue": "derive",
+          "source_predicate": "derived_from",
+          "subject": "dataset",
+          "validation_status": "accept_high"
+        },
+        {
+          "confidence": 0.98107,
+          "evidence_phrase": "dataset derives from public incident reports",
+          "object": "incident reports",
+          "object_kind": "entity",
+          "predicate": "derived_from",
+          "relation_cue": "derive",
+          "source_predicate": "derived_from",
+          "subject": "dataset",
+          "validation_status": "accept_high"
+        }
+      ],
+      "schema_lens_id": null,
+      "schema_mode": "none",
+      "schema_version": "polymath.extract.relex_local.v1",
+      "semantic_direction_drop_count": 0,
+      "semantic_direction_repair_count": 0,
+      "semantic_verifier_mode": "",
+      "source_version_id": null,
+      "strict_entity_drop_count": 0,
+      "strict_relation_drop_count": 0,
+      "temporal_capture_version": null,
+      "temporal_captures": [],
+      "text": "dataset derives from public incident reports.\nThe metric measures latency in milliseconds.\nEl Paso is a Location and Graphify is not located in El Paso unless evidence says so.\nThe event began on July 13, 2026.\nThe document defines assertion status as the state of a claim.\nPolymath related_to Graphify is invalid unless the source explicitly says Polymath is related to Graphify.\nPolymath is related to Graphify in this fixture for explicit related_to testing.\n"
+    }
+  ],
+  "schema_version": "polymath.relex_fixture_records.v1"
+}

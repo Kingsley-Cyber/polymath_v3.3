@@ -1,16 +1,16 @@
 """spaCy dependency-path relation adapter for the Ghost B pipeline.
 
-Drop-in replacement for GLiREL in Stage C of ghost_b_local._extract_raw.
-Same interface: extract_chunks(chunks, max_related, unit_batch) → list[list[dict]]
+Structural relation lane used by the canonical Relex extractor. Same
+interface: extract_chunks(chunks, max_related, unit_batch) → list[list[dict]]
 where each edge dict is {sub, obj, pred, ev, score}.
 
-The spaCy path is ~200x faster than GLiREL on Apple Silicon because it's a
-single CPU forward pass (en_core_web_sm) vs. a transformer classifier. It
-catches the 60% of relations that follow predictable dependency grammar
-(nsubj-verb-dobj, appos, poss) and normalizes predicates through
-config/predicate_synonyms.yaml to the 31 Ghost B Predicate Literal values.
+The spaCy path is a single CPU forward pass (en_core_web_sm) rather than a
+transformer classifier. It catches the ~60% of relations that follow
+predictable dependency grammar (nsubj-verb-dobj, appos, poss) and normalizes
+predicates through config/predicate_synonyms.yaml to the Ghost B Predicate
+Literal values.
 
-Selected via GHOST_B_RELATION_ENGINE=spacy (default) | glirel.
+This is the only structural relation lane in the Relex-only runtime.
 """
 
 from __future__ import annotations
@@ -96,7 +96,7 @@ _NOISE_PREDICATES = frozenset({
 
 
 class SpacyRelationExtractor:
-    """spaCy dependency-path relation extractor with GLiREL-compatible interface.
+    """spaCy dependency-path relation extractor.
 
     Lazily loads the spaCy model on first call. Thread-safe via the GIL for
     the model load (worst case: two loads, one is discarded).
@@ -147,7 +147,7 @@ class SpacyRelationExtractor:
                     entities is a list of GLiNER entity dicts with keys:
                     surface/text, start_char/start, end_char/end, entity_type/type.
             max_related: cap on relations per chunk.
-            unit_batch: ignored (interface compat with GLiREL).
+            unit_batch: ignored (kept for interface compatibility).
             docs: pre-parsed spaCy Docs (one per chunk). If provided, skips
                   internal nlp.pipe() — enables single-parse-per-chunk when
                   the pipeline shares Docs between Stage B and Stage C.
@@ -339,74 +339,11 @@ class SpacyRelationExtractor:
 
 
 # ---------------------------------------------------------------------------
-# Entity-type casing normalization (R-pre Finding 6, fixed in R8)
-#
-# ontology.yaml declares entity_types in Title Case (Concept, Software, ...)
-# and allowed_pairs does an EXACT tuple match. The RunPod lane stores UPPERCASE
-# types (CONCEPT, PERSON, ORGANIZATION), so every uppercase-typed entity failed
-# every constrained predicate silently. MEASURED on a 5,500-chunk sample:
-# normalizing recovers 84 relations (+2.9%). Minor at the time it was measured
-# ONLY because pod relations were never stored at all; it becomes load-bearing
-# the moment the pod lane starts emitting.
-#
-# Normalizing here — at the single boundary every lane passes through — keeps
-# local, pod, and backfill from disagreeing about what a type is.
+# Entity-type casing normalization is now owned by services.extraction.canonical.
+# Import normalize_entity_type from there — single source of truth shared by
+# this adapter, entity_quality, relex_gate, and neo4j_writer.
 # ---------------------------------------------------------------------------
-
-_ONTOLOGY_ENTITY_TYPES = (
-    "Person", "Organization", "Location", "Event", "Concept", "Method",
-    "Product", "Software", "Document", "Standard", "Rule", "Law",
-    "Artifact", "TimeReference", "other",
-)
-_UPPER_TO_ONTOLOGY = {t.upper(): t for t in _ONTOLOGY_ENTITY_TYPES}
-
-# Exact synonyms for ontology types under a different upstream name. ONLY
-# unambiguous renames belong here.
-_SYNONYM_TO_ONTOLOGY = {
-    "PLACE": "Location",
-}
-
-# DELIBERATELY NOT MAPPED — and specifically NOT mapped to "other".
-#
-# An earlier revision sent unknown types (PLACE, BEHAVIOR, PROCESS, QUALITY,
-# AGENT, ...) to the "other" wildcard. That was wrong: pair_allowed() treats
-# "other" as an explicit PASS, so wildcarding them bypassed the ontology gate
-# entirely for a large share of the corpus. The live type vocabulary is much
-# wider than ontology.yaml — GROUP, BEHAVIOR, SYSTEM, PROCESS, RESOURCE,
-# QUALITY, TIME_PATTERN all appear in the thousands — so that one line opened
-# the gate on most entities and produced edges like
-#     (Newbury Park, instance_of, Sage)      [bibliography]
-#     (Ann Arbor, instance_of, University of Michigan Press)
-# which allowed_pairs would otherwise have rejected: instance_of requires a
-# Concept object.
-#
-# It also explains why R-pre measured the casing fix as recovering "only" 84
-# relations: the UPPERCASE mismatch had been ACCIDENTALLY acting as a precision
-# gate. Normalizing casing without this correction removes that accident.
-#
-# An entity whose type is not in the ontology cannot satisfy a typed constraint,
-# so it now fails CLOSED at allowed_pairs. Extending ontology.yaml to cover
-# these types is an OWNER decision, not something to paper over here.
-
-
-def normalize_entity_type(raw: str) -> str:
-    """Map an upstream entity type onto ontology.yaml casing.
-
-    Exact ontology values pass through. Case variants are folded. Known
-    out-of-ontology types become the "other" wildcard. Anything else is
-    returned unchanged so it stays visible rather than being quietly coerced.
-    """
-    if not raw:
-        return ""
-    if raw in _ONTOLOGY_ENTITY_TYPES:
-        return raw
-    upper = raw.strip().upper()
-    mapped = _UPPER_TO_ONTOLOGY.get(upper) or _SYNONYM_TO_ONTOLOGY.get(upper)
-    if mapped:
-        return mapped
-    # Unknown type: returned unchanged so it stays visible AND fails closed at
-    # the allowed_pairs gate. Never coerce to "other" — that is a wildcard pass.
-    return raw
+from services.extraction.canonical import normalize_entity_type  # noqa: E402
 
 
 def _to_entity_spans(raw_entities: list[dict], text: str = "") -> list:

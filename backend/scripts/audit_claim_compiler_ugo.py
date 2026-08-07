@@ -88,8 +88,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     skipped_predicates = 0
     same_sentence_repeated_claims = 0
     unresolved_coreference = 0
-    glirel_agree = 0
-    glirel_conflict = 0
+    relation_agree = 0
+    relation_conflict = 0
     link_count = 0
     link_families: Counter[str] = Counter()
     cross_candidates = 0
@@ -134,8 +134,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         skipped_predicates += receipt["skipped_predicate_count"]
         same_sentence_repeated_claims += receipt["same_sentence_repeated_claim_count"]
         unresolved_coreference += receipt["unresolved_coreference_count"]
-        glirel_agree += receipt["glirel_agree_count"]
-        glirel_conflict += receipt["glirel_conflict_count"]
+        relation_agree += receipt["relation_agree_count"]
+        relation_conflict += receipt["relation_conflict_count"]
         link_count += receipt["link_count"]
         link_families.update(receipt["links_by_connective_family"])
         cross_candidates += receipt["cross_sentence_candidate_count"]
@@ -226,8 +226,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                     untyped_lemmas.items(), key=lambda item: (-item[1], item[0])
                 )[:20]
             ],
-            "glirel_agree_count": glirel_agree,
-            "glirel_conflict_count": glirel_conflict,
+            "relation_agree_count": relation_agree,
+            "relation_conflict_count": relation_conflict,
             "link_count": link_count,
             "links_by_connective_family": dict(sorted(link_families.items())),
             "cross_sentence_candidate_count": cross_candidates,

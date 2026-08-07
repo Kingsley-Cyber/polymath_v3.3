@@ -1,0 +1,1064 @@
+[
+  {
+    "evidence_end": 678,
+    "evidence_start": 499,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "evidence and downstream services build query oriented views",
+    "predicate": "preserves",
+    "qualifiers": {},
+    "subject": "events"
+  },
+  {
+    "evidence_end": 678,
+    "evidence_start": 499,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "query oriented views",
+    "predicate": "build",
+    "qualifiers": {},
+    "subject": "downstream services"
+  },
+  {
+    "evidence_end": 678,
+    "evidence_start": 499,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "query oriented views",
+    "predicate": "build",
+    "qualifiers": {},
+    "subject": "evidence and downstream services"
+  },
+  {
+    "evidence_end": 678,
+    "evidence_start": 499,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "evidence and",
+    "predicate": "preserves",
+    "qualifiers": {},
+    "subject": "events"
+  },
+  {
+    "evidence_end": 678,
+    "evidence_start": 499,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "events",
+    "predicate": "normalize",
+    "qualifiers": {},
+    "subject": "workers"
+  },
+  {
+    "evidence_end": 678,
+    "evidence_start": 499,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "evidence",
+    "predicate": "preserves",
+    "qualifiers": {},
+    "subject": "durable storage"
+  },
+  {
+    "evidence_end": 678,
+    "evidence_start": 499,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "gateway accepts requests",
+    "predicate": "normalize",
+    "qualifiers": {},
+    "subject": "workers"
+  },
+  {
+    "evidence_end": 678,
+    "evidence_start": 499,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "events durable storage preserves evidence and downstream services build query oriented views",
+    "predicate": "normalize",
+    "qualifiers": {},
+    "subject": "requests workers"
+  },
+  {
+    "evidence_end": 678,
+    "evidence_start": 499,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "events durable preserves evidence and",
+    "predicate": "normalize",
+    "qualifiers": {},
+    "subject": "requests workers"
+  },
+  {
+    "evidence_end": 678,
+    "evidence_start": 499,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "requests",
+    "predicate": "accepts",
+    "qualifiers": {},
+    "subject": "gateway"
+  },
+  {
+    "evidence_end": 678,
+    "evidence_start": 499,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "events",
+    "predicate": "normalize",
+    "qualifiers": {},
+    "subject": "requests workers"
+  },
+  {
+    "evidence_end": 678,
+    "evidence_start": 499,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "events durable preserves evidence and downstream services build query oriented views",
+    "predicate": "normalize",
+    "qualifiers": {},
+    "subject": "requests workers"
+  },
+  {
+    "evidence_end": 678,
+    "evidence_start": 499,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "requests workers normalize events",
+    "predicate": "accepts",
+    "qualifiers": {},
+    "subject": "gateway"
+  },
+  {
+    "evidence_end": 678,
+    "evidence_start": 499,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "the design is intentionally ordinary",
+    "predicate": "normalize",
+    "qualifiers": {},
+    "subject": "workers"
+  },
+  {
+    "evidence_end": 2422,
+    "evidence_start": 2317,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "evidence",
+    "predicate": "is not replacement for",
+    "qualifiers": {},
+    "subject": "it"
+  },
+  {
+    "evidence_end": 2422,
+    "evidence_start": 2317,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "the original evidence",
+    "predicate": "is not replacement for",
+    "qualifiers": {},
+    "subject": "it"
+  },
+  {
+    "evidence_end": 2422,
+    "evidence_start": 2317,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "replacement for original",
+    "predicate": "is not",
+    "qualifiers": {},
+    "subject": "it"
+  },
+  {
+    "evidence_end": 2422,
+    "evidence_start": 2317,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "original evidence",
+    "predicate": "is not replacement for",
+    "qualifiers": {},
+    "subject": "it"
+  },
+  {
+    "evidence_end": 2749,
+    "evidence_start": 2595,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "equipment",
+    "predicate": "when fails to",
+    "qualifiers": {},
+    "subject": "service"
+  },
+  {
+    "evidence_end": 2749,
+    "evidence_start": 2595,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "to recognize name",
+    "predicate": "when fails",
+    "qualifiers": {},
+    "subject": "service"
+  },
+  {
+    "evidence_end": 2749,
+    "evidence_start": 2595,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "to recognize equipment name",
+    "predicate": "when fails",
+    "qualifiers": {},
+    "subject": "enrichment service"
+  },
+  {
+    "evidence_end": 2749,
+    "evidence_start": 2595,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "to recognize name",
+    "predicate": "when fails",
+    "qualifiers": {},
+    "subject": "enrichment"
+  },
+  {
+    "evidence_end": 2749,
+    "evidence_start": 2595,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "to equipment name",
+    "predicate": "when fails",
+    "qualifiers": {},
+    "subject": "enrichment"
+  },
+  {
+    "evidence_end": 2749,
+    "evidence_start": 2595,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "to equipment name",
+    "predicate": "when fails",
+    "qualifiers": {},
+    "subject": "service"
+  },
+  {
+    "evidence_end": 2749,
+    "evidence_start": 2595,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "to recognize equipment name",
+    "predicate": "when fails",
+    "qualifiers": {},
+    "subject": "service"
+  },
+  {
+    "evidence_end": 2749,
+    "evidence_start": 2595,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "equipment",
+    "predicate": "when fails to",
+    "qualifiers": {},
+    "subject": "enrichment"
+  },
+  {
+    "evidence_end": 2749,
+    "evidence_start": 2595,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "to recognize equipment name",
+    "predicate": "when fails",
+    "qualifiers": {},
+    "subject": "enrichment"
+  },
+  {
+    "evidence_end": 2890,
+    "evidence_start": 2794,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "duplicate graph nodes",
+    "predicate": "causes",
+    "qualifiers": {},
+    "subject": "malformed aliases"
+  },
+  {
+    "evidence_end": 2890,
+    "evidence_start": 2794,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "aliases and aliases can cause duplicate graph nodes",
+    "predicate": "causes",
+    "qualifiers": {},
+    "subject": "parser bug"
+  },
+  {
+    "evidence_end": 2890,
+    "evidence_start": 2794,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "aliases",
+    "predicate": "causes",
+    "qualifiers": {},
+    "subject": "parser bug"
+  },
+  {
+    "evidence_end": 2890,
+    "evidence_start": 2794,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "aliases and malformed aliases can cause duplicate graph nodes",
+    "predicate": "causes",
+    "qualifiers": {},
+    "subject": "parser bug"
+  },
+  {
+    "evidence_end": 2890,
+    "evidence_start": 2794,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "graph nodes",
+    "predicate": "can duplicate",
+    "qualifiers": {},
+    "subject": "aliases and aliases"
+  },
+  {
+    "evidence_end": 2890,
+    "evidence_start": 2794,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "duplicate graph nodes",
+    "predicate": "causes",
+    "qualifiers": {},
+    "subject": "aliases and malformed aliases"
+  },
+  {
+    "evidence_end": 2890,
+    "evidence_start": 2794,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "aliases and aliases can duplicate graph nodes",
+    "predicate": "causes",
+    "qualifiers": {},
+    "subject": "parser bug"
+  },
+  {
+    "evidence_end": 2890,
+    "evidence_start": 2794,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "duplicate graph nodes",
+    "predicate": "causes",
+    "qualifiers": {},
+    "subject": "aliases and malformed aliases"
+  },
+  {
+    "evidence_end": 2890,
+    "evidence_start": 2794,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "aliases and malformed aliases cause duplicate graph nodes",
+    "predicate": "causes",
+    "qualifiers": {},
+    "subject": "parser bug"
+  },
+  {
+    "evidence_end": 2890,
+    "evidence_start": 2794,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "duplicate graph nodes",
+    "predicate": "causes",
+    "qualifiers": {},
+    "subject": "aliases and aliases"
+  },
+  {
+    "evidence_end": 2890,
+    "evidence_start": 2794,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "malformed aliases",
+    "predicate": "causes",
+    "qualifiers": {},
+    "subject": "a parser bug"
+  },
+  {
+    "evidence_end": 3219,
+    "evidence_start": 3106,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "rebuilt",
+    "predicate": "may discarded",
+    "qualifiers": {},
+    "subject": "operational rule derived"
+  },
+  {
+    "evidence_end": 3416,
+    "evidence_start": 3262,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "accepted envelope and its normalized representation to canonical event store",
+    "predicate": "writes",
+    "qualifiers": {},
+    "subject": "Ingestion Worker"
+  },
+  {
+    "evidence_end": 7179,
+    "evidence_start": 7093,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "if relies only word",
+    "predicate": "can obscure",
+    "qualifiers": {},
+    "subject": "passive constructions"
+  },
+  {
+    "evidence_end": 7179,
+    "evidence_start": 7093,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "order",
+    "predicate": "can obscure on",
+    "qualifiers": {},
+    "subject": "constructions"
+  },
+  {
+    "evidence_end": 7179,
+    "evidence_start": 7093,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "word",
+    "predicate": "can obscure on",
+    "qualifiers": {},
+    "subject": "constructions"
+  },
+  {
+    "evidence_end": 7179,
+    "evidence_start": 7093,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "if extractor relies on order",
+    "predicate": "can obscure",
+    "qualifiers": {},
+    "subject": "passive constructions"
+  },
+  {
+    "evidence_end": 7179,
+    "evidence_start": 7093,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "relies only on word order",
+    "predicate": "can obscure",
+    "qualifiers": {},
+    "subject": "constructions"
+  },
+  {
+    "evidence_end": 7179,
+    "evidence_start": 7093,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "relies only on word order",
+    "predicate": "can obscure",
+    "qualifiers": {},
+    "subject": "passive constructions"
+  },
+  {
+    "evidence_end": 7179,
+    "evidence_start": 7093,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "if extractor relies only on word order",
+    "predicate": "can obscure",
+    "qualifiers": {},
+    "subject": "passive constructions"
+  },
+  {
+    "evidence_end": 7179,
+    "evidence_start": 7093,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "direction",
+    "predicate": "can obscure",
+    "qualifiers": {},
+    "subject": "constructions"
+  },
+  {
+    "evidence_end": 7179,
+    "evidence_start": 7093,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "word order",
+    "predicate": "can obscure on",
+    "qualifiers": {},
+    "subject": "constructions"
+  },
+  {
+    "evidence_end": 7179,
+    "evidence_start": 7093,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "if extractor relies on word order",
+    "predicate": "can obscure",
+    "qualifiers": {},
+    "subject": "passive constructions"
+  },
+  {
+    "evidence_end": 7179,
+    "evidence_start": 7093,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "relies only on order",
+    "predicate": "can obscure",
+    "qualifiers": {},
+    "subject": "constructions"
+  },
+  {
+    "evidence_end": 7179,
+    "evidence_start": 7093,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "direction extractor",
+    "predicate": "can obscure",
+    "qualifiers": {},
+    "subject": "passive constructions"
+  },
+  {
+    "evidence_end": 7179,
+    "evidence_start": 7093,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "direction extractor",
+    "predicate": "can obscure",
+    "qualifiers": {},
+    "subject": "constructions"
+  },
+  {
+    "evidence_end": 7179,
+    "evidence_start": 7093,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "if extractor relies only word order",
+    "predicate": "can obscure",
+    "qualifiers": {},
+    "subject": "passive constructions"
+  },
+  {
+    "evidence_end": 7179,
+    "evidence_start": 7093,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "direction",
+    "predicate": "can obscure",
+    "qualifiers": {},
+    "subject": "passive constructions"
+  },
+  {
+    "evidence_end": 7330,
+    "evidence_start": 7180,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "service",
+    "predicate": "is by",
+    "qualifiers": {},
+    "subject": "hybrid process"
+  },
+  {
+    "evidence_end": 7330,
+    "evidence_start": 7180,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "Query Service",
+    "predicate": "is by",
+    "qualifiers": {},
+    "subject": "hybrid process"
+  },
+  {
+    "evidence_end": 7828,
+    "evidence_start": 7718,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "Canonical evidence",
+    "predicate": "not cause loss of",
+    "qualifiers": {},
+    "subject": "it"
+  },
+  {
+    "evidence_end": 7828,
+    "evidence_start": 7718,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "projection failure may cause temporary search staleness",
+    "predicate": "should not cause",
+    "qualifiers": {},
+    "subject": "it"
+  },
+  {
+    "evidence_end": 7828,
+    "evidence_start": 7718,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "temporary search staleness",
+    "predicate": "causes",
+    "qualifiers": {},
+    "subject": "projection failure"
+  },
+  {
+    "evidence_end": 7828,
+    "evidence_start": 7718,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "projection failure may cause search staleness",
+    "predicate": "not cause",
+    "qualifiers": {},
+    "subject": "it"
+  },
+  {
+    "evidence_end": 7828,
+    "evidence_start": 7718,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "projection failure may cause search staleness",
+    "predicate": "should not cause",
+    "qualifiers": {},
+    "subject": "it"
+  },
+  {
+    "evidence_end": 7828,
+    "evidence_start": 7718,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "search staleness",
+    "predicate": "causes",
+    "qualifiers": {},
+    "subject": "projection failure"
+  },
+  {
+    "evidence_end": 7828,
+    "evidence_start": 7718,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "temporary search staleness",
+    "predicate": "causes",
+    "qualifiers": {},
+    "subject": "a projection failure"
+  },
+  {
+    "evidence_end": 7828,
+    "evidence_start": 7718,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "Canonical evidence",
+    "predicate": "should not cause loss of",
+    "qualifiers": {},
+    "subject": "it"
+  },
+  {
+    "evidence_end": 8713,
+    "evidence_start": 8561,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "useful graph entities",
+    "predicate": "detects",
+    "qualifiers": {},
+    "subject": "phrases"
+  },
+  {
+    "evidence_end": 8713,
+    "evidence_start": 8561,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "a process",
+    "predicate": "uses",
+    "qualifiers": {},
+    "subject": "this approach"
+  },
+  {
+    "evidence_end": 8713,
+    "evidence_start": 8561,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "owns problem",
+    "predicate": "uses",
+    "qualifiers": {},
+    "subject": "approach"
+  },
+  {
+    "evidence_end": 8713,
+    "evidence_start": 8561,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "process",
+    "predicate": "uses",
+    "qualifiers": {},
+    "subject": "approach"
+  },
+  {
+    "evidence_end": 8713,
+    "evidence_start": 8561,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "problem",
+    "predicate": "owns",
+    "qualifiers": {},
+    "subject": "system"
+  },
+  {
+    "evidence_end": 8713,
+    "evidence_start": 8561,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "the problem",
+    "predicate": "owns",
+    "qualifiers": {},
+    "subject": "the system"
+  },
+  {
+    "evidence_end": 8713,
+    "evidence_start": 8561,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "useful graph entities",
+    "predicate": "detects",
+    "qualifiers": {},
+    "subject": "those phrases"
+  },
+  {
+    "evidence_end": 8968,
+    "evidence_start": 8780,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "inventing subject for either clause unless surrounding resolves reference",
+    "predicate": "should avoid",
+    "qualifiers": {},
+    "subject": "extractor"
+  },
+  {
+    "evidence_end": 8968,
+    "evidence_start": 8780,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "inventing for either clause unless surrounding evidence reference",
+    "predicate": "should avoid",
+    "qualifiers": {},
+    "subject": "extractor"
+  },
+  {
+    "evidence_end": 8968,
+    "evidence_start": 8780,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "inventing subject for either clause unless evidence resolves reference",
+    "predicate": "should avoid",
+    "qualifiers": {},
+    "subject": "extractor"
+  },
+  {
+    "evidence_end": 8968,
+    "evidence_start": 8780,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "inventing subject for either clause unless surrounding evidence resolves",
+    "predicate": "should avoid",
+    "qualifiers": {},
+    "subject": "extractor"
+  },
+  {
+    "evidence_end": 8968,
+    "evidence_start": 8780,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "surrounding evidence resolves reference",
+    "predicate": "should avoid",
+    "qualifiers": {},
+    "subject": "conservative extractor"
+  },
+  {
+    "evidence_end": 8968,
+    "evidence_start": 8780,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "inventing subject for either clause",
+    "predicate": "should avoid",
+    "qualifiers": {},
+    "subject": "extractor"
+  },
+  {
+    "evidence_end": 8968,
+    "evidence_start": 8780,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "inventing subject for either clause unless evidence resolves reference",
+    "predicate": "should avoid",
+    "qualifiers": {},
+    "subject": "conservative extractor"
+  },
+  {
+    "evidence_end": 8968,
+    "evidence_start": 8780,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "inventing for either clause unless surrounding resolves",
+    "predicate": "should avoid",
+    "qualifiers": {},
+    "subject": "extractor"
+  },
+  {
+    "evidence_end": 8968,
+    "evidence_start": 8780,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "inventing for either clause",
+    "predicate": "should avoid",
+    "qualifiers": {},
+    "subject": "extractor"
+  },
+  {
+    "evidence_end": 8968,
+    "evidence_start": 8780,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "inventing subject for either clause unless surrounding evidence resolves",
+    "predicate": "should avoid",
+    "qualifiers": {},
+    "subject": "conservative extractor"
+  },
+  {
+    "evidence_end": 8968,
+    "evidence_start": 8780,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "surrounding resolves reference inventing subject for either clause",
+    "predicate": "should avoid",
+    "qualifiers": {},
+    "subject": "conservative extractor"
+  },
+  {
+    "evidence_end": 8968,
+    "evidence_start": 8780,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "inventing for either clause unless surrounding resolves reference",
+    "predicate": "should avoid",
+    "qualifiers": {},
+    "subject": "extractor"
+  },
+  {
+    "evidence_end": 8968,
+    "evidence_start": 8780,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "inventing subject for either clause unless evidence resolves",
+    "predicate": "should avoid",
+    "qualifiers": {},
+    "subject": "conservative extractor"
+  },
+  {
+    "evidence_end": 8968,
+    "evidence_start": 8780,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "reference inventing subject for either clause",
+    "predicate": "should avoid",
+    "qualifiers": {},
+    "subject": "conservative extractor"
+  },
+  {
+    "evidence_end": 8968,
+    "evidence_start": 8780,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "inventing subject for either clause surrounding evidence resolves",
+    "predicate": "should avoid",
+    "qualifiers": {},
+    "subject": "conservative extractor"
+  },
+  {
+    "evidence_end": 8968,
+    "evidence_start": 8780,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "inventing subject for either clause",
+    "predicate": "should avoid",
+    "qualifiers": {},
+    "subject": "conservative extractor"
+  },
+  {
+    "evidence_end": 8968,
+    "evidence_start": 8780,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "inventing a subject for either clause unless surrounding evidence resolves the reference",
+    "predicate": "should avoid",
+    "qualifiers": {},
+    "subject": "a conservative extractor"
+  },
+  {
+    "evidence_end": 9102,
+    "evidence_start": 9037,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "SQLite",
+    "predicate": "depends_on",
+    "qualifiers": {},
+    "subject": "Harbor"
+  },
+  {
+    "evidence_end": 9102,
+    "evidence_start": 9037,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "canonical event storage",
+    "predicate": "depends_on",
+    "qualifiers": {},
+    "subject": "Harbor"
+  },
+  {
+    "evidence_end": 9102,
+    "evidence_start": 9037,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "*",
+    "predicate": "does not depend",
+    "qualifiers": {},
+    "subject": "*"
+  },
+  {
+    "evidence_end": 9102,
+    "evidence_start": 9037,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "canonical event storage",
+    "predicate": "does not depend for",
+    "qualifiers": {},
+    "subject": "*"
+  },
+  {
+    "evidence_end": 9102,
+    "evidence_start": 9037,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "SQLite",
+    "predicate": "does not depend on",
+    "qualifiers": {},
+    "subject": "*"
+  },
+  {
+    "evidence_end": 9257,
+    "evidence_start": 9103,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "ClickHouse",
+    "predicate": "supports",
+    "qualifiers": {},
+    "subject": "the team"
+  },
+  {
+    "evidence_end": 9257,
+    "evidence_start": 9103,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "future release",
+    "predicate": "supports",
+    "qualifiers": {},
+    "subject": "team"
+  },
+  {
+    "evidence_end": 9257,
+    "evidence_start": 9103,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "analytical reporting",
+    "predicate": "supports",
+    "qualifiers": {},
+    "subject": "the team"
+  },
+  {
+    "evidence_end": 9257,
+    "evidence_start": 9103,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "ClickHouse",
+    "predicate": "supports",
+    "qualifiers": {},
+    "subject": "team"
+  },
+  {
+    "evidence_end": 9257,
+    "evidence_start": 9103,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "analytical reporting",
+    "predicate": "supports",
+    "qualifiers": {},
+    "subject": "team"
+  },
+  {
+    "evidence_end": 9257,
+    "evidence_start": 9103,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "current production architecture",
+    "predicate": "is not of",
+    "qualifiers": {},
+    "subject": "possibility"
+  },
+  {
+    "evidence_end": 9257,
+    "evidence_start": 9103,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "a future release",
+    "predicate": "supports",
+    "qualifiers": {},
+    "subject": "the team"
+  },
+  {
+    "evidence_end": 9404,
+    "evidence_start": 9258,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "future recommendation feature",
+    "predicate": "supports",
+    "qualifiers": {},
+    "subject": "Qdrant"
+  },
+  {
+    "evidence_end": 9404,
+    "evidence_start": 9258,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "review suggested could support future feature",
+    "predicate": "does not establish",
+    "qualifiers": {},
+    "subject": "suggestion"
+  },
+  {
+    "evidence_end": 9404,
+    "evidence_start": 9258,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "review suggested could support future recommendation",
+    "predicate": "does not establish",
+    "qualifiers": {},
+    "subject": "suggestion"
+  },
+  {
+    "evidence_end": 9404,
+    "evidence_start": 9258,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "that qdrant could support a future recommendation feature",
+    "predicate": "suggested",
+    "qualifiers": {},
+    "subject": "an internal review"
+  },
+  {
+    "evidence_end": 9404,
+    "evidence_start": 9258,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "could support future recommendation feature",
+    "predicate": "suggested",
+    "qualifiers": {},
+    "subject": "review"
+  },
+  {
+    "evidence_end": 9404,
+    "evidence_start": 9258,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "could support future recommendation",
+    "predicate": "suggested",
+    "qualifiers": {},
+    "subject": "review"
+  },
+  {
+    "evidence_end": 9404,
+    "evidence_start": 9258,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "review suggested qdrant could support future recommendation feature",
+    "predicate": "does not establish",
+    "qualifiers": {},
+    "subject": "suggestion"
+  },
+  {
+    "evidence_end": 9404,
+    "evidence_start": 9258,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "an internal review suggested that qdrant could support a future recommendation feature",
+    "predicate": "does not establish",
+    "qualifiers": {},
+    "subject": "the suggestion"
+  },
+  {
+    "evidence_end": 9404,
+    "evidence_start": 9258,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "a future recommendation feature",
+    "predicate": "supports",
+    "qualifiers": {},
+    "subject": "Qdrant"
+  },
+  {
+    "evidence_end": 9404,
+    "evidence_start": 9258,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "could support future feature",
+    "predicate": "suggested",
+    "qualifiers": {},
+    "subject": "review"
+  },
+  {
+    "evidence_end": 9404,
+    "evidence_start": 9258,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "qdrant could support future recommendation feature",
+    "predicate": "suggested",
+    "qualifiers": {},
+    "subject": "review"
+  },
+  {
+    "evidence_end": 9404,
+    "evidence_start": 9258,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "review suggested could support future recommendation feature",
+    "predicate": "does not establish",
+    "qualifiers": {},
+    "subject": "suggestion"
+  },
+  {
+    "evidence_end": 9475,
+    "evidence_start": 9405,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "phantom",
+    "predicate": "owns",
+    "qualifiers": {},
+    "subject": "it"
+  },
+  {
+    "evidence_end": 9475,
+    "evidence_start": 9405,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "Phantom Dataset",
+    "predicate": "owns",
+    "qualifiers": {},
+    "subject": "it"
+  },
+  {
+    "evidence_end": 9475,
+    "evidence_start": 9405,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "Phantom Dataset",
+    "predicate": "owns",
+    "qualifiers": {},
+    "subject": "it"
+  },
+  {
+    "evidence_end": 9475,
+    "evidence_start": 9405,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "*",
+    "predicate": "owns",
+    "qualifiers": {},
+    "subject": "it"
+  },
+  {
+    "evidence_end": 9475,
+    "evidence_start": 9405,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "the phantom dataset",
+    "predicate": "owns",
+    "qualifiers": {},
+    "subject": "it"
+  }
+]

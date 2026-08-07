@@ -1,0 +1,19 @@
+{
+  "assertion_decisions": 310,
+  "decision_conservation": true,
+  "fact_entity_edges": 3,
+  "fact_values": 15,
+  "identity_digest": "e351fa94564a69b2679581e7bef95d1e546c6ca1ece8803cf1b098c2a2eb5924",
+  "lane_counts": {
+    "FACT": 18,
+    "OPEN_RELATION": 62,
+    "QUALIFIED_CLAIM": 18,
+    "REJECT": 12,
+    "REVIEW": 200
+  },
+  "predicate_candidates": 310,
+  "qualified_promoted_to_fact": 0,
+  "schema_version": "polymath.openie_assertion_report.v1",
+  "status": "passed",
+  "wildcard_endpoints": 0
+}

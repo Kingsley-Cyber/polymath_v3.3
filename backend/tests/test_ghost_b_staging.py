@@ -527,8 +527,8 @@ async def test_resume_skip_reads_staging_not_llm():
         worker.mongo_reader, "read_ghost_b_staging", side_effect=_read_stub
     ) as read_mock, patch.object(
         worker.mongo_reader, "read_ghost_b_failures", new_callable=AsyncMock
-    ) as failures_mock, patch.object(
-        worker, "extract_entities", new_callable=AsyncMock
+    ) as failures_mock, patch(
+        "services.ingestion.relex_local.extract_entities", new_callable=AsyncMock
     ) as extract_mock, patch.object(worker.settings, "NEO4J_ENABLED", True):
         parent_mock.return_value = []
         failures_mock.return_value = []
@@ -607,15 +607,15 @@ async def test_resume_skip_keeps_ghost_b_partial_metrics():
         worker.mongo_reader, "read_ghost_b_staging", side_effect=_read_stub
     ), patch.object(
         worker.mongo_reader, "read_ghost_b_failures", side_effect=_read_failures_stub
-    ), patch.object(
-        worker, "extract_entities", new_callable=AsyncMock
+    ), patch(
+        "services.ingestion.relex_local.extract_entities", new_callable=AsyncMock
     ) as extract_mock, patch.object(worker.settings, "NEO4J_ENABLED", True):
         parent_mock.return_value = []
         result = await worker._run_ghosts_parallel(
             config=IngestionConfig(
                 use_neo4j=True,
                 chunk_summarization=False,
-                extraction_engine="legacy_local",
+                extraction_engine="relex_local",
             ),
             parents=[],
             children=[],
@@ -700,8 +700,8 @@ async def test_resume_extracts_only_missing_ghost_b_chunks():
         worker.mongo_reader, "read_ghost_b_failures", new_callable=AsyncMock
     ) as failures_mock, patch.object(
         worker, "get_or_create_schema_lens", new_callable=AsyncMock
-    ) as lens_mock, patch.object(
-        worker, "extract_entities", side_effect=_extract_stub
+    ) as lens_mock, patch(
+        "services.ingestion.relex_local.extract_entities", side_effect=_extract_stub
     ) as extract_mock, patch.object(worker.settings, "NEO4J_ENABLED", True):
         parent_mock.return_value = []
         staging_mock.return_value = staged
@@ -711,7 +711,7 @@ async def test_resume_extracts_only_missing_ghost_b_chunks():
             config=IngestionConfig(
                 use_neo4j=True,
                 chunk_summarization=False,
-                extraction_engine="legacy_local",
+                extraction_engine="relex_local",
             ),
             parents=[],
             children=children,
@@ -792,8 +792,8 @@ async def test_resume_keeps_staged_ghost_b_when_missing_retry_totally_fails():
         worker.mongo_reader, "read_ghost_b_failures", new_callable=AsyncMock
     ) as failures_mock, patch.object(
         worker, "get_or_create_schema_lens", new_callable=AsyncMock
-    ) as lens_mock, patch.object(
-        worker, "extract_entities", side_effect=_extract_stub
+    ) as lens_mock, patch(
+        "services.ingestion.relex_local.extract_entities", side_effect=_extract_stub
     ) as extract_mock, patch.object(worker.settings, "NEO4J_ENABLED", True):
         parent_mock.return_value = []
         staging_mock.return_value = staged
@@ -803,7 +803,7 @@ async def test_resume_keeps_staged_ghost_b_when_missing_retry_totally_fails():
             config=IngestionConfig(
                 use_neo4j=True,
                 chunk_summarization=False,
-                extraction_engine="legacy_local",
+                extraction_engine="relex_local",
             ),
             parents=[],
             children=children,

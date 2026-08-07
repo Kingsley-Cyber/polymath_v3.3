@@ -45,7 +45,6 @@ fi
 EMBED_BATCH_SIZE="${EMBED_BATCH_SIZE:-32}"
 START_EMBEDDER="${START_EMBEDDER:-true}"
 START_RERANKER="${START_RERANKER:-true}"
-START_DOCLING="${START_DOCLING:-false}"
 
 should_start() {
   case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
@@ -58,7 +57,7 @@ echo "[apple-mlx] runtime root : ${RUNTIME_ROOT}"
 echo "[apple-mlx] services     : ${SERVICES_DIR}"
 echo "[apple-mlx] launch agent : ${LAUNCH_AGENT_PATH}"
 echo "[apple-mlx] embed batch  : ${EMBED_BATCH_SIZE}"
-echo "[apple-mlx] sidecars     : embedder=${START_EMBEDDER} reranker=${START_RERANKER} docling=${START_DOCLING}"
+echo "[apple-mlx] sidecars     : embedder=${START_EMBEDDER} reranker=${START_RERANKER}"
 echo "[apple-mlx] reranker     : backend=${APPLE_RERANKER_BACKEND} model=${APPLE_TORCH_RERANKER_MODEL_ID}"
 
 mkdir -p "${SERVICES_DIR}" "${LOG_DIR}" "${RUNTIME_ROOT}/models" "${RUNTIME_ROOT}/volumes/hf-cache"
@@ -72,7 +71,6 @@ EXCLUDES=(
 SIDECAR_RELS=(
   'embedder_mlx/main.py'
   'reranker_mlx/main.py'
-  'docling_svc/main.py'
 )
 if [[ "${POLYMATH_APPLE_MLX_PRESERVE_HOST:-0}" == "1" ]]; then
   for rel in "${SIDECAR_RELS[@]}"; do
@@ -179,8 +177,6 @@ cat > "${LAUNCH_AGENT_PATH}" <<PLIST
         <string>${START_EMBEDDER}</string>
         <key>START_RERANKER</key>
         <string>${START_RERANKER}</string>
-        <key>START_DOCLING</key>
-        <string>${START_DOCLING}</string>
         <key>RERANKER_SCORE_SCALE</key>
         <string>${RERANKER_SCORE_SCALE}</string>
         <key>RERANKER_WARM_ON_STARTUP</key>
@@ -220,7 +216,6 @@ echo "[apple-mlx] waiting up to 90s for sidecars to come up"
 VERIFY_ARGS=(--wait 90)
 should_start "${START_EMBEDDER}" || VERIFY_ARGS+=(--skip-embedder)
 should_start "${START_RERANKER}" || VERIFY_ARGS+=(--skip-reranker)
-should_start "${START_DOCLING}" || VERIFY_ARGS+=(--skip-docling)
 "${SERVICES_DIR}/.venv/bin/python" "${REPO_ROOT}/scripts/verify_apple_mlx_runtime.py" "${VERIFY_ARGS[@]}"
 
 echo

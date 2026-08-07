@@ -12,17 +12,32 @@ import hashlib
 import json
 import time
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
+from pydantic import BaseModel, ConfigDict
 from pymongo import UpdateOne
 
 from db.queue_integrity import bulk_upsert_durable_jobs
+from models.release_stamp import copy_stamp
+from models.release_state import (
+    ReleasePin,
+    blocked_no_release_state,
+    graph_write_allowed,
+    missing_release_conditions,
+)
 from services.ingestion.job_leases import lease_deadline, reclaim_expired_running_jobs
 from services.ingestion.stage_identity import graph_promotion_stage_identity, stable_stage_hash
 
 GRAPH_VERIFY_PATTERN = r"(neo4j|has_chunk)"
 CLAIM_PROMOTION_REASON = "claims_unpromoted"
 LOCAL_CLAIM_SCHEMA_VERSION = "polymath.extract.local_extraction.v1"
+
+# Deny-by-default release gate (owner sequencing decision 2026-08-03).
+# off/shadow/enforce — staged rollout; authority comes exclusively from the
+# categorical ReleasePin registry. A complete ReleaseStamp or a complete
+# TemporalEnvelope never authorizes a canonical Neo4j write.
+ReleaseGateMode = Literal["off", "shadow", "enforce"]
+VALID_RELEASE_GATE_MODES: tuple[str, ...] = ("off", "shadow", "enforce")
 TERMINAL_STATUSES = {
     "done",
     "partial",
@@ -146,6 +161,10 @@ def classify_graph_promotion_candidate(row: dict[str, Any]) -> dict[str, Any] | 
         "failure_rows": failure_rows,
         "failed_chunks": failure_count,
         "claim_promotion_required": False,
+        # Step 3 — release stamp of the extraction artifacts this attempt
+        # promotes, copied verbatim (null when unknown). Descriptive only;
+        # it neither permits nor denies the write.
+        "release_stamp": copy_stamp(row.get("release_stamp")),
     }
 
 
@@ -257,6 +276,9 @@ async def _claim_promotion_candidate_rows(
             "failure_rows": 0,
             "failed_chunks": 0,
             "ingestion_config": cfg,
+            # Step 3 — claim leg carries no extraction stamp today; null
+            # keeps the attempt record honest until stamps flow from claims.
+            "release_stamp": None,
         }
         candidate["stage_identity"] = graph_promotion_stage_identity(
             doc={**doc, "ingestion_config": cfg},
@@ -411,10 +433,13 @@ async def mark_doc_extractions_promoted(
             "full_replay": bool(result.get("full_replay")),
         }
 
-    ghost_result = await db["ghost_b_extractions"].update_many(
-        {"corpus_id": corpus_id, "doc_id": doc_id, "status": "ok"},
-        {"$set": base_set},
-    )
+    # Ordering is the crash-safety contract: the census derives promotion
+    # state from ghost rows' promoted_at, so the ghost stamp is the commit
+    # point and must land LAST. A crash between the two writes then leaves
+    # ghost rows unstamped → the census still plans a re-promotion, whose
+    # rerun converges both collections. The reverse order strands
+    # extraction_jobs at "succeeded" forever because the census is already
+    # satisfied and never replans.
     job_result = await db["extraction_jobs"].update_many(
         {"corpus_id": corpus_id, "doc_id": doc_id, "status": "succeeded"},
         {
@@ -425,6 +450,10 @@ async def mark_doc_extractions_promoted(
                 "source_status": "ok",
             }
         },
+    )
+    ghost_result = await db["ghost_b_extractions"].update_many(
+        {"corpus_id": corpus_id, "doc_id": doc_id, "status": "ok"},
+        {"$set": base_set},
     )
     return {
         "ghost_b_rows_promoted": _modified_count(ghost_result),
@@ -653,7 +682,16 @@ async def plan_graph_promotion_jobs(
         "counts": counts,
         "jobs": plan[:50],
     }
-    if not apply or not plan:
+    if not apply:
+        return result
+
+    reevaluation = await reevaluate_stale_graph_promotion_jobs(
+        db, corpus_id=corpus_id, user_id=user_id, limit=max(limit, 500)
+    )
+    result["blocked_reevaluation"] = reevaluation
+    if not plan:
+        # Nothing new to materialize — stale/blocked jobs were still
+        # reconsidered above (owner §4.3 self-healing).
         return result
 
     now = datetime.utcnow()
@@ -673,6 +711,119 @@ async def plan_graph_promotion_jobs(
         ops.append(UpdateOne({"job_id": row["job_id"]}, update, upsert=True))
     await bulk_upsert_durable_jobs(db["graph_promotion_jobs"], ops)
     return result
+
+
+GRAPH_BLOCKED_REEVALUATION_STATUSES: tuple[str, ...] = (
+    "blocked_no_extractions",
+    "blocked_failed_chunks",
+)
+
+
+async def reevaluate_stale_graph_promotion_jobs(
+    db: Any,
+    *,
+    corpus_id: str,
+    user_id: str | None = None,
+    limit: int = 500,
+) -> dict[str, int]:
+    """Reconcile durable graph jobs against live document state (owner §4.3).
+
+    A blocked dependency is reconsidered automatically when the required
+    artifact appears: a blocked job whose document is a fresh candidate again
+    adopts the candidate's classification. A runnable or blocked job whose
+    document no longer carries a graph gap becomes ``noop`` — the gap is
+    resolved, so the job must not linger in the pressure/repair census.
+    Release-gated jobs are untouched: they retry deterministically when the
+    release advances.
+    """
+
+    limit = max(1, min(int(limit or 500), 5000))
+    reevaluable = sorted(set(ACTIVE_STATUSES) | set(GRAPH_BLOCKED_REEVALUATION_STATUSES))
+    query: dict[str, Any] = {"corpus_id": corpus_id, "status": {"$in": reevaluable}}
+    if user_id:
+        query["user_id"] = user_id
+    jobs = await db["graph_promotion_jobs"].find(query, {"_id": 0}).limit(limit).to_list(
+        length=limit
+    )
+    if not jobs:
+        return {"reevaluated": 0, "requeued": 0, "resolved": 0, "still_blocked": 0}
+
+    candidates = {
+        str(row["job_id"]): row
+        for row in await _candidate_rows(
+            db, corpus_id=corpus_id, user_id=user_id, limit=max(limit, 100)
+        )
+    }
+
+    now = datetime.utcnow()
+    ops: list[UpdateOne] = []
+    requeued = resolved = still_blocked = 0
+    for job in jobs:
+        current = str(job.get("status") or "")
+        candidate = candidates.get(str(job.get("job_id") or ""))
+        if candidate is not None:
+            new_status = str(candidate.get("status") or "")
+            if new_status == current:
+                if current in GRAPH_BLOCKED_REEVALUATION_STATUSES:
+                    still_blocked += 1
+                continue
+            ops.append(
+                UpdateOne(
+                    {"job_id": job["job_id"], "status": current},
+                    {
+                        "$set": {
+                            **candidate,
+                            "updated_at": now,
+                            "last_reevaluated_at": now,
+                            "reevaluation_reason": "dependency_reconsidered",
+                        }
+                    },
+                )
+            )
+            if new_status == "queued":
+                requeued += 1
+            else:
+                still_blocked += 1
+            continue
+
+        doc = await db["documents"].find_one(
+            {"corpus_id": corpus_id, "doc_id": job.get("doc_id")},
+            {"_id": 0, "write_state": 1, "ingestion_config": 1, "ingest_stage": 1},
+        )
+        if doc is None:
+            noop_reason = "document_gone"
+        elif ((doc.get("ingestion_config") or {}).get("use_neo4j", True)) is False:
+            noop_reason = "neo4j_disabled"
+        elif graph_gap_reason(doc) is None:
+            noop_reason = "graph_gap_resolved"
+        else:
+            still_blocked += 1
+            continue
+        ops.append(
+            UpdateOne(
+                {"job_id": job["job_id"], "status": current},
+                {
+                    "$set": {
+                        "status": "noop",
+                        "noop_reason": noop_reason,
+                        "updated_at": now,
+                        "last_reevaluated_at": now,
+                        "reevaluation_reason": "stale_job_reconciled",
+                    },
+                    "$unset": {"lease_until": "", "runner": ""},
+                },
+            )
+        )
+        resolved += 1
+
+    if ops:
+        await db["graph_promotion_jobs"].bulk_write(ops, ordered=False)
+    return {
+        "reevaluated": len(jobs),
+        "requeued": requeued,
+        "resolved": resolved,
+        "still_blocked": still_blocked,
+    }
 
 
 async def list_graph_promotion_jobs(
@@ -700,6 +851,203 @@ async def list_graph_promotion_jobs(
     }
 
 
+# ---------------------------------------------------------------------------
+# Deny-by-default release gate for canonical Neo4j writes
+# ---------------------------------------------------------------------------
+
+
+def release_gate_mode() -> ReleaseGateMode:
+    """Staged rollout flag for the graph-promotion release gate.
+
+    ``GRAPH_PROMOTION_RELEASE_GATE=off|shadow|enforce`` (default ``off``).
+    Unrecognized values fail closed to ``off`` semantics ONLY via settings
+    validation (Literal type); this helper never invents a permissive mode.
+    """
+
+    from config import get_settings
+
+    mode = str(get_settings().GRAPH_PROMOTION_RELEASE_GATE or "off").strip().lower()
+    if mode not in VALID_RELEASE_GATE_MODES:
+        return "off"
+    return mode  # type: ignore[return-value]
+
+
+def active_release_pin() -> ReleasePin | None:
+    """The active categorical release bundle from the fail-closed registry.
+
+    Backed by ``services.control_plane.release_registry``: exactly one
+    valid active entry yields its validated ``ReleasePin``; every other
+    state (missing registry, ambiguity, malformed entry, failed
+    categorical state, hash mismatch) resolves to None — the
+    deny-by-default state where ``graph_write_allowed`` refuses every
+    canonical write. Artifact stamps (ReleaseStamp) are descriptive
+    identity, never write authority, and are never consumed here.
+    """
+
+    from services.control_plane.release_registry import load_release_registry
+
+    return load_release_registry().release_pin
+
+
+def instrument_canonical_writer_calls(counter: dict[str, int]) -> None:
+    """Enforcement-audit observability owned by the authorized module.
+
+    Wraps the canonical graph writers with call counters so enforcement
+    probes can prove "zero writer executions while blocked" directly.
+    This lives inside the single authorized execution module: probes and
+    scripts consume this helper instead of importing the writers, which
+    keeps the global no-bypass invariant intact. The wrappers only count;
+    they never grant, alter, or bypass release authorization.
+    """
+
+    import services.ingestion.graph_backfill as graph_backfill
+    import services.ingestion.promote as promote_mod
+
+    real_backfill = graph_backfill.backfill_failed_graph_chunks
+    real_promote = promote_mod.promote_claims_to_graph
+
+    async def counting_backfill(**kwargs: Any):
+        counter["backfill_failed_graph_chunks"] = (
+            counter.get("backfill_failed_graph_chunks", 0) + 1
+        )
+        return await real_backfill(**kwargs)
+
+    async def counting_promote(*args: Any, **kwargs: Any):
+        counter["promote_claims_to_graph"] = (
+            counter.get("promote_claims_to_graph", 0) + 1
+        )
+        return await real_promote(*args, **kwargs)
+
+    graph_backfill.backfill_failed_graph_chunks = counting_backfill
+    promote_mod.promote_claims_to_graph = counting_promote
+
+
+def evaluate_release_gate(
+    release: Any, *, mode: str | None = None
+) -> dict[str, Any]:
+    """Deterministic gate decision for one canonical write attempt.
+
+    Authority is exclusive: only a ``ReleasePin`` instance can ever yield
+    ``would_allow``. Any other value — None, a complete ReleaseStamp dict,
+    a TemporalEnvelope, anything — is treated as "no active release" and
+    yields ``would_block`` with the exact missing conditions.
+    """
+
+    gate_mode = mode if mode in VALID_RELEASE_GATE_MODES else release_gate_mode()
+    pin = release if isinstance(release, ReleasePin) else None
+    if graph_write_allowed(pin):
+        decision = "would_allow"
+        missing: list[str] = []
+    else:
+        decision = "would_block"
+        missing = list(missing_release_conditions(pin))
+    return {
+        "gate": "graph_promotion_release_gate",
+        "mode": gate_mode,
+        "decision": decision,
+        "missing_conditions": missing,
+        "release_id": getattr(pin, "release_id", None) if pin else None,
+    }
+
+
+class GraphWriteAuthorization(BaseModel):
+    """One shared authorization result for every canonical graph write.
+
+    Both write surfaces — the durable promotion runner and the operator
+    manual-repair path — consume THIS result; neither interprets the
+    ReleasePin independently. ``enforcement_applied`` distinguishes a real
+    enforce-mode denial/allowance from off/shadow pass-through.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    allowed: bool
+    enforcement_applied: bool
+    decision: dict[str, Any]
+
+
+def authorize_canonical_graph_write(
+    *,
+    mode: str,
+    release_pin: ReleasePin | None,
+) -> GraphWriteAuthorization:
+    """The single canonical graph-write authorization seam.
+
+    off     → preserve existing behavior (allowed, no enforcement).
+    shadow  → record the decision, continue (allowed, no enforcement).
+    enforce → allowed only when the active ReleasePin proves every
+              mandatory categorical state and artifact-hash match.
+    """
+
+    decision = evaluate_release_gate(release_pin, mode=mode)
+    if mode in ("off", "shadow"):
+        return GraphWriteAuthorization(
+            allowed=True,
+            enforcement_applied=False,
+            decision=decision,
+        )
+    return GraphWriteAuthorization(
+        allowed=decision["decision"] == "would_allow",
+        enforcement_applied=True,
+        decision=decision,
+    )
+
+
+# Distinct nonzero exit code for a release-policy block in operator CLIs.
+# Not a graph failure, not an operational error: policy denial.
+RELEASE_POLICY_BLOCK_EXIT_CODE = 77
+
+
+def evaluate_cli_graph_write_gate(
+    *, script_name: str, operator: str
+) -> dict[str, Any]:
+    """Shared release-gate check for operator CLI scripts.
+
+    Resolves the active release ONCE per run through the same
+    ``authorize_canonical_graph_write`` seam as the durable runner and the
+    manual-repair service method — scripts never interpret the ReleasePin
+    themselves. Call this BEFORE connecting clients, mutating state,
+    touching counters, or calling any writer.
+
+    off     → not blocked; decision recorded for trace continuity.
+    shadow  → not blocked; decision recorded; execution continues.
+    enforce → blocked unless a qualifying active ReleasePin exists.
+    """
+
+    mode = release_gate_mode()
+    pin = active_release_pin()
+    auth = authorize_canonical_graph_write(mode=mode, release_pin=pin)
+    if not auth.allowed:
+        blocked = blocked_no_release_state(pin)
+        return {
+            "blocked": True,
+            "exit_code": RELEASE_POLICY_BLOCK_EXIT_CODE,
+            "payload": {
+                **blocked,
+                "gate_mode": mode,
+                "release_gate": auth.decision,
+                "script": script_name,
+                "operator": operator,
+            },
+        }
+    return {
+        "blocked": False,
+        "gate_mode": mode,
+        "release_gate": auth.decision,
+        "script": script_name,
+        "operator": operator,
+    }
+
+
+def cli_operator_identity() -> str:
+    """Best-effort operator identity for CLI gate records."""
+
+    import getpass
+    import os
+
+    return os.environ.get("USER") or getpass.getuser() or "unknown"
+
+
 async def run_graph_promotion_jobs(
     db: Any,
     *,
@@ -708,6 +1056,7 @@ async def run_graph_promotion_jobs(
     corpus_id: str,
     user_id: str,
     limit: int = 5,
+    release: ReleasePin | None = None,
 ) -> dict[str, Any]:
     from services.ingestion.graph_backfill import backfill_failed_graph_chunks
     from services.ingestion.promote import promote_claims_to_graph
@@ -731,16 +1080,92 @@ async def run_graph_promotion_jobs(
         "partial": 0,
         "noop": 0,
         "blocked_no_extractions": 0,
+        "blocked_no_release": 0,
         "failed": 0,
         "lost_ownership": 0,
     }
     if reclaimed:
         counts["reclaimed"] = reclaimed
     results: list[dict[str, Any]] = []
+    gate_mode = release_gate_mode()
 
-    for job in jobs:
+    # Shadow A/B run contract: the release state is resolved ONCE at run
+    # start, never re-resolved per candidate. Every job in this run
+    # consumes the same authorization; a registry change mid-run can
+    # never produce mixed decisions within one run. The run handle pins
+    # the registry hash so mutation mid-run fails closed instead of
+    # silently extending authority.
+    from services.control_plane.release_registry import begin_registry_run
+
+    registry_handle = begin_registry_run()
+    resolution = registry_handle.resolution
+    if release is None:
+        release = resolution.release_pin
+    auth = authorize_canonical_graph_write(mode=gate_mode, release_pin=release)
+    run_gate_decision = auth.decision if gate_mode in ("shadow", "enforce") else None
+    if run_gate_decision is not None:
+        # The shadow/enforce trace records WHY authority was absent: a
+        # fail-closed registry resolution is distinct from an evaluated
+        # failing pin. Identity is relayed only when one truly exists.
+        if resolution.status != "ok" and release is None:
+            run_gate_decision = {
+                **run_gate_decision,
+                "registry_resolution": resolution.reason,
+            }
+
+    for position, job in enumerate(jobs):
         job_id = str(job["job_id"])
         runner = "graph_promotion_jobs.run"
+
+        # Deny-by-default release gate, evaluated BEFORE lease acquisition:
+        # a blocked job never counts a Neo4j write attempt, never leaves the
+        # durable queue (stays queued → retryable), and is reconsidered
+        # exactly once per run after the release advances. Authority comes
+        # exclusively from the categorical ReleasePin — a complete
+        # ReleaseStamp or TemporalEnvelope can never authorize this write.
+        if not auth.allowed:
+            pin = release if isinstance(release, ReleasePin) else None
+            blocked = blocked_no_release_state(pin)
+            await db["graph_promotion_jobs"].update_one(
+                {"job_id": job_id, "status": "queued"},
+                {
+                    "$set": {
+                        "last_release_gate": blocked,
+                        "last_release_gate_at": datetime.utcnow(),
+                        "updated_at": datetime.utcnow(),
+                    }
+                },
+            )
+            counts["blocked_no_release"] += 1
+            results.append(
+                {
+                    "job_id": job_id,
+                    "doc_id": job.get("doc_id"),
+                    "status": "blocked_no_release",
+                    "attempted_status": "blocked_no_release",
+                    "release_gate": blocked,
+                }
+            )
+            continue
+        gate_decision = run_gate_decision
+
+        # Registry mutation during one run fails closed: the remaining
+        # jobs stop here, intact and retryable. The resolution itself is
+        # never refreshed mid-run — decisions cannot mix within one run.
+        if not registry_handle.verify_unchanged():
+            remaining_jobs = jobs[position:]
+            counts["registry_mutated"] = len(remaining_jobs)
+            for remaining in remaining_jobs:
+                results.append(
+                    {
+                        "job_id": str(remaining["job_id"]),
+                        "doc_id": remaining.get("doc_id"),
+                        "status": "blocked_registry_mutated",
+                        "attempted_status": "blocked_registry_mutated",
+                    }
+                )
+            break
+
         started_at = now
         lease_until = lease_deadline(now)
         lease = await db["graph_promotion_jobs"].update_one(
@@ -831,6 +1256,22 @@ async def run_graph_promotion_jobs(
                 if final_status in {"done", "partial"}
                 else {"ghost_b_rows_promoted": 0, "extraction_jobs_promoted": 0}
             )
+            completion_set: dict[str, Any] = {
+                "status": final_status,
+                "result": result,
+                "claim_promotion_result": claim_result,
+                "neo4j_write_latency_ms": neo4j_write_latency_ms,
+                "neo4j_write_latency_source": "graph_promotion_job",
+                "promoted_counts": promoted_counts,
+                "lease_until": None,
+                "completed_at": datetime.utcnow(),
+                "updated_at": datetime.utcnow(),
+            }
+            if gate_decision is not None:
+                # Shadow mode: the decision is recorded verbatim but never
+                # altered execution — enforce mode never reaches this point
+                # with a would_block decision.
+                completion_set["release_gate_shadow"] = gate_decision
             completion = await db["graph_promotion_jobs"].update_one(
                 {
                     "job_id": job_id,
@@ -841,17 +1282,7 @@ async def run_graph_promotion_jobs(
                     "lease_until": lease_until,
                 },
                 {
-                    "$set": {
-                        "status": final_status,
-                        "result": result,
-                        "claim_promotion_result": claim_result,
-                        "neo4j_write_latency_ms": neo4j_write_latency_ms,
-                        "neo4j_write_latency_source": "graph_promotion_job",
-                        "promoted_counts": promoted_counts,
-                        "lease_until": None,
-                        "completed_at": datetime.utcnow(),
-                        "updated_at": datetime.utcnow(),
-                    },
+                    "$set": completion_set,
                     "$unset": {"failure_reason": "", "runner": "", "started_at": ""},
                 },
             )
@@ -869,10 +1300,29 @@ async def run_graph_promotion_jobs(
                     "neo4j_write_latency_ms": neo4j_write_latency_ms,
                     "promoted_counts": promoted_counts,
                     "claim_promotion_result": claim_result,
+                    **(
+                        {"release_gate_shadow": gate_decision}
+                        if gate_decision is not None
+                        else {}
+                    ),
                 }
             )
         except Exception as exc:  # noqa: BLE001
             neo4j_write_latency_ms = _elapsed_ms(started_perf)
+            failure_set: dict[str, Any] = {
+                "status": "failed",
+                "failure_reason": str(exc)[:1000],
+                "neo4j_write_latency_ms": neo4j_write_latency_ms,
+                "neo4j_write_latency_source": "graph_promotion_job",
+                "lease_until": None,
+                "completed_at": datetime.utcnow(),
+                "updated_at": datetime.utcnow(),
+            }
+            if gate_decision is not None:
+                # No execution without an authorization record: the shadow
+                # decision accompanies the failure path too. It never
+                # reclassifies the failure — release policy is not a cause.
+                failure_set["release_gate_shadow"] = gate_decision
             completion = await db["graph_promotion_jobs"].update_one(
                 {
                     "job_id": job_id,
@@ -883,15 +1333,7 @@ async def run_graph_promotion_jobs(
                     "lease_until": lease_until,
                 },
                 {
-                    "$set": {
-                        "status": "failed",
-                        "failure_reason": str(exc)[:1000],
-                        "neo4j_write_latency_ms": neo4j_write_latency_ms,
-                        "neo4j_write_latency_source": "graph_promotion_job",
-                        "lease_until": None,
-                        "completed_at": datetime.utcnow(),
-                        "updated_at": datetime.utcnow(),
-                    },
+                    "$set": failure_set,
                     "$unset": {"runner": "", "started_at": ""},
                 },
             )
@@ -908,6 +1350,11 @@ async def run_graph_promotion_jobs(
                     "attempted_status": "failed",
                     "neo4j_write_latency_ms": neo4j_write_latency_ms,
                     "failure_reason": str(exc)[:300],
+                    **(
+                        {"release_gate_shadow": gate_decision}
+                        if gate_decision is not None
+                        else {}
+                    ),
                 }
             )
 
@@ -916,4 +1363,21 @@ async def run_graph_promotion_jobs(
         "status": "complete",
         "counts": counts,
         "results": results,
+        # Additive run-level shadow diagnostics (Shadow A contract): the
+        # release state resolved once at run start.
+        **(
+            {
+                "release_gate_shadow": {
+                    "gate_mode": gate_mode,
+                    "active_release_resolved_once": True,
+                    "release_registry_entry": registry_handle.resolution.entry_id,
+                    "registry_identity": registry_handle.resolution.trace_identity(),
+                    "caller": "run_graph_promotion_jobs",
+                    "operator": user_id,
+                    **run_gate_decision,
+                }
+            }
+            if run_gate_decision is not None
+            else {}
+        ),
     }

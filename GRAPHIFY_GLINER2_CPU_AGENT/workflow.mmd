@@ -1,0 +1,17 @@
+flowchart TD
+  S00[Bootstrap] --> S01[Repository discovery]
+  S01 --> S02[Frozen Relex baseline]
+  S02 --> S03[Gold-entity syntax ceiling]
+  S03 --> S04[Survey + contracts]
+  S04 --> S05[GLiNER2 CPU provider]
+  S05 --> S06[Entity census]
+  S06 --> S07[Document entity reducer]
+  S07 --> S08[Mention completion]
+  S08 --> S09[Grammar fast path]
+  S03 -->|pair recall < 0.65| S10[Semantic rescue]
+  S09 --> S10
+  S09 -->|pair recall >= 0.65| S11[Graphify integration]
+  S10 --> S11
+  S11 --> S12[Two-document E2E]
+  S12 --> S13[Runtime cleanup]
+  S13 --> S14[Final verification]

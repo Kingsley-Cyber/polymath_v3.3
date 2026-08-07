@@ -1778,6 +1778,28 @@ byte-identical reruns; local path must need no special flags.
 - [ ] Re-extraction of contaminated corpora (653/680 stored relations are
   GLiREL-era) — owner GO, after the ladder closes, one corpus at a time.
 
+### P2.12 GLiNER2 entity-census → grammar relations (WAY AHEAD — adopted 2026-08-06)
+
+**Item-level execution ledger:** `CONTINUITY/SPEED_BENCH_CLOSEOUT_AND_PERFORMANCE_PLAN_20260805.md`
+(§ OPEN work G0–G13). **Architecture detail:** `CONTINUITY/OWNER_INGESTION_THROUGHPUT_AND_QUALITY_ANALYSIS_20260806.md`
+§ WAY AHEAD.
+
+Law: *Batch globally; adjudicate document-locally.* Hot path = GLiNER2 entity census →
+document entity reducer → deterministic mention completion → selective spaCy → existing
+predicate compiler/gate. Relex = frozen benchmark baseline only (`production_candidate: removed`).
+Canonical graph writes disabled until closed-world qualification + owner GO.
+
+- [ ] G0 Gold-entity syntax ceiling rerun (block production flip if recall fails)
+- [ ] G3–G6 Census + reducer + mention completion + eligibility (see SPEED_BENCH)
+- [ ] G4 MPS vs MLX corpus bench (`fastino/gliner2-base-v1`)
+- [ ] G8–G11 Wire durable surface relations + startup endpoint signatures + Mongo/Neo4j
+- [ ] G12 Semantic-rescue shadow (GLiNER2 Python relations) until G0 qualifies
+- [ ] G13 Closed-world calibration + held-out directed-triple qualification + owner GO
+- [ ] Pri 0 Vector-first Pass-1 remains mandatory for searchable SLO
+
+P2.11 rungs that improve the **shared** syntax/predicate stack still feed P2.12; do not
+rebuild FrameExtractor/DependencyMatcher/SVO (see `KNOWLEDGE_PIPELINE_LINEAGE_MAP_20260804.md`).
+
 ## P3 - Semantic-Relational RAPTOR And Cross-Corpus Bridges
 
 ### P3.1 Pilot Claim And Mechanism-Frame Routing
@@ -1981,6 +2003,18 @@ A corpus is strict-ready only when:
 - [ ] All three retrieval tiers pass smoke and negative-control probes.
 
 ## Implementation Log
+
+### 2026-08-05 - Complex Query / Multi-Hop Phase 0–3 (dark)
+
+- Owner directive: Complex Query and Multi-Hop Graph RAG plan
+- Baseline: `CONTINUITY/COMPLEX_QUERY_SUBQUERY_BASELINE_20260804.md`
+- Code: `models/complex_query.py`, `services/retriever/complex_query_templates.py`,
+  `services/retriever/complex_query_executor.py`, `COMPLEX_QUERY_*` config (default off),
+  dark diagnostics hook in `retrieve_planned`
+- Tests: `test_complex_query_contracts.py` + `test_complex_query_templates.py` (12 passed)
+- Production: subquery planner / vocabulary ranking / ontology / backfill = false
+- Next: Phase 4–5 fixture-gated lane reuse + traversal compiler
+
 
 ### 2026-07-13 - Baseline capture (pre-edit requirement)
 

@@ -109,7 +109,9 @@ def test_shared_candidate_contract_is_strict_and_identity_bearing() -> None:
     assert artifact.schema_version == CANDIDATE_EXTRACTION_ARTIFACT_VERSION
     assert artifact.authority == CANDIDATE_EXTRACTION_AUTHORITY
     assert CANDIDATE_EXTRACTION_SCHEMA_HASH == (
-        "sha256:370661b1059bb5c3e7027033d0dba91f399686eda5895bbe780dc39bb620d229"
+        # Re-pinned 2026-08: the engine Literal now carries the canonical
+        # relex_local identity alongside the quarantine-only legacy_local.
+        "sha256:6f6ff7c394d29753287fb153af0ad7d96586bc0e7de3eac6892bda9e9bbd8a4f"
     )
     assert artifact.provenance.shared_contract_hash == CANDIDATE_EXTRACTION_SCHEMA_HASH
     assert artifact.artifact_id.startswith("candidate-extraction:")

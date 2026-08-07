@@ -171,6 +171,16 @@ def test_extraction_status_classifies_missing_as_queued():
     assert classify_extraction_status(None) == ("queued", "missing_extraction")
 
 
+def test_extraction_status_classifies_delete_tombstones_as_missing():
+    """Delete → re-ingest of the same content-derived doc_id resurrects the
+    document over tombstoned ghost rows. They must classify as never-extracted
+    (clean requeue), not fall through to a phantom "failed"/"extraction_error"."""
+    for status in ("deleted", "deleting"):
+        assert classify_extraction_status(
+            {"status": status, "deleted_at": "now"}
+        ) == ("queued", "missing_extraction")
+
+
 def test_extraction_status_classifies_ok_as_succeeded():
     assert classify_extraction_status({"status": "ok"}) == ("succeeded", "ghost_b_ok")
 

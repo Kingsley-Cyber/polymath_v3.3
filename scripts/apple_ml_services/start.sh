@@ -7,10 +7,8 @@
 #   APPLE_MLX_RERANKER_MODEL_ID       default mlx-community/jina-reranker-v3-4bit-mxfp4
 #   EMBEDDER_HOST / EMBEDDER_PORT     default 0.0.0.0 / 8082
 #   RERANKER_HOST / RERANKER_PORT     default 0.0.0.0 / 8081
-#   DOCLING_HOST  / DOCLING_PORT      default 0.0.0.0 / 8500
 #   START_EMBEDDER                    default true
 #   START_RERANKER                    default false
-#   START_DOCLING                     default false
 #   EMBED_BATCH_SIZE                  default 32  (M-series Studio friendly; lower if memory pressure appears)
 #   EMBED_MAX_LENGTH                  default 512
 #   RERANKER_BATCH_SIZE               default 16
@@ -37,14 +35,10 @@ export EMBEDDER_HOST="${EMBEDDER_HOST:-0.0.0.0}"
 export EMBEDDER_PORT="${EMBEDDER_PORT:-8082}"
 export RERANKER_HOST="${RERANKER_HOST:-0.0.0.0}"
 export RERANKER_PORT="${RERANKER_PORT:-8081}"
-export DOCLING_HOST="${DOCLING_HOST:-0.0.0.0}"
-export DOCLING_PORT="${DOCLING_PORT:-8500}"
 export START_EMBEDDER="${START_EMBEDDER:-true}"
 export START_RERANKER="${START_RERANKER:-false}"
-export START_DOCLING="${START_DOCLING:-false}"
 export HF_HOME="${HF_HOME:-${RUNTIME_ROOT}/volumes/hf-cache}"
 export HF_HUB_CACHE="${HF_HUB_CACHE:-${HF_HOME}/hub}"
-export DOCLING_ARTIFACTS_PATH="${DOCLING_ARTIFACTS_PATH:-${RUNTIME_ROOT}/volumes/docling/models}"
 
 export APPLE_MLX_EMBED_MODEL_ID="${APPLE_MLX_EMBED_MODEL_ID:-mlx-community/Qwen3-Embedding-0.6B-mxfp8}"
 export APPLE_MLX_RERANKER_MODEL_ID="${APPLE_MLX_RERANKER_MODEL_ID:-mlx-community/jina-reranker-v3-4bit-mxfp4}"
@@ -179,12 +173,6 @@ if should_start "${START_RERANKER}"; then
   start_service "reranker" "reranker_mlx.main" RERANKER_HOST RERANKER_PORT
 else
   skip_service "reranker"
-fi
-
-if should_start "${START_DOCLING}"; then
-  start_service "docling"  "docling_svc.main"  DOCLING_HOST  DOCLING_PORT
-else
-  skip_service "docling"
 fi
 
 if [[ "${#PID_FILES[@]}" -eq 0 ]]; then

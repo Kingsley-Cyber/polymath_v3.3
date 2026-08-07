@@ -11,11 +11,8 @@ import {
   X,
   Check,
   Database,
-  Cloud,
   Server,
-  ShieldCheck,
   Ban,
-  Route,
   Loader2,
   AlertTriangle,
   ExternalLink,
@@ -80,18 +77,7 @@ function compactCount(value?: number | null): string {
 
 // DEFAULT_INGESTION_CONFIG imported from ../../types (complete version with all IngestionConfig fields)
 
-type IngestionWorkflowId =
-  | "local_only"
-  | "rtx_only"
-  | "cloud_only"
-  | "runpod_flash"
-  | "local_cloud"
-  | "local_rtx"
-  | "cloud_rtx"
-  | "all_lanes"
-  | "fast_local_graph_rtx"
-  | "vectors_only"
-  | "custom";
+type IngestionWorkflowId = "graphify_cpu" | "vectors_only";
 
 const WORKFLOW_META: {
   key: IngestionWorkflowId;
@@ -100,158 +86,34 @@ const WORKFLOW_META: {
   execution: string;
   outcome: string;
   badge: string;
-  kind: "private" | "cloud" | "hybrid" | "legacy" | "off" | "custom";
+  kind: "private" | "off";
   engine: ExtractionEngine;
-  needsCloudPool: boolean;
-  needsRtx: boolean;
-  needsCloudApi: boolean;
+  needsCloudPool: false;
+  needsRtx: false;
+  needsCloudApi: false;
 }[] = [
   {
-    key: "rtx_only",
-    label: "Private RTX server",
-    detail:
-      "Your desktop vLLM endpoint receives the strict cloud-style extraction contract.",
-    execution: "Calls LAN vLLM URL, not the Mac sidecar",
-    outcome: "Structured entities, relations, facts, evidence",
-    badge: "Private LAN",
+    key: "graphify_cpu",
+    label: "Graphify CPU",
+    detail: "Pinned GLiNER2 entity census with deterministic document completion and relation extraction.",
+    execution: "Runs in-process on CPU with no provider endpoint or fallback",
+    outcome: "Qualified entities and relations with durable stage receipts",
+    badge: "Canonical",
     kind: "private",
-    engine: "local",
-    needsCloudPool: true,
-    needsRtx: true,
-    needsCloudApi: false,
-  },
-  {
-    key: "cloud_only",
-    label: "Cloud API provider",
-    detail:
-      "Extraction goes to configured API providers such as SiliconFlow, DeepSeek, LongCat, OpenRouter, or OpenAI.",
-    execution: "Calls external API keys",
-    outcome: "Structured graph output, validated before promotion",
-    badge: "Cloud API",
-    kind: "cloud",
-    engine: "cloud",
-    needsCloudPool: true,
-    needsRtx: false,
-    needsCloudApi: true,
-  },
-  {
-    key: "runpod_flash",
-    label: "Runpod Flash burst",
-    detail:
-      "Joint GLiNER-Relex extraction runs on an autoscaling Runpod GPU fleet; spaCy preserves sentence windows and offsets.",
-    execution: "Dispatches bounded batches to the configured Flash queue endpoint",
-    outcome: "Fast ontology-bound entities and relations, validated locally before graph promotion",
-    badge: "GPU burst",
-    kind: "cloud",
-    engine: "runpod_flash",
+    engine: "graphify_cpu",
     needsCloudPool: false,
     needsRtx: false,
-    needsCloudApi: false,
-  },
-  {
-    key: "cloud_rtx",
-    label: "Cloud API + RTX",
-    detail: "Cloud/API providers and the private RTX server share the same extraction pool.",
-    execution: "Routes across API chips and LAN vLLM",
-    outcome: "Fast failover and mixed-provider extraction",
-    badge: "Hybrid",
-    kind: "hybrid",
-    engine: "cloud",
-    needsCloudPool: true,
-    needsRtx: true,
-    needsCloudApi: true,
-  },
-  {
-    key: "local_only",
-    label: "Legacy Mac sidecar",
-    detail:
-      "Deprecated GLiNER/GLiREL sidecar path. Use only for compatibility or controlled backfills.",
-    execution: "Runs local sidecar models on the Mac",
-    outcome: "Compatibility path, not the default graph lane",
-    badge: "Legacy",
-    kind: "legacy",
-    engine: "legacy_local",
-    needsCloudPool: false,
-    needsRtx: false,
-    needsCloudApi: false,
-  },
-  {
-    key: "local_cloud",
-    label: "Legacy sidecar + cloud",
-    detail:
-      "Transition mode: deprecated Mac sidecars and cloud chips split chunks deterministically.",
-    execution: "Mac sidecar plus external API calls",
-    outcome: "Migration route only",
-    badge: "Legacy hybrid",
-    kind: "legacy",
-    engine: "dual",
-    needsCloudPool: true,
-    needsRtx: false,
-    needsCloudApi: true,
-  },
-  {
-    key: "local_rtx",
-    label: "Legacy sidecar + RTX",
-    detail: "Transition mode: deprecated Mac sidecars and RTX vLLM split extraction chunks.",
-    execution: "Mac sidecar plus LAN vLLM",
-    outcome: "Migration route only",
-    badge: "Legacy hybrid",
-    kind: "legacy",
-    engine: "dual",
-    needsCloudPool: true,
-    needsRtx: true,
-    needsCloudApi: false,
-  },
-  {
-    key: "all_lanes",
-    label: "Legacy sidecar + cloud + RTX",
-    detail:
-      "Transition mode: deprecated Mac sidecars plus all configured cloud/RTX extraction chips.",
-    execution: "Mac sidecar, external APIs, and LAN vLLM",
-    outcome: "Migration route only",
-    badge: "Legacy all-lane",
-    kind: "legacy",
-    engine: "dual",
-    needsCloudPool: true,
-    needsRtx: true,
-    needsCloudApi: true,
-  },
-  {
-    key: "fast_local_graph_rtx",
-    label: "Deprecated local graph + RTX enrich",
-    detail:
-      "Legacy GLiNER/GLiREL skeleton first, then RTX re-extracts quality-gated gaps. Kept for migration only.",
-    execution: "Mac sidecar first, then LAN vLLM enrichment",
-    outcome: "Backfill/migration route only",
-    badge: "Deprecated",
-    kind: "legacy",
-    engine: "local_then_enrich",
-    needsCloudPool: true,
-    needsRtx: true,
     needsCloudApi: false,
   },
   {
     key: "vectors_only",
     label: "Vectors only",
-    detail: "Skip graph extraction; vector/hybrid retrieval only.",
-    execution: "No Ghost B extraction calls",
-    outcome: "Documents become searchable, graph stays off",
+    detail: "Skip graph extraction; vector and hybrid retrieval only.",
+    execution: "No Graphify extraction",
+    outcome: "Documents become searchable while graph extraction stays off",
     badge: "No graph",
     kind: "off",
     engine: "off",
-    needsCloudPool: false,
-    needsRtx: false,
-    needsCloudApi: false,
-  },
-  {
-    key: "custom",
-    label: "Custom",
-    detail: "Keep the current engine and pools exactly as configured.",
-    execution: "Uses the current saved backend fields",
-    outcome: "Advanced/manual route",
-    badge: "Custom",
-    kind: "custom",
-    engine: "inherit",
     needsCloudPool: false,
     needsRtx: false,
     needsCloudApi: false,
@@ -316,143 +178,37 @@ function createDefaultIngestionConfig(
     extraction_models: [...DEFAULT_INGESTION_CONFIG.extraction_models],
     embedding_models: [...DEFAULT_INGESTION_CONFIG.embedding_models],
   };
-  if (usesProviderEngine(draftEngine(next.extraction_engine, "cloud")) && hasFactoryChunkShape(next)) {
-    next = {
-      ...next,
-      child_chunk_algorithm: "sentence_merge",
-      child_chunk_tokens: { min_tokens: 128, target_tokens: 512, max_tokens: 700 },
-    };
-  }
   return next;
 }
 
-function isRtxModel(entry: ModelProfileRef): boolean {
-  const provider = (entry.provider_preset || "").toLowerCase();
-  const model = (entry.model || "").toLowerCase();
-  const base = (entry.base_url || "").toLowerCase();
-  const lifecycle = (entry.lifecycle_base_url || "").toLowerCase();
-  const extra = entry.extra_params || {};
-  return (
-    entry.runtime === "rtx" ||
-    provider === "vllm-rtx" ||
-    provider === "vllm" ||
-    Boolean(extra.managed_vllm) ||
-    extra.resource_class === "rtx" ||
-    model.includes("polymath-extract") ||
-    model.includes("vllm") ||
-    base.includes(":8000") ||
-    lifecycle.includes(":8085")
-  );
-}
-
-function hasNonRtxCloudModel(entries: ModelProfileRef[]): boolean {
-  return entries.some((entry) => !isRtxModel(entry));
-}
-
 function inferWorkflow(config: IngestionConfig): IngestionWorkflowId {
-  const engine = draftEngine(config.extraction_engine, "local");
-  const pool = config.extraction_models ?? [];
-  const hasRtx = pool.some(isRtxModel);
-  const hasCloud = hasNonRtxCloudModel(pool);
-  if (engine === "off") return "vectors_only";
-  if (engine === "runpod_flash") return "runpod_flash";
-  if (engine === "legacy_local") return "local_only";
-  if (engine === "local") return hasRtx ? "rtx_only" : "custom";
-  if (engine === "cloud") {
-    if (hasRtx && hasCloud) return "cloud_rtx";
-    if (hasRtx) return "rtx_only";
-    return "cloud_only";
-  }
-  if (engine === "local_then_enrich") {
-    return hasRtx ? "fast_local_graph_rtx" : "custom";
-  }
-  if (engine === "dual" || engine === "local_then_cloud") {
-    if (hasRtx && hasCloud) return "all_lanes";
-    if (hasRtx) return "local_rtx";
-    return "local_cloud";
-  }
-  return "custom";
-}
-
-// GLiNER-era factory chunk shape: tiny single-idea children sized for the
-// local classifier. LLM extraction lanes want LLM-sized windows instead.
-function hasFactoryChunkShape(cfg: IngestionConfig): boolean {
-  const t = cfg.child_chunk_tokens;
-  return (
-    cfg.child_chunk_algorithm === "semantic_split" &&
-    t?.target_tokens === 128 &&
-    t?.max_tokens === 256
-  );
+  return config.extraction_engine === "off" ? "vectors_only" : "graphify_cpu";
 }
 
 function applyWorkflowToConfig(
   cfg: IngestionConfig,
   workflowId: IngestionWorkflowId,
-  providerProfiles: ModelProfileRef[] = [],
+  _providerProfiles: ModelProfileRef[] = [],
 ): IngestionConfig {
   const workflow = WORKFLOW_META.find((item) => item.key === workflowId);
-  if (!workflow || workflowId === "custom") return cfg;
-
+  if (!workflow) return cfg;
   let next: IngestionConfig = {
     ...cfg,
     extraction_engine: workflow.engine,
-    // New workflow choices are explicit. Ghost B never silently borrows
-    // Summary chips unless a legacy corpus still carries models_linked=true.
     models_linked: false,
+    extraction_models: [],
   };
   if (workflowId === "vectors_only") {
     next = applyPresetToConfig(next, "fast");
   } else if (next.preset === "fast" || inferPreset(next) === "fast") {
     next = applyPresetToConfig(next, "balanced");
   }
-  if (workflow.needsCloudPool && providerProfiles.length) {
-    const eligible = providerProfiles.filter((profile) => {
-      if (profile.enabled === false || !profile.profile_id) return false;
-      if (profile.capabilities?.length && !profile.capabilities.includes("extraction")) {
-        return false;
-      }
-      if (workflow.needsRtx && workflow.needsCloudApi) return true;
-      if (workflow.needsRtx) return isRtxModel(profile);
-      if (workflow.needsCloudApi) return !isRtxModel(profile);
-      return true;
-    });
-    if (eligible.length) {
-      next.extraction_models = eligible.map((profile) => ({
-        ...profile,
-        api_key: null,
-        lifecycle_api_key: null,
-        extra_params: { ...(profile.extra_params || {}) },
-      }));
-    }
-  }
-  // Cloud-LLM extraction (RTX vLLM / API) reads context, not GLiNER spans:
-  // 512-token children ≈ 4× fewer extraction calls per file at equal
-  // coverage (measured on polymath_v2, 2026-07-05: 128-tok chunks made a
-  // 508KB book cost 1,201 calls). Only applied when the corpus still has the
-  // factory shape — user-customized chunking is never overridden, and the
-  // backend freeze keeps already-populated corpora unchanged.
-  if (
-    (workflow.engine === "cloud" ||
-      workflow.engine === "local" ||
-      workflow.engine === "runpod_flash" ||
-      workflow.engine === "dual" ||
-      // §13-H: storage chunks at LLM shape; the local GLiREL lane derives
-      // its own sentence windows from parent text at extraction time.
-      workflow.engine === "local_then_enrich") &&
-    hasFactoryChunkShape(next)
-  ) {
-    next = {
-      ...next,
-      child_chunk_algorithm: "sentence_merge",
-      child_chunk_tokens: { min_tokens: 128, target_tokens: 512, max_tokens: 700 },
-    };
-  }
   return next;
 }
 
 function poolLabel(entries: ModelProfileRef[]): string {
   if (!entries.length) return "empty";
-  return entries.map(formatExtractionPoolEntry).join(" | ");
+  return entries.map((entry) => entry.model || entry.provider_preset || "model").join(" | ");
 }
 
 type WorkflowMeta = (typeof WORKFLOW_META)[number];
@@ -495,22 +251,11 @@ function workflowBadgeClass(kind: WorkflowMeta["kind"]): string {
 function WorkflowIcon({ kind }: { kind: WorkflowMeta["kind"] }) {
   const className = "w-4 h-4 shrink-0";
   if (kind === "private") return <Server className={className} />;
-  if (kind === "cloud") return <Cloud className={className} />;
-  if (kind === "hybrid") return <Route className={className} />;
-  if (kind === "legacy") return <AlertTriangle className={className} />;
-  if (kind === "off") return <Ban className={className} />;
-  return <ShieldCheck className={className} />;
+  return <Ban className={className} />;
 }
 
 function humanEngineLabel(engine: ExtractionEngine | string | undefined): string {
-  if (!engine || engine === "inherit") return "Inherited";
-  if (engine === "local") return "Private provider LLM";
-  if (engine === "cloud") return "Cloud/API provider LLM";
-  if (engine === "runpod_flash") return "Runpod Flash GLiNER-Relex";
-  if (engine === "dual") return "Legacy sidecar + provider LLM";
-  if (engine === "local_then_cloud") return "Legacy local, cloud rescue";
-  if (engine === "local_then_enrich") return "Legacy local, RTX enrichment";
-  if (engine === "legacy_local") return "Legacy Mac sidecar";
+  if (!engine || engine === "graphify_cpu") return "Graphify CPU (canonical)";
   if (engine === "off") return "Off";
   return String(engine).replace(/_/g, " ");
 }
@@ -528,14 +273,9 @@ function IngestionWorkflowSelector({
 }) {
   const current = inferWorkflow(config);
   const currentMeta = WORKFLOW_META.find((item) => item.key === current) ?? WORKFLOW_META[0];
-  const extractionPool = config.extraction_models ?? [];
   const summaryPool = config.summary_models ?? [];
-  const providerActive = usesProviderEngine(draftEngine(config.extraction_engine, "local"));
   const primaryWorkflowIds: IngestionWorkflowId[] = [
-    "rtx_only",
-    "cloud_only",
-    "runpod_flash",
-    "cloud_rtx",
+    "graphify_cpu",
     "vectors_only",
   ];
   const visibleWorkflowIds = primaryWorkflowIds.includes(current)
@@ -666,10 +406,10 @@ function IngestionWorkflowSelector({
             </span>
           </div>
           <div className="text-content-primary font-bold uppercase mt-0.5">
-            {humanEngineLabel(draftEngine(config.extraction_engine, "local"))}
+            {humanEngineLabel(config.extraction_engine)}
           </div>
           <div className="text-content-tertiary mt-0.5">
-            {providerActive ? poolLabel(extractionPool) : "provider pool inactive"}
+            {config.extraction_engine === "off" ? "disabled" : "in-process CPU"}
           </div>
         </div>
         <div className="border border-border-minimal bg-bg-surface px-2 py-1.5">
@@ -1763,153 +1503,6 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
 // mirrors the Summary pool's chips (since the worker reuses summary_models
 // for GHOST B in that mode).
 
-type ResolvedDraftEngine = Exclude<ExtractionEngine, "inherit">;
-
-function draftEngine(
-  engine: ExtractionEngine | undefined,
-  inheritedEngine?: ResolvedDraftEngine,
-): ResolvedDraftEngine {
-  return engine && engine !== "inherit" ? engine : (inheritedEngine ?? "local");
-}
-
-function usesLegacyLocalEngine(engine: ResolvedDraftEngine): boolean {
-  return (
-    engine === "legacy_local" ||
-    engine === "dual" ||
-    engine === "local_then_cloud" ||
-    engine === "local_then_enrich"
-  );
-}
-
-function usesProviderEngine(engine: ResolvedDraftEngine): boolean {
-  return (
-    engine === "local" ||
-    engine === "cloud" ||
-    engine === "dual" ||
-    engine === "local_then_cloud" ||
-    engine === "local_then_enrich"
-  );
-}
-
-type ContractPoolEntry = ExtractionContractResponse["pool"][number];
-type ProviderCard = NonNullable<ContractPoolEntry["provider_card"]>;
-
-function isContractPoolEntry(
-  entry: ModelProfileRef | ContractPoolEntry,
-): entry is ContractPoolEntry {
-  return "provider_card" in entry || "lifecycle_status" in entry;
-}
-
-function inferDraftProviderCard(entry: ModelProfileRef): ProviderCard {
-  const provider = (entry.provider_preset || "custom").toLowerCase();
-  const model = (entry.model || "").toLowerCase();
-  const base = (entry.base_url || "").toLowerCase();
-  const extra = entry.extra_params || {};
-  const rtx = isRtxModel(entry);
-  const longcat = provider === "longcat" || base.includes("longcat") || model.includes("longcat");
-  const siliconflow =
-    provider === "siliconflow" || base.includes("siliconflow") || model.includes("hy3");
-  const mimo = provider === "mimo" || base.includes("xiaomimimo") || model.includes("mimo");
-  const openrouterNemo = provider === "openrouter" && model.includes("mistral-nemo");
-  const nativeSchema =
-    Boolean(extra.supports_json_schema) ||
-    rtx ||
-    provider === "openai" ||
-    provider === "deepseek" ||
-    openrouterNemo;
-  const compilerGated = longcat || siliconflow || mimo || !nativeSchema;
-  return {
-    provider: rtx ? "local_private_vllm" : provider,
-    model: entry.model,
-    endpoint: entry.base_url || "litellm_default",
-    auth_mode: entry.api_key ? "bearer_api_key" : rtx ? "none_or_lan_bearer" : "bearer_api_key",
-    schema_mode: nativeSchema ? "json_schema" : "json_object_prompt",
-    json_repair_mode: compilerGated ? "deterministic_compiler" : "provider_native",
-    semantic_verifier_mode: "strict_with_direction_repair",
-    concurrency_policy: rtx ? "adaptive_vram_85" : "static_lane_cap",
-    failure_backfill_policy: "retry_then_stage",
-    supports_json_schema: nativeSchema,
-    supports_json_object: !compilerGated,
-    disable_thinking: longcat || mimo || provider === "deepseek",
-    local_private: rtx,
-    managed_vllm: rtx || Boolean(entry.lifecycle_base_url),
-    lifecycle_base_url: entry.lifecycle_base_url || "",
-    promotion_gate: [
-      "json_parse",
-      "pydantic_extraction_response",
-      "allowed_predicate",
-      "required_evidence_phrase",
-      "sane_endpoints",
-      "semantic_direction_check",
-    ],
-    notes: [],
-  };
-}
-
-function providerLabel(card: ProviderCard | null | undefined, entry?: ModelProfileRef | ContractPoolEntry): string {
-  const provider = (card?.provider || entry?.provider_preset || "custom").toLowerCase();
-  if (provider === "local_private_vllm" || provider === "vllm-rtx" || provider === "vllm") {
-    return "Local RTX vLLM";
-  }
-  if (provider === "siliconflow") return "SiliconFlow";
-  if (provider === "openrouter") return "OpenRouter";
-  if (provider === "longcat") return "LongCat";
-  if (provider === "deepseek") return "DeepSeek";
-  if (provider === "openai") return "OpenAI";
-  if (provider === "mimo") return "MiMo";
-  return provider || "custom";
-}
-
-function schemaModeLabel(card: ProviderCard | null | undefined): string {
-  if (!card) return "schema unknown";
-  if (card.schema_mode === "json_schema") return "json_schema";
-  if (card.schema_mode === "json_object_prompt") return "compiler-gated JSON";
-  if (card.schema_mode === "json_object") return "json_object";
-  return "JSONL repair";
-}
-
-function concurrencyLabel(card: ProviderCard | null | undefined, maxConcurrent?: number | null): string {
-  if (card?.concurrency_policy === "adaptive_vram_85") {
-    return `adaptive 85% VRAM · cap ${maxConcurrent ?? 1}`;
-  }
-  return `static cap ${maxConcurrent ?? 1}`;
-}
-
-function lifecycleStatusLabel(entry: ContractPoolEntry): string | null {
-  const status = entry.lifecycle_status;
-  if (!status) return null;
-  if (!status.ok) return `control DOWN${status.error ? ` · ${status.error}` : ""}`;
-  const free =
-    typeof status.gpu_vram_free_gb === "number"
-      ? ` · ${status.gpu_vram_free_gb.toFixed(1)}GB free`
-      : "";
-  const rec =
-    typeof status.recommended_concurrency === "number"
-      ? ` · rec ${status.recommended_concurrency}`
-      : "";
-  return `${status.ready ? "READY" : "NOT READY"}${free}${rec}`;
-}
-
-function formatExtractionPoolEntry(
-  entry:
-    | ModelProfileRef
-    | ExtractionContractResponse["pool"][number],
-): string {
-  const card = isContractPoolEntry(entry)
-    ? entry.provider_card
-    : inferDraftProviderCard(entry);
-  const lifecycle = isContractPoolEntry(entry) ? lifecycleStatusLabel(entry) : null;
-  const pieces = [
-    `${providerLabel(card, entry)}: ${entry.model} @${entry.max_concurrent ?? 1}`,
-    `schema ${schemaModeLabel(card)}`,
-    `repair ${card?.json_repair_mode ?? "unknown"}`,
-    `verifier ${card?.semantic_verifier_mode ?? "strict"}`,
-    concurrencyLabel(card, entry.max_concurrent),
-  ];
-  if (lifecycle) pieces.push(lifecycle);
-  return pieces.join(" · ");
-}
-
 function IngestionModelsSection({
   config,
   onPatch,
@@ -1923,327 +1516,61 @@ function IngestionModelsSection({
   corpusId?: string;
   providerProfiles: ModelProfileRef[];
 }) {
-  const linked = config.models_linked !== false;
   const summaryPool = config.summary_models ?? [];
-  const extractionPool = linked ? summaryPool : (config.extraction_models ?? []);
-
-  // Resolved contract (SAVED state) from the backend truth endpoint.
   const [contract, setContract] = useState<ExtractionContractResponse | null>(null);
   const [contractDown, setContractDown] = useState(false);
-
-  const engine = config.extraction_engine;
-  const draft = draftEngine(engine, contract?.engine);
-  const draftUsesLegacyLocal = usesLegacyLocalEngine(draft);
-  const draftUsesProvider = usesProviderEngine(draft);
-  const draftPoolSource = draftUsesProvider
-    ? linked
-      ? "summary_models"
-      : "extraction_models"
-    : "none";
-  const draftPool =
-    draftPoolSource === "summary_models"
-      ? summaryPool
-      : draftPoolSource === "extraction_models"
-        ? (config.extraction_models ?? [])
-        : [];
-  const workflow =
-    WORKFLOW_META.find((item) => item.key === inferWorkflow(config)) ?? WORKFLOW_META[0];
-  const draftErrors =
-    draftUsesProvider && draftPool.length === 0
-      ? [
-          linked
-            ? "Provider extraction needs at least one Summary model chip."
-            : "Provider extraction needs at least one Extraction model chip.",
-        ]
-      : draft === "local" && !draftPool.some(isRtxModel)
-        ? [
-            "Local private extraction requires at least one RTX/vLLM extraction chip.",
-          ]
-      : [];
-  const draftChanged =
-    !!contract &&
-    (contract.engine !== draft ||
-      contract.models_linked !== linked ||
-      (draftUsesProvider &&
-        contract.pool.map(formatExtractionPoolEntry).join("|") !==
-          draftPool.map(formatExtractionPoolEntry).join("|")));
 
   useEffect(() => {
     if (!corpusId) return;
     let gone = false;
-    api
-      .getExtractionContract(corpusId)
-      .then((c) => {
+    api.getExtractionContract(corpusId)
+      .then((value) => {
         if (!gone) {
-          setContract(c);
+          setContract(value);
           setContractDown(false);
         }
       })
       .catch(() => {
         if (!gone) setContractDown(true);
       });
-    return () => {
-      gone = true;
-    };
-  }, [corpusId, config.extraction_engine, config.models_linked]);
+    return () => { gone = true; };
+  }, [corpusId, config.extraction_engine]);
 
+  const engine = config.extraction_engine ?? "graphify_cpu";
   return (
     <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <div>
-          <div className="text-[12px] font-bold tracking-widest text-content-tertiary uppercase">
-            Model Routing
-          </div>
-          <div className="text-[10px] text-content-tertiary">
-            Configure the endpoints behind the selected extraction route.
-          </div>
+      <div className="border border-border-minimal bg-bg-base px-3 py-2 space-y-1">
+        <div className="text-[10px] font-bold tracking-widest text-content-tertiary uppercase">
+          Extraction contract
         </div>
-        <div
-          className={`inline-flex items-center gap-1.5 border px-2 py-1 text-[9px] font-bold tracking-widest uppercase ${workflowBadgeClass(
-            workflow.kind,
-          )}`}
-        >
-          <WorkflowIcon kind={workflow.kind} />
-          {workflow.badge}
+        <div className="text-[11px] text-content-primary font-bold uppercase">
+          {humanEngineLabel(contract?.engine ?? engine)}
         </div>
-      </div>
-
-      {/* ── Extraction contract — the deterministic workflow switch ── */}
-      <div
-        className="border border-border-minimal bg-bg-base px-3 py-2 space-y-2"
-        data-testid="extraction-contract-block"
-      >
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[10px] font-bold tracking-widest text-content-tertiary uppercase">
-            Extraction contract
-          </span>
-          <span className="text-[10px] font-bold tracking-widest text-accent-secondary uppercase">
-            {engine === "runpod_flash"
-              ? "RUNPOD FLASH BURST"
-              : engine === "local_then_enrich"
-              ? "LEGACY LOCAL FIRST - RTX fills gaps"
-              : draftUsesLegacyLocal && draftUsesProvider
-                ? "TRANSITION - legacy sidecar + provider LLM"
-                : draftUsesLegacyLocal
-                  ? "LEGACY LOCAL SIDECAR"
-                : draftUsesProvider
-                    ? draft === "local"
-                      ? "PRIVATE PROVIDER LLM"
-                      : "PROVIDER LLM"
-                    : "OFF - vectors only"}
-            {engine === "inherit" || engine === undefined ? " (inherited)" : ""}
-            {engine === "local_then_cloud" ? " (local->cloud rescue)" : ""}
-          </span>
-          <span className="ml-auto text-[10px] text-content-tertiary">
-            Change via Extraction Profile above.
-          </span>
+        <div className="text-[10px] text-content-tertiary">
+          {engine === "off"
+            ? "Vectors-only opt-out. No graph extraction runs."
+            : "Pinned GLiNER2 census and deterministic relation stages run in-process on CPU. No provider pool or fallback."}
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-1.5 text-[10px]">
-          <div className="border border-border-minimal bg-bg-surface px-2 py-1.5">
-            <div className="text-[8px] font-bold tracking-widest uppercase text-content-tertiary">
-              Calls go to
-            </div>
-            <div className="mt-0.5 text-content-primary font-bold">
-              {workflow.execution}
-            </div>
-          </div>
-          <div className="border border-border-minimal bg-bg-surface px-2 py-1.5">
-            <div className="text-[8px] font-bold tracking-widest uppercase text-content-tertiary">
-              Expected output
-            </div>
-            <div className="mt-0.5 text-content-primary font-bold">
-              {workflow.outcome}
-            </div>
-          </div>
-          <div className="border border-border-minimal bg-bg-surface px-2 py-1.5">
-            <div className="text-[8px] font-bold tracking-widest uppercase text-content-tertiary">
-              Safety gate
-            </div>
-            <div className="mt-0.5 text-content-primary font-bold">
-              Pydantic schema + evidence + graph promotion
-            </div>
-          </div>
-        </div>
-        {linked && draftUsesProvider && (
-          <div className="flex flex-wrap items-center gap-2 border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[10px] text-amber-300">
-            <span>
-              Legacy summary reuse is active: provider extraction borrows Summary
-              Models. New workflows use a dedicated Extraction pool.
-            </span>
-            {editing && (
-              <button
-                type="button"
-                onClick={() => onPatch({ models_linked: false })}
-                className="px-2 py-0.5 border border-amber-300/50 text-amber-200 uppercase tracking-widest"
-              >
-                Detach
-              </button>
-            )}
-          </div>
+        {contractDown && (
+          <div className="text-[10px] text-error">Saved contract endpoint unavailable.</div>
         )}
-
-        {/* Resolved truth line — what the worker will actually run NOW */}
-        <div className="text-[10px] leading-relaxed" data-testid="extraction-contract-truth">
-          {!corpusId ? (
-            <>
-              <span className="text-content-tertiary tracking-wider">
-                NEW CONTRACT:{" "}
-              </span>
-              <span className="text-content-primary font-bold uppercase">
-                {humanEngineLabel(draft)}
-              </span>
-              {draftUsesLegacyLocal && (
-                <span className="text-content-secondary">
-                  {" · legacy GLiNER/GLiREL sidecars from Settings"}
-                </span>
-              )}
-              {draftUsesProvider && (
-                <span className="text-content-secondary">
-                  {" · pool ("}
-                  {draftPoolSource === "summary_models"
-                    ? "summary, linked"
-                    : "extraction"}
-                  {"): "}
-                  {draftPool.length === 0
-                    ? "EMPTY"
-                    : draftPool
-                        .map(formatExtractionPoolEntry)
-                        .join(", ")}
-                </span>
-              )}
-              {draftErrors.map((e, i) => (
-                <div key={`de-${i}`} className="text-error">
-                  ERROR: {e}
-                </div>
-              ))}
-            </>
-          ) : contractDown ? (
-            <span className="text-content-tertiary">
-              [SAVED_CONTRACT_UNAVAILABLE] — backend build without the contract
-              endpoint; showing config only
-            </span>
-          ) : !contract ? (
-            <span className="text-content-tertiary">resolving saved contract…</span>
-          ) : (
-            <>
-              <span className="text-content-tertiary tracking-wider">SAVED CONTRACT: </span>
-              <span className="text-content-primary font-bold uppercase">
-                {humanEngineLabel(contract.engine)}
-              </span>
-              <span className="text-content-tertiary"> ({contract.source})</span>
-              {contract.engine === "runpod_flash" && (
-                <span className="text-content-secondary">
-                  {" · "}
-                  {contract.runpod_flash?.configured
-                    ? `${contract.runpod_flash.endpoint_name} · ${contract.runpod_flash.request_batch_size} chunks/request · ${contract.runpod_flash.request_concurrency} in flight · max ${contract.runpod_flash.max_workers} workers`
-                    : "endpoint not configured"}
-                </span>
-              )}
-              {(contract.engine === "legacy_local" ||
-                contract.engine === "dual" ||
-                contract.engine === "local_then_cloud" ||
-                contract.engine === "local_then_enrich") && (
-                <span className="text-content-secondary">
-                  {" · legacy sidecars: "}
-                  {contract.endpoints.filter((e) => e.enabled).length === 0
-                    ? "none enabled (env floor)"
-                    : contract.endpoints
-                        .filter((e) => e.enabled)
-                        .map(
-                          (e) =>
-                            `${e.label || e.url}${
-                              e.alive === null ? "" : e.alive ? " UP" : " DOWN"
-                            }`,
-                        )
-                        .join(" · ")}
-                </span>
-              )}
-              {(contract.engine === "local" ||
-                contract.engine === "cloud" ||
-                contract.engine === "dual" ||
-                contract.engine === "local_then_cloud" ||
-                contract.engine === "local_then_enrich") && (
-                <span className="text-content-secondary">
-                  {" · pool ("}
-                  {contract.pool_source === "summary_models"
-                    ? contract.models_linked
-                      ? "summary, linked"
-                      : "summary"
-                    : "extraction"}
-                  {"): "}
-                  {contract.pool.length === 0
-                    ? "EMPTY"
-                    : contract.pool
-                        .map(formatExtractionPoolEntry)
-                        .join(", ")}
-                  {contract.routing_policy
-                    ? ` · routing ${contract.routing_policy.replace(/_/g, " ")}`
-                    : ""}
-                </span>
-              )}
-              {contract.errors.map((e, i) => (
-                <div key={`ce-${i}`} className="text-error">
-                  ERROR: {e}
-                </div>
-              ))}
-              {contract.warnings.map((w, i) => (
-                <div key={`cw-${i}`} className="text-amber-300">
-                  WARN: {w}
-                </div>
-              ))}
-              {editing && draftChanged && (
-                <div className="text-accent-secondary">
-                  PENDING AFTER SAVE: {draft.toUpperCase()}
-                  {draftUsesProvider
-                    ? ` · ${draftPoolSource === "summary_models" ? "summary" : "extraction"} pool: ${
-                        draftPool.length === 0
-                          ? "EMPTY"
-                          : draftPool.map(formatExtractionPoolEntry).join(", ")
-                      }`
-                    : ""}
-                </div>
-              )}
-              {editing &&
-                draftErrors.map((e, i) => (
-                  <div key={`pe-${i}`} className="text-error">
-                    PENDING ERROR: {e}
-                  </div>
-                ))}
-            </>
-          )}
-        </div>
+        {contract?.errors.map((error, index) => (
+          <div key={index} className="text-[10px] text-error">ERROR: {error}</div>
+        ))}
+        {contract?.warnings.map((warning, index) => (
+          <div key={index} className="text-[10px] text-amber-300">WARN: {warning}</div>
+        ))}
       </div>
 
       <IngestionProviderSelector
         title="Summary routes"
-        subtitle="Select saved Settings routes for parent-chunk summarization. Keys never enter this form."
+        subtitle="Select saved Settings routes for optional parent-chunk summarization. Extraction never uses these providers."
         role="summary"
         profiles={providerProfiles}
         value={summaryPool}
         onChange={(next) => onPatch({ summary_models: next })}
         editing={editing}
       />
-
-      {draftUsesProvider ? (
-        <IngestionProviderSelector
-          title="Extraction routes"
-          subtitle={
-            linked
-              ? "Legacy summary reuse is active. Detach it above to select dedicated extraction routes."
-              : "Select cloud API and private RTX routes from the saved ingestion registry."
-          }
-          role="extraction"
-          profiles={providerProfiles}
-          value={extractionPool}
-          onChange={(next) => onPatch({ extraction_models: next })}
-          editing={editing && !linked}
-        />
-      ) : (
-        <div className="border border-border-minimal bg-bg-base/40 px-3 py-2 text-[10px] text-content-tertiary leading-snug">
-          Extraction model pool hidden because this workflow does not send Ghost
-          B to provider-card LLM chips. Legacy sidecars are configured globally in Settings.
-        </div>
-      )}
     </div>
   );
 }

@@ -40,6 +40,8 @@ predicates:
       - [Concept, Method]
       - [Concept, Software]
       - [Artifact, Software]
+      - [Method, Method]       # owner-ratified 2026-07-29
+      - [Person, Concept]      # owner-ratified 2026-07-29
   supports:
     allowed_pairs:
       - [Software, Method]
@@ -50,6 +52,7 @@ predicates:
       - [Method, Concept]
       - [Concept, Method]
       - [Organization, Software]
+      - [Organization, Person]   # org/team supports a person — general class (audit 2026-08-07)
       - [Product, Method]
   produces:
     allowed_pairs:
@@ -100,12 +103,14 @@ predicates:
       - [Organization, Document]
   depends_on:
     allowed_pairs:
-      - [Software, Software]
+      - [Software, Software]   # owner-ratified 2026-07-29 (confirmed existing)
+      - [Software, Concept]
       - [Software, Artifact]
       - [Software, Standard]
       - [Method, Software]
       - [Method, Concept]
       - [Concept, Concept]
+      - [Concept, Software]    # a practice/artifact-concept depends on software — general (audit 2026-08-07)
       - [Product, Software]
   quantizes:
     allowed_pairs:

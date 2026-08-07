@@ -239,6 +239,73 @@ def _schema_point_id(corpus_id: str, kind: str, term: str) -> str:
 
 _VALID_KINDS = ("naive", "hrag", "graph", "schemas")
 
+# q8 (owner directive 2026-08-04) — one-point-per-child candidate collection.
+# Shadow-only: written alongside the legacy naive/hrag/graph family while the
+# consolidation canary is proven; production reads stay on the legacy family
+# unless a request explicitly opts into shadow read.
+_EVIDENCE_KIND = "evidence"
+
+# Route-eligibility vocabulary: one boolean per legacy collection a chunk
+# would have been physically copied into. naive -> focused route, hrag ->
+# hierarchical lane, graph -> graph-seed lane.
+_KIND_TO_EVIDENCE_FLAG = {
+    "naive": "eligible_focused",
+    "hrag": "eligible_hierarchical",
+    "graph": "eligible_graph_seed",
+}
+_EVIDENCE_FLAG_FIELDS = tuple(_KIND_TO_EVIDENCE_FLAG.values())
+
+
+def _evidence_col_for_corpus(corpus_id: str) -> str:
+    """Resolve the per-corpus one-point-per-child candidate collection name.
+
+    Deliberately NOT part of `_VALID_KINDS`/`_col_for_corpus` so no legacy
+    alias, readiness, or read path can resolve it accidentally — only the
+    shadow write/read seams reference this name.
+    """
+    if not corpus_id:
+        raise ValueError("corpus_id is required for evidence collection naming")
+    return f"{settings.QDRANT_COLLECTION_PREFIX}{corpus_id[:8]}_{_EVIDENCE_KIND}"
+
+
+# Minimal payload indexes for the candidate collection (owner directive:
+# only fields PROVEN to be filtered at runtime). doc_id/parent_id/
+# chunk_type/chunk_kind mirror the funnel_a/funnel_b must-filters and the
+# per-doc delete cascade; record_kind/active/eligible_* are the new route
+# filters. q9 prune: corpus_id was removed — inside a per-corpus collection
+# the value is constant, so the index has zero selectivity and the route
+# scopes still evaluate it as a payload condition. concepts and entity_ids
+# are funnel_b SHOULD-clause fields — deliberately NOT indexed until a
+# runtime audit proves a latency dependency (they stay payload-only).
+_EVIDENCE_PAYLOAD_INDEXES: tuple[str, ...] = (
+    "doc_id",
+    "parent_id",
+    "chunk_type",
+    "chunk_kind",
+    "record_kind",
+    "active",
+    "eligible_focused",
+    "eligible_hierarchical",
+    "eligible_graph_seed",
+)
+
+
+def _evidence_dual_write_active(corpus_id: str) -> bool:
+    """q8 shadow-write gate: global flag AND the canary allowlist.
+
+    Owner directive: ONE dedicated canary corpus while q8 is in flight. The
+    allowlist keeps every other corpus byte-identical even when the global
+    flag is on; an empty allowlist means every corpus (q9 pressure test).
+    """
+    if not settings.QDRANT_EVIDENCE_DUAL_WRITE:
+        return False
+    allowlist = {
+        token.strip()
+        for token in (settings.QDRANT_EVIDENCE_DUAL_WRITE_CORPUS_IDS or "").split(",")
+        if token.strip()
+    }
+    return corpus_id in allowlist if allowlist else True
+
 
 def _col(key: str) -> str | None:
     """LEGACY — global collection name lookup. Used only by the migration
@@ -258,11 +325,15 @@ _ALIAS_PREFIX = "corpus_"  # keeps aliases namespaced away from user-typed strin
 _SLUG_MAX_LEN = 40
 
 
-def _slugify_name(name: str) -> str:
+def _slugify_corpus_name(name: str) -> str:
     """Make a Qdrant-alias-safe slug from a corpus name. Lowercase, alnum+underscore
     only, collapsed runs, length-capped. Empty / non-ASCII-only names collapse to
     'unnamed' so we always have a usable slug (uniqueness handled by `[:cid8]`
     suffix in `_alias_for_corpus`).
+
+    Renamed from `_slugify_name` to avoid a collision with the canonical-entity
+    slug helper in services.extraction.canonical — these two functions have
+    different semantics (corpus slug vs entity slug).
     """
     if not name:
         return "unnamed"
@@ -279,7 +350,7 @@ def _alias_for_corpus(corpus_id: str, name: str, kind: str) -> str:
     """
     if kind not in _VALID_KINDS:
         raise ValueError(f"Invalid Qdrant kind {kind!r}")
-    slug = _slugify_name(name)
+    slug = _slugify_corpus_name(name)
     return f"{_ALIAS_PREFIX}{slug}_{corpus_id[:8]}_{kind}"
 
 
@@ -790,7 +861,89 @@ async def drop_collections_for_corpus(client: AsyncQdrantClient, corpus_id: str)
                 corpus_id,
                 exc,
             )
+    # q8 — the shadow evidence collection belongs to the same corpus identity:
+    # the deletion path must stay complete (no orphan candidate collections),
+    # even when dual-write is disabled (backfilled collections still exist).
+    evidence_name = _evidence_col_for_corpus(corpus_id)
+    try:
+        if await client.collection_exists(evidence_name):
+            await client.delete_collection(collection_name=evidence_name)
+            _COLLECTION_EXISTENCE_CACHE.discard(evidence_name)
+            _COLLECTION_LAYOUT_CACHE.pop(evidence_name, None)
+            logger.info(
+                "Dropped Qdrant evidence collection: %s (corpus %s)",
+                evidence_name,
+                corpus_id,
+            )
+            dropped += 1
+    except Exception as exc:
+        logger.warning(
+            "Failed to drop Qdrant evidence collection %s for corpus %s: %s",
+            evidence_name,
+            corpus_id,
+            exc,
+        )
     return dropped
+
+
+async def ensure_evidence_collection_for_corpus(
+    client: AsyncQdrantClient,
+    corpus_id: str,
+    dim: int = 1024,
+) -> str:
+    """Create the per-corpus one-point-per-child candidate collection if it
+    does not exist. Idempotent. Returns the collection name.
+
+    q8 (owner directive 2026-08-04). Layout matches a NEW corpus family
+    member: named "dense" + named "sparse" (server-side IDF) + binary
+    quantization. Payload indexes are the minimal runtime-proven set —
+    see `_EVIDENCE_PAYLOAD_INDEXES`.
+    """
+    name = _evidence_col_for_corpus(corpus_id)
+    if name in _COLLECTION_EXISTENCE_CACHE:
+        return name
+    existing_payload_indexes: set[str] = set()
+    info: object | None = None
+    if await client.collection_exists(name):
+        info = await _assert_collection_dimension(
+            client,
+            collection_name=name,
+            expected_dim=dim,
+        )
+        existing_payload_indexes = _payload_index_fields(info)
+    else:
+        await _create_collection_with_retry(
+            client,
+            collection_name=name,
+            vectors_config={
+                "dense": VectorParams(size=dim, distance=Distance.COSINE)
+            },
+            sparse_vectors_config={
+                "sparse": SparseVectorParams(modifier=Modifier.IDF)
+            },
+            quantization_config=binary_quantization_config(),
+        )
+    await ensure_binary_quantization(
+        client,
+        name,
+        collection_info=info,
+    )
+    await _assert_collection_owner(client, name, corpus_id)
+    for field_name in _EVIDENCE_PAYLOAD_INDEXES:
+        if field_name in existing_payload_indexes:
+            continue
+        await _create_payload_index_with_retry(
+            client,
+            collection_name=name,
+            field_name=field_name,
+        )
+    _COLLECTION_EXISTENCE_CACHE.add(name)
+    logger.info(
+        "Ensured Qdrant evidence collection: %s (corpus %s) [q8 shadow]",
+        name,
+        corpus_id,
+    )
+    return name
 
 
 # Per-collection layout cache: (has_named_dense, has_sparse). Populated
@@ -839,6 +992,160 @@ def _build_vector(
     if has_sparse and sparse is not None and getattr(sparse, "indices", None):
         out["sparse"] = sparse
     return out
+
+
+async def _upsert_evidence_shadow(
+    client: AsyncQdrantClient,
+    corpus_id: str,
+    chunks: list[dict],
+    vectors: list[list[float]],
+    target_kinds: list[str],
+    payloads: list[dict],
+    sparse_vectors: list[SparseVector] | None,
+) -> None:
+    """q8 (owner directive 2026-08-04) — shadow dual-write into the
+    one-point-per-child candidate collection.
+
+    One physical point per chunk carries the SAME payload as the legacy
+    family plus record_kind/active and one route-eligibility boolean per
+    legacy collection the chunk would have been copied into. The worker
+    calls upsert_children once PER kind (naive, then hrag, then graph), so
+    eligibility flags are MERGED with any existing shadow point (OR) — a
+    later single-kind call must never clobber flags written by an earlier
+    call. Shadow-only: failures here log and never break the legacy write.
+    """
+    try:
+        name = await ensure_evidence_collection_for_corpus(client, corpus_id)
+        point_ids = [_child_point_id(c["chunk_id"]) for c in chunks]
+        # Merge basis: read only the flag fields of any existing shadow points.
+        existing_flags: dict[str, dict] = {}
+        try:
+            recs = await client.retrieve(
+                collection_name=name,
+                ids=point_ids,
+                with_payload=list(_EVIDENCE_FLAG_FIELDS),
+                with_vectors=False,
+            )
+            existing_flags = {
+                str(r.id): (r.payload or {}) for r in (recs or [])
+            }
+        except Exception as exc:
+            logger.warning(
+                "q8 evidence flag-merge readback failed (%s) — writing this "
+                "call's flags only",
+                exc,
+            )
+        flags_now = {
+            flag: (kind in target_kinds)
+            for kind, flag in _KIND_TO_EVIDENCE_FLAG.items()
+        }
+        sv_iter = sparse_vectors or [None] * len(chunks)
+        points = []
+        for c, v, sv, base_payload, pid in zip(
+            chunks, vectors, sv_iter, payloads, point_ids
+        ):
+            prev = existing_flags.get(pid) or {}
+            merged_flags = {
+                flag: bool(flags_now[flag] or prev.get(flag))
+                for flag in _EVIDENCE_FLAG_FIELDS
+            }
+            payload = {
+                **base_payload,
+                "record_kind": "child",
+                "active": True,
+                **merged_flags,
+            }
+            points.append(
+                PointStruct(
+                    id=pid,
+                    vector=_build_vector(
+                        dense=v,
+                        sparse=sv,
+                        has_named_dense=True,
+                        has_sparse=True,
+                    ),
+                    payload=payload,
+                )
+            )
+        await _upsert_points_batched(
+            client,
+            collection_name=name,
+            points=points,
+            point_label="evidence-child",
+        )
+        logger.debug(
+            "q8 shadow: upserted %d evidence points → %s (kinds=%s)",
+            len(points),
+            name,
+            target_kinds,
+        )
+    except Exception as exc:
+        # Shadow-only invariant: the candidate write must never break the
+        # legacy production write path.
+        logger.warning(
+            "q8 evidence shadow write failed for corpus %s: %s",
+            corpus_id[:8],
+            exc,
+        )
+
+
+async def _upsert_evidence_summary_shadow(
+    client: AsyncQdrantClient,
+    corpus_id: str,
+    payloads: list[dict],
+    vectors: list[list[float]],
+    sparse_vectors: list,
+) -> None:
+    """q8 (owner directive 2026-08-04) — shadow dual-write of summary records
+    into the candidate collection so the hierarchical lane can prove parity
+    (funnel_a reads summaries from hrag today). Summaries are hierarchical-
+    lane records only: eligible_hierarchical=true, the other route flags
+    false. Same deterministic point IDs as the legacy summary lane. Shadow-
+    only: failures here never break the legacy write.
+    """
+    try:
+        name = await ensure_evidence_collection_for_corpus(client, corpus_id)
+        points = []
+        for p, v, sv in zip(payloads, vectors, sparse_vectors):
+            payload = {
+                **p,
+                "record_kind": "parent_summary",
+                "active": True,
+                "eligible_focused": False,
+                "eligible_hierarchical": True,
+                "eligible_graph_seed": False,
+            }
+            points.append(
+                PointStruct(
+                    id=_summary_point_id(p["corpus_id"], p["parent_id"]),
+                    vector=_build_vector(
+                        dense=v,
+                        sparse=sv,
+                        has_named_dense=True,
+                        has_sparse=True,
+                    ),
+                    payload=payload,
+                )
+            )
+        await _upsert_points_batched(
+            client,
+            collection_name=name,
+            points=points,
+            point_label="evidence-summary",
+        )
+        logger.debug(
+            "q8 shadow: upserted %d evidence summary points → %s",
+            len(points),
+            name,
+        )
+    except Exception as exc:
+        # Shadow-only invariant: the candidate write must never break the
+        # legacy production write path.
+        logger.warning(
+            "q8 evidence summary shadow write failed for corpus %s: %s",
+            corpus_id[:8],
+            exc,
+        )
 
 
 async def upsert_children(
@@ -953,6 +1260,20 @@ async def upsert_children(
             name,
             has_named,
             has_sparse,
+        )
+
+    # q8 (owner directive 2026-08-04) — shadow dual-write into the
+    # one-point-per-child candidate collection. Shadow-only: failures inside
+    # never propagate into the legacy production write path above.
+    if _evidence_dual_write_active(corpus_id):
+        await _upsert_evidence_shadow(
+            client,
+            corpus_id,
+            chunks,
+            vectors,
+            target_kinds,
+            payloads,
+            sparse_vectors,
         )
 
 
@@ -1104,6 +1425,16 @@ async def upsert_summaries(
             has_named,
             has_sparse,
         )
+    # q8 (owner directive 2026-08-04) — shadow dual-write of summary records
+    # into the candidate collection (hierarchical lane parity). Shadow-only.
+    if wrote_to_collection and _evidence_dual_write_active(corpus_id):
+        await _upsert_evidence_summary_shadow(
+            client,
+            corpus_id,
+            payloads,
+            vectors,
+            list(sv_iter),
+        )
     return len(payloads) if wrote_to_collection else 0
 
 
@@ -1168,6 +1499,44 @@ async def delete_points_by_doc(
                 exc,
             )
             results[kind] = False
+    # q8 (owner directive 2026-08-04) — doc-scoped cascade completeness for
+    # the candidate collection. Runs unconditionally (a backfilled evidence
+    # collection exists even when dual-write is disabled); shadow-only, so a
+    # failure here never alters the legacy delete results.
+    try:
+        evidence_name = _evidence_col_for_corpus(corpus_id)
+        if await client.collection_exists(evidence_name):
+            selector = Filter(
+                must=[
+                    FieldCondition(key="corpus_id", match=MatchValue(value=corpus_id)),
+                    FieldCondition(key="doc_id", match=MatchValue(value=doc_id)),
+                ],
+                must_not=(
+                    [
+                        FieldCondition(
+                            key="chunk_type",
+                            match=MatchValue(value="summary"),
+                        )
+                    ]
+                    if preserve_summary_points
+                    else None
+                ),
+            )
+            op = await client.delete(
+                collection_name=evidence_name,
+                points_selector=selector,
+            )
+            results["evidence"] = getattr(op, "operation_id", None) is not None
+        else:
+            results["evidence"] = False
+    except Exception as exc:
+        logger.warning(
+            "q8 evidence per-doc delete failed for %s (doc=%s): %s",
+            corpus_id[:8],
+            doc_id[:12],
+            exc,
+        )
+        results["evidence"] = False
     logger.info(
         "Qdrant: deleted points for doc %s in corpus %s preserve_summaries=%s → %s",
         doc_id[:12],

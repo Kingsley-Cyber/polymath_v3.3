@@ -1,0 +1,37 @@
+[
+  {
+    "subject": "dr reyes",
+    "predicate": "owns",
+    "object": "cold 7 rollout plan"
+  },
+  {
+    "subject": "pinion 3 1",
+    "predicate": "depends_on",
+    "object": "cold 7"
+  },
+  {
+    "subject": "pinion 3 2",
+    "predicate": "depends_on",
+    "object": "sable index"
+  },
+  {
+    "subject": "quartzline retrieval layer",
+    "predicate": "part_of",
+    "object": "pinion 3 2"
+  },
+  {
+    "subject": "recovery desk",
+    "predicate": "consumes",
+    "object": "report q 9"
+  },
+  {
+    "subject": "sensor k 12",
+    "predicate": "produces",
+    "object": "report q 9"
+  },
+  {
+    "subject": "telemetry group",
+    "predicate": "supports",
+    "object": "dr imani reyes"
+  }
+]

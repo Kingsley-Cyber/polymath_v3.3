@@ -16474,3 +16474,441 @@ WHERE THE RELATION LOSS COMES FROM (14 of 15 missed)
 
 Artifacts: docs/baselines/RECALL_GOLD_V1_2026-07-31.json,
 backend/scripts/recall_score.py
+
+## [2026-08-04T17:20Z] CLAUDE :: RECEIPT
+q9 directive steps 7–8 CLOSED.
+- QDRANT_BINARY_QUANTIZATION_ENABLED=false (compose verified on backend+mcp).
+- Evidence payload indexes pruned: corpus_id removed; canary has 9 indexes, 143 pts green.
+- Quantization-assert test pins extended to hybrid_lexical / tier0_document_routing / facet_schema.
+- MEASURED: 137 targeted passed; capped sweep 2488 passed / 30 failed (0 q9-related; hang file ignored).
+- Artifacts: CONTINUITY/Q9_STEPS_7_8_CLOSEOUT_20260804.md + updated Q9_STEP7_HANDOFF.
+- NEXT: step 9 Mongo WT 1.5GB + Neo4j heap 2G/pagecache 1G (measured). Note: .env had NEO4J_PAGECACHE but compose reads NEO4J_PAGECACHE_SIZE.
+
+## [2026-08-04T17:21Z] CLAUDE :: RECEIPT
+q9 directive step 9 CLOSED (Mongo WT 1.5GB + Neo4j heap 2G/pagecache 1G).
+- .env: MONGO_WIREDTIGER_CACHE_GB=1.5; NEO4J_HEAP_MAX=2g; fixed NEO4J_PAGECACHE→NEO4J_PAGECACHE_SIZE=1g.
+- Recreated mongodb+neo4j only; both healthy; backend /health all ok.
+- MEASURED: mongo WT max 3→1.5GB; neo4j heap max 3→2G; container RSS mongo 611→91MiB (cold), neo4j 3.97→2.68GiB.
+- Artifact: CONTINUITY/Q9_STEP9_MEMORY_CLOSEOUT_20260804.md
+- NEXT: step 10 Docker/datastore baselines (no destructive prune).
+
+## [2026-08-04T17:32Z] CLAUDE :: RECEIPT
+Pre-q9 16GB Memory Architecture directive ADOPTED for next work (inspect-first).
+- Wrote CONTINUITY/PREQ9_16GB_MEMORY_ARCHITECTURE_BASELINE.md
+- MEASURED: host RAM 32GiB (directive assumes 16GiB); Docker idle WS ≈9.75GiB (target 5–6GiB); Qdrant 5.48GiB alone.
+- Relex=:8086 host sidecar; embed=:8082; rerank=:8081; ghostb :8084 DOWN.
+- mem_reservation mostly absent; no exclusive heavy-stage lease; SearXNG running in idle.
+- Alias path: architecture+code exist (corpus_lexicon/appos/canonical); NOT e2e proven (no provenance/P-R).
+- HARD STOP before config apply: need owner ruling on (1) stress-16GB on 32GB host vs true 16GB device, (2) Qdrant estate vs 3GiB cap without forbidden deletes.
+- No 10-file q9 ingest started.
+
+## [2026-08-04T17:50Z] CLAUDE :: RECEIPT
+Owner alias-identity state ADOPTED as authoritative.
+- Artifact: CONTINUITY/ALIAS_IDENTITY_AUTHORITATIVE_STATE_20260804.md
+- Binding: query_aliases = retrieval_surface_variants until gate; appos dead_code / do not wire unchanged; Fast schema expansion unqualified (shadow_or_bounded); gate is the missing piece.
+- Next slice when ordered: inventory every producer feeding schema aliases (step 1 of 10).
+- No alias rewrite started this turn.
+
+## [2026-08-04T17:55Z] CLAUDE :: RECEIPT
+Alias pipeline directive v1.0 ADOPTED. Phase 0 COMPLETE.
+- CONTINUITY/ALIAS_PIPELINE_DIRECTIVE_v1.xml (status stub)
+- CONTINUITY/ALIAS_PIPELINE_BASELINE_20260804.md
+- data_eval/alias_pipeline/baseline_inventory.json
+- MEASURED lexicon alias_evidence: SH=4520, surface=196, explicit=98, query_alias=2
+- appos_enrichment live callers=0; curated map at config/canonical/entity_aliases.json (33 keys)
+- NEXT: Phase 1 typed contracts (AliasCandidateV1 / Decision / DocumentEntity / CorpusEntity) — no prod writes.
+
+## [2026-08-04T17:57Z] CLAUDE :: RECEIPT
+Alias pipeline Phase 1 COMPLETE (contracts only; no prod writers).
+- backend/models/alias_identity.py — AliasCandidateV1 / AliasDecisionV1 / DocumentEntityV1 / CorpusEntityV1 + deterministic ids/hashes
+- tests/test_alias_identity_contracts.py — 9 passed
+- NEXT: Phase 2 wrap live miners (enrich/corpus_lexicon/curated/relex surfaces) into AliasCandidateV1 without deleting legacy outputs.
+
+## [2026-08-04T18:01Z] CLAUDE :: RECEIPT
+Alias pipeline Phase 2 COMPLETE (candidate unification; no gate/appos/prod).
+- backend/services/ingestion/alias_candidates.py — collect_alias_candidates()
+- wraps: Schwartz-Hearst(+spans), explicit/abbrev/former patterns, casing variants, curated map, relex surface variants
+- IncompleteAliasCandidate for missing offsets/evidence (fail-closed)
+- legacy_query_aliases == extract_aliases(...) preserved
+- enrich.schwartz_hearst_matches added (schwartz_hearst thin wrapper)
+- tests: test_alias_candidates_phase2.py + contracts → 20 passed
+- NOT done: gate, appos wiring, Fast expansion, prod mutation
+- NEXT: Phase 3 apposition fix+wiring OR Phase 4 alias_gate (directive order: 3 then 4)
+
+## [2026-08-04T18:20Z] CLAUDE :: RECEIPT
+Alias pipeline Phase 3 COMPLETE (typed apposition; no gate/prod).
+- appos_enrichment: classifier (explicit/descriptive/role/location/ambiguous); length NEVER decides alias-hood
+- adjacency gap filter; known-as span path; legacy adapter policy-corrected
+- alias_candidates._wrap_appositions + include_appositions / spacy_doc reuse
+- tests/test_alias_apposition_phase3.py + Phase1/2 → 30 passed
+- Closeout: CONTINUITY/ALIAS_PIPELINE_PHASE3_CLOSEOUT_20260804.md
+- NOT done: alias_gate, Fast expansion, prod mutation
+- NEXT: Phase 4 alias_gate
+
+## [2026-08-04T20:08Z] CLAUDE :: RECEIPT
+Alias pipeline Phase 4 COMPLETE — HARD PAUSE.
+- backend/services/ingestion/alias_gate.py — run_alias_gate()
+- Decisions: ACCEPT_IDENTITY / ACCEPT_TEMPORAL_IDENTITY / ACCEPT_RETRIEVAL_ONLY / REVIEW / REJECT
+- Enforced: deterministic reasons+hashes; provenance fail-closed; doc-scoped ambiguous acronyms;
+  descriptive/role/location REJECT; synonym_of needs corroboration; surface=retrieval-only;
+  semantic=shadow-only REVIEW
+- tests/test_alias_gate_phase4.py + Phases 1–3 → 48 passed
+- Closeout: CONTINUITY/ALIAS_PIPELINE_PHASE4_CLOSEOUT_20260804.md
+- NOT done: Phase 5 clustering, schemas projection, Fast activation, prod mutation
+- PAUSED — await owner go for Phase 5
+
+## [2026-08-04T20:14Z] CLAUDE :: RECEIPT
+Alias pipeline Phase 5 COMPLETE — HARD PAUSE (no corpus clustering).
+- ParentAliasBundleV1 + DocumentEntityV1(+defining/supporting child ids)
+- alias_parent_aggregation.py — child evidence aggregation; no co-occurrence identity;
+  boundary rebuild only with contiguous parent offsets + raw parent text
+- alias_document_clustering.py — doc clusters from ACCEPT_IDENTITY / ACCEPT_TEMPORAL_IDENTITY
+- tests/test_alias_document_clustering_phase5.py + Phases 1–4 → 59 passed
+- Closeout: CONTINUITY/ALIAS_PIPELINE_PHASE5_CLOSEOUT_20260804.md
+- NOT done: corpus clustering, schemas projection, Fast activation, prod writes
+- PAUSED — await owner go for Phase 6
+
+## [2026-08-04T20:31Z] CLAUDE :: RECEIPT
+Alias pipeline Phase 6 COMPLETE — HARD PAUSE (no Phase 7 / prod / Fast).
+- CorpusMergeDecisionV1 + expanded CorpusEntityV1
+- alias_corpus_clustering.py — bounded blocking, pair policy, bridge protection,
+  unique acronym promotion, temporal links, shadow schemas projection
+- tests/test_alias_corpus_clustering_phase6.py + Phases 1–5 → 75 passed
+- Artifacts: data_eval/alias_pipeline/corpus_*.jsonl + metrics/replay/acceptance
+- MEASURED fixture: 17 doc ents → 8 pairs (not N²); false_merge_count=0; replay_ok
+- Closeout: CONTINUITY/ALIAS_PIPELINE_PHASE6_CLOSEOUT_20260804.md
+- NOT done: Phase 7 schemas activation, retrieval integration, prod writes
+- PAUSED — STOP until owner authorizes Phase 7
+
+## [2026-08-04T20:37Z] CLAUDE :: RECEIPT
+Alias pipeline Phase 7 COMPLETE — HARD PAUSE (no prod activation / backfill).
+- ShadowSchemaRecordV1 + SchemaAssistedTraceV1 (separated trust classes)
+- alias_schema_projection.py — CorpusEntity → shadow records (no query_aliases collapse)
+- alias_schema_retrieval.py — dual-lane planner; Fast children-only; Hybrid summaries+children;
+  Graph node IDs + child hydration; related_terms trace-only
+- tests/test_alias_schema_retrieval_phase7.py + Phases 1–6 → 87 passed
+- Artifacts: data_eval/alias_pipeline/phase7_*
+- Closeout: CONTINUITY/ALIAS_PIPELINE_PHASE7_CLOSEOUT_20260804.md
+- NOT done: live retriever wiring, prod schema overwrite, global Fast on, backfill
+- PAUSED — STOP until owner authorizes production activation
+
+## [2026-08-04T20:50Z] CLAUDE :: RECEIPT
+Alias pipeline Phase 8 COMPLETE — shadow/canary live wiring; HARD PAUSE (no prod activation).
+- Controls: enabled_globally=false, shadow_enabled=true, ranking_enabled=false,
+  fixture allowlist=[isolated_alias_fixture], production writes/backfill=false
+- alias_retrieval_shadow.py + retrieve_planned / retrieve() attach (fail-closed)
+- tests: 102 passed phases 1–8 (phase8: 15); artifacts phase8_*; LIVE_PROBE_OK in
+  polymath_v33-backend-1 (docker cp — not image-baked); verify_backend_runtime OK
+- Closeout: CONTINUITY/ALIAS_PIPELINE_PHASE8_CLOSEOUT_20260804.md
+- NOT done: global expansion, prod schema mutation, backfill, Fast ranking in prod,
+  Neo4j identity edges, full-corpus migration, durable image rebuild
+- PAUSED — STOP until owner authorizes next (rebuild / fixture e2e / q9)
+
+## [2026-08-04T20:58Z] CLAUDE :: RECEIPT
+Phase 8 durable image bake PASSED (owner ruling: shadow accepted; prod activation blocked).
+- Rebuilt+force-recreated: backend, mcp, ingest-worker (apple-mlx + offline-ingest + daily)
+- Image IDs changed (all three); modules on overlay FS (not bind-mount); second
+  force-recreate WITHOUT rebuild kept hooks; docker_cp_dependency=0 for impl
+- Flags inside all three containers: shadow=true ranking=false global=false writes=false
+- LIVE_PROBE_OK + DURABILITY_PROBE_OK; replay_identical=true; ranking unchanged
+- verify_backend_runtime.sh OK embed dim=1024
+- Artifact: data_eval/alias_pipeline/phase8_durability_acceptance.json
+- NEXT authorized: isolated alias e2e from /Users/king/Downloads/Test (+ curated cases)
+- STILL NOT authorized: production canary, schema backfill, global Fast, Neo4j identity writes
+
+## [2026-08-04T21:12Z] CLAUDE :: RECEIPT
+Isolated alias e2e PASSED on durable baked images (Level 0 shadow only).
+- Corpus isolated_alias_fixture id=8bf57c76-7e2d-49eb-9a11-6e260406903f
+  (Test/ + curated cases under /ingest-source/isolated_alias_fixture); queryable=10
+- Pipeline: relex_local ingest → AliasCandidateV1 → gate → parent/doc/corpus →
+  shadow schemas → dual-lane Fast/Hybrid/Graph (ranking unchanged)
+- identity: precision=1.0 recall=1.0 false_merges=0 IR-cross=0 desc_as_alias=0
+  RAG+IBM+Benesh explicit found; schema citations=0; replay identical
+- Bugfix baked: Schwartz-Hearst long-form no longer crosses newlines (enrich.py)
+- Rebake image backend=bbb2173b8902… mcp=c19c60188894…; verify_backend OK
+- Artifacts: isolated_alias_e2e_acceptance.json + isolated_alias_e2e_summary.json
+- NEXT: q9 10-file e2e with per-query alias traces (still no prod activation)
+- NOT authorized: Levels 1–4 ranking, schema backfill, global Fast, Neo4j identity
+
+## [2026-08-04T23:20Z] CLAUDE :: RECEIPT
+q9 steps 10–17 COMPLETE — HARD PAUSE (step 18 owner approval).
+- Step10 baseline + qdrant raised to 8g for book-scale headroom
+- Corpus q9_10_file_inspection id=6a766597-29f3-4a3e-8918-5de10f0053b3
+  queryable=10; evidence dual-write 2714 pts unquantized (9 indexes); dup_chunk_ids=0
+- Probes: 33 Fast/Hybrid/Graph w/ alias traces; schema_match=33; citations=0;
+  ranking unchanged=33; cold/warm latency measured; HTML-test grounded follow-up OK
+- Graph path ran (timings.graph~7s); facts_used=0 while enrichment still mid-flight
+- Closeout: CONTINUITY/Q9_STEPS_10_17_CLOSEOUT_20260804.md
+- Artifacts: data_eval/q9/*
+- PAUSED — no production migration; alias stays Level 0
+
+## [2026-08-04T23:32Z] CLAUDE :: RECEIPT
+Owner Step 18 + Final Functional Closure Directive ACCEPTED on disk.
+- Ruling: CONTINUITY/Q9_STEP18_OWNER_RULING_20260804.md
+- q9_report=accepted_with_documented_caveats; production_migration=not_authorized
+- alias_level_1_canary=authorized (allowlist only); graph+SSE pending
+- MEASURED preflight: Mongo ghost_b facts=0 entities=3262 relations=36;
+  Neo4j Fact=0 Entity=0 Chunk=160 Document=8; promo noop/blocked_no_extractions;
+  extraction_jobs still queued/running; 4/10 docs graph=pending
+- Control-plane gate (no promote without extractions) appears intentional;
+  readiness "graph complete" with 0 Fact nodes is a honesty defect to fix
+- NEXT: finish enrichment terminal → Graph branch A–E → SSE HTML → empty probe → latency → L1
+
+## [2026-08-04T23:55Z] CLAUDE :: RECEIPT
+Cross-domain retrieval directive ADOPTED — Phase 0 baseline + Phase 1 started.
+- Baseline: CONTINUITY/CROSS_DOMAIN_RETRIEVAL_BASELINE_20260804.md
+- Schema inventory MEASURED: corpus_6a766597_schemas 1247/1247 dense @1024
+  (semantic vocab vector lookup enabled; no shadow backfill needed for q9)
+- Extend-only: QueryIR domains/bridges; EvidenceItem lane spine; config RRF/MMR/
+  protected-anchor/final-budget knobs; protected_anchors.py; graph_authority.py
+- Graph explicit block wired in retrieve_planned + legacy retrieve when
+  Neo4j Fact count=0 → status=blocked reason=qualified_graph_evidence_unavailable
+- NOT done yet: full wave-1 lane timers, weighted RRF name unification, MMR
+  post-protect wire into retrieve_planned, context packet, live canary, closeout
+- Production ranking/backfill/topology still forbidden
+
+## [2026-08-05T00:05Z] CLAUDE :: RECEIPT
+Cross-domain retrieval directive COMPLETE — HARD PAUSE.
+- Closeout: CONTINUITY/CROSS_DOMAIN_RETRIEVAL_CLOSEOUT_20260804.md
+- Canary artifacts: data_eval/cross_domain/* (acceptance_matrix, RRF, protect,
+  MMR, context packets, stage timings, Level0 vs Level1 comparison)
+- MEASURED: Graph block pass; 5/5 non-graph nonempty; citations=0;
+  Level1 no clear recall gain → ranking left disabled
+- Defaults: CROSS_DOMAIN_CURATION_ENABLED=false; alias ranking=false;
+  production writes/backfill=false; no topology migration
+- STOP — owner approval required for prod ranking / schema backfill / migration
+
+## [2026-08-05T00:20Z] CLAUDE :: RECEIPT
+Graph authority repair Phase-1 COMPLETE on q9 (HARD PAUSE).
+- Directive: CONTINUITY/GRAPH_AUTHORITY_REPAIR_DIRECTIVE_20260804.md
+- Closeout: CONTINUITY/GRAPH_AUTHORITY_REPAIR_CLOSEOUT_20260804.md
+- CORRECTION: Entity!=0 — prior Entity=0 was corpus_id filter bug; MEASURED
+  Entity via MENTIONS=2310, RELATES_TO=1230, RelationAssertion=36, Fact=0
+- Capability gate: advertised_mode=graph_assertion; Fact gate not weakened
+- Graph retrieval: not blocked; graph_added_beyond_Hybrid on fixture; silent_Hybrid=0
+- Jobs: stuck_orphan=2583 explicitly recorded; pending/leased=0
+- Baked backend image
+
+## [2026-08-05T01:21Z] CLAUDE :: RECEIPT
+Graph Semantic E2E Phases 0–10 COMPLETE on isolated fixture — HARD STOP.
+- Fixture: gsem-e2e-20260804a (excluded_from_user_search; production_visible=false)
+- Closeout: CONTINUITY/GRAPH_SEMANTIC_E2E_CLOSEOUT_20260805.md
+- Phase1 proof: data_eval/knowledge_e2e/phase1_fixture_proof.json (phase_1_ok)
+- Phases2–6: data_eval/knowledge_e2e/phases_2_6_fixture_report.json
+- Phases7–10: data_eval/knowledge_e2e/phases_7_10_fixture_report.json (all_ok)
+- Writer convergence: worker+graph_backfill → project_document_via_control_plane;
+  tests/test_neo4j_write_via_projection_cp.py 3 passed
+- MEASURED retrieval: qdrant_only=7 / qdrant_mongo=8 / graph=6; SSE sources=2 fixture-only
+- Replay: job_id set stable; CERTIFIED=19 NOOP=13
+- Production migration / ontology activation / orphan re-extract / global ranking = still prohibited
+- STOP — no further phase work without new owner directive
+
+## [2026-08-05T01:28Z] CLAUDE :: RECEIPT
+Post-closeout durable bake COMPLETE (no new phases).
+- Rebuilt backend + ingest-worker images with project_document_via_control_plane
+- Qdrant briefly unhealthy during cold collection load; waited → healthy; backend started
+- MEASURED: verify_backend_runtime.sh OK (EMBEDDER_URL=host.docker.internal:8082, dim=1024)
+- Workers 2+3 healthy with baked CP entry
+- Graph Semantic E2E HARD STOP still in force
+
+## [2026-08-05T01:40Z] CLAUDE :: RECEIPT
+Complex Query / Multi-Hop Graph RAG — Phase 0–3 ADOPTED (dark).
+- Baseline: CONTINUITY/COMPLEX_QUERY_SUBQUERY_BASELINE_20260804.md
+- Ledger: CONTINUITY/COMPLEX_QUERY_MULTIHOP_IMPLEMENTATION_20260804.md
+- Inventory: data_eval/complex_query/current_state_inventory.json + retrieval_executor_matrix.json
+- Contracts: backend/models/complex_query.py (RootQueryIR, SubQuery*, GraphTraversal*, Path, Bridge, Contradiction, ContextPacket, AnswerVerification)
+- Config: COMPLEX_QUERY_* dark; allowlist default gsem-e2e-20260804a; planner flag false
+- Templates+executor: complex_query_templates.py / complex_query_executor.py (plan-only)
+- retrieve_planned: attaches complex_query diagnostics when flag+allowlist; ranking_mutated=false
+- Tests: test_complex_query_contracts.py + test_complex_query_templates.py → 12 passed
+- Production activation / global ranking / ontology / schema backfill still prohibited
+- NEXT: Phase 4–5 fixture-gated Wave-1 asset reuse + traversal compiler
+
+## [2026-08-05T01:46Z] CLAUDE → OWNER :: RECEIPT
+Complex Query / Multi-Hop Phases 4–13 fixture-only E2E COMPLETE → HARD STOP.
+- Allowlist: gsem-e2e-20260804a only; COMPLEX_QUERY_SUBQUERY_PLANNER_ENABLED=false
+- Wave-1: root_embedding_calls=1, duplicate_root_embeddings=0, duplicate_child_hydration=0, ranking_mutated=false
+- Traversal: graph_subqueries=2, neo4j_round_trips=2 (≤max), unrestricted_bfs=false, child_support=true, llm_cypher=false
+- Fusion/protect/MMR + ContextPacket + AnswerVerification wired in complex_query_runtime.py
+- Unit tests: 15 passed (contracts/templates/traversal)
+- Fixture E2E: data_eval/complex_query/acceptance_matrix.json all_ok=true, replay_ok=true
+- Closeout: CONTINUITY/COMPLEX_QUERY_MULTIHOP_E2E_CLOSEOUT_20260805.md
+- NOT done / not authorized: production ontology, schema backfill, orphan re-extract, global planner, production graph migration, Graph Semantic E2E hard-stop lift, image re-bake
+
+## [2026-08-05T02:20Z] CLAUDE → OWNER :: RECEIPT
+Complex-query validation/durability delta COMPLETE → HARD STOP.
+- Baked complex-query modules into backend image; force-recreated; docker_cp_dependency=false
+- Fixture runtime override ON (COMPLEX_QUERY_FIXTURE_RUNTIME_ENABLED); global planner OFF
+- Real /api/chat SSE: executor_ran=true, paths=2, child_support=true, ranking_mutated_outside_fixture=false
+- Query suite 8/8; false_transitive=0; identity_merges=0; graph_fact_block_honest=true
+- Perf warm chat p95≈6319ms ≤ graph_deep 10000ms target; neo4j_rt≤2; OOM=0
+- True restart replay: stop→restart deps→force-recreate→rerun; all required hashes identical
+- Closeout updated: CONTINUITY/COMPLEX_QUERY_MULTIHOP_E2E_CLOSEOUT_20260805.md
+- NOT authorized: global planner, Graph Semantic E2E hard-stop lift, production ontology/backfill/migration
+
+## [2026-08-05T02:38Z] CLAUDE → OWNER :: RECEIPT
+Provider-backed synthesis gap CLOSED → HARD STOP.
+- Blocker was OpenCode/Anthropic credits on default answer model (not LiteLLM master key); DeepSeek stored key invalid/zero-balance
+- Fixture probes use pool:provider-readiness-longcat-1 (LongCat-2.0) via overrides.model
+- 3/3 successful /api/chat generation probes (direct, cross-domain paths=2, contradiction); claims fully supported; SSE terminal=completed; tokens streamed
+- successful_generation_performance recorded separately (retrieval p95≈1.3s; full chat p95≈22s includes provider generation)
+- Closeout updated: CONTINUITY/COMPLEX_QUERY_MULTIHOP_E2E_CLOSEOUT_20260805.md
+- graph_semantic_e2e_hard_stop REMAINS; global planner DISABLED; production activation NOT_AUTHORIZED
+
+## [2026-08-05T02:45Z] CLAUDE → OWNER :: RECEIPT
+Composer 2.5 graphify production-gap audit complete.
+- Report: CONTINUITY/COMPLEX_QUERY_PRODUCTION_GAP_GRAPHIFY_20260805.md
+- Graph updated (~29.5k nodes). Top P0: fixture-only env; CQ does not merge into finalists; ContextPacket/AnswerVerification not consumed by chat_orchestrator.
+- Fix order before hard-stop lift: wire CQ→finalists+synthesis (G02/G03), then downgrade honesty + credential preflight.
+- No production activation performed.
+
+## [2026-08-05T03:10Z] CLAUDE → OWNER :: RECEIPT
+Owner ruling GO — Graph Semantic E2E hard stop LIFTED_FOR_BOUNDED_DARK_CANARY_ONLY.
+- Implemented shadow dark canary: config gates, DarkCanaryComparisonV1, ledger + auto-rollback, wired in retrieve_planned (diagnostics only; finalists unchanged)
+- Override: COMPLEX_QUERY_DARK_CANARY_ENABLED + corpus/user allowlists (gsem-e2e-20260804a / Sambenja)
+- Global planner remains OFF; user-visible ranking / production migration NOT_AUTHORIZED
+- Next: bounded relationship-heavy canary run → comparison ledger → HARD STOP for user-visible canary decision
+
+## [2026-08-05T02:56Z] CLAUDE → OWNER :: RECEIPT
+Bounded dark canary RUN COMPLETE → HARD STOP (user-visible canary NOT_AUTHORIZED).
+- MEASURED n=5 relationship-heavy /api/chat queries on gsem-e2e-20260804a / Sambenja
+- acceptance.pass=true: citation_resolution=1.0, unsupported_paths=0, false_transitive=0, identity_merges=0, unsupported_final_claims=0, silent_hybrid=0, child_support=1.0, production_answer_mutations=0, ranking_mutations=0, dark_retrieval_p95≈1522ms, OOM=0
+- graph_relationship_query_gain: 5/5 rows with graph_added_child_ids (cross_domain paths=2)
+- ranking_mutated=false on all probes; baseline chunks authoritative
+- Provider note: dependency_analysis SSE error 402 Payment Required (LongCat) after retrieval succeeded — classified provider-readiness, not retrieval; dark comparison still recorded
+- Artifacts: data_eval/complex_query/dark_canary_report.json + dark_canary_comparisons.jsonl
+- STILL BLOCKED: global planner, user-visible CQ ranking, ontology/backfill/migration, orphan reextraction, qualified_fact promotion
+
+## [2026-08-05T03:30Z] CLAUDE → OWNER :: RECEIPT
+Owner ruling EXPAND DARK → expanded shadow suite COMPLETE → HARD STOP.
+- Corpora used 2/3 (only two graph_assertion+entity+assertion certified): gsem-e2e-20260804a + q9_10_file_inspection; users 1/3 (Sambenja only); queries 50 exact distribution
+- MEASURED acceptance.pass=true; citation=1.0; child_support=1.0; false_transitive=0; identity_merges=0; silent_hybrid=0; unexplained_empty=0; ranking_mutations=0; answer_mutations=0; gain_rate=1.0 (36/36); neg_irrelevant_graph=0.0 (0/3); retrieval_p95≈9760ms; neo4j/hydrate/rerank budgets held; rollback_count=0
+- synthesis_preflight=ok (LongCat); ranking_mutated=false all probes
+- Production-gap delta: visible prerequisites still unmet (G02/G03/G04/G10) — CQ winners still do not control finalists/synthesis
+- Artifacts: data_eval/complex_query/expanded_dark_canary_*.json + CONTINUITY/COMPLEX_QUERY_EXPANDED_DARK_CANARY_20260805.md
+- user_visible_canary NOT_AUTHORIZED; global planner DISABLED; no auto-promotion
+
+## [2026-08-05T04:41Z] CLAUDE → OWNER :: RECEIPT
+Owner ruling option 2 — candidate-adoption integration COMPLETE (DARK / allowlist) → HARD STOP.
+- Flags: RUNTIME/RANKING/SYNTHESIS_PACKET/FINAL_VERIFICATION on allowlist; planner OFF; user-visible CQ NOT_AUTHORIZED
+- Corpora: gsem-e2e-20260804a + q9_10_file_inspection; user Sambenja
+- MEASURED acceptance.pass=true (n=50): cq_winners→candidate_finalists 0.98; graph_added_final_evidence_rate(rel)=1.0; ranking inside=true outside=false; user_visible_mutations=0; CQ-stage p95≈1188ms; neo4j≤2; hydrate≤1; rerank≤1
+- Dark synthesis 25/25 via DeepSeek platform Flash (`pool:deepseek-api__deepseek-v4-flash`, api.deepseek.com); key encrypted in settings.api_keys.deepseek — NOT committed
+- Quality delta weak for visible canary: coverage improved=0 / regressed=6; candidate_supported_claim_rate=0.7451; verify pass=5 revise=20 block=0
+- Artifacts: data_eval/complex_query/candidate_* + CONTINUITY/COMPLEX_QUERY_CANDIDATE_ADOPTION_CLOSEOUT_20260805.md
+- STILL BLOCKED: user-visible CQ, global planner, ontology/backfill/migration, orphan reextract
+
+## [2026-08-05T04:42Z] CLAUDE → OWNER :: RECEIPT
+Post-bake correction: `docker compose -f yml -f apple-mlx.yml` alone dropped override CQ flags (empty env). Recreated with explicit `-f docker-compose.override.yml`. Verified RUNTIME/RANKING/SYNTH/VERIFY=true, PLANNER=false, allowlists intact, embed dim=1024.
+
+## [2026-08-05T05:54Z] CLAUDE → OWNER :: RECEIPT
+Dark quality-correction slice COMPLETE → use_gate PASS on 15 real q9 questions → HARD STOP before visible enable (key rotation required).
+- Six “coverage regressions” classified as metric asymmetry (baseline hardcoded 1.0); true displacements=0 — see CONTINUITY/COMPLEX_QUERY_COVERAGE_REGRESSIONS_20260805.md
+- Policy: baseline-augment + coverage guard; revise→regen→citation salvage→pass|block; paired DeepSeek Flash; CQ rerank cap wired (override=12)
+- MEASURED use_gate.pass=true: worse=0, unsupported_final=0, cov_reg=0, cov_imp=1, graph_gain=1, warm_p95=9216.92ms
+- VISIBLE still false; planner false; bake verified embed dim=1024
+- BLOCKED FOR ENABLE: paste rotated DeepSeek platform key → replace encrypted settings → smoke → then flip VISIBLE allowlist for Sambenja+q9 only
+- Artifacts: data_eval/complex_query/q9_quality_use_* + CONTINUITY/COMPLEX_QUERY_DARK_QUALITY_CLOSEOUT_20260805.md
+
+## [2026-08-05T08:15Z] CLAUDE → OWNER :: RECEIPT
+Ingestion control plane corrected for q9 final E2E redo (contaminated DeepSeek summary path void).
+- BINDING: CONTINUITY/INGESTION_CONTROL_PLANE_20260805.md
+- Extraction ONLY: relex_local; Required summaries: deterministic_summary.v1; Cloud Ghost A: DEPRECATED enrichment behind summary_cost_authority only (not removed)
+- CODE: worker.py `_run_ghosts_parallel` — no cost controller → deterministic path; cost controller → summarize_parents
+- TESTS GREEN (host): test_worker_summary_control_plane.py (2) + resume reuse (1) + test_summary_provider_not_required + deterministic_parent = 13 passed
+- Contaminated corpus 7d801816 / batch 5ece32b2 is NOT acceptance truth; Docker Desktop currently DOWN (Relex :8086 still 200)
+- NEXT: bring Docker up → bake backend+ingest-worker → new sibling clean gen with NO summary_cost_run_id
+
+## [2026-08-05T12:10Z] CLAUDE → OWNER :: RECEIPT
+Clean deterministic q9 ingest LAUNCHED under corrected control plane.
+- Corpus `q9_final_e2e_det_20260805` / `d153de2a-14c9-4ab3-9063-565d872f3773`
+- Batch `740be753-d988-4b8b-9d98-5c8305398075` options: cost_run=null authority=null defer=false profile=mac_safe relex_local
+- Extra gates fixed: batches create (no auto cost_run), router (no authority require), ingestion_service.ingest (allow deterministic), preflight canary skip without authority
+- Hot-patched into running backend+workers; full image bake still owed after docker-cp
+- Contaminated `7d801816` void; monitor: data_eval/q9_final/phase1_det_ingest_progress.jsonl
+
+## [2026-08-05T14:20Z] CLAUDE → OWNER :: RECEIPT
+Speed bench COMPLETE — 5/5 done, 0 failures, all-local ($0, zero provider calls; litellm log empty).
+- Corpus `speed_bench_test_20260805` / `0189427c` · batch `b0d12dba` status=done; verify ok=true all docs; all docs qdrant_written+neo4j_written+summaries_indexed=true
+- MEASURED clean run (post-quiesce 13:42:11→14:11:43 UTC, worker-2, Mac Studio): Fundamentals 1695 chunks extract 490.0s (3.5 ch/s, 313 rel), embed 138s, qdrant 22s, neo4j 340s; Terraform 859 extract 225.0s (68 rel), embed 66s, neo4j 204s; TRAILs 12s/10s extract, neo4j 82s/78s
+- QUALITY: summaries PASS_CONTROL (1360/1360 deterministic:v1, cloud=0; 33 low-overlap flags = 2.4%); ontology PASS_SOFT (OOV types 0.0, OOV predicates 0.0); relations 413 accepted (372 accept_high + 41 accept_corroborated); 57,499 entities; 0 empty rows
+- Artifact: data_eval/speed_bench_test_20260805/quality_speed_assessment.json (batch_span 6149s includes pre-quiesce crash churn; clean-run numbers above are authority)
+- ROOT CAUSES FIXED+BAKED (2 image bakes, docker cp era ended): (1) relex client 512-chunk mute POST severed by Docker host proxy → 32-chunk slices + 1 retry + keepalive=0; (2) join_trust + control-plane patches were reverted by post-unplug container recreate — now baked; (3) repair-lane starvation: 14.7k extraction_jobs (q9-det paused + VOID 7d801816) hogged the single MPS encoder → INGEST_AUTO_REPAIR_RUN_EXTRACTION/SUMMARIES=false (.env) + CONTROL_PLANE_V2_RUN_ALL_LANES=false (override) — jobs parked queued, also silences reconciler no-authority summary warnings
+- PERF SHIPPED (baked, tests 3/3 green test_relex_local_microbatch.py): slice pipelining — spaCy/gate lane (~35% of extract wall) now overlaps encode wait; sequential-order deterministic, single consumer (spaCy not thread-safe)
+- ARCH FINDING: Neo4j promotion = 704s ≈ 40% of clean wall with ~78s fixed floor per doc (24 relations → 78s; ontology resolution 15,103 domain-type lookups on Terraform). Docs are queryable at qdrant (book at +11.8min) — graph step is enrichment and could leave the critical path
+- OWNER DECISIONS PENDING: (a) sidecar batched MPS inference (2–4× encode; changes frozen batch-1 lane that mirrors gold benchmark — borderline scores can flip); (b) resume paused q9-det batch `740be753` (repair extraction lanes are now OFF — batch runner is the only extraction path, as doctrine intends); (c) VOID corpus 7d801816 disposal (its 2.6k parked extraction jobs re-plan forever until corpus is removed)
+
+## [2026-08-05T14:35Z] CLAUDE → OWNER :: RECEIPT
+Continuity written for follow-on sessions: CONTINUITY/SPEED_BENCH_CLOSEOUT_AND_PERFORMANCE_PLAN_20260805.md
+- Captures: clean-run MEASURED table (encode 0.19s/chunk batch-1, 3.5 ch/s; Neo4j 704s ≈40% wall, 78s fixed floor/doc, 15,103 domain-type lookups on Terraform); quality verdicts (summaries PASS_CONTROL 1360/1360 deterministic:v1, ontology 0.0 OOV, 2704/2704 extracted, $0); all four root causes + fixes (baked); queryable≠complete distinction (book queryable +11.8min)
+- Open perf work (ordered): (1) Neo4j promotion off critical path [owner ratify], (2) cache/bulk ontology resolution, (3) batched MPS inference [owner: gold-benchmark diff first], (4) NO doc-level MPS concurrency
+- Open owner decisions: A) resume q9-det batch 740be753 from state; B) terminal disposal of void corpus 7d801816 (2.6k parked jobs re-plan forever); C) authorize batch-8/16 only after frozen gold diff
+- Session-restart checklist included in the continuity doc
+
+## [2026-08-05T14:40Z] OWNER REVIEW → CONTINUITY UPDATE
+Owner closeout review folded into CONTINUITY/SPEED_BENCH_CLOSEOUT_AND_PERFORMANCE_PLAN_20260805.md: operational ingestion PASSED (5/5 files, 0 failures, qdrant+neo4j+summaries written, $0), but corpus semantic quality NOT_YET_FULLY_PASSED.
+- Open bounded gaps: 24 unexplained parents without summaries (1384 vs 1360); 32 unexplained children without extraction rows (2736 vs 2704); row-level engine metadata "<unset>" on all 2704 rows (doc-level relex_local); visibly questionable relation samples (malformed span "operatorauthorized account", duplicate surface forms, possessive mis-predicate "owner owns agreement", 0.336-confidence accept_high); 33 low-overlap summaries need routing disposition; ladder counters ambiguous (fully_enriched:5 AND graph_pending:5)
+- Rule recorded: ontology PASS_SOFT = vocabulary compatibility only, NOT span/predicate/direction/consolidation accuracy
+- NEXT ACTION: narrow quality-closeout pass (classify 24+32, stamp engine metadata, audit all 413 relations against source, consolidate duplicates, disposition 33 summaries, fix counters, reproject only affected artifacts) — NOT a reingest
+
+
+## [2026-08-06] OWNER ANALYSIS SAVED — ingestion throughput + semantic quality
+
+Owner diagnosis filed as living authority:
+- `CONTINUITY/OWNER_INGESTION_THROUGHPUT_AND_QUALITY_ANALYSIS_20260806.md` (full analysis)
+- `CONTINUITY/SPEED_BENCH_CLOSEOUT_AND_PERFORMANCE_PLAN_20260805.md` updated: OPEN work now Pri 1–6 (Relex profile → cache invariants → relation routing → extraction windows → entity consolidation → deterministic_parent.v2)
+
+Central diagnosis: speed = serial Relex per child (~49% wall); quality = noisy entities / sparse-low-value relations / thin section+doc summaries. Batch-1 Relex retained. Do not rebuild parse/chunk/det-summary-runtime/Qdrant/control-plane.
+
+Next: Pri 1 Relex internal profile unless owner reorders.
+
+## [2026-08-06] OWNER PERF TARGETS + M1 SCHEDULING MODEL ADDED
+
+Appended to `OWNER_INGESTION_THROUGHPUT_AND_QUALITY_ANALYSIS_20260806.md` and SLOs mirrored in `SPEED_BENCH_CLOSEOUT_AND_PERFORMANCE_PLAN_20260805.md`:
+- Realistic aim: searchable ≤5 min · fully enriched ~9–13 min (windows+overlap path)
+- Math: Relex-only cannot hit ≤10 min full (even Relex=0 ≈15.6 min)
+- Doctrine: concurrency *around* Relex (prefetch/CPU), not multiple MPS forwards; batch_1 retained
+- Summaries = quality track, not speed bottleneck
+
+## [2026-08-06] ADOPTED — entity quality ladder 5a/5b/5c
+
+Owner adopted into SPEED_BENCH tracker + OWNER analysis:
+- **5a Label contract** (rename magnets, decoys+drop, per-label thresholds) BEFORE next extract
+- **5b Deterministic entity gate** on ALL Relex entities (POS/shape, line-wrap; expand beyond relation-anchor-only)
+- **5c Neo4j→PhraseMatcher/EntityRuler gazetteer** optional later; **confirmed NOT running today**
+Order: 5a → 5b → 5 → 5c. Root cause: label set is the bug (`software` magnet), not the model.
+
+## [2026-08-06] REFINED — quality vs throughput, LFM distinction, entity ladder corrections
+
+Owner analysis absorbed into SPEED_BENCH tracker + OWNER_INGESTION…:
+- Central conclusion: quality plan mostly fixes durable graph writes; only part of throughput
+- LFM2-1.2B-Extract works OOTB (generative); not drop-in Relex; deprecated → LFM2.5-1.2B-Instruct bake-off
+- Decoys demoted to ablation; specificity ladder replaces reject-all-lowercase
+- Type-pair allowlist = precision not released-Relex speed; windows + Pass-1 = highest levers
+- Bake-off A/B/C/D defined; production stays Relex until gates pass
+
+## [2026-08-06] ADOPTED — syntax lane surface preservation + endpoint signature compile
+
+Owner doctrine into SPEED_BENCH + OWNER analysis:
+- Syntax lane = DependencyMatcher ∪ FrameExtractor ∪ SVO + negation/modality/voice/apposition/coordination/alias
+- Always retain surface_predicate / lemma / particle / preposition / voice / canonical_candidate (ontology rematch without re-extract)
+- Compile endpoint signatures before runtime (VALID/AMBIGUOUS/INVALID lookup)
+- Do not rebuild stack — wire + durable persist; lineage map already shows components exist
+
+## [2026-08-06] WAY AHEAD — GLiNER2 entity-census architecture is the implementation plan
+
+Owner verdict absorbed into SPEED_BENCH (G0–G13 tracker) + OWNER analysis:
+- Law: Batch globally; adjudicate document-locally
+- Hot path: GLiNER2 census → doc reducer → mention completion → selective spaCy → existing predicate/gate
+- Relex: production_candidate removed; frozen_benchmark_baseline retained
+- Prior Pri 0–6 / 5a–5e mapped into G* phases (not discarded)
+- Blockers: gold-entity syntax ceiling, MPS vs MLX, cluster+completion evals, closed-world quals, owner GO for graph writes
+- Primary risk: relation recall vs historical syntax silence — remeasure before flip
+
+## 2026-08-06 23:15 MDT — OWNER STOP ORDER: Meridian iteration halt (forensic audit)
+
+Any agent working on Graphify remediation: STOP scoring against the Meridian set
+("graphrag_accuracy_test 2"). It is burned as an independent benchmark (4 scored exposures with code
+edits in between). Directive + full findings: POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/work/remediation/STOP_MERIDIAN_TUNING.md
+and audit/FORENSIC_AUDIT_REPORT.md. General-class fixes verified on synthetic fixtures only.
+Qualification requires a new sealed set, scored once, post-freeze. — auditor, on owner instruction

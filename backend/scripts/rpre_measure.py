@@ -13,7 +13,8 @@ Answers three questions the plan could previously only guess at:
      R-pre these counters were incremented and garbage-collected.
   2. What is R3's real ceiling? suppressed_conjunct_crossing per chunk is the
      upper bound on what coordination distribution could recover — NOT the
-     "6.5x GLiREL" figure, which came from one chunk of a P=0.273 engine.
+     "6.5x" retired-classifier figure, which came from one chunk of a P=0.273
+     engine.
   3. How much is lost to the entity_type CASING MISMATCH? ontology.yaml uses
      Title Case (Concept); the RunPod-extracted corpora store UPPERCASE
      (CONCEPT). allowed_pairs does an exact tuple match, so uppercase types can
@@ -165,7 +166,7 @@ def main() -> int:
 
     # R3 ceiling: conjunct-crossing is the upper bound on what coordination
     # distribution could recover. Discount by the ~0.5 genuine rate estimated
-    # from hand-judging GLiREL's enumeration output (spec §0).
+    # from hand-judging the retired classifier's enumeration output (spec §0).
     cc = pass_b["counters"].get("suppressed_conjunct_crossing", 0)
     n = pass_b["chunks"]
     cc_per_chunk = cc / n if n else 0.0
@@ -206,8 +207,9 @@ def main() -> int:
             "note": (
                 "Upper bound before non-distributive guards (between/among, "
                 "symmetric predicates, negated/contrastive conjuncts, list "
-                "cap), which only reduce it. Supersedes the '6.5x GLiREL' "
-                "planning figure, which rested on one chunk of P=0.273 output."
+                "cap), which only reduce it. Supersedes the '6.5x' "
+                "retired-classifier planning figure, which rested on one chunk "
+                "of P=0.273 output."
             ),
         },
         "suppression_ranking": sorted(

@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "candidate_type": {
+      "type": "string"
+    },
+    "canonical_surface": {
+      "type": "string"
+    },
+    "document_entity_id": {
+      "type": "string"
+    },
+    "document_id": {
+      "type": "string"
+    },
+    "mention_count": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "mention_ids": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "status": {
+      "enum": [
+        "PROMOTED",
+        "DOCUMENT_LOCAL",
+        "REVIEW_AMBIGUOUS",
+        "SUPPRESSED"
+      ]
+    },
+    "status_reasons": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "type_purity": {
+      "type": "number"
+    }
+  },
+  "required": [
+    "document_entity_id",
+    "document_id",
+    "canonical_surface",
+    "candidate_type",
+    "mention_ids",
+    "mention_count",
+    "type_purity",
+    "status"
+  ],
+  "type": "object"
+}

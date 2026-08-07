@@ -1,0 +1,29 @@
+{
+  "attributed_renderings": 14,
+  "conservation": true,
+  "documents": 2,
+  "elapsed_seconds": 5.690732583010686,
+  "eligible_units": 193,
+  "exact_evidence_alignment": true,
+  "extract_calls": 193,
+  "health": {
+    "deep_search": false,
+    "device": "cpu",
+    "extractor_load_count": 1,
+    "extractor_release": "graphify-triplet-extract-balanced-cpu-v1",
+    "package_version": "0.5.0",
+    "ready": true,
+    "resolve_coref": false,
+    "source_commit": "89417ae62214728deca112aa8f4d27ff6c854d08",
+    "speed_preset": "balanced"
+  },
+  "identity_digest": "f2e35a40e2a7f11d917f64b6f890d180f2c39dc9e5d0138c2cb9c306becae0aa",
+  "input_units": 1279,
+  "negated_asserter_links": 0,
+  "no_graph_writes": true,
+  "one_extract_call_per_eligible_unit": true,
+  "persisted_propositions": 489,
+  "raw_renderings": 489,
+  "schema_version": "polymath.openie_extraction_report.v1",
+  "status": "passed"
+}

@@ -38,6 +38,51 @@ from services.storage.record_status import (
 logger = logging.getLogger(__name__)
 
 _BIBLIOGRAPHIC_CAS_ATTEMPTS = 3
+GRAPHIFY_ARTIFACTS_COLLECTION = "graphify_stage_artifacts"
+
+
+async def persist_graphify_stage_artifact(
+    db: AsyncIOMotorDatabase,
+    *,
+    artifact_id: str,
+    corpus_id: str,
+    doc_id: str,
+    stage: str,
+    input_hash: str,
+    output_hash: str,
+    release: str,
+    payload: dict[str, Any],
+) -> bool:
+    """Insert one immutable Graphify stage artifact, or verify its identity."""
+    collection = db[GRAPHIFY_ARTIFACTS_COLLECTION]
+    existing = await collection.find_one({"artifact_id": artifact_id}, {"_id": 0})
+    if existing is not None:
+        if (
+            existing.get("input_hash") != input_hash
+            or existing.get("output_hash") != output_hash
+            or existing.get("release") != release
+        ):
+            raise RuntimeError(f"conflicting immutable Graphify artifact {artifact_id}")
+        return False
+    now = datetime.utcnow()
+    await collection.update_one(
+        {"artifact_id": artifact_id},
+        {
+            "$setOnInsert": {
+                "artifact_id": artifact_id,
+                "corpus_id": corpus_id,
+                "doc_id": doc_id,
+                "stage": stage,
+                "input_hash": input_hash,
+                "output_hash": output_hash,
+                "release": release,
+                "payload": payload,
+                "created_at": now,
+            }
+        },
+        upsert=True,
+    )
+    return True
 
 
 def _validate_parent_summary_row(parent: dict) -> dict:
@@ -412,6 +457,9 @@ async def retire_document_derived_state(
     tree_result = await db["summary_tree"].delete_many(
         {"corpus_id": corpus_id, "doc_id": doc_id}
     )
+    control_plane_counts = await _retire_control_plane_state(
+        db, {"corpus_id": corpus_id, "doc_id": doc_id}, reason="document_deleted"
+    )
     queue_counts: dict[str, int] = {}
     for collection_name in (
         "source_parse_jobs",
@@ -449,6 +497,54 @@ async def retire_document_derived_state(
     return {
         "summary_tree": int(getattr(tree_result, "deleted_count", 0) or 0),
         **queue_counts,
+        **control_plane_counts,
+    }
+
+
+async def _retire_control_plane_state(
+    db: AsyncIOMotorDatabase,
+    scope: dict[str, Any],
+    *,
+    reason: str,
+) -> dict[str, int]:
+    """Project a deletion onto the control-plane ledger for `scope`.
+
+    The run status becomes `excluded` — exactly what the next artifact census
+    of a soft-deleted document would derive — instead of leaving a stale
+    `query_ready` row visible until the periodic recheck. Unconsumed outbox
+    intents are consumed so the reconciler never plans work for a tombstone.
+    Certificates are insert-only history and stay untouched: no proof path
+    trusts one without a live all-clear census.
+    """
+
+    from services.control_plane.ledger import (
+        OUTBOX_COLLECTION,
+        RUNS_COLLECTION,
+        RUN_STATUS_EXCLUDED,
+    )
+
+    now = datetime.utcnow()
+    runs_result = await db[RUNS_COLLECTION].update_many(
+        {**scope, "status": {"$ne": RUN_STATUS_EXCLUDED}},
+        {
+            "$set": {
+                "status": RUN_STATUS_EXCLUDED,
+                "certificate_id": None,
+                "proof": None,
+                "last_intake_reason": reason,
+                "updated_at": now,
+            }
+        },
+    )
+    outbox_result = await db[OUTBOX_COLLECTION].update_many(
+        {**scope, "consumed_at": None},
+        {"$set": {"consumed_at": now, "reason": reason, "updated_at": now}},
+    )
+    return {
+        "ingestion_runs": int(getattr(runs_result, "modified_count", 0) or 0),
+        "control_plane_outbox": int(
+            getattr(outbox_result, "modified_count", 0) or 0
+        ),
     }
 
 
@@ -461,6 +557,9 @@ async def retire_corpus_derived_state(
 
     now = datetime.utcnow()
     tree_result = await db["summary_tree"].delete_many({"corpus_id": corpus_id})
+    control_plane_counts = await _retire_control_plane_state(
+        db, {"corpus_id": corpus_id}, reason="corpus_deleted"
+    )
     queue_counts: dict[str, int] = {}
     for collection_name in (
         "source_parse_jobs",
@@ -498,6 +597,7 @@ async def retire_corpus_derived_state(
     return {
         "summary_tree": int(getattr(tree_result, "deleted_count", 0) or 0),
         **queue_counts,
+        **control_plane_counts,
     }
 
 

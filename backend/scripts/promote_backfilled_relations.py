@@ -5,8 +5,9 @@ WHY A SCRIPT AND NOT A HAND-ROLLED WRITER
     neo4j_writer._upsert_relation does entity-type resolution, corpus stamping,
     predicate refinement, edge-strength scoring and deadlock retry. Re-implementing
     any of that here would produce edges that differ from every other edge in the
-    graph. So this drives `backfill_failed_graph_chunks`, the same entry point the
-    /graph-backfill endpoint uses.
+    graph. So this drives the gated service method `backfill_graph_failures`,
+    the same seam the /graph-backfill endpoint uses, which routes through the
+    shared canonical graph-write authorization seam.
 
 WHY DOCS MUST BE UNLATCHED FIRST
     That function only flushes when `write_state.neo4j_written` is not True. Every
@@ -46,8 +47,24 @@ BACKFILL_VERSION = "r8a.v2.frame"
 async def _run(corpus_id: str | None, apply: bool, limit: int | None) -> dict:
     from motor.motor_asyncio import AsyncIOMotorClient
 
-    from services.ingestion.graph_backfill import backfill_failed_graph_chunks
+    from services.ingestion.graph_promotion_jobs import (
+        cli_operator_identity,
+        evaluate_cli_graph_write_gate,
+    )
     import services.ingestion_service as isvc
+
+    # Deny-by-default release gate, evaluated BEFORE the latch is touched,
+    # any state mutation, or any Neo4j call. Authority resolves once per run
+    # through the shared authorization seam; writes below go through the
+    # gated service method, never the low-level writer directly.
+    gate = evaluate_cli_graph_write_gate(
+        script_name="promote_backfilled_relations",
+        operator=cli_operator_identity(),
+    )
+    if gate["blocked"]:
+        # Release-policy block: not a graph failure. Return the frozen
+        # blocked_no_release payload with a distinct policy exit marker.
+        return {**gate["payload"], "mode": "BLOCKED_NO_RELEASE"}
 
     # The singleton is normally wired by the FastAPI lifespan. Outside the app
     # we drive its OWN connect() rather than rebuilding the clients here, so the
@@ -90,6 +107,9 @@ async def _run(corpus_id: str | None, apply: bool, limit: int | None) -> dict:
     if not apply:
         return {"mode": "DRY_RUN", "documents": len(targets),
                 "relations_pending": total_rels,
+                "release_gate": gate["release_gate"],
+                "release_gate_caller": gate["script"],
+                "release_gate_operator": gate["operator"],
                 "sample": targets[:5]}
 
     ok = failed = 0
@@ -119,10 +139,7 @@ async def _run(corpus_id: str | None, apply: bool, limit: int | None) -> dict:
             }},
         )
         try:
-            await backfill_failed_graph_chunks(
-                db=db,
-                qdrant_client=service._qdrant,
-                neo4j_driver=service._neo4j,
+            await service.backfill_graph_failures(
                 corpus_id=t["corpus_id"],
                 doc_id=t["doc_id"],
                 user_id=str(doc.get("user_id") or ""),
@@ -149,11 +166,18 @@ async def _run(corpus_id: str | None, apply: bool, limit: int | None) -> dict:
         "documents_failed": failed,
         "failure_reasons": dict(reasons),
         "relations_pending_before": total_rels,
+        "release_gate": gate["release_gate"],
+        "release_gate_caller": gate["script"],
+        "release_gate_operator": gate["operator"],
         "elapsed_s": round(time.time() - t0, 1),
     }
 
 
 def main() -> int:
+    from services.ingestion.graph_promotion_jobs import (
+        RELEASE_POLICY_BLOCK_EXIT_CODE,
+    )
+
     ap = argparse.ArgumentParser()
     ap.add_argument("--corpus", default=None)
     ap.add_argument("--all", action="store_true")
@@ -165,6 +189,13 @@ def main() -> int:
         return 2
     report = asyncio.run(_run(args.corpus, args.apply, args.limit))
     print(json.dumps(report, indent=2, default=str))
+    if report.get("mode") == "BLOCKED_NO_RELEASE":
+        print(
+            "\nBLOCKED BY RELEASE GATE — no latch change, no write. "
+            "Retryable once a qualifying active release exists.",
+            file=sys.stderr,
+        )
+        return RELEASE_POLICY_BLOCK_EXIT_CODE
     if not args.apply:
         print("\nDRY RUN — nothing written. Re-run with --apply.", file=sys.stderr)
     return 0

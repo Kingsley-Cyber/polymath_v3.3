@@ -54,22 +54,12 @@ from services.extraction.spacy_relation_adapter import (
 )
 
 # Natural-language relation labels handed to the model, and the internal
-# predicate each maps back to. Wording matters to a zero-shot model, so the
-# prompt side is plain English while storage stays snake_case.
-RELATION_LABEL_TO_PREDICATE: dict[str, str] = {
-    "affiliated with": "affiliated_with", "works for": "works_for",
-    "created by": "created_by", "owns": "owns", "part of": "part_of",
-    "located in": "located_in", "causes": "causes", "detects": "detects",
-    "uses": "uses", "produces": "produces", "derived from": "derived_from",
-    "is an instance of": "instance_of", "synonym of": "synonym_of",
-    "includes": "includes", "supports": "supports", "implements": "implements",
-    "has part": "has_part", "references": "references",
-    "depends on": "depends_on", "member of": "member_of",
-    "example of": "example_of", "evaluates": "evaluates",
-    "deploys": "deploys", "creates": "creates", "trains": "trains",
-    "runs on": "runs", "quantizes": "quantizes",
-}
-RELATION_LABELS: list[str] = list(RELATION_LABEL_TO_PREDICATE)
+# predicate each maps back to, are now owned by services.extraction.canonical
+# as the single source of truth. Import from there.
+from services.extraction.canonical import (
+    RELATION_LABELS,
+    RELATION_LABEL_TO_PREDICATE,
+)
 
 # v2 entity vocabulary. MEASURED better than v1's 25 abstract labels: 22% more
 # graph-eligible entities from 21% fewer raw mentions, and it maps 1:1 onto

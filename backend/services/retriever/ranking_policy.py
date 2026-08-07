@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+import statistics
+from dataclasses import dataclass, replace
 from typing import Any
 
+from config import get_settings
 from models.schemas import RetrievalTier, SourceChunk
 from services.retriever.intent_policy import QueryNeed, RetrievalIntent
 from services.retriever.evidence_allocation import (
@@ -52,7 +54,10 @@ _GRAPH_GROUNDED_FLOOR_RATIO: float = 0.40
 # SPECIFIC-intent post-MMR trim floor (ratio of top score). Deliberately
 # stricter than _MAIN_FLOOR_RATIO: tangential cross-encoder scores cluster in
 # the 0.25-0.5 band, genuinely relevant secondary passages score above it.
-_SPECIFIC_FLOOR_RATIO: float = 0.5
+# Lowered 0.5 -> 0.35 (2026-07-29): 0.5 was starving specific queries to 2-3
+# chunks when the CE score distribution is tight (top ~0.6, bulk 0.4-0.55).
+# Now env-configurable via RERANK_SPECIFIC_FLOOR_RATIO; this is the fallback.
+_SPECIFIC_FLOOR_RATIO: float = 0.35
 _CROSS_DOCUMENT_RELATIONSHIP_ATOM = "cross_document_relationship_evidence"
 _PERSONALITY_FRAMEWORK_RE = re.compile(
     r"\b("
@@ -526,12 +531,22 @@ def _mmr_policy_for(
         max_same_predicate = 999
     elif tier == RetrievalTier.qdrant_mongo:
         base_lambda = 0.65
-        relevance_floor = 0.35 if intent.need == QueryNeed.BROAD else 0.85
+        # Env-configurable via RERANK_RELEVANCE_FLOOR_HYBRID (default 0.55).
+        # 0.85 starved hybrid queries to 2-3 chunks; 0.55 keeps relevant evidence.
+        relevance_floor = (
+            0.35
+            if intent.need == QueryNeed.BROAD
+            else get_settings().RERANK_RELEVANCE_FLOOR_HYBRID
+        )
         graph_reserve = 0
         max_same_predicate = 999
     else:
         base_lambda = 0.55
-        relevance_floor = 0.35 if intent.need == QueryNeed.BROAD else 0.80
+        relevance_floor = (
+            0.35
+            if intent.need == QueryNeed.BROAD
+            else get_settings().RERANK_RELEVANCE_FLOOR_GRAPH
+        )
         graph_reserve = 2 if intent.need == QueryNeed.BROAD else 1
         max_same_predicate = 3
 
@@ -828,6 +843,9 @@ def _fingerprint(chunk: SourceChunk) -> dict[str, Any]:
         "facts": _candidate_fact_ids(chunk),
         "predicates": _candidate_predicates(chunk),
         "retrievers": _candidate_retrievers(chunk),
+        # Mixed-content book lane: chunk kind (body / code / output / ...) so
+        # the mixed-evidence reservation can see what each candidate is.
+        "kind": str(getattr(chunk, "chunk_kind", "") or "").strip().lower(),
         "graph_supported": (
             _is_graph_expansion(chunk)
             or (chunk.source_tier or "").lower() == "graph_fact_seed"
@@ -1292,6 +1310,135 @@ def _repair_sufficiency(
     return selected, scores, reasons, sufficiency, repair_rounds
 
 
+def _repair_mixed_evidence(
+    *,
+    ranked: list[SourceChunk],
+    fingerprints: list[dict[str, Any]],
+    relevance_by_idx: dict[int, float],
+    selected_indices: list[int],
+    selected_scores: dict[int, float],
+    selected_by: dict[int, str],
+    final_top_k: int,
+) -> tuple[list[int], dict[int, float], dict[int, str], int]:
+    """Mixed-content book lane: never return code without its explanation.
+
+    Deterministic reservation mirroring the sufficiency-repair pattern:
+    when the ranked pool for a selected chunk's parent (or document, since
+    code blocks get their own heading-bound parents) contains both
+    code-kind and body-kind chunks but the seated set carries only one of
+    the two kinds, admit the highest-scoring missing-kind sibling that
+    clears the relaxed floor (>= 0.25 of the top score, same as the
+    cross-document repair). At most +1 code and +1 prose per call; each
+    admission is tagged selected_by="mixed_evidence". Pools without code
+    chunks (every prose-only corpus) are untouched.
+    """
+    if not ranked or not selected_indices:
+        return selected_indices, selected_scores, selected_by, 0
+    top_score = float(ranked[0].score or 0.0)
+
+    pool_kinds_by_parent: dict[str, set[str]] = {}
+    pool_kinds_by_doc: dict[str, set[str]] = {}
+    for fp in fingerprints:
+        kind = fp.get("kind") or ""
+        if fp.get("parent"):
+            pool_kinds_by_parent.setdefault(fp["parent"], set()).add(kind)
+        if fp.get("doc"):
+            pool_kinds_by_doc.setdefault(fp["doc"], set()).add(kind)
+
+    selected = list(selected_indices)
+    selected_set = set(selected)
+    scores = dict(selected_scores)
+    reasons = dict(selected_by)
+    admitted_code = False
+    admitted_body = False
+    repairs = 0
+
+    for seat_idx in list(selected):
+        seat_fp = fingerprints[seat_idx]
+        seat_kind = seat_fp.get("kind") or ""
+        if seat_kind not in ("code", "body"):
+            continue
+        # Prefer the parent group; code blocks get their own parents, so
+        # fall back to the document group when the parent pool is not mixed.
+        group_key, group_pool = seat_fp.get("parent") or "", pool_kinds_by_parent
+        pool_kinds = group_pool.get(group_key) or set()
+        if not ({"code", "body"} <= pool_kinds):
+            group_key, group_pool = seat_fp.get("doc") or "", pool_kinds_by_doc
+            pool_kinds = group_pool.get(group_key) or set()
+        if not ({"code", "body"} <= pool_kinds):
+            continue
+
+        seated_kinds = {
+            fingerprints[i].get("kind") or ""
+            for i in selected
+            if fingerprints[i].get("parent") == seat_fp.get("parent")
+            or fingerprints[i].get("doc") == seat_fp.get("doc")
+        }
+        has_code = "code" in seated_kinds
+        has_body = "body" in seated_kinds
+        if has_code == has_body:
+            continue
+        missing_kind = "body" if has_code else "code"
+        if missing_kind == "code" and admitted_code:
+            continue
+        if missing_kind == "body" and admitted_body:
+            continue
+
+        # Highest-scoring missing-kind sibling in the same group that clears
+        # the relaxed floor.
+        best_idx: int | None = None
+        best_raw = float("-inf")
+        for idx, fp in enumerate(fingerprints):
+            if idx in selected_set or (fp.get("kind") or "") != missing_kind:
+                continue
+            if fp.get("parent") != group_key and fp.get("doc") != group_key:
+                continue
+            raw_score = float(ranked[idx].score or 0.0)
+            if top_score > 0.0 and (raw_score / top_score) < 0.25:
+                continue
+            if raw_score > best_raw:
+                best_raw = raw_score
+                best_idx = idx
+        if best_idx is None:
+            continue
+
+        admit_score = relevance_by_idx.get(best_idx, 0.0) + 0.10
+        if len(selected) < final_top_k:
+            selected.append(best_idx)
+            selected_set.add(best_idx)
+        else:
+            # Full house: swap the lowest-scored seated chunk from the same
+            # group so document coverage is preserved.
+            replace_pos: int | None = None
+            replace_score = float("inf")
+            for pos, idx in enumerate(selected):
+                fp = fingerprints[idx]
+                if fp.get("parent") != group_key and fp.get("doc") != group_key:
+                    continue
+                seat_score = scores.get(idx, relevance_by_idx.get(idx, 0.0))
+                if seat_score < replace_score:
+                    replace_score = seat_score
+                    replace_pos = pos
+            if replace_pos is None:
+                continue
+            removed = selected[replace_pos]
+            selected_set.discard(removed)
+            selected[replace_pos] = best_idx
+            selected_set.add(best_idx)
+            scores.pop(removed, None)
+            reasons.pop(removed, None)
+
+        scores[best_idx] = admit_score
+        reasons[best_idx] = "mixed_evidence"
+        if missing_kind == "code":
+            admitted_code = True
+        else:
+            admitted_body = True
+        repairs += 1
+
+    return selected, scores, reasons, repairs
+
+
 def select_with_diversity(
     ranked: list[SourceChunk],
     *,
@@ -1331,6 +1478,21 @@ def select_with_diversity(
     top_score = float(ranked[0].score or 0.0)
     bounded = 0.0 <= top_score <= 1.0
     rel_floor = max(_MAIN_ABS_FLOOR, top_score * _MAIN_FLOOR_RATIO) if bounded else 0.0
+
+    # --- Adaptive distribution-relative floor (production pattern) ---
+    # Instead of a fixed ratio of top score, compute mean - 0.5*std of the
+    # normalized relevance distribution. Tight clusters (all scores close)
+    # keep more chunks; spread distributions (one clear winner) keep fewer.
+    # The env-configured floor acts as an absolute minimum safety net.
+    _norm_scores = [relevance_by_idx.get(i, 0.0) for i in range(len(ranked))]
+    if len(_norm_scores) >= 3:
+        _mean = statistics.mean(_norm_scores)
+        _std = statistics.stdev(_norm_scores)
+        _adaptive = _mean - 0.5 * _std
+        # Bound: never below the env-configured floor, never above 0.95
+        _env_floor = policy.relevance_floor
+        _adaptive = max(_env_floor, min(0.95, _adaptive))
+        policy = replace(policy, relevance_floor=_adaptive)
 
     chosen_idx: set[int] = set()
     selected_indices: list[int] = []
@@ -1524,7 +1686,7 @@ def select_with_diversity(
         and bounded
         and selected_indices
     ):
-        specific_floor = max(_MAIN_ABS_FLOOR, top_score * _SPECIFIC_FLOOR_RATIO)
+        specific_floor = max(_MAIN_ABS_FLOOR, top_score * get_settings().RERANK_SPECIFIC_FLOOR_RATIO)
         kept: list[int] = []
         for idx in selected_indices:
             if float(
@@ -1717,6 +1879,20 @@ def select_with_diversity(
         selected_scores=selected_scores,
         selected_by=selected_by,
         policy=policy,
+        final_top_k=final_top_k,
+    )
+    (
+        selected_indices,
+        selected_scores,
+        selected_by,
+        mixed_evidence_repairs,
+    ) = _repair_mixed_evidence(
+        ranked=ranked,
+        fingerprints=fingerprints,
+        relevance_by_idx=relevance_by_idx,
+        selected_indices=selected_indices,
+        selected_scores=selected_scores,
+        selected_by=selected_by,
         final_top_k=final_top_k,
     )
     chosen_idx = set(selected_indices)
@@ -2104,6 +2280,7 @@ def select_with_diversity(
             threshold=policy.near_duplicate_similarity,
         ),
         "repair_rounds": repair_rounds,
+        "mixed_evidence_repairs": mixed_evidence_repairs,
         "sufficiency": sufficiency,
         "corpus_floor": corpus_floor_meta,
     }

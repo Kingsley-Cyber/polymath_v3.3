@@ -1,0 +1,13 @@
+1. Unzip or copy this folder into the target repository.
+2. Direct the repository agent to:
+
+   Read GRAPHIFY_GLINER2_CPU_AGENT/PROMPT_TO_AGENT.md and execute every workflow stage through final verification. Do not broaden scope or stop before the two-document E2E, rebuild, idempotency, quality, and speed gates pass.
+
+3. The agent initializes with:
+
+   cd GRAPHIFY_GLINER2_CPU_AGENT
+   python3 controller.py init --repo-root ..
+   python3 controller.py verify-pack
+   python3 controller.py next
+
+No LangChain, LangGraph, or external workflow dependency is required. The folder supplies its own graph, state ledger, branching condition, receipts, and E2E runner.

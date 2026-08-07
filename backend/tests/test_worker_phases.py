@@ -763,6 +763,38 @@ async def test_phase_order_balanced_mode():
 
 
 @pytest.mark.asyncio
+async def test_extracted_target_defers_unused_retrieval_readiness():
+    rec = PhaseRecorder()
+    p, c = _parent("stub-doc", "c" * 36)
+    ghost_b_out = [_fake_extraction_result(c.chunk_id, "stub-doc", "c" * 36)]
+    m = _install_mocks(
+        rec,
+        parents=[p],
+        children=[c],
+        summaries=None,
+        ghost_b_out=ghost_b_out,
+    )
+    try:
+        cfg = IngestionConfig(
+            use_neo4j=True,
+            chunk_summarization=False,
+            target_qdrant_collections=["naive", "hrag", "graph"],
+        )
+        result = await _run_job(m, cfg, target_stage="extracted")
+
+        assert result.status == "staged"
+        assert rec.events == [
+            "parse", "chunk", "chunk_checkpoint", "ghosts_parallel", "mongo_write",
+        ]
+        m["readiness"].assert_not_awaited()
+        m["embed"].assert_not_awaited()
+        m["qdrant"].assert_not_awaited()
+        m["neo4j"].assert_not_awaited()
+    finally:
+        m["stop_all"]()
+
+
+@pytest.mark.asyncio
 async def test_queryable_target_defers_enrichment_before_qdrant():
     rec = PhaseRecorder()
     p, c = _parent("stub-doc", "c" * 36)
@@ -1338,7 +1370,7 @@ async def test_ghost_a_zero_summaries_safe_mode_continues_to_extraction():
         use_neo4j=True,
         chunk_summarization=True,
         target_qdrant_collections=["naive", "hrag"],
-        extraction_engine="legacy_local",
+        extraction_engine="relex_local",
     )
 
     summarize_mock = AsyncMock(return_value=[])
@@ -1359,7 +1391,7 @@ async def test_ghost_a_zero_summaries_safe_mode_continues_to_extraction():
         )
 
     with patch.object(worker, "summarize_parents", summarize_mock), \
-         patch.object(worker, "extract_entities", fake_extract), \
+         patch("services.ingestion.relex_local.extract_entities", fake_extract), \
          patch.object(worker, "get_or_create_schema_lens", AsyncMock(return_value=lens)), \
          patch.object(worker.settings, "NEO4J_ENABLED", True), \
          patch.object(worker.settings, "INGEST_SAFE_SUMMARY_FAILURES", True):
@@ -1400,7 +1432,7 @@ async def test_defer_flags_skip_summary_and_ghost_b_calls():
 
     with patch.object(worker.mongo_reader, "get_parent_chunks", new_callable=AsyncMock) as parent_mock, \
          patch.object(worker, "summarize_parents", summarize_mock), \
-         patch.object(worker, "extract_entities", extract_mock), \
+         patch("services.ingestion.relex_local.extract_entities", extract_mock), \
          patch.object(worker.settings, "NEO4J_ENABLED", True):
         parent_mock.return_value = []
         result = await worker._run_ghosts_parallel(
@@ -1521,7 +1553,7 @@ async def test_ghost_b_zero_extractions_leaves_neo4j_pending():
         use_neo4j=True,
         chunk_summarization=False,
         target_qdrant_collections=["naive", "hrag", "graph"],
-        extraction_engine="legacy_local",
+        extraction_engine="relex_local",
     )
     failure = ExtractionFailureItem(
         chunk_id="c0",
@@ -1547,7 +1579,7 @@ async def test_ghost_b_zero_extractions_leaves_neo4j_pending():
 
     extract_mock = AsyncMock(return_value=report)
     lens = SimpleNamespace(to_dict=lambda: {"lens_id": "test-lens"})
-    with patch.object(worker, "extract_entities", extract_mock), \
+    with patch("services.ingestion.relex_local.extract_entities", extract_mock), \
          patch.object(worker, "get_or_create_schema_lens", AsyncMock(return_value=lens)), \
          patch.object(worker.settings, "NEO4J_ENABLED", True):
         result = await worker._run_ghosts_parallel(
@@ -1560,7 +1592,10 @@ async def test_ghost_b_zero_extractions_leaves_neo4j_pending():
         )
 
     assert extract_mock.await_count == 1
-    assert extract_mock.await_args.kwargs["enable_facts"] is worker.settings.EXTRACTION_ENABLE_FACTS
+    # Canonical Relex lane: the worker passes ONLY the report flag. No
+    # provider-pool, schema, or fact-toggle routing kwargs may reach the
+    # deterministic extractor.
+    assert extract_mock.await_args.kwargs == {"return_report": True}
     assert result.ghost_b_out is None
     assert result.ghost_b_failures == [failure]
     assert result.ghost_b_metrics is not None
@@ -1601,7 +1636,7 @@ async def test_ghost_b_file_gate_serializes_concurrent_documents():
             use_neo4j=True,
             chunk_summarization=False,
             target_qdrant_collections=["naive", "hrag", "graph"],
-            extraction_engine="legacy_local",
+            extraction_engine="relex_local",
             extraction_models=[
                 ModelProfileRef(model="test-model", max_concurrent=45),
             ],
@@ -1622,7 +1657,7 @@ async def test_ghost_b_file_gate_serializes_concurrent_documents():
 
     worker._GHOST_B_FILE_SEMAPHORES.clear()
     worker._GHOST_B_FILE_SEMAPHORE_STATE.clear()
-    with patch.object(worker, "extract_entities", fake_extract), \
+    with patch("services.ingestion.relex_local.extract_entities", fake_extract), \
          patch.object(worker, "get_or_create_schema_lens", AsyncMock(return_value=lens)), \
          patch.object(worker.settings, "NEO4J_ENABLED", True):
         results = await asyncio.gather(run_doc("doc-a"), run_doc("doc-b"))

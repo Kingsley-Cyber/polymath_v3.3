@@ -131,6 +131,265 @@ _PREPOSITIONAL_PREDICATES: dict[str, frozenset[str]] = {
 }
 
 
+# Prepositions that participate in pseudo-passive or role-marking
+# constructions in prep_object frames. The preposition alone does NOT
+# determine direction — the construction-level participial test does.
+_DIRECTIONAL_PREPS = frozenset({"with", "by", "from"})
+
+# Reduced participial / adjectival dependency labels. A VBD/VBN predicate
+# in one of these positions is a participial modifier, not a finite verb:
+#   "landscape crowded with video"  → dep=relcl  → participial
+#   "the book written by Alice"     → dep=acl    → participial
+# A VBD/VBN predicate with dep=ROOT and an explicit nsubj is a finite
+# active-past verb and must NOT be treated as pseudo-passive:
+#   "John worked with Mary"         → dep=ROOT   → ordinary active
+_PARTICIPIAL_DEPS = frozenset({"relcl", "acl", "amod"})
+
+
+def _is_pseudo_passive(
+    pred_tok: "Token",
+    prep: str,
+) -> bool:
+    """Construction-level participial test for prep_object frames.
+
+    Returns True only when the predicate is structurally a participial
+    modifier or passive, NOT merely because it carries a VBD/VBN tag.
+
+    Classification table:
+        was written by Alice      → auxpass + VBN       → True  (high)
+        book written by Alice     → acl + VBN           → True  (high)
+        landscape crowded with X  → relcl + VBD         → True  (medium)
+        John worked with Alice    → ROOT + VBD + nsubj  → False
+        company benefited from X  → ROOT + VBD + nsubj  → False
+        Alice traveled with Bob   → ROOT + VBD + nsubj  → False
+    """
+    if prep not in _DIRECTIONAL_PREPS:
+        return False
+    if pred_tok.tag_ not in ("VBN", "VBD"):
+        return False
+
+    # Ordinary passive: explicit passive auxiliary.
+    has_passive_aux = any(c.dep_ == "auxpass" for c in pred_tok.children)
+    if has_passive_aux:
+        return True
+
+    # Reduced participial modifier or fragment: the predicate is NOT the
+    # main clause verb. It hangs off a noun as a relative clause (relcl),
+    # adjectival clause (acl), or adjectival modifier (amod).
+    if pred_tok.dep_ in _PARTICIPIAL_DEPS:
+        return True
+
+    # ROOT + VBD/VBN with an explicit subject is an ordinary finite verb.
+    return False
+
+
+def _prep_object_role(prep: str, *, pseudo_passive: bool) -> tuple[str, str, str]:
+    """Return (subject_role, object_role, confidence) for a prep_object frame.
+
+    Roles are precise: content, instrument, source, co_participant — not
+    a blanket 'agent' for every prepositional object.
+    """
+    if pseudo_passive:
+        # Participial / passive construction: subject is patient/theme.
+        # Object role depends on the preposition:
+        #   by   → agent   ("written by Alice")
+        #   with → content  ("filled with smoke", "crowded with video")
+        #   from → source   ("suffered from drought")
+        obj_role = {"by": "agent", "with": "content", "from": "source"}.get(
+            prep, "patient"
+        )
+        return ("patient", obj_role, "medium")
+
+    # Ordinary active construction: subject retains its canonical role.
+    # Object role depends on the preposition:
+    #   with → co_participant ("worked with Mary")
+    #   from → source         ("benefited from caching")
+    #   by   → agent          (rare in active: "surpassed by far")
+    obj_role = {"with": "co_participant", "from": "source", "by": "agent"}.get(
+        prep, "patient"
+    )
+    return ("agent", obj_role, "high")
+
+
+def _has_subject_conflict(frame: "Frame") -> bool:
+    """Detect structural ambiguity in subject assignment.
+
+    Returns True when the selected subject may belong to a different
+    predicate clause — typically a coordination misparse where the
+    parser assigned the subject to the wrong verb.
+
+    Signals:
+      1. The predicate participates in a coordination (has conj siblings
+         or is itself a conjunct).
+      2. A comma separates the subject token from the predicate token,
+         suggesting a clause boundary between them.
+      3. The subject is not sentence-initial (there is a preceding token
+         that could be the true predicate's subject or object).
+
+    When all three hold, the subject assignment is uncertain and the
+    record should route to REVIEW, not STORE.
+
+    Example misparse:
+        "Copyright fuels creativity, encourages diverse voices"
+        en_core_web_sm tags 'fuels' as a noun, making 'creativity'
+        the nsubj of 'encourages'. The comma between 'creativity' and
+        'encourages' reveals the clause boundary.
+    """
+    pred = frame.pred_tok
+    subj = frame.subj_tok
+
+    # Signal 1: coordination structure.
+    has_conj_siblings = any(c.dep_ == "conj" for c in pred.children)
+    is_conjunct = pred.dep_ == "conj"
+    if not (has_conj_siblings or is_conjunct):
+        return False
+
+    # Signal 2: comma between subject and predicate.
+    sent = pred.sent
+    lo, hi = sorted([subj.i, pred.i])
+    has_comma_between = any(
+        t.text == "," and lo < t.i < hi for t in sent
+    )
+    if not has_comma_between:
+        return False
+
+    # Signal 3: subject is not sentence-initial.
+    if subj.i <= sent.start:
+        return False
+
+    return True
+
+
+def _open_relation_metadata(frame: "Frame") -> dict[str, str]:
+    """Direction metadata for open-relation triples, with conflict demotion.
+
+    Computes the standard argument metadata, then checks for structural
+    subject-assignment conflict. If the subject may belong to a different
+    predicate clause (coordination misparse), the confidence is demoted
+    to 'low' so the gate routes the record to REVIEW.
+    """
+    meta = _argument_metadata(
+        frame.frame_type, swap=False,
+        signature=frame.signature, pred_tok=frame.pred_tok,
+    )
+    if _has_subject_conflict(frame):
+        meta["direction_confidence"] = "low"
+        meta["direction_source"] = "PARSER_STRUCTURE_CONFLICT"
+    return meta
+
+
+def _argument_metadata(
+    frame_type: str,
+    *,
+    swap: bool,
+    signature: str = "",
+    pred_tok: "Token | None" = None,
+) -> dict[str, str]:
+    """Compute argument-role and direction provenance for an extracted triple.
+
+    Returns a dict suitable for spreading into ExtractedTriple kwargs.
+    The roles describe the FINAL subject/object after any swap.
+
+    signature: the frame's dependency signature (e.g. "nsubj-VERB-prep:with-pobj").
+        Used to extract the preposition for construction classification.
+    pred_tok: the predicate Token. Used for the structural participial test
+        (dep label, auxpass children) rather than POS tag alone.
+    """
+    if frame_type == "active_transitive":
+        if swap:
+            return {
+                "subject_dependency_role": "patient",
+                "object_dependency_role": "agent",
+                "voice": "active",
+                "direction_source": "RESOLVER_SWAP",
+                "direction_confidence": "high",
+            }
+        return {
+            "subject_dependency_role": "agent",
+            "object_dependency_role": "patient",
+            "voice": "active",
+            "direction_source": "DEPENDENCY_FRAME",
+            "direction_confidence": "high",
+        }
+    if frame_type == "passive_agent":
+        # Passive frames always swap: grammatical subject is semantic patient.
+        return {
+            "subject_dependency_role": "patient",
+            "object_dependency_role": "agent",
+            "voice": "passive",
+            "direction_source": "DEPENDENCY_FRAME",
+            "direction_confidence": "high",
+        }
+    if frame_type == "prep_object":
+        # Construction-level classification, not POS-tag heuristics.
+        # Extract the preposition from the signature (e.g. "prep:with").
+        prep = ""
+        if "prep:" in signature:
+            prep = signature.split("prep:", 1)[-1].split("-")[0].lower()
+
+        if prep in _DIRECTIONAL_PREPS and pred_tok is not None and not swap:
+            pseudo = _is_pseudo_passive(pred_tok, prep)
+            subj_role, obj_role, conf = _prep_object_role(
+                prep, pseudo_passive=pseudo
+            )
+            return {
+                "subject_dependency_role": subj_role,
+                "object_dependency_role": obj_role,
+                "voice": "active",
+                "direction_source": "DEPENDENCY_FRAME",
+                "direction_confidence": conf,
+            }
+        if swap:
+            return {
+                "subject_dependency_role": "patient",
+                "object_dependency_role": "agent",
+                "voice": "active",
+                "direction_source": "RESOLVER_SWAP",
+                "direction_confidence": "medium",
+            }
+        return {
+            "subject_dependency_role": "agent",
+            "object_dependency_role": "patient",
+            "voice": "active",
+            "direction_source": "DEPENDENCY_FRAME",
+            "direction_confidence": "high",
+        }
+    if frame_type == "possessive":
+        return {
+            "subject_dependency_role": "possessor",
+            "object_dependency_role": "possessed",
+            "voice": "nominal",
+            "direction_source": "NOMINAL",
+            "direction_confidence": "high",
+        }
+    if frame_type == "appositive":
+        return {
+            "subject_dependency_role": "anchor",
+            "object_dependency_role": "appositive",
+            "voice": "nominal",
+            "direction_source": "NOMINAL",
+            "direction_confidence": "high",
+        }
+    if frame_type == "copular_prep":
+        # Copular + prepositional complement: "X is a member of Y"
+        # Subject is the entity being classified; object is the group/whole.
+        return {
+            "subject_dependency_role": "agent",
+            "object_dependency_role": "patient",
+            "voice": "copular",
+            "direction_source": "DEPENDENCY_FRAME",
+            "direction_confidence": "high",
+        }
+    # Unknown frame type — low confidence.
+    return {
+        "subject_dependency_role": "unknown",
+        "object_dependency_role": "unknown",
+        "voice": "unknown",
+        "direction_source": "DEPENDENCY_FRAME",
+        "direction_confidence": "low",
+    }
+
+
 @dataclass(slots=True)
 class Frame:
     """One predicate-bearing construction with two argument slots."""
@@ -145,6 +404,9 @@ class Frame:
     # Structural tier, not a calibrated probability. 1.0 = the predicate token
     # directly governs both slots; 0.9 = one hop further (prepositional object).
     confidence: float = 1.0
+    # For copular_prep frames: the attr noun's lemma overrides the copula
+    # lemma so the resolver can match noun-based signature rules (member, part).
+    override_lemma: str = ""
 
 
 def _conjuncts(tok: Token, *, max_depth: int = 6) -> list[Token]:
@@ -267,6 +529,22 @@ def _find_frames(doc: Doc) -> list[Frame]:
                         signature=f"{s.dep_}-VERB-attr",
                         confidence=1.0,
                     ))
+                    # 2b. Copular attr + prepositional complement:
+                    # "Alice is a member of the committee"
+                    # "The imprint is part of Penguin Random House"
+                    # The attr noun carries a prep phrase whose pobj is the
+                    # semantic complement. The resolver uses the attr noun's
+                    # lemma (member, part) to match p2_verb_prep rules.
+                    for prep in (c for c in a.children if c.dep_ == "prep"):
+                        for pobj in (g for g in prep.children if g.dep_ == "pobj"):
+                            sig = f"{s.dep_}-VERB-prep:{prep.lemma_.lower()}-pobj"
+                            frames.append(Frame(
+                                subj_tok=s, pred_tok=tok, obj_tok=pobj,
+                                frame_type="copular_prep",
+                                signature=sig,
+                                confidence=0.9,
+                                override_lemma=a.lemma_.lower(),
+                            ))
 
             # 3. Passive with explicit agent: "GitHub was acquired by Microsoft"
             #    Agentless passives form NO frame — an unstated agent is not an
@@ -310,6 +588,23 @@ def _find_frames(doc: Doc) -> list[Frame]:
                                         frame_type="prep_object",
                                         signature=sig, confidence=0.8,
                                     ))
+
+            # 4b. Passive subject + prepositional object (non-agent):
+            # "The company is based in Texas"
+            # "The hotel is located in Quebec"
+            # These have nsubjpass + prep (not agent). The resolver matches
+            # the verb lemma (base, locate) against p2_verb_prep rules.
+            for s in passive_subjects:
+                for prep in (c for c in tok.children if c.dep_ == "prep"):
+                    if prep.lemma_.lower() == "by":
+                        continue  # agent phrase — handled in section 3
+                    for pobj in (g for g in prep.children if g.dep_ == "pobj"):
+                        sig = f"{s.dep_}-VERB-prep:{prep.lemma_.lower()}-pobj"
+                        frames.append(Frame(
+                            subj_tok=s, pred_tok=tok, obj_tok=pobj,
+                            frame_type="prep_object", signature=sig,
+                            confidence=0.9,
+                        ))
 
         # ---- Nominal frames ------------------------------------------------
         # 5. Possessive: "Google's TensorFlow" -> (Google, owns, TensorFlow).
@@ -387,6 +682,12 @@ def _resolve_slot(
     current = tok
     for _ in range(2):
         if current.head.i == current.i:
+            break
+        # Do not walk up past a relative-clause verb to the modified noun.
+        # "the investment that players have" — walking from "players" up
+        # through "have" (relcl) to "investment" crosses a clause boundary
+        # and fabricates a wrong subject assignment.
+        if current.dep_ in ("relcl", "acl", "advcl"):
             break
         current = current.head
         found = slot_index.get(current.i)
@@ -576,6 +877,7 @@ class FrameExtractor:
         doc: Doc | None = None,
         suppression_counters: dict[str, int] | None = None,
         trace: list[dict] | None = None,
+        disabled_feature_groups: frozenset[str] = frozenset(),
     ) -> list[ExtractedTriple]:
         """Extract frame-licensed relations.
 
@@ -587,6 +889,11 @@ class FrameExtractor:
         it outside this method means reimplementing the guard order — which is
         how you end up measuring a copy of the pipeline instead of the pipeline.
         Off by default; costs one list append per frame when on.
+
+        `disabled_feature_groups`: resolver rules tagged with a feature_group
+        in this set are skipped (ablation). E.g. frozenset({"p2_verb_prep"})
+        disables only the P2B verb+preposition resolver rules while leaving
+        baseline prep_object frame generation intact.
         """
         if not text.strip() or len(entities) < 2:
             return []
@@ -620,6 +927,17 @@ class FrameExtractor:
         # are still checked individually below; nominal frames no longer need a
         # verb to exist.
         frames = _find_frames(doc)
+        # Ablation gate: the copular_prep and passive prep-object frame types
+        # are part of the p2_verb_prep feature. When disabled (profile D),
+        # these frames do not form — so E−D measures the COMPLETE verb-prep
+        # feature impact (frames + mappings), not just the mapping delta.
+        if disabled_feature_groups and "p2_verb_prep" in disabled_feature_groups:
+            frames = [
+                f for f in frames
+                if f.frame_type != "copular_prep"
+                and not (f.frame_type == "prep_object"
+                         and f.signature.startswith("nsubjpass"))
+            ]
         if not frames:
             _inc(suppression_counters, "skipped_verbless")
             return []
@@ -746,7 +1064,7 @@ class FrameExtractor:
                 resolved = ("instance_of", False)
                 lemma = "be"
             else:
-                lemma = pred_tok.lemma_.lower()
+                lemma = frame.override_lemma or pred_tok.lemma_.lower()
                 resolved = resolve_predicate(
                     signature=frame.signature,
                     lemma=lemma,
@@ -754,9 +1072,92 @@ class FrameExtractor:
                     object_type=obj_ent.entity_type,
                     pred_tok=pred_tok,
                     object_tok=frame.obj_tok,
+                    disabled_feature_groups=disabled_feature_groups,
                 )
             if resolved is None:
-                _die("frame_predicate_unnamed")
+                # --- Open-relation lane (P2A resolver coverage) ---
+                # The resolver could not map this frame's predicate to any
+                # ontology predicate (T4 DROP). Instead of discarding trusted
+                # structural evidence, emit it with predicate=None so the
+                # corroboration gate can route it to
+                # STORE_UNMAPPED_SURFACE_RELATION. The frame is grammatically
+                # licensed (both slots filled, all hygiene guards passed) —
+                # only the ontology mapping is absent.
+                _inc(suppression_counters, "frame_predicate_unnamed")
+
+                polarity, modality, temporal = _extract_qualifiers_inline(pred_tok)
+                if is_attributed:
+                    assertion_mode = "attributed"
+                elif is_conditional:
+                    assertion_mode = "conditional"
+                else:
+                    assertion_mode = "direct"
+
+                sent = pred_tok.sent
+                sent_idx = sent_idx_by_start.get(sent.start, 0)
+
+                key = (subj_ent.surface, "", obj_ent.surface, sent_idx)
+                if key in seen:
+                    if trace is not None:
+                        trace.append({
+                            "subject_token": frame.subj_tok.text,
+                            "predicate_token": frame.pred_tok.text,
+                            "object_token": frame.obj_tok.text,
+                            "frame_type": frame.frame_type,
+                            "subject_entity": subj_ent.surface,
+                            "object_entity": obj_ent.surface,
+                            "signature": frame.signature,
+                            "died_at": "duplicate_of_earlier_frame",
+                        })
+                    continue
+                seen.add(key)
+
+                if trace is not None:
+                    trace.append({
+                        "subject_token": frame.subj_tok.text,
+                        "predicate_token": frame.pred_tok.text,
+                        "object_token": frame.obj_tok.text,
+                        "frame_type": frame.frame_type,
+                        "subject_entity": subj_ent.surface,
+                        "object_entity": obj_ent.surface,
+                        "signature": frame.signature,
+                        "died_at": None,
+                        "emitted": (
+                            f"({subj_ent.surface}) "
+                            f"-[{pred_tok.text} UNMAPPED]-> "
+                            f"({obj_ent.surface})"
+                        ),
+                    })
+
+                triples.append(ExtractedTriple(
+                    subject_surface=subj_ent.surface,
+                    subject_start=subj_ent.start_char,
+                    subject_end=subj_ent.end_char,
+                    predicate=None,  # no canonical mapping (open relation)
+                    predicate_lemma=lemma,
+                    predicate_surface=pred_tok.text,
+                    object_surface=obj_ent.surface,
+                    object_start=obj_ent.start_char,
+                    object_end=obj_ent.end_char,
+                    confidence=frame.confidence,
+                    dep_signature=f"{frame.frame_type}:{frame.signature}",
+                    polarity=polarity,
+                    modality=modality,
+                    assertion_mode=assertion_mode,
+                    temporal_cue=temporal,
+                    sentence_text=sent.text.strip(),
+                    sentence_idx=sent_idx,
+                    chunk_id=chunk_id,
+                    doc_id=doc_id,
+                    section_path=section_path,
+                    mapping_status="UNMAPPED",
+                    graph_eligible=False,
+                    subject_head_start=frame.subj_tok.idx,
+                    subject_head_end=frame.subj_tok.idx + len(frame.subj_tok.text),
+                    object_head_start=frame.obj_tok.idx,
+                    object_head_end=frame.obj_tok.idx + len(frame.obj_tok.text),
+                    **_open_relation_metadata(frame),
+                ))
                 continue
 
             predicate, resolver_swap = resolved
@@ -880,6 +1281,11 @@ class FrameExtractor:
                 chunk_id=chunk_id,
                 doc_id=doc_id,
                 section_path=section_path,
+                subject_head_start=frame.subj_tok.idx,
+                subject_head_end=frame.subj_tok.idx + len(frame.subj_tok.text),
+                object_head_start=frame.obj_tok.idx,
+                object_head_end=frame.obj_tok.idx + len(frame.obj_tok.text),
+                **_argument_metadata(frame.frame_type, swap=swap, signature=frame.signature, pred_tok=frame.pred_tok),
             ))
 
         return triples

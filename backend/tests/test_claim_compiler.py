@@ -403,8 +403,8 @@ def test_relation_attaches_only_when_dependency_direction_agrees() -> None:
     compiled = compile_claim_records_v1(bundle=bundle, extraction=extraction)
     assert compiled.claims[0].source_relation_ids == ["relation:agrees"]
     assert compiled.rejected_relation_ids == []
-    assert compiled.receipt()["glirel_agree_count"] == 1
-    assert compiled.receipt()["glirel_conflict_count"] == 0
+    assert compiled.receipt()["relation_agree_count"] == 1
+    assert compiled.receipt()["relation_conflict_count"] == 0
 
     reversed_relation = relation.model_copy(
         update={
@@ -422,8 +422,8 @@ def test_relation_attaches_only_when_dependency_direction_agrees() -> None:
     rejected = compile_claim_records_v1(bundle=bundle, extraction=reversed_extraction)
     assert rejected.claims[0].source_relation_ids == []
     assert rejected.rejected_relation_ids == ["relation:reversed"]
-    assert rejected.receipt()["glirel_agree_count"] == 0
-    assert rejected.receipt()["glirel_conflict_count"] == 1
+    assert rejected.receipt()["relation_agree_count"] == 0
+    assert rejected.receipt()["relation_conflict_count"] == 1
 
 
 def test_explicit_result_phrase_emits_claim_to_claim_link() -> None:

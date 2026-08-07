@@ -1,0 +1,28 @@
+{
+  "repo_root": "..",
+  "environment": {},
+  "commands": {
+    "candidate": {
+      "quality": "REPLACE_WITH_CANONICAL_GRAPHIFY_COMMAND --input {quality_fixture} --report-json {report_json} --isolated-namespace {namespace}",
+      "throughput": "REPLACE_WITH_CANONICAL_GRAPHIFY_COMMAND --input {throughput_fixture} --report-json {report_json} --isolated-namespace {namespace}"
+    },
+    "baseline": {
+      "quality": "REPLACE_WITH_OFFLINE_RELEX_BASELINE_COMMAND --input {quality_fixture} --report-json {report_json} --isolated-namespace {namespace}",
+      "throughput": "REPLACE_WITH_OFFLINE_RELEX_BASELINE_COMMAND --input {throughput_fixture} --report-json {report_json} --isolated-namespace {namespace}"
+    },
+    "preflight": [],
+    "postflight": [],
+    "projection_rebuild": "",
+    "projection_verify": ""
+  },
+  "required_report_keys": [
+    "status",
+    "metrics",
+    "counts",
+    "identity_digest",
+    "release_pins"
+  ],
+  "run_baseline": true,
+  "candidate_repetitions": 2,
+  "timeout_seconds": 7200
+}

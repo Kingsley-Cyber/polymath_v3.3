@@ -1,0 +1,1283 @@
+{
+  "configuration": {
+    "deep_search": false,
+    "gold_endpoint_spans": true,
+    "predicate_policy": "repository_frozen_compiler",
+    "runtime": "CPU",
+    "speed_preset": "balanced"
+  },
+  "decision": {
+    "continue_openie_path": true,
+    "directed_triple_precision_passed": true,
+    "gold_pair_recall_passed": true
+  },
+  "decision_criterion": {
+    "directed_triple_precision_min": 0.9,
+    "gold_pair_recall_min": 0.65
+  },
+  "diagnostic_counts": {
+    "compiler:review:ambiguous_or_unmapped_predicate": 13,
+    "openie_object:multiple_endpoint_subspans": 5,
+    "openie_object:no_exact_endpoint_subspan": 53,
+    "openie_subject:ambiguous_endpoint_subspan": 6,
+    "openie_subject:multiple_endpoint_subspans": 2,
+    "openie_subject:no_exact_endpoint_subspan": 76,
+    "surface_compiler:review:ambiguous_build_on_top_of": 1,
+    "surface_compiler:review:ambiguous_or_unmapped_predicate": 12
+  },
+  "elapsed_seconds": 1.3431019580020802,
+  "fixture": "/Users/king/polymath_v3.3/POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/fixtures/graphify_quality_fixture.md",
+  "fixture_sha256": "adebcd4dfd58b64d7c6f192b210efe7cbf42b6153091a9e97d91911054d062c3",
+  "gold": "/Users/king/polymath_v3.3/POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/fixtures/graphify_quality_gold.json",
+  "gold_sha256": "233265a7d94c9f7ebc2bee33b7e3093e642a5ddda71ac2f3dfc87796753552ea",
+  "lanes": {
+    "combined": {
+      "directed_canonical_triple_precision": 0.9230769230769231,
+      "directed_canonical_triple_recall": 0.6666666666666666,
+      "directed_triple_true_positives": 12,
+      "false_positive_triples": [
+        [
+          "neo4j",
+          "supports",
+          "rebuildable projections"
+        ]
+      ],
+      "gold_canonical_triples": 18,
+      "gold_pair_recall": 1.0,
+      "gold_pairs": 19,
+      "missed_gold_pairs": [],
+      "missed_gold_triples": [
+        [
+          "github",
+          "owns_inverse",
+          "microsoft"
+        ],
+        [
+          "gliner2",
+          "defines",
+          "span based entity extractor"
+        ],
+        [
+          "graphify",
+          "derived_from",
+          "spacy and python rules"
+        ],
+        [
+          "metric",
+          "measures",
+          "latency"
+        ],
+        [
+          "neo4j",
+          "projects",
+          "accepted assertions"
+        ],
+        [
+          "polymath",
+          "related_to",
+          "graphify"
+        ]
+      ],
+      "pair_true_positives": 19,
+      "predicted_canonical_triples": 13,
+      "predicted_pairs": 34
+    },
+    "surface_recovery": {
+      "directed_canonical_triple_precision": 0.8571428571428571,
+      "directed_canonical_triple_recall": 0.6666666666666666,
+      "directed_triple_true_positives": 12,
+      "false_positive_triples": [
+        [
+          "github",
+          "owns",
+          "microsoft"
+        ],
+        [
+          "neo4j",
+          "supports",
+          "rebuildable projections"
+        ]
+      ],
+      "gold_canonical_triples": 18,
+      "gold_pair_recall": 0.9473684210526315,
+      "gold_pairs": 19,
+      "missed_gold_pairs": [
+        [
+          "gliner2",
+          "span based entity extractor"
+        ]
+      ],
+      "missed_gold_triples": [
+        [
+          "github",
+          "owns_inverse",
+          "microsoft"
+        ],
+        [
+          "gliner2",
+          "defines",
+          "span based entity extractor"
+        ],
+        [
+          "graphify",
+          "derived_from",
+          "spacy and python rules"
+        ],
+        [
+          "metric",
+          "measures",
+          "latency"
+        ],
+        [
+          "neo4j",
+          "projects",
+          "accepted assertions"
+        ],
+        [
+          "polymath",
+          "related_to",
+          "graphify"
+        ]
+      ],
+      "pair_true_positives": 18,
+      "predicted_canonical_triples": 14,
+      "predicted_pairs": 26
+    },
+    "syntax": {
+      "directed_canonical_triple_precision": 0.6,
+      "directed_canonical_triple_recall": 0.3333333333333333,
+      "directed_triple_true_positives": 6,
+      "false_positive_triples": [
+        [
+          "github",
+          "owns",
+          "microsoft"
+        ],
+        [
+          "gliner2",
+          "instance_of",
+          "span based entity extractor"
+        ],
+        [
+          "public incident reports",
+          "derived_from",
+          "dataset"
+        ],
+        [
+          "retrieval augmented generation",
+          "instance_of",
+          "rag"
+        ]
+      ],
+      "gold_canonical_triples": 18,
+      "gold_pair_recall": 0.5263157894736842,
+      "gold_pairs": 19,
+      "missed_gold_pairs": [
+        [
+          "dataset",
+          "public incident reports"
+        ],
+        [
+          "graphify",
+          "spacy and python rules"
+        ],
+        [
+          "metric",
+          "latency"
+        ],
+        [
+          "mongodb",
+          "canonical documents"
+        ],
+        [
+          "mongodb",
+          "rebuildable projections"
+        ],
+        [
+          "neo4j",
+          "accepted assertions"
+        ],
+        [
+          "qdrant",
+          "embeddings"
+        ],
+        [
+          "qdrant",
+          "hnsw"
+        ],
+        [
+          "qdrant",
+          "semantic retrieval"
+        ]
+      ],
+      "missed_gold_triples": [
+        [
+          "dataset",
+          "derived_from",
+          "public incident reports"
+        ],
+        [
+          "github",
+          "owns_inverse",
+          "microsoft"
+        ],
+        [
+          "gliner2",
+          "defines",
+          "span based entity extractor"
+        ],
+        [
+          "graphify",
+          "derived_from",
+          "spacy and python rules"
+        ],
+        [
+          "metric",
+          "measures",
+          "latency"
+        ],
+        [
+          "mongodb",
+          "stores",
+          "canonical documents"
+        ],
+        [
+          "mongodb",
+          "supports",
+          "rebuildable projections"
+        ],
+        [
+          "neo4j",
+          "projects",
+          "accepted assertions"
+        ],
+        [
+          "polymath",
+          "defines",
+          "graphify"
+        ],
+        [
+          "polymath",
+          "related_to",
+          "graphify"
+        ],
+        [
+          "qdrant",
+          "depends_on",
+          "hnsw"
+        ],
+        [
+          "qdrant",
+          "stores",
+          "embeddings"
+        ]
+      ],
+      "pair_true_positives": 10,
+      "predicted_canonical_triples": 10,
+      "predicted_pairs": 14
+    },
+    "triplet_extract": {
+      "directed_canonical_triple_precision": 0.875,
+      "directed_canonical_triple_recall": 0.3888888888888889,
+      "directed_triple_true_positives": 7,
+      "false_positive_triples": [
+        [
+          "python",
+          "implements",
+          "python"
+        ]
+      ],
+      "gold_canonical_triples": 18,
+      "gold_pair_recall": 0.5263157894736842,
+      "gold_pairs": 19,
+      "missed_gold_pairs": [
+        [
+          "api",
+          "normalized records"
+        ],
+        [
+          "github",
+          "microsoft"
+        ],
+        [
+          "graphify",
+          "spacy and python rules"
+        ],
+        [
+          "metric",
+          "latency"
+        ],
+        [
+          "mongodb",
+          "canonical documents"
+        ],
+        [
+          "mongodb",
+          "rebuildable projections"
+        ],
+        [
+          "neo4j",
+          "accepted assertions"
+        ],
+        [
+          "qdrant",
+          "embeddings"
+        ],
+        [
+          "qdrant",
+          "semantic retrieval"
+        ]
+      ],
+      "missed_gold_triples": [
+        [
+          "api",
+          "produces",
+          "normalized records"
+        ],
+        [
+          "github",
+          "owns_inverse",
+          "microsoft"
+        ],
+        [
+          "gliner2",
+          "defines",
+          "span based entity extractor"
+        ],
+        [
+          "graphify",
+          "derived_from",
+          "spacy and python rules"
+        ],
+        [
+          "metric",
+          "measures",
+          "latency"
+        ],
+        [
+          "mongodb",
+          "stores",
+          "canonical documents"
+        ],
+        [
+          "mongodb",
+          "supports",
+          "rebuildable projections"
+        ],
+        [
+          "neo4j",
+          "projects",
+          "accepted assertions"
+        ],
+        [
+          "polymath",
+          "defines",
+          "graphify"
+        ],
+        [
+          "polymath",
+          "related_to",
+          "graphify"
+        ],
+        [
+          "qdrant",
+          "stores",
+          "embeddings"
+        ]
+      ],
+      "pair_true_positives": 10,
+      "predicted_canonical_triples": 8,
+      "predicted_pairs": 18
+    }
+  },
+  "qualified_candidates": [
+    {
+      "asserter_chain": null,
+      "asserter_links": [],
+      "canonical_predicate": null,
+      "object": "pandas",
+      "reasons": [
+        "modal_relation_surface"
+      ],
+      "subject": "GLiNER2",
+      "surface_predicate": "may classify",
+      "unit": "GLiNER2 may classify lowercase pandas as a Library when the context says pandas processes tables."
+    },
+    {
+      "asserter_chain": null,
+      "asserter_links": [],
+      "canonical_predicate": null,
+      "object": "pandas",
+      "reasons": [
+        "modal_relation_surface"
+      ],
+      "subject": "GLiNER2",
+      "surface_predicate": "may classify as",
+      "unit": "GLiNER2 may classify lowercase pandas as a Library when the context says pandas processes tables."
+    },
+    {
+      "asserter_chain": [
+        "report"
+      ],
+      "asserter_links": [
+        {
+          "asserter": "report",
+          "cluster": null,
+          "cluster_canonical": null,
+          "construction": "ccomp",
+          "negated": false,
+          "speech_act": true,
+          "verb": "say"
+        }
+      ],
+      "canonical_predicate": "owns",
+      "object": "Java",
+      "reasons": [
+        "attributed_embedded_clause"
+      ],
+      "subject": "Oracle",
+      "surface_predicate": "owns",
+      "unit": "The report says Oracle owns Java, but Apple appears only as a company name in a comparison."
+    },
+    {
+      "asserter_chain": [
+        "the claim",
+        "The authors"
+      ],
+      "asserter_links": [
+        {
+          "asserter": "the claim",
+          "cluster": null,
+          "cluster_canonical": null,
+          "construction": "ccomp",
+          "negated": false,
+          "speech_act": false,
+          "verb": "attribute"
+        },
+        {
+          "asserter": "The authors",
+          "cluster": null,
+          "cluster_canonical": null,
+          "construction": "ccomp",
+          "negated": false,
+          "speech_act": true,
+          "verb": "claim"
+        }
+      ],
+      "canonical_predicate": null,
+      "object": "recall",
+      "reasons": [
+        "attributed_embedded_clause"
+      ],
+      "subject": "Graphify",
+      "surface_predicate": "improves",
+      "unit": "The authors claim that Graphify improves recall, so the claim is attributed rather than unconditional."
+    },
+    {
+      "asserter_chain": [
+        "API"
+      ],
+      "asserter_links": [
+        {
+          "asserter": "API",
+          "cluster": null,
+          "cluster_canonical": null,
+          "construction": "ccomp",
+          "negated": false,
+          "speech_act": false,
+          "verb": "consume"
+        }
+      ],
+      "canonical_predicate": "produces",
+      "object": "normalized records",
+      "reasons": [
+        "attributed_embedded_clause"
+      ],
+      "subject": "JSON documents",
+      "surface_predicate": "produces",
+      "unit": "The API consumes JSON documents and produces normalized records."
+    },
+    {
+      "asserter_chain": null,
+      "asserter_links": [],
+      "canonical_predicate": "located_in",
+      "object": "El Paso",
+      "reasons": [
+        "negative_relation_surface"
+      ],
+      "subject": "Graphify",
+      "surface_predicate": "is not located in",
+      "unit": "El Paso is a Location and Graphify is not located in El Paso unless evidence says so."
+    },
+    {
+      "asserter_chain": null,
+      "asserter_links": [],
+      "canonical_predicate": "located_in",
+      "object": "El Paso",
+      "reasons": [
+        "negative_relation_surface"
+      ],
+      "subject": "Graphify",
+      "surface_predicate": "is is not located in",
+      "unit": "El Paso is a Location and Graphify is not located in El Paso unless evidence says so."
+    },
+    {
+      "asserter_chain": null,
+      "asserter_links": [],
+      "canonical_predicate": "located_in",
+      "object": "El Paso",
+      "reasons": [
+        "negative_relation_surface"
+      ],
+      "subject": "Graphify",
+      "surface_predicate": "is not located in",
+      "unit": "El Paso is a Location and Graphify is not located in El Paso unless evidence says so."
+    },
+    {
+      "asserter_chain": [
+        "the source"
+      ],
+      "asserter_links": [
+        {
+          "asserter": "the source",
+          "cluster": null,
+          "cluster_canonical": null,
+          "construction": "ccomp",
+          "negated": false,
+          "speech_act": true,
+          "verb": "say"
+        }
+      ],
+      "canonical_predicate": null,
+      "object": "Graphify",
+      "reasons": [
+        "attributed_embedded_clause"
+      ],
+      "subject": "Polymath",
+      "surface_predicate": "is related to",
+      "unit": "Polymath related_to Graphify is invalid unless the source explicitly says Polymath is related to Graphify."
+    }
+  ],
+  "schema_version": "polymath.openie_relation_kill_switch.v1",
+  "status": "PASSED",
+  "triplet_extract_commit": "89417ae62214728deca112aa8f4d27ff6c854d08",
+  "triplet_extract_version": "0.5.0",
+  "units": [
+    {
+      "gold_endpoint_spans": [
+        {
+          "end": 7,
+          "entity_type": "Software",
+          "name": "MongoDB",
+          "start": 0
+        },
+        {
+          "end": 34,
+          "entity_type": "Concept",
+          "name": "canonical documents",
+          "start": 15
+        },
+        {
+          "end": 47,
+          "entity_type": "Service",
+          "name": "Qdrant",
+          "start": 41
+        },
+        {
+          "end": 65,
+          "entity_type": "Concept",
+          "name": "embeddings",
+          "start": 55
+        }
+      ],
+      "openie_aligned": 0,
+      "openie_renderings": 0,
+      "surface_recovery_aligned": 2,
+      "syntax_aligned": 0,
+      "syntax_records": 0,
+      "text": "MongoDB stores canonical documents while Qdrant stores embeddings for retrieval.",
+      "unit_index": 0
+    },
+    {
+      "gold_endpoint_spans": [
+        {
+          "end": 5,
+          "entity_type": "Software",
+          "name": "Neo4j",
+          "start": 0
+        },
+        {
+          "end": 34,
+          "entity_type": "Concept",
+          "name": "accepted assertions",
+          "start": 15
+        },
+        {
+          "end": 47,
+          "entity_type": "Software",
+          "name": "MongoDB",
+          "start": 40
+        }
+      ],
+      "openie_aligned": 0,
+      "openie_renderings": 2,
+      "surface_recovery_aligned": 1,
+      "syntax_aligned": 1,
+      "syntax_records": 1,
+      "text": "Neo4j projects accepted assertions from MongoDB into a rebuildable graph.",
+      "unit_index": 1
+    },
+    {
+      "gold_endpoint_spans": [
+        {
+          "end": 7,
+          "entity_type": "Software",
+          "name": "GLiNER2",
+          "start": 0
+        },
+        {
+          "end": 40,
+          "entity_type": "Concept",
+          "name": "span-based entity extractor",
+          "start": 13
+        }
+      ],
+      "openie_aligned": 6,
+      "openie_renderings": 8,
+      "surface_recovery_aligned": 0,
+      "syntax_aligned": 2,
+      "syntax_records": 2,
+      "text": "GLiNER2 is a span-based entity extractor for named software and concepts.",
+      "unit_index": 2
+    },
+    {
+      "gold_endpoint_spans": [
+        {
+          "end": 8,
+          "entity_type": "Software",
+          "name": "Polymath",
+          "start": 0
+        },
+        {
+          "end": 25,
+          "entity_type": "Process",
+          "name": "Graphify",
+          "start": 17
+        }
+      ],
+      "openie_aligned": 0,
+      "openie_renderings": 5,
+      "surface_recovery_aligned": 1,
+      "syntax_aligned": 0,
+      "syntax_records": 0,
+      "text": "Polymath defines Graphify as the ingestion workflow that creates evidence-linked knowledge.",
+      "unit_index": 4
+    },
+    {
+      "gold_endpoint_spans": [
+        {
+          "end": 30,
+          "entity_type": "Concept",
+          "name": "Retrieval-Augmented Generation",
+          "start": 0
+        },
+        {
+          "end": 35,
+          "entity_type": "Concept",
+          "name": "RAG",
+          "start": 32
+        }
+      ],
+      "openie_aligned": 0,
+      "openie_renderings": 13,
+      "surface_recovery_aligned": 0,
+      "syntax_aligned": 1,
+      "syntax_records": 1,
+      "text": "Retrieval-Augmented Generation (RAG) refers to generation grounded by retrieved evidence.",
+      "unit_index": 5
+    },
+    {
+      "gold_endpoint_spans": [
+        {
+          "end": 3,
+          "entity_type": "Concept",
+          "name": "RAG",
+          "start": 0
+        },
+        {
+          "end": 20,
+          "entity_type": "Concept",
+          "name": "retriever",
+          "start": 11
+        }
+      ],
+      "openie_aligned": 2,
+      "openie_renderings": 5,
+      "surface_recovery_aligned": 1,
+      "syntax_aligned": 2,
+      "syntax_records": 2,
+      "text": "RAG uses a retriever to collect source passages before synthesis.",
+      "unit_index": 6
+    },
+    {
+      "gold_endpoint_spans": [
+        {
+          "end": 6,
+          "entity_type": "Service",
+          "name": "Qdrant",
+          "start": 0
+        },
+        {
+          "end": 22,
+          "entity_type": "Concept",
+          "name": "HNSW",
+          "start": 18
+        }
+      ],
+      "openie_aligned": 4,
+      "openie_renderings": 4,
+      "surface_recovery_aligned": 1,
+      "syntax_aligned": 0,
+      "syntax_records": 0,
+      "text": "Qdrant depends on HNSW indexing for approximate nearest-neighbor search.",
+      "unit_index": 7
+    },
+    {
+      "gold_endpoint_spans": [
+        {
+          "end": 7,
+          "entity_type": "Software",
+          "name": "MongoDB",
+          "start": 0
+        },
+        {
+          "end": 17,
+          "entity_type": "Software",
+          "name": "Neo4j",
+          "start": 12
+        },
+        {
+          "end": 49,
+          "entity_type": "Concept",
+          "name": "rebuildable projections",
+          "start": 26
+        },
+        {
+          "end": 62,
+          "entity_type": "Software",
+          "name": "MongoDB",
+          "start": 55
+        }
+      ],
+      "openie_aligned": 0,
+      "openie_renderings": 3,
+      "surface_recovery_aligned": 2,
+      "syntax_aligned": 0,
+      "syntax_records": 0,
+      "text": "MongoDB and Neo4j support rebuildable projections when MongoDB remains authoritative.",
+      "unit_index": 8
+    },
+    {
+      "gold_endpoint_spans": [
+        {
+          "end": 6,
+          "entity_type": "Service",
+          "name": "Qdrant",
+          "start": 0
+        },
+        {
+          "end": 25,
+          "entity_type": "Software",
+          "name": "MongoDB",
+          "start": 18
+        }
+      ],
+      "openie_aligned": 1,
+      "openie_renderings": 2,
+      "surface_recovery_aligned": 1,
+      "syntax_aligned": 0,
+      "syntax_records": 0,
+      "text": "Qdrant works with MongoDB, and it supports filtering only when the resolver is unambiguous.",
+      "unit_index": 12
+    },
+    {
+      "gold_endpoint_spans": [
+        {
+          "end": 7,
+          "entity_type": "Software",
+          "name": "GLiNER2",
+          "start": 0
+        },
+        {
+          "end": 37,
+          "entity_type": "Library",
+          "name": "pandas",
+          "start": 31
+        },
+        {
+          "end": 79,
+          "entity_type": "Library",
+          "name": "pandas",
+          "start": 73
+        }
+      ],
+      "openie_aligned": 2,
+      "openie_renderings": 11,
+      "surface_recovery_aligned": 1,
+      "syntax_aligned": 1,
+      "syntax_records": 1,
+      "text": "GLiNER2 may classify lowercase pandas as a Library when the context says pandas processes tables.",
+      "unit_index": 13
+    },
+    {
+      "gold_endpoint_spans": [
+        {
+          "end": 22,
+          "entity_type": "Org",
+          "name": "Oracle",
+          "start": 16
+        },
+        {
+          "end": 32,
+          "entity_type": "Software",
+          "name": "Java",
+          "start": 28
+        },
+        {
+          "end": 43,
+          "entity_type": "Org",
+          "name": "Apple",
+          "start": 38
+        }
+      ],
+      "openie_aligned": 1,
+      "openie_renderings": 18,
+      "surface_recovery_aligned": 1,
+      "syntax_aligned": 0,
+      "syntax_records": 0,
+      "text": "The report says Oracle owns Java, but Apple appears only as a company name in a comparison.",
+      "unit_index": 14
+    },
+    {
+      "gold_endpoint_spans": [
+        {
+          "end": 6,
+          "entity_type": "Library",
+          "name": "Python",
+          "start": 0
+        },
+        {
+          "end": 55,
+          "entity_type": "Library",
+          "name": "Python",
+          "start": 49
+        }
+      ],
+      "openie_aligned": 2,
+      "openie_renderings": 11,
+      "surface_recovery_aligned": 0,
+      "syntax_aligned": 0,
+      "syntax_records": 0,
+      "text": "Python implements the extraction controller, but python as a common word must not be guessed from context.",
+      "unit_index": 15
+    },
+    {
+      "gold_endpoint_spans": [
+        {
+          "end": 31,
+          "entity_type": "Process",
+          "name": "Graphify",
+          "start": 23
+        },
+        {
+          "end": 47,
+          "entity_type": "Concept",
+          "name": "recall",
+          "start": 41
+        }
+      ],
+      "openie_aligned": 1,
+      "openie_renderings": 6,
+      "surface_recovery_aligned": 1,
+      "syntax_aligned": 1,
+      "syntax_records": 1,
+      "text": "The authors claim that Graphify improves recall, so the claim is attributed rather than unconditional.",
+      "unit_index": 20
+    },
+    {
+      "gold_endpoint_spans": [
+        {
+          "end": 8,
+          "entity_type": "Process",
+          "name": "Graphify",
+          "start": 0
+        },
+        {
+          "end": 51,
+          "entity_type": "Concept",
+          "name": "spaCy and Python rules",
+          "start": 29
+        }
+      ],
+      "openie_aligned": 1,
+      "openie_renderings": 2,
+      "surface_recovery_aligned": 1,
+      "syntax_aligned": 0,
+      "syntax_records": 0,
+      "text": "Graphify was built on top of spaCy and Python rules.",
+      "unit_index": 23
+    },
+    {
+      "gold_endpoint_spans": [
+        {
+          "end": 6,
+          "entity_type": "Service",
+          "name": "Qdrant",
+          "start": 0
+        },
+        {
+          "end": 32,
+          "entity_type": "Concept",
+          "name": "semantic retrieval",
+          "start": 14
+        }
+      ],
+      "openie_aligned": 0,
+      "openie_renderings": 0,
+      "surface_recovery_aligned": 1,
+      "syntax_aligned": 0,
+      "syntax_records": 0,
+      "text": "Qdrant powers semantic retrieval in the product description.",
+      "unit_index": 26
+    },
+    {
+      "gold_endpoint_spans": [
+        {
+          "end": 14,
+          "entity_type": "Library",
+          "name": "FrameExtractor",
+          "start": 0
+        },
+        {
+          "end": 53,
+          "entity_type": "Service",
+          "name": "GitHub",
+          "start": 47
+        },
+        {
+          "end": 79,
+          "entity_type": "Org",
+          "name": "Microsoft",
+          "start": 70
+        }
+      ],
+      "openie_aligned": 1,
+      "openie_renderings": 7,
+      "surface_recovery_aligned": 2,
+      "syntax_aligned": 2,
+      "syntax_records": 2,
+      "text": "FrameExtractor extracts passive relations when GitHub was acquired by Microsoft.",
+      "unit_index": 28
+    },
+    {
+      "gold_endpoint_spans": [
+        {
+          "end": 9,
+          "entity_type": "Org",
+          "name": "Microsoft",
+          "start": 0
+        },
+        {
+          "end": 25,
+          "entity_type": "Service",
+          "name": "GitHub",
+          "start": 19
+        }
+      ],
+      "openie_aligned": 1,
+      "openie_renderings": 2,
+      "surface_recovery_aligned": 1,
+      "syntax_aligned": 2,
+      "syntax_records": 2,
+      "text": "Microsoft acquired GitHub in 2018.",
+      "unit_index": 29
+    },
+    {
+      "gold_endpoint_spans": [
+        {
+          "end": 6,
+          "entity_type": "Service",
+          "name": "GitHub",
+          "start": 0
+        },
+        {
+          "end": 32,
+          "entity_type": "Org",
+          "name": "Microsoft",
+          "start": 23
+        }
+      ],
+      "openie_aligned": 0,
+      "openie_renderings": 1,
+      "surface_recovery_aligned": 1,
+      "syntax_aligned": 2,
+      "syntax_records": 2,
+      "text": "GitHub was acquired by Microsoft in 2018.",
+      "unit_index": 30
+    },
+    {
+      "gold_endpoint_spans": [
+        {
+          "end": 41,
+          "entity_type": "Software",
+          "name": "GLiNER2",
+          "start": 34
+        },
+        {
+          "end": 62,
+          "entity_type": "Library",
+          "name": "triplet-extract",
+          "start": 47
+        }
+      ],
+      "openie_aligned": 0,
+      "openie_renderings": 6,
+      "surface_recovery_aligned": 1,
+      "syntax_aligned": 0,
+      "syntax_records": 0,
+      "text": "The benchmark compares Relex with GLiNER2 plus triplet-extract.",
+      "unit_index": 31
+    },
+    {
+      "gold_endpoint_spans": [
+        {
+          "end": 8,
+          "entity_type": "Process",
+          "name": "Graphify",
+          "start": 0
+        },
+        {
+          "end": 32,
+          "entity_type": "Concept",
+          "name": "Markdown files",
+          "start": 18
+        }
+      ],
+      "openie_aligned": 3,
+      "openie_renderings": 8,
+      "surface_recovery_aligned": 1,
+      "syntax_aligned": 2,
+      "syntax_records": 2,
+      "text": "Graphify consumes Markdown files and produces raw mentions.",
+      "unit_index": 32
+    },
+    {
+      "gold_endpoint_spans": [
+        {
+          "end": 52,
+          "entity_type": "Concept",
+          "name": "Retrieval-Augmented Generation",
+          "start": 22
+        },
+        {
+          "end": 57,
+          "entity_type": "Concept",
+          "name": "RAG",
+          "start": 54
+        }
+      ],
+      "openie_aligned": 0,
+      "openie_renderings": 30,
+      "surface_recovery_aligned": 0,
+      "syntax_aligned": 0,
+      "syntax_records": 0,
+      "text": "The survey pass finds Retrieval-Augmented Generation (RAG) as an acronym definition.",
+      "unit_index": 37
+    },
+    {
+      "gold_endpoint_spans": [
+        {
+          "end": 7,
+          "entity_type": "Concept",
+          "name": "API",
+          "start": 4
+        },
+        {
+          "end": 31,
+          "entity_type": "Concept",
+          "name": "JSON documents",
+          "start": 17
+        },
+        {
+          "end": 63,
+          "entity_type": "Concept",
+          "name": "normalized records",
+          "start": 45
+        }
+      ],
+      "openie_aligned": 4,
+      "openie_renderings": 5,
+      "surface_recovery_aligned": 2,
+      "syntax_aligned": 3,
+      "syntax_records": 3,
+      "text": "The API consumes JSON documents and produces normalized records.",
+      "unit_index": 43
+    },
+    {
+      "gold_endpoint_spans": [
+        {
+          "end": 11,
+          "entity_type": "Concept",
+          "name": "dataset",
+          "start": 4
+        },
+        {
+          "end": 48,
+          "entity_type": "Concept",
+          "name": "public incident reports",
+          "start": 25
+        }
+      ],
+      "openie_aligned": 2,
+      "openie_renderings": 3,
+      "surface_recovery_aligned": 1,
+      "syntax_aligned": 1,
+      "syntax_records": 1,
+      "text": "The dataset derives from public incident reports.",
+      "unit_index": 44
+    },
+    {
+      "gold_endpoint_spans": [
+        {
+          "end": 10,
+          "entity_type": "Concept",
+          "name": "metric",
+          "start": 4
+        },
+        {
+          "end": 27,
+          "entity_type": "Metric",
+          "name": "latency",
+          "start": 20
+        }
+      ],
+      "openie_aligned": 0,
+      "openie_renderings": 0,
+      "surface_recovery_aligned": 1,
+      "syntax_aligned": 0,
+      "syntax_records": 0,
+      "text": "The metric measures latency in milliseconds.",
+      "unit_index": 45
+    },
+    {
+      "gold_endpoint_spans": [
+        {
+          "end": 7,
+          "entity_type": "Location",
+          "name": "El Paso",
+          "start": 0
+        },
+        {
+          "end": 34,
+          "entity_type": "Process",
+          "name": "Graphify",
+          "start": 26
+        },
+        {
+          "end": 60,
+          "entity_type": "Location",
+          "name": "El Paso",
+          "start": 53
+        }
+      ],
+      "openie_aligned": 3,
+      "openie_renderings": 4,
+      "surface_recovery_aligned": 1,
+      "syntax_aligned": 0,
+      "syntax_records": 0,
+      "text": "El Paso is a Location and Graphify is not located in El Paso unless evidence says so.",
+      "unit_index": 46
+    },
+    {
+      "gold_endpoint_spans": [
+        {
+          "end": 12,
+          "entity_type": "Concept",
+          "name": "document",
+          "start": 4
+        },
+        {
+          "end": 37,
+          "entity_type": "Concept",
+          "name": "assertion status",
+          "start": 21
+        }
+      ],
+      "openie_aligned": 2,
+      "openie_renderings": 4,
+      "surface_recovery_aligned": 1,
+      "syntax_aligned": 2,
+      "syntax_records": 2,
+      "text": "The document defines assertion status as the state of a claim.",
+      "unit_index": 48
+    },
+    {
+      "gold_endpoint_spans": [
+        {
+          "end": 8,
+          "entity_type": "Software",
+          "name": "Polymath",
+          "start": 0
+        },
+        {
+          "end": 28,
+          "entity_type": "Process",
+          "name": "Graphify",
+          "start": 20
+        },
+        {
+          "end": 82,
+          "entity_type": "Software",
+          "name": "Polymath",
+          "start": 74
+        },
+        {
+          "end": 105,
+          "entity_type": "Process",
+          "name": "Graphify",
+          "start": 97
+        }
+      ],
+      "openie_aligned": 3,
+      "openie_renderings": 18,
+      "surface_recovery_aligned": 3,
+      "syntax_aligned": 1,
+      "syntax_records": 1,
+      "text": "Polymath related_to Graphify is invalid unless the source explicitly says Polymath is related to Graphify.",
+      "unit_index": 49
+    },
+    {
+      "gold_endpoint_spans": [
+        {
+          "end": 8,
+          "entity_type": "Software",
+          "name": "Polymath",
+          "start": 0
+        },
+        {
+          "end": 31,
+          "entity_type": "Process",
+          "name": "Graphify",
+          "start": 23
+        }
+      ],
+      "openie_aligned": 2,
+      "openie_renderings": 5,
+      "surface_recovery_aligned": 1,
+      "syntax_aligned": 1,
+      "syntax_records": 1,
+      "text": "Polymath is related to Graphify in this fixture for explicit related_to testing.",
+      "unit_index": 50
+    }
+  ]
+}

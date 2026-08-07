@@ -1,0 +1,27 @@
+{
+  "errors": [],
+  "files_changed": [
+    "/Users/king/polymath_v3.3/POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/work/artifacts/adapted_arguments.jsonl",
+    "/Users/king/polymath_v3.3/POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/work/artifacts/argument_adapter_report.json"
+  ],
+  "finished_at": "2026-08-06T23:52:15.398059+00:00",
+  "inputs_hash": "",
+  "metrics": {
+    "classified_arguments": 978,
+    "kind_counts": {
+      "DESCRIPTION": 201,
+      "EMBEDDED_CLAUSE": 9,
+      "ENTITY": 742,
+      "UNRESOLVED": 26
+    },
+    "strict_entity_alignment_rate": 1.0
+  },
+  "outputs_hash": "",
+  "stage": "IMPLEMENT_ARGUMENT_ADAPTER",
+  "started_at": "2026-08-06T23:52:15.391528+00:00",
+  "status": "PASSED",
+  "tests": [
+    "backend/tests/extraction/test_graphify_argument_adapter.py"
+  ],
+  "warnings": []
+}

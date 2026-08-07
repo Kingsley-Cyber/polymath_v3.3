@@ -1,8 +1,9 @@
 """Runpod Flash queue adapter for burst GLiNER-Relex extraction.
 
 Flash is compute only. The remote function receives bounded text batches and
-returns the same validated wire shape as ``ghost_b_local``; this process keeps
-ownership of durable jobs, validation, Mongo staging, and graph promotion.
+returns the shared validated wire shape (services.extraction_wire); this
+process keeps ownership of durable jobs, validation, Mongo staging, and
+graph promotion.
 """
 
 from __future__ import annotations
@@ -26,7 +27,7 @@ from services.ghost_b import (
     ExtractionFailureItem,
     SchemaContext,
 )
-from services.ghost_b_local import SCHEMA_VERSION, _to_results
+from services.extraction_wire import SCHEMA_VERSION, to_results as _to_results
 from services.ghost_b_schemas import LLMEntity, LLMRelation
 from services.ingestion.enrich import extract_aliases, extract_definitional_phrases
 

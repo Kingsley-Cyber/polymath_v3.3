@@ -63,7 +63,7 @@ class ExtractedTriple:
     subject_surface: str
     subject_start: int
     subject_end: int
-    predicate: str  # normalized
+    predicate: str | None  # canonical predicate, or None if unmapped
     predicate_lemma: str
     predicate_surface: str
     object_surface: str
@@ -80,18 +80,38 @@ class ExtractedTriple:
     chunk_id: str = ""
     doc_id: str = ""
     section_path: str = ""
+    # P2A open-relation provenance:
+    # MAPPED = predicate resolved to ontology; UNMAPPED = no canonical mapping.
+    mapping_status: str = "MAPPED"
+    # False for unmapped frames: they must never become graph edges.
+    graph_eligible: bool = True
+    # Head-token offsets: the spaCy head token of each argument phrase.
+    # Used by the HEAD_TOKEN join level to verify that the syntactic head
+    # of the argument lies inside the Relex entity span. These are the
+    # actual token character offsets, NOT the full phrase span.
+    subject_head_start: int = -1
+    subject_head_end: int = -1
+    object_head_start: int = -1
+    object_head_end: int = -1
+    # Argument-role and direction provenance (open-relation routing).
+    subject_dependency_role: str = ""   # agent | patient | theme | possessor | anchor
+    object_dependency_role: str = ""    # agent | patient | theme | possessed | appositive
+    voice: str = ""                     # active | passive | nominal
+    direction_source: str = ""          # DEPENDENCY_FRAME | RESOLVER_SWAP | NOMINAL
+    direction_confidence: str = ""      # high | medium | low
 
     @property
     def is_graph_edge(self) -> bool:
         """True if this candidate qualifies as an asserted graph edge.
 
         The graph writer boundary uses this to filter: only direct,
-        positive, asserted candidates become Neo4j edges. Qualified
-        candidates (negated, modal, attributed, conditional) are preserved
-        for the ClaimRecord path but never written as graph facts.
+        positive, asserted, graph-eligible candidates become Neo4j edges.
+        Unmapped frames (graph_eligible=False) never pass this gate.
         """
         return (
-            self.polarity == "POSITIVE"
+            self.graph_eligible
+            and self.predicate is not None
+            and self.polarity == "POSITIVE"
             and self.modality == "ASSERTED"
             and self.assertion_mode == "direct"
         )
@@ -126,7 +146,7 @@ _VALID_PREDICATES = frozenset({
     "part_of", "member_of", "located_in", "works_for", "created_by",
     "owns", "affiliated_with", "synonym_of", "instance_of", "uses",
     "runs_on", "trained_on", "references", "implements", "depends_on",
-    "produces", "stores", "detects", "supports", "defines", "represents",
+    "produces", "consumes", "stores", "detects", "supports", "defines", "represents",
     "maps_to", "preceded_by", "causes", "overlaps", "derived_from",
     "contradicts", "excepts", "overrides", "related_to",
 })
@@ -175,6 +195,7 @@ SUPPRESSION_KEYS: tuple[str, ...] = (
     "frame_self_loop",
     "frame_predicate_unnamed",
     "frame_bibliographic_appositive",
+    "frame_symmetric_no_distribute",
     "frame_structural_artifact",
     "frame_missing_required_preposition",
 )
@@ -665,6 +686,7 @@ def resolve_predicate(
     object_type: str,
     pred_tok: Token | None = None,
     object_tok: Token | None = None,
+    disabled_feature_groups: frozenset[str] = frozenset(),
 ) -> tuple[str, bool] | None:
     """4-tier STRUCTURAL composite predicate resolver.
 
@@ -679,6 +701,11 @@ def resolve_predicate(
 
     Returns (predicate, swap) where swap=True marks passive/agent
     constructions, or None (drop this edge).
+
+    disabled_feature_groups: rules tagged with a feature_group in this
+    set are skipped (ablation). E.g. frozenset({"p2_verb_prep"}) disables
+    only the P2B verb+preposition resolver rules while leaving baseline
+    prep_object frame generation and older prepositional rules intact.
     """
     _load_config()
     # Lemma-indexed lookup: only scan rules matching this lemma (or wildcard "")
@@ -688,6 +715,8 @@ def resolve_predicate(
 
     # --- T1: rules with BOTH subj_type and obj_type constraints ---
     for rule in rules:
+        if disabled_feature_groups and rule.get("feature_group") in disabled_feature_groups:
+            continue
         r_subj = rule.get("subj_type", "")
         r_obj = rule.get("obj_type", "")
         if not (r_subj and r_obj):
@@ -707,6 +736,8 @@ def resolve_predicate(
 
     # --- T2: rules with signature_contains but NOT both type constraints ---
     for rule in rules:
+        if disabled_feature_groups and rule.get("feature_group") in disabled_feature_groups:
+            continue
         r_subj = rule.get("subj_type", "")
         r_obj = rule.get("obj_type", "")
         if r_subj and r_obj:

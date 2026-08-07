@@ -17,7 +17,13 @@ __pycache__
 .coverage
 htmlcov
 
-tests
+# Exclude general tests from the image; keep the complex-query portable
+# suite so durability validation can run inside the rebuilt backend.
+tests/*
+!tests/test_complex_query_contracts.py
+!tests/test_complex_query_templates.py
+!tests/test_complex_query_traversal.py
+!tests/test_complex_query_dark_canary.py
 test-results
 scripts/__pycache__
 

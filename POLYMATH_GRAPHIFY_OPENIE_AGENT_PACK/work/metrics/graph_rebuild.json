@@ -1,0 +1,38 @@
+{
+  "created_at": "2026-08-07T03:05:32.795701+00:00",
+  "deleted_counts": {
+    "assertion_edges": 0,
+    "assertion_support": 0,
+    "mentions": 0,
+    "nodes": 0,
+    "relations": 0
+  },
+  "first": {
+    "counts": {
+      "assertion_edges": 175,
+      "assertion_support": 175,
+      "mentions": 434,
+      "nodes": 425,
+      "relations": 15
+    },
+    "digest": "130a8300be27a5c2dfe4de437efbfdc796d81d7d5704de4870aee3b48e40665f"
+  },
+  "gates": {
+    "empty_after_delete": true,
+    "first_rebuild_passed": true,
+    "idempotency_verifier_passed": true,
+    "identical_graph_snapshot": true,
+    "repeat_rebuild_passed": true
+  },
+  "repeat": {
+    "counts": {
+      "assertion_edges": 175,
+      "assertion_support": 175,
+      "mentions": 434,
+      "nodes": 425,
+      "relations": 15
+    },
+    "digest": "130a8300be27a5c2dfe4de437efbfdc796d81d7d5704de4870aee3b48e40665f"
+  },
+  "status": "PASSED"
+}

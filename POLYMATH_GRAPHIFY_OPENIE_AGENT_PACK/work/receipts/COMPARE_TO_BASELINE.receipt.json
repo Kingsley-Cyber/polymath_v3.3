@@ -1,0 +1,21 @@
+{
+  "errors": [],
+  "files_changed": [
+    "/Users/king/polymath_v3.3/POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/work/metrics/baseline_comparison.json"
+  ],
+  "finished_at": "2026-08-07T03:05:32.988005+00:00",
+  "inputs_hash": "a2b795a9052d216c38c15b190e062d9bb2c7cc9afedd286ac8aac0601f63020a",
+  "metrics": {
+    "passed_gates": 8,
+    "total_gates": 8
+  },
+  "outputs_hash": "8848177ca4a4538e06738dc95a7a13a4063c8d075d48dd40b70e30a37bcaf3d5",
+  "stage": "COMPARE_TO_BASELINE",
+  "started_at": "2026-08-07T03:05:32.987113+00:00",
+  "status": "PASSED",
+  "tests": [
+    "compare measured quality to acceptance thresholds",
+    "compare full fixture runtime to frozen Relex baseline"
+  ],
+  "warnings": []
+}

@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "confidence": {
+      "type": "number"
+    },
+    "description_hash": {
+      "type": "string"
+    },
+    "document_id": {
+      "type": "string"
+    },
+    "end": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "label_set_hash": {
+      "type": "string"
+    },
+    "mention_id": {
+      "type": "string"
+    },
+    "model_checkpoint": {
+      "type": "string"
+    },
+    "normalized_surface": {
+      "type": "string"
+    },
+    "original_end": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "original_start": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "predicted_type": {
+      "type": "string"
+    },
+    "run_id": {
+      "type": "string"
+    },
+    "start": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "surface": {
+      "type": "string"
+    },
+    "window_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "mention_id",
+    "run_id",
+    "document_id",
+    "window_id",
+    "surface",
+    "normalized_surface",
+    "predicted_type",
+    "confidence",
+    "start",
+    "end",
+    "model_checkpoint",
+    "label_set_hash",
+    "description_hash"
+  ],
+  "type": "object"
+}

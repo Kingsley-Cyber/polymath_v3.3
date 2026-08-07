@@ -1,0 +1,121 @@
+{
+  "family": "05_endpoint_minting_negatives",
+  "status": "PASS",
+  "runtime": {
+    "pipeline_release": "graphify-cpu-pipeline-v15",
+    "mongo_database": "graphify_eval_syn_05_8786e2632b",
+    "corpus_id": "f9195796-b065-5512-b73c-75cabeb7ef1c",
+    "elapsed_seconds": 0.85,
+    "interpreter": "/Users/king/polymath_v3.3/local_ghost_b/.venv/bin/python"
+  },
+  "items": {
+    "passed": 9,
+    "failed": 0,
+    "optional_failed": 1,
+    "total": 10
+  },
+  "negative_entities_in_graph": [],
+  "unexpected_promoted_triples": [],
+  "duplicate_promoted_edges": {},
+  "graph": {
+    "nodes": [
+      "glowline metrics",
+      "p50 intake latency",
+      "quartzline analytics",
+      "redlark"
+    ],
+    "promoted_edge_count": 2
+  },
+  "extracted_entities": [
+    "Glowline Metrics",
+    "June 2030",
+    "P50 Intake Latency",
+    "Pinion API",
+    "Quartzline Analytics",
+    "Redlark",
+    "Sable Index",
+    "spring sweep"
+  ],
+  "item_results": [
+    {
+      "id": "M01",
+      "check": "control",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "Quartzline Analytics owns the Redlark database."
+    },
+    {
+      "id": "M02",
+      "check": "junk_negative",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "The Pinion API produces two dashboards."
+    },
+    {
+      "id": "M03",
+      "check": "junk_negative",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "The Sable Index flagged several broken records during the spring sweep."
+    },
+    {
+      "id": "M04",
+      "check": "junk_negative",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "That surprised the auditors."
+    },
+    {
+      "id": "M05",
+      "check": "junk_negative",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "One document was archived after the review."
+    },
+    {
+      "id": "M06",
+      "check": "junk_negative",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "The team finished temporary coordination work in June 2030."
+    },
+    {
+      "id": "M07",
+      "check": "positive",
+      "verdict": "FAIL",
+      "optional": true,
+      "detail": "no positive edge for pair",
+      "evidence": "The Pinion API handles intake. It stores summaries in Redlark."
+    },
+    {
+      "id": "M08",
+      "check": "junk_negative",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "A separate audit consumed most of the quarter."
+    },
+    {
+      "id": "M09",
+      "check": "junk_negative",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "The rollout produced confusion among staff."
+    },
+    {
+      "id": "M10",
+      "check": "control",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "Glowline Metrics defines the P50 Intake Latency target."
+    }
+  ]
+}

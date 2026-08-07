@@ -529,6 +529,16 @@ class GraphDecorator:
                   AND max_hops <= 1
               )
           )
+          // Graph-authority policy: structural-shadow edges are extraction
+          // candidates, never canonical factual evidence. Answer decoration
+          // is a factual-assertion route, so fail closed: only edges with
+          // claim provenance, or an explicit non-shadow authority, qualify.
+          // Unlabeled legacy edges coalesce to 'noncanonical' and are
+          // excluded until the shadow backfill labels them.
+          AND (
+              size(coalesce(r.claim_ids, [])) > 0
+              OR coalesce(r.authority, 'noncanonical') <> 'noncanonical'
+          )
           AND (
               size($wanted_families) = 0
               OR coalesce(r.relation_family, '') IN $wanted_families

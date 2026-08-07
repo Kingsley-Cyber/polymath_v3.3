@@ -1,0 +1,55 @@
+{
+  "baseline_total_seconds": 26.78292116599914,
+  "candidate_total_seconds": 11.98372183192987,
+  "created_at": "2026-08-07T03:05:32.987581+00:00",
+  "gates": {
+    "directed_triple_f1": true,
+    "directed_triple_precision": true,
+    "directed_triple_recall": true,
+    "entity_exact_span_f1": true,
+    "entity_type_f1": true,
+    "generic_noun_fp_rate": true,
+    "gold_pair_recall": true,
+    "speed_ratio_vs_relex": true
+  },
+  "minimum_speed_ratio": 1.5,
+  "quality": {
+    "entity": {
+      "accepted_pronoun_endpoints": 0,
+      "ambiguous_negative_hits": 0,
+      "exact_span_f1": 0.870748299319728,
+      "exact_span_precision": 0.7710843373493976,
+      "exact_span_recall": 1.0,
+      "generic_noun_false_positive_rate": 0.0,
+      "strict_alignment_rate": 1.0,
+      "type_f1": 0.870748299319728
+    },
+    "relation": {
+      "directed_triple_f1": 0.9285714285714286,
+      "directed_triple_precision": 1.0,
+      "directed_triple_recall": 0.8666666666666667,
+      "direction_fixture_accuracy": 1.0,
+      "exact_evidence_alignment": 1.0,
+      "final_pair_recall": 0.8666666666666667,
+      "forced_related_to_fallbacks": 0,
+      "gold_supported_facts": 15,
+      "open_relation_recall": 1.0,
+      "predicted_supported_facts": 13,
+      "qualification_fixture_accuracy": 1.0,
+      "true_positive_facts": 13,
+      "unsupported_canonical_edges": 0
+    },
+    "throughput": {
+      "source_bytes": 3805,
+      "source_bytes_per_second": 364.6802279111604,
+      "windows_per_second": 0.19168474528838916
+    }
+  },
+  "sources": [
+    "work/metrics/e2e_quality_final.json",
+    "work/metrics/e2e_throughput_final.json",
+    "work/baseline/relex_baseline_manifest.json"
+  ],
+  "speed_ratio_vs_relex": 2.2349418270572454,
+  "status": "PASSED"
+}

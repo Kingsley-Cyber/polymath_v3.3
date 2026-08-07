@@ -2,14 +2,11 @@
 
 The repo law is "never drop silently: every suppression increments a named
 counter". Before R-pre that law was honored inside dep_path_extractor and
-DEFEATED at the emit boundary:
-
-  - ghost_b_local.py hand-maintained a PARTIAL copy of the key list. It omitted
-    all three P2 structural guards (suppressed_multi_clause /
-    suppressed_conjunct_crossing / suppressed_exception_boundary), so those were
-    incremented into a dict that never declared them.
-  - Only 4 counters (entity/relation/evidence/fact drop) were emitted on
-    ExtractionResult. The other 10+ were garbage-collected.
+DEFEATED at the emit boundary: a hand-maintained PARTIAL copy of the key
+list omitted all three P2 structural guards (suppressed_multi_clause /
+suppressed_conjunct_crossing / suppressed_exception_boundary), and only 4
+counters (entity/relation/evidence/fact drop) were emitted on
+ExtractionResult while the other 10+ were garbage-collected.
 
 Net effect: nobody could measure what the guards cost, even in principle.
 
@@ -29,7 +26,7 @@ from pathlib import Path
 _BACKEND = Path(__file__).resolve().parents[1]
 _EXTRACTOR = _BACKEND / "services" / "extraction" / "dep_path_extractor.py"
 _ADAPTER = _BACKEND / "services" / "extraction" / "spacy_relation_adapter.py"
-_GHOST_B_LOCAL = _BACKEND / "services" / "ghost_b_local.py"
+_WIRE = _BACKEND / "services" / "extraction_wire.py"
 _GHOST_B = _BACKEND / "services" / "ghost_b.py"
 _WORKER = _BACKEND / "services" / "ingestion" / "worker.py"
 
@@ -100,20 +97,6 @@ def test_the_three_p2_structural_guards_are_published():
         )
 
 
-def test_ghost_b_local_does_not_hand_maintain_a_key_list():
-    """counters_per must be built from new_counters(), never a literal."""
-    src = _GHOST_B_LOCAL.read_text()
-    assert "counters_per = [new_counters() for _ in range(n)]" in src, (
-        "counters_per is no longer built from the extractor's canonical "
-        "new_counters() factory. A hand-maintained literal is exactly how the "
-        "three P2 guards went unpublished."
-    )
-    # The old literal must not come back.
-    assert '{"entity_drop": 0, "relation_drop": 0' not in src, (
-        "A hand-maintained counter literal has been re-introduced."
-    )
-
-
 def test_extraction_result_carries_the_counter_map():
     """The dataclass must have somewhere to put the counters."""
     src = _GHOST_B.read_text()
@@ -123,21 +106,13 @@ def test_extraction_result_carries_the_counter_map():
 
 
 def test_counters_are_carried_through_both_construction_paths():
-    """In-process AND sidecar/worker paths must both forward the map."""
-    assert "extraction_counters=" in _GHOST_B_LOCAL.read_text(), (
-        "In-process ExtractionResult construction drops extraction_counters."
+    """Shared-wire AND worker paths must both forward the map."""
+    assert "extraction_counters=" in _WIRE.read_text(), (
+        "Shared wire conversion (extraction_wire) drops extraction_counters."
     )
     assert 'extraction_counters=r.get("extraction_counters"' in _WORKER.read_text(), (
         "Worker mapping (sidecar response -> ExtractionResult) drops "
         "extraction_counters, so sidecar-extracted chunks lose them."
-    )
-
-
-def test_emit_block_publishes_the_full_map_not_just_four():
-    src = _GHOST_B_LOCAL.read_text()
-    assert '"extraction_counters": dict(counters)' in src, (
-        "The per-chunk emit block does not publish the full counter map. "
-        "Publishing only the 4 legacy *_drop_count fields is the original bug."
     )
 
 

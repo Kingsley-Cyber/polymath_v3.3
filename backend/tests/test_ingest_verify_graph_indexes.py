@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from services.ingestion import verify
+from services.storage.record_status import active_record_clause
 
 
 class _Cursor:
@@ -112,7 +113,12 @@ async def test_expected_child_count_includes_noisy_chunks_for_qdrant():
     )
 
     assert count == 2
-    assert "$or" not in db.chunks.query
+    # Query = {"$and": [base, active-record clause]}: no noisy-kind exclusion
+    # in the base, but tombstoned chunks never count (delete → re-ingest of
+    # the same content-derived doc_id must not over-expect Qdrant points).
+    base, active = db.chunks.query["$and"]
+    assert "$or" not in base
+    assert active == active_record_clause()
 
 
 @pytest.mark.asyncio
@@ -144,7 +150,9 @@ async def test_expected_child_count_excludes_noisy_chunks_for_neo4j():
     )
 
     assert count == 1
-    assert "$or" in db.chunks.query
+    base, active = db.chunks.query["$and"]
+    assert "$or" in base
+    assert active == active_record_clause()
 
 
 @pytest.mark.asyncio

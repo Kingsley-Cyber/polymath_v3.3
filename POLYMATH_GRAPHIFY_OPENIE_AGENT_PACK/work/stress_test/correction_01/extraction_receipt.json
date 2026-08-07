@@ -1,0 +1,32 @@
+{
+  "answer_key": "/Users/king/polymath_v3.3/POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/work/stress_test/frozen_v1/gold_triples.json",
+  "artifact_digest": "148e445178acbcc0c0106e13f4cdb2f128d965a8c75ccf527d351fd27b05b1ad",
+  "corpus_id": "0a858214-cc58-5615-9b4b-ba177ffd3ca3",
+  "counts": {
+    "gold_positive": 66,
+    "neo4j_promoted_positive": 67,
+    "qualified_gold": 5,
+    "qualified_retained": 118
+  },
+  "document_id": "9e3e45389e2e73da5cc6838d98f99f7d59b3dccbf1cb08035f8ad496628365c7",
+  "elapsed_seconds": 150.20911187501042,
+  "gates": {
+    "projection_idempotent": true
+  },
+  "graph": {
+    "counts": {
+      "assertion_edges": 124,
+      "assertion_support": 124,
+      "mentions": 131,
+      "nodes": 147,
+      "relations": 67
+    },
+    "digest": "0c75c146beac134c3f656385bcf8fe733c0beb7f6bbfd4addd91356c5c4796a7",
+    "repeat_digest": "0c75c146beac134c3f656385bcf8fe733c0beb7f6bbfd4addd91356c5c4796a7"
+  },
+  "metrics": {},
+  "mongo_database": "graphify_e2e_technical_book_stress_v1_bc4ad2c7",
+  "namespace": "technical_book_stress_v1",
+  "source": "/Users/king/polymath_v3.3/POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/work/stress_test/frozen_v1/fixture.md",
+  "status": "unscored"
+}

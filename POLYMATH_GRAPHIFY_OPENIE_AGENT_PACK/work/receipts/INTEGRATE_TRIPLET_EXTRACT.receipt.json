@@ -1,0 +1,24 @@
+{
+  "errors": [],
+  "files_changed": [
+    "/Users/king/polymath_v3.3/POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/work/artifacts/openie_raw_propositions.jsonl",
+    "/Users/king/polymath_v3.3/POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/work/artifacts/openie_report.json"
+  ],
+  "finished_at": "2026-08-06T23:52:15.519509+00:00",
+  "inputs_hash": "",
+  "metrics": {
+    "attributed_renderings": 14,
+    "elapsed_seconds": 5.690732583010686,
+    "eligible_units": 193,
+    "raw_renderings": 489
+  },
+  "outputs_hash": "",
+  "stage": "INTEGRATE_TRIPLET_EXTRACT",
+  "started_at": "2026-08-06T23:52:15.516457+00:00",
+  "status": "PASSED",
+  "tests": [
+    "backend/tests/extraction/test_graphify_openie.py",
+    "triplet-extract attribution and polarity tests"
+  ],
+  "warnings": []
+}

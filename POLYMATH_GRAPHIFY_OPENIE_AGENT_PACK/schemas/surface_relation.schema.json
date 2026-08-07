@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "attribution": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "decision_family": {
+      "type": "string"
+    },
+    "document_id": {
+      "type": "string"
+    },
+    "evidence_text": {
+      "type": "string"
+    },
+    "modality": {
+      "type": "string"
+    },
+    "object_argument": {
+      "type": "object"
+    },
+    "object_mention_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "particle": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "polarity": {
+      "type": "string"
+    },
+    "predicate_lemma": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "preposition": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "relation_candidate_id": {
+      "type": "string"
+    },
+    "sentence_id": {
+      "type": "string"
+    },
+    "subject_mention_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "surface_predicate": {
+      "type": "string"
+    },
+    "voice": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "relation_candidate_id",
+    "document_id",
+    "sentence_id",
+    "subject_mention_id",
+    "surface_predicate",
+    "object_argument",
+    "evidence_text",
+    "decision_family"
+  ],
+  "type": "object"
+}

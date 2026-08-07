@@ -773,3 +773,139 @@ def test_describe_chunking_reports_ast_bound_for_tier_code():
     )
     desc = tier_chunker.describe_chunking(pr)
     assert desc["parent_strategy"] == "ast_bound_code"
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Mixed-content book lane (Slice 1) — OUTPUT/CAPTION detection, routing,
+# and deterministic EXPLAINS adjacency metadata.
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def _tier_a_pr(sections, filename="book.md"):
+    return SimpleNamespace(
+        source_tier=SourceTier.tier_a,
+        text="",
+        markdown="",
+        sections=sections,
+        pages=None,
+        injected_headers_audit=[],
+        language=None,
+        filename=filename,
+    )
+
+
+def test_output_fence_language_routes_to_output_kind():
+    sections = [
+        _section("H1", element_type="section_heading", heading_path=["H1"], level=1),
+        _section(
+            "```python\ndef f():\n    return 1\n```",
+            element_type="code_block",
+            heading_path=["H1"],
+            language="python",
+        ),
+        _section(
+            "```output\n1\n```",
+            element_type="code_block",
+            heading_path=["H1"],
+            language="output",
+        ),
+    ]
+    parents, children, _ = tier_chunker.chunk(
+        _tier_a_pr(sections), doc_id="docO", corpus_id="corpusO"
+    )
+    kinds = {p.chunk_kind for p in parents}
+    assert ChunkKind.CODE in kinds
+    assert ChunkKind.OUTPUT in kinds
+    out_parents = [p for p in parents if p.chunk_kind == ChunkKind.OUTPUT]
+    # Fence markers are stripped from output text; AST packer never saw it.
+    assert all("```" not in p.text for p in out_parents)
+    assert "1" in out_parents[0].text
+    for c in children:
+        if c.chunk_kind == ChunkKind.OUTPUT:
+            assert "symbols_defined" not in c.metadata or not c.metadata.get("symbols_defined")
+
+
+def test_markdown_sections_indented_run_after_code_fence_is_output():
+    md = (
+        "# Running the example\n\n"
+        "```python\nprint('hi')\n```\n\n"
+        "    hi\n\n"
+        "After prose.\n"
+    )
+    sections, _h1, _h2 = _markdown_sections(md)
+    types = [s.element_type for s in sections]
+    assert "output_block" in types
+    out = next(s for s in sections if s.element_type == "output_block")
+    assert "hi" in out.text
+    # The trailing unindented prose stays a paragraph.
+    assert types[-1] == "paragraph"
+
+
+def test_markdown_sections_caption_line_emits_caption_section():
+    md = (
+        "# Pipeline\n\n"
+        "Figure 1.1: The ingestion pipeline.\n\n"
+        "More prose here about the diagram.\n"
+    )
+    sections, _h1, _h2 = _markdown_sections(md)
+    types = [s.element_type for s in sections]
+    assert "caption" in types
+    cap = next(s for s in sections if s.element_type == "caption")
+    assert cap.text.startswith("Figure 1.1")
+
+
+def test_mixed_content_doc_emits_all_kinds_and_explains_links():
+    md = """# Caching
+
+The LRU cache evicts the least recently used entry first.
+
+```python
+from functools import lru_cache
+
+@lru_cache(maxsize=2)
+def square(n):
+    return n * n
+```
+
+```output
+4
+```
+
+Figure 1.2: Cache eviction order.
+
+Trailing prose describes the eviction cost.
+"""
+    sections, _h1, _h2 = _markdown_sections(md)
+    parents, children, _ = tier_chunker.chunk(
+        _tier_a_pr(sections, filename="mixed.md"),
+        doc_id="docM",
+        corpus_id="corpusM",
+    )
+    kinds = {p.chunk_kind for p in parents}
+    assert {ChunkKind.BODY, ChunkKind.CODE, ChunkKind.OUTPUT, ChunkKind.CAPTION} <= kinds
+
+    # Normal python fence stays CODE and keeps parser-owned AST facts.
+    code_parents = [p for p in parents if p.chunk_kind == ChunkKind.CODE]
+    assert code_parents and code_parents[0].language == "python"
+    defined: set[str] = set()
+    for c in code_parents[0].children:
+        defined.update(c.metadata.get("symbols_defined", []))
+    assert "square" in defined
+
+    # Deterministic EXPLAINS adjacency rides the code parent's metadata.
+    rows = code_parents[0].metadata.get("explains_links") or []
+    assert rows, "expected EXPLAINS adjacency rows on the code parent"
+    body_child_ids = {
+        c.chunk_id for p in parents if p.chunk_kind == ChunkKind.BODY for c in p.children
+    }
+    code_child_ids = {c.chunk_id for p in code_parents for c in p.children}
+    for row in rows:
+        assert row["relation"] == "EXPLAINS"
+        assert row["basis"] == "adjacency"
+        assert row["explains_chunk_id"] in body_child_ids
+        assert row["code_chunk_id"] in code_child_ids
+
+    # OUTPUT block adjacent to the code block carries output_of.
+    out_parents = [p for p in parents if p.chunk_kind == ChunkKind.OUTPUT]
+    assert out_parents
+    assert out_parents[0].metadata.get("output_of") in code_child_ids

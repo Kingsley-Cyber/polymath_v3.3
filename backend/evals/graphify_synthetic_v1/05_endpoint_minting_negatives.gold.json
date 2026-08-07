@@ -1,0 +1,41 @@
+{
+  "fixture": "05_endpoint_minting_negatives.md",
+  "purpose": "Endpoint minting containment — the mechanism that dropped independent entity precision from .868 to .631. Cue verbs appear with junk endpoints on purpose: extraction may fire, promotion must not. Exactly two positive edges are allowed from this document.",
+  "items": [
+    {"id": "M01", "check": "control", "evidence": "Quartzline Analytics owns the Redlark database.",
+     "expect": {"type": "canonical", "subject": "Quartzline Analytics", "predicate": "owns", "object": "Redlark", "status": "ASSERTED_TRUE"}},
+    {"id": "M02", "check": "junk_negative", "evidence": "The Pinion API produces two dashboards.",
+     "expect": {"type": "no_edge"},
+     "must_not": {"promote_positive_edge": true, "entities": ["two dashboards"], "notes": "counted generic NP: acceptable as a value/description record or REVIEW; never a graph node ('two metrics' Meridian class)"}},
+    {"id": "M03", "check": "junk_negative", "evidence": "The Sable Index flagged several broken records during the spring sweep.",
+     "expect": {"type": "no_edge"},
+     "must_not": {"promote_positive_edge": true, "entities": ["several broken records", "spring sweep"], "notes": "'several incorrect candidate relationships' class"}},
+    {"id": "M04", "check": "junk_negative", "evidence": "That surprised the auditors.",
+     "expect": {"type": "no_edge"},
+     "must_not": {"promote_positive_edge": true, "entities": ["that", "auditors"], "notes": "the promoted node 'that' from Meridian must be impossible"}},
+    {"id": "M05", "check": "junk_negative", "evidence": "One document was archived after the review.",
+     "expect": {"type": "no_edge"},
+     "must_not": {"promote_positive_edge": true, "entities": ["One document"], "notes": "the 'one document derived_from ...' FP class"}},
+    {"id": "M06", "check": "junk_negative", "evidence": "The team finished temporary coordination work in June 2030.",
+     "expect": {"type": "no_edge"},
+     "must_not": {"promote_positive_edge": true, "entities": ["temporary coordination work", "team"]}},
+    {"id": "M07", "check": "positive", "evidence": "The Pinion API handles intake. It stores summaries in Redlark.",
+     "expect": {"type": "canonical", "subject": "Pinion API", "predicate": "uses", "object": "Redlark", "any_of": ["uses"], "status": "ASSERTED_TRUE", "optional": true},
+     "must_not": {"entities": ["It", "summaries", "intake"], "notes": "pronoun subject: EITHER resolve It->Pinion API and emit the edge, OR leave UNRESOLVED and emit nothing — but never mint 'It'/'summaries'. Edge itself is optional; the entity prohibition is not."}},
+    {"id": "M08", "check": "junk_negative", "evidence": "A separate audit consumed most of the quarter.",
+     "expect": {"type": "no_edge"},
+     "must_not": {"promote_positive_edge": true, "entities": ["A separate audit", "quarter"], "notes": "cue verb 'consumed' with junk endpoints — the gate, not eligibility, must stop this"}},
+    {"id": "M09", "check": "junk_negative", "evidence": "The rollout produced confusion among staff.",
+     "expect": {"type": "no_edge"},
+     "must_not": {"promote_positive_edge": true, "entities": ["rollout", "confusion", "staff"], "notes": "cue verb 'produced' with abstract endpoints"}},
+    {"id": "M10", "check": "control", "evidence": "Glowline Metrics defines the P50 Intake Latency target.",
+     "expect": {"type": "canonical", "subject": "Glowline Metrics", "predicate": "defines", "object": "P50 Intake Latency", "status": "ASSERTED_TRUE"},
+     "must_not": {"entities": ["P50 Intake Latency target (with the word 'target')"], "notes": "head trim: the entity is P50 Intake Latency"}}
+  ],
+  "negative_entities": ["that", "It", "two dashboards", "several broken records", "One document", "temporary coordination work", "A separate audit", "confusion", "staff", "auditors", "team", "rollout", "spring sweep", "quarter", "intake", "summaries", "June 2030"],
+  "invariants": [
+    "positive graph from this document contains at most: M01, M10, and optionally M07 — nothing else",
+    "graph node count from this document <= 7 named entities (Quartzline Analytics, Redlark, Pinion API, Sable Index, Glowline Metrics, P50 Intake Latency, + optional none)",
+    "no doc-local entity is created without type evidence (the UNRESOLVED lane exists for a reason)"
+  ]
+}

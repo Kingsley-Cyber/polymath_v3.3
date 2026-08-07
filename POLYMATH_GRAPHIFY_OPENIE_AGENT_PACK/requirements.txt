@@ -1,0 +1,10 @@
+# Core orchestration pack requirements only.
+# Repo-specific runtime dependencies are detected by the target repository.
+PyYAML>=6.0
+jsonschema>=4.0
+
+# Target refactor dependencies. Install in the repo environment when executing the refactor.
+# gliner>=0.3.0
+# triplet-extract
+# spacy[apple]
+# wordfreq

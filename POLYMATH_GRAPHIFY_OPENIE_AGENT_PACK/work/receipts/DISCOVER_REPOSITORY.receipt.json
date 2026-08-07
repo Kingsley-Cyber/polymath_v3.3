@@ -1,0 +1,16 @@
+{
+  "errors": [],
+  "files_changed": [],
+  "finished_at": "2026-08-06T23:19:29.331038+00:00",
+  "inputs_hash": "",
+  "metrics": {
+    "capability_count": 13,
+    "hit_count": 7038
+  },
+  "outputs_hash": "",
+  "stage": "DISCOVER_REPOSITORY",
+  "started_at": "2026-08-06T23:18:38.201002+00:00",
+  "status": "PASSED",
+  "tests": [],
+  "warnings": []
+}

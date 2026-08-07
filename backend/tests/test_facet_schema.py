@@ -13,6 +13,7 @@ from services.facets import (
     normalize_facet_id,
 )
 from services.ingestion.worker import _build_child_dicts, _build_parent_dicts
+from services.storage import qdrant_writer
 
 
 def _parent(parent_id="p1", heading_path=None):
@@ -303,7 +304,13 @@ async def test_matching_ingest_facets_finds_query_named_doc_facets():
 
 
 @pytest.mark.asyncio
-async def test_vector_facets_activate_semantic_near_doc_when_lexical_is_thin():
+async def test_vector_facets_activate_semantic_near_doc_when_lexical_is_thin(
+    monkeypatch,
+):
+    # Pins the quantized search-param path; q9 ships with quantization off.
+    monkeypatch.setattr(
+        qdrant_writer.settings, "QDRANT_BINARY_QUANTIZATION_ENABLED", True
+    )
     profile = build_ingest_facet_profile(
         filename="Perceiving Others _ The Psychology of Interpersonal.md",
         doc_id="doc-perceiving",

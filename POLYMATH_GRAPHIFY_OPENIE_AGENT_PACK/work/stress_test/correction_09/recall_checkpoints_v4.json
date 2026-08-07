@@ -1,0 +1,411 @@
+{
+  "assertions": [
+    {
+      "correct_canonical_assertion_promoted": false,
+      "correct_surface_proposition_generated": false,
+      "endpoint_pair_generated": false,
+      "id": "T001"
+    },
+    {
+      "correct_canonical_assertion_promoted": false,
+      "correct_surface_proposition_generated": false,
+      "endpoint_pair_generated": false,
+      "id": "T002"
+    },
+    {
+      "correct_canonical_assertion_promoted": false,
+      "correct_surface_proposition_generated": false,
+      "endpoint_pair_generated": false,
+      "id": "T003"
+    },
+    {
+      "correct_canonical_assertion_promoted": true,
+      "correct_surface_proposition_generated": true,
+      "endpoint_pair_generated": true,
+      "id": "T004"
+    },
+    {
+      "correct_canonical_assertion_promoted": true,
+      "correct_surface_proposition_generated": false,
+      "endpoint_pair_generated": true,
+      "id": "T005"
+    },
+    {
+      "correct_canonical_assertion_promoted": true,
+      "correct_surface_proposition_generated": true,
+      "endpoint_pair_generated": true,
+      "id": "T006"
+    },
+    {
+      "correct_canonical_assertion_promoted": true,
+      "correct_surface_proposition_generated": true,
+      "endpoint_pair_generated": true,
+      "id": "T007"
+    },
+    {
+      "correct_canonical_assertion_promoted": true,
+      "correct_surface_proposition_generated": true,
+      "endpoint_pair_generated": true,
+      "id": "T008"
+    },
+    {
+      "correct_canonical_assertion_promoted": true,
+      "correct_surface_proposition_generated": true,
+      "endpoint_pair_generated": true,
+      "id": "T009"
+    },
+    {
+      "correct_canonical_assertion_promoted": true,
+      "correct_surface_proposition_generated": true,
+      "endpoint_pair_generated": true,
+      "id": "T010"
+    },
+    {
+      "correct_canonical_assertion_promoted": true,
+      "correct_surface_proposition_generated": true,
+      "endpoint_pair_generated": true,
+      "id": "T011"
+    },
+    {
+      "correct_canonical_assertion_promoted": true,
+      "correct_surface_proposition_generated": true,
+      "endpoint_pair_generated": true,
+      "id": "T012"
+    },
+    {
+      "correct_canonical_assertion_promoted": true,
+      "correct_surface_proposition_generated": true,
+      "endpoint_pair_generated": true,
+      "id": "T013"
+    },
+    {
+      "correct_canonical_assertion_promoted": true,
+      "correct_surface_proposition_generated": true,
+      "endpoint_pair_generated": true,
+      "id": "T014"
+    },
+    {
+      "correct_canonical_assertion_promoted": false,
+      "correct_surface_proposition_generated": false,
+      "endpoint_pair_generated": false,
+      "id": "T015"
+    },
+    {
+      "correct_canonical_assertion_promoted": true,
+      "correct_surface_proposition_generated": true,
+      "endpoint_pair_generated": true,
+      "id": "T016"
+    },
+    {
+      "correct_canonical_assertion_promoted": true,
+      "correct_surface_proposition_generated": true,
+      "endpoint_pair_generated": true,
+      "id": "T017"
+    },
+    {
+      "correct_canonical_assertion_promoted": true,
+      "correct_surface_proposition_generated": true,
+      "endpoint_pair_generated": true,
+      "id": "T018"
+    },
+    {
+      "correct_canonical_assertion_promoted": true,
+      "correct_surface_proposition_generated": true,
+      "endpoint_pair_generated": true,
+      "id": "T019"
+    },
+    {
+      "correct_canonical_assertion_promoted": true,
+      "correct_surface_proposition_generated": true,
+      "endpoint_pair_generated": true,
+      "id": "T020"
+    },
+    {
+      "correct_canonical_assertion_promoted": true,
+      "correct_surface_proposition_generated": true,
+      "endpoint_pair_generated": true,
+      "id": "T021"
+    },
+    {
+      "correct_canonical_assertion_promoted": true,
+      "correct_surface_proposition_generated": true,
+      "endpoint_pair_generated": true,
+      "id": "T022"
+    },
+    {
+      "correct_canonical_assertion_promoted": true,
+      "correct_surface_proposition_generated": true,
+      "endpoint_pair_generated": true,
+      "id": "T023"
+    },
+    {
+      "correct_canonical_assertion_promoted": true,
+      "correct_surface_proposition_generated": true,
+      "endpoint_pair_generated": true,
+      "id": "T024"
+    },
+    {
+      "correct_canonical_assertion_promoted": true,
+      "correct_surface_proposition_generated": true,
+      "endpoint_pair_generated": true,
+      "id": "T025"
+    },
+    {
+      "correct_canonical_assertion_promoted": false,
+      "correct_surface_proposition_generated": false,
+      "endpoint_pair_generated": false,
+      "id": "T026"
+    },
+    {
+      "correct_canonical_assertion_promoted": false,
+      "correct_surface_proposition_generated": false,
+      "endpoint_pair_generated": false,
+      "id": "T027"
+    },
+    {
+      "correct_canonical_assertion_promoted": false,
+      "correct_surface_proposition_generated": false,
+      "endpoint_pair_generated": false,
+      "id": "T028"
+    },
+    {
+      "correct_canonical_assertion_promoted": false,
+      "correct_surface_proposition_generated": false,
+      "endpoint_pair_generated": false,
+      "id": "T029"
+    },
+    {
+      "correct_canonical_assertion_promoted": false,
+      "correct_surface_proposition_generated": false,
+      "endpoint_pair_generated": false,
+      "id": "T030"
+    },
+    {
+      "correct_canonical_assertion_promoted": true,
+      "correct_surface_proposition_generated": true,
+      "endpoint_pair_generated": true,
+      "id": "T031"
+    },
+    {
+      "correct_canonical_assertion_promoted": true,
+      "correct_surface_proposition_generated": true,
+      "endpoint_pair_generated": true,
+      "id": "T032"
+    },
+    {
+      "correct_canonical_assertion_promoted": true,
+      "correct_surface_proposition_generated": true,
+      "endpoint_pair_generated": true,
+      "id": "T033"
+    },
+    {
+      "correct_canonical_assertion_promoted": true,
+      "correct_surface_proposition_generated": true,
+      "endpoint_pair_generated": true,
+      "id": "T034"
+    },
+    {
+      "correct_canonical_assertion_promoted": true,
+      "correct_surface_proposition_generated": true,
+      "endpoint_pair_generated": true,
+      "id": "T035"
+    },
+    {
+      "correct_canonical_assertion_promoted": true,
+      "correct_surface_proposition_generated": true,
+      "endpoint_pair_generated": true,
+      "id": "T036"
+    },
+    {
+      "correct_canonical_assertion_promoted": true,
+      "correct_surface_proposition_generated": true,
+      "endpoint_pair_generated": true,
+      "id": "T037"
+    },
+    {
+      "correct_canonical_assertion_promoted": true,
+      "correct_surface_proposition_generated": true,
+      "endpoint_pair_generated": true,
+      "id": "T038"
+    },
+    {
+      "correct_canonical_assertion_promoted": true,
+      "correct_surface_proposition_generated": true,
+      "endpoint_pair_generated": true,
+      "id": "T039"
+    },
+    {
+      "correct_canonical_assertion_promoted": true,
+      "correct_surface_proposition_generated": true,
+      "endpoint_pair_generated": true,
+      "id": "T040"
+    },
+    {
+      "correct_canonical_assertion_promoted": true,
+      "correct_surface_proposition_generated": true,
+      "endpoint_pair_generated": true,
+      "id": "T041"
+    },
+    {
+      "correct_canonical_assertion_promoted": true,
+      "correct_surface_proposition_generated": true,
+      "endpoint_pair_generated": true,
+      "id": "T042"
+    },
+    {
+      "correct_canonical_assertion_promoted": false,
+      "correct_surface_proposition_generated": false,
+      "endpoint_pair_generated": false,
+      "id": "T043"
+    },
+    {
+      "correct_canonical_assertion_promoted": true,
+      "correct_surface_proposition_generated": true,
+      "endpoint_pair_generated": true,
+      "id": "T044"
+    },
+    {
+      "correct_canonical_assertion_promoted": true,
+      "correct_surface_proposition_generated": true,
+      "endpoint_pair_generated": true,
+      "id": "T045"
+    },
+    {
+      "correct_canonical_assertion_promoted": true,
+      "correct_surface_proposition_generated": true,
+      "endpoint_pair_generated": true,
+      "id": "T046"
+    },
+    {
+      "correct_canonical_assertion_promoted": true,
+      "correct_surface_proposition_generated": true,
+      "endpoint_pair_generated": true,
+      "id": "T047"
+    },
+    {
+      "correct_canonical_assertion_promoted": true,
+      "correct_surface_proposition_generated": true,
+      "endpoint_pair_generated": true,
+      "id": "T048"
+    },
+    {
+      "correct_canonical_assertion_promoted": false,
+      "correct_surface_proposition_generated": true,
+      "endpoint_pair_generated": true,
+      "id": "T049"
+    },
+    {
+      "correct_canonical_assertion_promoted": true,
+      "correct_surface_proposition_generated": true,
+      "endpoint_pair_generated": true,
+      "id": "T050"
+    },
+    {
+      "correct_canonical_assertion_promoted": true,
+      "correct_surface_proposition_generated": true,
+      "endpoint_pair_generated": true,
+      "id": "T051"
+    },
+    {
+      "correct_canonical_assertion_promoted": true,
+      "correct_surface_proposition_generated": true,
+      "endpoint_pair_generated": true,
+      "id": "T052"
+    },
+    {
+      "correct_canonical_assertion_promoted": true,
+      "correct_surface_proposition_generated": true,
+      "endpoint_pair_generated": true,
+      "id": "T053"
+    },
+    {
+      "correct_canonical_assertion_promoted": true,
+      "correct_surface_proposition_generated": true,
+      "endpoint_pair_generated": true,
+      "id": "T054"
+    },
+    {
+      "correct_canonical_assertion_promoted": true,
+      "correct_surface_proposition_generated": true,
+      "endpoint_pair_generated": true,
+      "id": "T055"
+    },
+    {
+      "correct_canonical_assertion_promoted": true,
+      "correct_surface_proposition_generated": true,
+      "endpoint_pair_generated": true,
+      "id": "T056"
+    },
+    {
+      "correct_canonical_assertion_promoted": true,
+      "correct_surface_proposition_generated": true,
+      "endpoint_pair_generated": true,
+      "id": "T057"
+    },
+    {
+      "correct_canonical_assertion_promoted": false,
+      "correct_surface_proposition_generated": false,
+      "endpoint_pair_generated": false,
+      "id": "T058"
+    },
+    {
+      "correct_canonical_assertion_promoted": true,
+      "correct_surface_proposition_generated": true,
+      "endpoint_pair_generated": true,
+      "id": "T059"
+    },
+    {
+      "correct_canonical_assertion_promoted": true,
+      "correct_surface_proposition_generated": true,
+      "endpoint_pair_generated": true,
+      "id": "T060"
+    },
+    {
+      "correct_canonical_assertion_promoted": true,
+      "correct_surface_proposition_generated": true,
+      "endpoint_pair_generated": true,
+      "id": "T061"
+    },
+    {
+      "correct_canonical_assertion_promoted": true,
+      "correct_surface_proposition_generated": true,
+      "endpoint_pair_generated": true,
+      "id": "T062"
+    },
+    {
+      "correct_canonical_assertion_promoted": true,
+      "correct_surface_proposition_generated": true,
+      "endpoint_pair_generated": true,
+      "id": "T063"
+    },
+    {
+      "correct_canonical_assertion_promoted": false,
+      "correct_surface_proposition_generated": true,
+      "endpoint_pair_generated": true,
+      "id": "T064"
+    },
+    {
+      "correct_canonical_assertion_promoted": false,
+      "correct_surface_proposition_generated": true,
+      "endpoint_pair_generated": true,
+      "id": "T065"
+    },
+    {
+      "correct_canonical_assertion_promoted": false,
+      "correct_surface_proposition_generated": true,
+      "endpoint_pair_generated": true,
+      "id": "T066"
+    }
+  ],
+  "summary": {
+    "correct_canonical_assertion_promoted": 51,
+    "correct_surface_proposition_generated": 54,
+    "endpoint_pair_generated": 55,
+    "gold_total": 66,
+    "recall": {
+      "correct_canonical_assertion_promoted": 0.7727272727272727,
+      "correct_surface_proposition_generated": 0.8181818181818182,
+      "endpoint_pair_generated": 0.8333333333333334
+    }
+  }
+}

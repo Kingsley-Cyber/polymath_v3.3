@@ -1,0 +1,61 @@
+{
+  "population": "61 matched frozen answer-key assertions",
+  "random_seed": 20260806,
+  "records": [
+    {
+      "id": "T033",
+      "gold": ["Graph Writer", "uses", "Neo4j"],
+      "prediction": ["graph writer", "uses", "neo4j"],
+      "match_class": "NORMALIZED_VARIANT",
+      "checkpoints": {
+        "endpoint_pair_generated": true,
+        "correct_surface_proposition_generated": true,
+        "correct_canonical_assertion_promoted": true
+      }
+    },
+    {
+      "id": "T022",
+      "gold": ["Data Retention Guide", "defines", "Retention Policy"],
+      "prediction": ["data retention guide", "defines", "retention policy"],
+      "match_class": "NORMALIZED_VARIANT",
+      "checkpoints": {
+        "endpoint_pair_generated": true,
+        "correct_surface_proposition_generated": true,
+        "correct_canonical_assertion_promoted": true
+      }
+    },
+    {
+      "id": "T036",
+      "gold": ["Query Service", "uses", "Neo4j"],
+      "prediction": ["query service", "uses", "neo4j"],
+      "match_class": "NORMALIZED_VARIANT",
+      "checkpoints": {
+        "endpoint_pair_generated": true,
+        "correct_surface_proposition_generated": true,
+        "correct_canonical_assertion_promoted": true
+      }
+    },
+    {
+      "id": "T032",
+      "gold": ["Graph Writer", "consumes", "Validated Assertion Batch"],
+      "prediction": ["graph writer", "consumes", "validated assertion batches"],
+      "match_class": "NORMALIZED_VARIANT",
+      "checkpoints": {
+        "endpoint_pair_generated": true,
+        "correct_surface_proposition_generated": true,
+        "correct_canonical_assertion_promoted": true
+      }
+    },
+    {
+      "id": "T005",
+      "gold": ["Neo4j", "part_of", "Graph Projection Layer"],
+      "prediction": ["neo4j", "part_of", "graph projection layer"],
+      "match_class": "NORMALIZED_VARIANT",
+      "checkpoints": {
+        "endpoint_pair_generated": true,
+        "correct_surface_proposition_generated": false,
+        "correct_canonical_assertion_promoted": true
+      }
+    }
+  ]
+}

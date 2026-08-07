@@ -21,6 +21,7 @@ from qdrant_client import AsyncQdrantClient
 from qdrant_client import models as qmodels
 
 from services.storage.qdrant_writer import _col_for_corpus, payload_text_contract
+from services.storage.record_status import with_active_records
 from services.ingestion.section_classifier import NOISY_KINDS
 
 logger = logging.getLogger(__name__)
@@ -50,7 +51,11 @@ async def _expected_child_count(
         ]
     if collection_kind == "hrag":
         query["source_tier"] = {"$in": list(_HRAG_CHILD_TIERS)}
-    return int(await db["chunks"].count_documents(query))
+    # Active-record scoping is mandatory: doc_id is content-derived, so a
+    # delete → re-ingest of the same file resurrects the document while old
+    # chunk tombstones linger. Counting them over-expects Qdrant points that
+    # no writer will ever produce and fails verification forever.
+    return int(await db["chunks"].count_documents(with_active_records(query)))
 
 
 def expected_summary_points_from_state(write_state: Any) -> int | None:
@@ -101,7 +106,7 @@ async def _expected_summary_count(
         return stamped
     projection = {"_id": 0, "parent_id": 1, "summary": 1, "chunk_kind": 1}
     parents = await db["parent_chunks"].find(
-        {"doc_id": doc_id, "corpus_id": corpus_id},
+        with_active_records({"doc_id": doc_id, "corpus_id": corpus_id}),
         projection,
     ).to_list(length=None)
     if not parents:
@@ -134,7 +139,7 @@ async def _expected_qdrant_texts(
     """Return canonical Mongo text keyed by Qdrant chunk_id/summary id."""
     expected: dict[str, str] = {}
     rows = await db["chunks"].find(
-        {"doc_id": doc_id, "corpus_id": corpus_id},
+        with_active_records({"doc_id": doc_id, "corpus_id": corpus_id}),
         {"_id": 0, "chunk_id": 1, "text": 1},
     ).to_list(length=None)
     for row in rows:
@@ -143,7 +148,7 @@ async def _expected_qdrant_texts(
             expected[chunk_id] = str(row.get("text") or "")
 
     parents = await db["parent_chunks"].find(
-        {"doc_id": doc_id, "corpus_id": corpus_id},
+        with_active_records({"doc_id": doc_id, "corpus_id": corpus_id}),
         {"_id": 0},
     ).to_list(length=None)
     if not parents:
@@ -317,9 +322,10 @@ async def verify_ingest(
     """
     errors: list[str] = []
 
-    # 1. Mongo chunk count for this doc.
+    # 1. Mongo chunk count for this doc (active records only — tombstones
+    # from a prior delete of the same content-derived doc_id don't count).
     mongo_chunk_count = await db["chunks"].count_documents(
-        {"doc_id": doc_id, "corpus_id": corpus_id}
+        with_active_records({"doc_id": doc_id, "corpus_id": corpus_id})
     )
     if mongo_chunk_count == 0:
         errors.append(

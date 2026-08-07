@@ -37,7 +37,11 @@ FAILED_STATUSES = {
 TERMINAL_STATUSES = {"succeeded", "skipped"}
 SUPERSEDABLE_STATUSES = ACTIVE_STATUSES | FAILED_STATUSES
 FAILED_INGEST_STAGES = {"failed", "setup_failed", "chunk_failed"}
-TERMINAL_SKIP_INGEST_STAGES = {"skipped_duplicate", "skipped_nonsemantic"}
+TERMINAL_SKIP_INGEST_STAGES = {
+    "skipped_duplicate",
+    "skipped_nonsemantic",
+    "unsupported_by_policy",
+}
 RUNNABLE_STATUSES = ("queued",)
 EXECUTOR_BACKED_KINDS = {
     "persist_document",

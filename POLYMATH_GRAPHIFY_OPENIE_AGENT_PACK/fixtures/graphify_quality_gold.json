@@ -1,0 +1,605 @@
+{
+  "alias_groups": [
+    [
+      "Retrieval-Augmented Generation",
+      "RAG"
+    ]
+  ],
+  "entities": [
+    {
+      "end": 10,
+      "id": "ent:24",
+      "label": "Process",
+      "start": 2,
+      "text": "Graphify"
+    },
+    {
+      "end": 35,
+      "id": "ent:1",
+      "label": "Software",
+      "start": 28,
+      "text": "MongoDB"
+    },
+    {
+      "end": 75,
+      "id": "ent:7",
+      "label": "Service",
+      "start": 69,
+      "text": "Qdrant"
+    },
+    {
+      "end": 114,
+      "id": "ent:12",
+      "label": "Software",
+      "start": 109,
+      "text": "Neo4j"
+    },
+    {
+      "end": 156,
+      "id": "ent:2",
+      "label": "Software",
+      "start": 149,
+      "text": "MongoDB"
+    },
+    {
+      "end": 190,
+      "id": "ent:15",
+      "label": "Software",
+      "start": 183,
+      "text": "GLiNER2"
+    },
+    {
+      "end": 272,
+      "id": "ent:18",
+      "label": "Library",
+      "start": 257,
+      "text": "triplet-extract"
+    },
+    {
+      "end": 356,
+      "id": "ent:20",
+      "label": "Software",
+      "start": 348,
+      "text": "Polymath"
+    },
+    {
+      "end": 373,
+      "id": "ent:25",
+      "label": "Process",
+      "start": 365,
+      "text": "Graphify"
+    },
+    {
+      "end": 470,
+      "id": "ent:33",
+      "label": "Concept",
+      "start": 440,
+      "text": "Retrieval-Augmented Generation"
+    },
+    {
+      "end": 475,
+      "id": "ent:35",
+      "label": "Concept",
+      "start": 472,
+      "text": "RAG"
+    },
+    {
+      "end": 533,
+      "id": "ent:36",
+      "label": "Concept",
+      "start": 530,
+      "text": "RAG"
+    },
+    {
+      "end": 602,
+      "id": "ent:8",
+      "label": "Service",
+      "start": 596,
+      "text": "Qdrant"
+    },
+    {
+      "end": 618,
+      "id": "ent:39",
+      "label": "Concept",
+      "start": 614,
+      "text": "HNSW"
+    },
+    {
+      "end": 676,
+      "id": "ent:3",
+      "label": "Software",
+      "start": 669,
+      "text": "MongoDB"
+    },
+    {
+      "end": 686,
+      "id": "ent:13",
+      "label": "Software",
+      "start": 681,
+      "text": "Neo4j"
+    },
+    {
+      "end": 731,
+      "id": "ent:4",
+      "label": "Software",
+      "start": 724,
+      "text": "MongoDB"
+    },
+    {
+      "end": 965,
+      "id": "ent:9",
+      "label": "Service",
+      "start": 959,
+      "text": "Qdrant"
+    },
+    {
+      "end": 973,
+      "id": "ent:10",
+      "label": "Service",
+      "start": 967,
+      "text": "Qdrant"
+    },
+    {
+      "end": 992,
+      "id": "ent:5",
+      "label": "Software",
+      "start": 985,
+      "text": "MongoDB"
+    },
+    {
+      "end": 1066,
+      "id": "ent:16",
+      "label": "Software",
+      "start": 1059,
+      "text": "GLiNER2"
+    },
+    {
+      "end": 1096,
+      "id": "ent:40",
+      "label": "Library",
+      "start": 1090,
+      "text": "pandas"
+    },
+    {
+      "end": 1138,
+      "id": "ent:41",
+      "label": "Library",
+      "start": 1132,
+      "text": "pandas"
+    },
+    {
+      "end": 1179,
+      "id": "ent:42",
+      "label": "Org",
+      "start": 1173,
+      "text": "Oracle"
+    },
+    {
+      "end": 1189,
+      "id": "ent:43",
+      "label": "Software",
+      "start": 1185,
+      "text": "Java"
+    },
+    {
+      "end": 1200,
+      "id": "ent:44",
+      "label": "Org",
+      "start": 1195,
+      "text": "Apple"
+    },
+    {
+      "end": 1255,
+      "id": "ent:45",
+      "label": "Library",
+      "start": 1249,
+      "text": "Python"
+    },
+    {
+      "end": 1687,
+      "id": "ent:26",
+      "label": "Process",
+      "start": 1679,
+      "text": "Graphify"
+    },
+    {
+      "end": 1813,
+      "id": "ent:14",
+      "label": "Software",
+      "start": 1808,
+      "text": "Neo4j"
+    },
+    {
+      "end": 1898,
+      "id": "ent:27",
+      "label": "Process",
+      "start": 1890,
+      "text": "Graphify"
+    },
+    {
+      "end": 1935,
+      "id": "ent:46",
+      "label": "Library",
+      "start": 1929,
+      "text": "Python"
+    },
+    {
+      "end": 1965,
+      "id": "ent:47",
+      "label": "Process",
+      "start": 1947,
+      "text": "Predicate Compiler"
+    },
+    {
+      "end": 2054,
+      "id": "ent:48",
+      "label": "Process",
+      "start": 2036,
+      "text": "Predicate Compiler"
+    },
+    {
+      "end": 2138,
+      "id": "ent:11",
+      "label": "Service",
+      "start": 2132,
+      "text": "Qdrant"
+    },
+    {
+      "end": 2210,
+      "id": "ent:49",
+      "label": "Library",
+      "start": 2193,
+      "text": "DependencyMatcher"
+    },
+    {
+      "end": 2288,
+      "id": "ent:50",
+      "label": "Library",
+      "start": 2274,
+      "text": "FrameExtractor"
+    },
+    {
+      "end": 2327,
+      "id": "ent:51",
+      "label": "Service",
+      "start": 2321,
+      "text": "GitHub"
+    },
+    {
+      "end": 2353,
+      "id": "ent:54",
+      "label": "Org",
+      "start": 2344,
+      "text": "Microsoft"
+    },
+    {
+      "end": 2364,
+      "id": "ent:55",
+      "label": "Org",
+      "start": 2355,
+      "text": "Microsoft"
+    },
+    {
+      "end": 2380,
+      "id": "ent:52",
+      "label": "Service",
+      "start": 2374,
+      "text": "GitHub"
+    },
+    {
+      "end": 2396,
+      "id": "ent:53",
+      "label": "Service",
+      "start": 2390,
+      "text": "GitHub"
+    },
+    {
+      "end": 2422,
+      "id": "ent:56",
+      "label": "Org",
+      "start": 2413,
+      "text": "Microsoft"
+    },
+    {
+      "end": 2473,
+      "id": "ent:17",
+      "label": "Software",
+      "start": 2466,
+      "text": "GLiNER2"
+    },
+    {
+      "end": 2494,
+      "id": "ent:19",
+      "label": "Library",
+      "start": 2479,
+      "text": "triplet-extract"
+    },
+    {
+      "end": 2504,
+      "id": "ent:28",
+      "label": "Process",
+      "start": 2496,
+      "text": "Graphify"
+    },
+    {
+      "end": 2522,
+      "id": "ent:57",
+      "label": "Document",
+      "start": 2514,
+      "text": "Markdown"
+    },
+    {
+      "end": 2820,
+      "id": "ent:6",
+      "label": "Software",
+      "start": 2813,
+      "text": "MongoDB"
+    },
+    {
+      "end": 2914,
+      "id": "ent:34",
+      "label": "Concept",
+      "start": 2884,
+      "text": "Retrieval-Augmented Generation"
+    },
+    {
+      "end": 2919,
+      "id": "ent:37",
+      "label": "Concept",
+      "start": 2916,
+      "text": "RAG"
+    },
+    {
+      "end": 2950,
+      "id": "ent:38",
+      "label": "Concept",
+      "start": 2947,
+      "text": "RAG"
+    },
+    {
+      "end": 3245,
+      "id": "ent:59",
+      "label": "Software",
+      "start": 3240,
+      "text": "Linux"
+    },
+    {
+      "end": 3252,
+      "id": "ent:60",
+      "label": "Software",
+      "start": 3247,
+      "text": "Linux"
+    },
+    {
+      "end": 3295,
+      "id": "ent:58",
+      "label": "Document",
+      "start": 3291,
+      "text": "JSON"
+    },
+    {
+      "end": 3416,
+      "id": "ent:64",
+      "label": "Metric",
+      "start": 3409,
+      "text": "latency"
+    },
+    {
+      "end": 3441,
+      "id": "ent:61",
+      "label": "Location",
+      "start": 3434,
+      "text": "El Paso"
+    },
+    {
+      "end": 3468,
+      "id": "ent:29",
+      "label": "Process",
+      "start": 3460,
+      "text": "Graphify"
+    },
+    {
+      "end": 3494,
+      "id": "ent:62",
+      "label": "Location",
+      "start": 3487,
+      "text": "El Paso"
+    },
+    {
+      "end": 3552,
+      "id": "ent:63",
+      "label": "Event",
+      "start": 3539,
+      "text": "July 13, 2026"
+    },
+    {
+      "end": 3625,
+      "id": "ent:21",
+      "label": "Software",
+      "start": 3617,
+      "text": "Polymath"
+    },
+    {
+      "end": 3645,
+      "id": "ent:30",
+      "label": "Process",
+      "start": 3637,
+      "text": "Graphify"
+    },
+    {
+      "end": 3699,
+      "id": "ent:22",
+      "label": "Software",
+      "start": 3691,
+      "text": "Polymath"
+    },
+    {
+      "end": 3722,
+      "id": "ent:31",
+      "label": "Process",
+      "start": 3714,
+      "text": "Graphify"
+    },
+    {
+      "end": 3732,
+      "id": "ent:23",
+      "label": "Software",
+      "start": 3724,
+      "text": "Polymath"
+    },
+    {
+      "end": 3755,
+      "id": "ent:32",
+      "label": "Process",
+      "start": 3747,
+      "text": "Graphify"
+    }
+  ],
+  "fixture": "graphify_quality_fixture.md",
+  "negative_examples": [
+    {
+      "reason": "generic noun trap",
+      "surface": "successor"
+    },
+    {
+      "reason": "generic noun trap",
+      "surface": "directive"
+    },
+    {
+      "reason": "generic phrase trap",
+      "surface": "this approach"
+    },
+    {
+      "reason": "generic edge trap",
+      "surface": "owner -> owns -> end goal"
+    },
+    {
+      "reason": "generic object trap",
+      "surface": "Taylor & Francis -> produces -> information"
+    }
+  ],
+  "notes": "Exact offsets generated by pack builder.",
+  "relations": [
+    {
+      "decision": "FACT",
+      "object": "canonical documents",
+      "predicate": "stores",
+      "subject": "MongoDB"
+    },
+    {
+      "decision": "FACT",
+      "object": "embeddings",
+      "predicate": "stores",
+      "subject": "Qdrant"
+    },
+    {
+      "decision": "FACT",
+      "object": "accepted assertions",
+      "predicate": "projects",
+      "subject": "Neo4j"
+    },
+    {
+      "decision": "FACT",
+      "object": "span-based entity extractor",
+      "predicate": "defines",
+      "subject": "GLiNER2"
+    },
+    {
+      "decision": "FACT",
+      "object": "Graphify",
+      "predicate": "defines",
+      "subject": "Polymath"
+    },
+    {
+      "decision": "FACT",
+      "object": "retriever",
+      "predicate": "uses",
+      "subject": "RAG"
+    },
+    {
+      "decision": "FACT",
+      "object": "HNSW",
+      "predicate": "depends_on",
+      "subject": "Qdrant"
+    },
+    {
+      "decision": "FACT",
+      "object": "rebuildable projections",
+      "predicate": "supports",
+      "subject": "MongoDB"
+    },
+    {
+      "decision": "FACT",
+      "object": "spaCy and Python rules",
+      "predicate": "derived_from",
+      "subject": "Graphify"
+    },
+    {
+      "decision": "FACT",
+      "object": "GitHub",
+      "predicate": "owns",
+      "subject": "Microsoft"
+    },
+    {
+      "decision": "FACT",
+      "object": "Microsoft",
+      "predicate": "owns_inverse",
+      "subject": "GitHub"
+    },
+    {
+      "decision": "FACT",
+      "object": "Markdown files",
+      "predicate": "consumes",
+      "subject": "Graphify"
+    },
+    {
+      "decision": "FACT",
+      "object": "JSON documents",
+      "predicate": "consumes",
+      "subject": "API"
+    },
+    {
+      "decision": "FACT",
+      "object": "normalized records",
+      "predicate": "produces",
+      "subject": "API"
+    },
+    {
+      "decision": "FACT",
+      "object": "public incident reports",
+      "predicate": "derived_from",
+      "subject": "dataset"
+    },
+    {
+      "decision": "FACT",
+      "object": "latency",
+      "predicate": "measures",
+      "subject": "metric"
+    },
+    {
+      "decision": "FACT",
+      "object": "assertion status",
+      "predicate": "defines",
+      "subject": "document"
+    },
+    {
+      "decision": "FACT",
+      "object": "Graphify",
+      "predicate": "related_to",
+      "subject": "Polymath"
+    },
+    {
+      "decision": "OPEN_RELATION",
+      "object": "semantic retrieval",
+      "predicate": "powers",
+      "subject": "Qdrant"
+    },
+    {
+      "attributed_to": "authors",
+      "decision": "QUALIFIED_CLAIM",
+      "object": "recall",
+      "predicate": "improves",
+      "subject": "Graphify"
+    }
+  ]
+}

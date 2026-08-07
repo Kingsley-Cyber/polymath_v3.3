@@ -1,0 +1,695 @@
+{
+  "counts": {
+    "ARGUMENT_ALIGNMENT": 0,
+    "ATTRIBUTION": 0,
+    "CONDITIONAL_SCOPE": 0,
+    "DIRECTION": 0,
+    "ENTITY_TYPE": 3,
+    "GATE_POLICY": 4,
+    "MISSING_PAIR": 6,
+    "MODALITY": 0,
+    "POLARITY": 0,
+    "PREDICATE_MAPPING": 3
+  },
+  "failures": [
+    {
+      "checkpoints": {
+        "correct_canonical_assertion_promoted": false,
+        "correct_surface_proposition_generated": false,
+        "endpoint_pair_generated": false,
+        "id": "T001"
+      },
+      "failure_class": "ENTITY_TYPE",
+      "gold": {
+        "evidence": "Harbor accepts telemetry from industrial sensors deployed at a regional facility in El Paso.",
+        "id": "T001",
+        "object": "Industrial Sensor Telemetry",
+        "object_type": "Dataset",
+        "predicate": "consumes",
+        "subject": "Harbor",
+        "subject_type": "Software"
+      },
+      "id": "T001",
+      "matching_assertions": [],
+      "matching_candidates": [],
+      "reason": "canonical object endpoint was not available"
+    },
+    {
+      "checkpoints": {
+        "correct_canonical_assertion_promoted": false,
+        "correct_surface_proposition_generated": false,
+        "endpoint_pair_generated": false,
+        "id": "T002"
+      },
+      "failure_class": "MISSING_PAIR",
+      "gold": {
+        "evidence": "This chapter follows a fictional platform, Harbor, operated by Northstar Labs",
+        "id": "T002",
+        "object": "Harbor",
+        "object_type": "Software",
+        "predicate": "related_to",
+        "subject": "Northstar Labs",
+        "subject_type": "Org"
+      },
+      "id": "T002",
+      "matching_assertions": [],
+      "matching_candidates": [],
+      "reason": "both endpoint entities existed but no directed endpoint pair was generated"
+    },
+    {
+      "checkpoints": {
+        "correct_canonical_assertion_promoted": false,
+        "correct_surface_proposition_generated": false,
+        "endpoint_pair_generated": false,
+        "id": "T003"
+      },
+      "failure_class": "MISSING_PAIR",
+      "gold": {
+        "evidence": "MongoDB stores Harbor's canonical event evidence.",
+        "id": "T003",
+        "object": "MongoDB",
+        "object_type": "Software",
+        "predicate": "uses",
+        "subject": "Harbor",
+        "subject_type": "Software"
+      },
+      "id": "T003",
+      "matching_assertions": [],
+      "matching_candidates": [],
+      "reason": "both endpoint entities existed but no directed endpoint pair was generated"
+    },
+    {
+      "checkpoints": {
+        "correct_canonical_assertion_promoted": false,
+        "correct_surface_proposition_generated": false,
+        "endpoint_pair_generated": false,
+        "id": "T015"
+      },
+      "failure_class": "MISSING_PAIR",
+      "gold": {
+        "evidence": "The worker produces a Normalized Event",
+        "id": "T015",
+        "object": "Normalized Event",
+        "object_type": "Dataset",
+        "predicate": "produces",
+        "subject": "Ingestion Worker",
+        "subject_type": "Service"
+      },
+      "id": "T015",
+      "matching_assertions": [],
+      "matching_candidates": [],
+      "reason": "both endpoint entities existed but no directed endpoint pair was generated"
+    },
+    {
+      "checkpoints": {
+        "correct_canonical_assertion_promoted": false,
+        "correct_surface_proposition_generated": false,
+        "endpoint_pair_generated": false,
+        "id": "T026"
+      },
+      "failure_class": "MISSING_PAIR",
+      "gold": {
+        "evidence": "It also depends on the Schema Registry",
+        "id": "T026",
+        "object": "Schema Registry",
+        "object_type": "Service",
+        "predicate": "depends_on",
+        "subject": "Projection Worker",
+        "subject_type": "Service"
+      },
+      "id": "T026",
+      "matching_assertions": [],
+      "matching_candidates": [],
+      "reason": "both endpoint entities existed but no directed endpoint pair was generated"
+    },
+    {
+      "checkpoints": {
+        "correct_canonical_assertion_promoted": false,
+        "correct_surface_proposition_generated": false,
+        "endpoint_pair_generated": false,
+        "id": "T027"
+      },
+      "failure_class": "MISSING_PAIR",
+      "gold": {
+        "evidence": "They are consumed by the Validation Service",
+        "id": "T027",
+        "object": "Projection Assertions",
+        "object_type": "Dataset",
+        "predicate": "consumes",
+        "subject": "Validation Service",
+        "subject_type": "Service"
+      },
+      "id": "T027",
+      "matching_assertions": [],
+      "matching_candidates": [],
+      "reason": "both endpoint entities existed but no directed endpoint pair was generated"
+    },
+    {
+      "checkpoints": {
+        "correct_canonical_assertion_promoted": false,
+        "correct_surface_proposition_generated": false,
+        "endpoint_pair_generated": true,
+        "id": "T028"
+      },
+      "failure_class": "PREDICATE_MAPPING",
+      "gold": {
+        "evidence": "applies identity rules, predicate constraints, and provenance checks",
+        "id": "T028",
+        "object": "Identity Rules",
+        "object_type": "Concept",
+        "predicate": "uses",
+        "subject": "Validation Service",
+        "subject_type": "Service"
+      },
+      "id": "T028",
+      "matching_assertions": [],
+      "matching_candidates": [
+        {
+          "attribution": "",
+          "candidate_id": "syntax:surface-relation:07817d0e7e0db496b676dd9c",
+          "canonical_predicate": "consumes",
+          "evidence_text": "They are consumed by the **Validation Service**, which applies identity rules, predicate constraints, and provenance checks.",
+          "mapping_rule": "mapped:strict_dependency_cue:consume",
+          "mapping_status": "accepted",
+          "modality": "asserted",
+          "object": "identity rules",
+          "polarity": "positive",
+          "source": "syntax_fast_path",
+          "subject": "Validation Service",
+          "surface_relation": "consumed"
+        }
+      ],
+      "reason": "endpoint pair existed but the required surface or canonical predicate did not"
+    },
+    {
+      "checkpoints": {
+        "correct_canonical_assertion_promoted": false,
+        "correct_surface_proposition_generated": false,
+        "endpoint_pair_generated": false,
+        "id": "T029"
+      },
+      "failure_class": "ENTITY_TYPE",
+      "gold": {
+        "evidence": "applies identity rules, predicate constraints, and provenance checks",
+        "id": "T029",
+        "object": "Predicate Constraints",
+        "object_type": "Concept",
+        "predicate": "uses",
+        "subject": "Validation Service",
+        "subject_type": "Service"
+      },
+      "id": "T029",
+      "matching_assertions": [],
+      "matching_candidates": [],
+      "reason": "canonical object endpoint was not available"
+    },
+    {
+      "checkpoints": {
+        "correct_canonical_assertion_promoted": false,
+        "correct_surface_proposition_generated": false,
+        "endpoint_pair_generated": true,
+        "id": "T030"
+      },
+      "failure_class": "PREDICATE_MAPPING",
+      "gold": {
+        "evidence": "applies identity rules, predicate constraints, and provenance checks",
+        "id": "T030",
+        "object": "Provenance Checks",
+        "object_type": "Concept",
+        "predicate": "uses",
+        "subject": "Validation Service",
+        "subject_type": "Service"
+      },
+      "id": "T030",
+      "matching_assertions": [],
+      "matching_candidates": [
+        {
+          "attribution": "",
+          "candidate_id": "syntax:surface-relation:c5caa2f08aa49663a738b8bb",
+          "canonical_predicate": "consumes",
+          "evidence_text": "They are consumed by the **Validation Service**, which applies identity rules, predicate constraints, and provenance checks.",
+          "mapping_rule": "mapped:strict_dependency_cue:consume",
+          "mapping_status": "accepted",
+          "modality": "asserted",
+          "object": "provenance checks",
+          "polarity": "positive",
+          "source": "syntax_fast_path",
+          "subject": "Validation Service",
+          "surface_relation": "consumed"
+        }
+      ],
+      "reason": "endpoint pair existed but the required surface or canonical predicate did not"
+    },
+    {
+      "checkpoints": {
+        "correct_canonical_assertion_promoted": false,
+        "correct_surface_proposition_generated": false,
+        "endpoint_pair_generated": false,
+        "id": "T043"
+      },
+      "failure_class": "ENTITY_TYPE",
+      "gold": {
+        "evidence": "A small Redis deployment coordinates leases for projection jobs.",
+        "id": "T043",
+        "object": "Projection Job Coordination",
+        "object_type": "Process",
+        "predicate": "supports",
+        "subject": "Redis",
+        "subject_type": "Software"
+      },
+      "id": "T043",
+      "matching_assertions": [],
+      "matching_candidates": [],
+      "reason": "canonical object endpoint was not available"
+    },
+    {
+      "checkpoints": {
+        "correct_canonical_assertion_promoted": false,
+        "correct_surface_proposition_generated": true,
+        "endpoint_pair_generated": true,
+        "id": "T044"
+      },
+      "failure_class": "GATE_POLICY",
+      "gold": {
+        "evidence": "The Run Ledger is related to the Evidence Ledger",
+        "id": "T044",
+        "object": "Evidence Ledger",
+        "object_type": "Document",
+        "predicate": "related_to",
+        "subject": "Run Ledger",
+        "subject_type": "Document"
+      },
+      "id": "T044",
+      "matching_assertions": [
+        {
+          "attribution": "direct",
+          "candidate_id": "openie-predicate:0c0bd9112e207546133387d6",
+          "canonical_predicate": "related_to",
+          "evidence_text": "The Run Ledger is related to the **Evidence Ledger**, which records source identifiers and checksums for accepted evidence.",
+          "lane": "FACT",
+          "mapping_rule": "mapped:openie:strict_surface_recovery:explicit_related_surface:relate",
+          "mapping_status": "MAPPED",
+          "modality": "asserted",
+          "object": "evidence ledger",
+          "polarity": "positive",
+          "subject": "Run Ledger"
+        }
+      ],
+      "matching_candidates": [
+        {
+          "attribution": "direct",
+          "candidate_id": "openie-predicate:0c0bd9112e207546133387d6",
+          "canonical_predicate": "related_to",
+          "evidence_text": "The Run Ledger is related to the **Evidence Ledger**, which records source identifiers and checksums for accepted evidence.",
+          "mapping_rule": "mapped:openie:strict_surface_recovery:explicit_related_surface:relate",
+          "mapping_status": "MAPPED",
+          "modality": "asserted",
+          "object": "evidence ledger",
+          "polarity": "positive",
+          "source": null,
+          "subject": "Run Ledger",
+          "surface_relation": "is related to"
+        },
+        {
+          "attribution": "",
+          "candidate_id": "syntax:surface-relation:6f9e08dd29b78bce75f8c474",
+          "canonical_predicate": "related_to",
+          "evidence_text": "The Run Ledger is related to the **Evidence Ledger**, which records source identifiers and checksums for accepted evidence.",
+          "mapping_rule": "mapped:strict_dependency_cue:relate",
+          "mapping_status": "accepted",
+          "modality": "asserted",
+          "object": "Evidence Ledger",
+          "polarity": "positive",
+          "source": "syntax_fast_path",
+          "subject": "Run Ledger",
+          "surface_relation": "related"
+        },
+        {
+          "attribution": "direct",
+          "candidate_id": "syntax:surface-relation:1a337d8f34e35834415e24ac",
+          "canonical_predicate": null,
+          "evidence_text": "The Run Ledger is related to the **Evidence Ledger**, which records source identifiers and checksums for accepted evidence.",
+          "mapping_rule": "review:ambiguous_or_unmapped_predicate",
+          "mapping_status": "review",
+          "modality": "asserted",
+          "object": "Evidence Ledger",
+          "polarity": "positive",
+          "source": "syntax_fast_path",
+          "subject": "Run Ledger",
+          "surface_relation": "relate"
+        }
+      ],
+      "reason": "correct canonical candidate existed but was not promoted to Neo4j"
+    },
+    {
+      "checkpoints": {
+        "correct_canonical_assertion_promoted": false,
+        "correct_surface_proposition_generated": true,
+        "endpoint_pair_generated": true,
+        "id": "T057"
+      },
+      "failure_class": "PREDICATE_MAPPING",
+      "gold": {
+        "evidence": "The August Recovery Event occurred in El Paso",
+        "id": "T057",
+        "object": "El Paso",
+        "object_type": "Location",
+        "predicate": "related_to",
+        "subject": "August Recovery Event",
+        "subject_type": "Event"
+      },
+      "id": "T057",
+      "matching_assertions": [
+        {
+          "attribution": "direct",
+          "candidate_id": "openie-predicate:d8f07dff093cfbf37b3bf3be",
+          "canonical_predicate": null,
+          "evidence_text": "The **August Recovery Event** occurred in El Paso after a storage host failed during a maintenance window.",
+          "lane": "OPEN_RELATION",
+          "mapping_rule": "review:ambiguous_or_unmapped_predicate",
+          "mapping_status": "STORE_UNMAPPED_SURFACE_RELATION",
+          "modality": "asserted",
+          "object": "El Paso",
+          "polarity": "positive",
+          "subject": "the august recovery event"
+        },
+        {
+          "attribution": "direct",
+          "candidate_id": "openie-predicate:5982fbcb418372583d30e59d",
+          "canonical_predicate": null,
+          "evidence_text": "The **August Recovery Event** occurred in El Paso after a storage host failed during a maintenance window.",
+          "lane": "OPEN_RELATION",
+          "mapping_rule": "review:ambiguous_or_unmapped_predicate",
+          "mapping_status": "STORE_UNMAPPED_SURFACE_RELATION",
+          "modality": "asserted",
+          "object": "El Paso",
+          "polarity": "positive",
+          "subject": "August Recovery Event"
+        },
+        {
+          "attribution": "direct",
+          "candidate_id": "openie-predicate:ed5af720b8c6f91be99013f6",
+          "canonical_predicate": null,
+          "evidence_text": "The **August Recovery Event** occurred in El Paso after a storage host failed during a maintenance window.",
+          "lane": "OPEN_RELATION",
+          "mapping_rule": "review:ambiguous_or_unmapped_predicate",
+          "mapping_status": "STORE_UNMAPPED_SURFACE_RELATION",
+          "modality": "asserted",
+          "object": "El Paso",
+          "polarity": "positive",
+          "subject": "August Recovery Event"
+        }
+      ],
+      "matching_candidates": [
+        {
+          "attribution": "direct",
+          "candidate_id": "openie-predicate:5982fbcb418372583d30e59d",
+          "canonical_predicate": null,
+          "evidence_text": "The **August Recovery Event** occurred in El Paso after a storage host failed during a maintenance window.",
+          "mapping_rule": "review:ambiguous_or_unmapped_predicate",
+          "mapping_status": "STORE_UNMAPPED_SURFACE_RELATION",
+          "modality": "asserted",
+          "object": "El Paso",
+          "polarity": "positive",
+          "source": null,
+          "subject": "August Recovery Event",
+          "surface_relation": "occurred"
+        },
+        {
+          "attribution": "direct",
+          "candidate_id": "openie-predicate:d8f07dff093cfbf37b3bf3be",
+          "canonical_predicate": null,
+          "evidence_text": "The **August Recovery Event** occurred in El Paso after a storage host failed during a maintenance window.",
+          "mapping_rule": "review:ambiguous_or_unmapped_predicate",
+          "mapping_status": "STORE_UNMAPPED_SURFACE_RELATION",
+          "modality": "asserted",
+          "object": "El Paso",
+          "polarity": "positive",
+          "source": null,
+          "subject": "the august recovery event",
+          "surface_relation": "occurred in"
+        },
+        {
+          "attribution": "direct",
+          "candidate_id": "openie-predicate:ed5af720b8c6f91be99013f6",
+          "canonical_predicate": null,
+          "evidence_text": "The **August Recovery Event** occurred in El Paso after a storage host failed during a maintenance window.",
+          "mapping_rule": "review:ambiguous_or_unmapped_predicate",
+          "mapping_status": "STORE_UNMAPPED_SURFACE_RELATION",
+          "modality": "asserted",
+          "object": "El Paso",
+          "polarity": "positive",
+          "source": null,
+          "subject": "August Recovery Event",
+          "surface_relation": "occurred in"
+        },
+        {
+          "attribution": "direct",
+          "candidate_id": "syntax:surface-relation:bb52dc6548e8771dc540d6d9",
+          "canonical_predicate": null,
+          "evidence_text": "The **August Recovery Event** occurred in El Paso after a storage host failed during a maintenance window.",
+          "mapping_rule": "open:occur:frozen_policy_abstain",
+          "mapping_status": "open",
+          "modality": "asserted",
+          "object": "El Paso",
+          "polarity": "positive",
+          "source": "syntax_fast_path",
+          "subject": "August Recovery Event",
+          "surface_relation": "occur"
+        }
+      ],
+      "reason": "endpoint pair existed but the required surface or canonical predicate did not"
+    },
+    {
+      "checkpoints": {
+        "correct_canonical_assertion_promoted": false,
+        "correct_surface_proposition_generated": false,
+        "endpoint_pair_generated": false,
+        "id": "T058"
+      },
+      "failure_class": "MISSING_PAIR",
+      "gold": {
+        "evidence": "That event caused temporary query latency",
+        "id": "T058",
+        "object": "Temporary Query Latency",
+        "object_type": "Metric",
+        "predicate": "causes",
+        "subject": "August Recovery Event",
+        "subject_type": "Event"
+      },
+      "id": "T058",
+      "matching_assertions": [],
+      "matching_candidates": [],
+      "reason": "both endpoint entities existed but no directed endpoint pair was generated"
+    },
+    {
+      "checkpoints": {
+        "correct_canonical_assertion_promoted": false,
+        "correct_surface_proposition_generated": true,
+        "endpoint_pair_generated": true,
+        "id": "T063"
+      },
+      "failure_class": "GATE_POLICY",
+      "gold": {
+        "evidence": "The Operations Dashboard is related to the Recovery Report",
+        "id": "T063",
+        "object": "Recovery Report",
+        "object_type": "Document",
+        "predicate": "related_to",
+        "subject": "Operations Dashboard",
+        "subject_type": "Document"
+      },
+      "id": "T063",
+      "matching_assertions": [
+        {
+          "attribution": "direct",
+          "candidate_id": "openie-predicate:1616f641baf01a2c931c21a3",
+          "canonical_predicate": "related_to",
+          "evidence_text": "The Operations Dashboard is related to the Recovery Report because both are reviewed during post-incident analysis.",
+          "lane": "FACT",
+          "mapping_rule": "mapped:openie:strict_surface_recovery:explicit_related_surface:relate",
+          "mapping_status": "MAPPED",
+          "modality": "asserted",
+          "object": "Recovery Report",
+          "polarity": "positive",
+          "subject": "Operations Dashboard"
+        }
+      ],
+      "matching_candidates": [
+        {
+          "attribution": "direct",
+          "candidate_id": "openie-predicate:1616f641baf01a2c931c21a3",
+          "canonical_predicate": "related_to",
+          "evidence_text": "The Operations Dashboard is related to the Recovery Report because both are reviewed during post-incident analysis.",
+          "mapping_rule": "mapped:openie:strict_surface_recovery:explicit_related_surface:relate",
+          "mapping_status": "MAPPED",
+          "modality": "asserted",
+          "object": "Recovery Report",
+          "polarity": "positive",
+          "source": null,
+          "subject": "Operations Dashboard",
+          "surface_relation": "is related to"
+        },
+        {
+          "attribution": "",
+          "candidate_id": "syntax:surface-relation:425a25f299f63aa34a583db4",
+          "canonical_predicate": "related_to",
+          "evidence_text": "The Operations Dashboard is related to the Recovery Report because both are reviewed during post-incident analysis.",
+          "mapping_rule": "mapped:strict_dependency_cue:relate",
+          "mapping_status": "accepted",
+          "modality": "asserted",
+          "object": "Recovery Report",
+          "polarity": "positive",
+          "source": "syntax_fast_path",
+          "subject": "Operations Dashboard",
+          "surface_relation": "related"
+        },
+        {
+          "attribution": "direct",
+          "candidate_id": "syntax:surface-relation:472b8ac0879c825fbc82b376",
+          "canonical_predicate": null,
+          "evidence_text": "The Operations Dashboard is related to the Recovery Report because both are reviewed during post-incident analysis.",
+          "mapping_rule": "review:ambiguous_or_unmapped_predicate",
+          "mapping_status": "review",
+          "modality": "asserted",
+          "object": "Recovery Report",
+          "polarity": "positive",
+          "source": "syntax_fast_path",
+          "subject": "Operations Dashboard",
+          "surface_relation": "relate"
+        }
+      ],
+      "reason": "correct canonical candidate existed but was not promoted to Neo4j"
+    },
+    {
+      "checkpoints": {
+        "correct_canonical_assertion_promoted": false,
+        "correct_surface_proposition_generated": true,
+        "endpoint_pair_generated": true,
+        "id": "T064"
+      },
+      "failure_class": "GATE_POLICY",
+      "gold": {
+        "evidence": "The Canonical Event Store supports the Replay Process",
+        "id": "T064",
+        "object": "Replay Process",
+        "object_type": "Process",
+        "predicate": "supports",
+        "subject": "Canonical Event Store",
+        "subject_type": "Dataset"
+      },
+      "id": "T064",
+      "matching_assertions": [],
+      "matching_candidates": [
+        {
+          "attribution": "",
+          "candidate_id": "syntax:surface-relation:de426c4de2380cfd395275a8",
+          "canonical_predicate": "supports",
+          "evidence_text": "The Canonical Event Store supports the Replay Process, the Replay Process supports projection recovery, and projection recovery supports continued query service after a projection failure.",
+          "mapping_rule": "review:endpoint_signature:Event:Method",
+          "mapping_status": "review",
+          "modality": "asserted",
+          "object": "Replay Process",
+          "polarity": "positive",
+          "source": "syntax_fast_path",
+          "subject": "Canonical Event Store",
+          "surface_relation": "supports"
+        },
+        {
+          "attribution": "",
+          "candidate_id": "syntax:surface-relation:c765123b31419e482f63e3ca",
+          "canonical_predicate": "supports",
+          "evidence_text": "The Canonical Event Store supports the Replay Process, the Replay Process supports projection recovery, and projection recovery supports continued query service after a projection failure.",
+          "mapping_rule": "review:endpoint_signature:Event:Method",
+          "mapping_status": "review",
+          "modality": "asserted",
+          "object": "Replay Process",
+          "polarity": "positive",
+          "source": "syntax_fast_path",
+          "subject": "Canonical Event Store",
+          "surface_relation": "supports"
+        }
+      ],
+      "reason": "correct canonical candidate existed but was not promoted to Neo4j"
+    },
+    {
+      "checkpoints": {
+        "correct_canonical_assertion_promoted": false,
+        "correct_surface_proposition_generated": true,
+        "endpoint_pair_generated": true,
+        "id": "T065"
+      },
+      "failure_class": "GATE_POLICY",
+      "gold": {
+        "evidence": "the Replay Process supports projection recovery",
+        "id": "T065",
+        "object": "Projection Recovery",
+        "object_type": "Process",
+        "predicate": "supports",
+        "subject": "Replay Process",
+        "subject_type": "Process"
+      },
+      "id": "T065",
+      "matching_assertions": [
+        {
+          "attribution": "direct",
+          "candidate_id": "openie-predicate:a04c8e5e6d6f6541f3be3875",
+          "canonical_predicate": "supports",
+          "evidence_text": "The Canonical Event Store supports the Replay Process, the Replay Process supports projection recovery, and projection recovery supports continued query service after a projection failure.",
+          "lane": "REVIEW",
+          "mapping_rule": "review:endpoint_signature:Concept:Concept",
+          "mapping_status": "REVIEW",
+          "modality": "asserted",
+          "object": "projection recovery",
+          "polarity": "positive",
+          "subject": "replay process"
+        }
+      ],
+      "matching_candidates": [
+        {
+          "attribution": "direct",
+          "candidate_id": "openie-predicate:a04c8e5e6d6f6541f3be3875",
+          "canonical_predicate": "supports",
+          "evidence_text": "The Canonical Event Store supports the Replay Process, the Replay Process supports projection recovery, and projection recovery supports continued query service after a projection failure.",
+          "mapping_rule": "review:endpoint_signature:Concept:Concept",
+          "mapping_status": "REVIEW",
+          "modality": "asserted",
+          "object": "projection recovery",
+          "polarity": "positive",
+          "source": null,
+          "subject": "replay process",
+          "surface_relation": "supports"
+        },
+        {
+          "attribution": "",
+          "candidate_id": "syntax:surface-relation:3a0d24934498adf31162af82",
+          "canonical_predicate": "supports",
+          "evidence_text": "The Canonical Event Store supports the Replay Process, the Replay Process supports projection recovery, and projection recovery supports continued query service after a projection failure.",
+          "mapping_rule": "review:endpoint_signature:Method:Software",
+          "mapping_status": "review",
+          "modality": "asserted",
+          "object": "projection recovery",
+          "polarity": "positive",
+          "source": "syntax_fast_path",
+          "subject": "Replay Process",
+          "surface_relation": "supports"
+        },
+        {
+          "attribution": "",
+          "candidate_id": "syntax:surface-relation:0867ce6eac3113354377a60d",
+          "canonical_predicate": "supports",
+          "evidence_text": "The Canonical Event Store supports the Replay Process, the Replay Process supports projection recovery, and projection recovery supports continued query service after a projection failure.",
+          "mapping_rule": "review:endpoint_signature:Method:Software",
+          "mapping_status": "review",
+          "modality": "asserted",
+          "object": "projection recovery",
+          "polarity": "positive",
+          "source": "syntax_fast_path",
+          "subject": "Replay Process",
+          "surface_relation": "supports"
+        }
+      ],
+      "reason": "correct canonical candidate existed but was not promoted to Neo4j"
+    }
+  ]
+}

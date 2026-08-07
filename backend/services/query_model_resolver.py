@@ -233,7 +233,9 @@ async def resolve_fallback_candidates(
 
         provider = str(entry.get("provider") or "").strip().lower()
         model_name = str(entry.get("model_name") or "").strip().lower()
-        if provider in {"vllm-rtx", "rtx", "gliner", "glirel"}:
+        # Extraction-only providers (including the canonical Relex lane)
+        # must never become chat-answer fallback lanes.
+        if provider in {"vllm-rtx", "rtx", "gliner", "relex"}:
             continue
         if "polymath-extract" in model_name:
             continue

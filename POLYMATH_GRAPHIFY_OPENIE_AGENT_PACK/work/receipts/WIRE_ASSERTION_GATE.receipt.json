@@ -1,0 +1,25 @@
+{
+  "errors": [],
+  "files_changed": [
+    "/Users/king/polymath_v3.3/POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/work/artifacts/assertion_decisions.jsonl",
+    "/Users/king/polymath_v3.3/POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/work/artifacts/assertion_report.json"
+  ],
+  "finished_at": "2026-08-07T00:02:12.624758+00:00",
+  "inputs_hash": "",
+  "metrics": {
+    "FACT": 18,
+    "OPEN_RELATION": 62,
+    "QUALIFIED_CLAIM": 18,
+    "REJECT": 12,
+    "REVIEW": 200,
+    "assertions": 310
+  },
+  "outputs_hash": "",
+  "stage": "WIRE_ASSERTION_GATE",
+  "started_at": "2026-08-07T00:02:12.622338+00:00",
+  "status": "PASSED",
+  "tests": [
+    "backend/tests/extraction/test_graphify_assertion_assembler.py"
+  ],
+  "warnings": []
+}

@@ -99,58 +99,17 @@ PENDING_ENRICHMENT_PHASES = [
 # mac_safe is the global local/Mac rule:
 #   - one active document owns the heavy phase budget;
 #   - staged sweeps release memory between queryability and enrichment;
-#   - local Mac sidecars are preferred over remote/cloud pools.
+#   - Graphify CPU extraction stays local and deterministic.
 # First pass is queryable-first: Mongo chunks + dense/sparse vectors land before
 # Ghost B/Neo4j, so local extraction can never gate initial retrieval.
-# rtx_assisted: the elastic-car topology; single full pass.
-# runpod_burst: autoscaling extraction with summaries allowed to overlap; unlike
-# rtx_assisted it does not intentionally defer Ghost A, so a new cloud ingest
-# can reach strict enrichment in one durable pass when both providers are live.
 INGEST_PROFILES: dict[str, dict] = {
     "mac_queryable_first": {
         "concurrency": 1,
         "pass_plan": ["queryable", None],  # None = run enrichment to completion
-        "extraction_endpoint_urls": [
-            os.environ.get(
-                "MAC_SIDECAR_URL", "http://host.docker.internal:8084"
-            ).rstrip("/")
-        ],
     },
     "mac_safe": {
         "concurrency": 1,
         "pass_plan": ["queryable", None],  # legacy name, same safe contract
-        "extraction_endpoint_urls": [
-            os.environ.get(
-                "MAC_SIDECAR_URL", "http://host.docker.internal:8084"
-            ).rstrip("/")
-        ],
-    },
-    "rtx_assisted": {
-        "concurrency": None,  # honor batch/env
-        "pass_plan": [None],
-        "extraction_endpoint_urls": None,  # settings/global fleet
-        # RTX/cloud extraction is the expensive/offloaded lane. Do not let a
-        # slow or exhausted summary provider keep the RTX idle; summaries are
-        # filled by the summary backfill lane after graph extraction lands.
-        "defer_summaries": True,
-    },
-    "runpod_burst": {
-        "concurrency": None,
-        "pass_plan": [None],
-        "extraction_endpoint_urls": None,
-        "defer_summaries": False,
-    },
-    # Extraction-first: pass 1 sweeps every item through parse→chunk→extract
-    # so the serverless fleet runs one continuous saturated burst (durable
-    # staged artifacts at stage "extracted", zero local embed pressure), then
-    # pass 2 finishes embed/index/graph locally with no pod time at all.
-    # Summaries defer to the backfill lane exactly like rtx_assisted so a
-    # slow provider can never keep paid extraction workers idle.
-    "runpod_extract_first": {
-        "concurrency": None,
-        "pass_plan": ["extracted", None],
-        "extraction_endpoint_urls": None,
-        "defer_summaries": True,
     },
 }
 
@@ -178,13 +137,6 @@ def _batch_defer_summaries(batch: dict[str, Any]) -> bool:
         return bool(options.get("defer_summaries"))
     profile_defaults = _profile_defaults(options.get("profile"))
     return bool(profile_defaults.get("defer_summaries"))
-
-
-def _profile_endpoint_urls(batch: dict[str, Any]) -> list[str] | None:
-    prof = INGEST_PROFILES.get(
-        str((batch.get("options") or {}).get("profile") or "").strip().lower()
-    )
-    return (prof or {}).get("extraction_endpoint_urls")
 
 
 async def _advance_item_stage(
@@ -985,7 +937,11 @@ async def create_local_batch(
             "model": model or "",
             "concurrency": worker_count,
             "profile": normalized_profile,
-            "summary_cost_run_id": batch_id,
+            # Cost run id opens deprecated llm_summary_enrichment.v1 only.
+            # Deterministic baseline (default) must leave both unset.
+            "summary_cost_run_id": (
+                batch_id if summary_cost_authority_usd is not None else None
+            ),
             "summary_cost_authority_usd": (
                 str(summary_cost_authority_usd)
                 if summary_cost_authority_usd is not None
@@ -1128,7 +1084,11 @@ async def create_upload_batch(
             "model": model or "",
             "concurrency": worker_count,
             "profile": normalized_profile,
-            "summary_cost_run_id": batch_id,
+            # Cost run id opens deprecated llm_summary_enrichment.v1 only.
+            # Deterministic baseline (default) must leave both unset.
+            "summary_cost_run_id": (
+                batch_id if summary_cost_authority_usd is not None else None
+            ),
             "summary_cost_authority_usd": (
                 str(summary_cost_authority_usd)
                 if summary_cost_authority_usd is not None
@@ -1557,12 +1517,19 @@ async def refresh_batch_counts(
         stage = _infer_item_stage(item)
         if stage:
             _by_stage[stage] = _by_stage.get(stage, 0) + 1
-    # Cumulative ladder: a file AT rung k has passed every rung below it.
+    # Cumulative milestone ladder: a file AT rung k has passed every rung below
+    # it. Names read "passed this rung", so a fully_enriched doc still counts
+    # for graph_pending/summary_pending — that is by design here, NOT a pending
+    # queue count. Use `stage_counts` for the "currently at" truth.
     ladder = {}
     _cum = 0
     for s in reversed(STAGE_LADDER):
         _cum += _by_stage.get(s, 0)
         ladder[s] = _cum
+    # Current-state histogram: each non-skipped doc counted exactly once at its
+    # own rung. pending == current docs at the *_pending rungs, never double
+    # counted with fully_enriched. This is the "pending vs milestone" truth.
+    stage_counts = {s: _by_stage.get(s, 0) for s in STAGE_LADDER}
 
     progress = {
         "files_done": counts[ITEM_DONE],
@@ -1576,7 +1543,10 @@ async def refresh_batch_counts(
         "mb_graph_extracted": _mb(sizes.get("graph_extracted_bytes")),
         "mb_total": _mb(sizes.get("total_bytes")),
         # §13-S honest ladder ("500 chunked / 320 queryable / 60 graph promoted").
+        # CUMULATIVE milestone counts — read "passed this rung", not "pending".
         "ladder": ladder,
+        # CURRENT state — each doc counted once; pending rungs are live pending.
+        "stage_counts": stage_counts,
     }
 
     update: dict[str, Any] = {
@@ -1841,8 +1811,17 @@ async def _lease_next_item(
     owner: str,
     lease_seconds: int,
     target_rank: int | None = None,
+    claim_statuses: frozenset[str] | None = None,
 ) -> dict[str, Any] | None:
     now = _now()
+    # §13-S overlap: when two passes run concurrently, each worker pool is
+    # bound to a disjoint item-status set so pass-1 and pass-2 can never
+    # claim the same document and so pass-2 cannot leapfrog a queued doc past
+    # its queryable-first pass. claim_statuses=None preserves legacy behavior
+    # (any leaseable status); the sequential path never passes it.
+    _claim_queued = claim_statuses is None or ITEM_QUEUED in claim_statuses
+    _claim_failed = claim_statuses is None or ITEM_FAILED_RECOVERABLE in claim_statuses
+    _claim_staged = claim_statuses is None or ITEM_STAGED in claim_statuses
     # Audit 2026-07-06 (critical): `attempts` was incremented but never READ —
     # a doc that deterministically kills its worker (OOM, pathological
     # chunking) retried forever (observed: 270+ attempts crash-looping a
@@ -1868,17 +1847,18 @@ async def _lease_next_item(
             "source": {"$in": RUNNABLE_SOURCES},
             "$and": [
                 {"$or": [
-                    {"status": ITEM_QUEUED},
-                    {"status": ITEM_FAILED_RECOVERABLE,
-                     "$or": [
-                         {"updated_at": {"$lte": retryable_after}},
-                         {"updated_at": {"$exists": False}},
-                     ]},
+                    *([{"status": ITEM_QUEUED}] if _claim_queued else []),
+                    *([{"status": ITEM_FAILED_RECOVERABLE,
+                        "$or": [
+                            {"updated_at": {"$lte": retryable_after}},
+                            {"updated_at": {"$exists": False}},
+                        ]}] if _claim_failed else []),
                     # §13-S: staged items re-lease when the batch target moved
                     # past their persisted rung (next pass).
-                    {"status": ITEM_STAGED,
-                     "stage_rank": {"$lt": target_rank}} if target_rank is not None
-                    else {"status": ITEM_STAGED},
+                    *(([{"status": ITEM_STAGED,
+                         "stage_rank": {"$lt": target_rank}}]
+                       if target_rank is not None else [{"status": ITEM_STAGED}])
+                      if _claim_staged else []),
                 ]},
                 {"$or": [
                     {"attempts": {"$exists": False}},
@@ -2286,7 +2266,6 @@ async def _process_local_item(
             on_doc_id=_on_doc_id,
             on_phase=_on_phase,
             target_stage=(batch.get("options") or {}).get("target_stage") or None,
-            extraction_endpoint_urls=_profile_endpoint_urls(batch),
             defer_summaries=_batch_defer_summaries(batch),
             summary_cost_run_id=(batch.get("options") or {}).get(
                 "summary_cost_run_id"
@@ -2305,7 +2284,11 @@ async def _process_local_item(
         elif str(result.status).startswith("queryable_with_pending_"):
             item_phase = str(result.status)
             status, failure_stage = ITEM_DONE, None
-        elif result.status in {"skipped_duplicate", "skipped_nonsemantic"}:
+        elif result.status in {
+            "skipped_duplicate",
+            "skipped_nonsemantic",
+            "unsupported_by_policy",
+        }:
             # Deliberate terminal exclusions are not failures and must never
             # enter the retry queue.
             status, item_phase, failure_stage = ITEM_SKIPPED, "skipped", None
@@ -2405,6 +2388,10 @@ async def _preflight_summary_canary(db, batch: dict) -> str | None:
     if summary_enabled is None:
         summary_enabled = cfg.get("chunk_summarization")
     if not bool(summary_enabled):
+        return None
+    # Deterministic baseline needs no provider canary. Cloud enrichment
+    # canary runs only when cost authority is open on the batch.
+    if opts.get("summary_cost_authority_usd") is None:
         return None
     runtime_refs: list[Any] = []
     try:
@@ -2662,7 +2649,70 @@ async def _batch_quality_report(db, batch: dict) -> dict[str, Any]:
     if alerts:
         report["alerts"] = alerts
         report["alert"] = alerts[0]
+    # Per-doc stage timings: derived from durable item + doc write_state
+    # timestamps (never from in-memory timers). Missing rungs are reported as
+    # null so callers can distinguish "not yet" from "not instrumented".
+    _batch_id_for_timings = str(batch.get("batch_id") or "")
+    report["doc_timings"] = (
+        await _collect_doc_stage_timings(db, batch_id=_batch_id_for_timings)
+        if _batch_id_for_timings
+        else []
+    )
     return report
+
+
+async def _collect_doc_stage_timings(
+    db: AsyncIOMotorDatabase,
+    *,
+    batch_id: str,
+) -> list[dict[str, Any]]:
+    """Per-doc stage arrival timestamps + durations from durable fields only.
+
+    source_to_queryable_s = item.created_at -> docs.write_state.qdrant_written_at
+    source_to_graph_s     = item.created_at -> docs.write_state.neo4j_written_at
+    source_to_enriched_s  = item.created_at -> docs.write_state.verified_at
+    All values seconds (float) or null when a rung is not yet reached.
+    """
+
+    items = await db[ITEMS].find(
+        {"batch_id": batch_id, "doc_id": {"$exists": True, "$nin": [None, ""]}},
+        {"_id": 0, "doc_id": 1, "created_at": 1},
+    ).to_list(length=None)
+    doc_ids = [str(i.get("doc_id")) for i in items if i.get("doc_id")]
+    created_by_doc = {str(i.get("doc_id")): i.get("created_at") for i in items if i.get("doc_id")}
+    if not doc_ids:
+        return []
+    docs = await db["documents"].find(
+        {"doc_id": {"$in": doc_ids}},
+        {"_id": 0, "doc_id": 1, "write_state": 1},
+    ).to_list(length=None)
+    ws_by_doc = {str(d.get("doc_id")): (d.get("write_state") or {}) for d in docs}
+
+    def _s(delta: Any) -> float | None:
+        try:
+            return round(float(delta.total_seconds()), 3) if delta is not None else None
+        except AttributeError:
+            return None
+
+    timings: list[dict[str, Any]] = []
+    for doc_id in doc_ids:
+        ws = ws_by_doc.get(doc_id) or {}
+        t0 = created_by_doc.get(doc_id)
+        q_at = ws.get("qdrant_written_at")
+        n_at = ws.get("neo4j_written_at")
+        v_at = ws.get("verified_at")
+        timings.append(
+            {
+                "doc_id": doc_id,
+                "source_to_queryable_s": _s(q_at - t0) if (q_at and t0) else None,
+                "source_to_graph_s": _s(n_at - t0) if (n_at and t0) else None,
+                "source_to_enriched_s": _s(v_at - t0) if (v_at and t0) else None,
+                "queryable_at": q_at,
+                "graph_ready_at": n_at,
+                "fully_enriched_at": v_at,
+            }
+        )
+    return timings
 
 
 async def _run_deferred_summary_backfill(
@@ -3105,7 +3155,12 @@ async def run_local_batch(
     if (_profile or {}).get("concurrency"):
         concurrency = min(concurrency, int(_profile["concurrency"])) or 1
 
-    async def _worker(worker_idx: int, target_rank: int | None) -> None:
+    async def _worker(
+        worker_idx: int | str,
+        target_rank: int | None,
+        claim_statuses: frozenset[str] | None = None,
+        wait_for_producer: bool = False,
+    ) -> None:
         from services.ingestion.job_leases import lanes_lost
 
         owner = f"{owner_prefix}:{worker_idx}"
@@ -3139,9 +3194,30 @@ async def run_local_batch(
                 owner=owner,
                 lease_seconds=lease_seconds,
                 target_rank=target_rank,
+                claim_statuses=claim_statuses,
             )
             if not item:
-                return
+                # Producer-aware wait (pass overlap): a consumer bound to a
+                # disjoint status set (e.g. pass-2 claiming only STAGED) must
+                # not exit just because nothing is leaseable THIS instant —
+                # pass-1 may still be producing items into that set. Keep
+                # polling until the batch has no work left that could ever
+                # become claimable by this worker. When wait_for_producer is
+                # False (all other paths), preserve the legacy exit-on-empty.
+                if not wait_for_producer:
+                    return
+                remaining = await db[ITEMS].count_documents(
+                    {
+                        "batch_id": batch_id,
+                        "source": {"$in": RUNNABLE_SOURCES},
+                        "status": {"$in": [ITEM_QUEUED, ITEM_RUNNING, ITEM_STAGED,
+                                           ITEM_FAILED_RECOVERABLE]},
+                    }
+                )
+                if remaining <= 0:
+                    return
+                await asyncio.sleep(2.0)
+                continue
             await refresh_batch_counts(db, batch_id, user_id=user_id)
             async with sem:
                 # Lease heartbeat covers the WHOLE hold — including the
@@ -3189,20 +3265,103 @@ async def run_local_batch(
                     type(exc).__name__,
                 )
 
-        for _pass_target in pass_plan:
-            _rank = STAGE_RANK.get(_pass_target) if _pass_target else None
-            batch.setdefault("options", {})["target_stage"] = _pass_target
+        # §13-S overlap repair (Phase 3): the strict sequential pass sweep left
+        # the MPS idle during every doc's pass-2 graph phase. For the two-pass
+        # queryable-first plan (["queryable", None]) we now run the queryable
+        # pass and the full pass CONCURRENTLY: pass-1 workers keep claiming
+        # queued docs while pass-2 workers drive already-staged docs through
+        # enrichment/graph. Bounds preserved (no new scheduler, no extra MPS):
+        #   * BOTH passes share the same `sem` (_global_doc_semaphore), so total
+        #     in-flight docs never exceed the batch doc limit (mac_safe memory
+        #     property holds).
+        #   * MPS exclusivity is a module-shared semaphore (_GHOST_B_FILE_
+        #     SEMAPHORES, limit 1 for relex_local) independent of worker count —
+        #     pass-1's extraction and pass-2's re-extraction can never overlap
+        #     on the Metal GPU.
+        #   * Item identity is disjoint by status: pass-1 claims QUEUED docs
+        #     (stage_rank below the queryable rung), pass-2 claims STAGED docs
+        #     (stage_rank < full rung). A doc is never in both passes at once.
+        #   * Graph stays durable-async; a graph failure marks only that doc's
+        #     enrichment_status and never rolls back Mongo/Qdrant.
+        # Opt out (INGEST_PASS_OVERLAP=0) to restore the strict sequential sweep.
+        import os as _os
+
+        _overlap_enabled = _os.environ.get("INGEST_PASS_OVERLAP", "1") != "0"
+        if (
+            _overlap_enabled
+            and len(pass_plan) == 2
+            and pass_plan[1] is None
+        ):
+            _rank_p1 = STAGE_RANK.get(pass_plan[0]) if pass_plan[0] else None
+            logger.info(
+                "batch %s pass overlap enabled: queryable pass + full pass "
+                "concurrent (shared doc-sem=%s, MPS file-gate=1)",
+                batch_id[:8], _global_doc_limit_for_batch(batch, settings),
+            )
             await db[BATCHES].update_one(
                 {"batch_id": batch_id},
-                {"$set": {"options.target_stage": _pass_target, "updated_at": _now()}},
+                {"$set": {"options.target_stage": None, "options.pass_overlap": True,
+                          "updated_at": _now()}},
             )
-            if len(pass_plan) > 1:
-                logger.info(
-                    "batch %s pass -> %s (plan %s)",
-                    batch_id[:8], _pass_target or "full", pass_plan,
+            pass1_workers = [
+                _worker(
+                    f"p1-{idx}",
+                    _rank_p1,
+                    claim_statuses=frozenset({ITEM_QUEUED, ITEM_FAILED_RECOVERABLE}),
                 )
-            await asyncio.gather(*[_worker(idx, _rank) for idx in range(concurrency)])
+                for idx in range(concurrency)
+            ]
+            pass2_workers = [
+                _worker(
+                    f"p2-{idx}",
+                    None,
+                    claim_statuses=frozenset({ITEM_STAGED}),
+                    wait_for_producer=True,
+                )
+                for idx in range(concurrency)
+            ]
+            await asyncio.gather(*(pass1_workers + pass2_workers))
+        else:
+            for _pass_target in pass_plan:
+                _rank = STAGE_RANK.get(_pass_target) if _pass_target else None
+                batch.setdefault("options", {})["target_stage"] = _pass_target
+                await db[BATCHES].update_one(
+                    {"batch_id": batch_id},
+                    {"$set": {"options.target_stage": _pass_target, "updated_at": _now()}},
+                )
+                if len(pass_plan) > 1:
+                    logger.info(
+                        "batch %s pass -> %s (plan %s)",
+                        batch_id[:8], _pass_target or "full", pass_plan,
+                    )
+                await asyncio.gather(*[_worker(idx, _rank) for idx in range(concurrency)])
         refreshed = await refresh_batch_counts(db, batch_id, user_id=user_id)
+        # Corpus-wide capability certification runs ONCE per batch, not once
+        # per document. The per-doc projection path (project_document_via_
+        # control_plane) now defers it; this is the deferred home. It drains
+        # any leftover projection jobs and runs the corpus-wide inspect +
+        # certify a single time after all docs' graph writes have landed, so
+        # the capability certificate reflects the complete corpus. Failure is
+        # logged, never fatal — the certificate is reconciler-recomputable.
+        if _batch_items_terminal(refreshed):
+            _neo4j_drv = getattr(ingestion_service, "_neo4j", None)
+            if _neo4j_drv is not None:
+                try:
+                    from services.graph.projection_runner import certify_corpus_once
+
+                    _cert = await certify_corpus_once(
+                        db, _neo4j_drv, corpus_id=batch["corpus_id"]
+                    )
+                    logger.info(
+                        "batch %s corpus capability certification (once-per-batch): "
+                        "deferred_per_doc=true executed=%s",
+                        batch_id[:8], _cert.get("executed"),
+                    )
+                except Exception as exc:  # noqa: BLE001 — never fail the batch on cert
+                    logger.warning(
+                        "batch %s once-per-batch corpus certification failed (non-fatal): %s",
+                        batch_id[:8], exc,
+                    )
         if _batch_items_terminal(refreshed) and _batch_requires_summary_completion(
             refreshed
         ):
@@ -3278,25 +3437,12 @@ def _runtime_batch_concurrency(batch: dict[str, Any], settings: Any) -> int:
     options = batch.get("options") or {}
     configured = int(options.get("concurrency") or 0)
     requested = configured or int(getattr(settings, "INGEST_BATCH_WORKERS", 1))
-    if str(options.get("profile") or "").strip().lower() == "rtx_assisted":
-        remote_cap = _rtx_assisted_doc_cap(settings)
-        return max(1, min(configured or max(requested, remote_cap), remote_cap))
     global_cap = max(1, int(getattr(settings, "INGEST_GLOBAL_MAX_DOCS", 1)))
     active_cap = max(1, int(getattr(settings, "INGEST_MAX_ACTIVE_JOBS", 1)))
     return max(1, min(requested, global_cap, active_cap))
 
 
-def _rtx_assisted_doc_cap(settings: Any) -> int:
-    return max(
-        1,
-        int(getattr(settings, "EXTRACTION_MANAGED_VLLM_MAX_ACTIVE_DOCS", 2)),
-    )
-
-
 def _global_doc_limit_for_batch(batch: dict[str, Any], settings: Any) -> int:
-    options = batch.get("options") or {}
-    if str(options.get("profile") or "").strip().lower() == "rtx_assisted":
-        return _rtx_assisted_doc_cap(settings)
     return max(1, int(getattr(settings, "INGEST_GLOBAL_MAX_DOCS", 1)))
 
 

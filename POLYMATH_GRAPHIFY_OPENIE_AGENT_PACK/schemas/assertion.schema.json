@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "assertion_id": {
+      "type": "string"
+    },
+    "attribution": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "candidate_id": {
+      "type": "string"
+    },
+    "decision": {
+      "enum": [
+        "FACT",
+        "QUALIFIED_CLAIM",
+        "OPEN_RELATION",
+        "REVIEW",
+        "REJECT"
+      ]
+    },
+    "evidence_text": {
+      "type": "string"
+    },
+    "modality": {
+      "type": "string"
+    },
+    "object_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "object_value": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "polarity": {
+      "type": "string"
+    },
+    "predicate": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "subject_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "assertion_id",
+    "candidate_id",
+    "decision",
+    "evidence_text",
+    "polarity",
+    "modality"
+  ],
+  "type": "object"
+}

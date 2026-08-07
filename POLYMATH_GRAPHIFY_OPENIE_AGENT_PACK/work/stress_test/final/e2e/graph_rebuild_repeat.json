@@ -1,0 +1,33 @@
+{
+  "after": {
+    "counts": {
+      "assertion_edges": 175,
+      "assertion_support": 175,
+      "mentions": 434,
+      "nodes": 425,
+      "relations": 15
+    },
+    "digest": "130a8300be27a5c2dfe4de437efbfdc796d81d7d5704de4870aee3b48e40665f"
+  },
+  "before": {
+    "counts": {
+      "assertion_edges": 175,
+      "assertion_support": 175,
+      "mentions": 434,
+      "nodes": 425,
+      "relations": 15
+    },
+    "digest": "130a8300be27a5c2dfe4de437efbfdc796d81d7d5704de4870aee3b48e40665f"
+  },
+  "corpus_id": "0e41f9ce-3ed3-5793-8f75-2d55a228c4e2",
+  "deleted_counts": {
+    "assertion_edges": 0,
+    "assertion_support": 0,
+    "mentions": 0,
+    "nodes": 0,
+    "relations": 0
+  },
+  "graph_rebuild_match": true,
+  "namespace": "openie_final_v12",
+  "status": "passed"
+}

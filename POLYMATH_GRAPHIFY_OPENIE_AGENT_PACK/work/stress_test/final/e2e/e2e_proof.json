@@ -1,0 +1,84 @@
+{
+  "after": {
+    "counts": {
+      "assertion_edges": 175,
+      "assertion_support": 175,
+      "mentions": 434,
+      "nodes": 425,
+      "relations": 15
+    },
+    "digest": "130a8300be27a5c2dfe4de437efbfdc796d81d7d5704de4870aee3b48e40665f"
+  },
+  "before": {
+    "counts": {
+      "assertion_edges": 175,
+      "assertion_support": 175,
+      "mentions": 434,
+      "nodes": 425,
+      "relations": 15
+    },
+    "digest": "130a8300be27a5c2dfe4de437efbfdc796d81d7d5704de4870aee3b48e40665f"
+  },
+  "canonical_entrypoint": "IngestionService.ingest",
+  "corpus_id": "0e41f9ce-3ed3-5793-8f75-2d55a228c4e2",
+  "deleted_counts": {
+    "assertion_edges": 0,
+    "assertion_support": 0,
+    "mentions": 0,
+    "nodes": 0,
+    "relations": 0
+  },
+  "fixtures": {
+    "quality": {
+      "counts": {
+        "ghost_rows": 6,
+        "stage_artifacts": 15
+      },
+      "doc_id": "3ab0577d8b13bbd55fd733bd7a7aedf808553b0e47673aa733c7e0e193ec46e4",
+      "identity_digest": "f58e9f95c8fba17ba760e3656bab80a1fdd5fa2cefae242f342b7e08e978aa9e",
+      "projection_digest": "130a8300be27a5c2dfe4de437efbfdc796d81d7d5704de4870aee3b48e40665f"
+    },
+    "throughput": {
+      "counts": {
+        "ghost_rows": 220,
+        "stage_artifacts": 15
+      },
+      "doc_id": "6bfe18ed71e3875b4ff6b3ec4e47878248f470c20efe2807b889700f9bdf0417",
+      "identity_digest": "9e6d06039ccf7b6f243448245459c5c4ca476e42508c03fe2d20ef2918b26373",
+      "projection_digest": "130a8300be27a5c2dfe4de437efbfdc796d81d7d5704de4870aee3b48e40665f"
+    }
+  },
+  "graph_rebuild_match": true,
+  "ingests": {
+    "quality": {
+      "chunk_count": 6,
+      "doc_id": "3ab0577d8b13bbd55fd733bd7a7aedf808553b0e47673aa733c7e0e193ec46e4",
+      "parent_count": 1,
+      "phases": [
+        "chunking",
+        "ghosts",
+        "mongo",
+        "staged_extracted"
+      ],
+      "status": "staged",
+      "wall_seconds": 19.455767125007696
+    },
+    "throughput": {
+      "chunk_count": 242,
+      "doc_id": "6bfe18ed71e3875b4ff6b3ec4e47878248f470c20efe2807b889700f9bdf0417",
+      "parent_count": 233,
+      "phases": [
+        "chunking",
+        "ghosts",
+        "mongo",
+        "staged_extracted"
+      ],
+      "status": "staged",
+      "wall_seconds": 18.034013458993286
+    }
+  },
+  "model_load_count": 1,
+  "mongo_database": "graphify_e2e_openie_final_v12_d59424ac",
+  "namespace": "openie_final_v12",
+  "status": "passed"
+}

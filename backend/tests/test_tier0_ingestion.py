@@ -88,6 +88,13 @@ class _Qdrant:
 
 @pytest.mark.asyncio
 async def test_tier0_profiles_embed_in_one_batch_and_stamp_projection(monkeypatch):
+    # Validates the quantized code path; pin the flag so the test does not
+    # depend on the deployment .env (q9 ships with quantization disabled).
+    from services.storage import qdrant_writer
+
+    monkeypatch.setattr(
+        qdrant_writer.settings, "QDRANT_BINARY_QUANTIZATION_ENABLED", True
+    )
     db = _Db(
         [
             {
@@ -146,7 +153,12 @@ async def test_tier0_profile_delete_targets_deterministic_shared_point():
 
 
 @pytest.mark.asyncio
-async def test_existing_tier0_collection_reconciles_binary_quantization_once():
+async def test_existing_tier0_collection_reconciles_binary_quantization_once(monkeypatch):
+    from services.storage import qdrant_writer
+
+    monkeypatch.setattr(
+        qdrant_writer.settings, "QDRANT_BINARY_QUANTIZATION_ENABLED", True
+    )
     qdrant = _Qdrant(exists=True)
 
     await _ensure_collection(qdrant, 1024)

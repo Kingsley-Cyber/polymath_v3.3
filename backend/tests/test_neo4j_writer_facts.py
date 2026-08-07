@@ -560,7 +560,9 @@ async def test_write_document_graph_uses_mongo_chunk_ids_as_authoritative():
         for query, params in driver.calls
         if "MERGE (c)-[m:MENTIONS]->(e)" in query
     )
-    assert chunk_call[1]["rows"] == [{"chunk_id": "c1"}]
+    assert chunk_call[1]["rows"] == [
+        {"chunk_id": "c1", "chunk_kind": None, "language": None}
+    ]
     assert {row["chunk_id"] for row in mention_call[1]["rows"]} == {"c1"}
 
 

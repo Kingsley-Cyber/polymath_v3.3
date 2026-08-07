@@ -74,6 +74,7 @@ more like a research workbench:
 | **Chat RAG** | Agent-Zero-inspired synthesis style, live reasoning streams, source-aware rendering, and pressure-tested answers for design/research questions. |
 | **Retrieval** | Vector, hybrid, and graph-augmented tiers with reranking, HyDE controls, facet-aware coverage, and evidence provenance. |
 | **Graph Query** | Query-specific graph views, evidence packets for research/nuance/ideation, bridges/gaps/hubs, and richer graph visualization controls. |
+| **Extraction** | [Graphify CPU](docs/GRAPHIFY_EXTRACTION_RUNTIME.md) is the single production entity/relation path, with pinned GLiNER2 inputs, deterministic stages, resumable receipts, and fail-closed routing. |
 | **Model routing** | LiteLLM wildcard routing with DeepSeek, GLM 5.1, MiMo, OpenRouter, Anthropic, OpenAI, Gemini, Mistral, Ollama, and custom providers. |
 | **Web RAG** | Optional live-web retrieval with cache, trust signals, reranking, and visible trace events. |
 
@@ -634,6 +635,10 @@ mcp_servers:
     url: https://mcp.example.com/mcp
     headers:
       Authorization: Bearer YOUR_POLYMATH_MCP_KEY
+  runpod_docs:
+    url: https://docs.runpod.io/mcp
+    connect_timeout: 30
+    timeout: 120
 ```
 
 After editing Hermes config, verify the live agent path end-to-end:
@@ -645,6 +650,35 @@ scripts/verify_hermes_mcp.py
 The verifier compares `~/.hermes/config.yaml` against this repo's
 `MCP_PUBLIC_URL`, checks that Hermes has a bearer header, then performs a live
 streamable-HTTP MCP smoke call without printing the secret token.
+
+Hermes must not infer ingestion execution from names. After
+`polymath_get_ingest_status` reaches `complete`, it must call
+`polymath_verify_ingestion` for the exact `corpus_id + doc_id` and report only
+that tool's `safe_claims`. In particular, `local_extraction` names the
+deterministic schema contract; a receipt with
+`execution_location=remote_runpod_serverless` proves the work ran on RunPod.
+Qdrant or Mongo location never proves where embeddings were computed.
+
+RunPod now publishes two separate MCP servers:
+
+```yaml
+# No authentication. Search current RunPod contracts and documentation.
+runpod_docs:
+  url: https://docs.runpod.io/mcp
+
+# Optional infrastructure control plane. Put RUNPOD_API_KEY in ~/.hermes/.env.
+runpod:
+  command: npx
+  args: ["-y", "@runpod/mcp-server@latest"]
+  env:
+    RUNPOD_API_KEY: ${RUNPOD_API_KEY}
+```
+
+The API MCP manages RunPod infrastructure. It does not replace Polymath's
+extraction data plane. Polymath's current certified extraction adapter remains
+queue-based (`/run` plus `/status/{job_id}`); load-balancing endpoints use a
+different direct-HTTP worker contract and must be introduced as a separate
+explicit route, never by silently changing an existing endpoint.
 
 Use Settings -> MCP Server to generate user-scoped MCP keys for remote
 agents. `MCP_API_KEY` in `.env` remains available for trusted system agents

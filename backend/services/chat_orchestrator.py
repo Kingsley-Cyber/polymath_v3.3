@@ -153,7 +153,7 @@ _EVIDENCE_LLM_DECOMPOSE_DEADLINE = 10.0
 _CHAT_COVERAGE_MAX_DYNAMIC_SUPPLEMENTS = 4
 _CHAT_COVERAGE_THRESHOLD = 4
 _CHAT_COVERAGE_WEAK_THRESHOLD = 2
-_CHAT_COVERAGE_SOURCE_CAP = 8
+_CHAT_COVERAGE_SOURCE_CAP = get_settings().CHAT_SOURCE_CAP
 _PROMPT_COMPACTION_SOURCE_CHAR_STEPS = (1400, 950, 650, 450, 320)
 # Max chunks any single document may contribute to the final context.
 # 0 = DISABLED (uncapped). Reverted 2026-06-19: this hard cap was a band-aid for
@@ -162,7 +162,7 @@ _PROMPT_COMPACTION_SOURCE_CHAR_STEPS = (1400, 950, 650, 450, 320)
 # dedup.py) removes that root cause, so an authoritative single source may again
 # contribute as deeply as it ranks for. Set >0 to re-enable the per-doc ceiling
 # (honored by both _cap_chunks_per_doc and select_facet_final).
-_CHAT_PER_DOC_CAP = 0
+_CHAT_PER_DOC_CAP = get_settings().CHAT_PER_DOC_CAP
 # Per-facet coverage retrievals are independent and run concurrently; this caps
 # the fan-out so a many-facet query can't swamp Qdrant/Mongo/the reranker at once.
 _CHAT_COVERAGE_MAX_CONCURRENCY = 4
@@ -175,7 +175,7 @@ _CHAT_COVERAGE_DOMAIN_CAP = 3
 # than a focused query — widen the coverage budget AND the distinct-doc cap for
 # global mode so an overview answer spans more documents/domains. Local unaffected.
 # (Eval: overview pools held ~35 docs but answers used only 6-7 at the default cap.)
-_GLOBAL_OVERVIEW_BUDGET = 12
+_GLOBAL_OVERVIEW_BUDGET = get_settings().CHAT_GLOBAL_OVERVIEW_BUDGET
 # Last-resort fallback when a user has no other enabled query-pool entry. Normal
 # chat fallback is resolved dynamically from the user's encrypted model pool so
 # an exhausted provider/account cannot strand a correct retrieval packet.
@@ -211,6 +211,50 @@ async def _resolve_chat_fallback(
             "extra_params": None,
         }
     return None
+
+
+def _answer_provider_unavailable_chunk(
+    *,
+    conversation_id: Any,
+    sources: list[Any] | None,
+    detail: str,
+) -> ChatChunk:
+    """Owner directive 2026-08-03 — a provider failure AFTER successful
+    retrieval must never be presented as missing evidence ("no evidence
+    found"). Emit an error-compatible chunk carrying the structured
+    answer verdict:
+
+        {"status": "answer_provider_unavailable",
+         "retrieval_succeeded": true,
+         "sources": [...]}
+
+    The deterministic `sources` SSE chunk has already been streamed by the
+    time this helper is called; the payload here is the machine-readable
+    verdict for clients and eval harnesses. `type` stays "error" so the
+    existing frontend error rendering keeps working.
+    """
+    source_dicts = [
+        data
+        for source in (sources or [])
+        if (data := _source_to_dict(source)) is not None
+    ]
+    return ChatChunk(
+        type="error",
+        content=(
+            "The answer provider failed after retrieval succeeded; the "
+            "retrieved evidence in the sources panel remains valid. "
+            f"Provider error: {detail}"
+        ),
+        conversation_id=(
+            str(conversation_id) if conversation_id is not None else None
+        ),
+        answer_status={
+            "status": "answer_provider_unavailable",
+            "retrieval_succeeded": True,
+            "sources": source_dicts,
+            "detail": detail,
+        },
+    )
 
 
 # (Removed) The Phase-4 LLM "overview intent" second-chance classifier that
@@ -962,6 +1006,46 @@ async def _build_librarian_plan_trace(
                 "silent_fallback_count": 1,
             },
         }
+
+
+async def _chat_route_readiness(corpus_ids: list[str] | None) -> dict[str, Any]:
+    """Route-aware readiness relay for the chat entry (owner §4.2).
+
+    Chat is the ``curated_chat`` route. The relay is informational: ordinary
+    retrieval continues while graph writes are blocked. Never raises.
+    """
+
+    ids = [str(cid) for cid in (corpus_ids or []) if str(cid).strip()]
+    if not ids:
+        return {"route": "curated_chat", "decisions": {}}
+    try:
+        from services.ingestion.route_readiness import route_readiness_payload
+        from services.ingestion_service import ingestion_service
+
+        db = getattr(ingestion_service, "db", None)
+        if db is None:
+            return {"route": "curated_chat", "decisions": {}}
+        return await route_readiness_payload(db, ids, "curated_chat")
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "route": "curated_chat",
+            "decisions": {},
+            "relay_error": type(exc).__name__,
+        }
+
+
+def _format_route_readiness_trace(block: dict[str, Any]) -> str:
+    decisions = block.get("decisions") or {}
+    if not decisions:
+        return "route readiness: no corpus scope"
+    parts = []
+    for cid, payload in decisions.items():
+        missing = ", ".join(payload.get("missing_artifacts") or [])
+        parts.append(
+            f"{cid[:8]}: {payload.get('mode')}"
+            + (f" (missing: {missing})" if missing else "")
+        )
+    return f"route={block.get('route')} " + "; ".join(parts)
 
 
 def _format_chat_query_plan_trace(plan: dict[str, Any]) -> str:
@@ -7398,6 +7482,19 @@ class ChatOrchestrator:
             metadata=query_plan,
         )
 
+        # Route-aware readiness (§4.2): relay the curated_chat verdict per
+        # scoped corpus before retrieval. Relay only — ordinary retrieval
+        # continues while graph routes remain fail-closed.
+        route_readiness_block = await _chat_route_readiness(request.corpus_ids)
+        if route_readiness_block.get("decisions"):
+            yield _record_trace_event(
+                lane="planning",
+                title="Route readiness",
+                status="done",
+                content=_format_route_readiness_trace(route_readiness_block),
+                metadata=route_readiness_block,
+            )
+
         yield _record_trace_event(
             lane="retrieval",
             title="Local RAG retrieval",
@@ -7505,6 +7602,7 @@ class ChatOrchestrator:
                     )
                 ),
                 librarian_refinement_user_id=user_id,
+                request_user_id=user_id,
             )
         elif reasoning_mode == "atomic":
             from services.reasoning import atomic_retrieve
@@ -7897,6 +7995,141 @@ class ChatOrchestrator:
         else:
             sources = _cap_chunks_per_doc(sources)
         retrieval_diagnostics = getattr(retrieval, "diagnostics", {}) or {}
+        # Dark candidate synthesis (allowlist): never replaces the user-visible
+        # baseline answer. Stores comparison artifacts on retrieval_diagnostics.
+        try:
+            _ca = dict(retrieval_diagnostics.get("candidate_adoption") or {})
+            if (
+                _ca.get("enabled")
+                and _ca.get("synthesis_packet")
+                and _ca.get("context_packet")
+                and _ca.get("candidate_chunks")
+            ):
+                from services.retriever.complex_query_candidate_adoption import (
+                    synthesis_provider_preflight,
+                )
+                from services.retriever.complex_query_candidate_synthesis import (
+                    run_dark_candidate_synthesis,
+                )
+
+                _override_model = (
+                    str(getattr(request.overrides, "model", "") or "")
+                    if request.overrides
+                    else ""
+                )
+                _pre = await synthesis_provider_preflight(
+                    user_id=user_id,
+                    model_override=_override_model or None,
+                )
+                _ca["provider_preflight"] = _pre
+                if _pre.get("status") == "ok":
+                    _model = str(_override_model or _pre.get("model") or model_used)
+                    _dark = await run_dark_candidate_synthesis(
+                        query=request.message,
+                        candidate_chunks=list(_ca.get("candidate_chunks") or []),
+                        context_packet=dict(_ca.get("context_packet") or {}),
+                        model=_model,
+                        user_id=user_id,
+                        api_base=(profile_creds or {}).get("api_base"),
+                        api_key=(profile_creds or {}).get("api_key"),
+                        extra_params=(profile_creds or {}).get("extra_params"),
+                        baseline_chunks=list(_ca.get("baseline_chunks") or []),
+                        pair_baseline=True,
+                        query_class=str(
+                            (_ca.get("comparison") or {}).get("query_class") or ""
+                        ),
+                    )
+                    _ca["dark_synthesis"] = _dark
+                    _cmp = dict(_ca.get("comparison") or {})
+                    _ver = dict((_dark or {}).get("verification") or {})
+                    _cmp["candidate_synthesis_ms"] = _dark.get("synthesis_ms")
+                    _cmp["candidate_answer_chars"] = _dark.get("answer_chars")
+                    _cmp["verification_status"] = _ver.get("verification_status")
+                    _cmp["claims_total"] = _ver.get("claims_total")
+                    _cmp["claims_supported"] = _ver.get("claims_supported")
+                    _cmp["claims_unsupported"] = _ver.get("claims_unsupported")
+                    _cmp["used_baseline_fallback"] = bool(
+                        _dark.get("used_baseline_fallback")
+                    )
+                    _cmp["terminal_pass"] = bool(_dark.get("terminal_pass"))
+                    _base_arm = dict((_dark or {}).get("baseline") or {})
+                    _base_ver = dict(_base_arm.get("verification") or {})
+                    _cmp["baseline_verification_status"] = _base_ver.get(
+                        "verification_status"
+                    )
+                    _cmp["baseline_claims_supported"] = _base_ver.get("claims_supported")
+                    _cmp["baseline_claims_total"] = _base_ver.get("claims_total")
+                    _ca["comparison"] = _cmp
+                    # Visible CQ: only when explicitly enabled + terminal pass.
+                    # Default remains baseline for all users/corpora.
+                    try:
+                        _vis = bool(
+                            getattr(
+                                settings, "COMPLEX_QUERY_VISIBLE_ANSWER_ENABLED", False
+                            )
+                        )
+                        _vis_c = {
+                            x.strip()
+                            for x in str(
+                                getattr(
+                                    settings,
+                                    "COMPLEX_QUERY_VISIBLE_CORPUS_ALLOWLIST",
+                                    "",
+                                )
+                                or ""
+                            ).split(",")
+                            if x.strip()
+                        }
+                        _vis_u = {
+                            x.strip()
+                            for x in str(
+                                getattr(
+                                    settings,
+                                    "COMPLEX_QUERY_VISIBLE_USER_ALLOWLIST",
+                                    "",
+                                )
+                                or ""
+                            ).split(",")
+                            if x.strip()
+                        }
+                        _req_corpora = {
+                            str(x)
+                            for x in (
+                                getattr(request, "corpus_ids", None)
+                                or retrieval_diagnostics.get("corpus_ids")
+                                or []
+                            )
+                            if x
+                        }
+                        if (
+                            _vis
+                            and _dark.get("terminal_pass")
+                            and not _dark.get("used_baseline_fallback")
+                            and (not _vis_u or str(user_id) in _vis_u)
+                            and (not _vis_c or bool(_req_corpora & _vis_c))
+                        ):
+                            _ca["visible_candidate_authorized"] = True
+                        else:
+                            _ca["visible_candidate_authorized"] = False
+                    except Exception:  # noqa: BLE001
+                        _ca["visible_candidate_authorized"] = False
+                else:
+                    _ca["dark_synthesis"] = {
+                        "skipped": True,
+                        "reason": "provider_preflight_failed",
+                        "preflight": _pre,
+                        "returned_to_user": False,
+                        "baseline_answer_remains_visible": True,
+                    }
+                retrieval_diagnostics["candidate_adoption"] = _ca
+        except Exception as _ca_syn_exc:  # noqa: BLE001
+            retrieval_diagnostics["candidate_adoption"] = {
+                **dict(retrieval_diagnostics.get("candidate_adoption") or {}),
+                "dark_synthesis_error": f"{type(_ca_syn_exc).__name__}: {_ca_syn_exc}"[
+                    :300
+                ],
+                "user_visible_answer_mutated": False,
+            }
         required_planned_lane_ids = list(
             (retrieval_diagnostics.get("required_concept_coverage") or {}).get(
                 "required_lane_ids"
@@ -9136,7 +9369,11 @@ class ChatOrchestrator:
                         metadata={"model": model_used},
                     )
                     yield build_sse_chunk(
-                        ChatChunk(type="error", content=f"LLM streaming error: {e}")
+                        _answer_provider_unavailable_chunk(
+                            conversation_id=conversation_id,
+                            sources=sources,
+                            detail=f"LLM streaming error: {e}",
+                        )
                     )
                     return
 
@@ -9762,7 +9999,11 @@ class ChatOrchestrator:
                         metadata={"model": model_used},
                     )
                     yield build_sse_chunk(
-                        ChatChunk(type="error", content=f"LLM streaming error: {e}")
+                        _answer_provider_unavailable_chunk(
+                            conversation_id=conversation_id,
+                            sources=sources,
+                            detail=f"LLM streaming error: {e}",
+                        )
                     )
                     return
 
@@ -9857,13 +10098,13 @@ class ChatOrchestrator:
                 },
             )
             yield build_sse_chunk(
-                ChatChunk(
-                    type="error",
-                    content=(
-                        "The model did not return an answer after retrieval. "
-                        "Please retry the question."
+                _answer_provider_unavailable_chunk(
+                    conversation_id=conversation_id,
+                    sources=sources,
+                    detail=(
+                        "The model returned no user-facing answer after "
+                        "retrieval, including the fallback lane."
                     ),
-                    conversation_id=str(conversation_id),
                 )
             )
             return

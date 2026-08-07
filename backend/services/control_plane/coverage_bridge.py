@@ -15,7 +15,7 @@ from __future__ import annotations
 from typing import Any
 
 from services.control_plane.extraction_organs import (
-    LANE_LOCAL, LANE_POD, ORGAN_BY_NAME, organs_expected_for_lane,
+    LANE_GRAPHIFY, ORGAN_BY_NAME, organs_expected_for_lane,
 )
 from services.extraction.coverage_checkpoint import (
     STATUS_DEAD, build_pipeline, coverage_from_row,
@@ -28,12 +28,7 @@ async def _dominant_lane(db: Any, *, corpus_id: str) -> str:
     Read from stored provider values rather than config, because config can be
     edited after the fact while the rows record what really happened.
     """
-    providers = await db["ghost_b_extractions"].distinct(
-        "provider", {"corpus_id": corpus_id}
-    )
-    if any(p == "runpod_local_extraction" for p in providers if p):
-        return LANE_POD
-    return LANE_LOCAL
+    return LANE_GRAPHIFY
 
 
 async def corpus_organ_gaps(

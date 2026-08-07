@@ -1,34 +1,4 @@
-"""Extraction ORGANS as first-class, accountable control-plane stages.
-
-THE DEFECT THIS FIXES
-    `compile_document_contract` declares extraction as ONE boolean:
-        {"extraction_required": True, ...}
-    So the control plane can certify a document as extracted while three of the
-    four extraction organs produced nothing. That is exactly what happened:
-    `relations=[]` and `facts=[]` were hardcoded and the facet pass never ran,
-    across 362,142 chunks, for months, with every health signal green.
-
-    The control plane did not know its own process. It knew a step named
-    "extraction"; it did not know that step has four sub-stages, which lane owns
-    each, or whether each actually fired.
-
-WHAT THIS ADDS
-    Each organ becomes a declared stage with:
-      - an OWNER LANE — who is accountable for producing it,
-      - a REQUIREMENT rule — whether this document is supposed to have it,
-      - an OBSERVATION — what was actually produced,
-      - a REPAIR ROUTE — the concrete job that closes the gap.
-
-    A stage that cannot name its repair route is not a stage, it is a wish. So
-    `repair_route` is mandatory and asserted by tests.
-
-THE LANE ASYMMETRY THIS EXPOSED
-    Neither lane runs all four organs:
-      pod lane  (runpod_local_extraction) : entities, relations, facts, claims — NO facets
-      local lane (ghost_b_local)          : entities, facets, relations, facts — NO claims
-    Encoding the owner lane per organ is what makes that asymmetry visible
-    instead of folklore.
-"""
+"""Accountable extraction-organ contract for the canonical Graphify lane."""
 
 from __future__ import annotations
 
@@ -38,8 +8,7 @@ from typing import Any
 ORGAN_CONTRACT_VERSION = "polymath.extraction_organs.v1"
 
 # Lane identifiers, matching ExtractionResult.provider.
-LANE_POD = "runpod_local_extraction"
-LANE_LOCAL = "ghost_b_local"
+LANE_GRAPHIFY = "graphify_gliner2_cpu"
 LANE_ANY = "*"
 
 ORGAN_ENTITIES = "entities"
@@ -74,58 +43,55 @@ class OrganSpec:
 ORGAN_SPECS: tuple[OrganSpec, ...] = (
     OrganSpec(
         organ=ORGAN_ENTITIES,
-        produced_by=(LANE_POD, LANE_LOCAL),
+        produced_by=(LANE_GRAPHIFY,),
         field_path="entities",
-        repair_route="re-extract chunk (GLiNER pass-1); no cheaper route exists",
+        repair_route="rerun the canonical Graphify document pipeline",
         required=True,
         needs_model_pass=True,
         notes="Only organ that was never broken on either lane.",
     ),
     OrganSpec(
         organ=ORGAN_FACETS,
-        produced_by=(LANE_LOCAL,),
+        produced_by=(),
         field_path="entities[].object_kind",
-        repair_route="facet_tagger.tag_facets over unique canonical_names",
+        repair_route="manual historical-artifact review; no live model route",
         required=False,
-        needs_model_pass=True,
+        needs_model_pass=False,
         notes=(
-            "GLiNER pass-2. NOT produced by the pod lane at all — the single "
-            "largest remaining gap. Deduped per unique canonical_name (6:1 vs "
-            "mentions), so repair is ~467k forwards, not 2.8M."
+            "Optional historical field. No production model route owns it."
         ),
     ),
     OrganSpec(
         organ=ORGAN_RELATIONS,
-        produced_by=(LANE_POD, LANE_LOCAL),
+        produced_by=(LANE_GRAPHIFY,),
         field_path="relations",
-        repair_route="backfill_relations.py (frame extractor; local recompute)",
+        repair_route="rerun the canonical Graphify document pipeline",
         required=True,
         needs_model_pass=False,
         notes=(
-            "Was hardcoded [] on the pod lane. Repaired 2026-07-30. Free to "
-            "recompute: a pure function of stored text + entities."
+            "Graphify emits only deterministic, eligibility-filtered relations."
         ),
     ),
     OrganSpec(
         organ=ORGAN_FACTS,
-        produced_by=(LANE_POD, LANE_LOCAL),
+        produced_by=(),
         field_path="facts",
         repair_route="backfill_facts.py (enrich Stage D; local recompute)",
-        required=True,
+        required=False,
         needs_model_pass=False,
-        notes="Was hardcoded [] on the pod lane. Repaired 2026-07-31.",
+        notes=(
+            "Graphify does not claim a separate facts organ."
+        ),
     ),
     OrganSpec(
         organ=ORGAN_CLAIMS,
-        produced_by=(LANE_POD,),
+        produced_by=(),
         field_path="claim_compilation.claims",
         repair_route="compile_claim_records_v1 over the spaCy bundle",
         required=False,
         needs_model_pass=False,
         notes=(
-            "MIRROR of the facet gap: produced by the pod lane, NOT by the "
-            "local lane (cpcs_local measures 0.000). Neither lane runs all "
-            "four organs."
+            "Claims are an optional downstream compilation stage."
         ),
     ),
 )
@@ -145,7 +111,7 @@ def lane_coverage_gaps() -> dict[str, tuple[str, ...]]:
     """Organs each lane does NOT produce. The asymmetry, made explicit."""
     all_organs = tuple(s.organ for s in ORGAN_SPECS)
     out: dict[str, tuple[str, ...]] = {}
-    for lane in (LANE_POD, LANE_LOCAL):
+    for lane in (LANE_GRAPHIFY,):
         produced = set(organs_expected_for_lane(lane))
         out[lane] = tuple(o for o in all_organs if o not in produced)
     return out

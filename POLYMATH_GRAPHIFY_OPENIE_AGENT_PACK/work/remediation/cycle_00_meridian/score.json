@@ -1,0 +1,204 @@
+{
+  "assertion_containment": {
+    "leakage": 2,
+    "traps": [
+      {
+        "gold": [
+          "Northwind Systems",
+          "owns",
+          "Beacon"
+        ],
+        "id": 1,
+        "positive_graph_leak": true,
+        "predictions": [
+          {
+            "object": "beacon",
+            "predicate": "owns",
+            "subject": "northwind systems"
+          }
+        ]
+      },
+      {
+        "gold": [
+          "Beacon Search",
+          "uses",
+          "MongoDB"
+        ],
+        "id": 2,
+        "positive_graph_leak": true,
+        "predictions": [
+          {
+            "object": "mongodb",
+            "predicate": "uses",
+            "subject": "beacon search"
+          }
+        ]
+      },
+      {
+        "gold": [
+          "Nova",
+          "uses",
+          "Neo4j"
+        ],
+        "id": 3,
+        "positive_graph_leak": false,
+        "predictions": []
+      }
+    ]
+  },
+  "counts": {
+    "false_negative": 29,
+    "false_positive": 13,
+    "gold_entities": 45,
+    "gold_positive": 44,
+    "predicted_entities": 67,
+    "promoted_positive": 28,
+    "trap_leaks": 2,
+    "true_positive": 15
+  },
+  "entity_metrics": {
+    "extra": [
+      "Beacon. Beacon",
+      "Dr.",
+      "Dr. Park",
+      "June 2029",
+      "May 8, 2029",
+      "One document",
+      "Park",
+      "Project Meridian",
+      "Triple F1",
+      "alias rule",
+      "child chunks",
+      "evidence identifier",
+      "extraction",
+      "extraction quality",
+      "graph relationships",
+      "incorrect relationship",
+      "knowledge graph",
+      "original record",
+      "parent chunks",
+      "separate Reranker consumes candidate passages",
+      "several incorrect candidate relationships",
+      "source evidence",
+      "temporary job coordination",
+      "ten minutes later",
+      "that",
+      "two metrics"
+    ],
+    "missing": [
+      "Beacon 2.1",
+      "Beacon 2.2",
+      "Incident Copper",
+      "candidate passages"
+    ],
+    "precision": 0.6119402985074627,
+    "recall": 0.9111111111111111,
+    "type_errors": [
+      "Redis",
+      "Segmenter",
+      "spaCy",
+      "GLiNER-Relex",
+      "Resolver",
+      "Validator",
+      "Reranker",
+      "Beacon Search",
+      "Graph Monitor",
+      "Alert C-17",
+      "Recovery Worker",
+      "Resolver 2.0",
+      "Evaluation Runner",
+      "extraction records",
+      "ordered result list",
+      "research briefs"
+    ]
+  },
+  "evaluation_class": "exposed_development_regression",
+  "failure_taxonomy_counts": {
+    "ATTRIBUTION_ERROR": 0,
+    "CONDITIONAL_SCOPE_ERROR": 0,
+    "DUPLICATE_PROPOSITION": 0,
+    "ENDPOINT_SIGNATURE_ERROR": 0,
+    "ENTITY_TYPE_ERROR": 11,
+    "GATE_ERROR": 0,
+    "GENERIC_ENTITY_FALSE_POSITIVE": 0,
+    "KNOWN_FALSE_PROMOTION": 2,
+    "MISSING_ENTITY": 6,
+    "MISSING_PAIR": 8,
+    "MODALITY_ERROR": 0,
+    "POLARITY_ERROR": 0,
+    "SCORER_ERROR": 0,
+    "WRONG_ARGUMENT_ALIGNMENT": 3,
+    "WRONG_DIRECTION": 0,
+    "WRONG_PREDICATE": 1
+  },
+  "freeze_id": "graphify-exposed-development-regressions-v1",
+  "gates": {
+    "canonical_triple_precision": false,
+    "directed_pair_recall": false,
+    "duplicate_promoted_proposition_zero": true,
+    "entity_precision": false,
+    "entity_recall": false,
+    "exact_evidence_alignment": true,
+    "forced_related_to_fallback_zero": true,
+    "predicate_accuracy_given_directed_pair": true,
+    "strict_canonical_triple_f1": false,
+    "trap_leakage_zero": false,
+    "undirected_pair_recall": false,
+    "wildcard_terminal_endpoints_zero": true
+  },
+  "hard_invariants": {
+    "duplicate_promoted_propositions": 0,
+    "evidence_aligned": 50,
+    "evidence_rows": 50,
+    "forced_related_to_fallbacks": 0,
+    "openie_wildcard_non_reject_endpoints": 0,
+    "syntax_wildcard_non_rejected_endpoints": 0
+  },
+  "match_class_counts": {
+    "DECLARED_ALIAS": 0,
+    "DECLARED_SUBSUMPTION": 0,
+    "EXACT": 0,
+    "NORMALIZED_VARIANT": 15,
+    "NO_MATCH": 29
+  },
+  "matching_policy_version": "meridian-adversarial-matching-v1",
+  "namespace": {
+    "corpus_id": "e36dba1d-2df5-5770-9b15-0fd135ed3e75",
+    "document_id": "4a05afcc74f0cfc5b670e31027c4e9ba3b7133fe64becbd0fe0213f1ebcff544",
+    "mongo_database": "graphify_eval_meridian_ee7ac085f300"
+  },
+  "pair_metrics": {
+    "directed_recall": 0.5,
+    "undirected_recall": 0.5227272727272727
+  },
+  "predicate_metrics": {
+    "accuracy_given_directed_pair": 0.9090909090909091,
+    "correct_given_directed_pair": 20,
+    "directed_pairs": 22
+  },
+  "prohibited_matchers_used": [],
+  "recall_checkpoints": {
+    "correct_canonical_assertion_promoted": 15,
+    "correct_canonical_candidate_generated": 20,
+    "correct_surface_proposition_generated": 19,
+    "correct_terminal_positive_assertion_generated": 19,
+    "gold_endpoint_entities_generated": 38,
+    "gold_endpoint_pair_generated": 22,
+    "gold_total": 44,
+    "recall": {
+      "correct_canonical_assertion_promoted": 0.3409090909090909,
+      "correct_canonical_candidate_generated": 0.45454545454545453,
+      "correct_surface_proposition_generated": 0.4318181818181818,
+      "correct_terminal_positive_assertion_generated": 0.4318181818181818,
+      "gold_endpoint_entities_generated": 0.8636363636363636,
+      "gold_endpoint_pair_generated": 0.5
+    }
+  },
+  "scorer_version": "meridian-stage-scorer-v1",
+  "status": "failed",
+  "triple_metrics": {
+    "f1": 0.41666666666666663,
+    "precision": 0.5357142857142857,
+    "recall": 0.3409090909090909
+  }
+}

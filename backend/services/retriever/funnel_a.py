@@ -14,6 +14,29 @@ from qdrant_client import AsyncQdrantClient, models
 logger = logging.getLogger(__name__)
 
 
+def _with_route_eligibility(
+    base: models.Filter, collection_name: str
+) -> models.Filter:
+    """q8 (owner directive 2026-08-04) — the hierarchical lane reads summary
+    records; when this fan-out leg reads the candidate one-point-per-child
+    evidence collection, hard-filter to records marked eligible for the
+    hierarchical route. Legacy collections pass through untouched.
+    """
+    from services.retriever.shadow_read import is_evidence_collection
+
+    if not is_evidence_collection(collection_name):
+        return base
+    return models.Filter(
+        must=[
+            *(base.must or []),
+            models.FieldCondition(
+                key="eligible_hierarchical", match=models.MatchValue(value=True)
+            ),
+        ],
+        must_not=base.must_not,
+    )
+
+
 class FunnelA:
     """
     FUNNEL A - Summary Breadth
@@ -172,7 +195,7 @@ class FunnelA:
             self._search_collection(
                 collection_name,
                 query_vector,
-                query_filter,
+                _with_route_eligibility(query_filter, collection_name),
                 top_k,
                 query_text=query_text,
             )

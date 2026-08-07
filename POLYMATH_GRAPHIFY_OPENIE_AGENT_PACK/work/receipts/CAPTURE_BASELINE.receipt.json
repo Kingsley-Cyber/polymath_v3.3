@@ -1,0 +1,23 @@
+{
+  "errors": [],
+  "files_changed": [
+    "/Users/king/polymath_v3.3/POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/work/baseline/relex_quality.json",
+    "/Users/king/polymath_v3.3/POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/work/baseline/relex_throughput.json",
+    "/Users/king/polymath_v3.3/POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/work/baseline/relex_quality_records.json",
+    "/Users/king/polymath_v3.3/POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/work/baseline/relex_throughput_records.json"
+  ],
+  "finished_at": "2026-08-06T23:23:34.548658+00:00",
+  "inputs_hash": "",
+  "metrics": {
+    "quality_seconds": 2.200699250010075,
+    "throughput_seconds": 26.78292116599914
+  },
+  "outputs_hash": "",
+  "stage": "CAPTURE_BASELINE",
+  "started_at": "2026-08-06T23:23:34.547779+00:00",
+  "status": "PASSED",
+  "tests": [
+    "backend/tests/test_relex_fixture_baseline.py"
+  ],
+  "warnings": []
+}

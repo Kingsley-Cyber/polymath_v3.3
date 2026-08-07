@@ -35,7 +35,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from services.control_plane.extraction_organs import (
-    ORGAN_BY_NAME, ORGAN_FACETS, ORGAN_FACTS, ORGAN_RELATIONS,
+    ORGAN_BY_NAME, ORGAN_FACTS, ORGAN_RELATIONS,
 )
 
 ORGAN_REPAIR_COLLECTION = "organ_repair_jobs"
@@ -231,81 +231,9 @@ async def _repair_facts(db: Any, *, corpus_id: str) -> dict[str, Any]:
     return {"chunks_repaired": touched, "produced": made}
 
 
-async def _repair_facets(db: Any, *, corpus_id: str) -> dict[str, Any]:
-    """GLiNER pass-2 over unique canonical_names.
-
-    THE SECOND PASS, incorporated. Unlike relations/facts this is NOT a free
-    recompute — it is a real model forward per unique entity. Deduped 6:1
-    against mentions (467,123 unique names vs 2,822,023 mentions corpus-wide),
-    which is what makes it tractable at all.
-
-    Contexts come from the entity's FIRST-OCCURRENCE chunk, matching how
-    ghost_b_local builds `context_by_entity` for the doc-level pass.
-    """
-    from services.ingestion.facet_tagger import tag_facets
-
-    # Build canonical_name -> first-occurrence context, and remember which
-    # chunks mention each name so the facet can be written back.
-    context_by_entity: dict[str, str] = {}
-    chunks_by_canon: dict[str, list[str]] = {}
-    entities_seen: list[dict] = []
-
-    cursor = db["ghost_b_extractions"].find(
-        {"corpus_id": corpus_id, "entities.0": {"$exists": True}},
-        {"chunk_id": 1, "text": 1, "entities": 1},
-    )
-    async for d in cursor:
-        text = d.get("text") or ""
-        for e in d.get("entities") or []:
-            canon = (e.get("canonical_name") or "").strip().lower()
-            if not canon:
-                continue
-            if canon not in context_by_entity and text:
-                context_by_entity[canon] = text
-                entities_seen.append({
-                    "canonical_name": e.get("canonical_name") or "",
-                    "surface_form": e.get("surface_form") or "",
-                    "entity_type": e.get("entity_type") or "",
-                    "object_kind": "",
-                })
-            chunks_by_canon.setdefault(canon, []).append(d["chunk_id"])
-
-    if not entities_seen:
-        return {"unique_entities": 0, "faceted": 0, "chunks_updated": 0}
-
-    facet_map = tag_facets(entities_seen, context_by_entity)
-
-    # Write facets back onto every mention of each faceted canonical_name.
-    updated = 0
-    for canon, facet in facet_map.items():
-        for chunk_id in chunks_by_canon.get(canon, []):
-            res = await db["ghost_b_extractions"].update_one(
-                {"chunk_id": chunk_id},
-                {"$set": {"entities.$[e].object_kind": facet}},
-                array_filters=[{
-                    "e.canonical_name": {
-                        "$regex": f"^{_escape(canon)}$", "$options": "i"},
-                    "$or": [{"e.object_kind": {"$exists": False}},
-                            {"e.object_kind": ""}],
-                }],
-            )
-            updated += int(res.modified_count or 0)
-    return {
-        "unique_entities": len(entities_seen),
-        "faceted": len(facet_map),
-        "chunks_updated": updated,
-    }
-
-
-def _escape(value: str) -> str:
-    import re
-    return re.escape(value)
-
-
 _EXECUTORS = {
     ORGAN_RELATIONS: _repair_relations,
     ORGAN_FACTS: _repair_facts,
-    ORGAN_FACETS: _repair_facets,
 }
 
 

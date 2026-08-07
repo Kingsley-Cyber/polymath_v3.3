@@ -1484,23 +1484,6 @@ export async function updateGlobalSettings(
 }
 
 /**
- * GET /api/settings/extraction/validate
- * Probe every configured extraction endpoint from the backend's network
- * position; returns per-endpoint checklists + an overall deploy_ready verdict.
- */
-export async function validateExtraction(): Promise<ExtractionValidationReport> {
-  return fetchJSON("/settings/extraction/validate");
-}
-
-export async function testRunpodFlashExtraction(): Promise<
-  import("../types/settings").RunpodFlashTestResult
-> {
-  return fetchJSON("/settings/ingestion/runpod-flash/test", {
-    method: "POST",
-  });
-}
-
-/**
  * POST /api/settings/infrastructure/test
  * Test connectivity to all infrastructure services.
  */
@@ -1637,7 +1620,6 @@ export async function testModelPoolEntry(
 // ─────────────────────────────────────────────────────────────────────────
 
 import type { QueryPrefs, QueryPrefsUpdate } from "../types/queryPrefs";
-import type { ExtractionValidationReport } from "../types/settings";
 
 export async function getQueryPrefs(): Promise<QueryPrefs> {
   return fetchJSON("/query-prefs");
@@ -1716,8 +1698,6 @@ export const api = {
   getEntityRelations,
   getGlobalSettings,
   updateGlobalSettings,
-  validateExtraction,
-  testRunpodFlashExtraction,
   testInfrastructure,
   testService,
   testModalEndpoint,
@@ -2127,6 +2107,27 @@ export async function downloadResearchArtifact(artifactId: string): Promise<Blob
     throw new Error(`HTTP ${response.status}: ${error}`);
   }
   return response.blob();
+}
+
+/**
+ * Download a research artifact through the authenticated endpoint and save it
+ * to disk under its original filename. The download route requires a Bearer
+ * header, so a plain `<a href>` cannot be used — fetch the blob, mint an
+ * object URL, and drive a transient anchor click instead.
+ */
+export async function triggerResearchArtifactDownload(
+  artifactId: string,
+  filename: string,
+): Promise<void> {
+  const blob = await downloadResearchArtifact(artifactId);
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
 }
 
 export interface PortabilityImportResponse {

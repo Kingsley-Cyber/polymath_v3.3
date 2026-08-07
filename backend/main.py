@@ -15,6 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from routers.auth import limiter as auth_limiter
 from routers.auth import router as auth_router
 from routers.chat import router as chat_router
+from routers.control_plane import router as control_plane_router
 from routers.conversations import router as conversations_router
 from routers.discourse import router as discourse_router
 from routers.health import router as health_router
@@ -229,7 +230,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     try:
         _ext = await settings_service.get_system_extraction()
         result = await ingestion_service.migrate_extraction_engine(
-            str(getattr(_ext, "engine", "local") or "local")
+            str(getattr(_ext, "engine", "graphify_cpu") or "graphify_cpu")
         )
         logger.info(
             "Extraction engine migration: scanned=%d stamped=%d engine=%s",
@@ -239,8 +240,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         )
     except Exception as e:
         logger.error(f"Extraction engine migration failed: {e}")
-        # Non-fatal: unstamped corpora resolve via 'inherit' -> global engine,
-        # identical to pre-migration behavior.
+        # Non-fatal: ingestion still validates the explicit corpus contract.
 
     # Model Profiles service (Phase 19.3): attach same DB handle
     model_profiles_service.attach(conversation_service._db)
@@ -338,6 +338,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as exc:
         logger.warning("graph_sessions multi-corpus migration failed (non-fatal): %s", exc)
 
+    # Control Plane V2 — durable run ledger indexes (idempotent, non-fatal).
+    if bool(getattr(settings, "CONTROL_PLANE_V2_ENABLED", True)):
+        try:
+            from services.control_plane.ledger import ensure_ledger_indexes
+
+            await ensure_ledger_indexes(conversation_service._db)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Control-plane ledger index setup failed (non-fatal): %s", exc)
+
     ingest_poll_task: asyncio.Task | None = None
     startup_repair_task: asyncio.Task | None = None
     auto_repair_lock = asyncio.Lock()
@@ -379,7 +388,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             return
         try:
             async with auto_repair_lock:
-                result = await ingestion_service.run_auto_corpus_repair_tick()
+                if bool(getattr(settings, "CONTROL_PLANE_V2_ENABLED", True)):
+                    # Control Plane V2: artifact-driven reconciler. Actionable
+                    # work is discovered from the run ledger + artifact census,
+                    # never from queue-row counts.
+                    from services.control_plane.reconciler import run_reconcile_tick
+
+                    result = await run_reconcile_tick(
+                        conversation_service._db,
+                        ingestion_service=ingestion_service,
+                    )
+                else:
+                    result = await ingestion_service.run_auto_corpus_repair_tick()
             logger.info(
                 "Auto corpus repair %s tick: scanned=%d changed=%d",
                 reason,
@@ -596,6 +616,7 @@ app.include_router(mcp_info_router)       # Phase 24 — MCP server info for Set
 app.include_router(portability_router)    # Runtime archive download/upload for Settings
 app.include_router(research_router)       # Autoresearch jobs + artifacts
 app.include_router(ingestion_router)
+app.include_router(control_plane_router)   # Control Plane V2 — run ledger + readiness proof
 app.include_router(graph_router)
 app.include_router(graph_discovery_router)  # Phase 17 Wave 1 — /api/graph/query
 app.include_router(discourse_router)  # Phase 17 Wave 2 — /api/corpora/{id}/discourse

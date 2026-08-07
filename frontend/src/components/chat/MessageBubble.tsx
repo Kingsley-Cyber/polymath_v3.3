@@ -15,6 +15,7 @@ import type { TraceEvent } from "../../types";
 import type { StreamingToolActivity } from "../../stores/chatStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { RetrievalBadge } from "./RetrievalBadge";
+import { ResearchCard } from "./ResearchCard";
 
 interface MessageBubbleProps {
   message: ChatMessage;
@@ -117,6 +118,23 @@ export function MessageBubble({
         <span className="text-[10px] font-bold tracking-widest uppercase text-error">
           [SYSTEM_WARN] Context trimmed to fit token constraint
         </span>
+      </div>
+    );
+  }
+
+  // Deep Research job card — assistant messages flagged with
+  // `message_kind === "research_job"` render a self-polling progress /
+  // artifact card instead of ordinary markdown content.
+  const researchJobId =
+    !isUser && message.metadata?.message_kind === "research_job"
+      ? String(message.metadata.research_job_id || "")
+      : "";
+  if (researchJobId) {
+    return (
+      <div className="group flex w-full justify-start animate-fade-in">
+        <div className="flex flex-col flex-1 min-w-0 items-start">
+          <ResearchCard jobId={researchJobId} />
+        </div>
       </div>
     );
   }

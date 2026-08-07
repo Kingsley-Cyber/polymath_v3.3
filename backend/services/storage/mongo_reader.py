@@ -13,6 +13,17 @@ from services.storage.record_status import with_active_records
 logger = logging.getLogger(__name__)
 
 
+async def read_graphify_stage_artifact(
+    db: AsyncIOMotorDatabase,
+    *,
+    artifact_id: str,
+) -> dict | None:
+    """Read one immutable Graphify stage artifact by deterministic identity."""
+    return await db["graphify_stage_artifacts"].find_one(
+        {"artifact_id": artifact_id}, {"_id": 0},
+    )
+
+
 async def get_corpus(db: AsyncIOMotorDatabase, corpus_id: str) -> dict | None:
     return await db["corpora"].find_one(with_active_records({"corpus_id": corpus_id}))
 

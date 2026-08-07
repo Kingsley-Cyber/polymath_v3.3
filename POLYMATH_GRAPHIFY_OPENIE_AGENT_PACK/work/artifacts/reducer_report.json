@@ -1,0 +1,61 @@
+{
+  "aligned_raw_mentions": 728,
+  "clusters": 133,
+  "conservation": true,
+  "document_reports": [
+    {
+      "aligned_raw_mentions": 59,
+      "clusters": 54,
+      "conservation": true,
+      "document_id": "graphify_quality_fixture",
+      "hard_entity_cap": null,
+      "identity_digest": "f6ca30caf485f7039268b5748c349f57ca824fb2a1942924c22fe1557da409be",
+      "release": "graphify-document-entity-reducer-v1",
+      "schema_version": "polymath.document_entity_reducer_report.v1",
+      "state_counts": {
+        "document_local": 10,
+        "promoted": 22,
+        "review": 19,
+        "suppressed": 3
+      },
+      "status": "passed",
+      "strong_singletons": 17,
+      "survey_only_clusters": 3,
+      "terminal_assignments": 59
+    },
+    {
+      "aligned_raw_mentions": 669,
+      "clusters": 79,
+      "conservation": true,
+      "document_id": "graphify_throughput_fixture",
+      "hard_entity_cap": null,
+      "identity_digest": "bac25a080f883292772cce3916156fa4a0082f41b8bba241032acaa67a39c881",
+      "release": "graphify-document-entity-reducer-v1",
+      "schema_version": "polymath.document_entity_reducer_report.v1",
+      "state_counts": {
+        "document_local": 41,
+        "promoted": 20,
+        "review": 15,
+        "suppressed": 3
+      },
+      "status": "passed",
+      "strong_singletons": 1,
+      "survey_only_clusters": 8,
+      "terminal_assignments": 669
+    }
+  ],
+  "documents": 2,
+  "hard_entity_cap": null,
+  "identity_digest": "7639b7ada00fb5906c464771ab23a5bc8e3405575cdf58607ca8276b1d833cde",
+  "schema_version": "polymath.corpus_entity_reducer_report.v1",
+  "state_counts": {
+    "document_local": 51,
+    "promoted": 42,
+    "review": 34,
+    "suppressed": 6
+  },
+  "status": "passed",
+  "strong_singletons": 18,
+  "survey_only_clusters": 11,
+  "terminal_assignments": 728
+}

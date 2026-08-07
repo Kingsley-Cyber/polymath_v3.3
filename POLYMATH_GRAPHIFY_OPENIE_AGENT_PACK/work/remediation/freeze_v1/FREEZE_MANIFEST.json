@@ -1,0 +1,96 @@
+{
+  "freeze_id": "graphify-exposed-development-regressions-v1",
+  "frozen_at": "2026-08-06T22:42:00-06:00",
+  "repository_commit": "86149227db703c097aad586e4a18018185e9f742",
+  "evaluation_claim": {
+    "classification": "development_set_regression",
+    "general_quality_qualification": "pending_separate_sealed_evaluation",
+    "reason": "Both answer keys and item-level failures are exposed. The technical-book fixture drove correction cycles; the Meridian fixture has now been inspected and cannot qualify as held out."
+  },
+  "technical_book_66": {
+    "fixture": {
+      "path": "/Users/king/Downloads/technical_book_graphrag_stress_test/source/reliable_event_processing_chapter.md",
+      "sha256": "2c0499505455b782cd6a4a2a9bf888141a820e89919eb0866bf9ba4270bd2391",
+      "bytes": 10366
+    },
+    "answer_key": {
+      "path": "/Users/king/Downloads/technical_book_graphrag_stress_test/answer_key/gold_triples.json",
+      "sha256": "8e402f5e2f16ca8011bd23facf3f70a52c846b7618a58a8659105d1801d7d7a2",
+      "positive_assertions": 66,
+      "qualified_assertions": 5
+    },
+    "matching_policy": {
+      "path": "POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/work/stress_test/frozen_v1/SCORING_POLICY_V2.json",
+      "sha256": "9de099dbec4053be29fd0113b55759c4d186b68783b9cc68098b4ea04298b393",
+      "version": "technical-book-66-matching-v2"
+    },
+    "scorer": {
+      "path": "backend/scripts/audit_graphify_stress_frozen.py",
+      "sha256": "976f87b913f6334910daac54153a93c487949da00a7fdee462a029e1e8652c85",
+      "version": "stress-answer-key-scorer-v4-qualified-taxonomy"
+    },
+    "namespace": {
+      "name": "technical_book_stress_v1",
+      "mongo_database": "graphify_e2e_technical_book_stress_v1_bc4ad2c7",
+      "corpus_id": "0a858214-cc58-5615-9b4b-ba177ffd3ca3",
+      "document_id": "9e3e45389e2e73da5cc6838d98f99f7d59b3dccbf1cb08035f8ad496628365c7"
+    },
+    "known_exposure": {
+      "correction_cycles": 16,
+      "status": "development_regression"
+    }
+  },
+  "meridian_adversarial_44": {
+    "fixture": {
+      "path": "/Users/king/Downloads/graphrag_accuracy_test 2/test_document.md",
+      "sha256": "4a05afcc74f0cfc5b670e31027c4e9ba3b7133fe64becbd0fe0213f1ebcff544"
+    },
+    "answer_key": {
+      "path": "/Users/king/Downloads/graphrag_accuracy_test 2/answer_key.md",
+      "sha256": "e1ea38db6c81864d136ee42c940fd1482f8bf9005a3b1b4edc17383154093116",
+      "entities": 45,
+      "positive_assertions": 44,
+      "trap_assertions": 3
+    },
+    "matching_policy": {
+      "path": "POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/work/remediation/freeze_v1/MERIDIAN_MATCHING_POLICY.json",
+      "sha256": "dd0d661e5669cfce68daf529afd580a4cf79f17ee43a58b48f3c22bfc390bbde",
+      "version": "meridian-adversarial-matching-v1"
+    },
+    "baseline_scorer_harness": {
+      "path": "/Users/king/Downloads/graphrag_accuracy_test 2/run_graphify_independent.py",
+      "sha256": "81734c67bb077f9a2785ea4c43f432449999e91f55592d43901952c97712d149",
+      "warning": "This direct pipeline harness bypasses canonical Qdrant ingestion and is frozen only to reproduce the first-run baseline. A separate canonical E2E scorer is required for release gates."
+    },
+    "stage_scorer": {
+      "path": "POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/work/remediation/freeze_v1/score_meridian_v1.py",
+      "sha256": "8b03e3d0932a603d765e150e80ea76c9be8683b2436319f09e5d3ddff97bf03c",
+      "version": "meridian-stage-scorer-v1",
+      "endpoint_projection_policy": "Use Neo4j display_name for human canonical labels while retaining canonical_name as the storage identity key. No fuzzy or embedding matching."
+    },
+    "baseline_namespace": {
+      "mongo_database": "graphify_eval_meridian_ee7ac085f300",
+      "corpus_id": "e36dba1d-2df5-5770-9b15-0fd135ed3e75",
+      "document_id": "4a05afcc74f0cfc5b670e31027c4e9ba3b7133fe64becbd0fe0213f1ebcff544"
+    },
+    "known_exposure": {
+      "first_run_count": 1,
+      "correction_cycles": 0,
+      "status": "development_regression_as_of_this_freeze"
+    }
+  },
+  "release_thresholds": {
+    "entity_recall_min": 0.95,
+    "entity_precision_min": 0.85,
+    "undirected_gold_pair_recall_min": 0.90,
+    "directed_gold_pair_recall_min": 0.85,
+    "predicate_accuracy_given_directed_pair_min": 0.90,
+    "canonical_triple_precision_min": 0.90,
+    "technical_book_positive_recall_min": 0.90,
+    "meridian_strict_f1_min": 0.80,
+    "trap_leakage_max": 0,
+    "wildcard_terminal_endpoints_max": 0,
+    "forced_related_to_fallback_max": 0,
+    "exact_evidence_alignment": 1.0
+  }
+}
