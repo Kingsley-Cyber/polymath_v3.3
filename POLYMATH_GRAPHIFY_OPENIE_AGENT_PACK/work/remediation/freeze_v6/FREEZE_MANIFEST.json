@@ -77,7 +77,7 @@
   "backend/evals/graphify_synthetic_v1/score_synthetic_family.py": "f6a7d3158678ab4159b77ac97007ee1875fb1f2909125c9dc2b9b3d0ec969336",
   "backend/models/graphify_contracts.py": "46799a80b9c74cbe42b93e1b1aaa47a69a69dd33d8d391dc201b5fbf11ca0820",
   "backend/scripts/audit_graphify_stress_frozen.py": "976f87b913f6334910daac54153a93c487949da00a7fdee462a029e1e8652c85",
-  "backend/scripts/replay_downstream.py": "b44580832e58740652d6ad3cf5d0b7c1cfe2c7803a41ee0255079d7c188c6f1c",
+  "backend/scripts/replay_downstream.py": "e69fc282bfd12d9eda4104c8e870e80e07d3022f712b5340ab196908d91a65b2",
   "backend/scripts/run_graphify_stress_answer_key.py": "3b36fae42f393aada48e039b77428805c9541f815f54f78a4bb4845fc24a2604",
   "backend/services/extraction/canonical.py": "e3908e1d3800b4bb65aff821400162b58f0cce9af7c92853543578d33f7c1293",
   "backend/services/extraction/dep_path_extractor.py": "631e8e75c01c623dc6da8102375dcf998687282e637206cf00dd8f4b21ef38cc",
@@ -98,6 +98,7 @@
   "backend/services/ghost_b.py": "497dd4c678b72a544ec306937f8e6e74a7ebb0e818929790e0fca7fca7c69792",
   "backend/services/graph/neo4j_writer.py": "a90c06cd00c05c9bd0f3d22db0942c353ece411141ffdc85cb77ed1a9af60e5d",
   "backend/services/ingestion/docling_adapter.py": "87d90c9981f50fa2dcbf2ca94aea1b2d6ceb1b1a420b5b4104868f15e08835f5",
+  "backend/services/storage/graphify_artifact_codec.py": "295558d8dc599973b2c17aafa67a377f211507e207775ee75619eb8ca479e62f",
   "config/entity_schema.yaml": "73bad40139d3f369e649d48b3e889fe9731f0bc77f1a5e084447119a113d9fe0",
   "config/ontology.yaml": "04caa3324848c1fa9d8d02d5ab2dae54e9d7d51959ac83b0c5e60bd7cd5ecead",
   "config/predicate_synonyms.yaml": "3a3dcc57e78294c2b24f57b43755cc9c9d69dd0f806906a333ed851467c37198"
@@ -127,7 +128,7 @@
   "spacy_model": "en_core_web_sm"
  },
  "freeze_id": "graphify-qualification-freeze-v6",
- "frozen_at_commit": "5c83d49f0cf36d25babcbb3feb38c48769a92095",
+ "frozen_at_commit": "00a482015a4e392b40cf256684ca85a72a0752d7",
  "known_residuals_at_freeze": [
   "lowercase concept-phrase entities ('atomic deconstruction', 'text-to-video') intentionally suppressed by genericity gates \u2014 sealed-v2-class gold needs an owner contract decision before such relations can promote",
   "spec-metadata key mapping policy beyond self-naming keys (primary_system, has_type ...) undecided",
@@ -135,6 +136,6 @@
   "DENSE_STRUCTURE routing (labeling live, handler pending); per-proposer promotion telemetry pending",
   "agentless participles (E10), D04-class typing, cross-sentence relations"
  ],
- "purpose": "Round-1 downstream remediation freeze: adapter-v2 deterministic linking ladder, evidence-scoped FACT merge, self-loop + function-word guards. Precedes sealed_qualification_v7/v8 (research-monograph scale tests). Revised post-census-fold fix (scale crash on v7 first attempt; no key existed, seal unaffected). Re-pinned after promotable-endpoint acceptance rule (v7 scale crash #2).",
+ "purpose": "Round-1 downstream remediation freeze: adapter-v2 deterministic linking ladder, evidence-scoped FACT merge, self-loop + function-word guards. Precedes sealed_qualification_v7/v8 (research-monograph scale tests). Revised post-census-fold fix (scale crash on v7 first attempt; no key existed, seal unaffected). Re-pinned after promotable-endpoint acceptance rule (v7 scale crash #2). Re-pinned after artifact shard codec (v8 DocumentTooLarge).",
  "supersedes": "freeze_v5 (closed; sealed_v6 graded under it: traps 11/11, FACT .462)"
 }
