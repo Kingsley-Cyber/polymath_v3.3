@@ -167,3 +167,29 @@ predicate interpretation 2 (consumes→causes; materializes unmapped→OPEN), on
 coverage 1 (created_by → OPEN, contract-correct). Assertion-safety machinery is the
 strongest layer across all six tests; subject-side discourse recovery + alignment is the
 weakest. Full assessment: work/remediation/sealed_v6/SEALED_V6_ASSESSMENT.md.
+
+### Downstream remediation round 1 (2026-08-07, owner-ratified, replay-only)
+**Fix #1 — deterministic argument-linking ladder** (argument adapter v2): exact mention →
+exact canonical/alias → unique contained mention → unique contained canonical phrase →
+explicit document variant (name-cased short form) → non-entity. Uniqueness required per
+rung; clausal/relative-lead/multi-entity arguments never containment-align; OpenIE surface
+never rewritten (both surfaces preserved). Acceptance family green (Ingestion Worker &
+Mira Solano variants; ambiguous/wrong-number/clausal all rejected).
+**Fix #2 — evidence-scoped FACT merge** (shared `openie_fact_merge_disposition`): qualified
+syntax vetoes an OpenIE FACT only on overlapping evidence spans; fact identity dedupes
+globally; pipeline and replay share the one contract.
+**Soundness guards the measurement exposed**: self-referential endpoints REJECT
+(subject entity == object entity); function-word canonical names never alignable.
+
+Replay measurement (frozen observations, no re-extraction, all conservation HOLDS,
+v6 traps still 0 leaked, 554 tests green):
+- downstream first-loss queue 18 → 13 (alignment 13 → 8, merge 4 → 3, assertion 2)
+- OpenIE stream unique promotions: book 20 (13 exact gold), sealed-v1 22 (16), v6 1 (0)
+- residual openie FPs 7/6/1 — upstream attachment errors + value-entity edges
+  (proposition-discovery queue; NOT downstream)
+- assertion-status residuals inspected per plan, mechanisms named, untouched:
+  book R22 object=EMBEDDED_CLAUSE (clause-headed object hides entity head);
+  sealed R46 object=DESCRIPTION (value-fact requires strict-recovery provenance).
+Alignment residuals: book R15/R18/R58, sealed R2/R15/R20/R42/R43, v6 R11 — next
+inspection targets. Adapter release bumped to v2; extraction-time regressions (families,
+book, sealed re-runs) still required before any new sealed one-shot.

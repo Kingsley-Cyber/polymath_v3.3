@@ -1869,3 +1869,26 @@ def run_relation_fast_path(
         tuple(sorted(endpoint_mentions.values(), key=lambda item: item.mention_id)),
         tuple(surface_records), tuple(mapped), tuple(assertions), report,
     )
+
+
+def openie_fact_merge_disposition(
+    key: tuple[str | None, str | None, str | None],
+    span: tuple[int, int],
+    accepted_keys: set,
+    qualified_spans_by_key: dict,
+) -> str:
+    """Evidence-scoped FACT merge contract (owner-ratified 2026-08-07).
+
+    Fact identity (subject, predicate, object) dedupes globally, but a
+    QUALIFIED syntax record vetoes an OpenIE FACT only when both read the
+    SAME evidence (overlapping spans). Different evidence contexts coexist:
+    a direct assertion in sentence A is never silenced by an attributed
+    restatement in sentence B — the safe result applies only to genuine
+    same-evidence status conflicts.
+    """
+    if key in accepted_keys:
+        return "duplicate"
+    for start, end in qualified_spans_by_key.get(key, ()):
+        if start < span[1] and span[0] < end:
+            return "blocked_same_evidence_qualified"
+    return "promote"

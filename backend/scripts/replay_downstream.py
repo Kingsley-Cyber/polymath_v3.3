@@ -136,19 +136,21 @@ def replay(frozen: dict) -> dict:
     assertions = tuple(assemble_openie_assertions(candidates, arguments).assertions)
     fast_path = run_relation_fast_path([document], [survey], completed, entities)
 
-    # FACT merge — the exact promotion contract the pipeline applies (a FACT
-    # joins the graph unless the syntax lane already accepted or qualified the
-    # same (subject mention, object mention, predicate) key).
-    accepted_keys = {
+    # FACT merge — the exact promotion contract the pipeline applies
+    # (evidence-scoped: shared helper openie_fact_merge_disposition).
+    from services.extraction.graphify_relations import openie_fact_merge_disposition
+
+    merged_keys = {
         (m.subject_mention_id, m.object_mention_id, m.canonical_candidate)
         for m in fast_path.mapped_relations if m.terminal_state.value == "accepted"
     }
-    qualified_keys = {
-        (m.subject_mention_id, m.object_mention_id, m.canonical_candidate)
-        for m in fast_path.mapped_relations if m.terminal_state.value == "qualified"
-    }
+    qualified_spans_by_key: dict[tuple, list[tuple[int, int]]] = {}
+    for m in fast_path.mapped_relations:
+        if m.terminal_state.value == "qualified":
+            qualified_spans_by_key.setdefault(
+                (m.subject_mention_id, m.object_mention_id, m.canonical_candidate), [],
+            ).append((m.evidence_start, m.evidence_end))
     merge_fate: dict[str, str] = {}
-    merged_keys = set(accepted_keys)
     for assertion in assertions:
         if assertion.lane != "FACT":
             continue
@@ -158,9 +160,13 @@ def replay(frozen: dict) -> dict:
             continue
         key = (assertion.subject_mention_id, assertion.object_mention_id,
                assertion.canonical_predicate)
-        if key in qualified_keys:
+        disposition = openie_fact_merge_disposition(
+            key, (assertion.evidence_start, assertion.evidence_end),
+            merged_keys, qualified_spans_by_key,
+        )
+        if disposition == "blocked_same_evidence_qualified":
             merge_fate[assertion.assertion_id] = "blocked_by_qualified_syntax"
-        elif key in merged_keys:
+        elif disposition == "duplicate":
             merge_fate[assertion.assertion_id] = "already_promoted_by_syntax_or_duplicate"
         else:
             merged_keys.add(key)

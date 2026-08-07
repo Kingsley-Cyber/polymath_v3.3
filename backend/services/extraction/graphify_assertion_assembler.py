@@ -65,6 +65,12 @@ def assemble_openie_assertions(
         elif candidate.mapping_status == "REVIEW":
             lane = "REVIEW"
             reasons.append("predicate_or_endpoint_requires_review")
+        elif subject.entity_id is not None and subject.entity_id == obj.entity_id:
+            # Both arguments resolve to the same entity: an appositive or
+            # definitional restatement, never a relation. A graph edge from a
+            # node to itself asserts nothing.
+            lane = "REJECT"
+            reasons.append("self_referential_endpoints")
         elif subject.kind != OpenIEArgumentKind.ENTITY:
             lane = "REJECT"
             reasons.append("fact_subject_is_not_a_canonical_entity")

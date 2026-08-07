@@ -1,4 +1,21 @@
-"""Conservative exact-span adapter for raw OpenIE arguments."""
+"""Deterministic entity-linking ladder for raw OpenIE arguments.
+
+Owner-ratified alignment contract (2026-08-07): an OpenIE argument surface
+does not have to equal an entity mention surface — it only has to establish
+that it unambiguously refers to that local mention. Resolution walks a
+strict ladder; every rung requires a UNIQUE entity or it fails to the next:
+
+    1. exact completed mention surface
+    2. exact canonical name / explicit alias
+    3. unique completed mention contained inside the argument
+    4. unique canonical/alias phrase contained inside the argument
+    5. explicit document variant (contiguous name-token short form)
+    → otherwise the argument stays non-entity (never invented, never guessed)
+
+No fuzzy matching, no embeddings, no edit distance. Both surfaces are
+preserved: `surface` keeps OpenIE's observation verbatim; the mention and
+canonical name ride alongside it.
+"""
 
 from __future__ import annotations
 
@@ -18,7 +35,7 @@ from models.graphify_contracts import (
     stable_id,
 )
 
-ARGUMENT_ADAPTER_RELEASE = "graphify-openie-argument-adapter-v1"
+ARGUMENT_ADAPTER_RELEASE = "graphify-openie-argument-adapter-v2-deterministic-ladder"
 _WORD_RE = re.compile(r"[\w]+", re.UNICODE)
 _PRONOUNS = frozenset({"it", "they", "this", "that", "these", "those", "we", "he", "she", "them", "their", "its"})
 _GENERIC = frozenset({
@@ -63,27 +80,43 @@ def _occurrences(text: str, surface: str) -> list[tuple[int, int]]:
     ]
 
 
-def _entity_argument(
+_FUNCTION_WORDS = frozenset({
+    "a", "an", "the", "and", "or", "of", "for", "with", "by", "at", "on",
+    "in", "to", "from", "as", "but", "not",
+})
+_LEADING_ARTICLE_RE = re.compile(r"^(?:a|an|the)\s+", re.I)
+_RELATIVE_LEAD_RE = re.compile(r"^(?:whose|which|who|that|where|when)\b", re.I)
+_CLAUSAL_VERB_RE = re.compile(
+    r"\b(?:is|are|was|were|has|have|uses|depends|supports|owns|causes|"
+    r"produces|consumes|references?|contains?)\b",
+)
+_Pair = tuple[CompletedMentionV1, DocumentEntityV1]
+
+
+def _representative(candidates: list[_Pair]) -> _Pair:
+    return sorted(candidates, key=lambda item: (
+        -(item[0].normalized_end - item[0].normalized_start),
+        item[0].normalized_start,
+        item[0].mention_id,
+    ))[0]
+
+
+def _unique_entity(candidates: list[_Pair]) -> _Pair | None:
+    """Exactly one ENTITY may survive a rung; ambiguity fails the rung."""
+    if not candidates:
+        return None
+    if len({entity.entity_id for _mention, entity in candidates}) != 1:
+        return None
+    return _representative(candidates)
+
+
+def _scope_to_argument_occurrence(
     proposition: OpenIERawPropositionV1,
     role: str,
     surface: str,
-    mentions: Sequence[CompletedMentionV1],
-    entity_by_id: dict[str, DocumentEntityV1],
-) -> AdaptedOpenIEArgumentV1 | None:
-    candidates = []
-    for mention in mentions:
-        entity = entity_by_id.get(mention.entity_id)
-        if entity is None or entity.state not in _ELIGIBLE_STATES:
-            continue
-        if not (
-            proposition.evidence_start <= mention.normalized_start
-            and mention.normalized_end <= proposition.evidence_end
-        ):
-            continue
-        if _normalize(mention.surface) == _normalize(surface):
-            candidates.append((mention, entity))
-    if not candidates:
-        return None
+    candidates: list[_Pair],
+) -> list[_Pair]:
+    """Narrow exact-match candidates to the argument's actual occurrence."""
     argument_occurrences = _occurrences(proposition.evidence_text, surface)
     if len(argument_occurrences) > 1:
         relation_start = proposition.evidence_text.casefold().find(proposition.relation.casefold())
@@ -106,42 +139,137 @@ def _entity_argument(
             if absolute[0] <= item[0].normalized_start and item[0].normalized_end <= absolute[1]
         ]
         if scoped:
-            candidates = scoped
-    candidates.sort(key=lambda item: (
-        -(item[0].normalized_end - item[0].normalized_start),
-        item[0].normalized_start,
-        item[0].mention_id,
-    ))
-    entity_ids = {entity.entity_id for _mention, entity in candidates}
-    longest = candidates[0][0].normalized_end - candidates[0][0].normalized_start
-    best = [
-        item for item in candidates
-        if item[0].normalized_end - item[0].normalized_start == longest
-    ]
-    if len(entity_ids) != 1 or len(best) != 1:
+            return scoped
+    return candidates
+
+
+def _entity_argument(
+    proposition: OpenIERawPropositionV1,
+    role: str,
+    surface: str,
+    mentions: Sequence[CompletedMentionV1],
+    entity_by_id: dict[str, DocumentEntityV1],
+) -> AdaptedOpenIEArgumentV1 | None:
+    norm_arg = _normalize(surface)
+    if not norm_arg or norm_arg in _PRONOUNS or norm_arg in _GENERIC:
         return None
-    mention, entity = best[0]
-    return AdaptedOpenIEArgumentV1(
-        argument_id=stable_id(
-            "adapted-argument", proposition.proposition_id, role, surface,
-            OpenIEArgumentKind.ENTITY.value, mention.mention_id, ARGUMENT_ADAPTER_RELEASE,
-        ),
-        proposition_id=proposition.proposition_id,
-        document_id=proposition.document_id,
-        unit_id=proposition.unit_id,
-        role=role,
-        surface=surface,
-        kind=OpenIEArgumentKind.ENTITY,
-        normalized_start=mention.normalized_start,
-        normalized_end=mention.normalized_end,
-        mention_id=mention.mention_id,
-        entity_id=entity.entity_id,
-        entity_type=entity.entity_type,
-        entity_state=entity.state,
-        normalized_value=entity.canonical_name,
-        reasons=("exact_promoted_mention_subspan",),
-        adapter_release=ARGUMENT_ADAPTER_RELEASE,
+
+    def build(mention: CompletedMentionV1, entity: DocumentEntityV1, reason: str) -> AdaptedOpenIEArgumentV1:
+        return AdaptedOpenIEArgumentV1(
+            argument_id=stable_id(
+                "adapted-argument", proposition.proposition_id, role, surface,
+                OpenIEArgumentKind.ENTITY.value, mention.mention_id, ARGUMENT_ADAPTER_RELEASE,
+            ),
+            proposition_id=proposition.proposition_id,
+            document_id=proposition.document_id,
+            unit_id=proposition.unit_id,
+            role=role,
+            surface=surface,
+            kind=OpenIEArgumentKind.ENTITY,
+            normalized_start=mention.normalized_start,
+            normalized_end=mention.normalized_end,
+            mention_id=mention.mention_id,
+            entity_id=entity.entity_id,
+            entity_type=entity.entity_type,
+            entity_state=entity.state,
+            normalized_value=entity.canonical_name,
+            reasons=(reason,),
+            adapter_release=ARGUMENT_ADAPTER_RELEASE,
+        )
+
+    eligible: list[_Pair] = []
+    local: list[_Pair] = []
+    for mention in mentions:
+        entity = entity_by_id.get(mention.entity_id)
+        if entity is None or entity.state not in _ELIGIBLE_STATES:
+            continue
+        # A bare function word is not an entity reference, whatever the
+        # census minted — the ladder never links to one.
+        if _normalize(entity.canonical_name) in _FUNCTION_WORDS:
+            continue
+        eligible.append((mention, entity))
+        if (
+            proposition.evidence_start <= mention.normalized_start
+            and mention.normalized_end <= proposition.evidence_end
+        ):
+            local.append((mention, entity))
+
+    # Rung 1: exact completed mention surface.
+    exact = [item for item in local if _normalize(item[0].surface) == norm_arg]
+    hit = _unique_entity(_scope_to_argument_occurrence(proposition, role, surface, exact))
+    if hit:
+        return build(*hit, "exact_completed_mention")
+
+    # Rung 2: exact canonical name / explicit alias.
+    named = [
+        item for item in local
+        if _normalize(item[1].canonical_name) == norm_arg
+        or any(_normalize(alias) == norm_arg for alias in item[1].aliases)
+    ]
+    hit = _unique_entity(named)
+    if hit:
+        return build(*hit, "exact_canonical_or_alias")
+
+    # Containment rungs never fire on clausal or relative-lead arguments — a
+    # clause mentioning an entity does not refer to it.
+    clausal = (
+        _RELATIVE_LEAD_RE.search(surface.strip())
+        or _EMBEDDED_RE.search(surface)
+        or _CLAUSAL_VERB_RE.search(norm_arg)
+        or len(norm_arg.split()) > 8
     )
+    if not clausal:
+        # Rung 3: unique completed mention contained inside the argument.
+        contained = [
+            item for item in local
+            if _normalize(item[0].surface)
+            and _normalize(item[0].surface) not in _GENERIC
+            and _normalize(item[0].surface) not in _PRONOUNS
+            and _contains_phrase(surface, item[0].surface)
+        ]
+        hit = _unique_entity(contained)
+        if hit:
+            return build(*hit, "unique_completed_mention_contained_in_argument")
+
+        # Rung 4: unique canonical/alias phrase contained inside the argument.
+        phrase_hits = []
+        for item in local:
+            for phrase in (item[1].canonical_name, *item[1].aliases):
+                normalized_phrase = _normalize(phrase)
+                if (
+                    normalized_phrase
+                    and normalized_phrase not in _GENERIC
+                    and _contains_phrase(surface, phrase)
+                ):
+                    phrase_hits.append(item)
+                    break
+        hit = _unique_entity(phrase_hits)
+        if hit:
+            return build(*hit, "unique_canonical_phrase_contained_in_argument")
+
+        # Rung 5: explicit document variant — the argument (article stripped,
+        # name-cased) is a contiguous token short form of exactly one document
+        # entity's multi-token canonical name ("Solano" ⊂ "Mira Solano").
+        bare = _LEADING_ARTICLE_RE.sub("", surface.strip())
+        first_alpha = next((char for char in bare if char.isalpha()), "")
+        if len(norm_arg) >= 4 and first_alpha.isupper():
+            arg_tokens = _normalize(bare).split()
+            by_entity: dict[str, list[_Pair]] = {}
+            for item in eligible:
+                by_entity.setdefault(item[1].entity_id, []).append(item)
+            variant_hits = []
+            for pairs in by_entity.values():
+                tokens = _normalize(pairs[0][1].canonical_name).split()
+                if len(tokens) >= 2 and 1 <= len(arg_tokens) < len(tokens) and any(
+                    tokens[index:index + len(arg_tokens)] == arg_tokens
+                    for index in range(len(tokens) - len(arg_tokens) + 1)
+                ):
+                    in_evidence = [item for item in pairs if item in local]
+                    variant_hits.append(_representative(in_evidence or pairs))
+            hit = _unique_entity(variant_hits)
+            if hit:
+                return build(*hit, "explicit_document_variant_short_form")
+    return None
 
 
 def _non_entity_argument(
@@ -224,6 +352,9 @@ def adapt_openie_arguments(
         "classification_conservation": len(arguments) == len(propositions) * 2,
         "kind_counts": dict(sorted(counts.items())),
         "entity_arguments": len(entity_arguments),
+        "alignment_ladder_counts": dict(sorted(Counter(
+            item.reasons[0] for item in entity_arguments if item.reasons
+        ).items())),
         "strict_entity_alignment_rate": (
             sum(item.normalized_start is not None and item.normalized_end is not None for item in entity_arguments)
             / len(entity_arguments) if entity_arguments else 1.0

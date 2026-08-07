@@ -83,6 +83,7 @@ from services.extraction.graphify_relations import (
     RELATION_RELEASE,
     RelationFastPathOutput,
     evaluate_relation_eligibility,
+    openie_fact_merge_disposition,
     run_relation_fast_path,
 )
 from services.extraction.graphify_survey import (
@@ -654,10 +655,13 @@ async def run_graphify_pipeline(
             (item.subject_mention_id, item.object_mention_id, item.canonical_candidate)
             for item in mapped if item.terminal_state.value == "accepted"
         }
-        qualified_keys = {
-            (item.subject_mention_id, item.object_mention_id, item.canonical_candidate)
-            for item in mapped if item.terminal_state.value == "qualified"
-        }
+        qualified_spans_by_key: dict[tuple, list[tuple[int, int]]] = {}
+        for item in mapped:
+            if item.terminal_state.value == "qualified":
+                qualified_spans_by_key.setdefault(
+                    (item.subject_mention_id, item.object_mention_id, item.canonical_candidate),
+                    [],
+                ).append((item.evidence_start, item.evidence_end))
         blocked_by_qualified_syntax = 0
         for assertion in openie_assertions:
             if (
@@ -669,9 +673,13 @@ async def run_graphify_pipeline(
                 assertion.subject_mention_id, assertion.object_mention_id,
                 assertion.canonical_predicate,
             )
-            if key in existing_keys:
+            disposition = openie_fact_merge_disposition(
+                key, (assertion.evidence_start, assertion.evidence_end),
+                existing_keys, qualified_spans_by_key,
+            )
+            if disposition == "duplicate":
                 continue
-            if key in qualified_keys:
+            if disposition == "blocked_same_evidence_qualified":
                 blocked_by_qualified_syntax += 1
                 continue
             existing_keys.add(key)
