@@ -1,7 +1,44 @@
 {
   "benchmarks": {
     "meridian_44": "development_regression (burned 2026-08-06; do not score against it)",
-    "sealed_qualification": "PENDING \u2014 one-shot only, key unseen by implementation agents until scored",
+    "sealed_qualification": {
+      "counts": {
+        "distinct_gold_entities": 52,
+        "positive": 51,
+        "qualified_traps": 7,
+        "words": 1385
+      },
+      "domain": "fictional satellite-telemetry ground segment",
+      "files": {
+        "README.md": {
+          "bytes": 3556,
+          "sha256": "7e3600c98c8b4fd29e22d93aea241135d226925f5ceb02d6878e2a178c26a697"
+        },
+        "answer_key/EXPECTED.md": {
+          "bytes": 3034,
+          "sha256": "224a19016efb6246de99c780709646c04f86edee6e82e215d6793017abe819db"
+        },
+        "answer_key/gold_triples.json": {
+          "bytes": 15799,
+          "sha256": "60ff6d740d0769dd07f307f76165ffd5dd40676849ed187694de3c150b86ceeb"
+        },
+        "source/cinder_mesa_ground_segment_chapter.md": {
+          "bytes": 8812,
+          "sha256": "8c05628225d8efab29ea5c7fa6642f62045365bf90eda57066d9b80cdb48f4c0"
+        }
+      },
+      "package": "/Users/king/Downloads/sealed_qualification_v1",
+      "protocol": [
+        "1. verify_freeze.py must report FREEZE INTACT",
+        "2. verify package sha256s against this manifest",
+        "3. run ONCE: backend/scripts/run_graphify_stress_answer_key.py --input <source> --answer-key <gold> --namespace sealed_qualification_v1 --output-dir POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/work/remediation/sealed_qualification_v1",
+        "4. verify_freeze.py again must report FREEZE INTACT",
+        "5. the score stands as-is; no reruns, no scorer/alias/threshold changes; any post-hoc analysis uses the set as a burned development regression only",
+        "note: this harness qualifies extraction quality via the direct pipeline; canonical-worker-path E2E remains separately required for production-write promotion"
+      ],
+      "sealed_at": "2026-08-07T04:3x MDT (post-freeze; authored by an isolated agent; implementation agents have not read any package file)",
+      "status": "SEALED_AWAITING_ONE_SHOT_RUN"
+    },
     "synthetic_families_v1": "development regression, 62/71 at freeze",
     "technical_book_66": "development_regression (16 correction cycles; last: 58/66 matched, byte-stable across all 5 remediation fixes)"
   },
