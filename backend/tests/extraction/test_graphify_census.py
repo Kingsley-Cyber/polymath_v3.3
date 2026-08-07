@@ -149,3 +149,29 @@ def test_misaligned_model_span_reanchors_or_persists_as_failure() -> None:
     assert _anchor_span(two, "alpha", 2, 7) == (2, 7)
     # Absent surface: unchanged as well.
     assert _anchor_span(text, "zeta", 1, 5) == (1, 5)
+
+
+def test_deterministic_identifier_minting_unions_with_model_mentions() -> None:
+    text = (
+        "Solano assigned follow-up action AR-17 to Nikhil Rao.\n"
+        "document_id: INC-4821\n"
+        "The team read RFC-9110 and shipped a top-10 list of Wi-Fi fixes v2.\n"
+    )
+    document = normalize_document("doc", text)
+    sink = InMemoryRawMentionSink()
+    output = run_entity_census(
+        [document], [survey_document(document)], FakeProvider(), sink,
+    )
+    minted = {
+        m.surface: m for m in output.mentions
+        if m.provider_release == "graphify-identifier-miner-v1"
+    }
+    assert set(minted) == {"AR-17", "INC-4821", "RFC-9110"}
+    sample = minted["AR-17"]
+    assert sample.entity_type == "artifact"
+    assert sample.facet == "document_identifier"
+    assert sample.terminal_state.value == "aligned"
+    assert document.normalized_text[sample.normalized_start:sample.normalized_end] == "AR-17"
+    assert output.report["identifier_mentions_minted"] == 3
+    assert output.report["conservation"] is True
+    assert len(sink.records) == len(output.mentions)

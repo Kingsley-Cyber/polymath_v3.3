@@ -3,9 +3,9 @@
   "status": "PASS",
   "runtime": {
     "pipeline_release": "graphify-cpu-pipeline-v15",
-    "mongo_database": "graphify_eval_syn_10_734dffd45e",
-    "corpus_id": "aab15c47-8b75-5c3b-be9b-402531bf5b46",
-    "elapsed_seconds": 0.94,
+    "mongo_database": "graphify_eval_syn_10_9cc319ed4f",
+    "corpus_id": "0a90148a-75ed-58b4-8fd9-57110b3d0176",
+    "elapsed_seconds": 1.16,
     "interpreter": "/Users/king/polymath_v3.3/local_ghost_b/.venv/bin/python"
   },
   "items": {
@@ -34,6 +34,7 @@
     "Kelpgate Module",
     "Mooring Ledger",
     "Moorline Dispatch",
+    "SKY-2027-04",
     "Shoal Report",
     "Skerry\nInspection Suite",
     "Skerry Inspection Suite",

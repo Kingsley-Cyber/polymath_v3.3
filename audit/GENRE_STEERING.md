@@ -294,3 +294,14 @@ test_graphify_endpoint_eligibility.py: 'Deployment CAN cause…' (AUX) vetoed,
 'can -[causes]-> action' class is gone; families matched 94/102 identical (appositive
 and metadiscourse residuals untouched, per scoping order); book/sealed replay traces
 and conservation unchanged; 571 tests green.
+
+### Factory station 3: deterministic identifier minting (#3, 2026-08-07)
+`graphify-identifier-miner-v1` in the census: uppercase-prefix-hyphen-digits identifiers
+(AR-17 / INC-4821 / RFC-9110 / ISO-9001 class) mint as first-class deterministic mentions
+(artifact / document_identifier facet, confidence 1.0, thin provenance windows) UNIONED
+with GLiNER2 output — a model never rediscovers observable syntax. Negative shapes
+(top-10, Wi-Fi, v2) never mint. Report field `identifier_mentions_minted` (doctrine
+enforcement). Verified: v6 arXiv dev rerun — AR-17 now a PROMOTED entity (was the only
+entity miss, 24/25→25/25-equivalent); families 94/102 + unexpected unchanged; 572 tests
+green. Neo4j store was found damaged (TransactionCommitFailed after earlier critical
+error) — volume wiped and rebuilt, safe by architecture (graph = rebuildable projection).

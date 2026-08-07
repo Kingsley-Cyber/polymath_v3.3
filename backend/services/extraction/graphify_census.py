@@ -37,6 +37,12 @@ from services.extraction.graphify_unit_kind import (
 )
 
 CENSUS_RELEASE = "graphify-entity-census-v1"
+IDENTIFIER_MINER_RELEASE = "graphify-identifier-miner-v1"
+# Deterministic identifier minting (#3, owner-ratified): observable syntax the
+# entity model should never have to rediscover — an uppercase code prefix,
+# hyphen, digits (AR-17, INC-4821, RFC-9110, ISO-9001). Format-shaped and
+# corpus-blind; facets refine later.
+_MINT_IDENTIFIER_RE = re.compile(r"\b[A-Z][A-Z0-9]{1,9}-\d{1,6}(?:[A-Z0-9-]*[A-Z0-9])?\b")
 MIN_WINDOW_TOKENS = 512
 TARGET_WINDOW_TOKENS = 512
 MAX_WINDOW_TOKENS = 1024
@@ -388,6 +394,55 @@ def run_entity_census(
         persisted_calls += 1
         mentions.extend(batch_mentions)
     inference_seconds = time.perf_counter() - inference_started
+
+    # Deterministic identifier mentions UNION with model mentions (#3): one
+    # thin synthetic window per identifier occurrence, provenance-marked with
+    # the miner release. The reducer merges them with model output; nothing
+    # is ever rediscovered by a model that deterministic syntax already knows.
+    identifier_mentions = 0
+    for document in documents:
+        text = document.normalized_text
+        doc_sequence = 1 + max(
+            (window.sequence for window in all_windows if window.document_id == document.document_id),
+            default=-1,
+        )
+        for match in _MINT_IDENTIFIER_RE.finditer(text):
+            surface = match.group(0)
+            start, end = match.start(), match.end()
+            original = to_original_span(document, start, end)
+            window_hash = hashlib.sha256(surface.encode("utf-8")).hexdigest()
+            window = ExtractionWindowV1(
+                window_id=stable_id(
+                    "identifier-window", document.document_id, start, end,
+                    surface, IDENTIFIER_MINER_RELEASE,
+                ),
+                document_id=document.document_id,
+                sequence=doc_sequence,
+                normalized_start=start,
+                normalized_end=end,
+                original_start=original.start if original.exact else None,
+                original_end=original.end if original.exact else None,
+                text=surface,
+                heading_path=(),
+                token_count=1,
+                window_sha256=window_hash,
+            )
+            doc_sequence += 1
+            all_windows.append(window)
+            mention = _raw_mention(
+                document, window,
+                EntityPrediction(
+                    text=surface, entity_type="artifact", start=0, end=len(surface),
+                    confidence=1.0, facet="document_identifier",
+                ),
+                0,
+                schema_release=IDENTIFIER_MINER_RELEASE,
+            )
+            mention = mention.model_copy(update={"provider_release": IDENTIFIER_MINER_RELEASE})
+            sink.persist([mention])
+            mentions.append(mention)
+            identifier_mentions += 1
+
     window_order = {window.window_id: index for index, window in enumerate(all_windows)}
     mentions.sort(key=lambda item: (
         window_order[item.window_id], item.local_start, item.local_end,
@@ -404,6 +459,7 @@ def run_entity_census(
         "windows": len(all_windows),
         "emitted_predictions": len(mentions),
         "folded_duplicate_predictions": folded_duplicates,
+        "identifier_mentions_minted": identifier_mentions,
         "persisted_records": len(mentions),
         "aligned_mentions": aligned,
         "alignment_failures": failures,
