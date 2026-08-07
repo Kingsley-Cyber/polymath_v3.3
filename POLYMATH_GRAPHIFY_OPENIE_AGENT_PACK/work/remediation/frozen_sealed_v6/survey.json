@@ -1,0 +1,653 @@
+{
+ "schema_version": "polymath.document_survey.v1",
+ "document_id": "3ab827d7ecb0145eb6a12f6943f9d9dbf99d1237787a60458d12b465a27c5df5",
+ "survey_release": "graphify-survey-v1",
+ "normalized_sha256": "465bbf5e2b02b4202944bcdb3dee1970a542e3e82b37177cd00c534b7b0227d1",
+ "headings": [
+  {
+   "level": 1,
+   "text": "Adaptive Evidence Graphs for Auditable Retrieval Systems",
+   "start": 0,
+   "end": 58,
+   "path": [
+    "Adaptive Evidence Graphs for Auditable Retrieval Systems"
+   ]
+  }
+ ],
+ "aliases": [],
+ "definitions": [],
+ "blocks": [
+  {
+   "block_id": "block:63811d6fdd643d7f7aab",
+   "start": 0,
+   "end": 59,
+   "text": "# Adaptive Evidence Graphs for Auditable Retrieval Systems\n",
+   "structural_position": "front",
+   "repeat_count": 1,
+   "furniture_signals": [
+    "front_matter",
+    "short_block"
+   ],
+   "furniture_candidate": false
+  },
+  {
+   "block_id": "block:11cb202d5ca236ca1bdf",
+   "start": 60,
+   "end": 774,
+   "text": "DeltaGraph, a retrieval architecture introduced by Mira Solano at Redwood AI Lab, uses the Orion Benchmark to compare Helix-2 with Atlas-7B under identical retrieval conditions. For every query, Raven\u2014the retrieval controller\u2014retrieves candidate passages from Qdrant and produces an Evidence Packet containing passage identifiers, source hashes, and a model-independent retrieval score. Solano defines Citation Recall as the fraction of accepted answers whose cited passages contain the governing source statement. Although Orion contains 12,000 questions, only 2,400 were reserved for the blinded evaluation; the remaining 9,600 were used to tune deterministic routing thresholds rather than either answer model.\n",
+   "structural_position": "front",
+   "repeat_count": 1,
+   "furniture_signals": [
+    "front_matter"
+   ],
+   "furniture_candidate": false
+  },
+  {
+   "block_id": "block:15eb5418534ee255ba22",
+   "start": 775,
+   "end": 1525,
+   "text": "Raven sends each Evidence Packet to Argus, a verifier service maintained by the Northwind Evaluation Group, and depends on Argus for final acceptance decisions. Argus consumes the packet and rejects it when two representations of the same source disagree on their Source Hash. A Semantic Cache supports Raven during repeated retrieval, but Raven does not depend on the cache: disabling it increased p95 retrieval latency from 420 ms to 710 ms while changing Citation Recall by less than 0.3 percentage points. By contrast, removing Argus caused 17 of 300 synthetic conflict cases to pass verification unchecked, which the authors cite as evidence that the verifier\u2014not the cache\u2014is responsible for most of the reduction in false citation acceptance.\n",
+   "structural_position": "body",
+   "repeat_count": 1,
+   "furniture_signals": [],
+   "furniture_candidate": false
+  },
+  {
+   "block_id": "block:4c4c17f5a808040bb613",
+   "start": 1526,
+   "end": 2316,
+   "text": "The paper reports that Helix-2 exceeded Atlas-7B by 6.4 Citation Recall points on the blinded split. An external reviewer, however, claimed that the apparent improvement resulted from hidden evaluation leakage; Solano and her coauthors rejected that explanation and stated that no blinded Orion question had been used to train either answer model. The paper also states explicitly that DeltaGraph does not use Neo4j for online ranking. Instead, after an evaluation run finishes, Neo4j materializes an Audit Path Store whose records reference the Evidence Packets supporting accepted answers. If two high-authority sources conflict, Argus routes the affected Evidence Packet to the Human Review Queue rather than automatically accepting whichever source received the higher retrieval score.\n",
+   "structural_position": "body",
+   "repeat_count": 1,
+   "furniture_signals": [],
+   "furniture_candidate": false
+  },
+  {
+   "block_id": "block:58c5ef0ca30ca7a750dd",
+   "start": 2317,
+   "end": 3085,
+   "text": "DeltaGraph 1.3, released on May 14, 2026, implements deterministic Source Hash Validation and changed the review policy so that a reviewer can override a rejected packet without deleting its original decision record. Solano assigned follow-up action AR-17 to Nikhil Rao, who owns the experiment and must report its result by July 1, 2026; the experiment will test whether the Human Review Queue can be bypassed when three independent sources agree. The team plans to replace Qdrant with VectorLake in a future ablation, but that migration has not occurred and DeltaGraph 1.3 still uses Qdrant. A separate experiment may evaluate DeltaGraph on legal-policy documents during Q4 2026, so neither VectorLake nor the legal-policy corpus is a current production dependency.\n",
+   "structural_position": "body",
+   "repeat_count": 1,
+   "furniture_signals": [],
+   "furniture_candidate": false
+  }
+ ],
+ "shape_counts": {
+  "capitalized_phrases": 61,
+  "all_caps_tokens": 3,
+  "identifier_tokens": 4,
+  "numeric_tokens": 9
+ },
+ "token_frequency": {
+  "a": 9,
+  "ablation": 1,
+  "acceptance": 1,
+  "acceptance.": 1,
+  "accepted": 2,
+  "accepting": 1,
+  "action": 1,
+  "adaptive": 1,
+  "affected": 1,
+  "after": 1,
+  "agree.": 1,
+  "ai": 1,
+  "also": 1,
+  "although": 1,
+  "an": 4,
+  "and": 9,
+  "answer": 2,
+  "answers": 1,
+  "answers.": 1,
+  "apparent": 1,
+  "ar-17": 1,
+  "architecture": 1,
+  "argus": 5,
+  "as": 2,
+  "assigned": 1,
+  "at": 1,
+  "atlas-7b": 2,
+  "audit": 1,
+  "auditable": 1,
+  "authors": 1,
+  "automatically": 1,
+  "be": 1,
+  "been": 1,
+  "benchmark": 1,
+  "blinded": 3,
+  "but": 2,
+  "by": 6,
+  "bypassed": 1,
+  "cache": 3,
+  "can": 2,
+  "candidate": 1,
+  "cases": 1,
+  "caused": 1,
+  "changed": 1,
+  "changing": 1,
+  "citation": 4,
+  "cite": 1,
+  "cited": 1,
+  "claimed": 1,
+  "coauthors": 1,
+  "compare": 1,
+  "conditions.": 1,
+  "conflict": 2,
+  "consumes": 1,
+  "contain": 1,
+  "containing": 1,
+  "contains": 1,
+  "contrast": 1,
+  "controller": 1,
+  "corpus": 1,
+  "current": 1,
+  "decision": 1,
+  "decisions.": 1,
+  "defines": 1,
+  "deleting": 1,
+  "deltagraph": 5,
+  "depend": 1,
+  "dependency.": 1,
+  "depends": 1,
+  "deterministic": 2,
+  "disabling": 1,
+  "disagree": 1,
+  "documents": 1,
+  "does": 2,
+  "during": 2,
+  "each": 1,
+  "either": 2,
+  "evaluate": 1,
+  "evaluation": 4,
+  "every": 1,
+  "evidence": 6,
+  "exceeded": 1,
+  "experiment": 3,
+  "explanation": 1,
+  "explicitly": 1,
+  "external": 1,
+  "false": 1,
+  "final": 1,
+  "finishes": 1,
+  "follow-up": 1,
+  "for": 6,
+  "fraction": 1,
+  "from": 3,
+  "future": 1,
+  "governing": 1,
+  "graphs": 1,
+  "group": 1,
+  "had": 1,
+  "has": 1,
+  "hash": 1,
+  "hash.": 1,
+  "hashes": 1,
+  "helix-2": 2,
+  "her": 1,
+  "hidden": 1,
+  "high-authority": 1,
+  "higher": 1,
+  "however": 1,
+  "human": 2,
+  "identical": 1,
+  "identifiers": 1,
+  "if": 1,
+  "implements": 1,
+  "improvement": 1,
+  "in": 2,
+  "increased": 1,
+  "independent": 1,
+  "instead": 1,
+  "introduced": 1,
+  "is": 2,
+  "it": 2,
+  "its": 2,
+  "july": 1,
+  "lab": 1,
+  "latency": 1,
+  "leakage": 1,
+  "legal-policy": 2,
+  "less": 1,
+  "maintained": 1,
+  "materializes": 1,
+  "may": 2,
+  "migration": 1,
+  "mira": 1,
+  "model-independent": 1,
+  "model.": 2,
+  "most": 1,
+  "ms": 2,
+  "must": 1,
+  "neither": 1,
+  "neo4j": 2,
+  "nikhil": 1,
+  "no": 1,
+  "nor": 1,
+  "northwind": 1,
+  "not": 4,
+  "occurred": 1,
+  "of": 4,
+  "on": 6,
+  "online": 1,
+  "only": 1,
+  "original": 1,
+  "orion": 3,
+  "override": 1,
+  "owns": 1,
+  "p95": 1,
+  "packet": 5,
+  "packets": 1,
+  "paper": 2,
+  "pass": 1,
+  "passage": 1,
+  "passages": 2,
+  "path": 1,
+  "percentage": 1,
+  "plans": 1,
+  "points": 1,
+  "points.": 1,
+  "policy": 1,
+  "produces": 1,
+  "production": 1,
+  "q4": 1,
+  "qdrant": 2,
+  "qdrant.": 1,
+  "query": 1,
+  "question": 1,
+  "questions": 1,
+  "queue": 2,
+  "ranking.": 1,
+  "rao": 1,
+  "rather": 2,
+  "raven": 4,
+  "recall": 3,
+  "received": 1,
+  "record.": 1,
+  "records": 1,
+  "reduction": 1,
+  "redwood": 1,
+  "reference": 1,
+  "rejected": 2,
+  "rejects": 1,
+  "released": 1,
+  "remaining": 1,
+  "removing": 1,
+  "repeated": 1,
+  "replace": 1,
+  "report": 1,
+  "reports": 1,
+  "representations": 1,
+  "reserved": 1,
+  "responsible": 1,
+  "result": 1,
+  "resulted": 1,
+  "retrieval": 8,
+  "retrieves": 1,
+  "review": 3,
+  "reviewer": 2,
+  "routes": 1,
+  "routing": 1,
+  "run": 1,
+  "same": 1,
+  "score.": 2,
+  "semantic": 1,
+  "sends": 1,
+  "separate": 1,
+  "service": 1,
+  "so": 2,
+  "solano": 4,
+  "source": 6,
+  "sources": 2,
+  "split.": 1,
+  "stated": 1,
+  "statement.": 1,
+  "states": 1,
+  "still": 1,
+  "store": 1,
+  "supporting": 1,
+  "supports": 1,
+  "synthetic": 1,
+  "systems": 1,
+  "team": 1,
+  "test": 1,
+  "than": 3,
+  "that": 8,
+  "the": 28,
+  "their": 1,
+  "three": 1,
+  "thresholds": 1,
+  "to": 9,
+  "train": 1,
+  "tune": 1,
+  "two": 2,
+  "unchecked": 1,
+  "under": 1,
+  "use": 1,
+  "used": 2,
+  "uses": 2,
+  "validation": 1,
+  "vectorlake": 2,
+  "verification": 1,
+  "verifier": 2,
+  "were": 2,
+  "when": 2,
+  "whether": 1,
+  "which": 1,
+  "whichever": 1,
+  "while": 1,
+  "who": 1,
+  "whose": 2,
+  "will": 1,
+  "with": 2,
+  "without": 1
+ },
+ "gazetteer_candidates": [
+  {
+   "surface": "Adaptive Evidence Graphs",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Adaptive Evidence Graphs for Auditable Retrieval Systems",
+   "sources": [
+    "heading"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Although Orion",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "An",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "AR-17",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Argus",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 5,
+   "strength": "weak"
+  },
+  {
+   "surface": "Atlas-7B",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 2,
+   "strength": "weak"
+  },
+  {
+   "surface": "Audit Path Store",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Auditable Retrieval Systems",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "By",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Citation Recall",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 3,
+   "strength": "weak"
+  },
+  {
+   "surface": "DeltaGraph",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 5,
+   "strength": "weak"
+  },
+  {
+   "surface": "Evidence Packet",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 3,
+   "strength": "weak"
+  },
+  {
+   "surface": "Evidence Packets",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "For",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Helix-2",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 2,
+   "strength": "weak"
+  },
+  {
+   "surface": "Human Review Queue",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 2,
+   "strength": "weak"
+  },
+  {
+   "surface": "If",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Instead",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "July",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "May",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Mira Solano",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Neo4j",
+   "sources": [
+    "capitalization_shape",
+    "identifier_shape"
+   ],
+   "count": 4,
+   "strength": "weak"
+  },
+  {
+   "surface": "Nikhil Rao",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Northwind Evaluation Group",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Orion",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Orion Benchmark",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "p95",
+   "sources": [
+    "identifier_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Q4",
+   "sources": [
+    "capitalization_shape",
+    "identifier_shape"
+   ],
+   "count": 2,
+   "strength": "weak"
+  },
+  {
+   "surface": "Qdrant",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 2,
+   "strength": "weak"
+  },
+  {
+   "surface": "Qdrant. A",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Raven",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 4,
+   "strength": "weak"
+  },
+  {
+   "surface": "Redwood AI Lab",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Solano",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 3,
+   "strength": "weak"
+  },
+  {
+   "surface": "Source Hash Validation",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Source Hash. A Semantic Cache",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "The",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 3,
+   "strength": "weak"
+  },
+  {
+   "surface": "VectorLake",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 2,
+   "strength": "weak"
+  }
+ ],
+ "survey_hash": "434b469d90d6554bff95c51fe9820d8067f1b3157f0f56610540a7999212fd2c"
+}

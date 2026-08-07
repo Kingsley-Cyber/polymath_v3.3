@@ -1,0 +1,35 @@
+{
+ "waterfall": {
+  "raw_propositions": 242,
+  "arguments_aligned": 236,
+  "entity_pairs_resolved": 9,
+  "family_retained": 242,
+  "unresolved_roles": {
+   "object": 1,
+   "subject": 5
+  },
+  "mapping_status_by_prop": {
+   "REVIEW": 65,
+   "STORE_UNMAPPED_SURFACE_RELATION": 124,
+   "MAPPED": 53
+  },
+  "assertion_lane_by_prop": {
+   "REVIEW": 73,
+   "OPEN_RELATION": 86,
+   "REJECT": 12,
+   "FACT": 6,
+   "QUALIFIED_CLAIM": 65
+  },
+  "graph_eligible_props": 0,
+  "conservation_holds": true
+ },
+ "fate_counts": {
+  "REVIEW": 67,
+  "OPEN_RELATION": 86,
+  "REJECT": 12,
+  "FACT:fact_without_promotable_endpoints": 2,
+  "QUALIFIED_CLAIM": 65,
+  "FACT:already_promoted_by_syntax_or_duplicate": 4,
+  "REVIEW+ALIGNMENT_FAILURE": 6
+ }
+}

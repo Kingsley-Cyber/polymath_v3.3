@@ -144,3 +144,15 @@ canonical predicate already compiled in every such trace. Second = promotion/mer
 contract (full FACT chain, correct predicate, blocked at merge). These are the two
 deterministic-fix targets for the hard-document phase; per owner rule, fixes target the
 FIRST losing mechanism generically — never final F1 directly, never GLiNER2/triplet-extract.
+
+### sealed_qualification_v6 — arxiv-style hard test (2026-08-07, EXTRACTION LOCKED pre-key)
+Source: `# Adaptive Evidence Graphs for Audi (1).txt` (3102 bytes, sha256 bd8e686e…).
+Registered under **freeze_v5** (pinned @ cf42506, FREEZE INTACT) — first test on the UNION
+stack. Extract-only completed BEFORE any key exists: graph digest **814bc637…** (repeat
+digest identical, projection idempotent), artifact digest 37d0314e…. Graph: 20 nodes,
+39 mentions, 13 promoted relations, 61 qualified assertions retained.
+Frozen observations exported (frozen_sealed_v6/) — all downstream debugging replays;
+no re-extraction. Conservation snapshot HOLDS: 242 raw propositions → FACT 6 /
+OPEN_RELATION 86 / QUALIFIED_CLAIM 65 / REVIEW 73 / REJECT 12; 6 alignment failures
+sub-attributed; OpenIE-stream novel promotions 0 (4 duplicate syntax facts, 2 value-facts).
+Awaiting owner key; grades flow through the five-layer waterfall.
