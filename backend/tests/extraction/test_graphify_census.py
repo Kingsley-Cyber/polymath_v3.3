@@ -18,7 +18,7 @@ class FakeProvider:
     def __init__(self) -> None:
         self.calls: list[tuple[list[str], int]] = []
 
-    def predict_entities(self, texts, *, batch_size, threshold):
+    def predict_entities(self, texts, *, batch_size, threshold, adapters=()):
         self.calls.append((list(texts), batch_size))
         rows = []
         for text in texts:

@@ -144,6 +144,8 @@ class RawMentionV1(StrictFrozenModel):
     terminal_state: MentionTerminalState
     alignment_error: str = ""
     provider_release: str
+    facet: str = ""
+    schema_release: str = ""
 
     @field_validator("entity_type")
     @classmethod
@@ -178,6 +180,7 @@ class DocumentEntityV1(StrictFrozenModel):
     confidence: float = Field(ge=0.0, le=1.0)
     reasons: tuple[str, ...]
     reducer_release: str
+    facet: str = ""
 
     @field_validator("entity_type")
     @classmethod

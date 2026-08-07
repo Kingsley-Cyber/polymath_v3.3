@@ -568,11 +568,15 @@ def reduce_document_entities(
         entity_id = stable_id(
             "document-entity", document.document_id, key, entity_type, REDUCER_RELEASE,
         )
+        facet_votes = Counter(
+            mention.facet for mention in cluster.mentions if getattr(mention, "facet", "")
+        )
         entity = DocumentEntityV1(
             entity_id=entity_id,
             document_id=document.document_id,
             canonical_name=cluster.canonical_name,
             entity_type=entity_type,
+            facet=facet_votes.most_common(1)[0][0] if facet_votes else "",
             aliases=tuple(sorted(cluster.aliases, key=lambda value: (value.casefold(), value))),
             mention_ids=tuple(sorted(mention.mention_id for mention in cluster.mentions)),
             state=state,

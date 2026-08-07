@@ -1,0 +1,38 @@
+# Graphify entity census schema — versioned configuration.
+# Core inventory + optional corpus adapters (open-discovery cycle, 2026-08-07).
+# Serialization is sorted-key JSON before hashing; the schema hash is stamped
+# on the census report and every raw mention. Facets never widen allowed_pairs:
+# core types keep gating, facets are interpretation metadata only.
+release: graphify-entity-schema-v2
+
+core:
+  Person: "A specifically named individual human person, author, researcher, executive, or historical figure."
+  Organization: "A specifically named company, institution, agency, laboratory, team, or other formal organization."
+  Location: "A named geographic place, country, city, region, physical site, or address."
+  Event: "A specifically named occurrence, conference, incident, launch, campaign, or historical event."
+  Concept: "A named idea, theory, discipline, technical concept, principle, quality measure, or metric."
+  Method: "A named process, algorithm, technique, workflow, protocol, procedure, or research method."
+  Product: "A specifically named commercial product, device, service offering, or manufactured system."
+  Software: "Named software, programming language, database, library, framework, API, platform, application, or software service."
+  Document: "A specifically named book, paper, report, specification, policy, manual, dataset, or other document artifact."
+  Standard: "A named technical standard, formal specification, convention, or compliance framework."
+  Rule: "A named operational rule, constraint, requirement, policy rule, or decision criterion."
+  Law: "A named statute, regulation, legal doctrine, act, or other law."
+  Artifact: "A named dataset, file, model artifact, component, resource, or produced technical object."
+  TimeReference: "A specific date, year, time period, deadline, duration, or temporal reference."
+
+adapters:
+  metadata:
+    labels:
+      Identifier: "A specifically formatted identifier, tracking code, reference code, version code, or document ID composed of letters, digits, and separators."
+      SchemaField: "A named schema field, metadata key, configuration parameter, or structured attribute name, often written in snake_case or as a labeled key."
+      Format: "A specifically named data format, file format, serialization format, markup language, template format, or encoding."
+    facets:
+      Identifier: {core: Artifact, facet: document_identifier}
+      SchemaField: {core: Concept, facet: schema_field}
+      Format: {core: Standard, facet: format}
+    # Deterministic selection thresholds (survey-derived; recorded in the
+    # census report whenever the adapter activates).
+    selection:
+      key_value_line_ratio_min: 0.12
+      identifier_density_min: 0.02

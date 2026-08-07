@@ -213,6 +213,9 @@ synonyms:
   writes to: uses
   written to: uses
   maintain: supports
+  # spec-metadata keys whose wording itself names the canonical relation
+  related framework: related_to
+  related to: related_to
   # --- transfer-verb policy (owner-delegated decision, 2026-08-07): directed
   # transfer maps the DESTINATION as uses (same frame as "writes to") and the
   # SOURCE as consumes (same frame as "reads from"). Phrase keys only — a bare

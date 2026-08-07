@@ -3,14 +3,14 @@
   "status": "FAIL",
   "runtime": {
     "pipeline_release": "graphify-cpu-pipeline-v15",
-    "mongo_database": "graphify_eval_syn_04_c34ab6e475",
-    "corpus_id": "fdf76a44-6ec8-5747-ba5a-d20deea6601a",
-    "elapsed_seconds": 1.56,
+    "mongo_database": "graphify_eval_syn_04_4476c14cef",
+    "corpus_id": "cd25c10b-bc24-51ee-a34a-62b161e918b9",
+    "elapsed_seconds": 1.52,
     "interpreter": "/Users/king/polymath_v3.3/local_ghost_b/.venv/bin/python"
   },
   "items": {
-    "passed": 10,
-    "failed": 2,
+    "passed": 11,
+    "failed": 1,
     "optional_failed": 0,
     "total": 12
   },
@@ -23,6 +23,7 @@
       "cold 7 rollout plan",
       "dr imani reyes",
       "dr reyes",
+      "falcon cache",
       "pinion 3 1",
       "pinion 3 2",
       "quartzline retrieval layer",
@@ -32,13 +33,14 @@
       "sensor k 12",
       "telemetry group"
     ],
-    "promoted_edge_count": 7
+    "promoted_edge_count": 8
   },
   "extracted_entities": [
     "COLD-7",
     "COLD-7 Rollout Plan",
     "Dr. Imani Reyes",
     "Dr. Reyes",
+    "Falcon Cache",
     "Pinion",
     "Pinion 3.1",
     "Pinion 3.2",
@@ -129,9 +131,9 @@
     {
       "id": "I10",
       "check": "positive",
-      "verdict": "FAIL",
+      "verdict": "PASS",
       "optional": false,
-      "detail": "no positive edge for pair",
+      "detail": "",
       "evidence": "The Quartzline Retrieval Layer (QRL) uses the Falcon Cache."
     },
     {

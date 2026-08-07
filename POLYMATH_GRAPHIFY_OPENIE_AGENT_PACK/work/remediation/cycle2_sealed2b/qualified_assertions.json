@@ -1,0 +1,65 @@
+[
+  {
+    "evidence_end": 3698,
+    "evidence_start": 3511,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "What",
+    "predicate": "synonym_of",
+    "qualifiers": {},
+    "subject": "the video"
+  },
+  {
+    "evidence_end": 3698,
+    "evidence_start": 3511,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "what video means",
+    "predicate": "should recover",
+    "qualifiers": {},
+    "subject": "Pegasus"
+  },
+  {
+    "evidence_end": 3698,
+    "evidence_start": 3511,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "pegasus should recover what video means it organized and why each functions",
+    "predicate": "should measure",
+    "qualifiers": {},
+    "subject": "specialized extractors"
+  },
+  {
+    "evidence_end": 3698,
+    "evidence_start": 3511,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "what the video means",
+    "predicate": "should recover",
+    "qualifiers": {},
+    "subject": "Pegasus"
+  },
+  {
+    "evidence_end": 3698,
+    "evidence_start": 3511,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "exactly where and when visible changes occur",
+    "predicate": "why should measure",
+    "qualifiers": {},
+    "subject": "each passage functions"
+  },
+  {
+    "evidence_end": 4253,
+    "evidence_start": 4046,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "landmarks optical flow contact distances shot cuts audio transients",
+    "predicate": "pose",
+    "qualifiers": {},
+    "subject": "presentation timestamps masks"
+  },
+  {
+    "evidence_end": 4253,
+    "evidence_start": 4046,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "landmarks optical contact distances shot cuts audio transients",
+    "predicate": "pose",
+    "qualifiers": {},
+    "subject": "presentation timestamps masks"
+  }
+]

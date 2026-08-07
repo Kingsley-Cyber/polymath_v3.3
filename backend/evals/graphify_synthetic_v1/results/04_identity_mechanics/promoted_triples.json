@@ -20,6 +20,11 @@
     "object": "pinion 3 2"
   },
   {
+    "subject": "quartzline retrieval layer",
+    "predicate": "uses",
+    "object": "falcon cache"
+  },
+  {
     "subject": "recovery desk",
     "predicate": "consumes",
     "object": "report q 9"

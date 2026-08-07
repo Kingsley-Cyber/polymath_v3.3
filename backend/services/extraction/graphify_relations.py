@@ -1046,7 +1046,10 @@ def _complete_relation_arguments(
                             "reasons": (*entity.reasons, "strict_relation_role_type"),
                         })
                 else:
-                    entity_type = inferred_type
+                    # Minted endpoints are untyped observations: 'other' is the
+                    # declared unknown (signature wildcard). Type evidence, when
+                    # it exists, arrives via census/reducer entities instead.
+                    entity_type = "unknown"
                     entity_id = stable_id(
                         "relation-endpoint-entity", document.document_id,
                         identity_surface.casefold(), entity_type, RELATION_RELEASE,
@@ -1425,6 +1428,144 @@ def _syntax_proposals(
     return proposals, resolved + unmapped, gate_counts
 
 
+_KEY_VALUE_LINE_RE = re.compile(
+    r"^(?P<prefix>\s*(?:[-*]\s+)?(?:\*\*)?)"
+    r"(?P<key>[A-Za-z_][A-Za-z0-9_ ]{0,40}?)(?:\*\*)?\s*:\s+(?P<value>\S.*?)\s*$"
+)
+_CONTAINMENT_KEYS = frozenset({"contains", "includes", "comprises", "components", "parts"})
+
+
+def _structured_data_proposals(
+    document: NormalizedDocumentV1,
+    survey: DocumentSurveyV1,
+    document_mentions: Sequence[CompletedMentionV1],
+    doc_units: Sequence[_Unit],
+    entity_by_id: dict[str, DocumentEntityV1],
+    endpoint_entities: dict[str, DocumentEntityV1],
+    endpoint_mentions: dict[str, CompletedMentionV1],
+) -> list[tuple[_Unit, _Proposal]]:
+    """Deterministic structured-data proposer: explicit key-value metadata lines
+    ("requires: Gullwing Runtime") relate the document's leading promoted
+    entity to the full value span through the key as surface predicate. Builds
+    its own line-anchored units (key-value lines are rarely grammar-eligible)
+    and resolves or mints the value endpoint from the entire value span. A
+    parallel proposer — the compiler interprets, the gate decides."""
+    def _subject_candidate(mention: CompletedMentionV1) -> bool:
+        entity = entity_by_id.get(mention.entity_id)
+        return (
+            entity is not None
+            and entity.state == EntityTerminalState.PROMOTED
+            # An identifier is an attribute of the document, never the
+            # implicit subject of its metadata.
+            and getattr(entity, "facet", "") != "document_identifier"
+        )
+
+    subject: CompletedMentionV1 | None = None
+    title_span = (
+        (survey.headings[0].start, survey.headings[0].end) if survey.headings else None
+    )
+    if title_span is not None:
+        for mention in document_mentions:
+            if (
+                mention.normalized_start is not None
+                and title_span[0] <= mention.normalized_start
+                and (mention.normalized_end or 0) <= title_span[1] + 1
+                and _subject_candidate(mention)
+            ):
+                subject = mention
+                break
+    if subject is None:
+        for mention in document_mentions:
+            if _subject_candidate(mention):
+                if subject is None or (mention.normalized_start or 0) < (subject.normalized_start or 0):
+                    subject = mention
+    if subject is None:
+        return []
+    entities_by_name: dict[str, DocumentEntityV1] = {}
+    for entity in entity_by_id.values():
+        if entity.document_id != document.document_id:
+            continue
+        key = entity.canonical_name.casefold()
+        current = entities_by_name.get(key)
+        if current is None or (
+            current.state != EntityTerminalState.PROMOTED
+            and entity.state == EntityTerminalState.PROMOTED
+        ):
+            entities_by_name[key] = entity
+    rows: list[tuple[_Unit, _Proposal]] = []
+    offset = 0
+    for line in document.normalized_text.splitlines(keepends=True):
+        stripped = line.rstrip("\n")
+        match = _KEY_VALUE_LINE_RE.match(stripped)
+        if match:
+            line_start = offset
+            value_start = line_start + match.start("value")
+            value_end = line_start + match.end("value")
+            value_surface = document.normalized_text[value_start:value_end]
+            decision, core_span = endpoint_mint_policy(value_surface)
+            if decision != "blocked":
+                identity_surface = value_surface
+                if core_span is not None:
+                    identity_surface = value_surface[core_span[0]:core_span[1]].strip() or value_surface
+                entity = entities_by_name.get(identity_surface.casefold())
+                if entity is None:
+                    entity_id = stable_id(
+                        "relation-endpoint-entity", document.document_id,
+                        identity_surface.casefold(), "unknown", RELATION_RELEASE,
+                    )
+                    entity = endpoint_entities.get(entity_id) or DocumentEntityV1(
+                        entity_id=entity_id, document_id=document.document_id,
+                        canonical_name=identity_surface, entity_type="unknown",
+                        mention_ids=(), state=EntityTerminalState.DOCUMENT_LOCAL,
+                        confidence=1.0,
+                        reasons=("structured_data_value", "relation_local_completion"),
+                        reducer_release=RELATION_RELEASE,
+                    )
+                original = to_original_span(document, value_start, value_end)
+                if original.exact and entity.entity_id != subject.entity_id:
+                    mention_id = stable_id(
+                        "relation-endpoint-mention", document.document_id,
+                        entity.entity_id, value_start, value_end, value_surface,
+                        RELATION_RELEASE,
+                    )
+                    obj = CompletedMentionV1(
+                        mention_id=mention_id, entity_id=entity.entity_id,
+                        document_id=document.document_id, surface=value_surface,
+                        normalized_start=value_start, normalized_end=value_end,
+                        original_start=original.start, original_end=original.end,
+                        source="variant", context_rule="structured_data_value",
+                        completion_release=RELATION_RELEASE,
+                    )
+                    endpoint_entities[entity.entity_id] = entity
+                    entity_by_id.setdefault(entity.entity_id, entity)
+                    endpoint_mentions[mention_id] = obj
+                    surface = re.sub(r"[_\s]+", " ", match.group("key")).strip().casefold()
+                    invert = surface in _CONTAINMENT_KEYS
+                    left, right = (obj, subject) if invert else (subject, obj)
+                    cue = "part of" if invert else surface
+                    unit = _Unit(
+                        stable_id(
+                            "relation-unit", document.document_id, "structured",
+                            line_start, line_start + len(stripped), stripped,
+                        ),
+                        document.document_id, line_start,
+                        line_start + len(stripped), stripped, (subject, obj),
+                    )
+                    rows.append((unit, _Proposal(
+                        subject=left, object=right,
+                        surface_predicate=cue, lemma=cue, particle="",
+                        preposition="",
+                        dependency_frame="structured:key_value",
+                        dependency_path="key>value",
+                        voice="structured", polarity="positive",
+                        modality="asserted", attribution="",
+                        canonical_hint="part_of" if invert else None,
+                        confidence=1.0, source="structured_data",
+                    )))
+        offset += len(line)
+    return rows
+
+
 def _surface_record(unit: _Unit, proposal: _Proposal) -> SurfaceRelationV1:
     relation_id = stable_id(
         "surface-relation", unit.document_id, proposal.subject.mention_id,
@@ -1491,10 +1632,12 @@ def run_relation_fast_path(
         mentions_by_document.setdefault(mention.document_id, []).append(mention)
     all_units: list[_Unit] = []
     all_decisions: list[RelationEligibilityDecision] = []
+    unit_counts_by_document: list[tuple[NormalizedDocumentV1, int, int]] = []
     for document, survey in zip(documents, surveys):
         units, decisions = _unit_rows(
             document, survey, mentions_by_document.get(document.document_id, []),
         )
+        unit_counts_by_document.append((document, len(all_units), len(all_units) + len(units)))
         all_units.extend(units)
         all_decisions.extend(decisions)
 
@@ -1535,6 +1678,18 @@ def run_relation_fast_path(
     conjunction_counts: list[int] = []
     dense_structure_units: list[str] = []
     for unit, doc in zip(all_units, docs):
+        # Strictly aligned entity mentions attached to the shared Doc so every
+        # Doc consumer sees the same accepted spans (contract: one Doc).
+        entity_spans = []
+        for mention in unit.mentions:
+            span = doc.char_span(
+                mention.normalized_start - unit.start,
+                mention.normalized_end - unit.start,
+                alignment_mode="strict",
+            )
+            if span is not None:
+                entity_spans.append(span)
+        doc.spans["polymath_entities"] = entity_spans
         syntax, raw_syntax, local_gate_counts = _syntax_proposals(unit, doc, extractor, entity_by_id)
         direct = _direct_dependency_proposals(doc, unit)
         gate_counts.update(local_gate_counts)
@@ -1558,6 +1713,18 @@ def run_relation_fast_path(
             # Pathologically dense unit: labeled for routing, never discarded.
             dense_structure_units.append(unit.unit_id)
         proposal_rows.extend((unit, item) for item in deduped.values())
+
+    structured_proposals = 0
+    survey_by_document = {survey.document_id: survey for survey in surveys}
+    for document, start_index, end_index in unit_counts_by_document:
+        doc_units = completed_units[start_index:end_index]
+        for unit, proposal in _structured_data_proposals(
+            document, survey_by_document[document.document_id],
+            mentions_by_document.get(document.document_id, []),
+            doc_units, entity_by_id, endpoint_entities, endpoint_mentions,
+        ):
+            proposal_rows.append((unit, proposal))
+            structured_proposals += 1
 
     surface_records = [_surface_record(unit, proposal) for unit, proposal in proposal_rows]
     compiler = predicate_compiler()
@@ -1602,7 +1769,7 @@ def run_relation_fast_path(
         elif _crosses_competing_relation_cue(_unit, proposal, candidate):
             state = RelationTerminalState.REVIEW
             rule = "review:competing_coordinated_relation_cue"
-        elif proposal.source == "strict_dependency_cue":
+        elif proposal.source in {"strict_dependency_cue", "structured_data"}:
             state = RelationTerminalState.ACCEPTED
         else:
             state = RelationTerminalState.REVIEW
@@ -1638,6 +1805,7 @@ def run_relation_fast_path(
         "statistical_ner_enabled": False,
         "syntax_records": syntax_records,
         "strict_dependency_records": direct_records,
+        "structured_data_proposals": structured_proposals,
         "relation_local_endpoint_entities": len(endpoint_entities),
         "relation_local_endpoint_mentions": len(endpoint_mentions),
         "discourse_resolved_mentions": discourse_resolved_mentions,

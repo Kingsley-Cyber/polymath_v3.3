@@ -1,0 +1,34 @@
+[
+  {
+    "evidence_count": 0,
+    "object": "cinematic performance control score cpcs",
+    "object_entity_id": "entity:cinematic-performance-control-score-cpcs",
+    "predicate": "related_to",
+    "subject": "pegasus centered atomic video deconstruction and modular ai recreation",
+    "subject_entity_id": "entity:pegasus-centered-atomic-video-deconstruction-and-modular-ai-recreation"
+  },
+  {
+    "evidence_count": 0,
+    "object": "strongly delimited semantic envelope",
+    "object_entity_id": "entity:strongly-delimited-semantic-envelope",
+    "predicate": "supports",
+    "subject": "xml",
+    "subject_entity_id": "entity:xml"
+  },
+  {
+    "evidence_count": 0,
+    "object": "human readable direction",
+    "object_entity_id": "entity:human-readable-direction",
+    "predicate": "supports",
+    "subject": "yaml",
+    "subject_entity_id": "entity:yaml"
+  },
+  {
+    "evidence_count": 0,
+    "object": "replacement policies",
+    "object_entity_id": "entity:replacement-policies",
+    "predicate": "supports",
+    "subject": "yaml",
+    "subject_entity_id": "entity:yaml"
+  }
+]

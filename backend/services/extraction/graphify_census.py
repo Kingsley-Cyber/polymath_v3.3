@@ -25,6 +25,9 @@ from services.extraction.gliner2_cpu_provider import (
     PROVIDER_RELEASE,
     EntityPrediction,
     GLiNER2CPUProvider,
+    SCHEMA_CONFIG,
+    SCHEMA_RELEASE,
+    schema_hash,
 )
 from services.extraction.graphify_normalization import to_original_span
 from services.extraction.graphify_survey import DocumentSurveyV1
@@ -190,6 +193,8 @@ def _raw_mention(
     window: ExtractionWindowV1,
     prediction: EntityPrediction,
     sequence: int,
+    *,
+    schema_release: str = "",
 ) -> RawMentionV1:
     local_valid = (
         0 <= prediction.start < prediction.end <= len(window.text)
@@ -238,7 +243,41 @@ def _raw_mention(
         terminal_state=terminal,
         alignment_error=";".join(errors),
         provider_release=PROVIDER_RELEASE,
+        facet=prediction.facet,
+        schema_release=schema_release,
     )
+
+
+def select_schema_adapters(
+    document: NormalizedDocumentV1, survey: DocumentSurveyV1,
+) -> tuple[str, ...]:
+    """Deterministic, survey-derived corpus-adapter selection.
+
+    A document dense in key-value metadata lines or identifier-shaped tokens
+    activates the metadata adapter. Thresholds come from versioned schema
+    configuration; the decision is stamped in the census report.
+    """
+    text = document.normalized_text
+    lines = [line for line in text.splitlines() if line.strip()]
+    key_value = sum(
+        1 for line in lines
+        if re.match(r"^\s*(?:[-*]\s+)?(?:\*\*)?[A-Za-z_][A-Za-z0-9_ ]{0,40}(?:\*\*)?\s*:\s+\S", line)
+    )
+    key_value_ratio = key_value / len(lines) if lines else 0.0
+    words = max(1, len(text.split()))
+    identifiers = len(re.findall(
+        r"\b[A-Z][A-Z0-9]*(?:-[A-Z0-9]+){2,}\b|\b[a-z]+(?:_[a-z0-9]+)+\b", text,
+    ))
+    identifier_density = identifiers / words
+    selected: list[str] = []
+    for name, adapter in SCHEMA_CONFIG["adapters"].items():
+        rules = adapter.get("selection") or {}
+        if (
+            key_value_ratio >= float(rules.get("key_value_line_ratio_min", 2.0))
+            or identifier_density >= float(rules.get("identifier_density_min", 2.0))
+        ):
+            selected.append(name)
+    return tuple(sorted(selected))
 
 
 def run_entity_census(
@@ -258,15 +297,27 @@ def run_entity_census(
         if document.document_id != survey.document_id:
             raise ValueError("survey document identity mismatch")
         all_windows.extend(build_census_windows(document, survey))
+    adapter_by_document = {
+        document.document_id: select_schema_adapters(document, survey)
+        for document, survey in zip(documents, surveys)
+    }
     bucketed = sorted(all_windows, key=_bucket_key)
     mentions: list[RawMentionV1] = []
     persisted_calls = 0
     inference_started = time.perf_counter()
-    predictions = provider.predict_entities(
-        [window.text for window in bucketed],
-        batch_size=batch_size,
-        threshold=threshold,
-    )
+    predictions: list[list[EntityPrediction]] = [[] for _ in bucketed]
+    adapter_groups: dict[tuple[str, ...], list[int]] = {}
+    for index, window in enumerate(bucketed):
+        adapter_groups.setdefault(adapter_by_document[window.document_id], []).append(index)
+    for adapters, indexes in sorted(adapter_groups.items()):
+        group_predictions = provider.predict_entities(
+            [bucketed[index].text for index in indexes],
+            batch_size=batch_size,
+            threshold=threshold,
+            adapters=adapters,
+        )
+        for index, row in zip(indexes, group_predictions):
+            predictions[index] = row
     for batch_start in range(0, len(bucketed), batch_size):
         batch = bucketed[batch_start:batch_start + batch_size]
         batch_predictions = predictions[batch_start:batch_start + batch_size]
@@ -274,7 +325,10 @@ def run_entity_census(
         for window, row in zip(batch, batch_predictions):
             document = document_by_id[window.document_id]
             for sequence, prediction in enumerate(row):
-                batch_mentions.append(_raw_mention(document, window, prediction, sequence))
+                batch_mentions.append(_raw_mention(
+                    document, window, prediction, sequence,
+                    schema_release=f"{SCHEMA_RELEASE}:{schema_hash(adapter_by_document[window.document_id])[:16]}",
+                ))
         sink.persist(batch_mentions)
         persisted_calls += 1
         mentions.extend(batch_mentions)
@@ -297,6 +351,15 @@ def run_entity_census(
         "persisted_records": len(mentions),
         "aligned_mentions": aligned,
         "alignment_failures": failures,
+        "schema_release": SCHEMA_RELEASE,
+        "schema_adapters_by_document": {
+            document_id: list(adapters)
+            for document_id, adapters in sorted(adapter_by_document.items())
+        },
+        "schema_hashes": {
+            document_id: schema_hash(adapters)
+            for document_id, adapters in sorted(adapter_by_document.items())
+        },
         "conservation": len(mentions) == aligned + failures,
         "strict_alignment_rate": aligned / len(mentions) if mentions else 1.0,
         "batch_size": batch_size,

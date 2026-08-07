@@ -522,13 +522,30 @@ def finalize_source_meta(result: "DoclingParseResult", filename: str | None) -> 
 
 
 def _strip_yaml_frontmatter(text: str) -> str:
+    """Open-discovery revision: front matter is explicit document metadata, so
+    deleting it destroys observations before any stage can see them. The
+    fences and quoting are removed but the key-value lines survive as a plain
+    metadata block — the deterministic structured-data lane consumes exactly
+    this shape, and the endpoint mint policy contains junk values."""
     if not text or not text.lstrip("﻿").startswith("---"):
         return text
-    stripped = _FRONTMATTER_RE.sub("", text, count=1)
-    if stripped is not text:
-        logger.info("local_markdown: stripped YAML frontmatter (%d chars)",
-                    len(text) - len(stripped))
-    return stripped
+    clean = text.lstrip("﻿")
+    match = _FRONTMATTER_RE.match(clean)
+    if not match:
+        return text
+    block_lines = match.group(0).splitlines()[1:-1]
+    kept: list[str] = []
+    for line in block_lines:
+        key, sep, value = line.partition(":")
+        if sep and key.strip() and value.strip():
+            kept.append(f"{key.strip()}: {value.strip().strip(chr(39) + chr(34))}")
+    replacement = ("\n".join(kept) + "\n\n") if kept else ""
+    transformed = clean[:match.start()] + replacement + clean[match.end():]
+    logger.info(
+        "local_markdown: preserved YAML frontmatter as metadata block (%d keys)",
+        len(kept),
+    )
+    return transformed
 
 
 # Bold-key metadata line: `**Source:** https://…`, `**Extracted:** 2026-03-24`.

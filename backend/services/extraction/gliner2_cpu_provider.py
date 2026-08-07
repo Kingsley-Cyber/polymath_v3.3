@@ -8,6 +8,8 @@ import json
 import threading
 from dataclasses import dataclass
 from pathlib import Path
+
+import yaml
 from typing import Any, Callable, Sequence
 
 from services.extraction.canonical import canonical_entity_type
@@ -38,6 +40,75 @@ ENTITY_DESCRIPTIONS: dict[str, dict[str, str]] = {
 }
 
 
+_SCHEMA_CONFIG_PATH = Path(__file__).resolve().parents[3] / "config" / "entity_schema.yaml"
+
+
+def _load_schema_config() -> dict[str, Any]:
+    """Versioned schema configuration: core inventory + corpus adapters.
+
+    Falls back to the built-in core descriptions if the config is absent so
+    the provider never silently changes census behavior on a missing file.
+    """
+    try:
+        payload = yaml.safe_load(_SCHEMA_CONFIG_PATH.read_text(encoding="utf-8")) or {}
+    except FileNotFoundError:
+        payload = {}
+    core = {
+        str(label): {"description": str(desc)}
+        for label, desc in (payload.get("core") or {}).items()
+    } or dict(ENTITY_DESCRIPTIONS)
+    adapters: dict[str, dict[str, Any]] = {}
+    for name, adapter in (payload.get("adapters") or {}).items():
+        adapters[str(name)] = {
+            "labels": {
+                str(label): {"description": str(desc)}
+                for label, desc in (adapter.get("labels") or {}).items()
+            },
+            "facets": {
+                str(label): {"core": str(row.get("core", "Concept")), "facet": str(row.get("facet", ""))}
+                for label, row in (adapter.get("facets") or {}).items()
+            },
+            "selection": dict(adapter.get("selection") or {}),
+        }
+    return {
+        "release": str(payload.get("release") or DESCRIPTION_RELEASE),
+        "core": core,
+        "adapters": adapters,
+    }
+
+
+SCHEMA_CONFIG = _load_schema_config()
+SCHEMA_RELEASE = SCHEMA_CONFIG["release"]
+
+
+def schema_descriptions(adapters: tuple[str, ...] = ()) -> dict[str, dict[str, str]]:
+    merged = dict(SCHEMA_CONFIG["core"])
+    for name in adapters:
+        adapter = SCHEMA_CONFIG["adapters"].get(name)
+        if adapter is None:
+            raise KeyError(f"unknown entity-schema adapter: {name}")
+        merged.update(adapter["labels"])
+    return merged
+
+
+def schema_hash(adapters: tuple[str, ...] = ()) -> str:
+    payload = json.dumps(
+        {"release": SCHEMA_RELEASE, "adapters": sorted(adapters),
+         "descriptions": schema_descriptions(adapters)},
+        sort_keys=True, separators=(",", ":"),
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _facet_for_label(label: str, adapters: tuple[str, ...]) -> tuple[str, str]:
+    """Adapter labels normalize to (core_type, facet); core labels pass through."""
+    for name in adapters:
+        row = SCHEMA_CONFIG["adapters"][name]["facets"].get(label)
+        if row is not None:
+            return row["core"], row["facet"]
+    return label, ""
+
+
 @dataclass(frozen=True)
 class EntityPrediction:
     text: str
@@ -45,12 +116,13 @@ class EntityPrediction:
     start: int
     end: int
     confidence: float
+    facet: str = ""
 
 
 _MODEL_LOCK = threading.Lock()
 _INFERENCE_LOCK = threading.Lock()
 _MODEL: Any | None = None
-_SCHEMA: Any | None = None
+_SCHEMAS: dict[tuple[str, ...], Any] = {}
 _MODEL_LOAD_COUNT = 0
 _PROVIDER: "GLiNER2CPUProvider | None" = None
 
@@ -139,13 +211,13 @@ class GLiNER2CPUProvider:
         return _MODEL
 
     @staticmethod
-    def _schema(model: Any) -> Any:
-        global _SCHEMA
-        if _SCHEMA is None:
+    def _schema(model: Any, adapters: tuple[str, ...] = ()) -> Any:
+        key = tuple(sorted(adapters))
+        if key not in _SCHEMAS:
             with _MODEL_LOCK:
-                if _SCHEMA is None:
-                    _SCHEMA = model.create_schema().entities(ENTITY_DESCRIPTIONS)
-        return _SCHEMA
+                if key not in _SCHEMAS:
+                    _SCHEMAS[key] = model.create_schema().entities(schema_descriptions(key))
+        return _SCHEMAS[key]
 
     @property
     def load_count(self) -> int:
@@ -177,6 +249,7 @@ class GLiNER2CPUProvider:
         *,
         batch_size: int = DEFAULT_BATCH_SIZE,
         threshold: float = DEFAULT_THRESHOLD,
+        adapters: tuple[str, ...] = (),
     ) -> list[list[EntityPrediction]]:
         if batch_size < 1:
             raise ValueError("batch_size must be positive")
@@ -185,7 +258,8 @@ class GLiNER2CPUProvider:
         if not texts:
             return []
         model = self._model()
-        schema = self._schema(model)
+        schema = self._schema(model, adapters)
+        active_labels = schema_descriptions(adapters)
         with _INFERENCE_LOCK:
             raw_results = model.batch_extract(
                 list(texts), schema, batch_size=batch_size, threshold=threshold,
@@ -196,7 +270,7 @@ class GLiNER2CPUProvider:
         output: list[list[EntityPrediction]] = []
         for text, result in zip(texts, raw_results):
             row: list[EntityPrediction] = []
-            for label in ENTITY_DESCRIPTIONS:
+            for label in active_labels:
                 values = result.get("entities", {}).get(label, [])
                 for item in values:
                     start = int(item["start"])
@@ -204,12 +278,14 @@ class GLiNER2CPUProvider:
                     surface = str(item["text"])
                     if start < 0 or end <= start or end > len(text) or text[start:end] != surface:
                         raise RuntimeError("GLiNER2 emitted a span that does not match its input text")
+                    core_label, facet = _facet_for_label(label, adapters)
                     row.append(EntityPrediction(
                         text=surface,
-                        entity_type=canonical_entity_type(label),
+                        entity_type=canonical_entity_type(core_label),
                         start=start,
                         end=end,
                         confidence=float(item.get("confidence", 0.0)),
+                        facet=facet,
                     ))
             row.sort(key=lambda item: (item.start, item.end, item.entity_type, item.text))
             output.append(row)

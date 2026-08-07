@@ -443,6 +443,8 @@ def pair_allowed(predicate: str, subject_type: str, object_type: str) -> bool:
         return True  # unconstrained predicate
     if not subject_type or not object_type:
         return True  # missing type info
+    if subject_type.strip().lower() in ("other", "unknown") or object_type.strip().lower() in ("other", "unknown"):
+        return True  # declared-unknown endpoint types carry no signature evidence
     if subject_type == "other" or object_type == "other":
         return True  # wildcard
     return (subject_type, object_type) in pair_set

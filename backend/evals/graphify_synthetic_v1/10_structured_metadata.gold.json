@@ -1,0 +1,34 @@
+{
+  "fixture": "10_structured_metadata.md",
+  "purpose": "Structured-metadata contract: the survey-derived adapter must activate on a key-value document; identifier/field/format entities normalize to core types + facets; the deterministic structured lane relates the leading entity through key surfaces (requires/provides/outputs) with containment inverted; prose lanes keep working in the same document.",
+  "items": [
+    {"id": "SM01", "check": "positive", "evidence": "requires: Gullwing Runtime",
+     "expect": {"type": "canonical", "subject": "Skerry Inspection Suite", "predicate": "depends_on", "object": "Gullwing Runtime", "status": "ASSERTED_TRUE"}},
+    {"id": "SM02", "check": "positive", "evidence": "provides: Moorline Dispatch",
+     "expect": {"type": "canonical", "subject": "Skerry Inspection Suite", "predicate": "supports", "object": "Moorline Dispatch", "status": "ASSERTED_TRUE"}},
+    {"id": "SM03", "check": "positive", "evidence": "outputs: Shoal Report",
+     "expect": {"type": "canonical", "subject": "Skerry Inspection Suite", "predicate": "produces", "object": "Shoal Report", "status": "ASSERTED_TRUE"}},
+    {"id": "SM04", "check": "positive", "evidence": "contains: Kelpgate Module",
+     "expect": {"type": "canonical", "subject": "Kelpgate Module", "predicate": "part_of", "object": "Skerry Inspection Suite", "status": "ASSERTED_TRUE"},
+     "must_not": {"notes": "containment keys invert: the contained item is part_of the container"}},
+    {"id": "SM05", "check": "positive", "evidence": "document_id: TIS-SKY-2027-04",
+     "expect": {"type": "open", "subject": "Skerry Inspection Suite", "surface_predicate": "document id", "object": "TIS-SKY-2027-04", "status": "ASSERTED_TRUE"},
+     "must_not": {"notes": "unmapped key stays an open relation — captured, never forced, never dropped; the identifier must exist as an entity (Artifact facet document_identifier)"}},
+    {"id": "SM06", "check": "positive", "evidence": "format: Vellumscript",
+     "expect": {"type": "open", "subject": "Skerry Inspection Suite", "surface_predicate": "format", "object": "Vellumscript", "status": "ASSERTED_TRUE"}},
+    {"id": "SM07", "check": "control", "evidence": "The Skerry Inspection Suite consumes the Tidal Window Feed.",
+     "expect": {"type": "canonical", "subject": "Skerry Inspection Suite", "predicate": "consumes", "object": "Tidal Window Feed", "status": "ASSERTED_TRUE"}},
+    {"id": "SM08", "check": "control", "evidence": "The Kelpgate Module produces the Mooring Ledger.",
+     "expect": {"type": "canonical", "subject": "Kelpgate Module", "predicate": "produces", "object": "Mooring Ledger", "status": "ASSERTED_TRUE"}},
+    {"id": "SM09", "check": "junk_negative", "evidence": "inspection_interval: fourteen days",
+     "expect": {"type": "no_edge"},
+     "must_not": {"promote_positive_edge": true, "entities": ["fourteen days"], "notes": "quantified duration value must not mint an entity or a positive edge"}}
+  ],
+  "negative_entities": ["fourteen days", "aerial pier inspections"],
+  "invariants": [
+    "the metadata adapter activates for this document (census report schema_adapters_by_document lists it)",
+    "TIS-SKY-2027-04 exists as an entity with core type Artifact and facet document_identifier",
+    "prose-lane edges (SM07/SM08) and structured-lane edges coexist in one graph",
+    "family 01 (pure prose) must NOT activate the adapter — verified by its unchanged results"
+  ]
+}

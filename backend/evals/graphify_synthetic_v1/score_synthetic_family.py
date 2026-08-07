@@ -147,7 +147,29 @@ async def run_family(stem: str, results_root: Path) -> dict:
                     rec = dict(a)
                     rec["_lane"] = f"openie:{lane or 'UNKNOWN'}"
                     nonpositive.append(rec)
-        nonpositive_texts = [norm(json.dumps(r, default=str)) for r in nonpositive]
+        mention_names: dict[str, str] = {}
+        if rc:
+            payload = rc.get("payload") or {}
+            entity_names = {
+                e.get("entity_id"): e.get("canonical_name", "")
+                for e in payload.get("endpoint_entities", [])
+            }
+            red = await art.find_one({"stage": "ENTITY_REDUCTION_COMPLETE"}, sort=[("created_at", -1)])
+            for e in ((red or {}).get("payload") or {}).get("entities", []):
+                entity_names[e.get("entity_id")] = e.get("canonical_name", "")
+            comp = await art.find_one({"stage": "MENTION_COMPLETION_COMPLETE"}, sort=[("created_at", -1)])
+            for mn in ((comp or {}).get("payload") or {}).get("mentions", []):
+                mention_names[mn.get("mention_id")] = entity_names.get(mn.get("entity_id"), mn.get("surface", ""))
+            for mn in payload.get("endpoint_mentions", []):
+                mention_names[mn.get("mention_id")] = entity_names.get(mn.get("entity_id"), mn.get("surface", ""))
+        def enrich(record: dict) -> str:
+            mapped = record.get("_mapped") or record
+            extra = " ".join(
+                mention_names.get(mapped.get(key), "")
+                for key in ("subject_mention_id", "object_mention_id")
+            )
+            return norm(json.dumps(record, default=str) + " " + extra)
+        nonpositive_texts = [enrich(r) for r in nonpositive]
 
         promoted = {
             (canon(r["subject"], aliases), norm(r["predicate"]), canon(r["object"], aliases))

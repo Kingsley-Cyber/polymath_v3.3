@@ -53,7 +53,7 @@ class _Provider:
     def __init__(self) -> None:
         self.calls = 0
 
-    def predict_entities(self, texts, *, batch_size, threshold):
+    def predict_entities(self, texts, *, batch_size, threshold, adapters=()):
         del batch_size, threshold
         self.calls += 1
         output = []
@@ -75,7 +75,7 @@ class _NamedProvider:
         self.specs = tuple(specs)
         self.calls = 0
 
-    def predict_entities(self, texts, *, batch_size, threshold):
+    def predict_entities(self, texts, *, batch_size, threshold, adapters=()):
         del batch_size, threshold
         self.calls += 1
         output = []
@@ -168,7 +168,7 @@ async def test_provider_failure_records_failure_and_no_downstream_artifact() -> 
     db = _Db()
 
     class BrokenProvider(_Provider):
-        def predict_entities(self, texts, *, batch_size, threshold):
+        def predict_entities(self, texts, *, batch_size, threshold, adapters=()):
             del texts, batch_size, threshold
             raise RuntimeError("provider unavailable")
 
