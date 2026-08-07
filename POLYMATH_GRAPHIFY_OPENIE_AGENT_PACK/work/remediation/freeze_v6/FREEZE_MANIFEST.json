@@ -84,16 +84,16 @@
   "backend/services/extraction/gliner2_cpu_provider.py": "81a6a4008ab17fd70e77ed92349586dd6d819732fc036a5e25a0f5240a234d61",
   "backend/services/extraction/graphify_argument_adapter.py": "92a829aa25a1d6e5210159cf84d2ab5ccffc3c85f08a85b5265bd2e2faa936e5",
   "backend/services/extraction/graphify_assertion_assembler.py": "9a608948578d2e9cb56f237967c0d8061dc24585e246efc6cb631d6aea56f533",
-  "backend/services/extraction/graphify_assertion_semantics.py": "1e27cf0ad97dfe02fa6aa7412317097b89b29dfe0d0f56a2a646c3d63e6711f8",
+  "backend/services/extraction/graphify_assertion_semantics.py": "67f9e5602dd583e290e8017e73009e578f592080a669b9b9ec18f1994961a8c8",
   "backend/services/extraction/graphify_census.py": "685a56e6973e0eba7d171fb2bebb2b25a7fa62dd2576faea7a485aa37482a4f2",
   "backend/services/extraction/graphify_completion.py": "faac6cb22e3831ada1a4574f825b4080fe6ce7477e4053bcc9e59588bb569064",
   "backend/services/extraction/graphify_normalization.py": "ca137159ad89925050930eb9963e4a719bbcb9ed42ddce89cf0b37551b4d29d6",
-  "backend/services/extraction/graphify_openie.py": "894230639b7994b92eb47a2181f6e6ef44d416c8f4d64bb3e26446fabb1418da",
+  "backend/services/extraction/graphify_openie.py": "38a8dddf7a67494e4e8acc889d7354ee82f0f02a1aa0c1d8ffd9b3bd343c4262",
   "backend/services/extraction/graphify_pipeline.py": "dac88b326e7b27a3a10016d6af53d11b13435e9e3a84d62be5bfa433ccdd567b",
   "backend/services/extraction/graphify_predicate_compiler.py": "2a7524468e728d7c513c4f4246d4947535f450e85eed51c5df7ef1048d2c3bb0",
-  "backend/services/extraction/graphify_proposition_reducer.py": "5542b21b4dd14c0dc2c023188c61687aedbe5c8414cdadc676b4b843ada65d2b",
+  "backend/services/extraction/graphify_proposition_reducer.py": "ec8650944d4a51184bbe40aa1f3506aa1562bd7f5df578f49dc56f4001e1f732",
   "backend/services/extraction/graphify_reducer.py": "6de159311e4eca17c2de1c60f39b48e3aad69904ed63635800c3c435f9266583",
-  "backend/services/extraction/graphify_relations.py": "089ff010c40ecd9b88530db391f0a39244f144f941ded2f9f9f8070e98674dee",
+  "backend/services/extraction/graphify_relations.py": "55cb2ccbac784a3c2706691488f1d979c115d5b2b2610f1e3ac8103e8beb1d1b",
   "backend/services/extraction/graphify_survey.py": "c06828c6e8e62b778ecbccc5d17b523569e1adbc666d790d61bd3bbe0b4b13f2",
   "backend/services/ghost_b.py": "497dd4c678b72a544ec306937f8e6e74a7ebb0e818929790e0fca7fca7c69792",
   "backend/services/graph/neo4j_writer.py": "a90c06cd00c05c9bd0f3d22db0942c353ece411141ffdc85cb77ed1a9af60e5d",
@@ -101,7 +101,7 @@
   "backend/services/storage/graphify_artifact_codec.py": "295558d8dc599973b2c17aafa67a377f211507e207775ee75619eb8ca479e62f",
   "config/entity_schema.yaml": "73bad40139d3f369e649d48b3e889fe9731f0bc77f1a5e084447119a113d9fe0",
   "config/ontology.yaml": "04caa3324848c1fa9d8d02d5ab2dae54e9d7d51959ac83b0c5e60bd7cd5ecead",
-  "config/predicate_synonyms.yaml": "3a3dcc57e78294c2b24f57b43755cc9c9d69dd0f806906a333ed851467c37198"
+  "config/predicate_synonyms.yaml": "e7261d8e0628f58cc09fc963d13e0662dfa3ddb8538d2e0e5339396b10e05ce4"
  },
  "cycle_results": {
   "book_66": "59/66, F1 .868, zero leakage, passed (unmoved)",
@@ -128,7 +128,7 @@
   "spacy_model": "en_core_web_sm"
  },
  "freeze_id": "graphify-qualification-freeze-v6",
- "frozen_at_commit": "dff7b51d6d42ba8583a536c584b08b409ab8e196",
+ "frozen_at_commit": "6495ee9d5cba515e23e2b0fb8ac892300ebd5e63",
  "known_residuals_at_freeze": [
   "lowercase concept-phrase entities ('atomic deconstruction', 'text-to-video') intentionally suppressed by genericity gates \u2014 sealed-v2-class gold needs an owner contract decision before such relations can promote",
   "spec-metadata key mapping policy beyond self-naming keys (primary_system, has_type ...) undecided",
@@ -136,6 +136,6 @@
   "DENSE_STRUCTURE routing (labeling live, handler pending); per-proposer promotion telemetry pending",
   "agentless participles (E10), D04-class typing, cross-sentence relations"
  ],
- "purpose": "Round-1 downstream remediation freeze: adapter-v2 deterministic linking ladder, evidence-scoped FACT merge, self-loop + function-word guards. Precedes sealed_qualification_v7/v8 (research-monograph scale tests). Revised post-census-fold fix (scale crash on v7 first attempt; no key existed, seal unaffected). Re-pinned after promotable-endpoint acceptance rule (v7 scale crash #2). Re-pinned after artifact shard codec (v8 DocumentTooLarge). Re-pinned after legacy GLiNER/GLiREL purge (behavior-neutral, A/B-proven).",
+ "purpose": "Round-1 downstream remediation freeze: adapter-v2 deterministic linking ladder, evidence-scoped FACT merge, self-loop + function-word guards. Precedes sealed_qualification_v7/v8 (research-monograph scale tests). Revised post-census-fold fix (scale crash on v7 first attempt; no key existed, seal unaffected). Re-pinned after promotable-endpoint acceptance rule (v7 scale crash #2). Re-pinned after artifact shard codec (v8 DocumentTooLarge). Re-pinned after legacy GLiNER/GLiREL purge (behavior-neutral, A/B-proven). Re-pinned after ratified #5+#6 (according-to attribution, frame-scoped operate).",
  "supersedes": "freeze_v5 (closed; sealed_v6 graded under it: traps 11/11, FACT .462)"
 }
