@@ -10,21 +10,31 @@
           "sha256": "0484f52794ae4d2e1fe70b0d22aba65f95588f84deb40a946927c160935be7e3"
         },
         "answer_key/NOTES.md": {
-          "sha256": "182be9a4c87d157d6bc2acffbbc70b02a1ee9c87638e7d53f2cd7824286a9cf0"
+          "sha256": "96aed925ad43fd43253464019d22f049fd6f2a0ba023d81967007daf78467ccf"
         },
         "answer_key/PLACEHOLDER_EMPTY_KEY.json": {
           "role": "loader placeholder, never a scoring basis",
           "sha256": "7efce79daa5675d9bef5afe8eb35702c17c18257e60c3f71bb2ab80248399be0"
+        },
+        "answer_key/gold_triples.json": {
+          "bytes": 10227,
+          "converted_by": "isolated grader agent from owner package rag_graph_entity_relation_test; implementation agent never read it",
+          "sha256": "c097a869e3f997ea673c451ff7067bb318355d51ee8629c26e69a8fc4b6bd92f"
         },
         "source/document.md": {
           "bytes": 5648,
           "sha256": "891f15d7ca33ee2f73817c3cf595d32e79c11de6cb9657fa49f2d23769dea7da"
         }
       },
+      "locked_extraction": {
+        "artifact_digest": "8bbd5ebaa9394ac452ad1a0a0eea5ffa4d85058f10a3380e63212bcb9c2023dd",
+        "graph_digest": "07ac1e9ba09e6ce9c99f9de89db1da51372a7bfb1f9eaa5e5333ab18f5a6f242",
+        "note": "extraction completed and committed BEFORE the key existed; the scored run must reproduce this graph digest"
+      },
       "package": "/Users/king/Downloads/sealed_qualification_v2",
       "protocol": "extraction runs FIRST (extract-only, placeholder empty key), digest recorded; when the owner supplies the real key it is scored EXACTLY ONCE under frozen code; freeze verified before and after each step",
       "provenance": "owner-provided document (ENTITY EXTRACTION TEST.txt); packaging agent confirmed it contains the source document ONLY \u2014 no key material; implementation agents have read nothing from the package",
-      "status": "SOURCE_SEALED_AWAITING_ANSWER_KEY"
+      "status": "KEY_RECEIVED_SCORING_ONE_SHOT"
     },
     "synthetic_families_v1 (01-09)": "development regressions \u2014 85/93 at freeze; 02/03/05/07/08/09 PASS",
     "technical_book_66": "development regression \u2014 59/66 at freeze, zero leakage"
