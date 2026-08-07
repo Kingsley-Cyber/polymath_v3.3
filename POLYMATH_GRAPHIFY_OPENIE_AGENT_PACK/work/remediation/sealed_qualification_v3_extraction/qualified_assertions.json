@@ -1,0 +1,65 @@
+[
+  {
+    "evidence_end": 946,
+    "evidence_start": 826,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "the staging checklist",
+    "predicate": "can publish",
+    "qualifiers": {},
+    "subject": "i"
+  },
+  {
+    "evidence_end": 946,
+    "evidence_start": 826,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "staging checklist",
+    "predicate": "can publish",
+    "qualifiers": {},
+    "subject": "i"
+  },
+  {
+    "evidence_end": 1635,
+    "evidence_start": 1521,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "guide",
+    "predicate": "\u2019ll finish",
+    "qualifiers": {},
+    "subject": "i"
+  },
+  {
+    "evidence_end": 1635,
+    "evidence_start": 1521,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "the onboarding guide",
+    "predicate": "\u2019ll finish",
+    "qualifiers": {},
+    "subject": "i"
+  },
+  {
+    "evidence_end": 2075,
+    "evidence_start": 2015,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "training and",
+    "predicate": "runs_on",
+    "qualifiers": {},
+    "subject": "who"
+  },
+  {
+    "evidence_end": 2075,
+    "evidence_start": 2015,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "training and follow up",
+    "predicate": "runs_on",
+    "qualifiers": {},
+    "subject": "who"
+  },
+  {
+    "evidence_end": 2139,
+    "evidence_start": 2079,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "deadline",
+    "predicate": "misses",
+    "qualifiers": {},
+    "subject": "either wednesday review"
+  }
+]
