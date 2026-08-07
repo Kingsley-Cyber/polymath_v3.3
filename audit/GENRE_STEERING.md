@@ -239,3 +239,17 @@ whether it caused this crash. Remediation DONE: volume recreated clean after art
 export; stress runner now derives an IMMUTABLE per-run namespace
 (<ns>_<sourcehash8>_<runid>), never drop-resets at start; cleanup deferred to a
 separate ownership-aware GC.
+
+### Legacy purge complete + sealed v7/v8 locked (2026-08-07, @dff7b51)
+Old GLiNER (urchade relex), GLiNER-Relex flash contract, relex_local, gliner_mentions,
+GLiREL benchmark assets, six relex scripts, ten dead tests — DELETED. Queue dispatcher
+extracted to services/runpod_dispatch (embedding lane). Neutrality proven by A/B: 131
+pre-existing suite failures byte-identical before/after; extraction suite 558 green.
+GLiNER2 + triplet-extract via graphify_cpu is the only extraction stack in the tree.
+sealed_v7 (MX monograph): digest 7f424ea5, 726 nodes / 169 promoted / 1380 qualified,
+conservation 7235/7235. sealed_v8 (FACS/Laban): digest eb0e7d37, 1723 nodes / 572
+promoted / 3721 qualified, conservation 16280/16280. Three scale bugs found+fixed en
+route (census mention-id fold, promotable-endpoint acceptance, artifact shard codec).
+Mongo volume recreated clean; runner uses immutable per-run namespaces. Answers file
+for owner grading: ~/Downloads/graphify_answers_v7_v8.md (furniture-entity noise
+confirms unit.kind classifier as the top factory-phase item).
