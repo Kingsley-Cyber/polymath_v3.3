@@ -1531,6 +1531,9 @@ def run_relation_fast_path(
     syntax_records = 0
     direct_records = 0
     pair_counts: list[int] = []
+    mention_counts: list[int] = []
+    conjunction_counts: list[int] = []
+    dense_structure_units: list[str] = []
     for unit, doc in zip(all_units, docs):
         syntax, raw_syntax, local_gate_counts = _syntax_proposals(unit, doc, extractor, entity_by_id)
         direct = _direct_dependency_proposals(doc, unit)
@@ -1546,7 +1549,14 @@ def run_relation_fast_path(
             existing = deduped.get(key)
             if existing is None or (proposal.source == "strict_dependency_cue" and existing.source != proposal.source):
                 deduped[key] = proposal
-        pair_counts.append(len({(item.subject.mention_id, item.object.mention_id) for item in deduped.values()}))
+        unit_pairs = len({(item.subject.mention_id, item.object.mention_id) for item in deduped.values()})
+        unit_conjunctions = sum(1 for item in doc if item.dep_ == "conj")
+        pair_counts.append(unit_pairs)
+        mention_counts.append(len(unit.mentions))
+        conjunction_counts.append(unit_conjunctions)
+        if len(unit.mentions) >= 8 or unit_conjunctions >= 6 or unit_pairs >= 12:
+            # Pathologically dense unit: labeled for routing, never discarded.
+            dense_structure_units.append(unit.unit_id)
         proposal_rows.extend((unit, item) for item in deduped.values())
 
     surface_records = [_surface_record(unit, proposal) for unit, proposal in proposal_rows]
@@ -1651,6 +1661,32 @@ def run_relation_fast_path(
             "p95": _percentile(pair_counts, 0.95),
             "p99": _percentile(pair_counts, 0.99),
             "max": max(pair_counts, default=0),
+        },
+        "structure_telemetry": {
+            "mentions_per_unit": {
+                "p50": _percentile(mention_counts, 0.50),
+                "p95": _percentile(mention_counts, 0.95),
+                "p99": _percentile(mention_counts, 0.99),
+                "max": max(mention_counts, default=0),
+            },
+            "grammar_pairs_per_unit": {
+                "p50": _percentile(pair_counts, 0.50),
+                "p95": _percentile(pair_counts, 0.95),
+                "p99": _percentile(pair_counts, 0.99),
+                "max": max(pair_counts, default=0),
+            },
+            "coordination_arcs_per_unit": {
+                "p50": _percentile(conjunction_counts, 0.50),
+                "p95": _percentile(conjunction_counts, 0.95),
+                "p99": _percentile(conjunction_counts, 0.99),
+                "max": max(conjunction_counts, default=0),
+            },
+            "grammar_capture_yield": (
+                round(sum(pair_counts) / sum(mention_counts), 4)
+                if sum(mention_counts) else 0.0
+            ),
+            "dense_structure_units": len(dense_structure_units),
+            "dense_structure_unit_ids": dense_structure_units[:20],
         },
         "identity_digest": stable_digest({
             "eligibility": [item.as_dict() for item in all_decisions],

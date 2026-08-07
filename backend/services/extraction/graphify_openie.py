@@ -276,7 +276,10 @@ def run_openie_extraction(
             renderings = []
             deterministic_only_units += 1
         else:
-            renderings = provider.extract(unit.text)
+            # External proposers receive the same masked, soft-wrap-flattened
+            # text the shared spaCy pipe parses (equal length, offsets stable),
+            # so their internal parse tokenizes the identical string.
+            renderings = provider.extract(re.sub(r"[*_~`\r\n]", " ", unit.text))
             extract_calls += 1
         for sequence, rendering in enumerate(renderings):
             links = tuple(_link(link) for link in (getattr(rendering, "asserter_links", None) or ()))
