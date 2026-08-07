@@ -3,9 +3,9 @@
   "status": "PASS",
   "runtime": {
     "pipeline_release": "graphify-cpu-pipeline-v15",
-    "mongo_database": "graphify_eval_syn_08_b0735ca0c0",
-    "corpus_id": "527720d7-158f-5d95-b2d0-bbc8115586ab",
-    "elapsed_seconds": 10.28,
+    "mongo_database": "graphify_eval_syn_08_fa2c83f035",
+    "corpus_id": "08cbc80e-ac54-53cc-bb78-ee76cffe1acb",
+    "elapsed_seconds": 1.08,
     "interpreter": "/Users/king/polymath_v3.3/local_ghost_b/.venv/bin/python"
   },
   "items": {

@@ -3,14 +3,14 @@
   "status": "FAIL",
   "runtime": {
     "pipeline_release": "graphify-cpu-pipeline-v15",
-    "mongo_database": "graphify_eval_syn_01_ec6fc58b8d",
-    "corpus_id": "de7df3a4-b438-5473-8736-f2bcaacc0da4",
-    "elapsed_seconds": 10.06,
+    "mongo_database": "graphify_eval_syn_01_47a38018da",
+    "corpus_id": "7d72c395-1053-5b6b-b1da-c9b599e5b197",
+    "elapsed_seconds": 10.8,
     "interpreter": "/Users/king/polymath_v3.3/local_ghost_b/.venv/bin/python"
   },
   "items": {
-    "passed": 11,
-    "failed": 2,
+    "passed": 12,
+    "failed": 1,
     "optional_failed": 0,
     "total": 13
   },
@@ -28,10 +28,11 @@
       "pinion api",
       "priya anand",
       "quartzline analytics",
+      "sable index",
       "telemetry group",
       "tobias venn"
     ],
-    "promoted_edge_count": 4
+    "promoted_edge_count": 5
   },
   "extracted_entities": [
     "2027",
@@ -114,9 +115,9 @@
     {
       "id": "E08",
       "check": "positive",
-      "verdict": "FAIL",
+      "verdict": "PASS",
       "optional": false,
-      "detail": "no positive edge for pair",
+      "detail": "",
       "evidence": "The Pinion API sends normalized batches to the Sable Index."
     },
     {

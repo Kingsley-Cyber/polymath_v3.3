@@ -20,6 +20,11 @@
     "object": "falcon cache"
   },
   {
+    "subject": "pinion api",
+    "predicate": "uses",
+    "object": "redlark"
+  },
+  {
     "subject": "quartzline",
     "predicate": "owns",
     "object": "vaultstone"

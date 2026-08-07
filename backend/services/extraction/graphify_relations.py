@@ -165,8 +165,9 @@ def _valid_endpoint_surface(value: str) -> bool:
 
 
 def _mask_markdown_for_parse(value: str) -> str:
-    """Replace Markdown delimiters with equal-length spaces for stable offsets."""
-    return re.sub(r"[*_~`]", " ", value)
+    """Replace Markdown delimiters and soft line-wraps with equal-length spaces
+    so the parser sees one flowing sentence while offsets stay stable."""
+    return re.sub(r"[*_~`\r\n]", " ", value)
 
 
 @dataclass(frozen=True)
@@ -794,6 +795,12 @@ def _argument_tokens(token) -> tuple[list[Any], list[Any]]:
     if lemma in {"build", "derive"}:
         subject_dependencies.update({"nsubjpass", "nsubj:pass"})
     subjects = _children(token, subject_dependencies)
+    if not subjects:
+        for auxiliary in _children(token, {"aux", "auxpass"}):
+            recovered = _children(auxiliary, {"nsubj", "csubj", "nsubjpass", "nsubj:pass"})
+            if recovered:
+                subjects = recovered
+                break
     required_prep = _PREPOSITION_BY_LEMMA.get(lemma)
     if lemma in _OPEN_ONLY_LEMMAS:
         required_prep = _OPEN_PREPOSITION_BY_LEMMA.get(lemma)
@@ -1102,6 +1109,7 @@ def _direct_dependency_proposals(doc, unit: _Unit) -> list[_Proposal]:
         objects: list[Any] = []
         voice = "active"
         preposition = ""
+        cue_source_text = token.text
 
         passive_subjects = _children(token, {"nsubjpass", "nsubj:pass"})
         by_agents = _prep_objects(token, "by")
@@ -1164,16 +1172,6 @@ def _direct_dependency_proposals(doc, unit: _Unit) -> list[_Proposal]:
                 preposition = required_prep
             else:
                 objects = _children(token, {"dobj", "obj", "attr", "oprd"})
-                if open_verb:
-                    # Ditransitive recipients ("sends X to Y") carry the named
-                    # endpoint; the dative complement is proposed alongside the
-                    # direct object.
-                    for child in token.children:
-                        if child.dep_ == "dative":
-                            dative_objects = _children(child, {"pobj"})
-                            if dative_objects:
-                                objects = [*objects, *dative_objects]
-                                preposition = preposition or child.text.casefold()
                 if not objects and (open_verb or open_relation):
                     # Open verbs without a direct object may relate through a
                     # prepositional complement ("works from X", "migrated to Y",
@@ -1189,6 +1187,23 @@ def _direct_dependency_proposals(doc, unit: _Unit) -> list[_Proposal]:
                 objects = _explicit_list_objects(doc, token, objects)
             if not subjects and token.dep_ in {"xcomp", "ccomp", "conj"}:
                 subjects = _children(token.head, {"nsubj"})
+            if not subjects:
+                # Subject stranded on an aux child. When that aux carries a
+                # content lemma ("sends" tagged AUX under ROOT "normalized"),
+                # the small model misparsed: the aux is the real predicate.
+                for auxiliary in _children(token, {"aux", "auxpass"}):
+                    recovered = _children(
+                        auxiliary, {"nsubj", "csubj", "nsubjpass", "nsubj:pass"},
+                    )
+                    if recovered:
+                        subjects = recovered
+                        if auxiliary.lemma_.casefold() not in {
+                            "be", "have", "do", "will", "would", "shall",
+                            "should", "can", "could", "may", "might", "must", "get",
+                        }:
+                            cue_source_text = auxiliary.text
+                            lemma = auxiliary.lemma_.casefold()
+                        break
             if token.dep_ in {"xcomp", "ccomp"} and subjects and all(
                 item.lemma_.casefold() in {"it", "they", "he", "she"} for item in subjects
             ):
@@ -1233,6 +1248,24 @@ def _direct_dependency_proposals(doc, unit: _Unit) -> list[_Proposal]:
             )
         subject_mentions = list({item.mention_id: item for item in subject_mentions}.values())
         object_mentions = list({item.mention_id: item for item in object_mentions}.values())
+        recipient_mentions: list[Any] = []
+        recipient_prep = ""
+        if open_verb and voice == "active":
+            # Transfer frame "verb NP to NP": the to/dative complement is a
+            # recipient argument, proposed with its own "<verb> to" surface so
+            # the transfer-verb policy (destination -> uses) can apply.
+            for child in token.children:
+                if child.dep_ == "dative" or (
+                    child.dep_ == "prep" and child.lemma_.casefold() == "to"
+                ):
+                    for pobj in _children(child, {"pobj"}):
+                        recipient_mentions.extend(_mentions_for_token(pobj, unit))
+                    if recipient_mentions:
+                        recipient_prep = child.text.casefold()
+                        break
+            recipient_mentions = list(
+                {item.mention_id: item for item in recipient_mentions}.values()
+            )
         if (open_verb or open_relation) and subject_mentions and not object_mentions:
             # The direct object carried no name evidence ("migrated its
             # archives to the Vaultstone store"): relate through the
@@ -1250,9 +1283,9 @@ def _direct_dependency_proposals(doc, unit: _Unit) -> list[_Proposal]:
         if not subject_mentions or not object_mentions:
             continue
         cue = (
-            f"{token.text} {preposition}"
+            f"{cue_source_text} {preposition}"
             if ((open_verb or open_relation) and preposition)
-            else token.text
+            else cue_source_text
         )
         for subject in subject_mentions:
             for object_mention in object_mentions:
@@ -1273,6 +1306,34 @@ def _direct_dependency_proposals(doc, unit: _Unit) -> list[_Proposal]:
                     voice=voice, polarity=local_polarity, modality=local_modality,
                     attribution=local_attribution, canonical_hint=canonical,
                     confidence=1.0, source="strict_dependency_cue",
+                ))
+        for subject in subject_mentions:
+            for recipient in recipient_mentions:
+                if subject.entity_id == recipient.entity_id:
+                    continue
+                if any(
+                    recipient.entity_id == existing.entity_id
+                    for existing in object_mentions
+                ):
+                    continue
+                recipient_cue = f"{cue_source_text} {recipient_prep}"
+                local_qualification = nominal_assertion_qualification(
+                    unit.text, subject.surface, recipient_cue, recipient.surface,
+                )
+                recipient_polarity, recipient_modality, recipient_attribution = (
+                    local_qualification or (polarity, modality, attribution)
+                )
+                proposals.append(_Proposal(
+                    subject=subject, object=recipient,
+                    surface_predicate=recipient_cue, lemma=lemma, particle="",
+                    preposition=recipient_prep,
+                    dependency_frame=f"direct:{voice}:transfer_recipient",
+                    dependency_path=f"nsubj>{token.dep_}>pobj",
+                    voice=voice, polarity=recipient_polarity,
+                    modality=recipient_modality,
+                    attribution=recipient_attribution,
+                    canonical_hint=None, confidence=1.0,
+                    source="strict_dependency_cue",
                 ))
     # Appositive membership: "X, the <descriptor> in Y, ..." — the appositive
     # descriptor's in-complement associates the anchor with Y. Captured as an

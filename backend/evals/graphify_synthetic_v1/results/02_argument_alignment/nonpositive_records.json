@@ -87,49 +87,6 @@
   },
   {
     "schema_version": "polymath.assertion_decision.v1",
-    "decision_id": "assertion-decision:732b77282f3745983af03dd1",
-    "relation_id": "surface-relation:59586cfe067a5917ed069e11",
-    "document_id": "1e5b7411399edd5ee5f8f5ece51fd78c5433d3ff349fc10c678aa678e9b72a3d",
-    "status": "open",
-    "canonical_predicate": null,
-    "score": 1.0,
-    "reasons": [
-      "open:send:unmapped_surface_relation",
-      "source:strict_dependency_cue"
-    ],
-    "policy_release": "graphify-relation-fast-path-v13",
-    "_mapped": {
-      "schema_version": "polymath.surface_relation.v1",
-      "relation_id": "surface-relation:59586cfe067a5917ed069e11",
-      "document_id": "1e5b7411399edd5ee5f8f5ece51fd78c5433d3ff349fc10c678aa678e9b72a3d",
-      "evidence_text": "The Pinion API produces the Audit Summary Report and sends rollups to Redlark.",
-      "evidence_start": 497,
-      "evidence_end": 575,
-      "subject_mention_id": "completed-mention:e8cb5f2f7174f4b8912f0841",
-      "object_mention_id": "completed-mention:ae67aa9d472549a1d9427821",
-      "surface_predicate": "sends to",
-      "lemma": "send",
-      "particle": "",
-      "preposition": "to",
-      "dependency_frame": "direct:active:conj",
-      "dependency_path": "nsubj>conj>dobj",
-      "voice": "active",
-      "polarity": "positive",
-      "modality": "asserted",
-      "attribution": "",
-      "canonical_candidate": null,
-      "mapping_rule": "open:send:unmapped_surface_relation",
-      "mapping_release": "graphify-predicate-compiler-v2",
-      "terminal_state": "open",
-      "reasons": [
-        "open:send:unmapped_surface_relation",
-        "source:strict_dependency_cue"
-      ]
-    },
-    "_lane": "fast_path:open"
-  },
-  {
-    "schema_version": "polymath.assertion_decision.v1",
     "decision_id": "assertion-decision:3b32b9c7873d7af88b79af04",
     "relation_id": "surface-relation:a5838a7e043db9b601edd9bc",
     "document_id": "1e5b7411399edd5ee5f8f5ece51fd78c5433d3ff349fc10c678aa678e9b72a3d",

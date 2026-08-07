@@ -10,6 +10,11 @@
     "object": "larkspur queue"
   },
   {
+    "subject": "pinion api",
+    "predicate": "uses",
+    "object": "sable index"
+  },
+  {
     "subject": "priya anand",
     "predicate": "works_for",
     "object": "quartzline analytics"

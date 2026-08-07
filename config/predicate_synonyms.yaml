@@ -213,6 +213,46 @@ synonyms:
   writes to: uses
   written to: uses
   maintain: supports
+  # --- transfer-verb policy (owner-delegated decision, 2026-08-07): directed
+  # transfer maps the DESTINATION as uses (same frame as "writes to") and the
+  # SOURCE as consumes (same frame as "reads from"). Phrase keys only — a bare
+  # transfer verb without its complement stays an open relation.
+  send to: uses
+  sends to: uses
+  sent to: uses
+  deliver to: uses
+  delivers to: uses
+  forward to: uses
+  forwards to: uses
+  push to: uses
+  pushes to: uses
+  publish to: uses
+  publishes to: uses
+  stream to: uses
+  streams to: uses
+  ship to: uses
+  ships to: uses
+  transmit to: uses
+  transmits to: uses
+  upload to: uses
+  uploads to: uses
+  route to: uses
+  routes to: uses
+  emit to: uses
+  emits to: uses
+  export to: uses
+  exports to: uses
+  receive from: consumes
+  receives from: consumes
+  received from: consumes
+  pull from: consumes
+  pulls from: consumes
+  fetch from: consumes
+  fetches from: consumes
+  import from: consumes
+  imports from: consumes
+  download from: consumes
+  downloads from: consumes
   # --- instance_of (be = 29.5% of corpus) ---
   be: instance_of
   is a: instance_of
