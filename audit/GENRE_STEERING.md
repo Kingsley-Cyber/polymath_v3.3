@@ -120,3 +120,27 @@ with zero malformed growth and zero precision damage. Proposition-level recall r
 +4 sealed) but the final graph is unchanged — the newly discovered pairs die between reducer
 and promotion. Next steering target is therefore the promotion/interpretation layers, NOT
 discovery. Unit tests: 546 passed.
+
+### Downstream replay harness (2026-08-07, owner-ordered before the hard-document test)
+`backend/scripts/replay_downstream.py` — freezes upstream observations (document, survey,
+raw GLiNER2 mentions, raw OpenIE propositions; loadable from any run DB or exported
+raw_mentions.jsonl / raw_openie_propositions.jsonl) and replays ONLY the downstream
+compiler through the production functions: entity reduction → mention completion →
+argument alignment → proposition reduction → predicate compilation → assertion assembly
+→ syntax fast path → FACT-merge. Emits the stage waterfall, enforces conservation
+(raw = FACT + QUALIFIED_CLAIM + OPEN_RELATION + REVIEW + REJECT, alignment failures
+sub-attributed, nothing silently disappears), and per-gold FIRST-LOSS traces.
+Frozen sets exported: work/remediation/frozen_book66, frozen_sealed1.
+
+First replay results (union extractions, conservation HOLDS on both):
+- book-66: 1225 props → aligned 94.5% → entity pairs 10.4% → predicate mapped 49.7% /
+  open 28.4% / review 21.9% → lanes FACT 10.6% (of which 101 duplicate syntax facts,
+  17 novel promotions, 12 value-facts without promotable endpoints). Lost gold: 16
+  (10 upstream no-proposition, 5 ARGUMENT ALIGNMENT, 1 promotion/merge).
+- sealed-v1: 683 props → aligned 89.3% → pairs 3.5% → FACT 4.2%. Lost gold: 23
+  (11 upstream, 8 ARGUMENT ALIGNMENT, 3 promotion/merge, 1 assertion status).
+Dominant downstream loss class = SUBJECT-side argument alignment, with the correct
+canonical predicate already compiled in every such trace. Second = promotion/merge
+contract (full FACT chain, correct predicate, blocked at merge). These are the two
+deterministic-fix targets for the hard-document phase; per owner rule, fixes target the
+FIRST losing mechanism generically — never final F1 directly, never GLiNER2/triplet-extract.

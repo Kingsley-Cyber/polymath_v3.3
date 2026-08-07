@@ -1,0 +1,1734 @@
+{
+ "schema_version": "polymath.document_survey.v1",
+ "document_id": "e231938df9ea59ca993619c376622d91271d036c821a37c36e780cb75a14bb7b",
+ "survey_release": "graphify-survey-v1",
+ "normalized_sha256": "8c05628225d8efab29ea5c7fa6642f62045365bf90eda57066d9b80cdb48f4c0",
+ "headings": [
+  {
+   "level": 1,
+   "text": "Chapter 9: Night Passes at Cinder Mesa",
+   "start": 0,
+   "end": 40,
+   "path": [
+    "Chapter 9: Night Passes at Cinder Mesa"
+   ]
+  },
+  {
+   "level": 2,
+   "text": "From antenna to envelope",
+   "start": 1189,
+   "end": 1216,
+   "path": [
+    "Chapter 9: Night Passes at Cinder Mesa",
+    "From antenna to envelope"
+   ]
+  },
+  {
+   "level": 2,
+   "text": "Decommutation and calibration",
+   "start": 2449,
+   "end": 2481,
+   "path": [
+    "Chapter 9: Night Passes at Cinder Mesa",
+    "Decommutation and calibration"
+   ]
+  },
+  {
+   "level": 2,
+   "text": "The archive and its customers",
+   "start": 4100,
+   "end": 4132,
+   "path": [
+    "Chapter 9: Night Passes at Cinder Mesa",
+    "The archive and its customers"
+   ]
+  },
+  {
+   "level": 2,
+   "text": "Alarms, overruns, and the March blackout",
+   "start": 5749,
+   "end": 5792,
+   "path": [
+    "Chapter 9: Night Passes at Cinder Mesa",
+    "Alarms, overruns, and the March blackout"
+   ]
+  },
+  {
+   "level": 2,
+   "text": "What we owe the spacecraft",
+   "start": 7491,
+   "end": 7520,
+   "path": [
+    "Chapter 9: Night Passes at Cinder Mesa",
+    "What we owe the spacecraft"
+   ]
+  }
+ ],
+ "aliases": [
+  {
+   "canonical": "The Decommutation and Calibration Unit",
+   "alias": "DCU",
+   "start": 957,
+   "end": 1001
+  },
+  {
+   "canonical": "Mission Telemetry Archive",
+   "alias": "MTA",
+   "start": 4478,
+   "end": 4509
+  }
+ ],
+ "definitions": [
+  {
+   "term": "Skyloom",
+   "definition": "not one program but a federation, currently shipped as release 12",
+   "start": 718,
+   "end": 794
+  },
+  {
+   "term": "Drift Report",
+   "definition": "derived from ninety days of MTA history, and the Drift Report supports the Flight Dynamics Review held every Thursday morning",
+   "start": 4908,
+   "end": 5049
+  },
+  {
+   "term": "Regenerated Point Set",
+   "definition": "consumed by the Trend Service before the next report is cut",
+   "start": 5232,
+   "end": 5316
+  }
+ ],
+ "blocks": [
+  {
+   "block_id": "block:1dc3f4dcca45344671f5",
+   "start": 0,
+   "end": 41,
+   "text": "# Chapter 9: Night Passes at Cinder Mesa\n",
+   "structural_position": "front",
+   "repeat_count": 1,
+   "furniture_signals": [
+    "front_matter",
+    "short_block"
+   ],
+   "furniture_candidate": false
+  },
+  {
+   "block_id": "block:17aeb1022a1322aabcec",
+   "start": 42,
+   "end": 717,
+   "text": "Most of what the public sees of a satellite mission is the launch. Most of what keeps the mission alive happens afterward, at night, in buildings nobody photographs. This chapter follows one such building \u2014 the Cinder Mesa Ground Station, a fenced compound of dishes and portacabins on the high desert outside Braxton Hollow \u2014 and the software that runs inside it. Aurelia Orbital owns the Cinder Mesa Ground Station, and nearly everything the station does flows through Skyloom, the ground-segment platform operated by Aurelia Orbital. Skyloom supports round-the-clock mission operations for the Kestrel fleet; when the operators say \"the platform,\" this is what they mean.\n",
+   "structural_position": "front",
+   "repeat_count": 1,
+   "furniture_signals": [
+    "front_matter"
+   ],
+   "furniture_candidate": false
+  },
+  {
+   "block_id": "block:91a76689aaff2d0f1657",
+   "start": 718,
+   "end": 1188,
+   "text": "Skyloom is not one program but a federation, currently shipped as release 12.4. Groundgate, the station's front door for radio traffic, is part of Skyloom, and so is the Ops Console that the night shift keeps open across three dashboards. The Decommutation and Calibration Unit (DCU), which we will meet shortly, is part of Skyloom as well. The pieces were written by different teams in different years, and it shows; what holds them together is not style but contract.\n",
+   "structural_position": "front",
+   "repeat_count": 1,
+   "furniture_signals": [
+    "front_matter"
+   ],
+   "furniture_candidate": false
+  },
+  {
+   "block_id": "block:2e7ffaa6d0fdae30a3a2",
+   "start": 1189,
+   "end": 1217,
+   "text": "## From antenna to envelope\n",
+   "structural_position": "front",
+   "repeat_count": 1,
+   "furniture_signals": [
+    "front_matter",
+    "short_block"
+   ],
+   "furniture_candidate": false
+  },
+  {
+   "block_id": "block:3620d6f3c5b607b577ef",
+   "start": 1218,
+   "end": 1807,
+   "text": "A pass begins hours before the spacecraft rises. The Station Scheduler uses Orrery, an ephemeris library that the flight-dynamics team has maintained since the first Kestrel launch, and Orrery produces the Pass Predictions that anchor each week's contact plan. The Pass Planning Service consumes the Pass Predictions and hands the antenna crew a timetable printed in station-local time, a courtesy the crew defends fiercely. Groundgate depends on the Station Scheduler for its pass windows; without a scheduled window, the gateway simply refuses to open the link, no matter who is asking.\n",
+   "structural_position": "front",
+   "repeat_count": 1,
+   "furniture_signals": [
+    "front_matter"
+   ],
+   "furniture_candidate": false
+  },
+  {
+   "block_id": "block:792dc6721ea31af12535",
+   "start": 1808,
+   "end": 2448,
+   "text": "When KST-14, the newest spacecraft in the Kestrel constellation, clears the eastern horizon, the dishes lock on and Groundgate consumes the Raw Downlink Stream in eight-second bursts. Authentication happens at the edge: Groundgate uses Palisade for link authentication, rejecting any burst whose station key fails to match. For every accepted burst, Groundgate produces a Frame Envelope, a stamped container recording timing, antenna identity, and signal quality. The Frame Registry defines the Frame Envelope contract; version fe-2.3 of that contract has been frozen since last winter, and the freeze is treated as something close to law.\n",
+   "structural_position": "body",
+   "repeat_count": 1,
+   "furniture_signals": [],
+   "furniture_candidate": false
+  },
+  {
+   "block_id": "block:6eabc39db3f2690bd859",
+   "start": 2449,
+   "end": 2482,
+   "text": "## Decommutation and calibration\n",
+   "structural_position": "body",
+   "repeat_count": 1,
+   "furniture_signals": [
+    "short_block"
+   ],
+   "furniture_candidate": false
+  },
+  {
+   "block_id": "block:0ae2a53cb371b6a6e5df",
+   "start": 2483,
+   "end": 3319,
+   "text": "Accepted envelopes are consumed by the DCU, the subsystem that turns radio frames back into engineering truth. The DCU was rewritten from scratch two years ago after a long argument about validation. It now uses Latchkey for checksum validation \u2014 Latchkey 2.6, to be precise \u2014 and the old hand-rolled verifier survives only in a museum branch of the repository. The DCU depends on Copperline for durable frame transport between station buildings. Copperline, a transport bus owned by Veldstone Systems, supports the Frame Transport Process that moves envelopes from the antenna vault to the processing floor without loss or reordering. A Veldstone Systems account manager claimed that Copperline supports encrypted multicast, but nobody at Cinder Mesa has ever seen the feature work, and it does not appear in the product's own manual.\n",
+   "structural_position": "body",
+   "repeat_count": 1,
+   "furniture_signals": [],
+   "furniture_candidate": false
+  },
+  {
+   "block_id": "block:122417b5a5e90faade46",
+   "start": 3320,
+   "end": 4099,
+   "text": "The DCU implements the Decommutation Process, the step-by-step unpacking of each envelope into named measurements. The Decommutation Process uses the Calibration Table Set published after every thermal-vacuum campaign, and Dr. Maren Oduya owns the Calibration Table Set \u2014 a responsibility she describes, without much affection, as keeping four hundred polynomials honest. The DCU produces Calibrated Telemetry Points, and Calibrated Telemetry Points are derived from their parent Frame Envelopes in a strict one-to-many mapping; no point exists without a traceable envelope behind it. If the planned Ironvale migration is ever approved, the DCU will depend on Ironvale for frame transport instead, but that decision has been deferred twice and now belongs to next year's budget.\n",
+   "structural_position": "body",
+   "repeat_count": 1,
+   "furniture_signals": [],
+   "furniture_candidate": false
+  },
+  {
+   "block_id": "block:304d9c38ea6f7f4f0fea",
+   "start": 4100,
+   "end": 4133,
+   "text": "## The archive and its customers\n",
+   "structural_position": "body",
+   "repeat_count": 1,
+   "furniture_signals": [
+    "short_block"
+   ],
+   "furniture_candidate": false
+  },
+  {
+   "block_id": "block:d9fd4de58b31b75f140e",
+   "start": 4134,
+   "end": 4791,
+   "text": "Every calibrated point ends up in the same place. The Archive Process consumes Calibrated Telemetry Points from the processing floor, and the Archive Process uses Tidegauge, a time-series engine tuned for write-heavy workloads, to lay the points down in arrival order. What accumulates is the mission's memory: the Archive Process produces the Mission Telemetry Archive (MTA), and Aurelia Orbital owns the MTA outright \u2014 a point of contractual pride, since two earlier missions had ended up leasing their own history back from a vendor. Tidegauge supports downsampled retrieval, which is why a ninety-day trend query returns in seconds rather than minutes.\n",
+   "structural_position": "body",
+   "repeat_count": 1,
+   "furniture_signals": [],
+   "furniture_candidate": false
+  },
+  {
+   "block_id": "block:0ad64593d3cf207671ac",
+   "start": 4792,
+   "end": 5318,
+   "text": "Two regular customers sit downstream. The Trend Service consumes the MTA and produces the weekly Drift Report; each Drift Report is derived from ninety days of MTA history, and the Drift Report supports the Flight Dynamics Review held every Thursday morning. When gaps appear \u2014 and after any long outage they do \u2014 the Backfill Process consumes the Mission Telemetry Archive, the Backfill Process produces the Regenerated Point Set, and the Regenerated Point Set is consumed by the Trend Service before the next report is cut.\n",
+   "structural_position": "body",
+   "repeat_count": 1,
+   "furniture_signals": [],
+   "furniture_candidate": false
+  },
+  {
+   "block_id": "block:eed6a6c1d5b44ed026fa",
+   "start": 5319,
+   "end": 5748,
+   "text": "Paper trails accumulate their own myths. The statement that the Pass Planning Service owns the Station Scheduler surfaced in a vendor audit last spring; it was never substantiated, and the org chart says otherwise. In a hypothetical hosted deployment \u2014 an idea sketched once on a whiteboard and left there \u2014 Skyloom would use Stonevault for long-term cold storage, but no such deployment exists, and nobody has budgeted for one.\n",
+   "structural_position": "body",
+   "repeat_count": 1,
+   "furniture_signals": [],
+   "furniture_candidate": false
+  },
+  {
+   "block_id": "block:e2d266fcb081ab553ea4",
+   "start": 5749,
+   "end": 5793,
+   "text": "## Alarms, overruns, and the March blackout\n",
+   "structural_position": "body",
+   "repeat_count": 1,
+   "furniture_signals": [
+    "short_block"
+   ],
+   "furniture_candidate": false
+  },
+  {
+   "block_id": "block:57f5c6f79018e09d41d8",
+   "start": 5794,
+   "end": 6345,
+   "text": "Alarms live in their own lane. The Alert Engine consumes Calibrated Telemetry Points as they land, and the Alert Engine implements the Limit-Checking Process, a comparison of every point against red and yellow bounds. When a bound is crossed, the Alert Engine produces Anomaly Notices, and Anomaly Notices are consumed by the Ops Console, where they surface as banners the night shift cannot dismiss without comment. The Alert Engine does not consume the Drift Report; limit checking runs on live points only, and weekly paperwork has no place in it.\n",
+   "structural_position": "body",
+   "repeat_count": 1,
+   "furniture_signals": [],
+   "furniture_candidate": false
+  },
+  {
+   "block_id": "block:ddc181f0e8ff2c349f49",
+   "start": 6346,
+   "end": 6946,
+   "text": "Not every alarm is honest work. Thermal sensor saturation causes false limit trips on the sunward side of each orbit, and false limit trips cause operator fatigue faster than any real emergency does. Clock skew between the station reference and the spacecraft bus causes ALR-2214 alarms \u2014 the code the shift log politely calls the two a.m. special. For nearly two years the station wiki stated that the Trend Service produces the Anomaly Notices; the page was corrected after the March post-incident review, but the error had already found its way into one training deck and two interview questions.\n",
+   "structural_position": "body",
+   "repeat_count": 1,
+   "furniture_signals": [],
+   "furniture_candidate": false
+  },
+  {
+   "block_id": "block:e46259d0ca8ded8c117b",
+   "start": 6947,
+   "end": 7490,
+   "text": "The March Blackout Event occurred at the Cinder Mesa Ground Station on the night of March 14th, when a substation fault dropped the compound to generator power for six hours. The March Blackout Event caused pass overruns across two consecutive shifts as the antenna crew re-queued missed contacts. It was incorrectly reported, in the first summary that reached headquarters, that the March Blackout Event caused data loss in the Mission Telemetry Archive; the archive was verified complete within a day, and the summary was quietly retracted.\n",
+   "structural_position": "body",
+   "repeat_count": 1,
+   "furniture_signals": [],
+   "furniture_candidate": false
+  },
+  {
+   "block_id": "block:4d252517bbaa05fc6453",
+   "start": 7491,
+   "end": 7521,
+   "text": "## What we owe the spacecraft\n",
+   "structural_position": "back",
+   "repeat_count": 1,
+   "furniture_signals": [
+    "back_matter",
+    "short_block"
+   ],
+   "furniture_candidate": false
+  },
+  {
+   "block_id": "block:fb988e11ff8f77a71b5a",
+   "start": 7522,
+   "end": 8131,
+   "text": "Two documents keep the whole arrangement honest. The Service Commitment Letter defines P99 Delivery Latency as 900 milliseconds from antenna to archive. It also defines Archive Completeness, the fraction of predicted points actually banked per pass, and the letter is reviewed each quarter with the same solemnity as the budget. The Contingency Playbook defines the Safe-Hold Response Process, the ordered steps the shift follows when a spacecraft tumbles into its protective mode, and the Safe-Hold Response Process supports spacecraft recovery without requiring anyone to improvise at three in the morning.\n",
+   "structural_position": "back",
+   "repeat_count": 1,
+   "furniture_signals": [
+    "back_matter"
+   ],
+   "furniture_candidate": false
+  },
+  {
+   "block_id": "block:5b05fe7e4047ce930a29",
+   "start": 8132,
+   "end": 8788,
+   "text": "Beneath both documents sits a principle. The Frame Integrity Charter defines frame integrity as the guarantee that every stored point can be traced back to a validated envelope \u2014 no orphan measurements, no unexplained values. Frame integrity is why the DCU refuses partial envelopes, why the archive is verified after every outage, and why a handful of shell scripts that once patched gaps by hand were retired and ceremonially deleted. Ask Dr. Oduya what the ground segment is for and she will not mention antennas at all. The spacecraft forgets, she likes to say, handing a new operator the playbook on their first night. We are the part that remembers.\n",
+   "structural_position": "back",
+   "repeat_count": 1,
+   "furniture_signals": [
+    "back_matter"
+   ],
+   "furniture_candidate": false
+  }
+ ],
+ "shape_counts": {
+  "capitalized_phrases": 155,
+  "all_caps_tokens": 15,
+  "identifier_tokens": 2,
+  "numeric_tokens": 4
+ },
+ "token_frequency": {
+  "a": 32,
+  "a.m.": 1,
+  "about": 1,
+  "accepted": 2,
+  "account": 1,
+  "accumulate": 1,
+  "accumulates": 1,
+  "across": 2,
+  "actually": 1,
+  "affection": 1,
+  "after": 5,
+  "afterward": 1,
+  "against": 1,
+  "ago": 1,
+  "alarm": 1,
+  "alarms": 3,
+  "alert": 4,
+  "alive": 1,
+  "all.": 1,
+  "alr-2214": 1,
+  "already": 1,
+  "also": 1,
+  "an": 2,
+  "anchor": 1,
+  "and": 41,
+  "anomaly": 3,
+  "antenna": 6,
+  "antennas": 1,
+  "any": 3,
+  "anyone": 1,
+  "appear": 2,
+  "approved": 1,
+  "archive": 10,
+  "archive.": 1,
+  "are": 4,
+  "argument": 1,
+  "arrangement": 1,
+  "arrival": 1,
+  "as": 10,
+  "ask": 1,
+  "asking.": 1,
+  "at": 7,
+  "audit": 1,
+  "aurelia": 3,
+  "authentication": 2,
+  "back": 3,
+  "backfill": 2,
+  "banked": 1,
+  "banners": 1,
+  "be": 2,
+  "been": 2,
+  "before": 2,
+  "begins": 1,
+  "behind": 1,
+  "belongs": 1,
+  "beneath": 1,
+  "between": 2,
+  "blackout": 4,
+  "both": 1,
+  "bound": 1,
+  "bounds.": 1,
+  "branch": 1,
+  "braxton": 1,
+  "budget.": 2,
+  "budgeted": 1,
+  "building": 1,
+  "buildings": 1,
+  "buildings.": 1,
+  "burst": 2,
+  "bursts.": 1,
+  "bus": 2,
+  "but": 6,
+  "by": 7,
+  "calibrated": 5,
+  "calibration": 4,
+  "calls": 1,
+  "campaign": 1,
+  "can": 1,
+  "cannot": 1,
+  "cause": 1,
+  "caused": 2,
+  "causes": 2,
+  "ceremonially": 1,
+  "chapter": 2,
+  "chart": 1,
+  "charter": 1,
+  "checking": 1,
+  "checksum": 1,
+  "cinder": 5,
+  "claimed": 1,
+  "clears": 1,
+  "clock": 1,
+  "close": 1,
+  "code": 1,
+  "cold": 1,
+  "comment.": 1,
+  "commitment": 1,
+  "comparison": 1,
+  "complete": 1,
+  "completeness": 1,
+  "compound": 2,
+  "consecutive": 1,
+  "console": 2,
+  "constellation": 1,
+  "consume": 1,
+  "consumed": 3,
+  "consumes": 6,
+  "contact": 1,
+  "contacts.": 1,
+  "container": 1,
+  "contingency": 1,
+  "contract": 2,
+  "contract.": 1,
+  "contractual": 1,
+  "copperline": 3,
+  "corrected": 1,
+  "courtesy": 1,
+  "crew": 3,
+  "crossed": 1,
+  "currently": 1,
+  "customers": 2,
+  "cut.": 1,
+  "dashboards.": 1,
+  "data": 1,
+  "day": 1,
+  "days": 1,
+  "dcu": 8,
+  "decision": 1,
+  "deck": 1,
+  "decommutation": 4,
+  "defends": 1,
+  "deferred": 1,
+  "defines": 5,
+  "deleted.": 1,
+  "delivery": 1,
+  "depend": 1,
+  "depends": 2,
+  "deployment": 2,
+  "derived": 2,
+  "describes": 1,
+  "desert": 1,
+  "different": 2,
+  "dishes": 2,
+  "dismiss": 1,
+  "do": 1,
+  "documents": 2,
+  "does": 3,
+  "does.": 1,
+  "door": 1,
+  "down": 1,
+  "downlink": 1,
+  "downsampled": 1,
+  "downstream.": 1,
+  "dr.": 2,
+  "drift": 4,
+  "dropped": 1,
+  "durable": 1,
+  "dynamics": 1,
+  "each": 5,
+  "earlier": 1,
+  "eastern": 1,
+  "edge": 1,
+  "eight-second": 1,
+  "emergency": 1,
+  "encrypted": 1,
+  "ended": 1,
+  "ends": 1,
+  "engine": 5,
+  "engineering": 1,
+  "envelope": 6,
+  "envelopes": 4,
+  "ephemeris": 1,
+  "error": 1,
+  "event": 3,
+  "ever": 2,
+  "every": 8,
+  "everything": 1,
+  "exists": 2,
+  "fails": 1,
+  "false": 2,
+  "faster": 1,
+  "fatigue": 1,
+  "fault": 1,
+  "fe-2.3": 1,
+  "feature": 1,
+  "federation": 1,
+  "fenced": 1,
+  "fiercely.": 1,
+  "first": 3,
+  "fleet": 1,
+  "flight": 1,
+  "flight-dynamics": 1,
+  "floor": 2,
+  "flows": 1,
+  "follows": 2,
+  "for": 14,
+  "forgets": 1,
+  "found": 1,
+  "four": 1,
+  "fraction": 1,
+  "frame": 10,
+  "frames": 1,
+  "freeze": 1,
+  "from": 8,
+  "front": 1,
+  "frozen": 1,
+  "gaps": 2,
+  "gateway": 1,
+  "generator": 1,
+  "ground": 4,
+  "ground-segment": 1,
+  "groundgate": 5,
+  "guarantee": 1,
+  "had": 2,
+  "hand": 1,
+  "hand-rolled": 1,
+  "handful": 1,
+  "handing": 1,
+  "hands": 1,
+  "happens": 2,
+  "has": 6,
+  "headquarters": 1,
+  "held": 1,
+  "high": 1,
+  "history": 2,
+  "holds": 1,
+  "hollow": 1,
+  "honest": 1,
+  "honest.": 2,
+  "horizon": 1,
+  "hosted": 1,
+  "hours": 1,
+  "hours.": 1,
+  "hundred": 1,
+  "hypothetical": 1,
+  "idea": 1,
+  "identity": 1,
+  "if": 1,
+  "implements": 2,
+  "improvise": 1,
+  "in": 18,
+  "incorrectly": 1,
+  "inside": 1,
+  "instead": 1,
+  "integrity": 3,
+  "interview": 1,
+  "into": 4,
+  "ironvale": 2,
+  "is": 21,
+  "it": 6,
+  "it.": 3,
+  "its": 4,
+  "keep": 1,
+  "keeping": 1,
+  "keeps": 2,
+  "kestrel": 3,
+  "key": 1,
+  "kst-14": 1,
+  "land": 1,
+  "lane.": 1,
+  "last": 2,
+  "latchkey": 2,
+  "latency": 1,
+  "launch": 1,
+  "launch.": 1,
+  "law.": 1,
+  "lay": 1,
+  "leasing": 1,
+  "left": 1,
+  "letter": 2,
+  "library": 1,
+  "likes": 1,
+  "limit": 3,
+  "limit-checking": 1,
+  "link": 2,
+  "live": 2,
+  "lock": 1,
+  "log": 1,
+  "long": 2,
+  "long-term": 1,
+  "loss": 2,
+  "maintained": 1,
+  "manager": 1,
+  "manual.": 1,
+  "mapping": 1,
+  "march": 6,
+  "maren": 1,
+  "match.": 1,
+  "matter": 1,
+  "mean.": 1,
+  "measurements": 1,
+  "measurements.": 1,
+  "meet": 1,
+  "memory": 1,
+  "mention": 1,
+  "mesa": 5,
+  "migration": 1,
+  "milliseconds": 1,
+  "minutes.": 1,
+  "missed": 1,
+  "mission": 7,
+  "missions": 1,
+  "mode": 1,
+  "morning.": 2,
+  "most": 2,
+  "moves": 1,
+  "mta": 4,
+  "much": 1,
+  "multicast": 1,
+  "museum": 1,
+  "myths.": 1,
+  "named": 1,
+  "nearly": 2,
+  "never": 1,
+  "new": 1,
+  "newest": 1,
+  "next": 2,
+  "night": 5,
+  "night.": 1,
+  "ninety": 1,
+  "ninety-day": 1,
+  "no": 6,
+  "nobody": 3,
+  "not": 6,
+  "notices": 3,
+  "now": 2,
+  "occurred": 1,
+  "oduya": 2,
+  "of": 16,
+  "old": 1,
+  "on": 10,
+  "once": 2,
+  "one": 3,
+  "one-to-many": 1,
+  "one.": 1,
+  "only": 2,
+  "open": 2,
+  "operated": 1,
+  "operations": 1,
+  "operator": 2,
+  "operators": 1,
+  "ops": 2,
+  "or": 1,
+  "orbit": 1,
+  "orbital": 2,
+  "orbital.": 1,
+  "order.": 1,
+  "ordered": 1,
+  "org": 1,
+  "orphan": 1,
+  "orrery": 2,
+  "otherwise.": 1,
+  "outage": 2,
+  "outright": 1,
+  "outside": 1,
+  "overruns": 2,
+  "owe": 1,
+  "own": 4,
+  "owned": 1,
+  "owns": 4,
+  "p99": 1,
+  "page": 1,
+  "palisade": 1,
+  "paper": 1,
+  "paperwork": 1,
+  "parent": 1,
+  "part": 3,
+  "partial": 1,
+  "pass": 8,
+  "passes": 1,
+  "patched": 1,
+  "per": 1,
+  "photographs.": 1,
+  "pieces": 1,
+  "place": 1,
+  "place.": 1,
+  "plan.": 1,
+  "planned": 1,
+  "planning": 2,
+  "platform": 2,
+  "playbook": 2,
+  "point": 7,
+  "points": 7,
+  "politely": 1,
+  "polynomials": 1,
+  "portacabins": 1,
+  "post-incident": 1,
+  "power": 1,
+  "precise": 1,
+  "predicted": 1,
+  "predictions": 2,
+  "pride": 1,
+  "principle.": 1,
+  "printed": 1,
+  "process": 11,
+  "processing": 2,
+  "produces": 8,
+  "product": 1,
+  "program": 1,
+  "protective": 1,
+  "public": 1,
+  "published": 1,
+  "quality.": 1,
+  "quarter": 1,
+  "query": 1,
+  "questions.": 1,
+  "quietly": 1,
+  "radio": 2,
+  "rather": 1,
+  "raw": 1,
+  "re-queued": 1,
+  "reached": 1,
+  "real": 1,
+  "recording": 1,
+  "recovery": 1,
+  "red": 1,
+  "reference": 1,
+  "refuses": 2,
+  "regenerated": 2,
+  "registry": 1,
+  "regular": 1,
+  "rejecting": 1,
+  "release": 1,
+  "remembers.": 1,
+  "reordering.": 1,
+  "report": 5,
+  "reported": 1,
+  "repository.": 1,
+  "requiring": 1,
+  "response": 2,
+  "responsibility": 1,
+  "retired": 1,
+  "retracted.": 1,
+  "retrieval": 1,
+  "returns": 1,
+  "review": 2,
+  "reviewed": 1,
+  "rewritten": 1,
+  "rises.": 1,
+  "round-the-clock": 1,
+  "runs": 2,
+  "s": 5,
+  "safe-hold": 2,
+  "same": 2,
+  "satellite": 1,
+  "saturation": 1,
+  "say": 2,
+  "says": 1,
+  "scheduled": 1,
+  "scheduler": 3,
+  "scratch": 1,
+  "scripts": 1,
+  "seconds": 1,
+  "seen": 1,
+  "sees": 1,
+  "segment": 1,
+  "sensor": 1,
+  "service": 6,
+  "set": 4,
+  "she": 3,
+  "shell": 1,
+  "shift": 4,
+  "shifts": 1,
+  "shipped": 1,
+  "shortly": 1,
+  "shows": 1,
+  "side": 1,
+  "signal": 1,
+  "simply": 1,
+  "since": 3,
+  "sit": 1,
+  "sits": 1,
+  "six": 1,
+  "sketched": 1,
+  "skew": 1,
+  "skyloom": 6,
+  "so": 1,
+  "software": 1,
+  "solemnity": 1,
+  "something": 1,
+  "spacecraft": 7,
+  "special.": 1,
+  "spring": 1,
+  "stamped": 1,
+  "stated": 1,
+  "statement": 1,
+  "station": 12,
+  "station-local": 1,
+  "step-by-step": 1,
+  "steps": 1,
+  "stonevault": 1,
+  "storage": 1,
+  "stored": 1,
+  "stream": 1,
+  "strict": 1,
+  "style": 1,
+  "substantiated": 1,
+  "substation": 1,
+  "subsystem": 1,
+  "such": 2,
+  "summary": 2,
+  "sunward": 1,
+  "supports": 6,
+  "surface": 1,
+  "surfaced": 1,
+  "survives": 1,
+  "systems": 2,
+  "table": 2,
+  "team": 1,
+  "teams": 1,
+  "telemetry": 7,
+  "th": 1,
+  "than": 2,
+  "that": 16,
+  "the": 137,
+  "their": 5,
+  "them": 1,
+  "there": 1,
+  "thermal": 1,
+  "thermal-vacuum": 1,
+  "they": 4,
+  "this": 2,
+  "three": 2,
+  "through": 1,
+  "thursday": 1,
+  "tidegauge": 2,
+  "time": 1,
+  "time-series": 1,
+  "timetable": 1,
+  "timing": 1,
+  "to": 13,
+  "together": 1,
+  "traceable": 1,
+  "traced": 1,
+  "traffic": 1,
+  "trails": 1,
+  "training": 1,
+  "transport": 4,
+  "treated": 1,
+  "trend": 4,
+  "trips": 2,
+  "truth.": 1,
+  "tumbles": 1,
+  "tuned": 1,
+  "turns": 1,
+  "twice": 1,
+  "two": 8,
+  "unexplained": 1,
+  "unit": 1,
+  "unpacking": 1,
+  "up": 2,
+  "use": 1,
+  "uses": 5,
+  "validated": 1,
+  "validation": 1,
+  "validation.": 1,
+  "values.": 1,
+  "vault": 1,
+  "veldstone": 2,
+  "vendor": 1,
+  "vendor.": 1,
+  "verified": 2,
+  "verifier": 1,
+  "version": 1,
+  "was": 6,
+  "way": 1,
+  "we": 3,
+  "week": 1,
+  "weekly": 2,
+  "well.": 1,
+  "were": 2,
+  "what": 7,
+  "when": 6,
+  "where": 1,
+  "which": 2,
+  "whiteboard": 1,
+  "who": 1,
+  "whole": 1,
+  "whose": 1,
+  "why": 4,
+  "wiki": 1,
+  "will": 3,
+  "window": 1,
+  "windows": 1,
+  "winter": 1,
+  "with": 1,
+  "within": 1,
+  "without": 6,
+  "work": 1,
+  "work.": 1,
+  "workloads": 1,
+  "would": 1,
+  "write-heavy": 1,
+  "written": 1,
+  "year": 1,
+  "years": 3,
+  "yellow": 1
+ },
+ "gazetteer_candidates": [
+  {
+   "surface": "A",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "A Veldstone Systems",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "a.m",
+   "sources": [
+    "identifier_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Accepted",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Alarms",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 2,
+   "strength": "weak"
+  },
+  {
+   "surface": "Alarms, overruns, and the March blackout",
+   "sources": [
+    "heading"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Alert Engine",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 2,
+   "strength": "weak"
+  },
+  {
+   "surface": "ALR-2214",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Anomaly Notices",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 3,
+   "strength": "weak"
+  },
+  {
+   "surface": "Archive Completeness",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Archive Process",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 2,
+   "strength": "weak"
+  },
+  {
+   "surface": "Ask Dr. Oduya",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Aurelia Orbital",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 2,
+   "strength": "weak"
+  },
+  {
+   "surface": "Aurelia Orbital. Skyloom",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Authentication",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Backfill Process",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 2,
+   "strength": "weak"
+  },
+  {
+   "surface": "Beneath",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Braxton Hollow",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Calibrated Telemetry Points",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 4,
+   "strength": "weak"
+  },
+  {
+   "surface": "Calibration Table Set",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 2,
+   "strength": "weak"
+  },
+  {
+   "surface": "Calibration Unit",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Chapter",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Chapter 9: Night Passes at Cinder Mesa",
+   "sources": [
+    "heading"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Cinder Mesa",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 2,
+   "strength": "weak"
+  },
+  {
+   "surface": "Cinder Mesa Ground Station",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 3,
+   "strength": "weak"
+  },
+  {
+   "surface": "Clock",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Copperline",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 3,
+   "strength": "weak"
+  },
+  {
+   "surface": "DCU",
+   "sources": [
+    "acronym",
+    "capitalization_shape"
+   ],
+   "count": 5,
+   "strength": "weak"
+  },
+  {
+   "surface": "Decommutation",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Decommutation and calibration",
+   "sources": [
+    "heading"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Decommutation Process",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Dr. Maren Oduya",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Drift Report",
+   "sources": [
+    "capitalization_shape",
+    "definition"
+   ],
+   "count": 5,
+   "strength": "weak"
+  },
+  {
+   "surface": "Every",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Flight Dynamics Review",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "For",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 2,
+   "strength": "weak"
+  },
+  {
+   "surface": "Frame",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Frame Envelope",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 2,
+   "strength": "weak"
+  },
+  {
+   "surface": "Frame Envelopes",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Frame Transport Process",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "From",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "From antenna to envelope",
+   "sources": [
+    "heading"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Groundgate",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 5,
+   "strength": "weak"
+  },
+  {
+   "surface": "If",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "In",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Ironvale",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 2,
+   "strength": "weak"
+  },
+  {
+   "surface": "It",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 3,
+   "strength": "weak"
+  },
+  {
+   "surface": "Kestrel",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 3,
+   "strength": "weak"
+  },
+  {
+   "surface": "Latchkey",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 2,
+   "strength": "weak"
+  },
+  {
+   "surface": "Limit-Checking Process",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "March",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 3,
+   "strength": "weak"
+  },
+  {
+   "surface": "March Blackout Event",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Mission Telemetry Archive",
+   "sources": [
+    "alias_long_form",
+    "capitalization_shape"
+   ],
+   "count": 4,
+   "strength": "weak"
+  },
+  {
+   "surface": "Most",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 2,
+   "strength": "weak"
+  },
+  {
+   "surface": "MTA",
+   "sources": [
+    "acronym",
+    "capitalization_shape"
+   ],
+   "count": 5,
+   "strength": "weak"
+  },
+  {
+   "surface": "Night Passes",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Not",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Ops Console",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 2,
+   "strength": "weak"
+  },
+  {
+   "surface": "Orrery",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 2,
+   "strength": "weak"
+  },
+  {
+   "surface": "P99",
+   "sources": [
+    "identifier_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "P99 Delivery Latency",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Palisade",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Paper",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Pass Planning Service",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Pass Predictions",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 2,
+   "strength": "weak"
+  },
+  {
+   "surface": "Raw Downlink Stream",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Regenerated Point Set",
+   "sources": [
+    "capitalization_shape",
+    "definition"
+   ],
+   "count": 3,
+   "strength": "weak"
+  },
+  {
+   "surface": "Safe-Hold Response Process",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 2,
+   "strength": "weak"
+  },
+  {
+   "surface": "Skyloom",
+   "sources": [
+    "capitalization_shape",
+    "definition"
+   ],
+   "count": 6,
+   "strength": "weak"
+  },
+  {
+   "surface": "Station Scheduler",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 2,
+   "strength": "weak"
+  },
+  {
+   "surface": "Stonevault",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "The",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 4,
+   "strength": "weak"
+  },
+  {
+   "surface": "The Alert Engine",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 2,
+   "strength": "weak"
+  },
+  {
+   "surface": "The archive and its customers",
+   "sources": [
+    "heading"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "The Archive Process",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "The Contingency Playbook",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "The DCU",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 4,
+   "strength": "weak"
+  },
+  {
+   "surface": "The Decommutation",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "The Decommutation and Calibration Unit",
+   "sources": [
+    "alias_long_form"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "The Decommutation Process",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "The Frame Integrity Charter",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "The Frame Registry",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "The March Blackout Event",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 2,
+   "strength": "weak"
+  },
+  {
+   "surface": "The Pass Planning Service",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "The Service Commitment Letter",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "The Station Scheduler",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "The Trend Service",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Thermal",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "This",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Thursday",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Tidegauge",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 2,
+   "strength": "weak"
+  },
+  {
+   "surface": "Trend Service",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 2,
+   "strength": "weak"
+  },
+  {
+   "surface": "Two",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 2,
+   "strength": "weak"
+  },
+  {
+   "surface": "Veldstone Systems",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "We",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "What",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 2,
+   "strength": "weak"
+  },
+  {
+   "surface": "What we owe the spacecraft",
+   "sources": [
+    "heading"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "When",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 2,
+   "strength": "weak"
+  },
+  {
+   "surface": "When KST-14",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  }
+ ],
+ "survey_hash": "2e5d4e68f4e2258e1514c0b190aebd556ac331e4fa4ca0ca6f26ddb0f0bdf1af"
+}

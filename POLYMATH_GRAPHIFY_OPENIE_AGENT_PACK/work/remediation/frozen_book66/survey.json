@@ -1,0 +1,2114 @@
+{
+ "schema_version": "polymath.document_survey.v1",
+ "document_id": "9e3e45389e2e73da5cc6838d98f99f7d59b3dccbf1cb08035f8ad496628365c7",
+ "survey_release": "graphify-survey-v1",
+ "normalized_sha256": "2c0499505455b782cd6a4a2a9bf888141a820e89919eb0866bf9ba4270bd2391",
+ "headings": [
+  {
+   "level": 1,
+   "text": "Reliable Event Processing in a Rebuildable Data Platform",
+   "start": 0,
+   "end": 58,
+   "path": [
+    "Reliable Event Processing in a Rebuildable Data Platform"
+   ]
+  },
+  {
+   "level": 2,
+   "text": "7.1 Admission and normalization",
+   "start": 1140,
+   "end": 1174,
+   "path": [
+    "Reliable Event Processing in a Rebuildable Data Platform",
+    "7.1 Admission and normalization"
+   ]
+  },
+  {
+   "level": 2,
+   "text": "7.2 Canonical storage and projection",
+   "start": 3221,
+   "end": 3260,
+   "path": [
+    "Reliable Event Processing in a Rebuildable Data Platform",
+    "7.2 Canonical storage and projection"
+   ]
+  },
+  {
+   "level": 2,
+   "text": "7.3 Replay, derived indexes, and recovery",
+   "start": 5766,
+   "end": 5810,
+   "path": [
+    "Reliable Event Processing in a Rebuildable Data Platform",
+    "7.3 Replay, derived indexes, and recovery"
+   ]
+  },
+  {
+   "level": 2,
+   "text": "7.4 Failure semantics and operational metrics",
+   "start": 7539,
+   "end": 7587,
+   "path": [
+    "Reliable Event Processing in a Rebuildable Data Platform",
+    "7.4 Failure semantics and operational metrics"
+   ]
+  },
+  {
+   "level": 3,
+   "text": "Review notes",
+   "start": 10064,
+   "end": 10080,
+   "path": [
+    "Reliable Event Processing in a Rebuildable Data Platform",
+    "7.4 Failure semantics and operational metrics",
+    "Review notes"
+   ]
+  }
+ ],
+ "aliases": [],
+ "definitions": [
+  {
+   "term": "Neo4j",
+   "definition": "part of the graph projection layer**",
+   "start": 940,
+   "end": 985
+  },
+  {
+   "term": "A Normalized Event",
+   "definition": "derived from its Event Envelope; it is not a replacement for the original evidence",
+   "start": 2317,
+   "end": 2421
+  },
+  {
+   "term": "Event Envelope",
+   "definition": "the team can correct normalization logic and replay the same bytes through a newer version of the worker",
+   "start": 2978,
+   "end": 3103
+  },
+  {
+   "term": "Vector Search",
+   "definition": "related to **Semantic Retrieval**, and Graph Traversal is related to **Relational Retrieval**",
+   "start": 4671,
+   "end": 4781
+  },
+  {
+   "term": "If Redis",
+   "definition": "unavailable, existing events remain recoverable because queue leases can be recreated from durable projection state",
+   "start": 5224,
+   "end": 5351
+  },
+  {
+   "term": "This",
+   "definition": "why the architecture does not define Redis as part of the source of truth",
+   "start": 5353,
+   "end": 5434
+  },
+  {
+   "term": "The Run Ledger",
+   "definition": "related to the **Evidence Ledger**, which records source identifiers and checksums for accepted evidence",
+   "start": 5869,
+   "end": 5991
+  },
+  {
+   "term": "The Rebuild Dataset",
+   "definition": "then consumed by the Projection Worker",
+   "start": 6204,
+   "end": 6265
+  },
+  {
+   "term": "Hybrid Retrieval Process",
+   "definition": "implemented by the Query Service**",
+   "start": 7267,
+   "end": 7329
+  },
+  {
+   "term": "Rebuildability Contract",
+   "definition": "defined by the Architecture Guide**",
+   "start": 7347,
+   "end": 7409
+  },
+  {
+   "term": "The Operations Dashboard",
+   "definition": "related to the Recovery Report because both are reviewed during post-incident analysis",
+   "start": 8403,
+   "end": 8517
+  }
+ ],
+ "blocks": [
+  {
+   "block_id": "block:d892def0a448082fa613",
+   "start": 0,
+   "end": 59,
+   "text": "# Reliable Event Processing in a Rebuildable Data Platform\n",
+   "structural_position": "front",
+   "repeat_count": 1,
+   "furniture_signals": [
+    "front_matter",
+    "short_block"
+   ],
+   "furniture_candidate": false
+  },
+  {
+   "block_id": "block:0b5b5f472c8a208345e8",
+   "start": 60,
+   "end": 679,
+   "text": "A production event pipeline is easier to operate when the system distinguishes **authoritative evidence** from the indexes and projections built for retrieval. This chapter follows a fictional platform, **Harbor**, operated by **Northstar Labs**, to show how that separation affects ingestion, replay, graph projection, and failure recovery. Harbor accepts telemetry from industrial sensors deployed at a regional facility in **El Paso**. The design is intentionally ordinary: a gateway accepts requests, workers normalize events, durable storage preserves evidence, and downstream services build query-oriented views.\n",
+   "structural_position": "front",
+   "repeat_count": 1,
+   "furniture_signals": [
+    "front_matter",
+    "structural_marker"
+   ],
+   "furniture_candidate": true
+  },
+  {
+   "block_id": "block:5db3950289f36277bae1",
+   "start": 680,
+   "end": 1139,
+   "text": "The important architectural choice is that **MongoDB stores Harbor's canonical event evidence**. Search and graph databases are treated as rebuildable projections rather than independent sources of truth. **Harbor uses Qdrant for semantic retrieval**, while **Neo4j is part of the graph projection layer**. If either projection is lost, operators should be able to reconstruct it from canonical records without asking the original devices to retransmit data.\n",
+   "structural_position": "front",
+   "repeat_count": 1,
+   "furniture_signals": [
+    "front_matter"
+   ],
+   "furniture_candidate": false
+  },
+  {
+   "block_id": "block:d12bf6d0a4c27e912526",
+   "start": 1140,
+   "end": 1175,
+   "text": "## 7.1 Admission and normalization\n",
+   "structural_position": "front",
+   "repeat_count": 1,
+   "furniture_signals": [
+    "front_matter",
+    "short_block"
+   ],
+   "furniture_candidate": false
+  },
+  {
+   "block_id": "block:3716be52b69bdd9df31f",
+   "start": 1176,
+   "end": 1611,
+   "text": "Every device request first reaches the **Harbor Gateway**. The Harbor Gateway uses **Envoy** for request routing and depends on the **Identity Service** for authentication. The Identity Service uses **PostgreSQL** to store service accounts and credential metadata. After authentication, the Harbor Gateway produces an **Event Envelope** containing the device identifier, an event timestamp, a schema identifier, and the payload bytes.\n",
+   "structural_position": "front",
+   "repeat_count": 1,
+   "furniture_signals": [
+    "front_matter"
+   ],
+   "furniture_candidate": false
+  },
+  {
+   "block_id": "block:35fba0b41ac6a597177e",
+   "start": 1612,
+   "end": 1944,
+   "text": "The **Schema Registry** defines the Event Envelope contract. The contract is versioned because sensor firmware is not upgraded everywhere at the same time. A new producer may emit version 4 while an older controller still emits version 2. The gateway therefore records the schema version instead of silently converting the payload.\n",
+   "structural_position": "body",
+   "repeat_count": 1,
+   "furniture_signals": [],
+   "furniture_candidate": false
+  },
+  {
+   "block_id": "block:bc3da6ef22cc572d2a8e",
+   "start": 1945,
+   "end": 2423,
+   "text": "Accepted envelopes are consumed by the **Ingestion Worker**. The Ingestion Worker uses **Pydantic** for contract validation and depends on **Kafka** for durable event transport. Kafka supports the **Event Transport Process**, which decouples admission from later processing. The worker produces a **Normalized Event** only after the envelope passes structural validation. A Normalized Event is derived from its Event Envelope; it is not a replacement for the original evidence.\n",
+   "structural_position": "body",
+   "repeat_count": 1,
+   "furniture_signals": [],
+   "furniture_candidate": false
+  },
+  {
+   "block_id": "block:265eaab92f118b5408ef",
+   "start": 2424,
+   "end": 2750,
+   "text": "The normalization code also uses **spaCy** to identify free-text equipment references when a device embeds an operator note. Those mentions are enrichment, not authority. If the note says, \u201cpump seven may be overheating,\u201d Harbor stores the original note even when the enrichment service fails to recognize the equipment name.\n",
+   "structural_position": "body",
+   "repeat_count": 1,
+   "furniture_signals": [
+    "structural_marker"
+   ],
+   "furniture_candidate": false
+  },
+  {
+   "block_id": "block:444ea3912a63b09456d7",
+   "start": 2751,
+   "end": 3105,
+   "text": "This distinction matters during incidents. A parser bug can cause malformed aliases, and malformed aliases can cause duplicate graph nodes. Deleting the source message would make the mistake difficult to repair. Preserving the Event Envelope means the team can correct normalization logic and replay the same bytes through a newer version of the worker.\n",
+   "structural_position": "body",
+   "repeat_count": 1,
+   "furniture_signals": [],
+   "furniture_candidate": false
+  },
+  {
+   "block_id": "block:3643b07daf69a6f2528f",
+   "start": 3106,
+   "end": 3220,
+   "text": "> **Operational rule:** derived records may be discarded and rebuilt; canonical evidence must remain recoverable.\n",
+   "structural_position": "body",
+   "repeat_count": 1,
+   "furniture_signals": [
+    "short_block"
+   ],
+   "furniture_candidate": false
+  },
+  {
+   "block_id": "block:3a34ed1a99c80760e623",
+   "start": 3221,
+   "end": 3261,
+   "text": "## 7.2 Canonical storage and projection\n",
+   "structural_position": "body",
+   "repeat_count": 1,
+   "furniture_signals": [
+    "short_block"
+   ],
+   "furniture_candidate": false
+  },
+  {
+   "block_id": "block:f4a77e890a1937be1618",
+   "start": 3262,
+   "end": 3639,
+   "text": "Once validation succeeds, the Ingestion Worker writes the accepted envelope and its normalized representation to the **Canonical Event Store** in MongoDB. The **Canonical Storage Process** uses MongoDB and produces the **Canonical Event Dataset**. Northstar Labs owns the Canonical Event Dataset, and the **Data Retention Guide** defines the retention policy for that dataset.\n",
+   "structural_position": "body",
+   "repeat_count": 1,
+   "furniture_signals": [],
+   "furniture_candidate": false
+  },
+  {
+   "block_id": "block:07d22d61cb15e7fd8d87",
+   "start": 3640,
+   "end": 4100,
+   "text": "Downstream processing begins from a durable offset. The **Projection Worker** consumes the Canonical Event Dataset and produces **Projection Assertions**. Each assertion records a subject, a predicate, an object, and the source event that supports the statement. The Projection Worker implements the **Assertion Compilation Process**. It also depends on the Schema Registry so that field meanings are interpreted under the same contract used during admission.\n",
+   "structural_position": "body",
+   "repeat_count": 1,
+   "furniture_signals": [],
+   "furniture_candidate": false
+  },
+  {
+   "block_id": "block:b9703f08c9b08beabba1",
+   "start": 4101,
+   "end": 4617,
+   "text": "Projection Assertions are not written directly to the graph. They are consumed by the **Validation Service**, which applies identity rules, predicate constraints, and provenance checks. The Validation Service produces a **Validated Assertion Batch**. The **Graph Writer** consumes Validated Assertion Batches and uses Neo4j to materialize graph relationships. Neo4j supports **Graph Traversal**, while Qdrant supports **Vector Search**. The **Query Service** uses both Neo4j and Qdrant to answer retrieval requests.\n",
+   "structural_position": "body",
+   "repeat_count": 1,
+   "furniture_signals": [],
+   "furniture_candidate": false
+  },
+  {
+   "block_id": "block:8491fd6f32f50b8056c5",
+   "start": 4618,
+   "end": 5050,
+   "text": "The two projections serve different access patterns. Vector Search is related to **Semantic Retrieval**, and Graph Traversal is related to **Relational Retrieval**. The Query Service implements the **Hybrid Retrieval Process**, which combines candidate passages from Qdrant with related entities and assertions from Neo4j. The Query Service depends on the **Authorization Service** before it returns protected evidence to a caller.\n",
+   "structural_position": "body",
+   "repeat_count": 1,
+   "furniture_signals": [],
+   "furniture_candidate": false
+  },
+  {
+   "block_id": "block:d89025ad870364a55c2e",
+   "start": 5051,
+   "end": 5436,
+   "text": "A small Redis deployment coordinates leases for projection jobs. The Projection Worker uses **Redis** for transient coordination, but Redis does not own canonical evidence. If Redis is unavailable, existing events remain recoverable because queue leases can be recreated from durable projection state. This is why the architecture does not define Redis as part of the source of truth.\n",
+   "structural_position": "body",
+   "repeat_count": 1,
+   "furniture_signals": [],
+   "furniture_candidate": false
+  },
+  {
+   "block_id": "block:88fdba16a4c817285bfd",
+   "start": 5437,
+   "end": 5517,
+   "text": "The following configuration fragment is illustrative rather than authoritative:\n",
+   "structural_position": "body",
+   "repeat_count": 1,
+   "furniture_signals": [
+    "short_block"
+   ],
+   "furniture_candidate": false
+  },
+  {
+   "block_id": "block:be600f5d53b031e82b13",
+   "start": 5518,
+   "end": 5627,
+   "text": "```yaml\nprojection:\n  semantic_index: qdrant\n  graph_index: neo4j\n  lease_store: redis\n  batch_size: 250\n```\n",
+   "structural_position": "body",
+   "repeat_count": 1,
+   "furniture_signals": [
+    "structural_marker",
+    "short_block"
+   ],
+   "furniture_candidate": false
+  },
+  {
+   "block_id": "block:6fe626def5f38054f36e",
+   "start": 5628,
+   "end": 5765,
+   "text": "A book reader should not infer additional architectural relationships merely because names appear together in the example configuration.\n",
+   "structural_position": "body",
+   "repeat_count": 1,
+   "furniture_signals": [],
+   "furniture_candidate": false
+  },
+  {
+   "block_id": "block:7f8e31e184198fdb4b7c",
+   "start": 5766,
+   "end": 5811,
+   "text": "## 7.3 Replay, derived indexes, and recovery\n",
+   "structural_position": "body",
+   "repeat_count": 1,
+   "furniture_signals": [
+    "structural_marker",
+    "short_block"
+   ],
+   "furniture_candidate": false
+  },
+  {
+   "block_id": "block:d8c15be12bf5427752a4",
+   "start": 5812,
+   "end": 6203,
+   "text": "Harbor tracks projection progress in the **Run Ledger**. The Run Ledger is related to the **Evidence Ledger**, which records source identifiers and checksums for accepted evidence. The **Recovery Guide** defines the **Replay Process**. During replay, the Replay Process consumes the Canonical Event Dataset and produces a **Rebuild Dataset** containing the events selected for reprocessing.\n",
+   "structural_position": "body",
+   "repeat_count": 1,
+   "furniture_signals": [],
+   "furniture_candidate": false
+  },
+  {
+   "block_id": "block:79f3790e51d873fc305d",
+   "start": 6204,
+   "end": 6661,
+   "text": "The Rebuild Dataset is then consumed by the Projection Worker. A **Derived Search Index** is derived from the Canonical Event Store, and a **Derived Graph Projection** is also derived from the Canonical Event Store. Neither derived artifact is allowed to become the only copy of information needed for recovery. The **Rebuildability Contract** defines this requirement, and the Architecture Guide defines the Rebuildability Contract for Harbor deployments.\n",
+   "structural_position": "body",
+   "repeat_count": 1,
+   "furniture_signals": [
+    "structural_marker"
+   ],
+   "furniture_candidate": false
+  },
+  {
+   "block_id": "block:bc1a37f9b9de5a3a6932",
+   "start": 6662,
+   "end": 7092,
+   "text": "The recovery sequence is intentionally boring. Operators stop new graph writes, record the last durable offset, recreate the damaged projection, and restart from that offset. The **Recovery Test Process** uses the Replay Process and produces a **Recovery Report**. The Recovery Report defines the measured **Recovery Time Objective** for the exercise. Northstar Labs uses the Recovery Report during quarterly operational reviews.\n",
+   "structural_position": "body",
+   "repeat_count": 1,
+   "furniture_signals": [],
+   "furniture_candidate": false
+  },
+  {
+   "block_id": "block:82a749330139efb58721",
+   "start": 7093,
+   "end": 7538,
+   "text": "Passive constructions can obscure direction if an extractor relies only on word order. In Harbor, **Validated Assertion Batches are consumed by the Graph Writer**, and **the Hybrid Retrieval Process is implemented by the Query Service**. Likewise, **the Rebuildability Contract is defined by the Architecture Guide**. These statements describe the same direction as the active-voice descriptions above and should not create reversed duplicates.\n",
+   "structural_position": "body",
+   "repeat_count": 1,
+   "furniture_signals": [],
+   "furniture_candidate": false
+  },
+  {
+   "block_id": "block:cde91e14f70cd97d2448",
+   "start": 7539,
+   "end": 7588,
+   "text": "## 7.4 Failure semantics and operational metrics\n",
+   "structural_position": "body",
+   "repeat_count": 1,
+   "furniture_signals": [
+    "short_block"
+   ],
+   "furniture_candidate": false
+  },
+  {
+   "block_id": "block:e651c1bdcf1ae830b6e0",
+   "start": 7589,
+   "end": 8018,
+   "text": "A rebuildable system still needs failure boundaries. The **Incident Response Guide** defines the **Projection Failure Process**. A projection failure may cause temporary search staleness, but it should not cause loss of canonical evidence. The **August Recovery Event** occurred in El Paso after a storage host failed during a maintenance window. That event caused temporary query latency while the graph projection was rebuilt.\n",
+   "structural_position": "body",
+   "repeat_count": 1,
+   "furniture_signals": [],
+   "furniture_candidate": false
+  },
+  {
+   "block_id": "block:75eb1996772bdd4bb4e6",
+   "start": 8019,
+   "end": 8519,
+   "text": "The team measures **P95 Query Latency** and **Projection Lag**. The **Service Level Objective** defines P95 Query Latency as 450 milliseconds for the normal interactive path. The Service Level Objective also defines Projection Lag as less than 90 seconds during steady-state operation. The **Observability Service** consumes runtime metrics and produces the **Operations Dashboard**. The Operations Dashboard is related to the Recovery Report because both are reviewed during post-incident analysis.\n",
+   "structural_position": "body",
+   "repeat_count": 1,
+   "furniture_signals": [],
+   "furniture_candidate": false
+  },
+  {
+   "block_id": "block:79a7ec3e51c03fab8839",
+   "start": 8520,
+   "end": 8969,
+   "text": "Not every sentence should become a fact. Engineers sometimes say that \u201cthe system owns the problem,\u201d or that \u201cthis approach uses a process.\u201d Those phrases do not identify useful graph entities. Pronouns are also dangerous when their antecedents are uncertain. For example: \u201cIt uses Redis, and they support the platform.\u201d A conservative extractor should avoid inventing a subject for either clause unless surrounding evidence resolves the reference.\n",
+   "structural_position": "body",
+   "repeat_count": 1,
+   "furniture_signals": [],
+   "furniture_candidate": false
+  },
+  {
+   "block_id": "block:572f89c15528d7c9014e",
+   "start": 8970,
+   "end": 9611,
+   "text": "Negation and modality need separate treatment from asserted facts. Harbor **does not depend on SQLite for canonical event storage**. The team **may support ClickHouse for analytical reporting** in a future release, but that possibility is not part of the current production architecture. An internal review suggested that Qdrant could support a future recommendation feature; the suggestion does not establish that the feature exists. Similarly, Northstar Labs denied that it owns the **Phantom Dataset**. A graph can preserve these statements as qualified assertions, but it should not silently convert them into positive production facts.\n",
+   "structural_position": "back",
+   "repeat_count": 1,
+   "furniture_signals": [
+    "back_matter"
+   ],
+   "furniture_candidate": false
+  },
+  {
+   "block_id": "block:09deb8e6e1c77ddbc572",
+   "start": 9612,
+   "end": 10058,
+   "text": "The chapter's central rule is therefore simple: **Harbor depends on canonical evidence for recovery, and its projections depend on that evidence for reconstruction**. The Canonical Event Store supports the Replay Process, the Replay Process supports projection recovery, and projection recovery supports continued query service after a projection failure. This chain is more useful to operations than a graph containing every nearby noun phrase.\n",
+   "structural_position": "back",
+   "repeat_count": 1,
+   "furniture_signals": [
+    "back_matter"
+   ],
+   "furniture_candidate": false
+  },
+  {
+   "block_id": "block:a40f9452faa2f58cec4a",
+   "start": 10059,
+   "end": 10063,
+   "text": "---\n",
+   "structural_position": "back",
+   "repeat_count": 1,
+   "furniture_signals": [
+    "back_matter",
+    "short_block"
+   ],
+   "furniture_candidate": false
+  },
+  {
+   "block_id": "block:fe44f93d5ba56bd8fa11",
+   "start": 10064,
+   "end": 10081,
+   "text": "### Review notes\n",
+   "structural_position": "back",
+   "repeat_count": 1,
+   "furniture_signals": [
+    "back_matter",
+    "short_block"
+   ],
+   "furniture_candidate": false
+  },
+  {
+   "block_id": "block:f29ebd12f2dc07fcb47d",
+   "start": 10082,
+   "end": 10350,
+   "text": "1. Canonical evidence is durable; projections are rebuildable.\n2. Direction matters for passive voice and derived artifacts.\n3. Configuration examples, generic prose, negated claims, and future possibilities require different treatment from asserted production facts.\n",
+   "structural_position": "back",
+   "repeat_count": 1,
+   "furniture_signals": [
+    "back_matter"
+   ],
+   "furniture_candidate": false
+  }
+ ],
+ "shape_counts": {
+  "capitalized_phrases": 208,
+  "all_caps_tokens": 2,
+  "identifier_tokens": 12,
+  "numeric_tokens": 8
+ },
+ "token_frequency": {
+  "a": 37,
+  "able": 1,
+  "above": 1,
+  "accepted": 3,
+  "accepts": 2,
+  "access": 1,
+  "accounts": 1,
+  "active-voice": 1,
+  "additional": 1,
+  "admission": 2,
+  "admission.": 1,
+  "affects": 1,
+  "after": 4,
+  "aliases": 2,
+  "allowed": 1,
+  "also": 5,
+  "an": 7,
+  "analysis.": 1,
+  "analytical": 1,
+  "and": 41,
+  "answer": 1,
+  "antecedents": 1,
+  "appear": 1,
+  "applies": 1,
+  "approach": 1,
+  "architectural": 2,
+  "architecture": 3,
+  "architecture.": 1,
+  "are": 11,
+  "artifact": 1,
+  "artifacts.": 1,
+  "as": 6,
+  "asking": 1,
+  "asserted": 2,
+  "assertion": 5,
+  "assertions": 4,
+  "at": 2,
+  "august": 1,
+  "authentication": 1,
+  "authentication.": 1,
+  "authoritative": 2,
+  "authority.": 1,
+  "authorization": 1,
+  "avoid": 1,
+  "batch": 1,
+  "batch_size": 1,
+  "batches": 2,
+  "be": 4,
+  "because": 4,
+  "become": 2,
+  "before": 1,
+  "begins": 1,
+  "book": 1,
+  "boring.": 1,
+  "both": 2,
+  "boundaries.": 1,
+  "bug": 1,
+  "build": 1,
+  "built": 1,
+  "but": 4,
+  "by": 7,
+  "bytes": 1,
+  "bytes.": 1,
+  "caller.": 1,
+  "can": 6,
+  "candidate": 1,
+  "canonical": 18,
+  "cause": 4,
+  "caused": 1,
+  "central": 1,
+  "chain": 1,
+  "chapter": 2,
+  "checks.": 1,
+  "checksums": 1,
+  "choice": 1,
+  "claims": 1,
+  "clause": 1,
+  "clickhouse": 1,
+  "code": 1,
+  "combines": 1,
+  "compilation": 1,
+  "configuration": 2,
+  "configuration.": 1,
+  "conservative": 1,
+  "constraints": 1,
+  "constructions": 1,
+  "consumed": 4,
+  "consumes": 4,
+  "containing": 3,
+  "continued": 1,
+  "contract": 6,
+  "contract.": 1,
+  "controller": 1,
+  "convert": 1,
+  "converting": 1,
+  "coordinates": 1,
+  "coordination": 1,
+  "copy": 1,
+  "correct": 1,
+  "could": 1,
+  "create": 1,
+  "credential": 1,
+  "current": 1,
+  "damaged": 1,
+  "dangerous": 1,
+  "dashboard": 2,
+  "data": 2,
+  "data.": 1,
+  "databases": 1,
+  "dataset": 7,
+  "dataset.": 1,
+  "decouples": 1,
+  "define": 1,
+  "defined": 1,
+  "defines": 9,
+  "deleting": 1,
+  "denied": 1,
+  "depend": 2,
+  "depends": 5,
+  "deployed": 1,
+  "deployment": 1,
+  "deployments.": 1,
+  "derived": 9,
+  "describe": 1,
+  "descriptions": 1,
+  "design": 1,
+  "device": 3,
+  "devices": 1,
+  "different": 2,
+  "difficult": 1,
+  "direction": 3,
+  "directly": 1,
+  "discarded": 1,
+  "distinction": 1,
+  "distinguishes": 1,
+  "do": 1,
+  "does": 4,
+  "downstream": 2,
+  "duplicate": 1,
+  "duplicates.": 1,
+  "durable": 6,
+  "during": 7,
+  "each": 1,
+  "easier": 1,
+  "either": 2,
+  "el": 2,
+  "embeds": 1,
+  "emit": 1,
+  "emits": 1,
+  "engineers": 1,
+  "enrichment": 2,
+  "entities": 1,
+  "entities.": 1,
+  "envelope": 6,
+  "envelopes": 1,
+  "envoy": 1,
+  "equipment": 2,
+  "establish": 1,
+  "even": 1,
+  "event": 24,
+  "events": 3,
+  "every": 3,
+  "everywhere": 1,
+  "evidence": 10,
+  "evidence.": 4,
+  "example": 2,
+  "examples": 1,
+  "exercise.": 1,
+  "existing": 1,
+  "exists.": 1,
+  "extractor": 2,
+  "facility": 1,
+  "fact.": 1,
+  "facts.": 3,
+  "failed": 1,
+  "fails": 1,
+  "failure": 5,
+  "failure.": 1,
+  "feature": 2,
+  "fictional": 1,
+  "field": 1,
+  "firmware": 1,
+  "first": 1,
+  "following": 1,
+  "follows": 1,
+  "for": 23,
+  "fragment": 1,
+  "free-text": 1,
+  "from": 14,
+  "future": 3,
+  "gateway": 5,
+  "generic": 1,
+  "graph": 15,
+  "graph.": 1,
+  "graph_index": 1,
+  "guide": 5,
+  "harbor": 13,
+  "host": 1,
+  "how": 1,
+  "hybrid": 2,
+  "identifier": 2,
+  "identifiers": 1,
+  "identify": 2,
+  "identity": 3,
+  "if": 4,
+  "illustrative": 1,
+  "implemented": 1,
+  "implements": 2,
+  "important": 1,
+  "in": 8,
+  "incident": 1,
+  "incidents.": 1,
+  "independent": 1,
+  "index": 1,
+  "indexes": 2,
+  "industrial": 1,
+  "infer": 1,
+  "information": 1,
+  "ingestion": 4,
+  "instead": 1,
+  "intentionally": 2,
+  "interactive": 1,
+  "internal": 1,
+  "interpreted": 1,
+  "into": 1,
+  "inventing": 1,
+  "is": 27,
+  "it": 8,
+  "its": 3,
+  "jobs.": 1,
+  "kafka": 2,
+  "labs": 4,
+  "lag": 2,
+  "last": 1,
+  "latency": 3,
+  "later": 1,
+  "layer": 1,
+  "lease_store": 1,
+  "leases": 2,
+  "ledger": 3,
+  "less": 1,
+  "level": 2,
+  "likewise": 1,
+  "logic": 1,
+  "loss": 1,
+  "lost": 1,
+  "maintenance": 1,
+  "make": 1,
+  "malformed": 2,
+  "materialize": 1,
+  "matters": 2,
+  "may": 5,
+  "meanings": 1,
+  "means": 1,
+  "measured": 1,
+  "measures": 1,
+  "mentions": 1,
+  "merely": 1,
+  "message": 1,
+  "metadata.": 1,
+  "metrics": 2,
+  "milliseconds": 1,
+  "mistake": 1,
+  "modality": 1,
+  "mongodb": 2,
+  "mongodb.": 1,
+  "more": 1,
+  "must": 1,
+  "name.": 1,
+  "names": 1,
+  "nearby": 1,
+  "need": 1,
+  "needed": 1,
+  "needs": 1,
+  "negated": 1,
+  "negation": 1,
+  "neither": 1,
+  "neo4j": 5,
+  "neo4j.": 1,
+  "new": 2,
+  "newer": 1,
+  "nodes.": 1,
+  "normal": 1,
+  "normalization": 3,
+  "normalize": 1,
+  "normalized": 3,
+  "northstar": 4,
+  "not": 15,
+  "note": 2,
+  "note.": 1,
+  "notes": 1,
+  "noun": 1,
+  "object": 1,
+  "objective": 3,
+  "obscure": 1,
+  "observability": 1,
+  "occurred": 1,
+  "of": 9,
+  "offset": 1,
+  "offset.": 2,
+  "older": 1,
+  "on": 8,
+  "once": 1,
+  "only": 3,
+  "operate": 1,
+  "operated": 1,
+  "operation.": 1,
+  "operational": 3,
+  "operations": 3,
+  "operator": 1,
+  "operators": 2,
+  "or": 1,
+  "order.": 1,
+  "ordinary": 1,
+  "original": 3,
+  "overheating": 1,
+  "own": 1,
+  "owns": 3,
+  "p95": 2,
+  "parser": 1,
+  "part": 3,
+  "paso": 2,
+  "passages": 1,
+  "passes": 1,
+  "passive": 2,
+  "path.": 1,
+  "patterns.": 1,
+  "payload": 1,
+  "payload.": 1,
+  "phantom": 1,
+  "phrase.": 1,
+  "phrases": 1,
+  "pipeline": 1,
+  "platform": 2,
+  "platform.": 1,
+  "policy": 1,
+  "positive": 1,
+  "possibilities": 1,
+  "possibility": 1,
+  "post-incident": 1,
+  "postgresql": 1,
+  "predicate": 2,
+  "preserve": 1,
+  "preserves": 1,
+  "preserving": 1,
+  "problem": 1,
+  "process": 12,
+  "process.": 1,
+  "processing": 2,
+  "processing.": 1,
+  "producer": 1,
+  "produces": 8,
+  "production": 4,
+  "progress": 1,
+  "projection": 24,
+  "projections": 5,
+  "pronouns": 1,
+  "prose": 1,
+  "protected": 1,
+  "provenance": 1,
+  "pump": 1,
+  "pydantic": 1,
+  "qdrant": 6,
+  "qualified": 1,
+  "quarterly": 1,
+  "query": 8,
+  "query-oriented": 1,
+  "queue": 1,
+  "rather": 2,
+  "reaches": 1,
+  "reader": 1,
+  "rebuild": 2,
+  "rebuildability": 3,
+  "rebuildable": 3,
+  "rebuildable.": 1,
+  "rebuilt": 1,
+  "rebuilt.": 1,
+  "recognize": 1,
+  "recommendation": 1,
+  "reconstruct": 1,
+  "reconstruction": 1,
+  "record": 1,
+  "records": 5,
+  "recoverable": 1,
+  "recoverable.": 1,
+  "recovery": 13,
+  "recovery.": 2,
+  "recreate": 1,
+  "recreated": 1,
+  "redis": 7,
+  "reference.": 1,
+  "references": 1,
+  "regional": 1,
+  "registry": 2,
+  "related": 5,
+  "relational": 1,
+  "relationships": 1,
+  "relationships.": 1,
+  "release": 1,
+  "reliable": 1,
+  "relies": 1,
+  "remain": 2,
+  "repair.": 1,
+  "replacement": 1,
+  "replay": 9,
+  "report": 4,
+  "reporting": 1,
+  "representation": 1,
+  "reprocessing.": 1,
+  "request": 2,
+  "requests": 1,
+  "requests.": 1,
+  "require": 1,
+  "requirement": 1,
+  "resolves": 1,
+  "response": 1,
+  "restart": 1,
+  "retention": 2,
+  "retransmit": 1,
+  "retrieval": 6,
+  "retrieval.": 1,
+  "returns": 1,
+  "reversed": 1,
+  "review": 2,
+  "reviewed": 1,
+  "reviews.": 1,
+  "routing": 1,
+  "rule": 2,
+  "rules": 1,
+  "run": 2,
+  "runtime": 1,
+  "s": 2,
+  "same": 4,
+  "say": 1,
+  "says": 1,
+  "schema": 4,
+  "search": 5,
+  "seconds": 1,
+  "selected": 1,
+  "semantic": 2,
+  "semantic_index": 1,
+  "semantics": 1,
+  "sensor": 1,
+  "sensors": 1,
+  "sentence": 1,
+  "separate": 1,
+  "separation": 1,
+  "sequence": 1,
+  "serve": 1,
+  "service": 15,
+  "services": 1,
+  "seven": 1,
+  "should": 7,
+  "show": 1,
+  "silently": 2,
+  "similarly": 1,
+  "simple": 1,
+  "small": 1,
+  "so": 1,
+  "sometimes": 1,
+  "source": 4,
+  "sources": 1,
+  "spacy": 1,
+  "sqlite": 1,
+  "staleness": 1,
+  "state.": 1,
+  "statement.": 1,
+  "statements": 2,
+  "steady-state": 1,
+  "still": 2,
+  "stop": 1,
+  "storage": 5,
+  "store": 4,
+  "store.": 1,
+  "stores": 2,
+  "structural": 1,
+  "subject": 2,
+  "succeeds": 1,
+  "suggested": 1,
+  "suggestion": 1,
+  "support": 3,
+  "supports": 7,
+  "surrounding": 1,
+  "system": 3,
+  "team": 3,
+  "telemetry": 1,
+  "temporary": 2,
+  "test": 1,
+  "than": 4,
+  "that": 14,
+  "the": 125,
+  "their": 1,
+  "them": 1,
+  "then": 1,
+  "therefore": 2,
+  "these": 2,
+  "they": 2,
+  "this": 6,
+  "those": 2,
+  "through": 1,
+  "time": 1,
+  "time.": 1,
+  "timestamp": 1,
+  "to": 19,
+  "together": 1,
+  "tracks": 1,
+  "transient": 1,
+  "transport": 1,
+  "transport.": 1,
+  "traversal": 2,
+  "treated": 1,
+  "treatment": 2,
+  "truth.": 2,
+  "two": 1,
+  "unavailable": 1,
+  "uncertain.": 1,
+  "under": 1,
+  "unless": 1,
+  "upgraded": 1,
+  "used": 1,
+  "useful": 2,
+  "uses": 13,
+  "validated": 3,
+  "validation": 4,
+  "validation.": 1,
+  "vector": 2,
+  "version": 4,
+  "versioned": 1,
+  "views.": 1,
+  "voice": 1,
+  "was": 1,
+  "when": 4,
+  "which": 4,
+  "while": 4,
+  "why": 1,
+  "window.": 1,
+  "with": 1,
+  "without": 1,
+  "word": 1,
+  "worker": 7,
+  "worker.": 2,
+  "workers": 1,
+  "would": 1,
+  "writer": 2,
+  "writes": 2,
+  "written": 1,
+  "yaml": 1
+ },
+ "gazetteer_candidates": [
+  {
+   "surface": "7.1 Admission and normalization",
+   "sources": [
+    "heading"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "7.2 Canonical storage and projection",
+   "sources": [
+    "heading"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "7.3 Replay, derived indexes, and recovery",
+   "sources": [
+    "heading"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "7.4 Failure semantics and operational metrics",
+   "sources": [
+    "heading"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "A",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 9,
+   "strength": "weak"
+  },
+  {
+   "surface": "A Normalized Event",
+   "sources": [
+    "capitalization_shape",
+    "definition"
+   ],
+   "count": 2,
+   "strength": "weak"
+  },
+  {
+   "surface": "Accepted",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Admission",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "After",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "An",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Architecture Guide",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 2,
+   "strength": "weak"
+  },
+  {
+   "surface": "Assertion Compilation Process",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "August Recovery Event",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Authorization Service",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "batch_size",
+   "sources": [
+    "identifier_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Canonical",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 2,
+   "strength": "weak"
+  },
+  {
+   "surface": "Canonical Event Dataset",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 4,
+   "strength": "weak"
+  },
+  {
+   "surface": "Canonical Event Store",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 2,
+   "strength": "weak"
+  },
+  {
+   "surface": "Canonical Event Store. Neither",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Canonical Storage Process",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "ClickHouse",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Configuration",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Data Retention Guide",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Deleting",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Derived Graph Projection",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Derived Search Index",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Direction",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Downstream",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "During",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Each",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "El Paso",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 2,
+   "strength": "weak"
+  },
+  {
+   "surface": "Engineers",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Envoy",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Event Envelope",
+   "sources": [
+    "capitalization_shape",
+    "definition"
+   ],
+   "count": 5,
+   "strength": "weak"
+  },
+  {
+   "surface": "Event Transport Process",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Every",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Evidence Ledger",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Failure",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "For",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Graph Traversal",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 2,
+   "strength": "weak"
+  },
+  {
+   "surface": "Graph Writer",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 2,
+   "strength": "weak"
+  },
+  {
+   "surface": "graph_index",
+   "sources": [
+    "identifier_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Harbor",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 9,
+   "strength": "weak"
+  },
+  {
+   "surface": "Harbor Gateway",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 2,
+   "strength": "weak"
+  },
+  {
+   "surface": "Hybrid Retrieval Process",
+   "sources": [
+    "capitalization_shape",
+    "definition"
+   ],
+   "count": 3,
+   "strength": "weak"
+  },
+  {
+   "surface": "Identity Service",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "If",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 2,
+   "strength": "weak"
+  },
+  {
+   "surface": "If Redis",
+   "sources": [
+    "capitalization_shape",
+    "definition"
+   ],
+   "count": 2,
+   "strength": "weak"
+  },
+  {
+   "surface": "In Harbor",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Incident Response Guide",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Ingestion Worker",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 2,
+   "strength": "weak"
+  },
+  {
+   "surface": "It",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 2,
+   "strength": "weak"
+  },
+  {
+   "surface": "Kafka",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 2,
+   "strength": "weak"
+  },
+  {
+   "surface": "lease_store",
+   "sources": [
+    "identifier_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Likewise",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "MongoDB",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 2,
+   "strength": "weak"
+  },
+  {
+   "surface": "MongoDB. The",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Negation",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Neo4j",
+   "sources": [
+    "capitalization_shape",
+    "definition",
+    "identifier_shape"
+   ],
+   "count": 10,
+   "strength": "weak"
+  },
+  {
+   "surface": "neo4j",
+   "sources": [
+    "identifier_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Neo4j. The Query Service",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Normalized Event",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Northstar Labs",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 4,
+   "strength": "weak"
+  },
+  {
+   "surface": "Not",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Observability Service",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Once",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Operational",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Operations Dashboard",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Operators",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "P95",
+   "sources": [
+    "identifier_shape"
+   ],
+   "count": 2,
+   "strength": "weak"
+  },
+  {
+   "surface": "P95 Query Latency",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 2,
+   "strength": "weak"
+  },
+  {
+   "surface": "Passive",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Phantom Dataset",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "PostgreSQL",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Preserving",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Projection Assertions",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 2,
+   "strength": "weak"
+  },
+  {
+   "surface": "Projection Failure Process",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Projection Lag",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 2,
+   "strength": "weak"
+  },
+  {
+   "surface": "Projection Worker",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Projection Worker. A",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Pronouns",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Pydantic",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Qdrant",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 5,
+   "strength": "weak"
+  },
+  {
+   "surface": "Query Service",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 2,
+   "strength": "weak"
+  },
+  {
+   "surface": "Rebuild Dataset",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Rebuildability Contract",
+   "sources": [
+    "capitalization_shape",
+    "definition"
+   ],
+   "count": 4,
+   "strength": "weak"
+  },
+  {
+   "surface": "Rebuildable Data Platform",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Recovery Guide",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Recovery Report",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 3,
+   "strength": "weak"
+  },
+  {
+   "surface": "Recovery Test Process",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Recovery Time Objective",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Redis",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 5,
+   "strength": "weak"
+  },
+  {
+   "surface": "Relational Retrieval",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Reliable Event Processing",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Reliable Event Processing in a Rebuildable Data Platform",
+   "sources": [
+    "heading"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Replay",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Replay Process",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 5,
+   "strength": "weak"
+  },
+  {
+   "surface": "Review",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Review notes",
+   "sources": [
+    "heading"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Run Ledger",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Schema Registry",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 2,
+   "strength": "weak"
+  },
+  {
+   "surface": "Search",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Semantic Retrieval",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "semantic_index",
+   "sources": [
+    "identifier_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Service Level Objective",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Similarly",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "SQLite",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "That",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "The",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 23,
+   "strength": "weak"
+  },
+  {
+   "surface": "The Canonical Event Store",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "The Harbor Gateway",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "The Identity Service",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "The Ingestion Worker",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "The Operations Dashboard",
+   "sources": [
+    "capitalization_shape",
+    "definition"
+   ],
+   "count": 2,
+   "strength": "weak"
+  },
+  {
+   "surface": "The Projection Worker",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 2,
+   "strength": "weak"
+  },
+  {
+   "surface": "The Query Service",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "The Rebuild Dataset",
+   "sources": [
+    "capitalization_shape",
+    "definition"
+   ],
+   "count": 2,
+   "strength": "weak"
+  },
+  {
+   "surface": "The Recovery Report",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "The Run Ledger",
+   "sources": [
+    "capitalization_shape",
+    "definition"
+   ],
+   "count": 2,
+   "strength": "weak"
+  },
+  {
+   "surface": "The Service Level Objective",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "The Validation Service",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "These",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "They",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "This",
+   "sources": [
+    "capitalization_shape",
+    "definition"
+   ],
+   "count": 5,
+   "strength": "weak"
+  },
+  {
+   "surface": "Those",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 2,
+   "strength": "weak"
+  },
+  {
+   "surface": "Validated Assertion Batch",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Validated Assertion Batches",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 2,
+   "strength": "weak"
+  },
+  {
+   "surface": "Validation Service",
+   "sources": [
+    "capitalization_shape"
+   ],
+   "count": 1,
+   "strength": "weak"
+  },
+  {
+   "surface": "Vector Search",
+   "sources": [
+    "capitalization_shape",
+    "definition"
+   ],
+   "count": 3,
+   "strength": "weak"
+  }
+ ],
+ "survey_hash": "a6561dda837c1a7cfa49214bb71e74ba6f730379872812ebd696e2ded4ad22fe"
+}
