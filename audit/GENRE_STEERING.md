@@ -320,3 +320,14 @@ and 12,000-questions count (was 0/9). Families byte-identical 94/102 with the sa
 residuals ('ten minutes' now carries duration IR for the future counted-NP gate policy).
 575 tests green. NEXT: factory concurrency/corpus scheduling → fresh sealed
 qualification → production freeze.
+
+### SEMANTIC FREEZE DECLARED @ 0cb56088 (owner order, 2026-08-08)
+Extraction semantics are FROZEN: no ontology synonyms, endpoint rules, linguistic
+constructions, or benchmark-driven extraction fixes unless a fresh INDEPENDENT
+production failure reveals a NEW mechanism class. The remediation cycle is closed.
+Phase order: q8 storage-contract consolidation (canonical one-vector-per-semantic-
+object; legacy naive/hrag/graph = parity/rollback only) → factory execution plane
+built against q8 (hard gate: serial output digest == parallel output digest) →
+read cutover (shadow → canary → default → rollback window → retire) → fresh sealed
+qualification → production freeze. The concept/mechanism latent-query project is
+explicitly AFTER the production boundary (retrieval projection, not extraction).
