@@ -1,5 +1,5 @@
 # Graphify Genre Steering — LIVE DOCUMENT
-Updated: 2026-08-07 · Status: collecting edge-case genres (2 more owner tests pending) · Fixes deferred until all genres measured.
+Updated: 2026-08-07 · Status: v4+v5 extractions locked + ANSWERS FILE delivered (~/Downloads/graphify_answers_v4_v5.md, owner grading pass/fail) · STANDSTILL ENDED by owner order 2026-08-07: OpenIE gate opened (union live).
 Rule: every test lands here BEFORE any fix is built; fixes are chosen from the cross-genre class matrix, never from a single test.
 
 ## Scorecard by genre (all under freeze_v4 stack unless noted)
@@ -78,3 +78,13 @@ RELATION-ELIGIBLE PROSE UNIT
 ```
 
 Post-standstill work queue (after v4+v5 keys assessed): (1) remove the OpenIE bypass → union; (2) capability trials: resolve_coref=True + quote-attribution on transcript + prose dev sets, measured before any custom speaker/coref machinery; (3) revisit counted-NP suppression AT THE GATE (OpenIE preserves them; suppression should be a promotion policy, not an observation destroyer) pending the owner scope decision; (4) thin transcript speaker-header adapter only for what quote-attribution doesn't cover.
+
+
+## Union activation (owner-ordered, 2026-08-07)
+Bypass removed at graphify_openie.py — triplet-extract now runs on EVERY eligible unit; the
+deterministic recovery lane corroborates, never silences. Measured cost of opening the gate:
+families 01-10 IDENTICAL (95/102 + 10 PASS, zero junk nodes); book-66 59/66 unchanged with
+precision .843→.831 (+1 unmatched doc-supported edge); sealed-v1-as-dev byte-stable 40/51
+F1 .808; ZERO leakage everywhere. The argument adapter + endpoint policy successfully gate
+the now-always-on OpenIE lane. Next: owner grades v4/v5 answers; then coref/quote-attribution
+capability trials per the ratified queue.

@@ -666,5 +666,36 @@
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
     "_lane": "openie:REVIEW"
+  },
+  {
+    "schema_version": "polymath.openie_assertion.v1",
+    "assertion_id": "openie-assertion:cf228e43155302469d787aad",
+    "candidate_id": "openie-predicate:1cd64a44fffac735a5b2e927",
+    "family_id": "openie-family:eae4ea70e38ae6167e95c651",
+    "document_id": "7ead4bd5cb08714670a72e47219ae20e62f3c0b70f568e169cb2716b6144d68b",
+    "lane": "REJECT",
+    "canonical_predicate": "depends_on",
+    "surface_relation": "depends on",
+    "subject_argument_id": "adapted-argument:086e4167f7ccb7ecb1f7757f",
+    "object_argument_id": "adapted-argument:a92c7b603cb3cc6111d50236",
+    "subject_entity_id": null,
+    "object_entity_id": null,
+    "subject_mention_id": null,
+    "object_mention_id": null,
+    "value_kind": "DESCRIPTION",
+    "value": "the gate controller",
+    "polarity": "positive",
+    "modality": "asserted",
+    "attribution": "direct",
+    "evidence_start": 377,
+    "evidence_end": 423,
+    "score": 1.0,
+    "reasons": [
+      "mapped:openie:triplet_extract:bounded_lemma_map:depend",
+      "surface_subject_to_object",
+      "fact_subject_is_not_a_canonical_entity"
+    ],
+    "policy_release": "graphify-openie-assertion-policy-v2",
+    "_lane": "openie:REJECT"
   }
 ]

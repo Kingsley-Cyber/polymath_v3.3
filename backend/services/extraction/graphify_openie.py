@@ -272,15 +272,13 @@ def run_openie_extraction(
         if document.normalized_text[unit.start:unit.end] != unit.text:
             raise ValueError(f"OpenIE unit evidence mismatch for {unit.unit_id}")
         recovered_rows = () if _QUALIFIED_UNIT_RE.search(unit.text) else _strict_surface_recovery(unit.text)
-        if recovered_rows:
-            renderings = []
-            deterministic_only_units += 1
-        else:
-            # External proposers receive the same masked, soft-wrap-flattened
-            # text the shared spaCy pipe parses (equal length, offsets stable),
-            # so their internal parse tokenizes the identical string.
-            renderings = provider.extract(re.sub(r"[*_~`\r\n]", " ", unit.text))
-            extract_calls += 1
+        # UNION (owner-ratified 2026-08-07): triplet-extract ALWAYS runs — the
+        # open-world linguistic baseline is never silenced. The deterministic
+        # recovery lane corroborates and augments; it does not replace.
+        # External proposers receive the same masked, soft-wrap-flattened text
+        # the shared spaCy pipe parses (equal length, offsets stable).
+        renderings = provider.extract(re.sub(r"[*_~`\r\n]", " ", unit.text))
+        extract_calls += 1
         for sequence, rendering in enumerate(renderings):
             links = tuple(_link(link) for link in (getattr(rendering, "asserter_links", None) or ()))
             chain = tuple(str(value) for value in (getattr(rendering, "asserter_chain", None) or ()))
