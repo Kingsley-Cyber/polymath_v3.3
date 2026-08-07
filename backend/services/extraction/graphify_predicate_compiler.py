@@ -65,8 +65,11 @@ def _canonical_hint(
 ) -> tuple[str | None, str, str]:
     normalized = _normalize(surface)
     candidates = _lemma_candidates(family, surface)
+    # A relation surface with no lemmatizable content (symbols, format tokens)
+    # yields no candidates; the normalized surface stands in as the lemma.
+    fallback_lemma = candidates[0] if candidates else (normalized or "surface")
     if re.search(r"\b(?:built|build|builds)(?:\s+on)?(?:\s+top)?\b", normalized):
-        return None, candidates[0], "review:ambiguous_built_on_top_of"
+        return None, fallback_lemma, "review:ambiguous_built_on_top_of"
     if "related" in normalized:
         return "related_to", "relate", "explicit_related_surface"
     if re.search(r"\b(?:part|component)\s+of\b", normalized):
@@ -78,7 +81,7 @@ def _canonical_hint(
     for lemma in candidates:
         if lemma in _CANONICAL_BY_LEMMA:
             return _CANONICAL_BY_LEMMA[lemma], lemma, "bounded_lemma_map"
-    return None, candidates[0], "configured_synonym_or_abstain"
+    return None, fallback_lemma, "configured_synonym_or_abstain"
 
 
 def compile_openie_predicates(
