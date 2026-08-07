@@ -1769,6 +1769,16 @@ def run_relation_fast_path(
         elif _crosses_competing_relation_cue(_unit, proposal, candidate):
             state = RelationTerminalState.REVIEW
             rule = "review:competing_coordinated_relation_cue"
+        elif not all(
+            entity_by_id[item.entity_id].state
+            in {EntityTerminalState.PROMOTED, EntityTerminalState.DOCUMENT_LOCAL}
+            for item in (proposal.subject, proposal.object)
+        ):
+            # Acceptance requires promotable endpoint identities — same rule
+            # the OpenIE assertion lane enforces. A review-state entity can
+            # carry a qualified or review record, never a graph fact.
+            state = RelationTerminalState.REVIEW
+            rule = "review:endpoint_entity_not_promotable"
         elif proposal.source in {"strict_dependency_cue", "structured_data"}:
             state = RelationTerminalState.ACCEPTED
         else:
