@@ -2,7 +2,30 @@
   "benchmarks": {
     "meridian_44": "burned development set \u2014 do not score",
     "sealed_qualification_v1": "burned development regression \u2014 40/51 F1 .816 at freeze (one-shot result stands at F1 .742 FAILED)",
-    "sealed_qualification_v2": "AWAITING OWNER-PROVIDED SET \u2014 key must remain unopened by implementation agents; one-shot via the frozen harness; verify_freeze before and after",
+    "sealed_qualification_v2": {
+      "document_words": 697,
+      "domain": "media",
+      "files": {
+        "README.md": {
+          "sha256": "0484f52794ae4d2e1fe70b0d22aba65f95588f84deb40a946927c160935be7e3"
+        },
+        "answer_key/NOTES.md": {
+          "sha256": "182be9a4c87d157d6bc2acffbbc70b02a1ee9c87638e7d53f2cd7824286a9cf0"
+        },
+        "answer_key/PLACEHOLDER_EMPTY_KEY.json": {
+          "role": "loader placeholder, never a scoring basis",
+          "sha256": "7efce79daa5675d9bef5afe8eb35702c17c18257e60c3f71bb2ab80248399be0"
+        },
+        "source/document.md": {
+          "bytes": 5648,
+          "sha256": "891f15d7ca33ee2f73817c3cf595d32e79c11de6cb9657fa49f2d23769dea7da"
+        }
+      },
+      "package": "/Users/king/Downloads/sealed_qualification_v2",
+      "protocol": "extraction runs FIRST (extract-only, placeholder empty key), digest recorded; when the owner supplies the real key it is scored EXACTLY ONCE under frozen code; freeze verified before and after each step",
+      "provenance": "owner-provided document (ENTITY EXTRACTION TEST.txt); packaging agent confirmed it contains the source document ONLY \u2014 no key material; implementation agents have read nothing from the package",
+      "status": "SOURCE_SEALED_AWAITING_ANSWER_KEY"
+    },
     "synthetic_families_v1 (01-09)": "development regressions \u2014 85/93 at freeze; 02/03/05/07/08/09 PASS",
     "technical_book_66": "development regression \u2014 59/66 at freeze, zero leakage"
   },
