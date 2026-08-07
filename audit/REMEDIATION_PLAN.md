@@ -120,3 +120,34 @@ Emit mention spans in scored artifacts so span-level scorers can grade.
 
 All three burned sets (book-66, Meridian, sealed-v1, sealed-v2) are development
 regressions for this cycle. Qualification bar stays at P/R/F1 ≥ .80, zero leakage.
+
+---
+
+# Parse & proposal contract (owner-ratified addition, 2026-08-07)
+
+## One pipeline, one Doc
+- The existing lightweight spaCy pipeline only; statistical NER, textcat, and transformer components disabled. `nlp.pipe`, CPU, `n_process=1`, repository batching convention.
+- Each text is parsed to exactly ONE Doc, reused by every consumer: DependencyMatcher, FrameExtractor, SVO, dep-path logic, voice/negation/modality/attribution, apposition, coordination, alias logic, relative clauses, nominalizations. **No component may call `nlp(text)` again.**
+
+## Entity-to-spaCy alignment
+- GLiNER2 character offsets are character offsets, never token indexes. Strict character-span alignment only.
+- Strict success → attach the accepted span to `doc.spans["polymath_entities"]`. Strict failure → record `ALIGNMENT_FAILURE`; a contracted/expanded span may be stored as a diagnostic but never used for graph acceptance.
+- Invariant: GLiNER2 and spaCy receive byte-for-byte identical normalized text.
+
+## Grammar-first relation generation
+- The deterministic syntax stack is the primary proposer. Candidate pairs come from grammatical constructions (active/passive transitive, verb-preposition, copular classification/preposition, appositional definition, relative clauses, nominalizations, possessive/part-whole, xcomp purpose, ccomp attribution, coordinated subjects/objects, native SVO, dep-path patterns) — **never every-entity × every-entity**.
+- Tail telemetry required: mentions/sentence, grammar pairs/sentence, grammar pairs/window, coordination expansion factor — each with p50/p95/p99/max.
+- Pathological sentences → classify `DENSE_STRUCTURE`, split or route to a specialized handler; never silently discard.
+
+## Compliance audit at spec time (2026-08-07, commit 3f0fa01)
+
+| Requirement | Status | Evidence |
+|---|---|---|
+| Shared lightweight pipe, ner/textcat disabled, CPU, n_process=1 | COMPLIES | `appos_enrichment.py:104` `spacy.load(model, disable=["ner","textcat"])`; `nlp.pipe(..., batch_size=64)` at `graphify_relations.py:1503` |
+| One Doc reused across fast path + syntax stack | COMPLIES (fast path) | `parse_once` invariant tracked (`graphify_relations.py:1627`); Doc passed into `_syntax_proposals`/FrameExtractor |
+| No component re-calls nlp(text) | **VIOLATED by OpenIE lane** | installed triplet-extract loads its own `en_core_web_sm` (`extractor.py:175`, `corenlp_patterns.py:121`) and re-parses raw unit text — the audited dual-parse divergence. Next cycle: feed triplet-extract the shared Doc or wrap it behind the observation IR |
+| Strict char-span alignment + ALIGNMENT_FAILURE | COMPLIES | `graphify_census.py:220` terminal `ALIGNMENT_FAILURE`; `alignment_failures` counter; byte-identity is pack law |
+| `doc.spans["polymath_entities"]` attachment | **MISSING** | not implemented anywhere; add in the open-discovery cycle |
+| Grammar-first pairs, no all-pairs generation | COMPLIES | proposals are construction-anchored; pair co-occurrence licenses parsing only, never generates pairs |
+| Tail telemetry (p50/p95/p99/max) | **MISSING** | add counters to the fast-path report |
+| DENSE_STRUCTURE classification/routing | **MISSING** | add; today pathological units are handled implicitly or dropped by frame coverage |
