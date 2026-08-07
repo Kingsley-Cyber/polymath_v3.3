@@ -15,6 +15,7 @@ from models.graphify_contracts import (
     stable_digest,
     stable_id,
 )
+from services.extraction.graphify_value_ir import extract_temporal_qualifier
 from services.extraction.graphify_assertion_semantics import (
     nominal_assertion_qualification,
     reported_attribution_source,
@@ -172,6 +173,7 @@ def reduce_openie_propositions(
             polarity=polarity,
             modality=modality,
             attribution=attribution,
+            temporal=extract_temporal_qualifier(representative.evidence_text),
             representative_proposition_id=representative.proposition_id,
             rendering_ids=rendering_ids,
             surface_relations=tuple(sorted({item.relation for item in renderings})),

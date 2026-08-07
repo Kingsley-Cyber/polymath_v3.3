@@ -34,6 +34,11 @@
       "canonical_candidate": "located_in",
       "mapping_rule": "review:endpoint_signature:Person:Organization",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": {
+        "operator": "in",
+        "value": "2027",
+        "ir_release": "graphify-value-ir-v1"
+      },
       "terminal_state": "review",
       "reasons": [
         "review:endpoint_signature:Person:Organization",
@@ -77,6 +82,11 @@
       "canonical_candidate": "located_in",
       "mapping_rule": "review:endpoint_signature:Person:Organization",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": {
+        "operator": "in",
+        "value": "2027",
+        "ir_release": "graphify-value-ir-v1"
+      },
       "terminal_state": "review",
       "reasons": [
         "review:endpoint_signature:Person:Organization",
@@ -120,6 +130,11 @@
       "canonical_candidate": "located_in",
       "mapping_rule": "review:endpoint_signature:Person:TimeReference",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": {
+        "operator": "in",
+        "value": "2027",
+        "ir_release": "graphify-value-ir-v1"
+      },
       "terminal_state": "review",
       "reasons": [
         "review:endpoint_signature:Person:TimeReference",
@@ -163,6 +178,7 @@
       "canonical_candidate": "located_in",
       "mapping_rule": "review:endpoint_signature:Person:Organization",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "review",
       "reasons": [
         "review:endpoint_signature:Person:Organization",
@@ -206,6 +222,7 @@
       "canonical_candidate": "located_in",
       "mapping_rule": "review:endpoint_signature:Person:Organization",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "review",
       "reasons": [
         "review:endpoint_signature:Person:Organization",
@@ -249,6 +266,7 @@
       "canonical_candidate": "located_in",
       "mapping_rule": "review:endpoint_signature:Organization:Person",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "review",
       "reasons": [
         "review:endpoint_signature:Organization:Person",
@@ -292,6 +310,7 @@
       "canonical_candidate": "causes",
       "mapping_rule": "review:endpoint_signature:Person:Concept",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "review",
       "reasons": [
         "review:endpoint_signature:Person:Concept",
@@ -335,6 +354,7 @@
       "canonical_candidate": "causes",
       "mapping_rule": "review:endpoint_signature:Person:Concept",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "review",
       "reasons": [
         "review:endpoint_signature:Person:Concept",
@@ -378,6 +398,7 @@
       "canonical_candidate": "member_of",
       "mapping_rule": "review:endpoint_signature:Person:Concept",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "review",
       "reasons": [
         "review:endpoint_signature:Person:Concept",
@@ -421,6 +442,7 @@
       "canonical_candidate": "member_of",
       "mapping_rule": "review:endpoint_signature:Person:Concept",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "review",
       "reasons": [
         "review:endpoint_signature:Person:Concept",
@@ -464,6 +486,7 @@
       "canonical_candidate": "member_of",
       "mapping_rule": "review:endpoint_signature:Person:TimeReference",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "review",
       "reasons": [
         "review:endpoint_signature:Person:TimeReference",
@@ -507,6 +530,7 @@
       "canonical_candidate": null,
       "mapping_rule": "open:work:unmapped_surface_relation",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "open",
       "reasons": [
         "open:work:unmapped_surface_relation",
@@ -550,6 +574,7 @@
       "canonical_candidate": "consumes",
       "mapping_rule": "mapped:existing_syntax_stack:read",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "review",
       "reasons": [
         "mapped:existing_syntax_stack:read",
@@ -593,6 +618,11 @@
       "canonical_candidate": null,
       "mapping_rule": "open:migrate:unmapped_surface_relation",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": {
+        "operator": "in",
+        "value": "2029",
+        "ir_release": "graphify-value-ir-v1"
+      },
       "terminal_state": "open",
       "reasons": [
         "open:migrate:unmapped_surface_relation",
@@ -636,6 +666,11 @@
       "canonical_candidate": null,
       "mapping_rule": "open:migrate:unmapped_surface_relation",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": {
+        "operator": "in",
+        "value": "2029",
+        "ir_release": "graphify-value-ir-v1"
+      },
       "terminal_state": "open",
       "reasons": [
         "open:migrate:unmapped_surface_relation",
@@ -679,6 +714,7 @@
       "canonical_candidate": "consumes",
       "mapping_rule": "mapped:existing_syntax_stack:read",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "review",
       "reasons": [
         "mapped:existing_syntax_stack:read",
@@ -722,6 +758,7 @@
       "canonical_candidate": "consumes",
       "mapping_rule": "mapped:existing_syntax_stack:read",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "review",
       "reasons": [
         "mapped:existing_syntax_stack:read",
@@ -765,6 +802,7 @@
       "canonical_candidate": "located_in",
       "mapping_rule": "review:endpoint_signature:Person:Organization",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "qualified",
       "reasons": [
         "review:endpoint_signature:Person:Organization",
@@ -808,6 +846,7 @@
       "canonical_candidate": "located_in",
       "mapping_rule": "review:endpoint_signature:Person:Organization",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "qualified",
       "reasons": [
         "review:endpoint_signature:Person:Organization",
@@ -851,6 +890,7 @@
       "canonical_candidate": "located_in",
       "mapping_rule": "review:endpoint_signature:Organization:Person",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "review",
       "reasons": [
         "review:endpoint_signature:Organization:Person",
@@ -888,6 +928,12 @@
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": {
+      "operator": "in",
+      "value": "2027",
+      "ir_release": "graphify-value-ir-v1"
+    },
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -919,6 +965,12 @@
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": {
+      "operator": "in",
+      "value": "2027",
+      "ir_release": "graphify-value-ir-v1"
+    },
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -950,6 +1002,8 @@
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -981,6 +1035,8 @@
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -1012,6 +1068,8 @@
       "surface_relation_preserved_without_ontology_fallback"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:OPEN_RELATION"
   },
   {
@@ -1043,6 +1101,8 @@
       "surface_relation_preserved_without_ontology_fallback"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:OPEN_RELATION"
   },
   {
@@ -1074,6 +1134,8 @@
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -1105,6 +1167,8 @@
       "surface_relation_preserved_without_ontology_fallback"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:OPEN_RELATION"
   },
   {
@@ -1136,6 +1200,8 @@
       "surface_relation_preserved_without_ontology_fallback"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:OPEN_RELATION"
   },
   {
@@ -1167,6 +1233,8 @@
       "surface_relation_preserved_without_ontology_fallback"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:OPEN_RELATION"
   },
   {
@@ -1198,6 +1266,8 @@
       "surface_relation_preserved_without_ontology_fallback"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:OPEN_RELATION"
   },
   {
@@ -1229,6 +1299,8 @@
       "surface_relation_preserved_without_ontology_fallback"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:OPEN_RELATION"
   },
   {
@@ -1260,6 +1332,8 @@
       "surface_relation_preserved_without_ontology_fallback"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:OPEN_RELATION"
   },
   {
@@ -1291,6 +1365,8 @@
       "surface_relation_preserved_without_ontology_fallback"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:OPEN_RELATION"
   },
   {
@@ -1322,6 +1398,12 @@
       "surface_relation_preserved_without_ontology_fallback"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": {
+      "operator": "in",
+      "value": "2029",
+      "ir_release": "graphify-value-ir-v1"
+    },
+    "value_ir": null,
     "_lane": "openie:OPEN_RELATION"
   },
   {
@@ -1353,6 +1435,12 @@
       "surface_relation_preserved_without_ontology_fallback"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": {
+      "operator": "in",
+      "value": "2029",
+      "ir_release": "graphify-value-ir-v1"
+    },
+    "value_ir": null,
     "_lane": "openie:OPEN_RELATION"
   },
   {
@@ -1384,6 +1472,12 @@
       "surface_relation_preserved_without_ontology_fallback"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": {
+      "operator": "in",
+      "value": "2029",
+      "ir_release": "graphify-value-ir-v1"
+    },
+    "value_ir": null,
     "_lane": "openie:OPEN_RELATION"
   },
   {
@@ -1415,6 +1509,8 @@
       "surface_relation_preserved_without_ontology_fallback"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:OPEN_RELATION"
   },
   {
@@ -1446,6 +1542,8 @@
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -1477,6 +1575,8 @@
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -1508,6 +1608,8 @@
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -1539,6 +1641,8 @@
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -1570,6 +1674,8 @@
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -1601,6 +1707,8 @@
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -1632,6 +1740,8 @@
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -1663,6 +1773,8 @@
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -1694,6 +1806,8 @@
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -1725,6 +1839,8 @@
       "surface_relation_preserved_without_ontology_fallback"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:OPEN_RELATION"
   }
 ]

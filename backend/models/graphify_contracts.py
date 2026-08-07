@@ -298,6 +298,7 @@ class OpenIEPropositionFamilyV1(StrictFrozenModel):
     evidence_end: int = Field(gt=0)
     max_confidence: float = Field(ge=0.0, le=1.0)
     family_release: str
+    temporal: dict | None = None
 
     @model_validator(mode="after")
     def validate_family(self) -> "OpenIEPropositionFamilyV1":
@@ -335,6 +336,7 @@ class OpenIEPredicateCandidateV1(StrictFrozenModel):
     evidence_end: int = Field(gt=0)
     confidence: float = Field(ge=0.0, le=1.0)
     compiler_release: str
+    temporal: dict | None = None
 
     @model_validator(mode="after")
     def validate_mapping(self) -> "OpenIEPredicateCandidateV1":
@@ -377,6 +379,8 @@ class OpenIEAssertionV1(StrictFrozenModel):
     score: float = Field(ge=0.0, le=1.0)
     reasons: tuple[str, ...]
     policy_release: str
+    temporal: dict | None = None
+    value_ir: dict | None = None
 
     @model_validator(mode="after")
     def validate_lane(self) -> "OpenIEAssertionV1":
@@ -416,6 +420,7 @@ class SurfaceRelationV1(StrictFrozenModel):
     canonical_candidate: str | None = None
     mapping_rule: str = ""
     mapping_release: str
+    temporal: dict | None = None
     terminal_state: RelationTerminalState
     reasons: tuple[str, ...] = ()
 

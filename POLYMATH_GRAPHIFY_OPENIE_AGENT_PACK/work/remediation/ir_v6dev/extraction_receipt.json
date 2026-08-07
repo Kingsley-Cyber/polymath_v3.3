@@ -1,0 +1,33 @@
+{
+  "answer_key": "/Users/king/polymath_v3.3/POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/work/remediation/sealed_v6_placeholder_key.json",
+  "artifact_digest": "16f1e5794312cdc1b834c784cd9694ab45275b08438627f37c87c4bef04eea9b",
+  "corpus_id": "32c0adaf-ef2b-58b8-82b9-4a94a298525e",
+  "counts": {
+    "gold_positive": 0,
+    "neo4j_promoted_positive": 14,
+    "qualified_gold": 0,
+    "qualified_retained": 59
+  },
+  "document_id": "3ab827d7ecb0145eb6a12f6943f9d9dbf99d1237787a60458d12b465a27c5df5",
+  "elapsed_seconds": 21.264115166006377,
+  "gates": {
+    "projection_idempotent": true
+  },
+  "graph": {
+    "counts": {
+      "assertion_edges": 14,
+      "assertion_support": 14,
+      "mentions": 39,
+      "nodes": 21,
+      "relations": 14
+    },
+    "digest": "12db8d02b07b5107cfd7238a2e31b6af8ba7c2e5b57e09e6b1c8f10899f390fb",
+    "repeat_digest": "12db8d02b07b5107cfd7238a2e31b6af8ba7c2e5b57e09e6b1c8f10899f390fb"
+  },
+  "metrics": {},
+  "mongo_database": "graphify_e2e_v6dev_ir_bd8e686e_202608_47f0f2e1",
+  "namespace": "v6dev_ir_bd8e686e_20260807T173458",
+  "requested_namespace": "v6dev_ir",
+  "source": "/Users/king/Downloads/# Adaptive Evidence Graphs for Audi (1).txt",
+  "status": "unscored"
+}

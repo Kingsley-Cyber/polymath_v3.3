@@ -36,6 +36,7 @@ from services.extraction.graphify_assertion_semantics import (
     FALSE_MODIFIER_LEMMAS,
     nominal_assertion_qualification,
 )
+from services.extraction.graphify_value_ir import extract_temporal_qualifier
 from services.extraction.graphify_unit_kind import (
     SEMANTIC_KINDS,
     classify_document_blocks,
@@ -1674,6 +1675,7 @@ def _surface_record(unit: _Unit, proposal: _Proposal) -> SurfaceRelationV1:
         dependency_path=proposal.dependency_path, voice=proposal.voice,
         polarity=proposal.polarity, modality=proposal.modality,
         attribution=proposal.attribution, canonical_candidate=None,
+        temporal=extract_temporal_qualifier(unit.text),
         mapping_rule=f"uncompiled:{proposal.source}",
         mapping_release=PREDICATE_COMPILER_RELEASE,
         terminal_state=RelationTerminalState.REVIEW,

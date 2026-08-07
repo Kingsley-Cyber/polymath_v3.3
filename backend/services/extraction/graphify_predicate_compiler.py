@@ -196,6 +196,7 @@ def compile_openie_predicates(
             evidence_start=family.evidence_start,
             evidence_end=family.evidence_end,
             confidence=family.max_confidence,
+            temporal=family.temporal,
             compiler_release=OPENIE_PREDICATE_COMPILER_RELEASE,
         ))
     output.sort(key=lambda item: (item.document_id, item.evidence_start, item.candidate_id))

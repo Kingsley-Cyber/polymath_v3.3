@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import re
 from typing import Sequence
 
+from services.extraction.graphify_value_ir import parse_typed_value
 from models.graphify_contracts import (
     AdaptedOpenIEArgumentV1,
     OpenIEArgumentKind,
@@ -109,6 +110,11 @@ def assemble_openie_assertions(
             object_mention_id=obj.mention_id,
             value_kind=value_kind,
             value=(obj.normalized_value or obj.surface) if value_kind else "",
+            temporal=candidate.temporal,
+            value_ir=(
+                parse_typed_value(obj.normalized_value or obj.surface)
+                if value_kind else None
+            ),
             polarity=candidate.polarity,
             modality=candidate.modality,
             attribution=candidate.attribution,

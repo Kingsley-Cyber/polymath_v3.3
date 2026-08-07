@@ -305,3 +305,18 @@ enforcement). Verified: v6 arXiv dev rerun — AR-17 now a PROMOTED entity (was 
 entity miss, 24/25→25/25-equivalent); families 94/102 + unexpected unchanged; 572 tests
 green. Neo4j store was found damaged (TransactionCommitFailed after earlier critical
 error) — volume wiped and rebuilt, safe by architecture (graph = rebuildable projection).
+
+### Factory station 4: temporal/numeric qualifier IR (#7, 2026-08-07)
+`graphify_value_ir.py` — qualifiers on assertions, never predicates (no LAUNCHES_ON/
+COSTS families; test asserts the frozen inventory stays clean). Typed values:
+fixed unit→dimension table ({value, unit, dimension}; unknown units keep surface with
+dimension unknown; non-numeric abstains). Temporal: strong date shapes + governing
+preposition ({operator, value}); interpretation belongs to the query layer. Additive
+fields ride family → candidate → assertion (temporal, value_ir) and SurfaceRelationV1
+(temporal); every persisted artifact stays valid. v6 arXiv dev probe: EXACTLY the key's
+3 temporal qualifiers captured on the right relations (on May 14 2026 / by July 1 2026 /
+during Q4 2026 — the layer that scored 0/3) + 5 typed values incl. 420ms/710ms durations
+and 12,000-questions count (was 0/9). Families byte-identical 94/102 with the same four
+residuals ('ten minutes' now carries duration IR for the future counted-NP gate policy).
+575 tests green. NEXT: factory concurrency/corpus scheduling → fresh sealed
+qualification → production freeze.
