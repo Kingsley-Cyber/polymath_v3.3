@@ -88,3 +88,35 @@ graphify_refactor:
 1. Adjudicate the stopped session's uncommitted edits (made 22:55–23:1x pre-stop-order): keep the slug fix after synthetic validation; **review `graphify_assertion_semantics.py` before trusting it** — it was written mid-Meridian-iteration and has not been audited.
 2. Put the tree under version control: every graphify module and both packs are untracked — the audit had to reconstruct history from mtimes. Commit the current state + audit artifacts before remediation begins so every subsequent change has provenance.
 3. `stages/final_verify.py` must resolve evidence via the freeze manifest and report qualification as pending until the sealed run exists.
+
+---
+
+# Next cycle (owner-ratified direction, 2026-08-07): open discovery, bounded interpretation
+
+Sealed-v2 (0/26 on a metadata/spec document) located the remaining architectural
+entanglement: the census schema and predicate inventory are fixed at DETECTION time
+(`gliner2_cpu_provider.py:24+` hardcoded entity-description dict; fixed `Predicate`
+Literal). The relation lane already obeys "ontology interprets, never gates detection";
+the entity lane does not.
+
+Change at ONE boundary:
+
+```text
+DOCUMENT
+  → DISCOVERY (no ontology rejection):
+      GLiNER2 census (schema assembled per corpus/document: base classes +
+        survey-derived classes — identifiers, fields, formats, structured spans)
+      + deterministic structured-data parsing (IDs, key-value/metadata fields)
+      + OpenIE + generic syntax
+  → OPEN OBSERVATION IR (everything observed, typed loosely, spans preserved)
+  → deterministic compiler + ontology (interpretation: canonical vs open vs review)
+  → evidence gate (promotion)
+```
+
+Invariants preserved: raw-observation immutability, compiler authority, gate decides,
+Mongo authoritative / Neo4j rebuildable. The ontology stays bounded — it just moves
+entirely to the interpretation side, for entities exactly as was done for relations.
+Emit mention spans in scored artifacts so span-level scorers can grade.
+
+All three burned sets (book-66, Meridian, sealed-v1, sealed-v2) are development
+regressions for this cycle. Qualification bar stays at P/R/F1 ≥ .80, zero leakage.
