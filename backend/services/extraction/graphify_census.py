@@ -318,13 +318,28 @@ def run_entity_census(
         )
         for index, row in zip(indexes, group_predictions):
             predictions[index] = row
+    folded_duplicates = 0
     for batch_start in range(0, len(bucketed), batch_size):
         batch = bucketed[batch_start:batch_start + batch_size]
         batch_predictions = predictions[batch_start:batch_start + batch_size]
         batch_mentions: list[RawMentionV1] = []
         for window, row in zip(batch, batch_predictions):
             document = document_by_id[window.document_id]
-            for sequence, prediction in enumerate(row):
+            # Two provider labels can normalize to the same (span, text, type)
+            # with different confidence/facet — one observation, two readings.
+            # mention_id identity excludes confidence/facet, so fold duplicates
+            # deterministically (max confidence, then lexicographic facet)
+            # BEFORE persistence; the immutable-sink invariant stays exact.
+            folded: dict[tuple[int, int, str, str], EntityPrediction] = {}
+            for prediction in row:
+                key = (prediction.start, prediction.end, prediction.text, prediction.entity_type)
+                incumbent = folded.get(key)
+                if incumbent is None or (
+                    prediction.confidence, incumbent.facet or "~",
+                ) > (incumbent.confidence, prediction.facet or "~"):
+                    folded[key] = prediction
+            folded_duplicates += len(row) - len(folded)
+            for sequence, prediction in enumerate(folded.values()):
                 batch_mentions.append(_raw_mention(
                     document, window, prediction, sequence,
                     schema_release=f"{SCHEMA_RELEASE}:{schema_hash(adapter_by_document[window.document_id])[:16]}",
@@ -348,6 +363,7 @@ def run_entity_census(
         "documents": len(documents),
         "windows": len(all_windows),
         "emitted_predictions": len(mentions),
+        "folded_duplicate_predictions": folded_duplicates,
         "persisted_records": len(mentions),
         "aligned_mentions": aligned,
         "alignment_failures": failures,

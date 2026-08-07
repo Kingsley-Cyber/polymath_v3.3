@@ -88,3 +88,34 @@ def test_census_source_has_only_allowed_stage_dependencies() -> None:
         "FrameExtractor", "svo_candidates",
     )
     assert not any(value in source for value in forbidden_imports)
+
+
+class DuplicateSpanProvider:
+    """Same span surfaced by two labels: one type, two confidences/facets."""
+
+    def predict_entities(self, texts, *, batch_size, threshold, adapters=()):
+        rows = []
+        for text in texts:
+            if "Polymath" in text:
+                start = text.index("Polymath")
+                rows.append([
+                    EntityPrediction("Polymath", "software", start, start + 8, 0.72, facet="schema_field"),
+                    EntityPrediction("Polymath", "software", start, start + 8, 0.91, facet=""),
+                ])
+            else:
+                rows.append([])
+        return rows
+
+
+def test_duplicate_span_predictions_fold_instead_of_conflicting() -> None:
+    document = normalize_document("doc", "Polymath " + "word " * 100)
+    sink = InMemoryRawMentionSink()
+    output = run_entity_census(
+        [document], [survey_document(document)], DuplicateSpanProvider(), sink,
+    )
+    polymath = [item for item in output.mentions if item.surface == "Polymath"]
+    assert len(polymath) == 1
+    assert polymath[0].confidence == 0.91  # deterministic winner: max confidence
+    assert output.report["folded_duplicate_predictions"] == 1
+    assert output.report["conservation"] is True
+    assert len(sink.records) == len(output.mentions)
