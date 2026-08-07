@@ -34,7 +34,12 @@
       "package": "/Users/king/Downloads/sealed_qualification_v2",
       "protocol": "extraction runs FIRST (extract-only, placeholder empty key), digest recorded; when the owner supplies the real key it is scored EXACTLY ONCE under frozen code; freeze verified before and after each step",
       "provenance": "owner-provided document (ENTITY EXTRACTION TEST.txt); packaging agent confirmed it contains the source document ONLY \u2014 no key material; implementation agents have read nothing from the package",
-      "status": "KEY_RECEIVED_SCORING_ONE_SHOT"
+      "result": {
+        "frozen_harness": "0/26 matched, P/R/F1 0.0, promoted 11 outside band [22,33], qualified_leaked 0, projection idempotent, status FAILED",
+        "notes": "owner key uses a 21-predicate vocabulary + entity-span + QA expectations; 26/38 relations mappable to the frozen 12-predicate ontology (12 via inversion), 11 unmappable",
+        "owner_scorer": "relations 0/38, entities 0/60 (no mention spans in outputs), both bands needs_tuning"
+      },
+      "status": "SCORED_ONE_SHOT_FAILED_NOW_DEVELOPMENT_DATA"
     },
     "synthetic_families_v1 (01-09)": "development regressions \u2014 85/93 at freeze; 02/03/05/07/08/09 PASS",
     "technical_book_66": "development regression \u2014 59/66 at freeze, zero leakage"
