@@ -263,22 +263,40 @@ def run_openie_extraction(
     eligible = [unit for unit in units if unit.eligible]
     started = time.perf_counter()
     extract_calls = 0
+    openie_successes = 0
+    openie_failures: list[dict[str, str]] = []
     deterministic_recoveries = 0
-    deterministic_only_units = 0
     for unit in eligible:
         document = document_by_id.get(unit.document_id)
         if document is None:
             raise ValueError(f"unknown OpenIE document {unit.document_id}")
         if document.normalized_text[unit.start:unit.end] != unit.text:
             raise ValueError(f"OpenIE unit evidence mismatch for {unit.unit_id}")
+        # The deterministic recovery lane carries no asserter chains, so it is
+        # scoped away from attributed/modal/negation-cue units: on those, only
+        # triplet-extract can qualify safely. This is lane scoping (assertion
+        # safety), never a substitute for the OpenIE call below.
         recovered_rows = () if _QUALIFIED_UNIT_RE.search(unit.text) else _strict_surface_recovery(unit.text)
         # UNION (owner-ratified 2026-08-07): triplet-extract ALWAYS runs — the
         # open-world linguistic baseline is never silenced. The deterministic
         # recovery lane corroborates and augments; it does not replace.
         # External proposers receive the same masked, soft-wrap-flattened text
         # the shared spaCy pipe parses (equal length, offsets stable).
-        renderings = provider.extract(re.sub(r"[*_~`\r\n]", " ", unit.text))
+        # Invariant: eligible_prose_units == openie_successes + explicit
+        # failures. A provider error is recorded, never silently absorbed into
+        # a deterministic-only unit.
         extract_calls += 1
+        try:
+            renderings = provider.extract(re.sub(r"[*_~`\r\n]", " ", unit.text))
+            openie_successes += 1
+        except Exception as exc:  # noqa: BLE001 — failure is data, not control flow
+            renderings = []
+            openie_failures.append({
+                "unit_id": unit.unit_id,
+                "document_id": unit.document_id,
+                "error_type": type(exc).__name__,
+                "error": str(exc)[:300],
+            })
         for sequence, rendering in enumerate(renderings):
             links = tuple(_link(link) for link in (getattr(rendering, "asserter_links", None) or ()))
             chain = tuple(str(value) for value in (getattr(rendering, "asserter_chain", None) or ()))
@@ -328,13 +346,24 @@ def run_openie_extraction(
         item.rendering_sequence, item.proposition_id,
     ))
     health = provider.health()
+    deterministic_only_units = len(eligible) - openie_successes - len(openie_failures)
+    if deterministic_only_units != 0:
+        raise RuntimeError(
+            "UNION invariant violated: "
+            f"{deterministic_only_units} eligible unit(s) never reached triplet-extract"
+        )
     report: dict[str, object] = {
         "schema_version": "polymath.openie_extraction_report.v1",
         "status": "passed",
         "documents": len(documents),
         "input_units": len(units),
         "eligible_units": len(eligible),
+        "eligible_prose_units": len(eligible),
         "extract_calls": extract_calls,
+        "openie_successes": openie_successes,
+        "explicit_openie_failures": len(openie_failures),
+        "openie_failure_records": openie_failures,
+        "union_invariant_holds": len(eligible) == openie_successes + len(openie_failures),
         "one_extract_call_per_eligible_unit": extract_calls == len(eligible),
         "at_most_one_provider_call_per_eligible_unit": extract_calls <= len(eligible),
         "every_eligible_unit_routed": extract_calls + deterministic_only_units == len(eligible),

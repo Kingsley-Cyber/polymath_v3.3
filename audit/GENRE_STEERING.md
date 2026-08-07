@@ -88,3 +88,35 @@ precision .843→.831 (+1 unmatched doc-supported edge); sealed-v1-as-dev byte-s
 F1 .808; ZERO leakage everywhere. The argument adapter + endpoint policy successfully gate
 the now-always-on OpenIE lane. Next: owner grades v4/v5 answers; then coref/quote-attribution
 capability trials per the ratified queue.
+
+### Union proof — instrumented invariant (2026-08-07, owner-ordered "DO ONE THING")
+Hard invariant now enforced in code (graphify_openie.py raises on violation) and stamped in
+every extraction report: `eligible_prose_units == openie_successes + explicit_openie_failures`,
+`deterministic_only_prose_units == 0`. Provider exceptions become explicit failure records
+(unit_id + error), never silent deterministic-only units. Provenance per row: openie release
+tag vs `:strict_surface_recovery`. Dedupe/collapse remains solely in the Proposition Reducer.
+The deterministic recovery lane stays scoped away from attributed/modal-cue units — verified
+load-bearing: recovery rows carry no asserter chains and `nominal_assertion_qualification`
+only covers assertion-noun that-clauses, so un-scoping it would leak attributed content as
+direct (changing qualifiers is forbidden).
+
+Burned-suite comparison (pre-union baseline DBs vs instrumented union, same keys, dev data):
+
+| metric | book-66 pre | book-66 union | sealed-v1 pre | sealed-v1 union |
+|---|---|---|---|---|
+| eligible units never reaching OpenIE | 41/78 | 0/78 | 26/54 | 0/54 |
+| raw propositions | 513 | 1225 | 281 | 683 |
+| malformed propositions | 0 | 0 | 1 | 1 |
+| directed pair recall (raw props) | 51/66 .773 | 52/66 .788 | 32/51 .627 | 35/51 .686 |
+| proposition recall (pair+compiled pred) | 49/66 .742 | 51/66 .773 | 28/51 .549 | 32/51 .627 |
+| gold pairs covered by OpenIE lane | 6 | 44 | 9 | 30 |
+| gold pairs covered by recovery lane | 45 | 45 | 24 | 24 |
+| downstream final graph | 59/66 P .843 | 59/66 P .831 | 40/51 F1 .808 | 40/51 F1 .808 |
+| leakage | 0 | 0 | 0 | 0 |
+
+Reading: the bypass had been silencing triplet-extract on 53% (book) / 48% (sealed) of eligible
+units. Under the union, the OpenIE lane's independent gold-pair coverage went 6→44 and 9→30
+with zero malformed growth and zero precision damage. Proposition-level recall rose (+2 book,
++4 sealed) but the final graph is unchanged — the newly discovered pairs die between reducer
+and promotion. Next steering target is therefore the promotion/interpretation layers, NOT
+discovery. Unit tests: 546 passed.

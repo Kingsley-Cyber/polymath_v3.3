@@ -136,3 +136,34 @@ def test_strict_recovery_treats_markdown_emphasis_as_formatting() -> None:
     assert ("Data Retention Guide", "defines", "retention policy") in {
         (item.subject, item.relation, item.object) for item in output.propositions
     }
+
+
+class CrashingExtractor:
+    def extract_triplet_objects(self, text):
+        raise RuntimeError("simulated triplet-extract crash")
+
+
+def test_provider_crash_is_an_explicit_failure_not_a_silent_deterministic_unit() -> None:
+    text = "Harbor depends on SQLite. Mesa uses Redis."
+    document = normalize_document("doc", text)
+    units = [
+        OpenIEUnit("unit:1", "doc", 0, 26, text[0:26], True),
+        OpenIEUnit("unit:2", "doc", 27, len(text), text[27:], True),
+    ]
+    provider = TripletExtractCPUProvider(loader=CrashingExtractor)
+    output = run_openie_extraction([document], units, provider)
+    report = output.report
+    assert report["eligible_prose_units"] == 2
+    assert report["openie_successes"] == 0
+    assert report["explicit_openie_failures"] == 2
+    assert report["union_invariant_holds"] is True
+    assert report["deterministic_only_units"] == 0
+    assert {row["unit_id"] for row in report["openie_failure_records"]} == {"unit:1", "unit:2"}
+    assert all(row["error_type"] == "RuntimeError" for row in report["openie_failure_records"])
+    # The deterministic lane still contributed its corroborating rows with
+    # provenance intact — a failure never silences the union.
+    assert output.propositions
+    assert all(
+        item.extractor_release.endswith(":strict_surface_recovery")
+        for item in output.propositions
+    )
