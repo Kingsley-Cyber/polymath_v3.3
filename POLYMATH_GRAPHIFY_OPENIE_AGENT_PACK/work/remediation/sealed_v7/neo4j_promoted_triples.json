@@ -1,0 +1,1354 @@
+[
+  {
+    "evidence_count": 0,
+    "object": "proactive gaze",
+    "object_entity_id": "entity:proactive-gaze",
+    "predicate": "uses",
+    "subject": "action",
+    "subject_entity_id": "entity:action"
+  },
+  {
+    "evidence_count": 0,
+    "object": "visibility and training domain",
+    "object_entity_id": "entity:visibility-and-training-domain",
+    "predicate": "depends_on",
+    "subject": "action unit",
+    "subject_entity_id": "entity:action-unit"
+  },
+  {
+    "evidence_count": 0,
+    "object": "declared ranges",
+    "object_entity_id": "entity:declared-ranges",
+    "predicate": "depends_on",
+    "subject": "affect",
+    "subject_entity_id": "entity:affect"
+  },
+  {
+    "evidence_count": 0,
+    "object": "approximate internet lists",
+    "object_entity_id": "entity:approximate-internet-lists",
+    "predicate": "depends_on",
+    "subject": "agent",
+    "subject_entity_id": "entity:agent"
+  },
+  {
+    "evidence_count": 0,
+    "object": "full source performance",
+    "object_entity_id": "entity:full-source-performance",
+    "predicate": "part_of",
+    "subject": "agent",
+    "subject_entity_id": "entity:agent"
+  },
+  {
+    "evidence_count": 0,
+    "object": "stereotyped movement profiles",
+    "object_entity_id": "entity:stereotyped-movement-profiles",
+    "predicate": "produces",
+    "subject": "agent",
+    "subject_entity_id": "entity:agent"
+  },
+  {
+    "evidence_count": 0,
+    "object": "camera shake",
+    "object_entity_id": "entity:camera-shake",
+    "predicate": "causes",
+    "subject": "animation system",
+    "subject_entity_id": "entity:animation-system"
+  },
+  {
+    "evidence_count": 0,
+    "object": "physics controller",
+    "object_entity_id": "entity:physics-controller",
+    "predicate": "causes",
+    "subject": "animation system",
+    "subject_entity_id": "entity:animation-system"
+  },
+  {
+    "evidence_count": 0,
+    "object": "branded elements",
+    "object_entity_id": "entity:branded-elements",
+    "predicate": "overrides",
+    "subject": "approved structural features",
+    "subject_entity_id": "entity:approved-structural-features"
+  },
+  {
+    "evidence_count": 0,
+    "object": "correct identifiers",
+    "object_entity_id": "entity:correct-identifiers",
+    "predicate": "uses",
+    "subject": "aus",
+    "subject_entity_id": "entity:aus"
+  },
+  {
+    "evidence_count": 0,
+    "object": "ground reaction analysis",
+    "object_entity_id": "entity:ground-reaction-analysis",
+    "predicate": "supports",
+    "subject": "biomechanics",
+    "subject_entity_id": "entity:biomechanics"
+  },
+  {
+    "evidence_count": 0,
+    "object": "joint models",
+    "object_entity_id": "entity:joint-models",
+    "predicate": "supports",
+    "subject": "biomechanics",
+    "subject_entity_id": "entity:biomechanics"
+  },
+  {
+    "evidence_count": 0,
+    "object": "frame count",
+    "object_entity_id": "entity:frame-count",
+    "predicate": "represents",
+    "subject": "biovision hierarchy",
+    "subject_entity_id": "entity:biovision-hierarchy"
+  },
+  {
+    "evidence_count": 0,
+    "object": "frame time",
+    "object_entity_id": "entity:frame-time",
+    "predicate": "represents",
+    "subject": "biovision hierarchy",
+    "subject_entity_id": "entity:biovision-hierarchy"
+  },
+  {
+    "evidence_count": 0,
+    "object": "joint hierarchy",
+    "object_entity_id": "entity:joint-hierarchy",
+    "predicate": "represents",
+    "subject": "biovision hierarchy",
+    "subject_entity_id": "entity:biovision-hierarchy"
+  },
+  {
+    "evidence_count": 0,
+    "object": "per joint channels",
+    "object_entity_id": "entity:per-joint-channels",
+    "predicate": "represents",
+    "subject": "biovision hierarchy",
+    "subject_entity_id": "entity:biovision-hierarchy"
+  },
+  {
+    "evidence_count": 0,
+    "object": "static offsets",
+    "object_entity_id": "entity:static-offsets",
+    "predicate": "represents",
+    "subject": "biovision hierarchy",
+    "subject_entity_id": "entity:biovision-hierarchy"
+  },
+  {
+    "evidence_count": 0,
+    "object": "full source performance",
+    "object_entity_id": "entity:full-source-performance",
+    "predicate": "part_of",
+    "subject": "bvh",
+    "subject_entity_id": "entity:bvh"
+  },
+  {
+    "evidence_count": 0,
+    "object": "contact",
+    "object_entity_id": "entity:contact",
+    "predicate": "consumes",
+    "subject": "camera placement",
+    "subject_entity_id": "entity:camera-placement"
+  },
+  {
+    "evidence_count": 0,
+    "object": "action",
+    "object_entity_id": "entity:action",
+    "predicate": "causes",
+    "subject": "can",
+    "subject_entity_id": "entity:can"
+  },
+  {
+    "evidence_count": 0,
+    "object": "human",
+    "object_entity_id": "entity:human",
+    "predicate": "defines",
+    "subject": "can",
+    "subject_entity_id": "entity:can"
+  },
+  {
+    "evidence_count": 0,
+    "object": "visibility and training domain",
+    "object_entity_id": "entity:visibility-and-training-domain",
+    "predicate": "depends_on",
+    "subject": "can",
+    "subject_entity_id": "entity:can"
+  },
+  {
+    "evidence_count": 0,
+    "object": "com",
+    "object_entity_id": "entity:com",
+    "predicate": "stores",
+    "subject": "can",
+    "subject_entity_id": "entity:can"
+  },
+  {
+    "evidence_count": 0,
+    "object": "without",
+    "object_entity_id": "entity:without",
+    "predicate": "supports",
+    "subject": "can",
+    "subject_entity_id": "entity:can"
+  },
+  {
+    "evidence_count": 0,
+    "object": "contact guidance",
+    "object_entity_id": "entity:contact-guidance",
+    "predicate": "uses",
+    "subject": "cg hoi",
+    "subject_entity_id": "entity:cg-hoi"
+  },
+  {
+    "evidence_count": 0,
+    "object": "root path",
+    "object_entity_id": "entity:root-path",
+    "predicate": "preceded_by",
+    "subject": "character",
+    "subject_entity_id": "entity:character"
+  },
+  {
+    "evidence_count": 0,
+    "object": "responsive locomotion",
+    "object_entity_id": "entity:responsive-locomotion",
+    "predicate": "produces",
+    "subject": "character",
+    "subject_entity_id": "entity:character"
+  },
+  {
+    "evidence_count": 0,
+    "object": "character",
+    "object_entity_id": "entity:character",
+    "predicate": "preceded_by",
+    "subject": "chunk boundaries",
+    "subject_entity_id": "entity:chunk-boundaries"
+  },
+  {
+    "evidence_count": 0,
+    "object": "semantic sections",
+    "object_entity_id": "entity:semantic-sections",
+    "predicate": "preceded_by",
+    "subject": "chunk boundaries",
+    "subject_entity_id": "entity:chunk-boundaries"
+  },
+  {
+    "evidence_count": 0,
+    "object": "virtual animation",
+    "object_entity_id": "entity:virtual-animation",
+    "predicate": "references",
+    "subject": "combat",
+    "subject_entity_id": "entity:combat"
+  },
+  {
+    "evidence_count": 0,
+    "object": "declared ranges",
+    "object_entity_id": "entity:declared-ranges",
+    "predicate": "depends_on",
+    "subject": "confidence values",
+    "subject_entity_id": "entity:confidence-values"
+  },
+  {
+    "evidence_count": 0,
+    "object": "contact",
+    "object_entity_id": "entity:contact",
+    "predicate": "causes",
+    "subject": "constraint_driven",
+    "subject_entity_id": "entity:constraint_driven"
+  },
+  {
+    "evidence_count": 0,
+    "object": "procedural traversal",
+    "object_entity_id": "entity:procedural-traversal",
+    "predicate": "causes",
+    "subject": "constraint_driven",
+    "subject_entity_id": "entity:constraint_driven"
+  },
+  {
+    "evidence_count": 0,
+    "object": "target",
+    "object_entity_id": "entity:target",
+    "predicate": "causes",
+    "subject": "constraint_driven",
+    "subject_entity_id": "entity:constraint_driven"
+  },
+  {
+    "evidence_count": 0,
+    "object": "action",
+    "object_entity_id": "entity:action",
+    "predicate": "causes",
+    "subject": "contact",
+    "subject_entity_id": "entity:contact"
+  },
+  {
+    "evidence_count": 0,
+    "object": "multimodal interpretation",
+    "object_entity_id": "entity:multimodal-interpretation",
+    "predicate": "overrides",
+    "subject": "contact",
+    "subject_entity_id": "entity:contact"
+  },
+  {
+    "evidence_count": 0,
+    "object": "intended image plane paths",
+    "object_entity_id": "entity:intended-image-plane-paths",
+    "predicate": "preceded_by",
+    "subject": "contact",
+    "subject_entity_id": "entity:contact"
+  },
+  {
+    "evidence_count": 0,
+    "object": "rapid acceleration",
+    "object_entity_id": "entity:rapid-acceleration",
+    "predicate": "uses",
+    "subject": "contact",
+    "subject_entity_id": "entity:contact"
+  },
+  {
+    "evidence_count": 0,
+    "object": "frame 72",
+    "object_entity_id": "entity:frame-72",
+    "predicate": "related_to",
+    "subject": "contact event",
+    "subject_entity_id": "entity:contact-event"
+  },
+  {
+    "evidence_count": 0,
+    "object": "peak velocity",
+    "object_entity_id": "entity:peak-velocity",
+    "predicate": "causes",
+    "subject": "contact time",
+    "subject_entity_id": "entity:contact-time"
+  },
+  {
+    "evidence_count": 0,
+    "object": "responsive locomotion",
+    "object_entity_id": "entity:responsive-locomotion",
+    "predicate": "produces",
+    "subject": "control",
+    "subject_entity_id": "entity:control"
+  },
+  {
+    "evidence_count": 0,
+    "object": "target",
+    "object_entity_id": "entity:target",
+    "predicate": "depends_on",
+    "subject": "cpcs mx",
+    "subject_entity_id": "entity:cpcs-mx"
+  },
+  {
+    "evidence_count": 0,
+    "object": "collision exemptions",
+    "object_entity_id": "entity:collision-exemptions",
+    "predicate": "part_of",
+    "subject": "cpcs mx",
+    "subject_entity_id": "entity:cpcs-mx"
+  },
+  {
+    "evidence_count": 0,
+    "object": "keyed overrides",
+    "object_entity_id": "entity:keyed-overrides",
+    "predicate": "part_of",
+    "subject": "cpcs mx",
+    "subject_entity_id": "entity:cpcs-mx"
+  },
+  {
+    "evidence_count": 0,
+    "object": "pinned shapes",
+    "object_entity_id": "entity:pinned-shapes",
+    "predicate": "part_of",
+    "subject": "cpcs mx",
+    "subject_entity_id": "entity:cpcs-mx"
+  },
+  {
+    "evidence_count": 0,
+    "object": "constraint",
+    "object_entity_id": "entity:constraint",
+    "predicate": "represents",
+    "subject": "cpcs mx",
+    "subject_entity_id": "entity:cpcs-mx"
+  },
+  {
+    "evidence_count": 0,
+    "object": "measurable or inspectable transformations",
+    "object_entity_id": "entity:measurable-or-inspectable-transformations",
+    "predicate": "represents",
+    "subject": "cpcs mx",
+    "subject_entity_id": "entity:cpcs-mx"
+  },
+  {
+    "evidence_count": 0,
+    "object": "separate phase local controls",
+    "object_entity_id": "entity:separate-phase-local-controls",
+    "predicate": "represents",
+    "subject": "cpcs mx",
+    "subject_entity_id": "entity:cpcs-mx"
+  },
+  {
+    "evidence_count": 0,
+    "object": "execution manifest",
+    "object_entity_id": "entity:execution-manifest",
+    "predicate": "stores",
+    "subject": "cpcs mx",
+    "subject_entity_id": "entity:cpcs-mx"
+  },
+  {
+    "evidence_count": 0,
+    "object": "joint track",
+    "object_entity_id": "entity:joint-track",
+    "predicate": "stores",
+    "subject": "cpcs mx",
+    "subject_entity_id": "entity:cpcs-mx"
+  },
+  {
+    "evidence_count": 0,
+    "object": "retarget_profile",
+    "object_entity_id": "entity:retarget_profile",
+    "predicate": "stores",
+    "subject": "cpcs mx",
+    "subject_entity_id": "entity:cpcs-mx"
+  },
+  {
+    "evidence_count": 0,
+    "object": "two",
+    "object_entity_id": "entity:two",
+    "predicate": "stores",
+    "subject": "cpcs mx",
+    "subject_entity_id": "entity:cpcs-mx"
+  },
+  {
+    "evidence_count": 0,
+    "object": "si",
+    "object_entity_id": "entity:si",
+    "predicate": "uses",
+    "subject": "cpcs mx",
+    "subject_entity_id": "entity:cpcs-mx"
+  },
+  {
+    "evidence_count": 0,
+    "object": "visibility and training domain",
+    "object_entity_id": "entity:visibility-and-training-domain",
+    "predicate": "depends_on",
+    "subject": "detector outputs",
+    "subject_entity_id": "entity:detector-outputs"
+  },
+  {
+    "evidence_count": 0,
+    "object": "available solver",
+    "object_entity_id": "entity:available-solver",
+    "predicate": "maps_to",
+    "subject": "engine adapter",
+    "subject_entity_id": "entity:engine-adapter"
+  },
+  {
+    "evidence_count": 0,
+    "object": "geodesic angular distance",
+    "object_entity_id": "entity:geodesic-angular-distance",
+    "predicate": "uses",
+    "subject": "error",
+    "subject_entity_id": "entity:error"
+  },
+  {
+    "evidence_count": 0,
+    "object": "retrieval and evaluation unit",
+    "object_entity_id": "entity:retrieval-and-evaluation-unit",
+    "predicate": "supports",
+    "subject": "event graph",
+    "subject_entity_id": "entity:event-graph"
+  },
+  {
+    "evidence_count": 0,
+    "object": "action",
+    "object_entity_id": "entity:action",
+    "predicate": "causes",
+    "subject": "every",
+    "subject_entity_id": "entity:every"
+  },
+  {
+    "evidence_count": 0,
+    "object": "derived_from",
+    "object_entity_id": "entity:derived_from",
+    "predicate": "created_by",
+    "subject": "every",
+    "subject_entity_id": "entity:every"
+  },
+  {
+    "evidence_count": 0,
+    "object": "executable carrier",
+    "object_entity_id": "entity:executable-carrier",
+    "predicate": "depends_on",
+    "subject": "exact control",
+    "subject_entity_id": "entity:exact-control"
+  },
+  {
+    "evidence_count": 0,
+    "object": "contact",
+    "object_entity_id": "entity:contact",
+    "predicate": "uses",
+    "subject": "executable score",
+    "subject_entity_id": "entity:executable-score"
+  },
+  {
+    "evidence_count": 0,
+    "object": "target relations",
+    "object_entity_id": "entity:target-relations",
+    "predicate": "uses",
+    "subject": "executable score",
+    "subject_entity_id": "entity:executable-score"
+  },
+  {
+    "evidence_count": 0,
+    "object": "verification",
+    "object_entity_id": "entity:verification",
+    "predicate": "depends_on",
+    "subject": "external assets",
+    "subject_entity_id": "entity:external-assets"
+  },
+  {
+    "evidence_count": 0,
+    "object": "layer",
+    "object_entity_id": "entity:layer",
+    "predicate": "derived_from",
+    "subject": "generated video",
+    "subject_entity_id": "entity:generated-video"
+  },
+  {
+    "evidence_count": 0,
+    "object": "impossible joint velocities",
+    "object_entity_id": "entity:impossible-joint-velocities",
+    "predicate": "created_by",
+    "subject": "global",
+    "subject_entity_id": "entity:global"
+  },
+  {
+    "evidence_count": 0,
+    "object": "visibility and training domain",
+    "object_entity_id": "entity:visibility-and-training-domain",
+    "predicate": "depends_on",
+    "subject": "head pose",
+    "subject_entity_id": "entity:head-pose"
+  },
+  {
+    "evidence_count": 0,
+    "object": "morphology independent representation",
+    "object_entity_id": "entity:morphology-independent-representation",
+    "predicate": "depends_on",
+    "subject": "highly varied morphologies",
+    "subject_entity_id": "entity:highly-varied-morphologies"
+  },
+  {
+    "evidence_count": 0,
+    "object": "asymmetric step lengths",
+    "object_entity_id": "entity:asymmetric-step-lengths",
+    "predicate": "part_of",
+    "subject": "human motion",
+    "subject_entity_id": "entity:human-motion"
+  },
+  {
+    "evidence_count": 0,
+    "object": "postural adjustments",
+    "object_entity_id": "entity:postural-adjustments",
+    "predicate": "part_of",
+    "subject": "human motion",
+    "subject_entity_id": "entity:human-motion"
+  },
+  {
+    "evidence_count": 0,
+    "object": "small speed fluctuations",
+    "object_entity_id": "entity:small-speed-fluctuations",
+    "predicate": "part_of",
+    "subject": "human motion",
+    "subject_entity_id": "entity:human-motion"
+  },
+  {
+    "evidence_count": 0,
+    "object": "widely used text motion dataset",
+    "object_entity_id": "entity:widely-used-text-motion-dataset",
+    "predicate": "supports",
+    "subject": "humanml3d",
+    "subject_entity_id": "entity:humanml3d"
+  },
+  {
+    "evidence_count": 0,
+    "object": "human",
+    "object_entity_id": "entity:human",
+    "predicate": "represents",
+    "subject": "intercontrol",
+    "subject_entity_id": "entity:intercontrol"
+  },
+  {
+    "evidence_count": 0,
+    "object": "human interaction",
+    "object_entity_id": "entity:human-interaction",
+    "predicate": "represents",
+    "subject": "intercontrol",
+    "subject_entity_id": "entity:intercontrol"
+  },
+  {
+    "evidence_count": 0,
+    "object": "ik",
+    "object_entity_id": "entity:ik",
+    "predicate": "uses",
+    "subject": "intercontrol",
+    "subject_entity_id": "entity:intercontrol"
+  },
+  {
+    "evidence_count": 0,
+    "object": "input quality",
+    "object_entity_id": "entity:input-quality",
+    "predicate": "depends_on",
+    "subject": "inverse dynamics",
+    "subject_entity_id": "entity:inverse-dynamics"
+  },
+  {
+    "evidence_count": 0,
+    "object": "model",
+    "object_entity_id": "entity:model",
+    "predicate": "depends_on",
+    "subject": "inverse dynamics",
+    "subject_entity_id": "entity:inverse-dynamics"
+  },
+  {
+    "evidence_count": 0,
+    "object": "model assumptions",
+    "object_entity_id": "entity:model-assumptions",
+    "predicate": "depends_on",
+    "subject": "inverse dynamics",
+    "subject_entity_id": "entity:inverse-dynamics"
+  },
+  {
+    "evidence_count": 0,
+    "object": "coordinate and reporting conventions",
+    "object_entity_id": "entity:coordinate-and-reporting-conventions",
+    "predicate": "depends_on",
+    "subject": "inverse dynamics results",
+    "subject_entity_id": "entity:inverse-dynamics-results"
+  },
+  {
+    "evidence_count": 0,
+    "object": "external loads",
+    "object_entity_id": "entity:external-loads",
+    "predicate": "depends_on",
+    "subject": "inverse dynamics workflow",
+    "subject_entity_id": "entity:inverse-dynamics-workflow"
+  },
+  {
+    "evidence_count": 0,
+    "object": "inertial properties",
+    "object_entity_id": "entity:inertial-properties",
+    "predicate": "depends_on",
+    "subject": "inverse dynamics workflow",
+    "subject_entity_id": "entity:inverse-dynamics-workflow"
+  },
+  {
+    "evidence_count": 0,
+    "object": "motion",
+    "object_entity_id": "entity:motion",
+    "predicate": "detects",
+    "subject": "jerk based and spectral smoothness measures",
+    "subject_entity_id": "entity:jerk-based-and-spectral-smoothness-measures"
+  },
+  {
+    "evidence_count": 0,
+    "object": "interoperable objects",
+    "object_entity_id": "entity:interoperable-objects",
+    "predicate": "supports",
+    "subject": "json",
+    "subject_entity_id": "entity:json"
+  },
+  {
+    "evidence_count": 0,
+    "object": "conditional validation",
+    "object_entity_id": "entity:conditional-validation",
+    "predicate": "supports",
+    "subject": "json schema",
+    "subject_entity_id": "entity:json-schema"
+  },
+  {
+    "evidence_count": 0,
+    "object": "machine readable contracts",
+    "object_entity_id": "entity:machine-readable-contracts",
+    "predicate": "supports",
+    "subject": "json schema",
+    "subject_entity_id": "entity:json-schema"
+  },
+  {
+    "evidence_count": 0,
+    "object": "reusable definitions",
+    "object_entity_id": "entity:reusable-definitions",
+    "predicate": "supports",
+    "subject": "json schema",
+    "subject_entity_id": "entity:json-schema"
+  },
+  {
+    "evidence_count": 0,
+    "object": "one",
+    "object_entity_id": "entity:one",
+    "predicate": "uses",
+    "subject": "jsonl",
+    "subject_entity_id": "entity:jsonl"
+  },
+  {
+    "evidence_count": 0,
+    "object": "confidence values",
+    "object_entity_id": "entity:confidence-values",
+    "predicate": "causes",
+    "subject": "laban",
+    "subject_entity_id": "entity:laban"
+  },
+  {
+    "evidence_count": 0,
+    "object": "style intensities",
+    "object_entity_id": "entity:style-intensities",
+    "predicate": "causes",
+    "subject": "laban",
+    "subject_entity_id": "entity:laban"
+  },
+  {
+    "evidence_count": 0,
+    "object": "declared ranges",
+    "object_entity_id": "entity:declared-ranges",
+    "predicate": "depends_on",
+    "subject": "laban",
+    "subject_entity_id": "entity:laban"
+  },
+  {
+    "evidence_count": 0,
+    "object": "global phase",
+    "object_entity_id": "entity:global-phase",
+    "predicate": "supports",
+    "subject": "layer",
+    "subject_entity_id": "entity:layer"
+  },
+  {
+    "evidence_count": 0,
+    "object": "raw volume",
+    "object_entity_id": "entity:raw-volume",
+    "predicate": "causes",
+    "subject": "limb adduction",
+    "subject_entity_id": "entity:limb-adduction"
+  },
+  {
+    "evidence_count": 0,
+    "object": "single global phase",
+    "object_entity_id": "entity:single-global-phase",
+    "predicate": "references",
+    "subject": "local motion phases",
+    "subject_entity_id": "entity:local-motion-phases"
+  },
+  {
+    "evidence_count": 0,
+    "object": "why complex movement benefits",
+    "object_entity_id": "entity:why-complex-movement-benefits",
+    "predicate": "references",
+    "subject": "local motion phases",
+    "subject_entity_id": "entity:local-motion-phases"
+  },
+  {
+    "evidence_count": 0,
+    "object": "action",
+    "object_entity_id": "entity:action",
+    "predicate": "causes",
+    "subject": "long",
+    "subject_entity_id": "entity:long"
+  },
+  {
+    "evidence_count": 0,
+    "object": "mapping",
+    "object_entity_id": "entity:mapping",
+    "predicate": "depends_on",
+    "subject": "long limbs",
+    "subject_entity_id": "entity:long-limbs"
+  },
+  {
+    "evidence_count": 0,
+    "object": "repeated performances",
+    "object_entity_id": "entity:repeated-performances",
+    "predicate": "depends_on",
+    "subject": "mannerism",
+    "subject_entity_id": "entity:mannerism"
+  },
+  {
+    "evidence_count": 0,
+    "object": "head stabilization",
+    "object_entity_id": "entity:head-stabilization",
+    "predicate": "part_of",
+    "subject": "model",
+    "subject_entity_id": "entity:model"
+  },
+  {
+    "evidence_count": 0,
+    "object": "respiration driven torso motion",
+    "object_entity_id": "entity:respiration-driven-torso-motion",
+    "predicate": "part_of",
+    "subject": "model",
+    "subject_entity_id": "entity:model"
+  },
+  {
+    "evidence_count": 0,
+    "object": "visual attention changes",
+    "object_entity_id": "entity:visual-attention-changes",
+    "predicate": "part_of",
+    "subject": "model",
+    "subject_entity_id": "entity:model"
+  },
+  {
+    "evidence_count": 0,
+    "object": "body part aware motion style transfer",
+    "object_entity_id": "entity:body-part-aware-motion-style-transfer",
+    "predicate": "supports",
+    "subject": "motion puzzle",
+    "subject_entity_id": "entity:motion-puzzle"
+  },
+  {
+    "evidence_count": 0,
+    "object": "motion",
+    "object_entity_id": "entity:motion",
+    "predicate": "supports",
+    "subject": "motion puzzle",
+    "subject_entity_id": "entity:motion-puzzle"
+  },
+  {
+    "evidence_count": 0,
+    "object": "presentation",
+    "object_entity_id": "entity:presentation",
+    "predicate": "created_by",
+    "subject": "movement",
+    "subject_entity_id": "entity:movement"
+  },
+  {
+    "evidence_count": 0,
+    "object": "intermittent corrections",
+    "object_entity_id": "entity:intermittent-corrections",
+    "predicate": "part_of",
+    "subject": "movement",
+    "subject_entity_id": "entity:movement"
+  },
+  {
+    "evidence_count": 0,
+    "object": "postural tone",
+    "object_entity_id": "entity:postural-tone",
+    "predicate": "part_of",
+    "subject": "movement",
+    "subject_entity_id": "entity:movement"
+  },
+  {
+    "evidence_count": 0,
+    "object": "stable individual tendencies",
+    "object_entity_id": "entity:stable-individual-tendencies",
+    "predicate": "part_of",
+    "subject": "movement",
+    "subject_entity_id": "entity:movement"
+  },
+  {
+    "evidence_count": 0,
+    "object": "task specific variability",
+    "object_entity_id": "entity:task-specific-variability",
+    "predicate": "part_of",
+    "subject": "movement",
+    "subject_entity_id": "entity:movement"
+  },
+  {
+    "evidence_count": 0,
+    "object": "a e",
+    "object_entity_id": "entity:a-e",
+    "predicate": "uses",
+    "subject": "native facs",
+    "subject_entity_id": "entity:native-facs"
+  },
+  {
+    "evidence_count": 0,
+    "object": "mapping",
+    "object_entity_id": "entity:mapping",
+    "predicate": "depends_on",
+    "subject": "nonhuman torsos",
+    "subject_entity_id": "entity:nonhuman-torsos"
+  },
+  {
+    "evidence_count": 0,
+    "object": "action unit",
+    "object_entity_id": "entity:action-unit",
+    "predicate": "overrides",
+    "subject": "numerical curve",
+    "subject_entity_id": "entity:numerical-curve"
+  },
+  {
+    "evidence_count": 0,
+    "object": "visibility and training domain",
+    "object_entity_id": "entity:visibility-and-training-domain",
+    "predicate": "depends_on",
+    "subject": "openface",
+    "subject_entity_id": "entity:openface"
+  },
+  {
+    "evidence_count": 0,
+    "object": "optimal control framework",
+    "object_entity_id": "entity:optimal-control-framework",
+    "predicate": "supports",
+    "subject": "opensim moco",
+    "subject_entity_id": "entity:opensim-moco"
+  },
+  {
+    "evidence_count": 0,
+    "object": "constraint",
+    "object_entity_id": "entity:constraint",
+    "predicate": "defines",
+    "subject": "opensim models",
+    "subject_entity_id": "entity:opensim-models"
+  },
+  {
+    "evidence_count": 0,
+    "object": "coordinate couplers",
+    "object_entity_id": "entity:coordinate-couplers",
+    "predicate": "defines",
+    "subject": "opensim models",
+    "subject_entity_id": "entity:opensim-models"
+  },
+  {
+    "evidence_count": 0,
+    "object": "coordinate",
+    "object_entity_id": "entity:coordinate",
+    "predicate": "derived_from",
+    "subject": "output",
+    "subject_entity_id": "entity:output"
+  },
+  {
+    "evidence_count": 0,
+    "object": "mapping",
+    "object_entity_id": "entity:mapping",
+    "predicate": "depends_on",
+    "subject": "oversized hands",
+    "subject_entity_id": "entity:oversized-hands"
+  },
+  {
+    "evidence_count": 0,
+    "object": "project defined metrics",
+    "object_entity_id": "entity:project-defined-metrics",
+    "predicate": "uses",
+    "subject": "perceptual constraints",
+    "subject_entity_id": "entity:perceptual-constraints"
+  },
+  {
+    "evidence_count": 0,
+    "object": "human ratings",
+    "object_entity_id": "entity:human-ratings",
+    "predicate": "depends_on",
+    "subject": "perceptual metrics",
+    "subject_entity_id": "entity:perceptual-metrics"
+  },
+  {
+    "evidence_count": 0,
+    "object": "reliability analysis",
+    "object_entity_id": "entity:reliability-analysis",
+    "predicate": "depends_on",
+    "subject": "perceptual metrics",
+    "subject_entity_id": "entity:perceptual-metrics"
+  },
+  {
+    "evidence_count": 0,
+    "object": "shape",
+    "object_entity_id": "entity:shape",
+    "predicate": "references",
+    "subject": "performance driven facial animation",
+    "subject_entity_id": "entity:performance-driven-facial-animation"
+  },
+  {
+    "evidence_count": 0,
+    "object": "responsive locomotion",
+    "object_entity_id": "entity:responsive-locomotion",
+    "predicate": "produces",
+    "subject": "pfnn",
+    "subject_entity_id": "entity:pfnn"
+  },
+  {
+    "evidence_count": 0,
+    "object": "control",
+    "object_entity_id": "entity:control",
+    "predicate": "supports",
+    "subject": "pfnn",
+    "subject_entity_id": "entity:pfnn"
+  },
+  {
+    "evidence_count": 0,
+    "object": "com",
+    "object_entity_id": "entity:com",
+    "predicate": "stores",
+    "subject": "physically informed workflow",
+    "subject_entity_id": "entity:physically-informed-workflow"
+  },
+  {
+    "evidence_count": 0,
+    "object": "balance control",
+    "object_entity_id": "entity:balance-control",
+    "predicate": "part_of",
+    "subject": "postural sway",
+    "subject_entity_id": "entity:postural-sway"
+  },
+  {
+    "evidence_count": 0,
+    "object": "universal and individual components",
+    "object_entity_id": "entity:universal-and-individual-components",
+    "predicate": "part_of",
+    "subject": "postural sway",
+    "subject_entity_id": "entity:postural-sway"
+  },
+  {
+    "evidence_count": 0,
+    "object": "peak velocity",
+    "object_entity_id": "entity:peak-velocity",
+    "predicate": "causes",
+    "subject": "preserve",
+    "subject_entity_id": "entity:preserve"
+  },
+  {
+    "evidence_count": 0,
+    "object": "gait identity",
+    "object_entity_id": "entity:gait-identity",
+    "predicate": "consumes",
+    "subject": "procedural locomotion controller",
+    "subject_entity_id": "entity:procedural-locomotion-controller"
+  },
+  {
+    "evidence_count": 0,
+    "object": "style profile",
+    "object_entity_id": "entity:style-profile",
+    "predicate": "consumes",
+    "subject": "procedural locomotion controller",
+    "subject_entity_id": "entity:procedural-locomotion-controller"
+  },
+  {
+    "evidence_count": 0,
+    "object": "terrain samples",
+    "object_entity_id": "entity:terrain-samples",
+    "predicate": "consumes",
+    "subject": "procedural locomotion controller",
+    "subject_entity_id": "entity:procedural-locomotion-controller"
+  },
+  {
+    "evidence_count": 0,
+    "object": "domain tags",
+    "object_entity_id": "entity:domain-tags",
+    "predicate": "part_of",
+    "subject": "rag",
+    "subject_entity_id": "entity:rag"
+  },
+  {
+    "evidence_count": 0,
+    "object": "evidence labels",
+    "object_entity_id": "entity:evidence-labels",
+    "predicate": "part_of",
+    "subject": "rag",
+    "subject_entity_id": "entity:rag"
+  },
+  {
+    "evidence_count": 0,
+    "object": "safety scope",
+    "object_entity_id": "entity:safety-scope",
+    "predicate": "part_of",
+    "subject": "rag",
+    "subject_entity_id": "entity:rag"
+  },
+  {
+    "evidence_count": 0,
+    "object": "repeated items",
+    "object_entity_id": "entity:repeated-items",
+    "predicate": "part_of",
+    "subject": "randomize order",
+    "subject_entity_id": "entity:randomize-order"
+  },
+  {
+    "evidence_count": 0,
+    "object": "raw volume",
+    "object_entity_id": "entity:raw-volume",
+    "predicate": "causes",
+    "subject": "reach volume",
+    "subject_entity_id": "entity:reach-volume"
+  },
+  {
+    "evidence_count": 0,
+    "object": "optimization difficulty",
+    "object_entity_id": "entity:optimization-difficulty",
+    "predicate": "created_by",
+    "subject": "representational discontinuities",
+    "subject_entity_id": "entity:representational-discontinuities"
+  },
+  {
+    "evidence_count": 0,
+    "object": "branded elements",
+    "object_entity_id": "entity:branded-elements",
+    "predicate": "overrides",
+    "subject": "rights safe modular recreation",
+    "subject_entity_id": "entity:rights-safe-modular-recreation"
+  },
+  {
+    "evidence_count": 0,
+    "object": "contact aware re",
+    "object_entity_id": "entity:contact-aware-re",
+    "predicate": "causes",
+    "subject": "root edit",
+    "subject_entity_id": "entity:root-edit"
+  },
+  {
+    "evidence_count": 0,
+    "object": "global translation",
+    "object_entity_id": "entity:global-translation",
+    "predicate": "references",
+    "subject": "root motion",
+    "subject_entity_id": "entity:root-motion"
+  },
+  {
+    "evidence_count": 0,
+    "object": "model",
+    "object_entity_id": "entity:model",
+    "predicate": "references",
+    "subject": "s006 quaternet",
+    "subject_entity_id": "entity:s006-quaternet"
+  },
+  {
+    "evidence_count": 0,
+    "object": "character",
+    "object_entity_id": "entity:character",
+    "predicate": "depends_on",
+    "subject": "s033",
+    "subject_entity_id": "entity:s033"
+  },
+  {
+    "evidence_count": 0,
+    "object": "movement",
+    "object_entity_id": "entity:movement",
+    "predicate": "uses",
+    "subject": "s054",
+    "subject_entity_id": "entity:s054"
+  },
+  {
+    "evidence_count": 0,
+    "object": "output clip",
+    "object_entity_id": "entity:output-clip",
+    "predicate": "runs_on",
+    "subject": "same observation stack",
+    "subject_entity_id": "entity:same-observation-stack"
+  },
+  {
+    "evidence_count": 0,
+    "object": "different packages",
+    "object_entity_id": "entity:different-packages",
+    "predicate": "produces",
+    "subject": "same resolved score",
+    "subject_entity_id": "entity:same-resolved-score"
+  },
+  {
+    "evidence_count": 0,
+    "object": "gravity profile",
+    "object_entity_id": "entity:gravity-profile",
+    "predicate": "overrides",
+    "subject": "scalar setting",
+    "subject_entity_id": "entity:scalar-setting"
+  },
+  {
+    "evidence_count": 0,
+    "object": "intended image plane paths",
+    "object_entity_id": "entity:intended-image-plane-paths",
+    "predicate": "preceded_by",
+    "subject": "screen space exactness",
+    "subject_entity_id": "entity:screen-space-exactness"
+  },
+  {
+    "evidence_count": 0,
+    "object": "environmental response",
+    "object_entity_id": "entity:environmental-response",
+    "predicate": "part_of",
+    "subject": "secondary motion",
+    "subject_entity_id": "entity:secondary-motion"
+  },
+  {
+    "evidence_count": 0,
+    "object": "loose equipment",
+    "object_entity_id": "entity:loose-equipment",
+    "predicate": "part_of",
+    "subject": "secondary motion",
+    "subject_entity_id": "entity:secondary-motion"
+  },
+  {
+    "evidence_count": 0,
+    "object": "soft tissue",
+    "object_entity_id": "entity:soft-tissue",
+    "predicate": "part_of",
+    "subject": "secondary motion",
+    "subject_entity_id": "entity:secondary-motion"
+  },
+  {
+    "evidence_count": 0,
+    "object": "primary",
+    "object_entity_id": "entity:primary",
+    "predicate": "preceded_by",
+    "subject": "secondary motion",
+    "subject_entity_id": "entity:secondary-motion"
+  },
+  {
+    "evidence_count": 0,
+    "object": "skeleton",
+    "object_entity_id": "entity:skeleton",
+    "predicate": "preceded_by",
+    "subject": "secondary motion",
+    "subject_entity_id": "entity:secondary-motion"
+  },
+  {
+    "evidence_count": 0,
+    "object": "action",
+    "object_entity_id": "entity:action",
+    "predicate": "causes",
+    "subject": "shoulder phases",
+    "subject_entity_id": "entity:shoulder-phases"
+  },
+  {
+    "evidence_count": 0,
+    "object": "joint rotations",
+    "object_entity_id": "entity:joint-rotations",
+    "predicate": "preceded_by",
+    "subject": "skeleton",
+    "subject_entity_id": "entity:skeleton"
+  },
+  {
+    "evidence_count": 0,
+    "object": "root transforms",
+    "object_entity_id": "entity:root-transforms",
+    "predicate": "preceded_by",
+    "subject": "skeleton",
+    "subject_entity_id": "entity:skeleton"
+  },
+  {
+    "evidence_count": 0,
+    "object": "stable identifiers",
+    "object_entity_id": "entity:stable-identifiers",
+    "predicate": "uses",
+    "subject": "source claims",
+    "subject_entity_id": "entity:source-claims"
+  },
+  {
+    "evidence_count": 0,
+    "object": "action",
+    "object_entity_id": "entity:action",
+    "predicate": "causes",
+    "subject": "staged",
+    "subject_entity_id": "entity:staged"
+  },
+  {
+    "evidence_count": 0,
+    "object": "drawn stick figure",
+    "object_entity_id": "entity:drawn-stick-figure",
+    "predicate": "uses",
+    "subject": "stickmotion",
+    "subject_entity_id": "entity:stickmotion"
+  },
+  {
+    "evidence_count": 0,
+    "object": "typed transforms",
+    "object_entity_id": "entity:typed-transforms",
+    "predicate": "uses",
+    "subject": "style agent",
+    "subject_entity_id": "entity:style-agent"
+  },
+  {
+    "evidence_count": 0,
+    "object": "genre conventions",
+    "object_entity_id": "entity:genre-conventions",
+    "predicate": "references",
+    "subject": "style constraints",
+    "subject_entity_id": "entity:style-constraints"
+  },
+  {
+    "evidence_count": 0,
+    "object": "declared ranges",
+    "object_entity_id": "entity:declared-ranges",
+    "predicate": "depends_on",
+    "subject": "style intensities",
+    "subject_entity_id": "entity:style-intensities"
+  },
+  {
+    "evidence_count": 0,
+    "object": "character",
+    "object_entity_id": "entity:character",
+    "predicate": "depends_on",
+    "subject": "stylized",
+    "subject_entity_id": "entity:stylized"
+  },
+  {
+    "evidence_count": 0,
+    "object": "character specific mappings",
+    "object_entity_id": "entity:character-specific-mappings",
+    "predicate": "depends_on",
+    "subject": "stylized",
+    "subject_entity_id": "entity:stylized"
+  },
+  {
+    "evidence_count": 0,
+    "object": "one",
+    "object_entity_id": "entity:one",
+    "predicate": "depends_on",
+    "subject": "sudden midair direction change",
+    "subject_entity_id": "entity:sudden-midair-direction-change"
+  },
+  {
+    "evidence_count": 0,
+    "object": "action",
+    "object_entity_id": "entity:action",
+    "predicate": "causes",
+    "subject": "target",
+    "subject_entity_id": "entity:target"
+  },
+  {
+    "evidence_count": 0,
+    "object": "peak velocity",
+    "object_entity_id": "entity:peak-velocity",
+    "predicate": "causes",
+    "subject": "target",
+    "subject_entity_id": "entity:target"
+  },
+  {
+    "evidence_count": 0,
+    "object": "only root trajectory",
+    "object_entity_id": "entity:only-root-trajectory",
+    "predicate": "supports",
+    "subject": "target",
+    "subject_entity_id": "entity:target"
+  },
+  {
+    "evidence_count": 0,
+    "object": "evidence proposed",
+    "object_entity_id": "entity:evidence-proposed",
+    "predicate": "detects",
+    "subject": "title evidence",
+    "subject_entity_id": "entity:title-evidence"
+  },
+  {
+    "evidence_count": 0,
+    "object": "id 2 evidence and claim taxonomy a",
+    "object_entity_id": "entity:id-2-evidence-and-claim-taxonomy-a",
+    "predicate": "detects",
+    "subject": "title evidence",
+    "subject_entity_id": "entity:title-evidence"
+  },
+  {
+    "evidence_count": 0,
+    "object": "emerging work",
+    "object_entity_id": "entity:emerging-work",
+    "predicate": "represents",
+    "subject": "tokenmotion",
+    "subject_entity_id": "entity:tokenmotion"
+  },
+  {
+    "evidence_count": 0,
+    "object": "emerging work",
+    "object_entity_id": "entity:emerging-work",
+    "predicate": "represents",
+    "subject": "wan move",
+    "subject_entity_id": "entity:wan-move"
+  },
+  {
+    "evidence_count": 0,
+    "object": "full source performance",
+    "object_entity_id": "entity:full-source-performance",
+    "predicate": "part_of",
+    "subject": "without",
+    "subject_entity_id": "entity:without"
+  }
+]

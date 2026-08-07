@@ -350,6 +350,8 @@ async def _stage_payloads(stores: _Stores, doc_id: str) -> dict[str, dict[str, A
     rows = await stores.db["graphify_stage_artifacts"].find(
         {"corpus_id": stores.corpus_id, "doc_id": doc_id}, {"_id": 0},
     ).to_list(length=None)
+    from services.storage.mongo_reader import materialize_graphify_artifact
+    rows = [await materialize_graphify_artifact(stores.db, row) for row in rows]
     return {str(row["stage"]): dict(row["payload"]) for row in rows}
 
 

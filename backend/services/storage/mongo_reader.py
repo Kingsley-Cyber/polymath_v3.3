@@ -8,9 +8,29 @@ import logging
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
+from services.storage.graphify_artifact_codec import (
+    PARTS_COLLECTION,
+    decode_stage_payload,
+)
 from services.storage.record_status import with_active_records
 
 logger = logging.getLogger(__name__)
+
+
+async def materialize_graphify_artifact(
+    db: AsyncIOMotorDatabase, row: dict | None,
+) -> dict | None:
+    """Return the artifact row with its payload inline, decoding shards."""
+    if row is None or "payload" in row:
+        return row
+    parts = await db[PARTS_COLLECTION].find(
+        {"artifact_id": row["artifact_id"]}, {"_id": 0, "part": 1, "blob": 1},
+    ).sort("part", 1).to_list(length=None)
+    row = dict(row)
+    row["payload"] = decode_stage_payload(
+        row, lambda _artifact_id, _expected: [item["blob"] for item in parts],
+    )
+    return row
 
 
 async def read_graphify_stage_artifact(
@@ -19,9 +39,10 @@ async def read_graphify_stage_artifact(
     artifact_id: str,
 ) -> dict | None:
     """Read one immutable Graphify stage artifact by deterministic identity."""
-    return await db["graphify_stage_artifacts"].find_one(
+    row = await db["graphify_stage_artifacts"].find_one(
         {"artifact_id": artifact_id}, {"_id": 0},
     )
+    return await materialize_graphify_artifact(db, row)
 
 
 async def get_corpus(db: AsyncIOMotorDatabase, corpus_id: str) -> dict | None:

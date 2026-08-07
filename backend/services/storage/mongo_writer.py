@@ -12,9 +12,15 @@ from dataclasses import asdict, is_dataclass
 from datetime import datetime
 from typing import Any
 
+from bson.binary import Binary
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from pymongo import ReplaceOne, UpdateOne
 from pymongo.errors import DuplicateKeyError
+
+from services.storage.graphify_artifact_codec import (
+    PARTS_COLLECTION,
+    encode_stage_payload,
+)
 
 from models.contracts import ParentSummaryRecord, ParentSummaryWrite
 from services.ingestion.bibliographic import (
@@ -65,6 +71,16 @@ async def persist_graphify_stage_artifact(
             raise RuntimeError(f"conflicting immutable Graphify artifact {artifact_id}")
         return False
     now = datetime.utcnow()
+    payload_fields, part_blobs = encode_stage_payload(payload)
+    for index, blob in enumerate(part_blobs):
+        await db[PARTS_COLLECTION].update_one(
+            {"artifact_id": artifact_id, "part": index},
+            {"$setOnInsert": {
+                "artifact_id": artifact_id, "part": index,
+                "blob": Binary(blob), "created_at": now,
+            }},
+            upsert=True,
+        )
     await collection.update_one(
         {"artifact_id": artifact_id},
         {
@@ -76,7 +92,7 @@ async def persist_graphify_stage_artifact(
                 "input_hash": input_hash,
                 "output_hash": output_hash,
                 "release": release,
-                "payload": payload,
+                **payload_fields,
                 "created_at": now,
             }
         },

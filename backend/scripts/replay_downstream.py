@@ -72,7 +72,16 @@ def _load_frozen_from_db(dbname: str) -> dict:
         row = db["graphify_stage_artifacts"].find_one({"stage": stage})
         if row is None:
             raise SystemExit(f"frozen stage artifact missing in {dbname}: {stage}")
-        return row["payload"]
+        if "payload" in row:
+            return row["payload"]
+        from services.storage.graphify_artifact_codec import decode_stage_payload
+
+        parts = list(db["graphify_stage_artifact_parts"].find(
+            {"artifact_id": row["artifact_id"]}, {"_id": 0, "part": 1, "blob": 1},
+        ).sort("part", 1))
+        return decode_stage_payload(
+            row, lambda _artifact_id, _expected: [item["blob"] for item in parts],
+        )
 
     return {
         "document": payload("NORMALIZED")["document"],
