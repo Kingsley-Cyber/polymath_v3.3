@@ -349,14 +349,17 @@ class Settings(BaseSettings):
         ),
     )
     QDRANT_EVIDENCE_DUAL_WRITE: bool = Field(
-        default=False,
+        default=True,
         description=(
-            "q8 (owner directive 2026-08-04) — shadow dual-write of child "
-            "and summary records into the per-corpus one-point-per-child "
-            "candidate collection corpus_{cid8}_evidence alongside the "
-            "legacy naive/hrag/graph family. Shadow-only: production reads "
-            "are unchanged unless a request explicitly opts into shadow "
-            "read; legacy collections are never deleted by this flag."
+            "q8 CANONICAL projection (owner directive 2026-08-08, supersedes "
+            "2026-08-04 shadow phase): child and summary records write to the "
+            "per-corpus one-point-per-child candidate collection "
+            "corpus_{cid8}_evidence as the factory's target storage contract. "
+            "Write failures fail the ingest. The legacy naive/hrag/graph "
+            "family is still written alongside for parity/rollback ONLY; "
+            "production reads stay on legacy until the read cutover "
+            "(shadow -> canary -> default). Legacy is never deleted by this "
+            "flag."
         ),
     )
     QDRANT_EVIDENCE_DUAL_WRITE_CORPUS_IDS: str = Field(
@@ -365,7 +368,7 @@ class Settings(BaseSettings):
             "q8 — comma-separated allowlist restricting the shadow dual-write "
             "to named corpora (owner directive: ONE dedicated canary corpus). "
             "Empty string means every corpus when QDRANT_EVIDENCE_DUAL_WRITE "
-            "is on; keep the canary UUID here while q8 is in flight."
+            "is on; empty (default) = canonical everywhere per the 2026-08-08 phase."
         ),
     )
     CROSS_DOMAIN_EMPHASIS: str = Field(

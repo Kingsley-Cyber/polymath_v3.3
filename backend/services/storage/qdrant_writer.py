@@ -1080,13 +1080,15 @@ async def _upsert_evidence_shadow(
             target_kinds,
         )
     except Exception as exc:
-        # Shadow-only invariant: the candidate write must never break the
-        # legacy production write path.
-        logger.warning(
-            "q8 evidence shadow write failed for corpus %s: %s",
+        # q8 is the CANONICAL projection (owner, 2026-08-08): a candidate
+        # write failure fails the ingest — a canonical store never silently
+        # misses points. Legacy stays alongside for parity/rollback only.
+        logger.error(
+            "q8 canonical evidence write failed for corpus %s: %s",
             corpus_id[:8],
             exc,
         )
+        raise
 
 
 async def _upsert_evidence_summary_shadow(
@@ -1139,13 +1141,14 @@ async def _upsert_evidence_summary_shadow(
             name,
         )
     except Exception as exc:
-        # Shadow-only invariant: the candidate write must never break the
-        # legacy production write path.
-        logger.warning(
-            "q8 evidence summary shadow write failed for corpus %s: %s",
+        # q8 is the CANONICAL projection (owner, 2026-08-08): summary write
+        # failures fail the ingest.
+        logger.error(
+            "q8 canonical evidence summary write failed for corpus %s: %s",
             corpus_id[:8],
             exc,
         )
+        raise
 
 
 async def upsert_children(

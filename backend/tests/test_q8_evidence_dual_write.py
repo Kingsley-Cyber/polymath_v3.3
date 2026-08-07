@@ -72,8 +72,10 @@ def test_evidence_payload_indexes_are_the_minimal_runtime_set():
     assert "entity_ids" not in qdrant_writer._EVIDENCE_PAYLOAD_INDEXES
 
 
-def test_dual_write_defaults_off():
-    assert Settings.model_fields["QDRANT_EVIDENCE_DUAL_WRITE"].default is False
+def test_dual_write_defaults_on_canonical():
+    # Contract revision (owner, 2026-08-08): q8 is the CANONICAL projection —
+    # the factory's target storage contract writes it everywhere by default.
+    assert Settings.model_fields["QDRANT_EVIDENCE_DUAL_WRITE"].default is True
     assert (
         Settings.model_fields["QDRANT_EVIDENCE_DUAL_WRITE_CORPUS_IDS"].default
         == ""
@@ -301,7 +303,7 @@ async def test_upsert_children_calls_shadow_when_dual_write_on(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_shadow_failure_never_breaks_legacy_write(monkeypatch):
+async def test_canonical_evidence_write_failure_fails_ingest(monkeypatch):
     _stub_legacy_path(monkeypatch)
     legacy_upsert = AsyncMock()
     monkeypatch.setattr(qdrant_writer, "_upsert_points_batched", legacy_upsert)
@@ -317,16 +319,16 @@ async def test_shadow_failure_never_breaks_legacy_write(monkeypatch):
         qdrant_writer.settings, "QDRANT_EVIDENCE_DUAL_WRITE_CORPUS_IDS", ""
     )
 
-    # Must not raise even though the entire shadow path blew up.
-    await qdrant_writer.upsert_children(
-        object(),
-        CORPUS_ID,
-        [_chunk("chunk-1")],
-        [[0.1] * 4],
-        ["naive", "hrag", "graph"],
-    )
-
-    assert legacy_upsert.await_count == 3  # all three legacy kinds written
+    # Contract revision (owner, 2026-08-08): q8 is canonical — its write
+    # failure FAILS the ingest instead of silently missing points.
+    with pytest.raises(RuntimeError, match="qdrant unavailable"):
+        await qdrant_writer.upsert_children(
+            object(),
+            CORPUS_ID,
+            [_chunk("chunk-1")],
+            [[0.1] * 4],
+            ["naive", "hrag", "graph"],
+        )
 
 
 # ── deletion cascade completeness ────────────────────────────────────────────
