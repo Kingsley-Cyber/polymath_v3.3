@@ -43,6 +43,34 @@
    "source_bytes": 3102,
    "source_sha256": "bd8e686e81c7e44e49c8c865a92b0717c345ab0733a90c697e79624f2b8b4d60",
    "status": "SOURCE_SEALED_OWNER_HOLDS_KEY"
+  },
+  "sealed_qualification_v7": {
+   "genre": "full research monograph (hierarchical motion grammar; YAML front matter, citation ids, status labels) \u2014 SCALE test",
+   "package": "/Users/king/Downloads/s/CPCS_MX_Hierarchical_Motion_Grammar_Research_Paper.md",
+   "protocol": [
+    "1. verify_freeze (v5) INTACT",
+    "2. extract-only with placeholder key; lock artifact + graph digests; export frozen observations",
+    "3. owner supplies key; isolated grading only",
+    "4. downstream debugging via replay_downstream.py on frozen observations \u2014 no re-extraction"
+   ],
+   "provenance": "owner-provided pair (1/2); key off-flow; extraction at 17326e6 (adapter-v2 ladder + evidence-scoped merge)",
+   "source_bytes": 193277,
+   "source_sha256": "5655c63082ebad79f4f1c4881abb9348689409724ea1807b68bca40c5423af17",
+   "status": "SOURCE_SEALED_OWNER_HOLDS_KEY"
+  },
+  "sealed_qualification_v8": {
+   "genre": "full research monograph (FACS/Laban directorial control) \u2014 SCALE test",
+   "package": "/Users/king/Downloads/s/CPCS_FACS_Laban_AI_Video_Directorial_Control_Research_Paper.md",
+   "protocol": [
+    "1. verify_freeze (v5) INTACT",
+    "2. extract-only with placeholder key; lock artifact + graph digests; export frozen observations",
+    "3. owner supplies key; isolated grading only",
+    "4. downstream debugging via replay_downstream.py on frozen observations \u2014 no re-extraction"
+   ],
+   "provenance": "owner-provided pair (2/2); key off-flow; extraction at 17326e6",
+   "source_bytes": 435888,
+   "source_sha256": "7ba240f350f58291bb8d2e67cfca679cfa8a92cbf4da33de924aae5370d606b5",
+   "status": "SOURCE_SEALED_OWNER_HOLDS_KEY"
   }
  },
  "code": {
