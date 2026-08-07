@@ -9,8 +9,8 @@ Rule: every test lands here BEFORE any fix is built; fixes are chosen from the c
 | 1 | Technical prose | sealed-v1 (satellite ground segment) | ~high | 36/51 one-shot (F1 .742); 40/51 as-dev (F1 .816) | 0/7 | the trained contract; qualification bar missed on recall |
 | 2 | Spec / metadata doc | sealed-v2 (CPCS Pegasus) | 13/59 → improved post-cycle | 0/26 one-shot; 1/26 as-dev post-cycle | 0/1 | front matter now preserved+extracted (6 observations); rest = concept-phrase + spec-key mapping |
 | 3 | Meeting transcript | sealed-v3 (Project Cedar) | 13/18 exact (72%), 15/18 lenient | 0/13 strict, ~2 captured | 0 (1 FP: wednesday-owns-legal) | speaker-turn agency + temporal predicates dominate |
-| 4 | (owner test #4 — pending) | | | | | |
-| 5 | (owner test #5 — pending) | | | | | |
+| 4 | Technical (control) | sealed-v4 (01_technical_test) | EXTRACTION LOCKED pre-key: 1 promoted, 5 qualified, 8 nodes, digest c33c79f1… | awaiting key | – | control for the trained contract |
+| 5 | Philosophical (new) | sealed-v5 (02_philosophical_test) | EXTRACTION LOCKED pre-key: **0 promoted, 70 qualified**, 6 nodes, digest ed24e818… | awaiting key | – | containment qualified essentially the whole document — hedged/attributed argumentation; key will reveal whether that is correct containment or recall collapse |
 
 ## Cross-genre failure-class matrix (fix candidates — tally before building)
 
@@ -47,3 +47,34 @@ Same as v3: source file registered + hashed, freeze verified, extract-only FIRST
 - freeze_v4 @ de410a5 (verify: work/remediation/freeze_v4/verify_freeze.py)
 - assessments: SEALED_V2_ANALYSIS.md, SEALED_V3_ASSESSMENT.md (pack remediation dir)
 - families: backend/evals/graphify_synthetic_v1/results/BASELINE_2026-08-07.md (104/111)
+
+
+## Verified integration findings (2026-08-07, code-confirmed — steer the post-standstill build)
+
+1. **strict_surface_recovery BYPASSES triplet-extract** (`graphify_openie.py:274-278`: matched unit → `renderings=[]`, OpenIE never runs; audit measured 42/67 book units deterministic-only). The custom lane must corroborate, never replace. REMOVE the bypass → UNION.
+2. **Deterministic coref + deep_search disabled** (`:103-104`). The library ships conservative pronoun resolution (abstains without unique antecedent), quote attribution (credits quoted content to the speaker — directly relevant to transcript speaker agency), asserter chains, quantifier preservation ("five customer accounts" would survive OpenIE; OUR junk gate suppresses it downstream). **Trial the capability before building custom machinery.**
+
+## Ratified ownership (owner, 2026-08-07)
+
+| Problem | Owner |
+|---|---|
+| Open propositions, complex clauses, attribution "X said Y", direct quotes, appositives-first, pronouns (opt-in), quantified phrases | triplet-extract / OpenIE |
+| Entity spans/types | GLiNER2 |
+| Exact entity identity | Polymath reducer |
+| YAML/JSON/table structure | deterministic document adapter |
+| Transcript speaker headers | very thin document adapter |
+| Surface → canonical predicate | Polymath ontology compiler |
+| Fact vs qualified claim | Polymath assertion gate |
+| Durable truth | Mongo + projection policy |
+
+## Ratified relation-lane shape (post-standstill build)
+
+```text
+RELATION-ELIGIBLE PROSE UNIT
+   ├→ triplet-extract            (ALWAYS — never bypassed)
+   ├→ generic spaCy syntax
+   └→ deterministic high-precision rules (corroborate / add / contradict — never suppress)
+        ↓ UNION → Proposition Reducer → Argument Alignment → Predicate Compiler
+```
+
+Post-standstill work queue (after v4+v5 keys assessed): (1) remove the OpenIE bypass → union; (2) capability trials: resolve_coref=True + quote-attribution on transcript + prose dev sets, measured before any custom speaker/coref machinery; (3) revisit counted-NP suppression AT THE GATE (OpenIE preserves them; suppression should be a promotion policy, not an observation destroyer) pending the owner scope decision; (4) thin transcript speaker-header adapter only for what quote-attribution doesn't cover.
