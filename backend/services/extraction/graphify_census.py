@@ -31,6 +31,10 @@ from services.extraction.gliner2_cpu_provider import (
 )
 from services.extraction.graphify_normalization import to_original_span
 from services.extraction.graphify_survey import DocumentSurveyV1
+from services.extraction.graphify_unit_kind import (
+    classify_document_blocks,
+    semantic_segments,
+)
 
 CENSUS_RELEASE = "graphify-entity-census-v1"
 MIN_WINDOW_TOKENS = 512
@@ -123,21 +127,57 @@ def build_census_windows(
     target_tokens: int = TARGET_WINDOW_TOKENS,
     max_tokens: int = MAX_WINDOW_TOKENS,
 ) -> tuple[ExtractionWindowV1, ...]:
+    """Window the document's SEMANTIC segments for GLiNER2.
+
+    unit.kind routing (owner-ratified 2026-08-07): navigation/metadata/code/
+    table blocks never reach the entity model — deterministic lanes own them.
+    Every byte keeps its block and provenance; only NLP eligibility changes.
+    """
     if not 1 <= min_tokens <= target_tokens <= max_tokens:
         raise ValueError("window token bounds must be ordered and positive")
     text = document.normalized_text
-    tokens = _token_spans(text)
+    classified = classify_document_blocks(document, survey)
+    segments = semantic_segments(classified, len(text))
+    windows: list[ExtractionWindowV1] = []
+    sequence = 0
+    for segment_start, segment_end in segments:
+        windows_for_segment, sequence = _windows_for_segment(
+            document, survey, segment_start, segment_end, sequence,
+            min_tokens=min_tokens, target_tokens=target_tokens, max_tokens=max_tokens,
+        )
+        windows.extend(windows_for_segment)
+    return tuple(windows)
+
+
+def _windows_for_segment(
+    document: NormalizedDocumentV1,
+    survey: DocumentSurveyV1,
+    segment_start: int,
+    segment_end: int,
+    sequence: int,
+    *,
+    min_tokens: int,
+    target_tokens: int,
+    max_tokens: int,
+) -> tuple[list[ExtractionWindowV1], int]:
+    text = document.normalized_text
+    tokens = [
+        span for span in _token_spans(text)
+        if segment_start <= span[0] and span[1] <= segment_end
+    ]
     if not tokens:
-        return ()
-    boundaries = _structural_boundaries(document, survey)
+        return [], sequence
+    boundaries = tuple(
+        value for value in _structural_boundaries(document, survey)
+        if segment_start <= value <= segment_end
+    )
     windows: list[ExtractionWindowV1] = []
     token_index = 0
-    char_start = 0
-    sequence = 0
+    char_start = tokens[0][0]
     while token_index < len(tokens):
         remaining = len(tokens) - token_index
         if remaining <= target_tokens:
-            char_end = len(text)
+            char_end = segment_end
             next_token_index = len(tokens)
         else:
             lower_token = min(token_index + min_tokens, len(tokens) - 1)
@@ -181,7 +221,7 @@ def build_census_windows(
             sequence += 1
         char_start = char_end
         token_index = next_token_index
-    return tuple(windows)
+    return windows, sequence
 
 
 def _bucket_key(window: ExtractionWindowV1) -> tuple[int, str, int]:

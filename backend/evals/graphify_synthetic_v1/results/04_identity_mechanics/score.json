@@ -3,9 +3,9 @@
   "status": "FAIL",
   "runtime": {
     "pipeline_release": "graphify-cpu-pipeline-v15",
-    "mongo_database": "graphify_eval_syn_04_916eb4f9d8",
-    "corpus_id": "f2515c88-eb05-5ea4-adbf-0f250efc09c8",
-    "elapsed_seconds": 1.35,
+    "mongo_database": "graphify_eval_syn_04_ee369203cf",
+    "corpus_id": "e73aa2d6-c356-579b-9836-c93a796ed870",
+    "elapsed_seconds": 2.01,
     "interpreter": "/Users/king/polymath_v3.3/local_ghost_b/.venv/bin/python"
   },
   "items": {
@@ -15,7 +15,9 @@
     "total": 12
   },
   "negative_entities_in_graph": [],
-  "unexpected_promoted_triples": [],
+  "unexpected_promoted_triples": [
+    "recovery desk | consumes | ten minutes"
+  ],
   "duplicate_promoted_edges": {},
   "graph": {
     "nodes": [
@@ -31,9 +33,10 @@
       "report q 9",
       "sable index",
       "sensor k 12",
-      "telemetry group"
+      "telemetry group",
+      "ten minutes"
     ],
-    "promoted_edge_count": 8
+    "promoted_edge_count": 9
   },
   "extracted_entities": [
     "COLD-7",
@@ -41,6 +44,7 @@
     "Dr. Imani Reyes",
     "Dr. Reyes",
     "Falcon Cache",
+    "Monday",
     "Pinion",
     "Pinion 3.1",
     "Pinion 3.2",
@@ -51,6 +55,8 @@
     "Sable Index",
     "Sensor K-12",
     "Telemetry Group",
+    "dependency ledger",
+    "draft note",
     "hourly schedule",
     "ten minutes",
     "the"

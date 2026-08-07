@@ -3,9 +3,9 @@
   "status": "FAIL",
   "runtime": {
     "pipeline_release": "graphify-cpu-pipeline-v15",
-    "mongo_database": "graphify_eval_syn_06_9990d44b53",
-    "corpus_id": "0c0c6442-5032-524e-b10d-cf7b75e03403",
-    "elapsed_seconds": 1.1,
+    "mongo_database": "graphify_eval_syn_06_d1995ded7a",
+    "corpus_id": "e46e47f8-2679-5a96-a568-50831ec6a974",
+    "elapsed_seconds": 1.54,
     "interpreter": "/Users/king/polymath_v3.3/local_ghost_b/.venv/bin/python"
   },
   "items": {
@@ -34,12 +34,12 @@
     "2029",
     "Falcon Cache",
     "Glowline Metrics",
-    "Ledger",
     "Nightly Snapshot Feed",
     "Pinion API",
     "Quartzline",
     "Quartzline Analytics",
     "Redlark",
+    "Rollups",
     "Sable Index",
     "Vaultstone",
     "partner deck",

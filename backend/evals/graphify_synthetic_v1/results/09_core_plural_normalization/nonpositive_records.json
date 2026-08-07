@@ -1,6 +1,49 @@
 [
   {
     "schema_version": "polymath.assertion_decision.v1",
+    "decision_id": "assertion-decision:5739f8bae52a40f6c9bd16c4",
+    "relation_id": "surface-relation:a5ea98f639d5635e78ebc0ca",
+    "document_id": "a793de031c8ff3da2180db8f2c12c4f01ad47da68c50550b7b2baebb206eab1e",
+    "status": "review",
+    "canonical_predicate": "causes",
+    "score": 1.0,
+    "reasons": [
+      "review:endpoint_signature:Event:Concept",
+      "source:strict_dependency_cue"
+    ],
+    "policy_release": "graphify-relation-fast-path-v13",
+    "_mapped": {
+      "schema_version": "polymath.surface_relation.v1",
+      "relation_id": "surface-relation:a5ea98f639d5635e78ebc0ca",
+      "document_id": "a793de031c8ff3da2180db8f2c12c4f01ad47da68c50550b7b2baebb206eab1e",
+      "evidence_text": "Voltage sag causes breaker trips on the eastern quay.",
+      "evidence_start": 31,
+      "evidence_end": 84,
+      "subject_mention_id": "completed-mention:67e20d1cc9c4dfc45943d3b7",
+      "object_mention_id": "completed-mention:e2c20952b2292370710d029f",
+      "surface_predicate": "causes",
+      "lemma": "cause",
+      "particle": "",
+      "preposition": "",
+      "dependency_frame": "direct:active:ROOT",
+      "dependency_path": "nsubj>ROOT>dobj",
+      "voice": "active",
+      "polarity": "positive",
+      "modality": "asserted",
+      "attribution": "",
+      "canonical_candidate": "causes",
+      "mapping_rule": "review:endpoint_signature:Event:Concept",
+      "mapping_release": "graphify-predicate-compiler-v2",
+      "terminal_state": "review",
+      "reasons": [
+        "review:endpoint_signature:Event:Concept",
+        "source:strict_dependency_cue"
+      ]
+    },
+    "_lane": "fast_path:review"
+  },
+  {
+    "schema_version": "polymath.assertion_decision.v1",
     "decision_id": "assertion-decision:b5ee520c697f48e4969f2069",
     "relation_id": "surface-relation:8911d372e0b64de2b9fdc2cb",
     "document_id": "a793de031c8ff3da2180db8f2c12c4f01ad47da68c50550b7b2baebb206eab1e",
@@ -8,7 +51,7 @@
     "canonical_predicate": "causes",
     "score": 0.9,
     "reasons": [
-      "review:endpoint_signature:Concept:Location",
+      "review:endpoint_signature:Event:Location",
       "source:existing_syntax_stack"
     ],
     "policy_release": "graphify-relation-fast-path-v13",
@@ -32,11 +75,11 @@
       "modality": "asserted",
       "attribution": "direct",
       "canonical_candidate": "causes",
-      "mapping_rule": "review:endpoint_signature:Concept:Location",
+      "mapping_rule": "review:endpoint_signature:Event:Location",
       "mapping_release": "graphify-predicate-compiler-v2",
       "terminal_state": "review",
       "reasons": [
-        "review:endpoint_signature:Concept:Location",
+        "review:endpoint_signature:Event:Location",
         "source:existing_syntax_stack"
       ]
     },

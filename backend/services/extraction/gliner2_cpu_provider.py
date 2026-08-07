@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 import hashlib
 import importlib.metadata
 import json
@@ -79,6 +81,17 @@ def _load_schema_config() -> dict[str, Any]:
 
 SCHEMA_CONFIG = _load_schema_config()
 SCHEMA_RELEASE = SCHEMA_CONFIG["release"]
+
+
+def _anchor_span(text: str, surface: str, start: int, end: int) -> tuple[int, int]:
+    """Re-anchor a misaligned model span on a unique exact occurrence."""
+    if surface:
+        occurrences = [
+            match.start() for match in re.finditer(re.escape(surface), text)
+        ]
+        if len(occurrences) == 1:
+            return occurrences[0], occurrences[0] + len(surface)
+    return start, end
 
 
 def schema_descriptions(adapters: tuple[str, ...] = ()) -> dict[str, dict[str, str]]:
@@ -277,7 +290,14 @@ class GLiNER2CPUProvider:
                     end = int(item["end"])
                     surface = str(item["text"])
                     if start < 0 or end <= start or end > len(text) or text[start:end] != surface:
-                        raise RuntimeError("GLiNER2 emitted a span that does not match its input text")
+                        # The model asserted a surface its own offsets do not
+                        # anchor (observed on tiny adapter-schema windows).
+                        # Deterministic recovery: re-anchor on a UNIQUE exact
+                        # occurrence; otherwise pass the emission through so
+                        # the census persists it as an ALIGNMENT_FAILURE row —
+                        # an observation is never silently lost and never
+                        # crashes the corpus.
+                        start, end = _anchor_span(text, surface, start, end)
                     core_label, facet = _facet_for_label(label, adapters)
                     row.append(EntityPrediction(
                         text=surface,

@@ -1,5 +1,10 @@
 [
   {
+    "subject": "archival store",
+    "predicate": "consumes",
+    "object": "nightly snapshot feed"
+  },
+  {
     "subject": "falcon cache",
     "predicate": "depends_on",
     "object": "sable index"

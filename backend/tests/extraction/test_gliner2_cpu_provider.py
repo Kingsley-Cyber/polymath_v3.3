@@ -80,18 +80,26 @@ def test_non_cpu_parameter_fails_closed(device: str) -> None:
         provider.health()
 
 
-def test_span_mismatch_fails_closed() -> None:
+def test_span_mismatch_reanchors_or_passes_through() -> None:
+    # Contract revision (owner doctrine, 2026-08-07): a misaligned model span
+    # re-anchors on a unique exact occurrence; otherwise the emission passes
+    # through VERBATIM and the census persists it as an ALIGNMENT_FAILURE
+    # mention — an incoherent emission never crashes a corpus run and never
+    # silently disappears.
     model = FakeModel()
 
     def invalid_batch(texts, schema, **kwargs):
-        return [{"entities": {"Software": [{
-            "text": "wrong", "start": 0, "end": 5, "confidence": 1.0,
-        }]}}]
+        return [{"entities": {"Software": [
+            {"text": "text", "start": 0, "end": 4, "confidence": 1.0},
+            {"text": "wrong", "start": 0, "end": 5, "confidence": 1.0},
+        ]}}]
 
     model.batch_extract = invalid_batch
     provider = provider_module.GLiNER2CPUProvider(loader=lambda: model)
-    with pytest.raises(RuntimeError, match="does not match"):
-        provider.predict_entities(["right text"])
+    rows = provider.predict_entities(["right text"])
+    by_surface = {item.text: item for item in rows[0]}
+    assert (by_surface["text"].start, by_surface["text"].end) == (6, 10)  # re-anchored
+    assert (by_surface["wrong"].start, by_surface["wrong"].end) == (0, 5)  # verbatim
 
 
 def test_release_identity_is_pinned_and_hashed() -> None:

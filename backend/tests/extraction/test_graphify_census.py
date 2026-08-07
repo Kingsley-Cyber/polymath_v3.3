@@ -33,13 +33,29 @@ class FakeProvider:
         return rows
 
 
-def test_structure_windows_are_bounded_and_cover_document() -> None:
+def test_structure_windows_are_bounded_and_cover_semantic_segments() -> None:
+    # unit.kind routing revision (owner-ratified 2026-08-07): windows cover
+    # every SEMANTIC segment exactly — heading-only navigation blocks never
+    # reach the entity model, but no prose byte is ever skipped.
+    from services.extraction.graphify_unit_kind import (
+        classify_document_blocks,
+        semantic_segments,
+    )
+
     paragraphs = [f"## Heading {index}\n\n" + "word " * 180 for index in range(15)]
     document = normalize_document("doc", "\n\n".join(paragraphs))
-    windows = build_census_windows(document, survey_document(document))
-    assert windows[0].normalized_start == 0
-    assert windows[-1].normalized_end == len(document.normalized_text)
-    assert all(left.normalized_end == right.normalized_start for left, right in zip(windows, windows[1:]))
+    survey = survey_document(document)
+    windows = build_census_windows(document, survey)
+    segments = semantic_segments(
+        classify_document_blocks(document, survey), len(document.normalized_text),
+    )
+    windowed = [(w.normalized_start, w.normalized_end) for w in windows]
+    for start, end in windowed:
+        assert any(s <= start and end <= e for s, e in segments)
+    covered_chars = sum(end - start for start, end in windowed)
+    semantic_chars = sum(end - start for start, end in segments)
+    assert covered_chars >= semantic_chars * 0.98  # whitespace seams only
+    assert "## Heading" not in " ".join(w.text for w in windows)
     assert all(window.token_count <= MAX_WINDOW_TOKENS for window in windows)
     assert [window.sequence for window in windows] == list(range(len(windows)))
 
@@ -119,3 +135,17 @@ def test_duplicate_span_predictions_fold_instead_of_conflicting() -> None:
     assert output.report["folded_duplicate_predictions"] == 1
     assert output.report["conservation"] is True
     assert len(sink.records) == len(output.mentions)
+
+
+def test_misaligned_model_span_reanchors_or_persists_as_failure() -> None:
+    from services.extraction.gliner2_cpu_provider import _anchor_span
+
+    text = "CPCS-MX stores two linked representations:\n\n"
+    # Unique occurrence: deterministic re-anchor.
+    assert _anchor_span(text, "CPCS-MX", 3, 10) == (0, 7)
+    # Ambiguous occurrence: emission passes through untouched — the census
+    # persists it as an ALIGNMENT_FAILURE mention rather than crashing.
+    two = "alpha beta alpha"
+    assert _anchor_span(two, "alpha", 2, 7) == (2, 7)
+    # Absent surface: unchanged as well.
+    assert _anchor_span(text, "zeta", 1, 5) == (1, 5)

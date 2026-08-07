@@ -30,6 +30,11 @@
     "object": "report q 9"
   },
   {
+    "subject": "recovery desk",
+    "predicate": "consumes",
+    "object": "ten minutes"
+  },
+  {
     "subject": "sensor k 12",
     "predicate": "produces",
     "object": "report q 9"

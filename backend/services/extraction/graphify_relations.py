@@ -36,6 +36,10 @@ from services.extraction.graphify_assertion_semantics import (
     FALSE_MODIFIER_LEMMAS,
     nominal_assertion_qualification,
 )
+from services.extraction.graphify_unit_kind import (
+    SEMANTIC_KINDS,
+    classify_document_blocks,
+)
 from services.extraction.syntax_lane import build_union_evidence, generate_syntax_records
 from services.extraction.graphify_survey import DocumentSurveyV1
 from services.ghost_b_schemas import Predicate
@@ -179,12 +183,25 @@ class RelationEligibilityDecision:
     eligible: bool
     mention_count: int
     reasons: tuple[str, ...]
+    unit_kind: str = "prose"
+    # Structural lineage (#4, owner-ratified): provenance/structure never
+    # disappears between stages — every downstream observation joins back to
+    # this row by unit_id.
+    heading_path: tuple[str, ...] = ()
+    section_id: str = ""
+    structural_parent: str = ""
+    definition_subject: str = ""
 
     def as_dict(self) -> dict[str, object]:
         return {
             "unit_id": self.unit_id, "document_id": self.document_id,
             "start": self.start, "end": self.end, "eligible": self.eligible,
             "mention_count": self.mention_count, "reasons": list(self.reasons),
+            "unit_kind": self.unit_kind,
+            "heading_path": list(self.heading_path),
+            "section_id": self.section_id,
+            "structural_parent": self.structural_parent,
+            "definition_subject": self.definition_subject,
         }
 
 
@@ -207,6 +224,11 @@ class _Unit:
     end: int
     text: str
     mentions: tuple[CompletedMentionV1, ...]
+    unit_kind: str = "prose"
+    heading_path: tuple[str, ...] = ()
+    section_id: str = ""
+    structural_parent: str = ""
+    definition_subject: str = ""
 
 
 @dataclass(frozen=True)
@@ -370,7 +392,30 @@ def _unit_rows(
         key=lambda item: (item[1].normalized_start, item[1].normalized_end, item[0]),
     )
     mention_starts = [item.normalized_start for _index, item in indexed_mentions]
+    classified = {
+        item.block_id: item for item in classify_document_blocks(document, survey)
+    }
     for block_index, block in enumerate(survey.blocks):
+        unit_kind = classified[block.block_id].kind
+        heading_path: tuple[str, ...] = ()
+        for heading in survey.headings:
+            if heading.start <= block.start:
+                heading_path = heading.path
+            else:
+                break
+        section_id = stable_id("section", document.document_id, *heading_path)
+        block_definition_subject = ""
+        if unit_kind == "definition":
+            overlapping = [
+                item.term for item in survey.definitions
+                if item.start < block.end and block.start < item.end
+            ]
+            if overlapping:
+                block_definition_subject = overlapping[0]
+            else:
+                head_line = block.text.strip().splitlines()[0] if block.text.strip() else ""
+                if ":" in head_line:
+                    block_definition_subject = head_line.split(":", 1)[0].strip().lstrip("#>*- ").strip()
         block_text = block.text.rstrip("\n")
         boundaries = [0, *_unit_boundary_positions(block_text), len(block_text)]
         seen_spans: set[tuple[int, int]] = set()
@@ -398,7 +443,12 @@ def _unit_rows(
             metalinguistic = bool(_META_PREDICATE_RE.search(text))
             reasons: list[str] = []
             eligible = False
-            if metalinguistic:
+            if unit_kind not in SEMANTIC_KINDS:
+                # Representation routing (owner-ratified): navigation/metadata/
+                # code/table units keep full provenance but never enter
+                # semantic NLP — deterministic lanes own them.
+                reasons.append(f"unit_kind:{unit_kind}")
+            elif metalinguistic:
                 reasons.append("metalinguistic_predicate_example")
             elif len(local_mentions) >= 2 and cue:
                 eligible = True
@@ -424,11 +474,16 @@ def _unit_rows(
             )
             decision = RelationEligibilityDecision(
                 unit_id, document.document_id, start, end, eligible,
-                len(local_mentions), tuple(reasons),
+                len(local_mentions), tuple(reasons), unit_kind,
+                heading_path, section_id, block.block_id, block_definition_subject,
             )
             decisions.append(decision)
             if eligible:
-                units.append(_Unit(unit_id, document.document_id, start, end, text, local_mentions))
+                units.append(_Unit(
+                    unit_id, document.document_id, start, end, text, local_mentions,
+                    unit_kind, heading_path, section_id, block.block_id,
+                    block_definition_subject,
+                ))
     return tuple(units), tuple(decisions)
 
 
@@ -1845,6 +1900,7 @@ def run_relation_fast_path(
         "eligibility_decisions": len(all_decisions),
         "eligible_units": eligible_count,
         "relation_eligible_rate": eligible_count / len(all_decisions) if all_decisions else 0.0,
+        "unit_kind_counts": dict(Counter(item.unit_kind for item in all_decisions)),
         "spacy_parses": len(docs),
         "parse_once": len(docs) == eligible_count,
         "statistical_ner_enabled": False,

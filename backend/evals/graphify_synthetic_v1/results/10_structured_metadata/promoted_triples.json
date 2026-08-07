@@ -1,15 +1,5 @@
 [
   {
-    "subject": "gullwing",
-    "predicate": "supports",
-    "object": "tis sky 2027 04"
-  },
-  {
-    "subject": "gullwing runtime",
-    "predicate": "supports",
-    "object": "moorline dispatch"
-  },
-  {
     "subject": "kelpgate module",
     "predicate": "part_of",
     "object": "skerry inspection suite"

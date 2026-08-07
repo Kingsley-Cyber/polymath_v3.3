@@ -3,9 +3,9 @@
   "status": "FAIL",
   "runtime": {
     "pipeline_release": "graphify-cpu-pipeline-v15",
-    "mongo_database": "graphify_eval_syn_01_7ba0c97280",
-    "corpus_id": "19a89cff-d5e3-5bd4-ae83-1810a77f7dd0",
-    "elapsed_seconds": 10.11,
+    "mongo_database": "graphify_eval_syn_01_5f045ce128",
+    "corpus_id": "05d0f658-0de3-50b8-88d1-778ed8342d1f",
+    "elapsed_seconds": 11.04,
     "interpreter": "/Users/king/polymath_v3.3/local_ghost_b/.venv/bin/python"
   },
   "items": {
@@ -44,6 +44,7 @@
     "Maren Solis",
     "Pinion API",
     "Priya Anand",
+    "Quartzline",
     "Quartzline Analytics",
     "Rust",
     "Sable Index",

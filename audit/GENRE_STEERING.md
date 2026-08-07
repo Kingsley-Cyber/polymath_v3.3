@@ -253,3 +253,30 @@ route (census mention-id fold, promotable-endpoint acceptance, artifact shard co
 Mongo volume recreated clean; runner uses immutable per-run namespaces. Answers file
 for owner grading: ~/Downloads/graphify_answers_v7_v8.md (furniture-entity noise
 confirms unit.kind classifier as the top factory-phase item).
+
+### Factory phase station 1: unit.kind router + structure propagation (#1+#4, 2026-08-07)
+`graphify_unit_kind.py` (versioned): six kinds from format/structure only, precedence
+code>table>metadata/definition(value-shape)>navigation>prose; markup-only (HTML anchor)
+blocks are navigation. Routing enforced at BOTH gates: GLiNER2 windows cover semantic
+segments only; relation eligibility marks furniture `unit_kind:<kind>` ineligible (covers
+OpenIE + spaCy in one place). Structure propagation: every eligibility row/unit carries
+unit_kind, heading_path, section_id, structural_parent, definition_subject.
+
+Acceptance (owner's 8 criteria, measured on the MX monograph vs pre-router locked v7):
+- source conservation 100% (938 blocks all classified, spans intact; nothing discarded)
+- semantic prose 100% eligible (1,054 prose + 122 definition units; OpenIE invariant 846/846)
+- navigation heading-slug entities 32 → 2 (residual = genuine prose cross-reference)
+- metadata routed to kv lane (family 10 PASS 9/9 AND its 2 kv FPs eliminated)
+- definitions retain extraction (41-110 definition blocks per monograph, eligible)
+- assertion safety: zero leakage on book-66 + sealed-v1 extraction reruns
+- deterministic classification across reruns (tested); projection idempotent
+- NLP reduction: 40% of MX tokens / 49% of FACS tokens excluded as furniture;
+  1,465 furniture units never reach OpenIE/spaCy; runtime 564s → 351s (−38%)
+Also fixed en route (doctrine-compliant): GLiNER2 misaligned-span emissions now
+deterministically re-anchor on unique occurrence or persist as ALIGNMENT_FAILURE
+mentions (was: corpus-run crash; observation survival preserved).
+Logged regressions (mechanism-class, queued for #2): family 02 junk-negative
+'archival store' appositive-descriptor promotion; book P .779→.732 from the
+pre-existing metadiscourse-sentence FP class shifting under new window seams
+(matched 60/66 and zero leakage unchanged); family battery matched 94/102
+(-1: the appositive case) + 10 PASS.
