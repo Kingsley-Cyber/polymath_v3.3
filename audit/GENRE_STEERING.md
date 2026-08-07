@@ -156,3 +156,14 @@ no re-extraction. Conservation snapshot HOLDS: 242 raw propositions → FACT 6 /
 OPEN_RELATION 86 / QUALIFIED_CLAIM 65 / REVIEW 73 / REJECT 12; 6 alignment failures
 sub-attributed; OpenIE-stream novel promotions 0 (4 duplicate syntax facts, 2 value-facts).
 Awaiting owner key; grades flow through the five-layer waterfall.
+
+### sealed_v6 GRADED (2026-08-07) — arXiv-style dense abstract, UNION stack
+Entities .96 (24/25; AR-17 ID pattern missed) · core FACT P/R/F1 .462 (6/13; 7 junk-subject
+FPs) · open 2/3 · **traps 11/11 non-promoted, zero false-claim & zero future-plan leakage**
+· temporal relations 0/3 · numeric 0/9. Five-layer attribution of 7 FACT misses:
+discourse recovery 4 (em-dash appositive / participial interruption / relative pronoun /
+whose-clause — INTERRUPTED SUBJECT is now the confirmed dominant cross-genre class),
+predicate interpretation 2 (consumes→causes; materializes unmapped→OPEN), ontology
+coverage 1 (created_by → OPEN, contract-correct). Assertion-safety machinery is the
+strongest layer across all six tests; subject-side discourse recovery + alignment is the
+weakest. Full assessment: work/remediation/sealed_v6/SEALED_V6_ASSESSMENT.md.
