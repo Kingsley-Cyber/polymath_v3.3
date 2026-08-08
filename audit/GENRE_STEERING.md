@@ -437,3 +437,21 @@ Adapter-compiler seam added: GRAPHIFY_FORCED_ADAPTERS (selection config only;
 gates/thresholds/candidate construction untouched; schema hash stamps it).
 Owner-decided next gates: compiled adapter WITHOUT gold schema on this pack →
 held-out multi-domain adapter generalization. Oracle is NOT final qualification.
+
+### Entity-encoder bake-off (owner-directed, 2026-08-08)
+Sidecar-boundary trial, same 385 windows / 35 oracle labels / host MPS, thresholds
+swept per encoder (threshold = encoder-release property, never a shared constant):
+| arm | span R | span P | typed R | lowercase-compound | secs |
+| gliner2@0.5 (incumbent) | .350 | .304 | .217 | 3/11 | 3.9 |
+| gliner2@0.3 (control)   | .467 | .235 | .267 | 6/11 | 1.7 |
+| gliner-bi-base-v2.0@0.3 | .633 | .380 | .283 | 9/11 | 2.7 |
+| gliner-bi-base-v2.0@0.5 | .217 | .542 | .133 | 2/11 | 0.2 |
+STRICT PARETO WIN for knowledgator/gliner-bi-base-v2.0 @0.3: +81% span recall AND
+higher precision than the incumbent's operating point; the measured lowercase-
+compound failure class largely cured (3/11→9/11); faster before label-precompute
+is even exploited. Control arm proves it is the checkpoint, not the threshold.
+RECOMMENDED: adopt as sidecar challenger → build host-MPS entity sidecar
+({text,start,end,label,score} contract owns model compatibility), pin provider
+release (model id + revision + threshold + label-cache policy), requalify:
+burned safety suites (leakage zero), A–D on the pack, family battery.
+Bench: backend/scripts/bench_entity_encoders.py · data_eval/encoder_bakeoff.json.
