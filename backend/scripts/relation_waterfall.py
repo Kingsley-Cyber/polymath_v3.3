@@ -83,13 +83,30 @@ def main() -> int:
         if best:
             gid2entity[g["id"]] = best
 
-    # relation universes
+    # relation universes — FULL proposal space: fast-path mapped relations
+    # PLUS every OpenIE assertion lane (OPEN/REVIEW/QUALIFIED rows never
+    # merge into mapped_relations; omitting them undercounts R2).
     all_mapped = validation["mapped_relations"]
+    assertions = payload("OPENIE_ASSERTION_ASSEMBLY_COMPLETE")["assertions"]
+    arguments = {a["argument_id"]: a for a in payload("OPENIE_ARGUMENT_ADAPTATION_COMPLETE")["arguments"]}
     pair_rows: dict[frozenset, list] = {}
     for r in all_mapped:
         s_, o_ = m2e.get(r["subject_mention_id"]), m2e.get(r["object_mention_id"])
         if s_ and o_:
             pair_rows.setdefault(frozenset((s_, o_)), []).append(r)
+    for a in assertions:
+        sa, oa = arguments.get(a["subject_argument_id"]), arguments.get(a["object_argument_id"])
+        s_ = (sa or {}).get("entity_id")
+        o_ = (oa or {}).get("entity_id")
+        if s_ and o_:
+            pair_rows.setdefault(frozenset((s_, o_)), []).append({
+                "surface_predicate": a.get("surface_relation"),
+                "canonical_candidate": a.get("canonical_predicate"),
+                "terminal_state": {"FACT": "accepted", "OPEN_RELATION": "open"}.get(a.get("lane"), str(a.get("lane", "")).lower()),
+                "subject_mention_id": (sa or {}).get("mention_id"),
+                "object_mention_id": (oa or {}).get("mention_id"),
+                "mapping_rule": "openie_assertion_lane:" + str(a.get("lane")),
+            })
     # openie propositions by rough entity pair (surface containment on names)
     counts = Counter()
     stages = ["R1_endpoints", "R2_pair_proposed", "R3_surface_frame",
