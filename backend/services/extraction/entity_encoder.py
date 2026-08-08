@@ -153,6 +153,23 @@ _BI_PROVIDER: GLiNERBiProvider | None = None
 RELEX_ENTITY_PROVIDER_RELEASE = "relex-large-sidecar-entities-v1"
 
 
+def _relex_thresholds() -> dict:
+    """Calibration-only overrides (saturation Matrix A). Defaults = the
+    sidecar release pins; after the Pareto point is pinned these envs are
+    retired from use."""
+    out = {}
+    for env, key in (("RELEX_ENTITY_THRESHOLD", "entity_threshold"),
+                     ("RELEX_RELATION_THRESHOLD", "relation_threshold")):
+        raw = os.environ.get(env, "").strip()
+        if raw:
+            try:
+                out[key] = float(raw)
+            except ValueError:
+                pass
+    return out
+
+
+
 class RelexSidecarEntityProvider:
     """Entity candidates from the host-MPS Relex sidecar (production candidate).
 
@@ -189,6 +206,7 @@ class RelexSidecarEntityProvider:
         for result in infer(
             list(texts), entity_labels=label_strings,
             relation_labels=_relex_relation_labels(),
+            **_relex_thresholds(),
         ):
             text = texts[len(entity_rows)]
             row: list[EntityPrediction] = []
@@ -239,7 +257,8 @@ class RelexSidecarEntityProvider:
         label_strings = sorted(label.replace("_", " ").lower() for label in active)
         back = {label.replace("_", " ").lower(): label for label in active}
         output: list[list[EntityPrediction]] = []
-        for result in infer(list(texts), entity_labels=label_strings, relation_labels=[]):
+        for result in infer(list(texts), entity_labels=label_strings, relation_labels=[],
+                            **_relex_thresholds()):
             row: list[EntityPrediction] = []
             for item in result.entities:
                 start, end = int(item["start"]), int(item["end"])

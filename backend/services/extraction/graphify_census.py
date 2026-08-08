@@ -38,6 +38,7 @@ from services.extraction.graphify_unit_kind import (
 
 CENSUS_RELEASE = "graphify-entity-census-v1"
 IDENTIFIER_MINER_RELEASE = "graphify-identifier-miner-v1"
+TITLE_MINER_RELEASE = "graphify-title-miner-v1"
 # Deterministic identifier minting (#3, owner-ratified): observable syntax the
 # entity model should never have to rediscover — an uppercase code prefix,
 # hyphen, digits (AR-17, INC-4821, RFC-9110, ISO-9001). Format-shaped and
@@ -486,6 +487,83 @@ def run_entity_census(
             mentions.append(mention)
             identifier_mentions += 1
 
+    # Deterministic TITLE mentions (saturation Matrix C, owner-queued): the
+    # document's top heading names the document — a structural fact, never a
+    # model rediscovery. Minted like identifier mentions (provenance-marked,
+    # arbitration decides promotion). Two generic naming conventions: the full
+    # title span, and the pre-colon head ("Name: subtitle" => "Name").
+    title_mentions = 0
+    for document, survey in zip(documents, surveys):
+        top = min(survey.headings, key=lambda h: (h.level, h.start), default=None) \
+            if survey.headings else None
+        # Frontmatter title is the same structural fact in metadata form:
+        # a YAML block leading the document with a title: key names the
+        # document (generic convention, any corpus).
+        frontmatter_title = None
+        fm = re.match(r"\s*---\n(.*?)\n---", document.normalized_text, re.S)
+        if fm:
+            tm = re.search(r"^title:\s*\"?([^\"\n]+)\"?\s*$", fm.group(1), re.M)
+            if tm:
+                value = tm.group(1).strip()
+                value_start = document.normalized_text.find(value, fm.start(1), fm.end(1) + 8)
+                if value_start >= 0 and len(value) >= 3:
+                    frontmatter_title = (value_start, value_start + len(value), value)
+        if (top is None or not top.text.strip()) and frontmatter_title is None:
+            continue
+        doc_sequence = 1 + max(
+            (window.sequence for window in all_windows if window.document_id == document.document_id),
+            default=-1,
+        )
+        candidates = []
+        if frontmatter_title is not None:
+            candidates.append(frontmatter_title)
+        if top is not None and top.text.strip():
+            title_text = top.text.strip()
+            heading_slice = document.normalized_text[top.start:top.end]
+            offset = heading_slice.find(title_text)
+            if offset >= 0:
+                title_start = top.start + offset
+                candidates.append((title_start, title_start + len(title_text), title_text))
+                head, sep, _tail = title_text.partition(":")
+                if sep and len(head.split()) >= 2:
+                    candidates.append((title_start, title_start + len(head), head.strip()))
+        for start, end, surface in candidates:
+            if len(surface) < 3 or document.normalized_text[start:end].strip() != surface:
+                continue
+            original = to_original_span(document, start, end)
+            window = ExtractionWindowV1(
+                window_id=stable_id(
+                    "title-window", document.document_id, start, end,
+                    surface, TITLE_MINER_RELEASE,
+                ),
+                document_id=document.document_id,
+                sequence=doc_sequence,
+                normalized_start=start,
+                normalized_end=end,
+                original_start=original.start if original.exact else None,
+                original_end=original.end if original.exact else None,
+                text=document.normalized_text[start:end],
+                heading_path=(),
+                token_count=max(1, len(surface.split())),
+                window_sha256=hashlib.sha256(surface.encode("utf-8")).hexdigest(),
+            )
+            doc_sequence += 1
+            all_windows.append(window)
+            mention = _raw_mention(
+                document, window,
+                EntityPrediction(
+                    text=surface, entity_type="document",
+                    start=0, end=len(surface),
+                    confidence=1.0, facet="document_title",
+                ),
+                0,
+                schema_release=TITLE_MINER_RELEASE,
+            )
+            mention = mention.model_copy(update={"provider_release": TITLE_MINER_RELEASE})
+            sink.persist([mention])
+            mentions.append(mention)
+            title_mentions += 1
+
     window_order = {window.window_id: index for index, window in enumerate(all_windows)}
     mentions.sort(key=lambda item: (
         window_order[item.window_id], item.local_start, item.local_end,
@@ -503,6 +581,7 @@ def run_entity_census(
         "emitted_predictions": len(mentions),
         "folded_duplicate_predictions": folded_duplicates,
         "identifier_mentions_minted": identifier_mentions,
+        "title_mentions_minted": title_mentions,
         "persisted_records": len(mentions),
         "aligned_mentions": aligned,
         "alignment_failures": failures,

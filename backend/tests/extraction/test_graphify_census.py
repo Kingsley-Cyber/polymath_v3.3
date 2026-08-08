@@ -175,3 +175,50 @@ def test_deterministic_identifier_minting_unions_with_model_mentions() -> None:
     assert output.report["identifier_mentions_minted"] == 3
     assert output.report["conservation"] is True
     assert len(sink.records) == len(output.mentions)
+
+
+def test_title_miner_mints_document_title_and_colon_head() -> None:
+    # Structural fact: the top heading names the document (Matrix C).
+    # Both the full title and the pre-colon head are generic conventions.
+    from services.extraction.graphify_census import (
+        InMemoryRawMentionSink,
+        TITLE_MINER_RELEASE,
+        run_entity_census,
+    )
+    from services.extraction.graphify_normalization import normalize_document
+    from services.extraction.graphify_survey import survey_document
+
+    class _NoModelProvider:
+        release = "test-null"
+        def predict_entities(self, texts, **kwargs):
+            return [[] for _ in texts]
+
+    text = "# Pegasus Deconstruction: A Motion Grammar\n\nBody prose mentions things.\n"
+    document = normalize_document("doc", text)
+    survey = survey_document(document)
+    output = run_entity_census([document], [survey], _NoModelProvider(), InMemoryRawMentionSink())
+    titled = [m for m in output.mentions if m.provider_release == TITLE_MINER_RELEASE]
+    surfaces = sorted(m.surface for m in titled)
+    assert output.report["title_mentions_minted"] == len(titled) >= 1
+    assert any("Pegasus Deconstruction" in s for s in surfaces)
+
+
+def test_title_miner_reads_yaml_frontmatter_title() -> None:
+    from services.extraction.graphify_census import (
+        InMemoryRawMentionSink,
+        TITLE_MINER_RELEASE,
+        run_entity_census,
+    )
+    from services.extraction.graphify_normalization import normalize_document
+    from services.extraction.graphify_survey import survey_document
+
+    class _NoModelProvider:
+        release = "test-null"
+        def predict_entities(self, texts, **kwargs):
+            return [[] for _ in texts]
+
+    text = '---\ntitle: "Aurora Drift Compensation Workflow"\nauthor: someone\n---\n\nBody prose.\n'
+    document = normalize_document("doc", text)
+    output = run_entity_census([document], [survey_document(document)], _NoModelProvider(), InMemoryRawMentionSink())
+    titled = [m for m in output.mentions if m.provider_release == TITLE_MINER_RELEASE]
+    assert any("Aurora Drift Compensation Workflow" == m.surface for m in titled)
