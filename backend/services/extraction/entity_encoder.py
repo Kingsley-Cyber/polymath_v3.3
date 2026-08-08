@@ -164,6 +164,66 @@ class RelexSidecarEntityProvider:
 
     release = RELEX_ENTITY_PROVIDER_RELEASE
 
+    def predict_joint(
+        self,
+        texts: Sequence[str],
+        *,
+        adapters: tuple[str, ...] = (),
+    ) -> tuple[list[list[EntityPrediction]], list[list[dict]]]:
+        """ONE sidecar pass per text: entities under the ACTIVE schema AND
+        relation candidates under the canonical predicate labels.
+
+        The single-pass consolidation (owner-ordered): the census consumes
+        the entity rows exactly as predict_entities returns them; the
+        relation rows (text-local offsets, raw label+score) ride the census
+        artifact to the relation lane, which then makes no second pass.
+        """
+        from services.extraction.graphify_relations import RELEX_RELATION_LABELS
+        from services.extraction.relex_sidecar_client import infer
+
+        active = schema_descriptions(adapters)
+        label_strings = sorted(label.replace("_", " ").lower() for label in active)
+        back = {label.replace("_", " ").lower(): label for label in active}
+        entity_rows: list[list[EntityPrediction]] = []
+        relation_rows: list[list[dict]] = []
+        for result in infer(
+            list(texts), entity_labels=label_strings,
+            relation_labels=list(RELEX_RELATION_LABELS),
+        ):
+            text = texts[len(entity_rows)]
+            row: list[EntityPrediction] = []
+            for item in result.entities:
+                start, end = int(item["start"]), int(item["end"])
+                surface = str(item["text"])
+                if (
+                    start < 0 or end <= start or end > len(text)
+                    or text[start:end] != surface
+                ):
+                    start, end = _anchor_span(text, surface, start, end)
+                schema_label = back.get(str(item["label"]).lower(), "Concept")
+                core_label, facet = _facet_for_label(schema_label, adapters)
+                row.append(EntityPrediction(
+                    text=surface,
+                    entity_type=canonical_entity_type(core_label),
+                    start=start,
+                    end=end,
+                    confidence=float(item.get("score", 0.0)),
+                    facet=facet,
+                ))
+            row.sort(key=lambda p: (p.start, p.end, p.entity_type, p.text))
+            entity_rows.append(row)
+            relation_rows.append([
+                {
+                    "head_start": r.head_start, "head_end": r.head_end,
+                    "head_text": r.head_text,
+                    "tail_start": r.tail_start, "tail_end": r.tail_end,
+                    "tail_text": r.tail_text,
+                    "label": r.label, "score": r.score,
+                }
+                for r in result.relations
+            ])
+        return entity_rows, relation_rows
+
     def predict_entities(
         self,
         texts: Sequence[str],

@@ -474,6 +474,7 @@ async def run_graphify_pipeline(
             "windows": _record_payload(output.windows),
             "mentions": _record_payload(output.mentions),
             "report": output.report,
+            "relex_relations": list(output.relex_relations),
         }
 
     census_payload = await run_one(
@@ -660,6 +661,7 @@ async def run_graphify_pipeline(
     def _relation_compute_sync() -> dict[str, Any]:
         output: RelationFastPathOutput = run_relation_fast_path(
             [document], [survey], completed_mentions, entities,
+            relex_candidates=census_payload.get("relex_relations"),
         )
         candidate_by_id = {item.candidate_id: item for item in openie_candidates}
         mapped = list(output.mapped_relations)

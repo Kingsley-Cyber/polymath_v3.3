@@ -108,6 +108,10 @@ class CensusOutput:
     windows: tuple[ExtractionWindowV1, ...]
     mentions: tuple[RawMentionV1, ...]
     report: dict[str, object]
+    # Single-pass consolidation: relation candidates captured in the SAME
+    # sidecar call as the entity census (doc-global offsets). The relation
+    # lane consumes these instead of making a second neural pass.
+    relex_relations: tuple[dict, ...] = ()
 
 
 def _token_spans(text: str) -> list[tuple[int, int]]:
@@ -364,13 +368,42 @@ def run_entity_census(
     adapter_groups: dict[tuple[str, ...], list[int]] = {}
     for index, window in enumerate(bucketed):
         adapter_groups.setdefault(adapter_by_document[window.document_id], []).append(index)
+    joint = getattr(provider, "predict_joint", None)
+    raw_relex_relations: dict[tuple, dict] = {}
     for adapters, indexes in sorted(adapter_groups.items()):
-        group_predictions = provider.predict_entities(
-            [bucketed[index].text for index in indexes],
-            batch_size=batch_size,
-            threshold=threshold,
-            adapters=adapters,
-        )
+        if joint is not None:
+            group_predictions, group_relations = joint(
+                [bucketed[index].text for index in indexes],
+                adapters=adapters,
+            )
+            for index, relation_row in zip(indexes, group_relations):
+                window = bucketed[index]
+                for relation in relation_row:
+                    row = {
+                        "document_id": window.document_id,
+                        "head_start": window.normalized_start + int(relation["head_start"]),
+                        "head_end": window.normalized_start + int(relation["head_end"]),
+                        "head_text": relation["head_text"],
+                        "tail_start": window.normalized_start + int(relation["tail_start"]),
+                        "tail_end": window.normalized_start + int(relation["tail_end"]),
+                        "tail_text": relation["tail_text"],
+                        "label": relation["label"],
+                        "score": float(relation["score"]),
+                    }
+                    key = (
+                        row["document_id"], row["head_start"], row["head_end"],
+                        row["tail_start"], row["tail_end"], row["label"],
+                    )
+                    kept = raw_relex_relations.get(key)
+                    if kept is None or row["score"] > kept["score"]:
+                        raw_relex_relations[key] = row
+        else:
+            group_predictions = provider.predict_entities(
+                [bucketed[index].text for index in indexes],
+                batch_size=batch_size,
+                threshold=threshold,
+                adapters=adapters,
+            )
         for index, row in zip(indexes, group_predictions):
             predictions[index] = row
     folded_duplicates = 0
@@ -489,6 +522,11 @@ def run_entity_census(
         "inference_seconds": inference_seconds,
         "identity_digest": identity,
         "deterministic_output_order": True,
+        "single_pass_relex_relations": len(raw_relex_relations),
         "stage_dependencies": ["normalization", "survey", "entity_provider"],
     }
-    return CensusOutput(tuple(all_windows), tuple(mentions), report)
+    relex_relations = tuple(sorted(
+        raw_relex_relations.values(),
+        key=lambda r: (r["document_id"], r["head_start"], r["tail_start"], r["label"]),
+    ))
+    return CensusOutput(tuple(all_windows), tuple(mentions), report, relex_relations)

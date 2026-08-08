@@ -650,3 +650,37 @@ def test_relex_qualified_rows_never_enter_qualifier_veto(monkeypatch) -> None:
     assert disposition == "promote"
     blocked = openie_fact_merge_disposition(key, (0, 50), set(), {key: [(0, 50)]})
     assert blocked == "blocked_same_evidence_qualified"
+
+
+def test_single_pass_relex_candidates_skip_second_neural_pass(monkeypatch) -> None:
+    # Census-captured candidates (doc-global offsets) are the ONLY source in
+    # single-pass mode: the relation lane must not call the sidecar at all,
+    # and the captured pair must flow through the same policy (accepted only
+    # via same-canonical corroboration).
+    from services.extraction import relex_sidecar_client
+
+    def forbidden_infer(*args, **kwargs):
+        raise AssertionError("relation lane must not call the sidecar in single-pass mode")
+
+    monkeypatch.setattr(relex_sidecar_client, "infer", forbidden_infer)
+    monkeypatch.setenv("GRAPHIFY_RELEX_RELATIONS", "1")
+    text = "The Harbor Gateway uses Envoy."
+    document = normalize_document("doc", text)
+    entities = [_entity("doc", "Harbor Gateway", "software"), _entity("doc", "Envoy", "software")]
+    mentions = [_mention("doc", e, text, text.index(e.canonical_name)) for e in entities]
+    a = text.index("Harbor Gateway"); b = text.index("Envoy")
+    captured = [{
+        "document_id": document.document_id,
+        "head_start": a, "head_end": a + 14, "head_text": "Harbor Gateway",
+        "tail_start": b, "tail_end": b + 5, "tail_text": "Envoy",
+        "label": "uses", "score": 0.97,
+    }]
+    output = run_relation_fast_path(
+        [document], [survey_document(document)], mentions, entities,
+        relex_candidates=captured,
+    )
+    relex_rows = [r for r in output.mapped_relations if r.dependency_frame == "relex:semantic"]
+    assert len(relex_rows) == 1
+    assert relex_rows[0].canonical_candidate == "uses"
+    assert relex_rows[0].terminal_state.value == "accepted"  # corroborated duplicate
+    assert output.report["relex_semantic_proposals"] == 1

@@ -1548,7 +1548,10 @@ def _relex_accept_threshold() -> float:
         return 0.5
 
 
-def _relex_semantic_proposals(units: Sequence[_Unit]) -> list[tuple[_Unit, _Proposal]]:
+def _relex_semantic_proposals(
+    units: Sequence[_Unit],
+    precomputed: Sequence[dict] | None = None,
+) -> list[tuple[_Unit, _Proposal]]:
     """Semantic relation candidates from the host-MPS Relex sidecar.
 
     The sidecar proposes (head span, predicate, tail span); this joiner
@@ -1559,22 +1562,51 @@ def _relex_semantic_proposals(units: Sequence[_Unit]) -> list[tuple[_Unit, _Prop
     because Relex itself carries no polarity signal. The gates remain the
     knowledge authority; source 'relex_semantic' is accepted only above
     the pinned score threshold and only through the unchanged gate chain.
+
+    Single-pass mode: when `precomputed` is supplied (relation candidates
+    captured during the entity census, doc-global offsets), it is the
+    ONLY source — no second neural pass. Candidates whose endpoints span
+    unit boundaries are dropped conservatively (cross-sentence binding is
+    coref-era work, not span arithmetic).
     """
-    from services.extraction.relex_sidecar_client import RelexSidecarError, infer
+    from services.extraction.relex_sidecar_client import (
+        RelexRelation, RelexSidecarError, infer,
+    )
 
     eligible = [unit for unit in units if unit.mentions and len(unit.text.split()) >= 3]
     if not eligible:
         return []
-    try:
-        results = infer(
-            [unit.text for unit in eligible],
-            entity_labels=[], relation_labels=list(RELEX_RELATION_LABELS),
-        )
-    except RelexSidecarError as exc:
-        logger.warning("relex sidecar unavailable; semantic lane skipped: %s", exc)
-        return []
+    if precomputed is not None:
+        pairs = []
+        for unit in eligible:
+            local = [
+                RelexRelation(
+                    head_start=int(row["head_start"]) - unit.start,
+                    head_end=int(row["head_end"]) - unit.start,
+                    head_text=str(row["head_text"]),
+                    tail_start=int(row["tail_start"]) - unit.start,
+                    tail_end=int(row["tail_end"]) - unit.start,
+                    tail_text=str(row["tail_text"]),
+                    label=str(row["label"]), score=float(row["score"]),
+                )
+                for row in precomputed
+                if row.get("document_id") == unit.document_id
+                and unit.start <= int(row["head_start"]) and int(row["head_end"]) <= unit.end
+                and unit.start <= int(row["tail_start"]) and int(row["tail_end"]) <= unit.end
+            ]
+            pairs.append((unit, local))
+    else:
+        try:
+            results = infer(
+                [unit.text for unit in eligible],
+                entity_labels=[], relation_labels=list(RELEX_RELATION_LABELS),
+            )
+        except RelexSidecarError as exc:
+            logger.warning("relex sidecar unavailable; semantic lane skipped: %s", exc)
+            return []
+        pairs = [(unit, list(result.relations)) for unit, result in zip(eligible, results)]
     output: list[tuple[_Unit, _Proposal]] = []
-    for unit, result in zip(eligible, results):
+    for unit, unit_relations in pairs:
         def mention_for(start: int, end: int):
             best, best_overlap = None, 0
             for mention in unit.mentions:
@@ -1585,7 +1617,7 @@ def _relex_semantic_proposals(units: Sequence[_Unit]) -> list[tuple[_Unit, _Prop
                     best, best_overlap = mention, overlap
             return best
 
-        for relation in result.relations:
+        for relation in unit_relations:
             subject = mention_for(relation.head_start, relation.head_end)
             object_mention = mention_for(relation.tail_start, relation.tail_end)
             if subject is None or object_mention is None:
@@ -1887,6 +1919,7 @@ def run_relation_fast_path(
     surveys: Sequence[DocumentSurveyV1],
     mentions: Sequence[CompletedMentionV1],
     entities: Sequence[DocumentEntityV1],
+    relex_candidates: Sequence[dict] | None = None,
 ) -> RelationFastPathOutput:
     entity_by_id = {entity.entity_id: entity for entity in entities}
     document_by_id = {document.document_id: document for document in documents}
@@ -2008,8 +2041,12 @@ def run_relation_fast_path(
         # Semantic candidate lane: joins the SAME union and faces the SAME
         # compiler and gates as every structural lane. Appended LAST so the
         # mapping loop has already judged every structural row when a relex
-        # row is scored — corroboration reads those verdicts.
-        for unit, proposal in _relex_semantic_proposals(all_units):
+        # row is scored — corroboration reads those verdicts. When the
+        # census ran the single-pass provider, its captured candidates are
+        # consumed here and NO second neural pass happens.
+        for unit, proposal in _relex_semantic_proposals(
+            all_units, precomputed=relex_candidates,
+        ):
             proposal_rows.append((unit, proposal))
             relex_proposals += 1
 
