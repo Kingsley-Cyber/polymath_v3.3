@@ -135,3 +135,18 @@ def test_repeated_body_entity_is_unchanged_by_heading_evidence_rule() -> None:
     entity = next(entity for entity in output.entities if entity.canonical_name == "Incident Amber")
     assert entity.state.value == "promoted"
     assert "structural_heading_review_only" not in entity.reasons
+
+
+def test_counted_noun_phrase_never_promotes() -> None:
+    # Universal entity-quality class: cardinal determiner over a lowercase
+    # common head names a quantity, not an identity — any domain.
+    from services.extraction.graphify_reducer import _counted_noun_phrase
+    assert _counted_noun_phrase("two dashboards")
+    assert _counted_noun_phrase("three sensors")
+    assert _counted_noun_phrase("10 workers")
+    assert _counted_noun_phrase("several batches")
+    # Names keep their identity: capitalized continuations and fused digits.
+    assert not _counted_noun_phrase("Three Mile Island")
+    assert not _counted_noun_phrase("5G networks")  # fused digit token is a name
+    assert not _counted_noun_phrase("One Identity Manager")
+    assert not _counted_noun_phrase("dashboards")

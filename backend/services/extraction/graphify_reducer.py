@@ -317,6 +317,24 @@ def _build_clusters(
     return clusters
 
 
+_CARDINAL_WORDS = frozenset({
+    "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
+    "ten", "eleven", "twelve", "dozen", "twenty", "thirty", "forty", "fifty",
+    "hundred", "thousand", "million", "billion", "several", "both",
+})
+
+
+def _counted_noun_phrase(name: str) -> bool:
+    """Cardinal determiner + all-lowercase continuation = quantity, not identity."""
+    tokens = name.strip().split()
+    if len(tokens) < 2:
+        return False
+    first = tokens[0].casefold()
+    if first not in _CARDINAL_WORDS and not tokens[0].isdigit():
+        return False
+    return all(token.islower() for token in tokens[1:])
+
+
 def _cluster_decision(
     cluster: _Cluster,
     document: NormalizedDocumentV1,
@@ -327,6 +345,13 @@ def _cluster_decision(
     normalized = _normalized_surface(cluster.canonical_name)
     if normalized in _GENERIC_SURFACES and "strict_technical_context" not in cluster.survey_sources:
         return EntityTerminalState.SUPPRESSED, ("generic_or_pronominal_surface",)
+    if _counted_noun_phrase(cluster.canonical_name):
+        # Universal entity-quality class (owner-authorized 2026-08-08): a
+        # cardinal determiner over a lowercase common head names a QUANTITY
+        # of things, never an identity — "two dashboards", "three sensors",
+        # "10 workers" — in any domain. Capitalized continuations ("Three
+        # Mile Island") and attached digits ("5G networks") are untouched.
+        return EntityTerminalState.SUPPRESSED, ("counted_noun_phrase",)
     ambiguous_mentions = [mention for mention in cluster.mentions if _normalized_surface(mention.surface) in _AMBIGUOUS_NAMES]
     ambiguous_named = bool(ambiguous_mentions) and any(
         _ambiguous_use_is_named(document, mention) for mention in ambiguous_mentions
