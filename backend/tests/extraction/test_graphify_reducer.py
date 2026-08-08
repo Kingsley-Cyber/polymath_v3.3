@@ -150,3 +150,16 @@ def test_counted_noun_phrase_never_promotes() -> None:
     assert not _counted_noun_phrase("5G networks")  # fused digit token is a name
     assert not _counted_noun_phrase("One Identity Manager")
     assert not _counted_noun_phrase("dashboards")
+
+
+def test_universal_entity_guards_suppress_junk_surfaces() -> None:
+    # Decision-1 guards (owner: "wire the entity guards", 2026-08-08):
+    # pronouns, bare function words, discourse markers, timestamps — junk
+    # in ANY domain. Real names must be untouched.
+    from services.extraction.graphify_reducer import _junk_entity_surface
+    for junk in ("I", "You", "And", "But", "Because", "If", "Like", "Look",
+                 "And I", "Additionally", "However", "So", "5:45", "12:03"):
+        assert _junk_entity_surface(junk), junk
+    for real in ("Harbor Gateway", "Claude", "AutoDS", "Adobe Express",
+                 "If-Then Systems", "Go", "Ac Hampton", "5G networks"):
+        assert not _junk_entity_surface(real), real

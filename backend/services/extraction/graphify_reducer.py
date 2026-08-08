@@ -324,6 +324,38 @@ _CARDINAL_WORDS = frozenset({
 })
 
 
+_TIMESTAMP_RE = __import__("re").compile(r"^\d{1,2}:\d{2}(:\d{2})?$")
+_DISCOURSE_MARKERS = frozenset({
+    "additionally", "however", "furthermore", "meanwhile", "moreover",
+    "therefore", "otherwise", "anyway", "basically", "actually", "look",
+    "like", "okay", "ok", "well", "right", "now",
+    # bare subordinators/conjunctions are never names either
+    "because", "although", "though", "while", "since", "unless",
+    "whether", "whenever", "after", "before", "during",
+})
+
+
+def _junk_entity_surface(name: str) -> bool:
+    """Universal entity-quality classes (Decision 1, wired 2026-08-08):
+    pronouns, bare function words, discourse markers, and timestamps name
+    nothing in ANY domain. Membership comes from the same battle-tested
+    sets the entity_quality verdict layer uses; multi-token surfaces are
+    junk only when EVERY token is junk-class ("And I"), so real names
+    that merely contain function words ("If-Then Systems") survive."""
+    from services.extraction.entity_quality import _FUNCTION_WORDS, _PRONOUNS
+
+    stripped = name.strip()
+    if _TIMESTAMP_RE.match(stripped):
+        return True
+    tokens = [t.casefold() for t in stripped.replace("-", " ").split()]
+    if not tokens:
+        return True
+    return all(
+        t in _FUNCTION_WORDS or t in _PRONOUNS or t in _DISCOURSE_MARKERS
+        for t in tokens
+    )
+
+
 def _counted_noun_phrase(name: str) -> bool:
     """Cardinal determiner + all-lowercase continuation = quantity, not identity."""
     tokens = name.strip().split()
@@ -345,6 +377,8 @@ def _cluster_decision(
     normalized = _normalized_surface(cluster.canonical_name)
     if normalized in _GENERIC_SURFACES and "strict_technical_context" not in cluster.survey_sources:
         return EntityTerminalState.SUPPRESSED, ("generic_or_pronominal_surface",)
+    if _junk_entity_surface(cluster.canonical_name):
+        return EntityTerminalState.SUPPRESSED, ("universal_junk_surface",)
     if _counted_noun_phrase(cluster.canonical_name):
         # Universal entity-quality class (owner-authorized 2026-08-08): a
         # cardinal determiner over a lowercase common head names a QUANTITY

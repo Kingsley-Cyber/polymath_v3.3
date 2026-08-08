@@ -843,3 +843,19 @@ def test_assertion_controls_stay_accepted() -> None:
     ):
         output = _run(text, [("Alphaline", "software"), ("Betamark", "software" if "consumes" in text else "concept")])
         assert _accepted_pair(output, "Alphaline", "Betamark"), text
+
+
+def test_pronoun_endpoints_never_anchor_accepted_facts() -> None:
+    # PRON closed-class endpoint veto: census pronoun mentions can never
+    # anchor canonical facts; the discourse-subject machinery (which mints
+    # RESOLVED copies) is the sanctioned path and stays intact.
+    text = "I use PostgreSQL for storage."
+    document = normalize_document("doc", text)
+    pronoun = _entity("doc", "I", "person")
+    postgres = _entity("doc", "PostgreSQL", "software")
+    mentions = [_mention("doc", pronoun, text, 0), _mention("doc", postgres, text, text.index("PostgreSQL"))]
+    output = run_relation_fast_path([document], [survey_document(document)], mentions, [pronoun, postgres])
+    assert not any(
+        r.terminal_state.value == "accepted" and r.subject_mention_id.endswith(":I")
+        for r in output.mapped_relations
+    )

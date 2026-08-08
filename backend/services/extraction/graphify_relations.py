@@ -73,7 +73,10 @@ _META_PREDICATE_RE = re.compile(
 )
 logger = logging.getLogger(__name__)
 _SPACY_PARSE_LOCK = threading.Lock()
-_CLOSED_CLASS_POS = frozenset({"AUX", "DET", "ADP", "CCONJ", "SCONJ", "PART", "PUNCT"})
+# PRON added 2026-08-08 (Decision-1 guards): a census pronoun mention can
+# never anchor a canonical endpoint. Discourse-RESOLVED subjects are minted
+# later with real entity identity and are not in the census veto scan.
+_CLOSED_CLASS_POS = frozenset({"AUX", "DET", "ADP", "CCONJ", "SCONJ", "PART", "PUNCT", "PRON"})
 _OPEN_ONLY_LEMMAS = frozenset({"serve", "publish", "author", "curate", "interoperate", "occur"})
 # "X occurred in/at/on/near/during Y" is an explicit event-association surface;
 # the closed ontology represents it as related_to (generalizes the former
@@ -2212,7 +2215,12 @@ def run_relation_fast_path(
                 # never anchor a relation endpoint. POS decides, not words:
                 # "Deployment CAN cause…" (AUX) is vetoed while "the CAN
                 # stores paint" (NOUN) stays eligible.
-                if span.root.pos_ in _CLOSED_CLASS_POS or all(
+                if mention.context_rule == "unique_deterministic_subject_antecedent":
+                    # Discourse-RESOLVED subjects are the sanctioned pronoun
+                    # path: the span is a pronoun but the identity is the
+                    # resolved antecedent entity — never vetoed.
+                    pass
+                elif span.root.pos_ in _CLOSED_CLASS_POS or all(
                     token.pos_ in _CLOSED_CLASS_POS for token in span
                 ):
                     closed_class_mentions.add(mention.mention_id)
