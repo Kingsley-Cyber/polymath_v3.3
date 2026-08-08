@@ -153,9 +153,71 @@ _BI_PROVIDER: GLiNERBiProvider | None = None
 def get_entity_encoder_provider():
     """The one selection seam. Default = frozen GLiNER2 baseline."""
     global _BI_PROVIDER
+    global _COMPOSITE
     choice = os.environ.get("GRAPHIFY_ENTITY_PROVIDER", "gliner2").strip().lower()
     if choice in ("gliner_bi", "gliner-bi", "bi"):
         if _BI_PROVIDER is None:
             _BI_PROVIDER = GLiNERBiProvider()
         return _BI_PROVIDER
+    if choice in ("composite", "union"):
+        if _COMPOSITE is None:
+            _COMPOSITE = CompositeEntityProvider()
+        return _COMPOSITE
     return get_gliner2_cpu_provider()
+
+
+COMPOSITE_PROVIDER_RELEASE = "entity-composite-v1(gliner2+gliner-bi)"
+
+
+class CompositeEntityProvider:
+    """Diagnostic/candidate ensemble: both encoders as candidate generators.
+
+    Structural reconciliation only — never cross-model score comparison
+    (confidence scales are not calibrated against each other):
+
+      identical (span, text, type)  → one candidate (max score, same decision)
+      same span, conflicting type   → BOTH retained; existing reducer/type
+                                       arbitration decides, as it always has
+      different/overlapping spans   → both retained until canonicalization
+      provider-only spans           → retained
+
+    Recall is the union; the deterministic gates remain the sole knowledge
+    authority. Owner framing: this establishes the attainable upper bound
+    before any primary+rescue optimization; the long-run constraint is
+    still ONE heavy encoder.
+    """
+
+    release = COMPOSITE_PROVIDER_RELEASE
+
+    def __init__(self) -> None:
+        self._incumbent = get_gliner2_cpu_provider()
+        self._candidate = GLiNERBiProvider()
+
+    def predict_entities(
+        self,
+        texts: Sequence[str],
+        *,
+        batch_size: int = 4,
+        threshold: float = 0.5,
+        adapters: tuple[str, ...] = (),
+    ) -> list[list[EntityPrediction]]:
+        first = self._incumbent.predict_entities(
+            texts, batch_size=batch_size, threshold=threshold, adapters=adapters,
+        )
+        second = self._candidate.predict_entities(
+            texts, batch_size=batch_size, threshold=threshold, adapters=adapters,
+        )
+        merged: list[list[EntityPrediction]] = []
+        for row_a, row_b in zip(first, second):
+            folded: dict[tuple[int, int, str, str], EntityPrediction] = {}
+            for prediction in [*row_a, *row_b]:
+                key = (prediction.start, prediction.end, prediction.text, prediction.entity_type)
+                incumbent = folded.get(key)
+                if incumbent is None or prediction.confidence > incumbent.confidence:
+                    folded[key] = prediction
+            row = sorted(folded.values(), key=lambda p: (p.start, p.end, p.entity_type, p.text))
+            merged.append(row)
+        return merged
+
+
+_COMPOSITE: CompositeEntityProvider | None = None

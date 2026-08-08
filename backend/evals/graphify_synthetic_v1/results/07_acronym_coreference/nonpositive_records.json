@@ -228,7 +228,7 @@
     "canonical_predicate": "causes",
     "score": 1.0,
     "reasons": [
-      "review:endpoint_signature:Person:Concept",
+      "review:endpoint_signature:Person:Organization",
       "source:strict_dependency_cue"
     ],
     "policy_release": "graphify-relation-fast-path-v13",
@@ -252,12 +252,12 @@
       "modality": "asserted",
       "attribution": "",
       "canonical_candidate": "causes",
-      "mapping_rule": "review:endpoint_signature:Person:Concept",
+      "mapping_rule": "review:endpoint_signature:Person:Organization",
       "mapping_release": "graphify-predicate-compiler-v2",
       "temporal": null,
       "terminal_state": "review",
       "reasons": [
-        "review:endpoint_signature:Person:Concept",
+        "review:endpoint_signature:Person:Organization",
         "source:strict_dependency_cue"
       ]
     },
@@ -272,7 +272,7 @@
     "canonical_predicate": "causes",
     "score": 1.0,
     "reasons": [
-      "review:endpoint_signature:Person:Concept",
+      "review:endpoint_signature:Person:Organization",
       "source:existing_syntax_stack"
     ],
     "policy_release": "graphify-relation-fast-path-v13",
@@ -296,12 +296,12 @@
       "modality": "asserted",
       "attribution": "direct",
       "canonical_candidate": "causes",
-      "mapping_rule": "review:endpoint_signature:Person:Concept",
+      "mapping_rule": "review:endpoint_signature:Person:Organization",
       "mapping_release": "graphify-predicate-compiler-v2",
       "temporal": null,
       "terminal_state": "review",
       "reasons": [
-        "review:endpoint_signature:Person:Concept",
+        "review:endpoint_signature:Person:Organization",
         "source:existing_syntax_stack"
       ]
     },
@@ -391,50 +391,6 @@
       "reasons": [
         "review:endpoint_head_closed_class",
         "source:existing_syntax_stack"
-      ]
-    },
-    "_lane": "fast_path:review"
-  },
-  {
-    "schema_version": "polymath.assertion_decision.v1",
-    "decision_id": "assertion-decision:054decd166a62aa21ed4fdc7",
-    "relation_id": "surface-relation:8de6604fda925035244ddc3a",
-    "document_id": "8be8823dddb68051f2fcb0030190d4745bae1d92ab5977327de6d7e01634c79b",
-    "status": "review",
-    "canonical_predicate": "supports",
-    "score": 1.0,
-    "reasons": [
-      "review:endpoint_signature:Concept:Person",
-      "source:strict_dependency_cue"
-    ],
-    "policy_release": "graphify-relation-fast-path-v13",
-    "_mapped": {
-      "schema_version": "polymath.surface_relation.v1",
-      "relation_id": "surface-relation:8de6604fda925035244ddc3a",
-      "document_id": "8be8823dddb68051f2fcb0030190d4745bae1d92ab5977327de6d7e01634c79b",
-      "evidence_text": "The\nQuay Analytics Group supports Dr. Nadia Osei with two reviewers.",
-      "evidence_start": 351,
-      "evidence_end": 419,
-      "subject_mention_id": "completed-mention:8b9c8215b7a8e1eb8f3e5e6b",
-      "object_mention_id": "completed-mention:dc0e5ac1fe1aedb6a14fc285",
-      "surface_predicate": "supports",
-      "lemma": "support",
-      "particle": "",
-      "preposition": "",
-      "dependency_frame": "direct:active:ROOT",
-      "dependency_path": "nsubj>ROOT>dobj",
-      "voice": "active",
-      "polarity": "positive",
-      "modality": "asserted",
-      "attribution": "",
-      "canonical_candidate": "supports",
-      "mapping_rule": "review:endpoint_signature:Concept:Person",
-      "mapping_release": "graphify-predicate-compiler-v2",
-      "temporal": null,
-      "terminal_state": "review",
-      "reasons": [
-        "review:endpoint_signature:Concept:Person",
-        "source:strict_dependency_cue"
       ]
     },
     "_lane": "fast_path:review"

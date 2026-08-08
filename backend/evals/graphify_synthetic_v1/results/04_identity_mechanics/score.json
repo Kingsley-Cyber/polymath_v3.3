@@ -1,16 +1,16 @@
 {
   "family": "04_identity_mechanics",
-  "status": "FAIL",
+  "status": "PASS",
   "runtime": {
     "pipeline_release": "graphify-cpu-pipeline-v15",
-    "mongo_database": "graphify_eval_syn_04_6c536eba62",
-    "corpus_id": "f61a6d8b-3360-5f18-ad66-b226d5e9e667",
-    "elapsed_seconds": 0.87,
+    "mongo_database": "graphify_eval_syn_04_6af7cf7261",
+    "corpus_id": "fe2e5a93-8396-5286-8cd5-26ed630103af",
+    "elapsed_seconds": 1.46,
     "interpreter": "/Users/king/polymath_v3.3/local_ghost_b/.venv/bin/python"
   },
   "items": {
-    "passed": 11,
-    "failed": 1,
+    "passed": 12,
+    "failed": 0,
     "optional_failed": 0,
     "total": 12
   },
@@ -25,6 +25,7 @@
       "cold 7 rollout plan",
       "dr imani reyes",
       "falcon cache",
+      "pinion",
       "pinion 3 1",
       "pinion 3 2",
       "quartzline retrieval layer",
@@ -35,13 +36,14 @@
       "telemetry group",
       "ten minutes"
     ],
-    "promoted_edge_count": 9
+    "promoted_edge_count": 10
   },
   "extracted_entities": [
     "COLD-7",
     "COLD-7 Rollout Plan",
     "Dr. Imani Reyes",
     "Falcon Cache",
+    "Monday",
     "Pinion",
     "Pinion 3.1",
     "Pinion 3.2",
@@ -102,9 +104,9 @@
     {
       "id": "I06",
       "check": "positive",
-      "verdict": "FAIL",
+      "verdict": "PASS",
       "optional": false,
-      "detail": "no positive edge for pair",
+      "detail": "",
       "evidence": "Pinion is maintained by the Telemetry Group."
     },
     {

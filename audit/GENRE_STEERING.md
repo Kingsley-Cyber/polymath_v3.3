@@ -472,3 +472,21 @@ RECOMMENDED: encoder UNION as candidate generators (both providers → same
 census fold → same gates; recall=union, precision=gates, leakage proven robust)
 OR book-regression class diagnosis first. Owner decision pending.
 Seam + pinned candidate committed @34dc3c8 (config/entity_provider_gliner_bi.yaml).
+
+### Complementarity census + COMPOSITE PROMOTION (owner rule fired, 2026-08-08)
+Census (b): book-66 relations BOTH 52 / INCUMBENT_ONLY 8 / BI_ONLY 0 (union=60=incumbent);
+the 8 losses classified TYPE FLIPS (class C): bi finds every endpoint but types
+service-like names organization @.53-.58 → pair signatures reject. Pack spans:
+BOTH 19 / INC_ONLY 2 / BI_ONLY 17 / NEITHER 22 → union .633.
+CompositeEntityProvider (entity-composite-v1): both encoders as candidate
+generators, structural reconciliation only (identical decisions fold, type
+conflicts retained for existing arbitration, no cross-model score comparison).
+REQUAL UNDER COMPOSITE: pack A .62 / C 58%·26% / D-ent .221 (all best);
+book 60/66 R .909 FULLY RECOVERED (P .779→.723, promoted 83 — candidate volume
+cost, all safety classes still zero); sealed 45/51 best-equal; families 95/102
+BEST (+1, one family flipped to PASS); LEAKAGE 0 EVERYWHERE.
+→ PROMOTED to production candidate per the owner's rule (union materially
+exceeds both + leakage zero). Long-run constraint stands: ONE heavy encoder —
+primary+rescue optimization deferred until after the upper bound is banked;
+pair-explosion economics to be measured in factory soak. Pack remains
+dev/calibration data; release qualification = fresh sealed multi-domain docs.

@@ -3,9 +3,9 @@
   "status": "FAIL",
   "runtime": {
     "pipeline_release": "graphify-cpu-pipeline-v15",
-    "mongo_database": "graphify_eval_syn_02_31b0e7b1ce",
-    "corpus_id": "0017d39d-5335-592f-ad8d-1b961231692c",
-    "elapsed_seconds": 0.97,
+    "mongo_database": "graphify_eval_syn_02_91c2ab0676",
+    "corpus_id": "32b4126a-096f-51d2-8dc7-b0b2f64bfa0a",
+    "elapsed_seconds": 1.21,
     "interpreter": "/Users/king/polymath_v3.3/local_ghost_b/.venv/bin/python"
   },
   "items": {
@@ -51,6 +51,7 @@
     "Vaultstone",
     "archival store",
     "onboarding document",
+    "seven years",
     "the",
     "warm starts"
   ],

@@ -3,9 +3,9 @@
   "status": "PASS",
   "runtime": {
     "pipeline_release": "graphify-cpu-pipeline-v15",
-    "mongo_database": "graphify_eval_syn_10_b5a1d15baf",
-    "corpus_id": "40235928-13c4-5a3f-a448-49676d8d07ce",
-    "elapsed_seconds": 0.36,
+    "mongo_database": "graphify_eval_syn_10_d6263548d0",
+    "corpus_id": "1e48ad3c-d55d-52ec-b5ff-265f22550712",
+    "elapsed_seconds": 0.58,
     "interpreter": "/Users/king/polymath_v3.3/local_ghost_b/.venv/bin/python"
   },
   "items": {
@@ -38,7 +38,8 @@
     "Shoal Report",
     "Skerry\nInspection Suite",
     "Skerry Inspection Suite",
-    "Tidal Window Feed"
+    "Tidal Window Feed",
+    "aerial pier inspections"
   ],
   "item_results": [
     {

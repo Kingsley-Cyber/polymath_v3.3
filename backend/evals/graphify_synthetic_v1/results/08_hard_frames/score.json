@@ -3,9 +3,9 @@
   "status": "PASS",
   "runtime": {
     "pipeline_release": "graphify-cpu-pipeline-v15",
-    "mongo_database": "graphify_eval_syn_08_4dbed99d39",
-    "corpus_id": "2475744b-bd1e-5c39-b816-697e12b06634",
-    "elapsed_seconds": 0.47,
+    "mongo_database": "graphify_eval_syn_08_9933d5c82f",
+    "corpus_id": "076281a0-8016-5ecf-abca-ab3e1a9b9d2e",
+    "elapsed_seconds": 0.66,
     "interpreter": "/Users/king/polymath_v3.3/local_ghost_b/.venv/bin/python"
   },
   "items": {
@@ -40,7 +40,9 @@
     "Pier Nine",
     "Spring\nAudit Window",
     "Spring Audit Window",
+    "Wavemark",
     "Yard Stack",
+    "last spring",
     "sailing plans",
     "the"
   ],

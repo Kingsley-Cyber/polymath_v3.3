@@ -3,9 +3,9 @@
   "status": "PASS",
   "runtime": {
     "pipeline_release": "graphify-cpu-pipeline-v15",
-    "mongo_database": "graphify_eval_syn_09_993c2cf342",
-    "corpus_id": "65c980b1-ff31-577c-9cdc-3dbe72cec5ec",
-    "elapsed_seconds": 0.52,
+    "mongo_database": "graphify_eval_syn_09_f73159ff04",
+    "corpus_id": "0aae816b-3c20-52c5-8bdf-322f5bf23c48",
+    "elapsed_seconds": 0.69,
     "interpreter": "/Users/king/polymath_v3.3/local_ghost_b/.venv/bin/python"
   },
   "items": {
@@ -33,6 +33,7 @@
     "promoted_edge_count": 7
   },
   "extracted_entities": [
+    "Berth Fairness",
     "Berth Fairness Charter",
     "Booking\nLedger",
     "Booking Ledger",
@@ -44,7 +45,6 @@
     "Rejected manifests",
     "Stowage Planner",
     "Voltage sag",
-    "berth fairness",
     "breaker trips",
     "dockside joke",
     "eastern quay",

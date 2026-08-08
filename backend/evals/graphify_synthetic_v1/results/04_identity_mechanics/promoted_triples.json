@@ -43,5 +43,10 @@
     "subject": "telemetry group",
     "predicate": "supports",
     "object": "dr imani reyes"
+  },
+  {
+    "subject": "telemetry group",
+    "predicate": "supports",
+    "object": "pinion"
   }
 ]
