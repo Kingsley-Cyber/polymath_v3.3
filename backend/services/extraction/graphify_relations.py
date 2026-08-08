@@ -739,6 +739,92 @@ def _has_negation(token) -> bool:
     return any(child.dep_ == "neg" for child in token.children)
 
 
+_EPISTEMIC_CONFIG = _CONFIG_DIR / "epistemic_governors.yaml"
+
+
+@lru_cache(maxsize=1)
+def _epistemic_classes() -> dict[str, str]:
+    """Declarative governor-class membership (freeze-exception 2026-08-08).
+
+    The mechanism below is grammatical and fixed; this registry supplies
+    members only. Missing file = empty registry (mechanism inert)."""
+    try:
+        payload = yaml.safe_load(_EPISTEMIC_CONFIG.read_text(encoding="utf-8")) or {}
+    except FileNotFoundError:
+        return {}
+    out: dict[str, str] = {}
+    for cls, members in (payload.get("classes") or {}).items():
+        for lemma in members or ():
+            out[str(lemma).casefold()] = str(cls)
+    return out
+
+
+_MODAL_AUX = frozenset({"may", "might", "could", "would", "should"})
+
+
+def _embedded_governor_chain(token, max_depth: int = 4):
+    """Bounded climb through embedded-proposition arcs: for a relation
+    predicate inside a complement clause, yield the governing predicates."""
+    chain = []
+    current = token
+    depth = 0
+    while current.head.i != current.i and depth < max_depth:
+        # A complement clause FOLLOWS its governing predicate in English
+        # ("did not establish that X..."); an embedded arc pointing at a
+        # LATER governor is a parser-glued independent clause (semicolon
+        # joins), never that governor's content.
+        if (
+            current.dep_ in {"ccomp", "xcomp", "csubj", "advcl", "acl"}
+            and current.i > current.head.i
+        ):
+            chain.append(current.head)
+        current = current.head
+        depth += 1
+    return chain
+
+
+def _epistemic_nonfact(token) -> bool:
+    """An epistemic/evidential governor blocks its embedded proposition when
+    the governor is negated ('did not establish that', 'could not confirm
+    that') or is itself negative-implicative ('failed to demonstrate').
+    Positive evidential governors leave the embedded assertion intact —
+    the mechanism contains, it never blanket-demotes."""
+    classes = _epistemic_classes()
+    for governor in _embedded_governor_chain(token):
+        cls = classes.get(governor.lemma_.casefold())
+        if cls is None:
+            continue
+        if cls == "negative_implicative":
+            return True
+        if _has_negation(governor):
+            return True
+    return False
+
+
+def _catenative_chain_context(token) -> tuple[bool, bool, bool]:
+    """Inherited assertion context through the xcomp catenative chain:
+    'might begin consuming' modalizes 'consuming'; 'was expected to begin
+    using' marks the chain prospective. Returns (modal, negated, attitude)."""
+    modal = negated = attitude = False
+    classes = _epistemic_classes()
+    current = token
+    depth = 0
+    while current.dep_ == "xcomp" and current.head.i != current.i and depth < 4:
+        governor = current.head
+        if any(
+            child.dep_ in {"aux", "auxpass"} and child.lemma_.casefold() in _MODAL_AUX
+            for child in governor.children
+        ):
+            modal = True
+        if _has_negation(governor):
+            negated = True
+        if classes.get(governor.lemma_.casefold()) == "attitude_prospective":
+            attitude = True
+        current = governor
+        depth += 1
+    return modal, negated, attitude
+
+
 def _marked_conditional_clause(token) -> bool:
     return any(
         child.dep_ == "mark" and child.lemma_.casefold() in _CONDITIONAL_MARKERS
@@ -868,20 +954,21 @@ def _qualifiers(token, _text: str) -> tuple[str, str, str]:
     direct_negated = _has_negation(token) or (predicate is not token and _has_negation(predicate))
     denied = any(item.lemma_.casefold() in _DENIAL_LEMMAS for item in governors) or claim_noun_rejected
     negated_attribution = any(_has_negation(item) for item in governors)
-    if denied:
+    chain_modal, chain_negated, chain_attitude = _catenative_chain_context(predicate)
+    if denied or _epistemic_nonfact(token):
         polarity = "denied"
-    elif direct_negated or negated_attribution:
+    elif direct_negated or negated_attribution or chain_negated:
         polarity = "negative"
     else:
         polarity = "positive"
     if _conditional_scope(token, predicate):
         modality = "conditional"
-    elif any(
+    elif chain_modal or any(
         child.dep_ == "aux" and child.lemma_.casefold() in {"may", "might", "could", "would", "should"}
         for child in predicate.children
     ):
         modality = "hypothetical"
-    elif attribution:
+    elif attribution or chain_attitude:
         modality = "attributed"
     else:
         modality = "asserted"

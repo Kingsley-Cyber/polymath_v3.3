@@ -684,3 +684,84 @@ def test_single_pass_relex_candidates_skip_second_neural_pass(monkeypatch) -> No
     assert relex_rows[0].canonical_candidate == "uses"
     assert relex_rows[0].terminal_state.value == "accepted"  # corroborated duplicate
     assert output.report["relex_semantic_proposals"] == 1
+
+
+# ── Freeze-exception fixtures (owner-authorized 2026-08-08) ──────────────
+# Burned BEFORE implementation: epistemic-governor scope propagation and
+# catenative modal inheritance. Positive forms must stay accepted — the
+# fix may only contain, never blanket-demote.
+
+def _accepted_pair(output, subject, obj):
+    return any(
+        r.terminal_state.value == "accepted"
+        and r.subject_mention_id.endswith(f":{subject}")
+        and r.object_mention_id.endswith(f":{obj}")
+        for r in output.mapped_relations
+    )
+
+
+def _pair_state_set(output, subject, obj):
+    return {
+        r.terminal_state.value for r in output.mapped_relations
+        if r.subject_mention_id.endswith(f":{subject}")
+        and r.object_mention_id.endswith(f":{obj}")
+    }
+
+
+def test_negated_epistemic_governor_contains_embedded_fact() -> None:
+    for text in (
+        "The study did not establish that Alphaline causes Betamark.",
+        "The authors failed to demonstrate that Alphaline causes Betamark.",
+        "The analysis could not confirm that Alphaline causes Betamark.",
+        "The report did not find that Alphaline causes Betamark.",
+    ):
+        output = _run(text, [("Alphaline", "method"), ("Betamark", "concept")])
+        assert not _accepted_pair(output, "Alphaline", "Betamark"), text
+
+
+def test_positive_epistemic_governor_keeps_embedded_fact() -> None:
+    for text in (
+        "The experiment proved that Alphaline causes Betamark.",
+        "The study found that Alphaline causes Betamark.",
+    ):
+        output = _run(text, [("Alphaline", "method"), ("Betamark", "concept")])
+        assert _accepted_pair(output, "Alphaline", "Betamark"), text
+
+
+def test_catenative_modal_chain_inherits_modality() -> None:
+    for text in (
+        "Alphaline might begin consuming Betamark.",
+        "Alphaline may continue consuming Betamark.",
+    ):
+        output = _run(text, [("Alphaline", "software"), ("Betamark", "software")])
+        states = _pair_state_set(output, "Alphaline", "Betamark")
+        assert "accepted" not in states, (text, states)
+        assert "qualified" in states or "review" in states, (text, states)
+
+
+def test_plain_catenative_chain_stays_asserted() -> None:
+    for text in (
+        "Alphaline began consuming Betamark.",
+        "Alphaline continues consuming Betamark.",
+    ):
+        output = _run(text, [("Alphaline", "software"), ("Betamark", "software")])
+        assert _accepted_pair(output, "Alphaline", "Betamark"), text
+
+
+def test_expected_to_chain_is_not_asserted() -> None:
+    output = _run(
+        "Alphaline was expected to begin using Betamark.",
+        [("Alphaline", "software"), ("Betamark", "software")],
+    )
+    assert not _accepted_pair(output, "Alphaline", "Betamark")
+
+
+def test_preceding_clause_is_not_governor_complement() -> None:
+    # sm-parser glues semicolon-joined independent clauses into ccomp arcs;
+    # a clause PRECEDING a registry governor is not its complement content
+    # (English complement clauses follow their governing predicate).
+    output = _run(
+        "Alphaline consumes Betamark; without approval, the operator refuses to proceed.",
+        [("Alphaline", "software"), ("Betamark", "software")],
+    )
+    assert _accepted_pair(output, "Alphaline", "Betamark")
