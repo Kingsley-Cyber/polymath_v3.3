@@ -88,7 +88,7 @@
   "backend/services/extraction/graphify_census.py": "f8c2968b002a70e3f70db8f51e7431b93112f27b001a7d1a54e2a19787bc4669",
   "backend/services/extraction/graphify_completion.py": "faac6cb22e3831ada1a4574f825b4080fe6ce7477e4053bcc9e59588bb569064",
   "backend/services/extraction/graphify_normalization.py": "ca137159ad89925050930eb9963e4a719bbcb9ed42ddce89cf0b37551b4d29d6",
-  "backend/services/extraction/graphify_openie.py": "38a8dddf7a67494e4e8acc889d7354ee82f0f02a1aa0c1d8ffd9b3bd343c4262",
+  "backend/services/extraction/graphify_openie.py": "ffbb065210f79c1c7c0bd776ce1fd88fa7e61428c9bd3ebc4a5dc9f12589f753",
   "backend/services/extraction/graphify_pipeline.py": "babb5b57499cbd1af7ec8fcf3cb3075053f7abe2e058723d27efa0c696ea29ed",
   "backend/services/extraction/graphify_predicate_compiler.py": "8960d610b6a548418512f6dc0c1135e66ecf3531e5b8d5fadb0d65741cd8c187",
   "backend/services/extraction/graphify_proposition_reducer.py": "e86c0b03c4a43e7239eec3c4efa3272950e46d2e8f6f01b8e56a1170b5d239e5",
@@ -97,6 +97,7 @@
   "backend/services/extraction/graphify_survey.py": "c06828c6e8e62b778ecbccc5d17b523569e1adbc666d790d61bd3bbe0b4b13f2",
   "backend/services/extraction/graphify_unit_kind.py": "cc7d908c6f51cdea1df0acbcd7ae3c7ccf40c417d08ba9c80433eca74d308eb9",
   "backend/services/extraction/graphify_value_ir.py": "6583d1b9220236e6da8b4a5fa0a155de24b77866631bc05bdc3ba23663aae774",
+  "backend/services/extraction/openie_farm.py": "f7af024b46205358de9775e3f471a2ccea1043e960c0eda753b32a58a2412c98",
   "backend/services/ghost_b.py": "497dd4c678b72a544ec306937f8e6e74a7ebb0e818929790e0fca7fca7c69792",
   "backend/services/graph/neo4j_writer.py": "a90c06cd00c05c9bd0f3d22db0942c353ece411141ffdc85cb77ed1a9af60e5d",
   "backend/services/ingestion/docling_adapter.py": "87d90c9981f50fa2dcbf2ca94aea1b2d6ceb1b1a420b5b4104868f15e08835f5",
@@ -130,7 +131,7 @@
   "spacy_model": "en_core_web_sm"
  },
  "freeze_id": "graphify-qualification-freeze-v6",
- "frozen_at_commit": "0cb560883d73ae5a8883563e16489ba15cfcd966",
+ "frozen_at_commit": "bb74031c55526f41965b910d4014c2a835b0f9c2",
  "known_residuals_at_freeze": [
   "lowercase concept-phrase entities ('atomic deconstruction', 'text-to-video') intentionally suppressed by genericity gates \u2014 sealed-v2-class gold needs an owner contract decision before such relations can promote",
   "spec-metadata key mapping policy beyond self-naming keys (primary_system, has_type ...) undecided",
@@ -138,6 +139,6 @@
   "DENSE_STRUCTURE routing (labeling live, handler pending); per-proposer promotion telemetry pending",
   "agentless participles (E10), D04-class typing, cross-sentence relations"
  ],
- "purpose": "Round-1 downstream remediation freeze: adapter-v2 deterministic linking ladder, evidence-scoped FACT merge, self-loop + function-word guards. Precedes sealed_qualification_v7/v8 (research-monograph scale tests). Revised post-census-fold fix (scale crash on v7 first attempt; no key existed, seal unaffected). Re-pinned after promotable-endpoint acceptance rule (v7 scale crash #2). Re-pinned after artifact shard codec (v8 DocumentTooLarge). Re-pinned after legacy GLiNER/GLiREL purge (behavior-neutral, A/B-proven). Re-pinned after ratified #5+#6 (according-to attribution, frame-scoped operate). Re-pinned after factory station 1 (unit.kind + structure propagation). Re-pinned after factory station 2 (structural endpoint eligibility). Re-pinned after factory station 3 (identifier minting). Re-pinned after factory station 4 (qualifier IR).",
+ "purpose": "Round-1 downstream remediation freeze: adapter-v2 deterministic linking ladder, evidence-scoped FACT merge, self-loop + function-word guards. Precedes sealed_qualification_v7/v8 (research-monograph scale tests). Revised post-census-fold fix (scale crash on v7 first attempt; no key existed, seal unaffected). Re-pinned after promotable-endpoint acceptance rule (v7 scale crash #2). Re-pinned after artifact shard codec (v8 DocumentTooLarge). Re-pinned after legacy GLiNER/GLiREL purge (behavior-neutral, A/B-proven). Re-pinned after ratified #5+#6 (according-to attribution, frame-scoped operate). Re-pinned after factory station 1 (unit.kind + structure propagation). Re-pinned after factory station 2 (structural endpoint eligibility). Re-pinned after factory station 3 (identifier minting). Re-pinned after factory station 4 (qualifier IR). Re-pinned after factory station A (openie farm; digest-equal execution change only).",
  "supersedes": "freeze_v5 (closed; sealed_v6 graded under it: traps 11/11, FACT .462)"
 }
