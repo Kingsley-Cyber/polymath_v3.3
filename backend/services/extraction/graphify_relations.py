@@ -739,6 +739,100 @@ def _has_negation(token) -> bool:
     return any(child.dep_ == "neg" for child in token.children)
 
 
+_ASSERTION_CONTEXT_CONFIG = _CONFIG_DIR / "assertion_context.yaml"
+
+
+@lru_cache(maxsize=1)
+def _assertion_context() -> dict:
+    """Assertion-context layer registry (systematic completion 2026-08-08).
+    Missing file = empty registry (mechanisms inert)."""
+    try:
+        payload = yaml.safe_load(_ASSERTION_CONTEXT_CONFIG.read_text(encoding="utf-8")) or {}
+    except FileNotFoundError:
+        return {}
+    return {key: frozenset(str(v).casefold() for v in values or ())
+            for key, values in payload.items()}
+
+
+def _inverted_conditional_clause(node) -> bool:
+    """Marker-less counterfactual protasis: subject-aux inversion — the
+    clause's auxiliary (had/were/should) PRECEDES its subject
+    ("Had X depended on Y, ...", "Should X fail, ...")."""
+    aux_lemmas = _assertion_context().get("inversion_auxiliaries", frozenset())
+    subjects = [c for c in node.children if c.dep_ in {"nsubj", "nsubjpass", "nsubj:pass"}]
+    auxes = [c for c in node.children if c.dep_ in {"aux", "auxpass"}
+             and c.lower_ in aux_lemmas]  # surface form IS the inversion signal
+    return bool(subjects and auxes and min(a.i for a in auxes) < min(s.i for s in subjects))
+
+
+def _interrogative_scope(token) -> bool:
+    """The clause containing the relation is interrogative content: a
+    whether/if COMPLEMENT (mark on the clause, complement position), a
+    wh-question, or a question-mark sentence. Questions assert nothing."""
+    marks = _assertion_context().get("interrogative_marks", frozenset())
+    for node in (token, *token.ancestors):
+        for child in node.children:
+            if child.dep_ == "mark" and child.lemma_.casefold() in marks:
+                if child.lemma_.casefold() == "if" and node.dep_ not in {"ccomp", "csubj", "acl"}:
+                    continue  # adverbial 'if' is conditional scope, handled there
+                return True
+    sent = token.sent
+    if sent.text.rstrip().endswith("?"):
+        return True
+    return False
+
+
+def _adjectival_epistemic_uncertain(token) -> bool:
+    """'It is unresolved/unclear/unknown whether|that X ...' — the clause is
+    governed by an uncertainty predicate adjective; content is not asserted."""
+    adjectives = _assertion_context().get("epistemic_uncertainty_adjectives", frozenset())
+    for node in (token, *token.ancestors):
+        if node.dep_ in {"ccomp", "csubj", "xcomp", "acl"} and node.i > node.head.i:
+            head = node.head
+            if head.pos_ == "ADJ" and head.lemma_.casefold() in adjectives:
+                return True
+            if head.lemma_.casefold() == "be" and any(
+                c.dep_ in {"acomp", "attr"} and c.lemma_.casefold() in adjectives
+                for c in head.children
+            ):
+                return True
+            for c in head.children:
+                if c.dep_ in {"acomp", "attr", "oprd"} and c.lemma_.casefold() in adjectives:
+                    return True
+    return False
+
+
+def _directive_scope(token) -> bool:
+    """Mandative complements ('requires that X use Y') and imperative roots
+    ('Configure X to consume Y') are directives, never facts."""
+    directives = _assertion_context().get("directive_governors", frozenset())
+    for governor in _embedded_governor_chain(token):
+        if governor.lemma_.casefold() in directives:
+            return True
+    root = token.sent.root
+    if (
+        root.tag_ == "VB"
+        and not any(c.dep_ in {"nsubj", "nsubjpass", "nsubj:pass"} for c in root.children)
+        and not token.sent.text.rstrip().endswith("?")
+    ):
+        return True
+    return False
+
+
+def _negative_adverb(token) -> bool:
+    adverbs = _assertion_context().get("negative_adverbs", frozenset())
+    for node in (token, token.head):
+        for child in node.children:
+            lemma = child.lemma_.casefold()
+            if child.dep_ == "advmod" and lemma in adverbs:
+                return True
+            if child.lower_ == "longer" and any(
+                g.dep_ == "neg" or g.lower_ == "no" for g in child.children
+            ):
+                return True
+    return False
+
+
 _EPISTEMIC_CONFIG = _CONFIG_DIR / "epistemic_governors.yaml"
 
 
@@ -826,8 +920,9 @@ def _catenative_chain_context(token) -> tuple[bool, bool, bool]:
 
 
 def _marked_conditional_clause(token) -> bool:
+    markers = _CONDITIONAL_MARKERS | _assertion_context().get("conditional_markers_extra", frozenset())
     return any(
-        child.dep_ == "mark" and child.lemma_.casefold() in _CONDITIONAL_MARKERS
+        child.dep_ == "mark" and child.lemma_.casefold() in markers
         for child in token.children
     )
 
@@ -836,6 +931,17 @@ def _conditional_scope(token, predicate) -> bool:
     # The predicate is inside an if/unless adverbial clause.
     if any(
         node.dep_ == "advcl" and _marked_conditional_clause(node)
+        for node in (token, *token.ancestors)
+    ):
+        return True
+    # Marker-less counterfactual protasis via subject-aux inversion:
+    # "Had X depended on Y, ..." — aux-before-subject with had/were/should
+    # is ALWAYS a non-assertion context in English (conditional inversion,
+    # question, or negative inversion), so the inversion shape decides on
+    # ANY clause label — broken parses relabel the clause but cannot
+    # destroy the inversion signal.
+    if any(
+        _inverted_conditional_clause(node)
         for node in (token, *token.ancestors)
     ):
         return True
@@ -957,12 +1063,21 @@ def _qualifiers(token, _text: str) -> tuple[str, str, str]:
     chain_modal, chain_negated, chain_attitude = _catenative_chain_context(predicate)
     if denied or _epistemic_nonfact(token):
         polarity = "denied"
-    elif direct_negated or negated_attribution or chain_negated:
+    elif (
+        direct_negated or negated_attribution or chain_negated
+        or _negative_adverb(predicate) or (predicate is not token and _negative_adverb(token))
+    ):
         polarity = "negative"
     else:
         polarity = "positive"
     if _conditional_scope(token, predicate):
         modality = "conditional"
+    elif _interrogative_scope(token):
+        modality = "interrogative"
+    elif _adjectival_epistemic_uncertain(token):
+        modality = "uncertain"
+    elif _directive_scope(token):
+        modality = "directive"
     elif chain_modal or any(
         child.dep_ == "aux" and child.lemma_.casefold() in {"may", "might", "could", "would", "should"}
         for child in predicate.children

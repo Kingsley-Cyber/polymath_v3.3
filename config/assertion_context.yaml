@@ -1,0 +1,12 @@
+# Assertion-context layer — declarative membership (owner-authorized
+# systematic completion, 2026-08-08). The CODE owns the grammatical
+# mechanisms (inversion detection, mark inspection, governor walks,
+# imperative shape); this registry owns only class members.
+conditional_markers_extra: [provided, providing, assuming, supposing, whenever]
+inversion_auxiliaries: [had, were, should]
+interrogative_marks: [whether, if]          # 'if' only in COMPLEMENT position (ccomp), never advcl
+epistemic_uncertainty_adjectives: [unresolved, unclear, unknown, uncertain,
+                                   undetermined, unproven, disputed, debatable,
+                                   questionable, unverified]
+directive_governors: [require, demand, insist, mandate, direct, instruct, urge]
+negative_adverbs: [never, "no longer", rarely, seldom, hardly, scarcely]

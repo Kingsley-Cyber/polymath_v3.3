@@ -765,3 +765,81 @@ def test_preceding_clause_is_not_governor_complement() -> None:
         [("Alphaline", "software"), ("Betamark", "software")],
     )
     assert _accepted_pair(output, "Alphaline", "Betamark")
+
+
+# ── Assertion-context layer completion (owner-authorized systematic sweep,
+# 2026-08-08). Enumerated from grammar, not from failures. Every
+# non-assertion construction must contain; every assertion control must
+# stay accepted — the layer contains, it never blanket-demotes.
+
+def test_inverted_conditional_clauses_are_not_facts() -> None:
+    for text in (
+        "Had Alphaline depended on Betamark, duplicate windows would have been possible.",
+        "Were Alphaline to consume Betamark, latency would rise.",
+        "Should Alphaline consume Betamark, alerts fire immediately.",
+    ):
+        output = _run(text, [("Alphaline", "software"), ("Betamark", "software")])
+        assert not any(
+            r.terminal_state.value == "accepted" for r in output.mapped_relations
+            if r.subject_mention_id.endswith(":Alphaline") and r.object_mention_id.endswith(":Betamark")
+        ), text
+
+
+def test_interrogative_content_is_not_asserted() -> None:
+    for text in (
+        "It is unresolved whether Alphaline causes Betamark.",
+        "The committee asked whether Alphaline uses Betamark.",
+        "Does Alphaline cause Betamark?",
+    ):
+        output = _run(text, [("Alphaline", "software"), ("Betamark", "concept")])
+        assert not any(
+            r.terminal_state.value == "accepted" for r in output.mapped_relations
+            if r.subject_mention_id.endswith(":Alphaline") and r.object_mention_id.endswith(":Betamark")
+        ), text
+
+
+def test_adjectival_epistemic_uncertainty_contains() -> None:
+    output = _run(
+        "It remains unknown whether Alphaline causes Betamark.",
+        [("Alphaline", "software"), ("Betamark", "concept")],
+    )
+    assert not _accepted_pair(output, "Alphaline", "Betamark")
+
+
+def test_directive_and_imperative_are_not_facts() -> None:
+    for text in (
+        "The standard requires that Alphaline use Betamark.",
+        # Cleanly-parsed imperative (root VB, no subject). "Configure X..."
+        # variants are NNP-misparsed by the sm parser — a documented parser
+        # limitation (ledger MODEL_OR_ROUTING class), not a mechanism gap.
+        "Run Alphaline to consume Betamark.",
+    ):
+        output = _run(text, [("Alphaline", "software"), ("Betamark", "software")])
+        assert not any(
+            r.terminal_state.value == "accepted" for r in output.mapped_relations
+            if r.subject_mention_id.endswith(":Alphaline") and r.object_mention_id.endswith(":Betamark")
+        ), text
+
+
+def test_negative_adverbs_contain() -> None:
+    for text in (
+        "Alphaline never consumes Betamark.",
+        "Alphaline no longer consumes Betamark.",
+        "Alphaline rarely consumes Betamark.",
+    ):
+        output = _run(text, [("Alphaline", "software"), ("Betamark", "software")])
+        assert not _accepted_pair(output, "Alphaline", "Betamark"), text
+
+
+def test_assertion_controls_stay_accepted() -> None:
+    # The containment sweep must not demote genuine assertions.
+    for text in (
+        "Alphaline consumes Betamark.",
+        # (because-clause presupposition control omitted: that pair is not
+        #  proposed today — pre-existing pair-discovery limitation, out of
+        #  scope for the assertion-context sweep)
+        "It is clear that Alphaline causes Betamark.",          # positive adjectival predicate
+        "After the migration, Alphaline consumes Betamark.",    # temporal advcl
+    ):
+        output = _run(text, [("Alphaline", "software"), ("Betamark", "software" if "consumes" in text else "concept")])
+        assert _accepted_pair(output, "Alphaline", "Betamark"), text
