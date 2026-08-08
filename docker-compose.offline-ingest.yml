@@ -58,6 +58,7 @@ services:
       # artifacts, no longer in the production path.
       GRAPHIFY_ENTITY_PROVIDER: ${GRAPHIFY_ENTITY_PROVIDER:-relex}
       GRAPHIFY_RELEX_RELATIONS: ${GRAPHIFY_RELEX_RELATIONS:-1}
+      GRAPHIFY_ADAPTER_COMPILER: ${GRAPHIFY_ADAPTER_COMPILER:-1}
       RELEX_SIDECAR_URL: ${RELEX_SIDECAR_URL:-http://host.docker.internal:8737}
       MONGODB_URI: mongodb://${MONGO_USER:-polymath}:${MONGO_PASSWORD}@mongodb:27017/polymath?authSource=admin
       QDRANT_URL: http://qdrant:6333

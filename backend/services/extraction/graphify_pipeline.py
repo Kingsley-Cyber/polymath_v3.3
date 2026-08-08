@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import inspect
 import time
 from dataclasses import dataclass
@@ -458,6 +459,20 @@ async def run_graphify_pipeline(
         output_count=lambda payload: 1,
     )
     survey = DocumentSurveyV1.model_validate(survey_payload["survey"])
+
+    if os.environ.get("GRAPHIFY_ADAPTER_COMPILER", "").strip() == "1":
+        # Released production path: gold-blind per-document adapter
+        # compilation (profiler reads ONLY the document text; packs are
+        # frozen declarative knowledge; validator fails closed).
+        from services.ontology_adapter.profiler import profile_document
+        from services.ontology_adapter.schema_compiler import compile_adapter
+        from services.ontology_adapter.providers.relex import activate_for_document
+
+        compiled_ir = compile_adapter(
+            profile_document(document.normalized_text),
+            adapter_id=document.document_id[:16],
+        )
+        activate_for_document(document.document_id, compiled_ir)
 
     census_input_hash = stable_digest({
         "document": document.normalized_sha256,

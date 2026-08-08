@@ -337,7 +337,14 @@ def select_schema_adapters(
             or identifier_density >= float(rules.get("identifier_density_min", 2.0))
         ):
             selected.append(name)
-    return tuple(sorted(set(selected) | set(forced)))
+    compiled = ()
+    try:
+        from services.ontology_adapter.providers.relex import adapter_for_document
+        name = adapter_for_document(document.document_id)
+        compiled = (name,) if name else ()
+    except Exception:  # noqa: BLE001 — adapter layer absent = config adapters only
+        compiled = ()
+    return tuple(sorted(set(selected) | set(forced) | set(compiled)))
 
 
 def run_entity_census(

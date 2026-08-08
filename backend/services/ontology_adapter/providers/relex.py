@@ -12,16 +12,25 @@ from services.ontology_adapter.adapter_ir import AdapterIR
 from services.ontology_adapter.validator import validate_ir
 
 _ACTIVE: AdapterIR | None = None
+_BY_DOCUMENT: dict[str, str] = {}
+_IR_BY_NAME: dict[str, AdapterIR] = {}
 
 
 def active_adapter() -> AdapterIR | None:
     return _ACTIVE
 
 
+def adapter_for_document(document_id: str) -> str | None:
+    return _BY_DOCUMENT.get(document_id)
+
+
 def extra_relation_labels() -> tuple[str, ...]:
-    if _ACTIVE is None:
-        return ()
-    return tuple(p.surface for p in _ACTIVE.predicates)
+    surfaces: list[str] = []
+    if _ACTIVE is not None:
+        surfaces.extend(p.surface for p in _ACTIVE.predicates)
+    for ir in _IR_BY_NAME.values():
+        surfaces.extend(p.surface for p in ir.predicates)
+    return tuple(dict.fromkeys(surfaces))
 
 
 def activate(ir: AdapterIR) -> str:
@@ -52,6 +61,18 @@ def activate(ir: AdapterIR) -> str:
     return name
 
 
+def activate_for_document(document_id: str, ir: AdapterIR) -> str:
+    """Per-document compiled adapter (production wiring): registers the IR
+    and binds it to this document; select_schema_adapters consults the
+    binding. Gold-blind by construction — the IR came from the profiler."""
+    name = activate(ir)
+    _BY_DOCUMENT[document_id] = name
+    _IR_BY_NAME[name] = ir
+    return name
+
+
 def deactivate() -> None:
     global _ACTIVE
     _ACTIVE = None
+    _BY_DOCUMENT.clear()
+    _IR_BY_NAME.clear()
