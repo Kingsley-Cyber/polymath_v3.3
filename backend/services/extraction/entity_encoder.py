@@ -208,6 +208,68 @@ class RelexSidecarEntityProvider:
 _RELEX_PROVIDER: RelexSidecarEntityProvider | None = None
 
 
+ENTITY_SIDECAR_CONTRACT = "entity-predict-v1"
+
+
+def _entity_sidecar_url() -> str:
+    explicit = os.environ.get("ENTITY_SIDECAR_URL", "").strip()
+    if explicit:
+        return explicit.rstrip("/")
+    if os.path.exists("/.dockerenv"):
+        return "http://host.docker.internal:8738"
+    return "http://127.0.0.1:8738"
+
+
+class SidecarEntityProvider:
+    """One qualified entity provider executed on the host-MPS entity sidecar.
+
+    The sidecar runs the EXISTING provider code (byte-identical decisions
+    per the placement A/B); this class is transport only. kind selects
+    which provider the sidecar executes: 'gliner2' or 'gliner_bi'.
+    """
+
+    def __init__(self, kind: str) -> None:
+        self.kind = kind
+        self.release = f"entity-sidecar-mps-v1({kind})"
+
+    def predict_entities(
+        self,
+        texts: Sequence[str],
+        *,
+        batch_size: int = 4,
+        threshold: float = 0.5,
+        adapters: tuple[str, ...] = (),
+    ) -> list[list[EntityPrediction]]:
+        import json as _json
+        import urllib.request
+
+        request = urllib.request.Request(
+            _entity_sidecar_url() + "/predict",
+            data=_json.dumps({
+                "provider": self.kind, "texts": list(texts),
+                "adapters": list(adapters), "threshold": threshold,
+                "batch_size": batch_size,
+            }).encode(),
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=1800) as response:
+            body = _json.loads(response.read())
+        if body.get("contract") != ENTITY_SIDECAR_CONTRACT:
+            raise RuntimeError(f"entity sidecar contract mismatch: {body.get('contract')!r}")
+        return [
+            [
+                EntityPrediction(
+                    text=item["text"], entity_type=item["entity_type"],
+                    start=int(item["start"]), end=int(item["end"]),
+                    confidence=float(item["confidence"]),
+                    facet=item.get("facet") or "",
+                )
+                for item in row
+            ]
+            for row in body["results"]
+        ]
+
+
 def get_entity_encoder_provider():
     """The one selection seam. Default = frozen GLiNER2 baseline."""
     global _BI_PROVIDER
@@ -226,6 +288,16 @@ def get_entity_encoder_provider():
         if _RELEX_PROVIDER is None:
             _RELEX_PROVIDER = RelexSidecarEntityProvider()
         return _RELEX_PROVIDER
+    if choice in ("composite_sidecar", "sidecar_composite"):
+        global _COMPOSITE_SIDECAR
+        if _COMPOSITE_SIDECAR is None:
+            _COMPOSITE_SIDECAR = CompositeSidecarProvider()
+        return _COMPOSITE_SIDECAR
+    if choice in ("gliner2_sidecar",):
+        global _GLINER2_SIDECAR
+        if _GLINER2_SIDECAR is None:
+            _GLINER2_SIDECAR = SidecarEntityProvider("gliner2")
+        return _GLINER2_SIDECAR
     return get_gliner2_cpu_provider()
 
 
@@ -284,3 +356,17 @@ class CompositeEntityProvider:
 
 
 _COMPOSITE: CompositeEntityProvider | None = None
+class CompositeSidecarProvider(CompositeEntityProvider):
+    """Composite arbitration unchanged; both generators execute on the
+    host-MPS sidecar instead of in-process. Fold logic is inherited —
+    reconciliation stays pipeline knowledge, transport stays dumb."""
+
+    release = "entity-composite-sidecar-v1(gliner2+gliner-bi@mps)"
+
+    def __init__(self) -> None:  # noqa: D401 — no in-process model loads
+        self._incumbent = SidecarEntityProvider("gliner2")
+        self._candidate = SidecarEntityProvider("gliner_bi")
+
+
+_COMPOSITE_SIDECAR: CompositeSidecarProvider | None = None
+_GLINER2_SIDECAR: SidecarEntityProvider | None = None

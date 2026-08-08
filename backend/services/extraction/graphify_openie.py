@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.metadata
 import threading
+import os
 import time
 import re
 from dataclasses import dataclass
@@ -272,6 +273,29 @@ def run_openie_extraction(
     units: Sequence[OpenIEUnit],
     provider: TripletExtractCPUProvider,
 ) -> OpenIEOutput:
+    if os.environ.get("GRAPHIFY_OPENIE_DISABLED", "").strip() == "1":
+        # Ablation seam (owner-ordered deletion phase): the broad OpenIE
+        # proposition lane is switched off end to end — downstream OpenIE
+        # stages (adaptation, reduction, assembly) no-op on empty input.
+        # Default-off; flag-off behavior is byte-identical.
+        return OpenIEOutput((), {
+            "engine": "disabled_ablation",
+            "openie_workers": 0,
+            "at_most_one_provider_call_per_eligible_unit": True,
+            "every_eligible_unit_routed": True,
+            "deterministic_only_units": 0,
+            "raw_renderings": 0,
+            "deterministic_surface_recoveries": 0,
+            "persisted_propositions": 0,
+            "conservation": True,
+            "exact_evidence_alignment": True,
+            "attributed_renderings": 0,
+            "negated_asserter_links": 0,
+            "no_graph_writes": True,
+            "elapsed_seconds": 0.0,
+            "health": {"status": "disabled"},
+            "identity_digest": stable_digest([]),
+        })
     document_by_id = {document.document_id: document for document in documents}
     propositions: list[OpenIERawPropositionV1] = []
     eligible = [unit for unit in units if unit.eligible]
