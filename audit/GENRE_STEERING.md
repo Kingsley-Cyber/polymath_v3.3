@@ -390,3 +390,20 @@ container CPU 496.4s → host CPU 70.9s (7.0x — pure Docker-VM tax) → host M
 1.0). RATIFIED BOUNDARY: host-native warm GLiNER2 sidecar on Metal (same pattern as
 the embedder/reranker sidecars); the model was never slow — the VM was. Next ladder:
 split the 157s unattributed bucket → OpenIE 104s → adaptation 46s.
+
+### q8 parity gate on the factory corpus (2026-08-08)
+STRUCTURAL UNIVERSE PARITY: PERFECT — focused 754==754, hierarchical 442==442,
+graph_seed 754==754; candidate drift 0, route leakage 0, payload identity
+mismatches 0 on every route. Vector census 512/512 dense+sparse; same point ids;
+same collection configs; same-id vectors cosine 1.0.
+LIVE Fast/Hybrid/Graph SSE runs (30 queries, both layouts): within-layout
+determinism 0/0; shadow latency equal or better (hierarchical p50 66.8s vs 85.8s);
+tail drift ~1-2 sources/query — STRUCTURALLY EXPLAINED, not patched: legacy
+physically co-mingles 442 parent-summary points inside `naive` and the legacy
+focused search includes them; q8's eligible_focused is CHILDREN-ONLY by the
+ratified contract (route behavior = payload flags; summaries live as
+parent_summary records for hierarchical/hydration). The drift is the new
+contract being stricter than the legacy accident, not a regression.
+OWNER CUTOVER DECISION: keep children-only focused (contract-faithful,
+recommended — summary text remains reachable via the hierarchical lane and
+child_summary hydration) or add an explicit summary-inclusive focused filter.
