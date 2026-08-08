@@ -670,7 +670,15 @@ async def run_graphify_pipeline(
         }
         qualified_spans_by_key: dict[tuple, list[tuple[int, int]]] = {}
         for item in mapped:
-            if item.terminal_state.value == "qualified":
+            # Qualifier VETO authority belongs to the syntax lanes alone:
+            # a demoted semantic-lane candidate is a withheld proposal, not
+            # evidence that the sentence qualifies the fact. Burned sealed
+            # counterexample: relex duplicates of accepted golds landed
+            # QUALIFIED and silently blocked the same-evidence OpenIE FACTs.
+            if (
+                item.terminal_state.value == "qualified"
+                and item.dependency_frame != "relex:semantic"
+            ):
                 qualified_spans_by_key.setdefault(
                     (item.subject_mention_id, item.object_mention_id, item.canonical_candidate),
                     [],

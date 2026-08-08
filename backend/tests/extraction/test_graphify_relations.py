@@ -599,3 +599,54 @@ def test_object_list_never_absorbs_a_following_verbs_arguments() -> None:
     }
     assert ("gateway", "failures") not in routed
     assert ("gateway", "metrics") not in routed
+
+
+def test_relex_semantic_accepts_only_same_canonical_corroboration(monkeypatch) -> None:
+    # The semantic lane strengthens structurally-accepted triples; it never
+    # introduces a new canonical edge (round-2 burned measurement: pair-level
+    # corroboration let it name OPEN pairs and promote battery negatives).
+    from services.extraction import relex_sidecar_client
+
+    def fake_infer(texts, **kwargs):
+        results = []
+        for text in texts:
+            rels = []
+            if "Envoy" in text:
+                a, b = text.find("Harbor Gateway"), text.find("Envoy")
+                rels = [
+                    relex_sidecar_client.RelexRelation(
+                        head_start=a, head_end=a + 14, head_text="Harbor Gateway",
+                        tail_start=b, tail_end=b + 5, tail_text="Envoy",
+                        label="uses", score=0.97,
+                    ),
+                    relex_sidecar_client.RelexRelation(
+                        head_start=a, head_end=a + 14, head_text="Harbor Gateway",
+                        tail_start=b, tail_end=b + 5, tail_text="Envoy",
+                        label="owns", score=0.96,
+                    ),
+                ]
+            results.append(relex_sidecar_client.RelexResult(entities=(), relations=tuple(rels)))
+        return results
+
+    monkeypatch.setattr(relex_sidecar_client, "infer", fake_infer)
+    monkeypatch.setenv("GRAPHIFY_RELEX_RELATIONS", "1")
+    output = _run(
+        "The Harbor Gateway uses Envoy.",
+        [("Harbor Gateway", "software"), ("Envoy", "software")],
+    )
+    relex_rows = [r for r in output.mapped_relations if r.dependency_frame == "relex:semantic"]
+    by_candidate = {r.canonical_candidate: r.terminal_state.value for r in relex_rows}
+    assert by_candidate.get("uses") == "accepted"          # same-canonical duplicate
+    assert by_candidate.get("owns") in (None, "review")     # novel canonical: never accepted
+
+
+def test_relex_qualified_rows_never_enter_qualifier_veto(monkeypatch) -> None:
+    # A demoted semantic candidate is a withheld proposal, not qualifier
+    # evidence — it must not block same-evidence OpenIE FACTs (round-2
+    # burned sealed losses T010/T040).
+    from services.extraction.graphify_relations import openie_fact_merge_disposition
+    key = ("m1", "m2", "depends_on")
+    disposition = openie_fact_merge_disposition(key, (0, 50), set(), {})
+    assert disposition == "promote"
+    blocked = openie_fact_merge_disposition(key, (0, 50), set(), {key: [(0, 50)]})
+    assert blocked == "blocked_same_evidence_qualified"

@@ -1991,16 +1991,6 @@ def run_relation_fast_path(
             dense_structure_units.append(unit.unit_id)
         proposal_rows.extend((unit, item) for item in deduped.values())
 
-    relex_proposals = 0
-    if _relex_enabled():
-        # Semantic candidate lane (owner-ordered production candidate):
-        # Relex proposals join the SAME union and face the SAME compiler
-        # and gates as every structural lane. Syntax-duplicate pairs fold
-        # in the assertion reducer downstream; nothing is pre-trusted.
-        for unit, proposal in _relex_semantic_proposals(all_units):
-            proposal_rows.append((unit, proposal))
-            relex_proposals += 1
-
     structured_proposals = 0
     survey_by_document = {survey.document_id: survey for survey in surveys}
     for document, start_index, end_index in unit_counts_by_document:
@@ -2013,11 +2003,30 @@ def run_relation_fast_path(
             proposal_rows.append((unit, proposal))
             structured_proposals += 1
 
+    relex_proposals = 0
+    if _relex_enabled():
+        # Semantic candidate lane: joins the SAME union and faces the SAME
+        # compiler and gates as every structural lane. Appended LAST so the
+        # mapping loop has already judged every structural row when a relex
+        # row is scored — corroboration reads those verdicts.
+        for unit, proposal in _relex_semantic_proposals(all_units):
+            proposal_rows.append((unit, proposal))
+            relex_proposals += 1
+
     surface_records = [_surface_record(unit, proposal) for unit, proposal in proposal_rows]
     compiler = predicate_compiler()
     mapped: list[SurfaceRelationV1] = []
     assertions: list[AssertionDecisionV1] = []
     invalid_endpoint_rejections = 0
+    # Pairs a TRUSTED structural lane deemed assertable (accepted/open) in a
+    # unit. A relex row may accept only on such corroboration: if structure
+    # held the pair back as qualified/review (negation, modality, claim
+    # scope, attribution), the structural verdict governs and the semantic
+    # lane can never override it. Burned sealed-v1 counterexample: "It was
+    # incorrectly reported ... that the March Blackout Event caused data
+    # loss" — Relex proposes causes(event, loss); no trusted lane asserts
+    # the pair; the row stays REVIEW.
+    assertable_pairs: set[tuple[str, frozenset]] = set()
     for surface, (_unit, proposal) in zip(surface_records, proposal_rows):
         subject_type = entity_by_id[proposal.subject.entity_id].entity_type
         object_type = entity_by_id[proposal.object.entity_id].entity_type
@@ -2086,15 +2095,37 @@ def run_relation_fast_path(
             proposal.source == "relex_semantic"
             and candidate is not None
             and proposal.confidence >= _relex_accept_threshold()
+            and (
+                _unit.unit_id,
+                frozenset((proposal.subject.entity_id, proposal.object.entity_id)),
+                candidate,
+            ) in assertable_pairs
         ):
-            # Semantic acceptance class: canonical-mapped, above the pinned
-            # score threshold, AND past every deterministic gate above
-            # (signature, closed-class, promotability, competing cue,
-            # qualifier demotion). Burned leakage suites are the authority
-            # on whether this policy stands.
+            # Semantic acceptance class: SAME-CANONICAL corroboration only —
+            # a trusted structural lane already ACCEPTED this exact triple
+            # in this unit; the relex row strengthens evidence and never
+            # introduces a new canonical edge. Round-1 measurement:
+            # threshold-only acceptance leaked embedded claims (sealed-v1,
+            # claim-scope family). Round-2 measurement: pair-level
+            # corroboration let relex name structurally-OPEN pairs and put
+            # battery-negative endpoints into the graph. Widening this
+            # (open-pair naming) is blocked on the owner-pending junk-class
+            # promotion guards; until then novel relex knowledge is
+            # measured in the REVIEW/OPEN lanes, never promoted.
             state = RelationTerminalState.ACCEPTED
+            rule = f"{rule}:relex_corroborated"
         else:
             state = RelationTerminalState.REVIEW
+        if (
+            proposal.source != "relex_semantic"
+            and state == RelationTerminalState.ACCEPTED
+            and candidate is not None
+        ):
+            assertable_pairs.add((
+                _unit.unit_id,
+                frozenset((proposal.subject.entity_id, proposal.object.entity_id)),
+                candidate,
+            ))
         reasons = (rule, f"source:{proposal.source}")
         update: dict[str, Any] = {
             "canonical_candidate": candidate,
