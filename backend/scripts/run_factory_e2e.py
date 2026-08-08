@@ -118,7 +118,7 @@ def main() -> int:
             for row in rows
             if (row.get("status") or "").lower()
             and (row.get("status") or "").lower()
-            not in ("processing", "queued", "running", "pending")
+            not in ("processing", "queued", "running", "pending", "active", "extracting", "embedding", "summarizing")
         }
         print(f"  [{time.strftime('%H:%M:%S')}] documents {len(rows)}/{expected}, "
               f"terminal {len(terminal)}")

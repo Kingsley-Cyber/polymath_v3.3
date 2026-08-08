@@ -82,8 +82,9 @@ CANONICAL_SCHEMA_VERSION = "1.0.0"
 # Paths — canonical config lives in config/canonical/, with a historical
 # fallback to services/graph/ for older checkouts.
 # ---------------------------------------------------------------------------
-_REPO_ROOT = Path(__file__).resolve().parents[3]
-_CANONICAL_CONFIG_DIR = _REPO_ROOT / "config" / "canonical"
+from services.extraction.config_locator import find_config_dir
+
+_CANONICAL_CONFIG_DIR = find_config_dir(__file__) / "canonical"
 _GRAPH_DIR = Path(__file__).resolve().parents[1] / "graph"
 
 # Preferred location (config/canonical/)

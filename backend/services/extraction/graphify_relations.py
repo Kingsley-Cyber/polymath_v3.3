@@ -49,9 +49,11 @@ from services.ghost_b_schemas import Predicate
 RELATION_RELEASE = "graphify-relation-fast-path-v13"
 PREDICATE_COMPILER_RELEASE = "graphify-predicate-compiler-v2"
 
-_REPO_ROOT = Path(__file__).resolve().parents[3]
-_PREDICATE_CONFIG = _REPO_ROOT / "config/predicate_synonyms.yaml"
-_ONTOLOGY_CONFIG = _REPO_ROOT / "config/ontology.yaml"
+from services.extraction.config_locator import find_config_dir
+
+_CONFIG_DIR = find_config_dir(__file__)
+_PREDICATE_CONFIG = _CONFIG_DIR / "predicate_synonyms.yaml"
+_ONTOLOGY_CONFIG = _CONFIG_DIR / "ontology.yaml"
 _RELATION_CUE_RE = re.compile(
     r"\b(?:use[sd]?|appl(?:y|ies|ied)|depend(?:s|ed)?|support(?:s|ed)?|produce[sd]?|consume[sd]?|"
     r"own(?:s|ed|ing)?|cause[sd]?|deriv(?:e[sd]?|ed)|define[sd]?|implement(?:s|ed)?|"

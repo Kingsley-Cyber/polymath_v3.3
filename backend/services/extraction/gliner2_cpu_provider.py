@@ -42,7 +42,9 @@ ENTITY_DESCRIPTIONS: dict[str, dict[str, str]] = {
 }
 
 
-_SCHEMA_CONFIG_PATH = Path(__file__).resolve().parents[3] / "config" / "entity_schema.yaml"
+from services.extraction.config_locator import find_config_dir
+
+_SCHEMA_CONFIG_PATH = find_config_dir(__file__) / "entity_schema.yaml"
 
 
 def _load_schema_config() -> dict[str, Any]:
