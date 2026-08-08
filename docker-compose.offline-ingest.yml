@@ -52,6 +52,12 @@ services:
       - "./config:/app/config:ro"
     environment:
       APP_ENV: offline-ingest-worker
+      # Production-candidate extraction stack (owner-marked 2026-08-08):
+      # composite entity arbitration (relex entities PENDING battery) +
+      # semantic relation lane via the host-MPS Relex sidecar.
+      GRAPHIFY_ENTITY_PROVIDER: ${GRAPHIFY_ENTITY_PROVIDER:-composite}
+      GRAPHIFY_RELEX_RELATIONS: ${GRAPHIFY_RELEX_RELATIONS:-1}
+      RELEX_SIDECAR_URL: ${RELEX_SIDECAR_URL:-http://host.docker.internal:8737}
       MONGODB_URI: mongodb://${MONGO_USER:-polymath}:${MONGO_PASSWORD}@mongodb:27017/polymath?authSource=admin
       QDRANT_URL: http://qdrant:6333
       QDRANT_MEM_LIMIT: ${QDRANT_MEM_LIMIT:-4g}
