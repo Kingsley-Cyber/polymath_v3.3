@@ -73,6 +73,8 @@ def main() -> int:
     parser.add_argument("--corpus-name", default=f"factory-e2e-{time.strftime('%Y%m%dT%H%M%S')}")
     parser.add_argument("--timeout", type=int, default=5400)
     parser.add_argument("--json-out", default="/Users/king/polymath_v3.3/data_eval/factory_e2e_report.json")
+    parser.add_argument("--existing-corpus", default="",
+                        help="Resume: poll+validate this corpus id; skip create/upload")
     args = parser.parse_args()
 
     token = _login(args.api_base)
@@ -81,6 +83,11 @@ def main() -> int:
         headers={"Authorization": f"Bearer {token}"},
         timeout=300,
     )
+    if args.existing_corpus:
+        cid = args.existing_corpus
+        print(f"resuming corpus {cid}")
+        return _poll_and_validate(client, cid, args)
+
     resp = client.post("/api/corpora", json={
         "name": args.corpus_name,
         "description": "Factory E2E — release loop step 1 (owner-ratified)",
@@ -107,18 +114,24 @@ def main() -> int:
     batch = upload.json()
     print("batch:", json.dumps(batch, default=str)[:400])
 
+    return _poll_and_validate(client, cid, args)
+
+
+def _poll_and_validate(client: httpx.Client, cid: str, args) -> int:
     expected = len(args.inputs)
     deadline = time.monotonic() + args.timeout
     terminal: dict[str, str] = {}
     while time.monotonic() < deadline:
         docs = client.get(f"/api/corpora/{cid}/documents").json()
         rows = docs if isinstance(docs, list) else docs.get("documents") or []
+        # NOTE: "active" is this app's TERMINAL healthy document status
+        # (record_status.ACTIVE_STATUS) — a live, fully ingested document.
         terminal = {
             (row.get("doc_id") or row.get("id")): (row.get("status") or "").lower()
             for row in rows
             if (row.get("status") or "").lower()
             and (row.get("status") or "").lower()
-            not in ("processing", "queued", "running", "pending", "active", "extracting", "embedding", "summarizing")
+            not in ("processing", "queued", "running", "pending", "extracting", "embedding", "summarizing")
         }
         print(f"  [{time.strftime('%H:%M:%S')}] documents {len(rows)}/{expected}, "
               f"terminal {len(terminal)}")

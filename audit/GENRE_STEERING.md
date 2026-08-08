@@ -369,3 +369,24 @@ its inference lock — restructuring the per-document pipeline into corpus stage
 not required for saturation at current scale). Remaining before cutover: factory-
 ingest a corpus through the FULL worker path (embedding+q8+neo4j), run the q8 parity
 harness, then fresh sealed qualification.
+
+### Factory E2E step 1 complete + GLiNER2 placement A/B (2026-08-08)
+FULL PRODUCTION PATH GREEN: 5-doc heterogeneous corpus through the live worker —
+70/70 stage receipts passed, 754 chunks / 530 parents / 666 ghost_b rows, legacy
+qdrant (1196/1190/754), q8 evidence 1196 pts (754 children == chunks one-per-child,
+442 parent summaries; backfilled after finding the worker still carried the old
+canary allowlist — compose fixed, canonical everywhere). Neo4j 1073 nodes / 1141
+edges. Measured wall 853s; decomposition: GLiNER2 census 496.4s (58%), OpenIE 104.5s,
+adaptation 46.3s, other graphify ~49s, unattributed ~157s (worker logs lost to
+container recreate — telemetry must persist outside disposable containers next run).
+Five integration defects found+fixed by the E2E as designed: lost provider-payload
+re-export, git-less image vs triplet-extract pin, typing-extensions conflict,
+tokenizers/hub drift (image now pinned to constraints-proven.txt = the qualified
+venv freeze), parents[3] config path wrong in-container (shared find_config_dir),
+worker q8 allowlist stale, driver 'active'-is-terminal semantics.
+**GLiNER2 PLACEMENT A/B (same 385 windows, 16,747 tokens, production parse path):**
+container CPU 496.4s → host CPU 70.9s (7.0x — pure Docker-VM tax) → host MPS 34.0s
+(14.6x). Decision sets BYTE-IDENTICAL (3,527 entities; 0 flips of any kind; Jaccard
+1.0). RATIFIED BOUNDARY: host-native warm GLiNER2 sidecar on Metal (same pattern as
+the embedder/reranker sidecars); the model was never slow — the VM was. Next ladder:
+split the 157s unattributed bucket → OpenIE 104s → adaptation 46s.
