@@ -490,3 +490,22 @@ exceeds both + leakage zero). Long-run constraint stands: ONE heavy encoder —
 primary+rescue optimization deferred until after the upper bound is banked;
 pair-explosion economics to be measured in factory soak. Pack remains
 dev/calibration data; release qualification = fresh sealed multi-domain docs.
+
+### R0→R7 relation-loss waterfall (owner-demanded, 2026-08-08) — investment ranking by data
+Composite + oracle adapter on the pack: R0 38 → R1 22 (−16) → R2 10 (−12) → R3 4 (−6)
+→ R4 4 → R5 3 (−1) → R6 2 (−1) → R7 1 (−1).
+PREDICATE/CANONICAL MAPPING LOST EXACTLY ONE RELATION — the adapter compiler is NOT
+the current bottleneck. Measured ranking:
+1. R2 (−12): NEW MECHANISM CLASS = coordination distribution — one governing
+   predicate over coordinated conjunct lists ('lane CONTAINING timestamps, shot
+   boundaries, actor masks…'; 'compiled for a new text-to-video, image-to-video,
+   pose-conditioned, or video-to-video workflow'). Lanes propose the head pair,
+   never distribute; recovery lane splits AT 'containing'. Freeze-exception
+   candidate (fresh qualification revealed it) — OWNER DECISION to reopen.
+2. R1 (−16 but concentrated): document-title long-span entity cascades across many
+   gold relations → deterministic DocumentProfile title mention (doctrine #1/#8,
+   config lane, no encoder change) + long-span discovery class.
+3. R3 (−6): frame-surface recovery between linked pairs.
+4. Adapter compiler: deprioritized by data (R5 −1); resumes after the above.
+Composite retained as upper-bound control for qualification; bi-solo = one-encoder
+comparison arm; GLiNER2 deletable when a type-resolver converges the two.
