@@ -150,10 +150,69 @@ class GLiNERBiProvider:
 _BI_PROVIDER: GLiNERBiProvider | None = None
 
 
+RELEX_ENTITY_PROVIDER_RELEASE = "relex-large-sidecar-entities-v1"
+
+
+class RelexSidecarEntityProvider:
+    """Entity candidates from the host-MPS Relex sidecar (production candidate).
+
+    Same downstream contract as every provider: EntityPrediction rows with
+    core types + facets from the ACTIVE schema. Transport and model
+    compatibility live behind the sidecar boundary (relex-infer-v1); this
+    provider only translates schema labels out and spans back.
+    """
+
+    release = RELEX_ENTITY_PROVIDER_RELEASE
+
+    def predict_entities(
+        self,
+        texts: Sequence[str],
+        *,
+        batch_size: int = 4,
+        threshold: float = 0.5,
+        adapters: tuple[str, ...] = (),
+    ) -> list[list[EntityPrediction]]:
+        del batch_size, threshold  # release properties; sidecar pins them
+        from services.extraction.relex_sidecar_client import infer
+
+        active = schema_descriptions(adapters)
+        label_strings = sorted(label.replace("_", " ").lower() for label in active)
+        back = {label.replace("_", " ").lower(): label for label in active}
+        output: list[list[EntityPrediction]] = []
+        for result in infer(list(texts), entity_labels=label_strings, relation_labels=[]):
+            row: list[EntityPrediction] = []
+            for item in result.entities:
+                start, end = int(item["start"]), int(item["end"])
+                surface = str(item["text"])
+                text = texts[len(output)]
+                if (
+                    start < 0 or end <= start or end > len(text)
+                    or text[start:end] != surface
+                ):
+                    start, end = _anchor_span(text, surface, start, end)
+                schema_label = back.get(str(item["label"]).lower(), "Concept")
+                core_label, facet = _facet_for_label(schema_label, adapters)
+                row.append(EntityPrediction(
+                    text=surface,
+                    entity_type=canonical_entity_type(core_label),
+                    start=start,
+                    end=end,
+                    confidence=float(item.get("score", 0.0)),
+                    facet=facet,
+                ))
+            row.sort(key=lambda p: (p.start, p.end, p.entity_type, p.text))
+            output.append(row)
+        return output
+
+
+_RELEX_PROVIDER: RelexSidecarEntityProvider | None = None
+
+
 def get_entity_encoder_provider():
     """The one selection seam. Default = frozen GLiNER2 baseline."""
     global _BI_PROVIDER
     global _COMPOSITE
+    global _RELEX_PROVIDER
     choice = os.environ.get("GRAPHIFY_ENTITY_PROVIDER", "gliner2").strip().lower()
     if choice in ("gliner_bi", "gliner-bi", "bi"):
         if _BI_PROVIDER is None:
@@ -163,6 +222,10 @@ def get_entity_encoder_provider():
         if _COMPOSITE is None:
             _COMPOSITE = CompositeEntityProvider()
         return _COMPOSITE
+    if choice in ("relex", "gliner_relex", "relex_sidecar"):
+        if _RELEX_PROVIDER is None:
+            _RELEX_PROVIDER = RelexSidecarEntityProvider()
+        return _RELEX_PROVIDER
     return get_gliner2_cpu_provider()
 
 

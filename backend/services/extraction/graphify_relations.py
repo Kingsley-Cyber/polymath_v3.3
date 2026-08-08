@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
+import os
 import re
 import threading
 from bisect import bisect_left
@@ -69,6 +71,7 @@ _META_PREDICATE_RE = re.compile(
     r"\b(?:predicate|unmapped\s+surface\s+relation|depends[_ ]on|related[_ ]to)\b",
     re.I,
 )
+logger = logging.getLogger(__name__)
 _SPACY_PARSE_LOCK = threading.Lock()
 _CLOSED_CLASS_POS = frozenset({"AUX", "DET", "ADP", "CCONJ", "SCONJ", "PART", "PUNCT"})
 _OPEN_ONLY_LEMMAS = frozenset({"serve", "publish", "author", "curate", "interoperate", "occur"})
@@ -1523,6 +1526,111 @@ def _direct_dependency_proposals(doc, unit: _Unit) -> list[_Proposal]:
     return proposals
 
 
+RELEX_RELATION_LABELS = (
+    "is a", "part of", "owns", "member of", "created by", "located in",
+    "uses", "depends on", "implements", "supports", "produces", "consumes",
+    "derived from", "defines", "measures", "causes", "enables", "precedes",
+)
+_RELEX_NEGATION_RE = re.compile(
+    r"\b(?:not|never|no longer|cannot|can't|denie[ds]|refuse[ds]?|without)\b", re.I,
+)
+
+
+def _relex_enabled() -> bool:
+    return os.environ.get("GRAPHIFY_RELEX_RELATIONS", "").strip() == "1"
+
+
+def _relex_accept_threshold() -> float:
+    raw = os.environ.get("RELEX_ACCEPT_THRESHOLD", "").strip()
+    try:
+        return float(raw) if raw else 0.5
+    except ValueError:
+        return 0.5
+
+
+def _relex_semantic_proposals(units: Sequence[_Unit]) -> list[tuple[_Unit, _Proposal]]:
+    """Semantic relation candidates from the host-MPS Relex sidecar.
+
+    The sidecar proposes (head span, predicate, tail span); this joiner
+    binds spans to completed mentions by strict overlap and abstains on
+    any unbound endpoint — it never mints entities. Qualifier safety is
+    text-scoped and conservative: a sentence carrying negation or modal
+    markers demotes the proposal to negative/uncertain (QUALIFIED lane),
+    because Relex itself carries no polarity signal. The gates remain the
+    knowledge authority; source 'relex_semantic' is accepted only above
+    the pinned score threshold and only through the unchanged gate chain.
+    """
+    from services.extraction.relex_sidecar_client import RelexSidecarError, infer
+
+    eligible = [unit for unit in units if unit.mentions and len(unit.text.split()) >= 3]
+    if not eligible:
+        return []
+    try:
+        results = infer(
+            [unit.text for unit in eligible],
+            entity_labels=[], relation_labels=list(RELEX_RELATION_LABELS),
+        )
+    except RelexSidecarError as exc:
+        logger.warning("relex sidecar unavailable; semantic lane skipped: %s", exc)
+        return []
+    output: list[tuple[_Unit, _Proposal]] = []
+    for unit, result in zip(eligible, results):
+        def mention_for(start: int, end: int):
+            best, best_overlap = None, 0
+            for mention in unit.mentions:
+                ls = mention.normalized_start - unit.start
+                le = mention.normalized_end - unit.start
+                overlap = min(le, end) - max(ls, start)
+                if overlap > 0 and overlap > best_overlap:
+                    best, best_overlap = mention, overlap
+            return best
+
+        for relation in result.relations:
+            subject = mention_for(relation.head_start, relation.head_end)
+            object_mention = mention_for(relation.tail_start, relation.tail_end)
+            if subject is None or object_mention is None:
+                continue
+            if subject.entity_id == object_mention.entity_id:
+                continue
+            left = min(relation.head_start, relation.tail_start)
+            right = max(relation.head_end, relation.tail_end)
+            sentence_left = max(
+                unit.text.rfind(".", 0, left), unit.text.rfind("\n", 0, left),
+            ) + 1
+            sentence_right = unit.text.find(".", right)
+            sentence = unit.text[sentence_left:sentence_right + 1 if sentence_right >= 0 else len(unit.text)]
+            polarity = "negative" if _RELEX_NEGATION_RE.search(sentence) else "positive"
+            modality = "uncertain" if _QUALIFIER_RE.search(sentence) else "asserted"
+            label = relation.label.strip().casefold()
+            qualification = nominal_assertion_qualification(
+                unit.text, subject.surface, label, object_mention.surface,
+            )
+            if qualification:
+                polarity, modality, attribution = qualification
+            else:
+                attribution = ""
+            output.append((unit, _Proposal(
+                subject=subject, object=object_mention,
+                surface_predicate=label, lemma=label, particle="",
+                preposition="",
+                dependency_frame="relex:semantic",
+                dependency_path="relex",
+                voice="semantic", polarity=polarity, modality=modality,
+                attribution=attribution, canonical_hint=None,
+                confidence=float(relation.score), source="relex_semantic",
+            )))
+    # One candidate per (unit, pair, predicate): overlapping mention joins
+    # produce duplicates; keep the highest-scored observation.
+    deduped: dict[tuple, tuple[_Unit, _Proposal]] = {}
+    for unit, proposal in output:
+        key = (unit.unit_id, proposal.subject.mention_id,
+               proposal.object.mention_id, proposal.surface_predicate)
+        kept = deduped.get(key)
+        if kept is None or proposal.confidence > kept[1].confidence:
+            deduped[key] = (unit, proposal)
+    return list(deduped.values())
+
+
 def _syntax_proposals(
     unit: _Unit,
     doc,
@@ -1883,6 +1991,16 @@ def run_relation_fast_path(
             dense_structure_units.append(unit.unit_id)
         proposal_rows.extend((unit, item) for item in deduped.values())
 
+    relex_proposals = 0
+    if _relex_enabled():
+        # Semantic candidate lane (owner-ordered production candidate):
+        # Relex proposals join the SAME union and face the SAME compiler
+        # and gates as every structural lane. Syntax-duplicate pairs fold
+        # in the assertion reducer downstream; nothing is pre-trusted.
+        for unit, proposal in _relex_semantic_proposals(all_units):
+            proposal_rows.append((unit, proposal))
+            relex_proposals += 1
+
     structured_proposals = 0
     survey_by_document = {survey.document_id: survey for survey in surveys}
     for document, start_index, end_index in unit_counts_by_document:
@@ -1964,6 +2082,17 @@ def run_relation_fast_path(
             rule = "review:endpoint_entity_not_promotable"
         elif proposal.source in {"strict_dependency_cue", "structured_data"}:
             state = RelationTerminalState.ACCEPTED
+        elif (
+            proposal.source == "relex_semantic"
+            and candidate is not None
+            and proposal.confidence >= _relex_accept_threshold()
+        ):
+            # Semantic acceptance class: canonical-mapped, above the pinned
+            # score threshold, AND past every deterministic gate above
+            # (signature, closed-class, promotability, competing cue,
+            # qualifier demotion). Burned leakage suites are the authority
+            # on whether this policy stands.
+            state = RelationTerminalState.ACCEPTED
         else:
             state = RelationTerminalState.REVIEW
         reasons = (rule, f"source:{proposal.source}")
@@ -2009,6 +2138,7 @@ def run_relation_fast_path(
         "syntax_records": syntax_records,
         "strict_dependency_records": direct_records,
         "structured_data_proposals": structured_proposals,
+        "relex_semantic_proposals": relex_proposals,
         "relation_local_endpoint_entities": len(endpoint_entities),
         "relation_local_endpoint_mentions": len(endpoint_mentions),
         "discourse_resolved_mentions": discourse_resolved_mentions,
