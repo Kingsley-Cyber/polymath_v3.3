@@ -36,3 +36,83 @@ adapters:
     selection:
       key_value_line_ratio_min: 0.12
       identifier_density_min: 0.02
+
+  cpcs_research_v1:
+    # Oracle adapter (owner-authorized 2026-08-08): the qualification
+    # pack's own label schema loaded through the sanctioned interface.
+    # adapter_release: cpcs-research-v1 · compiler: hand-authored oracle.
+    # Facet = native label (lowercase); core types keep all gating.
+    labels:
+      Architecture: "A named system or processing architecture."
+      AuthoringArtifact: "A named artifact used for authoring or editing work."
+      Capability: "A named capability, ability, or supported function."
+      Concept: "A named idea, notion, or technical concept."
+      ContentAsset: "A named piece of content such as a clip, asset, or media item."
+      DataAsset: "A named dataset, data store, or data asset."
+      DataFormat: "A named data format, file format, or serialization format."
+      DataRecord: "A named record, entry, or structured data row."
+      DenseSignal: "A named dense signal, track, or continuous measurement stream."
+      Document: "A specifically named document, paper, report, or blueprint."
+      DocumentId: "A formatted document identifier or reference code."
+      EffectDescriptor: "A named visual or auditory effect description."
+      Event: "A specifically named event or occurrence."
+      ExampleEntity: "A named example item used for illustration."
+      Framework: "A named framework, scoring system, or structured methodology."
+      GenerationMode: "A named mode or configuration of generation."
+      Graph: "A named graph, network, or graph-structured representation."
+      Measurement: "A named measurement, metric, or measured quantity."
+      Method: "A named method, technique, procedure, or process."
+      Model: "A specifically named AI model, machine learning model, or model release."
+      Object: "A named physical object, prop, or item."
+      OutputArtifact: "A named produced output such as a file, package, or result artifact."
+      OutputField: "A named output field, attribute, or schema key."
+      PassageType: "A named type or category of passage or segment."
+      PerformanceDescriptor: "A named descriptor of performance style or delivery."
+      Protocol: "A named protocol, exchange convention, or formal procedure."
+      Role: "A named role, function, or acting capacity."
+      SemanticArtifact: "A named semantic representation or derived semantic object."
+      TimeReference: "A specific date, time, version date, or temporal reference."
+      Tool: "A specifically named tool, application, or utility."
+      ToolGroup: "A named group, family, or suite of tools."
+      Video: "A specifically named video or video asset."
+      VideoType: "A named category or type of video."
+      Workflow: "A named workflow or end-to-end process."
+      WorkflowLane: "A named lane, track, or branch within a workflow."
+    facets:
+      Architecture: {core: Concept, facet: architecture}
+      AuthoringArtifact: {core: Artifact, facet: authoring_artifact}
+      Capability: {core: Concept, facet: capability}
+      Concept: {core: Concept, facet: concept}
+      ContentAsset: {core: Artifact, facet: content_asset}
+      DataAsset: {core: Artifact, facet: data_asset}
+      DataFormat: {core: Standard, facet: data_format}
+      DataRecord: {core: Artifact, facet: data_record}
+      DenseSignal: {core: Concept, facet: dense_signal}
+      Document: {core: Document, facet: document}
+      DocumentId: {core: Artifact, facet: document_id}
+      EffectDescriptor: {core: Concept, facet: effect_descriptor}
+      Event: {core: Event, facet: event}
+      ExampleEntity: {core: Concept, facet: example_entity}
+      Framework: {core: Software, facet: framework}
+      GenerationMode: {core: Concept, facet: generation_mode}
+      Graph: {core: Artifact, facet: graph}
+      Measurement: {core: Concept, facet: measurement}
+      Method: {core: Method, facet: method}
+      Model: {core: Software, facet: model}
+      Object: {core: Product, facet: object}
+      OutputArtifact: {core: Artifact, facet: output_artifact}
+      OutputField: {core: Concept, facet: output_field}
+      PassageType: {core: Concept, facet: passage_type}
+      PerformanceDescriptor: {core: Concept, facet: performance_descriptor}
+      Protocol: {core: Standard, facet: protocol}
+      Role: {core: Concept, facet: role}
+      SemanticArtifact: {core: Artifact, facet: semantic_artifact}
+      TimeReference: {core: TimeReference, facet: time_reference}
+      Tool: {core: Software, facet: tool}
+      ToolGroup: {core: Software, facet: tool_group}
+      Video: {core: Artifact, facet: video}
+      VideoType: {core: Concept, facet: video_type}
+      Workflow: {core: Method, facet: workflow}
+      WorkflowLane: {core: Method, facet: workflow_lane}
+    selection:
+      forced_only: true   # never auto-selected; explicit activation only

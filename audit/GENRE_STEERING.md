@@ -407,3 +407,33 @@ contract being stricter than the legacy accident, not a regression.
 OWNER CUTOVER DECISION: keep children-only focused (contract-faithful,
 recommended — summary text remains reachable via the hierarchical lane and
 child_summary hydration) or add an explicit summary-inclusive focused filter.
+
+### Final qualification — generic baseline + oracle adapter (2026-08-08, permanent)
+Pack: rag_graph_entity_relation_test (Pegasus/CPCS; 60 gold entity mentions / 38
+relations / 35-label private schema). Ingest through production path: flawless
+(14/14 receipts, one-point-per-child, FREEZE INTACT @ production pin b3c70043).
+
+qualification:
+  generic_cross_ontology_baseline:   # frozen generic schema
+    entity_discovery: 0.42
+    typing_given_discovery: 0.08
+    endpoint_pair_recall: 0.13
+    strict_entities_f1: 0.025
+    strict_relations_f1: 0.026
+  oracle_adapter:                    # pack's own labels via sanctioned adapter
+    adapter_release: cpcs-research-v1 (entity_schema.yaml, hashed)
+    entity_discovery: 0.37           # FLAT — decision tree: span-discovery limit
+    typing_given_discovery: 0.59
+    endpoint_pair_recall: 0.08
+    strict_entities_f1: 0.197        # 8x from vocabulary alone
+    strict_relations_f1: 0.032
+  missed_span_attribution:           # 38 misses, measured not argued
+    genuine_model_span_recall (semantic regions): 26   # lowercase compound
+      # domain terms (text-to-video / image-to-video / pose-conditioned ...),
+      # long title spans — at the FROZEN threshold; stands as measured
+    routing_owned (code/table/metadata lanes): 12      # deterministic table/
+      # JSON/metadata minting = doctrine #4/#8, queued with numbers
+Adapter-compiler seam added: GRAPHIFY_FORCED_ADAPTERS (selection config only;
+gates/thresholds/candidate construction untouched; schema hash stamps it).
+Owner-decided next gates: compiled adapter WITHOUT gold schema on this pack →
+held-out multi-domain adapter generalization. Oracle is NOT final qualification.

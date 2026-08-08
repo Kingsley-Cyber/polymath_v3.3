@@ -303,6 +303,14 @@ def select_schema_adapters(
     activates the metadata adapter. Thresholds come from versioned schema
     configuration; the decision is stamped in the census report.
     """
+    # Explicit adapter activation (adapter-compiler seam, 2026-08-08):
+    # GRAPHIFY_FORCED_ADAPTERS names adapter packs to activate for this run.
+    # Pure configuration — selection thresholds, gates, and candidate
+    # construction are unchanged; the schema hash stamps the difference.
+    forced = tuple(
+        token.strip() for token in os.environ.get("GRAPHIFY_FORCED_ADAPTERS", "").split(",")
+        if token.strip()
+    )
     text = document.normalized_text
     lines = [line for line in text.splitlines() if line.strip()]
     key_value = sum(
@@ -323,7 +331,7 @@ def select_schema_adapters(
             or identifier_density >= float(rules.get("identifier_density_min", 2.0))
         ):
             selected.append(name)
-    return tuple(sorted(selected))
+    return tuple(sorted(set(selected) | set(forced)))
 
 
 def run_entity_census(
