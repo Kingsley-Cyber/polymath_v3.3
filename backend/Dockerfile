@@ -22,14 +22,20 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # Install system dependencies required by some Python packages
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 # Install Python dependencies first (layer caching)
 COPY requirements.txt .
+# unstructured==0.12.6 spuriously pins typing-extensions==4.9.0 while torch
+# 2.12 needs >=4.10; the PROVEN pipeline venv resolves this with last-wins
+# (typing-extensions 4.16.0) — mirror that resolution exactly.
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+    pip install --no-cache-dir --use-deprecated=legacy-resolver -r requirements.txt && \
+    pip install --no-cache-dir "typing-extensions==4.16.0" && \
+    python -c "import typing_extensions, torch, unstructured; print('deps ok')" 
 
 # Optional JS-rendered page fetcher for the live web lane.
 # Disabled on arm64; set OBSCURA_COMMAND empty so native HTML fetch is used.

@@ -4,6 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+# Re-export: five lazy call sites (batches summary canary, ghost_a x2,
+# ghost_b x2) import this helper from the contract module. The re-export
+# was lost in the freeze-era rewrite; its home is services.provider_payload.
+from services.provider_payload import (  # noqa: F401
+    ingestion_provider_payload_extras,
+)
+
 ENGINES = ("off", "graphify_cpu")
 CANONICAL_ENGINE = "graphify_cpu"
 

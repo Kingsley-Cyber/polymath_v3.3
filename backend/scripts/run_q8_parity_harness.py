@@ -34,6 +34,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import os
 import json
 import statistics
 import time
@@ -41,7 +42,11 @@ from typing import Any
 
 import requests
 
-CANARY_CORPUS = "c6518e7b-1327-4694-85c8-08a81542e425"
+# 2026-08-08: corpus is CLI-selectable (--corpus) for the factory-E2E
+# parity gate; the historic canary UUID stays the default.
+CANARY_CORPUS = os.environ.get(
+    "Q8_PARITY_CORPUS", "c6518e7b-1327-4694-85c8-08a81542e425"
+)
 
 ROUTES: dict[str, str] = {
     "focused": "qdrant_only",
