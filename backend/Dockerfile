@@ -34,7 +34,7 @@ COPY requirements.txt .
 # (typing-extensions 4.16.0) — mirror that resolution exactly.
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir --use-deprecated=legacy-resolver -r requirements.txt && \
-    pip install --no-cache-dir "typing-extensions==4.16.0" && \
+    pip install --no-cache-dir "typing-extensions==4.16.0" "tokenizers==0.22.2" && \
     python -c "import typing_extensions, torch, unstructured; print('deps ok')" 
 
 # Optional JS-rendered page fetcher for the live web lane.
