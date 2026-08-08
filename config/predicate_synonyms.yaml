@@ -290,16 +290,7 @@ synonyms:
   acquires: owns
   acquired: owns
   part of: part_of
-  contains: part_of
-  contain: part_of
-  includes: part_of
-  include: part_of
-  comprises: part_of
-  comprise: part_of
-  consist: part_of
-  consists of: part_of
   compose: part_of
-  composed of: part_of
   belongs to: part_of
   belong to: part_of
   belong: part_of
@@ -631,6 +622,26 @@ synonyms:
 # Every suppression increments a named counter. Nothing dropped silently.
 # These are loaded and validated at config load time (fail LOUD).
 # ===========================================================================
+# --- Inverse-direction synonyms ---
+# The surface SUBJECT is the semantic WHOLE/container: "X contains Y",
+# "X includes Y", "X consists of Y" all assert Y part_of X, so resolvers
+# must SWAP endpoints when mapping (canonical part_of direction is
+# member -> whole). Both consumers honor this: the T3 flat-synonym rung
+# returns swap=True, and the fast-path PredicateCompiler tags the mapping
+# rule with :inverse_direction so the compiled relation swaps endpoints.
+# A surface may appear in synonyms OR inverse_synonyms, never both.
+inverse_synonyms:
+  contains: part_of
+  contain: part_of
+  containing: part_of
+  includes: part_of
+  include: part_of
+  comprises: part_of
+  comprise: part_of
+  consist: part_of
+  consists of: part_of
+  composed of: part_of
+
 suppression:
   # --- Attribution: relations inside ccomp/xcomp of these verbs are
   #     attributed (someone SAYS/BELIEVES X), not asserted as fact. ---

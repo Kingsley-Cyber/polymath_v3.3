@@ -483,11 +483,19 @@ def _pairs(output, states=("accepted", "open")):
 def test_participial_acl_frame_relates_head_noun_to_its_object() -> None:
     # Active participial modifier: the modified noun is the participle's
     # subject — mirror class of the long-standing VBN passive-acl recovery.
+    # "contain" is an inverse-direction synonym: the compiled canonical
+    # relation is checksums part_of registry, never the reverse.
     output = _run(
         "The registry containing checksums was archived last year.",
         [("registry", "artifact"), ("checksums", "artifact")],
     )
-    assert ("registry", "checksums") in _pairs(output)
+    assert ("checksums", "registry") in _pairs(output)
+    assert not any(
+        item.subject_mention_id.endswith(":registry")
+        and item.canonical_candidate == "part_of"
+        for item in output.mapped_relations
+        if item.terminal_state.value in ("accepted", "open")
+    )
 
 
 def test_explicit_object_list_distributes_across_any_frame() -> None:
@@ -518,9 +526,46 @@ def test_participial_frame_with_fracture_prone_list_reaches_every_member() -> No
     )
     pairs = _pairs(output)
     assert {
-        ("sensor array", "heat probes"), ("sensor array", "dust filters"),
-        ("sensor array", "flow meters"), ("sensor array", "pressure gauges"),
+        ("heat probes", "sensor array"), ("dust filters", "sensor array"),
+        ("flow meters", "sensor array"), ("pressure gauges", "sensor array"),
     } <= pairs
+
+
+def test_participial_container_list_never_inverts_or_cross_pairs() -> None:
+    # The class that minted false book facts: a container participle over a
+    # determiner-separated list whose conj arcs the parser attaches to the
+    # container noun itself. The container must never become a part_of
+    # subject, and list members must never pair with each other.
+    output = _run(
+        "After authentication, the Harbor Gateway produces an Event Envelope containing the device identifier, an event timestamp, a schema identifier, and the payload bytes.",
+        [
+            ("Harbor Gateway", "software"), ("Event Envelope", "artifact"),
+            ("device identifier", "artifact"), ("schema identifier", "artifact"),
+            ("payload bytes", "artifact"),
+        ],
+    )
+    kept = [
+        item for item in output.mapped_relations
+        if item.terminal_state.value in ("accepted", "open")
+        and item.canonical_candidate == "part_of"
+    ]
+    assert not any(item.subject_mention_id.endswith(":Event Envelope") for item in kept)
+    member_pairs = {
+        (item.subject_mention_id.rsplit(":", 1)[-1], item.object_mention_id.rsplit(":", 1)[-1])
+        for item in output.mapped_relations
+        if item.terminal_state.value in ("accepted", "open")
+    }
+    assert ("schema identifier", "device identifier") not in member_pairs
+    assert ("payload bytes", "device identifier") not in member_pairs
+
+
+def test_inverse_synonym_compiles_part_of_with_endpoint_swap() -> None:
+    candidate, rule = predicate_compiler().compile(
+        surface="contains", lemma="contain", canonical_hint=None,
+        subject_type="artifact", object_type="artifact", source="test",
+    )
+    assert candidate == "part_of"
+    assert ":inverse_direction" in rule
 
 
 def test_object_list_never_crosses_a_clause_subject() -> None:

@@ -265,6 +265,14 @@ class PredicateCompiler:
             for key, value in dict(predicate_payload.get("synonyms") or {}).items()
             if value and value != "__DROP__"
         }
+        # Surfaces whose grammatical subject is the semantic OBJECT
+        # ("X contains Y" asserts Y part_of X): mapping succeeds only with
+        # endpoint inversion, marked via :inverse_direction in the rule.
+        self.inverse_synonyms = {
+            str(key).casefold(): str(value)
+            for key, value in dict(predicate_payload.get("inverse_synonyms") or {}).items()
+            if value and value != "__DROP__"
+        }
         # The canonical predicate contract is broader than ontology.yaml.
         # Missing allowed_pairs means unconstrained, not non-canonical.
         self.allowed_predicates = frozenset((*get_args(Predicate), "consumes"))
@@ -297,20 +305,34 @@ class PredicateCompiler:
                 return "related_to", "mapped:openie:declared_closed_ontology:occurred_prep:related_to"
             return "related_to", f"mapped:{source}:declared_closed_ontology:occurred_prep:related_to"
         candidate = canonical_hint
+        inverted = False
         if candidate is None:
+            keys = {surface.casefold().strip(), normalized_lemma}
             candidates = {
-                value for key, value in self.synonyms.items()
-                if key in {surface.casefold().strip(), normalized_lemma}
+                value for key, value in self.synonyms.items() if key in keys
             }
-            if not candidates:
+            inverse_candidates = {
+                value for key, value in self.inverse_synonyms.items() if key in keys
+            }
+            if not candidates and not inverse_candidates:
                 # Meaningful relation with no ontology representation: store as
                 # an open/unmapped surface relation — never force related_to,
                 # never silently drop.
                 open_key = normalized_lemma or surface.casefold().strip() or "surface"
                 return None, f"open:{open_key}:unmapped_surface_relation"
-            if len(candidates) != 1:
+            if len(candidates) + len(inverse_candidates) != 1:
                 return None, "review:ambiguous_predicate"
-            candidate = next(iter(candidates))
+            if inverse_candidates:
+                # Inverse-direction surface ("X contains Y" = Y part_of X):
+                # the semantic subject is the surface object — signature
+                # checks and the compiled relation both swap endpoints.
+                candidate = next(iter(inverse_candidates))
+                inverted = True
+                subject_type, object_type = object_type, subject_type
+                subject_name, object_name = object_name, subject_name
+            else:
+                candidate = next(iter(candidates))
+        marker = ":inverse_direction" if inverted else ""
         if candidate == "related_to" and "related" not in surface.casefold() and not occurred_prep:
             return None, "review:forced_related_to_prohibited"
         if candidate not in self.allowed_predicates and candidate != "related_to":
@@ -337,13 +359,13 @@ class PredicateCompiler:
                     + int(candidate_object != object_ontology) == minimum_coercions
                 ]
             if len(compatible_pairs) != 1:
-                return candidate, f"review:endpoint_signature:{subject_ontology}:{object_ontology}"
+                return candidate, f"review:endpoint_signature:{subject_ontology}:{object_ontology}{marker}"
             resolved_subject, resolved_object = compatible_pairs[0]
             return candidate, (
                 f"mapped:{source}:{normalized_lemma}:endpoint_role:"
-                f"{resolved_subject}:{resolved_object}"
+                f"{resolved_subject}:{resolved_object}{marker}"
             )
-        return candidate, f"mapped:{source}:{normalized_lemma}"
+        return candidate, f"mapped:{source}:{normalized_lemma}{marker}"
 
     @staticmethod
     def _ontology_roles(entity_type: str, name: str) -> tuple[str, ...]:
@@ -1373,6 +1395,16 @@ def _direct_dependency_proposals(doc, unit: _Unit) -> list[_Proposal]:
             )
         subject_mentions = list({item.mention_id: item for item in subject_mentions}.values())
         object_mentions = list({item.mention_id: item for item in object_mentions}.values())
+        if voice == "participial":
+            # The participle's subject is the modified head noun (plus any
+            # genuinely coordinated heads, all LEFT of the participle).
+            # Conj arcs the parser attached rightward belong to the object
+            # field — without this guard a fractured list parse turns list
+            # members into subjects and mints false facts.
+            subject_mentions = [
+                item for item in subject_mentions
+                if item.normalized_end <= unit.start + token.idx
+            ]
         recipient_mentions: list[Any] = []
         recipient_prep = ""
         if open_verb and voice == "active":
@@ -1935,12 +1967,19 @@ def run_relation_fast_path(
         else:
             state = RelationTerminalState.REVIEW
         reasons = (rule, f"source:{proposal.source}")
-        mapped_relation = surface.model_copy(update={
+        update: dict[str, Any] = {
             "canonical_candidate": candidate,
             "mapping_rule": rule,
             "terminal_state": state,
             "reasons": reasons,
-        })
+        }
+        if candidate is not None and ":inverse_direction" in rule:
+            # Inverse-direction synonym ("X contains Y" = Y part_of X): the
+            # compiled relation swaps endpoints; the uncompiled surface
+            # record above keeps the observed direction as provenance.
+            update["subject_mention_id"] = surface.object_mention_id
+            update["object_mention_id"] = surface.subject_mention_id
+        mapped_relation = surface.model_copy(update=update)
         mapped.append(mapped_relation)
         assertions.append(AssertionDecisionV1(
             decision_id=stable_id("assertion-decision", surface.relation_id, state.value, candidate),

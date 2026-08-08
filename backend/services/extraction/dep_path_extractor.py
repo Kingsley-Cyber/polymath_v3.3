@@ -122,6 +122,7 @@ class ExtractedTriple:
 # ---------------------------------------------------------------------------
 
 _SYNONYM_MAP: dict[str, str] | None = None
+_INVERSE_SYNONYM_MAP: dict[str, str] | None = None
 _SIGNATURE_RULES: list[dict] | None = None
 _RULES_BY_LEMMA: dict[str, list[dict]] | None = None  # lemma → [rules] index
 _ALLOWED_PAIRS: dict[str, frozenset[tuple[str, str]]] | None = None
@@ -319,6 +320,15 @@ def _load_config() -> None:
             _invalid_syns.append(f"  {k!r} -> {v!r}")
         else:
             _SYNONYM_MAP[k.lower()] = v
+    # Inverse-direction synonyms: the grammatical subject is the semantic
+    # object ("X contains Y" asserts Y part_of X) — T3 returns swap=True.
+    global _INVERSE_SYNONYM_MAP
+    _INVERSE_SYNONYM_MAP = {}
+    for k, v in (data.get("inverse_synonyms") or {}).items():
+        if v not in _VALID_PREDICATES:
+            _invalid_syns.append(f"  {k!r} -> {v!r}")
+        else:
+            _INVERSE_SYNONYM_MAP[k.lower()] = v
     if _invalid_syns:
         raise RuntimeError(
             f"FATAL: predicate_synonyms.yaml synonyms target non-emittable predicates "
@@ -784,6 +794,11 @@ def resolve_predicate(
     t3 = synonyms.get(lemma)
     if t3 and t3 in _VALID_PREDICATES:
         return (t3, False)
+    t3_inverse = (_INVERSE_SYNONYM_MAP or {}).get(lemma)
+    if t3_inverse and t3_inverse in _VALID_PREDICATES:
+        # Inverse-direction surface: grammatical subject is the semantic
+        # object ("X contains Y" = Y part_of X).
+        return (t3_inverse, True)
 
     # --- T4: DROP — do not manufacture predicates ---
     return None
