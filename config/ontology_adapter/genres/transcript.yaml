@@ -1,0 +1,7 @@
+# Genre pack: transcripts, interviews, meeting notes.
+version: "1.0"
+cues: [said, asked, replied, speaker, interview, meeting, discussion]
+structure_cues: {speaker_turns: 5}
+entity_labels:
+  Speaker: {description: a named person speaking in this transcript, core: person, facet: speaker}
+native_predicates: {}

@@ -96,6 +96,23 @@ def _anchor_span(text: str, surface: str, start: int, end: int) -> tuple[int, in
     return start, end
 
 
+def register_runtime_adapter(
+    name: str, labels: dict[str, str], facets: dict[str, dict],
+) -> None:
+    """Sanctioned seam for COMPILED adapters (Universal Adapter Compiler).
+
+    Same structure as a config adapter; registered per-process and always
+    forced_only — a compiled adapter activates only when its run selects
+    it explicitly. schema_hash flows automatically because it hashes the
+    merged descriptions.
+    """
+    SCHEMA_CONFIG["adapters"][name] = {
+        "labels": dict(labels),
+        "facets": {k: dict(v) for k, v in facets.items()},
+        "selection": {"forced_only": True},
+    }
+
+
 def schema_descriptions(adapters: tuple[str, ...] = ()) -> dict[str, dict[str, str]]:
     merged = dict(SCHEMA_CONFIG["core"])
     for name in adapters:

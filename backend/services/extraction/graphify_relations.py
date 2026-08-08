@@ -1531,6 +1531,19 @@ RELEX_RELATION_LABELS = (
     "uses", "depends on", "implements", "supports", "produces", "consumes",
     "derived from", "defines", "measures", "causes", "enables", "precedes",
 )
+def _relex_relation_labels() -> list[str]:
+    """Canonical predicate labels + the active compiled adapter's native
+    predicate surfaces (Universal Adapter Compiler). Native surfaces map
+    through the compiler's synonym tables when exact, else stay OPEN."""
+    labels = list(RELEX_RELATION_LABELS)
+    try:
+        from services.ontology_adapter.providers.relex import extra_relation_labels
+        labels.extend(l for l in extra_relation_labels() if l not in labels)
+    except Exception:  # noqa: BLE001 — adapter layer absent = canonical only
+        pass
+    return labels
+
+
 _RELEX_NEGATION_RE = re.compile(
     r"\b(?:not|never|no longer|cannot|can't|denie[ds]|refuse[ds]?|without)\b", re.I,
 )
@@ -1599,7 +1612,7 @@ def _relex_semantic_proposals(
         try:
             results = infer(
                 [unit.text for unit in eligible],
-                entity_labels=[], relation_labels=list(RELEX_RELATION_LABELS),
+                entity_labels=[], relation_labels=_relex_relation_labels(),
             )
         except RelexSidecarError as exc:
             logger.warning("relex sidecar unavailable; semantic lane skipped: %s", exc)

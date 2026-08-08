@@ -1,0 +1,19 @@
+# Domain pack: AI / machine learning literature and systems writing.
+# Authored document-blind: labels a generic ML ontologist would define.
+version: "1.0"
+cues: [neural, training, inference, encoder, decoder, embedding, transformer,
+       fine-tuning, dataset, benchmark, prompt, tokenizer, checkpoint, latency,
+       gpu, quantization, diffusion, generative]
+entity_labels:
+  Model_Architecture: {description: a named neural network architecture or model family, core: software, facet: model_architecture}
+  Training_Dataset: {description: a named dataset used to train or evaluate a model, core: artifact, facet: dataset}
+  Evaluation_Metric: {description: a named quantitative measure of model quality or cost, core: concept, facet: metric}
+  Model_Capability: {description: a named task or capability a model performs, core: method, facet: capability}
+  Inference_Artifact: {description: a named output or intermediate representation produced by a model, core: artifact, facet: inference_artifact}
+native_predicates:
+  trained on: {canonical: trained_on, status: exact}
+  fine-tuned on: {canonical: trained_on, status: narrower}
+  evaluated on: {canonical: null, status: OPEN}
+  generates: {canonical: produces, status: exact}
+  conditioned on: {canonical: uses, status: broader}
+  distilled from: {canonical: derived_from, status: exact}

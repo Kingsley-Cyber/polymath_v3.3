@@ -178,7 +178,7 @@ class RelexSidecarEntityProvider:
         relation rows (text-local offsets, raw label+score) ride the census
         artifact to the relation lane, which then makes no second pass.
         """
-        from services.extraction.graphify_relations import RELEX_RELATION_LABELS
+        from services.extraction.graphify_relations import _relex_relation_labels
         from services.extraction.relex_sidecar_client import infer
 
         active = schema_descriptions(adapters)
@@ -188,7 +188,7 @@ class RelexSidecarEntityProvider:
         relation_rows: list[list[dict]] = []
         for result in infer(
             list(texts), entity_labels=label_strings,
-            relation_labels=list(RELEX_RELATION_LABELS),
+            relation_labels=_relex_relation_labels(),
         ):
             text = texts[len(entity_rows)]
             row: list[EntityPrediction] = []
