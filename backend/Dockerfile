@@ -29,13 +29,16 @@ WORKDIR /app
 
 # Install Python dependencies first (layer caching)
 COPY requirements.txt .
-# unstructured==0.12.6 spuriously pins typing-extensions==4.9.0 while torch
-# 2.12 needs >=4.10; the PROVEN pipeline venv resolves this with last-wins
-# (typing-extensions 4.16.0) — mirror that resolution exactly.
+# The image mirrors the PROVEN pipeline venv exactly: constraints-proven.txt
+# is that venv's pip freeze (the environment every qualification ran in).
+# The legacy resolver is required because unstructured==0.12.6 spuriously
+# pins typing-extensions==4.9.0 against torch 2.12's >=4.10; constraints
+# make every transitive version deterministic instead of resolver-latest.
+COPY constraints-proven.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir --use-deprecated=legacy-resolver -r requirements.txt && \
-    pip install --no-cache-dir "typing-extensions==4.16.0" "tokenizers==0.22.2" && \
-    python -c "import typing_extensions, torch, unstructured; print('deps ok')" 
+    pip install --no-cache-dir --use-deprecated=legacy-resolver \
+        -r requirements.txt -c constraints-proven.txt && \
+    python -c "import typing_extensions, torch, unstructured; import transformers; print('deps ok')" 
 
 # Optional JS-rendered page fetcher for the live web lane.
 # Disabled on arm64; set OBSCURA_COMMAND empty so native HTML fetch is used.
