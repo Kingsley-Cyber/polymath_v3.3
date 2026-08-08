@@ -913,10 +913,13 @@ def _argument_tokens(token) -> tuple[list[Any], list[Any]]:
         for child in token.children:
             if child.dep_ in {"prep", "dative"} and child.lemma_.casefold() != "by":
                 objects = [*objects, *_children(child, {"pobj"})]
-    if lemma == "apply":
-        objects = _explicit_list_objects(token.doc, token, objects)
+    objects = _explicit_list_objects(token.doc, token, objects)
     if not subjects and token.dep_ in {"xcomp", "ccomp", "conj", "relcl"}:
         subjects = _children(token.head, {"nsubj"})
+    if not subjects and token.dep_ == "acl" and token.tag_ == "VBG":
+        # Active participial modifier: "a lane containing X" — the modified
+        # noun is the participle's subject (mirror of the VBN recovery).
+        subjects = [token.head]
     if token.dep_ in {"xcomp", "ccomp"} and subjects and all(
         item.lemma_.casefold() in {"it", "they", "he", "she"} for item in subjects
     ):
@@ -927,7 +930,17 @@ def _argument_tokens(token) -> tuple[list[Any], list[Any]]:
 
 
 def _explicit_list_objects(doc, cue, objects: list[Any]) -> list[Any]:
-    """Recover only comma/and object lists attached to an explicit apply cue."""
+    """Extend a frame's objects across an explicit comma/and NP list.
+
+    Purely structural: members are NP heads joined by comma (optionally
+    "and"/"or") separators; the walk stops at any verb, subject, or
+    sentence boundary, so independent clauses never merge. Licensing is
+    textual adjacency, not conj arcs — the small parser fractures long
+    coordinations into disconnected islands ("... lane containing source
+    timestamps, shot boundaries, actor masks, pose tracks ..." parses
+    "shot" as a second acl and "pose" as a fresh verb), and arc-following
+    strands every member past the first fracture.
+    """
     if not objects:
         return objects
     output = list(objects)
@@ -937,11 +950,19 @@ def _explicit_list_objects(doc, cue, objects: list[Any]) -> list[Any]:
             break
         if candidate.pos_ in {"VERB", "AUX"}:
             break
+        # A subject belongs to the next clause, never to this list.
+        if candidate.dep_ in {"nsubj", "nsubjpass", "nsubj:pass"}:
+            break
         if candidate.pos_ not in {"NOUN", "PROPN"} or candidate.dep_ == "compound":
             continue
         start, end = _argument_span(doc, candidate)
         separator = doc.text[previous_end:start]
-        if not re.fullmatch(r"\s*,\s*(?:and\s+)?", separator, re.I):
+        if not re.fullmatch(r"\s*,\s*(?:and\s+|or\s+)?", separator, re.I):
+            if re.fullmatch(r"\s*", separator):
+                # Same noun phrase continuing past the accepted head
+                # (fractured-arc NP): advance the cursor so the next
+                # separator is measured from the phrase end.
+                previous_end = max(previous_end, end)
             continue
         output.append(candidate)
         previous_end = end
@@ -1282,10 +1303,15 @@ def _direct_dependency_proposals(doc, unit: _Unit) -> list[_Proposal]:
                                 objects = prep_objects
                                 preposition = child.text.casefold()
                                 break
-            if lemma == "apply":
-                objects = _explicit_list_objects(doc, token, objects)
+            objects = _explicit_list_objects(doc, token, objects)
             if not subjects and token.dep_ in {"xcomp", "ccomp", "conj"}:
                 subjects = _children(token.head, {"nsubj"})
+            if not subjects and token.dep_ == "acl" and token.tag_ == "VBG":
+                # Active participial modifier: "a lane containing X, ..." —
+                # the modified noun is the participle's subject; mirror of
+                # the VBN passive-acl recovery above.
+                subjects = [token.head]
+                voice = "participial"
             if not subjects:
                 # Subject stranded on an aux child. When that aux carries a
                 # content lemma ("sends" tagged AUX under ROOT "normalized"),

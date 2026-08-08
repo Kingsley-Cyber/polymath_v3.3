@@ -467,3 +467,90 @@ def test_bare_article_entity_does_not_block_unique_previous_subject() -> None:
         and "discourse-subject-mention" in item.subject_mention_id
         for item in output.mapped_relations
     )
+
+
+def _pairs(output, states=("accepted", "open")):
+    return {
+        (
+            item.subject_mention_id.rsplit(":", 1)[-1],
+            item.object_mention_id.rsplit(":", 1)[-1],
+        )
+        for item in output.mapped_relations
+        if item.terminal_state.value in states
+    }
+
+
+def test_participial_acl_frame_relates_head_noun_to_its_object() -> None:
+    # Active participial modifier: the modified noun is the participle's
+    # subject — mirror class of the long-standing VBN passive-acl recovery.
+    output = _run(
+        "The registry containing checksums was archived last year.",
+        [("registry", "artifact"), ("checksums", "artifact")],
+    )
+    assert ("registry", "checksums") in _pairs(output)
+
+
+def test_explicit_object_list_distributes_across_any_frame() -> None:
+    # Comma/and NP lists extend a frame's objects for every cue, not only
+    # "apply" — licensing is adjacency, robust to parser-fractured conj arcs.
+    output = _run(
+        "The vault holds keys, certificates, and revocation lists.",
+        [
+            ("vault", "artifact"), ("keys", "artifact"),
+            ("certificates", "artifact"), ("revocation lists", "artifact"),
+        ],
+    )
+    pairs = _pairs(output)
+    assert {("vault", "keys"), ("vault", "certificates"), ("vault", "revocation lists")} <= pairs
+
+
+def test_participial_frame_with_fracture_prone_list_reaches_every_member() -> None:
+    # Same structural shape that fractures the small parser on long
+    # heterogeneous lists (a second acl island, a compound misread as a
+    # verb): every list member must still pair with the participle's head.
+    output = _run(
+        "The kit ships a sensor array containing heat probes, dust filters, flow meters, and manually calibrated pressure gauges.",
+        [
+            ("sensor array", "artifact"), ("heat probes", "artifact"),
+            ("dust filters", "artifact"), ("flow meters", "artifact"),
+            ("pressure gauges", "artifact"),
+        ],
+    )
+    pairs = _pairs(output)
+    assert {
+        ("sensor array", "heat probes"), ("sensor array", "dust filters"),
+        ("sensor array", "flow meters"), ("sensor array", "pressure gauges"),
+    } <= pairs
+
+
+def test_object_list_never_crosses_a_clause_subject() -> None:
+    # Comma splice: the second clause's subject terminates the list walk —
+    # no derived pair may reach across the clause boundary.
+    output = _run(
+        "The scheduler notified Alpha, Beta follows Gamma.",
+        [
+            ("scheduler", "software"), ("Alpha", "software"),
+            ("Beta", "software"), ("Gamma", "software"),
+        ],
+    )
+    assert ("scheduler", "Beta") not in _pairs(output, states=("accepted", "open", "review"))
+    assert ("scheduler", "Gamma") not in _pairs(output, states=("accepted", "open", "review"))
+
+
+def test_object_list_never_absorbs_a_following_verbs_arguments() -> None:
+    # The walk stops at any verb: objects of a later predicate are never
+    # folded into the earlier frame's list.
+    output = _run(
+        "The gateway sends requests, logs failures, and updates metrics.",
+        [
+            ("gateway", "software"), ("requests", "artifact"),
+            ("failures", "event"), ("metrics", "artifact"),
+        ],
+    )
+    routed = {
+        (item.subject_mention_id.rsplit(":", 1)[-1], item.object_mention_id.rsplit(":", 1)[-1])
+        for item in output.mapped_relations
+        if item.surface_predicate.startswith("send")
+    }
+    assert ("gateway", "failures") not in routed
+    assert ("gateway", "metrics") not in routed
