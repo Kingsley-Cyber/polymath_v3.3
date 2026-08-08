@@ -24,8 +24,15 @@ knowledge_safety:
   open_semantics_preserved: passed     # native predicates/facets retained; nearest-vague impossible
 
 held_out_generalization:
-  status: pending                      # fresh multi-domain corpus, run ONCE untouched
-  criterion: zero NEW mechanism-level failure classes
+  packet_v1: consumed                  # exposed 2 new mechanism classes (epistemic
+                                       # scope, catenative modality) -> freeze
+                                       # exception -> fixed + burned -> packet is
+                                       # now DEVELOPMENT data; regression rerun:
+                                       # all hard gates clean, residuals map 1:1
+                                       # to ledger classes, leakage 0
+  status: pending_fresh_corpus         # final gate needs ONE genuinely new sealed
+                                       # corpus; criterion unchanged: zero NEW
+                                       # mechanism-level failure classes
 
 operations:
   crash_recovery: pending
