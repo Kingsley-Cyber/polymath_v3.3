@@ -133,8 +133,9 @@ services:
       # q8 (owner directive 2026-08-04) — shadow dual-write canary, mirrored
       # from docker-compose.override.yml so the offline worker stays aligned
       # with backend. Shadow-only; remove both lines to end the canary.
+      # 2026-08-08 (owner): q8 CANONICAL everywhere — empty allowlist.
       QDRANT_EVIDENCE_DUAL_WRITE: ${QDRANT_EVIDENCE_DUAL_WRITE:-true}
-      QDRANT_EVIDENCE_DUAL_WRITE_CORPUS_IDS: ${QDRANT_EVIDENCE_DUAL_WRITE_CORPUS_IDS:-c6518e7b-1327-4694-85c8-08a81542e425,6a766597-29f3-4a3e-8918-5de10f0053b3}
+      QDRANT_EVIDENCE_DUAL_WRITE_CORPUS_IDS: ${QDRANT_EVIDENCE_DUAL_WRITE_CORPUS_IDS:-}
     depends_on:
       mongodb:
         condition: service_healthy
