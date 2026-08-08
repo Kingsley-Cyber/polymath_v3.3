@@ -904,6 +904,7 @@ def _catenative_chain_context(token) -> tuple[bool, bool, bool]:
     using' marks the chain prospective. Returns (modal, negated, attitude)."""
     modal = negated = attitude = False
     classes = _epistemic_classes()
+    prospective = _assertion_context().get("prospective_periphrastic", frozenset())
     current = token
     depth = 0
     while current.dep_ == "xcomp" and current.head.i != current.i and depth < 4:
@@ -917,8 +918,45 @@ def _catenative_chain_context(token) -> tuple[bool, bool, bool]:
             negated = True
         if classes.get(governor.lemma_.casefold()) == "attitude_prospective":
             attitude = True
+        # Periphrastic future/instruction: "be going to VERB" — the
+        # governor is a prospective-class verb with a be-auxiliary and a
+        # verbal complement (this chain). Motion-sense 'going to <place>'
+        # never enters: it has no xcomp.
+        if governor.lemma_.casefold() in prospective and any(
+            child.dep_ in {"aux", "auxpass"} and child.lemma_.casefold() == "be"
+            for child in governor.children
+        ):
+            attitude = True
         current = governor
         depth += 1
+    # Prospective projection into complement clauses: a complement is never
+    # more asserted than its matrix, so a ccomp whose matrix chain is a
+    # 'be going to VERB' periphrastic inherits the prospective attitude.
+    # Only attitude projects — modality and negation stay clause-local
+    # across complement boundaries ("must know that X" does not modalize X).
+    if not attitude:
+        current = token
+        depth = 0
+        crossed_complement = False
+        # acomp bridges predicative-adjective matrices ("make sure", "be
+        # certain") — chain-internal, never a new assertion context.
+        while current.dep_ in {"ccomp", "xcomp", "acomp"} and current.head.i != current.i and depth < 6:
+            if current.dep_ == "ccomp":
+                crossed_complement = True
+            governor = current.head
+            if (
+                crossed_complement
+                and token.i > governor.i
+                and governor.lemma_.casefold() in prospective
+                and any(
+                    child.dep_ in {"aux", "auxpass"} and child.lemma_.casefold() == "be"
+                    for child in governor.children
+                )
+            ):
+                attitude = True
+                break
+            current = governor
+            depth += 1
     return modal, negated, attitude
 
 

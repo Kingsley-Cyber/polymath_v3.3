@@ -859,3 +859,42 @@ def test_pronoun_endpoints_never_anchor_accepted_facts() -> None:
         r.terminal_state.value == "accepted" and r.subject_mention_id.endswith(":I")
         for r in output.mapped_relations
     )
+
+
+def test_going_to_periphrastic_future_is_not_asserted() -> None:
+    # Prospective periphrastic ("be going to VERB") is instruction/intent,
+    # never an asserted fact; motion-sense 'going to <place>' is untouched
+    # because the mechanism requires an xcomp verb complement.
+    for text in (
+        "Alphaline is going to consume Betamark.",
+        "We are going to configure Alphaline to consume Betamark.",
+    ):
+        output = _run(text, [("Alphaline", "software"), ("Betamark", "software")])
+        assert not _accepted_pair(output, "Alphaline", "Betamark"), text
+
+
+def test_plain_past_and_present_stay_asserted_after_prospective_guard() -> None:
+    for text in (
+        "Alphaline consumed Betamark.",
+        "Alphaline consumes Betamark.",
+    ):
+        output = _run(text, [("Alphaline", "software"), ("Betamark", "software")])
+        assert _accepted_pair(output, "Alphaline", "Betamark"), text
+
+
+def test_prospective_context_projects_into_complement_clauses() -> None:
+    # A complement clause is never more asserted than its matrix: when the
+    # matrix chain is 'be going to ...', the ccomp inherits the prospective
+    # context ("you're going to make sure that X" is an instruction, not a
+    # report that X happened).
+    text = "You are going to make sure that Alphaline consumes Betamark."
+    output = _run(text, [("Alphaline", "software"), ("Betamark", "software")])
+    assert not _accepted_pair(output, "Alphaline", "Betamark")
+
+
+def test_plain_complement_clauses_stay_asserted_without_prospective_matrix() -> None:
+    # No prospective matrix -> the complement's own disposition decides;
+    # the projection must not fire off arbitrary ccomp embedding.
+    text = "The audit confirmed that Alphaline consumes Betamark."
+    output = _run(text, [("Alphaline", "software"), ("Betamark", "software")])
+    assert _accepted_pair(output, "Alphaline", "Betamark")

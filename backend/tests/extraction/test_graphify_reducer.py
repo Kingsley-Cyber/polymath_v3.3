@@ -163,3 +163,47 @@ def test_universal_entity_guards_suppress_junk_surfaces() -> None:
     for real in ("Harbor Gateway", "Claude", "AutoDS", "Adobe Express",
                  "If-Then Systems", "Go", "Ac Hampton", "5G networks"):
         assert not _junk_entity_surface(real), real
+
+
+def test_metadata_key_surfaces_never_promote() -> None:
+    # Structural guard: a surface whose every mention sits in key-position
+    # ("Channel: ...", "Duration: ...") is a metadata KEY, not an entity.
+    # Entities that merely appear once before a colon but also in prose
+    # keep their identity.
+    from services.extraction.graphify_reducer import reduce_document_entities
+    from services.extraction.graphify_normalization import normalize_document
+    from services.extraction.graphify_survey import survey_document
+    from services.extraction.graphify_census import InMemoryRawMentionSink, run_entity_census
+
+    text = (
+        "The upload metadata reads Channel: Ac Hampton and Duration: 25:30 "
+        "for this video. AutoDS: the tool I use daily. AutoDS automates "
+        "fulfillment and AutoDS integrates with Shopify.\n"
+    )
+    document = normalize_document("doc", text)
+    survey = survey_document(document)
+
+    class _Provider:
+        release = "test-null"
+        def predict_entities(self, texts, **kwargs):
+            rows = []
+            for t in texts:
+                row = []
+                for name in ("Channel", "Duration", "AutoDS", "Shopify", "Ac Hampton"):
+                    i = t.find(name)
+                    while i >= 0:
+                        from services.extraction.gliner2_cpu_provider import EntityPrediction
+                        row.append(EntityPrediction(text=name, entity_type="software",
+                                                    start=i, end=i + len(name),
+                                                    confidence=0.9, facet=""))
+                        i = t.find(name, i + 1)
+                rows.append(sorted(row, key=lambda p: (p.start, p.end)))
+            return rows
+
+    census = run_entity_census([document], [survey], _Provider(), InMemoryRawMentionSink())
+    output = reduce_document_entities(document, census.mentions, survey)
+    states = {e.canonical_name: e.state.value for e in output.entities}
+    assert states.get("Channel") == "suppressed"
+    assert states.get("Duration") == "suppressed"
+    assert states.get("AutoDS") in ("promoted", "document_local")
+    assert states.get("Shopify") in ("promoted", "document_local")

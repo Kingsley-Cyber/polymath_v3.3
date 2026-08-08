@@ -10,3 +10,4 @@ epistemic_uncertainty_adjectives: [unresolved, unclear, unknown, uncertain,
                                    questionable, unverified]
 directive_governors: [require, demand, insist, mandate, direct, instruct, urge]
 negative_adverbs: [never, "no longer", rarely, seldom, hardly, scarcely]
+prospective_periphrastic: [go]

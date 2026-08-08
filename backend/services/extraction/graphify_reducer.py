@@ -379,6 +379,22 @@ def _cluster_decision(
         return EntityTerminalState.SUPPRESSED, ("generic_or_pronominal_surface",)
     if _junk_entity_surface(cluster.canonical_name):
         return EntityTerminalState.SUPPRESSED, ("universal_junk_surface",)
+    # Metadata-KEY guard (owner-authorized 2026-08-08): a surface whose
+    # EVERY mention sits in key-position (immediately followed by ':') is
+    # a structural key, not an entity — "Channel: ...", "Duration: ...".
+    # One prose mention anywhere rescues a real name ("AutoDS: the tool"
+    # plus prose uses of AutoDS).
+    if cluster.mentions:
+        text_all = document.normalized_text
+        key_positions = 0
+        for mention in cluster.mentions:
+            end = mention.normalized_end
+            if end is not None:
+                tail = text_all[end:end + 2]
+                if tail[:1] == ":" or tail == " :":
+                    key_positions += 1
+        if key_positions == len(cluster.mentions):
+            return EntityTerminalState.SUPPRESSED, ("metadata_key_surface",)
     if _counted_noun_phrase(cluster.canonical_name):
         # Universal entity-quality class (owner-authorized 2026-08-08): a
         # cardinal determiner over a lowercase common head names a QUANTITY
