@@ -241,6 +241,7 @@ def _raw_mention(
     sequence: int,
     *,
     schema_release: str = "",
+    provider_release: str = PROVIDER_RELEASE,
 ) -> RawMentionV1:
     local_valid = (
         0 <= prediction.start < prediction.end <= len(window.text)
@@ -272,7 +273,7 @@ def _raw_mention(
     return RawMentionV1(
         mention_id=stable_id(
             "raw-mention", document.document_id, window.window_id, prediction.start,
-            prediction.end, prediction.text, prediction.entity_type, PROVIDER_RELEASE,
+            prediction.end, prediction.text, prediction.entity_type, provider_release,
         ),
         document_id=document.document_id,
         window_id=window.window_id,
@@ -288,7 +289,7 @@ def _raw_mention(
         original_end=original_end,
         terminal_state=terminal,
         alignment_error=";".join(errors),
-        provider_release=PROVIDER_RELEASE,
+        provider_release=provider_release,
         facet=prediction.facet,
         schema_release=schema_release,
     )
@@ -397,6 +398,7 @@ def run_entity_census(
                 batch_mentions.append(_raw_mention(
                     document, window, prediction, sequence,
                     schema_release=f"{SCHEMA_RELEASE}:{schema_hash(adapter_by_document[window.document_id])[:16]}",
+                    provider_release=getattr(provider, "release", PROVIDER_RELEASE),
                 ))
         sink.persist(batch_mentions)
         persisted_calls += 1

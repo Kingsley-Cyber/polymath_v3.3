@@ -60,7 +60,7 @@ class _Db(dict):
 
 async def run():
     from services.extraction.graphify_pipeline import run_graphify_pipeline
-    from services.extraction.gliner2_cpu_provider import get_gliner2_cpu_provider
+    from services.extraction.entity_encoder import get_entity_encoder_provider as get_gliner2_cpu_provider
     db = _Db()
     await run_graphify_pipeline(
         db=db, corpus_id="oracle", doc_id="doc", text=RAW,

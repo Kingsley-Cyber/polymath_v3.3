@@ -1,0 +1,18 @@
+# Entity-provider release pin (owner-ratified 2026-08-08).
+entity_provider_release: gliner-bi-base-mps-v1
+model:
+  id: knowledgator/gliner-bi-base-v2.0
+  revision: 3fdae58db008a8b4e0a803a920ce9bf6566aceed
+  weights_file: pytorch_model.bin
+  weights_sha256: a5b2383eacebba61042935a5cff7000e5b6706a5295b9c865d0c62b67405f5a1
+runtime:
+  device: mps
+  threshold: 0.30
+  gliner_version: 0.2.26
+  torch_version: 2.12.0
+schema:
+  label_description_policy: humanized-schema-label-strings-v1
+  label_embedding_cache: planned_after_equivalence_test
+output_contract:
+  version: entity-span-v1
+role: production_candidate   # NOT final universal encoder; frozen baseline = gliner2

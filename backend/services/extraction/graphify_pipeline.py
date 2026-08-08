@@ -397,7 +397,12 @@ async def run_graphify_pipeline(
 ) -> GraphifyPipelineOutput:
     """Run or resume the canonical document pipeline without partial graph output."""
     run_id = ledger.run_id_for(corpus_id=corpus_id, doc_id=doc_id)
-    selected_provider = provider or get_gliner2_cpu_provider()
+    # Provider-neutral encoder seam (owner 2026-08-08): default resolves the
+    # frozen GLiNER2 baseline; GRAPHIFY_ENTITY_PROVIDER selects the pinned
+    # candidate. Downstream stages never learn which encoder ran.
+    from services.extraction.entity_encoder import get_entity_encoder_provider
+
+    selected_provider = provider or get_entity_encoder_provider()
     pins = {
         "pipeline": PIPELINE_RELEASE,
         "model_id": MODEL_ID,
