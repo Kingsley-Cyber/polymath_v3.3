@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import threading
 from bisect import bisect_left
 from collections import Counter
 from dataclasses import dataclass, replace
@@ -66,6 +67,7 @@ _META_PREDICATE_RE = re.compile(
     r"\b(?:predicate|unmapped\s+surface\s+relation|depends[_ ]on|related[_ ]to)\b",
     re.I,
 )
+_SPACY_PARSE_LOCK = threading.Lock()
 _CLOSED_CLASS_POS = frozenset({"AUX", "DET", "ADP", "CCONJ", "SCONJ", "PART", "PUNCT"})
 _OPEN_ONLY_LEMMAS = frozenset({"serve", "publish", "author", "curate", "interoperate", "occur"})
 # "X occurred in/at/on/near/during Y" is an explicit event-association surface;
@@ -1735,9 +1737,13 @@ def run_relation_fast_path(
         all_decisions.extend(decisions)
 
     extractor = FrameExtractor()
-    docs = list(extractor._nlp.pipe(  # noqa: SLF001
-        [_mask_markdown_for_parse(unit.text) for unit in all_units], batch_size=64,
-    ))
+    # The shared spaCy Language is not safe under concurrent pipe() calls;
+    # the factory coordinator overlaps documents, so the parse itself is the
+    # one serialized section (pure-Python compile below runs concurrently).
+    with _SPACY_PARSE_LOCK:
+        docs = list(extractor._nlp.pipe(  # noqa: SLF001
+            [_mask_markdown_for_parse(unit.text) for unit in all_units], batch_size=64,
+        ))
     endpoint_entities: dict[str, DocumentEntityV1] = {}
     endpoint_mentions: dict[str, CompletedMentionV1] = {}
     completed_units: list[_Unit] = []

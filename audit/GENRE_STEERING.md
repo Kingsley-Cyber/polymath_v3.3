@@ -348,3 +348,24 @@ everywhere, q8 write failures fail the ingest, legacy = parity/rollback only,
 reads unchanged until cutover. Remaining factory stations: CorpusCoordinator +
 corpus-wide GLiNER batching, spaCy pipe, compiler pool, bulk writers, saturation
 controller + telemetry → then read cutover → fresh qualification → production.
+
+### Factory station B: CorpusCoordinator + storage root-cause fix (2026-08-08)
+`corpus_coordinator.py` — bounded document-overlap budget over the deterministic
+per-document pipeline; heavy stages (OpenIE farm dispatch, spaCy+compile fast path)
+moved off the event loop; shared spaCy Language guarded by a parse lock; one failed
+document never sinks the corpus; telemetry (overlap factor, peak active, docs/min).
+CORPUS EQUALITY GATE (fresh namespaces, no resume contamination): 4 real documents
+(arXiv v6, book-66, sealed-v1, transcript) — serial corpus digest == overlapped
+corpus digest, 4/4 passed both modes, **26.0s → 8.7s = 2.96× at max_active=3**
+(stacking on the farm's 3.54× and routing's −38%).
+STORAGE ROOT CAUSE CLOSED: every "database corruption" this week (WiredTiger missing
+.wt, FTDC FileNotOpen abort, Neo4j TransactionCommitFailed, wedged mount source) was
+Docker Desktop's macOS bind-mount layer failing under sustained DB IO — Mongo/Neo4j
+data+logs/Qdrant/Redis moved to named Docker volumes (VM filesystem); Neo4j plugin
+jars stay bind-mounted; override also aligned to q8-canonical (empty allowlist).
+Deferred with rationale: cross-document GLiNER batch consolidation (census already
+corpus-batches the documents it is given; overlap keeps the warm model fed through
+its inference lock — restructuring the per-document pipeline into corpus stages is
+not required for saturation at current scale). Remaining before cutover: factory-
+ingest a corpus through the FULL worker path (embedding+q8+neo4j), run the q8 parity
+harness, then fresh sealed qualification.

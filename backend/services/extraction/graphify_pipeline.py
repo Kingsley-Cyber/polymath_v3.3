@@ -544,8 +544,11 @@ async def run_graphify_pipeline(
         eligible=bool(item["eligible"]),
     ) for item in eligibility_payload["eligibility"])
 
-    def openie_compute() -> dict[str, Any]:
-        output = run_openie_extraction(
+    async def openie_compute() -> dict[str, Any]:
+        # Factory: farm dispatch blocks the calling thread, so it runs off
+        # the event loop — concurrent documents keep the worker pool fed.
+        output = await asyncio.to_thread(
+            run_openie_extraction,
             [document], openie_units, get_triplet_extract_cpu_provider(),
         )
         return {"propositions": _record_payload(output.propositions), "report": output.report}
@@ -644,7 +647,12 @@ async def run_graphify_pipeline(
         OpenIEAssertionV1.model_validate(item) for item in openie_assertion_payload["assertions"]
     )
 
-    def relation_compute() -> dict[str, Any]:
+    async def relation_compute() -> dict[str, Any]:
+        # Factory: the spaCy parse + deterministic compile run off the event
+        # loop so one document's fast path overlaps another's model stages.
+        return await asyncio.to_thread(_relation_compute_sync)
+
+    def _relation_compute_sync() -> dict[str, Any]:
         output: RelationFastPathOutput = run_relation_fast_path(
             [document], [survey], completed_mentions, entities,
         )
