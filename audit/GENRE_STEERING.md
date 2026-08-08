@@ -331,3 +331,20 @@ built against q8 (hard gate: serial output digest == parallel output digest) →
 read cutover (shadow → canary → default → rollback window → retire) → fresh sealed
 qualification → production freeze. The concept/mechanism latent-query project is
 explicitly AFTER the production boundary (retrieval projection, not extraction).
+
+### Factory execution plane, station A: N-process warm OpenIE farm (2026-08-08)
+`openie_farm.py` — spawn-based persistent worker pool, one warm triplet-extract per
+process (load once, consume until corpus complete); units from any document dispatch
+to any worker; results reassemble in deterministic unit order so proposition identity
+is engine-independent (one `rendering_payload` shape for both engines). Farm engages
+only for the default extractor construction — custom providers (tests) stay serial.
+UNION invariant carried unchanged (worker error = explicit failure record).
+EQUALITY GATE (owner's hard rule — parallelism changes WHEN, never WHAT):
+- v6 frozen units: serial digest == farm digest (242 propositions, byte-identical)
+- v7 monograph (843 units): serial digest == farm digest, 7,235 propositions,
+  **122.8s → 34.7s = 3.54× speedup at 4 workers**, 0 failures both engines.
+q8 promoted to CANONICAL projection the same session: dual-write defaults ON
+everywhere, q8 write failures fail the ingest, legacy = parity/rollback only,
+reads unchanged until cutover. Remaining factory stations: CorpusCoordinator +
+corpus-wide GLiNER batching, spaCy pipe, compiler pool, bulk writers, saturation
+controller + telemetry → then read cutover → fresh qualification → production.

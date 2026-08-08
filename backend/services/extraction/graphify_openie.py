@@ -9,6 +9,11 @@ import re
 from dataclasses import dataclass
 from typing import Any, Callable, Sequence
 
+from services.extraction.openie_farm import (
+    default_worker_count,
+    get_openie_farm,
+    rendering_payload,
+)
 from models.graphify_contracts import (
     NormalizedDocumentV1,
     OpenIEAsserterLinkV1,
@@ -113,6 +118,13 @@ class TripletExtractCPUProvider:
 
     def __init__(self, loader: Callable[[], Any] | None = None) -> None:
         self._loader = loader or _default_loader
+
+    @property
+    def is_default_loader(self) -> bool:
+        """True when the farm's worker-side construction replicates this
+        provider exactly; a custom loader (tests, alternative config) must
+        run serially through the injected instance."""
+        return self._loader is _default_loader
 
     def _instance(self) -> Any:
         global _EXTRACTOR, _EXTRACTOR_LOAD_COUNT
@@ -268,6 +280,21 @@ def run_openie_extraction(
     openie_successes = 0
     openie_failures: list[dict[str, str]] = []
     deterministic_recoveries = 0
+    masked_text = {
+        unit.unit_id: re.sub(r"[*_~`\r\n]", " ", unit.text) for unit in eligible
+    }
+    # Factory station A (owner-ratified 2026-08-08): units from any document
+    # dispatch to N warm worker processes; results reassemble in the
+    # caller's deterministic unit order below, so the serial and parallel
+    # proposition digests are identical by construction.
+    workers = default_worker_count()
+    farm_results: dict[str, tuple[str, list]] | None = None
+    engine = "serial"
+    if workers > 1 and len(eligible) > 1 and provider.is_default_loader:
+        engine = "farm"
+        farm_results = get_openie_farm(workers).extract_all(
+            [(unit.unit_id, masked_text[unit.unit_id]) for unit in eligible]
+        )
     for unit in eligible:
         document = document_by_id.get(unit.document_id)
         if document is None:
@@ -288,23 +315,40 @@ def run_openie_extraction(
         # failures. A provider error is recorded, never silently absorbed into
         # a deterministic-only unit.
         extract_calls += 1
-        try:
-            renderings = provider.extract(re.sub(r"[*_~`\r\n]", " ", unit.text))
-            openie_successes += 1
-        except Exception as exc:  # noqa: BLE001 — failure is data, not control flow
-            renderings = []
-            openie_failures.append({
-                "unit_id": unit.unit_id,
-                "document_id": unit.document_id,
-                "error_type": type(exc).__name__,
-                "error": str(exc)[:300],
-            })
-        for sequence, rendering in enumerate(renderings):
-            links = tuple(_link(link) for link in (getattr(rendering, "asserter_links", None) or ()))
-            chain = tuple(str(value) for value in (getattr(rendering, "asserter_chain", None) or ()))
-            subject = str(rendering.subject)
-            relation = str(rendering.relation)
-            obj = str(rendering.object)
+        if farm_results is not None:
+            status, rows = farm_results[unit.unit_id]
+            if status == "ok":
+                rendering_rows = rows
+                openie_successes += 1
+            else:
+                rendering_rows = []
+                openie_failures.append({
+                    "unit_id": unit.unit_id,
+                    "document_id": unit.document_id,
+                    "error_type": str(rows[0]) if rows else "WorkerError",
+                    "error": str(rows[1]) if len(rows) > 1 else "",
+                })
+        else:
+            try:
+                rendering_rows = [
+                    rendering_payload(rendering)
+                    for rendering in provider.extract(masked_text[unit.unit_id])
+                ]
+                openie_successes += 1
+            except Exception as exc:  # noqa: BLE001 — failure is data, not control flow
+                rendering_rows = []
+                openie_failures.append({
+                    "unit_id": unit.unit_id,
+                    "document_id": unit.document_id,
+                    "error_type": type(exc).__name__,
+                    "error": str(exc)[:300],
+                })
+        for sequence, row in enumerate(rendering_rows):
+            links = tuple(_link(link) for link in row["asserter_links"])
+            chain = tuple(str(value) for value in row["asserter_chain"])
+            subject = str(row["subject"])
+            relation = str(row["relation"])
+            obj = str(row["object"])
             propositions.append(OpenIERawPropositionV1(
                 proposition_id=stable_id(
                     "openie-proposition", unit.document_id, unit.unit_id, sequence,
@@ -320,17 +364,17 @@ def run_openie_extraction(
                 subject=subject,
                 relation=relation,
                 object=obj,
-                confidence=float(getattr(rendering, "confidence", 1.0)),
-                from_clause_split=bool(getattr(rendering, "from_clause_split", False)),
-                from_entailment=bool(getattr(rendering, "from_entailment", False)),
-                entailment_score=float(getattr(rendering, "entailment_score", 1.0)),
+                confidence=float(row["confidence"]),
+                from_clause_split=bool(row["from_clause_split"]),
+                from_entailment=bool(row["from_entailment"]),
+                entailment_score=float(row["entailment_score"]),
                 asserter_chain=chain,
                 asserter_links=links,
                 extractor_release=OPENIE_RELEASE,
             ))
         for subject, relation, obj in recovered_rows:
             deterministic_recoveries += 1
-            sequence = len(renderings) + deterministic_recoveries
+            sequence = len(rendering_rows) + deterministic_recoveries
             propositions.append(OpenIERawPropositionV1(
                 proposition_id=stable_id(
                     "openie-proposition", unit.document_id, unit.unit_id, "strict-recovery",
@@ -347,7 +391,28 @@ def run_openie_extraction(
         item.document_id, item.evidence_start, item.unit_id,
         item.rendering_sequence, item.proposition_id,
     ))
-    health = provider.health()
+    if engine == "serial":
+        health = provider.health()
+    else:
+        # Farm mode: workers own the warm extractors — never force a parent-
+        # process model load just to report health.
+        try:
+            package_version = importlib.metadata.version("triplet-extract")
+        except importlib.metadata.PackageNotFoundError:
+            package_version = TRIPLET_EXTRACT_VERSION
+        health = {
+            "ready": True,
+            "device": "cpu",
+            "speed_preset": SPEED_PRESET,
+            "deep_search": False,
+            "resolve_coref": False,
+            "package_version": package_version,
+            "source_commit": TRIPLET_EXTRACT_COMMIT,
+            "extractor_release": OPENIE_RELEASE,
+            "extractor_load_count": provider.load_count,
+            "engine": "farm",
+            "workers": workers,
+        }
     deterministic_only_units = len(eligible) - openie_successes - len(openie_failures)
     if deterministic_only_units != 0:
         raise RuntimeError(
@@ -367,6 +432,8 @@ def run_openie_extraction(
         "openie_failure_records": openie_failures,
         "union_invariant_holds": len(eligible) == openie_successes + len(openie_failures),
         "one_extract_call_per_eligible_unit": extract_calls == len(eligible),
+        "engine": engine,
+        "openie_workers": workers if engine == "farm" else 1,
         "at_most_one_provider_call_per_eligible_unit": extract_calls <= len(eligible),
         "every_eligible_unit_routed": extract_calls + deterministic_only_units == len(eligible),
         "deterministic_only_units": deterministic_only_units,
