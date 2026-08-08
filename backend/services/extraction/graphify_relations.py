@@ -1816,9 +1816,11 @@ def _relex_semantic_proposals(
                 [unit.text for unit in eligible],
                 entity_labels=[], relation_labels=_relex_relation_labels(),
             )
-        except RelexSidecarError as exc:
-            logger.warning("relex sidecar unavailable; semantic lane skipped: %s", exc)
-            return []
+        except RelexSidecarError:
+            # Fail-closed (O1 worker contract): no silent degradation. The
+            # stage fails recoverable and retries once the SAME pinned
+            # release is healthy — never a partial semantic completion.
+            raise
         pairs = [(unit, list(result.relations)) for unit, result in zip(eligible, results)]
     output: list[tuple[_Unit, _Proposal]] = []
     for unit, unit_relations in pairs:

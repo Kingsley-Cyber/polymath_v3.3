@@ -1915,6 +1915,12 @@ def _is_transient_store_exception(exc: BaseException) -> bool:
         "readtimeout",
         "writetimeout",
         "service unavailable",
+        # Host-MPS sidecar outages (O1 worker contract 2026-08-08): the
+        # neural sidecar being down is transient infrastructure — the item
+        # must retry with bounded backoff and resume when the SAME pinned
+        # release is healthy, never terminal-fail on first touch.
+        "sidecar",
+        "unreachable",
         "503",
         "504",
         "neo4j",
