@@ -3,9 +3,9 @@
   "status": "FAIL",
   "runtime": {
     "pipeline_release": "graphify-cpu-pipeline-v15",
-    "mongo_database": "graphify_eval_syn_04_39924d8c03",
-    "corpus_id": "ca9b3e92-3889-573b-8ac7-5346b51428a1",
-    "elapsed_seconds": 1.56,
+    "mongo_database": "graphify_eval_syn_04_6c536eba62",
+    "corpus_id": "f61a6d8b-3360-5f18-ad66-b226d5e9e667",
+    "elapsed_seconds": 0.87,
     "interpreter": "/Users/king/polymath_v3.3/local_ghost_b/.venv/bin/python"
   },
   "items": {
@@ -24,7 +24,6 @@
       "cold 7",
       "cold 7 rollout plan",
       "dr imani reyes",
-      "dr reyes",
       "falcon cache",
       "pinion 3 1",
       "pinion 3 2",
@@ -42,9 +41,7 @@
     "COLD-7",
     "COLD-7 Rollout Plan",
     "Dr. Imani Reyes",
-    "Dr. Reyes",
     "Falcon Cache",
-    "Monday",
     "Pinion",
     "Pinion 3.1",
     "Pinion 3.2",

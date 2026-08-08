@@ -1,0 +1,1217 @@
+[
+  {
+    "evidence_end": 797,
+    "evidence_start": 718,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "12 4",
+    "predicate": "is not as",
+    "qualifiers": {},
+    "subject": "Skyloom"
+  },
+  {
+    "evidence_end": 797,
+    "evidence_start": 718,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "one program federation",
+    "predicate": "is not",
+    "qualifiers": {},
+    "subject": "Skyloom"
+  },
+  {
+    "evidence_end": 797,
+    "evidence_start": 718,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "one program but",
+    "predicate": "is not",
+    "qualifiers": {},
+    "subject": "Skyloom"
+  },
+  {
+    "evidence_end": 797,
+    "evidence_start": 718,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "one program",
+    "predicate": "is not",
+    "qualifiers": {},
+    "subject": "Skyloom"
+  },
+  {
+    "evidence_end": 797,
+    "evidence_start": 718,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "one program but federation",
+    "predicate": "is not",
+    "qualifiers": {},
+    "subject": "Skyloom"
+  },
+  {
+    "evidence_end": 1058,
+    "evidence_start": 957,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "Skyloom",
+    "predicate": "will shortly is well of",
+    "qualifiers": {},
+    "subject": "which"
+  },
+  {
+    "evidence_end": 1058,
+    "evidence_start": 957,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "which",
+    "predicate": "will meet shortly",
+    "qualifiers": {},
+    "subject": "we"
+  },
+  {
+    "evidence_end": 1187,
+    "evidence_start": 1059,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "them",
+    "predicate": "holds together",
+    "qualifiers": {},
+    "subject": "What"
+  },
+  {
+    "evidence_end": 1806,
+    "evidence_start": 1643,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "to link",
+    "predicate": "simply refuses",
+    "qualifiers": {},
+    "subject": "scheduled window gateway"
+  },
+  {
+    "evidence_end": 1806,
+    "evidence_start": 1643,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "Station Scheduler",
+    "predicate": "depends_on",
+    "qualifiers": {},
+    "subject": "Groundgate"
+  },
+  {
+    "evidence_end": 1991,
+    "evidence_start": 1808,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "eastern horizon",
+    "predicate": "clears",
+    "qualifiers": {},
+    "subject": "kst 14 spacecraft kestrel constellation"
+  },
+  {
+    "evidence_end": 1991,
+    "evidence_start": 1808,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "eastern horizon",
+    "predicate": "clears",
+    "qualifiers": {},
+    "subject": "kst 14 newest spacecraft in kestrel constellation"
+  },
+  {
+    "evidence_end": 1991,
+    "evidence_start": 1808,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "eastern horizon",
+    "predicate": "clears",
+    "qualifiers": {},
+    "subject": "kst 14 spacecraft in kestrel constellation"
+  },
+  {
+    "evidence_end": 1991,
+    "evidence_start": 1808,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "eastern horizon",
+    "predicate": "clears",
+    "qualifiers": {},
+    "subject": "kst 14 spacecraft kestrel"
+  },
+  {
+    "evidence_end": 2131,
+    "evidence_start": 1992,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "edge",
+    "predicate": "happens at",
+    "qualifiers": {},
+    "subject": "authentication"
+  },
+  {
+    "evidence_end": 2131,
+    "evidence_start": 1992,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "the edge",
+    "predicate": "happens at",
+    "qualifiers": {},
+    "subject": "authentication"
+  },
+  {
+    "evidence_end": 2447,
+    "evidence_start": 2272,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "last winter",
+    "predicate": "has been frozen since",
+    "qualifiers": {},
+    "subject": "version fe 2 3 of that contract"
+  },
+  {
+    "evidence_end": 2447,
+    "evidence_start": 2272,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "something close to law",
+    "predicate": "is treated as",
+    "qualifiers": {},
+    "subject": "the freeze"
+  },
+  {
+    "evidence_end": 3118,
+    "evidence_start": 2930,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "processing floor",
+    "predicate": "moves to",
+    "qualifiers": {},
+    "subject": "transport process"
+  },
+  {
+    "evidence_end": 3118,
+    "evidence_start": 2930,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "loss or reordering",
+    "predicate": "moves without",
+    "qualifiers": {},
+    "subject": "transport process"
+  },
+  {
+    "evidence_end": 3118,
+    "evidence_start": 2930,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "antenna vault to processing floor without loss or reordering",
+    "predicate": "moves",
+    "qualifiers": {},
+    "subject": "transport process"
+  },
+  {
+    "evidence_end": 3118,
+    "evidence_start": 2930,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "processing floor",
+    "predicate": "vault to",
+    "qualifiers": {},
+    "subject": "antenna"
+  },
+  {
+    "evidence_end": 3118,
+    "evidence_start": 2930,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "vault",
+    "predicate": "moves from",
+    "qualifiers": {},
+    "subject": "transport process"
+  },
+  {
+    "evidence_end": 3118,
+    "evidence_start": 2930,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "loss or reordering",
+    "predicate": "vault without",
+    "qualifiers": {},
+    "subject": "frame transport process envelopes antenna"
+  },
+  {
+    "evidence_end": 3118,
+    "evidence_start": 2930,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "antenna vault to processing floor",
+    "predicate": "moves from",
+    "qualifiers": {},
+    "subject": "transport process"
+  },
+  {
+    "evidence_end": 3118,
+    "evidence_start": 2930,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "envelopes",
+    "predicate": "moves",
+    "qualifiers": {},
+    "subject": "transport process"
+  },
+  {
+    "evidence_end": 3118,
+    "evidence_start": 2930,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "processing floor",
+    "predicate": "vault to",
+    "qualifiers": {},
+    "subject": "frame transport process envelopes antenna"
+  },
+  {
+    "evidence_end": 3118,
+    "evidence_start": 2930,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "loss or reordering",
+    "predicate": "vault without",
+    "qualifiers": {},
+    "subject": "antenna"
+  },
+  {
+    "evidence_end": 3318,
+    "evidence_start": 3119,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "the feature work",
+    "predicate": "has ever seen",
+    "qualifiers": {},
+    "subject": "Cinder Mesa"
+  },
+  {
+    "evidence_end": 3318,
+    "evidence_start": 3119,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "the product s own manual",
+    "predicate": "does not appear in",
+    "qualifiers": {},
+    "subject": "it"
+  },
+  {
+    "evidence_end": 3318,
+    "evidence_start": 3119,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "multicast",
+    "predicate": "encrypted",
+    "qualifiers": {},
+    "subject": "copperline supports"
+  },
+  {
+    "evidence_end": 3318,
+    "evidence_start": 3119,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "product s own manual",
+    "predicate": "does not appear in",
+    "qualifiers": {},
+    "subject": "it"
+  },
+  {
+    "evidence_end": 3904,
+    "evidence_start": 3692,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "Frame Envelope",
+    "predicate": "derived_from",
+    "qualifiers": {},
+    "subject": "Calibrated Telemetry Points"
+  },
+  {
+    "evidence_end": 3904,
+    "evidence_start": 3692,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "a strict one to many mapping",
+    "predicate": "derived_from",
+    "qualifiers": {},
+    "subject": "Calibrated Telemetry Points"
+  },
+  {
+    "evidence_end": 3904,
+    "evidence_start": 3692,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "strict one to many",
+    "predicate": "derived_from",
+    "qualifiers": {},
+    "subject": "Calibrated Telemetry Points"
+  },
+  {
+    "evidence_end": 3904,
+    "evidence_start": 3692,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "Frame Envelope",
+    "predicate": "derived_from",
+    "qualifiers": {},
+    "subject": "Calibrated Telemetry Points"
+  },
+  {
+    "evidence_end": 3904,
+    "evidence_start": 3692,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "Calibrated Telemetry Points",
+    "predicate": "produces",
+    "qualifiers": {},
+    "subject": "Decommutation and Calibration Unit"
+  },
+  {
+    "evidence_end": 3904,
+    "evidence_start": 3692,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "calibrated telemetry points and calibrated telemetry points are derived from their frame envelopes in strict one to many mapping",
+    "predicate": "produces",
+    "qualifiers": {},
+    "subject": "Decommutation and Calibration Unit"
+  },
+  {
+    "evidence_end": 3904,
+    "evidence_start": 3692,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "calibrated telemetry points and calibrated telemetry points are derived from their frame envelopes in strict one to many",
+    "predicate": "produces",
+    "qualifiers": {},
+    "subject": "Decommutation and Calibration Unit"
+  },
+  {
+    "evidence_end": 3904,
+    "evidence_start": 3692,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "strict one to many mapping",
+    "predicate": "derived_from",
+    "qualifiers": {},
+    "subject": "Calibrated Telemetry Points"
+  },
+  {
+    "evidence_end": 3904,
+    "evidence_start": 3692,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "strict one to many mapping",
+    "predicate": "derived_from",
+    "qualifiers": {},
+    "subject": "Calibrated Telemetry Points"
+  },
+  {
+    "evidence_end": 3904,
+    "evidence_start": 3692,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "strict one to mapping",
+    "predicate": "derived_from",
+    "qualifiers": {},
+    "subject": "Calibrated Telemetry Points"
+  },
+  {
+    "evidence_end": 4098,
+    "evidence_start": 3905,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "frame transport",
+    "predicate": "depends_on",
+    "qualifiers": {},
+    "subject": "Decommutation and Calibration Unit"
+  },
+  {
+    "evidence_end": 4098,
+    "evidence_start": 3905,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "Ironvale",
+    "predicate": "depends_on",
+    "qualifiers": {},
+    "subject": "Decommutation and Calibration Unit"
+  },
+  {
+    "evidence_end": 4098,
+    "evidence_start": 3905,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "frame transport",
+    "predicate": "depends_on",
+    "qualifiers": {},
+    "subject": "Decommutation and Calibration Unit"
+  },
+  {
+    "evidence_end": 4098,
+    "evidence_start": 3905,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "Ironvale",
+    "predicate": "depends_on",
+    "qualifiers": {},
+    "subject": "Decommutation and Calibration Unit"
+  },
+  {
+    "evidence_end": 4098,
+    "evidence_start": 3905,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "planned ironvale migration is ever approved",
+    "predicate": "will depend instead",
+    "qualifiers": {},
+    "subject": "Decommutation and Calibration Unit"
+  },
+  {
+    "evidence_end": 4098,
+    "evidence_start": 3905,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "planned migration is ever approved",
+    "predicate": "depends_on",
+    "qualifiers": {},
+    "subject": "Decommutation and Calibration Unit"
+  },
+  {
+    "evidence_end": 4402,
+    "evidence_start": 4184,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "write heavy workloads",
+    "predicate": "tuned for",
+    "qualifiers": {},
+    "subject": "time-series engine"
+  },
+  {
+    "evidence_end": 4402,
+    "evidence_start": 4184,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "write heavy workloads",
+    "predicate": "tuned for",
+    "qualifiers": {},
+    "subject": "time-series engine"
+  },
+  {
+    "evidence_end": 5050,
+    "evidence_start": 4830,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "Mission Telemetry Archive",
+    "predicate": "consumes",
+    "qualifiers": {},
+    "subject": "Trend Service"
+  },
+  {
+    "evidence_end": 5317,
+    "evidence_start": 5051,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "any they do",
+    "predicate": "appear",
+    "qualifiers": {},
+    "subject": "gaps"
+  },
+  {
+    "evidence_end": 5317,
+    "evidence_start": 5051,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "any long outage they do",
+    "predicate": "appear",
+    "qualifiers": {},
+    "subject": "gaps"
+  },
+  {
+    "evidence_end": 5317,
+    "evidence_start": 5051,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "after any long outage they do",
+    "predicate": "consumes",
+    "qualifiers": {},
+    "subject": "Backfill Process"
+  },
+  {
+    "evidence_end": 5533,
+    "evidence_start": 5360,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "pass planning service owns scheduler surfaced in audit last spring",
+    "predicate": "was never substantiated",
+    "qualifiers": {},
+    "subject": "it"
+  },
+  {
+    "evidence_end": 5533,
+    "evidence_start": 5360,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "vendor audit",
+    "predicate": "surfaced in",
+    "qualifiers": {},
+    "subject": "Station Scheduler"
+  },
+  {
+    "evidence_end": 5533,
+    "evidence_start": 5360,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "vendor audit",
+    "predicate": "owns",
+    "qualifiers": {},
+    "subject": "Pass Planning Service"
+  },
+  {
+    "evidence_end": 5533,
+    "evidence_start": 5360,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "pass planning service owns station scheduler surfaced in vendor audit last spring",
+    "predicate": "was never substantiated",
+    "qualifiers": {},
+    "subject": "it"
+  },
+  {
+    "evidence_end": 5533,
+    "evidence_start": 5360,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "scheduler surfaced in audit last spring",
+    "predicate": "owns",
+    "qualifiers": {},
+    "subject": "Pass Planning Service"
+  },
+  {
+    "evidence_end": 5533,
+    "evidence_start": 5360,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "Station Scheduler",
+    "predicate": "owns",
+    "qualifiers": {},
+    "subject": "Pass Planning Service"
+  },
+  {
+    "evidence_end": 5533,
+    "evidence_start": 5360,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "vendor audit",
+    "predicate": "surfaced in",
+    "qualifiers": {},
+    "subject": "the statement that the pass planning service owns the station scheduler"
+  },
+  {
+    "evidence_end": 5533,
+    "evidence_start": 5360,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "audit",
+    "predicate": "surfaced in",
+    "qualifiers": {},
+    "subject": "Station Scheduler"
+  },
+  {
+    "evidence_end": 5533,
+    "evidence_start": 5360,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "pass planning service owns scheduler surfaced in vendor audit last spring",
+    "predicate": "was never substantiated",
+    "qualifiers": {},
+    "subject": "it"
+  },
+  {
+    "evidence_end": 5533,
+    "evidence_start": 5360,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "the statement that the pass planning service owns the station scheduler surfaced in a vendor audit last spring",
+    "predicate": "was never substantiated",
+    "qualifiers": {},
+    "subject": "it"
+  },
+  {
+    "evidence_end": 5533,
+    "evidence_start": 5360,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "station scheduler surfaced in vendor audit last spring",
+    "predicate": "owns",
+    "qualifiers": {},
+    "subject": "Pass Planning Service"
+  },
+  {
+    "evidence_end": 5747,
+    "evidence_start": 5534,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "in hypothetical deployment sketched once on whiteboard and left there",
+    "predicate": "uses",
+    "qualifiers": {},
+    "subject": "Skyloom"
+  },
+  {
+    "evidence_end": 5747,
+    "evidence_start": 5534,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "long term cold storage",
+    "predicate": "uses",
+    "qualifiers": {},
+    "subject": "Skyloom"
+  },
+  {
+    "evidence_end": 5747,
+    "evidence_start": 5534,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "stonevault",
+    "predicate": "uses",
+    "qualifiers": {},
+    "subject": "Skyloom"
+  },
+  {
+    "evidence_end": 5747,
+    "evidence_start": 5534,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "a hypothetical hosted deployment",
+    "predicate": "uses",
+    "qualifiers": {},
+    "subject": "Skyloom"
+  },
+  {
+    "evidence_end": 5747,
+    "evidence_start": 5534,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "hypothetical deployment",
+    "predicate": "uses",
+    "qualifiers": {},
+    "subject": "Skyloom"
+  },
+  {
+    "evidence_end": 6210,
+    "evidence_start": 6012,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "Anomaly Notices",
+    "predicate": "produces",
+    "qualifiers": {},
+    "subject": "Alert Engine"
+  },
+  {
+    "evidence_end": 6210,
+    "evidence_start": 6012,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "comment",
+    "predicate": "can not dismiss without",
+    "qualifiers": {},
+    "subject": "the night shift"
+  },
+  {
+    "evidence_end": 6344,
+    "evidence_start": 6211,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "drift report limit checking runs on live points only and weekly paperwork has no place in it",
+    "predicate": "does not consume",
+    "qualifiers": {},
+    "subject": "Alert Engine"
+  },
+  {
+    "evidence_end": 6344,
+    "evidence_start": 6211,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "drift report limit checking runs on live only and paperwork no place in it",
+    "predicate": "consumes",
+    "qualifiers": {},
+    "subject": "Alert Engine"
+  },
+  {
+    "evidence_end": 6344,
+    "evidence_start": 6211,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "live points",
+    "predicate": "runs_on",
+    "qualifiers": {},
+    "subject": "Drift Report"
+  },
+  {
+    "evidence_end": 6344,
+    "evidence_start": 6211,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "drift report limit checking runs on live points only and paperwork no place in it",
+    "predicate": "consumes",
+    "qualifiers": {},
+    "subject": "Alert Engine"
+  },
+  {
+    "evidence_end": 6344,
+    "evidence_start": 6211,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "it",
+    "predicate": "has no in",
+    "qualifiers": {},
+    "subject": "weekly paperwork"
+  },
+  {
+    "evidence_end": 6344,
+    "evidence_start": 6211,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "live points",
+    "predicate": "limit only",
+    "qualifiers": {},
+    "subject": "Drift Report"
+  },
+  {
+    "evidence_end": 6344,
+    "evidence_start": 6211,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "it",
+    "predicate": "does not consume place in",
+    "qualifiers": {},
+    "subject": "Alert Engine"
+  },
+  {
+    "evidence_end": 6344,
+    "evidence_start": 6211,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "drift report limit checking runs on live only weekly paperwork no place in it",
+    "predicate": "consumes",
+    "qualifiers": {},
+    "subject": "Alert Engine"
+  },
+  {
+    "evidence_end": 6344,
+    "evidence_start": 6211,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "checking runs on",
+    "predicate": "limit",
+    "qualifiers": {},
+    "subject": "Drift Report"
+  },
+  {
+    "evidence_end": 6344,
+    "evidence_start": 6211,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "checking runs on live",
+    "predicate": "limit",
+    "qualifiers": {},
+    "subject": "Drift Report"
+  },
+  {
+    "evidence_end": 6344,
+    "evidence_start": 6211,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "drift report limit checking runs on live points only and weekly paperwork has no in it",
+    "predicate": "does not consume",
+    "qualifiers": {},
+    "subject": "Alert Engine"
+  },
+  {
+    "evidence_end": 6344,
+    "evidence_start": 6211,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "drift report limit checking runs on live points only",
+    "predicate": "consumes",
+    "qualifiers": {},
+    "subject": "Alert Engine"
+  },
+  {
+    "evidence_end": 6344,
+    "evidence_start": 6211,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "drift report limit checking runs on live only and paperwork no in it",
+    "predicate": "consumes",
+    "qualifiers": {},
+    "subject": "Alert Engine"
+  },
+  {
+    "evidence_end": 6344,
+    "evidence_start": 6211,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "drift report limit checking runs on live points only and paperwork has place in it",
+    "predicate": "does not consume",
+    "qualifiers": {},
+    "subject": "Alert Engine"
+  },
+  {
+    "evidence_end": 6344,
+    "evidence_start": 6211,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "live points",
+    "predicate": "runs_on",
+    "qualifiers": {},
+    "subject": "Drift Report"
+  },
+  {
+    "evidence_end": 6344,
+    "evidence_start": 6211,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "place",
+    "predicate": "has in",
+    "qualifiers": {},
+    "subject": "paperwork"
+  },
+  {
+    "evidence_end": 6344,
+    "evidence_start": 6211,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "Drift Report",
+    "predicate": "consumes",
+    "qualifiers": {},
+    "subject": "Alert Engine"
+  },
+  {
+    "evidence_end": 6344,
+    "evidence_start": 6211,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "drift report limit checking runs on live points only and weekly",
+    "predicate": "consumes",
+    "qualifiers": {},
+    "subject": "Alert Engine"
+  },
+  {
+    "evidence_end": 6344,
+    "evidence_start": 6211,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "drift report limit checking runs on live points only and weekly paperwork",
+    "predicate": "consumes",
+    "qualifiers": {},
+    "subject": "Alert Engine"
+  },
+  {
+    "evidence_end": 6344,
+    "evidence_start": 6211,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "drift report limit checking runs on live points only and paperwork has place in",
+    "predicate": "does not consume",
+    "qualifiers": {},
+    "subject": "Alert Engine"
+  },
+  {
+    "evidence_end": 6344,
+    "evidence_start": 6211,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "checking runs on live only",
+    "predicate": "limit",
+    "qualifiers": {},
+    "subject": "Drift Report"
+  },
+  {
+    "evidence_end": 6344,
+    "evidence_start": 6211,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "drift report limit checking runs on live points",
+    "predicate": "consumes",
+    "qualifiers": {},
+    "subject": "Alert Engine"
+  },
+  {
+    "evidence_end": 6344,
+    "evidence_start": 6211,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "drift report limit checking runs on live only and weekly has place in it",
+    "predicate": "does not consume",
+    "qualifiers": {},
+    "subject": "Alert Engine"
+  },
+  {
+    "evidence_end": 6344,
+    "evidence_start": 6211,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "live points",
+    "predicate": "limit",
+    "qualifiers": {},
+    "subject": "Drift Report"
+  },
+  {
+    "evidence_end": 6344,
+    "evidence_start": 6211,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "drift report limit checking runs on live only and weekly paperwork no place it",
+    "predicate": "consumes",
+    "qualifiers": {},
+    "subject": "Alert Engine"
+  },
+  {
+    "evidence_end": 6344,
+    "evidence_start": 6211,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "drift report limit checking runs on live only and weekly paperwork no place in it",
+    "predicate": "consumes",
+    "qualifiers": {},
+    "subject": "Alert Engine"
+  },
+  {
+    "evidence_end": 6344,
+    "evidence_start": 6211,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "drift report limit checking runs on live points only and paperwork",
+    "predicate": "consumes",
+    "qualifiers": {},
+    "subject": "Alert Engine"
+  },
+  {
+    "evidence_end": 6344,
+    "evidence_start": 6211,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "drift report limit checking runs on live only weekly paperwork",
+    "predicate": "consumes",
+    "qualifiers": {},
+    "subject": "Alert Engine"
+  },
+  {
+    "evidence_end": 6344,
+    "evidence_start": 6211,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "it",
+    "predicate": "has no in",
+    "qualifiers": {},
+    "subject": "weekly"
+  },
+  {
+    "evidence_end": 6694,
+    "evidence_start": 6546,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "Two",
+    "predicate": "politely calls",
+    "qualifiers": {},
+    "subject": "shift log"
+  },
+  {
+    "evidence_end": 6945,
+    "evidence_start": 6695,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "Anomaly Notices",
+    "predicate": "produces",
+    "qualifiers": {},
+    "subject": "Trend Service"
+  },
+  {
+    "evidence_end": 6945,
+    "evidence_start": 6695,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "that the trend service produces the anomaly notices",
+    "predicate": "stated",
+    "qualifiers": {},
+    "subject": "the station wiki"
+  },
+  {
+    "evidence_end": 6945,
+    "evidence_start": 6695,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "Two",
+    "predicate": "stated For",
+    "qualifiers": {},
+    "subject": "the station wiki"
+  },
+  {
+    "evidence_end": 7489,
+    "evidence_start": 7245,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "Mission Telemetry Archive",
+    "predicate": "causes",
+    "qualifiers": {},
+    "subject": "March Blackout Event"
+  },
+  {
+    "evidence_end": 7489,
+    "evidence_start": 7245,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "Mission Telemetry Archive",
+    "predicate": "causes",
+    "qualifiers": {},
+    "subject": "March Blackout Event"
+  },
+  {
+    "evidence_end": 7489,
+    "evidence_start": 7245,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "summary",
+    "predicate": "was reported in",
+    "qualifiers": {},
+    "subject": "it"
+  },
+  {
+    "evidence_end": 7489,
+    "evidence_start": 7245,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "first summary",
+    "predicate": "was reported in",
+    "qualifiers": {},
+    "subject": "it"
+  },
+  {
+    "evidence_end": 7489,
+    "evidence_start": 7245,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "Mission Telemetry Archive",
+    "predicate": "causes",
+    "qualifiers": {},
+    "subject": "march event"
+  },
+  {
+    "evidence_end": 7489,
+    "evidence_start": 7245,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "first summary",
+    "predicate": "causes",
+    "qualifiers": {},
+    "subject": "March Blackout Event"
+  },
+  {
+    "evidence_end": 7489,
+    "evidence_start": 7245,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "it was reported in summary reached",
+    "predicate": "caused",
+    "qualifiers": {},
+    "subject": "March Blackout Event"
+  },
+  {
+    "evidence_end": 7489,
+    "evidence_start": 7245,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "that the march blackout event caused data loss in the mission telemetry archive",
+    "predicate": "was incorrectly reported",
+    "qualifiers": {},
+    "subject": "it"
+  },
+  {
+    "evidence_end": 7489,
+    "evidence_start": 7245,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "headquarters",
+    "predicate": "reached",
+    "qualifiers": {},
+    "subject": "that"
+  },
+  {
+    "evidence_end": 7489,
+    "evidence_start": 7245,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "data loss",
+    "predicate": "causes",
+    "qualifiers": {},
+    "subject": "March Blackout Event"
+  },
+  {
+    "evidence_end": 7489,
+    "evidence_start": 7245,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "it was reported in summary reached headquarters",
+    "predicate": "caused",
+    "qualifiers": {},
+    "subject": "March Blackout Event"
+  },
+  {
+    "evidence_end": 7489,
+    "evidence_start": 7245,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "it was reported in first summary reached headquarters",
+    "predicate": "caused",
+    "qualifiers": {},
+    "subject": "March Blackout Event"
+  },
+  {
+    "evidence_end": 7489,
+    "evidence_start": 7245,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "Mission Telemetry Archive",
+    "predicate": "causes",
+    "qualifiers": {},
+    "subject": "March Blackout Event"
+  },
+  {
+    "evidence_end": 7489,
+    "evidence_start": 7245,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "loss",
+    "predicate": "causes",
+    "qualifiers": {},
+    "subject": "march event"
+  },
+  {
+    "evidence_end": 7489,
+    "evidence_start": 7245,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "the first summary that reached headquarters",
+    "predicate": "was incorrectly reported in",
+    "qualifiers": {},
+    "subject": "it"
+  },
+  {
+    "evidence_end": 7489,
+    "evidence_start": 7245,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "summary reached headquarters",
+    "predicate": "was reported in",
+    "qualifiers": {},
+    "subject": "it"
+  },
+  {
+    "evidence_end": 7489,
+    "evidence_start": 7245,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "Mission Telemetry Archive",
+    "predicate": "causes",
+    "qualifiers": {},
+    "subject": "march event"
+  },
+  {
+    "evidence_end": 7489,
+    "evidence_start": 7245,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "it was reported in summary reached",
+    "predicate": "caused",
+    "qualifiers": {},
+    "subject": "march event"
+  },
+  {
+    "evidence_end": 7489,
+    "evidence_start": 7245,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "it was reported",
+    "predicate": "causes",
+    "qualifiers": {},
+    "subject": "March Blackout Event"
+  },
+  {
+    "evidence_end": 7489,
+    "evidence_start": 7245,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "Mission Telemetry Archive",
+    "predicate": "causes",
+    "qualifiers": {},
+    "subject": "march event"
+  },
+  {
+    "evidence_end": 7850,
+    "evidence_start": 7675,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "points actually banked per pass",
+    "predicate": "predicted",
+    "qualifiers": {},
+    "subject": "archive completeness fraction"
+  },
+  {
+    "evidence_end": 7850,
+    "evidence_start": 7675,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "pass",
+    "predicate": "banked per",
+    "qualifiers": {},
+    "subject": "points"
+  },
+  {
+    "evidence_end": 8130,
+    "evidence_start": 7851,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "its protective mode",
+    "predicate": "when tumbles into",
+    "qualifiers": {},
+    "subject": "a spacecraft"
+  },
+  {
+    "evidence_end": 8130,
+    "evidence_start": 7851,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "spacecraft recovery",
+    "predicate": "supports",
+    "qualifiers": {},
+    "subject": "Safe-Hold Response Process"
+  },
+  {
+    "evidence_end": 8130,
+    "evidence_start": 7851,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "the safe hold response process the ordered steps the shift follows when a spacecraft tumbles into its protective mode and",
+    "predicate": "defines",
+    "qualifiers": {},
+    "subject": "Contingency Playbook"
+  },
+  {
+    "evidence_end": 8357,
+    "evidence_start": 8173,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "validated envelope",
+    "predicate": "can be traced back to",
+    "qualifiers": {},
+    "subject": "stored point"
+  },
+  {
+    "evidence_end": 8357,
+    "evidence_start": 8173,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "a validated envelope no orphan measurements no unexplained values",
+    "predicate": "can be traced back to",
+    "qualifiers": {},
+    "subject": "stored point"
+  },
+  {
+    "evidence_end": 8357,
+    "evidence_start": 8173,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "envelope",
+    "predicate": "can traced back to",
+    "qualifiers": {},
+    "subject": "frame integrity charter defines frame integrity guarantee stored point no orphan measurements no unexplained values"
+  },
+  {
+    "evidence_end": 8357,
+    "evidence_start": 8173,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "validated envelope",
+    "predicate": "can traced back to",
+    "qualifiers": {},
+    "subject": "frame integrity charter defines frame integrity guarantee stored point"
+  },
+  {
+    "evidence_end": 8655,
+    "evidence_start": 8569,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "antennas at all",
+    "predicate": "will not mention",
+    "qualifiers": {},
+    "subject": "she"
+  }
+]

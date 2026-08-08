@@ -1,5 +1,10 @@
 [
   {
+    "subject": "dr imani reyes",
+    "predicate": "causes",
+    "object": "telemetry group"
+  },
+  {
     "subject": "pinion api",
     "predicate": "consumes",
     "object": "incoming events"

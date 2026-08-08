@@ -455,3 +455,20 @@ RECOMMENDED: adopt as sidecar challenger → build host-MPS entity sidecar
 release (model id + revision + threshold + label-cache policy), requalify:
 burned safety suites (leakage zero), A–D on the pack, family battery.
 Bench: backend/scripts/bench_entity_encoders.py · data_eval/encoder_bakeoff.json.
+
+### Candidate requalification: gliner-bi-base-mps-v1 through unchanged downstream (2026-08-08)
+SAFETY GATE PASSED: leakage 0 book + 0 sealed; families matched identical 94/102
+(unexpected promotions 6→8, known junk classes, no negative-entity leaks) — the
+gates absorbed the higher-recall candidate stream as designed.
+PACK (dev): A .37→.60 · C endpoints 8%→55%, pairs proposed 5%→21% · D flat
+(entities .192, relations .026) ⇒ owner decision tree: remaining bottleneck =
+predicate/canonical mapping (their 21 custom predicates), i.e. the compiled-
+adapter gate's territory. Encoder change improved KNOWLEDGE extraction (gold
+endpoint-complete relations 3→21/38), not just NER.
+BURNED SETS: sealed-v1 flat (45→44, P .776→.786); book-66 REGRESSED 60→52
+(R .909→.788) — candidate cures lowercase compounds but drops some book golds
+the incumbent caught. NOT a clean drop-in promotion.
+RECOMMENDED: encoder UNION as candidate generators (both providers → same
+census fold → same gates; recall=union, precision=gates, leakage proven robust)
+OR book-regression class diagnosis first. Owner decision pending.
+Seam + pinned candidate committed @34dc3c8 (config/entity_provider_gliner_bi.yaml).

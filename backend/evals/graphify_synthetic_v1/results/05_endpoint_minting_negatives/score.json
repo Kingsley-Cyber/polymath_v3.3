@@ -3,9 +3,9 @@
   "status": "PASS",
   "runtime": {
     "pipeline_release": "graphify-cpu-pipeline-v15",
-    "mongo_database": "graphify_eval_syn_05_904dd67873",
-    "corpus_id": "740b2dba-f6b0-5e39-bf73-d8ecd7f81941",
-    "elapsed_seconds": 0.9,
+    "mongo_database": "graphify_eval_syn_05_affc8406cc",
+    "corpus_id": "95f8d82d-256e-5d28-8055-681f44c0d892",
+    "elapsed_seconds": 0.67,
     "interpreter": "/Users/king/polymath_v3.3/local_ghost_b/.venv/bin/python"
   },
   "items": {
@@ -28,12 +28,13 @@
   },
   "extracted_entities": [
     "Glowline Metrics",
-    "June 2030",
     "P50 Intake Latency",
     "Pinion API",
     "Quartzline Analytics",
     "Redlark",
     "Sable Index",
+    "broken records",
+    "separate audit",
     "spring sweep"
   ],
   "item_results": [

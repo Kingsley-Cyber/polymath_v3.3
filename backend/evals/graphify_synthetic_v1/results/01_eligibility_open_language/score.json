@@ -3,9 +3,9 @@
   "status": "FAIL",
   "runtime": {
     "pipeline_release": "graphify-cpu-pipeline-v15",
-    "mongo_database": "graphify_eval_syn_01_9406be5ffa",
-    "corpus_id": "11374e22-cc8e-52ba-a1bc-8422a714f2ea",
-    "elapsed_seconds": 9.72,
+    "mongo_database": "graphify_eval_syn_01_f1c4dbae12",
+    "corpus_id": "acae1e1a-65f3-5398-a367-9d3e99a6820f",
+    "elapsed_seconds": 19.77,
     "interpreter": "/Users/king/polymath_v3.3/local_ghost_b/.venv/bin/python"
   },
   "items": {
@@ -16,6 +16,7 @@
   },
   "negative_entities_in_graph": [],
   "unexpected_promoted_triples": [
+    "dr imani reyes | causes | telemetry group",
     "pinion api | consumes | incoming events",
     "priya anand | works for | quartzline analytics",
     "tobias venn | member of | telemetry group"
@@ -23,6 +24,7 @@
   "duplicate_promoted_edges": {},
   "graph": {
     "nodes": [
+      "dr imani reyes",
       "incoming events",
       "larkspur queue",
       "pinion api",
@@ -32,15 +34,12 @@
       "telemetry group",
       "tobias venn"
     ],
-    "promoted_edge_count": 5
+    "promoted_edge_count": 6
   },
   "extracted_entities": [
-    "2027",
-    "2029",
     "Dr. Imani Reyes",
     "Larkspur Queue",
     "Lisbon",
-    "March 2028",
     "Maren Solis",
     "Pinion API",
     "Priya Anand",

@@ -3,9 +3,9 @@
   "status": "PASS",
   "runtime": {
     "pipeline_release": "graphify-cpu-pipeline-v15",
-    "mongo_database": "graphify_eval_syn_07_2d66c728de",
-    "corpus_id": "de262f2b-13c3-5dc7-875d-f63bc0f9620e",
-    "elapsed_seconds": 1.18,
+    "mongo_database": "graphify_eval_syn_07_e02223dac1",
+    "corpus_id": "d4b2eb63-fbe7-5fb7-8329-1cdcedfe2da2",
+    "elapsed_seconds": 0.53,
     "interpreter": "/Users/king/polymath_v3.3/local_ghost_b/.venv/bin/python"
   },
   "items": {
@@ -24,7 +24,6 @@
       "cargo manifest reconciliation service",
       "daily berth ledger",
       "dr nadia osei",
-      "dr osei",
       "quay analytics group",
       "registry of vessel identities",
       "tide forecast feed",
@@ -38,12 +37,12 @@
     "Cargo Manifest Reconciliation Service",
     "Daily Berth Ledger",
     "Dr. Nadia Osei",
-    "Dr. Osei",
     "Port Halveron",
     "Quay Analytics Group",
     "Registry of Vessel Identities",
     "Tide Forecast Feed",
     "Tidewatch Systems",
+    "incoming manifests",
     "the"
   ],
   "item_results": [

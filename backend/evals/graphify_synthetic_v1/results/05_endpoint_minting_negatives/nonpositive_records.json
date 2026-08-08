@@ -34,9 +34,54 @@
       "canonical_candidate": "owns",
       "mapping_rule": "mapped:existing_syntax_stack:own",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "review",
       "reasons": [
         "mapped:existing_syntax_stack:own",
+        "source:existing_syntax_stack"
+      ]
+    },
+    "_lane": "fast_path:review"
+  },
+  {
+    "schema_version": "polymath.assertion_decision.v1",
+    "decision_id": "assertion-decision:11ae8cf12d0f2bc22f211e27",
+    "relation_id": "surface-relation:dad0f3c3f2b1469af1a77302",
+    "document_id": "c54c1f782bbdd5260c4c36345143cef300e0087badc9825316124183dd4e8fb2",
+    "status": "review",
+    "canonical_predicate": "defines",
+    "score": 1.0,
+    "reasons": [
+      "mapped:existing_syntax_stack:define",
+      "source:existing_syntax_stack"
+    ],
+    "policy_release": "graphify-relation-fast-path-v13",
+    "_mapped": {
+      "schema_version": "polymath.surface_relation.v1",
+      "relation_id": "surface-relation:dad0f3c3f2b1469af1a77302",
+      "document_id": "c54c1f782bbdd5260c4c36345143cef300e0087badc9825316124183dd4e8fb2",
+      "evidence_text": "Glowline Metrics defines the P50 Intake Latency target.",
+      "evidence_start": 481,
+      "evidence_end": 536,
+      "subject_mention_id": "completed-mention:2c3430b1762f2418a7e49d11",
+      "object_mention_id": "completed-mention:4093f3c3ff0bd93440660fcf",
+      "surface_predicate": "define",
+      "lemma": "define",
+      "particle": "",
+      "preposition": "",
+      "dependency_frame": "syntax:NATIVE_SVO",
+      "dependency_path": "nsubj-VERB-dobj",
+      "voice": "",
+      "polarity": "positive",
+      "modality": "asserted",
+      "attribution": "direct",
+      "canonical_candidate": "defines",
+      "mapping_rule": "mapped:existing_syntax_stack:define",
+      "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
+      "terminal_state": "review",
+      "reasons": [
+        "mapped:existing_syntax_stack:define",
         "source:existing_syntax_stack"
       ]
     },
@@ -71,6 +116,8 @@
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -102,6 +149,8 @@
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -133,6 +182,41 @@
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
+  },
+  {
+    "schema_version": "polymath.openie_assertion.v1",
+    "assertion_id": "openie-assertion:64ad99531ede52e93af9c333",
+    "candidate_id": "openie-predicate:deae1a71a1a02421521523c0",
+    "family_id": "openie-family:7b4807deb64ee9f53944acf9",
+    "document_id": "c54c1f782bbdd5260c4c36345143cef300e0087badc9825316124183dd4e8fb2",
+    "lane": "REJECT",
+    "canonical_predicate": "consumes",
+    "surface_relation": "consumed of",
+    "subject_argument_id": "adapted-argument:cb8ac4e5c560f003eb8746c8",
+    "object_argument_id": "adapted-argument:700f9ae639fc502604858f8a",
+    "subject_entity_id": null,
+    "object_entity_id": null,
+    "subject_mention_id": null,
+    "object_mention_id": null,
+    "value_kind": "DESCRIPTION",
+    "value": "quarter",
+    "polarity": "positive",
+    "modality": "asserted",
+    "attribution": "direct",
+    "evidence_start": 390,
+    "evidence_end": 436,
+    "score": 1.0,
+    "reasons": [
+      "mapped:openie:triplet_extract:bounded_lemma_map:consume",
+      "surface_subject_to_object",
+      "fact_subject_is_not_a_canonical_entity"
+    ],
+    "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
+    "_lane": "openie:REJECT"
   }
 ]

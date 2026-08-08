@@ -34,6 +34,7 @@
       "canonical_candidate": null,
       "mapping_rule": "open:operate:unmapped_surface_relation",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "open",
       "reasons": [
         "open:operate:unmapped_surface_relation",
@@ -77,6 +78,7 @@
       "canonical_candidate": null,
       "mapping_rule": "open:operate:unmapped_surface_relation",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "open",
       "reasons": [
         "open:operate:unmapped_surface_relation",
@@ -120,6 +122,7 @@
       "canonical_candidate": null,
       "mapping_rule": "open:assign:unmapped_surface_relation",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "open",
       "reasons": [
         "open:assign:unmapped_surface_relation",
@@ -163,6 +166,7 @@
       "canonical_candidate": null,
       "mapping_rule": "open:assign:unmapped_surface_relation",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "open",
       "reasons": [
         "open:assign:unmapped_surface_relation",
@@ -206,6 +210,7 @@
       "canonical_candidate": "instance_of",
       "mapping_rule": "mapped:existing_syntax_stack:be",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "review",
       "reasons": [
         "mapped:existing_syntax_stack:be",
@@ -223,7 +228,7 @@
     "canonical_predicate": "causes",
     "score": 1.0,
     "reasons": [
-      "review:endpoint_signature:Person:Organization",
+      "review:endpoint_signature:Person:Concept",
       "source:strict_dependency_cue"
     ],
     "policy_release": "graphify-relation-fast-path-v13",
@@ -247,11 +252,12 @@
       "modality": "asserted",
       "attribution": "",
       "canonical_candidate": "causes",
-      "mapping_rule": "review:endpoint_signature:Person:Organization",
+      "mapping_rule": "review:endpoint_signature:Person:Concept",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "review",
       "reasons": [
-        "review:endpoint_signature:Person:Organization",
+        "review:endpoint_signature:Person:Concept",
         "source:strict_dependency_cue"
       ]
     },
@@ -266,7 +272,7 @@
     "canonical_predicate": "causes",
     "score": 1.0,
     "reasons": [
-      "review:endpoint_signature:Person:Organization",
+      "review:endpoint_signature:Person:Concept",
       "source:existing_syntax_stack"
     ],
     "policy_release": "graphify-relation-fast-path-v13",
@@ -290,11 +296,12 @@
       "modality": "asserted",
       "attribution": "direct",
       "canonical_candidate": "causes",
-      "mapping_rule": "review:endpoint_signature:Person:Organization",
+      "mapping_rule": "review:endpoint_signature:Person:Concept",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "review",
       "reasons": [
-        "review:endpoint_signature:Person:Organization",
+        "review:endpoint_signature:Person:Concept",
         "source:existing_syntax_stack"
       ]
     },
@@ -335,6 +342,7 @@
       "canonical_candidate": "causes",
       "mapping_rule": "review:endpoint_signature:Person:Concept",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "review",
       "reasons": [
         "review:endpoint_signature:Person:Concept",
@@ -345,8 +353,8 @@
   },
   {
     "schema_version": "polymath.assertion_decision.v1",
-    "decision_id": "assertion-decision:bc67b8688d7cd3e991a08229",
-    "relation_id": "surface-relation:b0d95842cef673f904001ff6",
+    "decision_id": "assertion-decision:e8f3b8d3049dbe4651637229",
+    "relation_id": "surface-relation:1f6ef02fb97a0e113515a627",
     "document_id": "8be8823dddb68051f2fcb0030190d4745bae1d92ab5977327de6d7e01634c79b",
     "status": "review",
     "canonical_predicate": "owns",
@@ -358,12 +366,12 @@
     "policy_release": "graphify-relation-fast-path-v13",
     "_mapped": {
       "schema_version": "polymath.surface_relation.v1",
-      "relation_id": "surface-relation:b0d95842cef673f904001ff6",
+      "relation_id": "surface-relation:1f6ef02fb97a0e113515a627",
       "document_id": "8be8823dddb68051f2fcb0030190d4745bae1d92ab5977327de6d7e01634c79b",
       "evidence_text": "Dr. Osei owns the Berth Fairness Charter.",
       "evidence_start": 309,
       "evidence_end": 350,
-      "subject_mention_id": "relation-endpoint-mention:72557da28ecc41da20ee0a96",
+      "subject_mention_id": "completed-mention:8caf162add72ecbf9f9f532b",
       "object_mention_id": "completed-mention:abc8af340a85412907f5c5e9",
       "surface_predicate": "own",
       "lemma": "own",
@@ -378,10 +386,55 @@
       "canonical_candidate": "owns",
       "mapping_rule": "review:endpoint_head_closed_class",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "review",
       "reasons": [
         "review:endpoint_head_closed_class",
         "source:existing_syntax_stack"
+      ]
+    },
+    "_lane": "fast_path:review"
+  },
+  {
+    "schema_version": "polymath.assertion_decision.v1",
+    "decision_id": "assertion-decision:054decd166a62aa21ed4fdc7",
+    "relation_id": "surface-relation:8de6604fda925035244ddc3a",
+    "document_id": "8be8823dddb68051f2fcb0030190d4745bae1d92ab5977327de6d7e01634c79b",
+    "status": "review",
+    "canonical_predicate": "supports",
+    "score": 1.0,
+    "reasons": [
+      "review:endpoint_signature:Concept:Person",
+      "source:strict_dependency_cue"
+    ],
+    "policy_release": "graphify-relation-fast-path-v13",
+    "_mapped": {
+      "schema_version": "polymath.surface_relation.v1",
+      "relation_id": "surface-relation:8de6604fda925035244ddc3a",
+      "document_id": "8be8823dddb68051f2fcb0030190d4745bae1d92ab5977327de6d7e01634c79b",
+      "evidence_text": "The\nQuay Analytics Group supports Dr. Nadia Osei with two reviewers.",
+      "evidence_start": 351,
+      "evidence_end": 419,
+      "subject_mention_id": "completed-mention:8b9c8215b7a8e1eb8f3e5e6b",
+      "object_mention_id": "completed-mention:dc0e5ac1fe1aedb6a14fc285",
+      "surface_predicate": "supports",
+      "lemma": "support",
+      "particle": "",
+      "preposition": "",
+      "dependency_frame": "direct:active:ROOT",
+      "dependency_path": "nsubj>ROOT>dobj",
+      "voice": "active",
+      "polarity": "positive",
+      "modality": "asserted",
+      "attribution": "",
+      "canonical_candidate": "supports",
+      "mapping_rule": "review:endpoint_signature:Concept:Person",
+      "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
+      "terminal_state": "review",
+      "reasons": [
+        "review:endpoint_signature:Concept:Person",
+        "source:strict_dependency_cue"
       ]
     },
     "_lane": "fast_path:review"
@@ -421,6 +474,7 @@
       "canonical_candidate": "supports",
       "mapping_rule": "review:endpoint_signature:Concept:Person",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "review",
       "reasons": [
         "review:endpoint_signature:Concept:Person",
@@ -431,8 +485,8 @@
   },
   {
     "schema_version": "polymath.assertion_decision.v1",
-    "decision_id": "assertion-decision:a9d5274dc8dc24f8503ee193",
-    "relation_id": "surface-relation:59aa8b7c7c3d301ab0eb34fd",
+    "decision_id": "assertion-decision:77c147f857095fb8a0c05d50",
+    "relation_id": "surface-relation:636b5fa02cb64545b6645084",
     "document_id": "8be8823dddb68051f2fcb0030190d4745bae1d92ab5977327de6d7e01634c79b",
     "status": "open",
     "canonical_predicate": null,
@@ -444,13 +498,13 @@
     "policy_release": "graphify-relation-fast-path-v13",
     "_mapped": {
       "schema_version": "polymath.surface_relation.v1",
-      "relation_id": "surface-relation:59aa8b7c7c3d301ab0eb34fd",
+      "relation_id": "surface-relation:636b5fa02cb64545b6645084",
       "document_id": "8be8823dddb68051f2fcb0030190d4745bae1d92ab5977327de6d7e01634c79b",
       "evidence_text": "The Cargo Manifest Reconciliation Service (CMRS) validates incoming manifests.",
       "evidence_start": 421,
       "evidence_end": 499,
       "subject_mention_id": "completed-mention:8f872e9b24b774c9e9f849e2",
-      "object_mention_id": "relation-endpoint-mention:c44ed86610d8e7bbd25f7fc9",
+      "object_mention_id": "completed-mention:94ff1e676ba8e062fd63cb20",
       "surface_predicate": "validates",
       "lemma": "validate",
       "particle": "",
@@ -464,6 +518,7 @@
       "canonical_candidate": null,
       "mapping_rule": "open:validate:unmapped_surface_relation",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "open",
       "reasons": [
         "open:validate:unmapped_surface_relation",
@@ -474,8 +529,8 @@
   },
   {
     "schema_version": "polymath.assertion_decision.v1",
-    "decision_id": "assertion-decision:057abaf41b2437157f44214b",
-    "relation_id": "surface-relation:f9952cfb1fec40861cb211a6",
+    "decision_id": "assertion-decision:57775117117387fee4b8f9e6",
+    "relation_id": "surface-relation:ac097c23e5b26ba07ce54ed8",
     "document_id": "8be8823dddb68051f2fcb0030190d4745bae1d92ab5977327de6d7e01634c79b",
     "status": "open",
     "canonical_predicate": null,
@@ -487,13 +542,13 @@
     "policy_release": "graphify-relation-fast-path-v13",
     "_mapped": {
       "schema_version": "polymath.surface_relation.v1",
-      "relation_id": "surface-relation:f9952cfb1fec40861cb211a6",
+      "relation_id": "surface-relation:ac097c23e5b26ba07ce54ed8",
       "document_id": "8be8823dddb68051f2fcb0030190d4745bae1d92ab5977327de6d7e01634c79b",
       "evidence_text": "The Cargo Manifest Reconciliation Service (CMRS) validates incoming manifests.",
       "evidence_start": 421,
       "evidence_end": 499,
       "subject_mention_id": "completed-mention:bb562f1772059889131e25f3",
-      "object_mention_id": "relation-endpoint-mention:c44ed86610d8e7bbd25f7fc9",
+      "object_mention_id": "completed-mention:94ff1e676ba8e062fd63cb20",
       "surface_predicate": "validates",
       "lemma": "validate",
       "particle": "",
@@ -507,6 +562,7 @@
       "canonical_candidate": null,
       "mapping_rule": "open:validate:unmapped_surface_relation",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "open",
       "reasons": [
         "open:validate:unmapped_surface_relation",
@@ -550,6 +606,7 @@
       "canonical_candidate": "owns",
       "mapping_rule": "review:endpoint_head_closed_class",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "review",
       "reasons": [
         "review:endpoint_head_closed_class",
@@ -587,6 +644,8 @@
       "surface_relation_preserved_without_ontology_fallback"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:OPEN_RELATION"
   },
   {
@@ -618,6 +677,8 @@
       "surface_relation_preserved_without_ontology_fallback"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:OPEN_RELATION"
   },
   {
@@ -649,6 +710,8 @@
       "surface_relation_preserved_without_ontology_fallback"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:OPEN_RELATION"
   },
   {
@@ -680,6 +743,8 @@
       "surface_relation_preserved_without_ontology_fallback"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:OPEN_RELATION"
   },
   {
@@ -711,6 +776,8 @@
       "surface_relation_preserved_without_ontology_fallback"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:OPEN_RELATION"
   },
   {
@@ -742,38 +809,9 @@
       "surface_relation_preserved_without_ontology_fallback"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:OPEN_RELATION"
-  },
-  {
-    "schema_version": "polymath.openie_assertion.v1",
-    "assertion_id": "openie-assertion:51109b3884efe486a9f0f776",
-    "candidate_id": "openie-predicate:c7bba546350baab5d682250f",
-    "family_id": "openie-family:978a1fc79fd13e802f6be080",
-    "document_id": "8be8823dddb68051f2fcb0030190d4745bae1d92ab5977327de6d7e01634c79b",
-    "lane": "REVIEW",
-    "canonical_predicate": "consumes",
-    "surface_relation": "consumes",
-    "subject_argument_id": "adapted-argument:10228ce0670be0a7a34cc963",
-    "object_argument_id": "adapted-argument:a8270dfd14fa5b76016b30a1",
-    "subject_entity_id": "document-entity:d2cd0c3817ef4c313e687ebf",
-    "object_entity_id": null,
-    "subject_mention_id": "completed-mention:713cb2ab49b69e10a75dfffe",
-    "object_mention_id": null,
-    "value_kind": "DESCRIPTION",
-    "value": "the tide forecast feed",
-    "polarity": "positive",
-    "modality": "asserted",
-    "attribution": "direct",
-    "evidence_start": 177,
-    "evidence_end": 218,
-    "score": 1.0,
-    "reasons": [
-      "mapped:openie:triplet_extract:bounded_lemma_map:consume",
-      "surface_subject_to_object",
-      "value_fact_requires_strict_surface_recovery"
-    ],
-    "policy_release": "graphify-openie-assertion-policy-v2",
-    "_lane": "openie:REVIEW"
   },
   {
     "schema_version": "polymath.openie_assertion.v1",
@@ -804,38 +842,9 @@
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
-  },
-  {
-    "schema_version": "polymath.openie_assertion.v1",
-    "assertion_id": "openie-assertion:5335a14ce7e20a8fa924860d",
-    "candidate_id": "openie-predicate:8c40e73238730a470673419b",
-    "family_id": "openie-family:34c2424170d7578dfcdf30f2",
-    "document_id": "8be8823dddb68051f2fcb0030190d4745bae1d92ab5977327de6d7e01634c79b",
-    "lane": "REJECT",
-    "canonical_predicate": "owns",
-    "surface_relation": "owns",
-    "subject_argument_id": "adapted-argument:ab3160c94f4294acc19fc7e2",
-    "object_argument_id": "adapted-argument:37e09c48fdb02b1a00f01316",
-    "subject_entity_id": null,
-    "object_entity_id": "document-entity:e0059b1c13ee173c7cb57429",
-    "subject_mention_id": null,
-    "object_mention_id": "completed-mention:fb57f7f873b2431584265a0c",
-    "value_kind": null,
-    "value": "",
-    "polarity": "positive",
-    "modality": "asserted",
-    "attribution": "direct",
-    "evidence_start": 309,
-    "evidence_end": 350,
-    "score": 1.0,
-    "reasons": [
-      "mapped:openie:triplet_extract:bounded_lemma_map:own",
-      "surface_subject_to_object",
-      "fact_subject_is_not_a_canonical_entity"
-    ],
-    "policy_release": "graphify-openie-assertion-policy-v2",
-    "_lane": "openie:REJECT"
   },
   {
     "schema_version": "polymath.openie_assertion.v1",
@@ -866,6 +875,8 @@
       "value_fact_requires_strict_surface_recovery"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -897,6 +908,41 @@
       "surface_relation_preserved_without_ontology_fallback"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
+    "_lane": "openie:OPEN_RELATION"
+  },
+  {
+    "schema_version": "polymath.openie_assertion.v1",
+    "assertion_id": "openie-assertion:840798d6050ee91dd9bec6b7",
+    "candidate_id": "openie-predicate:138899ef7eae649634305840",
+    "family_id": "openie-family:56b7f312c1e02ed52a46831a",
+    "document_id": "8be8823dddb68051f2fcb0030190d4745bae1d92ab5977327de6d7e01634c79b",
+    "lane": "OPEN_RELATION",
+    "canonical_predicate": null,
+    "surface_relation": "validates",
+    "subject_argument_id": "adapted-argument:68cf4799ed758d331d2b164a",
+    "object_argument_id": "adapted-argument:2cec7cc1964ed668c5fdcd41",
+    "subject_entity_id": "document-entity:97bbce9fc0e909a14d6ba93e",
+    "object_entity_id": "document-entity:cab61fa50651ddff20d53b21",
+    "subject_mention_id": "completed-mention:8f872e9b24b774c9e9f849e2",
+    "object_mention_id": "completed-mention:94ff1e676ba8e062fd63cb20",
+    "value_kind": null,
+    "value": "",
+    "polarity": "positive",
+    "modality": "asserted",
+    "attribution": "direct",
+    "evidence_start": 421,
+    "evidence_end": 499,
+    "score": 1.0,
+    "reasons": [
+      "open:validate:unmapped_surface_relation",
+      "surface_subject_to_object",
+      "surface_relation_preserved_without_ontology_fallback"
+    ],
+    "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:OPEN_RELATION"
   },
   {
@@ -928,37 +974,8 @@
       "surface_relation_preserved_without_ontology_fallback"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
-    "_lane": "openie:OPEN_RELATION"
-  },
-  {
-    "schema_version": "polymath.openie_assertion.v1",
-    "assertion_id": "openie-assertion:cd5f9c875f33570b609120eb",
-    "candidate_id": "openie-predicate:0b8d55cb5b204b5ca34b7a4a",
-    "family_id": "openie-family:0dcd32c2fd8cfc7b26659aaf",
-    "document_id": "8be8823dddb68051f2fcb0030190d4745bae1d92ab5977327de6d7e01634c79b",
-    "lane": "OPEN_RELATION",
-    "canonical_predicate": null,
-    "surface_relation": "validates",
-    "subject_argument_id": "adapted-argument:68cf4799ed758d331d2b164a",
-    "object_argument_id": "adapted-argument:a90ccdad0d8176bb873c4c10",
-    "subject_entity_id": "document-entity:97bbce9fc0e909a14d6ba93e",
-    "object_entity_id": null,
-    "subject_mention_id": "completed-mention:8f872e9b24b774c9e9f849e2",
-    "object_mention_id": null,
-    "value_kind": "DESCRIPTION",
-    "value": "incoming manifests",
-    "polarity": "positive",
-    "modality": "asserted",
-    "attribution": "direct",
-    "evidence_start": 421,
-    "evidence_end": 499,
-    "score": 1.0,
-    "reasons": [
-      "open:validate:unmapped_surface_relation",
-      "surface_subject_to_object",
-      "surface_relation_preserved_without_ontology_fallback"
-    ],
-    "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:OPEN_RELATION"
   }
 ]

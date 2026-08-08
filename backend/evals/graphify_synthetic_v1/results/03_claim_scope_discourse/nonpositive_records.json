@@ -34,6 +34,7 @@
       "canonical_candidate": "uses",
       "mapping_rule": "review:endpoint_signature:Software:Document",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "review",
       "reasons": [
         "review:endpoint_signature:Software:Document",
@@ -77,6 +78,7 @@
       "canonical_candidate": "uses",
       "mapping_rule": "review:endpoint_signature:Software:Document",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "review",
       "reasons": [
         "review:endpoint_signature:Software:Document",
@@ -120,6 +122,7 @@
       "canonical_candidate": "uses",
       "mapping_rule": "review:endpoint_signature:Software:Location",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "review",
       "reasons": [
         "review:endpoint_signature:Software:Location",
@@ -130,26 +133,26 @@
   },
   {
     "schema_version": "polymath.assertion_decision.v1",
-    "decision_id": "assertion-decision:a2c86bf28b7e2349d2fe880c",
-    "relation_id": "surface-relation:a4bfeb032b5e5e5b69667c89",
+    "decision_id": "assertion-decision:054052666b6fe411c26bad80",
+    "relation_id": "surface-relation:46fe2f471caa29cb8098c231",
     "document_id": "884222d622358b5c01b67c2911d3e09b6b4adff226f8f00dc8a1c655c6f803df",
     "status": "qualified",
     "canonical_predicate": "uses",
     "score": 1.0,
     "reasons": [
-      "review:endpoint_signature:Software:Location",
+      "mapped:strict_dependency_cue:use:endpoint_role:Software:Software",
       "source:strict_dependency_cue"
     ],
     "policy_release": "graphify-relation-fast-path-v13",
     "_mapped": {
       "schema_version": "polymath.surface_relation.v1",
-      "relation_id": "surface-relation:a4bfeb032b5e5e5b69667c89",
+      "relation_id": "surface-relation:46fe2f471caa29cb8098c231",
       "document_id": "884222d622358b5c01b67c2911d3e09b6b4adff226f8f00dc8a1c655c6f803df",
       "evidence_text": "An early memo claimed that the Harrier Gateway uses the Cobalt Vault.",
       "evidence_start": 189,
       "evidence_end": 258,
       "subject_mention_id": "completed-mention:f869e6554e4ba7517215a25a",
-      "object_mention_id": "relation-endpoint-mention:f6986e167f91ad43286a188e",
+      "object_mention_id": "relation-endpoint-mention:54137db8bc723de0aaef5d61",
       "surface_predicate": "uses",
       "lemma": "use",
       "particle": "",
@@ -161,11 +164,12 @@
       "modality": "attributed",
       "attribution": "claim",
       "canonical_candidate": "uses",
-      "mapping_rule": "review:endpoint_signature:Software:Location",
+      "mapping_rule": "mapped:strict_dependency_cue:use:endpoint_role:Software:Software",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "qualified",
       "reasons": [
-        "review:endpoint_signature:Software:Location",
+        "mapped:strict_dependency_cue:use:endpoint_role:Software:Software",
         "source:strict_dependency_cue"
       ]
     },
@@ -173,26 +177,26 @@
   },
   {
     "schema_version": "polymath.assertion_decision.v1",
-    "decision_id": "assertion-decision:38fc0e6158ae415aa540ac5b",
-    "relation_id": "surface-relation:aaf3d8964fa9f798c303f887",
+    "decision_id": "assertion-decision:1b3b146d1bc48fd7fa74f92d",
+    "relation_id": "surface-relation:1dab57db3284b9912fc2741d",
     "document_id": "884222d622358b5c01b67c2911d3e09b6b4adff226f8f00dc8a1c655c6f803df",
     "status": "qualified",
     "canonical_predicate": "uses",
     "score": 1.0,
     "reasons": [
-      "review:endpoint_signature:Software:Location",
+      "mapped:strict_dependency_cue:use:endpoint_role:Software:Software",
       "source:strict_dependency_cue"
     ],
     "policy_release": "graphify-relation-fast-path-v13",
     "_mapped": {
       "schema_version": "polymath.surface_relation.v1",
-      "relation_id": "surface-relation:aaf3d8964fa9f798c303f887",
+      "relation_id": "surface-relation:1dab57db3284b9912fc2741d",
       "document_id": "884222d622358b5c01b67c2911d3e09b6b4adff226f8f00dc8a1c655c6f803df",
       "evidence_text": "The review board rejected the\nstatement that the Harrier Gateway uses the Cobalt Vault.",
       "evidence_start": 259,
       "evidence_end": 346,
       "subject_mention_id": "completed-mention:6f23e1df407f365078e70b52",
-      "object_mention_id": "relation-endpoint-mention:50623e016f4e1fb3eb54530c",
+      "object_mention_id": "relation-endpoint-mention:a8a11f38acb99358024282ea",
       "surface_predicate": "uses",
       "lemma": "use",
       "particle": "",
@@ -204,11 +208,12 @@
       "modality": "attributed",
       "attribution": "nominal:statement",
       "canonical_candidate": "uses",
-      "mapping_rule": "review:endpoint_signature:Software:Location",
+      "mapping_rule": "mapped:strict_dependency_cue:use:endpoint_role:Software:Software",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "qualified",
       "reasons": [
-        "review:endpoint_signature:Software:Location",
+        "mapped:strict_dependency_cue:use:endpoint_role:Software:Software",
         "source:strict_dependency_cue"
       ]
     },
@@ -249,6 +254,7 @@
       "canonical_candidate": "owns",
       "mapping_rule": "mapped:strict_dependency_cue:own",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "qualified",
       "reasons": [
         "mapped:strict_dependency_cue:own",
@@ -259,8 +265,8 @@
   },
   {
     "schema_version": "polymath.assertion_decision.v1",
-    "decision_id": "assertion-decision:ff5e3bf4c334ea90bb13f937",
-    "relation_id": "surface-relation:e4b6717a288bbae03e9c485a",
+    "decision_id": "assertion-decision:ae835fe8d78466b58d57ce1d",
+    "relation_id": "surface-relation:19295439914987fe13d619b2",
     "document_id": "884222d622358b5c01b67c2911d3e09b6b4adff226f8f00dc8a1c655c6f803df",
     "status": "open",
     "canonical_predicate": null,
@@ -272,13 +278,13 @@
     "policy_release": "graphify-relation-fast-path-v13",
     "_mapped": {
       "schema_version": "polymath.surface_relation.v1",
-      "relation_id": "surface-relation:e4b6717a288bbae03e9c485a",
+      "relation_id": "surface-relation:19295439914987fe13d619b2",
       "document_id": "884222d622358b5c01b67c2911d3e09b6b4adff226f8f00dc8a1c655c6f803df",
       "evidence_text": "The incorrect claim that Northgale Group\nowns the Onyx Ledger passed an early review before it was removed.",
       "evidence_start": 347,
       "evidence_end": 454,
       "subject_mention_id": "relation-endpoint-mention:a192dceb5e31ea085bc2ac6b",
-      "object_mention_id": "relation-endpoint-mention:2e286106ef8b9cab5031954b",
+      "object_mention_id": "completed-mention:a55c6161ad3bdb19026f9365",
       "surface_predicate": "passed",
       "lemma": "pass",
       "particle": "",
@@ -292,6 +298,7 @@
       "canonical_candidate": null,
       "mapping_rule": "open:pass:unmapped_surface_relation",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "open",
       "reasons": [
         "open:pass:unmapped_surface_relation",
@@ -335,6 +342,7 @@
       "canonical_candidate": "owns",
       "mapping_rule": "review:endpoint_head_closed_class",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "review",
       "reasons": [
         "review:endpoint_head_closed_class",
@@ -378,6 +386,7 @@
       "canonical_candidate": "owns",
       "mapping_rule": "mapped:strict_dependency_cue:own",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "qualified",
       "reasons": [
         "mapped:strict_dependency_cue:own",
@@ -421,6 +430,7 @@
       "canonical_candidate": "owns",
       "mapping_rule": "review:endpoint_head_closed_class",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "review",
       "reasons": [
         "review:endpoint_head_closed_class",
@@ -464,6 +474,7 @@
       "canonical_candidate": "owns",
       "mapping_rule": "mapped:strict_dependency_cue:own",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "qualified",
       "reasons": [
         "mapped:strict_dependency_cue:own",
@@ -507,6 +518,7 @@
       "canonical_candidate": "owns",
       "mapping_rule": "review:endpoint_head_closed_class",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "review",
       "reasons": [
         "review:endpoint_head_closed_class",
@@ -517,26 +529,26 @@
   },
   {
     "schema_version": "polymath.assertion_decision.v1",
-    "decision_id": "assertion-decision:a4735556ba9aaa8e9ce74a2f",
-    "relation_id": "surface-relation:192b1b4356f1eb34e4b9d503",
+    "decision_id": "assertion-decision:0e730fe2727416a79c9b7703",
+    "relation_id": "surface-relation:b13f143cff61858061b080b6",
     "document_id": "884222d622358b5c01b67c2911d3e09b6b4adff226f8f00dc8a1c655c6f803df",
     "status": "qualified",
     "canonical_predicate": "depends_on",
     "score": 1.0,
     "reasons": [
-      "review:endpoint_signature:Document:Location",
+      "review:endpoint_signature:Document:Product",
       "source:strict_dependency_cue"
     ],
     "policy_release": "graphify-relation-fast-path-v13",
     "_mapped": {
       "schema_version": "polymath.surface_relation.v1",
-      "relation_id": "surface-relation:192b1b4356f1eb34e4b9d503",
+      "relation_id": "surface-relation:b13f143cff61858061b080b6",
       "document_id": "884222d622358b5c01b67c2911d3e09b6b4adff226f8f00dc8a1c655c6f803df",
       "evidence_text": "Northgale Group retracted its statement that the Onyx Ledger depends on the Cobalt Vault.",
       "evidence_start": 625,
       "evidence_end": 714,
       "subject_mention_id": "completed-mention:30fa36b8101b57754dba0db0",
-      "object_mention_id": "relation-endpoint-mention:d95508d81e2c62f732f4ac15",
+      "object_mention_id": "relation-endpoint-mention:5528198e83668cc7ce607ade",
       "surface_predicate": "depends",
       "lemma": "depend",
       "particle": "",
@@ -548,11 +560,12 @@
       "modality": "attributed",
       "attribution": "nominal:statement",
       "canonical_candidate": "depends_on",
-      "mapping_rule": "review:endpoint_signature:Document:Location",
+      "mapping_rule": "review:endpoint_signature:Document:Product",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "qualified",
       "reasons": [
-        "review:endpoint_signature:Document:Location",
+        "review:endpoint_signature:Document:Product",
         "source:strict_dependency_cue"
       ]
     },
@@ -560,25 +573,25 @@
   },
   {
     "schema_version": "polymath.assertion_decision.v1",
-    "decision_id": "assertion-decision:dc49644094c9faf8195441ec",
-    "relation_id": "surface-relation:c704a3269a249146e8415b9e",
+    "decision_id": "assertion-decision:eb047ed8b2d4f80fb4fdccd3",
+    "relation_id": "surface-relation:67946df4b0482389a79dd1d8",
     "document_id": "884222d622358b5c01b67c2911d3e09b6b4adff226f8f00dc8a1c655c6f803df",
     "status": "qualified",
     "canonical_predicate": "supports",
     "score": 1.0,
     "reasons": [
-      "review:endpoint_signature:Location:Software",
+      "review:endpoint_signature:Product:Software",
       "source:strict_dependency_cue"
     ],
     "policy_release": "graphify-relation-fast-path-v13",
     "_mapped": {
       "schema_version": "polymath.surface_relation.v1",
-      "relation_id": "surface-relation:c704a3269a249146e8415b9e",
+      "relation_id": "surface-relation:67946df4b0482389a79dd1d8",
       "document_id": "884222d622358b5c01b67c2911d3e09b6b4adff226f8f00dc8a1c655c6f803df",
       "evidence_text": "The\nvendor walked back the assertion that the Cobalt Vault supports the Harrier Gateway.",
       "evidence_start": 715,
       "evidence_end": 803,
-      "subject_mention_id": "completed-mention:01a858e9498b50753453eacc",
+      "subject_mention_id": "completed-mention:142d430c8a9ce99a74cdc5d1",
       "object_mention_id": "completed-mention:673c66de84bbdc30ce0894d9",
       "surface_predicate": "supports",
       "lemma": "support",
@@ -591,11 +604,12 @@
       "modality": "attributed",
       "attribution": "nominal:assertion",
       "canonical_candidate": "supports",
-      "mapping_rule": "review:endpoint_signature:Location:Software",
+      "mapping_rule": "review:endpoint_signature:Product:Software",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "qualified",
       "reasons": [
-        "review:endpoint_signature:Location:Software",
+        "review:endpoint_signature:Product:Software",
         "source:strict_dependency_cue"
       ]
     },
@@ -603,26 +617,26 @@
   },
   {
     "schema_version": "polymath.assertion_decision.v1",
-    "decision_id": "assertion-decision:7d9173c5a703b138660f6a2e",
-    "relation_id": "surface-relation:1bb0e041868aa5d91e6eaf24",
+    "decision_id": "assertion-decision:0db13c206fa15f102687b55f",
+    "relation_id": "surface-relation:ea9d9579c376f1a0f078fe0c",
     "document_id": "884222d622358b5c01b67c2911d3e09b6b4adff226f8f00dc8a1c655c6f803df",
     "status": "qualified",
     "canonical_predicate": "uses",
     "score": 1.0,
     "reasons": [
-      "review:endpoint_signature:Software:Location",
+      "mapped:strict_dependency_cue:use:endpoint_role:Software:Software",
       "source:strict_dependency_cue"
     ],
     "policy_release": "graphify-relation-fast-path-v13",
     "_mapped": {
       "schema_version": "polymath.surface_relation.v1",
-      "relation_id": "surface-relation:1bb0e041868aa5d91e6eaf24",
+      "relation_id": "surface-relation:ea9d9579c376f1a0f078fe0c",
       "document_id": "884222d622358b5c01b67c2911d3e09b6b4adff226f8f00dc8a1c655c6f803df",
       "evidence_text": "The Harrier Gateway does not use the Cobalt Vault.",
       "evidence_start": 827,
       "evidence_end": 877,
       "subject_mention_id": "completed-mention:1e547c479f053c95b6388ff6",
-      "object_mention_id": "relation-endpoint-mention:0c5de8ac054d4c213366bba6",
+      "object_mention_id": "relation-endpoint-mention:bb839e43457edfca4d21047f",
       "surface_predicate": "use",
       "lemma": "use",
       "particle": "",
@@ -634,11 +648,12 @@
       "modality": "asserted",
       "attribution": "",
       "canonical_candidate": "uses",
-      "mapping_rule": "review:endpoint_signature:Software:Location",
+      "mapping_rule": "mapped:strict_dependency_cue:use:endpoint_role:Software:Software",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "qualified",
       "reasons": [
-        "review:endpoint_signature:Software:Location",
+        "mapped:strict_dependency_cue:use:endpoint_role:Software:Software",
         "source:strict_dependency_cue"
       ]
     },
@@ -646,26 +661,26 @@
   },
   {
     "schema_version": "polymath.assertion_decision.v1",
-    "decision_id": "assertion-decision:18126fa65b55eb57ecccbdb7",
-    "relation_id": "surface-relation:1278e0c75c4dcdf85bac698c",
+    "decision_id": "assertion-decision:a89942e0c662d89da08f24ef",
+    "relation_id": "surface-relation:711457ef34822b729a471050",
     "document_id": "884222d622358b5c01b67c2911d3e09b6b4adff226f8f00dc8a1c655c6f803df",
     "status": "qualified",
     "canonical_predicate": "uses",
     "score": 1.0,
     "reasons": [
-      "review:endpoint_signature:Software:Location",
+      "mapped:strict_dependency_cue:adopt:endpoint_role:Software:Software",
       "source:strict_dependency_cue"
     ],
     "policy_release": "graphify-relation-fast-path-v13",
     "_mapped": {
       "schema_version": "polymath.surface_relation.v1",
-      "relation_id": "surface-relation:1278e0c75c4dcdf85bac698c",
+      "relation_id": "surface-relation:711457ef34822b729a471050",
       "document_id": "884222d622358b5c01b67c2911d3e09b6b4adff226f8f00dc8a1c655c6f803df",
       "evidence_text": "The Harrier Gateway may adopt the Cobalt Vault\nnext year.",
       "evidence_start": 878,
       "evidence_end": 935,
       "subject_mention_id": "completed-mention:68ed2dbfcdc595c27f97e15d",
-      "object_mention_id": "completed-mention:e69c3380e38e261d3f76f3ed",
+      "object_mention_id": "completed-mention:0d381e7ab19d6831961a70be",
       "surface_predicate": "adopt",
       "lemma": "adopt",
       "particle": "",
@@ -677,11 +692,12 @@
       "modality": "hypothetical",
       "attribution": "",
       "canonical_candidate": "uses",
-      "mapping_rule": "review:endpoint_signature:Software:Location",
+      "mapping_rule": "mapped:strict_dependency_cue:adopt:endpoint_role:Software:Software",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "qualified",
       "reasons": [
-        "review:endpoint_signature:Software:Location",
+        "mapped:strict_dependency_cue:adopt:endpoint_role:Software:Software",
         "source:strict_dependency_cue"
       ]
     },
@@ -689,26 +705,26 @@
   },
   {
     "schema_version": "polymath.assertion_decision.v1",
-    "decision_id": "assertion-decision:f4b5f2371406da21b6947b09",
-    "relation_id": "surface-relation:832c376eda161210a87e7c1a",
+    "decision_id": "assertion-decision:8ce5c2f1b8b783c0f87f5c18",
+    "relation_id": "surface-relation:3d54a48f86f6f80a7c688664",
     "document_id": "884222d622358b5c01b67c2911d3e09b6b4adff226f8f00dc8a1c655c6f803df",
     "status": "qualified",
     "canonical_predicate": "uses",
     "score": 1.0,
     "reasons": [
-      "review:endpoint_signature:Software:Location",
+      "mapped:existing_syntax_stack:adopt:endpoint_role:Software:Software",
       "source:existing_syntax_stack"
     ],
     "policy_release": "graphify-relation-fast-path-v13",
     "_mapped": {
       "schema_version": "polymath.surface_relation.v1",
-      "relation_id": "surface-relation:832c376eda161210a87e7c1a",
+      "relation_id": "surface-relation:3d54a48f86f6f80a7c688664",
       "document_id": "884222d622358b5c01b67c2911d3e09b6b4adff226f8f00dc8a1c655c6f803df",
       "evidence_text": "The Harrier Gateway may adopt the Cobalt Vault\nnext year.",
       "evidence_start": 878,
       "evidence_end": 935,
       "subject_mention_id": "completed-mention:68ed2dbfcdc595c27f97e15d",
-      "object_mention_id": "completed-mention:e69c3380e38e261d3f76f3ed",
+      "object_mention_id": "completed-mention:0d381e7ab19d6831961a70be",
       "surface_predicate": "adopt",
       "lemma": "adopt",
       "particle": "",
@@ -720,11 +736,12 @@
       "modality": "hypothetical",
       "attribution": "direct",
       "canonical_candidate": "uses",
-      "mapping_rule": "review:endpoint_signature:Software:Location",
+      "mapping_rule": "mapped:existing_syntax_stack:adopt:endpoint_role:Software:Software",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "qualified",
       "reasons": [
-        "review:endpoint_signature:Software:Location",
+        "mapped:existing_syntax_stack:adopt:endpoint_role:Software:Software",
         "source:existing_syntax_stack"
       ]
     },
@@ -765,6 +782,7 @@
       "canonical_candidate": "causes",
       "mapping_rule": "mapped:strict_dependency_cue:cause",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "qualified",
       "reasons": [
         "mapped:strict_dependency_cue:cause",
@@ -808,6 +826,7 @@
       "canonical_candidate": "causes",
       "mapping_rule": "review:endpoint_head_closed_class",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "review",
       "reasons": [
         "review:endpoint_head_closed_class",
@@ -818,8 +837,8 @@
   },
   {
     "schema_version": "polymath.assertion_decision.v1",
-    "decision_id": "assertion-decision:2b776ec13a1620765fcc1968",
-    "relation_id": "surface-relation:e4b143e139ba5f0b5c22f0cc",
+    "decision_id": "assertion-decision:56120faa0407da7cb6911e0f",
+    "relation_id": "surface-relation:c32996512968afa805606458",
     "document_id": "884222d622358b5c01b67c2911d3e09b6b4adff226f8f00dc8a1c655c6f803df",
     "status": "qualified",
     "canonical_predicate": "derived_from",
@@ -831,13 +850,13 @@
     "policy_release": "graphify-relation-fast-path-v13",
     "_mapped": {
       "schema_version": "polymath.surface_relation.v1",
-      "relation_id": "surface-relation:e4b143e139ba5f0b5c22f0cc",
+      "relation_id": "surface-relation:c32996512968afa805606458",
       "document_id": "884222d622358b5c01b67c2911d3e09b6b4adff226f8f00dc8a1c655c6f803df",
       "evidence_text": "Engineers once\nbelieved the Onyx Ledger was derived from the Cobalt Vault, but later evidence rejected this.",
       "evidence_start": 1005,
       "evidence_end": 1113,
       "subject_mention_id": "completed-mention:99181aa19b96cc0263bca0c7",
-      "object_mention_id": "completed-mention:9e31a87f9bef84909f504d1e",
+      "object_mention_id": "completed-mention:8b70a7f28fa6946fbc644773",
       "surface_predicate": "derived",
       "lemma": "derive",
       "particle": "",
@@ -851,6 +870,7 @@
       "canonical_candidate": "derived_from",
       "mapping_rule": "mapped:strict_dependency_cue:derive",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "qualified",
       "reasons": [
         "mapped:strict_dependency_cue:derive",
@@ -861,8 +881,8 @@
   },
   {
     "schema_version": "polymath.assertion_decision.v1",
-    "decision_id": "assertion-decision:e39212f750c3020c78789777",
-    "relation_id": "surface-relation:82d8ee97c485de9077122dec",
+    "decision_id": "assertion-decision:17fd13caf043ae3c9d40afcd",
+    "relation_id": "surface-relation:0cfc37b579bf4536851e9c14",
     "document_id": "884222d622358b5c01b67c2911d3e09b6b4adff226f8f00dc8a1c655c6f803df",
     "status": "qualified",
     "canonical_predicate": "derived_from",
@@ -874,12 +894,12 @@
     "policy_release": "graphify-relation-fast-path-v13",
     "_mapped": {
       "schema_version": "polymath.surface_relation.v1",
-      "relation_id": "surface-relation:82d8ee97c485de9077122dec",
+      "relation_id": "surface-relation:0cfc37b579bf4536851e9c14",
       "document_id": "884222d622358b5c01b67c2911d3e09b6b4adff226f8f00dc8a1c655c6f803df",
       "evidence_text": "Engineers once\nbelieved the Onyx Ledger was derived from the Cobalt Vault, but later evidence rejected this.",
       "evidence_start": 1005,
       "evidence_end": 1113,
-      "subject_mention_id": "completed-mention:9e31a87f9bef84909f504d1e",
+      "subject_mention_id": "completed-mention:8b70a7f28fa6946fbc644773",
       "object_mention_id": "completed-mention:99181aa19b96cc0263bca0c7",
       "surface_predicate": "derive",
       "lemma": "derive",
@@ -894,6 +914,7 @@
       "canonical_candidate": "derived_from",
       "mapping_rule": "mapped:existing_syntax_stack:derive",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "qualified",
       "reasons": [
         "mapped:existing_syntax_stack:derive",
@@ -931,6 +952,8 @@
       "non_positive_modal_or_attributed"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:QUALIFIED_CLAIM"
   },
   {
@@ -962,6 +985,8 @@
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -993,6 +1018,8 @@
       "non_positive_modal_or_attributed"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:QUALIFIED_CLAIM"
   },
   {
@@ -1024,6 +1051,8 @@
       "non_positive_modal_or_attributed"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:QUALIFIED_CLAIM"
   },
   {
@@ -1055,6 +1084,8 @@
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -1086,6 +1117,8 @@
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -1117,7 +1150,42 @@
       "non_positive_modal_or_attributed"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:QUALIFIED_CLAIM"
+  },
+  {
+    "schema_version": "polymath.openie_assertion.v1",
+    "assertion_id": "openie-assertion:308209b544a24253bc651c7a",
+    "candidate_id": "openie-predicate:f6294c8756eb4541d33f9fa0",
+    "family_id": "openie-family:1dee596b8fffd41ffb5fe0f8",
+    "document_id": "884222d622358b5c01b67c2911d3e09b6b4adff226f8f00dc8a1c655c6f803df",
+    "lane": "OPEN_RELATION",
+    "canonical_predicate": null,
+    "surface_relation": "claimed",
+    "subject_argument_id": "adapted-argument:b7baf21e65035580f169b6f9",
+    "object_argument_id": "adapted-argument:65411ebc4b0518015c13adb9",
+    "subject_entity_id": "document-entity:ff478526a28fde118d0c7dfc",
+    "object_entity_id": null,
+    "subject_mention_id": "completed-mention:a048d51a8562a63f9c6dae2b",
+    "object_mention_id": null,
+    "value_kind": "DESCRIPTION",
+    "value": "harrier gateway uses",
+    "polarity": "positive",
+    "modality": "asserted",
+    "attribution": "direct",
+    "evidence_start": 189,
+    "evidence_end": 258,
+    "score": 0.47442781706385295,
+    "reasons": [
+      "open:claim:unmapped_surface_relation",
+      "surface_subject_to_object",
+      "surface_relation_preserved_without_ontology_fallback"
+    ],
+    "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
+    "_lane": "openie:OPEN_RELATION"
   },
   {
     "schema_version": "polymath.openie_assertion.v1",
@@ -1148,6 +1216,8 @@
       "surface_relation_preserved_without_ontology_fallback"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:OPEN_RELATION"
   },
   {
@@ -1179,6 +1249,8 @@
       "non_positive_modal_or_attributed"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:QUALIFIED_CLAIM"
   },
   {
@@ -1210,6 +1282,8 @@
       "non_positive_modal_or_attributed"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:QUALIFIED_CLAIM"
   },
   {
@@ -1241,84 +1315,24 @@
       "surface_relation_preserved_without_ontology_fallback"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:OPEN_RELATION"
   },
   {
     "schema_version": "polymath.openie_assertion.v1",
-    "assertion_id": "openie-assertion:96f9aaf34b3651abe3d660b8",
-    "candidate_id": "openie-predicate:42f4544d095824d75e24b44c",
-    "family_id": "openie-family:f12ac8d907c4acc75fb69dfc",
-    "document_id": "884222d622358b5c01b67c2911d3e09b6b4adff226f8f00dc8a1c655c6f803df",
-    "lane": "OPEN_RELATION",
-    "canonical_predicate": null,
-    "surface_relation": "claimed",
-    "subject_argument_id": "adapted-argument:42dbf793a19285774bdf28ce",
-    "object_argument_id": "adapted-argument:42481b7312452fadc24caec9",
-    "subject_entity_id": null,
-    "object_entity_id": null,
-    "subject_mention_id": null,
-    "object_mention_id": null,
-    "value_kind": "DESCRIPTION",
-    "value": "harrier gateway uses cobalt vault",
-    "polarity": "positive",
-    "modality": "asserted",
-    "attribution": "direct",
-    "evidence_start": 189,
-    "evidence_end": 258,
-    "score": 1.0,
-    "reasons": [
-      "open:claim:unmapped_surface_relation",
-      "surface_subject_to_object",
-      "surface_relation_preserved_without_ontology_fallback"
-    ],
-    "policy_release": "graphify-openie-assertion-policy-v2",
-    "_lane": "openie:OPEN_RELATION"
-  },
-  {
-    "schema_version": "polymath.openie_assertion.v1",
-    "assertion_id": "openie-assertion:c99f0c785c82113864f4f661",
-    "candidate_id": "openie-predicate:af2e67b776d2547942b4b8e0",
-    "family_id": "openie-family:862000384fc105dd1f9a8b32",
-    "document_id": "884222d622358b5c01b67c2911d3e09b6b4adff226f8f00dc8a1c655c6f803df",
-    "lane": "OPEN_RELATION",
-    "canonical_predicate": null,
-    "surface_relation": "claimed",
-    "subject_argument_id": "adapted-argument:13271b1119ff9b35273aaf0b",
-    "object_argument_id": "adapted-argument:65411ebc4b0518015c13adb9",
-    "subject_entity_id": null,
-    "object_entity_id": null,
-    "subject_mention_id": null,
-    "object_mention_id": null,
-    "value_kind": "DESCRIPTION",
-    "value": "harrier gateway uses",
-    "polarity": "positive",
-    "modality": "asserted",
-    "attribution": "direct",
-    "evidence_start": 189,
-    "evidence_end": 258,
-    "score": 0.47442781706385295,
-    "reasons": [
-      "open:claim:unmapped_surface_relation",
-      "surface_subject_to_object",
-      "surface_relation_preserved_without_ontology_fallback"
-    ],
-    "policy_release": "graphify-openie-assertion-policy-v2",
-    "_lane": "openie:OPEN_RELATION"
-  },
-  {
-    "schema_version": "polymath.openie_assertion.v1",
-    "assertion_id": "openie-assertion:d8c3edc6ed3d8051a2c2ff42",
-    "candidate_id": "openie-predicate:f4581c8097169a4b2e6ea6b7",
-    "family_id": "openie-family:747f7f7b5cca2f6e4139d3e1",
+    "assertion_id": "openie-assertion:d106a61b6656a863c11e7462",
+    "candidate_id": "openie-predicate:13110a049515d25f42879e6b",
+    "family_id": "openie-family:f8de56e6606c63643fff07ec",
     "document_id": "884222d622358b5c01b67c2911d3e09b6b4adff226f8f00dc8a1c655c6f803df",
     "lane": "REVIEW",
     "canonical_predicate": null,
     "surface_relation": "claimed",
-    "subject_argument_id": "adapted-argument:f7b544ea17bb3dc8573f5d5a",
+    "subject_argument_id": "adapted-argument:f89b9a5cf0c7afa3f5f87255",
     "object_argument_id": "adapted-argument:d7d09628e5f91b0acf4de85e",
-    "subject_entity_id": null,
+    "subject_entity_id": "document-entity:ff478526a28fde118d0c7dfc",
     "object_entity_id": null,
-    "subject_mention_id": null,
+    "subject_mention_id": "completed-mention:a048d51a8562a63f9c6dae2b",
     "object_mention_id": null,
     "value_kind": null,
     "value": "",
@@ -1334,6 +1348,8 @@
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -1365,7 +1381,42 @@
       "non_positive_modal_or_attributed"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:QUALIFIED_CLAIM"
+  },
+  {
+    "schema_version": "polymath.openie_assertion.v1",
+    "assertion_id": "openie-assertion:f617975cbc3bac519a426ccd",
+    "candidate_id": "openie-predicate:a44eacf5f203d4ba2892d8ea",
+    "family_id": "openie-family:bf709a51ceff9f0a82497fd4",
+    "document_id": "884222d622358b5c01b67c2911d3e09b6b4adff226f8f00dc8a1c655c6f803df",
+    "lane": "OPEN_RELATION",
+    "canonical_predicate": null,
+    "surface_relation": "claimed",
+    "subject_argument_id": "adapted-argument:1185aee6fcf07895935e061c",
+    "object_argument_id": "adapted-argument:42481b7312452fadc24caec9",
+    "subject_entity_id": "document-entity:ff478526a28fde118d0c7dfc",
+    "object_entity_id": null,
+    "subject_mention_id": "completed-mention:a048d51a8562a63f9c6dae2b",
+    "object_mention_id": null,
+    "value_kind": "DESCRIPTION",
+    "value": "harrier gateway uses cobalt vault",
+    "polarity": "positive",
+    "modality": "asserted",
+    "attribution": "direct",
+    "evidence_start": 189,
+    "evidence_end": 258,
+    "score": 1.0,
+    "reasons": [
+      "open:claim:unmapped_surface_relation",
+      "surface_subject_to_object",
+      "surface_relation_preserved_without_ontology_fallback"
+    ],
+    "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
+    "_lane": "openie:OPEN_RELATION"
   },
   {
     "schema_version": "polymath.openie_assertion.v1",
@@ -1396,6 +1447,8 @@
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -1427,6 +1480,8 @@
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -1458,6 +1513,8 @@
       "non_positive_modal_or_attributed"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:QUALIFIED_CLAIM"
   },
   {
@@ -1489,7 +1546,42 @@
       "surface_relation_preserved_without_ontology_fallback"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:OPEN_RELATION"
+  },
+  {
+    "schema_version": "polymath.openie_assertion.v1",
+    "assertion_id": "openie-assertion:1bceae3fdf0aff83d62b5366",
+    "candidate_id": "openie-predicate:209f3d67c7bef6f426217001",
+    "family_id": "openie-family:7b5e69db81b9175ecae04bc1",
+    "document_id": "884222d622358b5c01b67c2911d3e09b6b4adff226f8f00dc8a1c655c6f803df",
+    "lane": "REVIEW",
+    "canonical_predicate": null,
+    "surface_relation": "passed",
+    "subject_argument_id": "adapted-argument:1f799c7ca51c22c95cba1433",
+    "object_argument_id": "adapted-argument:06f02aaf4c174389936df293",
+    "subject_entity_id": null,
+    "object_entity_id": "document-entity:5b05e576dd09eb67a16d5d85",
+    "subject_mention_id": null,
+    "object_mention_id": "completed-mention:a55c6161ad3bdb19026f9365",
+    "value_kind": null,
+    "value": "",
+    "polarity": "positive",
+    "modality": "asserted",
+    "attribution": "direct",
+    "evidence_start": 347,
+    "evidence_end": 454,
+    "score": 1.0,
+    "reasons": [
+      "review:unresolved_or_embedded_endpoint",
+      "surface_subject_to_object",
+      "predicate_or_endpoint_requires_review"
+    ],
+    "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
+    "_lane": "openie:REVIEW"
   },
   {
     "schema_version": "polymath.openie_assertion.v1",
@@ -1520,6 +1612,8 @@
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -1551,38 +1645,9 @@
       "non_positive_modal_or_attributed"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:QUALIFIED_CLAIM"
-  },
-  {
-    "schema_version": "polymath.openie_assertion.v1",
-    "assertion_id": "openie-assertion:89e5bc32c8b188c1b626eb45",
-    "candidate_id": "openie-predicate:80c6e6226458402a3d91d63d",
-    "family_id": "openie-family:fe5e4ca50f308139bf40f99f",
-    "document_id": "884222d622358b5c01b67c2911d3e09b6b4adff226f8f00dc8a1c655c6f803df",
-    "lane": "REVIEW",
-    "canonical_predicate": null,
-    "surface_relation": "passed",
-    "subject_argument_id": "adapted-argument:1f799c7ca51c22c95cba1433",
-    "object_argument_id": "adapted-argument:9592472a07567baa9745364e",
-    "subject_entity_id": null,
-    "object_entity_id": null,
-    "subject_mention_id": null,
-    "object_mention_id": null,
-    "value_kind": "DESCRIPTION",
-    "value": "an early review",
-    "polarity": "positive",
-    "modality": "asserted",
-    "attribution": "direct",
-    "evidence_start": 347,
-    "evidence_end": 454,
-    "score": 1.0,
-    "reasons": [
-      "review:unresolved_or_embedded_endpoint",
-      "surface_subject_to_object",
-      "predicate_or_endpoint_requires_review"
-    ],
-    "policy_release": "graphify-openie-assertion-policy-v2",
-    "_lane": "openie:REVIEW"
   },
   {
     "schema_version": "polymath.openie_assertion.v1",
@@ -1613,6 +1678,8 @@
       "value_fact_requires_strict_surface_recovery"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -1644,6 +1711,8 @@
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -1675,6 +1744,8 @@
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -1706,6 +1777,8 @@
       "value_fact_requires_strict_surface_recovery"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -1737,6 +1810,8 @@
       "non_positive_modal_or_attributed"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:QUALIFIED_CLAIM"
   },
   {
@@ -1768,6 +1843,8 @@
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -1799,6 +1876,8 @@
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -1830,6 +1909,8 @@
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -1861,6 +1942,8 @@
       "non_positive_modal_or_attributed"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:QUALIFIED_CLAIM"
   },
   {
@@ -1892,6 +1975,8 @@
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -1923,6 +2008,8 @@
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -1954,6 +2041,8 @@
       "non_positive_modal_or_attributed"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:QUALIFIED_CLAIM"
   },
   {
@@ -1985,6 +2074,8 @@
       "surface_relation_preserved_without_ontology_fallback"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:OPEN_RELATION"
   },
   {
@@ -2016,6 +2107,8 @@
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -2047,6 +2140,8 @@
       "non_positive_modal_or_attributed"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:QUALIFIED_CLAIM"
   },
   {
@@ -2078,6 +2173,8 @@
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -2109,6 +2206,8 @@
       "non_positive_modal_or_attributed"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:QUALIFIED_CLAIM"
   },
   {
@@ -2140,6 +2239,8 @@
       "non_positive_modal_or_attributed"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:QUALIFIED_CLAIM"
   },
   {
@@ -2171,6 +2272,8 @@
       "surface_relation_preserved_without_ontology_fallback"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:OPEN_RELATION"
   },
   {
@@ -2202,6 +2305,8 @@
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -2233,6 +2338,8 @@
       "non_positive_modal_or_attributed"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:QUALIFIED_CLAIM"
   },
   {
@@ -2264,6 +2371,8 @@
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -2295,6 +2404,8 @@
       "surface_relation_preserved_without_ontology_fallback"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:OPEN_RELATION"
   },
   {
@@ -2326,6 +2437,8 @@
       "fact_subject_is_not_a_canonical_entity"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REJECT"
   },
   {
@@ -2357,6 +2470,8 @@
       "value_fact_requires_strict_surface_recovery"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -2388,38 +2503,42 @@
       "surface_relation_preserved_without_ontology_fallback"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:OPEN_RELATION"
   },
   {
     "schema_version": "polymath.openie_assertion.v1",
-    "assertion_id": "openie-assertion:000479dde311870f274d23ae",
-    "candidate_id": "openie-predicate:29fc7ccd4a6d29eac479ba10",
-    "family_id": "openie-family:3982b208baa58c6bfae0ca1a",
+    "assertion_id": "openie-assertion:04a75edef6e0e066518d9da8",
+    "candidate_id": "openie-predicate:178a4aa4f107253a3dd1d2c0",
+    "family_id": "openie-family:538788eb8847d846688db1da",
     "document_id": "884222d622358b5c01b67c2911d3e09b6b4adff226f8f00dc8a1c655c6f803df",
-    "lane": "QUALIFIED_CLAIM",
+    "lane": "REVIEW",
     "canonical_predicate": "supports",
     "surface_relation": "supports",
-    "subject_argument_id": "adapted-argument:731f6c651fd7b5e2f1bbfa11",
-    "object_argument_id": "adapted-argument:6e5d7e4f003c2b54a8445b21",
-    "subject_entity_id": "document-entity:0a2d0f3704281c6904428780",
-    "object_entity_id": "document-entity:96cf74caa311b9e43ad67ce4",
-    "subject_mention_id": "completed-mention:01a858e9498b50753453eacc",
-    "object_mention_id": "completed-mention:673c66de84bbdc30ce0894d9",
-    "value_kind": null,
-    "value": "",
+    "subject_argument_id": "adapted-argument:a87cdd25d7343b04d2c48840",
+    "object_argument_id": "adapted-argument:42e8cd398179e32aaa8fdc76",
+    "subject_entity_id": "document-entity:3edb9a65bbefef3271878dbb",
+    "object_entity_id": null,
+    "subject_mention_id": "completed-mention:142d430c8a9ce99a74cdc5d1",
+    "object_mention_id": null,
+    "value_kind": "DESCRIPTION",
+    "value": "vendor walked back assertion",
     "polarity": "positive",
     "modality": "asserted",
-    "attribution": "nominal:assertion",
+    "attribution": "direct",
     "evidence_start": 715,
     "evidence_end": 803,
     "score": 1.0,
     "reasons": [
-      "review:endpoint_signature:Location:Software",
+      "mapped:openie:triplet_extract:bounded_lemma_map:support:endpoint_role:Software:Concept",
       "surface_subject_to_object",
-      "non_positive_modal_or_attributed"
+      "value_fact_requires_strict_surface_recovery"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
-    "_lane": "openie:QUALIFIED_CLAIM"
+    "temporal": null,
+    "value_ir": null,
+    "_lane": "openie:REVIEW"
   },
   {
     "schema_version": "polymath.openie_assertion.v1",
@@ -2450,7 +2569,42 @@
       "non_positive_modal_or_attributed"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:QUALIFIED_CLAIM"
+  },
+  {
+    "schema_version": "polymath.openie_assertion.v1",
+    "assertion_id": "openie-assertion:27a9951234d8a8ee0a82bcee",
+    "candidate_id": "openie-predicate:abb03303c377ddfe43ecc20a",
+    "family_id": "openie-family:3789daa9fe7b78ca98d7f653",
+    "document_id": "884222d622358b5c01b67c2911d3e09b6b4adff226f8f00dc8a1c655c6f803df",
+    "lane": "REVIEW",
+    "canonical_predicate": "supports",
+    "surface_relation": "supports",
+    "subject_argument_id": "adapted-argument:6f06af469f4acf5860a1f6a8",
+    "object_argument_id": "adapted-argument:be3fb914fa6d45ff1343949b",
+    "subject_entity_id": "document-entity:3edb9a65bbefef3271878dbb",
+    "object_entity_id": null,
+    "subject_mention_id": "completed-mention:142d430c8a9ce99a74cdc5d1",
+    "object_mention_id": null,
+    "value_kind": "DESCRIPTION",
+    "value": "vendor walked back",
+    "polarity": "positive",
+    "modality": "asserted",
+    "attribution": "direct",
+    "evidence_start": 715,
+    "evidence_end": 803,
+    "score": 1.0,
+    "reasons": [
+      "mapped:openie:triplet_extract:bounded_lemma_map:support:endpoint_role:Software:Concept",
+      "surface_subject_to_object",
+      "value_fact_requires_strict_surface_recovery"
+    ],
+    "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
+    "_lane": "openie:REVIEW"
   },
   {
     "schema_version": "polymath.openie_assertion.v1",
@@ -2481,115 +2635,57 @@
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
     "schema_version": "polymath.openie_assertion.v1",
-    "assertion_id": "openie-assertion:7d186671c2b5c59a3d4d3eca",
-    "candidate_id": "openie-predicate:e379db1cfbcd764a5d2781b0",
-    "family_id": "openie-family:41785bd721cb661f4c80ebc2",
+    "assertion_id": "openie-assertion:79c3fa44492febd2fea32054",
+    "candidate_id": "openie-predicate:19c5a8dedb1ca3244a19e318",
+    "family_id": "openie-family:73a561c172427a2ae68765d6",
     "document_id": "884222d622358b5c01b67c2911d3e09b6b4adff226f8f00dc8a1c655c6f803df",
-    "lane": "REVIEW",
+    "lane": "QUALIFIED_CLAIM",
     "canonical_predicate": "supports",
     "surface_relation": "supports",
-    "subject_argument_id": "adapted-argument:09682f8d3ee6207fcedc8a97",
-    "object_argument_id": "adapted-argument:be3fb914fa6d45ff1343949b",
-    "subject_entity_id": "document-entity:0a2d0f3704281c6904428780",
-    "object_entity_id": null,
-    "subject_mention_id": "completed-mention:01a858e9498b50753453eacc",
-    "object_mention_id": null,
-    "value_kind": "DESCRIPTION",
-    "value": "vendor walked back",
-    "polarity": "positive",
-    "modality": "asserted",
-    "attribution": "direct",
-    "evidence_start": 715,
-    "evidence_end": 803,
-    "score": 1.0,
-    "reasons": [
-      "mapped:openie:triplet_extract:value_object:support",
-      "surface_subject_to_object",
-      "value_fact_requires_strict_surface_recovery"
-    ],
-    "policy_release": "graphify-openie-assertion-policy-v2",
-    "_lane": "openie:REVIEW"
-  },
-  {
-    "schema_version": "polymath.openie_assertion.v1",
-    "assertion_id": "openie-assertion:a96ff6cbb3fbf24171d6b32b",
-    "candidate_id": "openie-predicate:f6766263f53a3b8266b862ad",
-    "family_id": "openie-family:cd8f57a1c423c53a8a9d88d9",
-    "document_id": "884222d622358b5c01b67c2911d3e09b6b4adff226f8f00dc8a1c655c6f803df",
-    "lane": "REVIEW",
-    "canonical_predicate": "supports",
-    "surface_relation": "supports",
-    "subject_argument_id": "adapted-argument:e59e41116771643573727e62",
-    "object_argument_id": "adapted-argument:4e2657c56e3ad0ef1de70740",
-    "subject_entity_id": "document-entity:0a2d0f3704281c6904428780",
-    "object_entity_id": null,
-    "subject_mention_id": "completed-mention:01a858e9498b50753453eacc",
-    "object_mention_id": null,
-    "value_kind": "DESCRIPTION",
-    "value": "vendor walked assertion",
-    "polarity": "positive",
-    "modality": "asserted",
-    "attribution": "direct",
-    "evidence_start": 715,
-    "evidence_end": 803,
-    "score": 1.0,
-    "reasons": [
-      "mapped:openie:triplet_extract:value_object:support",
-      "surface_subject_to_object",
-      "value_fact_requires_strict_surface_recovery"
-    ],
-    "policy_release": "graphify-openie-assertion-policy-v2",
-    "_lane": "openie:REVIEW"
-  },
-  {
-    "schema_version": "polymath.openie_assertion.v1",
-    "assertion_id": "openie-assertion:b9ef299fd8bcdaac4220c0eb",
-    "candidate_id": "openie-predicate:c1762f1e1fc8057050b04ca1",
-    "family_id": "openie-family:c927c856cdab160c63614551",
-    "document_id": "884222d622358b5c01b67c2911d3e09b6b4adff226f8f00dc8a1c655c6f803df",
-    "lane": "REVIEW",
-    "canonical_predicate": "supports",
-    "surface_relation": "supports",
-    "subject_argument_id": "adapted-argument:daa6056493db13ab7f3e0a2c",
-    "object_argument_id": "adapted-argument:42e8cd398179e32aaa8fdc76",
-    "subject_entity_id": "document-entity:0a2d0f3704281c6904428780",
-    "object_entity_id": null,
-    "subject_mention_id": "completed-mention:01a858e9498b50753453eacc",
-    "object_mention_id": null,
-    "value_kind": "DESCRIPTION",
-    "value": "vendor walked back assertion",
-    "polarity": "positive",
-    "modality": "asserted",
-    "attribution": "direct",
-    "evidence_start": 715,
-    "evidence_end": 803,
-    "score": 1.0,
-    "reasons": [
-      "mapped:openie:triplet_extract:value_object:support",
-      "surface_subject_to_object",
-      "value_fact_requires_strict_surface_recovery"
-    ],
-    "policy_release": "graphify-openie-assertion-policy-v2",
-    "_lane": "openie:REVIEW"
-  },
-  {
-    "schema_version": "polymath.openie_assertion.v1",
-    "assertion_id": "openie-assertion:c4a4c4d4aa35c4d1c0293b9b",
-    "candidate_id": "openie-predicate:4061c393168d05be81fffda7",
-    "family_id": "openie-family:0ef1d4be71e2ae27ed19fe28",
-    "document_id": "884222d622358b5c01b67c2911d3e09b6b4adff226f8f00dc8a1c655c6f803df",
-    "lane": "REVIEW",
-    "canonical_predicate": "supports",
-    "surface_relation": "supports",
-    "subject_argument_id": "adapted-argument:3aa91c8907aa6b337c03ab26",
-    "object_argument_id": "adapted-argument:42fd87a56206fcbfcd436511",
-    "subject_entity_id": "document-entity:0a2d0f3704281c6904428780",
+    "subject_argument_id": "adapted-argument:44a44e4ed7f1a0f81dc4c627",
+    "object_argument_id": "adapted-argument:6e5d7e4f003c2b54a8445b21",
+    "subject_entity_id": "document-entity:3edb9a65bbefef3271878dbb",
     "object_entity_id": "document-entity:96cf74caa311b9e43ad67ce4",
-    "subject_mention_id": "completed-mention:01a858e9498b50753453eacc",
+    "subject_mention_id": "completed-mention:142d430c8a9ce99a74cdc5d1",
+    "object_mention_id": "completed-mention:673c66de84bbdc30ce0894d9",
+    "value_kind": null,
+    "value": "",
+    "polarity": "positive",
+    "modality": "asserted",
+    "attribution": "nominal:assertion",
+    "evidence_start": 715,
+    "evidence_end": 803,
+    "score": 1.0,
+    "reasons": [
+      "review:endpoint_signature:Product:Software",
+      "surface_subject_to_object",
+      "non_positive_modal_or_attributed"
+    ],
+    "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
+    "_lane": "openie:QUALIFIED_CLAIM"
+  },
+  {
+    "schema_version": "polymath.openie_assertion.v1",
+    "assertion_id": "openie-assertion:8b9b5e482e8dfac31d01f7c9",
+    "candidate_id": "openie-predicate:27dfc83f4eac901bf2a39d4c",
+    "family_id": "openie-family:9bfbb480e13abb3dc6f471bd",
+    "document_id": "884222d622358b5c01b67c2911d3e09b6b4adff226f8f00dc8a1c655c6f803df",
+    "lane": "REVIEW",
+    "canonical_predicate": "supports",
+    "surface_relation": "supports",
+    "subject_argument_id": "adapted-argument:ba2723a9f6052b3377869767",
+    "object_argument_id": "adapted-argument:42fd87a56206fcbfcd436511",
+    "subject_entity_id": "document-entity:3edb9a65bbefef3271878dbb",
+    "object_entity_id": "document-entity:96cf74caa311b9e43ad67ce4",
+    "subject_mention_id": "completed-mention:142d430c8a9ce99a74cdc5d1",
     "object_mention_id": "completed-mention:673c66de84bbdc30ce0894d9",
     "value_kind": null,
     "value": "",
@@ -2600,11 +2696,46 @@
     "evidence_end": 803,
     "score": 1.0,
     "reasons": [
-      "review:endpoint_signature:Location:Software",
+      "review:endpoint_signature:Product:Software",
       "surface_subject_to_object",
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
+    "_lane": "openie:REVIEW"
+  },
+  {
+    "schema_version": "polymath.openie_assertion.v1",
+    "assertion_id": "openie-assertion:bbd150bfad7bff92ae5d8a4d",
+    "candidate_id": "openie-predicate:46549b83c1dc41925a631da2",
+    "family_id": "openie-family:d752d8fcd6a0fb9db7805f31",
+    "document_id": "884222d622358b5c01b67c2911d3e09b6b4adff226f8f00dc8a1c655c6f803df",
+    "lane": "REVIEW",
+    "canonical_predicate": "supports",
+    "surface_relation": "supports",
+    "subject_argument_id": "adapted-argument:654bdd9621407dab26a624e4",
+    "object_argument_id": "adapted-argument:4e2657c56e3ad0ef1de70740",
+    "subject_entity_id": "document-entity:3edb9a65bbefef3271878dbb",
+    "object_entity_id": null,
+    "subject_mention_id": "completed-mention:142d430c8a9ce99a74cdc5d1",
+    "object_mention_id": null,
+    "value_kind": "DESCRIPTION",
+    "value": "vendor walked assertion",
+    "polarity": "positive",
+    "modality": "asserted",
+    "attribution": "direct",
+    "evidence_start": 715,
+    "evidence_end": 803,
+    "score": 1.0,
+    "reasons": [
+      "mapped:openie:triplet_extract:bounded_lemma_map:support:endpoint_role:Software:Concept",
+      "surface_subject_to_object",
+      "value_fact_requires_strict_surface_recovery"
+    ],
+    "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -2636,6 +2767,8 @@
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -2667,6 +2800,8 @@
       "non_positive_modal_or_attributed"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:QUALIFIED_CLAIM"
   },
   {
@@ -2698,23 +2833,25 @@
       "non_positive_modal_or_attributed"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:QUALIFIED_CLAIM"
   },
   {
     "schema_version": "polymath.openie_assertion.v1",
-    "assertion_id": "openie-assertion:97b8095dee395cfb83d39730",
-    "candidate_id": "openie-predicate:db9ee35859f0a5bbd037a7bf",
-    "family_id": "openie-family:90624579b6db5373ad612c1a",
+    "assertion_id": "openie-assertion:03b923c110874c50c9164f96",
+    "candidate_id": "openie-predicate:a90e7d6d2bbb77fc2637b1a1",
+    "family_id": "openie-family:b82c1208c75bbf9467ce6d59",
     "document_id": "884222d622358b5c01b67c2911d3e09b6b4adff226f8f00dc8a1c655c6f803df",
     "lane": "QUALIFIED_CLAIM",
     "canonical_predicate": "uses",
     "surface_relation": "may adopt",
     "subject_argument_id": "adapted-argument:89770b2eae2f5130d5de775a",
-    "object_argument_id": "adapted-argument:d65772cc5e1afb1b85a00880",
+    "object_argument_id": "adapted-argument:4d72627dc646932e12e72f5b",
     "subject_entity_id": "document-entity:96cf74caa311b9e43ad67ce4",
-    "object_entity_id": "document-entity:0a2d0f3704281c6904428780",
+    "object_entity_id": "document-entity:3edb9a65bbefef3271878dbb",
     "subject_mention_id": "completed-mention:68ed2dbfcdc595c27f97e15d",
-    "object_mention_id": "completed-mention:e69c3380e38e261d3f76f3ed",
+    "object_mention_id": "completed-mention:0d381e7ab19d6831961a70be",
     "value_kind": null,
     "value": "",
     "polarity": "positive",
@@ -2724,11 +2861,13 @@
     "evidence_end": 935,
     "score": 1.0,
     "reasons": [
-      "review:endpoint_signature:Software:Location",
+      "mapped:openie:triplet_extract:configured_synonym_or_abstain:adopt:endpoint_role:Software:Software",
       "surface_subject_to_object",
       "non_positive_modal_or_attributed"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:QUALIFIED_CLAIM"
   },
   {
@@ -2760,6 +2899,8 @@
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -2791,6 +2932,8 @@
       "surface_relation_preserved_without_ontology_fallback"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:OPEN_RELATION"
   },
   {
@@ -2822,6 +2965,8 @@
       "surface_relation_preserved_without_ontology_fallback"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:OPEN_RELATION"
   },
   {
@@ -2853,6 +2998,8 @@
       "value_fact_requires_strict_surface_recovery"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -2884,6 +3031,8 @@
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -2915,6 +3064,8 @@
       "non_positive_modal_or_attributed"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:QUALIFIED_CLAIM"
   },
   {
@@ -2946,6 +3097,8 @@
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -2977,6 +3130,8 @@
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -3008,7 +3163,42 @@
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
+  },
+  {
+    "schema_version": "polymath.openie_assertion.v1",
+    "assertion_id": "openie-assertion:1729896660a0a07ab5e1ef55",
+    "candidate_id": "openie-predicate:cffe157136f2e23668075c6a",
+    "family_id": "openie-family:8a110c1a6087998ef637bf0c",
+    "document_id": "884222d622358b5c01b67c2911d3e09b6b4adff226f8f00dc8a1c655c6f803df",
+    "lane": "QUALIFIED_CLAIM",
+    "canonical_predicate": "derived_from",
+    "surface_relation": "was derived",
+    "subject_argument_id": "adapted-argument:bc6a6e1a93bd88d4187061c2",
+    "object_argument_id": "adapted-argument:315b65da7392f8a3f7688c10",
+    "subject_entity_id": "document-entity:c0f81a0178a1c0ba3acda2b8",
+    "object_entity_id": "document-entity:3edb9a65bbefef3271878dbb",
+    "subject_mention_id": "completed-mention:99181aa19b96cc0263bca0c7",
+    "object_mention_id": "completed-mention:8b70a7f28fa6946fbc644773",
+    "value_kind": null,
+    "value": "",
+    "polarity": "positive",
+    "modality": "asserted",
+    "attribution": "attributed:Engineers [Engineers:believe:0]",
+    "evidence_start": 1005,
+    "evidence_end": 1113,
+    "score": 1.0,
+    "reasons": [
+      "mapped:openie:triplet_extract:bounded_lemma_map:derive",
+      "surface_subject_to_object",
+      "non_positive_modal_or_attributed"
+    ],
+    "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
+    "_lane": "openie:QUALIFIED_CLAIM"
   },
   {
     "schema_version": "polymath.openie_assertion.v1",
@@ -3039,6 +3229,8 @@
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -3070,6 +3262,8 @@
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -3101,6 +3295,8 @@
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -3132,6 +3328,8 @@
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -3163,23 +3361,25 @@
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
     "schema_version": "polymath.openie_assertion.v1",
-    "assertion_id": "openie-assertion:73d1226aec8a965b680e0187",
-    "candidate_id": "openie-predicate:1f0f7c961bc711ae2a32cbc6",
-    "family_id": "openie-family:abfeb957e86de8a1f4174201",
+    "assertion_id": "openie-assertion:72bf10a1e9b828736fdfb9fa",
+    "candidate_id": "openie-predicate:87981d0406552b5042c43d83",
+    "family_id": "openie-family:854dd19d99db6f5f9458eb47",
     "document_id": "884222d622358b5c01b67c2911d3e09b6b4adff226f8f00dc8a1c655c6f803df",
     "lane": "QUALIFIED_CLAIM",
     "canonical_predicate": "derived_from",
     "surface_relation": "was derived from",
     "subject_argument_id": "adapted-argument:e5bc4614b5d289be167efdc2",
-    "object_argument_id": "adapted-argument:7d9f212f0230e0ba09c248a5",
+    "object_argument_id": "adapted-argument:a1fcf2844beef68df49ecf9d",
     "subject_entity_id": "document-entity:c0f81a0178a1c0ba3acda2b8",
-    "object_entity_id": "document-entity:0a2d0f3704281c6904428780",
+    "object_entity_id": "document-entity:3edb9a65bbefef3271878dbb",
     "subject_mention_id": "completed-mention:99181aa19b96cc0263bca0c7",
-    "object_mention_id": "completed-mention:9e31a87f9bef84909f504d1e",
+    "object_mention_id": "completed-mention:8b70a7f28fa6946fbc644773",
     "value_kind": null,
     "value": "",
     "polarity": "positive",
@@ -3194,6 +3394,8 @@
       "non_positive_modal_or_attributed"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:QUALIFIED_CLAIM"
   },
   {
@@ -3225,6 +3427,8 @@
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -3256,6 +3460,8 @@
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -3287,38 +3493,9 @@
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
-  },
-  {
-    "schema_version": "polymath.openie_assertion.v1",
-    "assertion_id": "openie-assertion:d496fe9fba2b966985f20b81",
-    "candidate_id": "openie-predicate:2bdb7ed2b32c98784382884c",
-    "family_id": "openie-family:b2575ff2f81edc625c85e3d8",
-    "document_id": "884222d622358b5c01b67c2911d3e09b6b4adff226f8f00dc8a1c655c6f803df",
-    "lane": "QUALIFIED_CLAIM",
-    "canonical_predicate": "derived_from",
-    "surface_relation": "was derived",
-    "subject_argument_id": "adapted-argument:bc6a6e1a93bd88d4187061c2",
-    "object_argument_id": "adapted-argument:e119b3c610b977129b598d3f",
-    "subject_entity_id": "document-entity:c0f81a0178a1c0ba3acda2b8",
-    "object_entity_id": "document-entity:0a2d0f3704281c6904428780",
-    "subject_mention_id": "completed-mention:99181aa19b96cc0263bca0c7",
-    "object_mention_id": "completed-mention:9e31a87f9bef84909f504d1e",
-    "value_kind": null,
-    "value": "",
-    "polarity": "positive",
-    "modality": "asserted",
-    "attribution": "attributed:Engineers [Engineers:believe:0]",
-    "evidence_start": 1005,
-    "evidence_end": 1113,
-    "score": 1.0,
-    "reasons": [
-      "mapped:openie:triplet_extract:bounded_lemma_map:derive",
-      "surface_subject_to_object",
-      "non_positive_modal_or_attributed"
-    ],
-    "policy_release": "graphify-openie-assertion-policy-v2",
-    "_lane": "openie:QUALIFIED_CLAIM"
   },
   {
     "schema_version": "polymath.openie_assertion.v1",
@@ -3349,6 +3526,8 @@
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -3380,6 +3559,8 @@
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -3411,6 +3592,8 @@
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   }
 ]

@@ -1,68 +1,25 @@
 [
   {
     "schema_version": "polymath.assertion_decision.v1",
-    "decision_id": "assertion-decision:5739f8bae52a40f6c9bd16c4",
-    "relation_id": "surface-relation:a5ea98f639d5635e78ebc0ca",
-    "document_id": "a793de031c8ff3da2180db8f2c12c4f01ad47da68c50550b7b2baebb206eab1e",
-    "status": "review",
-    "canonical_predicate": "causes",
-    "score": 1.0,
-    "reasons": [
-      "review:endpoint_signature:Event:Concept",
-      "source:strict_dependency_cue"
-    ],
-    "policy_release": "graphify-relation-fast-path-v13",
-    "_mapped": {
-      "schema_version": "polymath.surface_relation.v1",
-      "relation_id": "surface-relation:a5ea98f639d5635e78ebc0ca",
-      "document_id": "a793de031c8ff3da2180db8f2c12c4f01ad47da68c50550b7b2baebb206eab1e",
-      "evidence_text": "Voltage sag causes breaker trips on the eastern quay.",
-      "evidence_start": 31,
-      "evidence_end": 84,
-      "subject_mention_id": "completed-mention:67e20d1cc9c4dfc45943d3b7",
-      "object_mention_id": "completed-mention:e2c20952b2292370710d029f",
-      "surface_predicate": "causes",
-      "lemma": "cause",
-      "particle": "",
-      "preposition": "",
-      "dependency_frame": "direct:active:ROOT",
-      "dependency_path": "nsubj>ROOT>dobj",
-      "voice": "active",
-      "polarity": "positive",
-      "modality": "asserted",
-      "attribution": "",
-      "canonical_candidate": "causes",
-      "mapping_rule": "review:endpoint_signature:Event:Concept",
-      "mapping_release": "graphify-predicate-compiler-v2",
-      "terminal_state": "review",
-      "reasons": [
-        "review:endpoint_signature:Event:Concept",
-        "source:strict_dependency_cue"
-      ]
-    },
-    "_lane": "fast_path:review"
-  },
-  {
-    "schema_version": "polymath.assertion_decision.v1",
-    "decision_id": "assertion-decision:b5ee520c697f48e4969f2069",
-    "relation_id": "surface-relation:8911d372e0b64de2b9fdc2cb",
+    "decision_id": "assertion-decision:02f0c004cfeafb17573b9478",
+    "relation_id": "surface-relation:073241ad499c8b04ea4305d1",
     "document_id": "a793de031c8ff3da2180db8f2c12c4f01ad47da68c50550b7b2baebb206eab1e",
     "status": "review",
     "canonical_predicate": "causes",
     "score": 0.9,
     "reasons": [
-      "review:endpoint_signature:Event:Location",
+      "mapped:existing_syntax_stack:cause",
       "source:existing_syntax_stack"
     ],
     "policy_release": "graphify-relation-fast-path-v13",
     "_mapped": {
       "schema_version": "polymath.surface_relation.v1",
-      "relation_id": "surface-relation:8911d372e0b64de2b9fdc2cb",
+      "relation_id": "surface-relation:073241ad499c8b04ea4305d1",
       "document_id": "a793de031c8ff3da2180db8f2c12c4f01ad47da68c50550b7b2baebb206eab1e",
       "evidence_text": "Voltage sag causes breaker trips on the eastern quay.",
       "evidence_start": 31,
       "evidence_end": 84,
-      "subject_mention_id": "completed-mention:67e20d1cc9c4dfc45943d3b7",
+      "subject_mention_id": "relation-endpoint-mention:e706dd186fe1ad383464ee2f",
       "object_mention_id": "completed-mention:29ff02e976b00eca9f89d9d0",
       "surface_predicate": "cause",
       "lemma": "cause",
@@ -75,11 +32,12 @@
       "modality": "asserted",
       "attribution": "direct",
       "canonical_candidate": "causes",
-      "mapping_rule": "review:endpoint_signature:Event:Location",
+      "mapping_rule": "mapped:existing_syntax_stack:cause",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "review",
       "reasons": [
-        "review:endpoint_signature:Event:Location",
+        "mapped:existing_syntax_stack:cause",
         "source:existing_syntax_stack"
       ]
     },
@@ -87,8 +45,8 @@
   },
   {
     "schema_version": "polymath.assertion_decision.v1",
-    "decision_id": "assertion-decision:c9d5292b8f2fee69bb7493d2",
-    "relation_id": "surface-relation:1fd5bae32b9f28e1e400ec1a",
+    "decision_id": "assertion-decision:9a80c48cdae81d1e48464c6d",
+    "relation_id": "surface-relation:86ffa1f143e905dcb42c3c70",
     "document_id": "a793de031c8ff3da2180db8f2c12c4f01ad47da68c50550b7b2baebb206eab1e",
     "status": "review",
     "canonical_predicate": "consumes",
@@ -100,12 +58,12 @@
     "policy_release": "graphify-relation-fast-path-v13",
     "_mapped": {
       "schema_version": "polymath.surface_relation.v1",
-      "relation_id": "surface-relation:1fd5bae32b9f28e1e400ec1a",
+      "relation_id": "surface-relation:86ffa1f143e905dcb42c3c70",
       "document_id": "a793de031c8ff3da2180db8f2c12c4f01ad47da68c50550b7b2baebb206eab1e",
       "evidence_text": "Rejected manifests are consumed by the\nException Desk.",
       "evidence_start": 85,
       "evidence_end": 139,
-      "subject_mention_id": "relation-endpoint-mention:502c4dc1f06e10010757efdd",
+      "subject_mention_id": "completed-mention:8c2f8383907835d163100ef6",
       "object_mention_id": "completed-mention:678f0ed1386d8636a72d5d6b",
       "surface_predicate": "consume",
       "lemma": "consume",
@@ -120,6 +78,7 @@
       "canonical_candidate": "consumes",
       "mapping_rule": "review:endpoint_head_closed_class",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "review",
       "reasons": [
         "review:endpoint_head_closed_class",
@@ -130,8 +89,52 @@
   },
   {
     "schema_version": "polymath.assertion_decision.v1",
-    "decision_id": "assertion-decision:f3f86bdcf492b165f0a9df92",
-    "relation_id": "surface-relation:efc7f331dc0b344cad9d51bc",
+    "decision_id": "assertion-decision:267dfe4d31387f9690260aba",
+    "relation_id": "surface-relation:32b0771aeb99f6c43fe691d2",
+    "document_id": "a793de031c8ff3da2180db8f2c12c4f01ad47da68c50550b7b2baebb206eab1e",
+    "status": "review",
+    "canonical_predicate": "produces",
+    "score": 1.0,
+    "reasons": [
+      "review:endpoint_signature:Concept:Artifact",
+      "source:strict_dependency_cue"
+    ],
+    "policy_release": "graphify-relation-fast-path-v13",
+    "_mapped": {
+      "schema_version": "polymath.surface_relation.v1",
+      "relation_id": "surface-relation:32b0771aeb99f6c43fe691d2",
+      "document_id": "a793de031c8ff3da2180db8f2c12c4f01ad47da68c50550b7b2baebb206eab1e",
+      "evidence_text": "The Exception Desk produces the Correction Queue.",
+      "evidence_start": 140,
+      "evidence_end": 189,
+      "subject_mention_id": "completed-mention:a97aeb9f1e43c24073440b22",
+      "object_mention_id": "completed-mention:6ed5794061e07a0b2911560a",
+      "surface_predicate": "produces",
+      "lemma": "produce",
+      "particle": "",
+      "preposition": "",
+      "dependency_frame": "direct:active:ROOT",
+      "dependency_path": "nsubj>ROOT>dobj",
+      "voice": "active",
+      "polarity": "positive",
+      "modality": "asserted",
+      "attribution": "",
+      "canonical_candidate": "produces",
+      "mapping_rule": "review:endpoint_signature:Concept:Artifact",
+      "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
+      "terminal_state": "review",
+      "reasons": [
+        "review:endpoint_signature:Concept:Artifact",
+        "source:strict_dependency_cue"
+      ]
+    },
+    "_lane": "fast_path:review"
+  },
+  {
+    "schema_version": "polymath.assertion_decision.v1",
+    "decision_id": "assertion-decision:140795355d199f1b4108454f",
+    "relation_id": "surface-relation:6d380b0c94fd65e566590498",
     "document_id": "a793de031c8ff3da2180db8f2c12c4f01ad47da68c50550b7b2baebb206eab1e",
     "status": "review",
     "canonical_predicate": "consumes",
@@ -143,13 +146,13 @@
     "policy_release": "graphify-relation-fast-path-v13",
     "_mapped": {
       "schema_version": "polymath.surface_relation.v1",
-      "relation_id": "surface-relation:efc7f331dc0b344cad9d51bc",
+      "relation_id": "surface-relation:6d380b0c94fd65e566590498",
       "document_id": "a793de031c8ff3da2180db8f2c12c4f01ad47da68c50550b7b2baebb206eab1e",
       "evidence_text": "The Stowage Planner consumes Load Manifests.",
       "evidence_start": 191,
       "evidence_end": 235,
       "subject_mention_id": "completed-mention:a08e85ce0596f7145838680f",
-      "object_mention_id": "completed-mention:a13c74222d5506e8f8712060",
+      "object_mention_id": "completed-mention:853564b9ebe8c37f013298d1",
       "surface_predicate": "consume",
       "lemma": "consume",
       "particle": "",
@@ -163,6 +166,7 @@
       "canonical_candidate": "consumes",
       "mapping_rule": "review:endpoint_head_closed_class",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "review",
       "reasons": [
         "review:endpoint_head_closed_class",
@@ -173,8 +177,8 @@
   },
   {
     "schema_version": "polymath.assertion_decision.v1",
-    "decision_id": "assertion-decision:f081f164fb679827ca268977",
-    "relation_id": "surface-relation:6bd505a5a1537bf114b3e3e9",
+    "decision_id": "assertion-decision:892438d2dcc1c2fcdb8643ea",
+    "relation_id": "surface-relation:6135e36ce23e942b66b9e4da",
     "document_id": "a793de031c8ff3da2180db8f2c12c4f01ad47da68c50550b7b2baebb206eab1e",
     "status": "review",
     "canonical_predicate": "derived_from",
@@ -186,13 +190,13 @@
     "policy_release": "graphify-relation-fast-path-v13",
     "_mapped": {
       "schema_version": "polymath.surface_relation.v1",
-      "relation_id": "surface-relation:6bd505a5a1537bf114b3e3e9",
+      "relation_id": "surface-relation:6135e36ce23e942b66b9e4da",
       "document_id": "a793de031c8ff3da2180db8f2c12c4f01ad47da68c50550b7b2baebb206eab1e",
       "evidence_text": "Each Load Manifest is derived from the Booking\nLedger.",
       "evidence_start": 236,
       "evidence_end": 290,
       "subject_mention_id": "relation-endpoint-mention:778acb57bf74e7201e7a8125",
-      "object_mention_id": "completed-mention:7303cd68a8598045896e3484",
+      "object_mention_id": "completed-mention:4471683fb29eaf226a983ba5",
       "surface_predicate": "derive",
       "lemma": "derive",
       "particle": "",
@@ -206,6 +210,7 @@
       "canonical_candidate": "derived_from",
       "mapping_rule": "mapped:existing_syntax_stack:derive",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "review",
       "reasons": [
         "mapped:existing_syntax_stack:derive",
@@ -249,6 +254,7 @@
       "canonical_candidate": "defines",
       "mapping_rule": "review:endpoint_head_closed_class",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "review",
       "reasons": [
         "review:endpoint_head_closed_class",
@@ -292,6 +298,7 @@
       "canonical_candidate": "owns",
       "mapping_rule": "review:endpoint_head_closed_class",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "review",
       "reasons": [
         "review:endpoint_head_closed_class",
@@ -335,6 +342,7 @@
       "canonical_candidate": "depends_on",
       "mapping_rule": "review:endpoint_signature:Method:Document",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "review",
       "reasons": [
         "review:endpoint_signature:Method:Document",
@@ -345,18 +353,18 @@
   },
   {
     "schema_version": "polymath.openie_assertion.v1",
-    "assertion_id": "openie-assertion:10078db3bccb493ca9ba8702",
-    "candidate_id": "openie-predicate:6e76872ccad13c9c93180594",
-    "family_id": "openie-family:c93849e3544804341509d156",
+    "assertion_id": "openie-assertion:34db5c71799ac2e15c7d170e",
+    "candidate_id": "openie-predicate:634beb0bed7714e182972d82",
+    "family_id": "openie-family:1ecf9909f9830dcd17815c37",
     "document_id": "a793de031c8ff3da2180db8f2c12c4f01ad47da68c50550b7b2baebb206eab1e",
-    "lane": "REVIEW",
+    "lane": "REJECT",
     "canonical_predicate": "causes",
     "surface_relation": "causes breaker trips on",
-    "subject_argument_id": "adapted-argument:1fac67db3c7044999f27d31a",
+    "subject_argument_id": "adapted-argument:68402e2c5d22e0a16d4c9008",
     "object_argument_id": "adapted-argument:121b405d2e4ea07712254ac7",
-    "subject_entity_id": "document-entity:ee28231e64343bc5b682b16a",
+    "subject_entity_id": null,
     "object_entity_id": null,
-    "subject_mention_id": "completed-mention:67e20d1cc9c4dfc45943d3b7",
+    "subject_mention_id": null,
     "object_mention_id": null,
     "value_kind": "DESCRIPTION",
     "value": "quay",
@@ -367,28 +375,30 @@
     "evidence_end": 84,
     "score": 1.0,
     "reasons": [
-      "mapped:openie:triplet_extract:value_object:cause",
+      "mapped:openie:triplet_extract:bounded_lemma_map:cause",
       "surface_subject_to_object",
-      "value_fact_requires_strict_surface_recovery"
+      "fact_subject_is_not_a_canonical_entity"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
-    "_lane": "openie:REVIEW"
+    "temporal": null,
+    "value_ir": null,
+    "_lane": "openie:REJECT"
   },
   {
     "schema_version": "polymath.openie_assertion.v1",
-    "assertion_id": "openie-assertion:546ea1a7fbab76cbb4aba03c",
-    "candidate_id": "openie-predicate:7faff0e65fdf3bd9d9c2c92d",
-    "family_id": "openie-family:90a45bf36ab38e7cc8b6ebce",
+    "assertion_id": "openie-assertion:9b692b967334f4e541907abd",
+    "candidate_id": "openie-predicate:2f3e8dcf0b33ee441dbb2150",
+    "family_id": "openie-family:282bbcbdcd930b5ff7747d0b",
     "document_id": "a793de031c8ff3da2180db8f2c12c4f01ad47da68c50550b7b2baebb206eab1e",
     "lane": "REVIEW",
     "canonical_predicate": "causes",
-    "surface_relation": "causes on",
-    "subject_argument_id": "adapted-argument:929d06677dd59e5f1c554df0",
-    "object_argument_id": "adapted-argument:89664863f4364f8aeef4b48b",
-    "subject_entity_id": "document-entity:ee28231e64343bc5b682b16a",
-    "object_entity_id": "document-entity:4dc9e6b1d13ad687d60ff6f8",
-    "subject_mention_id": "completed-mention:67e20d1cc9c4dfc45943d3b7",
-    "object_mention_id": "completed-mention:29ff02e976b00eca9f89d9d0",
+    "surface_relation": "causes",
+    "subject_argument_id": "adapted-argument:056d090d9525b9bf2cab4259",
+    "object_argument_id": "adapted-argument:984a95d82a342b572d2fe3f6",
+    "subject_entity_id": null,
+    "object_entity_id": "document-entity:4a3156a3b7ac20f609177815",
+    "subject_mention_id": null,
+    "object_mention_id": "completed-mention:e2c20952b2292370710d029f",
     "value_kind": null,
     "value": "",
     "polarity": "positive",
@@ -398,27 +408,29 @@
     "evidence_end": 84,
     "score": 1.0,
     "reasons": [
-      "review:endpoint_signature:Event:Location",
+      "review:endpoint_signature:Concept:Event",
       "surface_subject_to_object",
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
     "schema_version": "polymath.openie_assertion.v1",
-    "assertion_id": "openie-assertion:bdf8ad9b7410782123e8ab8e",
-    "candidate_id": "openie-predicate:cfa2faf682ab5355391f1681",
-    "family_id": "openie-family:7d7e941a093128fc0a458979",
+    "assertion_id": "openie-assertion:bc688c10e61d7b09c5ac38b0",
+    "candidate_id": "openie-predicate:83b683275d130dfb23285c2a",
+    "family_id": "openie-family:d96741135f33fa0f079692e7",
     "document_id": "a793de031c8ff3da2180db8f2c12c4f01ad47da68c50550b7b2baebb206eab1e",
     "lane": "REVIEW",
     "canonical_predicate": "causes",
     "surface_relation": "causes breaker trips on",
-    "subject_argument_id": "adapted-argument:8afa6e1f0d5f8d851cd5e1c7",
+    "subject_argument_id": "adapted-argument:23301428a0b318dcb10d84a4",
     "object_argument_id": "adapted-argument:f7fcc814448c6763e40ff1df",
-    "subject_entity_id": "document-entity:ee28231e64343bc5b682b16a",
+    "subject_entity_id": null,
     "object_entity_id": "document-entity:4dc9e6b1d13ad687d60ff6f8",
-    "subject_mention_id": "completed-mention:67e20d1cc9c4dfc45943d3b7",
+    "subject_mention_id": null,
     "object_mention_id": "completed-mention:29ff02e976b00eca9f89d9d0",
     "value_kind": null,
     "value": "",
@@ -429,27 +441,62 @@
     "evidence_end": 84,
     "score": 1.0,
     "reasons": [
-      "review:endpoint_signature:Event:Location",
+      "review:endpoint_signature:Concept:Location",
       "surface_subject_to_object",
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
     "schema_version": "polymath.openie_assertion.v1",
-    "assertion_id": "openie-assertion:2cbbba6c2b8c475074b23b17",
-    "candidate_id": "openie-predicate:9ecbec437fc50411364048d1",
-    "family_id": "openie-family:9d0ce1c70f3738351b4ba521",
+    "assertion_id": "openie-assertion:cd22ccbb63e9a8c170b0ac2d",
+    "candidate_id": "openie-predicate:c72ea2956668a17f5ffd9ea8",
+    "family_id": "openie-family:521fa3208e28562231998a90",
+    "document_id": "a793de031c8ff3da2180db8f2c12c4f01ad47da68c50550b7b2baebb206eab1e",
+    "lane": "REVIEW",
+    "canonical_predicate": "causes",
+    "surface_relation": "causes on",
+    "subject_argument_id": "adapted-argument:f7d898c76460167527264da7",
+    "object_argument_id": "adapted-argument:89664863f4364f8aeef4b48b",
+    "subject_entity_id": null,
+    "object_entity_id": "document-entity:4dc9e6b1d13ad687d60ff6f8",
+    "subject_mention_id": null,
+    "object_mention_id": "completed-mention:29ff02e976b00eca9f89d9d0",
+    "value_kind": null,
+    "value": "",
+    "polarity": "positive",
+    "modality": "asserted",
+    "attribution": "direct",
+    "evidence_start": 31,
+    "evidence_end": 84,
+    "score": 1.0,
+    "reasons": [
+      "review:endpoint_signature:Concept:Location",
+      "surface_subject_to_object",
+      "predicate_or_endpoint_requires_review"
+    ],
+    "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
+    "_lane": "openie:REVIEW"
+  },
+  {
+    "schema_version": "polymath.openie_assertion.v1",
+    "assertion_id": "openie-assertion:97d5fe1de05c4500869073cc",
+    "candidate_id": "openie-predicate:eabd59bd0966ffe7611d98b9",
+    "family_id": "openie-family:283ab2d2b0e54d840145ef75",
     "document_id": "a793de031c8ff3da2180db8f2c12c4f01ad47da68c50550b7b2baebb206eab1e",
     "lane": "REVIEW",
     "canonical_predicate": "instance_of",
     "surface_relation": "are",
-    "subject_argument_id": "adapted-argument:547095fa52f43c5eaa9af034",
+    "subject_argument_id": "adapted-argument:b104c757b2ada9e709eb46c7",
     "object_argument_id": "adapted-argument:9ccc14b5749095e249aa69b3",
-    "subject_entity_id": null,
+    "subject_entity_id": "document-entity:111a53bc8e4d54abee74f153",
     "object_entity_id": null,
-    "subject_mention_id": null,
+    "subject_mention_id": "completed-mention:8c2f8383907835d163100ef6",
     "object_mention_id": null,
     "value_kind": "DESCRIPTION",
     "value": "consumed",
@@ -460,11 +507,13 @@
     "evidence_end": 139,
     "score": 1.0,
     "reasons": [
-      "review:endpoint_signature:Concept:Concept",
+      "mapped:openie:triplet_extract:configured_synonym_or_abstain:are",
       "surface_subject_to_object",
-      "predicate_or_endpoint_requires_review"
+      "value_fact_requires_strict_surface_recovery"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -496,53 +545,24 @@
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
     "schema_version": "polymath.openie_assertion.v1",
-    "assertion_id": "openie-assertion:09056f7353ff0889dacf73db",
-    "candidate_id": "openie-predicate:2e5751f111d4846d942c6b94",
-    "family_id": "openie-family:513c399cbac1ae4dd911a360",
-    "document_id": "a793de031c8ff3da2180db8f2c12c4f01ad47da68c50550b7b2baebb206eab1e",
-    "lane": "REVIEW",
-    "canonical_predicate": "produces",
-    "surface_relation": "produces",
-    "subject_argument_id": "adapted-argument:9054e064b144a6210a52ed7b",
-    "object_argument_id": "adapted-argument:e245a0568aa2a94b1338d94f",
-    "subject_entity_id": "document-entity:6b50c801907a4c83e82fba76",
-    "object_entity_id": null,
-    "subject_mention_id": "completed-mention:575714fb97204020a694e1ae",
-    "object_mention_id": null,
-    "value_kind": "DESCRIPTION",
-    "value": "the correction queue",
-    "polarity": "positive",
-    "modality": "asserted",
-    "attribution": "direct",
-    "evidence_start": 140,
-    "evidence_end": 189,
-    "score": 1.0,
-    "reasons": [
-      "mapped:openie:triplet_extract:bounded_lemma_map:produce",
-      "surface_subject_to_object",
-      "value_fact_requires_strict_surface_recovery"
-    ],
-    "policy_release": "graphify-openie-assertion-policy-v2",
-    "_lane": "openie:REVIEW"
-  },
-  {
-    "schema_version": "polymath.openie_assertion.v1",
-    "assertion_id": "openie-assertion:0ba040498de17cc0310d3817",
-    "candidate_id": "openie-predicate:689fb595cedb8d9018e3b342",
-    "family_id": "openie-family:9447c582ae99f1819a29dcf6",
+    "assertion_id": "openie-assertion:2df05c25b7a6c3589ce1f504",
+    "candidate_id": "openie-predicate:6b08f1e981bf66358f2b6234",
+    "family_id": "openie-family:49104c38020f2f63ba1d91b7",
     "document_id": "a793de031c8ff3da2180db8f2c12c4f01ad47da68c50550b7b2baebb206eab1e",
     "lane": "REVIEW",
     "canonical_predicate": "derived_from",
     "surface_relation": "is derived from",
-    "subject_argument_id": "adapted-argument:f58e3d1d484cf5417803e3ef",
+    "subject_argument_id": "adapted-argument:15563bcbdd1a30c121838286",
     "object_argument_id": "adapted-argument:f708cc719dbb740fba832a33",
-    "subject_entity_id": "document-entity:a3b04d6c77807f923683641c",
+    "subject_entity_id": "document-entity:df5899d90b4c84479279315b",
     "object_entity_id": null,
-    "subject_mention_id": "completed-mention:7303cd68a8598045896e3484",
+    "subject_mention_id": "completed-mention:4471683fb29eaf226a983ba5",
     "object_mention_id": null,
     "value_kind": "DESCRIPTION",
     "value": "the booking ledger",
@@ -558,22 +578,24 @@
       "value_fact_requires_strict_surface_recovery"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
     "schema_version": "polymath.openie_assertion.v1",
-    "assertion_id": "openie-assertion:d4d1b1ff8ee1497b60277af3",
-    "candidate_id": "openie-predicate:400a0f85f633a8d806b78e03",
-    "family_id": "openie-family:6560c9d822c02bd0d1e904d4",
+    "assertion_id": "openie-assertion:dcbf4cae31d31d5707a39853",
+    "candidate_id": "openie-predicate:6b366042f809b8939afb5f8c",
+    "family_id": "openie-family:ee4281ee5ed36d8a6ce37bbf",
     "document_id": "a793de031c8ff3da2180db8f2c12c4f01ad47da68c50550b7b2baebb206eab1e",
     "lane": "REVIEW",
     "canonical_predicate": "derived_from",
     "surface_relation": "is derived from",
-    "subject_argument_id": "adapted-argument:14819f0acc5912c128ea2ad2",
+    "subject_argument_id": "adapted-argument:b2bb8420df85a0f238bce7f6",
     "object_argument_id": "adapted-argument:16b695056a0885f6225b1eb5",
-    "subject_entity_id": "document-entity:a3b04d6c77807f923683641c",
+    "subject_entity_id": "document-entity:df5899d90b4c84479279315b",
     "object_entity_id": null,
-    "subject_mention_id": "completed-mention:7303cd68a8598045896e3484",
+    "subject_mention_id": "completed-mention:4471683fb29eaf226a983ba5",
     "object_mention_id": null,
     "value_kind": "DESCRIPTION",
     "value": "booking ledger",
@@ -589,6 +611,8 @@
       "value_fact_requires_strict_surface_recovery"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -620,6 +644,8 @@
       "surface_relation_preserved_without_ontology_fallback"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:OPEN_RELATION"
   },
   {
@@ -651,6 +677,8 @@
       "fact_subject_is_not_a_canonical_entity"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REJECT"
   },
   {
@@ -682,6 +710,8 @@
       "non_positive_modal_or_attributed"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:QUALIFIED_CLAIM"
   },
   {
@@ -713,6 +743,8 @@
       "value_fact_requires_strict_surface_recovery"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -744,6 +776,8 @@
       "surface_relation_preserved_without_ontology_fallback"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:OPEN_RELATION"
   },
   {
@@ -775,6 +809,8 @@
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -806,6 +842,8 @@
       "non_positive_modal_or_attributed"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:QUALIFIED_CLAIM"
   },
   {
@@ -837,25 +875,27 @@
       "non_positive_modal_or_attributed"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:QUALIFIED_CLAIM"
   },
   {
     "schema_version": "polymath.openie_assertion.v1",
-    "assertion_id": "openie-assertion:4720d936d70eecc6fde0a151",
-    "candidate_id": "openie-predicate:236ce054b5c80284600805e8",
-    "family_id": "openie-family:fab5fe9ed255e03caabac73d",
+    "assertion_id": "openie-assertion:ac82c1c6292a1ef3edcd81b1",
+    "candidate_id": "openie-predicate:b29344636d48dc955a40eee4",
+    "family_id": "openie-family:cecd40b40d73da2eea1e0536",
     "document_id": "a793de031c8ff3da2180db8f2c12c4f01ad47da68c50550b7b2baebb206eab1e",
     "lane": "QUALIFIED_CLAIM",
     "canonical_predicate": "owns",
     "surface_relation": "owns according",
     "subject_argument_id": "adapted-argument:4c18f42e6061383eaf0914bb",
-    "object_argument_id": "adapted-argument:43fc29a54e0b4593d56628c2",
+    "object_argument_id": "adapted-argument:7aac1484919a4790454771b0",
     "subject_entity_id": "document-entity:feb2030623c07841c86ae289",
-    "object_entity_id": null,
+    "object_entity_id": "document-entity:56cde0acdb6565c6181151b1",
     "subject_mention_id": "completed-mention:d0cb8f21b81b792e5188087f",
-    "object_mention_id": null,
-    "value_kind": "DESCRIPTION",
-    "value": "dockside joke",
+    "object_mention_id": "completed-mention:7ab720e7b53d33d264866a94",
+    "value_kind": null,
+    "value": "",
     "polarity": "positive",
     "modality": "asserted",
     "attribution": "reported:according_to:a dockside joke",
@@ -868,6 +908,8 @@
       "non_positive_modal_or_attributed"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:QUALIFIED_CLAIM"
   },
   {
@@ -899,6 +941,8 @@
       "non_positive_modal_or_attributed"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:QUALIFIED_CLAIM"
   },
   {
@@ -930,6 +974,8 @@
       "non_positive_modal_or_attributed"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:QUALIFIED_CLAIM"
   },
   {
@@ -961,6 +1007,8 @@
       "non_positive_modal_or_attributed"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:QUALIFIED_CLAIM"
   }
 ]

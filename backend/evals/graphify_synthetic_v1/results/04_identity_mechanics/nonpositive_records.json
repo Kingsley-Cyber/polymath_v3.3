@@ -1,6 +1,50 @@
 [
   {
     "schema_version": "polymath.assertion_decision.v1",
+    "decision_id": "assertion-decision:c2edcfcfb4a198c0d18662f7",
+    "relation_id": "surface-relation:2a17c14a99e4d643df516098",
+    "document_id": "28b5e1c1b88cb794a2e9925f78e24b3833310a3cbe1aa5b0c316f7ff7148a66d",
+    "status": "review",
+    "canonical_predicate": "produces",
+    "score": 1.0,
+    "reasons": [
+      "review:endpoint_signature:Organization:Document",
+      "source:strict_dependency_cue"
+    ],
+    "policy_release": "graphify-relation-fast-path-v13",
+    "_mapped": {
+      "schema_version": "polymath.surface_relation.v1",
+      "relation_id": "surface-relation:2a17c14a99e4d643df516098",
+      "document_id": "28b5e1c1b88cb794a2e9925f78e24b3833310a3cbe1aa5b0c316f7ff7148a66d",
+      "evidence_text": "Sensor K-12 produces Report Q-9.",
+      "evidence_start": 24,
+      "evidence_end": 56,
+      "subject_mention_id": "completed-mention:2a3852d84ccf82242d536b82",
+      "object_mention_id": "completed-mention:2597209b1b0b8be75950d43b",
+      "surface_predicate": "produces",
+      "lemma": "produce",
+      "particle": "",
+      "preposition": "",
+      "dependency_frame": "direct:active:ROOT",
+      "dependency_path": "nsubj>ROOT>dobj",
+      "voice": "active",
+      "polarity": "positive",
+      "modality": "asserted",
+      "attribution": "",
+      "canonical_candidate": "produces",
+      "mapping_rule": "review:endpoint_signature:Organization:Document",
+      "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
+      "terminal_state": "review",
+      "reasons": [
+        "review:endpoint_signature:Organization:Document",
+        "source:strict_dependency_cue"
+      ]
+    },
+    "_lane": "fast_path:review"
+  },
+  {
+    "schema_version": "polymath.assertion_decision.v1",
     "decision_id": "assertion-decision:2096f6937f701dde5ef4e57d",
     "relation_id": "surface-relation:084678558979d1b37affeca6",
     "document_id": "28b5e1c1b88cb794a2e9925f78e24b3833310a3cbe1aa5b0c316f7ff7148a66d",
@@ -34,6 +78,7 @@
       "canonical_candidate": "consumes",
       "mapping_rule": "mapped:existing_syntax_stack:consume",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "review",
       "reasons": [
         "mapped:existing_syntax_stack:consume",
@@ -77,6 +122,7 @@
       "canonical_candidate": "consumes",
       "mapping_rule": "review:endpoint_head_closed_class",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "review",
       "reasons": [
         "review:endpoint_head_closed_class",
@@ -87,26 +133,70 @@
   },
   {
     "schema_version": "polymath.assertion_decision.v1",
-    "decision_id": "assertion-decision:a0754f21ac18fbfa71088024",
-    "relation_id": "surface-relation:4757c03c48bb2b12103cb809",
+    "decision_id": "assertion-decision:8de386b8f329c78882af67ab",
+    "relation_id": "surface-relation:b7ff8c1ce474a9c8470bec72",
+    "document_id": "28b5e1c1b88cb794a2e9925f78e24b3833310a3cbe1aa5b0c316f7ff7148a66d",
+    "status": "review",
+    "canonical_predicate": "produces",
+    "score": 1.0,
+    "reasons": [
+      "review:endpoint_signature:Organization:Document",
+      "source:strict_dependency_cue"
+    ],
+    "policy_release": "graphify-relation-fast-path-v13",
+    "_mapped": {
+      "schema_version": "polymath.surface_relation.v1",
+      "relation_id": "surface-relation:b7ff8c1ce474a9c8470bec72",
+      "document_id": "28b5e1c1b88cb794a2e9925f78e24b3833310a3cbe1aa5b0c316f7ff7148a66d",
+      "evidence_text": "Report Q-9 is produced by Sensor K-12 on an hourly schedule.",
+      "evidence_start": 130,
+      "evidence_end": 190,
+      "subject_mention_id": "completed-mention:d67ef0d6af071e82fca683e5",
+      "object_mention_id": "completed-mention:45e11c3357e2f35c4de5cf81",
+      "surface_predicate": "produced",
+      "lemma": "produce",
+      "particle": "",
+      "preposition": "by",
+      "dependency_frame": "direct:passive:ROOT",
+      "dependency_path": "pobj>ROOT>nsubjpass",
+      "voice": "passive",
+      "polarity": "positive",
+      "modality": "asserted",
+      "attribution": "",
+      "canonical_candidate": "produces",
+      "mapping_rule": "review:endpoint_signature:Organization:Document",
+      "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
+      "terminal_state": "review",
+      "reasons": [
+        "review:endpoint_signature:Organization:Document",
+        "source:strict_dependency_cue"
+      ]
+    },
+    "_lane": "fast_path:review"
+  },
+  {
+    "schema_version": "polymath.assertion_decision.v1",
+    "decision_id": "assertion-decision:2dab8b866af2bd0f73cf5899",
+    "relation_id": "surface-relation:126d66ae5104248d8e1098c1",
     "document_id": "28b5e1c1b88cb794a2e9925f78e24b3833310a3cbe1aa5b0c316f7ff7148a66d",
     "status": "review",
     "canonical_predicate": "produces",
     "score": 0.9,
     "reasons": [
-      "review:endpoint_signature:Document:Method",
+      "review:endpoint_signature:Document:TimeReference",
       "source:existing_syntax_stack"
     ],
     "policy_release": "graphify-relation-fast-path-v13",
     "_mapped": {
       "schema_version": "polymath.surface_relation.v1",
-      "relation_id": "surface-relation:4757c03c48bb2b12103cb809",
+      "relation_id": "surface-relation:126d66ae5104248d8e1098c1",
       "document_id": "28b5e1c1b88cb794a2e9925f78e24b3833310a3cbe1aa5b0c316f7ff7148a66d",
       "evidence_text": "Report Q-9 is produced by Sensor K-12 on an hourly schedule.",
       "evidence_start": 130,
       "evidence_end": 190,
       "subject_mention_id": "completed-mention:45e11c3357e2f35c4de5cf81",
-      "object_mention_id": "completed-mention:7158c1ddd68868718825e697",
+      "object_mention_id": "completed-mention:4b6ecf55c741543b9c8111fb",
       "surface_predicate": "produce",
       "lemma": "produce",
       "particle": "",
@@ -118,11 +208,12 @@
       "modality": "asserted",
       "attribution": "direct",
       "canonical_candidate": "produces",
-      "mapping_rule": "review:endpoint_signature:Document:Method",
+      "mapping_rule": "review:endpoint_signature:Document:TimeReference",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "review",
       "reasons": [
-        "review:endpoint_signature:Document:Method",
+        "review:endpoint_signature:Document:TimeReference",
         "source:existing_syntax_stack"
       ]
     },
@@ -130,26 +221,26 @@
   },
   {
     "schema_version": "polymath.assertion_decision.v1",
-    "decision_id": "assertion-decision:d5bc40cf0b0a00f7f6c0ffd2",
-    "relation_id": "surface-relation:c562062c8295159b8fca63ca",
+    "decision_id": "assertion-decision:965e3f27628abd8706e933ba",
+    "relation_id": "surface-relation:242a1dd848e7ed25f708b4ac",
     "document_id": "28b5e1c1b88cb794a2e9925f78e24b3833310a3cbe1aa5b0c316f7ff7148a66d",
     "status": "review",
     "canonical_predicate": "produces",
     "score": 1.0,
     "reasons": [
-      "review:endpoint_signature:Document:Product",
+      "review:endpoint_signature:Document:Organization",
       "source:existing_syntax_stack"
     ],
     "policy_release": "graphify-relation-fast-path-v13",
     "_mapped": {
       "schema_version": "polymath.surface_relation.v1",
-      "relation_id": "surface-relation:c562062c8295159b8fca63ca",
+      "relation_id": "surface-relation:242a1dd848e7ed25f708b4ac",
       "document_id": "28b5e1c1b88cb794a2e9925f78e24b3833310a3cbe1aa5b0c316f7ff7148a66d",
       "evidence_text": "Report Q-9 is produced by Sensor K-12 on an hourly schedule.",
       "evidence_start": 130,
       "evidence_end": 190,
       "subject_mention_id": "completed-mention:45e11c3357e2f35c4de5cf81",
-      "object_mention_id": "completed-mention:abfcd525b55553fa4fc790b9",
+      "object_mention_id": "completed-mention:d67ef0d6af071e82fca683e5",
       "surface_predicate": "produce",
       "lemma": "produce",
       "particle": "",
@@ -161,11 +252,12 @@
       "modality": "asserted",
       "attribution": "direct",
       "canonical_candidate": "produces",
-      "mapping_rule": "review:endpoint_signature:Document:Product",
+      "mapping_rule": "review:endpoint_signature:Document:Organization",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "review",
       "reasons": [
-        "review:endpoint_signature:Document:Product",
+        "review:endpoint_signature:Document:Organization",
         "source:existing_syntax_stack"
       ]
     },
@@ -173,26 +265,114 @@
   },
   {
     "schema_version": "polymath.assertion_decision.v1",
-    "decision_id": "assertion-decision:59f0c9896bb2fe47121f14c2",
-    "relation_id": "surface-relation:561a9e97da8a53786b1b8116",
+    "decision_id": "assertion-decision:7b07962acf3bb09c6acc17e0",
+    "relation_id": "surface-relation:2de8bef5410656a18e8d4982",
     "document_id": "28b5e1c1b88cb794a2e9925f78e24b3833310a3cbe1aa5b0c316f7ff7148a66d",
     "status": "review",
-    "canonical_predicate": "supports",
+    "canonical_predicate": "depends_on",
     "score": 1.0,
     "reasons": [
-      "review:endpoint_signature:Organization:Concept",
+      "review:endpoint_signature:Concept:Artifact",
       "source:strict_dependency_cue"
     ],
     "policy_release": "graphify-relation-fast-path-v13",
     "_mapped": {
       "schema_version": "polymath.surface_relation.v1",
-      "relation_id": "surface-relation:561a9e97da8a53786b1b8116",
+      "relation_id": "surface-relation:2de8bef5410656a18e8d4982",
+      "document_id": "28b5e1c1b88cb794a2e9925f78e24b3833310a3cbe1aa5b0c316f7ff7148a66d",
+      "evidence_text": "Pinion 3.1 depends on the COLD-7 protocol.",
+      "evidence_start": 205,
+      "evidence_end": 247,
+      "subject_mention_id": "completed-mention:b6e21b4c4a000a0ccca9aadd",
+      "object_mention_id": "completed-mention:25f6d2fe202f5f282bd2db5a",
+      "surface_predicate": "depends",
+      "lemma": "depend",
+      "particle": "",
+      "preposition": "on",
+      "dependency_frame": "direct:active:ROOT",
+      "dependency_path": "nsubj>ROOT>pobj",
+      "voice": "active",
+      "polarity": "positive",
+      "modality": "asserted",
+      "attribution": "",
+      "canonical_candidate": "depends_on",
+      "mapping_rule": "review:endpoint_signature:Concept:Artifact",
+      "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
+      "terminal_state": "review",
+      "reasons": [
+        "review:endpoint_signature:Concept:Artifact",
+        "source:strict_dependency_cue"
+      ]
+    },
+    "_lane": "fast_path:review"
+  },
+  {
+    "schema_version": "polymath.assertion_decision.v1",
+    "decision_id": "assertion-decision:b154359072ca31263d3a4248",
+    "relation_id": "surface-relation:a677325a2f44b085a6d2bcb5",
+    "document_id": "28b5e1c1b88cb794a2e9925f78e24b3833310a3cbe1aa5b0c316f7ff7148a66d",
+    "status": "review",
+    "canonical_predicate": "depends_on",
+    "score": 1.0,
+    "reasons": [
+      "review:endpoint_signature:Concept:Artifact",
+      "source:strict_dependency_cue"
+    ],
+    "policy_release": "graphify-relation-fast-path-v13",
+    "_mapped": {
+      "schema_version": "polymath.surface_relation.v1",
+      "relation_id": "surface-relation:a677325a2f44b085a6d2bcb5",
+      "document_id": "28b5e1c1b88cb794a2e9925f78e24b3833310a3cbe1aa5b0c316f7ff7148a66d",
+      "evidence_text": "Pinion 3.2 depends on the Sable Index.",
+      "evidence_start": 248,
+      "evidence_end": 286,
+      "subject_mention_id": "completed-mention:3f61de53dba47b2420f57028",
+      "object_mention_id": "completed-mention:8751f6cacd84844c673cb604",
+      "surface_predicate": "depends",
+      "lemma": "depend",
+      "particle": "",
+      "preposition": "on",
+      "dependency_frame": "direct:active:ROOT",
+      "dependency_path": "nsubj>ROOT>pobj",
+      "voice": "active",
+      "polarity": "positive",
+      "modality": "asserted",
+      "attribution": "",
+      "canonical_candidate": "depends_on",
+      "mapping_rule": "review:endpoint_signature:Concept:Artifact",
+      "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
+      "terminal_state": "review",
+      "reasons": [
+        "review:endpoint_signature:Concept:Artifact",
+        "source:strict_dependency_cue"
+      ]
+    },
+    "_lane": "fast_path:review"
+  },
+  {
+    "schema_version": "polymath.assertion_decision.v1",
+    "decision_id": "assertion-decision:5b9370fab1b19e5a9bd98b74",
+    "relation_id": "surface-relation:69af70e2a7bed16fd62bead5",
+    "document_id": "28b5e1c1b88cb794a2e9925f78e24b3833310a3cbe1aa5b0c316f7ff7148a66d",
+    "status": "review",
+    "canonical_predicate": "supports",
+    "score": 1.0,
+    "reasons": [
+      "review:endpoint_signature:Concept:Software",
+      "source:strict_dependency_cue"
+    ],
+    "policy_release": "graphify-relation-fast-path-v13",
+    "_mapped": {
+      "schema_version": "polymath.surface_relation.v1",
+      "relation_id": "surface-relation:69af70e2a7bed16fd62bead5",
       "document_id": "28b5e1c1b88cb794a2e9925f78e24b3833310a3cbe1aa5b0c316f7ff7148a66d",
       "evidence_text": "Pinion is\nmaintained by the Telemetry Group.",
       "evidence_start": 287,
       "evidence_end": 331,
       "subject_mention_id": "completed-mention:7c046c1c3f33c9dce771be40",
-      "object_mention_id": "completed-mention:bef4febea1282e30c960fc89",
+      "object_mention_id": "completed-mention:adbf08b8dbf5696801fdd9a0",
       "surface_predicate": "maintained by",
       "lemma": "maintain",
       "particle": "",
@@ -204,11 +384,12 @@
       "modality": "asserted",
       "attribution": "",
       "canonical_candidate": "supports",
-      "mapping_rule": "review:endpoint_signature:Organization:Concept",
+      "mapping_rule": "review:endpoint_signature:Concept:Software",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "review",
       "reasons": [
-        "review:endpoint_signature:Organization:Concept",
+        "review:endpoint_signature:Concept:Software",
         "source:strict_dependency_cue"
       ]
     },
@@ -216,26 +397,26 @@
   },
   {
     "schema_version": "polymath.assertion_decision.v1",
-    "decision_id": "assertion-decision:ba68848fe2effa39805a22c3",
-    "relation_id": "surface-relation:4bc30e151572e94435bf7529",
+    "decision_id": "assertion-decision:7dd4263b4ec0375a6f951753",
+    "relation_id": "surface-relation:fd03569ccefada908bc556e1",
     "document_id": "28b5e1c1b88cb794a2e9925f78e24b3833310a3cbe1aa5b0c316f7ff7148a66d",
     "status": "review",
     "canonical_predicate": "supports",
     "score": 1.0,
     "reasons": [
-      "review:endpoint_signature:Organization:Concept",
+      "review:endpoint_signature:Concept:Software",
       "source:existing_syntax_stack"
     ],
     "policy_release": "graphify-relation-fast-path-v13",
     "_mapped": {
       "schema_version": "polymath.surface_relation.v1",
-      "relation_id": "surface-relation:4bc30e151572e94435bf7529",
+      "relation_id": "surface-relation:fd03569ccefada908bc556e1",
       "document_id": "28b5e1c1b88cb794a2e9925f78e24b3833310a3cbe1aa5b0c316f7ff7148a66d",
       "evidence_text": "Pinion is\nmaintained by the Telemetry Group.",
       "evidence_start": 287,
       "evidence_end": 331,
       "subject_mention_id": "completed-mention:7c046c1c3f33c9dce771be40",
-      "object_mention_id": "completed-mention:bef4febea1282e30c960fc89",
+      "object_mention_id": "completed-mention:adbf08b8dbf5696801fdd9a0",
       "surface_predicate": "maintain",
       "lemma": "maintain",
       "particle": "",
@@ -247,11 +428,12 @@
       "modality": "asserted",
       "attribution": "direct",
       "canonical_candidate": "supports",
-      "mapping_rule": "review:endpoint_signature:Organization:Concept",
+      "mapping_rule": "review:endpoint_signature:Concept:Software",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "review",
       "reasons": [
-        "review:endpoint_signature:Organization:Concept",
+        "review:endpoint_signature:Concept:Software",
         "source:existing_syntax_stack"
       ]
     },
@@ -259,25 +441,25 @@
   },
   {
     "schema_version": "polymath.assertion_decision.v1",
-    "decision_id": "assertion-decision:3ce0360da99e718c6a14294a",
-    "relation_id": "surface-relation:5bf9dd165bc98208f978bd74",
+    "decision_id": "assertion-decision:f616b36ac885740a35be262d",
+    "relation_id": "surface-relation:ea08667f222385cda38c1ed1",
     "document_id": "28b5e1c1b88cb794a2e9925f78e24b3833310a3cbe1aa5b0c316f7ff7148a66d",
     "status": "review",
     "canonical_predicate": "supports",
     "score": 1.0,
     "reasons": [
-      "review:endpoint_signature:Concept:Concept",
+      "review:endpoint_head_closed_class",
       "source:existing_syntax_stack"
     ],
     "policy_release": "graphify-relation-fast-path-v13",
     "_mapped": {
       "schema_version": "polymath.surface_relation.v1",
-      "relation_id": "surface-relation:5bf9dd165bc98208f978bd74",
+      "relation_id": "surface-relation:ea08667f222385cda38c1ed1",
       "document_id": "28b5e1c1b88cb794a2e9925f78e24b3833310a3cbe1aa5b0c316f7ff7148a66d",
       "evidence_text": "Pinion is\nmaintained by the Telemetry Group.",
       "evidence_start": 287,
       "evidence_end": 331,
-      "subject_mention_id": "completed-mention:bef4febea1282e30c960fc89",
+      "subject_mention_id": "completed-mention:adbf08b8dbf5696801fdd9a0",
       "object_mention_id": "completed-mention:3c51dd1c460ea2af21f614f3",
       "surface_predicate": "maintain",
       "lemma": "maintain",
@@ -290,11 +472,12 @@
       "modality": "asserted",
       "attribution": "direct",
       "canonical_candidate": "supports",
-      "mapping_rule": "review:endpoint_signature:Concept:Concept",
+      "mapping_rule": "review:endpoint_head_closed_class",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "review",
       "reasons": [
-        "review:endpoint_signature:Concept:Concept",
+        "review:endpoint_head_closed_class",
         "source:existing_syntax_stack"
       ]
     },
@@ -309,7 +492,7 @@
     "canonical_predicate": "depends_on",
     "score": 1.0,
     "reasons": [
-      "mapped:strict_dependency_cue:depend:endpoint_role:Software:Artifact",
+      "review:endpoint_signature:Concept:Artifact",
       "source:strict_dependency_cue"
     ],
     "policy_release": "graphify-relation-fast-path-v13",
@@ -333,15 +516,60 @@
       "modality": "attributed",
       "attribution": "claim",
       "canonical_candidate": "depends_on",
-      "mapping_rule": "mapped:strict_dependency_cue:depend:endpoint_role:Software:Artifact",
+      "mapping_rule": "review:endpoint_signature:Concept:Artifact",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "qualified",
       "reasons": [
-        "mapped:strict_dependency_cue:depend:endpoint_role:Software:Artifact",
+        "review:endpoint_signature:Concept:Artifact",
         "source:strict_dependency_cue"
       ]
     },
     "_lane": "fast_path:qualified"
+  },
+  {
+    "schema_version": "polymath.assertion_decision.v1",
+    "decision_id": "assertion-decision:0f2dbc746c6e466a911eab77",
+    "relation_id": "surface-relation:ae0af8f3ff358ce833f49f07",
+    "document_id": "28b5e1c1b88cb794a2e9925f78e24b3833310a3cbe1aa5b0c316f7ff7148a66d",
+    "status": "review",
+    "canonical_predicate": "supports",
+    "score": 1.0,
+    "reasons": [
+      "review:endpoint_signature:Concept:Concept",
+      "source:strict_dependency_cue"
+    ],
+    "policy_release": "graphify-relation-fast-path-v13",
+    "_mapped": {
+      "schema_version": "polymath.surface_relation.v1",
+      "relation_id": "surface-relation:ae0af8f3ff358ce833f49f07",
+      "document_id": "28b5e1c1b88cb794a2e9925f78e24b3833310a3cbe1aa5b0c316f7ff7148a66d",
+      "evidence_text": "The Telemetry Group supports Dr. Imani Reyes.",
+      "evidence_start": 446,
+      "evidence_end": 491,
+      "subject_mention_id": "completed-mention:bbe12f05c9fb7ad7bb9ccbb6",
+      "object_mention_id": "completed-mention:c7840f9c79fe2428cb578e87",
+      "surface_predicate": "supports",
+      "lemma": "support",
+      "particle": "",
+      "preposition": "",
+      "dependency_frame": "direct:active:ROOT",
+      "dependency_path": "nsubj>ROOT>dobj",
+      "voice": "active",
+      "polarity": "positive",
+      "modality": "asserted",
+      "attribution": "",
+      "canonical_candidate": "supports",
+      "mapping_rule": "review:endpoint_signature:Concept:Concept",
+      "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
+      "terminal_state": "review",
+      "reasons": [
+        "review:endpoint_signature:Concept:Concept",
+        "source:strict_dependency_cue"
+      ]
+    },
+    "_lane": "fast_path:review"
   },
   {
     "schema_version": "polymath.assertion_decision.v1",
@@ -352,7 +580,7 @@
     "canonical_predicate": "supports",
     "score": 1.0,
     "reasons": [
-      "review:endpoint_signature:Concept:Person",
+      "review:endpoint_signature:Concept:Concept",
       "source:existing_syntax_stack"
     ],
     "policy_release": "graphify-relation-fast-path-v13",
@@ -376,11 +604,12 @@
       "modality": "asserted",
       "attribution": "direct",
       "canonical_candidate": "supports",
-      "mapping_rule": "review:endpoint_signature:Concept:Person",
+      "mapping_rule": "review:endpoint_signature:Concept:Concept",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "review",
       "reasons": [
-        "review:endpoint_signature:Concept:Person",
+        "review:endpoint_signature:Concept:Concept",
         "source:existing_syntax_stack"
       ]
     },
@@ -388,8 +617,8 @@
   },
   {
     "schema_version": "polymath.assertion_decision.v1",
-    "decision_id": "assertion-decision:7ae68cffb479c735c34231a7",
-    "relation_id": "surface-relation:670fefb9fe124847b57a35a2",
+    "decision_id": "assertion-decision:23b461b2acbfa7e229e2a918",
+    "relation_id": "surface-relation:af76fdf8fa4c11463342e89e",
     "document_id": "28b5e1c1b88cb794a2e9925f78e24b3833310a3cbe1aa5b0c316f7ff7148a66d",
     "status": "review",
     "canonical_predicate": "owns",
@@ -401,12 +630,12 @@
     "policy_release": "graphify-relation-fast-path-v13",
     "_mapped": {
       "schema_version": "polymath.surface_relation.v1",
-      "relation_id": "surface-relation:670fefb9fe124847b57a35a2",
+      "relation_id": "surface-relation:af76fdf8fa4c11463342e89e",
       "document_id": "28b5e1c1b88cb794a2e9925f78e24b3833310a3cbe1aa5b0c316f7ff7148a66d",
       "evidence_text": "Dr. Reyes owns\nthe COLD-7 Rollout Plan.",
       "evidence_start": 529,
       "evidence_end": 568,
-      "subject_mention_id": "relation-endpoint-mention:96b361955081d24e886acd4d",
+      "subject_mention_id": "completed-mention:755e6c8f512f920f23da1888",
       "object_mention_id": "completed-mention:9253114d6f90829ebab1a32d",
       "surface_predicate": "own",
       "lemma": "own",
@@ -421,6 +650,7 @@
       "canonical_candidate": "owns",
       "mapping_rule": "review:endpoint_head_closed_class",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "review",
       "reasons": [
         "review:endpoint_head_closed_class",
@@ -431,8 +661,8 @@
   },
   {
     "schema_version": "polymath.assertion_decision.v1",
-    "decision_id": "assertion-decision:cba2da77ad8d50272a8901a3",
-    "relation_id": "surface-relation:5e35b31265303ada11cf44ee",
+    "decision_id": "assertion-decision:7cc21c0c1f64a7559c2cd536",
+    "relation_id": "surface-relation:e55d824ea84f65e113aeb24a",
     "document_id": "28b5e1c1b88cb794a2e9925f78e24b3833310a3cbe1aa5b0c316f7ff7148a66d",
     "status": "review",
     "canonical_predicate": "uses",
@@ -444,13 +674,13 @@
     "policy_release": "graphify-relation-fast-path-v13",
     "_mapped": {
       "schema_version": "polymath.surface_relation.v1",
-      "relation_id": "surface-relation:5e35b31265303ada11cf44ee",
+      "relation_id": "surface-relation:e55d824ea84f65e113aeb24a",
       "document_id": "28b5e1c1b88cb794a2e9925f78e24b3833310a3cbe1aa5b0c316f7ff7148a66d",
       "evidence_text": "The Quartzline Retrieval Layer (QRL) uses the Falcon Cache.",
       "evidence_start": 583,
       "evidence_end": 642,
       "subject_mention_id": "completed-mention:fa2a58b7b8334227214f1a84",
-      "object_mention_id": "completed-mention:3ee60aef7e5c6125ea3e4a8b",
+      "object_mention_id": "completed-mention:f7383337e7fa138bfac2a362",
       "surface_predicate": "uses",
       "lemma": "use",
       "particle": "",
@@ -464,6 +694,7 @@
       "canonical_candidate": "uses",
       "mapping_rule": "review:endpoint_signature:Concept:Concept",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "review",
       "reasons": [
         "review:endpoint_signature:Concept:Concept",
@@ -474,8 +705,8 @@
   },
   {
     "schema_version": "polymath.assertion_decision.v1",
-    "decision_id": "assertion-decision:001c52dd3488e6c659a52124",
-    "relation_id": "surface-relation:5dc8d7284363cca2e980d81b",
+    "decision_id": "assertion-decision:b3a6a5c2055403e4ed0d6022",
+    "relation_id": "surface-relation:02b3d64e62adcb2c5e59bf7a",
     "document_id": "28b5e1c1b88cb794a2e9925f78e24b3833310a3cbe1aa5b0c316f7ff7148a66d",
     "status": "review",
     "canonical_predicate": "uses",
@@ -487,13 +718,13 @@
     "policy_release": "graphify-relation-fast-path-v13",
     "_mapped": {
       "schema_version": "polymath.surface_relation.v1",
-      "relation_id": "surface-relation:5dc8d7284363cca2e980d81b",
+      "relation_id": "surface-relation:02b3d64e62adcb2c5e59bf7a",
       "document_id": "28b5e1c1b88cb794a2e9925f78e24b3833310a3cbe1aa5b0c316f7ff7148a66d",
       "evidence_text": "The Quartzline Retrieval Layer (QRL) uses the Falcon Cache.",
       "evidence_start": 583,
       "evidence_end": 642,
       "subject_mention_id": "completed-mention:78d2fea79e58eefc6795ef63",
-      "object_mention_id": "completed-mention:3ee60aef7e5c6125ea3e4a8b",
+      "object_mention_id": "completed-mention:f7383337e7fa138bfac2a362",
       "surface_predicate": "uses",
       "lemma": "use",
       "particle": "",
@@ -507,6 +738,7 @@
       "canonical_candidate": "uses",
       "mapping_rule": "review:endpoint_signature:Concept:Concept",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "review",
       "reasons": [
         "review:endpoint_signature:Concept:Concept",
@@ -517,8 +749,8 @@
   },
   {
     "schema_version": "polymath.assertion_decision.v1",
-    "decision_id": "assertion-decision:0b28519f3d66dc2d8fb6e32e",
-    "relation_id": "surface-relation:51c02fb08e749d78b7c9ef2d",
+    "decision_id": "assertion-decision:65db7d79b233b3a588a3f86a",
+    "relation_id": "surface-relation:32321e6e0e53d075db9b36ed",
     "document_id": "28b5e1c1b88cb794a2e9925f78e24b3833310a3cbe1aa5b0c316f7ff7148a66d",
     "status": "review",
     "canonical_predicate": "runs_on",
@@ -530,13 +762,13 @@
     "policy_release": "graphify-relation-fast-path-v13",
     "_mapped": {
       "schema_version": "polymath.surface_relation.v1",
-      "relation_id": "surface-relation:51c02fb08e749d78b7c9ef2d",
+      "relation_id": "surface-relation:32321e6e0e53d075db9b36ed",
       "document_id": "28b5e1c1b88cb794a2e9925f78e24b3833310a3cbe1aa5b0c316f7ff7148a66d",
       "evidence_text": "The pipeline\nprocesses readings (e.g. Sensor K-12 output) without pause.",
       "evidence_start": 670,
       "evidence_end": 742,
       "subject_mention_id": "completed-mention:fe7dbdeb03f09cf60b39d9ac",
-      "object_mention_id": "completed-mention:2672f95858109b45404d7574",
+      "object_mention_id": "completed-mention:53ddd08fc7edf9ca38c617a8",
       "surface_predicate": "process",
       "lemma": "process",
       "particle": "",
@@ -550,6 +782,7 @@
       "canonical_candidate": "runs_on",
       "mapping_rule": "review:endpoint_head_closed_class",
       "mapping_release": "graphify-predicate-compiler-v2",
+      "temporal": null,
       "terminal_state": "review",
       "reasons": [
         "review:endpoint_head_closed_class",
@@ -560,19 +793,19 @@
   },
   {
     "schema_version": "polymath.openie_assertion.v1",
-    "assertion_id": "openie-assertion:024301e80ece6e550b9498c9",
-    "candidate_id": "openie-predicate:1fab2f53cfba8267afa2b96f",
-    "family_id": "openie-family:3aa5cb7e64f59d0944409d16",
+    "assertion_id": "openie-assertion:11f7133e4c7475fdb348f53e",
+    "candidate_id": "openie-predicate:7a9734be3c8bf0d0c4d49f85",
+    "family_id": "openie-family:df93b30c02876689e1b553ad",
     "document_id": "28b5e1c1b88cb794a2e9925f78e24b3833310a3cbe1aa5b0c316f7ff7148a66d",
     "lane": "REVIEW",
     "canonical_predicate": "produces",
     "surface_relation": "is produced on",
     "subject_argument_id": "adapted-argument:cb1bd46f146b1651b95e8963",
-    "object_argument_id": "adapted-argument:59ca73472a562d31f94103af",
+    "object_argument_id": "adapted-argument:71d1660b2b28b99409426f2a",
     "subject_entity_id": "document-entity:c5ae457d775814bde01f86eb",
-    "object_entity_id": "document-entity:b037c283a9fbdfdfe453d483",
+    "object_entity_id": "document-entity:84888e63e3a3f1d8af5760d6",
     "subject_mention_id": "completed-mention:45e11c3357e2f35c4de5cf81",
-    "object_mention_id": "completed-mention:7158c1ddd68868718825e697",
+    "object_mention_id": "completed-mention:4b6ecf55c741543b9c8111fb",
     "value_kind": null,
     "value": "",
     "polarity": "positive",
@@ -582,11 +815,13 @@
     "evidence_end": 190,
     "score": 1.0,
     "reasons": [
-      "review:endpoint_signature:Document:Method",
+      "review:endpoint_signature:Document:TimeReference",
       "surface_subject_to_object",
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -618,6 +853,8 @@
       "value_fact_requires_strict_surface_recovery"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -649,22 +886,24 @@
       "value_fact_requires_strict_surface_recovery"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
     "schema_version": "polymath.openie_assertion.v1",
-    "assertion_id": "openie-assertion:a9869dfdcbb45f9dd22ab3e7",
-    "candidate_id": "openie-predicate:ed4c965384ad528f6ef90882",
-    "family_id": "openie-family:17dc015f9ad1304295fa0eb5",
+    "assertion_id": "openie-assertion:f419b0a7768ba39c1c5332e9",
+    "candidate_id": "openie-predicate:734fc8bf278b3ded1991e396",
+    "family_id": "openie-family:bdef66f5c487a00523fd4aba",
     "document_id": "28b5e1c1b88cb794a2e9925f78e24b3833310a3cbe1aa5b0c316f7ff7148a66d",
     "lane": "OPEN_RELATION",
     "canonical_predicate": null,
     "surface_relation": "is",
-    "subject_argument_id": "adapted-argument:2a708a46b06bfc8514547615",
+    "subject_argument_id": "adapted-argument:571050d8b4bfcfdaabaf4bb4",
     "object_argument_id": "adapted-argument:c69f905d94205ea4d6e1f4bf",
-    "subject_entity_id": "document-entity:da4a4d93de97a14ee6060af0",
+    "subject_entity_id": "document-entity:92fe850eda43bd9750fbf52b",
     "object_entity_id": null,
-    "subject_mention_id": "completed-mention:bef4febea1282e30c960fc89",
+    "subject_mention_id": "completed-mention:adbf08b8dbf5696801fdd9a0",
     "object_mention_id": null,
     "value_kind": "DESCRIPTION",
     "value": "maintained",
@@ -680,6 +919,8 @@
       "surface_relation_preserved_without_ontology_fallback"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:OPEN_RELATION"
   },
   {
@@ -711,6 +952,8 @@
       "non_positive_modal_or_attributed"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:QUALIFIED_CLAIM"
   },
   {
@@ -742,6 +985,8 @@
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -773,6 +1018,8 @@
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -804,6 +1051,8 @@
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -835,6 +1084,8 @@
       "non_positive_modal_or_attributed"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:QUALIFIED_CLAIM"
   },
   {
@@ -866,6 +1117,8 @@
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
   },
   {
@@ -897,69 +1150,9 @@
       "predicate_or_endpoint_requires_review"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REVIEW"
-  },
-  {
-    "schema_version": "polymath.openie_assertion.v1",
-    "assertion_id": "openie-assertion:a8f94cd216872ba60ee62122",
-    "candidate_id": "openie-predicate:45ad0c564e5c3020e2281d60",
-    "family_id": "openie-family:8cc284d957cb843f25074bf3",
-    "document_id": "28b5e1c1b88cb794a2e9925f78e24b3833310a3cbe1aa5b0c316f7ff7148a66d",
-    "lane": "REVIEW",
-    "canonical_predicate": null,
-    "surface_relation": "reviews",
-    "subject_argument_id": "adapted-argument:5cd8caab46679399cda0b989",
-    "object_argument_id": "adapted-argument:129d619389df6441dd84aba5",
-    "subject_entity_id": null,
-    "object_entity_id": "document-entity:c5ae457d775814bde01f86eb",
-    "subject_mention_id": null,
-    "object_mention_id": "completed-mention:8baf2f14521cafa1bcc49f6a",
-    "value_kind": null,
-    "value": "",
-    "polarity": "positive",
-    "modality": "asserted",
-    "attribution": "direct",
-    "evidence_start": 492,
-    "evidence_end": 528,
-    "score": 1.0,
-    "reasons": [
-      "review:unresolved_or_embedded_endpoint",
-      "surface_subject_to_object",
-      "predicate_or_endpoint_requires_review"
-    ],
-    "policy_release": "graphify-openie-assertion-policy-v2",
-    "_lane": "openie:REVIEW"
-  },
-  {
-    "schema_version": "polymath.openie_assertion.v1",
-    "assertion_id": "openie-assertion:5d601952672d3460c113dee6",
-    "candidate_id": "openie-predicate:b55270242acab71afb402f57",
-    "family_id": "openie-family:c57dc9653f877a1c82b3a285",
-    "document_id": "28b5e1c1b88cb794a2e9925f78e24b3833310a3cbe1aa5b0c316f7ff7148a66d",
-    "lane": "REJECT",
-    "canonical_predicate": "owns",
-    "surface_relation": "owns",
-    "subject_argument_id": "adapted-argument:305f5b79eb7f6f6237a78343",
-    "object_argument_id": "adapted-argument:2c495907d5701709f4b8b371",
-    "subject_entity_id": null,
-    "object_entity_id": "document-entity:2fe7990bea346faf6ebe71f2",
-    "subject_mention_id": null,
-    "object_mention_id": "completed-mention:fa09a2a2bf9f3572b6d115e6",
-    "value_kind": null,
-    "value": "",
-    "polarity": "positive",
-    "modality": "asserted",
-    "attribution": "direct",
-    "evidence_start": 529,
-    "evidence_end": 568,
-    "score": 1.0,
-    "reasons": [
-      "mapped:openie:triplet_extract:bounded_lemma_map:own",
-      "surface_subject_to_object",
-      "fact_subject_is_not_a_canonical_entity"
-    ],
-    "policy_release": "graphify-openie-assertion-policy-v2",
-    "_lane": "openie:REJECT"
   },
   {
     "schema_version": "polymath.openie_assertion.v1",
@@ -990,6 +1183,8 @@
       "fact_subject_is_not_a_canonical_entity"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REJECT"
   },
   {
@@ -1021,6 +1216,8 @@
       "surface_relation_preserved_without_ontology_fallback"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:OPEN_RELATION"
   },
   {
@@ -1052,37 +1249,8 @@
       "fact_subject_is_not_a_canonical_entity"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
-    "_lane": "openie:REJECT"
-  },
-  {
-    "schema_version": "polymath.openie_assertion.v1",
-    "assertion_id": "openie-assertion:299d56793fd8970ac254e3c5",
-    "candidate_id": "openie-predicate:6970c296cc465a22d0a94fb0",
-    "family_id": "openie-family:bd388b3fab9f69a8a72e3eff",
-    "document_id": "28b5e1c1b88cb794a2e9925f78e24b3833310a3cbe1aa5b0c316f7ff7148a66d",
-    "lane": "REJECT",
-    "canonical_predicate": "runs_on",
-    "surface_relation": "processes",
-    "subject_argument_id": "adapted-argument:7c0243870ece6742718d332d",
-    "object_argument_id": "adapted-argument:59ba84b5f00057c64b18a8b6",
-    "subject_entity_id": null,
-    "object_entity_id": "document-entity:1e8f86d8158f4235be663e49",
-    "subject_mention_id": null,
-    "object_mention_id": "completed-mention:2672f95858109b45404d7574",
-    "value_kind": null,
-    "value": "",
-    "polarity": "positive",
-    "modality": "asserted",
-    "attribution": "direct",
-    "evidence_start": 670,
-    "evidence_end": 742,
-    "score": 1.0,
-    "reasons": [
-      "mapped:openie:triplet_extract:configured_synonym_or_abstain:processe",
-      "surface_subject_to_object",
-      "fact_subject_is_not_a_canonical_entity"
-    ],
-    "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REJECT"
   },
   {
@@ -1114,6 +1282,8 @@
       "fact_subject_is_not_a_canonical_entity"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REJECT"
   },
   {
@@ -1145,6 +1315,8 @@
       "fact_subject_is_not_a_canonical_entity"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REJECT"
   },
   {
@@ -1176,6 +1348,8 @@
       "fact_subject_is_not_a_canonical_entity"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REJECT"
   },
   {
@@ -1207,6 +1381,8 @@
       "fact_subject_is_not_a_canonical_entity"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REJECT"
   },
   {
@@ -1238,6 +1414,41 @@
       "fact_subject_is_not_a_canonical_entity"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
+    "_lane": "openie:REJECT"
+  },
+  {
+    "schema_version": "polymath.openie_assertion.v1",
+    "assertion_id": "openie-assertion:981b4cc6a61892b55f70b9ab",
+    "candidate_id": "openie-predicate:de6aaf1656978899e531bf03",
+    "family_id": "openie-family:29eaf80243077d83456cd355",
+    "document_id": "28b5e1c1b88cb794a2e9925f78e24b3833310a3cbe1aa5b0c316f7ff7148a66d",
+    "lane": "REJECT",
+    "canonical_predicate": "runs_on",
+    "surface_relation": "processes",
+    "subject_argument_id": "adapted-argument:a9a411afdb57bf6e45fcfc73",
+    "object_argument_id": "adapted-argument:3120644e720575b95591729a",
+    "subject_entity_id": null,
+    "object_entity_id": "document-entity:a841e4d481d27cfd5ecee75e",
+    "subject_mention_id": null,
+    "object_mention_id": "completed-mention:53ddd08fc7edf9ca38c617a8",
+    "value_kind": null,
+    "value": "",
+    "polarity": "positive",
+    "modality": "asserted",
+    "attribution": "direct",
+    "evidence_start": 670,
+    "evidence_end": 742,
+    "score": 1.0,
+    "reasons": [
+      "mapped:openie:triplet_extract:configured_synonym_or_abstain:processe",
+      "surface_subject_to_object",
+      "fact_subject_is_not_a_canonical_entity"
+    ],
+    "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REJECT"
   },
   {
@@ -1269,6 +1480,8 @@
       "fact_subject_is_not_a_canonical_entity"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REJECT"
   },
   {
@@ -1300,6 +1513,8 @@
       "fact_subject_is_not_a_canonical_entity"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REJECT"
   },
   {
@@ -1331,6 +1546,8 @@
       "fact_subject_is_not_a_canonical_entity"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REJECT"
   },
   {
@@ -1362,6 +1579,41 @@
       "fact_subject_is_not_a_canonical_entity"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
+    "_lane": "openie:REJECT"
+  },
+  {
+    "schema_version": "polymath.openie_assertion.v1",
+    "assertion_id": "openie-assertion:d5d7748349f11c7d73047bbe",
+    "candidate_id": "openie-predicate:ae5d9fcacc07d541c8b148c0",
+    "family_id": "openie-family:039f1f7b3575cf52020bd903",
+    "document_id": "28b5e1c1b88cb794a2e9925f78e24b3833310a3cbe1aa5b0c316f7ff7148a66d",
+    "lane": "REJECT",
+    "canonical_predicate": "runs_on",
+    "surface_relation": "processes",
+    "subject_argument_id": "adapted-argument:7c0243870ece6742718d332d",
+    "object_argument_id": "adapted-argument:00a106b7cac319cef32a33b0",
+    "subject_entity_id": null,
+    "object_entity_id": "document-entity:a841e4d481d27cfd5ecee75e",
+    "subject_mention_id": null,
+    "object_mention_id": "completed-mention:53ddd08fc7edf9ca38c617a8",
+    "value_kind": null,
+    "value": "",
+    "polarity": "positive",
+    "modality": "asserted",
+    "attribution": "direct",
+    "evidence_start": 670,
+    "evidence_end": 742,
+    "score": 1.0,
+    "reasons": [
+      "mapped:openie:triplet_extract:configured_synonym_or_abstain:processe",
+      "surface_subject_to_object",
+      "fact_subject_is_not_a_canonical_entity"
+    ],
+    "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:REJECT"
   },
   {
@@ -1393,37 +1645,8 @@
       "surface_relation_preserved_without_ontology_fallback"
     ],
     "policy_release": "graphify-openie-assertion-policy-v2",
+    "temporal": null,
+    "value_ir": null,
     "_lane": "openie:OPEN_RELATION"
-  },
-  {
-    "schema_version": "polymath.openie_assertion.v1",
-    "assertion_id": "openie-assertion:ea48bb1b763e4caffe7078b5",
-    "candidate_id": "openie-predicate:55a2665d8d66352c5080d945",
-    "family_id": "openie-family:3a2dce542cc5d6100d33f8f6",
-    "document_id": "28b5e1c1b88cb794a2e9925f78e24b3833310a3cbe1aa5b0c316f7ff7148a66d",
-    "lane": "REJECT",
-    "canonical_predicate": "runs_on",
-    "surface_relation": "processes",
-    "subject_argument_id": "adapted-argument:a9a411afdb57bf6e45fcfc73",
-    "object_argument_id": "adapted-argument:29334fb2ecb1d29a326b9d35",
-    "subject_entity_id": null,
-    "object_entity_id": "document-entity:1e8f86d8158f4235be663e49",
-    "subject_mention_id": null,
-    "object_mention_id": "completed-mention:2672f95858109b45404d7574",
-    "value_kind": null,
-    "value": "",
-    "polarity": "positive",
-    "modality": "asserted",
-    "attribution": "direct",
-    "evidence_start": 670,
-    "evidence_end": 742,
-    "score": 1.0,
-    "reasons": [
-      "mapped:openie:triplet_extract:configured_synonym_or_abstain:processe",
-      "surface_subject_to_object",
-      "fact_subject_is_not_a_canonical_entity"
-    ],
-    "policy_release": "graphify-openie-assertion-policy-v2",
-    "_lane": "openie:REJECT"
   }
 ]
