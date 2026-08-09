@@ -72,6 +72,19 @@ def health(timeout: float = 5.0) -> dict:
         raise RelexSidecarError(f"relex sidecar unreachable at {sidecar_url()}: {exc}") from exc
 
 
+def _infer_timeout() -> float:
+    """Per-call ceiling. The sidecar serves one MPS inference at a time, so a
+    caller's wall time = its own batch + everything queued ahead of it; under
+    concurrent extraction lanes the queue wait dominates (O5 soak finding).
+    Bounded batches keep per-call work small — the timeout must tolerate the
+    queue, and the failed_recoverable retry lane remains the backstop."""
+    raw = os.environ.get("RELEX_INFER_TIMEOUT_SECONDS", "").strip()
+    try:
+        return max(60.0, float(raw)) if raw else 900.0
+    except ValueError:
+        return 900.0
+
+
 def infer(
     texts: Sequence[str],
     *,
@@ -79,7 +92,7 @@ def infer(
     relation_labels: Sequence[str] | None = None,
     entity_threshold: float | None = None,
     relation_threshold: float | None = None,
-    timeout: float = 300.0,
+    timeout: float | None = None,
 ) -> list[RelexResult]:
     payload: dict[str, Any] = {"texts": list(texts)}
     if entity_labels is not None:
@@ -90,7 +103,7 @@ def infer(
         payload["entity_threshold"] = entity_threshold
     if relation_threshold is not None:
         payload["relation_threshold"] = relation_threshold
-    body = _post("/infer", payload, timeout)
+    body = _post("/infer", payload, _infer_timeout() if timeout is None else timeout)
     if body.get("contract") != RELEX_CONTRACT:
         raise RelexSidecarError(f"contract mismatch: {body.get('contract')!r}")
     results = []
