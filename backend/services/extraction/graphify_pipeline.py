@@ -642,9 +642,16 @@ async def run_graphify_pipeline(
         OpenIERawPropositionV1.model_validate(item) for item in openie_payload["propositions"]
     )
 
-    def adapter_compute() -> dict[str, Any]:
-        output = adapt_openie_arguments(openie_propositions, completed_mentions, entities)
-        return {"arguments": _record_payload(output.arguments), "report": output.report}
+    def adapter_compute() -> Any:
+        # Pure CPU over in-memory data — run off the event loop. Inline, a
+        # book-scale document blocked the loop for minutes (heartbeats,
+        # health checks, and lane renewals all starve); the stage wrapper
+        # awaits awaitable payloads, so to_thread slots in transparently.
+        def _run() -> dict[str, Any]:
+            output = adapt_openie_arguments(openie_propositions, completed_mentions, entities)
+            return {"arguments": _record_payload(output.arguments), "report": output.report}
+
+        return asyncio.to_thread(_run)
 
     adapter_payload = await run_one(
         stage=PipelineStage.OPENIE_ARGUMENT_ADAPTATION_COMPLETE,

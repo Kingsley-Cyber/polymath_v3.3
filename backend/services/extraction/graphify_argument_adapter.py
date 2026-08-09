@@ -20,8 +20,10 @@ canonical name ride alongside it.
 from __future__ import annotations
 
 import re
+from bisect import bisect_left, insort
 from collections import Counter
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Sequence
 
 from models.graphify_contracts import (
@@ -57,7 +59,12 @@ class ArgumentAdapterOutput:
     report: dict[str, object]
 
 
+@lru_cache(maxsize=262_144)
 def _normalize(value: str) -> str:
+    # Pure function of its input — caching is behavior-neutral. At book scale
+    # the ladder normalizes the same surfaces/canonicals millions of times
+    # (observed 2026-08-09: a 1,675-child transcript pinned a worker for 27+
+    # minutes inside this module); the cache turns those into dict hits.
     return " ".join(_WORD_RE.findall(value.casefold().replace("_", " ")))
 
 
@@ -91,6 +98,48 @@ _CLAUSAL_VERB_RE = re.compile(
     r"produces|consumes|references?|contains?)\b",
 )
 _Pair = tuple[CompletedMentionV1, DocumentEntityV1]
+
+
+@dataclass(frozen=True)
+class _DocMentionIndex:
+    """Per-document precomputation for the ladder.
+
+    The ladder's semantics are defined over `eligible` in MENTION INPUT
+    ORDER; every structure here preserves that order so results are
+    bit-identical to the original per-call scans. Built once per document
+    instead of once per (proposition, role) — the O(P×M) rebuild was the
+    hot spot that wedged workers on transcript-scale documents.
+    """
+
+    eligible: tuple[_Pair, ...]                 # filtered pairs, input order
+    sorted_starts: tuple[int, ...]              # ascending mention starts
+    sorted_to_orig: tuple[int, ...]             # sorted position → eligible idx
+    by_entity: dict[str, tuple[int, ...]]       # entity_id → eligible idxs (input order)
+
+
+def _build_doc_index(
+    mentions: Sequence[CompletedMentionV1],
+    entity_by_id: dict[str, DocumentEntityV1],
+) -> _DocMentionIndex:
+    eligible: list[_Pair] = []
+    by_entity: dict[str, list[int]] = {}
+    for mention in mentions:
+        entity = entity_by_id.get(mention.entity_id)
+        if entity is None or entity.state not in _ELIGIBLE_STATES:
+            continue
+        # A bare function word is not an entity reference, whatever the
+        # census minted — the ladder never links to one.
+        if _normalize(entity.canonical_name) in _FUNCTION_WORDS:
+            continue
+        by_entity.setdefault(entity.entity_id, []).append(len(eligible))
+        eligible.append((mention, entity))
+    order = sorted(range(len(eligible)), key=lambda i: eligible[i][0].normalized_start)
+    return _DocMentionIndex(
+        eligible=tuple(eligible),
+        sorted_starts=tuple(eligible[i][0].normalized_start for i in order),
+        sorted_to_orig=tuple(order),
+        by_entity={k: tuple(v) for k, v in by_entity.items()},
+    )
 
 
 def _representative(candidates: list[_Pair]) -> _Pair:
@@ -147,8 +196,7 @@ def _entity_argument(
     proposition: OpenIERawPropositionV1,
     role: str,
     surface: str,
-    mentions: Sequence[CompletedMentionV1],
-    entity_by_id: dict[str, DocumentEntityV1],
+    index: _DocMentionIndex,
 ) -> AdaptedOpenIEArgumentV1 | None:
     norm_arg = _normalize(surface)
     if not norm_arg or norm_arg in _PRONOUNS or norm_arg in _GENERIC:
@@ -177,22 +225,21 @@ def _entity_argument(
             adapter_release=ARGUMENT_ADAPTER_RELEASE,
         )
 
-    eligible: list[_Pair] = []
-    local: list[_Pair] = []
-    for mention in mentions:
-        entity = entity_by_id.get(mention.entity_id)
-        if entity is None or entity.state not in _ELIGIBLE_STATES:
-            continue
-        # A bare function word is not an entity reference, whatever the
-        # census minted — the ladder never links to one.
-        if _normalize(entity.canonical_name) in _FUNCTION_WORDS:
-            continue
-        eligible.append((mention, entity))
-        if (
-            proposition.evidence_start <= mention.normalized_start
-            and mention.normalized_end <= proposition.evidence_end
-        ):
-            local.append((mention, entity))
+    # Window the precomputed eligible pairs to the evidence span via bisect,
+    # then restore MENTION INPUT ORDER — identical list to the original
+    # per-call scan, without the O(M) walk per (proposition, role).
+    local_indices: list[int] = []
+    position = bisect_left(index.sorted_starts, proposition.evidence_start)
+    while position < len(index.sorted_starts):
+        start = index.sorted_starts[position]
+        if start > proposition.evidence_end:
+            break  # starts are ascending; ends can't fit either (end >= start)
+        orig = index.sorted_to_orig[position]
+        if index.eligible[orig][0].normalized_end <= proposition.evidence_end:
+            insort(local_indices, orig)
+        position += 1
+    local: list[_Pair] = [index.eligible[i] for i in local_indices]
+    local_index_set = frozenset(local_indices)
 
     # Rung 1: exact completed mention surface.
     exact = [item for item in local if _normalize(item[0].surface) == norm_arg]
@@ -254,17 +301,19 @@ def _entity_argument(
         first_alpha = next((char for char in bare if char.isalpha()), "")
         if len(norm_arg) >= 4 and first_alpha.isupper():
             arg_tokens = _normalize(bare).split()
-            by_entity: dict[str, list[_Pair]] = {}
-            for item in eligible:
-                by_entity.setdefault(item[1].entity_id, []).append(item)
             variant_hits = []
-            for pairs in by_entity.values():
+            for pair_indices in index.by_entity.values():
+                pairs = [index.eligible[i] for i in pair_indices]
                 tokens = _normalize(pairs[0][1].canonical_name).split()
                 if len(tokens) >= 2 and 1 <= len(arg_tokens) < len(tokens) and any(
-                    tokens[index:index + len(arg_tokens)] == arg_tokens
-                    for index in range(len(tokens) - len(arg_tokens) + 1)
+                    tokens[token_index:token_index + len(arg_tokens)] == arg_tokens
+                    for token_index in range(len(tokens) - len(arg_tokens) + 1)
                 ):
-                    in_evidence = [item for item in pairs if item in local]
+                    in_evidence = [
+                        index.eligible[i]
+                        for i in pair_indices
+                        if i in local_index_set
+                    ]
                     variant_hits.append(_representative(in_evidence or pairs))
             hit = _unique_entity(variant_hits)
             if hit:
@@ -332,13 +381,17 @@ def adapt_openie_arguments(
     mentions_by_document: dict[str, list[CompletedMentionV1]] = {}
     for mention in mentions:
         mentions_by_document.setdefault(mention.document_id, []).append(mention)
+    index_by_document: dict[str, _DocMentionIndex] = {}
     arguments: list[AdaptedOpenIEArgumentV1] = []
     for proposition in propositions:
-        local_mentions = mentions_by_document.get(proposition.document_id, [])
-        for role, surface in (("subject", proposition.subject), ("object", proposition.object)):
-            adapted = _entity_argument(
-                proposition, role, surface, local_mentions, entity_by_id,
+        doc_index = index_by_document.get(proposition.document_id)
+        if doc_index is None:
+            doc_index = _build_doc_index(
+                mentions_by_document.get(proposition.document_id, []), entity_by_id,
             )
+            index_by_document[proposition.document_id] = doc_index
+        for role, surface in (("subject", proposition.subject), ("object", proposition.object)):
+            adapted = _entity_argument(proposition, role, surface, doc_index)
             arguments.append(adapted or _non_entity_argument(proposition, role, surface))
     arguments.sort(key=lambda item: (item.proposition_id, item.role, item.argument_id))
     counts = Counter(item.kind.value for item in arguments)
